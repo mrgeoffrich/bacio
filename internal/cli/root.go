@@ -1,0 +1,66 @@
+package cli
+
+import (
+	"github.com/spf13/cobra"
+
+	"github.com/mrgeoffrich/bacio/internal/version"
+)
+
+type outputFormat string
+
+const (
+	outputText outputFormat = "text"
+	outputJSON outputFormat = "json"
+)
+
+type globalOpts struct {
+	output outputFormat
+	dbPath string
+	user   string
+	dryRun bool
+	remote string
+	token  string
+}
+
+var opts = globalOpts{output: outputText}
+
+func NewRoot() *cobra.Command {
+	root := &cobra.Command{
+		Use:           "bacio",
+		Short:         "bacio: a local-first issue tracker, CLI-first",
+		Version:       version.String(),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			return validateActorFlag()
+		},
+	}
+	root.PersistentFlags().VarP(newOutputFlag(&opts.output), "output", "o", "output format: text|json")
+	root.PersistentFlags().StringVar(&opts.dbPath, "db", "", "override database path (default: ~/.bacio/db.sqlite)")
+	root.PersistentFlags().StringVar(&opts.user, "user", "", "actor name recorded in history (defaults to OS user; AI agents must pass this explicitly)")
+	root.PersistentFlags().BoolVar(&opts.dryRun, "dry-run", false, "validate the request and emit the projected result without writing to the database (no audit log entry)")
+	root.PersistentFlags().StringVar(&opts.remote, "remote", "", "talk to a bacio api server at this URL instead of the local DB; falls back to BACIO_REMOTE")
+	root.PersistentFlags().StringVar(&opts.token, "token", "", "bearer token for the remote API; falls back to BACIO_API_TOKEN")
+
+	root.AddCommand(
+		newInitCmd(),
+		newRepoCmd(),
+		newFeatureCmd(),
+		newIssueCmd(),
+		newCommentCmd(),
+		newLinkCmd(),
+		newUnlinkCmd(),
+		newPRCmd(),
+		newTagCmd(),
+		newDocCmd(),
+		newStatusCmd(),
+		newHistoryCmd(),
+		newSchemaCmd(),
+		newAPICmd(),
+		newSyncCmd(),
+		newInstallSkillCmd(),
+		newInstallSampleSkillsCmd(),
+		newTUICmd(),
+	)
+	return root
+}

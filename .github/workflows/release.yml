@@ -1,0 +1,105 @@
+name: Release
+
+# Triggered by pushing a semver tag like v0.1.0. The skill at
+# .claude/skills/release-bacio handles the local pre-flight + tagging;
+# this workflow does the build and publish on a clean Ubuntu runner.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history for changelog)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Test
+        run: go test ./...
+
+      - name: Cross-compile and package
+        run: bash scripts/release.sh "${GITHUB_REF_NAME}"
+
+      - name: Compose release notes
+        run: |
+          set -euo pipefail
+          previous="$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          {
+            if [ -n "$previous" ]; then
+              echo "## Changes since ${previous}"
+              echo
+              git log --pretty=format:'- %s' "${previous}..${GITHUB_REF_NAME}"
+            else
+              echo "## Initial release"
+              echo
+              git log --pretty=format:'- %s' "${GITHUB_REF_NAME}"
+            fi
+          } > /tmp/notes.md
+          cat /tmp/notes.md
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file /tmp/notes.md \
+            dist/bacio-*.tar.gz \
+            dist/bacio-*.zip \
+            dist/checksums.txt
+
+  update-homebrew-tap:
+    # Bumps Formula/bacio.rb in mrgeoffrich/homebrew-bacio to the freshly-released
+    # version. Requires a HOMEBREW_TAP_TOKEN repo secret holding a PAT with
+    # push access to the tap repo (the default GITHUB_TOKEN can't push
+    # across repos). Failures here do not roll back the release.
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout bacio (for render script)
+        uses: actions/checkout@v4
+
+      - name: Download release checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --pattern checksums.txt \
+            --dir .
+
+      - name: Checkout homebrew tap
+        uses: actions/checkout@v4
+        with:
+          repository: mrgeoffrich/homebrew-bacio
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Render formula
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          bash scripts/render-tap-formula.sh "$version" < checksums.txt > tap/Formula/bacio.rb
+
+      - name: Commit and push
+        working-directory: tap
+        run: |
+          if git diff --quiet Formula/bacio.rb; then
+            echo "Formula already up to date for ${GITHUB_REF_NAME}; nothing to push."
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add Formula/bacio.rb
+          git commit -m "bacio ${GITHUB_REF_NAME}"
+          git push

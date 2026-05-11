@@ -1,0 +1,340 @@
+package sync
+
+import (
+	"bytes"
+	"fmt"
+	"time"
+
+	"go.yaml.in/yaml/v4"
+)
+
+// Strict YAML parser for sync-repo files. Distinct from the emitter
+// (yaml_emit.go): the emitter is a hand-rolled writer tuned for
+// hash-stable output, while parsing is delegated to go.yaml.in/yaml/v4
+// with two non-negotiable settings:
+//
+//   - Decoder.KnownFields(true) — unknown fields fail loudly. Silently
+//     dropping a field would let a future schema mistake (or a
+//     hand-edit typo) sail through unnoticed.
+//   - Strict typing on every Go struct field — the emitter always
+//     quotes user strings, so a value that round-trips to the wrong
+//     YAML type (e.g. `assignee: on` decoded as bool) means the file
+//     was hand-edited or git mangled it. Refuse rather than coerce.
+//
+// All string fields that flow into a label or filename are
+// NFC-normalised at parse time so the on-disk canonical form matches
+// the emitter's NFC-on-write rule.
+//
+// The Parsed* types in this file are the wire shapes the importer
+// works with. They deliberately don't share fields with model.* —
+// keeping the disk schema and the DB row representation separated
+// means a tweak to either side doesn't accidentally couple to the
+// other.
+
+// ParsedRepo is the on-disk shape of repos/<prefix>/repo.yaml.
+//
+// JSON tags mirror the YAML field names so `bacio sync inspect`'s
+// `-o json` output matches the canonical on-disk schema rather than
+// the Go field names. The yaml/JSON contract is that both speak the
+// same vocabulary — we just use Go's idiomatic PascalCase internally.
+type ParsedRepo struct {
+	UUID            string    `yaml:"uuid" json:"uuid"`
+	Prefix          string    `yaml:"prefix" json:"prefix"`
+	Name            string    `yaml:"name" json:"name"`
+	RemoteURL       string    `yaml:"remote_url" json:"remote_url"`
+	NextIssueNumber int64     `yaml:"next_issue_number" json:"next_issue_number"`
+	CreatedAt       time.Time `yaml:"created_at" json:"created_at"`
+	UpdatedAt       time.Time `yaml:"updated_at" json:"updated_at"`
+}
+
+// ParsedFeature is the on-disk shape of feature.yaml.
+type ParsedFeature struct {
+	UUID            string    `yaml:"uuid" json:"uuid"`
+	Slug            string    `yaml:"slug" json:"slug"`
+	Title           string    `yaml:"title" json:"title"`
+	DescriptionHash string    `yaml:"description_hash" json:"description_hash"`
+	CreatedAt       time.Time `yaml:"created_at" json:"created_at"`
+	UpdatedAt       time.Time `yaml:"updated_at" json:"updated_at"`
+}
+
+// ParsedRef is a {label, uuid} cross-reference. Both fields are
+// always present in emitted YAML; the importer treats uuid as
+// canonical and label as a stale-tolerant hint.
+type ParsedRef struct {
+	Label string `yaml:"label" json:"label"`
+	UUID  string `yaml:"uuid" json:"uuid"`
+}
+
+// ParsedRelations is the `relations: {blocks, relates_to,
+// duplicate_of}` map inside issue.yaml. Each bucket is always
+// emitted (with `[]` when empty), so missing keys here means
+// hand-editing or schema drift.
+type ParsedRelations struct {
+	Blocks      []ParsedRef `yaml:"blocks" json:"blocks"`
+	RelatesTo   []ParsedRef `yaml:"relates_to" json:"relates_to"`
+	DuplicateOf []ParsedRef `yaml:"duplicate_of" json:"duplicate_of"`
+}
+
+// ParsedIssue is the on-disk shape of issue.yaml.
+type ParsedIssue struct {
+	UUID            string          `yaml:"uuid" json:"uuid"`
+	Number          int64           `yaml:"number" json:"number"`
+	Title           string          `yaml:"title" json:"title"`
+	State           string          `yaml:"state" json:"state"`
+	Assignee        string          `yaml:"assignee" json:"assignee"`
+	Tags            []string        `yaml:"tags" json:"tags"`
+	PRs             []string        `yaml:"prs" json:"prs"`
+	Feature         *ParsedRef      `yaml:"feature,omitempty" json:"feature,omitempty"`
+	Relations       ParsedRelations `yaml:"relations" json:"relations"`
+	DescriptionHash string          `yaml:"description_hash" json:"description_hash"`
+	CreatedAt       time.Time       `yaml:"created_at" json:"created_at"`
+	UpdatedAt       time.Time       `yaml:"updated_at" json:"updated_at"`
+}
+
+// ParsedComment is the on-disk shape of a comment .yaml file.
+type ParsedComment struct {
+	UUID      string    `yaml:"uuid" json:"uuid"`
+	Author    string    `yaml:"author" json:"author"`
+	BodyHash  string    `yaml:"body_hash" json:"body_hash"`
+	CreatedAt time.Time `yaml:"created_at" json:"created_at"`
+}
+
+// ParsedDocLink is one entry in doc.yaml's `links:` sequence.
+type ParsedDocLink struct {
+	Kind        string `yaml:"kind" json:"kind"` // "issue" | "feature"
+	TargetLabel string `yaml:"target_label" json:"target_label"`
+	TargetUUID  string `yaml:"target_uuid" json:"target_uuid"`
+}
+
+// ParsedDocument is the on-disk shape of doc.yaml.
+type ParsedDocument struct {
+	UUID        string          `yaml:"uuid" json:"uuid"`
+	Filename    string          `yaml:"filename" json:"filename"`
+	Type        string          `yaml:"type" json:"type"`
+	SourcePath  string          `yaml:"source_path" json:"source_path"`
+	Links       []ParsedDocLink `yaml:"links" json:"links"`
+	ContentHash string          `yaml:"content_hash" json:"content_hash"`
+	CreatedAt   time.Time       `yaml:"created_at" json:"created_at"`
+	UpdatedAt   time.Time       `yaml:"updated_at" json:"updated_at"`
+}
+
+// ParsedRedirect is one entry in redirects.yaml. The file is a
+// top-level YAML sequence of these.
+type ParsedRedirect struct {
+	Kind      string    `yaml:"kind" json:"kind"` // "issue" | "feature" | "document"
+	Old       string    `yaml:"old" json:"old"`
+	New       string    `yaml:"new" json:"new"`
+	UUID      string    `yaml:"uuid" json:"uuid"`
+	ChangedAt time.Time `yaml:"changed_at" json:"changed_at"`
+	Reason    string    `yaml:"reason" json:"reason"`
+}
+
+// ParseRepoYAML decodes repo.yaml bytes into a ParsedRepo with strict
+// typing. Returns an error on unknown fields, type mismatches, or
+// invalid YAML. NFC-normalises string fields used as labels.
+func ParseRepoYAML(b []byte) (*ParsedRepo, error) {
+	var r ParsedRepo
+	if err := strictDecode(b, &r); err != nil {
+		return nil, fmt.Errorf("parse repo.yaml: %w", err)
+	}
+	r.Prefix = NormalizeNFC(r.Prefix)
+	r.Name = NormalizeNFC(r.Name)
+	return &r, nil
+}
+
+// ParseFeatureYAML decodes feature.yaml bytes.
+func ParseFeatureYAML(b []byte) (*ParsedFeature, error) {
+	var f ParsedFeature
+	if err := strictDecode(b, &f); err != nil {
+		return nil, fmt.Errorf("parse feature.yaml: %w", err)
+	}
+	f.Slug = NormalizeNFC(f.Slug)
+	f.Title = NormalizeNFC(f.Title)
+	return &f, nil
+}
+
+// ParseIssueYAML decodes issue.yaml bytes. Slugs/labels in
+// cross-references are NFC-normalised; uuids are passed through
+// unchanged (they're already 8-4-4-4-12 hex).
+func ParseIssueYAML(b []byte) (*ParsedIssue, error) {
+	var i ParsedIssue
+	if err := strictDecode(b, &i); err != nil {
+		return nil, fmt.Errorf("parse issue.yaml: %w", err)
+	}
+	i.Title = NormalizeNFC(i.Title)
+	i.Assignee = NormalizeNFC(i.Assignee)
+	for k := range i.Tags {
+		i.Tags[k] = NormalizeNFC(i.Tags[k])
+	}
+	if i.Feature != nil {
+		i.Feature.Label = NormalizeNFC(i.Feature.Label)
+	}
+	for k := range i.Relations.Blocks {
+		i.Relations.Blocks[k].Label = NormalizeNFC(i.Relations.Blocks[k].Label)
+	}
+	for k := range i.Relations.RelatesTo {
+		i.Relations.RelatesTo[k].Label = NormalizeNFC(i.Relations.RelatesTo[k].Label)
+	}
+	for k := range i.Relations.DuplicateOf {
+		i.Relations.DuplicateOf[k].Label = NormalizeNFC(i.Relations.DuplicateOf[k].Label)
+	}
+	return &i, nil
+}
+
+// ParseCommentYAML decodes a comment .yaml file's bytes.
+func ParseCommentYAML(b []byte) (*ParsedComment, error) {
+	var c ParsedComment
+	if err := strictDecode(b, &c); err != nil {
+		return nil, fmt.Errorf("parse comment.yaml: %w", err)
+	}
+	c.Author = NormalizeNFC(c.Author)
+	return &c, nil
+}
+
+// ParseDocumentYAML decodes doc.yaml bytes.
+func ParseDocumentYAML(b []byte) (*ParsedDocument, error) {
+	var d ParsedDocument
+	if err := strictDecode(b, &d); err != nil {
+		return nil, fmt.Errorf("parse doc.yaml: %w", err)
+	}
+	d.Filename = NormalizeNFC(d.Filename)
+	for k := range d.Links {
+		d.Links[k].TargetLabel = NormalizeNFC(d.Links[k].TargetLabel)
+	}
+	return &d, nil
+}
+
+// ParseRedirectsYAML decodes redirects.yaml bytes. The file is a
+// top-level YAML sequence; an empty/missing file is the caller's
+// responsibility to skip — this function expects valid bytes.
+func ParseRedirectsYAML(b []byte) ([]ParsedRedirect, error) {
+	// Empty file is a valid "no redirects" state. Treat ws-only the
+	// same — go.yaml.in returns an EOF-style error otherwise.
+	if len(bytes.TrimSpace(b)) == 0 {
+		return nil, nil
+	}
+	var rs []ParsedRedirect
+	if err := strictDecode(b, &rs); err != nil {
+		return nil, fmt.Errorf("parse redirects.yaml: %w", err)
+	}
+	for k := range rs {
+		rs[k].Old = NormalizeNFC(rs[k].Old)
+		rs[k].New = NormalizeNFC(rs[k].New)
+	}
+	return rs, nil
+}
+
+// strictDecode runs the v4 decoder with KnownFields(true) so unknown
+// fields produce errors. It also walks the parsed node tree first to
+// enforce strict scalar typing on the string fields the design doc
+// calls out — go.yaml.in/yaml/v4 will happily coerce `assignee: true`
+// (a YAML 1.2 boolean) into a Go string, but the design rule is
+// "refuse rather than coerce" because every emitted user string is
+// always quoted, so an unquoted scalar in the wrong shape means
+// either a hand-edit or git mangling we'd rather catch loudly.
+//
+// Strictness applies to scalar fields that hold user-supplied free
+// text; structural fields (number, created_at, prs[], …) are typed
+// by the Go struct and rely on the decoder's normal type checking.
+// stringFields lists the scalar keys whose values must carry the
+// !!str YAML tag.
+func strictDecode(b []byte, out any) error {
+	// Round 1: validate scalar tags on the raw node tree.
+	var root yaml.Node
+	if err := yaml.NewDecoder(bytes.NewReader(b)).Decode(&root); err != nil {
+		return err
+	}
+	if err := assertStringScalarTags(&root); err != nil {
+		return err
+	}
+	// Round 2: typed decode with KnownFields(true) for unknown-field
+	// rejection. We re-parse rather than reuse the node above so the
+	// existing yaml.Decode/.Decode wiring keeps doing the heavy
+	// lifting (defaults, time.Time parsing, etc.).
+	dec := yaml.NewDecoder(bytes.NewReader(b))
+	dec.KnownFields(true)
+	if err := dec.Decode(out); err != nil {
+		return err
+	}
+	return nil
+}
+
+// stringFields is the allowlist of map keys whose scalar values must
+// be YAML strings (tag !!str). Any unquoted bool / int / null sitting
+// where the schema expects a string fails the parse with a clear
+// error. The set is deliberately small — the design doc only calls
+// out user-text fields like assignee, title, name as the threat
+// surface, not numeric fields like number where the type is
+// unambiguous.
+var stringFields = map[string]struct{}{
+	"assignee":     {},
+	"author":       {},
+	"name":         {},
+	"prefix":       {},
+	"reason":       {},
+	"remote_url":   {},
+	"slug":         {},
+	"source_path":  {},
+	"state":        {},
+	"target_label": {},
+	"target_uuid":  {},
+	"title":        {},
+	"type":         {},
+	"uuid":         {},
+	"kind":         {},
+	"label":        {},
+	"old":          {},
+	"new":          {},
+	"filename":     {},
+	"description_hash": {},
+	"content_hash":     {},
+	"body_hash":        {},
+}
+
+// assertStringScalarTags walks the YAML node tree and returns an
+// error if any value under a key in stringFields carries a tag
+// other than !!str. Recursive across maps and sequences so
+// `relations.blocks[*].label` is checked too.
+//
+// We special-case sequences-of-strings (tags[], prs[]) by descending
+// into them when the parent key is one of those — every scalar item
+// must be !!str.
+func assertStringScalarTags(n *yaml.Node) error {
+	switch n.Kind {
+	case yaml.DocumentNode:
+		for _, c := range n.Content {
+			if err := assertStringScalarTags(c); err != nil {
+				return err
+			}
+		}
+	case yaml.MappingNode:
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			key := n.Content[i].Value
+			val := n.Content[i+1]
+			if _, isStringKey := stringFields[key]; isStringKey && val.Kind == yaml.ScalarNode {
+				if val.Tag != "" && val.Tag != "!!str" {
+					return fmt.Errorf("strict typing: field %q expects a string but got YAML tag %s (line %d, value %q) — quote the value to disambiguate",
+						key, val.Tag, val.Line, val.Value)
+				}
+			}
+			if (key == "tags" || key == "prs") && val.Kind == yaml.SequenceNode {
+				for _, item := range val.Content {
+					if item.Kind == yaml.ScalarNode && item.Tag != "" && item.Tag != "!!str" {
+						return fmt.Errorf("strict typing: %q items must be strings but got YAML tag %s (line %d, value %q)",
+							key, item.Tag, item.Line, item.Value)
+					}
+				}
+			}
+			if err := assertStringScalarTags(val); err != nil {
+				return err
+			}
+		}
+	case yaml.SequenceNode:
+		for _, c := range n.Content {
+			if err := assertStringScalarTags(c); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}

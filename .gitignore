@@ -1,0 +1,20 @@
+# Build artifacts
+/bacio
+*.exe
+/dist/
+
+# Go
+go.work
+go.work.sum
+/coverage.out
+/coverage.html
+
+# Local databases / runtime state
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store

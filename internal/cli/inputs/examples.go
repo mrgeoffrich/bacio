@@ -1,0 +1,126 @@
+package inputs
+
+func strPtr(s string) *string { return &s }
+
+// Examples are realistic, hand-curated payloads attached to each input
+// schema's `examples` field, so an LLM consumer can adapt a working call
+// rather than improvise from the type signature alone.
+var (
+	ExampleIssueAdd = IssueAddInput{
+		Title:       "Pin tab strip in place",
+		FeatureSlug: "tui-polish",
+		Description: "Body height should clip the tab strip so it doesn't drift on overflow.",
+		State:       "todo",
+		Tags:        []string{"ui", "tui"},
+	}
+	ExampleIssueEdit = IssueEditInput{
+		Key:   "MINI-42",
+		Title: strPtr("Pin tab strip with body-height clipping"),
+	}
+	ExampleIssueState = IssueStateInput{
+		Key:   "MINI-42",
+		State: "in_progress",
+	}
+	ExampleIssueAssign = IssueAssignInput{
+		Key:      "MINI-42",
+		Assignee: "agent-alice",
+	}
+	ExampleIssueUnassign = IssueUnassignInput{
+		Key: "MINI-42",
+	}
+	ExampleIssueNext = IssueNextInput{
+		FeatureSlug: "tui-polish",
+	}
+	ExampleIssueRm = IssueRmInput{
+		Key: "MINI-99",
+	}
+
+	ExampleFeatureAdd = FeatureAddInput{
+		Title:       "Auth rewrite",
+		Slug:        "auth",
+		Description: "Replace the legacy session-token middleware to meet new compliance rules.",
+	}
+	ExampleFeatureEdit = FeatureEditInput{
+		Slug:        "auth",
+		Description: strPtr("Compliance-driven session-token rewrite (legal flagged the old impl)."),
+	}
+	ExampleFeatureRm = FeatureRmInput{
+		Slug: "auth-old",
+	}
+
+	ExampleCommentAdd = CommentAddInput{
+		IssueKey: "MINI-42",
+		Author:   "agent-alice",
+		Body:     "Reproduced locally; the clip arithmetic is off by one cell on overflow.",
+	}
+
+	ExampleLink = LinkInput{
+		From: "MINI-42",
+		Type: "blocks",
+		To:   "MINI-7",
+	}
+	ExampleUnlink = UnlinkInput{
+		A: "MINI-42",
+		B: "MINI-7",
+	}
+
+	ExamplePRAttach = PRAttachInput{
+		IssueKey: "MINI-42",
+		URL:      "https://github.com/example/bacio/pull/123",
+	}
+	ExamplePRDetach = PRDetachInput{
+		IssueKey: "MINI-42",
+		URL:      "https://github.com/example/bacio/pull/123",
+	}
+
+	ExampleTagAdd = TagAddInput{
+		IssueKey: "MINI-42",
+		Tags:     []string{"ui", "tui"},
+	}
+	ExampleTagRm = TagRmInput{
+		IssueKey: "MINI-42",
+		Tags:     []string{"wip"},
+	}
+
+	ExampleDocAdd = DocAddInput{
+		Filename: "auth-design.md",
+		Type:     "architecture",
+		Content:  "# Auth design\n\nMotivation, options, and the chosen path.\n",
+	}
+	ExampleDocEdit = DocEditInput{
+		Filename: "auth-design.md",
+		Type:     strPtr("designs"),
+	}
+	ExampleDocRename = DocRenameInput{
+		OldFilename: "auth.md",
+		NewFilename: "auth-design.md",
+		Type:        "architecture",
+	}
+	ExampleDocRm = DocRmInput{
+		Filename: "auth-old.md",
+	}
+	ExampleDocLink = DocLinkInput{
+		Filename:    "auth-design.md",
+		IssueKey:    "MINI-42",
+		Description: "Source-of-truth design doc.",
+	}
+	ExampleDocUnlink = DocUnlinkInput{
+		Filename:    "auth-design.md",
+		FeatureSlug: "auth",
+	}
+	ExampleDocExport = DocExportInput{
+		Filename: "auth-design.md",
+		To:       "docs/auth-design.md",
+	}
+
+	ExampleRepoCreate = RepoCreateInput{
+		Prefix:    "MINI",
+		Name:      "bacio",
+		Path:      "/Users/dev/code/bacio",
+		RemoteURL: "https://github.com/example/bacio.git",
+	}
+	ExampleRepoRm = RepoRmInput{
+		Prefix:  "MINI",
+		Confirm: "MINI",
+	}
+)

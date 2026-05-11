@@ -1,0 +1,83 @@
+package api
+
+import (
+	"net/http"
+
+	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
+	"github.com/mrgeoffrich/bacio/internal/inputio"
+	"github.com/mrgeoffrich/bacio/internal/model"
+)
+
+func (d deps) handleCommentsList(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	iss, ok := resolveIssueOnRepo(w, r, d.store, repo)
+	if !ok {
+		return
+	}
+	cs, err := d.store.ListComments(iss.ID)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if cs == nil {
+		cs = []*model.Comment{}
+	}
+	writeJSON(w, http.StatusOK, cs)
+}
+
+func (d deps) handleCommentAdd(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	in, _, err := inputio.DecodeStrict[inputs.CommentAddInput](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	iss, ok := resolveIssueOnRepo(w, r, d.store, repo)
+	if !ok {
+		return
+	}
+	if in.Author == "" {
+		writeError(w, http.StatusBadRequest, "invalid_input", "author is required", map[string]any{"field": "author"})
+		return
+	}
+	if in.Body == "" {
+		writeError(w, http.StatusBadRequest, "invalid_input", "body is required", map[string]any{"field": "body"})
+		return
+	}
+	if isDryRun(r) {
+		writeDryRun(w, http.StatusCreated, &model.Comment{
+			IssueID: iss.ID,
+			Author:  in.Author,
+			Body:    in.Body,
+		})
+		return
+	}
+	c, err := d.store.CreateComment(iss.ID, in.Author, in.Body)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	recordOp(d.store, d.logger, model.HistoryEntry{
+		RepoID:      &iss.RepoID,
+		RepoPrefix:  repo.Prefix,
+		Actor:       ActorFromContext(r.Context()),
+		Op:          "comment.add",
+		Kind:        "issue",
+		TargetID:    &iss.ID,
+		TargetLabel: iss.Key,
+		Details:     "by " + in.Author,
+	})
+	writeJSON(w, http.StatusCreated, c)
+}
