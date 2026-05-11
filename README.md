@@ -6,7 +6,7 @@ Sick of dealing with bloated tooling and vendors to manage your work?
 
 Bacio is a totally free local first kanban board for _anyone_. **Claude/Codex does the work, you orchestrate it.**
 
-You talk to Claude Code or Codex; it does the typing — files issues, updates state, breaks features into tasks, answers questions about your board. You mostly *read* — in your editor of choice, on the CLI (`bacio issue list`) , in the TUI (`bacio tui`) or in your favourite editor.
+You talk to Claude Code or Codex; it does the typing — files issues, updates state, breaks features into tasks, answers questions about your board. You mostly *read* — on the CLI (`bacio issue list`) , in the TUI (`bacio tui`) or in your favourite editor (Vscode/Zed/Vim).
 
 <p align="center">
   <img src="docs/screenshots/01.png" alt="The bacio TUI board" width="80%" />
