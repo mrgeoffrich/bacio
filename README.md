@@ -1,6 +1,6 @@
-# bacio
+# bacio - *BAH-choh* 
 
-*BAH-choh* — "kiss" in Italian; more importantly its a chocolate-hazelnut gelato flavour.
+> "kiss" in Italian; more importantly its a chocolate-hazelnut gelato flavour.
 
 A free local first kanban board for anyone. **Claude/Codex does the work, you orchestrate it.**
 
