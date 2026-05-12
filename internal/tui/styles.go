@@ -34,11 +34,9 @@ var (
 	tabSep = lipgloss.NewStyle().Foreground(lipgloss.Color("238")).Render("·")
 )
 
-// repoGlyph prefixes the repo name in the header. Defaults to the Powerline
-// / Nerd Font git-branch glyph (U+E0A0) since most dev terminals carry it.
-// If your terminal renders a tofu box, swap to a simpler choice like "⎇" or
-// "git:".
-const repoGlyph = ""
+// repoGlyph prefixes the repo name in the header. Definition lives in
+// glyph_native.go (Nerd Font / Powerline U+E0A0) and glyph_wasm.go
+// ("⎇" — browsers don't carry Nerd Fonts, so the BMP fallback wins).
 
 var (
 	colBorder        = lipgloss.RoundedBorder()
