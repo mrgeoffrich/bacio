@@ -811,7 +811,7 @@ func (b *boardView) renderColumn(st model.State, focused bool, width, height int
 // or bottom border line of a lipgloss-rendered box, wrapped in single
 // spaces so it visually floats inside the ─ run:
 //
-//	╭─── Backlog ────╮       (top, top=true)
+//	╭─── Todo ───────╮       (top, top=true)
 //	╰─── 60 ↓ ───────╯       (bottom, top=false)
 //
 // `leftCorner` / `rightCorner` are the expected corner glyphs for the
@@ -900,7 +900,7 @@ func spliceCenteredIntoBorder(line, text string, leftCorner, rightCorner rune, i
 	return line[:startByte] + open + region + close + line[endByte:]
 }
 
-// fitHeader builds the per-column kanban header text ("Backlog · 12 ↓")
+// fitHeader builds the per-column kanban header text ("Todo · 12 ↓")
 // so the whole thing fits in innerWidth runes. The count and arrow are
 // the live data; the label ("In Progress") is the most expendable
 // piece, so when truncation is forced we shrink the label and keep
@@ -1297,20 +1297,18 @@ func paneScrollFrame(header string, body []string, width, height, offset int, hi
 
 func stateLabel(st model.State) string {
 	switch st {
-	case model.StateBacklog:
-		return "Backlog"
 	case model.StateTodo:
 		return "Todo"
 	case model.StateInProgress:
 		return "In Progress"
+	case model.StateNeedsAction:
+		return "Needs Action"
 	case model.StateInReview:
 		return "In Review"
 	case model.StateDone:
 		return "Done"
 	case model.StateCancelled:
 		return "Cancelled"
-	case model.StateDuplicate:
-		return "Duplicate"
 	}
 	return string(st)
 }

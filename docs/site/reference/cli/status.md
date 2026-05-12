@@ -21,11 +21,11 @@ DB:      /Users/you/.bacio/db.sqlite
 
 Features: 3
 Issues:   12
-  backlog:     2
-  todo:        4
-  in_progress: 3
-  in_review:   1
-  done:        2
+  todo:         4
+  in_progress:  3
+  needs_action: 1
+  in_review:    1
+  done:         3
 Next:    MINI-13
 ```
 
@@ -60,7 +60,7 @@ Returns a `statusReport` shape:
   "stats": {
     "features": 3,
     "issues": 12,
-    "issues_by_state": { "backlog": 2, "todo": 4, "in_progress": 3, "in_review": 1, "done": 2 },
+    "issues_by_state": { "todo": 4, "in_progress": 3, "needs_action": 1, "in_review": 1, "done": 3 },
     "next_issue_key": "MINI-13"
   }
 }

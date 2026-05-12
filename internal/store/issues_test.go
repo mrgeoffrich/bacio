@@ -29,7 +29,7 @@ func TestCreateIssueCounterAtomicity(t *testing.T) {
 	}
 
 	// First create — counter goes 1 → 2.
-	first, err := s.CreateIssue(repo.ID, nil, "first", "", model.StateBacklog, nil)
+	first, err := s.CreateIssue(repo.ID, nil, "first", "", model.StateTodo, nil)
 	if err != nil {
 		t.Fatalf("first create: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestCreateIssueCounterAtomicity(t *testing.T) {
 	}
 
 	// Next valid create must be number 2 — no gap.
-	second, err := s.CreateIssue(repo.ID, nil, "second", "", model.StateBacklog, nil)
+	second, err := s.CreateIssue(repo.ID, nil, "second", "", model.StateTodo, nil)
 	if err != nil {
 		t.Fatalf("second create: %v", err)
 	}
@@ -85,11 +85,11 @@ func TestIssueUUIDRoundTrip(t *testing.T) {
 		t.Fatalf("repo uuid is empty")
 	}
 
-	first, err := s.CreateIssue(repo.ID, nil, "first", "", model.StateBacklog, nil)
+	first, err := s.CreateIssue(repo.ID, nil, "first", "", model.StateTodo, nil)
 	if err != nil {
 		t.Fatalf("first create: %v", err)
 	}
-	second, err := s.CreateIssue(repo.ID, nil, "second", "", model.StateBacklog, nil)
+	second, err := s.CreateIssue(repo.ID, nil, "second", "", model.StateTodo, nil)
 	if err != nil {
 		t.Fatalf("second create: %v", err)
 	}

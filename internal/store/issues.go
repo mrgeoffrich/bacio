@@ -264,7 +264,7 @@ const nextCandidateQ = `
 	    JOIN issues b ON b.id = ir.from_issue_id
 	    WHERE ir.type = 'blocks'
 	      AND ir.to_issue_id = i.id
-	      AND b.state NOT IN ('done','cancelled','duplicate')
+	      AND b.state NOT IN ('done','cancelled')
 	  )
 	ORDER BY i.number
 	LIMIT 1`
@@ -286,9 +286,9 @@ func (s *Store) PeekNextIssue(repoID int64, featureID int64) (*model.Issue, erro
 // ClaimNextIssue atomically picks the next ready issue in a feature and flips
 // it to in_progress with the given assignee. "Ready" means: state='todo',
 // assignee='', and every `blocks`-blocker is in a terminal state
-// (done/cancelled/duplicate). Returns nil, nil when nothing is currently
-// claimable (the caller should treat this as "wait and retry"). The picked
-// row is the lowest-numbered candidate, matching the order produced by
+// (done/cancelled). Returns nil, nil when nothing is currently claimable
+// (the caller should treat this as "wait and retry"). The picked row is
+// the lowest-numbered candidate, matching the order produced by
 // `feature plan`.
 //
 // Concurrency: the SELECT + UPDATE run inside a single transaction, and the

@@ -19,7 +19,7 @@ Each lands at `<repo-root>/.claude/skills/<name>/SKILL.md` and is overwritten on
 | Skill | Trigger | What it does |
 |---|---|---|
 | `file-issue` | *"file an issue"*, *"log this"*, *"add a ticket"* | Cleans up a one-line description into a proper title/body/tags. |
-| `triage` | *"triage the backlog"*, *"groom the board"* | Sweeps backlog issues, proposes tags, priorities, feature groupings. |
+| `triage` | *"triage the backlog"*, *"groom the board"* | Sweeps open issues in `todo`, proposes tags, priorities, feature groupings. |
 | `stand-up` | *"stand-up"*, *"daily summary"* | Pure-read summary of in-progress, blocked, and last-24h history. |
 | `plan-feature` | *"plan the auth rewrite"*, *"break this down"* | Creates a feature, child issues, blocks/blocked-by edges, optionally a linked design doc. |
 

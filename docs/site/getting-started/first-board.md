@@ -46,12 +46,12 @@ Output:
 
 ```
 MYPR-1  Login 500s on Safari when password contains '&'
-State:    backlog
+State:    todo
 Created:  2026-05-12 14:35 AEST
 Updated:  2026-05-12 14:35 AEST
 ```
 
-(New issues land in `backlog` by default. Pass `--state todo` if you want to skip straight into the actionable column.)
+(New issues land in `todo` by default. Move to `in_progress` once you start working on it, or `needs_action` if you're paused waiting on a human.)
 
 You can list, show, and move it from the CLI:
 
@@ -78,7 +78,7 @@ installed bacio skill (12345 bytes) at /Users/you/code/my-project/.claude/skills
 Restart Claude Code in this repo so the new skill loads. Re-run `install-skill` after upgrading bacio (`brew upgrade bacio` / `scoop update bacio`) to pick up updates.
 
 ::: tip Workflow skills
-For trigger-phrase shortcuts on common flows (*"triage the backlog"*, *"daily stand-up"*, *"plan this feature"*), see [`bacio install-sample-skills`](/reference/cli/install-sample-skills).
+For trigger-phrase shortcuts on common flows (*"triage the todo column"*, *"daily stand-up"*, *"plan this feature"*), see [`bacio install-sample-skills`](/reference/cli/install-sample-skills).
 :::
 
 ## 4. File your second issue through Claude

@@ -130,7 +130,7 @@ func (d deps) handleIssueCreate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_input", "title is required", map[string]any{"field": "title"})
 		return
 	}
-	state := model.StateBacklog
+	state := model.StateTodo
 	if in.State != "" {
 		st, err := model.ParseState(in.State)
 		if err != nil {

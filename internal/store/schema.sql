@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS issues (
     title       TEXT    NOT NULL,
     description TEXT    NOT NULL DEFAULT '',
     state       TEXT    NOT NULL CHECK (state IN
-                  ('backlog','todo','in_progress','in_review','done','cancelled','duplicate')),
+                  ('todo','in_progress','needs_action','in_review','done','cancelled')),
     assignee    TEXT    NOT NULL DEFAULT '',
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

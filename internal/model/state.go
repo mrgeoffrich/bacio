@@ -8,18 +8,20 @@ import (
 type State string
 
 const (
-	StateBacklog    State = "backlog"
-	StateTodo       State = "todo"
-	StateInProgress State = "in_progress"
-	StateInReview   State = "in_review"
-	StateDone       State = "done"
-	StateCancelled  State = "cancelled"
-	StateDuplicate  State = "duplicate"
+	StateTodo        State = "todo"
+	StateInProgress  State = "in_progress"
+	// StateNeedsAction parks an issue while an LLM agent is waiting on
+	// the user for input — the assignee stays, but the column signals
+	// that human attention (not more agent work) is the next step.
+	StateNeedsAction State = "needs_action"
+	StateInReview    State = "in_review"
+	StateDone        State = "done"
+	StateCancelled   State = "cancelled"
 )
 
 var allStates = []State{
-	StateBacklog, StateTodo, StateInProgress, StateInReview,
-	StateDone, StateCancelled, StateDuplicate,
+	StateTodo, StateInProgress, StateNeedsAction, StateInReview,
+	StateDone, StateCancelled,
 }
 
 func AllStates() []State { return append([]State(nil), allStates...) }

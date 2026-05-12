@@ -20,7 +20,7 @@ Features are the unit of grouping above issues — a feature is a shipping unit,
 
 ## `bacio feature plan` — execution order
 
-`plan` topo-sorts the feature's open issues (not `done` / `cancelled` / `duplicate`), so issues with all blockers satisfied come first; blocked issues appear after their blockers, annotated with `blocked_by`. Cross-feature blockers surface as hints but don't gate the topo position. Errors out on a cycle.
+`plan` topo-sorts the feature's open issues (not `done` / `cancelled`), so issues with all blockers satisfied come first; blocked issues appear after their blockers, annotated with `blocked_by`. Cross-feature blockers surface as hints but don't gate the topo position. Errors out on a cycle.
 
 ```bash
 bacio feature plan auth-rewrite                     # text output for humans

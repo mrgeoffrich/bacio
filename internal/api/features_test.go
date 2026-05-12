@@ -70,7 +70,7 @@ func TestFeatureShowHappy(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	feat := seedFeature(t, s, repo, "auth", "Auth")
-	if _, err := s.CreateIssue(repo.ID, &feat.ID, "an issue", "", model.StateBacklog, nil); err != nil {
+	if _, err := s.CreateIssue(repo.ID, &feat.ID, "an issue", "", model.StateTodo, nil); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
 	resp, body := apiGet(t, ts.URL+"/repos/MINI/features/auth")
@@ -390,7 +390,7 @@ func TestFeatureDeleteDryRunCascade(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	feat := seedFeature(t, s, repo, "auth", "Auth")
-	if _, err := s.CreateIssue(repo.ID, &feat.ID, "child", "", model.StateBacklog, nil); err != nil {
+	if _, err := s.CreateIssue(repo.ID, &feat.ID, "child", "", model.StateTodo, nil); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
 	resp, body := apiDelete(t, ts.URL+"/repos/MINI/features/auth?dry_run=true", nil)

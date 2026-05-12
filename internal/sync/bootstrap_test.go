@@ -89,7 +89,7 @@ func seedTwoIssues(t *testing.T) (*store.Store, *model.Repo) {
 	if _, err := s.CreateIssue(r.ID, nil, "First issue", "first body", model.StateInProgress, []string{"p1"}); err != nil {
 		t.Fatalf("iss1: %v", err)
 	}
-	if _, err := s.CreateIssue(r.ID, nil, "Second issue", "second body", model.StateBacklog, nil); err != nil {
+	if _, err := s.CreateIssue(r.ID, nil, "Second issue", "second body", model.StateTodo, nil); err != nil {
 		t.Fatalf("iss2: %v", err)
 	}
 	return s, r
@@ -370,7 +370,7 @@ func TestPushRace(t *testing.T) {
 	}
 
 	// B: create issue and push first.
-	if _, err := sB.CreateIssue(repoB.ID, nil, "Bob's issue", "first to push", model.StateBacklog, nil); err != nil {
+	if _, err := sB.CreateIssue(repoB.ID, nil, "Bob's issue", "first to push", model.StateTodo, nil); err != nil {
 		t.Fatalf("B create iss: %v", err)
 	}
 	syncRepoB, err := git.Open(syncB)
@@ -382,7 +382,7 @@ func TestPushRace(t *testing.T) {
 	}
 
 	// A: create a different issue without pulling first.
-	if _, err := sA.CreateIssue(repoA.ID, nil, "Alice's issue", "trying to push behind bob", model.StateBacklog, nil); err != nil {
+	if _, err := sA.CreateIssue(repoA.ID, nil, "Alice's issue", "trying to push behind bob", model.StateTodo, nil); err != nil {
 		t.Fatalf("A create iss: %v", err)
 	}
 	syncRepoA, err := git.Open(syncA)
