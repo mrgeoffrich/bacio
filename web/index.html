@@ -52,10 +52,23 @@
   });
   term.open(document.getElementById('term'));
 
-  // Bridge surface: Go calls window.bacioOnStdout for every chunk it
-  // writes; we forward to xterm.js. Phase 2 will add the stdin half.
+  // Bridge surface (see cmd/bacio-wasm/main.go for the contract):
+  //  - bacioOnStdout: Go → xterm.js (writes go straight to the terminal)
+  //  - xterm.js onData → bacioWriteStdin: keypresses → Go's stdin
+  //  - bacioResize: xterm.js resize → Bubble Tea WindowSizeMsg
   window.bacioOnStdout = (chunk) => term.write(chunk);
-  window.bacioReady = () => { document.getElementById('status').textContent = 'ready · phase 2'; };
+  window.bacioReady = () => {
+    document.getElementById('status').textContent = 'ready · phase 3';
+    // Send the initial size now that Go has set up the resize bridge.
+    if (window.bacioResize) window.bacioResize(term.cols, term.rows);
+  };
+
+  term.onData((data) => {
+    if (window.bacioWriteStdin) window.bacioWriteStdin(data);
+  });
+  term.onResize(({ cols, rows }) => {
+    if (window.bacioResize) window.bacioResize(cols, rows);
+  });
 
   const status = document.getElementById('status');
   (async () => {
