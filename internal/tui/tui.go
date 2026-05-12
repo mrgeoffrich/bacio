@@ -64,11 +64,25 @@ type openDocMsg struct {
 // Run boots the Bubble Tea program in alt-screen mode and blocks until
 // quit. The store is owned by the caller.
 func Run(s *store.Store, repo *model.Repo) error {
-	board, err := newBoardView(s, repo)
+	m, err := NewModel(s, repo)
 	if err != nil {
 		return err
 	}
-	m := &Model{
+	p := tea.NewProgram(m, tea.WithAltScreen())
+	_, err = p.Run()
+	return err
+}
+
+// NewModel builds the four-tab TUI model wired against the given store
+// and repo. Exposed so alternative entry points (the WASM demo) can
+// embed the model into their own tea.Program with different program
+// options — e.g. WithInput/WithOutput for an xterm.js bridge.
+func NewModel(s *store.Store, repo *model.Repo) (*Model, error) {
+	board, err := newBoardView(s, repo)
+	if err != nil {
+		return nil, err
+	}
+	return &Model{
 		repo: repo,
 		tabs: []tab{
 			{"Board", board},
@@ -77,10 +91,7 @@ func Run(s *store.Store, repo *model.Repo) error {
 			{"History", newHistoryView(s, repo)},
 		},
 		returnTab: -1,
-	}
-	p := tea.NewProgram(m, tea.WithAltScreen())
-	_, err = p.Run()
-	return err
+	}, nil
 }
 
 type Model struct {

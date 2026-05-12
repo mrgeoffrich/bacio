@@ -9,7 +9,9 @@ import (
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite"
+	// SQL driver is registered in driver_native.go (modernc/sqlite on
+	// the CLI binary) or driver_wasm.go (ncruces/go-sqlite3 in the
+	// browser build). Both register under name "sqlite".
 
 	"github.com/mrgeoffrich/bacio/internal/identity"
 )
@@ -56,6 +58,37 @@ func Open(path string) (*Store, error) {
 	// hit a snag — so we surface a warning and carry on.
 	if err := pruneHistory(db, HistoryRetention); err != nil {
 		fmt.Fprintln(os.Stderr, "bacio: warning: history prune failed:", err)
+	}
+	return &Store{DB: db}, nil
+}
+
+// OpenMemory opens a transient in-memory database with the bacio schema
+// applied. No filesystem access, no WAL — used by the WASM demo so the
+// browser can seed and query a real bacio store without touching disk.
+//
+// The history retention prune is skipped (in-memory store starts empty),
+// and migrations run unconditionally since the schema is whatever the
+// embed gives us.
+func OpenMemory() (*Store, error) {
+	// "file::memory:" is SQLite's canonical URI form for an anonymous
+	// in-memory database — both modernc and ncruces accept it. The
+	// modernc-specific "?_pragma=…" shorthand isn't portable, so we
+	// flip foreign_keys on with a follow-up Exec instead.
+	db, err := sql.Open("sqlite", "file::memory:")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("enable foreign keys: %w", err)
+	}
+	if _, err := db.Exec(schemaSQL); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("apply schema: %w", err)
+	}
+	if err := migrate(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate: %w", err)
 	}
 	return &Store{DB: db}, nil
 }
