@@ -227,7 +227,7 @@ func (c *localClient) CreateIssue(ctx context.Context, repo *model.Repo, in inpu
 	if in.Title == "" {
 		return nil, fmt.Errorf("title is required")
 	}
-	state := model.StateBacklog
+	state := model.StateTodo
 	if in.State != "" {
 		st, err := model.ParseState(in.State)
 		if err != nil {

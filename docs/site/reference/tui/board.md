@@ -8,12 +8,14 @@ description: The kanban view — one column per issue state, cards keyboard-navi
 The Board (tab `1`) is the kanban view of the current repo's issues. One column per state, cards stacked top-down, focus moves with the arrow-style keys.
 
 ```
-┌─ Backlog ─┬─ Todo ──┬─ In Progress ─┬─ In Review ─┬─ Done ──┐
-│ MINI-12   │ MINI-7  │ MINI-3        │ MINI-1      │ MINI-2  │
-│ MINI-9    │ MINI-5  │ MINI-4        │             │         │
-│           │         │               │             │         │
-└───────────┴─────────┴───────────────┴─────────────┴─────────┘
+┌─ Todo ──┬─ In Progress ─┬─ Needs Action ─┬─ In Review ─┬─ Done ──┬─ Cancelled ─┐
+│ MINI-7  │ MINI-3        │ MINI-8         │ MINI-1      │ MINI-2  │ MINI-11     │
+│ MINI-5  │ MINI-4        │                │             │ MINI-6  │             │
+│         │               │                │             │         │             │
+└─────────┴───────────────┴────────────────┴─────────────┴─────────┴─────────────┘
 ```
+
+`needs_action` is for issues where an LLM agent is paused waiting on the user (the assignee stays, the column flags that the next move is the human's). For the full state semantics see [data model — Issue](/concepts/data-model#issue).
 
 ## Bindings (default view)
 

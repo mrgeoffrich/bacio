@@ -16,7 +16,7 @@ func featurePlanCmd() *cobra.Command {
 'blocks' relation to determine dependencies. Issues with all blockers satisfied
 appear first; issues blocked by other open work appear after their blockers.
 
-Open issues are anything not in done / cancelled / duplicate. Cross-feature
+Open issues are anything not in done / cancelled. Cross-feature
 blockers (open issues outside this feature) are surfaced as blocked_by hints
 but cannot be ordered against in-feature issues, so they don't gate the topo
 position.`,

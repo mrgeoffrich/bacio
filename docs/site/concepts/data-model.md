@@ -64,7 +64,7 @@ An optional grouping of issues — think *project* or *epic*. Addressed by slug 
 
 The unit of work. Addressed by canonical key `PREFIX-N` (e.g. `MINI-42`). On the CLI flag path, humans can also use the bare number; JSON payloads must use the canonical form.
 
-- **State**: `backlog | todo | in_progress | in_review | done | cancelled | duplicate`. State parser tolerates dashes or spaces (`in-progress`, `in progress`).
+- **State**: `todo | in_progress | needs_action | in_review | done | cancelled`. State parser tolerates dashes or spaces (`in-progress`, `in progress`). Use `needs_action` to park an issue an LLM is working on while it waits for human input — keeps the assignee, signals the user.
 - **Fields**: title, description, state, optional `feature_slug`, optional `assignee`, tags, timestamps.
 - **Attached entities**: comments, typed relations, PR URLs, linked documents.
 

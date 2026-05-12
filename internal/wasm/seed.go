@@ -83,11 +83,11 @@ const (
 
 var gelatoIssues = []seedIssue{
 
-	// --- Backlog: sorbettos + waiting-on-something issues ---------------
+	// --- Todo: sorbettos + cream classics queued up --------------------
 
 	{
 		title: "Banana", desc: "Banana sorbetto. First-batch panel notes are in `docs/banana-tasting-2026-01-08.md` — kids loved it, adults split.",
-		state: model.StateBacklog, assignee: authorMarco,
+		state: model.StateTodo, assignee: authorMarco,
 		tags: []string{"experimental", "kids"},
 		comments: []seedComment{
 			{authorAnna, "Three Saturdays in a row, the four-year-olds asked for 'the yellow one'. Worth keeping warm."},
@@ -95,34 +95,37 @@ var gelatoIssues = []seedIssue{
 	},
 	{
 		title: "Pesca e Mango", desc: "Peach & mango sorbetto. Slushy on refreeze — needs more inverted sugar.",
-		state: model.StateBacklog, assignee: authorMarco,
+		state: model.StateTodo, assignee: authorMarco,
 		tags: []string{"experimental", "qa"},
 	},
 	{
 		title: "Visciole", desc: "Roman cherry sorbetto. Visciole are seasonal — sourcing windowed Apr–Jun.",
-		state: model.StateBacklog,
+		state: model.StateTodo,
 		tags:  []string{"supplier"},
 	},
 	{
 		title: "Limone", desc: "Portofino lemon sorbetto. Switching from amalfi to portofino lemons; trial run pending.",
-		state: model.StateBacklog, assignee: authorMarco,
+		state: model.StateTodo, assignee: authorMarco,
 		tags: []string{"supplier", "experimental"},
 	},
 	{
-		title: "Yogurt", desc: "Italian yogurt cultures. **Blocked** on dairy supplier confirming Jersey vs Holstein ratio for fat content.",
-		state: model.StateBacklog,
-		tags:  []string{"blocked", "supplier"},
+		title: "Yogurt", desc: "Italian yogurt cultures. **agent-claude is waiting on a call**: Jersey vs Holstein ratio for the fat content — dairy supplier offered both but needs the spec before they'll quote. Marco, can you weigh in?",
+		state: model.StateNeedsAction, assignee: authorAgentClaude,
+		tags: []string{"blocked", "supplier"},
+		comments: []seedComment{
+			{authorAgentClaude, "Reached the limit of what I can decide on my own — fat content affects mouthfeel which is a Marco-flavour call, not an agent call. Parked here until we get a steer."},
+		},
 	},
 	{
 		title: "Caramello Salato", desc: "Salted caramel with imported Sicilian sea salt. Last batch crystallised on cooling — try lower-temp pour.",
-		state: model.StateBacklog, assignee: authorMarco,
+		state: model.StateTodo, assignee: authorMarco,
 		tags: []string{"qa"},
 		comments: []seedComment{
 			{authorMarco, "Pour temp was 121°C. Lab notes say 117 — operator error. Will retry Tue."},
 		},
 	},
 
-	// --- Todo: cream classics queued up --------------------------------
+	// --- Todo: extra classics queued up --------------------------------
 
 	{
 		title: "Vaniglia", desc: "Vanilla bean with lemon twist. Vanilla supplier sent Madagascar Grade A — confirm pricing before committing 2026 calendar.",
@@ -426,8 +429,9 @@ house espresso.
 
 **Didn't**
 
-- Banana sorbetto sat in Backlog the entire quarter. Either commit a
-  Feb slot for it or move it to Cancelled with notes. Decision pending.
+- Banana sorbetto never got off the Todo column the entire quarter.
+  Either commit a Feb slot for it or move it to Cancelled with notes.
+  Decision pending.
 - Tempering room thermostat drifted twice — alarm went off at 03:00
   on a Sunday. Need a better setup before summer.
 
@@ -787,6 +791,7 @@ func seedHistoryEvents(s *store.Store, repo *model.Repo) {
 	recordEvent(authorAgentClaude, "issue.add", "issue", repo.Prefix+"-19 Bacio", "feature=winter-2026-flavours")
 	recordEvent(authorMarco, "issue.state", "issue", repo.Prefix+"-19 Bacio", "todo → in_progress")
 	recordEvent(authorMarco, "issue.assign", "issue", repo.Prefix+"-19 Bacio", "→ @marco")
+	recordEvent(authorAgentClaude, "issue.state", "issue", "Yogurt", "in_progress → needs_action")
 	recordEvent(authorAgentClaude, "feature.add", "feature", "valentines-2026-promo", "")
 	recordEvent(authorAnna, "issue.add", "issue", "Duo cup sleeve design", "feature=valentines-2026-promo")
 	recordEvent(authorAnna, "pr.attach", "issue", "Sleeve print run — 2000 units", "https://github.com/gelateria-bacio/promo-assets/pull/12")

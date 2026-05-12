@@ -132,7 +132,7 @@ Restart Claude Code so the new skills load, then:
 | Skill | Trigger phrase | What it does |
 |---|---|---|
 | `file-issue` | *"file an issue"*, *"log this"*, *"add a ticket"* | Takes a one-line description, writes a clean title, body, and tags; attaches to a feature if obvious. |
-| `triage` | *"triage the backlog"*, *"groom the board"*, *"what should I look at"* | Sweeps backlog issues, proposes tags / priorities / feature groupings — asks before writing. |
+| `triage` | *"triage the backlog"*, *"groom the board"*, *"what should I look at"* | Sweeps open issues in `todo`, proposes tags / priorities / feature groupings — asks before writing. |
 | `stand-up` | *"stand-up"*, *"daily summary"*, *"what changed yesterday"* | Pure-read summary of `in_progress`, blocked items, and the last 24h of audit history. |
 | `plan-feature` | *"plan the auth rewrite"*, *"break this down"* | Creates a feature, child issues, blocks/blocked-by edges, and (optionally) a linked design doc. |
 

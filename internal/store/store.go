@@ -175,6 +175,18 @@ func migrate(db *sql.DB) error {
 		)`); err != nil {
 		return fmt.Errorf("create sync_remotes: %w", err)
 	}
+	// State-set change: `backlog` and `duplicate` were retired and
+	// `needs_action` was added. Existing rows are migrated in place;
+	// the new code never writes the dropped states. SQLite's
+	// CREATE TABLE IF NOT EXISTS doesn't update CHECK constraints on
+	// pre-existing tables, so old DBs keep a looser CHECK — harmless,
+	// since ParseState rejects the dropped names at the boundary.
+	if _, err := db.Exec(`UPDATE issues SET state = 'todo' WHERE state = 'backlog'`); err != nil {
+		return fmt.Errorf("migrate backlog→todo: %w", err)
+	}
+	if _, err := db.Exec(`UPDATE issues SET state = 'cancelled' WHERE state = 'duplicate'`); err != nil {
+		return fmt.Errorf("migrate duplicate→cancelled: %w", err)
+	}
 	return nil
 }
 

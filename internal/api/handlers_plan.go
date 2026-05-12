@@ -37,7 +37,7 @@ func (d deps) handleFeaturePlan(w http.ResponseWriter, r *http.Request) {
 // isOpenState is kept in sync with internal/client/local_feature.go:isOpenState.
 func isOpenState(s model.State) bool {
 	switch s {
-	case model.StateDone, model.StateCancelled, model.StateDuplicate:
+	case model.StateDone, model.StateCancelled:
 		return false
 	}
 	return true

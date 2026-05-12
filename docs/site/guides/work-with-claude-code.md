@@ -104,7 +104,7 @@ bacio install-sample-skills triage stand-up       # subset
 | Skill | Trigger phrase | What it does |
 |---|---|---|
 | `file-issue` | *"file an issue"*, *"log this"*, *"add a ticket"* | Cleans up a one-line description into a proper title, body, and tags. |
-| `triage` | *"triage the backlog"*, *"groom the board"* | Sweeps backlog issues, proposes tags / priorities / feature groupings; asks before writing. |
+| `triage` | *"triage the backlog"*, *"groom the board"* | Sweeps open issues in `todo`, proposes tags / priorities / feature groupings; asks before writing. |
 | `stand-up` | *"stand-up"*, *"daily summary"* | Pure-read summary of in-progress, blocked items, and the last 24h of history. |
 | `plan-feature` | *"plan the auth rewrite"*, *"break this down"* | Creates a feature + child issues + blocks/blocked-by edges + an optional linked design doc. |
 

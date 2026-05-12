@@ -251,7 +251,7 @@ func (c *localClient) PlanFeature(ctx context.Context, repo *model.Repo, slug st
 // isOpenState is kept in sync with internal/api/handlers_plan.go:isOpenState.
 func isOpenState(s model.State) bool {
 	switch s {
-	case model.StateDone, model.StateCancelled, model.StateDuplicate:
+	case model.StateDone, model.StateCancelled:
 		return false
 	}
 	return true

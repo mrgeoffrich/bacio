@@ -52,7 +52,7 @@ func seedExportFixture(t *testing.T) (*store.Store, map[string]string) {
 	if err := s.SetIssueAssignee(iss1.ID, "geoff"); err != nil {
 		t.Fatalf("set assignee: %v", err)
 	}
-	iss2, err := s.CreateIssue(r.ID, nil, `Refactor "config" loader`, "", model.StateBacklog, nil)
+	iss2, err := s.CreateIssue(r.ID, nil, `Refactor "config" loader`, "", model.StateTodo, nil)
 	if err != nil {
 		t.Fatalf("create iss2: %v", err)
 	}

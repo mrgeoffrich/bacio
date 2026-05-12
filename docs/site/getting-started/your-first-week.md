@@ -67,11 +67,11 @@ The triage / grooming workflow is the one weekly ritual worth keeping:
 
 > triage the backlog
 
-(via the `triage` sample skill) — Claude sweeps issues in `backlog` state, proposes tags, priorities, and feature groupings, **and asks before writing**. You go through its proposal — *"yes, no, yes, no, change this one to P1 not P2"* — and Claude applies the accepted changes.
+(via the `triage` sample skill) — Claude sweeps issues in the `todo` column, proposes tags, priorities, and feature groupings, **and asks before writing**. You go through its proposal — *"yes, no, yes, no, change this one to P1 not P2"* — and Claude applies the accepted changes.
 
 If you've not installed the sample skill:
 
-> Go through everything in the backlog. For each issue, propose a tag, a priority, and which feature (if any) it belongs to. Don't write anything yet — show me the table.
+> Go through everything in the todo column. For each issue, propose a tag, a priority, and which feature (if any) it belongs to. Don't write anything yet — show me the table.
 
 Same outcome, more setup per call.
 

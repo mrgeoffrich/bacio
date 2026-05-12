@@ -66,7 +66,7 @@ func issueAddCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&featureSlug, "feature", "f", "", "feature slug to attach to")
 	cmd.Flags().StringVar(&description, "description", "", "description text or '-' for stdin")
 	cmd.Flags().StringVar(&descriptionFile, "description-file", "", "path to a markdown file")
-	cmd.Flags().StringVar(&stateStr, "state", "", "initial state (default: backlog)")
+	cmd.Flags().StringVar(&stateStr, "state", "", "initial state (default: todo)")
 	cmd.Flags().StringSliceVar(&tags, "tag", nil, "tag to attach (repeatable)")
 	addInputFlag(cmd, &rawInput)
 	return cmd
@@ -793,8 +793,8 @@ func issueNextCmd() *cobra.Command {
 		Use:   "next",
 		Short: "Atomically claim the next ready issue in a feature",
 		Long: `Picks the lowest-numbered todo issue in --feature whose blockers are all
-done/cancelled/duplicate and whose assignee is empty, flips it to
-in_progress, and stamps the assignee with --user.
+done/cancelled and whose assignee is empty, flips it to in_progress,
+and stamps the assignee with --user.
 
 Designed for agent loops: call repeatedly to walk through a feature in
 dependency order. When nothing is currently claimable (everything is
@@ -858,7 +858,7 @@ func issuePeekCmd() *cobra.Command {
 		Short: "Show the next ready issue in a feature without claiming it",
 		Long: `Read-only counterpart to ` + "`bacio issue next`" + `: returns the same issue
 the claim would pick (lowest-numbered todo with all blockers
-done/cancelled/duplicate and no assignee) but does not mutate state.
+done/cancelled and no assignee) but does not mutate state.
 
 Emits an empty result with exit code 0 when nothing is currently
 claimable, matching the shape of ` + "`bacio issue next`" + `.`,

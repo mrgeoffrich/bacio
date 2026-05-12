@@ -32,11 +32,11 @@ func TestDeleteRepoCascades(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create feature: %v", err)
 	}
-	iss1, err := s.CreateIssue(target.ID, &feat.ID, "first", "", model.StateBacklog, []string{"bug"})
+	iss1, err := s.CreateIssue(target.ID, &feat.ID, "first", "", model.StateTodo, []string{"bug"})
 	if err != nil {
 		t.Fatalf("create issue 1: %v", err)
 	}
-	iss2, err := s.CreateIssue(target.ID, nil, "second", "", model.StateBacklog, nil)
+	iss2, err := s.CreateIssue(target.ID, nil, "second", "", model.StateTodo, nil)
 	if err != nil {
 		t.Fatalf("create issue 2: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestDeleteRepoCascades(t *testing.T) {
 	if _, err := s.LinkDocument(doc.ID, LinkTarget{IssueID: &iss1.ID}, "design"); err != nil {
 		t.Fatalf("link doc: %v", err)
 	}
-	if err := s.SaveHiddenStates(target.ID, map[model.State]bool{model.StateBacklog: true}); err != nil {
+	if err := s.SaveHiddenStates(target.ID, map[model.State]bool{model.StateTodo: true}); err != nil {
 		t.Fatalf("save hidden states: %v", err)
 	}
 	if err := s.RecordHistory(model.HistoryEntry{
@@ -68,7 +68,7 @@ func TestDeleteRepoCascades(t *testing.T) {
 	}
 
 	// Keep-side: one issue + one history row, untouched by the delete.
-	keepIss, err := s.CreateIssue(keep.ID, nil, "keeper", "", model.StateBacklog, nil)
+	keepIss, err := s.CreateIssue(keep.ID, nil, "keeper", "", model.StateTodo, nil)
 	if err != nil {
 		t.Fatalf("create keep issue: %v", err)
 	}

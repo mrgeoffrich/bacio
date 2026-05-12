@@ -11,7 +11,7 @@ The most-used command group. Every issue has a canonical key (e.g. `MINI-42`); h
 
 | Subcommand | What it does |
 |---|---|
-| `bacio issue add <title>` | Create an issue. Initial state defaults to `backlog`. Accepts `--json`. |
+| `bacio issue add <title>` | Create an issue. Initial state defaults to `todo`. Accepts `--json`. |
 | `bacio issue list` | List issues with filters. Lean by default. |
 | `bacio issue show <KEY>` | Show one issue with comments, relations, PRs, and linked documents. |
 | `bacio issue brief <KEY>` | Bulk-context JSON: issue + parent feature + linked-doc bodies + comments + relations + PRs, in one read. Designed for agents. Always JSON. |
@@ -27,7 +27,9 @@ A bare number like `42` is accepted for `<KEY>` on the CLI flag path; it resolve
 
 ## States
 
-`backlog` (default) · `todo` · `in_progress` · `in_review` · `done` · `cancelled` · `duplicate`
+`todo` (default) · `in_progress` · `needs_action` · `in_review` · `done` · `cancelled`
+
+`needs_action` is the LLM-flow column: an agent in the middle of a `--feature` loop flips an issue from `in_progress` to `needs_action` when it's blocked on user input. The assignee stays put; the column signals that the next move is the human's, not the agent's. Move it back to `in_progress` (or onward to `in_review`) once you've answered.
 
 The state parser tolerates dashes or spaces, so `in-progress`, `in progress`, and `in_progress` all work. The lowercase form is required.
 
@@ -78,7 +80,7 @@ Projection flags trim the brief when the full payload is too much:
 
 ## `next` / `peek` — the atomic claim pattern
 
-`bacio issue next --feature <slug>` claims the next ready issue: the lowest-numbered `todo` issue with **all blockers in a terminal state** (`done`, `cancelled`, `duplicate`) and **no existing assignee**. It flips the issue to `in_progress` and stamps the assignee from `--user`.
+`bacio issue next --feature <slug>` claims the next ready issue: the lowest-numbered `todo` issue with **all blockers in a terminal state** (`done`, `cancelled`) and **no existing assignee**. It flips the issue to `in_progress` and stamps the assignee from `--user`.
 
 ```bash
 bacio issue next --feature auth-rewrite --user agent-claude -o json

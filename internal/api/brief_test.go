@@ -13,7 +13,7 @@ func TestIssueBriefHappy(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	feat := seedFeature(t, s, repo, "auth", "Auth")
-	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "x", "", model.StateBacklog, nil)
+	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "x", "", model.StateTodo, nil)
 	if _, err := s.CreateComment(iss.ID, "alice", "first comment"); err != nil {
 		t.Fatalf("comment: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestIssueBriefNoFeatureDocs(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	feat := seedFeature(t, s, repo, "auth", "Auth")
-	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "x", "", model.StateBacklog, nil)
+	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "x", "", model.StateTodo, nil)
 	doc, err := s.CreateDocument(repo.ID, "feat-doc.md", model.DocTypeArchitecture, "feature body content", "")
 	if err != nil {
 		t.Fatalf("create doc: %v", err)

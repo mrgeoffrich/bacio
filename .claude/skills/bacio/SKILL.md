@@ -44,7 +44,9 @@ bacio issue add --user agent-claude --json '{ ...same payload... }' -o json
 - An **issue** has a title, description, state, tags, comments, relations to other issues, and attached PR URLs. Issues are addressed by a 4-letter `PREFIX-N` key like `MINI-42`.
 - A **document** is a per-repo named text blob (markdown, etc.) with a typed category (architecture, designs, project-in-planning, …). Issues and features can link to documents with a short reason; the same document can be linked to many issues and features.
 
-**Issue states**: `backlog | todo | in_progress | in_review | done | cancelled | duplicate`. The state parser also accepts dashes or spaces (`in-progress`, `in progress`).
+**Issue states**: `todo | in_progress | needs_action | in_review | done | cancelled`. The state parser also accepts dashes or spaces (`in-progress`, `in progress`).
+
+Use `needs_action` when an LLM agent is paused waiting on the user — keep the assignee, flip the state. It signals "the next move is the human's", as distinct from `in_progress` (agent is actively working) or `in_review` (work is done and awaiting human approval).
 
 **Auto-create on first use:** running any `bacio` command in a git repo that hasn't been registered yet automatically creates the repo row and allocates a 4-char prefix from the directory basename (e.g. `bacio` → `MINI`). Outside any git repo, `bacio` errors out — never invent a working directory just to make it run.
 
@@ -209,7 +211,7 @@ bacio feature plan <slug>               Print open issues in execution order,
                                      with all blockers satisfied appear first;
                                      blocked issues appear after their
                                      blockers, annotated with `blocked_by`.
-                                     Open = not done/cancelled/duplicate.
+                                     Open = not done/cancelled.
                                      Cross-feature blockers are surfaced as
                                      `blocked_by` hints but don't gate the
                                      topo position. Errors out on a cycle.
@@ -230,7 +232,7 @@ bacio issue add <title>                 Create an issue in the current repo
   -f, --feature <slug>                  Attach to a feature
   --description <text|->                Inline or stdin
   --description-file <path>
-  --state <state>                       Initial state (default: backlog)
+  --state <state>                       Initial state (default: todo)
   --tag <name>                          Repeatable; attach a tag at creation
 
 bacio issue list                        List issues in the current repo
@@ -262,9 +264,8 @@ bacio issue assign <KEY> <name>         Set the assignee (free-form name; pass
 bacio issue unassign <KEY>              Clear the assignee
 bacio issue next --feature <slug>       Atomically claim the next ready issue
                                      in a feature: lowest-numbered todo
-                                     issue with all blockers
-                                     done/cancelled/duplicate and no
-                                     existing assignee. Flips it to
+                                     issue with all blockers done/cancelled
+                                     and no existing assignee. Flips it to
                                      in_progress and stamps the assignee
                                      with --user. Emits
                                      `{"issue": null}` (and exit 0) when
