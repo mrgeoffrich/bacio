@@ -55,7 +55,7 @@
   // Bridge surface: Go calls window.bacioOnStdout for every chunk it
   // writes; we forward to xterm.js. Phase 2 will add the stdin half.
   window.bacioOnStdout = (chunk) => term.write(chunk);
-  window.bacioReady = () => { document.getElementById('status').textContent = 'ready · phase 1'; };
+  window.bacioReady = () => { document.getElementById('status').textContent = 'ready · phase 2'; };
 
   const status = document.getElementById('status');
   (async () => {

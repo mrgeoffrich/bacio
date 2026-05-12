@@ -4,41 +4,96 @@
 // `bacioOnStdout`, key events arrive through `bacioWriteStdin`, and the
 // program signals readiness by calling `bacioReady`.
 //
-// Phase 1 (this file): proves the pipe by streaming a static banner +
-// a slow heartbeat. The full TUI lights up in later phases.
+// Phase 2 (this file): runs a static Bubble Tea program through the
+// bridge to prove that the framework renders correctly. Phase 3 wires
+// keyboard input; phase 4 swaps in the real bacio TUI.
 package main
 
 import (
 	"fmt"
 	"syscall/js"
 	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func main() {
 	out := newJSOut("bacioOnStdout")
+	in := newJSIn() // exposed to JS as window.bacioWriteStdin
 
-	// Hardcoded banner. ANSI colour codes are passed straight through to
-	// xterm.js which renders them natively — no extra setup required.
-	banner := "" +
-		"\x1b[38;5;181m" + // pale gold
-		"  ___  ___   ___ ___ ___\n" +
-		" | _ )/ _ \\ / __|_ _/ _ \\\n" +
-		" | _ \\ (_) | (__ | | (_) |\n" +
-		" |___/\\___/ \\___|___\\___/\n" +
-		"\x1b[0m\n" +
-		"\x1b[2m bacio-wasm · phase 1 · hello from a Go binary running in your browser\x1b[0m\n\n"
-	fmt.Fprint(out, banner)
-
-	// Tell the host we're up so it can dismiss any loading spinner.
+	// Tell the host we're up so it can dismiss the loading state. The
+	// callback also receives the bridge so JS can push keys in later.
 	if cb := js.Global().Get("bacioReady"); cb.Truthy() {
 		cb.Invoke()
 	}
 
-	// Heartbeat so it's obvious we're alive (and that the bridge keeps
-	// flushing). Removed once we wire up Bubble Tea in phase 3.
-	tick := time.NewTicker(2 * time.Second)
-	defer tick.Stop()
-	for t := range tick.C {
-		fmt.Fprintf(out, "\x1b[2m  · tick %s\x1b[0m\n", t.Format("15:04:05"))
+	// Hardcode initial terminal size; phase 3 will accept resize messages
+	// through the input bridge.
+	p := tea.NewProgram(
+		newDemoModel(),
+		tea.WithInput(in),
+		tea.WithOutput(out),
+		// Signals aren't available in js/wasm.
+		tea.WithoutSignalHandler(),
+		tea.WithoutSignals(),
+		// Don't try to grab the terminal — xterm.js owns it.
+		tea.WithoutCatchPanics(),
+	)
+	if _, err := p.Run(); err != nil {
+		fmt.Fprintf(out, "\r\n\x1b[31mbacio-wasm crashed: %v\x1b[0m\r\n", err)
 	}
+}
+
+// demoModel is a placeholder Bubble Tea program for phase 2 — proves
+// rendering works end-to-end. Real bacio TUI lands in phase 4.
+type demoModel struct {
+	width, height int
+	frame         int
+}
+
+func newDemoModel() demoModel { return demoModel{width: 110, height: 28} }
+
+func (m demoModel) Init() tea.Cmd { return tickCmd() }
+
+type tickMsg time.Time
+
+func tickCmd() tea.Cmd {
+	// Pure-Go time.After works on js/wasm, so this is safe.
+	return tea.Every(time.Second, func(t time.Time) tea.Msg { return tickMsg(t) })
+}
+
+func (m demoModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+	case tea.KeyMsg:
+		if msg.String() == "q" || msg.String() == "ctrl+c" {
+			return m, tea.Quit
+		}
+	case tickMsg:
+		m.frame++
+		return m, tickCmd()
+	}
+	return m, nil
+}
+
+func (m demoModel) View() string {
+	gold := lipgloss.NewStyle().Foreground(lipgloss.Color("#F2DDA0")).Bold(true)
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#74819A"))
+	cream := lipgloss.NewStyle().Foreground(lipgloss.Color("#F9EBC4"))
+
+	box := lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#2A344A")).
+		Padding(1, 3).
+		Width(min(m.width-4, 80))
+
+	body := gold.Render("bacio · phase 2") + "\n" +
+		dim.Render("Bubble Tea rendering through the WASM bridge.") + "\n\n" +
+		cream.Render(fmt.Sprintf("frame %03d", m.frame)) + "  " +
+		dim.Render(fmt.Sprintf("terminal: %d×%d", m.width, m.height)) + "\n\n" +
+		dim.Render("press q to quit")
+
+	return "\n" + box.Render(body) + "\n"
 }
