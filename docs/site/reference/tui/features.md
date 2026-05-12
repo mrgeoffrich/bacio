@@ -11,7 +11,9 @@ The Features tab (`2`) is a scrollable list of every feature in the current repo
 
 | Key | Action |
 |---|---|
-| `j` / `k` | Previous / next feature. |
+| `j` / `k` (or `down` / `up`) | Previous / next feature. |
+| `g` / `home` | Jump to the first feature. |
+| `G` / `end` | Jump to the last feature. |
 | `enter` | Open the feature overlay. |
 | `r` | Reload from the database. |
 | `q` | Quit. |
@@ -20,16 +22,22 @@ The Features tab (`2`) is a scrollable list of every feature in the current repo
 
 | Key | Action |
 |---|---|
-| `j` / `k` | Scroll. |
-| `g` / `G` | Top / bottom. |
-| `esc` | Close. |
+| `j` / `k` (or `down` / `up`) | Scroll one line. |
+| `pgdown` / `space` | Scroll down 10 lines. |
+| `pgup` | Scroll up 10 lines. |
+| `g` / `home` | Jump to the top. |
+| `G` / `end` | Jump to the bottom. |
+| `esc` / `enter` | Close. |
 
 The overlay shows:
 
 - **Title and slug.**
 - **Description** rendered with glamour.
 - **Issues** — every issue with this `feature_slug`, with its canonical key, state, and title.
-- **Linked documents** — every document attached to this feature, with the optional `--why` description if one was set.
+
+::: tip Linked documents on features
+Documents that are linked to a feature show up in `bacio feature show -o json` and on linked issues' `bacio issue brief` output (under `documents[].linked_via`). They are deliberately **not** rendered inside the Features overlay — open one of the feature's issues on the [Board tab](/reference/tui/board) (or use [`bacio feature show`](/reference/cli/feature)) to see them.
+:::
 
 ## When to use it
 

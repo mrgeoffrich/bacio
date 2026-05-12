@@ -21,9 +21,11 @@ The Docs tab (`3`) lists every document attached to the current repo. Open one f
 | Key | Action |
 |---|---|
 | `j` / `k` (or `down` / `up`) | Scroll one line. |
+| `pgdown` / `space` | Scroll down 10 lines. |
+| `pgup` | Scroll up 10 lines. |
 | `g` / `home` | Jump to top. |
 | `G` / `end` | Jump to bottom. |
-| `esc` | Close. |
+| `esc` / `enter` | Close. |
 
 Markdown rendering is via glamour — headings, code blocks, lists, and inline emphasis all render. The doc's metadata (filename, type, created/updated, linked-from) shows at the top.
 

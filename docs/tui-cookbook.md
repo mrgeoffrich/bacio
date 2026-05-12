@@ -1,6 +1,6 @@
 # TUI Cookbook
 
-Synthesised from bubbletea v1.3.10 + lipgloss v1.1.0 + bubbles, fetched 2026-05-03. Refresh by re-fetching the README and godoc URLs cited in the source list at the bottom.
+Synthesised from bubbletea v1.3.10 (pinned via `replace ... => ./third_party/bubbletea` in `go.mod`) + lipgloss v1.1.1-pre (`v1.1.1-0.20250404203927-76690c660834`) + bubbles, fetched 2026-05-03. Refresh by re-fetching the README and godoc URLs cited in the source list at the bottom.
 
 This is a cookbook for the three Charm libraries we use in `bacio`. It assumes Go fluency and skips installation, marketing, and unrelated Charm tooling.
 
@@ -482,7 +482,7 @@ Forward to the *focused* component only when keystrokes shouldn't reach the othe
 
 Map upstream concepts to bacio code:
 
-- `internal/tui/tui.go` — the shell. Owns the alt-screen `tea.Program`, holds tabs (`Board`, `Documents`, `History`), tracks `WindowSizeMsg`, dispatches top-level keys (quit, tab switch, digit jump). Defines the `view` interface every tab implements: `Update(msg) tea.Cmd`, `View(w, h) string`, `Help() string`, `HasOverlay() bool`. When a view declares `HasOverlay()`, the shell stops intercepting and routes all keys to the view.
+- `internal/tui/tui.go` — the shell. Owns the alt-screen `tea.Program`, holds tabs (`Board`, `Features`, `Documents`, `History`), tracks `WindowSizeMsg`, dispatches top-level keys (quit, tab switch, digit jump). Defines the `view` interface every tab implements: `Init() tea.Cmd`, `Update(msg) tea.Cmd`, `View(w, h) string`, `Help() string`, `HasOverlay() bool`, `CloseOverlay()`, `Status() string`, `Breadcrumb() string`. When a view returns `true` from `HasOverlay()`, the shell switches into overlay routing: `ctrl+c` and `q` still quit unconditionally, digit shortcuts still switch tabs (closing the overlay on the way out), but `esc`, `tab`/`shift+tab`, and everything else are routed to the view so its overlay handles them.
 - `internal/tui/board.go` — the kanban tab. Self-contained `view`. Holds columns keyed by `model.State`, a per-column row cursor, and an optional fullscreen card overlay. Loads comments lazily through a Cmd when a card is selected.
 - `internal/tui/docs.go` — documents tab; same `view` shape.
 - `internal/tui/history.go` — audit log tab; same shape.

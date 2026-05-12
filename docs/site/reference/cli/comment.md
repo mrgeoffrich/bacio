@@ -27,7 +27,7 @@ bacio comment add MINI-3 --as Geoff --body "Tried clearing the cookie, didn't he
 
 ## Where comments show up
 
-- **`bacio comment list <KEY>`** — newest-first listing.
+- **`bacio comment list <KEY>`** — oldest-first listing.
 - **`bacio issue show <KEY>`** — comments section at the bottom of the rendered output.
 - **`bacio issue brief <KEY>`** — included in the bulk-context JSON for agents. Strip with `--no-comments`.
 - **TUI Board card overlay** — the "Comments" pane.

@@ -18,7 +18,7 @@ Documents are markdown notes (or any text body) that live inside the bacio DB an
 | `bacio doc edit <filename>` | Patch type / content. |
 | `bacio doc rename <old> <new>` | Rename in place. Links are preserved. Optional `--type <new-type>`. |
 | `bacio doc export <filename>` | Materialise back to disk. `--to-path` (reuses the path the doc was last imported from) or `--to <path>`. |
-| `bacio doc download <filename>` | Stream the content to stdout (remote-mode-friendly counterpart to `export`). |
+| `bacio doc download <filename>` | Stream the content to stdout, or pass `--to <path>` to write straight to a file. Remote-mode-friendly counterpart to `export`. |
 | `bacio doc rm <filename>` | Delete a document and its links. Use `--dry-run`. |
 | `bacio doc link <filename> <ISSUE-KEY\|feature-slug>` | Upsert a link with optional `--why <text>`. |
 | `bacio doc unlink <filename> <ISSUE-KEY\|feature-slug>` | Remove a link. |

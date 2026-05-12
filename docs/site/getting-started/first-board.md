@@ -46,10 +46,12 @@ Output:
 
 ```
 MYPR-1  Login 500s on Safari when password contains '&'
-State:    todo
+State:    backlog
 Created:  2026-05-12 14:35 AEST
 Updated:  2026-05-12 14:35 AEST
 ```
+
+(New issues land in `backlog` by default. Pass `--state todo` if you want to skip straight into the actionable column.)
 
 You can list, show, and move it from the CLI:
 

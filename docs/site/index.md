@@ -20,7 +20,7 @@ Verify the install:
 
 ```bash
 $ bacio --version
-bacio 1.0.3
+bacio version v1.0.3
 ```
 
 ## 2. Initialize a repo

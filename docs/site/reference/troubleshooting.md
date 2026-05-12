@@ -101,9 +101,9 @@ bacio sync verify           # see what's broken
 
 ## State machine confusions
 
-### "`bacio issue state MINI-3 In Progress` failed"
+### "`bacio issue state MINI-3 In Progress` failed unexpectedly"
 
-State parser is **case-sensitive** on the lowercase form — `in_progress`, `in-progress`, and `in progress` all work; `In Progress` does not.
+The state parser is permissive: it lower-cases the input and accepts `-`, `_`, or space as separators, so `in_progress`, `in-progress`, `IN PROGRESS`, and `In Progress` all parse to the same state. If something *does* fail, the value isn't a state at all — check `bacio schema show issue.state` for the canonical list (`backlog`, `todo`, `in_progress`, `in_review`, `done`, `cancelled`, `duplicate`).
 
 ### "`bacio issue next` returned `{"issue": null}` — is something broken?"
 

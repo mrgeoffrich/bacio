@@ -1,6 +1,6 @@
 # bacio's agent-CLI principles
 
-The compact reference. Read this when planning a feature so the conventions we adopted from [Justin Poehnelt's "Rewrite Your CLI for AI Agents"](https://justin.poehnelt.com/posts/rewrite-your-cli-for-ai-agents/) stay true. The longer working notes — threat models, alternatives considered, smoke-test results — live in [agent-cli-redesign.md](agent-cli-redesign.md).
+The compact reference. Read this when planning a feature so the conventions we adopted from [Justin Poehnelt's "Rewrite Your CLI for AI Agents"](https://justin.poehnelt.com/posts/rewrite-your-cli-for-ai-agents/) stay true.
 
 ## Six rules new code should honour
 
@@ -15,7 +15,7 @@ Every command that writes to the database accepts a JSON payload via `--json` (a
 Every `--json` payload has a JSON Schema (draft 2020-12) reflected from the same `inputs.*Input` struct the decoder uses, so schema and parser can't drift. Agents discover shapes via `bacio schema list / show <name> / all` rather than memorising them.
 
 - New mutations register in the `schemaRegistry` in `internal/cli/schema.go` with a hand-curated `examples[0]` showing a realistic call. Don't autogenerate examples — the value is in the realism.
-- Schema names are dotted forms of the cobra command path: `bacio issue add` → `issue.add`. Matches the convention used for history op names.
+- Schema names are dotted forms of the cobra command path: `bacio issue add` → `issue.add`. The audit log uses a parallel dotted naming (`<entity>.<verb>`) but the verbs are CRUD-flavoured — `bacio issue add` records `issue.create`, `bacio feature edit` records `feature.update`. Schema names and audit op names are two related-but-distinct namespaces.
 
 ### 3. Lists are lean by default
 JSON output from list-style commands strips heavy fields (issue / feature `description`, doc `content`). Opt-in to inflation with `--with-description` or fetch the full record via `show` / `brief`. Heavy bodies belong on per-row lookups, not on bulk reads.
@@ -46,7 +46,7 @@ The global `--dry-run` flag short-circuits every mutation right after validators
 
 ## Implemented principles (post-#1–#6)
 
-- **#7 Multi-surface architecture.** REST API surface shipped (`bacio api` — see `docs/rest-api-design.md` and the "HTTP API" section of `SKILL.md`). Same `inputs.*Input` structs, same `schemaRegistry`, same validators, same audit log; only the transport differs. MCP server surface remains plausible future work.
+- **#7 Multi-surface architecture.** REST API surface shipped (`bacio api` — see the "HTTP API" section of `SKILL.md`, and `docs/site/guides/run-the-api-server.md` for the end-to-end walk-through). Same `inputs.*Input` structs, same `schemaRegistry`, same validators, same audit log; only the transport differs. MCP server surface remains plausible future work.
 
 ## What we deliberately don't do
 
@@ -65,4 +65,4 @@ These came up during the redesign and were considered + rejected. New PRs should
 - **#8 Response sanitization.** bacio doesn't currently filter prompt-injection-style content from issue/comment/doc text it returns to agents. Worth revisiting if bacio ingests data from third parties.
 - **#9 Incremental implementation.** Already how we're doing it.
 
-When implementing #8, extend [agent-cli-redesign.md](agent-cli-redesign.md) first with the design pass, then update this doc.
+When implementing #8, document the design pass before updating this doc — write it up alongside the change so the rules and their rationale stay together.

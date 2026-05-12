@@ -42,7 +42,7 @@ description: How bacio thinks — repos, prefixes, issues, features, comments, l
 Direction notes:
 - `issue.feature_slug` — many issues per feature, one feature per issue (optional).
 - Documents link to one or many issues / features through a join table with an optional `--why` reason.
-- Relations are typed edges between issues: `blocks`, `relates-to`, `duplicate-of`.
+- Relations are typed edges between issues: `blocks`, `relates_to`, `duplicate_of` (canonical underscored form; the CLI also accepts the dashed spelling on input).
 
 ## Entities
 
@@ -74,7 +74,7 @@ A note on an issue. Has an `author` (passed via `--as <name>` on the CLI — the
 
 ### Link (relation)
 
-A typed edge between two issues. `bacio link <FROM> <type> <TO>`. Relation types are `blocks`, `relates-to`, `duplicate-of` (dashes, not underscores). Relations are stored one-directionally — `blocked-by` is the implicit inverse view of `blocks`, not a creatable type. The TUI surfaces relations in the card overlay; `bacio issue brief` includes them in its bulk-context payload; `bacio feature plan` uses `blocks` to compute execution order.
+A typed edge between two issues. `bacio link <FROM> <type> <TO>`. Relation types come in three flavours: **`blocks`**, **`relates_to`**, **`duplicate_of`**. The CLI accepts both the dashed (`relates-to`) and underscored (`relates_to`) spelling on input; the **canonical stored form is underscored** (it's what the schema CHECK constraint enforces and what JSON output emits). Relations are stored one-directionally — `blocked-by` is the implicit inverse view of `blocks`, not a creatable type. The TUI surfaces relations in the card overlay; `bacio issue brief` includes them in its bulk-context payload; `bacio feature plan` uses `blocks` to compute execution order.
 
 ### PR (pull request)
 
@@ -94,7 +94,7 @@ A per-repo named text blob (markdown, etc.) with a typed category (`architecture
 
 ### History (audit log)
 
-Every mutation records a row: actor (`--user`), op (`issue.add`, `feature.edit`, `sync.renumber`, …), target, and a details blob. Pruned to 60 days on every DB open. Survives [git-backed sync](/guides/sync-across-machines).
+Every mutation records a row: actor (`--user`), op (`issue.create`, `feature.update`, `sync.renumber`, …), target, and a details blob. Pruned to 60 days on every DB open. Survives [git-backed sync](/guides/sync-across-machines).
 
 ## Identity: the UUIDv7 layer
 

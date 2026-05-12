@@ -34,7 +34,7 @@ Dotted form: `<entity>.<verb>`.
 
 | Entity | Verbs |
 |---|---|
-| `repo` | `create` |
+| `repo` | `create`, `delete`, `upgrade_phantom` |
 | `feature` | `create`, `update`, `delete` |
 | `issue` | `create`, `update`, `state`, `assign`, `claim`, `delete` |
 | `comment` | `add` |
@@ -42,9 +42,13 @@ Dotted form: `<entity>.<verb>`.
 | `pr` | `attach`, `detach` |
 | `tag` | `add`, `remove` |
 | `document` | `create`, `update`, `rename`, `delete`, `link`, `unlink` |
-| `sync` | `renumber`, `rename` |
+| `sync` | `run`, `init`, `clone`, `import`, `renumber`, `rename`, `delete` |
 
-`bacio doc upsert` records `document.create` or `document.update` depending on whether it created the row.
+Notes:
+
+- `bacio doc upsert` records `document.create` or `document.update` depending on whether it created the row.
+- `bacio issue unassign` reuses `issue.assign` (with an empty assignee in the details blob) rather than its own op.
+- `repo.upgrade_phantom` is emitted by `bacio sync` when a placeholder "phantom" repo (a prefix that existed only in the synced YAML) gets a real local working tree on this machine.
 
 ## Worked examples
 

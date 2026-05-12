@@ -17,7 +17,7 @@ Inspect and manage the repos bacio knows about. Repos auto-register when you fir
 
 ## `bacio repo rm` — the destructive one
 
-`rm` cascades through **every** issue, comment, feature, document, link, PR attachment, and history row attached to the repo. To prevent accidents, the command requires two things:
+`rm` cascades through **every** issue, comment, feature, document, link, PR attachment, tag, TUI setting, and history row attached to the repo. To prevent accidents, the command requires two things:
 
 1. **`--dry-run` first** is strongly recommended. It returns a `*DeletePreview` with cascade counts so you see the full blast radius before you commit.
 2. **`--confirm <PREFIX>`** is **mandatory** on the real run. Without it the command exits non-zero with a "STOP — DESTRUCTIVE OPERATION REQUIRES HUMAN APPROVAL" alert and the impact preview. The agent contract requires showing this preview to the user, getting unambiguous confirmation, then re-running with `--confirm <PREFIX>`.

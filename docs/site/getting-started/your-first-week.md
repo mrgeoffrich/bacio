@@ -35,7 +35,7 @@ Five minutes later you remember another thing:
 
 > File an issue for the auth rewrite — actually break it down: create a feature, add three child issues, wire up MIDS-7 as a blocker on the first one.
 
-Claude does `bacio feature add`, three `bacio issue add` calls under the new feature, and a `bacio link MIDS-X blocked-by MIDS-7`. You confirm what it picked, fix the title on the second issue (*"actually call it 'Token rotation' not 'Refresh logic'"*), and move on.
+Claude does `bacio feature add`, three `bacio issue add` calls under the new feature, and a `bacio link MIDS-7 blocks MIDS-X` (relations are stored one-directionally — "X blocked by Y" is created as "Y blocks X"; the reverse view is rendered automatically wherever bacio shows relations). You confirm what it picked, fix the title on the second issue (*"actually call it 'Token rotation' not 'Refresh logic'"*), and move on.
 
 ## Mid-day — glance at the board
 
