@@ -19,6 +19,13 @@ brew tap mrgeoffrich/bacio
 brew install bacio
 ```
 
+**Scoop** (Windows, prebuilt binaries):
+
+```powershell
+scoop bucket add bacio https://github.com/mrgeoffrich/scoop-bacio
+scoop install bacio
+```
+
 ## Quick start
 
 ```bash

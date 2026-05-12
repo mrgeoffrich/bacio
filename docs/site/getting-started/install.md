@@ -1,6 +1,6 @@
 ---
 title: Install bacio
-description: Install bacio on macOS or Linux with Homebrew, build from source with Go, verify the install, and uninstall cleanly.
+description: Install bacio on macOS or Linux with Homebrew, on Windows with Scoop, build from source with Go, verify the install, and uninstall cleanly.
 ---
 
 # Install
@@ -18,6 +18,23 @@ Upgrade later with:
 
 ```bash
 brew upgrade bacio
+```
+
+After upgrading, re-run `bacio install-skill` in any repo you use bacio in so the bundled agent skill picks up doc updates.
+
+## Scoop (Windows)
+
+The recommended path on Windows — pre-built `bacio.exe`, no admin required:
+
+```powershell
+scoop bucket add bacio https://github.com/mrgeoffrich/scoop-bacio
+scoop install bacio
+```
+
+Upgrade later with:
+
+```powershell
+scoop update bacio
 ```
 
 After upgrading, re-run `bacio install-skill` in any repo you use bacio in so the bundled agent skill picks up doc updates.
@@ -52,6 +69,7 @@ Just one binary — `bacio`. Everything else (the SQLite database, per-repo skil
 
 ```bash
 brew uninstall bacio                          # if installed via brew
+scoop uninstall bacio                         # if installed via scoop (Windows)
 rm "$(go env GOPATH)/bin/bacio"               # if installed via go install
 ```
 
