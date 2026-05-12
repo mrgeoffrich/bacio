@@ -75,7 +75,7 @@ bacio install-skill
 installed bacio skill (12345 bytes) at /Users/you/code/my-project/.claude/skills/bacio/SKILL.md
 ```
 
-Restart Claude Code in this repo so the new skill loads. Re-run `install-skill` after `brew upgrade bacio` to pick up updates.
+Restart Claude Code in this repo so the new skill loads. Re-run `install-skill` after upgrading bacio (`brew upgrade bacio` / `scoop update bacio`) to pick up updates.
 
 ::: tip Workflow skills
 For trigger-phrase shortcuts on common flows (*"triage the backlog"*, *"daily stand-up"*, *"plan this feature"*), see [`bacio install-sample-skills`](/reference/cli/install-sample-skills).

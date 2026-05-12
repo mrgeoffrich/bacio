@@ -82,7 +82,7 @@ Things that have caught real users out:
 - **Claude attributes work to your OS user instead of `agent-claude`.** It forgot `--user`. Mention it once and the skill self-corrects for the rest of the session.
 - **You can't find an issue from last week.** Either filter the History tab (`4`) by the day, or `bacio history --since 1w`, or — if you've enabled sync — `cd ~/sync/your-project && git log --since="1 week ago"`.
 - **A prefix collision on a second machine.** `bacio sync clone` refuses to overwrite. Re-run with `--allow-renumber` (after looking at `--dry-run` first) to let the joining side renumber.
-- **A stale skill.** After `brew upgrade bacio`, re-run `bacio install-skill` so the doc updates land. Restart Claude Code.
+- **A stale skill.** After upgrading bacio (`brew upgrade bacio` / `scoop update bacio`), re-run `bacio install-skill` so the doc updates land. Restart Claude Code.
 
 ## What you'll stop doing
 

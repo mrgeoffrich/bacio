@@ -19,9 +19,22 @@ This guide walks you through:
 
 ## 1. One-time setup
 
-Install the binary (pure-Go SQLite, no CGO):
+Install the binary. Pre-built packages on macOS, Linux, and Windows; or build from source — bacio is pure-Go, no CGO.
 
 ```bash
+# macOS and Linux
+brew tap mrgeoffrich/bacio
+brew install bacio
+```
+
+```powershell
+# Windows
+scoop bucket add bacio https://github.com/mrgeoffrich/scoop-bacio
+scoop install bacio
+```
+
+```bash
+# any platform, from source
 go install github.com/mrgeoffrich/bacio/cmd/bacio@latest
 ```
 

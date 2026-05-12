@@ -9,11 +9,18 @@ Install bacio, run `init` in a repo, open the TUI, then let your agent in. The f
 
 ## 1. Install
 
-On macOS, install with Homebrew:
+On macOS and Linux, install with Homebrew:
 
 ```bash
 $ brew tap mrgeoffrich/bacio
 $ brew install bacio
+```
+
+On Windows, install with Scoop:
+
+```powershell
+$ scoop bucket add bacio https://github.com/mrgeoffrich/scoop-bacio
+$ scoop install bacio
 ```
 
 Verify the install:
@@ -22,6 +29,8 @@ Verify the install:
 $ bacio --version
 bacio version v1.0.3
 ```
+
+Other install paths (build from source, uninstall, where the binary lands) live on the [Install page](/getting-started/install).
 
 ## 2. Initialize a repo
 
@@ -65,6 +74,6 @@ $ bacio install-skill
 installed bacio skill (12345 bytes) at /Users/you/code/my-project/.claude/skills/bacio/SKILL.md
 ```
 
-Restart Claude Code in this repo so the new skill loads. From here, your agent can file issues, link features, write doc pages, and read history — all without leaving the repo. Re-run `install-skill` after `brew upgrade bacio` to pick up doc updates.
+Restart Claude Code in this repo so the new skill loads. From here, your agent can file issues, link features, write doc pages, and read history — all without leaving the repo. Re-run `install-skill` after upgrading bacio (`brew upgrade bacio` / `scoop update bacio`) to pick up doc updates.
 
 Looking for higher-level workflows (file-issue, triage, stand-up, plan-feature)? See [`bacio install-sample-skills`](/reference/cli/install-sample-skills).

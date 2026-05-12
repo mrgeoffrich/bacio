@@ -13,6 +13,7 @@ The driver is `modernc.org/sqlite` — pure-Go, no CGO. That means:
 
 - bacio cross-compiles cleanly to any platform Go targets.
 - `brew install bacio` works the same on macOS and Linux.
+- `scoop install bacio` ships a prebuilt `bacio.exe` for Windows.
 - `go install github.com/mrgeoffrich/bacio/cmd/bacio@latest` works without a C toolchain.
 
 ## Schema is idempotent
