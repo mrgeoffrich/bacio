@@ -37,7 +37,7 @@ func main() {
 		fmt.Fprintf(out, "\r\n\x1b[31mfailed to open in-memory store: %v\x1b[0m\r\n", err)
 		return
 	}
-	repo, err := wasm.Seed(s)
+	repo, err := wasm.Seed(s, wasm.SeedOptions{})
 	if err != nil {
 		fmt.Fprintf(out, "\r\n\x1b[31mfailed to seed demo data: %v\x1b[0m\r\n", err)
 		return

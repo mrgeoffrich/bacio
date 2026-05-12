@@ -61,6 +61,7 @@ func NewRoot() *cobra.Command {
 		newInstallSkillCmd(),
 		newInstallSampleSkillsCmd(),
 		newTUICmd(),
+		newDemoCmd(),
 	)
 	return root
 }
