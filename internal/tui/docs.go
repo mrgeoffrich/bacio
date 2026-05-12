@@ -19,10 +19,11 @@ type docsView struct {
 	store *store.Store
 	repo  *model.Repo
 
-	docs    []*model.Document
-	row     int
-	loaded  *model.Document // selected doc with content (lazy loaded)
-	loadErr error
+	docs       []*model.Document
+	row        int
+	listScroll int
+	loaded     *model.Document // selected doc with content (lazy loaded)
+	loadErr    error
 
 	overlay       bool
 	overlayScroll int
@@ -240,16 +241,26 @@ func (d *docsView) renderList(width, height int) string {
 	if innerWidth < 6 {
 		innerWidth = 6
 	}
+	innerHeight := height - 2
+	if innerHeight < 2 {
+		innerHeight = 2
+	}
 
 	header := lipgloss.NewStyle().
 		Bold(true).Foreground(lipgloss.Color("231")).Background(colHeaderFocus).
 		Width(innerWidth).Align(lipgloss.Center).
 		Render(fmt.Sprintf("Documents · %d", len(d.docs)))
 
-	rowStyle := lipgloss.NewStyle().Width(innerWidth).Padding(0, 1)
-	selStyle := lipgloss.NewStyle().Width(innerWidth).Padding(0, 1).
+	// Body width reserves 1 col for the scrollbar that scrollableBlock pins
+	// to the right edge.
+	bodyContentWidth := innerWidth - 1
+	if bodyContentWidth < 4 {
+		bodyContentWidth = 4
+	}
+	rowStyle := lipgloss.NewStyle().Width(bodyContentWidth).Padding(0, 1)
+	selStyle := lipgloss.NewStyle().Width(bodyContentWidth).Padding(0, 1).
 		Background(cardSelectedBG).Foreground(lipgloss.Color("231"))
-	groupStyle := lipgloss.NewStyle().Width(innerWidth).Padding(0, 1).
+	groupStyle := lipgloss.NewStyle().Width(bodyContentWidth).Padding(0, 1).
 		Foreground(cardKeyColor).Bold(true)
 
 	var lines []string
@@ -260,25 +271,47 @@ func (d *docsView) renderList(width, height int) string {
 	// cross a type boundary. Headers are non-selectable; d.row still indexes
 	// directly into d.docs so navigation stays simple.
 	var lastType model.DocumentType
+	cursorStart, cursorEnd := -1, -1
 	for i, doc := range d.docs {
 		if i == 0 || doc.Type != lastType {
 			lines = append(lines, groupStyle.Render("▸ "+stringDocType(doc.Type)))
 			lastType = doc.Type
 		}
-		line := "  " + truncate(doc.Filename, innerWidth-4)
+		line := "  " + truncate(doc.Filename, bodyContentWidth-4)
 		if i == d.row {
+			cursorStart = len(lines)
 			lines = append(lines, selStyle.Render(line))
+			cursorEnd = len(lines)
 		} else {
 			lines = append(lines, rowStyle.Render(line))
 		}
 	}
 
 	body := strings.Join(lines, "\n")
-	content := lipgloss.JoinVertical(lipgloss.Left, header, body)
+	bodyHeight := innerHeight - 1 // header takes 1 row
+	if bodyHeight < 1 {
+		bodyHeight = 1
+	}
+	// Keep the selected doc visible by nudging the scroll offset before
+	// handing it to scrollableBlock (which clamps against total body height).
+	if cursorStart >= 0 {
+		if cursorStart < d.listScroll {
+			d.listScroll = cursorStart
+		}
+		if cursorEnd > d.listScroll+bodyHeight {
+			d.listScroll = cursorEnd - bodyHeight
+		}
+		if d.listScroll < 0 {
+			d.listScroll = 0
+		}
+	}
+
+	scrolled := scrollableBlock(innerWidth, bodyHeight, body, &d.listScroll, true)
+	content := lipgloss.JoinVertical(lipgloss.Left, header, scrolled)
 
 	return lipgloss.NewStyle().
 		Border(colBorder).BorderForeground(colFocusBorder).
-		Width(innerWidth).Height(height - 2).
+		Width(innerWidth).Height(innerHeight).
 		Render(content)
 }
 

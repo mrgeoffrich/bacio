@@ -19,8 +19,9 @@ type featuresView struct {
 	store *store.Store
 	repo  *model.Repo
 
-	features []*model.Feature
-	row      int
+	features   []*model.Feature
+	row        int
+	listScroll int
 
 	selected  *model.Feature
 	issues    []*model.Issue
@@ -211,14 +212,24 @@ func (f *featuresView) renderList(width, height int) string {
 	if innerWidth < 6 {
 		innerWidth = 6
 	}
+	innerHeight := height - 2
+	if innerHeight < 2 {
+		innerHeight = 2
+	}
 
 	header := lipgloss.NewStyle().
 		Bold(true).Foreground(lipgloss.Color("231")).Background(colHeaderFocus).
 		Width(innerWidth).Align(lipgloss.Center).
 		Render(fmt.Sprintf("Features · %d", len(f.features)))
 
-	rowStyle := lipgloss.NewStyle().Width(innerWidth).Padding(0, 1)
-	selStyle := lipgloss.NewStyle().Width(innerWidth).Padding(0, 1).
+	// Body width reserves 1 col for the scrollbar that scrollableBlock pins
+	// to the right edge.
+	bodyContentWidth := innerWidth - 1
+	if bodyContentWidth < 4 {
+		bodyContentWidth = 4
+	}
+	rowStyle := lipgloss.NewStyle().Width(bodyContentWidth).Padding(0, 1)
+	selStyle := lipgloss.NewStyle().Width(bodyContentWidth).Padding(0, 1).
 		Background(cardSelectedBG).Foreground(lipgloss.Color("231"))
 
 	var lines []string
@@ -229,10 +240,11 @@ func (f *featuresView) renderList(width, height int) string {
 	// lines. The same selection background paints all three so a focused
 	// feature reads as a single chunk.
 	const featureRows = 3
-	titleW := innerWidth - 2
+	titleW := bodyContentWidth - 2
 	if titleW < 4 {
 		titleW = 4
 	}
+	cursorStart, cursorEnd := -1, -1
 	for i, feat := range f.features {
 		isSel := i == f.row
 		styler := rowStyle
@@ -243,6 +255,7 @@ func (f *featuresView) renderList(width, height int) string {
 		if isSel {
 			styler = selStyle
 			slugRender = bracketed
+			cursorStart = len(lines)
 		}
 		titleLines := wrapLines(feat.Title, titleW, 2)
 		for j := 0; j < featureRows; j++ {
@@ -257,13 +270,35 @@ func (f *featuresView) renderList(width, height int) string {
 			}
 			lines = append(lines, styler.Render(content))
 		}
+		if isSel {
+			cursorEnd = len(lines)
+		}
 	}
 
 	body := strings.Join(lines, "\n")
-	content := lipgloss.JoinVertical(lipgloss.Left, header, body)
+	bodyHeight := innerHeight - 1 // header takes 1 row
+	if bodyHeight < 1 {
+		bodyHeight = 1
+	}
+	// Keep the selected feature visible by nudging the scroll offset before
+	// handing it to scrollableBlock (which clamps against total body height).
+	if cursorStart >= 0 {
+		if cursorStart < f.listScroll {
+			f.listScroll = cursorStart
+		}
+		if cursorEnd > f.listScroll+bodyHeight {
+			f.listScroll = cursorEnd - bodyHeight
+		}
+		if f.listScroll < 0 {
+			f.listScroll = 0
+		}
+	}
+
+	scrolled := scrollableBlock(innerWidth, bodyHeight, body, &f.listScroll, true)
+	content := lipgloss.JoinVertical(lipgloss.Left, header, scrolled)
 	return lipgloss.NewStyle().
 		Border(colBorder).BorderForeground(colFocusBorder).
-		Width(innerWidth).Height(height - 2).
+		Width(innerWidth).Height(innerHeight).
 		Render(content)
 }
 
