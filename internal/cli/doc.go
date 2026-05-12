@@ -238,15 +238,12 @@ func docAddCmd() *cobra.Command {
 		Short: "Create a document in the current repo",
 		Args:  cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, err := readJSONInput(rawInput)
+			raw, err := parseJSONInput(cmd, args, rawInput,
+				"type", "content", "content-file", "from-path")
 			if err != nil {
 				return err
 			}
 			if raw != nil {
-				if err := rejectMixedInput(cmd, args,
-					"type", "content", "content-file", "from-path"); err != nil {
-					return err
-				}
 				in, _, err := inputio.DecodeStrict[inputs.DocAddInput](raw)
 				if err != nil {
 					return err
@@ -315,15 +312,12 @@ func docUpsertCmd() *cobra.Command {
 		Short: "Create or update a document (same flag surface as `add`)",
 		Args:  cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, err := readJSONInput(rawInput)
+			raw, err := parseJSONInput(cmd, args, rawInput,
+				"type", "content", "content-file", "from-path")
 			if err != nil {
 				return err
 			}
 			if raw != nil {
-				if err := rejectMixedInput(cmd, args,
-					"type", "content", "content-file", "from-path"); err != nil {
-					return err
-				}
 				in, _, err := inputio.DecodeStrict[inputs.DocAddInput](raw)
 				if err != nil {
 					return err
@@ -458,15 +452,12 @@ func docEditCmd() *cobra.Command {
 		Short: "Edit a document's type and/or content",
 		Args:  cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, err := readJSONInput(rawInput)
+			raw, err := parseJSONInput(cmd, args, rawInput,
+				"type", "content", "content-file")
 			if err != nil {
 				return err
 			}
 			if raw != nil {
-				if err := rejectMixedInput(cmd, args,
-					"type", "content", "content-file"); err != nil {
-					return err
-				}
 				in, present, err := inputio.DecodeStrict[inputs.DocEditInput](raw)
 				if err != nil {
 					return err
@@ -556,14 +547,11 @@ func docRenameCmd() *cobra.Command {
 		Short: "Rename a document, preserving its links (and optionally update its type)",
 		Args:  cobra.RangeArgs(0, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, err := readJSONInput(rawInput)
+			raw, err := parseJSONInput(cmd, args, rawInput, "type")
 			if err != nil {
 				return err
 			}
 			if raw != nil {
-				if err := rejectMixedInput(cmd, args, "type"); err != nil {
-					return err
-				}
 				in, _, err := inputio.DecodeStrict[inputs.DocRenameInput](raw)
 				if err != nil {
 					return err
@@ -638,14 +626,11 @@ Local-only: the API can't write to the client's filesystem. In remote
 mode, use ` + "`bacio doc download`" + ` and pipe to disk yourself.`,
 		Args: cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, err := readJSONInput(rawInput)
+			raw, err := parseJSONInput(cmd, args, rawInput, "to", "to-path")
 			if err != nil {
 				return err
 			}
 			if raw != nil {
-				if err := rejectMixedInput(cmd, args, "to", "to-path"); err != nil {
-					return err
-				}
 				in, _, err := inputio.DecodeStrict[inputs.DocExportInput](raw)
 				if err != nil {
 					return err
@@ -795,14 +780,11 @@ func docRmCmd() *cobra.Command {
 		Short: "Delete a document (and its links)",
 		Args:  cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, err := readJSONInput(rawInput)
+			raw, err := parseJSONInput(cmd, args, rawInput)
 			if err != nil {
 				return err
 			}
 			if raw != nil {
-				if err := rejectMixedInput(cmd, args); err != nil {
-					return err
-				}
 				in, _, err := inputio.DecodeStrict[inputs.DocRmInput](raw)
 				if err != nil {
 					return err

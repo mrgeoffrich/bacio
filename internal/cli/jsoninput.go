@@ -63,3 +63,23 @@ func rejectMixedInput(cmd *cobra.Command, args []string, conflictingFlags ...str
 	}
 	return nil
 }
+
+// parseJSONInput resolves --json into raw bytes and, when present,
+// validates that it isn't combined with positionals or any of the named
+// flags. Returns (nil, nil) when --json was not supplied — the caller
+// should fall back to positional/flag parsing. Combines the
+// readJSONInput → rejectMixedInput skeleton every mutating command
+// repeats at the top of its RunE.
+func parseJSONInput(cmd *cobra.Command, args []string, rawInput string, conflictingFlags ...string) ([]byte, error) {
+	raw, err := readJSONInput(rawInput)
+	if err != nil {
+		return nil, err
+	}
+	if raw == nil {
+		return nil, nil
+	}
+	if err := rejectMixedInput(cmd, args, conflictingFlags...); err != nil {
+		return nil, err
+	}
+	return raw, nil
+}

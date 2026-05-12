@@ -28,14 +28,11 @@ func prAttachCmd() *cobra.Command {
 		Short: "Attach a pull request URL to an issue",
 		Args:  cobra.RangeArgs(0, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, err := readJSONInput(rawInput)
+			raw, err := parseJSONInput(cmd, args, rawInput)
 			if err != nil {
 				return err
 			}
 			if raw != nil {
-				if err := rejectMixedInput(cmd, args); err != nil {
-					return err
-				}
 				in, _, err := inputio.DecodeStrict[inputs.PRAttachInput](raw)
 				if err != nil {
 					return err
@@ -89,14 +86,11 @@ func prDetachCmd() *cobra.Command {
 		Short: "Detach a pull request URL from an issue",
 		Args:  cobra.RangeArgs(0, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, err := readJSONInput(rawInput)
+			raw, err := parseJSONInput(cmd, args, rawInput)
 			if err != nil {
 				return err
 			}
 			if raw != nil {
-				if err := rejectMixedInput(cmd, args); err != nil {
-					return err
-				}
 				in, _, err := inputio.DecodeStrict[inputs.PRDetachInput](raw)
 				if err != nil {
 					return err

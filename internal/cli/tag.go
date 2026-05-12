@@ -24,14 +24,11 @@ func tagAddCmd() *cobra.Command {
 		Short: "Add one or more tags to an issue (idempotent)",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, err := readJSONInput(rawInput)
+			raw, err := parseJSONInput(cmd, args, rawInput)
 			if err != nil {
 				return err
 			}
 			if raw != nil {
-				if err := rejectMixedInput(cmd, args); err != nil {
-					return err
-				}
 				in, _, err := inputio.DecodeStrict[inputs.TagAddInput](raw)
 				if err != nil {
 					return err
@@ -58,14 +55,11 @@ func tagRmCmd() *cobra.Command {
 		Short: "Remove one or more tags from an issue",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, err := readJSONInput(rawInput)
+			raw, err := parseJSONInput(cmd, args, rawInput)
 			if err != nil {
 				return err
 			}
 			if raw != nil {
-				if err := rejectMixedInput(cmd, args); err != nil {
-					return err
-				}
 				in, _, err := inputio.DecodeStrict[inputs.TagRmInput](raw)
 				if err != nil {
 					return err

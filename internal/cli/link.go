@@ -18,14 +18,11 @@ func newLinkCmd() *cobra.Command {
 		Long:  "Types: blocks, relates-to, duplicate-of",
 		Args:  cobra.RangeArgs(0, 3),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, err := readJSONInput(rawInput)
+			raw, err := parseJSONInput(cmd, args, rawInput)
 			if err != nil {
 				return err
 			}
 			if raw != nil {
-				if err := rejectMixedInput(cmd, args); err != nil {
-					return err
-				}
 				in, _, err := inputio.DecodeStrict[inputs.LinkInput](raw)
 				if err != nil {
 					return err
@@ -84,14 +81,11 @@ func newUnlinkCmd() *cobra.Command {
 		Short: "Remove all relations between two issues",
 		Args:  cobra.RangeArgs(0, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, err := readJSONInput(rawInput)
+			raw, err := parseJSONInput(cmd, args, rawInput)
 			if err != nil {
 				return err
 			}
 			if raw != nil {
-				if err := rejectMixedInput(cmd, args); err != nil {
-					return err
-				}
 				in, _, err := inputio.DecodeStrict[inputs.UnlinkInput](raw)
 				if err != nil {
 					return err

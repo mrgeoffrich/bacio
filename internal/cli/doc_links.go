@@ -18,14 +18,11 @@ func docLinkCmd() *cobra.Command {
 		Short: "Link a document to an issue or feature (upsert; --why replaces description)",
 		Args:  cobra.RangeArgs(0, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, err := readJSONInput(rawInput)
+			raw, err := parseJSONInput(cmd, args, rawInput, "why")
 			if err != nil {
 				return err
 			}
 			if raw != nil {
-				if err := rejectMixedInput(cmd, args, "why"); err != nil {
-					return err
-				}
 				in, _, err := inputio.DecodeStrict[inputs.DocLinkInput](raw)
 				if err != nil {
 					return err
@@ -83,14 +80,11 @@ func docUnlinkCmd() *cobra.Command {
 		Short: "Remove a link between a document and an issue or feature",
 		Args:  cobra.RangeArgs(0, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, err := readJSONInput(rawInput)
+			raw, err := parseJSONInput(cmd, args, rawInput)
 			if err != nil {
 				return err
 			}
 			if raw != nil {
-				if err := rejectMixedInput(cmd, args); err != nil {
-					return err
-				}
 				in, _, err := inputio.DecodeStrict[inputs.DocUnlinkInput](raw)
 				if err != nil {
 					return err

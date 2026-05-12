@@ -46,15 +46,12 @@ func issueAddCmd() *cobra.Command {
 		Short: "Create an issue in the current repo",
 		Args:  cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, err := readJSONInput(rawInput)
+			raw, err := parseJSONInput(cmd, args, rawInput,
+				"feature", "description", "description-file", "state", "tag")
 			if err != nil {
 				return err
 			}
 			if raw != nil {
-				if err := rejectMixedInput(cmd, args,
-					"feature", "description", "description-file", "state", "tag"); err != nil {
-					return err
-				}
 				return runIssueAddJSON(raw)
 			}
 			if len(args) != 1 {
@@ -225,15 +222,12 @@ func issueEditCmd() *cobra.Command {
 		Short: "Edit an issue's title, description, or feature",
 		Args:  cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, err := readJSONInput(rawInput)
+			raw, err := parseJSONInput(cmd, args, rawInput,
+				"title", "description", "description-file", "feature", "no-feature")
 			if err != nil {
 				return err
 			}
 			if raw != nil {
-				if err := rejectMixedInput(cmd, args,
-					"title", "description", "description-file", "feature", "no-feature"); err != nil {
-					return err
-				}
 				return runIssueEditJSON(raw)
 			}
 			if len(args) != 1 {
@@ -362,14 +356,11 @@ func issueStateCmd() *cobra.Command {
 		Short: "Set issue state",
 		Args:  cobra.RangeArgs(0, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, err := readJSONInput(rawInput)
+			raw, err := parseJSONInput(cmd, args, rawInput)
 			if err != nil {
 				return err
 			}
 			if raw != nil {
-				if err := rejectMixedInput(cmd, args); err != nil {
-					return err
-				}
 				in, _, err := inputio.DecodeStrict[inputs.IssueStateInput](raw)
 				if err != nil {
 					return err
@@ -526,14 +517,11 @@ func issueAssignCmd() *cobra.Command {
 		Short: "Assign an issue to a person or agent",
 		Args:  cobra.RangeArgs(0, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, err := readJSONInput(rawInput)
+			raw, err := parseJSONInput(cmd, args, rawInput)
 			if err != nil {
 				return err
 			}
 			if raw != nil {
-				if err := rejectMixedInput(cmd, args); err != nil {
-					return err
-				}
 				in, _, err := inputio.DecodeStrict[inputs.IssueAssignInput](raw)
 				if err != nil {
 					return err
@@ -590,14 +578,11 @@ func issueUnassignCmd() *cobra.Command {
 		Short: "Clear the assignee on an issue",
 		Args:  cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, err := readJSONInput(rawInput)
+			raw, err := parseJSONInput(cmd, args, rawInput)
 			if err != nil {
 				return err
 			}
 			if raw != nil {
-				if err := rejectMixedInput(cmd, args); err != nil {
-					return err
-				}
 				in, _, err := inputio.DecodeStrict[inputs.IssueUnassignInput](raw)
 				if err != nil {
 					return err
@@ -669,14 +654,11 @@ Pass --user explicitly so the audit log and assignee reflect the agent's
 identity instead of the OS username.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, err := readJSONInput(rawInput)
+			raw, err := parseJSONInput(cmd, args, rawInput, "feature")
 			if err != nil {
 				return err
 			}
 			if raw != nil {
-				if err := rejectMixedInput(cmd, args, "feature"); err != nil {
-					return err
-				}
 				in, _, err := inputio.DecodeStrict[inputs.IssueNextInput](raw)
 				if err != nil {
 					return err
@@ -760,14 +742,11 @@ func issueRmCmd() *cobra.Command {
 		Short: "Delete an issue (and its comments)",
 		Args:  cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, err := readJSONInput(rawInput)
+			raw, err := parseJSONInput(cmd, args, rawInput)
 			if err != nil {
 				return err
 			}
 			if raw != nil {
-				if err := rejectMixedInput(cmd, args); err != nil {
-					return err
-				}
 				in, _, err := inputio.DecodeStrict[inputs.IssueRmInput](raw)
 				if err != nil {
 					return err

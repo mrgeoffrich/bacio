@@ -89,16 +89,13 @@ func repoRmCmd() *cobra.Command {
 		Long:  repoRmLongHelp,
 		Args:  cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, err := readJSONInput(rawInput)
+			raw, err := parseJSONInput(cmd, args, rawInput, "confirm")
 			if err != nil {
 				return err
 			}
 			var prefix string
 			switch {
 			case raw != nil:
-				if err := rejectMixedInput(cmd, args, "confirm"); err != nil {
-					return err
-				}
 				in, _, err := inputio.DecodeStrict[inputs.RepoRmInput](raw)
 				if err != nil {
 					return err
