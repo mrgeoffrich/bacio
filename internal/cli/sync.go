@@ -222,8 +222,22 @@ func newSyncInitCmd() *cobra.Command {
 	var remote string
 	cmd := &cobra.Command{
 		Use:   "init <local-path>",
-		Short: "Create a new sync repo and seed it with the project's data",
-		Args:  cobra.ExactArgs(1),
+		Short: "Create or attach to a sync repo at <local-path>",
+		Long: `Connect the current project repo to a sync repo at <local-path> and
+perform an initial sync. <local-path> may be:
+
+  - a missing or empty directory (fresh bootstrap)
+  - an existing 'git init'-only folder, or a freshly 'git clone'd empty
+    bare remote (sentinel and .gitattributes are written, then the
+    first export is committed and pushed)
+  - an existing bacio sync repo (attach mode: pull → import →
+    re-export → commit → push; the current project's data joins the
+    repo alongside any projects already exported there)
+
+If the target already has an 'origin' remote configured, --remote is
+optional — the URL is auto-detected. When both are given they must
+match.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if inRemoteMode() {
 				return fmt.Errorf("bacio sync init: not supported in remote mode (operates on the local DB only)")
@@ -258,8 +272,11 @@ func newSyncInitCmd() *cobra.Command {
 				recordOp(s, model.HistoryEntry{
 					Op:      "sync.init",
 					Kind:    "repo",
-					Details: fmt.Sprintf("local=%s remote=%s commit=%s pushed=%v", res.LocalPath, res.Remote, res.CommitSHA, res.Pushed),
+					Details: fmt.Sprintf("local=%s remote=%s commit=%s pushed=%v attached=%v", res.LocalPath, res.Remote, res.CommitSHA, res.Pushed, res.Attached),
 				})
+				if res.Import != nil {
+					recordSyncImportOps(s, res.Import)
+				}
 			}
 			out := syncInitResult{InitResult: res}
 			if opts.dryRun {
@@ -268,7 +285,7 @@ func newSyncInitCmd() *cobra.Command {
 			return emit(out)
 		},
 	}
-	cmd.Flags().StringVar(&remote, "remote", "", "git URL of the remote sync repo (sets up origin and writes .bacio/config.yaml)")
+	cmd.Flags().StringVar(&remote, "remote", "", "git URL of the remote sync repo (sets up origin and writes .bacio/config.yaml). Optional when <local-path> already has an origin configured")
 	return cmd
 }
 

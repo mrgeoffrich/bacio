@@ -25,6 +25,11 @@ type ExportResult struct {
 	BytesWritten int64  `json:"bytes_written"`
 	Target       string `json:"target"`
 	DryRun       bool   `json:"dry_run,omitempty"`
+
+	// Index carries the per-repo summaries used to render the
+	// top-level index.yaml. Populated as each repo finishes exporting
+	// so the totals above and the index rows stay in sync.
+	Index []RepoIndexEntry `json:"-"`
 }
 
 // Export walks every repo in the DB and writes the canonical YAML +
@@ -83,6 +88,14 @@ func (e *Engine) Export(ctx context.Context, target string) (*ExportResult, erro
 
 	res.Files = w.files
 	res.BytesWritten = w.bytes
+
+	// Write the top-level index.yaml from the accumulated per-repo
+	// summaries. Skipped in dry-run mode (no filesystem writes).
+	if !e.DryRun {
+		if err := WriteIndex(target, res.Index); err != nil {
+			return nil, fmt.Errorf("write index: %w", err)
+		}
+	}
 	return res, nil
 }
 
@@ -91,6 +104,13 @@ func (e *Engine) Export(ctx context.Context, target string) (*ExportResult, erro
 // feature-uuid lookup is populated for the issues' `feature` field —
 // although in practice we just build the map before either pass.
 func (e *Engine) exportRepo(w *exportWriter, repo *model.Repo, issueByID map[int64]*model.Issue, uuidByKey map[string]string, res *ExportResult) error {
+	// Snapshot pre-counts so we can derive this repo's contribution
+	// without re-walking the tree at the end.
+	preFeatures := res.Features
+	preIssues := res.Issues
+	preComments := res.Comments
+	preDocuments := res.Documents
+
 	// repo.yaml
 	repoYAML, err := buildRepoYAML(repo)
 	if err != nil {
@@ -159,6 +179,16 @@ func (e *Engine) exportRepo(w *exportWriter, repo *model.Repo, issueByID map[int
 		res.Documents++
 	}
 
+	res.Index = append(res.Index, RepoIndexEntry{
+		Prefix:    repo.Prefix,
+		UUID:      repo.UUID,
+		Name:      repo.Name,
+		Remote:    repo.RemoteURL,
+		Features:  res.Features - preFeatures,
+		Issues:    res.Issues - preIssues,
+		Comments:  res.Comments - preComments,
+		Documents: res.Documents - preDocuments,
+	})
 	return nil
 }
 

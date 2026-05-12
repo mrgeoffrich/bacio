@@ -16,6 +16,7 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/inputio"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
+	"github.com/mrgeoffrich/bacio/internal/sync"
 )
 
 var issueKeyShape = regexp.MustCompile(`^[A-Za-z0-9]{4}-\d+$`)
@@ -380,11 +381,18 @@ func upsertDocument(in *docInputs) error {
 }
 
 func docListCmd() *cobra.Command {
-	var typeStr string
+	var (
+		typeStr    string
+		repoPrefix string
+		allRepos   bool
+	)
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List documents in the current repo",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if root, ok := resolveSyncRepoRoot(); ok {
+				return listDocsFromSyncRepo(root, repoPrefix, allRepos, typeStr)
+			}
 			c, err := openClient()
 			if err != nil {
 				return err
@@ -402,7 +410,41 @@ func docListCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&typeStr, "type", "", "filter by type")
+	cmd.Flags().StringVar(&repoPrefix, "repo", "", "limit to a specific repo prefix; required when run inside a sync repo (or pass --all-repos)")
+	cmd.Flags().BoolVar(&allRepos, "all-repos", false, "list across all tracked repos (only meaningful inside a sync repo)")
 	return cmd
+}
+
+// listDocsFromSyncRepo serves `bacio doc list` when run inside a sync
+// repo. Reads doc.yaml off disk and converts to `[]*model.Document`
+// so the existing renderer still picks it up.
+func listDocsFromSyncRepo(syncRoot, repoPrefix string, allRepos bool, typeStr string) error {
+	prefixes, err := resolveSyncRepoListPrefixes(syncRoot, repoPrefix, allRepos)
+	if err != nil {
+		return err
+	}
+	wantType := strings.TrimSpace(typeStr)
+	var docs []*model.Document
+	for _, prefix := range prefixes {
+		parsed, err := sync.ListDocumentsOnDisk(syncRoot, prefix)
+		if err != nil {
+			return err
+		}
+		for _, p := range parsed {
+			if wantType != "" && p.Type != wantType {
+				continue
+			}
+			docs = append(docs, &model.Document{
+				UUID:       p.UUID,
+				Filename:   p.Filename,
+				Type:       model.DocumentType(p.Type),
+				SourcePath: p.SourcePath,
+				CreatedAt:  p.CreatedAt,
+				UpdatedAt:  p.UpdatedAt,
+			})
+		}
+	}
+	return emit(docs)
 }
 
 func docShowCmd() *cobra.Command {

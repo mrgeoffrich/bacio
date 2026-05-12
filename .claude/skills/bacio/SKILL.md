@@ -487,14 +487,32 @@ bacio pr attach MINI-42 https://github.com/owner/repo/pull/7
 
 The sync repo is its own git repo, marked by an `bacio-sync.yaml` sentinel at its root. Project repos point at it via `.bacio/config.yaml` (checked in: `sync.remote: <git URL>`). The same sync repo can hold many projects — one folder per prefix under `repos/`.
 
+Alongside the sentinel, every export refreshes an `index.yaml` at the sync-repo root: a machine-readable table-of-contents listing every project repo present (`prefix`, `uuid`, `name`, `remote`, plus `issues`/`features`/`documents`/`comments` counts). The per-repo `repos/<PREFIX>/repo.yaml` files remain authoritative; `index.yaml` is regenerated from them and is byte-stable across no-op runs so it doesn't churn commits. It's safe to delete — the next export rewrites it.
+
+Inside a sync repo, the read-only list commands take a YAML-on-disk branch instead of hitting the local DB:
+
+- `bacio repo list` reads `index.yaml` and prints the prefixes/names/remotes recorded there.
+- `bacio issue list --repo <PREFIX>` (or `--all-repos`) walks `repos/<PREFIX>/issues/*/issue.yaml`. The usual `--state`, `--feature`, `--tag`, `--with-description` filters apply. Without `--repo`/`--all-repos` inside a sync repo, the command errors with a hint listing available prefixes.
+- `bacio doc list --repo <PREFIX>` (or `--all-repos`) walks `repos/<PREFIX>/docs/*/doc.yaml`; `--type` filters as in project-repo mode.
+
+Mutating commands (`bacio issue create`, `bacio doc add`, etc.) still refuse inside a sync repo with the existing `errSyncRepoMode` message; the read-only relaxation is scoped to those three list commands.
+
 ```
-bacio sync init <local-path> [--remote URL]   First-time setup. From inside a
-                                           project repo, creates the sync
-                                           repo at <local-path>, writes
-                                           bacio-sync.yaml, exports the
-                                           project's data, commits, and
-                                           (with --remote) pushes. Refuses
-                                           if the remote already has data.
+bacio sync init <local-path> [--remote URL]   Connect the current project repo
+                                           to a sync repo at <local-path> and
+                                           perform an initial sync. <local-path>
+                                           may be empty/missing (fresh
+                                           bootstrap), an existing
+                                           'git init'/cloned-empty-bare folder
+                                           (sentinel + .gitattributes written,
+                                           then export+commit+push), or an
+                                           already-populated bacio sync repo
+                                           (attach mode: pull, import,
+                                           re-export, commit, push). If the
+                                           target already has an origin
+                                           configured, --remote is optional —
+                                           the URL is auto-detected; supplying
+                                           a mismatching --remote errors.
 
 bacio sync clone [<local-path>] [--allow-renumber] [--dry-run]
                                            Join an existing sync repo.

@@ -351,3 +351,55 @@ func keys(m map[string][]byte) []string {
 	}
 	return out
 }
+
+// TestExportWritesIndex verifies the export pass drops index.yaml at
+// the target root, that it parses back via ReadIndex, and that
+// re-running against an unchanged DB produces byte-identical output.
+func TestExportWritesIndex(t *testing.T) {
+	s, _ := seedExportFixture(t)
+	tdir := t.TempDir()
+	eng := &Engine{Store: s, Actor: "tester"}
+
+	res1, err := eng.Export(context.Background(), tdir)
+	if err != nil {
+		t.Fatalf("export 1: %v", err)
+	}
+	if len(res1.Index) != 1 {
+		t.Fatalf("expected 1 index entry, got %d", len(res1.Index))
+	}
+	entry := res1.Index[0]
+	if entry.Prefix != "MINI" {
+		t.Fatalf("unexpected prefix %q", entry.Prefix)
+	}
+	if entry.Issues != 2 || entry.Features != 1 || entry.Documents != 1 || entry.Comments != 1 {
+		t.Fatalf("unexpected counts: %+v", entry)
+	}
+
+	idx, err := ReadIndex(tdir)
+	if err != nil {
+		t.Fatalf("read index: %v", err)
+	}
+	if idx.SchemaVersion != IndexSchemaVersion {
+		t.Fatalf("schema version = %d, want %d", idx.SchemaVersion, IndexSchemaVersion)
+	}
+	if len(idx.Repos) != 1 || idx.Repos[0].Prefix != "MINI" {
+		t.Fatalf("round-trip lost data: %+v", idx)
+	}
+
+	// Re-export. Index bytes must match exactly so steady-state
+	// `bacio sync` doesn't churn a commit per run.
+	first, err := os.ReadFile(filepath.Join(tdir, IndexFilename))
+	if err != nil {
+		t.Fatalf("read first: %v", err)
+	}
+	if _, err := eng.Export(context.Background(), tdir); err != nil {
+		t.Fatalf("export 2: %v", err)
+	}
+	second, err := os.ReadFile(filepath.Join(tdir, IndexFilename))
+	if err != nil {
+		t.Fatalf("read second: %v", err)
+	}
+	if string(first) != string(second) {
+		t.Fatalf("index.yaml not byte-stable across runs:\nfirst:\n%s\nsecond:\n%s", first, second)
+	}
+}

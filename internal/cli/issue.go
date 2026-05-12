@@ -3,8 +3,10 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -14,6 +16,7 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/inputio"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
+	"github.com/mrgeoffrich/bacio/internal/sync"
 )
 
 func newIssueCmd() *cobra.Command {
@@ -116,6 +119,7 @@ func issueListCmd() *cobra.Command {
 		stateCSV        string
 		featureSlug     string
 		tags            []string
+		repoPrefix      string
 		allRepos        bool
 		withDescription bool
 	)
@@ -123,6 +127,9 @@ func issueListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List issues (descriptions are stripped by default; pass --with-description to include them)",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if root, ok := resolveSyncRepoRoot(); ok {
+				return listIssuesFromSyncRepo(root, repoPrefix, allRepos, stateCSV, featureSlug, tags, withDescription)
+			}
 			c, err := openClient()
 			if err != nil {
 				return err
@@ -162,9 +169,154 @@ func issueListCmd() *cobra.Command {
 	cmd.Flags().StringVar(&stateCSV, "state", "", "comma-separated states to filter (e.g. todo,in_progress)")
 	cmd.Flags().StringVarP(&featureSlug, "feature", "f", "", "limit to a feature")
 	cmd.Flags().StringSliceVar(&tags, "tag", nil, "require this tag (repeatable; AND semantics)")
+	cmd.Flags().StringVar(&repoPrefix, "repo", "", "limit to a specific repo prefix; required when run inside a sync repo (or pass --all-repos)")
 	cmd.Flags().BoolVar(&allRepos, "all-repos", false, "search across all tracked repos")
 	cmd.Flags().BoolVar(&withDescription, "with-description", false, "include each issue's full description in JSON output (off by default to keep responses small)")
 	return cmd
+}
+
+// listIssuesFromSyncRepo serves `bacio issue list` when run inside a
+// sync repo. Reads issue.yaml + description.md off disk (no DB) and
+// pipes results through the existing []*model.Issue renderer.
+func listIssuesFromSyncRepo(syncRoot, repoPrefix string, allRepos bool, stateCSV, featureSlug string, tags []string, withDescription bool) error {
+	prefixes, err := resolveSyncRepoListPrefixes(syncRoot, repoPrefix, allRepos)
+	if err != nil {
+		return err
+	}
+
+	stateFilter := map[model.State]struct{}{}
+	if stateCSV != "" {
+		for _, raw := range strings.Split(stateCSV, ",") {
+			st, err := model.ParseState(raw)
+			if err != nil {
+				return err
+			}
+			stateFilter[st] = struct{}{}
+		}
+	}
+	tagFilter, err := store.NormalizeTags(tags)
+	if err != nil {
+		return err
+	}
+
+	var issues []*model.Issue
+	for _, prefix := range prefixes {
+		parsed, err := sync.ListIssuesOnDisk(syncRoot, prefix)
+		if err != nil {
+			return err
+		}
+		for _, p := range parsed {
+			state, err := model.ParseState(p.State)
+			if err != nil {
+				return fmt.Errorf("%s-%d: %w", prefix, p.Number, err)
+			}
+			if len(stateFilter) > 0 {
+				if _, ok := stateFilter[state]; !ok {
+					continue
+				}
+			}
+			if featureSlug != "" {
+				if p.Feature == nil || p.Feature.Label != featureSlug {
+					continue
+				}
+			}
+			if len(tagFilter) > 0 && !containsAllTags(p.Tags, tagFilter) {
+				continue
+			}
+			iss := &model.Issue{
+				UUID:      p.UUID,
+				Number:    p.Number,
+				Key:       fmt.Sprintf("%s-%d", prefix, p.Number),
+				Title:     p.Title,
+				State:     state,
+				Assignee:  p.Assignee,
+				Tags:      p.Tags,
+				CreatedAt: p.CreatedAt,
+				UpdatedAt: p.UpdatedAt,
+			}
+			if p.Feature != nil {
+				iss.FeatureSlug = p.Feature.Label
+			}
+			if withDescription {
+				body, err := sync.ReadIssueDescription(syncRoot, prefix, iss.Key)
+				if err != nil {
+					return err
+				}
+				iss.Description = body
+			}
+			issues = append(issues, iss)
+		}
+	}
+	return emit(issues)
+}
+
+// containsAllTags reports whether `haystack` contains every tag in
+// `needles` (AND semantics, matching the local-DB filter).
+func containsAllTags(haystack, needles []string) bool {
+	have := make(map[string]struct{}, len(haystack))
+	for _, t := range haystack {
+		have[t] = struct{}{}
+	}
+	for _, n := range needles {
+		if _, ok := have[n]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// resolveSyncRepoListPrefixes returns the prefixes a sync-repo-mode
+// list command should iterate. `--all-repos` reads every prefix from
+// index.yaml (or, on older sync repos, the repos/ folder); a
+// `--repo <PREFIX>` flag pins to a single one. Without either, the
+// caller gets a friendly error pointing at the right flag plus the
+// available prefixes.
+func resolveSyncRepoListPrefixes(syncRoot, repoPrefix string, allRepos bool) ([]string, error) {
+	if repoPrefix != "" {
+		return []string{strings.ToUpper(repoPrefix)}, nil
+	}
+	available, err := syncRepoPrefixes(syncRoot)
+	if err != nil {
+		return nil, err
+	}
+	if allRepos {
+		return available, nil
+	}
+	hint := strings.Join(available, ", ")
+	if hint == "" {
+		hint = "(none yet)"
+	}
+	return nil, fmt.Errorf("inside a sync repo: pass --repo <PREFIX> (one of: %s) or --all-repos", hint)
+}
+
+// syncRepoPrefixes reads index.yaml when present (the fast path) and
+// falls back to scanning repos/ for older sync repos.
+func syncRepoPrefixes(syncRoot string) ([]string, error) {
+	idx, err := sync.ReadIndex(syncRoot)
+	if err != nil && !errors.Is(err, sync.ErrNoIndex) {
+		return nil, err
+	}
+	if idx != nil {
+		out := make([]string, 0, len(idx.Repos))
+		for _, e := range idx.Repos {
+			out = append(out, e.Prefix)
+		}
+		return out, nil
+	}
+	entries, err := os.ReadDir(filepath.Join(syncRoot, "repos"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			out = append(out, e.Name())
+		}
+	}
+	return out, nil
 }
 
 func issueShowCmd() *cobra.Command {
