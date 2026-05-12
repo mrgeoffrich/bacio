@@ -58,7 +58,7 @@
   //  - bacioResize: xterm.js resize → Bubble Tea WindowSizeMsg
   window.bacioOnStdout = (chunk) => term.write(chunk);
   window.bacioReady = () => {
-    document.getElementById('status').textContent = 'ready · phase 3';
+    document.getElementById('status').textContent = 'ready · phase 4';
     // Send the initial size now that Go has set up the resize bridge.
     if (window.bacioResize) window.bacioResize(term.cols, term.rows);
   };

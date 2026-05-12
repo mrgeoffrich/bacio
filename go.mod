@@ -8,10 +8,11 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
 	github.com/google/uuid v1.6.0
 	github.com/invopop/jsonschema v0.14.0
+	github.com/ncruces/go-sqlite3 v0.34.1
 	github.com/spf13/cobra v1.10.2
 	go.yaml.in/yaml/v4 v4.0.0-rc.2
-	golang.org/x/sys v0.42.0
-	golang.org/x/text v0.30.0
+	golang.org/x/sys v0.44.0
+	golang.org/x/text v0.37.0
 	modernc.org/sqlite v1.50.0
 )
 
@@ -40,7 +41,9 @@ require (
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/reflow v0.3.0 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect
+	github.com/ncruces/go-sqlite3-wasm/v2 v2.2.35301 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
+	github.com/ncruces/julianday v1.0.0 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
