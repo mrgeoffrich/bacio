@@ -1,17 +1,24 @@
-// Package wasm provides helpers used only by the browser-side build
-// (GOOS=js GOARCH=wasm). The big-ticket item here is Seed, which fills
-// a fresh in-memory store with a believable, lived-in gelato shop:
-// 4 features, ~38 issues spread across all states, assignees, tags,
-// review-note comments on done items, attached PRs, and several
-// linked documents.
+// Package wasm carries the gelato demo seed used by two callers:
 //
-// Read-only. The TUI demo doesn't write back into the store after this
-// runs; any state changes the user makes by pressing keys are scoped
-// to the page load.
+//   - The browser build (cmd/bacio-wasm, GOOS=js GOARCH=wasm) seeds a
+//     fresh in-memory store before handing it to the TUI.
+//   - The CLI `bacio demo` command seeds a synthetic repo in the
+//     local SQLite store so the developer can stress-test the UI
+//     against realistic volumes of issues, features, comments, and
+//     docs.
+//
+// The base seed is a believable, lived-in gelato shop: 4 features,
+// ~38 issues spread across all states, assignees, tags, review-note
+// comments on done items, attached PRs, and 9 linked documents.
+// SeedOptions.Copies > 1 duplicates the features/issues/docs N times
+// with -copyN suffixes so the same store can hold an order of
+// magnitude more rows without hand-authoring new content.
 package wasm
 
 import (
 	"fmt"
+	"path/filepath"
+	"strings"
 
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
@@ -601,25 +608,86 @@ her Italian class.
 
 // ----- Seed ----------------------------------------------------------------
 
+// SeedOptions controls which synthetic repo the seed lands in and
+// how many duplicate passes of the gelato content to load. Zero
+// values default to the legacy WASM-demo behaviour (BACIO prefix,
+// single copy) so callers that don't care can pass SeedOptions{}.
+type SeedOptions struct {
+	// Prefix is the 4-char repo prefix. Empty defaults to "BACIO".
+	Prefix string
+	// Name is the repo's display name. Empty defaults to "gelateria-bacio".
+	Name string
+	// Path is the repo's filesystem path. Empty defaults to a synthetic
+	// "/Users/you/code/bacio-gelato" (kept for backward compatibility
+	// with the WASM demo). The CLI demo command supplies a synthetic
+	// path namespaced by prefix so multiple demo repos can coexist.
+	Path string
+	// Copies controls how many times to layer the gelato feature/issue/doc
+	// set over the same repo. Values <=1 mean "single copy" (the base
+	// seed). Higher values append "-copyN" / " (copy N)" suffixes to
+	// slugs, titles, and filenames so the rows stay unique.
+	Copies int
+}
+
 // Seed populates s with the lived-in gelato demo data. Returns the
 // synthetic repo so callers can pass it into tui.NewModel.
-func Seed(s *store.Store) (*model.Repo, error) {
-	repo, err := s.CreateRepo("BACIO", "gelateria-bacio", "/Users/you/code/bacio-gelato", "")
+func Seed(s *store.Store, opts SeedOptions) (*model.Repo, error) {
+	prefix := opts.Prefix
+	if prefix == "" {
+		prefix = "BACIO"
+	}
+	name := opts.Name
+	if name == "" {
+		name = "gelateria-bacio"
+	}
+	path := opts.Path
+	if path == "" {
+		path = "/Users/you/code/bacio-gelato"
+	}
+	copies := opts.Copies
+	if copies < 1 {
+		copies = 1
+	}
+
+	repo, err := s.CreateRepo(prefix, name, path, "")
 	if err != nil {
 		return nil, fmt.Errorf("seed: create repo: %w", err)
 	}
 
-	// Features first so we can resolve slugs while creating issues.
+	for i := 0; i < copies; i++ {
+		if err := seedOnePass(s, repo, i); err != nil {
+			return nil, err
+		}
+	}
+
+	// Audit-log events are only written for the base pass — they
+	// reference specific issue titles and would produce noisy
+	// duplicates if replayed per copy. They populate the History tab
+	// with realistic-looking lines for the user clicking around.
+	seedHistoryEvents(s, repo)
+
+	return repo, nil
+}
+
+// seedOnePass writes one layer of features, issues, comments, PRs, and
+// docs. copyIdx=0 keeps the original slugs/titles/filenames; copyIdx>=1
+// suffixes them with -copyN / " (copy N)" so a multi-pass seed avoids
+// UNIQUE collisions on (repo, slug), (repo, filename), and the seed's
+// own issue-title-keyed link map.
+func seedOnePass(s *store.Store, repo *model.Repo, copyIdx int) error {
+	slugSfx, titleSfx, fileSfx := copySuffixes(copyIdx)
+
 	featureIDBySlug := map[string]int64{}
 	for _, f := range gelatoFeatures {
-		feat, err := s.CreateFeature(repo.ID, f.slug, f.title, f.desc)
+		slug := f.slug + slugSfx
+		title := f.title + titleSfx
+		feat, err := s.CreateFeature(repo.ID, slug, title, f.desc)
 		if err != nil {
-			return nil, fmt.Errorf("seed: create feature %q: %w", f.slug, err)
+			return fmt.Errorf("seed: create feature %q: %w", slug, err)
 		}
 		featureIDBySlug[f.slug] = feat.ID
 	}
 
-	// Issues, capturing IDs by title for later linking from documents.
 	issueIDByTitle := map[string]int64{}
 	for _, iss := range gelatoIssues {
 		var featureID *int64
@@ -628,45 +696,97 @@ func Seed(s *store.Store) (*model.Repo, error) {
 				featureID = &id
 			}
 		}
-		created, err := s.CreateIssue(repo.ID, featureID, iss.title, iss.desc, iss.state, iss.tags)
+		title := iss.title + titleSfx
+		created, err := s.CreateIssue(repo.ID, featureID, title, iss.desc, iss.state, iss.tags)
 		if err != nil {
-			return nil, fmt.Errorf("seed: create issue %q: %w", iss.title, err)
+			return fmt.Errorf("seed: create issue %q: %w", title, err)
 		}
 		issueIDByTitle[iss.title] = created.ID
 
 		if iss.assignee != "" {
 			if err := s.SetIssueAssignee(created.ID, iss.assignee); err != nil {
-				return nil, fmt.Errorf("seed: assign issue %q: %w", iss.title, err)
+				return fmt.Errorf("seed: assign issue %q: %w", title, err)
 			}
 		}
 		for _, url := range iss.prs {
 			if _, err := s.AttachPR(created.ID, url); err != nil {
-				return nil, fmt.Errorf("seed: attach PR to %q: %w", iss.title, err)
+				return fmt.Errorf("seed: attach PR to %q: %w", title, err)
 			}
 		}
 		for _, c := range iss.comments {
 			if _, err := s.CreateComment(created.ID, c.author, c.body); err != nil {
-				return nil, fmt.Errorf("seed: create comment on %q: %w", iss.title, err)
+				return fmt.Errorf("seed: create comment on %q: %w", title, err)
 			}
 		}
 	}
 
-	// Recorded history events to populate the History tab — these are
-	// the kinds of audit-log lines bacio normally writes via the CLI.
-	// We don't need to back-date them; current-time entries read as
-	// "freshly active" to anyone clicking around.
+	for _, d := range gelatoDocs {
+		filename := suffixFilename(d.filename, fileSfx)
+		doc, err := s.CreateDocument(repo.ID, filename, d.docType, d.body, "")
+		if err != nil {
+			return fmt.Errorf("seed: create doc %q: %w", filename, err)
+		}
+		if d.linkFeature != "" {
+			if id, ok := featureIDBySlug[d.linkFeature]; ok {
+				if _, err := s.LinkDocument(doc.ID, store.LinkTarget{FeatureID: &id}, d.linkDesc); err != nil {
+					return fmt.Errorf("seed: link doc %q to feature %q: %w", filename, d.linkFeature, err)
+				}
+			}
+		}
+		if d.linkIssue != "" {
+			if id, ok := issueIDByTitle[d.linkIssue]; ok {
+				if _, err := s.LinkDocument(doc.ID, store.LinkTarget{IssueID: &id}, d.linkDesc); err != nil {
+					return fmt.Errorf("seed: link doc %q to issue %q: %w", filename, d.linkIssue, err)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// copySuffixes returns the slug/title/filename suffix for the given
+// copy index. Copy 0 is the base pass and uses no suffix; copies 1..
+// append "-copy2", " (copy 2)", "-copy2" respectively (the +1 keeps
+// the user-visible numbering 1-based so "copy 2" reads as "the second
+// copy" rather than "the copy with index 1").
+func copySuffixes(copyIdx int) (slug, title, file string) {
+	if copyIdx == 0 {
+		return "", "", ""
+	}
+	n := copyIdx + 1
+	return fmt.Sprintf("-copy%d", n),
+		fmt.Sprintf(" (copy %d)", n),
+		fmt.Sprintf("-copy%d", n)
+}
+
+// suffixFilename inserts the copy suffix before the file extension.
+// "winter-2026-flavours.md" + "-copy2" → "winter-2026-flavours-copy2.md".
+// Files without an extension just get the suffix appended.
+func suffixFilename(name, sfx string) string {
+	if sfx == "" {
+		return name
+	}
+	ext := filepath.Ext(name)
+	stem := strings.TrimSuffix(name, ext)
+	return stem + sfx + ext
+}
+
+// seedHistoryEvents writes a representative slice of audit-log lines
+// for the base pass. Labels are prefixed with repo.Prefix so the
+// entries make sense regardless of which prefix the caller picked.
+func seedHistoryEvents(s *store.Store, repo *model.Repo) {
 	recordEvent := func(actor, op, kind, label, details string) {
 		_ = s.RecordHistory(model.HistoryEntry{
 			RepoID: &repo.ID, RepoPrefix: repo.Prefix,
 			Actor: actor, Op: op, Kind: kind, TargetLabel: label, Details: details,
 		})
 	}
-	recordEvent(authorGeoff, "init", "repo", "gelateria-bacio", "prefix=BACIO")
+	recordEvent(authorGeoff, "init", "repo", repo.Name, "prefix="+repo.Prefix)
 	recordEvent(authorAgentClaude, "feature.add", "feature", "winter-2026-flavours", "")
-	recordEvent(authorAgentClaude, "issue.add", "issue", "BACIO-13 Cioccolato", "feature=winter-2026-flavours")
-	recordEvent(authorAgentClaude, "issue.add", "issue", "BACIO-19 Bacio", "feature=winter-2026-flavours")
-	recordEvent(authorMarco, "issue.state", "issue", "BACIO-19 Bacio", "todo → in_progress")
-	recordEvent(authorMarco, "issue.assign", "issue", "BACIO-19 Bacio", "→ @marco")
+	recordEvent(authorAgentClaude, "issue.add", "issue", repo.Prefix+"-13 Cioccolato", "feature=winter-2026-flavours")
+	recordEvent(authorAgentClaude, "issue.add", "issue", repo.Prefix+"-19 Bacio", "feature=winter-2026-flavours")
+	recordEvent(authorMarco, "issue.state", "issue", repo.Prefix+"-19 Bacio", "todo → in_progress")
+	recordEvent(authorMarco, "issue.assign", "issue", repo.Prefix+"-19 Bacio", "→ @marco")
 	recordEvent(authorAgentClaude, "feature.add", "feature", "valentines-2026-promo", "")
 	recordEvent(authorAnna, "issue.add", "issue", "Duo cup sleeve design", "feature=valentines-2026-promo")
 	recordEvent(authorAnna, "pr.attach", "issue", "Sleeve print run — 2000 units", "https://github.com/gelateria-bacio/promo-assets/pull/12")
@@ -692,28 +812,4 @@ func Seed(s *store.Store) (*model.Repo, error) {
 	recordEvent(authorMarco, "issue.state", "issue", "Cioccolato", "fat content 11.2% — re-batch Thu 09:00")
 	recordEvent(authorAgentClaude, "comment.add", "issue", "Cioccolato", "scheduled re-batch + QA panel reminder for Thu 14:00")
 	recordEvent(authorGeoff, "comment.add", "issue", "Pistacchio", "fallback plan locked: Almería pistachios at €29/kg if Bronte deal falls through")
-
-	// Documents, with optional links to features or issues.
-	for _, d := range gelatoDocs {
-		doc, err := s.CreateDocument(repo.ID, d.filename, d.docType, d.body, "")
-		if err != nil {
-			return nil, fmt.Errorf("seed: create doc %q: %w", d.filename, err)
-		}
-		if d.linkFeature != "" {
-			if id, ok := featureIDBySlug[d.linkFeature]; ok {
-				if _, err := s.LinkDocument(doc.ID, store.LinkTarget{FeatureID: &id}, d.linkDesc); err != nil {
-					return nil, fmt.Errorf("seed: link doc %q to feature %q: %w", d.filename, d.linkFeature, err)
-				}
-			}
-		}
-		if d.linkIssue != "" {
-			if id, ok := issueIDByTitle[d.linkIssue]; ok {
-				if _, err := s.LinkDocument(doc.ID, store.LinkTarget{IssueID: &id}, d.linkDesc); err != nil {
-					return nil, fmt.Errorf("seed: link doc %q to issue %q: %w", d.filename, d.linkIssue, err)
-				}
-			}
-		}
-	}
-
-	return repo, nil
 }

@@ -123,6 +123,15 @@ func renderText(w io.Writer, v any) error {
 		printSyncVerifyResult(w, x)
 	case syncInspectResult:
 		printSyncInspectResult(w, x)
+	case demoSeedResult:
+		fmt.Fprintf(w, "Seeded demo repo %s (%s) at %s\n", x.Repo.Prefix, x.Repo.Name, x.Repo.Path)
+		fmt.Fprintf(w, "  copies:    %d\n", x.Copies)
+		fmt.Fprintf(w, "  features:  %d\n", x.Features)
+		fmt.Fprintf(w, "  issues:    %d\n", x.Issues)
+		fmt.Fprintf(w, "  comments:  %d\n", x.Comments)
+		fmt.Fprintf(w, "  documents: %d\n", x.Documents)
+		fmt.Fprintf(w, "\nTry: bacio tui --repo %s\n", x.Repo.Prefix)
+		fmt.Fprintln(w, "     bacio issue list --all-repos")
 	case message:
 		fmt.Fprintln(w, x.Text)
 	default:
