@@ -76,9 +76,11 @@ bacio issue edit MYPR-3 --feature auth-rewrite
 
 ```bash
 bacio link MYPR-7 blocks MYPR-5
-bacio link MYPR-7 relates_to MYPR-12
+bacio link MYPR-7 relates-to MYPR-12       # 'relates_to' is also accepted on input
 bacio unlink MYPR-7 MYPR-5
 ```
+
+There's no `blocked-by` type to create — relations are one-directional. To say "MYPR-5 is blocked by MYPR-7", create `bacio link MYPR-7 blocks MYPR-5`; the reverse view shows up automatically wherever bacio renders relations.
 
 Relations show up in `bacio issue brief`, in the TUI card overlay, and in JSON output of `bacio issue show -o json`.
 
@@ -123,10 +125,12 @@ bacio doc edit design.md --from-path /tmp/design.md
 ```bash
 bacio history                              # most recent
 bacio history --since 1d
-bacio history --user Geoff
-bacio history --op issue.add
-bacio history --target MYPR-3
+bacio history --user-filter Geoff          # filter by actor
+bacio history --op issue.create
+bacio history --kind issue --since 1w      # filter by entity kind
 ```
+
+`bacio history` has no `--target` filter — narrow by kind, op, actor, or time range, or pipe `-o json` through `jq` to filter on `target_label`. Note that the actor-filter flag is `--user-filter`; the persistent `--user` records who's running the call but doesn't filter the output.
 
 Or open the TUI and switch to tab `4` History.
 

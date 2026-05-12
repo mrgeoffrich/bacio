@@ -24,16 +24,16 @@ bacio re-applies its schema (`CREATE TABLE IF NOT EXISTS …`) on every DB open.
 Every mutation records a row:
 
 - **Actor** — `--user <name>`. Defaults to your OS user. AI agents are expected to pass `--user <agent-name>` so attribution stays clean.
-- **Op** — the canonical operation name (`issue.add`, `feature.edit`, `sync.renumber`, …). Mirrors the JSON schema names.
+- **Op** — the canonical operation name (`issue.create`, `feature.update`, `sync.renumber`, …). Closely related to the JSON schema names but uses CRUD-flavoured verbs: schemas expose `bacio issue add` as `issue.add` while the corresponding audit row records `issue.create`.
 - **Target** — the entity touched (`MINI-42`, the feature slug, the document filename, …).
 - **Details** — a free-text blob with context (the title that was set, the cascade counts, the source phrase, …).
 - **Timestamps** — created-at on the row itself.
 
 You can read the audit log:
 
-- **From the TUI** — the History tab, last-first.
-- **From the CLI** — `bacio history`, with filters like `--since 1d`, `--user claude`, `--op issue.add`, `--target MINI-12`.
-- **Inside an agent prompt** — *"what did Claude do yesterday?"* triggers `bacio history -o json --since 1d --user agent-claude`.
+- **From the TUI** — the History tab, newest-first.
+- **From the CLI** — `bacio history`, with filters like `--since 1d`, `--user-filter claude`, `--op issue.create`, plus `--kind` and `--from`/`--to`. `--user` on a `bacio history` call sets the actor recorded on the (read-only) call rather than filtering; use `--user-filter` to filter.
+- **Inside an agent prompt** — *"what did Claude do yesterday?"* triggers `bacio history -o json --since 1d --user-filter agent-claude`.
 
 ## Retention: 60 days, by default
 
@@ -47,7 +47,7 @@ Mutations are recorded in dotted op form (`<entity>.<verb>`):
 
 | Entity | Verbs |
 |---|---|
-| `repo` | `create` |
+| `repo` | `create`, `delete`, `upgrade_phantom` |
 | `feature` | `create`, `update`, `delete` |
 | `issue` | `create`, `update`, `state`, `assign`, `claim`, `delete` |
 | `comment` | `add` |
@@ -55,9 +55,13 @@ Mutations are recorded in dotted op form (`<entity>.<verb>`):
 | `pr` | `attach`, `detach` |
 | `tag` | `add`, `remove` |
 | `document` | `create`, `update`, `rename`, `delete`, `link`, `unlink` |
-| `sync` | `renumber`, `rename` |
+| `sync` | `run`, `init`, `clone`, `import`, `renumber`, `rename`, `delete` |
 
-`bacio doc upsert` records `document.create` or `document.update` depending on whether it created the row.
+Notes:
+
+- `bacio doc upsert` records `document.create` or `document.update` depending on whether it created the row.
+- `bacio issue unassign` reuses `issue.assign` (with an empty assignee) — there's no separate `issue.unassign` op.
+- `repo.upgrade_phantom` is emitted by `bacio sync` when a placeholder repo (a prefix that existed only in the synced YAML) gets a real local working tree.
 
 **Reads are not logged.** `*.list`, `*.show`, `*.brief` don't produce audit rows. `--dry-run` doesn't either — it explicitly bypasses the write path.
 

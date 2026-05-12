@@ -19,9 +19,9 @@ BACIO_API_TOKEN=T bacio api                # token via env
 |---|---|---|
 | `--addr` | `127.0.0.1:5320` | Bind address as `host:port`. |
 | `--port` | — | Shorthand to override only the port (keeps host from `--addr`). |
-| `--token` | — | Require `Authorization: Bearer <token>` on every request. Falls back to `BACIO_API_TOKEN`. |
+| `--token` | — | Require `Authorization: Bearer <token>` on every request **except `/healthz`** (so liveness probes never need to know the token). Falls back to `BACIO_API_TOKEN`. |
 
-Plus all [global flags](/reference/cli/index#global-flags).
+Plus all [global flags](/reference/cli/index#global-flags). One caveat: the persistent `--user` flag is silently ignored under `bacio api` — incoming requests carry their own actor via the `X-Actor` header (default `"api"`).
 
 Once running, point any client at the server — or set `BACIO_REMOTE` so other `bacio` calls go through the API instead of the local DB:
 

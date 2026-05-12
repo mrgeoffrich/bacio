@@ -19,13 +19,15 @@ The Board (tab `1`) is the kanban view of the current repo's issues. One column 
 
 | Key | Action |
 |---|---|
-| `h` / `l` | Previous / next column. |
-| `j` / `k` | Previous / next card in the focused column. |
+| `h` / `l` (or `left` / `right`) | Previous / next column. |
+| `j` / `k` (or `down` / `up`) | Previous / next card in the focused column. |
+| `g` / `home` | Jump to the first card in the focused column. |
+| `G` / `end` | Jump to the last card in the focused column. |
 | `enter` | Open the focused card's detail overlay. |
 | `c` | Open the column-visibility picker. |
 | `f` | Open the feature filter picker. |
-| `H` | Hide the focused column. |
-| `d` | Show detail inline. |
+| `H` | Hide the focused column (refuses if it's the last visible one). |
+| `d` | Toggle the inline detail pane. |
 | `r` | Reload from the database. |
 | `q` | Quit. |
 
@@ -39,9 +41,15 @@ A full-screen view of one card with three inner panes:
 - **Comments** — the threaded comment list.
 - **Attachments** — linked documents and attached PR URLs.
 
-`tab` cycles between panes. `j`/`k` scrolls within the active pane (or moves selection on Attachments). `g`/`G` jump top/bottom on the Description. `enter` on Attachments opens the focused attachment — for a document, that jumps to the [Docs tab](/reference/tui/docs) with the file open, and `esc` from there returns you to the Board.
+`tab` / `shift+tab` cycles between panes. `j`/`k` (or arrow keys) scrolls within the active pane (or moves selection on Attachments). `g`/`home` and `G`/`end` jump top/bottom on every pane. `pgdown`/`space` and `pgup` jump 10 lines on the Description and Comments panes.
 
-`esc` closes the overlay and returns focus to the card on the board.
+Pane-specific `enter`:
+
+- **Description** — closes the overlay.
+- **Comments** — opens every comment in a fullscreen scrollable view (`esc` returns to the overlay).
+- **Attachments** — opens the focused attachment. For a document, that jumps to the [Docs tab](/reference/tui/docs) with the file open; `esc` from there returns you to this card.
+
+`esc` (from any pane) closes the overlay and returns focus to the card on the board.
 
 ## The column picker (`c`)
 
@@ -50,9 +58,9 @@ A modal that lets you toggle which state columns are visible. Useful for hiding 
 | Key | Action |
 |---|---|
 | `j` / `k` | Move selection. |
-| `space` | Toggle the focused column. |
-| `a` | Show all. |
-| `n` | Hide all. |
+| `space` | Toggle the focused column (refuses to hide the last visible one). |
+| `a` | Show all columns. |
+| `n` | Minimise — keep only the first state visible. |
 | `esc` | Close. |
 
 Hidden columns persist per-repo (in `tui_settings(repo_id, key, value)`), so the next time you open the TUI you're back where you left off.
@@ -61,7 +69,13 @@ Hidden columns persist per-repo (in `tui_settings(repo_id, key, value)`), so the
 
 A modal that lets you filter the board by feature. Each row shows a feature name and its issue count; toggling hides that feature's issues from the board.
 
-Same controls as the column picker (`j`/`k`, `space`, `a`/`n`, `esc`).
+| Key | Action |
+|---|---|
+| `j` / `k` | Move selection. |
+| `space` | Toggle the focused feature. |
+| `a` | Show all features. |
+| `n` | Isolate — hide every feature except the focused one. |
+| `esc` | Close. |
 
 ## Background refresh
 

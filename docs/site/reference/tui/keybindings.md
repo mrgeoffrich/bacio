@@ -26,51 +26,73 @@ These work from any tab. Inside an overlay, `q` and digits still quit / switch t
 
 | Key | Action |
 |---|---|
-| `h` / `l` | Move between columns. |
-| `j` / `k` | Move between cards in the focused column. |
+| `h` / `l` (or `left` / `right`) | Move between columns. |
+| `j` / `k` (or `down` / `up`) | Move between cards in the focused column. |
+| `g` / `home` | Jump to the first card. |
+| `G` / `end` | Jump to the last card. |
 | `enter` | Open the focused card's detail overlay. |
 | `c` | Open the column-visibility picker. |
 | `f` | Open the feature filter picker. |
-| `H` | Hide the focused column. |
-| `d` | Show detail inline. |
+| `H` | Hide the focused column (refuses if it's the last visible one). |
+| `d` | Toggle the inline detail pane. |
 | `r` | Reload from the database. |
 | `q` | Quit. |
 
 ### Card overlay (open with `enter` on a card)
 
-Cycles through three inner panes — description, comments, attachments — via `tab`. Bindings depend on which pane is focused.
+Cycles through three inner panes — description, comments, attachments — via `tab` / `shift+tab`. Bindings depend on which pane is focused.
 
 | Key | Action |
 |---|---|
-| `tab` | Next pane (description → comments → attachments → description). |
-| `j` / `k` | Scroll within the active pane (or move selection on the attachments pane). |
-| `g` / `G` | Jump to top / bottom (description pane). |
-| `enter` | Open all comments full-screen (comments pane) / open the focused attachment (attachments pane). |
+| `tab` / `shift+tab` | Next / previous pane (description ↔ comments ↔ attachments). |
+| `j` / `k` (or `down` / `up`) | Scroll within the active pane (or move selection on the attachments pane). |
+| `g` / `home` | Jump to top. |
+| `G` / `end` | Jump to bottom. |
+| `pgdown` / `space` | Scroll down 10 lines (description / comments). |
+| `pgup` | Scroll up 10 lines (description / comments). |
+| `enter` (description) | Close the overlay. |
+| `enter` (comments) | Open all comments full-screen. |
+| `enter` (attachments) | Open the focused attachment (a document jumps to the Docs tab; PR URLs print). |
 | `esc` | Close the card overlay. |
 
 ### Comment overlay (full-screen comments view)
 
 | Key | Action |
 |---|---|
-| `j` / `k` | Scroll. |
-| `g` / `G` | Top / bottom. |
+| `j` / `k` (or `down` / `up`) | Scroll. |
+| `pgdown` / `space` | Scroll down 10 lines. |
+| `pgup` | Scroll up 10 lines. |
+| `g` / `home` | Top. |
+| `G` / `end` | Bottom. |
 | `esc` | Back to the card overlay. |
 
-### Column picker (open with `c`) and Feature picker (open with `f`)
+### Column picker (open with `c`)
 
 | Key | Action |
 |---|---|
 | `j` / `k` | Move selection. |
-| `space` | Toggle the focused item. |
-| `a` | Select all. |
-| `n` | Select none. |
+| `space` | Toggle the focused column (refuses to hide the last visible one). |
+| `a` | Show all columns. |
+| `n` | Minimise — keep only the first state visible. |
+| `esc` | Close the picker. |
+
+### Feature picker (open with `f`)
+
+| Key | Action |
+|---|---|
+| `j` / `k` | Move selection. |
+| `space` | Toggle the focused feature. |
+| `a` | Show all features. |
+| `n` | Isolate — hide every feature except the focused one. |
 | `esc` | Close the picker. |
 
 ## Features tab
 
 | Key | Action |
 |---|---|
-| `j` / `k` | Move between features. |
+| `j` / `k` (or `down` / `up`) | Move between features. |
+| `g` / `home` | First feature. |
+| `G` / `end` | Last feature. |
 | `enter` | Open the focused feature's overlay. |
 | `r` | Reload. |
 | `q` | Quit. |
@@ -79,15 +101,18 @@ Cycles through three inner panes — description, comments, attachments — via 
 
 | Key | Action |
 |---|---|
-| `j` / `k` | Scroll. |
-| `g` / `G` | Top / bottom. |
-| `esc` | Close. |
+| `j` / `k` (or `down` / `up`) | Scroll. |
+| `pgdown` / `space` | Scroll down 10 lines. |
+| `pgup` | Scroll up 10 lines. |
+| `g` / `home` | Top. |
+| `G` / `end` | Bottom. |
+| `esc` / `enter` | Close. |
 
 ## Docs tab
 
 | Key | Action |
 |---|---|
-| `j` / `k` | Move between documents. |
+| `j` / `k` (or `down` / `up`) | Move between documents. |
 | `enter` | Open the focused document in the full-screen reader. |
 | `r` | Reload. |
 | `q` | Quit. |
@@ -96,9 +121,12 @@ Cycles through three inner panes — description, comments, attachments — via 
 
 | Key | Action |
 |---|---|
-| `j` / `k` | Scroll. |
-| `g` / `G` | Top / bottom (`home` and `end` also work). |
-| `esc` | Close. |
+| `j` / `k` (or `down` / `up`) | Scroll. |
+| `pgdown` / `space` | Scroll down 10 lines. |
+| `pgup` | Scroll up 10 lines. |
+| `g` / `home` | Top. |
+| `G` / `end` | Bottom. |
+| `esc` / `enter` | Close. |
 
 Cross-tab note: when a card's *Linked documents* attachment is opened (via `enter` on the attachments pane), the TUI jumps to the Docs tab with that file selected and remembers the original tab so `esc` returns you there.
 
@@ -106,8 +134,11 @@ Cross-tab note: when a card's *Linked documents* attachment is opened (via `ente
 
 | Key | Action |
 |---|---|
-| `j` / `k` | Scroll. |
-| `g` / `G` | Top / bottom. |
+| `j` / `k` (or `down` / `up`) | Scroll. |
+| `pgdown` / `space` | Scroll down 10 lines. |
+| `pgup` | Scroll up 10 lines. |
+| `g` / `home` | Top. |
+| `G` / `end` | Bottom. |
 | `r` | Reload. |
 | `q` | Quit. |
 

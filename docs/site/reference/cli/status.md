@@ -1,6 +1,6 @@
 ---
 title: bacio status
-description: One-screen summary of the current repo — prefix, counts by state, recent activity.
+description: One-screen summary of the current repo — prefix, DB path, feature/issue counts by state, and the next issue key.
 ---
 
 # `bacio status`

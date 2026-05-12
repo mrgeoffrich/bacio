@@ -1,6 +1,6 @@
 ---
 title: bacio link / unlink
-description: Connect issues with typed relationships — blocks, blocked-by, relates-to.
+description: Connect issues with typed relationships — blocks, relates-to, duplicate-of (with blocked-by surfaced as the implicit inverse).
 ---
 
 # `bacio link` / `bacio unlink`

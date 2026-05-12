@@ -15,11 +15,10 @@ The flag path is the densest filter surface. Compose freely:
 bacio issue list --state in_progress
 bacio issue list --state todo --tag P1
 bacio issue list --feature auth-rewrite
-bacio issue list --assignee Geoff
 bacio issue list --state in_progress --all-repos
 ```
 
-Lean by default — descriptions stripped. Add `--with-description` if you actually need bodies.
+Lean by default — descriptions stripped. Add `--with-description` if you actually need bodies. `bacio issue list` doesn't have a built-in `--assignee` filter — pipe `-o json` through `jq` (e.g. `jq '.[] | select(.assignee == "Geoff")'`) for that one.
 
 For JSON consumers (scripts, agents):
 
@@ -31,13 +30,13 @@ bacio issue list -o json --state in_progress | jq '.[] | .key + "  " + .title'
 
 ```bash
 bacio history --since 1d
-bacio history --user agent-claude
-bacio history --op issue.add
-bacio history --target MYPR-3
+bacio history --user-filter agent-claude   # filter by actor
+bacio history --op issue.create
+bacio history --kind issue --since 1w
 bacio history --all-repos --since 1d
 ```
 
-Combine freely. The `--since` flag accepts durations like `1h`, `2d`, `1w`.
+Combine freely. The `--since` flag accepts durations like `1h`, `2d`, `1w`. `bacio history` doesn't have a `--target` filter — narrow by `--kind` / `--op` / `--user-filter` / time range, or `jq` the JSON output on `target_label` if you need a specific target. The persistent `--user` records who's running the call rather than filtering output; the filter flag is `--user-filter`.
 
 ## TUI: the column picker (`c`)
 
@@ -51,7 +50,7 @@ Also on the Board, hit `f` to open the feature-filter picker. Each row shows a f
 
 ## TUI: in-tab filtering on Features, Docs, History
 
-These tabs are scroll-and-select — there's no key-driven filter inside them. Use the CLI for surgical queries (`bacio feature list --search foo`-style flags are documented per-command), then jump to the TUI for visual context.
+These tabs are scroll-and-select — there's no key-driven filter inside them. Use the CLI for surgical queries (`bacio feature list`, `bacio doc list --type ...`, `bacio history --since 1d --user-filter ...` and friends), or pipe `-o json | jq` for anything more bespoke, then jump back to the TUI for visual context.
 
 ## Full-text search via the sync repo
 
