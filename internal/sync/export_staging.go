@@ -124,6 +124,15 @@ func (e *Engine) ExportStaged(ctx context.Context, gitRepo *git.Repo) (*StagedEx
 		return nil, fmt.Errorf("apply ops: %w", err)
 	}
 
+	// Refresh the top-level index.yaml at the working-tree root. The
+	// staging diff is scoped to repos/, so the index.yaml written into
+	// staging by the Export call above was discarded. Re-emit it at
+	// the real target so it travels in the same commit as any repos/
+	// changes.
+	if err := WriteIndex(target, res.Index); err != nil {
+		return nil, fmt.Errorf("write index: %w", err)
+	}
+
 	cleanup = true // explicit; defer above will remove
 	return staged, nil
 }

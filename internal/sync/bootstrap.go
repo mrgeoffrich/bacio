@@ -50,10 +50,19 @@ type InitResult struct {
 	CommitSHA string `json:"commit_sha,omitempty"`
 	Pushed    bool   `json:"pushed"`
 
-	// First-export counts (from the underlying ExportResult). One
-	// pointer is enough; we don't need a separate StagedExportResult
-	// because init is always a full export into an empty tree.
+	// Attached is true when init ran against a pre-existing sync repo
+	// (or an existing `git init`-only folder) rather than bootstrapping
+	// from scratch. Lets callers distinguish "this project just joined
+	// an existing sync repo" from "this is the first project here".
+	Attached bool `json:"attached,omitempty"`
+
+	// Export counts. Always populated.
 	Export *ExportResult `json:"export,omitempty"`
+
+	// Import counts. Only populated in attach mode (when init pulls
+	// data from an existing sync repo into the local DB before
+	// re-exporting).
+	Import *ImportResult `json:"import,omitempty"`
 }
 
 // CloneResult is the structured outcome of `bacio sync clone`.
@@ -105,12 +114,18 @@ func (e *Engine) InitSyncRepo(ctx context.Context, projectRoot string, opts Init
 		return nil, fmt.Errorf("project root %s is not a git repo: %w", projectRoot, err)
 	}
 
-	// LocalPath either doesn't exist or is empty.
-	if err := requireEmptyOrMissing(opts.LocalPath); err != nil {
+	// Classify the target path. Each state takes a different bootstrap
+	// path; targetIncompatible is the explicit refusal case.
+	state, err := classifyInitTarget(opts.LocalPath)
+	if err != nil {
 		return nil, err
 	}
+	if state == targetIncompatible {
+		return nil, fmt.Errorf("%s is not empty and not an bacio sync repo; remove it or pick another path", opts.LocalPath)
+	}
+	attached := state == targetExistingSyncRepo || state == targetEmptyGit
 
-	res := &InitResult{LocalPath: opts.LocalPath, Remote: opts.Remote}
+	res := &InitResult{LocalPath: opts.LocalPath, Remote: opts.Remote, Attached: attached}
 
 	if e.DryRun {
 		// Build a full Export against a temp dir so the user sees
@@ -129,60 +144,118 @@ func (e *Engine) InitSyncRepo(ctx context.Context, projectRoot string, opts Init
 		return res, nil
 	}
 
-	// 1. git init at LocalPath; write the sentinel + .gitattributes.
-	syncRepo, err := git.Init(opts.LocalPath)
-	if err != nil {
-		return nil, fmt.Errorf("git init: %w", err)
-	}
-	if err := WriteSentinel(opts.LocalPath, Sentinel{
-		SchemaVersion: SchemaVersion,
-		CreatedAt:     time.Now().UTC(),
-	}); err != nil {
-		return nil, err
-	}
-	// Pin LF line endings so checkouts on Windows don't rewrite the
-	// canonical YAML. Defence in depth alongside NormalizeBody on
-	// the parse side.
-	if err := syncRepo.WriteGitattributes("* -text\n"); err != nil {
-		return nil, fmt.Errorf("write .gitattributes: %w", err)
+	// 1. Open or create the local git repo.
+	var syncRepo *git.Repo
+	switch state {
+	case targetEmpty:
+		syncRepo, err = git.Init(opts.LocalPath)
+		if err != nil {
+			return nil, fmt.Errorf("git init: %w", err)
+		}
+	case targetEmptyGit, targetExistingSyncRepo:
+		syncRepo, err = git.Open(opts.LocalPath)
+		if err != nil {
+			return nil, fmt.Errorf("open existing repo at %s: %w", opts.LocalPath, err)
+		}
 	}
 
-	// 2. If a remote was supplied, wire it up before any export so
-	// the next step's "is remote empty?" check fires before we do
-	// expensive work.
-	if opts.Remote != "" {
-		if err := syncRepo.AddRemote("origin", opts.Remote); err != nil {
+	// 2. Resolve the effective remote. If the existing repo already
+	// has an `origin` set, default to that; if the caller also passed
+	// --remote, they must match.
+	existingOrigin, err := syncRepo.RemoteURL("origin")
+	if err != nil {
+		return nil, fmt.Errorf("read existing origin: %w", err)
+	}
+	effectiveRemote := opts.Remote
+	switch {
+	case effectiveRemote == "" && existingOrigin != "":
+		effectiveRemote = existingOrigin
+	case effectiveRemote != "" && existingOrigin != "" && effectiveRemote != existingOrigin:
+		return nil, fmt.Errorf("existing repo at %s already has origin=%s which doesn't match --remote=%s", opts.LocalPath, existingOrigin, opts.Remote)
+	}
+	res.Remote = effectiveRemote
+
+	// 3. Wire up origin if it isn't already configured.
+	if effectiveRemote != "" && existingOrigin == "" {
+		if err := syncRepo.AddRemote("origin", effectiveRemote); err != nil {
 			return nil, fmt.Errorf("add origin: %w", err)
 		}
+	}
+
+	// 4. Refuse to seed an already-populated remote only in the pure
+	// bootstrap case. In attach mode we expect the remote to have
+	// commits — that's the whole point.
+	if effectiveRemote != "" && state != targetExistingSyncRepo {
 		hasContent, err := syncRepo.RemoteHasContent("origin")
 		if err != nil {
 			return nil, fmt.Errorf("check remote: %w", err)
 		}
-		if hasContent {
-			return nil, fmt.Errorf("remote %s already has content; use 'bacio sync clone' to join it instead of 'bacio sync init'", opts.Remote)
+		if hasContent && state == targetEmpty {
+			return nil, fmt.Errorf("remote %s already has content; use 'bacio sync clone' (or `git clone %s <path>` then `bacio sync init <path>`) to join it", effectiveRemote, effectiveRemote)
+		}
+		// If state == targetEmptyGit and remote has content, fall
+		// through: pull will bring it in below, and we'll switch to
+		// attach-style flow from there.
+		if hasContent && state == targetEmptyGit {
+			state = targetExistingSyncRepo
+			res.Attached = true
 		}
 	}
 
-	// 3. Run the export. First export against an empty tree, so the
-	// simple Phase-2 path is fine — no atomic staging needed.
+	// 5. Write sentinel + .gitattributes if they're not already there.
+	// Preserves the original created_at for an existing sync repo.
+	if !IsSyncRepo(opts.LocalPath) {
+		if err := WriteSentinel(opts.LocalPath, Sentinel{
+			SchemaVersion: SchemaVersion,
+			CreatedAt:     time.Now().UTC(),
+		}); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := os.Stat(filepath.Join(opts.LocalPath, ".gitattributes")); os.IsNotExist(err) {
+		// Pin LF line endings so checkouts on Windows don't rewrite the
+		// canonical YAML. Defence in depth alongside NormalizeBody on
+		// the parse side.
+		if err := syncRepo.WriteGitattributes("* -text\n"); err != nil {
+			return nil, fmt.Errorf("write .gitattributes: %w", err)
+		}
+	} else if err != nil {
+		return nil, fmt.Errorf("stat .gitattributes: %w", err)
+	}
+
+	// 6. Attach mode only: pull existing commits and import any
+	// rows we don't yet have in the local DB before re-exporting.
+	if state == targetExistingSyncRepo && effectiveRemote != "" {
+		if err := syncRepo.Pull(); err != nil {
+			if !isNoUpstreamErr(err) {
+				return nil, fmt.Errorf("git pull: %w", err)
+			}
+		}
+	}
+	if state == targetExistingSyncRepo {
+		importEng := &Engine{Store: e.Store, Actor: e.Actor, DryRun: false}
+		impRes, err := importEng.Import(ctx, opts.LocalPath)
+		if err != nil {
+			return nil, fmt.Errorf("import: %w", err)
+		}
+		res.Import = impRes
+	}
+
+	// 7. Run the export.
 	exportEng := &Engine{Store: e.Store, Actor: e.Actor, DryRun: false}
 	exportRes, err := exportEng.Export(ctx, opts.LocalPath)
 	if err != nil {
-		return nil, fmt.Errorf("first export: %w", err)
+		return nil, fmt.Errorf("export: %w", err)
 	}
 	res.Export = exportRes
 
-	// 3a. Mark every freshly-exported uuid as synced so a subsequent
-	// `bacio sync` doesn't treat them as "never synced". The export side
-	// of Phase 2 didn't bookkeep into sync_state — that's an
-	// import-side concern in Phase 3 — but the bootstrap is the
-	// natural moment to seed.
+	// 8. Mark every uuid as synced so a subsequent `bacio sync` doesn't
+	// treat them as "never synced". Idempotent — safe to re-run.
 	if err := e.markAllAsSynced(); err != nil {
 		return nil, fmt.Errorf("seed sync_state: %w", err)
 	}
 
-	// 4. Stage everything, commit. The first commit covers the
-	// sentinel + .gitattributes + repos/.
+	// 9. Stage + commit. Commit returns ("", nil) if nothing staged.
 	if err := syncRepo.Add(); err != nil {
 		return nil, fmt.Errorf("git add: %w", err)
 	}
@@ -192,31 +265,42 @@ func (e *Engine) InitSyncRepo(ctx context.Context, projectRoot string, opts Init
 	}
 	res.CommitSHA = sha
 
-	// 5. Push (if remote configured).
-	if opts.Remote != "" {
-		branch, err := syncRepo.CurrentBranch()
+	// 10. Push (if remote configured). Use plain Push if the branch
+	// already tracks an upstream; otherwise PushSetUpstream to wire
+	// up tracking on first push.
+	if effectiveRemote != "" {
+		hasUpstream, err := syncRepo.HasUpstream()
 		if err != nil {
-			return nil, fmt.Errorf("resolve current branch: %w", err)
+			return nil, fmt.Errorf("check upstream: %w", err)
 		}
-		if err := syncRepo.PushSetUpstream("origin", branch); err != nil {
-			return nil, fmt.Errorf("git push: %w", err)
+		if hasUpstream {
+			if sha != "" {
+				if err := syncRepo.Push(); err != nil {
+					return nil, fmt.Errorf("git push: %w", err)
+				}
+				res.Pushed = true
+			}
+		} else {
+			branch, err := syncRepo.CurrentBranch()
+			if err != nil {
+				return nil, fmt.Errorf("resolve current branch: %w", err)
+			}
+			if err := syncRepo.PushSetUpstream("origin", branch); err != nil {
+				return nil, fmt.Errorf("git push: %w", err)
+			}
+			res.Pushed = true
 		}
-		res.Pushed = true
 	}
 
-	// 6. .bacio/config.yaml (if remote configured).
-	if opts.Remote != "" {
+	// 11. .bacio/config.yaml + DB-side bookkeeping (only meaningful
+	// when a remote is configured).
+	if effectiveRemote != "" {
 		if err := WriteProjectConfig(projectRoot, ProjectConfig{
-			Sync: ProjectSync{Remote: opts.Remote},
+			Sync: ProjectSync{Remote: effectiveRemote},
 		}); err != nil {
 			return nil, err
 		}
-	}
-
-	// 7. DB-side bookkeeping: record the (remote → local path)
-	// mapping so steady-state `bacio sync` finds the working tree.
-	if opts.Remote != "" {
-		if err := e.Store.UpsertSyncRemote(opts.Remote, opts.LocalPath); err != nil {
+		if err := e.Store.UpsertSyncRemote(effectiveRemote, opts.LocalPath); err != nil {
 			return nil, fmt.Errorf("record sync remote: %w", err)
 		}
 	}
@@ -396,27 +480,67 @@ func defaultClonePath(remote string) (string, error) {
 	return filepath.Join(home, ".bacio", "sync", base), nil
 }
 
-// requireEmptyOrMissing returns nil if path doesn't exist, or exists
-// as an empty directory. Anything else (file, non-empty dir) errors.
-func requireEmptyOrMissing(path string) error {
+// initTargetState classifies the state of the directory passed to
+// `bacio sync init`. The classification gates how InitSyncRepo behaves:
+// fresh paths get full bootstrap; existing sync repos get attach mode;
+// existing git repos with no commits get sentinel-only bootstrap;
+// anything else is refused.
+type initTargetState int
+
+const (
+	// targetEmpty: path is missing, or exists as an empty directory.
+	targetEmpty initTargetState = iota
+	// targetEmptyGit: path exists, has a `.git` entry, but no commits
+	// and no other working-tree files. Typical of `git init` or a
+	// fresh `git clone` of an empty bare remote.
+	targetEmptyGit
+	// targetExistingSyncRepo: path is an bacio sync repo (carries
+	// bacio-sync.yaml at root). Attach mode.
+	targetExistingSyncRepo
+	// targetIncompatible: anything else — non-git directory with
+	// files, or a git repo with unrelated commits and no sentinel.
+	targetIncompatible
+)
+
+// classifyInitTarget inspects path on disk and returns its state.
+// Used by InitSyncRepo to pick between bootstrap and attach behavior.
+// Returns targetIncompatible (and nil error) for cases the caller
+// should refuse, so callers always render the same refusal message.
+func classifyInitTarget(path string) (initTargetState, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			return targetEmpty, nil
 		}
-		return err
+		return 0, err
 	}
 	if !info.IsDir() {
-		return fmt.Errorf("%s exists and is not a directory", path)
+		return targetIncompatible, nil
 	}
 	entries, err := os.ReadDir(path)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	if len(entries) > 0 {
-		return fmt.Errorf("%s exists and is not empty; remove it or pick another path", path)
+	if len(entries) == 0 {
+		return targetEmpty, nil
 	}
-	return nil
+	if IsSyncRepo(path) {
+		return targetExistingSyncRepo, nil
+	}
+	// Not a sync repo but non-empty: only acceptable when the only
+	// entry is `.git` (working tree is otherwise clean). This covers
+	// `git init` on a fresh folder, `git clone <empty-bare>`, and
+	// `git clone <existing-repo>` followed by deleting tracked files —
+	// the commit history is fine; what matters is that there are no
+	// working-tree files that would coexist with bacio's `repos/` and
+	// `bacio-sync.yaml`.
+	if len(entries) == 1 && entries[0].Name() == ".git" {
+		if _, err := git.Open(path); err != nil {
+			return targetIncompatible, nil
+		}
+		return targetEmptyGit, nil
+	}
+	return targetIncompatible, nil
 }
 
 // initCommitMessage is the canonical first-commit message for `bacio sync

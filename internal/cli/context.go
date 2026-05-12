@@ -74,6 +74,26 @@ func openClient() (client.Client, error) {
 // with a clear error.
 func inRemoteMode() bool { return remoteURL() != "" }
 
+// resolveSyncRepoRoot reports whether the current working directory
+// sits inside a bacio sync repo (i.e. the git working-tree root carries
+// bacio-sync.yaml). Returns the absolute root + true when so; ("", false)
+// otherwise. Unlike requireSyncRepoMode (which errors), this is a quiet
+// probe used by read-only list commands to pick a branch.
+func resolveSyncRepoRoot() (string, bool) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", false
+	}
+	info, err := git.Detect(cwd)
+	if err != nil {
+		return "", false
+	}
+	if !sync.IsSyncRepo(info.Root) {
+		return "", false
+	}
+	return info.Root, true
+}
+
 // resolveRepo finds the repo row for the current working directory, creating
 // it on first use. Errors out if not inside a git repo. Used by handlers
 // that haven't migrated to the client yet; new code should prefer

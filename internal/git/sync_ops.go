@@ -271,6 +271,37 @@ func (r *Repo) WriteGitattributes(content string) error {
 	return os.WriteFile(abs, []byte(content), 0o644)
 }
 
+// RemoteURL returns the configured URL for the named remote (e.g.
+// "origin"). Returns ("", nil) if the remote is not configured — the
+// signal `bacio sync init` uses to decide whether to add a remote vs.
+// reuse an existing one. Any other failure is returned as an *Error.
+func (r *Repo) RemoteURL(name string) (string, error) {
+	out, err := runGit(r.Root, "remote", "get-url", name)
+	if err != nil {
+		var gerr *Error
+		if errors.As(err, &gerr) && strings.Contains(gerr.Stderr, "No such remote") {
+			return "", nil
+		}
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// HasUpstream reports whether the current branch has an upstream
+// tracking ref configured. Used by `bacio sync init`'s attach mode to
+// pick between `git push` (already tracks) and `git push --set-upstream`
+// (first push from this clone).
+func (r *Repo) HasUpstream() (bool, error) {
+	if _, err := runGit(r.Root, "rev-parse", "--abbrev-ref", "@{upstream}"); err != nil {
+		var gerr *Error
+		if errors.As(err, &gerr) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
 // runGit shells out to git with the given args, returning stdout (as
 // a string) on success or an *Error wrapping stderr on failure.
 func runGit(dir string, args ...string) (string, error) {

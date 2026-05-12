@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
@@ -410,5 +411,178 @@ func TestPushRace(t *testing.T) {
 	// import picked up B's new issue.
 	if runResA.Import == nil {
 		t.Fatalf("A run import was nil")
+	}
+}
+
+// seedStoreWithRepo builds a fresh in-memory store seeded with one
+// repo and one issue. Used by the attach-mode tests where two
+// independent DBs need different prefixes so the merged sync repo
+// holds both folders side-by-side.
+func seedStoreWithRepo(t *testing.T, prefix, name string) *store.Store {
+	t.Helper()
+	s, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	r, err := s.CreateRepo(prefix, name, "/local/"+name, "git@github.com:user/"+name+".git")
+	if err != nil {
+		t.Fatalf("create repo %s: %v", prefix, err)
+	}
+	if _, err := s.CreateIssue(r.ID, nil, name+" issue", "body", model.StateInProgress, nil); err != nil {
+		t.Fatalf("create issue in %s: %v", prefix, err)
+	}
+	return s
+}
+
+// TestInitSyncRepo_AttachesToExistingSyncRepo verifies the
+// "two projects, one sync repo" workflow: project A inits the sync
+// repo; project B then runs init against the same path (no --remote
+// because the existing repo already has origin), and the sync repo
+// ends up holding both projects' data.
+func TestInitSyncRepo_AttachesToExistingSyncRepo(t *testing.T) {
+	requireGit(t)
+	tdir := t.TempDir()
+	bare := initBareRemote(t, tdir)
+	t.Setenv("GIT_AUTHOR_NAME", "tester")
+	t.Setenv("GIT_AUTHOR_EMAIL", "tester@example.invalid")
+	t.Setenv("GIT_COMMITTER_NAME", "tester")
+	t.Setenv("GIT_COMMITTER_EMAIL", "tester@example.invalid")
+
+	syncPath := filepath.Join(tdir, "sync")
+
+	// Project A inits.
+	projectA := initProjectRepo(t, tdir)
+	sA := seedStoreWithRepo(t, "AAAA", "projA")
+	engA := &Engine{Store: sA, Actor: "alice"}
+	resA, err := engA.InitSyncRepo(context.Background(), projectA, InitOptions{
+		LocalPath: syncPath,
+		Remote:    bare,
+	})
+	if err != nil {
+		t.Fatalf("init A: %v", err)
+	}
+	if resA.Attached {
+		t.Fatal("first init shouldn't report Attached=true")
+	}
+
+	// Project B attaches with no --remote (should auto-detect origin).
+	projectB := filepath.Join(tdir, "projectB")
+	if err := exec.Command("git", "init", "-b", "main", projectB).Run(); err != nil {
+		t.Fatalf("init projectB: %v", err)
+	}
+	configureSyncRepoIdentity(t, projectB)
+	sB := seedStoreWithRepo(t, "BBBB", "projB")
+	engB := &Engine{Store: sB, Actor: "bob"}
+	resB, err := engB.InitSyncRepo(context.Background(), projectB, InitOptions{
+		LocalPath: syncPath, // no Remote
+	})
+	if err != nil {
+		t.Fatalf("attach B: %v", err)
+	}
+	if !resB.Attached {
+		t.Fatal("second init should report Attached=true")
+	}
+	if resB.Remote != bare {
+		t.Fatalf("expected auto-detected remote %q, got %q", bare, resB.Remote)
+	}
+	if resB.Import == nil {
+		t.Fatal("attach should populate Import (read A's data into B's DB)")
+	}
+
+	// Both prefix folders should exist in the sync repo.
+	for _, p := range []string{"AAAA", "BBBB"} {
+		if _, err := os.Stat(filepath.Join(syncPath, "repos", p)); err != nil {
+			t.Errorf("missing repo folder %s: %v", p, err)
+		}
+	}
+
+	// Project B's .bacio/config.yaml should carry the auto-detected remote.
+	cfgB, err := ReadProjectConfig(projectB)
+	if err != nil {
+		t.Fatalf("read project B config: %v", err)
+	}
+	if cfgB.Sync.Remote != bare {
+		t.Fatalf("project B config remote = %q, want %q", cfgB.Sync.Remote, bare)
+	}
+
+	// DB-side mapping for B should point at the same sync repo path.
+	rec, err := sB.GetSyncRemote(bare)
+	if err != nil {
+		t.Fatalf("get sync remote on B: %v", err)
+	}
+	if rec.LocalPath != syncPath {
+		t.Fatalf("B's local path = %q, want %q", rec.LocalPath, syncPath)
+	}
+}
+
+// TestInitSyncRepo_RefusesUnrelatedGitRepo: an existing git repo with
+// unrelated commits and no bacio-sync.yaml is rejected outright — we
+// don't want to silently turn somebody's working tree into a sync repo.
+func TestInitSyncRepo_RefusesUnrelatedGitRepo(t *testing.T) {
+	requireGit(t)
+	tdir := t.TempDir()
+	t.Setenv("GIT_AUTHOR_NAME", "tester")
+	t.Setenv("GIT_AUTHOR_EMAIL", "tester@example.invalid")
+	t.Setenv("GIT_COMMITTER_NAME", "tester")
+	t.Setenv("GIT_COMMITTER_EMAIL", "tester@example.invalid")
+
+	target := filepath.Join(tdir, "unrelated")
+	if err := exec.Command("git", "init", "-b", "main", target).Run(); err != nil {
+		t.Fatalf("init unrelated: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(target, "README.md"), []byte("hi"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	configureSyncRepoIdentity(t, target)
+	if err := exec.Command("git", "-C", target, "add", "README.md").Run(); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if err := exec.Command("git", "-C", target, "commit", "-m", "initial").Run(); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+
+	project := initProjectRepo(t, tdir)
+	s := seedStoreWithRepo(t, "AAAA", "projA")
+	eng := &Engine{Store: s, Actor: "alice"}
+	_, err := eng.InitSyncRepo(context.Background(), project, InitOptions{LocalPath: target})
+	if err == nil {
+		t.Fatal("expected refusal against an unrelated git repo")
+	}
+}
+
+// TestInitSyncRepo_AcceptsEmptyGitDir: a freshly 'git init'-ed folder
+// (no commits, no other files) is acceptable — sentinel is written
+// without re-running git init.
+func TestInitSyncRepo_AcceptsEmptyGitDir(t *testing.T) {
+	requireGit(t)
+	tdir := t.TempDir()
+	bare := initBareRemote(t, tdir)
+	t.Setenv("GIT_AUTHOR_NAME", "tester")
+	t.Setenv("GIT_AUTHOR_EMAIL", "tester@example.invalid")
+	t.Setenv("GIT_COMMITTER_NAME", "tester")
+	t.Setenv("GIT_COMMITTER_EMAIL", "tester@example.invalid")
+
+	target := filepath.Join(tdir, "sync")
+	if err := exec.Command("git", "init", "-b", "main", target).Run(); err != nil {
+		t.Fatalf("git init target: %v", err)
+	}
+	configureSyncRepoIdentity(t, target)
+
+	project := initProjectRepo(t, tdir)
+	s := seedStoreWithRepo(t, "AAAA", "projA")
+	eng := &Engine{Store: s, Actor: "alice"}
+	res, err := eng.InitSyncRepo(context.Background(), project, InitOptions{
+		LocalPath: target,
+		Remote:    bare,
+	})
+	if err != nil {
+		t.Fatalf("init against empty git dir: %v", err)
+	}
+	if !IsSyncRepo(target) {
+		t.Fatal("sentinel should have been written")
+	}
+	if !res.Pushed {
+		t.Fatal("expected push to succeed")
 	}
 }

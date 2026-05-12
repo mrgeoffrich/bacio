@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -12,6 +13,8 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/inputio"
+	"github.com/mrgeoffrich/bacio/internal/model"
+	"github.com/mrgeoffrich/bacio/internal/sync"
 )
 
 func newRepoCmd() *cobra.Command {
@@ -25,6 +28,9 @@ func repoListCmd() *cobra.Command {
 		Use:   "list",
 		Short: "List all tracked repos",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if root, ok := resolveSyncRepoRoot(); ok {
+				return listReposFromSyncRepo(root)
+			}
 			c, err := openClient()
 			if err != nil {
 				return err
@@ -37,6 +43,57 @@ func repoListCmd() *cobra.Command {
 			return emit(repos)
 		},
 	}
+}
+
+// listReposFromSyncRepo reads index.yaml at the sync repo root and
+// renders the entries through the same `[]*model.Repo` path the
+// project-repo branch uses. We convert RepoIndexEntry → model.Repo
+// (lossy: no ID, no Path, no NextIssueNumber) so existing JSON/text
+// renderers keep working without a new shape. Falls back to a scan
+// of `repos/*/repo.yaml` for older sync repos that pre-date index.yaml.
+func listReposFromSyncRepo(syncRoot string) error {
+	idx, err := sync.ReadIndex(syncRoot)
+	if err != nil && !errors.Is(err, sync.ErrNoIndex) {
+		return err
+	}
+	repos := []*model.Repo{}
+	if idx != nil {
+		for _, e := range idx.Repos {
+			repos = append(repos, &model.Repo{
+				UUID:      e.UUID,
+				Prefix:    e.Prefix,
+				Name:      e.Name,
+				RemoteURL: e.Remote,
+			})
+		}
+		return emit(repos)
+	}
+	// Fallback: scan repos/*/repo.yaml when no index.yaml is present
+	// (sync repos created before this file existed).
+	entries, err := os.ReadDir(filepath.Join(syncRoot, "repos"))
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(syncRoot, "repos", entry.Name(), "repo.yaml"))
+		if err != nil {
+			continue
+		}
+		parsed, err := sync.ParseRepoYAML(b)
+		if err != nil {
+			continue
+		}
+		repos = append(repos, &model.Repo{
+			UUID:      parsed.UUID,
+			Prefix:    parsed.Prefix,
+			Name:      parsed.Name,
+			RemoteURL: parsed.RemoteURL,
+		})
+	}
+	return emit(repos)
 }
 
 func repoShowCmd() *cobra.Command {
