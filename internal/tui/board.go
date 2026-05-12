@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -596,10 +597,8 @@ func (b *boardView) renderColumn(st model.State, focused bool, width, height int
 	}
 
 	border := colBorderColor
-	headerBG := colHeaderUnfocus
 	if focused {
 		border = colFocusBorder
-		headerBG = colHeaderFocus
 	}
 
 	innerWidth := width - 2
@@ -609,13 +608,15 @@ func (b *boardView) renderColumn(st model.State, focused bool, width, height int
 
 	// Each card occupies exactly cardHeight lines: the first carries the
 	// issue key and the start of the title, subsequent lines are wrapped
-	// title continuations indented to align under the title text.
+	// title continuations indented to align under the title text. The
+	// column title ("In Progress · 100") is no longer a row of its own
+	// inside the box — it rides in the top border via post-processing,
+	// which gives the body one extra row for actual cards.
 	const cardHeight = 2
-	const headerRows = 1
 
 	// Compute how many cards fit in the body, then nudge the per-column
 	// scroll so the cursor stays in view.
-	bodyRows := height - 2 - headerRows // -2 for top/bottom borders
+	bodyRows := height - 2 // -2 for top/bottom borders
 	if bodyRows < cardHeight {
 		bodyRows = cardHeight
 	}
@@ -649,30 +650,44 @@ func (b *boardView) renderColumn(st model.State, focused bool, width, height int
 	moreAbove := scroll > 0
 	moreBelow := end < len(issues)
 
-	indicator := ""
-	switch {
-	case moreAbove && moreBelow:
-		indicator = " ↕"
-	case moreAbove:
-		indicator = " ↑"
-	case moreBelow:
-		indicator = " ↓"
+	// The column title sits in the top border, the count + scroll
+	// arrow share the bottom border. Splitting them this way frees up
+	// the title from any ellipsis from the count digits — at 14-col
+	// columns "In Progress" survives intact instead of getting clipped
+	// to "In … · 100". Each region gets a 1-space gutter on each side
+	// plus a 1-char ─ minimum so it floats inside the border rather
+	// than abutting the corners.
+	const sidePad = 1   // " region " — one space each side
+	const minDashes = 1 // ─ each side after the spaces
+	regionBudget := innerWidth - 2*(sidePad+minDashes)
+
+	var title string
+	if regionBudget >= 1 {
+		title = truncate(stateLabel(st), regionBudget)
 	}
 
-	header := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("231")).
-		Background(headerBG).
-		Width(innerWidth).
-		Align(lipgloss.Center).
-		Render(fmt.Sprintf("%s · %d%s", stateLabel(st), len(issues), indicator))
+	var arrowSuffix string
+	switch {
+	case moreAbove && moreBelow:
+		arrowSuffix = " ↕"
+	case moreAbove:
+		arrowSuffix = " ↑"
+	case moreBelow:
+		arrowSuffix = " ↓"
+	}
+	footer := fmt.Sprintf("%d%s", len(issues), arrowSuffix)
+	if regionBudget >= 1 && utf8.RuneCountInString(footer) > regionBudget {
+		footer = truncate(footer, regionBudget)
+	}
+	if regionBudget < 1 {
+		footer = ""
+	}
 
-	// 1 col reserved at the LEFT of every card line for a coloured
-	// stripe keyed on the issue's feature slug. Card content uses the
-	// remaining width; the stripe character ▌ sits flush against the
-	// column's inner border.
-	const stripeChar = "▌"
-	contentW := innerWidth - 1
+	// No reserved gutter on the LEFT of the card any more — the
+	// feature-colour signal now rides on the square brackets around
+	// the issue number (see keyRender below) rather than a dedicated
+	// ▌ stripe column, so we reclaim that 1 col for title text.
+	contentW := innerWidth
 	if contentW < 3 {
 		contentW = 3
 	}
@@ -686,43 +701,62 @@ func (b *boardView) renderColumn(st model.State, focused bool, width, height int
 	}
 	for i := scroll; i < end; i++ {
 		iss := issues[i]
-		bracketed := "[" + iss.Key + "]"
+		// On the kanban cards we drop the repo prefix (it's already in
+		// the tab strip's title chip in the top-right) and show only
+		// the issue number, space-padded to a minimum of 2 chars so a
+		// column of mixed-width numbers stays visually aligned:
+		// [ 1] [ 2] [10] [11] [120] [1234]. The detail / overlay views
+		// elsewhere still use the full iss.Key.
+		bracketed := fmt.Sprintf("[%2d]", iss.Number)
 		fullW := contentW
 
 		isSel := i == sel && focused
 		styler := cardStyle
-		// When the card is selected we deliberately render the key as plain
-		// text. Nested lipgloss styles emit their own reset sequence, which
-		// punches a black hole in the parent's background even when we set
-		// an explicit bg on the inner span. Letting selStyle paint uniformly
-		// gives a clean fill at the cost of the key's accent colour.
-		keyRender := keyStyle.Render(bracketed)
+		// keyRender colours the [ and ] in the feature colour while
+		// leaving the number itself in keyStyle's lavender. That's the
+		// only place the feature signal lives now — the old ▌ stripe
+		// is gone. Selected cards are rendered as plain text (no
+		// per-rune styling) because nested lipgloss resets punch holes
+		// in selStyle's background; the colour is sacrificed in the
+		// selected state, same tradeoff the original code made for the
+		// whole key.
+		var keyRender string
 		if isSel {
 			styler = selStyle
 			keyRender = bracketed
+		} else {
+			bracketStyle := lipgloss.NewStyle().Foreground(featureColor(iss.FeatureSlug))
+			keyRender = bracketStyle.Render("[") +
+				keyStyle.Render(fmt.Sprintf("%2d", iss.Number)) +
+				bracketStyle.Render("]")
 		}
 
-		stripe := lipgloss.NewStyle().Foreground(featureColor(iss.FeatureSlug)).Render(stripeChar)
 		emit := func(content string) {
-			lines = append(lines, stripe+styler.Render(content))
+			lines = append(lines, styler.Render(content))
 		}
 
-		// If the title fits on a single line at the full inner width, use
-		// the spacious layout: [KEY] alone on line 0, title alone on line
-		// 1. This avoids the line-0 prefix gutter eating into the title's
-		// budget for the common short-title case.
-		if titleRunes := []rune(iss.Title); len(titleRunes) <= fullW {
-			emit(keyRender)
-			emit(iss.Title)
-			continue
-		}
-
-		// Title needs both lines. Pack [KEY] + the start of the title on
-		// line 0, then the continuation on line 1.
-		prefixW := len(bracketed) + 2 // [KEY] + two-space gutter
+		// Always use the packed layout: [KEY] + one-space gutter + the
+		// start of the title on line 0, continuation on line 1. Every
+		// card is exactly cardHeight=2 lines, and the title sits flush
+		// against the key rather than dropping to line 1. Short titles
+		// like "Banana" fit fully on line 0 and pad line 1 with
+		// whitespace; longer titles fill both rows.
+		//
+		// `firstW < 1` is the one edge case where packing isn't
+		// possible (bracketed key alone fills the content width); we
+		// fall back to "key alone on line 0, title wrap on line 1" so
+		// we still emit exactly cardHeight lines.
+		prefixW := len(bracketed) + 1 // [KEY] + single-space gutter
 		firstW := contentW - prefixW
-		if firstW < 4 {
-			firstW = 4
+		if firstW < 1 {
+			emit(keyRender)
+			fallback := wrapLines(iss.Title, contentW, 1)
+			if len(fallback) > 0 {
+				emit(fallback[0])
+			} else {
+				emit("")
+			}
+			continue
 		}
 		titleLines := wrapLinesAt(iss.Title, func(line int) int {
 			if line == 0 {
@@ -736,7 +770,7 @@ func (b *boardView) renderColumn(st model.State, focused bool, width, height int
 			switch {
 			case j == 0:
 				if len(titleLines) > 0 {
-					content = keyRender + "  " + titleLines[0]
+					content = keyRender + " " + titleLines[0]
 				} else {
 					content = keyRender
 				}
@@ -749,15 +783,143 @@ func (b *boardView) renderColumn(st model.State, focused bool, width, height int
 		}
 	}
 
-	body := strings.Join(lines, "\n")
-	content := lipgloss.JoinVertical(lipgloss.Left, header, body)
+	content := strings.Join(lines, "\n")
 
-	return lipgloss.NewStyle().
+	rendered := lipgloss.NewStyle().
 		Border(colBorder).
 		BorderForeground(border).
 		Width(innerWidth).
 		Height(height - 2).
+		MaxHeight(height).
 		Render(content)
+
+	// Slot the title into the top border and the count+arrow into the
+	// bottom border. Both regions are centered inside their border's
+	// horizontal run; the title is bold so it reads as a heading, and
+	// the bottom footer stays in the border's plain colour so it sits
+	// quietly as secondary info.
+	if title != "" {
+		rendered = overlayCenteredInBorder(rendered, title, '╭', '╮', innerWidth, true, true)
+	}
+	if footer != "" {
+		rendered = overlayCenteredInBorder(rendered, footer, '╰', '╯', innerWidth, false, false)
+	}
+	return rendered
+}
+
+// overlayCenteredInBorder splices `text` into the middle of the top
+// or bottom border line of a lipgloss-rendered box, wrapped in single
+// spaces so it visually floats inside the ─ run:
+//
+//	╭─── Backlog ────╮       (top, top=true)
+//	╰─── 60 ↓ ───────╯       (bottom, top=false)
+//
+// `leftCorner` / `rightCorner` are the expected corner glyphs for the
+// target border (╭/╮ for top, ╰/╯ for bottom); if the line doesn't
+// match (e.g. lipgloss switched to a different border style) the line
+// is returned unchanged rather than corrupted. When `bold` is true the
+// text is wrapped in SGR 1 / 22 so it stands out from the plain border
+// chars; the border's foreground ANSI escape continues to apply so
+// the bolded text inherits the border colour rather than going white.
+//
+// Implementation note: we post-process the rendered string rather
+// than passing a custom Border to lipgloss because lipgloss cycles
+// the Border.Top / Border.Bottom character across the full width —
+// there's no hook for "put this glyph at the middle of the edge".
+func overlayCenteredInBorder(rendered, text string, leftCorner, rightCorner rune, innerWidth int, top, bold bool) string {
+	lines := strings.Split(rendered, "\n")
+	if len(lines) == 0 {
+		return rendered
+	}
+	idx := 0
+	if !top {
+		idx = len(lines) - 1
+	}
+	lines[idx] = spliceCenteredIntoBorder(lines[idx], text, leftCorner, rightCorner, innerWidth, bold)
+	return strings.Join(lines, "\n")
+}
+
+func spliceCenteredIntoBorder(line, text string, leftCorner, rightCorner rune, innerWidth int, bold bool) string {
+	region := " " + text + " "
+	regionW := utf8.RuneCountInString(region)
+	if regionW > innerWidth {
+		return line
+	}
+
+	type cell struct {
+		bytePos  int
+		byteSize int
+		r        rune
+	}
+	var cells []cell
+
+	i := 0
+	for i < len(line) {
+		if line[i] == 0x1b && i+1 < len(line) && line[i+1] == '[' {
+			// Skip CSI: ESC [ <params> <final>. Final byte is 0x40-0x7E.
+			j := i + 2
+			for j < len(line) {
+				b := line[j]
+				j++
+				if b >= 0x40 && b <= 0x7E {
+					break
+				}
+			}
+			i = j
+			continue
+		}
+		r, sz := utf8.DecodeRuneInString(line[i:])
+		cells = append(cells, cell{bytePos: i, byteSize: sz, r: r})
+		i += sz
+	}
+
+	// Expected layout: cells[0] = leftCorner, cells[1..N] = ─, cells[N+1] = rightCorner.
+	if len(cells) < 3 || cells[0].r != leftCorner || cells[len(cells)-1].r != rightCorner {
+		return line
+	}
+
+	dashSpan := innerWidth - regionW
+	leftDashes := dashSpan / 2
+	startIdx := 1 + leftDashes
+	endIdx := startIdx + regionW - 1
+	if endIdx >= len(cells)-1 {
+		return line
+	}
+
+	startByte := cells[startIdx].bytePos
+	endByte := cells[endIdx].bytePos + cells[endIdx].byteSize
+
+	open, close := "", ""
+	if bold {
+		// SGR 1 turns bold on, 22 turns it back off. We deliberately
+		// don't reset the foreground colour — the border's surrounding
+		// ANSI is still active, so the text inherits the border colour
+		// and only the boldness toggles.
+		open, close = "\x1b[1m", "\x1b[22m"
+	}
+	return line[:startByte] + open + region + close + line[endByte:]
+}
+
+// fitHeader builds the per-column kanban header text ("Backlog · 12 ↓")
+// so the whole thing fits in innerWidth runes. The count and arrow are
+// the live data; the label ("In Progress") is the most expendable
+// piece, so when truncation is forced we shrink the label and keep
+// the count + arrow visible. Result for "In Progress · 100 ↓" at
+// innerWidth=16: "In Prog… · 100 ↓" instead of "In Progress ·… ↓".
+func fitHeader(label string, count int, indicator string, innerWidth int) string {
+	tail := fmt.Sprintf(" · %d%s", count, indicator)
+	full := label + tail
+	if utf8.RuneCountInString(full) <= innerWidth {
+		return full
+	}
+	labelBudget := innerWidth - utf8.RuneCountInString(tail)
+	if labelBudget < 1 {
+		// Even the count+indicator alone exceed innerWidth — column
+		// is absurdly narrow. Drop everything but enough chars to
+		// keep the render inside the box.
+		return truncate(full, innerWidth)
+	}
+	return truncate(label, labelBudget) + tail
 }
 
 func (b *boardView) renderDetail(width, height int) string {

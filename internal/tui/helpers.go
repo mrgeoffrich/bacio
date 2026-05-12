@@ -2,18 +2,25 @@ package tui
 
 import (
 	"strings"
-	"unicode"
-	"unicode/utf8"
 )
 
-func isWordRune(r rune) bool {
-	return unicode.IsLetter(r) || unicode.IsDigit(r)
-}
-
-// wrapLinesAt word-wraps s across up to maxLines lines, where line i may
-// have its own width given by widthAt(i). Words longer than the line's
-// width are hard-broken. Overflow past maxLines truncates the last visible
-// line with an ellipsis.
+// wrapLinesAt fills s across up to maxLines lines, where line i may have
+// its own width given by widthAt(i). Wraps strictly on rune count — no
+// word-boundary preference, no hyphenation. Pure character wrapping
+// packs the most content into each kanban card slot; the previous
+// word-aware variant was leaving short trailing lines (e.g. "Receipt" +
+// "printer…" instead of "Receipt printer" + "compat test") and burning
+// two extra chars on the hyphen-plus-ellipsis tail.
+//
+// Trailing whitespace on each emitted line is stripped (it would just be
+// padding under the styler anyway) and leading whitespace on continuation
+// lines is also stripped so wrapped words don't look indented.
+//
+// When the budget runs out and real content remains, the very last
+// rune of the last visible line is replaced with `…` so readers can
+// tell the title was truncated rather than ending where they see it.
+// The replacement is in-place (no extra width grab) so the rendered
+// line stays inside its column.
 func wrapLinesAt(s string, widthAt func(int) int, maxLines int) []string {
 	if maxLines <= 0 {
 		return nil
@@ -29,46 +36,21 @@ func wrapLinesAt(s string, widthAt func(int) int, maxLines int) []string {
 		if w <= 0 {
 			break
 		}
-		if utf8.RuneCountInString(rest) <= w {
+		runes := []rune(rest)
+		if len(runes) <= w {
 			lines = append(lines, rest)
 			rest = ""
 			break
 		}
-		runes := []rune(rest)
-		breakAt := -1
-		for i := w; i > 0; i-- {
-			if runes[i-1] == ' ' {
-				breakAt = i - 1
-				break
-			}
-		}
-		if breakAt > 0 {
-			lines = append(lines, strings.TrimRight(string(runes[:breakAt]), " "))
-			rest = strings.TrimLeft(string(runes[breakAt:]), " ")
-			continue
-		}
-		// Hard break inside a word: reserve one column for a hyphen so the
-		// reader knows the word continues on the next line.
-		cut := w - 1
-		if cut < 1 {
-			cut = w
-		}
-		lines = append(lines, string(runes[:cut])+"-")
-		rest = string(runes[cut:])
+		lines = append(lines, strings.TrimRight(string(runes[:w]), " "))
+		rest = strings.TrimLeft(string(runes[w:]), " ")
 	}
 
 	if len(rest) > 0 && len(lines) > 0 {
 		last := []rune(lines[len(lines)-1])
 		if len(last) > 0 && last[len(last)-1] != '…' {
-			firstDropped, _ := utf8.DecodeRuneInString(rest)
-			midWord := isWordRune(last[len(last)-1]) && isWordRune(firstDropped)
-			if midWord && len(last) >= 2 {
-				// Mid-word truncation: prefix the ellipsis with a hyphen so
-				// readers can tell the word was cut, not the sentence.
-				lines[len(lines)-1] = string(last[:len(last)-2]) + "-…"
-			} else {
-				lines[len(lines)-1] = string(last[:len(last)-1]) + "…"
-			}
+			last[len(last)-1] = '…'
+			lines[len(lines)-1] = string(last)
 		}
 	}
 	return lines
