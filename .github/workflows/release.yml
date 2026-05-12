@@ -105,3 +105,51 @@ jobs:
           fi
           git commit -m "bacio ${GITHUB_REF_NAME}"
           git push
+
+  update-scoop-bucket:
+    # Bumps bucket/bacio.json in mrgeoffrich/scoop-bacio to the freshly-released
+    # version. Requires a SCOOP_BUCKET_TOKEN repo secret holding a PAT with
+    # push access to the bucket repo (the default GITHUB_TOKEN can't push
+    # across repos). Failures here do not roll back the release.
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout bacio (for render script)
+        uses: actions/checkout@v4
+
+      - name: Download release checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --pattern checksums.txt \
+            --dir .
+
+      - name: Checkout scoop bucket
+        uses: actions/checkout@v4
+        with:
+          repository: mrgeoffrich/scoop-bacio
+          token: ${{ secrets.SCOOP_BUCKET_TOKEN }}
+          path: bucket-repo
+
+      - name: Render manifest
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          mkdir -p bucket-repo/bucket
+          bash scripts/render-scoop-manifest.sh "$version" < checksums.txt > bucket-repo/bucket/bacio.json
+
+      - name: Commit and push
+        working-directory: bucket-repo
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add bucket/bacio.json
+          # `git diff --cached` (unlike plain `git diff`) sees newly-added
+          # files, which is the case the first time the bucket is populated.
+          if git diff --cached --quiet -- bucket/bacio.json; then
+            echo "Manifest already up to date for ${GITHUB_REF_NAME}; nothing to push."
+            exit 0
+          fi
+          git commit -m "bacio ${GITHUB_REF_NAME}"
+          git push
