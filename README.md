@@ -1,8 +1,4 @@
-# bacio - *BAH-choh* 
-
-<p align="center">
-  <video src="https://github.com/user-attachments/assets/aa83c41d-1e9a-4053-89cc-2c0773fd9044" controls></video>
-</p>
+# bacio - [*BAH-choh*](#how-do-you-say-it)
 
 > "kiss" in Italian; more importantly its a chocolate-hazelnut gelato flavour.
 
@@ -98,6 +94,12 @@ Run it whenever — pushes your writes, pulls anyone else's. Multi-machine setup
 ## Project status
 
 Solo-maintained, used in anger by its author. Contributions welcome — see `CLAUDE.md` for development conventions, and `docs/tui-cookbook.md` for the bubbletea/lipgloss patterns the TUI relies on.
+
+## How do you say it?
+
+<p align="center">
+  <video src="https://github.com/user-attachments/assets/aa83c41d-1e9a-4053-89cc-2c0773fd9044" controls></video>
+</p>
 
 ## License
 
