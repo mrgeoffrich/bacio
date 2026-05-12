@@ -1,7 +1,7 @@
 # bacio - *BAH-choh* 
 
 <p align="center">
-  <video src="https://github.com/user-attachments/assets/ab2f48a7-6771-4535-bcb6-78755c0711f4" controls width="240"></video>
+  <video src="https://github.com/user-attachments/assets/ab2f48a7-6771-4535-bcb6-78755c0711f4" controls width="100"></video>
 </p>
 
 > "kiss" in Italian; more importantly its a chocolate-hazelnut gelato flavour.
