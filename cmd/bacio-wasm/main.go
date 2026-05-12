@@ -1,3 +1,5 @@
+//go:build js && wasm
+
 // Command bacio-wasm is the browser build of bacio's TUI. Compiled with
 // GOOS=js GOARCH=wasm, it speaks to an xterm.js terminal via a small
 // syscall/js bridge:

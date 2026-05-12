@@ -1,3 +1,5 @@
+//go:build js && wasm
+
 // Bridge between Go's io.Writer/io.Reader and the JS host page.
 //
 // Writing: every Write call invokes a JS callback (window[name]) with a
