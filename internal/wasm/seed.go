@@ -429,8 +429,9 @@ house espresso.
 
 **Didn't**
 
-- Banana sorbetto sat in Backlog the entire quarter. Either commit a
-  Feb slot for it or move it to Cancelled with notes. Decision pending.
+- Banana sorbetto never got off the Todo column the entire quarter.
+  Either commit a Feb slot for it or move it to Cancelled with notes.
+  Decision pending.
 - Tempering room thermostat drifted twice — alarm went off at 03:00
   on a Sunday. Need a better setup before summer.
 
