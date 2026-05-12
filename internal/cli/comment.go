@@ -25,14 +25,11 @@ func commentAddCmd() *cobra.Command {
 		Short: "Add a comment to an issue",
 		Args:  cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, err := readJSONInput(rawInput)
+			raw, err := parseJSONInput(cmd, args, rawInput, "as", "body", "body-file")
 			if err != nil {
 				return err
 			}
 			if raw != nil {
-				if err := rejectMixedInput(cmd, args, "as", "body", "body-file"); err != nil {
-					return err
-				}
 				in, _, err := inputio.DecodeStrict[inputs.CommentAddInput](raw)
 				if err != nil {
 					return err

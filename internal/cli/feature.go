@@ -27,15 +27,12 @@ func featureAddCmd() *cobra.Command {
 		Short: "Create a feature in the current repo",
 		Args:  cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, err := readJSONInput(rawInput)
+			raw, err := parseJSONInput(cmd, args, rawInput,
+				"slug", "description", "description-file")
 			if err != nil {
 				return err
 			}
 			if raw != nil {
-				if err := rejectMixedInput(cmd, args,
-					"slug", "description", "description-file"); err != nil {
-					return err
-				}
 				in, _, err := inputio.DecodeStrict[inputs.FeatureAddInput](raw)
 				if err != nil {
 					return err
@@ -152,15 +149,12 @@ func featureEditCmd() *cobra.Command {
 		Short: "Edit a feature's title or description",
 		Args:  cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, err := readJSONInput(rawInput)
+			raw, err := parseJSONInput(cmd, args, rawInput,
+				"title", "description", "description-file")
 			if err != nil {
 				return err
 			}
 			if raw != nil {
-				if err := rejectMixedInput(cmd, args,
-					"title", "description", "description-file"); err != nil {
-					return err
-				}
 				in, present, err := inputio.DecodeStrict[inputs.FeatureEditInput](raw)
 				if err != nil {
 					return err
@@ -239,14 +233,11 @@ func featureRmCmd() *cobra.Command {
 		Short: "Delete a feature (issues are kept, unlinked from it)",
 		Args:  cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, err := readJSONInput(rawInput)
+			raw, err := parseJSONInput(cmd, args, rawInput)
 			if err != nil {
 				return err
 			}
 			if raw != nil {
-				if err := rejectMixedInput(cmd, args); err != nil {
-					return err
-				}
 				in, _, err := inputio.DecodeStrict[inputs.FeatureRmInput](raw)
 				if err != nil {
 					return err

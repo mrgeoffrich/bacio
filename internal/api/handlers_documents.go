@@ -716,25 +716,3 @@ func fieldDetail(field string) map[string]any {
 	return map[string]any{"field": field}
 }
 
-// resolveDocumentOnRepo pulls {filename} from the URL, validates it, and
-// fetches the row scoped to repo. 404 on miss; 400 on a validation
-// failure since the URL value can't satisfy any document at that point.
-func resolveDocumentOnRepo(w http.ResponseWriter, r *http.Request, s *store.Store, repo *model.Repo, withContent bool) (*model.Document, bool) {
-	name := r.PathValue("filename")
-	clean, err := store.ValidateDocFilenameStrict(name)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), map[string]any{"field": "filename"})
-		return nil, false
-	}
-	doc, err := s.GetDocumentByFilename(repo.ID, clean, withContent)
-	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "not_found", "document not found", nil)
-			return nil, false
-		}
-		status, code := statusForError(err)
-		writeError(w, status, code, err.Error(), nil)
-		return nil, false
-	}
-	return doc, true
-}
