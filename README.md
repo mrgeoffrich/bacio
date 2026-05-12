@@ -1,5 +1,7 @@
 # bacio - *BAH-choh* 
 
+[![Listen to pronunciation](https://img.shields.io/badge/%E2%96%B6%20listen-pronunciation-orange?style=for-the-badge)](docs/bacio.mp3)
+
 > "kiss" in Italian; more importantly its a chocolate-hazelnut gelato flavour.
 
 Sick of dealing with bloated tooling and vendors to manage your work?
