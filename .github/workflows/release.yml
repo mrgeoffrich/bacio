@@ -94,12 +94,14 @@ jobs:
       - name: Commit and push
         working-directory: tap
         run: |
-          if git diff --quiet Formula/bacio.rb; then
-            echo "Formula already up to date for ${GITHUB_REF_NAME}; nothing to push."
-            exit 0
-          fi
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
           git add Formula/bacio.rb
+          # `git diff --cached` (unlike plain `git diff`) sees newly-added
+          # files, which is the case the first time the tap is populated.
+          if git diff --cached --quiet -- Formula/bacio.rb; then
+            echo "Formula already up to date for ${GITHUB_REF_NAME}; nothing to push."
+            exit 0
+          fi
           git commit -m "bacio ${GITHUB_REF_NAME}"
           git push
