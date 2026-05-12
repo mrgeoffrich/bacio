@@ -683,12 +683,11 @@ func (b *boardView) renderColumn(st model.State, focused bool, width, height int
 		footer = ""
 	}
 
-	// 1 col reserved at the LEFT of every card line for a coloured
-	// stripe keyed on the issue's feature slug. Card content uses the
-	// remaining width; the stripe character ▌ sits flush against the
-	// column's inner border.
-	const stripeChar = "▌"
-	contentW := innerWidth - 1
+	// No reserved gutter on the LEFT of the card any more — the
+	// feature-colour signal now rides on the square brackets around
+	// the issue number (see keyRender below) rather than a dedicated
+	// ▌ stripe column, so we reclaim that 1 col for title text.
+	contentW := innerWidth
 	if contentW < 3 {
 		contentW = 3
 	}
@@ -713,20 +712,27 @@ func (b *boardView) renderColumn(st model.State, focused bool, width, height int
 
 		isSel := i == sel && focused
 		styler := cardStyle
-		// When the card is selected we deliberately render the key as plain
-		// text. Nested lipgloss styles emit their own reset sequence, which
-		// punches a black hole in the parent's background even when we set
-		// an explicit bg on the inner span. Letting selStyle paint uniformly
-		// gives a clean fill at the cost of the key's accent colour.
-		keyRender := keyStyle.Render(bracketed)
+		// keyRender colours the [ and ] in the feature colour while
+		// leaving the number itself in keyStyle's lavender. That's the
+		// only place the feature signal lives now — the old ▌ stripe
+		// is gone. Selected cards are rendered as plain text (no
+		// per-rune styling) because nested lipgloss resets punch holes
+		// in selStyle's background; the colour is sacrificed in the
+		// selected state, same tradeoff the original code made for the
+		// whole key.
+		var keyRender string
 		if isSel {
 			styler = selStyle
 			keyRender = bracketed
+		} else {
+			bracketStyle := lipgloss.NewStyle().Foreground(featureColor(iss.FeatureSlug))
+			keyRender = bracketStyle.Render("[") +
+				keyStyle.Render(fmt.Sprintf("%2d", iss.Number)) +
+				bracketStyle.Render("]")
 		}
 
-		stripe := lipgloss.NewStyle().Foreground(featureColor(iss.FeatureSlug)).Render(stripeChar)
 		emit := func(content string) {
-			lines = append(lines, stripe+styler.Render(content))
+			lines = append(lines, styler.Render(content))
 		}
 
 		// Always use the packed layout: [KEY] + one-space gutter + the
