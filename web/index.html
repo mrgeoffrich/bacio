@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>bacio-wasm dev harness</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<!-- xterm.js renders the terminal. Pulled from a CDN here so the dev
+     harness has zero npm setup. bacio-website will bundle properly. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css">
+
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #0F1626; }
+  body {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    color: #DDE4EE;
+    gap: 16px;
+  }
+  h1 { margin: 0; font-weight: 600; font-size: 14px; letter-spacing: 0.04em; color: #74819A; }
+  #term {
+    width: 960px; max-width: calc(100% - 48px);
+    height: 540px;
+    box-shadow: 0 30px 80px -20px rgba(0,0,0,0.6);
+    border-radius: 8px; overflow: hidden;
+  }
+  .status { font-size: 12px; color: #586581; font-family: ui-monospace, monospace; }
+</style>
+
+</head>
+<body>
+
+<h1>bacio-wasm — local dev harness</h1>
+<div id="term"></div>
+<div id="status" class="status">loading wasm…</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
+<script src="dist/wasm_exec.js"></script>
+<script>
+  const term = new Terminal({
+    rows: 28,
+    cols: 110,
+    fontFamily: 'JetBrains Mono, Menlo, Consolas, monospace',
+    fontSize: 13,
+    theme: {
+      background: '#1B2336',
+      foreground: '#DDE4EE',
+      cursor: '#F2DDA0',
+    },
+    cursorBlink: false,
+    convertEol: true,
+  });
+  term.open(document.getElementById('term'));
+
+  // Bridge surface: Go calls window.bacioOnStdout for every chunk it
+  // writes; we forward to xterm.js. Phase 2 will add the stdin half.
+  window.bacioOnStdout = (chunk) => term.write(chunk);
+  window.bacioReady = () => { document.getElementById('status').textContent = 'ready · phase 1'; };
+
+  const status = document.getElementById('status');
+  (async () => {
+    try {
+      const go = new Go();
+      const t0 = performance.now();
+      const result = await WebAssembly.instantiateStreaming(fetch('dist/bacio.wasm'), go.importObject);
+      const ms = (performance.now() - t0).toFixed(0);
+      status.textContent = `loaded in ${ms}ms · starting…`;
+      go.run(result.instance);
+    } catch (err) {
+      console.error(err);
+      status.textContent = 'failed: ' + err.message;
+      term.write('\r\n\x1b[31m[bridge] failed to load WASM: ' + err.message + '\x1b[0m');
+    }
+  })();
+</script>
+
+</body>
+</html>
