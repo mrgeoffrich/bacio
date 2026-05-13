@@ -4,9 +4,20 @@ package inputs
 // session_id, actor are required. Mutable fields (model, mode, host,
 // branch) are overwritten on every register/heartbeat — pass them only
 // when they apply.
+//
+// Agent is the persistent identity slug (e.g. "cheerful-otter@claude.shiny");
+// optional but recommended — without it the session has no link to a
+// long-lived identity, so cross-session correlation falls back to actor
+// matching. Set NewIdentity true on the first register from a fresh
+// .bacio/agent (no file yet) — bacio will then error with "agent name
+// taken" if the slug clashes with another agent's, prompting the agent
+// to regenerate. Leave NewIdentity false on subsequent registers
+// reading the persisted slug from disk; the upsert is then idempotent.
 type AgentRegisterInput struct {
 	SessionID      string `json:"session_id"`
 	Actor          string `json:"actor"`
+	Agent          string `json:"agent,omitempty"`
+	NewIdentity    bool   `json:"new_identity,omitempty"`
 	Model          string `json:"model,omitempty"`
 	PermissionMode string `json:"permission_mode,omitempty"`
 	Host           string `json:"host,omitempty"`

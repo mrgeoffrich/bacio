@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -267,6 +268,90 @@ func TestReleaseClaimErrorPaths(t *testing.T) {
 	}
 	if _, err := s.ReleaseAgentClaim("does-not-exist", iss.ID); err == nil {
 		t.Fatalf("expected error releasing from unknown session, got nil")
+	}
+}
+
+// TestUpsertAgentRequireNewClash locks in the identity-clash semantic:
+// UpsertAgent(name, requireNew=true) on a taken name returns
+// ErrAgentNameTaken so the agent loop can detect the clash via
+// errors.Is and regenerate its slug. requireNew=false reuses silently.
+func TestUpsertAgentRequireNewClash(t *testing.T) {
+	s := newTestStore(t)
+	first, created, err := s.UpsertAgent("cheerful-otter@claude.shiny", true)
+	if err != nil {
+		t.Fatalf("first claim: %v", err)
+	}
+	if !created || first.Name != "cheerful-otter@claude.shiny" {
+		t.Fatalf("expected created=true with the slug, got created=%v name=%q", created, first.Name)
+	}
+	_, _, err = s.UpsertAgent("cheerful-otter@claude.shiny", true)
+	if !errors.Is(err, ErrAgentNameTaken) {
+		t.Fatalf("expected ErrAgentNameTaken on second --new, got: %v", err)
+	}
+	again, created, err := s.UpsertAgent("cheerful-otter@claude.shiny", false)
+	if err != nil {
+		t.Fatalf("reuse without requireNew: %v", err)
+	}
+	if created {
+		t.Fatalf("expected created=false on reuse, got true")
+	}
+	if again.ID != first.ID {
+		t.Fatalf("reuse returned a different row: %d → %d", first.ID, again.ID)
+	}
+}
+
+// TestSessionLinksToAgent locks in the join: registering a session
+// with AgentID populated stores the FK, and the LEFT JOIN in
+// GetAgentSession returns the agent name back through AgentName.
+func TestSessionLinksToAgent(t *testing.T) {
+	s, repo, _ := seedRepoAndIssue(t)
+	ag, _, err := s.UpsertAgent("quiet-falcon@claude.shiny", true)
+	if err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "sess-link", RepoID: repo.ID, AgentID: &ag.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register session: %v", err)
+	}
+	got, err := s.GetAgentSession("sess-link")
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if got.AgentID == nil || *got.AgentID != ag.ID {
+		t.Fatalf("AgentID = %v, want %d", got.AgentID, ag.ID)
+	}
+	if got.AgentName != "quiet-falcon@claude.shiny" {
+		t.Fatalf("AgentName = %q, want quiet-falcon@claude.shiny", got.AgentName)
+	}
+}
+
+// TestSessionUpsertPreservesAgentID locks in that a heartbeat-style
+// upsert with AgentID=nil doesn't clobber the previously-linked
+// agent_id (COALESCE in the ON CONFLICT clause).
+func TestSessionUpsertPreservesAgentID(t *testing.T) {
+	s, repo, _ := seedRepoAndIssue(t)
+	ag, _, err := s.UpsertAgent("bold-lynx@claude.shiny", true)
+	if err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "sess-preserve", RepoID: repo.ID, AgentID: &ag.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("first register: %v", err)
+	}
+	// Second upsert with AgentID=nil (mimics heartbeat / no-identity caller).
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "sess-preserve", RepoID: repo.ID, AgentID: nil, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("second register: %v", err)
+	}
+	got, err := s.GetAgentSession("sess-preserve")
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if got.AgentID == nil || *got.AgentID != ag.ID {
+		t.Fatalf("AgentID was clobbered: got %v, want %d", got.AgentID, ag.ID)
 	}
 }
 

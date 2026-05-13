@@ -27,6 +27,7 @@ func projectAgentSession(repo *model.Repo, in inputs.AgentRegisterInput) *model.
 		SessionID:      in.SessionID,
 		RepoID:         repo.ID,
 		RepoPrefix:     repo.Prefix,
+		AgentName:      in.Agent,
 		Actor:          in.Actor,
 		Model:          in.Model,
 		PermissionMode: in.PermissionMode,
@@ -38,12 +39,30 @@ func projectAgentSession(repo *model.Repo, in inputs.AgentRegisterInput) *model.
 }
 
 func (c *localClient) RegisterAgent(ctx context.Context, repo *model.Repo, in inputs.AgentRegisterInput, dryRun bool) (*model.AgentSession, error) {
+	// Resolve agent identity (optional). When --new is set we must
+	// commit the agents row *before* the session upsert so that the
+	// FK on agent_sessions.agent_id resolves to a real row; dry-run
+	// short-circuits before any write hits the DB. On clash the store
+	// returns ErrAgentNameTaken and we surface it verbatim so the
+	// agent loop can detect the case (`errors.Is(..., ErrAgentNameTaken)`)
+	// and retry with a fresh slug.
+	var agentID *int64
+	var agentCreated bool
+	if in.Agent != "" && !dryRun {
+		ag, created, err := c.store.UpsertAgent(in.Agent, in.NewIdentity)
+		if err != nil {
+			return nil, err
+		}
+		agentID = &ag.ID
+		agentCreated = created
+	}
 	if dryRun {
 		return projectAgentSession(repo, in), nil
 	}
 	sess, err := c.store.UpsertAgentSession(store.UpsertAgentSessionIn{
 		SessionID:      in.SessionID,
 		RepoID:         repo.ID,
+		AgentID:        agentID,
 		Actor:          in.Actor,
 		Model:          in.Model,
 		PermissionMode: in.PermissionMode,
@@ -52,6 +71,13 @@ func (c *localClient) RegisterAgent(ctx context.Context, repo *model.Repo, in in
 	})
 	if err != nil {
 		return nil, err
+	}
+	if agentCreated {
+		c.recordOp(model.HistoryEntry{
+			RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+			Op: "agent.identity.create", Kind: "agent",
+			TargetID: agentID, TargetLabel: in.Agent,
+		})
 	}
 	c.recordOp(model.HistoryEntry{
 		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
@@ -251,6 +277,9 @@ func (c *localClient) ShowAgentSession(ctx context.Context, sessionID string) (*
 
 func agentRegisterDetails(sess *model.AgentSession) string {
 	var parts []string
+	if sess.AgentName != "" {
+		parts = append(parts, "agent="+sess.AgentName)
+	}
 	if sess.Model != "" {
 		parts = append(parts, "model="+sess.Model)
 	}

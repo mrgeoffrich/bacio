@@ -116,6 +116,8 @@ var (
 	ExampleAgentRegister = AgentRegisterInput{
 		SessionID:      "092d8907-a5ed-48cf-9fdd-22c3941f3710",
 		Actor:          "agent-claude",
+		Agent:          "cheerful-otter@claude.shiny",
+		NewIdentity:    true,
 		Model:          "claude-sonnet-4-6",
 		PermissionMode: "acceptEdits",
 		Host:           "shiny.local",

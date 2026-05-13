@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,6 +16,7 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/inputio"
 	"github.com/mrgeoffrich/bacio/internal/model"
+	"github.com/mrgeoffrich/bacio/internal/store"
 	"github.com/mrgeoffrich/bacio/internal/timeparse"
 )
 
@@ -57,15 +59,28 @@ intent — it does NOT move the issue or change its assignee; use
 
 func agentRegisterCmd() *cobra.Command {
 	var (
-		sessionID, modelStr, mode, host, branch, rawInput string
+		sessionID, agentName, modelStr, mode, host, branch, rawInput string
+		newIdentity                                                  bool
 	)
 	cmd := &cobra.Command{
 		Use:   "register",
 		Short: "Register (or refresh) this agent session against the current repo",
-		Args:  cobra.NoArgs,
+		Long: `Register or refresh a live agent session.
+
+The optional --agent flag attaches a persistent identity (e.g.
+"cheerful-otter@claude.shiny") so cross-session activity correlates
+back to one logical agent rather than dissolving on every /clear.
+
+The skill convention: on first session in a repo, generate a fresh
+slug and register with --agent <slug> --new. The --new flag asserts
+"this name MUST be new" — bacio errors with "agent name already
+taken" if the slug clashes with another agent's, so the agent loop
+can retry with a fresh slug. Once accepted, persist the chosen name
+to .bacio/agent and reuse it on subsequent registers (without --new).`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			raw, err := parseJSONInput(cmd, args, rawInput,
-				"session", "model", "mode", "host", "branch")
+				"session", "agent", "new", "model", "mode", "host", "branch")
 			if err != nil {
 				return err
 			}
@@ -85,6 +100,8 @@ func agentRegisterCmd() *cobra.Command {
 			return runAgentRegister(inputs.AgentRegisterInput{
 				SessionID:      sid,
 				Actor:          actor(),
+				Agent:          agentName,
+				NewIdentity:    newIdentity,
 				Model:          modelStr,
 				PermissionMode: mode,
 				Host:           orDefault(host, detectedHost),
@@ -93,6 +110,8 @@ func agentRegisterCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&sessionID, "session", "", "session id (default: $CLAUDE_CODE_SESSION_ID)")
+	cmd.Flags().StringVar(&agentName, "agent", "", "persistent identity slug (e.g. cheerful-otter@claude.shiny)")
+	cmd.Flags().BoolVar(&newIdentity, "new", false, "assert --agent is a fresh slug; errors if it clashes (loop with a new slug)")
 	cmd.Flags().StringVar(&modelStr, "model", "", "model identifier (e.g. claude-sonnet-4-6)")
 	cmd.Flags().StringVar(&mode, "mode", "", "permission mode (plan/acceptEdits/bypass/...)")
 	cmd.Flags().StringVar(&host, "host", "", "hostname (default: os.Hostname())")
@@ -104,6 +123,9 @@ func agentRegisterCmd() *cobra.Command {
 func runAgentRegister(in inputs.AgentRegisterInput) error {
 	if err := requireLocalForAgent("register"); err != nil {
 		return err
+	}
+	if in.NewIdentity && in.Agent == "" {
+		return fmt.Errorf("--new requires --agent <name>")
 	}
 	if in.Actor == "" {
 		in.Actor = actor()
@@ -119,6 +141,11 @@ func runAgentRegister(in inputs.AgentRegisterInput) error {
 	}
 	sess, err := c.RegisterAgent(context.Background(), repo, in, opts.dryRun)
 	if err != nil {
+		if errors.Is(err, store.ErrAgentNameTaken) {
+			// Stable phrasing so agent-loop code can grep stderr for
+			// "agent name already taken" and decide to regenerate.
+			return fmt.Errorf("agent name %q already taken — generate a fresh slug and retry with --new", in.Agent)
+		}
 		return err
 	}
 	if opts.dryRun {
@@ -518,7 +545,7 @@ func emitAgentSessionTable(sessions []*model.AgentSession) error {
 		return nil
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "SESSION\tACTOR\tREPO\tMODEL\tBRANCH\tLAST-SEEN\tSTATUS")
+	fmt.Fprintln(w, "SESSION\tAGENT\tACTOR\tREPO\tMODEL\tBRANCH\tLAST-SEEN\tSTATUS")
 	now := time.Now().UTC()
 	for _, s := range sessions {
 		status := "alive"
@@ -526,9 +553,9 @@ func emitAgentSessionTable(sessions []*model.AgentSession) error {
 			status = "ended:" + s.EndReason
 		}
 		seen := humanAgo(now.Sub(s.LastSeenAt.UTC()))
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			shortID(s.SessionID), s.Actor, s.RepoPrefix, dashIfEmpty(s.Model),
-			dashIfEmpty(s.Branch), seen, status)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			shortID(s.SessionID), dashIfEmpty(s.AgentName), s.Actor, s.RepoPrefix,
+			dashIfEmpty(s.Model), dashIfEmpty(s.Branch), seen, status)
 	}
 	return w.Flush()
 }
@@ -536,6 +563,7 @@ func emitAgentSessionTable(sessions []*model.AgentSession) error {
 func emitAgentSessionDetail(view *client.AgentSessionView) error {
 	s := view.Session
 	fmt.Fprintf(os.Stdout, "Session:  %s\n", s.SessionID)
+	fmt.Fprintf(os.Stdout, "Agent:    %s\n", dashIfEmpty(s.AgentName))
 	fmt.Fprintf(os.Stdout, "Actor:    %s\n", s.Actor)
 	fmt.Fprintf(os.Stdout, "Repo:     %s\n", s.RepoPrefix)
 	fmt.Fprintf(os.Stdout, "Model:    %s\n", dashIfEmpty(s.Model))
