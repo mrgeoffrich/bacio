@@ -194,6 +194,9 @@ func syncRunDetails(res *sync.RunResult) string {
 	if res.Import != nil {
 		parts += fmt.Sprintf("inserted=%d updated=%d noop=%d ",
 			res.Import.Inserted, res.Import.Updated, res.Import.NoOp)
+		if res.Import.Skipped > 0 {
+			parts += fmt.Sprintf("skipped=%d ", res.Import.Skipped)
+		}
 	}
 	if res.Export != nil && res.Export.ExportResult != nil {
 		parts += fmt.Sprintf("renames=%d writes=%d deletes=%d ",
@@ -599,11 +602,22 @@ func recordSyncImportOps(s *store.Store, res *sync.ImportResult) {
 	details := fmt.Sprintf("repos=%d issues=%d features=%d documents=%d comments=%d inserted=%d updated=%d noop=%d",
 		res.Repos, res.Issues, res.Features, res.Documents, res.Comments,
 		res.Inserted, res.Updated, res.NoOp)
+	if res.Skipped > 0 {
+		details += fmt.Sprintf(" skipped=%d", res.Skipped)
+	}
 	recordOp(s, model.HistoryEntry{
 		Op:      "sync.import",
 		Kind:    "repo",
 		Details: details,
 	})
+	for _, sk := range res.SkippedStale {
+		recordOp(s, model.HistoryEntry{
+			Op:          "sync.skip_stale_remote",
+			Kind:        sk.Kind,
+			TargetLabel: sk.Label,
+			Details:     fmt.Sprintf("uuid=%s local=%s remote=%s", sk.UUID, sk.LocalUpdated, sk.RemoteUpdated),
+		})
+	}
 	for _, r := range res.Renumbered {
 		recordOp(s, model.HistoryEntry{
 			Op:          "sync.renumber",

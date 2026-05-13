@@ -23,10 +23,11 @@ func (e *Engine) applyFeatures(tx *sql.Tx, sr *scannedRepo, repo *model.Repo, re
 		hash := contentHashFeature(sf)
 		var existingID int64
 		var existingSlug, existingTitle, existingDescription string
+		var existingUpdatedAt time.Time
 		err := tx.QueryRow(
-			`SELECT id, slug, title, description FROM features WHERE uuid = ?`,
+			`SELECT id, slug, title, description, updated_at FROM features WHERE uuid = ?`,
 			uuid,
-		).Scan(&existingID, &existingSlug, &existingTitle, &existingDescription)
+		).Scan(&existingID, &existingSlug, &existingTitle, &existingDescription, &existingUpdatedAt)
 		if errors.Is(err, sql.ErrNoRows) {
 			// Insert.
 			if _, err := tx.Exec(
@@ -44,6 +45,21 @@ func (e *Engine) applyFeatures(tx *sql.Tx, sr *scannedRepo, repo *model.Repo, re
 		}
 		if err != nil {
 			return err
+		}
+		// Last-writer-wins (BACI-5): if the remote YAML is older than
+		// the local row, preserve local and surface a skip event. We
+		// leave sync_state untouched so the next import re-evaluates;
+		// the export phase on this run writes the newer local out.
+		if sf.Parsed.UpdatedAt.Before(existingUpdatedAt) {
+			res.Skipped++
+			res.SkippedStale = append(res.SkippedStale, SkippedStaleEntry{
+				Kind:          "feature",
+				UUID:          uuid,
+				Label:         existingSlug,
+				LocalUpdated:  existingUpdatedAt.UTC().Format(time.RFC3339),
+				RemoteUpdated: sf.Parsed.UpdatedAt.UTC().Format(time.RFC3339),
+			})
+			continue
 		}
 		// Update if any field differs.
 		if existingSlug != sf.Parsed.Slug || existingTitle != sf.Parsed.Title || existingDescription != sf.Description {
@@ -82,6 +98,11 @@ func (e *Engine) applyIssues(tx *sql.Tx, sr *scannedRepo, repo *model.Repo, res 
 	// Track which issues were inserted (vs updated) so the
 	// next_issue_number bump only fires when the issue is new.
 	idByUUID := make(map[string]int64, len(uuids))
+	// Track which uuids the LWW gate skipped in pass 1 so pass 2
+	// leaves their side-data alone too — otherwise tags/PRs/relations
+	// would be reverted while the row body was preserved, which is
+	// inconsistent and undoes part of the LWW guarantee.
+	skipped := make(map[string]bool, len(uuids))
 
 	// Pass 1: insert/update issue rows.
 	for _, uuid := range uuids {
@@ -112,11 +133,12 @@ func (e *Engine) applyIssues(tx *sql.Tx, sr *scannedRepo, repo *model.Repo, res 
 			existingDescription string
 			existingState       string
 			existingAssignee    string
+			existingUpdatedAt   time.Time
 		)
 		err := tx.QueryRow(
-			`SELECT id, number, feature_id, title, description, state, assignee FROM issues WHERE uuid = ?`,
+			`SELECT id, number, feature_id, title, description, state, assignee, updated_at FROM issues WHERE uuid = ?`,
 			uuid,
-		).Scan(&existingID, &existingNumber, &existingFeatureID, &existingTitle, &existingDescription, &existingState, &existingAssignee)
+		).Scan(&existingID, &existingNumber, &existingFeatureID, &existingTitle, &existingDescription, &existingState, &existingAssignee, &existingUpdatedAt)
 		if errors.Is(err, sql.ErrNoRows) {
 			res2, err := tx.Exec(
 				`INSERT INTO issues (uuid, repo_id, number, feature_id, title, description, state, assignee, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -132,6 +154,20 @@ func (e *Engine) applyIssues(tx *sql.Tx, sr *scannedRepo, repo *model.Repo, res 
 			res.Inserted++
 		} else if err != nil {
 			return err
+		} else if si.Parsed.UpdatedAt.Before(existingUpdatedAt) {
+			// Last-writer-wins (BACI-5): remote YAML is older than the
+			// local row. Preserve local body, tags, PRs, relations; the
+			// export phase will write the newer local content out.
+			skipped[uuid] = true
+			idByUUID[uuid] = existingID
+			res.Skipped++
+			res.SkippedStale = append(res.SkippedStale, SkippedStaleEntry{
+				Kind:          "issue",
+				UUID:          uuid,
+				Label:         fmt.Sprintf("%s-%d", repo.Prefix, existingNumber),
+				LocalUpdated:  existingUpdatedAt.UTC().Format(time.RFC3339),
+				RemoteUpdated: si.Parsed.UpdatedAt.UTC().Format(time.RFC3339),
+			})
 		} else {
 			// Skip the UPDATE if every field is already equal — this
 			// keeps a re-import of an unchanged sync repo reporting
@@ -167,6 +203,13 @@ func (e *Engine) applyIssues(tx *sql.Tx, sr *scannedRepo, repo *model.Repo, res 
 	// referenced by another issue's relations now has a row, so
 	// resolveRelationsTx won't trip a false dangling.
 	for _, uuid := range uuids {
+		if skipped[uuid] {
+			// LWW skipped this row in pass 1; leave its side-data
+			// intact and don't bump sync_state — the export phase will
+			// emit the newer local content and the next round-trip
+			// will close the loop.
+			continue
+		}
 		si := sr.Issues[uuid]
 		issueID := idByUUID[uuid]
 		hash := contentHashIssue(si)
@@ -373,11 +416,13 @@ func (e *Engine) applyDocuments(tx *sql.Tx, sr *scannedRepo, repo *model.Repo, r
 			existingType       string
 			existingContent    string
 			existingSourcePath string
+			existingUpdatedAt  time.Time
 		)
 		err := tx.QueryRow(
-			`SELECT id, filename, type, content, source_path FROM documents WHERE uuid = ?`,
+			`SELECT id, filename, type, content, source_path, updated_at FROM documents WHERE uuid = ?`,
 			uuid,
-		).Scan(&existingID, &existingFilename, &existingType, &existingContent, &existingSourcePath)
+		).Scan(&existingID, &existingFilename, &existingType, &existingContent, &existingSourcePath, &existingUpdatedAt)
+		var stale bool
 		if errors.Is(err, sql.ErrNoRows) {
 			res2, err := tx.Exec(
 				`INSERT INTO documents (uuid, repo_id, filename, type, content, size_bytes, source_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -392,6 +437,19 @@ func (e *Engine) applyDocuments(tx *sql.Tx, sr *scannedRepo, repo *model.Repo, r
 			res.Inserted++
 		} else if err != nil {
 			return err
+		} else if sd.Parsed.UpdatedAt.Before(existingUpdatedAt) {
+			// Last-writer-wins (BACI-5): remote YAML is older than the
+			// local row. Preserve local body + links; the export phase
+			// writes the newer local content out on this run.
+			stale = true
+			res.Skipped++
+			res.SkippedStale = append(res.SkippedStale, SkippedStaleEntry{
+				Kind:          "document",
+				UUID:          uuid,
+				Label:         existingFilename,
+				LocalUpdated:  existingUpdatedAt.UTC().Format(time.RFC3339),
+				RemoteUpdated: sd.Parsed.UpdatedAt.UTC().Format(time.RFC3339),
+			})
 		} else {
 			// Same noop-vs-update gate as applyFeatures / applyIssues:
 			// only run the UPDATE if any salient field actually
@@ -413,6 +471,11 @@ func (e *Engine) applyDocuments(tx *sql.Tx, sr *scannedRepo, repo *model.Repo, r
 			} else {
 				res.NoOp++
 			}
+		}
+		if stale {
+			// Leave doc_links + sync_state intact for the same LWW
+			// reasons as issues' pass-2 skip.
+			continue
 		}
 		// Replace links wholesale.
 		if err := e.replaceDocLinksTx(tx, existingID, sd.Parsed.Filename, uuid, sd.Parsed.Links, res); err != nil {

@@ -34,12 +34,33 @@ type ImportResult struct {
 	Inserted int `json:"inserted"`
 	Updated  int `json:"updated"`
 	NoOp     int `json:"noop"`
+	// Skipped counts records whose remote YAML carried an older
+	// `updated_at` than the matching local DB row. Per the
+	// last-writer-wins contract advertised in SKILL.md § Git-backed
+	// sync, the importer preserves the newer local version instead of
+	// silently downgrading. The export phase on the same run writes
+	// the local content back to YAML so the loop closes naturally.
+	Skipped      int                 `json:"skipped,omitempty"`
+	SkippedStale []SkippedStaleEntry `json:"skipped_stale,omitempty"`
 
 	Renumbered []RenumberEntry `json:"renumbered,omitempty"`
 	Renamed    []RenameEntry   `json:"renamed,omitempty"`
 	Deleted    []DeletionEntry `json:"deleted,omitempty"`
 	Dangling   []DanglingRef   `json:"dangling_refs,omitempty"`
 	Warnings   []string        `json:"warnings,omitempty"`
+}
+
+// SkippedStaleEntry records one record whose remote YAML's
+// `updated_at` was older than the local DB row's. The import phase
+// preserved the local row and left sync_state untouched so the next
+// run re-evaluates; the export phase writes the newer local content
+// out on this same run.
+type SkippedStaleEntry struct {
+	Kind          string `json:"kind"` // "issue" | "feature" | "document"
+	UUID          string `json:"uuid"`
+	Label         string `json:"label,omitempty"` // issue key, feature slug, or doc filename
+	LocalUpdated  string `json:"local_updated_at"`
+	RemoteUpdated string `json:"remote_updated_at"`
 }
 
 // RenumberEntry records one issue renumber driven by the
