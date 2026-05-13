@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react'
 import {Events, WML} from "@wailsio/runtime";
-import {GreetService} from "../bindings/github.com/mrgeoffrich/bacio/desktop";
+import {FeatureService, GreetService} from "../bindings/github.com/mrgeoffrich/bacio/desktop";
 
 function App() {
   const [name, setName] = useState<string>('');
   const [result, setResult] = useState<string>('Please enter your name below 👇');
   const [time, setTime] = useState<string>('Listening for Time event...');
+  const [featureSummary, setFeatureSummary] = useState<string>('Loading features…');
 
   const doGreet = () => {
     let localName = name;
@@ -22,6 +23,14 @@ function App() {
   useEffect(() => {
     Events.On('time', (timeValue: any) => {
       setTime(timeValue.data);
+    });
+    FeatureService.List().then((features) => {
+      console.log('features from bacio store:', features);
+      const count = features?.length ?? 0;
+      setFeatureSummary(`Found ${count} feature${count === 1 ? '' : 's'} in the local bacio store`);
+    }).catch((err: any) => {
+      console.error('FeatureService.List failed:', err);
+      setFeatureSummary(`FeatureService.List failed: ${err?.message ?? err}`);
     });
     // Reload WML so it picks up the wml tags
     WML.Reload();
@@ -48,6 +57,7 @@ function App() {
       <div className="footer">
         <div><p>Click on the Wails logo to learn more</p></div>
         <div><p>{time}</p></div>
+        <div><p>{featureSummary}</p></div>
       </div>
     </div>
   )

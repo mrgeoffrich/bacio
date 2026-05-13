@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/mrgeoffrich/bacio/internal/store"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -29,6 +30,16 @@ func init() {
 // logs any error that might occur.
 func main() {
 
+	dbPath, err := store.DefaultPath()
+	if err != nil {
+		log.Fatalf("resolve default db path: %v", err)
+	}
+	s, err := store.Open(dbPath)
+	if err != nil {
+		log.Fatalf("open bacio store at %s: %v", dbPath, err)
+	}
+	defer s.DB.Close()
+
 	// Create a new Wails application by providing the necessary options.
 	// Variables 'Name' and 'Description' are for application metadata.
 	// 'Assets' configures the asset server with the 'FS' variable pointing to the frontend files.
@@ -39,6 +50,7 @@ func main() {
 		Description: "A demo of using raw HTML & CSS",
 		Services: []application.Service{
 			application.NewService(&GreetService{}),
+			application.NewService(NewFeatureService(s)),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
@@ -75,7 +87,7 @@ func main() {
 	}()
 
 	// Run the application. This blocks until the application has been exited.
-	err := app.Run()
+	err = app.Run()
 
 	// If an error occurred while running the application, log it and exit.
 	if err != nil {
