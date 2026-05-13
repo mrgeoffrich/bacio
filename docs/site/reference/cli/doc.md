@@ -13,7 +13,7 @@ Documents are markdown notes (or any text body) that live inside the bacio DB an
 |---|---|
 | `bacio doc add <filename>` | Create a document. |
 | `bacio doc upsert <filename>` | Create or update by filename. Use this from skills to skip the "show, branch, then add or edit" dance. |
-| `bacio doc list [--type <type>]` | List documents. Metadata only — never inlines `content`. |
+| `bacio doc list` | List documents. Metadata only — never inlines `content`. Filters: `--type <type>`. Inside a sync repo, `--repo <PREFIX>` is required (or `--all-repos`). |
 | `bacio doc show <filename> [--raw]` | Print metadata + content + links. `--raw` prints content only. `--metadata` skips the body. |
 | `bacio doc edit <filename>` | Patch type / content. |
 | `bacio doc rename <old> <new>` | Rename in place. Links are preserved. Optional `--type <new-type>`. |
@@ -24,6 +24,16 @@ Documents are markdown notes (or any text body) that live inside the bacio DB an
 | `bacio doc unlink <filename> <ISSUE-KEY\|feature-slug>` | Remove a link. |
 
 `<ISSUE-KEY|feature-slug>` auto-detects: anything matching `PREFIX-N` is an issue key, otherwise it's a feature slug in the current repo.
+
+### `bacio doc list` flags
+
+| Flag | What it does |
+|---|---|
+| `--type <type>` | Filter by document type. |
+| `--repo <PREFIX>` | Limit to one repo prefix. Required when run inside a [sync repo](/guides/sync-across-machines) (or pass `--all-repos`); ignored otherwise. |
+| `--all-repos` | List across every tracked repo. Inside a sync repo, walks every prefix recorded in `index.yaml`. |
+
+Inside a sync repo the command reads `repos/<PREFIX>/docs/*/doc.yaml` off disk; `--type` filters as in project-repo mode. Metadata only — `content` is never inlined.
 
 ## Document types
 

@@ -8,12 +8,15 @@ description: The kanban view — one column per issue state, cards keyboard-navi
 The Board (tab `1`) is the kanban view of the current repo's issues. One column per state, cards stacked top-down, focus moves with the arrow-style keys.
 
 ```
-┌─ Todo ──┬─ In Progress ─┬─ Needs Action ─┬─ In Review ─┬─ Done ──┬─ Cancelled ─┐
-│ MINI-7  │ MINI-3        │ MINI-8         │ MINI-1      │ MINI-2  │ MINI-11     │
-│ MINI-5  │ MINI-4        │                │             │ MINI-6  │             │
-│         │               │                │             │         │             │
-└─────────┴───────────────┴────────────────┴─────────────┴─────────┴─────────────┘
+┌─ Todo ─────┬─ In Progress ─┬─ Needs Action ─┬─ In Review ─┬─ Done ─────┬─ Cancelled ─┐
+│ [ 7] Login │ [ 3] Refactor │ [ 8] Awaiting  │ [ 1] Render │ [ 2] Wire  │ [11] Drop   │
+│      broke │      session… │      copy      │      cards  │      audit │      legacy │
+│ [ 5] Empty │ [ 4] Tag      │                │             │ [ 6] Seed  │             │
+│      state │      colours  │                │             │      docs  │             │
+└─ 2 ────────┴─ 2 ───────────┴─ 1 ────────────┴─ 1 ─────────┴─ 2 ────────┴─ 1 ────────┘
 ```
+
+The column title sits inside the top border; the issue count (and a `↑` / `↓` / `↕` arrow if the column scrolls beyond the visible window) sits inside the bottom border. Cards drop the repo prefix — it's already visible in the tab strip's top-right chip — and show only the issue number, padded to two characters so columns of mixed-width numbers stay aligned: `[ 1]`, `[ 2]`, `[10]`, `[123]`. The brackets around the number are tinted with the per-feature colour; selected cards keep the brackets plain so nested styling doesn't punch holes in the selection background.
 
 `needs_action` is for issues where an LLM agent is paused waiting on the user (the assignee stays, the column flags that the next move is the human's). For the full state semantics see [data model — Issue](/concepts/data-model#issue).
 
@@ -62,7 +65,7 @@ A modal that lets you toggle which state columns are visible. Useful for hiding 
 | `j` / `k` | Move selection. |
 | `space` | Toggle the focused column (refuses to hide the last visible one). |
 | `a` | Show all columns. |
-| `n` | Minimise — keep only the first state visible. |
+| `n` | Minimal — keep only the first state column visible (the in-app footer reads `n minimal`). |
 | `esc` | Close. |
 
 Hidden columns persist per-repo (in `tui_settings(repo_id, key, value)`), so the next time you open the TUI you're back where you left off.

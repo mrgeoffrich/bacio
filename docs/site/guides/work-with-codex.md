@@ -22,15 +22,17 @@ That drops `SKILL.md` into `<repo>/.claude/skills/bacio/`. Restart Codex in this
 
 ## How Codex drives bacio
 
-Same five-step flow as Claude Code, because the contract is the same:
+Same flow as Claude Code, because the contract is the same — bracketed by *register* and *end*:
 
+0. **Declare itself** — `bacio agent register --user agent-codex --agent <slug>` at session start, then `bacio agent claim <KEY>` when it starts focused work. On first contact with a repo, Codex generates a memorable slug (e.g. `clever-lynx@codex.shiny`), registers with `--new`, and persists it to `.bacio/agent` so the identity is reused next time.
 1. **Discover** — `bacio schema show <command>` if Codex is unsure of the payload shape.
 2. **Compose** — build the JSON payload.
 3. **Rehearse** — `--dry-run` for anything destructive.
 4. **Execute** — run for real with `--user <agent-name>` so the audit log attributes the work to the agent, not to your OS user.
 5. **Query lean** — `*.list` with filters; `bacio issue brief <KEY>` for bulk-context reads.
+6. **Tear down** — `bacio agent release <KEY>` when Codex stops, `bacio agent end --reason stop` at session end (auto-releases anything still claimed).
 
-See [How agents drive bacio](/concepts/how-agents-drive-bacio) for the rules behind the contract.
+See [How agents drive bacio](/concepts/how-agents-drive-bacio) for the rules behind the contract, and [`bacio agent`](/reference/cli/agent) for the registry surface.
 
 ## Prompts that work
 
@@ -79,6 +81,7 @@ In practice, almost nothing. Both agents:
 The handful of practical differences:
 
 - **Identity in the audit log.** Pass `--user agent-codex` (or whatever name you give the agent) so `bacio history` distinguishes its work from yours.
+- **Persistent slug.** Codex picks its own `--agent <slug>` and persists it to `.bacio/agent` — the harness suffix differs from Claude (`codex` vs `claude`) but the bootstrap loop in [`bacio agent`](/reference/cli/agent#pick-your-identity) is identical. Make sure `.bacio/agent` is gitignored.
 - **Restart cadence.** After `bacio install-skill` or `brew upgrade bacio`, restart Codex in this repo so the new skill loads.
 
 ## Sample skills work the same way
@@ -112,5 +115,6 @@ The same tells apply across both agents:
 
 - **[Work with Claude Code](/guides/work-with-claude-code)** — the equivalent guide; the workflow patterns are essentially identical.
 - **[How agents drive bacio](/concepts/how-agents-drive-bacio)** — the six rules behind the contract.
+- **[`bacio agent`](/reference/cli/agent)** — the registry Codex registers itself against.
 - **[`bacio install-skill`](/reference/cli/install-skill)** — installs the canonical skill at `.claude/skills/bacio/SKILL.md`.
 - **[`bacio install-sample-skills`](/reference/cli/install-sample-skills)** — the workflow packs.

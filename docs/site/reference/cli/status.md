@@ -55,7 +55,17 @@ Returns a `statusReport` shape:
 {
   "db_path": "/Users/you/.bacio/db.sqlite",
   "in_repo": true,
-  "repo": { "prefix": "MINI", "name": "bacio", "path": "...", "remote_url": "...", "next_issue_number": 13, ... },
+  "repo": {
+    "id": 1,
+    "uuid": "0190a44e-...-uuid",
+    "prefix": "MINI",
+    "name": "bacio",
+    "path": "/Users/you/code/bacio",
+    "remote_url": "git@github.com:mrgeoffrich/bacio.git",
+    "next_issue_number": 13,
+    "created_at": "2026-04-01T08:12:31Z",
+    "updated_at": "2026-05-12T14:32:01Z"
+  },
   "just_registered": false,
   "stats": {
     "features": 3,
@@ -66,7 +76,7 @@ Returns a `statusReport` shape:
 }
 ```
 
-In the outside-a-repo branch, `repo` is absent and `stats` carries `tracked_repos` and `total_issues` instead of the per-repo fields.
+`repo` is the full `model.Repo` shape (`id`, `uuid`, `prefix`, `name`, `path`, `remote_url`, `next_issue_number`, `created_at`, `updated_at`); `remote_url` is omitted when there's no remote configured. In the outside-a-repo branch, `repo` is absent and `stats` carries `tracked_repos` and `total_issues` instead of the per-repo fields. `just_registered` is omitted when false.
 
 ## See also
 

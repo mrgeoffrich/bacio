@@ -113,12 +113,13 @@ Markdown notes that live in the DB alongside your issues, linkable to one or man
 bacio doc add design.md --type architecture --from-path /tmp/design.md
 bacio doc list
 bacio doc show design.md
-bacio doc link design.md auth-rewrite          # link to a feature
-bacio doc link design.md MYPR-3                # link to an issue
-bacio doc edit design.md --from-path /tmp/design.md
+bacio doc link design.md auth-rewrite                # link to a feature
+bacio doc link design.md MYPR-3                      # link to an issue
+bacio doc upsert design.md --from-path /tmp/design.md  # idempotent re-import from disk
+bacio doc edit design.md --content-file /tmp/design.md # or update body only on an existing doc
 ```
 
-`--from-path` reads the body from disk on the way in; `bacio doc export design.md` materialises it back to disk.
+`--from-path` (on `doc add` / `doc upsert`) reads the body, derives the filename, and infers the type from the path. `doc edit` doesn't accept `--from-path` — use `--content-file` for the body or `doc upsert` for the full idempotent re-import. `bacio doc export design.md` materialises a doc back to disk.
 
 ## History
 

@@ -11,6 +11,12 @@ Open the full-screen kanban board. Four tabs (Board, Features, Docs, History), a
 bacio tui
 ```
 
+## Flags
+
+| Flag | What it does |
+|---|---|
+| `--repo <PREFIX>` | Open this repo prefix instead of resolving from the current `cwd`. Useful for opening repos that have no real git working tree (e.g. the synthetic data the hidden `bacio demo` seed creates). |
+
 ## Snapshot mode
 
 `--snapshot` renders a single view to stdout non-interactively, at the given terminal size. Useful for layout debugging and CI snapshot tests.

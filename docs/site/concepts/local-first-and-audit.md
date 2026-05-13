@@ -40,29 +40,34 @@ You can read the audit log:
 
 `pruneHistory` runs on every DB open and removes rows older than 60 days. That keeps the local DB lean for read-heavy commands (`bacio history`, the TUI History tab).
 
-If you need long-term records — for compliance, post-mortems, *"when did we decide this?"* — **enable [git-backed sync](/guides/sync-across-machines)**. The audit log is included in the synced YAML repo and survives prune; the sync repo is your long-term archive.
+The audit log is **local-only**. `bacio sync` does not write a history file into the sync repo — there's no `history.yaml` and the per-record YAML doesn't carry audit rows. If you need long-term change tracking — for compliance, post-mortems, *"when did we decide this?"* — **enable [git-backed sync](/guides/sync-across-machines)** and rely on the sync repo's git log over the YAML files. Every state move, edit, rename, and link surfaces as a commit-level diff there, and the git history is forever.
 
 ## What gets written
 
-Mutations are recorded in dotted op form (`<entity>.<verb>`):
+Mutations are recorded in dotted op form (`<entity>.<verb>`). The **kind** column is what `bacio history --kind` actually filters on — note that comment / relation / pr / tag ops all share `kind=issue` because they hang off an issue row.
 
-| Entity | Verbs |
+| Op (`<entity>.<verb>`) | Recorded `kind` |
 |---|---|
-| `repo` | `create`, `delete`, `upgrade_phantom` |
-| `feature` | `create`, `update`, `delete` |
-| `issue` | `create`, `update`, `state`, `assign`, `claim`, `delete` |
-| `comment` | `add` |
-| `relation` | `create`, `delete` |
-| `pr` | `attach`, `detach` |
-| `tag` | `add`, `remove` |
-| `document` | `create`, `update`, `rename`, `delete`, `link`, `unlink` |
-| `sync` | `run`, `init`, `clone`, `import`, `renumber`, `rename`, `delete` |
+| `repo.create`, `repo.upgrade_phantom` | `repo` |
+| `feature.create`, `feature.update`, `feature.delete` | `feature` |
+| `issue.create`, `issue.update`, `issue.state`, `issue.assign`, `issue.claim`, `issue.delete` | `issue` |
+| `comment.add` | `issue` |
+| `relation.create`, `relation.delete` | `issue` |
+| `pr.attach`, `pr.detach` | `issue` |
+| `tag.add`, `tag.remove` | `issue` |
+| `document.create`, `document.update`, `document.rename`, `document.delete`, `document.link`, `document.unlink` | `document` |
+| `agent.identity.create`, `agent.register`, `agent.end`, `agent.claim`, `agent.release` | `agent` |
+| `sync.run`, `sync.init`, `sync.clone`, `sync.import`, `sync.renumber`, `sync.rename`, `sync.delete` | `sync` |
+| `demo.seed` (hidden `bacio demo` command) | `repo` |
 
 Notes:
 
+- The valid values for `bacio history --kind` are therefore `repo`, `feature`, `issue`, `document`, `agent`, and `sync` — filtering by `--kind tag` or `--kind comment` returns nothing.
 - `bacio doc upsert` records `document.create` or `document.update` depending on whether it created the row.
 - `bacio issue unassign` reuses `issue.assign` (with an empty assignee) — there's no separate `issue.unassign` op.
-- `repo.upgrade_phantom` is emitted by `bacio sync` when a placeholder repo (a prefix that existed only in the synced YAML) gets a real local working tree.
+- `issue.claim` is the audit op `bacio issue next` records when it atomically picks the next ready issue; `bacio agent claim` records `agent.claim`, which is the registry intent record only (it does NOT change `assignee` or state).
+- `repo.upgrade_phantom` is emitted by the **auto-register flow** (`resolveRepo` / `EnsureRepo`) when the user runs *any* `bacio` command inside a project working tree whose remote URL matches a phantom repo previously imported via sync. `bacio sync` itself does not emit this op.
+- `bacio agent heartbeat` deliberately does **not** write an audit row — it would flood the log.
 
 **Reads are not logged.** `*.list`, `*.show`, `*.brief` don't produce audit rows. `--dry-run` doesn't either — it explicitly bypasses the write path.
 

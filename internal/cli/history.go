@@ -99,7 +99,7 @@ Time inputs:
 	cmd.Flags().IntVar(&offset, "offset", 0, "skip the first N entries (for pagination)")
 	cmd.Flags().StringVar(&userFilter, "user-filter", "", "filter by actor name")
 	cmd.Flags().StringVar(&opFilter, "op", "", "filter by op (e.g. issue.create)")
-	cmd.Flags().StringVar(&kindFilter, "kind", "", "filter by kind (issue, feature, document, repo)")
+	cmd.Flags().StringVar(&kindFilter, "kind", "", "filter by kind (issue, feature, document, repo, agent, sync)")
 	cmd.Flags().StringVar(&sinceStr, "since", "", "look back this far (e.g. 30m, 1h, 1d, 2w); shorthand for --from")
 	cmd.Flags().StringVar(&fromStr, "from", "", "include entries on/after this timestamp")
 	cmd.Flags().StringVar(&toStr, "to", "", "include entries on/before this timestamp")
