@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -14,7 +15,14 @@ import (
 // projectAgentSession builds the in-memory session object the local
 // client returns from --dry-run paths. Mirrors what UpsertAgentSession
 // would store, minus server-time fields (id, created_at-style stamps).
+// StartedAt / LastSeenAt are stamped with now so dry-run output doesn't
+// surface the zero time (`0001-01-01 …`). For a refresh upsert,
+// StartedAt would actually be preserved by the real write — we don't
+// look that up here to keep dry-run a pure projection, and the
+// LastSeenAt-equals-now case is the honest one for "what would the row
+// look like immediately after this write".
 func projectAgentSession(repo *model.Repo, in inputs.AgentRegisterInput) *model.AgentSession {
+	now := time.Now().UTC()
 	return &model.AgentSession{
 		SessionID:      in.SessionID,
 		RepoID:         repo.ID,
@@ -24,6 +32,8 @@ func projectAgentSession(repo *model.Repo, in inputs.AgentRegisterInput) *model.
 		PermissionMode: in.PermissionMode,
 		Host:           in.Host,
 		Branch:         in.Branch,
+		StartedAt:      now,
+		LastSeenAt:     now,
 	}
 }
 
@@ -124,9 +134,15 @@ func (c *localClient) EndAgent(ctx context.Context, repo *model.Repo, in inputs.
 func (c *localClient) ClaimAgent(ctx context.Context, repo *model.Repo, in inputs.AgentClaimInput, dryRun bool) (*model.AgentClaim, error) {
 	iss, err := c.GetIssueByKey(ctx, repo, in.IssueKey)
 	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, fmt.Errorf("issue %s does not exist in repo %s", in.IssueKey, repo.Prefix)
+		}
 		return nil, err
 	}
 	if _, err := c.store.GetAgentSession(in.SessionID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, fmt.Errorf("session %q is not registered — run `bacio agent register` first", in.SessionID)
+		}
 		return nil, err
 	}
 	if dryRun {
@@ -138,9 +154,15 @@ func (c *localClient) ClaimAgent(ctx context.Context, repo *model.Repo, in input
 			ClaimedAt: now,
 		}, nil
 	}
-	claim, err := c.store.AddAgentClaim(in.SessionID, iss.ID)
+	claim, created, err := c.store.AddAgentClaim(in.SessionID, iss.ID)
 	if err != nil {
 		return nil, err
+	}
+	// Re-claiming an issue this session already has open is a no-op
+	// in the DB — skip the audit row too, otherwise a `claim` poll loop
+	// floods the history table with duplicate entries.
+	if !created {
+		return claim, nil
 	}
 	// Audit against the *issue's* repo, not the cwd repo. Cross-repo
 	// claims (working in BACI but claiming a DEMO-* issue) are valid;
@@ -159,9 +181,15 @@ func (c *localClient) ClaimAgent(ctx context.Context, repo *model.Repo, in input
 func (c *localClient) ReleaseAgent(ctx context.Context, repo *model.Repo, in inputs.AgentReleaseInput, dryRun bool) (*model.AgentClaim, error) {
 	iss, err := c.GetIssueByKey(ctx, repo, in.IssueKey)
 	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, fmt.Errorf("issue %s does not exist in repo %s", in.IssueKey, repo.Prefix)
+		}
 		return nil, err
 	}
 	if _, err := c.store.GetAgentSession(in.SessionID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, fmt.Errorf("session %q is not registered — run `bacio agent register` first", in.SessionID)
+		}
 		return nil, err
 	}
 	if dryRun {
@@ -175,6 +203,9 @@ func (c *localClient) ReleaseAgent(ctx context.Context, repo *model.Repo, in inp
 	}
 	claim, err := c.store.ReleaseAgentClaim(in.SessionID, iss.ID)
 	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, fmt.Errorf("session %q has no open claim on %s", in.SessionID, iss.Key)
+		}
 		return nil, err
 	}
 	issRepoID, issRepoPrefix := iss.RepoID, prefixFromIssueKey(iss.Key)

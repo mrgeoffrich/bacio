@@ -70,7 +70,7 @@ func TestEndAgentSessionReleasesClaims(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	if _, err := s.AddAgentClaim("sess-2", iss.ID); err != nil {
+	if _, _, err := s.AddAgentClaim("sess-2", iss.ID); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 	if _, err := s.EndAgentSession("sess-2", string(model.EndReasonStop)); err != nil {
@@ -107,7 +107,7 @@ func TestAddAgentClaimRejectsEndedSession(t *testing.T) {
 	if _, err := s.EndAgentSession("sess-3", string(model.EndReasonStop)); err != nil {
 		t.Fatalf("end: %v", err)
 	}
-	if _, err := s.AddAgentClaim("sess-3", iss.ID); err == nil {
+	if _, _, err := s.AddAgentClaim("sess-3", iss.ID); err == nil {
 		t.Fatalf("expected AddAgentClaim to reject ended session, got nil")
 	}
 }
@@ -192,12 +192,42 @@ func TestRapidClaimReleaseClaim(t *testing.T) {
 	// Three claim/release cycles back-to-back — well within a single
 	// SQLite-granular second on any plausible hardware.
 	for i := 0; i < 3; i++ {
-		if _, err := s.AddAgentClaim("rapid", iss.ID); err != nil {
+		if _, _, err := s.AddAgentClaim("rapid", iss.ID); err != nil {
 			t.Fatalf("claim cycle %d: %v", i, err)
 		}
 		if _, err := s.ReleaseAgentClaim("rapid", iss.ID); err != nil {
 			t.Fatalf("release cycle %d: %v", i, err)
 		}
+	}
+}
+
+// TestAddAgentClaimIdempotent locks in that re-claiming the same
+// (session, issue) returns the existing claim row with created=false
+// instead of inserting a duplicate. The local client uses the bool to
+// skip writing a redundant audit row.
+func TestAddAgentClaimIdempotent(t *testing.T) {
+	s, repo, iss := seedRepoAndIssue(t)
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "idem", RepoID: repo.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	first, created, err := s.AddAgentClaim("idem", iss.ID)
+	if err != nil {
+		t.Fatalf("first claim: %v", err)
+	}
+	if !created {
+		t.Fatalf("expected created=true for the first claim")
+	}
+	second, created, err := s.AddAgentClaim("idem", iss.ID)
+	if err != nil {
+		t.Fatalf("second claim: %v", err)
+	}
+	if created {
+		t.Fatalf("expected created=false for the re-claim")
+	}
+	if second.ID != first.ID {
+		t.Fatalf("re-claim returned a different row: %d → %d", first.ID, second.ID)
 	}
 }
 

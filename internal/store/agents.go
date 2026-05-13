@@ -164,14 +164,17 @@ func (s *Store) EndAgentSession(sessionID, reason string) (*model.AgentSession, 
 // ended (an ended agent has no business claiming new work). Allows
 // multiple concurrent open claims by different sessions on the same
 // issue (pairing/review). A session re-claiming an issue it already
-// has open is a no-op (returns the existing claim).
-func (s *Store) AddAgentClaim(sessionID string, issueID int64) (*model.AgentClaim, error) {
+// has open is a no-op (returns the existing claim with created=false).
+// The `created` flag lets callers (the local client) skip writing an
+// audit row for no-op re-claims — otherwise a poll loop would flood
+// the history table with duplicate `agent.claim` entries.
+func (s *Store) AddAgentClaim(sessionID string, issueID int64) (*model.AgentClaim, bool, error) {
 	if _, err := ValidateSessionID(sessionID); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	tx, err := s.DB.Begin()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer tx.Rollback()
 
@@ -179,25 +182,26 @@ func (s *Store) AddAgentClaim(sessionID string, issueID int64) (*model.AgentClai
 	var ended sql.NullTime
 	err = tx.QueryRow(`SELECT id, ended_at FROM agent_sessions WHERE session_id = ?`, sessionID).Scan(&sessPK, &ended)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("session %q is not registered", sessionID)
+		return nil, false, fmt.Errorf("session %q is not registered", sessionID)
 	}
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if ended.Valid {
-		return nil, fmt.Errorf("session %q is already ended; cannot claim", sessionID)
+		return nil, false, fmt.Errorf("session %q is already ended; cannot claim", sessionID)
 	}
 
 	var existing int64
 	err = tx.QueryRow(`SELECT id FROM agent_claims WHERE session_pk = ? AND issue_id = ? AND released_at IS NULL`, sessPK, issueID).Scan(&existing)
 	if err == nil {
 		if err := tx.Commit(); err != nil {
-			return nil, err
+			return nil, false, err
 		}
-		return s.getAgentClaimByID(existing)
+		c, err := s.getAgentClaimByID(existing)
+		return c, false, err
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return nil, err
+		return nil, false, err
 	}
 
 	res, err := tx.Exec(
@@ -205,21 +209,22 @@ func (s *Store) AddAgentClaim(sessionID string, issueID int64) (*model.AgentClai
 		sessPK, issueID,
 	)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	id, err := res.LastInsertId()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if _, err := tx.Exec(
 		`UPDATE agent_sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?`, sessPK,
 	); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return s.getAgentClaimByID(id)
+	c, err := s.getAgentClaimByID(id)
+	return c, true, err
 }
 
 // ReleaseAgentClaim stamps released_at on the latest open claim for
