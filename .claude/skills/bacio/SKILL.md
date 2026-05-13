@@ -637,6 +637,12 @@ bacio sync init <local-path> [--remote URL]   Connect the current project repo
                                            configured, --remote is optional —
                                            the URL is auto-detected; supplying
                                            a mismatching --remote errors.
+                                           Attach-mode import is additive:
+                                           local-only records (uuids absent
+                                           from the sync repo's working tree)
+                                           are preserved and exported in the
+                                           same run. Only steady-state bacio
+                                           sync propagates deletes.
 
 bacio sync clone [<local-path>] [--allow-renumber] [--dry-run]
                                            Join an existing sync repo.
@@ -648,6 +654,10 @@ bacio sync clone [<local-path>] [--allow-renumber] [--dry-run]
                                            unless --allow-renumber is set;
                                            --dry-run prints the preview
                                            without touching DB or disk.
+                                           Import is additive — clone never
+                                           destroys local-only records; only
+                                           steady-state bacio sync propagates
+                                           deletes.
 
 bacio sync                                    Steady state: pull → import →
                                            export → commit → push. Run

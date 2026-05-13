@@ -128,6 +128,19 @@ func (e *Engine) InitSyncRepo(ctx context.Context, projectRoot string, opts Init
 	res := &InitResult{LocalPath: opts.LocalPath, Remote: opts.Remote, Attached: attached}
 
 	if e.DryRun {
+		// In attach mode, preview the import too so the user sees
+		// what would be merged in alongside the export preview.
+		// Uses the same additive flag the real run uses (see
+		// BACI-4); a dry-run that overstated deletions would be
+		// misleading.
+		if state == targetExistingSyncRepo {
+			impEng := &Engine{Store: e.Store, Actor: e.Actor, DryRun: true, SkipPropagateDeletes: true}
+			impRes, err := impEng.Import(ctx, opts.LocalPath)
+			if err != nil {
+				return nil, fmt.Errorf("dry-run import: %w", err)
+			}
+			res.Import = impRes
+		}
 		// Build a full Export against a temp dir so the user sees
 		// the projected counts. No filesystem changes outside the
 		// temp dir.
@@ -233,7 +246,12 @@ func (e *Engine) InitSyncRepo(ctx context.Context, projectRoot string, opts Init
 		}
 	}
 	if state == targetExistingSyncRepo {
-		importEng := &Engine{Store: e.Store, Actor: e.Actor, DryRun: false}
+		// Attach-mode import is additive: SkipPropagateDeletes
+		// preserves local-only DB rows whose uuids aren't in the
+		// sync repo's current working tree. Steady-state bacio sync
+		// is where deletes propagate; init must never destroy local
+		// work (see BACI-4).
+		importEng := &Engine{Store: e.Store, Actor: e.Actor, DryRun: false, SkipPropagateDeletes: true}
 		impRes, err := importEng.Import(ctx, opts.LocalPath)
 		if err != nil {
 			return nil, fmt.Errorf("import: %w", err)
@@ -363,7 +381,10 @@ func (e *Engine) CloneSyncRepo(ctx context.Context, projectRoot string, opts Clo
 
 	if opts.DryRun {
 		// Run the import in dry-run mode for accurate counts.
-		dryEng := &Engine{Store: e.Store, Actor: e.Actor, DryRun: true}
+		// SkipPropagateDeletes matches the real path below — clone
+		// is additive, so the preview must reflect that or it'll
+		// overstate deletions (see BACI-4).
+		dryEng := &Engine{Store: e.Store, Actor: e.Actor, DryRun: true, SkipPropagateDeletes: true}
 		importRes, err := dryEng.Import(ctx, syncRepo.Root)
 		if err != nil {
 			return nil, fmt.Errorf("dry-run import: %w", err)
@@ -375,8 +396,10 @@ func (e *Engine) CloneSyncRepo(ctx context.Context, projectRoot string, opts Clo
 		return res, nil
 	}
 
-	// 3. Real import.
-	importEng := &Engine{Store: e.Store, Actor: e.Actor, DryRun: false}
+	// 3. Real import. Additive merge: clone never destroys local
+	// work, only adds remote-only records by uuid. Deletes are the
+	// job of steady-state bacio sync (see BACI-4).
+	importEng := &Engine{Store: e.Store, Actor: e.Actor, DryRun: false, SkipPropagateDeletes: true}
 	importRes, err := importEng.Import(ctx, syncRepo.Root)
 	if err != nil {
 		return nil, fmt.Errorf("import: %w", err)
@@ -447,7 +470,10 @@ func openOrCloneSyncRepo(localPath, remote string) (*git.Repo, error) {
 // dry-run path rather than a hand-rolled scanner so the preview
 // matches reality byte-for-byte.
 func previewClone(ctx context.Context, e *Engine, syncRepo *git.Repo) (*CollisionPreview, error) {
-	previewEng := &Engine{Store: e.Store, Actor: e.Actor, DryRun: true}
+	// Match the real clone path: additive merge, no propagated
+	// deletes. Preview must use the same flag set as the run it's
+	// previewing (see BACI-4).
+	previewEng := &Engine{Store: e.Store, Actor: e.Actor, DryRun: true, SkipPropagateDeletes: true}
 	imp, err := previewEng.Import(ctx, syncRepo.Root)
 	if err != nil {
 		return nil, err
