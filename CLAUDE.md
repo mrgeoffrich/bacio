@@ -28,6 +28,7 @@ The deeper context for both lives in the topic sections below (`## Agent-CLI pri
 - Domain types: `internal/model/` — pure structs/enums, no DB.
 - Git detection: `internal/git/detect.go` shells out to `git` for repo root + remote URL.
 - TUI: `internal/tui/` — bubbletea v1.3.10 + lipgloss v1.1.0. Shell in `tui.go` owns the tab strip and routes keys; each tab implements the local `view` interface.
+- Desktop app: `desktop/` is a **separate nested Go module** (`github.com/mrgeoffrich/bacio/desktop`) driven by Wails v3 + React + Vite (TypeScript). It is invisible to `go build ./...` from the repo root — build it via `wails3 build` from inside `desktop/`. The durable reference is the `docs-wails-v3-react-research.md` bacio doc; v3 is alpha (pinned to `v3.0.0-alpha.90`) so don't trust hosted docs at `v3.wails.io` blindly.
 
 ## Agent-CLI principles (read before planning a feature)
 
