@@ -182,6 +182,42 @@ CREATE TABLE IF NOT EXISTS sync_state (
 
 CREATE INDEX IF NOT EXISTS idx_sync_state_kind ON sync_state(kind);
 
+-- agent_sessions tracks live AI-agent sessions driving the repo. Local
+-- only — never synced. session_id is the external id (e.g.
+-- CLAUDE_CODE_SESSION_ID); `ended_at IS NULL` means "still alive".
+CREATE TABLE IF NOT EXISTS agent_sessions (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id      TEXT    NOT NULL UNIQUE,
+    repo_id         INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+    actor           TEXT    NOT NULL,
+    model           TEXT    NOT NULL DEFAULT '',
+    permission_mode TEXT    NOT NULL DEFAULT '',
+    host            TEXT    NOT NULL DEFAULT '',
+    branch          TEXT    NOT NULL DEFAULT '',
+    started_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ended_at        DATETIME,
+    end_reason      TEXT    NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_sessions_repo_active
+    ON agent_sessions(repo_id, ended_at);
+
+-- agent_claims records which issues an agent is currently focused on.
+-- Multiple agents may claim the same issue (pairing/review). Distinct
+-- from issues.assignee — claim is "intent", assignee is "ownership".
+CREATE TABLE IF NOT EXISTS agent_claims (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_pk   INTEGER NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+    issue_id     INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+    claimed_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    released_at  DATETIME,
+    UNIQUE (session_pk, issue_id, claimed_at)
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_claims_active
+    ON agent_claims(issue_id, released_at);
+
 -- sync_remotes records, per (canonical) remote URL, where each user has
 -- their sync repo cloned locally. The remote is the shared truth (also
 -- in .bacio/config.yaml of every project that uses this sync repo); the

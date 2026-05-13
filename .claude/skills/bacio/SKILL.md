@@ -52,6 +52,48 @@ Use `needs_action` when an LLM agent is paused waiting on the user — keep the 
 
 **Identity:** the repo is keyed by its absolute git toplevel path. Moving the repo on disk creates a new row.
 
+## Agent registry — declare yourself
+
+bacio tracks live agent sessions in a local SQLite registry (never synced) so you and the user can see who's working on what.
+
+**Once per session — at session start, register yourself:**
+
+```bash
+bacio agent register --user <your-name>
+```
+
+The session id is auto-read from `$CLAUDE_CODE_SESSION_ID`. If your harness doesn't set that env var, pass `--session <id>` explicitly. `--model`, `--mode`, and `--branch` are optional but useful — they default to whatever you (or detection) supplies.
+
+**When you start focused work on an issue — claim it:**
+
+```bash
+bacio agent claim MINI-42 --user <your-name>
+```
+
+This records *intent*. It does NOT move the issue or set the assignee — use `bacio issue state` / `bacio issue assign` for that. Multiple agents may claim the same issue (pairing/review is a real flow).
+
+**When you stop — release the claim and end the session:**
+
+```bash
+bacio agent release MINI-42 --user <your-name>
+bacio agent end --reason stop --user <your-name>
+```
+
+`bacio agent end` auto-releases every open claim the session holds, so you can skip `release` if you're shutting down anyway.
+
+Heartbeats are optional — `register` / `claim` / `release` already bump `last_seen_at`. `bacio agent heartbeat` exists for long-running sessions with nothing else to write. Heartbeats deliberately don't write to `bacio history` (they'd flood the audit log); register/end/claim/release do.
+
+Inspect the registry:
+
+```bash
+bacio agent list                # alive + recently-ended sessions in this repo
+bacio agent list --active       # only sessions that haven't called `end`
+bacio agent list --all-repos    # across every tracked repo
+bacio agent show <session-id>   # session + full claim history
+```
+
+The registry is local-only in v1 — running under `--remote` errors with a clear hint. v2 will add HTTP parity.
+
 ## Calling `bacio` from an agent
 
 - **Working directory matters.** Most commands resolve the repo from `cwd`. `cd` to the repo before running unless using `--all-repos` (available on `bacio issue list` and `bacio history`).
@@ -481,6 +523,43 @@ bacio pr list <KEY>                     One URL per line (or JSON)
 ```bash
 bacio pr attach MINI-42 https://github.com/owner/repo/pull/7
 ```
+
+### Agent registry
+
+Local-only — never replicated to GitHub via `bacio sync`.
+
+```
+bacio agent register                    Register / refresh this session
+  --user <name>                         Actor (required for agents)
+  --session <id>                        Default: $CLAUDE_CODE_SESSION_ID
+  --model <id>                          e.g. claude-sonnet-4-6
+  --mode <id>                           Permission mode (acceptEdits/...)
+  --host <hostname>                     Default: os.Hostname()
+  --branch <name>                       Default: current git branch
+bacio agent heartbeat                   Bump last_seen_at on a registered session
+bacio agent end --reason <r>            Reason: stop|clear|logout|crash|other
+                                     (also auto-releases every open claim)
+bacio agent claim <ISSUE-KEY>           Record intent — does NOT move the issue
+                                     or set assignee. Multiple agents may
+                                     claim the same issue (pairing/review).
+bacio agent release <ISSUE-KEY>         Release this session's claim on an issue
+bacio agent list                        Lean table of sessions in this repo
+  --active                              Only sessions that haven't ended
+  --all-repos                           Include sessions from every repo
+  --since 30m                           Only sessions seen within this window
+bacio agent show <session-id>           Session + full claim history
+```
+
+**Example agent loop:**
+```bash
+bacio agent register --user agent-claude
+bacio agent claim MINI-42 --user agent-claude
+# ... actual work: bacio issue state, bacio comment add, edits, commits ...
+bacio agent release MINI-42 --user agent-claude
+bacio agent end --reason stop --user agent-claude
+```
+
+The registry is local-only in v1. Running under `--remote` / `BACIO_REMOTE` errors with a clear "drop --remote — the agent registry lives only in the local SQLite store" message. v2 will add HTTP parity.
 
 ## Git-backed sync
 

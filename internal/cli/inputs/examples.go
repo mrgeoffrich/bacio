@@ -113,6 +113,32 @@ var (
 		To:       "docs/auth-design.md",
 	}
 
+	ExampleAgentRegister = AgentRegisterInput{
+		SessionID:      "092d8907-a5ed-48cf-9fdd-22c3941f3710",
+		Actor:          "agent-claude",
+		Model:          "claude-sonnet-4-6",
+		PermissionMode: "acceptEdits",
+		Host:           "shiny.local",
+		Branch:         "feat/auth-rewrite",
+	}
+	ExampleAgentHeartbeat = AgentHeartbeatInput{
+		SessionID: "092d8907-a5ed-48cf-9fdd-22c3941f3710",
+		Model:     "claude-opus-4-7",
+		Branch:    "feat/auth-rewrite",
+	}
+	ExampleAgentEnd = AgentEndInput{
+		SessionID: "092d8907-a5ed-48cf-9fdd-22c3941f3710",
+		Reason:    "stop",
+	}
+	ExampleAgentClaim = AgentClaimInput{
+		SessionID: "092d8907-a5ed-48cf-9fdd-22c3941f3710",
+		IssueKey:  "MINI-42",
+	}
+	ExampleAgentRelease = AgentReleaseInput{
+		SessionID: "092d8907-a5ed-48cf-9fdd-22c3941f3710",
+		IssueKey:  "MINI-42",
+	}
+
 	ExampleRepoCreate = RepoCreateInput{
 		Prefix:    "MINI",
 		Name:      "bacio",
