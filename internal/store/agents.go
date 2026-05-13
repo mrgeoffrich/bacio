@@ -14,12 +14,103 @@ import (
 // two prune passes share the same "what does bacio remember" window.
 const AgentSessionRetention = 60 * 24 * time.Hour
 
+// ErrAgentNameTaken signals that UpsertAgent was called with
+// requireNew=true on a name that's already in use. Callers translate
+// this into a "name taken, pick another" hint so the agent retries
+// with a different slug.
+var ErrAgentNameTaken = errors.New("agent name already taken")
+
+// UpsertAgent inserts a new agent row or refreshes an existing one
+// (matched by name). When requireNew is true, an existing name is a
+// hard error (ErrAgentNameTaken) — that's the "I'm claiming this
+// fresh, fail if it clashes" path the SKILL.md bootstrap uses on first
+// session in a repo. When requireNew is false, an existing name is a
+// no-op refresh (last_seen_at bumped) — that's the "I'm a returning
+// agent reading my saved name from .bacio/agent" path.
+//
+// Returns the row plus a created flag so callers can decide whether to
+// record an audit event for a fresh creation vs. a routine refresh.
+func (s *Store) UpsertAgent(name string, requireNew bool) (*model.Agent, bool, error) {
+	name, err := ValidateAgentName(name)
+	if err != nil {
+		return nil, false, err
+	}
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return nil, false, err
+	}
+	defer tx.Rollback()
+
+	var existingID int64
+	err = tx.QueryRow(`SELECT id FROM agents WHERE name = ?`, name).Scan(&existingID)
+	switch {
+	case err == nil:
+		if requireNew {
+			return nil, false, ErrAgentNameTaken
+		}
+		if _, err := tx.Exec(`UPDATE agents SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?`, existingID); err != nil {
+			return nil, false, err
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, false, err
+		}
+		ag, err := s.GetAgentByID(existingID)
+		return ag, false, err
+	case errors.Is(err, sql.ErrNoRows):
+		// fresh insert below
+	default:
+		return nil, false, err
+	}
+	res, err := tx.Exec(`INSERT INTO agents (name) VALUES (?)`, name)
+	if err != nil {
+		return nil, false, err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return nil, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, false, err
+	}
+	ag, err := s.GetAgentByID(id)
+	return ag, true, err
+}
+
+// GetAgentByName returns the agent identified by name, or ErrNotFound.
+func (s *Store) GetAgentByName(name string) (*model.Agent, error) {
+	row := s.DB.QueryRow(`SELECT id, name, created_at, last_seen_at FROM agents WHERE name = ?`, name)
+	var ag model.Agent
+	if err := row.Scan(&ag.ID, &ag.Name, &ag.CreatedAt, &ag.LastSeenAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &ag, nil
+}
+
+// GetAgentByID returns the agent identified by primary key, or
+// ErrNotFound. Used by callers that already resolved name → id once
+// and want to re-fetch the canonical row (e.g. after Upsert).
+func (s *Store) GetAgentByID(id int64) (*model.Agent, error) {
+	row := s.DB.QueryRow(`SELECT id, name, created_at, last_seen_at FROM agents WHERE id = ?`, id)
+	var ag model.Agent
+	if err := row.Scan(&ag.ID, &ag.Name, &ag.CreatedAt, &ag.LastSeenAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &ag, nil
+}
+
 // UpsertAgentSessionIn is the validated tuple UpsertAgentSession consumes.
 // Mutable fields update on every call (so a heartbeat after a /model
 // switch picks up the new model); started_at is set only on insert.
 type UpsertAgentSessionIn struct {
 	SessionID      string
 	RepoID         int64
+	AgentID        *int64 // nil leaves agent_id NULL (back-compat for callers without identity)
 	Actor          string
 	Model          string
 	PermissionMode string
@@ -82,19 +173,28 @@ func (s *Store) UpsertAgentSession(in UpsertAgentSessionIn) (*model.AgentSession
 
 	// INSERT … ON CONFLICT: update mutable fields and bump last_seen_at.
 	// The ended-session case is already filtered above, so this path
-	// only runs for new or alive rows.
+	// only runs for new or alive rows. agent_id is mutable on the
+	// session row too — if the agent rewrites .bacio/agent mid-session
+	// (rename), the next register picks up the new identity. Passing
+	// nil leaves the column unchanged on update (COALESCE) so callers
+	// that don't supply an agent (e.g. heartbeat) don't clobber it.
+	var agentID any
+	if in.AgentID != nil {
+		agentID = *in.AgentID
+	}
 	if _, err := tx.Exec(`
 		INSERT INTO agent_sessions
-		    (session_id, repo_id, actor, model, permission_mode, host, branch, last_seen_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		    (session_id, repo_id, agent_id, actor, model, permission_mode, host, branch, last_seen_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 		ON CONFLICT(session_id) DO UPDATE SET
 		    actor           = excluded.actor,
+		    agent_id        = COALESCE(excluded.agent_id, agent_sessions.agent_id),
 		    model           = excluded.model,
 		    permission_mode = excluded.permission_mode,
 		    host            = excluded.host,
 		    branch          = excluded.branch,
 		    last_seen_at    = CURRENT_TIMESTAMP`,
-		in.SessionID, in.RepoID, in.Actor, in.Model, in.PermissionMode, in.Host, in.Branch,
+		in.SessionID, in.RepoID, agentID, in.Actor, in.Model, in.PermissionMode, in.Host, in.Branch,
 	); err != nil {
 		return nil, err
 	}
@@ -282,9 +382,12 @@ type AgentSessionFilter struct {
 // ListAgentSessions returns sessions matching the filter, ordered by
 // last_seen_at DESC so the freshest activity surfaces first.
 func (s *Store) ListAgentSessions(f AgentSessionFilter) ([]*model.AgentSession, error) {
-	q := `SELECT s.id, s.session_id, s.repo_id, r.prefix, s.actor, s.model, s.permission_mode, s.host, s.branch,
+	q := `SELECT s.id, s.session_id, s.repo_id, r.prefix, s.agent_id, a.name, s.actor, s.model, s.permission_mode, s.host, s.branch,
 		s.started_at, s.last_seen_at, s.ended_at, s.end_reason
-		FROM agent_sessions s LEFT JOIN repos r ON r.id = s.repo_id WHERE 1=1`
+		FROM agent_sessions s
+		LEFT JOIN repos r  ON r.id = s.repo_id
+		LEFT JOIN agents a ON a.id = s.agent_id
+		WHERE 1=1`
 	var args []any
 	if f.RepoID != nil {
 		q += ` AND s.repo_id = ?`
@@ -318,9 +421,12 @@ func (s *Store) ListAgentSessions(f AgentSessionFilter) ([]*model.AgentSession, 
 // GetAgentSession fetches one session by its external id.
 func (s *Store) GetAgentSession(sessionID string) (*model.AgentSession, error) {
 	row := s.DB.QueryRow(
-		`SELECT s.id, s.session_id, s.repo_id, r.prefix, s.actor, s.model, s.permission_mode, s.host, s.branch,
+		`SELECT s.id, s.session_id, s.repo_id, r.prefix, s.agent_id, a.name, s.actor, s.model, s.permission_mode, s.host, s.branch,
 		s.started_at, s.last_seen_at, s.ended_at, s.end_reason
-		FROM agent_sessions s LEFT JOIN repos r ON r.id = s.repo_id WHERE s.session_id = ?`, sessionID,
+		FROM agent_sessions s
+		LEFT JOIN repos r  ON r.id = s.repo_id
+		LEFT JOIN agents a ON a.id = s.agent_id
+		WHERE s.session_id = ?`, sessionID,
 	)
 	ag, err := scanAgentSession(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -344,9 +450,11 @@ func (s *Store) ResolveAgentSession(idOrPrefix string) (*model.AgentSession, err
 	// supplied prefix is safe — we escape with a leading-literal pattern.
 	pattern := idOrPrefix + "%"
 	rows, err := s.DB.Query(
-		`SELECT s.id, s.session_id, s.repo_id, r.prefix, s.actor, s.model, s.permission_mode, s.host, s.branch,
+		`SELECT s.id, s.session_id, s.repo_id, r.prefix, s.agent_id, a.name, s.actor, s.model, s.permission_mode, s.host, s.branch,
 		s.started_at, s.last_seen_at, s.ended_at, s.end_reason
-		FROM agent_sessions s LEFT JOIN repos r ON r.id = s.repo_id
+		FROM agent_sessions s
+		LEFT JOIN repos r  ON r.id = s.repo_id
+		LEFT JOIN agents a ON a.id = s.agent_id
 		WHERE s.session_id LIKE ? ORDER BY s.last_seen_at DESC LIMIT 2`, pattern,
 	)
 	if err != nil {
@@ -439,14 +547,24 @@ func (s *Store) getAgentClaimByID(id int64) (*model.AgentClaim, error) {
 func scanAgentSession(r rowScanner) (*model.AgentSession, error) {
 	var ag model.AgentSession
 	var prefix sql.NullString
+	var agentID sql.NullInt64
+	var agentName sql.NullString
 	var ended sql.NullTime
-	err := r.Scan(&ag.ID, &ag.SessionID, &ag.RepoID, &prefix, &ag.Actor, &ag.Model, &ag.PermissionMode,
+	err := r.Scan(&ag.ID, &ag.SessionID, &ag.RepoID, &prefix, &agentID, &agentName,
+		&ag.Actor, &ag.Model, &ag.PermissionMode,
 		&ag.Host, &ag.Branch, &ag.StartedAt, &ag.LastSeenAt, &ended, &ag.EndReason)
 	if err != nil {
 		return nil, err
 	}
 	if prefix.Valid {
 		ag.RepoPrefix = prefix.String
+	}
+	if agentID.Valid {
+		v := agentID.Int64
+		ag.AgentID = &v
+	}
+	if agentName.Valid {
+		ag.AgentName = agentName.String
 	}
 	if ended.Valid {
 		ag.EndedAt = &ended.Time

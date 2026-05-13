@@ -6,6 +6,18 @@ import (
 	"time"
 )
 
+// Agent is the persistent identity layer above sessions. Name is the
+// free-form slug the agent picks (typically "verb-animal@harness.host"
+// per the SKILL.md convention, but bacio doesn't enforce a shape). One
+// agent racks up many sessions over its lifetime; the join is what
+// lets `bacio agent show` reconstruct cross-session activity.
+type Agent struct {
+	ID         int64     `json:"id"`
+	Name       string    `json:"name"`
+	CreatedAt  time.Time `json:"created_at"`
+	LastSeenAt time.Time `json:"last_seen_at"`
+}
+
 // AgentSession is one running instance of an AI agent (typically a
 // Claude Code session) talking to a bacio repo. The registry is
 // local-only — never synced to GitHub — so it's safe to record
@@ -13,12 +25,16 @@ import (
 //
 // SessionID is the external id (e.g. CLAUDE_CODE_SESSION_ID); ID is
 // the bacio store's autoincrement PK. EndedAt == nil means the session
-// is still alive (the agent never called `bacio agent end`).
+// is still alive (the agent never called `bacio agent end`). AgentID
+// points at the persistent identity row in `agents`; nil for sessions
+// registered before the identity layer existed.
 type AgentSession struct {
 	ID             int64      `json:"id"`
 	SessionID      string     `json:"session_id"`
 	RepoID         int64      `json:"repo_id"`
 	RepoPrefix     string     `json:"repo_prefix,omitempty"`
+	AgentID        *int64     `json:"agent_id,omitempty"`
+	AgentName      string     `json:"agent_name,omitempty"`
 	Actor          string     `json:"actor"`
 	Model          string     `json:"model,omitempty"`
 	PermissionMode string     `json:"permission_mode,omitempty"`

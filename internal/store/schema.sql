@@ -182,13 +182,30 @@ CREATE TABLE IF NOT EXISTS sync_state (
 
 CREATE INDEX IF NOT EXISTS idx_sync_state_kind ON sync_state(kind);
 
+-- agents is the persistent identity layer above sessions. One row per
+-- agent (e.g. "cheerful-otter@claude.shiny"); a session links back to
+-- it so audit history and `agent list` can correlate work across the
+-- many sessions a single agent racks up over its lifetime. Local only.
+-- name is a free-form single-line slug the agent picks; UNIQUE is what
+-- catches accidental collisions between two agents that independently
+-- generate the same slug, prompting the loser to retry.
+CREATE TABLE IF NOT EXISTS agents (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    name         TEXT    NOT NULL UNIQUE,
+    created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 -- agent_sessions tracks live AI-agent sessions driving the repo. Local
 -- only — never synced. session_id is the external id (e.g.
 -- CLAUDE_CODE_SESSION_ID); `ended_at IS NULL` means "still alive".
+-- agent_id is the persistent identity (see `agents`); nullable so old
+-- sessions registered before the identity layer existed keep working.
 CREATE TABLE IF NOT EXISTS agent_sessions (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id      TEXT    NOT NULL UNIQUE,
     repo_id         INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+    agent_id        INTEGER REFERENCES agents(id) ON DELETE SET NULL,
     actor           TEXT    NOT NULL,
     model           TEXT    NOT NULL DEFAULT '',
     permission_mode TEXT    NOT NULL DEFAULT '',
@@ -199,6 +216,8 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
     ended_at        DATETIME,
     end_reason      TEXT    NOT NULL DEFAULT ''
 );
+
+CREATE INDEX IF NOT EXISTS idx_agent_sessions_agent ON agent_sessions(agent_id);
 
 CREATE INDEX IF NOT EXISTS idx_agent_sessions_repo_active
     ON agent_sessions(repo_id, ended_at);

@@ -440,6 +440,9 @@ func printImportResult(w io.Writer, r importResult) {
 
 func printAgentSession(w io.Writer, s *model.AgentSession) {
 	fmt.Fprintf(w, "Session:  %s\n", s.SessionID)
+	if s.AgentName != "" {
+		fmt.Fprintf(w, "Agent:    %s\n", s.AgentName)
+	}
 	fmt.Fprintf(w, "Actor:    %s\n", s.Actor)
 	if s.RepoPrefix != "" {
 		fmt.Fprintf(w, "Repo:     %s\n", s.RepoPrefix)

@@ -178,6 +178,23 @@ func migrate(db *sql.DB) error {
 		)`); err != nil {
 		return fmt.Errorf("create sync_remotes: %w", err)
 	}
+	// agent_sessions.agent_id was added when the persistent agent-identity
+	// layer landed. Older DBs that already created agent_sessions (from
+	// the registry's initial v1) gain the column here. The CREATE TABLE
+	// for `agents` itself is in schema.sql and idempotent — already there
+	// by the time this ALTER runs because Open() applies schema.sql first.
+	hasAgentID, err := columnExists(db, "agent_sessions", "agent_id")
+	if err != nil {
+		return err
+	}
+	if !hasAgentID {
+		if _, err := db.Exec(`ALTER TABLE agent_sessions ADD COLUMN agent_id INTEGER REFERENCES agents(id) ON DELETE SET NULL`); err != nil {
+			return fmt.Errorf("add agent_id to agent_sessions: %w", err)
+		}
+		if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_agent_sessions_agent ON agent_sessions(agent_id)`); err != nil {
+			return fmt.Errorf("create idx_agent_sessions_agent: %w", err)
+		}
+	}
 	// State-set change: `backlog` and `duplicate` were retired and
 	// `needs_action` was added. Existing rows are migrated in place;
 	// the new code never writes the dropped states. SQLite's

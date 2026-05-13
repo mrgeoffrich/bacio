@@ -54,12 +54,41 @@ Use `needs_action` when an LLM agent is paused waiting on the user — keep the 
 
 ## Agent registry — declare yourself
 
-bacio tracks live agent sessions in a local SQLite registry (never synced) so you and the user can see who's working on what.
+bacio tracks live agent sessions in a local SQLite registry (never synced) so you and the user can see who's working on what. Two layers:
 
-**Once per session — at session start, register yourself:**
+- **Agent identity** (long-lived) — a slug like `cheerful-otter@claude.shiny` that survives across sessions, `/clear`s, and reboots. Persisted in `.bacio/agent` on disk so it's the same identity next time.
+- **Session** (ephemeral) — one row per running instance. FKs back to the identity, so cross-session activity correlates.
+
+### Pick your identity (once per repo)
+
+At session start, before any other bacio call:
+
+1. Look for `.bacio/agent` in the repo root. If it exists, read the single-line slug; skip ahead to **Register the session**.
+2. Otherwise, generate a slug of the form `<adjective>-<animal>@<harness>.<hostname>`:
+   - `adjective` — pick at random from common English adjectives (e.g. `cheerful`, `quiet`, `swift`, `bold`, `clever`).
+   - `animal` — pick at random from common animals (e.g. `otter`, `gorilla`, `panda`, `falcon`, `lynx`).
+   - `harness` — your harness name (`claude` for Claude Code).
+   - `hostname` — `hostname -s` on Unix, `%COMPUTERNAME%` on Windows.
+   - Example: `cheerful-otter@claude.shiny`
+3. Register with `--new`:
+   ```bash
+   bacio agent register --user <your-name> --agent <slug> --new
+   ```
+4. If bacio errors with `agent name "<slug>" already taken`, your random slug clashed with another agent's. Pick a different adjective/animal and retry from step 3 — the host suffix keeps cross-machine identities apart, the retry handles same-machine clashes.
+5. On success, write the slug to `.bacio/agent` (the file should contain just the slug — no surrounding quotes, trailing whitespace is tolerated). Make sure `.bacio/agent` is gitignored — it's per-machine identity, not project state.
+
+**On subsequent sessions in the same repo**, step 1 short-circuits the generation/clash loop. Call `register` *without* `--new`:
 
 ```bash
-bacio agent register --user <your-name>
+bacio agent register --user <your-name> --agent "$(cat .bacio/agent)"
+```
+
+Re-registering is idempotent: bacio refreshes `last_seen_at` and re-links the session to the existing identity row.
+
+### Register the session
+
+```bash
+bacio agent register --user <your-name> --agent "$(cat .bacio/agent)"
 ```
 
 The session id is auto-read from `$CLAUDE_CODE_SESSION_ID`. If your harness doesn't set that env var, pass `--session <id>` explicitly. `--model`, `--mode`, and `--branch` are optional but useful — they default to whatever you (or detection) supplies.
@@ -533,6 +562,8 @@ Local-only — never replicated to GitHub via `bacio sync`.
 ```
 bacio agent register                    Register / refresh this session
   --user <name>                         Actor (required for agents)
+  --agent <slug>                        Persistent identity (see "Pick your identity")
+  --new                                 Assert --agent is fresh; errors on clash
   --session <id>                        Default: $CLAUDE_CODE_SESSION_ID
   --model <id>                          e.g. claude-sonnet-4-6
   --mode <id>                           Permission mode (acceptEdits/...)
@@ -552,9 +583,20 @@ bacio agent list                        Lean table of sessions in this repo
 bacio agent show <session-id>           Session + full claim history
 ```
 
-**Example agent loop:**
+**Example agent loop (first session in a repo):**
 ```bash
-bacio agent register --user agent-claude
+# Identity bootstrap: try saved name, else generate + claim + persist.
+if [ -f .bacio/agent ]; then
+    SLUG=$(cat .bacio/agent)
+    bacio agent register --user agent-claude --agent "$SLUG"
+else
+    SLUG="cheerful-otter@claude.$(hostname -s)"
+    until bacio agent register --user agent-claude --agent "$SLUG" --new 2>/dev/null; do
+        SLUG="quiet-falcon@claude.$(hostname -s)"   # …regenerate
+    done
+    printf '%s' "$SLUG" > .bacio/agent
+fi
+
 bacio agent claim MINI-42 --user agent-claude
 # ... actual work: bacio issue state, bacio comment add, edits, commits ...
 bacio agent release MINI-42 --user agent-claude

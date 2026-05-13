@@ -53,6 +53,15 @@ func ValidateActor(s string) (string, error) {
 	return validateSingleLine(s, "user", maxNameLen, true)
 }
 
+// ValidateAgentName validates the persistent agent-identity slug
+// (`bacio agent register --agent <name>`). Free-form single-line —
+// agents are expected to use a verb-animal@harness.host slug per
+// SKILL.md, but the store doesn't enforce a shape; UNIQUE catches
+// clashes between two agents that independently generate the same name.
+func ValidateAgentName(s string) (string, error) {
+	return validateSingleLine(s, "agent", maxNameLen, true)
+}
+
 // ValidateSessionID validates an external session id (e.g.
 // CLAUDE_CODE_SESSION_ID, which is a UUID). Strict no-whitespace,
 // printable ASCII only, capped at maxNameLen. Unlike most validators
