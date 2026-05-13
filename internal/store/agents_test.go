@@ -176,3 +176,97 @@ func TestValidateSessionIDRejectsWhitespace(t *testing.T) {
 // Ensure newTestStore is reachable (declared in issues_test.go); a
 // no-op test guards against import-only regressions.
 var _ = filepath.Join
+
+// TestRapidClaimReleaseClaim locks in C1: rapidly claiming, releasing,
+// and re-claiming the same issue within one wall-clock second must not
+// fail on a UNIQUE constraint. The original (session_pk, issue_id,
+// claimed_at) UNIQUE collided because SQLite's CURRENT_TIMESTAMP is
+// 1-sec granular; the partial unique index on open claims fixes it.
+func TestRapidClaimReleaseClaim(t *testing.T) {
+	s, repo, iss := seedRepoAndIssue(t)
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "rapid", RepoID: repo.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	// Three claim/release cycles back-to-back — well within a single
+	// SQLite-granular second on any plausible hardware.
+	for i := 0; i < 3; i++ {
+		if _, err := s.AddAgentClaim("rapid", iss.ID); err != nil {
+			t.Fatalf("claim cycle %d: %v", i, err)
+		}
+		if _, err := s.ReleaseAgentClaim("rapid", iss.ID); err != nil {
+			t.Fatalf("release cycle %d: %v", i, err)
+		}
+	}
+}
+
+// TestUpsertAgentSessionRejectsEndedSession locks in C2: re-registering
+// against an already-ended session id surfaces a clear error from the
+// store call itself, not from a post-fetch check.
+func TestUpsertAgentSessionRejectsEndedSession(t *testing.T) {
+	s, repo, _ := seedRepoAndIssue(t)
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "ended-then-reregister", RepoID: repo.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("first register: %v", err)
+	}
+	if _, err := s.EndAgentSession("ended-then-reregister", string(model.EndReasonStop)); err != nil {
+		t.Fatalf("end: %v", err)
+	}
+	_, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "ended-then-reregister", RepoID: repo.ID, Actor: "agent-claude",
+	})
+	if err == nil {
+		t.Fatalf("expected upsert against ended session to error, got nil")
+	}
+}
+
+// TestReleaseClaimErrorPaths locks in that ReleaseAgentClaim returns a
+// clear error for the two failure modes: unknown session, and known
+// session with no open claim on that issue.
+func TestReleaseClaimErrorPaths(t *testing.T) {
+	s, repo, iss := seedRepoAndIssue(t)
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "rel", RepoID: repo.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if _, err := s.ReleaseAgentClaim("rel", iss.ID); err == nil {
+		t.Fatalf("expected ErrNotFound releasing a non-existent claim, got nil")
+	}
+	if _, err := s.ReleaseAgentClaim("does-not-exist", iss.ID); err == nil {
+		t.Fatalf("expected error releasing from unknown session, got nil")
+	}
+}
+
+// TestResolveAgentSessionPrefix locks in C6: `agent show` accepts a
+// unique-prefix match so the truncated session id printed by
+// `agent list` is copy-pasteable.
+func TestResolveAgentSessionPrefix(t *testing.T) {
+	s, repo, _ := seedRepoAndIssue(t)
+	for _, sid := range []string{
+		"deadbeef-0001-0000-0000-000000000000",
+		"feedface-0002-0000-0000-000000000000",
+	} {
+		if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+			SessionID: sid, RepoID: repo.ID, Actor: "agent-claude",
+		}); err != nil {
+			t.Fatalf("register %s: %v", sid, err)
+		}
+	}
+	got, err := s.ResolveAgentSession("deadbeef")
+	if err != nil {
+		t.Fatalf("unique prefix should resolve: %v", err)
+	}
+	if got.SessionID != "deadbeef-0001-0000-0000-000000000000" {
+		t.Fatalf("resolved to %q, want deadbeef-…", got.SessionID)
+	}
+	// Both share the empty prefix → ambiguous.
+	if _, err := s.ResolveAgentSession(""); err == nil {
+		t.Fatalf("empty prefix should error")
+	}
+	if _, err := s.ResolveAgentSession("missing-"); err == nil {
+		t.Fatalf("no-match should error")
+	}
+}

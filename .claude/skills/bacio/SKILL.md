@@ -92,6 +92,8 @@ bacio agent list --all-repos    # across every tracked repo
 bacio agent show <session-id>   # session + full claim history
 ```
 
+`bacio agent show` accepts the truncated id from the `list` table (a 12-char prefix is enough in practice). Ambiguous prefixes error out — pass more characters or the full id.
+
 The registry is local-only in v1 — running under `--remote` errors with a clear hint. v2 will add HTTP parity.
 
 ## Calling `bacio` from an agent

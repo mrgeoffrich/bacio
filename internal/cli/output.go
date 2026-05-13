@@ -439,31 +439,31 @@ func printImportResult(w io.Writer, r importResult) {
 
 
 func printAgentSession(w io.Writer, s *model.AgentSession) {
-	fmt.Fprintln(w, "Session:  "+s.SessionID)
-	fmt.Fprintln(w, "Actor:    "+s.Actor)
+	fmt.Fprintf(w, "Session:  %s\n", s.SessionID)
+	fmt.Fprintf(w, "Actor:    %s\n", s.Actor)
 	if s.RepoPrefix != "" {
-		fmt.Fprintln(w, "Repo:     "+s.RepoPrefix)
+		fmt.Fprintf(w, "Repo:     %s\n", s.RepoPrefix)
 	}
 	if s.Model != "" {
-		fmt.Fprintln(w, "Model:    "+s.Model)
+		fmt.Fprintf(w, "Model:    %s\n", s.Model)
 	}
 	if s.PermissionMode != "" {
-		fmt.Fprintln(w, "Mode:     "+s.PermissionMode)
+		fmt.Fprintf(w, "Mode:     %s\n", s.PermissionMode)
 	}
 	if s.Branch != "" {
-		fmt.Fprintln(w, "Branch:   "+s.Branch)
+		fmt.Fprintf(w, "Branch:   %s\n", s.Branch)
 	}
-	fmt.Fprintln(w, "LastSeen: "+localTime(s.LastSeenAt))
+	fmt.Fprintf(w, "LastSeen: %s\n", localTime(s.LastSeenAt))
 	if s.EndedAt != nil {
 		fmt.Fprintf(w, "Ended:    %s (reason=%s)\n", localTime(*s.EndedAt), s.EndReason)
 	}
 }
 
 func printAgentClaim(w io.Writer, c *model.AgentClaim) {
-	fmt.Fprintln(w, "Session:  "+c.SessionID)
-	fmt.Fprintln(w, "Issue:    "+c.IssueKey)
-	fmt.Fprintln(w, "Claimed:  "+localTime(c.ClaimedAt))
+	fmt.Fprintf(w, "Session:  %s\n", c.SessionID)
+	fmt.Fprintf(w, "Issue:    %s\n", c.IssueKey)
+	fmt.Fprintf(w, "Claimed:  %s\n", localTime(c.ClaimedAt))
 	if c.ReleasedAt != nil {
-		fmt.Fprintln(w, "Released: "+localTime(*c.ReleasedAt))
+		fmt.Fprintf(w, "Released: %s\n", localTime(*c.ReleasedAt))
 	}
 }

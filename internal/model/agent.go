@@ -35,8 +35,11 @@ type AgentSession struct {
 // agents can claim the same issue concurrently (pairing/review).
 // ReleasedAt == nil means the claim is still active.
 type AgentClaim struct {
-	ID         int64      `json:"id"`
-	SessionPK  int64      `json:"session_pk"`
+	// ID / SessionPK are server-time fields — `omitempty` so dry-run
+	// projections (which can't know them yet) emit the same JSON shape
+	// as real calls minus the unknown fields.
+	ID         int64      `json:"id,omitempty"`
+	SessionPK  int64      `json:"session_pk,omitempty"`
 	SessionID  string     `json:"session_id,omitempty"`
 	IssueID    int64      `json:"issue_id"`
 	IssueKey   string     `json:"issue_key,omitempty"`

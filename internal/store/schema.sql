@@ -211,12 +211,20 @@ CREATE TABLE IF NOT EXISTS agent_claims (
     session_pk   INTEGER NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
     issue_id     INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
     claimed_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    released_at  DATETIME,
-    UNIQUE (session_pk, issue_id, claimed_at)
+    released_at  DATETIME
 );
+
+-- Enforce "a session may hold at most one open claim per issue" without
+-- making rapid claim/release/claim within the same second collide on a
+-- (session_pk, issue_id, claimed_at) UNIQUE — CURRENT_TIMESTAMP is
+-- 1-sec granular in SQLite.
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_agent_claims_open
+    ON agent_claims(session_pk, issue_id) WHERE released_at IS NULL;
 
 CREATE INDEX IF NOT EXISTS idx_agent_claims_active
     ON agent_claims(issue_id, released_at);
+CREATE INDEX IF NOT EXISTS idx_agent_claims_by_session
+    ON agent_claims(session_pk, released_at);
 
 -- sync_remotes records, per (canonical) remote URL, where each user has
 -- their sync repo cloned locally. The remote is the shared truth (also

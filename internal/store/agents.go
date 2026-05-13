@@ -56,12 +56,34 @@ func (s *Store) UpsertAgentSession(in UpsertAgentSessionIn) (*model.AgentSession
 		return nil, err
 	}
 
+	// Guard against re-registering an ended session inside the same
+	// transaction as the write — the ON CONFLICT … WHERE clause silently
+	// no-ops the conflict resolution when the row is already ended,
+	// which would otherwise hide the precondition failure behind a
+	// post-fetch check.
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	var existingEnded sql.NullTime
+	var existingReason sql.NullString
+	err = tx.QueryRow(
+		`SELECT ended_at, end_reason FROM agent_sessions WHERE session_id = ?`,
+		in.SessionID,
+	).Scan(&existingEnded, &existingReason)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	if existingEnded.Valid {
+		return nil, fmt.Errorf("session %q is already ended (reason=%s); start a new session", in.SessionID, existingReason.String)
+	}
+
 	// INSERT … ON CONFLICT: update mutable fields and bump last_seen_at.
-	// Don't clear ended_at — a re-register after end is intentional (a
-	// new session with a recycled id is vanishingly unlikely, and if it
-	// did happen we'd want it surfaced as a new row). Re-registering an
-	// ended session is rejected explicitly.
-	_, err = s.DB.Exec(`
+	// The ended-session case is already filtered above, so this path
+	// only runs for new or alive rows.
+	if _, err := tx.Exec(`
 		INSERT INTO agent_sessions
 		    (session_id, repo_id, actor, model, permission_mode, host, branch, last_seen_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -71,21 +93,15 @@ func (s *Store) UpsertAgentSession(in UpsertAgentSessionIn) (*model.AgentSession
 		    permission_mode = excluded.permission_mode,
 		    host            = excluded.host,
 		    branch          = excluded.branch,
-		    last_seen_at    = CURRENT_TIMESTAMP
-		WHERE agent_sessions.ended_at IS NULL`,
+		    last_seen_at    = CURRENT_TIMESTAMP`,
 		in.SessionID, in.RepoID, in.Actor, in.Model, in.PermissionMode, in.Host, in.Branch,
-	)
-	if err != nil {
+	); err != nil {
 		return nil, err
 	}
-	got, err := s.GetAgentSession(in.SessionID)
-	if err != nil {
+	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	if got.EndedAt != nil {
-		return nil, fmt.Errorf("session %q is already ended (reason=%s); start a new session", in.SessionID, got.EndReason)
-	}
-	return got, nil
+	return s.GetAgentSession(in.SessionID)
 }
 
 // EndAgentSession stamps ended_at + end_reason, and auto-releases every
@@ -110,10 +126,11 @@ func (s *Store) EndAgentSession(sessionID, reason string) (*model.AgentSession, 
 	var alreadyEnded sql.NullString
 	err = tx.QueryRow(`SELECT id, end_reason FROM agent_sessions WHERE session_id = ? AND ended_at IS NOT NULL`, sessionID).Scan(&pk, &alreadyEnded)
 	if err == nil {
-		// Already ended — idempotent path.
-		if err := tx.Commit(); err != nil {
-			return nil, err
-		}
+		// Already ended — idempotent path. The transaction did nothing
+		// write-worthy, so roll it back (the defer would do this anyway,
+		// but spelling it out keeps the "no commit happens here" intent
+		// obvious to future readers).
+		_ = tx.Rollback()
 		return s.GetAgentSession(sessionID)
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
@@ -305,6 +322,51 @@ func (s *Store) GetAgentSession(sessionID string) (*model.AgentSession, error) {
 		return nil, ErrNotFound
 	}
 	return ag, err
+}
+
+// ResolveAgentSession looks up a session by exact id first, then by
+// unique-prefix match (git-style). Lets `bacio agent show` accept the
+// short ids that `bacio agent list` prints without forcing the user
+// to copy the full UUID. Returns ErrNotFound if no match, or a
+// "matches N sessions" error on ambiguous prefixes.
+func (s *Store) ResolveAgentSession(idOrPrefix string) (*model.AgentSession, error) {
+	if sess, err := s.GetAgentSession(idOrPrefix); err == nil {
+		return sess, nil
+	} else if !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
+	// Try prefix match. SQLite's LIKE with no wildcard chars in the
+	// supplied prefix is safe — we escape with a leading-literal pattern.
+	pattern := idOrPrefix + "%"
+	rows, err := s.DB.Query(
+		`SELECT s.id, s.session_id, s.repo_id, r.prefix, s.actor, s.model, s.permission_mode, s.host, s.branch,
+		s.started_at, s.last_seen_at, s.ended_at, s.end_reason
+		FROM agent_sessions s LEFT JOIN repos r ON r.id = s.repo_id
+		WHERE s.session_id LIKE ? ORDER BY s.last_seen_at DESC LIMIT 2`, pattern,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var matches []*model.AgentSession
+	for rows.Next() {
+		ag, err := scanAgentSession(rows)
+		if err != nil {
+			return nil, err
+		}
+		matches = append(matches, ag)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	switch len(matches) {
+	case 0:
+		return nil, ErrNotFound
+	case 1:
+		return matches[0], nil
+	default:
+		return nil, fmt.Errorf("session prefix %q is ambiguous (matches at least 2 sessions); pass more characters or the full id", idOrPrefix)
+	}
 }
 
 // ListAgentClaims returns every claim attached to a session (open and

@@ -142,8 +142,13 @@ func (c *localClient) ClaimAgent(ctx context.Context, repo *model.Repo, in input
 	if err != nil {
 		return nil, err
 	}
+	// Audit against the *issue's* repo, not the cwd repo. Cross-repo
+	// claims (working in BACI but claiming a DEMO-* issue) are valid;
+	// recording them under the cwd repo would mis-attribute the audit
+	// and make `bacio history --repo DEMO` miss the entry.
+	issRepoID, issRepoPrefix := iss.RepoID, prefixFromIssueKey(iss.Key)
 	c.recordOp(model.HistoryEntry{
-		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+		RepoID: &issRepoID, RepoPrefix: issRepoPrefix,
 		Op: "agent.claim", Kind: "agent",
 		TargetID: &claim.ID, TargetLabel: in.SessionID,
 		Details: "issue=" + iss.Key,
@@ -172,13 +177,24 @@ func (c *localClient) ReleaseAgent(ctx context.Context, repo *model.Repo, in inp
 	if err != nil {
 		return nil, err
 	}
+	issRepoID, issRepoPrefix := iss.RepoID, prefixFromIssueKey(iss.Key)
 	c.recordOp(model.HistoryEntry{
-		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+		RepoID: &issRepoID, RepoPrefix: issRepoPrefix,
 		Op: "agent.release", Kind: "agent",
 		TargetID: &claim.ID, TargetLabel: in.SessionID,
 		Details: "issue=" + iss.Key,
 	})
 	return claim, nil
+}
+
+// prefixFromIssueKey returns the PREFIX portion of a canonical issue
+// key. Falls back to "" on malformed input; recordOp tolerates an
+// empty prefix.
+func prefixFromIssueKey(key string) string {
+	if i := strings.Index(key, "-"); i > 0 {
+		return key[:i]
+	}
+	return ""
 }
 
 func (c *localClient) ListAgentSessions(ctx context.Context, f AgentSessionFilter) ([]*model.AgentSession, error) {
@@ -191,7 +207,7 @@ func (c *localClient) ListAgentSessions(ctx context.Context, f AgentSessionFilte
 }
 
 func (c *localClient) ShowAgentSession(ctx context.Context, sessionID string) (*AgentSessionView, error) {
-	sess, err := c.store.GetAgentSession(sessionID)
+	sess, err := c.store.ResolveAgentSession(sessionID)
 	if err != nil {
 		return nil, err
 	}

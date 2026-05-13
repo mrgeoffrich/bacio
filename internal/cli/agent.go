@@ -224,7 +224,7 @@ func agentEndCmd() *cobra.Command {
 				return err
 			}
 			if reason == "" {
-				reason = string(modelStop)
+				reason = string(model.EndReasonStop)
 			}
 			return runAgentEnd(inputs.AgentEndInput{SessionID: sid, Reason: reason})
 		},
@@ -504,11 +504,6 @@ func detectBranch() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// modelStop is the default --reason value when none is supplied. Lives
-// in the cli package as a string to avoid importing model.EndReasonStop
-// just for one constant.
-const modelStop = "stop"
-
 // orDefault returns value if non-empty, else fallback.
 func orDefault(value, fallback string) string {
 	if value == "" {
@@ -572,11 +567,16 @@ func emitAgentSessionDetail(view *client.AgentSessionView) error {
 	return w.Flush()
 }
 
+// shortID truncates a session id for table display. 12 chars covers
+// well past UUID-v7's deterministic timestamp prefix into the random
+// half, so collisions in a busy repo are vanishingly unlikely while
+// the column still fits comfortably. `agent show` accepts any unique
+// prefix, so list output stays copy-pasteable.
 func shortID(s string) string {
-	if len(s) <= 8 {
+	if len(s) <= 12 {
 		return s
 	}
-	return s[:8]
+	return s[:12]
 }
 
 func dashIfEmpty(s string) string {
