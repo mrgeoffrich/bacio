@@ -59,6 +59,9 @@ func Open(path string) (*Store, error) {
 	if err := pruneHistory(db, HistoryRetention); err != nil {
 		fmt.Fprintln(os.Stderr, "bacio: warning: history prune failed:", err)
 	}
+	if err := pruneAgentSessions(db, AgentSessionRetention); err != nil {
+		fmt.Fprintln(os.Stderr, "bacio: warning: agent-session prune failed:", err)
+	}
 	return &Store{DB: db}, nil
 }
 

@@ -65,6 +65,12 @@ var Registry = []Entry{
 	{"doc.export", "Write a document's content to disk.", typeOf[inputs.DocExportInput](), inputs.ExampleDocExport},
 
 	{"repo.rm", repoRmDescription, typeOf[inputs.RepoRmInput](), inputs.ExampleRepoRm},
+
+	{"agent.register", "Register (or refresh) an AI-agent session against the current repo.", typeOf[inputs.AgentRegisterInput](), inputs.ExampleAgentRegister},
+	{"agent.heartbeat", "Bump last_seen_at on an existing agent session (optional — register / claim / release already bump it).", typeOf[inputs.AgentHeartbeatInput](), inputs.ExampleAgentHeartbeat},
+	{"agent.end", "End an agent session and auto-release every open claim it holds.", typeOf[inputs.AgentEndInput](), inputs.ExampleAgentEnd},
+	{"agent.claim", "Record that an agent is now focused on an issue (intent, not state — does not move the issue or change assignee).", typeOf[inputs.AgentClaimInput](), inputs.ExampleAgentClaim},
+	{"agent.release", "Release an agent's claim on an issue (does not move the issue or change assignee).", typeOf[inputs.AgentReleaseInput](), inputs.ExampleAgentRelease},
 }
 
 // repoRmDescription is the LLM-targeted warning text published via

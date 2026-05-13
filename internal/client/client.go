@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/git"
@@ -161,6 +162,36 @@ type Client interface {
 	// are scoped to that repo (the remote backend uses the repo's
 	// prefix in the URL). repo == nil means "across all repos".
 	ListHistory(ctx context.Context, repo *model.Repo, f store.HistoryFilter) ([]*model.HistoryEntry, error)
+
+	// ----- Agent registry (local-only in v1; remote returns ErrLocalOnly) -----
+	// The agent registry records which AI agent sessions are alive
+	// against which repos, and which issues they're focused on.
+	// Local-only data — never synced. HTTP parity is a v2 follow-up;
+	// the remote backend returns ErrLocalOnly for now so callers get a
+	// clear "use --remote unset" message instead of a 404.
+	RegisterAgent(ctx context.Context, repo *model.Repo, in inputs.AgentRegisterInput, dryRun bool) (*model.AgentSession, error)
+	HeartbeatAgent(ctx context.Context, repo *model.Repo, in inputs.AgentHeartbeatInput, dryRun bool) (*model.AgentSession, error)
+	EndAgent(ctx context.Context, repo *model.Repo, in inputs.AgentEndInput, dryRun bool) (*model.AgentSession, error)
+	ClaimAgent(ctx context.Context, repo *model.Repo, in inputs.AgentClaimInput, dryRun bool) (*model.AgentClaim, error)
+	ReleaseAgent(ctx context.Context, repo *model.Repo, in inputs.AgentReleaseInput, dryRun bool) (*model.AgentClaim, error)
+	ListAgentSessions(ctx context.Context, f AgentSessionFilter) ([]*model.AgentSession, error)
+	ShowAgentSession(ctx context.Context, sessionID string) (*AgentSessionView, error)
+}
+
+// AgentSessionFilter mirrors store.AgentSessionFilter; the wrapper lets
+// CLI callers pass a *model.Repo (so the remote backend can resolve
+// prefix when v2 wires it up) instead of a raw repo id.
+type AgentSessionFilter struct {
+	Repo      *model.Repo // nil = all repos
+	OnlyAlive bool
+	Since     time.Time
+}
+
+// AgentSessionView bundles a session with its claim history for the
+// `bacio agent show` view.
+type AgentSessionView struct {
+	Session *model.AgentSession `json:"session"`
+	Claims  []*model.AgentClaim `json:"claims"`
 }
 
 // IssueFilter mirrors store.IssueFilter but also carries an optional

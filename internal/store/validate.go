@@ -53,6 +53,35 @@ func ValidateActor(s string) (string, error) {
 	return validateSingleLine(s, "user", maxNameLen, true)
 }
 
+// ValidateSessionID validates an external session id (e.g.
+// CLAUDE_CODE_SESSION_ID, which is a UUID). Strict no-whitespace,
+// printable ASCII only, capped at maxNameLen. Unlike most validators
+// we do NOT TrimSpace — leading/trailing whitespace in a session id
+// almost certainly indicates a copy-paste error and surfacing it as
+// an explicit reject (per principle #4) beats silently accepting an
+// almost-right id that won't match the original.
+func ValidateSessionID(s string) (string, error) {
+	if !utf8.ValidString(s) {
+		return "", fmt.Errorf("session_id is not valid UTF-8")
+	}
+	if s == "" {
+		return "", fmt.Errorf("session_id is required")
+	}
+	if strings.TrimSpace(s) != s {
+		return "", fmt.Errorf("session_id must not have leading or trailing whitespace")
+	}
+	if len(s) > maxNameLen {
+		return "", fmt.Errorf("session_id too long: %d chars, max %d", len(s), maxNameLen)
+	}
+	for _, r := range s {
+		switch {
+		case r < 0x21 || r > 0x7E:
+			return "", fmt.Errorf("session_id must be printable ASCII (no whitespace, no control chars)")
+		}
+	}
+	return s, nil
+}
+
 // ValidateSlug enforces the kebab-case slug shape used for feature slugs.
 // Must start with [a-z0-9] and contain only [a-z0-9-]; capped at maxSlugLen.
 func ValidateSlug(s string) (string, error) {

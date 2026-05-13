@@ -62,6 +62,7 @@ func NewRoot() *cobra.Command {
 		newInstallSampleSkillsCmd(),
 		newTUICmd(),
 		newDemoCmd(),
+		newAgentCmd(),
 	)
 	return root
 }

@@ -134,6 +134,10 @@ func renderText(w io.Writer, v any) error {
 		fmt.Fprintln(w, "     bacio issue list --all-repos")
 	case message:
 		fmt.Fprintln(w, x.Text)
+	case *model.AgentSession:
+		printAgentSession(w, x)
+	case *model.AgentClaim:
+		printAgentClaim(w, x)
 	default:
 		fmt.Fprintf(w, "%v\n", v)
 	}
@@ -433,3 +437,33 @@ func printImportResult(w io.Writer, r importResult) {
 	}
 }
 
+
+func printAgentSession(w io.Writer, s *model.AgentSession) {
+	fmt.Fprintf(w, "Session:  %s\n", s.SessionID)
+	fmt.Fprintf(w, "Actor:    %s\n", s.Actor)
+	if s.RepoPrefix != "" {
+		fmt.Fprintf(w, "Repo:     %s\n", s.RepoPrefix)
+	}
+	if s.Model != "" {
+		fmt.Fprintf(w, "Model:    %s\n", s.Model)
+	}
+	if s.PermissionMode != "" {
+		fmt.Fprintf(w, "Mode:     %s\n", s.PermissionMode)
+	}
+	if s.Branch != "" {
+		fmt.Fprintf(w, "Branch:   %s\n", s.Branch)
+	}
+	fmt.Fprintf(w, "LastSeen: %s\n", localTime(s.LastSeenAt))
+	if s.EndedAt != nil {
+		fmt.Fprintf(w, "Ended:    %s (reason=%s)\n", localTime(*s.EndedAt), s.EndReason)
+	}
+}
+
+func printAgentClaim(w io.Writer, c *model.AgentClaim) {
+	fmt.Fprintf(w, "Session:  %s\n", c.SessionID)
+	fmt.Fprintf(w, "Issue:    %s\n", c.IssueKey)
+	fmt.Fprintf(w, "Claimed:  %s\n", localTime(c.ClaimedAt))
+	if c.ReleasedAt != nil {
+		fmt.Fprintf(w, "Released: %s\n", localTime(*c.ReleasedAt))
+	}
+}
