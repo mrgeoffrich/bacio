@@ -24,4 +24,13 @@ type Engine struct {
 	Store  *store.Store
 	Actor  string
 	DryRun bool
+
+	// SkipPropagateDeletes disables Import phase 4 (the "rows in
+	// sync_state but not seen on disk → delete" pass). Set by
+	// bootstrap flows (sync init attach, sync clone) where
+	// sync_state is not a trustworthy "what was last shared"
+	// snapshot, so missing-on-disk does not imply
+	// deleted-elsewhere. Steady-state bacio sync leaves this
+	// false — that's where propagateDeletes is correct.
+	SkipPropagateDeletes bool
 }

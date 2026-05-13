@@ -255,9 +255,15 @@ func (e *Engine) applyImport(ctx context.Context, tx *sql.Tx, source string, sca
 			return fmt.Errorf("apply documents for %s: %w", sr.Prefix, err)
 		}
 	}
-	// Phase 4: deletions.
-	if err := e.propagateDeletes(tx, scan, res); err != nil {
-		return fmt.Errorf("propagate deletes: %w", err)
+	// Phase 4: deletions. Bootstrap flows (sync init attach, sync
+	// clone) skip this — they treat import as an additive merge so
+	// local-only records aren't wiped when the sync-repo working
+	// tree doesn't yet reflect them. Steady-state sync leaves the
+	// flag false and runs propagateDeletes normally.
+	if !e.SkipPropagateDeletes {
+		if err := e.propagateDeletes(tx, scan, res); err != nil {
+			return fmt.Errorf("propagate deletes: %w", err)
+		}
 	}
 	return nil
 }
