@@ -18,13 +18,17 @@ bacio's CLI was rebuilt around six rules so an LLM can drive it reliably. These 
 
 ## The agent flow
 
-The five-step pattern agents use:
+The five-step pattern agents use, bracketed by a *declare yourself* / *tear down* pair:
 
+0. **Declare yourself** — `bacio agent register --user <name> --agent <slug>` (with `--new` on first session, then persisting the slug to `.bacio/agent`). `bacio agent claim <KEY>` when you start focused work on an issue.
 1. **Discover** — `bacio schema show issue.add` if the agent is unsure.
 2. **Compose** — build the JSON payload.
 3. **Rehearse** — `--dry-run` to validate without writing.
 4. **Execute** — run for real with `--user <agent-name>` for clean audit attribution.
 5. **Query lean** — `*.list` with filters, not bulk reads.
+6. **Tear down** — `bacio agent release <KEY>` when you stop, then `bacio agent end --reason stop` (which auto-releases any remaining claims).
+
+The registry is local-only and never replicated via `bacio sync` — it's runtime flow data, not durable project state. The full surface is on the [`bacio agent`](/reference/cli/agent) reference.
 
 ## What bacio deliberately doesn't do
 

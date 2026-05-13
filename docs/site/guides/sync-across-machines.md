@@ -28,12 +28,18 @@ bacio sync init ~/sync/your-project \
 
 This:
 
-1. Creates the sync repo at `~/sync/your-project`, writes `bacio-sync.yaml`.
+1. Creates (or initialises) the sync repo at `~/sync/your-project`, writes `bacio-sync.yaml`.
 2. Exports your project's data into the sync repo.
 3. Commits and pushes (with `--remote`).
 4. Writes `.bacio/config.yaml` inside your project pointing at the sync remote.
 
-`init` refuses if the remote already has data. Any empty git remote works — GitHub, GitLab, Gitea, a bare repo on your own server.
+`<local-path>` may be missing, an empty directory, a freshly `git init`-ed folder with no working-tree files (e.g. a just-cloned empty bare remote), **or an already-populated bacio sync repo**. The last case is *attach mode*: bacio pulls, imports, re-exports, commits, and pushes — connecting your project repo to an existing sync repo that already holds other projects.
+
+If the target already has an `origin` remote configured, `--remote` is **optional** — the URL is auto-detected. Pass `--remote` explicitly when bootstrapping a brand-new sync repo (or to assert the expected URL; a mismatch errors). Any empty git remote works — GitHub, GitLab, Gitea, a bare repo on your own server.
+
+### The `index.yaml` TOC
+
+Every export refreshes a top-level `index.yaml` at the sync-repo root: a machine-readable table-of-contents listing every project repo present (`prefix`, `uuid`, `name`, `remote`, plus `issues` / `features` / `documents` / `comments` counts). The per-repo `repos/<PREFIX>/repo.yaml` files remain authoritative; `index.yaml` is regenerated from them and is byte-stable across no-op runs so steady-state `bacio sync` doesn't churn a commit per invocation. It's safe to delete — the next export rewrites it.
 
 ## Joining from a second machine
 
@@ -91,7 +97,15 @@ bacio sync inspect MINI --doc design.md
 
 ## Mode switch
 
-Inside a sync repo, bacio refuses to auto-register the directory as a tracked project (the `bacio-sync.yaml` sentinel switches bacio into sync-repo mode). Tracking commands (`bacio issue add`, `bacio feature edit`, …) error out with a "this is a bacio sync repo" message, pointing you back to a real project working tree.
+Inside a sync repo, bacio refuses to auto-register the directory as a tracked project (the `bacio-sync.yaml` sentinel switches bacio into sync-repo mode). Mutating commands (`bacio issue add`, `bacio feature edit`, …) error out with a "this is a bacio sync repo" message, pointing you back to a real project working tree.
+
+The read-only list commands take a YAML-on-disk branch instead of refusing:
+
+- `bacio repo list` reads `index.yaml` and prints the prefixes / names / remotes recorded there.
+- `bacio issue list --repo <PREFIX>` (or `--all-repos`) walks `repos/<PREFIX>/issues/*/issue.yaml`. The usual `--state`, `--feature`, `--tag`, `--with-description` filters apply. Without `--repo` or `--all-repos`, the command errors with a hint listing available prefixes.
+- `bacio doc list --repo <PREFIX>` (or `--all-repos`) walks `repos/<PREFIX>/docs/*/doc.yaml`; `--type` filters as in project-repo mode.
+
+That's the full sync-repo-aware list surface; everything else still refuses with `errSyncRepoMode`.
 
 ## When NOT to use sync
 

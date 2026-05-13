@@ -39,7 +39,14 @@ bacio repo rm MINI --dry-run
 bacio repo rm MINI --confirm MINI
 ```
 
+## Inside a sync repo
+
+`bacio repo list` is one of the three read-only commands that take a YAML-on-disk branch inside a [bacio sync repo](/guides/sync-across-machines). Instead of hitting the local SQLite store, it reads the top-level `index.yaml` and prints the prefixes, names, and remotes recorded there. Fields not stored in `index.yaml` (the local DB id, on-disk path, next issue number) come back empty. If `index.yaml` is missing — e.g. a sync repo created before that file existed — the command falls back to scanning `repos/*/repo.yaml`.
+
+`bacio repo show` and `bacio repo rm` still refuse inside a sync repo with `errSyncRepoMode`; only `list` is sync-aware.
+
 ## See also
 
 - **[`bacio init`](/reference/cli/init)** — bind a new repo.
 - **[`bacio status`](/reference/cli/status)** — one-screen summary of the current repo.
+- **[Sync across machines](/guides/sync-across-machines)** — the sync-repo mode the section above refers to.

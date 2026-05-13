@@ -20,6 +20,7 @@ bacio's CLI is the same surface that agents drive — every mutating command acc
 | [`bacio pr`](/reference/cli/pr) | Attach, detach, and list pull requests on an issue. |
 | [`bacio tag`](/reference/cli/tag) | Add or remove tags on issues. |
 | [`bacio doc`](/reference/cli/doc) | Manage per-repo text documents and their links to issues / features. |
+| [`bacio agent`](/reference/cli/agent) | Track live AI-agent sessions and their issue claims (local-only registry). |
 | [`bacio status`](/reference/cli/status) | One-screen summary of the current repo. |
 | [`bacio history`](/reference/cli/history) | Query the audit log of mutations. |
 | [`bacio schema`](/reference/cli/schema) | List and show JSON schemas for every `--json` payload. |

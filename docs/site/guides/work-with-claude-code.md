@@ -18,15 +18,26 @@ That drops `SKILL.md` into `<repo>/.claude/skills/bacio/`. Restart Claude Code i
 
 ## How Claude actually drives bacio
 
-You don't need to know this to use it, but it helps to recognise good vs. confused behaviour. Behind every prompt, Claude follows the same five-step flow:
+You don't need to know this to use it, but it helps to recognise good vs. confused behaviour. Behind every prompt, Claude follows the same flow, bracketed by *register* and *end*:
 
+0. **Declare itself** — `bacio agent register --user agent-claude --agent <slug>` at session start, then `bacio agent claim <KEY>` when it starts focused work on an issue. The first time Claude touches a repo it generates a memorable slug (e.g. `cheerful-otter@claude.shiny`), registers it with `--new`, and persists it to `.bacio/agent` so the same identity is reused next time.
 1. **Discover** — `bacio schema show <command>` if it's unsure of the payload shape (rare, but happens for less-common verbs).
 2. **Compose** — build the JSON payload.
 3. **Rehearse** — `--dry-run` for anything destructive (rm verbs especially). Stdout shape matches the real call; cascade counts are reported.
 4. **Execute** — run for real with `--user agent-claude` so the audit log attributes the work to the agent, not to your OS user.
 5. **Query lean** — `*.list` with filters, `*.show` only when full detail is needed.
+6. **Tear down** — `bacio agent release <KEY>` when it stops working on an issue; `bacio agent end --reason stop` at session end (auto-releases anything still claimed).
 
 If Claude ever asks *"do you want me to actually run that?"* after showing `--dry-run` output, that's the contract working as designed.
+
+### Spotting who's currently working
+
+The registry surfaces in two places worth knowing:
+
+- **`bacio agent list`** — a lean table of live sessions in this repo (or `--all-repos`). Useful for "who's running right now?" before you kick off a parallel agent.
+- **`bacio agent show <session-id>`** — full claim history for one session. Accepts any unique prefix of the id shown in `list`.
+
+Make sure `.bacio/agent` is gitignored — it holds Claude's per-machine identity, not project state.
 
 ## Prompts that work
 
@@ -113,6 +124,7 @@ These files are checked into your repo. Once you've customised one, **stop re-ru
 ## See also
 
 - **[How agents drive bacio](/concepts/how-agents-drive-bacio)** — the six rules behind the contract.
+- **[`bacio agent`](/reference/cli/agent)** — the registry Claude registers itself against.
 - **[`bacio install-skill`](/reference/cli/install-skill)** — the canonical reference install.
 - **[`bacio install-sample-skills`](/reference/cli/install-sample-skills)** — the workflow packs.
 - **[JSON payloads](/reference/json-payloads)** — the agent contract from the human side.

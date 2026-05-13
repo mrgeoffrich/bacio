@@ -40,8 +40,11 @@ The state parser tolerates dashes or spaces, so `in-progress`, `in progress`, an
 | `--state s1,s2` | Comma-separated states. |
 | `--feature <slug>` (`-f`) | Limit to one feature. |
 | `--tag <name>` | Repeatable. Multiple tags AND-combine. |
-| `--all-repos` | Search every tracked repo. |
+| `--repo <PREFIX>` | Limit to one repo prefix. Required when run inside a sync repo (or pass `--all-repos`); ignored otherwise — `cwd` resolves the repo in a normal project working tree. |
+| `--all-repos` | Search every tracked repo. Inside a sync repo, walks every prefix recorded in `index.yaml`. |
 | `--with-description` | Inflate the `description` field (lean by default). |
+
+Inside a [bacio sync repo](/guides/sync-across-machines) the command takes a YAML-on-disk branch — issues are read from `repos/<PREFIX>/issues/*/issue.yaml` rather than the local SQLite store. The filter flags above all apply identically. See [`bacio sync`](/reference/cli/sync) for the full mode-switch behaviour.
 
 ## Worked examples
 

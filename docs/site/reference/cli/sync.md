@@ -12,7 +12,7 @@ description: Mirror the SQLite DB to a git-backed YAML + markdown repo for cross
 | Subcommand | What it does |
 |---|---|
 | `bacio sync` | Steady state: pull → import → export → commit → push. Run whenever. |
-| `bacio sync init <local-path>` | First-time setup. Exports current state, commits, pushes. Writes `.bacio/config.yaml` in your project. |
+| `bacio sync init <local-path>` | Connect the current project to a sync repo at `<local-path>` and run an initial sync. Handles fresh bootstrap, an empty `git init`-only / cloned-empty-bare folder, and *attach mode* against an already-populated sync repo. Writes `.bacio/config.yaml` in your project. |
 | `bacio sync clone [<local-path>]` | Join an existing sync repo from a second machine. Refuses to overwrite local issues unless `--allow-renumber` is passed. |
 | `bacio sync verify` | Check that local DB and sync repo agree, without writing. |
 | `bacio sync inspect <prefix>` | Inspect the synced state for one repo prefix. |
@@ -33,9 +33,15 @@ Plus `--dry-run` from the global set, which projects what would change without w
 
 ### `bacio sync init <local-path>`
 
+`<local-path>` may be:
+
+- a missing or empty directory (fresh bootstrap),
+- an existing `git init`-only folder, or a freshly `git clone`-ed empty bare remote (sentinel + `.gitattributes` are written, then the first export is committed and pushed),
+- an existing bacio sync repo (*attach mode*: pull → import → re-export → commit → push; the current project joins alongside any projects already exported there).
+
 | Flag | What it does |
 |---|---|
-| `--remote <url>` | Git URL of the remote sync repo. Sets up `origin` and writes `.bacio/config.yaml`. Pass when bootstrapping a brand-new sync repo. |
+| `--remote <url>` | Git URL of the remote sync repo. Sets up `origin` and writes `.bacio/config.yaml`. **Optional** when `<local-path>` already has an `origin` configured — the URL is auto-detected; supplying a mismatching `--remote` errors. |
 
 ### `bacio sync clone [<local-path>]`
 
