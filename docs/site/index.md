@@ -27,7 +27,7 @@ Verify the install:
 
 ```bash
 $ bacio --version
-bacio version v1.0.3
+bacio version vX.Y.Z
 ```
 
 Other install paths (build from source, uninstall, where the binary lands) live on the [Install page](/getting-started/install).

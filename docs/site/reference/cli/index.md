@@ -16,7 +16,7 @@ bacio's CLI is the same surface that agents drive — every mutating command acc
 | [`bacio feature`](/reference/cli/feature) | Manage features (groups of issues). Includes `plan` for dependency-ordered execution. |
 | [`bacio issue`](/reference/cli/issue) | Manage issues — add, list, show, brief, edit, state, assign, unassign, next, peek, rm. |
 | [`bacio comment`](/reference/cli/comment) | Add and list issue comments. |
-| [`bacio link`](/reference/cli/link) / `bacio unlink` | Create / remove typed issue relations (`blocks`, `relates-to`, `duplicate-of`). |
+| [`bacio link`](/reference/cli/link) / `bacio unlink` | Create / remove typed issue relations (`blocks`, `relates-to`, `duplicate-of` — stored as `blocks`, `relates_to`, `duplicate_of`). |
 | [`bacio pr`](/reference/cli/pr) | Attach, detach, and list pull requests on an issue. |
 | [`bacio tag`](/reference/cli/tag) | Add or remove tags on issues. |
 | [`bacio doc`](/reference/cli/doc) | Manage per-repo text documents and their links to issues / features. |

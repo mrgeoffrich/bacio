@@ -73,7 +73,7 @@ Cycles through three inner panes — description, comments, attachments — via 
 | `j` / `k` | Move selection. |
 | `space` | Toggle the focused column (refuses to hide the last visible one). |
 | `a` | Show all columns. |
-| `n` | Minimise — keep only the first state visible. |
+| `n` | Minimal — keep only the first state column visible (matches the in-app footer's `n minimal`). |
 | `esc` | Close the picker. |
 
 ### Feature picker (open with `f`)

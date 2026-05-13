@@ -37,7 +37,7 @@ See [Sync across machines](/guides/sync-across-machines) for the full conflict s
 
 60 days, on the local DB. `pruneHistory` runs on every DB open.
 
-If you need longer retention, [enable sync](/guides/sync-across-machines) — the audit log is included in the synced YAML repo and survives prune, and the sync repo's git history is forever.
+The audit log is **local-only** — `bacio sync` does not write a history file into the sync repo, so the on-disk YAML never carries audit rows. If you need longer-lived change tracking, [enable sync](/guides/sync-across-machines) and rely on the sync repo's git history: every state move, edit, and rename surfaces as a commit-level diff there, and the git history is forever.
 
 ## Can I run bacio in CI?
 
@@ -49,10 +49,11 @@ If you have sync enabled:
 
 ```bash
 cd ~/sync/your-project
-git log -p --follow repos/MINI/issues/MINI-7.yaml
+git log -p --follow repos/MINI/issues/MINI-7/issue.yaml
+git log -p --follow repos/MINI/issues/MINI-7/description.md
 ```
 
-git history is the source of truth for *when* something changed; the audit log inside bacio is the source of truth for *who* changed it and what op was recorded.
+git history is the source of truth for *when* something changed; the local audit log inside bacio is the source of truth for *who* changed it and which op was recorded.
 
 ## What's the difference between an "issue" and a "feature"?
 

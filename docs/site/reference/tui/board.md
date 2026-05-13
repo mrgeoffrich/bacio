@@ -13,7 +13,7 @@ The Board (tab `1`) is the kanban view of the current repo's issues. One column 
 │      broke │      session… │      copy      │      cards  │      audit │      legacy │
 │ [ 5] Empty │ [ 4] Tag      │                │             │ [ 6] Seed  │             │
 │      state │      colours  │                │             │      docs  │             │
-└─ 2 ────────┴─ 2 ───────────┴─ 1 ────────────┴─ 1 ─────────┴─ 2 ────────┴─ 1 ─ ───────┘
+└─ 2 ────────┴─ 2 ───────────┴─ 1 ────────────┴─ 1 ─────────┴─ 2 ────────┴─ 1 ────────┘
 ```
 
 The column title sits inside the top border; the issue count (and a `↑` / `↓` / `↕` arrow if the column scrolls beyond the visible window) sits inside the bottom border. Cards drop the repo prefix — it's already visible in the tab strip's top-right chip — and show only the issue number, padded to two characters so columns of mixed-width numbers stay aligned: `[ 1]`, `[ 2]`, `[10]`, `[123]`. The brackets around the number are tinted with the per-feature colour; selected cards keep the brackets plain so nested styling doesn't punch holes in the selection background.
@@ -65,7 +65,7 @@ A modal that lets you toggle which state columns are visible. Useful for hiding 
 | `j` / `k` | Move selection. |
 | `space` | Toggle the focused column (refuses to hide the last visible one). |
 | `a` | Show all columns. |
-| `n` | Minimise — keep only the first state visible. |
+| `n` | Minimal — keep only the first state column visible (the in-app footer reads `n minimal`). |
 | `esc` | Close. |
 
 Hidden columns persist per-repo (in `tui_settings(repo_id, key, value)`), so the next time you open the TUI you're back where you left off.

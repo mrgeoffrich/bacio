@@ -94,7 +94,7 @@ A per-repo named text blob (markdown, etc.) with a typed category (`architecture
 
 ### History (audit log)
 
-Every mutation records a row: actor (`--user`), op (`issue.create`, `feature.update`, `sync.renumber`, …), target, and a details blob. Pruned to 60 days on every DB open. Survives [git-backed sync](/guides/sync-across-machines).
+Every mutation records a row: actor (`--user`), op (`issue.create`, `feature.update`, `sync.renumber`, …), kind (`issue`, `feature`, `document`, `repo`, `agent`, `sync`), target, and a details blob. Pruned to 60 days on every DB open. The audit log is **local-only** — `bacio sync` does not write it into the sync repo. For longer-lived change tracking, rely on the sync repo's git history over the YAML files.
 
 ## Identity: the UUIDv7 layer
 

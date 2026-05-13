@@ -13,35 +13,40 @@ Inside the sync repo:
 
 ```
 ~/sync/your-project/
-├── bacio-sync.yaml              # sentinel: marks this as a sync repo
-├── redirects.yaml               # historical renumbers / renames
+├── bacio-sync.yaml                       # sentinel: marks this as a sync repo
+├── index.yaml                            # TOC of every project repo (regenerated on each export)
+├── redirects.yaml                        # historical renumbers / renames
 └── repos/
-    └── MINI/                    # one folder per prefix
-        ├── repo.yaml            # repo metadata
+    └── MINI/                             # one folder per prefix
+        ├── repo.yaml                     # repo metadata
         ├── features/
-        │   └── auth-rewrite.yaml
+        │   └── auth-rewrite/
+        │       ├── feature.yaml
+        │       └── description.md        # body lives next to metadata
         ├── issues/
-        │   ├── MINI-1.yaml      # filename embeds the canonical key
-        │   └── MINI-2.yaml
-        ├── comments/
-        │   └── MINI-1/
-        │       └── 001.yaml
-        ├── documents/
-        │   ├── design.md        # body lives next to the metadata
-        │   └── design.yaml
-        └── history.yaml         # audit log
+        │   └── MINI-1/                   # one folder per issue
+        │       ├── issue.yaml
+        │       ├── description.md
+        │       └── comments/             # comments live inside the issue folder
+        │           └── 2026-05-12T14-14-22.103Z--01890c5f-…-uuid.yaml
+        │           # plus a sibling .md with the body
+        └── docs/
+            └── design.md/                # one folder per document, named by filename
+                ├── doc.yaml
+                └── content.md
 ```
 
-A second project synced to the same sync repo just adds another folder under `repos/` — `repos/AUTH/`, `repos/SITE/`, and so on.
+A second project synced to the same sync repo just adds another folder under `repos/` — `repos/AUTH/`, `repos/SITE/`, and so on. The audit log is **not** exported to the sync repo (there's no `history.yaml`); it stays in the local SQLite at `~/.bacio/db.sqlite`.
 
 ## Read
 
 ```bash
 cd ~/sync/your-project
-$EDITOR repos/MINI/issues/MINI-7.yaml
+$EDITOR repos/MINI/issues/MINI-7/issue.yaml
+$EDITOR repos/MINI/issues/MINI-7/description.md
 ```
 
-Markdown bodies are stored alongside metadata so a doc reader / markdown preview Just Works. Comments are one file per comment under `comments/<KEY>/`, ordered numerically.
+Markdown bodies are sibling files inside each record's folder (`description.md` for issues and features, `content.md` for documents, a per-comment `.md` next to each comment YAML), so a markdown preview Just Works. Comments live in `repos/<PREFIX>/issues/<KEY>/comments/`, named with the comment's UTC timestamp and full UUID so concurrent comments from different machines never collide on filename.
 
 ## Grep / ripgrep
 
@@ -79,12 +84,13 @@ Nothing bacio-specific — but if you want a starting point:
 
 ```bash
 cd ~/sync/your-project
-git log --follow repos/MINI/issues/MINI-7.yaml      # every revision of one issue
-git diff HEAD~10 -- repos/MINI/issues/MINI-7.yaml   # what changed in the last 10 commits
-git log -p --since="1 week ago" -- repos/MINI/      # everything in MINI last week
+git log --follow repos/MINI/issues/MINI-7/issue.yaml        # every revision of one issue
+git log --follow repos/MINI/issues/MINI-7/description.md    # body history
+git diff HEAD~10 -- repos/MINI/issues/MINI-7/               # what changed in the last 10 commits
+git log -p --since="1 week ago" -- repos/MINI/              # everything in MINI last week
 ```
 
-The audit log inside the DB is pruned to 60 days; the sync repo's git history is **forever**. If you need long-term traceability, the sync repo is the archive.
+The audit log inside the DB is pruned to 60 days and is **not** exported to the sync repo — but the sync repo's git history covers the same ground at the record level: every state move, edit, rename, comment, tag, and link surfaces as a commit-level diff over the YAML, and the git history is forever. If you need long-term traceability, the sync repo is the archive.
 
 ## See also
 

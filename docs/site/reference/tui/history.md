@@ -34,19 +34,21 @@ Common op names (canonical `<entity>.<verb>` form — these are CRUD-flavoured v
 
 | Op | What |
 |---|---|
-| `repo.create` / `.delete` / `.upgrade_phantom` | A new repo bound, removed, or promoted from sync-only to having a local working tree. |
+| `repo.create` / `.upgrade_phantom` | A new repo bound, or promoted from sync-only (phantom) to having a local working tree. `repo.upgrade_phantom` is emitted by the auto-register flow when any `bacio` command runs in a working tree whose remote matches a phantom previously imported via sync. |
 | `feature.create` / `.update` / `.delete` | Feature CRUD. |
-| `issue.create` / `.update` / `.state` / `.assign` / `.claim` / `.delete` | Issue lifecycle. `issue.unassign` reuses `issue.assign` with an empty assignee. |
-| `comment.add` | A new comment. |
-| `relation.create` / `.delete` | Typed links between issues (`blocks`, `relates_to`, `duplicate_of`). |
+| `issue.create` / `.update` / `.state` / `.assign` / `.claim` / `.delete` | Issue lifecycle. `issue.unassign` reuses `issue.assign` with an empty assignee. `issue.claim` is the atomic claim recorded by `bacio issue next`. |
+| `comment.add` | A new comment (recorded with `kind=issue`). |
+| `relation.create` / `.delete` | Typed links between issues, stored as `blocks` / `relates_to` / `duplicate_of`. |
 | `pr.attach` / `.detach` | Pull request URLs attached / removed. |
 | `tag.add` / `.remove` | Tag changes. |
 | `document.create` / `.update` / `.rename` / `.delete` / `.link` / `.unlink` | Document lifecycle. |
+| `agent.identity.create` / `agent.register` / `agent.end` / `agent.claim` / `agent.release` | Agent registry activity. `agent.claim` is intent-only — it doesn't move the issue, unlike `issue.claim`. `bacio agent heartbeat` deliberately doesn't write a row. |
 | `sync.run` / `.init` / `.clone` / `.import` / `.renumber` / `.rename` / `.delete` | Sync activity. |
+| `demo.seed` | The hidden `bacio demo` command (UI stress-testing seed). |
 
 ## Retention
 
-History is **pruned to 60 days** on every DB open. If you need longer-lived records, enable [git-backed sync](/guides/sync-across-machines) — the audit log goes with the sync repo and lives forever in git.
+History is **pruned to 60 days** on every DB open. The audit log is local-only — `bacio sync` doesn't export it to the sync repo. For longer-lived change tracking, enable [git-backed sync](/guides/sync-across-machines) and lean on the git log of the YAML files (every state move, edit, and rename is a commit-level diff there).
 
 ## Source of truth
 

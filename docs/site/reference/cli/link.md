@@ -16,11 +16,13 @@ bacio unlink <A> <B>                   # removes any relation between two issues
 
 ## Relation types
 
-| Type | Semantics |
-|---|---|
-| `blocks` | `FROM` blocks `TO`. The inverse view (`TO` is blocked by `FROM`) is surfaced automatically in `bacio issue show`. |
-| `relates-to` | Loose association. No direction. |
-| `duplicate-of` | `FROM` is a duplicate of `TO`. |
+| Type | Stored as | Semantics |
+|---|---|---|
+| `blocks` | `blocks` | `FROM` blocks `TO`. The inverse view (`TO` is blocked by `FROM`) is surfaced automatically in `bacio issue show`. |
+| `relates-to` | `relates_to` | Loose association. No direction. |
+| `duplicate-of` | `duplicate_of` | `FROM` is a duplicate of `TO`. |
+
+The CLI accepts the dashed form; the canonical stored form is underscored, so JSON payloads, audit-log `details` blobs, and the on-disk YAML all use `blocks` / `relates_to` / `duplicate_of`. If you're grepping the sync repo, search for the underscored form.
 
 There is **no `blocked-by` create form** — write it as `blocks` from the other direction.
 
