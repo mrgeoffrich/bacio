@@ -233,6 +233,218 @@ func TestImport_DryRunRollsBack(t *testing.T) {
 	}
 }
 
+// TestImport_LWW_Issue_PreservesNewerLocal: BACI-5. When the remote
+// YAML's updated_at is older than the local DB row's, import must
+// preserve local (body, state, tags) and report the skip via
+// ImportResult.Skipped / SkippedStale instead of silently downgrading.
+func TestImport_LWW_Issue_PreservesNewerLocal(t *testing.T) {
+	b, uuids := seedExportFixture(t)
+	dirA := t.TempDir()
+	if _, err := (&Engine{Store: b}).Export(context.Background(), dirA); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	// Tamper with MINI-1's exported YAML so a naive import would
+	// observe a "change". Leave updated_at intact (older than the
+	// value we'll set locally below).
+	iss1Path := filepath.Join(dirA, "repos", "MINI", "issues", "MINI-1", "issue.yaml")
+	body, err := os.ReadFile(iss1Path)
+	if err != nil {
+		t.Fatalf("read iss1 yaml: %v", err)
+	}
+	tampered := strings.Replace(string(body), `state: "in_progress"`, `state: "todo"`, 1)
+	if tampered == string(body) {
+		t.Fatalf("expected to flip state in yaml, body:\n%s", body)
+	}
+	if err := os.WriteFile(iss1Path, []byte(tampered), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	// Bump local MINI-1 updated_at to a value strictly newer than the
+	// fixture's '2026-05-09 14:22:00'.
+	if _, err := b.DB.Exec(
+		`UPDATE issues SET updated_at = '2026-05-15 10:00:00' WHERE uuid = ?`, uuids["iss1"],
+	); err != nil {
+		t.Fatalf("bump local updated_at: %v", err)
+	}
+
+	res, err := (&Engine{Store: b}).Import(context.Background(), dirA)
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if res.Skipped < 1 {
+		t.Fatalf("expected Skipped >= 1, got %d (res=%+v)", res.Skipped, res)
+	}
+	var hit *SkippedStaleEntry
+	for i := range res.SkippedStale {
+		if res.SkippedStale[i].UUID == uuids["iss1"] {
+			hit = &res.SkippedStale[i]
+			break
+		}
+	}
+	if hit == nil {
+		t.Fatalf("MINI-1 not in SkippedStale: %+v", res.SkippedStale)
+	}
+	if hit.Kind != "issue" {
+		t.Errorf("SkippedStale.Kind: got %q, want issue", hit.Kind)
+	}
+	if hit.Label != "MINI-1" {
+		t.Errorf("SkippedStale.Label: got %q, want MINI-1", hit.Label)
+	}
+
+	// Local body preserved — state must still be in_progress, not the
+	// "todo" we wrote into the YAML.
+	iss, err := b.GetIssueByKey("MINI", 1)
+	if err != nil {
+		t.Fatalf("get issue: %v", err)
+	}
+	if iss.State != model.StateInProgress {
+		t.Errorf("local state was overwritten to %v; expected in_progress (LWW skip should have preserved it)", iss.State)
+	}
+	// Tags on local must also be preserved (side-data skip).
+	tagSet := map[string]bool{}
+	for _, tag := range iss.Tags {
+		tagSet[tag] = true
+	}
+	if !tagSet["p1"] || !tagSet["security"] {
+		t.Errorf("local tags clobbered: got %v; expected p1+security to survive", iss.Tags)
+	}
+}
+
+// TestImport_LWW_Feature_PreservesNewerLocal: feature variant of the
+// LWW skip test.
+func TestImport_LWW_Feature_PreservesNewerLocal(t *testing.T) {
+	b, uuids := seedExportFixture(t)
+	dirA := t.TempDir()
+	if _, err := (&Engine{Store: b}).Export(context.Background(), dirA); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	featPath := filepath.Join(dirA, "repos", "MINI", "features", "auth-rewrite", "feature.yaml")
+	body, err := os.ReadFile(featPath)
+	if err != nil {
+		t.Fatalf("read feature yaml: %v", err)
+	}
+	tampered := strings.Replace(string(body), `title: "Rewrite auth"`, `title: "Older remote title"`, 1)
+	if tampered == string(body) {
+		t.Fatalf("expected to replace title in feature yaml; body:\n%s", body)
+	}
+	if err := os.WriteFile(featPath, []byte(tampered), 0o644); err != nil {
+		t.Fatalf("write feature yaml: %v", err)
+	}
+	if _, err := b.DB.Exec(
+		`UPDATE features SET updated_at = '2026-05-15 10:00:00' WHERE uuid = ?`, uuids["feat"],
+	); err != nil {
+		t.Fatalf("bump local feature updated_at: %v", err)
+	}
+
+	res, err := (&Engine{Store: b}).Import(context.Background(), dirA)
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	var hit *SkippedStaleEntry
+	for i := range res.SkippedStale {
+		if res.SkippedStale[i].UUID == uuids["feat"] {
+			hit = &res.SkippedStale[i]
+			break
+		}
+	}
+	if hit == nil {
+		t.Fatalf("feature not in SkippedStale: %+v", res.SkippedStale)
+	}
+	if hit.Kind != "feature" {
+		t.Errorf("SkippedStale.Kind: got %q, want feature", hit.Kind)
+	}
+	f, err := b.GetFeatureByUUID(uuids["feat"])
+	if err != nil {
+		t.Fatalf("get feature: %v", err)
+	}
+	if f.Title != "Rewrite auth" {
+		t.Errorf("local title was overwritten to %q; expected Rewrite auth", f.Title)
+	}
+}
+
+// TestImport_LWW_Document_PreservesNewerLocal: document variant.
+func TestImport_LWW_Document_PreservesNewerLocal(t *testing.T) {
+	b, uuids := seedExportFixture(t)
+	dirA := t.TempDir()
+	if _, err := (&Engine{Store: b}).Export(context.Background(), dirA); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	docMD := filepath.Join(dirA, "repos", "MINI", "docs", "auth-overview.md", "content.md")
+	if err := os.WriteFile(docMD, []byte("# Overwritten by older remote\n"), 0o644); err != nil {
+		t.Fatalf("write doc md: %v", err)
+	}
+	if _, err := b.DB.Exec(
+		`UPDATE documents SET updated_at = '2026-05-15 10:00:00' WHERE uuid = ?`, uuids["doc"],
+	); err != nil {
+		t.Fatalf("bump local doc updated_at: %v", err)
+	}
+	res, err := (&Engine{Store: b}).Import(context.Background(), dirA)
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	var hit *SkippedStaleEntry
+	for i := range res.SkippedStale {
+		if res.SkippedStale[i].UUID == uuids["doc"] {
+			hit = &res.SkippedStale[i]
+			break
+		}
+	}
+	if hit == nil {
+		t.Fatalf("doc not in SkippedStale: %+v", res.SkippedStale)
+	}
+	if hit.Kind != "document" {
+		t.Errorf("SkippedStale.Kind: got %q, want document", hit.Kind)
+	}
+	d, err := b.GetDocumentByUUID(uuids["doc"], true)
+	if err != nil {
+		t.Fatalf("get doc: %v", err)
+	}
+	if !strings.Contains(d.Content, "Auth overview") {
+		t.Errorf("local doc content was overwritten: %q", d.Content)
+	}
+}
+
+// TestImport_LWW_NewerRemote_Updates: regression check that the
+// existing "remote newer, apply remote" behaviour still fires when
+// remote's updated_at is greater than local's.
+func TestImport_LWW_NewerRemote_Updates(t *testing.T) {
+	b, uuids := seedExportFixture(t)
+	dirA := t.TempDir()
+	if _, err := (&Engine{Store: b}).Export(context.Background(), dirA); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	iss1Path := filepath.Join(dirA, "repos", "MINI", "issues", "MINI-1", "issue.yaml")
+	body, err := os.ReadFile(iss1Path)
+	if err != nil {
+		t.Fatalf("read iss1 yaml: %v", err)
+	}
+	// Bump remote updated_at past local (fixture sets local to
+	// '2026-05-09 14:22:00'), and flip state. The YAML uses RFC3339 in
+	// UTC, e.g. "2026-05-09T14:22:00Z".
+	tampered := strings.Replace(string(body), "2026-05-09T14:22:00Z", "2026-06-01T10:00:00Z", 1)
+	tampered = strings.Replace(tampered, `state: "in_progress"`, `state: "done"`, 1)
+	if tampered == string(body) {
+		t.Fatalf("expected to bump remote ts + flip state; body:\n%s", body)
+	}
+	if err := os.WriteFile(iss1Path, []byte(tampered), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	res, err := (&Engine{Store: b}).Import(context.Background(), dirA)
+	if err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	if res.Skipped != 0 {
+		t.Errorf("expected Skipped=0 when remote is newer, got %d (entries: %+v)", res.Skipped, res.SkippedStale)
+	}
+	iss, err := b.GetIssueByKey("MINI", 1)
+	if err != nil {
+		t.Fatalf("get issue: %v", err)
+	}
+	if iss.State != model.StateDone {
+		t.Errorf("expected remote update to apply (state=done); got %v", iss.State)
+	}
+	_ = uuids
+}
+
 // TestImport_EmptySource: importing from a folder with no repos/
 // directory is fine; reports zeros.
 func TestImport_EmptySource(t *testing.T) {

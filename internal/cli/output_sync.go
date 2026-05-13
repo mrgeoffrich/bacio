@@ -18,8 +18,23 @@ func printSyncRunResult(w io.Writer, r syncRunResult) {
 	}
 	fmt.Fprintln(w, "bacio sync complete")
 	if r.Import != nil {
-		fmt.Fprintf(w, "  imported: inserted=%d updated=%d noop=%d\n",
+		fmt.Fprintf(w, "  imported: inserted=%d updated=%d noop=%d",
 			r.Import.Inserted, r.Import.Updated, r.Import.NoOp)
+		if r.Import.Skipped > 0 {
+			fmt.Fprintf(w, " skipped=%d", r.Import.Skipped)
+		}
+		fmt.Fprintln(w)
+		if len(r.Import.SkippedStale) > 0 {
+			fmt.Fprintln(w, "  skipped (local newer than remote):")
+			for _, e := range r.Import.SkippedStale {
+				label := e.Label
+				if label == "" {
+					label = e.UUID
+				}
+				fmt.Fprintf(w, "    %s %s  local=%s remote=%s\n",
+					e.Kind, label, e.LocalUpdated, e.RemoteUpdated)
+			}
+		}
 		if len(r.Import.Renumbered) > 0 {
 			fmt.Fprintln(w, "  renumbered:")
 			for _, e := range r.Import.Renumbered {
@@ -88,8 +103,12 @@ func printSyncCloneResult(w io.Writer, r syncCloneResult) {
 		fmt.Fprintf(w, "  remote:   %s\n", r.Remote)
 	}
 	if r.Import != nil {
-		fmt.Fprintf(w, "  imported: inserted=%d updated=%d noop=%d\n",
+		fmt.Fprintf(w, "  imported: inserted=%d updated=%d noop=%d",
 			r.Import.Inserted, r.Import.Updated, r.Import.NoOp)
+		if r.Import.Skipped > 0 {
+			fmt.Fprintf(w, " skipped=%d", r.Import.Skipped)
+		}
+		fmt.Fprintln(w)
 	}
 	if r.PreviewCollisions != nil {
 		if len(r.PreviewCollisions.Renumbered) > 0 {
