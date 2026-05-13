@@ -120,6 +120,19 @@ gh release view v0.1.0
 
 Surface the release URL so the user can click through to verify the assets and changelog.
 
+### 8. Sync the new docs to bacio.io
+
+The user-docs site at [bacio.io](https://bacio.io) pins to a published release tag via `~/Repos/bacio-website/.bacio-ref`. Cutting a release doesn't deploy the new docs by itself — that's a separate, intentionally-pinned step on the website repo.
+
+Hand off to the **`bacio-docs-update`** skill at `~/Repos/bacio-website/.claude/skills/bacio-docs-update/SKILL.md`. It bumps `.bacio-ref` to the latest published release (which is what step 5 just pushed), runs `npm run sync-docs`, commits to `main`, then merges `main → prod` for the Cloudflare Pages production deploy.
+
+From this session, `cd ~/Repos/bacio-website` and follow the `bacio-docs-update` SKILL.md recipe — the skill auto-loads once the working directory changes, so a prompt like "sync the docs" or "bump the website to the latest release" picks it up.
+
+Skip this step when:
+
+- The release was a **pre-release** (`-rc.1`, `-beta`) — `gh release view` skips drafts/pre-releases by default, so the docs skill would no-op anyway, but it's clearer to not pretend you're publishing user-facing docs for an RC.
+- The release contained **no user-doc changes** — `bacio-docs-update` would still bump `.bacio-ref` and resync (the footer's version chip would change), which is fine but adds a Cloudflare deploy for nothing. The skill's "bail early if pin == latest" check doesn't help here because the pin is whatever the *previous* release was. Use your judgement.
+
 ## Dry runs
 
 When the user says "dry run", "snapshot", "build only", "test the matrix" — run **steps 1, 3, 4** only. Don't tag, don't push. This is the right mode for:
