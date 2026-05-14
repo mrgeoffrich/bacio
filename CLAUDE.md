@@ -22,12 +22,13 @@ The deeper context for both lives in the topic sections below (`## Agent-CLI pri
 
 ## Profiling
 
-Two hidden persistent root flags capture pprof profiles — a dev/debug affordance, kept out of `--help`:
+Three hidden persistent root flags capture profiles/traces — a dev/debug affordance, kept out of `--help`:
 
 - `bacio --cpuprofile <path> tui` — writes a CPU profile covering the whole interactive session.
 - `bacio --memprofile <path> tui` — writes a heap profile (`runtime.GC()` then `pprof.WriteHeapProfile`) of what survived the session.
+- `bacio --trace <path> tui` — writes an execution trace covering the whole session. Unlike the CPU profile, the trace captures off-CPU events (goroutine scheduling, blocking on syscalls/channels/mutexes), so it's the tool for diagnosing UI freezes — a stall on a slow query or `git` shell-out is invisible to CPU profiling but shows up here.
 
-They start in the root `PersistentPreRunE` and flush in `stopProfiling` (`internal/cli/profiling.go`). `NewRoot()` returns that cleanup func; `cmd/bacio/main.go` runs it after `Execute()` returns — on success and error alike — so profiles flush even when a command exits via an error path (cobra skips `PersistentPostRunE` on error). Open the output with `go tool pprof <path>`. Today the flags are wired for `bacio tui`; extending them to the short-lived CLI commands is a possible follow-up.
+They start in the root `PersistentPreRunE` and flush in `stopProfiling` (`internal/cli/profiling.go`). `NewRoot()` returns that cleanup func; `cmd/bacio/main.go` runs it after `Execute()` returns — on success and error alike — so profiles flush even when a command exits via an error path (cobra skips `PersistentPostRunE` on error). Open CPU/heap output with `go tool pprof <path>`, trace output with `go tool trace <path>`. Today the flags are wired for `bacio tui`; extending them to the short-lived CLI commands is a possible follow-up.
 
 ## Architecture in one screen
 
