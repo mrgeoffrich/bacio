@@ -79,21 +79,31 @@ func New(src Source, name string, in io.Reader, out io.Writer, logf func(string,
 // Run drives the server until stdin closes or ctx is cancelled. The
 // poller goroutine drains the Source on a ticker; the read loop handles
 // inbound JSON-RPC. Both share the write mutex.
+//
+// Run does not return until the poller goroutine has fully stopped — so
+// a caller that closes Source-backing resources (a DB handle, say) in a
+// defer after Run can't race a poll still in flight.
 func (s *Server) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	go s.poll(ctx)
+	pollDone := make(chan struct{})
+	go func() {
+		defer close(pollDone)
+		s.poll(ctx)
+	}()
 
-	done := make(chan error, 1)
-	go func() { done <- s.readLoop(ctx) }()
+	readErr := make(chan error, 1)
+	go func() { readErr <- s.readLoop(ctx) }()
 
+	var err error
 	select {
 	case <-ctx.Done():
-		return nil
-	case err := <-done:
-		return err
+	case err = <-readErr:
 	}
+	cancel()   // signal the poller to stop
+	<-pollDone // and wait for it before returning
+	return err
 }
 
 // ---------- JSON-RPC wire types ----------

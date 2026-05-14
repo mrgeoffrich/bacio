@@ -173,6 +173,16 @@ If the session runs `bacio channel` (an MCP-over-stdio server —
 channel polls the dispatch queue (~3s) and pushes each new dispatch as a
 `<channel source="bacio" dispatch_id="..." issue="..." mode="...">` tag.
 
+**Scoping.** Unlike a hook, a channel is *not* told its session id —
+Claude Code only sets `CLAUDE_PROJECT_DIR` in a stdio MCP server's
+environment. So `bacio channel` resolves the **repo** from that
+directory and the **agent identity** from its `.bacio/agent` file, and
+pushes the dispatches queued for that identity (`DrainAgentDispatches`).
+A channel that can't resolve a repo or an identity still starts — it
+just runs idle. (A bare `--session`-only dispatch with no agent identity
+therefore can't reach a channel; it's delivered via the hook pull path,
+which *does* know the session id.)
+
 Wiring it up takes two steps, both handled by **`bacio install-channel`**
 (`internal/cli/install_channel.go`):
 

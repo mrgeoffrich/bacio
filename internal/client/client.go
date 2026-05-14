@@ -187,9 +187,16 @@ type Client interface {
 	AckDispatch(ctx context.Context, in inputs.AgentAckInput, dryRun bool) (*model.AgentDispatch, error)
 	// DrainDispatches returns a session's pending dispatches and marks
 	// each one delivered — the pull-delivery path used by the bacio
-	// hooks. Delivered dispatches aren't re-drained but stay in the
-	// inbox until acked.
+	// hooks (which know their session id from the hook payload).
+	// Delivered dispatches aren't re-drained but stay in the inbox
+	// until acked.
 	DrainDispatches(ctx context.Context, sessionID string) ([]*model.AgentDispatch, error)
+	// DrainAgentDispatches is the same drain, scoped to a repo + agent
+	// identity rather than a session id — the push-delivery path used
+	// by `bacio channel`, which (unlike a hook) is never told its
+	// session id. A nil repo or empty agent name drains nothing (the
+	// channel runs idle rather than erroring).
+	DrainAgentDispatches(ctx context.Context, repo *model.Repo, agentName string) ([]*model.AgentDispatch, error)
 	// RepoDispatches returns every dispatch scoped to one repo, newest
 	// first, regardless of status — the read surface the desktop Agents
 	// screen needs. Local-only in v1.

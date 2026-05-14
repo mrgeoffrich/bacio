@@ -67,3 +67,7 @@ func (c *remoteClient) DrainDispatches(ctx context.Context, sessionID string) ([
 func (c *remoteClient) RepoDispatches(ctx context.Context, repo *model.Repo) ([]*model.AgentDispatch, error) {
 	return nil, remoteAgentNotSupported("dispatches")
 }
+
+func (c *remoteClient) DrainAgentDispatches(ctx context.Context, repo *model.Repo, agentName string) ([]*model.AgentDispatch, error) {
+	return nil, remoteAgentNotSupported("channel")
+}

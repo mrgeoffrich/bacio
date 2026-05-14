@@ -14,6 +14,7 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/git"
+	"github.com/mrgeoffrich/bacio/internal/model"
 )
 
 func newChannelCmd() *cobra.Command {
@@ -26,9 +27,14 @@ stdio, that pushes queued dispatches into THIS Claude Code session the
 moment they're created — no waiting for the next prompt the way the
 'bacio hook' pull path does.
 
-The channel is scoped to one session via $CLAUDE_CODE_SESSION_ID and
-exposes a 'reply' tool so the agent can acknowledge a dispatch without
-shelling out to 'bacio agent ack'.
+Scoping: Claude Code spawns one channel subprocess per session and sets
+$CLAUDE_PROJECT_DIR in its environment (it does NOT pass the session
+id). The channel resolves the repo from that directory and the agent
+identity from its .bacio/agent file, and pushes the dispatches queued
+for that identity. If it can't resolve a repo or identity it still
+starts — it just runs idle — because a failed MCP server is worse than
+one that delivers nothing. It also exposes a 'reply' tool so the agent
+can acknowledge a dispatch without shelling out to 'bacio agent ack'.
 
 Research-preview caveats: Claude Code channels are a research preview.
 A custom channel like bacio is not on the Anthropic allowlist, so it
@@ -36,8 +42,9 @@ must be launched with --dangerously-load-development-channels, e.g.:
 
     claude --dangerously-load-development-channels server:bacio
 
-with a .mcp.json entry running 'bacio channel'. Requires Claude Code
-v2.1.80 or later, and the protocol contract may still change.
+with a .mcp.json entry running 'bacio channel' (see 'bacio
+install-channel'). Requires Claude Code v2.1.80 or later, and the
+protocol contract may still change.
 
 Like 'bacio hook' and 'bacio tui', this is a harness-integration shim,
 not an agent-facing mutation command: it does not follow the six
@@ -48,35 +55,59 @@ to stderr.`,
 			if inRemoteMode() {
 				return fmt.Errorf("bacio channel: not supported in remote mode — the agent registry is local-only")
 			}
-			sid := strings.TrimSpace(os.Getenv(claudeSessionEnv))
-			if sid == "" {
-				return fmt.Errorf("bacio channel: $%s is empty — a channel is scoped to one session", claudeSessionEnv)
+			logf := func(format string, a ...any) {
+				fmt.Fprintf(os.Stderr, "bacio channel: "+format+"\n", a...)
 			}
 
-			// Attribute acks to the agent identity when .bacio/agent is
-			// present, mirroring the hook shim; fall back to the OS user.
-			act := actor()
-			if cwd, err := os.Getwd(); err == nil {
-				if info, err := git.Detect(cwd); err == nil {
-					if slug := readAgentSlug(info.Root); slug != "" {
-						act = slug
-					}
+			// Claude Code sets CLAUDE_PROJECT_DIR in a stdio MCP server's
+			// environment; the session id is NOT passed (only hooks get
+			// it, via their JSON payload). Fall back to the process cwd
+			// when CLAUDE_PROJECT_DIR is absent — e.g. running by hand.
+			projectDir := strings.TrimSpace(os.Getenv("CLAUDE_PROJECT_DIR"))
+			if projectDir == "" {
+				if cwd, err := os.Getwd(); err == nil {
+					projectDir = cwd
 				}
 			}
 
+			// Resolve the repo + agent identity this channel serves. Both
+			// are best-effort: a channel that can't resolve them still
+			// starts and serves a valid (idle) MCP server.
+			var info *git.Info
+			var agentName string
+			if gi, err := git.Detect(projectDir); err == nil {
+				info = gi
+				agentName = readAgentSlug(gi.Root)
+				if agentName == "" {
+					logf("no .bacio/agent in %s — channel will run idle (no identity to scope dispatches to)", gi.Root)
+				}
+			} else {
+				logf("%s is not a git repo — channel will run idle", projectDir)
+			}
+
+			actorName := agentName
+			if actorName == "" {
+				actorName = actor()
+			}
 			c, err := client.Open(context.Background(), client.Options{
 				DBPath: opts.dbPath,
-				Actor:  act,
+				Actor:  actorName,
 			})
 			if err != nil {
 				return err
 			}
 			defer c.Close()
 
-			src := &channelSource{c: c, sessionID: sid}
-			logf := func(format string, a ...any) {
-				fmt.Fprintf(os.Stderr, format+"\n", a...)
+			var repo *model.Repo
+			if info != nil {
+				if r, _, err := c.EnsureRepo(context.Background(), info); err == nil {
+					repo = r
+				} else {
+					logf("could not resolve repo for %s: %v — channel will run idle", info.Root, err)
+				}
 			}
+
+			src := &channelSource{c: c, repo: repo, agentName: agentName}
 			srv := channel.New(src, "bacio", os.Stdin, os.Stdout, logf)
 
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -87,15 +118,18 @@ to stderr.`,
 }
 
 // channelSource adapts the bacio dispatch queue to channel.Source,
-// scoped to one session. Drain hands the channel this session's pending
-// dispatches (marking them delivered); Ack records the agent's reply.
+// scoped to a repo + agent identity (not a session id — the channel is
+// never told its session). A nil repo or empty agentName means the
+// channel couldn't scope itself: Drain returns nothing and the channel
+// runs idle. Ack still works regardless — it's keyed on dispatch id.
 type channelSource struct {
 	c         client.Client
-	sessionID string
+	repo      *model.Repo
+	agentName string
 }
 
 func (s *channelSource) Drain(ctx context.Context) ([]channel.Event, error) {
-	ds, err := s.c.DrainDispatches(ctx, s.sessionID)
+	ds, err := s.c.DrainAgentDispatches(ctx, s.repo, s.agentName)
 	if err != nil {
 		return nil, err
 	}

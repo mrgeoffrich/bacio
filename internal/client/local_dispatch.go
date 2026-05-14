@@ -172,6 +172,40 @@ func (c *localClient) RepoDispatches(ctx context.Context, repo *model.Repo) ([]*
 	return c.store.ListDispatches(store.DispatchFilter{RepoID: &repo.ID})
 }
 
+func (c *localClient) DrainAgentDispatches(ctx context.Context, repo *model.Repo, agentName string) ([]*model.AgentDispatch, error) {
+	// An unscoped channel (no repo / no .bacio/agent identity) has
+	// nothing to drain — that's not an error, the channel just idles.
+	if repo == nil || agentName == "" {
+		return nil, nil
+	}
+	ag, err := c.store.GetAgentByName(agentName)
+	if err != nil {
+		// The identity isn't registered yet (no hook / register has run
+		// in this repo) — transient, not an error. Idle until it is.
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	pending, err := c.store.ListDispatches(store.DispatchFilter{
+		RepoID:        &repo.ID,
+		TargetAgentID: &ag.ID,
+		Statuses:      []model.DispatchStatus{model.DispatchPending},
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*model.AgentDispatch, 0, len(pending))
+	for _, d := range pending {
+		delivered, err := c.store.MarkDispatchDelivered(d.ID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, delivered)
+	}
+	return out, nil
+}
+
 // dispatchTargetLabel picks the most specific label for audit rows:
 // the agent identity slug if there is one, else the session id.
 func dispatchTargetLabel(d *model.AgentDispatch) string {
