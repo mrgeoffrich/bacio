@@ -78,7 +78,7 @@ func Run(s *store.Store, repo *model.Repo) error {
 // embed the model into their own tea.Program with different program
 // options — e.g. WithInput/WithOutput for an xterm.js bridge.
 func NewModel(s *store.Store, repo *model.Repo) (*Model, error) {
-	board, err := newBoardView(s, repo)
+	board, err := newBoardView(s, repo, tuiActor())
 	if err != nil {
 		return nil, err
 	}
@@ -88,6 +88,7 @@ func NewModel(s *store.Store, repo *model.Repo) (*Model, error) {
 			{"Board", board},
 			{"Features", newFeaturesView(s, repo)},
 			{"Documents", newDocsView(s, repo)},
+			{"Agents", newAgentsView(s, repo)},
 			{"History", newHistoryView(s, repo)},
 		},
 		returnTab: -1,

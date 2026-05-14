@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"strings"
 	"time"
 
+	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/model"
 )
@@ -75,9 +77,45 @@ type IssueDetail struct {
 	PullRequests []PRDTO      `json:"pullRequests"`
 }
 
-// BoardService is the Wails-bound read API the kanban frontend talks to. It
-// wraps a local bacio client.Client and reshapes its results into the DTOs
-// the imported UI kit expects. Read-only for now — mutations are a follow-up.
+// ClaimDTO is one open agent claim, shaped for the Agents screen.
+type ClaimDTO struct {
+	IssueKey  string    `json:"issueKey"`
+	ClaimedAt time.Time `json:"claimedAt"`
+}
+
+// DispatchDTO is one queued dispatch — returned both inside an AgentCard
+// (the agent's drill-down) and from DispatchIssue (the new write).
+type DispatchDTO struct {
+	ID          int64     `json:"id"`
+	IssueKey    string    `json:"issueKey"`
+	TargetAgent string    `json:"targetAgent"`
+	Mode        string    `json:"mode"`
+	Status      string    `json:"status"`
+	Payload     string    `json:"payload"`
+	CreatedBy   string    `json:"createdBy"`
+	CreatedAt   time.Time `json:"createdAt"`
+}
+
+// AgentCard is one agent session shaped for the desktop Agents screen,
+// carrying its open claims and the dispatches aimed at it so the
+// frontend can render the drill-down without a second round trip.
+type AgentCard struct {
+	SessionID  string        `json:"sessionId"`
+	AgentName  string        `json:"agentName"` // identity slug; "" if none
+	Actor      string        `json:"actor"`
+	Model      string        `json:"model"`
+	Branch     string        `json:"branch"`
+	RepoPrefix string        `json:"repoPrefix"`
+	Status     string        `json:"status"` // active | idle | ended
+	LastSeenAt time.Time     `json:"lastSeenAt"`
+	Claims     []ClaimDTO    `json:"claims"`
+	Dispatches []DispatchDTO `json:"dispatches"`
+}
+
+// BoardService is the Wails-bound API the kanban frontend talks to. It
+// wraps a local bacio client.Client and reshapes its results into the
+// DTOs the imported UI kit expects. Mostly read-only; DispatchIssue is
+// the one mutation (queuing a dispatch for an agent).
 type BoardService struct {
 	client client.Client
 }
@@ -208,4 +246,132 @@ func (b *BoardService) GetIssue(repoPrefix, key string) (IssueDetail, error) {
 		Comments:     comments,
 		PullRequests: prs,
 	}, nil
+}
+
+func dispatchDTO(d *model.AgentDispatch) DispatchDTO {
+	return DispatchDTO{
+		ID:          d.ID,
+		IssueKey:    d.IssueKey,
+		TargetAgent: d.TargetAgentName,
+		Mode:        string(d.Mode),
+		Status:      string(d.Status),
+		Payload:     d.Payload,
+		CreatedBy:   d.CreatedBy,
+		CreatedAt:   d.CreatedAt,
+	}
+}
+
+// dispatchTargetsSession reports whether a dispatch is aimed at this
+// session — by the bare session id or the agent identity behind it.
+func dispatchTargetsSession(d *model.AgentDispatch, s *model.AgentSession) bool {
+	if d.TargetSessionID != "" && d.TargetSessionID == s.SessionID {
+		return true
+	}
+	if d.TargetAgentID != nil && s.AgentID != nil && *d.TargetAgentID == *s.AgentID {
+		return true
+	}
+	return false
+}
+
+// ListAgents returns the agent sessions for one repo (or every repo when
+// repoPrefix is empty or "all"), each carrying its status, open claims,
+// and the dispatches aimed at it.
+func (b *BoardService) ListAgents(repoPrefix string) ([]AgentCard, error) {
+	ctx := context.Background()
+	filter := client.AgentSessionFilter{}
+	var repos []*model.Repo
+	if repoPrefix == "" || repoPrefix == "all" {
+		rs, err := b.client.ListRepos(ctx)
+		if err != nil {
+			return nil, err
+		}
+		repos = rs
+	} else {
+		repo, err := b.client.GetRepoByPrefix(ctx, repoPrefix)
+		if err != nil {
+			return nil, err
+		}
+		filter.Repo = repo
+		repos = []*model.Repo{repo}
+	}
+
+	sessions, err := b.client.ListAgentSessions(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+
+	// Gather dispatches across the in-scope repos once, then bucket them
+	// onto each session.
+	var allDispatches []*model.AgentDispatch
+	for _, r := range repos {
+		ds, err := b.client.RepoDispatches(ctx, r)
+		if err != nil {
+			return nil, err
+		}
+		allDispatches = append(allDispatches, ds...)
+	}
+
+	now := time.Now()
+	cards := make([]AgentCard, 0, len(sessions))
+	for _, s := range sessions {
+		card := AgentCard{
+			SessionID:  s.SessionID,
+			AgentName:  s.AgentName,
+			Actor:      s.Actor,
+			Model:      s.Model,
+			Branch:     s.Branch,
+			RepoPrefix: s.RepoPrefix,
+			Status:     model.SessionLiveness(s, now),
+			LastSeenAt: s.LastSeenAt,
+			Claims:     []ClaimDTO{},
+			Dispatches: []DispatchDTO{},
+		}
+		view, err := b.client.ShowAgentSession(ctx, s.SessionID)
+		if err != nil {
+			return nil, err
+		}
+		for _, c := range view.Claims {
+			if c.ReleasedAt == nil {
+				card.Claims = append(card.Claims, ClaimDTO{IssueKey: c.IssueKey, ClaimedAt: c.ClaimedAt})
+			}
+		}
+		for _, d := range allDispatches {
+			if dispatchTargetsSession(d, s) {
+				card.Dispatches = append(card.Dispatches, dispatchDTO(d))
+			}
+		}
+		cards = append(cards, card)
+	}
+	return cards, nil
+}
+
+// DispatchIssue queues a dispatch for an agent: the target agent slug,
+// the mode ("plan" / "implement" / ""), and an optional free-form note.
+// repoPrefix may be empty or "all" — the prefix is then derived from the
+// canonical issue key.
+func (b *BoardService) DispatchIssue(repoPrefix, issueKey, agentName, mode, note string) (DispatchDTO, error) {
+	ctx := context.Background()
+	if _, err := model.ParseDispatchMode(mode); err != nil {
+		return DispatchDTO{}, err
+	}
+	prefix := repoPrefix
+	if prefix == "" || prefix == "all" {
+		if i := strings.LastIndex(issueKey, "-"); i > 0 {
+			prefix = issueKey[:i]
+		}
+	}
+	repo, err := b.client.GetRepoByPrefix(ctx, prefix)
+	if err != nil {
+		return DispatchDTO{}, err
+	}
+	d, err := b.client.CreateDispatch(ctx, repo, inputs.AgentDispatchInput{
+		TargetAgent: agentName,
+		IssueKey:    issueKey,
+		Mode:        mode,
+		Message:     note,
+	}, false)
+	if err != nil {
+		return DispatchDTO{}, err
+	}
+	return dispatchDTO(d), nil
 }

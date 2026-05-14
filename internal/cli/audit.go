@@ -11,13 +11,20 @@ import (
 )
 
 // actor returns the resolved name for who is performing the operation.
-// Resolution order: --user flag → OS username → "unknown". Falls back to
-// "unknown" if the supplied value fails validation rather than panicking
-// at the boundary — the caller should validate up-front via validateActor
-// when --user came from the command line.
+// Resolution order: --user flag → agent identity (this process's
+// claude_pid in .bacio/agents.json) → OS username → "unknown". The
+// agents.json step is what lets an agent-driven `bacio` call attribute
+// history correctly without passing --user on every command. Falls back
+// rather than panicking at the boundary — the caller should validate
+// up-front via validateActor when --user came from the command line.
 func actor() string {
 	if opts.user != "" {
 		if clean, err := store.ValidateActor(opts.user); err == nil {
+			return clean
+		}
+	}
+	if id := agentIdentityForProcess(); id != "" {
+		if clean, err := store.ValidateActor(id); err == nil {
 			return clean
 		}
 	}

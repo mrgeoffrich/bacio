@@ -56,42 +56,20 @@ Use `needs_action` when an LLM agent is paused waiting on the user — keep the 
 
 bacio tracks live agent sessions in a local SQLite registry (never synced) so you and the user can see who's working on what. Two layers:
 
-- **Agent identity** (long-lived) — a slug like `cheerful-otter@claude.shiny` that survives across sessions, `/clear`s, and reboots. Persisted in `.bacio/agent` on disk so it's the same identity next time.
+- **Agent identity** — a slug like `cheerful-otter@claude.shiny`, one per `claude` process. Recorded in `.bacio/agents.json`, a `claude_pid → identity` map, so every `bacio` call in that process knows who it is — and so multiple agents can share one repo, each addressable separately.
 - **Session** (ephemeral) — one row per running instance. FKs back to the identity, so cross-session activity correlates.
 
-### Pick your identity (once per repo)
+### Pick your identity — automatic
 
-At session start, before any other bacio call:
+**With bacio's hooks installed** (`bacio install-hooks` — they usually are), you do nothing. The `SessionStart` hook resolves the `claude` process you're running under, mints a fresh identity if that process has none yet, records it in `.bacio/agents.json` (gitignoring `.bacio/` for you), and registers your session — all before your first turn. Every later `bacio` call self-identifies from that file, so you don't need `--user` either.
 
-1. Look for `.bacio/agent` in the repo root. If it exists, read the single-line slug; skip ahead to **Register the session**.
-2. Otherwise, generate a slug of the form `<adjective>-<animal>@<harness>.<hostname>`:
-   - `adjective` — pick at random from common English adjectives (e.g. `cheerful`, `quiet`, `swift`, `bold`, `clever`).
-   - `animal` — pick at random from common animals (e.g. `otter`, `gorilla`, `panda`, `falcon`, `lynx`).
-   - `harness` — your harness name (`claude` for Claude Code).
-   - `hostname` — `hostname -s` on Unix, `%COMPUTERNAME%` on Windows.
-   - Example: `cheerful-otter@claude.shiny`
-3. Register with `--new`:
-   ```bash
-   bacio agent register --user <your-name> --agent <slug> --new
-   ```
-4. If bacio errors with `agent name "<slug>" already taken`, your random slug clashed with another agent's. Pick a different adjective/animal and retry from step 3 — the host suffix keeps cross-machine identities apart, the retry handles same-machine clashes.
-5. On success, write the slug to `.bacio/agent` (the file should contain just the slug — no surrounding quotes, trailing whitespace is tolerated). Make sure `.bacio/agent` is gitignored — it's per-machine identity, not project state.
-
-**On subsequent sessions in the same repo**, step 1 short-circuits the generation/clash loop. Call `register` *without* `--new`:
+**Only if hooks are NOT installed**, register by hand at session start, before any other bacio call: generate a slug of the form `<adjective>-<animal>@<harness>.<hostname>` (e.g. `cheerful-otter@claude.shiny`) and
 
 ```bash
-bacio agent register --user <your-name> --agent "$(cat .bacio/agent)"
+bacio agent register --user <your-name> --agent <slug> --new
 ```
 
-Re-registering is idempotent: bacio refreshes `last_seen_at` and re-links the session to the existing identity row.
-
-### Register the session
-
-```bash
-bacio agent register --user <your-name> --agent "$(cat .bacio/agent)"
-```
-
-The session id is auto-read from `$CLAUDE_CODE_SESSION_ID`. If your harness doesn't set that env var, pass `--session <id>` explicitly. `--model`, `--mode`, and `--branch` are optional but useful — they default to whatever you (or detection) supplies.
+If bacio errors with `agent name "<slug>" already taken`, reroll the adjective/animal and retry. Re-registering later (drop `--new`) is idempotent. The session id is auto-read from `$CLAUDE_CODE_SESSION_ID`; if your harness doesn't set it, pass `--session <id>`. `--model`, `--mode`, `--branch` are optional.
 
 **When you start focused work on an issue — claim it:**
 
@@ -584,6 +562,15 @@ bacio agent claim <ISSUE-KEY>           Record intent — does NOT move the issu
                                      or set assignee. Multiple agents may
                                      claim the same issue (pairing/review).
 bacio agent release <ISSUE-KEY>         Release this session's claim on an issue
+bacio agent dispatch [ISSUE-KEY]        Queue a work item for an agent / session
+  --to <agent-slug>                     Target a persistent identity
+  --session <id>                        Target one specific session
+  --message <text>                      Free-form instruction body
+                                     (must pass --to and/or --session)
+bacio agent inbox                       Open dispatches queued for this session
+  --session <id>                        Default: $CLAUDE_CODE_SESSION_ID
+bacio agent ack <DISPATCH-ID>           Acknowledge a dispatch
+  --note <text>                         Optional reply recorded on the dispatch
 bacio agent list                        Lean table of sessions in this repo
   --active                              Only sessions that haven't ended
   --all-repos                           Include sessions from every repo
@@ -591,25 +578,71 @@ bacio agent list                        Lean table of sessions in this repo
 bacio agent show <session-id>           Session + full claim history
 ```
 
-**Example agent loop (first session in a repo):**
+### Dispatches — supervisor → agent work queue
+
+A **dispatch** is a unit of work one party queues for an agent: an issue to
+look at, plus a free-form instruction. It targets an agent identity slug
+(`--to`), a specific session (`--session`), or both. Dispatches are
+local-only, like the rest of the registry.
+
+An agent picks dispatches up two ways:
+
+- **Pull** — the `bacio` Claude Code hooks (see "Hook integration" below)
+  drain pending dispatches at session start and on every prompt, injecting
+  them into context. Nothing to poll.
+- **Push** — if the session runs the `bacio channel` MCP server, dispatches
+  arrive live as `<channel source="bacio">` events the moment they're
+  created. `bacio install-channel --yes` registers the channel in the
+  repo's `.mcp.json` and prints the `claude` launch command (channels are
+  a research preview — the session opts in with
+  `--dangerously-load-development-channels server:bacio`). `bacio agent
+  list` shows a `CHANNEL` column (`live` / `-`) so you can see which
+  sessions have push delivery wired up.
+
+Either way, acknowledge each handled dispatch with `bacio agent ack <id>
+--note "..."` (or the channel's `reply` tool). Acked/cancelled dispatches
+drop out of `bacio agent inbox` and are pruned after 60 days.
+
+### Hook integration — automatic registration & supervision
+
+`bacio install-hooks` merges four command hooks into the repo's
+`.claude/settings.json` (it prints the plan and prompts first — pass
+`--yes` to accept non-interactively):
+
+| Event            | What `bacio hook <event>` does                                       |
+| ---------------- | -------------------------------------------------------------------- |
+| SessionStart     | mints + records the identity in `.bacio/agents.json` if absent, registers the session, injects assigned issues + claims |
+| UserPromptSubmit | heartbeats; nudges on open claims; drains pending dispatches         |
+| Stop             | heartbeats                                                           |
+| SessionEnd       | ends the session, auto-releasing every open claim                    |
+
+With hooks installed, an agent no longer has to call `bacio agent register`
+/ `heartbeat` / `end` by hand — the registry stays in sync automatically,
+and the SessionStart hook mints and records the identity in
+`.bacio/agents.json` itself (you don't run the "Pick your identity" steps,
+and you don't need `--user` — every `bacio` call resolves its own
+identity from that file). Every hook also stamps the session's
+`claude_pid` and links it to a live `bacio channel` for the same process,
+so `bacio agent list` can show the `CHANNEL` column. `bacio hook` and
+`bacio channel` are harness-integration shims, like `bacio tui`: they
+don't follow the six agent-CLI principles and aren't in `bacio schema`.
+
+**Example agent loop, hooks NOT installed (manual fallback):**
 ```bash
-# Identity bootstrap: try saved name, else generate + claim + persist.
-if [ -f .bacio/agent ]; then
-    SLUG=$(cat .bacio/agent)
-    bacio agent register --user agent-claude --agent "$SLUG"
-else
-    SLUG="cheerful-otter@claude.$(hostname -s)"
-    until bacio agent register --user agent-claude --agent "$SLUG" --new 2>/dev/null; do
-        SLUG="quiet-falcon@claude.$(hostname -s)"   # …regenerate
-    done
-    printf '%s' "$SLUG" > .bacio/agent
-fi
+SLUG="cheerful-otter@claude.$(hostname -s)"
+until bacio agent register --user agent-claude --agent "$SLUG" --new 2>/dev/null; do
+    SLUG="quiet-falcon@claude.$(hostname -s)"   # …regenerate on clash
+done
 
 bacio agent claim MINI-42 --user agent-claude
 # ... actual work: bacio issue state, bacio comment add, edits, commits ...
 bacio agent release MINI-42 --user agent-claude
 bacio agent end --reason stop --user agent-claude
 ```
+
+If the repo has `bacio install-hooks` set up, the register / heartbeat /
+end calls happen automatically — the loop above collapses to just `claim`,
+the work, `release`, and `bacio agent ack` for any dispatches that arrived.
 
 The registry is local-only in v1. Running under `--remote` / `BACIO_REMOTE` errors with a clear "drop --remote — the agent registry lives only in the local SQLite store" message. v2 will add HTTP parity.
 
@@ -771,7 +804,7 @@ A few non-obvious mappings:
 
 - **`POST /repos`** is the equivalent of `bacio init`, but the server can't see your CWD — supply `{"name":"...", "path":"..."}` (plus optional `prefix`) explicitly.
 - **`GET /repos/{prefix}/documents/{filename}/download`** is the only non-JSON endpoint. Streams the body as `text/markdown` with `Content-Disposition: attachment`. No audit row, no dry-run, no `with_content`. The API never reads or writes the server filesystem, so callers materialise on disk by piping the response (`curl -O`).
-- **CLI verbs with no API equivalent** (touch the local filesystem or terminal): `bacio init` (use `POST /repos`), `bacio install-skill`, `bacio doc add --from-path` / `--content-file` (inline `content` in the body), `bacio doc export` (use `/download`), `bacio tui`.
+- **CLI verbs with no API equivalent** (touch the local filesystem or terminal, or the local-only agent registry): `bacio init` (use `POST /repos`), `bacio install-skill`, `bacio install-hooks`, `bacio install-channel`, `bacio doc add --from-path` / `--content-file` (inline `content` in the body), `bacio doc export` (use `/download`), `bacio tui`, `bacio agent *`, `bacio hook *`, `bacio channel`.
 
 For the full design rationale, threat model, and what the API deliberately doesn't do (NDJSON, per-user auth, CORS, cursor pagination, …), see `docs/rest-api-design.md`.
 
@@ -784,7 +817,7 @@ BACIO_REMOTE=http://team-bacio:5320 BACIO_API_TOKEN=$T bacio issue list -o json
 bacio --remote http://team-bacio:5320 issue add "Login broken" --feature auth
 ```
 
-Verbs that touch the local filesystem or terminal error clearly in remote mode and stay local-direct: `bacio init`, `bacio install-skill`, `bacio doc add --from-path` / `--content-file` (use `--content` inline instead), `bacio doc export` (use `bacio doc download <filename>` — writes to stdout or `--to <path>`), `bacio tui`, `bacio schema *`, `bacio status`.
+Verbs that touch the local filesystem or terminal error clearly in remote mode and stay local-direct: `bacio init`, `bacio install-skill`, `bacio install-hooks`, `bacio install-channel`, `bacio doc add --from-path` / `--content-file` (use `--content` inline instead), `bacio doc export` (use `bacio doc download <filename>` — writes to stdout or `--to <path>`), `bacio tui`, `bacio schema *`, `bacio status`, `bacio agent *`, `bacio hook *`, `bacio channel`.
 
 ## Gotchas
 
@@ -825,3 +858,25 @@ bacio install-skill
 ```
 
 It walks up to the git root and writes `.claude/skills/bacio/SKILL.md`, creating the directory if needed. The bundled SKILL.md content is the version embedded in the build of `bacio` you're running, so re-run after upgrading `bacio` to pull doc updates.
+
+To wire up automatic session registration and dispatch delivery, also run:
+
+```bash
+bacio install-hooks --yes
+```
+
+It merges the four `bacio hook` command hooks into `.claude/settings.json`
+(non-destructively — existing hooks are preserved). It prints the planned
+changes and asks for confirmation first; pass `--yes` (`-y`) to accept
+automatically, which is required when running non-interactively. See
+"Hook integration" above for what each hook does.
+
+For real-time (push) dispatch delivery, also register the channel:
+
+```bash
+bacio install-channel --yes
+```
+
+It merges a `bacio` entry into the repo's `.mcp.json` and prints the
+`claude --dangerously-load-development-channels server:bacio` command to
+launch with — same confirmation + `--yes` behaviour as `install-hooks`.

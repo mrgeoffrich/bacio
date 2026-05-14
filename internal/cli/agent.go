@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -49,6 +50,9 @@ intent — it does NOT move the issue or change its assignee; use
 		agentEndCmd(),
 		agentClaimCmd(),
 		agentReleaseCmd(),
+		agentDispatchCmd(),
+		agentInboxCmd(),
+		agentAckCmd(),
 		agentListCmd(),
 		agentShowCmd(),
 	)
@@ -71,12 +75,13 @@ The optional --agent flag attaches a persistent identity (e.g.
 "cheerful-otter@claude.shiny") so cross-session activity correlates
 back to one logical agent rather than dissolving on every /clear.
 
-The skill convention: on first session in a repo, generate a fresh
-slug and register with --agent <slug> --new. The --new flag asserts
-"this name MUST be new" — bacio errors with "agent name already
-taken" if the slug clashes with another agent's, so the agent loop
-can retry with a fresh slug. Once accepted, persist the chosen name
-to .bacio/agent and reuse it on subsequent registers (without --new).`,
+With bacio's hooks installed, the SessionStart hook does all of this
+for you — minting the identity, recording it in .bacio/agents.json,
+and registering the session. This command is the manual fallback for
+repos without hooks: generate a fresh slug and register with --agent
+<slug> --new. The --new flag asserts "this name MUST be new" — bacio
+errors with "agent name already taken" if the slug clashes, so the
+loop can retry; subsequent registers of a known slug drop --new.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			raw, err := parseJSONInput(cmd, args, rawInput,
@@ -405,6 +410,176 @@ func runAgentRelease(in inputs.AgentReleaseInput) error {
 	return emit(claim)
 }
 
+// ---------- dispatch ----------
+
+func agentDispatchCmd() *cobra.Command {
+	var (
+		toAgent, toSession, mode, message, rawInput string
+	)
+	cmd := &cobra.Command{
+		Use:   "dispatch [issue-key]",
+		Short: "Queue a unit of work for an agent identity and/or a session",
+		Long: `Enqueue a dispatch — a supervisor->agent work item. A dispatch must
+name a target: --to <agent-slug>, --session <id>, or both. The optional
+[issue-key] positional ties the dispatch to an issue.
+
+--mode marks the intent: "plan" (produce an implementation plan, don't
+write code) or "implement" (build it end-to-end). The agent's instruction
+body is the mode's canned text plus any --message note. Both are optional.
+
+The target agent picks the dispatch up automatically on its next prompt
+(via the bacio UserPromptSubmit hook) or at session start, and can list
+its queue with ` + "`bacio agent inbox`" + `.`,
+		Args: cobra.RangeArgs(0, 1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			raw, err := parseJSONInput(cmd, args, rawInput, "to", "session", "mode", "message")
+			if err != nil {
+				return err
+			}
+			if raw != nil {
+				in, _, err := inputio.DecodeStrict[inputs.AgentDispatchInput](raw)
+				if err != nil {
+					return err
+				}
+				return runAgentDispatch(*in)
+			}
+			in := inputs.AgentDispatchInput{
+				TargetAgent:   toAgent,
+				TargetSession: toSession,
+				Mode:          mode,
+				Message:       message,
+			}
+			if len(args) == 1 {
+				in.IssueKey = args[0]
+			}
+			return runAgentDispatch(in)
+		},
+	}
+	cmd.Flags().StringVar(&toAgent, "to", "", "target agent identity slug (e.g. swift-otter@claude.shiny)")
+	cmd.Flags().StringVar(&toSession, "session", "", "target session id")
+	cmd.Flags().StringVar(&mode, "mode", "", "dispatch intent: plan or implement (default: untyped)")
+	cmd.Flags().StringVar(&message, "message", "", "optional free-form note appended to the instruction body")
+	addInputFlag(cmd, &rawInput)
+	return cmd
+}
+
+func runAgentDispatch(in inputs.AgentDispatchInput) error {
+	if err := requireLocalForAgent("dispatch"); err != nil {
+		return err
+	}
+	c, err := openClient()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	repo, err := resolveRepoC(c)
+	if err != nil {
+		return err
+	}
+	d, err := c.CreateDispatch(context.Background(), repo, in, opts.dryRun)
+	if err != nil {
+		return err
+	}
+	if opts.dryRun {
+		return emitDryRun(d)
+	}
+	return emit(d)
+}
+
+// ---------- inbox ----------
+
+func agentInboxCmd() *cobra.Command {
+	var sessionID string
+	cmd := &cobra.Command{
+		Use:   "inbox",
+		Short: "List dispatches queued for this session (and its agent identity)",
+		Long: `Show the open dispatches (pending or delivered) aimed at this session
+or at the agent identity behind it. --session defaults to
+$CLAUDE_CODE_SESSION_ID. Ack a dispatch with ` + "`bacio agent ack <id>`" + `.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireLocalForAgent("inbox"); err != nil {
+				return err
+			}
+			sid, err := resolveSessionID(sessionID)
+			if err != nil {
+				return err
+			}
+			c, err := openClient()
+			if err != nil {
+				return err
+			}
+			defer c.Close()
+			ds, err := c.InboxDispatches(context.Background(), sid)
+			if err != nil {
+				return err
+			}
+			if opts.output == outputJSON && ds == nil {
+				ds = []*model.AgentDispatch{}
+			}
+			return emit(ds)
+		},
+	}
+	cmd.Flags().StringVar(&sessionID, "session", "", "session id (default: $CLAUDE_CODE_SESSION_ID)")
+	return cmd
+}
+
+// ---------- ack ----------
+
+func agentAckCmd() *cobra.Command {
+	var (
+		note, rawInput string
+	)
+	cmd := &cobra.Command{
+		Use:   "ack <dispatch-id>",
+		Short: "Acknowledge a dispatch and record an optional reply note",
+		Args:  cobra.RangeArgs(0, 1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			raw, err := parseJSONInput(cmd, args, rawInput, "note")
+			if err != nil {
+				return err
+			}
+			if raw != nil {
+				in, _, err := inputio.DecodeStrict[inputs.AgentAckInput](raw)
+				if err != nil {
+					return err
+				}
+				return runAgentAck(*in)
+			}
+			if len(args) != 1 {
+				return fmt.Errorf("requires <dispatch-id> positional or --json")
+			}
+			id, err := strconv.ParseInt(args[0], 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid dispatch id %q: %w", args[0], err)
+			}
+			return runAgentAck(inputs.AgentAckInput{ID: id, Note: note})
+		},
+	}
+	cmd.Flags().StringVar(&note, "note", "", "free-form reply recorded against the dispatch")
+	addInputFlag(cmd, &rawInput)
+	return cmd
+}
+
+func runAgentAck(in inputs.AgentAckInput) error {
+	if err := requireLocalForAgent("ack"); err != nil {
+		return err
+	}
+	c, err := openClient()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	d, err := c.AckDispatch(context.Background(), in, opts.dryRun)
+	if err != nil {
+		return err
+	}
+	if opts.dryRun {
+		return emitDryRun(d)
+	}
+	return emit(d)
+}
+
 // ---------- list ----------
 
 func agentListCmd() *cobra.Command {
@@ -502,10 +677,11 @@ func requireLocalForAgent(verb string) error {
 	return nil
 }
 
-// resolveSessionID falls back to $CLAUDE_CODE_SESSION_ID when --session
-// is empty. Errors out explicitly if neither source provides a value
-// rather than guessing — silently registering a wrong session id is
-// worse than a clear "set --session or export CLAUDE_CODE_SESSION_ID".
+// resolveSessionID falls back to $CLAUDE_CODE_SESSION_ID, then to this
+// process's newest session in .bacio/agents.json (resolved via the
+// claude pid), when --session is empty. Errors out explicitly if none
+// of them provide a value rather than guessing — silently registering a
+// wrong session id is worse than a clear failure.
 func resolveSessionID(flag string) (string, error) {
 	if flag != "" {
 		return flag, nil
@@ -513,7 +689,10 @@ func resolveSessionID(flag string) (string, error) {
 	if v := strings.TrimSpace(os.Getenv(claudeSessionEnv)); v != "" {
 		return v, nil
 	}
-	return "", fmt.Errorf("--session not set and $%s is empty", claudeSessionEnv)
+	if v := sessionIDForProcess(); v != "" {
+		return v, nil
+	}
+	return "", fmt.Errorf("--session not set, $%s is empty, and no .bacio/agents.json entry for this process", claudeSessionEnv)
 }
 
 // detectBranch returns the current git branch via a shellout.
@@ -545,7 +724,7 @@ func emitAgentSessionTable(sessions []*model.AgentSession) error {
 		return nil
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "SESSION\tAGENT\tACTOR\tREPO\tMODEL\tBRANCH\tLAST-SEEN\tSTATUS")
+	fmt.Fprintln(w, "SESSION\tAGENT\tACTOR\tREPO\tMODEL\tBRANCH\tLAST-SEEN\tCHANNEL\tSTATUS")
 	now := time.Now().UTC()
 	for _, s := range sessions {
 		status := "alive"
@@ -553,11 +732,26 @@ func emitAgentSessionTable(sessions []*model.AgentSession) error {
 			status = "ended:" + s.EndReason
 		}
 		seen := humanAgo(now.Sub(s.LastSeenAt.UTC()))
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			shortID(s.SessionID), dashIfEmpty(s.AgentName), s.Actor, s.RepoPrefix,
-			dashIfEmpty(s.Model), dashIfEmpty(s.Branch), seen, status)
+			dashIfEmpty(s.Model), dashIfEmpty(s.Branch), seen, channelStatus(s, now), status)
 	}
 	return w.Flush()
+}
+
+// channelStatus reports whether a session currently has a live `bacio
+// channel` behind it — "live" when the hooks last saw a fresh
+// agent_channels row for the session's (host, claude_pid), "-" when
+// none was ever linked or its heartbeat went stale. A stale link reads
+// the same as none: the channel process is gone either way.
+func channelStatus(s *model.AgentSession, now time.Time) string {
+	if s.ChannelSeenAt == nil {
+		return "-"
+	}
+	if now.Sub(s.ChannelSeenAt.UTC()) <= model.AgentLivenessThreshold {
+		return "live"
+	}
+	return "-"
 }
 
 func emitAgentSessionDetail(view *client.AgentSessionView) error {
@@ -570,6 +764,11 @@ func emitAgentSessionDetail(view *client.AgentSessionView) error {
 	fmt.Fprintf(os.Stdout, "Mode:     %s\n", dashIfEmpty(s.PermissionMode))
 	fmt.Fprintf(os.Stdout, "Host:     %s\n", dashIfEmpty(s.Host))
 	fmt.Fprintf(os.Stdout, "Branch:   %s\n", dashIfEmpty(s.Branch))
+	if s.ClaudePID != 0 {
+		fmt.Fprintf(os.Stdout, "Channel:  %s (claude_pid=%d)\n", channelStatus(s, time.Now().UTC()), s.ClaudePID)
+	} else {
+		fmt.Fprintf(os.Stdout, "Channel:  %s\n", channelStatus(s, time.Now().UTC()))
+	}
 	fmt.Fprintf(os.Stdout, "Started:  %s\n", s.StartedAt.Local().Format("2006-01-02 15:04:05"))
 	fmt.Fprintf(os.Stdout, "LastSeen: %s\n", s.LastSeenAt.Local().Format("2006-01-02 15:04:05"))
 	if s.EndedAt != nil {

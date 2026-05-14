@@ -26,7 +26,7 @@ var ErrAgentNameTaken = errors.New("agent name already taken")
 // fresh, fail if it clashes" path the SKILL.md bootstrap uses on first
 // session in a repo. When requireNew is false, an existing name is a
 // no-op refresh (last_seen_at bumped) — that's the "I'm a returning
-// agent reading my saved name from .bacio/agent" path.
+// agent reading its recorded name from .bacio/agents.json" path.
 //
 // Returns the row plus a created flag so callers can decide whether to
 // record an audit event for a fresh creation vs. a routine refresh.
@@ -174,8 +174,8 @@ func (s *Store) UpsertAgentSession(in UpsertAgentSessionIn) (*model.AgentSession
 	// INSERT … ON CONFLICT: update mutable fields and bump last_seen_at.
 	// The ended-session case is already filtered above, so this path
 	// only runs for new or alive rows. agent_id is mutable on the
-	// session row too — if the agent rewrites .bacio/agent mid-session
-	// (rename), the next register picks up the new identity. Passing
+	// session row too — if the identity for this claude_pid changes
+	// mid-session (rename), the next register picks it up. Passing
 	// nil leaves the column unchanged on update (COALESCE) so callers
 	// that don't supply an agent (e.g. heartbeat) don't clobber it.
 	var agentID any
@@ -383,7 +383,7 @@ type AgentSessionFilter struct {
 // last_seen_at DESC so the freshest activity surfaces first.
 func (s *Store) ListAgentSessions(f AgentSessionFilter) ([]*model.AgentSession, error) {
 	q := `SELECT s.id, s.session_id, s.repo_id, r.prefix, s.agent_id, a.name, s.actor, s.model, s.permission_mode, s.host, s.branch,
-		s.started_at, s.last_seen_at, s.ended_at, s.end_reason
+		s.started_at, s.last_seen_at, s.ended_at, s.end_reason, s.claude_pid, s.channel_seen_at
 		FROM agent_sessions s
 		LEFT JOIN repos r  ON r.id = s.repo_id
 		LEFT JOIN agents a ON a.id = s.agent_id
@@ -422,7 +422,7 @@ func (s *Store) ListAgentSessions(f AgentSessionFilter) ([]*model.AgentSession, 
 func (s *Store) GetAgentSession(sessionID string) (*model.AgentSession, error) {
 	row := s.DB.QueryRow(
 		`SELECT s.id, s.session_id, s.repo_id, r.prefix, s.agent_id, a.name, s.actor, s.model, s.permission_mode, s.host, s.branch,
-		s.started_at, s.last_seen_at, s.ended_at, s.end_reason
+		s.started_at, s.last_seen_at, s.ended_at, s.end_reason, s.claude_pid, s.channel_seen_at
 		FROM agent_sessions s
 		LEFT JOIN repos r  ON r.id = s.repo_id
 		LEFT JOIN agents a ON a.id = s.agent_id
@@ -451,7 +451,7 @@ func (s *Store) ResolveAgentSession(idOrPrefix string) (*model.AgentSession, err
 	pattern := idOrPrefix + "%"
 	rows, err := s.DB.Query(
 		`SELECT s.id, s.session_id, s.repo_id, r.prefix, s.agent_id, a.name, s.actor, s.model, s.permission_mode, s.host, s.branch,
-		s.started_at, s.last_seen_at, s.ended_at, s.end_reason
+		s.started_at, s.last_seen_at, s.ended_at, s.end_reason, s.claude_pid, s.channel_seen_at
 		FROM agent_sessions s
 		LEFT JOIN repos r  ON r.id = s.repo_id
 		LEFT JOIN agents a ON a.id = s.agent_id
@@ -550,9 +550,11 @@ func scanAgentSession(r rowScanner) (*model.AgentSession, error) {
 	var agentID sql.NullInt64
 	var agentName sql.NullString
 	var ended sql.NullTime
+	var channelSeen sql.NullTime
 	err := r.Scan(&ag.ID, &ag.SessionID, &ag.RepoID, &prefix, &agentID, &agentName,
 		&ag.Actor, &ag.Model, &ag.PermissionMode,
-		&ag.Host, &ag.Branch, &ag.StartedAt, &ag.LastSeenAt, &ended, &ag.EndReason)
+		&ag.Host, &ag.Branch, &ag.StartedAt, &ag.LastSeenAt, &ended, &ag.EndReason,
+		&ag.ClaudePID, &channelSeen)
 	if err != nil {
 		return nil, err
 	}
@@ -568,6 +570,9 @@ func scanAgentSession(r rowScanner) (*model.AgentSession, error) {
 	}
 	if ended.Valid {
 		ag.EndedAt = &ended.Time
+	}
+	if channelSeen.Valid {
+		ag.ChannelSeenAt = &channelSeen.Time
 	}
 	return &ag, nil
 }

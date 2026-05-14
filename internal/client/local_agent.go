@@ -88,6 +88,41 @@ func (c *localClient) RegisterAgent(ctx context.Context, repo *model.Repo, in in
 	return sess, nil
 }
 
+// EnsureAgentIdentity mints a fresh persistent identity for a `claude`
+// process that has no entry in .bacio/agents.json yet. It rerolls the
+// random slug against the agents.name UNIQUE constraint (UpsertAgent
+// with requireNew) until one sticks — so two agents bootstrapping on
+// the same host at the same instant can't end up sharing a row. On
+// success it adopts the slug as this client's audit actor, so the
+// session-start hook's subsequent register/dispatch audit rows
+// attribute to the agent rather than the OS user the hook runs as. The
+// caller is responsible for recording the slug into .bacio/agents.json.
+func (c *localClient) EnsureAgentIdentity(ctx context.Context, repo *model.Repo) (string, error) {
+	const maxAttempts = 20
+	for i := 0; i < maxAttempts; i++ {
+		cand := model.GenerateAgentSlug()
+		ag, _, err := c.store.UpsertAgent(cand, true)
+		if err != nil {
+			if errors.Is(err, store.ErrAgentNameTaken) {
+				continue // slug clashed with a live identity — reroll
+			}
+			return "", err
+		}
+		c.actor = cand // adopt the minted identity for subsequent audit rows
+		entry := model.HistoryEntry{
+			Op: "agent.identity.create", Kind: "agent",
+			TargetID: &ag.ID, TargetLabel: cand,
+		}
+		if repo != nil {
+			entry.RepoID = &repo.ID
+			entry.RepoPrefix = repo.Prefix
+		}
+		c.recordOp(entry)
+		return cand, nil
+	}
+	return "", fmt.Errorf("could not mint a unique agent identity after %d attempts", maxAttempts)
+}
+
 // HeartbeatAgent is the same store call as RegisterAgent but with
 // fewer required fields and no audit row. session_id must already
 // exist; we don't allow a heartbeat to implicitly create a session

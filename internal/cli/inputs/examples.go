@@ -140,6 +140,15 @@ var (
 		SessionID: "092d8907-a5ed-48cf-9fdd-22c3941f3710",
 		IssueKey:  "MINI-42",
 	}
+	ExampleAgentDispatch = AgentDispatchInput{
+		TargetAgent: "swift-otter@claude.shiny",
+		IssueKey:    "MINI-42",
+		Message:     "This regressed after the tab-strip change — please pick it up before EOD.",
+	}
+	ExampleAgentAck = AgentAckInput{
+		ID:   7,
+		Note: "On it — claimed MINI-42, opening a PR shortly.",
+	}
 
 	ExampleRepoCreate = RepoCreateInput{
 		Prefix:    "MINI",

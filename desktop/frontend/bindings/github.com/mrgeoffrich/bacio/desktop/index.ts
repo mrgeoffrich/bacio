@@ -9,10 +9,13 @@ export {
 };
 
 export {
+    AgentCard,
     Board,
     BoardCard,
     BoardColumn,
+    ClaimDTO,
     CommentDTO,
+    DispatchDTO,
     DocContent,
     DocSummary,
     IssueDetail,

@@ -2,6 +2,8 @@ package model
 
 import (
 	"fmt"
+	"math/rand/v2"
+	"os"
 	"strings"
 	"time"
 )
@@ -44,6 +46,36 @@ type AgentSession struct {
 	LastSeenAt     time.Time  `json:"last_seen_at"`
 	EndedAt        *time.Time `json:"ended_at,omitempty"`
 	EndReason      string     `json:"end_reason,omitempty"`
+	// ClaudePID is the pid of the `claude` process driving this session,
+	// resolved by the `bacio hook` handlers. ChannelSeenAt is bumped
+	// whenever a hook finds a live `bacio channel` row keyed on the same
+	// (host, claude_pid) — nil/zero when no channel has ever been linked.
+	ClaudePID     int64      `json:"claude_pid,omitempty"`
+	ChannelSeenAt *time.Time `json:"channel_seen_at,omitempty"`
+}
+
+// AgentChannel is one live `bacio channel` subprocess. Claude Code never
+// hands a channel its session id, so the channel keys itself on the
+// `claude` process it descends from; the `bacio hook` handlers join
+// (Host, ClaudePID) back onto a session. Pure liveness state — see the
+// agent_channels schema comment.
+type AgentChannel struct {
+	ID         int64     `json:"id"`
+	RepoID     int64     `json:"repo_id"`
+	AgentID    *int64    `json:"agent_id,omitempty"`
+	Host       string    `json:"host,omitempty"`
+	ClaudePID  int64     `json:"claude_pid"`
+	ChannelPID int64     `json:"channel_pid,omitempty"`
+	StartedAt  time.Time `json:"started_at"`
+	LastSeenAt time.Time `json:"last_seen_at"`
+}
+
+// ChannelLive reports whether a channel's heartbeat is fresh enough to
+// count as live, reusing AgentLivenessThreshold — a channel that polls
+// every few seconds refreshes well inside the window, so a longer gap
+// means the channel process is gone. now should be UTC.
+func (ch *AgentChannel) ChannelLive(now time.Time) bool {
+	return ch != nil && now.Sub(ch.LastSeenAt) <= AgentLivenessThreshold
 }
 
 // AgentClaim is a "this agent is focused on this issue" intent
@@ -98,4 +130,183 @@ func ParseEndReason(s string) (EndReason, error) {
 		names[i] = string(r)
 	}
 	return "", fmt.Errorf("unknown end_reason %q (valid: %s)", s, strings.Join(names, ", "))
+}
+
+// DispatchStatus tracks a dispatch through its lifecycle. pending: not
+// yet seen by the agent. delivered: drained into a session (by a hook)
+// or pushed (by a channel) but not acted on. acked: the agent reported
+// back via `bacio agent ack`. cancelled: the supervisor withdrew it.
+type DispatchStatus string
+
+const (
+	DispatchPending   DispatchStatus = "pending"
+	DispatchDelivered DispatchStatus = "delivered"
+	DispatchAcked     DispatchStatus = "acked"
+	DispatchCancelled DispatchStatus = "cancelled"
+)
+
+var allDispatchStatuses = []DispatchStatus{
+	DispatchPending, DispatchDelivered, DispatchAcked, DispatchCancelled,
+}
+
+func AllDispatchStatuses() []DispatchStatus {
+	return append([]DispatchStatus(nil), allDispatchStatuses...)
+}
+
+// ParseDispatchStatus accepts the canonical lowercase form and rejects
+// unknown values. Used when a status arrives as a filter argument.
+func ParseDispatchStatus(s string) (DispatchStatus, error) {
+	s = strings.TrimSpace(s)
+	for _, st := range allDispatchStatuses {
+		if string(st) == s {
+			return st, nil
+		}
+	}
+	names := make([]string, len(allDispatchStatuses))
+	for i, st := range allDispatchStatuses {
+		names[i] = string(st)
+	}
+	return "", fmt.Errorf("unknown dispatch status %q (valid: %s)", s, strings.Join(names, ", "))
+}
+
+// DispatchMode marks the intent of a dispatch. plan: investigate the
+// issue and produce an implementation plan, don't change code.
+// implement: carry the work through end-to-end. "" = untyped (the
+// pre-Mode default; delivery treats it as unspecified).
+type DispatchMode string
+
+const (
+	DispatchModePlan      DispatchMode = "plan"
+	DispatchModeImplement DispatchMode = "implement"
+)
+
+var allDispatchModes = []DispatchMode{DispatchModePlan, DispatchModeImplement}
+
+func AllDispatchModes() []DispatchMode {
+	return append([]DispatchMode(nil), allDispatchModes...)
+}
+
+// ParseDispatchMode accepts "" (untyped — valid), "plan", or
+// "implement", and rejects anything else.
+func ParseDispatchMode(s string) (DispatchMode, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", nil
+	}
+	for _, m := range allDispatchModes {
+		if string(m) == s {
+			return m, nil
+		}
+	}
+	return "", fmt.Errorf("unknown dispatch mode %q (valid: plan, implement, or empty)", s)
+}
+
+// ComposeDispatchPayload builds the instruction body for a dispatch from
+// its mode and an optional free-form note. The mode contributes a canned
+// instruction; the note is appended after a blank line. Either part may
+// be empty — an untyped dispatch with no note yields "".
+func ComposeDispatchPayload(mode DispatchMode, note string) string {
+	note = strings.TrimSpace(note)
+	var canned string
+	switch mode {
+	case DispatchModePlan:
+		canned = "Run a planning pass on this issue: produce an implementation plan, don't write code yet."
+	case DispatchModeImplement:
+		canned = "Implement this issue end-to-end."
+	}
+	switch {
+	case canned != "" && note != "":
+		return canned + "\n\n" + note
+	case canned != "":
+		return canned
+	default:
+		return note
+	}
+}
+
+// AgentDispatch is one unit of supervisor->agent work. It targets an
+// agent identity (TargetAgentID), a specific session (TargetSessionID),
+// or both — the drain query matches on either. IssueID is the issue the
+// dispatch is about, when there is one; Mode marks plan vs implement
+// intent; Payload carries the (mode-derived + note) instruction body.
+// Local-only, like the rest of the agent registry.
+type AgentDispatch struct {
+	ID              int64          `json:"id"`
+	RepoID          int64          `json:"repo_id"`
+	RepoPrefix      string         `json:"repo_prefix,omitempty"`
+	TargetAgentID   *int64         `json:"target_agent_id,omitempty"`
+	TargetAgentName string         `json:"target_agent_name,omitempty"`
+	TargetSessionID string         `json:"target_session_id,omitempty"`
+	IssueID         *int64         `json:"issue_id,omitempty"`
+	IssueKey        string         `json:"issue_key,omitempty"`
+	Mode            DispatchMode   `json:"mode,omitempty"`
+	Payload         string         `json:"payload,omitempty"`
+	Status          DispatchStatus `json:"status"`
+	CreatedBy       string         `json:"created_by"`
+	CreatedAt       time.Time      `json:"created_at"`
+	DeliveredAt     *time.Time     `json:"delivered_at,omitempty"`
+	AckedAt         *time.Time     `json:"acked_at,omitempty"`
+	AckNote         string         `json:"ack_note,omitempty"`
+}
+
+// AgentLivenessThreshold is the gap after a session's last heartbeat
+// past which it's considered idle rather than active. Heartbeats fire
+// on every prompt and on the Stop hook, so a working session refreshes
+// well inside this window; a longer gap means the agent is between
+// turns or the harness is closed.
+const AgentLivenessThreshold = 10 * time.Minute
+
+// SessionLiveness classifies a session as "ended", "active", or "idle"
+// relative to now. Shared by the TUI agent cards and the desktop Agents
+// screen so both render the same status vocabulary.
+func SessionLiveness(s *AgentSession, now time.Time) string {
+	if s == nil || s.EndedAt != nil {
+		return "ended"
+	}
+	if now.Sub(s.LastSeenAt) <= AgentLivenessThreshold {
+		return "active"
+	}
+	return "idle"
+}
+
+// slug word pools for GenerateAgentSlug. Kept deliberately generic and
+// G-rated; the pools just need enough combinations that two agents on
+// the same host rarely collide (the store's UNIQUE on agents.name plus
+// the EnsureAgentIdentity retry loop handle the rare clash that slips
+// through).
+var slugAdjectives = []string{
+	"cheerful", "quiet", "swift", "bold", "clever", "calm", "brave", "bright",
+	"eager", "gentle", "happy", "jolly", "keen", "lively", "merry", "nimble",
+	"polite", "proud", "ready", "shiny", "spry", "sturdy", "sunny", "tidy",
+	"witty", "zesty", "amber", "azure", "crisp", "dapper", "fleet", "frosty",
+	"golden", "humble", "ivory", "lucky", "mellow", "noble", "plucky", "rapid",
+	"rugged", "scarlet", "silent", "smooth", "snappy", "stout", "trusty", "vivid",
+}
+
+var slugAnimals = []string{
+	"otter", "gorilla", "panda", "falcon", "lynx", "badger", "heron", "marten",
+	"beaver", "bison", "cobra", "dingo", "eagle", "ferret", "gecko", "hawk",
+	"ibex", "jaguar", "koala", "lemur", "mole", "newt", "owl", "puffin",
+	"quail", "raven", "seal", "tapir", "urchin", "viper", "walrus", "yak",
+	"zebra", "bobcat", "crane", "dolphin", "egret", "finch", "gibbon", "hare",
+	"impala", "jackal", "kestrel", "leopard", "manta", "narwhal", "osprey", "weasel",
+}
+
+// GenerateAgentSlug mints a fresh identity slug of the SKILL.md shape:
+// <adjective>-<animal>@claude.<short-hostname>. The host suffix keeps
+// cross-machine identities apart; the adjective-animal pair is the
+// random part. Callers MUST treat the result as a candidate — the
+// store's UNIQUE constraint is the real collision guard.
+func GenerateAgentSlug() string {
+	adj := slugAdjectives[rand.IntN(len(slugAdjectives))]
+	animal := slugAnimals[rand.IntN(len(slugAnimals))]
+	host := "local"
+	if hn, err := os.Hostname(); err == nil && hn != "" {
+		// Short hostname: first label only ("shiny.local" -> "shiny").
+		if i := strings.IndexByte(hn, '.'); i > 0 {
+			hn = hn[:i]
+		}
+		host = hn
+	}
+	return fmt.Sprintf("%s-%s@claude.%s", adj, animal, host)
 }

@@ -47,3 +47,39 @@ func (c *remoteClient) ListAgentSessions(ctx context.Context, f AgentSessionFilt
 func (c *remoteClient) ShowAgentSession(ctx context.Context, sessionID string) (*AgentSessionView, error) {
 	return nil, remoteAgentNotSupported("show")
 }
+
+func (c *remoteClient) CreateDispatch(ctx context.Context, repo *model.Repo, in inputs.AgentDispatchInput, dryRun bool) (*model.AgentDispatch, error) {
+	return nil, remoteAgentNotSupported("dispatch")
+}
+
+func (c *remoteClient) InboxDispatches(ctx context.Context, sessionID string) ([]*model.AgentDispatch, error) {
+	return nil, remoteAgentNotSupported("inbox")
+}
+
+func (c *remoteClient) AckDispatch(ctx context.Context, in inputs.AgentAckInput, dryRun bool) (*model.AgentDispatch, error) {
+	return nil, remoteAgentNotSupported("ack")
+}
+
+func (c *remoteClient) DrainDispatches(ctx context.Context, sessionID string) ([]*model.AgentDispatch, error) {
+	return nil, remoteAgentNotSupported("inbox")
+}
+
+func (c *remoteClient) RepoDispatches(ctx context.Context, repo *model.Repo) ([]*model.AgentDispatch, error) {
+	return nil, remoteAgentNotSupported("dispatches")
+}
+
+func (c *remoteClient) DrainAgentDispatches(ctx context.Context, repo *model.Repo, agentName string) ([]*model.AgentDispatch, error) {
+	return nil, remoteAgentNotSupported("channel")
+}
+
+func (c *remoteClient) EnsureAgentIdentity(ctx context.Context, repo *model.Repo) (string, error) {
+	return "", remoteAgentNotSupported("register")
+}
+
+func (c *remoteClient) UpsertAgentChannel(ctx context.Context, repo *model.Repo, agentName, host string, claudePID, channelPID int64) error {
+	return remoteAgentNotSupported("channel")
+}
+
+func (c *remoteClient) LinkSessionChannel(ctx context.Context, sessionID string, claudePID int64, host string) error {
+	return remoteAgentNotSupported("channel")
+}

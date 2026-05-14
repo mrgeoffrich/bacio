@@ -8,11 +8,12 @@ package inputs
 // Agent is the persistent identity slug (e.g. "cheerful-otter@claude.shiny");
 // optional but recommended — without it the session has no link to a
 // long-lived identity, so cross-session correlation falls back to actor
-// matching. Set NewIdentity true on the first register from a fresh
-// .bacio/agent (no file yet) — bacio will then error with "agent name
-// taken" if the slug clashes with another agent's, prompting the agent
-// to regenerate. Leave NewIdentity false on subsequent registers
-// reading the persisted slug from disk; the upsert is then idempotent.
+// matching. Set NewIdentity true on the first register of a freshly
+// generated slug — bacio will then error with "agent name taken" if it
+// clashes with another agent's, prompting the agent to regenerate.
+// Leave NewIdentity false on subsequent registers of a known slug; the
+// upsert is then idempotent. (With hooks installed, the session-start
+// hook handles all of this — see SKILL.md.)
 type AgentRegisterInput struct {
 	SessionID      string `json:"session_id"`
 	Actor          string `json:"actor"`
@@ -53,4 +54,27 @@ type AgentClaimInput struct {
 type AgentReleaseInput struct {
 	SessionID string `json:"session_id"`
 	IssueKey  string `json:"issue_key"`
+}
+
+// AgentDispatchInput is the payload for `bacio agent dispatch --json`.
+// A dispatch must name a target: TargetAgent (a persistent identity
+// slug), TargetSession (a session id), or both. IssueKey is the issue
+// the dispatch concerns, when there is one. Mode is the dispatch intent
+// ("plan", "implement", or "" for untyped); Message is an optional
+// free-form note. The instruction body the agent sees is the mode's
+// canned text plus the note.
+type AgentDispatchInput struct {
+	TargetAgent   string `json:"target_agent,omitempty"`
+	TargetSession string `json:"target_session,omitempty"`
+	IssueKey      string `json:"issue_key,omitempty"`
+	Mode          string `json:"mode,omitempty"`
+	Message       string `json:"message,omitempty"`
+}
+
+// AgentAckInput is the payload for `bacio agent ack --json`. ID is the
+// dispatch id (as printed by `bacio agent inbox`). Note is an optional
+// free-form reply recorded against the dispatch.
+type AgentAckInput struct {
+	ID   int64  `json:"id"`
+	Note string `json:"note,omitempty"`
 }

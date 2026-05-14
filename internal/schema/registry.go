@@ -71,6 +71,8 @@ var Registry = []Entry{
 	{"agent.end", "End an agent session and auto-release every open claim it holds.", typeOf[inputs.AgentEndInput](), inputs.ExampleAgentEnd},
 	{"agent.claim", "Record that an agent is now focused on an issue (intent, not state — does not move the issue or change assignee).", typeOf[inputs.AgentClaimInput](), inputs.ExampleAgentClaim},
 	{"agent.release", "Release an agent's claim on an issue (does not move the issue or change assignee).", typeOf[inputs.AgentReleaseInput](), inputs.ExampleAgentRelease},
+	{"agent.dispatch", "Queue a unit of work (an issue, an instruction) for an agent identity and/or a session.", typeOf[inputs.AgentDispatchInput](), inputs.ExampleAgentDispatch},
+	{"agent.ack", "Acknowledge a dispatch and record an optional reply note.", typeOf[inputs.AgentAckInput](), inputs.ExampleAgentAck},
 }
 
 // repoRmDescription is the LLM-targeted warning text published via

@@ -28,12 +28,13 @@ func Snapshot(s *store.Store, repo *model.Repo, opts SnapshotOpts) error {
 		opts.Height = 40
 	}
 
-	board, err := newBoardView(s, repo)
+	board, err := newBoardView(s, repo, "snapshot")
 	if err != nil {
 		return err
 	}
 	features := newFeaturesView(s, repo)
 	docs := newDocsView(s, repo)
+	agents := newAgentsView(s, repo)
 	hist := newHistoryView(s, repo)
 
 	m := &Model{
@@ -42,6 +43,7 @@ func Snapshot(s *store.Store, repo *model.Repo, opts SnapshotOpts) error {
 			{"Board", board},
 			{"Features", features},
 			{"Documents", docs},
+			{"Agents", agents},
 			{"History", hist},
 		},
 		width:  opts.Width,
@@ -59,8 +61,15 @@ func Snapshot(s *store.Store, repo *model.Repo, opts SnapshotOpts) error {
 		m.active = 1
 	case "documents", "docs":
 		m.active = 2
-	case "history":
+	case "agents":
 		m.active = 3
+	case "agent-detail":
+		m.active = 3
+		if len(agents.sessions) > 0 {
+			agents.detail = true
+		}
+	case "history":
+		m.active = 4
 	case "card-overlay", "card":
 		m.active = 0
 		if err := focusIssue(board, opts.Issue); err != nil {
@@ -73,6 +82,12 @@ func Snapshot(s *store.Store, repo *model.Repo, opts SnapshotOpts) error {
 	case "feature-picker":
 		m.active = 0
 		board.openFeaturePicker()
+	case "dispatch-picker":
+		m.active = 0
+		if err := focusIssue(board, opts.Issue); err != nil {
+			return err
+		}
+		board.openDispatchPicker()
 	case "doc-overlay":
 		m.active = 2
 		if docs.loaded != nil {
@@ -84,7 +99,7 @@ func Snapshot(s *store.Store, repo *model.Repo, opts SnapshotOpts) error {
 			features.overlay = true
 		}
 	default:
-		return fmt.Errorf("unknown snapshot target %q (try board, features, docs, history, card-overlay, doc-overlay, feature-overlay, picker)", opts.Target)
+		return fmt.Errorf("unknown snapshot target %q (try board, features, docs, agents, agent-detail, history, card-overlay, doc-overlay, feature-overlay, picker, feature-picker, dispatch-picker)", opts.Target)
 	}
 
 	out := m.View()
