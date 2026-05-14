@@ -1,6 +1,7 @@
 ---
 title: bacio agent
 description: Track live AI-agent sessions and their issue claims — a local-only registry so you and your tools can see who's working on what.
+status: beta
 ---
 
 # `bacio agent`
