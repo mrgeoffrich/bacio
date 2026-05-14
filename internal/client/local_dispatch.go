@@ -160,21 +160,38 @@ func (c *localClient) DrainDispatches(ctx context.Context, sessionID string) ([]
 		}
 		return nil, err
 	}
-	pending, err := c.store.ListDispatches(store.DispatchFilter{
+	// Drain pending AND delivered — anything not yet acked. `delivered`
+	// only means "we tried to hand it over once"; if that push was lost
+	// (a dead channel process, a notification the session never surfaced)
+	// the dispatch would be silently stranded. Re-surfacing un-acked
+	// dispatches on every hook drain is the reliable recovery path — only
+	// an ack retires a dispatch.
+	open, err := c.store.ListDispatches(store.DispatchFilter{
 		TargetAgentID:   sess.AgentID,
 		TargetSessionID: sess.SessionID,
-		Statuses:        []model.DispatchStatus{model.DispatchPending},
+		Statuses:        []model.DispatchStatus{model.DispatchPending, model.DispatchDelivered},
 	})
 	if err != nil {
 		return nil, err
 	}
-	out := make([]*model.AgentDispatch, 0, len(pending))
-	for _, d := range pending {
-		delivered, err := c.store.MarkDispatchDelivered(d.ID)
-		if err != nil {
-			return nil, err
+	return c.markDrained(open)
+}
+
+// markDrained flips any still-pending dispatches to delivered and returns
+// the list unchanged otherwise. Already-delivered rows are passed through
+// as-is (re-emitted by the caller until acked).
+func (c *localClient) markDrained(open []*model.AgentDispatch) ([]*model.AgentDispatch, error) {
+	out := make([]*model.AgentDispatch, 0, len(open))
+	for _, d := range open {
+		if d.Status == model.DispatchPending {
+			delivered, err := c.store.MarkDispatchDelivered(d.ID)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, delivered)
+			continue
 		}
-		out = append(out, delivered)
+		out = append(out, d)
 	}
 	return out, nil
 }
@@ -201,23 +218,19 @@ func (c *localClient) DrainAgentDispatches(ctx context.Context, repo *model.Repo
 		}
 		return nil, err
 	}
-	pending, err := c.store.ListDispatches(store.DispatchFilter{
+	// Same pending-AND-delivered drain as DrainDispatches: an un-acked
+	// dispatch stays drainable so a lost push can still be recovered. The
+	// channel caller dedups within a process so it doesn't re-push every
+	// poll tick; a fresh channel process re-pushes un-acked work.
+	open, err := c.store.ListDispatches(store.DispatchFilter{
 		RepoID:        &repo.ID,
 		TargetAgentID: &ag.ID,
-		Statuses:      []model.DispatchStatus{model.DispatchPending},
+		Statuses:      []model.DispatchStatus{model.DispatchPending, model.DispatchDelivered},
 	})
 	if err != nil {
 		return nil, err
 	}
-	out := make([]*model.AgentDispatch, 0, len(pending))
-	for _, d := range pending {
-		delivered, err := c.store.MarkDispatchDelivered(d.ID)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, delivered)
-	}
-	return out, nil
+	return c.markDrained(open)
 }
 
 func (c *localClient) GetPromptTemplates(ctx context.Context) (map[string]string, error) {

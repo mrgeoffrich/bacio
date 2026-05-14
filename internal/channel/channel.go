@@ -36,7 +36,9 @@ type Event struct {
 // Source is the bacio-side backing the channel drains and acks against.
 // internal/cli wires this to the agent dispatch queue for one session.
 type Source interface {
-	// Drain returns newly-pending events and marks them delivered.
+	// Drain returns events to push: un-acked dispatches the caller
+	// hasn't already emitted this process. It marks pending dispatches
+	// delivered as a side effect.
 	Drain(ctx context.Context) ([]Event, error)
 	// Ack records the agent's acknowledgement of an event (dispatch).
 	Ack(ctx context.Context, eventID int64, note string) error

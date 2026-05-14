@@ -202,16 +202,19 @@ type Client interface {
 	CreateDispatch(ctx context.Context, repo *model.Repo, in inputs.AgentDispatchInput, dryRun bool) (*model.AgentDispatch, error)
 	InboxDispatches(ctx context.Context, sessionID string) ([]*model.AgentDispatch, error)
 	AckDispatch(ctx context.Context, in inputs.AgentAckInput, dryRun bool) (*model.AgentDispatch, error)
-	// DrainDispatches returns a session's pending dispatches and marks
-	// each one delivered — the pull-delivery path used by the bacio
-	// hooks (which know their session id from the hook payload).
-	// Delivered dispatches aren't re-drained but stay in the inbox
-	// until acked.
+	// DrainDispatches returns a session's un-acked dispatches (pending
+	// AND delivered) and marks any still-pending ones delivered — the
+	// pull-delivery path used by the bacio hooks (which know their
+	// session id from the hook payload). Delivered-but-un-acked
+	// dispatches are returned every drain so a lost push is recovered on
+	// the next prompt; only an ack retires a dispatch.
 	DrainDispatches(ctx context.Context, sessionID string) ([]*model.AgentDispatch, error)
 	// DrainAgentDispatches is the same drain, scoped to a repo + agent
 	// identity rather than a session id — the push-delivery path used
 	// by `bacio channel`, which (unlike a hook) is never told its
-	// session id. A nil repo or empty agent name drains nothing (the
+	// session id. Like DrainDispatches it returns un-acked dispatches;
+	// the channel caller dedups per-process so it doesn't re-push every
+	// poll tick. A nil repo or empty agent name drains nothing (the
 	// channel runs idle rather than erroring).
 	DrainAgentDispatches(ctx context.Context, repo *model.Repo, agentName string) ([]*model.AgentDispatch, error)
 	// RepoDispatches returns every dispatch scoped to one repo, newest

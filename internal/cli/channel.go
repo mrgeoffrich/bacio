@@ -130,6 +130,7 @@ to stderr.`,
 				host:       host,
 				claudePID:  int64(claudePID),
 				channelPID: int64(os.Getpid()),
+				pushed:     map[int64]bool{},
 			}
 			srv := channel.New(src, "bacio", os.Stdin, os.Stdout, logf)
 
@@ -159,6 +160,15 @@ type channelSource struct {
 	host       string
 	claudePID  int64
 	channelPID int64
+
+	// pushed is the set of dispatch ids this channel process has already
+	// emitted. DrainAgentDispatches returns un-acked dispatches (pending
+	// AND delivered) so a lost push can be recovered — but without this
+	// guard the channel would re-push every still-un-acked dispatch on
+	// every 3s poll tick. A fresh channel process starts with an empty
+	// set, so a restart still re-pushes work the previous process's push
+	// may not have landed. Only touched from the single poller goroutine.
+	pushed map[int64]bool
 }
 
 // identity re-reads this channel's agent slug from .bacio/agents.json.
@@ -179,6 +189,13 @@ func (s *channelSource) Drain(ctx context.Context) ([]channel.Event, error) {
 	}
 	out := make([]channel.Event, 0, len(ds))
 	for _, d := range ds {
+		// DrainAgentDispatches returns un-acked dispatches every tick;
+		// skip any this process has already pushed so a still-un-acked
+		// dispatch isn't re-emitted on every poll.
+		if s.pushed[d.ID] {
+			continue
+		}
+		s.pushed[d.ID] = true
 		out = append(out, channel.Event{
 			ID:       d.ID,
 			IssueKey: d.IssueKey,
