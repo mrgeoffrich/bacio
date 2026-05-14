@@ -13,7 +13,9 @@ Override per-command with `--db <path>`. Useful for tests and isolated experimen
 
 ## Per-project `.bacio/config.yaml`
 
-When you run `bacio sync init`, bacio writes `.bacio/config.yaml` inside your project repo. **Check this in** — other clones (and your other machines) use it to find the sync remote.
+`bacio sync init` and `bacio sync clone` write `.bacio/config.yaml` inside your project repo so steady-state `bacio sync` knows which sync remote to use.
+
+**This file is machine-local — do not commit it.** Add `.bacio/` to your repo's `.gitignore` (`bacio init` does this for you automatically). The `.bacio/` directory also holds the per-machine agent identity (`.bacio/agent`); none of it is meant to be shared via git. Each machine writes its own `config.yaml` when you run `bacio sync init` or `bacio sync clone --remote <url>`.
 
 Minimal contents:
 
@@ -22,7 +24,7 @@ sync:
   remote: git@github.com:you/your-project-bacio-sync.git
 ```
 
-The file is only required if you've enabled [git-backed sync](/guides/sync-across-machines). Without it, bacio's behaviour is unchanged from a fresh install.
+The file is only created if you've enabled [git-backed sync](/guides/sync-across-machines). Without it, bacio's behaviour is unchanged from a fresh install.
 
 ## Environment variables
 

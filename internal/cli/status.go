@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -24,6 +25,13 @@ type statusReport struct {
 	Path       string      `json:"path,omitempty"`
 	Repo       *model.Repo `json:"repo,omitempty"`
 	Stats      statusStats `json:"stats"`
+
+	// LLMRecommendations carries plain-English, actionable advice for
+	// an agent reading `bacio status -o json`: setup problems bacio
+	// noticed and a concrete fix for each. Empty (and omitted) when
+	// there's nothing to flag. Strictly advisory — `status` never acts
+	// on them itself and stays read-only.
+	LLMRecommendations []string `json:"llm_recommendations,omitempty"`
 }
 
 type statusStats struct {
@@ -83,6 +91,7 @@ func buildStatusReport(s *store.Store, dbPath, cwd string) (*statusReport, error
 	case gitErr == nil:
 		report.InRepo = true
 		report.Path = info.Root
+		report.LLMRecommendations = statusRecommendations(info.Root)
 		repo, err := s.GetRepoByPath(info.Root)
 		if errors.Is(err, store.ErrNotFound) {
 			return report, nil
@@ -139,8 +148,29 @@ func fillGlobalStats(s *store.Store, st *statusStats) error {
 	return nil
 }
 
+// statusRecommendations inspects the current repo for bacio setup
+// problems and returns an actionable hint for each. Strictly
+// read-only: it stats files and asks git about ignore rules but never
+// writes anything (BACI-6). Add new checks here as a single appended
+// string per finding — the consumer is an LLM reading JSON.
+func statusRecommendations(repoRoot string) []string {
+	var recs []string
+
+	// .bacio/ holds machine-local state (sync config, agent identity)
+	// and must never be committed. Flag it if it exists but git isn't
+	// ignoring it.
+	if _, err := os.Stat(filepath.Join(repoRoot, ".bacio")); err == nil {
+		if ignored, err := git.IsIgnored(repoRoot, ".bacio"); err == nil && !ignored {
+			recs = append(recs, "The .bacio/ directory is not gitignored. It holds machine-local state (sync config, agent identity) and must not be committed. Add `.bacio/` to this repo's .gitignore; if it is already tracked, also run `git rm --cached -r .bacio` to untrack it.")
+		}
+	}
+
+	return recs
+}
+
 func printStatus(w io.Writer, r *statusReport) error {
-	if r.InRepo && r.Registered && r.Repo != nil {
+	switch {
+	case r.InRepo && r.Registered && r.Repo != nil:
 		fmt.Fprintf(w, "Repo:    %s  (%s)\n", r.Repo.Prefix, r.Repo.Name)
 		fmt.Fprintf(w, "Path:    %s\n", r.Repo.Path)
 		if r.Repo.RemoteURL != "" {
@@ -156,19 +186,21 @@ func printStatus(w io.Writer, r *statusReport) error {
 			}
 		}
 		fmt.Fprintf(w, "Next:    %s\n", r.Stats.NextIssueKey)
-		return nil
-	}
 
-	if r.InRepo {
+	case r.InRepo:
 		fmt.Fprintf(w, "Path:    %s\n", r.Path)
 		fmt.Fprintf(w, "Repo:    (unregistered — run `bacio init` to bind a prefix)\n")
 		fmt.Fprintf(w, "DB:      %s\n", r.DBPath)
-		return nil
+
+	default:
+		fmt.Fprintf(w, "DB:      %s\n", r.DBPath)
+		fmt.Fprintf(w, "Repos:   %d\n", r.Stats.TrackedRepos)
+		fmt.Fprintf(w, "Issues:  %d (across all repos)\n\n", r.Stats.TotalIssues)
+		fmt.Fprintln(w, "Not inside a git repo — cd into one and re-run.")
 	}
 
-	fmt.Fprintf(w, "DB:      %s\n", r.DBPath)
-	fmt.Fprintf(w, "Repos:   %d\n", r.Stats.TrackedRepos)
-	fmt.Fprintf(w, "Issues:  %d (across all repos)\n\n", r.Stats.TotalIssues)
-	fmt.Fprintln(w, "Not inside a git repo — cd into one and re-run.")
+	for _, rec := range r.LLMRecommendations {
+		fmt.Fprintf(w, "\nRecommendation: %s\n", rec)
+	}
 	return nil
 }

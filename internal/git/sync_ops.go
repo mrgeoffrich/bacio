@@ -81,21 +81,61 @@ func Init(path string) (*Repo, error) {
 	return Open(path)
 }
 
-// Clone runs `git clone <remote> <dest>`. The destination is created
-// by git itself; it must not already exist.
+// Clone runs `git clone -- <remote> <dest>`. The destination is created
+// by git itself; it must not already exist. The remote is validated
+// (see ValidateRemoteURL) before it reaches git, and `--` guards
+// against a remote that slipped through still being read as a flag.
 func Clone(remote, dest string) error {
+	if err := ValidateRemoteURL(remote); err != nil {
+		return err
+	}
 	parent := filepath.Dir(dest)
 	if err := os.MkdirAll(parent, 0o755); err != nil {
 		return fmt.Errorf("mkdir parent %s: %w", parent, err)
 	}
-	_, err := runGit(parent, "clone", remote, dest)
+	_, err := runGit(parent, "clone", "--", remote, dest)
 	return err
 }
 
-// AddRemote runs `git remote add <name> <url>`.
+// AddRemote runs `git remote add <name> <url>`. The URL is validated
+// (see ValidateRemoteURL) before it reaches git.
 func (r *Repo) AddRemote(name, url string) error {
+	if err := ValidateRemoteURL(url); err != nil {
+		return err
+	}
 	_, err := runGit(r.Root, "remote", "add", name, url)
 	return err
+}
+
+// IsIgnored reports whether path (relative to the repo root) is
+// excluded by the repo's gitignore rules. Uses `git check-ignore`,
+// which exits 0 when the path is ignored, 1 when it is not, and >1 on
+// a real error. Read-only.
+func (r *Repo) IsIgnored(path string) (bool, error) {
+	return isIgnored(r.Root, path)
+}
+
+// isIgnored is the dir-based form of IsIgnored, usable before a *Repo
+// has been opened (e.g. from `bacio status`).
+func isIgnored(dir, path string) (bool, error) {
+	cmd := exec.Command("git", "-c", "protocol.ext.allow=never", "check-ignore", "-q", "--", path)
+	cmd.Dir = dir
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, err
+}
+
+// IsIgnored reports whether path (relative to repoRoot) is excluded by
+// repoRoot's gitignore rules. Package-level form for callers that have
+// a directory but not an open *Repo.
+func IsIgnored(repoRoot, path string) (bool, error) {
+	return isIgnored(repoRoot, path)
 }
 
 // Pull runs a fast-forward-only `git pull --ff-only`. We use ff-only
@@ -304,8 +344,15 @@ func (r *Repo) HasUpstream() (bool, error) {
 
 // runGit shells out to git with the given args, returning stdout (as
 // a string) on success or an *Error wrapping stderr on failure.
+//
+// Every invocation is hardened with `-c protocol.ext.allow=never` so
+// that even if a malicious remote URL reaches git, the `ext::`
+// transport-helper (which spawns an arbitrary shell command) is
+// refused. ValidateRemoteURL is the primary defence; this is the
+// belt-and-braces second layer covering any future shell-out too.
 func runGit(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+	full := append([]string{"-c", "protocol.ext.allow=never"}, args...)
+	cmd := exec.Command("git", full...)
 	cmd.Dir = dir
 	var stderr strings.Builder
 	cmd.Stderr = &stderr

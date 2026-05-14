@@ -13,8 +13,8 @@ status: beta
 | Subcommand | What it does |
 |---|---|
 | `bacio sync` | Steady state: pull → import → export → commit → push. Run whenever. |
-| `bacio sync init <local-path>` | Connect the current project to a sync repo at `<local-path>` and run an initial sync. Handles fresh bootstrap, an empty `git init`-only / cloned-empty-bare folder, and *attach mode* against an already-populated sync repo. Writes `.bacio/config.yaml` in your project. |
-| `bacio sync clone [<local-path>]` | Join an existing sync repo from a second machine. Refuses to overwrite local issues unless `--allow-renumber` is passed. |
+| `bacio sync init <local-path>` | Connect the current project to a sync repo at `<local-path>` and run an initial sync. Handles fresh bootstrap, an empty `git init`-only / cloned-empty-bare folder, and *attach mode* against an already-populated sync repo. Writes a machine-local `.bacio/config.yaml` in your project (gitignored, not shared). |
+| `bacio sync clone --remote <url> [<local-path>]` | Join an existing sync repo from a second machine. `--remote` is required (the config file is machine-local, so a fresh project clone has nothing to read). Refuses to overwrite local issues unless `--allow-renumber` is passed. |
 | `bacio sync verify` | Check that local DB and sync repo agree, without writing. |
 | `bacio sync inspect <prefix>` | Inspect the synced state for one repo prefix. |
 | `bacio sync export <path>` | (Hidden) Export the DB to a path without git operations. |
@@ -44,10 +44,11 @@ Plus `--dry-run` from the global set, which projects what would change without w
 |---|---|
 | `--remote <url>` | Git URL of the remote sync repo. Sets up `origin` and writes `.bacio/config.yaml`. **Optional** when `<local-path>` already has an `origin` configured — the URL is auto-detected; supplying a mismatching `--remote` errors. |
 
-### `bacio sync clone [<local-path>]`
+### `bacio sync clone --remote <url> [<local-path>]`
 
 | Flag | What it does |
 |---|---|
+| `--remote <url>` | **Required.** Git URL of the sync repo to join. `.bacio/config.yaml` is machine-local and not shared via git, so a freshly cloned project repo carries no remote — pass it explicitly (ask whoever set up sync, or read `origin` from the sync repo). Validated against an allowlist of git URL forms. |
 | `--allow-renumber` | Permit local rows to be renumbered or renamed to resolve collisions with the sync repo. Without it, `clone` errors with a preview if there's anything to renumber. |
 
 ### `bacio sync inspect <prefix>`

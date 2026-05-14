@@ -292,13 +292,20 @@ match.`,
 	return cmd
 }
 
-// newSyncCloneCmd handles `bacio sync clone [<local-path>]
+// newSyncCloneCmd handles `bacio sync clone --remote <url> [<local-path>]
 // [--allow-renumber] [--dry-run]`. Without `--allow-renumber`, errors
 // with a preview when the local DB has data that would be renumbered.
+//
+// `--remote` is required and the only source of the sync URL: the
+// project's .bacio/config.yaml is machine-local (gitignored, not
+// shared), so a freshly cloned project repo carries no remote to
+// read. Passing the URL on the command line keeps it a trusted input
+// — there is no checked-in file an attacker could poison.
 func newSyncCloneCmd() *cobra.Command {
 	var allowRenumber bool
+	var remote string
 	cmd := &cobra.Command{
-		Use:   "clone [<local-path>]",
+		Use:   "clone --remote <url> [<local-path>]",
 		Short: "Join an existing sync repo and import its data into the local DB",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -317,15 +324,11 @@ func newSyncCloneCmd() *cobra.Command {
 				return fmt.Errorf("bacio sync clone runs from inside a project repo, not a sync repo (%s)", info.Root)
 			}
 
-			cfg, err := sync.ReadProjectConfig(info.Root)
-			if err != nil {
-				if errors.Is(err, sync.ErrNoConfig) {
-					return fmt.Errorf("no .bacio/config.yaml at %s; ask the project owner to run 'bacio sync init --remote <url>' first", info.Root)
-				}
-				return err
+			if remote == "" {
+				return fmt.Errorf("the --remote flag is required: pass the sync repo's git URL (ask the project owner if you don't have it). .bacio/config.yaml is machine-local and is not shared via git")
 			}
-			if cfg.Sync.Remote == "" {
-				return fmt.Errorf("%s/.bacio/config.yaml has no sync.remote set", info.Root)
+			if err := git.ValidateRemoteURL(remote); err != nil {
+				return fmt.Errorf("invalid --remote: %w", err)
 			}
 
 			s, err := openStore()
@@ -341,7 +344,7 @@ func newSyncCloneCmd() *cobra.Command {
 			eng := &sync.Engine{Store: s, Actor: actor(), DryRun: opts.dryRun}
 			res, err := eng.CloneSyncRepo(context.Background(), info.Root, sync.CloneOptions{
 				LocalPath:     localPath,
-				Remote:        cfg.Sync.Remote,
+				Remote:        remote,
 				AllowRenumber: allowRenumber,
 				DryRun:        opts.dryRun,
 			})
@@ -370,6 +373,7 @@ func newSyncCloneCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&allowRenumber, "allow-renumber", false, "permit local rows to be renumbered/renamed to resolve collisions")
+	cmd.Flags().StringVar(&remote, "remote", "", "git URL of the sync repo to join (required)")
 	return cmd
 }
 

@@ -256,6 +256,11 @@ bacio status                            Read-only probe — never registers.
                                      Inside an unregistered git tree, reports
                                      `registered: false`. Outside any git
                                      repo, shows global counts instead.
+                                     When inside a git repo, the JSON output
+                                     may include an `llm_recommendations`
+                                     array — plain-English setup fixes bacio
+                                     noticed (e.g. `.bacio/` not gitignored).
+                                     Read it and action each item.
 ```
 
 **Example:**
@@ -614,7 +619,7 @@ The registry is local-only in v1. Running under `--remote` / `BACIO_REMOTE` erro
 
 **Last-writer-wins.** Issues, features, and documents each carry an `updated_at`. On import, if the remote YAML's `updated_at` is **older** than the local DB row's, bacio preserves the local row (and its tags/PRs/relations/links) instead of silently downgrading it. The skipped record is counted in `ImportResult.skipped` and reported per-record in `ImportResult.skipped_stale` (JSON) plus a `sync.skip_stale_remote` audit entry. The export phase on the same run writes the newer local content back out so the round-trip closes. Comments don't carry `updated_at` and are still subject to remote-wins on body/author drift — keep that in mind if multiple machines edit the same comment between syncs.
 
-The sync repo is its own git repo, marked by an `bacio-sync.yaml` sentinel at its root. Project repos point at it via `.bacio/config.yaml` (checked in: `sync.remote: <git URL>`). The same sync repo can hold many projects — one folder per prefix under `repos/`.
+The sync repo is its own git repo, marked by an `bacio-sync.yaml` sentinel at its root. Each machine records the remote in a **machine-local** `.bacio/config.yaml` (`sync.remote: <git URL>`) — that file is gitignored, NOT shared via git, so the remote only ever enters bacio through a trusted `--remote` flag. The same sync repo can hold many projects — one folder per prefix under `repos/`.
 
 Alongside the sentinel, every export refreshes an `index.yaml` at the sync-repo root: a machine-readable table-of-contents listing every project repo present (`prefix`, `uuid`, `name`, `remote`, plus `issues`/`features`/`documents`/`comments` counts). The per-repo `repos/<PREFIX>/repo.yaml` files remain authoritative; `index.yaml` is regenerated from them and is byte-stable across no-op runs so it doesn't churn commits. It's safe to delete — the next export rewrites it.
 
@@ -649,13 +654,19 @@ bacio sync init <local-path> [--remote URL]   Connect the current project repo
                                            same run. Only steady-state bacio
                                            sync propagates deletes.
 
-bacio sync clone [<local-path>] [--allow-renumber] [--dry-run]
+bacio sync clone --remote <url> [<local-path>] [--allow-renumber] [--dry-run]
                                            Join an existing sync repo.
-                                           Reads .bacio/config.yaml for the
-                                           remote, clones it, and runs the
-                                           first import. If local DB has
-                                           rows for the project's prefix
-                                           that would collide, refuses
+                                           --remote is REQUIRED: the sync
+                                           URL is not read from any file
+                                           (.bacio/config.yaml is machine-
+                                           local), so pass it explicitly —
+                                           ask the project owner, or read
+                                           `origin` from the sync repo.
+                                           Clones the remote, runs the first
+                                           import, and writes this machine's
+                                           local .bacio/config.yaml. If local
+                                           DB has rows for the project's
+                                           prefix that would collide, refuses
                                            unless --allow-renumber is set;
                                            --dry-run prints the preview
                                            without touching DB or disk.

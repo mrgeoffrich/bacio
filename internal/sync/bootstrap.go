@@ -105,6 +105,13 @@ func (e *Engine) InitSyncRepo(ctx context.Context, projectRoot string, opts Init
 	if opts.LocalPath == "" {
 		return nil, fmt.Errorf("InitSyncRepo: LocalPath is required")
 	}
+	// --remote is optional on init (it can be auto-detected from an
+	// existing origin), but when supplied it must be a safe git URL.
+	if opts.Remote != "" {
+		if err := git.ValidateRemoteURL(opts.Remote); err != nil {
+			return nil, fmt.Errorf("invalid --remote: %w", err)
+		}
+	}
 
 	// Project root must be a real git repo, not a sync repo.
 	if IsSyncRepo(projectRoot) {
@@ -340,6 +347,9 @@ func (e *Engine) CloneSyncRepo(ctx context.Context, projectRoot string, opts Clo
 	if opts.Remote == "" {
 		return nil, fmt.Errorf("CloneSyncRepo: Remote is required")
 	}
+	if err := git.ValidateRemoteURL(opts.Remote); err != nil {
+		return nil, fmt.Errorf("invalid --remote: %w", err)
+	}
 
 	// Project root must be a real git repo, not a sync repo.
 	if IsSyncRepo(projectRoot) {
@@ -409,6 +419,16 @@ func (e *Engine) CloneSyncRepo(ctx context.Context, projectRoot string, opts Clo
 	// 4. Record the (remote → local path) mapping.
 	if err := e.Store.UpsertSyncRemote(opts.Remote, localPath); err != nil {
 		return nil, fmt.Errorf("record sync remote: %w", err)
+	}
+
+	// 5. Write the project's machine-local .bacio/config.yaml so
+	// steady-state `bacio sync` can find the remote. Unlike the old
+	// model this file is NOT shared via git — each machine writes its
+	// own from the trusted --remote flag (see ProjectConfig docs).
+	if err := WriteProjectConfig(projectRoot, ProjectConfig{
+		Sync: ProjectSync{Remote: opts.Remote},
+	}); err != nil {
+		return nil, err
 	}
 
 	return res, nil

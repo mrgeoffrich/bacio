@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -69,9 +71,48 @@ func newInitCmd() *cobra.Command {
 				TargetID: &repo.ID, TargetLabel: repo.Prefix,
 				Details: "explicit init (" + repo.Name + ")",
 			})
+
+			// Best-effort: keep the machine-local .bacio/ directory
+			// (sync config, agent identity) out of git. Never fails
+			// the command — mirrors the recordOp convention.
+			if added, err := ensureBacioGitignored(info.Root); err != nil {
+				fmt.Fprintln(os.Stderr, "bacio: warning: could not update .gitignore:", err)
+			} else if added {
+				fmt.Fprintln(os.Stderr, "bacio: added '.bacio/' to .gitignore (machine-local state, not shared via git)")
+			}
+
 			return emit(repo)
 		},
 	}
 	cmd.Flags().StringVar(&prefix, "prefix", "", "explicit 4-char prefix (e.g. AUTH)")
 	return cmd
+}
+
+// ensureBacioGitignored makes sure the project's .gitignore excludes
+// the .bacio/ directory. Returns true if it appended the rule, false
+// if it was already covered. The .bacio/ directory holds machine-local
+// state — the sync config and the per-machine agent identity — and is
+// never meant to be committed.
+func ensureBacioGitignored(root string) (bool, error) {
+	path := filepath.Join(root, ".gitignore")
+	content, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return false, err
+	}
+	for _, line := range strings.Split(string(content), "\n") {
+		switch strings.TrimSpace(line) {
+		case ".bacio/", ".bacio", "/.bacio/", "/.bacio":
+			return false, nil
+		}
+	}
+	var b strings.Builder
+	b.Write(content)
+	if len(content) > 0 && !strings.HasSuffix(string(content), "\n") {
+		b.WriteByte('\n')
+	}
+	b.WriteString(".bacio/\n")
+	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+		return false, err
+	}
+	return true, nil
 }
