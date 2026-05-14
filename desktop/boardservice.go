@@ -25,7 +25,7 @@ func stateLabel(s model.State) string {
 	return string(s)
 }
 
-// Board is a sidebar entry — one bacio repo.
+// Board is one bacio repo, offered in the top-nav repository selector.
 type Board struct {
 	Prefix     string `json:"prefix"`
 	Name       string `json:"name"`
@@ -141,14 +141,21 @@ func (b *BoardService) ListColumns() ([]BoardColumn, error) {
 	return cols, nil
 }
 
-// ListCards returns every issue in the given repo as a kanban card.
+// ListCards returns issues as kanban cards — for one repo, or across every
+// repo when repoPrefix is empty or "all".
 func (b *BoardService) ListCards(repoPrefix string) ([]BoardCard, error) {
 	ctx := context.Background()
-	repo, err := b.client.GetRepoByPrefix(ctx, repoPrefix)
-	if err != nil {
-		return nil, err
+	filter := client.IssueFilter{}
+	if repoPrefix == "" || repoPrefix == "all" {
+		filter.AllRepos = true
+	} else {
+		repo, err := b.client.GetRepoByPrefix(ctx, repoPrefix)
+		if err != nil {
+			return nil, err
+		}
+		filter.Repo = repo
 	}
-	issues, err := b.client.ListIssues(ctx, client.IssueFilter{Repo: repo})
+	issues, err := b.client.ListIssues(ctx, filter)
 	if err != nil {
 		return nil, err
 	}
@@ -159,12 +166,18 @@ func (b *BoardService) ListCards(repoPrefix string) ([]BoardCard, error) {
 	return cards, nil
 }
 
-// GetIssue returns the full issue-drawer payload for one issue.
+// GetIssue returns the full issue-drawer payload for one issue. repoPrefix
+// may be empty or "all" — canonical issue keys (PREFIX-N) resolve without a
+// repo context.
 func (b *BoardService) GetIssue(repoPrefix, key string) (IssueDetail, error) {
 	ctx := context.Background()
-	repo, err := b.client.GetRepoByPrefix(ctx, repoPrefix)
-	if err != nil {
-		return IssueDetail{}, err
+	var repo *model.Repo
+	if repoPrefix != "" && repoPrefix != "all" {
+		r, err := b.client.GetRepoByPrefix(ctx, repoPrefix)
+		if err != nil {
+			return IssueDetail{}, err
+		}
+		repo = r
 	}
 	view, err := b.client.ShowIssue(ctx, repo, key)
 	if err != nil {

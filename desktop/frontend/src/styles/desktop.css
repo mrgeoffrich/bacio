@@ -4,23 +4,26 @@
    macOS-window-specific lives here only.
    ============================================================ */
 
-/* The window uses MacTitleBarHiddenInset (see desktop/main.go), so
-   the webview renders *under* the inset traffic-light buttons at the
-   top-left. Indent the sidebar header so the bacio logo sits just to
-   the right of the buttons rather than behind them. Skipped when the
-   sidebar is collapsed (56px wide — narrower than the buttons). */
-.mk-sidebar:not(.is-collapsed) .mk-sb-head { padding-left: 76px; }
-
-/* Window drag regions. `--wails-draggable` is a Wails CSS property:
-   an element whose computed value is `drag` becomes a window-move
-   handle. It's a custom property so it inherits — interactive
-   children must opt back out with `no-drag` to stay clickable. */
-.mk-topbar,
-.mk-sb-head { --wails-draggable: drag; }
+/* The window uses MacTitleBarHiddenInset (see desktop/main.go), so the
+   webview renders *under* the inset traffic-light buttons at the top-left.
+   The top nav now spans the full width, so pad its left edge to clear the
+   buttons. `--wails-draggable: drag` also makes the nav a window-move
+   handle — it's a custom property so it inherits, hence interactive
+   children opt back out with `no-drag` to stay clickable. */
+.mk-topbar {
+  padding-left: 84px;
+  --wails-draggable: drag;
+}
 
 .mk-topbar button,
 .mk-topbar input,
-.mk-sb-head button { --wails-draggable: no-drag; }
+.mk-topbar select { --wails-draggable: no-drag; }
+
+/* Nudge the repo selector and search box down a touch so they sit
+   vertically centred with the macOS traffic-light buttons, which the
+   window chrome places slightly below the top nav's own centre line. */
+.mk-repo-select,
+.mk-search { transform: translateY(1px); }
 
 /* Status pill colours for bacio's six real issue states. The imported
    app.css only covers the kit's placeholder column ids; these map each

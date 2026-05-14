@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import Sidebar from './components/Sidebar.jsx';
 import Topbar from './components/Topbar.jsx';
 import Board from './components/Board.jsx';
 import IssueDrawer from './components/IssueDrawer.jsx';
@@ -7,33 +6,28 @@ import CommandPalette from './components/CommandPalette.jsx';
 import * as api from './api';
 
 export default function App() {
-  const [collapsed, setCollapsed] = useState(false);
   const [boards, setBoards] = useState([]);
   const [columns, setColumns] = useState([]);
-  const [activeBoard, setActiveBoard] = useState(null); // repo prefix
+  const [activeBoard, setActiveBoard] = useState('all'); // repo prefix, or 'all'
   const [cards, setCards] = useState([]);
   const [openIssue, setOpenIssue] = useState(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const claudeRunning = cards.filter(c => c.claude && c.column !== 'done').length;
-
-  // Load boards + columns once on mount.
+  // Load the repository list + columns once on mount.
   useEffect(() => {
     Promise.all([api.listBoards(), api.listColumns()])
       .then(([bs, cols]) => {
         setBoards(bs);
         setColumns(cols);
-        if (bs.length > 0) setActiveBoard(bs[0].prefix);
         setLoading(false);
       })
       .catch(err => { setError(err.message); setLoading(false); });
   }, []);
 
-  // Load cards whenever the active board changes.
+  // Load cards whenever the selected repository changes ('all' = every repo).
   useEffect(() => {
-    if (!activeBoard) return;
     api.listCards(activeBoard)
       .then(setCards)
       .catch(err => setError(err.message));
@@ -81,38 +75,26 @@ export default function App() {
     setOpenIssue(null);
   };
 
-  const board = boards.find(b => b.prefix === activeBoard);
-
   return (
     <div className="mk-app">
-      <Sidebar
-        collapsed={collapsed}
-        onToggle={() => setCollapsed(c => !c)}
+      <Topbar
         boards={boards}
         activeBoard={activeBoard}
         onPickBoard={setActiveBoard}
-        agentRuns={claudeRunning}
+        onOpenPalette={() => setPaletteOpen(true)}
       />
-      <main className="mk-main">
-        <Topbar
-          boardName={board?.name || ''}
-          onOpenPalette={() => setPaletteOpen(true)}
-          onNewIssue={() => alert('+ New issue (coming soon)')}
-          agentRuns={claudeRunning}
+      {loading ? (
+        <div className="mk-app-state">Loading…</div>
+      ) : error ? (
+        <div className="mk-app-state mk-app-error">Error: {error}</div>
+      ) : (
+        <Board
+          columns={columns}
+          cards={cards}
+          onMoveCard={moveCard}
+          onOpenCard={openCard}
         />
-        {loading ? (
-          <div className="mk-app-state">Loading…</div>
-        ) : error ? (
-          <div className="mk-app-state mk-app-error">Error: {error}</div>
-        ) : (
-          <Board
-            columns={columns}
-            cards={cards}
-            onMoveCard={moveCard}
-            onOpenCard={openCard}
-          />
-        )}
-      </main>
+      )}
       <IssueDrawer
         issue={openIssue}
         onClose={() => setOpenIssue(null)}

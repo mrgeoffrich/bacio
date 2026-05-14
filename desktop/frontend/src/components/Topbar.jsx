@@ -1,14 +1,23 @@
 import React from 'react';
 import Icon from './Icon.jsx';
 
-export default function Topbar({ boardName, onOpenPalette, onNewIssue, agentRuns }) {
+export default function Topbar({ boards, activeBoard, onPickBoard, onOpenPalette }) {
   return (
     <header className="mk-topbar">
-      <nav className="mk-crumbs">
-        <span className="mk-crumb-root">orchestrator-os</span>
-        <span className="mk-crumb-sep">/</span>
-        <span className="mk-crumb-cur">{boardName}</span>
-      </nav>
+      <div className="mk-brand">
+        <img src="/bacio-mark.png" width="22" height="22" alt="" />
+        <span className="mk-brand-name">bacio</span>
+      </div>
+
+      <div className="mk-repo-select">
+        <Icon name="board" />
+        <select value={activeBoard} onChange={(e) => onPickBoard(e.target.value)}>
+          <option value="all">All repositories</option>
+          {boards.map(b => (
+            <option key={b.prefix} value={b.prefix}>{b.name}</option>
+          ))}
+        </select>
+      </div>
 
       <button className="mk-search" onClick={onOpenPalette}>
         <Icon name="search" />
@@ -17,15 +26,8 @@ export default function Topbar({ boardName, onOpenPalette, onNewIssue, agentRuns
       </button>
 
       <div className="mk-topbar-right">
-        <span className="mk-agent-pill">
-          <span className="mk-pulse-dot" />
-          claude · {agentRuns} running
-        </span>
-        <button className="mk-icbtn" aria-label="Filter"><Icon name="filter" /></button>
         <button className="mk-icbtn" aria-label="Notifications"><Icon name="bell" /></button>
-        <button className="mk-btn-primary" onClick={onNewIssue}>
-          <Icon name="plus" /> New issue
-        </button>
+        <button className="mk-icbtn" aria-label="Settings"><Icon name="settings" /></button>
       </div>
     </header>
   );

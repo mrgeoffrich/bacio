@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import Icon from './Icon.jsx';
 import KanbanCard from './KanbanCard.jsx';
 
 const EMPTY_COPY = {
@@ -35,7 +34,6 @@ export default function Board({ columns, cards, onMoveCard, onOpenCard }) {
             <header className="mk-col-head">
               <span className={`mk-col-pill mk-status-${col.state}`}>{col.label}</span>
               <span className="mk-col-count">{colCards.length}</span>
-              <button className="mk-icbtn mk-col-add" aria-label="Add card"><Icon name="plus" /></button>
             </header>
             <div className="mk-col-body">
               {colCards.map(card => (
