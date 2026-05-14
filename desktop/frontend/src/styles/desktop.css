@@ -1,0 +1,23 @@
+/* ============================================================
+   Wails desktop integration — overrides layered on top of the
+   imported bacio-ui-kit. Keeps the kit CSS pristine; everything
+   macOS-window-specific lives here only.
+   ============================================================ */
+
+/* The window uses MacTitleBarHiddenInset (see desktop/main.go), so
+   the webview renders *under* the inset traffic-light buttons at the
+   top-left. Indent the sidebar header so the bacio logo sits just to
+   the right of the buttons rather than behind them. Skipped when the
+   sidebar is collapsed (56px wide — narrower than the buttons). */
+.mk-sidebar:not(.is-collapsed) .mk-sb-head { padding-left: 76px; }
+
+/* Window drag regions. `--wails-draggable` is a Wails CSS property:
+   an element whose computed value is `drag` becomes a window-move
+   handle. It's a custom property so it inherits — interactive
+   children must opt back out with `no-drag` to stay clickable. */
+.mk-topbar,
+.mk-sb-head { --wails-draggable: drag; }
+
+.mk-topbar button,
+.mk-topbar input,
+.mk-sb-head button { --wails-draggable: no-drag; }
