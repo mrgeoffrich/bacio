@@ -6,7 +6,31 @@
 // bacio/docs/site/ can update the sidebar in the same commit — the
 // website side just re-syncs and picks up both.
 
-export const sidebar = [
+// Lifecycle markers shown as pills in the sidebar. Keyed by link path
+// (the same string used in the `link:` field below). Two values today:
+// `beta` and `preview` (= unreleased). The same page must also declare
+// `status: beta|preview` in its frontmatter for the in-page banner —
+// this map only governs the sidebar pill. Styling lives in
+// bacio-website/docs/.vitepress/theme/style.css.
+const statusBadges = {
+  '/reference/cli/sync': 'beta',
+  '/reference/cli/agent': 'beta',
+};
+
+// VitePress renders sidebar `text` via `v-html`, so we bake the badge
+// markup straight in. Keeping the wrap here means the raw sidebar list
+// below stays readable.
+function withBadge(item) {
+  const next = { ...item };
+  if (next.items) next.items = next.items.map(withBadge);
+  const status = next.link && statusBadges[next.link];
+  if (status) {
+    next.text = `${next.text}<span class="bacio-sidebar-badge bacio-sidebar-badge--${status}" aria-label="${status}">${status}</span>`;
+  }
+  return next;
+}
+
+const rawSidebar = [
   {
     text: 'Getting started',
     items: [
@@ -44,6 +68,7 @@ export const sidebar = [
       { text: 'bacio doc', link: '/reference/cli/doc' },
       { text: 'bacio status', link: '/reference/cli/status' },
       { text: 'bacio history', link: '/reference/cli/history' },
+      { text: 'bacio agent', link: '/reference/cli/agent' },
       { text: 'bacio schema', link: '/reference/cli/schema' },
       { text: 'bacio sync', link: '/reference/cli/sync' },
       { text: 'bacio api', link: '/reference/cli/api' },
@@ -88,3 +113,5 @@ export const sidebar = [
     ],
   },
 ];
+
+export const sidebar = rawSidebar.map(withBadge);

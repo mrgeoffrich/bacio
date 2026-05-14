@@ -1,6 +1,7 @@
 ---
 title: bacio sync
 description: Mirror the SQLite DB to a git-backed YAML + markdown repo for cross-machine sharing and editor browsing.
+status: beta
 ---
 
 # `bacio sync`

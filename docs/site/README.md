@@ -25,6 +25,41 @@ When adding a new page:
 3. Cross-link it from related pages — at minimum, add it to the "See
    also" footer of whatever page is closest in topic.
 
+## Marking lifecycle status
+
+Pages and individual surfaces can be tagged `beta` (shipped but rough)
+or `preview` (unreleased / behind a flag). There are three coordinated
+surfaces, all opt-in:
+
+1. **Whole-page banner** — add `status: beta` (or `preview`) to the
+   page frontmatter. The website theme renders a coloured banner at
+   the top of the doc, linking back to the roadmap. Use this when an
+   entire command group / guide is not yet stable. Live today:
+   `reference/cli/sync.md`, `reference/cli/agent.md`.
+
+2. **Inline badge** — for a single subcommand row, flag, or section
+   inside an otherwise-stable page, use VitePress' built-in `Badge`
+   component:
+
+   ```md
+   | `bacio issue next --feature <slug>` <Badge type="warning" text="beta" /> | Atomically claim the next ready issue. |
+   ```
+
+   `type="warning"` is the beta colour; `type="important"` is preview.
+   No frontmatter change needed.
+
+3. **Sidebar pill** — add an entry to the `statusBadges` map at the
+   top of `sidebar.js`, keyed by the same `link:` string the sidebar
+   entry uses. The pill is baked into the sidebar text at config time
+   (VitePress renders that field as HTML). Use whenever you also set
+   frontmatter `status` — the surfaces are independent toggles but in
+   practice they ship together.
+
+When a feature graduates to stable, drop the frontmatter line, remove
+the `statusBadges` entry, and delete any inline `<Badge>` calls in the
+page. There's no "stable" sticker — absence of a marker is the
+default.
+
 ## Relationship to the other docs/
 
 `bacio/docs/` also contains `getting-started.md`,
