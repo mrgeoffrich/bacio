@@ -74,10 +74,13 @@ If bacio errors with `agent name "<slug>" already taken`, reroll the adjective/a
 **When you start focused work on an issue — claim it:**
 
 ```bash
-bacio agent claim MINI-42 --user <your-name>
+bacio agent claim MINI-42 --user <your-name> \
+  --prompt "Implement the tab-strip fix end-to-end, then open a PR."
 ```
 
 This records *intent*. It does NOT move the issue or set the assignee — use `bacio issue state` / `bacio issue assign` for that. Multiple agents may claim the same issue (pairing/review is a real flow).
+
+Pass `--prompt` (or `"prompt"` in `--json`) with the instruction/dispatch text you're working from — it's stored on the claim so the issue carries a record of *who* worked it and *why*. Re-claiming with a fresher `--prompt` updates it in place. A claim makes the issue **`taken`** (a derived signal — true while the issue has any open claim); busy agents are excluded as dispatch targets in the TUI and desktop app until they release.
 
 **When you stop — release the claim and end the session:**
 
@@ -301,7 +304,9 @@ bacio issue list                        List issues in the current repo
   --all-repos                           Search every tracked repo
 
 bacio issue show <KEY>                  Show issue + tags + comments + relations
-                                     + PRs + linked documents
+                                     + PRs + linked documents + claimants
+                                     (the agent-claim history + derived
+                                     `taken` flag)
 bacio issue brief <KEY>                 Bulk JSON for skills / LLMs: the issue,
                                      parent feature, deduped linked docs
                                      (with full content inlined), comments,
@@ -354,7 +359,9 @@ bacio issue show MINI-42
 bacio issue brief MINI-42 | tee /tmp/ctx.json
 ```
 
-`bacio issue brief` returns a single object: `{issue, feature?, relations, pull_requests, documents, comments, warnings}`. Each entry in `documents` carries `filename`, `type`, `description` (the link's `--why`), `linked_via` (one or both of `"issue"` and `"feature/<slug>"`), `source_path`, and `content`. Docs reachable from both the issue and its parent feature are deduped to a single entry whose `linked_via` lists both paths. If the issue and feature link rows have differing `--why` descriptions, the issue's wins and a string is appended to `warnings`.
+`bacio issue brief` returns a single object: `{issue, feature?, relations, pull_requests, documents, comments, claimants, taken, warnings}`. Each entry in `documents` carries `filename`, `type`, `description` (the link's `--why`), `linked_via` (one or both of `"issue"` and `"feature/<slug>"`), `source_path`, and `content`. Docs reachable from both the issue and its parent feature are deduped to a single entry whose `linked_via` lists both paths. If the issue and feature link rows have differing `--why` descriptions, the issue's wins and a string is appended to `warnings`.
+
+`claimants` is the per-issue agent-claim history (open + released, newest first) — each entry carries `session_id`, `agent_name`, `prompt`, `claimed_at`, and `released_at` (absent while open). `taken` is the derived "an agent is actively holding this" flag — `true` iff any claimant is still open. `bacio issue show` carries the same `claimants` / `taken` fields, and so does the `bacio api` `/issues/{key}` and `/issues/{key}/brief` JSON.
 
 **Driving an agent through a feature in dependency order.** Inspect the topo order with `bacio feature plan <slug>`, then loop on `bacio issue next --feature <slug> --user <agent> -o json`, treating `{"issue": null}` as "retry later". Multiple agents can call `next` in parallel — SQLite serialises the claim. Crashed agents leave a stale `in_progress`/assigned issue; clear with `bacio issue state <KEY> todo` + `bacio issue unassign <KEY>`.
 
@@ -561,6 +568,10 @@ bacio agent end --reason <r>            Reason: stop|clear|logout|crash|other
 bacio agent claim <ISSUE-KEY>           Record intent — does NOT move the issue
                                      or set assignee. Multiple agents may
                                      claim the same issue (pairing/review).
+  --prompt <text>                       Instruction/dispatch text this session
+                                     is working from — stored on the claim;
+                                     a re-claim with a fresher --prompt updates
+                                     it in place.
 bacio agent release <ISSUE-KEY>         Release this session's claim on an issue
 bacio agent dispatch [ISSUE-KEY]        Queue a work item for an agent / session
   --to <agent-slug>                     Target a persistent identity

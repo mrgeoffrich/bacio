@@ -103,13 +103,35 @@ func (d deps) handleIssueShow(w http.ResponseWriter, r *http.Request) {
 	if docs == nil {
 		docs = []*model.DocumentLink{}
 	}
+	claimants, err := d.store.ListClaimsForIssue(iss.ID)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if claimants == nil {
+		claimants = []*model.AgentClaim{}
+	}
 	writeJSON(w, http.StatusOK, &IssueView{
 		Issue:        iss,
 		Comments:     comments,
 		Relations:    rels,
 		PullRequests: prs,
 		Documents:    docs,
+		Claimants:    claimants,
+		Taken:        anyOpenClaim(claimants),
 	})
+}
+
+// anyOpenClaim reports whether a claim list has at least one open
+// (unreleased) claim — the derived "taken" signal.
+func anyOpenClaim(claims []*model.AgentClaim) bool {
+	for _, c := range claims {
+		if c.ReleasedAt == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func (d deps) handleIssueCreate(w http.ResponseWriter, r *http.Request) {

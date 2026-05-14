@@ -285,6 +285,9 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
 .mk-status-active { background: var(--status-claude-bg); color: var(--status-claude); }
 .mk-status-idle   { background: var(--status-doing-bg);  color: var(--status-doing); }
 .mk-status-ended  { background: var(--bg-4);             color: var(--fg-4); }
+/* busy = the session is holding an open claim; orthogonal to the
+   active/idle/ended liveness pill, so it renders as a second chip. */
+.mk-status-busy   { background: var(--status-todo-bg);   color: var(--status-todo); }
 
 .mk-agent-card {
   border: 1px solid var(--border-1); border-radius: var(--radius-md);
@@ -312,6 +315,28 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
 }
 .mk-agent-detail-label:first-child { margin-top: 0; }
 .mk-agent-dispatch { display: flex; align-items: center; gap: 8px; }
+.mk-agent-claim { display: flex; align-items: baseline; gap: 8px; }
+.mk-agent-claim-prompt {
+  font-size: 12px; color: var(--fg-3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* Claimed-by block in the issue drawer — the per-issue claim history. */
+.mk-claimant-list {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.mk-claimant { display: flex; flex-direction: column; gap: 2px; }
+.mk-claimant.is-released { opacity: 0.6; }
+.mk-claimant-who {
+  display: flex; align-items: baseline; gap: 8px;
+  font-size: 13px; font-weight: 600; color: var(--fg-1);
+}
+.mk-claimant-state {
+  font-size: 11px; font-weight: 400; text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--fg-3);
+}
+.mk-claimant-prompt { font-size: 12px; color: var(--fg-3); }
 
 /* ============================================================
    Send-to-agent — the issue-drawer block for dispatching a todo

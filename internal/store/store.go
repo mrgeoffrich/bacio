@@ -259,6 +259,18 @@ func migrate(db *sql.DB) error {
 			return fmt.Errorf("add channel_seen_at to agent_sessions: %w", err)
 		}
 	}
+	// agent_claims.prompt records the instruction the agent claimed the
+	// issue from. schema.sql creates it on fresh DBs (CREATE TABLE IF NOT
+	// EXISTS, applied before migrate()); this ALTER backfills older ones.
+	hasClaimPrompt, err := columnExists(db, "agent_claims", "prompt")
+	if err != nil {
+		return err
+	}
+	if !hasClaimPrompt {
+		if _, err := db.Exec(`ALTER TABLE agent_claims ADD COLUMN prompt TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add prompt to agent_claims: %w", err)
+		}
+	}
 	return nil
 }
 

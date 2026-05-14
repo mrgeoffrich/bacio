@@ -43,26 +43,18 @@ func newAgentsView(s *store.Store, repo *model.Repo) *agentsView {
 }
 
 func (a *agentsView) reload() {
-	a.claims = map[int64][]*model.AgentClaim{}
 	a.pending = map[int64]int{}
 	sessions, err := a.store.ListAgentSessions(store.AgentSessionFilter{RepoID: &a.repo.ID})
 	if err != nil {
 		a.err = err
 		return
 	}
-	for _, s := range sessions {
-		cl, err := a.store.ListAgentClaims(s.ID)
-		if err != nil {
-			a.err = err
-			return
-		}
-		var open []*model.AgentClaim
-		for _, c := range cl {
-			if c.ReleasedAt == nil {
-				open = append(open, c)
-			}
-		}
-		a.claims[s.ID] = open
+	// Open claims for every alive session in the repo, in one query —
+	// ended sessions hold no open claims, so they're correctly absent.
+	a.claims, err = a.store.OpenClaimsBySession(a.repo.ID)
+	if err != nil {
+		a.err = err
+		return
 	}
 	dispatches, err := a.store.ListDispatches(store.DispatchFilter{RepoID: &a.repo.ID})
 	if err != nil {
@@ -241,16 +233,23 @@ func (a *agentsView) renderCard(s *model.AgentSession, selected bool, width int,
 
 	statusLabel, pill := agentStatusPill(s, now)
 	pillStr := pill.Render(statusLabel)
-	nameW := innerW - lipgloss.Width(pillStr) - 1
+	// A session holding an open claim is busy — show a "busy · BACI-12"
+	// badge alongside the liveness pill. Busy is orthogonal to liveness.
+	var busyStr string
+	if isBusy, issueKey := model.SessionBusy(a.claims[s.ID]); isBusy {
+		busyStr = agentBusyBadge.Render("busy · "+issueKey) + " "
+	}
+	rightW := lipgloss.Width(busyStr) + lipgloss.Width(pillStr)
+	nameW := innerW - rightW - 1
 	if nameW < 4 {
 		nameW = 4
 	}
 	name := boldStyle.Render(truncate(agentLabel(s), nameW))
-	gap := innerW - lipgloss.Width(name) - lipgloss.Width(pillStr)
+	gap := innerW - lipgloss.Width(name) - rightW
 	if gap < 1 {
 		gap = 1
 	}
-	row1 := name + strings.Repeat(" ", gap) + pillStr
+	row1 := name + strings.Repeat(" ", gap) + busyStr + pillStr
 
 	row2 := mutedStyle.Render(truncate(
 		fmt.Sprintf("model %s · branch %s", dashIfEmpty(s.Model), dashIfEmpty(s.Branch)), innerW))
@@ -284,7 +283,11 @@ func (a *agentsView) viewDetail(width, height int) string {
 
 	statusLabel, pill := agentStatusPill(s, now)
 	var lines []string
-	lines = append(lines, boldStyle.Render(truncate(agentLabel(s), innerW))+" "+pill.Render(statusLabel))
+	header := boldStyle.Render(truncate(agentLabel(s), innerW)) + " " + pill.Render(statusLabel)
+	if isBusy, issueKey := model.SessionBusy(a.claims[s.ID]); isBusy {
+		header += " " + agentBusyBadge.Render("busy · "+issueKey)
+	}
+	lines = append(lines, header)
 	lines = append(lines, mutedStyle.Render(truncate("session "+s.SessionID, innerW)))
 	lines = append(lines, mutedStyle.Render(truncate(fmt.Sprintf(
 		"model %s · branch %s · actor %s", dashIfEmpty(s.Model), dashIfEmpty(s.Branch), s.Actor), innerW)))
@@ -298,7 +301,11 @@ func (a *agentsView) viewDetail(width, height int) string {
 		lines = append(lines, mutedStyle.Render("  (none)"))
 	}
 	for _, c := range claims {
-		lines = append(lines, truncate("  "+c.IssueKey, innerW))
+		line := "  " + c.IssueKey
+		if c.Prompt != "" {
+			line += " — " + oneLine(c.Prompt)
+		}
+		lines = append(lines, truncate(line, innerW))
 	}
 
 	var ds []*model.AgentDispatch
@@ -334,6 +341,11 @@ func (a *agentsView) viewDetail(width, height int) string {
 		Width(width-2).Height(height-2).Padding(1, 2).
 		Render(body)
 }
+
+// agentBusyBadge styles the "busy · ISSUE-KEY" badge shown on agent
+// cards when a session is holding an open claim.
+var agentBusyBadge = lipgloss.NewStyle().
+	Background(lipgloss.Color("33")).Foreground(lipgloss.Color("231")).Padding(0, 1)
 
 // agentStatusPill maps a session's liveness to a label + pill style.
 func agentStatusPill(s *model.AgentSession, now time.Time) (string, lipgloss.Style) {

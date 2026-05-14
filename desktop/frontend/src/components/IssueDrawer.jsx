@@ -12,7 +12,10 @@ function prLabel(url) {
 export default function IssueDrawer({ issue, agents, onClose, onSendToAgent, onShip, onEdit }) {
   // Only agents with a persistent identity slug can be targeted from the
   // desktop (DispatchIssue routes by slug); ended sessions are dropped.
+  // Busy agents stay in the list but render disabled with a reason, so
+  // the user sees *why* they can't be picked rather than them vanishing.
   const dispatchable = (agents || []).filter(a => a.status !== 'ended' && a.agentName);
+  const available = dispatchable.filter(a => !a.busy);
   const [selectedAgent, setSelectedAgent] = useState('');
   const [note, setNote] = useState('');
 
@@ -25,9 +28,10 @@ export default function IssueDrawer({ issue, agents, onClose, onSendToAgent, onS
   if (!issue) return null;
 
   const isTodo = issue.column === 'todo';
-  // Fall back to the first dispatchable agent so the form is usable even
-  // before the user touches the select (agents may load after open).
-  const effectiveAgent = selectedAgent || dispatchable[0]?.agentName || '';
+  // Fall back to the first *available* (non-busy) agent so the form is
+  // usable even before the user touches the select (agents may load
+  // after open). A busy agent is never auto-selected.
+  const effectiveAgent = selectedAgent || available[0]?.agentName || '';
 
   const send = (mode) => {
     if (!effectiveAgent) return;
@@ -105,6 +109,10 @@ export default function IssueDrawer({ issue, agents, onClose, onSendToAgent, onS
               <div className="mk-drawer-label">Send to agent</div>
               {dispatchable.length === 0 ? (
                 <p className="mk-drawer-text mk-meta-empty">No agents online for this repo.</p>
+              ) : available.length === 0 ? (
+                <p className="mk-drawer-text mk-meta-empty">
+                  No available agents — all online agents are busy.
+                </p>
               ) : (
                 <div className="mk-send-agent">
                   <select
@@ -113,8 +121,10 @@ export default function IssueDrawer({ issue, agents, onClose, onSendToAgent, onS
                     onChange={(e) => setSelectedAgent(e.target.value)}
                   >
                     {dispatchable.map(a => (
-                      <option key={a.sessionId} value={a.agentName}>
-                        {a.agentName} · {a.status}
+                      <option key={a.sessionId} value={a.agentName} disabled={a.busy}>
+                        {a.busy
+                          ? `${a.agentName} · busy (${a.busyIssue})`
+                          : `${a.agentName} · ${a.status}`}
                       </option>
                     ))}
                   </select>
@@ -133,6 +143,25 @@ export default function IssueDrawer({ issue, agents, onClose, onSendToAgent, onS
                   </div>
                 </div>
               )}
+            </section>
+          )}
+
+          {(issue.claimants || []).length > 0 && (
+            <section className="mk-drawer-section">
+              <div className="mk-drawer-label">
+                Claimed by {issue.taken && <span className="mk-pill mk-status-busy">taken</span>}
+              </div>
+              <ul className="mk-claimant-list">
+                {issue.claimants.map((c, i) => (
+                  <li key={i} className={`mk-claimant ${c.open ? '' : 'is-released'}`}>
+                    <span className="mk-claimant-who">
+                      {c.agentName || c.sessionId.slice(0, 12)}
+                      <span className="mk-claimant-state">{c.open ? 'open' : 'released'}</span>
+                    </span>
+                    {c.prompt && <span className="mk-claimant-prompt">{c.prompt}</span>}
+                  </li>
+                ))}
+              </ul>
             </section>
           )}
 

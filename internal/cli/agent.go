@@ -294,14 +294,14 @@ func runAgentEnd(in inputs.AgentEndInput) error {
 
 func agentClaimCmd() *cobra.Command {
 	var (
-		sessionID, rawInput string
+		sessionID, prompt, rawInput string
 	)
 	cmd := &cobra.Command{
 		Use:   "claim [issue-key]",
 		Short: "Record that this session is focused on an issue (intent, not state)",
 		Args:  cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, err := parseJSONInput(cmd, args, rawInput, "session")
+			raw, err := parseJSONInput(cmd, args, rawInput, "session", "prompt")
 			if err != nil {
 				return err
 			}
@@ -319,10 +319,11 @@ func agentClaimCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return runAgentClaim(inputs.AgentClaimInput{SessionID: sid, IssueKey: args[0]})
+			return runAgentClaim(inputs.AgentClaimInput{SessionID: sid, IssueKey: args[0], Prompt: prompt})
 		},
 	}
 	cmd.Flags().StringVar(&sessionID, "session", "", "session id (default: $CLAUDE_CODE_SESSION_ID)")
+	cmd.Flags().StringVar(&prompt, "prompt", "", "instruction/dispatch text this session is working from")
 	addInputFlag(cmd, &rawInput)
 	return cmd
 }

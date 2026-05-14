@@ -30,6 +30,15 @@ export class AgentCard {
      * active | idle | ended
      */
     "status": string;
+
+    /**
+     * Busy is true while the session holds an open claim — orthogonal to
+     * Status (a session can be active+busy or idle+busy). BusyIssue is
+     * the issue key it's working, for a "busy (BACI-12)" label. A busy
+     * session is not a valid dispatch target.
+     */
+    "busy": boolean;
+    "busyIssue": string;
     "lastSeenAt": time$0.Time;
     "claims": ClaimDTO[];
     "dispatches": DispatchDTO[];
@@ -57,6 +66,12 @@ export class AgentCard {
         if (!("status" in $$source)) {
             this["status"] = "";
         }
+        if (!("busy" in $$source)) {
+            this["busy"] = false;
+        }
+        if (!("busyIssue" in $$source)) {
+            this["busyIssue"] = "";
+        }
         if (!("lastSeenAt" in $$source)) {
             this["lastSeenAt"] = null;
         }
@@ -74,14 +89,14 @@ export class AgentCard {
      * Creates a new AgentCard instance from a string or object.
      */
     static createFrom($$source: any = {}): AgentCard {
-        const $$createField8_0 = $$createType1;
-        const $$createField9_0 = $$createType3;
+        const $$createField10_0 = $$createType1;
+        const $$createField11_0 = $$createType3;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("claims" in $$parsedSource) {
-            $$parsedSource["claims"] = $$createField8_0($$parsedSource["claims"]);
+            $$parsedSource["claims"] = $$createField10_0($$parsedSource["claims"]);
         }
         if ("dispatches" in $$parsedSource) {
-            $$parsedSource["dispatches"] = $$createField9_0($$parsedSource["dispatches"]);
+            $$parsedSource["dispatches"] = $$createField11_0($$parsedSource["dispatches"]);
         }
         return new AgentCard($$parsedSource as Partial<AgentCard>);
     }
@@ -212,12 +227,16 @@ export class BoardColumn {
  */
 export class ClaimDTO {
     "issueKey": string;
+    "prompt": string;
     "claimedAt": time$0.Time;
 
     /** Creates a new ClaimDTO instance. */
     constructor($$source: Partial<ClaimDTO> = {}) {
         if (!("issueKey" in $$source)) {
             this["issueKey"] = "";
+        }
+        if (!("prompt" in $$source)) {
+            this["prompt"] = "";
         }
         if (!("claimedAt" in $$source)) {
             this["claimedAt"] = null;
@@ -232,6 +251,52 @@ export class ClaimDTO {
     static createFrom($$source: any = {}): ClaimDTO {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new ClaimDTO($$parsedSource as Partial<ClaimDTO>);
+    }
+}
+
+/**
+ * ClaimantDTO is one entry in an issue's claim history — a session that
+ * has claimed the issue, with the prompt it ran and whether the claim
+ * is still open.
+ */
+export class ClaimantDTO {
+    "sessionId": string;
+    "agentName": string;
+    "prompt": string;
+    "claimedAt": time$0.Time;
+    "releasedAt": time$0.Time | null;
+    "open": boolean;
+
+    /** Creates a new ClaimantDTO instance. */
+    constructor($$source: Partial<ClaimantDTO> = {}) {
+        if (!("sessionId" in $$source)) {
+            this["sessionId"] = "";
+        }
+        if (!("agentName" in $$source)) {
+            this["agentName"] = "";
+        }
+        if (!("prompt" in $$source)) {
+            this["prompt"] = "";
+        }
+        if (!("claimedAt" in $$source)) {
+            this["claimedAt"] = null;
+        }
+        if (!("releasedAt" in $$source)) {
+            this["releasedAt"] = null;
+        }
+        if (!("open" in $$source)) {
+            this["open"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ClaimantDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ClaimantDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ClaimantDTO($$parsedSource as Partial<ClaimantDTO>);
     }
 }
 
@@ -651,6 +716,13 @@ export class IssueDetail {
     "comments": CommentDTO[];
     "pullRequests": PRDTO[];
     "documents": DocLinkDTO[];
+    "claimants": ClaimantDTO[];
+
+    /**
+     * Taken is the derived "an agent is actively holding this" signal —
+     * true iff Claimants has an open (unreleased) claim.
+     */
+    "taken": boolean;
 
     /** Creates a new IssueDetail instance. */
     constructor($$source: Partial<IssueDetail> = {}) {
@@ -687,6 +759,12 @@ export class IssueDetail {
         if (!("documents" in $$source)) {
             this["documents"] = [];
         }
+        if (!("claimants" in $$source)) {
+            this["claimants"] = [];
+        }
+        if (!("taken" in $$source)) {
+            this["taken"] = false;
+        }
 
         Object.assign(this, $$source);
     }
@@ -700,6 +778,7 @@ export class IssueDetail {
         const $$createField8_0 = $$createType10;
         const $$createField9_0 = $$createType12;
         const $$createField10_0 = $$createType14;
+        const $$createField11_0 = $$createType16;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField5_0($$parsedSource["tags"]);
@@ -715,6 +794,9 @@ export class IssueDetail {
         }
         if ("documents" in $$parsedSource) {
             $$parsedSource["documents"] = $$createField10_0($$parsedSource["documents"]);
+        }
+        if ("claimants" in $$parsedSource) {
+            $$parsedSource["claimants"] = $$createField11_0($$parsedSource["claimants"]);
         }
         return new IssueDetail($$parsedSource as Partial<IssueDetail>);
     }
@@ -803,3 +885,5 @@ const $$createType11 = PRDTO.createFrom;
 const $$createType12 = $Create.Array($$createType11);
 const $$createType13 = DocLinkDTO.createFrom;
 const $$createType14 = $Create.Array($$createType13);
+const $$createType15 = ClaimantDTO.createFrom;
+const $$createType16 = $Create.Array($$createType15);

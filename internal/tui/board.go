@@ -57,6 +57,7 @@ type boardView struct {
 	commentsErr error
 	docLinks    []*model.DocumentLink
 	prs         []*model.PullRequest
+	claimants   []*model.AgentClaim // per-issue claim history (open + released)
 	attachErr   error
 
 	overlay       bool
@@ -93,6 +94,10 @@ type boardView struct {
 	dispatchStep     int // 0 agent · 1 mode · 2 note
 	dispatchRow      int // cursor within the current step's list
 	dispatchSessions []*model.AgentSession
+	// dispatchBusy is parallel to dispatchSessions: "" means the session
+	// is a valid target, a non-empty string is the issue key it's busy
+	// working — busy sessions are non-selectable in the picker.
+	dispatchBusy     []string
 	dispatchAgentRow int // remembered agent choice across steps
 	dispatchMode     model.DispatchMode
 	dispatchNote     string
@@ -275,6 +280,7 @@ func (b *boardView) refreshSelection() {
 		b.commentsErr = nil
 		b.docLinks = nil
 		b.prs = nil
+		b.claimants = nil
 		b.attachErr = nil
 		return
 	}
@@ -300,11 +306,15 @@ func (b *boardView) refreshSelection() {
 	b.docLinks = docs
 	prs, perr := b.store.ListPRs(iss.ID)
 	b.prs = prs
+	claimants, cerr := b.store.ListClaimsForIssue(iss.ID)
+	b.claimants = claimants
 	switch {
 	case derr != nil:
 		b.attachErr = derr
 	case perr != nil:
 		b.attachErr = perr
+	case cerr != nil:
+		b.attachErr = cerr
 	default:
 		b.attachErr = nil
 	}
@@ -1330,8 +1340,48 @@ func (b *boardView) renderAttachmentsLines(cellW, h int) []string {
 		}
 	}
 
+	// Claimants block — the per-issue agent-claim history. Display-only
+	// (not part of the selectable attachment list), appended below the
+	// docs/PRs so a reader can see who has worked the issue and why.
+	if len(b.claimants) > 0 {
+		if len(body) > 0 {
+			body = append(body, "")
+		}
+		taken, _ := claimantsTaken(b.claimants)
+		label := "Claimed by"
+		if taken {
+			label += " · taken"
+		}
+		body = append(body, boldStyle.Render(label))
+		for _, c := range b.claimants {
+			who := c.AgentName
+			if who == "" {
+				who = truncate(c.SessionID, 12)
+			}
+			marker := "●"
+			if c.ReleasedAt != nil {
+				marker = "○"
+			}
+			body = append(body, titleStyle.Render(truncate(marker+" "+who, contentW)))
+			if c.Prompt != "" {
+				body = append(body, subtitleStyle.Render("   "+truncate(oneLine(c.Prompt), contentW-3)))
+			}
+		}
+	}
+
 	inner := paneScrollFrame(header, body, contentW, h, 0, false, titleSlot, false, focused)
 	return padCell(inner, cellW)
+}
+
+// claimantsTaken reports whether a claim list has at least one open
+// claim, and returns the issue key of that open claim.
+func claimantsTaken(claimants []*model.AgentClaim) (bool, string) {
+	for _, c := range claimants {
+		if c.ReleasedAt == nil {
+			return true, c.IssueKey
+		}
+	}
+	return false, ""
 }
 
 // paneScrollFrame composes a focused-pane: a sticky header row, a

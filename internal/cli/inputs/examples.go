@@ -135,6 +135,7 @@ var (
 	ExampleAgentClaim = AgentClaimInput{
 		SessionID: "092d8907-a5ed-48cf-9fdd-22c3941f3710",
 		IssueKey:  "MINI-42",
+		Prompt:    "Implement the tab-strip pinning fix end-to-end, then open a PR.",
 	}
 	ExampleAgentRelease = AgentReleaseInput{
 		SessionID: "092d8907-a5ed-48cf-9fdd-22c3941f3710",

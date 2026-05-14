@@ -20,6 +20,7 @@ export {
     BoardCard,
     BoardColumn,
     ClaimDTO,
+    ClaimantDTO,
     CommentDTO,
     DispatchDTO,
     DocContent,

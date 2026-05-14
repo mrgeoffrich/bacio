@@ -212,10 +212,11 @@ func (c *localClient) ClaimAgent(ctx context.Context, repo *model.Repo, in input
 			SessionID: in.SessionID,
 			IssueID:   iss.ID,
 			IssueKey:  iss.Key,
+			Prompt:    in.Prompt,
 			ClaimedAt: now,
 		}, nil
 	}
-	claim, created, err := c.store.AddAgentClaim(in.SessionID, iss.ID)
+	claim, created, err := c.store.AddAgentClaim(in.SessionID, iss.ID, in.Prompt)
 	if err != nil {
 		return nil, err
 	}
