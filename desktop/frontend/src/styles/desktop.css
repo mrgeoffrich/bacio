@@ -156,28 +156,26 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
 .mk-btn-primary { color: var(--fg-on-primary); }  /* was hardcoded --paper */
 
 /* ============================================================
-   Settings dialog — a desktop-app addition (not part of the kit),
-   so its styles live here. Centred modal, reuses the palette's
-   pop-in animation and the shared .mk-scrim backdrop.
+   Settings screen — a desktop-app addition (not part of the kit),
+   so its styles live here. A full-screen view covering the content
+   area below the topbar, same shape as the Agents screen.
    ============================================================ */
-.mk-settings {
-  position: fixed; top: 90px; left: 50%; transform: translateX(-50%);
-  width: min(440px, 90vw);
-  background: var(--bg-2); border: 1px solid var(--border-1);
-  border-radius: var(--radius-lg); box-shadow: var(--shadow-4);
-  z-index: 60; display: flex; flex-direction: column;
-  animation: mk-pop var(--dur-medium) var(--ease-out);
+.mk-settings-view {
+  flex: 1; min-height: 0; display: flex; flex-direction: column;
+  background: var(--bg-1);
 }
-.mk-settings-head {
+.mk-settings-bar {
   display: flex; align-items: center; gap: 10px;
-  padding: 14px 14px 14px 20px; border-bottom: 1px solid var(--border-1);
+  padding: 12px 20px; border-bottom: 1px solid var(--border-1);
 }
 .mk-settings-title {
   margin: 0; flex: 1;
   font-size: 16px; font-weight: 600; color: var(--fg-1);
 }
 .mk-settings-body {
-  padding: 16px 20px 20px; display: flex; flex-direction: column; gap: 16px;
+  flex: 1; min-height: 0; overflow-y: auto;
+  padding: 20px; max-width: 720px; width: 100%;
+  display: flex; flex-direction: column; gap: 16px;
 }
 .mk-settings-row { display: flex; align-items: center; gap: 16px; }
 .mk-settings-row-text { flex: 1; min-width: 0; }
@@ -246,6 +244,29 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   outline: none; border-color: var(--border-focus);
 }
 .mk-tmpl-input:disabled { opacity: 0.6; }
+
+/* State-gate editor — the set of issue states each stage's prompt can
+   be launched from, rendered as toggleable chips under the textarea. */
+.mk-tmpl-states { display: flex; flex-direction: column; gap: 6px; margin-top: 2px; }
+.mk-tmpl-states-head { display: flex; align-items: center; gap: 8px; }
+.mk-tmpl-states-label {
+  flex: 1; font-size: 12px; font-weight: 500; color: var(--fg-2);
+}
+.mk-tmpl-states-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.mk-state-chip {
+  font-family: var(--font-sans); font-size: 11px; font-weight: 500;
+  padding: 3px 10px; border-radius: 9999px; cursor: pointer;
+  border: 1px solid var(--border-1); background: transparent; color: var(--fg-3);
+  transition: color var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out),
+              background var(--dur-fast) var(--ease-out);
+}
+.mk-state-chip:hover:not(:disabled) { color: var(--fg-1); border-color: var(--border-2); }
+.mk-state-chip.is-on {
+  background: var(--status-claude-bg); color: var(--status-claude);
+  border-color: var(--status-claude);
+}
+.mk-state-chip:disabled { opacity: 0.5; cursor: default; }
 
 /* ============================================================
    Agents screen — a desktop-app addition: a full-page list with a
@@ -337,21 +358,6 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   letter-spacing: 0.04em; color: var(--fg-3);
 }
 .mk-claimant-prompt { font-size: 12px; color: var(--fg-3); }
-
-/* ============================================================
-   Send-to-agent — the issue-drawer block for dispatching a todo
-   issue to an agent (pick agent, optional note, plan/implement).
-   ============================================================ */
-.mk-send-agent { display: flex; flex-direction: column; gap: 8px; }
-.mk-send-agent-select,
-.mk-send-agent-note {
-  font-family: var(--font-sans); font-size: 13px;
-  padding: 7px 10px; border: 1px solid var(--border-1);
-  border-radius: var(--radius-md); background: var(--bg-2); color: var(--fg-1);
-  width: 100%; box-sizing: border-box;
-}
-.mk-send-agent-note { resize: vertical; }
-.mk-send-agent-actions { display: flex; gap: 8px; justify-content: flex-end; }
 
 /* ============================================================
    Docs view — document browser + markdown editor. A desktop-app

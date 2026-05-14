@@ -76,6 +76,13 @@ So a dispatch carries both the machine-readable `Mode` **and** a
 self-contained `Payload` — tooling can filter on the former; the agent
 just reads the latter.
 
+Each stage also carries a **state-gate** — the set of issue states its
+prompt is valid to run from — alongside its template. It lives in
+`app_settings` as `prompt_states.<mode>` (sibling of
+`prompt_template.<mode>`); built-in defaults are `model.DefaultPromptStates`.
+The desktop per-card action button reads it to decide which prompts to
+offer; see [State-gated prompts](#state-gated-prompts).
+
 ### Lifecycle
 
 `pending` → an agent hasn't seen it yet. `delivered` → bacio has *tried*
@@ -130,24 +137,47 @@ so a session that goes busy mid-picker is caught.
 
 ### From the desktop app
 
-Open a **todo** issue's drawer → the **Send to agent** section: pick a
-dispatchable agent, optionally type a note, and hit **Send (Plan)** or
-**Send (Implement)**. The card gets the breathing "claude" treatment
-optimistically and the Agents panel counts refresh. Code:
-`desktop/frontend/src/components/IssueDrawer.jsx` →
+Every Board card carries an **action button** in its bottom-right
+corner. Clicking it opens a popover of the dispatch prompts valid for
+that card's current state (see [State-gated
+prompts](#state-gated-prompts) below); picking one queues the dispatch.
+The card gets the breathing "claude" treatment optimistically and the
+Agents panel counts refresh. Code:
+`desktop/frontend/src/components/KanbanCard.jsx` →
 `desktop/boardservice.go` (`DispatchIssue`) → `client.CreateDispatch`.
 
-> The desktop select only lists agents with a persistent identity slug —
-> `DispatchIssue` routes by slug. The TUI picker also targets bare
-> sessions (it passes the session id too).
+There is **no manual agent picker** and no free-form note: `DispatchIssue`
+auto-picks a free agent (the most-recently-active live session holding
+no open claim — a persistent-identity slug, since it routes by slug)
+and rejects with a clear error when none is free. The issue drawer no
+longer carries any agent-selection UI.
 
-Busy agents stay in the desktop `<select>` but render as disabled
-options labelled `agent · busy (<ISSUE-KEY>)`, so the user sees *why*
-they can't be picked. When every online agent is busy the form is
-replaced with a "no available agents" message. `DispatchIssue` also
-guards at the service boundary — a dispatch to an agent with no free
-session is rejected with a clear error, so a stale UI can't queue an
-undeliverable job.
+#### State-gated prompts
+
+Each dispatch stage (`plan`, `implement`, `review`, `ship`,
+`fix_review`) declares the set of issue states its prompt is valid to
+run from — its **state-gate**. The per-card action button only offers a
+prompt when the card's state is in that stage's gate. Built-in defaults
+(`model.DefaultPromptStates`):
+
+| stage        | valid-from states |
+| ------------ | ----------------- |
+| `plan`       | `todo`            |
+| `implement`  | `todo`            |
+| `review`     | `in_review`       |
+| `ship`       | `in_review`       |
+| `fix_review` | `in_review`       |
+
+State-gates are global (not per-repo), stored in `app_settings` as
+`prompt_states.<mode>` — the sibling of `prompt_template.<mode>`. Edit
+them per-stage from the desktop **Settings** screen (a chip-toggle under
+each prompt-template editor) or the CLI (`bacio settings template
+states show / set / reset`). `DispatchIssue` re-checks the gate against
+the issue's current state as a backing guard, so a stale UI can't queue
+a prompt the issue's state doesn't allow.
+
+The Settings screen itself is now a **full-screen view** (reached from
+the topbar gear icon), not a centred modal.
 
 ### Busy agents — dispatch target eligibility
 
@@ -156,9 +186,9 @@ row — it's actively working a job. Busy is *derived*, never stored: the
 open claim rows are the single source of truth, and `model.SessionBusy`
 computes it. A valid dispatch target is a session that is **not busy**
 (and, once BACI-11 lands, also channel-connected — the eligibility
-predicate is built to compose). Both the TUI picker and the desktop
-drawer exclude busy agents and surface a clear reason rather than
-hiding them silently.
+predicate is built to compose). The TUI picker excludes busy agents and
+surfaces a clear reason; the desktop app's per-card dispatch auto-picks
+a free (non-busy) agent and errors when none is available.
 
 ---
 

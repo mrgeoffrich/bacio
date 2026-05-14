@@ -288,6 +288,27 @@ func DefaultPromptTemplate(mode DispatchMode) string {
 	return defaultPromptTemplates[mode]
 }
 
+// defaultPromptStates is the built-in "this prompt is valid to run from
+// these issue states" gate, per dispatch stage. It mirrors a job's
+// lifecycle: planning/implementing start from a todo issue; reviewing,
+// shipping, and fixing-a-review happen once the work is in review.
+// Users override these per-stage; the override lives in app_settings.
+var defaultPromptStates = map[DispatchMode][]State{
+	DispatchModePlan:      {StateTodo},
+	DispatchModeImplement: {StateTodo},
+	DispatchModeReview:    {StateInReview},
+	DispatchModeShip:      {StateInReview},
+	DispatchModeFixReview: {StateInReview},
+}
+
+// DefaultPromptStates returns the built-in set of issue states a
+// dispatch stage's prompt is valid to run from. An untyped or unknown
+// mode has no gate (returns an empty slice). The returned slice is a
+// copy — callers may mutate it freely.
+func DefaultPromptStates(mode DispatchMode) []State {
+	return append([]State(nil), defaultPromptStates[mode]...)
+}
+
 // RenderPromptTemplate substitutes {{token}} placeholders in tmpl from
 // vars. Unknown {{...}} tokens are left untouched — a typo surfaces in
 // the prompt rather than failing a dispatch. Whitespace inside the

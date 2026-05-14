@@ -3,6 +3,8 @@ package store
 import (
 	"database/sql"
 	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/mrgeoffrich/bacio/internal/model"
 )
@@ -89,6 +91,94 @@ func (s *Store) AllPromptTemplates() (map[model.DispatchMode]string, error) {
 			return nil, err
 		}
 		out[m] = t
+	}
+	return out, nil
+}
+
+const promptStatesKeyPrefix = "prompt_states."
+
+// GetPromptStates returns the set of issue states a dispatch stage's
+// prompt is valid to run from — the user's per-stage override, falling
+// back to the built-in default (model.DefaultPromptStates) when none is
+// stored. An untyped mode ("") has no gate and returns nil.
+func (s *Store) GetPromptStates(mode model.DispatchMode) ([]model.State, error) {
+	if mode == "" {
+		return nil, nil
+	}
+	v, err := s.GetAppSetting(promptStatesKeyPrefix + string(mode))
+	if err != nil {
+		return nil, err
+	}
+	if v == "" {
+		return model.DefaultPromptStates(mode), nil
+	}
+	out := make([]model.State, 0)
+	for _, part := range strings.Split(v, ",") {
+		st, err := model.ParseState(part)
+		if err != nil {
+			// A stored value should always be valid — but if the vocabulary
+			// ever shrank, fall back to the default rather than erroring a
+			// read path.
+			return model.DefaultPromptStates(mode), nil
+		}
+		out = append(out, st)
+	}
+	return out, nil
+}
+
+// ValidatePromptStates runs the same mode + state-set checks as
+// SetPromptStates without writing — the --dry-run path. The mode must
+// be a concrete stage; every entry must be a valid issue state; no
+// duplicates. It returns the cleaned, canonical list.
+func (s *Store) ValidatePromptStates(mode model.DispatchMode, states []model.State) ([]model.State, error) {
+	if _, err := model.ParseDispatchMode(string(mode)); err != nil {
+		return nil, err
+	}
+	if mode == "" {
+		return nil, errors.New("prompt state-gate requires a dispatch mode")
+	}
+	seen := make(map[model.State]bool, len(states))
+	out := make([]model.State, 0, len(states))
+	for _, raw := range states {
+		st, err := model.ParseState(string(raw))
+		if err != nil {
+			return nil, err
+		}
+		if seen[st] {
+			return nil, fmt.Errorf("duplicate state %q in prompt state-gate", st)
+		}
+		seen[st] = true
+		out = append(out, st)
+	}
+	return out, nil
+}
+
+// SetPromptStates stores a custom state-gate for a dispatch stage — the
+// set of issue states the stage's prompt is valid to run from. An empty
+// slice clears the override, so GetPromptStates falls back to the
+// built-in default.
+func (s *Store) SetPromptStates(mode model.DispatchMode, states []model.State) error {
+	clean, err := s.ValidatePromptStates(mode, states)
+	if err != nil {
+		return err
+	}
+	parts := make([]string, len(clean))
+	for i, st := range clean {
+		parts[i] = string(st)
+	}
+	return s.SetAppSetting(promptStatesKeyPrefix+string(mode), strings.Join(parts, ","))
+}
+
+// AllPromptStates returns the resolved state-gate (custom or built-in
+// default) for every dispatch stage, keyed by mode.
+func (s *Store) AllPromptStates() (map[model.DispatchMode][]model.State, error) {
+	out := make(map[model.DispatchMode][]model.State, len(model.AllDispatchModes()))
+	for _, m := range model.AllDispatchModes() {
+		st, err := s.GetPromptStates(m)
+		if err != nil {
+			return nil, err
+		}
+		out[m] = st
 	}
 	return out, nil
 }

@@ -19,7 +19,8 @@ import * as $models from "./models.js";
 /**
  * ListPromptTemplates returns the five dispatch prompt templates in
  * lifecycle order, each with its effective body, the built-in default,
- * and whether the body still matches that default.
+ * the effective + default state-gate, and whether each still matches
+ * its built-in default.
  */
 export function ListPromptTemplates(): $CancellablePromise<$models.PromptTemplateDTO[]> {
     return $Call.ByID(1001854565).then(($result: any) => {
@@ -35,6 +36,18 @@ export function ListPromptTemplates(): $CancellablePromise<$models.PromptTemplat
 export function PromptPlaceholders(): $CancellablePromise<string[]> {
     return $Call.ByID(1135988516).then(($result: any) => {
         return $$createType2($result);
+    });
+}
+
+/**
+ * SavePromptStates stores a custom state-gate for one dispatch stage —
+ * the set of issue states the stage's prompt is valid to run from — and
+ * returns the refreshed DTO. An empty slice resets the stage to its
+ * built-in default gate.
+ */
+export function SavePromptStates(mode: string, states: string[]): $CancellablePromise<$models.PromptTemplateDTO> {
+    return $Call.ByID(1803653057, mode, states).then(($result: any) => {
+        return $$createType0($result);
     });
 }
 

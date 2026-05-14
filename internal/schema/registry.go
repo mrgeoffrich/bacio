@@ -76,6 +76,8 @@ var Registry = []Entry{
 
 	{"settings.template.set", "Set a custom dispatch prompt template for a job stage.", typeOf[inputs.SettingsTemplateSetInput](), inputs.ExampleSettingsTemplateSet},
 	{"settings.template.reset", "Reset a dispatch prompt template to its built-in default.", typeOf[inputs.SettingsTemplateResetInput](), inputs.ExampleSettingsTemplateReset},
+	{"settings.template.states.set", "Set the issue states a job stage's dispatch prompt is valid to run from.", typeOf[inputs.SettingsTemplateStatesSetInput](), inputs.ExampleSettingsTemplateStatesSet},
+	{"settings.template.states.reset", "Reset a job stage's prompt state-gate to its built-in default.", typeOf[inputs.SettingsTemplateStatesResetInput](), inputs.ExampleSettingsTemplateStatesReset},
 }
 
 // repoRmDescription is the LLM-targeted warning text published via

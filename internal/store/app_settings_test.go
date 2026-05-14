@@ -93,6 +93,74 @@ func TestSetPromptTemplateRejectsBadInput(t *testing.T) {
 	}
 }
 
+// TestPromptStatesDefaultFallback checks the state-gate analogue of the
+// template fallback: an unset stage resolves to its built-in default, a
+// custom set overrides it, and clearing it (empty slice) reverts.
+func TestPromptStatesDefaultFallback(t *testing.T) {
+	s := newTestStore(t)
+
+	// Unset → built-in default.
+	got, err := s.GetPromptStates(model.DispatchModePlan)
+	if err != nil {
+		t.Fatalf("GetPromptStates: %v", err)
+	}
+	if len(got) != 1 || got[0] != model.StateTodo {
+		t.Fatalf("unset plan state-gate = %v, want [todo]", got)
+	}
+
+	// Custom override wins.
+	custom := []model.State{model.StateTodo, model.StateInProgress}
+	if err := s.SetPromptStates(model.DispatchModePlan, custom); err != nil {
+		t.Fatalf("SetPromptStates: %v", err)
+	}
+	got, _ = s.GetPromptStates(model.DispatchModePlan)
+	if len(got) != 2 || got[0] != model.StateTodo || got[1] != model.StateInProgress {
+		t.Fatalf("custom plan state-gate = %v, want [todo in_progress]", got)
+	}
+
+	// Empty slice clears the override → back to the default.
+	if err := s.SetPromptStates(model.DispatchModePlan, nil); err != nil {
+		t.Fatalf("SetPromptStates (clear): %v", err)
+	}
+	got, _ = s.GetPromptStates(model.DispatchModePlan)
+	if len(got) != 1 || got[0] != model.StateTodo {
+		t.Fatalf("cleared plan state-gate = %v, want [todo] back", got)
+	}
+
+	// Untyped mode has no gate.
+	if got, _ := s.GetPromptStates(""); got != nil {
+		t.Fatalf("GetPromptStates(\"\") = %v, want nil", got)
+	}
+
+	// AllPromptStates resolves every stage to a non-empty set.
+	all, err := s.AllPromptStates()
+	if err != nil {
+		t.Fatalf("AllPromptStates: %v", err)
+	}
+	for _, m := range model.AllDispatchModes() {
+		if len(all[m]) == 0 {
+			t.Errorf("AllPromptStates missing/empty for %q", m)
+		}
+	}
+}
+
+// TestSetPromptStatesRejectsBadInput locks in store-boundary validation
+// for the state-gate: an untyped mode, an unknown state, and a duplicate
+// state are all refused.
+func TestSetPromptStatesRejectsBadInput(t *testing.T) {
+	s := newTestStore(t)
+
+	if err := s.SetPromptStates("", []model.State{model.StateTodo}); err == nil {
+		t.Fatal("SetPromptStates(\"\", ...) = nil, want error")
+	}
+	if err := s.SetPromptStates(model.DispatchModePlan, []model.State{"bogus"}); err == nil {
+		t.Fatal("SetPromptStates(unknown state) = nil, want error")
+	}
+	if err := s.SetPromptStates(model.DispatchModePlan, []model.State{model.StateTodo, model.StateTodo}); err == nil {
+		t.Fatal("SetPromptStates(duplicate state) = nil, want error")
+	}
+}
+
 // TestMigrateAgentDispatchesModeCheck simulates a plan/implement-era DB
 // that still carries CHECK (mode IN ('','plan','implement')) on
 // agent_dispatches, and asserts the migration rebuilds the table so the

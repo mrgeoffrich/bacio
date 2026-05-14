@@ -276,6 +276,57 @@ func (c *localClient) SetPromptTemplate(ctx context.Context, mode, body string, 
 	return nil
 }
 
+func (c *localClient) GetPromptStates(ctx context.Context) (map[string][]string, error) {
+	all, err := c.store.AllPromptStates()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string][]string, len(all))
+	for m, states := range all {
+		ss := make([]string, len(states))
+		for i, st := range states {
+			ss[i] = string(st)
+		}
+		out[string(m)] = ss
+	}
+	return out, nil
+}
+
+func (c *localClient) SetPromptStates(ctx context.Context, mode string, states []string, dryRun bool) error {
+	m, err := model.ParseDispatchMode(mode)
+	if err != nil {
+		return err
+	}
+	if m == "" {
+		return fmt.Errorf("prompt state-gate requires a dispatch mode")
+	}
+	parsed := make([]model.State, len(states))
+	for i, s := range states {
+		parsed[i] = model.State(s)
+	}
+	if dryRun {
+		// Validate the state set at the store boundary, then stop before
+		// the write — same shape as every other --dry-run mutation.
+		_, err := c.store.ValidatePromptStates(m, parsed)
+		return err
+	}
+	if err := c.store.SetPromptStates(m, parsed); err != nil {
+		return err
+	}
+	// Prompt state-gates are global, not repo-scoped — the audit row
+	// carries no RepoID. recordOp never fails the user-visible action.
+	op := "prompt_states.update"
+	if len(states) == 0 {
+		op = "prompt_states.reset"
+	}
+	c.recordOp(model.HistoryEntry{
+		Op: op, Kind: "app_setting",
+		TargetLabel: "prompt_states." + string(m),
+		Details:     "stage=" + string(m),
+	})
+	return nil
+}
+
 // dispatchTargetLabel picks the most specific label for audit rows:
 // the agent identity slug if there is one, else the session id.
 func dispatchTargetLabel(d *model.AgentDispatch) string {

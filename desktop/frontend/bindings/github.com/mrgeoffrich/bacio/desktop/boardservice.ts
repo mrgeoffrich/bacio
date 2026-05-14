@@ -43,13 +43,16 @@ export function AddRepository(): $CancellablePromise<$models.Board> {
 }
 
 /**
- * DispatchIssue queues a dispatch for an agent: the target agent slug,
- * the mode ("plan" / "implement" / ""), and an optional free-form note.
+ * DispatchIssue queues a dispatch against an issue for a given job stage
+ * (mode). The agent is auto-picked — the most-recently-active free
+ * (live, not busy) agent — rather than chosen by the caller. The mode
+ * must also be valid to run from the issue's current state (the
+ * per-card action button gates on this; this is the backing guard).
  * repoPrefix may be empty or "all" — the prefix is then derived from the
  * canonical issue key.
  */
-export function DispatchIssue(repoPrefix: string, issueKey: string, agentName: string, mode: string, note: string): $CancellablePromise<$models.DispatchDTO> {
-    return $Call.ByID(715303058, repoPrefix, issueKey, agentName, mode, note).then(($result: any) => {
+export function DispatchIssue(repoPrefix: string, issueKey: string, mode: string): $CancellablePromise<$models.DispatchDTO> {
+    return $Call.ByID(715303058, repoPrefix, issueKey, mode).then(($result: any) => {
         return $$createType2($result);
     });
 }

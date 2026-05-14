@@ -631,24 +631,44 @@ per-repo — with `bacio settings template`. The same templates are
 editable from the desktop app's Settings panel.
 
 ```
-bacio settings template list            Lean table: every stage's effective template
-bacio settings template show <stage>    One stage — effective body + built-in default
+bacio settings template list            Lean table: every stage's effective
+                                        template + its allowed_states gate
+bacio settings template show <stage>    One stage — effective body + built-in
+                                        default + the state-gate
 bacio settings template set <stage> <body>
                                         Override a stage's template
 bacio settings template reset <stage>   Revert a stage to its built-in default
+
+bacio settings template states show <stage>
+                                        Show the issue states a stage's prompt
+                                        is valid to run from
+bacio settings template states set <stage> <state,state,...>
+                                        Override a stage's state-gate
+bacio settings template states reset <stage>
+                                        Revert a stage's state-gate to default
 ```
 
-`set` and `reset` are mutations — they honour `--json`, `--dry-run`, and
-`bacio schema show settings.template.set` (schema names
-`settings.template.set` / `settings.template.reset`). A template body
-may interpolate `{{issue_id}}`, `{{issue_title}}`, and `{{repo_prefix}}`
-— substituted with the dispatched issue's context at dispatch time; an
-unknown `{{...}}` token is left verbatim. `bacio settings` is local-only
-(the `app_settings` store has no remote analogue in v1).
+`set` and `reset` (and their `states` siblings) are mutations — they
+honour `--json`, `--dry-run`, and `bacio schema show
+settings.template.set` (schema names `settings.template.set` /
+`settings.template.reset` / `settings.template.states.set` /
+`settings.template.states.reset`). A template body may interpolate
+`{{issue_id}}`, `{{issue_title}}`, and `{{repo_prefix}}` — substituted
+with the dispatched issue's context at dispatch time; an unknown
+`{{...}}` token is left verbatim. `bacio settings` is local-only (the
+`app_settings` store has no remote analogue in v1).
+
+Each stage also has a **state-gate**: the set of issue states its prompt
+is valid to run from (built-in defaults — `plan`/`implement` → `todo`,
+`review`/`ship`/`fix_review` → `in_review`). The desktop app's per-card
+action button only offers a prompt when the card's state is in that
+stage's gate; `show`/`list` surface it as `allowed_states`.
 
 ```bash
 bacio settings template set review --json '{"mode":"review","body":"Review {{issue_id}} ({{issue_title}}) — focus on correctness and tests."}'
 bacio settings template reset review
+bacio settings template states set review --json '{"mode":"review","states":["in_review","needs_action"]}'
+bacio settings template states reset review
 ```
 
 ### Hook integration — automatic registration & supervision

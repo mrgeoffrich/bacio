@@ -91,15 +91,16 @@ export async function listDocs(repoPrefix: string, typeFilter = ''): Promise<Doc
   }
 }
 
+// dispatchIssue queues a dispatch against an issue for a job stage. The
+// agent is auto-picked by the backend (the most-recently-active free
+// agent) — the caller never names one.
 export async function dispatchIssue(
   repoPrefix: string,
   issueKey: string,
-  agentName: string,
   mode: string,
-  note: string,
 ): Promise<DispatchDTO> {
   try {
-    return await BoardService.DispatchIssue(repoPrefix, issueKey, agentName, mode, note);
+    return await BoardService.DispatchIssue(repoPrefix, issueKey, mode);
   } catch (err) {
     throw normalize(err);
   }
@@ -210,6 +211,20 @@ export async function savePromptTemplate(
 ): Promise<PromptTemplateDTO> {
   try {
     return await SettingsService.SavePromptTemplate(mode, body);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// savePromptStates stores the set of issue states a dispatch stage's
+// prompt is valid to run from. Passing an empty array resets that
+// stage's state-gate to its built-in default.
+export async function savePromptStates(
+  mode: string,
+  states: string[],
+): Promise<PromptTemplateDTO> {
+  try {
+    return await SettingsService.SavePromptStates(mode, states);
   } catch (err) {
     throw normalize(err);
   }

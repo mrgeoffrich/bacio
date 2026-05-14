@@ -232,6 +232,17 @@ type Client interface {
 	// backend returns ErrLocalOnly.
 	GetPromptTemplates(ctx context.Context) (map[string]string, error)
 	SetPromptTemplate(ctx context.Context, mode, body string, dryRun bool) error
+
+	// ----- Prompt state-gates (local-only; `bacio settings template states`) -----
+	// GetPromptStates returns the resolved state-gate (custom override,
+	// or the built-in default) for every dispatch stage — the set of
+	// issue states the stage's prompt is valid to run from — keyed by
+	// mode string. SetPromptStates stores a custom set for one stage; an
+	// empty slice clears the override and reverts that stage to its
+	// default. With dryRun set it validates the mode and states but
+	// writes nothing. Local-only — the remote backend returns ErrLocalOnly.
+	GetPromptStates(ctx context.Context) (map[string][]string, error)
+	SetPromptStates(ctx context.Context, mode string, states []string, dryRun bool) error
 }
 
 // AgentSessionFilter mirrors store.AgentSessionFilter; the wrapper lets
