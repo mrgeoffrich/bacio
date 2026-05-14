@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "bacio": {
+      "args": [
+        "channel"
+      ],
+      "command": "/Users/geoff/.local/bin/bacio"
+    }
+  }
+}

@@ -1,0 +1,6 @@
+Make sure to use the bacio skill.
+As an agent first claim the issue as yours.
+Make sure main is up to date then create a worktree to work in.
+Ship {{issue_id}}: merge the PR an deal with any merge issues and then once its merged put the issue into the done status.
+Clean up and remove the worktree.
+Finally unclaim the issue.

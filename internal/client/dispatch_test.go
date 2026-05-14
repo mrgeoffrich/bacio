@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
@@ -119,7 +120,9 @@ func TestDispatchPromptTemplateRendering(t *testing.T) {
 	}
 
 	// No custom template stored → the built-in default, with {{issue_id}}
-	// substituted for the canonical key.
+	// substituted for the canonical key. The default text itself lives in
+	// editable data files (internal/model/prompttemplates), so assert on
+	// the resolve-and-substitute contract, not the exact wording.
 	d, err := p.local.CreateDispatch(ctx, p.repo, inputs.AgentDispatchInput{
 		TargetAgent: ag.Name,
 		IssueKey:    iss.Key,
@@ -128,9 +131,11 @@ func TestDispatchPromptTemplateRendering(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateDispatch (default): %v", err)
 	}
-	wantDefault := "Implement " + iss.Key + " end-to-end."
-	if d.Payload != wantDefault {
-		t.Fatalf("default payload = %q, want %q", d.Payload, wantDefault)
+	if d.Payload == "" || strings.Contains(d.Payload, "{{") {
+		t.Fatalf("default payload not resolved/substituted: %q", d.Payload)
+	}
+	if !strings.Contains(d.Payload, iss.Key) {
+		t.Fatalf("default payload = %q, want it to mention issue %s", d.Payload, iss.Key)
 	}
 
 	// Store a custom template, then dispatch with a note: the custom

@@ -1,0 +1,9 @@
+Make sure to use the bacio skill.
+As an agent first claim the issue as yours.
+Make sure main is up to date then create a worktree to work in.
+Then set the status of the issue to "in progress".
+Pull down all the details for {{issue_id}} which should include an implementation plan. Read the plan and begin execution.
+If you have to stop to get user assistance for any reason the issue will automatically be put into the "needs action" state. Once the user answers put the issue back into in progress.
+At the end run smoke tests to make sure the changes work.
+Once smoke tests pass create a PR from all the changes, then clean up and remove the worktree.
+Finally put the issue into "in review" and unclaim it.
