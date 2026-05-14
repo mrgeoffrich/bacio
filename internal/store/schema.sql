@@ -261,3 +261,33 @@ CREATE TABLE IF NOT EXISTS sync_remotes (
     cloned_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_sync_at DATETIME
 );
+
+-- agent_dispatches is the supervisor->agent work queue. A dispatch is a
+-- unit of work (an issue to look at, an instruction) aimed at an agent
+-- identity and/or one specific session. Local-only — never synced. It's
+-- drained by the `bacio hook` SessionStart/UserPromptSubmit handlers
+-- (pull delivery) and pushed live by `bacio channel` (push delivery).
+-- A dispatch must name a target: an agent identity, a session, or both.
+CREATE TABLE IF NOT EXISTS agent_dispatches (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    repo_id           INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+    target_agent_id   INTEGER REFERENCES agents(id) ON DELETE CASCADE,
+    target_session_id TEXT    NOT NULL DEFAULT '',
+    issue_id          INTEGER REFERENCES issues(id) ON DELETE SET NULL,
+    payload           TEXT    NOT NULL DEFAULT '',
+    status            TEXT    NOT NULL DEFAULT 'pending'
+                        CHECK (status IN ('pending','delivered','acked','cancelled')),
+    created_by        TEXT    NOT NULL,
+    created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    delivered_at      DATETIME,
+    acked_at          DATETIME,
+    ack_note          TEXT    NOT NULL DEFAULT '',
+    CHECK (target_agent_id IS NOT NULL OR target_session_id != '')
+);
+
+CREATE INDEX IF NOT EXISTS idx_dispatches_agent
+    ON agent_dispatches(target_agent_id, status);
+CREATE INDEX IF NOT EXISTS idx_dispatches_session
+    ON agent_dispatches(target_session_id, status);
+CREATE INDEX IF NOT EXISTS idx_dispatches_repo
+    ON agent_dispatches(repo_id, status);

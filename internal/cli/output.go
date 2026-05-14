@@ -138,6 +138,10 @@ func renderText(w io.Writer, v any) error {
 		printAgentSession(w, x)
 	case *model.AgentClaim:
 		printAgentClaim(w, x)
+	case *model.AgentDispatch:
+		printAgentDispatch(w, x)
+	case []*model.AgentDispatch:
+		printAgentDispatchList(w, x)
 	default:
 		fmt.Fprintf(w, "%v\n", v)
 	}
@@ -469,4 +473,63 @@ func printAgentClaim(w io.Writer, c *model.AgentClaim) {
 	if c.ReleasedAt != nil {
 		fmt.Fprintf(w, "Released: %s\n", localTime(*c.ReleasedAt))
 	}
+}
+
+func printAgentDispatch(w io.Writer, d *model.AgentDispatch) {
+	fmt.Fprintf(w, "Dispatch: %d\n", d.ID)
+	fmt.Fprintf(w, "Status:   %s\n", d.Status)
+	if d.RepoPrefix != "" {
+		fmt.Fprintf(w, "Repo:     %s\n", d.RepoPrefix)
+	}
+	if d.TargetAgentName != "" {
+		fmt.Fprintf(w, "To agent: %s\n", d.TargetAgentName)
+	}
+	if d.TargetSessionID != "" {
+		fmt.Fprintf(w, "To sess:  %s\n", d.TargetSessionID)
+	}
+	if d.IssueKey != "" {
+		fmt.Fprintf(w, "Issue:    %s\n", d.IssueKey)
+	}
+	fmt.Fprintf(w, "By:       %s\n", d.CreatedBy)
+	fmt.Fprintf(w, "Created:  %s\n", localTime(d.CreatedAt))
+	if d.DeliveredAt != nil {
+		fmt.Fprintf(w, "Delivered:%s\n", localTime(*d.DeliveredAt))
+	}
+	if d.AckedAt != nil {
+		fmt.Fprintf(w, "Acked:    %s\n", localTime(*d.AckedAt))
+	}
+	if d.Payload != "" {
+		fmt.Fprintf(w, "\n%s\n", d.Payload)
+	}
+	if d.AckNote != "" {
+		fmt.Fprintf(w, "\nAck note: %s\n", d.AckNote)
+	}
+}
+
+func printAgentDispatchList(w io.Writer, ds []*model.AgentDispatch) {
+	if len(ds) == 0 {
+		fmt.Fprintln(w, "(no dispatches)")
+		return
+	}
+	for _, d := range ds {
+		target := d.TargetAgentName
+		if target == "" {
+			target = shortID(d.TargetSessionID)
+		}
+		issue := d.IssueKey
+		if issue == "" {
+			issue = "-"
+		}
+		fmt.Fprintf(w, "#%-4d %-10s %-24s %-12s %s\n",
+			d.ID, d.Status, target, issue, firstLine(d.Payload))
+	}
+}
+
+// firstLine returns the first line of s, trimmed — keeps list rows to
+// one line even when a dispatch payload is a multi-line instruction.
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return strings.TrimSpace(s[:i])
+	}
+	return strings.TrimSpace(s)
 }

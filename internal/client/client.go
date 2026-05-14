@@ -176,6 +176,20 @@ type Client interface {
 	ReleaseAgent(ctx context.Context, repo *model.Repo, in inputs.AgentReleaseInput, dryRun bool) (*model.AgentClaim, error)
 	ListAgentSessions(ctx context.Context, f AgentSessionFilter) ([]*model.AgentSession, error)
 	ShowAgentSession(ctx context.Context, sessionID string) (*AgentSessionView, error)
+
+	// ----- Agent dispatch queue (local-only in v1) -----
+	// Dispatches are supervisor->agent work items. CreateDispatch
+	// enqueues one; InboxDispatches drains everything aimed at a
+	// session (its own id and its agent identity); AckDispatch records
+	// the agent's acknowledgement.
+	CreateDispatch(ctx context.Context, repo *model.Repo, in inputs.AgentDispatchInput, dryRun bool) (*model.AgentDispatch, error)
+	InboxDispatches(ctx context.Context, sessionID string) ([]*model.AgentDispatch, error)
+	AckDispatch(ctx context.Context, in inputs.AgentAckInput, dryRun bool) (*model.AgentDispatch, error)
+	// DrainDispatches returns a session's pending dispatches and marks
+	// each one delivered — the pull-delivery path used by the bacio
+	// hooks. Delivered dispatches aren't re-drained but stay in the
+	// inbox until acked.
+	DrainDispatches(ctx context.Context, sessionID string) ([]*model.AgentDispatch, error)
 }
 
 // AgentSessionFilter mirrors store.AgentSessionFilter; the wrapper lets

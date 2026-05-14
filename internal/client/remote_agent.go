@@ -47,3 +47,19 @@ func (c *remoteClient) ListAgentSessions(ctx context.Context, f AgentSessionFilt
 func (c *remoteClient) ShowAgentSession(ctx context.Context, sessionID string) (*AgentSessionView, error) {
 	return nil, remoteAgentNotSupported("show")
 }
+
+func (c *remoteClient) CreateDispatch(ctx context.Context, repo *model.Repo, in inputs.AgentDispatchInput, dryRun bool) (*model.AgentDispatch, error) {
+	return nil, remoteAgentNotSupported("dispatch")
+}
+
+func (c *remoteClient) InboxDispatches(ctx context.Context, sessionID string) ([]*model.AgentDispatch, error) {
+	return nil, remoteAgentNotSupported("inbox")
+}
+
+func (c *remoteClient) AckDispatch(ctx context.Context, in inputs.AgentAckInput, dryRun bool) (*model.AgentDispatch, error) {
+	return nil, remoteAgentNotSupported("ack")
+}
+
+func (c *remoteClient) DrainDispatches(ctx context.Context, sessionID string) ([]*model.AgentDispatch, error) {
+	return nil, remoteAgentNotSupported("inbox")
+}

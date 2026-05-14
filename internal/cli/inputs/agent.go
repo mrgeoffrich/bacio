@@ -54,3 +54,23 @@ type AgentReleaseInput struct {
 	SessionID string `json:"session_id"`
 	IssueKey  string `json:"issue_key"`
 }
+
+// AgentDispatchInput is the payload for `bacio agent dispatch --json`.
+// A dispatch must name a target: TargetAgent (a persistent identity
+// slug), TargetSession (a session id), or both. IssueKey is the issue
+// the dispatch concerns, when there is one; Message is the free-form
+// instruction body the agent reads when the dispatch is delivered.
+type AgentDispatchInput struct {
+	TargetAgent   string `json:"target_agent,omitempty"`
+	TargetSession string `json:"target_session,omitempty"`
+	IssueKey      string `json:"issue_key,omitempty"`
+	Message       string `json:"message,omitempty"`
+}
+
+// AgentAckInput is the payload for `bacio agent ack --json`. ID is the
+// dispatch id (as printed by `bacio agent inbox`). Note is an optional
+// free-form reply recorded against the dispatch.
+type AgentAckInput struct {
+	ID   int64  `json:"id"`
+	Note string `json:"note,omitempty"`
+}

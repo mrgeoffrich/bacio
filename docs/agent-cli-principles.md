@@ -46,7 +46,13 @@ The global `--dry-run` flag short-circuits every mutation right after validators
 
 ## Implemented principles (post-#1–#6)
 
-- **#7 Multi-surface architecture.** REST API surface shipped (`bacio api` — see the "HTTP API" section of `SKILL.md`, and `docs/site/guides/run-the-api-server.md` for the end-to-end walk-through). Same `inputs.*Input` structs, same `schemaRegistry`, same validators, same audit log; only the transport differs. MCP server surface remains plausible future work.
+- **#7 Multi-surface architecture.** REST API surface shipped (`bacio api` — see the "HTTP API" section of `SKILL.md`, and `docs/site/guides/run-the-api-server.md` for the end-to-end walk-through). Same `inputs.*Input` structs, same `schemaRegistry`, same validators, same audit log; only the transport differs. The MCP server surface also shipped, narrowly: `bacio channel` is an MCP-over-stdio server implementing Claude Code's "channel" contract — but it's a harness-integration shim (see below), not a general-purpose MCP surface over the whole CLI.
+
+## Harness-integration shims are exempt from the six rules
+
+`bacio tui`, `bacio api`, `bacio hook`, and `bacio channel` are *glue to a host* — a terminal, an HTTP client, the Claude Code hook/channel runtime — not agent-facing mutation verbs. They deliberately skip rules #1–#5: no `--json` input, no `bacio schema` entry, no `--dry-run`. The host defines their I/O contract (hook-event JSON on stdin, JSON-RPC over stdio, etc.), so re-deriving a bacio JSON schema for them would be noise. They are still documented in `SKILL.md` (rule #6 holds).
+
+The line: if a human or agent invokes the command *to mutate bacio state*, it follows the six rules (so `bacio agent dispatch` / `bacio agent ack` do — they're agent-facing). If a *host runtime* invokes it as an integration callback, it's a shim and is exempt. When in doubt, ask "who types this command?" — a person/agent, or a runtime.
 
 ## What we deliberately don't do
 

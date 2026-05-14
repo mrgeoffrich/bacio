@@ -62,6 +62,9 @@ func Open(path string) (*Store, error) {
 	if err := pruneAgentSessions(db, AgentSessionRetention); err != nil {
 		fmt.Fprintln(os.Stderr, "bacio: warning: agent-session prune failed:", err)
 	}
+	if err := pruneDispatches(db, AgentDispatchRetention); err != nil {
+		fmt.Fprintln(os.Stderr, "bacio: warning: dispatch prune failed:", err)
+	}
 	return &Store{DB: db}, nil
 }
 

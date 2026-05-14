@@ -88,6 +88,7 @@ func NewModel(s *store.Store, repo *model.Repo) (*Model, error) {
 			{"Board", board},
 			{"Features", newFeaturesView(s, repo)},
 			{"Documents", newDocsView(s, repo)},
+			{"Agents", newAgentsView(s, repo)},
 			{"History", newHistoryView(s, repo)},
 		},
 		returnTab: -1,

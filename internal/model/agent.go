@@ -99,3 +99,63 @@ func ParseEndReason(s string) (EndReason, error) {
 	}
 	return "", fmt.Errorf("unknown end_reason %q (valid: %s)", s, strings.Join(names, ", "))
 }
+
+// DispatchStatus tracks a dispatch through its lifecycle. pending: not
+// yet seen by the agent. delivered: drained into a session (by a hook)
+// or pushed (by a channel) but not acted on. acked: the agent reported
+// back via `bacio agent ack`. cancelled: the supervisor withdrew it.
+type DispatchStatus string
+
+const (
+	DispatchPending   DispatchStatus = "pending"
+	DispatchDelivered DispatchStatus = "delivered"
+	DispatchAcked     DispatchStatus = "acked"
+	DispatchCancelled DispatchStatus = "cancelled"
+)
+
+var allDispatchStatuses = []DispatchStatus{
+	DispatchPending, DispatchDelivered, DispatchAcked, DispatchCancelled,
+}
+
+func AllDispatchStatuses() []DispatchStatus {
+	return append([]DispatchStatus(nil), allDispatchStatuses...)
+}
+
+// ParseDispatchStatus accepts the canonical lowercase form and rejects
+// unknown values. Used when a status arrives as a filter argument.
+func ParseDispatchStatus(s string) (DispatchStatus, error) {
+	s = strings.TrimSpace(s)
+	for _, st := range allDispatchStatuses {
+		if string(st) == s {
+			return st, nil
+		}
+	}
+	names := make([]string, len(allDispatchStatuses))
+	for i, st := range allDispatchStatuses {
+		names[i] = string(st)
+	}
+	return "", fmt.Errorf("unknown dispatch status %q (valid: %s)", s, strings.Join(names, ", "))
+}
+
+// AgentDispatch is one unit of supervisor->agent work. It targets an
+// agent identity (TargetAgentID), a specific session (TargetSessionID),
+// or both — the drain query matches on either. IssueID is the issue the
+// dispatch is about, when there is one; Payload carries free-form
+// instructions. Local-only, like the rest of the agent registry.
+type AgentDispatch struct {
+	ID              int64          `json:"id"`
+	RepoID          int64          `json:"repo_id"`
+	RepoPrefix      string         `json:"repo_prefix,omitempty"`
+	TargetAgentID   *int64         `json:"target_agent_id,omitempty"`
+	TargetAgentName string         `json:"target_agent_name,omitempty"`
+	TargetSessionID string         `json:"target_session_id,omitempty"`
+	IssueID         *int64         `json:"issue_id,omitempty"`
+	IssueKey        string         `json:"issue_key,omitempty"`
+	Payload         string         `json:"payload,omitempty"`
+	Status          DispatchStatus `json:"status"`
+	CreatedBy       string         `json:"created_by"`
+	CreatedAt       time.Time      `json:"created_at"`
+	DeliveredAt     *time.Time     `json:"delivered_at,omitempty"`
+	AckedAt         *time.Time     `json:"acked_at,omitempty"`
+	AckNote         string         `json:"ack_note,omitempty"`
+}

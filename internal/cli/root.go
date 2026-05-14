@@ -76,9 +76,12 @@ func NewRoot() (*cobra.Command, func()) {
 		newSyncCmd(),
 		newInstallSkillCmd(),
 		newInstallSampleSkillsCmd(),
+		newInstallHooksCmd(),
 		newTUICmd(),
 		newDemoCmd(),
 		newAgentCmd(),
+		newHookCmd(),
+		newChannelCmd(),
 	)
 	return root, stopProfiling
 }

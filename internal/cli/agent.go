@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -49,6 +50,9 @@ intent — it does NOT move the issue or change its assignee; use
 		agentEndCmd(),
 		agentClaimCmd(),
 		agentReleaseCmd(),
+		agentDispatchCmd(),
+		agentInboxCmd(),
+		agentAckCmd(),
 		agentListCmd(),
 		agentShowCmd(),
 	)
@@ -403,6 +407,171 @@ func runAgentRelease(in inputs.AgentReleaseInput) error {
 		return emitDryRun(claim)
 	}
 	return emit(claim)
+}
+
+// ---------- dispatch ----------
+
+func agentDispatchCmd() *cobra.Command {
+	var (
+		toAgent, toSession, message, rawInput string
+	)
+	cmd := &cobra.Command{
+		Use:   "dispatch [issue-key]",
+		Short: "Queue a unit of work for an agent identity and/or a session",
+		Long: `Enqueue a dispatch — a supervisor->agent work item. A dispatch must
+name a target: --to <agent-slug>, --session <id>, or both. The optional
+[issue-key] positional ties the dispatch to an issue; --message carries
+free-form instructions.
+
+The target agent picks the dispatch up automatically on its next prompt
+(via the bacio UserPromptSubmit hook) or at session start, and can list
+its queue with ` + "`bacio agent inbox`" + `.`,
+		Args: cobra.RangeArgs(0, 1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			raw, err := parseJSONInput(cmd, args, rawInput, "to", "session", "message")
+			if err != nil {
+				return err
+			}
+			if raw != nil {
+				in, _, err := inputio.DecodeStrict[inputs.AgentDispatchInput](raw)
+				if err != nil {
+					return err
+				}
+				return runAgentDispatch(*in)
+			}
+			in := inputs.AgentDispatchInput{
+				TargetAgent:   toAgent,
+				TargetSession: toSession,
+				Message:       message,
+			}
+			if len(args) == 1 {
+				in.IssueKey = args[0]
+			}
+			return runAgentDispatch(in)
+		},
+	}
+	cmd.Flags().StringVar(&toAgent, "to", "", "target agent identity slug (e.g. swift-otter@claude.shiny)")
+	cmd.Flags().StringVar(&toSession, "session", "", "target session id")
+	cmd.Flags().StringVar(&message, "message", "", "free-form instruction body")
+	addInputFlag(cmd, &rawInput)
+	return cmd
+}
+
+func runAgentDispatch(in inputs.AgentDispatchInput) error {
+	if err := requireLocalForAgent("dispatch"); err != nil {
+		return err
+	}
+	c, err := openClient()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	repo, err := resolveRepoC(c)
+	if err != nil {
+		return err
+	}
+	d, err := c.CreateDispatch(context.Background(), repo, in, opts.dryRun)
+	if err != nil {
+		return err
+	}
+	if opts.dryRun {
+		return emitDryRun(d)
+	}
+	return emit(d)
+}
+
+// ---------- inbox ----------
+
+func agentInboxCmd() *cobra.Command {
+	var sessionID string
+	cmd := &cobra.Command{
+		Use:   "inbox",
+		Short: "List dispatches queued for this session (and its agent identity)",
+		Long: `Show the open dispatches (pending or delivered) aimed at this session
+or at the agent identity behind it. --session defaults to
+$CLAUDE_CODE_SESSION_ID. Ack a dispatch with ` + "`bacio agent ack <id>`" + `.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireLocalForAgent("inbox"); err != nil {
+				return err
+			}
+			sid, err := resolveSessionID(sessionID)
+			if err != nil {
+				return err
+			}
+			c, err := openClient()
+			if err != nil {
+				return err
+			}
+			defer c.Close()
+			ds, err := c.InboxDispatches(context.Background(), sid)
+			if err != nil {
+				return err
+			}
+			if opts.output == outputJSON && ds == nil {
+				ds = []*model.AgentDispatch{}
+			}
+			return emit(ds)
+		},
+	}
+	cmd.Flags().StringVar(&sessionID, "session", "", "session id (default: $CLAUDE_CODE_SESSION_ID)")
+	return cmd
+}
+
+// ---------- ack ----------
+
+func agentAckCmd() *cobra.Command {
+	var (
+		note, rawInput string
+	)
+	cmd := &cobra.Command{
+		Use:   "ack <dispatch-id>",
+		Short: "Acknowledge a dispatch and record an optional reply note",
+		Args:  cobra.RangeArgs(0, 1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			raw, err := parseJSONInput(cmd, args, rawInput, "note")
+			if err != nil {
+				return err
+			}
+			if raw != nil {
+				in, _, err := inputio.DecodeStrict[inputs.AgentAckInput](raw)
+				if err != nil {
+					return err
+				}
+				return runAgentAck(*in)
+			}
+			if len(args) != 1 {
+				return fmt.Errorf("requires <dispatch-id> positional or --json")
+			}
+			id, err := strconv.ParseInt(args[0], 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid dispatch id %q: %w", args[0], err)
+			}
+			return runAgentAck(inputs.AgentAckInput{ID: id, Note: note})
+		},
+	}
+	cmd.Flags().StringVar(&note, "note", "", "free-form reply recorded against the dispatch")
+	addInputFlag(cmd, &rawInput)
+	return cmd
+}
+
+func runAgentAck(in inputs.AgentAckInput) error {
+	if err := requireLocalForAgent("ack"); err != nil {
+		return err
+	}
+	c, err := openClient()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	d, err := c.AckDispatch(context.Background(), in, opts.dryRun)
+	if err != nil {
+		return err
+	}
+	if opts.dryRun {
+		return emitDryRun(d)
+	}
+	return emit(d)
 }
 
 // ---------- list ----------
