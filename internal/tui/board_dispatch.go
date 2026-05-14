@@ -47,14 +47,40 @@ func (b *boardView) openDispatchPicker() {
 		b.err = err
 		return
 	}
+	// A busy session (one holding an open claim) isn't a valid dispatch
+	// target — pull the repo's open claims once and mark each session.
+	openClaims, err := b.store.OpenClaimsBySession(b.repo.ID)
+	if err != nil {
+		b.err = err
+		return
+	}
+	busy := make([]string, len(sessions))
+	for i, s := range sessions {
+		if isBusy, issueKey := model.SessionBusy(openClaims[s.ID]); isBusy {
+			busy[i] = issueKey
+		}
+	}
 	b.dispatchIssue = iss
 	b.dispatchSessions = sessions
+	b.dispatchBusy = busy
 	b.dispatchPicker = true
 	b.dispatchStep = 0
-	b.dispatchRow = 0
+	b.dispatchRow = b.firstSelectableDispatchRow()
 	b.dispatchAgentRow = 0
 	b.dispatchMode = ""
 	b.dispatchNote = ""
+}
+
+// firstSelectableDispatchRow returns the index of the first non-busy
+// session, or 0 when every session is busy (the picker then refuses
+// enter and shows the "all agents busy" message).
+func (b *boardView) firstSelectableDispatchRow() int {
+	for i, reason := range b.dispatchBusy {
+		if reason == "" {
+			return i
+		}
+	}
+	return 0
 }
 
 // updateDispatchPicker drives the three-step picker: agent -> mode ->
@@ -78,27 +104,42 @@ func (b *boardView) updateDispatchAgentStep(key tea.KeyMsg) {
 	n := len(b.dispatchSessions)
 	switch key.String() {
 	case "j", "down":
-		if b.dispatchRow < n-1 {
-			b.dispatchRow++
+		for r := b.dispatchRow + 1; r < n; r++ {
+			if !b.dispatchRowBusy(r) {
+				b.dispatchRow = r
+				break
+			}
 		}
 	case "k", "up":
-		if b.dispatchRow > 0 {
-			b.dispatchRow--
+		for r := b.dispatchRow - 1; r >= 0; r-- {
+			if !b.dispatchRowBusy(r) {
+				b.dispatchRow = r
+				break
+			}
 		}
 	case "g", "home":
-		b.dispatchRow = 0
+		b.dispatchRow = b.firstSelectableDispatchRow()
 	case "G", "end":
-		if n > 0 {
-			b.dispatchRow = n - 1
+		for r := n - 1; r >= 0; r-- {
+			if !b.dispatchRowBusy(r) {
+				b.dispatchRow = r
+				break
+			}
 		}
 	case "enter", " ":
-		if n == 0 {
+		if n == 0 || b.dispatchRowBusy(b.dispatchRow) {
 			return
 		}
 		b.dispatchAgentRow = b.dispatchRow
 		b.dispatchStep = 1
 		b.dispatchRow = 0
 	}
+}
+
+// dispatchRowBusy reports whether the session at row r is busy (and so
+// not a valid dispatch target).
+func (b *boardView) dispatchRowBusy(r int) bool {
+	return r >= 0 && r < len(b.dispatchBusy) && b.dispatchBusy[r] != ""
 }
 
 func (b *boardView) updateDispatchModeStep(key tea.KeyMsg) {
@@ -151,6 +192,13 @@ func (b *boardView) updateDispatchNoteStep(key tea.KeyMsg) {
 // surface in the footer rather than crashing the loop.
 func (b *boardView) confirmDispatch() {
 	if b.dispatchIssue == nil || b.dispatchAgentRow >= len(b.dispatchSessions) {
+		return
+	}
+	// Defensive guard: the chosen session may have gone busy while the
+	// user was navigating the mode/note steps. Re-check before writing.
+	if b.dispatchRowBusy(b.dispatchAgentRow) {
+		sess := b.dispatchSessions[b.dispatchAgentRow]
+		b.err = fmt.Errorf("send to agent: %s is now busy (working %s) — pick another", agentLabel(sess), b.dispatchBusy[b.dispatchAgentRow])
 		return
 	}
 	sess := b.dispatchSessions[b.dispatchAgentRow]
@@ -238,15 +286,23 @@ func (b *boardView) viewDispatchPicker(width, height int) string {
 		rows = append(rows, boldStyle.Render("Send "+issueKey+" → pick an agent"), "")
 		if len(b.dispatchSessions) == 0 {
 			rows = append(rows, mutedStyle.Italic(true).Render("(no live agent sessions — esc to close)"))
+		} else if b.firstSelectableDispatchRow() == 0 && b.dispatchRowBusy(0) {
+			rows = append(rows, mutedStyle.Italic(true).Render("(all agents are busy — no available dispatch targets)"))
+			rows = append(rows, "")
 		}
 		for i, s := range b.dispatchSessions {
 			label := fmt.Sprintf("%-22s %-16s %s",
 				truncate(agentLabel(s), 22),
 				truncate(dashIfEmpty(s.Model), 16),
 				truncate(dashIfEmpty(s.Branch), 12))
-			if i == b.dispatchRow {
+			switch {
+			case b.dispatchRowBusy(i):
+				busyLabel := fmt.Sprintf("%-22s busy · working %s",
+					truncate(agentLabel(s), 22), b.dispatchBusy[i])
+				rows = append(rows, rowStyle.Render(mutedStyle.Render(busyLabel)))
+			case i == b.dispatchRow:
 				rows = append(rows, selStyle.Render(label))
-			} else {
+			default:
 				rows = append(rows, rowStyle.Render(label))
 			}
 		}

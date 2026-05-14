@@ -71,7 +71,7 @@ func TestEndAgentSessionReleasesClaims(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	if _, _, err := s.AddAgentClaim("sess-2", iss.ID); err != nil {
+	if _, _, err := s.AddAgentClaim("sess-2", iss.ID, ""); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 	if _, err := s.EndAgentSession("sess-2", string(model.EndReasonStop)); err != nil {
@@ -108,7 +108,7 @@ func TestAddAgentClaimRejectsEndedSession(t *testing.T) {
 	if _, err := s.EndAgentSession("sess-3", string(model.EndReasonStop)); err != nil {
 		t.Fatalf("end: %v", err)
 	}
-	if _, _, err := s.AddAgentClaim("sess-3", iss.ID); err == nil {
+	if _, _, err := s.AddAgentClaim("sess-3", iss.ID, ""); err == nil {
 		t.Fatalf("expected AddAgentClaim to reject ended session, got nil")
 	}
 }
@@ -193,7 +193,7 @@ func TestRapidClaimReleaseClaim(t *testing.T) {
 	// Three claim/release cycles back-to-back — well within a single
 	// SQLite-granular second on any plausible hardware.
 	for i := 0; i < 3; i++ {
-		if _, _, err := s.AddAgentClaim("rapid", iss.ID); err != nil {
+		if _, _, err := s.AddAgentClaim("rapid", iss.ID, ""); err != nil {
 			t.Fatalf("claim cycle %d: %v", i, err)
 		}
 		if _, err := s.ReleaseAgentClaim("rapid", iss.ID); err != nil {
@@ -213,14 +213,14 @@ func TestAddAgentClaimIdempotent(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	first, created, err := s.AddAgentClaim("idem", iss.ID)
+	first, created, err := s.AddAgentClaim("idem", iss.ID, "")
 	if err != nil {
 		t.Fatalf("first claim: %v", err)
 	}
 	if !created {
 		t.Fatalf("expected created=true for the first claim")
 	}
-	second, created, err := s.AddAgentClaim("idem", iss.ID)
+	second, created, err := s.AddAgentClaim("idem", iss.ID, "")
 	if err != nil {
 		t.Fatalf("second claim: %v", err)
 	}
@@ -352,6 +352,152 @@ func TestSessionUpsertPreservesAgentID(t *testing.T) {
 	}
 	if got.AgentID == nil || *got.AgentID != ag.ID {
 		t.Fatalf("AgentID was clobbered: got %v, want %d", got.AgentID, ag.ID)
+	}
+}
+
+// TestClaimPromptRoundTrip locks in that a prompt passed to AddAgentClaim
+// round-trips through getAgentClaimByID / ListAgentClaims, and that a
+// re-claim with a fresher prompt updates it in place while still
+// reporting created=false (so the audit log isn't flooded).
+func TestClaimPromptRoundTrip(t *testing.T) {
+	s, repo, iss := seedRepoAndIssue(t)
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "prompt-sess", RepoID: repo.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	first, created, err := s.AddAgentClaim("prompt-sess", iss.ID, "do the thing")
+	if err != nil {
+		t.Fatalf("first claim: %v", err)
+	}
+	if !created || first.Prompt != "do the thing" {
+		t.Fatalf("first claim: created=%v prompt=%q, want created=true prompt=%q", created, first.Prompt, "do the thing")
+	}
+	// Re-claim with a fresher prompt — no-op claim, but prompt updates.
+	second, created, err := s.AddAgentClaim("prompt-sess", iss.ID, "do the other thing")
+	if err != nil {
+		t.Fatalf("re-claim: %v", err)
+	}
+	if created {
+		t.Fatalf("expected created=false on re-claim")
+	}
+	if second.ID != first.ID || second.Prompt != "do the other thing" {
+		t.Fatalf("re-claim: id %d→%d prompt=%q, want same id and updated prompt", first.ID, second.ID, second.Prompt)
+	}
+	// Re-claim with an empty prompt must NOT clear the stored one.
+	third, _, err := s.AddAgentClaim("prompt-sess", iss.ID, "")
+	if err != nil {
+		t.Fatalf("re-claim empty: %v", err)
+	}
+	if third.Prompt != "do the other thing" {
+		t.Fatalf("empty re-claim clobbered prompt: got %q", third.Prompt)
+	}
+}
+
+// TestListClaimsForIssue locks in that the per-issue claim list returns
+// every claim (open + released) newest-first, carrying the prompt and
+// the agent identity slug behind each claiming session.
+func TestListClaimsForIssue(t *testing.T) {
+	s, repo, iss := seedRepoAndIssue(t)
+	ag, _, err := s.UpsertAgent("merry-jackal@claude.shiny", true)
+	if err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "claims-a", RepoID: repo.ID, AgentID: &ag.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register a: %v", err)
+	}
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "claims-b", RepoID: repo.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register b: %v", err)
+	}
+	if _, _, err := s.AddAgentClaim("claims-a", iss.ID, "first claim"); err != nil {
+		t.Fatalf("claim a: %v", err)
+	}
+	if _, err := s.ReleaseAgentClaim("claims-a", iss.ID); err != nil {
+		t.Fatalf("release a: %v", err)
+	}
+	if _, _, err := s.AddAgentClaim("claims-b", iss.ID, "second claim"); err != nil {
+		t.Fatalf("claim b: %v", err)
+	}
+	claims, err := s.ListClaimsForIssue(iss.ID)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(claims) != 2 {
+		t.Fatalf("got %d claims, want 2", len(claims))
+	}
+	// Newest first: claims-b's claim.
+	if claims[0].SessionID != "claims-b" || claims[0].Prompt != "second claim" {
+		t.Fatalf("claims[0] = %q/%q, want claims-b/second claim", claims[0].SessionID, claims[0].Prompt)
+	}
+	if claims[0].ReleasedAt != nil {
+		t.Fatalf("claims[0] should be open")
+	}
+	if claims[1].SessionID != "claims-a" || claims[1].Prompt != "first claim" {
+		t.Fatalf("claims[1] = %q/%q, want claims-a/first claim", claims[1].SessionID, claims[1].Prompt)
+	}
+	if claims[1].ReleasedAt == nil {
+		t.Fatalf("claims[1] should be released")
+	}
+	if claims[1].AgentName != "merry-jackal@claude.shiny" {
+		t.Fatalf("claims[1].AgentName = %q, want merry-jackal@claude.shiny", claims[1].AgentName)
+	}
+}
+
+// TestOpenClaimsBySession locks in that the repo-wide open-claim lookup
+// buckets claims by session PK, includes only open claims, and excludes
+// claims held by ended sessions.
+func TestOpenClaimsBySession(t *testing.T) {
+	s, repo, iss := seedRepoAndIssue(t)
+	iss2, err := s.CreateIssue(repo.ID, nil, "stub 2", "", model.StateTodo, nil)
+	if err != nil {
+		t.Fatalf("create issue 2: %v", err)
+	}
+	busy, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "busy-sess", RepoID: repo.ID, Actor: "agent-claude",
+	})
+	if err != nil {
+		t.Fatalf("register busy: %v", err)
+	}
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "ended-sess", RepoID: repo.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register ended: %v", err)
+	}
+	if _, _, err := s.AddAgentClaim("busy-sess", iss.ID, "p1"); err != nil {
+		t.Fatalf("claim busy: %v", err)
+	}
+	// A released claim must not count.
+	if _, _, err := s.AddAgentClaim("busy-sess", iss2.ID, "p2"); err != nil {
+		t.Fatalf("claim busy 2: %v", err)
+	}
+	if _, err := s.ReleaseAgentClaim("busy-sess", iss2.ID); err != nil {
+		t.Fatalf("release busy 2: %v", err)
+	}
+	// An ended session's claim must not count (EndAgentSession releases it).
+	if _, _, err := s.AddAgentClaim("ended-sess", iss2.ID, "p3"); err != nil {
+		t.Fatalf("claim ended: %v", err)
+	}
+	if _, err := s.EndAgentSession("ended-sess", string(model.EndReasonStop)); err != nil {
+		t.Fatalf("end: %v", err)
+	}
+	bySession, err := s.OpenClaimsBySession(repo.ID)
+	if err != nil {
+		t.Fatalf("open claims: %v", err)
+	}
+	if len(bySession) != 1 {
+		t.Fatalf("got %d sessions with open claims, want 1", len(bySession))
+	}
+	open := bySession[busy.ID]
+	if len(open) != 1 || open[0].IssueID != iss.ID {
+		t.Fatalf("busy session open claims = %+v, want one claim on iss", open)
+	}
+	gotBusy, key := model.SessionBusy(open)
+	if !gotBusy || key != open[0].IssueKey {
+		t.Fatalf("SessionBusy = (%v, %q), want (true, %q)", gotBusy, key, open[0].IssueKey)
 	}
 }
 

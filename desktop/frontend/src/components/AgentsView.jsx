@@ -47,6 +47,9 @@ export default function AgentsView({ agents, onRefresh }) {
               >
                 <span className="mk-agent-name">{name}</span>
                 <span className={`mk-pill mk-status-${a.status}`}>{a.status}</span>
+                {a.busy && (
+                  <span className="mk-pill mk-status-busy">busy · {a.busyIssue}</span>
+                )}
                 <span className="mk-agent-meta">
                   {a.model || '—'} · {a.branch || '—'} · seen {relTime(a.lastSeenAt)}
                 </span>
@@ -63,7 +66,10 @@ export default function AgentsView({ agents, onRefresh }) {
                     <div className="mk-meta-empty">none</div>
                   ) : (
                     a.claims.map((c) => (
-                      <div key={c.issueKey} className="mk-mono">{c.issueKey}</div>
+                      <div key={c.issueKey} className="mk-agent-claim">
+                        <span className="mk-mono">{c.issueKey}</span>
+                        {c.prompt && <span className="mk-agent-claim-prompt">{c.prompt}</span>}
+                      </div>
                     ))
                   )}
 

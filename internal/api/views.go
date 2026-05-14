@@ -15,6 +15,11 @@ type IssueView struct {
 	Relations    *store.IssueRelations `json:"relations"`
 	PullRequests []*model.PullRequest  `json:"pull_requests"`
 	Documents    []*model.DocumentLink `json:"documents"`
+	// Claimants is the per-issue agent-claim history (open + released,
+	// newest first); Taken is the derived "an agent is actively holding
+	// this" signal — true iff Claimants has an open claim.
+	Claimants []*model.AgentClaim `json:"claimants"`
+	Taken     bool                `json:"taken"`
 }
 
 type CascadeCount struct {
@@ -87,7 +92,12 @@ type IssueBrief struct {
 	PullRequests []*model.PullRequest  `json:"pull_requests"`
 	Documents    []*BriefDoc           `json:"documents"`
 	Comments     []*model.Comment      `json:"comments"`
-	Warnings     []string              `json:"warnings"`
+	// Claimants is the per-issue agent-claim history (open + released,
+	// newest first), each carrying the prompt that session ran; Taken is
+	// the derived "an agent is actively holding this" signal.
+	Claimants []*model.AgentClaim `json:"claimants"`
+	Taken     bool                `json:"taken"`
+	Warnings  []string            `json:"warnings"`
 }
 
 // BriefDoc mirrors internal/cli/issue.go:briefDoc — one linked document

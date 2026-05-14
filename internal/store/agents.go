@@ -264,12 +264,19 @@ func (s *Store) EndAgentSession(sessionID, reason string) (*model.AgentSession, 
 // ended (an ended agent has no business claiming new work). Allows
 // multiple concurrent open claims by different sessions on the same
 // issue (pairing/review). A session re-claiming an issue it already
-// has open is a no-op (returns the existing claim with created=false).
+// has open is a no-op (returns the existing claim with created=false) —
+// except that a non-empty prompt on the re-claim overwrites the stored
+// prompt in place, so a re-claim with a fresher instruction is
+// recorded without flooding the audit log.
 // The `created` flag lets callers (the local client) skip writing an
 // audit row for no-op re-claims — otherwise a poll loop would flood
 // the history table with duplicate `agent.claim` entries.
-func (s *Store) AddAgentClaim(sessionID string, issueID int64) (*model.AgentClaim, bool, error) {
+func (s *Store) AddAgentClaim(sessionID string, issueID int64, prompt string) (*model.AgentClaim, bool, error) {
 	if _, err := ValidateSessionID(sessionID); err != nil {
+		return nil, false, err
+	}
+	prompt, err := ValidateBody(prompt, "prompt", false)
+	if err != nil {
 		return nil, false, err
 	}
 	tx, err := s.DB.Begin()
@@ -294,6 +301,14 @@ func (s *Store) AddAgentClaim(sessionID string, issueID int64) (*model.AgentClai
 	var existing int64
 	err = tx.QueryRow(`SELECT id FROM agent_claims WHERE session_pk = ? AND issue_id = ? AND released_at IS NULL`, sessPK, issueID).Scan(&existing)
 	if err == nil {
+		// No-op re-claim. If the caller supplied a fresher prompt, update
+		// it in place — the claim row still counts as "not created" so the
+		// audit log isn't flooded by a poll loop.
+		if prompt != "" {
+			if _, err := tx.Exec(`UPDATE agent_claims SET prompt = ? WHERE id = ?`, prompt, existing); err != nil {
+				return nil, false, err
+			}
+		}
 		if err := tx.Commit(); err != nil {
 			return nil, false, err
 		}
@@ -305,8 +320,8 @@ func (s *Store) AddAgentClaim(sessionID string, issueID int64) (*model.AgentClai
 	}
 
 	res, err := tx.Exec(
-		`INSERT INTO agent_claims (session_pk, issue_id) VALUES (?, ?)`,
-		sessPK, issueID,
+		`INSERT INTO agent_claims (session_pk, issue_id, prompt) VALUES (?, ?, ?)`,
+		sessPK, issueID, prompt,
 	)
 	if err != nil {
 		return nil, false, err
@@ -487,9 +502,10 @@ func (s *Store) ResolveAgentSession(idOrPrefix string) (*model.AgentSession, err
 // caller can render the canonical PREFIX-N key without a second query.
 func (s *Store) ListAgentClaims(sessionPK int64) ([]*model.AgentClaim, error) {
 	rows, err := s.DB.Query(
-		`SELECT c.id, c.session_pk, s.session_id, c.issue_id, r.prefix || '-' || i.number, c.claimed_at, c.released_at
+		`SELECT c.id, c.session_pk, s.session_id, a.name, c.issue_id, r.prefix || '-' || i.number, c.prompt, c.claimed_at, c.released_at
 		FROM agent_claims c
 		JOIN agent_sessions s ON s.id = c.session_pk
+		LEFT JOIN agents a ON a.id = s.agent_id
 		JOIN issues i ON i.id = c.issue_id
 		JOIN repos r ON r.id = i.repo_id
 		WHERE c.session_pk = ? ORDER BY c.claimed_at DESC`, sessionPK,
@@ -500,15 +516,72 @@ func (s *Store) ListAgentClaims(sessionPK int64) ([]*model.AgentClaim, error) {
 	defer rows.Close()
 	var out []*model.AgentClaim
 	for rows.Next() {
-		var c model.AgentClaim
-		var rel sql.NullTime
-		if err := rows.Scan(&c.ID, &c.SessionPK, &c.SessionID, &c.IssueID, &c.IssueKey, &c.ClaimedAt, &rel); err != nil {
+		c, err := scanAgentClaim(rows)
+		if err != nil {
 			return nil, err
 		}
-		if rel.Valid {
-			c.ReleasedAt = &rel.Time
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// ListClaimsForIssue returns every claim against an issue — open and
+// released — newest claim first, joined to the session id and the
+// agent identity slug behind it. This is the "session list against
+// each issue": the history of who has worked the issue and the prompt
+// they ran.
+func (s *Store) ListClaimsForIssue(issueID int64) ([]*model.AgentClaim, error) {
+	rows, err := s.DB.Query(
+		`SELECT c.id, c.session_pk, s.session_id, a.name, c.issue_id, r.prefix || '-' || i.number, c.prompt, c.claimed_at, c.released_at
+		FROM agent_claims c
+		JOIN agent_sessions s ON s.id = c.session_pk
+		LEFT JOIN agents a ON a.id = s.agent_id
+		JOIN issues i ON i.id = c.issue_id
+		JOIN repos r ON r.id = i.repo_id
+		WHERE c.issue_id = ? ORDER BY c.claimed_at DESC`, issueID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.AgentClaim
+	for rows.Next() {
+		c, err := scanAgentClaim(rows)
+		if err != nil {
+			return nil, err
 		}
-		out = append(out, &c)
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// OpenClaimsBySession returns the open (unreleased) claims for every
+// alive session in a repo, keyed by session PK. Lets the TUI/desktop
+// agent views and dispatch pickers compute "busy" for a whole repo in
+// one query instead of an N+1 ListAgentClaims loop. Claims held by
+// ended sessions are excluded — an ended session isn't busy.
+func (s *Store) OpenClaimsBySession(repoID int64) (map[int64][]*model.AgentClaim, error) {
+	rows, err := s.DB.Query(
+		`SELECT c.id, c.session_pk, s.session_id, a.name, c.issue_id, r.prefix || '-' || i.number, c.prompt, c.claimed_at, c.released_at
+		FROM agent_claims c
+		JOIN agent_sessions s ON s.id = c.session_pk
+		LEFT JOIN agents a ON a.id = s.agent_id
+		JOIN issues i ON i.id = c.issue_id
+		JOIN repos r ON r.id = i.repo_id
+		WHERE c.released_at IS NULL AND s.ended_at IS NULL AND s.repo_id = ?
+		ORDER BY c.claimed_at DESC`, repoID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[int64][]*model.AgentClaim)
+	for rows.Next() {
+		c, err := scanAgentClaim(rows)
+		if err != nil {
+			return nil, err
+		}
+		out[c.SessionPK] = append(out[c.SessionPK], c)
 	}
 	return out, rows.Err()
 }
@@ -522,21 +595,37 @@ func pruneAgentSessions(db *sql.DB, retention time.Duration) error {
 }
 
 func (s *Store) getAgentClaimByID(id int64) (*model.AgentClaim, error) {
-	var c model.AgentClaim
-	var rel sql.NullTime
-	err := s.DB.QueryRow(
-		`SELECT c.id, c.session_pk, s.session_id, c.issue_id, r.prefix || '-' || i.number, c.claimed_at, c.released_at
+	row := s.DB.QueryRow(
+		`SELECT c.id, c.session_pk, s.session_id, a.name, c.issue_id, r.prefix || '-' || i.number, c.prompt, c.claimed_at, c.released_at
 		FROM agent_claims c
 		JOIN agent_sessions s ON s.id = c.session_pk
+		LEFT JOIN agents a ON a.id = s.agent_id
 		JOIN issues i ON i.id = c.issue_id
 		JOIN repos r ON r.id = i.repo_id
 		WHERE c.id = ?`, id,
-	).Scan(&c.ID, &c.SessionPK, &c.SessionID, &c.IssueID, &c.IssueKey, &c.ClaimedAt, &rel)
+	)
+	c, err := scanAgentClaim(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, err
+	}
+	return c, nil
+}
+
+// scanAgentClaim reads one agent_claims row in the canonical column
+// order shared by every claim query: id, session_pk, session_id,
+// agent_name, issue_id, issue_key, prompt, claimed_at, released_at.
+func scanAgentClaim(r rowScanner) (*model.AgentClaim, error) {
+	var c model.AgentClaim
+	var agentName sql.NullString
+	var rel sql.NullTime
+	if err := r.Scan(&c.ID, &c.SessionPK, &c.SessionID, &agentName, &c.IssueID, &c.IssueKey, &c.Prompt, &c.ClaimedAt, &rel); err != nil {
+		return nil, err
+	}
+	if agentName.Valid {
+		c.AgentName = agentName.String
 	}
 	if rel.Valid {
 		c.ReleasedAt = &rel.Time

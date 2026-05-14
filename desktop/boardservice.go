@@ -70,21 +70,38 @@ type PRDTO struct {
 
 // IssueDetail is the issue-drawer payload for a single issue.
 type IssueDetail struct {
-	Key          string       `json:"key"`
-	Column       string       `json:"column"`
-	ColumnLabel  string       `json:"columnLabel"`
-	Title        string       `json:"title"`
-	Description  string       `json:"description"`
-	Tags         []string     `json:"tags"`
-	Assignees    []string     `json:"assignees"`
-	Claude       bool         `json:"claude"`
-	Comments     []CommentDTO `json:"comments"`
-	PullRequests []PRDTO      `json:"pullRequests"`
+	Key          string         `json:"key"`
+	Column       string         `json:"column"`
+	ColumnLabel  string         `json:"columnLabel"`
+	Title        string         `json:"title"`
+	Description  string         `json:"description"`
+	Tags         []string       `json:"tags"`
+	Assignees    []string       `json:"assignees"`
+	Claude       bool           `json:"claude"`
+	Comments     []CommentDTO   `json:"comments"`
+	PullRequests []PRDTO        `json:"pullRequests"`
+	Claimants    []ClaimantDTO  `json:"claimants"`
+	// Taken is the derived "an agent is actively holding this" signal —
+	// true iff Claimants has an open (unreleased) claim.
+	Taken bool `json:"taken"`
+}
+
+// ClaimantDTO is one entry in an issue's claim history — a session that
+// has claimed the issue, with the prompt it ran and whether the claim
+// is still open.
+type ClaimantDTO struct {
+	SessionID  string     `json:"sessionId"`
+	AgentName  string     `json:"agentName"`
+	Prompt     string     `json:"prompt"`
+	ClaimedAt  time.Time  `json:"claimedAt"`
+	ReleasedAt *time.Time `json:"releasedAt"`
+	Open       bool       `json:"open"`
 }
 
 // ClaimDTO is one open agent claim, shaped for the Agents screen.
 type ClaimDTO struct {
 	IssueKey  string    `json:"issueKey"`
+	Prompt    string    `json:"prompt"`
 	ClaimedAt time.Time `json:"claimedAt"`
 }
 
@@ -105,13 +122,19 @@ type DispatchDTO struct {
 // carrying its open claims and the dispatches aimed at it so the
 // frontend can render the drill-down without a second round trip.
 type AgentCard struct {
-	SessionID  string        `json:"sessionId"`
-	AgentName  string        `json:"agentName"` // identity slug; "" if none
-	Actor      string        `json:"actor"`
-	Model      string        `json:"model"`
-	Branch     string        `json:"branch"`
-	RepoPrefix string        `json:"repoPrefix"`
-	Status     string        `json:"status"` // active | idle | ended
+	SessionID  string `json:"sessionId"`
+	AgentName  string `json:"agentName"` // identity slug; "" if none
+	Actor      string `json:"actor"`
+	Model      string `json:"model"`
+	Branch     string `json:"branch"`
+	RepoPrefix string `json:"repoPrefix"`
+	Status     string `json:"status"` // active | idle | ended
+	// Busy is true while the session holds an open claim — orthogonal to
+	// Status (a session can be active+busy or idle+busy). BusyIssue is
+	// the issue key it's working, for a "busy (BACI-12)" label. A busy
+	// session is not a valid dispatch target.
+	Busy       bool          `json:"busy"`
+	BusyIssue  string        `json:"busyIssue"`
 	LastSeenAt time.Time     `json:"lastSeenAt"`
 	Claims     []ClaimDTO    `json:"claims"`
 	Dispatches []DispatchDTO `json:"dispatches"`
@@ -289,6 +312,17 @@ func (b *BoardService) GetIssue(repoPrefix, key string) (IssueDetail, error) {
 	for _, p := range view.PullRequests {
 		prs = append(prs, PRDTO{URL: p.URL})
 	}
+	claimants := make([]ClaimantDTO, 0, len(view.Claimants))
+	for _, c := range view.Claimants {
+		claimants = append(claimants, ClaimantDTO{
+			SessionID:  c.SessionID,
+			AgentName:  c.AgentName,
+			Prompt:     c.Prompt,
+			ClaimedAt:  c.ClaimedAt,
+			ReleasedAt: c.ReleasedAt,
+			Open:       c.ReleasedAt == nil,
+		})
+	}
 	return IssueDetail{
 		Key:          iss.Key,
 		Column:       string(iss.State),
@@ -300,6 +334,8 @@ func (b *BoardService) GetIssue(repoPrefix, key string) (IssueDetail, error) {
 		Claude:       iss.Assignee == "claude",
 		Comments:     comments,
 		PullRequests: prs,
+		Claimants:    claimants,
+		Taken:        view.Taken,
 	}, nil
 }
 
@@ -385,10 +421,20 @@ func (b *BoardService) ListAgents(repoPrefix string) ([]AgentCard, error) {
 		if err != nil {
 			return nil, err
 		}
+		var openClaims []*model.AgentClaim
 		for _, c := range view.Claims {
 			if c.ReleasedAt == nil {
-				card.Claims = append(card.Claims, ClaimDTO{IssueKey: c.IssueKey, ClaimedAt: c.ClaimedAt})
+				openClaims = append(openClaims, c)
+				card.Claims = append(card.Claims, ClaimDTO{
+					IssueKey: c.IssueKey, Prompt: c.Prompt, ClaimedAt: c.ClaimedAt,
+				})
 			}
+		}
+		// A session holding an open claim is busy — and an ended session
+		// is never busy (its claims are auto-released on end, but guard
+		// anyway in case of a stale read).
+		if s.EndedAt == nil {
+			card.Busy, card.BusyIssue = model.SessionBusy(openClaims)
 		}
 		for _, d := range allDispatches {
 			if dispatchTargetsSession(d, s) {
@@ -418,6 +464,30 @@ func (b *BoardService) DispatchIssue(repoPrefix, issueKey, agentName, mode, note
 	repo, err := b.client.GetRepoByPrefix(ctx, prefix)
 	if err != nil {
 		return DispatchDTO{}, err
+	}
+	// Service-boundary guard: a busy agent isn't a valid dispatch target.
+	// Reject here so a stale UI can't queue an undeliverable job — mirrors
+	// the TUI confirmDispatch guard. The agent counts as busy only when
+	// every one of its live sessions is busy; one free session is enough.
+	cards, err := b.ListAgents(prefix)
+	if err != nil {
+		return DispatchDTO{}, err
+	}
+	var sawAgent, hasFreeSession bool
+	var busyIssue string
+	for _, c := range cards {
+		if c.AgentName != agentName || c.Status == "ended" {
+			continue
+		}
+		sawAgent = true
+		if c.Busy {
+			busyIssue = c.BusyIssue
+		} else {
+			hasFreeSession = true
+		}
+	}
+	if sawAgent && !hasFreeSession {
+		return DispatchDTO{}, fmt.Errorf("agent %s is busy (working %s) — wait until it's free", agentName, busyIssue)
 	}
 	d, err := b.client.CreateDispatch(ctx, repo, inputs.AgentDispatchInput{
 		TargetAgent: agentName,

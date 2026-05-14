@@ -74,6 +74,16 @@ func (d deps) handleIssueBrief(w http.ResponseWriter, r *http.Request) {
 		comments = []*model.Comment{}
 	}
 
+	claimants, err := d.store.ListClaimsForIssue(iss.ID)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if claimants == nil {
+		claimants = []*model.AgentClaim{}
+	}
+
 	writeJSON(w, http.StatusOK, &IssueBrief{
 		Issue:        iss,
 		Feature:      feat,
@@ -81,6 +91,8 @@ func (d deps) handleIssueBrief(w http.ResponseWriter, r *http.Request) {
 		PullRequests: prs,
 		Documents:    docs,
 		Comments:     comments,
+		Claimants:    claimants,
+		Taken:        anyOpenClaim(claimants),
 		Warnings:     warnings,
 	})
 }

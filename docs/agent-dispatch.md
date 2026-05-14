@@ -113,12 +113,17 @@ show agent.dispatch`, `--dry-run`. Code: `internal/cli/agent.go`
 On the board, select a **todo** issue and press **`x`**. A three-step
 picker opens (`internal/tui/board_dispatch.go`):
 
-1. **pick an agent** — the repo's live sessions
+1. **pick an agent** — the repo's live sessions. Busy sessions (see
+   [Busy agents](#busy-agents--dispatch-target-eligibility)) render
+   greyed with a `busy · working <ISSUE-KEY>` reason and are
+   non-selectable — `j`/`k` skip them and `enter` refuses them.
 2. **pick a mode** — Plan or Implement
 3. **add a note** — optional, free-form
 
 Confirm and the dispatch is written + an `agent.dispatch` history row is
 recorded. `x` on a non-todo issue is a no-op with a one-line hint.
+`confirmDispatch` re-checks the chosen session isn't busy before writing,
+so a session that goes busy mid-picker is caught.
 
 ### From the desktop app
 
@@ -132,6 +137,25 @@ optimistically and the Agents panel counts refresh. Code:
 > The desktop select only lists agents with a persistent identity slug —
 > `DispatchIssue` routes by slug. The TUI picker also targets bare
 > sessions (it passes the session id too).
+
+Busy agents stay in the desktop `<select>` but render as disabled
+options labelled `agent · busy (<ISSUE-KEY>)`, so the user sees *why*
+they can't be picked. When every online agent is busy the form is
+replaced with a "no available agents" message. `DispatchIssue` also
+guards at the service boundary — a dispatch to an agent with no free
+session is rejected with a clear error, so a stale UI can't queue an
+undeliverable job.
+
+### Busy agents — dispatch target eligibility
+
+A **busy** session is one holding an open (unreleased) `agent_claims`
+row — it's actively working a job. Busy is *derived*, never stored: the
+open claim rows are the single source of truth, and `model.SessionBusy`
+computes it. A valid dispatch target is a session that is **not busy**
+(and, once BACI-11 lands, also channel-connected — the eligibility
+predicate is built to compose). Both the TUI picker and the desktop
+drawer exclude busy agents and surface a clear reason rather than
+hiding them silently.
 
 ---
 
@@ -154,21 +178,55 @@ Separately, `bacio agent list` carries a `CHANNEL` column showing
 whether a live `bacio channel` is wired up for the session — see
 [Channel presence](#channel-presence--the-channel-column).
 
+**Busy** is a second, orthogonal signal layered on top of liveness: a
+session holding an open claim is `busy` regardless of whether it's
+`active` or `idle`. It renders as a separate `busy · <ISSUE-KEY>` badge
+beside the liveness pill — see
+[Busy agents](#busy-agents--dispatch-target-eligibility).
+
 ### In the TUI
 
 The **Agents** tab (`internal/tui/agents.go`) shows a **card per
-session**: name/identity, a status pill, model + branch, last-seen,
+session**: name/identity, a status pill (plus a `busy · <ISSUE-KEY>`
+badge when the session holds an open claim), model + branch, last-seen,
 and `N open claims · M pending dispatches`. `j`/`k` move between cards;
-**`enter`** drills into one agent's open claims and the dispatches aimed
-at it; `esc` backs out; `r` reloads.
+**`enter`** drills into one agent's open claims (each with the prompt
+that session ran) and the dispatches aimed at it; `esc` backs out; `r`
+reloads.
 
 ### In the desktop app
 
 The topbar's agents button opens **`AgentsPanel`**
 (`desktop/frontend/src/components/AgentsPanel.jsx`) — the same card per
-session, click a card to expand its claims + dispatches inline. Backed
-by `BoardService.ListAgents`, which bundles the claims and dispatches
-into each `AgentCard` so the drill-down needs no second round trip.
+session, with a `busy · <ISSUE-KEY>` chip when applicable, click a card
+to expand its claims (with prompts) + dispatches inline. Backed by
+`BoardService.ListAgents`, which bundles the claims and dispatches into
+each `AgentCard` so the drill-down needs no second round trip.
+
+---
+
+## Claims, prompts, and the `taken` signal
+
+A **claim** (`agent_claims`) records *"this session is focused on this
+issue"*. Two pieces of state hang off it:
+
+- **`prompt`** — the instruction/dispatch text the agent was working
+  from when it claimed the issue. `bacio agent claim` accepts it via
+  `--prompt` (flag path) or `"prompt"` (`--json` path); a re-claim with
+  a fresher prompt updates it in place without writing a duplicate
+  audit row. Empty when the claim was made without one.
+- **`taken`** — a *derived* signal, never a stored column: an issue is
+  taken iff it has at least one open (unreleased) claim. The claim rows
+  are the single source of truth, so `taken` can't drift.
+
+The **session list against an issue** is `store.ListClaimsForIssue` — a
+query over `agent_claims` for that issue, open and historical, newest
+first, each row carrying the session id, the agent identity slug, and
+the prompt. It surfaces as `claimants` + `taken` on `bacio issue show`
+and `bacio issue brief` (and the matching `bacio api` endpoints), in the
+desktop issue drawer's **Claimed by** section, and in the TUI board
+overlay's attachments pane. Busy status on the Agents screen is the same
+data viewed session-first instead of issue-first.
 
 ---
 

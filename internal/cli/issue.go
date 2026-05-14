@@ -344,6 +344,7 @@ func issueShowCmd() *cobra.Command {
 			return emit(&issueView{
 				Issue: view.Issue, Comments: view.Comments, Relations: view.Relations,
 				PullRequests: view.PullRequests, Documents: view.Documents,
+				Claimants: view.Claimants, Taken: view.Taken,
 			})
 		},
 	}
@@ -573,6 +574,8 @@ type issueBrief struct {
 	PullRequests []*model.PullRequest  `json:"pull_requests"`
 	Documents    []*briefDoc           `json:"documents"`
 	Comments     []*model.Comment      `json:"comments"`
+	Claimants    []*model.AgentClaim   `json:"claimants"`
+	Taken        bool                  `json:"taken"`
 	Warnings     []string              `json:"warnings"`
 }
 
@@ -649,6 +652,8 @@ text. Fetch specific bodies later via bacio doc show.`,
 				PullRequests: view.PullRequests,
 				Documents:    docs,
 				Comments:     view.Comments,
+				Claimants:    view.Claimants,
+				Taken:        view.Taken,
 				Warnings:     view.Warnings,
 			}
 			enc := json.NewEncoder(os.Stdout)

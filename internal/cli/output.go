@@ -212,6 +212,8 @@ type issueView struct {
 	Relations    *store.IssueRelations `json:"relations"`
 	PullRequests []*model.PullRequest  `json:"pull_requests"`
 	Documents    []*model.DocumentLink `json:"documents"`
+	Claimants    []*model.AgentClaim   `json:"claimants"`
+	Taken        bool                  `json:"taken"`
 }
 
 type featureView struct {
@@ -243,6 +245,11 @@ func printIssueView(w io.Writer, v *issueView) error {
 			printDocLinkInEntityContext(w, l)
 		}
 	}
+	if len(v.Claimants) > 0 {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "Claimed by:")
+		printClaimants(w, v.Claimants)
+	}
 	if len(v.Comments) > 0 {
 		fmt.Fprintln(w)
 		fmt.Fprintln(w, "Comments:")
@@ -252,6 +259,42 @@ func printIssueView(w io.Writer, v *issueView) error {
 		}
 	}
 	return nil
+}
+
+// printClaimants renders the per-issue agent-claim history: one line per
+// claim, open ones marked "open", released ones marked "released", each
+// with the prompt the session ran (when there is one).
+func printClaimants(w io.Writer, claimants []*model.AgentClaim) {
+	for _, c := range claimants {
+		shortSess := c.SessionID
+		if len(shortSess) > 12 {
+			shortSess = shortSess[:12]
+		}
+		who := c.AgentName
+		if who == "" {
+			who = shortSess
+		}
+		status := "open"
+		if c.ReleasedAt != nil {
+			status = "released"
+		}
+		fmt.Fprintf(w, "  %s (%s) — claimed %s [%s]\n", who, shortSess, localTime(c.ClaimedAt), status)
+		if c.Prompt != "" {
+			fmt.Fprintf(w, "    prompt: %s\n", claimPromptOneLine(c.Prompt))
+		}
+	}
+}
+
+// claimPromptOneLine collapses a multi-line claim prompt to a single
+// line for the issue-show "Claimed by:" section, capping the length.
+func claimPromptOneLine(s string) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\t", " ")
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) > 120 {
+		s = s[:117] + "..."
+	}
+	return s
 }
 
 func printFeatureView(w io.Writer, v *featureView) error {

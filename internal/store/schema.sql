@@ -248,10 +248,14 @@ CREATE INDEX IF NOT EXISTS idx_agent_sessions_repo_active
 -- agent_claims records which issues an agent is currently focused on.
 -- Multiple agents may claim the same issue (pairing/review). Distinct
 -- from issues.assignee — claim is "intent", assignee is "ownership".
+-- prompt records the instruction/dispatch text the agent was working
+-- from when it claimed the issue. Empty for claims made without one
+-- (e.g. a bare `bacio agent claim` with no --prompt).
 CREATE TABLE IF NOT EXISTS agent_claims (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     session_pk   INTEGER NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
     issue_id     INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+    prompt       TEXT NOT NULL DEFAULT '',
     claimed_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     released_at  DATETIME
 );

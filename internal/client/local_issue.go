@@ -100,10 +100,37 @@ func (c *localClient) ShowIssue(ctx context.Context, repo *model.Repo, key strin
 	if docs == nil {
 		docs = []*model.DocumentLink{}
 	}
+	claimants, taken, err := c.issueClaimants(iss.ID)
+	if err != nil {
+		return nil, err
+	}
 	return &IssueView{
 		Issue: iss, Comments: comments, Relations: rels,
 		PullRequests: prs, Documents: docs,
+		Claimants: claimants, Taken: taken,
 	}, nil
+}
+
+// issueClaimants returns the per-issue agent-claim history (open +
+// released, newest first) and the derived `taken` signal — true iff at
+// least one claim is still open. taken is never stored; the open claim
+// rows are the single source of truth.
+func (c *localClient) issueClaimants(issueID int64) ([]*model.AgentClaim, bool, error) {
+	claimants, err := c.store.ListClaimsForIssue(issueID)
+	if err != nil {
+		return nil, false, err
+	}
+	if claimants == nil {
+		claimants = []*model.AgentClaim{}
+	}
+	taken := false
+	for _, cl := range claimants {
+		if cl.ReleasedAt == nil {
+			taken = true
+			break
+		}
+	}
+	return claimants, taken, nil
 }
 
 func (c *localClient) BriefIssue(ctx context.Context, repo *model.Repo, key string, opts BriefOptions) (*IssueBrief, error) {
@@ -148,6 +175,10 @@ func (c *localClient) BriefIssue(ctx context.Context, repo *model.Repo, key stri
 	if comments == nil {
 		comments = []*model.Comment{}
 	}
+	claimants, taken, err := c.issueClaimants(iss.ID)
+	if err != nil {
+		return nil, err
+	}
 	return &IssueBrief{
 		Issue:        iss,
 		Feature:      feat,
@@ -155,6 +186,8 @@ func (c *localClient) BriefIssue(ctx context.Context, repo *model.Repo, key stri
 		PullRequests: prs,
 		Documents:    docs,
 		Comments:     comments,
+		Claimants:    claimants,
+		Taken:        taken,
 		Warnings:     warnings,
 	}, nil
 }

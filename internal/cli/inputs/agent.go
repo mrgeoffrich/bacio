@@ -44,10 +44,13 @@ type AgentEndInput struct {
 }
 
 // AgentClaimInput is the payload for `bacio agent claim --json`.
-// IssueKey must be canonical (PREFIX-N).
+// IssueKey must be canonical (PREFIX-N). Prompt is the optional
+// instruction/dispatch text the agent is working from — stored on the
+// claim so the issue carries a record of who worked it and why.
 type AgentClaimInput struct {
 	SessionID string `json:"session_id"`
 	IssueKey  string `json:"issue_key"`
+	Prompt    string `json:"prompt,omitempty"`
 }
 
 // AgentReleaseInput is the payload for `bacio agent release --json`.

@@ -87,13 +87,43 @@ type AgentClaim struct {
 	// ID / SessionPK are server-time fields — `omitempty` so dry-run
 	// projections (which can't know them yet) emit the same JSON shape
 	// as real calls minus the unknown fields.
-	ID         int64      `json:"id,omitempty"`
-	SessionPK  int64      `json:"session_pk,omitempty"`
-	SessionID  string     `json:"session_id,omitempty"`
-	IssueID    int64      `json:"issue_id"`
-	IssueKey   string     `json:"issue_key,omitempty"`
+	ID        int64  `json:"id,omitempty"`
+	SessionPK int64  `json:"session_pk,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+	IssueID   int64  `json:"issue_id"`
+	IssueKey  string `json:"issue_key,omitempty"`
+	// AgentName is the persistent identity slug behind the claiming
+	// session, joined in by the per-issue claim list so a reader can see
+	// who worked an issue without a second lookup. Empty for sessions
+	// registered before the identity layer existed.
+	AgentName string `json:"agent_name,omitempty"`
+	// Prompt is the instruction/dispatch text the agent was working from
+	// when it claimed the issue. Empty for claims made without one.
+	Prompt     string     `json:"prompt,omitempty"`
 	ClaimedAt  time.Time  `json:"claimed_at"`
 	ReleasedAt *time.Time `json:"released_at,omitempty"`
+}
+
+// SessionBusy reports whether a session is actively holding a job —
+// busy iff it has at least one open (unreleased) claim. issueKey is the
+// most-recently-claimed open issue, for a "busy (working BACI-12)"
+// label. Busy is orthogonal to SessionLiveness: a session can be
+// active+busy or idle+busy. openClaims must already be filtered to open
+// claims for one session.
+func SessionBusy(openClaims []*AgentClaim) (busy bool, issueKey string) {
+	var newest *AgentClaim
+	for _, c := range openClaims {
+		if c == nil || c.ReleasedAt != nil {
+			continue
+		}
+		if newest == nil || c.ClaimedAt.After(newest.ClaimedAt) {
+			newest = c
+		}
+	}
+	if newest == nil {
+		return false, ""
+	}
+	return true, newest.IssueKey
 }
 
 // EndReason values reported by `bacio agent end --reason`. Mirrors the
