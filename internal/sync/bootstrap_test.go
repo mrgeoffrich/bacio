@@ -216,22 +216,13 @@ func TestRoundTrip_TwoUsers(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("init A: %v", err)
 	}
-	// .bacio/config.yaml now lives in projectA. Commit it so projectB
-	// can clone and pick it up.
-	for _, args := range [][]string{
-		{"-C", projectA, "add", ".bacio/config.yaml"},
-		{"-C", projectA, "commit", "-m", "add bacio config"},
-	} {
-		if err := exec.Command("git", args...).Run(); err != nil {
-			t.Fatalf("git %v: %v", args, err)
-		}
-	}
-
-	// User B: project (cloned from A's project so .bacio/config.yaml is
-	// preserved), fresh DB, clone.
+	// User B: a separate project repo, fresh DB, clone. .bacio/config.yaml
+	// is machine-local and never shared via git — B passes the remote
+	// to CloneSyncRepo explicitly, just as `bacio sync clone --remote`
+	// does on the command line.
 	projectB := filepath.Join(tdir, "projectB")
-	if err := exec.Command("git", "clone", projectA, projectB).Run(); err != nil {
-		t.Fatalf("clone projectA: %v", err)
+	if err := exec.Command("git", "init", "-b", "main", projectB).Run(); err != nil {
+		t.Fatalf("init projectB: %v", err)
 	}
 	configureSyncRepoIdentity(t, projectB)
 	sB, err := store.Open(":memory:")
@@ -334,20 +325,11 @@ func TestPushRace(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("init A: %v", err)
 	}
-	// commit project's bacio config so B can clone.
-	for _, args := range [][]string{
-		{"-C", projectA, "add", ".bacio/config.yaml"},
-		{"-C", projectA, "commit", "-m", "add bacio config"},
-	} {
-		if err := exec.Command("git", args...).Run(); err != nil {
-			t.Fatalf("git %v: %v", args, err)
-		}
-	}
-
-	// User B clones.
+	// User B joins from a separate project repo, passing the remote
+	// explicitly — .bacio/config.yaml is machine-local, not shared.
 	projectB := filepath.Join(tdir, "projectB")
-	if err := exec.Command("git", "clone", projectA, projectB).Run(); err != nil {
-		t.Fatalf("clone projectA: %v", err)
+	if err := exec.Command("git", "init", "-b", "main", projectB).Run(); err != nil {
+		t.Fatalf("init projectB: %v", err)
 	}
 	configureSyncRepoIdentity(t, projectB)
 	sB, err := store.Open(":memory:")

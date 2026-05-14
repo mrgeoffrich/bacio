@@ -33,8 +33,8 @@ and markdown for each record). Run with no subcommand to do a full
 pull → import → export → commit → push cycle.
 
 Two non-overlapping bootstrap flows:
-  bacio sync init <local-path> [--remote URL]   # first time setup
-  bacio sync clone [<local-path>]               # join an existing sync repo
+  bacio sync init <local-path> [--remote URL]      # first time setup
+  bacio sync clone --remote URL [<local-path>]     # join an existing sync repo
 
 The Phase-2 dev tools (bacio sync export / import) remain available as
 hidden commands for low-level debugging.`,
