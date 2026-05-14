@@ -40,6 +40,7 @@ They start in the root `PersistentPreRunE` and flush in `stopProfiling` (`intern
 - Git detection: `internal/git/detect.go` shells out to `git` for repo root + remote URL.
 - TUI: `internal/tui/` — bubbletea v1.3.10 + lipgloss v1.1.0. Shell in `tui.go` owns the tab strip and routes keys; each tab implements the local `view` interface.
 - Desktop app: `desktop/` is a **separate nested Go module** (`github.com/mrgeoffrich/bacio/desktop`) driven by Wails v3 + React + Vite (TypeScript). It is invisible to `go build ./...` from the repo root — build it via `wails3 build` from inside `desktop/`. The durable reference is the `docs-wails-v3-react-research.md` bacio doc; v3 is alpha (pinned to `v3.0.0-alpha.90`) so don't trust hosted docs at `v3.wails.io` blindly.
+  - **Data-refresh model.** `cards` and `agents` are App-owned state (`desktop/frontend/src/App.jsx`); `Board` and `AgentsView` are presentational and read them via props. App orchestrates freshness with three effects: an eager load on repo change, a refresh-on-switch when `activeView` becomes `board`/`agents`, and a `POLL_INTERVAL_MS` (10s) `setInterval` poll that runs only while on those two screens. `FeaturesView`/`DocsView`/`HistoryView` are self-owning — App renders one view at a time, so they re-fetch via their own mount effect on remount. A future change that keeps all views mounted (CSS display-toggle instead of the unmounting ternary) would break refresh-on-switch for the self-owning views.
 
 ## Agent-CLI principles (read before planning a feature)
 
