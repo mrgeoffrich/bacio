@@ -1,6 +1,7 @@
 package model
 
 import (
+	"embed"
 	"fmt"
 	"math/rand/v2"
 	"os"
@@ -219,24 +220,42 @@ func ParseDispatchMode(s string) (DispatchMode, error) {
 // so users know what they can interpolate into a custom template.
 var PromptTemplateTokens = []string{"issue_id", "issue_title", "repo_prefix"}
 
+// promptTemplateFS embeds the shipped default dispatch templates, one
+// plain-text file per stage (prompttemplates/<mode>.txt). Editing those
+// files is how you change a built-in default — no Go change needed.
+//
+//go:embed prompttemplates/*.txt
+var promptTemplateFS embed.FS
+
+// defaultPromptTemplates is the per-stage built-in template, loaded once
+// from promptTemplateFS at package init.
+var defaultPromptTemplates = loadDefaultPromptTemplates()
+
+// loadDefaultPromptTemplates reads prompttemplates/<mode>.txt for every
+// dispatch stage. A missing or blank file is a packaging error, so it
+// panics — the files are embedded, so this can only fail at build time.
+func loadDefaultPromptTemplates() map[DispatchMode]string {
+	out := make(map[DispatchMode]string, len(allDispatchModes))
+	for _, m := range allDispatchModes {
+		b, err := promptTemplateFS.ReadFile("prompttemplates/" + string(m) + ".txt")
+		if err != nil {
+			panic(fmt.Sprintf("model: missing built-in prompt template for dispatch mode %q: %v", m, err))
+		}
+		t := strings.TrimRight(string(b), "\r\n")
+		if strings.TrimSpace(t) == "" {
+			panic(fmt.Sprintf("model: built-in prompt template for dispatch mode %q is empty", m))
+		}
+		out[m] = t
+	}
+	return out
+}
+
 // DefaultPromptTemplate returns the built-in dispatch instruction
 // template for a stage. These are the shipped defaults users edit from;
-// an untyped or unknown mode has no template (returns "").
+// the text lives in internal/model/prompttemplates/<mode>.txt. An
+// untyped or unknown mode has no template (returns "").
 func DefaultPromptTemplate(mode DispatchMode) string {
-	switch mode {
-	case DispatchModePlan:
-		return "Run a planning pass on {{issue_id}}: produce an implementation plan, don't write code yet."
-	case DispatchModeImplement:
-		return "Implement {{issue_id}} end-to-end."
-	case DispatchModeReview:
-		return "Review the work on {{issue_id}}: check correctness, tests, and adherence to the issue's acceptance criteria. Report findings, don't change code."
-	case DispatchModeShip:
-		return "Ship {{issue_id}}: run the final checks, commit, and open or update the PR."
-	case DispatchModeFixReview:
-		return "Address the review feedback on {{issue_id}} and push the fixes."
-	default:
-		return ""
-	}
+	return defaultPromptTemplates[mode]
 }
 
 // RenderPromptTemplate substitutes {{token}} placeholders in tmpl from

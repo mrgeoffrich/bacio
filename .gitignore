@@ -15,6 +15,9 @@ go.work.sum
 *.sqlite-wal
 .bacio/
 
+# Local Claude Code config (per-machine, not shared)
+.claude/settings.json
+
 # IDE / OS
 .vscode/
 .idea/

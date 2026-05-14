@@ -1,0 +1,8 @@
+Make sure to use the bacio skill.
+As an agent first claim the issue as yours.
+Make sure main is up to date then create a worktree to work in.
+Then set the status of the issue to "in progress".
+Run a planning pass on {{issue_id}}: produce a thorough implementation plan, don't write code yet. Make sure to capture documentation updates.
+Once you have a plan attach it to the issue as markdown.
+If you have to stop to get user assistance for any reason the issue will automatically be put into the "needs action" state. Once the user answers put the issue back into in progress.
+When the plan has been attached clean up the work tree and throw away any code changes and unclaim the job.
