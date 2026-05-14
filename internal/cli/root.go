@@ -14,17 +14,23 @@ const (
 )
 
 type globalOpts struct {
-	output outputFormat
-	dbPath string
-	user   string
-	dryRun bool
-	remote string
-	token  string
+	output     outputFormat
+	dbPath     string
+	user       string
+	dryRun     bool
+	remote     string
+	token      string
+	cpuProfile string
+	memProfile string
 }
 
 var opts = globalOpts{output: outputText}
 
-func NewRoot() *cobra.Command {
+// NewRoot builds the cobra command tree and returns it alongside a
+// cleanup func. main.go must call the cleanup func after Execute()
+// returns (on success and error alike) so CPU/heap profiles flush even
+// when a command exits via an error path.
+func NewRoot() (*cobra.Command, func()) {
 	root := &cobra.Command{
 		Use:           "bacio",
 		Short:         "bacio: a local-first issue tracker, CLI-first",
@@ -32,7 +38,10 @@ func NewRoot() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			return validateActorFlag()
+			if err := validateActorFlag(); err != nil {
+				return err
+			}
+			return startProfiling()
 		},
 	}
 	root.PersistentFlags().VarP(newOutputFlag(&opts.output), "output", "o", "output format: text|json")
@@ -41,6 +50,10 @@ func NewRoot() *cobra.Command {
 	root.PersistentFlags().BoolVar(&opts.dryRun, "dry-run", false, "validate the request and emit the projected result without writing to the database (no audit log entry)")
 	root.PersistentFlags().StringVar(&opts.remote, "remote", "", "talk to a bacio api server at this URL instead of the local DB; falls back to BACIO_REMOTE")
 	root.PersistentFlags().StringVar(&opts.token, "token", "", "bearer token for the remote API; falls back to BACIO_API_TOKEN")
+	root.PersistentFlags().StringVar(&opts.cpuProfile, "cpuprofile", "", "write a CPU profile to this path (dev/debug)")
+	root.PersistentFlags().StringVar(&opts.memProfile, "memprofile", "", "write a heap profile to this path (dev/debug)")
+	_ = root.PersistentFlags().MarkHidden("cpuprofile")
+	_ = root.PersistentFlags().MarkHidden("memprofile")
 
 	root.AddCommand(
 		newInitCmd(),
@@ -64,5 +77,5 @@ func NewRoot() *cobra.Command {
 		newDemoCmd(),
 		newAgentCmd(),
 	)
-	return root
+	return root, stopProfiling
 }
