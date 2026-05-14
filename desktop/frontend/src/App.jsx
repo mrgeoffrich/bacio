@@ -6,6 +6,7 @@ import FeaturesView from './components/FeaturesView.jsx';
 import AgentsView from './components/AgentsView.jsx';
 import HistoryView from './components/HistoryView.jsx';
 import IssueDrawer from './components/IssueDrawer.jsx';
+import IssueEditModal from './components/IssueEditModal.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
 import SettingsPanel from './components/SettingsPanel.jsx';
 import * as api from './api';
@@ -52,6 +53,7 @@ export default function App() {
   const [activeView, setActiveView] = useState('board'); // 'board' | 'features' | 'docs' | 'agents' | 'history'
   const [cards, setCards] = useState([]);
   const [openIssue, setOpenIssue] = useState(null);
+  const [editIssueOpen, setEditIssueOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [agents, setAgents] = useState([]);
@@ -188,6 +190,19 @@ export default function App() {
     setOpenIssue(null);
   };
 
+  // The edit modal returns the refreshed IssueDetail after each write, so the
+  // drawer behind it reflects the new description / comment immediately.
+  const onIssueSaved = (updated) => {
+    setOpenIssue(updated);
+  };
+
+  // Closing the drawer also dismisses the edit modal — otherwise its open
+  // flag would survive and re-trigger when the next issue is opened.
+  const closeDrawer = () => {
+    setOpenIssue(null);
+    setEditIssueOpen(false);
+  };
+
   return (
     <div className="mk-app">
       <Topbar
@@ -223,10 +238,19 @@ export default function App() {
       <IssueDrawer
         issue={openIssue}
         agents={agents}
-        onClose={() => setOpenIssue(null)}
+        onClose={closeDrawer}
         onSendToAgent={sendToAgent}
         onShip={ship}
+        onEdit={() => setEditIssueOpen(true)}
       />
+      {editIssueOpen && openIssue && (
+        <IssueEditModal
+          issue={openIssue}
+          repoPrefix={activeBoard}
+          onClose={() => setEditIssueOpen(false)}
+          onSaved={onIssueSaved}
+        />
+      )}
       <CommandPalette
         open={paletteOpen}
         cards={cards}
