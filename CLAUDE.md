@@ -20,6 +20,15 @@ The deeper context for both lives in the topic sections below (`## Agent-CLI pri
 - `bacio <subcommand>` from inside any git working tree drives the CLI.
 - The SQLite database lives at `~/.bacio/db.sqlite` by default. Override via `--db <path>` when testing or validating changes.
 
+## Profiling
+
+Two hidden persistent root flags capture pprof profiles — a dev/debug affordance, kept out of `--help`:
+
+- `bacio --cpuprofile <path> tui` — writes a CPU profile covering the whole interactive session.
+- `bacio --memprofile <path> tui` — writes a heap profile (`runtime.GC()` then `pprof.WriteHeapProfile`) of what survived the session.
+
+They start in the root `PersistentPreRunE` and flush in `stopProfiling` (`internal/cli/profiling.go`). `NewRoot()` returns that cleanup func; `cmd/bacio/main.go` runs it after `Execute()` returns — on success and error alike — so profiles flush even when a command exits via an error path (cobra skips `PersistentPostRunE` on error). Open the output with `go tool pprof <path>`. Today the flags are wired for `bacio tui`; extending them to the short-lived CLI commands is a possible follow-up.
+
 ## Architecture in one screen
 
 - Entry point: `cmd/bacio/main.go` → `internal/cli.NewRoot()` (cobra).
