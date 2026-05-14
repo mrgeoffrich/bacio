@@ -699,6 +699,49 @@ export class PRDTO {
     }
 }
 
+/**
+ * PromptTemplateDTO is one editable dispatch prompt template, shaped for
+ * the desktop Settings panel. Body is the effective template (the user's
+ * custom override, or Default when none is set); IsDefault reports
+ * whether Body still matches the built-in default.
+ */
+export class PromptTemplateDTO {
+    "mode": string;
+    "label": string;
+    "body": string;
+    "default": string;
+    "isDefault": boolean;
+
+    /** Creates a new PromptTemplateDTO instance. */
+    constructor($$source: Partial<PromptTemplateDTO> = {}) {
+        if (!("mode" in $$source)) {
+            this["mode"] = "";
+        }
+        if (!("label" in $$source)) {
+            this["label"] = "";
+        }
+        if (!("body" in $$source)) {
+            this["body"] = "";
+        }
+        if (!("default" in $$source)) {
+            this["default"] = "";
+        }
+        if (!("isDefault" in $$source)) {
+            this["isDefault"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new PromptTemplateDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): PromptTemplateDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new PromptTemplateDTO($$parsedSource as Partial<PromptTemplateDTO>);
+    }
+}
+
 // Private type creation functions
 const $$createType0 = ClaimDTO.createFrom;
 const $$createType1 = $Create.Array($$createType0);

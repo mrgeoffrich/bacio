@@ -169,25 +169,34 @@ func ParseDispatchStatus(s string) (DispatchStatus, error) {
 	return "", fmt.Errorf("unknown dispatch status %q (valid: %s)", s, strings.Join(names, ", "))
 }
 
-// DispatchMode marks the intent of a dispatch. plan: investigate the
-// issue and produce an implementation plan, don't change code.
-// implement: carry the work through end-to-end. "" = untyped (the
-// pre-Mode default; delivery treats it as unspecified).
+// DispatchMode marks the intent of a dispatch — one per stage of working
+// a job. plan: investigate the issue and produce an implementation plan,
+// don't change code. implement: carry the work through end-to-end.
+// review: assess finished work, don't change code. ship: final checks,
+// commit, open/update the PR. fix_review: address review feedback and
+// push the fixes. "" = untyped (the pre-Mode default; delivery treats
+// it as unspecified).
 type DispatchMode string
 
 const (
 	DispatchModePlan      DispatchMode = "plan"
 	DispatchModeImplement DispatchMode = "implement"
+	DispatchModeReview    DispatchMode = "review"
+	DispatchModeShip      DispatchMode = "ship"
+	DispatchModeFixReview DispatchMode = "fix_review"
 )
 
-var allDispatchModes = []DispatchMode{DispatchModePlan, DispatchModeImplement}
+var allDispatchModes = []DispatchMode{
+	DispatchModePlan, DispatchModeImplement, DispatchModeReview,
+	DispatchModeShip, DispatchModeFixReview,
+}
 
 func AllDispatchModes() []DispatchMode {
 	return append([]DispatchMode(nil), allDispatchModes...)
 }
 
-// ParseDispatchMode accepts "" (untyped — valid), "plan", or
-// "implement", and rejects anything else.
+// ParseDispatchMode accepts "" (untyped — valid) or one of the canonical
+// stage names, and rejects anything else.
 func ParseDispatchMode(s string) (DispatchMode, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -198,27 +207,80 @@ func ParseDispatchMode(s string) (DispatchMode, error) {
 			return m, nil
 		}
 	}
-	return "", fmt.Errorf("unknown dispatch mode %q (valid: plan, implement, or empty)", s)
+	names := make([]string, len(allDispatchModes))
+	for i, m := range allDispatchModes {
+		names[i] = string(m)
+	}
+	return "", fmt.Errorf("unknown dispatch mode %q (valid: %s, or empty)", s, strings.Join(names, ", "))
 }
 
-// ComposeDispatchPayload builds the instruction body for a dispatch from
-// its mode and an optional free-form note. The mode contributes a canned
-// instruction; the note is appended after a blank line. Either part may
-// be empty — an untyped dispatch with no note yields "".
-func ComposeDispatchPayload(mode DispatchMode, note string) string {
-	note = strings.TrimSpace(note)
-	var canned string
+// PromptTemplateTokens lists the placeholder tokens RenderPromptTemplate
+// substitutes, in display order. Surfaced in the desktop Settings panel
+// so users know what they can interpolate into a custom template.
+var PromptTemplateTokens = []string{"issue_id", "issue_title", "repo_prefix"}
+
+// DefaultPromptTemplate returns the built-in dispatch instruction
+// template for a stage. These are the shipped defaults users edit from;
+// an untyped or unknown mode has no template (returns "").
+func DefaultPromptTemplate(mode DispatchMode) string {
 	switch mode {
 	case DispatchModePlan:
-		canned = "Run a planning pass on this issue: produce an implementation plan, don't write code yet."
+		return "Run a planning pass on {{issue_id}}: produce an implementation plan, don't write code yet."
 	case DispatchModeImplement:
-		canned = "Implement this issue end-to-end."
+		return "Implement {{issue_id}} end-to-end."
+	case DispatchModeReview:
+		return "Review the work on {{issue_id}}: check correctness, tests, and adherence to the issue's acceptance criteria. Report findings, don't change code."
+	case DispatchModeShip:
+		return "Ship {{issue_id}}: run the final checks, commit, and open or update the PR."
+	case DispatchModeFixReview:
+		return "Address the review feedback on {{issue_id}} and push the fixes."
+	default:
+		return ""
 	}
+}
+
+// RenderPromptTemplate substitutes {{token}} placeholders in tmpl from
+// vars. Unknown {{...}} tokens are left untouched — a typo surfaces in
+// the prompt rather than failing a dispatch. Whitespace inside the
+// braces is tolerated ({{ issue_id }} resolves the same as {{issue_id}}).
+func RenderPromptTemplate(tmpl string, vars map[string]string) string {
+	var b strings.Builder
+	for {
+		i := strings.Index(tmpl, "{{")
+		if i < 0 {
+			b.WriteString(tmpl)
+			break
+		}
+		end := strings.Index(tmpl[i:], "}}")
+		if end < 0 {
+			b.WriteString(tmpl)
+			break
+		}
+		end += i
+		key := strings.TrimSpace(tmpl[i+2 : end])
+		if val, ok := vars[key]; ok {
+			b.WriteString(tmpl[:i])
+			b.WriteString(val)
+		} else {
+			b.WriteString(tmpl[:end+2]) // leave the {{...}} verbatim
+		}
+		tmpl = tmpl[end+2:]
+	}
+	return b.String()
+}
+
+// ComposeDispatchPayload builds a dispatch instruction body: the
+// template rendered against vars, then an optional free-form note after
+// a blank line. Either part may be empty — an empty template with no
+// note yields "".
+func ComposeDispatchPayload(template string, vars map[string]string, note string) string {
+	body := strings.TrimSpace(RenderPromptTemplate(template, vars))
+	note = strings.TrimSpace(note)
 	switch {
-	case canned != "" && note != "":
-		return canned + "\n\n" + note
-	case canned != "":
-		return canned
+	case body != "" && note != "":
+		return body + "\n\n" + note
+	case body != "":
+		return body
 	default:
 		return note
 	}

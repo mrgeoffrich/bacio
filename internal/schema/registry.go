@@ -73,6 +73,9 @@ var Registry = []Entry{
 	{"agent.release", "Release an agent's claim on an issue (does not move the issue or change assignee).", typeOf[inputs.AgentReleaseInput](), inputs.ExampleAgentRelease},
 	{"agent.dispatch", "Queue a unit of work (an issue, an instruction) for an agent identity and/or a session.", typeOf[inputs.AgentDispatchInput](), inputs.ExampleAgentDispatch},
 	{"agent.ack", "Acknowledge a dispatch and record an optional reply note.", typeOf[inputs.AgentAckInput](), inputs.ExampleAgentAck},
+
+	{"settings.template.set", "Set a custom dispatch prompt template for a job stage.", typeOf[inputs.SettingsTemplateSetInput](), inputs.ExampleSettingsTemplateSet},
+	{"settings.template.reset", "Reset a dispatch prompt template to its built-in default.", typeOf[inputs.SettingsTemplateResetInput](), inputs.ExampleSettingsTemplateReset},
 }
 
 // repoRmDescription is the LLM-targeted warning text published via

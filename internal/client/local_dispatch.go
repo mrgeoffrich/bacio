@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
@@ -37,7 +38,7 @@ func (c *localClient) CreateDispatch(ctx context.Context, repo *model.Repo, in i
 	}
 
 	var issueID *int64
-	var issueKey string
+	var issueKey, issueTitle string
 	if in.IssueKey != "" {
 		iss, err := c.GetIssueByKey(ctx, repo, in.IssueKey)
 		if err != nil {
@@ -48,10 +49,23 @@ func (c *localClient) CreateDispatch(ctx context.Context, repo *model.Repo, in i
 		}
 		issueID = &iss.ID
 		issueKey = iss.Key
+		issueTitle = iss.Title
 	}
 
 	mode := model.DispatchMode(in.Mode)
-	payload := model.ComposeDispatchPayload(mode, in.Message)
+	// Resolve the stage's prompt template (the user's custom override or
+	// the built-in default), render its placeholders against this
+	// issue's context, then append the free-form note. An untyped mode
+	// has no template, so the payload is just the note.
+	template, err := c.store.GetPromptTemplate(mode)
+	if err != nil {
+		return nil, err
+	}
+	payload := model.ComposeDispatchPayload(template, map[string]string{
+		"issue_id":    issueKey,
+		"issue_title": issueTitle,
+		"repo_prefix": repo.Prefix,
+	}, in.Message)
 
 	if dryRun {
 		return &model.AgentDispatch{
@@ -204,6 +218,49 @@ func (c *localClient) DrainAgentDispatches(ctx context.Context, repo *model.Repo
 		out = append(out, delivered)
 	}
 	return out, nil
+}
+
+func (c *localClient) GetPromptTemplates(ctx context.Context) (map[string]string, error) {
+	all, err := c.store.AllPromptTemplates()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(all))
+	for m, t := range all {
+		out[string(m)] = t
+	}
+	return out, nil
+}
+
+func (c *localClient) SetPromptTemplate(ctx context.Context, mode, body string, dryRun bool) error {
+	m, err := model.ParseDispatchMode(mode)
+	if err != nil {
+		return err
+	}
+	if m == "" {
+		return fmt.Errorf("prompt template requires a dispatch mode")
+	}
+	if dryRun {
+		// Validate the body at the store boundary, then stop before the
+		// write — same shape as every other --dry-run mutation.
+		_, err := c.store.ValidatePromptTemplate(m, body)
+		return err
+	}
+	if err := c.store.SetPromptTemplate(m, body); err != nil {
+		return err
+	}
+	// Prompt templates are global, not repo-scoped — the audit row
+	// carries no RepoID. recordOp never fails the user-visible action.
+	op := "prompt_template.update"
+	if strings.TrimSpace(body) == "" {
+		op = "prompt_template.reset"
+	}
+	c.recordOp(model.HistoryEntry{
+		Op: op, Kind: "app_setting",
+		TargetLabel: "prompt_template." + string(m),
+		Details:     "stage=" + string(m),
+	})
+	return nil
 }
 
 // dispatchTargetLabel picks the most specific label for audit rows:

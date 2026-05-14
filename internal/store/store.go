@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	_ "embed"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -217,9 +218,9 @@ func migrate(db *sql.DB) error {
 		return fmt.Errorf("migrate duplicate→cancelled: %w", err)
 	}
 	// agent_dispatches.mode was added when plan/implement dispatch intent
-	// landed. The ALTER can't carry the CHECK(mode IN …) the schema.sql
-	// declaration has — old DBs keep the looser shape; ParseDispatchMode
-	// guards at the store boundary, same tradeoff as the issue states above.
+	// landed. The ALTER can't carry a CHECK — old DBs that gained mode
+	// this way have no CHECK at all, while DBs created fresh in the
+	// plan/implement era carry CHECK(mode IN ('','plan','implement')).
 	hasDispatchMode, err := columnExists(db, "agent_dispatches", "mode")
 	if err != nil {
 		return err
@@ -228,6 +229,14 @@ func migrate(db *sql.DB) error {
 		if _, err := db.Exec(`ALTER TABLE agent_dispatches ADD COLUMN mode TEXT NOT NULL DEFAULT ''`); err != nil {
 			return fmt.Errorf("add mode to agent_dispatches: %w", err)
 		}
+	}
+	// The dispatch-mode set grew (review/ship/fix_review joined
+	// plan/implement). Any DB still carrying the old strict CHECK would
+	// reject the new modes, so rebuild the table without a mode CHECK —
+	// ParseDispatchMode guards the set at the store boundary, and
+	// dropping the CHECK means no future stage ever needs a migration.
+	if err := migrateAgentDispatchesModeCheck(db); err != nil {
+		return err
 	}
 	// agent_sessions.claude_pid + channel_seen_at landed with the
 	// channel-correlation layer. agent_channels itself is created by
@@ -336,6 +345,110 @@ func migrateRepoPathUnique(db *sql.DB) error {
 		return fmt.Errorf("create uniq_repos_path: %w", err)
 	}
 	return tx.Commit()
+}
+
+// migrateAgentDispatchesModeCheck rebuilds agent_dispatches to drop the
+// column-level CHECK on `mode`. Early-generation DBs created in the
+// plan/implement era carry CHECK (mode IN ('','plan','implement')),
+// which now rejects the review/ship/fix_review stages. SQLite can't
+// drop a column CHECK in place, so this is the table-rebuild dance —
+// the same pattern as migrateRepoPathUnique. Keyed off the stored
+// CREATE TABLE SQL: DBs that never had the CHECK (older still, gained
+// `mode` via ALTER) and fresh DBs (schema.sql no longer declares it)
+// skip the rebuild.
+func migrateAgentDispatchesModeCheck(db *sql.DB) error {
+	needs, err := agentDispatchesModeCheckPresent(db)
+	if err != nil {
+		return err
+	}
+	if !needs {
+		return nil
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// defer_foreign_keys is transaction-scoped — it keeps the DROP TABLE
+	// from cascading through children that REFERENCE agent_dispatches
+	// (none today, but future-proof and consistent with the repos rebuild).
+	if _, err := tx.Exec(`PRAGMA defer_foreign_keys = ON`); err != nil {
+		return fmt.Errorf("defer fk: %w", err)
+	}
+	// Mirror schema.sql's agent_dispatches shape exactly, minus the
+	// CHECK on `mode`, so SELECT *-style copy round-trips.
+	if _, err := tx.Exec(`
+		CREATE TABLE agent_dispatches_new (
+			id                INTEGER PRIMARY KEY AUTOINCREMENT,
+			repo_id           INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+			target_agent_id   INTEGER REFERENCES agents(id) ON DELETE CASCADE,
+			target_session_id TEXT    NOT NULL DEFAULT '',
+			issue_id          INTEGER REFERENCES issues(id) ON DELETE SET NULL,
+			mode              TEXT    NOT NULL DEFAULT '',
+			payload           TEXT    NOT NULL DEFAULT '',
+			status            TEXT    NOT NULL DEFAULT 'pending'
+			                    CHECK (status IN ('pending','delivered','acked','cancelled')),
+			created_by        TEXT    NOT NULL,
+			created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			delivered_at      DATETIME,
+			acked_at          DATETIME,
+			ack_note          TEXT    NOT NULL DEFAULT '',
+			CHECK (target_agent_id IS NOT NULL OR target_session_id != '')
+		)
+	`); err != nil {
+		return fmt.Errorf("create agent_dispatches_new: %w", err)
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO agent_dispatches_new
+			(id, repo_id, target_agent_id, target_session_id, issue_id, mode,
+			 payload, status, created_by, created_at, delivered_at, acked_at, ack_note)
+		SELECT
+			id, repo_id, target_agent_id, target_session_id, issue_id, mode,
+			payload, status, created_by, created_at, delivered_at, acked_at, ack_note
+		FROM agent_dispatches
+	`); err != nil {
+		return fmt.Errorf("copy agent_dispatches rows: %w", err)
+	}
+	if _, err := tx.Exec(`DROP TABLE agent_dispatches`); err != nil {
+		return fmt.Errorf("drop old agent_dispatches: %w", err)
+	}
+	if _, err := tx.Exec(`ALTER TABLE agent_dispatches_new RENAME TO agent_dispatches`); err != nil {
+		return fmt.Errorf("rename agent_dispatches_new: %w", err)
+	}
+	// Re-create the indexes the dropped table carried; the schema.sql
+	// declarations are CREATE ... IF NOT EXISTS so re-applying is harmless.
+	for _, stmt := range []string{
+		`CREATE INDEX IF NOT EXISTS idx_dispatches_agent ON agent_dispatches(target_agent_id, status)`,
+		`CREATE INDEX IF NOT EXISTS idx_dispatches_session ON agent_dispatches(target_session_id, status)`,
+		`CREATE INDEX IF NOT EXISTS idx_dispatches_repo ON agent_dispatches(repo_id, status)`,
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("recreate agent_dispatches index: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+// agentDispatchesModeCheckPresent reports whether the agent_dispatches
+// table still carries a CHECK constraint on `mode` — the strict
+// CHECK (mode IN (...)) from the plan/implement-era schema.sql. Looks at
+// the stored CREATE TABLE SQL, whitespace-collapsed so reformats don't
+// fool the matcher.
+func agentDispatchesModeCheckPresent(db *sql.DB) (bool, error) {
+	var sqlText sql.NullString
+	err := db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_dispatches'`).Scan(&sqlText)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !sqlText.Valid {
+		return false, nil
+	}
+	collapsed := strings.Join(strings.Fields(sqlText.String), " ")
+	return strings.Contains(collapsed, "CHECK (mode IN"), nil
 }
 
 // reposPathUniqueNeedsRelax reports whether the repos table still

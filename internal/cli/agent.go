@@ -423,9 +423,13 @@ func agentDispatchCmd() *cobra.Command {
 name a target: --to <agent-slug>, --session <id>, or both. The optional
 [issue-key] positional ties the dispatch to an issue.
 
---mode marks the intent: "plan" (produce an implementation plan, don't
-write code) or "implement" (build it end-to-end). The agent's instruction
-body is the mode's canned text plus any --message note. Both are optional.
+--mode marks the intent — one per stage of working a job: "plan"
+(produce an implementation plan, don't write code), "implement" (build
+it end-to-end), "review" (assess finished work), "ship" (final checks +
+PR), or "fix_review" (address review feedback). The agent's instruction
+body is the stage's prompt template (customisable in the desktop app's
+Settings panel) rendered with the issue's id/title, plus any --message
+note. Both are optional.
 
 The target agent picks the dispatch up automatically on its next prompt
 (via the bacio UserPromptSubmit hook) or at session start, and can list
@@ -457,7 +461,7 @@ its queue with ` + "`bacio agent inbox`" + `.`,
 	}
 	cmd.Flags().StringVar(&toAgent, "to", "", "target agent identity slug (e.g. swift-otter@claude.shiny)")
 	cmd.Flags().StringVar(&toSession, "session", "", "target session id")
-	cmd.Flags().StringVar(&mode, "mode", "", "dispatch intent: plan or implement (default: untyped)")
+	cmd.Flags().StringVar(&mode, "mode", "", "dispatch intent: plan, implement, review, ship, or fix_review (default: untyped)")
 	cmd.Flags().StringVar(&message, "message", "", "optional free-form note appended to the instruction body")
 	addInputFlag(cmd, &rawInput)
 	return cmd

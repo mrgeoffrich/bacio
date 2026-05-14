@@ -565,7 +565,14 @@ bacio agent release <ISSUE-KEY>         Release this session's claim on an issue
 bacio agent dispatch [ISSUE-KEY]        Queue a work item for an agent / session
   --to <agent-slug>                     Target a persistent identity
   --session <id>                        Target one specific session
-  --message <text>                      Free-form instruction body
+  --mode <stage>                        Job stage: plan, implement, review,
+                                     ship, or fix_review (default: untyped).
+                                     The stage's prompt template (editable
+                                     via `bacio settings template` or the
+                                     desktop Settings panel) is rendered
+                                     with the issue id/title to form the
+                                     instruction body.
+  --message <text>                      Free-form note appended to the body
                                      (must pass --to and/or --session)
 bacio agent inbox                       Open dispatches queued for this session
   --session <id>                        Default: $CLAUDE_CODE_SESSION_ID
@@ -602,6 +609,36 @@ An agent picks dispatches up two ways:
 Either way, acknowledge each handled dispatch with `bacio agent ack <id>
 --note "..."` (or the channel's `reply` tool). Acked/cancelled dispatches
 drop out of `bacio agent inbox` and are pruned after 60 days.
+
+### Dispatch prompt templates
+
+When you `bacio agent dispatch --mode <stage>`, the instruction body the
+agent sees is rendered from that stage's **prompt template**. Each of the
+five stages (`plan`, `implement`, `review`, `ship`, `fix_review`) ships
+with a built-in default; override them per-stage — globally, not
+per-repo — with `bacio settings template`. The same templates are
+editable from the desktop app's Settings panel.
+
+```
+bacio settings template list            Lean table: every stage's effective template
+bacio settings template show <stage>    One stage — effective body + built-in default
+bacio settings template set <stage> <body>
+                                        Override a stage's template
+bacio settings template reset <stage>   Revert a stage to its built-in default
+```
+
+`set` and `reset` are mutations — they honour `--json`, `--dry-run`, and
+`bacio schema show settings.template.set` (schema names
+`settings.template.set` / `settings.template.reset`). A template body
+may interpolate `{{issue_id}}`, `{{issue_title}}`, and `{{repo_prefix}}`
+— substituted with the dispatched issue's context at dispatch time; an
+unknown `{{...}}` token is left verbatim. `bacio settings` is local-only
+(the `app_settings` store has no remote analogue in v1).
+
+```bash
+bacio settings template set review --json '{"mode":"review","body":"Review {{issue_id}} ({{issue_title}}) — focus on correctness and tests."}'
+bacio settings template reset review
+```
 
 ### Hook integration — automatic registration & supervision
 

@@ -53,6 +53,7 @@ func main() {
 			application.NewService(NewDocService(c)),
 			application.NewService(NewFeatureService(c)),
 			application.NewService(NewHistoryService(c)),
+			application.NewService(NewSettingsService(c)),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),

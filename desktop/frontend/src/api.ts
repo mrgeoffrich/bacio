@@ -6,6 +6,7 @@ import {
   DocService,
   FeatureService,
   HistoryService,
+  SettingsService,
   Board,
   BoardColumn,
   BoardCard,
@@ -20,9 +21,10 @@ import {
   FeatureLinkedIssue,
   HistoryPage,
   HistoryEntryDTO,
+  PromptTemplateDTO,
 } from '../bindings/github.com/mrgeoffrich/bacio/desktop';
 
-export type { Board, BoardColumn, BoardCard, IssueDetail, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, FeatureSummary, FeatureDetail, FeatureLinkedIssue, HistoryPage, HistoryEntryDTO };
+export type { Board, BoardColumn, BoardCard, IssueDetail, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, FeatureSummary, FeatureDetail, FeatureLinkedIssue, HistoryPage, HistoryEntryDTO, PromptTemplateDTO };
 
 function normalize(err: unknown): Error {
   if (err instanceof Error) return err;
@@ -145,6 +147,39 @@ export async function saveDoc(
 ): Promise<DocContent> {
   try {
     return await DocService.SaveDoc(repoPrefix, filename, content);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// listPromptTemplates returns the five customisable dispatch prompt
+// templates, in job-lifecycle order.
+export async function listPromptTemplates(): Promise<PromptTemplateDTO[]> {
+  try {
+    return await SettingsService.ListPromptTemplates();
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// promptPlaceholders returns the placeholder token names a template body
+// can interpolate (without the surrounding {{ }}).
+export async function promptPlaceholders(): Promise<string[]> {
+  try {
+    return await SettingsService.PromptPlaceholders();
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// savePromptTemplate stores a custom body for one dispatch stage. Passing
+// an empty body resets that stage to its built-in default.
+export async function savePromptTemplate(
+  mode: string,
+  body: string,
+): Promise<PromptTemplateDTO> {
+  try {
+    return await SettingsService.SavePromptTemplate(mode, body);
   } catch (err) {
     throw normalize(err);
   }

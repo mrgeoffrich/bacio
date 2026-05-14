@@ -40,22 +40,37 @@ at, an intent (plan vs implement), and an optional note. It's local-only
 | `RepoID`                       | the repo the dispatch belongs to                              |
 | `TargetAgentID` / `TargetSessionID` | who it's for — an agent identity, a session, or both     |
 | `IssueID` / `IssueKey`         | the issue it concerns (optional)                              |
-| `Mode`                         | `plan`, `implement`, or `""` (untyped)                        |
+| `Mode`                         | job stage: `plan`, `implement`, `review`, `ship`, `fix_review`, or `""` (untyped) |
 | `Payload`                      | the instruction body the agent reads                          |
 | `Status`                       | `pending` → `delivered` → `acked` (or `cancelled`)            |
 | `CreatedBy` / `CreatedAt`      | who queued it, when                                           |
 | `DeliveredAt` / `AckedAt` / `AckNote` | lifecycle stamps + the agent's reply                  |
 
-### Mode and the payload
+### Mode, prompt templates, and the payload
 
 `Mode` is a **structured field**, not parsed out of free text, so it's
-queryable and displayable everywhere. `model.ComposeDispatchPayload(mode,
-note)` builds the `Payload` the agent actually sees:
+queryable and displayable everywhere. It names a **stage of working a
+job** — one of `plan`, `implement`, `review`, `ship`, `fix_review` (or
+`""` for untyped).
 
-- `plan` → *"Run a planning pass on this issue: produce an
-  implementation plan, don't write code yet."*
-- `implement` → *"Implement this issue end-to-end."*
-- a non-empty note is appended after a blank line.
+Each stage has a **prompt template**: the instruction text, with
+`{{token}}` placeholders. The shipped defaults live in
+`model.DefaultPromptTemplate(mode)`; users override them per-stage
+either from the desktop app's **Settings panel** or from the CLI
+(`bacio settings template list / show / set / reset` — `internal/cli/settings.go`),
+persisted globally in the `app_settings` KV table
+(`prompt_template.<mode>`). Supported placeholders are
+`model.PromptTemplateTokens` — `{{issue_id}}`, `{{issue_title}}`,
+`{{repo_prefix}}`; an unknown `{{...}}` token is left verbatim rather
+than failing the dispatch.
+
+At dispatch time the payload is assembled by
+`model.ComposeDispatchPayload(template, vars, note)`: the resolved
+template (custom override, else built-in default) is rendered against
+the issue's context, then a non-empty note is appended after a blank
+line. Template resolution happens in the Go dispatch path
+(`client.CreateDispatch`, and `tui/board_dispatch.go` for the TUI
+picker) — it needs DB access, so `localStorage` isn't an option.
 
 So a dispatch carries both the machine-readable `Mode` **and** a
 self-contained `Payload` — tooling can filter on the former; the agent
@@ -86,9 +101,10 @@ bacio agent dispatch BACI-12 --to swift-otter@claude.shiny \
 ```
 
 `--to` / `--session` name the target (at least one required); `--mode`
-is `plan` or `implement`; `--message` is the optional note. Honours the
-six agent-CLI principles — `--json` input, `bacio schema show
-agent.dispatch`, `--dry-run`. Code: `internal/cli/agent.go`
+is the job stage (`plan`, `implement`, `review`, `ship`, `fix_review`);
+`--message` is the optional note appended to the rendered template.
+Honours the six agent-CLI principles — `--json` input, `bacio schema
+show agent.dispatch`, `--dry-run`. Code: `internal/cli/agent.go`
 (`agentDispatchCmd`) → `internal/client/local_dispatch.go`
 (`CreateDispatch`).
 

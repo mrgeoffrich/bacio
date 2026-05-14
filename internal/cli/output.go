@@ -142,10 +142,36 @@ func renderText(w io.Writer, v any) error {
 		printAgentDispatch(w, x)
 	case []*model.AgentDispatch:
 		printAgentDispatchList(w, x)
+	case *promptTemplateView:
+		printPromptTemplate(w, x)
+	case []*promptTemplateSummary:
+		for _, t := range x {
+			printPromptTemplateSummary(w, t)
+		}
 	default:
 		fmt.Fprintf(w, "%v\n", v)
 	}
 	return nil
+}
+
+func printPromptTemplate(w io.Writer, t *promptTemplateView) {
+	origin := "custom"
+	if t.IsDefault {
+		origin = "default"
+	}
+	fmt.Fprintf(w, "%-11s %s  (%s)\n", t.Mode, t.Label, origin)
+	fmt.Fprintf(w, "\n%s\n", t.Body)
+	if !t.IsDefault {
+		fmt.Fprintf(w, "\nDefault:\n%s\n", t.Default)
+	}
+}
+
+func printPromptTemplateSummary(w io.Writer, t *promptTemplateSummary) {
+	origin := "custom"
+	if t.IsDefault {
+		origin = "default"
+	}
+	fmt.Fprintf(w, "%-11s %-18s (%s)  %s\n", t.Mode, t.Label, origin, t.Body)
 }
 
 func printRepo(w io.Writer, r *model.Repo) error {
