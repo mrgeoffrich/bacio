@@ -1,5 +1,6 @@
 import React from 'react';
 import Icon from './Icon.jsx';
+import RepoPicker from './RepoPicker.jsx';
 
 // NAV is the ordered top-nav. Exported so App can map the 1–5 digit
 // hotkeys onto the same views in the same order.
@@ -11,7 +12,7 @@ export const NAV = [
   { view: 'history', label: 'History' },
 ];
 
-export default function Topbar({ boards, activeBoard, onPickBoard, activeView, onChangeView, onOpenPalette, onOpenSettings }) {
+export default function Topbar({ boards, activeBoard, onPickBoard, onAddRepository, activeView, onChangeView, onOpenPalette, onOpenSettings }) {
   const syncEnabled = !!boards.find(b => b.prefix === activeBoard)?.syncEnabled;
   return (
     <header className="mk-topbar">
@@ -40,14 +41,12 @@ export default function Topbar({ boards, activeBoard, onPickBoard, activeView, o
 
       <div className="mk-topbar-right">
         {syncEnabled && <span className="mk-pill mk-sync-badge">Sync Enabled</span>}
-        <div className="mk-repo-select">
-          <Icon name="branch" />
-          <select value={activeBoard} onChange={(e) => onPickBoard(e.target.value)}>
-            {boards.map(b => (
-              <option key={b.prefix} value={b.prefix}>{b.name}</option>
-            ))}
-          </select>
-        </div>
+        <RepoPicker
+          boards={boards}
+          activeBoard={activeBoard}
+          onPick={onPickBoard}
+          onAddRepository={onAddRepository}
+        />
         <button className="mk-icbtn" aria-label="Settings" onClick={onOpenSettings}><Icon name="settings" /></button>
       </div>
     </header>

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Search, Columns3, GitBranch, Link, Settings, X } from 'lucide-react';
+import { Search, Plus, Columns3, GitBranch, Link, Settings, X } from 'lucide-react';
 
 // ClaudeMark is a brand glyph — no icon library carries Claude's logo, so it
 // stays a hand-rolled SVG. It ignores any props passed by <Icon>.
@@ -20,6 +20,7 @@ function ClaudeMark() {
 // own width/height attributes are overridden by CSS.
 const ICONS = {
   search: Search,
+  plus: Plus,
   board: Columns3,
   branch: GitBranch,
   link: Link,

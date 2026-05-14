@@ -146,6 +146,21 @@ export default function App() {
       .catch(err => setError(err.message));
   };
 
+  // Add a repository: the backend opens a native folder picker and registers
+  // the chosen git working tree. On success, refresh the board list and jump
+  // to the new repo; an empty prefix means the user cancelled the dialog.
+  const addRepository = () => {
+    api.addRepository()
+      .then(board => {
+        if (!board.prefix) return;
+        return api.listBoards().then(bs => {
+          setBoards(bs);
+          setActiveBoard(board.prefix);
+        });
+      })
+      .catch(err => setError(err.message));
+  };
+
   // Drag-to-move is visual-only for now: update local state, don't persist.
   // Persisting via SetIssueState is the follow-up write pass.
   const moveCard = (key, toCol) => {
@@ -179,6 +194,7 @@ export default function App() {
         boards={boards}
         activeBoard={activeBoard}
         onPickBoard={setActiveBoard}
+        onAddRepository={addRepository}
         activeView={activeView}
         onChangeView={setActiveView}
         onOpenPalette={() => setPaletteOpen(true)}

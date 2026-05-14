@@ -18,6 +18,18 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 import * as $models from "./models.js";
 
 /**
+ * AddRepository opens a native folder picker and registers the chosen git
+ * working tree as a bacio repo, returning it as a Board. A Board with an empty
+ * Prefix means the user cancelled the dialog. The picked folder may sit
+ * anywhere inside the repo — git.Detect walks up to the working-tree root.
+ */
+export function AddRepository(): $CancellablePromise<$models.Board> {
+    return $Call.ByID(2129265032).then(($result: any) => {
+        return $$createType0($result);
+    });
+}
+
+/**
  * DispatchIssue queues a dispatch for an agent: the target agent slug,
  * the mode ("plan" / "implement" / ""), and an optional free-form note.
  * repoPrefix may be empty or "all" — the prefix is then derived from the
@@ -25,7 +37,7 @@ import * as $models from "./models.js";
  */
 export function DispatchIssue(repoPrefix: string, issueKey: string, agentName: string, mode: string, note: string): $CancellablePromise<$models.DispatchDTO> {
     return $Call.ByID(715303058, repoPrefix, issueKey, agentName, mode, note).then(($result: any) => {
-        return $$createType0($result);
+        return $$createType1($result);
     });
 }
 
@@ -36,7 +48,7 @@ export function DispatchIssue(repoPrefix: string, issueKey: string, agentName: s
  */
 export function GetIssue(repoPrefix: string, key: string): $CancellablePromise<$models.IssueDetail> {
     return $Call.ByID(624409110, repoPrefix, key).then(($result: any) => {
-        return $$createType1($result);
+        return $$createType2($result);
     });
 }
 
@@ -47,7 +59,7 @@ export function GetIssue(repoPrefix: string, key: string): $CancellablePromise<$
  */
 export function ListAgents(repoPrefix: string): $CancellablePromise<$models.AgentCard[]> {
     return $Call.ByID(3979848123, repoPrefix).then(($result: any) => {
-        return $$createType3($result);
+        return $$createType4($result);
     });
 }
 
@@ -81,12 +93,12 @@ export function ListColumns(): $CancellablePromise<$models.BoardColumn[]> {
 }
 
 // Private type creation functions
-const $$createType0 = $models.DispatchDTO.createFrom;
-const $$createType1 = $models.IssueDetail.createFrom;
-const $$createType2 = $models.AgentCard.createFrom;
-const $$createType3 = $Create.Array($$createType2);
-const $$createType4 = $models.Board.createFrom;
-const $$createType5 = $Create.Array($$createType4);
+const $$createType0 = $models.Board.createFrom;
+const $$createType1 = $models.DispatchDTO.createFrom;
+const $$createType2 = $models.IssueDetail.createFrom;
+const $$createType3 = $models.AgentCard.createFrom;
+const $$createType4 = $Create.Array($$createType3);
+const $$createType5 = $Create.Array($$createType0);
 const $$createType6 = $models.BoardCard.createFrom;
 const $$createType7 = $Create.Array($$createType6);
 const $$createType8 = $models.BoardColumn.createFrom;

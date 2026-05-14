@@ -54,6 +54,16 @@ export async function listCards(repoPrefix: string): Promise<BoardCard[]> {
   }
 }
 
+// addRepository opens a native folder picker and registers the chosen git
+// working tree. The returned Board has an empty prefix if the user cancelled.
+export async function addRepository(): Promise<Board> {
+  try {
+    return await BoardService.AddRepository();
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
 export async function getIssue(repoPrefix: string, key: string): Promise<IssueDetail> {
   try {
     return await BoardService.GetIssue(repoPrefix, key);

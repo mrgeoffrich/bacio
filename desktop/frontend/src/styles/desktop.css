@@ -28,10 +28,6 @@
    lives in the right-hand cluster, so it aligns with .mk-icbtn instead. */
 .mk-search { transform: translateY(1px); }
 
-/* The active repo is the primary context for every screen — bold it so
-   it reads as the important selector it is. */
-.mk-repo-select select { font-weight: 700; }
-
 /* "Sync Enabled" badge — shown left of the repo selector when the repo
    has git sync configured. Reuses .mk-pill chrome with the healthy
    (pistachio) status colour. */
@@ -40,6 +36,84 @@
   color: var(--status-done);
   flex-shrink: 0;
 }
+
+/* ============================================================
+   Repository picker — a searchable dropdown replacing the plain
+   native <select>, with an "Add Repository" action that opens a
+   native folder picker. A desktop-app addition.
+   ============================================================ */
+.mk-repo-picker { position: relative; flex-shrink: 0; }
+.mk-repo-picker-trigger {
+  display: flex; align-items: center; gap: 6px;
+  height: 32px; padding: 0 10px;
+  border: 1px solid var(--border-1); border-radius: 8px;
+  background: var(--paper); color: var(--fg-1);
+  font-family: var(--font-sans); font-size: 13px; cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+.mk-repo-picker-trigger:hover { border-color: var(--border-2); }
+.mk-repo-picker-trigger .mk-icon { width: 14px; height: 14px; color: var(--fg-3); }
+/* The active repo is the primary context for every screen — bold it. */
+.mk-repo-picker-label {
+  font-weight: 700; max-width: 200px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Dot separating the repo name from its short code. */
+.mk-repo-picker-sep { color: var(--fg-4); }
+/* The repo's short code, shown after the name — secondary, so not bold. */
+.mk-repo-picker-code {
+  font-family: var(--font-mono); font-size: 10px; font-weight: 400;
+  letter-spacing: .06em; text-transform: uppercase; color: var(--fg-3);
+}
+.mk-repo-picker-menu {
+  position: absolute; top: calc(100% + 6px); right: 0;
+  width: 280px; z-index: 20;
+  display: flex; flex-direction: column;
+  background: var(--bg-2); border: 1px solid var(--border-1);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-3);
+  overflow: hidden;
+}
+.mk-repo-picker-search {
+  font-family: var(--font-sans); font-size: 13px;
+  margin: 8px; padding: 8px 10px; box-sizing: border-box;
+  width: calc(100% - 16px);
+  border: 1px solid var(--border-1); border-radius: var(--radius-md);
+  background: var(--bg-3); color: var(--fg-1);
+}
+.mk-repo-picker-list {
+  max-height: 280px; overflow-y: auto;
+  padding: 0 8px; display: flex; flex-direction: column; gap: 2px;
+}
+.mk-repo-picker-empty {
+  padding: 10px; font-size: var(--text-sm); color: var(--fg-4);
+}
+.mk-repo-picker-item {
+  display: flex; align-items: baseline; gap: 8px;
+  width: 100%; text-align: left;
+  padding: 7px 10px; border: 0; border-radius: var(--radius-md);
+  background: transparent; cursor: pointer; font-family: var(--font-sans);
+}
+.mk-repo-picker-item:hover,
+.mk-repo-picker-item.is-active { background: var(--bg-4); }
+.mk-repo-picker-item-name {
+  font-size: var(--text-sm); font-weight: 600; color: var(--fg-1);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mk-repo-picker-item-prefix {
+  margin-left: auto; flex-shrink: 0;
+  font-family: var(--font-mono); font-size: 10px;
+  letter-spacing: .06em; text-transform: uppercase; color: var(--fg-3);
+}
+.mk-repo-picker-add {
+  display: flex; align-items: center; gap: 6px;
+  width: 100%; margin-top: 4px; padding: 9px 12px;
+  border: 0; border-top: 1px solid var(--border-1);
+  background: transparent; cursor: pointer;
+  font-family: var(--font-sans); font-size: 13px; font-weight: 600;
+  color: var(--sky-600);
+}
+.mk-repo-picker-add:hover { background: var(--bg-4); }
+.mk-repo-picker-add .mk-icon { width: 14px; height: 14px; }
 
 /* Status pill colours for bacio's six real issue states. The imported
    app.css only covers the kit's placeholder column ids; these map each
