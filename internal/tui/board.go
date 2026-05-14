@@ -16,7 +16,7 @@ import (
 // boardRefreshInterval is how often the board reloads issues from the
 // store while the TUI is open. Short enough to feel live, long enough
 // not to thrash SQLite.
-const boardRefreshInterval = 30 * time.Second
+const boardRefreshInterval = 10 * time.Second
 
 // overlayPane identifies which sub-pane of the fullscreen card overlay
 // currently has the focus, so j/k and enter route to the right place
@@ -168,6 +168,24 @@ func (b *boardView) clampCol() {
 	if b.col < 0 {
 		b.col = 0
 	}
+}
+
+// carryRow copies the focused column's cursor row into the column at
+// dst (an index into visible), clamped to that column's card count so
+// horizontal navigation feels like moving across a grid rather than
+// between independent lists. Empty target columns clamp to 0.
+func (b *boardView) carryRow(visible []model.State, dst int) {
+	if b.col < 0 || b.col >= len(visible) || dst < 0 || dst >= len(visible) {
+		return
+	}
+	row := b.rows[visible[b.col]]
+	if n := len(b.columns[visible[dst]]); row > n-1 {
+		row = n - 1
+	}
+	if row < 0 {
+		row = 0
+	}
+	b.rows[visible[dst]] = row
 }
 
 // persistHidden writes the current hidden set to disk. Errors are stored on
@@ -335,14 +353,21 @@ func (b *boardView) Update(msg tea.Msg) tea.Cmd {
 		// Periodic background reload. We pull fresh issues, refresh the
 		// selected card's comments, and schedule the next tick. Errors
 		// surface in the footer rather than crashing the loop.
-		if err := b.reload(); err != nil {
-			b.err = err
-		} else {
-			b.err = nil
+		//
+		// Skip the actual reload while an overlay is open — reloading
+		// underneath it can shuffle the issue list and selection out
+		// from under the user. The tick still re-arms unconditionally
+		// so refreshes resume the moment the overlay closes.
+		if !b.HasOverlay() {
+			if err := b.reload(); err != nil {
+				b.err = err
+			} else {
+				b.err = nil
+			}
+			b.lastRefresh = time.Time(t)
+			b.clampCol()
+			b.refreshSelection()
 		}
-		b.lastRefresh = time.Time(t)
-		b.clampCol()
-		b.refreshSelection()
 		return boardRefreshTick()
 	}
 	key, ok := msg.(tea.KeyMsg)
@@ -368,10 +393,12 @@ func (b *boardView) Update(msg tea.Msg) tea.Cmd {
 	switch key.String() {
 	case "h", "left":
 		if b.col > 0 {
+			b.carryRow(visible, b.col-1)
 			b.col--
 		}
 	case "l", "right":
 		if b.col < len(visible)-1 {
+			b.carryRow(visible, b.col+1)
 			b.col++
 		}
 	case "j", "down":
@@ -529,6 +556,59 @@ func (b *boardView) updateOverlay(key tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
+// boardColWidths splits the board's total width across n columns,
+// handing the focused column a modest extra slice so it reads as
+// emphasised alongside the colFocusBorder highlight. When there isn't
+// room for every column to clear the 16-col minimum the bonus is
+// dropped and every column is clamped to 16 (the board overflows, same
+// as before this nicety existed).
+func boardColWidths(width, n, focus int) []int {
+	widths := make([]int, n)
+	base := width / n
+	if base < 16 {
+		for i := range widths {
+			widths[i] = 16
+		}
+		return widths
+	}
+	// Start equal, then hand the width%n remainder to the first few
+	// columns so the row tiles the full width with no gap.
+	rem := width % n
+	for i := range widths {
+		widths[i] = base
+		if i < rem {
+			widths[i]++
+		}
+	}
+	if n < 2 || focus < 0 || focus >= n {
+		return widths
+	}
+	// Shave a modest bonus off the non-focused columns round-robin,
+	// never letting any drop below 16, and give whatever was actually
+	// freed to the focused column — so the total stays exactly width.
+	const focusBonus = 6
+	freed := 0
+	for freed < focusBonus {
+		moved := false
+		for i := range widths {
+			if i == focus || widths[i] <= 16 {
+				continue
+			}
+			widths[i]--
+			freed++
+			moved = true
+			if freed == focusBonus {
+				break
+			}
+		}
+		if !moved {
+			break
+		}
+	}
+	widths[focus] += freed
+	return widths
+}
+
 func (b *boardView) View(width, height int) string {
 	if width == 0 || height == 0 {
 		return ""
@@ -571,14 +651,11 @@ func (b *boardView) View(width, height int) string {
 	}
 
 	n := len(visible)
-	colWidth := width / n
-	if colWidth < 16 {
-		colWidth = 16
-	}
+	widths := boardColWidths(width, n, b.col)
 
 	cols := make([]string, n)
 	for i, st := range visible {
-		cols[i] = b.renderColumn(st, i == b.col, colWidth, colsHeight)
+		cols[i] = b.renderColumn(st, i == b.col, widths[i], colsHeight)
 	}
 	board := lipgloss.JoinHorizontal(lipgloss.Top, cols...)
 
