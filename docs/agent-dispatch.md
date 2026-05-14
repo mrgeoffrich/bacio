@@ -78,13 +78,16 @@ just reads the latter.
 
 ### Lifecycle
 
-`pending` → an agent hasn't seen it yet. `delivered` → it's been drained
-into a session (by a hook) or pushed (by a channel). `acked` → the agent
-reported back. `cancelled` → the supervisor withdrew it. Settled
-dispatches (acked/cancelled) are pruned after 60 days
-(`AgentDispatchRetention`); open ones never expire. Store transitions:
-`MarkDispatchDelivered`, `AckDispatch`, `CancelDispatch` in
-`internal/store/dispatches.go`.
+`pending` → an agent hasn't seen it yet. `delivered` → bacio has *tried*
+to hand it over at least once (drained by a hook, or pushed by a
+channel) — but `delivered` is not a confirmation the agent actually saw
+it, so a `delivered`-but-un-acked dispatch stays drainable and is
+re-surfaced on the next drain (a lost push is recovered, not stranded).
+`acked` → the agent reported back; this is the only state that retires a
+dispatch. `cancelled` → the supervisor withdrew it. Settled dispatches
+(acked/cancelled) are pruned after 60 days (`AgentDispatchRetention`);
+open ones never expire. Store transitions: `MarkDispatchDelivered`,
+`AckDispatch`, `CancelDispatch` in `internal/store/dispatches.go`.
 
 ---
 
@@ -298,11 +301,15 @@ are two delivery paths — an agent can use either or both.
 
 If the repo has `bacio install-hooks` set up, the **SessionStart** and
 **UserPromptSubmit** hooks call `emitDrainedDispatches`
-(`internal/cli/hook.go`): they drain the session's `pending` dispatches,
-mark them `delivered`, and print them to stdout — which Claude Code
-injects into the agent's context. Nothing to poll; the work shows up on
-the agent's next turn. (The same hooks also mint the session's identity
-and link it to a running channel — see [Agent identity](#agent-identity--the-claude_pid-correlation)
+(`internal/cli/hook.go`): they drain the session's **un-acked**
+dispatches (`pending` *and* `delivered`), flip any still-`pending` ones
+to `delivered`, and print them to stdout — which Claude Code injects
+into the agent's context. Because `delivered`-but-un-acked dispatches are
+re-drained, a dispatch whose channel push never landed is re-surfaced on
+the agent's next turn rather than silently lost — only an ack retires
+it. Nothing to poll; the work shows up on the agent's next turn. (The
+same hooks also mint the session's identity and link it to a running
+channel — see [Agent identity](#agent-identity--the-claude_pid-correlation)
 above.)
 
 ### Push — via a channel (real-time)
@@ -312,6 +319,11 @@ If the session runs `bacio channel` (an MCP-over-stdio server —
 `notifications/claude/channel` events the moment they're created. The
 channel polls the dispatch queue (~3s) and pushes each new dispatch as a
 `<channel source="bacio" dispatch_id="..." issue="..." mode="...">` tag.
+`DrainAgentDispatches` returns un-acked dispatches (`pending` and
+`delivered`) every tick; the channel dedups against an in-process
+`pushed` set so it emits each dispatch once per process — but a *fresh*
+channel process (a restart) re-pushes anything still un-acked, so a push
+lost to a crash isn't stranded.
 
 **Scoping.** A channel is *not* told its session id (see [Agent
 identity](#agent-identity--the-claude_pid-correlation) above). It

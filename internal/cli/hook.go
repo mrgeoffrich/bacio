@@ -328,18 +328,20 @@ func emitClaimNudge(h *hookContext, sess *model.AgentSession) {
 		strings.Join(open, ", "))
 }
 
-// emitDrainedDispatches drains the session's pending dispatches and
-// writes them to stdout — injected into the agent's context. Called by
-// the SessionStart and UserPromptSubmit hooks: this is the pull-delivery
-// path. A drained dispatch moves to "delivered" and isn't re-emitted on
-// the next prompt, but stays in `bacio agent inbox` until acked.
+// emitDrainedDispatches drains the session's open dispatches and writes
+// them to stdout — injected into the agent's context. Called by the
+// SessionStart and UserPromptSubmit hooks: this is the pull-delivery
+// path. It drains every un-acked dispatch (pending AND delivered), so a
+// dispatch whose push was lost is re-surfaced on the next prompt — only
+// an ack retires it. A pending dispatch is flipped to "delivered" as it
+// drains.
 func emitDrainedDispatches(h *hookContext, sessionID string) {
 	ds, err := h.c.DrainDispatches(context.Background(), sessionID)
 	if err != nil || len(ds) == 0 {
 		return
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "[bacio] %d new dispatch(es) queued for you:\n", len(ds))
+	fmt.Fprintf(&b, "[bacio] %d open dispatch(es) queued for you:\n", len(ds))
 	for _, d := range ds {
 		issue := ""
 		if d.IssueKey != "" {
