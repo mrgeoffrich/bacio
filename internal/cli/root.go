@@ -22,6 +22,7 @@ type globalOpts struct {
 	token      string
 	cpuProfile string
 	memProfile string
+	traceFile  string
 }
 
 var opts = globalOpts{output: outputText}
@@ -52,8 +53,10 @@ func NewRoot() (*cobra.Command, func()) {
 	root.PersistentFlags().StringVar(&opts.token, "token", "", "bearer token for the remote API; falls back to BACIO_API_TOKEN")
 	root.PersistentFlags().StringVar(&opts.cpuProfile, "cpuprofile", "", "write a CPU profile to this path (dev/debug)")
 	root.PersistentFlags().StringVar(&opts.memProfile, "memprofile", "", "write a heap profile to this path (dev/debug)")
+	root.PersistentFlags().StringVar(&opts.traceFile, "trace", "", "write an execution trace to this path (dev/debug)")
 	_ = root.PersistentFlags().MarkHidden("cpuprofile")
 	_ = root.PersistentFlags().MarkHidden("memprofile")
+	_ = root.PersistentFlags().MarkHidden("trace")
 
 	root.AddCommand(
 		newInitCmd(),

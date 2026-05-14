@@ -5,27 +5,47 @@ import (
 	"os"
 	"runtime"
 	"runtime/pprof"
+	"runtime/trace"
 )
 
-var cpuProfileFile *os.File
+var (
+	cpuProfileFile *os.File
+	traceFile      *os.File
+)
 
-// startProfiling opens the CPU profile file (if --cpuprofile was given)
-// and begins CPU profiling. It runs from PersistentPreRunE, before the
-// command's RunE — for `bacio tui` that means profiling is live before
-// tea.NewProgram(...).Run() and covers the whole interactive session.
+// startProfiling opens the CPU profile and execution trace files (if the
+// corresponding flags were given) and begins recording. It runs from
+// PersistentPreRunE, before the command's RunE — for `bacio tui` that
+// means recording is live before tea.NewProgram(...).Run() and covers
+// the whole interactive session.
+//
+// Unlike CPU profiling, the execution trace captures off-CPU events
+// (goroutine scheduling, blocking on syscalls/channels/mutexes), so it's
+// the tool that actually diagnoses UI freezes — open it with
+// `go tool trace <path>`.
 func startProfiling() error {
-	if opts.cpuProfile == "" {
-		return nil
+	if opts.cpuProfile != "" {
+		f, err := os.Create(opts.cpuProfile)
+		if err != nil {
+			return fmt.Errorf("create cpu profile: %w", err)
+		}
+		if err := pprof.StartCPUProfile(f); err != nil {
+			f.Close()
+			return fmt.Errorf("start cpu profile: %w", err)
+		}
+		cpuProfileFile = f
 	}
-	f, err := os.Create(opts.cpuProfile)
-	if err != nil {
-		return fmt.Errorf("create cpu profile: %w", err)
+	if opts.traceFile != "" {
+		f, err := os.Create(opts.traceFile)
+		if err != nil {
+			return fmt.Errorf("create trace: %w", err)
+		}
+		if err := trace.Start(f); err != nil {
+			f.Close()
+			return fmt.Errorf("start trace: %w", err)
+		}
+		traceFile = f
 	}
-	if err := pprof.StartCPUProfile(f); err != nil {
-		f.Close()
-		return fmt.Errorf("start cpu profile: %w", err)
-	}
-	cpuProfileFile = f
 	return nil
 }
 
@@ -40,6 +60,13 @@ func stopProfiling() {
 			fmt.Fprintln(os.Stderr, "bacio: close cpu profile:", err)
 		}
 		cpuProfileFile = nil
+	}
+	if traceFile != nil {
+		trace.Stop()
+		if err := traceFile.Close(); err != nil {
+			fmt.Fprintln(os.Stderr, "bacio: close trace:", err)
+		}
+		traceFile = nil
 	}
 	if opts.memProfile == "" {
 		return
