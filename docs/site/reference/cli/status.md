@@ -5,7 +5,7 @@ description: One-screen summary of the current repo — prefix, DB path, feature
 
 # `bacio status`
 
-A quick-look read of the current repo. Good for *"where am I?"* moments in the terminal without opening the TUI. Auto-registers the current repo on first use — same behaviour as every other mutating command.
+A quick-look read of the current repo. Good for *"where am I?"* moments in the terminal without opening the TUI. `bacio status` is strictly read-only — it never writes to the database, so agents can use it as a safe probe before doing work. If the current git tree hasn't been bound yet, status reports that distinctly; use [`bacio init`](/reference/cli/init) (or any mutating command — they auto-register on first use) to register the repo.
 
 ```bash
 bacio status
@@ -29,7 +29,17 @@ Issues:   12
 Next:    MINI-13
 ```
 
-If the repo was registered as a side effect of this call (i.e. you ran `bacio status` before `bacio init` in a fresh git tree), the output is prefixed with `Just registered this git repo as MINI.`
+## Inside an unregistered git tree
+
+When you run `bacio status` in a git working tree that hasn't been bound to a prefix yet, status reports the unregistered state without writing anything:
+
+```
+Path:    /Users/you/code/fresh-project
+Repo:    (unregistered — run `bacio init` to bind a prefix)
+DB:      /Users/you/.bacio/db.sqlite
+```
+
+Run [`bacio init`](/reference/cli/init) to bind a prefix explicitly, or just call any mutating command (e.g. `bacio issue add`) which auto-registers as a side effect.
 
 ## Outside any git repo
 
@@ -49,12 +59,14 @@ The global counts are useful as a *"do I have any bacio data at all?"* read.
 bacio status -o json
 ```
 
-Returns a `statusReport` shape:
+Returns a `statusReport` shape. Inside a registered git tree:
 
 ```json
 {
   "db_path": "/Users/you/.bacio/db.sqlite",
   "in_repo": true,
+  "registered": true,
+  "path": "/Users/you/code/bacio",
   "repo": {
     "id": 1,
     "uuid": "0190a44e-...-uuid",
@@ -66,7 +78,6 @@ Returns a `statusReport` shape:
     "created_at": "2026-04-01T08:12:31Z",
     "updated_at": "2026-05-12T14:32:01Z"
   },
-  "just_registered": false,
   "stats": {
     "features": 3,
     "issues": 12,
@@ -76,7 +87,19 @@ Returns a `statusReport` shape:
 }
 ```
 
-`repo` is the full `model.Repo` shape (`id`, `uuid`, `prefix`, `name`, `path`, `remote_url`, `next_issue_number`, `created_at`, `updated_at`); `remote_url` is omitted when there's no remote configured. In the outside-a-repo branch, `repo` is absent and `stats` carries `tracked_repos` and `total_issues` instead of the per-repo fields. `just_registered` is omitted when false.
+Inside an unregistered git tree the `repo` block and the per-repo stats are absent:
+
+```json
+{
+  "db_path": "/Users/you/.bacio/db.sqlite",
+  "in_repo": true,
+  "registered": false,
+  "path": "/Users/you/code/fresh-project",
+  "stats": {}
+}
+```
+
+`repo` is the full `model.Repo` shape (`id`, `uuid`, `prefix`, `name`, `path`, `remote_url`, `next_issue_number`, `created_at`, `updated_at`); `remote_url` is omitted when there's no remote configured. `registered` is always present when `in_repo` is true and tells callers whether a `repos` row exists for the working tree. `path` is the git working-tree root and is populated whenever `in_repo` is true. In the outside-a-repo branch, `repo` and `path` are absent and `stats` carries `tracked_repos` and `total_issues` instead of the per-repo fields.
 
 ## See also
 
