@@ -24,6 +24,7 @@ export {
     CommentDTO,
     DispatchDTO,
     DocContent,
+    DocLinkDTO,
     DocSummary,
     FeatureDetail,
     FeatureLinkedIssue,

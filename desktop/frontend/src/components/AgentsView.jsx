@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import Icon from './Icon.jsx';
 
 // relTime renders a coarse "time since" for the last-seen line.
@@ -18,9 +18,6 @@ function relTime(iso) {
 // drawer, not from here.
 export default function AgentsView({ agents, onRefresh }) {
   const [expanded, setExpanded] = useState(null);
-
-  // Refresh once when the view opens so counts are current.
-  useEffect(() => { onRefresh(); }, []);
 
   return (
     <div className="mk-agents-view">

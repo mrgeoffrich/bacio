@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"os/user"
 	"strings"
 	"time"
 
@@ -68,19 +69,28 @@ type PRDTO struct {
 	URL string `json:"url"`
 }
 
+// DocLinkDTO is one document linked to an issue, shaped for the drawer's
+// attachments section.
+type DocLinkDTO struct {
+	Filename    string `json:"filename"`
+	Type        string `json:"type"`
+	Description string `json:"description"` // the link's --why reason
+}
+
 // IssueDetail is the issue-drawer payload for a single issue.
 type IssueDetail struct {
-	Key          string         `json:"key"`
-	Column       string         `json:"column"`
-	ColumnLabel  string         `json:"columnLabel"`
-	Title        string         `json:"title"`
-	Description  string         `json:"description"`
-	Tags         []string       `json:"tags"`
-	Assignees    []string       `json:"assignees"`
-	Claude       bool           `json:"claude"`
-	Comments     []CommentDTO   `json:"comments"`
-	PullRequests []PRDTO        `json:"pullRequests"`
-	Claimants    []ClaimantDTO  `json:"claimants"`
+	Key          string        `json:"key"`
+	Column       string        `json:"column"`
+	ColumnLabel  string        `json:"columnLabel"`
+	Title        string        `json:"title"`
+	Description  string        `json:"description"`
+	Tags         []string      `json:"tags"`
+	Assignees    []string      `json:"assignees"`
+	Claude       bool          `json:"claude"`
+	Comments     []CommentDTO  `json:"comments"`
+	PullRequests []PRDTO       `json:"pullRequests"`
+	Documents    []DocLinkDTO  `json:"documents"`
+	Claimants    []ClaimantDTO `json:"claimants"`
 	// Taken is the derived "an agent is actively holding this" signal —
 	// true iff Claimants has an open (unreleased) claim.
 	Taken bool `json:"taken"`
@@ -142,14 +152,28 @@ type AgentCard struct {
 
 // BoardService is the Wails-bound API the kanban frontend talks to. It
 // wraps a local bacio client.Client and reshapes its results into the
-// DTOs the imported UI kit expects. Mostly read-only; DispatchIssue is
-// the one mutation (queuing a dispatch for an agent).
+// DTOs the imported UI kit expects. Mostly read-only; the mutations are
+// DispatchIssue (queuing a dispatch for an agent), UpdateIssueDescription,
+// and AddComment (both driven from the issue-drawer Edit modal).
 type BoardService struct {
 	client client.Client
 }
 
 func NewBoardService(c client.Client) *BoardService {
 	return &BoardService{client: c}
+}
+
+// resolveRepoForKey turns a repo prefix into a *model.Repo. When the prefix
+// is empty or the "all" pseudo-board, the prefix is derived from the
+// canonical issue key (PREFIX-N) instead.
+func (b *BoardService) resolveRepoForKey(ctx context.Context, repoPrefix, key string) (*model.Repo, error) {
+	prefix := repoPrefix
+	if prefix == "" || prefix == "all" {
+		if i := strings.LastIndex(key, "-"); i > 0 {
+			prefix = key[:i]
+		}
+	}
+	return b.client.GetRepoByPrefix(ctx, prefix)
 }
 
 func assigneeList(a string) []string {
@@ -323,6 +347,14 @@ func (b *BoardService) GetIssue(repoPrefix, key string) (IssueDetail, error) {
 			Open:       c.ReleasedAt == nil,
 		})
 	}
+	docs := make([]DocLinkDTO, 0, len(view.Documents))
+	for _, d := range view.Documents {
+		docs = append(docs, DocLinkDTO{
+			Filename:    d.DocumentFilename,
+			Type:        string(d.DocumentType),
+			Description: d.Description,
+		})
+	}
 	return IssueDetail{
 		Key:          iss.Key,
 		Column:       string(iss.State),
@@ -334,9 +366,52 @@ func (b *BoardService) GetIssue(repoPrefix, key string) (IssueDetail, error) {
 		Claude:       iss.Assignee == "claude",
 		Comments:     comments,
 		PullRequests: prs,
+		Documents:    docs,
 		Claimants:    claimants,
 		Taken:        view.Taken,
 	}, nil
+}
+
+// UpdateIssueDescription replaces an issue's description and returns the
+// refreshed issue-drawer payload. repoPrefix may be empty or "all" — the
+// prefix is then derived from the canonical issue key.
+func (b *BoardService) UpdateIssueDescription(repoPrefix, key, description string) (IssueDetail, error) {
+	ctx := context.Background()
+	repo, err := b.resolveRepoForKey(ctx, repoPrefix, key)
+	if err != nil {
+		return IssueDetail{}, err
+	}
+	if _, err := b.client.UpdateIssue(ctx, repo, key, client.IssueEdit{Description: &description}, false); err != nil {
+		return IssueDetail{}, err
+	}
+	return b.GetIssue(repoPrefix, key)
+}
+
+// AddComment appends a comment to an issue and returns the refreshed
+// issue-drawer payload. An empty author falls back to the OS username,
+// the same default the CLI uses for human actors. repoPrefix may be empty
+// or "all" — the prefix is then derived from the canonical issue key.
+func (b *BoardService) AddComment(repoPrefix, key, author, body string) (IssueDetail, error) {
+	ctx := context.Background()
+	repo, err := b.resolveRepoForKey(ctx, repoPrefix, key)
+	if err != nil {
+		return IssueDetail{}, err
+	}
+	if strings.TrimSpace(author) == "" {
+		if u, err := user.Current(); err == nil && u.Username != "" {
+			author = u.Username
+		} else {
+			author = "desktop"
+		}
+	}
+	if _, err := b.client.AddComment(ctx, repo, inputs.CommentAddInput{
+		IssueKey: key,
+		Author:   author,
+		Body:     body,
+	}, false); err != nil {
+		return IssueDetail{}, err
+	}
+	return b.GetIssue(repoPrefix, key)
 }
 
 func dispatchDTO(d *model.AgentDispatch) DispatchDTO {

@@ -6,12 +6,14 @@ import FeaturesView from './components/FeaturesView.jsx';
 import AgentsView from './components/AgentsView.jsx';
 import HistoryView from './components/HistoryView.jsx';
 import IssueDrawer from './components/IssueDrawer.jsx';
+import IssueEditModal from './components/IssueEditModal.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
 import SettingsPanel from './components/SettingsPanel.jsx';
 import * as api from './api';
 
 const THEME_KEY = 'bacio-theme'; // persisted preference: 'system' | 'light' | 'dark'
 const REPO_KEY = 'bacio-active-repo'; // persisted preference: last-selected repo prefix
+const POLL_INTERVAL_MS = 10_000; // Board/Agents auto-refresh cadence while on-screen
 
 // localStorage is always present inside the Wails webview, but a hardened
 // browser profile can throw on access — fall back to defaults rather than
@@ -52,6 +54,7 @@ export default function App() {
   const [activeView, setActiveView] = useState('board'); // 'board' | 'features' | 'docs' | 'agents' | 'history'
   const [cards, setCards] = useState([]);
   const [openIssue, setOpenIssue] = useState(null);
+  const [editIssueOpen, setEditIssueOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [agents, setAgents] = useState([]);
@@ -99,24 +102,61 @@ export default function App() {
     if (activeBoard) persistActiveRepo(activeBoard);
   }, [activeBoard]);
 
-  // refreshAgents reloads the agent list for the active repo. Used by the
-  // board-change effect, the Agents panel's refresh button, and after a
-  // dispatch so the counts move.
-  const refreshAgents = useCallback(() => {
-    if (!activeBoard) return;
-    api.listAgents(activeBoard)
-      .then(setAgents)
-      .catch(err => setError(err.message));
-  }, [activeBoard]);
-
-  // Load cards + agents whenever the selected repository changes.
-  useEffect(() => {
+  // refreshCards / refreshAgents reload the App-owned card and agent lists
+  // for the active repo. Used by the repo-change effect, the screen-switch
+  // effect, the 10s poll, the Agents panel's refresh button, and after a
+  // dispatch so the counts move. Pass { silent: true } on the poll path so a
+  // transient failure logs instead of kicking the app to the error screen.
+  const refreshCards = useCallback((opts = {}) => {
     if (!activeBoard) return;
     api.listCards(activeBoard)
       .then(setCards)
-      .catch(err => setError(err.message));
+      .catch(err => {
+        if (opts.silent) console.warn('card refresh failed:', err);
+        else setError(err.message);
+      });
+  }, [activeBoard]);
+
+  const refreshAgents = useCallback((opts = {}) => {
+    if (!activeBoard) return;
+    api.listAgents(activeBoard)
+      .then(setAgents)
+      .catch(err => {
+        if (opts.silent) console.warn('agent refresh failed:', err);
+        else setError(err.message);
+      });
+  }, [activeBoard]);
+
+  // Load cards + agents whenever the selected repository changes. Both stay
+  // loaded regardless of the active view — CommandPalette reads cards and
+  // IssueDrawer reads agents, and either can open from any screen.
+  useEffect(() => {
+    if (!activeBoard) return;
+    refreshCards();
     refreshAgents();
-  }, [activeBoard, refreshAgents]);
+  }, [activeBoard, refreshCards, refreshAgents]);
+
+  // Re-fetch the active screen's data on switch so it's fresh on arrival,
+  // not mount-time/cached. Board + Agents only — Features/Docs/History are
+  // self-owning components that re-fetch on their own remount.
+  useEffect(() => {
+    if (!activeBoard) return;
+    if (activeView === 'board') refreshCards();
+    else if (activeView === 'agents') refreshAgents();
+  }, [activeView, refreshCards, refreshAgents]);
+
+  // Poll the Board / Agents screens every 10s so they don't go stale while
+  // open. The cleanup clears the interval on navigation away, repo change,
+  // or unmount — no leaks, no redundant fetches off-screen.
+  useEffect(() => {
+    if (!activeBoard) return;
+    if (activeView !== 'board' && activeView !== 'agents') return;
+    const id = setInterval(() => {
+      if (activeView === 'board') refreshCards({ silent: true });
+      else refreshAgents({ silent: true });
+    }, POLL_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [activeView, activeBoard, refreshCards, refreshAgents]);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -188,6 +228,19 @@ export default function App() {
     setOpenIssue(null);
   };
 
+  // The edit modal returns the refreshed IssueDetail after each write, so the
+  // drawer behind it reflects the new description / comment immediately.
+  const onIssueSaved = (updated) => {
+    setOpenIssue(updated);
+  };
+
+  // Closing the drawer also dismisses the edit modal — otherwise its open
+  // flag would survive and re-trigger when the next issue is opened.
+  const closeDrawer = () => {
+    setOpenIssue(null);
+    setEditIssueOpen(false);
+  };
+
   return (
     <div className="mk-app">
       <Topbar
@@ -223,10 +276,19 @@ export default function App() {
       <IssueDrawer
         issue={openIssue}
         agents={agents}
-        onClose={() => setOpenIssue(null)}
+        onClose={closeDrawer}
         onSendToAgent={sendToAgent}
         onShip={ship}
+        onEdit={() => setEditIssueOpen(true)}
       />
+      {editIssueOpen && openIssue && (
+        <IssueEditModal
+          issue={openIssue}
+          repoPrefix={activeBoard}
+          onClose={() => setEditIssueOpen(false)}
+          onSaved={onIssueSaved}
+        />
+      )}
       <CommandPalette
         open={paletteOpen}
         cards={cards}

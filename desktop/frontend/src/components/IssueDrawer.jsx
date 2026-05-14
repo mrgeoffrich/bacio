@@ -1,7 +1,15 @@
 import React, { useState, useEffect } from 'react';
+import ReactMarkdown from 'react-markdown';
 import Icon from './Icon.jsx';
 
-export default function IssueDrawer({ issue, agents, onClose, onSendToAgent, onShip }) {
+// prLabel shortens a GitHub PR URL to "owner/repo#N" when it matches the
+// familiar shape; anything else falls back to the raw URL.
+function prLabel(url) {
+  const m = url.match(/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
+  return m ? `${m[1]}/${m[2]}#${m[3]}` : url;
+}
+
+export default function IssueDrawer({ issue, agents, onClose, onSendToAgent, onShip, onEdit }) {
   // Only agents with a persistent identity slug can be targeted from the
   // desktop (DispatchIssue routes by slug); ended sessions are dropped.
   // Busy agents stay in the list but render disabled with a reason, so
@@ -30,6 +38,8 @@ export default function IssueDrawer({ issue, agents, onClose, onSendToAgent, onS
     onSendToAgent(effectiveAgent, mode, note);
   };
 
+  const hasAttachments = issue.pullRequests.length > 0 || issue.documents.length > 0;
+
   return (
     <>
       <div className="mk-scrim" onClick={onClose} />
@@ -37,8 +47,8 @@ export default function IssueDrawer({ issue, agents, onClose, onSendToAgent, onS
         <header className="mk-drawer-head">
           <span className="mk-card-id">{issue.key}</span>
           <span className={`mk-pill mk-status-${issue.column}`}>{issue.columnLabel}</span>
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: '4px' }}>
-            <button className="mk-icbtn" aria-label="Copy link"><Icon name="link" /></button>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: '4px', alignItems: 'center' }}>
+            <button className="mk-btn-secondary" onClick={onEdit}>Edit</button>
             <button className="mk-icbtn" aria-label="Close" onClick={onClose}><Icon name="x" /></button>
           </div>
         </header>
@@ -50,12 +60,9 @@ export default function IssueDrawer({ issue, agents, onClose, onSendToAgent, onS
             <div className="mk-meta-row-grid">
               <span className="mk-meta-key">Assignees</span>
               <span className="mk-meta-val">
-                <div className="mk-avatars">
-                  {issue.assignees.length === 0 && <span className="mk-meta-empty">unassigned</span>}
-                  {issue.assignees.map((a, i) => (
-                    <span key={i} className={`mk-av ${a === 'claude' ? 'is-claude' : ''}`}>{a === 'claude' ? 'c' : a}</span>
-                  ))}
-                </div>
+                {issue.assignees.length === 0
+                  ? <span className="mk-meta-empty">unassigned</span>
+                  : issue.assignees.join(', ')}
               </span>
 
               <span className="mk-meta-key">Tags</span>
@@ -64,22 +71,38 @@ export default function IssueDrawer({ issue, agents, onClose, onSendToAgent, onS
                   ? issue.tags.map(t => <span key={t} className="mk-tag">{t}</span>)
                   : <span className="mk-meta-empty">—</span>}
               </span>
-
-              {issue.pullRequests.length > 0 && (<>
-                <span className="mk-meta-key">PRs</span>
-                <span className="mk-meta-val mk-mono">
-                  {issue.pullRequests.map(p => p.url).join(', ')}
-                </span>
-              </>)}
             </div>
           </div>
 
           <section className="mk-drawer-section">
             <div className="mk-drawer-label">Description</div>
             {issue.description
-              ? <p className="mk-drawer-text">{issue.description}</p>
+              ? <div className="mk-drawer-text mk-markdown"><ReactMarkdown>{issue.description}</ReactMarkdown></div>
               : <p className="mk-drawer-text mk-meta-empty">No description.</p>}
           </section>
+
+          {hasAttachments && (
+            <section className="mk-drawer-section">
+              <div className="mk-drawer-label">Attachments</div>
+              <ul className="mk-attachments">
+                {issue.pullRequests.map(p => (
+                  <li key={p.url} className="mk-attachment">
+                    <span className="mk-attachment-badge">PR</span>
+                    <a href={p.url} target="_blank" rel="noreferrer" className="mk-attachment-link">
+                      {prLabel(p.url)}
+                    </a>
+                  </li>
+                ))}
+                {issue.documents.map(d => (
+                  <li key={d.filename} className="mk-attachment">
+                    <span className="mk-attachment-badge">{d.type || 'doc'}</span>
+                    <span className="mk-attachment-name">{d.filename}</span>
+                    {d.description && <span className="mk-attachment-why">{d.description}</span>}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
 
           {isTodo && (
             <section className="mk-drawer-section">

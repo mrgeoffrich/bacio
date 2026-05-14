@@ -422,6 +422,43 @@ export class DocContent {
 }
 
 /**
+ * DocLinkDTO is one document linked to an issue, shaped for the drawer's
+ * attachments section.
+ */
+export class DocLinkDTO {
+    "filename": string;
+    "type": string;
+
+    /**
+     * the link's --why reason
+     */
+    "description": string;
+
+    /** Creates a new DocLinkDTO instance. */
+    constructor($$source: Partial<DocLinkDTO> = {}) {
+        if (!("filename" in $$source)) {
+            this["filename"] = "";
+        }
+        if (!("type" in $$source)) {
+            this["type"] = "";
+        }
+        if (!("description" in $$source)) {
+            this["description"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new DocLinkDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): DocLinkDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new DocLinkDTO($$parsedSource as Partial<DocLinkDTO>);
+    }
+}
+
+/**
  * DocSummary is one document, shaped for the desktop document list.
  */
 export class DocSummary {
@@ -678,6 +715,7 @@ export class IssueDetail {
     "claude": boolean;
     "comments": CommentDTO[];
     "pullRequests": PRDTO[];
+    "documents": DocLinkDTO[];
     "claimants": ClaimantDTO[];
 
     /**
@@ -718,6 +756,9 @@ export class IssueDetail {
         if (!("pullRequests" in $$source)) {
             this["pullRequests"] = [];
         }
+        if (!("documents" in $$source)) {
+            this["documents"] = [];
+        }
         if (!("claimants" in $$source)) {
             this["claimants"] = [];
         }
@@ -737,6 +778,7 @@ export class IssueDetail {
         const $$createField8_0 = $$createType10;
         const $$createField9_0 = $$createType12;
         const $$createField10_0 = $$createType14;
+        const $$createField11_0 = $$createType16;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField5_0($$parsedSource["tags"]);
@@ -750,8 +792,11 @@ export class IssueDetail {
         if ("pullRequests" in $$parsedSource) {
             $$parsedSource["pullRequests"] = $$createField9_0($$parsedSource["pullRequests"]);
         }
+        if ("documents" in $$parsedSource) {
+            $$parsedSource["documents"] = $$createField10_0($$parsedSource["documents"]);
+        }
         if ("claimants" in $$parsedSource) {
-            $$parsedSource["claimants"] = $$createField10_0($$parsedSource["claimants"]);
+            $$parsedSource["claimants"] = $$createField11_0($$parsedSource["claimants"]);
         }
         return new IssueDetail($$parsedSource as Partial<IssueDetail>);
     }
@@ -838,5 +883,7 @@ const $$createType9 = CommentDTO.createFrom;
 const $$createType10 = $Create.Array($$createType9);
 const $$createType11 = PRDTO.createFrom;
 const $$createType12 = $Create.Array($$createType11);
-const $$createType13 = ClaimantDTO.createFrom;
+const $$createType13 = DocLinkDTO.createFrom;
 const $$createType14 = $Create.Array($$createType13);
+const $$createType15 = ClaimantDTO.createFrom;
+const $$createType16 = $Create.Array($$createType15);
