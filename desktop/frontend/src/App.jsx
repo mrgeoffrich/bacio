@@ -12,6 +12,7 @@ import * as api from './api';
 
 const THEME_KEY = 'bacio-theme'; // persisted preference: 'system' | 'light' | 'dark'
 const REPO_KEY = 'bacio-active-repo'; // persisted preference: last-selected repo prefix
+const POLL_INTERVAL_MS = 10_000; // Board/Agents auto-refresh cadence while on-screen
 
 // localStorage is always present inside the Wails webview, but a hardened
 // browser profile can throw on access — fall back to defaults rather than
@@ -99,24 +100,61 @@ export default function App() {
     if (activeBoard) persistActiveRepo(activeBoard);
   }, [activeBoard]);
 
-  // refreshAgents reloads the agent list for the active repo. Used by the
-  // board-change effect, the Agents panel's refresh button, and after a
-  // dispatch so the counts move.
-  const refreshAgents = useCallback(() => {
-    if (!activeBoard) return;
-    api.listAgents(activeBoard)
-      .then(setAgents)
-      .catch(err => setError(err.message));
-  }, [activeBoard]);
-
-  // Load cards + agents whenever the selected repository changes.
-  useEffect(() => {
+  // refreshCards / refreshAgents reload the App-owned card and agent lists
+  // for the active repo. Used by the repo-change effect, the screen-switch
+  // effect, the 10s poll, the Agents panel's refresh button, and after a
+  // dispatch so the counts move. Pass { silent: true } on the poll path so a
+  // transient failure logs instead of kicking the app to the error screen.
+  const refreshCards = useCallback((opts = {}) => {
     if (!activeBoard) return;
     api.listCards(activeBoard)
       .then(setCards)
-      .catch(err => setError(err.message));
+      .catch(err => {
+        if (opts.silent) console.warn('card refresh failed:', err);
+        else setError(err.message);
+      });
+  }, [activeBoard]);
+
+  const refreshAgents = useCallback((opts = {}) => {
+    if (!activeBoard) return;
+    api.listAgents(activeBoard)
+      .then(setAgents)
+      .catch(err => {
+        if (opts.silent) console.warn('agent refresh failed:', err);
+        else setError(err.message);
+      });
+  }, [activeBoard]);
+
+  // Load cards + agents whenever the selected repository changes. Both stay
+  // loaded regardless of the active view — CommandPalette reads cards and
+  // IssueDrawer reads agents, and either can open from any screen.
+  useEffect(() => {
+    if (!activeBoard) return;
+    refreshCards();
     refreshAgents();
-  }, [activeBoard, refreshAgents]);
+  }, [activeBoard, refreshCards, refreshAgents]);
+
+  // Re-fetch the active screen's data on switch so it's fresh on arrival,
+  // not mount-time/cached. Board + Agents only — Features/Docs/History are
+  // self-owning components that re-fetch on their own remount.
+  useEffect(() => {
+    if (!activeBoard) return;
+    if (activeView === 'board') refreshCards();
+    else if (activeView === 'agents') refreshAgents();
+  }, [activeView, refreshCards, refreshAgents]);
+
+  // Poll the Board / Agents screens every 10s so they don't go stale while
+  // open. The cleanup clears the interval on navigation away, repo change,
+  // or unmount — no leaks, no redundant fetches off-screen.
+  useEffect(() => {
+    if (!activeBoard) return;
+    if (activeView !== 'board' && activeView !== 'agents') return;
+    const id = setInterval(() => {
+      if (activeView === 'board') refreshCards({ silent: true });
+      else refreshAgents({ silent: true });
+    }, POLL_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [activeView, activeBoard, refreshCards, refreshAgents]);
 
   useEffect(() => {
     const onKey = (e) => {
