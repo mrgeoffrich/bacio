@@ -13,6 +13,9 @@
 .mk-topbar {
   padding-left: 84px;
   --wails-draggable: drag;
+  /* Kit app.css hardcodes a light translucent fill here; re-point it
+     at the themeable token so the dark theme can reach it. */
+  background: var(--topbar-bg);
 }
 
 .mk-topbar button,
@@ -48,3 +51,58 @@
   color: var(--fg-3);
 }
 .mk-app-error { color: var(--status-blocked); }
+
+/* ============================================================
+   Dark-mode plumbing — a few kit rules in app.css hardcode light
+   colours. Re-point them at tokens so the [data-theme] block can
+   reach them, without editing the pristine kit CSS.
+   ============================================================ */
+html { background: var(--bg-1); }            /* no white flash on overscroll */
+.mk-scrim { background: var(--scrim); }
+.mk-btn-primary { color: var(--fg-on-primary); }  /* was hardcoded --paper */
+
+/* ============================================================
+   Settings dialog — a desktop-app addition (not part of the kit),
+   so its styles live here. Centred modal, reuses the palette's
+   pop-in animation and the shared .mk-scrim backdrop.
+   ============================================================ */
+.mk-settings {
+  position: fixed; top: 90px; left: 50%; transform: translateX(-50%);
+  width: min(440px, 90vw);
+  background: var(--bg-2); border: 1px solid var(--border-1);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-4);
+  z-index: 60; display: flex; flex-direction: column;
+  animation: mk-pop var(--dur-medium) var(--ease-out);
+}
+.mk-settings-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 14px 14px 20px; border-bottom: 1px solid var(--border-1);
+}
+.mk-settings-title {
+  margin: 0; flex: 1;
+  font-size: 16px; font-weight: 600; color: var(--fg-1);
+}
+.mk-settings-body {
+  padding: 16px 20px 20px; display: flex; flex-direction: column; gap: 16px;
+}
+.mk-settings-row { display: flex; align-items: center; gap: 16px; }
+.mk-settings-row-text { flex: 1; min-width: 0; }
+.mk-settings-label { font-size: 14px; font-weight: 500; color: var(--fg-1); }
+.mk-settings-hint { font-size: 12px; color: var(--fg-3); margin-top: 2px; }
+
+.mk-segmented {
+  display: inline-flex; gap: 2px; padding: 2px; flex-shrink: 0;
+  background: var(--bg-4); border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+}
+.mk-segmented-btn {
+  font-family: var(--font-sans); font-size: 12px; font-weight: 500;
+  padding: 5px 12px; border: 0; border-radius: 6px; cursor: pointer;
+  background: transparent; color: var(--fg-3);
+  transition: background var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+.mk-segmented-btn:hover { color: var(--fg-1); }
+.mk-segmented-btn.is-active {
+  background: var(--bg-2); color: var(--fg-1); box-shadow: var(--shadow-1);
+}

@@ -1,7 +1,7 @@
 import React from 'react';
 import Icon from './Icon.jsx';
 
-export default function Topbar({ boards, activeBoard, onPickBoard, onOpenPalette }) {
+export default function Topbar({ boards, activeBoard, onPickBoard, onOpenPalette, onOpenSettings }) {
   return (
     <header className="mk-topbar">
       <div className="mk-brand">
@@ -27,7 +27,7 @@ export default function Topbar({ boards, activeBoard, onPickBoard, onOpenPalette
 
       <div className="mk-topbar-right">
         <button className="mk-icbtn" aria-label="Notifications"><Icon name="bell" /></button>
-        <button className="mk-icbtn" aria-label="Settings"><Icon name="settings" /></button>
+        <button className="mk-icbtn" aria-label="Settings" onClick={onOpenSettings}><Icon name="settings" /></button>
       </div>
     </header>
   );

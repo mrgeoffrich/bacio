@@ -6,6 +6,8 @@
 @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 :root {
+  color-scheme: light;
+
   /* ---------- Brand (Sky pastel — "blueberry sorbet") ---------- */
   --sky-50:  #EEF4FE;
   --sky-100: #DCE7FB;
@@ -26,6 +28,10 @@
   --paper:      #FFFFFF;   /* Card / input fill */
   --cream:      #F2F6FC;   /* App canvas — cool off-white */
   --cream-deep: #E6EEF8;   /* Sidebar, sunken areas */
+
+  /* ---------- Composed surfaces (themeable, not raw) ---------- */
+  --topbar-bg: rgba(242, 246, 252, 0.85); /* translucent canvas under blur */
+  --scrim:     rgba(26, 24, 20, 0.4);     /* modal / drawer backdrop */
 
   /* ---------- Ink (cool-slate ramp, single track) ---------- */
   --ink-0:    #FAFBFD;
@@ -140,6 +146,83 @@
   --dur-fast:   120ms;
   --dur-medium: 180ms;
   --dur-slow:   240ms;
+}
+
+/* ============================================================
+   Dark theme — applied when <html data-theme="dark">.
+   App.jsx resolves the user's System/Light/Dark preference to a
+   concrete light|dark value and writes it to data-theme, so this
+   block never needs a prefers-color-scheme media query.
+
+   Only the *primitive* tokens are redefined: the ink ramp is
+   inverted (0 = darkest), the three surfaces are darkened, and a
+   handful of on-colour / status / shadow values are retuned.
+   Everything semantic (--fg-*, --bg-*, --border-*) is declared as
+   var(--ink-*) / var(--paper) etc. in :root and re-resolves here
+   for free — custom properties resolve lazily at use.
+   ============================================================ */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Brand — keep --sky-500 as the primary; retune the rest so the
+     light-blue fills/borders read on a dark canvas. Hover goes
+     *lighter* in dark mode (the opposite of the light theme). */
+  --sky-50:  #1F2E48;   /* is-over column fill, priority pill fill */
+  --sky-100: #263755;
+  --sky-300: #5E86C4;   /* is-over column border */
+  --sky-600: #84B5EF;   /* primary button hover */
+  --sky-700: #AECEF5;   /* priority pill text */
+
+  /* Surfaces — mirror the light theme's hierarchy: columns are
+     sunken wells (darkest), cards are the raised, lightest plane. */
+  --paper:      #1E2740;   /* cards / inputs — raised */
+  --cream:      #151C2E;   /* app canvas */
+  --cream-deep: #0F1523;   /* columns / sunken areas */
+
+  /* Ink ramp — inverted: 0 is the darkest, 900 the lightest. */
+  --ink-0:    #0E1422;
+  --ink-50:   #1B2233;
+  --ink-100:  #2A3347;
+  --ink-200:  #3B475F;
+  --ink-300:  #5C6883;
+  --ink-400:  #828FA8;
+  --ink-500:  #9EAABF;
+  --ink-600:  #B9C2D3;
+  --ink-700:  #D2D9E4;
+  --ink-800:  #E5E9F0;
+  --ink-900:  #F2F4F8;
+
+  /* On-colour text — the kit's --fg-on-* alias --paper, which is now
+     dark, so text on the sky-blue primary button would vanish.
+     Pin these light. */
+  --fg-on-coral:   #F2F4F8;
+  --fg-on-primary: #F2F4F8;
+
+  --topbar-bg: rgba(21, 28, 46, 0.85);
+  --scrim:     rgba(0, 0, 0, 0.55);
+
+  /* Status (gelato) — brighter scoops for legibility on dark, with
+     translucent tints that sit on whatever surface they land on. */
+  --status-todo:        #A6B1C5;
+  --status-todo-bg:     rgba(110, 121, 144, 0.22);
+  --status-doing:       #E8B65C;
+  --status-doing-bg:    rgba(212, 154, 46, 0.20);
+  --status-review:      #B89BEA;
+  --status-review-bg:   rgba(156, 124, 216, 0.22);
+  --status-done:        #8FC98A;
+  --status-done-bg:     rgba(111, 168, 106, 0.22);
+  --status-blocked:     #E58FA1;
+  --status-blocked-bg:  rgba(210, 113, 135, 0.22);
+  --status-claude:      #7FCBBF;
+  --status-claude-bg:   rgba(93, 179, 166, 0.22);
+
+  /* Shadows — near-black and heavier; the warm-tinted light-theme
+     shadows are invisible on a dark canvas. */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.40);
+  --shadow-2: 0 4px 8px rgba(0, 0, 0, 0.45), 0 2px 4px rgba(0, 0, 0, 0.35);
+  --shadow-3: 0 8px 16px rgba(0, 0, 0, 0.50), 0 4px 8px rgba(0, 0, 0, 0.40);
+  --shadow-4: 0 16px 32px rgba(0, 0, 0, 0.60), 0 8px 16px rgba(0, 0, 0, 0.45);
+  --shadow-pressed: inset 0 1px 0 rgba(0, 0, 0, 0.40);
 }
 
 /* ============================================================

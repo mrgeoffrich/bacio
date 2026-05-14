@@ -3,7 +3,10 @@ import Topbar from './components/Topbar.jsx';
 import Board from './components/Board.jsx';
 import IssueDrawer from './components/IssueDrawer.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
+import SettingsPanel from './components/SettingsPanel.jsx';
 import * as api from './api';
+
+const THEME_KEY = 'bacio-theme'; // persisted preference: 'system' | 'light' | 'dark'
 
 export default function App() {
   const [boards, setBoards] = useState([]);
@@ -12,8 +15,27 @@ export default function App() {
   const [cards, setCards] = useState([]);
   const [openIssue, setOpenIssue] = useState(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [theme, setTheme] = useState(() => localStorage.getItem(THEME_KEY) || 'system');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // Resolve the System/Light/Dark preference to a concrete light|dark value
+  // and write it to <html data-theme>. In 'system' mode, track the OS setting
+  // live so the app follows appearance changes without a relaunch.
+  useEffect(() => {
+    localStorage.setItem(THEME_KEY, theme);
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const apply = () => {
+      const resolved = theme === 'system' ? (mq.matches ? 'dark' : 'light') : theme;
+      document.documentElement.dataset.theme = resolved;
+    };
+    apply();
+    if (theme === 'system') {
+      mq.addEventListener('change', apply);
+      return () => mq.removeEventListener('change', apply);
+    }
+  }, [theme]);
 
   // Load the repository list + columns once on mount.
   useEffect(() => {
@@ -41,6 +63,7 @@ export default function App() {
       } else if (e.key === 'Escape') {
         setPaletteOpen(false);
         setOpenIssue(null);
+        setSettingsOpen(false);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -82,6 +105,7 @@ export default function App() {
         activeBoard={activeBoard}
         onPickBoard={setActiveBoard}
         onOpenPalette={() => setPaletteOpen(true)}
+        onOpenSettings={() => setSettingsOpen(true)}
       />
       {loading ? (
         <div className="mk-app-state">Loading…</div>
@@ -106,6 +130,12 @@ export default function App() {
         cards={cards}
         onClose={() => setPaletteOpen(false)}
         onPick={openCard}
+      />
+      <SettingsPanel
+        open={settingsOpen}
+        theme={theme}
+        onChangeTheme={setTheme}
+        onClose={() => setSettingsOpen(false)}
       />
     </div>
   );
