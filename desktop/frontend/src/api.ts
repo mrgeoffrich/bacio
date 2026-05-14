@@ -106,6 +106,20 @@ export async function dispatchIssue(
   }
 }
 
+// setIssueState changes an issue's state — backs the board's drag-to-move,
+// persisting the column change so it survives the next refresh poll.
+export async function setIssueState(
+  repoPrefix: string,
+  key: string,
+  state: string,
+): Promise<BoardCard> {
+  try {
+    return await BoardService.SetIssueState(repoPrefix, key, state);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
 // updateIssueDescription replaces an issue's description and returns the
 // refreshed issue-drawer payload.
 export async function updateIssueDescription(
