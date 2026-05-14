@@ -388,6 +388,28 @@ func (b *BoardService) UpdateIssueDescription(repoPrefix, key, description strin
 	return b.GetIssue(repoPrefix, key)
 }
 
+// SetIssueState changes an issue's state and returns the refreshed card.
+// It backs the board's drag-to-move: dropping a card in a new column
+// persists the state change so it survives the next auto-refresh poll.
+// repoPrefix may be empty or "all" — the prefix is then derived from the
+// canonical issue key.
+func (b *BoardService) SetIssueState(repoPrefix, key, state string) (BoardCard, error) {
+	ctx := context.Background()
+	parsedState, err := model.ParseState(state)
+	if err != nil {
+		return BoardCard{}, err
+	}
+	repo, err := b.resolveRepoForKey(ctx, repoPrefix, key)
+	if err != nil {
+		return BoardCard{}, err
+	}
+	iss, err := b.client.SetIssueState(ctx, repo, key, parsedState, false)
+	if err != nil {
+		return BoardCard{}, err
+	}
+	return cardFromIssue(iss), nil
+}
+
 // AddComment appends a comment to an issue and returns the refreshed
 // issue-drawer payload. An empty author falls back to the OS username,
 // the same default the CLI uses for human actors. repoPrefix may be empty

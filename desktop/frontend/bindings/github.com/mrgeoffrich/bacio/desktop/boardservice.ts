@@ -109,6 +109,19 @@ export function ListColumns(): $CancellablePromise<$models.BoardColumn[]> {
 }
 
 /**
+ * SetIssueState changes an issue's state and returns the refreshed card.
+ * It backs the board's drag-to-move: dropping a card in a new column
+ * persists the state change so it survives the next auto-refresh poll.
+ * repoPrefix may be empty or "all" — the prefix is then derived from the
+ * canonical issue key.
+ */
+export function SetIssueState(repoPrefix: string, key: string, state: string): $CancellablePromise<$models.BoardCard> {
+    return $Call.ByID(2874048639, repoPrefix, key, state).then(($result: any) => {
+        return $$createType6($result);
+    });
+}
+
+/**
  * UpdateIssueDescription replaces an issue's description and returns the
  * refreshed issue-drawer payload. repoPrefix may be empty or "all" — the
  * prefix is then derived from the canonical issue key.

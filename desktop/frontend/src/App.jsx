@@ -229,10 +229,19 @@ export default function App() {
       .catch(err => setError(err.message));
   };
 
-  // Drag-to-move is visual-only for now: update local state, don't persist.
-  // Persisting via SetIssueState is the follow-up write pass.
+  // Drag-to-move: optimistically move the card to the new column, then
+  // persist the state change so it survives the next auto-refresh poll.
+  // On failure, revert the card to its original column rather than leave
+  // it stranded in a column the backend never accepted.
   const moveCard = (key, toCol) => {
+    const prev = cards.find(c => c.key === key);
+    if (!prev || prev.column === toCol) return;
     setCards(cs => cs.map(c => c.key === key ? { ...c, column: toCol } : c));
+    api.setIssueState(activeBoard, key, toCol)
+      .catch(err => {
+        setError(err.message);
+        setCards(cs => cs.map(c => c.key === key ? { ...c, column: prev.column } : c));
+      });
   };
 
   // Dispatch a prompt from a card's action button: the backend gates the
