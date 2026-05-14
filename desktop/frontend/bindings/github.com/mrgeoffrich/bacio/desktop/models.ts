@@ -830,7 +830,10 @@ export class PRDTO {
  * PromptTemplateDTO is one editable dispatch prompt template, shaped for
  * the desktop Settings panel. Body is the effective template (the user's
  * custom override, or Default when none is set); IsDefault reports
- * whether Body still matches the built-in default.
+ * whether Body still matches the built-in default. AllowedStates is the
+ * effective state-gate — the issue states this stage's prompt is valid
+ * to run from — with DefaultStates the built-in set and StatesAreDefault
+ * whether AllowedStates still matches it.
  */
 export class PromptTemplateDTO {
     "mode": string;
@@ -838,6 +841,9 @@ export class PromptTemplateDTO {
     "body": string;
     "default": string;
     "isDefault": boolean;
+    "allowedStates": string[];
+    "defaultStates": string[];
+    "statesAreDefault": boolean;
 
     /** Creates a new PromptTemplateDTO instance. */
     constructor($$source: Partial<PromptTemplateDTO> = {}) {
@@ -856,6 +862,15 @@ export class PromptTemplateDTO {
         if (!("isDefault" in $$source)) {
             this["isDefault"] = false;
         }
+        if (!("allowedStates" in $$source)) {
+            this["allowedStates"] = [];
+        }
+        if (!("defaultStates" in $$source)) {
+            this["defaultStates"] = [];
+        }
+        if (!("statesAreDefault" in $$source)) {
+            this["statesAreDefault"] = false;
+        }
 
         Object.assign(this, $$source);
     }
@@ -864,7 +879,15 @@ export class PromptTemplateDTO {
      * Creates a new PromptTemplateDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): PromptTemplateDTO {
+        const $$createField5_0 = $$createType4;
+        const $$createField6_0 = $$createType4;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("allowedStates" in $$parsedSource) {
+            $$parsedSource["allowedStates"] = $$createField5_0($$parsedSource["allowedStates"]);
+        }
+        if ("defaultStates" in $$parsedSource) {
+            $$parsedSource["defaultStates"] = $$createField6_0($$parsedSource["defaultStates"]);
+        }
         return new PromptTemplateDTO($$parsedSource as Partial<PromptTemplateDTO>);
     }
 }

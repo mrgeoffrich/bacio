@@ -10,7 +10,7 @@ const EMPTY_COPY = {
   cancelled: 'no write-offs.',
 };
 
-export default function Board({ columns, cards, onMoveCard, onOpenCard }) {
+export default function Board({ columns, cards, promptConfig, onMoveCard, onOpenCard, onDispatchFromCard }) {
   const [dragKey, setDragKey] = useState(null);
   const [overCol, setOverCol] = useState(null);
 
@@ -40,10 +40,12 @@ export default function Board({ columns, cards, onMoveCard, onOpenCard }) {
                 <KanbanCard
                   key={card.key}
                   card={card}
+                  promptConfig={promptConfig}
                   isDragging={dragKey === card.key}
                   onDragStart={() => setDragKey(card.key)}
                   onDragEnd={() => { setDragKey(null); setOverCol(null); }}
                   onOpen={() => onOpenCard(card)}
+                  onDispatch={onDispatchFromCard}
                 />
               ))}
               {colCards.length === 0 && (

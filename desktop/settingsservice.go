@@ -10,13 +10,19 @@ import (
 // PromptTemplateDTO is one editable dispatch prompt template, shaped for
 // the desktop Settings panel. Body is the effective template (the user's
 // custom override, or Default when none is set); IsDefault reports
-// whether Body still matches the built-in default.
+// whether Body still matches the built-in default. AllowedStates is the
+// effective state-gate — the issue states this stage's prompt is valid
+// to run from — with DefaultStates the built-in set and StatesAreDefault
+// whether AllowedStates still matches it.
 type PromptTemplateDTO struct {
-	Mode      string `json:"mode"`
-	Label     string `json:"label"`
-	Body      string `json:"body"`
-	Default   string `json:"default"`
-	IsDefault bool   `json:"isDefault"`
+	Mode             string   `json:"mode"`
+	Label            string   `json:"label"`
+	Body             string   `json:"body"`
+	Default          string   `json:"default"`
+	IsDefault        bool     `json:"isDefault"`
+	AllowedStates    []string `json:"allowedStates"`
+	DefaultStates    []string `json:"defaultStates"`
+	StatesAreDefault bool     `json:"statesAreDefault"`
 }
 
 // promptTemplateOrder fixes the display order and human labels of the
@@ -51,31 +57,74 @@ func (s *SettingsService) PromptPlaceholders() []string {
 	return append([]string{}, model.PromptTemplateTokens...)
 }
 
-// dtoFor builds the DTO for one stage from the resolved (custom-or-
-// default) template body.
-func dtoFor(mode model.DispatchMode, label, body string) PromptTemplateDTO {
-	def := model.DefaultPromptTemplate(mode)
-	return PromptTemplateDTO{
-		Mode:      string(mode),
-		Label:     label,
-		Body:      body,
-		Default:   def,
-		IsDefault: body == def,
+// sameStrings reports whether two string slices are equal, in order.
+func sameStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
 	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// statesToStrings renders a []model.State as a []string, never nil so
+// JSON consumers always see an array.
+func statesToStrings(states []model.State) []string {
+	out := make([]string, len(states))
+	for i, st := range states {
+		out[i] = string(st)
+	}
+	return out
+}
+
+// dtoFor builds the DTO for one stage from the resolved (custom-or-
+// default) template body and state-gate.
+func dtoFor(mode model.DispatchMode, label, body string, allowedStates []string) PromptTemplateDTO {
+	def := model.DefaultPromptTemplate(mode)
+	defStates := statesToStrings(model.DefaultPromptStates(mode))
+	return PromptTemplateDTO{
+		Mode:             string(mode),
+		Label:            label,
+		Body:             body,
+		Default:          def,
+		IsDefault:        body == def,
+		AllowedStates:    allowedStates,
+		DefaultStates:    defStates,
+		StatesAreDefault: sameStrings(allowedStates, defStates),
+	}
+}
+
+// labelFor returns the human label for a dispatch stage, falling back to
+// the raw mode string for an unknown stage.
+func labelFor(mode model.DispatchMode) string {
+	for _, t := range promptTemplateOrder {
+		if t.Mode == mode {
+			return t.Label
+		}
+	}
+	return string(mode)
 }
 
 // ListPromptTemplates returns the five dispatch prompt templates in
 // lifecycle order, each with its effective body, the built-in default,
-// and whether the body still matches that default.
+// the effective + default state-gate, and whether each still matches
+// its built-in default.
 func (s *SettingsService) ListPromptTemplates() ([]PromptTemplateDTO, error) {
 	ctx := context.Background()
 	current, err := s.client.GetPromptTemplates(ctx)
 	if err != nil {
 		return nil, err
 	}
+	states, err := s.client.GetPromptStates(ctx)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]PromptTemplateDTO, 0, len(promptTemplateOrder))
 	for _, t := range promptTemplateOrder {
-		out = append(out, dtoFor(t.Mode, t.Label, current[string(t.Mode)]))
+		out = append(out, dtoFor(t.Mode, t.Label, current[string(t.Mode)], states[string(t.Mode)]))
 	}
 	return out, nil
 }
@@ -88,16 +137,33 @@ func (s *SettingsService) SavePromptTemplate(mode, body string) (PromptTemplateD
 	if err := s.client.SetPromptTemplate(ctx, mode, body, false); err != nil {
 		return PromptTemplateDTO{}, err
 	}
+	return s.refreshedDTO(ctx, mode)
+}
+
+// SavePromptStates stores a custom state-gate for one dispatch stage —
+// the set of issue states the stage's prompt is valid to run from — and
+// returns the refreshed DTO. An empty slice resets the stage to its
+// built-in default gate.
+func (s *SettingsService) SavePromptStates(mode string, states []string) (PromptTemplateDTO, error) {
+	ctx := context.Background()
+	if err := s.client.SetPromptStates(ctx, mode, states, false); err != nil {
+		return PromptTemplateDTO{}, err
+	}
+	return s.refreshedDTO(ctx, mode)
+}
+
+// refreshedDTO re-reads the effective body + state-gate for one stage
+// and builds its DTO — the shared tail of SavePromptTemplate /
+// SavePromptStates.
+func (s *SettingsService) refreshedDTO(ctx context.Context, mode string) (PromptTemplateDTO, error) {
 	current, err := s.client.GetPromptTemplates(ctx)
 	if err != nil {
 		return PromptTemplateDTO{}, err
 	}
-	m := model.DispatchMode(mode)
-	label := mode
-	for _, t := range promptTemplateOrder {
-		if t.Mode == m {
-			label = t.Label
-		}
+	states, err := s.client.GetPromptStates(ctx)
+	if err != nil {
+		return PromptTemplateDTO{}, err
 	}
-	return dtoFor(m, label, current[mode]), nil
+	m := model.DispatchMode(mode)
+	return dtoFor(m, labelFor(m), current[mode], states[mode]), nil
 }

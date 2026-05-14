@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/user"
+	"slices"
 	"strings"
 	"time"
 
@@ -521,14 +522,21 @@ func (b *BoardService) ListAgents(repoPrefix string) ([]AgentCard, error) {
 	return cards, nil
 }
 
-// DispatchIssue queues a dispatch for an agent: the target agent slug,
-// the mode ("plan" / "implement" / ""), and an optional free-form note.
+// DispatchIssue queues a dispatch against an issue for a given job stage
+// (mode). The agent is auto-picked — the most-recently-active free
+// (live, not busy) agent — rather than chosen by the caller. The mode
+// must also be valid to run from the issue's current state (the
+// per-card action button gates on this; this is the backing guard).
 // repoPrefix may be empty or "all" — the prefix is then derived from the
 // canonical issue key.
-func (b *BoardService) DispatchIssue(repoPrefix, issueKey, agentName, mode, note string) (DispatchDTO, error) {
+func (b *BoardService) DispatchIssue(repoPrefix, issueKey, mode string) (DispatchDTO, error) {
 	ctx := context.Background()
-	if _, err := model.ParseDispatchMode(mode); err != nil {
+	parsedMode, err := model.ParseDispatchMode(mode)
+	if err != nil {
 		return DispatchDTO{}, err
+	}
+	if parsedMode == "" {
+		return DispatchDTO{}, fmt.Errorf("a dispatch mode is required")
 	}
 	prefix := repoPrefix
 	if prefix == "" || prefix == "all" {
@@ -540,35 +548,46 @@ func (b *BoardService) DispatchIssue(repoPrefix, issueKey, agentName, mode, note
 	if err != nil {
 		return DispatchDTO{}, err
 	}
-	// Service-boundary guard: a busy agent isn't a valid dispatch target.
-	// Reject here so a stale UI can't queue an undeliverable job — mirrors
-	// the TUI confirmDispatch guard. The agent counts as busy only when
-	// every one of its live sessions is busy; one free session is enough.
+
+	// State-gate guard: the prompt for this stage must be valid to run
+	// from the issue's current state. The desktop UI already gates the
+	// per-card action button on this, but re-check here so a stale UI
+	// can't queue a prompt the issue's state doesn't allow.
+	iss, err := b.client.GetIssueByKey(ctx, repo, issueKey)
+	if err != nil {
+		return DispatchDTO{}, err
+	}
+	gates, err := b.client.GetPromptStates(ctx)
+	if err != nil {
+		return DispatchDTO{}, err
+	}
+	if !slices.Contains(gates[mode], string(iss.State)) {
+		return DispatchDTO{}, fmt.Errorf("the %s prompt can't run from a %s issue", mode, iss.State)
+	}
+
+	// Auto-pick a free agent — a live (non-ended) session that holds no
+	// open claim, with a persistent identity slug (CreateDispatch routes
+	// by slug). ListAgents orders sessions by last-seen, so the first
+	// match is the most-recently-active free agent.
 	cards, err := b.ListAgents(prefix)
 	if err != nil {
 		return DispatchDTO{}, err
 	}
-	var sawAgent, hasFreeSession bool
-	var busyIssue string
+	agentName := ""
 	for _, c := range cards {
-		if c.AgentName != agentName || c.Status == "ended" {
-			continue
-		}
-		sawAgent = true
-		if c.Busy {
-			busyIssue = c.BusyIssue
-		} else {
-			hasFreeSession = true
+		if c.Status != "ended" && !c.Busy && c.AgentName != "" {
+			agentName = c.AgentName
+			break
 		}
 	}
-	if sawAgent && !hasFreeSession {
-		return DispatchDTO{}, fmt.Errorf("agent %s is busy (working %s) — wait until it's free", agentName, busyIssue)
+	if agentName == "" {
+		return DispatchDTO{}, fmt.Errorf("no free agent available — every agent is busy or offline")
 	}
+
 	d, err := b.client.CreateDispatch(ctx, repo, inputs.AgentDispatchInput{
 		TargetAgent: agentName,
 		IssueKey:    issueKey,
 		Mode:        mode,
-		Message:     note,
 	}, false)
 	if err != nil {
 		return DispatchDTO{}, err

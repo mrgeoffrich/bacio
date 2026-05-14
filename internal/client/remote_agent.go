@@ -94,3 +94,11 @@ func (c *remoteClient) GetPromptTemplates(ctx context.Context) (map[string]strin
 func (c *remoteClient) SetPromptTemplate(ctx context.Context, mode, body string, dryRun bool) error {
 	return remoteAgentNotSupported("prompt-templates")
 }
+
+func (c *remoteClient) GetPromptStates(ctx context.Context) (map[string][]string, error) {
+	return nil, remoteAgentNotSupported("prompt-states")
+}
+
+func (c *remoteClient) SetPromptStates(ctx context.Context, mode string, states []string, dryRun bool) error {
+	return remoteAgentNotSupported("prompt-states")
+}

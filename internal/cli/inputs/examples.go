@@ -169,4 +169,12 @@ var (
 	ExampleSettingsTemplateReset = SettingsTemplateResetInput{
 		Mode: "review",
 	}
+
+	ExampleSettingsTemplateStatesSet = SettingsTemplateStatesSetInput{
+		Mode:   "review",
+		States: []string{"in_review"},
+	}
+	ExampleSettingsTemplateStatesReset = SettingsTemplateStatesResetInput{
+		Mode: "review",
+	}
 )

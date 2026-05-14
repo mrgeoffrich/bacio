@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Topbar, { NAV } from './components/Topbar.jsx';
 import Board from './components/Board.jsx';
 import DocsView from './components/DocsView.jsx';
@@ -8,7 +8,7 @@ import HistoryView from './components/HistoryView.jsx';
 import IssueDrawer from './components/IssueDrawer.jsx';
 import IssueEditModal from './components/IssueEditModal.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
-import SettingsPanel from './components/SettingsPanel.jsx';
+import SettingsView from './components/SettingsView.jsx';
 import * as api from './api';
 
 const THEME_KEY = 'bacio-theme'; // persisted preference: 'system' | 'light' | 'dark'
@@ -58,6 +58,11 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [agents, setAgents] = useState([]);
+  // promptConfig is the global (repo-independent) dispatch-prompt config:
+  // one entry per stage with its label and the issue states it's valid
+  // to run from. Board → KanbanCard reads it to gate the per-card action
+  // button. Loaded on mount; reloaded when the Settings view closes.
+  const [promptConfig, setPromptConfig] = useState([]);
   const [theme, setTheme] = useState(readTheme);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -83,19 +88,42 @@ export default function App() {
     }
   }, [theme]);
 
-  // Load the repository list + columns once on mount. Once boards resolve,
-  // land activeBoard on the persisted repo if it still exists, otherwise the
-  // first repo — every screen needs a concrete repo, there's no "all" option.
+  // Load the repository list + columns + prompt config once on mount.
+  // Once boards resolve, land activeBoard on the persisted repo if it
+  // still exists, otherwise the first repo — every screen needs a
+  // concrete repo, there's no "all" option. The prompt config is global
+  // (repo-independent), so it loads here too.
   useEffect(() => {
-    Promise.all([api.listBoards(), api.listColumns()])
-      .then(([bs, cols]) => {
+    Promise.all([api.listBoards(), api.listColumns(), api.listPromptTemplates()])
+      .then(([bs, cols, tpls]) => {
         setBoards(bs);
         setColumns(cols);
+        setPromptConfig(tpls);
         setActiveBoard(prev => bs.some(b => b.prefix === prev) ? prev : (bs[0]?.prefix ?? ''));
         setLoading(false);
       })
       .catch(err => { setError(err.message); setLoading(false); });
   }, []);
+
+  // refreshPromptConfig reloads the global dispatch-prompt config. Called
+  // when the Settings view closes, since editing a stage's state-gate
+  // there changes which prompts each card offers.
+  const refreshPromptConfig = useCallback(() => {
+    api.listPromptTemplates()
+      .then(setPromptConfig)
+      .catch(err => console.warn('prompt config refresh failed:', err));
+  }, []);
+
+  // Reload the prompt config whenever the Settings view closes — a
+  // state-gate edit there changes which prompts each card offers. The
+  // ref guards against the mount-time false→false non-transition.
+  const prevSettingsOpen = useRef(false);
+  useEffect(() => {
+    if (prevSettingsOpen.current && !settingsOpen) refreshPromptConfig();
+    prevSettingsOpen.current = settingsOpen;
+  }, [settingsOpen, refreshPromptConfig]);
+
+  const closeSettings = useCallback(() => setSettingsOpen(false), []);
 
   // Remember the selected repo so the app reopens on the same one.
   useEffect(() => {
@@ -207,17 +235,16 @@ export default function App() {
     setCards(cs => cs.map(c => c.key === key ? { ...c, column: toCol } : c));
   };
 
-  // Queue a dispatch for an agent: pick the agent + mode (plan/implement)
-  // + an optional note in the drawer, then write it through the backend.
-  const sendToAgent = (agentName, mode, note) => {
-    if (!openIssue) return;
-    api.dispatchIssue(activeBoard, openIssue.key, agentName, mode, note)
+  // Dispatch a prompt from a card's action button: the backend gates the
+  // mode on the issue's state and auto-picks a free agent — the caller
+  // names neither an agent nor a note.
+  const dispatchFromCard = (cardKey, mode) => {
+    api.dispatchIssue(activeBoard, cardKey, mode)
       .then(() => {
         // Optimistically flag the card as claimed-by-an-agent so the
         // breathing-pulse treatment kicks in; refresh the agent counts.
-        setCards(cs => cs.map(c => c.key === openIssue.key ? { ...c, claude: true } : c));
+        setCards(cs => cs.map(c => c.key === cardKey ? { ...c, claude: true } : c));
         refreshAgents();
-        setOpenIssue(null);
       })
       .catch(err => setError(err.message));
   };
@@ -249,7 +276,7 @@ export default function App() {
         onPickBoard={setActiveBoard}
         onAddRepository={addRepository}
         activeView={activeView}
-        onChangeView={setActiveView}
+        onChangeView={(v) => { setSettingsOpen(false); setActiveView(v); }}
         onOpenPalette={() => setPaletteOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
       />
@@ -257,6 +284,13 @@ export default function App() {
         <div className="mk-app-state">Loading…</div>
       ) : error ? (
         <div className="mk-app-state mk-app-error">Error: {error}</div>
+      ) : settingsOpen ? (
+        <SettingsView
+          theme={theme}
+          onChangeTheme={setTheme}
+          columns={columns}
+          onClose={closeSettings}
+        />
       ) : activeView === 'docs' ? (
         <DocsView activeBoard={activeBoard} />
       ) : activeView === 'features' ? (
@@ -269,15 +303,15 @@ export default function App() {
         <Board
           columns={columns}
           cards={cards}
+          promptConfig={promptConfig}
           onMoveCard={moveCard}
           onOpenCard={openCard}
+          onDispatchFromCard={dispatchFromCard}
         />
       )}
       <IssueDrawer
         issue={openIssue}
-        agents={agents}
         onClose={closeDrawer}
-        onSendToAgent={sendToAgent}
         onShip={ship}
         onEdit={() => setEditIssueOpen(true)}
       />
@@ -294,12 +328,6 @@ export default function App() {
         cards={cards}
         onClose={() => setPaletteOpen(false)}
         onPick={openCard}
-      />
-      <SettingsPanel
-        open={settingsOpen}
-        theme={theme}
-        onChangeTheme={setTheme}
-        onClose={() => setSettingsOpen(false)}
       />
     </div>
   );
