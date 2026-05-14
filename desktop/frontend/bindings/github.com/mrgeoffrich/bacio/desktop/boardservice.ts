@@ -52,7 +52,8 @@ export function ListAgents(repoPrefix: string): $CancellablePromise<$models.Agen
 }
 
 /**
- * ListBoards returns every bacio repo as a sidebar board, with its issue count.
+ * ListBoards returns every bacio repo as a sidebar board, with its issue count
+ * and whether git sync is configured for it.
  */
 export function ListBoards(): $CancellablePromise<$models.Board[]> {
     return $Call.ByID(3235630628).then(($result: any) => {

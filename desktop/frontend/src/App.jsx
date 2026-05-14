@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import Topbar from './components/Topbar.jsx';
+import Topbar, { NAV } from './components/Topbar.jsx';
 import Board from './components/Board.jsx';
 import DocsView from './components/DocsView.jsx';
 import FeaturesView from './components/FeaturesView.jsx';
 import AgentsView from './components/AgentsView.jsx';
+import HistoryView from './components/HistoryView.jsx';
 import IssueDrawer from './components/IssueDrawer.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
 import SettingsPanel from './components/SettingsPanel.jsx';
@@ -32,6 +33,15 @@ function persistActiveRepo(prefix) {
   catch { /* non-fatal — the preference just won't survive a relaunch */ }
 }
 
+// isEditingTarget reports whether a keystroke landed in something the user is
+// typing into — a form field or the contenteditable doc editor — so global
+// hotkeys can stand down rather than hijack the keypress.
+function isEditingTarget(el) {
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+}
+
 export default function App() {
   const [boards, setBoards] = useState([]);
   const [columns, setColumns] = useState([]);
@@ -39,7 +49,7 @@ export default function App() {
   // first run / before the repo list resolves); the mount effect lands it on
   // a real repo once boards load.
   const [activeBoard, setActiveBoard] = useState(readActiveRepo);
-  const [activeView, setActiveView] = useState('board'); // 'board' | 'features' | 'docs' | 'agents'
+  const [activeView, setActiveView] = useState('board'); // 'board' | 'features' | 'docs' | 'agents' | 'history'
   const [cards, setCards] = useState([]);
   const [openIssue, setOpenIssue] = useState(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -117,6 +127,12 @@ export default function App() {
         setPaletteOpen(false);
         setOpenIssue(null);
         setSettingsOpen(false);
+      } else if (!e.metaKey && !e.ctrlKey && !e.altKey && e.key >= '1' && e.key <= '9') {
+        // Digit keys jump between nav views, like the TUI's tab shortcuts —
+        // unless the user is typing into a field or the doc editor.
+        if (isEditingTarget(e.target)) return;
+        const idx = Number(e.key) - 1;
+        if (idx < NAV.length) setActiveView(NAV[idx].view);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -178,6 +194,8 @@ export default function App() {
         <FeaturesView activeBoard={activeBoard} />
       ) : activeView === 'agents' ? (
         <AgentsView agents={agents} onRefresh={refreshAgents} />
+      ) : activeView === 'history' ? (
+        <HistoryView activeBoard={activeBoard} />
       ) : (
         <Board
           columns={columns}

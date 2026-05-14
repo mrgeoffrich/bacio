@@ -1,14 +1,18 @@
 import React from 'react';
 import Icon from './Icon.jsx';
 
-const NAV = [
+// NAV is the ordered top-nav. Exported so App can map the 1–5 digit
+// hotkeys onto the same views in the same order.
+export const NAV = [
   { view: 'board', label: 'Issues' },
   { view: 'features', label: 'Features' },
   { view: 'docs', label: 'Documents' },
   { view: 'agents', label: 'Agents' },
+  { view: 'history', label: 'History' },
 ];
 
 export default function Topbar({ boards, activeBoard, onPickBoard, activeView, onChangeView, onOpenPalette, onOpenSettings }) {
+  const syncEnabled = !!boards.find(b => b.prefix === activeBoard)?.syncEnabled;
   return (
     <header className="mk-topbar">
       <div className="mk-brand">
@@ -28,15 +32,6 @@ export default function Topbar({ boards, activeBoard, onPickBoard, activeView, o
         ))}
       </div>
 
-      <div className="mk-repo-select">
-        <Icon name="board" />
-        <select value={activeBoard} onChange={(e) => onPickBoard(e.target.value)}>
-          {boards.map(b => (
-            <option key={b.prefix} value={b.prefix}>{b.name}</option>
-          ))}
-        </select>
-      </div>
-
       <button className="mk-search" onClick={onOpenPalette}>
         <Icon name="search" />
         <span className="mk-search-text">Search issues, branches, prs</span>
@@ -44,7 +39,15 @@ export default function Topbar({ boards, activeBoard, onPickBoard, activeView, o
       </button>
 
       <div className="mk-topbar-right">
-        <button className="mk-icbtn" aria-label="Notifications"><Icon name="bell" /></button>
+        {syncEnabled && <span className="mk-pill mk-sync-badge">Sync Enabled</span>}
+        <div className="mk-repo-select">
+          <Icon name="branch" />
+          <select value={activeBoard} onChange={(e) => onPickBoard(e.target.value)}>
+            {boards.map(b => (
+              <option key={b.prefix} value={b.prefix}>{b.name}</option>
+            ))}
+          </select>
+        </div>
         <button className="mk-icbtn" aria-label="Settings" onClick={onOpenSettings}><Icon name="settings" /></button>
       </div>
     </header>

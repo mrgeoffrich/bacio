@@ -22,11 +22,24 @@
 .mk-topbar input,
 .mk-topbar select { --wails-draggable: no-drag; }
 
-/* Nudge the repo selector and search box down a touch so they sit
-   vertically centred with the macOS traffic-light buttons, which the
-   window chrome places slightly below the top nav's own centre line. */
-.mk-repo-select,
+/* Nudge the search box down a touch so it sits vertically centred with
+   the macOS traffic-light buttons, which the window chrome places
+   slightly below the top nav's own centre line. The repo selector now
+   lives in the right-hand cluster, so it aligns with .mk-icbtn instead. */
 .mk-search { transform: translateY(1px); }
+
+/* The active repo is the primary context for every screen — bold it so
+   it reads as the important selector it is. */
+.mk-repo-select select { font-weight: 700; }
+
+/* "Sync Enabled" badge — shown left of the repo selector when the repo
+   has git sync configured. Reuses .mk-pill chrome with the healthy
+   (pistachio) status colour. */
+.mk-sync-badge {
+  background: var(--status-done-bg);
+  color: var(--status-done);
+  flex-shrink: 0;
+}
 
 /* Status pill colours for bacio's six real issue states. The imported
    app.css only covers the kit's placeholder column ids; these map each
@@ -449,6 +462,111 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   font-family: var(--font-sans);
   font-size: var(--text-sm);
   color: var(--fg-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ============================================================
+   History view — a desktop-app addition: the paged audit log,
+   newest first. Mirrors the TUI's History tab but pages the data
+   (Prev/Next) instead of loading the whole log.
+   ============================================================ */
+.mk-history {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding: 20px 24px;
+}
+.mk-history-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 24px;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  color: var(--fg-4);
+}
+.mk-history-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  flex-shrink: 0;
+}
+.mk-history-title {
+  font-family: var(--font-sans);
+  font-size: var(--text-xl);
+  font-weight: 700;
+  color: var(--fg-1);
+  margin: 0;
+}
+.mk-history-pager {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mk-history-page {
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  color: var(--fg-3);
+  min-width: 64px;
+  text-align: center;
+}
+.mk-history-error {
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  font-size: var(--text-sm);
+  color: var(--status-blocked);
+  background: var(--status-blocked-bg);
+  border-radius: var(--radius-md);
+  flex-shrink: 0;
+}
+.mk-history-table {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  background: var(--bg-2);
+}
+.mk-history-head,
+.mk-history-row {
+  display: grid;
+  grid-template-columns: 110px 130px 160px 160px 1fr;
+  gap: 12px;
+  padding: 8px 14px;
+  align-items: baseline;
+}
+.mk-history-head {
+  position: sticky;
+  top: 0;
+  background: var(--bg-3);
+  border-bottom: 1px solid var(--border-1);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-3);
+}
+.mk-history-row {
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  color: var(--fg-2);
+  border-bottom: 1px solid var(--border-1);
+}
+.mk-history-row:last-child { border-bottom: 0; }
+.mk-history-when { color: var(--fg-3); white-space: nowrap; }
+.mk-history-actor { color: var(--fg-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mk-history-op { color: var(--fg-1); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mk-history-target { color: var(--fg-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mk-history-details {
+  color: var(--fg-2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -94,6 +94,7 @@ export class Board {
     "prefix": string;
     "name": string;
     "issueCount": number;
+    "syncEnabled": boolean;
 
     /** Creates a new Board instance. */
     constructor($$source: Partial<Board> = {}) {
@@ -105,6 +106,9 @@ export class Board {
         }
         if (!("issueCount" in $$source)) {
             this["issueCount"] = 0;
+        }
+        if (!("syncEnabled" in $$source)) {
+            this["syncEnabled"] = false;
         }
 
         Object.assign(this, $$source);
@@ -506,6 +510,96 @@ export class FeatureSummary {
 }
 
 /**
+ * HistoryEntryDTO is one audit-log row, shaped for the desktop history table.
+ */
+export class HistoryEntryDTO {
+    "id": number;
+    "actor": string;
+    "op": string;
+    "kind": string;
+    "targetLabel": string;
+    "details": string;
+    "createdAt": time$0.Time;
+
+    /** Creates a new HistoryEntryDTO instance. */
+    constructor($$source: Partial<HistoryEntryDTO> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = 0;
+        }
+        if (!("actor" in $$source)) {
+            this["actor"] = "";
+        }
+        if (!("op" in $$source)) {
+            this["op"] = "";
+        }
+        if (!("kind" in $$source)) {
+            this["kind"] = "";
+        }
+        if (!("targetLabel" in $$source)) {
+            this["targetLabel"] = "";
+        }
+        if (!("details" in $$source)) {
+            this["details"] = "";
+        }
+        if (!("createdAt" in $$source)) {
+            this["createdAt"] = null;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new HistoryEntryDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): HistoryEntryDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new HistoryEntryDTO($$parsedSource as Partial<HistoryEntryDTO>);
+    }
+}
+
+/**
+ * HistoryPage is one page of the audit log. Page is 0-based; HasMore reports
+ * whether a further page exists, so the frontend can drive Prev/Next without a
+ * separate total-count query.
+ */
+export class HistoryPage {
+    "entries": HistoryEntryDTO[];
+    "page": number;
+    "pageSize": number;
+    "hasMore": boolean;
+
+    /** Creates a new HistoryPage instance. */
+    constructor($$source: Partial<HistoryPage> = {}) {
+        if (!("entries" in $$source)) {
+            this["entries"] = [];
+        }
+        if (!("page" in $$source)) {
+            this["page"] = 0;
+        }
+        if (!("pageSize" in $$source)) {
+            this["pageSize"] = 0;
+        }
+        if (!("hasMore" in $$source)) {
+            this["hasMore"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new HistoryPage instance from a string or object.
+     */
+    static createFrom($$source: any = {}): HistoryPage {
+        const $$createField0_0 = $$createType8;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("entries" in $$parsedSource) {
+            $$parsedSource["entries"] = $$createField0_0($$parsedSource["entries"]);
+        }
+        return new HistoryPage($$parsedSource as Partial<HistoryPage>);
+    }
+}
+
+/**
  * IssueDetail is the issue-drawer payload for a single issue.
  */
 export class IssueDetail {
@@ -562,8 +656,8 @@ export class IssueDetail {
     static createFrom($$source: any = {}): IssueDetail {
         const $$createField5_0 = $$createType4;
         const $$createField6_0 = $$createType4;
-        const $$createField8_0 = $$createType8;
-        const $$createField9_0 = $$createType10;
+        const $$createField8_0 = $$createType10;
+        const $$createField9_0 = $$createType12;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField5_0($$parsedSource["tags"]);
@@ -613,7 +707,9 @@ const $$createType3 = $Create.Array($$createType2);
 const $$createType4 = $Create.Array($Create.Any);
 const $$createType5 = FeatureLinkedIssue.createFrom;
 const $$createType6 = $Create.Array($$createType5);
-const $$createType7 = CommentDTO.createFrom;
+const $$createType7 = HistoryEntryDTO.createFrom;
 const $$createType8 = $Create.Array($$createType7);
-const $$createType9 = PRDTO.createFrom;
+const $$createType9 = CommentDTO.createFrom;
 const $$createType10 = $Create.Array($$createType9);
+const $$createType11 = PRDTO.createFrom;
+const $$createType12 = $Create.Array($$createType11);
