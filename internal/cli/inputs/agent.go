@@ -8,11 +8,12 @@ package inputs
 // Agent is the persistent identity slug (e.g. "cheerful-otter@claude.shiny");
 // optional but recommended — without it the session has no link to a
 // long-lived identity, so cross-session correlation falls back to actor
-// matching. Set NewIdentity true on the first register from a fresh
-// .bacio/agent (no file yet) — bacio will then error with "agent name
-// taken" if the slug clashes with another agent's, prompting the agent
-// to regenerate. Leave NewIdentity false on subsequent registers
-// reading the persisted slug from disk; the upsert is then idempotent.
+// matching. Set NewIdentity true on the first register of a freshly
+// generated slug — bacio will then error with "agent name taken" if it
+// clashes with another agent's, prompting the agent to regenerate.
+// Leave NewIdentity false on subsequent registers of a known slug; the
+// upsert is then idempotent. (With hooks installed, the session-start
+// hook handles all of this — see SKILL.md.)
 type AgentRegisterInput struct {
 	SessionID      string `json:"session_id"`
 	Actor          string `json:"actor"`

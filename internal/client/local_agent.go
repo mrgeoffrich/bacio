@@ -88,14 +88,15 @@ func (c *localClient) RegisterAgent(ctx context.Context, repo *model.Repo, in in
 	return sess, nil
 }
 
-// EnsureAgentIdentity mints a fresh persistent identity for a repo that
-// has no .bacio/agent yet. It rerolls the random slug against the
-// agents.name UNIQUE constraint (UpsertAgent with requireNew) until one
-// sticks — so two agents bootstrapping on the same host at the same
-// instant can't end up sharing a row. On success it adopts the slug as
-// this client's audit actor, so the session-start hook's subsequent
-// register/dispatch audit rows attribute to the agent rather than the
-// OS user the hook process runs as.
+// EnsureAgentIdentity mints a fresh persistent identity for a `claude`
+// process that has no entry in .bacio/agents.json yet. It rerolls the
+// random slug against the agents.name UNIQUE constraint (UpsertAgent
+// with requireNew) until one sticks — so two agents bootstrapping on
+// the same host at the same instant can't end up sharing a row. On
+// success it adopts the slug as this client's audit actor, so the
+// session-start hook's subsequent register/dispatch audit rows
+// attribute to the agent rather than the OS user the hook runs as. The
+// caller is responsible for recording the slug into .bacio/agents.json.
 func (c *localClient) EnsureAgentIdentity(ctx context.Context, repo *model.Repo) (string, error) {
 	const maxAttempts = 20
 	for i := 0; i < maxAttempts; i++ {

@@ -75,12 +75,13 @@ The optional --agent flag attaches a persistent identity (e.g.
 "cheerful-otter@claude.shiny") so cross-session activity correlates
 back to one logical agent rather than dissolving on every /clear.
 
-The skill convention: on first session in a repo, generate a fresh
-slug and register with --agent <slug> --new. The --new flag asserts
-"this name MUST be new" — bacio errors with "agent name already
-taken" if the slug clashes with another agent's, so the agent loop
-can retry with a fresh slug. Once accepted, persist the chosen name
-to .bacio/agent and reuse it on subsequent registers (without --new).`,
+With bacio's hooks installed, the SessionStart hook does all of this
+for you — minting the identity, recording it in .bacio/agents.json,
+and registering the session. This command is the manual fallback for
+repos without hooks: generate a fresh slug and register with --agent
+<slug> --new. The --new flag asserts "this name MUST be new" — bacio
+errors with "agent name already taken" if the slug clashes, so the
+loop can retry; subsequent registers of a known slug drop --new.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			raw, err := parseJSONInput(cmd, args, rawInput,
@@ -676,10 +677,11 @@ func requireLocalForAgent(verb string) error {
 	return nil
 }
 
-// resolveSessionID falls back to $CLAUDE_CODE_SESSION_ID when --session
-// is empty. Errors out explicitly if neither source provides a value
-// rather than guessing — silently registering a wrong session id is
-// worse than a clear "set --session or export CLAUDE_CODE_SESSION_ID".
+// resolveSessionID falls back to $CLAUDE_CODE_SESSION_ID, then to this
+// process's newest session in .bacio/agents.json (resolved via the
+// claude pid), when --session is empty. Errors out explicitly if none
+// of them provide a value rather than guessing — silently registering a
+// wrong session id is worse than a clear failure.
 func resolveSessionID(flag string) (string, error) {
 	if flag != "" {
 		return flag, nil
@@ -687,7 +689,10 @@ func resolveSessionID(flag string) (string, error) {
 	if v := strings.TrimSpace(os.Getenv(claudeSessionEnv)); v != "" {
 		return v, nil
 	}
-	return "", fmt.Errorf("--session not set and $%s is empty", claudeSessionEnv)
+	if v := sessionIDForProcess(); v != "" {
+		return v, nil
+	}
+	return "", fmt.Errorf("--session not set, $%s is empty, and no .bacio/agents.json entry for this process", claudeSessionEnv)
 }
 
 // detectBranch returns the current git branch via a shellout.

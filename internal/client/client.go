@@ -179,9 +179,9 @@ type Client interface {
 	// EnsureAgentIdentity mints a fresh persistent agent identity (a
 	// random slug, retried against the UNIQUE constraint until it
 	// sticks) and adopts it as this client's audit actor. It's the
-	// `bacio hook` session-start path for a repo that has no
-	// .bacio/agent yet — the caller persists the returned slug to disk.
-	// Does NOT create a session row. Local-only.
+	// `bacio hook` session-start path for a `claude` process with no
+	// .bacio/agents.json entry yet — the caller records the returned
+	// slug there. Does NOT create a session row. Local-only.
 	EnsureAgentIdentity(ctx context.Context, repo *model.Repo) (string, error)
 	// UpsertAgentChannel records (or heartbeats) a live `bacio channel`
 	// subprocess, keyed on the `claude` pid it descends from. agentName

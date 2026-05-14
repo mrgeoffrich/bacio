@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -75,14 +74,15 @@ func readHookInput() (*hookInput, error) {
 }
 
 // hookContext is the resolved environment a hook handler operates in:
-// the parsed payload, an open local client, the current repo, and the
-// agent identity slug (read from .bacio/agent, may be empty).
+// the parsed payload, an open local client, the current repo, the agent
+// identity slug, and the claude pid this hook descends from.
 type hookContext struct {
-	in    *hookInput
-	c     client.Client
-	repo  *model.Repo
-	slug  string // persistent identity slug, "" if .bacio/agent absent
-	actor string // slug if set, else OS-user fallback
+	in        *hookInput
+	c         client.Client
+	repo      *model.Repo
+	slug      string // identity slug for this claude process, "" if none
+	actor     string // slug if set, else OS-user fallback
+	claudePID int    // nearest `claude` ancestor pid, 0 if not found
 }
 
 func (h *hookContext) close() {
@@ -126,7 +126,12 @@ func loadHookContext() (*hookContext, error) {
 		return nil, nil // a sync repo, not a project repo
 	}
 
-	slug := readAgentSlug(info.Root)
+	// Identity is keyed by the `claude` process this hook descends from:
+	// .bacio/agents.json maps claude_pid -> identity, so multiple agents
+	// can share one repo. claude_pid resolved once here and reused by
+	// linkChannel.
+	claudePID := findClaudeAncestor(os.Getpid())
+	slug := readAgentIdentity(info.Root, claudePID)
 	act := slug
 	if act == "" {
 		act = actor()
@@ -146,10 +151,8 @@ func loadHookContext() (*hookContext, error) {
 		_ = c.Close()
 		return nil, err
 	}
-	// No persistent identity yet — mint one and persist it to
-	// .bacio/agent. Every session in a bacio repo gets an identity: the
-	// channel subprocess and the sibling hooks all key off this file,
-	// and minting it here (rather than leaving it to the agent's first
+	// No identity recorded for this claude process yet — mint a fresh
+	// one. Minting it here (rather than leaving it to the agent's first
 	// turn) closes the window where a freshly-spawned channel froze an
 	// empty identity. Best-effort: a failure just leaves the session
 	// identity-less, the pre-existing behaviour — it never fails the hook.
@@ -157,15 +160,21 @@ func loadHookContext() (*hookContext, error) {
 		if gen, gerr := c.EnsureAgentIdentity(context.Background(), repo); gerr != nil {
 			fmt.Fprintln(os.Stderr, "bacio hook: mint agent identity:", gerr)
 		} else if gen != "" {
-			if werr := writeAgentSlug(info.Root, gen); werr != nil {
-				fmt.Fprintln(os.Stderr, "bacio hook: persist .bacio/agent:", werr)
-			}
 			// EnsureAgentIdentity already adopted gen as the client's
 			// audit actor; mirror it onto the hook context.
 			slug, act = gen, gen
 		}
 	}
-	return &hookContext{in: in, c: c, repo: repo, slug: slug, actor: act}, nil
+	// Record this session against its claude_pid in .bacio/agents.json:
+	// creates the entry on the first session, appends the session id on
+	// later ones (a new id per /clear within the same process).
+	if slug != "" {
+		host, _ := os.Hostname()
+		if rerr := recordAgentSession(info.Root, claudePID, host, slug, in.SessionID); rerr != nil {
+			fmt.Fprintln(os.Stderr, "bacio hook: update agents.json:", rerr)
+		}
+	}
+	return &hookContext{in: in, c: c, repo: repo, slug: slug, actor: act, claudePID: claudePID}, nil
 }
 
 // linkChannel stamps the session's claude_pid and lights up
@@ -177,41 +186,10 @@ func loadHookContext() (*hookContext, error) {
 // ancestor found) is passed through; the store treats it as "no
 // channel" rather than erroring.
 func (h *hookContext) linkChannel(sessionID string) {
-	claudePID := int64(findClaudeAncestor(os.Getpid()))
 	host, _ := os.Hostname()
-	if err := h.c.LinkSessionChannel(context.Background(), sessionID, claudePID, host); err != nil {
+	if err := h.c.LinkSessionChannel(context.Background(), sessionID, int64(h.claudePID), host); err != nil {
 		fmt.Fprintln(os.Stderr, "bacio hook: link channel:", err)
 	}
-}
-
-// readAgentSlug reads the persistent identity slug from
-// <root>/.bacio/agent (the SKILL.md convention). Returns "" if the file
-// is absent or empty — the session is still tracked, just without an
-// identity link.
-func readAgentSlug(root string) string {
-	b, err := os.ReadFile(filepath.Join(root, ".bacio", "agent"))
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(b))
-}
-
-// writeAgentSlug persists the identity slug to <root>/.bacio/agent,
-// creating .bacio/ if needed. On first write it also drops a
-// .bacio/.gitignore ('*') so the per-machine identity never lands in
-// version control — this used to be a manual step the SKILL.md asked
-// the agent to do. Best-effort: the caller logs the error and carries
-// on (a hook must never fail the session over housekeeping).
-func writeAgentSlug(root, slug string) error {
-	dir := filepath.Join(root, ".bacio")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	gitignore := filepath.Join(dir, ".gitignore")
-	if _, err := os.Stat(gitignore); errors.Is(err, os.ErrNotExist) {
-		_ = os.WriteFile(gitignore, []byte("*\n"), 0o644) // best-effort
-	}
-	return os.WriteFile(filepath.Join(dir, "agent"), []byte(slug+"\n"), 0o644)
 }
 
 // ---------- session-start ----------

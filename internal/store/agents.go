@@ -26,7 +26,7 @@ var ErrAgentNameTaken = errors.New("agent name already taken")
 // fresh, fail if it clashes" path the SKILL.md bootstrap uses on first
 // session in a repo. When requireNew is false, an existing name is a
 // no-op refresh (last_seen_at bumped) — that's the "I'm a returning
-// agent reading my saved name from .bacio/agent" path.
+// agent reading its recorded name from .bacio/agents.json" path.
 //
 // Returns the row plus a created flag so callers can decide whether to
 // record an audit event for a fresh creation vs. a routine refresh.
@@ -174,8 +174,8 @@ func (s *Store) UpsertAgentSession(in UpsertAgentSessionIn) (*model.AgentSession
 	// INSERT … ON CONFLICT: update mutable fields and bump last_seen_at.
 	// The ended-session case is already filtered above, so this path
 	// only runs for new or alive rows. agent_id is mutable on the
-	// session row too — if the agent rewrites .bacio/agent mid-session
-	// (rename), the next register picks up the new identity. Passing
+	// session row too — if the identity for this claude_pid changes
+	// mid-session (rename), the next register picks it up. Passing
 	// nil leaves the column unchanged on update (COALESCE) so callers
 	// that don't supply an agent (e.g. heartbeat) don't clobber it.
 	var agentID any

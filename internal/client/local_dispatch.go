@@ -173,7 +173,7 @@ func (c *localClient) RepoDispatches(ctx context.Context, repo *model.Repo) ([]*
 }
 
 func (c *localClient) DrainAgentDispatches(ctx context.Context, repo *model.Repo, agentName string) ([]*model.AgentDispatch, error) {
-	// An unscoped channel (no repo / no .bacio/agent identity) has
+	// An unscoped channel (no repo / no agents.json identity yet) has
 	// nothing to drain — that's not an error, the channel just idles.
 	if repo == nil || agentName == "" {
 		return nil, nil
