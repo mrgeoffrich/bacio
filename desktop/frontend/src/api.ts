@@ -4,6 +4,7 @@
 import {
   BoardService,
   DocService,
+  FeatureService,
   Board,
   BoardColumn,
   BoardCard,
@@ -13,9 +14,12 @@ import {
   DispatchDTO,
   DocSummary,
   DocContent,
+  FeatureSummary,
+  FeatureDetail,
+  FeatureLinkedIssue,
 } from '../bindings/github.com/mrgeoffrich/bacio/desktop';
 
-export type { Board, BoardColumn, BoardCard, IssueDetail, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent };
+export type { Board, BoardColumn, BoardCard, IssueDetail, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, FeatureSummary, FeatureDetail, FeatureLinkedIssue };
 
 function normalize(err: unknown): Error {
   if (err instanceof Error) return err;
@@ -80,6 +84,22 @@ export async function dispatchIssue(
 ): Promise<DispatchDTO> {
   try {
     return await BoardService.DispatchIssue(repoPrefix, issueKey, agentName, mode, note);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+export async function listFeatures(repoPrefix: string): Promise<FeatureSummary[]> {
+  try {
+    return await FeatureService.ListFeatures(repoPrefix);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+export async function getFeature(repoPrefix: string, slug: string): Promise<FeatureDetail> {
+  try {
+    return await FeatureService.GetFeature(repoPrefix, slug);
   } catch (err) {
     throw normalize(err);
   }

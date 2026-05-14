@@ -17,6 +17,12 @@ export default function Topbar({ boards, activeBoard, onPickBoard, activeView, o
           Board
         </button>
         <button
+          className={`mk-segmented-btn ${activeView === 'features' ? 'is-active' : ''}`}
+          onClick={() => onChangeView('features')}
+        >
+          Features
+        </button>
+        <button
           className={`mk-segmented-btn ${activeView === 'docs' ? 'is-active' : ''}`}
           onClick={() => onChangeView('docs')}
         >

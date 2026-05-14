@@ -3,9 +3,11 @@
 
 import * as BoardService from "./boardservice.js";
 import * as DocService from "./docservice.js";
+import * as FeatureService from "./featureservice.js";
 export {
     BoardService,
-    DocService
+    DocService,
+    FeatureService
 };
 
 export {
@@ -18,6 +20,9 @@ export {
     DispatchDTO,
     DocContent,
     DocSummary,
+    FeatureDetail,
+    FeatureLinkedIssue,
+    FeatureSummary,
     IssueDetail,
     PRDTO
 } from "./models.js";

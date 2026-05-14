@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Topbar from './components/Topbar.jsx';
 import Board from './components/Board.jsx';
 import DocsView from './components/DocsView.jsx';
+import FeaturesView from './components/FeaturesView.jsx';
 import IssueDrawer from './components/IssueDrawer.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
 import SettingsPanel from './components/SettingsPanel.jsx';
@@ -26,7 +27,7 @@ export default function App() {
   const [boards, setBoards] = useState([]);
   const [columns, setColumns] = useState([]);
   const [activeBoard, setActiveBoard] = useState('all'); // repo prefix, or 'all'
-  const [activeView, setActiveView] = useState('board'); // 'board' | 'docs'
+  const [activeView, setActiveView] = useState('board'); // 'board' | 'features' | 'docs'
   const [cards, setCards] = useState([]);
   const [openIssue, setOpenIssue] = useState(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -155,6 +156,8 @@ export default function App() {
         <div className="mk-app-state mk-app-error">Error: {error}</div>
       ) : activeView === 'docs' ? (
         <DocsView activeBoard={activeBoard} />
+      ) : activeView === 'features' ? (
+        <FeaturesView activeBoard={activeBoard} />
       ) : (
         <Board
           columns={columns}
