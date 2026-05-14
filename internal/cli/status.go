@@ -13,19 +13,21 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
 
-// statusReport is the unified shape returned by `bacio status`. Inside a git
-// repo it auto-registers on first use, like every other mutating command,
-// so the only branches are "in a (now-registered) repo" vs "no git repo".
+// statusReport is the unified shape returned by `bacio status`. `status` is
+// strictly read-only: inside a git tree it reports whether the repo is
+// registered without ever writing a row. Branches: registered repo,
+// unregistered git tree, or no git tree.
 type statusReport struct {
-	DBPath         string      `json:"db_path"`
-	InRepo         bool        `json:"in_repo"`
-	Repo           *model.Repo `json:"repo,omitempty"`
-	JustRegistered bool        `json:"just_registered,omitempty"`
-	Stats          statusStats `json:"stats"`
+	DBPath     string      `json:"db_path"`
+	InRepo     bool        `json:"in_repo"`
+	Registered bool        `json:"registered"`
+	Path       string      `json:"path,omitempty"`
+	Repo       *model.Repo `json:"repo,omitempty"`
+	Stats      statusStats `json:"stats"`
 }
 
 type statusStats struct {
-	// Repo-scoped (populated when InRepo)
+	// Repo-scoped (populated when InRepo and Registered)
 	Features      int            `json:"features,omitempty"`
 	Issues        int            `json:"issues,omitempty"`
 	IssuesByState map[string]int `json:"issues_by_state,omitempty"`
@@ -39,7 +41,7 @@ type statusStats struct {
 func newStatusCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
-		Short: "Show current repo, DB location, and quick stats",
+		Short: "Show current repo, DB location, and quick stats (read-only)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := opts.dbPath
 			if path == "" {
@@ -55,47 +57,13 @@ func newStatusCmd() *cobra.Command {
 			}
 			defer s.Close()
 
-			report := &statusReport{DBPath: path}
-
 			cwd, err := os.Getwd()
 			if err != nil {
 				return err
 			}
-			info, gitErr := git.Detect(cwd)
-			switch {
-			case gitErr == nil:
-				// Auto-register on first use, like every other mutating command.
-				repo, err := s.GetRepoByPath(info.Root)
-				if errors.Is(err, store.ErrNotFound) {
-					prefix, perr := s.AllocatePrefix(info.Name)
-					if perr != nil {
-						return fmt.Errorf("allocate prefix: %w", perr)
-					}
-					repo, err = s.CreateRepo(prefix, info.Name, info.Root, info.RemoteURL)
-					if err != nil {
-						return err
-					}
-					recordOp(s, model.HistoryEntry{
-						RepoID: &repo.ID, RepoPrefix: repo.Prefix,
-						Op: "repo.create", Kind: "repo",
-						TargetID: &repo.ID, TargetLabel: repo.Prefix,
-						Details: "auto-registered via status (" + repo.Name + ")",
-					})
-					report.JustRegistered = true
-				} else if err != nil {
-					return err
-				}
-				report.InRepo = true
-				report.Repo = repo
-				if err := fillRepoStats(s, repo, &report.Stats); err != nil {
-					return err
-				}
-			case errors.Is(gitErr, git.ErrNotARepo):
-				if err := fillGlobalStats(s, &report.Stats); err != nil {
-					return err
-				}
-			default:
-				return gitErr
+			report, err := buildStatusReport(s, path, cwd)
+			if err != nil {
+				return err
 			}
 			if opts.output == outputJSON {
 				return emit(report)
@@ -103,6 +71,38 @@ func newStatusCmd() *cobra.Command {
 			return printStatus(os.Stdout, report)
 		},
 	}
+}
+
+// buildStatusReport assembles the status payload without writing to the
+// store. Kept as a package-level helper so tests can drive it directly
+// after chdir-ing into a temp git tree.
+func buildStatusReport(s *store.Store, dbPath, cwd string) (*statusReport, error) {
+	report := &statusReport{DBPath: dbPath}
+	info, gitErr := git.Detect(cwd)
+	switch {
+	case gitErr == nil:
+		report.InRepo = true
+		report.Path = info.Root
+		repo, err := s.GetRepoByPath(info.Root)
+		if errors.Is(err, store.ErrNotFound) {
+			return report, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		report.Registered = true
+		report.Repo = repo
+		if err := fillRepoStats(s, repo, &report.Stats); err != nil {
+			return nil, err
+		}
+	case errors.Is(gitErr, git.ErrNotARepo):
+		if err := fillGlobalStats(s, &report.Stats); err != nil {
+			return nil, err
+		}
+	default:
+		return nil, gitErr
+	}
+	return report, nil
 }
 
 func fillRepoStats(s *store.Store, repo *model.Repo, st *statusStats) error {
@@ -140,10 +140,7 @@ func fillGlobalStats(s *store.Store, st *statusStats) error {
 }
 
 func printStatus(w io.Writer, r *statusReport) error {
-	if r.InRepo && r.Repo != nil {
-		if r.JustRegistered {
-			fmt.Fprintf(w, "Just registered this git repo as %s.\n\n", r.Repo.Prefix)
-		}
+	if r.InRepo && r.Registered && r.Repo != nil {
 		fmt.Fprintf(w, "Repo:    %s  (%s)\n", r.Repo.Prefix, r.Repo.Name)
 		fmt.Fprintf(w, "Path:    %s\n", r.Repo.Path)
 		if r.Repo.RemoteURL != "" {
@@ -159,6 +156,13 @@ func printStatus(w io.Writer, r *statusReport) error {
 			}
 		}
 		fmt.Fprintf(w, "Next:    %s\n", r.Stats.NextIssueKey)
+		return nil
+	}
+
+	if r.InRepo {
+		fmt.Fprintf(w, "Path:    %s\n", r.Path)
+		fmt.Fprintf(w, "Repo:    (unregistered — run `bacio init` to bind a prefix)\n")
+		fmt.Fprintf(w, "DB:      %s\n", r.DBPath)
 		return nil
 	}
 

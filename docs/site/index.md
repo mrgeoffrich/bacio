@@ -46,7 +46,7 @@ NextIssue: MYPR-1
 Created:   2026-05-12 14:33 AEST
 ```
 
-`init` is **optional** — any `bacio` command inside a fresh git working tree auto-registers the repo and allocates a prefix from its name. Run `init` explicitly when you want to pick the prefix yourself (`bacio init --prefix AUTH`). See [`bacio init`](/reference/cli/init) for the details.
+`init` is **optional** — any mutating `bacio` command (e.g. `bacio issue add`) inside a fresh git working tree auto-registers the repo and allocates a prefix from its name. `bacio status` is the lone exception: it's strictly read-only and reports `registered: false` rather than binding the repo. Run `init` explicitly when you want to pick the prefix yourself (`bacio init --prefix AUTH`). See [`bacio init`](/reference/cli/init) for the details.
 
 ## 3. Open the TUI
 

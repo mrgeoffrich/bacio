@@ -48,7 +48,7 @@ bacio issue add --user agent-claude --json '{ ...same payload... }' -o json
 
 Use `needs_action` when an LLM agent is paused waiting on the user — keep the assignee, flip the state. It signals "the next move is the human's", as distinct from `in_progress` (agent is actively working) or `in_review` (work is done and awaiting human approval).
 
-**Auto-create on first use:** running any `bacio` command in a git repo that hasn't been registered yet automatically creates the repo row and allocates a 4-char prefix from the directory basename (e.g. `bacio` → `MINI`). Outside any git repo, `bacio` errors out — never invent a working directory just to make it run.
+**Auto-create on first use:** running any mutating `bacio` command (e.g. `bacio issue add`, `bacio feature add`) in a git repo that hasn't been registered yet automatically creates the repo row and allocates a 4-char prefix from the directory basename (e.g. `bacio` → `MINI`). `bacio status` is strictly read-only and will NOT auto-register — use it as a safe probe; it reports `registered: false` when the working tree isn't bound yet. Outside any git repo, `bacio` errors out — never invent a working directory just to make it run.
 
 **Identity:** the repo is keyed by its absolute git toplevel path. Moving the repo on disk creates a new row.
 
@@ -249,10 +249,13 @@ bacio repo rm <PREFIX> --confirm <PREFIX>
                                      the user before re-running. Run
                                      with --dry-run first to inspect
                                      the cascade.
-bacio status                            Show the current repo, DB path, and
-                                     quick stats (feature count + issues
-                                     grouped by state); outside any tracked
-                                     repo it shows the global counts instead
+bacio status                            Read-only probe — never registers.
+                                     Inside a registered repo, shows the
+                                     repo, DB path, and quick stats (feature
+                                     count + issues grouped by state).
+                                     Inside an unregistered git tree, reports
+                                     `registered: false`. Outside any git
+                                     repo, shows global counts instead.
 ```
 
 **Example:**

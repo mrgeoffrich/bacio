@@ -50,7 +50,7 @@ Restart Claude Code in this repo so the new skill loads. That's it — you're do
 
 The SQLite database lives at `~/.bacio/db.sqlite`. Move it, back it up, or override with `--db <path>` per command. There's nothing else to configure.
 
-> **Note.** `bacio init` is optional — running any `bacio` command inside a fresh git repo auto-creates the row and allocates a prefix. Calling `init` explicitly just lets you choose the prefix (`--prefix AUTH`) and confirms the binding.
+> **Note.** `bacio init` is optional — running any mutating `bacio` command (e.g. `bacio issue add`) inside a fresh git repo auto-creates the row and allocates a prefix. `bacio status` is strictly read-only and will *not* register the repo; it reports `registered: false` when the working tree isn't bound yet. Calling `init` explicitly just lets you choose the prefix (`--prefix AUTH`) and confirms the binding.
 
 ---
 

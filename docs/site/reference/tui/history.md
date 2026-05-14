@@ -34,7 +34,7 @@ Common op names (canonical `<entity>.<verb>` form — these are CRUD-flavoured v
 
 | Op | What |
 |---|---|
-| `repo.create` / `.upgrade_phantom` | A new repo bound, or promoted from sync-only (phantom) to having a local working tree. `repo.upgrade_phantom` is emitted by the auto-register flow when any `bacio` command runs in a working tree whose remote matches a phantom previously imported via sync. |
+| `repo.create` / `.upgrade_phantom` | A new repo bound, or promoted from sync-only (phantom) to having a local working tree. `repo.upgrade_phantom` is emitted by the auto-register flow when any mutating `bacio` command runs in a working tree whose remote matches a phantom previously imported via sync (`bacio status` is read-only and doesn't trigger this). |
 | `feature.create` / `.update` / `.delete` | Feature CRUD. |
 | `issue.create` / `.update` / `.state` / `.assign` / `.claim` / `.delete` | Issue lifecycle. `issue.unassign` reuses `issue.assign` with an empty assignee. `issue.claim` is the atomic claim recorded by `bacio issue next`. |
 | `comment.add` | A new comment (recorded with `kind=issue`). |

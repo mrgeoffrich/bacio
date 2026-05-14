@@ -31,7 +31,7 @@ Created:   2026-05-12 14:33 AEST
 `init` registers the repo in bacio's global database at `~/.bacio/db.sqlite` and allocates a 4-letter prefix from the repo name. Issues in this repo will be keyed `MYPR-1`, `MYPR-2`, …
 
 ::: tip Note
-`init` is **optional** — any `bacio` command inside a fresh git working tree auto-registers the repo. You only need it when you want to pick the prefix yourself: `bacio init --prefix AUTH`.
+`init` is **optional** — any mutating `bacio` command (e.g. `bacio issue add`) inside a fresh git working tree auto-registers the repo. `bacio status` is the exception: it's strictly read-only and reports `registered: false` rather than binding the repo. You only need `init` when you want to pick the prefix yourself: `bacio init --prefix AUTH`.
 :::
 
 ## 2. File an issue by hand
