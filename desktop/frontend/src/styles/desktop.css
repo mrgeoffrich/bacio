@@ -22,11 +22,98 @@
 .mk-topbar input,
 .mk-topbar select { --wails-draggable: no-drag; }
 
-/* Nudge the repo selector and search box down a touch so they sit
-   vertically centred with the macOS traffic-light buttons, which the
-   window chrome places slightly below the top nav's own centre line. */
-.mk-repo-select,
+/* Nudge the search box down a touch so it sits vertically centred with
+   the macOS traffic-light buttons, which the window chrome places
+   slightly below the top nav's own centre line. The repo selector now
+   lives in the right-hand cluster, so it aligns with .mk-icbtn instead. */
 .mk-search { transform: translateY(1px); }
+
+/* "Sync Enabled" badge — shown left of the repo selector when the repo
+   has git sync configured. Reuses .mk-pill chrome with the healthy
+   (pistachio) status colour. */
+.mk-sync-badge {
+  background: var(--status-done-bg);
+  color: var(--status-done);
+  flex-shrink: 0;
+}
+
+/* ============================================================
+   Repository picker — a searchable dropdown replacing the plain
+   native <select>, with an "Add Repository" action that opens a
+   native folder picker. A desktop-app addition.
+   ============================================================ */
+.mk-repo-picker { position: relative; flex-shrink: 0; }
+.mk-repo-picker-trigger {
+  display: flex; align-items: center; gap: 6px;
+  height: 32px; padding: 0 10px;
+  border: 1px solid var(--border-1); border-radius: 8px;
+  background: var(--paper); color: var(--fg-1);
+  font-family: var(--font-sans); font-size: 13px; cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+.mk-repo-picker-trigger:hover { border-color: var(--border-2); }
+.mk-repo-picker-trigger .mk-icon { width: 14px; height: 14px; color: var(--fg-3); }
+/* The active repo is the primary context for every screen — bold it. */
+.mk-repo-picker-label {
+  font-weight: 700; max-width: 200px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Dot separating the repo name from its short code. */
+.mk-repo-picker-sep { color: var(--fg-4); }
+/* The repo's short code, shown after the name — secondary, so not bold. */
+.mk-repo-picker-code {
+  font-family: var(--font-mono); font-size: 10px; font-weight: 400;
+  letter-spacing: .06em; text-transform: uppercase; color: var(--fg-3);
+}
+.mk-repo-picker-menu {
+  position: absolute; top: calc(100% + 6px); right: 0;
+  width: 280px; z-index: 20;
+  display: flex; flex-direction: column;
+  background: var(--bg-2); border: 1px solid var(--border-1);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-3);
+  overflow: hidden;
+}
+.mk-repo-picker-search {
+  font-family: var(--font-sans); font-size: 13px;
+  margin: 8px; padding: 8px 10px; box-sizing: border-box;
+  width: calc(100% - 16px);
+  border: 1px solid var(--border-1); border-radius: var(--radius-md);
+  background: var(--bg-3); color: var(--fg-1);
+}
+.mk-repo-picker-list {
+  max-height: 280px; overflow-y: auto;
+  padding: 0 8px; display: flex; flex-direction: column; gap: 2px;
+}
+.mk-repo-picker-empty {
+  padding: 10px; font-size: var(--text-sm); color: var(--fg-4);
+}
+.mk-repo-picker-item {
+  display: flex; align-items: baseline; gap: 8px;
+  width: 100%; text-align: left;
+  padding: 7px 10px; border: 0; border-radius: var(--radius-md);
+  background: transparent; cursor: pointer; font-family: var(--font-sans);
+}
+.mk-repo-picker-item:hover,
+.mk-repo-picker-item.is-active { background: var(--bg-4); }
+.mk-repo-picker-item-name {
+  font-size: var(--text-sm); font-weight: 600; color: var(--fg-1);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mk-repo-picker-item-prefix {
+  margin-left: auto; flex-shrink: 0;
+  font-family: var(--font-mono); font-size: 10px;
+  letter-spacing: .06em; text-transform: uppercase; color: var(--fg-3);
+}
+.mk-repo-picker-add {
+  display: flex; align-items: center; gap: 6px;
+  width: 100%; margin-top: 4px; padding: 9px 12px;
+  border: 0; border-top: 1px solid var(--border-1);
+  background: transparent; cursor: pointer;
+  font-family: var(--font-sans); font-size: 13px; font-weight: 600;
+  color: var(--sky-600);
+}
+.mk-repo-picker-add:hover { background: var(--bg-4); }
+.mk-repo-picker-add .mk-icon { width: 14px; height: 14px; }
 
 /* Status pill colours for bacio's six real issue states. The imported
    app.css only covers the kit's placeholder column ids; these map each
@@ -115,11 +202,36 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
 }
 
 /* ============================================================
-   Agents screen — a desktop-app addition. Reuses the .mk-settings
-   modal shell (wider) with a card per agent session that expands
-   into its claims + dispatches.
+   Agents screen — a desktop-app addition: a full-page list with a
+   card per agent session that expands into its claims + dispatches.
    ============================================================ */
-.mk-agents { width: min(560px, 92vw); }
+.mk-agents-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 24px;
+}
+.mk-agents-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.mk-agents-title {
+  font-family: var(--font-sans);
+  font-size: var(--text-xl);
+  font-weight: 700;
+  color: var(--fg-1);
+  margin: 0;
+}
+.mk-agents-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 720px;
+}
 
 /* Agent-status pills — reuse the kit's pill chrome (.mk-pill), just
    the colour pairs here. active = claude's flavour; idle = honey;
@@ -282,4 +394,254 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   color: var(--status-blocked);
   background: var(--status-blocked-bg);
   border-bottom: 1px solid var(--border-1);
+}
+
+/* ============================================================
+   Features view — a read-only two-pane feature browser, the
+   desktop mirror of the TUI's Features tab. Left pane lists the
+   repo's features; right pane shows the selected feature's
+   description and the issues grouped under it. A desktop-app
+   addition (not part of the kit), so its styles live here.
+   ============================================================ */
+.mk-features {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+.mk-features-list {
+  width: 260px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--bg-3);
+  border-right: 1px solid var(--border-1);
+}
+.mk-features-list-empty,
+.mk-features-empty {
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  color: var(--fg-4);
+  line-height: 1.5;
+}
+.mk-features-list-empty { padding: 12px 8px; }
+.mk-features-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 24px;
+}
+.mk-features-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out);
+}
+.mk-features-item:hover { background: var(--bg-4); }
+.mk-features-item.is-active {
+  background: var(--bg-2);
+  border-color: var(--border-1);
+}
+.mk-features-item-slug {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+.mk-features-item-title {
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--fg-1);
+  line-height: 1.35;
+}
+.mk-features-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+.mk-features-error {
+  padding: 8px 16px;
+  font-size: var(--text-sm);
+  color: var(--status-blocked);
+  background: var(--status-blocked-bg);
+  border-bottom: 1px solid var(--border-1);
+}
+.mk-features-detail {
+  padding: 24px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mk-features-title {
+  font-family: var(--font-sans);
+  font-size: var(--text-xl);
+  font-weight: 700;
+  color: var(--fg-1);
+  margin: 0;
+}
+.mk-features-meta {
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  color: var(--fg-3);
+}
+.mk-features-section { margin-top: 20px; }
+.mk-features-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-3);
+  margin-bottom: 8px;
+}
+.mk-features-text {
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  color: var(--fg-2);
+  line-height: 1.6;
+  margin: 0;
+  white-space: pre-wrap;
+}
+.mk-features-issues {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mk-features-issue {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mk-features-issue-title {
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  color: var(--fg-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ============================================================
+   History view — a desktop-app addition: the paged audit log,
+   newest first. Mirrors the TUI's History tab but pages the data
+   (Prev/Next) instead of loading the whole log.
+   ============================================================ */
+.mk-history {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding: 20px 24px;
+}
+.mk-history-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 24px;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  color: var(--fg-4);
+}
+.mk-history-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  flex-shrink: 0;
+}
+.mk-history-title {
+  font-family: var(--font-sans);
+  font-size: var(--text-xl);
+  font-weight: 700;
+  color: var(--fg-1);
+  margin: 0;
+}
+.mk-history-pager {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mk-history-page {
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  color: var(--fg-3);
+  min-width: 64px;
+  text-align: center;
+}
+.mk-history-error {
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  font-size: var(--text-sm);
+  color: var(--status-blocked);
+  background: var(--status-blocked-bg);
+  border-radius: var(--radius-md);
+  flex-shrink: 0;
+}
+.mk-history-table {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  background: var(--bg-2);
+}
+.mk-history-head,
+.mk-history-row {
+  display: grid;
+  grid-template-columns: 110px 130px 160px 160px 1fr;
+  gap: 12px;
+  padding: 8px 14px;
+  align-items: baseline;
+}
+.mk-history-head {
+  position: sticky;
+  top: 0;
+  background: var(--bg-3);
+  border-bottom: 1px solid var(--border-1);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-3);
+}
+.mk-history-row {
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  color: var(--fg-2);
+  border-bottom: 1px solid var(--border-1);
+}
+.mk-history-row:last-child { border-bottom: 0; }
+.mk-history-when { color: var(--fg-3); white-space: nowrap; }
+.mk-history-actor { color: var(--fg-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mk-history-op { color: var(--fg-1); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mk-history-target { color: var(--fg-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mk-history-details {
+  color: var(--fg-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

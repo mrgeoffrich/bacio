@@ -51,6 +51,8 @@ func main() {
 		Services: []application.Service{
 			application.NewService(NewBoardService(c)),
 			application.NewService(NewDocService(c)),
+			application.NewService(NewFeatureService(c)),
+			application.NewService(NewHistoryService(c)),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),

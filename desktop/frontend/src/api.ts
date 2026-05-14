@@ -4,6 +4,8 @@
 import {
   BoardService,
   DocService,
+  FeatureService,
+  HistoryService,
   Board,
   BoardColumn,
   BoardCard,
@@ -13,9 +15,14 @@ import {
   DispatchDTO,
   DocSummary,
   DocContent,
+  FeatureSummary,
+  FeatureDetail,
+  FeatureLinkedIssue,
+  HistoryPage,
+  HistoryEntryDTO,
 } from '../bindings/github.com/mrgeoffrich/bacio/desktop';
 
-export type { Board, BoardColumn, BoardCard, IssueDetail, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent };
+export type { Board, BoardColumn, BoardCard, IssueDetail, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, FeatureSummary, FeatureDetail, FeatureLinkedIssue, HistoryPage, HistoryEntryDTO };
 
 function normalize(err: unknown): Error {
   if (err instanceof Error) return err;
@@ -42,6 +49,16 @@ export async function listColumns(): Promise<BoardColumn[]> {
 export async function listCards(repoPrefix: string): Promise<BoardCard[]> {
   try {
     return await BoardService.ListCards(repoPrefix);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// addRepository opens a native folder picker and registers the chosen git
+// working tree. The returned Board has an empty prefix if the user cancelled.
+export async function addRepository(): Promise<Board> {
+  try {
+    return await BoardService.AddRepository();
   } catch (err) {
     throw normalize(err);
   }
@@ -80,6 +97,34 @@ export async function dispatchIssue(
 ): Promise<DispatchDTO> {
   try {
     return await BoardService.DispatchIssue(repoPrefix, issueKey, agentName, mode, note);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+export async function listFeatures(repoPrefix: string): Promise<FeatureSummary[]> {
+  try {
+    return await FeatureService.ListFeatures(repoPrefix);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+export async function getFeature(repoPrefix: string, slug: string): Promise<FeatureDetail> {
+  try {
+    return await FeatureService.GetFeature(repoPrefix, slug);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+export async function listHistory(
+  repoPrefix: string,
+  page: number,
+  pageSize: number,
+): Promise<HistoryPage> {
+  try {
+    return await HistoryService.ListHistory(repoPrefix, page, pageSize);
   } catch (err) {
     throw normalize(err);
   }

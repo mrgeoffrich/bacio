@@ -7,8 +7,7 @@ function typeLabel(t) {
   return t.replace(/_/g, ' ');
 }
 
-// DocsView is the desktop document browser + editor. Documents are per-repo,
-// so it needs a concrete repo selected in the topbar (not "All repositories").
+// DocsView is the desktop document browser + editor. Documents are per-repo.
 // Edits are buffered locally and persisted explicitly via the Save button.
 export default function DocsView({ activeBoard }) {
   const [docs, setDocs] = useState([]);
@@ -19,7 +18,7 @@ export default function DocsView({ activeBoard }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
-  const repoSelected = !!activeBoard && activeBoard !== 'all';
+  const repoSelected = !!activeBoard;
   const dirty = content !== savedContent;
 
   // Reload the document list whenever the selected repo changes.

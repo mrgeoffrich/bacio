@@ -1,0 +1,117 @@
+import React, { useState, useEffect } from 'react';
+import * as api from '../api';
+
+const PAGE_SIZE = 50;
+
+// formatWhen mirrors the TUI's history view: relative for recent entries,
+// absolute date once they're more than a week old.
+function formatWhen(iso) {
+  const then = new Date(iso);
+  const m = Math.floor((Date.now() - then.getTime()) / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d}d ago`;
+  return then.toLocaleDateString();
+}
+
+// HistoryView is the desktop audit-log browser — the paged mirror of the TUI's
+// History tab. It shows the repo's history newest-first, one fixed-size page
+// at a time, with Prev/Next paging; it never loads the whole log at once.
+export default function HistoryView({ activeBoard }) {
+  const [page, setPage] = useState(0);
+  const [data, setData] = useState(null); // HistoryPage
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const repoSelected = !!activeBoard;
+
+  // Reset to the first page whenever the repo changes.
+  useEffect(() => { setPage(0); }, [activeBoard]);
+
+  // Load the current page.
+  useEffect(() => {
+    if (!repoSelected) {
+      setData(null);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    api.listHistory(activeBoard, page, PAGE_SIZE)
+      .then(p => {
+        setData(p);
+        setLoading(false);
+      })
+      .catch(err => {
+        setError(err.message);
+        setLoading(false);
+      });
+  }, [activeBoard, page, repoSelected]);
+
+  if (!repoSelected) {
+    return (
+      <div className="mk-history">
+        <div className="mk-history-empty">Select a repository to view its history.</div>
+      </div>
+    );
+  }
+
+  const entries = data?.entries ?? [];
+  const hasMore = data?.hasMore ?? false;
+
+  return (
+    <div className="mk-history">
+      <header className="mk-history-bar">
+        <h2 className="mk-history-title">History</h2>
+        <div className="mk-history-pager">
+          <button
+            className="mk-btn-secondary"
+            disabled={page === 0 || loading}
+            onClick={() => setPage(p => Math.max(0, p - 1))}
+          >
+            Prev
+          </button>
+          <span className="mk-history-page">Page {page + 1}</span>
+          <button
+            className="mk-btn-secondary"
+            disabled={!hasMore || loading}
+            onClick={() => setPage(p => p + 1)}
+          >
+            Next
+          </button>
+        </div>
+      </header>
+
+      {error && <div className="mk-history-error">{error}</div>}
+
+      <div className="mk-history-table">
+        <div className="mk-history-head">
+          <span>When</span>
+          <span>Actor</span>
+          <span>Op</span>
+          <span>Target</span>
+          <span>Details</span>
+        </div>
+        {loading ? (
+          <div className="mk-history-empty">Loading…</div>
+        ) : entries.length === 0 ? (
+          <div className="mk-history-empty">No history on this page.</div>
+        ) : (
+          entries.map(e => (
+            <div key={e.id} className="mk-history-row">
+              <span className="mk-history-when">{formatWhen(e.createdAt)}</span>
+              <span className="mk-history-actor">{e.actor}</span>
+              <span className="mk-history-op">{e.op}</span>
+              <span className="mk-history-target mk-mono">
+                {e.targetLabel ? `[${e.targetLabel}]` : '—'}
+              </span>
+              <span className="mk-history-details">{e.details || '—'}</span>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}

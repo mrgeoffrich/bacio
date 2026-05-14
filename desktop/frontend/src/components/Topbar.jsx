@@ -1,7 +1,19 @@
 import React from 'react';
 import Icon from './Icon.jsx';
+import RepoPicker from './RepoPicker.jsx';
 
-export default function Topbar({ boards, activeBoard, onPickBoard, activeView, onChangeView, onOpenPalette, onOpenAgents, onOpenSettings }) {
+// NAV is the ordered top-nav. Exported so App can map the 1–5 digit
+// hotkeys onto the same views in the same order.
+export const NAV = [
+  { view: 'board', label: 'Issues' },
+  { view: 'features', label: 'Features' },
+  { view: 'docs', label: 'Documents' },
+  { view: 'agents', label: 'Agents' },
+  { view: 'history', label: 'History' },
+];
+
+export default function Topbar({ boards, activeBoard, onPickBoard, onAddRepository, activeView, onChangeView, onOpenPalette, onOpenSettings }) {
+  const syncEnabled = !!boards.find(b => b.prefix === activeBoard)?.syncEnabled;
   return (
     <header className="mk-topbar">
       <div className="mk-brand">
@@ -10,28 +22,15 @@ export default function Topbar({ boards, activeBoard, onPickBoard, activeView, o
       </div>
 
       <div className="mk-segmented">
-        <button
-          className={`mk-segmented-btn ${activeView === 'board' ? 'is-active' : ''}`}
-          onClick={() => onChangeView('board')}
-        >
-          Board
-        </button>
-        <button
-          className={`mk-segmented-btn ${activeView === 'docs' ? 'is-active' : ''}`}
-          onClick={() => onChangeView('docs')}
-        >
-          Docs
-        </button>
-      </div>
-
-      <div className="mk-repo-select">
-        <Icon name="board" />
-        <select value={activeBoard} onChange={(e) => onPickBoard(e.target.value)}>
-          <option value="all">All repositories</option>
-          {boards.map(b => (
-            <option key={b.prefix} value={b.prefix}>{b.name}</option>
-          ))}
-        </select>
+        {NAV.map(({ view, label }) => (
+          <button
+            key={view}
+            className={`mk-segmented-btn ${activeView === view ? 'is-active' : ''}`}
+            onClick={() => onChangeView(view)}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
       <button className="mk-search" onClick={onOpenPalette}>
@@ -41,8 +40,13 @@ export default function Topbar({ boards, activeBoard, onPickBoard, activeView, o
       </button>
 
       <div className="mk-topbar-right">
-        <button className="mk-icbtn" aria-label="Agents" onClick={onOpenAgents}><Icon name="claude" /></button>
-        <button className="mk-icbtn" aria-label="Notifications"><Icon name="bell" /></button>
+        {syncEnabled && <span className="mk-pill mk-sync-badge">Sync Enabled</span>}
+        <RepoPicker
+          boards={boards}
+          activeBoard={activeBoard}
+          onPick={onPickBoard}
+          onAddRepository={onAddRepository}
+        />
         <button className="mk-icbtn" aria-label="Settings" onClick={onOpenSettings}><Icon name="settings" /></button>
       </div>
     </header>

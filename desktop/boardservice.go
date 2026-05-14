@@ -2,12 +2,16 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/client"
+	"github.com/mrgeoffrich/bacio/internal/git"
 	"github.com/mrgeoffrich/bacio/internal/model"
+	"github.com/mrgeoffrich/bacio/internal/sync"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 // stateLabels maps each bacio issue state to a human-friendly column label.
@@ -29,9 +33,10 @@ func stateLabel(s model.State) string {
 
 // Board is one bacio repo, offered in the top-nav repository selector.
 type Board struct {
-	Prefix     string `json:"prefix"`
-	Name       string `json:"name"`
-	IssueCount int    `json:"issueCount"`
+	Prefix      string `json:"prefix"`
+	Name        string `json:"name"`
+	IssueCount  int    `json:"issueCount"`
+	SyncEnabled bool   `json:"syncEnabled"`
 }
 
 // BoardColumn is one kanban column — one bacio issue state.
@@ -147,7 +152,19 @@ func cardFromIssue(iss *model.Issue) BoardCard {
 	}
 }
 
-// ListBoards returns every bacio repo as a sidebar board, with its issue count.
+// repoSyncEnabled reports whether the repo's working tree has git sync
+// configured — a readable .bacio/config.yaml with a sync.remote set. Any
+// read/parse failure (missing dir, broken config) counts as not-enabled.
+func repoSyncEnabled(path string) bool {
+	if path == "" {
+		return false
+	}
+	cfg, err := sync.ReadProjectConfig(path)
+	return err == nil && cfg.Sync.Remote != ""
+}
+
+// ListBoards returns every bacio repo as a sidebar board, with its issue count
+// and whether git sync is configured for it.
 func (b *BoardService) ListBoards() ([]Board, error) {
 	ctx := context.Background()
 	repos, err := b.client.ListRepos(ctx)
@@ -161,12 +178,50 @@ func (b *BoardService) ListBoards() ([]Board, error) {
 			return nil, err
 		}
 		boards = append(boards, Board{
-			Prefix:     r.Prefix,
-			Name:       r.Name,
-			IssueCount: len(issues),
+			Prefix:      r.Prefix,
+			Name:        r.Name,
+			IssueCount:  len(issues),
+			SyncEnabled: repoSyncEnabled(r.Path),
 		})
 	}
 	return boards, nil
+}
+
+// AddRepository opens a native folder picker and registers the chosen git
+// working tree as a bacio repo, returning it as a Board. A Board with an empty
+// Prefix means the user cancelled the dialog. The picked folder may sit
+// anywhere inside the repo — git.Detect walks up to the working-tree root.
+func (b *BoardService) AddRepository() (Board, error) {
+	path, err := application.Get().Dialog.OpenFile().
+		CanChooseDirectories(true).
+		CanChooseFiles(false).
+		SetTitle("Add Repository — pick a git working tree").
+		PromptForSingleSelection()
+	if err != nil {
+		return Board{}, err
+	}
+	if path == "" {
+		return Board{}, nil // dialog cancelled
+	}
+	info, err := git.Detect(path)
+	if err != nil {
+		return Board{}, fmt.Errorf("%q is not inside a git repository", path)
+	}
+	ctx := context.Background()
+	repo, _, err := b.client.EnsureRepo(ctx, info)
+	if err != nil {
+		return Board{}, err
+	}
+	issues, err := b.client.ListIssues(ctx, client.IssueFilter{Repo: repo})
+	if err != nil {
+		return Board{}, err
+	}
+	return Board{
+		Prefix:      repo.Prefix,
+		Name:        repo.Name,
+		IssueCount:  len(issues),
+		SyncEnabled: repoSyncEnabled(repo.Path),
+	}, nil
 }
 
 // ListColumns returns the kanban columns — bacio's issue states, in order.

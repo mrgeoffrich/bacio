@@ -94,6 +94,7 @@ export class Board {
     "prefix": string;
     "name": string;
     "issueCount": number;
+    "syncEnabled": boolean;
 
     /** Creates a new Board instance. */
     constructor($$source: Partial<Board> = {}) {
@@ -105,6 +106,9 @@ export class Board {
         }
         if (!("issueCount" in $$source)) {
             this["issueCount"] = 0;
+        }
+        if (!("syncEnabled" in $$source)) {
+            this["syncEnabled"] = false;
         }
 
         Object.assign(this, $$source);
@@ -389,6 +393,213 @@ export class DocSummary {
 }
 
 /**
+ * FeatureDetail is one feature with its description and linked issues — the
+ * payload for the desktop feature detail pane.
+ */
+export class FeatureDetail {
+    "slug": string;
+    "title": string;
+    "description": string;
+    "createdAt": time$0.Time;
+    "updatedAt": time$0.Time;
+    "issues": FeatureLinkedIssue[];
+
+    /** Creates a new FeatureDetail instance. */
+    constructor($$source: Partial<FeatureDetail> = {}) {
+        if (!("slug" in $$source)) {
+            this["slug"] = "";
+        }
+        if (!("title" in $$source)) {
+            this["title"] = "";
+        }
+        if (!("description" in $$source)) {
+            this["description"] = "";
+        }
+        if (!("createdAt" in $$source)) {
+            this["createdAt"] = null;
+        }
+        if (!("updatedAt" in $$source)) {
+            this["updatedAt"] = null;
+        }
+        if (!("issues" in $$source)) {
+            this["issues"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new FeatureDetail instance from a string or object.
+     */
+    static createFrom($$source: any = {}): FeatureDetail {
+        const $$createField5_0 = $$createType6;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("issues" in $$parsedSource) {
+            $$parsedSource["issues"] = $$createField5_0($$parsedSource["issues"]);
+        }
+        return new FeatureDetail($$parsedSource as Partial<FeatureDetail>);
+    }
+}
+
+/**
+ * FeatureLinkedIssue is one issue grouped under a feature, for the detail pane.
+ */
+export class FeatureLinkedIssue {
+    "key": string;
+    "title": string;
+    "state": string;
+    "stateLabel": string;
+
+    /** Creates a new FeatureLinkedIssue instance. */
+    constructor($$source: Partial<FeatureLinkedIssue> = {}) {
+        if (!("key" in $$source)) {
+            this["key"] = "";
+        }
+        if (!("title" in $$source)) {
+            this["title"] = "";
+        }
+        if (!("state" in $$source)) {
+            this["state"] = "";
+        }
+        if (!("stateLabel" in $$source)) {
+            this["stateLabel"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new FeatureLinkedIssue instance from a string or object.
+     */
+    static createFrom($$source: any = {}): FeatureLinkedIssue {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new FeatureLinkedIssue($$parsedSource as Partial<FeatureLinkedIssue>);
+    }
+}
+
+/**
+ * FeatureSummary is one feature, shaped for the desktop feature list.
+ */
+export class FeatureSummary {
+    "slug": string;
+    "title": string;
+    "updatedAt": time$0.Time;
+
+    /** Creates a new FeatureSummary instance. */
+    constructor($$source: Partial<FeatureSummary> = {}) {
+        if (!("slug" in $$source)) {
+            this["slug"] = "";
+        }
+        if (!("title" in $$source)) {
+            this["title"] = "";
+        }
+        if (!("updatedAt" in $$source)) {
+            this["updatedAt"] = null;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new FeatureSummary instance from a string or object.
+     */
+    static createFrom($$source: any = {}): FeatureSummary {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new FeatureSummary($$parsedSource as Partial<FeatureSummary>);
+    }
+}
+
+/**
+ * HistoryEntryDTO is one audit-log row, shaped for the desktop history table.
+ */
+export class HistoryEntryDTO {
+    "id": number;
+    "actor": string;
+    "op": string;
+    "kind": string;
+    "targetLabel": string;
+    "details": string;
+    "createdAt": time$0.Time;
+
+    /** Creates a new HistoryEntryDTO instance. */
+    constructor($$source: Partial<HistoryEntryDTO> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = 0;
+        }
+        if (!("actor" in $$source)) {
+            this["actor"] = "";
+        }
+        if (!("op" in $$source)) {
+            this["op"] = "";
+        }
+        if (!("kind" in $$source)) {
+            this["kind"] = "";
+        }
+        if (!("targetLabel" in $$source)) {
+            this["targetLabel"] = "";
+        }
+        if (!("details" in $$source)) {
+            this["details"] = "";
+        }
+        if (!("createdAt" in $$source)) {
+            this["createdAt"] = null;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new HistoryEntryDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): HistoryEntryDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new HistoryEntryDTO($$parsedSource as Partial<HistoryEntryDTO>);
+    }
+}
+
+/**
+ * HistoryPage is one page of the audit log. Page is 0-based; HasMore reports
+ * whether a further page exists, so the frontend can drive Prev/Next without a
+ * separate total-count query.
+ */
+export class HistoryPage {
+    "entries": HistoryEntryDTO[];
+    "page": number;
+    "pageSize": number;
+    "hasMore": boolean;
+
+    /** Creates a new HistoryPage instance. */
+    constructor($$source: Partial<HistoryPage> = {}) {
+        if (!("entries" in $$source)) {
+            this["entries"] = [];
+        }
+        if (!("page" in $$source)) {
+            this["page"] = 0;
+        }
+        if (!("pageSize" in $$source)) {
+            this["pageSize"] = 0;
+        }
+        if (!("hasMore" in $$source)) {
+            this["hasMore"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new HistoryPage instance from a string or object.
+     */
+    static createFrom($$source: any = {}): HistoryPage {
+        const $$createField0_0 = $$createType8;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("entries" in $$parsedSource) {
+            $$parsedSource["entries"] = $$createField0_0($$parsedSource["entries"]);
+        }
+        return new HistoryPage($$parsedSource as Partial<HistoryPage>);
+    }
+}
+
+/**
  * IssueDetail is the issue-drawer payload for a single issue.
  */
 export class IssueDetail {
@@ -445,8 +656,8 @@ export class IssueDetail {
     static createFrom($$source: any = {}): IssueDetail {
         const $$createField5_0 = $$createType4;
         const $$createField6_0 = $$createType4;
-        const $$createField8_0 = $$createType6;
-        const $$createField9_0 = $$createType8;
+        const $$createField8_0 = $$createType10;
+        const $$createField9_0 = $$createType12;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField5_0($$parsedSource["tags"]);
@@ -494,7 +705,11 @@ const $$createType1 = $Create.Array($$createType0);
 const $$createType2 = DispatchDTO.createFrom;
 const $$createType3 = $Create.Array($$createType2);
 const $$createType4 = $Create.Array($Create.Any);
-const $$createType5 = CommentDTO.createFrom;
+const $$createType5 = FeatureLinkedIssue.createFrom;
 const $$createType6 = $Create.Array($$createType5);
-const $$createType7 = PRDTO.createFrom;
+const $$createType7 = HistoryEntryDTO.createFrom;
 const $$createType8 = $Create.Array($$createType7);
+const $$createType9 = CommentDTO.createFrom;
+const $$createType10 = $Create.Array($$createType9);
+const $$createType11 = PRDTO.createFrom;
+const $$createType12 = $Create.Array($$createType11);
