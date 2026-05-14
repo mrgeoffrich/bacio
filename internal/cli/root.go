@@ -83,6 +83,7 @@ func NewRoot() (*cobra.Command, func()) {
 		newAgentCmd(),
 		newHookCmd(),
 		newChannelCmd(),
+		newSettingsCmd(),
 	)
 	return root, stopProfiling
 }

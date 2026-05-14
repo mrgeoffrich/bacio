@@ -232,13 +232,19 @@ func (c *localClient) GetPromptTemplates(ctx context.Context) (map[string]string
 	return out, nil
 }
 
-func (c *localClient) SetPromptTemplate(ctx context.Context, mode, body string) error {
+func (c *localClient) SetPromptTemplate(ctx context.Context, mode, body string, dryRun bool) error {
 	m, err := model.ParseDispatchMode(mode)
 	if err != nil {
 		return err
 	}
 	if m == "" {
 		return fmt.Errorf("prompt template requires a dispatch mode")
+	}
+	if dryRun {
+		// Validate the body at the store boundary, then stop before the
+		// write — same shape as every other --dry-run mutation.
+		_, err := c.store.ValidatePromptTemplate(m, body)
+		return err
 	}
 	if err := c.store.SetPromptTemplate(m, body); err != nil {
 		return err

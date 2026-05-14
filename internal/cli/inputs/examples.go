@@ -160,4 +160,12 @@ var (
 		Prefix:  "MINI",
 		Confirm: "MINI",
 	}
+
+	ExampleSettingsTemplateSet = SettingsTemplateSetInput{
+		Mode: "review",
+		Body: "Review {{issue_id}} ({{issue_title}}): check correctness, tests, and the acceptance criteria. Report findings — don't change code.",
+	}
+	ExampleSettingsTemplateReset = SettingsTemplateResetInput{
+		Mode: "review",
+	}
 )

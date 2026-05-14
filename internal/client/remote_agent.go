@@ -91,6 +91,6 @@ func (c *remoteClient) GetPromptTemplates(ctx context.Context) (map[string]strin
 	return nil, remoteAgentNotSupported("prompt-templates")
 }
 
-func (c *remoteClient) SetPromptTemplate(ctx context.Context, mode, body string) error {
+func (c *remoteClient) SetPromptTemplate(ctx context.Context, mode, body string, dryRun bool) error {
 	return remoteAgentNotSupported("prompt-templates")
 }

@@ -55,12 +55,14 @@ job** — one of `plan`, `implement`, `review`, `ship`, `fix_review` (or
 
 Each stage has a **prompt template**: the instruction text, with
 `{{token}}` placeholders. The shipped defaults live in
-`model.DefaultPromptTemplate(mode)`; users override them per-stage from
-the desktop app's **Settings panel**, persisted globally in the
-`app_settings` KV table (`prompt_template.<mode>`). Supported
-placeholders are `model.PromptTemplateTokens` — `{{issue_id}}`,
-`{{issue_title}}`, `{{repo_prefix}}`; an unknown `{{...}}` token is left
-verbatim rather than failing the dispatch.
+`model.DefaultPromptTemplate(mode)`; users override them per-stage
+either from the desktop app's **Settings panel** or from the CLI
+(`bacio settings template list / show / set / reset` — `internal/cli/settings.go`),
+persisted globally in the `app_settings` KV table
+(`prompt_template.<mode>`). Supported placeholders are
+`model.PromptTemplateTokens` — `{{issue_id}}`, `{{issue_title}}`,
+`{{repo_prefix}}`; an unknown `{{...}}` token is left verbatim rather
+than failing the dispatch.
 
 At dispatch time the payload is assembled by
 `model.ComposeDispatchPayload(template, vars, note)`: the resolved

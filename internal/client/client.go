@@ -219,15 +219,16 @@ type Client interface {
 	// screen needs. Local-only in v1.
 	RepoDispatches(ctx context.Context, repo *model.Repo) ([]*model.AgentDispatch, error)
 
-	// ----- Prompt templates (local-only; desktop Settings panel) -----
+	// ----- Prompt templates (local-only; `bacio settings template`) -----
 	// GetPromptTemplates returns the resolved dispatch prompt template
 	// (custom override, or the built-in default) for every dispatch
 	// stage, keyed by mode string. SetPromptTemplate stores a custom
 	// template for one stage; an empty body clears the override and
-	// reverts that stage to its default. Local-only — the remote
+	// reverts that stage to its default. With dryRun set it validates
+	// the mode and body but writes nothing. Local-only — the remote
 	// backend returns ErrLocalOnly.
 	GetPromptTemplates(ctx context.Context) (map[string]string, error)
-	SetPromptTemplate(ctx context.Context, mode, body string) error
+	SetPromptTemplate(ctx context.Context, mode, body string, dryRun bool) error
 }
 
 // AgentSessionFilter mirrors store.AgentSessionFilter; the wrapper lets

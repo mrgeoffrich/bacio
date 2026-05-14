@@ -53,18 +53,26 @@ func (s *Store) GetPromptTemplate(mode model.DispatchMode) (string, error) {
 	return v, nil
 }
 
+// ValidatePromptTemplate runs the same mode + body checks as
+// SetPromptTemplate without writing — the --dry-run path. It returns the
+// cleaned body so callers projecting a dry-run result see exactly what a
+// real call would have stored.
+func (s *Store) ValidatePromptTemplate(mode model.DispatchMode, body string) (string, error) {
+	if _, err := model.ParseDispatchMode(string(mode)); err != nil {
+		return "", err
+	}
+	if mode == "" {
+		return "", errors.New("prompt template requires a dispatch mode")
+	}
+	return ValidateBody(body, "prompt template", false)
+}
+
 // SetPromptTemplate stores a custom dispatch prompt template for a
 // stage. An empty body clears the override — GetPromptTemplate then
 // falls back to the built-in default. The body is validated as
 // multi-line free text, same as a document body.
 func (s *Store) SetPromptTemplate(mode model.DispatchMode, body string) error {
-	if _, err := model.ParseDispatchMode(string(mode)); err != nil {
-		return err
-	}
-	if mode == "" {
-		return errors.New("prompt template requires a dispatch mode")
-	}
-	clean, err := ValidateBody(body, "prompt template", false)
+	clean, err := s.ValidatePromptTemplate(mode, body)
 	if err != nil {
 		return err
 	}

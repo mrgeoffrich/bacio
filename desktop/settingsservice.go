@@ -85,7 +85,7 @@ func (s *SettingsService) ListPromptTemplates() ([]PromptTemplateDTO, error) {
 // built-in default.
 func (s *SettingsService) SavePromptTemplate(mode, body string) (PromptTemplateDTO, error) {
 	ctx := context.Background()
-	if err := s.client.SetPromptTemplate(ctx, mode, body); err != nil {
+	if err := s.client.SetPromptTemplate(ctx, mode, body, false); err != nil {
 		return PromptTemplateDTO{}, err
 	}
 	current, err := s.client.GetPromptTemplates(ctx)
