@@ -61,37 +61,27 @@ bacio tracks live agent sessions in a local SQLite registry (never synced) so yo
 
 ### Pick your identity (once per repo)
 
-At session start, before any other bacio call:
+**If bacio's hooks are installed** (`bacio install-hooks` — they usually are), you don't have to do anything. The `SessionStart` hook mints a persistent identity, writes it to `.bacio/agent` (and gitignores `.bacio/` for you), and registers your session — all before your first turn. `cat .bacio/agent` if you want to know your slug.
+
+**Only if hooks are NOT installed**, do it by hand at session start, before any other bacio call:
 
 1. Look for `.bacio/agent` in the repo root. If it exists, read the single-line slug; skip ahead to **Register the session**.
-2. Otherwise, generate a slug of the form `<adjective>-<animal>@<harness>.<hostname>`:
-   - `adjective` — pick at random from common English adjectives (e.g. `cheerful`, `quiet`, `swift`, `bold`, `clever`).
-   - `animal` — pick at random from common animals (e.g. `otter`, `gorilla`, `panda`, `falcon`, `lynx`).
-   - `harness` — your harness name (`claude` for Claude Code).
-   - `hostname` — `hostname -s` on Unix, `%COMPUTERNAME%` on Windows.
-   - Example: `cheerful-otter@claude.shiny`
-3. Register with `--new`:
+2. Otherwise, generate a slug of the form `<adjective>-<animal>@<harness>.<hostname>` — e.g. `cheerful-otter@claude.shiny` (`harness` is `claude` for Claude Code; `hostname` is `hostname -s` on Unix, `%COMPUTERNAME%` on Windows) — and register it with `--new`:
    ```bash
    bacio agent register --user <your-name> --agent <slug> --new
    ```
-4. If bacio errors with `agent name "<slug>" already taken`, your random slug clashed with another agent's. Pick a different adjective/animal and retry from step 3 — the host suffix keeps cross-machine identities apart, the retry handles same-machine clashes.
-5. On success, write the slug to `.bacio/agent` (the file should contain just the slug — no surrounding quotes, trailing whitespace is tolerated). Make sure `.bacio/agent` is gitignored — it's per-machine identity, not project state.
-
-**On subsequent sessions in the same repo**, step 1 short-circuits the generation/clash loop. Call `register` *without* `--new`:
-
-```bash
-bacio agent register --user <your-name> --agent "$(cat .bacio/agent)"
-```
-
-Re-registering is idempotent: bacio refreshes `last_seen_at` and re-links the session to the existing identity row.
+3. If bacio errors with `agent name "<slug>" already taken`, your random slug clashed with another agent's. Reroll the adjective/animal and retry from step 2.
+4. On success, write the slug to `.bacio/agent` (just the slug, one line) and make sure `.bacio/` is gitignored — it's per-machine identity, not project state.
 
 ### Register the session
 
+With hooks installed, this is automatic. **Without** them, register by hand:
+
 ```bash
 bacio agent register --user <your-name> --agent "$(cat .bacio/agent)"
 ```
 
-The session id is auto-read from `$CLAUDE_CODE_SESSION_ID`. If your harness doesn't set that env var, pass `--session <id>` explicitly. `--model`, `--mode`, and `--branch` are optional but useful — they default to whatever you (or detection) supplies.
+Re-registering is idempotent: bacio refreshes `last_seen_at` and re-links the session to the existing identity row. The session id is auto-read from `$CLAUDE_CODE_SESSION_ID`; if your harness doesn't set that env var, pass `--session <id>` explicitly. `--model`, `--mode`, and `--branch` are optional but useful — they default to whatever you (or detection) supplies.
 
 **When you start focused work on an issue — claim it:**
 
@@ -617,7 +607,9 @@ An agent picks dispatches up two ways:
   created. `bacio install-channel --yes` registers the channel in the
   repo's `.mcp.json` and prints the `claude` launch command (channels are
   a research preview — the session opts in with
-  `--dangerously-load-development-channels server:bacio`).
+  `--dangerously-load-development-channels server:bacio`). `bacio agent
+  list` shows a `CHANNEL` column (`live` / `-`) so you can see which
+  sessions have push delivery wired up.
 
 Either way, acknowledge each handled dispatch with `bacio agent ack <id>
 --note "..."` (or the channel's `reply` tool). Acked/cancelled dispatches
@@ -629,19 +621,21 @@ drop out of `bacio agent inbox` and are pruned after 60 days.
 `.claude/settings.json` (it prints the plan and prompts first — pass
 `--yes` to accept non-interactively):
 
-| Event            | What `bacio hook <event>` does                                |
-| ---------------- | ------------------------------------------------------------- |
-| SessionStart     | auto-registers the session, injects assigned issues + claims  |
-| UserPromptSubmit | heartbeats; nudges on open claims; drains pending dispatches  |
-| Stop             | heartbeats                                                    |
-| SessionEnd       | ends the session, auto-releasing every open claim             |
+| Event            | What `bacio hook <event>` does                                       |
+| ---------------- | -------------------------------------------------------------------- |
+| SessionStart     | mints `.bacio/agent` if absent, registers the session, injects assigned issues + claims |
+| UserPromptSubmit | heartbeats; nudges on open claims; drains pending dispatches         |
+| Stop             | heartbeats                                                           |
+| SessionEnd       | ends the session, auto-releasing every open claim                    |
 
 With hooks installed, an agent no longer has to call `bacio agent register`
-/ `heartbeat` / `end` by hand — the registry stays in sync automatically.
-The hook reads the identity slug from `.bacio/agent` (still generate and
-persist it per "Pick your identity"). `bacio hook` and `bacio channel` are
-harness-integration shims, like `bacio tui`: they don't follow the six
-agent-CLI principles and aren't in `bacio schema`.
+/ `heartbeat` / `end` by hand — the registry stays in sync automatically,
+and the SessionStart hook mints and persists `.bacio/agent` itself (you
+don't run the "Pick your identity" steps). Every hook also stamps the
+session's `claude_pid` and links it to a live `bacio channel` for the same
+process, so `bacio agent list` can show the `CHANNEL` column. `bacio hook`
+and `bacio channel` are harness-integration shims, like `bacio tui`: they
+don't follow the six agent-CLI principles and aren't in `bacio schema`.
 
 **Example agent loop (first session in a repo):**
 ```bash

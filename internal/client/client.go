@@ -176,6 +176,23 @@ type Client interface {
 	ReleaseAgent(ctx context.Context, repo *model.Repo, in inputs.AgentReleaseInput, dryRun bool) (*model.AgentClaim, error)
 	ListAgentSessions(ctx context.Context, f AgentSessionFilter) ([]*model.AgentSession, error)
 	ShowAgentSession(ctx context.Context, sessionID string) (*AgentSessionView, error)
+	// EnsureAgentIdentity mints a fresh persistent agent identity (a
+	// random slug, retried against the UNIQUE constraint until it
+	// sticks) and adopts it as this client's audit actor. It's the
+	// `bacio hook` session-start path for a repo that has no
+	// .bacio/agent yet — the caller persists the returned slug to disk.
+	// Does NOT create a session row. Local-only.
+	EnsureAgentIdentity(ctx context.Context, repo *model.Repo) (string, error)
+	// UpsertAgentChannel records (or heartbeats) a live `bacio channel`
+	// subprocess, keyed on the `claude` pid it descends from. agentName
+	// is best-effort: an unknown/empty name just leaves the row's
+	// agent_id NULL. Local-only — called from the channel poll loop.
+	UpsertAgentChannel(ctx context.Context, repo *model.Repo, agentName, host string, claudePID, channelPID int64) error
+	// LinkSessionChannel stamps claude_pid onto a session and lights up
+	// channel_seen_at when a live agent_channels row matches (host,
+	// claude_pid). The `bacio hook` side of the channel<->session join.
+	// Local-only.
+	LinkSessionChannel(ctx context.Context, sessionID string, claudePID int64, host string) error
 
 	// ----- Agent dispatch queue (local-only in v1) -----
 	// Dispatches are supervisor->agent work items. CreateDispatch

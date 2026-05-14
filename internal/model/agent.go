@@ -2,6 +2,8 @@ package model
 
 import (
 	"fmt"
+	"math/rand/v2"
+	"os"
 	"strings"
 	"time"
 )
@@ -44,6 +46,36 @@ type AgentSession struct {
 	LastSeenAt     time.Time  `json:"last_seen_at"`
 	EndedAt        *time.Time `json:"ended_at,omitempty"`
 	EndReason      string     `json:"end_reason,omitempty"`
+	// ClaudePID is the pid of the `claude` process driving this session,
+	// resolved by the `bacio hook` handlers. ChannelSeenAt is bumped
+	// whenever a hook finds a live `bacio channel` row keyed on the same
+	// (host, claude_pid) — nil/zero when no channel has ever been linked.
+	ClaudePID     int64      `json:"claude_pid,omitempty"`
+	ChannelSeenAt *time.Time `json:"channel_seen_at,omitempty"`
+}
+
+// AgentChannel is one live `bacio channel` subprocess. Claude Code never
+// hands a channel its session id, so the channel keys itself on the
+// `claude` process it descends from; the `bacio hook` handlers join
+// (Host, ClaudePID) back onto a session. Pure liveness state — see the
+// agent_channels schema comment.
+type AgentChannel struct {
+	ID         int64     `json:"id"`
+	RepoID     int64     `json:"repo_id"`
+	AgentID    *int64    `json:"agent_id,omitempty"`
+	Host       string    `json:"host,omitempty"`
+	ClaudePID  int64     `json:"claude_pid"`
+	ChannelPID int64     `json:"channel_pid,omitempty"`
+	StartedAt  time.Time `json:"started_at"`
+	LastSeenAt time.Time `json:"last_seen_at"`
+}
+
+// ChannelLive reports whether a channel's heartbeat is fresh enough to
+// count as live, reusing AgentLivenessThreshold — a channel that polls
+// every few seconds refreshes well inside the window, so a longer gap
+// means the channel process is gone. now should be UTC.
+func (ch *AgentChannel) ChannelLive(now time.Time) bool {
+	return ch != nil && now.Sub(ch.LastSeenAt) <= AgentLivenessThreshold
 }
 
 // AgentClaim is a "this agent is focused on this issue" intent
@@ -235,4 +267,46 @@ func SessionLiveness(s *AgentSession, now time.Time) string {
 		return "active"
 	}
 	return "idle"
+}
+
+// slug word pools for GenerateAgentSlug. Kept deliberately generic and
+// G-rated; the pools just need enough combinations that two agents on
+// the same host rarely collide (the store's UNIQUE on agents.name plus
+// the EnsureAgentIdentity retry loop handle the rare clash that slips
+// through).
+var slugAdjectives = []string{
+	"cheerful", "quiet", "swift", "bold", "clever", "calm", "brave", "bright",
+	"eager", "gentle", "happy", "jolly", "keen", "lively", "merry", "nimble",
+	"polite", "proud", "ready", "shiny", "spry", "sturdy", "sunny", "tidy",
+	"witty", "zesty", "amber", "azure", "crisp", "dapper", "fleet", "frosty",
+	"golden", "humble", "ivory", "lucky", "mellow", "noble", "plucky", "rapid",
+	"rugged", "scarlet", "silent", "smooth", "snappy", "stout", "trusty", "vivid",
+}
+
+var slugAnimals = []string{
+	"otter", "gorilla", "panda", "falcon", "lynx", "badger", "heron", "marten",
+	"beaver", "bison", "cobra", "dingo", "eagle", "ferret", "gecko", "hawk",
+	"ibex", "jaguar", "koala", "lemur", "mole", "newt", "owl", "puffin",
+	"quail", "raven", "seal", "tapir", "urchin", "viper", "walrus", "yak",
+	"zebra", "bobcat", "crane", "dolphin", "egret", "finch", "gibbon", "hare",
+	"impala", "jackal", "kestrel", "leopard", "manta", "narwhal", "osprey", "weasel",
+}
+
+// GenerateAgentSlug mints a fresh identity slug of the SKILL.md shape:
+// <adjective>-<animal>@claude.<short-hostname>. The host suffix keeps
+// cross-machine identities apart; the adjective-animal pair is the
+// random part. Callers MUST treat the result as a candidate — the
+// store's UNIQUE constraint is the real collision guard.
+func GenerateAgentSlug() string {
+	adj := slugAdjectives[rand.IntN(len(slugAdjectives))]
+	animal := slugAnimals[rand.IntN(len(slugAnimals))]
+	host := "local"
+	if hn, err := os.Hostname(); err == nil && hn != "" {
+		// Short hostname: first label only ("shiny.local" -> "shiny").
+		if i := strings.IndexByte(hn, '.'); i > 0 {
+			hn = hn[:i]
+		}
+		host = hn
+	}
+	return fmt.Sprintf("%s-%s@claude.%s", adj, animal, host)
 }

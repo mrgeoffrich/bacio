@@ -15,11 +15,12 @@ type ackRec struct {
 }
 
 // fakeSource is a deterministic Source: Drain hands back successive
-// pre-canned batches, Ack just records the call.
+// pre-canned batches, Ack just records the call, Heartbeat counts.
 type fakeSource struct {
-	mu      sync.Mutex
-	batches [][]Event
-	acked   []ackRec
+	mu         sync.Mutex
+	batches    [][]Event
+	acked      []ackRec
+	heartbeats int
 }
 
 func (f *fakeSource) Drain(ctx context.Context) ([]Event, error) {
@@ -37,6 +38,13 @@ func (f *fakeSource) Ack(ctx context.Context, id int64, note string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.acked = append(f.acked, ackRec{id, note})
+	return nil
+}
+
+func (f *fakeSource) Heartbeat(ctx context.Context) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.heartbeats++
 	return nil
 }
 

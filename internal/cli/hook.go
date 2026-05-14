@@ -146,7 +146,42 @@ func loadHookContext() (*hookContext, error) {
 		_ = c.Close()
 		return nil, err
 	}
+	// No persistent identity yet — mint one and persist it to
+	// .bacio/agent. Every session in a bacio repo gets an identity: the
+	// channel subprocess and the sibling hooks all key off this file,
+	// and minting it here (rather than leaving it to the agent's first
+	// turn) closes the window where a freshly-spawned channel froze an
+	// empty identity. Best-effort: a failure just leaves the session
+	// identity-less, the pre-existing behaviour — it never fails the hook.
+	if slug == "" {
+		if gen, gerr := c.EnsureAgentIdentity(context.Background(), repo); gerr != nil {
+			fmt.Fprintln(os.Stderr, "bacio hook: mint agent identity:", gerr)
+		} else if gen != "" {
+			if werr := writeAgentSlug(info.Root, gen); werr != nil {
+				fmt.Fprintln(os.Stderr, "bacio hook: persist .bacio/agent:", werr)
+			}
+			// EnsureAgentIdentity already adopted gen as the client's
+			// audit actor; mirror it onto the hook context.
+			slug, act = gen, gen
+		}
+	}
 	return &hookContext{in: in, c: c, repo: repo, slug: slug, actor: act}, nil
+}
+
+// linkChannel stamps the session's claude_pid and lights up
+// channel_seen_at when a live `bacio channel` is registered for the
+// same (host, claude_pid). It's the hook side of the channel<->session
+// join: the channel can't know its session id, but both it and this
+// hook descend from the same `claude` process. Best-effort — a problem
+// here is logged, never fails the hook. A claude_pid of 0 (no `claude`
+// ancestor found) is passed through; the store treats it as "no
+// channel" rather than erroring.
+func (h *hookContext) linkChannel(sessionID string) {
+	claudePID := int64(findClaudeAncestor(os.Getpid()))
+	host, _ := os.Hostname()
+	if err := h.c.LinkSessionChannel(context.Background(), sessionID, claudePID, host); err != nil {
+		fmt.Fprintln(os.Stderr, "bacio hook: link channel:", err)
+	}
 }
 
 // readAgentSlug reads the persistent identity slug from
@@ -159,6 +194,24 @@ func readAgentSlug(root string) string {
 		return ""
 	}
 	return strings.TrimSpace(string(b))
+}
+
+// writeAgentSlug persists the identity slug to <root>/.bacio/agent,
+// creating .bacio/ if needed. On first write it also drops a
+// .bacio/.gitignore ('*') so the per-machine identity never lands in
+// version control — this used to be a manual step the SKILL.md asked
+// the agent to do. Best-effort: the caller logs the error and carries
+// on (a hook must never fail the session over housekeeping).
+func writeAgentSlug(root, slug string) error {
+	dir := filepath.Join(root, ".bacio")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	gitignore := filepath.Join(dir, ".gitignore")
+	if _, err := os.Stat(gitignore); errors.Is(err, os.ErrNotExist) {
+		_ = os.WriteFile(gitignore, []byte("*\n"), 0o644) // best-effort
+	}
+	return os.WriteFile(filepath.Join(dir, "agent"), []byte(slug+"\n"), 0o644)
 }
 
 // ---------- session-start ----------
@@ -195,6 +248,7 @@ func hookSessionStartCmd() *cobra.Command {
 				fmt.Fprintln(os.Stderr, "bacio hook session-start: register:", err)
 				return nil
 			}
+			h.linkChannel(sess.SessionID)
 			emitSessionStartContext(h, sess)
 			emitDrainedDispatches(h, sess.SessionID)
 			return nil
@@ -257,6 +311,7 @@ func hookUserPromptSubmitCmd() *cobra.Command {
 			if sess == nil {
 				return nil
 			}
+			h.linkChannel(sess.SessionID)
 			emitClaimNudge(h, sess)
 			emitDrainedDispatches(h, sess.SessionID)
 			return nil
@@ -336,7 +391,9 @@ func hookStopCmd() *cobra.Command {
 				return nil
 			}
 			defer h.close()
-			h.heartbeatOrRegister()
+			if sess := h.heartbeatOrRegister(); sess != nil {
+				h.linkChannel(sess.SessionID)
+			}
 			return nil
 		},
 	}

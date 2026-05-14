@@ -719,7 +719,7 @@ func emitAgentSessionTable(sessions []*model.AgentSession) error {
 		return nil
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "SESSION\tAGENT\tACTOR\tREPO\tMODEL\tBRANCH\tLAST-SEEN\tSTATUS")
+	fmt.Fprintln(w, "SESSION\tAGENT\tACTOR\tREPO\tMODEL\tBRANCH\tLAST-SEEN\tCHANNEL\tSTATUS")
 	now := time.Now().UTC()
 	for _, s := range sessions {
 		status := "alive"
@@ -727,11 +727,26 @@ func emitAgentSessionTable(sessions []*model.AgentSession) error {
 			status = "ended:" + s.EndReason
 		}
 		seen := humanAgo(now.Sub(s.LastSeenAt.UTC()))
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			shortID(s.SessionID), dashIfEmpty(s.AgentName), s.Actor, s.RepoPrefix,
-			dashIfEmpty(s.Model), dashIfEmpty(s.Branch), seen, status)
+			dashIfEmpty(s.Model), dashIfEmpty(s.Branch), seen, channelStatus(s, now), status)
 	}
 	return w.Flush()
+}
+
+// channelStatus reports whether a session currently has a live `bacio
+// channel` behind it — "live" when the hooks last saw a fresh
+// agent_channels row for the session's (host, claude_pid), "-" when
+// none was ever linked or its heartbeat went stale. A stale link reads
+// the same as none: the channel process is gone either way.
+func channelStatus(s *model.AgentSession, now time.Time) string {
+	if s.ChannelSeenAt == nil {
+		return "-"
+	}
+	if now.Sub(s.ChannelSeenAt.UTC()) <= model.AgentLivenessThreshold {
+		return "live"
+	}
+	return "-"
 }
 
 func emitAgentSessionDetail(view *client.AgentSessionView) error {
@@ -744,6 +759,11 @@ func emitAgentSessionDetail(view *client.AgentSessionView) error {
 	fmt.Fprintf(os.Stdout, "Mode:     %s\n", dashIfEmpty(s.PermissionMode))
 	fmt.Fprintf(os.Stdout, "Host:     %s\n", dashIfEmpty(s.Host))
 	fmt.Fprintf(os.Stdout, "Branch:   %s\n", dashIfEmpty(s.Branch))
+	if s.ClaudePID != 0 {
+		fmt.Fprintf(os.Stdout, "Channel:  %s (claude_pid=%d)\n", channelStatus(s, time.Now().UTC()), s.ClaudePID)
+	} else {
+		fmt.Fprintf(os.Stdout, "Channel:  %s\n", channelStatus(s, time.Now().UTC()))
+	}
 	fmt.Fprintf(os.Stdout, "Started:  %s\n", s.StartedAt.Local().Format("2006-01-02 15:04:05"))
 	fmt.Fprintf(os.Stdout, "LastSeen: %s\n", s.LastSeenAt.Local().Format("2006-01-02 15:04:05"))
 	if s.EndedAt != nil {

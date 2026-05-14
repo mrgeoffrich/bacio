@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"syscall"
 
@@ -107,7 +108,23 @@ to stderr.`,
 				}
 			}
 
-			src := &channelSource{c: c, repo: repo, agentName: agentName}
+			dumpChannelDiagnostics(logf, projectDir, info, agentName, repo)
+
+			repoRoot := ""
+			if info != nil {
+				repoRoot = info.Root
+			}
+			host, _ := os.Hostname()
+			claudePID := int64(findClaudeAncestor(os.Getpid()))
+
+			src := &channelSource{
+				c:          c,
+				repo:       repo,
+				repoRoot:   repoRoot,
+				host:       host,
+				claudePID:  claudePID,
+				channelPID: int64(os.Getpid()),
+			}
 			srv := channel.New(src, "bacio", os.Stdin, os.Stdout, logf)
 
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -117,19 +134,38 @@ to stderr.`,
 	}
 }
 
-// channelSource adapts the bacio dispatch queue to channel.Source,
-// scoped to a repo + agent identity (not a session id — the channel is
-// never told its session). A nil repo or empty agentName means the
-// channel couldn't scope itself: Drain returns nothing and the channel
-// runs idle. Ack still works regardless — it's keyed on dispatch id.
+// channelSource adapts the bacio dispatch queue to channel.Source. It
+// is NOT scoped to a session id — Claude Code never tells the channel
+// its session. Instead it holds the repo (stable for the process's
+// life) and the repo root, and re-reads the agent identity from
+// .bacio/agent on every call: that file is routinely written *after*
+// the channel subprocess is spawned (by the agent's first turn / the
+// session-start hook), so caching the identity once at startup froze an
+// empty identity for the whole session — the original delivery bug.
+//
+// claudePID is the `claude` process this channel descends from; it's
+// what the hooks join on to correlate this channel back to a session.
 type channelSource struct {
-	c         client.Client
-	repo      *model.Repo
-	agentName string
+	c          client.Client
+	repo       *model.Repo // stable for the channel's lifetime
+	repoRoot   string      // git root — .bacio/agent is re-read from here
+	host       string
+	claudePID  int64
+	channelPID int64
+}
+
+// identity re-reads .bacio/agent from the repo root. Empty when the
+// repo couldn't be resolved or the file doesn't exist yet — both
+// transient, both leave the channel running idle until they resolve.
+func (s *channelSource) identity() string {
+	if s.repoRoot == "" {
+		return ""
+	}
+	return readAgentSlug(s.repoRoot)
 }
 
 func (s *channelSource) Drain(ctx context.Context) ([]channel.Event, error) {
-	ds, err := s.c.DrainAgentDispatches(ctx, s.repo, s.agentName)
+	ds, err := s.c.DrainAgentDispatches(ctx, s.repo, s.identity())
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +182,63 @@ func (s *channelSource) Drain(ctx context.Context) ([]channel.Event, error) {
 	return out, nil
 }
 
+// Heartbeat records this channel as live in agent_channels every poll
+// tick. It keys on (host, claude_pid) — the hooks correlate a session
+// to a channel on exactly that pair — so it needs a repo and a resolved
+// claude_pid, but NOT an identity: an identity-less channel still
+// records presence (agent_id NULL) and the next tick fills the identity
+// in once .bacio/agent appears.
+func (s *channelSource) Heartbeat(ctx context.Context) error {
+	if s.repo == nil || s.claudePID == 0 {
+		return nil
+	}
+	return s.c.UpsertAgentChannel(ctx, s.repo, s.identity(), s.host, s.claudePID, s.channelPID)
+}
+
 func (s *channelSource) Ack(ctx context.Context, eventID int64, note string) error {
 	_, err := s.c.AckDispatch(ctx, inputs.AgentAckInput{ID: eventID, Note: note}, false)
 	return err
+}
+
+// dumpChannelDiagnostics logs everything the channel process can see at
+// startup: pid/ppid, process ancestry, the resolved project dir / git
+// root / agent identity / repo, and the full environment. It's a
+// discovery aid for wiring up session<->channel correlation — Claude
+// Code does NOT hand the channel its session id, so we need to know
+// exactly what IS reachable (notably: is the `claude` process a
+// walkable ancestor?). All of it goes to stderr, which Claude Code
+// surfaces in its MCP server logs.
+func dumpChannelDiagnostics(logf func(string, ...any), projectDir string, info *git.Info, agentName string, repo *model.Repo) {
+	logf("--- channel diagnostics ---")
+	logf("pid=%d ppid=%d", os.Getpid(), os.Getppid())
+	if cwd, err := os.Getwd(); err == nil {
+		logf("cwd=%s", cwd)
+	}
+	logf("CLAUDE_PROJECT_DIR=%q resolved projectDir=%q", os.Getenv("CLAUDE_PROJECT_DIR"), projectDir)
+	if info != nil {
+		logf("git root=%s remote=%q", info.Root, info.RemoteURL)
+	} else {
+		logf("git root=<unresolved>")
+	}
+	logf("agent identity (.bacio/agent)=%q", agentName)
+	if repo != nil {
+		logf("repo prefix=%s id=%d", repo.Prefix, repo.ID)
+	} else {
+		logf("repo=<unresolved>")
+	}
+	if claudePID := findClaudeAncestor(os.Getpid()); claudePID != 0 {
+		logf("resolved claude_pid=%d (nearest `claude` ancestor)", claudePID)
+	} else {
+		logf("resolved claude_pid=0 — no `claude` ancestor found; session<->channel correlation unavailable")
+	}
+	for _, line := range processAncestry(os.Getpid()) {
+		logf("ancestry: %s", line)
+	}
+	env := os.Environ()
+	sort.Strings(env)
+	logf("environ (%d vars):", len(env))
+	for _, kv := range env {
+		logf("  %s", kv)
+	}
+	logf("--- end channel diagnostics ---")
 }

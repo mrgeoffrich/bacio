@@ -201,6 +201,15 @@ CREATE TABLE IF NOT EXISTS agents (
 -- CLAUDE_CODE_SESSION_ID); `ended_at IS NULL` means "still alive".
 -- agent_id is the persistent identity (see `agents`); nullable so old
 -- sessions registered before the identity layer existed keep working.
+--
+-- claude_pid is the pid of the `claude` process driving this session,
+-- walked up the process tree by the `bacio hook` handlers. It's how a
+-- `bacio channel` subprocess (which is never told its session id) is
+-- correlated back to a session: the channel records the same claude_pid
+-- in agent_channels. channel_seen_at is bumped by the hooks whenever a
+-- live agent_channels row matches (host, claude_pid) — so it freshness-
+-- decays exactly like last_seen_at once the channel dies. Both stay at
+-- the defaults for sessions from before the channel-correlation layer.
 CREATE TABLE IF NOT EXISTS agent_sessions (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id      TEXT    NOT NULL UNIQUE,
@@ -214,7 +223,9 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
     started_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     last_seen_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     ended_at        DATETIME,
-    end_reason      TEXT    NOT NULL DEFAULT ''
+    end_reason      TEXT    NOT NULL DEFAULT '',
+    claude_pid      INTEGER NOT NULL DEFAULT 0,
+    channel_seen_at DATETIME
 );
 
 -- idx_agent_sessions_agent is created in migrate() so it works on databases
@@ -293,3 +304,27 @@ CREATE INDEX IF NOT EXISTS idx_dispatches_session
     ON agent_dispatches(target_session_id, status);
 CREATE INDEX IF NOT EXISTS idx_dispatches_repo
     ON agent_dispatches(repo_id, status);
+
+-- agent_channels records live `bacio channel` subprocesses. Claude Code
+-- never tells a channel its session id (only hooks get that), so a
+-- channel can't stamp an agent_sessions row directly. Instead it walks
+-- its process tree to the `claude` process and records that claude_pid
+-- here, heartbeating last_seen_at every poll tick. The `bacio hook`
+-- handlers — which DO know the session id and can walk to the same
+-- `claude` pid — join (host, claude_pid) back onto agent_sessions to
+-- light up channel_seen_at. Pure liveness state, no historical value:
+-- pruneAgentChannels drops rows whose heartbeat went stale, and a
+-- recycled claude_pid simply upserts over its predecessor's row.
+CREATE TABLE IF NOT EXISTS agent_channels (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    repo_id      INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+    agent_id     INTEGER REFERENCES agents(id) ON DELETE SET NULL,
+    host         TEXT    NOT NULL DEFAULT '',
+    claude_pid   INTEGER NOT NULL,
+    channel_pid  INTEGER NOT NULL DEFAULT 0,
+    started_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(host, claude_pid)
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_channels_repo ON agent_channels(repo_id);

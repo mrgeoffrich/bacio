@@ -40,6 +40,12 @@ type Source interface {
 	Drain(ctx context.Context) ([]Event, error)
 	// Ack records the agent's acknowledgement of an event (dispatch).
 	Ack(ctx context.Context, eventID int64, note string) error
+	// Heartbeat is called once per poll tick (and once immediately at
+	// startup) regardless of whether there's anything to drain. The
+	// bacio source uses it to record this channel's liveness so the
+	// hooks can correlate it back to a session. Errors are logged, not
+	// fatal — a channel that can't heartbeat still delivers.
+	Heartbeat(ctx context.Context) error
 }
 
 // Server speaks the channel protocol over a reader/writer pair (stdin
@@ -157,8 +163,10 @@ func (s *Server) handle(ctx context.Context, msg *rpcMessage) {
 	isRequest := len(msg.ID) > 0
 	switch msg.Method {
 	case "initialize":
+		s.logf("bacio channel: initialize received (params=%s) — MCP client connected", string(msg.Params))
 		s.reply(msg.ID, s.initializeResult(msg.Params))
 	case "notifications/initialized", "notifications/cancelled":
+		s.logf("bacio channel: %s received — handshake complete", msg.Method)
 		// no-op acknowledgement notifications
 	case "ping":
 		s.reply(msg.ID, map[string]any{})
@@ -257,15 +265,25 @@ func (s *Server) handleToolCall(ctx context.Context, msg *rpcMessage) {
 func (s *Server) poll(ctx context.Context) {
 	t := time.NewTicker(s.pollInterval)
 	defer t.Stop()
-	s.drainOnce(ctx) // push anything already queued without waiting a tick
+	s.tick(ctx) // heartbeat + push anything already queued, no initial wait
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			s.drainOnce(ctx)
+			s.tick(ctx)
 		}
 	}
+}
+
+// tick is one poll cycle: heartbeat (record liveness) then drain (push
+// queued work). Heartbeat runs every tick regardless of whether there's
+// anything to drain — it's how the channel stays correlatable.
+func (s *Server) tick(ctx context.Context) {
+	if err := s.src.Heartbeat(ctx); err != nil {
+		s.logf("bacio channel: heartbeat: %v", err)
+	}
+	s.drainOnce(ctx)
 }
 
 func (s *Server) drainOnce(ctx context.Context) {

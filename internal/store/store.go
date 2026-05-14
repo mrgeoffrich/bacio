@@ -65,6 +65,9 @@ func Open(path string) (*Store, error) {
 	if err := pruneDispatches(db, AgentDispatchRetention); err != nil {
 		fmt.Fprintln(os.Stderr, "bacio: warning: dispatch prune failed:", err)
 	}
+	if err := pruneAgentChannels(db); err != nil {
+		fmt.Fprintln(os.Stderr, "bacio: warning: agent-channel prune failed:", err)
+	}
 	return &Store{DB: db}, nil
 }
 
@@ -224,6 +227,27 @@ func migrate(db *sql.DB) error {
 	if !hasDispatchMode {
 		if _, err := db.Exec(`ALTER TABLE agent_dispatches ADD COLUMN mode TEXT NOT NULL DEFAULT ''`); err != nil {
 			return fmt.Errorf("add mode to agent_dispatches: %w", err)
+		}
+	}
+	// agent_sessions.claude_pid + channel_seen_at landed with the
+	// channel-correlation layer. agent_channels itself is created by
+	// schema.sql (CREATE TABLE IF NOT EXISTS, applied before migrate()).
+	hasClaudePID, err := columnExists(db, "agent_sessions", "claude_pid")
+	if err != nil {
+		return err
+	}
+	if !hasClaudePID {
+		if _, err := db.Exec(`ALTER TABLE agent_sessions ADD COLUMN claude_pid INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("add claude_pid to agent_sessions: %w", err)
+		}
+	}
+	hasChannelSeen, err := columnExists(db, "agent_sessions", "channel_seen_at")
+	if err != nil {
+		return err
+	}
+	if !hasChannelSeen {
+		if _, err := db.Exec(`ALTER TABLE agent_sessions ADD COLUMN channel_seen_at DATETIME`); err != nil {
+			return fmt.Errorf("add channel_seen_at to agent_sessions: %w", err)
 		}
 	}
 	return nil
