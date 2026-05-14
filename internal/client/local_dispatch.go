@@ -50,6 +50,9 @@ func (c *localClient) CreateDispatch(ctx context.Context, repo *model.Repo, in i
 		issueKey = iss.Key
 	}
 
+	mode := model.DispatchMode(in.Mode)
+	payload := model.ComposeDispatchPayload(mode, in.Message)
+
 	if dryRun {
 		return &model.AgentDispatch{
 			RepoID:          repo.ID,
@@ -59,7 +62,8 @@ func (c *localClient) CreateDispatch(ctx context.Context, repo *model.Repo, in i
 			TargetSessionID: in.TargetSession,
 			IssueID:         issueID,
 			IssueKey:        issueKey,
-			Payload:         in.Message,
+			Mode:            mode,
+			Payload:         payload,
 			Status:          model.DispatchPending,
 			CreatedBy:       c.actor,
 			CreatedAt:       time.Now().UTC(),
@@ -71,7 +75,8 @@ func (c *localClient) CreateDispatch(ctx context.Context, repo *model.Repo, in i
 		TargetAgentID:   agentID,
 		TargetSessionID: in.TargetSession,
 		IssueID:         issueID,
-		Payload:         in.Message,
+		Mode:            mode,
+		Payload:         payload,
 		CreatedBy:       c.actor,
 	})
 	if err != nil {
@@ -158,6 +163,13 @@ func (c *localClient) DrainDispatches(ctx context.Context, sessionID string) ([]
 		out = append(out, delivered)
 	}
 	return out, nil
+}
+
+func (c *localClient) RepoDispatches(ctx context.Context, repo *model.Repo) ([]*model.AgentDispatch, error) {
+	if repo == nil {
+		return nil, fmt.Errorf("RepoDispatches requires a repo")
+	}
+	return c.store.ListDispatches(store.DispatchFilter{RepoID: &repo.ID})
 }
 
 // dispatchTargetLabel picks the most specific label for audit rows:

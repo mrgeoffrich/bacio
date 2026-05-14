@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"errors"
@@ -29,8 +30,18 @@ var bacioHookEvents = []struct{ Event, Subcommand string }{
 // install-hooks replaces them in place rather than stacking duplicates.
 const bacioHookMarker = "bacio hook "
 
+// hookChange describes what install-hooks will do for one event:
+// "add" (no bacio hook there yet) or "update" (bacio already owns a
+// group that'll be replaced in place).
+type hookChange struct {
+	Event      string
+	Subcommand string
+	Action     string
+}
+
 func newInstallHooksCmd() *cobra.Command {
-	return &cobra.Command{
+	var assumeYes bool
+	cmd := &cobra.Command{
 		Use:   "install-hooks",
 		Short: "Install bacio's Claude Code hooks into the current repo",
 		Long: `Merge bacio's agent-supervision hooks into <repo-root>/.claude/settings.json.
@@ -48,6 +59,10 @@ The merge is non-destructive: existing hooks for other events -- and
 any non-bacio hooks on these four events -- are preserved. Re-running
 replaces bacio's own hook groups in place so command updates land.
 
+install-hooks prints the planned changes and asks for confirmation
+before writing. Pass --yes (-y) to skip the prompt and accept
+automatically -- needed when running non-interactively.
+
 Note: top-level keys in settings.json may be reordered, since the file
 is round-tripped through a JSON decode. Hook behaviour is unchanged.`,
 		Args: cobra.NoArgs,
@@ -64,33 +79,75 @@ is round-tripped through a JSON decode. Hook behaviour is unchanged.`,
 				return err
 			}
 			path := filepath.Join(info.Root, ".claude", "settings.json")
-			if err := mergeBacioHooks(path); err != nil {
+
+			top, changes, err := planBacioHooks(path)
+			if err != nil {
 				return err
 			}
-			return ok("installed bacio hooks (%d events) into %s", len(bacioHookEvents), path)
+
+			if !assumeYes {
+				printHookPlan(path, changes)
+				confirmed, err := confirmPrompt("Proceed?")
+				if err != nil {
+					return err
+				}
+				if !confirmed {
+					fmt.Fprintln(os.Stderr, "aborted — no changes made")
+					return nil
+				}
+			}
+
+			if err := applyBacioHooks(path, top); err != nil {
+				return err
+			}
+			return reportHookChanges(path, changes)
 		},
 	}
+	cmd.Flags().BoolVarP(&assumeYes, "yes", "y", false, "skip the confirmation prompt and accept the changes")
+	return cmd
 }
 
-// mergeBacioHooks reads .claude/settings.json (treating an absent file
-// as empty), merges bacio's hook groups into the "hooks" object, and
-// writes it back. Non-bacio content is preserved; bacio's own groups
-// are replaced in place so the merge is idempotent.
-func mergeBacioHooks(path string) error {
+// planBacioHooks reads .claude/settings.json (treating an absent file as
+// empty) and reports what applyBacioHooks would do — without writing.
+// Returns the parsed top-level object so the apply step doesn't re-read.
+func planBacioHooks(path string) (map[string]json.RawMessage, []hookChange, error) {
 	top := map[string]json.RawMessage{}
 	switch data, err := os.ReadFile(path); {
 	case err == nil:
 		if len(strings.TrimSpace(string(data))) > 0 {
 			if err := json.Unmarshal(data, &top); err != nil {
-				return fmt.Errorf("parse %s: %w", path, err)
+				return nil, nil, fmt.Errorf("parse %s: %w", path, err)
 			}
 		}
 	case errors.Is(err, fs.ErrNotExist):
 		// absent file -> start from empty settings
 	default:
-		return err
+		return nil, nil, err
 	}
 
+	hooks := map[string]json.RawMessage{}
+	if raw, ok := top["hooks"]; ok {
+		if err := json.Unmarshal(raw, &hooks); err != nil {
+			return nil, nil, fmt.Errorf("parse %s: \"hooks\" is not an object: %w", path, err)
+		}
+	}
+
+	changes := make([]hookChange, 0, len(bacioHookEvents))
+	for _, ev := range bacioHookEvents {
+		action := "add"
+		if raw, ok := hooks[ev.Event]; ok && bytes.Contains(raw, []byte(bacioHookMarker)) {
+			action = "update"
+		}
+		changes = append(changes, hookChange{Event: ev.Event, Subcommand: ev.Subcommand, Action: action})
+	}
+	return top, changes, nil
+}
+
+// applyBacioHooks merges bacio's hook groups into the (already-parsed)
+// top-level settings object and writes it back. Non-bacio content is
+// preserved; bacio's own groups are replaced in place so the merge is
+// idempotent.
+func applyBacioHooks(path string, top map[string]json.RawMessage) error {
 	hooks := map[string]json.RawMessage{}
 	if raw, ok := top["hooks"]; ok {
 		if err := json.Unmarshal(raw, &hooks); err != nil {
@@ -149,4 +206,39 @@ func bacioHookGroup(subcommand string) map[string]any {
 			{"type": "command", "command": "bacio hook " + subcommand},
 		},
 	}
+}
+
+// printHookPlan writes the planned changes to stderr, ahead of the
+// confirmation prompt.
+func printHookPlan(path string, changes []hookChange) {
+	fmt.Fprintf(os.Stderr, "bacio install-hooks will update %s:\n", path)
+	for _, c := range changes {
+		fmt.Fprintf(os.Stderr, "  %-7s %-17s → bacio hook %s\n", c.Action, c.Event, c.Subcommand)
+	}
+	fmt.Fprintln(os.Stderr, "Existing hooks for other events are left untouched.")
+}
+
+// reportHookChanges emits the post-write summary on stdout (via ok(), so
+// it round-trips to JSON like every other command's success output).
+func reportHookChanges(path string, changes []hookChange) error {
+	var b strings.Builder
+	fmt.Fprintf(&b, "installed bacio hooks into %s", path)
+	for _, c := range changes {
+		fmt.Fprintf(&b, "\n  %-7s %-17s → bacio hook %s", c.Action, c.Event, c.Subcommand)
+	}
+	return ok("%s", b.String())
+}
+
+// confirmPrompt asks a yes/no question on stderr and reads the answer
+// from stdin. Returns (true, nil) for y/yes; (false, nil) for anything
+// else; (false, err) when stdin can't be read at all (EOF — e.g. a
+// non-tty pipe), so the caller can point the user at --yes.
+func confirmPrompt(question string) (bool, error) {
+	fmt.Fprintf(os.Stderr, "%s [y/N] ", question)
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil && line == "" {
+		return false, fmt.Errorf("cannot read confirmation from stdin — re-run with --yes to accept non-interactively")
+	}
+	answer := strings.ToLower(strings.TrimSpace(line))
+	return answer == "y" || answer == "yes", nil
 }

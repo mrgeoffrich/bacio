@@ -137,11 +137,67 @@ func ParseDispatchStatus(s string) (DispatchStatus, error) {
 	return "", fmt.Errorf("unknown dispatch status %q (valid: %s)", s, strings.Join(names, ", "))
 }
 
+// DispatchMode marks the intent of a dispatch. plan: investigate the
+// issue and produce an implementation plan, don't change code.
+// implement: carry the work through end-to-end. "" = untyped (the
+// pre-Mode default; delivery treats it as unspecified).
+type DispatchMode string
+
+const (
+	DispatchModePlan      DispatchMode = "plan"
+	DispatchModeImplement DispatchMode = "implement"
+)
+
+var allDispatchModes = []DispatchMode{DispatchModePlan, DispatchModeImplement}
+
+func AllDispatchModes() []DispatchMode {
+	return append([]DispatchMode(nil), allDispatchModes...)
+}
+
+// ParseDispatchMode accepts "" (untyped — valid), "plan", or
+// "implement", and rejects anything else.
+func ParseDispatchMode(s string) (DispatchMode, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", nil
+	}
+	for _, m := range allDispatchModes {
+		if string(m) == s {
+			return m, nil
+		}
+	}
+	return "", fmt.Errorf("unknown dispatch mode %q (valid: plan, implement, or empty)", s)
+}
+
+// ComposeDispatchPayload builds the instruction body for a dispatch from
+// its mode and an optional free-form note. The mode contributes a canned
+// instruction; the note is appended after a blank line. Either part may
+// be empty — an untyped dispatch with no note yields "".
+func ComposeDispatchPayload(mode DispatchMode, note string) string {
+	note = strings.TrimSpace(note)
+	var canned string
+	switch mode {
+	case DispatchModePlan:
+		canned = "Run a planning pass on this issue: produce an implementation plan, don't write code yet."
+	case DispatchModeImplement:
+		canned = "Implement this issue end-to-end."
+	}
+	switch {
+	case canned != "" && note != "":
+		return canned + "\n\n" + note
+	case canned != "":
+		return canned
+	default:
+		return note
+	}
+}
+
 // AgentDispatch is one unit of supervisor->agent work. It targets an
 // agent identity (TargetAgentID), a specific session (TargetSessionID),
 // or both — the drain query matches on either. IssueID is the issue the
-// dispatch is about, when there is one; Payload carries free-form
-// instructions. Local-only, like the rest of the agent registry.
+// dispatch is about, when there is one; Mode marks plan vs implement
+// intent; Payload carries the (mode-derived + note) instruction body.
+// Local-only, like the rest of the agent registry.
 type AgentDispatch struct {
 	ID              int64          `json:"id"`
 	RepoID          int64          `json:"repo_id"`
@@ -151,6 +207,7 @@ type AgentDispatch struct {
 	TargetSessionID string         `json:"target_session_id,omitempty"`
 	IssueID         *int64         `json:"issue_id,omitempty"`
 	IssueKey        string         `json:"issue_key,omitempty"`
+	Mode            DispatchMode   `json:"mode,omitempty"`
 	Payload         string         `json:"payload,omitempty"`
 	Status          DispatchStatus `json:"status"`
 	CreatedBy       string         `json:"created_by"`
@@ -158,4 +215,24 @@ type AgentDispatch struct {
 	DeliveredAt     *time.Time     `json:"delivered_at,omitempty"`
 	AckedAt         *time.Time     `json:"acked_at,omitempty"`
 	AckNote         string         `json:"ack_note,omitempty"`
+}
+
+// AgentLivenessThreshold is the gap after a session's last heartbeat
+// past which it's considered idle rather than active. Heartbeats fire
+// on every prompt and on the Stop hook, so a working session refreshes
+// well inside this window; a longer gap means the agent is between
+// turns or the harness is closed.
+const AgentLivenessThreshold = 10 * time.Minute
+
+// SessionLiveness classifies a session as "ended", "active", or "idle"
+// relative to now. Shared by the TUI agent cards and the desktop Agents
+// screen so both render the same status vocabulary.
+func SessionLiveness(s *AgentSession, now time.Time) string {
+	if s == nil || s.EndedAt != nil {
+		return "ended"
+	}
+	if now.Sub(s.LastSeenAt) <= AgentLivenessThreshold {
+		return "active"
+	}
+	return "idle"
 }

@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Topbar from './components/Topbar.jsx';
 import Board from './components/Board.jsx';
 import IssueDrawer from './components/IssueDrawer.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
 import SettingsPanel from './components/SettingsPanel.jsx';
+import AgentsPanel from './components/AgentsPanel.jsx';
 import * as api from './api';
 
 const THEME_KEY = 'bacio-theme'; // persisted preference: 'system' | 'light' | 'dark'
@@ -28,6 +29,8 @@ export default function App() {
   const [openIssue, setOpenIssue] = useState(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [agentsOpen, setAgentsOpen] = useState(false);
+  const [agents, setAgents] = useState([]);
   const [theme, setTheme] = useState(readTheme);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -64,12 +67,23 @@ export default function App() {
       .catch(err => { setError(err.message); setLoading(false); });
   }, []);
 
-  // Load cards whenever the selected repository changes ('all' = every repo).
+  // refreshAgents reloads the agent list for the active repo. Used by the
+  // board-change effect, the Agents panel's refresh button, and after a
+  // dispatch so the counts move.
+  const refreshAgents = useCallback(() => {
+    api.listAgents(activeBoard)
+      .then(setAgents)
+      .catch(err => setError(err.message));
+  }, [activeBoard]);
+
+  // Load cards + agents whenever the selected repository changes
+  // ('all' = every repo).
   useEffect(() => {
     api.listCards(activeBoard)
       .then(setCards)
       .catch(err => setError(err.message));
-  }, [activeBoard]);
+    refreshAgents();
+  }, [activeBoard, refreshAgents]);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -80,6 +94,7 @@ export default function App() {
         setPaletteOpen(false);
         setOpenIssue(null);
         setSettingsOpen(false);
+        setAgentsOpen(false);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -99,13 +114,19 @@ export default function App() {
     setCards(cs => cs.map(c => c.key === key ? { ...c, column: toCol } : c));
   };
 
-  // Local-only, like moveCard — the drawer actions don't hit the backend yet.
-  const handToClaude = () => {
+  // Queue a dispatch for an agent: pick the agent + mode (plan/implement)
+  // + an optional note in the drawer, then write it through the backend.
+  const sendToAgent = (agentName, mode, note) => {
     if (!openIssue) return;
-    setCards(cs => cs.map(c => c.key === openIssue.key
-      ? { ...c, claude: true, column: 'in_progress', assignees: ['claude', ...c.assignees.filter(a => a !== 'claude')] }
-      : c));
-    setOpenIssue(null);
+    api.dispatchIssue(activeBoard, openIssue.key, agentName, mode, note)
+      .then(() => {
+        // Optimistically flag the card as claimed-by-an-agent so the
+        // breathing-pulse treatment kicks in; refresh the agent counts.
+        setCards(cs => cs.map(c => c.key === openIssue.key ? { ...c, claude: true } : c));
+        refreshAgents();
+        setOpenIssue(null);
+      })
+      .catch(err => setError(err.message));
   };
 
   const ship = () => {
@@ -121,6 +142,7 @@ export default function App() {
         activeBoard={activeBoard}
         onPickBoard={setActiveBoard}
         onOpenPalette={() => setPaletteOpen(true)}
+        onOpenAgents={() => setAgentsOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
       />
       {loading ? (
@@ -137,8 +159,9 @@ export default function App() {
       )}
       <IssueDrawer
         issue={openIssue}
+        agents={agents}
         onClose={() => setOpenIssue(null)}
-        onHandToClaude={handToClaude}
+        onSendToAgent={sendToAgent}
         onShip={ship}
       />
       <CommandPalette
@@ -146,6 +169,12 @@ export default function App() {
         cards={cards}
         onClose={() => setPaletteOpen(false)}
         onPick={openCard}
+      />
+      <AgentsPanel
+        open={agentsOpen}
+        agents={agents}
+        onRefresh={refreshAgents}
+        onClose={() => setAgentsOpen(false)}
       />
       <SettingsPanel
         open={settingsOpen}

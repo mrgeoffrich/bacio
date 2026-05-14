@@ -304,7 +304,11 @@ func emitDrainedDispatches(h *hookContext, sessionID string) {
 		if d.IssueKey != "" {
 			issue = " [" + d.IssueKey + "]"
 		}
-		fmt.Fprintf(&b, "  #%d%s from %s", d.ID, issue, d.CreatedBy)
+		mode := ""
+		if d.Mode != "" {
+			mode = " (" + string(d.Mode) + ")"
+		}
+		fmt.Fprintf(&b, "  #%d%s%s from %s", d.ID, issue, mode, d.CreatedBy)
 		if d.Payload != "" {
 			fmt.Fprintf(&b, ": %s", d.Payload)
 		}

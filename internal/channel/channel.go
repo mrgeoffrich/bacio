@@ -29,6 +29,7 @@ type Event struct {
 	ID       int64  // dispatch id — echoed back by the reply tool
 	IssueKey string // "" when the dispatch isn't tied to an issue
 	From     string // who created the dispatch
+	Mode     string // "plan", "implement", or "" — the dispatch intent
 	Payload  string // the instruction body
 }
 
@@ -278,6 +279,9 @@ func (s *Server) pushEvent(e Event) {
 	}
 	if e.IssueKey != "" {
 		meta["issue"] = e.IssueKey
+	}
+	if e.Mode != "" {
+		meta["mode"] = e.Mode
 	}
 	s.write(rpcNotification{
 		JSONRPC: "2.0",

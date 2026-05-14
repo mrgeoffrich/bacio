@@ -213,6 +213,19 @@ func migrate(db *sql.DB) error {
 	if _, err := db.Exec(`UPDATE issues SET state = 'cancelled' WHERE state = 'duplicate'`); err != nil {
 		return fmt.Errorf("migrate duplicate→cancelled: %w", err)
 	}
+	// agent_dispatches.mode was added when plan/implement dispatch intent
+	// landed. The ALTER can't carry the CHECK(mode IN …) the schema.sql
+	// declaration has — old DBs keep the looser shape; ParseDispatchMode
+	// guards at the store boundary, same tradeoff as the issue states above.
+	hasDispatchMode, err := columnExists(db, "agent_dispatches", "mode")
+	if err != nil {
+		return err
+	}
+	if !hasDispatchMode {
+		if _, err := db.Exec(`ALTER TABLE agent_dispatches ADD COLUMN mode TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add mode to agent_dispatches: %w", err)
+		}
+	}
 	return nil
 }
 

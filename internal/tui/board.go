@@ -43,6 +43,7 @@ func boardRefreshTick() tea.Cmd {
 type boardView struct {
 	store         *store.Store
 	repo          *model.Repo
+	actor         string // history actor for board-initiated mutations
 	states        []model.State
 	hidden        map[model.State]bool
 	columns       map[model.State][]*model.Issue
@@ -79,10 +80,23 @@ type boardView struct {
 	// the "no feature" group. featurePickerSlugs holds the list shown
 	// in the picker (snapshotted when the picker opens so the order
 	// doesn't shift while the user is navigating).
-	hiddenFeatures    map[string]bool
-	featurePicker     bool
-	featurePickerRow  int
+	hiddenFeatures     map[string]bool
+	featurePicker      bool
+	featurePickerRow   int
 	featurePickerSlugs []string
+
+	// Dispatch picker — opened with `x` on a todo issue. Three steps:
+	// pick a live agent, pick a mode (plan/implement), type an optional
+	// note. dispatchSessions / dispatchIssue are snapshotted at open so
+	// the lists don't shift while the user is navigating.
+	dispatchPicker   bool
+	dispatchStep     int // 0 agent · 1 mode · 2 note
+	dispatchRow      int // cursor within the current step's list
+	dispatchSessions []*model.AgentSession
+	dispatchAgentRow int // remembered agent choice across steps
+	dispatchMode     model.DispatchMode
+	dispatchNote     string
+	dispatchIssue    *model.Issue
 
 	lastRefresh time.Time
 
@@ -113,7 +127,7 @@ func (b *boardView) cachedMD(id int64, src string, width int) string {
 	return out
 }
 
-func newBoardView(s *store.Store, repo *model.Repo) (*boardView, error) {
+func newBoardView(s *store.Store, repo *model.Repo, actor string) (*boardView, error) {
 	hidden, err := s.LoadHiddenStates(repo.ID)
 	if err != nil {
 		return nil, err
@@ -125,6 +139,7 @@ func newBoardView(s *store.Store, repo *model.Repo) (*boardView, error) {
 	b := &boardView{
 		store:          s,
 		repo:           repo,
+		actor:          actor,
 		states:         model.AllStates(),
 		hidden:         hidden,
 		hiddenFeatures: hiddenFeats,
@@ -305,13 +320,16 @@ func (b *boardView) Status() string {
 	return "↻ " + b.lastRefresh.Format("15:04:05")
 }
 
-func (b *boardView) HasOverlay() bool { return b.overlay || b.picker || b.featurePicker }
+func (b *boardView) HasOverlay() bool {
+	return b.overlay || b.picker || b.featurePicker || b.dispatchPicker
+}
 
 func (b *boardView) CloseOverlay() {
 	b.overlay = false
 	b.picker = false
 	b.featurePicker = false
 	b.commentOverlay = false
+	b.dispatchPicker = false
 }
 
 func (b *boardView) Breadcrumb() string {
@@ -324,6 +342,8 @@ func (b *boardView) Breadcrumb() string {
 		return "Columns"
 	case b.featurePicker:
 		return "Features"
+	case b.dispatchPicker && b.dispatchIssue != nil:
+		return "Send [" + b.dispatchIssue.Key + "]"
 	}
 	return ""
 }
@@ -334,6 +354,8 @@ func (b *boardView) Help() string {
 		return "j/k move · space toggle · a all · n none · esc close"
 	case b.featurePicker:
 		return "j/k move · space toggle · a all · n none · esc close"
+	case b.dispatchPicker:
+		return b.dispatchPickerHelp()
 	case b.commentOverlay:
 		return "j/k scroll · g/G top/bottom · esc back"
 	case b.overlay:
@@ -345,7 +367,7 @@ func (b *boardView) Help() string {
 		}
 		return "tab next pane · j/k scroll · g/G top/bottom · esc close"
 	}
-	return "h/l cols · j/k cards · enter open · c columns · f features · H hide col · d detail · r reload · q quit"
+	return "h/l cols · j/k cards · enter open · x send · c columns · f features · H hide col · d detail · r reload · q quit"
 }
 
 func (b *boardView) Update(msg tea.Msg) tea.Cmd {
@@ -380,6 +402,10 @@ func (b *boardView) Update(msg tea.Msg) tea.Cmd {
 	}
 	if b.featurePicker {
 		b.updateFeaturePicker(key)
+		return nil
+	}
+	if b.dispatchPicker {
+		b.updateDispatchPicker(key)
 		return nil
 	}
 	if b.commentOverlay {
@@ -450,6 +476,8 @@ func (b *boardView) Update(msg tea.Msg) tea.Cmd {
 		b.openPicker()
 	case "f":
 		b.openFeaturePicker()
+	case "x":
+		b.openDispatchPicker()
 	case "H":
 		// Quick power-user hide of the focused column. We refuse to hide
 		// the last visible column so the board never goes empty by accident.
@@ -618,6 +646,9 @@ func (b *boardView) View(width, height int) string {
 	}
 	if b.featurePicker {
 		return b.viewFeaturePicker(width, height)
+	}
+	if b.dispatchPicker {
+		return b.viewDispatchPicker(width, height)
 	}
 	if b.overlay {
 		return b.viewOverlay(width, height)

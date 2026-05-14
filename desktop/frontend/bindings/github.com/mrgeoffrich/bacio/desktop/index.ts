@@ -7,10 +7,13 @@ export {
 };
 
 export {
+    AgentCard,
     Board,
     BoardCard,
     BoardColumn,
+    ClaimDTO,
     CommentDTO,
+    DispatchDTO,
     IssueDetail,
     PRDTO
 } from "./models.js";

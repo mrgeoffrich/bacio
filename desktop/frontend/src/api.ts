@@ -7,9 +7,12 @@ import {
   BoardColumn,
   BoardCard,
   IssueDetail,
+  AgentCard,
+  ClaimDTO,
+  DispatchDTO,
 } from '../bindings/github.com/mrgeoffrich/bacio/desktop';
 
-export type { Board, BoardColumn, BoardCard, IssueDetail };
+export type { Board, BoardColumn, BoardCard, IssueDetail, AgentCard, ClaimDTO, DispatchDTO };
 
 function normalize(err: unknown): Error {
   if (err instanceof Error) return err;
@@ -44,6 +47,28 @@ export async function listCards(repoPrefix: string): Promise<BoardCard[]> {
 export async function getIssue(repoPrefix: string, key: string): Promise<IssueDetail> {
   try {
     return await BoardService.GetIssue(repoPrefix, key);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+export async function listAgents(repoPrefix: string): Promise<AgentCard[]> {
+  try {
+    return await BoardService.ListAgents(repoPrefix);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+export async function dispatchIssue(
+  repoPrefix: string,
+  issueKey: string,
+  agentName: string,
+  mode: string,
+  note: string,
+): Promise<DispatchDTO> {
+  try {
+    return await BoardService.DispatchIssue(repoPrefix, issueKey, agentName, mode, note);
   } catch (err) {
     throw normalize(err);
   }

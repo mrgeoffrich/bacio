@@ -614,7 +614,10 @@ An agent picks dispatches up two ways:
   them into context. Nothing to poll.
 - **Push** — if the session runs the `bacio channel` MCP server, dispatches
   arrive live as `<channel source="bacio">` events the moment they're
-  created.
+  created. `bacio install-channel --yes` registers the channel in the
+  repo's `.mcp.json` and prints the `claude` launch command (channels are
+  a research preview — the session opts in with
+  `--dangerously-load-development-channels server:bacio`).
 
 Either way, acknowledge each handled dispatch with `bacio agent ack <id>
 --note "..."` (or the channel's `reply` tool). Acked/cancelled dispatches
@@ -623,7 +626,8 @@ drop out of `bacio agent inbox` and are pruned after 60 days.
 ### Hook integration — automatic registration & supervision
 
 `bacio install-hooks` merges four command hooks into the repo's
-`.claude/settings.json`:
+`.claude/settings.json` (it prints the plan and prompts first — pass
+`--yes` to accept non-interactively):
 
 | Event            | What `bacio hook <event>` does                                |
 | ---------------- | ------------------------------------------------------------- |
@@ -823,7 +827,7 @@ A few non-obvious mappings:
 
 - **`POST /repos`** is the equivalent of `bacio init`, but the server can't see your CWD — supply `{"name":"...", "path":"..."}` (plus optional `prefix`) explicitly.
 - **`GET /repos/{prefix}/documents/{filename}/download`** is the only non-JSON endpoint. Streams the body as `text/markdown` with `Content-Disposition: attachment`. No audit row, no dry-run, no `with_content`. The API never reads or writes the server filesystem, so callers materialise on disk by piping the response (`curl -O`).
-- **CLI verbs with no API equivalent** (touch the local filesystem or terminal, or the local-only agent registry): `bacio init` (use `POST /repos`), `bacio install-skill`, `bacio install-hooks`, `bacio doc add --from-path` / `--content-file` (inline `content` in the body), `bacio doc export` (use `/download`), `bacio tui`, `bacio agent *`, `bacio hook *`, `bacio channel`.
+- **CLI verbs with no API equivalent** (touch the local filesystem or terminal, or the local-only agent registry): `bacio init` (use `POST /repos`), `bacio install-skill`, `bacio install-hooks`, `bacio install-channel`, `bacio doc add --from-path` / `--content-file` (inline `content` in the body), `bacio doc export` (use `/download`), `bacio tui`, `bacio agent *`, `bacio hook *`, `bacio channel`.
 
 For the full design rationale, threat model, and what the API deliberately doesn't do (NDJSON, per-user auth, CORS, cursor pagination, …), see `docs/rest-api-design.md`.
 
@@ -836,7 +840,7 @@ BACIO_REMOTE=http://team-bacio:5320 BACIO_API_TOKEN=$T bacio issue list -o json
 bacio --remote http://team-bacio:5320 issue add "Login broken" --feature auth
 ```
 
-Verbs that touch the local filesystem or terminal error clearly in remote mode and stay local-direct: `bacio init`, `bacio install-skill`, `bacio install-hooks`, `bacio doc add --from-path` / `--content-file` (use `--content` inline instead), `bacio doc export` (use `bacio doc download <filename>` — writes to stdout or `--to <path>`), `bacio tui`, `bacio schema *`, `bacio status`, `bacio agent *`, `bacio hook *`, `bacio channel`.
+Verbs that touch the local filesystem or terminal error clearly in remote mode and stay local-direct: `bacio init`, `bacio install-skill`, `bacio install-hooks`, `bacio install-channel`, `bacio doc add --from-path` / `--content-file` (use `--content` inline instead), `bacio doc export` (use `bacio doc download <filename>` — writes to stdout or `--to <path>`), `bacio tui`, `bacio schema *`, `bacio status`, `bacio agent *`, `bacio hook *`, `bacio channel`.
 
 ## Gotchas
 
@@ -881,9 +885,21 @@ It walks up to the git root and writes `.claude/skills/bacio/SKILL.md`, creating
 To wire up automatic session registration and dispatch delivery, also run:
 
 ```bash
-bacio install-hooks
+bacio install-hooks --yes
 ```
 
 It merges the four `bacio hook` command hooks into `.claude/settings.json`
-(non-destructively — existing hooks are preserved). See "Hook integration"
-above for what each hook does.
+(non-destructively — existing hooks are preserved). It prints the planned
+changes and asks for confirmation first; pass `--yes` (`-y`) to accept
+automatically, which is required when running non-interactively. See
+"Hook integration" above for what each hook does.
+
+For real-time (push) dispatch delivery, also register the channel:
+
+```bash
+bacio install-channel --yes
+```
+
+It merges a `bacio` entry into the repo's `.mcp.json` and prints the
+`claude --dangerously-load-development-channels server:bacio` command to
+launch with — same confirmation + `--yes` behaviour as `install-hooks`.

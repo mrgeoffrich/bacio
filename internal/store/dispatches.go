@@ -28,6 +28,7 @@ type AddDispatchIn struct {
 	TargetAgentID   *int64
 	TargetSessionID string
 	IssueID         *int64
+	Mode            model.DispatchMode
 	Payload         string
 	CreatedBy       string
 }
@@ -54,13 +55,16 @@ func (s *Store) AddDispatch(in AddDispatchIn) (*model.AgentDispatch, error) {
 	if len(in.Payload) > maxDispatchPayload {
 		return nil, fmt.Errorf("dispatch payload too long (%d bytes; max %d)", len(in.Payload), maxDispatchPayload)
 	}
+	if _, err := model.ParseDispatchMode(string(in.Mode)); err != nil {
+		return nil, err
+	}
 
 	res, err := s.DB.Exec(`
 		INSERT INTO agent_dispatches
-		    (repo_id, target_agent_id, target_session_id, issue_id, payload, created_by)
-		VALUES (?, ?, ?, ?, ?, ?)`,
+		    (repo_id, target_agent_id, target_session_id, issue_id, mode, payload, created_by)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		in.RepoID, nullableInt(in.TargetAgentID), in.TargetSessionID,
-		nullableInt(in.IssueID), in.Payload, actor,
+		nullableInt(in.IssueID), string(in.Mode), in.Payload, actor,
 	)
 	if err != nil {
 		return nil, err
@@ -88,7 +92,7 @@ const dispatchSelect = `
 	SELECT d.id, d.repo_id, r.prefix, d.target_agent_id, a.name,
 	       d.target_session_id, d.issue_id,
 	       COALESCE(r2.prefix || '-' || i.number, ''),
-	       d.payload, d.status, d.created_by, d.created_at,
+	       d.mode, d.payload, d.status, d.created_by, d.created_at,
 	       d.delivered_at, d.acked_at, d.ack_note
 	FROM agent_dispatches d
 	LEFT JOIN repos  r  ON r.id  = d.repo_id
@@ -251,7 +255,7 @@ func scanDispatch(r rowScanner) (*model.AgentDispatch, error) {
 	err := r.Scan(
 		&d.ID, &d.RepoID, &prefix, &agentID, &agentName,
 		&d.TargetSessionID, &issueID, &issueKey,
-		&d.Payload, &d.Status, &d.CreatedBy, &d.CreatedAt,
+		&d.Mode, &d.Payload, &d.Status, &d.CreatedBy, &d.CreatedAt,
 		&delivered, &acked, &d.AckNote,
 	)
 	if err != nil {

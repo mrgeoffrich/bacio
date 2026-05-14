@@ -274,6 +274,8 @@ CREATE TABLE IF NOT EXISTS agent_dispatches (
     target_agent_id   INTEGER REFERENCES agents(id) ON DELETE CASCADE,
     target_session_id TEXT    NOT NULL DEFAULT '',
     issue_id          INTEGER REFERENCES issues(id) ON DELETE SET NULL,
+    mode              TEXT    NOT NULL DEFAULT ''
+                        CHECK (mode IN ('','plan','implement')),
     payload           TEXT    NOT NULL DEFAULT '',
     status            TEXT    NOT NULL DEFAULT 'pending'
                         CHECK (status IN ('pending','delivered','acked','cancelled')),

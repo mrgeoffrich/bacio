@@ -113,3 +113,59 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
 .mk-segmented-btn.is-active {
   background: var(--bg-2); color: var(--fg-1); box-shadow: var(--shadow-1);
 }
+
+/* ============================================================
+   Agents screen — a desktop-app addition. Reuses the .mk-settings
+   modal shell (wider) with a card per agent session that expands
+   into its claims + dispatches.
+   ============================================================ */
+.mk-agents { width: min(560px, 92vw); }
+
+/* Agent-status pills — reuse the kit's pill chrome (.mk-pill), just
+   the colour pairs here. active = claude's flavour; idle = honey;
+   ended = neutral/quiet. */
+.mk-status-active { background: var(--status-claude-bg); color: var(--status-claude); }
+.mk-status-idle   { background: var(--status-doing-bg);  color: var(--status-doing); }
+.mk-status-ended  { background: var(--bg-4);             color: var(--fg-4); }
+
+.mk-agent-card {
+  border: 1px solid var(--border-1); border-radius: var(--radius-md);
+  background: var(--bg-2); overflow: hidden;
+}
+.mk-agent-card.is-open { border-color: var(--border-2); }
+.mk-agent-head {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  width: 100%; padding: 10px 14px; border: 0; cursor: pointer;
+  background: transparent; text-align: left;
+  font-family: var(--font-sans); color: var(--fg-1);
+}
+.mk-agent-head:hover { background: var(--bg-4); }
+.mk-agent-name { font-size: 14px; font-weight: 600; }
+.mk-agent-meta { font-size: 12px; color: var(--fg-3); }
+.mk-agent-counts { font-size: 12px; color: var(--fg-3); margin-left: auto; }
+.mk-agent-detail {
+  padding: 10px 14px 14px; border-top: 1px solid var(--border-1);
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 13px; color: var(--fg-2);
+}
+.mk-agent-detail-label {
+  font-size: 11px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.04em; color: var(--fg-3); margin-top: 8px;
+}
+.mk-agent-detail-label:first-child { margin-top: 0; }
+.mk-agent-dispatch { display: flex; align-items: center; gap: 8px; }
+
+/* ============================================================
+   Send-to-agent — the issue-drawer block for dispatching a todo
+   issue to an agent (pick agent, optional note, plan/implement).
+   ============================================================ */
+.mk-send-agent { display: flex; flex-direction: column; gap: 8px; }
+.mk-send-agent-select,
+.mk-send-agent-note {
+  font-family: var(--font-sans); font-size: 13px;
+  padding: 7px 10px; border: 1px solid var(--border-1);
+  border-radius: var(--radius-md); background: var(--bg-2); color: var(--fg-1);
+  width: 100%; box-sizing: border-box;
+}
+.mk-send-agent-note { resize: vertical; }
+.mk-send-agent-actions { display: flex; gap: 8px; justify-content: flex-end; }

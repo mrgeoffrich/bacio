@@ -63,3 +63,7 @@ func (c *remoteClient) AckDispatch(ctx context.Context, in inputs.AgentAckInput,
 func (c *remoteClient) DrainDispatches(ctx context.Context, sessionID string) ([]*model.AgentDispatch, error) {
 	return nil, remoteAgentNotSupported("inbox")
 }
+
+func (c *remoteClient) RepoDispatches(ctx context.Context, repo *model.Repo) ([]*model.AgentDispatch, error) {
+	return nil, remoteAgentNotSupported("dispatches")
+}

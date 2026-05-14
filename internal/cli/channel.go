@@ -105,6 +105,7 @@ func (s *channelSource) Drain(ctx context.Context) ([]channel.Event, error) {
 			ID:       d.ID,
 			IssueKey: d.IssueKey,
 			From:     d.CreatedBy,
+			Mode:     string(d.Mode),
 			Payload:  d.Payload,
 		})
 	}

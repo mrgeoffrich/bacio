@@ -64,6 +64,40 @@ func TestAddDispatchRoundTrip(t *testing.T) {
 	}
 }
 
+// TestAddDispatchMode locks in that a structured mode round-trips and an
+// unknown mode is rejected at the store boundary.
+func TestAddDispatchMode(t *testing.T) {
+	s, repo, _, ag, _ := seedDispatchFixture(t)
+	d, err := s.AddDispatch(AddDispatchIn{
+		RepoID:        repo.ID,
+		TargetAgentID: &ag.ID,
+		Mode:          model.DispatchModePlan,
+		Payload:       "plan it",
+		CreatedBy:     "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add dispatch: %v", err)
+	}
+	if d.Mode != model.DispatchModePlan {
+		t.Fatalf("mode = %q, want plan", d.Mode)
+	}
+	got, err := s.GetDispatch(d.ID)
+	if err != nil {
+		t.Fatalf("get dispatch: %v", err)
+	}
+	if got.Mode != model.DispatchModePlan {
+		t.Fatalf("mode after reload = %q, want plan", got.Mode)
+	}
+	if _, err := s.AddDispatch(AddDispatchIn{
+		RepoID:        repo.ID,
+		TargetAgentID: &ag.ID,
+		Mode:          model.DispatchMode("refactor"),
+		CreatedBy:     "supervisor",
+	}); err == nil {
+		t.Fatal("expected error for unknown dispatch mode, got nil")
+	}
+}
+
 // TestListDispatchesEitherTarget locks in the drain-query semantics:
 // when both an agent id and a session id are supplied, dispatches aimed
 // at EITHER come back. A dispatch to the agent identity and a separate

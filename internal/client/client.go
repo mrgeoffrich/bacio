@@ -190,6 +190,10 @@ type Client interface {
 	// hooks. Delivered dispatches aren't re-drained but stay in the
 	// inbox until acked.
 	DrainDispatches(ctx context.Context, sessionID string) ([]*model.AgentDispatch, error)
+	// RepoDispatches returns every dispatch scoped to one repo, newest
+	// first, regardless of status — the read surface the desktop Agents
+	// screen needs. Local-only in v1.
+	RepoDispatches(ctx context.Context, repo *model.Repo) ([]*model.AgentDispatch, error)
 }
 
 // AgentSessionFilter mirrors store.AgentSessionFilter; the wrapper lets

@@ -413,22 +413,25 @@ func runAgentRelease(in inputs.AgentReleaseInput) error {
 
 func agentDispatchCmd() *cobra.Command {
 	var (
-		toAgent, toSession, message, rawInput string
+		toAgent, toSession, mode, message, rawInput string
 	)
 	cmd := &cobra.Command{
 		Use:   "dispatch [issue-key]",
 		Short: "Queue a unit of work for an agent identity and/or a session",
 		Long: `Enqueue a dispatch — a supervisor->agent work item. A dispatch must
 name a target: --to <agent-slug>, --session <id>, or both. The optional
-[issue-key] positional ties the dispatch to an issue; --message carries
-free-form instructions.
+[issue-key] positional ties the dispatch to an issue.
+
+--mode marks the intent: "plan" (produce an implementation plan, don't
+write code) or "implement" (build it end-to-end). The agent's instruction
+body is the mode's canned text plus any --message note. Both are optional.
 
 The target agent picks the dispatch up automatically on its next prompt
 (via the bacio UserPromptSubmit hook) or at session start, and can list
 its queue with ` + "`bacio agent inbox`" + `.`,
 		Args: cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, err := parseJSONInput(cmd, args, rawInput, "to", "session", "message")
+			raw, err := parseJSONInput(cmd, args, rawInput, "to", "session", "mode", "message")
 			if err != nil {
 				return err
 			}
@@ -442,6 +445,7 @@ its queue with ` + "`bacio agent inbox`" + `.`,
 			in := inputs.AgentDispatchInput{
 				TargetAgent:   toAgent,
 				TargetSession: toSession,
+				Mode:          mode,
 				Message:       message,
 			}
 			if len(args) == 1 {
@@ -452,7 +456,8 @@ its queue with ` + "`bacio agent inbox`" + `.`,
 	}
 	cmd.Flags().StringVar(&toAgent, "to", "", "target agent identity slug (e.g. swift-otter@claude.shiny)")
 	cmd.Flags().StringVar(&toSession, "session", "", "target session id")
-	cmd.Flags().StringVar(&message, "message", "", "free-form instruction body")
+	cmd.Flags().StringVar(&mode, "mode", "", "dispatch intent: plan or implement (default: untyped)")
+	cmd.Flags().StringVar(&message, "message", "", "optional free-form note appended to the instruction body")
 	addInputFlag(cmd, &rawInput)
 	return cmd
 }

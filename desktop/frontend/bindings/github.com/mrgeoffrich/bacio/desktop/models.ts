@@ -10,6 +10,84 @@ import { Create as $Create } from "@wailsio/runtime";
 import * as time$0 from "../../../../time/models.js";
 
 /**
+ * AgentCard is one agent session shaped for the desktop Agents screen,
+ * carrying its open claims and the dispatches aimed at it so the
+ * frontend can render the drill-down without a second round trip.
+ */
+export class AgentCard {
+    "sessionId": string;
+
+    /**
+     * identity slug; "" if none
+     */
+    "agentName": string;
+    "actor": string;
+    "model": string;
+    "branch": string;
+    "repoPrefix": string;
+
+    /**
+     * active | idle | ended
+     */
+    "status": string;
+    "lastSeenAt": time$0.Time;
+    "claims": ClaimDTO[];
+    "dispatches": DispatchDTO[];
+
+    /** Creates a new AgentCard instance. */
+    constructor($$source: Partial<AgentCard> = {}) {
+        if (!("sessionId" in $$source)) {
+            this["sessionId"] = "";
+        }
+        if (!("agentName" in $$source)) {
+            this["agentName"] = "";
+        }
+        if (!("actor" in $$source)) {
+            this["actor"] = "";
+        }
+        if (!("model" in $$source)) {
+            this["model"] = "";
+        }
+        if (!("branch" in $$source)) {
+            this["branch"] = "";
+        }
+        if (!("repoPrefix" in $$source)) {
+            this["repoPrefix"] = "";
+        }
+        if (!("status" in $$source)) {
+            this["status"] = "";
+        }
+        if (!("lastSeenAt" in $$source)) {
+            this["lastSeenAt"] = null;
+        }
+        if (!("claims" in $$source)) {
+            this["claims"] = [];
+        }
+        if (!("dispatches" in $$source)) {
+            this["dispatches"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new AgentCard instance from a string or object.
+     */
+    static createFrom($$source: any = {}): AgentCard {
+        const $$createField8_0 = $$createType1;
+        const $$createField9_0 = $$createType3;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("claims" in $$parsedSource) {
+            $$parsedSource["claims"] = $$createField8_0($$parsedSource["claims"]);
+        }
+        if ("dispatches" in $$parsedSource) {
+            $$parsedSource["dispatches"] = $$createField9_0($$parsedSource["dispatches"]);
+        }
+        return new AgentCard($$parsedSource as Partial<AgentCard>);
+    }
+}
+
+/**
  * Board is one bacio repo, offered in the top-nav repository selector.
  */
 export class Board {
@@ -84,8 +162,8 @@ export class BoardCard {
      * Creates a new BoardCard instance from a string or object.
      */
     static createFrom($$source: any = {}): BoardCard {
-        const $$createField4_0 = $$createType0;
-        const $$createField5_0 = $$createType0;
+        const $$createField4_0 = $$createType4;
+        const $$createField5_0 = $$createType4;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField4_0($$parsedSource["tags"]);
@@ -126,6 +204,34 @@ export class BoardColumn {
 }
 
 /**
+ * ClaimDTO is one open agent claim, shaped for the Agents screen.
+ */
+export class ClaimDTO {
+    "issueKey": string;
+    "claimedAt": time$0.Time;
+
+    /** Creates a new ClaimDTO instance. */
+    constructor($$source: Partial<ClaimDTO> = {}) {
+        if (!("issueKey" in $$source)) {
+            this["issueKey"] = "";
+        }
+        if (!("claimedAt" in $$source)) {
+            this["claimedAt"] = null;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ClaimDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ClaimDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ClaimDTO($$parsedSource as Partial<ClaimDTO>);
+    }
+}
+
+/**
  * CommentDTO is one issue comment.
  */
 export class CommentDTO {
@@ -154,6 +260,59 @@ export class CommentDTO {
     static createFrom($$source: any = {}): CommentDTO {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new CommentDTO($$parsedSource as Partial<CommentDTO>);
+    }
+}
+
+/**
+ * DispatchDTO is one queued dispatch — returned both inside an AgentCard
+ * (the agent's drill-down) and from DispatchIssue (the new write).
+ */
+export class DispatchDTO {
+    "id": number;
+    "issueKey": string;
+    "targetAgent": string;
+    "mode": string;
+    "status": string;
+    "payload": string;
+    "createdBy": string;
+    "createdAt": time$0.Time;
+
+    /** Creates a new DispatchDTO instance. */
+    constructor($$source: Partial<DispatchDTO> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = 0;
+        }
+        if (!("issueKey" in $$source)) {
+            this["issueKey"] = "";
+        }
+        if (!("targetAgent" in $$source)) {
+            this["targetAgent"] = "";
+        }
+        if (!("mode" in $$source)) {
+            this["mode"] = "";
+        }
+        if (!("status" in $$source)) {
+            this["status"] = "";
+        }
+        if (!("payload" in $$source)) {
+            this["payload"] = "";
+        }
+        if (!("createdBy" in $$source)) {
+            this["createdBy"] = "";
+        }
+        if (!("createdAt" in $$source)) {
+            this["createdAt"] = null;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new DispatchDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): DispatchDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new DispatchDTO($$parsedSource as Partial<DispatchDTO>);
     }
 }
 
@@ -212,10 +371,10 @@ export class IssueDetail {
      * Creates a new IssueDetail instance from a string or object.
      */
     static createFrom($$source: any = {}): IssueDetail {
-        const $$createField5_0 = $$createType0;
-        const $$createField6_0 = $$createType0;
-        const $$createField8_0 = $$createType2;
-        const $$createField9_0 = $$createType4;
+        const $$createField5_0 = $$createType4;
+        const $$createField6_0 = $$createType4;
+        const $$createField8_0 = $$createType6;
+        const $$createField9_0 = $$createType8;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField5_0($$parsedSource["tags"]);
@@ -258,8 +417,12 @@ export class PRDTO {
 }
 
 // Private type creation functions
-const $$createType0 = $Create.Array($Create.Any);
-const $$createType1 = CommentDTO.createFrom;
-const $$createType2 = $Create.Array($$createType1);
-const $$createType3 = PRDTO.createFrom;
-const $$createType4 = $Create.Array($$createType3);
+const $$createType0 = ClaimDTO.createFrom;
+const $$createType1 = $Create.Array($$createType0);
+const $$createType2 = DispatchDTO.createFrom;
+const $$createType3 = $Create.Array($$createType2);
+const $$createType4 = $Create.Array($Create.Any);
+const $$createType5 = CommentDTO.createFrom;
+const $$createType6 = $Create.Array($$createType5);
+const $$createType7 = PRDTO.createFrom;
+const $$createType8 = $Create.Array($$createType7);

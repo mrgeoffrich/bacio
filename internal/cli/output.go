@@ -490,6 +490,9 @@ func printAgentDispatch(w io.Writer, d *model.AgentDispatch) {
 	if d.IssueKey != "" {
 		fmt.Fprintf(w, "Issue:    %s\n", d.IssueKey)
 	}
+	if d.Mode != "" {
+		fmt.Fprintf(w, "Mode:     %s\n", d.Mode)
+	}
 	fmt.Fprintf(w, "By:       %s\n", d.CreatedBy)
 	fmt.Fprintf(w, "Created:  %s\n", localTime(d.CreatedAt))
 	if d.DeliveredAt != nil {
