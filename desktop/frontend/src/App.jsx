@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Topbar from './components/Topbar.jsx';
 import Board from './components/Board.jsx';
+import DocsView from './components/DocsView.jsx';
 import IssueDrawer from './components/IssueDrawer.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
 import SettingsPanel from './components/SettingsPanel.jsx';
@@ -24,6 +25,7 @@ export default function App() {
   const [boards, setBoards] = useState([]);
   const [columns, setColumns] = useState([]);
   const [activeBoard, setActiveBoard] = useState('all'); // repo prefix, or 'all'
+  const [activeView, setActiveView] = useState('board'); // 'board' | 'docs'
   const [cards, setCards] = useState([]);
   const [openIssue, setOpenIssue] = useState(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -120,6 +122,8 @@ export default function App() {
         boards={boards}
         activeBoard={activeBoard}
         onPickBoard={setActiveBoard}
+        activeView={activeView}
+        onChangeView={setActiveView}
         onOpenPalette={() => setPaletteOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
       />
@@ -127,6 +131,8 @@ export default function App() {
         <div className="mk-app-state">Loading…</div>
       ) : error ? (
         <div className="mk-app-state mk-app-error">Error: {error}</div>
+      ) : activeView === 'docs' ? (
+        <DocsView activeBoard={activeBoard} />
       ) : (
         <Board
           columns={columns}

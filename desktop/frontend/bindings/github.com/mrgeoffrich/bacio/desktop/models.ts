@@ -158,6 +158,78 @@ export class CommentDTO {
 }
 
 /**
+ * DocContent is one document with its markdown body, for the editor pane.
+ */
+export class DocContent {
+    "filename": string;
+    "type": string;
+    "content": string;
+    "updatedAt": time$0.Time;
+
+    /** Creates a new DocContent instance. */
+    constructor($$source: Partial<DocContent> = {}) {
+        if (!("filename" in $$source)) {
+            this["filename"] = "";
+        }
+        if (!("type" in $$source)) {
+            this["type"] = "";
+        }
+        if (!("content" in $$source)) {
+            this["content"] = "";
+        }
+        if (!("updatedAt" in $$source)) {
+            this["updatedAt"] = null;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new DocContent instance from a string or object.
+     */
+    static createFrom($$source: any = {}): DocContent {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new DocContent($$parsedSource as Partial<DocContent>);
+    }
+}
+
+/**
+ * DocSummary is one document, shaped for the desktop document list.
+ */
+export class DocSummary {
+    "filename": string;
+    "type": string;
+    "sizeBytes": number;
+    "updatedAt": time$0.Time;
+
+    /** Creates a new DocSummary instance. */
+    constructor($$source: Partial<DocSummary> = {}) {
+        if (!("filename" in $$source)) {
+            this["filename"] = "";
+        }
+        if (!("type" in $$source)) {
+            this["type"] = "";
+        }
+        if (!("sizeBytes" in $$source)) {
+            this["sizeBytes"] = 0;
+        }
+        if (!("updatedAt" in $$source)) {
+            this["updatedAt"] = null;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new DocSummary instance from a string or object.
+     */
+    static createFrom($$source: any = {}): DocSummary {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new DocSummary($$parsedSource as Partial<DocSummary>);
+    }
+}
+
+/**
  * IssueDetail is the issue-drawer payload for a single issue.
  */
 export class IssueDetail {
