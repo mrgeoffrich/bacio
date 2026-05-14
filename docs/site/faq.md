@@ -61,7 +61,7 @@ A **feature** is an optional grouping — think *project*, *epic*, *shipping uni
 
 ## Can I have more than one repo?
 
-Yes. Every git repo you run `bacio init` (or any `bacio` command) in registers as a new row with its own prefix. The global DB at `~/.bacio/db.sqlite` holds them all. `bacio issue list --all-repos` and `bacio history --all-repos` are the cross-repo reads.
+Yes. Every git repo you run `bacio init` (or any mutating `bacio` command — `bacio status` is read-only and won't register) in registers as a new row with its own prefix. The global DB at `~/.bacio/db.sqlite` holds them all. `bacio issue list --all-repos` and `bacio history --all-repos` are the cross-repo reads.
 
 ## What if I lose my laptop?
 

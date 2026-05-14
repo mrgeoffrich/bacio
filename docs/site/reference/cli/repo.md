@@ -5,7 +5,7 @@ description: List, show, and remove tracked repos from the global bacio database
 
 # `bacio repo`
 
-Inspect and manage the repos bacio knows about. Repos auto-register when you first run any `bacio` command inside a git working tree, so this is mostly read-only — `bacio repo list` and `bacio repo show <PREFIX>` are the common calls.
+Inspect and manage the repos bacio knows about. Repos auto-register when you first run any mutating `bacio` command (e.g. `bacio issue add`) inside a git working tree, so this is mostly read-only — `bacio repo list` and `bacio repo show <PREFIX>` are the common calls. (`bacio status` is the deliberate exception to auto-register: it's strictly read-only and reports `registered: false` for unbound trees.)
 
 ## Subcommands
 

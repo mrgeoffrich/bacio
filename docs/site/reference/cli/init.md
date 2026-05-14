@@ -8,7 +8,7 @@ description: Bind the current git repo to a 4-letter kanban prefix.
 Bind the current git repo to a 4-letter prefix (e.g. `AUTH`, `MINI`) and register it in the global bacio database at `~/.bacio/db.sqlite`.
 
 ::: tip Heads up
-`init` is **optional**. Running any `bacio` command inside a fresh git repo auto-creates the row and allocates a prefix from the repo name. Calling `init` explicitly just lets you choose the prefix and confirms the binding.
+`init` is **optional**. Running any mutating `bacio` command (e.g. `bacio issue add`) inside a fresh git repo auto-creates the row and allocates a prefix from the repo name. `bacio status` is the deliberate exception: it's strictly read-only and reports `registered: false` rather than binding the repo. Calling `init` explicitly just lets you choose the prefix and confirms the binding.
 
 `init` does **not** create a `.bacio/` directory or a local SQLite file — the database is global, not per-repo.
 

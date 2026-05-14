@@ -66,7 +66,7 @@ Notes:
 - `bacio doc upsert` records `document.create` or `document.update` depending on whether it created the row.
 - `bacio issue unassign` reuses `issue.assign` (with an empty assignee) — there's no separate `issue.unassign` op.
 - `issue.claim` is the audit op `bacio issue next` records when it atomically picks the next ready issue; `bacio agent claim` records `agent.claim`, which is the registry intent record only (it does NOT change `assignee` or state).
-- `repo.upgrade_phantom` is emitted by the **auto-register flow** (`resolveRepo` / `EnsureRepo`) when the user runs *any* `bacio` command inside a project working tree whose remote URL matches a phantom repo previously imported via sync. `bacio sync` itself does not emit this op.
+- `repo.upgrade_phantom` is emitted by the **auto-register flow** (`resolveRepo` / `EnsureRepo`) when the user runs any *mutating* `bacio` command inside a project working tree whose remote URL matches a phantom repo previously imported via sync. (`bacio status` is read-only and does not trigger this — it reports `registered: false` instead.) `bacio sync` itself does not emit this op.
 - `bacio agent heartbeat` deliberately does **not** write an audit row — it would flood the log.
 
 **Reads are not logged.** `*.list`, `*.show`, `*.brief` don't produce audit rows. `--dry-run` doesn't either — it explicitly bypasses the write path.
