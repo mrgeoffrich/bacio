@@ -3,13 +3,14 @@ import Topbar from './components/Topbar.jsx';
 import Board from './components/Board.jsx';
 import DocsView from './components/DocsView.jsx';
 import FeaturesView from './components/FeaturesView.jsx';
+import AgentsView from './components/AgentsView.jsx';
 import IssueDrawer from './components/IssueDrawer.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
 import SettingsPanel from './components/SettingsPanel.jsx';
-import AgentsPanel from './components/AgentsPanel.jsx';
 import * as api from './api';
 
 const THEME_KEY = 'bacio-theme'; // persisted preference: 'system' | 'light' | 'dark'
+const REPO_KEY = 'bacio-active-repo'; // persisted preference: last-selected repo prefix
 
 // localStorage is always present inside the Wails webview, but a hardened
 // browser profile can throw on access — fall back to defaults rather than
@@ -22,17 +23,27 @@ function persistTheme(theme) {
   try { localStorage.setItem(THEME_KEY, theme); }
   catch { /* non-fatal — the preference just won't survive a relaunch */ }
 }
+function readActiveRepo() {
+  try { return localStorage.getItem(REPO_KEY) || ''; }
+  catch { return ''; }
+}
+function persistActiveRepo(prefix) {
+  try { localStorage.setItem(REPO_KEY, prefix); }
+  catch { /* non-fatal — the preference just won't survive a relaunch */ }
+}
 
 export default function App() {
   const [boards, setBoards] = useState([]);
   const [columns, setColumns] = useState([]);
-  const [activeBoard, setActiveBoard] = useState('all'); // repo prefix, or 'all'
-  const [activeView, setActiveView] = useState('board'); // 'board' | 'features' | 'docs'
+  // The selected repo prefix. Starts from the persisted preference (or "" on
+  // first run / before the repo list resolves); the mount effect lands it on
+  // a real repo once boards load.
+  const [activeBoard, setActiveBoard] = useState(readActiveRepo);
+  const [activeView, setActiveView] = useState('board'); // 'board' | 'features' | 'docs' | 'agents'
   const [cards, setCards] = useState([]);
   const [openIssue, setOpenIssue] = useState(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [agentsOpen, setAgentsOpen] = useState(false);
   const [agents, setAgents] = useState([]);
   const [theme, setTheme] = useState(readTheme);
   const [loading, setLoading] = useState(true);
@@ -59,29 +70,38 @@ export default function App() {
     }
   }, [theme]);
 
-  // Load the repository list + columns once on mount.
+  // Load the repository list + columns once on mount. Once boards resolve,
+  // land activeBoard on the persisted repo if it still exists, otherwise the
+  // first repo — every screen needs a concrete repo, there's no "all" option.
   useEffect(() => {
     Promise.all([api.listBoards(), api.listColumns()])
       .then(([bs, cols]) => {
         setBoards(bs);
         setColumns(cols);
+        setActiveBoard(prev => bs.some(b => b.prefix === prev) ? prev : (bs[0]?.prefix ?? ''));
         setLoading(false);
       })
       .catch(err => { setError(err.message); setLoading(false); });
   }, []);
 
+  // Remember the selected repo so the app reopens on the same one.
+  useEffect(() => {
+    if (activeBoard) persistActiveRepo(activeBoard);
+  }, [activeBoard]);
+
   // refreshAgents reloads the agent list for the active repo. Used by the
   // board-change effect, the Agents panel's refresh button, and after a
   // dispatch so the counts move.
   const refreshAgents = useCallback(() => {
+    if (!activeBoard) return;
     api.listAgents(activeBoard)
       .then(setAgents)
       .catch(err => setError(err.message));
   }, [activeBoard]);
 
-  // Load cards + agents whenever the selected repository changes
-  // ('all' = every repo).
+  // Load cards + agents whenever the selected repository changes.
   useEffect(() => {
+    if (!activeBoard) return;
     api.listCards(activeBoard)
       .then(setCards)
       .catch(err => setError(err.message));
@@ -97,7 +117,6 @@ export default function App() {
         setPaletteOpen(false);
         setOpenIssue(null);
         setSettingsOpen(false);
-        setAgentsOpen(false);
       }
     };
     window.addEventListener('keydown', onKey);
@@ -147,7 +166,6 @@ export default function App() {
         activeView={activeView}
         onChangeView={setActiveView}
         onOpenPalette={() => setPaletteOpen(true)}
-        onOpenAgents={() => setAgentsOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
       />
       {loading ? (
@@ -158,6 +176,8 @@ export default function App() {
         <DocsView activeBoard={activeBoard} />
       ) : activeView === 'features' ? (
         <FeaturesView activeBoard={activeBoard} />
+      ) : activeView === 'agents' ? (
+        <AgentsView agents={agents} onRefresh={refreshAgents} />
       ) : (
         <Board
           columns={columns}
@@ -178,12 +198,6 @@ export default function App() {
         cards={cards}
         onClose={() => setPaletteOpen(false)}
         onPick={openCard}
-      />
-      <AgentsPanel
-        open={agentsOpen}
-        agents={agents}
-        onRefresh={refreshAgents}
-        onClose={() => setAgentsOpen(false)}
       />
       <SettingsPanel
         open={settingsOpen}

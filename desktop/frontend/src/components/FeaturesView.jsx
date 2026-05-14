@@ -9,9 +9,7 @@ function shortDate(iso) {
 // FeaturesView is the desktop feature browser: a read-only two-pane mirror of
 // the TUI's Features tab. The left pane lists the repo's features; the right
 // pane shows the selected feature's description and the issues grouped under
-// it. Features are per-repo, so it needs a concrete repo selected in the
-// topbar (not "All repositories"). Features are created/edited via the CLI —
-// nothing here mutates.
+// it. Features are created/edited via the CLI — nothing here mutates.
 export default function FeaturesView({ activeBoard }) {
   const [features, setFeatures] = useState([]);
   const [selected, setSelected] = useState(null); // slug
@@ -19,7 +17,7 @@ export default function FeaturesView({ activeBoard }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const repoSelected = !!activeBoard && activeBoard !== 'all';
+  const repoSelected = !!activeBoard;
 
   // Reload the feature list whenever the selected repo changes.
   useEffect(() => {

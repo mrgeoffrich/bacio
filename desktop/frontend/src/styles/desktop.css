@@ -115,11 +115,36 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
 }
 
 /* ============================================================
-   Agents screen — a desktop-app addition. Reuses the .mk-settings
-   modal shell (wider) with a card per agent session that expands
-   into its claims + dispatches.
+   Agents screen — a desktop-app addition: a full-page list with a
+   card per agent session that expands into its claims + dispatches.
    ============================================================ */
-.mk-agents { width: min(560px, 92vw); }
+.mk-agents-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 24px;
+}
+.mk-agents-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.mk-agents-title {
+  font-family: var(--font-sans);
+  font-size: var(--text-xl);
+  font-weight: 700;
+  color: var(--fg-1);
+  margin: 0;
+}
+.mk-agents-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 720px;
+}
 
 /* Agent-status pills — reuse the kit's pill chrome (.mk-pill), just
    the colour pairs here. active = claude's flavour; idle = honey;

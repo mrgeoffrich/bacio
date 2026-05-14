@@ -1,7 +1,14 @@
 import React from 'react';
 import Icon from './Icon.jsx';
 
-export default function Topbar({ boards, activeBoard, onPickBoard, activeView, onChangeView, onOpenPalette, onOpenAgents, onOpenSettings }) {
+const NAV = [
+  { view: 'board', label: 'Issues' },
+  { view: 'features', label: 'Features' },
+  { view: 'docs', label: 'Documents' },
+  { view: 'agents', label: 'Agents' },
+];
+
+export default function Topbar({ boards, activeBoard, onPickBoard, activeView, onChangeView, onOpenPalette, onOpenSettings }) {
   return (
     <header className="mk-topbar">
       <div className="mk-brand">
@@ -10,30 +17,20 @@ export default function Topbar({ boards, activeBoard, onPickBoard, activeView, o
       </div>
 
       <div className="mk-segmented">
-        <button
-          className={`mk-segmented-btn ${activeView === 'board' ? 'is-active' : ''}`}
-          onClick={() => onChangeView('board')}
-        >
-          Board
-        </button>
-        <button
-          className={`mk-segmented-btn ${activeView === 'features' ? 'is-active' : ''}`}
-          onClick={() => onChangeView('features')}
-        >
-          Features
-        </button>
-        <button
-          className={`mk-segmented-btn ${activeView === 'docs' ? 'is-active' : ''}`}
-          onClick={() => onChangeView('docs')}
-        >
-          Docs
-        </button>
+        {NAV.map(({ view, label }) => (
+          <button
+            key={view}
+            className={`mk-segmented-btn ${activeView === view ? 'is-active' : ''}`}
+            onClick={() => onChangeView(view)}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
       <div className="mk-repo-select">
         <Icon name="board" />
         <select value={activeBoard} onChange={(e) => onPickBoard(e.target.value)}>
-          <option value="all">All repositories</option>
           {boards.map(b => (
             <option key={b.prefix} value={b.prefix}>{b.name}</option>
           ))}
@@ -47,7 +44,6 @@ export default function Topbar({ boards, activeBoard, onPickBoard, activeView, o
       </button>
 
       <div className="mk-topbar-right">
-        <button className="mk-icbtn" aria-label="Agents" onClick={onOpenAgents}><Icon name="claude" /></button>
         <button className="mk-icbtn" aria-label="Notifications"><Icon name="bell" /></button>
         <button className="mk-icbtn" aria-label="Settings" onClick={onOpenSettings}><Icon name="settings" /></button>
       </div>
