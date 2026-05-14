@@ -71,7 +71,13 @@ func main() {
 			Backdrop:                application.MacBackdropTranslucent,
 			TitleBar:                application.MacTitleBarHiddenInset,
 		},
-		BackgroundColour: application.NewRGB(242, 246, 252),
+		// Neutral mid-slate: the window background is briefly visible on a
+		// cold start before the webview paints. It can't match the resolved
+		// theme — Wails only wires up OS-appearance detection once Run()
+		// starts, after this window is already created — so a mid-tone keeps
+		// the flash mild in both light and dark mode rather than flashing
+		// bright white in dark mode.
+		BackgroundColour: application.NewRGB(131, 137, 149),
 		URL:              "/",
 	})
 

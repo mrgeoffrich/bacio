@@ -1,11 +1,13 @@
 import React from 'react';
 
 // One- or two-letter badge for an avatar: initials for multi-word
-// names, otherwise the first two characters.
+// names, otherwise the first two characters. Falls back to '?' for
+// empty / missing names rather than rendering a blank badge.
 function initials(name) {
+  if (!name) return '?';
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return name.slice(0, 2).toUpperCase();
+  return (parts[0] ?? '').slice(0, 2).toUpperCase() || '?';
 }
 
 export default function KanbanCard({ card, isDragging, onDragStart, onDragEnd, onOpen }) {

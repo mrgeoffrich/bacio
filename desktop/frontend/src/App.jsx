@@ -8,6 +8,18 @@ import * as api from './api';
 
 const THEME_KEY = 'bacio-theme'; // persisted preference: 'system' | 'light' | 'dark'
 
+// localStorage is always present inside the Wails webview, but a hardened
+// browser profile can throw on access — fall back to defaults rather than
+// failing to boot.
+function readTheme() {
+  try { return localStorage.getItem(THEME_KEY) || 'system'; }
+  catch { return 'system'; }
+}
+function persistTheme(theme) {
+  try { localStorage.setItem(THEME_KEY, theme); }
+  catch { /* non-fatal — the preference just won't survive a relaunch */ }
+}
+
 export default function App() {
   const [boards, setBoards] = useState([]);
   const [columns, setColumns] = useState([]);
@@ -16,15 +28,19 @@ export default function App() {
   const [openIssue, setOpenIssue] = useState(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [theme, setTheme] = useState(() => localStorage.getItem(THEME_KEY) || 'system');
+  const [theme, setTheme] = useState(readTheme);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   // Resolve the System/Light/Dark preference to a concrete light|dark value
   // and write it to <html data-theme>. In 'system' mode, track the OS setting
   // live so the app follows appearance changes without a relaunch.
+  //
+  // Only 'system' mode attaches a listener; 'light'/'dark' return no cleanup.
+  // That's safe: when switching away from 'system', React runs this effect's
+  // previous cleanup (which removes the system listener) before re-running.
   useEffect(() => {
-    localStorage.setItem(THEME_KEY, theme);
+    persistTheme(theme);
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
     const apply = () => {
       const resolved = theme === 'system' ? (mq.matches ? 'dark' : 'light') : theme;
