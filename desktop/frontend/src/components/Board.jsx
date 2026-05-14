@@ -1,0 +1,60 @@
+import React, { useState } from 'react';
+import KanbanCard from './KanbanCard.jsx';
+
+const EMPTY_COPY = {
+  todo: 'drop a card here.',
+  in_progress: 'doing nothing. (literally.)',
+  needs_action: 'nothing needs a human. yet.',
+  in_review: 'nothing in review. nice.',
+  done: 'nothing shipped yet.',
+  cancelled: 'no write-offs.',
+};
+
+export default function Board({ columns, cards, onMoveCard, onOpenCard }) {
+  const [dragKey, setDragKey] = useState(null);
+  const [overCol, setOverCol] = useState(null);
+
+  return (
+    <div className="mk-board">
+      {columns.map(col => {
+        const colCards = cards.filter(c => c.column === col.state);
+        return (
+          <div
+            key={col.state}
+            className={`mk-col ${overCol === col.state ? 'is-over' : ''}`}
+            onDragOver={(e) => { e.preventDefault(); setOverCol(col.state); }}
+            onDragLeave={() => setOverCol(null)}
+            onDrop={(e) => {
+              e.preventDefault();
+              if (dragKey) onMoveCard(dragKey, col.state);
+              setDragKey(null);
+              setOverCol(null);
+            }}
+          >
+            <header className="mk-col-head">
+              <span className={`mk-col-pill mk-status-${col.state}`}>{col.label}</span>
+              <span className="mk-col-count">{colCards.length}</span>
+            </header>
+            <div className="mk-col-body">
+              {colCards.map(card => (
+                <KanbanCard
+                  key={card.key}
+                  card={card}
+                  isDragging={dragKey === card.key}
+                  onDragStart={() => setDragKey(card.key)}
+                  onDragEnd={() => { setDragKey(null); setOverCol(null); }}
+                  onOpen={() => onOpenCard(card)}
+                />
+              ))}
+              {colCards.length === 0 && (
+                <div className="mk-col-empty">
+                  {EMPTY_COPY[col.state] || 'drop a card here.'}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}

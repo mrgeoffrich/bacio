@@ -1,0 +1,59 @@
+name: CI
+
+# Lightweight build/test gate for every PR and for pushes to main.
+# Covers the two things you can't catch from a single `go build` at the
+# repo root: the CLI module, and the desktop app's frontend (a separate
+# nested module + a Vite/TS build that root `go build ./...` never sees).
+# A full `wails3 build` of the desktop app is intentionally out of scope
+# here — it needs the wails3 CLI plus native webkit deps and an OS matrix;
+# add that when the desktop app becomes a released artifact.
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  cli:
+    name: CLI (build, vet, test)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
+  desktop-frontend:
+    name: Desktop frontend (tsc + vite build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop/frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
