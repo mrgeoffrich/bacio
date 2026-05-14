@@ -428,6 +428,39 @@ func dispatchDTO(d *model.AgentDispatch) DispatchDTO {
 	}
 }
 
+// pickFreeAgent chooses the agent identity to auto-route a dispatch to:
+// the most-recently-active live session that holds no open claim and has
+// no un-acked dispatch already queued against it. cards is expected in
+// last-seen order (as ListAgents returns it), so the first match wins.
+// An agent that's been handed work but hasn't claimed it yet still
+// counts as occupied — otherwise the same most-recent agent gets every
+// dispatch piled on it while genuinely-idle agents are never picked.
+// Returns "" when no agent qualifies.
+func pickFreeAgent(cards []AgentCard) string {
+	for _, c := range cards {
+		if c.Status == "ended" || c.Busy || c.AgentName == "" {
+			continue
+		}
+		if hasOpenDispatch(c) {
+			continue
+		}
+		return c.AgentName
+	}
+	return ""
+}
+
+// hasOpenDispatch reports whether the card carries a dispatch that's been
+// queued but not yet acked (pending or delivered) — work the agent still
+// owes a reply on.
+func hasOpenDispatch(c AgentCard) bool {
+	for _, d := range c.Dispatches {
+		if d.Status == string(model.DispatchPending) || d.Status == string(model.DispatchDelivered) {
+			return true
+		}
+	}
+	return false
+}
+
 // dispatchTargetsSession reports whether a dispatch is aimed at this
 // session — by the bare session id or the agent identity behind it.
 func dispatchTargetsSession(d *model.AgentDispatch, s *model.AgentSession) bool {
@@ -566,20 +599,15 @@ func (b *BoardService) DispatchIssue(repoPrefix, issueKey, mode string) (Dispatc
 	}
 
 	// Auto-pick a free agent — a live (non-ended) session that holds no
-	// open claim, with a persistent identity slug (CreateDispatch routes
-	// by slug). ListAgents orders sessions by last-seen, so the first
-	// match is the most-recently-active free agent.
+	// open claim and has no un-acked dispatch already queued, with a
+	// persistent identity slug (CreateDispatch routes by slug). ListAgents
+	// orders sessions by last-seen, so the first match is the
+	// most-recently-active free agent.
 	cards, err := b.ListAgents(prefix)
 	if err != nil {
 		return DispatchDTO{}, err
 	}
-	agentName := ""
-	for _, c := range cards {
-		if c.Status != "ended" && !c.Busy && c.AgentName != "" {
-			agentName = c.AgentName
-			break
-		}
-	}
+	agentName := pickFreeAgent(cards)
 	if agentName == "" {
 		return DispatchDTO{}, fmt.Errorf("no free agent available — every agent is busy or offline")
 	}
