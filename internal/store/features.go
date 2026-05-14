@@ -90,6 +90,29 @@ func (s *Store) ListFeatures(repoID int64, includeDescription bool) ([]*model.Fe
 	return out, rows.Err()
 }
 
+// ListAllFeatures returns every feature across every repo, ordered by
+// created_at. Used by the desktop app, which has no notion of a
+// "current repo" the way the CLI does.
+func (s *Store) ListAllFeatures(includeDescription bool) ([]*model.Feature, error) {
+	rows, err := s.DB.Query(`SELECT ` + featureCols + ` FROM features ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.Feature
+	for rows.Next() {
+		f, err := scanFeature(rows)
+		if err != nil {
+			return nil, err
+		}
+		if !includeDescription {
+			f.Description = ""
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) UpdateFeature(id int64, title, description *string) error {
 	sets := []string{}
 	args := []any{}
