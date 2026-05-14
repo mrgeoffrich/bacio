@@ -565,7 +565,13 @@ bacio agent release <ISSUE-KEY>         Release this session's claim on an issue
 bacio agent dispatch [ISSUE-KEY]        Queue a work item for an agent / session
   --to <agent-slug>                     Target a persistent identity
   --session <id>                        Target one specific session
-  --message <text>                      Free-form instruction body
+  --mode <stage>                        Job stage: plan, implement, review,
+                                     ship, or fix_review (default: untyped).
+                                     The stage's prompt template (editable
+                                     in the desktop Settings panel) is
+                                     rendered with the issue id/title to
+                                     form the instruction body.
+  --message <text>                      Free-form note appended to the body
                                      (must pass --to and/or --session)
 bacio agent inbox                       Open dispatches queued for this session
   --session <id>                        Default: $CLAUDE_CODE_SESSION_ID

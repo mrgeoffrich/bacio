@@ -155,6 +155,19 @@ func (b *boardView) confirmDispatch() {
 	}
 	sess := b.dispatchSessions[b.dispatchAgentRow]
 	issueID := b.dispatchIssue.ID
+	// Resolve the stage's prompt template (custom override or built-in
+	// default) and render it against this issue before storing — same
+	// substitution the client's CreateDispatch does for the desktop path.
+	template, err := b.store.GetPromptTemplate(b.dispatchMode)
+	if err != nil {
+		b.err = err
+		return
+	}
+	payload := model.ComposeDispatchPayload(template, map[string]string{
+		"issue_id":    b.dispatchIssue.Key,
+		"issue_title": b.dispatchIssue.Title,
+		"repo_prefix": b.repo.Prefix,
+	}, b.dispatchNote)
 	d, err := b.store.AddDispatch(store.AddDispatchIn{
 		RepoID: b.repo.ID,
 		// Pass both targets: the session id is always reliable, and
@@ -163,7 +176,7 @@ func (b *boardView) confirmDispatch() {
 		TargetSessionID: sess.SessionID,
 		IssueID:         &issueID,
 		Mode:            b.dispatchMode,
-		Payload:         model.ComposeDispatchPayload(b.dispatchMode, b.dispatchNote),
+		Payload:         payload,
 		CreatedBy:       b.actor,
 	})
 	if err != nil {

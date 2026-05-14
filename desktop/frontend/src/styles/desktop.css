@@ -201,6 +201,52 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   background: var(--bg-2); color: var(--fg-1); box-shadow: var(--shadow-1);
 }
 
+/* Prompt-template editors — the second section of the Settings dialog.
+   A stacked list of labelled textareas, one per dispatch stage. */
+.mk-settings-section {
+  display: flex; flex-direction: column; gap: 10px;
+  padding-top: 16px; border-top: 1px solid var(--border-1);
+}
+.mk-tmpl-tokens {
+  font-size: 12px; color: var(--fg-3);
+}
+.mk-tmpl-tokens code {
+  font-family: var(--font-mono); font-size: 11px;
+  padding: 1px 4px; border-radius: var(--radius-sm);
+  background: var(--bg-4); color: var(--fg-2);
+}
+.mk-settings-error {
+  font-size: 12px; color: var(--status-blocked);
+}
+.mk-tmpl { display: flex; flex-direction: column; gap: 4px; }
+.mk-tmpl-head {
+  display: flex; align-items: center; gap: 8px;
+}
+.mk-tmpl-label {
+  flex: 1; font-size: 13px; font-weight: 500; color: var(--fg-1);
+}
+.mk-tmpl-reset {
+  font-family: var(--font-sans); font-size: 11px;
+  padding: 3px 8px; border: 1px solid var(--border-1); border-radius: 6px;
+  background: transparent; color: var(--fg-3); cursor: pointer;
+  transition: color var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out);
+}
+.mk-tmpl-reset:hover:not(:disabled) {
+  color: var(--fg-1); border-color: var(--border-2);
+}
+.mk-tmpl-reset:disabled { opacity: 0.4; cursor: default; }
+.mk-tmpl-input {
+  font-family: var(--font-mono); font-size: 12px; line-height: 1.5;
+  padding: 8px 10px; border: 1px solid var(--border-1);
+  border-radius: var(--radius-md); resize: vertical;
+  background: var(--bg-1); color: var(--fg-1);
+}
+.mk-tmpl-input:focus {
+  outline: none; border-color: var(--border-focus);
+}
+.mk-tmpl-input:disabled { opacity: 0.6; }
+
 /* ============================================================
    Agents screen — a desktop-app addition: a full-page list with a
    card per agent session that expands into its claims + dispatches.

@@ -83,3 +83,14 @@ func (c *remoteClient) UpsertAgentChannel(ctx context.Context, repo *model.Repo,
 func (c *remoteClient) LinkSessionChannel(ctx context.Context, sessionID string, claudePID int64, host string) error {
 	return remoteAgentNotSupported("channel")
 }
+
+// Prompt templates live in the local app_settings KV — like the agent
+// registry, there's no remote analogue in v1.
+
+func (c *remoteClient) GetPromptTemplates(ctx context.Context) (map[string]string, error) {
+	return nil, remoteAgentNotSupported("prompt-templates")
+}
+
+func (c *remoteClient) SetPromptTemplate(ctx context.Context, mode, body string) error {
+	return remoteAgentNotSupported("prompt-templates")
+}

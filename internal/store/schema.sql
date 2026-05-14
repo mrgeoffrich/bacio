@@ -168,6 +168,16 @@ CREATE TABLE IF NOT EXISTS tui_settings (
     PRIMARY KEY (repo_id, key)
 );
 
+-- Global (not per-repo) KV store — the sibling of tui_settings for
+-- preferences that aren't tied to a single repo. Used today for the
+-- desktop app's customisable dispatch prompt templates, keyed
+-- `prompt_template.<mode>`. Same generic-KV rationale as tui_settings.
+CREATE TABLE IF NOT EXISTS app_settings (
+    key        TEXT    NOT NULL PRIMARY KEY,
+    value      TEXT    NOT NULL DEFAULT '',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 -- sync_state tracks records that have participated in a git-backed sync
 -- pass. Presence-of-row means "previously synced"; absence means
 -- "local-only, never exported". CRUD lands in a later phase; the table
@@ -285,8 +295,11 @@ CREATE TABLE IF NOT EXISTS agent_dispatches (
     target_agent_id   INTEGER REFERENCES agents(id) ON DELETE CASCADE,
     target_session_id TEXT    NOT NULL DEFAULT '',
     issue_id          INTEGER REFERENCES issues(id) ON DELETE SET NULL,
-    mode              TEXT    NOT NULL DEFAULT ''
-                        CHECK (mode IN ('','plan','implement')),
+    -- mode is one of the DispatchMode stage names (or '' for untyped).
+    -- No SQL CHECK: the set grew (plan/implement + review/ship/fix_review)
+    -- and ParseDispatchMode already guards at the store boundary, so a
+    -- CHECK here would just be a migration tax on every future stage.
+    mode              TEXT    NOT NULL DEFAULT '',
     payload           TEXT    NOT NULL DEFAULT '',
     status            TEXT    NOT NULL DEFAULT 'pending'
                         CHECK (status IN ('pending','delivered','acked','cancelled')),
