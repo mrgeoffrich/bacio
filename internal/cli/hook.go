@@ -131,6 +131,14 @@ func loadHookContext() (*hookContext, error) {
 	// can share one repo. claude_pid resolved once here and reused by
 	// linkChannel.
 	claudePID := findClaudeAncestor(os.Getpid())
+	if claudePID == 0 {
+		// No `claude` ancestor found — identity can't be keyed or
+		// recorded (agents.json keys on claude_pid) and the channel
+		// can't be correlated. The session is still tracked, just
+		// without a persistent identity. Surface it rather than
+		// degrading silently.
+		fmt.Fprintln(os.Stderr, "bacio hook: no `claude` ancestor process found — session runs without a persistent identity")
+	}
 	slug := readAgentIdentity(info.Root, claudePID)
 	act := slug
 	if act == "" {

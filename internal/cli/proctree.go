@@ -110,6 +110,13 @@ func findClaudeAncestor(pid int) int {
 // isClaudeComm reports whether a `ps` comm string names the Claude Code
 // binary. `ps -o comm` reports either a bare name or an absolute path
 // depending on how the process was exec'd, so we match on the basename.
+//
+// Caveat: this assumes the `claude` process exposes "claude" as its
+// comm — true on macOS, the primary target (verified). On a host where
+// Claude Code runs as e.g. a `node` process with "claude" only in argv,
+// the match fails and findClaudeAncestor returns 0; callers then fall
+// back to OS-user / un-correlated behaviour, and loadHookContext logs
+// it rather than degrading silently.
 func isClaudeComm(comm string) bool {
 	return filepath.Base(strings.TrimSpace(comm)) == "claude"
 }

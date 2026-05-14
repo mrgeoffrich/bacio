@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"errors"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"slices"
@@ -30,9 +31,14 @@ type agentEntry struct {
 // the live session registry proper is the agent_sessions table.
 //
 // Concurrency is deliberately best-effort: no locking, just an atomic
-// temp-file + rename per write and a handful of retries. A lost update
-// at worst drops a session id from an entry's list, which the next hook
-// fire re-adds — it can never tear the file.
+// temp-file + rename per write and a handful of backed-off retries. The
+// rename means a write can never *tear* the file — a reader always sees
+// a complete document. But a write is a whole-file replace built from a
+// possibly-stale read, so two writers racing for *different* claude_pids
+// can lose one another's entry: the loser's entry simply reappears on
+// that agent's next hook fire (session-start / every prompt / stop), so
+// it's self-healing within one hook tick. This tradeoff is intentional;
+// a lock would be the fix if it ever starts to matter.
 type agentsFile map[string]agentEntry
 
 const agentsFileName = "agents.json"
@@ -121,6 +127,14 @@ func (af agentsFile) pruneDead() {
 // readAgentIdentity returns the agent slug recorded for claudePID, or
 // "" when there's no entry (or no file). The read-side resolver the
 // channel hits every poll tick and the hooks consult on session start.
+//
+// There's no liveness check on the entry: callers pass their own
+// resolved claude_pid (an ancestor of the calling process, hence
+// alive), so the only stale-read hazard is a recycled pid whose
+// previous `claude` died. That self-corrects — pruneDead clears dead
+// pids on the next write, the new process's session-start hook
+// overwrites the key, and the channel re-reads every tick so it picks
+// the correction up within one poll.
 func readAgentIdentity(root string, claudePID int) string {
 	if root == "" || claudePID == 0 {
 		return ""
@@ -204,7 +218,13 @@ func recordAgentSession(root string, claudePID int, host, name, sessionID string
 	key := strconv.Itoa(claudePID)
 	const maxAttempts = 5
 	var lastErr error
-	for range maxAttempts {
+	for attempt := range maxAttempts {
+		if attempt > 0 {
+			// Best-effort jittered backoff — no locking by design (see
+			// the agentsFile doc comment), so spacing concurrent writers
+			// out is all we can do to cut down on clobbers.
+			time.Sleep(time.Duration(attempt)*8*time.Millisecond + time.Duration(rand.IntN(8))*time.Millisecond)
+		}
 		af, err := loadAgentsFile(root)
 		if err != nil {
 			lastErr = err

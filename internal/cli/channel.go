@@ -242,11 +242,19 @@ func dumpChannelDiagnostics(logf func(string, ...any), projectDir string, info *
 	for _, line := range processAncestry(os.Getpid()) {
 		logf("ancestry: %s", line)
 	}
-	env := os.Environ()
-	sort.Strings(env)
-	logf("environ (%d vars):", len(env))
-	for _, kv := range env {
-		logf("  %s", kv)
+	// The full environment can carry tokens/secrets and lands in Claude
+	// Code's MCP logs, so the dump is gated behind BACIO_CHANNEL_DEBUG.
+	// The pid / ancestry / repo / identity / claude_pid lines above —
+	// the actually-useful correlation diagnostics — stay always-on.
+	if os.Getenv("BACIO_CHANNEL_DEBUG") != "" {
+		env := os.Environ()
+		sort.Strings(env)
+		logf("environ (%d vars):", len(env))
+		for _, kv := range env {
+			logf("  %s", kv)
+		}
+	} else {
+		logf("environ: %d vars (set BACIO_CHANNEL_DEBUG=1 to dump)", len(os.Environ()))
 	}
 	logf("--- end channel diagnostics ---")
 }
