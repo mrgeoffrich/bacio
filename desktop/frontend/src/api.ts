@@ -1,8 +1,9 @@
-// Thin typed wrapper over the generated BoardService Wails bindings.
-// Centralises the binding import path and normalises rejections to Error so
-// the React components can stay unaware of Wails specifics.
+// Thin typed wrapper over the generated Wails bindings. Centralises the
+// binding import path and normalises rejections to Error so the React
+// components can stay unaware of Wails specifics.
 import {
   BoardService,
+  DocService,
   Board,
   BoardColumn,
   BoardCard,
@@ -10,9 +11,11 @@ import {
   AgentCard,
   ClaimDTO,
   DispatchDTO,
+  DocSummary,
+  DocContent,
 } from '../bindings/github.com/mrgeoffrich/bacio/desktop';
 
-export type { Board, BoardColumn, BoardCard, IssueDetail, AgentCard, ClaimDTO, DispatchDTO };
+export type { Board, BoardColumn, BoardCard, IssueDetail, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent };
 
 function normalize(err: unknown): Error {
   if (err instanceof Error) return err;
@@ -60,6 +63,14 @@ export async function listAgents(repoPrefix: string): Promise<AgentCard[]> {
   }
 }
 
+export async function listDocs(repoPrefix: string, typeFilter = ''): Promise<DocSummary[]> {
+  try {
+    return await DocService.ListDocs(repoPrefix, typeFilter);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
 export async function dispatchIssue(
   repoPrefix: string,
   issueKey: string,
@@ -69,6 +80,26 @@ export async function dispatchIssue(
 ): Promise<DispatchDTO> {
   try {
     return await BoardService.DispatchIssue(repoPrefix, issueKey, agentName, mode, note);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+export async function getDoc(repoPrefix: string, filename: string): Promise<DocContent> {
+  try {
+    return await DocService.GetDoc(repoPrefix, filename);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+export async function saveDoc(
+  repoPrefix: string,
+  filename: string,
+  content: string,
+): Promise<DocContent> {
+  try {
+    return await DocService.SaveDoc(repoPrefix, filename, content);
   } catch (err) {
     throw normalize(err);
   }

@@ -169,3 +169,117 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
 }
 .mk-send-agent-note { resize: vertical; }
 .mk-send-agent-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* ============================================================
+   Docs view — document browser + markdown editor. A desktop-app
+   addition (not part of the kit), so its styles live here. Left
+   pane lists the repo's documents; right pane hosts the ported
+   TipTap editor (see components/editor/).
+   ============================================================ */
+.mk-docs {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+.mk-docs-list {
+  width: 260px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--bg-3);
+  border-right: 1px solid var(--border-1);
+}
+.mk-docs-list-empty,
+.mk-docs-empty {
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  color: var(--fg-4);
+  line-height: 1.5;
+}
+.mk-docs-list-empty { padding: 12px 8px; }
+.mk-docs-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 24px;
+}
+.mk-docs-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out);
+}
+.mk-docs-item:hover { background: var(--bg-4); }
+.mk-docs-item.is-active {
+  background: var(--bg-2);
+  border-color: var(--border-1);
+}
+.mk-docs-item-name {
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--fg-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mk-docs-item-type {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+.mk-docs-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.mk-docs-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-1);
+  background: var(--bg-2);
+  flex-shrink: 0;
+}
+.mk-docs-bar-name {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--fg-1);
+}
+.mk-docs-bar-status {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  color: var(--fg-3);
+}
+.mk-docs-editor {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}
+.mk-docs-error {
+  padding: 8px 16px;
+  font-size: var(--text-sm);
+  color: var(--status-blocked);
+  background: var(--status-blocked-bg);
+  border-bottom: 1px solid var(--border-1);
+}

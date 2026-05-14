@@ -1,12 +1,27 @@
 import React from 'react';
 import Icon from './Icon.jsx';
 
-export default function Topbar({ boards, activeBoard, onPickBoard, onOpenPalette, onOpenAgents, onOpenSettings }) {
+export default function Topbar({ boards, activeBoard, onPickBoard, activeView, onChangeView, onOpenPalette, onOpenAgents, onOpenSettings }) {
   return (
     <header className="mk-topbar">
       <div className="mk-brand">
         <img src="/bacio-mark.png" width="22" height="22" alt="" />
         <span className="mk-brand-name">bacio</span>
+      </div>
+
+      <div className="mk-segmented">
+        <button
+          className={`mk-segmented-btn ${activeView === 'board' ? 'is-active' : ''}`}
+          onClick={() => onChangeView('board')}
+        >
+          Board
+        </button>
+        <button
+          className={`mk-segmented-btn ${activeView === 'docs' ? 'is-active' : ''}`}
+          onClick={() => onChangeView('docs')}
+        >
+          Docs
+        </button>
       </div>
 
       <div className="mk-repo-select">
