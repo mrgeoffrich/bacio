@@ -191,9 +191,12 @@ func migrate(db *sql.DB) error {
 		if _, err := db.Exec(`ALTER TABLE agent_sessions ADD COLUMN agent_id INTEGER REFERENCES agents(id) ON DELETE SET NULL`); err != nil {
 			return fmt.Errorf("add agent_id to agent_sessions: %w", err)
 		}
-		if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_agent_sessions_agent ON agent_sessions(agent_id)`); err != nil {
-			return fmt.Errorf("create idx_agent_sessions_agent: %w", err)
-		}
+	}
+	// Index lives here, not in schema.sql: it references agent_id, which the
+	// ALTER above only adds to older DBs. schema.sql runs before migrate(),
+	// so an index declaration there would fail on those DBs. Idempotent.
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_agent_sessions_agent ON agent_sessions(agent_id)`); err != nil {
+		return fmt.Errorf("create idx_agent_sessions_agent: %w", err)
 	}
 	// State-set change: `backlog` and `duplicate` were retired and
 	// `needs_action` was added. Existing rows are migrated in place;

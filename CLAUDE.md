@@ -20,9 +20,18 @@ The deeper context for both lives in the topic sections below (`## Agent-CLI pri
 - `bacio <subcommand>` from inside any git working tree drives the CLI.
 - The SQLite database lives at `~/.bacio/db.sqlite` by default. Override via `--db <path>` when testing or validating changes.
 
+## Profiling
+
+Two hidden persistent root flags capture pprof profiles — a dev/debug affordance, kept out of `--help`:
+
+- `bacio --cpuprofile <path> tui` — writes a CPU profile covering the whole interactive session.
+- `bacio --memprofile <path> tui` — writes a heap profile (`runtime.GC()` then `pprof.WriteHeapProfile`) of what survived the session.
+
+They start in the root `PersistentPreRunE` and flush in `stopProfiling` (`internal/cli/profiling.go`). `NewRoot()` returns that cleanup func; `cmd/bacio/main.go` runs it after `Execute()` returns — on success and error alike — so profiles flush even when a command exits via an error path (cobra skips `PersistentPostRunE` on error). Open the output with `go tool pprof <path>`. Today the flags are wired for `bacio tui`; extending them to the short-lived CLI commands is a possible follow-up.
+
 ## Architecture in one screen
 
-- Entry point: `cmd/bacio/main.go` → `internal/cli.NewRoot()` (cobra).
+- Entry point: `cmd/bacio/main.go` → `internal/cli.NewRoot()` (cobra). `NewRoot()` returns `(*cobra.Command, func())` — the func is a cleanup closure `main.go` runs after `Execute()` to flush pprof profiles (see ## Profiling).
 - CLI commands: `internal/cli/*.go`, one file per command group (`issue`, `feature`, `repo`, `doc`, `link`, `pr`, `tag`, `comment`, `history`, `status`, `init`, `install_skill`, `tui`). Cross-cutting helpers live in `audit.go`, `context.go`, `output.go`, `output_flag.go`, `input.go`, `doc.go`.
 - Persistence: `internal/store/` over SQLite (`modernc.org/sqlite`, pure-Go, no CGO). Schema is in `internal/store/schema.sql` and re-applied on every `Open` — adding a new table is a matter of appending another `CREATE TABLE IF NOT EXISTS …`. Schema changes that need real ALTERs go through `migrate()` in `internal/store/store.go`.
 - Domain types: `internal/model/` — pure structs/enums, no DB.

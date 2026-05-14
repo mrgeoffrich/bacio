@@ -217,7 +217,9 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
     end_reason      TEXT    NOT NULL DEFAULT ''
 );
 
-CREATE INDEX IF NOT EXISTS idx_agent_sessions_agent ON agent_sessions(agent_id);
+-- idx_agent_sessions_agent is created in migrate() so it works on databases
+-- that pre-date the agent_id column. The ALTER ADD COLUMN must run before the
+-- index can reference it, and schema.sql is applied before migrate().
 
 CREATE INDEX IF NOT EXISTS idx_agent_sessions_repo_active
     ON agent_sessions(repo_id, ended_at);
