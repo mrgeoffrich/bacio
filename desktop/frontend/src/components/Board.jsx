@@ -1,51 +1,56 @@
 import React, { useState } from 'react';
 import Icon from './Icon.jsx';
 import KanbanCard from './KanbanCard.jsx';
-import { columns } from '../data.js';
 
-export default function Board({ cards, onMoveCard, onOpenCard }) {
-  const [dragId, setDragId] = useState(null);
+const EMPTY_COPY = {
+  todo: 'drop a card here.',
+  in_progress: 'doing nothing. (literally.)',
+  needs_action: 'nothing needs a human. yet.',
+  in_review: 'nothing in review. nice.',
+  done: 'nothing shipped yet.',
+  cancelled: 'no write-offs.',
+};
+
+export default function Board({ columns, cards, onMoveCard, onOpenCard }) {
+  const [dragKey, setDragKey] = useState(null);
   const [overCol, setOverCol] = useState(null);
 
   return (
     <div className="mk-board">
       {columns.map(col => {
-        const colCards = cards.filter(c => c.column === col.id);
+        const colCards = cards.filter(c => c.column === col.state);
         return (
           <div
-            key={col.id}
-            className={`mk-col ${overCol === col.id ? 'is-over' : ''}`}
-            onDragOver={(e) => { e.preventDefault(); setOverCol(col.id); }}
+            key={col.state}
+            className={`mk-col ${overCol === col.state ? 'is-over' : ''}`}
+            onDragOver={(e) => { e.preventDefault(); setOverCol(col.state); }}
             onDragLeave={() => setOverCol(null)}
             onDrop={(e) => {
               e.preventDefault();
-              if (dragId) onMoveCard(dragId, col.id);
-              setDragId(null);
+              if (dragKey) onMoveCard(dragKey, col.state);
+              setDragKey(null);
               setOverCol(null);
             }}
           >
             <header className="mk-col-head">
-              <span className={`mk-col-pill mk-status-${col.status}`}>{col.name}</span>
+              <span className={`mk-col-pill mk-status-${col.state}`}>{col.label}</span>
               <span className="mk-col-count">{colCards.length}</span>
               <button className="mk-icbtn mk-col-add" aria-label="Add card"><Icon name="plus" /></button>
             </header>
             <div className="mk-col-body">
               {colCards.map(card => (
                 <KanbanCard
-                  key={card.id}
+                  key={card.key}
                   card={card}
-                  isDragging={dragId === card.id}
-                  onDragStart={() => setDragId(card.id)}
-                  onDragEnd={() => { setDragId(null); setOverCol(null); }}
+                  isDragging={dragKey === card.key}
+                  onDragStart={() => setDragKey(card.key)}
+                  onDragEnd={() => { setDragKey(null); setOverCol(null); }}
                   onOpen={() => onOpenCard(card)}
                 />
               ))}
               {colCards.length === 0 && (
                 <div className="mk-col-empty">
-                  {col.id === 'blocked' ? 'no blockers. for now.'
-                  : col.id === 'doing'  ? 'doing nothing. (literally.)'
-                  : col.id === 'review' ? 'nothing in review. nice.'
-                  : 'drop a card here.'}
+                  {EMPTY_COPY[col.state] || 'drop a card here.'}
                 </div>
               )}
             </div>

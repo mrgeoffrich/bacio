@@ -1,8 +1,7 @@
 import React from 'react';
 import Icon from './Icon.jsx';
-import { boards } from '../data.js';
 
-export default function Sidebar({ collapsed, onToggle, activeBoard, onPickBoard, agentRuns }) {
+export default function Sidebar({ collapsed, onToggle, boards, activeBoard, onPickBoard, agentRuns }) {
   return (
     <aside className={`mk-sidebar ${collapsed ? 'is-collapsed' : ''}`}>
       <div className="mk-sb-head">
@@ -18,13 +17,13 @@ export default function Sidebar({ collapsed, onToggle, activeBoard, onPickBoard,
             <div className="mk-sb-label">Boards</div>
             {boards.map(b => (
               <button
-                key={b.id}
-                className={`mk-sb-item ${b.id === activeBoard ? 'is-active' : ''}`}
-                onClick={() => onPickBoard(b.id)}
+                key={b.prefix}
+                className={`mk-sb-item ${b.prefix === activeBoard ? 'is-active' : ''}`}
+                onClick={() => onPickBoard(b.prefix)}
               >
                 <Icon name="board" />
                 <span>{b.name}</span>
-                <span className="mk-sb-count">{b.count}</span>
+                <span className="mk-sb-count">{b.issueCount}</span>
               </button>
             ))}
             <button className="mk-sb-item mk-sb-add">
@@ -33,9 +32,10 @@ export default function Sidebar({ collapsed, onToggle, activeBoard, onPickBoard,
             </button>
           </div>
 
+          {/* Views section is static decoration for now — not wired to data. */}
           <div className="mk-sb-section">
             <div className="mk-sb-label">Views</div>
-            <button className="mk-sb-item"><Icon name="inbox" /><span>Inbox</span><span className="mk-sb-count" style={{ color: 'var(--coral-600)' }}>3</span></button>
+            <button className="mk-sb-item"><Icon name="inbox" /><span>Inbox</span></button>
             <button className="mk-sb-item"><Icon name="user" /><span>Mine</span></button>
             <button className="mk-sb-item"><Icon name="claude" /><span>claude is on</span><span className="mk-sb-count">{agentRuns}</span></button>
           </div>
@@ -47,7 +47,7 @@ export default function Sidebar({ collapsed, onToggle, activeBoard, onPickBoard,
                 <span className="mk-claude-label">claude</span>
                 <span className="mk-claude-count">{agentRuns} running</span>
               </div>
-              <div className="mk-claude-meta">last shipped 4m ago · BAC-185</div>
+              <div className="mk-claude-meta">{agentRuns > 0 ? 'agents on the board' : 'no agents running'}</div>
             </div>
           </div>
         </>

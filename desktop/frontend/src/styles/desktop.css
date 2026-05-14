@@ -21,3 +21,27 @@
 .mk-topbar button,
 .mk-topbar input,
 .mk-sb-head button { --wails-draggable: no-drag; }
+
+/* Status pill colours for bacio's six real issue states. The imported
+   app.css only covers the kit's placeholder column ids; these map each
+   model.State to the existing gelato tokens. (todo/done already match
+   app.css — redefined here for a complete, single-source set.) */
+.mk-status-todo         { background: var(--status-todo-bg);    color: var(--status-todo); }
+.mk-status-in_progress  { background: var(--status-doing-bg);   color: var(--status-doing); }
+.mk-status-needs_action { background: var(--status-blocked-bg); color: var(--status-blocked); }
+.mk-status-in_review    { background: var(--status-review-bg);  color: var(--status-review); }
+.mk-status-done         { background: var(--status-done-bg);    color: var(--status-done); }
+.mk-status-cancelled    { background: var(--ink-50);            color: var(--fg-4); }
+
+/* App-level loading / error placeholder shown in the main area before
+   the board's data resolves. */
+.mk-app-state {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  color: var(--fg-3);
+}
+.mk-app-error { color: var(--status-blocked); }

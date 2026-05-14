@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Icon from './Icon.jsx';
-import { cards as allCards, columnStatus } from '../data.js';
 
-export default function CommandPalette({ open, onClose, onPick }) {
+export default function CommandPalette({ open, cards, onClose, onPick }) {
   const [q, setQ] = useState('');
   const inputRef = useRef(null);
 
@@ -16,8 +15,8 @@ export default function CommandPalette({ open, onClose, onPick }) {
   if (!open) return null;
 
   const filtered = q
-    ? allCards.filter(c => (c.id + ' ' + c.title).toLowerCase().includes(q.toLowerCase())).slice(0, 6)
-    : allCards.slice(0, 6);
+    ? cards.filter(c => (c.key + ' ' + c.title).toLowerCase().includes(q.toLowerCase())).slice(0, 6)
+    : cards.slice(0, 6);
 
   return (
     <>
@@ -38,9 +37,9 @@ export default function CommandPalette({ open, onClose, onPick }) {
         <div className="mk-palette-results">
           <div className="mk-palette-section">Issues</div>
           {filtered.map(c => (
-            <button key={c.id} className="mk-palette-item" onClick={() => { onPick(c); onClose(); }}>
-              <span className={`mk-pill mk-status-${columnStatus(c.column)}`}>{columnStatus(c.column).toUpperCase()}</span>
-              <span className="mk-mono mk-palette-id">{c.id}</span>
+            <button key={c.key} className="mk-palette-item" onClick={() => { onPick(c); onClose(); }}>
+              <span className={`mk-pill mk-status-${c.column}`}>{c.columnLabel}</span>
+              <span className="mk-mono mk-palette-id">{c.key}</span>
               <span className="mk-palette-title">{c.title}</span>
               <span className="mk-kbd">↵</span>
             </button>

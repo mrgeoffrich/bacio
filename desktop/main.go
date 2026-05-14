@@ -1,12 +1,13 @@
 package main
 
 import (
+	"context"
 	"embed"
 	_ "embed"
 	"log"
 	"time"
 
-	"github.com/mrgeoffrich/bacio/internal/store"
+	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -30,15 +31,14 @@ func init() {
 // logs any error that might occur.
 func main() {
 
-	dbPath, err := store.DefaultPath()
+	// Open a local bacio client — the same API surface the CLI uses. An
+	// empty DBPath falls back to store.DefaultPath(); an empty Remote
+	// selects the local SQLite backend.
+	c, err := client.Open(context.Background(), client.Options{Actor: "desktop"})
 	if err != nil {
-		log.Fatalf("resolve default db path: %v", err)
+		log.Fatalf("open bacio client: %v", err)
 	}
-	s, err := store.Open(dbPath)
-	if err != nil {
-		log.Fatalf("open bacio store at %s: %v", dbPath, err)
-	}
-	defer s.DB.Close()
+	defer c.Close()
 
 	// Create a new Wails application by providing the necessary options.
 	// Variables 'Name' and 'Description' are for application metadata.
@@ -49,8 +49,7 @@ func main() {
 		Name:        "bacio-desktop",
 		Description: "A demo of using raw HTML & CSS",
 		Services: []application.Service{
-			application.NewService(&GreetService{}),
-			application.NewService(NewFeatureService(s)),
+			application.NewService(NewBoardService(c)),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),

@@ -1,18 +1,15 @@
 import React from 'react';
 import Icon from './Icon.jsx';
-import { columnStatus } from '../data.js';
 
-export default function IssueDrawer({ card, onClose, onHandToClaude, onShip }) {
-  if (!card) return null;
+export default function IssueDrawer({ issue, onClose, onHandToClaude, onShip }) {
+  if (!issue) return null;
   return (
     <>
       <div className="mk-scrim" onClick={onClose} />
-      <aside className="mk-drawer" role="dialog" aria-label={`Issue ${card.id}`}>
+      <aside className="mk-drawer" role="dialog" aria-label={`Issue ${issue.key}`}>
         <header className="mk-drawer-head">
-          <span className="mk-card-id">{card.id}</span>
-          <span className={`mk-pill mk-status-${columnStatus(card.column)}`}>
-            {columnStatus(card.column).toUpperCase()}
-          </span>
+          <span className="mk-card-id">{issue.key}</span>
+          <span className={`mk-pill mk-status-${issue.column}`}>{issue.columnLabel}</span>
           <div style={{ marginLeft: 'auto', display: 'flex', gap: '4px' }}>
             <button className="mk-icbtn" aria-label="Copy link"><Icon name="link" /></button>
             <button className="mk-icbtn" aria-label="Close" onClick={onClose}><Icon name="x" /></button>
@@ -20,15 +17,15 @@ export default function IssueDrawer({ card, onClose, onHandToClaude, onShip }) {
         </header>
 
         <div className="mk-drawer-body">
-          <h2 className="mk-drawer-title">{card.title}</h2>
+          <h2 className="mk-drawer-title">{issue.title}</h2>
 
           <div className="mk-drawer-meta">
             <div className="mk-meta-row-grid">
               <span className="mk-meta-key">Assignees</span>
               <span className="mk-meta-val">
                 <div className="mk-avatars">
-                  {card.assignees.length === 0 && <span className="mk-meta-empty">unassigned</span>}
-                  {card.assignees.map((a, i) => (
+                  {issue.assignees.length === 0 && <span className="mk-meta-empty">unassigned</span>}
+                  {issue.assignees.map((a, i) => (
                     <span key={i} className={`mk-av ${a === 'claude' ? 'is-claude' : ''}`}>{a === 'claude' ? 'c' : a}</span>
                   ))}
                 </div>
@@ -36,49 +33,46 @@ export default function IssueDrawer({ card, onClose, onHandToClaude, onShip }) {
 
               <span className="mk-meta-key">Tags</span>
               <span className="mk-meta-val">
-                {card.tags?.map(t => <span key={t} className="mk-tag">{t}</span>) || <span className="mk-meta-empty">—</span>}
+                {issue.tags.length > 0
+                  ? issue.tags.map(t => <span key={t} className="mk-tag">{t}</span>)
+                  : <span className="mk-meta-empty">—</span>}
               </span>
 
-              {card.pr && (<>
-                <span className="mk-meta-key">PR</span>
-                <span className="mk-meta-val mk-mono">{card.pr} · feat/board-drag</span>
-              </>)}
-              {card.note && (<>
-                <span className="mk-meta-key">Block</span>
-                <span className="mk-meta-val mk-blocked-note">{card.note}</span>
+              {issue.pullRequests.length > 0 && (<>
+                <span className="mk-meta-key">PRs</span>
+                <span className="mk-meta-val mk-mono">
+                  {issue.pullRequests.map(p => p.url).join(', ')}
+                </span>
               </>)}
             </div>
           </div>
 
           <section className="mk-drawer-section">
             <div className="mk-drawer-label">Description</div>
-            <p className="mk-drawer-text">
-              On iOS Safari and Chrome Android, dragging a card during a long press introduces ~80ms of jitter.
-              Likely the touchmove preventDefault timing — needs a debounce or a switch to pointer events.
-            </p>
+            {issue.description
+              ? <p className="mk-drawer-text">{issue.description}</p>
+              : <p className="mk-drawer-text mk-meta-empty">No description.</p>}
           </section>
 
           <section className="mk-drawer-section">
             <div className="mk-drawer-label">Activity</div>
-            <ul className="mk-timeline">
-              <li className="mk-tl-item">
-                <span className="mk-tl-dot is-claude" />
-                <span className="mk-tl-text"><b>claude</b> opened <span className="mk-mono">PR #4821</span> · 12m ago</span>
-              </li>
-              <li className="mk-tl-item">
-                <span className="mk-tl-dot is-claude" />
-                <span className="mk-tl-text"><b>claude</b> picked this up · 38m ago</span>
-              </li>
-              <li className="mk-tl-item">
-                <span className="mk-tl-dot" />
-                <span className="mk-tl-text"><b>jr</b> moved this from Todo → Doing · 1h ago</span>
-              </li>
-            </ul>
+            {issue.comments.length > 0 ? (
+              <ul className="mk-timeline">
+                {issue.comments.map((c, i) => (
+                  <li key={i} className="mk-tl-item">
+                    <span className={`mk-tl-dot ${c.author === 'claude' ? 'is-claude' : ''}`} />
+                    <span className="mk-tl-text"><b>{c.author}</b> {c.body}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mk-drawer-text mk-meta-empty">No comments yet.</p>
+            )}
           </section>
         </div>
 
         <footer className="mk-drawer-foot">
-          {card.column !== 'done' ? (
+          {issue.column !== 'done' ? (
             <>
               <button className="mk-btn-primary" onClick={onHandToClaude}>
                 <Icon name="claude" /> Hand to claude
