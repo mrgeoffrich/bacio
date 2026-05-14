@@ -1,5 +1,13 @@
 import React from 'react';
 
+// One- or two-letter badge for an avatar: initials for multi-word
+// names, otherwise the first two characters.
+function initials(name) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return name.slice(0, 2).toUpperCase();
+}
+
 export default function KanbanCard({ card, isDragging, onDragStart, onDragEnd, onOpen }) {
   return (
     <article
@@ -10,7 +18,6 @@ export default function KanbanCard({ card, isDragging, onDragStart, onDragEnd, o
       onClick={onOpen}
     >
       <div className="mk-card-top">
-        <span className={`mk-pill mk-status-${card.column}`}>{card.columnLabel}</span>
         <span className="mk-card-id">{card.key}</span>
       </div>
       <h3 className="mk-card-title">{card.title}</h3>
@@ -24,7 +31,7 @@ export default function KanbanCard({ card, isDragging, onDragStart, onDragEnd, o
           <div className="mk-avatars">
             {card.assignees.map((a, i) => (
               <span key={i} className={`mk-av ${a === 'claude' ? 'is-claude' : ''}`}>
-                {a === 'claude' ? 'c' : a}
+                {a === 'claude' ? 'c' : initials(a)}
               </span>
             ))}
           </div>

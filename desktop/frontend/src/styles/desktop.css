@@ -39,6 +39,13 @@
 .mk-status-done         { background: var(--status-done-bg);    color: var(--status-done); }
 .mk-status-cancelled    { background: var(--ink-50);            color: var(--fg-4); }
 
+/* Board cards lead with the issue ID (the status pill was removed —
+   the column already conveys state). The kit gives .mk-card-id a
+   margin-left: auto to push it past the pill; with the pill gone it
+   sits flush-left instead. Scoped to .mk-card-top so the issue
+   drawer's header use of .mk-card-id is untouched. */
+.mk-card-top .mk-card-id { margin-left: 0; }
+
 /* App-level loading / error placeholder shown in the main area before
    the board's data resolves. */
 .mk-app-state {
