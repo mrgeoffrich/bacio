@@ -4,8 +4,9 @@
 /**
  * BoardService is the Wails-bound API the kanban frontend talks to. It
  * wraps a local bacio client.Client and reshapes its results into the
- * DTOs the imported UI kit expects. Mostly read-only; DispatchIssue is
- * the one mutation (queuing a dispatch for an agent).
+ * DTOs the imported UI kit expects. Mostly read-only; the mutations are
+ * DispatchIssue (queuing a dispatch for an agent), UpdateIssueDescription,
+ * and AddComment (both driven from the issue-drawer Edit modal).
  * @module
  */
 
@@ -18,6 +19,18 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 import * as $models from "./models.js";
 
 /**
+ * AddComment appends a comment to an issue and returns the refreshed
+ * issue-drawer payload. An empty author falls back to the OS username,
+ * the same default the CLI uses for human actors. repoPrefix may be empty
+ * or "all" — the prefix is then derived from the canonical issue key.
+ */
+export function AddComment(repoPrefix: string, key: string, author: string, body: string): $CancellablePromise<$models.IssueDetail> {
+    return $Call.ByID(1143577105, repoPrefix, key, author, body).then(($result: any) => {
+        return $$createType0($result);
+    });
+}
+
+/**
  * AddRepository opens a native folder picker and registers the chosen git
  * working tree as a bacio repo, returning it as a Board. A Board with an empty
  * Prefix means the user cancelled the dialog. The picked folder may sit
@@ -25,7 +38,7 @@ import * as $models from "./models.js";
  */
 export function AddRepository(): $CancellablePromise<$models.Board> {
     return $Call.ByID(2129265032).then(($result: any) => {
-        return $$createType0($result);
+        return $$createType1($result);
     });
 }
 
@@ -37,7 +50,7 @@ export function AddRepository(): $CancellablePromise<$models.Board> {
  */
 export function DispatchIssue(repoPrefix: string, issueKey: string, agentName: string, mode: string, note: string): $CancellablePromise<$models.DispatchDTO> {
     return $Call.ByID(715303058, repoPrefix, issueKey, agentName, mode, note).then(($result: any) => {
-        return $$createType1($result);
+        return $$createType2($result);
     });
 }
 
@@ -48,7 +61,7 @@ export function DispatchIssue(repoPrefix: string, issueKey: string, agentName: s
  */
 export function GetIssue(repoPrefix: string, key: string): $CancellablePromise<$models.IssueDetail> {
     return $Call.ByID(624409110, repoPrefix, key).then(($result: any) => {
-        return $$createType2($result);
+        return $$createType0($result);
     });
 }
 
@@ -92,13 +105,24 @@ export function ListColumns(): $CancellablePromise<$models.BoardColumn[]> {
     });
 }
 
+/**
+ * UpdateIssueDescription replaces an issue's description and returns the
+ * refreshed issue-drawer payload. repoPrefix may be empty or "all" — the
+ * prefix is then derived from the canonical issue key.
+ */
+export function UpdateIssueDescription(repoPrefix: string, key: string, description: string): $CancellablePromise<$models.IssueDetail> {
+    return $Call.ByID(2921112347, repoPrefix, key, description).then(($result: any) => {
+        return $$createType0($result);
+    });
+}
+
 // Private type creation functions
-const $$createType0 = $models.Board.createFrom;
-const $$createType1 = $models.DispatchDTO.createFrom;
-const $$createType2 = $models.IssueDetail.createFrom;
+const $$createType0 = $models.IssueDetail.createFrom;
+const $$createType1 = $models.Board.createFrom;
+const $$createType2 = $models.DispatchDTO.createFrom;
 const $$createType3 = $models.AgentCard.createFrom;
 const $$createType4 = $Create.Array($$createType3);
-const $$createType5 = $Create.Array($$createType0);
+const $$createType5 = $Create.Array($$createType1);
 const $$createType6 = $models.BoardCard.createFrom;
 const $$createType7 = $Create.Array($$createType6);
 const $$createType8 = $models.BoardColumn.createFrom;

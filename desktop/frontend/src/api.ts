@@ -16,6 +16,7 @@ import {
   DispatchDTO,
   DocSummary,
   DocContent,
+  DocLinkDTO,
   FeatureSummary,
   FeatureDetail,
   FeatureLinkedIssue,
@@ -24,7 +25,7 @@ import {
   PromptTemplateDTO,
 } from '../bindings/github.com/mrgeoffrich/bacio/desktop';
 
-export type { Board, BoardColumn, BoardCard, IssueDetail, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, FeatureSummary, FeatureDetail, FeatureLinkedIssue, HistoryPage, HistoryEntryDTO, PromptTemplateDTO };
+export type { Board, BoardColumn, BoardCard, IssueDetail, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, HistoryPage, HistoryEntryDTO, PromptTemplateDTO };
 
 function normalize(err: unknown): Error {
   if (err instanceof Error) return err;
@@ -99,6 +100,35 @@ export async function dispatchIssue(
 ): Promise<DispatchDTO> {
   try {
     return await BoardService.DispatchIssue(repoPrefix, issueKey, agentName, mode, note);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// updateIssueDescription replaces an issue's description and returns the
+// refreshed issue-drawer payload.
+export async function updateIssueDescription(
+  repoPrefix: string,
+  key: string,
+  description: string,
+): Promise<IssueDetail> {
+  try {
+    return await BoardService.UpdateIssueDescription(repoPrefix, key, description);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// addComment appends a comment to an issue and returns the refreshed
+// issue-drawer payload. An empty author falls back to the OS username.
+export async function addComment(
+  repoPrefix: string,
+  key: string,
+  author: string,
+  body: string,
+): Promise<IssueDetail> {
+  try {
+    return await BoardService.AddComment(repoPrefix, key, author, body);
   } catch (err) {
     throw normalize(err);
   }
