@@ -31,7 +31,7 @@ They start in the root `PersistentPreRunE` and flush in `stopProfiling` (`intern
 
 ## Architecture in one screen
 
-- Entry point: `cmd/bacio/main.go` → `internal/cli.NewRoot()` (cobra).
+- Entry point: `cmd/bacio/main.go` → `internal/cli.NewRoot()` (cobra). `NewRoot()` returns `(*cobra.Command, func())` — the func is a cleanup closure `main.go` runs after `Execute()` to flush pprof profiles (see ## Profiling).
 - CLI commands: `internal/cli/*.go`, one file per command group (`issue`, `feature`, `repo`, `doc`, `link`, `pr`, `tag`, `comment`, `history`, `status`, `init`, `install_skill`, `tui`). Cross-cutting helpers live in `audit.go`, `context.go`, `output.go`, `output_flag.go`, `input.go`, `doc.go`.
 - Persistence: `internal/store/` over SQLite (`modernc.org/sqlite`, pure-Go, no CGO). Schema is in `internal/store/schema.sql` and re-applied on every `Open` — adding a new table is a matter of appending another `CREATE TABLE IF NOT EXISTS …`. Schema changes that need real ALTERs go through `migrate()` in `internal/store/store.go`.
 - Domain types: `internal/model/` — pure structs/enums, no DB.
