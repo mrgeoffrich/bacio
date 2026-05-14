@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/mrgeoffrich/bacio/internal/git"
 )
 
 // ErrNoConfig is the sentinel error returned by ReadProjectConfig
@@ -15,8 +17,14 @@ var ErrNoConfig = errors.New("no .bacio/config.yaml in project repo")
 
 // ProjectConfig is the parsed shape of .bacio/config.yaml — the
 // reverse pointer that lets a project repo find its sync remote.
-// Checked into the project repo so every collaborator agrees on
-// where the data lives.
+//
+// This file is machine-local, NOT shared via git: it's written by
+// `bacio sync init` / `bacio sync clone` on each machine and the
+// `.bacio/` directory should be gitignored (it also holds the
+// per-machine agent identity). Collaborators learn the sync remote
+// out-of-band and pass it to `bacio sync clone --remote <url>`. The
+// remote therefore only ever enters bacio through a trusted CLI flag,
+// not through a checked-in file an attacker could poison.
 type ProjectConfig struct {
 	Sync ProjectSync `yaml:"sync"`
 }
@@ -51,6 +59,14 @@ func ReadProjectConfig(projectRoot string) (*ProjectConfig, error) {
 	var c ProjectConfig
 	if err := strictDecode(b, &c); err != nil {
 		return nil, fmt.Errorf("parse project config: %w", err)
+	}
+	// Defence in depth: an older bacio (or a hand-edited file) may
+	// carry a remote that predates URL validation. Reject it loudly
+	// here rather than letting it reach `git`.
+	if c.Sync.Remote != "" {
+		if err := git.ValidateRemoteURL(c.Sync.Remote); err != nil {
+			return nil, fmt.Errorf("parse project config: invalid sync.remote: %w", err)
+		}
 	}
 	return &c, nil
 }

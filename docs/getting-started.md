@@ -170,18 +170,18 @@ From inside your project repo:
 bacio sync init ~/sync/your-project --remote git@github.com:you/your-project-bacio-sync.git
 ```
 
-This creates the sync repo at `~/sync/your-project`, exports the project's data, commits, and pushes. It also writes `.bacio/config.yaml` in your project (checked in) so other clones know which sync remote to use.
+This creates the sync repo at `~/sync/your-project`, exports the project's data, commits, and pushes. It also writes a machine-local `.bacio/config.yaml` in your project so steady-state `bacio sync` knows the remote. That file is **not** committed — `.bacio/` is gitignored (`bacio init` adds the rule).
 
 ### Joining the sync repo from another machine
 
-After cloning your project on machine 2:
+After cloning your project on machine 2, pass the sync repo's git URL explicitly:
 
 ```bash
 cd ~/Repos/your-project
-bacio sync clone           # uses .bacio/config.yaml to find the remote
+bacio sync clone --remote git@github.com:you/your-project-bacio-sync.git
 ```
 
-This clones the sync repo and imports its contents into the local SQLite DB. If the local DB already has issues for this prefix, `bacio sync clone` will refuse unless you pass `--allow-renumber`.
+This clones the sync repo, imports its contents into the local SQLite DB, and writes this machine's local `.bacio/config.yaml`. `--remote` is required — the config file is machine-local, so a fresh project clone has no remote to read. If the local DB already has issues for this prefix, `bacio sync clone` will refuse unless you pass `--allow-renumber`.
 
 ### Steady-state
 

@@ -12,7 +12,7 @@ Sync is **opt-in**. A project repo without `.bacio/config.yaml` and a sync remot
 ## The model
 
 - **Sync repo** — a git repo, marked by a `bacio-sync.yaml` sentinel at its root. One sync repo can hold many projects (one folder per prefix under `repos/`).
-- **Project repo** — your code repo. Points at the sync remote via `.bacio/config.yaml` (`sync.remote: <git URL>`). Check that file in.
+- **Project repo** — your code repo. Each machine records the sync remote in a **machine-local** `.bacio/config.yaml` (`sync.remote: <git URL>`). Don't commit it — `.bacio/` should be gitignored (`bacio init` adds the rule for you). Collaborators get the remote URL out-of-band and pass it to `bacio sync clone --remote <url>`.
 - **Reconciliation** — `bacio sync` runs `pull → import → export → commit → push`. Last-writer-wins per record. Already-in-git wins label collisions.
 - **Identity** — every record has an immutable UUIDv7 assigned at create time. Sync matches by `uuid`, never by label, so renumbers and renames never lose history.
 
@@ -31,7 +31,7 @@ This:
 1. Creates (or initialises) the sync repo at `~/sync/your-project`, writes `bacio-sync.yaml`.
 2. Exports your project's data into the sync repo.
 3. Commits and pushes (with `--remote`).
-4. Writes `.bacio/config.yaml` inside your project pointing at the sync remote.
+4. Writes a machine-local `.bacio/config.yaml` inside your project pointing at the sync remote (gitignored, not shared).
 
 `<local-path>` may be missing, an empty directory, a freshly `git init`-ed folder with no working-tree files (e.g. a just-cloned empty bare remote), **or an already-populated bacio sync repo**. The last case is *attach mode*: bacio pulls, imports, re-exports, commits, and pushes — connecting your project repo to an existing sync repo that already holds other projects.
 
@@ -43,14 +43,14 @@ Every export refreshes a top-level `index.yaml` at the sync-repo root: a machine
 
 ## Joining from a second machine
 
-After cloning your project on machine 2:
+After cloning your project on machine 2, you need the sync repo's git URL — get it from whoever set up sync (it's the same `--remote` URL used in first-time setup; it's also visible as `origin` in the sync repo itself):
 
 ```bash
 cd ~/code/your-project
-bacio sync clone
+bacio sync clone --remote git@github.com:you/your-project-bacio-sync.git
 ```
 
-`clone` reads `.bacio/config.yaml`, clones the sync repo, and runs the first import. If your local DB already has rows for this project's prefix that would collide, `clone` refuses unless you pass `--allow-renumber`. Use `--dry-run` to see the projected renumbers / renames before committing.
+`clone` clones the sync repo, runs the first import, and writes this machine's local `.bacio/config.yaml` so later `bacio sync` runs need no flags. `--remote` is required — `.bacio/config.yaml` is machine-local, so a freshly cloned project repo carries no remote to read. If your local DB already has rows for this project's prefix that would collide, `clone` refuses unless you pass `--allow-renumber`. Use `--dry-run` to see the projected renumbers / renames before committing.
 
 ## Steady state
 
