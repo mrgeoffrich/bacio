@@ -49,7 +49,7 @@ cd ~/your-project
 bacio tui
 ```
 
-A full-screen kanban with four tabs — Board (above), Features, Docs, History — all keyboard driven. `?` shows the bindings for the focused tab, `q` (or `esc`) exits. Open any card for the full description and comments, or jump to the other tabs:
+A full-screen kanban with six tabs — Board (above), Features, Documents, Agents, History, Settings — all keyboard driven. `?` shows the bindings for the focused tab, `q` (or `esc`) exits. Open any card for the full description and comments, or jump to the other tabs:
 
 <p align="center">
   <img src="docs/screenshots/02.png" alt="Card overlay" width="48%" />

@@ -50,6 +50,13 @@ type view interface {
 	// the tab strip. Empty means no detail; the regular tab strip
 	// renders as usual.
 	Breadcrumb() string
+	// CapturesInput reports whether the view is currently focused on a
+	// raw text input (e.g. a bubbles/textarea) that must receive literal
+	// `q` and digit keystrokes. While it returns true the shell does NOT
+	// treat `q` as quit or `1`-`9` as tab-switches — they route to the
+	// view instead. `ctrl+c` is unaffected: it is always a hard quit.
+	// Views with no text input return false unconditionally.
+	CapturesInput() bool
 }
 
 type tab struct {
@@ -96,7 +103,7 @@ func Run(s *store.Store, repo *model.Repo) error {
 	return err
 }
 
-// NewModel builds the four-tab TUI model wired against the given store
+// NewModel builds the six-tab TUI model wired against the given store
 // and repo. Exposed so alternative entry points (the WASM demo) can
 // embed the model into their own tea.Program with different program
 // options — e.g. WithInput/WithOutput for an xterm.js bridge.
@@ -115,6 +122,7 @@ func NewModel(s *store.Store, repo *model.Repo, el *leader.Elector) (*Model, err
 			{"Documents", newDocsView(s, repo)},
 			{"Agents", newAgentsView(s, repo)},
 			{"History", newHistoryView(s, repo)},
+			{"Settings", newSettingsView(s, repo)},
 		},
 		returnTab: -1,
 	}, nil
@@ -189,29 +197,42 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case tea.KeyMsg:
-		// ctrl+c and q always quit, even past an overlay. esc stays
-		// view-routed when an overlay is up so it closes the overlay
-		// rather than the program.
-		switch msg.String() {
-		case "ctrl+c", "q":
+		s := msg.String()
+		// captures is true when the active view is focused on a raw text
+		// input (e.g. the Settings tab's template-body textarea). While
+		// it's set the shell yields `q` and the digit keys to the view so
+		// they can be typed literally. `ctrl+c` is never yielded — it is
+		// the universal hard quit.
+		captures := m.tabs[m.active].v.CapturesInput()
+
+		// ctrl+c always quits. q quits too — except while a view is
+		// capturing raw input, where it must reach the text editor. esc
+		// stays view-routed when an overlay is up so it closes the
+		// overlay rather than the program.
+		if s == "ctrl+c" {
 			return m, tea.Quit
 		}
-		s := msg.String()
+		if s == "q" && !captures {
+			return m, tea.Quit
+		}
 		hasOverlay := m.tabs[m.active].v.HasOverlay()
 
-		// Digit shortcuts always win — the user can jump screens from
-		// anywhere, including inside an overlay. Close the leaving
-		// view's overlay first so coming back lands on its base layout.
+		// Digit shortcuts switch tabs from anywhere, including inside an
+		// overlay — but not while a view is capturing raw input (a digit
+		// must be typeable into the textarea). Close the leaving view's
+		// overlay first so coming back lands on its base layout.
 		// (tab/shift+tab are intentionally NOT global: views use tab to
 		// cycle their inner panes, e.g. description ↔ comments ↔
 		// attachments inside the card overlay.)
-		if idx, ok := digitSwitchTarget(s, len(m.tabs)); ok {
-			if idx != m.active {
-				m.tabs[m.active].v.CloseOverlay()
-				m.active = idx
-				m.returnTab = -1 // explicit nav cancels any pending auto-return
+		if !captures {
+			if idx, ok := digitSwitchTarget(s, len(m.tabs)); ok {
+				if idx != m.active {
+					m.tabs[m.active].v.CloseOverlay()
+					m.active = idx
+					m.returnTab = -1 // explicit nav cancels any pending auto-return
+				}
+				return m, nil
 			}
-			return m, nil
 		}
 
 		if !hasOverlay && s == "esc" {
