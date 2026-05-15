@@ -150,6 +150,11 @@ type AgentCard struct {
 	// session is not a valid dispatch target.
 	Busy       bool          `json:"busy"`
 	BusyIssue  string        `json:"busyIssue"`
+	// HasChannel is true when the bacio channel MCP server has been seen
+	// running alongside this session. Only sessions with a live channel
+	// can receive push dispatches — sessions without one are interactive
+	// (the user hasn't granted channel permission) and should be skipped.
+	HasChannel bool          `json:"hasChannel"`
 	LastSeenAt time.Time     `json:"lastSeenAt"`
 	Claims     []ClaimDTO    `json:"claims"`
 	Dispatches []DispatchDTO `json:"dispatches"`
@@ -478,7 +483,7 @@ func dispatchDTO(d *model.AgentDispatch) DispatchDTO {
 // Returns "" when no agent qualifies.
 func pickFreeAgent(cards []AgentCard) string {
 	for _, c := range cards {
-		if c.Status == "ended" || c.Busy || c.AgentName == "" {
+		if c.Status == "ended" || c.Busy || c.AgentName == "" || !c.HasChannel {
 			continue
 		}
 		if hasOpenDispatch(c) {
@@ -562,6 +567,7 @@ func (b *BoardService) ListAgents(repoPrefix string) ([]AgentCard, error) {
 			Branch:     s.Branch,
 			RepoPrefix: s.RepoPrefix,
 			Status:     model.SessionLiveness(s, now),
+			HasChannel: s.ChannelSeenAt != nil,
 			LastSeenAt: s.LastSeenAt,
 			Claims:     []ClaimDTO{},
 			Dispatches: []DispatchDTO{},
