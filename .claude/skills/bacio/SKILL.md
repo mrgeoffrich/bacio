@@ -78,7 +78,7 @@ bacio agent claim MINI-42 --user <your-name> \
   --prompt "Implement the tab-strip fix end-to-end, then open a PR."
 ```
 
-This records *intent*. It does NOT move the issue or set the assignee — use `bacio issue state` / `bacio issue assign` for that. Multiple agents may claim the same issue (pairing/review is a real flow).
+This records *intent* **and** stamps the issue's `assignee` with your agent identity — so `taken` and `assignee` stay in lockstep. It does NOT move the issue's state — use `bacio issue state` for that. Multiple agents may claim the same issue (pairing/review is a real flow); the most recent claim wins the `assignee` field. Releasing the last open claim (or `bacio agent end`) clears the `assignee` again — unless a human reassigned it in the meantime, in which case that deliberate change is left alone.
 
 Pass `--prompt` (or `"prompt"` in `--json`) with the instruction/dispatch text you're working from — it's stored on the claim so the issue carries a record of *who* worked it and *why*. Re-claiming with a fresher `--prompt` updates it in place. A claim makes the issue **`taken`** (a derived signal — true while the issue has any open claim); busy agents are excluded as dispatch targets in the TUI and desktop app until they release.
 
@@ -564,15 +564,22 @@ bacio agent register                    Register / refresh this session
   --branch <name>                       Default: current git branch
 bacio agent heartbeat                   Bump last_seen_at on a registered session
 bacio agent end --reason <r>            Reason: stop|clear|logout|crash|other
-                                     (also auto-releases every open claim)
-bacio agent claim <ISSUE-KEY>           Record intent — does NOT move the issue
-                                     or set assignee. Multiple agents may
-                                     claim the same issue (pairing/review).
+                                     (also auto-releases every open claim,
+                                     unassigning any issue left unclaimed)
+bacio agent claim <ISSUE-KEY>           Record intent + stamp the issue's
+                                     assignee with this agent's identity
+                                     (does NOT move the issue's state).
+                                     Multiple agents may claim the same
+                                     issue (pairing/review); last claim
+                                     wins the assignee field.
   --prompt <text>                       Instruction/dispatch text this session
                                      is working from — stored on the claim;
                                      a re-claim with a fresher --prompt updates
                                      it in place.
-bacio agent release <ISSUE-KEY>         Release this session's claim on an issue
+bacio agent release <ISSUE-KEY>         Release this session's claim on an
+                                     issue; clears the assignee once the
+                                     issue has no open claims left (a
+                                     human-set assignee is left alone)
 bacio agent dispatch [ISSUE-KEY]        Queue a work item for an agent / session
   --to <agent-slug>                     Target a persistent identity
   --session <id>                        Target one specific session

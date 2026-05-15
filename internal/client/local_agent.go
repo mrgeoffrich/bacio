@@ -179,7 +179,7 @@ func (c *localClient) EndAgent(ctx context.Context, repo *model.Repo, in inputs.
 		projected.EndReason = in.Reason
 		return &projected, nil
 	}
-	sess, err := c.store.EndAgentSession(in.SessionID, in.Reason)
+	sess, assigneeChanges, err := c.store.EndAgentSession(in.SessionID, in.Reason)
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +189,39 @@ func (c *localClient) EndAgent(ctx context.Context, repo *model.Repo, in inputs.
 		TargetID: &sess.ID, TargetLabel: sess.SessionID,
 		Details: "reason=" + sess.EndReason,
 	})
+	// Auto-releasing claims may have unassigned issues — audit each one.
+	for _, ch := range assigneeChanges {
+		c.recordAssigneeChange(ch)
+	}
 	return sess, nil
+}
+
+// recordAssigneeChange writes the issue.assign audit row for an
+// issues.assignee mutation a claim / release / end made as a side
+// effect of keeping the claim and the assignee in lockstep. A no-op
+// change (Old == New) records nothing. Detail strings mirror the
+// AssignIssue / UnassignIssue conventions so `bacio history` reads
+// consistently regardless of which path moved the assignee.
+func (c *localClient) recordAssigneeChange(ch store.AssigneeChange) {
+	if !ch.Changed() {
+		return
+	}
+	var details string
+	switch {
+	case ch.New == "":
+		details = fmt.Sprintf("%s → (unassigned)", ch.Old)
+	case ch.Old == "":
+		details = "assigned to " + ch.New
+	default:
+		details = fmt.Sprintf("%s → %s", ch.Old, ch.New)
+	}
+	repoID, issueID := ch.RepoID, ch.IssueID
+	c.recordOp(model.HistoryEntry{
+		RepoID: &repoID, RepoPrefix: ch.RepoPrefix,
+		Op: "issue.assign", Kind: "issue",
+		TargetID: &issueID, TargetLabel: ch.IssueKey,
+		Details: details,
+	})
 }
 
 func (c *localClient) ClaimAgent(ctx context.Context, repo *model.Repo, in inputs.AgentClaimInput, dryRun bool) (*model.AgentClaim, error) {
@@ -216,7 +248,7 @@ func (c *localClient) ClaimAgent(ctx context.Context, repo *model.Repo, in input
 			ClaimedAt: now,
 		}, nil
 	}
-	claim, created, err := c.store.AddAgentClaim(in.SessionID, iss.ID, in.Prompt)
+	claim, created, assigneeChange, err := c.store.AddAgentClaim(in.SessionID, iss.ID, in.Prompt)
 	if err != nil {
 		return nil, err
 	}
@@ -237,6 +269,10 @@ func (c *localClient) ClaimAgent(ctx context.Context, repo *model.Repo, in input
 		TargetID: &claim.ID, TargetLabel: in.SessionID,
 		Details: "issue=" + iss.Key,
 	})
+	// A fresh claim also stamps the assignee — audit that move too.
+	if assigneeChange != nil {
+		c.recordAssigneeChange(*assigneeChange)
+	}
 	return claim, nil
 }
 
@@ -263,7 +299,7 @@ func (c *localClient) ReleaseAgent(ctx context.Context, repo *model.Repo, in inp
 			ReleasedAt: &now,
 		}, nil
 	}
-	claim, err := c.store.ReleaseAgentClaim(in.SessionID, iss.ID)
+	claim, assigneeChange, err := c.store.ReleaseAgentClaim(in.SessionID, iss.ID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, fmt.Errorf("session %q has no open claim on %s", in.SessionID, iss.Key)
@@ -277,6 +313,10 @@ func (c *localClient) ReleaseAgent(ctx context.Context, repo *model.Repo, in inp
 		TargetID: &claim.ID, TargetLabel: in.SessionID,
 		Details: "issue=" + iss.Key,
 	})
+	// Releasing the last open claim unassigns the issue — audit that.
+	if assigneeChange != nil {
+		c.recordAssigneeChange(*assigneeChange)
+	}
 	return claim, nil
 }
 

@@ -1,16 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import Icon from './Icon.jsx';
 
-// One- or two-letter badge for an avatar: initials for multi-word
-// names, otherwise the first two characters. Falls back to '?' for
-// empty / missing names rather than rendering a blank badge.
-function initials(name) {
-  if (!name) return '?';
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
-  return (parts[0] ?? '').slice(0, 2).toUpperCase() || '?';
-}
-
 export default function KanbanCard({ card, promptConfig, isDragging, amLeader, onDragStart, onDragEnd, onOpen, onDispatch }) {
   // The prompts valid to dispatch from this card's current state — the
   // state-gate config is global (App-owned), filtered per-card here.
@@ -72,13 +62,14 @@ export default function KanbanCard({ card, promptConfig, isDragging, amLeader, o
       )}
       {hasFooter && (
         <footer className="mk-card-foot">
-          <div className="mk-avatars">
-            {card.assignees.map((a, i) => (
-              <span key={i} className={`mk-av ${a === 'claude' ? 'is-claude' : ''}`}>
-                {a === 'claude' ? 'c' : initials(a)}
-              </span>
-            ))}
-          </div>
+          {card.assignees.length > 0 && (
+            <span
+              className={`mk-card-assignee ${card.claude ? 'is-claude' : ''}`}
+              title={card.assignees.join(', ')}
+            >
+              {card.assignees.join(', ')}
+            </span>
+          )}
           {validPrompts.length > 0 && (
             <div className="mk-card-action" ref={actionRef}>
               <button

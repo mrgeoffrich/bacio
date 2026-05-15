@@ -247,6 +247,71 @@ func TestSetPromptTemplateDryRun(t *testing.T) {
 	}
 }
 
+// TestClaimReleaseKeepsAssigneeInLockstep locks in BACI-27 at the
+// client layer: ClaimAgent stamps the issue's assignee with the
+// claiming identity and records an issue.assign audit row alongside
+// agent.claim; ReleaseAgent clears it and records the inverse.
+func TestClaimReleaseKeepsAssigneeInLockstep(t *testing.T) {
+	p := newPair(t)
+	defer p.cleanup()
+	ctx := context.Background()
+
+	iss, err := p.store.CreateIssue(p.repo.ID, nil, "lockstep", "", model.StateTodo, nil)
+	if err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+	ag, _, err := p.store.UpsertAgent("lockstep-fox@claude.test", true)
+	if err != nil {
+		t.Fatalf("UpsertAgent: %v", err)
+	}
+	if _, err := p.store.UpsertAgentSession(store.UpsertAgentSessionIn{
+		SessionID: "sess-lockstep", RepoID: p.repo.ID, AgentID: &ag.ID, Actor: "tester",
+	}); err != nil {
+		t.Fatalf("UpsertAgentSession: %v", err)
+	}
+
+	assignRows := func() int {
+		t.Helper()
+		rows, err := p.store.ListHistory(store.HistoryFilter{RepoID: &p.repo.ID, Op: "issue.assign"})
+		if err != nil {
+			t.Fatalf("ListHistory: %v", err)
+		}
+		return len(rows)
+	}
+
+	if _, err := p.local.ClaimAgent(ctx, p.repo, inputs.AgentClaimInput{
+		SessionID: "sess-lockstep", IssueKey: iss.Key,
+	}, false); err != nil {
+		t.Fatalf("ClaimAgent: %v", err)
+	}
+	got, err := p.store.GetIssueByID(iss.ID)
+	if err != nil {
+		t.Fatalf("GetIssueByID: %v", err)
+	}
+	if got.Assignee != "lockstep-fox@claude.test" {
+		t.Fatalf("after claim, assignee = %q, want lockstep-fox@claude.test", got.Assignee)
+	}
+	if n := assignRows(); n != 1 {
+		t.Fatalf("issue.assign audit rows after claim = %d, want 1", n)
+	}
+
+	if _, err := p.local.ReleaseAgent(ctx, p.repo, inputs.AgentReleaseInput{
+		SessionID: "sess-lockstep", IssueKey: iss.Key,
+	}, false); err != nil {
+		t.Fatalf("ReleaseAgent: %v", err)
+	}
+	got, err = p.store.GetIssueByID(iss.ID)
+	if err != nil {
+		t.Fatalf("GetIssueByID: %v", err)
+	}
+	if got.Assignee != "" {
+		t.Fatalf("after release, assignee = %q, want empty", got.Assignee)
+	}
+	if n := assignRows(); n != 2 {
+		t.Fatalf("issue.assign audit rows after release = %d, want 2", n)
+	}
+}
+
 // TestDispatchRemoteNotSupported locks in that the remote backend
 // refuses dispatch verbs with ErrLocalOnly (the registry is local-only
 // in v1).
