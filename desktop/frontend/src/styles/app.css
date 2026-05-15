@@ -167,6 +167,14 @@ body { margin: 0; }
   margin-top: 2px;
 }
 .mk-card-meta { display: flex; gap: 8px; margin-left: auto; }
+/* The assigned identity, shown in monospace — agent slugs like
+   bold-quail@claude.shiny read better mono. min-width:0 + ellipsis so a
+   long slug truncates instead of blowing out the card width. */
+.mk-card-assignee {
+  font-family: var(--font-mono); font-size: 11px; color: var(--fg-3);
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mk-card-assignee.is-claude { color: var(--status-claude); }
 
 /* ---------- Per-card dispatch action button + prompt popover ---------- */
 .mk-card-action { position: relative; margin-left: auto; }
