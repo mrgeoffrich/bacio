@@ -43,13 +43,22 @@ func (b *boardView) openDispatchPicker() {
 		b.err = fmt.Errorf("send to agent: only todo issues can be dispatched")
 		return
 	}
-	sessions, err := b.store.ListAgentSessions(store.AgentSessionFilter{
+	allSessions, err := b.store.ListAgentSessions(store.AgentSessionFilter{
 		RepoID:    &b.repo.ID,
 		OnlyAlive: true,
 	})
 	if err != nil {
 		b.err = err
 		return
+	}
+	// Only offer sessions that have a live bacio channel — sessions
+	// without one are interactive (the user hasn't granted channel
+	// permission) and can't receive push dispatches.
+	sessions := make([]*model.AgentSession, 0, len(allSessions))
+	for _, s := range allSessions {
+		if s.ChannelSeenAt != nil {
+			sessions = append(sessions, s)
+		}
 	}
 	// A busy session (one holding an open claim) isn't a valid dispatch
 	// target — pull the repo's open claims once and mark each session.
