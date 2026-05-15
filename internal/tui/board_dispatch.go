@@ -35,6 +35,10 @@ func (b *boardView) openDispatchPicker() {
 	if iss == nil {
 		return
 	}
+	if b.takenIssues[iss.ID] {
+		b.err = fmt.Errorf("send to agent: %s is taken — an agent already holds it", iss.Key)
+		return
+	}
 	if iss.State != model.StateTodo {
 		b.err = fmt.Errorf("send to agent: only todo issues can be dispatched")
 		return

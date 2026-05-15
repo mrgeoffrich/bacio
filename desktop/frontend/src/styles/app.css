@@ -143,6 +143,14 @@ body { margin: 0; }
 .mk-card.is-dragging { box-shadow: var(--shadow-2); transform: rotate(-1.5deg); cursor: grabbing; opacity: .9; }
 .mk-card.is-claude { animation: mk-breathe 2.4s ease-in-out infinite; }
 @keyframes mk-breathe { 0%,100% { box-shadow: var(--shadow-1); } 50% { box-shadow: 0 0 0 2px var(--status-claude-bg), var(--shadow-1); } }
+/* A taken card is held by an agent — bolder accent border, and the grab
+   cursor is dropped since drag is disabled. Coexists with .is-claude (a
+   separate signal) and .is-dragging. */
+.mk-card.is-taken {
+  border-width: 2px; border-color: var(--status-claude);
+  cursor: not-allowed;
+}
+.mk-card.is-taken:hover { border-color: var(--status-claude); transform: none; }
 .mk-card-top { display: flex; align-items: center; gap: 6px; }
 .mk-card-id { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); }
 .mk-card-title { margin: 0; font-size: 14px; font-weight: 500; line-height: 1.35; color: var(--fg-1); }
@@ -174,6 +182,15 @@ body { margin: 0; }
 .mk-card-action-btn:hover {
   border-color: var(--border-2); color: var(--status-claude);
   background: var(--status-claude-bg);
+}
+/* Disabled on a taken card — neutralise the hover affordances so it
+   reads as inert. */
+.mk-card-action-btn:disabled {
+  opacity: .5; cursor: not-allowed;
+}
+.mk-card-action-btn:disabled:hover {
+  border-color: var(--border-1); color: var(--fg-3);
+  background: var(--paper);
 }
 .mk-card-action-btn .mk-icon { width: 13px; height: 13px; }
 .mk-card-action-menu {

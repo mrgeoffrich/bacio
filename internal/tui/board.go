@@ -52,6 +52,11 @@ type boardView struct {
 	scroll        map[model.State]int // top visible card index per column
 	detailVisible bool
 
+	// takenIssues is the repo-wide set of issues with an open agent
+	// claim, keyed by issue ID. Refreshed on every reload(). Taken
+	// cards are marked in renderColumn and refuse the `x` dispatch.
+	takenIssues map[int64]bool
+
 	selected    *model.Issue
 	comments    []*model.Comment
 	commentsErr error
@@ -221,6 +226,19 @@ func (b *boardView) reload() error {
 	if err != nil {
 		return err
 	}
+	// Repo-wide set of issues with an open agent claim — one query, used
+	// to mark taken cards and gate the `x` dispatch.
+	openClaims, err := b.store.OpenClaimsBySession(b.repo.ID)
+	if err != nil {
+		return err
+	}
+	taken := map[int64]bool{}
+	for _, claims := range openClaims {
+		for _, c := range claims {
+			taken[c.IssueID] = true
+		}
+	}
+	b.takenIssues = taken
 	for _, st := range b.states {
 		b.columns[st] = nil
 	}
@@ -829,7 +847,15 @@ func (b *boardView) renderColumn(st model.State, focused bool, width, height int
 		fullW := contentW
 
 		isSel := i == sel && focused
+		// A taken card (an agent holds an open claim on it) renders bold
+		// so a human can see at a glance not to touch it — the `x`
+		// dispatch is also refused on it. Bold survives the selected
+		// state (selStyle.Bold) so the signal doesn't vanish on focus.
+		isTaken := b.takenIssues[iss.ID]
 		styler := cardStyle
+		if isTaken {
+			styler = cardStyle.Bold(true)
+		}
 		// keyRender colours the [ and ] in the feature colour while
 		// leaving the number itself in keyStyle's lavender. That's the
 		// only place the feature signal lives now — the old ▌ stripe
@@ -837,15 +863,25 @@ func (b *boardView) renderColumn(st model.State, focused bool, width, height int
 		// per-rune styling) because nested lipgloss resets punch holes
 		// in selStyle's background; the colour is sacrificed in the
 		// selected state, same tradeoff the original code made for the
-		// whole key.
+		// whole key. A taken card overrides the bracket colour with the
+		// amber takenColor so the marker reads even against a feature hue.
 		var keyRender string
 		if isSel {
 			styler = selStyle
+			if isTaken {
+				styler = selStyle.Bold(true)
+			}
 			keyRender = bracketed
 		} else {
-			bracketStyle := lipgloss.NewStyle().Foreground(featureColor(iss.FeatureSlug))
+			bracketColor := featureColor(iss.FeatureSlug)
+			numStyle := keyStyle
+			if isTaken {
+				bracketColor = takenColor
+				numStyle = keyStyle.Foreground(takenColor).Bold(true)
+			}
+			bracketStyle := lipgloss.NewStyle().Foreground(bracketColor).Bold(isTaken)
 			keyRender = bracketStyle.Render("[") +
-				keyStyle.Render(fmt.Sprintf("%2d", iss.Number)) +
+				numStyle.Render(fmt.Sprintf("%2d", iss.Number)) +
 				bracketStyle.Render("]")
 		}
 

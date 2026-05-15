@@ -59,7 +59,7 @@ export default function Board({ columns, cards, promptConfig, hideEmptyColumns, 
                   card={card}
                   promptConfig={promptConfig}
                   isDragging={dragKey === card.key}
-                  onDragStart={() => setDragKey(card.key)}
+                  onDragStart={() => { if (!card.taken) setDragKey(card.key); }}
                   onDragEnd={() => { setDragKey(null); setOverCol(null); }}
                   onOpen={() => onOpenCard(card)}
                   onDispatch={onDispatchFromCard}

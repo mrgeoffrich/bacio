@@ -56,6 +56,10 @@ type BoardCard struct {
 	Tags        []string `json:"tags"`
 	Assignees   []string `json:"assignees"`
 	Claude      bool     `json:"claude"`
+	// Taken is the derived "an agent is actively holding this issue"
+	// signal — true while the issue has an open agent claim. The Board
+	// bolds taken cards and disables drag / per-card actions on them.
+	Taken bool `json:"taken"`
 }
 
 // CommentDTO is one issue comment.
@@ -184,7 +188,7 @@ func assigneeList(a string) []string {
 	return []string{a}
 }
 
-func cardFromIssue(iss *model.Issue) BoardCard {
+func cardFromIssue(iss *model.Issue, taken bool) BoardCard {
 	tags := iss.Tags
 	if tags == nil {
 		tags = []string{}
@@ -197,6 +201,7 @@ func cardFromIssue(iss *model.Issue) BoardCard {
 		Tags:        tags,
 		Assignees:   assigneeList(iss.Assignee),
 		Claude:      iss.Assignee == "claude",
+		Taken:       taken,
 	}
 }
 
@@ -300,9 +305,20 @@ func (b *BoardService) ListCards(repoPrefix string) ([]BoardCard, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Derive each card's `taken` from the repo's open agent claims —
+	// one bulk query (filter.Repo is nil for the "all" board, which
+	// ListOpenClaims handles). Issue keys are globally unique (PREFIX-N).
+	claims, err := b.client.ListOpenClaims(ctx, filter.Repo)
+	if err != nil {
+		return nil, err
+	}
+	taken := make(map[string]bool, len(claims))
+	for _, c := range claims {
+		taken[c.IssueKey] = true
+	}
 	cards := make([]BoardCard, 0, len(issues))
 	for _, iss := range issues {
-		cards = append(cards, cardFromIssue(iss))
+		cards = append(cards, cardFromIssue(iss, taken[iss.Key]))
 	}
 	return cards, nil
 }
@@ -407,7 +423,9 @@ func (b *BoardService) SetIssueState(repoPrefix, key, state string) (BoardCard, 
 	if err != nil {
 		return BoardCard{}, err
 	}
-	return cardFromIssue(iss), nil
+	// A card only reaches here via drag, which the UI blocks for taken
+	// cards — so it can't be taken. Skip the extra claims query.
+	return cardFromIssue(iss, false), nil
 }
 
 // AddComment appends a comment to an issue and returns the refreshed

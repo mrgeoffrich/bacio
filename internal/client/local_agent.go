@@ -311,6 +311,39 @@ func (c *localClient) ShowAgentSession(ctx context.Context, sessionID string) (*
 	return &AgentSessionView{Session: sess, Claims: claims}, nil
 }
 
+// ListOpenClaims flattens store.OpenClaimsBySession (which buckets open
+// claims by session) into a flat slice. With repo == nil it concatenates
+// across every tracked repo. One query per repo — no N+1.
+func (c *localClient) ListOpenClaims(ctx context.Context, repo *model.Repo) ([]*model.AgentClaim, error) {
+	collect := func(repoID int64) ([]*model.AgentClaim, error) {
+		bySession, err := c.store.OpenClaimsBySession(repoID)
+		if err != nil {
+			return nil, err
+		}
+		var out []*model.AgentClaim
+		for _, claims := range bySession {
+			out = append(out, claims...)
+		}
+		return out, nil
+	}
+	if repo != nil {
+		return collect(repo.ID)
+	}
+	repos, err := c.store.ListRepos()
+	if err != nil {
+		return nil, err
+	}
+	var out []*model.AgentClaim
+	for _, r := range repos {
+		claims, err := collect(r.ID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, claims...)
+	}
+	return out, nil
+}
+
 func agentRegisterDetails(sess *model.AgentSession) string {
 	var parts []string
 	if sess.AgentName != "" {
