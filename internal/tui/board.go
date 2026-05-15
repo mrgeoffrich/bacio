@@ -57,6 +57,12 @@ type boardView struct {
 	// cards are marked in renderColumn and refuse the `x` dispatch.
 	takenIssues map[int64]bool
 
+	// amLeader / holderLabel track the UI leader election (BACI-23).
+	// amLeader defaults to true so dispatch works before the first tick.
+	// Updated via leaderStateMsg from the shell on every ~10s election tick.
+	amLeader    bool
+	holderLabel string
+
 	selected    *model.Issue
 	comments    []*model.Comment
 	commentsErr error
@@ -157,6 +163,7 @@ func newBoardView(s *store.Store, repo *model.Repo, actor string) (*boardView, e
 		rows:           map[model.State]int{},
 		scroll:         map[model.State]int{},
 		detailVisible:  true,
+		amLeader:       true, // optimistic default: allow dispatch before first election tick
 	}
 	if err := b.reload(); err != nil {
 		return nil, err
@@ -342,6 +349,9 @@ func (b *boardView) refreshSelection() {
 func (b *boardView) Init() tea.Cmd { return boardRefreshTick() }
 
 func (b *boardView) Status() string {
+	if b.err != nil {
+		return b.err.Error()
+	}
 	if b.lastRefresh.IsZero() {
 		return ""
 	}
@@ -419,6 +429,14 @@ func (b *boardView) Update(msg tea.Msg) tea.Cmd {
 			b.refreshSelection()
 		}
 		return boardRefreshTick()
+	}
+	if lsm, ok := msg.(leaderStateMsg); ok {
+		b.amLeader = lsm.state.AmLeader
+		b.holderLabel = lsm.state.HolderLabel
+		if b.amLeader {
+			b.err = nil // clear any standby message on promotion
+		}
+		return nil
 	}
 	key, ok := msg.(tea.KeyMsg)
 	if !ok {

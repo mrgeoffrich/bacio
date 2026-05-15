@@ -31,6 +31,14 @@ const maxDispatchNote = 1000
 // card. It only acts on todo issues — the keybind is otherwise a no-op
 // with a one-line footer hint.
 func (b *boardView) openDispatchPicker() {
+	if !b.amLeader {
+		holder := b.holderLabel
+		if holder == "" {
+			holder = "another process"
+		}
+		b.err = fmt.Errorf("standby — %s has control; dispatch unavailable here", holder)
+		return
+	}
 	iss := b.currentIssue()
 	if iss == nil {
 		return

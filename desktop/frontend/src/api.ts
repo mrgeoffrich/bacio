@@ -6,6 +6,7 @@ import {
   DocService,
   FeatureService,
   HistoryService,
+  LeaderService,
   SettingsService,
   Board,
   BoardColumn,
@@ -22,11 +23,12 @@ import {
   FeatureLinkedIssue,
   HistoryPage,
   HistoryEntryDTO,
+  LeaderStatusDTO,
   PromptTemplateDTO,
   BoardPreferencesDTO,
 } from '../bindings/github.com/mrgeoffrich/bacio/desktop';
 
-export type { Board, BoardColumn, BoardCard, IssueDetail, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, HistoryPage, HistoryEntryDTO, PromptTemplateDTO, BoardPreferencesDTO };
+export type { Board, BoardColumn, BoardCard, IssueDetail, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, BoardPreferencesDTO };
 
 function normalize(err: unknown): Error {
   if (err instanceof Error) return err;
@@ -262,6 +264,16 @@ export async function setBoardPreferences(
 ): Promise<BoardPreferencesDTO> {
   try {
     return await SettingsService.SetBoardPreferences(hideEmptyColumns);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// getLeaderStatus returns the current UI leader-election state synchronously.
+// Used on mount to seed the UI before the first "leaderStatus" event arrives.
+export async function getLeaderStatus(): Promise<LeaderStatusDTO> {
+  try {
+    return await LeaderService.GetLeaderStatus();
   } catch (err) {
     throw normalize(err);
   }

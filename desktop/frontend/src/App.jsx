@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Events } from '@wailsio/runtime';
 import Topbar, { NAV } from './components/Topbar.jsx';
 import Board from './components/Board.jsx';
 import DocsView from './components/DocsView.jsx';
@@ -68,6 +69,10 @@ export default function App() {
   // mount; flipped live from the Settings screen. Passed to the
   // presentational Board alongside columns/cards.
   const [hideEmptyColumns, setHideEmptyColumns] = useState(false);
+  // leaderState tracks the UI leader-election result from LeaderService.
+  // amLeader = true means this desktop process holds the lease and may
+  // dispatch. Standby processes show a chip and disable the per-card button.
+  const [leaderState, setLeaderState] = useState({ amLeader: false, holderLabel: '' });
   const [theme, setTheme] = useState(readTheme);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -109,6 +114,15 @@ export default function App() {
         setLoading(false);
       })
       .catch(err => { setError(err.message); setLoading(false); });
+  }, []);
+
+  // Subscribe to leaderStatus events and seed the initial state on mount.
+  // LeaderService emits the first tick almost immediately on startup, so
+  // the state corrects quickly even if the initial pull lags.
+  useEffect(() => {
+    api.getLeaderStatus().then(setLeaderState).catch(() => {});
+    const off = Events.On('leaderStatus', (e) => setLeaderState(e.data));
+    return () => { if (typeof off === 'function') off(); };
   }, []);
 
   // changeHideEmptyColumns persists the Board preference, then updates
@@ -304,6 +318,7 @@ export default function App() {
         onChangeView={(v) => { setSettingsOpen(false); setActiveView(v); }}
         onOpenPalette={() => setPaletteOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
+        leaderState={leaderState}
       />
       {loading ? (
         <div className="mk-app-state">Loading…</div>
@@ -332,6 +347,7 @@ export default function App() {
           cards={cards}
           promptConfig={promptConfig}
           hideEmptyColumns={hideEmptyColumns}
+          amLeader={leaderState.amLeader}
           onMoveCard={moveCard}
           onOpenCard={openCard}
           onDispatchFromCard={dispatchFromCard}

@@ -14,11 +14,14 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/mrgeoffrich/bacio/internal/leader"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
@@ -61,10 +64,30 @@ type openDocMsg struct {
 	filename string
 }
 
+// leaderTickMsg fires on every ~10s election tick, handled exclusively by
+// the shell (not broadcast to views — views receive leaderStateMsg instead).
+type leaderTickMsg time.Time
+
+// leaderStateMsg is dispatched by the shell after each election tick.
+// It is broadcast to all views; boardView uses it to gate dispatch.
+type leaderStateMsg struct{ state leader.State }
+
+// leaderTick returns a Cmd that fires leaderTickMsg after UILeaderHeartbeatInterval.
+func leaderTick() tea.Cmd {
+	return tea.Tick(store.UILeaderHeartbeatInterval, func(t time.Time) tea.Msg {
+		return leaderTickMsg(t)
+	})
+}
+
 // Run boots the Bubble Tea program in alt-screen mode and blocks until
-// quit. The store is owned by the caller.
+// quit. The store is owned by the caller. It constructs a leader.Elector
+// for the process and releases the lease on graceful exit.
 func Run(s *store.Store, repo *model.Repo) error {
-	m, err := NewModel(s, repo)
+	h, _ := os.Hostname()
+	label := fmt.Sprintf("tui pid=%d host=%s", os.Getpid(), h)
+	el := leader.New(s, label)
+	defer el.Release()
+	m, err := NewModel(s, repo, el)
 	if err != nil {
 		return err
 	}
@@ -77,13 +100,15 @@ func Run(s *store.Store, repo *model.Repo) error {
 // and repo. Exposed so alternative entry points (the WASM demo) can
 // embed the model into their own tea.Program with different program
 // options — e.g. WithInput/WithOutput for an xterm.js bridge.
-func NewModel(s *store.Store, repo *model.Repo) (*Model, error) {
+// Pass el as nil to disable leader election (WASM demo — always acts as leader).
+func NewModel(s *store.Store, repo *model.Repo, el *leader.Elector) (*Model, error) {
 	board, err := newBoardView(s, repo, tuiActor())
 	if err != nil {
 		return nil, err
 	}
 	return &Model{
-		repo: repo,
+		repo:    repo,
+		elector: el,
 		tabs: []tab{
 			{"Board", board},
 			{"Features", newFeaturesView(s, repo)},
@@ -108,6 +133,9 @@ type Model struct {
 	// explicitly (digit/tab/shift+tab) so a manual swap doesn't bounce
 	// back later.
 	returnTab int
+	// elector runs the UI leader election; nil in the WASM demo.
+	elector     *leader.Elector
+	leaderState leader.State
 }
 
 func (m *Model) Init() tea.Cmd {
@@ -116,6 +144,9 @@ func (m *Model) Init() tea.Cmd {
 		if c := t.v.Init(); c != nil {
 			cmds = append(cmds, c)
 		}
+	}
+	if m.elector != nil {
+		cmds = append(cmds, leaderTick())
 	}
 	if len(cmds) == 0 {
 		return nil
@@ -129,6 +160,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		return m, nil
+	case leaderTickMsg:
+		// Election tick: renew if leader, acquire if standby. Handled at
+		// the shell level (not broadcast to views). The resulting state is
+		// dispatched as leaderStateMsg so views can update asynchronously.
+		if m.elector != nil {
+			m.leaderState = m.elector.Tick()
+		}
+		state := m.leaderState
+		stateCmd := func() tea.Msg { return leaderStateMsg{state: state} }
+		return m, tea.Batch(leaderTick(), stateCmd)
 	case openDocMsg:
 		// Cross-tab: hand the filename to the Documents tab and focus
 		// it. Remember where we came from so esc on the doc overlay
@@ -266,12 +307,23 @@ func (m *Model) renderHeader() string {
 		left = lipgloss.JoinHorizontal(lipgloss.Top, tabParts...)
 	}
 
-	gap := m.width - lipgloss.Width(repoTag) - lipgloss.Width(left)
+	// Leader chip: only shown when the elector is active (not the WASM demo).
+	var leaderChip string
+	if m.elector != nil {
+		if m.leaderState.AmLeader {
+			leaderChip = leaderLeadStyle.Render("● ctrl")
+		} else {
+			leaderChip = leaderStandbyStyle.Render("○ stby")
+		}
+	}
+	right := lipgloss.JoinHorizontal(lipgloss.Top, leaderChip, repoTag)
+
+	gap := m.width - lipgloss.Width(right) - lipgloss.Width(left)
 	if gap < 1 {
 		gap = 1
 	}
 	spacer := lipgloss.NewStyle().Width(gap).Render("")
-	return lipgloss.JoinHorizontal(lipgloss.Top, left, spacer, repoTag)
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, spacer, right)
 }
 
 // digitSwitchTarget maps a "1"–"9" key to a 0-based tab index. Returns

@@ -5,12 +5,14 @@ import * as BoardService from "./boardservice.js";
 import * as DocService from "./docservice.js";
 import * as FeatureService from "./featureservice.js";
 import * as HistoryService from "./historyservice.js";
+import * as LeaderService from "./leaderservice.js";
 import * as SettingsService from "./settingsservice.js";
 export {
     BoardService,
     DocService,
     FeatureService,
     HistoryService,
+    LeaderService,
     SettingsService
 };
 
@@ -33,6 +35,7 @@ export {
     HistoryEntryDTO,
     HistoryPage,
     IssueDetail,
+    LeaderStatusDTO,
     PRDTO,
     PromptTemplateDTO
 } from "./models.js";
