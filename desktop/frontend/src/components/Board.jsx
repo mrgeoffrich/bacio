@@ -10,7 +10,7 @@ const EMPTY_COPY = {
   cancelled: 'no write-offs.',
 };
 
-export default function Board({ columns, cards, promptConfig, hideEmptyColumns, onMoveCard, onOpenCard, onDispatchFromCard }) {
+export default function Board({ columns, cards, promptConfig, hideEmptyColumns, amLeader, onMoveCard, onOpenCard, onDispatchFromCard }) {
   const [dragKey, setDragKey] = useState(null);
   const [overCol, setOverCol] = useState(null);
 
@@ -59,6 +59,7 @@ export default function Board({ columns, cards, promptConfig, hideEmptyColumns, 
                   card={card}
                   promptConfig={promptConfig}
                   isDragging={dragKey === card.key}
+                  amLeader={amLeader}
                   onDragStart={() => { if (!card.taken) setDragKey(card.key); }}
                   onDragEnd={() => { setDragKey(null); setOverCol(null); }}
                   onOpen={() => onOpenCard(card)}

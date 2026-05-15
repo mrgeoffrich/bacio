@@ -11,7 +11,7 @@ function initials(name) {
   return (parts[0] ?? '').slice(0, 2).toUpperCase() || '?';
 }
 
-export default function KanbanCard({ card, promptConfig, isDragging, onDragStart, onDragEnd, onOpen, onDispatch }) {
+export default function KanbanCard({ card, promptConfig, isDragging, amLeader, onDragStart, onDragEnd, onOpen, onDispatch }) {
   // The prompts valid to dispatch from this card's current state — the
   // state-gate config is global (App-owned), filtered per-card here.
   const validPrompts = (promptConfig || []).filter(
@@ -47,6 +47,9 @@ export default function KanbanCard({ card, promptConfig, isDragging, onDragStart
   // or dispatching from it until the claim is released. Opening the
   // read-only drawer stays allowed (viewing isn't a mutation).
   const taken = !!card.taken;
+  // On a standby process (amLeader=false), dispatch is also disabled —
+  // only the leader runs the auto-pick so two processes don't race.
+  const dispatchDisabled = taken || !amLeader;
 
   const hasFooter = validPrompts.length > 0 || card.assignees.length > 0;
 
@@ -80,20 +83,20 @@ export default function KanbanCard({ card, promptConfig, isDragging, onDragStart
             <div className="mk-card-action" ref={actionRef}>
               <button
                 className="mk-card-action-btn"
-                aria-label={taken ? 'An agent is working on this issue' : 'Dispatch a prompt'}
+                aria-label={taken ? 'An agent is working on this issue' : !amLeader ? 'Standby — another window has control' : 'Dispatch a prompt'}
                 aria-haspopup="menu"
                 aria-expanded={menuOpen}
-                disabled={taken}
-                title={taken ? 'An agent is working on this issue' : undefined}
+                disabled={dispatchDisabled}
+                title={taken ? 'An agent is working on this issue' : !amLeader ? 'Standby — another window controls automated dispatch' : undefined}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (taken) return;
+                  if (dispatchDisabled) return;
                   setMenuOpen(o => !o);
                 }}
               >
                 <Icon name="zap" />
               </button>
-              {menuOpen && !taken && (
+              {menuOpen && !dispatchDisabled && (
                 <div className="mk-card-action-menu" role="menu">
                   {validPrompts.map(p => (
                     <button

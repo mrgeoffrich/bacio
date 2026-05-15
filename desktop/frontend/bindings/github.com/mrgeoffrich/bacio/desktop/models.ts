@@ -39,6 +39,14 @@ export class AgentCard {
      */
     "busy": boolean;
     "busyIssue": string;
+
+    /**
+     * HasChannel is true when the bacio channel MCP server has been seen
+     * running alongside this session. Only sessions with a live channel
+     * can receive push dispatches — sessions without one are interactive
+     * (the user hasn't granted channel permission) and should be skipped.
+     */
+    "hasChannel": boolean;
     "lastSeenAt": time$0.Time;
     "claims": ClaimDTO[];
     "dispatches": DispatchDTO[];
@@ -72,6 +80,9 @@ export class AgentCard {
         if (!("busyIssue" in $$source)) {
             this["busyIssue"] = "";
         }
+        if (!("hasChannel" in $$source)) {
+            this["hasChannel"] = false;
+        }
         if (!("lastSeenAt" in $$source)) {
             this["lastSeenAt"] = null;
         }
@@ -89,14 +100,14 @@ export class AgentCard {
      * Creates a new AgentCard instance from a string or object.
      */
     static createFrom($$source: any = {}): AgentCard {
-        const $$createField10_0 = $$createType1;
-        const $$createField11_0 = $$createType3;
+        const $$createField11_0 = $$createType1;
+        const $$createField12_0 = $$createType3;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("claims" in $$parsedSource) {
-            $$parsedSource["claims"] = $$createField10_0($$parsedSource["claims"]);
+            $$parsedSource["claims"] = $$createField11_0($$parsedSource["claims"]);
         }
         if ("dispatches" in $$parsedSource) {
-            $$parsedSource["dispatches"] = $$createField11_0($$parsedSource["dispatches"]);
+            $$parsedSource["dispatches"] = $$createField12_0($$parsedSource["dispatches"]);
         }
         return new AgentCard($$parsedSource as Partial<AgentCard>);
     }
@@ -835,6 +846,44 @@ export class IssueDetail {
             $$parsedSource["claimants"] = $$createField11_0($$parsedSource["claimants"]);
         }
         return new IssueDetail($$parsedSource as Partial<IssueDetail>);
+    }
+}
+
+/**
+ * LeaderStatusDTO is the state the desktop frontend receives on every election
+ * tick via the "leaderStatus" Wails event and via GetLeaderStatus on mount.
+ */
+export class LeaderStatusDTO {
+    /**
+     * AmLeader is true when this desktop process holds the UI leader lease.
+     */
+    "amLeader": boolean;
+
+    /**
+     * HolderLabel is the human-readable label of the process that currently
+     * holds the lease — useful for "Standby — {HolderLabel} has control".
+     * Empty when AmLeader is true or the lease has never been acquired.
+     */
+    "holderLabel": string;
+
+    /** Creates a new LeaderStatusDTO instance. */
+    constructor($$source: Partial<LeaderStatusDTO> = {}) {
+        if (!("amLeader" in $$source)) {
+            this["amLeader"] = false;
+        }
+        if (!("holderLabel" in $$source)) {
+            this["holderLabel"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new LeaderStatusDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): LeaderStatusDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new LeaderStatusDTO($$parsedSource as Partial<LeaderStatusDTO>);
     }
 }
 

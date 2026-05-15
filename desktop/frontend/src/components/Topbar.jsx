@@ -12,8 +12,9 @@ export const NAV = [
   { view: 'history', label: 'History' },
 ];
 
-export default function Topbar({ boards, activeBoard, onPickBoard, onAddRepository, activeView, onChangeView, onOpenPalette, onOpenSettings }) {
+export default function Topbar({ boards, activeBoard, onPickBoard, onAddRepository, activeView, onChangeView, onOpenPalette, onOpenSettings, leaderState }) {
   const syncEnabled = !!boards.find(b => b.prefix === activeBoard)?.syncEnabled;
+  const isLeader = leaderState?.amLeader ?? false;
   return (
     <header className="mk-topbar">
       <div className="mk-brand">
@@ -41,6 +42,10 @@ export default function Topbar({ boards, activeBoard, onPickBoard, onAddReposito
 
       <div className="mk-topbar-right">
         {syncEnabled && <span className="mk-pill mk-sync-badge">Sync Enabled</span>}
+        {isLeader
+          ? <span className="mk-pill mk-leader-badge" title="This window controls automated dispatch">Controlling</span>
+          : <span className="mk-pill mk-standby-badge" title={leaderState?.holderLabel ? `${leaderState.holderLabel} has control` : 'Awaiting leader election'}>Standby</span>
+        }
         <RepoPicker
           boards={boards}
           activeBoard={activeBoard}

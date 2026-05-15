@@ -24,6 +24,9 @@ func init() {
 	// This is not required, but the binding generator will pick up registered events
 	// and provide a strongly typed JS/TS API for them.
 	application.RegisterEvent[string]("time")
+	// leaderStatus fires on every UI leader-election tick (~10s). The frontend
+	// subscribes to it to keep the "Controlling / Standby" chip up to date.
+	application.RegisterEvent[LeaderStatusDTO]("leaderStatus")
 }
 
 // main function serves as the application's entry point. It initializes the application, creates a window,
@@ -54,6 +57,7 @@ func main() {
 			application.NewService(NewFeatureService(c)),
 			application.NewService(NewHistoryService(c)),
 			application.NewService(NewSettingsService(c)),
+			application.NewService(NewLeaderService()),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),

@@ -345,3 +345,18 @@ CREATE TABLE IF NOT EXISTS agent_channels (
 );
 
 CREATE INDEX IF NOT EXISTS idx_agent_channels_repo ON agent_channels(repo_id);
+
+-- ui_leader is a single-row lease table. Only one UI process (TUI or desktop
+-- app) holds the lease at a time; all others stand by. The CHECK (id = 1)
+-- constraint + INSERT OR IGNORE seed guarantee exactly one row forever.
+-- heartbeat_at is seeded to 0 (integer) so the first ACQUIRE's staleness
+-- test (heartbeat_at < datetime('now','-180 seconds')) is immediately true
+-- on a fresh database.
+CREATE TABLE IF NOT EXISTS ui_leader (
+    id           INTEGER PRIMARY KEY CHECK (id = 1),
+    holder_token TEXT    NOT NULL DEFAULT '',
+    holder_label TEXT    NOT NULL DEFAULT '',
+    acquired_at  DATETIME,
+    heartbeat_at DATETIME
+);
+INSERT OR IGNORE INTO ui_leader (id, heartbeat_at) VALUES (1, 0);
