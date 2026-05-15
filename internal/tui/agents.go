@@ -97,8 +97,9 @@ func dispatchTargetsSession(d *model.AgentDispatch, s *model.AgentSession) bool 
 func (a *agentsView) Init() tea.Cmd  { return nil }
 func (a *agentsView) Status() string { return "" }
 
-func (a *agentsView) HasOverlay() bool { return a.detail }
-func (a *agentsView) CloseOverlay()    { a.detail = false }
+func (a *agentsView) HasOverlay() bool    { return a.detail }
+func (a *agentsView) CloseOverlay()       { a.detail = false }
+func (a *agentsView) CapturesInput() bool { return false }
 
 func (a *agentsView) Breadcrumb() string {
 	if !a.detail || a.cursor >= len(a.sessions) {

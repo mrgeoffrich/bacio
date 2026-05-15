@@ -110,6 +110,8 @@ func (f *featuresView) HasOverlay() bool { return f.overlay }
 
 func (f *featuresView) CloseOverlay() { f.overlay = false }
 
+func (f *featuresView) CapturesInput() bool { return false }
+
 func (f *featuresView) Breadcrumb() string {
 	if f.overlay && f.selected != nil {
 		return "[" + f.selected.Slug + "]"
