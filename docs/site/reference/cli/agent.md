@@ -13,7 +13,7 @@ Two layers:
 - **Agent identity** (long-lived) — a slug like `cheerful-otter@claude.shiny` stored in the `agents` table. Survives `/clear`, restarts, and reboots; persisted on disk in `.bacio/agent` so the next session in the same repo picks it up automatically.
 - **Session** (ephemeral) — one row in `agent_sessions` per running instance. FKs back to the identity, so cross-session activity correlates to a single logical agent.
 
-Claims are *intent-only*: claiming an issue does **not** move it or change `assignee`. Multiple agents may claim the same issue at once (pairing or review is a real flow); use `bacio issue state` / `bacio issue assign` for the durable ownership change.
+Claiming an issue records *intent* **and** stamps its `assignee` with the claiming agent's identity, so the derived `taken` signal and the stored `assignee` stay in lockstep. It does **not** move the issue's state — use `bacio issue state` for that. Multiple agents may claim the same issue at once (pairing or review is a real flow); the most recent claim wins the `assignee` field, and releasing the last open claim (or `bacio agent end`) clears it again — leaving a human's deliberate reassignment untouched.
 
 ::: tip Local-only in v1
 Every agent verb short-circuits with a clear error if `--remote` or `BACIO_REMOTE` is set. HTTP API parity is a v2 follow-up.
@@ -25,9 +25,9 @@ Every agent verb short-circuits with a clear error if `--remote` or `BACIO_REMOT
 |---|---|
 | `bacio agent register` | Register (or refresh) this session. Optionally attaches a persistent `--agent <slug>` identity. |
 | `bacio agent heartbeat` | Bump `last_seen_at` on an already-registered session. Optional — register/claim/release already heartbeat. |
-| `bacio agent end --reason <r>` | End this session. Auto-releases every open claim it holds. |
-| `bacio agent claim <ISSUE-KEY>` | Record intent — this session is focused on the issue. Does **not** touch state or assignee. |
-| `bacio agent release <ISSUE-KEY>` | Release this session's claim on an issue. |
+| `bacio agent end --reason <r>` | End this session. Auto-releases every open claim it holds, unassigning any issue left with no open claims. |
+| `bacio agent claim <ISSUE-KEY>` | Focus this session on the issue — records the claim and stamps the issue's `assignee`. Does **not** move the issue's state. |
+| `bacio agent release <ISSUE-KEY>` | Release this session's claim on an issue. Clears the `assignee` once the issue has no open claims left (a human-set assignee is preserved). |
 | `bacio agent list` | Lean table of sessions in this repo. |
 | `bacio agent show <session-id>` | Session detail + full claim history. Accepts any unique prefix of the id (12 chars is plenty in practice). |
 
@@ -98,6 +98,8 @@ Re-registering is idempotent: bacio refreshes `last_seen_at` and re-links the se
 
 Both verbs accept a positional `<ISSUE-KEY>` **or** a `--json` payload. The session must currently be alive — claims against an ended session are rejected.
 
+A fresh `claim` stamps the issue's `assignee` with the claiming agent's identity (the linked agent slug, or the session's actor if it has no identity) inside the same transaction as the claim row, so the two can never drift. `release` reverses it: once the issue has no open claims left, the `assignee` is cleared — but only if it still equals the releasing identity, so a human's deliberate reassignment after the claim is preserved. Each assignee mutation is recorded as an `issue.assign` audit row alongside the `agent.claim` / `agent.release` row.
+
 ### `bacio agent list`
 
 | Flag | What it does |
@@ -139,4 +141,4 @@ bacio agent end --reason stop --user agent-claude
 
 - **[How agents drive bacio](/concepts/how-agents-drive-bacio)** — the six rules behind the CLI contract.
 - **[Working with Claude Code](/guides/work-with-claude-code)** — the end-to-end agent flow with the registry plugged in.
-- **[`bacio issue`](/reference/cli/issue)** — claim records intent; `issue state` / `issue assign` are still the durable ownership moves.
+- **[`bacio issue`](/reference/cli/issue)** — claim records intent *and* stamps the assignee; `issue state` is still the durable move for the issue's workflow state, and `issue assign` still sets the assignee directly when you want it independent of a claim.

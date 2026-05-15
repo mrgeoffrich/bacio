@@ -40,9 +40,10 @@ Typical lifecycle, driven by an agent (see SKILL.md):
     bacio agent release  MINI-42 --user agent-claude
     bacio agent end      --reason stop --user agent-claude
 
-` + "`--session`" + ` defaults to $CLAUDE_CODE_SESSION_ID. Claim records
-intent — it does NOT move the issue or change its assignee; use
-` + "`bacio issue state`" + ` / ` + "`bacio issue assign`" + ` for that.`,
+` + "`--session`" + ` defaults to $CLAUDE_CODE_SESSION_ID. Claiming an
+issue also stamps its assignee with the claiming agent's identity (and
+releasing the last open claim clears it again) — but it does NOT move
+the issue's state; use ` + "`bacio issue state`" + ` for that.`,
 	}
 	cmd.AddCommand(
 		agentRegisterCmd(),
@@ -298,7 +299,7 @@ func agentClaimCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "claim [issue-key]",
-		Short: "Record that this session is focused on an issue (intent, not state)",
+		Short: "Focus this session on an issue — records the claim and stamps the assignee (not state)",
 		Args:  cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			raw, err := parseJSONInput(cmd, args, rawInput, "session", "prompt")
