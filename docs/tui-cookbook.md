@@ -1,6 +1,6 @@
 # TUI Cookbook
 
-Synthesised from bubbletea v1.3.10 (pinned via `replace ... => ./third_party/bubbletea` in `go.mod`) + lipgloss v1.1.1-pre (`v1.1.1-0.20250404203927-76690c660834`) + bubbles, fetched 2026-05-03. Refresh by re-fetching the README and godoc URLs cited in the source list at the bottom.
+Synthesised from bubbletea v1.3.10 (pinned via `replace ... => ./third_party/bubbletea` in `go.mod`) + lipgloss v1.1.1-pre (`v1.1.1-0.20250404203927-76690c660834`) + bubbles v0.21.0 (the last bubbletea-v1-compatible release), fetched 2026-05-03. Refresh by re-fetching the README and godoc URLs cited in the source list at the bottom.
 
 This is a cookbook for the three Charm libraries we use in `bacio`. It assumes Go fluency and skips installation, marketing, and unrelated Charm tooling.
 
@@ -386,6 +386,29 @@ ta.Focus()
 
 Update/View identical to textinput. Use `key.NewBinding` to disambiguate `enter`-as-newline from `enter`-as-submit at the parent level (the textarea always inserts a newline on enter).
 
+**In use:** the Settings tab (`internal/tui/settings.go`) edits dispatch
+prompt-template bodies with `textarea`. Two gotchas it had to handle:
+
+- The textarea binds `ctrl+d` to delete-forward. The Settings editor uses
+  `ctrl+d` for reset-to-default, so it **intercepts `ctrl+d` (and
+  `ctrl+s`, `tab`, `esc`) before forwarding the message** to
+  `ta.Update` — otherwise the reset key would eat a character.
+- `textarea` sanitises control runes on input, so a value typed into it
+  is always control-char clean. Saving still goes through the store's
+  `ValidateBody`, which can reject on the 1 MiB length cap — surface
+  that error in the overlay, don't crash.
+
+### The `CapturesInput()` shell contract
+
+A view that embeds a `textarea`/`textinput` MUST implement
+`CapturesInput() bool` to return `true` while that input is focused.
+The shell (`tui.go`) consults it on every key: while it's true, `q` and
+the digit keys `1`–`9` are routed to the view (typed literally) instead
+of being treated as quit / tab-switch. `ctrl+c` is never yielded — it is
+always a hard quit. Views with no text input return `false`
+unconditionally. This is the documented pattern for any future
+text-editing view (e.g. the long-mooted "edit description" overlay).
+
 ### viewport
 
 ```go
@@ -491,7 +514,13 @@ Map upstream concepts to bacio code:
 
 The shell is a `*Model` (pointer receiver) so the tabs can mutate through their handles. Each tab is also a pointer-receiver type so its `Update` can mutate its own fields directly; the shell just calls the view's `Update` and bubbles the returned `Cmd`.
 
-We don't currently use `bubbles` components — board cells and the doc viewer are hand-rendered with lipgloss. If we add a fuzzy issue picker, use `bubbles/list`; for the eventual "edit description" overlay, use `bubbles/textarea`.
+`bubbles` is a dependency as of the Settings tab — `bubbles/textarea`
+powers the dispatch prompt-template body editor (`internal/tui/settings.go`).
+It is pinned to **v0.21.0**, the last release in the bubbletea-v1 line
+(newer `bubbles` targets bubbletea v2 and won't compile against the
+pinned v1.3.10). Everything else — board cells, the doc viewer — is
+still hand-rendered with lipgloss. If we add a fuzzy issue picker, use
+`bubbles/list`.
 
 ---
 

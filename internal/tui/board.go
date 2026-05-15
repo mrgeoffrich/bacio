@@ -446,6 +446,12 @@ func (b *boardView) Breadcrumb() string {
 	return ""
 }
 
+// CapturesInput is always false for the board — its overlays handle
+// keys themselves but none is a free-text editor (the dispatch-note
+// step is a bounded single-line capture handled inside the view, and it
+// deliberately leaves global q/digit routing intact).
+func (b *boardView) CapturesInput() bool { return false }
+
 func (b *boardView) Help() string {
 	switch {
 	case b.picker:

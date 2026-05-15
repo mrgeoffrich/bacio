@@ -36,6 +36,7 @@ func Snapshot(s *store.Store, repo *model.Repo, opts SnapshotOpts) error {
 	docs := newDocsView(s, repo)
 	agents := newAgentsView(s, repo)
 	hist := newHistoryView(s, repo)
+	settings := newSettingsView(s, repo)
 
 	m := &Model{
 		repo: repo,
@@ -45,6 +46,7 @@ func Snapshot(s *store.Store, repo *model.Repo, opts SnapshotOpts) error {
 			{"Documents", docs},
 			{"Agents", agents},
 			{"History", hist},
+			{"Settings", settings},
 		},
 		width:  opts.Width,
 		height: opts.Height,
@@ -70,6 +72,13 @@ func Snapshot(s *store.Store, repo *model.Repo, opts SnapshotOpts) error {
 		}
 	case "history":
 		m.active = 4
+	case "settings":
+		m.active = 5
+	case "settings-editor":
+		m.active = 5
+		if len(settings.stages) > 0 {
+			settings.openEditor(0)
+		}
 	case "card-overlay", "card":
 		m.active = 0
 		if err := focusIssue(board, opts.Issue); err != nil {
@@ -99,7 +108,7 @@ func Snapshot(s *store.Store, repo *model.Repo, opts SnapshotOpts) error {
 			features.overlay = true
 		}
 	default:
-		return fmt.Errorf("unknown snapshot target %q (try board, features, docs, agents, agent-detail, history, card-overlay, doc-overlay, feature-overlay, picker, feature-picker, dispatch-picker)", opts.Target)
+		return fmt.Errorf("unknown snapshot target %q (try board, features, docs, agents, agent-detail, history, settings, settings-editor, card-overlay, doc-overlay, feature-overlay, picker, feature-picker, dispatch-picker)", opts.Target)
 	}
 
 	out := m.View()

@@ -68,9 +68,9 @@ var Registry = []Entry{
 
 	{"agent.register", "Register (or refresh) an AI-agent session against the current repo.", typeOf[inputs.AgentRegisterInput](), inputs.ExampleAgentRegister},
 	{"agent.heartbeat", "Bump last_seen_at on an existing agent session (optional — register / claim / release already bump it).", typeOf[inputs.AgentHeartbeatInput](), inputs.ExampleAgentHeartbeat},
-	{"agent.end", "End an agent session and auto-release every open claim it holds.", typeOf[inputs.AgentEndInput](), inputs.ExampleAgentEnd},
-	{"agent.claim", "Record that an agent is now focused on an issue (intent, not state — does not move the issue or change assignee).", typeOf[inputs.AgentClaimInput](), inputs.ExampleAgentClaim},
-	{"agent.release", "Release an agent's claim on an issue (does not move the issue or change assignee).", typeOf[inputs.AgentReleaseInput](), inputs.ExampleAgentRelease},
+	{"agent.end", "End an agent session and auto-release every open claim it holds (unassigning any issue left with no open claims).", typeOf[inputs.AgentEndInput](), inputs.ExampleAgentEnd},
+	{"agent.claim", "Focus an agent on an issue — records the claim and stamps the issue's assignee with the claiming identity (does not move the issue's state).", typeOf[inputs.AgentClaimInput](), inputs.ExampleAgentClaim},
+	{"agent.release", "Release an agent's claim on an issue — clears the assignee once the issue has no open claims left (does not move the issue's state).", typeOf[inputs.AgentReleaseInput](), inputs.ExampleAgentRelease},
 	{"agent.dispatch", "Queue a unit of work (an issue, an instruction) for an agent identity and/or a session.", typeOf[inputs.AgentDispatchInput](), inputs.ExampleAgentDispatch},
 	{"agent.ack", "Acknowledge a dispatch and record an optional reply note.", typeOf[inputs.AgentAckInput](), inputs.ExampleAgentAck},
 

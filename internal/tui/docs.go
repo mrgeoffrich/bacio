@@ -143,6 +143,8 @@ func (d *docsView) HasOverlay() bool { return d.overlay }
 
 func (d *docsView) CloseOverlay() { d.overlay = false }
 
+func (d *docsView) CapturesInput() bool { return false }
+
 func (d *docsView) Breadcrumb() string {
 	if d.overlay && d.loaded != nil {
 		return d.loaded.Filename

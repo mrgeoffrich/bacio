@@ -71,10 +71,10 @@ func TestEndAgentSessionReleasesClaims(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	if _, _, err := s.AddAgentClaim("sess-2", iss.ID, ""); err != nil {
+	if _, _, _, err := s.AddAgentClaim("sess-2", iss.ID, ""); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	if _, err := s.EndAgentSession("sess-2", string(model.EndReasonStop)); err != nil {
+	if _, _, err := s.EndAgentSession("sess-2", string(model.EndReasonStop)); err != nil {
 		t.Fatalf("end: %v", err)
 	}
 
@@ -105,10 +105,10 @@ func TestAddAgentClaimRejectsEndedSession(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	if _, err := s.EndAgentSession("sess-3", string(model.EndReasonStop)); err != nil {
+	if _, _, err := s.EndAgentSession("sess-3", string(model.EndReasonStop)); err != nil {
 		t.Fatalf("end: %v", err)
 	}
-	if _, _, err := s.AddAgentClaim("sess-3", iss.ID, ""); err == nil {
+	if _, _, _, err := s.AddAgentClaim("sess-3", iss.ID, ""); err == nil {
 		t.Fatalf("expected AddAgentClaim to reject ended session, got nil")
 	}
 }
@@ -134,7 +134,7 @@ func TestPruneAgentSessionsKeepsActive(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("register stale: %v", err)
 	}
-	if _, err := s.EndAgentSession("stale", string(model.EndReasonStop)); err != nil {
+	if _, _, err := s.EndAgentSession("stale", string(model.EndReasonStop)); err != nil {
 		t.Fatalf("end stale: %v", err)
 	}
 	// Backdate to two retention windows ago.
@@ -193,10 +193,10 @@ func TestRapidClaimReleaseClaim(t *testing.T) {
 	// Three claim/release cycles back-to-back — well within a single
 	// SQLite-granular second on any plausible hardware.
 	for i := 0; i < 3; i++ {
-		if _, _, err := s.AddAgentClaim("rapid", iss.ID, ""); err != nil {
+		if _, _, _, err := s.AddAgentClaim("rapid", iss.ID, ""); err != nil {
 			t.Fatalf("claim cycle %d: %v", i, err)
 		}
-		if _, err := s.ReleaseAgentClaim("rapid", iss.ID); err != nil {
+		if _, _, err := s.ReleaseAgentClaim("rapid", iss.ID); err != nil {
 			t.Fatalf("release cycle %d: %v", i, err)
 		}
 	}
@@ -213,14 +213,14 @@ func TestAddAgentClaimIdempotent(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	first, created, err := s.AddAgentClaim("idem", iss.ID, "")
+	first, created, _, err := s.AddAgentClaim("idem", iss.ID, "")
 	if err != nil {
 		t.Fatalf("first claim: %v", err)
 	}
 	if !created {
 		t.Fatalf("expected created=true for the first claim")
 	}
-	second, created, err := s.AddAgentClaim("idem", iss.ID, "")
+	second, created, _, err := s.AddAgentClaim("idem", iss.ID, "")
 	if err != nil {
 		t.Fatalf("second claim: %v", err)
 	}
@@ -242,7 +242,7 @@ func TestUpsertAgentSessionRejectsEndedSession(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("first register: %v", err)
 	}
-	if _, err := s.EndAgentSession("ended-then-reregister", string(model.EndReasonStop)); err != nil {
+	if _, _, err := s.EndAgentSession("ended-then-reregister", string(model.EndReasonStop)); err != nil {
 		t.Fatalf("end: %v", err)
 	}
 	_, err := s.UpsertAgentSession(UpsertAgentSessionIn{
@@ -263,10 +263,10 @@ func TestReleaseClaimErrorPaths(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	if _, err := s.ReleaseAgentClaim("rel", iss.ID); err == nil {
+	if _, _, err := s.ReleaseAgentClaim("rel", iss.ID); err == nil {
 		t.Fatalf("expected ErrNotFound releasing a non-existent claim, got nil")
 	}
-	if _, err := s.ReleaseAgentClaim("does-not-exist", iss.ID); err == nil {
+	if _, _, err := s.ReleaseAgentClaim("does-not-exist", iss.ID); err == nil {
 		t.Fatalf("expected error releasing from unknown session, got nil")
 	}
 }
@@ -366,7 +366,7 @@ func TestClaimPromptRoundTrip(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	first, created, err := s.AddAgentClaim("prompt-sess", iss.ID, "do the thing")
+	first, created, _, err := s.AddAgentClaim("prompt-sess", iss.ID, "do the thing")
 	if err != nil {
 		t.Fatalf("first claim: %v", err)
 	}
@@ -374,7 +374,7 @@ func TestClaimPromptRoundTrip(t *testing.T) {
 		t.Fatalf("first claim: created=%v prompt=%q, want created=true prompt=%q", created, first.Prompt, "do the thing")
 	}
 	// Re-claim with a fresher prompt — no-op claim, but prompt updates.
-	second, created, err := s.AddAgentClaim("prompt-sess", iss.ID, "do the other thing")
+	second, created, _, err := s.AddAgentClaim("prompt-sess", iss.ID, "do the other thing")
 	if err != nil {
 		t.Fatalf("re-claim: %v", err)
 	}
@@ -385,7 +385,7 @@ func TestClaimPromptRoundTrip(t *testing.T) {
 		t.Fatalf("re-claim: id %d→%d prompt=%q, want same id and updated prompt", first.ID, second.ID, second.Prompt)
 	}
 	// Re-claim with an empty prompt must NOT clear the stored one.
-	third, _, err := s.AddAgentClaim("prompt-sess", iss.ID, "")
+	third, _, _, err := s.AddAgentClaim("prompt-sess", iss.ID, "")
 	if err != nil {
 		t.Fatalf("re-claim empty: %v", err)
 	}
@@ -413,13 +413,13 @@ func TestListClaimsForIssue(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("register b: %v", err)
 	}
-	if _, _, err := s.AddAgentClaim("claims-a", iss.ID, "first claim"); err != nil {
+	if _, _, _, err := s.AddAgentClaim("claims-a", iss.ID, "first claim"); err != nil {
 		t.Fatalf("claim a: %v", err)
 	}
-	if _, err := s.ReleaseAgentClaim("claims-a", iss.ID); err != nil {
+	if _, _, err := s.ReleaseAgentClaim("claims-a", iss.ID); err != nil {
 		t.Fatalf("release a: %v", err)
 	}
-	if _, _, err := s.AddAgentClaim("claims-b", iss.ID, "second claim"); err != nil {
+	if _, _, _, err := s.AddAgentClaim("claims-b", iss.ID, "second claim"); err != nil {
 		t.Fatalf("claim b: %v", err)
 	}
 	claims, err := s.ListClaimsForIssue(iss.ID)
@@ -467,21 +467,21 @@ func TestOpenClaimsBySession(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("register ended: %v", err)
 	}
-	if _, _, err := s.AddAgentClaim("busy-sess", iss.ID, "p1"); err != nil {
+	if _, _, _, err := s.AddAgentClaim("busy-sess", iss.ID, "p1"); err != nil {
 		t.Fatalf("claim busy: %v", err)
 	}
 	// A released claim must not count.
-	if _, _, err := s.AddAgentClaim("busy-sess", iss2.ID, "p2"); err != nil {
+	if _, _, _, err := s.AddAgentClaim("busy-sess", iss2.ID, "p2"); err != nil {
 		t.Fatalf("claim busy 2: %v", err)
 	}
-	if _, err := s.ReleaseAgentClaim("busy-sess", iss2.ID); err != nil {
+	if _, _, err := s.ReleaseAgentClaim("busy-sess", iss2.ID); err != nil {
 		t.Fatalf("release busy 2: %v", err)
 	}
 	// An ended session's claim must not count (EndAgentSession releases it).
-	if _, _, err := s.AddAgentClaim("ended-sess", iss2.ID, "p3"); err != nil {
+	if _, _, _, err := s.AddAgentClaim("ended-sess", iss2.ID, "p3"); err != nil {
 		t.Fatalf("claim ended: %v", err)
 	}
-	if _, err := s.EndAgentSession("ended-sess", string(model.EndReasonStop)); err != nil {
+	if _, _, err := s.EndAgentSession("ended-sess", string(model.EndReasonStop)); err != nil {
 		t.Fatalf("end: %v", err)
 	}
 	bySession, err := s.OpenClaimsBySession(repo.ID)
@@ -529,5 +529,233 @@ func TestResolveAgentSessionPrefix(t *testing.T) {
 	}
 	if _, err := s.ResolveAgentSession("missing-"); err == nil {
 		t.Fatalf("no-match should error")
+	}
+}
+
+// assigneeOf is a 1-liner for the lockstep tests: reads an issue's
+// current assignee straight from the row.
+func assigneeOf(t *testing.T, s *Store, issueID int64) string {
+	t.Helper()
+	iss, err := s.GetIssueByID(issueID)
+	if err != nil {
+		t.Fatalf("read issue: %v", err)
+	}
+	return iss.Assignee
+}
+
+// TestAddAgentClaimAssignsIssue locks in BACI-27: a fresh claim stamps
+// issues.assignee with the claiming agent's identity slug, and the
+// returned AssigneeChange describes the move. A session without a
+// linked identity falls back to its actor.
+func TestAddAgentClaimAssignsIssue(t *testing.T) {
+	s, repo, iss := seedRepoAndIssue(t)
+	ag, _, err := s.UpsertAgent("brave-otter@claude.shiny", true)
+	if err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "with-id", RepoID: repo.ID, AgentID: &ag.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	_, created, change, err := s.AddAgentClaim("with-id", iss.ID, "")
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if !created {
+		t.Fatalf("expected created=true")
+	}
+	if change == nil || !change.Changed() {
+		t.Fatalf("expected a changed AssigneeChange, got %+v", change)
+	}
+	if change.Old != "" || change.New != "brave-otter@claude.shiny" {
+		t.Fatalf("AssigneeChange = %q → %q, want \"\" → brave-otter@claude.shiny", change.Old, change.New)
+	}
+	if change.IssueKey != iss.Key {
+		t.Fatalf("AssigneeChange.IssueKey = %q, want %q", change.IssueKey, iss.Key)
+	}
+	if got := assigneeOf(t, s, iss.ID); got != "brave-otter@claude.shiny" {
+		t.Fatalf("issue assignee = %q, want brave-otter@claude.shiny", got)
+	}
+
+	// A session with no linked identity falls back to its actor.
+	iss2, err := s.CreateIssue(repo.ID, nil, "stub 2", "", model.StateTodo, nil)
+	if err != nil {
+		t.Fatalf("create issue 2: %v", err)
+	}
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "no-id", RepoID: repo.ID, Actor: "manual-actor",
+	}); err != nil {
+		t.Fatalf("register no-id: %v", err)
+	}
+	if _, _, change, err := s.AddAgentClaim("no-id", iss2.ID, ""); err != nil {
+		t.Fatalf("claim no-id: %v", err)
+	} else if change.New != "manual-actor" {
+		t.Fatalf("identity fallback = %q, want manual-actor", change.New)
+	}
+	if got := assigneeOf(t, s, iss2.ID); got != "manual-actor" {
+		t.Fatalf("issue 2 assignee = %q, want manual-actor", got)
+	}
+}
+
+// TestAddAgentClaimOverwritesAssignee locks in the last-claim-wins rule:
+// claiming an issue overwrites even a pre-set (e.g. human) assignee.
+func TestAddAgentClaimOverwritesAssignee(t *testing.T) {
+	s, repo, iss := seedRepoAndIssue(t)
+	if err := s.SetIssueAssignee(iss.ID, "some-human"); err != nil {
+		t.Fatalf("pre-assign: %v", err)
+	}
+	ag, _, err := s.UpsertAgent("keen-finch@claude.shiny", true)
+	if err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "overwrite", RepoID: repo.ID, AgentID: &ag.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	_, _, change, err := s.AddAgentClaim("overwrite", iss.ID, "")
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if change.Old != "some-human" || change.New != "keen-finch@claude.shiny" {
+		t.Fatalf("AssigneeChange = %q → %q, want some-human → keen-finch@claude.shiny", change.Old, change.New)
+	}
+	if got := assigneeOf(t, s, iss.ID); got != "keen-finch@claude.shiny" {
+		t.Fatalf("issue assignee = %q, want keen-finch@claude.shiny", got)
+	}
+}
+
+// TestReleaseAgentClaimClearsAssignee locks in that releasing the last
+// open claim unassigns the issue — but a release that still leaves an
+// open claim behind leaves the assignee alone.
+func TestReleaseAgentClaimClearsAssignee(t *testing.T) {
+	s, repo, iss := seedRepoAndIssue(t)
+	agA, _, err := s.UpsertAgent("pair-a@claude.shiny", true)
+	if err != nil {
+		t.Fatalf("create agent a: %v", err)
+	}
+	agB, _, err := s.UpsertAgent("pair-b@claude.shiny", true)
+	if err != nil {
+		t.Fatalf("create agent b: %v", err)
+	}
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "sess-a", RepoID: repo.ID, AgentID: &agA.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register a: %v", err)
+	}
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "sess-b", RepoID: repo.ID, AgentID: &agB.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register b: %v", err)
+	}
+	if _, _, _, err := s.AddAgentClaim("sess-a", iss.ID, ""); err != nil {
+		t.Fatalf("claim a: %v", err)
+	}
+	if _, _, _, err := s.AddAgentClaim("sess-b", iss.ID, ""); err != nil {
+		t.Fatalf("claim b: %v", err)
+	}
+	// Last claim wins: assignee is B.
+	if got := assigneeOf(t, s, iss.ID); got != "pair-b@claude.shiny" {
+		t.Fatalf("after both claims, assignee = %q, want pair-b@claude.shiny", got)
+	}
+	// A releases — B still holds an open claim, so the assignee stays.
+	_, change, err := s.ReleaseAgentClaim("sess-a", iss.ID)
+	if err != nil {
+		t.Fatalf("release a: %v", err)
+	}
+	if change.Changed() {
+		t.Fatalf("release a should not have changed the assignee, got %+v", change)
+	}
+	if got := assigneeOf(t, s, iss.ID); got != "pair-b@claude.shiny" {
+		t.Fatalf("after release a, assignee = %q, want pair-b@claude.shiny", got)
+	}
+	// B releases the last open claim — now the issue is unassigned.
+	_, change, err = s.ReleaseAgentClaim("sess-b", iss.ID)
+	if err != nil {
+		t.Fatalf("release b: %v", err)
+	}
+	if !change.Changed() || change.New != "" {
+		t.Fatalf("release b should have cleared the assignee, got %+v", change)
+	}
+	if got := assigneeOf(t, s, iss.ID); got != "" {
+		t.Fatalf("after release b, assignee = %q, want empty", got)
+	}
+}
+
+// TestReleaseAgentClaimKeepsForeignAssignee locks in the "don't clobber
+// deliberate human action" guard: if a human reassigns the issue after
+// the claim, releasing the claim leaves that assignee in place.
+func TestReleaseAgentClaimKeepsForeignAssignee(t *testing.T) {
+	s, repo, iss := seedRepoAndIssue(t)
+	ag, _, err := s.UpsertAgent("tidy-wren@claude.shiny", true)
+	if err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "foreign", RepoID: repo.ID, AgentID: &ag.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if _, _, _, err := s.AddAgentClaim("foreign", iss.ID, ""); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	// A human reassigns the issue out from under the agent.
+	if err := s.SetIssueAssignee(iss.ID, "a-human"); err != nil {
+		t.Fatalf("human reassign: %v", err)
+	}
+	_, change, err := s.ReleaseAgentClaim("foreign", iss.ID)
+	if err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	if change.Changed() {
+		t.Fatalf("release should not have touched the human-set assignee, got %+v", change)
+	}
+	if got := assigneeOf(t, s, iss.ID); got != "a-human" {
+		t.Fatalf("assignee = %q, want a-human (preserved)", got)
+	}
+}
+
+// TestEndAgentSessionUnassignsReleasedIssues locks in that EndAgentSession
+// clears the assignee on each issue it auto-releases, and reports the
+// change for the audit log.
+func TestEndAgentSessionUnassignsReleasedIssues(t *testing.T) {
+	s, repo, iss := seedRepoAndIssue(t)
+	iss2, err := s.CreateIssue(repo.ID, nil, "stub 2", "", model.StateTodo, nil)
+	if err != nil {
+		t.Fatalf("create issue 2: %v", err)
+	}
+	ag, _, err := s.UpsertAgent("busy-stoat@claude.shiny", true)
+	if err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "ending", RepoID: repo.ID, AgentID: &ag.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if _, _, _, err := s.AddAgentClaim("ending", iss.ID, ""); err != nil {
+		t.Fatalf("claim 1: %v", err)
+	}
+	if _, _, _, err := s.AddAgentClaim("ending", iss2.ID, ""); err != nil {
+		t.Fatalf("claim 2: %v", err)
+	}
+	_, changes, err := s.EndAgentSession("ending", string(model.EndReasonStop))
+	if err != nil {
+		t.Fatalf("end: %v", err)
+	}
+	if len(changes) != 2 {
+		t.Fatalf("got %d assignee changes, want 2", len(changes))
+	}
+	for _, ch := range changes {
+		if ch.Old != "busy-stoat@claude.shiny" || ch.New != "" {
+			t.Fatalf("change = %q → %q, want busy-stoat@claude.shiny → \"\"", ch.Old, ch.New)
+		}
+	}
+	if got := assigneeOf(t, s, iss.ID); got != "" {
+		t.Fatalf("issue 1 assignee = %q, want empty", got)
+	}
+	if got := assigneeOf(t, s, iss2.ID); got != "" {
+		t.Fatalf("issue 2 assignee = %q, want empty", got)
 	}
 }

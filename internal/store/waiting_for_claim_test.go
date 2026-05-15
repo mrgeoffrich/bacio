@@ -118,7 +118,7 @@ func TestAddAgentClaimClearsWaitingForClaim(t *testing.T) {
 		t.Fatal("waiting_for_claim = false after dispatch, want true")
 	}
 
-	if _, created, err := s.AddAgentClaim(sess.SessionID, iss.ID, "on it"); err != nil {
+	if _, created, _, err := s.AddAgentClaim(sess.SessionID, iss.ID, "on it"); err != nil {
 		t.Fatalf("add claim: %v", err)
 	} else if !created {
 		t.Fatal("AddAgentClaim reported created = false for a fresh claim")
@@ -140,7 +140,7 @@ func TestNoopReclaimDoesNotTouchWaitingForClaim(t *testing.T) {
 	s, _, iss, _, sess := seedDispatchFixture(t)
 	// First claim — the new-claim path; clears the flag (which is false
 	// here anyway).
-	if _, created, err := s.AddAgentClaim(sess.SessionID, iss.ID, "first"); err != nil {
+	if _, created, _, err := s.AddAgentClaim(sess.SessionID, iss.ID, "first"); err != nil {
 		t.Fatalf("first claim: %v", err)
 	} else if !created {
 		t.Fatal("first claim reported created = false")
@@ -150,7 +150,7 @@ func TestNoopReclaimDoesNotTouchWaitingForClaim(t *testing.T) {
 	if err := s.SetWaitingForClaim(iss.ID, true); err != nil {
 		t.Fatalf("set flag: %v", err)
 	}
-	if _, created, err := s.AddAgentClaim(sess.SessionID, iss.ID, "again"); err != nil {
+	if _, created, _, err := s.AddAgentClaim(sess.SessionID, iss.ID, "again"); err != nil {
 		t.Fatalf("re-claim: %v", err)
 	} else if created {
 		t.Fatal("re-claim reported created = true, want false (no-op)")
