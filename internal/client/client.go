@@ -176,6 +176,10 @@ type Client interface {
 	ReleaseAgent(ctx context.Context, repo *model.Repo, in inputs.AgentReleaseInput, dryRun bool) (*model.AgentClaim, error)
 	ListAgentSessions(ctx context.Context, f AgentSessionFilter) ([]*model.AgentSession, error)
 	ShowAgentSession(ctx context.Context, sessionID string) (*AgentSessionView, error)
+	// ListOpenClaims returns every open (unreleased) agent claim for repo,
+	// or across all repos when repo is nil. Local-only; remote returns
+	// ErrLocalOnly. Used by the desktop Board to derive each card's `taken`.
+	ListOpenClaims(ctx context.Context, repo *model.Repo) ([]*model.AgentClaim, error)
 	// EnsureAgentIdentity mints a fresh persistent agent identity (a
 	// random slug, retried against the UNIQUE constraint until it
 	// sticks) and adopts it as this client's audit actor. It's the

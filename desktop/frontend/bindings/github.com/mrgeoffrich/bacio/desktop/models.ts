@@ -150,6 +150,13 @@ export class BoardCard {
     "assignees": string[];
     "claude": boolean;
 
+    /**
+     * Taken is the derived "an agent is actively holding this issue"
+     * signal — true while the issue has an open agent claim. The Board
+     * bolds taken cards and disables drag / per-card actions on them.
+     */
+    "taken": boolean;
+
     /** Creates a new BoardCard instance. */
     constructor($$source: Partial<BoardCard> = {}) {
         if (!("key" in $$source)) {
@@ -172,6 +179,9 @@ export class BoardCard {
         }
         if (!("claude" in $$source)) {
             this["claude"] = false;
+        }
+        if (!("taken" in $$source)) {
+            this["taken"] = false;
         }
 
         Object.assign(this, $$source);

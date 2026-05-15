@@ -48,6 +48,10 @@ func (c *remoteClient) ShowAgentSession(ctx context.Context, sessionID string) (
 	return nil, remoteAgentNotSupported("show")
 }
 
+func (c *remoteClient) ListOpenClaims(ctx context.Context, repo *model.Repo) ([]*model.AgentClaim, error) {
+	return nil, remoteAgentNotSupported("claims")
+}
+
 func (c *remoteClient) CreateDispatch(ctx context.Context, repo *model.Repo, in inputs.AgentDispatchInput, dryRun bool) (*model.AgentDispatch, error) {
 	return nil, remoteAgentNotSupported("dispatch")
 }

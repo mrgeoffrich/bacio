@@ -43,12 +43,17 @@ export default function KanbanCard({ card, promptConfig, isDragging, onDragStart
     onDispatch(card.key, mode);
   };
 
+  // A taken card is held by an agent — block the human from dragging it
+  // or dispatching from it until the claim is released. Opening the
+  // read-only drawer stays allowed (viewing isn't a mutation).
+  const taken = !!card.taken;
+
   const hasFooter = validPrompts.length > 0 || card.assignees.length > 0;
 
   return (
     <article
-      className={`mk-card ${isDragging ? 'is-dragging' : ''} ${card.claude ? 'is-claude' : ''}`}
-      draggable
+      className={`mk-card ${isDragging ? 'is-dragging' : ''} ${card.claude ? 'is-claude' : ''} ${taken ? 'is-taken' : ''}`}
+      draggable={!taken}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onClick={onOpen}
@@ -75,14 +80,20 @@ export default function KanbanCard({ card, promptConfig, isDragging, onDragStart
             <div className="mk-card-action" ref={actionRef}>
               <button
                 className="mk-card-action-btn"
-                aria-label="Dispatch a prompt"
+                aria-label={taken ? 'An agent is working on this issue' : 'Dispatch a prompt'}
                 aria-haspopup="menu"
                 aria-expanded={menuOpen}
-                onClick={(e) => { e.stopPropagation(); setMenuOpen(o => !o); }}
+                disabled={taken}
+                title={taken ? 'An agent is working on this issue' : undefined}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (taken) return;
+                  setMenuOpen(o => !o);
+                }}
               >
                 <Icon name="zap" />
               </button>
-              {menuOpen && (
+              {menuOpen && !taken && (
                 <div className="mk-card-action-menu" role="menu">
                   {validPrompts.map(p => (
                     <button

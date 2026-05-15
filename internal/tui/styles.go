@@ -47,6 +47,10 @@ var (
 	cardSelectedBG   = lipgloss.Color("57")
 	cardKeyColor     = lipgloss.Color("147")
 	mutedColor       = lipgloss.Color("241")
+	// takenColor tints the key brackets of a board card whose issue has
+	// an open agent claim — paired with a bold card body so a human can
+	// see at a glance the issue is held by an agent.
+	takenColor = lipgloss.Color("214") // amber
 )
 
 // featurePalette is a curated set of distinguishable 256-colour ANSI
