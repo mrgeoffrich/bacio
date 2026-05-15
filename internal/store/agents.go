@@ -204,21 +204,135 @@ func (s *Store) UpsertAgentSession(in UpsertAgentSessionIn) (*model.AgentSession
 	return s.GetAgentSession(in.SessionID)
 }
 
+// AssigneeChange describes an issues.assignee mutation that
+// AddAgentClaim / ReleaseAgentClaim / EndAgentSession made as a side
+// effect of keeping the claim and the assignee in lockstep. The client
+// layer turns a *changed* AssigneeChange into an `issue.assign` audit
+// row; Old == New means the store looked but nothing moved, so the
+// client skips the audit.
+type AssigneeChange struct {
+	IssueID    int64
+	IssueKey   string
+	RepoID     int64
+	RepoPrefix string
+	Old        string
+	New        string
+}
+
+// Changed reports whether the assignee actually moved.
+func (a AssigneeChange) Changed() bool { return a.Old != a.New }
+
+// sessionIdentity resolves the assignee string for a session: the
+// linked agent identity slug if the session has one, else the session's
+// actor (itself validated at register time). Never the OS user.
+func sessionIdentity(tx *sql.Tx, sessPK int64) (string, error) {
+	var name sql.NullString
+	var actor string
+	err := tx.QueryRow(
+		`SELECT a.name, s.actor FROM agent_sessions s LEFT JOIN agents a ON a.id = s.agent_id WHERE s.id = ?`,
+		sessPK,
+	).Scan(&name, &actor)
+	if err != nil {
+		return "", err
+	}
+	if name.Valid && name.String != "" {
+		return name.String, nil
+	}
+	return actor, nil
+}
+
+// issueAssigneeContext reads the fields the assignee-lockstep helpers
+// need inside a tx: the current assignee plus the issue's repo/key for
+// the audit row.
+func issueAssigneeContext(tx *sql.Tx, issueID int64) (assignee string, repoID int64, prefix string, number int64, err error) {
+	err = tx.QueryRow(
+		`SELECT i.assignee, i.repo_id, r.prefix, i.number FROM issues i JOIN repos r ON r.id = i.repo_id WHERE i.id = ?`,
+		issueID,
+	).Scan(&assignee, &repoID, &prefix, &number)
+	return
+}
+
+// applyClaimAssignee stamps issues.assignee with the claiming identity,
+// overwriting whatever was there — claiming is a deliberate ownership
+// signal, so last claim wins even over a human-set assignee. Returns the
+// before/after for the audit row.
+func applyClaimAssignee(tx *sql.Tx, issueID int64, identity string) (*AssigneeChange, error) {
+	clean, err := ValidateName(identity, "assignee")
+	if err != nil {
+		return nil, err
+	}
+	old, repoID, prefix, number, err := issueAssigneeContext(tx, issueID)
+	if err != nil {
+		return nil, err
+	}
+	ch := &AssigneeChange{
+		IssueID: issueID, IssueKey: fmt.Sprintf("%s-%d", prefix, number),
+		RepoID: repoID, RepoPrefix: prefix, Old: old, New: clean,
+	}
+	if old == clean {
+		return ch, nil // already assigned to this identity — nothing to write
+	}
+	if _, err := tx.Exec(
+		`UPDATE issues SET assignee = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		clean, issueID,
+	); err != nil {
+		return nil, err
+	}
+	return ch, nil
+}
+
+// clearAssigneeIfOwned clears issues.assignee iff (a) the issue has no
+// remaining open claims and (b) the current assignee still equals the
+// releasing identity — so a human's deliberate reassignment after the
+// claim is preserved. Must run *after* the releasing claim is stamped so
+// the open-claim count is accurate. Returns a changed AssigneeChange
+// only when it actually cleared the field.
+func clearAssigneeIfOwned(tx *sql.Tx, issueID int64, identity string) (*AssigneeChange, error) {
+	var openClaims int
+	if err := tx.QueryRow(
+		`SELECT COUNT(*) FROM agent_claims WHERE issue_id = ? AND released_at IS NULL`,
+		issueID,
+	).Scan(&openClaims); err != nil {
+		return nil, err
+	}
+	old, repoID, prefix, number, err := issueAssigneeContext(tx, issueID)
+	if err != nil {
+		return nil, err
+	}
+	ch := &AssigneeChange{
+		IssueID: issueID, IssueKey: fmt.Sprintf("%s-%d", prefix, number),
+		RepoID: repoID, RepoPrefix: prefix, Old: old, New: old,
+	}
+	if openClaims > 0 || old == "" || old != identity {
+		return ch, nil // claims remain, nothing to clear, or a human owns it now
+	}
+	if _, err := tx.Exec(
+		`UPDATE issues SET assignee = '', updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		issueID,
+	); err != nil {
+		return nil, err
+	}
+	ch.New = ""
+	return ch, nil
+}
+
 // EndAgentSession stamps ended_at + end_reason, and auto-releases every
 // open claim for that session. Idempotent: ending an already-ended
 // session is a no-op (returns the row as-is) so a Stop hook firing twice
-// doesn't error.
-func (s *Store) EndAgentSession(sessionID, reason string) (*model.AgentSession, error) {
+// doesn't error. Each issue left with no open claims is also unassigned
+// (subject to clearAssigneeIfOwned's guard) — the returned slice carries
+// one entry per issue whose assignee actually changed, for the audit log.
+func (s *Store) EndAgentSession(sessionID, reason string) (*model.AgentSession, []AssigneeChange, error) {
 	if _, err := ValidateSessionID(sessionID); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	parsed, err := model.ParseEndReason(reason)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	tx, err := s.DB.Begin()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer tx.Rollback()
 
@@ -231,33 +345,82 @@ func (s *Store) EndAgentSession(sessionID, reason string) (*model.AgentSession, 
 		// but spelling it out keeps the "no commit happens here" intent
 		// obvious to future readers).
 		_ = tx.Rollback()
-		return s.GetAgentSession(sessionID)
+		sess, err := s.GetAgentSession(sessionID)
+		return sess, nil, err
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return nil, err
+		return nil, nil, err
 	}
+
+	var sessPK int64
+	if err := tx.QueryRow(`SELECT id FROM agent_sessions WHERE session_id = ?`, sessionID).Scan(&sessPK); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil, ErrNotFound
+		}
+		return nil, nil, err
+	}
+
+	// Capture the issues this session is about to auto-release *before*
+	// the bulk update, so the post-release assignee sweep knows which
+	// issues to revisit.
+	claimedRows, err := tx.Query(
+		`SELECT DISTINCT issue_id FROM agent_claims WHERE released_at IS NULL AND session_pk = ?`, sessPK,
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+	var issueIDs []int64
+	for claimedRows.Next() {
+		var id int64
+		if err := claimedRows.Scan(&id); err != nil {
+			claimedRows.Close()
+			return nil, nil, err
+		}
+		issueIDs = append(issueIDs, id)
+	}
+	if err := claimedRows.Err(); err != nil {
+		claimedRows.Close()
+		return nil, nil, err
+	}
+	claimedRows.Close()
 
 	res, err := tx.Exec(
 		`UPDATE agent_sessions SET ended_at = CURRENT_TIMESTAMP, end_reason = ? WHERE session_id = ? AND ended_at IS NULL`,
 		string(parsed), sessionID,
 	)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return nil, ErrNotFound
+		return nil, nil, ErrNotFound
 	}
 	if _, err := tx.Exec(
-		`UPDATE agent_claims SET released_at = CURRENT_TIMESTAMP WHERE released_at IS NULL AND session_pk IN (SELECT id FROM agent_sessions WHERE session_id = ?)`,
-		sessionID,
+		`UPDATE agent_claims SET released_at = CURRENT_TIMESTAMP WHERE released_at IS NULL AND session_pk = ?`,
+		sessPK,
 	); err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+
+	identity, err := sessionIdentity(tx, sessPK)
+	if err != nil {
+		return nil, nil, err
+	}
+	var changes []AssigneeChange
+	for _, issueID := range issueIDs {
+		ch, err := clearAssigneeIfOwned(tx, issueID, identity)
+		if err != nil {
+			return nil, nil, err
+		}
+		if ch.Changed() {
+			changes = append(changes, *ch)
+		}
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return s.GetAgentSession(sessionID)
+	sess, err := s.GetAgentSession(sessionID)
+	return sess, changes, err
 }
 
 // AddAgentClaim records a new claim. Rejects if the session is already
@@ -271,17 +434,23 @@ func (s *Store) EndAgentSession(sessionID, reason string) (*model.AgentSession, 
 // The `created` flag lets callers (the local client) skip writing an
 // audit row for no-op re-claims — otherwise a poll loop would flood
 // the history table with duplicate `agent.claim` entries.
-func (s *Store) AddAgentClaim(sessionID string, issueID int64, prompt string) (*model.AgentClaim, bool, error) {
+//
+// A freshly-created claim also stamps issues.assignee with the claiming
+// identity (last claim wins, even over a human-set assignee) inside the
+// same transaction, so the claim and the assignee can never drift. The
+// returned *AssigneeChange describes that mutation for the audit log; it
+// is nil on the no-op re-claim path.
+func (s *Store) AddAgentClaim(sessionID string, issueID int64, prompt string) (*model.AgentClaim, bool, *AssigneeChange, error) {
 	if _, err := ValidateSessionID(sessionID); err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
 	prompt, err := ValidateBody(prompt, "prompt", false)
 	if err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
 	tx, err := s.DB.Begin()
 	if err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
 	defer tx.Rollback()
 
@@ -289,13 +458,13 @@ func (s *Store) AddAgentClaim(sessionID string, issueID int64, prompt string) (*
 	var ended sql.NullTime
 	err = tx.QueryRow(`SELECT id, ended_at FROM agent_sessions WHERE session_id = ?`, sessionID).Scan(&sessPK, &ended)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, false, fmt.Errorf("session %q is not registered", sessionID)
+		return nil, false, nil, fmt.Errorf("session %q is not registered", sessionID)
 	}
 	if err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
 	if ended.Valid {
-		return nil, false, fmt.Errorf("session %q is already ended; cannot claim", sessionID)
+		return nil, false, nil, fmt.Errorf("session %q is already ended; cannot claim", sessionID)
 	}
 
 	var existing int64
@@ -303,20 +472,21 @@ func (s *Store) AddAgentClaim(sessionID string, issueID int64, prompt string) (*
 	if err == nil {
 		// No-op re-claim. If the caller supplied a fresher prompt, update
 		// it in place — the claim row still counts as "not created" so the
-		// audit log isn't flooded by a poll loop.
+		// audit log isn't flooded by a poll loop. Ownership is unchanged,
+		// so the assignee is left alone (nil AssigneeChange).
 		if prompt != "" {
 			if _, err := tx.Exec(`UPDATE agent_claims SET prompt = ? WHERE id = ?`, prompt, existing); err != nil {
-				return nil, false, err
+				return nil, false, nil, err
 			}
 		}
 		if err := tx.Commit(); err != nil {
-			return nil, false, err
+			return nil, false, nil, err
 		}
 		c, err := s.getAgentClaimByID(existing)
-		return c, false, err
+		return c, false, nil, err
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return nil, false, err
+		return nil, false, nil, err
 	}
 
 	res, err := tx.Exec(
@@ -324,43 +494,57 @@ func (s *Store) AddAgentClaim(sessionID string, issueID int64, prompt string) (*
 		sessPK, issueID, prompt,
 	)
 	if err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
 	id, err := res.LastInsertId()
 	if err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
 	if _, err := tx.Exec(
 		`UPDATE agent_sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?`, sessPK,
 	); err != nil {
-		return nil, false, err
+		return nil, false, nil, err
+	}
+	identity, err := sessionIdentity(tx, sessPK)
+	if err != nil {
+		return nil, false, nil, err
+	}
+	change, err := applyClaimAssignee(tx, issueID, identity)
+	if err != nil {
+		return nil, false, nil, err
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, false, err
+		return nil, false, nil, err
 	}
 	c, err := s.getAgentClaimByID(id)
-	return c, true, err
+	return c, true, change, err
 }
 
 // ReleaseAgentClaim stamps released_at on the latest open claim for
 // (session, issue). Returns ErrNotFound if no open claim exists.
-func (s *Store) ReleaseAgentClaim(sessionID string, issueID int64) (*model.AgentClaim, error) {
+//
+// Once the claim is released, the issue is unassigned if it has no
+// remaining open claims and its assignee still equals the releasing
+// identity (clearAssigneeIfOwned's guard preserves a human's deliberate
+// reassignment). The returned *AssigneeChange describes that mutation
+// for the audit log — Old == New when nothing was cleared.
+func (s *Store) ReleaseAgentClaim(sessionID string, issueID int64) (*model.AgentClaim, *AssigneeChange, error) {
 	if _, err := ValidateSessionID(sessionID); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	tx, err := s.DB.Begin()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer tx.Rollback()
 
 	var sessPK int64
 	err = tx.QueryRow(`SELECT id FROM agent_sessions WHERE session_id = ?`, sessionID).Scan(&sessPK)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("session %q is not registered", sessionID)
+		return nil, nil, fmt.Errorf("session %q is not registered", sessionID)
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var claimID int64
@@ -369,21 +553,30 @@ func (s *Store) ReleaseAgentClaim(sessionID string, issueID int64) (*model.Agent
 		sessPK, issueID,
 	).Scan(&claimID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
+		return nil, nil, ErrNotFound
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if _, err := tx.Exec(`UPDATE agent_claims SET released_at = CURRENT_TIMESTAMP WHERE id = ?`, claimID); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if _, err := tx.Exec(`UPDATE agent_sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?`, sessPK); err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	identity, err := sessionIdentity(tx, sessPK)
+	if err != nil {
+		return nil, nil, err
+	}
+	change, err := clearAssigneeIfOwned(tx, issueID, identity)
+	if err != nil {
+		return nil, nil, err
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return s.getAgentClaimByID(claimID)
+	claim, err := s.getAgentClaimByID(claimID)
+	return claim, change, err
 }
 
 // AgentSessionFilter scopes ListAgentSessions. Zero value = all
