@@ -62,6 +62,11 @@ type boardView struct {
 	// Updated via leaderStateMsg from the shell on every ~10s election tick.
 	amLeader    bool
 	holderLabel string
+	// standbyNotice explains why dispatch was refused on a standby process.
+	// It lives in its own field (not b.err) so the ~10s reload's
+	// `b.err = nil` can't wipe it; it persists until the process is
+	// promoted to leader.
+	standbyNotice string
 
 	selected    *model.Issue
 	comments    []*model.Comment
@@ -352,6 +357,9 @@ func (b *boardView) Status() string {
 	if b.err != nil {
 		return b.err.Error()
 	}
+	if b.standbyNotice != "" {
+		return b.standbyNotice
+	}
 	if b.lastRefresh.IsZero() {
 		return ""
 	}
@@ -434,7 +442,7 @@ func (b *boardView) Update(msg tea.Msg) tea.Cmd {
 		b.amLeader = lsm.state.AmLeader
 		b.holderLabel = lsm.state.HolderLabel
 		if b.amLeader {
-			b.err = nil // clear any standby message on promotion
+			b.standbyNotice = "" // dispatch is available again on promotion
 		}
 		return nil
 	}

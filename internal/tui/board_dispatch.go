@@ -36,7 +36,7 @@ func (b *boardView) openDispatchPicker() {
 		if holder == "" {
 			holder = "another process"
 		}
-		b.err = fmt.Errorf("standby — %s has control; dispatch unavailable here", holder)
+		b.standbyNotice = fmt.Sprintf("standby — %s has control; dispatch unavailable here", holder)
 		return
 	}
 	iss := b.currentIssue()

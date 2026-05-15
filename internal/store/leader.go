@@ -75,7 +75,7 @@ func (s *Store) ReleaseLeader(token string) error {
 // AcquiredAt is zero when the lease has never been acquired.
 func (s *Store) CurrentLeader() (LeaderInfo, error) {
 	var info LeaderInfo
-	var acquiredAt sql.NullString
+	var acquiredAt sql.NullTime
 	err := s.DB.QueryRow(`
 		SELECT holder_token, holder_label, acquired_at
 		  FROM ui_leader WHERE id = 1`).Scan(
@@ -83,8 +83,8 @@ func (s *Store) CurrentLeader() (LeaderInfo, error) {
 	if err != nil {
 		return LeaderInfo{}, err
 	}
-	if acquiredAt.Valid && acquiredAt.String != "" {
-		info.AcquiredAt, _ = time.Parse("2006-01-02 15:04:05", acquiredAt.String)
+	if acquiredAt.Valid {
+		info.AcquiredAt = acquiredAt.Time
 	}
 	return info, nil
 }

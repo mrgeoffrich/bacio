@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/mrgeoffrich/bacio/internal/leader"
@@ -33,6 +34,7 @@ type LeaderService struct {
 	st      *store.Store
 	elector *leader.Elector
 	done    chan struct{}
+	wg      sync.WaitGroup
 }
 
 // NewLeaderService creates an uninitialised LeaderService; Wails calls
@@ -57,7 +59,9 @@ func (ls *LeaderService) ServiceStartup(_ context.Context, _ application.Service
 	ls.elector = leader.New(s, label)
 	ls.done = make(chan struct{})
 
+	ls.wg.Add(1)
 	go func() {
+		defer ls.wg.Done()
 		// Tick immediately on startup so the frontend reflects the real
 		// state on first load rather than waiting 10 s.
 		ls.emitState(ls.elector.Tick())
@@ -76,9 +80,13 @@ func (ls *LeaderService) ServiceStartup(_ context.Context, _ application.Service
 }
 
 func (ls *LeaderService) ServiceShutdown() error {
+	// Stop the ticker goroutine and wait for it to exit before releasing the
+	// lease and closing the store — otherwise an in-flight Tick could run
+	// against a closed store.
 	if ls.done != nil {
 		close(ls.done)
 	}
+	ls.wg.Wait()
 	if ls.elector != nil {
 		ls.elector.Release()
 	}

@@ -10,6 +10,8 @@
 package leader
 
 import (
+	"sync"
+
 	"github.com/mrgeoffrich/bacio/internal/identity"
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
@@ -35,11 +37,16 @@ type State struct {
 // Elector runs the election loop. Create one per process with [New], then call
 // [Tick] on each timer fire. [Release] on graceful shutdown.
 type Elector struct {
-	backend  Backend
-	token    string
-	label    string
+	backend Backend
+	token   string
+	label   string
+	// amLeader is owned by the Tick goroutine — Tick is the only reader and
+	// writer, so it needs no lock.
 	amLeader bool
-	cached   State
+	// mu guards cached: Tick (election goroutine) writes it, CurrentState
+	// (e.g. the desktop's Wails binding goroutine) reads it.
+	mu     sync.Mutex
+	cached State
 }
 
 // New creates an Elector with a fresh per-process token. label is a
@@ -71,8 +78,11 @@ func (e *Elector) Tick() State {
 			e.amLeader = true
 		}
 	}
-	e.cached = e.buildState()
-	return e.cached
+	state := e.buildState()
+	e.mu.Lock()
+	e.cached = state
+	e.mu.Unlock()
+	return state
 }
 
 // Release best-effort releases the lease on graceful shutdown. The holder_token
@@ -82,8 +92,10 @@ func (e *Elector) Release() {
 }
 
 // CurrentState returns the last state computed by [Tick] without contacting
-// the backend. Safe to call from any goroutine after initialisation.
+// the backend. Safe to call from any goroutine — the read is mutex-guarded.
 func (e *Elector) CurrentState() State {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	return e.cached
 }
 
