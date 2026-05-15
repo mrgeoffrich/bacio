@@ -8,13 +8,18 @@ const THEME_OPTIONS = [
   { id: 'dark', label: 'Dark' },
 ];
 
+const HIDE_EMPTY_OPTIONS = [
+  { id: false, label: 'Off' },
+  { id: true, label: 'On' },
+];
+
 // SettingsView is the desktop Settings screen — a full-screen view (not
 // a modal) covering the content area below the topbar. It owns theme
 // selection plus the per-stage dispatch prompt config: the template
 // body and the state-gate (which issue states the prompt is valid to
 // run from). `columns` is the bacio state vocabulary, used to render
 // the state-gate toggles.
-export default function SettingsView({ theme, onChangeTheme, columns, onClose }) {
+export default function SettingsView({ theme, onChangeTheme, hideEmptyColumns, onChangeHideEmptyColumns, columns, onClose }) {
   // `templates` holds the persisted per-stage config from the backend;
   // `drafts` holds in-flight body textarea edits, keyed by mode, so a
   // body save only fires on blur. State-gate edits save immediately.
@@ -97,6 +102,25 @@ export default function SettingsView({ theme, onChangeTheme, columns, onClose })
                 className={`mk-segmented-btn ${theme === opt.id ? 'is-active' : ''}`}
                 aria-pressed={theme === opt.id}
                 onClick={() => onChangeTheme(opt.id)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="mk-settings-row">
+          <div className="mk-settings-row-text">
+            <div className="mk-settings-label">Hide empty board columns</div>
+            <div className="mk-settings-hint">Columns with no cards are hidden from the board.</div>
+          </div>
+          <div className="mk-segmented" role="group" aria-label="Hide empty board columns">
+            {HIDE_EMPTY_OPTIONS.map(opt => (
+              <button
+                key={String(opt.id)}
+                className={`mk-segmented-btn ${hideEmptyColumns === opt.id ? 'is-active' : ''}`}
+                aria-pressed={hideEmptyColumns === opt.id}
+                onClick={() => onChangeHideEmptyColumns(opt.id)}
               >
                 {opt.label}
               </button>

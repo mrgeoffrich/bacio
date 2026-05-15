@@ -63,6 +63,11 @@ export default function App() {
   // to run from. Board → KanbanCard reads it to gate the per-card action
   // button. Loaded on mount; reloaded when the Settings view closes.
   const [promptConfig, setPromptConfig] = useState([]);
+  // hideEmptyColumns is the App-owned Board preference: when true, the
+  // Board drops columns with zero cards. Loaded from app_settings on
+  // mount; flipped live from the Settings screen. Passed to the
+  // presentational Board alongside columns/cards.
+  const [hideEmptyColumns, setHideEmptyColumns] = useState(false);
   const [theme, setTheme] = useState(readTheme);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -94,15 +99,26 @@ export default function App() {
   // concrete repo, there's no "all" option. The prompt config is global
   // (repo-independent), so it loads here too.
   useEffect(() => {
-    Promise.all([api.listBoards(), api.listColumns(), api.listPromptTemplates()])
-      .then(([bs, cols, tpls]) => {
+    Promise.all([api.listBoards(), api.listColumns(), api.listPromptTemplates(), api.getBoardPreferences()])
+      .then(([bs, cols, tpls, prefs]) => {
         setBoards(bs);
         setColumns(cols);
         setPromptConfig(tpls);
+        setHideEmptyColumns(prefs.hideEmptyColumns);
         setActiveBoard(prev => bs.some(b => b.prefix === prev) ? prev : (bs[0]?.prefix ?? ''));
         setLoading(false);
       })
       .catch(err => { setError(err.message); setLoading(false); });
+  }, []);
+
+  // changeHideEmptyColumns persists the Board preference, then updates
+  // the App-owned flag on success so the Board reacts immediately —
+  // optimistic-then-confirmed, the same shape as the theme handler. A
+  // failed write logs and leaves the toggle where it was.
+  const changeHideEmptyColumns = useCallback((next) => {
+    api.setBoardPreferences(next)
+      .then(prefs => setHideEmptyColumns(prefs.hideEmptyColumns))
+      .catch(err => setError(err.message));
   }, []);
 
   // refreshPromptConfig reloads the global dispatch-prompt config. Called
@@ -297,6 +313,8 @@ export default function App() {
         <SettingsView
           theme={theme}
           onChangeTheme={setTheme}
+          hideEmptyColumns={hideEmptyColumns}
+          onChangeHideEmptyColumns={changeHideEmptyColumns}
           columns={columns}
           onClose={closeSettings}
         />
@@ -313,6 +331,7 @@ export default function App() {
           columns={columns}
           cards={cards}
           promptConfig={promptConfig}
+          hideEmptyColumns={hideEmptyColumns}
           onMoveCard={moveCard}
           onOpenCard={openCard}
           onDispatchFromCard={dispatchFromCard}

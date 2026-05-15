@@ -223,6 +223,32 @@ export class BoardColumn {
 }
 
 /**
+ * BoardPreferencesDTO is the desktop Board's UI preferences, shaped for
+ * the Settings panel. HideEmptyColumns drops kanban columns with zero
+ * cards from the Board.
+ */
+export class BoardPreferencesDTO {
+    "hideEmptyColumns": boolean;
+
+    /** Creates a new BoardPreferencesDTO instance. */
+    constructor($$source: Partial<BoardPreferencesDTO> = {}) {
+        if (!("hideEmptyColumns" in $$source)) {
+            this["hideEmptyColumns"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new BoardPreferencesDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): BoardPreferencesDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new BoardPreferencesDTO($$parsedSource as Partial<BoardPreferencesDTO>);
+    }
+}
+
+/**
  * ClaimDTO is one open agent claim, shaped for the Agents screen.
  */
 export class ClaimDTO {

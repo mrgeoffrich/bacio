@@ -102,3 +102,14 @@ func (c *remoteClient) GetPromptStates(ctx context.Context) (map[string][]string
 func (c *remoteClient) SetPromptStates(ctx context.Context, mode string, states []string, dryRun bool) error {
 	return remoteAgentNotSupported("prompt-states")
 }
+
+// Board preferences live in the local app_settings KV — like the agent
+// registry and prompt templates, there's no remote analogue in v1.
+
+func (c *remoteClient) GetBoardPreferences(ctx context.Context) (BoardPreferences, error) {
+	return BoardPreferences{}, remoteAgentNotSupported("board-preferences")
+}
+
+func (c *remoteClient) SetBoardPreferences(ctx context.Context, prefs BoardPreferences, dryRun bool) error {
+	return remoteAgentNotSupported("board-preferences")
+}

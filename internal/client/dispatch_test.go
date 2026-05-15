@@ -171,6 +171,57 @@ func TestDispatchPromptTemplateRendering(t *testing.T) {
 	}
 }
 
+// TestBoardPreferencesLocal checks the local-backend round-trip for the
+// desktop Board preferences: the default is hide-off, a real set
+// persists, a dry-run set writes nothing, and the remote backend
+// refuses (Board preferences are local-only).
+func TestBoardPreferencesLocal(t *testing.T) {
+	p := newPair(t)
+	defer p.cleanup()
+	ctx := context.Background()
+
+	// Default — nothing stored yet — is hide-empty-columns off.
+	prefs, err := p.local.GetBoardPreferences(ctx)
+	if err != nil {
+		t.Fatalf("GetBoardPreferences: %v", err)
+	}
+	if prefs.HideEmptyColumns {
+		t.Fatalf("default HideEmptyColumns = true, want false")
+	}
+
+	// A real set persists.
+	if err := p.local.SetBoardPreferences(ctx, BoardPreferences{HideEmptyColumns: true}, false); err != nil {
+		t.Fatalf("SetBoardPreferences: %v", err)
+	}
+	prefs, err = p.local.GetBoardPreferences(ctx)
+	if err != nil {
+		t.Fatalf("GetBoardPreferences after set: %v", err)
+	}
+	if !prefs.HideEmptyColumns {
+		t.Fatalf("HideEmptyColumns = false after set true, want true")
+	}
+
+	// A dry-run set writes nothing — the stored value stays put.
+	if err := p.local.SetBoardPreferences(ctx, BoardPreferences{HideEmptyColumns: false}, true); err != nil {
+		t.Fatalf("SetBoardPreferences dry-run: %v", err)
+	}
+	prefs, err = p.local.GetBoardPreferences(ctx)
+	if err != nil {
+		t.Fatalf("GetBoardPreferences after dry-run: %v", err)
+	}
+	if !prefs.HideEmptyColumns {
+		t.Fatalf("dry-run set persisted: HideEmptyColumns = false, want still true")
+	}
+
+	// The remote backend refuses — Board preferences are local-only.
+	if _, err := p.remote.GetBoardPreferences(ctx); !errors.Is(err, ErrLocalOnly) {
+		t.Fatalf("remote GetBoardPreferences err = %v, want ErrLocalOnly", err)
+	}
+	if err := p.remote.SetBoardPreferences(ctx, BoardPreferences{}, false); !errors.Is(err, ErrLocalOnly) {
+		t.Fatalf("remote SetBoardPreferences err = %v, want ErrLocalOnly", err)
+	}
+}
+
 // TestSetPromptTemplateDryRun checks that a dry-run set validates the
 // mode and body but writes nothing, while a bad body still errors.
 func TestSetPromptTemplateDryRun(t *testing.T) {

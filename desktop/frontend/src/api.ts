@@ -23,9 +23,10 @@ import {
   HistoryPage,
   HistoryEntryDTO,
   PromptTemplateDTO,
+  BoardPreferencesDTO,
 } from '../bindings/github.com/mrgeoffrich/bacio/desktop';
 
-export type { Board, BoardColumn, BoardCard, IssueDetail, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, HistoryPage, HistoryEntryDTO, PromptTemplateDTO };
+export type { Board, BoardColumn, BoardCard, IssueDetail, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, HistoryPage, HistoryEntryDTO, PromptTemplateDTO, BoardPreferencesDTO };
 
 function normalize(err: unknown): Error {
   if (err instanceof Error) return err;
@@ -239,6 +240,28 @@ export async function savePromptStates(
 ): Promise<PromptTemplateDTO> {
   try {
     return await SettingsService.SavePromptStates(mode, states);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// getBoardPreferences returns the persisted desktop Board UI
+// preferences (or the built-in defaults when none are stored).
+export async function getBoardPreferences(): Promise<BoardPreferencesDTO> {
+  try {
+    return await SettingsService.GetBoardPreferences();
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// setBoardPreferences stores the Board's hide-empty-columns preference
+// and returns the refreshed DTO.
+export async function setBoardPreferences(
+  hideEmptyColumns: boolean,
+): Promise<BoardPreferencesDTO> {
+  try {
+    return await SettingsService.SetBoardPreferences(hideEmptyColumns);
   } catch (err) {
     throw normalize(err);
   }
