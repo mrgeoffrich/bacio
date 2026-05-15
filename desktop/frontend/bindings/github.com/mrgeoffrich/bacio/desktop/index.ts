@@ -19,6 +19,7 @@ export {
     Board,
     BoardCard,
     BoardColumn,
+    BoardPreferencesDTO,
     ClaimDTO,
     ClaimantDTO,
     CommentDTO,

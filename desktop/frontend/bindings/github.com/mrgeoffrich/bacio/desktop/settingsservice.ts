@@ -17,6 +17,16 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 import * as $models from "./models.js";
 
 /**
+ * GetBoardPreferences returns the persisted desktop Board UI
+ * preferences (or the built-in defaults when none are stored).
+ */
+export function GetBoardPreferences(): $CancellablePromise<$models.BoardPreferencesDTO> {
+    return $Call.ByID(749217122).then(($result: any) => {
+        return $$createType0($result);
+    });
+}
+
+/**
  * ListPromptTemplates returns the five dispatch prompt templates in
  * lifecycle order, each with its effective body, the built-in default,
  * the effective + default state-gate, and whether each still matches
@@ -24,7 +34,7 @@ import * as $models from "./models.js";
  */
 export function ListPromptTemplates(): $CancellablePromise<$models.PromptTemplateDTO[]> {
     return $Call.ByID(1001854565).then(($result: any) => {
-        return $$createType1($result);
+        return $$createType2($result);
     });
 }
 
@@ -35,7 +45,7 @@ export function ListPromptTemplates(): $CancellablePromise<$models.PromptTemplat
  */
 export function PromptPlaceholders(): $CancellablePromise<string[]> {
     return $Call.ByID(1135988516).then(($result: any) => {
-        return $$createType2($result);
+        return $$createType3($result);
     });
 }
 
@@ -47,7 +57,7 @@ export function PromptPlaceholders(): $CancellablePromise<string[]> {
  */
 export function SavePromptStates(mode: string, states: string[]): $CancellablePromise<$models.PromptTemplateDTO> {
     return $Call.ByID(1803653057, mode, states).then(($result: any) => {
-        return $$createType0($result);
+        return $$createType1($result);
     });
 }
 
@@ -58,11 +68,23 @@ export function SavePromptStates(mode: string, states: string[]): $CancellablePr
  */
 export function SavePromptTemplate(mode: string, body: string): $CancellablePromise<$models.PromptTemplateDTO> {
     return $Call.ByID(898182437, mode, body).then(($result: any) => {
+        return $$createType1($result);
+    });
+}
+
+/**
+ * SetBoardPreferences stores the desktop Board's hide-empty-columns
+ * preference and returns the refreshed DTO — same "save returns the
+ * refreshed DTO" shape as SavePromptTemplate.
+ */
+export function SetBoardPreferences(hideEmptyColumns: boolean): $CancellablePromise<$models.BoardPreferencesDTO> {
+    return $Call.ByID(3601263486, hideEmptyColumns).then(($result: any) => {
         return $$createType0($result);
     });
 }
 
 // Private type creation functions
-const $$createType0 = $models.PromptTemplateDTO.createFrom;
-const $$createType1 = $Create.Array($$createType0);
-const $$createType2 = $Create.Array($Create.Any);
+const $$createType0 = $models.BoardPreferencesDTO.createFrom;
+const $$createType1 = $models.PromptTemplateDTO.createFrom;
+const $$createType2 = $Create.Array($$createType1);
+const $$createType3 = $Create.Array($Create.Any);

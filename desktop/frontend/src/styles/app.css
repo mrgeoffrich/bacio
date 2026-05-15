@@ -100,6 +100,16 @@ body { margin: 0; }
   font-family: var(--font-sans); font-size: 12px; color: var(--fg-4);
   padding: 16px 8px; text-align: center; line-height: 1.5;
 }
+/* Whole-board placeholder: shown when "hide empty columns" is on and
+   every column would be empty. Overrides .mk-board's grid layout so the
+   message centres in the board region instead of leaving it blank. */
+.mk-board-empty-wrap {
+  display: flex; align-items: center; justify-content: center;
+}
+.mk-board-empty {
+  font-family: var(--font-sans); font-size: 13px; color: var(--fg-4);
+  text-align: center; line-height: 1.5;
+}
 
 /* ---------- Status pills ---------- */
 .mk-status-todo    { background: var(--status-todo-bg);    color: var(--status-todo); }

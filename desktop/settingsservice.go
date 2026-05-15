@@ -167,3 +167,33 @@ func (s *SettingsService) refreshedDTO(ctx context.Context, mode string) (Prompt
 	m := model.DispatchMode(mode)
 	return dtoFor(m, labelFor(m), current[mode], states[mode]), nil
 }
+
+// BoardPreferencesDTO is the desktop Board's UI preferences, shaped for
+// the Settings panel. HideEmptyColumns drops kanban columns with zero
+// cards from the Board.
+type BoardPreferencesDTO struct {
+	HideEmptyColumns bool `json:"hideEmptyColumns"`
+}
+
+// GetBoardPreferences returns the persisted desktop Board UI
+// preferences (or the built-in defaults when none are stored).
+func (s *SettingsService) GetBoardPreferences() (BoardPreferencesDTO, error) {
+	prefs, err := s.client.GetBoardPreferences(context.Background())
+	if err != nil {
+		return BoardPreferencesDTO{}, err
+	}
+	return BoardPreferencesDTO{HideEmptyColumns: prefs.HideEmptyColumns}, nil
+}
+
+// SetBoardPreferences stores the desktop Board's hide-empty-columns
+// preference and returns the refreshed DTO — same "save returns the
+// refreshed DTO" shape as SavePromptTemplate.
+func (s *SettingsService) SetBoardPreferences(hideEmptyColumns bool) (BoardPreferencesDTO, error) {
+	ctx := context.Background()
+	if err := s.client.SetBoardPreferences(ctx, client.BoardPreferences{
+		HideEmptyColumns: hideEmptyColumns,
+	}, false); err != nil {
+		return BoardPreferencesDTO{}, err
+	}
+	return s.GetBoardPreferences()
+}

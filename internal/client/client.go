@@ -243,6 +243,22 @@ type Client interface {
 	// writes nothing. Local-only — the remote backend returns ErrLocalOnly.
 	GetPromptStates(ctx context.Context) (map[string][]string, error)
 	SetPromptStates(ctx context.Context, mode string, states []string, dryRun bool) error
+
+	// ----- Board preferences (local-only; desktop Settings panel) -----
+	// GetBoardPreferences returns the desktop Board's UI preferences
+	// (custom values, or the built-in defaults). SetBoardPreferences
+	// stores them; with dryRun set it writes nothing. Local-only — the
+	// remote backend returns ErrLocalOnly.
+	GetBoardPreferences(ctx context.Context) (BoardPreferences, error)
+	SetBoardPreferences(ctx context.Context, prefs BoardPreferences, dryRun bool) error
+}
+
+// BoardPreferences holds the desktop Board's UI preferences, persisted
+// in the global app_settings KV. HideEmptyColumns drops kanban columns
+// with zero cards from the Board. Local-only — there's no remote
+// analogue in v1, like the rest of the app_settings store.
+type BoardPreferences struct {
+	HideEmptyColumns bool `json:"hideEmptyColumns"`
 }
 
 // AgentSessionFilter mirrors store.AgentSessionFilter; the wrapper lets

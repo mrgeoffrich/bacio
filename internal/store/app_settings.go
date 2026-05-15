@@ -182,3 +182,28 @@ func (s *Store) AllPromptStates() (map[model.DispatchMode][]model.State, error) 
 	}
 	return out, nil
 }
+
+const boardHideEmptyColumnsKey = "board.hide_empty_columns"
+
+// GetBoardHideEmptyColumns reports whether the desktop Board should hide
+// columns that have no cards. A missing/empty value — or any value that
+// isn't exactly "true" — reads as false (the default), the same
+// defensive read style as GetPromptStates: a read path never errors on
+// an unexpected stored value.
+func (s *Store) GetBoardHideEmptyColumns() (bool, error) {
+	v, err := s.GetAppSetting(boardHideEmptyColumnsKey)
+	if err != nil {
+		return false, err
+	}
+	return v == "true", nil
+}
+
+// SetBoardHideEmptyColumns stores the desktop Board's hide-empty-columns
+// preference.
+func (s *Store) SetBoardHideEmptyColumns(hide bool) error {
+	v := "false"
+	if hide {
+		v = "true"
+	}
+	return s.SetAppSetting(boardHideEmptyColumnsKey, v)
+}
