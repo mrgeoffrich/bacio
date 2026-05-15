@@ -47,6 +47,10 @@ func (b *boardView) openDispatchPicker() {
 		b.err = fmt.Errorf("send to agent: %s is taken — an agent already holds it", iss.Key)
 		return
 	}
+	if b.waitingIssues[iss.ID] {
+		b.err = fmt.Errorf("send to agent: %s is already waiting for an agent to claim it", iss.Key)
+		return
+	}
 	if iss.State != model.StateTodo {
 		b.err = fmt.Errorf("send to agent: only todo issues can be dispatched")
 		return
@@ -253,6 +257,11 @@ func (b *boardView) confirmDispatch() {
 		return
 	}
 	b.err = nil
+	// AddDispatch flipped waiting_for_claim on the issue row; reflect it
+	// in the board's local set immediately so the spinner shows without
+	// waiting for the next ~10s reload. The spinner tick-chain is armed
+	// by the caller (Update's dispatch-picker branch).
+	b.waitingIssues[issueID] = true
 	recordTUIOp(b.store, model.HistoryEntry{
 		RepoID:      &b.repo.ID,
 		RepoPrefix:  b.repo.Prefix,

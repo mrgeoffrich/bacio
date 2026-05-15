@@ -363,6 +363,8 @@ bacio issue brief MINI-42 | tee /tmp/ctx.json
 
 `claimants` is the per-issue agent-claim history (open + released, newest first) — each entry carries `session_id`, `agent_name`, `prompt`, `claimed_at`, and `released_at` (absent while open). `taken` is the derived "an agent is actively holding this" flag — `true` iff any claimant is still open. `bacio issue show` carries the same `claimants` / `taken` fields, and so does the `bacio api` `/issues/{key}` and `/issues/{key}/brief` JSON.
 
+Every issue also carries a `waiting_for_claim` boolean (in `bacio issue show -o json`, `bacio issue list -o json`, `bacio issue brief`, and the API issue JSON). It's `true` in the gap between a dispatch being queued against the issue and an agent recording an open claim on it — see the dispatch lifecycle in the Dispatches section. The TUI board and desktop app render a spinner on a waiting issue and refuse a fresh dispatch on it. In text output, `bacio issue show` prints a `Waiting for claim: yes` line only while it's set.
+
 **Driving an agent through a feature in dependency order.** Inspect the topo order with `bacio feature plan <slug>`, then loop on `bacio issue next --feature <slug> --user <agent> -o json`, treating `{"issue": null}` as "retry later". Multiple agents can call `next` in parallel — SQLite serialises the claim. Crashed agents leave a stale `in_progress`/assigned issue; clear with `bacio issue state <KEY> todo` + `bacio issue unassign <KEY>`.
 
 ### Comments
@@ -627,6 +629,18 @@ An agent picks dispatches up two ways:
 Either way, acknowledge each handled dispatch with `bacio agent ack <id>
 --note "..."` (or the channel's `reply` tool). Acked/cancelled dispatches
 drop out of `bacio agent inbox` and are pruned after 60 days.
+
+**The `waiting_for_claim` lifecycle.** When a dispatch is queued against
+a concrete issue, bacio immediately sets that issue's `waiting_for_claim`
+flag to `true` — the "a dispatch is out, but no agent has picked it up
+yet" signal. It is cleared back to `false` the moment an agent records
+an open claim on the issue (`bacio agent claim`), and also if the
+dispatch is cancelled. So the normal flow is: dispatch → `waiting_for_claim
+= true` → agent claims → `waiting_for_claim = false`, `taken = true`. The
+TUI and desktop boards show a spinner (and hide the dispatch action)
+while an issue is waiting, so claiming promptly after you pick up a
+dispatch is what clears the spinner. Known gap: if an agent session ends
+without ever claiming or cancelling, the flag stays set.
 
 ### Dispatch prompt templates
 

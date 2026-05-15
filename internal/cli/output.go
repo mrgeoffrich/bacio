@@ -195,6 +195,9 @@ func printIssue(w io.Writer, i *model.Issue) error {
 	if i.Assignee != "" {
 		fmt.Fprintf(w, "Assignee: %s\n", i.Assignee)
 	}
+	if i.WaitingForClaim {
+		fmt.Fprintln(w, "Waiting for claim: yes")
+	}
 	if len(i.Tags) > 0 {
 		fmt.Fprintf(w, "Tags:     %s\n", strings.Join(i.Tags, ", "))
 	}

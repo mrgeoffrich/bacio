@@ -60,6 +60,11 @@ type BoardCard struct {
 	// signal — true while the issue has an open agent claim. The Board
 	// bolds taken cards and disables drag / per-card actions on them.
 	Taken bool `json:"taken"`
+	// WaitingForClaim is true between a dispatch being queued against
+	// this issue and an agent recording an open claim — the UI shows a
+	// spinner and disables drag / the per-card action while it's set.
+	// Cleared the moment a claim lands. `taken` takes render precedence.
+	WaitingForClaim bool `json:"waitingForClaim"`
 }
 
 // CommentDTO is one issue comment.
@@ -199,14 +204,15 @@ func cardFromIssue(iss *model.Issue, taken bool) BoardCard {
 		tags = []string{}
 	}
 	return BoardCard{
-		Key:         iss.Key,
-		Column:      string(iss.State),
-		ColumnLabel: stateLabel(iss.State),
-		Title:       iss.Title,
-		Tags:        tags,
-		Assignees:   assigneeList(iss.Assignee),
-		Claude:      iss.Assignee == "claude",
-		Taken:       taken,
+		Key:             iss.Key,
+		Column:          string(iss.State),
+		ColumnLabel:     stateLabel(iss.State),
+		Title:           iss.Title,
+		Tags:            tags,
+		Assignees:       assigneeList(iss.Assignee),
+		Claude:          iss.Assignee == "claude",
+		Taken:           taken,
+		WaitingForClaim: iss.WaitingForClaim,
 	}
 }
 

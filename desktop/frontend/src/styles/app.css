@@ -151,6 +151,22 @@ body { margin: 0; }
   cursor: not-allowed;
 }
 .mk-card.is-taken:hover { border-color: var(--status-claude); transform: none; }
+/* A waiting card has a dispatch queued but no agent claim yet — a coral
+   accent border (distinct from the mint taken border) and a spinner in
+   the action slot. Drag and dispatch are disabled like .is-taken. */
+.mk-card.is-waiting {
+  border-width: 2px; border-color: var(--border-focus);
+  cursor: not-allowed;
+}
+.mk-card.is-waiting:hover { border-color: var(--border-focus); transform: none; }
+.mk-card-spinner {
+  width: 13px; height: 13px; margin-left: auto; flex: none;
+  border: 2px solid var(--border-2);
+  border-top-color: var(--border-focus);
+  border-radius: 50%;
+  animation: mk-spin 0.7s linear infinite;
+}
+@keyframes mk-spin { to { transform: rotate(360deg); } }
 .mk-card-top { display: flex; align-items: center; gap: 6px; }
 .mk-card-id { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); }
 .mk-card-title { margin: 0; font-size: 14px; font-weight: 500; line-height: 1.35; color: var(--fg-1); }

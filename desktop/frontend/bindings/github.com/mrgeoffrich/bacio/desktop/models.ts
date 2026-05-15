@@ -168,6 +168,14 @@ export class BoardCard {
      */
     "taken": boolean;
 
+    /**
+     * WaitingForClaim is true between a dispatch being queued against
+     * this issue and an agent recording an open claim — the UI shows a
+     * spinner and disables drag / the per-card action while it's set.
+     * Cleared the moment a claim lands. `taken` takes render precedence.
+     */
+    "waitingForClaim": boolean;
+
     /** Creates a new BoardCard instance. */
     constructor($$source: Partial<BoardCard> = {}) {
         if (!("key" in $$source)) {
@@ -193,6 +201,9 @@ export class BoardCard {
         }
         if (!("taken" in $$source)) {
             this["taken"] = false;
+        }
+        if (!("waitingForClaim" in $$source)) {
+            this["waitingForClaim"] = false;
         }
 
         Object.assign(this, $$source);
