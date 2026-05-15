@@ -248,6 +248,17 @@ func (s *Store) SetIssueAssignee(id int64, assignee string) error {
 	return err
 }
 
+// SetWaitingForClaim toggles the issue's waiting_for_claim flag — the
+// ephemeral "a dispatch is queued but no agent has claimed yet" signal.
+// Set by AddDispatch, cleared by AddAgentClaim / CancelDispatch.
+// Deliberately does NOT bump updated_at: this is runtime state, like the
+// derived `taken` flag, and bumping updated_at would make git-backed
+// sync churn on every dispatch/claim.
+func (s *Store) SetWaitingForClaim(issueID int64, waiting bool) error {
+	_, err := s.DB.Exec(`UPDATE issues SET waiting_for_claim = ? WHERE id = ?`, waiting, issueID)
+	return err
+}
+
 // nextCandidateQ picks the lowest-numbered ready issue in a feature: state='todo',
 // no assignee, and every `blocks`-blocker in a terminal state. Shared between
 // PeekNextIssue (read-only) and ClaimNextIssue (claim).
@@ -640,7 +651,7 @@ func (s *Store) CountFeatures(repoID int64) (int, error) {
 
 const issueSelect = `
 SELECT i.id, i.uuid, i.repo_id, i.number, r.prefix, i.feature_id, COALESCE(f.slug, ''),
-       i.title, i.description, i.state, i.assignee, i.created_at, i.updated_at
+       i.title, i.description, i.state, i.assignee, i.waiting_for_claim, i.created_at, i.updated_at
 FROM issues i
 JOIN repos r ON r.id = i.repo_id
 LEFT JOIN features f ON f.id = i.feature_id`
@@ -654,7 +665,7 @@ func scanIssue(row rowScanner) (*model.Issue, error) {
 		state     string
 	)
 	err := row.Scan(&i.ID, &i.UUID, &i.RepoID, &i.Number, &prefix, &featureID, &featSlug,
-		&i.Title, &i.Description, &state, &i.Assignee, &i.CreatedAt, &i.UpdatedAt)
+		&i.Title, &i.Description, &state, &i.Assignee, &i.WaitingForClaim, &i.CreatedAt, &i.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}

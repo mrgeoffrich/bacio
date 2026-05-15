@@ -55,6 +55,10 @@ var (
 	// an open agent claim — paired with a bold card body so a human can
 	// see at a glance the issue is held by an agent.
 	takenColor = lipgloss.Color("214") // amber
+	// waitingColor tints the spinner marker on a board card whose issue
+	// has a queued-but-unclaimed dispatch (waiting_for_claim). Distinct
+	// from takenColor so the two inter-agent signals don't blur.
+	waitingColor = lipgloss.Color("39") // bright blue
 )
 
 // featurePalette is a curated set of distinguishable 256-colour ANSI

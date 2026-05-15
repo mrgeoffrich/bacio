@@ -59,7 +59,13 @@ func (s *Store) AddDispatch(in AddDispatchIn) (*model.AgentDispatch, error) {
 		return nil, err
 	}
 
-	res, err := s.DB.Exec(`
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	res, err := tx.Exec(`
 		INSERT INTO agent_dispatches
 		    (repo_id, target_agent_id, target_session_id, issue_id, mode, payload, created_by)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -71,6 +77,20 @@ func (s *Store) AddDispatch(in AddDispatchIn) (*model.AgentDispatch, error) {
 	}
 	id, err := res.LastInsertId()
 	if err != nil {
+		return nil, err
+	}
+	// A dispatch against a concrete issue flips its waiting_for_claim
+	// flag — transactional with the dispatch insert so a dispatch is
+	// never recorded without its issue being flagged. Cleared by
+	// AddAgentClaim when an agent claims, or by CancelDispatch.
+	if in.IssueID != nil {
+		if _, err := tx.Exec(
+			`UPDATE issues SET waiting_for_claim = 1 WHERE id = ?`, *in.IssueID,
+		); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return s.GetDispatch(id)
@@ -219,11 +239,30 @@ func (s *Store) CancelDispatch(id int64) (*model.AgentDispatch, error) {
 	case model.DispatchAcked:
 		return nil, fmt.Errorf("dispatch %d is already acked; cannot cancel", id)
 	}
-	if _, err := s.DB.Exec(
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(
 		`UPDATE agent_dispatches
 		    SET status = 'cancelled'
 		  WHERE id = ? AND status IN ('pending','delivered')`, id,
 	); err != nil {
+		return nil, err
+	}
+	// A cancelled dispatch is no longer "waiting" — clear the issue's
+	// flag. Harmless if another open dispatch still targets the issue:
+	// the next dispatch/claim re-establishes the correct value, and the
+	// flag is only an "is anything happening" hint, not a counter.
+	if d.IssueID != nil {
+		if _, err := tx.Exec(
+			`UPDATE issues SET waiting_for_claim = 0 WHERE id = ?`, *d.IssueID,
+		); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return s.GetDispatch(id)

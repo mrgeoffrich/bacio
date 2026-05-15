@@ -335,6 +335,14 @@ func (s *Store) AddAgentClaim(sessionID string, issueID int64, prompt string) (*
 	); err != nil {
 		return nil, false, err
 	}
+	// A fresh open claim clears the issue's waiting_for_claim flag — an
+	// agent has picked the work up, so the dispatch→claim gap is closed.
+	// Only on this new-claim path, not the no-op re-claim above.
+	if _, err := tx.Exec(
+		`UPDATE issues SET waiting_for_claim = 0 WHERE id = ?`, issueID,
+	); err != nil {
+		return nil, false, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, false, err
 	}

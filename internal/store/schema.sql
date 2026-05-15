@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS issues (
     state       TEXT    NOT NULL CHECK (state IN
                   ('todo','in_progress','needs_action','in_review','done','cancelled')),
     assignee    TEXT    NOT NULL DEFAULT '',
+    waiting_for_claim INTEGER NOT NULL DEFAULT 0,
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(repo_id, number)

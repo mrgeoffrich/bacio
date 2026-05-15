@@ -47,16 +47,21 @@ export default function KanbanCard({ card, promptConfig, isDragging, amLeader, o
   // or dispatching from it until the claim is released. Opening the
   // read-only drawer stays allowed (viewing isn't a mutation).
   const taken = !!card.taken;
+  // A waiting card has a dispatch queued but no agent claim yet — the
+  // gap this feature closes. Show a spinner, block drag/dispatch.
+  // `taken` wins: once an agent claims, waiting_for_claim is cleared, so
+  // they shouldn't overlap, but render defensively if they do.
+  const waiting = !!card.waitingForClaim && !taken;
   // On a standby process (amLeader=false), dispatch is also disabled —
   // only the leader runs the auto-pick so two processes don't race.
-  const dispatchDisabled = taken || !amLeader;
+  const dispatchDisabled = taken || waiting || !amLeader;
 
-  const hasFooter = validPrompts.length > 0 || card.assignees.length > 0;
+  const hasFooter = validPrompts.length > 0 || card.assignees.length > 0 || waiting;
 
   return (
     <article
-      className={`mk-card ${isDragging ? 'is-dragging' : ''} ${card.claude ? 'is-claude' : ''} ${taken ? 'is-taken' : ''}`}
-      draggable={!taken}
+      className={`mk-card ${isDragging ? 'is-dragging' : ''} ${card.claude ? 'is-claude' : ''} ${taken ? 'is-taken' : ''} ${waiting ? 'is-waiting' : ''}`}
+      draggable={!taken && !waiting}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onClick={onOpen}
@@ -79,7 +84,14 @@ export default function KanbanCard({ card, promptConfig, isDragging, amLeader, o
               </span>
             ))}
           </div>
-          {validPrompts.length > 0 && (
+          {waiting ? (
+            <span
+              className="mk-card-spinner"
+              role="status"
+              aria-label="Waiting for an agent to claim this issue"
+              title="Waiting for an agent to claim this issue"
+            />
+          ) : validPrompts.length > 0 && (
             <div className="mk-card-action" ref={actionRef}>
               <button
                 className="mk-card-action-btn"

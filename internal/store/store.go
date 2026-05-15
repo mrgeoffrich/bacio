@@ -155,6 +155,15 @@ func migrate(db *sql.DB) error {
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_issues_assignee ON issues(assignee)`); err != nil {
 		return err
 	}
+	hasWaitingForClaim, err := columnExists(db, "issues", "waiting_for_claim")
+	if err != nil {
+		return err
+	}
+	if !hasWaitingForClaim {
+		if _, err := db.Exec(`ALTER TABLE issues ADD COLUMN waiting_for_claim INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return err
+		}
+	}
 	hasRepoUpdated, err := columnExists(db, "repos", "updated_at")
 	if err != nil {
 		return err

@@ -37,9 +37,15 @@ type Issue struct {
 	Description string    `json:"description,omitempty"`
 	State       State     `json:"state"`
 	Assignee    string    `json:"assignee,omitempty"`
-	Tags        []string  `json:"tags"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	// WaitingForClaim is true between a dispatch being queued against
+	// this issue and an agent recording an open claim on it. Ephemeral
+	// runtime state — set by store.AddDispatch, cleared by
+	// store.AddAgentClaim / store.CancelDispatch. No omitempty: the
+	// field must be visible (including when false) in JSON output.
+	WaitingForClaim bool      `json:"waiting_for_claim"`
+	Tags            []string  `json:"tags"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 type Comment struct {

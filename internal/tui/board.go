@@ -38,6 +38,37 @@ func boardRefreshTick() tea.Cmd {
 	})
 }
 
+// spinnerInterval is how fast the waiting-for-claim spinner advances a
+// frame. Fast enough to read as motion, slow enough not to thrash.
+const spinnerInterval = 120 * time.Millisecond
+
+// spinnerFrames is the braille spinner cycled on a waiting-for-claim
+// card's key marker.
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+// spinnerTickMsg advances the waiting-for-claim spinner. The tick-chain
+// only re-arms while at least one visible issue is waiting, so the
+// animation costs nothing when nothing is waiting.
+type spinnerTickMsg time.Time
+
+func spinnerTick() tea.Cmd {
+	return tea.Tick(spinnerInterval, func(t time.Time) tea.Msg {
+		return spinnerTickMsg(t)
+	})
+}
+
+// maybeStartSpinnerCmd arms the spinner tick-chain when there is at
+// least one waiting issue and a chain isn't already running. Returns nil
+// otherwise. Safe to call after any action that may have set
+// waiting_for_claim (e.g. a TUI-initiated dispatch).
+func (b *boardView) maybeStartSpinnerCmd() tea.Cmd {
+	if len(b.waitingIssues) > 0 && !b.spinnerRunning {
+		b.spinnerRunning = true
+		return spinnerTick()
+	}
+	return nil
+}
+
 // boardView is the kanban tab: one column per state, optional bottom detail
 // pane, and a fullscreen card overlay opened with `enter`.
 type boardView struct {
@@ -56,6 +87,17 @@ type boardView struct {
 	// claim, keyed by issue ID. Refreshed on every reload(). Taken
 	// cards are marked in renderColumn and refuse the `x` dispatch.
 	takenIssues map[int64]bool
+
+	// waitingIssues is the repo-wide set of issues with waiting_for_claim
+	// set — a dispatch is queued but no agent has claimed yet. Refreshed
+	// on every reload(). Waiting cards show an animated spinner marker
+	// and refuse the `x` dispatch, same guard as takenIssues. `taken`
+	// wins over `waiting` when (defensively) a card is somehow both.
+	waitingIssues map[int64]bool
+	// spinnerFrame is the current spinner animation frame; spinnerRunning
+	// guards against stacking concurrent tick-chains.
+	spinnerFrame   int
+	spinnerRunning bool
 
 	// amLeader / holderLabel track the UI leader election (BACI-23).
 	// amLeader defaults to true so dispatch works before the first tick.
@@ -251,6 +293,16 @@ func (b *boardView) reload() error {
 		}
 	}
 	b.takenIssues = taken
+	// Repo-wide set of issues with a queued-but-unclaimed dispatch — read
+	// straight off the issue rows (waiting_for_claim is a stored column,
+	// unlike the derived `taken` flag).
+	waiting := map[int64]bool{}
+	for _, iss := range issues {
+		if iss.WaitingForClaim {
+			waiting[iss.ID] = true
+		}
+	}
+	b.waitingIssues = waiting
 	for _, st := range b.states {
 		b.columns[st] = nil
 	}
@@ -436,7 +488,23 @@ func (b *boardView) Update(msg tea.Msg) tea.Cmd {
 			b.clampCol()
 			b.refreshSelection()
 		}
+		// Start the spinner tick-chain if a reload turned up waiting
+		// cards and one isn't already running. The chain stops itself
+		// (spinnerRunning = false) once nothing is waiting.
+		if spin := b.maybeStartSpinnerCmd(); spin != nil {
+			return tea.Batch(boardRefreshTick(), spin)
+		}
 		return boardRefreshTick()
+	}
+	if _, ok := msg.(spinnerTickMsg); ok {
+		// Advance the spinner. Re-arm only while something is still
+		// waiting; otherwise let the chain die so we don't tick forever.
+		if len(b.waitingIssues) == 0 {
+			b.spinnerRunning = false
+			return nil
+		}
+		b.spinnerFrame = (b.spinnerFrame + 1) % len(spinnerFrames)
+		return spinnerTick()
 	}
 	if lsm, ok := msg.(leaderStateMsg); ok {
 		b.amLeader = lsm.state.AmLeader
@@ -460,7 +528,9 @@ func (b *boardView) Update(msg tea.Msg) tea.Cmd {
 	}
 	if b.dispatchPicker {
 		b.updateDispatchPicker(key)
-		return nil
+		// A confirmed dispatch may have just set waiting_for_claim on an
+		// issue — arm the spinner tick-chain if it isn't already running.
+		return b.maybeStartSpinnerCmd()
 	}
 	if b.commentOverlay {
 		b.updateCommentOverlay(key)
@@ -878,6 +948,11 @@ func (b *boardView) renderColumn(st model.State, focused bool, width, height int
 		// dispatch is also refused on it. Bold survives the selected
 		// state (selStyle.Bold) so the signal doesn't vanish on focus.
 		isTaken := b.takenIssues[iss.ID]
+		// A waiting card (dispatch queued, not yet claimed) shows an
+		// animated spinner where the opening bracket would be. `taken`
+		// wins: once an agent claims, waiting_for_claim is cleared in the
+		// same transaction, but render defensively in case they overlap.
+		isWaiting := b.waitingIssues[iss.ID] && !isTaken
 		styler := cardStyle
 		if isTaken {
 			styler = cardStyle.Bold(true)
@@ -897,7 +972,13 @@ func (b *boardView) renderColumn(st model.State, focused bool, width, height int
 			if isTaken {
 				styler = selStyle.Bold(true)
 			}
-			keyRender = bracketed
+			if isWaiting {
+				// Swap the opening bracket for the spinner frame; plain
+				// text because nested styling punches holes in selStyle.
+				keyRender = spinnerFrames[b.spinnerFrame] + fmt.Sprintf("%2d]", iss.Number)
+			} else {
+				keyRender = bracketed
+			}
 		} else {
 			bracketColor := featureColor(iss.FeatureSlug)
 			numStyle := keyStyle
@@ -906,7 +987,14 @@ func (b *boardView) renderColumn(st model.State, focused bool, width, height int
 				numStyle = keyStyle.Foreground(takenColor).Bold(true)
 			}
 			bracketStyle := lipgloss.NewStyle().Foreground(bracketColor).Bold(isTaken)
-			keyRender = bracketStyle.Render("[") +
+			openMark := bracketStyle.Render("[")
+			if isWaiting {
+				// Spinner glyph in place of the opening bracket, tinted
+				// in the distinct waitingColor so it reads as motion
+				// without being confused with the amber taken marker.
+				openMark = lipgloss.NewStyle().Foreground(waitingColor).Render(spinnerFrames[b.spinnerFrame])
+			}
+			keyRender = openMark +
 				numStyle.Render(fmt.Sprintf("%2d", iss.Number)) +
 				bracketStyle.Render("]")
 		}
