@@ -102,6 +102,12 @@ func (d *docsView) currentDoc() *model.Document {
 // attachments pane sends an openDocMsg, so the user lands directly in
 // the doc reader without an intermediate click.
 func (d *docsView) selectByFilename(filename string) {
+	// The board's attachments pane refreshes its doc links whenever the
+	// selected issue changes, but this view only loads its list on
+	// construction and on 'r'. Reload here so a document linked while
+	// the TUI was already running is still found — otherwise the jump
+	// silently lands the user on the bare Documents list.
+	d.reload()
 	for i, doc := range d.docs {
 		if doc.Filename == filename {
 			d.row = i
