@@ -526,9 +526,6 @@ func printAgentSession(w io.Writer, s *model.AgentSession) {
 	if s.Model != "" {
 		fmt.Fprintf(w, "Model:    %s\n", s.Model)
 	}
-	if s.PermissionMode != "" {
-		fmt.Fprintf(w, "Mode:     %s\n", s.PermissionMode)
-	}
 	if s.Branch != "" {
 		fmt.Fprintf(w, "Branch:   %s\n", s.Branch)
 	}

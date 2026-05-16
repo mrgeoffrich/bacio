@@ -365,6 +365,58 @@ func dispatchTargetLabel(d *model.AgentDispatch) string {
 	return d.TargetSessionID
 }
 
+// SetupDispatchCreator marks dispatches that the bacio channel itself
+// enqueued to ask the agent to call the `register` tool — distinct from
+// any human or supervisor creator. The channel filters on this value to
+// keep EnsureSetupDispatch idempotent across restarts.
+const SetupDispatchCreator = "bacio-channel"
+
+// setupDispatchPayload is the content of the channel-emitted setup
+// dispatch. The agent sees this as a regular dispatch (so it lands via
+// the proven push path, not a synthetic notification) and acks it via
+// the normal reply tool. $CLAUDE_SESSION_ID is a literal — the agent
+// substitutes it from its own env.
+const setupDispatchPayload = "Call the bacio MCP `register` tool now with " +
+	"{\"session_id\": \"$CLAUDE_SESSION_ID\", \"model\": \"<your model id>\", " +
+	"\"branch\": \"<your current git branch>\"} " +
+	"(session_id is the only required field; model + branch are optional but worth passing — " +
+	"the model identifier looks like \"claude-opus-4-7\" or \"claude-sonnet-4-6\"). " +
+	"This completes the registration; ack this dispatch via `reply` once you've called register."
+
+func (c *localClient) EnsureSetupDispatch(ctx context.Context, repo *model.Repo, sessionID string) (*model.AgentDispatch, error) {
+	if repo == nil || sessionID == "" {
+		return nil, nil // channel runs idle until a session for its (host, claude_pid) exists
+	}
+	existing, err := c.store.ListDispatches(store.DispatchFilter{
+		RepoID:          &repo.ID,
+		TargetSessionID: sessionID,
+		Statuses:        []model.DispatchStatus{model.DispatchPending, model.DispatchDelivered},
+		CreatedBy:       SetupDispatchCreator,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(existing) > 0 {
+		return existing[0], nil // idempotent — drain will re-push it next tick
+	}
+	d, err := c.store.AddDispatch(store.AddDispatchIn{
+		RepoID:          repo.ID,
+		TargetSessionID: sessionID,
+		Payload:         setupDispatchPayload,
+		CreatedBy:       SetupDispatchCreator,
+	})
+	if err != nil {
+		return nil, err
+	}
+	c.recordOp(model.HistoryEntry{
+		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+		Op: "agent.dispatch", Kind: "agent", Actor: SetupDispatchCreator,
+		TargetID: &d.ID, TargetLabel: dispatchTargetLabel(d),
+		Details: dispatchDetails(d),
+	})
+	return d, nil
+}
+
 // dispatchDetails builds the audit-log Details string for a dispatch op.
 func dispatchDetails(d *model.AgentDispatch) string {
 	var parts []string

@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/mrgeoffrich/bacio/internal/model"
+	"github.com/mrgeoffrich/bacio/internal/version"
 )
 
 // This file holds the parts of the Settings tab that are platform
@@ -121,9 +122,14 @@ func renderSettingsList(width, height int, stages []stageRow, cursor int, err er
 		rows = append(rows, styled.Render(line))
 	}
 
+	// Footer carries the running binary's version so you can cross-check
+	// what the TUI client is running against the BACIO column on the
+	// Agents tab — easy way to spot "is this agent's channel an older
+	// build than my TUI?".
 	hint := mutedStyle.Padding(0, 1).Render("Placeholders: " + placeholderTokens())
+	versionLine := mutedStyle.Padding(0, 1).Render("Bacio version: " + version.String())
 	body := lipgloss.JoinVertical(lipgloss.Left, rows...)
-	content := lipgloss.JoinVertical(lipgloss.Left, titleBar, "", body, "", hint)
+	content := lipgloss.JoinVertical(lipgloss.Left, titleBar, "", body, "", hint, versionLine)
 	return box.Render(content)
 }
 

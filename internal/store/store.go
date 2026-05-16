@@ -42,7 +42,16 @@ func Open(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, fmt.Errorf("create db dir: %w", err)
 	}
-	db, err := sql.Open("sqlite", path+"?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)")
+	// busy_timeout(5000) is the load-bearing pragma for multi-process
+	// access. WAL lets readers and writers coexist, but writers still
+	// serialise on the single writer lock — and the default busy_timeout
+	// is 0, meaning SQLITE_BUSY returns immediately. With the TUI / the
+	// desktop / a hook subprocess / a `bacio channel` MCP server all
+	// racing to write at session-start, that returned-immediately error
+	// surfaces as silent failures (e.g. EnsureAgentIdentity losing the
+	// race and leaving a session identity-less). 5s is generous enough
+	// to cover the worst observed contention without hanging the UI.
+	db, err := sql.Open("sqlite", path+"?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, err
 	}
@@ -278,6 +287,50 @@ func migrate(db *sql.DB) error {
 	if !hasClaimPrompt {
 		if _, err := db.Exec(`ALTER TABLE agent_claims ADD COLUMN prompt TEXT NOT NULL DEFAULT ''`); err != nil {
 			return fmt.Errorf("add prompt to agent_claims: %w", err)
+		}
+	}
+	// agent_sessions.registered_at + channel_version came in with the
+	// register-tool lifecycle: the SessionStart hook now creates a
+	// minimal stub row, and the bacio channel's register tool enriches
+	// it. registered_at distinguishes the two states; channel_version is
+	// the binary version reported by the channel the agent talked to.
+	// Older sessions that pre-date the lifecycle change are backfilled
+	// with registered_at = started_at if they have an agent_id set, so
+	// the post-change UI filter doesn't make historical sessions vanish.
+	hasRegisteredAt, err := columnExists(db, "agent_sessions", "registered_at")
+	if err != nil {
+		return err
+	}
+	if !hasRegisteredAt {
+		if _, err := db.Exec(`ALTER TABLE agent_sessions ADD COLUMN registered_at DATETIME`); err != nil {
+			return fmt.Errorf("add registered_at to agent_sessions: %w", err)
+		}
+		if _, err := db.Exec(`UPDATE agent_sessions SET registered_at = started_at WHERE agent_id IS NOT NULL`); err != nil {
+			return fmt.Errorf("backfill agent_sessions.registered_at: %w", err)
+		}
+	}
+	hasChannelVersion, err := columnExists(db, "agent_sessions", "channel_version")
+	if err != nil {
+		return err
+	}
+	if !hasChannelVersion {
+		if _, err := db.Exec(`ALTER TABLE agent_sessions ADD COLUMN channel_version TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add channel_version to agent_sessions: %w", err)
+		}
+	}
+	// agent_sessions.permission_mode was a hangover from when we mirrored
+	// Claude Code's permission mode on the session row — bacio never did
+	// anything useful with the value, so it's noise. Drop the column on
+	// existing DBs; SQLite supports ALTER TABLE DROP COLUMN since 3.35
+	// (modernc/sqlite ships much newer). New DBs from schema.sql never
+	// have it.
+	hasPermissionMode, err := columnExists(db, "agent_sessions", "permission_mode")
+	if err != nil {
+		return err
+	}
+	if hasPermissionMode {
+		if _, err := db.Exec(`ALTER TABLE agent_sessions DROP COLUMN permission_mode`); err != nil {
+			return fmt.Errorf("drop permission_mode from agent_sessions: %w", err)
 		}
 	}
 	return nil

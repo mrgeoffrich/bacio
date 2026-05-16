@@ -15,14 +15,13 @@ package inputs
 // upsert is then idempotent. (With hooks installed, the session-start
 // hook handles all of this — see SKILL.md.)
 type AgentRegisterInput struct {
-	SessionID      string `json:"session_id"`
-	Actor          string `json:"actor"`
-	Agent          string `json:"agent,omitempty"`
-	NewIdentity    bool   `json:"new_identity,omitempty"`
-	Model          string `json:"model,omitempty"`
-	PermissionMode string `json:"permission_mode,omitempty"`
-	Host           string `json:"host,omitempty"`
-	Branch         string `json:"branch,omitempty"`
+	SessionID   string `json:"session_id"`
+	Actor       string `json:"actor"`
+	Agent       string `json:"agent,omitempty"`
+	NewIdentity bool   `json:"new_identity,omitempty"`
+	Model       string `json:"model,omitempty"`
+	Host        string `json:"host,omitempty"`
+	Branch      string `json:"branch,omitempty"`
 }
 
 // AgentHeartbeatInput is the payload for `bacio agent heartbeat --json`.
@@ -30,10 +29,9 @@ type AgentRegisterInput struct {
 // register so a long-lived agent can send the same payload whether
 // it's the first call or the hundredth.
 type AgentHeartbeatInput struct {
-	SessionID      string `json:"session_id"`
-	Model          string `json:"model,omitempty"`
-	PermissionMode string `json:"permission_mode,omitempty"`
-	Branch         string `json:"branch,omitempty"`
+	SessionID string `json:"session_id"`
+	Model     string `json:"model,omitempty"`
+	Branch    string `json:"branch,omitempty"`
 }
 
 // AgentEndInput is the payload for `bacio agent end --json`. Reason

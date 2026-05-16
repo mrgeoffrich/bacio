@@ -19,6 +19,7 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
 	"github.com/mrgeoffrich/bacio/internal/timeparse"
+	"github.com/mrgeoffrich/bacio/internal/version"
 )
 
 // claudeSessionEnv is the env var Claude Code exposes for the current
@@ -64,8 +65,8 @@ the issue's state; use ` + "`bacio issue state`" + ` for that.`,
 
 func agentRegisterCmd() *cobra.Command {
 	var (
-		sessionID, agentName, modelStr, mode, host, branch, rawInput string
-		newIdentity                                                  bool
+		sessionID, agentName, modelStr, host, branch, rawInput string
+		newIdentity                                            bool
 	)
 	cmd := &cobra.Command{
 		Use:   "register",
@@ -86,7 +87,7 @@ loop can retry; subsequent registers of a known slug drop --new.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			raw, err := parseJSONInput(cmd, args, rawInput,
-				"session", "agent", "new", "model", "mode", "host", "branch")
+				"session", "agent", "new", "model", "host", "branch")
 			if err != nil {
 				return err
 			}
@@ -104,14 +105,13 @@ loop can retry; subsequent registers of a known slug drop --new.`,
 			detectedBranch, _ := detectBranch()
 			detectedHost, _ := os.Hostname()
 			return runAgentRegister(inputs.AgentRegisterInput{
-				SessionID:      sid,
-				Actor:          actor(),
-				Agent:          agentName,
-				NewIdentity:    newIdentity,
-				Model:          modelStr,
-				PermissionMode: mode,
-				Host:           orDefault(host, detectedHost),
-				Branch:         orDefault(branch, detectedBranch),
+				SessionID:   sid,
+				Actor:       actor(),
+				Agent:       agentName,
+				NewIdentity: newIdentity,
+				Model:       modelStr,
+				Host:        orDefault(host, detectedHost),
+				Branch:      orDefault(branch, detectedBranch),
 			})
 		},
 	}
@@ -119,7 +119,6 @@ loop can retry; subsequent registers of a known slug drop --new.`,
 	cmd.Flags().StringVar(&agentName, "agent", "", "persistent identity slug (e.g. cheerful-otter@claude.shiny)")
 	cmd.Flags().BoolVar(&newIdentity, "new", false, "assert --agent is a fresh slug; errors if it clashes (loop with a new slug)")
 	cmd.Flags().StringVar(&modelStr, "model", "", "model identifier (e.g. claude-sonnet-4-6)")
-	cmd.Flags().StringVar(&mode, "mode", "", "permission mode (plan/acceptEdits/bypass/...)")
 	cmd.Flags().StringVar(&host, "host", "", "hostname (default: os.Hostname())")
 	cmd.Flags().StringVar(&branch, "branch", "", "git branch (default: detected from current repo)")
 	addInputFlag(cmd, &rawInput)
@@ -164,7 +163,7 @@ func runAgentRegister(in inputs.AgentRegisterInput) error {
 
 func agentHeartbeatCmd() *cobra.Command {
 	var (
-		sessionID, modelStr, mode, branch, rawInput string
+		sessionID, modelStr, branch, rawInput string
 	)
 	cmd := &cobra.Command{
 		Use:   "heartbeat",
@@ -175,7 +174,7 @@ wants to stay flagged as alive.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			raw, err := parseJSONInput(cmd, args, rawInput,
-				"session", "model", "mode", "branch")
+				"session", "model", "branch")
 			if err != nil {
 				return err
 			}
@@ -191,16 +190,14 @@ wants to stay flagged as alive.`,
 				return err
 			}
 			return runAgentHeartbeat(inputs.AgentHeartbeatInput{
-				SessionID:      sid,
-				Model:          modelStr,
-				PermissionMode: mode,
-				Branch:         branch,
+				SessionID: sid,
+				Model:     modelStr,
+				Branch:    branch,
 			})
 		},
 	}
 	cmd.Flags().StringVar(&sessionID, "session", "", "session id (default: $CLAUDE_CODE_SESSION_ID)")
 	cmd.Flags().StringVar(&modelStr, "model", "", "model identifier (overwrite previous if different)")
-	cmd.Flags().StringVar(&mode, "mode", "", "permission mode")
 	cmd.Flags().StringVar(&branch, "branch", "", "git branch")
 	addInputFlag(cmd, &rawInput)
 	return cmd
@@ -590,12 +587,12 @@ func runAgentAck(in inputs.AgentAckInput) error {
 
 func agentListCmd() *cobra.Command {
 	var (
-		allRepos, alive bool
-		since           string
+		allRepos, alive, allStates bool
+		since                      string
 	)
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "List agent sessions in this repo (lean output; use `agent show` for claim history)",
+		Short: "List agent sessions in this repo (registered only by default — use --all to include SessionStart stubs)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireLocalForAgent("list"); err != nil {
@@ -607,7 +604,12 @@ func agentListCmd() *cobra.Command {
 			}
 			defer c.Close()
 
-			f := client.AgentSessionFilter{OnlyAlive: alive}
+			// Default: registered_at IS NOT NULL — hide stubs from
+			// sessions that never completed register. --all flips it.
+			f := client.AgentSessionFilter{
+				OnlyAlive:      alive,
+				RegisteredOnly: !allStates,
+			}
 			if !allRepos {
 				repo, err := resolveRepoC(c)
 				if err != nil {
@@ -637,6 +639,7 @@ func agentListCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&allRepos, "all-repos", false, "include sessions across every repo (default: just this one)")
 	cmd.Flags().BoolVar(&alive, "active", false, "only sessions that haven't been ended")
+	cmd.Flags().BoolVar(&allStates, "all", false, "include SessionStart stubs that never completed register (default: registered only)")
 	cmd.Flags().StringVar(&since, "since", "", "only sessions seen within this duration (e.g. 30m, 4h)")
 	return cmd
 }
@@ -730,19 +733,40 @@ func emitAgentSessionTable(sessions []*model.AgentSession) error {
 		return nil
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "SESSION\tAGENT\tACTOR\tREPO\tMODEL\tBRANCH\tLAST-SEEN\tCHANNEL\tSTATUS")
+	fmt.Fprintln(w, "SESSION\tAGENT\tACTOR\tREPO\tMODEL\tBRANCH\tLAST-SEEN\tCHANNEL\tBACIO\tSTATUS")
 	now := time.Now().UTC()
+	current := version.String()
 	for _, s := range sessions {
 		status := "alive"
 		if s.EndedAt != nil {
 			status = "ended:" + s.EndReason
 		}
 		seen := humanAgo(now.Sub(s.LastSeenAt.UTC()))
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			shortID(s.SessionID), dashIfEmpty(s.AgentName), s.Actor, s.RepoPrefix,
-			dashIfEmpty(s.Model), dashIfEmpty(s.Branch), seen, channelStatus(s, now), status)
+			dashIfEmpty(s.Model), dashIfEmpty(s.Branch), seen,
+			channelStatus(s, now), bacioVersionDisplay(s.ChannelVersion, current), status)
 	}
 	return w.Flush()
+}
+
+// bacioVersionDisplay renders the BACIO column (the bacio binary version
+// the channel was running at register time). "-" for sessions that
+// pre-date version reporting (or never registered). A trailing "!stale"
+// annotates a non-matching version so you can spot a long-lived channel
+// still running an old bacio binary after an upgrade. A bare "dev"
+// current (no VCS info — debug.ReadBuildInfo failed) suppresses the
+// stale flag because we can't meaningfully compare; once VCS info is
+// present (the usual case), two different commits will surface as
+// stale even between two dev builds.
+func bacioVersionDisplay(seen, current string) string {
+	if seen == "" {
+		return "-"
+	}
+	if current == "" || current == "dev" || seen == current {
+		return seen
+	}
+	return seen + "!stale"
 }
 
 // channelStatus reports whether a session currently has a live `bacio
@@ -767,13 +791,18 @@ func emitAgentSessionDetail(view *client.AgentSessionView) error {
 	fmt.Fprintf(os.Stdout, "Actor:    %s\n", s.Actor)
 	fmt.Fprintf(os.Stdout, "Repo:     %s\n", s.RepoPrefix)
 	fmt.Fprintf(os.Stdout, "Model:    %s\n", dashIfEmpty(s.Model))
-	fmt.Fprintf(os.Stdout, "Mode:     %s\n", dashIfEmpty(s.PermissionMode))
 	fmt.Fprintf(os.Stdout, "Host:     %s\n", dashIfEmpty(s.Host))
 	fmt.Fprintf(os.Stdout, "Branch:   %s\n", dashIfEmpty(s.Branch))
 	if s.ClaudePID != 0 {
 		fmt.Fprintf(os.Stdout, "Channel:  %s (claude_pid=%d)\n", channelStatus(s, time.Now().UTC()), s.ClaudePID)
 	} else {
 		fmt.Fprintf(os.Stdout, "Channel:  %s\n", channelStatus(s, time.Now().UTC()))
+	}
+	fmt.Fprintf(os.Stdout, "Bacio Version: %s\n", bacioVersionDisplay(s.ChannelVersion, version.String()))
+	if s.RegisteredAt != nil {
+		fmt.Fprintf(os.Stdout, "Registered: %s\n", s.RegisteredAt.Local().Format("2006-01-02 15:04:05"))
+	} else {
+		fmt.Fprintf(os.Stdout, "Registered: - (SessionStart stub, register tool never called)\n")
 	}
 	fmt.Fprintf(os.Stdout, "Started:  %s\n", s.StartedAt.Local().Format("2006-01-02 15:04:05"))
 	fmt.Fprintf(os.Stdout, "LastSeen: %s\n", s.LastSeenAt.Local().Format("2006-01-02 15:04:05"))

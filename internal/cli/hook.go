@@ -126,18 +126,17 @@ func loadHookContext() (*hookContext, error) {
 		return nil, nil // a sync repo, not a project repo
 	}
 
-	// Identity is keyed by the `claude` process this hook descends from:
-	// .bacio/agents.json maps claude_pid -> identity, so multiple agents
-	// can share one repo. claude_pid resolved once here and reused by
-	// linkChannel.
+	// claude_pid is keyed by the `claude` process this hook descends
+	// from — the join column the channel uses to find sessions it's
+	// serving. agents.json (the persistent slug-for-this-claude-pid
+	// mapping) is populated by the channel's `register` tool *during*
+	// register, not here at SessionStart — so this hook reads slug as
+	// best-effort: empty on a fresh claude_pid, populated on subsequent
+	// hooks (heartbeat / stop / end) for a claude_pid that has since
+	// completed register.
 	claudePID := findClaudeAncestor(os.Getpid())
 	if claudePID == 0 {
-		// No `claude` ancestor found — identity can't be keyed or
-		// recorded (agents.json keys on claude_pid) and the channel
-		// can't be correlated. The session is still tracked, just
-		// without a persistent identity. Surface it rather than
-		// degrading silently.
-		fmt.Fprintln(os.Stderr, "bacio hook: no `claude` ancestor process found — session runs without a persistent identity")
+		fmt.Fprintln(os.Stderr, "bacio hook: no `claude` ancestor process found — session can't be correlated to a channel")
 	}
 	slug := readAgentIdentity(info.Root, claudePID)
 	act := slug
@@ -158,29 +157,6 @@ func loadHookContext() (*hookContext, error) {
 	if err != nil {
 		_ = c.Close()
 		return nil, err
-	}
-	// No identity recorded for this claude process yet — mint a fresh
-	// one. Minting it here (rather than leaving it to the agent's first
-	// turn) closes the window where a freshly-spawned channel froze an
-	// empty identity. Best-effort: a failure just leaves the session
-	// identity-less, the pre-existing behaviour — it never fails the hook.
-	if slug == "" {
-		if gen, gerr := c.EnsureAgentIdentity(context.Background(), repo); gerr != nil {
-			fmt.Fprintln(os.Stderr, "bacio hook: mint agent identity:", gerr)
-		} else if gen != "" {
-			// EnsureAgentIdentity already adopted gen as the client's
-			// audit actor; mirror it onto the hook context.
-			slug, act = gen, gen
-		}
-	}
-	// Record this session against its claude_pid in .bacio/agents.json:
-	// creates the entry on the first session, appends the session id on
-	// later ones (a new id per /clear within the same process).
-	if slug != "" {
-		host, _ := os.Hostname()
-		if rerr := recordAgentSession(info.Root, claudePID, host, slug, in.SessionID); rerr != nil {
-			fmt.Fprintln(os.Stderr, "bacio hook: update agents.json:", rerr)
-		}
 	}
 	return &hookContext{in: in, c: c, repo: repo, slug: slug, actor: act, claudePID: claudePID}, nil
 }
@@ -205,7 +181,7 @@ func (h *hookContext) linkChannel(sessionID string) {
 func hookSessionStartCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:    "session-start",
-		Short:  "SessionStart hook: register the session, inject assigned issues + open claims",
+		Short:  "SessionStart hook: create a minimal session stub (channel's `register` tool enriches it)",
 		Args:   cobra.NoArgs,
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -219,19 +195,17 @@ func hookSessionStartCmd() *cobra.Command {
 			}
 			defer h.close()
 
-			br, _ := detectBranch()
-			reg := inputs.AgentRegisterInput{
-				SessionID: h.in.SessionID,
-				Actor:     h.actor,
-				Agent:     h.slug,
-				Branch:    br,
-			}
-			if hn, err := os.Hostname(); err == nil {
-				reg.Host = hn
-			}
-			sess, err := h.c.RegisterAgent(context.Background(), h.repo, reg, false)
+			// SessionStart writes only the bare minimum: session_id +
+			// claude_pid + host. Identity mint, agents.json write, branch
+			// detection, model — all happen later when the agent calls
+			// the bacio channel's `register` tool, which has access to
+			// the agent's own self-description and avoids the SQLite
+			// write-contention race that lost identity mints under the
+			// old "do everything at SessionStart" path.
+			host, _ := os.Hostname()
+			sess, err := h.c.CreateSessionStub(context.Background(), h.repo, h.in.SessionID, host, int64(h.claudePID))
 			if err != nil {
-				fmt.Fprintln(os.Stderr, "bacio hook session-start: register:", err)
+				fmt.Fprintln(os.Stderr, "bacio hook session-start: create stub:", err)
 				return nil
 			}
 			h.linkChannel(sess.SessionID)
@@ -247,29 +221,35 @@ func hookSessionStartCmd() *cobra.Command {
 // the agent starts the session already knowing what it owns.
 func emitSessionStartContext(h *hookContext, sess *model.AgentSession) {
 	var b strings.Builder
-	id := h.slug
-	if id == "" {
-		id = shortID(sess.SessionID)
-	}
-	fmt.Fprintf(&b, "[bacio] Session registered against repo %s as %s.\n", h.repo.Prefix, id)
+	if h.slug != "" {
+		// Repeat-session for a claude_pid that previously registered:
+		// agents.json has the slug so the briefing can name the agent
+		// and surface any issues already assigned to it.
+		fmt.Fprintf(&b, "[bacio] Session opened against repo %s as %s (waiting for `register` from the bacio channel to complete).\n", h.repo.Prefix, h.slug)
 
-	if view, err := h.c.ShowAgentSession(context.Background(), sess.SessionID); err == nil {
-		var open []string
-		for _, cl := range view.Claims {
-			if cl.ReleasedAt == nil {
-				open = append(open, cl.IssueKey)
+		if view, err := h.c.ShowAgentSession(context.Background(), sess.SessionID); err == nil {
+			var open []string
+			for _, cl := range view.Claims {
+				if cl.ReleasedAt == nil {
+					open = append(open, cl.IssueKey)
+				}
+			}
+			if len(open) > 0 {
+				fmt.Fprintf(&b, "Open claims carried into this session: %s\n", strings.Join(open, ", "))
 			}
 		}
-		if len(open) > 0 {
-			fmt.Fprintf(&b, "Open claims carried into this session: %s\n", strings.Join(open, ", "))
-		}
-	}
 
-	if assigned := h.assignedIssues(); len(assigned) > 0 {
-		fmt.Fprintf(&b, "Issues assigned to %s:\n", h.slug)
-		for _, i := range assigned {
-			fmt.Fprintf(&b, "  %-12s %-12s %s\n", i.Key, i.State, i.Title)
+		if assigned := h.assignedIssues(); len(assigned) > 0 {
+			fmt.Fprintf(&b, "Issues assigned to %s:\n", h.slug)
+			for _, i := range assigned {
+				fmt.Fprintf(&b, "  %-12s %-12s %s\n", i.Key, i.State, i.Title)
+			}
 		}
+	} else {
+		// Fresh claude_pid — identity hasn't been minted yet (register
+		// does that). Keep the briefing minimal; the channel will queue
+		// the setup dispatch with full instructions for the agent.
+		fmt.Fprintf(&b, "[bacio] Session opened against repo %s (stub %s — bacio channel's `register` tool will complete the registration).\n", h.repo.Prefix, shortID(sess.SessionID))
 	}
 	fmt.Fprint(os.Stdout, b.String())
 }

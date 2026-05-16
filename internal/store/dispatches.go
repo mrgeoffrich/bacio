@@ -106,6 +106,7 @@ type DispatchFilter struct {
 	TargetAgentID   *int64
 	TargetSessionID string
 	Statuses        []model.DispatchStatus // empty = any status
+	CreatedBy       string                 // "" = any creator
 }
 
 const dispatchSelect = `
@@ -149,6 +150,10 @@ func (s *Store) ListDispatches(f DispatchFilter) ([]*model.AgentDispatch, error)
 			args = append(args, string(st))
 		}
 		q += `)`
+	}
+	if f.CreatedBy != "" {
+		q += ` AND d.created_by = ?`
+		args = append(args, f.CreatedBy)
 	}
 	q += ` ORDER BY d.created_at DESC, d.id DESC`
 

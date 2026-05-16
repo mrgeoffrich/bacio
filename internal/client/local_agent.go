@@ -24,17 +24,16 @@ import (
 func projectAgentSession(repo *model.Repo, in inputs.AgentRegisterInput) *model.AgentSession {
 	now := time.Now().UTC()
 	return &model.AgentSession{
-		SessionID:      in.SessionID,
-		RepoID:         repo.ID,
-		RepoPrefix:     repo.Prefix,
-		AgentName:      in.Agent,
-		Actor:          in.Actor,
-		Model:          in.Model,
-		PermissionMode: in.PermissionMode,
-		Host:           in.Host,
-		Branch:         in.Branch,
-		StartedAt:      now,
-		LastSeenAt:     now,
+		SessionID:  in.SessionID,
+		RepoID:     repo.ID,
+		RepoPrefix: repo.Prefix,
+		AgentName:  in.Agent,
+		Actor:      in.Actor,
+		Model:      in.Model,
+		Host:       in.Host,
+		Branch:     in.Branch,
+		StartedAt:  now,
+		LastSeenAt: now,
 	}
 }
 
@@ -60,14 +59,13 @@ func (c *localClient) RegisterAgent(ctx context.Context, repo *model.Repo, in in
 		return projectAgentSession(repo, in), nil
 	}
 	sess, err := c.store.UpsertAgentSession(store.UpsertAgentSessionIn{
-		SessionID:      in.SessionID,
-		RepoID:         repo.ID,
-		AgentID:        agentID,
-		Actor:          in.Actor,
-		Model:          in.Model,
-		PermissionMode: in.PermissionMode,
-		Host:           in.Host,
-		Branch:         in.Branch,
+		SessionID: in.SessionID,
+		RepoID:    repo.ID,
+		AgentID:   agentID,
+		Actor:     in.Actor,
+		Model:     in.Model,
+		Host:      in.Host,
+		Branch:    in.Branch,
 	})
 	if err != nil {
 		return nil, err
@@ -106,6 +104,7 @@ func (c *localClient) EnsureAgentIdentity(ctx context.Context, repo *model.Repo)
 			if errors.Is(err, store.ErrAgentNameTaken) {
 				continue // slug clashed with a live identity — reroll
 			}
+			c.recordIdentityMintFailure(repo, err)
 			return "", err
 		}
 		c.actor = cand // adopt the minted identity for subsequent audit rows
@@ -120,7 +119,120 @@ func (c *localClient) EnsureAgentIdentity(ctx context.Context, repo *model.Repo)
 		c.recordOp(entry)
 		return cand, nil
 	}
-	return "", fmt.Errorf("could not mint a unique agent identity after %d attempts", maxAttempts)
+	err := fmt.Errorf("could not mint a unique agent identity after %d attempts", maxAttempts)
+	c.recordIdentityMintFailure(repo, err)
+	return "", err
+}
+
+// UnregisteredActor is the placeholder actor stamped on SessionStart
+// stubs before the agent calls the bacio channel's `register` tool.
+// register replaces it with the real agent identity slug.
+const UnregisteredActor = "unregistered"
+
+func (c *localClient) CreateSessionStub(ctx context.Context, repo *model.Repo, sessionID, host string, claudePID int64) (*model.AgentSession, error) {
+	sess, err := c.store.UpsertAgentSession(store.UpsertAgentSessionIn{
+		SessionID: sessionID,
+		RepoID:    repo.ID,
+		Actor:     UnregisteredActor,
+		Host:      host,
+		ClaudePID: claudePID,
+		// No agent_id, model, permission_mode, branch, channel_version.
+		// MarkRegistered=false: registered_at stays NULL.
+	})
+	if err != nil {
+		return nil, err
+	}
+	// Stub creation deliberately does NOT emit an audit row — the
+	// SessionStart hook fires for every session including ones that
+	// never register (no bacio channel loaded), and flooding history
+	// with stubs would drown real events. The `agent.register` audit
+	// row fires from CompleteRegistration instead.
+	return sess, nil
+}
+
+func (c *localClient) SessionsByClaudePID(ctx context.Context, host string, claudePID int64) ([]*model.AgentSession, error) {
+	return c.store.SessionsByClaudePID(host, claudePID)
+}
+
+func (c *localClient) CompleteRegistration(ctx context.Context, repo *model.Repo, in inputs.AgentRegisterInput, channelVersion string) (*model.AgentSession, error) {
+	// Resolve or mint the agent identity. Empty in.Agent means "mint a
+	// fresh one"; non-empty looks up (or creates if NewIdentity is set).
+	var agentID *int64
+	var agentCreated bool
+	if in.Agent == "" {
+		slug, err := c.EnsureAgentIdentity(ctx, repo)
+		if err != nil {
+			return nil, err
+		}
+		in.Agent = slug
+		// EnsureAgentIdentity recorded the create + adopted slug as
+		// audit actor; resolve the id.
+		ag, err := c.store.GetAgentByName(slug)
+		if err != nil {
+			return nil, err
+		}
+		agentID = &ag.ID
+	} else {
+		ag, created, err := c.store.UpsertAgent(in.Agent, in.NewIdentity)
+		if err != nil {
+			return nil, err
+		}
+		agentID = &ag.ID
+		agentCreated = created
+	}
+	in.Actor = in.Agent
+	c.actor = in.Agent // adopt for the subsequent audit rows
+	sess, err := c.store.UpsertAgentSession(store.UpsertAgentSessionIn{
+		SessionID:      in.SessionID,
+		RepoID:         repo.ID,
+		AgentID:        agentID,
+		Actor:          in.Actor,
+		Model:          in.Model,
+		Host:           in.Host,
+		Branch:         in.Branch,
+		ChannelVersion: channelVersion,
+		MarkRegistered: true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if agentCreated {
+		c.recordOp(model.HistoryEntry{
+			RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+			Op: "agent.identity.create", Kind: "agent",
+			TargetID: agentID, TargetLabel: in.Agent,
+		})
+	}
+	c.recordOp(model.HistoryEntry{
+		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+		Op: "agent.register", Kind: "agent",
+		TargetID: &sess.ID, TargetLabel: sess.SessionID,
+		Details: agentRegisterDetails(sess),
+	})
+	return sess, nil
+}
+
+// recordIdentityMintFailure writes a paper-trail audit row when
+// EnsureAgentIdentity gives up. The hook swallows the error (a hook
+// MUST NOT fail the agent's session), so without this row a lost
+// identity mint disappears into stderr — the way we discovered the
+// SQLite-busy regression that motivated busy_timeout(5000). Best
+// effort: recordOp itself logs and continues on write failure, so a
+// fully-locked DB still leaves no row, but any partial degradation
+// leaves a trail. Actor is "unknown" rather than the OS user so the
+// row is unambiguously a system event, not user activity.
+func (c *localClient) recordIdentityMintFailure(repo *model.Repo, cause error) {
+	entry := model.HistoryEntry{
+		Op:      "agent.identity.create_failed",
+		Kind:    "agent",
+		Actor:   "unknown",
+		Details: cause.Error(),
+	}
+	if repo != nil {
+		entry.RepoID = &repo.ID
+		entry.RepoPrefix = repo.Prefix
+	}
+	c.recordOp(entry)
 }
 
 // HeartbeatAgent is the same store call as RegisterAgent but with
@@ -139,22 +251,18 @@ func (c *localClient) HeartbeatAgent(ctx context.Context, repo *model.Repo, in i
 		if in.Model != "" {
 			projected.Model = in.Model
 		}
-		if in.PermissionMode != "" {
-			projected.PermissionMode = in.PermissionMode
-		}
 		if in.Branch != "" {
 			projected.Branch = in.Branch
 		}
 		return &projected, nil
 	}
 	sess, err := c.store.UpsertAgentSession(store.UpsertAgentSessionIn{
-		SessionID:      in.SessionID,
-		RepoID:         existing.RepoID,
-		Actor:          existing.Actor,
-		Model:          orDefault(in.Model, existing.Model),
-		PermissionMode: orDefault(in.PermissionMode, existing.PermissionMode),
-		Host:           existing.Host,
-		Branch:         orDefault(in.Branch, existing.Branch),
+		SessionID: in.SessionID,
+		RepoID:    existing.RepoID,
+		Actor:     existing.Actor,
+		Model:     orDefault(in.Model, existing.Model),
+		Host:      existing.Host,
+		Branch:    orDefault(in.Branch, existing.Branch),
 	})
 	if err != nil {
 		return nil, err
@@ -331,7 +439,11 @@ func prefixFromIssueKey(key string) string {
 }
 
 func (c *localClient) ListAgentSessions(ctx context.Context, f AgentSessionFilter) ([]*model.AgentSession, error) {
-	sf := store.AgentSessionFilter{OnlyAlive: f.OnlyAlive, Since: f.Since}
+	sf := store.AgentSessionFilter{
+		OnlyAlive:      f.OnlyAlive,
+		RegisteredOnly: f.RegisteredOnly,
+		Since:          f.Since,
+	}
 	if f.Repo != nil {
 		id := f.Repo.ID
 		sf.RepoID = &id
@@ -391,9 +503,6 @@ func agentRegisterDetails(sess *model.AgentSession) string {
 	}
 	if sess.Model != "" {
 		parts = append(parts, "model="+sess.Model)
-	}
-	if sess.PermissionMode != "" {
-		parts = append(parts, "mode="+sess.PermissionMode)
 	}
 	if sess.Branch != "" {
 		parts = append(parts, "branch="+sess.Branch)

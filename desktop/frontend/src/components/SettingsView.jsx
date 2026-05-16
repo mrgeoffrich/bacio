@@ -28,15 +28,17 @@ export default function SettingsView({ theme, onChangeTheme, hideEmptyColumns, o
   const [drafts, setDrafts] = useState({});
   const [savingMode, setSavingMode] = useState(null);
   const [tmplError, setTmplError] = useState(null);
+  const [bacioVer, setBacioVer] = useState('');
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([api.listPromptTemplates(), api.promptPlaceholders()])
-      .then(([tpls, ph]) => {
+    Promise.all([api.listPromptTemplates(), api.promptPlaceholders(), api.bacioVersion()])
+      .then(([tpls, ph, ver]) => {
         if (cancelled) return;
         setTemplates(tpls);
         setPlaceholders(ph);
         setDrafts(Object.fromEntries(tpls.map(t => [t.mode, t.body])));
+        setBacioVer(ver);
         setTmplError(null);
       })
       .catch(err => { if (!cancelled) setTmplError(err.message); });
@@ -202,6 +204,18 @@ export default function SettingsView({ theme, onChangeTheme, hideEmptyColumns, o
               </div>
             );
           })}
+        </section>
+
+        <section className="mk-settings-row">
+          <div className="mk-settings-row-text">
+            <div className="mk-settings-label">Bacio version</div>
+            <div className="mk-settings-hint">
+              The version of the bacio binary this desktop app is running.
+              Cross-check against the "Bacio version" on each agent in the
+              Agents panel to spot agents talking to outdated channels.
+            </div>
+          </div>
+          <div className="mk-settings-value"><code>{bacioVer || '—'}</code></div>
         </section>
       </div>
     </div>

@@ -108,19 +108,31 @@ func (s *Store) GetAgentByID(id int64) (*model.Agent, error) {
 // Mutable fields update on every call (so a heartbeat after a /model
 // switch picks up the new model); started_at is set only on insert.
 type UpsertAgentSessionIn struct {
-	SessionID      string
-	RepoID         int64
-	AgentID        *int64 // nil leaves agent_id NULL (back-compat for callers without identity)
-	Actor          string
-	Model          string
-	PermissionMode string
-	Host           string
-	Branch         string
+	SessionID string
+	RepoID    int64
+	AgentID   *int64 // nil leaves agent_id NULL (back-compat for callers without identity)
+	Actor     string
+	Model     string
+	Host      string
+	Branch    string
+	// ClaudePID is the pid of the `claude` process driving this session.
+	// Always written — the channel scopes its dispatches by (host,
+	// claude_pid), so this needs to be present from the very first
+	// SessionStart-stub write or the channel can't queue setup work.
+	ClaudePID int64
+	// ChannelVersion is the bacio binary version the agent's channel
+	// reported. Only written on update when non-empty (so a heartbeat
+	// from a caller that doesn't know the version doesn't clobber it).
+	ChannelVersion string
+	// MarkRegistered flips registered_at to CURRENT_TIMESTAMP. The
+	// register tool sets it true; the SessionStart-stub path and
+	// heartbeats leave it false (preserving whatever's already there).
+	MarkRegistered bool
 }
 
 // UpsertAgentSession inserts a new row or refreshes an existing one
 // (matched by session_id). last_seen_at is always bumped to now;
-// started_at is preserved on update. Mutable fields (actor, model, mode,
+// started_at is preserved on update. Mutable fields (actor, model,
 // host, branch) are overwritten on every call so a session that's
 // `/model`-switched or `cd`-ed mid-life shows current state.
 //
@@ -135,9 +147,6 @@ func (s *Store) UpsertAgentSession(in UpsertAgentSessionIn) (*model.AgentSession
 	}
 	in.Actor = actor
 	if in.Model, err = validateOptionalName(in.Model, "model"); err != nil {
-		return nil, err
-	}
-	if in.PermissionMode, err = validateOptionalName(in.PermissionMode, "permission_mode"); err != nil {
 		return nil, err
 	}
 	if in.Host, err = validateOptionalName(in.Host, "host"); err != nil {
@@ -182,19 +191,31 @@ func (s *Store) UpsertAgentSession(in UpsertAgentSessionIn) (*model.AgentSession
 	if in.AgentID != nil {
 		agentID = *in.AgentID
 	}
+	registeredAtInsert := "NULL"
+	if in.MarkRegistered {
+		registeredAtInsert = "CURRENT_TIMESTAMP"
+	}
+	registeredAtUpdate := "registered_at"
+	if in.MarkRegistered {
+		// Don't clobber an earlier registered_at — first-mark-wins so
+		// re-runs of register report the original registration moment.
+		registeredAtUpdate = "COALESCE(agent_sessions.registered_at, CURRENT_TIMESTAMP)"
+	}
 	if _, err := tx.Exec(`
 		INSERT INTO agent_sessions
-		    (session_id, repo_id, agent_id, actor, model, permission_mode, host, branch, last_seen_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+		    (session_id, repo_id, agent_id, actor, model, host, branch, claude_pid, channel_version, last_seen_at, registered_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, `+registeredAtInsert+`)
 		ON CONFLICT(session_id) DO UPDATE SET
 		    actor           = excluded.actor,
 		    agent_id        = COALESCE(excluded.agent_id, agent_sessions.agent_id),
 		    model           = excluded.model,
-		    permission_mode = excluded.permission_mode,
 		    host            = excluded.host,
 		    branch          = excluded.branch,
+		    claude_pid      = CASE WHEN excluded.claude_pid != 0 THEN excluded.claude_pid ELSE agent_sessions.claude_pid END,
+		    channel_version = CASE WHEN excluded.channel_version != '' THEN excluded.channel_version ELSE agent_sessions.channel_version END,
+		    registered_at   = `+registeredAtUpdate+`,
 		    last_seen_at    = CURRENT_TIMESTAMP`,
-		in.SessionID, in.RepoID, agentID, in.Actor, in.Model, in.PermissionMode, in.Host, in.Branch,
+		in.SessionID, in.RepoID, agentID, in.Actor, in.Model, in.Host, in.Branch, in.ClaudePID, in.ChannelVersion,
 	); err != nil {
 		return nil, err
 	}
@@ -590,16 +611,16 @@ func (s *Store) ReleaseAgentClaim(sessionID string, issueID int64) (*model.Agent
 // AgentSessionFilter scopes ListAgentSessions. Zero value = all
 // sessions in all repos.
 type AgentSessionFilter struct {
-	RepoID    *int64    // nil = all repos
-	OnlyAlive bool      // ended_at IS NULL
-	Since     time.Time // last_seen_at >= since (zero = no filter)
+	RepoID         *int64    // nil = all repos
+	OnlyAlive      bool      // ended_at IS NULL
+	RegisteredOnly bool      // registered_at IS NOT NULL — hide SessionStart stubs that never made it through register
+	Since          time.Time // last_seen_at >= since (zero = no filter)
 }
 
 // ListAgentSessions returns sessions matching the filter, ordered by
 // last_seen_at DESC so the freshest activity surfaces first.
 func (s *Store) ListAgentSessions(f AgentSessionFilter) ([]*model.AgentSession, error) {
-	q := `SELECT s.id, s.session_id, s.repo_id, r.prefix, s.agent_id, a.name, s.actor, s.model, s.permission_mode, s.host, s.branch,
-		s.started_at, s.last_seen_at, s.ended_at, s.end_reason, s.claude_pid, s.channel_seen_at
+	q := `SELECT ` + agentSessionSelect + `
 		FROM agent_sessions s
 		LEFT JOIN repos r  ON r.id = s.repo_id
 		LEFT JOIN agents a ON a.id = s.agent_id
@@ -611,6 +632,9 @@ func (s *Store) ListAgentSessions(f AgentSessionFilter) ([]*model.AgentSession, 
 	}
 	if f.OnlyAlive {
 		q += ` AND s.ended_at IS NULL`
+	}
+	if f.RegisteredOnly {
+		q += ` AND s.registered_at IS NOT NULL`
 	}
 	if !f.Since.IsZero() {
 		q += ` AND s.last_seen_at >= ?`
@@ -634,11 +658,45 @@ func (s *Store) ListAgentSessions(f AgentSessionFilter) ([]*model.AgentSession, 
 	return out, rows.Err()
 }
 
+// SessionsByClaudePID returns the open sessions (ended_at IS NULL)
+// matching the given (host, claude_pid) — the channel's own coordinates.
+// The bacio channel MCP server doesn't know its session id (Claude Code
+// doesn't pass it), so it uses this to find which sessions it's serving
+// and target setup dispatches at them. claudePID of 0 returns nothing
+// (the channel couldn't walk to its `claude` ancestor — no correlation
+// possible). Newest-first by started_at.
+func (s *Store) SessionsByClaudePID(host string, claudePID int64) ([]*model.AgentSession, error) {
+	if claudePID == 0 {
+		return nil, nil
+	}
+	rows, err := s.DB.Query(
+		`SELECT `+agentSessionSelect+`
+		FROM agent_sessions s
+		LEFT JOIN repos r  ON r.id = s.repo_id
+		LEFT JOIN agents a ON a.id = s.agent_id
+		WHERE s.host = ? AND s.claude_pid = ? AND s.ended_at IS NULL
+		ORDER BY s.started_at DESC`,
+		host, claudePID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.AgentSession
+	for rows.Next() {
+		ag, err := scanAgentSession(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, ag)
+	}
+	return out, rows.Err()
+}
+
 // GetAgentSession fetches one session by its external id.
 func (s *Store) GetAgentSession(sessionID string) (*model.AgentSession, error) {
 	row := s.DB.QueryRow(
-		`SELECT s.id, s.session_id, s.repo_id, r.prefix, s.agent_id, a.name, s.actor, s.model, s.permission_mode, s.host, s.branch,
-		s.started_at, s.last_seen_at, s.ended_at, s.end_reason, s.claude_pid, s.channel_seen_at
+		`SELECT `+agentSessionSelect+`
 		FROM agent_sessions s
 		LEFT JOIN repos r  ON r.id = s.repo_id
 		LEFT JOIN agents a ON a.id = s.agent_id
@@ -666,8 +724,7 @@ func (s *Store) ResolveAgentSession(idOrPrefix string) (*model.AgentSession, err
 	// supplied prefix is safe — we escape with a leading-literal pattern.
 	pattern := idOrPrefix + "%"
 	rows, err := s.DB.Query(
-		`SELECT s.id, s.session_id, s.repo_id, r.prefix, s.agent_id, a.name, s.actor, s.model, s.permission_mode, s.host, s.branch,
-		s.started_at, s.last_seen_at, s.ended_at, s.end_reason, s.claude_pid, s.channel_seen_at
+		`SELECT `+agentSessionSelect+`
 		FROM agent_sessions s
 		LEFT JOIN repos r  ON r.id = s.repo_id
 		LEFT JOIN agents a ON a.id = s.agent_id
@@ -834,6 +891,14 @@ func scanAgentClaim(r rowScanner) (*model.AgentClaim, error) {
 	return &c, nil
 }
 
+// agentSessionSelect is the canonical column list for selecting an
+// AgentSession joined to its repo prefix + agent name. Centralised so
+// new columns (registered_at, channel_version) only need to land in
+// one place; scanAgentSession's column order mirrors it 1:1.
+const agentSessionSelect = `s.id, s.session_id, s.repo_id, r.prefix, s.agent_id, a.name, s.actor, s.model,
+	s.host, s.branch, s.started_at, s.last_seen_at, s.ended_at, s.end_reason,
+	s.claude_pid, s.channel_seen_at, s.registered_at, s.channel_version`
+
 func scanAgentSession(r rowScanner) (*model.AgentSession, error) {
 	var ag model.AgentSession
 	var prefix sql.NullString
@@ -841,10 +906,11 @@ func scanAgentSession(r rowScanner) (*model.AgentSession, error) {
 	var agentName sql.NullString
 	var ended sql.NullTime
 	var channelSeen sql.NullTime
+	var registered sql.NullTime
 	err := r.Scan(&ag.ID, &ag.SessionID, &ag.RepoID, &prefix, &agentID, &agentName,
-		&ag.Actor, &ag.Model, &ag.PermissionMode,
+		&ag.Actor, &ag.Model,
 		&ag.Host, &ag.Branch, &ag.StartedAt, &ag.LastSeenAt, &ended, &ag.EndReason,
-		&ag.ClaudePID, &channelSeen)
+		&ag.ClaudePID, &channelSeen, &registered, &ag.ChannelVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -864,12 +930,15 @@ func scanAgentSession(r rowScanner) (*model.AgentSession, error) {
 	if channelSeen.Valid {
 		ag.ChannelSeenAt = &channelSeen.Time
 	}
+	if registered.Valid {
+		ag.RegisteredAt = &registered.Time
+	}
 	return &ag, nil
 }
 
 // validateOptionalName accepts empty (keep default-empty) or runs the
 // usual single-line rules. Used for the optional session fields
-// (model, permission_mode, host, branch) where "" is meaningful.
+// (model, host, branch) where "" is meaningful.
 func validateOptionalName(s, field string) (string, error) {
 	if s == "" {
 		return "", nil

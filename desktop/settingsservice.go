@@ -5,6 +5,7 @@ import (
 
 	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/model"
+	"github.com/mrgeoffrich/bacio/internal/version"
 )
 
 // PromptTemplateDTO is one editable dispatch prompt template, shaped for
@@ -55,6 +56,17 @@ func NewSettingsService(c client.Client) *SettingsService {
 // to the editors. The tokens are wrapped in {{...}} when substituted.
 func (s *SettingsService) PromptPlaceholders() []string {
 	return append([]string{}, model.PromptTemplateTokens...)
+}
+
+// BacioVersion returns the version string of the bacio binary the
+// desktop app is currently running. Surfaced on the Settings panel so
+// you can cross-check what the desktop client is running against the
+// per-session "Bacio version" the Agents panel shows — easy way to
+// spot "is this agent's channel an older build than my desktop?".
+// Sources from version.String() so plain `go build` dev binaries get
+// commit-level resolution (e.g. "dev (commit abc1234)").
+func (s *SettingsService) BacioVersion() string {
+	return version.String()
 }
 
 // sameStrings reports whether two string slices are equal, in order.

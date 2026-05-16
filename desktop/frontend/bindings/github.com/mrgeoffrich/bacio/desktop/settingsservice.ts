@@ -17,6 +17,19 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 import * as $models from "./models.js";
 
 /**
+ * BacioVersion returns the version string of the bacio binary the
+ * desktop app is currently running. Surfaced on the Settings panel so
+ * you can cross-check what the desktop client is running against the
+ * per-session "Bacio version" the Agents panel shows — easy way to
+ * spot "is this agent's channel an older build than my desktop?".
+ * Sources from version.String() so plain `go build` dev binaries get
+ * commit-level resolution (e.g. "dev (commit abc1234)").
+ */
+export function BacioVersion(): $CancellablePromise<string> {
+    return $Call.ByID(2314822586);
+}
+
+/**
  * GetBoardPreferences returns the persisted desktop Board UI
  * preferences (or the built-in defaults when none are stored).
  */

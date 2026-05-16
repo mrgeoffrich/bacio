@@ -13,6 +13,7 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/git"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/sync"
+	"github.com/mrgeoffrich/bacio/internal/version"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -159,10 +160,18 @@ type AgentCard struct {
 	// running alongside this session. Only sessions with a live channel
 	// can receive push dispatches — sessions without one are interactive
 	// (the user hasn't granted channel permission) and should be skipped.
-	HasChannel bool          `json:"hasChannel"`
-	LastSeenAt time.Time     `json:"lastSeenAt"`
-	Claims     []ClaimDTO    `json:"claims"`
-	Dispatches []DispatchDTO `json:"dispatches"`
+	HasChannel bool `json:"hasChannel"`
+	// BacioVersion is the bacio binary version the channel was running at
+	// register time (stamped server-side by the channel itself — agents
+	// don't know it and aren't trusted to report it). Empty for sessions
+	// older than the version-reporting change. BacioVersionStale is true
+	// when it doesn't match the binary the desktop is currently running —
+	// useful signal that an agent is talking to an outdated channel.
+	BacioVersion      string        `json:"bacioVersion"`
+	BacioVersionStale bool          `json:"bacioVersionStale"`
+	LastSeenAt          time.Time     `json:"lastSeenAt"`
+	Claims              []ClaimDTO    `json:"claims"`
+	Dispatches          []DispatchDTO `json:"dispatches"`
 }
 
 // BoardService is the Wails-bound API the kanban frontend talks to. It
@@ -526,10 +535,11 @@ func dispatchTargetsSession(d *model.AgentDispatch, s *model.AgentSession) bool 
 
 // ListAgents returns the agent sessions for one repo (or every repo when
 // repoPrefix is empty or "all"), each carrying its status, open claims,
-// and the dispatches aimed at it.
+// and the dispatches aimed at it. SessionStart stubs that never
+// completed register are hidden — they're noise in the supervision UI.
 func (b *BoardService) ListAgents(repoPrefix string) ([]AgentCard, error) {
 	ctx := context.Background()
-	filter := client.AgentSessionFilter{}
+	filter := client.AgentSessionFilter{RegisteredOnly: true}
 	var repos []*model.Repo
 	if repoPrefix == "" || repoPrefix == "all" {
 		rs, err := b.client.ListRepos(ctx)
@@ -565,18 +575,24 @@ func (b *BoardService) ListAgents(repoPrefix string) ([]AgentCard, error) {
 	now := time.Now()
 	cards := make([]AgentCard, 0, len(sessions))
 	for _, s := range sessions {
+		current := version.String()
+		stale := s.ChannelVersion != "" &&
+			current != "" && current != "dev" &&
+			s.ChannelVersion != current
 		card := AgentCard{
-			SessionID:  s.SessionID,
-			AgentName:  s.AgentName,
-			Actor:      s.Actor,
-			Model:      s.Model,
-			Branch:     s.Branch,
-			RepoPrefix: s.RepoPrefix,
-			Status:     model.SessionLiveness(s, now),
-			HasChannel: s.ChannelSeenAt != nil,
-			LastSeenAt: s.LastSeenAt,
-			Claims:     []ClaimDTO{},
-			Dispatches: []DispatchDTO{},
+			SessionID:         s.SessionID,
+			AgentName:         s.AgentName,
+			Actor:             s.Actor,
+			Model:             s.Model,
+			Branch:            s.Branch,
+			RepoPrefix:        s.RepoPrefix,
+			Status:            model.SessionLiveness(s, now),
+			HasChannel:        s.ChannelSeenAt != nil,
+			BacioVersion:      s.ChannelVersion,
+			BacioVersionStale: stale,
+			LastSeenAt:        s.LastSeenAt,
+			Claims:            []ClaimDTO{},
+			Dispatches:        []DispatchDTO{},
 		}
 		view, err := b.client.ShowAgentSession(ctx, s.SessionID)
 		if err != nil {

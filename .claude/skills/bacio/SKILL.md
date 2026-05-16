@@ -618,13 +618,27 @@ An agent picks dispatches up two ways:
   drain pending dispatches at session start and on every prompt, injecting
   them into context. Nothing to poll.
 - **Push** — if the session runs the `bacio channel` MCP server, dispatches
-  arrive live as `<channel source="bacio">` events the moment they're
+  arrive live as `<channel source="bacio" ...>` events the moment they're
   created. `bacio install-channel --yes` registers the channel in the
   repo's `.mcp.json` and prints the `claude` launch command (channels are
   a research preview — the session opts in with
   `--dangerously-load-development-channels server:bacio`). `bacio agent
-  list` shows a `CHANNEL` column (`live` / `-`) so you can see which
-  sessions have push delivery wired up.
+  list` shows a `CHANNEL` column (`live` / `-`) and an `MCP` column with
+  the binary version the agent's channel reports (with a `!stale` flag
+  if it doesn't match the binary running the list command).
+  The channel exposes two MCP tools: `reply` (ack a dispatch) and
+  `register` (complete the session's registration). The SessionStart
+  hook now writes only a minimal stub — `bacio agent list` filters those
+  out by default (use `--all` to see them); they're invisible until
+  `register` enriches the row. On startup the channel itself queues a
+  dispatch with `from="bacio-channel"` asking you to call `register`
+  with `{"session_id": "$CLAUDE_SESSION_ID", "model": "<your model id>",
+  "branch": "<your git branch>", "permission_mode": "<your permission
+  mode>", "mcp_version": "<serverInfo.version from initialize>"}` —
+  only `session_id` is required, but every extra field enriches the
+  session row. Pass `mcp_version` from the value the MCP server reported
+  at initialize so bacio can detect stale channel processes. Call
+  register, then ack the dispatch with `reply`.
 
 Either way, acknowledge each handled dispatch with `bacio agent ack <id>
 --note "..."` (or the channel's `reply` tool). Acked/cancelled dispatches

@@ -72,12 +72,28 @@ func (c *remoteClient) RepoDispatches(ctx context.Context, repo *model.Repo) ([]
 	return nil, remoteAgentNotSupported("dispatches")
 }
 
+func (c *remoteClient) EnsureSetupDispatch(ctx context.Context, repo *model.Repo, sessionID string) (*model.AgentDispatch, error) {
+	return nil, remoteAgentNotSupported("channel")
+}
+
 func (c *remoteClient) DrainAgentDispatches(ctx context.Context, repo *model.Repo, agentName string) ([]*model.AgentDispatch, error) {
 	return nil, remoteAgentNotSupported("channel")
 }
 
 func (c *remoteClient) EnsureAgentIdentity(ctx context.Context, repo *model.Repo) (string, error) {
 	return "", remoteAgentNotSupported("register")
+}
+
+func (c *remoteClient) CreateSessionStub(ctx context.Context, repo *model.Repo, sessionID, host string, claudePID int64) (*model.AgentSession, error) {
+	return nil, remoteAgentNotSupported("session-stub")
+}
+
+func (c *remoteClient) SessionsByClaudePID(ctx context.Context, host string, claudePID int64) ([]*model.AgentSession, error) {
+	return nil, remoteAgentNotSupported("sessions-by-claude-pid")
+}
+
+func (c *remoteClient) CompleteRegistration(ctx context.Context, repo *model.Repo, in inputs.AgentRegisterInput, channelVersion string) (*model.AgentSession, error) {
+	return nil, remoteAgentNotSupported("register")
 }
 
 func (c *remoteClient) UpsertAgentChannel(ctx context.Context, repo *model.Repo, agentName, host string, claudePID, channelPID int64) error {

@@ -187,6 +187,28 @@ type Client interface {
 	// .bacio/agents.json entry yet — the caller records the returned
 	// slug there. Does NOT create a session row. Local-only.
 	EnsureAgentIdentity(ctx context.Context, repo *model.Repo) (string, error)
+	// CreateSessionStub inserts a minimal agent_sessions row at SessionStart
+	// — just session_id + repo + claude_pid + host + an "(unregistered)"
+	// placeholder actor. agent identity, model, branch, permission_mode are
+	// all left unset; registered_at stays NULL. The session is invisible to
+	// the default-filtered agent list until the bacio channel's `register`
+	// tool completes the registration via CompleteRegistration. Idempotent
+	// on session_id (a /clear that fires a fresh SessionStart with a new
+	// session_id is a separate stub). Local-only.
+	CreateSessionStub(ctx context.Context, repo *model.Repo, sessionID, host string, claudePID int64) (*model.AgentSession, error)
+	// SessionsByClaudePID returns the open sessions matching (host,
+	// claudePID) — the channel's coordinates. Used by the bacio channel
+	// MCP server to find which sessions it's serving so it can queue a
+	// setup dispatch at each one. Local-only.
+	SessionsByClaudePID(ctx context.Context, host string, claudePID int64) ([]*model.AgentSession, error)
+	// CompleteRegistration is the register-tool counterpart to
+	// CreateSessionStub: it enriches the stub with agent identity, model,
+	// branch, permission_mode, channel_version, and stamps registered_at.
+	// The agent identity is resolved or minted (via EnsureAgentIdentity
+	// semantics) and recorded in .bacio/agents.json. Idempotent — re-running
+	// register is a no-op on registered_at (first-mark-wins) and re-stamps
+	// the other fields with the new values. Local-only.
+	CompleteRegistration(ctx context.Context, repo *model.Repo, in inputs.AgentRegisterInput, channelVersion string) (*model.AgentSession, error)
 	// UpsertAgentChannel records (or heartbeats) a live `bacio channel`
 	// subprocess, keyed on the `claude` pid it descends from. agentName
 	// is best-effort: an unknown/empty name just leaves the row's
@@ -225,6 +247,15 @@ type Client interface {
 	// first, regardless of status — the read surface the desktop Agents
 	// screen needs. Local-only in v1.
 	RepoDispatches(ctx context.Context, repo *model.Repo) ([]*model.AgentDispatch, error)
+	// EnsureSetupDispatch idempotently queues a dispatch telling the
+	// agent to call the bacio channel's `register` tool — the path that
+	// completes a SessionStart stub into a fully-registered session.
+	// Scoped to one session_id (not an agent identity, since the agent
+	// identity only exists post-register). Idempotent on
+	// (TargetSessionID, CreatedBy=bacio-channel, status in [pending,
+	// delivered]): returns the existing open dispatch rather than
+	// creating a duplicate. sessionID="" is a no-op. Local-only.
+	EnsureSetupDispatch(ctx context.Context, repo *model.Repo, sessionID string) (*model.AgentDispatch, error)
 
 	// ----- Prompt templates (local-only; `bacio settings template`) -----
 	// GetPromptTemplates returns the resolved dispatch prompt template
@@ -269,9 +300,10 @@ type BoardPreferences struct {
 // CLI callers pass a *model.Repo (so the remote backend can resolve
 // prefix when v2 wires it up) instead of a raw repo id.
 type AgentSessionFilter struct {
-	Repo      *model.Repo // nil = all repos
-	OnlyAlive bool
-	Since     time.Time
+	Repo           *model.Repo // nil = all repos
+	OnlyAlive      bool
+	RegisteredOnly bool // registered_at IS NOT NULL — default for TUI/desktop/CLI agent list
+	Since          time.Time
 }
 
 // AgentSessionView bundles a session with its claim history for the

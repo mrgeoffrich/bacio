@@ -32,17 +32,16 @@ type Agent struct {
 // points at the persistent identity row in `agents`; nil for sessions
 // registered before the identity layer existed.
 type AgentSession struct {
-	ID             int64      `json:"id"`
-	SessionID      string     `json:"session_id"`
-	RepoID         int64      `json:"repo_id"`
-	RepoPrefix     string     `json:"repo_prefix,omitempty"`
-	AgentID        *int64     `json:"agent_id,omitempty"`
-	AgentName      string     `json:"agent_name,omitempty"`
-	Actor          string     `json:"actor"`
-	Model          string     `json:"model,omitempty"`
-	PermissionMode string     `json:"permission_mode,omitempty"`
-	Host           string     `json:"host,omitempty"`
-	Branch         string     `json:"branch,omitempty"`
+	ID         int64  `json:"id"`
+	SessionID  string `json:"session_id"`
+	RepoID     int64  `json:"repo_id"`
+	RepoPrefix string `json:"repo_prefix,omitempty"`
+	AgentID    *int64 `json:"agent_id,omitempty"`
+	AgentName  string `json:"agent_name,omitempty"`
+	Actor      string `json:"actor"`
+	Model      string `json:"model,omitempty"`
+	Host       string `json:"host,omitempty"`
+	Branch     string `json:"branch,omitempty"`
 	StartedAt      time.Time  `json:"started_at"`
 	LastSeenAt     time.Time  `json:"last_seen_at"`
 	EndedAt        *time.Time `json:"ended_at,omitempty"`
@@ -53,6 +52,17 @@ type AgentSession struct {
 	// (host, claude_pid) — nil/zero when no channel has ever been linked.
 	ClaudePID     int64      `json:"claude_pid,omitempty"`
 	ChannelSeenAt *time.Time `json:"channel_seen_at,omitempty"`
+	// RegisteredAt is set when the agent calls the bacio channel's
+	// `register` tool — distinguishes a fully-registered session from a
+	// SessionStart-stub waiting to be enriched. UI agent lists default
+	// to filtering on this being non-nil.
+	RegisteredAt *time.Time `json:"registered_at,omitempty"`
+	// ChannelVersion is the bacio binary version reported by the channel
+	// the agent talked to at register time — for spotting stale channel
+	// processes still running after a binary upgrade. Empty until the
+	// agent registers (or for sessions older than the version-reporting
+	// change).
+	ChannelVersion string `json:"channel_version,omitempty"`
 }
 
 // AgentChannel is one live `bacio channel` subprocess. Claude Code never
