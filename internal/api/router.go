@@ -93,6 +93,11 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("GET /agents/sessions/{session_id}/inbox", d.handleAgentInbox)
 	mux.HandleFunc("POST /agents/dispatches/{id}/ack", d.handleAgentDispatchAck)
 	mux.HandleFunc("GET /agents/claims/open", d.handleAgentClaimsOpen)
+	// Dispatch CRUD (BACI-35) rounds out the four dispatch verbs — inbox
+	// and ack already shipped with BACI-34. Repo-scoped because a
+	// dispatch is always queued against one repo.
+	mux.HandleFunc("POST /repos/{prefix}/agents/dispatches", d.handleAgentDispatchCreate)
+	mux.HandleFunc("GET /repos/{prefix}/agents/dispatches", d.handleAgentDispatchesList)
 
 	// Outermost first: panic recovery wraps everything so a bug in any
 	// later layer still returns a 500 envelope.

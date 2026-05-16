@@ -791,16 +791,17 @@ If the repo has `bacio install-hooks` set up, the register / heartbeat /
 end calls happen automatically — the loop above collapses to just `claim`,
 the work, `release`, and `bacio agent ack` for any dispatches that arrived.
 
-The agent registry is reachable over HTTP for nine verbs — `register`,
-`heartbeat`, `end`, `claim`, `release`, `list`, `show`, `inbox`, `ack` —
-plus the bulk `ListOpenClaims` (used by the desktop Board to derive
-`taken`). The CLI's `--remote` / `BACIO_REMOTE` mode drives these
-verbs over the same routes as a web frontend would. The holdouts that
-remain local-only are `bacio agent dispatch` (HTTP parity is a
-follow-up), the channel/hook internals (`EnsureSetupDispatch`,
-`DrainDispatches`, `CompleteRegistration`, `CreateSessionStub`, etc.),
-and the prompt-template / board-preference settings — those error
-clearly in remote mode with a "local-only" message.
+The agent registry is reachable over HTTP for the full eleven verbs —
+`register`, `heartbeat`, `end`, `claim`, `release`, `list`, `show`,
+`inbox`, `ack`, `dispatch`, and `RepoDispatches` (the per-repo dispatch
+list) — plus the bulk `ListOpenClaims` (used by the desktop Board to
+derive `taken`). The CLI's `--remote` / `BACIO_REMOTE` mode drives
+these over the same routes as a web frontend would. The holdouts that
+remain local-only are the channel/hook internals
+(`EnsureSetupDispatch`, `DrainDispatches`,
+`CompleteRegistration`, `CreateSessionStub`, etc.) and the
+prompt-template / board-preference settings — those error clearly in
+remote mode with a "local-only" message.
 
 ## Git-backed sync
 
@@ -960,8 +961,8 @@ A few non-obvious mappings:
 
 - **`POST /repos`** is the equivalent of `bacio init`, but the server can't see your CWD — supply `{"name":"...", "path":"..."}` (plus optional `prefix`) explicitly.
 - **`GET /repos/{prefix}/documents/{filename}/download`** is the only non-JSON endpoint. Streams the body as `text/markdown` with `Content-Disposition: attachment`. No audit row, no dry-run, no `with_content`. The API never reads or writes the server filesystem, so callers materialise on disk by piping the response (`curl -O`).
-- **CLI verbs with no API equivalent** (touch the local filesystem or terminal): `bacio init` (use `POST /repos`), `bacio install-skill`, `bacio install-hooks`, `bacio install-channel`, `bacio doc add --from-path` / `--content-file` (inline `content` in the body), `bacio doc export` (use `/download`), `bacio tui`, `bacio hook *`, `bacio channel`. Plus the local-only agent verbs `bacio agent dispatch` and the prompt-template / board-preference settings.
-- **Agent registry endpoints.** The nine register/heartbeat/end/claim/release/list/show/inbox/ack verbs reach the server under `/repos/{prefix}/agents/sessions` (register, list-in-repo, list-open-claims-in-repo) and `/agents/sessions/{session_id}/...` (heartbeat/end/claim/release/inbox + show), plus `/agents/dispatches/{id}/ack`. Cross-repo variants of the two lists live at `/agents/sessions` and `/agents/claims/open`. Stub sessions (`registered_at` NULL) are hidden by default on the list endpoints — pass `?all=true` to include them.
+- **CLI verbs with no API equivalent** (touch the local filesystem or terminal): `bacio init` (use `POST /repos`), `bacio install-skill`, `bacio install-hooks`, `bacio install-channel`, `bacio doc add --from-path` / `--content-file` (inline `content` in the body), `bacio doc export` (use `/download`), `bacio tui`, `bacio hook *`, `bacio channel`. Plus the prompt-template / board-preference settings (local-only).
+- **Agent registry endpoints.** The eleven register/heartbeat/end/claim/release/list/show/inbox/ack/dispatch/list-dispatches-in-repo verbs reach the server under `/repos/{prefix}/agents/sessions` (register, list-in-repo, list-open-claims-in-repo), `/repos/{prefix}/agents/dispatches` (BACI-35: create + list-in-repo), and `/agents/sessions/{session_id}/...` (heartbeat/end/claim/release/inbox + show), plus `/agents/dispatches/{id}/ack`. Cross-repo variants of the two lists live at `/agents/sessions` and `/agents/claims/open`. Stub sessions (`registered_at` NULL) are hidden by default on the list endpoints — pass `?all=true` to include them.
 
 For the full design rationale, threat model, and what the API deliberately doesn't do (NDJSON, per-user auth, CORS, cursor pagination, …), see `docs/rest-api-design.md`.
 
@@ -974,7 +975,7 @@ BACIO_REMOTE=http://team-bacio:5320 BACIO_API_TOKEN=$T bacio issue list -o json
 bacio --remote http://team-bacio:5320 issue add "Login broken" --feature auth
 ```
 
-Verbs that touch the local filesystem or terminal error clearly in remote mode and stay local-direct: `bacio init`, `bacio install-skill`, `bacio install-hooks`, `bacio install-channel`, `bacio doc add --from-path` / `--content-file` (use `--content` inline instead), `bacio doc export` (use `bacio doc download <filename>` — writes to stdout or `--to <path>`), `bacio tui`, `bacio schema *`, `bacio status`, `bacio hook *`, `bacio channel`. The agent verbs `register / heartbeat / end / claim / release / list / show / inbox / ack` now work in remote mode (BACI-34); only `bacio agent dispatch` and the prompt-template / board-preference settings remain local-only.
+Verbs that touch the local filesystem or terminal error clearly in remote mode and stay local-direct: `bacio init`, `bacio install-skill`, `bacio install-hooks`, `bacio install-channel`, `bacio doc add --from-path` / `--content-file` (use `--content` inline instead), `bacio doc export` (use `bacio doc download <filename>` — writes to stdout or `--to <path>`), `bacio tui`, `bacio schema *`, `bacio status`, `bacio hook *`, `bacio channel`. The agent verbs `register / heartbeat / end / claim / release / list / show / inbox / ack` work in remote mode (BACI-34), and `bacio agent dispatch` is also remote-capable now (BACI-35); only the prompt-template / board-preference settings remain local-only.
 
 ## Gotchas
 

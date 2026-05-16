@@ -25,8 +25,13 @@ under [Agent identity](#agent-identity--the-claude_pid-correlation).
 ```
 
 A **dispatch** is one unit of supervisor→agent work: an issue to look
-at, an intent (plan vs implement), and an optional note. It's local-only
-— never synced to GitHub, like the rest of the registry.
+at, an intent (plan vs implement), and an optional note. The data is
+never synced to GitHub (like the rest of the registry), but the full
+CRUD — create / list / inbox / ack — is reachable over `bacio api`
+(BACI-34 + BACI-35), so a remote supervisor can queue work for an
+agent against a server holding the local SQLite store. Only the
+side-effect-bearing drain path stays local-only (the `bacio hook`
+talks to the store directly).
 
 ---
 

@@ -312,23 +312,79 @@ func TestClaimReleaseKeepsAssigneeInLockstep(t *testing.T) {
 	}
 }
 
-// TestDispatchRemoteNotSupported locks in which dispatch-side verbs are
-// still local-only after BACI-34 landed inbox/ack over HTTP.
-// CreateDispatch (and the channel-internal drains) are the holdouts —
-// they remain ErrLocalOnly until a follow-up adds their HTTP parity.
+// TestDispatchRemoteNotSupported locks in which dispatch-side verbs
+// are still local-only after BACI-34 landed inbox/ack and BACI-35
+// landed create + list-per-repo over HTTP. Only the side-effect-bearing
+// drain path (used by the hook against the local store directly) is
+// left without a REST analogue.
 func TestDispatchRemoteNotSupported(t *testing.T) {
 	p := newPair(t)
 	defer p.cleanup()
 	ctx := context.Background()
 
-	_, err := p.remote.CreateDispatch(ctx, p.repo, inputs.AgentDispatchInput{TargetAgent: "x"}, false)
-	if !errors.Is(err, ErrLocalOnly) {
-		t.Fatalf("remote CreateDispatch err = %v, want ErrLocalOnly", err)
-	}
-	if _, err := p.remote.RepoDispatches(ctx, p.repo); !errors.Is(err, ErrLocalOnly) {
-		t.Fatalf("remote RepoDispatches err = %v, want ErrLocalOnly", err)
-	}
 	if _, err := p.remote.DrainDispatches(ctx, "sess-x"); !errors.Is(err, ErrLocalOnly) {
 		t.Fatalf("remote DrainDispatches err = %v, want ErrLocalOnly", err)
+	}
+}
+
+// TestRoundTripDispatchCreate exercises the BACI-35 additions —
+// CreateDispatch and RepoDispatches — through the remote backend. The
+// inbox/ack round-trip is covered separately by BACI-34's
+// TestRoundTripAgentLifecycle.
+func TestRoundTripDispatchCreate(t *testing.T) {
+	p := newPair(t)
+	defer p.cleanup()
+	ctx := context.Background()
+
+	iss, err := p.store.CreateIssue(p.repo.ID, nil, "ship it", "", model.StateTodo, nil)
+	if err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+	ag, _, err := p.store.UpsertAgent("swift-otter@claude.test", true)
+	if err != nil {
+		t.Fatalf("UpsertAgent: %v", err)
+	}
+
+	// Dry-run via REST: get a projected dispatch, write nothing.
+	proj, err := p.remote.CreateDispatch(ctx, p.repo, inputs.AgentDispatchInput{
+		TargetAgent: ag.Name,
+		IssueKey:    iss.Key,
+		Mode:        string(model.DispatchModeImplement),
+		Message:     "preview",
+	}, true)
+	if err != nil {
+		t.Fatalf("remote CreateDispatch dry-run: %v", err)
+	}
+	if proj.ID != 0 {
+		t.Errorf("dry-run dispatch id = %d, want 0 (server-time field)", proj.ID)
+	}
+	if list, _ := p.remote.RepoDispatches(ctx, p.repo); len(list) != 0 {
+		t.Fatalf("dry-run wrote %d dispatch(es), want 0", len(list))
+	}
+
+	// Real create via REST.
+	d, err := p.remote.CreateDispatch(ctx, p.repo, inputs.AgentDispatchInput{
+		TargetAgent: ag.Name,
+		IssueKey:    iss.Key,
+		Mode:        string(model.DispatchModeImplement),
+		Message:     "go",
+	}, false)
+	if err != nil {
+		t.Fatalf("remote CreateDispatch: %v", err)
+	}
+	if d.ID == 0 || d.Status != model.DispatchPending {
+		t.Fatalf("created dispatch = %+v", d)
+	}
+	if d.TargetAgentName != ag.Name || d.IssueKey != iss.Key {
+		t.Fatalf("created dispatch = %+v", d)
+	}
+
+	// RepoDispatches sees it.
+	list, err := p.remote.RepoDispatches(ctx, p.repo)
+	if err != nil {
+		t.Fatalf("remote RepoDispatches: %v", err)
+	}
+	if len(list) != 1 || list[0].ID != d.ID {
+		t.Fatalf("RepoDispatches = %+v, want [%d]", list, d.ID)
 	}
 }
