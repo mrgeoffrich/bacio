@@ -39,25 +39,26 @@ func hasHistoryOp(t *testing.T, s *store.Store, op string) bool {
 	return len(rows) > 0
 }
 
-// TestSettingsLoadsAllStages: the Settings view loads every dispatch
-// stage in lifecycle order with its effective template body.
+// TestSettingsLoadsAllStages: the Settings view loads every registered
+// template (the seeded built-ins on a fresh store) in stable iteration
+// order with its effective template body.
 func TestSettingsLoadsAllStages(t *testing.T) {
 	s, repo := settingsTestRepo(t)
 	sv := newSettingsView(s, repo)
 
-	modes := model.AllDispatchModes()
-	if len(sv.stages) != len(modes) {
-		t.Fatalf("expected %d stages, got %d", len(modes), len(sv.stages))
+	slugs := model.BuiltinTemplateSlugs()
+	if len(sv.stages) != len(slugs) {
+		t.Fatalf("expected %d stages, got %d", len(slugs), len(sv.stages))
 	}
 	for i, st := range sv.stages {
-		if st.mode != modes[i] {
-			t.Fatalf("stage %d: expected mode %q, got %q", i, modes[i], st.mode)
+		if st.slug != slugs[i] {
+			t.Fatalf("stage %d: expected slug %q, got %q", i, slugs[i], st.slug)
 		}
 		if st.body == "" {
-			t.Fatalf("stage %q: expected a non-empty effective body", st.mode)
+			t.Fatalf("stage %q: expected a non-empty effective body", st.slug)
 		}
 		if !st.bodyIsDefault {
-			t.Fatalf("stage %q: a fresh store should report the body as default", st.mode)
+			t.Fatalf("stage %q: a fresh store should report the body as default", st.slug)
 		}
 	}
 }
@@ -69,9 +70,8 @@ func TestSettingsEditBodySaves(t *testing.T) {
 	sv := newSettingsView(s, repo)
 
 	sv.openEditor(0)
-	mode := sv.stages[0].mode
+	mode := model.DispatchMode(sv.stages[0].slug)
 
-	// Type a marker into the body, then save.
 	sv.updateEditor(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("ZZZ-custom")})
 	sv.updateEditor(tea.KeyMsg{Type: tea.KeyCtrlS})
 
@@ -90,12 +90,11 @@ func TestSettingsEditBodySaves(t *testing.T) {
 	}
 }
 
-// TestSettingsResetBody: ctrl+d in the body pane clears the override so
-// the stage falls back to the built-in default, and records a
-// prompt_template.reset row.
+// TestSettingsResetBody: ctrl+r in the body pane reverts a built-in to
+// its embedded default and records a prompt_template.reset row.
 func TestSettingsResetBody(t *testing.T) {
 	s, repo := settingsTestRepo(t)
-	mode := model.AllDispatchModes()[0]
+	mode := model.DispatchMode(model.BuiltinTemplateSlugs()[0])
 	if err := s.SetPromptTemplate(mode, "a custom body"); err != nil {
 		t.Fatalf("seed custom template: %v", err)
 	}
@@ -105,13 +104,13 @@ func TestSettingsResetBody(t *testing.T) {
 		t.Fatal("precondition: stage 0 should start as custom")
 	}
 	sv.openEditor(0)
-	sv.updateEditor(tea.KeyMsg{Type: tea.KeyCtrlD})
+	sv.updateEditor(tea.KeyMsg{Type: tea.KeyCtrlR})
 
 	got, err := s.GetPromptTemplate(mode)
 	if err != nil {
 		t.Fatalf("get template: %v", err)
 	}
-	if got != model.DefaultPromptTemplate(mode) {
+	if got != model.DefaultPromptBodyForBuiltinSlug(string(mode)) {
 		t.Fatalf("expected reset to the built-in default, got %q", got)
 	}
 	if !hasHistoryOp(t, s, "prompt_template.reset") {
@@ -123,29 +122,23 @@ func TestSettingsResetBody(t *testing.T) {
 }
 
 // TestSettingsToggleStateSaves: in the state-gate pane, space toggles
-// the focused state, saving immediately and recording a
-// prompt_states.update audit row.
+// the focused state and writes a prompt_states.update audit row.
 func TestSettingsToggleStateSaves(t *testing.T) {
 	s, repo := settingsTestRepo(t)
 	sv := newSettingsView(s, repo)
 
 	sv.openEditor(0)
-	mode := sv.stages[0].mode
+	mode := model.DispatchMode(sv.stages[0].slug)
 	before, err := s.GetPromptStates(mode)
 	if err != nil {
 		t.Fatalf("get states: %v", err)
 	}
 
-	// tab to the state-gate pane, move the chip cursor onto a state that
-	// is NOT in plan's default gate, and toggle it on. (Toggling off the
-	// last state would clear the override — the store reads an empty gate
-	// as "reset to default" — so toggle a state *on* to get a stable,
-	// non-default change.)
 	sv.updateEditor(tea.KeyMsg{Type: tea.KeyTab})
 	if sv.editPane != paneGate {
 		t.Fatal("expected the state-gate pane to be focused after tab")
 	}
-	sv.updateEditor(tea.KeyMsg{Type: tea.KeyRight}) // cursor: todo -> in_progress
+	sv.updateEditor(tea.KeyMsg{Type: tea.KeyRight})
 	sv.updateEditor(tea.KeyMsg{Type: tea.KeySpace})
 
 	after, err := s.GetPromptStates(mode)
@@ -220,7 +213,7 @@ func TestSettingsValidationErrorSurfaced(t *testing.T) {
 	s, repo := settingsTestRepo(t)
 	sv := newSettingsView(s, repo)
 	sv.openEditor(0)
-	mode := sv.stages[0].mode
+	mode := model.DispatchMode(sv.stages[0].slug)
 
 	tooLong := strings.Repeat("x", (1<<20)+1)
 	sv.ta.SetValue(tooLong)
@@ -232,12 +225,11 @@ func TestSettingsValidationErrorSurfaced(t *testing.T) {
 	if sv.ta.Value() != tooLong {
 		t.Fatal("expected the rejected draft to be preserved in the textarea")
 	}
-	// Nothing should have been persisted.
 	got, err := s.GetPromptTemplate(mode)
 	if err != nil {
 		t.Fatalf("get template: %v", err)
 	}
-	if got != model.DefaultPromptTemplate(mode) {
+	if got != model.DefaultPromptBodyForBuiltinSlug(string(mode)) {
 		t.Fatalf("expected no write on a rejected body, store has %q", got)
 	}
 }

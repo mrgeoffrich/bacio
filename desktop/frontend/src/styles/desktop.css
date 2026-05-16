@@ -273,6 +273,54 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
 }
 .mk-state-chip:disabled { opacity: 0.5; cursor: default; }
 
+/* BACI-31: template list affordances (toolbar with Add / Restore
+   buttons, the inline Add form, per-template Rename/Delete actions, and
+   a small "built-in" / "slug=..." tag in the row header). */
+.mk-tmpl-toolbar {
+  display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0;
+}
+.mk-tmpl-actions {
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+.mk-tmpl-builtin {
+  font-size: 11px; color: var(--fg-3); font-weight: 400;
+}
+.mk-tmpl-slug { font-size: 11px; color: var(--fg-3); font-weight: 400; }
+.mk-tmpl-slug code {
+  font-family: var(--font-mono); font-size: 11px;
+  padding: 1px 4px; border-radius: var(--radius-sm);
+  background: var(--bg-4); color: var(--fg-2);
+}
+.mk-tmpl-adding {
+  padding: 12px; border: 1px dashed var(--border-2); border-radius: var(--radius-md);
+  background: var(--bg-2);
+}
+.mk-tmpl-add-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+}
+.mk-tmpl-add-field {
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 12px; color: var(--fg-2);
+}
+
+/* Small modal used by the Rename / Delete / Restore confirmations. */
+.mk-modal-backdrop {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 100;
+}
+.mk-modal {
+  width: min(420px, 90vw); padding: 18px 20px;
+  background: var(--bg-1); border: 1px solid var(--border-1); border-radius: var(--radius-md);
+  display: flex; flex-direction: column; gap: 10px; box-shadow: var(--shadow-2);
+}
+.mk-modal-title {
+  margin: 0; font-size: 15px; font-weight: 600; color: var(--fg-1);
+}
+.mk-modal-actions {
+  display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px;
+}
+
 /* ============================================================
    Agents screen — a desktop-app addition: a full-page list with a
    card per agent session that expands into its claims + dispatches.

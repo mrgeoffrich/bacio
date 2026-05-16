@@ -940,19 +940,23 @@ export class PRDTO {
 }
 
 /**
- * PromptTemplateDTO is one editable dispatch prompt template, shaped for
- * the desktop Settings panel. Body is the effective template (the user's
- * custom override, or Default when none is set); IsDefault reports
- * whether Body still matches the built-in default. AllowedStates is the
- * effective state-gate — the issue states this stage's prompt is valid
- * to run from — with DefaultStates the built-in set and StatesAreDefault
- * whether AllowedStates still matches it.
+ * PromptTemplateDTO is one editable dispatch prompt template, shaped
+ * for the desktop Settings panel. Slug is the storage / CLI identifier;
+ * Mode is kept as an alias of Slug for backward-compat with frontend
+ * code that still keys by `mode`. Body is the persisted body. Default
+ * is the built-in embedded default for the slug (empty for user-created
+ * templates); IsDefault reports whether Body still matches it.
+ * AllowedStates is the state-gate; DefaultStates is the built-in
+ * default for the slug (empty for user-created); StatesAreDefault
+ * reports whether the gate still matches.
  */
 export class PromptTemplateDTO {
+    "slug": string;
     "mode": string;
     "label": string;
     "body": string;
     "default": string;
+    "isBuiltin": boolean;
     "isDefault": boolean;
     "allowedStates": string[];
     "defaultStates": string[];
@@ -960,6 +964,9 @@ export class PromptTemplateDTO {
 
     /** Creates a new PromptTemplateDTO instance. */
     constructor($$source: Partial<PromptTemplateDTO> = {}) {
+        if (!("slug" in $$source)) {
+            this["slug"] = "";
+        }
         if (!("mode" in $$source)) {
             this["mode"] = "";
         }
@@ -971,6 +978,9 @@ export class PromptTemplateDTO {
         }
         if (!("default" in $$source)) {
             this["default"] = "";
+        }
+        if (!("isBuiltin" in $$source)) {
+            this["isBuiltin"] = false;
         }
         if (!("isDefault" in $$source)) {
             this["isDefault"] = false;
@@ -992,14 +1002,14 @@ export class PromptTemplateDTO {
      * Creates a new PromptTemplateDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): PromptTemplateDTO {
-        const $$createField5_0 = $$createType4;
-        const $$createField6_0 = $$createType4;
+        const $$createField7_0 = $$createType4;
+        const $$createField8_0 = $$createType4;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("allowedStates" in $$parsedSource) {
-            $$parsedSource["allowedStates"] = $$createField5_0($$parsedSource["allowedStates"]);
+            $$parsedSource["allowedStates"] = $$createField7_0($$parsedSource["allowedStates"]);
         }
         if ("defaultStates" in $$parsedSource) {
-            $$parsedSource["defaultStates"] = $$createField6_0($$parsedSource["defaultStates"]);
+            $$parsedSource["defaultStates"] = $$createField8_0($$parsedSource["defaultStates"]);
         }
         return new PromptTemplateDTO($$parsedSource as Partial<PromptTemplateDTO>);
     }

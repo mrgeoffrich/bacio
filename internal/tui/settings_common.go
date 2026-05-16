@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/mrgeoffrich/bacio/internal/model"
+	"github.com/mrgeoffrich/bacio/internal/store"
 	"github.com/mrgeoffrich/bacio/internal/version"
 )
 
@@ -18,48 +19,40 @@ import (
 // read-only by design, so a no-editor Settings tab there is correct,
 // not a compromise.
 
-// stageRow is one dispatch stage's resolved settings, plus the
-// derived "still matches the built-in default" flags the chips render.
+// stageRow is one template's resolved settings, plus the derived
+// "still matches the built-in default" flags the chips render. For
+// user-created (non-built-in) templates the "default" flags are always
+// false — there's nothing to compare against.
 type stageRow struct {
-	mode          model.DispatchMode
+	slug          string
 	label         string
-	body          string // effective (custom override or built-in default)
+	body          string
 	states        []model.State
 	bodyIsDefault bool
 	statesDefault bool
+	isBuiltin     bool
 }
 
-// settingsStageLabels fixes the human label for each dispatch stage,
-// mirroring promptTemplateOrder in desktop/settingsservice.go and
-// promptTemplateLabels in internal/cli/settings.go.
-var settingsStageLabels = map[model.DispatchMode]string{
-	model.DispatchModePlan:      "Planning",
-	model.DispatchModeImplement: "Implementing",
-	model.DispatchModeReview:    "Reviewing",
-	model.DispatchModeShip:      "Shipping",
-	model.DispatchModeFixReview: "Fixing a review",
-}
-
-func settingsStageLabel(mode model.DispatchMode) string {
-	if l, ok := settingsStageLabels[mode]; ok {
-		return l
-	}
-	return string(mode)
-}
-
-// loadStageRows builds the per-stage settings list from the resolved
-// templates + state-gates, in model.AllDispatchModes() lifecycle order.
-func loadStageRows(templates map[model.DispatchMode]string, states map[model.DispatchMode][]model.State) []stageRow {
-	modes := model.AllDispatchModes()
-	rows := make([]stageRow, 0, len(modes))
-	for _, mode := range modes {
+// loadStageRowsFromTemplates builds the per-template Settings list from
+// the canonical store iteration order. This is the new shape that
+// supports arbitrary templates; the older loadStageRows entry point
+// from a slug→body / slug→states pair of maps is gone — every caller
+// uses store.ListPromptTemplates directly.
+func loadStageRowsFromTemplates(templates []*store.PromptTemplate) []stageRow {
+	rows := make([]stageRow, 0, len(templates))
+	for _, t := range templates {
+		label := t.Name
+		if label == "" {
+			label = t.Slug
+		}
 		rows = append(rows, stageRow{
-			mode:          mode,
-			label:         settingsStageLabel(mode),
-			body:          templates[mode],
-			states:        states[mode],
-			bodyIsDefault: templates[mode] == model.DefaultPromptTemplate(mode),
-			statesDefault: sameStates(states[mode], model.DefaultPromptStates(mode)),
+			slug:          t.Slug,
+			label:         label,
+			body:          t.Body,
+			states:        append([]model.State(nil), t.AllowedStates...),
+			bodyIsDefault: t.IsBuiltin && t.Body == model.DefaultPromptBodyForBuiltinSlug(t.Slug),
+			statesDefault: t.IsBuiltin && sameStates(t.AllowedStates, model.DefaultPromptStatesForBuiltinSlug(t.Slug)),
+			isBuiltin:     t.IsBuiltin,
 		})
 	}
 	return rows

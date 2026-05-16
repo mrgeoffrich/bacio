@@ -11,16 +11,14 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
 
-// dispatchModeChoices is the step-1 list: the label shown and the mode
-// it maps to, plus a one-line description of what that mode tells the
-// agent to do.
-var dispatchModeChoices = []struct {
+// dispatchModeChoice is one row of the mode-picker step: the label
+// shown, the slug stored, and the body so the picker preview can show
+// what would be sent. Built today from the store's prompt_templates
+// table, filtered by the focused issue's state-gate.
+type dispatchModeChoice struct {
 	Label string
 	Mode  model.DispatchMode
 	Desc  string
-}{
-	{"Plan", model.DispatchModePlan, "produce an implementation plan, don't write code"},
-	{"Implement", model.DispatchModeImplement, "build the issue end-to-end"},
 }
 
 // maxDispatchNote bounds the free-form note typed in the picker. The
@@ -28,8 +26,9 @@ var dispatchModeChoices = []struct {
 const maxDispatchNote = 1000
 
 // openDispatchPicker starts the "send to agent" flow for the focused
-// card. It only acts on todo issues — the keybind is otherwise a no-op
-// with a one-line footer hint.
+// card. The mode-picker list is filtered to templates whose
+// state-gate contains the focused issue's current state; if no template
+// qualifies the keybind is a no-op with a footer hint.
 func (b *boardView) openDispatchPicker() {
 	iss := b.currentIssue()
 	if iss == nil {
@@ -43,8 +42,13 @@ func (b *boardView) openDispatchPicker() {
 		b.err = fmt.Errorf("send to agent: %s is already waiting for an agent to claim it", iss.Key)
 		return
 	}
-	if iss.State != model.StateTodo {
-		b.err = fmt.Errorf("send to agent: only todo issues can be dispatched")
+	modes, err := availableDispatchModes(b.store, iss.State)
+	if err != nil {
+		b.err = err
+		return
+	}
+	if len(modes) == 0 {
+		b.err = fmt.Errorf("send to agent: no prompt template is valid for a %s issue (configure one in Settings)", iss.State)
 		return
 	}
 	allSessions, err := b.store.ListAgentSessions(store.AgentSessionFilter{
@@ -81,12 +85,54 @@ func (b *boardView) openDispatchPicker() {
 	b.dispatchIssue = iss
 	b.dispatchSessions = sessions
 	b.dispatchBusy = busy
+	b.dispatchModes = modes
 	b.dispatchPicker = true
 	b.dispatchStep = 0
 	b.dispatchRow = b.firstSelectableDispatchRow()
 	b.dispatchAgentRow = 0
 	b.dispatchMode = ""
 	b.dispatchNote = ""
+}
+
+// availableDispatchModes returns the prompt templates whose state-gate
+// contains issueState — i.e. the ones the user could legitimately
+// dispatch the focused issue against. Templates with an empty gate
+// (CLI-only) are deliberately excluded.
+func availableDispatchModes(s *store.Store, issueState model.State) ([]dispatchModeChoice, error) {
+	tmpls, err := s.ListPromptTemplates()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]dispatchModeChoice, 0, len(tmpls))
+	for _, t := range tmpls {
+		matches := false
+		for _, st := range t.AllowedStates {
+			if st == issueState {
+				matches = true
+				break
+			}
+		}
+		if !matches {
+			continue
+		}
+		label := t.Name
+		if label == "" {
+			label = t.Slug
+		}
+		desc := strings.TrimSpace(t.Body)
+		if i := strings.IndexAny(desc, "\r\n"); i > 0 {
+			desc = desc[:i]
+		}
+		if len(desc) > 72 {
+			desc = desc[:69] + "…"
+		}
+		out = append(out, dispatchModeChoice{
+			Label: label,
+			Mode:  model.DispatchMode(t.Slug),
+			Desc:  desc,
+		})
+	}
+	return out, nil
 }
 
 // firstSelectableDispatchRow returns the index of the first non-busy
@@ -163,7 +209,7 @@ func (b *boardView) dispatchRowBusy(r int) bool {
 func (b *boardView) updateDispatchModeStep(key tea.KeyMsg) {
 	switch key.String() {
 	case "j", "down":
-		if b.dispatchRow < len(dispatchModeChoices)-1 {
+		if b.dispatchRow < len(b.dispatchModes)-1 {
 			b.dispatchRow++
 		}
 	case "k", "up":
@@ -174,7 +220,10 @@ func (b *boardView) updateDispatchModeStep(key tea.KeyMsg) {
 		b.dispatchStep = 0
 		b.dispatchRow = b.dispatchAgentRow
 	case "enter", " ":
-		b.dispatchMode = dispatchModeChoices[b.dispatchRow].Mode
+		if b.dispatchRow < 0 || b.dispatchRow >= len(b.dispatchModes) {
+			return
+		}
+		b.dispatchMode = b.dispatchModes[b.dispatchRow].Mode
 		b.dispatchStep = 2
 		b.dispatchRow = 0
 	}
@@ -334,11 +383,14 @@ func (b *boardView) viewDispatchPicker(width, height int) string {
 		if b.dispatchAgentRow < len(b.dispatchSessions) {
 			agent = agentLabel(b.dispatchSessions[b.dispatchAgentRow])
 		}
-		rows = append(rows, boldStyle.Render("Send "+issueKey+" to "+agent+" → pick a mode"), "")
-		for i, c := range dispatchModeChoices {
-			label := fmt.Sprintf("%-12s %s", c.Label, mutedStyle.Render(c.Desc))
+		rows = append(rows, boldStyle.Render("Send "+issueKey+" to "+agent+" → pick a template"), "")
+		if len(b.dispatchModes) == 0 {
+			rows = append(rows, mutedStyle.Italic(true).Render("(no template is valid for this issue's state — esc to close)"))
+		}
+		for i, c := range b.dispatchModes {
+			label := fmt.Sprintf("%-16s %s", truncate(c.Label, 16), mutedStyle.Render(c.Desc))
 			if i == b.dispatchRow {
-				label = fmt.Sprintf("%-12s %s", c.Label, c.Desc)
+				label = fmt.Sprintf("%-16s %s", truncate(c.Label, 16), c.Desc)
 				rows = append(rows, selStyle.Render(label))
 			} else {
 				rows = append(rows, rowStyle.Render(label))

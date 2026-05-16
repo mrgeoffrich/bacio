@@ -74,10 +74,14 @@ var Registry = []Entry{
 	{"agent.dispatch", "Queue a unit of work (an issue, an instruction) for an agent identity and/or a session.", typeOf[inputs.AgentDispatchInput](), inputs.ExampleAgentDispatch},
 	{"agent.ack", "Acknowledge a dispatch and record an optional reply note.", typeOf[inputs.AgentAckInput](), inputs.ExampleAgentAck},
 
-	{"settings.template.set", "Set a custom dispatch prompt template for a job stage.", typeOf[inputs.SettingsTemplateSetInput](), inputs.ExampleSettingsTemplateSet},
-	{"settings.template.reset", "Reset a dispatch prompt template to its built-in default.", typeOf[inputs.SettingsTemplateResetInput](), inputs.ExampleSettingsTemplateReset},
-	{"settings.template.states.set", "Set the issue states a job stage's dispatch prompt is valid to run from.", typeOf[inputs.SettingsTemplateStatesSetInput](), inputs.ExampleSettingsTemplateStatesSet},
-	{"settings.template.states.reset", "Reset a job stage's prompt state-gate to its built-in default.", typeOf[inputs.SettingsTemplateStatesResetInput](), inputs.ExampleSettingsTemplateStatesReset},
+	{"settings.template.set", "Set a dispatch prompt template's body.", typeOf[inputs.SettingsTemplateSetInput](), inputs.ExampleSettingsTemplateSet},
+	{"settings.template.reset", "Reset a built-in dispatch prompt template's body to its embedded default.", typeOf[inputs.SettingsTemplateResetInput](), inputs.ExampleSettingsTemplateReset},
+	{"settings.template.states.set", "Set the issue states a dispatch prompt template is valid to run from.", typeOf[inputs.SettingsTemplateStatesSetInput](), inputs.ExampleSettingsTemplateStatesSet},
+	{"settings.template.states.reset", "Reset a built-in template's state-gate to its embedded default.", typeOf[inputs.SettingsTemplateStatesResetInput](), inputs.ExampleSettingsTemplateStatesReset},
+	{"settings.template.add", "Create a new dispatch prompt template (slug, name, body, state-gate).", typeOf[inputs.SettingsTemplateAddInput](), inputs.ExampleSettingsTemplateAdd},
+	{"settings.template.rename", "Rename a dispatch prompt template — slug change cascades to agent_dispatches.mode.", typeOf[inputs.SettingsTemplateRenameInput](), inputs.ExampleSettingsTemplateRename},
+	{"settings.template.rm", "Delete a dispatch prompt template (historical dispatch rows keep the slug verbatim).", typeOf[inputs.SettingsTemplateRmInput](), inputs.ExampleSettingsTemplateRm},
+	{"settings.template.restore-defaults", "Re-seed any missing built-in dispatch prompt templates from the embedded defaults (idempotent).", typeOf[inputs.SettingsTemplateRestoreDefaultsInput](), inputs.ExampleSettingsTemplateRestoreDefaults},
 }
 
 // repoRmDescription is the LLM-targeted warning text published via

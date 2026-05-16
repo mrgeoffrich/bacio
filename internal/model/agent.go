@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -210,49 +211,102 @@ func ParseDispatchStatus(s string) (DispatchStatus, error) {
 	return "", fmt.Errorf("unknown dispatch status %q (valid: %s)", s, strings.Join(names, ", "))
 }
 
-// DispatchMode marks the intent of a dispatch — one per stage of working
-// a job. plan: investigate the issue and produce an implementation plan,
-// don't change code. implement: carry the work through end-to-end.
-// review: assess finished work, don't change code. ship: final checks,
-// commit, open/update the PR. fix_review: address review feedback and
-// push the fixes. "" = untyped (the pre-Mode default; delivery treats
-// it as unspecified).
+// DispatchMode is the slug of the prompt template a dispatch was queued
+// against — for the built-in templates that ship with bacio it's one of
+// "plan", "implement", "review", "ship", or "fix_review"; for a user-
+// created template it's whatever the user named it. "" = untyped (the
+// pre-Mode default; delivery treats it as unspecified). The mode is the
+// per-dispatch snapshot of which template was used; it deliberately
+// outlives the template (a deleted template's historical dispatches
+// keep the slug verbatim — renderers should treat an unrecognised slug
+// as "removed", not error out). The shape rule is a slug
+// (^[a-z0-9][a-z0-9-_]*$) capped at 60 chars; the registered set lives
+// in the prompt_templates store table, not this enum.
 type DispatchMode string
 
+// Built-in template slugs that ship with bacio. They have embedded
+// default bodies at prompttemplates/<slug>.txt and entries in
+// builtinPromptStates / builtinTemplateLabels. Users can edit or delete
+// any of them; `bacio settings template restore-defaults` re-seeds the
+// missing ones. Order matches a job's lifecycle, which is also the
+// seed order so the built-ins lead the list on a fresh install.
 const (
-	DispatchModePlan      DispatchMode = "plan"
-	DispatchModeImplement DispatchMode = "implement"
-	DispatchModeReview    DispatchMode = "review"
-	DispatchModeShip      DispatchMode = "ship"
-	DispatchModeFixReview DispatchMode = "fix_review"
+	BuiltinTemplatePlan      = "plan"
+	BuiltinTemplateImplement = "implement"
+	BuiltinTemplateReview    = "review"
+	BuiltinTemplateShip      = "ship"
+	BuiltinTemplateFixReview = "fix_review"
 )
 
-var allDispatchModes = []DispatchMode{
-	DispatchModePlan, DispatchModeImplement, DispatchModeReview,
-	DispatchModeShip, DispatchModeFixReview,
+// DispatchModePlan etc. are deprecated aliases — kept so older callers
+// that still reference the typed constants keep compiling. New code
+// should use the BuiltinTemplate* string constants above and the
+// runtime slug values from the prompt_templates table.
+const (
+	DispatchModePlan      DispatchMode = BuiltinTemplatePlan
+	DispatchModeImplement DispatchMode = BuiltinTemplateImplement
+	DispatchModeReview    DispatchMode = BuiltinTemplateReview
+	DispatchModeShip      DispatchMode = BuiltinTemplateShip
+	DispatchModeFixReview DispatchMode = BuiltinTemplateFixReview
+)
+
+// builtinTemplateSlugs lists the bundled built-in template slugs in
+// canonical lifecycle order — used by the migration's first-time seed
+// step and by `restore-defaults` to know what to re-create.
+var builtinTemplateSlugs = []string{
+	BuiltinTemplatePlan, BuiltinTemplateImplement, BuiltinTemplateReview,
+	BuiltinTemplateShip, BuiltinTemplateFixReview,
 }
 
-func AllDispatchModes() []DispatchMode {
-	return append([]DispatchMode(nil), allDispatchModes...)
+// BuiltinTemplateSlugs returns the bundled template slugs in canonical
+// lifecycle order. Copy of the package-private list so callers can
+// iterate without mutating shared state.
+func BuiltinTemplateSlugs() []string {
+	return append([]string(nil), builtinTemplateSlugs...)
 }
 
-// ParseDispatchMode accepts "" (untyped — valid) or one of the canonical
-// stage names, and rejects anything else.
+// builtinTemplateLabels gives each built-in slug a human display label
+// — used by the seed step (the table's `name` column) and as a fallback
+// when a UI surfaces a slug whose stored row is missing.
+var builtinTemplateLabels = map[string]string{
+	BuiltinTemplatePlan:      "Planning",
+	BuiltinTemplateImplement: "Implementing",
+	BuiltinTemplateReview:    "Reviewing",
+	BuiltinTemplateShip:      "Shipping",
+	BuiltinTemplateFixReview: "Fixing a review",
+}
+
+// BuiltinTemplateLabel returns the human display label for a built-in
+// template slug, or "" if the slug isn't a built-in. Callers should
+// fall back to the row's stored Name (or the slug itself) when this
+// returns empty.
+func BuiltinTemplateLabel(slug string) string {
+	return builtinTemplateLabels[slug]
+}
+
+// dispatchModeSlugRule allows a slightly broader shape than feature
+// slugs: kebab- AND snake-case both work, so the built-in `fix_review`
+// is a valid slug. Length cap is enforced separately by validators.
+var dispatchModeSlugRule = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+
+// ParseDispatchMode accepts "" (untyped — valid) or any slug-shaped
+// string ([a-z0-9][a-z0-9_-]*, max 60 chars). It does NOT check whether
+// the slug is registered in the prompt_templates table — that's a store
+// concern (and a dispatch may legitimately carry a slug for a template
+// the user has since deleted). Renderers should treat an unrecognised
+// but slug-shaped value as "removed", not error out.
 func ParseDispatchMode(s string) (DispatchMode, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return "", nil
 	}
-	for _, m := range allDispatchModes {
-		if string(m) == s {
-			return m, nil
-		}
+	if len(s) > 60 {
+		return "", fmt.Errorf("dispatch mode %q is too long (max 60 chars)", s)
 	}
-	names := make([]string, len(allDispatchModes))
-	for i, m := range allDispatchModes {
-		names[i] = string(m)
+	if !dispatchModeSlugRule.MatchString(s) {
+		return "", fmt.Errorf("dispatch mode %q must be a slug (lowercase letters, digits, hyphens, underscores; starting with a letter or digit)", s)
 	}
-	return "", fmt.Errorf("unknown dispatch mode %q (valid: %s, or empty)", s, strings.Join(names, ", "))
+	return DispatchMode(s), nil
 }
 
 // PromptTemplateTokens lists the placeholder tokens RenderPromptTemplate
@@ -267,56 +321,77 @@ var PromptTemplateTokens = []string{"issue_id", "issue_title", "repo_prefix"}
 //go:embed prompttemplates/*.txt
 var promptTemplateFS embed.FS
 
-// defaultPromptTemplates is the per-stage built-in template, loaded once
-// from promptTemplateFS at package init.
-var defaultPromptTemplates = loadDefaultPromptTemplates()
+// defaultPromptBodies is the per-slug built-in template body, loaded
+// once from promptTemplateFS at package init. Keyed by built-in slug
+// (a non-built-in slug has no entry and returns "" via the lookups).
+var defaultPromptBodies = loadDefaultPromptBodies()
 
-// loadDefaultPromptTemplates reads prompttemplates/<mode>.txt for every
-// dispatch stage. A missing or blank file is a packaging error, so it
+// loadDefaultPromptBodies reads prompttemplates/<slug>.txt for every
+// built-in slug. A missing or blank file is a packaging error, so it
 // panics — the files are embedded, so this can only fail at build time.
-func loadDefaultPromptTemplates() map[DispatchMode]string {
-	out := make(map[DispatchMode]string, len(allDispatchModes))
-	for _, m := range allDispatchModes {
-		b, err := promptTemplateFS.ReadFile("prompttemplates/" + string(m) + ".txt")
+func loadDefaultPromptBodies() map[string]string {
+	out := make(map[string]string, len(builtinTemplateSlugs))
+	for _, slug := range builtinTemplateSlugs {
+		b, err := promptTemplateFS.ReadFile("prompttemplates/" + slug + ".txt")
 		if err != nil {
-			panic(fmt.Sprintf("model: missing built-in prompt template for dispatch mode %q: %v", m, err))
+			panic(fmt.Sprintf("model: missing built-in prompt template for slug %q: %v", slug, err))
 		}
 		t := strings.TrimRight(string(b), "\r\n")
 		if strings.TrimSpace(t) == "" {
-			panic(fmt.Sprintf("model: built-in prompt template for dispatch mode %q is empty", m))
+			panic(fmt.Sprintf("model: built-in prompt template for slug %q is empty", slug))
 		}
-		out[m] = t
+		out[slug] = t
 	}
 	return out
 }
 
-// DefaultPromptTemplate returns the built-in dispatch instruction
-// template for a stage. These are the shipped defaults users edit from;
-// the text lives in internal/model/prompttemplates/<mode>.txt. An
-// untyped or unknown mode has no template (returns "").
-func DefaultPromptTemplate(mode DispatchMode) string {
-	return defaultPromptTemplates[mode]
+// DefaultPromptBodyForBuiltinSlug returns the embedded default body for
+// a built-in template slug, or "" for a non-built-in slug. Used by the
+// store migration's seed step and by `bacio settings template reset`
+// (which is only meaningful for built-ins).
+func DefaultPromptBodyForBuiltinSlug(slug string) string {
+	return defaultPromptBodies[slug]
 }
 
-// defaultPromptStates is the built-in "this prompt is valid to run from
-// these issue states" gate, per dispatch stage. It mirrors a job's
+// DefaultPromptTemplate is a legacy alias for
+// DefaultPromptBodyForBuiltinSlug, kept so older typed-DispatchMode
+// callers (TUI / desktop seed paths, audit-row comparisons) keep
+// compiling during the BACI-31 transition.
+//
+// Deprecated: use DefaultPromptBodyForBuiltinSlug with a slug string.
+func DefaultPromptTemplate(mode DispatchMode) string {
+	return DefaultPromptBodyForBuiltinSlug(string(mode))
+}
+
+// builtinPromptStates is the built-in "this prompt is valid to run from
+// these issue states" gate, per built-in slug. It mirrors a job's
 // lifecycle: planning/implementing start from a todo issue; reviewing,
 // shipping, and fixing-a-review happen once the work is in review.
-// Users override these per-stage; the override lives in app_settings.
-var defaultPromptStates = map[DispatchMode][]State{
-	DispatchModePlan:      {StateTodo},
-	DispatchModeImplement: {StateTodo},
-	DispatchModeReview:    {StateInReview},
-	DispatchModeShip:      {StateInReview},
-	DispatchModeFixReview: {StateInReview},
+// Users override these per-template; the override lives in the
+// prompt_templates table.
+var builtinPromptStates = map[string][]State{
+	BuiltinTemplatePlan:      {StateTodo},
+	BuiltinTemplateImplement: {StateTodo},
+	BuiltinTemplateReview:    {StateInReview},
+	BuiltinTemplateShip:      {StateInReview},
+	BuiltinTemplateFixReview: {StateInReview},
 }
 
-// DefaultPromptStates returns the built-in set of issue states a
-// dispatch stage's prompt is valid to run from. An untyped or unknown
-// mode has no gate (returns an empty slice). The returned slice is a
-// copy — callers may mutate it freely.
+// DefaultPromptStatesForBuiltinSlug returns the built-in set of issue
+// states a built-in template's prompt is valid to run from. A non-
+// built-in slug has no entry (returns an empty slice). The returned
+// slice is a copy — callers may mutate it freely.
+func DefaultPromptStatesForBuiltinSlug(slug string) []State {
+	return append([]State(nil), builtinPromptStates[slug]...)
+}
+
+// DefaultPromptStates is a legacy alias for
+// DefaultPromptStatesForBuiltinSlug, kept so older typed-DispatchMode
+// callers keep compiling during the BACI-31 transition.
+//
+// Deprecated: use DefaultPromptStatesForBuiltinSlug with a slug string.
 func DefaultPromptStates(mode DispatchMode) []State {
-	return append([]State(nil), defaultPromptStates[mode]...)
+	return DefaultPromptStatesForBuiltinSlug(string(mode))
 }
 
 // RenderPromptTemplate substitutes {{token}} placeholders in tmpl from

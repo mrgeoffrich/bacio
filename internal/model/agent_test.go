@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -19,8 +20,16 @@ func TestParseDispatchMode(t *testing.T) {
 		{"ship", DispatchModeShip, false},
 		{"fix_review", DispatchModeFixReview, false},
 		{" plan ", DispatchModePlan, false},
-		{"refactor", "", true},
-		{"Plan", "", true}, // case-sensitive, like ParseDispatchStatus
+		// User-created slugs validate too (the slug-shape check is
+		// orthogonal to whether the template exists — a deleted
+		// template's historical dispatch keeps the slug verbatim).
+		{"spike", "spike", false},
+		{"post-mortem", "post-mortem", false},
+		// Shape violations.
+		{"Plan", "", true},                  // uppercase
+		{"plan!", "", true},                 // punctuation
+		{"-plan", "", true},                 // leading hyphen
+		{strings.Repeat("a", 61), "", true}, // too long
 	}
 	for _, c := range cases {
 		got, err := ParseDispatchMode(c.in)
@@ -88,14 +97,18 @@ func TestRenderPromptTemplate(t *testing.T) {
 	}
 }
 
-func TestDefaultPromptTemplate(t *testing.T) {
-	for _, m := range AllDispatchModes() {
-		if DefaultPromptTemplate(m) == "" {
-			t.Errorf("DefaultPromptTemplate(%q) is empty — every stage needs a shipped default", m)
+func TestDefaultPromptBodyForBuiltinSlug(t *testing.T) {
+	for _, slug := range BuiltinTemplateSlugs() {
+		if DefaultPromptBodyForBuiltinSlug(slug) == "" {
+			t.Errorf("DefaultPromptBodyForBuiltinSlug(%q) is empty — every built-in needs a shipped default", slug)
 		}
 	}
-	if got := DefaultPromptTemplate(""); got != "" {
-		t.Errorf("DefaultPromptTemplate(\"\") = %q, want empty", got)
+	// User-created slugs (or empty / unknown) have no embedded body.
+	if got := DefaultPromptBodyForBuiltinSlug(""); got != "" {
+		t.Errorf("DefaultPromptBodyForBuiltinSlug(\"\") = %q, want empty", got)
+	}
+	if got := DefaultPromptBodyForBuiltinSlug("spike"); got != "" {
+		t.Errorf("DefaultPromptBodyForBuiltinSlug(\"spike\") = %q, want empty (not a built-in)", got)
 	}
 }
 

@@ -156,22 +156,28 @@ func renderText(w io.Writer, v any) error {
 
 func printPromptTemplate(w io.Writer, t *promptTemplateView) {
 	origin := "custom"
-	if t.IsDefault {
-		origin = "default"
+	if t.IsBuiltin {
+		origin = "built-in"
+		if t.IsDefault {
+			origin = "built-in (default body)"
+		}
 	}
-	fmt.Fprintf(w, "%-11s %s  (%s)\n", t.Mode, t.Label, origin)
+	fmt.Fprintf(w, "%-16s %s  (%s)\n", t.Slug, t.Label, origin)
 	fmt.Fprintf(w, "\n%s\n", t.Body)
-	if !t.IsDefault {
+	if t.IsBuiltin && !t.IsDefault {
 		fmt.Fprintf(w, "\nDefault:\n%s\n", t.Default)
 	}
 }
 
 func printPromptTemplateSummary(w io.Writer, t *promptTemplateSummary) {
 	origin := "custom"
-	if t.IsDefault {
-		origin = "default"
+	if t.IsBuiltin {
+		origin = "built-in"
+		if t.IsDefault {
+			origin = "built-in (default body)"
+		}
 	}
-	fmt.Fprintf(w, "%-11s %-18s (%s)  %s\n", t.Mode, t.Label, origin, t.Body)
+	fmt.Fprintf(w, "%-16s %-20s (%s)  %s\n", t.Slug, t.Label, origin, t.Body)
 }
 
 func printRepo(w io.Writer, r *model.Repo) error {

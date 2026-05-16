@@ -3,9 +3,11 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -13,17 +15,23 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
 
-// settingsView is the Settings tab: a view over bacio's global app
-// settings. v1 covers the dispatch prompt configuration — the same
-// per-stage template body + state-gate the desktop Settings panel and
-// `bacio settings template` edit. It is structured so a future global
-// setting can be added as another section.
+// settingsView is the Settings tab: the user's editable set of dispatch
+// prompt templates. Each row is one template (slug + name + body +
+// state-gate); the user can add, rename, delete, and restore the
+// built-in defaults.
 //
-// Two layers: a stage list (base layout) and a per-stage editor overlay
-// with two panes — a textarea for the template body and a chip row for
-// the state-gate. The view is store-backed (like every other tab) and
-// records its own audit rows via recordTUIOp, mirroring the op names
-// the localClient writes for the CLI/desktop paths.
+// Layers:
+//   - Base list (stage list + chips).
+//   - Per-template editor overlay (body textarea + state-gate chips).
+//   - Add-template overlay (slug + name + body + state-gate).
+//   - Rename overlay (slug + name).
+//   - Delete confirm + restore-defaults confirm overlays.
+//
+// The view is store-backed (like every other tab) and records its own
+// audit rows via recordTUIOp, mirroring the op names the localClient
+// writes (template.create / .delete / .rename / .restore_defaults plus
+// the existing prompt_template.update / .reset and
+// prompt_states.update / .reset).
 //
 // This is the native build. The wasm demo gets a read-only stub
 // (settings_wasm.go) because bubbles/textarea has no js/wasm build —
@@ -31,8 +39,9 @@ import (
 type settingsView struct {
 	store *store.Store
 	// repo is carried for constructor-signature parity with the other
-	// views; prompt settings are global (app_settings) so it is unused
-	// by the view's logic.
+	// views; templates are global (the prompt_templates table is local-
+	// only and has no per-repo scope) so it is unused by the view's
+	// logic.
 	repo  *model.Repo
 	actor string
 
@@ -40,13 +49,23 @@ type settingsView struct {
 	cursor int
 	err    error
 
-	// editor sub-state — active while editing is true.
-	editing  bool
-	editIdx  int
-	editPane settingsPane
-	ta       textarea.Model
-	gateCur  int
-	editErr  error
+	// One of the *Mode flags below is set while an overlay is open.
+	editing       bool
+	adding        bool
+	renaming      bool
+	confirmDelete bool
+	confirmReset  bool
+
+	// Per-overlay sub-state.
+	editIdx   int
+	editPane  settingsPane
+	ta        textarea.Model
+	slugInput textinput.Model
+	nameInput textinput.Model
+	gateStates map[model.State]bool
+	gateCur    int
+	addFocus   addField
+	editErr    error
 }
 
 type settingsPane int
@@ -56,27 +75,32 @@ const (
 	paneGate
 )
 
+// addField labels which field has focus on the add-template overlay.
+type addField int
+
+const (
+	addFieldSlug addField = iota
+	addFieldName
+	addFieldBody
+	addFieldGate
+)
+
 func newSettingsView(s *store.Store, repo *model.Repo) *settingsView {
 	v := &settingsView{store: s, repo: repo, actor: tuiActor()}
 	v.reload()
 	return v
 }
 
-// reload rebuilds the stage list from the store: effective body +
-// state-gate per stage, in model.AllDispatchModes() lifecycle order.
+// reload rebuilds the stage list from the store's canonical template
+// iteration order.
 func (s *settingsView) reload() {
-	templates, err := s.store.AllPromptTemplates()
-	if err != nil {
-		s.err = err
-		return
-	}
-	states, err := s.store.AllPromptStates()
+	tmpls, err := s.store.ListPromptTemplates()
 	if err != nil {
 		s.err = err
 		return
 	}
 	s.err = nil
-	s.stages = loadStageRows(templates, states)
+	s.stages = loadStageRowsFromTemplates(tmpls)
 	if s.cursor >= len(s.stages) {
 		s.cursor = max(0, len(s.stages)-1)
 	}
@@ -89,63 +113,100 @@ func (s *settingsView) refreshStage(idx int) {
 	if idx < 0 || idx >= len(s.stages) {
 		return
 	}
-	mode := s.stages[idx].mode
-	body, err := s.store.GetPromptTemplate(mode)
+	slug := s.stages[idx].slug
+	t, err := s.store.GetPromptTemplateBySlug(slug)
 	if err != nil {
 		s.editErr = err
 		return
 	}
-	states, err := s.store.GetPromptStates(mode)
-	if err != nil {
-		s.editErr = err
-		return
+	label := t.Name
+	if label == "" {
+		label = t.Slug
 	}
-	s.stages[idx].body = body
-	s.stages[idx].states = states
-	s.stages[idx].bodyIsDefault = body == model.DefaultPromptTemplate(mode)
-	s.stages[idx].statesDefault = sameStates(states, model.DefaultPromptStates(mode))
+	s.stages[idx] = stageRow{
+		slug:          t.Slug,
+		label:         label,
+		body:          t.Body,
+		states:        append([]model.State(nil), t.AllowedStates...),
+		bodyIsDefault: t.IsBuiltin && t.Body == model.DefaultPromptBodyForBuiltinSlug(t.Slug),
+		statesDefault: t.IsBuiltin && sameStates(t.AllowedStates, model.DefaultPromptStatesForBuiltinSlug(t.Slug)),
+		isBuiltin:     t.IsBuiltin,
+	}
 }
 
 func (s *settingsView) Init() tea.Cmd  { return nil }
 func (s *settingsView) Status() string { return "" }
 
-func (s *settingsView) HasOverlay() bool { return s.editing }
+func (s *settingsView) HasOverlay() bool {
+	return s.editing || s.adding || s.renaming || s.confirmDelete || s.confirmReset
+}
 
 func (s *settingsView) CloseOverlay() {
 	s.editing = false
+	s.adding = false
+	s.renaming = false
+	s.confirmDelete = false
+	s.confirmReset = false
 	s.editErr = nil
 	s.ta.Blur()
+	s.slugInput.Blur()
+	s.nameInput.Blur()
 }
 
-// CapturesInput is true only while the editor's body textarea is
-// focused — that's the one window where the shell must yield `q` and
-// the digit keys so they can be typed into the template. With the
-// state-gate pane focused, q/digits behave normally (the editor is an
-// overlay, so a digit-switch closes it cleanly via CloseOverlay).
+// CapturesInput is true only while a focused textarea / textinput is
+// active — those are the windows where the shell must yield `q` and the
+// digit keys so they can be typed. Confirmation overlays don't capture
+// input (they only watch for y/n/esc).
 func (s *settingsView) CapturesInput() bool {
-	return s.editing && s.editPane == paneBody
+	switch {
+	case s.editing && s.editPane == paneBody:
+		return true
+	case s.adding:
+		return s.addFocus == addFieldSlug || s.addFocus == addFieldName || s.addFocus == addFieldBody
+	case s.renaming:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *settingsView) Breadcrumb() string {
-	if s.editing && s.editIdx < len(s.stages) {
+	switch {
+	case s.editing && s.editIdx < len(s.stages):
 		return s.stages[s.editIdx].label
+	case s.adding:
+		return "New template"
+	case s.renaming && s.editIdx < len(s.stages):
+		return "Rename " + s.stages[s.editIdx].label
+	case s.confirmDelete && s.editIdx < len(s.stages):
+		return "Delete " + s.stages[s.editIdx].label + "?"
+	case s.confirmReset:
+		return "Restore built-in templates?"
 	}
 	return ""
 }
 
 func (s *settingsView) Help() string {
-	if !s.editing {
-		return "j/k move · enter edit stage · r reload · q quit"
+	switch {
+	case s.editing && s.editPane == paneBody:
+		return "type to edit · ctrl+s save · ctrl+r reset built-in · tab → state-gate · esc close"
+	case s.editing:
+		return "h/l move · space toggle (saves) · ctrl+r reset built-in · tab → body · esc close"
+	case s.adding:
+		return "tab cycle fields · ctrl+s save · esc cancel"
+	case s.renaming:
+		return "tab toggle slug/name · ctrl+s save · esc cancel"
+	case s.confirmDelete:
+		return "y delete · n cancel · esc cancel"
+	case s.confirmReset:
+		return "y restore · n cancel · esc cancel"
 	}
-	if s.editPane == paneBody {
-		return "type to edit · ctrl+s save · ctrl+d reset · tab → state-gate · esc close"
-	}
-	return "h/l move · space toggle (saves) · ctrl+d reset · tab → body · esc close"
+	return "j/k move · enter edit · a add · r rename · d delete · R restore built-ins · q quit"
 }
 
 func (s *settingsView) Update(msg tea.Msg) tea.Cmd {
-	if s.editing {
-		return s.updateEditor(msg)
+	if s.HasOverlay() {
+		return s.updateOverlay(msg)
 	}
 	key, ok := msg.(tea.KeyMsg)
 	if !ok {
@@ -168,15 +229,38 @@ func (s *settingsView) Update(msg tea.Msg) tea.Cmd {
 		}
 	case "enter":
 		return s.openEditor(s.cursor)
+	case "a":
+		return s.openAdd()
 	case "r":
+		return s.openRename(s.cursor)
+	case "d":
+		s.openDeleteConfirm(s.cursor)
+	case "R":
+		s.openRestoreConfirm()
+	case "ctrl+r":
 		s.reload()
 	}
 	return nil
 }
 
-// openEditor opens the per-stage editor overlay on the given stage,
-// seeding the textarea with the stage's effective body and focusing
-// the body pane. The returned Cmd is the textarea's cursor-blink tick.
+func (s *settingsView) updateOverlay(msg tea.Msg) tea.Cmd {
+	switch {
+	case s.editing:
+		return s.updateEditor(msg)
+	case s.adding:
+		return s.updateAdd(msg)
+	case s.renaming:
+		return s.updateRename(msg)
+	case s.confirmDelete:
+		return s.updateDeleteConfirm(msg)
+	case s.confirmReset:
+		return s.updateRestoreConfirm(msg)
+	}
+	return nil
+}
+
+// openEditor opens the per-template editor overlay, seeding the
+// textarea with the template's current body and focusing the body pane.
 func (s *settingsView) openEditor(idx int) tea.Cmd {
 	if idx < 0 || idx >= len(s.stages) {
 		return nil
@@ -200,7 +284,6 @@ func (s *settingsView) openEditor(idx int) tea.Cmd {
 func (s *settingsView) updateEditor(msg tea.Msg) tea.Cmd {
 	key, isKey := msg.(tea.KeyMsg)
 	if !isKey {
-		// Non-key messages (cursor blink) only matter to the textarea.
 		if s.editPane == paneBody {
 			var cmd tea.Cmd
 			s.ta, cmd = s.ta.Update(msg)
@@ -209,7 +292,6 @@ func (s *settingsView) updateEditor(msg tea.Msg) tea.Cmd {
 		return nil
 	}
 
-	// Editor-wide keys, handled before either pane sees them.
 	switch key.String() {
 	case "esc":
 		s.CloseOverlay()
@@ -219,14 +301,11 @@ func (s *settingsView) updateEditor(msg tea.Msg) tea.Cmd {
 	}
 
 	if s.editPane == paneBody {
-		// ctrl+s / ctrl+d are intercepted here so they never reach the
-		// textarea — ctrl+d is the textarea's delete-forward binding, so
-		// forwarding it would eat a character instead of resetting.
 		switch key.String() {
 		case "ctrl+s":
 			s.saveBody()
 			return nil
-		case "ctrl+d":
+		case "ctrl+r":
 			s.resetBody()
 			return nil
 		}
@@ -235,7 +314,6 @@ func (s *settingsView) updateEditor(msg tea.Msg) tea.Cmd {
 		return cmd
 	}
 
-	// State-gate pane.
 	switch key.String() {
 	case "h", "left":
 		if s.gateCur > 0 {
@@ -247,15 +325,14 @@ func (s *settingsView) updateEditor(msg tea.Msg) tea.Cmd {
 		}
 	case " ", "space":
 		s.toggleState()
-	case "ctrl+d":
+	case "ctrl+r":
 		s.resetStates()
 	}
 	return nil
 }
 
 // togglePane flips focus between the body textarea and the state-gate
-// chips, managing textarea focus (and returning its blink Cmd when the
-// body pane gains focus).
+// chips, managing textarea focus.
 func (s *settingsView) togglePane() tea.Cmd {
 	if s.editPane == paneBody {
 		s.editPane = paneGate
@@ -266,12 +343,13 @@ func (s *settingsView) togglePane() tea.Cmd {
 	return s.ta.Focus()
 }
 
-// saveBody persists the textarea's current value as the stage's custom
-// template. An empty body clears the override (the store's documented
-// "reset" signal) — so saving an empty body and resetting converge.
+// saveBody persists the textarea's value as the template's body. An
+// empty body either reverts a built-in to its embedded default or
+// stores an empty body for a user-created template (per the store's
+// SetPromptTemplate semantic).
 func (s *settingsView) saveBody() {
 	idx := s.editIdx
-	mode := s.stages[idx].mode
+	mode := model.DispatchMode(s.stages[idx].slug)
 	body := s.ta.Value()
 	if err := s.store.SetPromptTemplate(mode, body); err != nil {
 		s.editErr = err
@@ -282,41 +360,37 @@ func (s *settingsView) saveBody() {
 	if strings.TrimSpace(body) == "" {
 		op = "prompt_template.reset"
 	}
-	s.recordSettingOp(op, "prompt_template."+string(mode), "stage="+string(mode))
+	s.recordSettingOp(op, "prompt_template:"+s.stages[idx].slug, "slug="+s.stages[idx].slug)
 	s.refreshStage(idx)
-	// Re-seed the textarea with the resolved value so an empty save
-	// shows the built-in default rather than a blank editor.
 	s.ta.SetValue(s.stages[idx].body)
 }
 
-// resetBody clears the stage's custom template override and re-seeds
-// the textarea with the built-in default.
+// resetBody only makes sense for built-in templates — it restores the
+// embedded default body and state-gate via the store's SetPromptTemplate
+// "" semantic. For user templates the empty save would just clear the
+// body, which the editor's plain ctrl+s already does.
 func (s *settingsView) resetBody() {
 	idx := s.editIdx
-	mode := s.stages[idx].mode
+	if !s.stages[idx].isBuiltin {
+		s.editErr = fmt.Errorf("reset is only for built-in templates; user templates have no embedded default")
+		return
+	}
+	mode := model.DispatchMode(s.stages[idx].slug)
 	if err := s.store.SetPromptTemplate(mode, ""); err != nil {
 		s.editErr = err
 		return
 	}
 	s.editErr = nil
-	s.recordSettingOp("prompt_template.reset", "prompt_template."+string(mode), "stage="+string(mode))
+	s.recordSettingOp("prompt_template.reset", "prompt_template:"+s.stages[idx].slug, "slug="+s.stages[idx].slug)
 	s.refreshStage(idx)
 	s.ta.SetValue(s.stages[idx].body)
 }
 
-// toggleState flips the focused state in/out of the stage's state-gate
-// and saves immediately — matching the desktop panel, where the gate
-// has no separate "save" step. The next set is rebuilt in canonical
-// model.AllStates() order so the stored value stays stable.
-//
-// Note: the store reads an empty gate as "clear the override" — so
-// toggling off the last state falls the stage back to its built-in
-// default rather than persisting a literally-empty gate. That mirrors
-// the store semantics every surface shares; it is not special-cased
-// here.
+// toggleState flips the focused state in/out of the template's gate
+// and saves immediately, matching the desktop panel.
 func (s *settingsView) toggleState() {
 	idx := s.editIdx
-	mode := s.stages[idx].mode
+	mode := model.DispatchMode(s.stages[idx].slug)
 	all := model.AllStates()
 	if s.gateCur < 0 || s.gateCur >= len(all) {
 		return
@@ -338,22 +412,322 @@ func (s *settingsView) toggleState() {
 		return
 	}
 	s.editErr = nil
-	s.recordSettingOp("prompt_states.update", "prompt_states."+string(mode), "stage="+string(mode))
+	s.recordSettingOp("prompt_states.update", "prompt_states:"+s.stages[idx].slug, "slug="+s.stages[idx].slug)
 	s.refreshStage(idx)
 }
 
-// resetStates clears the stage's custom state-gate override, falling
-// back to the built-in default.
 func (s *settingsView) resetStates() {
 	idx := s.editIdx
-	mode := s.stages[idx].mode
+	if !s.stages[idx].isBuiltin {
+		s.editErr = fmt.Errorf("reset is only for built-in templates; user templates have no embedded default")
+		return
+	}
+	mode := model.DispatchMode(s.stages[idx].slug)
 	if err := s.store.SetPromptStates(mode, nil); err != nil {
 		s.editErr = err
 		return
 	}
 	s.editErr = nil
-	s.recordSettingOp("prompt_states.reset", "prompt_states."+string(mode), "stage="+string(mode))
+	s.recordSettingOp("prompt_states.reset", "prompt_states:"+s.stages[idx].slug, "slug="+s.stages[idx].slug)
 	s.refreshStage(idx)
+}
+
+// openAdd opens the new-template overlay with a fresh slug + name +
+// body editor. The state-gate defaults to "todo" (the most common
+// stage for a new template).
+func (s *settingsView) openAdd() tea.Cmd {
+	s.adding = true
+	s.editErr = nil
+	s.addFocus = addFieldSlug
+	s.gateCur = 0
+
+	s.slugInput = textinput.New()
+	s.slugInput.Placeholder = "slug (kebab- or snake-case)"
+	s.slugInput.CharLimit = 60
+	s.slugInput.Width = 40
+
+	s.nameInput = textinput.New()
+	s.nameInput.Placeholder = "Display name"
+	s.nameInput.CharLimit = 80
+	s.nameInput.Width = 40
+
+	ta := textarea.New()
+	ta.Prompt = ""
+	ta.ShowLineNumbers = false
+	ta.CharLimit = 0
+	ta.MaxHeight = 0
+	s.ta = ta
+	s.gateStates = map[model.State]bool{model.StateTodo: true}
+	return s.slugInput.Focus()
+}
+
+func (s *settingsView) updateAdd(msg tea.Msg) tea.Cmd {
+	key, isKey := msg.(tea.KeyMsg)
+	if !isKey {
+		if s.addFocus == addFieldBody {
+			var cmd tea.Cmd
+			s.ta, cmd = s.ta.Update(msg)
+			return cmd
+		}
+		return nil
+	}
+	switch key.String() {
+	case "esc":
+		s.CloseOverlay()
+		return nil
+	case "tab":
+		return s.cycleAddField(1)
+	case "shift+tab":
+		return s.cycleAddField(-1)
+	case "ctrl+s":
+		s.commitAdd()
+		return nil
+	}
+	switch s.addFocus {
+	case addFieldSlug:
+		var cmd tea.Cmd
+		s.slugInput, cmd = s.slugInput.Update(msg)
+		return cmd
+	case addFieldName:
+		var cmd tea.Cmd
+		s.nameInput, cmd = s.nameInput.Update(msg)
+		return cmd
+	case addFieldBody:
+		var cmd tea.Cmd
+		s.ta, cmd = s.ta.Update(msg)
+		return cmd
+	case addFieldGate:
+		switch key.String() {
+		case "h", "left":
+			if s.gateCur > 0 {
+				s.gateCur--
+			}
+		case "l", "right":
+			if s.gateCur < len(model.AllStates())-1 {
+				s.gateCur++
+			}
+		case " ", "space":
+			all := model.AllStates()
+			if s.gateCur < len(all) {
+				target := all[s.gateCur]
+				s.gateStates[target] = !s.gateStates[target]
+			}
+		}
+	}
+	return nil
+}
+
+func (s *settingsView) cycleAddField(delta int) tea.Cmd {
+	fields := []addField{addFieldSlug, addFieldName, addFieldBody, addFieldGate}
+	var idx int
+	for i, f := range fields {
+		if f == s.addFocus {
+			idx = i
+			break
+		}
+	}
+	idx = (idx + delta + len(fields)) % len(fields)
+	s.addFocus = fields[idx]
+	s.slugInput.Blur()
+	s.nameInput.Blur()
+	s.ta.Blur()
+	switch s.addFocus {
+	case addFieldSlug:
+		return s.slugInput.Focus()
+	case addFieldName:
+		return s.nameInput.Focus()
+	case addFieldBody:
+		return s.ta.Focus()
+	}
+	return nil
+}
+
+func (s *settingsView) commitAdd() {
+	all := model.AllStates()
+	states := make([]model.State, 0, len(s.gateStates))
+	for _, st := range all {
+		if s.gateStates[st] {
+			states = append(states, st)
+		}
+	}
+	in := store.AddPromptTemplateIn{
+		Slug:          s.slugInput.Value(),
+		Name:          s.nameInput.Value(),
+		Body:          s.ta.Value(),
+		AllowedStates: states,
+	}
+	t, err := s.store.AddPromptTemplate(in)
+	if err != nil {
+		s.editErr = err
+		return
+	}
+	s.editErr = nil
+	id := t.ID
+	recordTUIOp(s.store, model.HistoryEntry{
+		Actor:       s.actor,
+		Op:          "template.create",
+		Kind:        "app_setting",
+		TargetID:    &id,
+		TargetLabel: "prompt_template:" + t.Slug,
+		Details:     fmt.Sprintf("slug=%s, name=%s", t.Slug, t.Name),
+	})
+	s.CloseOverlay()
+	s.reload()
+}
+
+// openRename opens the rename overlay seeded with the current slug +
+// name. Either may be edited; an unchanged save errors at the store.
+func (s *settingsView) openRename(idx int) tea.Cmd {
+	if idx < 0 || idx >= len(s.stages) {
+		return nil
+	}
+	s.renaming = true
+	s.editIdx = idx
+	s.editErr = nil
+
+	s.slugInput = textinput.New()
+	s.slugInput.SetValue(s.stages[idx].slug)
+	s.slugInput.CharLimit = 60
+	s.slugInput.Width = 40
+
+	s.nameInput = textinput.New()
+	s.nameInput.SetValue(s.stages[idx].label)
+	s.nameInput.CharLimit = 80
+	s.nameInput.Width = 40
+
+	s.addFocus = addFieldSlug
+	return s.slugInput.Focus()
+}
+
+func (s *settingsView) updateRename(msg tea.Msg) tea.Cmd {
+	key, isKey := msg.(tea.KeyMsg)
+	if !isKey {
+		return nil
+	}
+	switch key.String() {
+	case "esc":
+		s.CloseOverlay()
+		return nil
+	case "tab", "shift+tab":
+		if s.addFocus == addFieldSlug {
+			s.addFocus = addFieldName
+			s.slugInput.Blur()
+			return s.nameInput.Focus()
+		}
+		s.addFocus = addFieldSlug
+		s.nameInput.Blur()
+		return s.slugInput.Focus()
+	case "ctrl+s":
+		s.commitRename()
+		return nil
+	}
+	if s.addFocus == addFieldSlug {
+		var cmd tea.Cmd
+		s.slugInput, cmd = s.slugInput.Update(msg)
+		return cmd
+	}
+	var cmd tea.Cmd
+	s.nameInput, cmd = s.nameInput.Update(msg)
+	return cmd
+}
+
+func (s *settingsView) commitRename() {
+	idx := s.editIdx
+	old := s.stages[idx]
+	t, err := s.store.RenamePromptTemplate(store.RenamePromptTemplateIn{
+		OldSlug: old.slug,
+		NewSlug: s.slugInput.Value(),
+		NewName: s.nameInput.Value(),
+	})
+	if err != nil {
+		s.editErr = err
+		return
+	}
+	id := t.ID
+	recordTUIOp(s.store, model.HistoryEntry{
+		Actor:       s.actor,
+		Op:          "template.rename",
+		Kind:        "app_setting",
+		TargetID:    &id,
+		TargetLabel: "prompt_template:" + t.Slug,
+		Details:     fmt.Sprintf("from=%s, to=%s, name=%s", old.slug, t.Slug, t.Name),
+	})
+	s.CloseOverlay()
+	s.reload()
+}
+
+func (s *settingsView) openDeleteConfirm(idx int) {
+	if idx < 0 || idx >= len(s.stages) {
+		return
+	}
+	s.confirmDelete = true
+	s.editIdx = idx
+	s.editErr = nil
+}
+
+func (s *settingsView) updateDeleteConfirm(msg tea.Msg) tea.Cmd {
+	key, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return nil
+	}
+	switch key.String() {
+	case "y", "Y", "enter":
+		idx := s.editIdx
+		slug := s.stages[idx].slug
+		removed, err := s.store.DeletePromptTemplate(slug)
+		if err != nil {
+			s.editErr = err
+			return nil
+		}
+		id := removed.ID
+		recordTUIOp(s.store, model.HistoryEntry{
+			Actor:       s.actor,
+			Op:          "template.delete",
+			Kind:        "app_setting",
+			TargetID:    &id,
+			TargetLabel: "prompt_template:" + slug,
+			Details:     "slug=" + slug,
+		})
+		s.CloseOverlay()
+		s.reload()
+	case "n", "N", "esc":
+		s.CloseOverlay()
+	}
+	return nil
+}
+
+func (s *settingsView) openRestoreConfirm() {
+	s.confirmReset = true
+	s.editErr = nil
+}
+
+func (s *settingsView) updateRestoreConfirm(msg tea.Msg) tea.Cmd {
+	key, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return nil
+	}
+	switch key.String() {
+	case "y", "Y", "enter":
+		created, err := s.store.RestoreBuiltinPromptTemplates()
+		if err != nil {
+			s.editErr = err
+			return nil
+		}
+		if len(created) > 0 {
+			recordTUIOp(s.store, model.HistoryEntry{
+				Actor:       s.actor,
+				Op:          "template.restore_defaults",
+				Kind:        "app_setting",
+				TargetLabel: "prompt_template",
+				Details:     "slugs=" + strings.Join(created, ","),
+			})
+		}
+		s.CloseOverlay()
+		s.reload()
+	case "n", "N", "esc":
+		s.CloseOverlay()
+	}
+	return nil
 }
 
 // recordSettingOp writes an audit row for a settings mutation, mirroring
@@ -373,13 +747,147 @@ func (s *settingsView) View(width, height int) string {
 	if width == 0 || height == 0 {
 		return ""
 	}
-	if s.editing {
+	switch {
+	case s.editing:
 		return s.viewEditor(width, height)
+	case s.adding:
+		return s.viewAdd(width, height)
+	case s.renaming:
+		return s.viewRename(width, height)
+	case s.confirmDelete:
+		return s.viewConfirm(width, height,
+			fmt.Sprintf("Delete template %q?", s.stages[s.editIdx].slug),
+			"y to delete · n to cancel · esc to cancel")
+	case s.confirmReset:
+		return s.viewConfirm(width, height,
+			"Restore missing built-in templates from the embedded defaults?",
+			"y to restore · n to cancel · esc to cancel")
 	}
 	return renderSettingsList(width, height, s.stages, s.cursor, s.err)
 }
 
 func (s *settingsView) viewEditor(width, height int) string {
+	innerWidth, innerHeight, box := settingsBox(width, height)
+	st := s.stages[s.editIdx]
+
+	header := boldStyle.Render(st.label + " — prompt template")
+	if s.ta.Value() != st.body {
+		header += "  " + lipgloss.NewStyle().Foreground(takenColor).Render("● modified")
+	}
+	if st.isBuiltin {
+		header += "  " + mutedStyle.Render("(built-in)")
+	}
+	headerBar := lipgloss.NewStyle().Width(innerWidth).Padding(0, 1).Render(header)
+
+	reserved := 7
+	if s.editErr != nil {
+		reserved++
+	}
+	taHeight := innerHeight - reserved - 2
+	if taHeight < 3 {
+		taHeight = 3
+	}
+	s.ta.SetWidth(innerWidth - 2)
+	s.ta.SetHeight(taHeight)
+
+	bodyLabel := paneLabel("Template body", s.editPane == paneBody)
+	gateLabel := paneLabel("Valid from states", s.editPane == paneGate)
+
+	gateRow := renderStateChips(innerWidth, st.states, s.gateCur, s.editPane == paneGate)
+
+	parts := []string{
+		headerBar, "",
+		bodyLabel,
+		lipgloss.NewStyle().Padding(0, 1).Render(s.ta.View()),
+		"",
+		gateLabel,
+		gateRow,
+	}
+	if s.editErr != nil {
+		parts = append(parts, errorStyle.Render(s.editErr.Error()))
+	}
+	parts = append(parts, mutedStyle.Padding(0, 1).Render("Placeholders: "+placeholderTokens()))
+	return box.Render(lipgloss.JoinVertical(lipgloss.Left, parts...))
+}
+
+func (s *settingsView) viewAdd(width, height int) string {
+	innerWidth, innerHeight, box := settingsBox(width, height)
+
+	headerBar := lipgloss.NewStyle().Width(innerWidth).Padding(0, 1).
+		Render(boldStyle.Render("New template"))
+
+	reserved := 11
+	if s.editErr != nil {
+		reserved++
+	}
+	taHeight := innerHeight - reserved - 2
+	if taHeight < 3 {
+		taHeight = 3
+	}
+	s.ta.SetWidth(innerWidth - 2)
+	s.ta.SetHeight(taHeight)
+	s.slugInput.Width = innerWidth - 6
+	s.nameInput.Width = innerWidth - 6
+
+	on := make([]model.State, 0)
+	all := model.AllStates()
+	for _, st := range all {
+		if s.gateStates[st] {
+			on = append(on, st)
+		}
+	}
+
+	parts := []string{
+		headerBar, "",
+		paneLabel("Slug", s.addFocus == addFieldSlug),
+		lipgloss.NewStyle().Padding(0, 1).Render(s.slugInput.View()),
+		paneLabel("Name", s.addFocus == addFieldName),
+		lipgloss.NewStyle().Padding(0, 1).Render(s.nameInput.View()),
+		paneLabel("Body", s.addFocus == addFieldBody),
+		lipgloss.NewStyle().Padding(0, 1).Render(s.ta.View()),
+		paneLabel("Valid from states", s.addFocus == addFieldGate),
+		renderStateChips(innerWidth, on, s.gateCur, s.addFocus == addFieldGate),
+	}
+	if s.editErr != nil {
+		parts = append(parts, errorStyle.Render(s.editErr.Error()))
+	}
+	return box.Render(lipgloss.JoinVertical(lipgloss.Left, parts...))
+}
+
+func (s *settingsView) viewRename(width, height int) string {
+	innerWidth, _, box := settingsBox(width, height)
+	s.slugInput.Width = innerWidth - 6
+	s.nameInput.Width = innerWidth - 6
+	headerBar := lipgloss.NewStyle().Width(innerWidth).Padding(0, 1).
+		Render(boldStyle.Render("Rename " + s.stages[s.editIdx].label))
+	parts := []string{
+		headerBar, "",
+		paneLabel("Slug", s.addFocus == addFieldSlug),
+		lipgloss.NewStyle().Padding(0, 1).Render(s.slugInput.View()),
+		paneLabel("Name", s.addFocus == addFieldName),
+		lipgloss.NewStyle().Padding(0, 1).Render(s.nameInput.View()),
+	}
+	if s.editErr != nil {
+		parts = append(parts, errorStyle.Render(s.editErr.Error()))
+	}
+	return box.Render(lipgloss.JoinVertical(lipgloss.Left, parts...))
+}
+
+func (s *settingsView) viewConfirm(width, height int, question, hint string) string {
+	innerWidth, _, box := settingsBox(width, height)
+	parts := []string{
+		lipgloss.NewStyle().Width(innerWidth).Padding(0, 1).Render(boldStyle.Render(question)),
+		"",
+		lipgloss.NewStyle().Padding(0, 1).Render(mutedStyle.Render(hint)),
+	}
+	if s.editErr != nil {
+		parts = append(parts, "", errorStyle.Render(s.editErr.Error()))
+	}
+	return box.Render(lipgloss.JoinVertical(lipgloss.Left, parts...))
+}
+
+// settingsBox is the shared lipgloss frame for every Settings overlay.
+func settingsBox(width, height int) (int, int, lipgloss.Style) {
 	innerWidth := width - 2
 	if innerWidth < 40 {
 		innerWidth = 40
@@ -391,72 +899,33 @@ func (s *settingsView) viewEditor(width, height int) string {
 	box := lipgloss.NewStyle().
 		Border(colBorder).BorderForeground(colFocusBorder).
 		Width(innerWidth).Height(innerHeight)
+	return innerWidth, innerHeight, box
+}
 
-	st := s.stages[s.editIdx]
-
-	// Header: stage label + a modified marker when the draft differs
-	// from the persisted body.
-	header := boldStyle.Render(st.label + " — prompt template")
-	if s.ta.Value() != st.body {
-		header += "  " + lipgloss.NewStyle().Foreground(takenColor).Render("● modified")
-	}
-	headerBar := lipgloss.NewStyle().Width(innerWidth).Padding(0, 1).Render(header)
-
-	// Budget: header(1) + blank(1) + body-label(1) + textarea(N) +
-	// blank(1) + gate-label(1) + gate(1) + err(0/1) + hint(1).
-	reserved := 7
-	if s.editErr != nil {
-		reserved++
-	}
-	taHeight := innerHeight - reserved - 2 // -2 for the box border padding rows
-	if taHeight < 3 {
-		taHeight = 3
-	}
-	s.ta.SetWidth(innerWidth - 2)
-	s.ta.SetHeight(taHeight)
-
-	bodyLabel := paneLabel("Template body", s.editPane == paneBody)
-	gateLabel := paneLabel("Valid from states", s.editPane == paneGate)
-
-	// State-gate chip row.
-	have := make(map[model.State]bool, len(st.states))
-	for _, x := range st.states {
-		have[x] = true
+// renderStateChips renders the row of state chips, with the focused
+// chip underlined when the gate pane has focus.
+func renderStateChips(innerWidth int, on []model.State, cur int, focused bool) string {
+	onSet := make(map[model.State]bool, len(on))
+	for _, st := range on {
+		onSet[st] = true
 	}
 	var chips []string
 	for i, state := range model.AllStates() {
-		on := have[state]
 		label := stateLabel(state)
 		cs := lipgloss.NewStyle().Padding(0, 1)
 		switch {
-		case on:
+		case onSet[state]:
 			cs = cs.Foreground(lipgloss.Color("231")).Background(lipgloss.Color("76"))
 		default:
 			cs = cs.Foreground(mutedColor)
 		}
-		if s.editPane == paneGate && i == s.gateCur {
+		if focused && i == cur {
 			cs = cs.Underline(true).Bold(true)
 		}
 		chips = append(chips, cs.Render(label))
 	}
-	gateRow := lipgloss.NewStyle().Width(innerWidth).Padding(0, 1).
+	return lipgloss.NewStyle().Width(innerWidth).Padding(0, 1).
 		Render(lipgloss.JoinHorizontal(lipgloss.Top, chips...))
-
-	parts := []string{
-		headerBar,
-		"",
-		bodyLabel,
-		lipgloss.NewStyle().Padding(0, 1).Render(s.ta.View()),
-		"",
-		gateLabel,
-		gateRow,
-	}
-	if s.editErr != nil {
-		parts = append(parts, errorStyle.Render(s.editErr.Error()))
-	}
-	parts = append(parts, mutedStyle.Padding(0, 1).Render("Placeholders: "+placeholderTokens()))
-
-	return box.Render(lipgloss.JoinVertical(lipgloss.Left, parts...))
 }
 
 // paneLabel renders an editor pane's heading, accented when focused.

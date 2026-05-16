@@ -88,13 +88,28 @@ func TestAddDispatchMode(t *testing.T) {
 	if got.Mode != model.DispatchModePlan {
 		t.Fatalf("mode after reload = %q, want plan", got.Mode)
 	}
+	// After BACI-31 the mode is a slug rather than a closed enum; any
+	// slug-shaped string is accepted (and may outlive the template
+	// it references). Shape violations are still rejected — uppercase
+	// breaks the kebab-/snake-case rule.
 	if _, err := s.AddDispatch(AddDispatchIn{
 		RepoID:        repo.ID,
 		TargetAgentID: &ag.ID,
-		Mode:          model.DispatchMode("refactor"),
+		Mode:          model.DispatchMode("Refactor"),
 		CreatedBy:     "supervisor",
 	}); err == nil {
-		t.Fatal("expected error for unknown dispatch mode, got nil")
+		t.Fatal("expected error for a malformed dispatch mode (uppercase), got nil")
+	}
+	// A slug-shaped but unregistered mode is accepted — the model
+	// validator only checks shape, and the store records the value
+	// verbatim. (Renderers treat an unknown slug as "removed".)
+	if _, err := s.AddDispatch(AddDispatchIn{
+		RepoID:        repo.ID,
+		TargetAgentID: &ag.ID,
+		Mode:          model.DispatchMode("never-registered"),
+		CreatedBy:     "supervisor",
+	}); err != nil {
+		t.Fatalf("unregistered-but-slug-shaped mode should be accepted: %v", err)
 	}
 }
 
