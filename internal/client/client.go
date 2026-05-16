@@ -258,25 +258,67 @@ type Client interface {
 	EnsureSetupDispatch(ctx context.Context, repo *model.Repo, sessionID string) (*model.AgentDispatch, error)
 
 	// ----- Prompt templates (local-only; `bacio settings template`) -----
-	// GetPromptTemplates returns the resolved dispatch prompt template
-	// (custom override, or the built-in default) for every dispatch
-	// stage, keyed by mode string. SetPromptTemplate stores a custom
-	// template for one stage; an empty body clears the override and
-	// reverts that stage to its default. With dryRun set it validates
-	// the mode and body but writes nothing. Local-only — the remote
-	// backend returns ErrLocalOnly.
+	// ListPromptTemplates returns every registered template — slug,
+	// name, body, state-gate, IsBuiltin — in stable order (created_at
+	// ascending). This is the canonical iteration source for UIs that
+	// list templates. Local-only — the remote backend returns
+	// ErrLocalOnly.
+	ListPromptTemplates(ctx context.Context) ([]*store.PromptTemplate, error)
+	// GetPromptTemplate returns one template by slug. Local-only.
+	GetPromptTemplate(ctx context.Context, slug string) (*store.PromptTemplate, error)
+	// AddPromptTemplate creates a new template. Slug must be unique;
+	// name must be unique case-insensitively. With dryRun set it
+	// validates the payload but writes nothing — the returned template
+	// has its server-time fields (ID, CreatedAt, UpdatedAt) left zero.
+	// Local-only.
+	AddPromptTemplate(ctx context.Context, in inputs.SettingsTemplateAddInput, dryRun bool) (*store.PromptTemplate, error)
+	// RenamePromptTemplate renames a template — its slug and/or its
+	// display name — cascading the slug change to
+	// agent_dispatches.mode so historical dispatch rows continue to
+	// resolve. With dryRun set it validates without writing. Local-only.
+	RenamePromptTemplate(ctx context.Context, in inputs.SettingsTemplateRenameInput, dryRun bool) (*store.PromptTemplate, error)
+	// DeletePromptTemplate removes a template by slug. Historical
+	// dispatch rows that reference the slug are left intact (a dispatch
+	// is a snapshot, not a live FK). With dryRun set it validates the
+	// slug exists and projects the row that would have been removed,
+	// without writing. Local-only.
+	DeletePromptTemplate(ctx context.Context, in inputs.SettingsTemplateRmInput, dryRun bool) (*store.PromptTemplate, error)
+	// RestoreBuiltinPromptTemplates re-seeds any built-in slug that
+	// doesn't currently have a row from the embedded defaults.
+	// Idempotent: existing rows are untouched. Returns the slugs that
+	// were re-created. With dryRun set it inspects the table state and
+	// returns the slugs it would have created without writing.
+	// Local-only.
+	RestoreBuiltinPromptTemplates(ctx context.Context, dryRun bool) ([]string, error)
+
+	// GetPromptTemplates is a legacy lookup shape for the dispatch
+	// renderer paths that still expect a slug→body map. Equivalent to
+	// iterating ListPromptTemplates and projecting Body. Local-only.
+	//
+	// Deprecated: prefer ListPromptTemplates for new code.
 	GetPromptTemplates(ctx context.Context) (map[string]string, error)
+	// SetPromptTemplate stores a custom body for one template slug —
+	// the body-only edit path used by the desktop Save-on-blur flow.
+	// An empty body reverts a built-in slug to its embedded default;
+	// non-built-in slugs accept an empty body. With dryRun set it
+	// validates and writes nothing. Local-only.
+	//
+	// Deprecated: prefer AddPromptTemplate / RenamePromptTemplate /
+	// DeletePromptTemplate verbs for new agent-facing flows.
 	SetPromptTemplate(ctx context.Context, mode, body string, dryRun bool) error
 
 	// ----- Prompt state-gates (local-only; `bacio settings template states`) -----
-	// GetPromptStates returns the resolved state-gate (custom override,
-	// or the built-in default) for every dispatch stage — the set of
-	// issue states the stage's prompt is valid to run from — keyed by
-	// mode string. SetPromptStates stores a custom set for one stage; an
-	// empty slice clears the override and reverts that stage to its
-	// default. With dryRun set it validates the mode and states but
-	// writes nothing. Local-only — the remote backend returns ErrLocalOnly.
+	// GetPromptStates is the legacy lookup shape for the dispatch
+	// gate-check paths that still expect a slug→[]state map. Local-only.
+	//
+	// Deprecated: prefer ListPromptTemplates for new code.
 	GetPromptStates(ctx context.Context) (map[string][]string, error)
+	// SetPromptStates stores a custom state-gate for one slug; an empty
+	// slice reverts a built-in slug to its embedded default gate.
+	// Local-only.
+	//
+	// Deprecated: prefer AddPromptTemplate / RenamePromptTemplate /
+	// DeletePromptTemplate verbs for new agent-facing flows.
 	SetPromptStates(ctx context.Context, mode string, states []string, dryRun bool) error
 
 	// ----- Board preferences (local-only; desktop Settings panel) -----

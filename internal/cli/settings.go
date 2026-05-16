@@ -8,59 +8,53 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
-	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/inputio"
 	"github.com/mrgeoffrich/bacio/internal/model"
+	"github.com/mrgeoffrich/bacio/internal/store"
 )
 
-// promptTemplateView is the full CLI/JSON shape for one dispatch prompt
-// template, returned by `settings template show` / `set` / `reset`.
-// Body is the effective template (the custom override, or Default when
-// none is set); IsDefault reports whether Body still matches Default.
-// AllowedStates is the effective state-gate — the issue states the
-// stage's prompt is valid to run from — with DefaultStates the built-in
-// set and StatesAreDefault whether AllowedStates still matches it.
+// promptTemplateView is the full CLI/JSON shape for one prompt
+// template, returned by `settings template show / set / reset / add /
+// rename`. Body is the persisted template; Default is the built-in
+// embedded default for the slug (empty for user-created templates);
+// IsDefault reports whether Body still matches Default. AllowedStates
+// is the state-gate; DefaultStates is the built-in default for the
+// slug; StatesAreDefault reports whether the gate still matches the
+// default.
 type promptTemplateView struct {
-	Mode             string   `json:"mode"`
+	Slug             string   `json:"slug"`
 	Label            string   `json:"label"`
 	Body             string   `json:"body"`
 	Default          string   `json:"default"`
 	IsDefault        bool     `json:"is_default"`
+	IsBuiltin        bool     `json:"is_builtin"`
 	AllowedStates    []string `json:"allowed_states"`
 	DefaultStates    []string `json:"default_states"`
 	StatesAreDefault bool     `json:"states_are_default"`
 }
 
 // promptTemplateSummary is the lean shape `settings template list`
-// returns — it drops the (redundant) built-in Default text so a bulk
-// read stays small. Fetch the default via `settings template show`.
+// returns — it drops the Default text so a bulk read stays small.
+// Fetch the default via `settings template show`.
 type promptTemplateSummary struct {
-	Mode          string   `json:"mode"`
+	Slug          string   `json:"slug"`
 	Label         string   `json:"label"`
 	Body          string   `json:"body"`
+	IsBuiltin     bool     `json:"is_builtin"`
 	IsDefault     bool     `json:"is_default"`
 	AllowedStates []string `json:"allowed_states"`
-}
-
-// promptTemplateLabels gives each dispatch stage a human label for text
-// output. Mirrors the stage labels in the desktop app's Settings panel.
-var promptTemplateLabels = map[model.DispatchMode]string{
-	model.DispatchModePlan:      "Planning",
-	model.DispatchModeImplement: "Implementing",
-	model.DispatchModeReview:    "Reviewing",
-	model.DispatchModeShip:      "Shipping",
-	model.DispatchModeFixReview: "Fixing a review",
 }
 
 func newSettingsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "settings",
 		Short: "Inspect and edit global bacio settings",
-		Long: `Global (not per-repo) bacio settings, stored in the local app_settings
-table. Today this is the dispatch prompt templates — the instruction
-text bacio renders for each job stage when you dispatch work to an
-agent. The same templates are editable from the desktop app's Settings
-panel; this is the CLI surface for them.`,
+		Long: `Global (not per-repo) bacio settings, stored in the local SQLite
+store. Today this covers the dispatch prompt templates — the
+instruction text bacio renders for each template when you dispatch
+work to an agent. The same templates are editable from the desktop
+app's Settings panel and the TUI Settings tab; this is the CLI
+surface for them.`,
 	}
 	cmd.AddCommand(newSettingsTemplateCmd())
 	return cmd
@@ -70,38 +64,44 @@ func newSettingsTemplateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "template",
 		Short: "Inspect and edit dispatch prompt templates",
-		Long: `A dispatch prompt template is the instruction body bacio renders for a
-job stage (plan, implement, review, ship, fix_review) when you queue
-work with ` + "`bacio agent dispatch --mode <stage>`" + `. Each stage ships with a
-built-in default; override it per-stage here. Templates are global, not
-per-repo. Bodies may use the {{issue_id}}, {{issue_title}} and
-{{repo_prefix}} placeholders, substituted with the issue's context at
-dispatch time.`,
+		Long: `A dispatch prompt template is the instruction body bacio renders
+when you queue work with ` + "`bacio agent dispatch --mode <slug>`" + `.
+Bacio ships with five built-in templates (plan, implement, review,
+ship, fix_review) that are seeded on first run; you can edit, rename,
+delete or replace any of them, and you can add your own.
+
+Templates are global, not per-repo. Bodies may use the {{issue_id}},
+{{issue_title}} and {{repo_prefix}} placeholders, substituted with
+the issue's context at dispatch time.
+
+Use ` + "`bacio settings template restore-defaults`" + ` to re-seed any
+built-in slug that's been deleted (idempotent).`,
 	}
 	cmd.AddCommand(
 		settingsTemplateListCmd(),
 		settingsTemplateShowCmd(),
 		settingsTemplateSetCmd(),
 		settingsTemplateResetCmd(),
+		settingsTemplateAddCmd(),
+		settingsTemplateRenameCmd(),
+		settingsTemplateRmCmd(),
+		settingsTemplateRestoreDefaultsCmd(),
 		settingsTemplateStatesCmd(),
 	)
 	return cmd
 }
 
 // newSettingsTemplateStatesCmd is the `states` sub-group: the issue
-// states each job stage's dispatch prompt is valid to run from. The
-// desktop app gates the per-card action button on this; the CLI is the
-// parity surface, mirroring the template body verbs.
+// states each template's dispatch prompt is valid to run from. The
+// desktop app + TUI gate the per-card action button on this.
 func settingsTemplateStatesCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "states",
-		Short: "Inspect and edit the issue states each job stage's prompt is valid from",
-		Long: `Each dispatch prompt stage (plan, implement, review, ship, fix_review)
-declares the set of issue states it is valid to run from — its
-"state-gate". The desktop app's per-card action button only offers a
-prompt when the card's current state is in that stage's gate. Each
-stage ships with a built-in default; override it per-stage here.
-State-gates are global, not per-repo.`,
+		Short: "Inspect and edit the issue states each template's prompt is valid from",
+		Long: `Each dispatch prompt template declares the set of issue states it is
+valid to run from — its "state-gate". The desktop app and TUI's
+per-card action button only offers a template when the card's current
+state is in that template's gate. State-gates are global, not per-repo.`,
 	}
 	cmd.AddCommand(
 		settingsTemplateStatesShowCmd(),
@@ -113,11 +113,14 @@ State-gates are global, not per-repo.`,
 
 func settingsTemplateStatesShowCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "show <stage>",
-		Short: "Show the valid-from issue states for one job stage's prompt",
+		Use:   "show <slug>",
+		Short: "Show the valid-from issue states for one template's prompt",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			mode, err := templateModeArg(args[0])
+			if err := requireLocalForSettings("template states show"); err != nil {
+				return err
+			}
+			slug, err := templateSlugArg(args[0])
 			if err != nil {
 				return err
 			}
@@ -126,15 +129,11 @@ func settingsTemplateStatesShowCmd() *cobra.Command {
 				return err
 			}
 			defer c.Close()
-			current, err := c.GetPromptTemplates(context.Background())
+			t, err := c.GetPromptTemplate(context.Background(), slug)
 			if err != nil {
-				return err
+				return wrapTemplateLookup(slug, err)
 			}
-			allowed, err := clientPromptStates(c, mode)
-			if err != nil {
-				return err
-			}
-			return emit(templateViewFor(mode, current[string(mode)], allowed))
+			return emit(templateViewForRow(t))
 		},
 	}
 }
@@ -142,12 +141,12 @@ func settingsTemplateStatesShowCmd() *cobra.Command {
 func settingsTemplateStatesSetCmd() *cobra.Command {
 	var rawInput string
 	cmd := &cobra.Command{
-		Use:   "set [STAGE] [STATES]",
-		Short: "Set the issue states a job stage's prompt is valid to run from",
-		Long: `Override the built-in state-gate for a job stage. STATES is a
-comma-separated list of canonical issue states (todo, in_progress,
-needs_action, in_review, done, cancelled). To revert a stage to its
-built-in default gate, use ` + "`bacio settings template states reset`" + `.`,
+		Use:   "set [SLUG] [STATES]",
+		Short: "Set the issue states a template's prompt is valid to run from",
+		Long: `Override the state-gate for a template. STATES is a comma-separated
+list of canonical issue states (todo, in_progress, needs_action,
+in_review, done, cancelled). To revert a built-in template's gate to
+its embedded default, use ` + "`bacio settings template states reset`" + `.`,
 		Args: cobra.RangeArgs(0, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			raw, err := parseJSONInput(cmd, args, rawInput)
@@ -160,19 +159,19 @@ built-in default gate, use ` + "`bacio settings template states reset`" + `.`,
 					return err
 				}
 				if len(in.States) == 0 {
-					return fmt.Errorf("states is required; use `bacio settings template states reset` to revert a stage to its default")
+					return fmt.Errorf("states is required; use `bacio settings template states reset` to revert a built-in to its default")
 				}
-				return applyTemplateStates(in.Mode, in.States)
+				return applyTemplateStates(in.Slug, in.States)
 			}
 			if len(args) != 2 {
-				return fmt.Errorf("requires <STAGE> <STATES> positionals or --json")
+				return fmt.Errorf("requires <SLUG> <STATES> positionals or --json")
 			}
 			states, err := parseStates(args[1])
 			if err != nil {
 				return err
 			}
 			if len(states) == 0 {
-				return fmt.Errorf("states is required; use `bacio settings template states reset` to revert a stage to its default")
+				return fmt.Errorf("states is required; use `bacio settings template states reset` to revert a built-in to its default")
 			}
 			return applyTemplateStates(args[0], statesToStrings(states))
 		},
@@ -184,8 +183,8 @@ built-in default gate, use ` + "`bacio settings template states reset`" + `.`,
 func settingsTemplateStatesResetCmd() *cobra.Command {
 	var rawInput string
 	cmd := &cobra.Command{
-		Use:   "reset [STAGE]",
-		Short: "Reset a job stage's prompt state-gate to its built-in default",
+		Use:   "reset [SLUG]",
+		Short: "Reset a built-in template's state-gate to its embedded default",
 		Args:  cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			raw, err := parseJSONInput(cmd, args, rawInput)
@@ -197,10 +196,10 @@ func settingsTemplateStatesResetCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				return applyTemplateStates(in.Mode, nil)
+				return applyTemplateStates(in.Slug, nil)
 			}
 			if len(args) != 1 {
-				return fmt.Errorf("requires <STAGE> positional or --json")
+				return fmt.Errorf("requires <SLUG> positional or --json")
 			}
 			return applyTemplateStates(args[0], nil)
 		},
@@ -209,12 +208,13 @@ func settingsTemplateStatesResetCmd() *cobra.Command {
 	return cmd
 }
 
-// applyTemplateStates is the shared mutation path for `states set`
-// (non-empty list) and `states reset` (empty list clears the override).
-// It honours --dry-run: the states are validated at the store boundary,
-// then the write is short-circuited and the projected template emitted.
-func applyTemplateStates(modeArg string, states []string) error {
-	mode, err := templateModeArg(modeArg)
+// (non-empty list) and `states reset` (empty list = revert built-in
+// to its default). It honours --dry-run.
+func applyTemplateStates(slugArg string, states []string) error {
+	if err := requireLocalForSettings("template states set"); err != nil {
+		return err
+	}
+	slug, err := templateSlugArg(slugArg)
 	if err != nil {
 		return err
 	}
@@ -224,47 +224,55 @@ func applyTemplateStates(modeArg string, states []string) error {
 	}
 	defer c.Close()
 	ctx := context.Background()
-	if err := c.SetPromptStates(ctx, string(mode), states, opts.dryRun); err != nil {
-		return err
-	}
-	current, err := c.GetPromptTemplates(ctx)
-	if err != nil {
+	if err := c.SetPromptStates(ctx, slug, states, opts.dryRun); err != nil {
 		return err
 	}
 	if opts.dryRun {
-		// Project the resolved state-gate: an empty list reverts to the
-		// built-in default, exactly as a real call would resolve it.
-		resolved := make([]model.State, len(states))
-		for i, s := range states {
-			resolved[i] = model.State(s)
+		t, err := c.GetPromptTemplate(ctx, slug)
+		if err != nil {
+			return wrapTemplateLookup(slug, err)
 		}
-		if len(resolved) == 0 {
-			resolved = model.DefaultPromptStates(mode)
+		projected := *t
+		if len(states) > 0 {
+			parsed := make([]model.State, len(states))
+			for i, s := range states {
+				parsed[i] = model.State(s)
+			}
+			projected.AllowedStates = parsed
+		} else if t.IsBuiltin {
+			projected.AllowedStates = model.DefaultPromptStatesForBuiltinSlug(slug)
 		}
-		return emitDryRun(templateViewFor(mode, current[string(mode)], resolved))
+		return emitDryRun(templateViewForRow(&projected))
 	}
-	allowed, err := clientPromptStates(c, mode)
+	t, err := c.GetPromptTemplate(ctx, slug)
 	if err != nil {
-		return err
+		return wrapTemplateLookup(slug, err)
 	}
-	return emit(templateViewFor(mode, current[string(mode)], allowed))
+	return emit(templateViewForRow(t))
 }
 
-// templateModeArg parses a stage argument, rejecting the empty / untyped
-// mode — every settings template verb names a concrete stage.
-func templateModeArg(s string) (model.DispatchMode, error) {
+// requireLocalForSettings short-circuits settings verbs in remote mode —
+// the prompt_templates table (like the agent registry) is local-only.
+func requireLocalForSettings(verb string) error {
+	if inRemoteMode() {
+		return fmt.Errorf("bacio settings %s is local-only in v1 — drop --remote / unset BACIO_REMOTE (prompt templates live only in the local SQLite store)", verb)
+	}
+	return nil
+}
+
+// templateSlugArg validates the slug shape (matching ParseDispatchMode
+// + non-empty); existence is enforced at the store boundary.
+func templateSlugArg(s string) (string, error) {
 	mode, err := model.ParseDispatchMode(s)
 	if err != nil {
 		return "", err
 	}
 	if mode == "" {
-		return "", fmt.Errorf("a job stage is required (plan, implement, review, ship, fix_review)")
+		return "", fmt.Errorf("a template slug is required")
 	}
-	return mode, nil
+	return string(mode), nil
 }
 
-// statesToStrings renders a []model.State as a []string in order, never
-// nil — JSON consumers always see an array.
 func statesToStrings(states []model.State) []string {
 	out := make([]string, len(states))
 	for i, st := range states {
@@ -273,8 +281,6 @@ func statesToStrings(states []model.State) []string {
 	return out
 }
 
-// sameStates reports whether two state lists are equal, order-sensitive
-// (the store keeps them in the order they were set).
 func sameStates(a, b []model.State) bool {
 	if len(a) != len(b) {
 		return false
@@ -287,39 +293,67 @@ func sameStates(a, b []model.State) bool {
 	return true
 }
 
-func templateViewFor(mode model.DispatchMode, body string, allowedStates []model.State) *promptTemplateView {
-	def := model.DefaultPromptTemplate(mode)
-	defStates := model.DefaultPromptStates(mode)
+func templateViewForRow(t *store.PromptTemplate) *promptTemplateView {
+	def := model.DefaultPromptBodyForBuiltinSlug(t.Slug)
+	defStates := model.DefaultPromptStatesForBuiltinSlug(t.Slug)
+	label := t.Name
+	if label == "" {
+		label = model.BuiltinTemplateLabel(t.Slug)
+		if label == "" {
+			label = t.Slug
+		}
+	}
 	return &promptTemplateView{
-		Mode:             string(mode),
-		Label:            promptTemplateLabels[mode],
-		Body:             body,
+		Slug:             t.Slug,
+		Label:            label,
+		Body:             t.Body,
 		Default:          def,
-		IsDefault:        body == def,
-		AllowedStates:    statesToStrings(allowedStates),
+		IsDefault:        t.IsBuiltin && t.Body == def,
+		IsBuiltin:        t.IsBuiltin,
+		AllowedStates:    statesToStrings(t.AllowedStates),
 		DefaultStates:    statesToStrings(defStates),
-		StatesAreDefault: sameStates(allowedStates, defStates),
+		StatesAreDefault: t.IsBuiltin && sameStates(t.AllowedStates, defStates),
 	}
 }
 
-// clientPromptStates resolves the state-gate for one stage through the
-// client, decoding the wire []string into []model.State.
-func clientPromptStates(c client.Client, mode model.DispatchMode) ([]model.State, error) {
-	all, err := c.GetPromptStates(context.Background())
-	if err != nil {
-		return nil, err
+// templateSummaryForRow is the lean shape for list output.
+func templateSummaryForRow(t *store.PromptTemplate) *promptTemplateSummary {
+	def := model.DefaultPromptBodyForBuiltinSlug(t.Slug)
+	label := t.Name
+	if label == "" {
+		label = model.BuiltinTemplateLabel(t.Slug)
+		if label == "" {
+			label = t.Slug
+		}
 	}
-	raw := all[string(mode)]
-	out := make([]model.State, len(raw))
-	for i, s := range raw {
-		out[i] = model.State(s)
+	return &promptTemplateSummary{
+		Slug:          t.Slug,
+		Label:         label,
+		Body:          t.Body,
+		IsBuiltin:     t.IsBuiltin,
+		IsDefault:     t.IsBuiltin && t.Body == def,
+		AllowedStates: statesToStrings(t.AllowedStates),
 	}
-	return out, nil
 }
 
-// parseStates parses a comma-separated state list (the CLI flag-path
-// form for `settings template states set`). An empty input yields an
-// empty slice — the "reset to default" signal.
+// wrapTemplateLookup turns store.ErrNotFound from a slug lookup into
+// the user-friendly "no template named X" message.
+func wrapTemplateLookup(slug string, err error) error {
+	if err == nil {
+		return nil
+	}
+	if errMsg := err.Error(); strings.Contains(errMsg, "not found") || strings.Contains(errMsg, "no rows") {
+		return fmt.Errorf("no template named %q is registered (see `bacio settings template list`)", slug)
+	}
+	// store.ErrNotFound is a sentinel — check with errors.Is via client.
+	if err == store.ErrNotFound {
+		return fmt.Errorf("no template named %q is registered (see `bacio settings template list`)", slug)
+	}
+	return err
+}
+
+// parseStates parses a comma-separated state list. Empty input yields
+// an empty slice — the "reset to default" signal.
 func parseStates(csv string) ([]model.State, error) {
 	csv = strings.TrimSpace(csv)
 	if csv == "" {
@@ -340,7 +374,7 @@ func parseStates(csv string) ([]model.State, error) {
 func settingsTemplateListCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
-		Short: "List the dispatch prompt template for every job stage",
+		Short: "List every registered dispatch prompt template",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := openClient()
@@ -348,25 +382,13 @@ func settingsTemplateListCmd() *cobra.Command {
 				return err
 			}
 			defer c.Close()
-			ctx := context.Background()
-			current, err := c.GetPromptTemplates(ctx)
+			tmpls, err := c.ListPromptTemplates(context.Background())
 			if err != nil {
 				return err
 			}
-			states, err := c.GetPromptStates(ctx)
-			if err != nil {
-				return err
-			}
-			out := make([]*promptTemplateSummary, 0, len(model.AllDispatchModes()))
-			for _, m := range model.AllDispatchModes() {
-				body := current[string(m)]
-				out = append(out, &promptTemplateSummary{
-					Mode:          string(m),
-					Label:         promptTemplateLabels[m],
-					Body:          body,
-					IsDefault:     body == model.DefaultPromptTemplate(m),
-					AllowedStates: states[string(m)],
-				})
+			out := make([]*promptTemplateSummary, 0, len(tmpls))
+			for _, t := range tmpls {
+				out = append(out, templateSummaryForRow(t))
 			}
 			return emit(out)
 		},
@@ -375,11 +397,14 @@ func settingsTemplateListCmd() *cobra.Command {
 
 func settingsTemplateShowCmd() *cobra.Command {
 	return &cobra.Command{
-		Use:   "show <stage>",
-		Short: "Show the dispatch prompt template for one job stage",
+		Use:   "show <slug>",
+		Short: "Show one dispatch prompt template",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			mode, err := templateModeArg(args[0])
+			if err := requireLocalForSettings("template show"); err != nil {
+				return err
+			}
+			slug, err := templateSlugArg(args[0])
 			if err != nil {
 				return err
 			}
@@ -388,15 +413,11 @@ func settingsTemplateShowCmd() *cobra.Command {
 				return err
 			}
 			defer c.Close()
-			current, err := c.GetPromptTemplates(context.Background())
+			t, err := c.GetPromptTemplate(context.Background(), slug)
 			if err != nil {
-				return err
+				return wrapTemplateLookup(slug, err)
 			}
-			allowed, err := clientPromptStates(c, mode)
-			if err != nil {
-				return err
-			}
-			return emit(templateViewFor(mode, current[string(mode)], allowed))
+			return emit(templateViewForRow(t))
 		},
 	}
 }
@@ -404,12 +425,12 @@ func settingsTemplateShowCmd() *cobra.Command {
 func settingsTemplateSetCmd() *cobra.Command {
 	var rawInput string
 	cmd := &cobra.Command{
-		Use:   "set [STAGE] [BODY]",
-		Short: "Set a custom dispatch prompt template for one job stage",
-		Long: `Override the built-in prompt template for a job stage. BODY may use the
+		Use:   "set [SLUG] [BODY]",
+		Short: "Update a dispatch prompt template's body",
+		Long: `Update the body of an existing template. BODY may use the
 {{issue_id}}, {{issue_title}} and {{repo_prefix}} placeholders — they're
-substituted with the issue's context at dispatch time. To revert a stage
-to its built-in default, use ` + "`bacio settings template reset`" + `.`,
+substituted with the issue's context at dispatch time. To revert a
+built-in template to its embedded default, use ` + "`bacio settings template reset`" + `.`,
 		Args: cobra.RangeArgs(0, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			raw, err := parseJSONInput(cmd, args, rawInput)
@@ -422,17 +443,17 @@ to its built-in default, use ` + "`bacio settings template reset`" + `.`,
 					return err
 				}
 				if in.Body == "" {
-					return fmt.Errorf("body is required; use `bacio settings template reset` to revert a stage to its default")
+					return fmt.Errorf("body is required; use `bacio settings template reset` to revert a built-in to its default")
 				}
-				return applyTemplate(in.Mode, in.Body)
+				return applyTemplateBody(in.Slug, in.Body)
 			}
 			if len(args) != 2 {
-				return fmt.Errorf("requires <STAGE> <BODY> positionals or --json")
+				return fmt.Errorf("requires <SLUG> <BODY> positionals or --json")
 			}
 			if args[1] == "" {
-				return fmt.Errorf("body is required; use `bacio settings template reset` to revert a stage to its default")
+				return fmt.Errorf("body is required; use `bacio settings template reset` to revert a built-in to its default")
 			}
-			return applyTemplate(args[0], args[1])
+			return applyTemplateBody(args[0], args[1])
 		},
 	}
 	addInputFlag(cmd, &rawInput)
@@ -442,9 +463,13 @@ to its built-in default, use ` + "`bacio settings template reset`" + `.`,
 func settingsTemplateResetCmd() *cobra.Command {
 	var rawInput string
 	cmd := &cobra.Command{
-		Use:   "reset [STAGE]",
-		Short: "Reset a dispatch prompt template to its built-in default",
-		Args:  cobra.RangeArgs(0, 1),
+		Use:   "reset [SLUG]",
+		Short: "Reset a built-in template's body to its embedded default",
+		Long: `Restore the embedded default body for a built-in template (plan,
+implement, review, ship, fix_review). User-created templates have no
+embedded default — edit the body directly via ` + "`bacio settings template set`" + `
+or delete the template via ` + "`bacio settings template rm`" + `.`,
+		Args: cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			raw, err := parseJSONInput(cmd, args, rawInput)
 			if err != nil {
@@ -455,26 +480,43 @@ func settingsTemplateResetCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				return applyTemplate(in.Mode, "")
+				return applyTemplateBody(in.Slug, "")
 			}
 			if len(args) != 1 {
-				return fmt.Errorf("requires <STAGE> positional or --json")
+				return fmt.Errorf("requires <SLUG> positional or --json")
 			}
-			return applyTemplate(args[0], "")
+			return applyTemplateBody(args[0], "")
 		},
 	}
 	addInputFlag(cmd, &rawInput)
 	return cmd
 }
 
-// applyTemplate is the shared mutation path for `set` (non-empty body)
-// and `reset` (empty body clears the override). It honours --dry-run:
-// the body is validated at the store boundary, then the write is
-// short-circuited and the projected template emitted.
-func applyTemplate(modeArg, body string) error {
-	mode, err := templateModeArg(modeArg)
+// applyTemplateBody is the shared mutation path for `set` (non-empty)
+// and `reset` (empty = revert built-in to its default). It honours
+// --dry-run.
+func applyTemplateBody(slugArg, body string) error {
+	if err := requireLocalForSettings("template set"); err != nil {
+		return err
+	}
+	slug, err := templateSlugArg(slugArg)
 	if err != nil {
 		return err
+	}
+	// Reset semantic check: only meaningful for built-ins.
+	if body == "" {
+		c, err := openClient()
+		if err != nil {
+			return err
+		}
+		defer c.Close()
+		t, err := c.GetPromptTemplate(context.Background(), slug)
+		if err != nil {
+			return wrapTemplateLookup(slug, err)
+		}
+		if !t.IsBuiltin {
+			return fmt.Errorf("template %q is user-created and has no embedded default — edit its body via `bacio settings template set` or delete via `bacio settings template rm`", slug)
+		}
 	}
 	c, err := openClient()
 	if err != nil {
@@ -482,30 +524,236 @@ func applyTemplate(modeArg, body string) error {
 	}
 	defer c.Close()
 	ctx := context.Background()
-	if err := c.SetPromptTemplate(ctx, string(mode), body, opts.dryRun); err != nil {
+	if err := c.SetPromptTemplate(ctx, slug, body, opts.dryRun); err != nil {
 		return err
 	}
 	if opts.dryRun {
-		// Project the resolved template: an empty body reverts to the
-		// built-in default, exactly as a real call would resolve it. The
-		// state-gate is untouched by this verb, so show its current value.
-		resolved := body
-		if resolved == "" {
-			resolved = model.DefaultPromptTemplate(mode)
-		}
-		allowed, err := clientPromptStates(c, mode)
+		t, err := c.GetPromptTemplate(ctx, slug)
 		if err != nil {
-			return err
+			return wrapTemplateLookup(slug, err)
 		}
-		return emitDryRun(templateViewFor(mode, resolved, allowed))
+		projected := *t
+		if body != "" {
+			projected.Body = body
+		} else if t.IsBuiltin {
+			projected.Body = model.DefaultPromptBodyForBuiltinSlug(slug)
+		}
+		return emitDryRun(templateViewForRow(&projected))
 	}
-	current, err := c.GetPromptTemplates(ctx)
+	t, err := c.GetPromptTemplate(ctx, slug)
 	if err != nil {
-		return err
+		return wrapTemplateLookup(slug, err)
 	}
-	allowed, err := clientPromptStates(c, mode)
-	if err != nil {
-		return err
+	return emit(templateViewForRow(t))
+}
+
+func settingsTemplateAddCmd() *cobra.Command {
+	var rawInput string
+	cmd := &cobra.Command{
+		Use:   "add [SLUG] [NAME]",
+		Short: "Create a new dispatch prompt template",
+		Long: `Create a new dispatch prompt template. The richest path is --json,
+which supports body and a state-gate as well as slug + name; the
+positional form is a quick "scaffold with empty body, no state-gate"
+shortcut you can then edit via the desktop / TUI / `+"`set`/`states`"+`.
+
+Examples:
+
+  bacio settings template add --json '{"slug":"spike","name":"Spike","body":"Spike on {{issue_id}}.","states":["todo"]}'
+  bacio settings template add spike Spike     # body empty, no state-gate`,
+		Args: cobra.RangeArgs(0, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireLocalForSettings("template add"); err != nil {
+				return err
+			}
+			raw, err := parseJSONInput(cmd, args, rawInput)
+			if err != nil {
+				return err
+			}
+			var in inputs.SettingsTemplateAddInput
+			if raw != nil {
+				parsed, _, err := inputio.DecodeStrict[inputs.SettingsTemplateAddInput](raw)
+				if err != nil {
+					return err
+				}
+				in = *parsed
+			} else {
+				if len(args) != 2 {
+					return fmt.Errorf("requires <SLUG> <NAME> positionals or --json")
+				}
+				in = inputs.SettingsTemplateAddInput{Slug: args[0], Name: args[1]}
+			}
+			c, err := openClient()
+			if err != nil {
+				return err
+			}
+			defer c.Close()
+			t, err := c.AddPromptTemplate(context.Background(), in, opts.dryRun)
+			if err != nil {
+				return err
+			}
+			if opts.dryRun {
+				return emitDryRun(templateViewForRow(t))
+			}
+			return emit(templateViewForRow(t))
+		},
 	}
-	return emit(templateViewFor(mode, current[string(mode)], allowed))
+	addInputFlag(cmd, &rawInput)
+	return cmd
+}
+
+func settingsTemplateRenameCmd() *cobra.Command {
+	var rawInput string
+	cmd := &cobra.Command{
+		Use:   "rename [SLUG] [NEW-SLUG] [NEW-NAME]",
+		Short: "Rename a dispatch prompt template (slug change cascades to historical dispatches)",
+		Long: `Rename a template — its slug and/or its display name. A slug change
+cascades to ` + "`agent_dispatches.mode`" + ` rows that referenced it, so the
+history surface continues to resolve. NEW-NAME is optional; pass an
+empty string (or omit the third positional) to leave the display name
+unchanged.
+
+Examples:
+
+  bacio settings template rename --json '{"slug":"spike","new_slug":"investigation","new_name":"Investigation"}'
+  bacio settings template rename spike investigation Investigation
+  bacio settings template rename spike spike "Quick spike"   # name-only rename`,
+		Args: cobra.RangeArgs(0, 3),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireLocalForSettings("template rename"); err != nil {
+				return err
+			}
+			raw, err := parseJSONInput(cmd, args, rawInput)
+			if err != nil {
+				return err
+			}
+			var in inputs.SettingsTemplateRenameInput
+			if raw != nil {
+				parsed, _, err := inputio.DecodeStrict[inputs.SettingsTemplateRenameInput](raw)
+				if err != nil {
+					return err
+				}
+				in = *parsed
+			} else {
+				if len(args) < 2 {
+					return fmt.Errorf("requires <SLUG> <NEW-SLUG> [NEW-NAME] positionals or --json")
+				}
+				in = inputs.SettingsTemplateRenameInput{Slug: args[0], NewSlug: args[1]}
+				if len(args) == 3 {
+					in.NewName = args[2]
+				}
+			}
+			c, err := openClient()
+			if err != nil {
+				return err
+			}
+			defer c.Close()
+			t, err := c.RenamePromptTemplate(context.Background(), in, opts.dryRun)
+			if err != nil {
+				return err
+			}
+			if opts.dryRun {
+				return emitDryRun(templateViewForRow(t))
+			}
+			return emit(templateViewForRow(t))
+		},
+	}
+	addInputFlag(cmd, &rawInput)
+	return cmd
+}
+
+func settingsTemplateRmCmd() *cobra.Command {
+	var rawInput string
+	cmd := &cobra.Command{
+		Use:   "rm [SLUG]",
+		Short: "Delete a dispatch prompt template",
+		Long: `Delete a template. Built-in templates can be deleted too; restore
+them with ` + "`bacio settings template restore-defaults`" + ` (idempotent).
+Historical ` + "`agent_dispatches.mode`" + ` rows that reference the slug are
+left intact — a dispatch is a snapshot, not a live foreign key.`,
+		Args: cobra.RangeArgs(0, 1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireLocalForSettings("template rm"); err != nil {
+				return err
+			}
+			raw, err := parseJSONInput(cmd, args, rawInput)
+			if err != nil {
+				return err
+			}
+			var in inputs.SettingsTemplateRmInput
+			if raw != nil {
+				parsed, _, err := inputio.DecodeStrict[inputs.SettingsTemplateRmInput](raw)
+				if err != nil {
+					return err
+				}
+				in = *parsed
+			} else {
+				if len(args) != 1 {
+					return fmt.Errorf("requires <SLUG> positional or --json")
+				}
+				in.Slug = args[0]
+			}
+			c, err := openClient()
+			if err != nil {
+				return err
+			}
+			defer c.Close()
+			t, err := c.DeletePromptTemplate(context.Background(), in, opts.dryRun)
+			if err != nil {
+				return wrapTemplateLookup(in.Slug, err)
+			}
+			if opts.dryRun {
+				return emitDryRun(templateViewForRow(t))
+			}
+			return emit(templateViewForRow(t))
+		},
+	}
+	addInputFlag(cmd, &rawInput)
+	return cmd
+}
+
+func settingsTemplateRestoreDefaultsCmd() *cobra.Command {
+	var rawInput string
+	cmd := &cobra.Command{
+		Use:   "restore-defaults",
+		Short: "Re-seed any missing built-in dispatch prompt templates (idempotent)",
+		Long: `Re-seed every built-in template slug (plan, implement, review, ship,
+fix_review) that doesn't currently have a row, using the embedded
+default body and state-gate. Existing rows (whether the user has
+edited them or not) are left alone. The output lists the slugs that
+were re-created.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireLocalForSettings("template restore-defaults"); err != nil {
+				return err
+			}
+			raw, err := parseJSONInput(cmd, args, rawInput)
+			if err != nil {
+				return err
+			}
+			if raw != nil {
+				if _, _, err = inputio.DecodeStrict[inputs.SettingsTemplateRestoreDefaultsInput](raw); err != nil {
+					return err
+				}
+			}
+			c, err := openClient()
+			if err != nil {
+				return err
+			}
+			defer c.Close()
+			created, err := c.RestoreBuiltinPromptTemplates(context.Background(), opts.dryRun)
+			if err != nil {
+				return err
+			}
+			out := struct {
+				Created []string `json:"created"`
+			}{Created: created}
+			if opts.dryRun {
+				return emitDryRun(out)
+			}
+			return emit(out)
+		},
+	}
+	addInputFlag(cmd, &rawInput)
+	return cmd
 }

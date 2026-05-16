@@ -332,6 +332,7 @@ export default function App() {
           onChangeHideEmptyColumns={changeHideEmptyColumns}
           columns={columns}
           onClose={closeSettings}
+          onTemplatesChanged={refreshPromptConfig}
         />
       ) : activeView === 'docs' ? (
         <DocsView activeBoard={activeBoard} />

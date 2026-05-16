@@ -87,9 +87,9 @@ func (d deps) handlePromptTemplateSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in := *parsed
-	if in.Mode != "" && in.Mode != string(mode) {
+	if in.Slug != "" && in.Slug != string(mode) {
 		writeError(w, http.StatusBadRequest, "invalid_input",
-			"mode in body must match URL", map[string]any{"field": "mode"})
+			"slug in body must match URL", map[string]any{"field": "slug"})
 		return
 	}
 	if in.Body == "" {
@@ -179,9 +179,9 @@ func (d deps) handlePromptStatesSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in := *parsed
-	if in.Mode != "" && in.Mode != string(mode) {
+	if in.Slug != "" && in.Slug != string(mode) {
 		writeError(w, http.StatusBadRequest, "invalid_input",
-			"mode in body must match URL", map[string]any{"field": "mode"})
+			"slug in body must match URL", map[string]any{"field": "slug"})
 		return
 	}
 	if len(in.States) == 0 {

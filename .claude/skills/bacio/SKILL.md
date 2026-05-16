@@ -361,7 +361,9 @@ bacio issue brief MINI-42 | tee /tmp/ctx.json
 
 `bacio issue brief` returns a single object: `{issue, feature?, relations, pull_requests, documents, comments, claimants, taken, warnings}`. Each entry in `documents` carries `filename`, `type`, `description` (the link's `--why`), `linked_via` (one or both of `"issue"` and `"feature/<slug>"`), `source_path`, and `content`. Docs reachable from both the issue and its parent feature are deduped to a single entry whose `linked_via` lists both paths. If the issue and feature link rows have differing `--why` descriptions, the issue's wins and a string is appended to `warnings`.
 
-`claimants` is the per-issue agent-claim history (open + released, newest first) — each entry carries `session_id`, `agent_name`, `prompt`, `claimed_at`, and `released_at` (absent while open). `taken` is the derived "an agent is actively holding this" flag — `true` iff any claimant is still open. `bacio issue show` carries the same `claimants` / `taken` fields, and so does the `bacio api` `/issues/{key}` and `/issues/{key}/brief` JSON.
+`claimants` is the per-issue agent-claim history (open + released, newest first) — each entry carries `session_id`, `agent_name`, `prompt`, `claimed_at`, and `released_at` (absent while open). `taken` is the derived "an agent is actively holding this" flag — `true` iff the issue has any open claim held by an alive session. `bacio issue show` carries the same `claimants` / `taken` fields, and so does the `bacio api` `/issues/{key}` and `/issues/{key}/brief` JSON.
+
+`taken` is also inlined on every issue read — `bacio issue list -o json`, `bacio issue show -o json`, `bacio issue brief`, the API issue list, and the per-issue API JSON. A lightweight client (a REST-driven board, a one-off script) gets the derived flag in the list payload itself, no second round trip needed. Backed by the same join `ListOpenClaims` uses, so the two sources agree.
 
 Every issue also carries a `waiting_for_claim` boolean (in `bacio issue show -o json`, `bacio issue list -o json`, `bacio issue brief`, and the API issue JSON). It's `true` in the gap between a dispatch being queued against the issue and an agent recording an open claim on it — see the dispatch lifecycle in the Dispatches section. The TUI board and desktop app render a spinner on a waiting issue and refuse a fresh dispatch on it. In text output, `bacio issue show` prints a `Waiting for claim: yes` line only while it's set.
 
@@ -658,55 +660,99 @@ without ever claiming or cancelling, the flag stays set.
 
 ### Dispatch prompt templates
 
-When you `bacio agent dispatch --mode <stage>`, the instruction body the
-agent sees is rendered from that stage's **prompt template**. Each of the
-five stages (`plan`, `implement`, `review`, `ship`, `fix_review`) ships
-with a built-in default; override them per-stage — globally, not
-per-repo — with `bacio settings template`. The same templates are
-editable from the desktop app's Settings panel.
+When you `bacio agent dispatch --mode <slug>`, the instruction body the
+agent sees is rendered from the template that matches that slug.
+Templates are **fully user-configurable**: bacio ships with a bundled
+set of five built-ins (`plan`, `implement`, `review`, `ship`,
+`fix_review`) that are seeded into a `prompt_templates` SQLite table
+on first run, but after that the user owns every row — they can edit
+the body, change the state-gate, rename, delete, and add brand-new
+templates. Templates are global, not per-repo. The same set is editable
+from the desktop Settings panel and the TUI Settings tab.
 
 ```
-bacio settings template list            Lean table: every stage's effective
-                                        template + its allowed_states gate
-bacio settings template show <stage>    One stage — effective body + built-in
-                                        default + the state-gate
-bacio settings template set <stage> <body>
-                                        Override a stage's template
-bacio settings template reset <stage>   Revert a stage to its built-in default
+bacio settings template list            Every registered template (slug, label,
+                                        body, allowed_states, is_builtin,
+                                        is_default)
+bacio settings template show <slug>     One template — body + built-in default
+                                        + state-gate
+bacio settings template add             Create a new template (slug + name +
+                                        body + state-gate)
+bacio settings template set <slug> <body>
+                                        Update a template's body
+bacio settings template reset <slug>    Built-ins only: revert body + state-gate
+                                        to the embedded default
+bacio settings template rename <slug> <new-slug> [<new-name>]
+                                        Rename a template (slug change cascades
+                                        to historical agent_dispatches.mode)
+bacio settings template rm <slug>       Delete a template (built-in or user)
+bacio settings template restore-defaults
+                                        Re-seed any missing built-in slugs
+                                        (idempotent)
 
-bacio settings template states show <stage>
-                                        Show the issue states a stage's prompt
-                                        is valid to run from
-bacio settings template states set <stage> <state,state,...>
-                                        Override a stage's state-gate
-bacio settings template states reset <stage>
-                                        Revert a stage's state-gate to default
+bacio settings template states show <slug>
+                                        Show the issue states a template's
+                                        prompt is valid to run from
+bacio settings template states set <slug> <state,state,...>
+                                        Update a template's state-gate
+bacio settings template states reset <slug>
+                                        Built-ins only: revert state-gate to
+                                        the embedded default
 ```
 
-`set` and `reset` (and their `states` siblings) are mutations — they
-honour `--json`, `--dry-run`, and `bacio schema show
-settings.template.set` (schema names `settings.template.set` /
-`settings.template.reset` / `settings.template.states.set` /
-`settings.template.states.reset`). A template body may interpolate
-`{{issue_id}}`, `{{issue_title}}`, and `{{repo_prefix}}` — substituted
-with the dispatched issue's context at dispatch time; an unknown
-`{{...}}` token is left verbatim. The prompt-template + state-gate
-verbs work over `--remote` too (HTTP parity landed in BACI-36); other
-`bacio settings` verbs (board preferences) are still local-only since
-they live elsewhere in `app_settings`.
+Every mutating verb honours `--json`, `--dry-run`, and `bacio schema
+show settings.template.<verb>` per the six agent-CLI principles. Schema
+names: `settings.template.add` / `set` / `reset` / `rename` / `rm` /
+`restore-defaults` / `states.set` / `states.reset`. A template body may
+interpolate `{{issue_id}}`, `{{issue_title}}`, and `{{repo_prefix}}` —
+substituted with the dispatched issue's context at dispatch time; an
+unknown `{{...}}` token is left verbatim. The `bacio settings template
+...` CLI verbs are local-only in v1; the legacy body and state-gate
+HTTP endpoints (`/settings/templates`, `/settings/templates/states`)
+landed in BACI-36 for any non-CLI consumer (e.g. a future web
+frontend), but the CLI verbs themselves still route through typed
+methods that don't have HTTP parity yet — full CLI/remote parity is a
+follow-up.
 
-Each stage also has a **state-gate**: the set of issue states its prompt
+Each template has a **state-gate**: the set of issue states its prompt
 is valid to run from (built-in defaults — `plan`/`implement` → `todo`,
-`review`/`ship`/`fix_review` → `in_review`). The desktop app's per-card
-action button only offers a prompt when the card's state is in that
-stage's gate; `show`/`list` surface it as `allowed_states`.
+`review`/`ship`/`fix_review` → `in_review`). The desktop app and TUI's
+per-card action button only offers a template when the card's state is
+in that template's gate; `show`/`list` surface it as `allowed_states`. A
+template with an **empty `allowed_states`** is CLI-only: it never
+appears on a per-card menu but is still reachable via
+`bacio agent dispatch --mode <slug>`.
 
 ```bash
-bacio settings template set review --json '{"mode":"review","body":"Review {{issue_id}} ({{issue_title}}) — focus on correctness and tests."}'
+# Edit an existing template's body.
+bacio settings template set review --json '{"slug":"review","body":"Review {{issue_id}} ({{issue_title}}) — focus on correctness and tests."}'
+
+# Revert a built-in's body + state-gate to the embedded default.
 bacio settings template reset review
-bacio settings template states set review --json '{"mode":"review","states":["in_review","needs_action"]}'
-bacio settings template states reset review
+
+# Add a brand-new template, slot it in for todo issues.
+bacio settings template add --json '{"slug":"spike","name":"Spike","body":"Spike on {{issue_id}}.","states":["todo"]}'
+
+# Rename a template — old slug also rewritten on historical dispatches.
+bacio settings template rename spike investigation Investigation
+
+# Delete a template (built-in or user).
+bacio settings template rm fix_review
+
+# Re-seed any deleted built-ins (idempotent — existing rows untouched).
+bacio settings template restore-defaults
 ```
+
+**Slugs outlive templates.** `agent_dispatches.mode` is a free-form
+text slug; a rename cascades to the dispatch rows but a delete does
+not — historical dispatches keep the slug verbatim and renderers treat
+an unrecognised slug as "removed" rather than erroring. So you can
+delete a template at any time without breaking history.
+
+**`reset` is built-ins only.** A user-created template has no embedded
+default to revert to. If you want to wipe one back to a blank body,
+either `set` it to a single space (the validator accepts any non-empty
+body) or `rm` it.
 
 ### Hook integration — automatic registration & supervision
 
@@ -749,19 +795,19 @@ If the repo has `bacio install-hooks` set up, the register / heartbeat /
 end calls happen automatically — the loop above collapses to just `claim`,
 the work, `release`, and `bacio agent ack` for any dispatches that arrived.
 
-The agent registry is reachable over HTTP for nine verbs — `register`,
-`heartbeat`, `end`, `claim`, `release`, `list`, `show`, `inbox`, `ack` —
-plus the bulk `ListOpenClaims` (used by the desktop Board to derive
-`taken`). Prompt templates and their state-gates are also reachable
-(`bacio settings template list / show / set / reset`, including the
-`states` sub-group) — landed in BACI-36. The CLI's `--remote` /
-`BACIO_REMOTE` mode drives all of these over the same routes as a web
-frontend would. The holdouts that remain local-only are
-`bacio agent dispatch` (HTTP parity is a follow-up), the channel/hook
-internals (`EnsureSetupDispatch`, `DrainDispatches`,
-`CompleteRegistration`, `CreateSessionStub`, etc.), and board
-preferences — those error clearly in remote mode with a "local-only"
-message.
+The agent registry is reachable over HTTP for the full eleven verbs —
+`register`, `heartbeat`, `end`, `claim`, `release`, `list`, `show`,
+`inbox`, `ack`, `dispatch`, and `RepoDispatches` (the per-repo dispatch
+list) — plus the bulk `ListOpenClaims` (used by the desktop Board to
+derive `taken`). The legacy prompt-template body and state-gate
+endpoints (`/settings/templates`, `/settings/templates/states`) landed
+in BACI-36 for direct HTTP consumers. The CLI's `--remote` /
+`BACIO_REMOTE` mode drives the agent verbs over the same routes as a
+web frontend would. The holdouts that remain local-only at the CLI
+level are the channel/hook internals (`EnsureSetupDispatch`,
+`DrainDispatches`, `CompleteRegistration`, `CreateSessionStub`, etc.)
+and the `bacio settings template ...` / board-preference verbs — those
+error clearly in remote mode with a "local-only" message.
 
 ## Git-backed sync
 
@@ -921,9 +967,9 @@ A few non-obvious mappings:
 
 - **`POST /repos`** is the equivalent of `bacio init`, but the server can't see your CWD — supply `{"name":"...", "path":"..."}` (plus optional `prefix`) explicitly.
 - **`GET /repos/{prefix}/documents/{filename}/download`** is the only non-JSON endpoint. Streams the body as `text/markdown` with `Content-Disposition: attachment`. No audit row, no dry-run, no `with_content`. The API never reads or writes the server filesystem, so callers materialise on disk by piping the response (`curl -O`).
-- **CLI verbs with no API equivalent** (touch the local filesystem or terminal): `bacio init` (use `POST /repos`), `bacio install-skill`, `bacio install-hooks`, `bacio install-channel`, `bacio doc add --from-path` / `--content-file` (inline `content` in the body), `bacio doc export` (use `/download`), `bacio tui`, `bacio hook *`, `bacio channel`. Plus the local-only agent verbs `bacio agent dispatch` and board-preference settings.
-- **Agent registry endpoints.** The nine register/heartbeat/end/claim/release/list/show/inbox/ack verbs reach the server under `/repos/{prefix}/agents/sessions` (register, list-in-repo, list-open-claims-in-repo) and `/agents/sessions/{session_id}/...` (heartbeat/end/claim/release/inbox + show), plus `/agents/dispatches/{id}/ack`. Cross-repo variants of the two lists live at `/agents/sessions` and `/agents/claims/open`. Stub sessions (`registered_at` NULL) are hidden by default on the list endpoints — pass `?all=true` to include them.
-- **Prompt-template endpoints.** Bodies and state-gates are global app-settings, not repo-scoped. `GET /settings/templates` returns the resolved body for every dispatch stage (a `mode → body` map); `GET /settings/templates/states` returns the state-gate map. Per-stage mutations live at `PUT/DELETE /settings/templates/{mode}` (body) and `PUT/DELETE /settings/templates/{mode}/states` (state-gate). An empty body/list on PUT is rejected — use DELETE to revert to the built-in default. Dry-run + `X-Dry-Run` header work as elsewhere.
+- **CLI verbs with no API equivalent** (touch the local filesystem or terminal): `bacio init` (use `POST /repos`), `bacio install-skill`, `bacio install-hooks`, `bacio install-channel`, `bacio doc add --from-path` / `--content-file` (inline `content` in the body), `bacio doc export` (use `/download`), `bacio tui`, `bacio hook *`, `bacio channel`. Plus the `bacio settings template ...` and board-preference verbs (local-only at the CLI; the legacy prompt-template HTTP endpoints below are reachable directly).
+- **Agent registry endpoints.** The eleven register/heartbeat/end/claim/release/list/show/inbox/ack/dispatch/list-dispatches-in-repo verbs reach the server under `/repos/{prefix}/agents/sessions` (register, list-in-repo, list-open-claims-in-repo), `/repos/{prefix}/agents/dispatches` (BACI-35: create + list-in-repo), and `/agents/sessions/{session_id}/...` (heartbeat/end/claim/release/inbox + show), plus `/agents/dispatches/{id}/ack`. Cross-repo variants of the two lists live at `/agents/sessions` and `/agents/claims/open`. Stub sessions (`registered_at` NULL) are hidden by default on the list endpoints — pass `?all=true` to include them.
+- **Prompt-template endpoints (BACI-36).** Bodies and state-gates are global app-settings, not repo-scoped. `GET /settings/templates` returns the resolved body for every dispatch stage (a `mode → body` map); `GET /settings/templates/states` returns the state-gate map. Per-stage mutations live at `PUT/DELETE /settings/templates/{mode}` (body) and `PUT/DELETE /settings/templates/{mode}/states` (state-gate). An empty body/list on PUT is rejected — use DELETE to revert to the built-in default. Dry-run + `X-Dry-Run` header work as elsewhere. The newer typed CRUD (add/rename/delete/restore-defaults) does not yet have HTTP parity.
 
 For the full design rationale, threat model, and what the API deliberately doesn't do (NDJSON, per-user auth, CORS, cursor pagination, …), see `docs/rest-api-design.md`.
 
@@ -936,7 +982,7 @@ BACIO_REMOTE=http://team-bacio:5320 BACIO_API_TOKEN=$T bacio issue list -o json
 bacio --remote http://team-bacio:5320 issue add "Login broken" --feature auth
 ```
 
-Verbs that touch the local filesystem or terminal error clearly in remote mode and stay local-direct: `bacio init`, `bacio install-skill`, `bacio install-hooks`, `bacio install-channel`, `bacio doc add --from-path` / `--content-file` (use `--content` inline instead), `bacio doc export` (use `bacio doc download <filename>` — writes to stdout or `--to <path>`), `bacio tui`, `bacio schema *`, `bacio status`, `bacio hook *`, `bacio channel`. The agent verbs `register / heartbeat / end / claim / release / list / show / inbox / ack` now work in remote mode (BACI-34); only `bacio agent dispatch` and the prompt-template / board-preference settings remain local-only.
+Verbs that touch the local filesystem or terminal error clearly in remote mode and stay local-direct: `bacio init`, `bacio install-skill`, `bacio install-hooks`, `bacio install-channel`, `bacio doc add --from-path` / `--content-file` (use `--content` inline instead), `bacio doc export` (use `bacio doc download <filename>` — writes to stdout or `--to <path>`), `bacio tui`, `bacio schema *`, `bacio status`, `bacio hook *`, `bacio channel`. The agent verbs `register / heartbeat / end / claim / release / list / show / inbox / ack` work in remote mode (BACI-34), and `bacio agent dispatch` is also remote-capable now (BACI-35); only the prompt-template / board-preference settings remain local-only.
 
 ## Gotchas
 

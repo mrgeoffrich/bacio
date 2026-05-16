@@ -452,9 +452,6 @@ its queue with ` + "`bacio agent inbox`" + `.`,
 }
 
 func runAgentDispatch(in inputs.AgentDispatchInput) error {
-	if err := requireLocalForAgent("dispatch"); err != nil {
-		return err
-	}
 	c, err := openClient()
 	if err != nil {
 		return err
@@ -647,19 +644,6 @@ func agentShowCmd() *cobra.Command {
 }
 
 // ---------- helpers ----------
-
-// requireLocalForAgent short-circuits agent verbs that have no HTTP
-// analogue when --remote / BACIO_REMOTE is set. The in-scope verbs from
-// BACI-34 (register / heartbeat / end / claim / release / list / show /
-// inbox / ack) reach the remote backend directly, so this helper only
-// guards `bacio agent dispatch` — the one remaining mutating verb whose
-// HTTP parity is a separate follow-up.
-func requireLocalForAgent(verb string) error {
-	if inRemoteMode() {
-		return fmt.Errorf("bacio agent %s is local-only in v1 — drop --remote / unset BACIO_REMOTE (HTTP parity is a follow-up to BACI-34)", verb)
-	}
-	return nil
-}
 
 // resolveSessionID falls back to $CLAUDE_CODE_SESSION_ID, then to this
 // process's newest session in .bacio/agents.json (resolved via the

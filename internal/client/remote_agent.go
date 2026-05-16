@@ -10,6 +10,7 @@ import (
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/model"
+	"github.com/mrgeoffrich/bacio/internal/store"
 )
 
 // HTTP parity for the agent-registry verbs landed in BACI-34. The
@@ -169,16 +170,49 @@ func (c *remoteClient) AckDispatch(ctx context.Context, in inputs.AgentAckInput,
 // always talk to the local store) or to mutate the global app_settings
 // KV (no remote analogue in v1).
 
+// CreateDispatch queues a dispatch via the REST API (BACI-35).
+// Mirrors the CLI flag path through the inputs.AgentDispatchInput
+// shape; the server resolves agent / session / issue / prompt
+// template and stamps the audit log itself.
 func (c *remoteClient) CreateDispatch(ctx context.Context, repo *model.Repo, in inputs.AgentDispatchInput, dryRun bool) (*model.AgentDispatch, error) {
-	return nil, remoteAgentNotSupported("dispatch")
+	if repo == nil {
+		return nil, fmt.Errorf("CreateDispatch requires a repo")
+	}
+	q := url.Values{}
+	if dryRun {
+		q.Set("dry_run", "true")
+	}
+	var out model.AgentDispatch
+	if err := c.do(ctx, http.MethodPost, "/repos/"+repo.Prefix+"/agents/dispatches", q, in, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
+// DrainDispatches is the side-effect-bearing "list pending+delivered
+// AND mark pending → delivered" call used by the bacio hook to feed an
+// agent's context. The hook talks to the local store directly (it
+// doesn't go through --remote), so this is genuinely not needed over
+// HTTP today — keep it local-only and clearly labelled.
 func (c *remoteClient) DrainDispatches(ctx context.Context, sessionID string) ([]*model.AgentDispatch, error) {
-	return nil, remoteAgentNotSupported("inbox")
+	return nil, remoteAgentNotSupported("inbox-drain")
 }
 
+// RepoDispatches lists every dispatch queued against a repo, newest
+// first — the read backing the desktop Agents view's per-repo bucket
+// (BACI-35).
 func (c *remoteClient) RepoDispatches(ctx context.Context, repo *model.Repo) ([]*model.AgentDispatch, error) {
-	return nil, remoteAgentNotSupported("dispatches")
+	if repo == nil {
+		return nil, fmt.Errorf("RepoDispatches requires a repo")
+	}
+	var out []*model.AgentDispatch
+	if err := c.do(ctx, http.MethodGet, "/repos/"+repo.Prefix+"/agents/dispatches", nil, nil, &out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = []*model.AgentDispatch{}
+	}
+	return out, nil
 }
 
 func (c *remoteClient) EnsureSetupDispatch(ctx context.Context, repo *model.Repo, sessionID string) (*model.AgentDispatch, error) {
@@ -213,13 +247,42 @@ func (c *remoteClient) LinkSessionChannel(ctx context.Context, sessionID string,
 	return remoteAgentNotSupported("channel")
 }
 
-// Prompt templates + state-gates landed HTTP parity in BACI-36; these
-// thread through the same `c.do(...)` pattern as the BACI-34 agent
-// verbs. An empty body on Set* is the reset signal: the helper switches
-// the HTTP verb from PUT to DELETE so the server's reset handler runs.
-// The cli/settings.go applyTemplate / applyTemplateStates helpers send
-// "" / nil to mean "revert to default" — this layer transparently turns
-// that into a DELETE.
+// Prompt templates + state-gates landed HTTP parity in BACI-36 for the
+// legacy four verbs (Get/SetPromptTemplate(s), Get/SetPromptStates);
+// these thread through the same `c.do(...)` pattern as the BACI-34
+// agent verbs. An empty body on Set* is the reset signal: the helper
+// switches the HTTP verb from PUT to DELETE so the server's reset
+// handler runs. The cli/settings.go applyTemplate / applyTemplateStates
+// helpers send "" / nil to mean "revert to default" — this layer
+// transparently turns that into a DELETE.
+//
+// The newer typed CRUD methods (List/GetPromptTemplate, AddPromptTemplate,
+// RenamePromptTemplate, DeletePromptTemplate, RestoreBuiltinPromptTemplates)
+// remain local-only in v1 — HTTP parity for them is a follow-up.
+
+func (c *remoteClient) ListPromptTemplates(ctx context.Context) ([]*store.PromptTemplate, error) {
+	return nil, remoteAgentNotSupported("prompt-templates")
+}
+
+func (c *remoteClient) GetPromptTemplate(ctx context.Context, slug string) (*store.PromptTemplate, error) {
+	return nil, remoteAgentNotSupported("prompt-templates")
+}
+
+func (c *remoteClient) AddPromptTemplate(ctx context.Context, in inputs.SettingsTemplateAddInput, dryRun bool) (*store.PromptTemplate, error) {
+	return nil, remoteAgentNotSupported("prompt-templates")
+}
+
+func (c *remoteClient) RenamePromptTemplate(ctx context.Context, in inputs.SettingsTemplateRenameInput, dryRun bool) (*store.PromptTemplate, error) {
+	return nil, remoteAgentNotSupported("prompt-templates")
+}
+
+func (c *remoteClient) DeletePromptTemplate(ctx context.Context, in inputs.SettingsTemplateRmInput, dryRun bool) (*store.PromptTemplate, error) {
+	return nil, remoteAgentNotSupported("prompt-templates")
+}
+
+func (c *remoteClient) RestoreBuiltinPromptTemplates(ctx context.Context, dryRun bool) ([]string, error) {
+	return nil, remoteAgentNotSupported("prompt-templates")
+}
 
 func (c *remoteClient) GetPromptTemplates(ctx context.Context) (map[string]string, error) {
 	var out map[string]string
@@ -241,7 +304,7 @@ func (c *remoteClient) SetPromptTemplate(ctx context.Context, mode, body string,
 	if body == "" {
 		return c.do(ctx, http.MethodDelete, path, q, nil, nil)
 	}
-	in := map[string]string{"mode": mode, "body": body}
+	in := map[string]string{"slug": mode, "body": body}
 	return c.do(ctx, http.MethodPut, path, q, in, nil)
 }
 
@@ -265,7 +328,7 @@ func (c *remoteClient) SetPromptStates(ctx context.Context, mode string, states 
 	if len(states) == 0 {
 		return c.do(ctx, http.MethodDelete, path, q, nil, nil)
 	}
-	in := map[string]any{"mode": mode, "states": states}
+	in := map[string]any{"slug": mode, "states": states}
 	return c.do(ctx, http.MethodPut, path, q, in, nil)
 }
 

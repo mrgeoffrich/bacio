@@ -2,9 +2,10 @@ package api
 
 // HTTP parity for the agent-registry verbs. Same inputs.*Input structs,
 // validators, store calls, and audit log as the CLI / local backend —
-// only the transport differs. Dispatch creation, prompt templates, and
-// board preferences are deliberately NOT here: they're separate
-// follow-ups (BACI-32 §5 #2 / #3).
+// only the transport differs. Prompt templates and board preferences
+// stay local-only (BACI-32 §5 #3 / §5 #5 — separate follow-ups);
+// dispatch CRUD now has full REST parity here too (BACI-35), bringing
+// dispatch create + list-per-repo in alongside inbox + ack.
 //
 // Audit actor: every mutating verb stamps history with the X-Actor
 // header (falling back to defaultActor) so a remote agent's identity
@@ -781,3 +782,172 @@ func (d deps) serveOpenClaims(w http.ResponseWriter, repoID *int64) {
 	}
 	writeJSON(w, http.StatusOK, out)
 }
+
+// ---------- repo-scoped dispatch CRUD (BACI-35) ----------
+
+// handleAgentDispatchesList returns every dispatch queued against this
+// repo, newest first — the read backing the desktop Agents view's
+// per-repo bucket. Read-only — no audit row.
+func (d deps) handleAgentDispatchesList(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	ds, err := d.store.ListDispatches(store.DispatchFilter{RepoID: &repo.ID})
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if ds == nil {
+		ds = []*model.AgentDispatch{}
+	}
+	writeJSON(w, http.StatusOK, ds)
+}
+
+// handleAgentDispatchCreate queues a dispatch against this repo,
+// mirroring localClient.CreateDispatch: validate target_agent and/or
+// target_session, resolve the issue (if any), render the stage's
+// prompt template with the issue's context, then write the row and
+// stamp the audit log. 201 with the queued dispatch, or a 201 dry-run
+// projection (no row, no audit) with X-Dry-Run: applied.
+func (d deps) handleAgentDispatchCreate(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	in, _, err := inputio.DecodeStrict[inputs.AgentDispatchInput](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	if in.TargetAgent == "" && in.TargetSession == "" {
+		writeError(w, http.StatusBadRequest, "invalid_input",
+			"dispatch requires a target — pass target_agent and/or target_session", nil)
+		return
+	}
+
+	var agentID *int64
+	if in.TargetAgent != "" {
+		ag, err := d.store.GetAgentByName(in.TargetAgent)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "not_found",
+					fmt.Sprintf("no agent identity named %q is registered", in.TargetAgent),
+					map[string]any{"field": "target_agent"})
+				return
+			}
+			status, code := statusForError(err)
+			writeError(w, status, code, err.Error(), nil)
+			return
+		}
+		agentID = &ag.ID
+	}
+	if in.TargetSession != "" {
+		if _, err := d.store.GetAgentSession(in.TargetSession); err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "not_found",
+					fmt.Sprintf("session %q is not registered", in.TargetSession),
+					map[string]any{"field": "target_session"})
+				return
+			}
+			status, code := statusForError(err)
+			writeError(w, status, code, err.Error(), nil)
+			return
+		}
+	}
+
+	var issueID *int64
+	var issueKey, issueTitle string
+	if in.IssueKey != "" {
+		prefix, num, err := store.ParseIssueKey(in.IssueKey)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_input", err.Error(),
+				map[string]any{"field": "issue_key"})
+			return
+		}
+		iss, err := d.store.GetIssueByKey(prefix, num)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "not_found",
+					fmt.Sprintf("issue %s does not exist", in.IssueKey),
+					map[string]any{"field": "issue_key"})
+				return
+			}
+			status, code := statusForError(err)
+			writeError(w, status, code, err.Error(), nil)
+			return
+		}
+		if iss.RepoID != repo.ID {
+			writeError(w, http.StatusNotFound, "not_found",
+				"issue not found in this repo", map[string]any{"field": "issue_key"})
+			return
+		}
+		issueID = &iss.ID
+		issueKey = iss.Key
+		issueTitle = iss.Title
+	}
+
+	mode := model.DispatchMode(in.Mode)
+	template, err := d.store.GetPromptTemplate(mode)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	payload := model.ComposeDispatchPayload(template, map[string]string{
+		"issue_id":    issueKey,
+		"issue_title": issueTitle,
+		"repo_prefix": repo.Prefix,
+	}, in.Message)
+
+	who := ActorFromContext(r.Context())
+	if isDryRun(r) {
+		writeDryRun(w, http.StatusCreated, &model.AgentDispatch{
+			RepoID:          repo.ID,
+			RepoPrefix:      repo.Prefix,
+			TargetAgentID:   agentID,
+			TargetAgentName: in.TargetAgent,
+			TargetSessionID: in.TargetSession,
+			IssueID:         issueID,
+			IssueKey:        issueKey,
+			Mode:            mode,
+			Payload:         payload,
+			Status:          model.DispatchPending,
+			CreatedBy:       who,
+			CreatedAt:       time.Now().UTC(),
+		})
+		return
+	}
+
+	dsp, err := d.store.AddDispatch(store.AddDispatchIn{
+		RepoID:          repo.ID,
+		TargetAgentID:   agentID,
+		TargetSessionID: in.TargetSession,
+		IssueID:         issueID,
+		Mode:            mode,
+		Payload:         payload,
+		CreatedBy:       who,
+	})
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	recordOp(d.store, d.logger, model.HistoryEntry{
+		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+		Actor:    who,
+		Op:       "agent.dispatch",
+		Kind:     "agent",
+		TargetID: &dsp.ID, TargetLabel: dispatchTargetLabel(dsp),
+		Details: dispatchDetails(dsp),
+	})
+	writeJSON(w, http.StatusCreated, dsp)
+}
+
+// (dispatchTargetLabel and dispatchDetails live above — defined for the
+// ack handler and reused by create.)

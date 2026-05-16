@@ -200,11 +200,61 @@ export async function saveDoc(
   }
 }
 
-// listPromptTemplates returns the five customisable dispatch prompt
-// templates, in job-lifecycle order.
+// listPromptTemplates returns every registered dispatch prompt template
+// (built-ins + user-created), in store iteration order.
 export async function listPromptTemplates(): Promise<PromptTemplateDTO[]> {
   try {
     return await SettingsService.ListPromptTemplates();
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// addPromptTemplate creates a new dispatch prompt template.
+export async function addPromptTemplate(
+  slug: string,
+  name: string,
+  body: string,
+  states: string[],
+): Promise<PromptTemplateDTO> {
+  try {
+    return await SettingsService.AddPromptTemplate(slug, name, body, states);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// renamePromptTemplate renames an existing template — slug, name, or
+// both. Pass an empty string for newSlug to keep the slug; pass an
+// empty string for newName to keep the display name.
+export async function renamePromptTemplate(
+  slug: string,
+  newSlug: string,
+  newName: string,
+): Promise<PromptTemplateDTO> {
+  try {
+    return await SettingsService.RenamePromptTemplate(slug, newSlug, newName);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// deletePromptTemplate removes a template by slug. Historical dispatch
+// rows that reference the slug are left intact (a dispatch is a
+// snapshot, not a foreign key).
+export async function deletePromptTemplate(slug: string): Promise<PromptTemplateDTO> {
+  try {
+    return await SettingsService.DeletePromptTemplate(slug);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// restoreBuiltinPromptTemplates re-seeds any built-in slug that's been
+// deleted, then returns the refreshed full template list.
+export async function restoreBuiltinPromptTemplates(): Promise<PromptTemplateDTO[]> {
+  try {
+    return await SettingsService.RestoreBuiltinPromptTemplates();
   } catch (err) {
     throw normalize(err);
   }

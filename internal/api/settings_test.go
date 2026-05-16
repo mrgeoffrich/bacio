@@ -24,13 +24,13 @@ func TestPromptTemplatesListAllDefaults(t *testing.T) {
 	}
 	// Every dispatch mode should be present and equal to its built-in
 	// default since nothing has been set yet.
-	for _, m := range model.AllDispatchModes() {
-		got, ok := out[string(m)]
+	for _, slug := range model.BuiltinTemplateSlugs() {
+		got, ok := out[slug]
 		if !ok {
-			t.Fatalf("missing mode %q in list", m)
+			t.Fatalf("missing mode %q in list", slug)
 		}
-		if got != model.DefaultPromptTemplate(m) {
-			t.Fatalf("mode %q: body deviates from default (default-only state)", m)
+		if got != model.DefaultPromptTemplate(model.DispatchMode(slug)) {
+			t.Fatalf("mode %q: body deviates from default (default-only state)", slug)
 		}
 	}
 }
@@ -63,14 +63,14 @@ func TestPromptStatesListAllDefaults(t *testing.T) {
 	if err := json.Unmarshal(body, &out); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	for _, m := range model.AllDispatchModes() {
-		got, ok := out[string(m)]
+	for _, slug := range model.BuiltinTemplateSlugs() {
+		got, ok := out[slug]
 		if !ok {
-			t.Fatalf("missing mode %q in list", m)
+			t.Fatalf("missing mode %q in list", slug)
 		}
-		want := model.DefaultPromptStates(m)
+		want := model.DefaultPromptStates(model.DispatchMode(slug))
 		if len(got) != len(want) {
-			t.Fatalf("mode %q states len: got %d want %d", m, len(got), len(want))
+			t.Fatalf("mode %q states len: got %d want %d", slug, len(got), len(want))
 		}
 	}
 }
@@ -81,7 +81,7 @@ func TestPromptTemplateSetHappy(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	resp, body := apiReq(t, "PUT",
 		ts.URL+"/settings/templates/plan",
-		map[string]any{"mode": "plan", "body": "review {{issue_id}}"},
+		map[string]any{"slug": "plan", "body": "review {{issue_id}}"},
 		map[string]string{"X-Actor": "agent-alice"})
 	if resp.StatusCode != 200 {
 		t.Fatalf("status: %d body: %s", resp.StatusCode, body)
@@ -105,7 +105,7 @@ func TestPromptTemplateSetBodyRequired(t *testing.T) {
 func TestPromptTemplateSetModeMismatch(t *testing.T) {
 	ts, _ := newTestAPI(t, api.Options{})
 	resp, _ := apiReq(t, "PUT", ts.URL+"/settings/templates/plan",
-		map[string]any{"mode": "review", "body": "x"}, nil)
+		map[string]any{"slug": "review", "body": "x"}, nil)
 	if resp.StatusCode != 400 {
 		t.Fatalf("status: %d", resp.StatusCode)
 	}
@@ -113,7 +113,8 @@ func TestPromptTemplateSetModeMismatch(t *testing.T) {
 
 func TestPromptTemplateSetUnknownMode(t *testing.T) {
 	ts, _ := newTestAPI(t, api.Options{})
-	resp, _ := apiReq(t, "PUT", ts.URL+"/settings/templates/bogus",
+	// Capitals fail the slug-shape check in ParseDispatchMode.
+	resp, _ := apiReq(t, "PUT", ts.URL+"/settings/templates/BOGUS",
 		map[string]any{"body": "x"}, nil)
 	if resp.StatusCode != 400 {
 		t.Fatalf("status: %d", resp.StatusCode)
@@ -178,7 +179,8 @@ func TestPromptTemplateResetHappy(t *testing.T) {
 
 func TestPromptTemplateResetUnknownMode(t *testing.T) {
 	ts, _ := newTestAPI(t, api.Options{})
-	resp, _ := apiReq(t, "DELETE", ts.URL+"/settings/templates/bogus", nil, nil)
+	// Capitals fail the slug-shape check in ParseDispatchMode.
+	resp, _ := apiReq(t, "DELETE", ts.URL+"/settings/templates/BOGUS", nil, nil)
 	if resp.StatusCode != 400 {
 		t.Fatalf("status: %d", resp.StatusCode)
 	}
@@ -207,7 +209,7 @@ func TestPromptStatesSetHappy(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	resp, body := apiReq(t, "PUT",
 		ts.URL+"/settings/templates/review/states",
-		map[string]any{"mode": "review", "states": []string{"in_review", "needs_action"}},
+		map[string]any{"slug": "review", "states": []string{"in_review", "needs_action"}},
 		map[string]string{"X-Actor": "agent-alice"})
 	if resp.StatusCode != 200 {
 		t.Fatalf("status: %d body: %s", resp.StatusCode, body)

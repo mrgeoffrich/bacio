@@ -42,10 +42,18 @@ type Issue struct {
 	// runtime state — set by store.AddDispatch, cleared by
 	// store.AddAgentClaim / store.CancelDispatch. No omitempty: the
 	// field must be visible (including when false) in JSON output.
-	WaitingForClaim bool      `json:"waiting_for_claim"`
-	Tags            []string  `json:"tags"`
-	CreatedAt       time.Time `json:"created_at"`
-	UpdatedAt       time.Time `json:"updated_at"`
+	WaitingForClaim bool `json:"waiting_for_claim"`
+	// Taken is true iff this issue currently has at least one open
+	// (unreleased) agent claim held by an alive session — the derived
+	// "an agent is actively holding this" signal also surfaced on the
+	// show/brief views. Computed at read time via the same join the
+	// desktop's ListOpenClaims runs, so list responses don't need a
+	// second round trip. No omitempty: the field must be visible
+	// (including when false) in JSON output.
+	Taken     bool      `json:"taken"`
+	Tags      []string  `json:"tags"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type Comment struct {
