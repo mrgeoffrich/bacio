@@ -126,9 +126,6 @@ loop can retry; subsequent registers of a known slug drop --new.`,
 }
 
 func runAgentRegister(in inputs.AgentRegisterInput) error {
-	if err := requireLocalForAgent("register"); err != nil {
-		return err
-	}
 	if in.NewIdentity && in.Agent == "" {
 		return fmt.Errorf("--new requires --agent <name>")
 	}
@@ -204,9 +201,6 @@ wants to stay flagged as alive.`,
 }
 
 func runAgentHeartbeat(in inputs.AgentHeartbeatInput) error {
-	if err := requireLocalForAgent("heartbeat"); err != nil {
-		return err
-	}
 	c, err := openClient()
 	if err != nil {
 		return err
@@ -266,9 +260,6 @@ func agentEndCmd() *cobra.Command {
 }
 
 func runAgentEnd(in inputs.AgentEndInput) error {
-	if err := requireLocalForAgent("end"); err != nil {
-		return err
-	}
 	c, err := openClient()
 	if err != nil {
 		return err
@@ -327,9 +318,6 @@ func agentClaimCmd() *cobra.Command {
 }
 
 func runAgentClaim(in inputs.AgentClaimInput) error {
-	if err := requireLocalForAgent("claim"); err != nil {
-		return err
-	}
 	c, err := openClient()
 	if err != nil {
 		return err
@@ -387,9 +375,6 @@ func agentReleaseCmd() *cobra.Command {
 }
 
 func runAgentRelease(in inputs.AgentReleaseInput) error {
-	if err := requireLocalForAgent("release"); err != nil {
-		return err
-	}
 	c, err := openClient()
 	if err != nil {
 		return err
@@ -501,9 +486,6 @@ or at the agent identity behind it. --session defaults to
 $CLAUDE_CODE_SESSION_ID. Ack a dispatch with ` + "`bacio agent ack <id>`" + `.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := requireLocalForAgent("inbox"); err != nil {
-				return err
-			}
 			sid, err := resolveSessionID(sessionID)
 			if err != nil {
 				return err
@@ -565,9 +547,6 @@ func agentAckCmd() *cobra.Command {
 }
 
 func runAgentAck(in inputs.AgentAckInput) error {
-	if err := requireLocalForAgent("ack"); err != nil {
-		return err
-	}
 	c, err := openClient()
 	if err != nil {
 		return err
@@ -595,9 +574,6 @@ func agentListCmd() *cobra.Command {
 		Short: "List agent sessions in this repo (registered only by default — use --all to include SessionStart stubs)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := requireLocalForAgent("list"); err != nil {
-				return err
-			}
 			c, err := openClient()
 			if err != nil {
 				return err
@@ -652,9 +628,6 @@ func agentShowCmd() *cobra.Command {
 		Short: "Show one session with full claim history",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := requireLocalForAgent("show"); err != nil {
-				return err
-			}
 			c, err := openClient()
 			if err != nil {
 				return err
@@ -675,13 +648,15 @@ func agentShowCmd() *cobra.Command {
 
 // ---------- helpers ----------
 
-// requireLocalForAgent short-circuits any agent verb when --remote /
-// BACIO_REMOTE is set. The registry is local-only in v1; rather than
-// have agents see a confusing "dial tcp" or 404 from the remote call,
-// we surface a clear "drop --remote" message before any network I/O.
+// requireLocalForAgent short-circuits agent verbs that have no HTTP
+// analogue when --remote / BACIO_REMOTE is set. The in-scope verbs from
+// BACI-34 (register / heartbeat / end / claim / release / list / show /
+// inbox / ack) reach the remote backend directly, so this helper only
+// guards `bacio agent dispatch` — the one remaining mutating verb whose
+// HTTP parity is a separate follow-up.
 func requireLocalForAgent(verb string) error {
 	if inRemoteMode() {
-		return fmt.Errorf("bacio agent %s is local-only in v1 — drop --remote / unset BACIO_REMOTE (the agent registry lives only in the local SQLite store)", verb)
+		return fmt.Errorf("bacio agent %s is local-only in v1 — drop --remote / unset BACIO_REMOTE (HTTP parity is a follow-up to BACI-34)", verb)
 	}
 	return nil
 }

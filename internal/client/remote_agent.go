@@ -3,65 +3,174 @@ package client
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/url"
+	"strconv"
+	"time"
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/model"
 )
 
-// Agent registry is local-only in v1. Every remote method returns
-// ErrLocalOnly with a short hint so the CLI can surface a clear
-// "drop --remote / unset BACIO_REMOTE" message rather than a 404.
-//
-// v2 follow-up: implement HTTP parity in internal/api/handlers_agent.go
-// and switch these stubs to the same `c.do(...)` pattern used by
-// remote_issue.go.
+// HTTP parity for the agent-registry verbs landed in BACI-34. The
+// methods in scope are register / heartbeat / end / claim / release /
+// list / show / inbox / ack / ListOpenClaims — every other agent-related
+// method (dispatch creation, prompt templates, board prefs, the
+// channel-side primitives) still has no HTTP analogue and returns
+// ErrLocalOnly via remoteAgentNotSupported.
 
 func remoteAgentNotSupported(verb string) error {
-	return fmt.Errorf("bacio agent %s: %w (drop --remote / unset BACIO_REMOTE — the agent registry lives only in the local SQLite store in v1)", verb, ErrLocalOnly)
+	return fmt.Errorf("bacio agent %s: %w (drop --remote / unset BACIO_REMOTE — this agent verb is local-only)", verb, ErrLocalOnly)
 }
 
 func (c *remoteClient) RegisterAgent(ctx context.Context, repo *model.Repo, in inputs.AgentRegisterInput, dryRun bool) (*model.AgentSession, error) {
-	return nil, remoteAgentNotSupported("register")
+	q := url.Values{}
+	if dryRun {
+		q.Set("dry_run", "true")
+	}
+	var out model.AgentSession
+	if err := c.do(ctx, http.MethodPost, "/repos/"+repo.Prefix+"/agents/sessions", q, in, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 func (c *remoteClient) HeartbeatAgent(ctx context.Context, repo *model.Repo, in inputs.AgentHeartbeatInput, dryRun bool) (*model.AgentSession, error) {
-	return nil, remoteAgentNotSupported("heartbeat")
+	q := url.Values{}
+	if dryRun {
+		q.Set("dry_run", "true")
+	}
+	var out model.AgentSession
+	if err := c.do(ctx, http.MethodPost, "/agents/sessions/"+url.PathEscape(in.SessionID)+"/heartbeat", q, in, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 func (c *remoteClient) EndAgent(ctx context.Context, repo *model.Repo, in inputs.AgentEndInput, dryRun bool) (*model.AgentSession, error) {
-	return nil, remoteAgentNotSupported("end")
+	q := url.Values{}
+	if dryRun {
+		q.Set("dry_run", "true")
+	}
+	var out model.AgentSession
+	if err := c.do(ctx, http.MethodPost, "/agents/sessions/"+url.PathEscape(in.SessionID)+"/end", q, in, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 func (c *remoteClient) ClaimAgent(ctx context.Context, repo *model.Repo, in inputs.AgentClaimInput, dryRun bool) (*model.AgentClaim, error) {
-	return nil, remoteAgentNotSupported("claim")
+	q := url.Values{}
+	if dryRun {
+		q.Set("dry_run", "true")
+	}
+	var out model.AgentClaim
+	if err := c.do(ctx, http.MethodPost, "/agents/sessions/"+url.PathEscape(in.SessionID)+"/claims", q, in, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 func (c *remoteClient) ReleaseAgent(ctx context.Context, repo *model.Repo, in inputs.AgentReleaseInput, dryRun bool) (*model.AgentClaim, error) {
-	return nil, remoteAgentNotSupported("release")
+	q := url.Values{}
+	if dryRun {
+		q.Set("dry_run", "true")
+	}
+	var out model.AgentClaim
+	if err := c.do(ctx, http.MethodDelete, "/agents/sessions/"+url.PathEscape(in.SessionID)+"/claims", q, in, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 func (c *remoteClient) ListAgentSessions(ctx context.Context, f AgentSessionFilter) ([]*model.AgentSession, error) {
-	return nil, remoteAgentNotSupported("list")
+	q := url.Values{}
+	if f.OnlyAlive {
+		q.Set("active", "true")
+	}
+	// The server defaults to registered-only; flip to "include stubs" via
+	// ?all=true so the wire flag mirrors the CLI's `--all`. The flag
+	// carries the opposite polarity from f.RegisteredOnly precisely
+	// because a remote client opting into stubs should be explicit.
+	if !f.RegisteredOnly {
+		q.Set("all", "true")
+	}
+	if !f.Since.IsZero() {
+		// Express the cutoff as a relative duration string the server
+		// re-resolves against its own clock — avoids drift between two
+		// machines with slightly different wall times.
+		q.Set("since", time.Since(f.Since).Round(time.Second).String())
+	}
+	path := "/agents/sessions"
+	if f.Repo != nil {
+		path = "/repos/" + f.Repo.Prefix + "/agents/sessions"
+	}
+	var out []*model.AgentSession
+	if err := c.do(ctx, http.MethodGet, path, q, nil, &out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = []*model.AgentSession{}
+	}
+	return out, nil
 }
 
 func (c *remoteClient) ShowAgentSession(ctx context.Context, sessionID string) (*AgentSessionView, error) {
-	return nil, remoteAgentNotSupported("show")
+	var out AgentSessionView
+	if err := c.do(ctx, http.MethodGet, "/agents/sessions/"+url.PathEscape(sessionID), nil, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
 func (c *remoteClient) ListOpenClaims(ctx context.Context, repo *model.Repo) ([]*model.AgentClaim, error) {
-	return nil, remoteAgentNotSupported("claims")
-}
-
-func (c *remoteClient) CreateDispatch(ctx context.Context, repo *model.Repo, in inputs.AgentDispatchInput, dryRun bool) (*model.AgentDispatch, error) {
-	return nil, remoteAgentNotSupported("dispatch")
+	path := "/agents/claims/open"
+	if repo != nil {
+		path = "/repos/" + repo.Prefix + "/agents/claims/open"
+	}
+	var out []*model.AgentClaim
+	if err := c.do(ctx, http.MethodGet, path, nil, nil, &out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = []*model.AgentClaim{}
+	}
+	return out, nil
 }
 
 func (c *remoteClient) InboxDispatches(ctx context.Context, sessionID string) ([]*model.AgentDispatch, error) {
-	return nil, remoteAgentNotSupported("inbox")
+	var out []*model.AgentDispatch
+	if err := c.do(ctx, http.MethodGet, "/agents/sessions/"+url.PathEscape(sessionID)+"/inbox", nil, nil, &out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = []*model.AgentDispatch{}
+	}
+	return out, nil
 }
 
 func (c *remoteClient) AckDispatch(ctx context.Context, in inputs.AgentAckInput, dryRun bool) (*model.AgentDispatch, error) {
-	return nil, remoteAgentNotSupported("ack")
+	q := url.Values{}
+	if dryRun {
+		q.Set("dry_run", "true")
+	}
+	var out model.AgentDispatch
+	path := "/agents/dispatches/" + strconv.FormatInt(in.ID, 10) + "/ack"
+	if err := c.do(ctx, http.MethodPost, path, q, in, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ---------- the rest stays local-only ----------
+// CreateDispatch, prompt templates, board prefs, and every channel /
+// hook-internal primitive don't have HTTP analogues in v1. Most exist
+// to drive the per-machine `bacio channel` / `bacio hook` shims (which
+// always talk to the local store) or to mutate the global app_settings
+// KV (no remote analogue in v1).
+
+func (c *remoteClient) CreateDispatch(ctx context.Context, repo *model.Repo, in inputs.AgentDispatchInput, dryRun bool) (*model.AgentDispatch, error) {
+	return nil, remoteAgentNotSupported("dispatch")
 }
 
 func (c *remoteClient) DrainDispatches(ctx context.Context, sessionID string) ([]*model.AgentDispatch, error) {
@@ -104,9 +213,6 @@ func (c *remoteClient) LinkSessionChannel(ctx context.Context, sessionID string,
 	return remoteAgentNotSupported("channel")
 }
 
-// Prompt templates live in the local app_settings KV — like the agent
-// registry, there's no remote analogue in v1.
-
 func (c *remoteClient) GetPromptTemplates(ctx context.Context) (map[string]string, error) {
 	return nil, remoteAgentNotSupported("prompt-templates")
 }
@@ -122,9 +228,6 @@ func (c *remoteClient) GetPromptStates(ctx context.Context) (map[string][]string
 func (c *remoteClient) SetPromptStates(ctx context.Context, mode string, states []string, dryRun bool) error {
 	return remoteAgentNotSupported("prompt-states")
 }
-
-// Board preferences live in the local app_settings KV — like the agent
-// registry and prompt templates, there's no remote analogue in v1.
 
 func (c *remoteClient) GetBoardPreferences(ctx context.Context) (BoardPreferences, error) {
 	return BoardPreferences{}, remoteAgentNotSupported("board-preferences")

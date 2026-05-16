@@ -357,3 +357,101 @@ func TestRoundTripNotFoundError(t *testing.T) {
 		t.Fatalf("local miss should be store.ErrNotFound; got %v", err)
 	}
 }
+
+// TestRoundTripAgentLifecycle exercises the BACI-34 agent verbs through
+// the remote backend and verifies the local store observes the same
+// state — the strongest single-test correctness check for parity.
+func TestRoundTripAgentLifecycle(t *testing.T) {
+	p := newPair(t)
+	defer p.cleanup()
+	ctx := context.Background()
+
+	iss, err := p.local.CreateIssue(ctx, p.repo, inputs.IssueAddInput{
+		Title: "round-trip target", State: "todo",
+	}, false)
+	if err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+
+	// Register via remote.
+	sess, err := p.remote.RegisterAgent(ctx, p.repo, inputs.AgentRegisterInput{
+		SessionID: "rt-sess", Actor: "tester", Model: "claude-opus-4-7",
+	}, false)
+	if err != nil {
+		t.Fatalf("remote RegisterAgent: %v", err)
+	}
+	if sess.SessionID != "rt-sess" {
+		t.Fatalf("remote RegisterAgent session_id = %q", sess.SessionID)
+	}
+
+	// Local observes the same registered session in the default list.
+	got, err := p.local.ListAgentSessions(ctx, AgentSessionFilter{
+		Repo: p.repo, RegisteredOnly: true,
+	})
+	if err != nil {
+		t.Fatalf("local ListAgentSessions: %v", err)
+	}
+	if len(got) != 1 || got[0].SessionID != "rt-sess" {
+		t.Fatalf("local list after remote register: %+v", got)
+	}
+
+	// Remote claim, observed by local-side derived `taken`.
+	if _, err := p.remote.ClaimAgent(ctx, p.repo, inputs.AgentClaimInput{
+		SessionID: "rt-sess", IssueKey: iss.Key, Prompt: "do the thing",
+	}, false); err != nil {
+		t.Fatalf("remote ClaimAgent: %v", err)
+	}
+	open, err := p.local.ListOpenClaims(ctx, p.repo)
+	if err != nil {
+		t.Fatalf("local ListOpenClaims: %v", err)
+	}
+	if len(open) != 1 || open[0].IssueKey != iss.Key {
+		t.Fatalf("local open claims: %+v", open)
+	}
+	post, _ := p.local.GetIssueByKey(ctx, p.repo, iss.Key)
+	if post.Assignee != "tester" {
+		t.Fatalf("local-observed assignee after remote claim = %q", post.Assignee)
+	}
+
+	// Remote show (cross-repo verb) sees the claim history.
+	view, err := p.remote.ShowAgentSession(ctx, "rt-sess")
+	if err != nil {
+		t.Fatalf("remote ShowAgentSession: %v", err)
+	}
+	if len(view.Claims) != 1 || view.Claims[0].Prompt != "do the thing" {
+		t.Fatalf("remote show claims: %+v", view.Claims)
+	}
+
+	// Remote release clears the assignee back out.
+	if _, err := p.remote.ReleaseAgent(ctx, p.repo, inputs.AgentReleaseInput{
+		SessionID: "rt-sess", IssueKey: iss.Key,
+	}, false); err != nil {
+		t.Fatalf("remote ReleaseAgent: %v", err)
+	}
+	open2, _ := p.local.ListOpenClaims(ctx, p.repo)
+	if len(open2) != 0 {
+		t.Fatalf("open claims after release: %+v", open2)
+	}
+	post2, _ := p.local.GetIssueByKey(ctx, p.repo, iss.Key)
+	if post2.Assignee != "" {
+		t.Fatalf("assignee after remote release = %q", post2.Assignee)
+	}
+
+	// Heartbeat is silent (no audit row, just bumps last_seen_at).
+	if _, err := p.remote.HeartbeatAgent(ctx, p.repo, inputs.AgentHeartbeatInput{
+		SessionID: "rt-sess",
+	}, false); err != nil {
+		t.Fatalf("remote HeartbeatAgent: %v", err)
+	}
+
+	// End closes the session out.
+	if _, err := p.remote.EndAgent(ctx, p.repo, inputs.AgentEndInput{
+		SessionID: "rt-sess", Reason: "stop",
+	}, false); err != nil {
+		t.Fatalf("remote EndAgent: %v", err)
+	}
+	ended, _ := p.store.GetAgentSession("rt-sess")
+	if ended.EndedAt == nil || ended.EndReason != "stop" {
+		t.Fatalf("ended state: %+v", ended)
+	}
+}
