@@ -239,6 +239,13 @@ func (s *channelSource) Ack(ctx context.Context, eventID int64, note string) err
 // sets agent_id, actor, model, branch, channel_version,
 // registered_at), and stamp channel_seen_at via LinkSessionChannel.
 //
+// Identity preservation across /clear: we look up the existing slug
+// for this claude_pid in agents.json and pass it through, so the new
+// post-/clear session inherits the previous identity instead of being
+// minted a fresh one (which would orphan the previous slug — the
+// SessionEnd hook just marked its last session ended:clear). An empty
+// hint (truly new claude_pid, no agents.json entry) still mints fresh.
+//
 // The bacio binary version stamped onto agent_sessions.channel_version
 // comes from internal/version.String() inside this channel process —
 // NOT from anything the agent passes. The agent doesn't reliably know
@@ -258,6 +265,7 @@ func (s *channelSource) Register(ctx context.Context, sessionID, modelID, branch
 	}
 	sess, err := s.c.CompleteRegistration(ctx, s.repo, inputs.AgentRegisterInput{
 		SessionID: sessionID,
+		Agent:     s.hintedAgentName(),
 		Host:      s.host,
 		Model:     modelID,
 		Branch:    branch,
