@@ -76,6 +76,35 @@ func (ls *LeaderService) ServiceStartup(_ context.Context, _ application.Service
 			}
 		}
 	}()
+
+	// Live-list prune ticker: only the controlling UI prunes ended
+	// agent_sessions older than AgentSessionLiveListRetention so two
+	// side-by-side UIs don't race on the same DELETE. The ticker keeps
+	// running regardless of leader state — the lease can flip back to us
+	// mid-run — but the prune itself is gated on the cached state.
+	// ServiceShutdown closes ls.done and ls.wg.Wait()s before the store
+	// is closed, so an in-flight tick can never race with store close.
+	ls.wg.Add(1)
+	go func() {
+		defer ls.wg.Done()
+		ticker := time.NewTicker(store.UILeaderPruneInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if !ls.elector.CurrentState().AmLeader {
+					continue
+				}
+				if _, err := ls.st.PruneEndedAgentSessions(
+					store.AgentSessionLiveListRetention); err != nil {
+					fmt.Fprintln(os.Stderr,
+						"bacio: live agent-session prune failed:", err)
+				}
+			case <-ls.done:
+				return
+			}
+		}
+	}()
 	return nil
 }
 
