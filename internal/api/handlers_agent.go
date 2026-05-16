@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
+	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/inputio"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
@@ -951,3 +952,62 @@ func (d deps) handleAgentDispatchCreate(w http.ResponseWriter, r *http.Request) 
 
 // (dispatchTargetLabel and dispatchDetails live above — defined for the
 // ack handler and reused by create.)
+
+// ---------- state-gated auto-pick dispatch (BACI-40) ----------
+
+// handleIssueDispatch is the REST entry point for the state-gated
+// auto-pick dispatch verb: re-check the stage's state-gate against the
+// issue's current state, pick the most-recently-active free agent
+// (live, not busy, has a channel, no un-acked dispatch already
+// queued), then queue the dispatch against it. Mirrors the desktop
+// per-card action button and the CLI's target-less `bacio agent
+// dispatch <key> --mode <stage>`; all three routes share the
+// client.AutoDispatchIssue implementation so the picker and gate
+// logic only lives in one place.
+func (d deps) handleIssueDispatch(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	iss, ok := resolveIssueOnRepo(w, r, d.store, repo)
+	if !ok {
+		return
+	}
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	in, _, err := inputio.DecodeStrict[inputs.IssueDispatchInput](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	if in.Mode == "" {
+		writeError(w, http.StatusBadRequest, "invalid_input",
+			"a dispatch mode is required", map[string]any{"field": "mode"})
+		return
+	}
+
+	who := ActorFromContext(r.Context())
+	c := client.NewLocalFromStore(d.store, who)
+	defer c.Close()
+	dsp, err := c.AutoDispatchIssue(r.Context(), repo, iss.Key, in.Mode, isDryRun(r))
+	if err != nil {
+		// Surface the picker / state-gate misses as 400s (caller's choice
+		// to retry / pick a different mode) rather than 500s. Anything
+		// else falls through to statusForError.
+		msg := err.Error()
+		if strings.Contains(msg, "no free agent") || strings.Contains(msg, "can't run from") {
+			writeError(w, http.StatusBadRequest, "invalid_input", msg, nil)
+			return
+		}
+		status, code := statusForError(err)
+		writeError(w, status, code, msg, nil)
+		return
+	}
+	if isDryRun(r) {
+		writeDryRun(w, http.StatusCreated, dsp)
+		return
+	}
+	writeJSON(w, http.StatusCreated, dsp)
+}

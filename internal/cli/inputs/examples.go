@@ -149,6 +149,9 @@ var (
 		ID:   7,
 		Note: "On it — claimed MINI-42, opening a PR shortly.",
 	}
+	ExampleIssueDispatch = IssueDispatchInput{
+		Mode: "implement",
+	}
 
 	ExampleRepoCreate = RepoCreateInput{
 		Prefix:    "MINI",

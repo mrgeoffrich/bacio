@@ -98,6 +98,12 @@ func newRouter(d deps) http.Handler {
 	// dispatch is always queued against one repo.
 	mux.HandleFunc("POST /repos/{prefix}/agents/dispatches", d.handleAgentDispatchCreate)
 	mux.HandleFunc("GET /repos/{prefix}/agents/dispatches", d.handleAgentDispatchesList)
+	// State-gated auto-pick dispatch (BACI-40): re-check the stage's
+	// state-gate against the issue's current state, pick the most-
+	// recently-active free agent, and queue the dispatch. Mirrors the
+	// desktop per-card action button and the CLI's target-less
+	// `bacio agent dispatch <key> --mode <stage>`.
+	mux.HandleFunc("POST /repos/{prefix}/issues/{key}/dispatch", d.handleIssueDispatch)
 
 	// Prompt templates + state-gates (BACI-36). Global app_settings —
 	// no /repos/{prefix} scope. Six routes: a GET-all for each of bodies

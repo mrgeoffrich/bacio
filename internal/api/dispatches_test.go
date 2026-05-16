@@ -235,3 +235,142 @@ func mustDecode(t *testing.T, raw []byte, out any) {
 		t.Fatalf("decode %T: %v (body: %s)", out, err, string(raw))
 	}
 }
+
+// ---------- state-gated auto-pick dispatch (BACI-40) ----------
+
+// seedChannelLiveSession is the agent-side fixture for an auto-dispatch
+// target: a registered session against the given agent identity plus a
+// fresh agent_channels heartbeat at the same (host, claude_pid) — both
+// required for `pickFreeAgent` to consider the session.
+func seedChannelLiveSession(t *testing.T, s *store.Store, repo *model.Repo, sessionID string, ag *model.Agent, claudePID int64) *model.AgentSession {
+	t.Helper()
+	sess := seedAgentSession(t, s, repo, sessionID, ag)
+	if err := s.UpsertAgentChannel(store.UpsertAgentChannelIn{
+		RepoID: repo.ID, AgentID: &ag.ID,
+		Host: "host", ClaudePID: claudePID, ChannelPID: claudePID + 1,
+	}); err != nil {
+		t.Fatalf("UpsertAgentChannel: %v", err)
+	}
+	if err := s.LinkSessionChannel(sessionID, claudePID, "host"); err != nil {
+		t.Fatalf("LinkSessionChannel: %v", err)
+	}
+	return sess
+}
+
+func TestIssueDispatchHappyPath(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	iss := seedIssue(t, s, repo, "auto pick me")
+	ag := seedAgentIdentity(t, s, "swift-otter@claude.test")
+	_ = seedChannelLiveSession(t, s, repo, "sess-auto", ag, 9100)
+
+	resp, raw := apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/issues/"+iss.Key+"/dispatch",
+		map[string]any{"mode": string(model.DispatchModeImplement)})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status %d, body %s", resp.StatusCode, raw)
+	}
+	var got model.AgentDispatch
+	mustDecode(t, raw, &got)
+	if got.ID == 0 {
+		t.Fatalf("expected an id, got 0")
+	}
+	if got.TargetAgentName != ag.Name {
+		t.Errorf("TargetAgentName = %q, want %q", got.TargetAgentName, ag.Name)
+	}
+	if got.IssueKey != iss.Key {
+		t.Errorf("IssueKey = %q, want %q", got.IssueKey, iss.Key)
+	}
+	if string(got.Mode) != string(model.DispatchModeImplement) {
+		t.Errorf("Mode = %q, want %q", got.Mode, model.DispatchModeImplement)
+	}
+	assertHistoryOps(t, s, []string{"agent.dispatch"})
+}
+
+func TestIssueDispatchDryRun(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	iss := seedIssue(t, s, repo, "preview only")
+	ag := seedAgentIdentity(t, s, "swift-otter@claude.test")
+	_ = seedChannelLiveSession(t, s, repo, "sess-auto-dry", ag, 9200)
+
+	resp, raw := apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/issues/"+iss.Key+"/dispatch?dry_run=1",
+		map[string]any{"mode": string(model.DispatchModeImplement)})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status %d, body %s", resp.StatusCode, raw)
+	}
+	if got := resp.Header.Get("X-Dry-Run"); got != "applied" {
+		t.Fatalf("X-Dry-Run = %q, want applied", got)
+	}
+	var proj model.AgentDispatch
+	mustDecode(t, raw, &proj)
+	if proj.ID != 0 {
+		t.Errorf("dry-run id = %d, want 0", proj.ID)
+	}
+	if proj.TargetAgentName != ag.Name {
+		t.Errorf("dry-run target = %q, want %q", proj.TargetAgentName, ag.Name)
+	}
+	ds, _ := s.ListDispatches(store.DispatchFilter{RepoID: &repo.ID})
+	if len(ds) != 0 {
+		t.Fatalf("dry-run persisted %d row(s), want 0", len(ds))
+	}
+	assertHistoryOps(t, s, nil)
+}
+
+func TestIssueDispatchStateGate(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	iss := seedIssue(t, s, repo, "wrong state")
+	ag := seedAgentIdentity(t, s, "swift-otter@claude.test")
+	_ = seedChannelLiveSession(t, s, repo, "sess-auto-gate", ag, 9300)
+
+	// "review" is gated to in_review by default; a todo issue must 400.
+	resp, raw := apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/issues/"+iss.Key+"/dispatch",
+		map[string]any{"mode": string(model.DispatchModeReview)})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status %d, body %s", resp.StatusCode, raw)
+	}
+	var env map[string]any
+	mustDecode(t, raw, &env)
+	if env["code"] != "invalid_input" {
+		t.Errorf("code = %v, want invalid_input", env["code"])
+	}
+}
+
+func TestIssueDispatchNoFreeAgent(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	iss := seedIssue(t, s, repo, "no agent")
+
+	resp, raw := apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/issues/"+iss.Key+"/dispatch",
+		map[string]any{"mode": string(model.DispatchModeImplement)})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status %d, body %s", resp.StatusCode, raw)
+	}
+}
+
+func TestIssueDispatchMissingMode(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	iss := seedIssue(t, s, repo, "missing mode")
+
+	resp, raw := apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/issues/"+iss.Key+"/dispatch",
+		map[string]any{})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status %d, body %s", resp.StatusCode, raw)
+	}
+}
+
+func TestIssueDispatchIssueInOtherRepo(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	other := seedRepo2(t, s)
+	otherIss := seedIssue(t, s, other, "lives elsewhere")
+
+	// Posting against repo's prefix but the OTHR-N key must 404 rather
+	// than leaking the issue to a different repo.
+	resp, raw := apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/issues/"+otherIss.Key+"/dispatch",
+		map[string]any{"mode": string(model.DispatchModeImplement)})
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status %d, body %s", resp.StatusCode, raw)
+	}
+}

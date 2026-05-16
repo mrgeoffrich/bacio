@@ -1,4 +1,4 @@
-package client
+package client_test
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
+	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
@@ -190,7 +191,7 @@ func TestBoardPreferencesLocal(t *testing.T) {
 	}
 
 	// A real set persists.
-	if err := p.local.SetBoardPreferences(ctx, BoardPreferences{HideEmptyColumns: true}, false); err != nil {
+	if err := p.local.SetBoardPreferences(ctx, client.BoardPreferences{HideEmptyColumns: true}, false); err != nil {
 		t.Fatalf("SetBoardPreferences: %v", err)
 	}
 	prefs, err = p.local.GetBoardPreferences(ctx)
@@ -202,7 +203,7 @@ func TestBoardPreferencesLocal(t *testing.T) {
 	}
 
 	// A dry-run set writes nothing — the stored value stays put.
-	if err := p.local.SetBoardPreferences(ctx, BoardPreferences{HideEmptyColumns: false}, true); err != nil {
+	if err := p.local.SetBoardPreferences(ctx, client.BoardPreferences{HideEmptyColumns: false}, true); err != nil {
 		t.Fatalf("SetBoardPreferences dry-run: %v", err)
 	}
 	prefs, err = p.local.GetBoardPreferences(ctx)
@@ -214,10 +215,10 @@ func TestBoardPreferencesLocal(t *testing.T) {
 	}
 
 	// The remote backend refuses — Board preferences are local-only.
-	if _, err := p.remote.GetBoardPreferences(ctx); !errors.Is(err, ErrLocalOnly) {
+	if _, err := p.remote.GetBoardPreferences(ctx); !errors.Is(err, client.ErrLocalOnly) {
 		t.Fatalf("remote GetBoardPreferences err = %v, want ErrLocalOnly", err)
 	}
-	if err := p.remote.SetBoardPreferences(ctx, BoardPreferences{}, false); !errors.Is(err, ErrLocalOnly) {
+	if err := p.remote.SetBoardPreferences(ctx, client.BoardPreferences{}, false); !errors.Is(err, client.ErrLocalOnly) {
 		t.Fatalf("remote SetBoardPreferences err = %v, want ErrLocalOnly", err)
 	}
 }
@@ -322,7 +323,7 @@ func TestDispatchRemoteNotSupported(t *testing.T) {
 	defer p.cleanup()
 	ctx := context.Background()
 
-	if _, err := p.remote.DrainDispatches(ctx, "sess-x"); !errors.Is(err, ErrLocalOnly) {
+	if _, err := p.remote.DrainDispatches(ctx, "sess-x"); !errors.Is(err, client.ErrLocalOnly) {
 		t.Fatalf("remote DrainDispatches err = %v, want ErrLocalOnly", err)
 	}
 }
