@@ -17,6 +17,13 @@ const (
 	// The 18x ratio vs the heartbeat interval means a GC pause or slow
 	// write won't trigger a false takeover.
 	UILeaderStaleSeconds = 180
+
+	// UILeaderPruneInterval is how often the controlling UI fires the
+	// short-window prune of ended agent_sessions (see
+	// AgentSessionLiveListRetention). Independent of the heartbeat
+	// cadence: a separate ticker keeps the prune cadence honest even if
+	// a future change tweaks heartbeat frequency.
+	UILeaderPruneInterval = 5 * time.Minute
 )
 
 // LeaderInfo is the current state of the ui_leader row, returned by

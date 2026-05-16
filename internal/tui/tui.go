@@ -14,6 +14,7 @@ package tui
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"os/signal"
 	"strings"
@@ -88,6 +89,21 @@ func leaderTick() tea.Cmd {
 	})
 }
 
+// pruneTickMsg fires on the controller-UI live-list prune cadence
+// (UILeaderPruneInterval). Handled at the shell level: when this process
+// holds the leader lease, the shell calls Store.PruneEndedAgentSessions
+// with AgentSessionLiveListRetention; standby ticks are no-ops. The
+// cadence keeps running regardless of leader state so a standby→leader
+// promotion picks up the next tick on schedule.
+type pruneTickMsg time.Time
+
+// pruneTick returns a Cmd that fires pruneTickMsg after UILeaderPruneInterval.
+func pruneTick() tea.Cmd {
+	return tea.Tick(store.UILeaderPruneInterval, func(t time.Time) tea.Msg {
+		return pruneTickMsg(t)
+	})
+}
+
 // Run boots the Bubble Tea program in alt-screen mode and blocks until
 // quit. The store is owned by the caller. It constructs a leader.Elector
 // for the process and releases the lease on graceful exit.
@@ -132,6 +148,7 @@ func NewModel(s *store.Store, repo *model.Repo, el *leader.Elector) (*Model, err
 	}
 	return &Model{
 		repo:    repo,
+		store:   s,
 		elector: el,
 		tabs: []tab{
 			{"Board", board},
@@ -158,6 +175,9 @@ type Model struct {
 	// explicitly (digit/tab/shift+tab) so a manual swap doesn't bounce
 	// back later.
 	returnTab int
+	// store is the shell-level handle the elector-gated prune ticker
+	// uses (views still hold their own copies for their own queries).
+	store *store.Store
 	// elector runs the UI leader election; nil in the WASM demo.
 	elector     *leader.Elector
 	leaderState leader.State
@@ -178,6 +198,11 @@ func (m *Model) Init() tea.Cmd {
 		// succeed on the spot. The leaderTickMsg handler chains the next
 		// tick via leaderTick(), so this only seeds the loop.
 		cmds = append(cmds, func() tea.Msg { return leaderTickMsg(time.Now()) })
+		// Seed the live-list prune cadence. We don't fire immediately:
+		// store.Open() has just run the 60-day pruneAgentSessions a moment
+		// ago, so there are no >4h-old ended rows newer than that pass'
+		// cutoff. The first real tick fires UILeaderPruneInterval later.
+		cmds = append(cmds, pruneTick())
 	}
 	if len(cmds) == 0 {
 		return nil
@@ -201,6 +226,23 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		state := m.leaderState
 		stateCmd := func() tea.Msg { return leaderStateMsg{state: state} }
 		return m, tea.Batch(leaderTick(), stateCmd)
+	case pruneTickMsg:
+		// Live-list prune tick: drop ended agent_sessions older than
+		// AgentSessionLiveListRetention so the Agents list stays tidy.
+		// Gated on the leader lease — only the controlling UI prunes so
+		// two UIs don't race on the same DELETE. The ticker keeps
+		// running on standby (the lease can flip back to us mid-run).
+		// Best-effort: a transient DB error is logged and we carry on.
+		if m.elector != nil && m.leaderState.AmLeader {
+			if _, err := m.store.PruneEndedAgentSessions(
+				store.AgentSessionLiveListRetention); err != nil {
+				log.Printf("bacio: live agent-session prune failed: %v", err)
+			}
+		}
+		if m.elector == nil {
+			return m, nil
+		}
+		return m, pruneTick()
 	case openDocMsg:
 		// Cross-tab: hand the filename to the Documents tab and focus
 		// it. Remember where we came from so esc on the doc overlay
