@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { NotionEditor } from './editor/NotionEditor';
+import { reportError } from '../errors';
 import * as api from '../api';
 
 // Human label for a bacio document-type enum value.
@@ -16,7 +17,6 @@ export default function DocsView({ activeBoard }) {
   const [savedContent, setSavedContent] = useState(''); // last persisted body
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(null);
 
   const repoSelected = !!activeBoard;
   const dirty = content !== savedContent;
@@ -26,21 +26,19 @@ export default function DocsView({ activeBoard }) {
     setSelected(null);
     setContent('');
     setSavedContent('');
-    setError(null);
     if (!repoSelected) {
       setDocs([]);
       return;
     }
     api.listDocs(activeBoard)
       .then(setDocs)
-      .catch(err => setError(err.message));
+      .catch(err => reportError(err, { headline: "Couldn't list docs" }));
   }, [activeBoard, repoSelected]);
 
   // Load the chosen document's markdown body.
   useEffect(() => {
     if (!selected || !repoSelected) return;
     setLoading(true);
-    setError(null);
     api.getDoc(activeBoard, selected)
       .then(doc => {
         setContent(doc.content);
@@ -48,7 +46,7 @@ export default function DocsView({ activeBoard }) {
         setLoading(false);
       })
       .catch(err => {
-        setError(err.message);
+        reportError(err, { headline: "Couldn't load document" });
         setLoading(false);
       });
   }, [selected, activeBoard, repoSelected]);
@@ -56,14 +54,13 @@ export default function DocsView({ activeBoard }) {
   const save = useCallback(() => {
     if (!selected || !dirty || saving) return;
     setSaving(true);
-    setError(null);
     api.saveDoc(activeBoard, selected, content)
       .then(doc => {
         setSavedContent(doc.content);
         setSaving(false);
       })
       .catch(err => {
-        setError(err.message);
+        reportError(err, { headline: "Couldn't save document" });
         setSaving(false);
       });
   }, [activeBoard, selected, content, dirty, saving]);
@@ -96,7 +93,6 @@ export default function DocsView({ activeBoard }) {
       </aside>
 
       <div className="mk-docs-main">
-        {error && <div className="mk-docs-error">{error}</div>}
         {!selected ? (
           <div className="mk-docs-empty">Pick a document to start editing.</div>
         ) : loading ? (

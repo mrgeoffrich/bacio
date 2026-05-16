@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from './Icon.jsx';
+import { reportError } from '../errors';
 import * as api from '../api';
 
 const THEME_OPTIONS = [
@@ -40,7 +41,6 @@ export default function SettingsView({
   const [placeholders, setPlaceholders] = useState([]);
   const [drafts, setDrafts] = useState({});
   const [savingSlug, setSavingSlug] = useState(null);
-  const [tmplError, setTmplError] = useState(null);
   const [bacioVer, setBacioVer] = useState('');
 
   // Add-template inline form. `null` = collapsed; an object = open.
@@ -65,9 +65,8 @@ export default function SettingsView({
         if (cancelled) return;
         setPlaceholders(ph);
         setBacioVer(ver);
-        setTmplError(null);
       })
-      .catch(err => { if (!cancelled) setTmplError(err.message); });
+      .catch(err => { if (!cancelled) reportError(err, { headline: "Couldn't load templates" }); });
     return () => { cancelled = true; };
   }, [refreshTemplates]);
 
@@ -84,10 +83,9 @@ export default function SettingsView({
       const updated = await api.savePromptTemplate(slug, body);
       setTemplates(prev => prev.map(t => (t.slug === slug ? updated : t)));
       setDrafts(prev => ({ ...prev, [slug]: updated.body }));
-      setTmplError(null);
       notifyTemplatesChanged();
     } catch (err) {
-      setTmplError(err.message);
+      reportError(err, { headline: "Couldn't save template body" });
     } finally {
       setSavingSlug(null);
     }
@@ -98,10 +96,9 @@ export default function SettingsView({
     try {
       const updated = await api.savePromptStates(slug, states);
       setTemplates(prev => prev.map(t => (t.slug === slug ? updated : t)));
-      setTmplError(null);
       notifyTemplatesChanged();
     } catch (err) {
-      setTmplError(err.message);
+      reportError(err, { headline: "Couldn't save template states" });
     } finally {
       setSavingSlug(null);
     }
@@ -122,10 +119,9 @@ export default function SettingsView({
       await api.addPromptTemplate(adding.slug, adding.name, adding.body, adding.states);
       setAdding(null);
       await refreshTemplates();
-      setTmplError(null);
       notifyTemplatesChanged();
     } catch (err) {
-      setTmplError(err.message);
+      reportError(err, { headline: "Couldn't add template" });
     } finally {
       setSavingSlug(null);
     }
@@ -138,10 +134,9 @@ export default function SettingsView({
       await api.renamePromptTemplate(renaming.slug, renaming.newSlug, renaming.newName);
       setRenaming(null);
       await refreshTemplates();
-      setTmplError(null);
       notifyTemplatesChanged();
     } catch (err) {
-      setTmplError(err.message);
+      reportError(err, { headline: "Couldn't rename template" });
     } finally {
       setSavingSlug(null);
     }
@@ -154,10 +149,9 @@ export default function SettingsView({
       await api.deletePromptTemplate(pendingDelete);
       setPendingDelete(null);
       await refreshTemplates();
-      setTmplError(null);
       notifyTemplatesChanged();
     } catch (err) {
-      setTmplError(err.message);
+      reportError(err, { headline: "Couldn't delete template" });
     } finally {
       setSavingSlug(null);
     }
@@ -170,10 +164,9 @@ export default function SettingsView({
       const refreshed = await api.restoreBuiltinPromptTemplates();
       setTemplates(refreshed);
       setDrafts(Object.fromEntries(refreshed.map(t => [t.slug, t.body])));
-      setTmplError(null);
       notifyTemplatesChanged();
     } catch (err) {
-      setTmplError(err.message);
+      reportError(err, { headline: "Couldn't restore built-in templates" });
     } finally {
       setSavingSlug(null);
     }
@@ -274,8 +267,6 @@ export default function SettingsView({
               Restore built-ins{missingBuiltins.length > 0 ? ` (${missingBuiltins.length})` : ''}
             </button>
           </div>
-
-          {tmplError && <div className="mk-settings-error">{tmplError}</div>}
 
           {adding && (
             <div className="mk-tmpl mk-tmpl-adding">
