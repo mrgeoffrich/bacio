@@ -120,10 +120,14 @@ type ClaimantDTO struct {
 }
 
 // ClaimDTO is one open agent claim, shaped for the Agents screen.
+// State is the claimed issue's current state — needed to derive the
+// session's Waiting flag and to annotate each claim in the drill-down
+// (e.g. "BACI-12 (needs action)").
 type ClaimDTO struct {
 	IssueKey  string    `json:"issueKey"`
 	Prompt    string    `json:"prompt"`
 	ClaimedAt time.Time `json:"claimedAt"`
+	State     string    `json:"state"`
 }
 
 // DispatchDTO is one queued dispatch — returned both inside an AgentCard
@@ -156,6 +160,14 @@ type AgentCard struct {
 	// session is not a valid dispatch target.
 	Busy       bool          `json:"busy"`
 	BusyIssue  string        `json:"busyIssue"`
+	// Waiting is true while the session holds an open claim on an issue
+	// in needs_action — the derived "parked, waiting on the user"
+	// signal. The Stop hook auto-flips a claimed in_progress issue to
+	// needs_action on idle, so this lights up automatically. A waiting
+	// session is also busy; the UI renders the waiting badge in place
+	// of busy because it's the actionable state.
+	Waiting      bool   `json:"waiting"`
+	WaitingIssue string `json:"waitingIssue"`
 	// HasChannel is true when the bacio channel MCP server has been seen
 	// running alongside this session. Only sessions with a live channel
 	// can receive push dispatches — sessions without one are interactive
@@ -572,6 +584,35 @@ func (b *BoardService) ListAgents(repoPrefix string) ([]AgentCard, error) {
 		allDispatches = append(allDispatches, ds...)
 	}
 
+	// Build a key→state lookup of every non-terminal issue across the
+	// in-scope repos in one bulk read per repo, so each claim can carry
+	// its issue's current state without a per-claim round trip. The
+	// derived Waiting flag reads from this map; populating ClaimDTO.State
+	// from the same source means a card can render "BACI-12 (needs
+	// action)" in the drill-down for free.
+	issueState := make(map[string]model.State)
+	for _, r := range repos {
+		issues, err := b.client.ListIssues(ctx, client.IssueFilter{
+			Repo: r,
+			States: []model.State{
+				model.StateTodo, model.StateInProgress,
+				model.StateNeedsAction, model.StateInReview,
+			},
+		})
+		if err != nil {
+			return nil, err
+		}
+		for _, iss := range issues {
+			issueState[iss.Key] = iss.State
+		}
+	}
+	needsAction := make(map[string]bool)
+	for k, st := range issueState {
+		if st == model.StateNeedsAction {
+			needsAction[k] = true
+		}
+	}
+
 	now := time.Now()
 	cards := make([]AgentCard, 0, len(sessions))
 	for _, s := range sessions {
@@ -603,7 +644,10 @@ func (b *BoardService) ListAgents(repoPrefix string) ([]AgentCard, error) {
 			if c.ReleasedAt == nil {
 				openClaims = append(openClaims, c)
 				card.Claims = append(card.Claims, ClaimDTO{
-					IssueKey: c.IssueKey, Prompt: c.Prompt, ClaimedAt: c.ClaimedAt,
+					IssueKey:  c.IssueKey,
+					Prompt:    c.Prompt,
+					ClaimedAt: c.ClaimedAt,
+					State:     string(issueState[c.IssueKey]),
 				})
 			}
 		}
@@ -612,6 +656,7 @@ func (b *BoardService) ListAgents(repoPrefix string) ([]AgentCard, error) {
 		// anyway in case of a stale read).
 		if s.EndedAt == nil {
 			card.Busy, card.BusyIssue = model.SessionBusy(openClaims)
+			card.Waiting, card.WaitingIssue = model.SessionWaiting(openClaims, needsAction)
 		}
 		for _, d := range allDispatches {
 			if dispatchTargetsSession(d, s) {

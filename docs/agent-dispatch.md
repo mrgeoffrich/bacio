@@ -263,6 +263,60 @@ data viewed session-first instead of issue-first.
 
 ---
 
+## Claimed-issue state tracks agent idle/active
+
+A claimed issue stays in lock-step with whether the agent is currently
+working it. The signal is precise: the Claude Code `Stop` hook fires
+exactly when the agent's turn ends and it parks waiting on the user — a
+word-for-word match for `model.StateNeedsAction`. So:
+
+- **`Stop` hook** → for each open claim the session holds, if the
+  claimed issue is `in_progress`, flip it to `needs_action`.
+- **`UserPromptSubmit` hook** → symmetric inverse: a fresh prompt
+  arrived, so flip every `needs_action` claimed issue back to
+  `in_progress`.
+
+The flip is **edge-only** — only issues already in the matching "from"
+state are touched, so a no-op turn writes nothing (no `SetIssueState`
+call, no `issue.state` audit row, no `updated_at` bump). The shared
+helper is `hookContext.syncClaimedIssueStates(sessionID, idle bool)` in
+`internal/cli/hook.go`; every error path logs to stderr and never fails
+the hook.
+
+The kanban side-effect is free: the claimed issue naturally appears in
+the `needs_action` column whenever its agent is parked, so the board
+shows at a glance which jobs are waiting on you.
+
+The Agents screens surface the same signal as a `waiting · <ISSUE-KEY>`
+badge in place of the `busy` badge — waiting supersedes busy because it
+points at the same issue and is the actionable state. The derive is
+`model.SessionWaiting(openClaims, needsActionKeys)` — same shape as
+`SessionBusy`, plus the key-set of issues currently in `needs_action`:
+
+- **TUI** (`internal/tui/agents.go`) — `agentsView.needsAction` is
+  populated by a per-reload `ListIssues(states=needs_action)` against
+  the repo; `renderCard`/`viewDetail` render the amber `agentWaitingBadge`
+  in preference to the blue `agentBusyBadge`, and the drill-down
+  annotates each `(needs action)` claim line.
+- **Desktop** (`desktop/boardservice.go`) — `BoardService.ListAgents`
+  bulk-fetches every non-terminal issue per in-scope repo into a
+  `key → state` map, so each `ClaimDTO` carries its `State` and the
+  card carries `Waiting`/`WaitingIssue`. The frontend pill is
+  `.mk-status-waiting` (`AgentsView.jsx` + `desktop.css`), painted with
+  the needs_action column palette so the badge and the column read as
+  the same thing.
+
+Cost is purely cosmetic — every agent turn on a claimed issue toggles
+its state, writing two `issue.state` audit rows + two `updated_at`
+bumps. The audit rows are bounded by `HistoryRetention` (60 days). The
+`updated_at` churn feeds git-backed sync's last-writer-wins; if it ever
+bites, a quieter audit path (a non-recording store call, or recording
+only the `in_progress → needs_action` edge) is the noted follow-up. A
+`Notification`/`idle_prompt` hook tier is also possible as a future
+stronger "idle for a while" signal layered on top.
+
+---
+
 ## Agent identity & the `claude_pid` correlation
 
 Dispatch delivery leans on one fact about the Claude Code process tree:

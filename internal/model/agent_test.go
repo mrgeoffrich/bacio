@@ -112,6 +112,50 @@ func TestDefaultPromptBodyForBuiltinSlug(t *testing.T) {
 	}
 }
 
+func TestSessionWaiting(t *testing.T) {
+	t0 := time.Date(2026, 5, 16, 9, 0, 0, 0, time.UTC)
+	released := t0.Add(time.Hour)
+
+	cases := []struct {
+		name        string
+		claims      []*AgentClaim
+		needsAction map[string]bool
+		wantOK      bool
+		wantKey     string
+	}{
+		{"no claims", nil, map[string]bool{"BACI-1": true}, false, ""},
+		{"open claim but issue not in needs_action", []*AgentClaim{
+			{IssueKey: "BACI-1", ClaimedAt: t0},
+		}, map[string]bool{"BACI-2": true}, false, ""},
+		{"open claim on needs_action issue", []*AgentClaim{
+			{IssueKey: "BACI-1", ClaimedAt: t0},
+		}, map[string]bool{"BACI-1": true}, true, "BACI-1"},
+		{"released claim ignored", []*AgentClaim{
+			{IssueKey: "BACI-1", ClaimedAt: t0, ReleasedAt: &released},
+		}, map[string]bool{"BACI-1": true}, false, ""},
+		{"nil entries skipped", []*AgentClaim{
+			nil,
+			{IssueKey: "BACI-1", ClaimedAt: t0},
+		}, map[string]bool{"BACI-1": true}, true, "BACI-1"},
+		{"newest waiting claim wins", []*AgentClaim{
+			{IssueKey: "BACI-1", ClaimedAt: t0},
+			{IssueKey: "BACI-2", ClaimedAt: t0.Add(time.Minute)},
+		}, map[string]bool{"BACI-1": true, "BACI-2": true}, true, "BACI-2"},
+		{"non-waiting newer claim doesn't mask waiting older claim", []*AgentClaim{
+			{IssueKey: "BACI-1", ClaimedAt: t0},
+			{IssueKey: "BACI-2", ClaimedAt: t0.Add(time.Minute)},
+		}, map[string]bool{"BACI-1": true}, true, "BACI-1"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			gotOK, gotKey := SessionWaiting(c.claims, c.needsAction)
+			if gotOK != c.wantOK || gotKey != c.wantKey {
+				t.Errorf("SessionWaiting() = (%v, %q), want (%v, %q)", gotOK, gotKey, c.wantOK, c.wantKey)
+			}
+		})
+	}
+}
+
 func TestSessionLiveness(t *testing.T) {
 	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
 	ended := now.Add(-time.Hour)
