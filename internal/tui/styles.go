@@ -33,9 +33,9 @@ var (
 			Padding(0, 2)
 	tabSep = lipgloss.NewStyle().Foreground(lipgloss.Color("238")).Render("·")
 
-	// Leader election chips rendered in renderHeader.
-	leaderLeadStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("76")).Padding(0, 1)  // green — this process controls
-	leaderStandbyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).Padding(0, 1) // muted — deferring to another
+	// Leader chip rendered in renderHeader — only shown when this
+	// process holds the UI leader lease.
+	leaderLeadStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("76")).Padding(0, 1) // green — this process controls
 )
 
 // repoGlyph prefixes the repo name in the header. Definition lives in

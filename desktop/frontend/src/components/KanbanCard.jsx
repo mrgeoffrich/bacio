@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import Icon from './Icon.jsx';
 
-export default function KanbanCard({ card, promptConfig, isDragging, amLeader, onDragStart, onDragEnd, onOpen, onDispatch }) {
+export default function KanbanCard({ card, promptConfig, isDragging, onDragStart, onDragEnd, onOpen, onDispatch }) {
   // The prompts valid to dispatch from this card's current state — the
   // state-gate config is global (App-owned), filtered per-card here.
   const validPrompts = (promptConfig || []).filter(
@@ -42,9 +42,7 @@ export default function KanbanCard({ card, promptConfig, isDragging, amLeader, o
   // `taken` wins: once an agent claims, waiting_for_claim is cleared, so
   // they shouldn't overlap, but render defensively if they do.
   const waiting = !!card.waitingForClaim && !taken;
-  // On a standby process (amLeader=false), dispatch is also disabled —
-  // only the leader runs the auto-pick so two processes don't race.
-  const dispatchDisabled = taken || waiting || !amLeader;
+  const dispatchDisabled = taken || waiting;
 
   const hasFooter = validPrompts.length > 0 || card.assignees.length > 0 || waiting;
 
@@ -86,11 +84,11 @@ export default function KanbanCard({ card, promptConfig, isDragging, amLeader, o
             <div className="mk-card-action" ref={actionRef}>
               <button
                 className="mk-card-action-btn"
-                aria-label={taken ? 'An agent is working on this issue' : !amLeader ? 'Standby — another window has control' : 'Dispatch a prompt'}
+                aria-label={taken ? 'An agent is working on this issue' : 'Dispatch a prompt'}
                 aria-haspopup="menu"
                 aria-expanded={menuOpen}
                 disabled={dispatchDisabled}
-                title={taken ? 'An agent is working on this issue' : !amLeader ? 'Standby — another window controls automated dispatch' : undefined}
+                title={taken ? 'An agent is working on this issue' : undefined}
                 onClick={(e) => {
                   e.stopPropagation();
                   if (dispatchDisabled) return;
