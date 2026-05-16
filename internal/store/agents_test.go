@@ -153,6 +153,119 @@ func TestPruneAgentSessionsKeepsActive(t *testing.T) {
 	}
 }
 
+// TestPruneEndedAgentSessionsCustomRetention locks in that the exported
+// PruneEndedAgentSessions honours an arbitrary retention argument — the
+// controller-UI live-list prune calls it with AgentSessionLiveListRetention
+// (4h), not the 60-day default.
+func TestPruneEndedAgentSessionsCustomRetention(t *testing.T) {
+	s := newTestStore(t)
+	repo, err := s.CreateRepo("AGNT", "live-prune", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+	for _, id := range []string{"old", "fresh"} {
+		if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+			SessionID: id, RepoID: repo.ID, Actor: "agent-claude",
+		}); err != nil {
+			t.Fatalf("register %s: %v", id, err)
+		}
+		if _, _, err := s.EndAgentSession(id, string(model.EndReasonStop)); err != nil {
+			t.Fatalf("end %s: %v", id, err)
+		}
+	}
+	// Backdate `old` past the 4h window; leave `fresh` ended a moment ago.
+	past := time.Now().Add(-5 * time.Hour).UTC().Format("2006-01-02 15:04:05")
+	if _, err := s.DB.Exec(`UPDATE agent_sessions SET ended_at = ? WHERE session_id = 'old'`, past); err != nil {
+		t.Fatalf("backdate: %v", err)
+	}
+	n, err := s.PruneEndedAgentSessions(AgentSessionLiveListRetention)
+	if err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("deleted = %d, want 1", n)
+	}
+	if _, err := s.GetAgentSession("old"); err == nil {
+		t.Fatalf("`old` survived the live-list prune")
+	}
+	if _, err := s.GetAgentSession("fresh"); err != nil {
+		t.Fatalf("`fresh` was pruned but should have survived: %v", err)
+	}
+}
+
+// TestPruneEndedAgentSessionsCascadesClaims pins the FK contract:
+// agent_claims rows for a pruned session must disappear via ON DELETE
+// CASCADE so a future schema change to that FK can't silently leave
+// orphan claim rows.
+func TestPruneEndedAgentSessionsCascadesClaims(t *testing.T) {
+	s, repo, iss := seedRepoAndIssue(t)
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "cascade", RepoID: repo.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if _, _, _, err := s.AddAgentClaim("cascade", iss.ID, ""); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if _, _, err := s.EndAgentSession("cascade", string(model.EndReasonStop)); err != nil {
+		t.Fatalf("end: %v", err)
+	}
+	past := time.Now().Add(-5 * time.Hour).UTC().Format("2006-01-02 15:04:05")
+	if _, err := s.DB.Exec(`UPDATE agent_sessions SET ended_at = ? WHERE session_id = 'cascade'`, past); err != nil {
+		t.Fatalf("backdate: %v", err)
+	}
+	if _, err := s.PruneEndedAgentSessions(AgentSessionLiveListRetention); err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	var claims int
+	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM agent_claims WHERE issue_id = ?`, iss.ID).Scan(&claims); err != nil {
+		t.Fatalf("count claims: %v", err)
+	}
+	if claims != 0 {
+		t.Fatalf("orphan claim rows survived prune: %d", claims)
+	}
+}
+
+// TestPruneEndedAgentSessionsLeavesDispatches pins the dispatch-survival
+// decision: agent_dispatches.target_session_id is not a FK, so a pruned
+// session's dispatches outlive it (cleaned by the long-window
+// pruneDispatches). If someone "fixes" the schema by adding an FK, this
+// test fails loudly so the decision can be revisited.
+func TestPruneEndedAgentSessionsLeavesDispatches(t *testing.T) {
+	s, repo, iss := seedRepoAndIssue(t)
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "dispatched", RepoID: repo.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if _, err := s.AddDispatch(AddDispatchIn{
+		RepoID:          repo.ID,
+		TargetSessionID: "dispatched",
+		IssueID:         &iss.ID,
+		Payload:         "look at it",
+		CreatedBy:       "agent-claude",
+	}); err != nil {
+		t.Fatalf("add dispatch: %v", err)
+	}
+	if _, _, err := s.EndAgentSession("dispatched", string(model.EndReasonStop)); err != nil {
+		t.Fatalf("end: %v", err)
+	}
+	past := time.Now().Add(-5 * time.Hour).UTC().Format("2006-01-02 15:04:05")
+	if _, err := s.DB.Exec(`UPDATE agent_sessions SET ended_at = ? WHERE session_id = 'dispatched'`, past); err != nil {
+		t.Fatalf("backdate: %v", err)
+	}
+	if _, err := s.PruneEndedAgentSessions(AgentSessionLiveListRetention); err != nil {
+		t.Fatalf("prune: %v", err)
+	}
+	var dispatches int
+	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM agent_dispatches WHERE target_session_id = ?`, "dispatched").Scan(&dispatches); err != nil {
+		t.Fatalf("count dispatches: %v", err)
+	}
+	if dispatches != 1 {
+		t.Fatalf("dispatch did not survive session prune: have %d, want 1", dispatches)
+	}
+}
+
 // TestValidateSessionIDRejectsWhitespace locks in the principle-#4 rule:
 // leading/trailing whitespace is an error, not trimmed silently.
 func TestValidateSessionIDRejectsWhitespace(t *testing.T) {

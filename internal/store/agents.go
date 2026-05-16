@@ -14,6 +14,14 @@ import (
 // two prune passes share the same "what does bacio remember" window.
 const AgentSessionRetention = 60 * 24 * time.Hour
 
+// AgentSessionLiveListRetention bounds how long ended sessions remain
+// visible in the live "Agents" list. The controlling UI prunes rows
+// beyond this window every UILeaderPruneInterval; the 60-day janitor
+// (AgentSessionRetention) still runs on store.Open() as the safety net.
+// 4h is long enough to see "this agent finished a minute ago" history,
+// short enough that a busy day's churn doesn't drown out live activity.
+const AgentSessionLiveListRetention = 4 * time.Hour
+
 // ErrAgentNameTaken signals that UpsertAgent was called with
 // requireNew=true on a name that's already in use. Callers translate
 // this into a "name taken, pick another" hint so the agent retries
@@ -844,11 +852,30 @@ func (s *Store) OpenClaimsBySession(repoID int64) (map[int64][]*model.AgentClaim
 	return out, rows.Err()
 }
 
-// pruneAgentSessions drops ended sessions whose ended_at is older than
-// retention. Active rows (ended_at IS NULL) are never touched.
-func pruneAgentSessions(db *sql.DB, retention time.Duration) error {
+// PruneEndedAgentSessions deletes ended sessions whose ended_at is
+// older than retention and returns the row count. Active rows
+// (ended_at IS NULL) are never touched. Shared by the store.Open()
+// 60-day janitor (AgentSessionRetention) and the controller-UI
+// 5-minute live-list prune (AgentSessionLiveListRetention) — same SQL,
+// only the retention argument differs. `agent_claims` rows referencing
+// pruned sessions are removed transitively by the FK's ON DELETE
+// CASCADE; `agent_dispatches.target_session_id` is a free-form text
+// column (not a FK), so dispatches survive — left to pruneDispatches.
+func (s *Store) PruneEndedAgentSessions(retention time.Duration) (int64, error) {
 	cutoff := time.Now().Add(-retention).UTC().Format("2006-01-02 15:04:05")
-	_, err := db.Exec(`DELETE FROM agent_sessions WHERE ended_at IS NOT NULL AND ended_at < ?`, cutoff)
+	res, err := s.DB.Exec(`DELETE FROM agent_sessions WHERE ended_at IS NOT NULL AND ended_at < ?`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// pruneAgentSessions is the thin shim store.Open() uses to invoke the
+// exported PruneEndedAgentSessions at startup. Keeping the package-
+// private name avoids touching the Open() call site every time the
+// implementation moves.
+func pruneAgentSessions(db *sql.DB, retention time.Duration) error {
+	_, err := (&Store{DB: db}).PruneEndedAgentSessions(retention)
 	return err
 }
 

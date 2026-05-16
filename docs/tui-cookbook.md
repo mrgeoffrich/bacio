@@ -196,6 +196,51 @@ case tickMsg:
 
 `tea.Tick` fires once. `tea.Every` fires repeatedly on a wall-clock cadence (good for clocks, bad for animations because it doesn't compensate for jitter).
 
+### Leader-gated periodic work
+
+For periodic side effects that must only run on the controlling UI (the
+one currently holding the `ui_leader` lease — see CLAUDE.md's *UI leader
+election* section), drive a separate `tea.Tick` and consult the shell's
+cached leader state inside the handler. The ticker keeps running on
+standby so a standby → leader promotion picks up the next tick on
+schedule; only the side effect is gated. This is the pattern the
+live-list `agent_sessions` prune uses
+(`internal/tui/tui.go`'s `pruneTickMsg`):
+
+```go
+type pruneTickMsg time.Time
+
+func pruneTick() tea.Cmd {
+    return tea.Tick(store.UILeaderPruneInterval, func(t time.Time) tea.Msg {
+        return pruneTickMsg(t)
+    })
+}
+
+// Init (only when the elector is non-nil — the WASM demo has none):
+cmds = append(cmds, pruneTick())
+
+// Update:
+case pruneTickMsg:
+    if m.elector != nil && m.leaderState.AmLeader {
+        if _, err := m.store.PruneEndedAgentSessions(
+            store.AgentSessionLiveListRetention); err != nil {
+            log.Printf("bacio: live agent-session prune failed: %v", err)
+        }
+    }
+    if m.elector == nil {
+        return m, nil
+    }
+    return m, pruneTick() // re-arm regardless of leader state
+```
+
+Two non-obvious points: re-arm `pruneTick()` even when standby (otherwise
+a flip to leader is silent until the next *un*armed tick that never
+fires), and skip re-arming entirely when `m.elector == nil` (the WASM
+demo has no leader concept, and an unbounded ticker would just heat the
+event loop). Errors go through `log.Printf` — `tea.LogToFile` is already
+configured so they land in the bacio debug log rather than corrupting
+the alt-screen.
+
 ### Quitting
 
 `return m, tea.Quit` is the normal path. `Program.Kill()` aborts immediately and skips alt-screen restore — last resort.
