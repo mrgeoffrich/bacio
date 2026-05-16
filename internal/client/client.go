@@ -256,6 +256,16 @@ type Client interface {
 	// delivered]): returns the existing open dispatch rather than
 	// creating a duplicate. sessionID="" is a no-op. Local-only.
 	EnsureSetupDispatch(ctx context.Context, repo *model.Repo, sessionID string) (*model.AgentDispatch, error)
+	// AutoDispatchIssue is the state-gated auto-pick dispatch verb
+	// (BACI-40): re-checks the mode's state-gate against the issue's
+	// current state, picks the most-recently-active free agent (live,
+	// not busy, has channel, no un-acked dispatch already queued),
+	// then enqueues the dispatch against it. The desktop per-card
+	// action button is the original caller; REST `POST
+	// /repos/{prefix}/issues/{key}/dispatch` and target-less `bacio
+	// agent dispatch <key> --mode <stage>` both route through this so
+	// the three surfaces share the same picker + gate.
+	AutoDispatchIssue(ctx context.Context, repo *model.Repo, issueKey, mode string, dryRun bool) (*model.AgentDispatch, error)
 
 	// ----- Prompt templates (local-only; `bacio settings template`) -----
 	// ListPromptTemplates returns every registered template — slug,

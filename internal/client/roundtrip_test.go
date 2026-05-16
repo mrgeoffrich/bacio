@@ -1,4 +1,4 @@
-package client
+package client_test
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 
 	"github.com/mrgeoffrich/bacio/internal/api"
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
+	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
@@ -18,14 +19,16 @@ import (
 // pair builds a temp-DB-backed local backend AND a remote backend
 // pointing at an in-process httptest server wrapping the same store,
 // so a round-trip test can drive both without a second SQLite file
-// and assert they observe identical state.
+// and assert they observe identical state. Now in package client_test
+// (external) so api can import client without forming a cycle through
+// the test binary.
 type pair struct {
-	store    *store.Store
-	local    Client
-	remote   Client
-	repo     *model.Repo
-	srv      *httptest.Server
-	cleanup  func()
+	store   *store.Store
+	local   client.Client
+	remote  client.Client
+	repo    *model.Repo
+	srv     *httptest.Server
+	cleanup func()
 }
 
 func newPair(t *testing.T) *pair {
@@ -44,10 +47,10 @@ func newPair(t *testing.T) *pair {
 
 	srv := httptest.NewServer(api.New(s, api.Options{}, slog.New(slog.NewTextHandler(discard{}, nil))).Handler())
 
-	local := &localClient{store: s, actor: "tester"}
-	remote, err := newRemoteClient(Options{Remote: srv.URL, Actor: "tester"})
+	local := client.NewLocalFromStore(s, "tester")
+	remote, err := client.Open(context.Background(), client.Options{Remote: srv.URL, Actor: "tester"})
 	if err != nil {
-		t.Fatalf("newRemoteClient: %v", err)
+		t.Fatalf("client.Open(remote): %v", err)
 	}
 	return &pair{
 		store: s, local: local, remote: remote, repo: repo, srv: srv,
@@ -68,7 +71,7 @@ func TestRoundTripRepos(t *testing.T) {
 	defer p.cleanup()
 	ctx := context.Background()
 
-	for _, c := range []Client{p.local, p.remote} {
+	for _, c := range []client.Client{p.local, p.remote} {
 		repos, err := c.ListRepos(ctx)
 		if err != nil {
 			t.Fatalf("ListRepos: %v", err)
@@ -221,7 +224,7 @@ func TestRoundTripCommentsAndDocs(t *testing.T) {
 	}
 
 	// Document round-trip.
-	doc, err := p.remote.CreateDocument(ctx, p.repo, DocCreateInput{
+	doc, err := p.remote.CreateDocument(ctx, p.repo, client.DocCreateInput{
 		Filename: "design.md",
 		Type:     model.DocTypeDesigns,
 		Body:     "# Design\nbody",
@@ -283,7 +286,7 @@ func TestRoundTripDocSpecialFilename(t *testing.T) {
 
 	for _, name := range []string{"with space.md", "a+b.md", "q?z.md"} {
 		t.Run(name, func(t *testing.T) {
-			doc, err := p.remote.CreateDocument(ctx, p.repo, DocCreateInput{
+			doc, err := p.remote.CreateDocument(ctx, p.repo, client.DocCreateInput{
 				Filename: name,
 				Type:     model.DocTypeDesigns,
 				Body:     "BODY-" + name,
@@ -385,7 +388,7 @@ func TestRoundTripAgentLifecycle(t *testing.T) {
 	}
 
 	// Local observes the same registered session in the default list.
-	got, err := p.local.ListAgentSessions(ctx, AgentSessionFilter{
+	got, err := p.local.ListAgentSessions(ctx, client.AgentSessionFilter{
 		Repo: p.repo, RegisteredOnly: true,
 	})
 	if err != nil {

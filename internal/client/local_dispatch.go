@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -103,6 +104,129 @@ func (c *localClient) CreateDispatch(ctx context.Context, repo *model.Repo, in i
 		Details: dispatchDetails(d),
 	})
 	return d, nil
+}
+
+// agentCandidate is the small projection AutoPickFreeAgent works on —
+// just the bits the picker decides from. Keeping it raw (no DTO shape)
+// lets REST, CLI, and desktop share the picker without pulling each
+// other's render types into client.
+type agentCandidate struct {
+	AgentName       string
+	Ended           bool
+	Busy            bool
+	HasChannel      bool
+	HasOpenDispatch bool
+}
+
+// autoPickFreeAgent returns the first candidate eligible to take
+// auto-dispatched work: live, not busy, has a channel, no un-acked
+// dispatch already queued against it, and a persistent identity slug
+// (CreateDispatch routes by slug). Candidates are expected in
+// last-seen-DESC order; the first match wins so the freshest free
+// agent gets the work.
+func autoPickFreeAgent(cands []agentCandidate) string {
+	for _, c := range cands {
+		if c.Ended || c.Busy || c.AgentName == "" || !c.HasChannel || c.HasOpenDispatch {
+			continue
+		}
+		return c.AgentName
+	}
+	return ""
+}
+
+// AutoDispatchIssue (BACI-40) is the state-gated auto-pick dispatch
+// verb shared by the desktop per-card action button, the REST
+// `POST /repos/{prefix}/issues/{key}/dispatch` route, and the CLI's
+// target-less `bacio agent dispatch <key> --mode <stage>`. It mirrors
+// what desktop's BoardService.DispatchIssue used to do inline.
+func (c *localClient) AutoDispatchIssue(ctx context.Context, repo *model.Repo, issueKey, mode string, dryRun bool) (*model.AgentDispatch, error) {
+	if repo == nil {
+		return nil, fmt.Errorf("AutoDispatchIssue requires a repo")
+	}
+	parsedMode, err := model.ParseDispatchMode(mode)
+	if err != nil {
+		return nil, err
+	}
+	if parsedMode == "" {
+		return nil, fmt.Errorf("a dispatch mode is required")
+	}
+
+	// State-gate: the prompt for this stage must be valid to run from
+	// the issue's current state. The desktop UI already gates the
+	// per-card action button on this; re-check here so a stale UI or
+	// a CLI/REST caller can't queue a prompt the state doesn't allow.
+	iss, err := c.GetIssueByKey(ctx, repo, issueKey)
+	if err != nil {
+		return nil, err
+	}
+	gates, err := c.GetPromptStates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !slices.Contains(gates[mode], string(iss.State)) {
+		return nil, fmt.Errorf("the %s prompt can't run from a %s issue", mode, iss.State)
+	}
+
+	// Auto-pick: build a candidate list (last-seen-DESC, since
+	// ListAgentSessions orders that way) and let autoPickFreeAgent
+	// choose the freshest free agent.
+	sessions, err := c.store.ListAgentSessions(store.AgentSessionFilter{
+		RepoID:         &repo.ID,
+		RegisteredOnly: true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	openClaims, err := c.store.OpenClaimsBySession(repo.ID)
+	if err != nil {
+		return nil, err
+	}
+	dispatches, err := c.store.ListDispatches(store.DispatchFilter{RepoID: &repo.ID})
+	if err != nil {
+		return nil, err
+	}
+	occupiedAgentID := map[int64]bool{}
+	occupiedSession := map[string]bool{}
+	for _, d := range dispatches {
+		if d.Status != model.DispatchPending && d.Status != model.DispatchDelivered {
+			continue
+		}
+		if d.TargetAgentID != nil {
+			occupiedAgentID[*d.TargetAgentID] = true
+		}
+		if d.TargetSessionID != "" {
+			occupiedSession[d.TargetSessionID] = true
+		}
+	}
+	now := time.Now()
+	cands := make([]agentCandidate, 0, len(sessions))
+	for _, s := range sessions {
+		cand := agentCandidate{
+			AgentName:  s.AgentName,
+			Ended:      model.SessionLiveness(s, now) == "ended",
+			HasChannel: s.ChannelSeenAt != nil,
+		}
+		if !cand.Ended {
+			cand.Busy, _ = model.SessionBusy(openClaims[s.ID])
+		}
+		if s.AgentID != nil && occupiedAgentID[*s.AgentID] {
+			cand.HasOpenDispatch = true
+		}
+		if occupiedSession[s.SessionID] {
+			cand.HasOpenDispatch = true
+		}
+		cands = append(cands, cand)
+	}
+	agentName := autoPickFreeAgent(cands)
+	if agentName == "" {
+		return nil, fmt.Errorf("no free agent available — every agent is busy or offline")
+	}
+
+	return c.CreateDispatch(ctx, repo, inputs.AgentDispatchInput{
+		TargetAgent: agentName,
+		IssueKey:    iss.Key,
+		Mode:        mode,
+	}, dryRun)
 }
 
 func (c *localClient) InboxDispatches(ctx context.Context, sessionID string) ([]*model.AgentDispatch, error) {

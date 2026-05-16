@@ -36,8 +36,26 @@ func newLocalClient(opts Options) (*localClient, error) {
 	return &localClient{store: s, actor: opts.Actor}, nil
 }
 
-func (c *localClient) Mode() string  { return ModeLocal }
-func (c *localClient) Close() error  { return c.store.Close() }
+// NewLocalFromStore wraps an already-open *store.Store as a Client without
+// taking ownership of its lifecycle — the caller's Close is a no-op on
+// the store. Used by the REST handler layer (which owns the store) when
+// it needs to reach a Client method like AutoDispatchIssue that the
+// handlers don't reimplement inline. actor is stamped on every audit
+// row the wrapped client records (typically the request's X-Actor).
+func NewLocalFromStore(s *store.Store, actor string) Client {
+	return &borrowedLocalClient{localClient: localClient{store: s, actor: actor}}
+}
+
+// borrowedLocalClient embeds localClient but overrides Close so the
+// caller's store keeps running after the wrapper is dropped.
+type borrowedLocalClient struct {
+	localClient
+}
+
+func (c *borrowedLocalClient) Close() error { return nil }
+
+func (c *localClient) Mode() string { return ModeLocal }
+func (c *localClient) Close() error { return c.store.Close() }
 
 // Store exposes the underlying *store.Store. Used by CLI verbs that
 // keep some local-only computation (e.g. bacio status's filesystem-aware

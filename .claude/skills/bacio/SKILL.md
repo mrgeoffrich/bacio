@@ -596,6 +596,20 @@ bacio agent dispatch [ISSUE-KEY]        Queue a work item for an agent / session
                                      instruction body.
   --message <text>                      Free-form note appended to the body
                                      (must pass --to and/or --session)
+                                     Auto-pick (BACI-40): omit both
+                                     --to and --session and pass
+                                     [ISSUE-KEY] + --mode <stage>, and
+                                     bacio picks the most-recently-
+                                     active free agent for you (same
+                                     picker the desktop per-card
+                                     button uses). The stage's state-
+                                     gate is re-checked against the
+                                     issue's current state. --dry-run
+                                     reports the chosen agent without
+                                     writing. Same shape works in the
+                                     REST surface: POST
+                                     /repos/{prefix}/issues/{key}/dispatch
+                                     with body {"mode": "<stage>"}.
 bacio agent inbox                       Open dispatches queued for this session
   --session <id>                        Default: $CLAUDE_CODE_SESSION_ID
 bacio agent ack <DISPATCH-ID>           Acknowledge a dispatch
@@ -932,6 +946,7 @@ A few non-obvious mappings:
 - **PR detach:** `DELETE /repos/{prefix}/issues/{key}/pull-requests` with `{"url"}` or `?url=`.
 - **Documents:** link/unlink at `POST/DELETE /documents/{filename}/links`; rename at `POST /documents/{filename}/rename`.
 - **State / assignee:** `PUT /issues/{key}/state`, `PUT/DELETE /issues/{key}/assignee`.
+- **State-gated auto-pick dispatch (BACI-40):** `POST /repos/{prefix}/issues/{key}/dispatch` with `{"mode":"<stage>"}` — server re-checks the stage's state-gate against the issue's current state, picks the most-recently-active free agent automatically, and returns the queued `AgentDispatch`. Supports `?dry_run=1`.
 
 ### Headers, query params, dry-run
 
@@ -962,7 +977,7 @@ A few non-obvious mappings:
 - **`POST /repos`** is the equivalent of `bacio init`, but the server can't see your CWD — supply `{"name":"...", "path":"..."}` (plus optional `prefix`) explicitly.
 - **`GET /repos/{prefix}/documents/{filename}/download`** is the only non-JSON endpoint. Streams the body as `text/markdown` with `Content-Disposition: attachment`. No audit row, no dry-run, no `with_content`. The API never reads or writes the server filesystem, so callers materialise on disk by piping the response (`curl -O`).
 - **CLI verbs with no API equivalent** (touch the local filesystem or terminal): `bacio init` (use `POST /repos`), `bacio install-skill`, `bacio install-hooks`, `bacio install-channel`, `bacio doc add --from-path` / `--content-file` (inline `content` in the body), `bacio doc export` (use `/download`), `bacio tui`, `bacio hook *`, `bacio channel`. Plus the prompt-template / board-preference settings (local-only).
-- **Agent registry endpoints.** The eleven register/heartbeat/end/claim/release/list/show/inbox/ack/dispatch/list-dispatches-in-repo verbs reach the server under `/repos/{prefix}/agents/sessions` (register, list-in-repo, list-open-claims-in-repo), `/repos/{prefix}/agents/dispatches` (BACI-35: create + list-in-repo), and `/agents/sessions/{session_id}/...` (heartbeat/end/claim/release/inbox + show), plus `/agents/dispatches/{id}/ack`. Cross-repo variants of the two lists live at `/agents/sessions` and `/agents/claims/open`. Stub sessions (`registered_at` NULL) are hidden by default on the list endpoints — pass `?all=true` to include them.
+- **Agent registry endpoints.** The dozen register/heartbeat/end/claim/release/list/show/inbox/ack/dispatch/list-dispatches-in-repo/auto-dispatch verbs reach the server under `/repos/{prefix}/agents/sessions` (register, list-in-repo, list-open-claims-in-repo), `/repos/{prefix}/agents/dispatches` (BACI-35: create + list-in-repo), `/repos/{prefix}/issues/{key}/dispatch` (BACI-40: state-gated auto-pick), and `/agents/sessions/{session_id}/...` (heartbeat/end/claim/release/inbox + show), plus `/agents/dispatches/{id}/ack`. Cross-repo variants of the two lists live at `/agents/sessions` and `/agents/claims/open`. Stub sessions (`registered_at` NULL) are hidden by default on the list endpoints — pass `?all=true` to include them.
 
 For the full design rationale, threat model, and what the API deliberately doesn't do (NDJSON, per-user auth, CORS, cursor pagination, …), see `docs/rest-api-design.md`.
 
@@ -975,7 +990,7 @@ BACIO_REMOTE=http://team-bacio:5320 BACIO_API_TOKEN=$T bacio issue list -o json
 bacio --remote http://team-bacio:5320 issue add "Login broken" --feature auth
 ```
 
-Verbs that touch the local filesystem or terminal error clearly in remote mode and stay local-direct: `bacio init`, `bacio install-skill`, `bacio install-hooks`, `bacio install-channel`, `bacio doc add --from-path` / `--content-file` (use `--content` inline instead), `bacio doc export` (use `bacio doc download <filename>` — writes to stdout or `--to <path>`), `bacio tui`, `bacio schema *`, `bacio status`, `bacio hook *`, `bacio channel`. The agent verbs `register / heartbeat / end / claim / release / list / show / inbox / ack` work in remote mode (BACI-34), and `bacio agent dispatch` is also remote-capable now (BACI-35); only the prompt-template / board-preference settings remain local-only.
+Verbs that touch the local filesystem or terminal error clearly in remote mode and stay local-direct: `bacio init`, `bacio install-skill`, `bacio install-hooks`, `bacio install-channel`, `bacio doc add --from-path` / `--content-file` (use `--content` inline instead), `bacio doc export` (use `bacio doc download <filename>` — writes to stdout or `--to <path>`), `bacio tui`, `bacio schema *`, `bacio status`, `bacio hook *`, `bacio channel`. The agent verbs `register / heartbeat / end / claim / release / list / show / inbox / ack` work in remote mode (BACI-34), `bacio agent dispatch` is remote-capable (BACI-35), and the state-gated auto-pick variant — `bacio agent dispatch <key> --mode <stage>` with neither --to nor --session — rides the same remote route (BACI-40); only the prompt-template / board-preference settings remain local-only.
 
 ## Gotchas
 

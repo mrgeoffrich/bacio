@@ -415,6 +415,12 @@ body is the stage's prompt template (customisable in the desktop app's
 Settings panel) rendered with the issue's id/title, plus any --message
 note. Both are optional.
 
+Auto-pick (BACI-40): when [issue-key] and --mode are set but both --to
+and --session are omitted, dispatch picks the most-recently-active free
+agent automatically — same picker the desktop per-card action button
+uses — and re-checks the stage's state-gate against the issue's
+current state. --dry-run reports the chosen agent without writing.
+
 The target agent picks the dispatch up automatically on its next prompt
 (via the bacio UserPromptSubmit hook) or at session start, and can list
 its queue with ` + "`bacio agent inbox`" + `.`,
@@ -451,6 +457,18 @@ its queue with ` + "`bacio agent inbox`" + `.`,
 	return cmd
 }
 
+// isAutoDispatch reports whether an AgentDispatchInput is the
+// BACI-40 auto-pick shape: an issue key plus a mode, with neither
+// target field set. Message is incompatible with auto-pick (the
+// state-gated server-side path renders only the template), so its
+// presence flips the call back to the explicit-target path so the
+// CLI raises the existing "needs a target" error rather than silently
+// dropping the note.
+func isAutoDispatch(in inputs.AgentDispatchInput) bool {
+	return in.TargetAgent == "" && in.TargetSession == "" &&
+		in.IssueKey != "" && in.Mode != "" && in.Message == ""
+}
+
 func runAgentDispatch(in inputs.AgentDispatchInput) error {
 	c, err := openClient()
 	if err != nil {
@@ -461,7 +479,12 @@ func runAgentDispatch(in inputs.AgentDispatchInput) error {
 	if err != nil {
 		return err
 	}
-	d, err := c.CreateDispatch(context.Background(), repo, in, opts.dryRun)
+	var d *model.AgentDispatch
+	if isAutoDispatch(in) {
+		d, err = c.AutoDispatchIssue(context.Background(), repo, in.IssueKey, in.Mode, opts.dryRun)
+	} else {
+		d, err = c.CreateDispatch(context.Background(), repo, in, opts.dryRun)
+	}
 	if err != nil {
 		return err
 	}

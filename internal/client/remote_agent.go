@@ -189,6 +189,26 @@ func (c *remoteClient) CreateDispatch(ctx context.Context, repo *model.Repo, in 
 	return &out, nil
 }
 
+// AutoDispatchIssue (BACI-40) targets the new REST route, sending only
+// the mode in the body — the issue is in the URL and the server picks
+// the free agent + re-checks the state-gate. Returns the queued
+// dispatch on success, or the projected row when dryRun is set.
+func (c *remoteClient) AutoDispatchIssue(ctx context.Context, repo *model.Repo, issueKey, mode string, dryRun bool) (*model.AgentDispatch, error) {
+	if repo == nil {
+		return nil, fmt.Errorf("AutoDispatchIssue requires a repo")
+	}
+	q := url.Values{}
+	if dryRun {
+		q.Set("dry_run", "true")
+	}
+	body := inputs.IssueDispatchInput{Mode: mode}
+	var out model.AgentDispatch
+	if err := c.do(ctx, http.MethodPost, "/repos/"+repo.Prefix+"/issues/"+issueKey+"/dispatch", q, body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // DrainDispatches is the side-effect-bearing "list pending+delivered
 // AND mark pending → delivered" call used by the bacio hook to feed an
 // agent's context. The hook talks to the local store directly (it

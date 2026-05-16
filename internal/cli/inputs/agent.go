@@ -79,3 +79,13 @@ type AgentAckInput struct {
 	ID   int64  `json:"id"`
 	Note string `json:"note,omitempty"`
 }
+
+// IssueDispatchInput is the payload for the state-gated auto-pick
+// dispatch verb (BACI-40): `POST /repos/{prefix}/issues/{key}/dispatch`
+// and the target-less `bacio agent dispatch <key> --mode <stage>`. Mode
+// is the only field — the server resolves the issue from the URL/positional,
+// re-checks the stage's state-gate against the issue's current state,
+// and auto-picks the most-recently-active free agent.
+type IssueDispatchInput struct {
+	Mode string `json:"mode"`
+}
