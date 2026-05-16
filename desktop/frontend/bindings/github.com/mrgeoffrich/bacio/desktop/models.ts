@@ -41,6 +41,17 @@ export class AgentCard {
     "busyIssue": string;
 
     /**
+     * Waiting is true while the session holds an open claim on an issue
+     * in needs_action — the derived "parked, waiting on the user"
+     * signal. The Stop hook auto-flips a claimed in_progress issue to
+     * needs_action on idle, so this lights up automatically. A waiting
+     * session is also busy; the UI renders the waiting badge in place
+     * of busy because it's the actionable state.
+     */
+    "waiting": boolean;
+    "waitingIssue": string;
+
+    /**
      * HasChannel is true when the bacio channel MCP server has been seen
      * running alongside this session. Only sessions with a live channel
      * can receive push dispatches — sessions without one are interactive
@@ -91,6 +102,12 @@ export class AgentCard {
         if (!("busyIssue" in $$source)) {
             this["busyIssue"] = "";
         }
+        if (!("waiting" in $$source)) {
+            this["waiting"] = false;
+        }
+        if (!("waitingIssue" in $$source)) {
+            this["waitingIssue"] = "";
+        }
         if (!("hasChannel" in $$source)) {
             this["hasChannel"] = false;
         }
@@ -117,14 +134,14 @@ export class AgentCard {
      * Creates a new AgentCard instance from a string or object.
      */
     static createFrom($$source: any = {}): AgentCard {
-        const $$createField13_0 = $$createType1;
-        const $$createField14_0 = $$createType3;
+        const $$createField15_0 = $$createType1;
+        const $$createField16_0 = $$createType3;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("claims" in $$parsedSource) {
-            $$parsedSource["claims"] = $$createField13_0($$parsedSource["claims"]);
+            $$parsedSource["claims"] = $$createField15_0($$parsedSource["claims"]);
         }
         if ("dispatches" in $$parsedSource) {
-            $$parsedSource["dispatches"] = $$createField14_0($$parsedSource["dispatches"]);
+            $$parsedSource["dispatches"] = $$createField16_0($$parsedSource["dispatches"]);
         }
         return new AgentCard($$parsedSource as Partial<AgentCard>);
     }
@@ -299,11 +316,15 @@ export class BoardPreferencesDTO {
 
 /**
  * ClaimDTO is one open agent claim, shaped for the Agents screen.
+ * State is the claimed issue's current state — needed to derive the
+ * session's Waiting flag and to annotate each claim in the drill-down
+ * (e.g. "BACI-12 (needs action)").
  */
 export class ClaimDTO {
     "issueKey": string;
     "prompt": string;
     "claimedAt": time$0.Time;
+    "state": string;
 
     /** Creates a new ClaimDTO instance. */
     constructor($$source: Partial<ClaimDTO> = {}) {
@@ -315,6 +336,9 @@ export class ClaimDTO {
         }
         if (!("claimedAt" in $$source)) {
             this["claimedAt"] = null;
+        }
+        if (!("state" in $$source)) {
+            this["state"] = "";
         }
 
         Object.assign(this, $$source);

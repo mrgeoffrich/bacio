@@ -136,6 +136,33 @@ func SessionBusy(openClaims []*AgentClaim) (busy bool, issueKey string) {
 	return true, newest.IssueKey
 }
 
+// SessionWaiting reports whether a session is parked waiting on the
+// user — true iff it holds an open claim on an issue whose state is in
+// needsActionKeys. The Stop hook auto-flips claimed in_progress issues
+// to needs_action, so this is the derived "parked" signal for the
+// Agents UI. issueKey is the most-recently-claimed waiting issue, for a
+// "waiting · BACI-12" badge. openClaims must already be filtered to
+// open claims for one session; needsActionKeys is a set of issue keys
+// (PREFIX-N) currently in state needs_action.
+func SessionWaiting(openClaims []*AgentClaim, needsActionKeys map[string]bool) (waiting bool, issueKey string) {
+	var newest *AgentClaim
+	for _, c := range openClaims {
+		if c == nil || c.ReleasedAt != nil {
+			continue
+		}
+		if !needsActionKeys[c.IssueKey] {
+			continue
+		}
+		if newest == nil || c.ClaimedAt.After(newest.ClaimedAt) {
+			newest = c
+		}
+	}
+	if newest == nil {
+		return false, ""
+	}
+	return true, newest.IssueKey
+}
+
 // EndReason values reported by `bacio agent end --reason`. Mirrors the
 // Claude Code SessionEnd.end_reason set, plus "stop" for explicit
 // shutdowns and "crash" for inferred ones (`agent list` flags stale
