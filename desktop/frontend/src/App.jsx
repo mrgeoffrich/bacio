@@ -347,7 +347,6 @@ export default function App() {
           cards={cards}
           promptConfig={promptConfig}
           hideEmptyColumns={hideEmptyColumns}
-          amLeader={leaderState.amLeader}
           onMoveCard={moveCard}
           onOpenCard={openCard}
           onDispatchFromCard={dispatchFromCard}

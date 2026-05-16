@@ -42,10 +42,9 @@ export default function Topbar({ boards, activeBoard, onPickBoard, onAddReposito
 
       <div className="mk-topbar-right">
         {syncEnabled && <span className="mk-pill mk-sync-badge">Sync Enabled</span>}
-        {isLeader
-          ? <span className="mk-pill mk-leader-badge" title="This window controls automated dispatch">Controlling</span>
-          : <span className="mk-pill mk-standby-badge" title={leaderState?.holderLabel ? `${leaderState.holderLabel} has control` : 'Awaiting leader election'}>Standby</span>
-        }
+        {isLeader && (
+          <span className="mk-pill mk-leader-badge" title="This window holds the UI leader lease">Controlling</span>
+        )}
         <RepoPicker
           boards={boards}
           activeBoard={activeBoard}

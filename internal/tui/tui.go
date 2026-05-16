@@ -171,7 +171,13 @@ func (m *Model) Init() tea.Cmd {
 		}
 	}
 	if m.elector != nil {
-		cmds = append(cmds, leaderTick())
+		// Fire the first election tick *immediately* rather than waiting
+		// out the 10s interval — otherwise a freshly-launched TUI shows no
+		// "Controlling" chip for a full tick even when the previous holder
+		// released gracefully (heartbeat_at = 0) and ACQUIRE would
+		// succeed on the spot. The leaderTickMsg handler chains the next
+		// tick via leaderTick(), so this only seeds the loop.
+		cmds = append(cmds, func() tea.Msg { return leaderTickMsg(time.Now()) })
 	}
 	if len(cmds) == 0 {
 		return nil
@@ -345,14 +351,11 @@ func (m *Model) renderHeader() string {
 		left = lipgloss.JoinHorizontal(lipgloss.Top, tabParts...)
 	}
 
-	// Leader chip: only shown when the elector is active (not the WASM demo).
+	// Leader chip: only shown when this process actually holds the lease
+	// (not on standby, not in the WASM demo where there's no elector).
 	var leaderChip string
-	if m.elector != nil {
-		if m.leaderState.AmLeader {
-			leaderChip = leaderLeadStyle.Render("● ctrl")
-		} else {
-			leaderChip = leaderStandbyStyle.Render("○ stby")
-		}
+	if m.elector != nil && m.leaderState.AmLeader {
+		leaderChip = leaderLeadStyle.Render("● ctrl")
 	}
 	right := lipgloss.JoinHorizontal(lipgloss.Top, leaderChip, repoTag)
 
