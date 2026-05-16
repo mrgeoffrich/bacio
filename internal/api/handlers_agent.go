@@ -1,0 +1,783 @@
+package api
+
+// HTTP parity for the agent-registry verbs. Same inputs.*Input structs,
+// validators, store calls, and audit log as the CLI / local backend —
+// only the transport differs. Dispatch creation, prompt templates, and
+// board preferences are deliberately NOT here: they're separate
+// follow-ups (BACI-32 §5 #2 / #3).
+//
+// Audit actor: every mutating verb stamps history with the X-Actor
+// header (falling back to defaultActor) so a remote agent's identity
+// flows through the same audit chain as the CLI's `--user`. Register
+// additionally writes that actor into the new session row's `actor`
+// field unless the JSON payload supplies its own.
+
+import (
+	"errors"
+	"fmt"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
+	"github.com/mrgeoffrich/bacio/internal/inputio"
+	"github.com/mrgeoffrich/bacio/internal/model"
+	"github.com/mrgeoffrich/bacio/internal/store"
+	"github.com/mrgeoffrich/bacio/internal/timeparse"
+)
+
+// AgentSessionShow mirrors client.AgentSessionView so JSON consumers see
+// the same shape from `bacio agent show -o json` and the API.
+type AgentSessionShow struct {
+	Session *model.AgentSession `json:"session"`
+	Claims  []*model.AgentClaim `json:"claims"`
+}
+
+// ---------- register ----------
+
+func (d deps) handleAgentRegister(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	parsed, _, err := inputio.DecodeStrict[inputs.AgentRegisterInput](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	in := *parsed
+	if strings.TrimSpace(in.SessionID) == "" {
+		writeError(w, http.StatusBadRequest, "invalid_input",
+			"session_id is required", map[string]any{"field": "session_id"})
+		return
+	}
+	if in.NewIdentity && in.Agent == "" {
+		writeError(w, http.StatusBadRequest, "invalid_input",
+			"new_identity requires agent", map[string]any{"field": "agent"})
+		return
+	}
+	actor := ActorFromContext(r.Context())
+	if in.Actor == "" {
+		in.Actor = actor
+	}
+	if isDryRun(r) {
+		writeDryRun(w, http.StatusCreated, projectAgentSession(repo, in))
+		return
+	}
+	sess, err := d.registerAgent(repo, in)
+	if err != nil {
+		if errors.Is(err, store.ErrAgentNameTaken) {
+			writeError(w, http.StatusConflict, "conflict",
+				fmt.Sprintf("agent name %q already taken — generate a fresh slug and retry with new_identity", in.Agent),
+				map[string]any{"field": "agent"})
+			return
+		}
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	recordOp(d.store, d.logger, model.HistoryEntry{
+		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+		Actor:    actor,
+		Op:       "agent.register",
+		Kind:     "agent",
+		TargetID: &sess.ID, TargetLabel: sess.SessionID,
+		Details:  agentRegisterDetails(sess),
+	})
+	writeJSON(w, http.StatusCreated, sess)
+}
+
+// registerAgent mirrors localClient.RegisterAgent's non-dry-run path:
+// upsert (or mint, on --new) the agent identity row before the session
+// upsert so the FK resolves; surface ErrAgentNameTaken verbatim so the
+// caller can detect the clash. Unlike the CLI's register (a manual
+// fallback that leaves registered_at NULL), the REST register
+// explicitly marks the session registered — a remote frontend calling
+// POST /repos/{prefix}/agents/sessions is doing a deliberate "register
+// me now" action and expects the session to surface in default-filtered
+// list views immediately, matching the desktop's expectations. The
+// MarkRegistered flag is first-mark-wins so re-runs preserve the
+// original timestamp.
+func (d deps) registerAgent(repo *model.Repo, in inputs.AgentRegisterInput) (*model.AgentSession, error) {
+	var agentID *int64
+	if in.Agent != "" {
+		ag, created, err := d.store.UpsertAgent(in.Agent, in.NewIdentity)
+		if err != nil {
+			return nil, err
+		}
+		agentID = &ag.ID
+		if created {
+			recordOp(d.store, d.logger, model.HistoryEntry{
+				RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+				Actor:    in.Actor,
+				Op:       "agent.identity.create",
+				Kind:     "agent",
+				TargetID: &ag.ID, TargetLabel: in.Agent,
+			})
+		}
+	}
+	return d.store.UpsertAgentSession(store.UpsertAgentSessionIn{
+		SessionID:      in.SessionID,
+		RepoID:         repo.ID,
+		AgentID:        agentID,
+		Actor:          in.Actor,
+		Model:          in.Model,
+		Host:           in.Host,
+		Branch:         in.Branch,
+		MarkRegistered: true,
+	})
+}
+
+// projectAgentSession is the API-side twin of client.projectAgentSession —
+// dry-run register returns this projection so the response shape matches
+// a real call minus server-time fields (ID).
+func projectAgentSession(repo *model.Repo, in inputs.AgentRegisterInput) *model.AgentSession {
+	now := time.Now().UTC()
+	return &model.AgentSession{
+		SessionID:  in.SessionID,
+		RepoID:     repo.ID,
+		RepoPrefix: repo.Prefix,
+		AgentName:  in.Agent,
+		Actor:      in.Actor,
+		Model:      in.Model,
+		Host:       in.Host,
+		Branch:     in.Branch,
+		StartedAt:  now,
+		LastSeenAt: now,
+	}
+}
+
+// agentRegisterDetails mirrors client.agentRegisterDetails so the audit
+// row reads identically across surfaces.
+func agentRegisterDetails(sess *model.AgentSession) string {
+	var parts []string
+	if sess.AgentName != "" {
+		parts = append(parts, "agent="+sess.AgentName)
+	}
+	if sess.Model != "" {
+		parts = append(parts, "model="+sess.Model)
+	}
+	if sess.Branch != "" {
+		parts = append(parts, "branch="+sess.Branch)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, " ")
+}
+
+// ---------- heartbeat ----------
+
+func (d deps) handleAgentHeartbeat(w http.ResponseWriter, r *http.Request) {
+	sid := r.PathValue("session_id")
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	var in inputs.AgentHeartbeatInput
+	if len(raw) > 0 {
+		got, _, err := inputio.DecodeStrict[inputs.AgentHeartbeatInput](raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+			return
+		}
+		in = *got
+	}
+	// session_id in the URL is canonical; reject any mismatch with the body
+	// rather than silently picking one.
+	if in.SessionID != "" && in.SessionID != sid {
+		writeError(w, http.StatusBadRequest, "invalid_input",
+			"session_id in body must match URL", map[string]any{"field": "session_id"})
+		return
+	}
+	in.SessionID = sid
+	existing, err := d.store.GetAgentSession(sid)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found",
+				fmt.Sprintf("session %q is not registered", sid), nil)
+			return
+		}
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if isDryRun(r) {
+		projected := *existing
+		if in.Model != "" {
+			projected.Model = in.Model
+		}
+		if in.Branch != "" {
+			projected.Branch = in.Branch
+		}
+		writeDryRun(w, http.StatusOK, &projected)
+		return
+	}
+	sess, err := d.store.UpsertAgentSession(store.UpsertAgentSessionIn{
+		SessionID: in.SessionID,
+		RepoID:    existing.RepoID,
+		Actor:     existing.Actor,
+		Model:     pickNonEmpty(in.Model, existing.Model),
+		Host:      existing.Host,
+		Branch:    pickNonEmpty(in.Branch, existing.Branch),
+	})
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	// No audit row — heartbeats run hundreds of times per session and
+	// would drown the audit log (matches localClient.HeartbeatAgent).
+	writeJSON(w, http.StatusOK, sess)
+}
+
+// pickNonEmpty returns value if non-empty, else fallback. Mirrors
+// client.orDefault — kept private to the handler so the api package
+// doesn't take a client dep.
+func pickNonEmpty(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+// ---------- end ----------
+
+func (d deps) handleAgentEnd(w http.ResponseWriter, r *http.Request) {
+	sid := r.PathValue("session_id")
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	var in inputs.AgentEndInput
+	if len(raw) > 0 {
+		got, _, err := inputio.DecodeStrict[inputs.AgentEndInput](raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+			return
+		}
+		in = *got
+	}
+	if in.SessionID != "" && in.SessionID != sid {
+		writeError(w, http.StatusBadRequest, "invalid_input",
+			"session_id in body must match URL", map[string]any{"field": "session_id"})
+		return
+	}
+	in.SessionID = sid
+	if in.Reason == "" {
+		in.Reason = string(model.EndReasonStop)
+	}
+	if _, err := model.ParseEndReason(in.Reason); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(),
+			map[string]any{"field": "reason"})
+		return
+	}
+	existing, err := d.store.GetAgentSession(sid)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found",
+				fmt.Sprintf("session %q is not registered", sid), nil)
+			return
+		}
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if isDryRun(r) {
+		projected := *existing
+		now := time.Now().UTC()
+		projected.EndedAt = &now
+		projected.EndReason = in.Reason
+		writeDryRun(w, http.StatusOK, &projected)
+		return
+	}
+	actor := ActorFromContext(r.Context())
+	sess, assigneeChanges, err := d.store.EndAgentSession(in.SessionID, in.Reason)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	recordOp(d.store, d.logger, model.HistoryEntry{
+		RepoID: &sess.RepoID, RepoPrefix: sess.RepoPrefix,
+		Actor:    actor,
+		Op:       "agent.end",
+		Kind:     "agent",
+		TargetID: &sess.ID, TargetLabel: sess.SessionID,
+		Details:  "reason=" + sess.EndReason,
+	})
+	for _, ch := range assigneeChanges {
+		writeAssigneeChange(d.store, d.logger, actor, ch)
+	}
+	writeJSON(w, http.StatusOK, sess)
+}
+
+// ---------- claim ----------
+
+func (d deps) handleAgentClaim(w http.ResponseWriter, r *http.Request) {
+	sid := r.PathValue("session_id")
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	in, _, err := inputio.DecodeStrict[inputs.AgentClaimInput](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	if in.SessionID != "" && in.SessionID != sid {
+		writeError(w, http.StatusBadRequest, "invalid_input",
+			"session_id in body must match URL", map[string]any{"field": "session_id"})
+		return
+	}
+	in.SessionID = sid
+	if strings.TrimSpace(in.IssueKey) == "" {
+		writeError(w, http.StatusBadRequest, "invalid_input",
+			"issue_key is required", map[string]any{"field": "issue_key"})
+		return
+	}
+	prefix, num, err := store.ParseIssueKey(in.IssueKey)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(),
+			map[string]any{"field": "issue_key"})
+		return
+	}
+	iss, err := d.store.GetIssueByKey(prefix, num)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found",
+				fmt.Sprintf("issue %s not found", in.IssueKey), nil)
+			return
+		}
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if _, err := d.store.GetAgentSession(sid); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found",
+				fmt.Sprintf("session %q is not registered", sid), nil)
+			return
+		}
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if isDryRun(r) {
+		writeDryRun(w, http.StatusCreated, &model.AgentClaim{
+			SessionID: sid,
+			IssueID:   iss.ID,
+			IssueKey:  iss.Key,
+			Prompt:    in.Prompt,
+			ClaimedAt: time.Now().UTC(),
+		})
+		return
+	}
+	actor := ActorFromContext(r.Context())
+	claim, created, assigneeChange, err := d.store.AddAgentClaim(sid, iss.ID, in.Prompt)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if created {
+		recordOp(d.store, d.logger, model.HistoryEntry{
+			RepoID: &iss.RepoID, RepoPrefix: prefix,
+			Actor:    actor,
+			Op:       "agent.claim",
+			Kind:     "agent",
+			TargetID: &claim.ID, TargetLabel: sid,
+			Details:  "issue=" + iss.Key,
+		})
+		if assigneeChange != nil {
+			writeAssigneeChange(d.store, d.logger, actor, *assigneeChange)
+		}
+	}
+	writeJSON(w, http.StatusCreated, claim)
+}
+
+// ---------- release ----------
+
+func (d deps) handleAgentRelease(w http.ResponseWriter, r *http.Request) {
+	sid := r.PathValue("session_id")
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	in, _, err := inputio.DecodeStrict[inputs.AgentReleaseInput](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	if in.SessionID != "" && in.SessionID != sid {
+		writeError(w, http.StatusBadRequest, "invalid_input",
+			"session_id in body must match URL", map[string]any{"field": "session_id"})
+		return
+	}
+	in.SessionID = sid
+	if strings.TrimSpace(in.IssueKey) == "" {
+		writeError(w, http.StatusBadRequest, "invalid_input",
+			"issue_key is required", map[string]any{"field": "issue_key"})
+		return
+	}
+	prefix, num, err := store.ParseIssueKey(in.IssueKey)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(),
+			map[string]any{"field": "issue_key"})
+		return
+	}
+	iss, err := d.store.GetIssueByKey(prefix, num)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found",
+				fmt.Sprintf("issue %s not found", in.IssueKey), nil)
+			return
+		}
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if _, err := d.store.GetAgentSession(sid); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found",
+				fmt.Sprintf("session %q is not registered", sid), nil)
+			return
+		}
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if isDryRun(r) {
+		now := time.Now().UTC()
+		writeDryRun(w, http.StatusOK, &model.AgentClaim{
+			SessionID:  sid,
+			IssueID:    iss.ID,
+			IssueKey:   iss.Key,
+			ReleasedAt: &now,
+		})
+		return
+	}
+	actor := ActorFromContext(r.Context())
+	claim, assigneeChange, err := d.store.ReleaseAgentClaim(sid, iss.ID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found",
+				fmt.Sprintf("session %q has no open claim on %s", sid, iss.Key), nil)
+			return
+		}
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	recordOp(d.store, d.logger, model.HistoryEntry{
+		RepoID: &iss.RepoID, RepoPrefix: prefix,
+		Actor:    actor,
+		Op:       "agent.release",
+		Kind:     "agent",
+		TargetID: &claim.ID, TargetLabel: sid,
+		Details:  "issue=" + iss.Key,
+	})
+	if assigneeChange != nil {
+		writeAssigneeChange(d.store, d.logger, actor, *assigneeChange)
+	}
+	writeJSON(w, http.StatusOK, claim)
+}
+
+// writeAssigneeChange writes the issue.assign audit row for an
+// issues.assignee mutation a claim/release/end made as a side effect of
+// keeping the claim and the assignee in lockstep. No-op changes record
+// nothing. Mirrors localClient.recordAssigneeChange so audit text reads
+// identically across surfaces.
+func writeAssigneeChange(s *store.Store, logger interface {
+	Warn(string, ...any)
+}, actor string, ch store.AssigneeChange) {
+	if !ch.Changed() {
+		return
+	}
+	var details string
+	switch {
+	case ch.New == "":
+		details = fmt.Sprintf("%s → (unassigned)", ch.Old)
+	case ch.Old == "":
+		details = "assigned to " + ch.New
+	default:
+		details = fmt.Sprintf("%s → %s", ch.Old, ch.New)
+	}
+	repoID, issueID := ch.RepoID, ch.IssueID
+	entry := model.HistoryEntry{
+		RepoID:      &repoID,
+		RepoPrefix:  ch.RepoPrefix,
+		Actor:       actor,
+		Op:          "issue.assign",
+		Kind:        "issue",
+		TargetID:    &issueID,
+		TargetLabel: ch.IssueKey,
+		Details:     details,
+	}
+	if err := s.RecordHistory(entry); err != nil {
+		logger.Warn("failed to record history", "err", err, "op", entry.Op)
+	}
+}
+
+// ---------- list ----------
+
+func (d deps) handleAgentSessionsList(w http.ResponseWriter, r *http.Request) {
+	d.serveAgentSessions(w, r, nil)
+}
+
+func (d deps) handleAgentSessionsListRepo(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	d.serveAgentSessions(w, r, &repo.ID)
+}
+
+func (d deps) serveAgentSessions(w http.ResponseWriter, r *http.Request, repoID *int64) {
+	q := r.URL.Query()
+	f := store.AgentSessionFilter{RepoID: repoID}
+	if v := q.Get("active"); v == "true" || v == "1" {
+		f.OnlyAlive = true
+	}
+	// Default: registered_at IS NOT NULL — hide SessionStart stubs that
+	// never made it through register. ?all=true flips it (mirrors the
+	// CLI's `--all` flag on bacio agent list).
+	all := q.Get("all")
+	f.RegisteredOnly = !(all == "true" || all == "1")
+	if since := q.Get("since"); since != "" {
+		dur, err := timeparse.Lookback(since)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_input", err.Error(),
+				map[string]any{"field": "since"})
+			return
+		}
+		f.Since = time.Now().Add(-dur).UTC()
+	}
+	sessions, err := d.store.ListAgentSessions(f)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if sessions == nil {
+		sessions = []*model.AgentSession{}
+	}
+	writeJSON(w, http.StatusOK, sessions)
+}
+
+// ---------- show ----------
+
+func (d deps) handleAgentSessionShow(w http.ResponseWriter, r *http.Request) {
+	sid := r.PathValue("session_id")
+	sess, err := d.store.ResolveAgentSession(sid)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found",
+				fmt.Sprintf("session %q not found", sid), nil)
+			return
+		}
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	claims, err := d.store.ListAgentClaims(sess.ID)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if claims == nil {
+		claims = []*model.AgentClaim{}
+	}
+	writeJSON(w, http.StatusOK, &AgentSessionShow{Session: sess, Claims: claims})
+}
+
+// ---------- inbox ----------
+
+func (d deps) handleAgentInbox(w http.ResponseWriter, r *http.Request) {
+	sid := r.PathValue("session_id")
+	sess, err := d.store.GetAgentSession(sid)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found",
+				fmt.Sprintf("session %q is not registered", sid), nil)
+			return
+		}
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	// A session's inbox is everything aimed at the bare session id OR at
+	// the agent identity behind it; open items only.
+	ds, err := d.store.ListDispatches(store.DispatchFilter{
+		TargetAgentID:   sess.AgentID,
+		TargetSessionID: sess.SessionID,
+		Statuses:        []model.DispatchStatus{model.DispatchPending, model.DispatchDelivered},
+	})
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if ds == nil {
+		ds = []*model.AgentDispatch{}
+	}
+	writeJSON(w, http.StatusOK, ds)
+}
+
+// ---------- ack ----------
+
+func (d deps) handleAgentDispatchAck(w http.ResponseWriter, r *http.Request) {
+	rawID := r.PathValue("id")
+	id, err := strconv.ParseInt(rawID, 10, 64)
+	if err != nil || id <= 0 {
+		writeError(w, http.StatusBadRequest, "invalid_input",
+			fmt.Sprintf("invalid dispatch id %q", rawID), map[string]any{"field": "id"})
+		return
+	}
+	body, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	in := inputs.AgentAckInput{ID: id}
+	if len(body) > 0 {
+		got, _, err := inputio.DecodeStrict[inputs.AgentAckInput](body)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+			return
+		}
+		// The URL id is canonical; reject a mismatch in the body rather than
+		// silently picking one.
+		if got.ID != 0 && got.ID != id {
+			writeError(w, http.StatusBadRequest, "invalid_input",
+				"id in body must match URL", map[string]any{"field": "id"})
+			return
+		}
+		in = *got
+		in.ID = id
+	}
+	existing, err := d.store.GetDispatch(in.ID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found",
+				fmt.Sprintf("no dispatch with id %d", in.ID), nil)
+			return
+		}
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if isDryRun(r) {
+		projected := *existing
+		now := time.Now().UTC()
+		projected.Status = model.DispatchAcked
+		projected.AckedAt = &now
+		projected.AckNote = in.Note
+		writeDryRun(w, http.StatusOK, &projected)
+		return
+	}
+	actor := ActorFromContext(r.Context())
+	acked, err := d.store.AckDispatch(in.ID, in.Note)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	recordOp(d.store, d.logger, model.HistoryEntry{
+		RepoID: &acked.RepoID, RepoPrefix: acked.RepoPrefix,
+		Actor:    actor,
+		Op:       "agent.ack",
+		Kind:     "agent",
+		TargetID: &acked.ID, TargetLabel: dispatchTargetLabel(acked),
+		Details:  dispatchDetails(acked),
+	})
+	writeJSON(w, http.StatusOK, acked)
+}
+
+// dispatchTargetLabel / dispatchDetails mirror their client-side twins so
+// the audit row reads identically across surfaces.
+func dispatchTargetLabel(d *model.AgentDispatch) string {
+	if d.TargetAgentName != "" {
+		return d.TargetAgentName
+	}
+	return d.TargetSessionID
+}
+
+func dispatchDetails(d *model.AgentDispatch) string {
+	var parts []string
+	if d.IssueKey != "" {
+		parts = append(parts, "issue="+d.IssueKey)
+	}
+	if d.TargetSessionID != "" {
+		parts = append(parts, "session="+d.TargetSessionID)
+	}
+	parts = append(parts, "status="+string(d.Status))
+	return strings.Join(parts, ",")
+}
+
+// ---------- open claims ----------
+
+func (d deps) handleAgentClaimsOpen(w http.ResponseWriter, r *http.Request) {
+	d.serveOpenClaims(w, nil)
+}
+
+func (d deps) handleAgentClaimsOpenRepo(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	d.serveOpenClaims(w, &repo.ID)
+}
+
+// serveOpenClaims flattens store.OpenClaimsBySession (which buckets open
+// claims by session PK) into a flat list. With repoID == nil it
+// concatenates across every tracked repo — matches localClient.ListOpenClaims.
+func (d deps) serveOpenClaims(w http.ResponseWriter, repoID *int64) {
+	collect := func(id int64) ([]*model.AgentClaim, error) {
+		bySession, err := d.store.OpenClaimsBySession(id)
+		if err != nil {
+			return nil, err
+		}
+		var out []*model.AgentClaim
+		for _, claims := range bySession {
+			out = append(out, claims...)
+		}
+		return out, nil
+	}
+	var (
+		out []*model.AgentClaim
+		err error
+	)
+	if repoID != nil {
+		out, err = collect(*repoID)
+	} else {
+		repos, lerr := d.store.ListRepos()
+		if lerr != nil {
+			status, code := statusForError(lerr)
+			writeError(w, status, code, lerr.Error(), nil)
+			return
+		}
+		for _, r := range repos {
+			claims, cerr := collect(r.ID)
+			if cerr != nil {
+				err = cerr
+				break
+			}
+			out = append(out, claims...)
+		}
+	}
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if out == nil {
+		out = []*model.AgentClaim{}
+	}
+	writeJSON(w, http.StatusOK, out)
+}

@@ -75,6 +75,25 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("GET /history", d.handleHistoryAll)
 	mux.HandleFunc("GET /repos/{prefix}/history", d.handleHistoryRepo)
 
+	// Agent registry (BACI-34). Local-only data, but reachable over HTTP
+	// so a remote frontend can drive the same surface as the desktop.
+	// Repo-scoped: register a session, list sessions in a repo, list open
+	// claims in a repo. Session-scoped: heartbeat / end / claim / release /
+	// show / inbox. Dispatch-scoped: ack. Cross-repo variants of the two
+	// lists mirror the /history pattern.
+	mux.HandleFunc("POST /repos/{prefix}/agents/sessions", d.handleAgentRegister)
+	mux.HandleFunc("GET /repos/{prefix}/agents/sessions", d.handleAgentSessionsListRepo)
+	mux.HandleFunc("GET /repos/{prefix}/agents/claims/open", d.handleAgentClaimsOpenRepo)
+	mux.HandleFunc("GET /agents/sessions", d.handleAgentSessionsList)
+	mux.HandleFunc("GET /agents/sessions/{session_id}", d.handleAgentSessionShow)
+	mux.HandleFunc("POST /agents/sessions/{session_id}/heartbeat", d.handleAgentHeartbeat)
+	mux.HandleFunc("POST /agents/sessions/{session_id}/end", d.handleAgentEnd)
+	mux.HandleFunc("POST /agents/sessions/{session_id}/claims", d.handleAgentClaim)
+	mux.HandleFunc("DELETE /agents/sessions/{session_id}/claims", d.handleAgentRelease)
+	mux.HandleFunc("GET /agents/sessions/{session_id}/inbox", d.handleAgentInbox)
+	mux.HandleFunc("POST /agents/dispatches/{id}/ack", d.handleAgentDispatchAck)
+	mux.HandleFunc("GET /agents/claims/open", d.handleAgentClaimsOpen)
+
 	// Outermost first: panic recovery wraps everything so a bug in any
 	// later layer still returns a 500 envelope.
 	var h http.Handler = mux

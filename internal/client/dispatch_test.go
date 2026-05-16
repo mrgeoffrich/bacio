@@ -312,9 +312,10 @@ func TestClaimReleaseKeepsAssigneeInLockstep(t *testing.T) {
 	}
 }
 
-// TestDispatchRemoteNotSupported locks in that the remote backend
-// refuses dispatch verbs with ErrLocalOnly (the registry is local-only
-// in v1).
+// TestDispatchRemoteNotSupported locks in which dispatch-side verbs are
+// still local-only after BACI-34 landed inbox/ack over HTTP.
+// CreateDispatch (and the channel-internal drains) are the holdouts —
+// they remain ErrLocalOnly until a follow-up adds their HTTP parity.
 func TestDispatchRemoteNotSupported(t *testing.T) {
 	p := newPair(t)
 	defer p.cleanup()
@@ -324,10 +325,10 @@ func TestDispatchRemoteNotSupported(t *testing.T) {
 	if !errors.Is(err, ErrLocalOnly) {
 		t.Fatalf("remote CreateDispatch err = %v, want ErrLocalOnly", err)
 	}
-	if _, err := p.remote.InboxDispatches(ctx, "sess-x"); !errors.Is(err, ErrLocalOnly) {
-		t.Fatalf("remote InboxDispatches err = %v, want ErrLocalOnly", err)
+	if _, err := p.remote.RepoDispatches(ctx, p.repo); !errors.Is(err, ErrLocalOnly) {
+		t.Fatalf("remote RepoDispatches err = %v, want ErrLocalOnly", err)
 	}
-	if _, err := p.remote.AckDispatch(ctx, inputs.AgentAckInput{ID: 1}, false); !errors.Is(err, ErrLocalOnly) {
-		t.Fatalf("remote AckDispatch err = %v, want ErrLocalOnly", err)
+	if _, err := p.remote.DrainDispatches(ctx, "sess-x"); !errors.Is(err, ErrLocalOnly) {
+		t.Fatalf("remote DrainDispatches err = %v, want ErrLocalOnly", err)
 	}
 }
