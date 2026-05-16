@@ -5,6 +5,9 @@ import (
 	"embed"
 	_ "embed"
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/mrgeoffrich/bacio/internal/client"
@@ -98,6 +101,19 @@ func main() {
 			time.Sleep(time.Second)
 		}
 	}()
+
+	// Translate SIGINT/SIGTERM/SIGHUP into a graceful app.Quit so Wails
+	// runs ServiceShutdown on LeaderService — which releases the UI
+	// leader lease so a standby UI promotes within one tick (~10s)
+	// rather than waiting out the 180s stale window.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	go func() {
+		if _, ok := <-sigCh; ok {
+			app.Quit()
+		}
+	}()
+	defer signal.Stop(sigCh)
 
 	// Run the application. This blocks until the application has been exited.
 	err = app.Run()

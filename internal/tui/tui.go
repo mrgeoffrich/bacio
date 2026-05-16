@@ -15,7 +15,9 @@ package tui
 import (
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -89,6 +91,11 @@ func leaderTick() tea.Cmd {
 // Run boots the Bubble Tea program in alt-screen mode and blocks until
 // quit. The store is owned by the caller. It constructs a leader.Elector
 // for the process and releases the lease on graceful exit.
+//
+// SIGTERM/SIGHUP are translated into a graceful tea.Quit so the deferred
+// el.Release fires and a standby UI can promote within one tick (~10s)
+// rather than waiting out the 180s stale window. SIGINT is left to
+// bubbletea, which already converts it into a graceful quit.
 func Run(s *store.Store, repo *model.Repo) error {
 	h, _ := os.Hostname()
 	label := fmt.Sprintf("tui pid=%d host=%s", os.Getpid(), h)
@@ -99,6 +106,16 @@ func Run(s *store.Store, repo *model.Repo) error {
 		return err
 	}
 	p := tea.NewProgram(m, tea.WithAltScreen())
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGHUP)
+	defer signal.Stop(sigCh)
+	go func() {
+		if _, ok := <-sigCh; ok {
+			p.Quit()
+		}
+	}()
+
 	_, err = p.Run()
 	return err
 }
