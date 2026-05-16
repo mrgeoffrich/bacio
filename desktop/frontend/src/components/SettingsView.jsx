@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from './Icon.jsx';
 import { reportError } from '../errors';
+import { WEB_MODE } from '../env';
 import * as api from '../api';
 
 const THEME_OPTIONS = [
@@ -60,7 +61,13 @@ export default function SettingsView({
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([refreshTemplates(), api.promptPlaceholders(), api.bacioVersion()])
+    // The prompt-templates surface is hidden entirely in WEB_MODE
+    // (the CRUD verbs live in app_settings, which has no HTTP parity
+    // yet). Only the bacio-version readout matters there.
+    const tasks = WEB_MODE
+      ? [Promise.resolve([]), Promise.resolve([]), api.bacioVersion()]
+      : [refreshTemplates(), api.promptPlaceholders(), api.bacioVersion()];
+    Promise.all(tasks)
       .then(([, ph, ver]) => {
         if (cancelled) return;
         setPlaceholders(ph);
@@ -207,25 +214,28 @@ export default function SettingsView({
           </div>
         </section>
 
-        <section className="mk-settings-row">
-          <div className="mk-settings-row-text">
-            <div className="mk-settings-label">Hide empty board columns</div>
-            <div className="mk-settings-hint">Columns with no cards are hidden from the board.</div>
-          </div>
-          <div className="mk-segmented" role="group" aria-label="Hide empty board columns">
-            {HIDE_EMPTY_OPTIONS.map(opt => (
-              <button
-                key={String(opt.id)}
-                className={`mk-segmented-btn ${hideEmptyColumns === opt.id ? 'is-active' : ''}`}
-                aria-pressed={hideEmptyColumns === opt.id}
-                onClick={() => onChangeHideEmptyColumns(opt.id)}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        </section>
+        {!WEB_MODE && (
+          <section className="mk-settings-row">
+            <div className="mk-settings-row-text">
+              <div className="mk-settings-label">Hide empty board columns</div>
+              <div className="mk-settings-hint">Columns with no cards are hidden from the board.</div>
+            </div>
+            <div className="mk-segmented" role="group" aria-label="Hide empty board columns">
+              {HIDE_EMPTY_OPTIONS.map(opt => (
+                <button
+                  key={String(opt.id)}
+                  className={`mk-segmented-btn ${hideEmptyColumns === opt.id ? 'is-active' : ''}`}
+                  aria-pressed={hideEmptyColumns === opt.id}
+                  onClick={() => onChangeHideEmptyColumns(opt.id)}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
 
+        {!WEB_MODE && (
         <section className="mk-settings-section">
           <div className="mk-settings-row-text">
             <div className="mk-settings-label">Prompt templates</div>
@@ -420,6 +430,7 @@ export default function SettingsView({
             );
           })}
         </section>
+        )}
 
         <section className="mk-settings-row">
           <div className="mk-settings-row-text">

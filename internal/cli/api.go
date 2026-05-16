@@ -17,9 +17,10 @@ import (
 
 func newAPICmd() *cobra.Command {
 	var (
-		addr  string
-		port  int
-		token string
+		addr        string
+		port        int
+		token       string
+		corsOrigins []string
 	)
 	cmd := &cobra.Command{
 		Use:   "api",
@@ -51,7 +52,11 @@ requests carry their own actor via the X-Actor header (default "api").`,
 			defer s.Close()
 
 			logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
-			srv := api.New(s, api.Options{Addr: addr, Token: token}, logger)
+			srv := api.New(s, api.Options{
+				Addr:        addr,
+				Token:       token,
+				CORSOrigins: corsOrigins,
+			}, logger)
 
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
@@ -61,5 +66,7 @@ requests carry their own actor via the X-Actor header (default "api").`,
 	cmd.Flags().StringVar(&addr, "addr", "127.0.0.1:5320", "bind address (host:port)")
 	cmd.Flags().IntVar(&port, "port", 0, "shorthand to override only the port (keeps host from --addr)")
 	cmd.Flags().StringVar(&token, "token", "", "shared bearer token; falls back to BACIO_API_TOKEN env var")
+	cmd.Flags().StringSliceVar(&corsOrigins, "cors-origin", nil,
+		"allow cross-origin browser requests from this origin (repeatable; e.g. http://localhost:5174). Empty allow-list = same-origin only.")
 	return cmd
 }

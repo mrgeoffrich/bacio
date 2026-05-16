@@ -122,6 +122,61 @@ func bodyCap(next http.Handler, max int64) http.Handler {
 	})
 }
 
+// cors handles cross-origin requests from a browser-hosted bundle,
+// using a strict allow-list rather than a wildcard. Origins are
+// matched case-sensitively against the Origin header; "*" entries
+// are honoured but discouraged (incompatible with credentialed
+// requests). When the allow-list is empty the middleware is a no-op
+// — same-origin browsers don't send an Origin header on simple
+// fetches and don't preflight at all, so omitting headers in the
+// default deployment keeps the response surface tight.
+//
+// Sits outermost in the chain so a CORS preflight is answered
+// before auth runs — otherwise a cross-origin OPTIONS would always
+// 401 when a bearer token is configured, which is the wrong shape.
+func cors(next http.Handler, allowed []string) http.Handler {
+	if len(allowed) == 0 {
+		return next
+	}
+	allow := make(map[string]struct{}, len(allowed))
+	wildcard := false
+	for _, o := range allowed {
+		if o == "*" {
+			wildcard = true
+			continue
+		}
+		allow[o] = struct{}{}
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin != "" {
+			_, ok := allow[origin]
+			if ok || wildcard {
+				echo := origin
+				if wildcard && !ok {
+					echo = "*"
+				}
+				w.Header().Set("Access-Control-Allow-Origin", echo)
+				w.Header().Set("Vary", "Origin")
+				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Actor, X-Dry-Run")
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+				w.Header().Set("Access-Control-Max-Age", "600")
+			}
+		}
+		if r.Method == http.MethodOptions {
+			// Preflight short-circuits — even when the origin doesn't
+			// match the allow-list, return 204 (with no CORS headers)
+			// rather than fall through to the auth middleware, which
+			// would 401 and confuse the browser. The missing
+			// Access-Control-Allow-Origin tells the browser the
+			// preflight failed.
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // ActorFromContext retrieves the resolved actor stamped onto the request
 // context by actorMiddleware. Returns the default if missing so callers
 // don't have to nil-check.

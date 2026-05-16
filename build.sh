@@ -14,17 +14,21 @@
 # Usage:
 #   ./build.sh                 # rebuild everything
 #   ./build.sh --skip-desktop  # CLI/TUI only (handy in the inner loop)
+#   ./build.sh --web           # also build the web bundle into webui/
+#                              # (BACI-30). Composes with --skip-desktop.
 #
 # Run from the repo root.
 
 set -euo pipefail
 
 skip_desktop=0
+build_web=0
 for arg in "$@"; do
     case "$arg" in
         --skip-desktop) skip_desktop=1 ;;
+        --web) build_web=1 ;;
         -h|--help)
-            sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -36,6 +40,28 @@ done
 
 repo_root=$(cd "$(dirname "$0")" && pwd)
 cd "$repo_root"
+
+# ---------- optional: web bundle ----------
+#
+# Has to run BEFORE the CLI build because `//go:embed all:webui` in
+# embed.go bakes the bundle into the binary at compile time. Skip if
+# --web wasn't passed.
+
+if [ "$build_web" -eq 1 ]; then
+    echo "==> npm install (desktop frontend deps, for web build)"
+    ( cd desktop/frontend && npm install --silent )
+
+    echo "==> npm run build:web (Vite --mode web → desktop/frontend/dist-web/)"
+    ( cd desktop/frontend && npm run build:web )
+
+    echo "==> sync dist-web/ → webui/"
+    # Wipe everything except the .gitkeep anchor, then copy the fresh
+    # bundle in. rsync would be cleaner but isn't ubiquitous on macOS;
+    # find + cp does the same with the tools every machine has.
+    find webui -mindepth 1 -not -name .gitkeep -delete
+    cp -R desktop/frontend/dist-web/. webui/
+    ls -la webui | head -10
+fi
 
 # ---------- main module: vet, test, install CLI/TUI ----------
 

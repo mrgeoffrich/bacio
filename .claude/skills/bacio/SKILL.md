@@ -941,7 +941,16 @@ bacio sync inspect <prefix> --doc filename    the flags, prints the parsed
 bacio api                                # bind 127.0.0.1:5320, no auth
 bacio api --addr 127.0.0.1:7777 --token T   # require Authorization: Bearer T
 BACIO_API_TOKEN=T bacio api                 # token via env
+bacio api --cors-origin http://localhost:5174   # opt in to cross-origin browser
+                                            # callers (repeatable; default empty
+                                            # = same-origin only)
 ```
+
+`GET /ui/` serves the BACI-30 web bundle when one was compiled in
+(via `./build.sh --web` populating `webui/` before `go build`).
+Same-origin loopback is the recommended deployment; `--cors-origin`
+exists for dev rigs and split-host setups. Durable reference:
+`docs/web-app-mode.md`.
 
 ### Discovery
 
