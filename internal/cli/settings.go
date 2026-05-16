@@ -117,9 +117,6 @@ func settingsTemplateStatesShowCmd() *cobra.Command {
 		Short: "Show the valid-from issue states for one job stage's prompt",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := requireLocalForSettings("template states show"); err != nil {
-				return err
-			}
 			mode, err := templateModeArg(args[0])
 			if err != nil {
 				return err
@@ -217,9 +214,6 @@ func settingsTemplateStatesResetCmd() *cobra.Command {
 // It honours --dry-run: the states are validated at the store boundary,
 // then the write is short-circuited and the projected template emitted.
 func applyTemplateStates(modeArg string, states []string) error {
-	if err := requireLocalForSettings("template states set"); err != nil {
-		return err
-	}
 	mode, err := templateModeArg(modeArg)
 	if err != nil {
 		return err
@@ -254,16 +248,6 @@ func applyTemplateStates(modeArg string, states []string) error {
 		return err
 	}
 	return emit(templateViewFor(mode, current[string(mode)], allowed))
-}
-
-// requireLocalForSettings short-circuits settings verbs in remote mode —
-// app_settings (like the agent registry) is local-only in v1, so a
-// clear message beats a confusing network error.
-func requireLocalForSettings(verb string) error {
-	if inRemoteMode() {
-		return fmt.Errorf("bacio settings %s is local-only in v1 — drop --remote / unset BACIO_REMOTE (prompt templates live only in the local SQLite store)", verb)
-	}
-	return nil
 }
 
 // templateModeArg parses a stage argument, rejecting the empty / untyped
@@ -359,9 +343,6 @@ func settingsTemplateListCmd() *cobra.Command {
 		Short: "List the dispatch prompt template for every job stage",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := requireLocalForSettings("template list"); err != nil {
-				return err
-			}
 			c, err := openClient()
 			if err != nil {
 				return err
@@ -398,9 +379,6 @@ func settingsTemplateShowCmd() *cobra.Command {
 		Short: "Show the dispatch prompt template for one job stage",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := requireLocalForSettings("template show"); err != nil {
-				return err
-			}
 			mode, err := templateModeArg(args[0])
 			if err != nil {
 				return err
@@ -494,9 +472,6 @@ func settingsTemplateResetCmd() *cobra.Command {
 // the body is validated at the store boundary, then the write is
 // short-circuited and the projected template emitted.
 func applyTemplate(modeArg, body string) error {
-	if err := requireLocalForSettings("template set"); err != nil {
-		return err
-	}
 	mode, err := templateModeArg(modeArg)
 	if err != nil {
 		return err

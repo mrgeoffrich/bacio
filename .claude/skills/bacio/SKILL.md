@@ -690,8 +690,10 @@ settings.template.set` (schema names `settings.template.set` /
 `settings.template.states.reset`). A template body may interpolate
 `{{issue_id}}`, `{{issue_title}}`, and `{{repo_prefix}}` — substituted
 with the dispatched issue's context at dispatch time; an unknown
-`{{...}}` token is left verbatim. `bacio settings` is local-only (the
-`app_settings` store has no remote analogue in v1).
+`{{...}}` token is left verbatim. The prompt-template + state-gate
+verbs work over `--remote` too (HTTP parity landed in BACI-36); other
+`bacio settings` verbs (board preferences) are still local-only since
+they live elsewhere in `app_settings`.
 
 Each stage also has a **state-gate**: the set of issue states its prompt
 is valid to run from (built-in defaults — `plan`/`implement` → `todo`,
@@ -750,13 +752,16 @@ the work, `release`, and `bacio agent ack` for any dispatches that arrived.
 The agent registry is reachable over HTTP for nine verbs — `register`,
 `heartbeat`, `end`, `claim`, `release`, `list`, `show`, `inbox`, `ack` —
 plus the bulk `ListOpenClaims` (used by the desktop Board to derive
-`taken`). The CLI's `--remote` / `BACIO_REMOTE` mode drives these
-verbs over the same routes as a web frontend would. The holdouts that
-remain local-only are `bacio agent dispatch` (HTTP parity is a
-follow-up), the channel/hook internals (`EnsureSetupDispatch`,
-`DrainDispatches`, `CompleteRegistration`, `CreateSessionStub`, etc.),
-and the prompt-template / board-preference settings — those error
-clearly in remote mode with a "local-only" message.
+`taken`). Prompt templates and their state-gates are also reachable
+(`bacio settings template list / show / set / reset`, including the
+`states` sub-group) — landed in BACI-36. The CLI's `--remote` /
+`BACIO_REMOTE` mode drives all of these over the same routes as a web
+frontend would. The holdouts that remain local-only are
+`bacio agent dispatch` (HTTP parity is a follow-up), the channel/hook
+internals (`EnsureSetupDispatch`, `DrainDispatches`,
+`CompleteRegistration`, `CreateSessionStub`, etc.), and board
+preferences — those error clearly in remote mode with a "local-only"
+message.
 
 ## Git-backed sync
 
@@ -916,8 +921,9 @@ A few non-obvious mappings:
 
 - **`POST /repos`** is the equivalent of `bacio init`, but the server can't see your CWD — supply `{"name":"...", "path":"..."}` (plus optional `prefix`) explicitly.
 - **`GET /repos/{prefix}/documents/{filename}/download`** is the only non-JSON endpoint. Streams the body as `text/markdown` with `Content-Disposition: attachment`. No audit row, no dry-run, no `with_content`. The API never reads or writes the server filesystem, so callers materialise on disk by piping the response (`curl -O`).
-- **CLI verbs with no API equivalent** (touch the local filesystem or terminal): `bacio init` (use `POST /repos`), `bacio install-skill`, `bacio install-hooks`, `bacio install-channel`, `bacio doc add --from-path` / `--content-file` (inline `content` in the body), `bacio doc export` (use `/download`), `bacio tui`, `bacio hook *`, `bacio channel`. Plus the local-only agent verbs `bacio agent dispatch` and the prompt-template / board-preference settings.
+- **CLI verbs with no API equivalent** (touch the local filesystem or terminal): `bacio init` (use `POST /repos`), `bacio install-skill`, `bacio install-hooks`, `bacio install-channel`, `bacio doc add --from-path` / `--content-file` (inline `content` in the body), `bacio doc export` (use `/download`), `bacio tui`, `bacio hook *`, `bacio channel`. Plus the local-only agent verbs `bacio agent dispatch` and board-preference settings.
 - **Agent registry endpoints.** The nine register/heartbeat/end/claim/release/list/show/inbox/ack verbs reach the server under `/repos/{prefix}/agents/sessions` (register, list-in-repo, list-open-claims-in-repo) and `/agents/sessions/{session_id}/...` (heartbeat/end/claim/release/inbox + show), plus `/agents/dispatches/{id}/ack`. Cross-repo variants of the two lists live at `/agents/sessions` and `/agents/claims/open`. Stub sessions (`registered_at` NULL) are hidden by default on the list endpoints — pass `?all=true` to include them.
+- **Prompt-template endpoints.** Bodies and state-gates are global app-settings, not repo-scoped. `GET /settings/templates` returns the resolved body for every dispatch stage (a `mode → body` map); `GET /settings/templates/states` returns the state-gate map. Per-stage mutations live at `PUT/DELETE /settings/templates/{mode}` (body) and `PUT/DELETE /settings/templates/{mode}/states` (state-gate). An empty body/list on PUT is rejected — use DELETE to revert to the built-in default. Dry-run + `X-Dry-Run` header work as elsewhere.
 
 For the full design rationale, threat model, and what the API deliberately doesn't do (NDJSON, per-user auth, CORS, cursor pagination, …), see `docs/rest-api-design.md`.
 

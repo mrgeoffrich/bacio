@@ -213,20 +213,60 @@ func (c *remoteClient) LinkSessionChannel(ctx context.Context, sessionID string,
 	return remoteAgentNotSupported("channel")
 }
 
+// Prompt templates + state-gates landed HTTP parity in BACI-36; these
+// thread through the same `c.do(...)` pattern as the BACI-34 agent
+// verbs. An empty body on Set* is the reset signal: the helper switches
+// the HTTP verb from PUT to DELETE so the server's reset handler runs.
+// The cli/settings.go applyTemplate / applyTemplateStates helpers send
+// "" / nil to mean "revert to default" — this layer transparently turns
+// that into a DELETE.
+
 func (c *remoteClient) GetPromptTemplates(ctx context.Context) (map[string]string, error) {
-	return nil, remoteAgentNotSupported("prompt-templates")
+	var out map[string]string
+	if err := c.do(ctx, http.MethodGet, "/settings/templates", nil, nil, &out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = map[string]string{}
+	}
+	return out, nil
 }
 
 func (c *remoteClient) SetPromptTemplate(ctx context.Context, mode, body string, dryRun bool) error {
-	return remoteAgentNotSupported("prompt-templates")
+	q := url.Values{}
+	if dryRun {
+		q.Set("dry_run", "true")
+	}
+	path := "/settings/templates/" + url.PathEscape(mode)
+	if body == "" {
+		return c.do(ctx, http.MethodDelete, path, q, nil, nil)
+	}
+	in := map[string]string{"mode": mode, "body": body}
+	return c.do(ctx, http.MethodPut, path, q, in, nil)
 }
 
 func (c *remoteClient) GetPromptStates(ctx context.Context) (map[string][]string, error) {
-	return nil, remoteAgentNotSupported("prompt-states")
+	var out map[string][]string
+	if err := c.do(ctx, http.MethodGet, "/settings/templates/states", nil, nil, &out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = map[string][]string{}
+	}
+	return out, nil
 }
 
 func (c *remoteClient) SetPromptStates(ctx context.Context, mode string, states []string, dryRun bool) error {
-	return remoteAgentNotSupported("prompt-states")
+	q := url.Values{}
+	if dryRun {
+		q.Set("dry_run", "true")
+	}
+	path := "/settings/templates/" + url.PathEscape(mode) + "/states"
+	if len(states) == 0 {
+		return c.do(ctx, http.MethodDelete, path, q, nil, nil)
+	}
+	in := map[string]any{"mode": mode, "states": states}
+	return c.do(ctx, http.MethodPut, path, q, in, nil)
 }
 
 func (c *remoteClient) GetBoardPreferences(ctx context.Context) (BoardPreferences, error) {
