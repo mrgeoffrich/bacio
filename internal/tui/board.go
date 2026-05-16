@@ -827,7 +827,7 @@ func (b *boardView) renderColumn(st model.State, focused bool, width, height int
 	// column title ("In Progress · 100") is no longer a row of its own
 	// inside the box — it rides in the top border via post-processing,
 	// which gives the body one extra row for actual cards.
-	const cardHeight = 2
+	const cardHeight = 3
 
 	// Compute how many cards fit in the body, then nudge the per-column
 	// scroll so the cursor stays in view.
@@ -987,11 +987,12 @@ func (b *boardView) renderColumn(st model.State, focused bool, width, height int
 		}
 
 		// Always use the packed layout: [KEY] + one-space gutter + the
-		// start of the title on line 0, continuation on line 1. Every
-		// card is exactly cardHeight=2 lines, and the title sits flush
-		// against the key rather than dropping to line 1. Short titles
-		// like "Banana" fit fully on line 0 and pad line 1 with
-		// whitespace; longer titles fill both rows.
+		// start of the title on line 0, continuations on subsequent
+		// lines. Every card is exactly cardHeight=3 lines, and the
+		// title sits flush against the key rather than dropping to
+		// line 1. Short titles like "Banana" fit fully on line 0 and
+		// pad the remaining rows with whitespace; longer titles fill
+		// more rows.
 		//
 		// `firstW < 1` is the one edge case where packing isn't
 		// possible (bracketed key alone fills the content width); we
