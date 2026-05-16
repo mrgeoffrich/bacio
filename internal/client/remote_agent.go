@@ -169,16 +169,49 @@ func (c *remoteClient) AckDispatch(ctx context.Context, in inputs.AgentAckInput,
 // always talk to the local store) or to mutate the global app_settings
 // KV (no remote analogue in v1).
 
+// CreateDispatch queues a dispatch via the REST API (BACI-35).
+// Mirrors the CLI flag path through the inputs.AgentDispatchInput
+// shape; the server resolves agent / session / issue / prompt
+// template and stamps the audit log itself.
 func (c *remoteClient) CreateDispatch(ctx context.Context, repo *model.Repo, in inputs.AgentDispatchInput, dryRun bool) (*model.AgentDispatch, error) {
-	return nil, remoteAgentNotSupported("dispatch")
+	if repo == nil {
+		return nil, fmt.Errorf("CreateDispatch requires a repo")
+	}
+	q := url.Values{}
+	if dryRun {
+		q.Set("dry_run", "true")
+	}
+	var out model.AgentDispatch
+	if err := c.do(ctx, http.MethodPost, "/repos/"+repo.Prefix+"/agents/dispatches", q, in, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }
 
+// DrainDispatches is the side-effect-bearing "list pending+delivered
+// AND mark pending → delivered" call used by the bacio hook to feed an
+// agent's context. The hook talks to the local store directly (it
+// doesn't go through --remote), so this is genuinely not needed over
+// HTTP today — keep it local-only and clearly labelled.
 func (c *remoteClient) DrainDispatches(ctx context.Context, sessionID string) ([]*model.AgentDispatch, error) {
-	return nil, remoteAgentNotSupported("inbox")
+	return nil, remoteAgentNotSupported("inbox-drain")
 }
 
+// RepoDispatches lists every dispatch queued against a repo, newest
+// first — the read backing the desktop Agents view's per-repo bucket
+// (BACI-35).
 func (c *remoteClient) RepoDispatches(ctx context.Context, repo *model.Repo) ([]*model.AgentDispatch, error) {
-	return nil, remoteAgentNotSupported("dispatches")
+	if repo == nil {
+		return nil, fmt.Errorf("RepoDispatches requires a repo")
+	}
+	var out []*model.AgentDispatch
+	if err := c.do(ctx, http.MethodGet, "/repos/"+repo.Prefix+"/agents/dispatches", nil, nil, &out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = []*model.AgentDispatch{}
+	}
+	return out, nil
 }
 
 func (c *remoteClient) EnsureSetupDispatch(ctx context.Context, repo *model.Repo, sessionID string) (*model.AgentDispatch, error) {
