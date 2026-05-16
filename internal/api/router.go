@@ -92,6 +92,7 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("DELETE /agents/sessions/{session_id}/claims", d.handleAgentRelease)
 	mux.HandleFunc("GET /agents/sessions/{session_id}/inbox", d.handleAgentInbox)
 	mux.HandleFunc("POST /agents/dispatches/{id}/ack", d.handleAgentDispatchAck)
+	mux.HandleFunc("POST /agents/dispatches/{id}/cancel", d.handleAgentDispatchCancel)
 	mux.HandleFunc("GET /agents/claims/open", d.handleAgentClaimsOpen)
 	// Dispatch CRUD (BACI-35) rounds out the four dispatch verbs — inbox
 	// and ack already shipped with BACI-34. Repo-scoped because a

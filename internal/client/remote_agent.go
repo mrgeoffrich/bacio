@@ -163,6 +163,19 @@ func (c *remoteClient) AckDispatch(ctx context.Context, in inputs.AgentAckInput,
 	return &out, nil
 }
 
+func (c *remoteClient) CancelDispatch(ctx context.Context, in inputs.AgentCancelInput, dryRun bool) (*model.AgentDispatch, error) {
+	q := url.Values{}
+	if dryRun {
+		q.Set("dry_run", "true")
+	}
+	var out model.AgentDispatch
+	path := "/agents/dispatches/" + strconv.FormatInt(in.ID, 10) + "/cancel"
+	if err := c.do(ctx, http.MethodPost, path, q, in, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // ---------- the rest stays local-only ----------
 // CreateDispatch, prompt templates, board prefs, and every channel /
 // hook-internal primitive don't have HTTP analogues in v1. Most exist

@@ -149,6 +149,9 @@ var (
 		ID:   7,
 		Note: "On it — claimed MINI-42, opening a PR shortly.",
 	}
+	ExampleAgentCancel = AgentCancelInput{
+		ID: 7,
+	}
 	ExampleIssueDispatch = IssueDispatchInput{
 		Mode: "implement",
 	}

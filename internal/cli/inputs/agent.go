@@ -80,6 +80,15 @@ type AgentAckInput struct {
 	Note string `json:"note,omitempty"`
 }
 
+// AgentCancelInput is the payload for `bacio agent cancel --json`. ID
+// is the dispatch id. Cancelling an already-acked dispatch is an error
+// (the work was acknowledged); cancelling an already-cancelled
+// dispatch is a no-op. If the dispatch targets an issue, the issue's
+// waiting_for_claim flag is cleared in the same transaction.
+type AgentCancelInput struct {
+	ID int64 `json:"id"`
+}
+
 // IssueDispatchInput is the payload for the state-gated auto-pick
 // dispatch verb (BACI-40): `POST /repos/{prefix}/issues/{key}/dispatch`
 // and the target-less `bacio agent dispatch <key> --mode <stage>`. Mode

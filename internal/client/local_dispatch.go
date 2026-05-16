@@ -276,6 +276,35 @@ func (c *localClient) AckDispatch(ctx context.Context, in inputs.AgentAckInput, 
 	return acked, nil
 }
 
+func (c *localClient) CancelDispatch(ctx context.Context, in inputs.AgentCancelInput, dryRun bool) (*model.AgentDispatch, error) {
+	d, err := c.store.GetDispatch(in.ID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, fmt.Errorf("no dispatch with id %d", in.ID)
+		}
+		return nil, err
+	}
+	if d.Status == model.DispatchAcked {
+		return nil, fmt.Errorf("dispatch %d is already acked; cannot cancel", in.ID)
+	}
+	if dryRun {
+		proj := *d
+		proj.Status = model.DispatchCancelled
+		return &proj, nil
+	}
+	cancelled, err := c.store.CancelDispatch(in.ID)
+	if err != nil {
+		return nil, err
+	}
+	c.recordOp(model.HistoryEntry{
+		RepoID: &cancelled.RepoID, RepoPrefix: cancelled.RepoPrefix,
+		Op: "agent.cancel", Kind: "agent",
+		TargetID: &cancelled.ID, TargetLabel: dispatchTargetLabel(cancelled),
+		Details: dispatchDetails(cancelled),
+	})
+	return cancelled, nil
+}
+
 func (c *localClient) DrainDispatches(ctx context.Context, sessionID string) ([]*model.AgentDispatch, error) {
 	sess, err := c.store.GetAgentSession(sessionID)
 	if err != nil {

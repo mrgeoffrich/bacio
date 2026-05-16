@@ -73,6 +73,7 @@ var Registry = []Entry{
 	{"agent.release", "Release an agent's claim on an issue — clears the assignee once the issue has no open claims left (does not move the issue's state).", typeOf[inputs.AgentReleaseInput](), inputs.ExampleAgentRelease},
 	{"agent.dispatch", "Queue a unit of work (an issue, an instruction) for an agent identity and/or a session.", typeOf[inputs.AgentDispatchInput](), inputs.ExampleAgentDispatch},
 	{"agent.ack", "Acknowledge a dispatch and record an optional reply note.", typeOf[inputs.AgentAckInput](), inputs.ExampleAgentAck},
+	{"agent.cancel", "Cancel a pending or delivered dispatch and clear the targeted issue's waiting_for_claim flag.", typeOf[inputs.AgentCancelInput](), inputs.ExampleAgentCancel},
 	{"issue.dispatch", "State-gated auto-pick dispatch — re-check the stage's state-gate against the issue's current state, then pick the most-recently-active free agent automatically.", typeOf[inputs.IssueDispatchInput](), inputs.ExampleIssueDispatch},
 
 	{"settings.template.set", "Set a dispatch prompt template's body.", typeOf[inputs.SettingsTemplateSetInput](), inputs.ExampleSettingsTemplateSet},
