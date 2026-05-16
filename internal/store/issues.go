@@ -649,9 +649,23 @@ func (s *Store) CountFeatures(repoID int64) (int, error) {
 	return n, err
 }
 
+// issueSelect joins each issue to its repo + (optional) feature, and
+// derives the `taken` flag via an EXISTS subquery against open agent
+// claims held by alive sessions — the same predicate
+// OpenClaimsBySession uses, just folded into the row read so list /
+// show / brief responses all carry the signal inline without a second
+// round trip.
 const issueSelect = `
 SELECT i.id, i.uuid, i.repo_id, i.number, r.prefix, i.feature_id, COALESCE(f.slug, ''),
-       i.title, i.description, i.state, i.assignee, i.waiting_for_claim, i.created_at, i.updated_at
+       i.title, i.description, i.state, i.assignee, i.waiting_for_claim,
+       EXISTS (
+         SELECT 1 FROM agent_claims c
+         JOIN agent_sessions s ON s.id = c.session_pk
+         WHERE c.issue_id = i.id
+           AND c.released_at IS NULL
+           AND s.ended_at IS NULL
+       ) AS taken,
+       i.created_at, i.updated_at
 FROM issues i
 JOIN repos r ON r.id = i.repo_id
 LEFT JOIN features f ON f.id = i.feature_id`
@@ -665,7 +679,7 @@ func scanIssue(row rowScanner) (*model.Issue, error) {
 		state     string
 	)
 	err := row.Scan(&i.ID, &i.UUID, &i.RepoID, &i.Number, &prefix, &featureID, &featSlug,
-		&i.Title, &i.Description, &state, &i.Assignee, &i.WaitingForClaim, &i.CreatedAt, &i.UpdatedAt)
+		&i.Title, &i.Description, &state, &i.Assignee, &i.WaitingForClaim, &i.Taken, &i.CreatedAt, &i.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
