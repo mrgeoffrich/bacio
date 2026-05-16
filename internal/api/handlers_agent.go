@@ -701,6 +701,75 @@ func (d deps) handleAgentDispatchAck(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, acked)
 }
 
+// ---------- cancel ----------
+
+func (d deps) handleAgentDispatchCancel(w http.ResponseWriter, r *http.Request) {
+	rawID := r.PathValue("id")
+	id, err := strconv.ParseInt(rawID, 10, 64)
+	if err != nil || id <= 0 {
+		writeError(w, http.StatusBadRequest, "invalid_input",
+			fmt.Sprintf("invalid dispatch id %q", rawID), map[string]any{"field": "id"})
+		return
+	}
+	body, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	in := inputs.AgentCancelInput{ID: id}
+	if len(body) > 0 {
+		got, _, err := inputio.DecodeStrict[inputs.AgentCancelInput](body)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+			return
+		}
+		if got.ID != 0 && got.ID != id {
+			writeError(w, http.StatusBadRequest, "invalid_input",
+				"id in body must match URL", map[string]any{"field": "id"})
+			return
+		}
+		in = *got
+		in.ID = id
+	}
+	existing, err := d.store.GetDispatch(in.ID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found",
+				fmt.Sprintf("no dispatch with id %d", in.ID), nil)
+			return
+		}
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if existing.Status == model.DispatchAcked {
+		writeError(w, http.StatusConflict, "conflict",
+			fmt.Sprintf("dispatch %d is already acked; cannot cancel", in.ID), nil)
+		return
+	}
+	if isDryRun(r) {
+		projected := *existing
+		projected.Status = model.DispatchCancelled
+		writeDryRun(w, http.StatusOK, &projected)
+		return
+	}
+	actor := ActorFromContext(r.Context())
+	cancelled, err := d.store.CancelDispatch(in.ID)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	recordOp(d.store, d.logger, model.HistoryEntry{
+		RepoID: &cancelled.RepoID, RepoPrefix: cancelled.RepoPrefix,
+		Actor:    actor,
+		Op:       "agent.cancel",
+		Kind:     "agent",
+		TargetID: &cancelled.ID, TargetLabel: dispatchTargetLabel(cancelled),
+		Details:  dispatchDetails(cancelled),
+	})
+	writeJSON(w, http.StatusOK, cancelled)
+}
+
 // dispatchTargetLabel / dispatchDetails mirror their client-side twins so
 // the audit row reads identically across surfaces.
 func dispatchTargetLabel(d *model.AgentDispatch) string {

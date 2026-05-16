@@ -55,6 +55,7 @@ the issue's state; use ` + "`bacio issue state`" + ` for that.`,
 		agentDispatchCmd(),
 		agentInboxCmd(),
 		agentAckCmd(),
+		agentCancelCmd(),
 		agentListCmd(),
 		agentShowCmd(),
 	)
@@ -573,6 +574,66 @@ func runAgentAck(in inputs.AgentAckInput) error {
 	}
 	defer c.Close()
 	d, err := c.AckDispatch(context.Background(), in, opts.dryRun)
+	if err != nil {
+		return err
+	}
+	if opts.dryRun {
+		return emitDryRun(d)
+	}
+	return emit(d)
+}
+
+// ---------- cancel ----------
+
+func agentCancelCmd() *cobra.Command {
+	var rawInput string
+	cmd := &cobra.Command{
+		Use:   "cancel <dispatch-id>",
+		Short: "Cancel a pending or delivered dispatch (clears the issue's waiting_for_claim flag)",
+		Long: `Withdraw a dispatch that hasn't been acked yet — the dispatcher's
+side of ack.
+
+Use when a queued dispatch was orphaned (target session ended before
+acking, or the dispatch is simply no longer wanted). If the dispatch
+targets an issue, the issue's waiting_for_claim flag is cleared in the
+same transaction, unsticking the desktop/TUI spinner.
+
+Cancelling an acked dispatch is an error (the work was acknowledged).
+Cancelling an already-cancelled dispatch is a no-op.`,
+		Args: cobra.RangeArgs(0, 1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			raw, err := parseJSONInput(cmd, args, rawInput)
+			if err != nil {
+				return err
+			}
+			if raw != nil {
+				in, _, err := inputio.DecodeStrict[inputs.AgentCancelInput](raw)
+				if err != nil {
+					return err
+				}
+				return runAgentCancel(*in)
+			}
+			if len(args) != 1 {
+				return fmt.Errorf("requires <dispatch-id> positional or --json")
+			}
+			id, err := strconv.ParseInt(args[0], 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid dispatch id %q: %w", args[0], err)
+			}
+			return runAgentCancel(inputs.AgentCancelInput{ID: id})
+		},
+	}
+	addInputFlag(cmd, &rawInput)
+	return cmd
+}
+
+func runAgentCancel(in inputs.AgentCancelInput) error {
+	c, err := openClient()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	d, err := c.CancelDispatch(context.Background(), in, opts.dryRun)
 	if err != nil {
 		return err
 	}

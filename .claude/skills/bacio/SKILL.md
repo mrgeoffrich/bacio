@@ -614,6 +614,10 @@ bacio agent inbox                       Open dispatches queued for this session
   --session <id>                        Default: $CLAUDE_CODE_SESSION_ID
 bacio agent ack <DISPATCH-ID>           Acknowledge a dispatch
   --note <text>                         Optional reply recorded on the dispatch
+bacio agent cancel <DISPATCH-ID>        Cancel a pending/delivered dispatch
+                                        (dispatcher side; clears the issue's
+                                        waiting_for_claim flag in the same
+                                        tx; errors if already acked)
 bacio agent list                        Lean table of sessions in this repo
   --active                              Only sessions that haven't ended
   --all-repos                           Include sessions from every repo
@@ -669,8 +673,10 @@ dispatch is cancelled. So the normal flow is: dispatch → `waiting_for_claim
 = true` → agent claims → `waiting_for_claim = false`, `taken = true`. The
 TUI and desktop boards show a spinner (and hide the dispatch action)
 while an issue is waiting, so claiming promptly after you pick up a
-dispatch is what clears the spinner. Known gap: if an agent session ends
-without ever claiming or cancelling, the flag stays set.
+dispatch is what clears the spinner. If a dispatch is orphaned (the
+target session ends before acking), unstick the spinner with `bacio
+agent cancel <dispatch-id>` — it marks the dispatch cancelled and
+clears `waiting_for_claim` in the same transaction.
 
 ### Dispatch prompt templates
 
