@@ -374,12 +374,13 @@ const SetupDispatchCreator = "bacio-channel"
 // setupDispatchPayload is the content of the channel-emitted setup
 // dispatch. The agent sees this as a regular dispatch (so it lands via
 // the proven push path, not a synthetic notification) and acks it via
-// the normal reply tool. $CLAUDE_SESSION_ID is a literal — the agent
-// substitutes it from its own env.
+// the normal reply tool. $CLAUDE_CODE_SESSION_ID is a literal — the
+// agent substitutes it from its own env.
 const setupDispatchPayload = "Call the bacio MCP `register` tool now with " +
-	"{\"session_id\": \"$CLAUDE_SESSION_ID\", \"model\": \"<your model id>\", " +
+	"{\"session_id\": \"$CLAUDE_CODE_SESSION_ID\", \"model\": \"<your model id>\", " +
 	"\"branch\": \"<your current git branch>\"} " +
-	"(session_id is the only required field; model + branch are optional but worth passing — " +
+	"(session_id is the only required field — find it in your env as $CLAUDE_CODE_SESSION_ID; " +
+	"model + branch are optional but worth passing — " +
 	"the model identifier looks like \"claude-opus-4-7\" or \"claude-sonnet-4-6\"). " +
 	"This completes the registration; ack this dispatch via `reply` once you've called register."
 
