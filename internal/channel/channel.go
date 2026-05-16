@@ -282,13 +282,13 @@ func replyToolSchema() map[string]any {
 func registerToolSchema() map[string]any {
 	return map[string]any{
 		"name":        "register",
-		"description": "Complete the registration of your Claude Code session with bacio. The SessionStart hook only creates a minimal stub; this call enriches it and makes the session visible to the agent list. Call once on your first turn with your session_id (from $CLAUDE_SESSION_ID or the bacio SessionStart briefing). Pass model if you know it; pass branch if you know it. Safe to call again — idempotent (first-registration timestamp wins).",
+		"description": "Complete the registration of your Claude Code session with bacio. The SessionStart hook only creates a minimal stub; this call enriches it and makes the session visible to the agent list. Call once on your first turn with your session_id (from $CLAUDE_CODE_SESSION_ID or the bacio SessionStart briefing). Pass model if you know it; pass branch if you know it. Safe to call again — idempotent (first-registration timestamp wins).",
 		"inputSchema": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"session_id": map[string]any{
 					"type":        "string",
-					"description": "Your Claude Code session id (from $CLAUDE_SESSION_ID or the bacio SessionStart briefing).",
+					"description": "Your Claude Code session id (from $CLAUDE_CODE_SESSION_ID or the bacio SessionStart briefing).",
 				},
 				"model": map[string]any{
 					"type":        "string",
@@ -360,7 +360,7 @@ func (s *Server) handleRegisterCall(ctx context.Context, id json.RawMessage, raw
 	}
 	sid := strings.TrimSpace(args.SessionID)
 	if sid == "" {
-		s.toolResult(id, true, "register requires a session_id (use $CLAUDE_SESSION_ID or the value the bacio SessionStart hook gave you)")
+		s.toolResult(id, true, "register requires a session_id (use $CLAUDE_CODE_SESSION_ID or the value the bacio SessionStart hook gave you)")
 		return
 	}
 	modelID := strings.TrimSpace(args.Model)

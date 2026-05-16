@@ -632,7 +632,7 @@ An agent picks dispatches up two ways:
   out by default (use `--all` to see them); they're invisible until
   `register` enriches the row. On startup the channel itself queues a
   dispatch with `from="bacio-channel"` asking you to call `register`
-  with `{"session_id": "$CLAUDE_SESSION_ID", "model": "<your model id>",
+  with `{"session_id": "$CLAUDE_CODE_SESSION_ID", "model": "<your model id>",
   "branch": "<your git branch>", "permission_mode": "<your permission
   mode>", "mcp_version": "<serverInfo.version from initialize>"}` —
   only `session_id` is required, but every extra field enriches the
