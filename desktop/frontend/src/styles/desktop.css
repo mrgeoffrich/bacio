@@ -321,6 +321,52 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px;
 }
 
+/* ----- Error modal (BACI-43): centred over everything; reuses the
+   .mk-modal frame but accents it red so it reads as an error, not
+   "another confirmation". Sits above every other overlay. ----- */
+.mk-error-modal-backdrop { z-index: 200; }
+.mk-error-modal {
+  border-color: var(--status-blocked);
+  border-width: 1px;
+  border-left-width: 4px;
+}
+.mk-error-modal-title { color: var(--status-blocked); }
+.mk-error-modal-count { font-weight: 600; color: var(--fg-2); }
+.mk-error-modal-body {
+  margin: 0; color: var(--fg-2); white-space: pre-wrap; word-break: break-word;
+  font-size: 13px; line-height: 1.45;
+}
+.mk-error-modal-link {
+  align-self: flex-start;
+  background: none; border: none; padding: 0;
+  color: var(--fg-2); font: inherit; cursor: pointer; text-decoration: underline;
+}
+.mk-error-modal-link:hover { color: var(--fg-1); }
+.mk-error-modal-details { font-size: 12px; color: var(--fg-3); }
+.mk-error-modal-details summary { cursor: pointer; }
+.mk-error-modal-stack {
+  margin: 6px 0 0; padding: 8px; max-height: 180px; overflow: auto;
+  background: var(--bg-2); border: 1px solid var(--border-1); border-radius: 6px;
+  font-family: var(--font-mono); font-size: 11px; white-space: pre-wrap;
+}
+.mk-error-modal-more {
+  font-size: 12px; color: var(--fg-3); margin-top: 2px;
+}
+
+/* ----- View-level boundary fallback: occupies the content area when
+   a top-level view throws during render. The Topbar and other views
+   stay alive; this just replaces the crashed subtree. ----- */
+.mk-view-error {
+  flex: 1; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 10px; padding: 24px; text-align: center;
+}
+.mk-view-error-title {
+  font-size: 16px; font-weight: 600; color: var(--status-blocked);
+}
+.mk-view-error-hint {
+  max-width: 480px; color: var(--fg-2); font-size: 13px; line-height: 1.45;
+}
+
 /* ============================================================
    Agents screen — a desktop-app addition: a full-page list with a
    card per agent session that expands into its claims + dispatches.

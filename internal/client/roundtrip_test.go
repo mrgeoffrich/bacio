@@ -458,3 +458,69 @@ func TestRoundTripAgentLifecycle(t *testing.T) {
 		t.Fatalf("ended state: %+v", ended)
 	}
 }
+
+// TestRoundTripPromptTemplates exercises the BACI-36 settings verbs
+// through the remote backend and verifies the local store observes the
+// same state. Covers body + state-gate, set + reset, with a quick
+// dry-run sanity check on both paths.
+func TestRoundTripPromptTemplates(t *testing.T) {
+	p := newPair(t)
+	defer p.cleanup()
+	ctx := context.Background()
+
+	// Bodies: list defaults round-trip → set via remote → observe via local.
+	tplsBefore, err := p.remote.GetPromptTemplates(ctx)
+	if err != nil {
+		t.Fatalf("remote GetPromptTemplates: %v", err)
+	}
+	if got := tplsBefore[string(model.DispatchModePlan)]; got != model.DefaultPromptTemplate(model.DispatchModePlan) {
+		t.Fatalf("plan default mismatch: %q", got)
+	}
+
+	if err := p.remote.SetPromptTemplate(ctx, string(model.DispatchModePlan), "custom-via-remote", false); err != nil {
+		t.Fatalf("remote SetPromptTemplate: %v", err)
+	}
+	got, _ := p.store.GetPromptTemplate(model.DispatchModePlan)
+	if got != "custom-via-remote" {
+		t.Fatalf("local-observed plan body after remote set: %q", got)
+	}
+
+	// Reset path (empty body → DELETE).
+	if err := p.remote.SetPromptTemplate(ctx, string(model.DispatchModePlan), "", false); err != nil {
+		t.Fatalf("remote SetPromptTemplate reset: %v", err)
+	}
+	got, _ = p.store.GetPromptTemplate(model.DispatchModePlan)
+	if got != model.DefaultPromptTemplate(model.DispatchModePlan) {
+		t.Fatalf("reset did not revert: %q", got)
+	}
+
+	// States: same pattern.
+	if err := p.remote.SetPromptStates(ctx, string(model.DispatchModeReview),
+		[]string{"in_review", "needs_action"}, false); err != nil {
+		t.Fatalf("remote SetPromptStates: %v", err)
+	}
+	gotStates, _ := p.store.GetPromptStates(model.DispatchModeReview)
+	if len(gotStates) != 2 || gotStates[0] != model.StateInReview || gotStates[1] != model.StateNeedsAction {
+		t.Fatalf("local-observed review states: %v", gotStates)
+	}
+
+	// Dry-run set should NOT touch the store.
+	if err := p.remote.SetPromptStates(ctx, string(model.DispatchModeReview),
+		[]string{"todo"}, true); err != nil {
+		t.Fatalf("remote SetPromptStates dry-run: %v", err)
+	}
+	postDry, _ := p.store.GetPromptStates(model.DispatchModeReview)
+	if len(postDry) != 2 {
+		t.Fatalf("dry-run set persisted: %v", postDry)
+	}
+
+	// Reset states via remote (empty list → DELETE).
+	if err := p.remote.SetPromptStates(ctx, string(model.DispatchModeReview), nil, false); err != nil {
+		t.Fatalf("remote SetPromptStates reset: %v", err)
+	}
+	postReset, _ := p.store.GetPromptStates(model.DispatchModeReview)
+	want := model.DefaultPromptStates(model.DispatchModeReview)
+	if len(postReset) != len(want) {
+		t.Fatalf("reset did not revert: got %v want %v", postReset, want)
+	}
+}

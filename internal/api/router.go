@@ -105,6 +105,20 @@ func newRouter(d deps) http.Handler {
 	// `bacio agent dispatch <key> --mode <stage>`.
 	mux.HandleFunc("POST /repos/{prefix}/issues/{key}/dispatch", d.handleIssueDispatch)
 
+	// Prompt templates + state-gates (BACI-36). Global app_settings —
+	// no /repos/{prefix} scope. Six routes: a GET-all for each of bodies
+	// and states, and PUT/DELETE per mode for both. The literal "states"
+	// segment takes precedence over the "{mode}" wildcard, so
+	// /settings/templates/states (collection-all) doesn't collide with
+	// /settings/templates/{mode} (per-mode body) — Go's ServeMux
+	// resolves the more-specific pattern first.
+	mux.HandleFunc("GET /settings/templates", d.handlePromptTemplatesList)
+	mux.HandleFunc("GET /settings/templates/states", d.handlePromptStatesList)
+	mux.HandleFunc("PUT /settings/templates/{mode}", d.handlePromptTemplateSet)
+	mux.HandleFunc("DELETE /settings/templates/{mode}", d.handlePromptTemplateReset)
+	mux.HandleFunc("PUT /settings/templates/{mode}/states", d.handlePromptStatesSet)
+	mux.HandleFunc("DELETE /settings/templates/{mode}/states", d.handlePromptStatesReset)
+
 	// Outermost first: panic recovery wraps everything so a bug in any
 	// later layer still returns a 500 envelope.
 	var h http.Handler = mux

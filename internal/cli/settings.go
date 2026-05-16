@@ -208,7 +208,6 @@ func settingsTemplateStatesResetCmd() *cobra.Command {
 	return cmd
 }
 
-// applyTemplateStates is the shared mutation path for `states set`
 // (non-empty list) and `states reset` (empty list = revert built-in
 // to its default). It honours --dry-run.
 func applyTemplateStates(slugArg string, states []string) error {
@@ -378,9 +377,6 @@ func settingsTemplateListCmd() *cobra.Command {
 		Short: "List every registered dispatch prompt template",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := requireLocalForSettings("template list"); err != nil {
-				return err
-			}
 			c, err := openClient()
 			if err != nil {
 				return err
