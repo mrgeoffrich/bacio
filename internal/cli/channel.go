@@ -16,6 +16,7 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/git"
 	"github.com/mrgeoffrich/bacio/internal/model"
+	"github.com/mrgeoffrich/bacio/internal/version"
 )
 
 func newChannelCmd() *cobra.Command {
@@ -132,7 +133,7 @@ to stderr.`,
 				channelPID: int64(os.Getpid()),
 				pushed:     map[int64]bool{},
 			}
-			srv := channel.New(src, "bacio", os.Stdin, os.Stdout, logf)
+			srv := channel.New(src, "bacio", version.String(), os.Stdin, os.Stdout, logf)
 
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
@@ -143,27 +144,25 @@ to stderr.`,
 
 // channelSource adapts the bacio dispatch queue to channel.Source. It
 // is NOT scoped to a session id — Claude Code never tells the channel
-// its session. Instead it holds the repo (stable for the process's
-// life) and re-reads its agent identity from .bacio/agents.json keyed
-// on claudePID on every call: that entry is written by the session-start
-// hook, which routinely runs *after* the channel subprocess is spawned,
-// so caching the identity once at startup froze an empty identity for
-// the whole session — the original delivery bug.
+// its session. Instead it scopes by (host, claudePID): on each tick it
+// walks the open sessions matching its own (host, claudePID) and
+// targets dispatches at those session_ids directly. Agent identity is
+// orthogonal — it only exists post-register, and the channel doesn't
+// need it for drain/setup.
 //
-// claudePID is the `claude` process this channel descends from: both
-// the agents.json key and what the hooks join on to correlate this
-// channel back to a session.
+// claudePID is the `claude` process this channel descends from: the
+// session row's claude_pid column is the join key.
 type channelSource struct {
 	c          client.Client
 	repo       *model.Repo // stable for the channel's lifetime
-	repoRoot   string      // repo root — .bacio/agents.json lives here
+	repoRoot   string      // repo root — agents.json still lives here (read-only here; register writes it)
 	host       string
 	claudePID  int64
 	channelPID int64
 
 	// pushed is the set of dispatch ids this channel process has already
-	// emitted. DrainAgentDispatches returns un-acked dispatches (pending
-	// AND delivered) so a lost push can be recovered — but without this
+	// emitted. DrainDispatches returns un-acked dispatches (pending AND
+	// delivered) so a lost push can be recovered — but without this
 	// guard the channel would re-push every still-un-acked dispatch on
 	// every 3s poll tick. A fresh channel process starts with an empty
 	// set, so a restart still re-pushes work the previous process's push
@@ -171,11 +170,11 @@ type channelSource struct {
 	pushed map[int64]bool
 }
 
-// identity re-reads this channel's agent slug from .bacio/agents.json.
-// Empty when the repo couldn't be resolved or no hook has recorded an
-// entry for this claude_pid yet — both transient, both leave the
-// channel running idle until they resolve.
-func (s *channelSource) identity() string {
+// hintedAgentName is a best-effort lookup of the agent identity slug
+// associated with this channel's claude_pid, used purely as a hint for
+// the agent_channels row (so `bacio agent channels` can show the slug).
+// Empty pre-register; populated after register writes agents.json.
+func (s *channelSource) hintedAgentName() string {
 	if s.repoRoot == "" || s.claudePID == 0 {
 		return ""
 	}
@@ -183,26 +182,33 @@ func (s *channelSource) identity() string {
 }
 
 func (s *channelSource) Drain(ctx context.Context) ([]channel.Event, error) {
-	ds, err := s.c.DrainAgentDispatches(ctx, s.repo, s.identity())
+	if s.repo == nil || s.claudePID == 0 {
+		return nil, nil
+	}
+	sessions, err := s.c.SessionsByClaudePID(ctx, s.host, s.claudePID)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]channel.Event, 0, len(ds))
-	for _, d := range ds {
-		// DrainAgentDispatches returns un-acked dispatches every tick;
-		// skip any this process has already pushed so a still-un-acked
-		// dispatch isn't re-emitted on every poll.
-		if s.pushed[d.ID] {
+	var out []channel.Event
+	for _, sess := range sessions {
+		ds, derr := s.c.DrainDispatches(ctx, sess.SessionID)
+		if derr != nil {
+			fmt.Fprintln(os.Stderr, "bacio channel: drain session", sess.SessionID, ":", derr)
 			continue
 		}
-		s.pushed[d.ID] = true
-		out = append(out, channel.Event{
-			ID:       d.ID,
-			IssueKey: d.IssueKey,
-			From:     d.CreatedBy,
-			Mode:     string(d.Mode),
-			Payload:  d.Payload,
-		})
+		for _, d := range ds {
+			if s.pushed[d.ID] {
+				continue
+			}
+			s.pushed[d.ID] = true
+			out = append(out, channel.Event{
+				ID:       d.ID,
+				IssueKey: d.IssueKey,
+				From:     d.CreatedBy,
+				Mode:     string(d.Mode),
+				Payload:  d.Payload,
+			})
+		}
 	}
 	return out, nil
 }
@@ -210,19 +216,93 @@ func (s *channelSource) Drain(ctx context.Context) ([]channel.Event, error) {
 // Heartbeat records this channel as live in agent_channels every poll
 // tick. It keys on (host, claude_pid) — the hooks correlate a session
 // to a channel on exactly that pair — so it needs a repo and a resolved
-// claude_pid, but NOT an identity: an identity-less channel still
-// records presence (agent_id NULL) and the next tick fills the identity
-// in once the session-start hook records it in .bacio/agents.json.
+// claude_pid. The agent name is a hint (read from agents.json if it's
+// been written yet — empty pre-register), used for human-readable
+// display only.
 func (s *channelSource) Heartbeat(ctx context.Context) error {
 	if s.repo == nil || s.claudePID == 0 {
 		return nil
 	}
-	return s.c.UpsertAgentChannel(ctx, s.repo, s.identity(), s.host, s.claudePID, s.channelPID)
+	return s.c.UpsertAgentChannel(ctx, s.repo, s.hintedAgentName(), s.host, s.claudePID, s.channelPID)
 }
 
 func (s *channelSource) Ack(ctx context.Context, eventID int64, note string) error {
 	_, err := s.c.AckDispatch(ctx, inputs.AgentAckInput{ID: eventID, Note: note}, false)
 	return err
+}
+
+// Register is the agent-driven side of the channel<->session join.
+// The agent calls the bacio MCP `register` tool with its own session
+// id (and optionally model, branch); we resolve/mint its persistent
+// identity, write agents.json so future hook invocations can name the
+// agent in their briefings, enrich the session row (CompleteRegistration
+// sets agent_id, actor, model, branch, channel_version,
+// registered_at), and stamp channel_seen_at via LinkSessionChannel.
+//
+// The bacio binary version stamped onto agent_sessions.channel_version
+// comes from internal/version.String() inside this channel process —
+// NOT from anything the agent passes. The agent doesn't reliably know
+// it, and the whole point of recording it is to detect stale channel
+// processes vs. the binary the UI is running. String() (not bare
+// Version) so dev builds get commit-level resolution.
+//
+// claudePID may legitimately be 0 (no `claude` ancestor walkable);
+// LinkSessionChannel treats a 0 join key as "no channel" and leaves
+// channel_seen_at untouched — register's other side-effects still apply.
+func (s *channelSource) Register(ctx context.Context, sessionID, modelID, branch string) error {
+	if s.repo == nil {
+		return fmt.Errorf("channel has no resolved repo — cannot register")
+	}
+	if err := s.Heartbeat(ctx); err != nil {
+		fmt.Fprintln(os.Stderr, "bacio channel: heartbeat before register:", err)
+	}
+	sess, err := s.c.CompleteRegistration(ctx, s.repo, inputs.AgentRegisterInput{
+		SessionID: sessionID,
+		Host:      s.host,
+		Model:     modelID,
+		Branch:    branch,
+	}, version.String())
+	if err != nil {
+		return err
+	}
+	// Persist (claude_pid -> agent identity) in .bacio/agents.json so
+	// subsequent hooks for the same claude_pid (heartbeat, end, future
+	// sessions after /clear) can name the agent in their briefings.
+	// Best-effort: a write failure doesn't fail register.
+	if sess.AgentName != "" && s.repoRoot != "" && s.claudePID != 0 {
+		if rerr := recordAgentSession(s.repoRoot, int(s.claudePID), s.host, sess.AgentName, sessionID); rerr != nil {
+			fmt.Fprintln(os.Stderr, "bacio channel: update agents.json:", rerr)
+		}
+	}
+	if err := s.c.LinkSessionChannel(ctx, sessionID, s.claudePID, s.host); err != nil {
+		fmt.Fprintln(os.Stderr, "bacio channel: link session channel:", err)
+	}
+	return nil
+}
+
+// EnsureSetup walks the open sessions for this channel's (host,
+// claudePID) and queues a setup dispatch for each one that hasn't
+// completed register yet. Idempotent — EnsureSetupDispatch dedupes via
+// (target_session_id, created_by=bacio-channel, status open). No-ops
+// when the channel has no resolved repo / claude_pid (idle channel) or
+// when no open unregistered session matches.
+func (s *channelSource) EnsureSetup(ctx context.Context) error {
+	if s.repo == nil || s.claudePID == 0 {
+		return nil
+	}
+	sessions, err := s.c.SessionsByClaudePID(ctx, s.host, s.claudePID)
+	if err != nil {
+		return err
+	}
+	for _, sess := range sessions {
+		if sess.RegisteredAt != nil {
+			continue // already registered — no nudge needed
+		}
+		if _, err := s.c.EnsureSetupDispatch(ctx, s.repo, sess.SessionID); err != nil {
+			fmt.Fprintln(os.Stderr, "bacio channel: ensure setup dispatch for", sess.SessionID, ":", err)
+		}
+	}
+	return nil
 }
 
 // dumpChannelDiagnostics logs everything the channel process can see at

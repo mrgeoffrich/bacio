@@ -56,8 +56,9 @@ func (b *boardView) openDispatchPicker() {
 		return
 	}
 	allSessions, err := b.store.ListAgentSessions(store.AgentSessionFilter{
-		RepoID:    &b.repo.ID,
-		OnlyAlive: true,
+		RepoID:         &b.repo.ID,
+		OnlyAlive:      true,
+		RegisteredOnly: true, // stubs can't receive dispatches — no agent identity yet
 	})
 	if err != nil {
 		b.err = err

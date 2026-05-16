@@ -228,7 +228,6 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
     agent_id        INTEGER REFERENCES agents(id) ON DELETE SET NULL,
     actor           TEXT    NOT NULL,
     model           TEXT    NOT NULL DEFAULT '',
-    permission_mode TEXT    NOT NULL DEFAULT '',
     host            TEXT    NOT NULL DEFAULT '',
     branch          TEXT    NOT NULL DEFAULT '',
     started_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -236,7 +235,20 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
     ended_at        DATETIME,
     end_reason      TEXT    NOT NULL DEFAULT '',
     claude_pid      INTEGER NOT NULL DEFAULT 0,
-    channel_seen_at DATETIME
+    channel_seen_at DATETIME,
+    -- registered_at marks when the agent actually completed registration
+    -- via the bacio channel's `register` tool (vs. just being created as
+    -- a stub by the SessionStart hook). NULL until register fires. The
+    -- TUI/desktop/CLI agent list defaults to filtering registered_at IS
+    -- NOT NULL — unregistered stubs (sessions without the bacio channel
+    -- loaded, or that never got that far) stay invisible by default.
+    registered_at   DATETIME,
+    -- channel_version is the bacio binary version reported by the
+    -- `bacio channel` MCP server the agent talked to at register time —
+    -- useful when multiple bacio processes coexist (TUI + desktop +
+    -- per-session channels) and one is running an outdated binary. NULL
+    -- until register fires; populated from mcp_version on the tool call.
+    channel_version TEXT    NOT NULL DEFAULT ''
 );
 
 -- idx_agent_sessions_agent is created in migrate() so it works on databases

@@ -71,7 +71,8 @@ export function GetIssue(repoPrefix: string, key: string): $CancellablePromise<$
 /**
  * ListAgents returns the agent sessions for one repo (or every repo when
  * repoPrefix is empty or "all"), each carrying its status, open claims,
- * and the dispatches aimed at it.
+ * and the dispatches aimed at it. SessionStart stubs that never
+ * completed register are hidden — they're noise in the supervision UI.
  */
 export function ListAgents(repoPrefix: string): $CancellablePromise<$models.AgentCard[]> {
     return $Call.ByID(3979848123, repoPrefix).then(($result: any) => {

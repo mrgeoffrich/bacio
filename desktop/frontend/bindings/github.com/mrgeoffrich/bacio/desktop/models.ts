@@ -47,6 +47,17 @@ export class AgentCard {
      * (the user hasn't granted channel permission) and should be skipped.
      */
     "hasChannel": boolean;
+
+    /**
+     * BacioVersion is the bacio binary version the channel was running at
+     * register time (stamped server-side by the channel itself — agents
+     * don't know it and aren't trusted to report it). Empty for sessions
+     * older than the version-reporting change. BacioVersionStale is true
+     * when it doesn't match the binary the desktop is currently running —
+     * useful signal that an agent is talking to an outdated channel.
+     */
+    "bacioVersion": string;
+    "bacioVersionStale": boolean;
     "lastSeenAt": time$0.Time;
     "claims": ClaimDTO[];
     "dispatches": DispatchDTO[];
@@ -83,6 +94,12 @@ export class AgentCard {
         if (!("hasChannel" in $$source)) {
             this["hasChannel"] = false;
         }
+        if (!("bacioVersion" in $$source)) {
+            this["bacioVersion"] = "";
+        }
+        if (!("bacioVersionStale" in $$source)) {
+            this["bacioVersionStale"] = false;
+        }
         if (!("lastSeenAt" in $$source)) {
             this["lastSeenAt"] = null;
         }
@@ -100,14 +117,14 @@ export class AgentCard {
      * Creates a new AgentCard instance from a string or object.
      */
     static createFrom($$source: any = {}): AgentCard {
-        const $$createField11_0 = $$createType1;
-        const $$createField12_0 = $$createType3;
+        const $$createField13_0 = $$createType1;
+        const $$createField14_0 = $$createType3;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("claims" in $$parsedSource) {
-            $$parsedSource["claims"] = $$createField11_0($$parsedSource["claims"]);
+            $$parsedSource["claims"] = $$createField13_0($$parsedSource["claims"]);
         }
         if ("dispatches" in $$parsedSource) {
-            $$parsedSource["dispatches"] = $$createField12_0($$parsedSource["dispatches"]);
+            $$parsedSource["dispatches"] = $$createField14_0($$parsedSource["dispatches"]);
         }
         return new AgentCard($$parsedSource as Partial<AgentCard>);
     }

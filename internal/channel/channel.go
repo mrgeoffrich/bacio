@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"time"
 )
@@ -48,6 +49,25 @@ type Source interface {
 	// hooks can correlate it back to a session. Errors are logged, not
 	// fatal — a channel that can't heartbeat still delivers.
 	Heartbeat(ctx context.Context) error
+	// Register completes the agent's session: links the channel to the
+	// agent-supplied session id and enriches the session row with the
+	// agent's self-description (model, branch). The SessionStart hook
+	// only creates a minimal stub; this is the path that flips
+	// registered_at and makes the session visible to the default
+	// agent-list view. model/branch are optional — empty leaves the
+	// column unchanged. The bacio binary version stamped onto the
+	// session row is taken from the channel itself (the agent doesn't
+	// know it, and shouldn't be trusted to report it), so it isn't
+	// part of this signature.
+	Register(ctx context.Context, sessionID, model, branch string) error
+	// EnsureSetup is called on every poll tick. It is the source's hook
+	// to idempotently queue a "call register" dispatch into the agent's
+	// inbox so the next Drain picks it up — routing setup through the
+	// proven dispatch path rather than a synthetic notification, which
+	// Claude Code's MCP client appears to drop. The source no-ops once
+	// Register has fired (or any other terminal signal it tracks). Best
+	// effort: errors are logged, not fatal.
+	EnsureSetup(ctx context.Context) error
 }
 
 // Server speaks the channel protocol over a reader/writer pair (stdin
@@ -55,8 +75,9 @@ type Source interface {
 // notifications/claude/channel and answers the reply tool by calling
 // Source.Ack.
 type Server struct {
-	src  Source
-	name string
+	src     Source
+	name    string
+	version string // serverInfo.version; also stamped onto agent_sessions.channel_version when register fires (server-side, not echoed via the tool)
 
 	in   io.Reader
 	out  io.Writer
@@ -65,21 +86,41 @@ type Server struct {
 	pollInterval time.Duration
 
 	mu sync.Mutex // serialises writes to out across the poller + read loop
+
+	// initialized is closed when the client sends notifications/initialized,
+	// signalling its claude/channel notification handler is wired up. The
+	// poller waits on this before its first tick — pushing a notification
+	// before Claude Code has registered the handler results in a silently
+	// dropped event, and the in-memory `pushed` dedup in the source then
+	// prevents re-push on subsequent ticks. Earlier "channel queues setup
+	// dispatch on its first tick before the handshake completes" bug.
+	initialized chan struct{}
+	initOnce    sync.Once
 }
 
 // New builds a channel server. name is the source attribute Claude Code
-// stamps on every <channel> tag. in/out are the stdio transport; logf
-// receives diagnostics (stderr in production) — pass nil to discard.
-func New(src Source, name string, in io.Reader, out io.Writer, logf func(string, ...any)) *Server {
+// stamps on every <channel> tag. version is reported in the initialize
+// response's serverInfo.version AND is stamped server-side onto the
+// session row when the agent calls the register tool — so bacio can
+// spot stale channel processes still running after the binary was
+// upgraded, without trusting the agent to report it. in/out are the
+// stdio transport; logf receives diagnostics (stderr in production) —
+// pass nil to discard.
+func New(src Source, name, version string, in io.Reader, out io.Writer, logf func(string, ...any)) *Server {
 	if logf == nil {
 		logf = func(string, ...any) {}
+	}
+	if version == "" {
+		version = "dev"
 	}
 	return &Server{
 		src:          src,
 		name:         name,
+		version:      version,
 		in:           in,
 		out:          out,
 		logf:         logf,
+		initialized:  make(chan struct{}),
 		pollInterval: 3 * time.Second,
 	}
 }
@@ -167,13 +208,15 @@ func (s *Server) handle(ctx context.Context, msg *rpcMessage) {
 	case "initialize":
 		s.logf("bacio channel: initialize received (params=%s) — MCP client connected", string(msg.Params))
 		s.reply(msg.ID, s.initializeResult(msg.Params))
-	case "notifications/initialized", "notifications/cancelled":
-		s.logf("bacio channel: %s received — handshake complete", msg.Method)
-		// no-op acknowledgement notifications
+	case "notifications/initialized":
+		s.logf("bacio channel: notifications/initialized received — releasing poller")
+		s.initOnce.Do(func() { close(s.initialized) })
+	case "notifications/cancelled":
+		s.logf("bacio channel: notifications/cancelled received")
 	case "ping":
 		s.reply(msg.ID, map[string]any{})
 	case "tools/list":
-		s.reply(msg.ID, map[string]any{"tools": []any{replyToolSchema()}})
+		s.reply(msg.ID, map[string]any{"tools": []any{replyToolSchema(), registerToolSchema()}})
 	case "tools/call":
 		s.handleToolCall(ctx, msg)
 	default:
@@ -203,15 +246,17 @@ func (s *Server) initializeResult(rawParams json.RawMessage) map[string]any {
 			"experimental": map[string]any{"claude/channel": map[string]any{}},
 			"tools":        map[string]any{},
 		},
-		"serverInfo": map[string]any{"name": s.name, "version": "1"},
+		"serverInfo": map[string]any{"name": s.name, "version": s.version},
 		"instructions": "Events from the bacio channel arrive as " +
 			"<channel source=\"" + s.name + "\" dispatch_id=\"...\" issue=\"...\" from=\"...\">. " +
-			"Each is a work item a supervisor dispatched to you: read the instruction, do the work, " +
-			"then call the `reply` tool with the dispatch_id from the tag and a short note to acknowledge it.",
+			"Each is a work item dispatched to you (sometimes by a human supervisor, sometimes by the " +
+			"channel itself — e.g. a `from=\"bacio-channel\"` event asking you to call the `register` tool): " +
+			"read the instruction, do the work, then call the `reply` tool with the dispatch_id from the " +
+			"tag and a short note to acknowledge it.",
 	}
 }
 
-// ---------- reply tool ----------
+// ---------- tools ----------
 
 func replyToolSchema() map[string]any {
 	return map[string]any{
@@ -234,40 +279,146 @@ func replyToolSchema() map[string]any {
 	}
 }
 
-func (s *Server) handleToolCall(ctx context.Context, msg *rpcMessage) {
-	var call struct {
-		Name      string `json:"name"`
-		Arguments struct {
-			DispatchID int64  `json:"dispatch_id"`
-			Note       string `json:"note"`
-		} `json:"arguments"`
+func registerToolSchema() map[string]any {
+	return map[string]any{
+		"name":        "register",
+		"description": "Complete the registration of your Claude Code session with bacio. The SessionStart hook only creates a minimal stub; this call enriches it and makes the session visible to the agent list. Call once on your first turn with your session_id (from $CLAUDE_SESSION_ID or the bacio SessionStart briefing). Pass model if you know it; pass branch if you know it. Safe to call again — idempotent (first-registration timestamp wins).",
+		"inputSchema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"session_id": map[string]any{
+					"type":        "string",
+					"description": "Your Claude Code session id (from $CLAUDE_SESSION_ID or the bacio SessionStart briefing).",
+				},
+				"model": map[string]any{
+					"type":        "string",
+					"description": "Your model identifier, e.g. \"claude-opus-4-7\" or \"claude-sonnet-4-6\". Optional.",
+				},
+				"branch": map[string]any{
+					"type":        "string",
+					"description": "Your current git branch, if you know it. Optional.",
+				},
+			},
+			"required": []string{"session_id"},
+		},
 	}
-	if err := json.Unmarshal(msg.Params, &call); err != nil {
+}
+
+func (s *Server) handleToolCall(ctx context.Context, msg *rpcMessage) {
+	var head struct {
+		Name      string          `json:"name"`
+		Arguments json.RawMessage `json:"arguments"`
+	}
+	if err := json.Unmarshal(msg.Params, &head); err != nil {
 		s.replyError(msg.ID, -32602, "invalid tool-call params: "+err.Error())
 		return
 	}
-	if call.Name != "reply" {
-		s.replyError(msg.ID, -32602, "unknown tool: "+call.Name)
+	switch head.Name {
+	case "reply":
+		s.handleReplyCall(ctx, msg.ID, head.Arguments)
+	case "register":
+		s.handleRegisterCall(ctx, msg.ID, head.Arguments)
+	default:
+		s.replyError(msg.ID, -32602, "unknown tool: "+head.Name)
+	}
+}
+
+func (s *Server) handleReplyCall(ctx context.Context, id json.RawMessage, rawArgs json.RawMessage) {
+	var args struct {
+		DispatchID int64  `json:"dispatch_id"`
+		Note       string `json:"note"`
+	}
+	if len(rawArgs) > 0 {
+		if err := json.Unmarshal(rawArgs, &args); err != nil {
+			s.replyError(id, -32602, "invalid reply arguments: "+err.Error())
+			return
+		}
+	}
+	if args.DispatchID == 0 {
+		s.toolResult(id, true, "reply requires a dispatch_id (the value from the <channel> tag)")
 		return
 	}
-	if call.Arguments.DispatchID == 0 {
-		s.toolResult(msg.ID, true, "reply requires a dispatch_id (the value from the <channel> tag)")
+	if err := s.src.Ack(ctx, args.DispatchID, args.Note); err != nil {
+		s.logf("bacio channel: ack dispatch %d: %v", args.DispatchID, err)
+		s.toolResult(id, true, fmt.Sprintf("could not ack dispatch %d: %v", args.DispatchID, err))
 		return
 	}
-	if err := s.src.Ack(ctx, call.Arguments.DispatchID, call.Arguments.Note); err != nil {
-		s.logf("bacio channel: ack dispatch %d: %v", call.Arguments.DispatchID, err)
-		s.toolResult(msg.ID, true, fmt.Sprintf("could not ack dispatch %d: %v", call.Arguments.DispatchID, err))
+	s.toolResult(id, false, fmt.Sprintf("acked dispatch %d", args.DispatchID))
+}
+
+func (s *Server) handleRegisterCall(ctx context.Context, id json.RawMessage, rawArgs json.RawMessage) {
+	var args struct {
+		SessionID string `json:"session_id"`
+		Model     string `json:"model"`
+		Branch    string `json:"branch"`
+	}
+	if len(rawArgs) > 0 {
+		if err := json.Unmarshal(rawArgs, &args); err != nil {
+			s.replyError(id, -32602, "invalid register arguments: "+err.Error())
+			return
+		}
+	}
+	sid := strings.TrimSpace(args.SessionID)
+	if sid == "" {
+		s.toolResult(id, true, "register requires a session_id (use $CLAUDE_SESSION_ID or the value the bacio SessionStart hook gave you)")
 		return
 	}
-	s.toolResult(msg.ID, false, fmt.Sprintf("acked dispatch %d", call.Arguments.DispatchID))
+	modelID := strings.TrimSpace(args.Model)
+	branch := strings.TrimSpace(args.Branch)
+	if err := s.src.Register(ctx, sid, modelID, branch); err != nil {
+		s.logf("bacio channel: register session %s: %v", sid, err)
+		s.toolResult(id, true, fmt.Sprintf("could not register session %s: %v", sid, err))
+		return
+	}
+	var extras []string
+	if modelID != "" {
+		extras = append(extras, "model="+modelID)
+	}
+	if branch != "" {
+		extras = append(extras, "branch="+branch)
+	}
+	msg := fmt.Sprintf("registered session %s with the bacio channel", sid)
+	if len(extras) > 0 {
+		msg += " (" + strings.Join(extras, ", ") + ")"
+	}
+	s.toolResult(id, false, msg)
 }
 
 // ---------- poller ----------
 
+// firstPushDelay is the settle wait between receiving
+// notifications/initialized and the first push. Empirically, Claude
+// Code's MCP client registers its claude/channel notification handler
+// *after* sending notifications/initialized — observed via the gap
+// between handshake completion and Claude Code's "Channel notifications
+// registered" debug log. Pushing in that window silently drops the
+// notification, and our per-process pushed-dedup then prevents re-push.
+// 500ms is conservative but cheap; it only applies once per channel
+// process lifetime.
+const firstPushDelay = 500 * time.Millisecond
+
 func (s *Server) poll(ctx context.Context) {
+	// Wait for the MCP handshake to complete before the first tick.
+	// 30s fallback so an unhappy client that never sends
+	// notifications/initialized still gets ticks (heartbeat / drain run
+	// idle rather than wedging the channel forever).
+	select {
+	case <-s.initialized:
+	case <-ctx.Done():
+		return
+	case <-time.After(30 * time.Second):
+		s.logf("bacio channel: notifications/initialized not received within 30s — starting poller anyway")
+	}
+	// Brief settle delay so Claude Code's channel-notification handler
+	// is wired up before our first push (see firstPushDelay comment).
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(firstPushDelay):
+	}
 	t := time.NewTicker(s.pollInterval)
 	defer t.Stop()
-	s.tick(ctx) // heartbeat + push anything already queued, no initial wait
+	s.tick(ctx) // heartbeat + push anything already queued
 	for {
 		select {
 		case <-ctx.Done():
@@ -278,12 +429,18 @@ func (s *Server) poll(ctx context.Context) {
 	}
 }
 
-// tick is one poll cycle: heartbeat (record liveness) then drain (push
-// queued work). Heartbeat runs every tick regardless of whether there's
-// anything to drain — it's how the channel stays correlatable.
+// tick is one poll cycle: heartbeat (record liveness), ensure-setup
+// (idempotently queue the call-register dispatch), then drain (push
+// queued work). EnsureSetup runs every tick — the source is responsible
+// for being a no-op once register has fired. Heartbeat runs every tick
+// regardless of whether there's anything to drain — it's how the
+// channel stays correlatable.
 func (s *Server) tick(ctx context.Context) {
 	if err := s.src.Heartbeat(ctx); err != nil {
 		s.logf("bacio channel: heartbeat: %v", err)
+	}
+	if err := s.src.EnsureSetup(ctx); err != nil {
+		s.logf("bacio channel: ensure-setup: %v", err)
 	}
 	s.drainOnce(ctx)
 }

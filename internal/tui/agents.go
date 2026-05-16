@@ -10,6 +10,7 @@ import (
 
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
+	"github.com/mrgeoffrich/bacio/internal/version"
 )
 
 // agentCardHeight is the fixed row budget for one agent card (4 content
@@ -33,6 +34,7 @@ type agentsView struct {
 	scroll    int  // index of the first visible card
 	detail    bool // drill-down overlay open for sessions[cursor]
 	detailRow int  // scroll offset within the detail overlay
+	showAll   bool // when false (default), hide SessionStart stubs that never registered
 	err       error
 }
 
@@ -44,7 +46,10 @@ func newAgentsView(s *store.Store, repo *model.Repo) *agentsView {
 
 func (a *agentsView) reload() {
 	a.pending = map[int64]int{}
-	sessions, err := a.store.ListAgentSessions(store.AgentSessionFilter{RepoID: &a.repo.ID})
+	sessions, err := a.store.ListAgentSessions(store.AgentSessionFilter{
+		RepoID:         &a.repo.ID,
+		RegisteredOnly: !a.showAll,
+	})
 	if err != nil {
 		a.err = err
 		return
@@ -112,7 +117,11 @@ func (a *agentsView) Help() string {
 	if a.detail {
 		return "j/k scroll · esc back · r reload · q quit"
 	}
-	return "j/k move · enter detail · g/G top/bottom · r reload · q quit"
+	suffix := "a show stubs"
+	if a.showAll {
+		suffix = "a hide stubs"
+	}
+	return "j/k move · enter detail · g/G top/bottom · r reload · " + suffix + " · q quit"
 }
 
 func (a *agentsView) Update(msg tea.Msg) tea.Cmd {
@@ -158,6 +167,14 @@ func (a *agentsView) Update(msg tea.Msg) tea.Cmd {
 			a.detailRow = 0
 		}
 	case "r":
+		a.reload()
+	case "a":
+		// Toggle SessionStart-stub visibility. Off by default — stubs
+		// are noise unless you're debugging why an agent never
+		// completed register.
+		a.showAll = !a.showAll
+		a.cursor = 0
+		a.scroll = 0
 		a.reload()
 	}
 	return nil
@@ -292,6 +309,12 @@ func (a *agentsView) viewDetail(width, height int) string {
 	lines = append(lines, mutedStyle.Render(truncate("session "+s.SessionID, innerW)))
 	lines = append(lines, mutedStyle.Render(truncate(fmt.Sprintf(
 		"model %s · branch %s · actor %s", dashIfEmpty(s.Model), dashIfEmpty(s.Branch), s.Actor), innerW)))
+	bv := dashIfEmpty(s.ChannelVersion)
+	current := version.String()
+	if s.ChannelVersion != "" && current != "dev" && s.ChannelVersion != current {
+		bv = s.ChannelVersion + " (stale, running binary is " + current + ")"
+	}
+	lines = append(lines, mutedStyle.Render(truncate("bacio version "+bv, innerW)))
 	lines = append(lines, mutedStyle.Render(truncate(fmt.Sprintf(
 		"started %s ago · last seen %s ago",
 		relAgo(now.Sub(s.StartedAt.UTC())), relAgo(now.Sub(s.LastSeenAt.UTC()))), innerW)))

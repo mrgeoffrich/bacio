@@ -220,6 +220,17 @@ export async function promptPlaceholders(): Promise<string[]> {
   }
 }
 
+// bacioVersion returns the version string of the bacio binary this
+// desktop client is running, so the Settings panel can surface it for
+// cross-checking against per-session "Bacio version" on the Agents panel.
+export async function bacioVersion(): Promise<string> {
+  try {
+    return await SettingsService.BacioVersion();
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
 // savePromptTemplate stores a custom body for one dispatch stage. Passing
 // an empty body resets that stage to its built-in default.
 export async function savePromptTemplate(
