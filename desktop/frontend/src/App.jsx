@@ -10,6 +10,9 @@ import IssueDrawer from './components/IssueDrawer.jsx';
 import IssueEditModal from './components/IssueEditModal.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
 import SettingsView from './components/SettingsView.jsx';
+import ErrorBoundary from './components/ErrorBoundary.jsx';
+import ErrorModal from './components/ErrorModal.jsx';
+import { reportError } from './errors';
 import * as api from './api';
 
 const THEME_KEY = 'bacio-theme'; // persisted preference: 'system' | 'light' | 'dark'
@@ -75,7 +78,6 @@ export default function App() {
   const [leaderState, setLeaderState] = useState({ amLeader: false, holderLabel: '' });
   const [theme, setTheme] = useState(readTheme);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
 
   // Resolve the System/Light/Dark preference to a concrete light|dark value
   // and write it to <html data-theme>. In 'system' mode, track the OS setting
@@ -102,7 +104,10 @@ export default function App() {
   // Once boards resolve, land activeBoard on the persisted repo if it
   // still exists, otherwise the first repo — every screen needs a
   // concrete repo, there's no "all" option. The prompt config is global
-  // (repo-independent), so it loads here too.
+  // (repo-independent), so it loads here too. A mount-time failure
+  // no longer blanks the renderer (BACI-43): the modal surfaces the
+  // error, the Topbar stays usable, and the views render their own
+  // empty states until the data lands.
   useEffect(() => {
     Promise.all([api.listBoards(), api.listColumns(), api.listPromptTemplates(), api.getBoardPreferences()])
       .then(([bs, cols, tpls, prefs]) => {
@@ -113,7 +118,10 @@ export default function App() {
         setActiveBoard(prev => bs.some(b => b.prefix === prev) ? prev : (bs[0]?.prefix ?? ''));
         setLoading(false);
       })
-      .catch(err => { setError(err.message); setLoading(false); });
+      .catch(err => {
+        reportError(err, { headline: "Couldn't load boards" });
+        setLoading(false);
+      });
   }, []);
 
   // Subscribe to leaderStatus events and seed the initial state on mount.
@@ -128,16 +136,19 @@ export default function App() {
   // changeHideEmptyColumns persists the Board preference, then updates
   // the App-owned flag on success so the Board reacts immediately —
   // optimistic-then-confirmed, the same shape as the theme handler. A
-  // failed write logs and leaves the toggle where it was.
+  // failed write reports through the modal and leaves the toggle where
+  // it was.
   const changeHideEmptyColumns = useCallback((next) => {
     api.setBoardPreferences(next)
       .then(prefs => setHideEmptyColumns(prefs.hideEmptyColumns))
-      .catch(err => setError(err.message));
+      .catch(err => reportError(err, { headline: "Couldn't save preference" }));
   }, []);
 
   // refreshPromptConfig reloads the global dispatch-prompt config. Called
   // when the Settings view closes, since editing a stage's state-gate
-  // there changes which prompts each card offers.
+  // there changes which prompts each card offers. Failures stay silent
+  // (console.warn) — the existing in-memory config is still valid and
+  // modal-spamming on a poll-loop adjacent refresh would be hostile.
   const refreshPromptConfig = useCallback(() => {
     api.listPromptTemplates()
       .then(setPromptConfig)
@@ -164,14 +175,15 @@ export default function App() {
   // for the active repo. Used by the repo-change effect, the screen-switch
   // effect, the 10s poll, the Agents panel's refresh button, and after a
   // dispatch so the counts move. Pass { silent: true } on the poll path so a
-  // transient failure logs instead of kicking the app to the error screen.
+  // transient failure logs instead of pushing through the modal — a flapping
+  // poll over a sleeping laptop shouldn't spam the user.
   const refreshCards = useCallback((opts = {}) => {
     if (!activeBoard) return;
     api.listCards(activeBoard)
       .then(setCards)
       .catch(err => {
         if (opts.silent) console.warn('card refresh failed:', err);
-        else setError(err.message);
+        else reportError(err, { headline: "Couldn't refresh board" });
       });
   }, [activeBoard]);
 
@@ -181,7 +193,7 @@ export default function App() {
       .then(setAgents)
       .catch(err => {
         if (opts.silent) console.warn('agent refresh failed:', err);
-        else setError(err.message);
+        else reportError(err, { headline: "Couldn't refresh agents" });
       });
   }, [activeBoard]);
 
@@ -241,7 +253,7 @@ export default function App() {
   const openCard = (card) => {
     api.getIssue(activeBoard, card.key)
       .then(setOpenIssue)
-      .catch(err => setError(err.message));
+      .catch(err => reportError(err, { headline: "Couldn't open issue" }));
   };
 
   // Add a repository: the backend opens a native folder picker and registers
@@ -256,7 +268,7 @@ export default function App() {
           setActiveBoard(board.prefix);
         });
       })
-      .catch(err => setError(err.message));
+      .catch(err => reportError(err, { headline: "Couldn't add repository" }));
   };
 
   // Drag-to-move: optimistically move the card to the new column, then
@@ -269,7 +281,7 @@ export default function App() {
     setCards(cs => cs.map(c => c.key === key ? { ...c, column: toCol } : c));
     api.setIssueState(activeBoard, key, toCol)
       .catch(err => {
-        setError(err.message);
+        reportError(err, { headline: "Couldn't move card" });
         setCards(cs => cs.map(c => c.key === key ? { ...c, column: prev.column } : c));
       });
   };
@@ -285,7 +297,7 @@ export default function App() {
         setCards(cs => cs.map(c => c.key === cardKey ? { ...c, claude: true } : c));
         refreshAgents();
       })
-      .catch(err => setError(err.message));
+      .catch(err => reportError(err, { headline: "Couldn't dispatch agent" }));
   };
 
   const ship = () => {
@@ -322,57 +334,74 @@ export default function App() {
       />
       {loading ? (
         <div className="mk-app-state">Loading…</div>
-      ) : error ? (
-        <div className="mk-app-state mk-app-error">Error: {error}</div>
       ) : settingsOpen ? (
-        <SettingsView
-          theme={theme}
-          onChangeTheme={setTheme}
-          hideEmptyColumns={hideEmptyColumns}
-          onChangeHideEmptyColumns={changeHideEmptyColumns}
-          columns={columns}
-          onClose={closeSettings}
-          onTemplatesChanged={refreshPromptConfig}
-        />
+        <ErrorBoundary headline="Something went wrong in Settings" label="The Settings view crashed">
+          <SettingsView
+            theme={theme}
+            onChangeTheme={setTheme}
+            hideEmptyColumns={hideEmptyColumns}
+            onChangeHideEmptyColumns={changeHideEmptyColumns}
+            columns={columns}
+            onClose={closeSettings}
+            onTemplatesChanged={refreshPromptConfig}
+          />
+        </ErrorBoundary>
       ) : activeView === 'docs' ? (
-        <DocsView activeBoard={activeBoard} />
+        <ErrorBoundary headline="Something went wrong in Docs" label="The Docs view crashed">
+          <DocsView activeBoard={activeBoard} />
+        </ErrorBoundary>
       ) : activeView === 'features' ? (
-        <FeaturesView activeBoard={activeBoard} />
+        <ErrorBoundary headline="Something went wrong in Features" label="The Features view crashed">
+          <FeaturesView activeBoard={activeBoard} />
+        </ErrorBoundary>
       ) : activeView === 'agents' ? (
-        <AgentsView agents={agents} onRefresh={refreshAgents} />
+        <ErrorBoundary headline="Something went wrong in Agents" label="The Agents view crashed">
+          <AgentsView agents={agents} onRefresh={refreshAgents} />
+        </ErrorBoundary>
       ) : activeView === 'history' ? (
-        <HistoryView activeBoard={activeBoard} />
+        <ErrorBoundary headline="Something went wrong in History" label="The History view crashed">
+          <HistoryView activeBoard={activeBoard} />
+        </ErrorBoundary>
       ) : (
-        <Board
-          columns={columns}
-          cards={cards}
-          promptConfig={promptConfig}
-          hideEmptyColumns={hideEmptyColumns}
-          onMoveCard={moveCard}
-          onOpenCard={openCard}
-          onDispatchFromCard={dispatchFromCard}
-        />
+        <ErrorBoundary headline="Something went wrong on the board" label="The Board view crashed">
+          <Board
+            columns={columns}
+            cards={cards}
+            promptConfig={promptConfig}
+            hideEmptyColumns={hideEmptyColumns}
+            onMoveCard={moveCard}
+            onOpenCard={openCard}
+            onDispatchFromCard={dispatchFromCard}
+          />
+        </ErrorBoundary>
       )}
-      <IssueDrawer
-        issue={openIssue}
-        onClose={closeDrawer}
-        onShip={ship}
-        onEdit={() => setEditIssueOpen(true)}
-      />
-      {editIssueOpen && openIssue && (
-        <IssueEditModal
+      <ErrorBoundary headline="Something went wrong in the issue drawer" label="The issue drawer crashed">
+        <IssueDrawer
           issue={openIssue}
-          repoPrefix={activeBoard}
-          onClose={() => setEditIssueOpen(false)}
-          onSaved={onIssueSaved}
+          onClose={closeDrawer}
+          onShip={ship}
+          onEdit={() => setEditIssueOpen(true)}
         />
+      </ErrorBoundary>
+      {editIssueOpen && openIssue && (
+        <ErrorBoundary headline="Something went wrong in the edit modal" label="The edit modal crashed">
+          <IssueEditModal
+            issue={openIssue}
+            repoPrefix={activeBoard}
+            onClose={() => setEditIssueOpen(false)}
+            onSaved={onIssueSaved}
+          />
+        </ErrorBoundary>
       )}
-      <CommandPalette
-        open={paletteOpen}
-        cards={cards}
-        onClose={() => setPaletteOpen(false)}
-        onPick={openCard}
-      />
+      <ErrorBoundary headline="Something went wrong in the command palette" label="The command palette crashed">
+        <CommandPalette
+          open={paletteOpen}
+          cards={cards}
+          onClose={() => setPaletteOpen(false)}
+          onPick={openCard}
+        />
+      </ErrorBoundary>
+      <ErrorModal />
     </div>
   );
 }

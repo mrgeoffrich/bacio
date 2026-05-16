@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { reportError } from '../errors';
 import * as api from '../api';
 
 // Short date for the feature-list rows and detail metadata line.
@@ -15,7 +16,6 @@ export default function FeaturesView({ activeBoard }) {
   const [selected, setSelected] = useState(null); // slug
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
 
   const repoSelected = !!activeBoard;
 
@@ -23,28 +23,26 @@ export default function FeaturesView({ activeBoard }) {
   useEffect(() => {
     setSelected(null);
     setDetail(null);
-    setError(null);
     if (!repoSelected) {
       setFeatures([]);
       return;
     }
     api.listFeatures(activeBoard)
       .then(setFeatures)
-      .catch(err => setError(err.message));
+      .catch(err => reportError(err, { headline: "Couldn't load features" }));
   }, [activeBoard, repoSelected]);
 
   // Load the chosen feature's detail (description + linked issues).
   useEffect(() => {
     if (!selected || !repoSelected) return;
     setLoading(true);
-    setError(null);
     api.getFeature(activeBoard, selected)
       .then(d => {
         setDetail(d);
         setLoading(false);
       })
       .catch(err => {
-        setError(err.message);
+        reportError(err, { headline: "Couldn't load feature" });
         setLoading(false);
       });
   }, [selected, activeBoard, repoSelected]);
@@ -77,7 +75,6 @@ export default function FeaturesView({ activeBoard }) {
       </aside>
 
       <div className="mk-features-main">
-        {error && <div className="mk-features-error">{error}</div>}
         {!selected ? (
           <div className="mk-features-empty">Pick a feature to see its details.</div>
         ) : loading ? (

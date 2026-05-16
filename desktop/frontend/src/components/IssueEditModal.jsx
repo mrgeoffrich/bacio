@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import Icon from './Icon.jsx';
+import { reportError } from '../errors';
 import * as api from '../api';
 
 // IssueEditModal is a centred dialog for the two write operations the issue
@@ -12,7 +13,6 @@ export default function IssueEditModal({ issue, repoPrefix, onClose, onSaved }) 
   const [commentAuthor, setCommentAuthor] = useState('');
   const [commentBody, setCommentBody] = useState('');
   const [busy, setBusy] = useState(null); // 'desc' | 'comment' | null
-  const [error, setError] = useState(null);
 
   if (!issue) return null;
 
@@ -20,12 +20,11 @@ export default function IssueEditModal({ issue, repoPrefix, onClose, onSaved }) 
 
   const saveDescription = async () => {
     setBusy('desc');
-    setError(null);
     try {
       const updated = await api.updateIssueDescription(repoPrefix, issue.key, desc);
       onSaved(updated);
     } catch (err) {
-      setError(err.message);
+      reportError(err, { headline: "Couldn't save description" });
     } finally {
       setBusy(null);
     }
@@ -34,13 +33,12 @@ export default function IssueEditModal({ issue, repoPrefix, onClose, onSaved }) 
   const addComment = async () => {
     if (!commentBody.trim()) return;
     setBusy('comment');
-    setError(null);
     try {
       const updated = await api.addComment(repoPrefix, issue.key, commentAuthor, commentBody);
       setCommentBody('');
       onSaved(updated);
     } catch (err) {
-      setError(err.message);
+      reportError(err, { headline: "Couldn't add comment" });
     } finally {
       setBusy(null);
     }
@@ -58,8 +56,6 @@ export default function IssueEditModal({ issue, repoPrefix, onClose, onSaved }) 
         </header>
 
         <div className="mk-edit-modal-body">
-          {error && <div className="mk-edit-modal-error">{error}</div>}
-
           <section className="mk-edit-section">
             <div className="mk-drawer-label">Description</div>
             <textarea

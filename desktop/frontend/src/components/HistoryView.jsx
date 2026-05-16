@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { reportError } from '../errors';
 import * as api from '../api';
 
 const PAGE_SIZE = 50;
@@ -24,7 +25,6 @@ export default function HistoryView({ activeBoard }) {
   const [page, setPage] = useState(0);
   const [data, setData] = useState(null); // HistoryPage
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
 
   const repoSelected = !!activeBoard;
 
@@ -38,14 +38,13 @@ export default function HistoryView({ activeBoard }) {
       return;
     }
     setLoading(true);
-    setError(null);
     api.listHistory(activeBoard, page, PAGE_SIZE)
       .then(p => {
         setData(p);
         setLoading(false);
       })
       .catch(err => {
-        setError(err.message);
+        reportError(err, { headline: "Couldn't load history" });
         setLoading(false);
       });
   }, [activeBoard, page, repoSelected]);
@@ -83,8 +82,6 @@ export default function HistoryView({ activeBoard }) {
           </button>
         </div>
       </header>
-
-      {error && <div className="mk-history-error">{error}</div>}
 
       <div className="mk-history-table">
         <div className="mk-history-head">
