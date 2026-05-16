@@ -715,8 +715,8 @@ bacio settings template states reset review
 | Event            | What `bacio hook <event>` does                                       |
 | ---------------- | -------------------------------------------------------------------- |
 | SessionStart     | mints + records the identity in `.bacio/agents.json` if absent, registers the session, injects assigned issues + claims |
-| UserPromptSubmit | heartbeats; nudges on open claims; drains pending dispatches         |
-| Stop             | heartbeats                                                           |
+| UserPromptSubmit | heartbeats; flips claimed `needs_action` issues back to `in_progress`; nudges on open claims; drains pending dispatches |
+| Stop             | heartbeats; flips claimed `in_progress` issues to `needs_action` (the precise "agent parked" signal) |
 | SessionEnd       | ends the session, auto-releasing every open claim                    |
 
 With hooks installed, an agent no longer has to call `bacio agent register`

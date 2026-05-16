@@ -44,8 +44,14 @@ export default function AgentsView({ agents, onRefresh }) {
               >
                 <span className="mk-agent-name">{name}</span>
                 <span className={`mk-pill mk-status-${a.status}`}>{a.status}</span>
-                {a.busy && (
-                  <span className="mk-pill mk-status-busy">busy · {a.busyIssue}</span>
+                {a.waiting ? (
+                  <span className="mk-pill mk-status-waiting">
+                    waiting · {a.waitingIssue}
+                  </span>
+                ) : (
+                  a.busy && (
+                    <span className="mk-pill mk-status-busy">busy · {a.busyIssue}</span>
+                  )
                 )}
                 <span className="mk-agent-meta">
                   {a.model || '—'} · {a.branch || '—'} · seen {relTime(a.lastSeenAt)}
@@ -65,6 +71,9 @@ export default function AgentsView({ agents, onRefresh }) {
                     a.claims.map((c) => (
                       <div key={c.issueKey} className="mk-agent-claim">
                         <span className="mk-mono">{c.issueKey}</span>
+                        {c.state === 'needs_action' && (
+                          <span className="mk-tag">needs action</span>
+                        )}
                         {c.prompt && <span className="mk-agent-claim-prompt">{c.prompt}</span>}
                       </div>
                     ))

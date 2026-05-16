@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/model"
@@ -10,12 +11,15 @@ import (
 
 // fakeBoardClient is a minimal client.Client for ListCards tests — it
 // embeds the interface (so unused methods exist but panic if called)
-// and implements only the three ListCards touches.
+// and implements only the touches the tests need.
 type fakeBoardClient struct {
 	client.Client
-	repo   *model.Repo
-	issues []*model.Issue
-	claims []*model.AgentClaim
+	repo       *model.Repo
+	issues     []*model.Issue
+	claims     []*model.AgentClaim
+	sessions   []*model.AgentSession
+	dispatches []*model.AgentDispatch
+	sessClaims map[string][]*model.AgentClaim // session id -> claims for ShowAgentSession
 }
 
 func (f *fakeBoardClient) GetRepoByPrefix(context.Context, string) (*model.Repo, error) {
@@ -28,6 +32,18 @@ func (f *fakeBoardClient) ListIssues(context.Context, client.IssueFilter) ([]*mo
 
 func (f *fakeBoardClient) ListOpenClaims(context.Context, *model.Repo) ([]*model.AgentClaim, error) {
 	return f.claims, nil
+}
+
+func (f *fakeBoardClient) ListAgentSessions(context.Context, client.AgentSessionFilter) ([]*model.AgentSession, error) {
+	return f.sessions, nil
+}
+
+func (f *fakeBoardClient) RepoDispatches(context.Context, *model.Repo) ([]*model.AgentDispatch, error) {
+	return f.dispatches, nil
+}
+
+func (f *fakeBoardClient) ShowAgentSession(_ context.Context, sessionID string) (*client.AgentSessionView, error) {
+	return &client.AgentSessionView{Claims: f.sessClaims[sessionID]}, nil
 }
 
 func TestListCardsTaken(t *testing.T) {
@@ -70,6 +86,64 @@ func TestListCardsTaken(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestListAgentsWaiting covers the Stop-hook side of BACI-14: an open
+// claim on a needs_action issue must surface as Waiting/WaitingIssue on
+// the AgentCard, with the ClaimDTO.State propagated for the drill-down.
+func TestListAgentsWaiting(t *testing.T) {
+	repo := &model.Repo{ID: 1, Prefix: "TEST"}
+	t0 := time.Date(2026, 5, 16, 9, 0, 0, 0, time.UTC)
+	sess := &model.AgentSession{
+		ID: 10, SessionID: "sess-a", RepoID: repo.ID, RepoPrefix: repo.Prefix,
+		AgentName: "witty-bison@claude.shiny", LastSeenAt: t0,
+	}
+	parkedClaim := &model.AgentClaim{IssueKey: "TEST-1", ClaimedAt: t0}
+	issues := []*model.Issue{
+		{Key: "TEST-1", State: model.StateNeedsAction, Title: "parked"},
+	}
+
+	svc := NewBoardService(&fakeBoardClient{
+		repo:       repo,
+		issues:     issues,
+		sessions:   []*model.AgentSession{sess},
+		dispatches: nil,
+		sessClaims: map[string][]*model.AgentClaim{"sess-a": {parkedClaim}},
+	})
+	cards, err := svc.ListAgents("TEST")
+	if err != nil {
+		t.Fatalf("ListAgents: %v", err)
+	}
+	if len(cards) != 1 {
+		t.Fatalf("got %d cards, want 1", len(cards))
+	}
+	card := cards[0]
+	if !card.Waiting || card.WaitingIssue != "TEST-1" {
+		t.Errorf("Waiting=%v WaitingIssue=%q, want (true, TEST-1)", card.Waiting, card.WaitingIssue)
+	}
+	if !card.Busy || card.BusyIssue != "TEST-1" {
+		t.Errorf("Busy=%v BusyIssue=%q, want (true, TEST-1)", card.Busy, card.BusyIssue)
+	}
+	if len(card.Claims) != 1 || card.Claims[0].State != string(model.StateNeedsAction) {
+		t.Errorf("Claims[0].State = %q, want %q", card.Claims[0].State, model.StateNeedsAction)
+	}
+
+	// Now flip the same issue to in_progress: Waiting should clear,
+	// Busy stays on, and the drill-down state moves with it.
+	issues[0].State = model.StateInProgress
+	cards, err = svc.ListAgents("TEST")
+	if err != nil {
+		t.Fatalf("ListAgents (in_progress): %v", err)
+	}
+	if cards[0].Waiting {
+		t.Errorf("Waiting = true after issue flipped to in_progress, want false")
+	}
+	if !cards[0].Busy {
+		t.Errorf("Busy = false, want true (claim is still open)")
+	}
+	if cards[0].Claims[0].State != string(model.StateInProgress) {
+		t.Errorf("Claims[0].State = %q, want in_progress", cards[0].Claims[0].State)
 	}
 }
 
