@@ -15,6 +15,7 @@ import (
 	// browser build). Both register under name "sqlite".
 
 	"github.com/mrgeoffrich/bacio/internal/identity"
+	"github.com/mrgeoffrich/bacio/internal/model"
 )
 
 // HistoryRetention bounds how long audit-log entries are kept. Anything
@@ -333,7 +334,129 @@ func migrate(db *sql.DB) error {
 			return fmt.Errorf("drop permission_mode from agent_sessions: %w", err)
 		}
 	}
+	// BACI-31: dispatch prompt templates moved from app_settings (KV
+	// rows keyed prompt_template.<slug> / prompt_states.<slug>) into a
+	// dedicated prompt_templates table. The CREATE TABLE itself lives in
+	// schema.sql and is applied before migrate(); this step seeds the
+	// five built-in rows on first run and folds any app_settings
+	// overrides the user already had into the new table.
+	if err := migratePromptTemplates(db); err != nil {
+		return fmt.Errorf("migrate prompt templates: %w", err)
+	}
 	return nil
+}
+
+// migratePromptTemplates handles the one-shot migration from the
+// pre-BACI-31 world (templates as app_settings KV rows) to the
+// dedicated prompt_templates table. The migration is gated on the
+// presence of `prompt_template.*` keys in app_settings AND the table
+// being empty:
+//
+//   - On a brand-new DB (table empty, no app_settings keys), it seeds
+//     the bundled built-in templates from the embedded defaults.
+//   - On a pre-BACI-31 DB (table empty, app_settings keys present), it
+//     seeds the built-ins and folds the user's overrides into them.
+//   - On a post-BACI-31 DB (table non-empty), it does nothing — so a
+//     user delete is not undone on the next Open. Restore via
+//     `RestoreBuiltinPromptTemplates` or the `restore-defaults` verb.
+//
+// The migrated app_settings rows are removed at the end of the fold
+// step so a future Open never re-applies them.
+func migratePromptTemplates(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// Bail unless the table is empty — once the user owns the rows,
+	// later Opens must not re-seed deleted templates. RestoreBuiltins
+	// is the deliberate-user-action recovery path.
+	var count int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM prompt_templates`).Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		return tx.Commit()
+	}
+
+	// Seed every built-in from the embedded defaults.
+	for _, slug := range model.BuiltinTemplateSlugs() {
+		body := model.DefaultPromptBodyForBuiltinSlug(slug)
+		states := model.DefaultPromptStatesForBuiltinSlug(slug)
+		encoded, err := encodeStates(states)
+		if err != nil {
+			return err
+		}
+		name := model.BuiltinTemplateLabel(slug)
+		if name == "" {
+			name = slug
+		}
+		if _, err := tx.Exec(`
+			INSERT INTO prompt_templates (slug, name, body, allowed_states_json, is_builtin, created_at, updated_at)
+			VALUES (?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+			slug, name, body, encoded); err != nil {
+			return err
+		}
+	}
+
+	// Fold any pre-BACI-31 app_settings overrides into the freshly
+	// seeded rows, then drop the migrated KV rows.
+	for _, slug := range model.BuiltinTemplateSlugs() {
+		bodyKey := "prompt_template." + slug
+		statesKey := "prompt_states." + slug
+
+		var (
+			bodyVal   sql.NullString
+			statesVal sql.NullString
+		)
+		if err := tx.QueryRow(`SELECT value FROM app_settings WHERE key = ?`, bodyKey).Scan(&bodyVal); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if err := tx.QueryRow(`SELECT value FROM app_settings WHERE key = ?`, statesKey).Scan(&statesVal); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if !bodyVal.Valid && !statesVal.Valid {
+			continue
+		}
+
+		// Translate the comma-separated state list (the old format) to
+		// the new JSON-array shape.
+		if statesVal.Valid && strings.TrimSpace(statesVal.String) != "" {
+			parts := strings.Split(statesVal.String, ",")
+			states := make([]model.State, 0, len(parts))
+			for _, p := range parts {
+				st, err := model.ParseState(p)
+				if err != nil {
+					continue
+				}
+				states = append(states, st)
+			}
+			encoded, err := encodeStates(states)
+			if err != nil {
+				return err
+			}
+			if _, err := tx.Exec(`
+				UPDATE prompt_templates
+				   SET allowed_states_json = ?, updated_at = CURRENT_TIMESTAMP
+				 WHERE slug = ?`, encoded, slug); err != nil {
+				return err
+			}
+		}
+		if bodyVal.Valid {
+			if _, err := tx.Exec(`
+				UPDATE prompt_templates
+				   SET body = ?, updated_at = CURRENT_TIMESTAMP
+				 WHERE slug = ?`, bodyVal.String, slug); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.Exec(`DELETE FROM app_settings WHERE key IN (?, ?)`, bodyKey, statesKey); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
 }
 
 // migrateRepoPathUnique relaxes the column-level UNIQUE on repos.path

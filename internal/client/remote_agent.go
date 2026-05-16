@@ -10,6 +10,7 @@ import (
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/model"
+	"github.com/mrgeoffrich/bacio/internal/store"
 )
 
 // HTTP parity for the agent-registry verbs landed in BACI-34. The
@@ -211,6 +212,33 @@ func (c *remoteClient) UpsertAgentChannel(ctx context.Context, repo *model.Repo,
 
 func (c *remoteClient) LinkSessionChannel(ctx context.Context, sessionID string, claudePID int64, host string) error {
 	return remoteAgentNotSupported("channel")
+}
+
+// Prompt templates live in the local prompt_templates table — like the
+// agent registry, there's no remote analogue in v1.
+
+func (c *remoteClient) ListPromptTemplates(ctx context.Context) ([]*store.PromptTemplate, error) {
+	return nil, remoteAgentNotSupported("prompt-templates")
+}
+
+func (c *remoteClient) GetPromptTemplate(ctx context.Context, slug string) (*store.PromptTemplate, error) {
+	return nil, remoteAgentNotSupported("prompt-templates")
+}
+
+func (c *remoteClient) AddPromptTemplate(ctx context.Context, in inputs.SettingsTemplateAddInput, dryRun bool) (*store.PromptTemplate, error) {
+	return nil, remoteAgentNotSupported("prompt-templates")
+}
+
+func (c *remoteClient) RenamePromptTemplate(ctx context.Context, in inputs.SettingsTemplateRenameInput, dryRun bool) (*store.PromptTemplate, error) {
+	return nil, remoteAgentNotSupported("prompt-templates")
+}
+
+func (c *remoteClient) DeletePromptTemplate(ctx context.Context, in inputs.SettingsTemplateRmInput, dryRun bool) (*store.PromptTemplate, error) {
+	return nil, remoteAgentNotSupported("prompt-templates")
+}
+
+func (c *remoteClient) RestoreBuiltinPromptTemplates(ctx context.Context, dryRun bool) ([]string, error) {
+	return nil, remoteAgentNotSupported("prompt-templates")
 }
 
 func (c *remoteClient) GetPromptTemplates(ctx context.Context) (map[string]string, error) {

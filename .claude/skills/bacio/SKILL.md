@@ -658,53 +658,95 @@ without ever claiming or cancelling, the flag stays set.
 
 ### Dispatch prompt templates
 
-When you `bacio agent dispatch --mode <stage>`, the instruction body the
-agent sees is rendered from that stage's **prompt template**. Each of the
-five stages (`plan`, `implement`, `review`, `ship`, `fix_review`) ships
-with a built-in default; override them per-stage — globally, not
-per-repo — with `bacio settings template`. The same templates are
-editable from the desktop app's Settings panel.
+When you `bacio agent dispatch --mode <slug>`, the instruction body the
+agent sees is rendered from the template that matches that slug.
+Templates are **fully user-configurable**: bacio ships with a bundled
+set of five built-ins (`plan`, `implement`, `review`, `ship`,
+`fix_review`) that are seeded into a `prompt_templates` SQLite table
+on first run, but after that the user owns every row — they can edit
+the body, change the state-gate, rename, delete, and add brand-new
+templates. Templates are global, not per-repo. The same set is editable
+from the desktop Settings panel and the TUI Settings tab.
 
 ```
-bacio settings template list            Lean table: every stage's effective
-                                        template + its allowed_states gate
-bacio settings template show <stage>    One stage — effective body + built-in
-                                        default + the state-gate
-bacio settings template set <stage> <body>
-                                        Override a stage's template
-bacio settings template reset <stage>   Revert a stage to its built-in default
+bacio settings template list            Every registered template (slug, label,
+                                        body, allowed_states, is_builtin,
+                                        is_default)
+bacio settings template show <slug>     One template — body + built-in default
+                                        + state-gate
+bacio settings template add             Create a new template (slug + name +
+                                        body + state-gate)
+bacio settings template set <slug> <body>
+                                        Update a template's body
+bacio settings template reset <slug>    Built-ins only: revert body + state-gate
+                                        to the embedded default
+bacio settings template rename <slug> <new-slug> [<new-name>]
+                                        Rename a template (slug change cascades
+                                        to historical agent_dispatches.mode)
+bacio settings template rm <slug>       Delete a template (built-in or user)
+bacio settings template restore-defaults
+                                        Re-seed any missing built-in slugs
+                                        (idempotent)
 
-bacio settings template states show <stage>
-                                        Show the issue states a stage's prompt
-                                        is valid to run from
-bacio settings template states set <stage> <state,state,...>
-                                        Override a stage's state-gate
-bacio settings template states reset <stage>
-                                        Revert a stage's state-gate to default
+bacio settings template states show <slug>
+                                        Show the issue states a template's
+                                        prompt is valid to run from
+bacio settings template states set <slug> <state,state,...>
+                                        Update a template's state-gate
+bacio settings template states reset <slug>
+                                        Built-ins only: revert state-gate to
+                                        the embedded default
 ```
 
-`set` and `reset` (and their `states` siblings) are mutations — they
-honour `--json`, `--dry-run`, and `bacio schema show
-settings.template.set` (schema names `settings.template.set` /
-`settings.template.reset` / `settings.template.states.set` /
-`settings.template.states.reset`). A template body may interpolate
-`{{issue_id}}`, `{{issue_title}}`, and `{{repo_prefix}}` — substituted
-with the dispatched issue's context at dispatch time; an unknown
-`{{...}}` token is left verbatim. `bacio settings` is local-only (the
-`app_settings` store has no remote analogue in v1).
+Every mutating verb honours `--json`, `--dry-run`, and `bacio schema
+show settings.template.<verb>` per the six agent-CLI principles. Schema
+names: `settings.template.add` / `set` / `reset` / `rename` / `rm` /
+`restore-defaults` / `states.set` / `states.reset`. A template body may
+interpolate `{{issue_id}}`, `{{issue_title}}`, and `{{repo_prefix}}` —
+substituted with the dispatched issue's context at dispatch time; an
+unknown `{{...}}` token is left verbatim. `bacio settings` is local-only
+(the `prompt_templates` table, like the rest of the agent-side data, has
+no remote analogue in v1).
 
-Each stage also has a **state-gate**: the set of issue states its prompt
+Each template has a **state-gate**: the set of issue states its prompt
 is valid to run from (built-in defaults — `plan`/`implement` → `todo`,
-`review`/`ship`/`fix_review` → `in_review`). The desktop app's per-card
-action button only offers a prompt when the card's state is in that
-stage's gate; `show`/`list` surface it as `allowed_states`.
+`review`/`ship`/`fix_review` → `in_review`). The desktop app and TUI's
+per-card action button only offers a template when the card's state is
+in that template's gate; `show`/`list` surface it as `allowed_states`. A
+template with an **empty `allowed_states`** is CLI-only: it never
+appears on a per-card menu but is still reachable via
+`bacio agent dispatch --mode <slug>`.
 
 ```bash
-bacio settings template set review --json '{"mode":"review","body":"Review {{issue_id}} ({{issue_title}}) — focus on correctness and tests."}'
+# Edit an existing template's body.
+bacio settings template set review --json '{"slug":"review","body":"Review {{issue_id}} ({{issue_title}}) — focus on correctness and tests."}'
+
+# Revert a built-in's body + state-gate to the embedded default.
 bacio settings template reset review
-bacio settings template states set review --json '{"mode":"review","states":["in_review","needs_action"]}'
-bacio settings template states reset review
+
+# Add a brand-new template, slot it in for todo issues.
+bacio settings template add --json '{"slug":"spike","name":"Spike","body":"Spike on {{issue_id}}.","states":["todo"]}'
+
+# Rename a template — old slug also rewritten on historical dispatches.
+bacio settings template rename spike investigation Investigation
+
+# Delete a template (built-in or user).
+bacio settings template rm fix_review
+
+# Re-seed any deleted built-ins (idempotent — existing rows untouched).
+bacio settings template restore-defaults
 ```
+
+**Slugs outlive templates.** `agent_dispatches.mode` is a free-form
+text slug; a rename cascades to the dispatch rows but a delete does
+not — historical dispatches keep the slug verbatim and renderers treat
+an unrecognised slug as "removed" rather than erroring. So you can
+delete a template at any time without breaking history.
+
+**`reset` is built-ins only.** A user-created template has no embedded
+default to revert to. If you want to wipe one back to a blank body,
+either `set` it to a single space (the validator accepts any non-empty
+body) or `rm` it.
 
 ### Hook integration — automatic registration & supervision
 

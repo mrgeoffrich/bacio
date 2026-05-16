@@ -133,10 +133,11 @@ type boardView struct {
 	featurePickerRow   int
 	featurePickerSlugs []string
 
-	// Dispatch picker — opened with `x` on a todo issue. Three steps:
-	// pick a live agent, pick a mode (plan/implement), type an optional
-	// note. dispatchSessions / dispatchIssue are snapshotted at open so
-	// the lists don't shift while the user is navigating.
+	// Dispatch picker — opened with `x` on an issue. Three steps:
+	// pick a live agent, pick a template (filtered by the issue's
+	// state-gate), type an optional note. dispatchSessions /
+	// dispatchModes / dispatchIssue are snapshotted at open so the
+	// lists don't shift while the user is navigating.
 	dispatchPicker   bool
 	dispatchStep     int // 0 agent · 1 mode · 2 note
 	dispatchRow      int // cursor within the current step's list
@@ -144,7 +145,10 @@ type boardView struct {
 	// dispatchBusy is parallel to dispatchSessions: "" means the session
 	// is a valid target, a non-empty string is the issue key it's busy
 	// working — busy sessions are non-selectable in the picker.
-	dispatchBusy     []string
+	dispatchBusy []string
+	// dispatchModes is the list of templates whose state-gate matches
+	// the focused issue's state — rebuilt every time the picker opens.
+	dispatchModes    []dispatchModeChoice
 	dispatchAgentRow int // remembered agent choice across steps
 	dispatchMode     model.DispatchMode
 	dispatchNote     string

@@ -170,14 +170,53 @@ CREATE TABLE IF NOT EXISTS tui_settings (
 );
 
 -- Global (not per-repo) KV store — the sibling of tui_settings for
--- preferences that aren't tied to a single repo. Used today for the
--- desktop app's customisable dispatch prompt templates, keyed
--- `prompt_template.<mode>`. Same generic-KV rationale as tui_settings.
+-- preferences that aren't tied to a single repo. Used today for scalar
+-- preferences (board.hide_empty_columns). Same generic-KV rationale as
+-- tui_settings. Dispatch prompt templates used to live here keyed
+-- `prompt_template.<mode>`; they were promoted to the dedicated
+-- prompt_templates table (BACI-31) so users can add / rename / delete
+-- arbitrary templates instead of editing a fixed five-stage set.
 CREATE TABLE IF NOT EXISTS app_settings (
     key        TEXT    NOT NULL PRIMARY KEY,
     value      TEXT    NOT NULL DEFAULT '',
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- prompt_templates is the user's set of dispatch prompt templates. Each
+-- row is a named, deletable, renameable template with its own body and
+-- state-gate (the set of issue states it's valid to run from). A small
+-- bundled set of "built-in" templates (plan, implement, review, ship,
+-- fix_review) is seeded on first run from the embedded
+-- prompttemplates/<slug>.txt defaults; after that the user owns every
+-- row and can delete a built-in if they want. `is_builtin` is purely
+-- informational — it does NOT gate deletion. Use
+-- `bacio settings template restore-defaults` (idempotent) to re-seed
+-- any deleted built-ins.
+--
+-- This is a dedicated table rather than a JSON blob in app_settings
+-- because it needs atomic per-row updates, clean audit-log targets, and
+-- room to grow (a future tag_predicate column for richer gating slots
+-- in with one ALTER instead of a blob-shape migration).
+--
+-- The `allowed_states_json` column stores the state-gate as a JSON array
+-- of canonical state strings. Order is preserved verbatim; an empty
+-- array means "no state qualifies" — such a template never appears on a
+-- per-card action menu and is only reachable via
+-- `bacio agent dispatch --mode <slug>`.
+CREATE TABLE IF NOT EXISTS prompt_templates (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    slug                TEXT    NOT NULL UNIQUE,
+    name                TEXT    NOT NULL,
+    body                TEXT    NOT NULL DEFAULT '',
+    allowed_states_json TEXT    NOT NULL DEFAULT '[]',
+    is_builtin          INTEGER NOT NULL DEFAULT 0,
+    created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+-- Case-insensitive UNIQUE on `name` — two templates called "Plan" and
+-- "plan" would be a UX trap, even though their slugs are distinct.
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_prompt_templates_name_ci
+    ON prompt_templates(LOWER(name));
 
 -- sync_state tracks records that have participated in a git-backed sync
 -- pass. Presence-of-row means "previously synced"; absence means

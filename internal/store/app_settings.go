@@ -4,14 +4,21 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/mrgeoffrich/bacio/internal/model"
 )
 
 // Global (not per-repo) KV used by the desktop app. Keep keys namespaced
-// (e.g. "prompt_template.<mode>") so future global preferences can share
-// this table — the same rationale as tui_settings, one scope up.
+// (e.g. "board.hide_empty_columns") so future global preferences can
+// share this table — the same rationale as tui_settings, one scope up.
+//
+// The dispatch prompt templates and their state-gates used to live here
+// (keyed prompt_template.<slug> / prompt_states.<slug>) but moved to
+// the dedicated `prompt_templates` table in BACI-31. The legacy
+// Get/Set/All helpers below are thin shims that read/write the new
+// table so existing callers keep working unchanged; new code should
+// use the table-typed Store.ListPromptTemplates / AddPromptTemplate /
+// etc. directly.
 
 func (s *Store) GetAppSetting(key string) (string, error) {
 	var v string
@@ -36,29 +43,32 @@ func (s *Store) SetAppSetting(key, value string) error {
 	return err
 }
 
-const promptTemplateKeyPrefix = "prompt_template."
-
-// GetPromptTemplate returns the user's custom dispatch prompt template
-// for a stage, falling back to the built-in default when none is
-// stored. An untyped mode ("") has no template and returns "".
+// GetPromptTemplate returns the dispatch prompt template body for the
+// given slug. An empty mode returns "". A slug with no matching row in
+// prompt_templates (a deleted template) returns "" — historical
+// dispatches whose mode-slug has since been removed are rendered as
+// "no template", not an error.
+//
+// Deprecated: use Store.GetPromptTemplateBySlug for the typed shape.
 func (s *Store) GetPromptTemplate(mode model.DispatchMode) (string, error) {
 	if mode == "" {
 		return "", nil
 	}
-	v, err := s.GetAppSetting(promptTemplateKeyPrefix + string(mode))
+	t, err := s.GetPromptTemplateBySlug(string(mode))
 	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return "", nil
+		}
 		return "", err
 	}
-	if v == "" {
-		return model.DefaultPromptTemplate(mode), nil
-	}
-	return v, nil
+	return t.Body, nil
 }
 
-// ValidatePromptTemplate runs the same mode + body checks as
-// SetPromptTemplate without writing — the --dry-run path. It returns the
-// cleaned body so callers projecting a dry-run result see exactly what a
-// real call would have stored.
+// ValidatePromptTemplate runs the body validator under the legacy mode
+// argument shape. Kept for the dry-run path of the original
+// SetPromptTemplate; new code should use ValidatePromptTemplateBody.
+//
+// Deprecated: use Store.ValidatePromptTemplateBody.
 func (s *Store) ValidatePromptTemplate(mode model.DispatchMode, body string) (string, error) {
 	if _, err := model.ParseDispatchMode(string(mode)); err != nil {
 		return "", err
@@ -66,70 +76,103 @@ func (s *Store) ValidatePromptTemplate(mode model.DispatchMode, body string) (st
 	if mode == "" {
 		return "", errors.New("prompt template requires a dispatch mode")
 	}
-	return ValidateBody(body, "prompt template", false)
+	return ValidatePromptTemplateBody(body)
 }
 
-// SetPromptTemplate stores a custom dispatch prompt template for a
-// stage. An empty body clears the override — GetPromptTemplate then
-// falls back to the built-in default. The body is validated as
-// multi-line free text, same as a document body.
+// SetPromptTemplate stores a custom body for one slug. If the slug
+// already has a row, its body is updated in place. If the slug doesn't
+// exist (a deleted template) and is a known built-in, the row is re-
+// seeded with the supplied body and default states. An empty body
+// triggers a "reset to default": built-in slugs get their embedded
+// default body restored; non-built-in slugs have their body cleared.
+//
+// Deprecated: use Store.UpdatePromptTemplate / AddPromptTemplate /
+// RestoreBuiltinPromptTemplates directly.
 func (s *Store) SetPromptTemplate(mode model.DispatchMode, body string) error {
 	clean, err := s.ValidatePromptTemplate(mode, body)
 	if err != nil {
 		return err
 	}
-	return s.SetAppSetting(promptTemplateKeyPrefix+string(mode), clean)
+	slug := string(mode)
+	existing, err := s.GetPromptTemplateBySlug(slug)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	// Empty body = reset semantic: built-in slugs revert to the
+	// embedded default body; user-created slugs accept an empty body
+	// (they have no embedded default to revert to).
+	if clean == "" {
+		if def := model.DefaultPromptBodyForBuiltinSlug(slug); def != "" {
+			clean = def
+		}
+	}
+	if existing != nil {
+		_, err := s.UpdatePromptTemplate(slug, UpdatePromptTemplatePatch{Body: &clean})
+		return err
+	}
+	// No row for that slug. Auto-create one for known built-in slugs
+	// (this is the path the desktop's "Reset to default" hits when the
+	// user had deleted the built-in and is now re-saving its body).
+	if def := model.DefaultPromptBodyForBuiltinSlug(slug); def != "" || isBuiltinSlug(slug) {
+		name := model.BuiltinTemplateLabel(slug)
+		if name == "" {
+			name = slug
+		}
+		_, err := s.AddPromptTemplate(AddPromptTemplateIn{
+			Slug:          slug,
+			Name:          name,
+			Body:          clean,
+			AllowedStates: model.DefaultPromptStatesForBuiltinSlug(slug),
+			IsBuiltin:     true,
+		})
+		return err
+	}
+	return fmt.Errorf("no template %q is registered — use `bacio settings template add` to create one", slug)
 }
 
-// AllPromptTemplates returns the resolved template (custom or built-in
-// default) for every dispatch stage, keyed by mode.
+// AllPromptTemplates returns the resolved body for every registered
+// template, keyed by slug-as-DispatchMode. The map's iteration order is
+// indeterminate; UIs that need ordering should use
+// Store.ListPromptTemplates directly.
+//
+// Deprecated: use Store.ListPromptTemplates for the typed shape.
 func (s *Store) AllPromptTemplates() (map[model.DispatchMode]string, error) {
-	out := make(map[model.DispatchMode]string, len(model.AllDispatchModes()))
-	for _, m := range model.AllDispatchModes() {
-		t, err := s.GetPromptTemplate(m)
-		if err != nil {
-			return nil, err
-		}
-		out[m] = t
+	tmpls, err := s.ListPromptTemplates()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[model.DispatchMode]string, len(tmpls))
+	for _, t := range tmpls {
+		out[model.DispatchMode(t.Slug)] = t.Body
 	}
 	return out, nil
 }
 
-const promptStatesKeyPrefix = "prompt_states."
-
-// GetPromptStates returns the set of issue states a dispatch stage's
-// prompt is valid to run from — the user's per-stage override, falling
-// back to the built-in default (model.DefaultPromptStates) when none is
-// stored. An untyped mode ("") has no gate and returns nil.
+// GetPromptStates returns the state-gate (set of issue states whose
+// prompt is valid to run from them) for a template by slug. Empty/
+// unknown slug returns nil — matching the old behaviour where a missing
+// override fell back to nothing.
+//
+// Deprecated: use Store.GetPromptTemplateBySlug for the typed shape.
 func (s *Store) GetPromptStates(mode model.DispatchMode) ([]model.State, error) {
 	if mode == "" {
 		return nil, nil
 	}
-	v, err := s.GetAppSetting(promptStatesKeyPrefix + string(mode))
+	t, err := s.GetPromptTemplateBySlug(string(mode))
 	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
-	if v == "" {
-		return model.DefaultPromptStates(mode), nil
-	}
-	out := make([]model.State, 0)
-	for _, part := range strings.Split(v, ",") {
-		st, err := model.ParseState(part)
-		if err != nil {
-			// A stored value should always be valid — but if the vocabulary
-			// ever shrank, fall back to the default rather than erroring a
-			// read path.
-			return model.DefaultPromptStates(mode), nil
-		}
-		out = append(out, st)
-	}
-	return out, nil
+	return t.AllowedStates, nil
 }
 
-// ValidatePromptStates runs the same mode + state-set checks as
-// SetPromptStates without writing — the --dry-run path. The mode must
-// be a concrete stage; every entry must be a valid issue state; no
-// duplicates. It returns the cleaned, canonical list.
+// ValidatePromptStates validates the state set against the canonical
+// vocabulary — same shape as ValidatePromptTemplateStates, kept under
+// the legacy name for the dry-run path of the original SetPromptStates.
+//
+// Deprecated: use Store.ValidatePromptTemplateStates.
 func (s *Store) ValidatePromptStates(mode model.DispatchMode, states []model.State) ([]model.State, error) {
 	if _, err := model.ParseDispatchMode(string(mode)); err != nil {
 		return nil, err
@@ -137,50 +180,75 @@ func (s *Store) ValidatePromptStates(mode model.DispatchMode, states []model.Sta
 	if mode == "" {
 		return nil, errors.New("prompt state-gate requires a dispatch mode")
 	}
-	seen := make(map[model.State]bool, len(states))
-	out := make([]model.State, 0, len(states))
-	for _, raw := range states {
-		st, err := model.ParseState(string(raw))
-		if err != nil {
-			return nil, err
-		}
-		if seen[st] {
-			return nil, fmt.Errorf("duplicate state %q in prompt state-gate", st)
-		}
-		seen[st] = true
-		out = append(out, st)
-	}
-	return out, nil
+	return ValidatePromptTemplateStates(states)
 }
 
-// SetPromptStates stores a custom state-gate for a dispatch stage — the
-// set of issue states the stage's prompt is valid to run from. An empty
-// slice clears the override, so GetPromptStates falls back to the
-// built-in default.
+// SetPromptStates stores a custom state-gate for a slug. Empty slice =
+// reset semantic: built-in slugs revert to the embedded default gate;
+// non-built-in slugs accept an empty gate (their template never appears
+// on a per-card menu but is still reachable via `bacio agent dispatch`).
+//
+// Deprecated: use Store.UpdatePromptTemplate directly.
 func (s *Store) SetPromptStates(mode model.DispatchMode, states []model.State) error {
 	clean, err := s.ValidatePromptStates(mode, states)
 	if err != nil {
 		return err
 	}
-	parts := make([]string, len(clean))
-	for i, st := range clean {
-		parts[i] = string(st)
+	slug := string(mode)
+	if len(clean) == 0 {
+		if def := model.DefaultPromptStatesForBuiltinSlug(slug); def != nil {
+			clean = def
+		}
 	}
-	return s.SetAppSetting(promptStatesKeyPrefix+string(mode), strings.Join(parts, ","))
+	existing, err := s.GetPromptTemplateBySlug(slug)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	if existing != nil {
+		_, err := s.UpdatePromptTemplate(slug, UpdatePromptTemplatePatch{AllowedStates: &clean})
+		return err
+	}
+	if isBuiltinSlug(slug) {
+		name := model.BuiltinTemplateLabel(slug)
+		if name == "" {
+			name = slug
+		}
+		_, err := s.AddPromptTemplate(AddPromptTemplateIn{
+			Slug:          slug,
+			Name:          name,
+			Body:          model.DefaultPromptBodyForBuiltinSlug(slug),
+			AllowedStates: clean,
+			IsBuiltin:     true,
+		})
+		return err
+	}
+	return fmt.Errorf("no template %q is registered — use `bacio settings template add` to create one", slug)
 }
 
-// AllPromptStates returns the resolved state-gate (custom or built-in
-// default) for every dispatch stage, keyed by mode.
+// AllPromptStates returns the state-gate for every registered template,
+// keyed by slug.
+//
+// Deprecated: use Store.ListPromptTemplates for the typed shape.
 func (s *Store) AllPromptStates() (map[model.DispatchMode][]model.State, error) {
-	out := make(map[model.DispatchMode][]model.State, len(model.AllDispatchModes()))
-	for _, m := range model.AllDispatchModes() {
-		st, err := s.GetPromptStates(m)
-		if err != nil {
-			return nil, err
-		}
-		out[m] = st
+	tmpls, err := s.ListPromptTemplates()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[model.DispatchMode][]model.State, len(tmpls))
+	for _, t := range tmpls {
+		out[model.DispatchMode(t.Slug)] = append([]model.State(nil), t.AllowedStates...)
 	}
 	return out, nil
+}
+
+// isBuiltinSlug reports whether s names a built-in template slug.
+func isBuiltinSlug(s string) bool {
+	for _, b := range model.BuiltinTemplateSlugs() {
+		if b == s {
+			return true
+		}
+	}
+	return false
 }
 
 const boardHideEmptyColumnsKey = "board.hide_empty_columns"

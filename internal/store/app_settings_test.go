@@ -28,19 +28,22 @@ func TestAppSettingRoundTrip(t *testing.T) {
 	}
 }
 
-// TestPromptTemplateDefaultFallback checks that an unset stage resolves
-// to its built-in default, a custom body overrides it, and clearing the
-// body (empty string) reverts to the default.
-func TestPromptTemplateDefaultFallback(t *testing.T) {
+// TestPromptTemplateSeedAndOverride checks that the migration seeds the
+// built-in templates on first run, that the legacy SetPromptTemplate /
+// GetPromptTemplate shims edit the prompt_templates rows in place, and
+// that an empty body reverts a built-in to its embedded default.
+func TestPromptTemplateSeedAndOverride(t *testing.T) {
 	s := newTestStore(t)
 
-	// Unset → built-in default.
-	got, err := s.GetPromptTemplate(model.DispatchModePlan)
-	if err != nil {
-		t.Fatalf("GetPromptTemplate: %v", err)
-	}
-	if got != model.DefaultPromptTemplate(model.DispatchModePlan) {
-		t.Fatalf("unset plan template = %q, want the built-in default", got)
+	// Seed → built-in default body for every built-in slug.
+	for _, slug := range model.BuiltinTemplateSlugs() {
+		got, err := s.GetPromptTemplate(model.DispatchMode(slug))
+		if err != nil {
+			t.Fatalf("GetPromptTemplate(%s): %v", slug, err)
+		}
+		if got != model.DefaultPromptBodyForBuiltinSlug(slug) {
+			t.Fatalf("seeded %s template = %q, want the built-in default", slug, got)
+		}
 	}
 
 	// Custom override wins.
@@ -52,11 +55,11 @@ func TestPromptTemplateDefaultFallback(t *testing.T) {
 		t.Fatalf("custom plan template = %q, want %q", got, custom)
 	}
 
-	// Empty body clears the override → back to the default.
+	// Empty body resets the built-in → back to the default.
 	if err := s.SetPromptTemplate(model.DispatchModePlan, ""); err != nil {
 		t.Fatalf("SetPromptTemplate (clear): %v", err)
 	}
-	if got, _ := s.GetPromptTemplate(model.DispatchModePlan); got != model.DefaultPromptTemplate(model.DispatchModePlan) {
+	if got, _ := s.GetPromptTemplate(model.DispatchModePlan); got != model.DefaultPromptBodyForBuiltinSlug(model.BuiltinTemplatePlan) {
 		t.Fatalf("cleared plan template = %q, want the default back", got)
 	}
 
@@ -65,14 +68,14 @@ func TestPromptTemplateDefaultFallback(t *testing.T) {
 		t.Fatalf("GetPromptTemplate(\"\") = %q, want empty", got)
 	}
 
-	// AllPromptTemplates resolves every stage to a non-empty body.
+	// AllPromptTemplates surfaces every registered template.
 	all, err := s.AllPromptTemplates()
 	if err != nil {
 		t.Fatalf("AllPromptTemplates: %v", err)
 	}
-	for _, m := range model.AllDispatchModes() {
-		if all[m] == "" {
-			t.Errorf("AllPromptTemplates missing/empty for %q", m)
+	for _, slug := range model.BuiltinTemplateSlugs() {
+		if all[model.DispatchMode(slug)] == "" {
+			t.Errorf("AllPromptTemplates missing/empty for %q", slug)
 		}
 	}
 }
@@ -85,27 +88,24 @@ func TestSetPromptTemplateRejectsBadInput(t *testing.T) {
 	if err := s.SetPromptTemplate("", "anything"); err == nil {
 		t.Fatal("SetPromptTemplate(\"\", ...) = nil, want error")
 	}
-	if err := s.SetPromptTemplate("refactor", "anything"); err == nil {
-		t.Fatal("SetPromptTemplate(unknown mode) = nil, want error")
-	}
 	if err := s.SetPromptTemplate(model.DispatchModePlan, "bad\x00body"); err == nil {
 		t.Fatal("SetPromptTemplate(control char) = nil, want error")
 	}
 }
 
-// TestPromptStatesDefaultFallback checks the state-gate analogue of the
-// template fallback: an unset stage resolves to its built-in default, a
-// custom set overrides it, and clearing it (empty slice) reverts.
-func TestPromptStatesDefaultFallback(t *testing.T) {
+// TestPromptStatesSeedAndOverride is the state-gate analogue of the
+// template seeding test: a built-in's gate starts at its embedded
+// default, a custom set overrides it, and an empty slice reverts.
+func TestPromptStatesSeedAndOverride(t *testing.T) {
 	s := newTestStore(t)
 
-	// Unset → built-in default.
+	// Seed → built-in default gate.
 	got, err := s.GetPromptStates(model.DispatchModePlan)
 	if err != nil {
 		t.Fatalf("GetPromptStates: %v", err)
 	}
 	if len(got) != 1 || got[0] != model.StateTodo {
-		t.Fatalf("unset plan state-gate = %v, want [todo]", got)
+		t.Fatalf("seeded plan state-gate = %v, want [todo]", got)
 	}
 
 	// Custom override wins.
@@ -118,7 +118,7 @@ func TestPromptStatesDefaultFallback(t *testing.T) {
 		t.Fatalf("custom plan state-gate = %v, want [todo in_progress]", got)
 	}
 
-	// Empty slice clears the override → back to the default.
+	// Empty slice resets the built-in → back to the default.
 	if err := s.SetPromptStates(model.DispatchModePlan, nil); err != nil {
 		t.Fatalf("SetPromptStates (clear): %v", err)
 	}
@@ -132,14 +132,14 @@ func TestPromptStatesDefaultFallback(t *testing.T) {
 		t.Fatalf("GetPromptStates(\"\") = %v, want nil", got)
 	}
 
-	// AllPromptStates resolves every stage to a non-empty set.
+	// AllPromptStates surfaces every registered template's gate.
 	all, err := s.AllPromptStates()
 	if err != nil {
 		t.Fatalf("AllPromptStates: %v", err)
 	}
-	for _, m := range model.AllDispatchModes() {
-		if len(all[m]) == 0 {
-			t.Errorf("AllPromptStates missing/empty for %q", m)
+	for _, slug := range model.BuiltinTemplateSlugs() {
+		if len(all[model.DispatchMode(slug)]) == 0 {
+			t.Errorf("AllPromptStates missing/empty for %q", slug)
 		}
 	}
 }

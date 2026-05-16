@@ -162,18 +162,34 @@ var (
 	}
 
 	ExampleSettingsTemplateSet = SettingsTemplateSetInput{
-		Mode: "review",
+		Slug: "review",
 		Body: "Review {{issue_id}} ({{issue_title}}): check correctness, tests, and the acceptance criteria. Report findings — don't change code.",
 	}
 	ExampleSettingsTemplateReset = SettingsTemplateResetInput{
-		Mode: "review",
+		Slug: "review",
 	}
 
 	ExampleSettingsTemplateStatesSet = SettingsTemplateStatesSetInput{
-		Mode:   "review",
+		Slug:   "review",
 		States: []string{"in_review"},
 	}
 	ExampleSettingsTemplateStatesReset = SettingsTemplateStatesResetInput{
-		Mode: "review",
+		Slug: "review",
 	}
+
+	ExampleSettingsTemplateAdd = SettingsTemplateAddInput{
+		Slug:   "spike",
+		Name:   "Spike",
+		Body:   "Spike on {{issue_id}} ({{issue_title}}) — produce a short investigation note, no code.",
+		States: []string{"todo"},
+	}
+	ExampleSettingsTemplateRename = SettingsTemplateRenameInput{
+		Slug:    "spike",
+		NewSlug: "investigation",
+		NewName: "Investigation",
+	}
+	ExampleSettingsTemplateRm = SettingsTemplateRmInput{
+		Slug: "spike",
+	}
+	ExampleSettingsTemplateRestoreDefaults = SettingsTemplateRestoreDefaultsInput{}
 )

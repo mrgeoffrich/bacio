@@ -233,6 +233,144 @@ func (c *localClient) DrainAgentDispatches(ctx context.Context, repo *model.Repo
 	return c.markDrained(open)
 }
 
+func (c *localClient) ListPromptTemplates(ctx context.Context) ([]*store.PromptTemplate, error) {
+	return c.store.ListPromptTemplates()
+}
+
+func (c *localClient) GetPromptTemplate(ctx context.Context, slug string) (*store.PromptTemplate, error) {
+	return c.store.GetPromptTemplateBySlug(slug)
+}
+
+func (c *localClient) AddPromptTemplate(ctx context.Context, in inputs.SettingsTemplateAddInput, dryRun bool) (*store.PromptTemplate, error) {
+	addIn := store.AddPromptTemplateIn{
+		Slug:          in.Slug,
+		Name:          in.Name,
+		Body:          in.Body,
+		AllowedStates: stringsToStates(in.States),
+		// IsBuiltin is never set by an agent-facing add — only the
+		// migration's seed step and RestoreBuiltinPromptTemplates flip
+		// it on.
+	}
+	if dryRun {
+		return c.store.ValidateAddPromptTemplate(addIn)
+	}
+	t, err := c.store.AddPromptTemplate(addIn)
+	if err != nil {
+		return nil, err
+	}
+	id := t.ID
+	c.recordOp(model.HistoryEntry{
+		Op: "template.create", Kind: "app_setting",
+		TargetID: &id, TargetLabel: "prompt_template:" + t.Slug,
+		Details: fmt.Sprintf("slug=%s, name=%s", t.Slug, t.Name),
+	})
+	return t, nil
+}
+
+func (c *localClient) RenamePromptTemplate(ctx context.Context, in inputs.SettingsTemplateRenameInput, dryRun bool) (*store.PromptTemplate, error) {
+	// A rename with empty NewSlug means "keep slug, change name"; copy
+	// the existing slug in so the validator + store don't need to
+	// special-case it.
+	existing, err := c.store.GetPromptTemplateBySlug(in.Slug)
+	if err != nil {
+		return nil, err
+	}
+	target := store.RenamePromptTemplateIn{
+		OldSlug: in.Slug,
+		NewSlug: in.NewSlug,
+		NewName: in.NewName,
+	}
+	if target.NewSlug == "" {
+		target.NewSlug = in.Slug
+	}
+	if dryRun {
+		// Project the would-be row without writing. Validate both slug
+		// shapes; surface the existing row's other fields untouched.
+		if _, err := store.ValidatePromptTemplateSlug(target.OldSlug); err != nil {
+			return nil, fmt.Errorf("old slug: %w", err)
+		}
+		if _, err := store.ValidatePromptTemplateSlug(target.NewSlug); err != nil {
+			return nil, fmt.Errorf("new slug: %w", err)
+		}
+		projected := *existing
+		projected.Slug = target.NewSlug
+		if target.NewName != "" {
+			name, err := store.ValidatePromptTemplateName(target.NewName)
+			if err != nil {
+				return nil, err
+			}
+			projected.Name = name
+		}
+		return &projected, nil
+	}
+	renamed, err := c.store.RenamePromptTemplate(target)
+	if err != nil {
+		return nil, err
+	}
+	id := renamed.ID
+	details := fmt.Sprintf("from=%s, to=%s, name=%s", in.Slug, renamed.Slug, renamed.Name)
+	c.recordOp(model.HistoryEntry{
+		Op: "template.rename", Kind: "app_setting",
+		TargetID: &id, TargetLabel: "prompt_template:" + renamed.Slug,
+		Details: details,
+	})
+	return renamed, nil
+}
+
+func (c *localClient) DeletePromptTemplate(ctx context.Context, in inputs.SettingsTemplateRmInput, dryRun bool) (*store.PromptTemplate, error) {
+	existing, err := c.store.GetPromptTemplateBySlug(in.Slug)
+	if err != nil {
+		return nil, err
+	}
+	if dryRun {
+		return existing, nil
+	}
+	removed, err := c.store.DeletePromptTemplate(in.Slug)
+	if err != nil {
+		return nil, err
+	}
+	id := removed.ID
+	c.recordOp(model.HistoryEntry{
+		Op: "template.delete", Kind: "app_setting",
+		TargetID: &id, TargetLabel: "prompt_template:" + removed.Slug,
+		Details: "slug=" + removed.Slug,
+	})
+	return removed, nil
+}
+
+func (c *localClient) RestoreBuiltinPromptTemplates(ctx context.Context, dryRun bool) ([]string, error) {
+	if dryRun {
+		// Compute the would-be list without touching the table.
+		existing, err := c.store.ListPromptTemplates()
+		if err != nil {
+			return nil, err
+		}
+		present := make(map[string]bool, len(existing))
+		for _, t := range existing {
+			present[t.Slug] = true
+		}
+		var would []string
+		for _, slug := range model.BuiltinTemplateSlugs() {
+			if !present[slug] {
+				would = append(would, slug)
+			}
+		}
+		return would, nil
+	}
+	created, err := c.store.RestoreBuiltinPromptTemplates()
+	if err != nil {
+		return nil, err
+	}
+	if len(created) > 0 {
+		c.recordOp(model.HistoryEntry{
+			Op: "template.restore_defaults", Kind: "app_setting",
+			TargetLabel: "prompt_template",
+			Details:     "slugs=" + strings.Join(created, ","),
+		})
+	}
+	return created, nil
+}
+
 func (c *localClient) GetPromptTemplates(ctx context.Context) (map[string]string, error) {
 	all, err := c.store.AllPromptTemplates()
 	if err != nil {
@@ -251,7 +389,7 @@ func (c *localClient) SetPromptTemplate(ctx context.Context, mode, body string, 
 		return err
 	}
 	if m == "" {
-		return fmt.Errorf("prompt template requires a dispatch mode")
+		return fmt.Errorf("prompt template requires a slug")
 	}
 	if dryRun {
 		// Validate the body at the store boundary, then stop before the
@@ -270,8 +408,8 @@ func (c *localClient) SetPromptTemplate(ctx context.Context, mode, body string, 
 	}
 	c.recordOp(model.HistoryEntry{
 		Op: op, Kind: "app_setting",
-		TargetLabel: "prompt_template." + string(m),
-		Details:     "stage=" + string(m),
+		TargetLabel: "prompt_template:" + string(m),
+		Details:     "slug=" + string(m),
 	})
 	return nil
 }
@@ -298,12 +436,9 @@ func (c *localClient) SetPromptStates(ctx context.Context, mode string, states [
 		return err
 	}
 	if m == "" {
-		return fmt.Errorf("prompt state-gate requires a dispatch mode")
+		return fmt.Errorf("prompt state-gate requires a slug")
 	}
-	parsed := make([]model.State, len(states))
-	for i, s := range states {
-		parsed[i] = model.State(s)
-	}
+	parsed := stringsToStates(states)
 	if dryRun {
 		// Validate the state set at the store boundary, then stop before
 		// the write — same shape as every other --dry-run mutation.
@@ -321,10 +456,21 @@ func (c *localClient) SetPromptStates(ctx context.Context, mode string, states [
 	}
 	c.recordOp(model.HistoryEntry{
 		Op: op, Kind: "app_setting",
-		TargetLabel: "prompt_states." + string(m),
-		Details:     "stage=" + string(m),
+		TargetLabel: "prompt_states:" + string(m),
+		Details:     "slug=" + string(m),
 	})
 	return nil
+}
+
+// stringsToStates is the wire-to-model helper for state-gate inputs.
+// Each element is a model.State string cast directly; the validator on
+// the store boundary rejects unknown values.
+func stringsToStates(states []string) []model.State {
+	out := make([]model.State, len(states))
+	for i, s := range states {
+		out[i] = model.State(s)
+	}
+	return out
 }
 
 func (c *localClient) GetBoardPreferences(ctx context.Context) (BoardPreferences, error) {

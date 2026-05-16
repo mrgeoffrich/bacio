@@ -9,13 +9,13 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
 
-// settingsView (wasm build) is a read-only stage list. The native
-// build (settings.go) adds a per-stage editor on top of this, backed
-// by bubbles/textarea — but textarea transitively imports
-// atotto/clipboard, which has no js/wasm build. The wasm demo is
-// read-only by design (cmd/bacio-wasm has no save loop), so a Settings
-// tab that only *shows* the prompt configuration is the correct
-// behaviour here, not a degraded one.
+// settingsView (wasm build) is a read-only template list. The native
+// build (settings.go) adds an editor + add/rename/delete affordances
+// on top of this, backed by bubbles/textarea — but textarea
+// transitively imports atotto/clipboard, which has no js/wasm build.
+// The wasm demo is read-only by design (cmd/bacio-wasm has no save
+// loop), so a Settings tab that only *shows* the templates is the
+// correct behaviour here, not a degraded one.
 type settingsView struct {
 	store  *store.Store
 	repo   *model.Repo
@@ -31,18 +31,13 @@ func newSettingsView(s *store.Store, repo *model.Repo) *settingsView {
 }
 
 func (s *settingsView) reload() {
-	templates, err := s.store.AllPromptTemplates()
-	if err != nil {
-		s.err = err
-		return
-	}
-	states, err := s.store.AllPromptStates()
+	tmpls, err := s.store.ListPromptTemplates()
 	if err != nil {
 		s.err = err
 		return
 	}
 	s.err = nil
-	s.stages = loadStageRows(templates, states)
+	s.stages = loadStageRowsFromTemplates(tmpls)
 	if s.cursor >= len(s.stages) {
 		s.cursor = max(0, len(s.stages)-1)
 	}

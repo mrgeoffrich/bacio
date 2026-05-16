@@ -3,8 +3,8 @@
 
 /**
  * SettingsService is the Wails-bound API for the desktop Settings panel.
- * Today it owns the customisable dispatch prompt templates; it wraps the
- * same local bacio client.Client as the rest of the app.
+ * It owns the customisable dispatch prompt templates (now arbitrary in
+ * count and shape — see BACI-31) and the Board UI preferences.
  * @module
  */
 
@@ -17,16 +17,34 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 import * as $models from "./models.js";
 
 /**
+ * AddPromptTemplate creates a brand-new template.
+ */
+export function AddPromptTemplate(slug: string, name: string, body: string, states: string[]): $CancellablePromise<$models.PromptTemplateDTO> {
+    return $Call.ByID(2314996611, slug, name, body, states).then(($result: any) => {
+        return $$createType0($result);
+    });
+}
+
+/**
  * BacioVersion returns the version string of the bacio binary the
  * desktop app is currently running. Surfaced on the Settings panel so
  * you can cross-check what the desktop client is running against the
- * per-session "Bacio version" the Agents panel shows — easy way to
- * spot "is this agent's channel an older build than my desktop?".
- * Sources from version.String() so plain `go build` dev binaries get
- * commit-level resolution (e.g. "dev (commit abc1234)").
+ * per-session "Bacio version" the Agents panel shows.
  */
 export function BacioVersion(): $CancellablePromise<string> {
     return $Call.ByID(2314822586);
+}
+
+/**
+ * DeletePromptTemplate removes a template by slug. The historical
+ * dispatches that reference the slug are left intact (a dispatch is a
+ * snapshot, not a live foreign key) — use RestoreBuiltinPromptTemplates
+ * to re-seed a deleted built-in.
+ */
+export function DeletePromptTemplate(slug: string): $CancellablePromise<$models.PromptTemplateDTO> {
+    return $Call.ByID(2109861811, slug).then(($result: any) => {
+        return $$createType0($result);
+    });
 }
 
 /**
@@ -35,15 +53,15 @@ export function BacioVersion(): $CancellablePromise<string> {
  */
 export function GetBoardPreferences(): $CancellablePromise<$models.BoardPreferencesDTO> {
     return $Call.ByID(749217122).then(($result: any) => {
-        return $$createType0($result);
+        return $$createType1($result);
     });
 }
 
 /**
- * ListPromptTemplates returns the five dispatch prompt templates in
- * lifecycle order, each with its effective body, the built-in default,
- * the effective + default state-gate, and whether each still matches
- * its built-in default.
+ * ListPromptTemplates returns every registered template in store
+ * iteration order — the desktop Settings panel renders them in this
+ * order and the per-card action menu in the Board iterates the same
+ * list filtered by state-gate.
  */
 export function ListPromptTemplates(): $CancellablePromise<$models.PromptTemplateDTO[]> {
     return $Call.ByID(1001854565).then(($result: any) => {
@@ -63,41 +81,60 @@ export function PromptPlaceholders(): $CancellablePromise<string[]> {
 }
 
 /**
- * SavePromptStates stores a custom state-gate for one dispatch stage —
- * the set of issue states the stage's prompt is valid to run from — and
- * returns the refreshed DTO. An empty slice resets the stage to its
- * built-in default gate.
+ * RenamePromptTemplate renames an existing template — either the slug,
+ * the display name, or both.
  */
-export function SavePromptStates(mode: string, states: string[]): $CancellablePromise<$models.PromptTemplateDTO> {
-    return $Call.ByID(1803653057, mode, states).then(($result: any) => {
-        return $$createType1($result);
+export function RenamePromptTemplate(slug: string, newSlug: string, newName: string): $CancellablePromise<$models.PromptTemplateDTO> {
+    return $Call.ByID(1528694734, slug, newSlug, newName).then(($result: any) => {
+        return $$createType0($result);
     });
 }
 
 /**
- * SavePromptTemplate stores a custom body for one dispatch stage and
- * returns the refreshed DTO. An empty body resets the stage to its
- * built-in default.
+ * RestoreBuiltinPromptTemplates re-seeds any built-in slug that doesn't
+ * currently have a row from the embedded defaults. Idempotent. Returns
+ * the refreshed full template list so the frontend can update its
+ * `templates` state in one shot.
  */
-export function SavePromptTemplate(mode: string, body: string): $CancellablePromise<$models.PromptTemplateDTO> {
-    return $Call.ByID(898182437, mode, body).then(($result: any) => {
-        return $$createType1($result);
+export function RestoreBuiltinPromptTemplates(): $CancellablePromise<$models.PromptTemplateDTO[]> {
+    return $Call.ByID(3843909418).then(($result: any) => {
+        return $$createType2($result);
+    });
+}
+
+/**
+ * SavePromptStates stores a new state-gate for one template. An empty
+ * slice reverts a built-in to its embedded default gate.
+ */
+export function SavePromptStates(slug: string, states: string[]): $CancellablePromise<$models.PromptTemplateDTO> {
+    return $Call.ByID(1803653057, slug, states).then(($result: any) => {
+        return $$createType0($result);
+    });
+}
+
+/**
+ * SavePromptTemplate stores a new body for one template slug. An empty
+ * body reverts a built-in to its embedded default (and is a no-op
+ * edit for a user-created template).
+ */
+export function SavePromptTemplate(slug: string, body: string): $CancellablePromise<$models.PromptTemplateDTO> {
+    return $Call.ByID(898182437, slug, body).then(($result: any) => {
+        return $$createType0($result);
     });
 }
 
 /**
  * SetBoardPreferences stores the desktop Board's hide-empty-columns
- * preference and returns the refreshed DTO — same "save returns the
- * refreshed DTO" shape as SavePromptTemplate.
+ * preference and returns the refreshed DTO.
  */
 export function SetBoardPreferences(hideEmptyColumns: boolean): $CancellablePromise<$models.BoardPreferencesDTO> {
     return $Call.ByID(3601263486, hideEmptyColumns).then(($result: any) => {
-        return $$createType0($result);
+        return $$createType1($result);
     });
 }
 
 // Private type creation functions
-const $$createType0 = $models.BoardPreferencesDTO.createFrom;
-const $$createType1 = $models.PromptTemplateDTO.createFrom;
-const $$createType2 = $Create.Array($$createType1);
+const $$createType0 = $models.PromptTemplateDTO.createFrom;
+const $$createType1 = $models.BoardPreferencesDTO.createFrom;
+const $$createType2 = $Create.Array($$createType0);
 const $$createType3 = $Create.Array($Create.Any);
