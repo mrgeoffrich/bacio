@@ -17,9 +17,16 @@ import (
 // Options is the bind/auth configuration for an API server. Token is the
 // shared bearer secret; an empty string disables auth (and logs nothing
 // on /healthz, which is unauthenticated regardless).
+//
+// CORSOrigins is the allow-list of cross-origin browser callers. Empty
+// (the default) means same-origin only — no CORS headers are emitted
+// and preflight requests fall through to the route handler, which
+// returns 405. Populate it (via --cors-origin, repeatable) when the
+// React bundle is hosted on a different origin from the API.
 type Options struct {
-	Addr  string
-	Token string
+	Addr        string
+	Token       string
+	CORSOrigins []string
 }
 
 // Server is the wired-up HTTP server. The caller (cmd/bacio) owns the store

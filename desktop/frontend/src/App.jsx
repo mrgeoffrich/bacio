@@ -13,6 +13,7 @@ import SettingsView from './components/SettingsView.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import ErrorModal from './components/ErrorModal.jsx';
 import { reportError } from './errors';
+import { WEB_MODE } from './env';
 import * as api from './api';
 
 const THEME_KEY = 'bacio-theme'; // persisted preference: 'system' | 'light' | 'dark'
@@ -127,7 +128,11 @@ export default function App() {
   // Subscribe to leaderStatus events and seed the initial state on mount.
   // LeaderService emits the first tick almost immediately on startup, so
   // the state corrects quickly even if the initial pull lags.
+  //
+  // Skipped entirely in web mode — the browser doesn't run the elector,
+  // there's no Wails Events bus, and the Topbar hides the chip anyway.
   useEffect(() => {
+    if (WEB_MODE) return undefined;
     api.getLeaderStatus().then(setLeaderState).catch(() => {});
     const off = Events.On('leaderStatus', (e) => setLeaderState(e.data));
     return () => { if (typeof off === 'function') off(); };
@@ -189,6 +194,10 @@ export default function App() {
 
   const refreshAgents = useCallback((opts = {}) => {
     if (!activeBoard) return;
+    // The Agents view is hidden in WEB_MODE — there's no HTTP route
+    // that assembles the AgentCard payload, so the api stub throws.
+    // Skip the call entirely instead of surfacing the error.
+    if (WEB_MODE) return;
     api.listAgents(activeBoard)
       .then(setAgents)
       .catch(err => {

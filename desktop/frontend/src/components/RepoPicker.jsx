@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import Icon from './Icon.jsx';
+import { WEB_MODE } from '../env';
 
 // RepoPicker is the topbar's repository selector — a searchable dropdown that
 // replaces the plain native <select>. Clicking the trigger opens a menu with
@@ -95,10 +96,16 @@ export default function RepoPicker({ boards, activeBoard, onPick, onAddRepositor
               ))
             )}
           </div>
-          <button className="mk-repo-picker-add" onClick={add}>
-            <Icon name="plus" />
-            Add Repository…
-          </button>
+          {WEB_MODE ? (
+            <div className="mk-repo-picker-empty" title="Run `bacio init` on the server to register a new repository">
+              Run <code>bacio init</code> on the server to register a repository.
+            </div>
+          ) : (
+            <button className="mk-repo-picker-add" onClick={add}>
+              <Icon name="plus" />
+              Add Repository…
+            </button>
+          )}
         </div>
       )}
     </div>

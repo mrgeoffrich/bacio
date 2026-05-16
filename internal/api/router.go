@@ -75,6 +75,13 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("GET /history", d.handleHistoryAll)
 	mux.HandleFunc("GET /repos/{prefix}/history", d.handleHistoryRepo)
 
+	// Web UI bundle (BACI-30): serve the browser-deployed React build at
+	// /ui/, with a 301 from the unslashed /ui to keep the SPA's base
+	// path consistent. The bundle is embedded at compile time via
+	// root.WebUIFS — see internal/api/static.go.
+	mux.HandleFunc("GET /ui", d.handleUIRedirect)
+	mux.HandleFunc("GET /ui/", d.handleUI)
+
 	// Agent registry (BACI-34). Local-only data, but reachable over HTTP
 	// so a remote frontend can drive the same surface as the desktop.
 	// Repo-scoped: register a session, list sessions in a repo, list open
@@ -114,11 +121,14 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("DELETE /settings/templates/{mode}/states", d.handlePromptStatesReset)
 
 	// Outermost first: panic recovery wraps everything so a bug in any
-	// later layer still returns a 500 envelope.
+	// later layer still returns a 500 envelope. The CORS middleware
+	// sits *outside* auth so a cross-origin preflight (OPTIONS) is
+	// answered before the bearer-token check would reject it.
 	var h http.Handler = mux
 	h = bodyCap(h, 4<<20)
 	h = auth(h, d.opts.Token)
 	h = actorMiddleware(h)
+	h = cors(h, d.opts.CORSOrigins)
 	h = requestLog(h, d.logger)
 	h = recoverPanic(h, d.logger)
 	return h

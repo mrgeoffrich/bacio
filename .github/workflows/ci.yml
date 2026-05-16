@@ -55,5 +55,8 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build
+      - name: Build (Wails mode)
         run: npm run build
+
+      - name: Build (web mode — BACI-30)
+        run: npm run build:web

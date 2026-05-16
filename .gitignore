@@ -3,6 +3,17 @@
 *.exe
 /dist/
 
+# Web UI bundle (BACI-30) — populated by `./build.sh --web` or
+# `npm --prefix desktop/frontend run build:web` + copy. The .gitkeep
+# is the embed.go anchor so `//go:embed all:webui` doesn't error on
+# a clean checkout.
+/webui/*
+!/webui/.gitkeep
+
+# Vite build output for the web bundle (the source of what gets
+# copied into /webui/).
+/desktop/frontend/dist-web/
+
 # Go
 go.work
 go.work.sum
