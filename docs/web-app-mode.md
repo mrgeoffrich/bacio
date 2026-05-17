@@ -17,8 +17,9 @@ app (build-mode summary).
 
 ```bash
 # One-shot from a clean checkout: build the web bundle, embed it into
-# the bacio binary, install to ~/.local/bin/bacio.
-./build.sh --web --skip-desktop
+# the bacio binary, install to ~/.local/bin/bacio. The web bundle now
+# builds by default; --skip-desktop just avoids the Wails desktop step.
+./build.sh --skip-desktop
 
 # Run the API server (loopback default) and open the UI.
 bacio api &
@@ -175,7 +176,7 @@ Two ways to iterate on the web bundle:
 recommended deployment.
 
 ```bash
-./build.sh --web --skip-desktop          # builds bundle + embeds + installs
+./build.sh --skip-desktop                 # builds bundle + embeds + installs (web bundle is default-on)
 bacio api                                 # serves /ui/ + /repos/...
 open http://127.0.0.1:5320/ui/
 ```
@@ -213,7 +214,7 @@ desktop/frontend/src/*           # source
 
 desktop/frontend/dist-web/       # raw built bundle
 
-         ↓ build.sh --web (cp to repo root)
+         ↓ build.sh (cp to repo root; web bundle is default-on)
 
 webui/                           # embed.go anchor
    ├─ .gitkeep                   # makes the embed directive valid on a clean checkout
@@ -253,7 +254,7 @@ still that today. Two changes were strictly necessary for a web bundle:
 
 1. **Same-origin loopback, no token.** Recommended for personal use:
    `bacio api` on `127.0.0.1`, browser on the same machine, no auth,
-   no CORS. This is the configuration `./build.sh --web` + `bacio api`
+   no CORS. This is the configuration `./build.sh` + `bacio api`
    produces out of the box.
 2. **Same-origin behind a reverse proxy with TLS.** Caddy or
    Tailscale Funnel terminates TLS, forwards to a local `bacio api`.
@@ -352,7 +353,7 @@ When you go to extend or fix this, the relevant files are:
   - `internal/api/server.go` — `Options.CORSOrigins`.
   - `internal/cli/api.go` — `--cors-origin` flag.
 - **Build**
-  - `build.sh --web` — npm install + `build:web` + dist-web/ → webui/.
+  - `build.sh` — npm install + `build:web` + dist-web/ → webui/ (default-on; opt out with `--skip-web`).
   - `.github/workflows/ci.yml` — extra `build:web` step.
 - **Tracking**
   - `webui/.gitkeep` — embed-directive anchor on clean checkouts.

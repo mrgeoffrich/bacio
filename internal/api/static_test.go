@@ -10,9 +10,10 @@ import (
 )
 
 // /ui/ and the embed setup depend on whether `webui/` is populated at
-// compile time. On a CI runner without `./build.sh --web` having
-// populated webui/, only the placeholder `.gitkeep` is present — every
-// path below /ui/ falls into the "no bundle" branch (404 with hint).
+// compile time. On a CI runner without `./build.sh` (or `--skip-web`
+// passed) having populated webui/, only the placeholder `.gitkeep` is
+// present — every path below /ui/ falls into the "no bundle" branch
+// (404 with hint).
 // When the bundle IS present, the handler serves real files and these
 // tests skip; the presence/absence branch is the contract.
 

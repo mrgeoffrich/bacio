@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# build.sh — rebuild everything bacio: the CLI/TUI binary, the desktop
-# frontend (Vite), the desktop's Wails bindings, and the desktop Go binary.
+# build.sh — rebuild everything bacio: the web bundle (embedded into the
+# CLI binary at /ui/), the CLI/TUI binary, the desktop frontend (Vite),
+# the desktop's Wails bindings, and the desktop Go binary.
 #
 # Why this exists: the desktop app is a separate nested Go module (`desktop/`,
 # pinned via `replace github.com/mrgeoffrich/bacio => ../`) AND a React
@@ -11,24 +12,27 @@
 # any Wails-bound service also need `wails3 generate bindings` to surface in
 # the React side.
 #
+# Default is full build — everything in, nothing skipped. Opt out of the
+# slower pieces when you know they're untouched.
+#
 # Usage:
-#   ./build.sh                 # rebuild everything
-#   ./build.sh --skip-desktop  # CLI/TUI only (handy in the inner loop)
-#   ./build.sh --web           # also build the web bundle into webui/
-#                              # (BACI-30). Composes with --skip-desktop.
+#   ./build.sh                            # rebuild everything
+#   ./build.sh --skip-web                 # skip the web bundle
+#   ./build.sh --skip-desktop             # skip the desktop app
+#   ./build.sh --skip-web --skip-desktop  # CLI/TUI only (inner loop)
 #
 # Run from the repo root.
 
 set -euo pipefail
 
 skip_desktop=0
-build_web=0
+skip_web=0
 for arg in "$@"; do
     case "$arg" in
         --skip-desktop) skip_desktop=1 ;;
-        --web) build_web=1 ;;
+        --skip-web) skip_web=1 ;;
         -h|--help)
-            sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -41,13 +45,12 @@ done
 repo_root=$(cd "$(dirname "$0")" && pwd)
 cd "$repo_root"
 
-# ---------- optional: web bundle ----------
+# ---------- web bundle ----------
 #
 # Has to run BEFORE the CLI build because `//go:embed all:webui` in
-# embed.go bakes the bundle into the binary at compile time. Skip if
-# --web wasn't passed.
+# embed.go bakes the bundle into the binary at compile time.
 
-if [ "$build_web" -eq 1 ]; then
+if [ "$skip_web" -eq 0 ]; then
     echo "==> npm install (desktop frontend deps, for web build)"
     ( cd desktop/frontend && npm install --silent )
 
