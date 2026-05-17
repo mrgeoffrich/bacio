@@ -22,7 +22,6 @@ export {
     BoardCard,
     BoardColumn,
     BoardPreferencesDTO,
-    ClaimDTO,
     ClaimantDTO,
     CommentDTO,
     DispatchDTO,
@@ -37,6 +36,5 @@ export {
     IssueDetail,
     LeaderStatusDTO,
     PRDTO,
-    PromptTemplateDTO,
-    SessionTodoDTO
+    PromptTemplateDTO
 } from "./models.js";

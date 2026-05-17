@@ -16,6 +16,10 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as agentcards$0 from "../internal/agentcards/models.js";
+
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
 /**
@@ -72,6 +76,10 @@ export function GetIssue(repoPrefix: string, key: string): $CancellablePromise<$
  * repoPrefix is empty or "all"), each carrying its status, open claims,
  * and the dispatches aimed at it. SessionStart stubs that never
  * completed register are hidden — they're noise in the supervision UI.
+ * 
+ * The assembly logic lives in internal/agentcards (BACI-50) so the
+ * bacio api can serve the same payload to a browser. This wrapper just
+ * resolves the repo and delegates.
  */
 export function ListAgents(repoPrefix: string): $CancellablePromise<$models.AgentCard[]> {
     return $Call.ByID(3979848123, repoPrefix).then(($result: any) => {
@@ -135,8 +143,8 @@ export function UpdateIssueDescription(repoPrefix: string, key: string, descript
 // Private type creation functions
 const $$createType0 = $models.IssueDetail.createFrom;
 const $$createType1 = $models.Board.createFrom;
-const $$createType2 = $models.DispatchDTO.createFrom;
-const $$createType3 = $models.AgentCard.createFrom;
+const $$createType2 = agentcards$0.DispatchDTO.createFrom;
+const $$createType3 = agentcards$0.AgentCard.createFrom;
 const $$createType4 = $Create.Array($$createType3);
 const $$createType5 = $Create.Array($$createType1);
 const $$createType6 = $models.BoardCard.createFrom;
