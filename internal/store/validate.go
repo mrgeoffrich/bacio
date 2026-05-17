@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/mrgeoffrich/bacio/internal/model"
 )
 
 // Defensive validators that run at every mutation boundary so hallucinated
@@ -187,6 +189,58 @@ func ValidateDocFilenameStrict(name string) (string, error) {
 		}
 	}
 	return name, nil
+}
+
+// maxTodoContentBytes caps a single TodoWrite item's content. Generous
+// for a real todo line; tight enough that a malformed batch surfaces
+// before it lands in the agent_session_todos table.
+const maxTodoContentBytes = 1 << 10 // 1 KiB
+
+// ValidateSessionTodos checks an entire TodoWrite snapshot before it
+// reaches the store. Rejects the whole batch on the first failure —
+// partial mirrors are worse than no mirror, because the UI would
+// suggest "this is the agent's plan" when it's actually a clipped
+// subset. Position is assumed to be the input slice index; the caller
+// (the post-tool-use hook) sets it that way.
+//
+// Rules:
+//   - len(todos) <= MaxSessionTodos (the row cap)
+//   - content is non-empty after trim, <= maxTodoContentBytes, valid
+//     UTF-8, with the multi-line control-char gate (tab/newline/CR ok)
+//   - status is already a parsed model.TodoStatus (so this is a defensive
+//     check against a programming error — ParseTodoStatus is run first
+//     in the hook handler)
+//   - position is monotonically 0..N-1 (programming-error guard rail)
+func ValidateSessionTodos(todos []model.SessionTodo) error {
+	if len(todos) > model.MaxSessionTodos {
+		return fmt.Errorf("too many todos: %d, max %d", len(todos), model.MaxSessionTodos)
+	}
+	for i, t := range todos {
+		if t.Position != i {
+			return fmt.Errorf("todo at index %d has out-of-order position %d", i, t.Position)
+		}
+		if !utf8.ValidString(t.Content) {
+			return fmt.Errorf("todo at position %d: content is not valid UTF-8", t.Position)
+		}
+		if strings.TrimSpace(t.Content) == "" {
+			return fmt.Errorf("todo at position %d: content is required", t.Position)
+		}
+		if len(t.Content) > maxTodoContentBytes {
+			return fmt.Errorf("todo at position %d: content too long: %d bytes, max %d", t.Position, len(t.Content), maxTodoContentBytes)
+		}
+		for _, r := range t.Content {
+			if isDisallowedControlMulti(r) {
+				return fmt.Errorf("todo at position %d: content contains a disallowed control character (U+%04X)", t.Position, r)
+			}
+		}
+		switch t.Status {
+		case model.TodoPending, model.TodoInProgress, model.TodoCompleted:
+			// ok
+		default:
+			return fmt.Errorf("todo at position %d: unknown status %q", t.Position, t.Status)
+		}
+	}
+	return nil
 }
 
 func validateSingleLine(s, field string, maxLen int, required bool) (string, error) {

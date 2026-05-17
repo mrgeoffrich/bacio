@@ -37,5 +37,6 @@ export {
     IssueDetail,
     LeaderStatusDTO,
     PRDTO,
-    PromptTemplateDTO
+    PromptTemplateDTO,
+    SessionTodoDTO
 } from "./models.js";

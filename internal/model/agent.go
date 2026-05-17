@@ -90,6 +90,56 @@ func (ch *AgentChannel) ChannelLive(now time.Time) bool {
 	return ch != nil && now.Sub(ch.LastSeenAt) <= AgentLivenessThreshold
 }
 
+// TodoStatus is the lifecycle marker on each TodoWrite item — the
+// agent's plan-list status vocabulary. Matches the Claude Code
+// PostToolUse payload verbatim.
+type TodoStatus string
+
+const (
+	TodoPending    TodoStatus = "pending"
+	TodoInProgress TodoStatus = "in_progress"
+	TodoCompleted  TodoStatus = "completed"
+)
+
+var allTodoStatuses = []TodoStatus{TodoPending, TodoInProgress, TodoCompleted}
+
+// ParseTodoStatus accepts the canonical lowercase form. Anything else
+// fails — the hook handler drops the whole batch on an unknown status
+// rather than mirror a partial list (a misleading mirror is worse than
+// none). New statuses surface here as a deliberate update.
+func ParseTodoStatus(s string) (TodoStatus, error) {
+	s = strings.TrimSpace(s)
+	for _, st := range allTodoStatuses {
+		if string(st) == s {
+			return st, nil
+		}
+	}
+	names := make([]string, len(allTodoStatuses))
+	for i, st := range allTodoStatuses {
+		names[i] = string(st)
+	}
+	return "", fmt.Errorf("unknown todo status %q (valid: %s)", s, strings.Join(names, ", "))
+}
+
+// SessionTodo is one row from the agent's current TodoWrite list,
+// mirrored into bacio by the post-tool-use hook. Read-only mirror —
+// bacio does not edit the agent's plan. Position is 0-indexed and
+// matches the array order the agent wrote.
+type SessionTodo struct {
+	Position  int        `json:"position"`
+	Content   string     `json:"content"`
+	Status    TodoStatus `json:"status"`
+	UpdatedAt time.Time  `json:"updated_at"`
+}
+
+// MaxSessionTodos caps how many todo rows a single agent session may
+// mirror. Generous for any realistic plan; tight enough that a runaway
+// agent writing nonsense gets rejected wholesale at the store boundary
+// rather than silently truncated (a partial mirror is worse than no
+// mirror — the UI suggests "this is the agent's plan" when actually
+// it's a clipped subset).
+const MaxSessionTodos = 200
+
 // AgentClaim is a "this agent is focused on this issue" intent
 // record. Distinct from issues.assignee (which is ownership) — multiple
 // agents can claim the same issue concurrently (pairing/review).

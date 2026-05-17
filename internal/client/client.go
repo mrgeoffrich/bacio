@@ -180,6 +180,19 @@ type Client interface {
 	// or across all repos when repo is nil. Local-only; remote returns
 	// ErrLocalOnly. Used by the desktop Board to derive each card's `taken`.
 	ListOpenClaims(ctx context.Context, repo *model.Repo) ([]*model.AgentClaim, error)
+	// ReplaceSessionTodos swaps a session's TodoWrite snapshot (the
+	// PostToolUse hook's mirror path). Local-only — the agent registry
+	// has no HTTP write surface in v1.
+	ReplaceSessionTodos(ctx context.Context, sessionID string, todos []model.SessionTodo) error
+	// ListSessionTodos returns the latest snapshot for one session,
+	// position-ordered. Empty slice for an unknown / empty session.
+	// Local-only.
+	ListSessionTodos(ctx context.Context, sessionID string) ([]model.SessionTodo, error)
+	// ListTodosBySessions returns a session_pk → []SessionTodo map for
+	// the given session ids in one query — used by the desktop and TUI
+	// agent views to hydrate todos for every live session in one trip,
+	// like ListOpenClaims does for claims. Local-only.
+	ListTodosBySessions(ctx context.Context, sessionIDs []string) (map[int64][]model.SessionTodo, error)
 	// EnsureAgentIdentity mints a fresh persistent agent identity (a
 	// random slug, retried against the UNIQUE constraint until it
 	// sticks) and adopts it as this client's audit actor. It's the

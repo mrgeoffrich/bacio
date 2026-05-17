@@ -98,6 +98,9 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("POST /agents/sessions/{session_id}/claims", d.handleAgentClaim)
 	mux.HandleFunc("DELETE /agents/sessions/{session_id}/claims", d.handleAgentRelease)
 	mux.HandleFunc("GET /agents/sessions/{session_id}/inbox", d.handleAgentInbox)
+	// BACI-45: read the session's TodoWrite mirror. Writes happen via the
+	// post-tool-use hook only — no POST surface here.
+	mux.HandleFunc("GET /agents/sessions/{session_id}/todos", d.handleAgentSessionTodos)
 	mux.HandleFunc("POST /agents/dispatches/{id}/ack", d.handleAgentDispatchAck)
 	mux.HandleFunc("POST /agents/dispatches/{id}/cancel", d.handleAgentDispatchCancel)
 	mux.HandleFunc("GET /agents/claims/open", d.handleAgentClaimsOpen)

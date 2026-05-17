@@ -26,10 +26,11 @@ type agentsView struct {
 	repo  *model.Repo
 
 	sessions    []*model.AgentSession
-	claims      map[int64][]*model.AgentClaim // session PK -> open claims
-	dispatches  []*model.AgentDispatch        // every dispatch in the repo
-	pending     map[int64]int                 // session PK -> open dispatch count
-	needsAction map[string]bool               // issue key set in state needs_action
+	claims      map[int64][]*model.AgentClaim   // session PK -> open claims
+	dispatches  []*model.AgentDispatch          // every dispatch in the repo
+	pending     map[int64]int                   // session PK -> open dispatch count
+	needsAction map[string]bool                 // issue key set in state needs_action
+	todos       map[int64][]model.SessionTodo   // session PK -> latest TodoWrite snapshot
 
 	cursor    int  // selected card
 	scroll    int  // index of the first visible card
@@ -82,6 +83,18 @@ func (a *agentsView) reload() {
 	a.needsAction = make(map[string]bool, len(needs))
 	for _, iss := range needs {
 		a.needsAction[iss.Key] = true
+	}
+	// Bulk-read each live session's TodoWrite mirror in one query —
+	// same one-trip pattern the claims map uses, so the card row +
+	// detail pane can render the n/m progress without N+1 lookups.
+	sessionIDs := make([]string, 0, len(sessions))
+	for _, s := range sessions {
+		sessionIDs = append(sessionIDs, s.SessionID)
+	}
+	a.todos, err = a.store.ListTodosBySessions(sessionIDs)
+	if err != nil {
+		a.err = err
+		return
 	}
 	// Count open (pending/delivered) dispatches per session — matched by
 	// the bare session id or the agent identity behind it, mirroring the
@@ -295,9 +308,17 @@ func (a *agentsView) renderCard(s *model.AgentSession, selected bool, width int,
 		fmt.Sprintf("model %s · branch %s", dashIfEmpty(s.Model), dashIfEmpty(s.Branch)), innerW))
 	row3 := mutedStyle.Render(truncate(
 		fmt.Sprintf("last seen %s ago · actor %s", relAgo(now.Sub(s.LastSeenAt.UTC())), s.Actor), innerW))
-	row4 := mutedStyle.Render(truncate(
-		fmt.Sprintf("%d open claim(s) · %d pending dispatch(es)",
-			len(a.claims[s.ID]), a.pending[s.ID]), innerW))
+	// row4 widens to carry the todos progress badge inline alongside
+	// the claims + dispatches counts. The whole row is truncated to
+	// innerW, so a narrow window drops the rightmost field cleanly
+	// without breaking the fixed 4-row card budget.
+	done, total := todoProgress(a.todos[s.ID])
+	row4Text := fmt.Sprintf("%d open claim(s) · %d pending dispatch(es)",
+		len(a.claims[s.ID]), a.pending[s.ID])
+	if total > 0 {
+		row4Text += fmt.Sprintf(" · todos %d/%d", done, total)
+	}
+	row4 := mutedStyle.Render(truncate(row4Text, innerW))
 
 	inner := strings.Join([]string{row1, row2, row3, row4}, "\n")
 
@@ -359,6 +380,23 @@ func (a *agentsView) viewDetail(width, height int) string {
 		lines = append(lines, truncate(line, innerW))
 	}
 
+	// Todos section sits between claims and dispatches — same vocabulary
+	// (Bold header + indent + glyph), reuses scrollLines for overflow.
+	todos := a.todos[s.ID]
+	tdDone, tdTotal := todoProgress(todos)
+	lines = append(lines, "", boldStyle.Render(fmt.Sprintf("Todos (%d/%d)", tdDone, tdTotal)))
+	if len(todos) == 0 {
+		lines = append(lines, mutedStyle.Render("  (none)"))
+	}
+	for _, td := range todos {
+		glyph, style := todoGlyphAndStyle(td.Status)
+		line := truncate("  "+glyph+" "+td.Content, innerW)
+		if style != nil {
+			line = style.Render(line)
+		}
+		lines = append(lines, line)
+	}
+
 	var ds []*model.AgentDispatch
 	for _, d := range a.dispatches {
 		if dispatchTargetsSession(d, s) {
@@ -391,6 +429,38 @@ func (a *agentsView) viewDetail(width, height int) string {
 		Border(colBorder).BorderForeground(colFocusBorder).
 		Width(width-2).Height(height-2).Padding(1, 2).
 		Render(body)
+}
+
+// todoProgress counts the completed-vs-total todos for the n/m
+// progress badge. Empty/nil snapshot returns (0, 0) — the caller hides
+// the badge in that case.
+func todoProgress(todos []model.SessionTodo) (done, total int) {
+	for _, t := range todos {
+		if t.Status == model.TodoCompleted {
+			done++
+		}
+	}
+	return done, len(todos)
+}
+
+// todoActiveStyle emphasises the in-progress row in the per-agent
+// drill-down — bold, same colour as the rest of the body. Completed
+// rows render muted (re-uses mutedStyle). Pending rows use the
+// default body style.
+var todoActiveStyle = lipgloss.NewStyle().Bold(true)
+
+// todoGlyphAndStyle returns the per-status glyph and (optionally) a
+// lipgloss style to apply to the whole row. nil style = render with
+// the surrounding body style.
+func todoGlyphAndStyle(st model.TodoStatus) (string, *lipgloss.Style) {
+	switch st {
+	case model.TodoCompleted:
+		return "●", &mutedStyle
+	case model.TodoInProgress:
+		return "◐", &todoActiveStyle
+	default:
+		return "○", nil
+	}
 }
 
 // agentBusyBadge styles the "busy · ISSUE-KEY" badge shown on agent

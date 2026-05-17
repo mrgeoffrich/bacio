@@ -104,6 +104,11 @@ export interface DispatchDTO {
   createdAt: string;
 }
 
+export interface SessionTodoDTO {
+  content: string;
+  status: string;
+}
+
 export interface AgentCard {
   sessionId: string;
   agentName: string;
@@ -122,6 +127,9 @@ export interface AgentCard {
   lastSeenAt: string;
   claims: ClaimDTO[];
   dispatches: DispatchDTO[];
+  todos: SessionTodoDTO[];
+  todosDone: number;
+  todosTotal: number;
 }
 
 export interface DocSummary {
