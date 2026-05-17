@@ -1,5 +1,7 @@
-import React, { useState, useRef, useEffect, memo } from 'react';
+import React, { memo } from 'react';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import Icon from './Icon.jsx';
+import Tooltip from './Tooltip.jsx';
 
 function KanbanCard({ card, promptConfig, isDragging, onDragStart, onDragEnd, onOpen, onDispatch, onCancelWaiting }) {
   // The prompts valid to dispatch from this card's current state — the
@@ -7,31 +9,6 @@ function KanbanCard({ card, promptConfig, isDragging, onDragStart, onDragEnd, on
   const validPrompts = (promptConfig || []).filter(
     p => (p.allowedStates || []).includes(card.column),
   );
-
-  const [menuOpen, setMenuOpen] = useState(false);
-  const actionRef = useRef(null);
-
-  // Close the prompt menu on an outside click or Escape — the menu is a
-  // self-contained popover, so the card owns its own dismissal.
-  useEffect(() => {
-    if (!menuOpen) return undefined;
-    const onDown = (e) => {
-      if (actionRef.current && !actionRef.current.contains(e.target)) setMenuOpen(false);
-    };
-    const onKey = (e) => { if (e.key === 'Escape') setMenuOpen(false); };
-    document.addEventListener('mousedown', onDown);
-    document.addEventListener('keydown', onKey);
-    return () => {
-      document.removeEventListener('mousedown', onDown);
-      document.removeEventListener('keydown', onKey);
-    };
-  }, [menuOpen]);
-
-  const pick = (e, mode) => {
-    e.stopPropagation();
-    setMenuOpen(false);
-    onDispatch(card.key, mode);
-  };
 
   // A taken card is held by an agent — block the human from dragging it
   // or dispatching from it until the claim is released. Opening the
@@ -66,56 +43,57 @@ function KanbanCard({ card, promptConfig, isDragging, onDragStart, onDragEnd, on
       {hasFooter && (
         <footer className="mk-card-foot">
           {card.assignees.length > 0 && (
-            <span
-              className={`mk-card-assignee ${card.claude ? 'is-claude' : ''}`}
-              title={card.assignees.join(', ')}
-            >
-              {card.assignees.join(', ')}
-            </span>
+            <Tooltip label={card.assignees.join(', ')}>
+              <span className={`mk-card-assignee ${card.claude ? 'is-claude' : ''}`}>
+                {card.assignees.join(', ')}
+              </span>
+            </Tooltip>
           )}
           {waiting ? (
-            <button
-              type="button"
-              className="mk-card-spinner mk-card-spinner-btn"
-              aria-label="Cancel queued dispatch"
-              title="Cancel queued dispatch"
-              onClick={(e) => {
-                e.stopPropagation();
-                if (onCancelWaiting) onCancelWaiting(card.key);
-              }}
-            />
-          ) : validPrompts.length > 0 && (
-            <div className="mk-card-action" ref={actionRef}>
+            <Tooltip label="Cancel queued dispatch">
               <button
-                className="mk-card-action-btn"
-                aria-label={taken ? 'An agent is working on this issue' : 'Dispatch a prompt'}
-                aria-haspopup="menu"
-                aria-expanded={menuOpen}
-                disabled={dispatchDisabled}
-                title={taken ? 'An agent is working on this issue' : undefined}
+                type="button"
+                className="mk-card-spinner mk-card-spinner-btn"
+                aria-label="Cancel queued dispatch"
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (dispatchDisabled) return;
-                  setMenuOpen(o => !o);
+                  if (onCancelWaiting) onCancelWaiting(card.key);
                 }}
-              >
-                <Icon name="zap" />
-              </button>
-              {menuOpen && !dispatchDisabled && (
-                <div className="mk-card-action-menu" role="menu">
+              />
+            </Tooltip>
+          ) : validPrompts.length > 0 && (
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger asChild>
+                <button
+                  className="mk-card-action-btn"
+                  aria-label={taken ? 'An agent is working on this issue' : 'Dispatch a prompt'}
+                  disabled={dispatchDisabled}
+                  title={taken ? 'An agent is working on this issue' : undefined}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Icon name="zap" />
+                </button>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content
+                  className="mk-card-action-menu"
+                  align="end"
+                  side="top"
+                  sideOffset={4}
+                  collisionPadding={8}
+                >
                   {validPrompts.map(p => (
-                    <button
+                    <DropdownMenu.Item
                       key={p.mode}
                       className="mk-card-action-item"
-                      role="menuitem"
-                      onClick={(e) => pick(e, p.mode)}
+                      onSelect={() => onDispatch(card.key, p.mode)}
                     >
                       {p.label}
-                    </button>
+                    </DropdownMenu.Item>
                   ))}
-                </div>
-              )}
-            </div>
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
           )}
         </footer>
       )}

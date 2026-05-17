@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import * as Dialog from '@radix-ui/react-dialog';
 import Icon from './Icon.jsx';
 import { reportError } from '../errors';
 import * as api from '../api';
@@ -45,67 +46,71 @@ export default function IssueEditModal({ issue, repoPrefix, onClose, onSaved }) 
   };
 
   return (
-    <>
-      <div className="mk-scrim" onClick={onClose} />
-      <div className="mk-edit-modal" role="dialog" aria-label={`Edit ${issue.key}`}>
-        <header className="mk-edit-modal-head">
-          <h2 className="mk-edit-modal-title">Edit {issue.key}</h2>
-          <button className="mk-icbtn" aria-label="Close" onClick={onClose}>
-            <Icon name="x" />
-          </button>
-        </header>
-
-        <div className="mk-edit-modal-body">
-          <section className="mk-edit-section">
-            <div className="mk-drawer-label">Description</div>
-            <textarea
-              className="mk-edit-textarea"
-              rows={8}
-              value={desc}
-              disabled={busy === 'desc'}
-              onChange={(e) => setDesc(e.target.value)}
-            />
-            <div className="mk-edit-actions">
-              <button
-                className="mk-btn-primary"
-                disabled={!descDirty || busy !== null}
-                onClick={saveDescription}
-              >
-                {busy === 'desc' ? 'Saving…' : 'Save description'}
+    <Dialog.Root open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="mk-scrim" />
+        <Dialog.Content className="mk-edit-modal" aria-describedby={undefined}>
+          <header className="mk-edit-modal-head">
+            <Dialog.Title className="mk-edit-modal-title">Edit {issue.key}</Dialog.Title>
+            <Dialog.Close asChild>
+              <button className="mk-icbtn" aria-label="Close">
+                <Icon name="x" />
               </button>
-            </div>
-          </section>
+            </Dialog.Close>
+          </header>
 
-          <section className="mk-edit-section">
-            <div className="mk-drawer-label">Add comment</div>
-            <input
-              className="mk-edit-input"
-              type="text"
-              placeholder="Author (defaults to your OS username)"
-              value={commentAuthor}
-              disabled={busy === 'comment'}
-              onChange={(e) => setCommentAuthor(e.target.value)}
-            />
-            <textarea
-              className="mk-edit-textarea"
-              rows={4}
-              placeholder="Write a comment…"
-              value={commentBody}
-              disabled={busy === 'comment'}
-              onChange={(e) => setCommentBody(e.target.value)}
-            />
-            <div className="mk-edit-actions">
-              <button
-                className="mk-btn-primary"
-                disabled={!commentBody.trim() || busy !== null}
-                onClick={addComment}
-              >
-                {busy === 'comment' ? 'Adding…' : 'Add comment'}
-              </button>
-            </div>
-          </section>
-        </div>
-      </div>
-    </>
+          <div className="mk-edit-modal-body">
+            <section className="mk-edit-section">
+              <div className="mk-drawer-label">Description</div>
+              <textarea
+                className="mk-edit-textarea"
+                rows={8}
+                value={desc}
+                disabled={busy === 'desc'}
+                onChange={(e) => setDesc(e.target.value)}
+              />
+              <div className="mk-edit-actions">
+                <button
+                  className="mk-btn-primary"
+                  disabled={!descDirty || busy !== null}
+                  onClick={saveDescription}
+                >
+                  {busy === 'desc' ? 'Saving…' : 'Save description'}
+                </button>
+              </div>
+            </section>
+
+            <section className="mk-edit-section">
+              <div className="mk-drawer-label">Add comment</div>
+              <input
+                className="mk-edit-input"
+                type="text"
+                placeholder="Author (defaults to your OS username)"
+                value={commentAuthor}
+                disabled={busy === 'comment'}
+                onChange={(e) => setCommentAuthor(e.target.value)}
+              />
+              <textarea
+                className="mk-edit-textarea"
+                rows={4}
+                placeholder="Write a comment…"
+                value={commentBody}
+                disabled={busy === 'comment'}
+                onChange={(e) => setCommentBody(e.target.value)}
+              />
+              <div className="mk-edit-actions">
+                <button
+                  className="mk-btn-primary"
+                  disabled={!commentBody.trim() || busy !== null}
+                  onClick={addComment}
+                >
+                  {busy === 'comment' ? 'Adding…' : 'Add comment'}
+                </button>
+              </div>
+            </section>
+          </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }

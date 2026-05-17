@@ -211,6 +211,7 @@ body { margin: 0; }
 .mk-card-action { position: relative; margin-left: auto; }
 .mk-card-action-btn {
   display: inline-flex; align-items: center; justify-content: center;
+  margin-left: auto;
   width: 24px; height: 24px; padding: 0;
   border: 1px solid var(--border-1); border-radius: var(--radius-md);
   background: var(--paper); color: var(--fg-3); cursor: pointer;
@@ -232,8 +233,11 @@ body { margin: 0; }
   background: var(--paper);
 }
 .mk-card-action-btn .mk-icon { width: 13px; height: 13px; }
+/* Layout (position/right/bottom) is owned by Radix DropdownMenu.Content
+   via portal + Floating UI; only visuals here. z-index keeps the menu
+   above the issue drawer's scrim. */
 .mk-card-action-menu {
-  position: absolute; right: 0; bottom: calc(100% + 4px); z-index: 20;
+  z-index: 100;
   min-width: 132px; padding: 4px;
   display: flex; flex-direction: column; gap: 2px;
   background: var(--bg-2); border: 1px solid var(--border-1);
@@ -246,6 +250,19 @@ body { margin: 0; }
   background: transparent; color: var(--fg-1);
 }
 .mk-card-action-item:hover { background: var(--bg-4); }
+
+/* ---------- Tooltip (Radix portal) ---------- */
+.mk-tooltip {
+  background: var(--bg-1); color: var(--fg-1);
+  font-family: var(--font-sans); font-size: 12px; line-height: 1.4;
+  padding: 4px 8px; max-width: 240px;
+  border: 1px solid var(--border-1); border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-2);
+  z-index: 100;
+  user-select: none;
+  animation: mk-pop var(--dur-fast) var(--ease-out);
+}
+.mk-tooltip-arrow { fill: var(--bg-1); }
 .mk-meta-row { display: inline-flex; align-items: center; gap: 4px; }
 .mk-meta-row .mk-icon { width: 12px; height: 12px; }
 .mk-card-note { font-size: 11px; color: var(--status-blocked); margin-left: 4px; }

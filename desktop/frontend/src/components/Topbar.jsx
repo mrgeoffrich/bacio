@@ -1,6 +1,7 @@
 import React from 'react';
 import Icon from './Icon.jsx';
 import RepoPicker from './RepoPicker.jsx';
+import Tooltip from './Tooltip.jsx';
 
 // NAV is the ordered top-nav. Exported so App can map the digit
 // hotkeys onto the same views in the same order. As of BACI-50 the
@@ -46,7 +47,9 @@ export default function Topbar({ boards, activeBoard, onPickBoard, onAddReposito
       <div className="mk-topbar-right">
         {syncEnabled && <span className="mk-pill mk-sync-badge">Sync Enabled</span>}
         {isLeader && (
-          <span className="mk-pill mk-leader-badge" title="This window holds the UI leader lease">Controlling</span>
+          <Tooltip label="This window holds the UI leader lease">
+            <span className="mk-pill mk-leader-badge">Controlling</span>
+          </Tooltip>
         )}
         <RepoPicker
           boards={boards}
