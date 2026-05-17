@@ -24,7 +24,7 @@ export default function Topbar({ boards, activeBoard, onPickBoard, onAddReposito
   return (
     <header className="mk-topbar">
       <div className="mk-brand">
-        <img src="/bacio-mark.png" width="22" height="22" alt="" />
+        <img src={`${import.meta.env.BASE_URL}bacio-mark.png`} width="22" height="22" alt="" />
         <span className="mk-brand-name">bacio</span>
       </div>
 
