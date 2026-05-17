@@ -61,7 +61,15 @@ bacio tracks live agent sessions in a local SQLite registry (never synced) so yo
 
 ### Pick your identity — automatic
 
-**With bacio's hooks installed** (`bacio install-hooks` — they usually are), you do nothing. The `SessionStart` hook resolves the `claude` process you're running under, mints a fresh identity if that process has none yet, records it in `.bacio/agents.json` (gitignoring `.bacio/` for you), and registers your session — all before your first turn. Every later `bacio` call self-identifies from that file, so you don't need `--user` either.
+**Set `BACIO_AGENT_MODE=1` in the launching shell.** bacio's hooks + channel poller are inert unless this env var is set, so even with hooks installed an interactive Claude session in the project is *not* auto-registered as an agent unless the user explicitly opted in. The recommended launch incantation is:
+
+```bash
+BACIO_AGENT_MODE=1 claude
+```
+
+`bacio status` reports the current value (`Agent: BACIO_AGENT_MODE=1 (active)` vs `unset (hooks + channel inert)`) — check it first when "why isn't dispatch reaching me?" is the question.
+
+**With bacio's hooks installed** (`bacio install-hooks` — they usually are) **and `BACIO_AGENT_MODE=1`**, you do nothing. The `SessionStart` hook resolves the `claude` process you're running under, mints a fresh identity if that process has none yet, records it in `.bacio/agents.json` (gitignoring `.bacio/` for you), and registers your session — all before your first turn. Every later `bacio` call self-identifies from that file, so you don't need `--user` either.
 
 **Only if hooks are NOT installed**, register by hand at session start, before any other bacio call: generate a slug of the form `<adjective>-<animal>@<harness>.<hostname>` (e.g. `cheerful-otter@claude.shiny`) and
 
@@ -790,6 +798,17 @@ body) or `rm` it.
 | Stop                               | heartbeats; flips claimed `in_progress` issues to `needs_action` (the precise "agent parked" signal) |
 | SessionEnd                         | ends the session, auto-releasing every open claim                    |
 | PostToolUse (matcher: `TodoWrite`) | mirrors the agent's TodoWrite list into `agent_session_todos`; surfaced as an `n/m` badge + drill-down list in the TUI/desktop Agents view (BACI-45) |
+
+**All five entries are inert unless `BACIO_AGENT_MODE=1`** is set in the
+environment of the Claude session that loads them. Launch with
+`BACIO_AGENT_MODE=1 claude` for the supervision; launch without for
+normal interactive collaboration where bacio CLI calls attribute to your
+OS user. The `bacio channel` MCP server obeys the same gate — its MCP
+handshake and `register` / `reply` tools stay reachable so an agent
+explicitly opting in mid-session can still call `register`, but the
+setup-dispatch poller (the bit that queues "call register" nudges) is
+parked when the env var is unset. `bacio status` reports the current
+value.
 
 With hooks installed, an agent no longer has to call `bacio agent register`
 / `heartbeat` / `end` by hand — the registry stays in sync automatically,

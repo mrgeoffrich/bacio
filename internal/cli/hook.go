@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/mrgeoffrich/bacio/internal/agentmode"
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/git"
@@ -18,6 +19,21 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/store"
 	"github.com/mrgeoffrich/bacio/internal/sync"
 )
+
+// skipUnlessAgentMode is the single guard every hook subcommand calls at
+// the top of its RunE. When BACIO_AGENT_MODE is not set, the hook logs a
+// one-line skip notice to stderr and returns true so the caller can
+// `return nil` immediately — the "must NEVER fail the agent's session"
+// invariant trumps every other concern, so this never returns an error.
+// The name is included verbatim so a user tailing Claude Code's hook
+// log can tell which subcommand bailed.
+func skipUnlessAgentMode(subcommand string) bool {
+	if agentmode.Enabled() {
+		return false
+	}
+	fmt.Fprintf(os.Stderr, "bacio hook %s: %s not set — skipping\n", subcommand, agentmode.EnvVar)
+	return true
+}
 
 // newHookCmd builds the hidden `bacio hook` command group — the Claude
 // Code hook integration shim. Each subcommand reads a hook-event JSON
@@ -186,6 +202,9 @@ func hookSessionStartCmd() *cobra.Command {
 		Args:   cobra.NoArgs,
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if skipUnlessAgentMode("session-start") {
+				return nil
+			}
 			h, err := loadHookContext()
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "bacio hook session-start:", err)
@@ -264,6 +283,9 @@ func hookUserPromptSubmitCmd() *cobra.Command {
 		Args:   cobra.NoArgs,
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if skipUnlessAgentMode("user-prompt-submit") {
+				return nil
+			}
 			h, err := loadHookContext()
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "bacio hook user-prompt-submit:", err)
@@ -387,6 +409,9 @@ func hookStopCmd() *cobra.Command {
 		Args:   cobra.NoArgs,
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if skipUnlessAgentMode("stop") {
+				return nil
+			}
 			h, err := loadHookContext()
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "bacio hook stop:", err)
@@ -447,6 +472,9 @@ func hookPostToolUseCmd() *cobra.Command {
 		Args:   cobra.NoArgs,
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if skipUnlessAgentMode("post-tool-use") {
+				return nil
+			}
 			in, err := readPostToolUseInput()
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "bacio hook post-tool-use:", err)
@@ -512,6 +540,9 @@ func hookSessionEndCmd() *cobra.Command {
 		Args:   cobra.NoArgs,
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if skipUnlessAgentMode("session-end") {
+				return nil
+			}
 			h, err := loadHookContext()
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "bacio hook session-end:", err)

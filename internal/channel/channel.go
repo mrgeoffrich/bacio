@@ -125,22 +125,47 @@ func New(src Source, name, version string, in io.Reader, out io.Writer, logf fun
 	}
 }
 
-// Run drives the server until stdin closes or ctx is cancelled. The
-// poller goroutine drains the Source on a ticker; the read loop handles
-// inbound JSON-RPC. Both share the write mutex.
+// Run drives the server with the setup-dispatch poller running until
+// stdin closes or ctx is cancelled. The poller goroutine drains the
+// Source on a ticker; the read loop handles inbound JSON-RPC. Both share
+// the write mutex.
 //
 // Run does not return until the poller goroutine has fully stopped — so
 // a caller that closes Source-backing resources (a DB handle, say) in a
 // defer after Run can't race a poll still in flight.
 func (s *Server) Run(ctx context.Context) error {
+	return s.serve(ctx, true)
+}
+
+// ServeMCP runs the JSON-RPC read loop without starting the
+// setup-dispatch poller. The MCP handshake and the tool handlers
+// (register, reply) stay reachable, so an agent that explicitly wants
+// to opt in to bacio agent supervision mid-session can still call
+// `register` directly — but the channel will not push queued
+// dispatches and the source's EnsureSetup / Drain / Heartbeat hooks
+// are never invoked. Use this when the host process has decided the
+// channel should be inert (e.g. the BACIO_AGENT_MODE env var gate in
+// the CLI).
+func (s *Server) ServeMCP(ctx context.Context) error {
+	return s.serve(ctx, false)
+}
+
+// serve is the shared poller-optional core. When withPoller is false
+// the poller goroutine isn't started and pollDone is closed up front,
+// so the read loop's exit still returns immediately.
+func (s *Server) serve(ctx context.Context, withPoller bool) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	pollDone := make(chan struct{})
-	go func() {
-		defer close(pollDone)
-		s.poll(ctx)
-	}()
+	if withPoller {
+		go func() {
+			defer close(pollDone)
+			s.poll(ctx)
+		}()
+	} else {
+		close(pollDone)
+	}
 
 	readErr := make(chan error, 1)
 	go func() { readErr <- s.readLoop(ctx) }()

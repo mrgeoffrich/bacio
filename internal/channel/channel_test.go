@@ -313,3 +313,42 @@ func TestChannelTickCallsEnsureSetup(t *testing.T) {
 		t.Fatalf("heartbeat calls = %d, want 2", src.heartbeats)
 	}
 }
+
+// TestServeMCPLeavesPollerParked locks in the BACI-48 contract on the
+// channel side: ServeMCP completes the MCP handshake and answers
+// tools/list + tools/call(register), but does NOT start the setup-
+// dispatch poller — so the source's EnsureSetup / Drain / Heartbeat
+// hooks are never invoked. The agent can still opt in mid-session by
+// calling register directly, which goes through the read loop.
+func TestServeMCPLeavesPollerParked(t *testing.T) {
+	src := &fakeSource{}
+	requests := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`,
+		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"register","arguments":{"session_id":"sess-opt-in"}}}`,
+	}, "\n") + "\n"
+
+	var out bytes.Buffer
+	srv := New(src, "bacio", "test", strings.NewReader(requests), &out, nil)
+	if err := srv.ServeMCP(context.Background()); err != nil {
+		t.Fatalf("ServeMCP: %v", err)
+	}
+
+	src.mu.Lock()
+	defer src.mu.Unlock()
+	if src.setupCalls != 0 {
+		t.Fatalf("EnsureSetup called %d times — poller must stay parked", src.setupCalls)
+	}
+	if src.heartbeats != 0 {
+		t.Fatalf("Heartbeat called %d times — poller must stay parked", src.heartbeats)
+	}
+	// Read-loop side-effects: tools/list + register both reached.
+	if len(src.registered) != 1 || src.registered[0].sessionID != "sess-opt-in" {
+		t.Fatalf("Register reach = %+v, want [{sess-opt-in}]", src.registered)
+	}
+	frames := decodeFrames(t, out.String())
+	if len(frames) < 3 {
+		t.Fatalf("expected at least 3 frames (initialize, tools/list, register), got %d: %v", len(frames), frames)
+	}
+}

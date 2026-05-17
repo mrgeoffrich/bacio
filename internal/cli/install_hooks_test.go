@@ -109,3 +109,22 @@ func readJSON(t *testing.T, path string, out any) error {
 	}
 	return json.Unmarshal(data, out)
 }
+
+// TestInstallHooksActivationBannerIncludesEnvVar pins the BACI-48
+// contract: the post-install activation banner mentions BACIO_AGENT_MODE
+// and the recommended launch command, so a user who just ran
+// install-hooks sees exactly what to do next.
+func TestInstallHooksActivationBannerIncludesEnvVar(t *testing.T) {
+	var buf strings.Builder
+	printActivationBanner(&buf)
+	got := buf.String()
+	for _, want := range []string{
+		"BACIO_AGENT_MODE",
+		"BACIO_AGENT_MODE=1 claude",
+		"inert",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("activation banner missing %q; got:\n%s", want, got)
+		}
+	}
+}

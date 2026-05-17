@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/mrgeoffrich/bacio/internal/agentmode"
 	"github.com/mrgeoffrich/bacio/internal/git"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
@@ -19,12 +20,13 @@ import (
 // registered without ever writing a row. Branches: registered repo,
 // unregistered git tree, or no git tree.
 type statusReport struct {
-	DBPath     string      `json:"db_path"`
-	InRepo     bool        `json:"in_repo"`
-	Registered bool        `json:"registered"`
-	Path       string      `json:"path,omitempty"`
-	Repo       *model.Repo `json:"repo,omitempty"`
-	Stats      statusStats `json:"stats"`
+	DBPath     string           `json:"db_path"`
+	InRepo     bool             `json:"in_repo"`
+	Registered bool             `json:"registered"`
+	Path       string           `json:"path,omitempty"`
+	Repo       *model.Repo      `json:"repo,omitempty"`
+	Stats      statusStats      `json:"stats"`
+	AgentMode  statusAgentMode  `json:"agent_mode"`
 
 	// LLMRecommendations carries plain-English, actionable advice for
 	// an agent reading `bacio status -o json`: setup problems bacio
@@ -32,6 +34,17 @@ type statusReport struct {
 	// there's nothing to flag. Strictly advisory — `status` never acts
 	// on them itself and stays read-only.
 	LLMRecommendations []string `json:"llm_recommendations,omitempty"`
+}
+
+// statusAgentMode reports the BACIO_AGENT_MODE env-var state: the raw
+// value (so a misset like "TRUE" or "yes" is visible) and the parsed
+// active flag. The hooks + channel poller activate only when Active is
+// true. Surfaced on `bacio status` so an agent debugging "why isn't a
+// dispatch reaching me?" can see the gate without grepping env.
+type statusAgentMode struct {
+	EnvVar string `json:"env_var"`
+	Value  string `json:"value"`
+	Active bool   `json:"active"`
 }
 
 type statusStats struct {
@@ -85,7 +98,14 @@ func newStatusCmd() *cobra.Command {
 // store. Kept as a package-level helper so tests can drive it directly
 // after chdir-ing into a temp git tree.
 func buildStatusReport(s *store.Store, dbPath, cwd string) (*statusReport, error) {
-	report := &statusReport{DBPath: dbPath}
+	report := &statusReport{
+		DBPath: dbPath,
+		AgentMode: statusAgentMode{
+			EnvVar: agentmode.EnvVar,
+			Value:  os.Getenv(agentmode.EnvVar),
+			Active: agentmode.Enabled(),
+		},
+	}
 	info, gitErr := git.Detect(cwd)
 	switch {
 	case gitErr == nil:
@@ -176,7 +196,8 @@ func printStatus(w io.Writer, r *statusReport) error {
 		if r.Repo.RemoteURL != "" {
 			fmt.Fprintf(w, "Remote:  %s\n", r.Repo.RemoteURL)
 		}
-		fmt.Fprintf(w, "DB:      %s\n\n", r.DBPath)
+		fmt.Fprintf(w, "DB:      %s\n", r.DBPath)
+		fmt.Fprintf(w, "%s\n\n", formatAgentMode(r.AgentMode))
 
 		fmt.Fprintf(w, "Features: %d\n", r.Stats.Features)
 		fmt.Fprintf(w, "Issues:   %d\n", r.Stats.Issues)
@@ -191,9 +212,11 @@ func printStatus(w io.Writer, r *statusReport) error {
 		fmt.Fprintf(w, "Path:    %s\n", r.Path)
 		fmt.Fprintf(w, "Repo:    (unregistered — run `bacio init` to bind a prefix)\n")
 		fmt.Fprintf(w, "DB:      %s\n", r.DBPath)
+		fmt.Fprintf(w, "%s\n", formatAgentMode(r.AgentMode))
 
 	default:
 		fmt.Fprintf(w, "DB:      %s\n", r.DBPath)
+		fmt.Fprintf(w, "%s\n", formatAgentMode(r.AgentMode))
 		fmt.Fprintf(w, "Repos:   %d\n", r.Stats.TrackedRepos)
 		fmt.Fprintf(w, "Issues:  %d (across all repos)\n\n", r.Stats.TotalIssues)
 		fmt.Fprintln(w, "Not inside a git repo — cd into one and re-run.")
@@ -203,4 +226,17 @@ func printStatus(w io.Writer, r *statusReport) error {
 		fmt.Fprintf(w, "\nRecommendation: %s\n", rec)
 	}
 	return nil
+}
+
+// formatAgentMode renders the BACIO_AGENT_MODE row aligned with the
+// other Repo: / Path: / DB: lines. The trailing tag (active / inert)
+// reads as "is this gate doing anything right now?".
+func formatAgentMode(m statusAgentMode) string {
+	if m.Active {
+		return fmt.Sprintf("Agent:   %s=%s (active)", m.EnvVar, m.Value)
+	}
+	if m.Value == "" {
+		return fmt.Sprintf("Agent:   %s unset (hooks + channel inert)", m.EnvVar)
+	}
+	return fmt.Sprintf("Agent:   %s=%s (inert — only \"1\" or \"true\" activate)", m.EnvVar, m.Value)
 }

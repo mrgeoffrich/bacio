@@ -35,10 +35,17 @@ entry in place.
 install-channel prints the planned change and asks for confirmation
 before writing. Pass --yes (-y) to skip the prompt.
 
-After writing, it prints the 'claude' command to launch with the
-channel opted in. Channels are a Claude Code research preview: a custom
-channel like bacio is not on the Anthropic allowlist, so it needs
---dangerously-load-development-channels and Claude Code v2.1.80 or later.`,
+Activation: the channel (and bacio's hooks) are inert unless
+BACIO_AGENT_MODE=1 is set in the environment of the Claude session
+that loads them. See the post-install output for the recommended
+launch incantation. The channel rides the regular .mcp.json MCP
+transport — Claude Code loads it automatically once the entry is
+written, no extra flags required.
+
+Optional: bacio can also be loaded as a Claude Code experimental
+"native" channel via --dangerously-load-development-channels
+server:bacio (Claude Code v2.1.80+). That path is independent of the
+default MCP transport above and is not required.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if inRemoteMode() {
@@ -76,7 +83,11 @@ channel like bacio is not on the Anthropic allowlist, so it needs
 			if err := applyBacioChannel(path, top, command); err != nil {
 				return err
 			}
-			return reportChannelInstall(path, action)
+			if err := reportChannelInstall(path, action); err != nil {
+				return err
+			}
+			printActivationBanner(os.Stderr)
+			return nil
 		},
 	}
 	cmd.Flags().BoolVarP(&assumeYes, "yes", "y", false, "skip the confirmation prompt and accept the change")
@@ -159,16 +170,21 @@ func applyBacioChannel(path string, top map[string]json.RawMessage, command stri
 	return os.WriteFile(path, out, 0o644)
 }
 
-// reportChannelInstall emits the success summary plus the claude command
-// the user runs to launch with the channel opted in.
+// reportChannelInstall emits the success summary on stdout via ok() so
+// it round-trips to JSON like every other command's success output. The
+// activation guidance (which flag/env var to launch with) is intentionally
+// kept out of this payload and printed separately to stderr by
+// printActivationBanner — folding paragraphs of human guidance into
+// the structured success body would clutter machine consumers' parse
+// path. The prior message also led users to launch with
+// --dangerously-load-development-channels, which is for Claude Code's
+// experimental native-channels feature; bacio actually rides the
+// regular .mcp.json MCP transport, so that hint was misleading
+// (BACI-48).
 func reportChannelInstall(path, action string) error {
 	done := "added"
 	if action == "update" {
 		done = "updated"
 	}
-	return ok("%s the %q MCP server in %s\n\n"+
-		"Launch Claude Code with the channel opted in:\n"+
-		"  claude --dangerously-load-development-channels server:%s\n\n"+
-		"Channels are a Claude Code research preview — requires v2.1.80 or later.",
-		done, mcpServerName, path, mcpServerName)
+	return ok("%s the %q MCP server in %s", done, mcpServerName, path)
 }
