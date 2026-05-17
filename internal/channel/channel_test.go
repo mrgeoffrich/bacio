@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -24,6 +25,11 @@ type fakeSource struct {
 	registered []regRec
 	heartbeats int
 	setupCalls int
+	// registerErr, when non-nil, lets a test inject a deterministic
+	// error from Register (e.g. the placeholder-reject path) and
+	// assert the channel surfaces it as a tool-error rather than
+	// quietly recording the call.
+	registerErr func(sessionID, model, branch string) error
 }
 
 type regRec struct {
@@ -60,6 +66,9 @@ func (f *fakeSource) Heartbeat(ctx context.Context) error {
 func (f *fakeSource) Register(ctx context.Context, sessionID, model, branch string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.registerErr != nil {
+		return f.registerErr(sessionID, model, branch)
+	}
 	f.registered = append(f.registered, regRec{sessionID, model, branch})
 	return nil
 }
@@ -199,6 +208,59 @@ func TestChannelRegisterTool(t *testing.T) {
 	}
 	if src.registered[1] != (regRec{"sess-bare", "", ""}) {
 		t.Fatalf("registered[1] = %+v, want {sess-bare \"\" \"\"}", src.registered[1])
+	}
+}
+
+// TestChannelRegisterRejectsPlaceholder locks in the BACI-46 contract:
+// the channel hands the validator's "placeholder" error straight back to
+// the agent as a tool error. The fake source mimics what the real local
+// client does (ValidateSessionID rejects "$CLAUDE_CODE_SESSION_ID" up
+// front), so we get end-to-end coverage of the wire path without
+// importing the store layer.
+func TestChannelRegisterRejectsPlaceholder(t *testing.T) {
+	src := &fakeSource{
+		registerErr: func(sid, _, _ string) error {
+			if strings.HasPrefix(sid, "$") {
+				return fmt.Errorf("session_id %q looks like an unsubstituted placeholder; pass the real value", sid)
+			}
+			return nil
+		},
+	}
+	requests := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`,
+		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"register","arguments":{"session_id":"$CLAUDE_CODE_SESSION_ID"}}}`,
+	}, "\n") + "\n"
+
+	var out bytes.Buffer
+	srv := New(src, "bacio", "test", strings.NewReader(requests), &out, nil)
+	if err := srv.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	frames := decodeFrames(t, out.String())
+	var call map[string]any
+	for _, f := range frames {
+		if id, ok := f["id"].(float64); ok && id == 2 {
+			call = f
+		}
+	}
+	if call == nil {
+		t.Fatal("no register tool-call response")
+	}
+	res, _ := call["result"].(map[string]any)
+	isErr, _ := res["isError"].(bool)
+	if !isErr {
+		t.Fatalf("register with placeholder must surface isError=true: %+v", call)
+	}
+	// The validator's actionable error text reaches the agent verbatim
+	// — that's the user-facing fix.
+	content, _ := res["content"].([]any)
+	if len(content) == 0 {
+		t.Fatalf("response missing content: %+v", res)
+	}
+	body, _ := content[0].(map[string]any)["text"].(string)
+	if !strings.Contains(body, "placeholder") {
+		t.Fatalf("response text does not mention placeholder: %q", body)
 	}
 }
 

@@ -62,6 +62,21 @@ func ValidateAgentName(s string) (string, error) {
 	return validateSingleLine(s, "agent", maxNameLen, true)
 }
 
+// sessionIDPlaceholderLiterals is the explicit set of unsubstituted
+// template tokens ValidateSessionID rejects up front (case-insensitive).
+// Born from BACI-46: the bacio channel's setup-dispatch payload used to
+// carry "$CLAUDE_CODE_SESSION_ID" as a literal example, and less careful
+// agents copied the placeholder verbatim into the register call. The
+// shape rule below (starts with `$`, contains `{`/`}`/`<`/`>`) is the
+// belt-and-braces guard against future placeholders we haven't listed.
+var sessionIDPlaceholderLiterals = []string{
+	"$CLAUDE_CODE_SESSION_ID",
+	"${CLAUDE_CODE_SESSION_ID}",
+	"{{session_id}}",
+	"{session_id}",
+	"<session_id>",
+}
+
 // ValidateSessionID validates an external session id (e.g.
 // CLAUDE_CODE_SESSION_ID, which is a UUID). Strict no-whitespace,
 // printable ASCII only, capped at maxNameLen. Unlike most validators
@@ -69,6 +84,14 @@ func ValidateAgentName(s string) (string, error) {
 // almost certainly indicates a copy-paste error and surfacing it as
 // an explicit reject (per principle #4) beats silently accepting an
 // almost-right id that won't match the original.
+//
+// On top of the shape rules above, ValidateSessionID also refuses
+// obvious unsubstituted-placeholder strings (BACI-46): a literal
+// "$CLAUDE_CODE_SESSION_ID", any of the explicit aliases in
+// sessionIDPlaceholderLiterals, or — as a belt-and-braces guard —
+// anything starting with `$` or containing template-bracket
+// characters (`{`, `}`, `<`, `>`). The error message names the
+// offending value and tells the caller what to pass instead.
 func ValidateSessionID(s string) (string, error) {
 	if !utf8.ValidString(s) {
 		return "", fmt.Errorf("session_id is not valid UTF-8")
@@ -88,7 +111,34 @@ func ValidateSessionID(s string) (string, error) {
 			return "", fmt.Errorf("session_id must be printable ASCII (no whitespace, no control chars)")
 		}
 	}
+	if err := rejectSessionIDPlaceholder(s); err != nil {
+		return "", err
+	}
 	return s, nil
+}
+
+// rejectSessionIDPlaceholder returns a placeholder-shaped error when s
+// looks like an unsubstituted template token. Split out from
+// ValidateSessionID so the shape rule can be unit-tested independently.
+func rejectSessionIDPlaceholder(s string) error {
+	for _, lit := range sessionIDPlaceholderLiterals {
+		if strings.EqualFold(s, lit) {
+			return placeholderError(s)
+		}
+	}
+	// Shape rule: an unsubstituted shell-style placeholder almost
+	// always starts with `$`; a template-bracket placeholder uses one
+	// of `{ } < >`. Neither of those characters appears in a real CC
+	// session id (UUIDs today; printable-ASCII-only by the loop above
+	// regardless), so the false-positive cost is zero.
+	if strings.HasPrefix(s, "$") || strings.ContainsAny(s, "{}<>") {
+		return placeholderError(s)
+	}
+	return nil
+}
+
+func placeholderError(s string) error {
+	return fmt.Errorf("session_id %q looks like an unsubstituted placeholder; pass the real value the bacio channel pre-filled for you in the setup dispatch payload (or $CLAUDE_CODE_SESSION_ID from your environment)", s)
 }
 
 // ValidateSlug enforces the kebab-case slug shape used for feature slugs.
