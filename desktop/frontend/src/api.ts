@@ -13,7 +13,6 @@ import {
   BoardCard,
   IssueDetail,
   AgentCard,
-  ClaimDTO,
   DispatchDTO,
   DocSummary,
   DocContent,
@@ -27,6 +26,7 @@ import {
   PromptTemplateDTO,
   BoardPreferencesDTO,
 } from '../bindings/github.com/mrgeoffrich/bacio/desktop';
+import { ClaimDTO } from '../bindings/github.com/mrgeoffrich/bacio/internal/agentcards';
 
 export type { Board, BoardColumn, BoardCard, IssueDetail, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, BoardPreferencesDTO };
 

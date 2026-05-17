@@ -7,169 +7,30 @@ import { Create as $Create } from "@wailsio/runtime";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as agentcards$0 from "../internal/agentcards/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as time$0 from "../../../../time/models.js";
 
 /**
- * AgentCard is one agent session shaped for the desktop Agents screen,
- * carrying its open claims and the dispatches aimed at it so the
- * frontend can render the drill-down without a second round trip.
+ * ClaimDTO, SessionTodoDTO, DispatchDTO, and AgentCard live in
+ * internal/agentcards so the bacio api can serve the same wire format
+ * (BACI-50). Aliases keep the Wails-bound surface unchanged — the
+ * generated TS bindings point at the same struct names from the
+ * desktop's perspective, so the existing api.ts and components don't
+ * need to update their imports.
  */
-export class AgentCard {
-    "sessionId": string;
+export const AgentCard = agentcards$0.AgentCard;
 
-    /**
-     * identity slug; "" if none
-     */
-    "agentName": string;
-    "actor": string;
-    "model": string;
-    "branch": string;
-    "repoPrefix": string;
-
-    /**
-     * active | idle | ended
-     */
-    "status": string;
-
-    /**
-     * Busy is true while the session holds an open claim — orthogonal to
-     * Status (a session can be active+busy or idle+busy). BusyIssue is
-     * the issue key it's working, for a "busy (BACI-12)" label. A busy
-     * session is not a valid dispatch target.
-     */
-    "busy": boolean;
-    "busyIssue": string;
-
-    /**
-     * Waiting is true while the session holds an open claim on an issue
-     * in needs_action — the derived "parked, waiting on the user"
-     * signal. The Stop hook auto-flips a claimed in_progress issue to
-     * needs_action on idle, so this lights up automatically. A waiting
-     * session is also busy; the UI renders the waiting badge in place
-     * of busy because it's the actionable state.
-     */
-    "waiting": boolean;
-    "waitingIssue": string;
-
-    /**
-     * HasChannel is true when the bacio channel MCP server has been seen
-     * running alongside this session. Only sessions with a live channel
-     * can receive push dispatches — sessions without one are interactive
-     * (the user hasn't granted channel permission) and should be skipped.
-     */
-    "hasChannel": boolean;
-
-    /**
-     * BacioVersion is the bacio binary version the channel was running at
-     * register time (stamped server-side by the channel itself — agents
-     * don't know it and aren't trusted to report it). Empty for sessions
-     * older than the version-reporting change. BacioVersionStale is true
-     * when it doesn't match the binary the desktop is currently running —
-     * useful signal that an agent is talking to an outdated channel.
-     */
-    "bacioVersion": string;
-    "bacioVersionStale": boolean;
-    "lastSeenAt": time$0.Time;
-    "claims": ClaimDTO[];
-    "dispatches": DispatchDTO[];
-
-    /**
-     * Todos mirrors the agent's TodoWrite list (BACI-45). Populated by
-     * ListAgents from the bulk ListTodosBySessions read; empty array
-     * when the agent hasn't run TodoWrite this session. TodosDone /
-     * TodosTotal are pre-computed server-side so the React component
-     * doesn't reduce the array twice per render.
-     */
-    "todos": SessionTodoDTO[];
-    "todosDone": number;
-    "todosTotal": number;
-
-    /** Creates a new AgentCard instance. */
-    constructor($$source: Partial<AgentCard> = {}) {
-        if (!("sessionId" in $$source)) {
-            this["sessionId"] = "";
-        }
-        if (!("agentName" in $$source)) {
-            this["agentName"] = "";
-        }
-        if (!("actor" in $$source)) {
-            this["actor"] = "";
-        }
-        if (!("model" in $$source)) {
-            this["model"] = "";
-        }
-        if (!("branch" in $$source)) {
-            this["branch"] = "";
-        }
-        if (!("repoPrefix" in $$source)) {
-            this["repoPrefix"] = "";
-        }
-        if (!("status" in $$source)) {
-            this["status"] = "";
-        }
-        if (!("busy" in $$source)) {
-            this["busy"] = false;
-        }
-        if (!("busyIssue" in $$source)) {
-            this["busyIssue"] = "";
-        }
-        if (!("waiting" in $$source)) {
-            this["waiting"] = false;
-        }
-        if (!("waitingIssue" in $$source)) {
-            this["waitingIssue"] = "";
-        }
-        if (!("hasChannel" in $$source)) {
-            this["hasChannel"] = false;
-        }
-        if (!("bacioVersion" in $$source)) {
-            this["bacioVersion"] = "";
-        }
-        if (!("bacioVersionStale" in $$source)) {
-            this["bacioVersionStale"] = false;
-        }
-        if (!("lastSeenAt" in $$source)) {
-            this["lastSeenAt"] = null;
-        }
-        if (!("claims" in $$source)) {
-            this["claims"] = [];
-        }
-        if (!("dispatches" in $$source)) {
-            this["dispatches"] = [];
-        }
-        if (!("todos" in $$source)) {
-            this["todos"] = [];
-        }
-        if (!("todosDone" in $$source)) {
-            this["todosDone"] = 0;
-        }
-        if (!("todosTotal" in $$source)) {
-            this["todosTotal"] = 0;
-        }
-
-        Object.assign(this, $$source);
-    }
-
-    /**
-     * Creates a new AgentCard instance from a string or object.
-     */
-    static createFrom($$source: any = {}): AgentCard {
-        const $$createField15_0 = $$createType1;
-        const $$createField16_0 = $$createType3;
-        const $$createField17_0 = $$createType5;
-        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
-        if ("claims" in $$parsedSource) {
-            $$parsedSource["claims"] = $$createField15_0($$parsedSource["claims"]);
-        }
-        if ("dispatches" in $$parsedSource) {
-            $$parsedSource["dispatches"] = $$createField16_0($$parsedSource["dispatches"]);
-        }
-        if ("todos" in $$parsedSource) {
-            $$parsedSource["todos"] = $$createField17_0($$parsedSource["todos"]);
-        }
-        return new AgentCard($$parsedSource as Partial<AgentCard>);
-    }
-}
+/**
+ * ClaimDTO, SessionTodoDTO, DispatchDTO, and AgentCard live in
+ * internal/agentcards so the bacio api can serve the same wire format
+ * (BACI-50). Aliases keep the Wails-bound surface unchanged — the
+ * generated TS bindings point at the same struct names from the
+ * desktop's perspective, so the existing api.ts and components don't
+ * need to update their imports.
+ */
+export type AgentCard = agentcards$0.AgentCard;
 
 /**
  * Board is one bacio repo, offered in the top-nav repository selector.
@@ -271,8 +132,8 @@ export class BoardCard {
      * Creates a new BoardCard instance from a string or object.
      */
     static createFrom($$source: any = {}): BoardCard {
-        const $$createField4_0 = $$createType6;
-        const $$createField5_0 = $$createType6;
+        const $$createField4_0 = $$createType0;
+        const $$createField5_0 = $$createType0;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField4_0($$parsedSource["tags"]);
@@ -335,45 +196,6 @@ export class BoardPreferencesDTO {
     static createFrom($$source: any = {}): BoardPreferencesDTO {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new BoardPreferencesDTO($$parsedSource as Partial<BoardPreferencesDTO>);
-    }
-}
-
-/**
- * ClaimDTO is one open agent claim, shaped for the Agents screen.
- * State is the claimed issue's current state — needed to derive the
- * session's Waiting flag and to annotate each claim in the drill-down
- * (e.g. "BACI-12 (needs action)").
- */
-export class ClaimDTO {
-    "issueKey": string;
-    "prompt": string;
-    "claimedAt": time$0.Time;
-    "state": string;
-
-    /** Creates a new ClaimDTO instance. */
-    constructor($$source: Partial<ClaimDTO> = {}) {
-        if (!("issueKey" in $$source)) {
-            this["issueKey"] = "";
-        }
-        if (!("prompt" in $$source)) {
-            this["prompt"] = "";
-        }
-        if (!("claimedAt" in $$source)) {
-            this["claimedAt"] = null;
-        }
-        if (!("state" in $$source)) {
-            this["state"] = "";
-        }
-
-        Object.assign(this, $$source);
-    }
-
-    /**
-     * Creates a new ClaimDTO instance from a string or object.
-     */
-    static createFrom($$source: any = {}): ClaimDTO {
-        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
-        return new ClaimDTO($$parsedSource as Partial<ClaimDTO>);
     }
 }
 
@@ -456,57 +278,24 @@ export class CommentDTO {
 }
 
 /**
- * DispatchDTO is one queued dispatch — returned both inside an AgentCard
- * (the agent's drill-down) and from DispatchIssue (the new write).
+ * ClaimDTO, SessionTodoDTO, DispatchDTO, and AgentCard live in
+ * internal/agentcards so the bacio api can serve the same wire format
+ * (BACI-50). Aliases keep the Wails-bound surface unchanged — the
+ * generated TS bindings point at the same struct names from the
+ * desktop's perspective, so the existing api.ts and components don't
+ * need to update their imports.
  */
-export class DispatchDTO {
-    "id": number;
-    "issueKey": string;
-    "targetAgent": string;
-    "mode": string;
-    "status": string;
-    "payload": string;
-    "createdBy": string;
-    "createdAt": time$0.Time;
+export const DispatchDTO = agentcards$0.DispatchDTO;
 
-    /** Creates a new DispatchDTO instance. */
-    constructor($$source: Partial<DispatchDTO> = {}) {
-        if (!("id" in $$source)) {
-            this["id"] = 0;
-        }
-        if (!("issueKey" in $$source)) {
-            this["issueKey"] = "";
-        }
-        if (!("targetAgent" in $$source)) {
-            this["targetAgent"] = "";
-        }
-        if (!("mode" in $$source)) {
-            this["mode"] = "";
-        }
-        if (!("status" in $$source)) {
-            this["status"] = "";
-        }
-        if (!("payload" in $$source)) {
-            this["payload"] = "";
-        }
-        if (!("createdBy" in $$source)) {
-            this["createdBy"] = "";
-        }
-        if (!("createdAt" in $$source)) {
-            this["createdAt"] = null;
-        }
-
-        Object.assign(this, $$source);
-    }
-
-    /**
-     * Creates a new DispatchDTO instance from a string or object.
-     */
-    static createFrom($$source: any = {}): DispatchDTO {
-        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
-        return new DispatchDTO($$parsedSource as Partial<DispatchDTO>);
-    }
-}
+/**
+ * ClaimDTO, SessionTodoDTO, DispatchDTO, and AgentCard live in
+ * internal/agentcards so the bacio api can serve the same wire format
+ * (BACI-50). Aliases keep the Wails-bound surface unchanged — the
+ * generated TS bindings point at the same struct names from the
+ * desktop's perspective, so the existing api.ts and components don't
+ * need to update their imports.
+ */
+export type DispatchDTO = agentcards$0.DispatchDTO;
 
 /**
  * DocContent is one document with its markdown body, for the editor pane.
@@ -657,7 +446,7 @@ export class FeatureDetail {
      * Creates a new FeatureDetail instance from a string or object.
      */
     static createFrom($$source: any = {}): FeatureDetail {
-        const $$createField5_0 = $$createType8;
+        const $$createField5_0 = $$createType2;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("issues" in $$parsedSource) {
             $$parsedSource["issues"] = $$createField5_0($$parsedSource["issues"]);
@@ -815,7 +604,7 @@ export class HistoryPage {
      * Creates a new HistoryPage instance from a string or object.
      */
     static createFrom($$source: any = {}): HistoryPage {
-        const $$createField0_0 = $$createType10;
+        const $$createField0_0 = $$createType4;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("entries" in $$parsedSource) {
             $$parsedSource["entries"] = $$createField0_0($$parsedSource["entries"]);
@@ -896,12 +685,12 @@ export class IssueDetail {
      * Creates a new IssueDetail instance from a string or object.
      */
     static createFrom($$source: any = {}): IssueDetail {
-        const $$createField5_0 = $$createType6;
-        const $$createField6_0 = $$createType6;
-        const $$createField8_0 = $$createType12;
-        const $$createField9_0 = $$createType14;
-        const $$createField10_0 = $$createType16;
-        const $$createField11_0 = $$createType18;
+        const $$createField5_0 = $$createType0;
+        const $$createField6_0 = $$createType0;
+        const $$createField8_0 = $$createType6;
+        const $$createField9_0 = $$createType8;
+        const $$createField10_0 = $$createType10;
+        const $$createField11_0 = $$createType12;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField5_0($$parsedSource["tags"]);
@@ -1050,8 +839,8 @@ export class PromptTemplateDTO {
      * Creates a new PromptTemplateDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): PromptTemplateDTO {
-        const $$createField7_0 = $$createType6;
-        const $$createField8_0 = $$createType6;
+        const $$createField7_0 = $$createType0;
+        const $$createField8_0 = $$createType0;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("allowedStates" in $$parsedSource) {
             $$parsedSource["allowedStates"] = $$createField7_0($$parsedSource["allowedStates"]);
@@ -1063,53 +852,17 @@ export class PromptTemplateDTO {
     }
 }
 
-/**
- * SessionTodoDTO is one row of the agent's mirrored TodoWrite list,
- * shaped for the Agents screen. Status is one of pending|in_progress|
- * completed, surfaced verbatim so the frontend can pick its glyph.
- */
-export class SessionTodoDTO {
-    "content": string;
-    "status": string;
-
-    /** Creates a new SessionTodoDTO instance. */
-    constructor($$source: Partial<SessionTodoDTO> = {}) {
-        if (!("content" in $$source)) {
-            this["content"] = "";
-        }
-        if (!("status" in $$source)) {
-            this["status"] = "";
-        }
-
-        Object.assign(this, $$source);
-    }
-
-    /**
-     * Creates a new SessionTodoDTO instance from a string or object.
-     */
-    static createFrom($$source: any = {}): SessionTodoDTO {
-        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
-        return new SessionTodoDTO($$parsedSource as Partial<SessionTodoDTO>);
-    }
-}
-
 // Private type creation functions
-const $$createType0 = ClaimDTO.createFrom;
-const $$createType1 = $Create.Array($$createType0);
-const $$createType2 = DispatchDTO.createFrom;
-const $$createType3 = $Create.Array($$createType2);
-const $$createType4 = SessionTodoDTO.createFrom;
-const $$createType5 = $Create.Array($$createType4);
-const $$createType6 = $Create.Array($Create.Any);
-const $$createType7 = FeatureLinkedIssue.createFrom;
+const $$createType0 = $Create.Array($Create.Any);
+const $$createType1 = FeatureLinkedIssue.createFrom;
+const $$createType2 = $Create.Array($$createType1);
+const $$createType3 = HistoryEntryDTO.createFrom;
+const $$createType4 = $Create.Array($$createType3);
+const $$createType5 = CommentDTO.createFrom;
+const $$createType6 = $Create.Array($$createType5);
+const $$createType7 = PRDTO.createFrom;
 const $$createType8 = $Create.Array($$createType7);
-const $$createType9 = HistoryEntryDTO.createFrom;
+const $$createType9 = DocLinkDTO.createFrom;
 const $$createType10 = $Create.Array($$createType9);
-const $$createType11 = CommentDTO.createFrom;
+const $$createType11 = ClaimantDTO.createFrom;
 const $$createType12 = $Create.Array($$createType11);
-const $$createType13 = PRDTO.createFrom;
-const $$createType14 = $Create.Array($$createType13);
-const $$createType15 = DocLinkDTO.createFrom;
-const $$createType16 = $Create.Array($$createType15);
-const $$createType17 = ClaimantDTO.createFrom;
-const $$createType18 = $Create.Array($$createType17);
