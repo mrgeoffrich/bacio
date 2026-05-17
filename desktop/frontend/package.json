@@ -13,6 +13,9 @@
     "preview:web": "vite preview --mode web"
   },
   "dependencies": {
+    "@radix-ui/react-dialog": "^1.1.15",
+    "@radix-ui/react-dropdown-menu": "^2.1.16",
+    "@radix-ui/react-tooltip": "^1.2.8",
     "@tiptap/extension-placeholder": "^3.6.5",
     "@tiptap/extension-table": "^3.6.6",
     "@tiptap/extension-table-cell": "^3.6.6",

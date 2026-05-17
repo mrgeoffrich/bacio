@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import * as Dialog from '@radix-ui/react-dialog';
 import Icon from './Icon.jsx';
 import { WEB_MODE } from '../env';
 
@@ -163,68 +164,76 @@ export default function RepoPicker({ boards, activeBoard, onPick, onAddRepositor
         </div>
       )}
 
-      {addingWeb && (
-        <div className="mk-modal-backdrop" onClick={closeWebModal}>
-          <div className="mk-modal" onClick={e => e.stopPropagation()}>
-            <h3 className="mk-modal-title">Add Repository</h3>
-            <p className="mk-settings-hint">
-              Path is on the server&apos;s filesystem
-              {' '}({window.location.host || 'this host'}), not your local machine.
-              Point at the git working tree you want bacio to track.
-            </p>
-            <label className="mk-tmpl-add-field">
-              <span>Path</span>
-              <input
-                autoFocus
-                className="mk-tmpl-input"
-                value={addingWeb.path}
-                placeholder="/Users/you/Code/my-project"
-                onChange={e => setAddingWeb({ ...addingWeb, path: e.target.value })}
-              />
-            </label>
-            <label className="mk-tmpl-add-field">
-              <span>Name</span>
-              <input
-                className="mk-tmpl-input"
-                value={addingWeb.name}
-                placeholder="my-project"
-                onChange={e => setAddingWeb({ ...addingWeb, name: e.target.value })}
-              />
-            </label>
-            <label className="mk-tmpl-add-field">
-              <span>Prefix (optional)</span>
-              <input
-                className="mk-tmpl-input"
-                value={addingWeb.prefix}
-                placeholder="MYPR (auto-allocated if blank)"
-                maxLength={4}
-                onChange={e => setAddingWeb({ ...addingWeb, prefix: e.target.value })}
-              />
-            </label>
-            {addError && (
-              <p className="mk-settings-hint" style={{ color: 'var(--status-blocked, #d44)' }}>
-                {addError}
-              </p>
+      <Dialog.Root
+        open={!!addingWeb}
+        onOpenChange={(open) => { if (!open && !submitting) closeWebModal(); }}
+      >
+        <Dialog.Portal>
+          <Dialog.Overlay className="mk-modal-backdrop" />
+          <Dialog.Content className="mk-modal" aria-describedby={undefined}>
+            <Dialog.Title className="mk-modal-title">Add Repository</Dialog.Title>
+            {addingWeb && (
+              <>
+                <p className="mk-settings-hint">
+                  Path is on the server&apos;s filesystem
+                  {' '}({window.location.host || 'this host'}), not your local machine.
+                  Point at the git working tree you want bacio to track.
+                </p>
+                <label className="mk-tmpl-add-field">
+                  <span>Path</span>
+                  <input
+                    autoFocus
+                    className="mk-tmpl-input"
+                    value={addingWeb.path}
+                    placeholder="/Users/you/Code/my-project"
+                    onChange={e => setAddingWeb({ ...addingWeb, path: e.target.value })}
+                  />
+                </label>
+                <label className="mk-tmpl-add-field">
+                  <span>Name</span>
+                  <input
+                    className="mk-tmpl-input"
+                    value={addingWeb.name}
+                    placeholder="my-project"
+                    onChange={e => setAddingWeb({ ...addingWeb, name: e.target.value })}
+                  />
+                </label>
+                <label className="mk-tmpl-add-field">
+                  <span>Prefix (optional)</span>
+                  <input
+                    className="mk-tmpl-input"
+                    value={addingWeb.prefix}
+                    placeholder="MYPR (auto-allocated if blank)"
+                    maxLength={4}
+                    onChange={e => setAddingWeb({ ...addingWeb, prefix: e.target.value })}
+                  />
+                </label>
+                {addError && (
+                  <p className="mk-settings-hint" style={{ color: 'var(--status-blocked, #d44)' }}>
+                    {addError}
+                  </p>
+                )}
+                <div className="mk-modal-actions">
+                  <button
+                    className="mk-segmented-btn"
+                    onClick={closeWebModal}
+                    disabled={submitting}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="mk-segmented-btn is-active"
+                    onClick={submitWebAdd}
+                    disabled={submitting}
+                  >
+                    {submitting ? 'Adding…' : 'Add'}
+                  </button>
+                </div>
+              </>
             )}
-            <div className="mk-modal-actions">
-              <button
-                className="mk-segmented-btn"
-                onClick={closeWebModal}
-                disabled={submitting}
-              >
-                Cancel
-              </button>
-              <button
-                className="mk-segmented-btn is-active"
-                onClick={submitWebAdd}
-                disabled={submitting}
-              >
-                {submitting ? 'Adding…' : 'Add'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
     </div>
   );
 }

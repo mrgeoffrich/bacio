@@ -12,6 +12,7 @@ import CommandPalette from './components/CommandPalette.jsx';
 import SettingsView from './components/SettingsView.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import ErrorModal from './components/ErrorModal.jsx';
+import { Provider as TooltipProvider } from '@radix-ui/react-tooltip';
 import { reportError } from './errors';
 import { WEB_MODE } from './env';
 import * as api from './api';
@@ -244,9 +245,10 @@ export default function App() {
         e.preventDefault();
         setPaletteOpen(true);
       } else if (e.key === 'Escape') {
+        // IssueDrawer / IssueEditModal / SettingsView modals are Radix
+        // Dialogs and catch Escape themselves. Only the palette (still
+        // hand-rolled) needs the window-level handler.
         setPaletteOpen(false);
-        setOpenIssue(null);
-        setSettingsOpen(false);
       } else if (!e.metaKey && !e.ctrlKey && !e.altKey && e.key >= '1' && e.key <= '9') {
         // Digit keys jump between nav views, like the TUI's tab shortcuts —
         // unless the user is typing into a field or the doc editor.
@@ -373,6 +375,7 @@ export default function App() {
   };
 
   return (
+    <TooltipProvider delayDuration={250} skipDelayDuration={150}>
     <div className="mk-app">
       <Topbar
         boards={boards}
@@ -457,5 +460,6 @@ export default function App() {
       </ErrorBoundary>
       <ErrorModal />
     </div>
+    </TooltipProvider>
   );
 }

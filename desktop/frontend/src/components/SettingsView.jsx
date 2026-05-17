@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import * as Dialog from '@radix-ui/react-dialog';
 import Icon from './Icon.jsx';
+import Tooltip from './Tooltip.jsx';
 import { reportError } from '../errors';
 import * as api from '../api';
 
@@ -272,16 +274,17 @@ export default function SettingsView({
             >
               {adding ? 'Cancel add' : '+ Add template'}
             </button>
-            <button
-              className="mk-segmented-btn"
-              onClick={() => setPendingRestore(true)}
-              disabled={savingSlug !== null || missingBuiltins.length === 0}
-              title={missingBuiltins.length === 0
-                ? 'Every built-in template is already present'
-                : `Will re-seed: ${missingBuiltins.join(', ')}`}
-            >
-              Restore built-ins{missingBuiltins.length > 0 ? ` (${missingBuiltins.length})` : ''}
-            </button>
+            <Tooltip label={missingBuiltins.length === 0
+              ? 'Every built-in template is already present'
+              : `Will re-seed: ${missingBuiltins.join(', ')}`}>
+              <button
+                className="mk-segmented-btn"
+                onClick={() => setPendingRestore(true)}
+                disabled={savingSlug !== null || missingBuiltins.length === 0}
+              >
+                Restore built-ins{missingBuiltins.length > 0 ? ` (${missingBuiltins.length})` : ''}
+              </button>
+            </Tooltip>
           </div>
 
           {adding && (
@@ -371,14 +374,15 @@ export default function SettingsView({
                   </span>
                   <div className="mk-tmpl-actions">
                     {t.isBuiltin && (
-                      <button
-                        className="mk-tmpl-reset"
-                        disabled={busy || (t.isDefault && !dirty)}
-                        onClick={() => saveTemplate(t.slug, '')}
-                        title="Restore the built-in default body"
-                      >
-                        Reset body
-                      </button>
+                      <Tooltip label="Restore the built-in default body">
+                        <button
+                          className="mk-tmpl-reset"
+                          disabled={busy || (t.isDefault && !dirty)}
+                          onClick={() => saveTemplate(t.slug, '')}
+                        >
+                          Reset body
+                        </button>
+                      </Tooltip>
                     )}
                     <button
                       className="mk-tmpl-reset"
@@ -439,14 +443,15 @@ export default function SettingsView({
                       <span className="mk-tmpl-states-hint"> · 0 = unlimited</span>
                     </span>
                     {t.isBuiltin && (
-                      <button
-                        className="mk-tmpl-reset"
-                        disabled={busy || t.concurrencyIsDefault}
-                        onClick={() => saveConcurrency(t.slug, t.defaultConcurrencyLimit)}
-                        title={`Reset to the built-in default (${t.defaultConcurrencyLimit})`}
-                      >
-                        Reset limit
-                      </button>
+                      <Tooltip label={`Reset to the built-in default (${t.defaultConcurrencyLimit})`}>
+                        <button
+                          className="mk-tmpl-reset"
+                          disabled={busy || t.concurrencyIsDefault}
+                          onClick={() => saveConcurrency(t.slug, t.defaultConcurrencyLimit)}
+                        >
+                          Reset limit
+                        </button>
+                      </Tooltip>
                     )}
                   </div>
                   <input
@@ -481,66 +486,79 @@ export default function SettingsView({
         </section>
       </div>
 
-      {renaming && (
-        <div className="mk-modal-backdrop" onClick={() => setRenaming(null)}>
-          <div className="mk-modal" onClick={e => e.stopPropagation()}>
-            <h3 className="mk-modal-title">Rename template</h3>
-            <label className="mk-tmpl-add-field">
-              <span>Slug</span>
-              <input
-                className="mk-tmpl-input"
-                value={renaming.newSlug}
-                onChange={e => setRenaming({ ...renaming, newSlug: e.target.value })}
-              />
-            </label>
-            <label className="mk-tmpl-add-field">
-              <span>Name</span>
-              <input
-                className="mk-tmpl-input"
-                value={renaming.newName}
-                onChange={e => setRenaming({ ...renaming, newName: e.target.value })}
-              />
-            </label>
-            <div className="mk-modal-actions">
-              <button className="mk-segmented-btn" onClick={() => setRenaming(null)}>Cancel</button>
-              <button className="mk-segmented-btn is-active" onClick={commitRename}>Save</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <Dialog.Root open={!!renaming} onOpenChange={(open) => { if (!open) setRenaming(null); }}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="mk-modal-backdrop" />
+          <Dialog.Content className="mk-modal" aria-describedby={undefined}>
+            <Dialog.Title className="mk-modal-title">Rename template</Dialog.Title>
+            {renaming && (
+              <>
+                <label className="mk-tmpl-add-field">
+                  <span>Slug</span>
+                  <input
+                    className="mk-tmpl-input"
+                    value={renaming.newSlug}
+                    onChange={e => setRenaming({ ...renaming, newSlug: e.target.value })}
+                  />
+                </label>
+                <label className="mk-tmpl-add-field">
+                  <span>Name</span>
+                  <input
+                    className="mk-tmpl-input"
+                    value={renaming.newName}
+                    onChange={e => setRenaming({ ...renaming, newName: e.target.value })}
+                  />
+                </label>
+                <div className="mk-modal-actions">
+                  <Dialog.Close asChild>
+                    <button className="mk-segmented-btn">Cancel</button>
+                  </Dialog.Close>
+                  <button className="mk-segmented-btn is-active" onClick={commitRename}>Save</button>
+                </div>
+              </>
+            )}
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
 
-      {pendingDelete && (
-        <div className="mk-modal-backdrop" onClick={() => setPendingDelete(null)}>
-          <div className="mk-modal" onClick={e => e.stopPropagation()}>
-            <h3 className="mk-modal-title">Delete template</h3>
+      <Dialog.Root open={!!pendingDelete} onOpenChange={(open) => { if (!open) setPendingDelete(null); }}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="mk-modal-backdrop" />
+          <Dialog.Content className="mk-modal" aria-describedby={undefined}>
+            <Dialog.Title className="mk-modal-title">Delete template</Dialog.Title>
             <p>
               Delete the template <code>{pendingDelete}</code>? Historical dispatches
               that referenced this slug will keep it verbatim but won't have a body to
               render anymore.
             </p>
             <div className="mk-modal-actions">
-              <button className="mk-segmented-btn" onClick={() => setPendingDelete(null)}>Cancel</button>
+              <Dialog.Close asChild>
+                <button className="mk-segmented-btn">Cancel</button>
+              </Dialog.Close>
               <button className="mk-segmented-btn is-active" onClick={commitDelete}>Delete</button>
             </div>
-          </div>
-        </div>
-      )}
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
 
-      {pendingRestore && (
-        <div className="mk-modal-backdrop" onClick={() => setPendingRestore(false)}>
-          <div className="mk-modal" onClick={e => e.stopPropagation()}>
-            <h3 className="mk-modal-title">Restore built-in templates</h3>
+      <Dialog.Root open={pendingRestore} onOpenChange={(open) => { if (!open) setPendingRestore(false); }}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="mk-modal-backdrop" />
+          <Dialog.Content className="mk-modal" aria-describedby={undefined}>
+            <Dialog.Title className="mk-modal-title">Restore built-in templates</Dialog.Title>
             <p>
               Re-seed any missing built-in templates ({missingBuiltins.join(', ') || 'none missing'})
               from the embedded defaults. Existing templates won't be touched.
             </p>
             <div className="mk-modal-actions">
-              <button className="mk-segmented-btn" onClick={() => setPendingRestore(false)}>Cancel</button>
+              <Dialog.Close asChild>
+                <button className="mk-segmented-btn">Cancel</button>
+              </Dialog.Close>
               <button className="mk-segmented-btn is-active" onClick={commitRestore}>Restore</button>
             </div>
-          </div>
-        </div>
-      )}
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
     </div>
   );
 }

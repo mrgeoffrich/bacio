@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import * as Dialog from '@radix-ui/react-dialog';
 import { subscribeErrors } from '../errors';
 
 const DEV = !!(import.meta && import.meta.env && import.meta.env.DEV);
@@ -14,7 +15,6 @@ export default function ErrorModal() {
   const [queue, setQueue] = useState([]);
   const [showDetail, setShowDetail] = useState(false);
   const [showMore, setShowMore] = useState(false);
-  const dismissBtnRef = useRef(null);
 
   const dismiss = useCallback(() => {
     setQueue(prev => prev.slice(1));
@@ -36,22 +36,6 @@ export default function ErrorModal() {
   }, []);
 
   const current = queue[0];
-
-  // Focus the Dismiss button and wire Esc to close, but only while a
-  // modal is visible.
-  useEffect(() => {
-    if (!current) return;
-    dismissBtnRef.current?.focus();
-    const onKey = (e) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        dismiss();
-      }
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [current, dismiss]);
-
   if (!current) return null;
 
   const remaining = queue.length - 1;
@@ -59,57 +43,57 @@ export default function ErrorModal() {
   const body = !tooLong || showMore
     ? current.message
     : current.message.slice(0, MAX_MESSAGE_CHARS) + '…';
-  const titleId = `mk-error-modal-title-${current.id}`;
 
   return (
-    <div className="mk-modal-backdrop mk-error-modal-backdrop">
-      <div
-        className="mk-modal mk-error-modal"
-        role="alertdialog"
-        aria-labelledby={titleId}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3 id={titleId} className="mk-modal-title mk-error-modal-title">
-          {current.headline}
-          {current.count > 1 && (
-            <span className="mk-error-modal-count"> (×{current.count})</span>
+    <Dialog.Root open onOpenChange={(open) => { if (!open) dismiss(); }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="mk-modal-backdrop mk-error-modal-backdrop" />
+        <Dialog.Content
+          className="mk-modal mk-error-modal"
+          aria-describedby={undefined}
+          onPointerDownOutside={(e) => e.preventDefault()}
+        >
+          <Dialog.Title className="mk-modal-title mk-error-modal-title">
+            {current.headline}
+            {current.count > 1 && (
+              <span className="mk-error-modal-count"> (×{current.count})</span>
+            )}
+          </Dialog.Title>
+          <p className="mk-error-modal-body">{body}</p>
+          {tooLong && (
+            <button
+              type="button"
+              className="mk-error-modal-link"
+              onClick={() => setShowMore(s => !s)}
+            >
+              {showMore ? 'Show less' : 'Show more'}
+            </button>
           )}
-        </h3>
-        <p className="mk-error-modal-body">{body}</p>
-        {tooLong && (
-          <button
-            type="button"
-            className="mk-error-modal-link"
-            onClick={() => setShowMore(s => !s)}
-          >
-            {showMore ? 'Show less' : 'Show more'}
-          </button>
-        )}
-        {DEV && current.detail && (
-          <details
-            className="mk-error-modal-details"
-            open={showDetail}
-            onToggle={(e) => setShowDetail(e.currentTarget.open)}
-          >
-            <summary>Details (dev only)</summary>
-            <pre className="mk-error-modal-stack">{current.detail}</pre>
-          </details>
-        )}
-        {remaining > 0 && (
-          <div className="mk-error-modal-more">
-            {remaining} more {remaining === 1 ? 'error' : 'errors'} queued
+          {DEV && current.detail && (
+            <details
+              className="mk-error-modal-details"
+              open={showDetail}
+              onToggle={(e) => setShowDetail(e.currentTarget.open)}
+            >
+              <summary>Details (dev only)</summary>
+              <pre className="mk-error-modal-stack">{current.detail}</pre>
+            </details>
+          )}
+          {remaining > 0 && (
+            <div className="mk-error-modal-more">
+              {remaining} more {remaining === 1 ? 'error' : 'errors'} queued
+            </div>
+          )}
+          <div className="mk-modal-actions">
+            <button
+              className="mk-segmented-btn is-active"
+              onClick={dismiss}
+            >
+              Dismiss
+            </button>
           </div>
-        )}
-        <div className="mk-modal-actions">
-          <button
-            ref={dismissBtnRef}
-            className="mk-segmented-btn is-active"
-            onClick={dismiss}
-          >
-            Dismiss
-          </button>
-        </div>
-      </div>
-    </div>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
