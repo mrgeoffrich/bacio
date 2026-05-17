@@ -260,11 +260,11 @@ export default function App() {
   }, []);
 
   // Open the issue drawer — fetch the full detail payload for the card.
-  const openCard = (card) => {
+  const openCard = useCallback((card) => {
     api.getIssue(activeBoard, card.key)
       .then(setOpenIssue)
       .catch(err => reportError(err, { headline: "Couldn't open issue" }));
-  };
+  }, [activeBoard]);
 
   // Add a repository. Desktop pops a native folder picker (Wails);
   // web mode hands the path-input modal's submission through as a
@@ -291,45 +291,57 @@ export default function App() {
   // persist the state change so it survives the next auto-refresh poll.
   // On failure, revert the card to its original column rather than leave
   // it stranded in a column the backend never accepted.
-  const moveCard = (key, toCol) => {
-    const prev = cards.find(c => c.key === key);
-    if (!prev || prev.column === toCol) return;
-    setCards(cs => cs.map(c => c.key === key ? { ...c, column: toCol } : c));
+  //
+  // Reads the previous column via the functional setCards form (and a
+  // capture-and-noop trick) so the callback identity doesn't depend on
+  // the cards array — keeps KanbanCard's React.memo effective.
+  const moveCard = useCallback((key, toCol) => {
+    let prevCol = null;
+    setCards(cs => {
+      const prev = cs.find(c => c.key === key);
+      if (!prev || prev.column === toCol) return cs;
+      prevCol = prev.column;
+      return cs.map(c => c.key === key ? { ...c, column: toCol } : c);
+    });
+    if (prevCol === null) return;
     api.setIssueState(activeBoard, key, toCol)
       .catch(err => {
         reportError(err, { headline: "Couldn't move card" });
-        setCards(cs => cs.map(c => c.key === key ? { ...c, column: prev.column } : c));
+        setCards(cs => cs.map(c => c.key === key ? { ...c, column: prevCol } : c));
       });
-  };
+  }, [activeBoard]);
 
   // Dispatch a prompt from a card's action button: the backend gates the
   // mode on the issue's state and enqueues a target-less dispatch the
   // matcher binds later — the caller names neither an agent nor a note.
   // Post-BACI-51 the call always succeeds (gate-aside); the waiting
   // spinner takes over until the matcher binds.
-  const dispatchFromCard = (cardKey, mode) => {
+  //
+  // Set waitingForClaim *before* the request so the spinner and drag-
+  // disable kick in on the click, not when the request returns. The
+  // backend sets the same flag on the issue row inside AddDispatch, so
+  // the next refresh keeps it true until the matcher binds (then
+  // waiting clears and taken takes over). Revert on failure.
+  const dispatchFromCard = useCallback((cardKey, mode) => {
+    setCards(cs => cs.map(c => c.key === cardKey ? { ...c, waitingForClaim: true } : c));
     api.dispatchIssue(activeBoard, cardKey, mode)
-      .then(() => {
-        // Optimistically flag the card as waiting-for-claim so the
-        // spinner appears immediately; the next refresh poll reads
-        // the authoritative state from the server.
-        setCards(cs => cs.map(c => c.key === cardKey ? { ...c, waitingForClaim: true } : c));
-        refreshAgents();
-      })
-      .catch(err => reportError(err, { headline: "Couldn't dispatch agent" }));
-  };
+      .catch(err => {
+        setCards(cs => cs.map(c => c.key === cardKey ? { ...c, waitingForClaim: false } : c));
+        reportError(err, { headline: "Couldn't dispatch agent" });
+      });
+  }, [activeBoard]);
 
   // BACI-51 spinner-as-cancel-button handler: withdraw a card's queued
   // (or pending/delivered) dispatch. Optimistically clears the local
   // waitingForClaim flag so the spinner disappears immediately; the
   // refresh poll reads the authoritative state.
-  const cancelWaitingFromCard = (cardKey) => {
+  const cancelWaitingFromCard = useCallback((cardKey) => {
     api.cancelWaitingDispatch(activeBoard, cardKey)
       .then(() => {
         setCards(cs => cs.map(c => c.key === cardKey ? { ...c, waitingForClaim: false } : c));
       })
       .catch(err => reportError(err, { headline: "Couldn't cancel queued dispatch" }));
-  };
+  }, [activeBoard]);
 
   // Ship: close the drawer, optimistically flip the card to "done", and
   // persist via setIssueState so the change survives the next 10s poll.
