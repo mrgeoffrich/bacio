@@ -670,18 +670,25 @@ func dispatchTargetLabel(d *model.AgentDispatch) string {
 // keep EnsureSetupDispatch idempotent across restarts.
 const SetupDispatchCreator = "bacio-channel"
 
-// setupDispatchPayload is the content of the channel-emitted setup
-// dispatch. The agent sees this as a regular dispatch (so it lands via
-// the proven push path, not a synthetic notification) and acks it via
-// the normal reply tool. $CLAUDE_CODE_SESSION_ID is a literal — the
-// agent substitutes it from its own env.
-const setupDispatchPayload = "Call the bacio MCP `register` tool now with " +
-	"{\"session_id\": \"$CLAUDE_CODE_SESSION_ID\", \"model\": \"<your model id>\", " +
-	"\"branch\": \"<your current git branch>\"} " +
-	"(session_id is the only required field — find it in your env as $CLAUDE_CODE_SESSION_ID; " +
-	"model + branch are optional but worth passing — " +
-	"the model identifier looks like \"claude-opus-4-7\" or \"claude-sonnet-4-6\"). " +
-	"This completes the registration; ack this dispatch via `reply` once you've called register."
+// buildSetupDispatchPayload renders the channel-emitted setup
+// dispatch with the real session_id pre-filled. The agent sees this
+// as a regular dispatch (so it lands via the proven push path, not a
+// synthetic notification) and acks it via the normal reply tool.
+//
+// The session_id is substituted server-side rather than left as a
+// literal placeholder (BACI-46): pre-filling makes the copy-paste path
+// correct by construction, and the ValidateSessionID rule that refuses
+// placeholder strings is the belt-and-braces guard against any future
+// briefing change reintroducing the bug.
+func buildSetupDispatchPayload(sessionID string) string {
+	return "Call the bacio MCP `register` tool now with " +
+		`{"session_id": "` + sessionID + `", ` +
+		`"model": "<your model id>", "branch": "<your current git branch>"} ` +
+		"(session_id is already filled in for you; " +
+		"model + branch are optional but worth passing — " +
+		"the model identifier looks like \"claude-opus-4-7\" or \"claude-sonnet-4-6\"). " +
+		"This completes the registration; ack this dispatch via `reply` once you've called register."
+}
 
 func (c *localClient) EnsureSetupDispatch(ctx context.Context, repo *model.Repo, sessionID string) (*model.AgentDispatch, error) {
 	if repo == nil || sessionID == "" {
@@ -702,7 +709,7 @@ func (c *localClient) EnsureSetupDispatch(ctx context.Context, repo *model.Repo,
 	d, err := c.store.AddDispatch(store.AddDispatchIn{
 		RepoID:          repo.ID,
 		TargetSessionID: sessionID,
-		Payload:         setupDispatchPayload,
+		Payload:         buildSetupDispatchPayload(sessionID),
 		CreatedBy:       SetupDispatchCreator,
 	})
 	if err != nil {

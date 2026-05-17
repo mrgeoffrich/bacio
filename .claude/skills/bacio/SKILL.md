@@ -651,14 +651,17 @@ An agent picks dispatches up two ways:
   hook now writes only a minimal stub — `bacio agent list` filters those
   out by default (use `--all` to see them); they're invisible until
   `register` enriches the row. On startup the channel itself queues a
-  dispatch with `from="bacio-channel"` asking you to call `register`
-  with `{"session_id": "$CLAUDE_CODE_SESSION_ID", "model": "<your model id>",
-  "branch": "<your git branch>", "permission_mode": "<your permission
-  mode>", "mcp_version": "<serverInfo.version from initialize>"}` —
-  only `session_id` is required, but every extra field enriches the
-  session row. Pass `mcp_version` from the value the MCP server reported
-  at initialize so bacio can detect stale channel processes. Call
-  register, then ack the dispatch with `reply`.
+  dispatch with `from="bacio-channel"` whose JSON payload **already
+  carries the real session_id** — copy the payload verbatim, replacing
+  the `<your model id>` / `<your current git branch>` placeholders with
+  real values if you have them (or omit them — only `session_id` is
+  required). Optionally pass `permission_mode` and `mcp_version` (the
+  `serverInfo.version` the MCP server reported at initialize so bacio
+  can flag stale channel processes). Call register, then ack the
+  dispatch with `reply`. **Never paste the literal
+  `$CLAUDE_CODE_SESSION_ID` placeholder** — the validator refuses it
+  with a clear error (BACI-46 hardening); use the value the channel
+  pre-filled for you.
 
 Either way, acknowledge each handled dispatch with `bacio agent ack <id>
 --note "..."` (or the channel's `reply` tool). Acked/cancelled dispatches

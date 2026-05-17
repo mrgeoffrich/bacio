@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -284,6 +285,42 @@ func TestValidateSessionIDRejectsWhitespace(t *testing.T) {
 				t.Fatalf("expected error for %q, got nil", tc.input)
 			}
 		})
+	}
+}
+
+// TestValidateSessionIDRejectsPlaceholders locks in BACI-46: the
+// register MCP tool used to accept a literal "$CLAUDE_CODE_SESSION_ID"
+// (and worse) because the briefing carried it as an example. The
+// validator now refuses obvious placeholder strings up front, so a
+// confused agent's call surfaces a clear error rather than silently
+// writing a poisoned agent_sessions row.
+func TestValidateSessionIDRejectsPlaceholders(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{"literal env var", "$CLAUDE_CODE_SESSION_ID"},
+		{"braced env var", "${CLAUDE_CODE_SESSION_ID}"},
+		{"lowercase env var", "$claude_code_session_id"},
+		{"double-brace template", "{{session_id}}"},
+		{"single-brace template", "{session_id}"},
+		{"angle-bracket template", "<session_id>"},
+		{"unlisted dollar prefix", "$foo"},
+		{"stray brace", "abc{def"},
+		{"stray angle", "abc<def"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := ValidateSessionID(tc.input); err == nil {
+				t.Fatalf("expected error for %q, got nil", tc.input)
+			} else if !strings.Contains(err.Error(), "placeholder") {
+				t.Fatalf("error for %q does not mention placeholder: %v", tc.input, err)
+			}
+		})
+	}
+	// Positive control: a real UUID still passes.
+	if _, err := ValidateSessionID("698f641f-4df1-4880-ab89-0ab2693c115a"); err != nil {
+		t.Fatalf("real UUID rejected: %v", err)
 	}
 }
 
