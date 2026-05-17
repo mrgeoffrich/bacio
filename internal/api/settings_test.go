@@ -275,3 +275,87 @@ func TestPromptStatesResetHappy(t *testing.T) {
 		t.Fatalf("reset did not revert: got %v want %v", stored, want)
 	}
 }
+
+// ---------- board preferences (BACI-47/D) ----------
+
+func TestBoardPreferencesGetDefault(t *testing.T) {
+	ts, _ := newTestAPI(t, api.Options{})
+	resp, body := apiGet(t, ts.URL+"/settings/board-preferences")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d body: %s", resp.StatusCode, body)
+	}
+	var out struct {
+		HideEmptyColumns bool `json:"hide_empty_columns"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.HideEmptyColumns {
+		t.Fatalf("expected default false, got true")
+	}
+}
+
+func TestBoardPreferencesSetRoundTrip(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	resp, body := apiReq(t, "PUT", ts.URL+"/settings/board-preferences",
+		map[string]any{"hide_empty_columns": true},
+		map[string]string{"X-Actor": "agent-alice"})
+	if resp.StatusCode != 200 {
+		t.Fatalf("PUT status: %d body: %s", resp.StatusCode, body)
+	}
+	var out struct {
+		HideEmptyColumns bool `json:"hide_empty_columns"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !out.HideEmptyColumns {
+		t.Fatalf("PUT response did not echo true")
+	}
+	// GET should now reflect the write.
+	resp2, body2 := apiGet(t, ts.URL+"/settings/board-preferences")
+	if resp2.StatusCode != 200 {
+		t.Fatalf("GET status: %d body: %s", resp2.StatusCode, body2)
+	}
+	_ = json.Unmarshal(body2, &out)
+	if !out.HideEmptyColumns {
+		t.Fatalf("GET after PUT: hide_empty_columns is false")
+	}
+	stored, err := s.GetBoardHideEmptyColumns()
+	if err != nil || !stored {
+		t.Fatalf("store reads %v err=%v", stored, err)
+	}
+	assertHistoryOps(t, s, []string{"board_pref.update"})
+}
+
+func TestBoardPreferencesSetDryRun(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	resp, _ := apiReq(t, "PUT", ts.URL+"/settings/board-preferences?dry_run=true",
+		map[string]any{"hide_empty_columns": true},
+		map[string]string{"X-Actor": "agent-alice"})
+	if resp.StatusCode != 200 || resp.Header.Get("X-Dry-Run") != "applied" {
+		t.Fatalf("status: %d header=%q", resp.StatusCode, resp.Header.Get("X-Dry-Run"))
+	}
+	stored, _ := s.GetBoardHideEmptyColumns()
+	if stored {
+		t.Fatalf("dry-run wrote pref")
+	}
+	assertHistoryOps(t, s, nil)
+}
+
+func TestBoardPreferencesSetUnknownField(t *testing.T) {
+	ts, _ := newTestAPI(t, api.Options{})
+	resp, _ := apiReq(t, "PUT", ts.URL+"/settings/board-preferences",
+		map[string]any{"hide_empty_columns": true, "bogus": 1}, nil)
+	if resp.StatusCode != 400 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+}
+
+func TestBoardPreferencesAuthRequired(t *testing.T) {
+	ts, _ := newTestAPI(t, api.Options{Token: "secret"})
+	resp, _ := apiGet(t, ts.URL+"/settings/board-preferences")
+	if resp.StatusCode != 401 {
+		t.Fatalf("expected 401, got %d", resp.StatusCode)
+	}
+}

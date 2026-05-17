@@ -61,13 +61,11 @@ export default function SettingsView({
 
   useEffect(() => {
     let cancelled = false;
-    // The prompt-templates surface is hidden entirely in WEB_MODE
-    // (the CRUD verbs live in app_settings, which has no HTTP parity
-    // yet). Only the bacio-version readout matters there.
-    const tasks = WEB_MODE
-      ? [Promise.resolve([]), Promise.resolve([]), api.bacioVersion()]
-      : [refreshTemplates(), api.promptPlaceholders(), api.bacioVersion()];
-    Promise.all(tasks)
+    // BACI-47/B+C: the per-template body + state-gate editors are wired
+    // in web mode against the BACI-36 REST routes; only the typed
+    // CRUD affordances (add / rename / delete / restore-defaults) stay
+    // hidden until that REST surface lands.
+    Promise.all([refreshTemplates(), api.promptPlaceholders(), api.bacioVersion()])
       .then(([, ph, ver]) => {
         if (cancelled) return;
         setPlaceholders(ph);
@@ -214,36 +212,32 @@ export default function SettingsView({
           </div>
         </section>
 
-        {!WEB_MODE && (
-          <section className="mk-settings-row">
-            <div className="mk-settings-row-text">
-              <div className="mk-settings-label">Hide empty board columns</div>
-              <div className="mk-settings-hint">Columns with no cards are hidden from the board.</div>
-            </div>
-            <div className="mk-segmented" role="group" aria-label="Hide empty board columns">
-              {HIDE_EMPTY_OPTIONS.map(opt => (
-                <button
-                  key={String(opt.id)}
-                  className={`mk-segmented-btn ${hideEmptyColumns === opt.id ? 'is-active' : ''}`}
-                  aria-pressed={hideEmptyColumns === opt.id}
-                  onClick={() => onChangeHideEmptyColumns(opt.id)}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          </section>
-        )}
+        <section className="mk-settings-row">
+          <div className="mk-settings-row-text">
+            <div className="mk-settings-label">Hide empty board columns</div>
+            <div className="mk-settings-hint">Columns with no cards are hidden from the board.</div>
+          </div>
+          <div className="mk-segmented" role="group" aria-label="Hide empty board columns">
+            {HIDE_EMPTY_OPTIONS.map(opt => (
+              <button
+                key={String(opt.id)}
+                className={`mk-segmented-btn ${hideEmptyColumns === opt.id ? 'is-active' : ''}`}
+                aria-pressed={hideEmptyColumns === opt.id}
+                onClick={() => onChangeHideEmptyColumns(opt.id)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </section>
 
-        {!WEB_MODE && (
         <section className="mk-settings-section">
           <div className="mk-settings-row-text">
             <div className="mk-settings-label">Prompt templates</div>
             <div className="mk-settings-hint">
-              The instruction sent to an agent when you dispatch a job at each template,
-              and the issue states each template's prompt can be launched from. You can
-              add, rename, and delete templates here — built-ins can be deleted too, and
-              "Restore built-ins" re-seeds any that are missing.
+              {WEB_MODE
+                ? "The instruction sent to an agent when you dispatch a job at each template, and the issue states each template's prompt can be launched from."
+                : "The instruction sent to an agent when you dispatch a job at each template, and the issue states each template's prompt can be launched from. You can add, rename, and delete templates here — built-ins can be deleted too, and \"Restore built-ins\" re-seeds any that are missing."}
             </div>
           </div>
           {placeholders.length > 0 && (
@@ -258,27 +252,29 @@ export default function SettingsView({
             </div>
           )}
 
-          <div className="mk-tmpl-toolbar">
-            <button
-              className="mk-segmented-btn"
-              onClick={() => setAdding(adding ? null : { ...EMPTY_NEW_TEMPLATE })}
-              disabled={savingSlug !== null}
-            >
-              {adding ? 'Cancel add' : '+ Add template'}
-            </button>
-            <button
-              className="mk-segmented-btn"
-              onClick={() => setPendingRestore(true)}
-              disabled={savingSlug !== null || missingBuiltins.length === 0}
-              title={missingBuiltins.length === 0
-                ? 'Every built-in template is already present'
-                : `Will re-seed: ${missingBuiltins.join(', ')}`}
-            >
-              Restore built-ins{missingBuiltins.length > 0 ? ` (${missingBuiltins.length})` : ''}
-            </button>
-          </div>
+          {!WEB_MODE && (
+            <div className="mk-tmpl-toolbar">
+              <button
+                className="mk-segmented-btn"
+                onClick={() => setAdding(adding ? null : { ...EMPTY_NEW_TEMPLATE })}
+                disabled={savingSlug !== null}
+              >
+                {adding ? 'Cancel add' : '+ Add template'}
+              </button>
+              <button
+                className="mk-segmented-btn"
+                onClick={() => setPendingRestore(true)}
+                disabled={savingSlug !== null || missingBuiltins.length === 0}
+                title={missingBuiltins.length === 0
+                  ? 'Every built-in template is already present'
+                  : `Will re-seed: ${missingBuiltins.join(', ')}`}
+              >
+                Restore built-ins{missingBuiltins.length > 0 ? ` (${missingBuiltins.length})` : ''}
+              </button>
+            </div>
+          )}
 
-          {adding && (
+          {adding && !WEB_MODE && (
             <div className="mk-tmpl mk-tmpl-adding">
               <div className="mk-tmpl-head">
                 <span className="mk-tmpl-label">New template</span>
@@ -374,20 +370,24 @@ export default function SettingsView({
                         Reset body
                       </button>
                     )}
-                    <button
-                      className="mk-tmpl-reset"
-                      disabled={busy}
-                      onClick={() => setRenaming({ slug: t.slug, newSlug: t.slug, newName: t.label })}
-                    >
-                      Rename
-                    </button>
-                    <button
-                      className="mk-tmpl-reset"
-                      disabled={busy}
-                      onClick={() => setPendingDelete(t.slug)}
-                    >
-                      Delete
-                    </button>
+                    {!WEB_MODE && (
+                      <button
+                        className="mk-tmpl-reset"
+                        disabled={busy}
+                        onClick={() => setRenaming({ slug: t.slug, newSlug: t.slug, newName: t.label })}
+                      >
+                        Rename
+                      </button>
+                    )}
+                    {!WEB_MODE && (
+                      <button
+                        className="mk-tmpl-reset"
+                        disabled={busy}
+                        onClick={() => setPendingDelete(t.slug)}
+                      >
+                        Delete
+                      </button>
+                    )}
                   </div>
                 </div>
                 <textarea
@@ -429,8 +429,12 @@ export default function SettingsView({
               </div>
             );
           })}
+          {WEB_MODE && (
+            <p className="mk-settings-hint">
+              Add, rename, delete, and restore-defaults for templates from the desktop app.
+            </p>
+          )}
         </section>
-        )}
 
         <section className="mk-settings-row">
           <div className="mk-settings-row-text">

@@ -477,17 +477,51 @@ export async function listDocs(repoPrefix: string, typeFilter = ''): Promise<Doc
   }));
 }
 
+interface ApiDispatch {
+  id: number;
+  issue_key?: string;
+  target_agent_name?: string;
+  mode?: string;
+  status: string;
+  payload?: string;
+  created_by?: string;
+  created_at: string;
+}
+
+function reshapeDispatch(d: ApiDispatch): DispatchDTO {
+  return {
+    id: d.id,
+    issueKey: d.issue_key ?? '',
+    targetAgent: d.target_agent_name ?? '',
+    mode: d.mode ?? '',
+    status: d.status,
+    payload: d.payload ?? '',
+    createdBy: d.created_by ?? '',
+    createdAt: d.created_at,
+  };
+}
+
+// dispatchIssue queues a state-gated auto-pick dispatch (BACI-40). The
+// server re-checks the stage's state-gate against the issue's current
+// state and picks the most-recently-active free agent — the caller
+// names neither an agent nor a note. Errors from the server (no free
+// agent / state-gate mismatch) come back as the error envelope and
+// surface through reportError() up in App.jsx.
 export async function dispatchIssue(
-  _repoPrefix: string,
-  _issueKey: string,
-  _mode: string,
+  repoPrefix: string,
+  issueKey: string,
+  mode: string,
 ): Promise<DispatchDTO> {
-  // POST /repos/{prefix}/agents/dispatches exists (BACI-35) but the
-  // desktop's DispatchIssue auto-picks an agent and re-checks the
-  // state-gate before submitting — neither is server-side today. The
-  // per-card action button is hidden in WEB_MODE; this stub is the
-  // belt-and-braces second line.
-  throw new WebModeUnavailableError('Dispatch agent (auto-pick)');
+  if (!repoPrefix || repoPrefix === 'all') {
+    const i = issueKey.lastIndexOf('-');
+    if (i <= 0) throw new Error(`invalid issue key: ${issueKey}`);
+    repoPrefix = issueKey.slice(0, i);
+  }
+  const raw = await call<ApiDispatch>(
+    `/repos/${repoPrefix}/issues/${issueKey}/dispatch`,
+    { method: 'POST', body: { mode } },
+  );
+  return reshapeDispatch(raw);
 }
 
 interface ApiBoardCard {
@@ -670,21 +704,104 @@ export async function saveDoc(
   return getDoc(repoPrefix, filename);
 }
 
-// ---------- Local-only stubs ----------
+// ---------- Prompt templates (BACI-47/B+C) ----------
 //
-// Prompt-template typed CRUD (add/rename/delete/restore) and the board
-// preferences ride on the local `app_settings` table — they have no
-// HTTP parity today. Body + state-gate CRUD landed in BACI-36 but is
-// global config; safer to keep all prompt-template editing in the
-// desktop app and have the web build hide the Settings → prompts
-// subsection entirely.
+// Body + state-gate CRUD landed in BACI-36 (PUT/DELETE
+// /settings/templates/{mode} and …/{mode}/states); the list endpoints
+// (GET /settings/templates, /settings/templates/states) round it out.
+// Web mode wires the per-template body textarea + state chips against
+// those routes; the typed CRUD (add/rename/delete/restore-defaults)
+// is still local-only — the four stubs below throw and the matching
+// affordances are hidden in SettingsView.
+
+// Built-in slugs + display labels mirror model.BuiltinTemplateSlugs() /
+// BuiltinTemplateLabel(); the REST surface doesn't carry the template's
+// display name (it's a `prompt_templates.name` column, not in the
+// app_settings-era GET maps), so the web bundle derives it client-side.
+const BUILTIN_SLUGS = new Set(['plan', 'implement', 'review', 'ship', 'fix_review']);
+const BUILTIN_LABELS: Record<string, string> = {
+  plan: 'Plan',
+  implement: 'Implement',
+  review: 'Review',
+  ship: 'Ship',
+  fix_review: 'Fix review',
+};
+function deriveLabel(slug: string): string {
+  // Built-ins have known display names; user-created slugs fall back
+  // to a title-cased version of the slug ("spike" → "Spike").
+  if (BUILTIN_LABELS[slug]) return BUILTIN_LABELS[slug];
+  return slug.replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
 
 export async function listPromptTemplates(): Promise<PromptTemplateDTO[]> {
-  // Returning [] (rather than throwing) keeps App.jsx's mount-time
-  // Promise.all happy when web mode hides the per-card dispatch
-  // button — the prompts list is read for that button's menu, and an
-  // empty list means "no menu", which is the correct hidden behaviour.
-  return [];
+  // Parallel fetch — both maps are small and the two requests are
+  // independent. /settings/templates is the authoritative source of
+  // slugs; a slug missing from /settings/templates/states reads as an
+  // empty state-gate (CLI-only template).
+  const [bodies, states] = await Promise.all([
+    call<Record<string, string>>('/settings/templates'),
+    call<Record<string, string[]>>('/settings/templates/states'),
+  ]);
+  // Stable, alphabetical iteration order — the desktop bindings use
+  // the store's insertion order, but the REST map is unordered.
+  const slugs = Object.keys(bodies).sort();
+  return slugs.map(slug => ({
+    slug,
+    mode: slug,
+    label: deriveLabel(slug),
+    body: bodies[slug],
+    // Embedded defaults aren't on the REST surface. The desktop's
+    // "Reset body" path uses these to render an indicator; web mode
+    // lives without it for now.
+    default: '',
+    isBuiltin: BUILTIN_SLUGS.has(slug),
+    isDefault: false,
+    allowedStates: states[slug] ?? [],
+    defaultStates: [],
+    statesAreDefault: false,
+  }));
+}
+
+// Refetch both maps and return the one DTO the caller updated — gives
+// the SettingsView setter the freshly resolved row without separately
+// fetching the body and state-gate.
+async function refreshOneTemplate(slug: string): Promise<PromptTemplateDTO> {
+  const all = await listPromptTemplates();
+  const found = all.find(t => t.slug === slug);
+  if (!found) throw new Error(`template ${slug} not found after save`);
+  return found;
+}
+
+export async function savePromptTemplate(
+  mode: string,
+  body: string,
+): Promise<PromptTemplateDTO> {
+  // Empty body = reset to default. BACI-36's PUT rejects an empty body
+  // explicitly; the documented contract is to DELETE for reset.
+  if (body === '') {
+    await call<unknown>(`/settings/templates/${mode}`, { method: 'DELETE' });
+  } else {
+    await call<unknown>(`/settings/templates/${mode}`, {
+      method: 'PUT',
+      body: { body },
+    });
+  }
+  return refreshOneTemplate(mode);
+}
+
+export async function savePromptStates(
+  mode: string,
+  states: string[],
+): Promise<PromptTemplateDTO> {
+  if (states.length === 0) {
+    await call<unknown>(`/settings/templates/${mode}/states`, { method: 'DELETE' });
+  } else {
+    await call<unknown>(`/settings/templates/${mode}/states`, {
+      method: 'PUT',
+      body: { states },
+    });
+  }
+  return refreshOneTemplate(mode);
 }
 
 export async function addPromptTemplate(): Promise<PromptTemplateDTO> {
@@ -704,38 +821,35 @@ export async function restoreBuiltinPromptTemplates(): Promise<PromptTemplateDTO
 }
 
 export async function promptPlaceholders(): Promise<string[]> {
-  // Mirror internal/model/prompt.go:PromptTemplateTokens — only used
-  // by the Settings panel, which is hidden in web mode. Returning the
-  // canonical set rather than [] so any future caller still works.
+  // Mirror internal/model/prompt.go:PromptTemplateTokens. The REST
+  // surface doesn't return the token list separately, but it's a
+  // small fixed set — render the canonical names client-side.
   return ['issue_id', 'issue_title', 'repo_prefix'];
 }
 
+// ---------- Bacio version (BACI-47/A) ----------
+
 export async function bacioVersion(): Promise<string> {
-  // No HTTP equivalent yet — surface a string the Settings panel can
-  // render. The web build is hosted by `bacio api`, so the binary
-  // *does* have a version, but exposing it would mean a new endpoint.
-  // Punt to the v2 follow-up; "web" makes the placeholder grep-able.
-  return 'web';
+  const res = await call<{ version: string }>('/version');
+  return res.version;
 }
 
-export async function savePromptTemplate(): Promise<PromptTemplateDTO> {
-  throw new WebModeUnavailableError('Save prompt template body');
-}
-
-export async function savePromptStates(): Promise<PromptTemplateDTO> {
-  throw new WebModeUnavailableError('Save prompt template state-gate');
-}
+// ---------- Board preferences (BACI-47/D) ----------
 
 export async function getBoardPreferences(): Promise<BoardPreferencesDTO> {
-  // Safe default: show every column. Persistence lives in
-  // app_settings, which is local-only — the toggle is hidden from
-  // Settings in WEB_MODE.
-  return { hideEmptyColumns: false };
+  const res = await call<{ hide_empty_columns: boolean }>('/settings/board-preferences');
+  return { hideEmptyColumns: res.hide_empty_columns };
 }
 
-export async function setBoardPreferences(_hideEmptyColumns: boolean): Promise<BoardPreferencesDTO> {
-  throw new WebModeUnavailableError('Set board preferences');
+export async function setBoardPreferences(hideEmptyColumns: boolean): Promise<BoardPreferencesDTO> {
+  const res = await call<{ hide_empty_columns: boolean }>('/settings/board-preferences', {
+    method: 'PUT',
+    body: { hide_empty_columns: hideEmptyColumns },
+  });
+  return { hideEmptyColumns: res.hide_empty_columns };
 }
+
+// ---------- Local-only stubs ----------
 
 export async function getLeaderStatus(): Promise<LeaderStatusDTO> {
   // The browser doesn't run the leader election (per-process Wails

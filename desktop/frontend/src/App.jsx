@@ -309,10 +309,20 @@ export default function App() {
       .catch(err => reportError(err, { headline: "Couldn't dispatch agent" }));
   };
 
+  // Ship: close the drawer, optimistically flip the card to "done", and
+  // persist via setIssueState so the change survives the next 10s poll.
+  // Mirrors moveCard's shape; on failure, refresh from the source of
+  // truth rather than try to restore the (already-discarded) old state.
   const ship = () => {
     if (!openIssue) return;
-    setCards(cs => cs.map(c => c.key === openIssue.key ? { ...c, column: 'done' } : c));
+    const key = openIssue.key;
     setOpenIssue(null);
+    setCards(cs => cs.map(c => c.key === key ? { ...c, column: 'done' } : c));
+    api.setIssueState(activeBoard, key, 'done')
+      .catch(err => {
+        reportError(err, { headline: "Couldn't ship issue" });
+        refreshCards();
+      });
   };
 
   // The edit modal returns the refreshed IssueDetail after each write, so the
