@@ -1008,7 +1008,8 @@ bacio api --cors-origin http://localhost:5174   # opt in to cross-origin browser
 ```
 
 `GET /ui/` serves the BACI-30 web bundle when one was compiled in
-(via `./build.sh --web` populating `webui/` before `go build`).
+(via `./build.sh` populating `webui/` before `go build` — the web
+bundle now builds by default; pass `--skip-web` to opt out).
 Same-origin loopback is the recommended deployment; `--cors-origin`
 exists for dev rigs and split-host setups. Durable reference:
 `docs/web-app-mode.md`.
