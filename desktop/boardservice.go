@@ -129,6 +129,14 @@ type ClaimDTO struct {
 	State     string    `json:"state"`
 }
 
+// SessionTodoDTO is one row of the agent's mirrored TodoWrite list,
+// shaped for the Agents screen. Status is one of pending|in_progress|
+// completed, surfaced verbatim so the frontend can pick its glyph.
+type SessionTodoDTO struct {
+	Content string `json:"content"`
+	Status  string `json:"status"`
+}
+
 // DispatchDTO is one queued dispatch — returned both inside an AgentCard
 // (the agent's drill-down) and from DispatchIssue (the new write).
 type DispatchDTO struct {
@@ -183,6 +191,14 @@ type AgentCard struct {
 	LastSeenAt          time.Time     `json:"lastSeenAt"`
 	Claims              []ClaimDTO    `json:"claims"`
 	Dispatches          []DispatchDTO `json:"dispatches"`
+	// Todos mirrors the agent's TodoWrite list (BACI-45). Populated by
+	// ListAgents from the bulk ListTodosBySessions read; empty array
+	// when the agent hasn't run TodoWrite this session. TodosDone /
+	// TodosTotal are pre-computed server-side so the React component
+	// doesn't reduce the array twice per render.
+	Todos      []SessionTodoDTO `json:"todos"`
+	TodosDone  int              `json:"todosDone"`
+	TodosTotal int              `json:"todosTotal"`
 }
 
 // BoardService is the Wails-bound API the kanban frontend talks to. It
@@ -539,6 +555,19 @@ func (b *BoardService) ListAgents(repoPrefix string) ([]AgentCard, error) {
 		return nil, err
 	}
 
+	// Bulk-read each session's TodoWrite mirror in one query, then
+	// fan back out by session PK — mirrors the OpenClaimsBySession
+	// hydration pattern so the 10s agents poll stays a single round
+	// trip per repo.
+	sessionIDs := make([]string, 0, len(sessions))
+	for _, s := range sessions {
+		sessionIDs = append(sessionIDs, s.SessionID)
+	}
+	todosByPK, err := b.client.ListTodosBySessions(ctx, sessionIDs)
+	if err != nil {
+		return nil, err
+	}
+
 	// Gather dispatches across the in-scope repos once, then bucket them
 	// onto each session.
 	var allDispatches []*model.AgentDispatch
@@ -586,6 +615,18 @@ func (b *BoardService) ListAgents(repoPrefix string) ([]AgentCard, error) {
 		stale := s.ChannelVersion != "" &&
 			current != "" && current != "dev" &&
 			s.ChannelVersion != current
+		sessTodos := todosByPK[s.ID]
+		todosDTO := make([]SessionTodoDTO, 0, len(sessTodos))
+		todosDone := 0
+		for _, t := range sessTodos {
+			todosDTO = append(todosDTO, SessionTodoDTO{
+				Content: t.Content,
+				Status:  string(t.Status),
+			})
+			if t.Status == model.TodoCompleted {
+				todosDone++
+			}
+		}
 		card := AgentCard{
 			SessionID:         s.SessionID,
 			AgentName:         s.AgentName,
@@ -600,6 +641,9 @@ func (b *BoardService) ListAgents(repoPrefix string) ([]AgentCard, error) {
 			LastSeenAt:        s.LastSeenAt,
 			Claims:            []ClaimDTO{},
 			Dispatches:        []DispatchDTO{},
+			Todos:             todosDTO,
+			TodosDone:         todosDone,
+			TodosTotal:        len(todosDTO),
 		}
 		view, err := b.client.ShowAgentSession(ctx, s.SessionID)
 		if err != nil {

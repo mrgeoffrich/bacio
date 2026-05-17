@@ -44,6 +44,7 @@ func newHookCmd() *cobra.Command {
 		hookUserPromptSubmitCmd(),
 		hookStopCmd(),
 		hookSessionEndCmd(),
+		hookPostToolUseCmd(),
 	)
 	return cmd
 }
@@ -398,6 +399,104 @@ func hookStopCmd() *cobra.Command {
 			if sess := h.heartbeatOrRegister(); sess != nil {
 				h.linkChannel(sess.SessionID)
 				h.syncClaimedIssueStates(sess.SessionID, true)
+			}
+			return nil
+		},
+	}
+}
+
+// ---------- post-tool-use ----------
+
+// postToolUseInput is the slice of the Claude Code PostToolUse payload
+// the TodoWrite mirror cares about. The decoder ignores unknown
+// fields, so this is a strict subset (no need to teach it about every
+// other tool's input shape).
+type postToolUseInput struct {
+	SessionID     string `json:"session_id"`
+	CWD           string `json:"cwd"`
+	HookEventName string `json:"hook_event_name"`
+	ToolName      string `json:"tool_name"`
+	ToolInput     struct {
+		Todos []struct {
+			Content string `json:"content"`
+			Status  string `json:"status"`
+			// activeForm / id / priority deliberately ignored in v1
+		} `json:"todos"`
+	} `json:"tool_input"`
+}
+
+func readPostToolUseInput() (*postToolUseInput, error) {
+	raw, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return nil, err
+	}
+	var in postToolUseInput
+	if len(strings.TrimSpace(string(raw))) == 0 {
+		return &in, nil
+	}
+	if err := json.Unmarshal(raw, &in); err != nil {
+		return nil, fmt.Errorf("parse hook input: %w", err)
+	}
+	return &in, nil
+}
+
+func hookPostToolUseCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:    "post-tool-use",
+		Short:  "PostToolUse hook (matcher: TodoWrite): mirror the agent's TodoWrite list",
+		Args:   cobra.NoArgs,
+		Hidden: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			in, err := readPostToolUseInput()
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "bacio hook post-tool-use:", err)
+				return nil
+			}
+			// Belt-and-braces: the matcher in settings.json already gates
+			// this to TodoWrite, but if Claude Code ever broadens the
+			// matcher syntax behind us, ignore non-TodoWrite events
+			// rather than mirror them into the wrong table.
+			if in.ToolName != "" && in.ToolName != "TodoWrite" {
+				return nil
+			}
+			if in.SessionID == "" {
+				return nil // nothing to correlate against
+			}
+
+			// The agent registry is local-only, so the hook always talks
+			// to the local SQLite store — --remote is intentionally
+			// ignored (matches the other four hooks). Unlike them we
+			// skip the git.Detect + EnsureRepo dance: the FK is to
+			// agent_sessions, not repos, so no working-directory context
+			// is needed. Less plumbing, less startup latency on a
+			// high-frequency hook, no spurious "not in a git repo"
+			// stderr noise if the agent runs TodoWrite from a non-git
+			// scratch dir.
+			c, err := client.Open(context.Background(), client.Options{
+				DBPath: opts.dbPath,
+				Actor:  actor(),
+			})
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "bacio hook post-tool-use: open:", err)
+				return nil
+			}
+			defer c.Close()
+
+			todos := make([]model.SessionTodo, 0, len(in.ToolInput.Todos))
+			for i, t := range in.ToolInput.Todos {
+				st, err := model.ParseTodoStatus(t.Status)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "bacio hook post-tool-use: skip bad status %q at position %d: %v\n", t.Status, i, err)
+					return nil // drop the whole batch — partial mirrors are misleading
+				}
+				todos = append(todos, model.SessionTodo{
+					Position: i,
+					Content:  t.Content,
+					Status:   st,
+				})
+			}
+			if err := c.ReplaceSessionTodos(context.Background(), in.SessionID, todos); err != nil {
+				fmt.Fprintln(os.Stderr, "bacio hook post-tool-use: replace:", err)
 			}
 			return nil
 		},

@@ -44,12 +44,11 @@ export function AddRepository(): $CancellablePromise<$models.Board> {
 
 /**
  * DispatchIssue queues a dispatch against an issue for a given job stage
- * (mode). The agent is auto-picked — the most-recently-active free
- * (live, not busy) agent — rather than chosen by the caller. The mode
- * must also be valid to run from the issue's current state (the
- * per-card action button gates on this; this is the backing guard).
- * repoPrefix may be empty or "all" — the prefix is then derived from the
- * canonical issue key.
+ * (mode). The state-gate check and the free-agent auto-pick both live
+ * on client.Client.AutoDispatchIssue (BACI-40), so the per-card button,
+ * the REST route, and the CLI's target-less `bacio agent dispatch`
+ * share the same picker + gate. repoPrefix may be empty or "all" — the
+ * prefix is then derived from the canonical issue key.
  */
 export function DispatchIssue(repoPrefix: string, issueKey: string, mode: string): $CancellablePromise<$models.DispatchDTO> {
     return $Call.ByID(715303058, repoPrefix, issueKey, mode).then(($result: any) => {

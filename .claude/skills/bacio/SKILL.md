@@ -776,16 +776,17 @@ body) or `rm` it.
 
 ### Hook integration — automatic registration & supervision
 
-`bacio install-hooks` merges four command hooks into the repo's
+`bacio install-hooks` merges command hooks into the repo's
 `.claude/settings.json` (it prints the plan and prompts first — pass
 `--yes` to accept non-interactively):
 
-| Event            | What `bacio hook <event>` does                                       |
-| ---------------- | -------------------------------------------------------------------- |
-| SessionStart     | mints + records the identity in `.bacio/agents.json` if absent, registers the session, injects assigned issues + claims |
-| UserPromptSubmit | heartbeats; flips claimed `needs_action` issues back to `in_progress`; nudges on open claims; drains pending dispatches |
-| Stop             | heartbeats; flips claimed `in_progress` issues to `needs_action` (the precise "agent parked" signal) |
-| SessionEnd       | ends the session, auto-releasing every open claim                    |
+| Event                              | What `bacio hook <event>` does                                       |
+| ---------------------------------- | -------------------------------------------------------------------- |
+| SessionStart                       | mints + records the identity in `.bacio/agents.json` if absent, registers the session, injects assigned issues + claims |
+| UserPromptSubmit                   | heartbeats; flips claimed `needs_action` issues back to `in_progress`; nudges on open claims; drains pending dispatches |
+| Stop                               | heartbeats; flips claimed `in_progress` issues to `needs_action` (the precise "agent parked" signal) |
+| SessionEnd                         | ends the session, auto-releasing every open claim                    |
+| PostToolUse (matcher: `TodoWrite`) | mirrors the agent's TodoWrite list into `agent_session_todos`; surfaced as an `n/m` badge + drill-down list in the TUI/desktop Agents view (BACI-45) |
 
 With hooks installed, an agent no longer has to call `bacio agent register`
 / `heartbeat` / `end` by hand — the registry stays in sync automatically,
@@ -998,7 +999,7 @@ A few non-obvious mappings:
 - **`POST /repos`** is the equivalent of `bacio init`, but the server can't see your CWD — supply `{"name":"...", "path":"..."}` (plus optional `prefix`) explicitly.
 - **`GET /repos/{prefix}/documents/{filename}/download`** is the only non-JSON endpoint. Streams the body as `text/markdown` with `Content-Disposition: attachment`. No audit row, no dry-run, no `with_content`. The API never reads or writes the server filesystem, so callers materialise on disk by piping the response (`curl -O`).
 - **CLI verbs with no API equivalent** (touch the local filesystem or terminal): `bacio init` (use `POST /repos`), `bacio install-skill`, `bacio install-hooks`, `bacio install-channel`, `bacio doc add --from-path` / `--content-file` (inline `content` in the body), `bacio doc export` (use `/download`), `bacio tui`, `bacio hook *`, `bacio channel`. Plus the `bacio settings template ...` and board-preference verbs (local-only at the CLI; the legacy prompt-template HTTP endpoints below are reachable directly).
-- **Agent registry endpoints.** The dozen register/heartbeat/end/claim/release/list/show/inbox/ack/dispatch/list-dispatches-in-repo/auto-dispatch verbs reach the server under `/repos/{prefix}/agents/sessions` (register, list-in-repo, list-open-claims-in-repo), `/repos/{prefix}/agents/dispatches` (BACI-35: create + list-in-repo), `/repos/{prefix}/issues/{key}/dispatch` (BACI-40: state-gated auto-pick), and `/agents/sessions/{session_id}/...` (heartbeat/end/claim/release/inbox + show), plus `/agents/dispatches/{id}/ack`. Cross-repo variants of the two lists live at `/agents/sessions` and `/agents/claims/open`. Stub sessions (`registered_at` NULL) are hidden by default on the list endpoints — pass `?all=true` to include them.
+- **Agent registry endpoints.** The dozen register/heartbeat/end/claim/release/list/show/inbox/ack/dispatch/list-dispatches-in-repo/auto-dispatch verbs reach the server under `/repos/{prefix}/agents/sessions` (register, list-in-repo, list-open-claims-in-repo), `/repos/{prefix}/agents/dispatches` (BACI-35: create + list-in-repo), `/repos/{prefix}/issues/{key}/dispatch` (BACI-40: state-gated auto-pick), and `/agents/sessions/{session_id}/...` (heartbeat/end/claim/release/inbox/todos + show), plus `/agents/dispatches/{id}/ack`. `GET /agents/sessions/{session_id}/todos` (BACI-45) returns the session's current TodoWrite mirror — read-only, writes are hook-driven only. Cross-repo variants of the two lists live at `/agents/sessions` and `/agents/claims/open`. Stub sessions (`registered_at` NULL) are hidden by default on the list endpoints — pass `?all=true` to include them.
 - **Prompt-template endpoints (BACI-36).** Bodies and state-gates are global app-settings, not repo-scoped. `GET /settings/templates` returns the resolved body for every dispatch stage (a `mode → body` map); `GET /settings/templates/states` returns the state-gate map. Per-stage mutations live at `PUT/DELETE /settings/templates/{mode}` (body) and `PUT/DELETE /settings/templates/{mode}/states` (state-gate). An empty body/list on PUT is rejected — use DELETE to revert to the built-in default. Dry-run + `X-Dry-Run` header work as elsewhere. The newer typed CRUD (add/rename/delete/restore-defaults) does not yet have HTTP parity.
 
 For the full design rationale, threat model, and what the API deliberately doesn't do (NDJSON, per-user auth, CORS, cursor pagination, …), see `docs/rest-api-design.md`.

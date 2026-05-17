@@ -496,6 +496,23 @@ func (c *localClient) ListOpenClaims(ctx context.Context, repo *model.Repo) ([]*
 	return out, nil
 }
 
+// ReplaceSessionTodos / ListSessionTodos / ListTodosBySessions are
+// thin pass-throughs to the store. The post-tool-use hook drives the
+// write side; the desktop/TUI agent views drive the read side. No
+// audit row — TodoWrite is high-frequency, like heartbeats; flooding
+// `bacio history` would drown the audit log.
+func (c *localClient) ReplaceSessionTodos(ctx context.Context, sessionID string, todos []model.SessionTodo) error {
+	return c.store.ReplaceSessionTodos(sessionID, todos)
+}
+
+func (c *localClient) ListSessionTodos(ctx context.Context, sessionID string) ([]model.SessionTodo, error) {
+	return c.store.ListSessionTodos(sessionID)
+}
+
+func (c *localClient) ListTodosBySessions(ctx context.Context, sessionIDs []string) (map[int64][]model.SessionTodo, error) {
+	return c.store.ListTodosBySessions(sessionIDs)
+}
+
 func agentRegisterDetails(sess *model.AgentSession) string {
 	var parts []string
 	if sess.AgentName != "" {

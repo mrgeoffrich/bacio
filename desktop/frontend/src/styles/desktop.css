@@ -446,6 +446,38 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
+/* TodoWrite mirror (BACI-45) — n/m badge on the card header, plus the
+   per-row list in the drill-down. Borrows the kit's pill chrome via
+   .mk-pill; the muted palette keeps it from drowning out the status
+   pill next to it. */
+.mk-todos-badge {
+  background: var(--bg-4); color: var(--fg-2);
+}
+.mk-agent-todo {
+  display: flex; align-items: baseline; gap: 8px;
+  font-size: 13px; color: var(--fg-2);
+}
+.mk-agent-todo-glyph {
+  font-family: var(--font-mono); font-size: 14px; line-height: 1;
+  color: var(--fg-3); min-width: 14px; text-align: center;
+}
+.mk-agent-todo-text { flex: 1; }
+/* Per-status emphasis: completed reads muted + struck-through, the
+   in-progress row is bold so a glance at the list lands on what the
+   agent is doing right now. */
+.mk-agent-todo--completed .mk-agent-todo-text {
+  color: var(--fg-3); text-decoration: line-through;
+}
+.mk-agent-todo--completed .mk-agent-todo-glyph {
+  color: var(--status-doing);
+}
+.mk-agent-todo--in_progress .mk-agent-todo-text {
+  font-weight: 600; color: var(--fg-1);
+}
+.mk-agent-todo--in_progress .mk-agent-todo-glyph {
+  color: var(--status-claude);
+}
+
 /* Claimed-by block in the issue drawer — the per-issue claim history. */
 .mk-claimant-list {
   list-style: none; margin: 0; padding: 0;

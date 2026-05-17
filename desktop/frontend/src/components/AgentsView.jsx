@@ -12,6 +12,20 @@ function relTime(iso) {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+// todoGlyph maps a TodoWrite status to the leading glyph rendered in
+// the per-agent drill-down. Mirrors the TUI's vocabulary so an operator
+// can switch between them without re-learning.
+function todoGlyph(status) {
+  switch (status) {
+    case 'completed':
+      return '●';
+    case 'in_progress':
+      return '◐';
+    default:
+      return '○';
+  }
+}
+
 // AgentsView is the desktop Agents screen: a full-page list with a card per
 // agent session connected to the current repo, click-to-expand into its open
 // claims and dispatches. Read-only — agents are dispatched work from the issue
@@ -53,6 +67,11 @@ export default function AgentsView({ agents, onRefresh }) {
                     <span className="mk-pill mk-status-busy">busy · {a.busyIssue}</span>
                   )
                 )}
+                {a.todosTotal > 0 && (
+                  <span className="mk-pill mk-todos-badge">
+                    todos {a.todosDone}/{a.todosTotal}
+                  </span>
+                )}
                 <span className="mk-agent-meta">
                   {a.model || '—'} · {a.branch || '—'} · seen {relTime(a.lastSeenAt)}
                 </span>
@@ -75,6 +94,25 @@ export default function AgentsView({ agents, onRefresh }) {
                           <span className="mk-tag">needs action</span>
                         )}
                         {c.prompt && <span className="mk-agent-claim-prompt">{c.prompt}</span>}
+                      </div>
+                    ))
+                  )}
+
+                  <div className="mk-agent-detail-label">
+                    Todos {a.todosTotal > 0 ? `(${a.todosDone}/${a.todosTotal})` : ''}
+                  </div>
+                  {!a.todos || a.todos.length === 0 ? (
+                    <div className="mk-meta-empty">none</div>
+                  ) : (
+                    a.todos.map((t, i) => (
+                      <div
+                        key={i}
+                        className={`mk-agent-todo mk-agent-todo--${t.status}`}
+                      >
+                        <span className="mk-agent-todo-glyph" aria-hidden>
+                          {todoGlyph(t.status)}
+                        </span>
+                        <span className="mk-agent-todo-text">{t.content}</span>
                       </div>
                     ))
                   )}
