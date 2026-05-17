@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/mrgeoffrich/bacio/internal/agentmode"
 	"github.com/mrgeoffrich/bacio/internal/channel"
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/client"
@@ -137,6 +138,17 @@ to stderr.`,
 
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
+
+			// BACIO_AGENT_MODE gates the setup-dispatch poller. When
+			// unset, the MCP handshake and tool handlers (register,
+			// reply) stay reachable so an agent that wants to opt in
+			// mid-session still can — but no setup dispatch is queued
+			// and no drain runs, so an interactive Claude session in
+			// this project isn't auto-registered as an agent.
+			if !agentmode.Enabled() {
+				logf("%s not set — MCP transport up, setup-dispatch poller parked", agentmode.EnvVar)
+				return srv.ServeMCP(ctx)
+			}
 			return srv.Run(ctx)
 		},
 	}

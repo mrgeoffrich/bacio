@@ -70,6 +70,10 @@ install-hooks prints the planned changes and asks for confirmation
 before writing. Pass --yes (-y) to skip the prompt and accept
 automatically -- needed when running non-interactively.
 
+Activation: the hooks above are inert unless BACIO_AGENT_MODE=1 is set
+in the environment of the Claude session that loads them. See the
+post-install output for the recommended launch incantation.
+
 Note: top-level keys in settings.json may be reordered, since the file
 is round-tripped through a JSON decode. Hook behaviour is unchanged.`,
 		Args: cobra.NoArgs,
@@ -107,7 +111,11 @@ is round-tripped through a JSON decode. Hook behaviour is unchanged.`,
 			if err := applyBacioHooks(path, top); err != nil {
 				return err
 			}
-			return reportHookChanges(path, changes)
+			if err := reportHookChanges(path, changes); err != nil {
+				return err
+			}
+			printActivationBanner(os.Stderr)
+			return nil
 		},
 	}
 	cmd.Flags().BoolVarP(&assumeYes, "yes", "y", false, "skip the confirmation prompt and accept the changes")
