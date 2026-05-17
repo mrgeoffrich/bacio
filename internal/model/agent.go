@@ -298,8 +298,8 @@ func ParseDispatchStatus(s string) (DispatchStatus, error) {
 
 // DispatchMode is the slug of the prompt template a dispatch was queued
 // against — for the built-in templates that ship with bacio it's one of
-// "plan", "implement", "review", "ship", or "fix_review"; for a user-
-// created template it's whatever the user named it. "" = untyped (the
+// "plan", "design", "implement", "review", "ship", or "fix_review"; for
+// a user-created template it's whatever the user named it. "" = untyped (the
 // pre-Mode default; delivery treats it as unspecified). The mode is the
 // per-dispatch snapshot of which template was used; it deliberately
 // outlives the template (a deleted template's historical dispatches
@@ -317,6 +317,7 @@ type DispatchMode string
 // seed order so the built-ins lead the list on a fresh install.
 const (
 	BuiltinTemplatePlan      = "plan"
+	BuiltinTemplateDesign    = "design"
 	BuiltinTemplateImplement = "implement"
 	BuiltinTemplateReview    = "review"
 	BuiltinTemplateShip      = "ship"
@@ -339,8 +340,8 @@ const (
 // canonical lifecycle order — used by the migration's first-time seed
 // step and by `restore-defaults` to know what to re-create.
 var builtinTemplateSlugs = []string{
-	BuiltinTemplatePlan, BuiltinTemplateImplement, BuiltinTemplateReview,
-	BuiltinTemplateShip, BuiltinTemplateFixReview,
+	BuiltinTemplatePlan, BuiltinTemplateDesign, BuiltinTemplateImplement,
+	BuiltinTemplateReview, BuiltinTemplateShip, BuiltinTemplateFixReview,
 }
 
 // BuiltinTemplateSlugs returns the bundled template slugs in canonical
@@ -355,6 +356,7 @@ func BuiltinTemplateSlugs() []string {
 // when a UI surfaces a slug whose stored row is missing.
 var builtinTemplateLabels = map[string]string{
 	BuiltinTemplatePlan:      "Planning",
+	BuiltinTemplateDesign:    "Designing",
 	BuiltinTemplateImplement: "Implementing",
 	BuiltinTemplateReview:    "Reviewing",
 	BuiltinTemplateShip:      "Shipping",
@@ -476,6 +478,7 @@ func DefaultPromptTemplate(mode DispatchMode) string {
 // prompt_templates table.
 var builtinPromptStates = map[string][]State{
 	BuiltinTemplatePlan:      {StateTodo},
+	BuiltinTemplateDesign:    {StateTodo},
 	BuiltinTemplateImplement: {StateTodo},
 	BuiltinTemplateReview:    {StateInReview},
 	BuiltinTemplateShip:      {StateInReview},
