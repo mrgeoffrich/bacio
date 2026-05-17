@@ -12,11 +12,11 @@ import (
 // TestReportChannelInstallDropsDangerousFlag is the BACI-48 regression
 // guard: the post-install success body (everything routed through ok(),
 // so it round-trips through -o json) must NOT include the
-// --dangerously-load-development-channels launch flag. That flag is
-// for Claude Code's experimental native-channels feature; bacio rides
-// the regular .mcp.json MCP transport, and the prior wording cost a
-// 20-minute debug session. The activation guidance moved to the
-// separate stderr banner printActivationBanner produces.
+// --dangerously-load-development-channels launch flag — that paragraph
+// of human-facing guidance belongs in the stderr banner
+// printActivationBanner produces, not the machine-parsed structured
+// success body. BACI-49 brought the flag back into the activation
+// banner, but the structured success body stays lean.
 func TestReportChannelInstallDropsDangerousFlag(t *testing.T) {
 	for _, action := range []string{"add", "update"} {
 		t.Run(action, func(t *testing.T) {
@@ -72,14 +72,17 @@ func TestReportChannelInstallJSONShape(t *testing.T) {
 // content. The banner is the install commands' way of telling the user
 // how to opt in; if the env-var name or the launch incantation drift
 // the user will be left wondering why the supervision they just
-// installed isn't firing.
+// installed isn't firing. BACI-49 added two dangerously-* flags to
+// the launch line — they're pinned here so the one-line copy-paste
+// hint can't silently regress to the bare 'BACIO_AGENT_MODE=1 claude'
+// form again.
 func TestPrintActivationBannerMentionsEnvVar(t *testing.T) {
 	var buf bytes.Buffer
 	printActivationBanner(&buf)
 	got := buf.String()
 	for _, want := range []string{
 		"BACIO_AGENT_MODE",
-		"BACIO_AGENT_MODE=1 claude",
+		"BACIO_AGENT_MODE=1 claude --dangerously-skip-permissions --dangerously-load-development-channels server:bacio",
 		"bacio status",
 	} {
 		if !strings.Contains(got, want) {
