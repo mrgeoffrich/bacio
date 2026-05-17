@@ -83,6 +83,11 @@ func (m *Matcher) Tick() (int, error) {
 // queued row. Each mode is independent — a stuck `ship` queue doesn't
 // hold up `plan` even if the ship-it template has concurrency_limit=1
 // and the slot is full.
+//
+// Within a single tick, an agent bound to one mode is marked busy in
+// the local candidate slice before the next mode runs, so a multi-mode
+// queue (e.g. 1 ship + 1 plan + 1 free agent) never over-assigns that
+// agent. The next tick re-reads fresh state from the backend.
 func (m *Matcher) tickRepo(repoID int64, limits map[string]int, now time.Time) (int, error) {
 	modes, err := m.b.ListQueuedModesByRepo(repoID)
 	if err != nil {
@@ -92,24 +97,24 @@ func (m *Matcher) tickRepo(repoID int64, limits map[string]int, now time.Time) (
 		return 0, nil
 	}
 	// Build the candidate slice once per (repo, tick) — it's the same
-	// agent pool every mode draws from, and BindQueuedDispatch's
-	// transactional WHERE guards against a concurrent bind grabbing the
-	// same agent. The picker re-runs per mode (cheap) so a successful
-	// bind for `plan` doesn't make the `ship` matcher think the agent
-	// is still free — but for one tick that's a tolerable approximation
-	// (next tick re-reads fresh state).
+	// agent pool every mode draws from. After a successful bind we
+	// mark the bound agent as busy in this slice (see
+	// markCandidateBusy) so the next mode's pick skips them — without
+	// this guard a mixed-mode queue could double-bind a single agent
+	// within one tick, defeating the per-template concurrency cap.
 	cands, err := pickCandidatesForRepo(m.b, repoID, now)
 	if err != nil {
 		return 0, fmt.Errorf("matcher: build candidates for repo %d: %w", repoID, err)
 	}
 	binds := 0
 	for _, mode := range modes {
-		bound, err := m.tickMode(repoID, mode, limits, cands)
+		boundAgent, err := m.tickMode(repoID, mode, limits, cands)
 		if err != nil {
 			return binds, err
 		}
-		if bound {
+		if boundAgent != "" {
 			binds++
+			markCandidateBusy(cands, boundAgent)
 		}
 	}
 	return binds, nil
@@ -117,34 +122,34 @@ func (m *Matcher) tickRepo(repoID int64, limits map[string]int, now time.Time) (
 
 // tickMode processes one (repo, mode) group: enforce the concurrency
 // limit, take the oldest queued row, pick a free agent, bind. Returns
-// true iff a bind succeeded. A no-eligible-agent or empty-queue case
-// returns (false, nil) — quiet skip, next tick retries.
+// the bound agent's name on success (""/no-op on an empty queue,
+// concurrency cap hit, no free agent, or a swallowed bind race).
 func (m *Matcher) tickMode(
 	repoID int64,
 	mode model.DispatchMode,
 	limits map[string]int,
 	cands []AgentCandidate,
-) (bool, error) {
+) (string, error) {
 	limit := limits[string(mode)]
 	if limit > 0 {
 		inflight, err := m.b.CountInFlightByMode(repoID, mode)
 		if err != nil {
-			return false, fmt.Errorf("matcher: count in-flight (%d, %s): %w", repoID, mode, err)
+			return "", fmt.Errorf("matcher: count in-flight (%d, %s): %w", repoID, mode, err)
 		}
 		if inflight >= limit {
-			return false, nil
+			return "", nil
 		}
 	}
 	queue, err := m.b.ListQueuedByRepoMode(repoID, mode)
 	if err != nil {
-		return false, fmt.Errorf("matcher: list queued (%d, %s): %w", repoID, mode, err)
+		return "", fmt.Errorf("matcher: list queued (%d, %s): %w", repoID, mode, err)
 	}
 	if len(queue) == 0 {
-		return false, nil
+		return "", nil
 	}
 	agentName := AutoPickFreeAgent(cands)
 	if agentName == "" {
-		return false, nil
+		return "", nil
 	}
 	ag, err := m.b.GetAgentByName(agentName)
 	if err != nil {
@@ -152,18 +157,31 @@ func (m *Matcher) tickMode(
 		// agents table is a defensive impossibility — bail this mode
 		// (skip the bind) and let the next tick re-read.
 		if errors.Is(err, store.ErrNotFound) {
-			return false, nil
+			return "", nil
 		}
-		return false, fmt.Errorf("matcher: resolve agent %q: %w", agentName, err)
+		return "", fmt.Errorf("matcher: resolve agent %q: %w", agentName, err)
 	}
 	oldest := queue[0]
 	if _, err := m.b.BindQueuedDispatch(oldest.ID, ag.ID); err != nil {
 		// A concurrent process beat us to this row — fine, no-op and
 		// move on. The next tick will pick up whatever is still queued.
 		if errors.Is(err, store.ErrNotFound) {
-			return false, nil
+			return "", nil
 		}
-		return false, fmt.Errorf("matcher: bind dispatch %d: %w", oldest.ID, err)
+		return "", fmt.Errorf("matcher: bind dispatch %d: %w", oldest.ID, err)
 	}
-	return true, nil
+	return agentName, nil
+}
+
+// markCandidateBusy flips the HasOpenDispatch flag on the candidate
+// with the given AgentName so the next AutoPickFreeAgent call within
+// the same tick skips them. A name we didn't recognise is a no-op
+// (defensive — the next tick reads fresh state regardless).
+func markCandidateBusy(cands []AgentCandidate, agentName string) {
+	for i := range cands {
+		if cands[i].AgentName == agentName {
+			cands[i].HasOpenDispatch = true
+			return
+		}
+	}
 }
