@@ -106,39 +106,17 @@ func (c *localClient) CreateDispatch(ctx context.Context, repo *model.Repo, in i
 	return d, nil
 }
 
-// agentCandidate is the small projection AutoPickFreeAgent works on —
-// just the bits the picker decides from. Keeping it raw (no DTO shape)
-// lets REST, CLI, and desktop share the picker without pulling each
-// other's render types into client.
-type agentCandidate struct {
-	AgentName       string
-	Ended           bool
-	Busy            bool
-	HasChannel      bool
-	HasOpenDispatch bool
-}
-
-// autoPickFreeAgent returns the first candidate eligible to take
-// auto-dispatched work: live, not busy, has a channel, no un-acked
-// dispatch already queued against it, and a persistent identity slug
-// (CreateDispatch routes by slug). Candidates are expected in
-// last-seen-DESC order; the first match wins so the freshest free
-// agent gets the work.
-func autoPickFreeAgent(cands []agentCandidate) string {
-	for _, c := range cands {
-		if c.Ended || c.Busy || c.AgentName == "" || !c.HasChannel || c.HasOpenDispatch {
-			continue
-		}
-		return c.AgentName
-	}
-	return ""
-}
-
-// AutoDispatchIssue (BACI-40) is the state-gated auto-pick dispatch
-// verb shared by the desktop per-card action button, the REST
-// `POST /repos/{prefix}/issues/{key}/dispatch` route, and the CLI's
-// target-less `bacio agent dispatch <key> --mode <stage>`. It mirrors
-// what desktop's BoardService.DispatchIssue used to do inline.
+// AutoDispatchIssue (BACI-40, rewired by BACI-51) is the state-gated
+// auto-pick dispatch verb shared by the desktop per-card action button,
+// the REST `POST /repos/{prefix}/issues/{key}/dispatch` route, and the
+// CLI's target-less `bacio agent dispatch <key> --mode <stage>`.
+//
+// As of BACI-51 this is the **enqueue path**: it re-checks the mode's
+// state-gate, then inserts a target-less `queued` dispatch the
+// background matcher will bind to a free agent when one frees up.
+// Never errors with "no free agent" — that case is now expressed as a
+// queued row in the per-(repo, mode) FIFO. Targeted dispatches
+// (CreateDispatch with --to/--session) still go straight to pending.
 func (c *localClient) AutoDispatchIssue(ctx context.Context, repo *model.Repo, issueKey, mode string, dryRun bool) (*model.AgentDispatch, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("AutoDispatchIssue requires a repo")
@@ -167,66 +145,65 @@ func (c *localClient) AutoDispatchIssue(ctx context.Context, repo *model.Repo, i
 		return nil, fmt.Errorf("the %s prompt can't run from a %s issue", mode, iss.State)
 	}
 
-	// Auto-pick: build a candidate list (last-seen-DESC, since
-	// ListAgentSessions orders that way) and let autoPickFreeAgent
-	// choose the freshest free agent.
-	sessions, err := c.store.ListAgentSessions(store.AgentSessionFilter{
-		RepoID:         &repo.ID,
-		RegisteredOnly: true,
+	// Render the prompt body now so the queued dispatch carries the
+	// final instruction — agents that receive it (via the matcher's
+	// later bind + drain) don't need any further lookup.
+	template, err := c.store.GetPromptTemplate(parsedMode)
+	if err != nil {
+		return nil, err
+	}
+	payload := model.ComposeDispatchPayload(template, map[string]string{
+		"issue_id":    iss.Key,
+		"issue_title": iss.Title,
+		"repo_prefix": repo.Prefix,
+	}, "")
+
+	if dryRun {
+		return &model.AgentDispatch{
+			RepoID:     repo.ID,
+			RepoPrefix: repo.Prefix,
+			IssueID:    &iss.ID,
+			IssueKey:   iss.Key,
+			Mode:       parsedMode,
+			Payload:    payload,
+			Status:     model.DispatchQueued,
+			CreatedBy:  c.actor,
+			CreatedAt:  time.Now().UTC(),
+		}, nil
+	}
+
+	d, err := c.store.AddDispatch(store.AddDispatchIn{
+		RepoID:        repo.ID,
+		IssueID:       &iss.ID,
+		Mode:          parsedMode,
+		Payload:       payload,
+		CreatedBy:     c.actor,
+		InitialStatus: model.DispatchQueued,
 	})
 	if err != nil {
 		return nil, err
 	}
-	openClaims, err := c.store.OpenClaimsBySession(repo.ID)
-	if err != nil {
-		return nil, err
-	}
-	dispatches, err := c.store.ListDispatches(store.DispatchFilter{RepoID: &repo.ID})
-	if err != nil {
-		return nil, err
-	}
-	occupiedAgentID := map[int64]bool{}
-	occupiedSession := map[string]bool{}
-	for _, d := range dispatches {
-		if d.Status != model.DispatchPending && d.Status != model.DispatchDelivered {
-			continue
-		}
-		if d.TargetAgentID != nil {
-			occupiedAgentID[*d.TargetAgentID] = true
-		}
-		if d.TargetSessionID != "" {
-			occupiedSession[d.TargetSessionID] = true
-		}
-	}
-	now := time.Now()
-	cands := make([]agentCandidate, 0, len(sessions))
-	for _, s := range sessions {
-		cand := agentCandidate{
-			AgentName:  s.AgentName,
-			Ended:      model.SessionLiveness(s, now) == "ended",
-			HasChannel: s.ChannelSeenAt != nil,
-		}
-		if !cand.Ended {
-			cand.Busy, _ = model.SessionBusy(openClaims[s.ID])
-		}
-		if s.AgentID != nil && occupiedAgentID[*s.AgentID] {
-			cand.HasOpenDispatch = true
-		}
-		if occupiedSession[s.SessionID] {
-			cand.HasOpenDispatch = true
-		}
-		cands = append(cands, cand)
-	}
-	agentName := autoPickFreeAgent(cands)
-	if agentName == "" {
-		return nil, fmt.Errorf("no free agent available — every agent is busy or offline")
-	}
+	c.recordOp(model.HistoryEntry{
+		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+		Op: "agent.queue", Kind: "agent",
+		TargetID: &d.ID, TargetLabel: iss.Key,
+		Details: dispatchDetails(d),
+	})
+	return d, nil
+}
 
-	return c.CreateDispatch(ctx, repo, inputs.AgentDispatchInput{
-		TargetAgent: agentName,
-		IssueKey:    iss.Key,
-		Mode:        mode,
-	}, dryRun)
+// WaitingDispatchForIssue returns the active (queued/pending/delivered)
+// dispatch targeting an issue or (nil, nil) if none. Backs the
+// spinner-as-cancel UI added in BACI-51.
+func (c *localClient) WaitingDispatchForIssue(ctx context.Context, repo *model.Repo, issueKey string) (*model.AgentDispatch, error) {
+	if repo == nil {
+		return nil, fmt.Errorf("WaitingDispatchForIssue requires a repo")
+	}
+	iss, err := c.GetIssueByKey(ctx, repo, issueKey)
+	if err != nil {
+		return nil, err
+	}
+	return c.store.WaitingDispatchForIssue(repo.ID, iss.ID)
 }
 
 func (c *localClient) InboxDispatches(ctx context.Context, sessionID string) ([]*model.AgentDispatch, error) {
@@ -403,6 +380,7 @@ func (c *localClient) AddPromptTemplate(ctx context.Context, in inputs.SettingsT
 		// IsBuiltin is never set by an agent-facing add — only the
 		// migration's seed step and RestoreBuiltinPromptTemplates flip
 		// it on.
+		ConcurrencyLimit: in.ConcurrencyLimit,
 	}
 	if dryRun {
 		return c.store.ValidateAddPromptTemplate(addIn)
@@ -522,6 +500,35 @@ func (c *localClient) RestoreBuiltinPromptTemplates(ctx context.Context, dryRun 
 		})
 	}
 	return created, nil
+}
+
+func (c *localClient) SetPromptTemplateConcurrencyLimit(ctx context.Context, in inputs.SettingsTemplateSetConcurrencyInput, dryRun bool) (*store.PromptTemplate, error) {
+	existing, err := c.store.GetPromptTemplateBySlug(in.Slug)
+	if err != nil {
+		return nil, err
+	}
+	cleaned, err := store.ValidateConcurrencyLimit(in.ConcurrencyLimit)
+	if err != nil {
+		return nil, err
+	}
+	if dryRun {
+		// Project the would-be row without writing — mirrors the
+		// dry-run shape every other template mutator uses.
+		proj := *existing
+		proj.ConcurrencyLimit = cleaned
+		return &proj, nil
+	}
+	updated, err := c.store.SetPromptTemplateConcurrencyLimit(in.Slug, cleaned)
+	if err != nil {
+		return nil, err
+	}
+	id := updated.ID
+	c.recordOp(model.HistoryEntry{
+		Op: "template.set_concurrency", Kind: "app_setting",
+		TargetID: &id, TargetLabel: "prompt_template:" + updated.Slug,
+		Details: fmt.Sprintf("slug=%s, concurrency_limit=%d", updated.Slug, updated.ConcurrencyLimit),
+	})
+	return updated, nil
 }
 
 func (c *localClient) GetPromptTemplates(ctx context.Context) (map[string]string, error) {
@@ -667,8 +674,11 @@ func dispatchTargetLabel(d *model.AgentDispatch) string {
 // SetupDispatchCreator marks dispatches that the bacio channel itself
 // enqueued to ask the agent to call the `register` tool — distinct from
 // any human or supervisor creator. The channel filters on this value to
-// keep EnsureSetupDispatch idempotent across restarts.
-const SetupDispatchCreator = "bacio-channel"
+// keep EnsureSetupDispatch idempotent across restarts. Aliases
+// model.SetupDispatchCreator (kept here for back-compat with existing
+// callers; new code should reference the model constant so the store
+// layer can use it without importing client).
+const SetupDispatchCreator = model.SetupDispatchCreator
 
 // buildSetupDispatchPayload renders the channel-emitted setup
 // dispatch with the real session_id pre-filled. The agent sees this

@@ -20,16 +20,19 @@ import (
 // default for the slug (empty for user-created); StatesAreDefault
 // reports whether the gate still matches.
 type PromptTemplateDTO struct {
-	Slug             string   `json:"slug"`
-	Mode             string   `json:"mode"`
-	Label            string   `json:"label"`
-	Body             string   `json:"body"`
-	Default          string   `json:"default"`
-	IsBuiltin        bool     `json:"isBuiltin"`
-	IsDefault        bool     `json:"isDefault"`
-	AllowedStates    []string `json:"allowedStates"`
-	DefaultStates    []string `json:"defaultStates"`
-	StatesAreDefault bool     `json:"statesAreDefault"`
+	Slug                    string   `json:"slug"`
+	Mode                    string   `json:"mode"`
+	Label                   string   `json:"label"`
+	Body                    string   `json:"body"`
+	Default                 string   `json:"default"`
+	IsBuiltin               bool     `json:"isBuiltin"`
+	IsDefault               bool     `json:"isDefault"`
+	AllowedStates           []string `json:"allowedStates"`
+	DefaultStates           []string `json:"defaultStates"`
+	StatesAreDefault        bool     `json:"statesAreDefault"`
+	ConcurrencyLimit        int      `json:"concurrencyLimit"`
+	DefaultConcurrencyLimit int      `json:"defaultConcurrencyLimit"`
+	ConcurrencyIsDefault    bool     `json:"concurrencyIsDefault"`
 }
 
 // SettingsService is the Wails-bound API for the desktop Settings panel.
@@ -91,17 +94,21 @@ func dtoForTemplate(t *store.PromptTemplate) PromptTemplateDTO {
 			label = t.Slug
 		}
 	}
+	defConc := model.DefaultConcurrencyLimit(t.Slug)
 	return PromptTemplateDTO{
-		Slug:             t.Slug,
-		Mode:             t.Slug,
-		Label:            label,
-		Body:             t.Body,
-		Default:          def,
-		IsBuiltin:        t.IsBuiltin,
-		IsDefault:        t.IsBuiltin && t.Body == def,
-		AllowedStates:    allowed,
-		DefaultStates:    defStates,
-		StatesAreDefault: t.IsBuiltin && sameStrings(allowed, defStates),
+		Slug:                    t.Slug,
+		Mode:                    t.Slug,
+		Label:                   label,
+		Body:                    t.Body,
+		Default:                 def,
+		IsBuiltin:               t.IsBuiltin,
+		IsDefault:               t.IsBuiltin && t.Body == def,
+		AllowedStates:           allowed,
+		DefaultStates:           defStates,
+		StatesAreDefault:        t.IsBuiltin && sameStrings(allowed, defStates),
+		ConcurrencyLimit:        t.ConcurrencyLimit,
+		DefaultConcurrencyLimit: defConc,
+		ConcurrencyIsDefault:    t.IsBuiltin && t.ConcurrencyLimit == defConc,
 	}
 }
 
@@ -138,6 +145,19 @@ func (s *SettingsService) SavePromptTemplate(slug, body string) (PromptTemplateD
 func (s *SettingsService) SavePromptStates(slug string, states []string) (PromptTemplateDTO, error) {
 	ctx := context.Background()
 	if err := s.client.SetPromptStates(ctx, slug, states, false); err != nil {
+		return PromptTemplateDTO{}, err
+	}
+	return s.refreshedDTO(ctx, slug)
+}
+
+// SavePromptConcurrency (BACI-51) sets a template's per-(repo, slug)
+// in-flight dispatch cap the matcher enforces. 0 = unlimited.
+func (s *SettingsService) SavePromptConcurrency(slug string, concurrencyLimit int) (PromptTemplateDTO, error) {
+	ctx := context.Background()
+	if _, err := s.client.SetPromptTemplateConcurrencyLimit(ctx, inputs.SettingsTemplateSetConcurrencyInput{
+		Slug:             slug,
+		ConcurrencyLimit: concurrencyLimit,
+	}, false); err != nil {
 		return PromptTemplateDTO{}, err
 	}
 	return s.refreshedDTO(ctx, slug)

@@ -416,11 +416,15 @@ body is the stage's prompt template (customisable in the desktop app's
 Settings panel) rendered with the issue's id/title, plus any --message
 note. Both are optional.
 
-Auto-pick (BACI-40): when [issue-key] and --mode are set but both --to
-and --session are omitted, dispatch picks the most-recently-active free
-agent automatically — same picker the desktop per-card action button
-uses — and re-checks the stage's state-gate against the issue's
-current state. --dry-run reports the chosen agent without writing.
+Auto-pick + queue (BACI-40 + BACI-51): when [issue-key] and --mode are
+set but both --to and --session are omitted, dispatch re-checks the
+stage's state-gate against the issue's current state and then
+*enqueues* the dispatch — it never errors with "no free agent". A
+background matcher (running in the controlling TUI/desktop process)
+binds the queued dispatch to a free agent automatically when one
+frees up. Cancel a still-queued dispatch with
+` + "`bacio agent cancel <id>`" + ` (the same command that withdraws
+pending dispatches).
 
 The target agent picks the dispatch up automatically on its next prompt
 (via the bacio UserPromptSubmit hook) or at session start, and can list

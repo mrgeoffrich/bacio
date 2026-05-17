@@ -17,15 +17,19 @@ import (
 // (with the {{issue_id}} / {{issue_title}} / {{repo_prefix}} tokens
 // substituted at dispatch time). AllowedStates is the state-gate.
 // IsBuiltin is informational only — it does NOT gate deletion.
+// ConcurrencyLimit (BACI-51) caps the in-flight (pending+delivered,
+// excluding bacio-channel setup rows) dispatches per (repo, mode) the
+// background matcher will allow; 0 = unlimited.
 type PromptTemplate struct {
-	ID            int64         `json:"id"`
-	Slug          string        `json:"slug"`
-	Name          string        `json:"name"`
-	Body          string        `json:"body"`
-	AllowedStates []model.State `json:"allowed_states"`
-	IsBuiltin     bool          `json:"is_builtin"`
-	CreatedAt     time.Time     `json:"created_at"`
-	UpdatedAt     time.Time     `json:"updated_at"`
+	ID               int64         `json:"id"`
+	Slug             string        `json:"slug"`
+	Name             string        `json:"name"`
+	Body             string        `json:"body"`
+	AllowedStates    []model.State `json:"allowed_states"`
+	IsBuiltin        bool          `json:"is_builtin"`
+	ConcurrencyLimit int           `json:"concurrency_limit"`
+	CreatedAt        time.Time     `json:"created_at"`
+	UpdatedAt        time.Time     `json:"updated_at"`
 }
 
 // AddPromptTemplateIn is the input for AddPromptTemplate. Slug and Name
@@ -38,6 +42,10 @@ type AddPromptTemplateIn struct {
 	// IsBuiltin is only set by the seed step in migrate() — user-created
 	// templates always store IsBuiltin = false.
 	IsBuiltin bool
+	// ConcurrencyLimit caps in-flight dispatches per (repo, slug) the
+	// background matcher will allow. 0 = unlimited. Negative values are
+	// rejected by the validator.
+	ConcurrencyLimit int
 }
 
 // UpdatePromptTemplatePatch is the partial patch for UpdatePromptTemplate.
@@ -45,10 +53,23 @@ type AddPromptTemplateIn struct {
 // from "set to empty" (non-nil empty string), matching the convention
 // used elsewhere in the store layer. AllowedStates uses a sentinel:
 // nil = leave unchanged, non-nil (even empty) = replace.
+// ConcurrencyLimit follows the same pointer pattern; *int is nil when
+// the caller doesn't want to touch the limit.
 type UpdatePromptTemplatePatch struct {
-	Name          *string
-	Body          *string
-	AllowedStates *[]model.State
+	Name             *string
+	Body             *string
+	AllowedStates    *[]model.State
+	ConcurrencyLimit *int
+}
+
+// ValidateConcurrencyLimit enforces the only rule on the field today:
+// non-negative. 0 means unlimited; positive integers cap in-flight
+// dispatches. No upper bound — a user that wants 999 is free to set it.
+func ValidateConcurrencyLimit(n int) (int, error) {
+	if n < 0 {
+		return 0, fmt.Errorf("concurrency_limit must be >= 0, got %d", n)
+	}
+	return n, nil
 }
 
 // maxTemplateNameLen caps the display label. Long enough for "Fixing a
@@ -150,6 +171,10 @@ func decodeStates(raw string) []model.State {
 }
 
 // scanPromptTemplate is the row-scan helper shared by Get/List.
+// Selects must include columns in this order:
+//
+//	id, slug, name, body, allowed_states_json, is_builtin,
+//	concurrency_limit, created_at, updated_at.
 func scanPromptTemplate(row interface {
 	Scan(...any) error
 }) (*PromptTemplate, error) {
@@ -158,7 +183,7 @@ func scanPromptTemplate(row interface {
 		statesJSON string
 		isBuiltin  int
 	)
-	if err := row.Scan(&t.ID, &t.Slug, &t.Name, &t.Body, &statesJSON, &isBuiltin, &t.CreatedAt, &t.UpdatedAt); err != nil {
+	if err := row.Scan(&t.ID, &t.Slug, &t.Name, &t.Body, &statesJSON, &isBuiltin, &t.ConcurrencyLimit, &t.CreatedAt, &t.UpdatedAt); err != nil {
 		return nil, err
 	}
 	t.AllowedStates = decodeStates(statesJSON)
@@ -172,7 +197,7 @@ func scanPromptTemplate(row interface {
 // canonical iteration order surfaced to UIs.
 func (s *Store) ListPromptTemplates() ([]*PromptTemplate, error) {
 	rows, err := s.DB.Query(`
-		SELECT id, slug, name, body, allowed_states_json, is_builtin, created_at, updated_at
+		SELECT id, slug, name, body, allowed_states_json, is_builtin, concurrency_limit, created_at, updated_at
 		  FROM prompt_templates
 		 ORDER BY created_at ASC, id ASC`)
 	if err != nil {
@@ -194,7 +219,7 @@ func (s *Store) ListPromptTemplates() ([]*PromptTemplate, error) {
 // ErrNotFound when no such template exists.
 func (s *Store) GetPromptTemplateBySlug(slug string) (*PromptTemplate, error) {
 	row := s.DB.QueryRow(`
-		SELECT id, slug, name, body, allowed_states_json, is_builtin, created_at, updated_at
+		SELECT id, slug, name, body, allowed_states_json, is_builtin, concurrency_limit, created_at, updated_at
 		  FROM prompt_templates
 		 WHERE slug = ?`, slug)
 	t, err := scanPromptTemplate(row)
@@ -224,12 +249,17 @@ func (s *Store) ValidateAddPromptTemplate(in AddPromptTemplateIn) (*PromptTempla
 	if err != nil {
 		return nil, err
 	}
+	limit, err := ValidateConcurrencyLimit(in.ConcurrencyLimit)
+	if err != nil {
+		return nil, err
+	}
 	return &PromptTemplate{
-		Slug:          slug,
-		Name:          name,
-		Body:          body,
-		AllowedStates: states,
-		IsBuiltin:     in.IsBuiltin,
+		Slug:             slug,
+		Name:             name,
+		Body:             body,
+		AllowedStates:    states,
+		IsBuiltin:        in.IsBuiltin,
+		ConcurrencyLimit: limit,
 	}, nil
 }
 
@@ -250,9 +280,9 @@ func (s *Store) AddPromptTemplate(in AddPromptTemplateIn) (*PromptTemplate, erro
 		isBuiltin = 1
 	}
 	res, err := s.DB.Exec(`
-		INSERT INTO prompt_templates (slug, name, body, allowed_states_json, is_builtin, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-		projected.Slug, projected.Name, projected.Body, encoded, isBuiltin)
+		INSERT INTO prompt_templates (slug, name, body, allowed_states_json, is_builtin, concurrency_limit, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+		projected.Slug, projected.Name, projected.Body, encoded, isBuiltin, projected.ConcurrencyLimit)
 	if err != nil {
 		return nil, wrapTemplateConflict(err)
 	}
@@ -268,9 +298,9 @@ func (s *Store) AddPromptTemplate(in AddPromptTemplateIn) (*PromptTemplate, erro
 	return out, nil
 }
 
-// ValidateUpdatePromptTemplate runs the body/name/states checks without
-// writing. Returns the projected row (slug + IsBuiltin from the
-// existing row; mutated fields from the patch).
+// ValidateUpdatePromptTemplate runs the body/name/states/concurrency
+// checks without writing. Returns the projected row (slug + IsBuiltin
+// from the existing row; mutated fields from the patch).
 func (s *Store) ValidateUpdatePromptTemplate(slug string, patch UpdatePromptTemplatePatch) (*PromptTemplate, error) {
 	existing, err := s.GetPromptTemplateBySlug(slug)
 	if err != nil {
@@ -298,11 +328,18 @@ func (s *Store) ValidateUpdatePromptTemplate(slug string, patch UpdatePromptTemp
 		}
 		projected.AllowedStates = states
 	}
+	if patch.ConcurrencyLimit != nil {
+		limit, err := ValidateConcurrencyLimit(*patch.ConcurrencyLimit)
+		if err != nil {
+			return nil, err
+		}
+		projected.ConcurrencyLimit = limit
+	}
 	return &projected, nil
 }
 
-// UpdatePromptTemplate applies a partial patch (name / body / states).
-// Returns the refreshed row.
+// UpdatePromptTemplate applies a partial patch (name / body / states /
+// concurrency_limit). Returns the refreshed row.
 func (s *Store) UpdatePromptTemplate(slug string, patch UpdatePromptTemplatePatch) (*PromptTemplate, error) {
 	projected, err := s.ValidateUpdatePromptTemplate(slug, patch)
 	if err != nil {
@@ -314,11 +351,37 @@ func (s *Store) UpdatePromptTemplate(slug string, patch UpdatePromptTemplatePatc
 	}
 	res, err := s.DB.Exec(`
 		UPDATE prompt_templates
-		   SET name = ?, body = ?, allowed_states_json = ?, updated_at = CURRENT_TIMESTAMP
+		   SET name = ?, body = ?, allowed_states_json = ?, concurrency_limit = ?, updated_at = CURRENT_TIMESTAMP
 		 WHERE slug = ?`,
-		projected.Name, projected.Body, encoded, slug)
+		projected.Name, projected.Body, encoded, projected.ConcurrencyLimit, slug)
 	if err != nil {
 		return nil, wrapTemplateConflict(err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if n == 0 {
+		return nil, ErrNotFound
+	}
+	return s.GetPromptTemplateBySlug(slug)
+}
+
+// SetPromptTemplateConcurrencyLimit is the focused mutator for the
+// BACI-51 concurrency field — convenient for CLI/REST verbs that only
+// want to change the limit without round-tripping the body or
+// state-gate through a patch. Validated >= 0.
+func (s *Store) SetPromptTemplateConcurrencyLimit(slug string, limit int) (*PromptTemplate, error) {
+	cleaned, err := ValidateConcurrencyLimit(limit)
+	if err != nil {
+		return nil, err
+	}
+	res, err := s.DB.Exec(`
+		UPDATE prompt_templates
+		   SET concurrency_limit = ?, updated_at = CURRENT_TIMESTAMP
+		 WHERE slug = ?`, cleaned, slug)
+	if err != nil {
+		return nil, err
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
@@ -459,9 +522,9 @@ func (s *Store) RestoreBuiltinPromptTemplates() ([]string, error) {
 			name = slug
 		}
 		if _, err := tx.Exec(`
-			INSERT INTO prompt_templates (slug, name, body, allowed_states_json, is_builtin, created_at, updated_at)
-			VALUES (?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-			slug, name, body, encoded); err != nil {
+			INSERT INTO prompt_templates (slug, name, body, allowed_states_json, is_builtin, concurrency_limit, created_at, updated_at)
+			VALUES (?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+			slug, name, body, encoded, model.DefaultConcurrencyLimit(slug)); err != nil {
 			return nil, wrapTemplateConflict(err)
 		}
 		created = append(created, slug)

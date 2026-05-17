@@ -106,6 +106,23 @@ export default function SettingsView({
     }
   }, [notifyTemplatesChanged]);
 
+  // BACI-51: persist a template's per-(repo, slug) in-flight cap. The
+  // matcher reads this column on every tick to decide whether to bind
+  // another queued dispatch. 0 = unlimited; built-in ship seeds to 1
+  // so merging serialises. Validation (>=0) lives in the store.
+  const saveConcurrency = useCallback(async (slug, limit) => {
+    setSavingSlug(slug);
+    try {
+      const updated = await api.savePromptConcurrency(slug, limit);
+      setTemplates(prev => prev.map(t => (t.slug === slug ? updated : t)));
+      notifyTemplatesChanged();
+    } catch (err) {
+      reportError(err, { headline: "Couldn't save concurrency limit" });
+    } finally {
+      setSavingSlug(null);
+    }
+  }, [notifyTemplatesChanged]);
+
   const toggleState = useCallback((t, state) => {
     const on = new Set(t.allowedStates || []);
     if (on.has(state)) on.delete(state);
@@ -414,6 +431,37 @@ export default function SettingsView({
                       </button>
                     ))}
                   </div>
+                </div>
+                <div className="mk-tmpl-states">
+                  <div className="mk-tmpl-states-head">
+                    <span className="mk-tmpl-states-label">
+                      Concurrency limit
+                      <span className="mk-tmpl-states-hint"> · 0 = unlimited</span>
+                    </span>
+                    {t.isBuiltin && (
+                      <button
+                        className="mk-tmpl-reset"
+                        disabled={busy || t.concurrencyIsDefault}
+                        onClick={() => saveConcurrency(t.slug, t.defaultConcurrencyLimit)}
+                        title={`Reset to the built-in default (${t.defaultConcurrencyLimit})`}
+                      >
+                        Reset limit
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    className="mk-tmpl-input mk-tmpl-concurrency"
+                    defaultValue={t.concurrencyLimit}
+                    key={`${t.slug}:${t.concurrencyLimit}`}
+                    disabled={busy}
+                    onBlur={(e) => {
+                      const n = Math.max(0, parseInt(e.target.value, 10) || 0);
+                      if (n !== t.concurrencyLimit) saveConcurrency(t.slug, n);
+                    }}
+                  />
                 </div>
               </div>
             );

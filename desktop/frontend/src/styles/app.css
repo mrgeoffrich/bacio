@@ -167,6 +167,21 @@ body { margin: 0; }
   animation: mk-spin 0.7s linear infinite;
 }
 @keyframes mk-spin { to { transform: rotate(360deg); } }
+/* BACI-51: the same spinner is also the clickable cancel control.
+   .mk-card-spinner-btn is the button variant — strip default <button>
+   chrome so it visually matches the read-only <span> form, and
+   surface a hover/focus accent so it reads as interactive. */
+.mk-card-spinner-btn {
+  background: transparent; padding: 0; cursor: pointer;
+}
+.mk-card-spinner-btn:hover {
+  border-color: var(--status-blocked, var(--border-focus));
+  border-top-color: var(--status-blocked, var(--border-focus));
+  animation-play-state: paused;
+}
+.mk-card-spinner-btn:focus-visible {
+  outline: 2px solid var(--border-focus); outline-offset: 2px;
+}
 .mk-card-top { display: flex; align-items: center; gap: 6px; }
 .mk-card-id { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); }
 .mk-card-title { margin: 0; font-size: 14px; font-weight: 500; line-height: 1.35; color: var(--fg-1); }

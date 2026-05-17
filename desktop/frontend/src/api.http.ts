@@ -201,6 +201,9 @@ export interface PromptTemplateDTO {
   allowedStates: string[];
   defaultStates: string[];
   statesAreDefault: boolean;
+  concurrencyLimit: number;
+  defaultConcurrencyLimit: number;
+  concurrencyIsDefault: boolean;
 }
 
 export interface BoardPreferencesDTO {
@@ -568,6 +571,38 @@ export async function dispatchIssue(
   return reshapeDispatch(raw);
 }
 
+// cancelWaitingDispatch (BACI-51) is the spinner-as-cancel-button
+// handler in web mode: two round-trips — GET the active dispatch on
+// the issue, POST cancel against its id. A 404 from the GET means the
+// dispatch cleared between the click and the call landing (e.g. the
+// matcher bound it) — that's a no-op success, not an error.
+export async function cancelWaitingDispatch(
+  repoPrefix: string,
+  issueKey: string,
+): Promise<void> {
+  if (!repoPrefix || repoPrefix === 'all') {
+    const i = issueKey.lastIndexOf('-');
+    if (i <= 0) throw new Error(`invalid issue key: ${issueKey}`);
+    repoPrefix = issueKey.slice(0, i);
+  }
+  let dsp: ApiDispatch;
+  try {
+    dsp = await call<ApiDispatch>(
+      `/repos/${repoPrefix}/issues/${issueKey}/waiting-dispatch`,
+      { method: 'GET' },
+    );
+  } catch (err: unknown) {
+    // call() throws an Error whose message is the server envelope's
+    // `error` field — the 404 body says "no waiting dispatch for <key>".
+    // Match on that prefix to treat the race-cleared case as a no-op
+    // (the matcher bound or another UI cancelled between click + call).
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.startsWith('no waiting dispatch')) return;
+    throw err;
+  }
+  await call<unknown>(`/agents/dispatches/${dsp.id}/cancel`, { method: 'POST' });
+}
+
 interface ApiBoardCard {
   // setIssueState returns the model.Issue; same reshape as listCards.
   key: string;
@@ -767,6 +802,9 @@ interface ApiPromptTemplate {
   allowed_states: string[];
   default_states: string[];
   states_are_default: boolean;
+  concurrency_limit?: number;
+  default_concurrency_limit?: number;
+  concurrency_is_default?: boolean;
 }
 
 function reshapeTemplate(t: ApiPromptTemplate): PromptTemplateDTO {
@@ -781,10 +819,17 @@ function reshapeTemplate(t: ApiPromptTemplate): PromptTemplateDTO {
     allowedStates: t.allowed_states ?? [],
     defaultStates: t.default_states ?? [],
     statesAreDefault: t.states_are_default,
+    concurrencyLimit: t.concurrency_limit ?? 0,
+    defaultConcurrencyLimit: t.default_concurrency_limit ?? 0,
+    concurrencyIsDefault: t.concurrency_is_default ?? true,
   };
 }
 
 export async function listPromptTemplates(): Promise<PromptTemplateDTO[]> {
+  // BACI-50 added the composite /settings/templates/full endpoint that
+  // returns the rich DTO — labels, defaults, is_builtin, and the
+  // BACI-51 concurrency fields all flow through in one round-trip,
+  // no client-side label derivation or placeholder fields needed.
   const rows = await call<ApiPromptTemplate[]>('/settings/templates/full');
   return (rows ?? []).map(reshapeTemplate);
 }
@@ -829,6 +874,20 @@ export async function savePromptStates(
       body: { states },
     });
   }
+  return refreshOneTemplate(mode);
+}
+
+// savePromptConcurrency (BACI-51) PUTs the per-(repo, slug) in-flight
+// dispatch cap. 0 = unlimited; positive integers cap. No DELETE route
+// (a PUT 0 reverts to "unlimited").
+export async function savePromptConcurrency(
+  mode: string,
+  concurrencyLimit: number,
+): Promise<PromptTemplateDTO> {
+  await call<unknown>(`/settings/templates/${mode}/concurrency`, {
+    method: 'PUT',
+    body: { concurrency_limit: concurrencyLimit },
+  });
   return refreshOneTemplate(mode);
 }
 

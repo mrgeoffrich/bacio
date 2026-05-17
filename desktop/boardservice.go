@@ -490,3 +490,32 @@ func (b *BoardService) DispatchIssue(repoPrefix, issueKey, mode string) (Dispatc
 	}
 	return dispatchDTO(d), nil
 }
+
+// CancelWaitingDispatch (BACI-51) is the spinner-as-cancel-button
+// binding. Resolves the active (queued / pending / delivered) dispatch
+// for an issue and cancels it in a single Wails call so card DTOs
+// don't have to carry the dispatch id. A no-active-dispatch issue is
+// not an error — the spinner may have cleared between the click and
+// the call landing — the cancel is a no-op and returns nil.
+func (b *BoardService) CancelWaitingDispatch(repoPrefix, issueKey string) error {
+	ctx := context.Background()
+	prefix := repoPrefix
+	if prefix == "" || prefix == "all" {
+		if i := strings.LastIndex(issueKey, "-"); i > 0 {
+			prefix = issueKey[:i]
+		}
+	}
+	repo, err := b.client.GetRepoByPrefix(ctx, prefix)
+	if err != nil {
+		return err
+	}
+	dsp, err := b.client.WaitingDispatchForIssue(ctx, repo, issueKey)
+	if err != nil {
+		return err
+	}
+	if dsp == nil {
+		return nil
+	}
+	_, err = b.client.CancelDispatch(ctx, inputs.AgentCancelInput{ID: dsp.ID}, false)
+	return err
+}

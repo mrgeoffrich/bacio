@@ -251,21 +251,29 @@ func ParseEndReason(s string) (EndReason, error) {
 	return "", fmt.Errorf("unknown end_reason %q (valid: %s)", s, strings.Join(names, ", "))
 }
 
-// DispatchStatus tracks a dispatch through its lifecycle. pending: not
-// yet seen by the agent. delivered: drained into a session (by a hook)
-// or pushed (by a channel) but not acted on. acked: the agent reported
-// back via `bacio agent ack`. cancelled: the supervisor withdrew it.
+// DispatchStatus tracks a dispatch through its lifecycle. queued: an
+// auto-pick dispatch waiting for the background matcher to bind it to
+// a free agent (BACI-51 — only the auto-pick path queues; targeted
+// dispatches go straight to pending). pending: bound to a target,
+// not yet seen by the agent. delivered: drained into a session (by a
+// hook) or pushed (by a channel) but not acted on. acked: the agent
+// reported back via `bacio agent ack`. cancelled: the supervisor
+// withdrew it (valid from queued, pending, or delivered).
 type DispatchStatus string
 
 const (
+	DispatchQueued    DispatchStatus = "queued"
 	DispatchPending   DispatchStatus = "pending"
 	DispatchDelivered DispatchStatus = "delivered"
 	DispatchAcked     DispatchStatus = "acked"
 	DispatchCancelled DispatchStatus = "cancelled"
 )
 
+// allDispatchStatuses lists the statuses in lifecycle order, with
+// `queued` first so JSON enumerations and CLI help text lead with the
+// initial state.
 var allDispatchStatuses = []DispatchStatus{
-	DispatchPending, DispatchDelivered, DispatchAcked, DispatchCancelled,
+	DispatchQueued, DispatchPending, DispatchDelivered, DispatchAcked, DispatchCancelled,
 }
 
 func AllDispatchStatuses() []DispatchStatus {
@@ -359,6 +367,26 @@ var builtinTemplateLabels = map[string]string{
 // returns empty.
 func BuiltinTemplateLabel(slug string) string {
 	return builtinTemplateLabels[slug]
+}
+
+// BuiltinTemplateShipConcurrency is the per-(repo, mode) cap the matcher
+// applies to ship-it by default (BACI-51). 1 = at most one ship-it
+// dispatch in flight per repo, so merging is serialised — the user
+// doesn't need to remember to wait between ships. Users can change it
+// via `bacio settings template set-concurrency ship <n>` or the
+// equivalent UIs.
+const BuiltinTemplateShipConcurrency = 1
+
+// DefaultConcurrencyLimit is the built-in concurrency_limit seed for a
+// template slug — what the schema migration writes for a freshly-seeded
+// built-in. 0 (unlimited) for everything except the BACI-51 ship-it
+// guard. Returns 0 for any non-built-in slug (a user-created template
+// defaults to unlimited).
+func DefaultConcurrencyLimit(slug string) int {
+	if slug == BuiltinTemplateShip {
+		return BuiltinTemplateShipConcurrency
+	}
+	return 0
 }
 
 // dispatchModeSlugRule allows a slightly broader shape than feature
@@ -549,6 +577,13 @@ type AgentDispatch struct {
 // well inside this window; a longer gap means the agent is between
 // turns or the harness is closed.
 const AgentLivenessThreshold = 10 * time.Minute
+
+// SetupDispatchCreator marks dispatches that the bacio channel itself
+// enqueued to ask the agent to call the `register` tool. The BACI-51
+// matcher excludes these from its concurrency-count query so a setup
+// nudge never blocks a real ship-it dispatch from binding. Lives in
+// model so the store can reference it without importing client.
+const SetupDispatchCreator = "bacio-channel"
 
 // SessionLiveness classifies a session as "ended", "active", or "idle"
 // relative to now. Shared by the TUI agent cards and the desktop Agents

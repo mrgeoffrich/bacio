@@ -210,6 +210,11 @@ CREATE TABLE IF NOT EXISTS prompt_templates (
     body                TEXT    NOT NULL DEFAULT '',
     allowed_states_json TEXT    NOT NULL DEFAULT '[]',
     is_builtin          INTEGER NOT NULL DEFAULT 0,
+    -- concurrency_limit caps the number of in-flight (pending+delivered,
+    -- excluding bacio-channel setup rows) dispatches per (repo, mode)
+    -- the matcher will allow. 0 = unlimited; the seed step sets `ship` to
+    -- 1 by default so the BACI-51 ship-it pipeline serialises merges.
+    concurrency_limit   INTEGER NOT NULL DEFAULT 0,
     created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -358,13 +363,16 @@ CREATE TABLE IF NOT EXISTS agent_dispatches (
     mode              TEXT    NOT NULL DEFAULT '',
     payload           TEXT    NOT NULL DEFAULT '',
     status            TEXT    NOT NULL DEFAULT 'pending'
-                        CHECK (status IN ('pending','delivered','acked','cancelled')),
+                        CHECK (status IN ('queued','pending','delivered','acked','cancelled')),
     created_by        TEXT    NOT NULL,
     created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     delivered_at      DATETIME,
     acked_at          DATETIME,
-    ack_note          TEXT    NOT NULL DEFAULT '',
-    CHECK (target_agent_id IS NOT NULL OR target_session_id != '')
+    ack_note          TEXT    NOT NULL DEFAULT ''
+    -- Target CHECK is intentionally absent: queued (BACI-51) rows leave
+    -- target_agent_id NULL and target_session_id '' until the matcher
+    -- binds them; the Go-side validator in AddDispatch enforces "queued
+    -- or named target" instead.
 );
 
 CREATE INDEX IF NOT EXISTS idx_dispatches_agent

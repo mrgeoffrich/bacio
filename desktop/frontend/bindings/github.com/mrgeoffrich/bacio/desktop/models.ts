@@ -798,6 +798,9 @@ export class PromptTemplateDTO {
     "allowedStates": string[];
     "defaultStates": string[];
     "statesAreDefault": boolean;
+    "concurrencyLimit": number;
+    "defaultConcurrencyLimit": number;
+    "concurrencyIsDefault": boolean;
 
     /** Creates a new PromptTemplateDTO instance. */
     constructor($$source: Partial<PromptTemplateDTO> = {}) {
@@ -830,6 +833,15 @@ export class PromptTemplateDTO {
         }
         if (!("statesAreDefault" in $$source)) {
             this["statesAreDefault"] = false;
+        }
+        if (!("concurrencyLimit" in $$source)) {
+            this["concurrencyLimit"] = 0;
+        }
+        if (!("defaultConcurrencyLimit" in $$source)) {
+            this["defaultConcurrencyLimit"] = 0;
+        }
+        if (!("concurrencyIsDefault" in $$source)) {
+            this["concurrencyIsDefault"] = false;
         }
 
         Object.assign(this, $$source);

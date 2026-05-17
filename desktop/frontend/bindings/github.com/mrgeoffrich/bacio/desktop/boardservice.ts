@@ -47,6 +47,18 @@ export function AddRepository(): $CancellablePromise<$models.Board> {
 }
 
 /**
+ * CancelWaitingDispatch (BACI-51) is the spinner-as-cancel-button
+ * binding. Resolves the active (queued / pending / delivered) dispatch
+ * for an issue and cancels it in a single Wails call so card DTOs
+ * don't have to carry the dispatch id. A no-active-dispatch issue is
+ * not an error — the spinner may have cleared between the click and
+ * the call landing — the cancel is a no-op and returns nil.
+ */
+export function CancelWaitingDispatch(repoPrefix: string, issueKey: string): $CancellablePromise<void> {
+    return $Call.ByID(2200863224, repoPrefix, issueKey);
+}
+
+/**
  * DispatchIssue queues a dispatch against an issue for a given job stage
  * (mode). The state-gate check and the free-agent auto-pick both live
  * on client.Client.AutoDispatchIssue (BACI-40), so the per-card button,

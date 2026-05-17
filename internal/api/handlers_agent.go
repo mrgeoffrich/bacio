@@ -1056,14 +1056,14 @@ func (d deps) handleAgentDispatchCreate(w http.ResponseWriter, r *http.Request) 
 // ---------- state-gated auto-pick dispatch (BACI-40) ----------
 
 // handleIssueDispatch is the REST entry point for the state-gated
-// auto-pick dispatch verb: re-check the stage's state-gate against the
-// issue's current state, pick the most-recently-active free agent
-// (live, not busy, has a channel, no un-acked dispatch already
-// queued), then queue the dispatch against it. Mirrors the desktop
-// per-card action button and the CLI's target-less `bacio agent
-// dispatch <key> --mode <stage>`; all three routes share the
-// client.AutoDispatchIssue implementation so the picker and gate
-// logic only lives in one place.
+// enqueue verb (BACI-40 + BACI-51): re-check the stage's state-gate
+// against the issue's current state, then insert a queued dispatch
+// the background matcher will bind to a free agent. Mirrors the
+// desktop per-card action button and the CLI's target-less
+// `bacio agent dispatch <key> --mode <stage>`; all three routes
+// share client.AutoDispatchIssue so the gate + enqueue path only
+// lives in one place. Post-BACI-51 there is no "no free agent" 400
+// — that case is now expressed as a queued row.
 func (d deps) handleIssueDispatch(w http.ResponseWriter, r *http.Request) {
 	repo, ok := resolveRepoFromPath(w, r, d.store)
 	if !ok {
@@ -1093,11 +1093,10 @@ func (d deps) handleIssueDispatch(w http.ResponseWriter, r *http.Request) {
 	defer c.Close()
 	dsp, err := c.AutoDispatchIssue(r.Context(), repo, iss.Key, in.Mode, isDryRun(r))
 	if err != nil {
-		// Surface the picker / state-gate misses as 400s (caller's choice
-		// to retry / pick a different mode) rather than 500s. Anything
-		// else falls through to statusForError.
+		// State-gate misses are 400s (caller's choice to retry / pick
+		// a different mode) rather than 500s.
 		msg := err.Error()
-		if strings.Contains(msg, "no free agent") || strings.Contains(msg, "can't run from") {
+		if strings.Contains(msg, "can't run from") {
 			writeError(w, http.StatusBadRequest, "invalid_input", msg, nil)
 			return
 		}
@@ -1110,4 +1109,31 @@ func (d deps) handleIssueDispatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, dsp)
+}
+
+// handleIssueWaitingDispatch is the BACI-51 read backing the spinner-
+// as-cancel UI: returns the active (queued / pending / delivered)
+// dispatch targeting an issue, or 404 when none. Read-only; no audit
+// row.
+func (d deps) handleIssueWaitingDispatch(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	iss, ok := resolveIssueOnRepo(w, r, d.store, repo)
+	if !ok {
+		return
+	}
+	dsp, err := d.store.WaitingDispatchForIssue(repo.ID, iss.ID)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if dsp == nil {
+		writeError(w, http.StatusNotFound, "not_found",
+			"no waiting dispatch for "+iss.Key, nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, dsp)
 }

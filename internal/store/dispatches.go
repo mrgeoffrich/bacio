@@ -20,9 +20,19 @@ const AgentDispatchRetention = 60 * 24 * time.Hour
 // caller filling the local DB.
 const maxDispatchPayload = 8192
 
-// AddDispatchIn is the validated tuple AddDispatch consumes. A dispatch
-// must name a target: TargetAgentID, TargetSessionID, or both. RepoID
+// AddDispatchIn is the validated tuple AddDispatch consumes. RepoID
 // and CreatedBy are always required.
+//
+// Target rules:
+//   - Targeted dispatch (the default, InitialStatus = "" or
+//     DispatchPending) requires a target: TargetAgentID,
+//     TargetSessionID, or both.
+//   - Queued dispatch (BACI-51: InitialStatus = DispatchQueued) is
+//     target-less by construction — the background matcher binds the
+//     target later via BindQueuedDispatch.
+//
+// InitialStatus selects between the two paths. Empty defaults to
+// DispatchPending so every existing caller stays correct.
 type AddDispatchIn struct {
 	RepoID          int64
 	TargetAgentID   *int64
@@ -31,11 +41,15 @@ type AddDispatchIn struct {
 	Mode            model.DispatchMode
 	Payload         string
 	CreatedBy       string
+	InitialStatus   model.DispatchStatus
 }
 
-// AddDispatch records a new pending dispatch. Existence of the target
-// agent / session / issue is enforced by foreign keys — a bad id
-// surfaces as a constraint error rather than a silent no-op.
+// AddDispatch records a new dispatch. Defaults to status='pending'
+// targeting a named agent/session; pass InitialStatus = DispatchQueued
+// for the BACI-51 enqueue path (no target — the matcher binds later).
+// Existence of the target agent / session / issue is enforced by foreign
+// keys — a bad id surfaces as a constraint error rather than a silent
+// no-op.
 func (s *Store) AddDispatch(in AddDispatchIn) (*model.AgentDispatch, error) {
 	if in.RepoID == 0 {
 		return nil, errors.New("dispatch requires a repo")
@@ -44,8 +58,25 @@ func (s *Store) AddDispatch(in AddDispatchIn) (*model.AgentDispatch, error) {
 	if err != nil {
 		return nil, err
 	}
-	if in.TargetAgentID == nil && in.TargetSessionID == "" {
-		return nil, errors.New("dispatch requires a target: an agent identity, a session, or both")
+	status := in.InitialStatus
+	if status == "" {
+		status = model.DispatchPending
+	}
+	switch status {
+	case model.DispatchPending:
+		if in.TargetAgentID == nil && in.TargetSessionID == "" {
+			return nil, errors.New("dispatch requires a target: an agent identity, a session, or both")
+		}
+	case model.DispatchQueued:
+		// Queued rows are target-less by construction (the matcher binds
+		// the agent later). A queued insert that also carries a target
+		// is a caller bug — refuse it rather than silently dropping the
+		// target.
+		if in.TargetAgentID != nil || in.TargetSessionID != "" {
+			return nil, errors.New("queued dispatches must not carry a target — the matcher will bind one")
+		}
+	default:
+		return nil, fmt.Errorf("dispatch InitialStatus %q not supported (use queued or pending)", status)
 	}
 	if in.TargetSessionID != "" {
 		if _, err := ValidateSessionID(in.TargetSessionID); err != nil {
@@ -67,10 +98,10 @@ func (s *Store) AddDispatch(in AddDispatchIn) (*model.AgentDispatch, error) {
 
 	res, err := tx.Exec(`
 		INSERT INTO agent_dispatches
-		    (repo_id, target_agent_id, target_session_id, issue_id, mode, payload, created_by)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		    (repo_id, target_agent_id, target_session_id, issue_id, mode, payload, status, created_by)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		in.RepoID, nullableInt(in.TargetAgentID), in.TargetSessionID,
-		nullableInt(in.IssueID), string(in.Mode), in.Payload, actor,
+		nullableInt(in.IssueID), string(in.Mode), in.Payload, string(status), actor,
 	)
 	if err != nil {
 		return nil, err
@@ -230,9 +261,11 @@ func (s *Store) AckDispatch(id int64, note string) (*model.AgentDispatch, error)
 	return s.GetDispatch(id)
 }
 
-// CancelDispatch withdraws a pending or delivered dispatch. An
-// already-cancelled dispatch is returned unchanged; cancelling an acked
-// dispatch is an error (the work was already acknowledged).
+// CancelDispatch withdraws a queued, pending, or delivered dispatch.
+// An already-cancelled dispatch is returned unchanged; cancelling an
+// acked dispatch is an error (the work was already acknowledged).
+// BACI-51: queued cancellation rides the same path as pending/delivered
+// so the UI's spinner-as-cancel button can clear an un-matched item.
 func (s *Store) CancelDispatch(id int64) (*model.AgentDispatch, error) {
 	d, err := s.GetDispatch(id)
 	if err != nil {
@@ -252,7 +285,7 @@ func (s *Store) CancelDispatch(id int64) (*model.AgentDispatch, error) {
 	if _, err := tx.Exec(
 		`UPDATE agent_dispatches
 		    SET status = 'cancelled'
-		  WHERE id = ? AND status IN ('pending','delivered')`, id,
+		  WHERE id = ? AND status IN ('queued','pending','delivered')`, id,
 	); err != nil {
 		return nil, err
 	}
@@ -283,6 +316,115 @@ func pruneDispatches(db *sql.DB, retention time.Duration) error {
 		  WHERE status IN ('acked','cancelled') AND created_at < ?`, cutoff,
 	)
 	return err
+}
+
+// WaitingDispatchForIssue returns the active (queued / pending /
+// delivered) dispatch targeting an issue, or (nil, nil) when none
+// exists. Used by the BACI-51 spinner-as-cancel button to resolve the
+// dispatch id without exposing dispatch internals through the card
+// DTO. ORDER BY id DESC LIMIT 1 picks the newest if multiple open
+// rows exist — defensive, since only one should be open while
+// `waiting_for_claim = 1`.
+func (s *Store) WaitingDispatchForIssue(repoID, issueID int64) (*model.AgentDispatch, error) {
+	row := s.DB.QueryRow(dispatchSelect+`
+		WHERE d.repo_id = ? AND d.issue_id = ?
+		  AND d.status IN ('queued','pending','delivered')
+		ORDER BY d.id DESC LIMIT 1`, repoID, issueID)
+	d, err := scanDispatch(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return d, err
+}
+
+// ListQueuedModesByRepo returns the distinct slugs of queued dispatches
+// for a repo, in lifecycle-friendly order (mode ASC) so the matcher's
+// per-tick iteration is deterministic across runs. An empty result is
+// the "nothing waiting" case.
+func (s *Store) ListQueuedModesByRepo(repoID int64) ([]model.DispatchMode, error) {
+	rows, err := s.DB.Query(`
+		SELECT DISTINCT mode FROM agent_dispatches
+		 WHERE repo_id = ? AND status = 'queued'
+		 ORDER BY mode ASC`, repoID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.DispatchMode
+	for rows.Next() {
+		var m string
+		if err := rows.Scan(&m); err != nil {
+			return nil, err
+		}
+		out = append(out, model.DispatchMode(m))
+	}
+	return out, rows.Err()
+}
+
+// ListQueuedByRepoMode returns queued dispatches for a (repo, mode)
+// pair, oldest first. The FIFO order is what the BACI-51 matcher uses
+// to pick the next dispatch to bind. created_at is the primary order
+// key (matching SQLite's default 1-sec timestamp granularity); id ASC
+// tiebreaks so two dispatches inserted in the same second pick the
+// numerically older one first.
+func (s *Store) ListQueuedByRepoMode(repoID int64, mode model.DispatchMode) ([]*model.AgentDispatch, error) {
+	rows, err := s.DB.Query(dispatchSelect+`
+		WHERE d.repo_id = ? AND d.mode = ? AND d.status = 'queued'
+		ORDER BY d.created_at ASC, d.id ASC`, repoID, string(mode))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.AgentDispatch
+	for rows.Next() {
+		d, err := scanDispatch(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// CountInFlightByMode counts the dispatches currently consuming a
+// (repo, mode) slot — pending and delivered, excluding the
+// bacio-channel setup-dispatch creator so the channel's own register
+// nudges never block real dispatches from binding. This is the query
+// the BACI-51 matcher uses to enforce a template's concurrency_limit.
+func (s *Store) CountInFlightByMode(repoID int64, mode model.DispatchMode) (int, error) {
+	var n int
+	err := s.DB.QueryRow(`
+		SELECT COUNT(*) FROM agent_dispatches
+		 WHERE repo_id = ? AND mode = ?
+		   AND status IN ('pending','delivered')
+		   AND created_by != ?`,
+		repoID, string(mode), model.SetupDispatchCreator).Scan(&n)
+	return n, err
+}
+
+// BindQueuedDispatch atomically binds a queued dispatch to a target
+// agent and flips it to pending — the matcher's commit step. The
+// WHERE status='queued' guard makes the bind a no-op if a concurrent
+// process already matched the row (leader gating makes this near-
+// impossible, but the guard is defence in depth). Returns ErrNotFound
+// when 0 rows were updated.
+func (s *Store) BindQueuedDispatch(id int64, agentID int64) (*model.AgentDispatch, error) {
+	res, err := s.DB.Exec(`
+		UPDATE agent_dispatches
+		   SET target_agent_id = ?, status = 'pending'
+		 WHERE id = ? AND status = 'queued'`,
+		agentID, id)
+	if err != nil {
+		return nil, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if n == 0 {
+		return nil, ErrNotFound
+	}
+	return s.GetDispatch(id)
 }
 
 func scanDispatch(r rowScanner) (*model.AgentDispatch, error) {

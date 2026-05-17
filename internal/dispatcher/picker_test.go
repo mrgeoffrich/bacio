@@ -1,11 +1,11 @@
-package client
+package dispatcher
 
 import "testing"
 
 func TestAutoPickFreeAgent(t *testing.T) {
 	cases := []struct {
 		name  string
-		cands []agentCandidate
+		cands []AgentCandidate
 		want  string
 	}{
 		{
@@ -15,7 +15,7 @@ func TestAutoPickFreeAgent(t *testing.T) {
 		},
 		{
 			name: "first eligible wins",
-			cands: []agentCandidate{
+			cands: []AgentCandidate{
 				{AgentName: "otter", HasChannel: true},
 				{AgentName: "viper", HasChannel: true},
 			},
@@ -23,7 +23,7 @@ func TestAutoPickFreeAgent(t *testing.T) {
 		},
 		{
 			name: "skip ended",
-			cands: []agentCandidate{
+			cands: []AgentCandidate{
 				{AgentName: "otter", Ended: true, HasChannel: true},
 				{AgentName: "viper", HasChannel: true},
 			},
@@ -31,7 +31,7 @@ func TestAutoPickFreeAgent(t *testing.T) {
 		},
 		{
 			name: "skip busy",
-			cands: []agentCandidate{
+			cands: []AgentCandidate{
 				{AgentName: "otter", Busy: true, HasChannel: true},
 				{AgentName: "viper", HasChannel: true},
 			},
@@ -39,7 +39,7 @@ func TestAutoPickFreeAgent(t *testing.T) {
 		},
 		{
 			name: "skip no identity slug",
-			cands: []agentCandidate{
+			cands: []AgentCandidate{
 				{AgentName: "", HasChannel: true},
 				{AgentName: "viper", HasChannel: true},
 			},
@@ -47,7 +47,7 @@ func TestAutoPickFreeAgent(t *testing.T) {
 		},
 		{
 			name: "skip no channel",
-			cands: []agentCandidate{
+			cands: []AgentCandidate{
 				{AgentName: "otter"},
 				{AgentName: "viper", HasChannel: true},
 			},
@@ -55,7 +55,7 @@ func TestAutoPickFreeAgent(t *testing.T) {
 		},
 		{
 			name: "skip already-occupied (open dispatch un-acked)",
-			cands: []agentCandidate{
+			cands: []AgentCandidate{
 				{AgentName: "otter", HasChannel: true, HasOpenDispatch: true},
 				{AgentName: "viper", HasChannel: true},
 			},
@@ -63,7 +63,7 @@ func TestAutoPickFreeAgent(t *testing.T) {
 		},
 		{
 			name: "everyone occupied yields no pick",
-			cands: []agentCandidate{
+			cands: []AgentCandidate{
 				{AgentName: "otter", HasChannel: true, HasOpenDispatch: true},
 				{AgentName: "viper", HasChannel: true, Busy: true},
 				{AgentName: "heron", Ended: true, HasChannel: true},
@@ -73,8 +73,8 @@ func TestAutoPickFreeAgent(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := autoPickFreeAgent(c.cands); got != c.want {
-				t.Errorf("autoPickFreeAgent() = %q, want %q", got, c.want)
+			if got := AutoPickFreeAgent(c.cands); got != c.want {
+				t.Errorf("AutoPickFreeAgent() = %q, want %q", got, c.want)
 			}
 		})
 	}

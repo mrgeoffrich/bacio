@@ -222,6 +222,14 @@ func (c *remoteClient) AutoDispatchIssue(ctx context.Context, repo *model.Repo, 
 	return &out, nil
 }
 
+// WaitingDispatchForIssue has no REST parity today — the spinner-as-
+// cancel UI runs on the desktop / TUI processes that talk to the
+// local store directly. A future web-mode follow-up would add the
+// matching GET route; until then this returns ErrLocalOnly cleanly.
+func (c *remoteClient) WaitingDispatchForIssue(ctx context.Context, repo *model.Repo, issueKey string) (*model.AgentDispatch, error) {
+	return nil, remoteAgentNotSupported("waiting-dispatch-for-issue")
+}
+
 // DrainDispatches is the side-effect-bearing "list pending+delivered
 // AND mark pending → delivered" call used by the bacio hook to feed an
 // agent's context. The hook talks to the local store directly (it
@@ -329,6 +337,14 @@ func (c *remoteClient) DeletePromptTemplate(ctx context.Context, in inputs.Setti
 }
 
 func (c *remoteClient) RestoreBuiltinPromptTemplates(ctx context.Context, dryRun bool) ([]string, error) {
+	return nil, remoteAgentNotSupported("prompt-templates")
+}
+
+func (c *remoteClient) SetPromptTemplateConcurrencyLimit(ctx context.Context, in inputs.SettingsTemplateSetConcurrencyInput, dryRun bool) (*store.PromptTemplate, error) {
+	// The REST surface is at PUT /settings/templates/{mode}/concurrency
+	// (BACI-51), but the CLI-side typed CRUD verbs route through the
+	// local store today — keep the remote stub returning the standard
+	// not-supported error until HTTP parity for the typed verbs lands.
 	return nil, remoteAgentNotSupported("prompt-templates")
 }
 

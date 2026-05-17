@@ -24,6 +24,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/mrgeoffrich/bacio/internal/dispatcher"
 	"github.com/mrgeoffrich/bacio/internal/leader"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
@@ -104,6 +105,20 @@ func pruneTick() tea.Cmd {
 	})
 }
 
+// queueMatchTickMsg fires on the BACI-51 dispatcher matcher cadence
+// (QueueMatchInterval). Same shell-level pattern as pruneTickMsg:
+// only the leader runs the matcher; standby ticks are no-ops; the
+// cadence keeps running on standby so a promotion picks up next tick.
+type queueMatchTickMsg time.Time
+
+// queueMatchTick returns a Cmd that fires queueMatchTickMsg after
+// QueueMatchInterval.
+func queueMatchTick() tea.Cmd {
+	return tea.Tick(store.QueueMatchInterval, func(t time.Time) tea.Msg {
+		return queueMatchTickMsg(t)
+	})
+}
+
 // Run boots the Bubble Tea program in alt-screen mode and blocks until
 // quit. The store is owned by the caller. It constructs a leader.Elector
 // for the process and releases the lease on graceful exit.
@@ -150,6 +165,7 @@ func NewModel(s *store.Store, repo *model.Repo, el *leader.Elector) (*Model, err
 		repo:    repo,
 		store:   s,
 		elector: el,
+		matcher: dispatcher.New(s),
 		tabs: []tab{
 			{"Board", board},
 			{"Features", newFeaturesView(s, repo)},
@@ -175,12 +191,16 @@ type Model struct {
 	// explicitly (digit/tab/shift+tab) so a manual swap doesn't bounce
 	// back later.
 	returnTab int
-	// store is the shell-level handle the elector-gated prune ticker
-	// uses (views still hold their own copies for their own queries).
+	// store is the shell-level handle the elector-gated prune + queue
+	// matcher tickers use (views still hold their own copies for their
+	// own queries).
 	store *store.Store
 	// elector runs the UI leader election; nil in the WASM demo.
 	elector     *leader.Elector
 	leaderState leader.State
+	// matcher binds BACI-51 queued dispatches to free agents on the
+	// queueMatchTick cadence. nil disables (e.g. WASM demo).
+	matcher *dispatcher.Matcher
 }
 
 func (m *Model) Init() tea.Cmd {
@@ -203,6 +223,11 @@ func (m *Model) Init() tea.Cmd {
 		// ago, so there are no >4h-old ended rows newer than that pass'
 		// cutoff. The first real tick fires UILeaderPruneInterval later.
 		cmds = append(cmds, pruneTick())
+		// Seed the BACI-51 queue-matcher cadence. Same pattern: don't
+		// fire immediately (lots of UIs racing on first launch would
+		// all attempt a match in the same instant); the first tick
+		// runs QueueMatchInterval (~5s) after Init.
+		cmds = append(cmds, queueMatchTick())
 	}
 	if len(cmds) == 0 {
 		return nil
@@ -243,6 +268,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, pruneTick()
+	case queueMatchTickMsg:
+		// BACI-51 queue-matcher tick: bind queued dispatches to free
+		// agents. Same leader-gating rationale as the prune tick — one
+		// matcher across the cluster, ticker keeps running on standby
+		// so a promotion picks it up. Mechanical work: errors logged,
+		// no audit row, no user-visible surface change.
+		if m.elector != nil && m.leaderState.AmLeader && m.matcher != nil {
+			if _, err := m.matcher.Tick(); err != nil {
+				log.Printf("bacio: queue match failed: %v", err)
+			}
+		}
+		if m.elector == nil {
+			return m, nil
+		}
+		return m, queueMatchTick()
 	case openDocMsg:
 		// Cross-tab: hand the filename to the Documents tab and focus
 		// it. Remember where we came from so esc on the doc overlay

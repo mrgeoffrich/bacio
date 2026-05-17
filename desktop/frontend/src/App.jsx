@@ -303,17 +303,32 @@ export default function App() {
   };
 
   // Dispatch a prompt from a card's action button: the backend gates the
-  // mode on the issue's state and auto-picks a free agent — the caller
-  // names neither an agent nor a note.
+  // mode on the issue's state and enqueues a target-less dispatch the
+  // matcher binds later — the caller names neither an agent nor a note.
+  // Post-BACI-51 the call always succeeds (gate-aside); the waiting
+  // spinner takes over until the matcher binds.
   const dispatchFromCard = (cardKey, mode) => {
     api.dispatchIssue(activeBoard, cardKey, mode)
       .then(() => {
-        // Optimistically flag the card as claimed-by-an-agent so the
-        // breathing-pulse treatment kicks in; refresh the agent counts.
-        setCards(cs => cs.map(c => c.key === cardKey ? { ...c, claude: true } : c));
+        // Optimistically flag the card as waiting-for-claim so the
+        // spinner appears immediately; the next refresh poll reads
+        // the authoritative state from the server.
+        setCards(cs => cs.map(c => c.key === cardKey ? { ...c, waitingForClaim: true } : c));
         refreshAgents();
       })
       .catch(err => reportError(err, { headline: "Couldn't dispatch agent" }));
+  };
+
+  // BACI-51 spinner-as-cancel-button handler: withdraw a card's queued
+  // (or pending/delivered) dispatch. Optimistically clears the local
+  // waitingForClaim flag so the spinner disappears immediately; the
+  // refresh poll reads the authoritative state.
+  const cancelWaitingFromCard = (cardKey) => {
+    api.cancelWaitingDispatch(activeBoard, cardKey)
+      .then(() => {
+        setCards(cs => cs.map(c => c.key === cardKey ? { ...c, waitingForClaim: false } : c));
+      })
+      .catch(err => reportError(err, { headline: "Couldn't cancel queued dispatch" }));
   };
 
   // Ship: close the drawer, optimistically flip the card to "done", and
@@ -398,6 +413,7 @@ export default function App() {
             onMoveCard={moveCard}
             onOpenCard={openCard}
             onDispatchFromCard={dispatchFromCard}
+            onCancelWaitingCard={cancelWaitingFromCard}
           />
         </ErrorBoundary>
       )}

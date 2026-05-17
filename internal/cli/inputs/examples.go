@@ -184,10 +184,15 @@ var (
 	}
 
 	ExampleSettingsTemplateAdd = SettingsTemplateAddInput{
-		Slug:   "spike",
-		Name:   "Spike",
-		Body:   "Spike on {{issue_id}} ({{issue_title}}) — produce a short investigation note, no code.",
-		States: []string{"todo"},
+		Slug:             "spike",
+		Name:             "Spike",
+		Body:             "Spike on {{issue_id}} ({{issue_title}}) — produce a short investigation note, no code.",
+		States:           []string{"todo"},
+		ConcurrencyLimit: 0,
+	}
+	ExampleSettingsTemplateSetConcurrency = SettingsTemplateSetConcurrencyInput{
+		Slug:             "ship",
+		ConcurrencyLimit: 1,
 	}
 	ExampleSettingsTemplateRename = SettingsTemplateRenameInput{
 		Slug:    "spike",
