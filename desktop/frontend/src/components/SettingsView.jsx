@@ -60,6 +60,21 @@ export default function SettingsView({
     return tpls;
   }, []);
 
+  // Page-level Escape closes the Settings view. Skipped when any
+  // sub-modal is open — Radix Dialog catches Escape first via a
+  // capture-phase listener and dismisses just the sub-modal, leaving
+  // Settings open. (When no sub-modal is open, no Radix listener is
+  // mounted, so this window-level listener fires and closes the page.)
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      if (adding || renaming || pendingDelete || pendingRestore) return;
+      onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [adding, renaming, pendingDelete, pendingRestore, onClose]);
+
   useEffect(() => {
     let cancelled = false;
     // BACI-50 closed the web-mode CRUD gap — every affordance below is
