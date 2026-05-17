@@ -398,6 +398,34 @@ CREATE TABLE IF NOT EXISTS agent_channels (
 
 CREATE INDEX IF NOT EXISTS idx_agent_channels_repo ON agent_channels(repo_id);
 
+-- agent_session_todos mirrors the agent's TodoWrite tool list per session
+-- — the in-progress plan a Claude Code session is executing. The list is
+-- replaced wholesale on every TodoWrite event (atomic per-session swap
+-- inside a single transaction so a partial write never shows a
+-- frankenlist). Local-only — never synced. Cascaded out by the
+-- agent_sessions ON DELETE chain, so the existing live-list / 60-day
+-- session prune sweeps it too; no separate retention pass.
+--
+-- session_pk (the int FK) rather than session_id (the external string)
+-- matches the rest of the agent_* tables (agent_claims.session_pk,
+-- agent_channels' (host, claude_pid) join key resolved server-side).
+-- position is part of the PK because the list is replaced wholesale and
+-- stable ordering is the only thing that matters; per-row identity buys
+-- nothing. The CHECK on status is a defensive belt over
+-- model.ParseTodoStatus / store.ValidateSessionTodos, which both run
+-- before the row reaches the DB.
+CREATE TABLE IF NOT EXISTS agent_session_todos (
+    session_pk  INTEGER NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+    position    INTEGER NOT NULL,
+    content     TEXT    NOT NULL,
+    status      TEXT    NOT NULL CHECK (status IN ('pending','in_progress','completed')),
+    updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (session_pk, position)
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_session_todos_session
+    ON agent_session_todos(session_pk);
+
 -- ui_leader is a single-row lease table. Only one UI process (TUI or desktop
 -- app) holds the lease at a time; all others stand by. The CHECK (id = 1)
 -- constraint + INSERT OR IGNORE seed guarantee exactly one row forever.

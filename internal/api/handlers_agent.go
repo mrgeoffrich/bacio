@@ -599,6 +599,37 @@ func (d deps) handleAgentSessionShow(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, &AgentSessionShow{Session: sess, Claims: claims})
 }
 
+// ---------- todos (BACI-45) ----------
+
+// handleAgentSessionTodos returns the agent's mirrored TodoWrite
+// snapshot for one session. Read-only: writes flow through the
+// `bacio hook post-tool-use` mirror, not over HTTP. Unknown session id
+// returns 404; an empty list is `[]`, never null.
+func (d deps) handleAgentSessionTodos(w http.ResponseWriter, r *http.Request) {
+	sid := r.PathValue("session_id")
+	sess, err := d.store.ResolveAgentSession(sid)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found",
+				fmt.Sprintf("session %q not found", sid), nil)
+			return
+		}
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	todos, err := d.store.ListSessionTodos(sess.SessionID)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if todos == nil {
+		todos = []model.SessionTodo{}
+	}
+	writeJSON(w, http.StatusOK, todos)
+}
+
 // ---------- inbox ----------
 
 func (d deps) handleAgentInbox(w http.ResponseWriter, r *http.Request) {

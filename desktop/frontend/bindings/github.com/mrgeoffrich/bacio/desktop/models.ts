@@ -73,6 +73,17 @@ export class AgentCard {
     "claims": ClaimDTO[];
     "dispatches": DispatchDTO[];
 
+    /**
+     * Todos mirrors the agent's TodoWrite list (BACI-45). Populated by
+     * ListAgents from the bulk ListTodosBySessions read; empty array
+     * when the agent hasn't run TodoWrite this session. TodosDone /
+     * TodosTotal are pre-computed server-side so the React component
+     * doesn't reduce the array twice per render.
+     */
+    "todos": SessionTodoDTO[];
+    "todosDone": number;
+    "todosTotal": number;
+
     /** Creates a new AgentCard instance. */
     constructor($$source: Partial<AgentCard> = {}) {
         if (!("sessionId" in $$source)) {
@@ -126,6 +137,15 @@ export class AgentCard {
         if (!("dispatches" in $$source)) {
             this["dispatches"] = [];
         }
+        if (!("todos" in $$source)) {
+            this["todos"] = [];
+        }
+        if (!("todosDone" in $$source)) {
+            this["todosDone"] = 0;
+        }
+        if (!("todosTotal" in $$source)) {
+            this["todosTotal"] = 0;
+        }
 
         Object.assign(this, $$source);
     }
@@ -136,12 +156,16 @@ export class AgentCard {
     static createFrom($$source: any = {}): AgentCard {
         const $$createField15_0 = $$createType1;
         const $$createField16_0 = $$createType3;
+        const $$createField17_0 = $$createType5;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("claims" in $$parsedSource) {
             $$parsedSource["claims"] = $$createField15_0($$parsedSource["claims"]);
         }
         if ("dispatches" in $$parsedSource) {
             $$parsedSource["dispatches"] = $$createField16_0($$parsedSource["dispatches"]);
+        }
+        if ("todos" in $$parsedSource) {
+            $$parsedSource["todos"] = $$createField17_0($$parsedSource["todos"]);
         }
         return new AgentCard($$parsedSource as Partial<AgentCard>);
     }
@@ -247,8 +271,8 @@ export class BoardCard {
      * Creates a new BoardCard instance from a string or object.
      */
     static createFrom($$source: any = {}): BoardCard {
-        const $$createField4_0 = $$createType4;
-        const $$createField5_0 = $$createType4;
+        const $$createField4_0 = $$createType6;
+        const $$createField5_0 = $$createType6;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField4_0($$parsedSource["tags"]);
@@ -633,7 +657,7 @@ export class FeatureDetail {
      * Creates a new FeatureDetail instance from a string or object.
      */
     static createFrom($$source: any = {}): FeatureDetail {
-        const $$createField5_0 = $$createType6;
+        const $$createField5_0 = $$createType8;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("issues" in $$parsedSource) {
             $$parsedSource["issues"] = $$createField5_0($$parsedSource["issues"]);
@@ -791,7 +815,7 @@ export class HistoryPage {
      * Creates a new HistoryPage instance from a string or object.
      */
     static createFrom($$source: any = {}): HistoryPage {
-        const $$createField0_0 = $$createType8;
+        const $$createField0_0 = $$createType10;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("entries" in $$parsedSource) {
             $$parsedSource["entries"] = $$createField0_0($$parsedSource["entries"]);
@@ -872,12 +896,12 @@ export class IssueDetail {
      * Creates a new IssueDetail instance from a string or object.
      */
     static createFrom($$source: any = {}): IssueDetail {
-        const $$createField5_0 = $$createType4;
-        const $$createField6_0 = $$createType4;
-        const $$createField8_0 = $$createType10;
-        const $$createField9_0 = $$createType12;
-        const $$createField10_0 = $$createType14;
-        const $$createField11_0 = $$createType16;
+        const $$createField5_0 = $$createType6;
+        const $$createField6_0 = $$createType6;
+        const $$createField8_0 = $$createType12;
+        const $$createField9_0 = $$createType14;
+        const $$createField10_0 = $$createType16;
+        const $$createField11_0 = $$createType18;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField5_0($$parsedSource["tags"]);
@@ -1026,8 +1050,8 @@ export class PromptTemplateDTO {
      * Creates a new PromptTemplateDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): PromptTemplateDTO {
-        const $$createField7_0 = $$createType4;
-        const $$createField8_0 = $$createType4;
+        const $$createField7_0 = $$createType6;
+        const $$createField8_0 = $$createType6;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("allowedStates" in $$parsedSource) {
             $$parsedSource["allowedStates"] = $$createField7_0($$parsedSource["allowedStates"]);
@@ -1039,21 +1063,53 @@ export class PromptTemplateDTO {
     }
 }
 
+/**
+ * SessionTodoDTO is one row of the agent's mirrored TodoWrite list,
+ * shaped for the Agents screen. Status is one of pending|in_progress|
+ * completed, surfaced verbatim so the frontend can pick its glyph.
+ */
+export class SessionTodoDTO {
+    "content": string;
+    "status": string;
+
+    /** Creates a new SessionTodoDTO instance. */
+    constructor($$source: Partial<SessionTodoDTO> = {}) {
+        if (!("content" in $$source)) {
+            this["content"] = "";
+        }
+        if (!("status" in $$source)) {
+            this["status"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new SessionTodoDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): SessionTodoDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new SessionTodoDTO($$parsedSource as Partial<SessionTodoDTO>);
+    }
+}
+
 // Private type creation functions
 const $$createType0 = ClaimDTO.createFrom;
 const $$createType1 = $Create.Array($$createType0);
 const $$createType2 = DispatchDTO.createFrom;
 const $$createType3 = $Create.Array($$createType2);
-const $$createType4 = $Create.Array($Create.Any);
-const $$createType5 = FeatureLinkedIssue.createFrom;
-const $$createType6 = $Create.Array($$createType5);
-const $$createType7 = HistoryEntryDTO.createFrom;
+const $$createType4 = SessionTodoDTO.createFrom;
+const $$createType5 = $Create.Array($$createType4);
+const $$createType6 = $Create.Array($Create.Any);
+const $$createType7 = FeatureLinkedIssue.createFrom;
 const $$createType8 = $Create.Array($$createType7);
-const $$createType9 = CommentDTO.createFrom;
+const $$createType9 = HistoryEntryDTO.createFrom;
 const $$createType10 = $Create.Array($$createType9);
-const $$createType11 = PRDTO.createFrom;
+const $$createType11 = CommentDTO.createFrom;
 const $$createType12 = $Create.Array($$createType11);
-const $$createType13 = DocLinkDTO.createFrom;
+const $$createType13 = PRDTO.createFrom;
 const $$createType14 = $Create.Array($$createType13);
-const $$createType15 = ClaimantDTO.createFrom;
+const $$createType15 = DocLinkDTO.createFrom;
 const $$createType16 = $Create.Array($$createType15);
+const $$createType17 = ClaimantDTO.createFrom;
+const $$createType18 = $Create.Array($$createType17);

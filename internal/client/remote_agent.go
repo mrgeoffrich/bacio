@@ -280,6 +280,21 @@ func (c *remoteClient) LinkSessionChannel(ctx context.Context, sessionID string,
 	return remoteAgentNotSupported("channel")
 }
 
+// Session-todo mirror methods — local-only in v1, like the rest of the
+// agent registry's hook/channel-internal surface.
+
+func (c *remoteClient) ReplaceSessionTodos(ctx context.Context, sessionID string, todos []model.SessionTodo) error {
+	return remoteAgentNotSupported("todos")
+}
+
+func (c *remoteClient) ListSessionTodos(ctx context.Context, sessionID string) ([]model.SessionTodo, error) {
+	return nil, remoteAgentNotSupported("todos")
+}
+
+func (c *remoteClient) ListTodosBySessions(ctx context.Context, sessionIDs []string) (map[int64][]model.SessionTodo, error) {
+	return nil, remoteAgentNotSupported("todos")
+}
+
 // Prompt templates + state-gates landed HTTP parity in BACI-36 for the
 // legacy four verbs (Get/SetPromptTemplate(s), Get/SetPromptStates);
 // these thread through the same `c.do(...)` pattern as the BACI-34
