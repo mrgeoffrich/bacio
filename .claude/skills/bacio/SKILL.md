@@ -624,10 +624,13 @@ bacio agent inbox                       Open dispatches queued for this session
   --session <id>                        Default: $CLAUDE_CODE_SESSION_ID
 bacio agent ack <DISPATCH-ID>           Acknowledge a dispatch
   --note <text>                         Optional reply recorded on the dispatch
-bacio agent cancel <DISPATCH-ID>        Cancel a pending/delivered dispatch
-                                        (dispatcher side; clears the issue's
-                                        waiting_for_claim flag in the same
-                                        tx; errors if already acked)
+bacio agent cancel <DISPATCH-ID>        Cancel a queued/pending/delivered
+                                        dispatch (dispatcher side; clears
+                                        the issue's waiting_for_claim
+                                        flag in the same tx; errors if
+                                        already acked). BACI-51: also
+                                        the spinner-as-cancel button's
+                                        underlying call.
 bacio agent list                        Lean table of sessions in this repo
   --active                              Only sessions that haven't ended
   --all-repos                           Include sessions from every repo
@@ -677,19 +680,37 @@ Either way, acknowledge each handled dispatch with `bacio agent ack <id>
 --note "..."` (or the channel's `reply` tool). Acked/cancelled dispatches
 drop out of `bacio agent inbox` and are pruned after 60 days.
 
-**The `waiting_for_claim` lifecycle.** When a dispatch is queued against
-a concrete issue, bacio immediately sets that issue's `waiting_for_claim`
-flag to `true` — the "a dispatch is out, but no agent has picked it up
-yet" signal. It is cleared back to `false` the moment an agent records
-an open claim on the issue (`bacio agent claim`), and also if the
-dispatch is cancelled. So the normal flow is: dispatch → `waiting_for_claim
-= true` → agent claims → `waiting_for_claim = false`, `taken = true`. The
-TUI and desktop boards show a spinner (and hide the dispatch action)
-while an issue is waiting, so claiming promptly after you pick up a
-dispatch is what clears the spinner. If a dispatch is orphaned (the
-target session ends before acking), unstick the spinner with `bacio
-agent cancel <dispatch-id>` — it marks the dispatch cancelled and
-clears `waiting_for_claim` in the same transaction.
+**The dispatch lifecycle (BACI-51).** Status progresses
+`queued → pending → delivered → acked`; cancel is valid from any of
+`queued`, `pending`, or `delivered`. The **auto-pick path**
+(target-less `bacio agent dispatch <key> --mode <stage>`, the desktop
+per-card action button, REST `POST .../dispatch`, TUI `x`) **always
+enqueues** as `queued` — it never errors with "no free agent". A
+background **matcher** running in whichever UI process holds the
+`ui_leader` lease (TUI or desktop) ticks ~every 5s and binds the
+oldest queued dispatch in each per-(repo, mode) FIFO to a free agent,
+flipping `queued → pending`. The matcher honours each template's
+`concurrency_limit` (0 = unlimited; built-in `ship` seeds to 1 so
+merging serialises). Targeted dispatch (`--to <agent>` and/or
+`--session <id>`) bypasses the queue and goes straight to `pending`.
+Setup dispatches the bacio channel queues for the `register` nudge
+(creator = `bacio-channel`) are excluded from the concurrency count.
+
+**The `waiting_for_claim` lifecycle.** When a dispatch is created
+against a concrete issue (queued or pending), bacio immediately sets
+that issue's `waiting_for_claim` flag to `true` — the "a dispatch is
+out, but no agent has picked it up yet" signal. It is cleared back to
+`false` the moment an agent records an open claim on the issue
+(`bacio agent claim`), and also if the dispatch is cancelled. So the
+normal flow is: enqueue → `waiting_for_claim = true` → matcher binds
+→ agent claims → `waiting_for_claim = false`, `taken = true`. The
+TUI and desktop boards show a spinner while an issue is waiting; in
+the desktop it doubles as a clickable cancel button (the TUI's
+equivalent is the `X` keybind on a waiting card). If a dispatch is
+orphaned (the target session ends before acking, or just nothing
+ever picks it up), cancel it with `bacio agent cancel <dispatch-id>`
+— it marks the dispatch cancelled and clears `waiting_for_claim` in
+the same transaction.
 
 ### Dispatch prompt templates
 
@@ -731,12 +752,20 @@ bacio settings template states set <slug> <state,state,...>
 bacio settings template states reset <slug>
                                         Built-ins only: revert state-gate to
                                         the embedded default
+
+bacio settings template set-concurrency <slug> <n>
+                                        BACI-51: set the per-(repo, slug)
+                                        in-flight dispatch cap the matcher
+                                        enforces. 0 = unlimited; positive
+                                        integers cap. Built-in `ship` seeds
+                                        to 1; everything else seeds to 0.
 ```
 
 Every mutating verb honours `--json`, `--dry-run`, and `bacio schema
 show settings.template.<verb>` per the six agent-CLI principles. Schema
 names: `settings.template.add` / `set` / `reset` / `rename` / `rm` /
-`restore-defaults` / `states.set` / `states.reset`. A template body may
+`restore-defaults` / `states.set` / `states.reset` /
+`set-concurrency`. A template body may
 interpolate `{{issue_id}}`, `{{issue_title}}`, and `{{repo_prefix}}` —
 substituted with the dispatched issue's context at dispatch time; an
 unknown `{{...}}` token is left verbatim. The `bacio settings template
@@ -765,6 +794,10 @@ bacio settings template reset review
 
 # Add a brand-new template, slot it in for todo issues.
 bacio settings template add --json '{"slug":"spike","name":"Spike","body":"Spike on {{issue_id}}.","states":["todo"]}'
+
+# Cap how many in-flight dispatches the matcher allows per (repo, slug).
+bacio settings template set-concurrency ship 1
+bacio settings template set-concurrency plan 0   # unlimited
 
 # Rename a template — old slug also rewritten on historical dispatches.
 bacio settings template rename spike investigation Investigation

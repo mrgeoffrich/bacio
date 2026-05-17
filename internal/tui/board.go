@@ -323,6 +323,41 @@ func (b *boardView) featureHidden(slug string) bool {
 	return b.hiddenFeatures[key]
 }
 
+// cancelWaitingOnSelection is the BACI-51 X-key handler: finds the
+// selected card's active queued/pending/delivered dispatch and cancels
+// it. A no-op on a card that isn't waiting (no spurious audit row), so
+// hitting X on the wrong card just does nothing instead of erroring.
+// Triggers an immediate reload so the spinner disappears on the next
+// repaint without waiting for the next refresh tick.
+func (b *boardView) cancelWaitingOnSelection() error {
+	iss := b.currentIssue()
+	if iss == nil || !iss.WaitingForClaim {
+		return nil
+	}
+	dsp, err := b.store.WaitingDispatchForIssue(b.repo.ID, iss.ID)
+	if err != nil {
+		return err
+	}
+	if dsp == nil {
+		// Race: the matcher bound it (or another UI cancelled) between
+		// the spinner render and the key press. Nothing to do.
+		return nil
+	}
+	if _, err := b.store.CancelDispatch(dsp.ID); err != nil {
+		return err
+	}
+	recordTUIOp(b.store, model.HistoryEntry{
+		RepoID: &b.repo.ID, RepoPrefix: b.repo.Prefix,
+		Op: "agent.cancel", Kind: "agent", Actor: b.actor,
+		TargetID: &dsp.ID, TargetLabel: iss.Key,
+		Details: "issue=" + iss.Key + ",status=cancelled,via=tui-spinner",
+	})
+	if err := b.reload(); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (b *boardView) currentIssue() *model.Issue {
 	v := b.visibleStates()
 	if b.col < 0 || b.col >= len(v) {
@@ -460,7 +495,7 @@ func (b *boardView) Help() string {
 		}
 		return "tab next pane · j/k scroll · g/G top/bottom · esc close"
 	}
-	return "h/l cols · j/k cards · enter open · x send · c columns · f features · H hide col · d detail · r reload · q quit"
+	return "h/l cols · j/k cards · enter open · x send · X cancel waiting · c columns · f features · H hide col · d detail · r reload · q quit"
 }
 
 func (b *boardView) Update(msg tea.Msg) tea.Cmd {
@@ -589,6 +624,14 @@ func (b *boardView) Update(msg tea.Msg) tea.Cmd {
 		b.openFeaturePicker()
 	case "x":
 		b.openDispatchPicker()
+	case "X":
+		// BACI-51: cancel a queued / pending / delivered dispatch on
+		// the selected waiting card. No-op on cards that aren't
+		// waiting — the spinner is the affordance, capital X is the
+		// keystroke (lowercase x already dispatches).
+		if err := b.cancelWaitingOnSelection(); err != nil {
+			b.err = err
+		}
 	case "H":
 		// Quick power-user hide of the focused column. We refuse to hide
 		// the last visible column so the board never goes empty by accident.

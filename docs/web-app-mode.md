@@ -145,10 +145,12 @@ shapes into the desktop's `BoardCard` / `IssueDetail` / `DocSummary` /
 | `listHistory(p, page, pageSize)` | `GET /repos/{p}/history?limit=&offset=` | Over-fetches by one so `hasMore` is derivable client-side. |
 | `getDoc(p, name)` | `GET /repos/{p}/documents/{name}` | |
 | `saveDoc(p, name, content)` | `PUT /repos/{p}/documents/{name}` then re-`getDoc` | |
-| `dispatchIssue(p, k, mode)` | `POST /repos/{p}/issues/{k}/dispatch` (BACI-40) | Server re-checks the state-gate and auto-picks a free agent; caller names neither an agent nor a note. |
-| `listPromptTemplates()` | `GET /settings/templates/full` (BACI-50) | Server returns the rich DTO (label, defaults, is_builtin, …); the bundle reshapes snake_case → camelCase. The older `GET /settings/templates` body-map and `…/states` map still ship for back-compat. |
+| `dispatchIssue(p, k, mode)` | `POST /repos/{p}/issues/{k}/dispatch` (BACI-40 + BACI-51) | Server re-checks the state-gate and enqueues a target-less `queued` dispatch; the matcher (running in TUI/desktop/`bacio api`) binds an agent later. Never errors with "no free agent" — that case is now a queued row in the per-(repo, mode) FIFO. |
+| `cancelWaitingDispatch(p, k)` | `GET /repos/{p}/issues/{k}/waiting-dispatch` then `POST /agents/dispatches/{id}/cancel` (BACI-51) | The spinner-as-cancel-button handler. A 404 on the GET means the matcher bound the dispatch (or another client cancelled) between the click and the call — treated as a no-op success, not an error. |
+| `listPromptTemplates()` | `GET /settings/templates/full` (BACI-50) | Server returns the rich DTO (label, defaults, is_builtin, BACI-51 concurrency fields, …); the bundle reshapes snake_case → camelCase. The older `GET /settings/templates` body-map and `…/states` map still ship for back-compat. |
 | `savePromptTemplate(mode, body)` | `PUT /settings/templates/{mode}` (or `DELETE` to reset on empty body) | Refetches the one DTO after the write. |
 | `savePromptStates(mode, states)` | `PUT /settings/templates/{mode}/states` (or `DELETE` on empty list) | Same refetch pattern. |
+| `savePromptConcurrency(mode, n)` | `PUT /settings/templates/{mode}/concurrency` (BACI-51) | `0` = unlimited, positive integers cap. No DELETE route — set to `0` to revert to "unlimited". The store-side validator enforces `>= 0`. |
 | `addPromptTemplate(slug, name, body, states)` | `POST /settings/templates` (BACI-50) | Returns the new DTO. Audits as `template.create`. |
 | `renamePromptTemplate(slug, newSlug, newName)` | `POST /settings/templates/{slug}/rename` (BACI-50) | Either field can be empty to leave it unchanged. Audits as `template.rename`. Cascade-updates historical `agent_dispatches.mode`. |
 | `deletePromptTemplate(slug)` | `DELETE /settings/templates/{slug}/row` (BACI-50) | Distinct from the body-reset endpoint at `…/{mode}`. Audits as `template.delete`. |
@@ -299,6 +301,18 @@ deferred:
    the existing refetch-one-after-write path works. Skipping the
    round-trip would mean having `PUT` return the full DTO too — small
    cleanup, not urgent.
+5. **Headless matcher for web-only deployments (BACI-51).** The
+   dispatch-queue matcher (`internal/dispatcher.Matcher`) is gated on
+   `ui_leader` and runs only inside the TUI's tick loop, the desktop's
+   `LeaderService`, or `bacio api`'s leader loop (BACI-50 added the
+   third). A `bacio api` instance already participates in the
+   election, so today's gap is narrower than it was: the matcher
+   itself isn't wired into the api's leader goroutine yet, so a
+   pure-web deployment (browser pointed at a `bacio api` with no
+   TUI/desktop on the host) won't auto-bind queued dispatches. The
+   follow-up is to call `dispatcher.Matcher.Tick()` from
+   `internal/api/leaderservice.go` on the same 5 s cadence
+   `QueueMatchInterval` uses everywhere else.
 
 ---
 

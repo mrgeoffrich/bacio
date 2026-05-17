@@ -46,12 +46,24 @@ type SettingsTemplateStatesResetInput struct {
 // identifier (kebab- or snake-case, max 60 chars, unique). Name is the
 // human display label (1–80 chars, unique case-insensitively). Body is
 // the prompt text; States is the set of issue states the template is
-// valid to run from.
+// valid to run from. ConcurrencyLimit (BACI-51) caps the in-flight
+// (pending+delivered) dispatches per (repo, slug) the background
+// matcher will allow; 0 = unlimited.
 type SettingsTemplateAddInput struct {
-	Slug   string   `json:"slug"`
-	Name   string   `json:"name"`
-	Body   string   `json:"body"`
-	States []string `json:"states"`
+	Slug             string   `json:"slug"`
+	Name             string   `json:"name"`
+	Body             string   `json:"body"`
+	States           []string `json:"states"`
+	ConcurrencyLimit int      `json:"concurrency_limit,omitempty"`
+}
+
+// SettingsTemplateSetConcurrencyInput is the payload for
+// `bacio settings template set-concurrency --json` (BACI-51). Slug
+// names the template; ConcurrencyLimit is the new cap (>=0,
+// 0 = unlimited).
+type SettingsTemplateSetConcurrencyInput struct {
+	Slug             string `json:"slug"`
+	ConcurrencyLimit int    `json:"concurrency_limit"`
 }
 
 // SettingsTemplateRenameInput is the payload for

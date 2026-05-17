@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mrgeoffrich/bacio/internal/dispatcher"
 	"github.com/mrgeoffrich/bacio/internal/leader"
 	"github.com/mrgeoffrich/bacio/internal/store"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -99,6 +100,32 @@ func (ls *LeaderService) ServiceStartup(_ context.Context, _ application.Service
 					store.AgentSessionLiveListRetention); err != nil {
 					fmt.Fprintln(os.Stderr,
 						"bacio: live agent-session prune failed:", err)
+				}
+			case <-ls.done:
+				return
+			}
+		}
+	}()
+
+	// BACI-51 dispatch-queue matcher ticker. Same leader-gated cadence
+	// pattern as the prune ticker above; runs ~every 5s and binds
+	// queued dispatches to free agents one (repo, mode) at a time.
+	// Mechanical work — no audit row, errors logged to stderr.
+	matcher := dispatcher.New(ls.st)
+	ls.wg.Add(1)
+	go func() {
+		defer ls.wg.Done()
+		ticker := time.NewTicker(store.QueueMatchInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if !ls.elector.CurrentState().AmLeader {
+					continue
+				}
+				if _, err := matcher.Tick(); err != nil {
+					fmt.Fprintln(os.Stderr,
+						"bacio: queue match failed:", err)
 				}
 			case <-ls.done:
 				return

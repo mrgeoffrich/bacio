@@ -24,6 +24,16 @@ const (
 	// cadence: a separate ticker keeps the prune cadence honest even if
 	// a future change tweaks heartbeat frequency.
 	UILeaderPruneInterval = 5 * time.Minute
+
+	// QueueMatchInterval is how often the controlling UI fires the
+	// BACI-51 dispatch-queue matcher (internal/dispatcher.Matcher.Tick).
+	// 5s is the responsiveness/load tradeoff: a user shouldn't wait
+	// more than a tick for a freshly-freed agent to pick up their
+	// queued dispatch, but every tick reads every repo's queued rows
+	// + session list, so much faster would be wasteful. Like the
+	// prune cadence, gated on the leader lease so one matcher runs
+	// across the cluster.
+	QueueMatchInterval = 5 * time.Second
 )
 
 // LeaderInfo is the current state of the ui_leader row, returned by

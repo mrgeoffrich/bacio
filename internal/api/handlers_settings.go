@@ -44,16 +44,19 @@ type PromptTemplateBody struct {
 // value still matches the built-in default — used by the UI's "reset"
 // affordances.
 type PromptTemplateFullDTO struct {
-	Slug             string   `json:"slug"`
-	Mode             string   `json:"mode"`
-	Label            string   `json:"label"`
-	Body             string   `json:"body"`
-	Default          string   `json:"default"`
-	IsBuiltin        bool     `json:"is_builtin"`
-	IsDefault        bool     `json:"is_default"`
-	AllowedStates    []string `json:"allowed_states"`
-	DefaultStates    []string `json:"default_states"`
-	StatesAreDefault bool     `json:"states_are_default"`
+	Slug                    string   `json:"slug"`
+	Mode                    string   `json:"mode"`
+	Label                   string   `json:"label"`
+	Body                    string   `json:"body"`
+	Default                 string   `json:"default"`
+	IsBuiltin               bool     `json:"is_builtin"`
+	IsDefault               bool     `json:"is_default"`
+	AllowedStates           []string `json:"allowed_states"`
+	DefaultStates           []string `json:"default_states"`
+	StatesAreDefault        bool     `json:"states_are_default"`
+	ConcurrencyLimit        int      `json:"concurrency_limit"`
+	DefaultConcurrencyLimit int      `json:"default_concurrency_limit"`
+	ConcurrencyIsDefault    bool     `json:"concurrency_is_default"`
 }
 
 func sameStringSlice(a, b []string) bool {
@@ -82,17 +85,21 @@ func templateDTO(t *store.PromptTemplate) PromptTemplateFullDTO {
 			label = t.Slug
 		}
 	}
+	defConc := model.DefaultConcurrencyLimit(t.Slug)
 	return PromptTemplateFullDTO{
-		Slug:             t.Slug,
-		Mode:             t.Slug,
-		Label:            label,
-		Body:             t.Body,
-		Default:          def,
-		IsBuiltin:        t.IsBuiltin,
-		IsDefault:        t.IsBuiltin && t.Body == def,
-		AllowedStates:    allowed,
-		DefaultStates:    defStates,
-		StatesAreDefault: t.IsBuiltin && sameStringSlice(allowed, defStates),
+		Slug:                    t.Slug,
+		Mode:                    t.Slug,
+		Label:                   label,
+		Body:                    t.Body,
+		Default:                 def,
+		IsBuiltin:               t.IsBuiltin,
+		IsDefault:               t.IsBuiltin && t.Body == def,
+		AllowedStates:           allowed,
+		DefaultStates:           defStates,
+		StatesAreDefault:        t.IsBuiltin && sameStringSlice(allowed, defStates),
+		ConcurrencyLimit:        t.ConcurrencyLimit,
+		DefaultConcurrencyLimit: defConc,
+		ConcurrencyIsDefault:    t.IsBuiltin && t.ConcurrencyLimit == defConc,
 	}
 }
 
@@ -594,3 +601,62 @@ func (d deps) handlePromptTemplateRestore(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// ---------- set concurrency (BACI-51) ----------
+
+// PromptTemplateConcurrency is the per-mode response shape for
+// PUT /settings/templates/{mode}/concurrency — the post-call resolved
+// concurrency_limit (the matcher's per-(repo, mode) in-flight cap;
+// 0 = unlimited).
+type PromptTemplateConcurrency struct {
+	Mode             string `json:"mode"`
+	ConcurrencyLimit int    `json:"concurrency_limit"`
+}
+
+type promptTemplateConcurrencyIn struct {
+	ConcurrencyLimit int `json:"concurrency_limit"`
+}
+
+func (d deps) handlePromptTemplateConcurrencySet(w http.ResponseWriter, r *http.Request) {
+	mode, ok := parseModePath(w, r)
+	if !ok {
+		return
+	}
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	parsed, _, err := inputio.DecodeStrict[promptTemplateConcurrencyIn](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	if isDryRun(r) {
+		// Validate without writing — same shape every other dry-run path uses.
+		cleaned, err := store.ValidateConcurrencyLimit(parsed.ConcurrencyLimit)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+			return
+		}
+		writeDryRun(w, http.StatusOK, &PromptTemplateConcurrency{
+			Mode: string(mode), ConcurrencyLimit: cleaned,
+		})
+		return
+	}
+	updated, err := d.store.SetPromptTemplateConcurrencyLimit(string(mode), parsed.ConcurrencyLimit)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	recordOp(d.store, d.logger, model.HistoryEntry{
+		Actor:       ActorFromContext(r.Context()),
+		Op:          "template.set_concurrency",
+		Kind:        "app_setting",
+		TargetID:    &updated.ID,
+		TargetLabel: "prompt_template:" + updated.Slug,
+		Details:     fmt.Sprintf("slug=%s, concurrency_limit=%d", updated.Slug, updated.ConcurrencyLimit),
+	})
+	writeJSON(w, http.StatusOK, &PromptTemplateConcurrency{
+		Mode: string(mode), ConcurrencyLimit: updated.ConcurrencyLimit,
+	})
+}

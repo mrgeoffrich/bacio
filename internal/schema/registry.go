@@ -84,6 +84,7 @@ var Registry = []Entry{
 	{"settings.template.rename", "Rename a dispatch prompt template — slug change cascades to agent_dispatches.mode.", typeOf[inputs.SettingsTemplateRenameInput](), inputs.ExampleSettingsTemplateRename},
 	{"settings.template.rm", "Delete a dispatch prompt template (historical dispatch rows keep the slug verbatim).", typeOf[inputs.SettingsTemplateRmInput](), inputs.ExampleSettingsTemplateRm},
 	{"settings.template.restore-defaults", "Re-seed any missing built-in dispatch prompt templates from the embedded defaults (idempotent).", typeOf[inputs.SettingsTemplateRestoreDefaultsInput](), inputs.ExampleSettingsTemplateRestoreDefaults},
+	{"settings.template.set-concurrency", "Set a dispatch prompt template's concurrency_limit — the per-(repo, slug) cap the BACI-51 matcher enforces on in-flight (pending+delivered) dispatches. 0 = unlimited.", typeOf[inputs.SettingsTemplateSetConcurrencyInput](), inputs.ExampleSettingsTemplateSetConcurrency},
 }
 
 // repoRmDescription is the LLM-targeted warning text published via

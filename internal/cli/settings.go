@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -22,27 +23,31 @@ import (
 // slug; StatesAreDefault reports whether the gate still matches the
 // default.
 type promptTemplateView struct {
-	Slug             string   `json:"slug"`
-	Label            string   `json:"label"`
-	Body             string   `json:"body"`
-	Default          string   `json:"default"`
-	IsDefault        bool     `json:"is_default"`
-	IsBuiltin        bool     `json:"is_builtin"`
-	AllowedStates    []string `json:"allowed_states"`
-	DefaultStates    []string `json:"default_states"`
-	StatesAreDefault bool     `json:"states_are_default"`
+	Slug                    string   `json:"slug"`
+	Label                   string   `json:"label"`
+	Body                    string   `json:"body"`
+	Default                 string   `json:"default"`
+	IsDefault               bool     `json:"is_default"`
+	IsBuiltin               bool     `json:"is_builtin"`
+	AllowedStates           []string `json:"allowed_states"`
+	DefaultStates           []string `json:"default_states"`
+	StatesAreDefault        bool     `json:"states_are_default"`
+	ConcurrencyLimit        int      `json:"concurrency_limit"`
+	DefaultConcurrencyLimit int      `json:"default_concurrency_limit"`
+	ConcurrencyIsDefault    bool     `json:"concurrency_is_default"`
 }
 
 // promptTemplateSummary is the lean shape `settings template list`
 // returns — it drops the Default text so a bulk read stays small.
 // Fetch the default via `settings template show`.
 type promptTemplateSummary struct {
-	Slug          string   `json:"slug"`
-	Label         string   `json:"label"`
-	Body          string   `json:"body"`
-	IsBuiltin     bool     `json:"is_builtin"`
-	IsDefault     bool     `json:"is_default"`
-	AllowedStates []string `json:"allowed_states"`
+	Slug             string   `json:"slug"`
+	Label            string   `json:"label"`
+	Body             string   `json:"body"`
+	IsBuiltin        bool     `json:"is_builtin"`
+	IsDefault        bool     `json:"is_default"`
+	AllowedStates    []string `json:"allowed_states"`
+	ConcurrencyLimit int      `json:"concurrency_limit"`
 }
 
 func newSettingsCmd() *cobra.Command {
@@ -87,6 +92,7 @@ built-in slug that's been deleted (idempotent).`,
 		settingsTemplateRmCmd(),
 		settingsTemplateRestoreDefaultsCmd(),
 		settingsTemplateStatesCmd(),
+		settingsTemplateSetConcurrencyCmd(),
 	)
 	return cmd
 }
@@ -303,16 +309,20 @@ func templateViewForRow(t *store.PromptTemplate) *promptTemplateView {
 			label = t.Slug
 		}
 	}
+	defConc := model.DefaultConcurrencyLimit(t.Slug)
 	return &promptTemplateView{
-		Slug:             t.Slug,
-		Label:            label,
-		Body:             t.Body,
-		Default:          def,
-		IsDefault:        t.IsBuiltin && t.Body == def,
-		IsBuiltin:        t.IsBuiltin,
-		AllowedStates:    statesToStrings(t.AllowedStates),
-		DefaultStates:    statesToStrings(defStates),
-		StatesAreDefault: t.IsBuiltin && sameStates(t.AllowedStates, defStates),
+		Slug:                    t.Slug,
+		Label:                   label,
+		Body:                    t.Body,
+		Default:                 def,
+		IsDefault:               t.IsBuiltin && t.Body == def,
+		IsBuiltin:               t.IsBuiltin,
+		AllowedStates:           statesToStrings(t.AllowedStates),
+		DefaultStates:           statesToStrings(defStates),
+		StatesAreDefault:        t.IsBuiltin && sameStates(t.AllowedStates, defStates),
+		ConcurrencyLimit:        t.ConcurrencyLimit,
+		DefaultConcurrencyLimit: defConc,
+		ConcurrencyIsDefault:    t.IsBuiltin && t.ConcurrencyLimit == defConc,
 	}
 }
 
@@ -327,12 +337,13 @@ func templateSummaryForRow(t *store.PromptTemplate) *promptTemplateSummary {
 		}
 	}
 	return &promptTemplateSummary{
-		Slug:          t.Slug,
-		Label:         label,
-		Body:          t.Body,
-		IsBuiltin:     t.IsBuiltin,
-		IsDefault:     t.IsBuiltin && t.Body == def,
-		AllowedStates: statesToStrings(t.AllowedStates),
+		Slug:             t.Slug,
+		Label:            label,
+		Body:             t.Body,
+		IsBuiltin:        t.IsBuiltin,
+		IsDefault:        t.IsBuiltin && t.Body == def,
+		AllowedStates:    statesToStrings(t.AllowedStates),
+		ConcurrencyLimit: t.ConcurrencyLimit,
 	}
 }
 
@@ -490,6 +501,94 @@ or delete the template via ` + "`bacio settings template rm`" + `.`,
 	}
 	addInputFlag(cmd, &rawInput)
 	return cmd
+}
+
+// settingsTemplateSetConcurrencyCmd is the BACI-51 cap-the-queue verb.
+// Caps the per-(repo, slug) in-flight dispatches the matcher will
+// allow. 0 = unlimited; positive integers cap. Built-in defaults are
+// 0 except `ship` which seeds to 1 so merging serialises.
+func settingsTemplateSetConcurrencyCmd() *cobra.Command {
+	var rawInput string
+	cmd := &cobra.Command{
+		Use:   "set-concurrency [SLUG] [LIMIT]",
+		Short: "Set a template's per-(repo, slug) in-flight dispatch cap (BACI-51); 0 = unlimited",
+		Long: `Update the concurrency_limit on a dispatch prompt template. The BACI-51
+matcher reads this column to decide whether to bind another queued
+dispatch for a given (repo, slug) pair — at most concurrency_limit
+in-flight (pending+delivered, excluding bacio-channel setup rows) at
+a time.
+
+0 means unlimited (the matcher binds whenever a free agent is
+available). The ` + "`ship`" + ` template seeds to 1 by default so merges
+serialise; all other built-ins seed to 0.`,
+		Args: cobra.RangeArgs(0, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			raw, err := parseJSONInput(cmd, args, rawInput)
+			if err != nil {
+				return err
+			}
+			var in inputs.SettingsTemplateSetConcurrencyInput
+			if raw != nil {
+				parsed, _, err := inputio.DecodeStrict[inputs.SettingsTemplateSetConcurrencyInput](raw)
+				if err != nil {
+					return err
+				}
+				in = *parsed
+			} else {
+				if len(args) != 2 {
+					return fmt.Errorf("requires <SLUG> <LIMIT> positionals or --json")
+				}
+				limit, err := parsePositiveOrZeroInt(args[1])
+				if err != nil {
+					return err
+				}
+				in = inputs.SettingsTemplateSetConcurrencyInput{Slug: args[0], ConcurrencyLimit: limit}
+			}
+			return applyTemplateConcurrency(in)
+		},
+	}
+	addInputFlag(cmd, &rawInput)
+	return cmd
+}
+
+// parsePositiveOrZeroInt parses a >=0 integer — the validator on
+// concurrency_limit rejects negatives, so do the same on the positional
+// path with a clearer message.
+func parsePositiveOrZeroInt(s string) (int, error) {
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil {
+		return 0, fmt.Errorf("concurrency_limit must be an integer >= 0, got %q", s)
+	}
+	if n < 0 {
+		return 0, fmt.Errorf("concurrency_limit must be >= 0, got %d", n)
+	}
+	return n, nil
+}
+
+// applyTemplateConcurrency is the shared write path for the
+// set-concurrency verb. Honours --dry-run.
+func applyTemplateConcurrency(in inputs.SettingsTemplateSetConcurrencyInput) error {
+	if err := requireLocalForSettings("template set-concurrency"); err != nil {
+		return err
+	}
+	slug, err := templateSlugArg(in.Slug)
+	if err != nil {
+		return err
+	}
+	in.Slug = slug
+	c, err := openClient()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	t, err := c.SetPromptTemplateConcurrencyLimit(context.Background(), in, opts.dryRun)
+	if err != nil {
+		return wrapTemplateLookup(slug, err)
+	}
+	if opts.dryRun {
+		return emitDryRun(templateViewForRow(t))
+	}
+	return emit(templateViewForRow(t))
 }
 
 // applyTemplateBody is the shared mutation path for `set` (non-empty)

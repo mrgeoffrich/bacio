@@ -276,15 +276,25 @@ type Client interface {
 	// creating a duplicate. sessionID="" is a no-op. Local-only.
 	EnsureSetupDispatch(ctx context.Context, repo *model.Repo, sessionID string) (*model.AgentDispatch, error)
 	// AutoDispatchIssue is the state-gated auto-pick dispatch verb
-	// (BACI-40): re-checks the mode's state-gate against the issue's
-	// current state, picks the most-recently-active free agent (live,
-	// not busy, has channel, no un-acked dispatch already queued),
-	// then enqueues the dispatch against it. The desktop per-card
-	// action button is the original caller; REST `POST
-	// /repos/{prefix}/issues/{key}/dispatch` and target-less `bacio
-	// agent dispatch <key> --mode <stage>` both route through this so
-	// the three surfaces share the same picker + gate.
+	// (BACI-40 + BACI-51): re-checks the mode's state-gate against
+	// the issue's current state, then enqueues a target-less queued
+	// dispatch the background matcher will bind to a free agent when
+	// one frees up. The desktop per-card action button is the
+	// original caller; REST `POST /repos/{prefix}/issues/{key}/dispatch`
+	// and target-less `bacio agent dispatch <key> --mode <stage>`
+	// both route through this so the three surfaces share the same
+	// gate + enqueue path. Never errors with "no free agent" — that
+	// case is now expressed as a queued dispatch sitting in the per-
+	// (repo, mode) FIFO until the matcher binds it.
 	AutoDispatchIssue(ctx context.Context, repo *model.Repo, issueKey, mode string, dryRun bool) (*model.AgentDispatch, error)
+
+	// WaitingDispatchForIssue returns the active (queued / pending /
+	// delivered) dispatch targeting an issue, or (nil, nil) when none
+	// exists. Used by the BACI-51 spinner-as-cancel UI to resolve the
+	// dispatch id without exposing dispatch internals through the
+	// card DTO. Local-only — the remote backend returns ErrLocalOnly
+	// today (REST parity is a follow-up).
+	WaitingDispatchForIssue(ctx context.Context, repo *model.Repo, issueKey string) (*model.AgentDispatch, error)
 
 	// ----- Prompt templates (local-only; `bacio settings template`) -----
 	// ListPromptTemplates returns every registered template — slug,
@@ -319,6 +329,12 @@ type Client interface {
 	// returns the slugs it would have created without writing.
 	// Local-only.
 	RestoreBuiltinPromptTemplates(ctx context.Context, dryRun bool) ([]string, error)
+	// SetPromptTemplateConcurrencyLimit (BACI-51) updates a template's
+	// per-(repo, slug) in-flight cap the matcher enforces. limit must
+	// be >= 0; 0 = unlimited. With dryRun set it validates without
+	// writing. Local-only at the CLI level (the REST surface is the
+	// PUT /settings/templates/{mode}/concurrency endpoint).
+	SetPromptTemplateConcurrencyLimit(ctx context.Context, in inputs.SettingsTemplateSetConcurrencyInput, dryRun bool) (*store.PromptTemplate, error)
 
 	// GetPromptTemplates is a legacy lookup shape for the dispatch
 	// renderer paths that still expect a slug→body map. Equivalent to

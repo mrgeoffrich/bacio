@@ -107,7 +107,8 @@ export async function listDocs(repoPrefix: string, typeFilter = ''): Promise<Doc
 
 // dispatchIssue queues a dispatch against an issue for a job stage. The
 // agent is auto-picked by the backend (the most-recently-active free
-// agent) — the caller never names one.
+// agent) — the caller never names one. Post-BACI-51 this is the enqueue
+// path: the dispatch is always queued; the matcher binds an agent later.
 export async function dispatchIssue(
   repoPrefix: string,
   issueKey: string,
@@ -115,6 +116,21 @@ export async function dispatchIssue(
 ): Promise<DispatchDTO> {
   try {
     return await BoardService.DispatchIssue(repoPrefix, issueKey, mode);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// cancelWaitingDispatch (BACI-51) withdraws an issue's queued / pending /
+// delivered dispatch — the spinner-as-cancel-button click handler. The
+// backend resolves the dispatch id from the issue + cancels in one call
+// so we don't round-trip the id through card DTOs.
+export async function cancelWaitingDispatch(
+  repoPrefix: string,
+  issueKey: string,
+): Promise<void> {
+  try {
+    await BoardService.CancelWaitingDispatch(repoPrefix, issueKey);
   } catch (err) {
     throw normalize(err);
   }
@@ -314,6 +330,20 @@ export async function savePromptStates(
 ): Promise<PromptTemplateDTO> {
   try {
     return await SettingsService.SavePromptStates(mode, states);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// savePromptConcurrency (BACI-51) updates a template's per-(repo, slug)
+// in-flight dispatch cap the matcher enforces. 0 = unlimited; positive
+// integers cap. Returns the refreshed template DTO.
+export async function savePromptConcurrency(
+  mode: string,
+  concurrencyLimit: number,
+): Promise<PromptTemplateDTO> {
+  try {
+    return await SettingsService.SavePromptConcurrency(mode, concurrencyLimit);
   } catch (err) {
     throw normalize(err);
   }

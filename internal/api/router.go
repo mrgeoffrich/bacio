@@ -127,6 +127,12 @@ func newRouter(d deps) http.Handler {
 	// desktop per-card action button and the CLI's target-less
 	// `bacio agent dispatch <key> --mode <stage>`.
 	mux.HandleFunc("POST /repos/{prefix}/issues/{key}/dispatch", d.handleIssueDispatch)
+	// BACI-51 spinner-as-cancel UI read: returns the active queued /
+	// pending / delivered dispatch on an issue, or 404 when none. Used
+	// by the desktop + (future) web cancel button to resolve the
+	// dispatch id without exposing dispatch internals through the card
+	// DTO.
+	mux.HandleFunc("GET /repos/{prefix}/issues/{key}/waiting-dispatch", d.handleIssueWaitingDispatch)
 
 	// Prompt templates + state-gates (BACI-36). Global app_settings —
 	// no /repos/{prefix} scope. Six routes: a GET-all for each of bodies
@@ -153,6 +159,10 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("POST /settings/templates/restore-builtins", d.handlePromptTemplateRestore)
 	mux.HandleFunc("POST /settings/templates/{slug}/rename", d.handlePromptTemplateRename)
 	mux.HandleFunc("DELETE /settings/templates/{slug}/row", d.handlePromptTemplateDelete)
+	// BACI-51 per-template concurrency limit. PUT mirrors the body /
+	// state-gate PUTs; no DELETE because "unlimited" is just
+	// concurrency_limit=0 — the caller PUTs 0 to revert.
+	mux.HandleFunc("PUT /settings/templates/{mode}/concurrency", d.handlePromptTemplateConcurrencySet)
 
 	// Board preferences (BACI-47/D). One scalar global flag today —
 	// board.hide_empty_columns. Lives at /settings/... alongside the

@@ -249,6 +249,14 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   outline: none; border-color: var(--border-focus);
 }
 .mk-tmpl-input:disabled { opacity: 0.6; }
+/* BACI-51: per-template concurrency limit, rendered as a narrow
+   number input — same chrome as the body textarea but compact. */
+.mk-tmpl-concurrency {
+  width: 6ch; padding: 4px 8px; resize: none;
+}
+.mk-tmpl-states-hint {
+  color: var(--fg-3); font-weight: 400;
+}
 
 /* State-gate editor — the set of issue states each stage's prompt can
    be launched from, rendered as toggleable chips under the textarea. */

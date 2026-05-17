@@ -261,6 +261,10 @@ func TestIssueDispatchHappyPath(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	iss := seedIssue(t, s, repo, "auto pick me")
+	// Seed a free agent fixture even though BACI-51 no longer binds at
+	// enqueue time — the matcher (running in TUI/desktop processes)
+	// does. The fixture keeps the test useful as a "queue then bind"
+	// integration smoke once we wire the matcher into the API tests.
 	ag := seedAgentIdentity(t, s, "swift-otter@claude.test")
 	_ = seedChannelLiveSession(t, s, repo, "sess-auto", ag, 9100)
 
@@ -274,8 +278,11 @@ func TestIssueDispatchHappyPath(t *testing.T) {
 	if got.ID == 0 {
 		t.Fatalf("expected an id, got 0")
 	}
-	if got.TargetAgentName != ag.Name {
-		t.Errorf("TargetAgentName = %q, want %q", got.TargetAgentName, ag.Name)
+	if got.Status != model.DispatchQueued {
+		t.Errorf("Status = %q, want queued (BACI-51 enqueue path)", got.Status)
+	}
+	if got.TargetAgentID != nil || got.TargetAgentName != "" {
+		t.Errorf("queued dispatch must be target-less, got agent_id=%v name=%q", got.TargetAgentID, got.TargetAgentName)
 	}
 	if got.IssueKey != iss.Key {
 		t.Errorf("IssueKey = %q, want %q", got.IssueKey, iss.Key)
@@ -283,7 +290,7 @@ func TestIssueDispatchHappyPath(t *testing.T) {
 	if string(got.Mode) != string(model.DispatchModeImplement) {
 		t.Errorf("Mode = %q, want %q", got.Mode, model.DispatchModeImplement)
 	}
-	assertHistoryOps(t, s, []string{"agent.dispatch"})
+	assertHistoryOps(t, s, []string{"agent.queue"})
 }
 
 func TestIssueDispatchDryRun(t *testing.T) {
@@ -306,9 +313,13 @@ func TestIssueDispatchDryRun(t *testing.T) {
 	if proj.ID != 0 {
 		t.Errorf("dry-run id = %d, want 0", proj.ID)
 	}
-	if proj.TargetAgentName != ag.Name {
-		t.Errorf("dry-run target = %q, want %q", proj.TargetAgentName, ag.Name)
+	if proj.Status != model.DispatchQueued {
+		t.Errorf("dry-run status = %q, want queued", proj.Status)
 	}
+	if proj.TargetAgentID != nil {
+		t.Errorf("dry-run target = %v, want nil (BACI-51 queue is target-less)", proj.TargetAgentID)
+	}
+	_ = ag
 	ds, _ := s.ListDispatches(store.DispatchFilter{RepoID: &repo.ID})
 	if len(ds) != 0 {
 		t.Fatalf("dry-run persisted %d row(s), want 0", len(ds))
@@ -336,15 +347,24 @@ func TestIssueDispatchStateGate(t *testing.T) {
 	}
 }
 
-func TestIssueDispatchNoFreeAgent(t *testing.T) {
+// TestIssueDispatchNoFreeAgentQueues is the inverse of the
+// pre-BACI-51 contract: with no free agent the API now returns a 201
+// + queued dispatch instead of a 400, leaving the matcher to bind it
+// later when an agent registers.
+func TestIssueDispatchNoFreeAgentQueues(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	iss := seedIssue(t, s, repo, "no agent")
 
 	resp, raw := apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/issues/"+iss.Key+"/dispatch",
 		map[string]any{"mode": string(model.DispatchModeImplement)})
-	if resp.StatusCode != http.StatusBadRequest {
+	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("status %d, body %s", resp.StatusCode, raw)
+	}
+	var got model.AgentDispatch
+	mustDecode(t, raw, &got)
+	if got.Status != model.DispatchQueued {
+		t.Errorf("status = %q, want queued", got.Status)
 	}
 }
 

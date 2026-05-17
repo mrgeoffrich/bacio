@@ -11,8 +11,10 @@ import (
 )
 
 // TestAutoDispatchIssueLocal covers the happy path end-to-end against
-// the local backend: state-gate accepts, the registered+channel-live
-// session is picked, and the dispatch is created targeting it.
+// the local backend: state-gate accepts and the dispatch is enqueued
+// (BACI-51) for the matcher to bind later. The presence of a free
+// agent no longer changes the call's result — that decision moved to
+// the background matcher.
 func TestAutoDispatchIssueLocal(t *testing.T) {
 	p := newPair(t)
 	defer p.cleanup()
@@ -23,34 +25,12 @@ func TestAutoDispatchIssueLocal(t *testing.T) {
 		t.Fatalf("CreateIssue: %v", err)
 	}
 
-	ag, _, err := p.store.UpsertAgent("swift-otter@claude.test", true)
-	if err != nil {
-		t.Fatalf("UpsertAgent: %v", err)
-	}
-	sess, err := p.store.UpsertAgentSession(store.UpsertAgentSessionIn{
-		SessionID:      "auto-sess-1",
-		RepoID:         p.repo.ID,
-		AgentID:        &ag.ID,
-		Actor:          "tester",
-		MarkRegistered: true,
-	})
-	if err != nil {
-		t.Fatalf("UpsertAgentSession: %v", err)
-	}
-	if err := p.store.UpsertAgentChannel(store.UpsertAgentChannelIn{
-		RepoID: p.repo.ID, AgentID: &ag.ID, Host: "host", ClaudePID: 1234, ChannelPID: 1235,
-	}); err != nil {
-		t.Fatalf("UpsertAgentChannel: %v", err)
-	}
-	if err := p.store.LinkSessionChannel(sess.SessionID, 1234, "host"); err != nil {
-		t.Fatalf("LinkSessionChannel: %v", err)
-	}
 	d, err := p.local.AutoDispatchIssue(ctx, p.repo, iss.Key, "implement", false)
 	if err != nil {
 		t.Fatalf("AutoDispatchIssue: %v", err)
 	}
-	if d.TargetAgentName != ag.Name {
-		t.Fatalf("dispatch target = %q, want %q", d.TargetAgentName, ag.Name)
+	if d.TargetAgentID != nil || d.TargetAgentName != "" {
+		t.Fatalf("queued dispatch should have no target, got agent_id=%v name=%q", d.TargetAgentID, d.TargetAgentName)
 	}
 	if d.IssueKey != iss.Key {
 		t.Fatalf("dispatch issue = %q, want %q", d.IssueKey, iss.Key)
@@ -58,8 +38,18 @@ func TestAutoDispatchIssueLocal(t *testing.T) {
 	if string(d.Mode) != "implement" {
 		t.Fatalf("dispatch mode = %q, want implement", d.Mode)
 	}
-	if d.Status != model.DispatchPending {
-		t.Fatalf("dispatch status = %q, want pending", d.Status)
+	if d.Status != model.DispatchQueued {
+		t.Fatalf("dispatch status = %q, want queued", d.Status)
+	}
+	// The audit op for the enqueue path is agent.queue (distinct from
+	// targeted dispatch's agent.dispatch) so history readers can tell
+	// the two apart.
+	hist, err := p.local.ListHistory(ctx, p.repo, store.HistoryFilter{Limit: 10, Op: "agent.queue"})
+	if err != nil {
+		t.Fatalf("ListHistory: %v", err)
+	}
+	if len(hist) != 1 {
+		t.Fatalf("agent.queue history rows: got %d, want 1", len(hist))
 	}
 }
 
@@ -82,9 +72,10 @@ func TestAutoDispatchIssueStateGate(t *testing.T) {
 	}
 }
 
-// TestAutoDispatchIssueNoFreeAgent covers the picker miss path —
-// every registered session is either busy, ended, or has no channel.
-func TestAutoDispatchIssueNoFreeAgent(t *testing.T) {
+// TestAutoDispatchIssueNoFreeAgentQueues is the inverse of the
+// pre-BACI-51 behaviour: with zero free agents the dispatch is queued
+// instead of erroring. The matcher will bind it when an agent frees up.
+func TestAutoDispatchIssueNoFreeAgentQueues(t *testing.T) {
 	p := newPair(t)
 	defer p.cleanup()
 	ctx := context.Background()
@@ -93,16 +84,31 @@ func TestAutoDispatchIssueNoFreeAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
-	if _, err := p.local.AutoDispatchIssue(ctx, p.repo, iss.Key, "implement", false); err == nil {
-		t.Fatalf("expected no-free-agent error, got nil")
-	} else if !strings.Contains(err.Error(), "no free agent") {
-		t.Fatalf("error = %v, want no-free-agent message", err)
+	d, err := p.local.AutoDispatchIssue(ctx, p.repo, iss.Key, "implement", false)
+	if err != nil {
+		t.Fatalf("AutoDispatchIssue: %v", err)
+	}
+	if d.Status != model.DispatchQueued {
+		t.Fatalf("status = %q, want queued", d.Status)
+	}
+	if d.TargetAgentID != nil || d.TargetSessionID != "" {
+		t.Fatalf("queued dispatch should be target-less, got agent_id=%v session=%q", d.TargetAgentID, d.TargetSessionID)
+	}
+	// The matching issue should also flip waiting_for_claim so the UI
+	// shows the spinner — the same plumbing pending dispatches use.
+	got, err := p.store.GetIssueByID(iss.ID)
+	if err != nil {
+		t.Fatalf("GetIssueByID: %v", err)
+	}
+	if !got.WaitingForClaim {
+		t.Fatalf("issue.waiting_for_claim should be true after enqueue")
 	}
 }
 
 // TestAutoDispatchIssueRoundTrip drives the REST route via the remote
-// client and asserts the local store sees the same dispatch row,
-// closing the audit story alongside the desktop path.
+// client and asserts the local store sees the same dispatch row.
+// Post-BACI-51 the row is queued (target-less) — the matcher binds it
+// later from a UI process; this test stops at the enqueue.
 func TestAutoDispatchIssueRoundTrip(t *testing.T) {
 	p := newPair(t)
 	defer p.cleanup()
@@ -114,31 +120,9 @@ func TestAutoDispatchIssueRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
-	ag, _, err := p.store.UpsertAgent("quiet-lynx@claude.test", true)
-	if err != nil {
-		t.Fatalf("UpsertAgent: %v", err)
-	}
-	sess, err := p.store.UpsertAgentSession(store.UpsertAgentSessionIn{
-		SessionID:      "auto-sess-rt",
-		RepoID:         p.repo.ID,
-		AgentID:        &ag.ID,
-		Actor:          "tester",
-		MarkRegistered: true,
-	})
-	if err != nil {
-		t.Fatalf("UpsertAgentSession: %v", err)
-	}
-	if err := p.store.UpsertAgentChannel(store.UpsertAgentChannelIn{
-		RepoID: p.repo.ID, AgentID: &ag.ID, Host: "host", ClaudePID: 4321, ChannelPID: 4322,
-	}); err != nil {
-		t.Fatalf("UpsertAgentChannel: %v", err)
-	}
-	if err := p.store.LinkSessionChannel(sess.SessionID, 4321, "host"); err != nil {
-		t.Fatalf("LinkSessionChannel: %v", err)
-	}
 
-	// Dry-run first: returns a projection naming the free agent but
-	// writes no row and no audit entry.
+	// Dry-run first: returns a projected queued dispatch but writes no
+	// row and no audit entry.
 	beforeHist, err := p.local.ListHistory(ctx, p.repo, store.HistoryFilter{Limit: 100})
 	if err != nil {
 		t.Fatalf("ListHistory: %v", err)
@@ -147,8 +131,11 @@ func TestAutoDispatchIssueRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("remote dry-run AutoDispatchIssue: %v", err)
 	}
-	if proj.TargetAgentName != ag.Name {
-		t.Fatalf("dry-run target = %q, want %q", proj.TargetAgentName, ag.Name)
+	if proj.Status != model.DispatchQueued {
+		t.Fatalf("dry-run status = %q, want queued", proj.Status)
+	}
+	if proj.TargetAgentID != nil {
+		t.Fatalf("dry-run should have no target, got agent_id=%v", proj.TargetAgentID)
 	}
 	if proj.ID != 0 {
 		t.Fatalf("dry-run id = %d, want 0 (server-time field)", proj.ID)
@@ -167,14 +154,14 @@ func TestAutoDispatchIssueRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("remote AutoDispatchIssue: %v", err)
 	}
-	if d.TargetAgentName != ag.Name {
-		t.Fatalf("remote target = %q, want %q", d.TargetAgentName, ag.Name)
+	if d.Status != model.DispatchQueued {
+		t.Fatalf("remote status = %q, want queued", d.Status)
 	}
 	rows, err = p.store.ListDispatches(store.DispatchFilter{RepoID: &p.repo.ID})
 	if err != nil {
 		t.Fatalf("ListDispatches: %v", err)
 	}
-	if len(rows) != 1 || rows[0].IssueKey != iss.Key {
+	if len(rows) != 1 || rows[0].IssueKey != iss.Key || rows[0].Status != model.DispatchQueued {
 		t.Fatalf("local dispatches: %+v", rows)
 	}
 }

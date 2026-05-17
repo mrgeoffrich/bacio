@@ -343,6 +343,36 @@ func migrate(db *sql.DB) error {
 	if err := migratePromptTemplates(db); err != nil {
 		return fmt.Errorf("migrate prompt templates: %w", err)
 	}
+	// BACI-51: per-template concurrency limit. The CREATE TABLE in
+	// schema.sql carries the column for fresh DBs; this ALTER + seed
+	// brings older DBs up to date and stamps `ship` to 1 so the
+	// matcher serialises ship-it dispatches by default. Only the
+	// initial ALTER seeds — a user who already tweaked the value (the
+	// column is present) is left alone.
+	hasConcurrencyLimit, err := columnExists(db, "prompt_templates", "concurrency_limit")
+	if err != nil {
+		return err
+	}
+	if !hasConcurrencyLimit {
+		if _, err := db.Exec(`ALTER TABLE prompt_templates ADD COLUMN concurrency_limit INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("add concurrency_limit to prompt_templates: %w", err)
+		}
+		if _, err := db.Exec(
+			`UPDATE prompt_templates SET concurrency_limit = ? WHERE slug = ?`,
+			model.BuiltinTemplateShipConcurrency, model.BuiltinTemplateShip,
+		); err != nil {
+			return fmt.Errorf("seed ship.concurrency_limit: %w", err)
+		}
+	}
+	// BACI-51: relax the agent_dispatches.status CHECK to include
+	// 'queued' and drop the (target_agent_id NOT NULL OR ...) row
+	// CHECK so queued rows can leave both targets unset until the
+	// matcher binds them. Same table-rewrite dance as the mode-check
+	// relax above; keyed off the stored CREATE TABLE SQL so re-runs
+	// are no-ops.
+	if err := migrateAgentDispatchesStatusCheck(db); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -393,9 +423,9 @@ func migratePromptTemplates(db *sql.DB) error {
 			name = slug
 		}
 		if _, err := tx.Exec(`
-			INSERT INTO prompt_templates (slug, name, body, allowed_states_json, is_builtin, created_at, updated_at)
-			VALUES (?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-			slug, name, body, encoded); err != nil {
+			INSERT INTO prompt_templates (slug, name, body, allowed_states_json, is_builtin, concurrency_limit, created_at, updated_at)
+			VALUES (?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+			slug, name, body, encoded, model.DefaultConcurrencyLimit(slug)); err != nil {
 			return err
 		}
 	}
@@ -625,6 +655,105 @@ func migrateAgentDispatchesModeCheck(db *sql.DB) error {
 		}
 	}
 	return tx.Commit()
+}
+
+// migrateAgentDispatchesStatusCheck rebuilds agent_dispatches with the
+// BACI-51 status-CHECK (adds 'queued') and without the trailing target
+// CHECK (queued rows leave both target_agent_id and target_session_id
+// unset until the matcher binds them; AddDispatch's Go-side validator
+// enforces "queued OR named target" instead). Same table-rebuild dance
+// as migrateAgentDispatchesModeCheck. Keyed off the stored CREATE
+// TABLE SQL: a DB whose status CHECK already mentions 'queued' (fresh
+// schema.sql or a prior run of this migration) skips the rebuild.
+func migrateAgentDispatchesStatusCheck(db *sql.DB) error {
+	needs, err := agentDispatchesStatusCheckNeedsRelax(db)
+	if err != nil {
+		return err
+	}
+	if !needs {
+		return nil
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`PRAGMA defer_foreign_keys = ON`); err != nil {
+		return fmt.Errorf("defer fk: %w", err)
+	}
+	// Mirror the post-BACI-51 schema.sql shape exactly: relaxed status
+	// CHECK, no target CHECK. Everything else matches the existing
+	// columns so a SELECT * INSERT * copy round-trips.
+	if _, err := tx.Exec(`
+		CREATE TABLE agent_dispatches_new (
+			id                INTEGER PRIMARY KEY AUTOINCREMENT,
+			repo_id           INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+			target_agent_id   INTEGER REFERENCES agents(id) ON DELETE CASCADE,
+			target_session_id TEXT    NOT NULL DEFAULT '',
+			issue_id          INTEGER REFERENCES issues(id) ON DELETE SET NULL,
+			mode              TEXT    NOT NULL DEFAULT '',
+			payload           TEXT    NOT NULL DEFAULT '',
+			status            TEXT    NOT NULL DEFAULT 'pending'
+			                    CHECK (status IN ('queued','pending','delivered','acked','cancelled')),
+			created_by        TEXT    NOT NULL,
+			created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			delivered_at      DATETIME,
+			acked_at          DATETIME,
+			ack_note          TEXT    NOT NULL DEFAULT ''
+		)
+	`); err != nil {
+		return fmt.Errorf("create agent_dispatches_new: %w", err)
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO agent_dispatches_new
+			(id, repo_id, target_agent_id, target_session_id, issue_id, mode,
+			 payload, status, created_by, created_at, delivered_at, acked_at, ack_note)
+		SELECT
+			id, repo_id, target_agent_id, target_session_id, issue_id, mode,
+			payload, status, created_by, created_at, delivered_at, acked_at, ack_note
+		FROM agent_dispatches
+	`); err != nil {
+		return fmt.Errorf("copy agent_dispatches rows: %w", err)
+	}
+	if _, err := tx.Exec(`DROP TABLE agent_dispatches`); err != nil {
+		return fmt.Errorf("drop old agent_dispatches: %w", err)
+	}
+	if _, err := tx.Exec(`ALTER TABLE agent_dispatches_new RENAME TO agent_dispatches`); err != nil {
+		return fmt.Errorf("rename agent_dispatches_new: %w", err)
+	}
+	for _, stmt := range []string{
+		`CREATE INDEX IF NOT EXISTS idx_dispatches_agent ON agent_dispatches(target_agent_id, status)`,
+		`CREATE INDEX IF NOT EXISTS idx_dispatches_session ON agent_dispatches(target_session_id, status)`,
+		`CREATE INDEX IF NOT EXISTS idx_dispatches_repo ON agent_dispatches(repo_id, status)`,
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("recreate agent_dispatches index: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+// agentDispatchesStatusCheckNeedsRelax reports whether the
+// agent_dispatches table still carries the pre-BACI-51 status CHECK
+// (the 4-status form without 'queued'). Whitespace-collapsed lookup on
+// the stored CREATE TABLE SQL so trivial reformatting doesn't fool it.
+func agentDispatchesStatusCheckNeedsRelax(db *sql.DB) (bool, error) {
+	var sqlText sql.NullString
+	err := db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_dispatches'`).Scan(&sqlText)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !sqlText.Valid {
+		return false, nil
+	}
+	collapsed := strings.Join(strings.Fields(sqlText.String), " ")
+	// True iff the table predates BACI-51 — its status CHECK omits
+	// 'queued'. The fresh schema.sql lists 'queued' first, so the
+	// presence of that literal in the stored SQL means we're done.
+	return !strings.Contains(collapsed, "'queued'"), nil
 }
 
 // agentDispatchesModeCheckPresent reports whether the agent_dispatches

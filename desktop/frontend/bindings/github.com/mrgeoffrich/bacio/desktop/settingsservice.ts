@@ -103,6 +103,16 @@ export function RestoreBuiltinPromptTemplates(): $CancellablePromise<$models.Pro
 }
 
 /**
+ * SavePromptConcurrency (BACI-51) sets a template's per-(repo, slug)
+ * in-flight dispatch cap the matcher enforces. 0 = unlimited.
+ */
+export function SavePromptConcurrency(slug: string, concurrencyLimit: number): $CancellablePromise<$models.PromptTemplateDTO> {
+    return $Call.ByID(1315581830, slug, concurrencyLimit).then(($result: any) => {
+        return $$createType0($result);
+    });
+}
+
+/**
  * SavePromptStates stores a new state-gate for one template. An empty
  * slice reverts a built-in to its embedded default gate.
  */

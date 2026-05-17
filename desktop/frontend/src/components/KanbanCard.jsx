@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import Icon from './Icon.jsx';
 
-export default function KanbanCard({ card, promptConfig, isDragging, onDragStart, onDragEnd, onOpen, onDispatch }) {
+export default function KanbanCard({ card, promptConfig, isDragging, onDragStart, onDragEnd, onOpen, onDispatch, onCancelWaiting }) {
   // The prompts valid to dispatch from this card's current state — the
   // state-gate config is global (App-owned), filtered per-card here.
   const validPrompts = (promptConfig || []).filter(
@@ -74,11 +74,15 @@ export default function KanbanCard({ card, promptConfig, isDragging, onDragStart
             </span>
           )}
           {waiting ? (
-            <span
-              className="mk-card-spinner"
-              role="status"
-              aria-label="Waiting for an agent to claim this issue"
-              title="Waiting for an agent to claim this issue"
+            <button
+              type="button"
+              className="mk-card-spinner mk-card-spinner-btn"
+              aria-label="Cancel queued dispatch"
+              title="Cancel queued dispatch"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (onCancelWaiting) onCancelWaiting(card.key);
+              }}
             />
           ) : validPrompts.length > 0 && (
             <div className="mk-card-action" ref={actionRef}>
