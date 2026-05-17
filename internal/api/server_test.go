@@ -387,6 +387,31 @@ func TestAuthTokenSetRight(t *testing.T) {
 	}
 }
 
+func TestVersionEndpoint(t *testing.T) {
+	ts, _ := newTestAPI(t, api.Options{})
+	resp := do(t, http.MethodGet, ts.URL+"/version", nil, nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+	body := decode[map[string]any](t, resp.Body)
+	v, _ := body["version"].(string)
+	if v == "" {
+		t.Fatalf("expected non-empty version, got: %v", body)
+	}
+}
+
+func TestVersionAuthRequired(t *testing.T) {
+	// /version is intentionally NOT in the /healthz public bypass — a
+	// bearer-protected deployment should require auth for it too.
+	ts, _ := newTestAPI(t, api.Options{Token: "secret"})
+	resp := do(t, http.MethodGet, ts.URL+"/version", nil, nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != 401 {
+		t.Fatalf("expected 401, got %d", resp.StatusCode)
+	}
+}
+
 func TestAuthHealthBypass(t *testing.T) {
 	ts, _ := newTestAPI(t, api.Options{Token: "secret"})
 	resp := do(t, http.MethodGet, ts.URL+"/healthz", nil, nil)

@@ -19,6 +19,7 @@ func newRouter(d deps) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", d.handleHealthz)
+	mux.HandleFunc("GET /version", d.handleVersion)
 
 	mux.HandleFunc("GET /schema", d.handleSchemaAll)
 	mux.HandleFunc("GET /schema/list", d.handleSchemaList)
@@ -129,6 +130,13 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("DELETE /settings/templates/{mode}", d.handlePromptTemplateReset)
 	mux.HandleFunc("PUT /settings/templates/{mode}/states", d.handlePromptStatesSet)
 	mux.HandleFunc("DELETE /settings/templates/{mode}/states", d.handlePromptStatesReset)
+
+	// Board preferences (BACI-47/D). One scalar global flag today —
+	// board.hide_empty_columns. Lives at /settings/... alongside the
+	// template surface to mirror the BACI-36 precedent for global
+	// app_settings over HTTP.
+	mux.HandleFunc("GET /settings/board-preferences", d.handleBoardPreferencesGet)
+	mux.HandleFunc("PUT /settings/board-preferences", d.handleBoardPreferencesSet)
 
 	// Outermost first: panic recovery wraps everything so a bug in any
 	// later layer still returns a 500 envelope. The CORS middleware

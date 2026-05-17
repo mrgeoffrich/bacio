@@ -11,6 +11,7 @@ package api
 // global (no RepoID), same as the local backend writes them.
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
@@ -289,4 +290,66 @@ func stateStrings(states []model.State) []string {
 		out[i] = string(st)
 	}
 	return out
+}
+
+// ---------- board preferences (BACI-47/D) ----------
+//
+// One scalar global flag today — board.hide_empty_columns. The desktop
+// app was the only writer until the web bundle wanted parity; serving
+// it from REST means the browser can drive the same toggle.
+
+// BoardPreferencesOut is the response shape for GET/PUT
+// /settings/board-preferences. Keep the underscore form on the wire so
+// it matches every other JSON field in this package; the desktop's
+// reshape into the camelCase BoardPreferencesDTO lives in api.http.ts.
+type BoardPreferencesOut struct {
+	HideEmptyColumns bool `json:"hide_empty_columns"`
+}
+
+// boardPreferencesIn is the strict-decoded input for PUT.
+type boardPreferencesIn struct {
+	HideEmptyColumns bool `json:"hide_empty_columns"`
+}
+
+func (d deps) handleBoardPreferencesGet(w http.ResponseWriter, r *http.Request) {
+	hide, err := d.store.GetBoardHideEmptyColumns()
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, &BoardPreferencesOut{HideEmptyColumns: hide})
+}
+
+func (d deps) handleBoardPreferencesSet(w http.ResponseWriter, r *http.Request) {
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	parsed, _, err := inputio.DecodeStrict[boardPreferencesIn](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	if isDryRun(r) {
+		writeDryRun(w, http.StatusOK, &BoardPreferencesOut{HideEmptyColumns: parsed.HideEmptyColumns})
+		return
+	}
+	if err := d.store.SetBoardHideEmptyColumns(parsed.HideEmptyColumns); err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	// Consistent with the prompt-template REST verbs which all audit.
+	// The local-path desktop writer doesn't audit today; this asymmetry
+	// is fine — the REST surface is where multi-client traffic shows up
+	// and history is most useful.
+	recordOp(d.store, d.logger, model.HistoryEntry{
+		Actor:       ActorFromContext(r.Context()),
+		Op:          "board_pref.update",
+		Kind:        "app_setting",
+		TargetLabel: "board.hide_empty_columns",
+		Details:     fmt.Sprintf("hide_empty_columns=%t", parsed.HideEmptyColumns),
+	})
+	writeJSON(w, http.StatusOK, &BoardPreferencesOut{HideEmptyColumns: parsed.HideEmptyColumns})
 }

@@ -25,10 +25,12 @@ bacio api &
 open http://127.0.0.1:5320/ui/
 ```
 
-The bundle is **read-mostly** in v1: the Board, Features, Documents,
-History and per-issue drawer + edit modal all work; the Agents tab,
-per-card Dispatch button, Settings → prompt templates, native folder
-picker, and leader-status chip are deliberately hidden. See
+The bundle covers most surfaces today: the Board, Features, Documents,
+History, per-issue drawer + edit modal, per-card Dispatch button,
+hide-empty-columns toggle, built-in prompt template editor, and
+bacio-version readout all work; the Agents tab, Settings → typed
+template CRUD (Add / Rename / Delete / Restore-built-ins), native folder
+picker, and leader-status chip remain deliberately hidden. See
 [§3 What v1 deliberately doesn't ship](#3-what-v1-deliberately-doesnt-ship)
 for the why-and-how.
 
@@ -81,17 +83,18 @@ React component  ──import * as api from '../api'──>  api.ts        (Wail
 
 ## 3. What v1 deliberately doesn't ship
 
-Five UI surfaces are hidden in `WEB_MODE`. All of them either touch
-local-only state (the agent registry, `app_settings`) or the host
-process (folder picker, leader election):
+Four UI surfaces remain hidden in `WEB_MODE`. The hide-empty-columns
+toggle, per-card Dispatch button, built-in prompt-template editor, and
+`bacio` version readout *used* to be in this list but are wired
+end-to-end now (BACI-47). What's left either needs a composite endpoint
+that doesn't exist (Agents tab) or genuinely can't work in a browser
+(native folder picker, leader election):
 
 | Surface | Why hidden | What the user sees |
 |---|---|---|
-| **Agents tab** | No HTTP endpoint assembles the `AgentCard` payload (busy/waiting derivation + dispatch bucketing). | Tab dropped from the topbar. |
-| **Per-card Dispatch button** | Needs server-side agent auto-pick + state-gate re-check, which `BoardService.DispatchIssue` does locally. | Button never renders (`promptConfig` is empty in web mode). |
-| **Settings → prompt templates** | Typed CRUD lives in `app_settings`, which has no HTTP parity yet. The body + state-gate routes (BACI-36) exist but the full edit UX needs the typed verbs too. | Section hidden; only the theme picker + bacio-version readout remain. |
-| **Hide-empty-columns toggle** | Persistence is in `app_settings`. | Toggle hidden; web build always shows every column. |
-| **Native folder picker (+ Add Repository)** | No browser equivalent. | Picker dropdown shows a "run `bacio init` on the server" hint instead. |
+| **Agents tab** | No HTTP endpoint assembles the `AgentCard` payload (busy/waiting derivation + dispatch bucketing). Doing it client-side would be N+1 round-trips per session per refresh. | Tab dropped from the topbar. |
+| **Settings → typed template CRUD** | The `Add` / `Rename` / `Delete` / `Restore built-ins` verbs live on Wails-bound typed methods (`AddPromptTemplate`, etc.) that `internal/client/remote_agent.go` marks `ErrLocalOnly` — no HTTP parity yet. Body + state-gate edits (the most-used flows) ARE wired via the BACI-36 routes. | Per-template body textarea + state chips are editable; the toolbar (Add / Restore) and per-template Rename / Delete buttons are hidden, with a "more template management in the desktop app" hint below the last template card. |
+| **Native folder picker (+ Add Repository)** | No browser equivalent. | Picker dropdown shows a "run `bacio init` on the server" hint instead. (A path-input modal that POSTs `/repos` is a noted follow-up.) |
 | **"Controlling" leader chip** | Per-process Wails concept — the browser doesn't run an elector. | Chip never renders. |
 
 The hidden state for each surface is *also* enforced in `api.http.ts`:
@@ -103,10 +106,11 @@ rather than failing silently.
 
 ## 4. Reshape table
 
-13 of the 23 surfaced calls in `api.ts` have a direct REST equivalent
-today (most behind a small DTO reshape from `internal/api/views.go`'s
+Most surfaced calls in `api.ts` have a direct REST equivalent today
+(usually behind a small DTO reshape from `internal/api/views.go`'s
 shapes into the desktop's `BoardCard` / `IssueDetail` / `DocSummary` /
-`DocContent` / `FeatureSummary` / `FeatureDetail` / `HistoryEntryDTO`).
+`DocContent` / `FeatureSummary` / `FeatureDetail` / `HistoryEntryDTO` /
+`PromptTemplateDTO` / `BoardPreferencesDTO`).
 
 | `api.ts` call | REST equivalent | Notes |
 |---|---|---|
@@ -123,8 +127,14 @@ shapes into the desktop's `BoardCard` / `IssueDetail` / `DocSummary` /
 | `listHistory(p, page, pageSize)` | `GET /repos/{p}/history?limit=&offset=` | Over-fetches by one so `hasMore` is derivable client-side. |
 | `getDoc(p, name)` | `GET /repos/{p}/documents/{name}` | |
 | `saveDoc(p, name, content)` | `PUT /repos/{p}/documents/{name}` then re-`getDoc` | |
+| `dispatchIssue(p, k, mode)` | `POST /repos/{p}/issues/{k}/dispatch` (BACI-40) | Server re-checks the state-gate and auto-picks a free agent; caller names neither an agent nor a note. |
+| `listPromptTemplates()` | `GET /settings/templates` + `GET /settings/templates/states` (BACI-36) | Parallel fetch; assemble client-side into `PromptTemplateDTO[]` with alphabetical slug order. Labels are derived (built-in defaults + title-cased fallback) since `prompt_templates.name` has no REST shape yet. |
+| `savePromptTemplate(mode, body)` | `PUT /settings/templates/{mode}` (or `DELETE` to reset on empty body) | Refetches the one DTO after the write. |
+| `savePromptStates(mode, states)` | `PUT /settings/templates/{mode}/states` (or `DELETE` on empty list) | Same refetch pattern. |
+| `getBoardPreferences()` | `GET /settings/board-preferences` (BACI-47/D) | Reshapes `{hide_empty_columns}` → `BoardPreferencesDTO`. |
+| `setBoardPreferences(hide)` | `PUT /settings/board-preferences` (BACI-47/D) | Audits as `board_pref.update`. |
 | `promptPlaceholders()` | static | Returns `['issue_id', 'issue_title', 'repo_prefix']`. |
-| `bacioVersion()` | (stub) | Returns `"web"`; no HTTP endpoint exposes the binary version today. |
+| `bacioVersion()` | `GET /version` (BACI-47/A) | Returns the same `internal/version.String()` used by `bacio --version` and the per-session `bacio_version` in the Agents panel — cross-checking the readout against a session's version reliably surfaces stale channels. |
 
 ---
 
@@ -245,33 +255,46 @@ The triggers below are concrete "a user is now blocked by this" signals,
 not aspirational TODOs. Pick them up in this order if web mode starts
 seeing real use.
 
-1. **Agent-registry HTTP shapes for AgentCard.** The raw register /
+1. **Composite `AgentCard` HTTP endpoint.** The raw register /
    heartbeat / claim / release / list-sessions / list-open-claims
    verbs already ship (BACI-34); what the desktop's Agents view also
-   needs is a *composite* endpoint that returns `AgentCard[]` directly
-   (with busy/waiting derivation and dispatch bucketing). Without it
-   the web build can't unhide the Agents tab without doing N+1
-   round-trips per session.
-2. **Server-side dispatch auto-pick.** Today the desktop's
-   `BoardService.DispatchIssue` picks the agent locally. Move that
-   logic into a new `POST /repos/{p}/issues/{k}/dispatch` (or extend
-   the existing `POST /repos/{p}/agents/dispatches`) that takes only
-   the issue key + mode and picks the target agent server-side. Then
-   the per-card action button can unhide in web mode.
-3. **`app_settings` HTTP parity.** Add `/settings/board-preferences`
-   read/write + the typed prompt-template CRUD endpoints
-   (`add`/`rename`/`delete`/`restore-defaults`). Then the Settings
-   → prompt templates section + hide-empty-columns toggle can
-   unhide.
-4. **"Register repo" path-input modal.** `POST /repos` already exists;
+   needs is a *composite* endpoint (proposed:
+   `GET /repos/{p}/agents/cards`) that returns `AgentCard[]` directly
+   (with busy/waiting derivation, dispatch bucketing, and the BACI-45
+   TodoWrite mirror inlined). Without it the web build can't unhide
+   the Agents tab without doing N+1 round-trips per session per
+   10s refresh.
+2. **Typed prompt-template CRUD HTTP verbs.** The body + state-gate
+   routes (BACI-36) ship; what's missing is REST parity for the
+   `Add` / `Rename` / `Delete` / `Restore-built-ins` verbs, which live
+   today as Wails-bound typed methods (`AddPromptTemplate`,
+   `RenamePromptTemplate`, `DeletePromptTemplate`,
+   `RestoreBuiltinPromptTemplates`) flagged `ErrLocalOnly` in
+   `internal/client/remote_agent.go`. Once those land at
+   `POST /settings/templates`, `POST /settings/templates/{slug}/rename`,
+   `DELETE /settings/templates/{slug}`,
+   `POST /settings/templates/restore-defaults`, the four hidden
+   toolbar / per-template buttons can unhide in web mode (drop the
+   `!WEB_MODE` gates in `SettingsView.jsx`) and the four throwing
+   stubs in `api.http.ts` can wire through. **Pitfall:** Go's
+   `ServeMux` will treat `DELETE /settings/templates/{slug}` and the
+   BACI-36 `DELETE /settings/templates/{mode}` (body-reset) as
+   conflicting patterns — move body-reset to
+   `DELETE /settings/templates/{mode}/body` to disambiguate.
+3. **"Register repo" path-input modal.** `POST /repos` already exists;
    the web RepoPicker could surface a path-input modal that POSTs to
    it, replacing the "run `bacio init` on the server" copy-only line.
-5. **SSE/WebSocket push.** The desktop's leader chip + Agents view get
+   Path UX: the placeholder should show an example matching the
+   server's OS (`/Users/you/Repos/example` on macOS); server-side
+   validation in `handleReposCreate` should reject non-absolute paths
+   / non-existent dirs / non-git working trees with useful messages.
+4. **SSE/WebSocket push.** The desktop's leader chip + Agents view get
    live updates via Wails events; the web bundle polls every 10s
    (existing `POLL_INTERVAL_MS`). A `/events` SSE channel that
    re-broadcasts mutations would close the gap.
-6. **`GET /version`.** So `bacioVersion()` doesn't return the literal
-   `"web"` placeholder.
+5. **Cross-repo Agents view (`?all=true`).** Today's web `RepoPicker`
+   doesn't surface "all", so there's no consumer for a cross-repo
+   `GET /agents/cards` aggregate — defer until someone uses it.
 
 ---
 
@@ -293,8 +316,12 @@ When you go to extend or fix this, the relevant files are:
     filtered out of `NAV`; leader chip hidden.
   - `desktop/frontend/src/components/RepoPicker.jsx` — Add Repository
     replaced with a copy-only hint.
-  - `desktop/frontend/src/components/SettingsView.jsx` — prompt-
-    template section + hide-empty-columns toggle gated.
+  - `desktop/frontend/src/components/SettingsView.jsx` — the typed
+    template CRUD affordances (toolbar Add / Restore built-ins,
+    per-template Rename / Delete) and the inline-add form are gated
+    on `!WEB_MODE`; the per-template body textarea + state chips +
+    Reset body / Reset gate buttons are visible in both modes. The
+    hide-empty-columns toggle is visible in both modes too.
 - **Backend**
   - `embed.go` — `//go:embed all:webui var WebUIFS`.
   - `internal/api/static.go` — `/ui/` handler with SPA fallback.
