@@ -64,8 +64,10 @@ bacio tracks live agent sessions in a local SQLite registry (never synced) so yo
 **Set `BACIO_AGENT_MODE=1` in the launching shell.** bacio's hooks + channel poller are inert unless this env var is set, so even with hooks installed an interactive Claude session in the project is *not* auto-registered as an agent unless the user explicitly opted in. The recommended launch incantation is:
 
 ```bash
-BACIO_AGENT_MODE=1 claude
+BACIO_AGENT_MODE=1 claude --dangerously-skip-permissions --dangerously-load-development-channels server:bacio
 ```
+
+`--dangerously-skip-permissions` waives the per-tool approval prompt for the agent session; `--dangerously-load-development-channels server:bacio` opts in to the experimental native-channels transport so dispatches stream live (the regular `.mcp.json` transport also works without that flag — see `bacio channel --help`).
 
 `bacio status` reports the current value (`Agent: BACIO_AGENT_MODE=1 (active)` vs `unset (hooks + channel inert)`) — check it first when "why isn't dispatch reaching me?" is the question.
 
@@ -801,9 +803,12 @@ body) or `rm` it.
 
 **All five entries are inert unless `BACIO_AGENT_MODE=1`** is set in the
 environment of the Claude session that loads them. Launch with
-`BACIO_AGENT_MODE=1 claude` for the supervision; launch without for
-normal interactive collaboration where bacio CLI calls attribute to your
-OS user. The `bacio channel` MCP server obeys the same gate — its MCP
+`BACIO_AGENT_MODE=1 claude` for the supervision (the install banners
+print a fuller recommended line that also adds
+`--dangerously-skip-permissions` and
+`--dangerously-load-development-channels server:bacio`); launch without
+the env var for normal interactive collaboration where bacio CLI calls
+attribute to your OS user. The `bacio channel` MCP server obeys the same gate — its MCP
 handshake and `register` / `reply` tools stay reachable so an agent
 explicitly opting in mid-session can still call `register`, but the
 setup-dispatch poller (the bit that queues "call register" nudges) is
@@ -1098,5 +1103,6 @@ bacio install-channel --yes
 ```
 
 It merges a `bacio` entry into the repo's `.mcp.json` and prints the
-`claude --dangerously-load-development-channels server:bacio` command to
-launch with — same confirmation + `--yes` behaviour as `install-hooks`.
+recommended launch command —
+`BACIO_AGENT_MODE=1 claude --dangerously-skip-permissions --dangerously-load-development-channels server:bacio`
+— same confirmation + `--yes` behaviour as `install-hooks`.

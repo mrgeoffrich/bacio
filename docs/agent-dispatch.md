@@ -435,12 +435,15 @@ Wiring it up takes two steps, both handled by **`bacio install-channel`**
 1. it merges a `bacio` entry into the repo's `.mcp.json` so Claude Code
    knows how to spawn `bacio channel` (non-destructive — other MCP
    servers are preserved; `--yes` skips the confirmation prompt);
-2. it prints the launch command — channels are a Claude Code research
-   preview, and a custom channel isn't on the Anthropic allowlist, so
-   the session must opt in with the development flag:
+2. it prints the recommended launch command — channels are a Claude
+   Code research preview, and a custom channel isn't on the Anthropic
+   allowlist, so the session must opt in with the development flag.
+   The shared activation banner emits a one-line copy-paste hint that
+   also sets the activation env var and waives the per-tool approval
+   prompt (BACI-49):
 
    ```bash
-   claude --dangerously-load-development-channels server:bacio
+   BACIO_AGENT_MODE=1 claude --dangerously-skip-permissions --dangerously-load-development-channels server:bacio
    ```
 
    (Requires Claude Code v2.1.80+.)

@@ -38,14 +38,13 @@ before writing. Pass --yes (-y) to skip the prompt.
 Activation: the channel (and bacio's hooks) are inert unless
 BACIO_AGENT_MODE=1 is set in the environment of the Claude session
 that loads them. See the post-install output for the recommended
-launch incantation. The channel rides the regular .mcp.json MCP
-transport — Claude Code loads it automatically once the entry is
-written, no extra flags required.
-
-Optional: bacio can also be loaded as a Claude Code experimental
-"native" channel via --dangerously-load-development-channels
-server:bacio (Claude Code v2.1.80+). That path is independent of the
-default MCP transport above and is not required.`,
+launch incantation, which also passes
+--dangerously-load-development-channels server:bacio (Claude Code
+v2.1.80+) so dispatches stream live over the native-channels
+transport. The plain .mcp.json transport — Claude Code loads it
+automatically once the entry is written, no extra flags required —
+remains a working fallback if you prefer not to opt in to the
+research-preview channel path.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if inRemoteMode() {
@@ -176,11 +175,11 @@ func applyBacioChannel(path string, top map[string]json.RawMessage, command stri
 // kept out of this payload and printed separately to stderr by
 // printActivationBanner — folding paragraphs of human guidance into
 // the structured success body would clutter machine consumers' parse
-// path. The prior message also led users to launch with
-// --dangerously-load-development-channels, which is for Claude Code's
-// experimental native-channels feature; bacio actually rides the
-// regular .mcp.json MCP transport, so that hint was misleading
-// (BACI-48).
+// path. BACI-49 brought --dangerously-load-development-channels
+// server:bacio back into the banner (alongside the new
+// --dangerously-skip-permissions) as a one-line copy-paste launch hint,
+// but the structured success body stays lean — the regression guard
+// in install_channel_test.go pins that.
 func reportChannelInstall(path, action string) error {
 	done := "added"
 	if action == "update" {
