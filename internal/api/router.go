@@ -9,10 +9,15 @@ import (
 
 // deps is the unexported handler-context bag. Each handler is a method on
 // deps so it can reach the store and config without pulling globals.
+//
+// leader is the UI leader-election goroutine — nil when newRouter is used
+// in tests that don't go through Server.Run. GET /leader reads its cached
+// state; everything else ignores it.
 type deps struct {
 	store  *store.Store
 	opts   Options
 	logger *slog.Logger
+	leader *apiLeaderService
 }
 
 func newRouter(d deps) http.Handler {
@@ -20,6 +25,7 @@ func newRouter(d deps) http.Handler {
 
 	mux.HandleFunc("GET /healthz", d.handleHealthz)
 	mux.HandleFunc("GET /version", d.handleVersion)
+	mux.HandleFunc("GET /leader", d.handleLeader)
 
 	mux.HandleFunc("GET /schema", d.handleSchemaAll)
 	mux.HandleFunc("GET /schema/list", d.handleSchemaList)
@@ -105,6 +111,11 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("POST /agents/dispatches/{id}/ack", d.handleAgentDispatchAck)
 	mux.HandleFunc("POST /agents/dispatches/{id}/cancel", d.handleAgentDispatchCancel)
 	mux.HandleFunc("GET /agents/claims/open", d.handleAgentClaimsOpen)
+	// BACI-50: composite Agents endpoint — one assembled AgentCard per
+	// session, with claims + dispatches + todos hydrated server-side
+	// so the browser does one round trip per refresh.
+	mux.HandleFunc("GET /repos/{prefix}/agents/cards", d.handleAgentCardsListRepo)
+	mux.HandleFunc("GET /agents/cards", d.handleAgentCardsListAll)
 	// Dispatch CRUD (BACI-35) rounds out the four dispatch verbs — inbox
 	// and ack already shipped with BACI-34. Repo-scoped because a
 	// dispatch is always queued against one repo.
@@ -130,6 +141,18 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("DELETE /settings/templates/{mode}", d.handlePromptTemplateReset)
 	mux.HandleFunc("PUT /settings/templates/{mode}/states", d.handlePromptStatesSet)
 	mux.HandleFunc("DELETE /settings/templates/{mode}/states", d.handlePromptStatesReset)
+	// Typed prompt-template CRUD over REST (BACI-50): the four `bacio
+	// settings template add/rename/rm/restore-defaults` verbs plus the
+	// /full list endpoint that returns the rich DTO the desktop renders
+	// from. Delete lives at /{slug}/row to coexist with the existing
+	// body-reset endpoint at /{mode}. The literal "restore-builtins"
+	// segment is more specific than "{slug}" so ServeMux disambiguates
+	// for free.
+	mux.HandleFunc("GET /settings/templates/full", d.handlePromptTemplatesFullList)
+	mux.HandleFunc("POST /settings/templates", d.handlePromptTemplateAdd)
+	mux.HandleFunc("POST /settings/templates/restore-builtins", d.handlePromptTemplateRestore)
+	mux.HandleFunc("POST /settings/templates/{slug}/rename", d.handlePromptTemplateRename)
+	mux.HandleFunc("DELETE /settings/templates/{slug}/row", d.handlePromptTemplateDelete)
 
 	// Board preferences (BACI-47/D). One scalar global flag today —
 	// board.hide_empty_columns. Lives at /settings/... alongside the

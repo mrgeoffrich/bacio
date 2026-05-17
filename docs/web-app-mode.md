@@ -25,14 +25,14 @@ bacio api &
 open http://127.0.0.1:5320/ui/
 ```
 
-The bundle covers most surfaces today: the Board, Features, Documents,
+The bundle covers every surface the desktop app does after BACI-50: the
+Board, Features, Documents, Agents (composite REST endpoint server-side),
 History, per-issue drawer + edit modal, per-card Dispatch button,
-hide-empty-columns toggle, built-in prompt template editor, and
-bacio-version readout all work; the Agents tab, Settings → typed
-template CRUD (Add / Rename / Delete / Restore-built-ins), native folder
-picker, and leader-status chip remain deliberately hidden. See
+hide-empty-columns toggle, built-in + typed-CRUD prompt-template editor,
+bacio-version readout, leader-election chip, and Add Repository
+(path-input modal). See
 [§3 What v1 deliberately doesn't ship](#3-what-v1-deliberately-doesnt-ship)
-for the why-and-how.
+for the small remaining surface gap.
 
 ---
 
@@ -83,24 +83,42 @@ React component  ──import * as api from '../api'──>  api.ts        (Wail
 
 ## 3. What v1 deliberately doesn't ship
 
-Four UI surfaces remain hidden in `WEB_MODE`. The hide-empty-columns
-toggle, per-card Dispatch button, built-in prompt-template editor, and
-`bacio` version readout *used* to be in this list but are wired
-end-to-end now (BACI-47). What's left either needs a composite endpoint
-that doesn't exist (Agents tab) or genuinely can't work in a browser
-(native folder picker, leader election):
+After BACI-50 there is no longer a `WEB_MODE`-only hidden surface —
+Agents, typed prompt-template CRUD, Add Repository (path-input modal),
+and the leader-election chip all work in both modes. The four entries
+that used to live in this table were closed by:
 
-| Surface | Why hidden | What the user sees |
-|---|---|---|
-| **Agents tab** | No HTTP endpoint assembles the `AgentCard` payload (busy/waiting derivation + dispatch bucketing). Doing it client-side would be N+1 round-trips per session per refresh. | Tab dropped from the topbar. |
-| **Settings → typed template CRUD** | The `Add` / `Rename` / `Delete` / `Restore built-ins` verbs live on Wails-bound typed methods (`AddPromptTemplate`, etc.) that `internal/client/remote_agent.go` marks `ErrLocalOnly` — no HTTP parity yet. Body + state-gate edits (the most-used flows) ARE wired via the BACI-36 routes. | Per-template body textarea + state chips are editable; the toolbar (Add / Restore) and per-template Rename / Delete buttons are hidden, with a "more template management in the desktop app" hint below the last template card. |
-| **Native folder picker (+ Add Repository)** | No browser equivalent. | Picker dropdown shows a "run `bacio init` on the server" hint instead. (A path-input modal that POSTs `/repos` is a noted follow-up.) |
-| **"Controlling" leader chip** | Per-process Wails concept — the browser doesn't run an elector. | Chip never renders. |
+- **Agents tab** — `GET /repos/{prefix}/agents/cards` and the cross-repo
+  `GET /agents/cards` now serve the assembled `AgentCard` payload
+  (busy / waiting derivation, dispatch bucketing, TodoWrite mirror)
+  in a single round trip. The assembly logic moved to
+  `internal/agentcards` so both `bacio api` and the desktop's
+  `BoardService.ListAgents` share the same source of truth.
+- **Settings → typed template CRUD** — `POST /settings/templates`,
+  `POST /settings/templates/{slug}/rename`,
+  `DELETE /settings/templates/{slug}/row`, and
+  `POST /settings/templates/restore-builtins` close the Add / Rename
+  / Delete / Restore-built-ins gap. `GET /settings/templates/full`
+  returns the rich DTO (label, defaults, is_builtin, …) so the web
+  bundle stops deriving labels client-side. The delete endpoint
+  lives at `/{slug}/row` to coexist with the BACI-36
+  `DELETE /settings/templates/{mode}` body-reset endpoint.
+- **Add Repository** — `RepoPicker` opens a path-input modal in web
+  mode that POSTs `{path, name, prefix?}` to the existing
+  `POST /repos` endpoint, then jumps to the new repo. Helper text
+  reminds the user the path is on the server's filesystem, not their
+  local machine.
+- **"Controlling" leader chip** — `bacio api` now runs the UI leader
+  elector itself (alongside the desktop's `LeaderService` and the
+  TUI's loop, all racing on the same `ui_leader` row). `GET /leader`
+  exposes the cached state; `App.jsx` polls it every
+  `POLL_INTERVAL_MS` (10s) in web mode. The chip renders only when
+  the server holds the lease.
 
-The hidden state for each surface is *also* enforced in `api.http.ts`:
-the stubbed functions throw `WebModeUnavailableError` so a caller that
-slips past component gating surfaces a clear error via the modal,
-rather than failing silently.
+What `bacio api` deliberately still doesn't do is replace the desktop's
+own use of the elector — both UIs (desktop + every running api server)
+race for the lease, and only one wins at a time. Closing a desktop window
+hands the lease over to a running api server within one tick (~10s).
 
 ---
 
@@ -128,9 +146,16 @@ shapes into the desktop's `BoardCard` / `IssueDetail` / `DocSummary` /
 | `getDoc(p, name)` | `GET /repos/{p}/documents/{name}` | |
 | `saveDoc(p, name, content)` | `PUT /repos/{p}/documents/{name}` then re-`getDoc` | |
 | `dispatchIssue(p, k, mode)` | `POST /repos/{p}/issues/{k}/dispatch` (BACI-40) | Server re-checks the state-gate and auto-picks a free agent; caller names neither an agent nor a note. |
-| `listPromptTemplates()` | `GET /settings/templates` + `GET /settings/templates/states` (BACI-36) | Parallel fetch; assemble client-side into `PromptTemplateDTO[]` with alphabetical slug order. Labels are derived (built-in defaults + title-cased fallback) since `prompt_templates.name` has no REST shape yet. |
+| `listPromptTemplates()` | `GET /settings/templates/full` (BACI-50) | Server returns the rich DTO (label, defaults, is_builtin, …); the bundle reshapes snake_case → camelCase. The older `GET /settings/templates` body-map and `…/states` map still ship for back-compat. |
 | `savePromptTemplate(mode, body)` | `PUT /settings/templates/{mode}` (or `DELETE` to reset on empty body) | Refetches the one DTO after the write. |
 | `savePromptStates(mode, states)` | `PUT /settings/templates/{mode}/states` (or `DELETE` on empty list) | Same refetch pattern. |
+| `addPromptTemplate(slug, name, body, states)` | `POST /settings/templates` (BACI-50) | Returns the new DTO. Audits as `template.create`. |
+| `renamePromptTemplate(slug, newSlug, newName)` | `POST /settings/templates/{slug}/rename` (BACI-50) | Either field can be empty to leave it unchanged. Audits as `template.rename`. Cascade-updates historical `agent_dispatches.mode`. |
+| `deletePromptTemplate(slug)` | `DELETE /settings/templates/{slug}/row` (BACI-50) | Distinct from the body-reset endpoint at `…/{mode}`. Audits as `template.delete`. |
+| `restoreBuiltinPromptTemplates()` | `POST /settings/templates/restore-builtins` (BACI-50) | Returns `{restored: [...], templates: [...]}` so the UI replaces its state in one shot. Audits as `template.restore_defaults`. |
+| `listAgents(prefix)` | `GET /repos/{p}/agents/cards` or `GET /agents/cards` (BACI-50) | Server-side composite — assembles `AgentCard[]` with claims + dispatches + todos in one round trip. Camel-case JSON tags match the existing TS shape, no reshape needed. |
+| `addRepository(payload)` | `POST /repos` (BACI-50, web only) | Web bundle pops a path-input modal and POSTs `{path, name, prefix?}`; desktop binding ignores the payload and pops the native folder picker. |
+| `getLeaderStatus()` | `GET /leader` (BACI-50) | `bacio api` runs the UI leader elector and exposes its cached state. App.jsx polls on `POLL_INTERVAL_MS` in web mode. |
 | `getBoardPreferences()` | `GET /settings/board-preferences` (BACI-47/D) | Reshapes `{hide_empty_columns}` → `BoardPreferencesDTO`. |
 | `setBoardPreferences(hide)` | `PUT /settings/board-preferences` (BACI-47/D) | Audits as `board_pref.update`. |
 | `promptPlaceholders()` | static | Returns `['issue_id', 'issue_title', 'repo_prefix']`. |
@@ -251,50 +276,29 @@ still that today. Two changes were strictly necessary for a web bundle:
 
 ## 7. Phase 2 follow-ups
 
-The triggers below are concrete "a user is now blocked by this" signals,
-not aspirational TODOs. Pick them up in this order if web mode starts
-seeing real use.
+BACI-50 closed the four big web/desktop parity gaps (Agents tab,
+typed template CRUD, Add Repository, leader chip). What's still
+deferred:
 
-1. **Composite `AgentCard` HTTP endpoint.** The raw register /
-   heartbeat / claim / release / list-sessions / list-open-claims
-   verbs already ship (BACI-34); what the desktop's Agents view also
-   needs is a *composite* endpoint (proposed:
-   `GET /repos/{p}/agents/cards`) that returns `AgentCard[]` directly
-   (with busy/waiting derivation, dispatch bucketing, and the BACI-45
-   TodoWrite mirror inlined). Without it the web build can't unhide
-   the Agents tab without doing N+1 round-trips per session per
-   10s refresh.
-2. **Typed prompt-template CRUD HTTP verbs.** The body + state-gate
-   routes (BACI-36) ship; what's missing is REST parity for the
-   `Add` / `Rename` / `Delete` / `Restore-built-ins` verbs, which live
-   today as Wails-bound typed methods (`AddPromptTemplate`,
-   `RenamePromptTemplate`, `DeletePromptTemplate`,
-   `RestoreBuiltinPromptTemplates`) flagged `ErrLocalOnly` in
-   `internal/client/remote_agent.go`. Once those land at
-   `POST /settings/templates`, `POST /settings/templates/{slug}/rename`,
-   `DELETE /settings/templates/{slug}`,
-   `POST /settings/templates/restore-defaults`, the four hidden
-   toolbar / per-template buttons can unhide in web mode (drop the
-   `!WEB_MODE` gates in `SettingsView.jsx`) and the four throwing
-   stubs in `api.http.ts` can wire through. **Pitfall:** Go's
-   `ServeMux` will treat `DELETE /settings/templates/{slug}` and the
-   BACI-36 `DELETE /settings/templates/{mode}` (body-reset) as
-   conflicting patterns — move body-reset to
-   `DELETE /settings/templates/{mode}/body` to disambiguate.
-3. **"Register repo" path-input modal.** `POST /repos` already exists;
-   the web RepoPicker could surface a path-input modal that POSTs to
-   it, replacing the "run `bacio init` on the server" copy-only line.
-   Path UX: the placeholder should show an example matching the
-   server's OS (`/Users/you/Repos/example` on macOS); server-side
-   validation in `handleReposCreate` should reject non-absolute paths
-   / non-existent dirs / non-git working trees with useful messages.
-4. **SSE/WebSocket push.** The desktop's leader chip + Agents view get
+1. **SSE/WebSocket push.** The desktop's leader chip + Agents view get
    live updates via Wails events; the web bundle polls every 10s
    (existing `POLL_INTERVAL_MS`). A `/events` SSE channel that
    re-broadcasts mutations would close the gap.
-5. **Cross-repo Agents view (`?all=true`).** Today's web `RepoPicker`
-   doesn't surface "all", so there's no consumer for a cross-repo
-   `GET /agents/cards` aggregate — defer until someone uses it.
+2. **Cross-repo Agents view (`?all=true`).** `GET /agents/cards` is
+   already wired for the cross-repo case, but today's web
+   `RepoPicker` doesn't surface an "all" option — defer the UI work
+   until someone uses it.
+3. **Path validation on `POST /repos`.** The Add Repository modal
+   accepts any string today; server-side `handleReposCreate` would
+   give better errors if it rejected non-absolute paths /
+   non-existent dirs / non-git working trees with useful messages
+   (matching the CLI's `git.Detect` failure modes).
+4. **Bundle the `default` field on body PUT.** `PUT /settings/templates/{mode}`
+   returns the persisted body only; `listPromptTemplates` (which uses
+   `/settings/templates/full`) does carry the embedded `default`, so
+   the existing refetch-one-after-write path works. Skipping the
+   round-trip would mean having `PUT` return the full DTO too — small
+   cleanup, not urgent.
 
 ---
 
@@ -310,18 +314,21 @@ When you go to extend or fix this, the relevant files are:
   - `desktop/frontend/package.json` — `dev:web` / `build:web` /
     `preview:web` scripts.
 - **Frontend (gating)**
-  - `desktop/frontend/src/App.jsx` — leader subscription gated on
-    `!WEB_MODE`; `refreshAgents` no-ops in web mode.
-  - `desktop/frontend/src/components/Topbar.jsx` — Agents tab
-    filtered out of `NAV`; leader chip hidden.
+  - `desktop/frontend/src/App.jsx` — leader subscription seeds once
+    on mount; web mode then polls `GET /leader` every
+    `POLL_INTERVAL_MS`, desktop mode listens on the `leaderStatus`
+    Wails event.
+  - `desktop/frontend/src/components/Topbar.jsx` — `NAV` is identical
+    in both modes; the leader chip renders whenever the elector
+    reports we hold the lease, regardless of build target.
   - `desktop/frontend/src/components/RepoPicker.jsx` — Add Repository
-    replaced with a copy-only hint.
-  - `desktop/frontend/src/components/SettingsView.jsx` — the typed
-    template CRUD affordances (toolbar Add / Restore built-ins,
-    per-template Rename / Delete) and the inline-add form are gated
-    on `!WEB_MODE`; the per-template body textarea + state chips +
-    Reset body / Reset gate buttons are visible in both modes. The
-    hide-empty-columns toggle is visible in both modes too.
+    pops the native folder picker in desktop mode and a path-input
+    modal in web mode (the modal POSTs to `/repos`).
+  - `desktop/frontend/src/components/SettingsView.jsx` — every
+    template affordance (body textarea, state chips, Reset body,
+    Reset gate, toolbar Add / Restore built-ins, per-template Rename
+    / Delete) works in both modes. The hide-empty-columns toggle is
+    visible in both modes too.
 - **Backend**
   - `embed.go` — `//go:embed all:webui var WebUIFS`.
   - `internal/api/static.go` — `/ui/` handler with SPA fallback.

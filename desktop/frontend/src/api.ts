@@ -60,9 +60,20 @@ export async function listCards(repoPrefix: string): Promise<BoardCard[]> {
   }
 }
 
+// AddRepositoryPayload mirrors the web-build shape so callers can pass
+// the same signature in both modes. Desktop ignores it — the Wails
+// AddRepository pops a native folder picker and resolves path/name
+// itself.
+export interface AddRepositoryPayload {
+  path: string;
+  name: string;
+  prefix?: string;
+}
+
 // addRepository opens a native folder picker and registers the chosen git
-// working tree. The returned Board has an empty prefix if the user cancelled.
-export async function addRepository(): Promise<Board> {
+// working tree. The returned Board has an empty prefix if the user
+// cancelled. The optional payload is web-only — desktop ignores it.
+export async function addRepository(_payload?: AddRepositoryPayload): Promise<Board> {
   try {
     return await BoardService.AddRepository();
   } catch (err) {

@@ -46,6 +46,25 @@ func (f *fakeBoardClient) ShowAgentSession(_ context.Context, sessionID string) 
 	return &client.AgentSessionView{Claims: f.sessClaims[sessionID]}, nil
 }
 
+// ListTodosBySessions is a fixed-empty stub — the existing tests don't
+// exercise the TodoWrite mirror, so the agentcards assembler reads an
+// empty map back and produces empty Todos arrays. Wiring it through
+// instead of relying on the embedded-interface panic was required once
+// BACI-50 moved ListAgents through agentcards.Assemble (which always
+// bulk-reads todos).
+func (f *fakeBoardClient) ListTodosBySessions(context.Context, []string) (map[int64][]model.SessionTodo, error) {
+	return map[int64][]model.SessionTodo{}, nil
+}
+
+// ListRepos is only called by Assemble in the cross-repo case; the
+// existing tests scope by a single repo so this is a no-op stub.
+func (f *fakeBoardClient) ListRepos(context.Context) ([]*model.Repo, error) {
+	if f.repo == nil {
+		return nil, nil
+	}
+	return []*model.Repo{f.repo}, nil
+}
+
 func TestListCardsTaken(t *testing.T) {
 	issues := []*model.Issue{
 		{Key: "TEST-1", State: model.StateTodo, Title: "held by an agent"},
