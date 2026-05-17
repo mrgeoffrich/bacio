@@ -373,11 +373,45 @@ export async function listCards(repoPrefix: string): Promise<BoardCard[]> {
   return issues.map(cardFromIssue);
 }
 
-export async function addRepository(): Promise<Board> {
-  // No browser equivalent of a native folder picker. A v2 follow-up
-  // could surface a path-input modal and POST /repos with the typed
-  // path — see docs/web-app-mode.md.
-  throw new WebModeUnavailableError('Add repository (native folder picker)');
+// AddRepositoryPayload is the shape the web bundle passes through to
+// POST /repos. Desktop mode ignores it (it pops a native folder
+// picker and resolves path/name itself). Both surfaces share the same
+// addRepository(payload?) signature — see api.ts for the desktop
+// wrapper.
+export interface AddRepositoryPayload {
+  path: string;
+  name: string;
+  prefix?: string;
+}
+
+export async function addRepository(payload?: AddRepositoryPayload): Promise<Board> {
+  // BACI-50: no browser folder picker, so the web bundle pops a
+  // path-input modal and POSTs to /repos. An empty payload means the
+  // caller forgot to gate this against WEB_MODE — surface clearly
+  // rather than send a malformed body.
+  if (!payload) {
+    throw new WebModeUnavailableError('Add repository (no path provided)');
+  }
+  const body: Record<string, string> = {
+    path: payload.path,
+    name: payload.name,
+  };
+  if (payload.prefix) body.prefix = payload.prefix.toUpperCase();
+  interface ApiRepo {
+    prefix: string;
+    name: string;
+    path: string;
+  }
+  const repo = await call<ApiRepo>('/repos', { method: 'POST', body });
+  // Match listBoards: issueCount=0 on a freshly-created repo;
+  // syncEnabled stays false in web mode (no machine-local config to
+  // probe). The Board picker shows these the moment listBoards refreshes.
+  return {
+    prefix: repo.prefix,
+    name: repo.name,
+    issueCount: 0,
+    syncEnabled: false,
+  };
 }
 
 interface ApiCommentEnvelope { author: string; body: string; created_at: string; }
@@ -444,14 +478,24 @@ export async function getIssue(repoPrefix: string, key: string): Promise<IssueDe
   };
 }
 
-export async function listAgents(_repoPrefix: string): Promise<AgentCard[]> {
-  // The agent-registry REST surface exists (BACI-34) but assembling
-  // the AgentCard shape requires several joins the desktop service
-  // does locally (per-session claim fetch, dispatch bucketing, busy /
-  // waiting derivation). Web mode hides the Agents tab entirely
-  // rather than reproduce that join chain here. See
-  // docs/web-app-mode.md for the v2 plan.
-  throw new WebModeUnavailableError('Agents view');
+export async function listAgents(repoPrefix: string): Promise<AgentCard[]> {
+  // BACI-50: bacio api now ships the composite endpoint that the
+  // desktop's BoardService.ListAgents used to build locally. The
+  // assembled card shape uses camelCase JSON tags matching the
+  // existing AgentCard TS type, so no per-field reshape is needed —
+  // the API response IS the AgentCard.
+  const path = (!repoPrefix || repoPrefix === 'all')
+    ? '/agents/cards'
+    : `/repos/${repoPrefix}/agents/cards`;
+  const cards = await call<AgentCard[]>(path);
+  // Normalise nullable arrays so consumers can iterate without
+  // defensive checks — matches what the Wails binding returns.
+  return (cards ?? []).map(c => ({
+    ...c,
+    claims: c.claims ?? [],
+    dispatches: c.dispatches ?? [],
+    todos: c.todos ?? [],
+  }));
 }
 
 interface ApiDocument {
@@ -704,67 +748,51 @@ export async function saveDoc(
   return getDoc(repoPrefix, filename);
 }
 
-// ---------- Prompt templates (BACI-47/B+C) ----------
+// ---------- Prompt templates (BACI-47/B+C, BACI-50) ----------
 //
-// Body + state-gate CRUD landed in BACI-36 (PUT/DELETE
-// /settings/templates/{mode} and …/{mode}/states); the list endpoints
-// (GET /settings/templates, /settings/templates/states) round it out.
-// Web mode wires the per-template body textarea + state chips against
-// those routes; the typed CRUD (add/rename/delete/restore-defaults)
-// is still local-only — the four stubs below throw and the matching
-// affordances are hidden in SettingsView.
+// Body + state-gate CRUD landed in BACI-36. BACI-50 finished the typed
+// CRUD surface — add/rename/delete/restore-builtins — and added the
+// /settings/templates/full list endpoint that returns the full DTO
+// (label, defaults, is_builtin, …) so the web bundle stops deriving
+// labels client-side.
 
-// Built-in slugs + display labels mirror model.BuiltinTemplateSlugs() /
-// BuiltinTemplateLabel(); the REST surface doesn't carry the template's
-// display name (it's a `prompt_templates.name` column, not in the
-// app_settings-era GET maps), so the web bundle derives it client-side.
-const BUILTIN_SLUGS = new Set(['plan', 'implement', 'review', 'ship', 'fix_review']);
-const BUILTIN_LABELS: Record<string, string> = {
-  plan: 'Plan',
-  implement: 'Implement',
-  review: 'Review',
-  ship: 'Ship',
-  fix_review: 'Fix review',
-};
-function deriveLabel(slug: string): string {
-  // Built-ins have known display names; user-created slugs fall back
-  // to a title-cased version of the slug ("spike" → "Spike").
-  if (BUILTIN_LABELS[slug]) return BUILTIN_LABELS[slug];
-  return slug.replace(/[-_]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+interface ApiPromptTemplate {
+  slug: string;
+  mode: string;
+  label: string;
+  body: string;
+  default: string;
+  is_builtin: boolean;
+  is_default: boolean;
+  allowed_states: string[];
+  default_states: string[];
+  states_are_default: boolean;
+}
+
+function reshapeTemplate(t: ApiPromptTemplate): PromptTemplateDTO {
+  return {
+    slug: t.slug,
+    mode: t.mode,
+    label: t.label,
+    body: t.body,
+    default: t.default,
+    isBuiltin: t.is_builtin,
+    isDefault: t.is_default,
+    allowedStates: t.allowed_states ?? [],
+    defaultStates: t.default_states ?? [],
+    statesAreDefault: t.states_are_default,
+  };
 }
 
 export async function listPromptTemplates(): Promise<PromptTemplateDTO[]> {
-  // Parallel fetch — both maps are small and the two requests are
-  // independent. /settings/templates is the authoritative source of
-  // slugs; a slug missing from /settings/templates/states reads as an
-  // empty state-gate (CLI-only template).
-  const [bodies, states] = await Promise.all([
-    call<Record<string, string>>('/settings/templates'),
-    call<Record<string, string[]>>('/settings/templates/states'),
-  ]);
-  // Stable, alphabetical iteration order — the desktop bindings use
-  // the store's insertion order, but the REST map is unordered.
-  const slugs = Object.keys(bodies).sort();
-  return slugs.map(slug => ({
-    slug,
-    mode: slug,
-    label: deriveLabel(slug),
-    body: bodies[slug],
-    // Embedded defaults aren't on the REST surface. The desktop's
-    // "Reset body" path uses these to render an indicator; web mode
-    // lives without it for now.
-    default: '',
-    isBuiltin: BUILTIN_SLUGS.has(slug),
-    isDefault: false,
-    allowedStates: states[slug] ?? [],
-    defaultStates: [],
-    statesAreDefault: false,
-  }));
+  const rows = await call<ApiPromptTemplate[]>('/settings/templates/full');
+  return (rows ?? []).map(reshapeTemplate);
 }
 
-// Refetch both maps and return the one DTO the caller updated — gives
-// the SettingsView setter the freshly resolved row without separately
-// fetching the body and state-gate.
+// Refetch every template and return the one DTO the caller updated —
+// SavePromptTemplate / SavePromptStates only return the persisted
+// row's body or states, not the full DTO; fetching once after the
+// write keeps the caller's `templates` state consistent.
 async function refreshOneTemplate(slug: string): Promise<PromptTemplateDTO> {
   const all = await listPromptTemplates();
   const found = all.find(t => t.slug === slug);
@@ -804,20 +832,50 @@ export async function savePromptStates(
   return refreshOneTemplate(mode);
 }
 
-export async function addPromptTemplate(): Promise<PromptTemplateDTO> {
-  throw new WebModeUnavailableError('Add prompt template');
+export async function addPromptTemplate(
+  slug: string,
+  name: string,
+  body: string,
+  states: string[],
+): Promise<PromptTemplateDTO> {
+  const raw = await call<ApiPromptTemplate>('/settings/templates', {
+    method: 'POST',
+    body: { slug, name, body, states },
+  });
+  return reshapeTemplate(raw);
 }
 
-export async function renamePromptTemplate(): Promise<PromptTemplateDTO> {
-  throw new WebModeUnavailableError('Rename prompt template');
+export async function renamePromptTemplate(
+  slug: string,
+  newSlug: string,
+  newName: string,
+): Promise<PromptTemplateDTO> {
+  const raw = await call<ApiPromptTemplate>(`/settings/templates/${slug}/rename`, {
+    method: 'POST',
+    body: { new_slug: newSlug, new_name: newName },
+  });
+  return reshapeTemplate(raw);
 }
 
-export async function deletePromptTemplate(): Promise<PromptTemplateDTO> {
-  throw new WebModeUnavailableError('Delete prompt template');
+export async function deletePromptTemplate(
+  slug: string,
+): Promise<PromptTemplateDTO> {
+  const raw = await call<ApiPromptTemplate>(`/settings/templates/${slug}/row`, {
+    method: 'DELETE',
+  });
+  return reshapeTemplate(raw);
+}
+
+interface ApiRestoreResponse {
+  restored: string[];
+  templates: ApiPromptTemplate[];
 }
 
 export async function restoreBuiltinPromptTemplates(): Promise<PromptTemplateDTO[]> {
-  throw new WebModeUnavailableError('Restore built-in prompt templates');
+  const raw = await call<ApiRestoreResponse>('/settings/templates/restore-builtins', {
+    method: 'POST',
+  });
+  return (raw.templates ?? []).map(reshapeTemplate);
 }
 
 export async function promptPlaceholders(): Promise<string[]> {
@@ -849,13 +907,14 @@ export async function setBoardPreferences(hideEmptyColumns: boolean): Promise<Bo
   return { hideEmptyColumns: res.hide_empty_columns };
 }
 
-// ---------- Local-only stubs ----------
+// ---------- Leader election (BACI-50) ----------
 
+// The bacio api server runs the elector itself, sharing the ui_leader
+// table with the desktop and TUI. The browser can never be the leader,
+// but its connected api server can — so the "Controlling" chip reflects
+// the server's lease, not this page's. App.jsx polls this on a 10s
+// cadence (matching POLL_INTERVAL_MS, which mirrors UILeaderHeartbeatInterval).
 export async function getLeaderStatus(): Promise<LeaderStatusDTO> {
-  // The browser doesn't run the leader election (per-process Wails
-  // concept), so it can never be the leader. App.jsx force-defaults
-  // amLeader to true in WEB_MODE so dispatch-gating doesn't refuse
-  // mutations the user triggers; this read is here for callers that
-  // still want a value-shaped response.
-  return { amLeader: false, holderLabel: '' };
+  const res = await call<{ amLeader: boolean; holderLabel: string }>('/leader');
+  return { amLeader: !!res.amLeader, holderLabel: res.holderLabel ?? '' };
 }

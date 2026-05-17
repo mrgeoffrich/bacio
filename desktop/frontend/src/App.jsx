@@ -125,15 +125,20 @@ export default function App() {
       });
   }, []);
 
-  // Subscribe to leaderStatus events and seed the initial state on mount.
-  // LeaderService emits the first tick almost immediately on startup, so
-  // the state corrects quickly even if the initial pull lags.
-  //
-  // Skipped entirely in web mode — the browser doesn't run the elector,
-  // there's no Wails Events bus, and the Topbar hides the chip anyway.
+  // Subscribe to leader-election state. Desktop mode reads the per-process
+  // LeaderService (the Wails Events bus pushes each tick); web mode polls
+  // the bacio api's GET /leader on the same 10s cadence the server's
+  // elector heartbeats — close enough that the chip never lags by more
+  // than one tick. Both modes seed the initial state on mount so the
+  // chip doesn't have to wait for the first interval to fire.
   useEffect(() => {
-    if (WEB_MODE) return undefined;
     api.getLeaderStatus().then(setLeaderState).catch(() => {});
+    if (WEB_MODE) {
+      const id = setInterval(() => {
+        api.getLeaderStatus().then(setLeaderState).catch(() => {});
+      }, POLL_INTERVAL_MS);
+      return () => clearInterval(id);
+    }
     const off = Events.On('leaderStatus', (e) => setLeaderState(e.data));
     return () => { if (typeof off === 'function') off(); };
   }, []);
@@ -194,10 +199,6 @@ export default function App() {
 
   const refreshAgents = useCallback((opts = {}) => {
     if (!activeBoard) return;
-    // The Agents view is hidden in WEB_MODE — there's no HTTP route
-    // that assembles the AgentCard payload, so the api stub throws.
-    // Skip the call entirely instead of surfacing the error.
-    if (WEB_MODE) return;
     api.listAgents(activeBoard)
       .then(setAgents)
       .catch(err => {
@@ -265,19 +266,25 @@ export default function App() {
       .catch(err => reportError(err, { headline: "Couldn't open issue" }));
   };
 
-  // Add a repository: the backend opens a native folder picker and registers
-  // the chosen git working tree. On success, refresh the board list and jump
-  // to the new repo; an empty prefix means the user cancelled the dialog.
-  const addRepository = () => {
-    api.addRepository()
+  // Add a repository. Desktop pops a native folder picker (Wails);
+  // web mode hands the path-input modal's submission through as a
+  // payload (BACI-50). On success, refresh the board list and jump
+  // to the new repo; an empty prefix means the user cancelled the
+  // dialog (desktop only — the web modal always submits a real path).
+  const addRepository = (payload) => {
+    return api.addRepository(payload)
       .then(board => {
-        if (!board.prefix) return;
+        if (!board.prefix) return undefined;
         return api.listBoards().then(bs => {
           setBoards(bs);
           setActiveBoard(board.prefix);
+          return board;
         });
       })
-      .catch(err => reportError(err, { headline: "Couldn't add repository" }));
+      .catch(err => {
+        reportError(err, { headline: "Couldn't add repository" });
+        throw err;
+      });
   };
 
   // Drag-to-move: optimistically move the card to the new column, then

@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from './Icon.jsx';
 import { reportError } from '../errors';
-import { WEB_MODE } from '../env';
 import * as api from '../api';
 
 const THEME_OPTIONS = [
@@ -61,10 +60,8 @@ export default function SettingsView({
 
   useEffect(() => {
     let cancelled = false;
-    // BACI-47/B+C: the per-template body + state-gate editors are wired
-    // in web mode against the BACI-36 REST routes; only the typed
-    // CRUD affordances (add / rename / delete / restore-defaults) stay
-    // hidden until that REST surface lands.
+    // BACI-50 closed the web-mode CRUD gap — every affordance below is
+    // available in both desktop and web.
     Promise.all([refreshTemplates(), api.promptPlaceholders(), api.bacioVersion()])
       .then(([, ph, ver]) => {
         if (cancelled) return;
@@ -235,9 +232,7 @@ export default function SettingsView({
           <div className="mk-settings-row-text">
             <div className="mk-settings-label">Prompt templates</div>
             <div className="mk-settings-hint">
-              {WEB_MODE
-                ? "The instruction sent to an agent when you dispatch a job at each template, and the issue states each template's prompt can be launched from."
-                : "The instruction sent to an agent when you dispatch a job at each template, and the issue states each template's prompt can be launched from. You can add, rename, and delete templates here — built-ins can be deleted too, and \"Restore built-ins\" re-seeds any that are missing."}
+              The instruction sent to an agent when you dispatch a job at each template, and the issue states each template&apos;s prompt can be launched from. You can add, rename, and delete templates here — built-ins can be deleted too, and &quot;Restore built-ins&quot; re-seeds any that are missing.
             </div>
           </div>
           {placeholders.length > 0 && (
@@ -252,29 +247,27 @@ export default function SettingsView({
             </div>
           )}
 
-          {!WEB_MODE && (
-            <div className="mk-tmpl-toolbar">
-              <button
-                className="mk-segmented-btn"
-                onClick={() => setAdding(adding ? null : { ...EMPTY_NEW_TEMPLATE })}
-                disabled={savingSlug !== null}
-              >
-                {adding ? 'Cancel add' : '+ Add template'}
-              </button>
-              <button
-                className="mk-segmented-btn"
-                onClick={() => setPendingRestore(true)}
-                disabled={savingSlug !== null || missingBuiltins.length === 0}
-                title={missingBuiltins.length === 0
-                  ? 'Every built-in template is already present'
-                  : `Will re-seed: ${missingBuiltins.join(', ')}`}
-              >
-                Restore built-ins{missingBuiltins.length > 0 ? ` (${missingBuiltins.length})` : ''}
-              </button>
-            </div>
-          )}
+          <div className="mk-tmpl-toolbar">
+            <button
+              className="mk-segmented-btn"
+              onClick={() => setAdding(adding ? null : { ...EMPTY_NEW_TEMPLATE })}
+              disabled={savingSlug !== null}
+            >
+              {adding ? 'Cancel add' : '+ Add template'}
+            </button>
+            <button
+              className="mk-segmented-btn"
+              onClick={() => setPendingRestore(true)}
+              disabled={savingSlug !== null || missingBuiltins.length === 0}
+              title={missingBuiltins.length === 0
+                ? 'Every built-in template is already present'
+                : `Will re-seed: ${missingBuiltins.join(', ')}`}
+            >
+              Restore built-ins{missingBuiltins.length > 0 ? ` (${missingBuiltins.length})` : ''}
+            </button>
+          </div>
 
-          {adding && !WEB_MODE && (
+          {adding && (
             <div className="mk-tmpl mk-tmpl-adding">
               <div className="mk-tmpl-head">
                 <span className="mk-tmpl-label">New template</span>
@@ -370,24 +363,20 @@ export default function SettingsView({
                         Reset body
                       </button>
                     )}
-                    {!WEB_MODE && (
-                      <button
-                        className="mk-tmpl-reset"
-                        disabled={busy}
-                        onClick={() => setRenaming({ slug: t.slug, newSlug: t.slug, newName: t.label })}
-                      >
-                        Rename
-                      </button>
-                    )}
-                    {!WEB_MODE && (
-                      <button
-                        className="mk-tmpl-reset"
-                        disabled={busy}
-                        onClick={() => setPendingDelete(t.slug)}
-                      >
-                        Delete
-                      </button>
-                    )}
+                    <button
+                      className="mk-tmpl-reset"
+                      disabled={busy}
+                      onClick={() => setRenaming({ slug: t.slug, newSlug: t.slug, newName: t.label })}
+                    >
+                      Rename
+                    </button>
+                    <button
+                      className="mk-tmpl-reset"
+                      disabled={busy}
+                      onClick={() => setPendingDelete(t.slug)}
+                    >
+                      Delete
+                    </button>
                   </div>
                 </div>
                 <textarea
@@ -429,11 +418,6 @@ export default function SettingsView({
               </div>
             );
           })}
-          {WEB_MODE && (
-            <p className="mk-settings-hint">
-              Add, rename, delete, and restore-defaults for templates from the desktop app.
-            </p>
-          )}
         </section>
 
         <section className="mk-settings-row">

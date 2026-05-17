@@ -49,6 +49,11 @@ func New(s *store.Store, opts Options, logger *slog.Logger) *Server {
 		opts:   opts,
 		logger: logger,
 	}
+	// The handler built here is the no-leader variant — tests reach it
+	// via Server.Handler() without going through Run, so an inert leader
+	// surface (GET /leader returns the empty state) is the right default.
+	// Run builds its own leader-aware handler and assigns it to
+	// httpServer.Handler before listening.
 	srv.handler = newRouter(deps{store: s, opts: opts, logger: logger})
 	srv.httpServer = &http.Server{
 		Addr:              opts.Addr,
@@ -67,7 +72,22 @@ func (s *Server) Handler() http.Handler { return s.handler }
 
 // Run starts the listener and blocks until ctx is cancelled, then performs
 // a 5s graceful shutdown via http.Server.Shutdown.
+//
+// Run owns the UI leader-election lifecycle (BACI-50): it starts the
+// elector + tickers before ListenAndServe, swaps in a leader-aware
+// handler so GET /leader returns the cached state, and releases the
+// lease as the first step of the graceful shutdown. Tests that drive
+// Server.Handler() directly bypass this and see the inert leader
+// handler from New.
 func (s *Server) Run(ctx context.Context) error {
+	leaderSvc := newAPILeaderService(s.store, s.opts.Addr, s.logger)
+	s.httpServer.Handler = newRouter(deps{
+		store:  s.store,
+		opts:   s.opts,
+		logger: s.logger,
+		leader: leaderSvc,
+	})
+
 	errCh := make(chan error, 1)
 	go func() {
 		s.logger.Info("api listening", "addr", s.opts.Addr)
@@ -79,6 +99,10 @@ func (s *Server) Run(ctx context.Context) error {
 	}()
 	select {
 	case <-ctx.Done():
+		// Release the lease first so a standby UI can promote within
+		// one heartbeat tick (~10s) instead of waiting out the 180s
+		// stale window.
+		leaderSvc.stop()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := s.httpServer.Shutdown(shutdownCtx); err != nil {
@@ -88,6 +112,7 @@ func (s *Server) Run(ctx context.Context) error {
 		<-errCh
 		return nil
 	case err := <-errCh:
+		leaderSvc.stop()
 		return err
 	}
 }

@@ -13,10 +13,13 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
+	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/inputio"
 	"github.com/mrgeoffrich/bacio/internal/model"
+	"github.com/mrgeoffrich/bacio/internal/store"
 )
 
 // PromptTemplateBody is the per-mode response shape for PUT/DELETE on
@@ -25,6 +28,72 @@ import (
 type PromptTemplateBody struct {
 	Mode string `json:"mode"`
 	Body string `json:"body"`
+}
+
+// PromptTemplateFullDTO mirrors the desktop's PromptTemplateDTO — a
+// single row of the typed CRUD list at GET /settings/templates/full,
+// and the response for the typed add / rename / delete / restore
+// endpoints. Snake-case JSON to match the rest of the api conventions;
+// the web bundle reshapes to camelCase in api.http.ts.
+//
+// Slug is the storage / CLI identifier; Mode is kept as an alias of
+// Slug so a frontend that still keys by "mode" keeps working. Body /
+// AllowedStates are the persisted values; Default / DefaultStates are
+// the embedded built-in defaults for the slug (empty for user-created
+// templates). IsDefault / StatesAreDefault report whether the persisted
+// value still matches the built-in default — used by the UI's "reset"
+// affordances.
+type PromptTemplateFullDTO struct {
+	Slug             string   `json:"slug"`
+	Mode             string   `json:"mode"`
+	Label            string   `json:"label"`
+	Body             string   `json:"body"`
+	Default          string   `json:"default"`
+	IsBuiltin        bool     `json:"is_builtin"`
+	IsDefault        bool     `json:"is_default"`
+	AllowedStates    []string `json:"allowed_states"`
+	DefaultStates    []string `json:"default_states"`
+	StatesAreDefault bool     `json:"states_are_default"`
+}
+
+func sameStringSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// templateDTO maps a store.PromptTemplate to the wire DTO. Mirrors
+// desktop/settingsservice.go::dtoForTemplate so both backends emit the
+// same shape.
+func templateDTO(t *store.PromptTemplate) PromptTemplateFullDTO {
+	def := model.DefaultPromptBodyForBuiltinSlug(t.Slug)
+	defStates := stateStrings(model.DefaultPromptStatesForBuiltinSlug(t.Slug))
+	allowed := stateStrings(t.AllowedStates)
+	label := t.Name
+	if label == "" {
+		label = model.BuiltinTemplateLabel(t.Slug)
+		if label == "" {
+			label = t.Slug
+		}
+	}
+	return PromptTemplateFullDTO{
+		Slug:             t.Slug,
+		Mode:             t.Slug,
+		Label:            label,
+		Body:             t.Body,
+		Default:          def,
+		IsBuiltin:        t.IsBuiltin,
+		IsDefault:        t.IsBuiltin && t.Body == def,
+		AllowedStates:    allowed,
+		DefaultStates:    defStates,
+		StatesAreDefault: t.IsBuiltin && sameStringSlice(allowed, defStates),
+	}
 }
 
 // PromptTemplateStates is the per-mode response shape for PUT/DELETE on
@@ -47,6 +116,25 @@ func (d deps) handlePromptTemplatesList(w http.ResponseWriter, r *http.Request) 
 	out := make(map[string]string, len(all))
 	for m, body := range all {
 		out[string(m)] = body
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// handlePromptTemplatesFullList returns every template's full DTO —
+// slug, label, body, allowed_states, is_builtin, plus the embedded
+// defaults so the UI can render its reset affordances. BACI-50: the
+// web bundle calls this instead of /settings/templates so it doesn't
+// have to derive labels client-side.
+func (d deps) handlePromptTemplatesFullList(w http.ResponseWriter, r *http.Request) {
+	tmpls, err := d.store.ListPromptTemplates()
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	out := make([]PromptTemplateFullDTO, 0, len(tmpls))
+	for _, t := range tmpls {
+		out = append(out, templateDTO(t))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -353,3 +441,156 @@ func (d deps) handleBoardPreferencesSet(w http.ResponseWriter, r *http.Request) 
 	})
 	writeJSON(w, http.StatusOK, &BoardPreferencesOut{HideEmptyColumns: parsed.HideEmptyColumns})
 }
+
+// ---------- typed prompt-template CRUD (BACI-50) ----------
+//
+// These mirror the four `bacio settings template ...` verbs and the
+// matching client.Client methods. The store calls live behind the
+// localClient so the audit-row Op names stay consistent with the CLI
+// path: template.create / template.rename / template.delete /
+// template.restore_defaults. Delete lives at
+// /settings/templates/{slug}/row to keep the existing
+// DELETE /settings/templates/{mode} body-reset endpoint working —
+// that endpoint resets a built-in's body without removing the row.
+
+// parseSlugPath pulls {slug} from the URL and validates it as a
+// dispatch slug. Distinct from parseModePath because the typed CRUD
+// surface accepts user-created slugs (not just the built-in modes).
+func parseSlugPath(w http.ResponseWriter, r *http.Request) (string, bool) {
+	raw := strings.TrimSpace(r.PathValue("slug"))
+	slug, err := store.ValidatePromptTemplateSlug(raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(),
+			map[string]any{"field": "slug"})
+		return "", false
+	}
+	return slug, true
+}
+
+func (d deps) handlePromptTemplateAdd(w http.ResponseWriter, r *http.Request) {
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	parsed, _, err := inputio.DecodeStrict[inputs.SettingsTemplateAddInput](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	c := client.NewLocalFromStore(d.store, ActorFromContext(r.Context()))
+	defer c.Close()
+	t, err := c.AddPromptTemplate(r.Context(), *parsed, isDryRun(r))
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if isDryRun(r) {
+		writeDryRun(w, http.StatusCreated, templateDTO(t))
+		return
+	}
+	writeJSON(w, http.StatusCreated, templateDTO(t))
+}
+
+func (d deps) handlePromptTemplateRename(w http.ResponseWriter, r *http.Request) {
+	slug, ok := parseSlugPath(w, r)
+	if !ok {
+		return
+	}
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	parsed, _, err := inputio.DecodeStrict[inputs.SettingsTemplateRenameInput](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	in := *parsed
+	// URL slug is authoritative; the body's "slug" field is optional
+	// and must match if present (mirrors the body-set endpoint's
+	// behaviour).
+	if in.Slug != "" && in.Slug != slug {
+		writeError(w, http.StatusBadRequest, "invalid_input",
+			"slug in body must match URL", map[string]any{"field": "slug"})
+		return
+	}
+	in.Slug = slug
+	c := client.NewLocalFromStore(d.store, ActorFromContext(r.Context()))
+	defer c.Close()
+	t, err := c.RenamePromptTemplate(r.Context(), in, isDryRun(r))
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if isDryRun(r) {
+		writeDryRun(w, http.StatusOK, templateDTO(t))
+		return
+	}
+	writeJSON(w, http.StatusOK, templateDTO(t))
+}
+
+func (d deps) handlePromptTemplateDelete(w http.ResponseWriter, r *http.Request) {
+	slug, ok := parseSlugPath(w, r)
+	if !ok {
+		return
+	}
+	c := client.NewLocalFromStore(d.store, ActorFromContext(r.Context()))
+	defer c.Close()
+	t, err := c.DeletePromptTemplate(r.Context(),
+		inputs.SettingsTemplateRmInput{Slug: slug}, isDryRun(r))
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if isDryRun(r) {
+		writeDryRun(w, http.StatusOK, templateDTO(t))
+		return
+	}
+	writeJSON(w, http.StatusOK, templateDTO(t))
+}
+
+// promptTemplateRestoreResponse is the POST /settings/templates/restore-builtins
+// response. Restored lists the slugs that were freshly re-seeded
+// (empty array when every built-in was already present); Templates is
+// the full list after the call so the UI can replace its state in one
+// shot — mirrors desktop SettingsService.RestoreBuiltinPromptTemplates.
+type promptTemplateRestoreResponse struct {
+	Restored  []string                `json:"restored"`
+	Templates []PromptTemplateFullDTO `json:"templates"`
+}
+
+func (d deps) handlePromptTemplateRestore(w http.ResponseWriter, r *http.Request) {
+	c := client.NewLocalFromStore(d.store, ActorFromContext(r.Context()))
+	defer c.Close()
+	restored, err := c.RestoreBuiltinPromptTemplates(r.Context(), isDryRun(r))
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if restored == nil {
+		restored = []string{}
+	}
+	// List after the call so the response carries the post-state — the
+	// UI replaces its template list with this and renders.
+	tmpls, err := d.store.ListPromptTemplates()
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	out := make([]PromptTemplateFullDTO, 0, len(tmpls))
+	for _, t := range tmpls {
+		out = append(out, templateDTO(t))
+	}
+	resp := &promptTemplateRestoreResponse{Restored: restored, Templates: out}
+	if isDryRun(r) {
+		writeDryRun(w, http.StatusOK, resp)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+

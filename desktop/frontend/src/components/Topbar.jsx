@@ -1,22 +1,19 @@
 import React from 'react';
 import Icon from './Icon.jsx';
 import RepoPicker from './RepoPicker.jsx';
-import { WEB_MODE } from '../env';
 
 // NAV is the ordered top-nav. Exported so App can map the digit
-// hotkeys onto the same views in the same order. The Agents tab is
-// dropped from the web build — no HTTP route assembles AgentCard
-// (busy / waiting / dispatch joins are server-side derivations that
-// the desktop's BoardService does, not the bacio api). See
-// docs/web-app-mode.md for the v2 plan.
-const NAV_ALL = [
+// hotkeys onto the same views in the same order. As of BACI-50 the
+// Agents tab is also available in web mode — the bacio api ships the
+// composite GET /agents/cards endpoint that assembles the AgentCard
+// shape server-side.
+export const NAV = [
   { view: 'board', label: 'Issues' },
   { view: 'features', label: 'Features' },
   { view: 'docs', label: 'Documents' },
   { view: 'agents', label: 'Agents' },
   { view: 'history', label: 'History' },
 ];
-export const NAV = WEB_MODE ? NAV_ALL.filter(n => n.view !== 'agents') : NAV_ALL;
 
 export default function Topbar({ boards, activeBoard, onPickBoard, onAddRepository, activeView, onChangeView, onOpenPalette, onOpenSettings, leaderState }) {
   const syncEnabled = !!boards.find(b => b.prefix === activeBoard)?.syncEnabled;
@@ -48,7 +45,7 @@ export default function Topbar({ boards, activeBoard, onPickBoard, onAddReposito
 
       <div className="mk-topbar-right">
         {syncEnabled && <span className="mk-pill mk-sync-badge">Sync Enabled</span>}
-        {!WEB_MODE && isLeader && (
+        {isLeader && (
           <span className="mk-pill mk-leader-badge" title="This window holds the UI leader lease">Controlling</span>
         )}
         <RepoPicker
