@@ -1,7 +1,7 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, memo } from 'react';
 import Icon from './Icon.jsx';
 
-export default function KanbanCard({ card, promptConfig, isDragging, onDragStart, onDragEnd, onOpen, onDispatch, onCancelWaiting }) {
+function KanbanCard({ card, promptConfig, isDragging, onDragStart, onDragEnd, onOpen, onDispatch, onCancelWaiting }) {
   // The prompts valid to dispatch from this card's current state — the
   // state-gate config is global (App-owned), filtered per-card here.
   const validPrompts = (promptConfig || []).filter(
@@ -122,3 +122,10 @@ export default function KanbanCard({ card, promptConfig, isDragging, onDragStart
     </article>
   );
 }
+
+// Memo skips the re-render on the common case where one card mutates
+// (drag, dispatch): App's setCards updater returns the same object ref
+// for every unchanged card, callback props are useCallback'd, so shallow
+// compare passes for the others. (Doesn't help the poll path — that
+// rebuilds the array from the server response, fresh refs all round.)
+export default memo(KanbanCard);
