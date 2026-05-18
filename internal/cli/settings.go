@@ -21,7 +21,10 @@ import (
 // IsDefault reports whether Body still matches Default. AllowedStates
 // is the state-gate; DefaultStates is the built-in default for the
 // slug; StatesAreDefault reports whether the gate still matches the
-// default.
+// default. ActionLabel (BACI-67) is the persisted imperative override;
+// DefaultActionLabel is the built-in imperative seed for the slug (empty
+// for user-created templates); ActionLabelIsDefault reports whether the
+// override still matches the built-in default.
 type promptTemplateView struct {
 	Slug                    string   `json:"slug"`
 	Label                   string   `json:"label"`
@@ -35,6 +38,9 @@ type promptTemplateView struct {
 	ConcurrencyLimit        int      `json:"concurrency_limit"`
 	DefaultConcurrencyLimit int      `json:"default_concurrency_limit"`
 	ConcurrencyIsDefault    bool     `json:"concurrency_is_default"`
+	ActionLabel             string   `json:"action_label"`
+	DefaultActionLabel      string   `json:"default_action_label"`
+	ActionLabelIsDefault    bool     `json:"action_label_is_default"`
 }
 
 // promptTemplateSummary is the lean shape `settings template list`
@@ -48,6 +54,7 @@ type promptTemplateSummary struct {
 	IsDefault        bool     `json:"is_default"`
 	AllowedStates    []string `json:"allowed_states"`
 	ConcurrencyLimit int      `json:"concurrency_limit"`
+	ActionLabel      string   `json:"action_label"`
 }
 
 func newSettingsCmd() *cobra.Command {
@@ -93,6 +100,7 @@ built-in slug that's been deleted (idempotent).`,
 		settingsTemplateRestoreDefaultsCmd(),
 		settingsTemplateStatesCmd(),
 		settingsTemplateSetConcurrencyCmd(),
+		settingsTemplateSetActionLabelCmd(),
 	)
 	return cmd
 }
@@ -310,6 +318,7 @@ func templateViewForRow(t *store.PromptTemplate) *promptTemplateView {
 		}
 	}
 	defConc := model.DefaultConcurrencyLimit(t.Slug)
+	defAction := model.BuiltinTemplateActionLabel(t.Slug)
 	return &promptTemplateView{
 		Slug:                    t.Slug,
 		Label:                   label,
@@ -323,6 +332,9 @@ func templateViewForRow(t *store.PromptTemplate) *promptTemplateView {
 		ConcurrencyLimit:        t.ConcurrencyLimit,
 		DefaultConcurrencyLimit: defConc,
 		ConcurrencyIsDefault:    t.IsBuiltin && t.ConcurrencyLimit == defConc,
+		ActionLabel:             t.ActionLabel,
+		DefaultActionLabel:      defAction,
+		ActionLabelIsDefault:    t.IsBuiltin && t.ActionLabel == defAction,
 	}
 }
 
@@ -344,6 +356,7 @@ func templateSummaryForRow(t *store.PromptTemplate) *promptTemplateSummary {
 		IsDefault:        t.IsBuiltin && t.Body == def,
 		AllowedStates:    statesToStrings(t.AllowedStates),
 		ConcurrencyLimit: t.ConcurrencyLimit,
+		ActionLabel:      t.ActionLabel,
 	}
 }
 
@@ -565,6 +578,79 @@ func parsePositiveOrZeroInt(s string) (int, error) {
 	return n, nil
 }
 
+// settingsTemplateSetActionLabelCmd is the BACI-67 imperative-label
+// setter — focused verb that doesn't round-trip the body or state-gate
+// through the heavier `set` payload. An empty value clears the
+// override; the UI then derives from the template's Name.
+func settingsTemplateSetActionLabelCmd() *cobra.Command {
+	var rawInput string
+	cmd := &cobra.Command{
+		Use:   "set-action-label [SLUG] [LABEL]",
+		Short: "Set a template's action_label — the imperative override on dispatch action menus (BACI-67); empty = derive from name",
+		Long: `Update the action_label on a dispatch prompt template. The dispatch
+action menus on the kanban card and the issue workspace shelf render
+the action_label as the button text, so callers see "Plan" /
+"Design" / "Implement" instead of the gerund form ("Planning",
+"Designing", …) the activity pill on a taken card uses.
+
+An empty LABEL clears the override — the UI then derives a default
+from the template's Name via the gerund→imperative rule. To clear
+via --json, pass an explicit empty string ("").`,
+		Args: cobra.RangeArgs(0, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			raw, err := parseJSONInput(cmd, args, rawInput)
+			if err != nil {
+				return err
+			}
+			var in inputs.SettingsTemplateSetActionLabelInput
+			if raw != nil {
+				parsed, _, err := inputio.DecodeStrict[inputs.SettingsTemplateSetActionLabelInput](raw)
+				if err != nil {
+					return err
+				}
+				in = *parsed
+			} else {
+				if len(args) < 1 || len(args) > 2 {
+					return fmt.Errorf("requires <SLUG> [LABEL] positionals or --json (empty LABEL clears the override)")
+				}
+				in = inputs.SettingsTemplateSetActionLabelInput{Slug: args[0]}
+				if len(args) == 2 {
+					in.ActionLabel = args[1]
+				}
+			}
+			return applyTemplateActionLabel(in)
+		},
+	}
+	addInputFlag(cmd, &rawInput)
+	return cmd
+}
+
+// applyTemplateActionLabel is the shared write path for the
+// set-action-label verb. Honours --dry-run.
+func applyTemplateActionLabel(in inputs.SettingsTemplateSetActionLabelInput) error {
+	if err := requireLocalForSettings("template set-action-label"); err != nil {
+		return err
+	}
+	slug, err := templateSlugArg(in.Slug)
+	if err != nil {
+		return err
+	}
+	in.Slug = slug
+	c, err := openClient()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	t, err := c.SetPromptTemplateActionLabel(context.Background(), in, opts.dryRun)
+	if err != nil {
+		return wrapTemplateLookup(slug, err)
+	}
+	if opts.dryRun {
+		return emitDryRun(templateViewForRow(t))
+	}
+	return emit(templateViewForRow(t))
+}
+
 // applyTemplateConcurrency is the shared write path for the
 // set-concurrency verb. Honours --dry-run.
 func applyTemplateConcurrency(in inputs.SettingsTemplateSetConcurrencyInput) error {
@@ -647,19 +733,26 @@ func applyTemplateBody(slugArg, body string) error {
 }
 
 func settingsTemplateAddCmd() *cobra.Command {
-	var rawInput string
+	var (
+		rawInput    string
+		actionLabel string
+	)
 	cmd := &cobra.Command{
 		Use:   "add [SLUG] [NAME]",
 		Short: "Create a new dispatch prompt template",
 		Long: `Create a new dispatch prompt template. The richest path is --json,
-which supports body and a state-gate as well as slug + name; the
-positional form is a quick "scaffold with empty body, no state-gate"
-shortcut you can then edit via the desktop / TUI / `+"`set`/`states`"+`.
+which supports body, state-gate, action_label and concurrency_limit as
+well as slug + name; the positional form is a quick "scaffold with
+empty body, no state-gate" shortcut you can then edit via the desktop
+/ TUI / `+"`set`/`states`"+`. ` + "`--action-label`" + ` is the imperative
+override (BACI-67) rendered on the dispatch action menus; when empty,
+the UI derives one from NAME via the gerund→imperative rule.
 
 Examples:
 
-  bacio settings template add --json '{"slug":"spike","name":"Spike","body":"Spike on {{issue_id}}.","states":["todo"]}'
-  bacio settings template add spike Spike     # body empty, no state-gate`,
+  bacio settings template add --json '{"slug":"spike","name":"Spike","body":"Spike on {{issue_id}}.","states":["todo"],"action_label":"Spike"}'
+  bacio settings template add spike Spike --action-label "Investigate"
+  bacio settings template add spike Spike     # body empty, derives label from name`,
 		Args: cobra.RangeArgs(0, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := requireLocalForSettings("template add"); err != nil {
@@ -671,6 +764,9 @@ Examples:
 			}
 			var in inputs.SettingsTemplateAddInput
 			if raw != nil {
+				if actionLabel != "" {
+					return fmt.Errorf("--action-label and --json are mutually exclusive (set action_label inside the JSON payload)")
+				}
 				parsed, _, err := inputio.DecodeStrict[inputs.SettingsTemplateAddInput](raw)
 				if err != nil {
 					return err
@@ -680,7 +776,7 @@ Examples:
 				if len(args) != 2 {
 					return fmt.Errorf("requires <SLUG> <NAME> positionals or --json")
 				}
-				in = inputs.SettingsTemplateAddInput{Slug: args[0], Name: args[1]}
+				in = inputs.SettingsTemplateAddInput{Slug: args[0], Name: args[1], ActionLabel: actionLabel}
 			}
 			c, err := openClient()
 			if err != nil {
@@ -698,6 +794,7 @@ Examples:
 		},
 	}
 	addInputFlag(cmd, &rawInput)
+	cmd.Flags().StringVar(&actionLabel, "action-label", "", "imperative override rendered on the dispatch action menus (BACI-67); empty = derive from NAME")
 	return cmd
 }
 

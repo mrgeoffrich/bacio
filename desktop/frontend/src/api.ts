@@ -301,15 +301,19 @@ export async function listPromptTemplates(): Promise<PromptTemplateDTO[]> {
   }
 }
 
-// addPromptTemplate creates a new dispatch prompt template.
+// addPromptTemplate creates a new dispatch prompt template. The trailing
+// actionLabel (BACI-67) is the imperative override rendered on the
+// dispatch action menus; pass "" to skip it and have the UI derive
+// from the display name via the gerund→imperative rule.
 export async function addPromptTemplate(
   slug: string,
   name: string,
   body: string,
   states: string[],
+  actionLabel: string = '',
 ): Promise<PromptTemplateDTO> {
   try {
-    return await SettingsService.AddPromptTemplate(slug, name, body, states);
+    return await SettingsService.AddPromptTemplate(slug, name, body, states, actionLabel);
   } catch (err) {
     throw normalize(err);
   }
@@ -408,6 +412,21 @@ export async function savePromptConcurrency(
 ): Promise<PromptTemplateDTO> {
   try {
     return await SettingsService.SavePromptConcurrency(mode, concurrencyLimit);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// savePromptActionLabel (BACI-67) sets or clears a template's
+// imperative override — the verb the dispatch action menus render.
+// An empty actionLabel clears the override; the UI then derives one
+// from the gerund display name. Returns the refreshed template DTO.
+export async function savePromptActionLabel(
+  mode: string,
+  actionLabel: string,
+): Promise<PromptTemplateDTO> {
+  try {
+    return await SettingsService.SavePromptActionLabel(mode, actionLabel);
   } catch (err) {
     throw normalize(err);
   }

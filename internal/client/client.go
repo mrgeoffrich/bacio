@@ -391,6 +391,14 @@ type Client interface {
 	// writing. Local-only at the CLI level (the REST surface is the
 	// PUT /settings/templates/{mode}/concurrency endpoint).
 	SetPromptTemplateConcurrencyLimit(ctx context.Context, in inputs.SettingsTemplateSetConcurrencyInput, dryRun bool) (*store.PromptTemplate, error)
+	// SetPromptTemplateActionLabel (BACI-67) updates a template's
+	// imperative action_label override — the verb rendered on the
+	// dispatch action menus instead of the gerund Name. An empty
+	// ActionLabel clears the override (the UI then derives from Name
+	// via the gerund→imperative rule). With dryRun set it validates
+	// without writing. Local-only at the CLI level; matching REST is
+	// PUT /settings/templates/{mode}/action-label.
+	SetPromptTemplateActionLabel(ctx context.Context, in inputs.SettingsTemplateSetActionLabelInput, dryRun bool) (*store.PromptTemplate, error)
 
 	// GetPromptTemplates is a legacy lookup shape for the dispatch
 	// renderer paths that still expect a slug→body map. Equivalent to

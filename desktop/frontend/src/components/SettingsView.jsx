@@ -17,7 +17,9 @@ const HIDE_EMPTY_OPTIONS = [
 ];
 
 // EMPTY_NEW_TEMPLATE is the seed state for the "Add template" inline form.
-const EMPTY_NEW_TEMPLATE = { slug: '', name: '', body: '', states: ['todo'] };
+// actionLabel (BACI-67) is optional — an empty string is the "no override,
+// derive from the gerund name" sentinel the backend honours.
+const EMPTY_NEW_TEMPLATE = { slug: '', name: '', body: '', states: ['todo'], actionLabel: '' };
 
 // SettingsView is the desktop Settings screen — a full-screen view (not
 // a modal) covering the content area below the topbar. It owns theme
@@ -140,6 +142,24 @@ export default function SettingsView({
     }
   }, [notifyTemplatesChanged]);
 
+  // BACI-67: persist the imperative action_label override — the verb the
+  // dispatch action menus render on the kanban-card + issue-workspace
+  // dropdowns. An empty string clears the override; the UI then derives
+  // a default from the gerund display name (the validator on the Go side
+  // accepts the empty value as the "no override" sentinel).
+  const saveActionLabel = useCallback(async (slug, actionLabel) => {
+    setSavingSlug(slug);
+    try {
+      const updated = await api.savePromptActionLabel(slug, actionLabel);
+      setTemplates(prev => prev.map(t => (t.slug === slug ? updated : t)));
+      notifyTemplatesChanged();
+    } catch (err) {
+      reportError(err, { headline: "Couldn't save action label" });
+    } finally {
+      setSavingSlug(null);
+    }
+  }, [notifyTemplatesChanged]);
+
   const toggleState = useCallback((t, state) => {
     const on = new Set(t.allowedStates || []);
     if (on.has(state)) on.delete(state);
@@ -152,7 +172,7 @@ export default function SettingsView({
     if (!adding) return;
     setSavingSlug(adding.slug || '__new__');
     try {
-      await api.addPromptTemplate(adding.slug, adding.name, adding.body, adding.states);
+      await api.addPromptTemplate(adding.slug, adding.name, adding.body, adding.states, adding.actionLabel || '');
       setAdding(null);
       await refreshTemplates();
       notifyTemplatesChanged();
@@ -316,15 +336,30 @@ export default function SettingsView({
                   />
                 </label>
                 <label className="mk-tmpl-add-field">
-                  <span>Name</span>
+                  <span>Name (gerund — used by the activity pill)</span>
                   <input
                     className="mk-tmpl-input"
                     value={adding.name}
-                    placeholder="e.g. Spike"
+                    placeholder="e.g. Spiking"
                     onChange={e => setAdding({ ...adding, name: e.target.value })}
                   />
                 </label>
               </div>
+              {/*
+                BACI-67: action_label is the imperative override used by
+                the dispatch dropdown buttons (kanban card + issue
+                workspace shelf). When empty, the UI derives one from
+                Name via the gerund→imperative rule. Optional.
+              */}
+              <label className="mk-tmpl-add-field">
+                <span>Action label (optional · button text on dispatch dropdowns; empty derives from name)</span>
+                <input
+                  className="mk-tmpl-input"
+                  value={adding.actionLabel}
+                  placeholder="e.g. Spike"
+                  onChange={e => setAdding({ ...adding, actionLabel: e.target.value })}
+                />
+              </label>
               <textarea
                 className="mk-tmpl-input"
                 value={adding.body}
@@ -422,6 +457,44 @@ export default function SettingsView({
                   onChange={e => setDrafts(prev => ({ ...prev, [t.slug]: e.target.value }))}
                   onBlur={() => { if (dirty) saveTemplate(t.slug, draft); }}
                 />
+                {/*
+                  BACI-67: per-template action_label override. The
+                  imperative form goes here; the gerund stays in
+                  Name (visible above) and feeds the activity-pill
+                  derivation on taken cards. Empty value clears the
+                  override and the UI derives from Name.
+                */}
+                <div className="mk-tmpl-states">
+                  <div className="mk-tmpl-states-head">
+                    <span className="mk-tmpl-states-label">
+                      Action label
+                      <span className="mk-tmpl-states-hint"> · imperative; rendered on dispatch dropdowns. Empty = derive from name.</span>
+                    </span>
+                    {t.isBuiltin && (
+                      <Tooltip label={t.defaultActionLabel ? `Reset to the built-in default ("${t.defaultActionLabel}")` : 'Clear the override'}>
+                        <button
+                          className="mk-tmpl-reset"
+                          disabled={busy || t.actionLabelIsDefault}
+                          onClick={() => saveActionLabel(t.slug, t.defaultActionLabel)}
+                        >
+                          Reset action label
+                        </button>
+                      </Tooltip>
+                    )}
+                  </div>
+                  <input
+                    type="text"
+                    className="mk-tmpl-input"
+                    defaultValue={t.actionLabel}
+                    key={`${t.slug}:action:${t.actionLabel}`}
+                    placeholder="e.g. Plan, Design, Implement (empty derives from name)"
+                    disabled={busy}
+                    onBlur={(e) => {
+                      const v = e.target.value;
+                      if (v !== t.actionLabel) saveActionLabel(t.slug, v);
+                    }}
+                  />
+                </div>
                 <div className="mk-tmpl-states">
                   <div className="mk-tmpl-states-head">
                     <span className="mk-tmpl-states-label">Valid from</span>

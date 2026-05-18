@@ -341,7 +341,14 @@ export default function IssueWorkspace({
                         className="mk-card-action-item"
                         onSelect={() => onDispatch(p.mode || p.slug)}
                       >
-                        {p.label}
+                        {/*
+                          BACI-67: prefer the imperative actionLabel
+                          override so the dispatch dropdown reads as
+                          a call to action ("Plan", "Design") instead
+                          of a status description ("Planning"). label
+                          remains the fallback for older payloads.
+                        */}
+                        {p.actionLabel || p.label}
                       </DropdownMenu.Item>
                     ))}
                   </DropdownMenu.Content>

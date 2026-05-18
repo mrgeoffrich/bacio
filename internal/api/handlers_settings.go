@@ -57,6 +57,15 @@ type PromptTemplateFullDTO struct {
 	ConcurrencyLimit        int      `json:"concurrency_limit"`
 	DefaultConcurrencyLimit int      `json:"default_concurrency_limit"`
 	ConcurrencyIsDefault    bool     `json:"concurrency_is_default"`
+	// BACI-67: imperative override rendered on the dispatch action
+	// menus. ActionLabel is the persisted value (empty = derive from
+	// Name); DefaultActionLabel is the built-in imperative seed for
+	// the slug (empty for user-created templates); ActionLabelIsDefault
+	// reports whether the persisted override still matches the
+	// built-in default — drives the Settings panel's "reset" affordance.
+	ActionLabel          string `json:"action_label"`
+	DefaultActionLabel   string `json:"default_action_label"`
+	ActionLabelIsDefault bool   `json:"action_label_is_default"`
 }
 
 func sameStringSlice(a, b []string) bool {
@@ -86,6 +95,7 @@ func templateDTO(t *store.PromptTemplate) PromptTemplateFullDTO {
 		}
 	}
 	defConc := model.DefaultConcurrencyLimit(t.Slug)
+	defAction := model.BuiltinTemplateActionLabel(t.Slug)
 	return PromptTemplateFullDTO{
 		Slug:                    t.Slug,
 		Mode:                    t.Slug,
@@ -100,6 +110,9 @@ func templateDTO(t *store.PromptTemplate) PromptTemplateFullDTO {
 		ConcurrencyLimit:        t.ConcurrencyLimit,
 		DefaultConcurrencyLimit: defConc,
 		ConcurrencyIsDefault:    t.IsBuiltin && t.ConcurrencyLimit == defConc,
+		ActionLabel:             t.ActionLabel,
+		DefaultActionLabel:      defAction,
+		ActionLabelIsDefault:    t.IsBuiltin && t.ActionLabel == defAction,
 	}
 }
 
@@ -614,6 +627,101 @@ type PromptTemplateConcurrency struct {
 
 type promptTemplateConcurrencyIn struct {
 	ConcurrencyLimit int `json:"concurrency_limit"`
+}
+
+// ---------- set action_label (BACI-67) ----------
+
+// PromptTemplateActionLabel is the per-mode response shape for
+// PUT/DELETE /settings/templates/{mode}/action-label — the post-call
+// resolved imperative override (the stored value, or "" when no
+// override is set; the UI derives from Name in that case).
+type PromptTemplateActionLabel struct {
+	Mode        string `json:"mode"`
+	ActionLabel string `json:"action_label"`
+}
+
+type promptTemplateActionLabelIn struct {
+	ActionLabel string `json:"action_label"`
+}
+
+func (d deps) handlePromptTemplateActionLabelSet(w http.ResponseWriter, r *http.Request) {
+	mode, ok := parseModePath(w, r)
+	if !ok {
+		return
+	}
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	parsed, _, err := inputio.DecodeStrict[promptTemplateActionLabelIn](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	cleaned, err := store.ValidatePromptTemplateActionLabel(parsed.ActionLabel)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(),
+			map[string]any{"field": "action_label"})
+		return
+	}
+	if isDryRun(r) {
+		writeDryRun(w, http.StatusOK, &PromptTemplateActionLabel{
+			Mode: string(mode), ActionLabel: cleaned,
+		})
+		return
+	}
+	updated, err := d.store.SetPromptTemplateActionLabel(string(mode), cleaned)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	recordOp(d.store, d.logger, model.HistoryEntry{
+		Actor:       ActorFromContext(r.Context()),
+		Op:          "template.set_action_label",
+		Kind:        "app_setting",
+		TargetID:    &updated.ID,
+		TargetLabel: "prompt_template:" + updated.Slug,
+		Details:     fmt.Sprintf("slug=%s, action_label=%q", updated.Slug, updated.ActionLabel),
+	})
+	writeJSON(w, http.StatusOK, &PromptTemplateActionLabel{
+		Mode: string(mode), ActionLabel: updated.ActionLabel,
+	})
+}
+
+// handlePromptTemplateActionLabelDelete clears the override — the
+// DELETE-as-reset shape that mirrors how the body endpoint reverts to
+// the built-in default. The store sets action_label = '' on success;
+// the UI's derivation rule (DeriveActionLabel) then produces a default
+// from Name. Returns the post-state (empty action_label).
+func (d deps) handlePromptTemplateActionLabelDelete(w http.ResponseWriter, r *http.Request) {
+	mode, ok := parseModePath(w, r)
+	if !ok {
+		return
+	}
+	if isDryRun(r) {
+		writeDryRun(w, http.StatusOK, &PromptTemplateActionLabel{
+			Mode: string(mode), ActionLabel: "",
+		})
+		return
+	}
+	updated, err := d.store.SetPromptTemplateActionLabel(string(mode), "")
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	recordOp(d.store, d.logger, model.HistoryEntry{
+		Actor:       ActorFromContext(r.Context()),
+		Op:          "template.set_action_label",
+		Kind:        "app_setting",
+		TargetID:    &updated.ID,
+		TargetLabel: "prompt_template:" + updated.Slug,
+		Details:     "slug=" + updated.Slug + ", action_label=\"\"",
+	})
+	writeJSON(w, http.StatusOK, &PromptTemplateActionLabel{
+		Mode: string(mode), ActionLabel: updated.ActionLabel,
+	})
 }
 
 func (d deps) handlePromptTemplateConcurrencySet(w http.ResponseWriter, r *http.Request) {

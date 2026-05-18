@@ -156,6 +156,96 @@ func TestPromptTemplatesAddRenameDelete(t *testing.T) {
 	}
 }
 
+// TestPromptTemplatesActionLabelRoundtrip exercises BACI-67: the
+// action_label column round-trips through Add, Update, and the
+// focused SetPromptTemplateActionLabel mutator, and the built-in
+// seed step stamps an imperative override on every dispatchable
+// built-in.
+func TestPromptTemplatesActionLabelRoundtrip(t *testing.T) {
+	s := newTestStore(t)
+
+	// Built-in seed step: every dispatchable built-in has an imperative
+	// action_label; the reserved preamble row has none (it never
+	// reaches a dropdown).
+	for _, slug := range model.BuiltinTemplateSlugs() {
+		tmpl, err := s.GetPromptTemplateBySlug(slug)
+		if err != nil {
+			t.Fatalf("get %s: %v", slug, err)
+		}
+		want := model.BuiltinTemplateActionLabel(slug)
+		if tmpl.ActionLabel != want {
+			t.Errorf("%s: action_label = %q, want %q", slug, tmpl.ActionLabel, want)
+		}
+	}
+
+	// Add with an explicit action_label.
+	added, err := s.AddPromptTemplate(AddPromptTemplateIn{
+		Slug:          "spike",
+		Name:          "Spike",
+		Body:          "Spike on {{issue_id}}.",
+		AllowedStates: []model.State{model.StateTodo},
+		ActionLabel:   "Spike",
+	})
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	if added.ActionLabel != "Spike" {
+		t.Errorf("after add: action_label = %q, want %q", added.ActionLabel, "Spike")
+	}
+
+	// Focused mutator: clear the override (UI then derives from Name).
+	cleared, err := s.SetPromptTemplateActionLabel("spike", "")
+	if err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if cleared.ActionLabel != "" {
+		t.Errorf("after clear: action_label = %q, want \"\"", cleared.ActionLabel)
+	}
+
+	// Focused mutator: set a new override.
+	set, err := s.SetPromptTemplateActionLabel("spike", "Investigate")
+	if err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	if set.ActionLabel != "Investigate" {
+		t.Errorf("after set: action_label = %q, want %q", set.ActionLabel, "Investigate")
+	}
+
+	// UpdatePromptTemplate honours the *string sentinel: nil = leave
+	// alone, non-nil empty = clear.
+	newLabel := "Spike review"
+	updated, err := s.UpdatePromptTemplate("spike", UpdatePromptTemplatePatch{
+		ActionLabel: &newLabel,
+	})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if updated.ActionLabel != "Spike review" {
+		t.Errorf("after update: action_label = %q, want %q", updated.ActionLabel, "Spike review")
+	}
+	// A nil patch leaves the field alone.
+	bodyOnly := "Spike on {{issue_id}} (updated)."
+	again, err := s.UpdatePromptTemplate("spike", UpdatePromptTemplatePatch{
+		Body: &bodyOnly,
+	})
+	if err != nil {
+		t.Fatalf("update body-only: %v", err)
+	}
+	if again.ActionLabel != "Spike review" {
+		t.Errorf("after body-only update: action_label = %q, want preserved %q", again.ActionLabel, "Spike review")
+	}
+
+	// Validator: control characters are rejected.
+	if _, err := s.SetPromptTemplateActionLabel("spike", "bad\x01label"); err == nil {
+		t.Errorf("expected control-char rejection, got nil")
+	}
+
+	// Validator: missing slug surfaces as ErrNotFound.
+	if _, err := s.SetPromptTemplateActionLabel("nope-no-such-slug", "x"); err != ErrNotFound {
+		t.Errorf("expected ErrNotFound on missing slug, got %v", err)
+	}
+}
+
 // TestPromptTemplatesMigrationFromAppSettings checks the one-shot fold:
 // app_settings prompt_template.<slug> / prompt_states.<slug> rows from
 // a pre-BACI-31 DB land in the new table.

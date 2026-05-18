@@ -124,7 +124,16 @@ function KanbanCard({ card, promptConfig, isDragging, onDragStart, onDragEnd, on
                       onSelect={() => onDispatch(card.key, p.mode)}
                       onClick={(e) => e.stopPropagation()}
                     >
-                      {p.label}
+                      {/*
+                        BACI-67: render the imperative actionLabel
+                        ("Plan", "Design") so the dispatch button
+                        reads as a call to action. label (gerund —
+                        "Planning") is the fallback for templates
+                        that haven't set the override and aren't
+                        built-in (no derivation yet client-side; the
+                        store seed handles built-ins).
+                      */}
+                      {p.actionLabel || p.label}
                     </DropdownMenu.Item>
                   ))}
                 </DropdownMenu.Content>

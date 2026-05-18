@@ -48,13 +48,17 @@ type SettingsTemplateStatesResetInput struct {
 // the prompt text; States is the set of issue states the template is
 // valid to run from. ConcurrencyLimit (BACI-51) caps the in-flight
 // (pending+delivered) dispatches per (repo, slug) the background
-// matcher will allow; 0 = unlimited.
+// matcher will allow; 0 = unlimited. ActionLabel (BACI-67) is the
+// imperative override rendered on the dispatch action menus
+// (kanban-card + issue-workspace dropdowns). When empty, the UI
+// derives the label from Name via the gerund→imperative rule.
 type SettingsTemplateAddInput struct {
 	Slug             string   `json:"slug"`
 	Name             string   `json:"name"`
 	Body             string   `json:"body"`
 	States           []string `json:"states"`
 	ConcurrencyLimit int      `json:"concurrency_limit,omitempty"`
+	ActionLabel      string   `json:"action_label,omitempty"`
 }
 
 // SettingsTemplateSetConcurrencyInput is the payload for
@@ -64,6 +68,18 @@ type SettingsTemplateAddInput struct {
 type SettingsTemplateSetConcurrencyInput struct {
 	Slug             string `json:"slug"`
 	ConcurrencyLimit int    `json:"concurrency_limit"`
+}
+
+// SettingsTemplateSetActionLabelInput is the payload for
+// `bacio settings template set-action-label --json` (BACI-67). Slug
+// names the template; ActionLabel is the new imperative override
+// rendered on the dispatch action menus. An empty ActionLabel clears
+// the override — the UI then derives the label from Name via the
+// gerund→imperative rule. Single-line, controls rejected; up to 80
+// chars.
+type SettingsTemplateSetActionLabelInput struct {
+	Slug        string `json:"slug"`
+	ActionLabel string `json:"action_label"`
 }
 
 // SettingsTemplateRenameInput is the payload for

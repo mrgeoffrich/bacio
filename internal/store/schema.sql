@@ -215,6 +215,16 @@ CREATE TABLE IF NOT EXISTS prompt_templates (
     -- the matcher will allow. 0 = unlimited; the seed step sets `ship` to
     -- 1 by default so the BACI-51 ship-it pipeline serialises merges.
     concurrency_limit   INTEGER NOT NULL DEFAULT 0,
+    -- action_label (BACI-67) is the imperative form of the template's
+    -- display name, used by the dispatch action menus on the kanban
+    -- card and the issue workspace shelf so the buttons read as a
+    -- call to action ("Plan", "Design", …) instead of a status
+    -- description ("Planning", "Designing", …). The activity pill on
+    -- a taken card still reads the gerund (lowercased Name). An
+    -- empty value means "derive from Name" — DeriveActionLabel runs
+    -- on the stored Name as a UI-side fallback. The seed step writes
+    -- the imperative form for every built-in slug.
+    action_label        TEXT    NOT NULL DEFAULT '',
     created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

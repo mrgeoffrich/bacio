@@ -126,6 +126,86 @@ func TestRenderPromptTemplate(t *testing.T) {
 	}
 }
 
+// TestBuiltinTemplateActionLabel covers the BACI-67 imperative-label
+// map. Every built-in slug (except the reserved _dispatch_preamble row
+// which never reaches a dropdown) should have an explicit imperative
+// override; non-built-in slugs fall back to the derivation rule.
+func TestBuiltinTemplateActionLabel(t *testing.T) {
+	cases := map[string]string{
+		BuiltinTemplatePlan:      "Plan",
+		BuiltinTemplateDesign:    "Design",
+		BuiltinTemplateImplement: "Implement",
+		BuiltinTemplateReview:    "Review",
+		BuiltinTemplateShip:      "Ship",
+		BuiltinTemplateFixReview: "Fix review",
+	}
+	for slug, want := range cases {
+		if got := BuiltinTemplateActionLabel(slug); got != want {
+			t.Errorf("BuiltinTemplateActionLabel(%q) = %q, want %q", slug, got, want)
+		}
+	}
+	// The reserved preamble row has no state-gate and never reaches the
+	// dropdown — by design it has no entry in the action_label map.
+	if got := BuiltinTemplateActionLabel(BuiltinTemplatePreamble); got != "" {
+		t.Errorf("BuiltinTemplateActionLabel(preamble) = %q, want \"\"", got)
+	}
+	// Non-built-in slug — empty, derivation runs on the stored Name.
+	if got := BuiltinTemplateActionLabel("spike"); got != "" {
+		t.Errorf("BuiltinTemplateActionLabel(\"spike\") = %q, want \"\"", got)
+	}
+}
+
+// TestDeriveActionLabel covers the gerund → imperative fallback the UI
+// surfaces use when no action_label override is stored on a template.
+// Anchored on the built-in gerunds plus edge cases the rule must
+// behave reasonably for.
+func TestDeriveActionLabel(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		// Built-in gerunds — the seed step overrides these explicitly,
+		// but the derivation rule must produce the same answer for
+		// user-created templates that mirror the convention.
+		{"Planning", "Planning", "Plan"},
+		{"Designing", "Designing", "Design"},
+		{"Implementing", "Implementing", "Implement"},
+		{"Reviewing", "Reviewing", "Review"},
+		{"Shipping", "Shipping", "Ship"},
+		// Capitalisation preserved on the kept prefix.
+		{"shipping (lowercase)", "shipping", "ship"},
+		// Already-imperative — passes through.
+		{"already imperative", "Plan", "Plan"},
+		{"single word non-gerund", "Spike", "Spike"},
+		// "ying" edge case: consonant+y verbs like "Spy" → "Spying".
+		{"spying → Spy", "Spying", "Spy"},
+		// Short names that happen to end in "ing" but aren't really
+		// gerunds: don't mangle them.
+		{"king (too short, ambiguous)", "King", "King"},
+		{"sing (4-char, too short to safely strip)", "Sing", "Sing"},
+		{"ring (4-char, too short to safely strip)", "Ring", "Ring"},
+		// Whitespace is trimmed.
+		{"whitespace", "  Planning  ", "Plan"},
+		{"empty", "", ""},
+		{"only whitespace", "   ", ""},
+		// Non-English / unusual passes through unchanged.
+		{"non-English", "Mañana", "Mañana"},
+		// Multi-word names: derivation runs on the full string, so a
+		// trailing gerund still trims. Users can override via
+		// action_label for any awkward case.
+		{"multi-word doubled-consonant gerund", "Sprint planning", "Sprint plan"},
+		{"multi-word plain gerund", "Code reviewing", "Code review"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := DeriveActionLabel(c.in); got != c.want {
+				t.Errorf("DeriveActionLabel(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
 func TestDefaultPromptBodyForBuiltinSlug(t *testing.T) {
 	for _, slug := range BuiltinTemplateSlugs() {
 		if DefaultPromptBodyForBuiltinSlug(slug) == "" {

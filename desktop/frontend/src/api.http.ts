@@ -324,6 +324,14 @@ export interface PromptTemplateDTO {
   concurrencyLimit: number;
   defaultConcurrencyLimit: number;
   concurrencyIsDefault: boolean;
+  // BACI-67: imperative override rendered on the dispatch action
+  // menus (kanban-card + issue-workspace dropdowns). When empty, the
+  // UI derives one from `label` (the gerund display name); the seed
+  // step stamps every built-in with an explicit imperative so the
+  // derivation rule is only a fallback for user-created templates.
+  actionLabel: string;
+  defaultActionLabel: string;
+  actionLabelIsDefault: boolean;
 }
 
 export interface BoardPreferencesDTO {
@@ -1077,6 +1085,10 @@ interface ApiPromptTemplate {
   concurrency_limit?: number;
   default_concurrency_limit?: number;
   concurrency_is_default?: boolean;
+  // BACI-67: imperative override for the dispatch action menus.
+  action_label?: string;
+  default_action_label?: string;
+  action_label_is_default?: boolean;
 }
 
 function reshapeTemplate(t: ApiPromptTemplate): PromptTemplateDTO {
@@ -1094,6 +1106,9 @@ function reshapeTemplate(t: ApiPromptTemplate): PromptTemplateDTO {
     concurrencyLimit: t.concurrency_limit ?? 0,
     defaultConcurrencyLimit: t.default_concurrency_limit ?? 0,
     concurrencyIsDefault: t.concurrency_is_default ?? true,
+    actionLabel: t.action_label ?? '',
+    defaultActionLabel: t.default_action_label ?? '',
+    actionLabelIsDefault: t.action_label_is_default ?? true,
   };
 }
 
@@ -1163,15 +1178,38 @@ export async function savePromptConcurrency(
   return refreshOneTemplate(mode);
 }
 
+// savePromptActionLabel (BACI-67) sets or clears the imperative
+// override rendered on the dispatch action menus. An empty actionLabel
+// DELETEs the override, mirroring the body endpoint's reset shape; the
+// UI then derives a default from the gerund display name. A non-empty
+// value PUTs the override.
+export async function savePromptActionLabel(
+  mode: string,
+  actionLabel: string,
+): Promise<PromptTemplateDTO> {
+  if (actionLabel === '') {
+    await call<unknown>(`/settings/templates/${mode}/action-label`, { method: 'DELETE' });
+  } else {
+    await call<unknown>(`/settings/templates/${mode}/action-label`, {
+      method: 'PUT',
+      body: { action_label: actionLabel },
+    });
+  }
+  return refreshOneTemplate(mode);
+}
+
 export async function addPromptTemplate(
   slug: string,
   name: string,
   body: string,
   states: string[],
+  actionLabel: string = '',
 ): Promise<PromptTemplateDTO> {
+  // BACI-67: forward actionLabel verbatim — an empty string is the
+  // "no override, derive from name" sentinel that the Go side honours.
   const raw = await call<ApiPromptTemplate>('/settings/templates', {
     method: 'POST',
-    body: { slug, name, body, states },
+    body: { slug, name, body, states, action_label: actionLabel },
   });
   return reshapeTemplate(raw);
 }

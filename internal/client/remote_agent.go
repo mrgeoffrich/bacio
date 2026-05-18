@@ -362,6 +362,14 @@ func (c *remoteClient) SetPromptTemplateConcurrencyLimit(ctx context.Context, in
 	return nil, remoteAgentNotSupported("prompt-templates")
 }
 
+func (c *remoteClient) SetPromptTemplateActionLabel(ctx context.Context, in inputs.SettingsTemplateSetActionLabelInput, dryRun bool) (*store.PromptTemplate, error) {
+	// The REST surface is at PUT /settings/templates/{mode}/action-label
+	// (BACI-67), but the CLI-side typed CRUD verbs route through the
+	// local store today — keep the remote stub returning the standard
+	// not-supported error until HTTP parity for the typed verbs lands.
+	return nil, remoteAgentNotSupported("prompt-templates")
+}
+
 func (c *remoteClient) GetPromptTemplates(ctx context.Context) (map[string]string, error) {
 	var out map[string]string
 	if err := c.do(ctx, http.MethodGet, "/settings/templates", nil, nil, &out); err != nil {
