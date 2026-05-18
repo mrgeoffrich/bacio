@@ -264,59 +264,6 @@ func TestChannelRegisterRejectsPlaceholder(t *testing.T) {
 	}
 }
 
-// TestInstructionsBlockContainsContract guards the BACI-52 worker
-// contract that ships in the MCP `instructions` block. The block is
-// injected into every channel-equipped session's system prompt, so
-// dropping a load-bearing phrase silently re-introduces the
-// "dispatches grow the parent context monotonically" regression.
-// Keep the phrase list aligned with the contract in
-// docs/agent-dispatch.md ("Subagent delegation") and SKILL.md
-// ("Handling dispatches"); if either drifts, the next reader will
-// hit a stale spec.
-func TestInstructionsBlockContainsContract(t *testing.T) {
-	srv := New(&fakeSource{}, "bacio", "test", strings.NewReader(""), &bytes.Buffer{}, nil)
-	got := srv.instructionsBlock()
-
-	mustContain := []string{
-		// Base contract — must survive the rewrite.
-		"reply",
-		"dispatch_id",
-		"<channel source=\"bacio\"",
-		// Delegation contract — every phrase here is load-bearing.
-		"Subagent delegation",
-		"subagent_type = \"general-purpose\"",
-		"model         = \"opus\"",
-		"bacio agent claim",
-		"bacio agent release",
-		"mcp__bacio__reply",
-		"plan / design / implement / review / ship / fix_review",
-		"needs_input",
-		// Trivial-dispatch carve-out.
-		"from=\"bacio-channel\"",
-	}
-	for _, phrase := range mustContain {
-		if !strings.Contains(got, phrase) {
-			t.Errorf("instructions block missing load-bearing phrase %q\nfull block:\n%s", phrase, got)
-		}
-	}
-}
-
-// TestInitializeResultUsesInstructionsBlock keeps the wire-level
-// initialize response and the in-code instructionsBlock in lockstep —
-// so a future refactor can't accidentally route around the contract
-// (e.g. by inlining a different string back into initializeResult).
-func TestInitializeResultUsesInstructionsBlock(t *testing.T) {
-	srv := New(&fakeSource{}, "bacio", "test", strings.NewReader(""), &bytes.Buffer{}, nil)
-	result := srv.initializeResult(nil)
-	got, _ := result["instructions"].(string)
-	if got == "" {
-		t.Fatal("initialize result missing instructions string")
-	}
-	if got != srv.instructionsBlock() {
-		t.Fatalf("initialize instructions diverged from instructionsBlock()\nwire:\n%s\nblock:\n%s", got, srv.instructionsBlock())
-	}
-}
-
 // TestChannelPushesEvents checks drainOnce turns a Source batch into a
 // notifications/claude/channel frame with the dispatch metadata.
 func TestChannelPushesEvents(t *testing.T) {

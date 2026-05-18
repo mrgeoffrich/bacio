@@ -273,12 +273,19 @@ func (b *boardView) confirmDispatch() {
 	// Resolve the stage's prompt template (custom override or built-in
 	// default) and render it against this issue before storing — same
 	// substitution the client's CreateDispatch does for the desktop path.
+	// The BACI-52 preamble is prepended so the parent session delegates
+	// the work to a subagent.
 	template, err := b.store.GetPromptTemplate(b.dispatchMode)
 	if err != nil {
 		b.err = err
 		return
 	}
-	payload := model.ComposeDispatchPayload(template, map[string]string{
+	preamble, err := b.store.GetDispatchPreamble()
+	if err != nil {
+		b.err = err
+		return
+	}
+	payload := model.ComposeDispatchPayload(preamble, template, map[string]string{
 		"issue_id":    b.dispatchIssue.Key,
 		"issue_title": b.dispatchIssue.Title,
 		"repo_prefix": b.repo.Prefix,

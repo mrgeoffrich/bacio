@@ -51,21 +51,50 @@ func TestParseDispatchMode(t *testing.T) {
 func TestComposeDispatchPayload(t *testing.T) {
 	cases := []struct {
 		name     string
+		preamble string
 		template string
 		vars     map[string]string
 		note     string
 		want     string
 	}{
-		{"empty everything", "", nil, "", ""},
-		{"note only", "", nil, "just a note", "just a note"},
-		{"template only", "Implement {{issue_id}}.", map[string]string{"issue_id": "BACI-10"}, "", "Implement BACI-10."},
-		{"template + note", "Implement {{issue_id}}.", map[string]string{"issue_id": "BACI-10"}, "watch the migration", "Implement BACI-10.\n\nwatch the migration"},
-		{"note trimmed", "Plan {{issue_id}}.", map[string]string{"issue_id": "BACI-10"}, "  trimmed  ", "Plan BACI-10.\n\ntrimmed"},
-		{"template trimmed", "  Plan {{issue_id}}.  ", map[string]string{"issue_id": "BACI-10"}, "", "Plan BACI-10."},
+		// Behaviour without a preamble — pre-BACI-52 shape.
+		{"empty everything", "", "", nil, "", ""},
+		{"note only", "", "", nil, "just a note", "just a note"},
+		{"template only", "", "Implement {{issue_id}}.", map[string]string{"issue_id": "BACI-10"}, "", "Implement BACI-10."},
+		{"template + note", "", "Implement {{issue_id}}.", map[string]string{"issue_id": "BACI-10"}, "watch the migration", "Implement BACI-10.\n\nwatch the migration"},
+		{"note trimmed", "", "Plan {{issue_id}}.", map[string]string{"issue_id": "BACI-10"}, "  trimmed  ", "Plan BACI-10.\n\ntrimmed"},
+		{"template trimmed", "", "  Plan {{issue_id}}.  ", map[string]string{"issue_id": "BACI-10"}, "", "Plan BACI-10."},
+
+		// BACI-52: when both preamble and template are non-empty, the
+		// preamble leads, separated from the body by a `---` line.
+		{
+			"preamble + template",
+			"Delegate {{issue_id}} to a subagent.",
+			"Implement {{issue_id}}.",
+			map[string]string{"issue_id": "BACI-10"},
+			"",
+			"Delegate BACI-10 to a subagent.\n\n---\n\nImplement BACI-10.",
+		},
+		{
+			"preamble + template + note",
+			"Delegate.",
+			"Plan {{issue_id}}.",
+			map[string]string{"issue_id": "BACI-10"},
+			"extra context",
+			"Delegate.\n\n---\n\nPlan BACI-10.\n\nextra context",
+		},
+
+		// Preamble without a template body is dropped (note-only and
+		// setup-style dispatches don't carry a delegatable work brief).
+		{"preamble without template (note only)", "Delegate.", "", nil, "just a note", "just a note"},
+		{"preamble without anything", "Delegate.", "", nil, "", ""},
+
+		// A preamble that trims to "" behaves identically to no preamble.
+		{"whitespace-only preamble", "   \n  ", "Plan {{issue_id}}.", map[string]string{"issue_id": "BACI-10"}, "", "Plan BACI-10."},
 	}
 	for _, c := range cases {
-		if got := ComposeDispatchPayload(c.template, c.vars, c.note); got != c.want {
-			t.Errorf("%s: ComposeDispatchPayload(%q, %v, %q) = %q, want %q", c.name, c.template, c.vars, c.note, got, c.want)
+		if got := ComposeDispatchPayload(c.preamble, c.template, c.vars, c.note); got != c.want {
+			t.Errorf("%s: ComposeDispatchPayload(%q, %q, %v, %q) = %q, want %q", c.name, c.preamble, c.template, c.vars, c.note, got, c.want)
 		}
 	}
 }

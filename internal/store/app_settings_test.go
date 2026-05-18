@@ -132,12 +132,17 @@ func TestPromptStatesSeedAndOverride(t *testing.T) {
 		t.Fatalf("GetPromptStates(\"\") = %v, want nil", got)
 	}
 
-	// AllPromptStates surfaces every registered template's gate.
+	// AllPromptStates surfaces every registered template's gate. The
+	// reserved BACI-52 preamble row is deliberately stateless (no
+	// state-gate = excluded from the per-card mode picker), so skip it.
 	all, err := s.AllPromptStates()
 	if err != nil {
 		t.Fatalf("AllPromptStates: %v", err)
 	}
 	for _, slug := range model.BuiltinTemplateSlugs() {
+		if slug == model.BuiltinTemplatePreamble {
+			continue
+		}
 		if len(all[model.DispatchMode(slug)]) == 0 {
 			t.Errorf("AllPromptStates missing/empty for %q", slug)
 		}

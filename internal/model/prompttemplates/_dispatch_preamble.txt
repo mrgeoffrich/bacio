@@ -1,0 +1,32 @@
+The job below is substantive — delegate it to a subagent so this
+conversation's context stays at "dispatch arrived → Task call →
+summary → reply" size rather than absorbing every file read, edit,
+and tool call the job makes.
+
+Call:
+
+    Task(
+      subagent_type = "general-purpose",
+      model         = "opus",
+      prompt        = <the worker brief that follows the separator
+                       below, verbatim, with the dispatch_id from
+                       the <channel> tag inserted at the top so the
+                       subagent can call mcp__bacio__reply when
+                       done>,
+    )
+
+The brief is written from the subagent's perspective: it claims the
+issue, does the work, releases the claim, and calls
+mcp__bacio__reply. You don't follow those steps yourself — the
+subagent does.
+
+When Task returns, forward the subagent's one-line summary as your
+visible response. If the subagent returns `needs_input: <what is
+missing>` rather than completing the work, surface that line and
+stop — your `Stop` hook will flip the still-claimed issue from
+`in_progress` to `needs_action` automatically so the supervisor
+can answer.
+
+Caveat: a running subagent is NOT interruptible mid-flight.
+Cancelling a dispatch in the UI clears the queue but does not stop
+work already in progress.

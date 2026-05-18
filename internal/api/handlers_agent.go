@@ -1041,7 +1041,13 @@ func (d deps) handleAgentDispatchCreate(w http.ResponseWriter, r *http.Request) 
 		writeError(w, status, code, err.Error(), nil)
 		return
 	}
-	payload := model.ComposeDispatchPayload(template, map[string]string{
+	preamble, err := d.store.GetDispatchPreamble()
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	payload := model.ComposeDispatchPayload(preamble, template, map[string]string{
 		"issue_id":    issueKey,
 		"issue_title": issueTitle,
 		"repo_prefix": repo.Prefix,

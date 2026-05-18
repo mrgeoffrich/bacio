@@ -229,6 +229,22 @@ func (s *Store) GetPromptTemplateBySlug(slug string) (*PromptTemplate, error) {
 	return t, err
 }
 
+// GetDispatchPreamble returns the body of the reserved
+// model.BuiltinTemplatePreamble row — the BACI-52 delegation wrapper
+// the dispatch composer prepends to every issue-tied payload. Returns
+// "" if the row has been deleted (the dispatch composer then degrades
+// to body-only, same as the pre-BACI-52 shape).
+func (s *Store) GetDispatchPreamble() (string, error) {
+	t, err := s.GetPromptTemplateBySlug(model.BuiltinTemplatePreamble)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return "", nil
+		}
+		return "", err
+	}
+	return t.Body, nil
+}
+
 // ValidateAddPromptTemplate runs the same checks as AddPromptTemplate
 // without writing — the --dry-run path. Returns a cleaned projection
 // that callers can emit as the dry-run result.

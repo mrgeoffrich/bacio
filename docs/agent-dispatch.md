@@ -516,24 +516,49 @@ Practical consequences:
 - No new schema rows, no `parent_session_pk` column, no per-subagent
   registry entries.
 
-### Worker contract lives in the channel instructions
+### Worker contract lives in the dispatch preamble
 
-The full delegation contract is the system-prompt block the channel
-injects on every MCP handshake — see
-`internal/channel/channel.go::instructionsBlock`. Editing it there is
-the **only** way to change the contract; the test
-`internal/channel/channel_test.go::TestInstructionsBlockContainsContract`
-asserts every load-bearing phrase (`subagent_type = "general-purpose"`,
-`model = "opus"`, `bacio agent claim`, `bacio agent release`,
-`mcp__bacio__reply`, the `from="bacio-channel"` carve-out, etc.) so a
-rewrite that drops one fails CI loudly.
+The full delegation contract is the **dispatch preamble** — a reserved
+row (`slug = _dispatch_preamble`) in the `prompt_templates` table that
+`model.ComposeDispatchPayload` prepends to every per-mode template body
+at dispatch compose time. The agent receives the wrapper inside the
+dispatch payload itself; there is no system-prompt-level instruction
+to follow. The shape of a composed payload is:
+
+```
+<preamble: BACI-52 delegation wrapper>
+
+---
+
+<per-mode template body, rendered with {{issue_id}} etc.>
+
+<optional --note appended after a blank line>
+```
+
+The embedded default body lives in
+[`internal/model/prompttemplates/_dispatch_preamble.txt`](../internal/model/prompttemplates/_dispatch_preamble.txt);
+fresh installs seed the row from that file. Existing DBs are brought
+up to date by `backfillDispatchPreamble` in
+`internal/store/store.go` — idempotent, runs on every `Open`, no-op
+once the row is present (or has been deliberately deleted).
+
+Editing the contract is the same flow as editing any other template:
+
+- CLI: `bacio settings template show _dispatch_preamble` /
+  `bacio settings template set _dispatch_preamble --body "..."`.
+- TUI: open Settings (`s` from the main menu) → the preamble row
+  leads the template list with the label "Dispatch preamble
+  (prepended to every job)".
+- Desktop: same row in the Settings panel.
+- Restore to the embedded default: `bacio settings template reset
+  _dispatch_preamble`.
 
 There is deliberately **no** `.claude/agents/bacio-worker.md` file,
 **no** `bacio install-worker` command, and **no** `//go:embed` of the
 contract into a per-repo template. Two install steps —
 `bacio install-channel` and `bacio install-hooks` — remain the only
-setup story. Every session picks up contract edits on its next
-handshake; nothing to re-deploy across consuming repos.
+setup story. Every dispatch picks up contract edits on the next
+compose; nothing to re-deploy across consuming repos.
 
 ### Subagent tool surface and the TodoWrite-mirror gap
 
@@ -554,15 +579,26 @@ tool the worker contract would call at each plan step (~30 lines
 reusing `client.ReplaceSessionTodos`); the gap is documented here so
 the next reader doesn't waste a spike on it.
 
-### Trivial-dispatch carve-out
+### Trivial-dispatch carve-out (structural, not instruction-based)
 
 Not every dispatch is worth a subagent. The channel's own
-**setup-register** nudge (`from="bacio-channel"`) is a single MCP
-call — calling `Task` to wrap it would cost more than the call
-itself. The instructions block tells the parent to handle dispatches
-from `from="bacio-channel"` inline, and to delegate anything else
-that carries `issue` or a `mode` in the `plan|design|implement|review|ship|fix_review`
-set.
+**setup-register** nudge (`from="bacio-channel"`) and the BACI-57
+**idle-ping** probe (`from="bacio-channel-ping"`) are each a single
+MCP call — calling `Task` to wrap them would cost more than the call
+itself. They don't need a carve-out instruction in the wrapper
+because they don't go through `ComposeDispatchPayload` at all:
+`client.buildSetupDispatchPayload` and `client.buildPingDispatchPayload`
+hand-roll their payloads and never see the preamble. The parent
+agent reads a tag with no delegation wrapper attached and handles it
+inline.
+
+For any dispatch that does go through `ComposeDispatchPayload` —
+which is every issue-tied per-mode dispatch (`plan` / `design` /
+`implement` / `review` / `ship` / `fix_review`, plus any user-added
+template) — the preamble is unconditionally prepended whenever the
+template body is non-empty. An untyped dispatch (no template, just a
+freeform `--note`) also skips the preamble: there's no work brief
+worth delegating.
 
 ### Single concurrent, no mid-flight cancel
 

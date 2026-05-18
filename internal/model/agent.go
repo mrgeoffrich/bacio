@@ -337,7 +337,15 @@ type DispatchMode string
 // any of them; `bacio settings template restore-defaults` re-seeds the
 // missing ones. Order matches a job's lifecycle, which is also the
 // seed order so the built-ins lead the list on a fresh install.
+//
+// BuiltinTemplatePreamble is a reserved slug (leading underscore) that
+// is NOT pickable as a dispatch mode — its body is the BACI-52
+// delegation wrapper, prepended to every other template's payload at
+// dispatch compose time. It has no state-gate, which is also why the
+// per-card mode picker (which filters by state-gate match) excludes
+// it naturally.
 const (
+	BuiltinTemplatePreamble  = "_dispatch_preamble"
 	BuiltinTemplatePlan      = "plan"
 	BuiltinTemplateDesign    = "design"
 	BuiltinTemplateImplement = "implement"
@@ -360,8 +368,12 @@ const (
 
 // builtinTemplateSlugs lists the bundled built-in template slugs in
 // canonical lifecycle order — used by the migration's first-time seed
-// step and by `restore-defaults` to know what to re-create.
+// step and by `restore-defaults` to know what to re-create. The
+// reserved BuiltinTemplatePreamble row leads the list so it lands at
+// the top of the Settings UI on a fresh install (the list is ordered
+// by created_at, id).
 var builtinTemplateSlugs = []string{
+	BuiltinTemplatePreamble,
 	BuiltinTemplatePlan, BuiltinTemplateDesign, BuiltinTemplateImplement,
 	BuiltinTemplateReview, BuiltinTemplateShip, BuiltinTemplateFixReview,
 }
@@ -377,6 +389,7 @@ func BuiltinTemplateSlugs() []string {
 // — used by the seed step (the table's `name` column) and as a fallback
 // when a UI surfaces a slug whose stored row is missing.
 var builtinTemplateLabels = map[string]string{
+	BuiltinTemplatePreamble:  "Dispatch preamble (prepended to every job)",
 	BuiltinTemplatePlan:      "Planning",
 	BuiltinTemplateDesign:    "Designing",
 	BuiltinTemplateImplement: "Implementing",
@@ -415,11 +428,15 @@ func DefaultConcurrencyLimit(slug string) int {
 
 // dispatchModeSlugRule allows a slightly broader shape than feature
 // slugs: kebab- AND snake-case both work, so the built-in `fix_review`
-// is a valid slug. Length cap is enforced separately by validators.
-var dispatchModeSlugRule = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+// is a valid slug. A leading underscore is also allowed — it's the
+// "reserved / internal" convention used by built-ins that aren't
+// pickable as a dispatch mode (e.g. `_dispatch_preamble`, the wrapper
+// prepended to every other template's payload). Length cap is enforced
+// separately by validators.
+var dispatchModeSlugRule = regexp.MustCompile(`^[a-z0-9_][a-z0-9_-]*$`)
 
 // ParseDispatchMode accepts "" (untyped — valid) or any slug-shaped
-// string ([a-z0-9][a-z0-9_-]*, max 60 chars). It does NOT check whether
+// string ([a-z0-9_][a-z0-9_-]*, max 60 chars). It does NOT check whether
 // the slug is registered in the prompt_templates table — that's a store
 // concern (and a dispatch may legitimately carry a slug for a template
 // the user has since deleted). Renderers should treat an unrecognised
@@ -433,7 +450,7 @@ func ParseDispatchMode(s string) (DispatchMode, error) {
 		return "", fmt.Errorf("dispatch mode %q is too long (max 60 chars)", s)
 	}
 	if !dispatchModeSlugRule.MatchString(s) {
-		return "", fmt.Errorf("dispatch mode %q must be a slug (lowercase letters, digits, hyphens, underscores; starting with a letter or digit)", s)
+		return "", fmt.Errorf("dispatch mode %q must be a slug (lowercase letters, digits, hyphens, underscores; the first character may also be an underscore for reserved/internal slugs)", s)
 	}
 	return DispatchMode(s), nil
 }
@@ -554,21 +571,45 @@ func RenderPromptTemplate(tmpl string, vars map[string]string) string {
 	return b.String()
 }
 
-// ComposeDispatchPayload builds a dispatch instruction body: the
-// template rendered against vars, then an optional free-form note after
-// a blank line. Either part may be empty — an empty template with no
-// note yields "".
-func ComposeDispatchPayload(template string, vars map[string]string, note string) string {
+// ComposeDispatchPayload builds a dispatch instruction body in the
+// shape the agent receives it: the optional preamble (BACI-52 wrapper
+// instructing the parent session to delegate to a subagent), a "---"
+// separator, the template rendered against vars, and an optional
+// free-form note after a blank line. Each part is independently
+// optional:
+//
+//   - preamble == "": skip the preamble + separator (used today by the
+//     channel's setup-register dispatch and by note-only dispatches,
+//     since there's no work brief there worth delegating).
+//   - template == "" (untyped dispatch): payload is just the note, no
+//     preamble — the agent isn't being handed a job to delegate.
+//   - note == "": payload is preamble + body, no trailing freeform line.
+//
+// preamble is rendered through RenderPromptTemplate too so future
+// preamble bodies can interpolate {{issue_id}} etc. without changing
+// the call shape.
+func ComposeDispatchPayload(preamble, template string, vars map[string]string, note string) string {
+	preamble = strings.TrimSpace(RenderPromptTemplate(preamble, vars))
 	body := strings.TrimSpace(RenderPromptTemplate(template, vars))
 	note = strings.TrimSpace(note)
-	switch {
-	case body != "" && note != "":
-		return body + "\n\n" + note
-	case body != "":
-		return body
-	default:
+
+	if body == "" {
+		// No template body = no work brief to delegate = no preamble.
+		// Untyped dispatch — just the freeform note (which may itself
+		// be empty, in which case the payload is "").
 		return note
 	}
+
+	parts := make([]string, 0, 4)
+	if preamble != "" {
+		parts = append(parts, preamble, "---", body)
+	} else {
+		parts = append(parts, body)
+	}
+	if note != "" {
+		parts = append(parts, note)
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 // AgentDispatch is one unit of supervisor->agent work. It targets an
