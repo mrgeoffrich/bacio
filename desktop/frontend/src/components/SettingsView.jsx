@@ -560,8 +560,8 @@ export default function SettingsView({
           <Dialog.Content className="mk-modal" aria-describedby={undefined}>
             <Dialog.Title className="mk-modal-title">Restore built-in templates</Dialog.Title>
             <p>
-              Re-seed any missing built-in templates ({missingBuiltins.join(', ') || 'none missing'})
-              from the embedded defaults. Existing templates won't be touched.
+              Re-seed any built-in template that's been deleted, from the
+              embedded defaults. Existing templates won't be touched (idempotent).
             </p>
             <div className="mk-modal-actions">
               <Dialog.Close asChild>
