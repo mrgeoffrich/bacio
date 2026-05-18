@@ -20,6 +20,7 @@ The deeper context for both lives in the topic sections below (`## Agent-CLI pri
 - `go test ./...` — run the unit tests.
 - `bacio <subcommand>` from inside any git working tree drives the CLI.
 - The SQLite database lives at `~/.bacio/db.sqlite` by default. Override via `--db <path>` when testing or validating changes.
+- **Smoke-testing a desktop / web change.** The same React tree drives both the Wails desktop binary and the web bundle, so the cheapest agent-driven validation is the web path: run `bacio api` (default `http://localhost:5320/ui/`) and drive the UI with the `playwright-cli` skill — no Wails native-window dance, and snapshots come back as readable accessibility trees. After a frontend change, `./build.sh --skip-desktop` is enough to refresh the embedded bundle; restart the running `bacio api` to pick up the new binary.
 
 ## Profiling
 
