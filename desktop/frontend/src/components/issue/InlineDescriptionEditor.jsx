@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
+import MarkdownView from '../../lib/markdownView';
 
 // InlineDescriptionEditor toggles between a rendered (markdown) view and
 // a textarea editor in place. The pencil opens edit mode; Save persists
@@ -97,9 +97,7 @@ export default function InlineDescriptionEditor({
           </div>
         </>
       ) : description ? (
-        <div className="mk-drawer-text mk-markdown">
-          <ReactMarkdown>{description}</ReactMarkdown>
-        </div>
+        <MarkdownView className="mk-drawer-text mk-markdown">{description}</MarkdownView>
       ) : (
         <p className="mk-drawer-text mk-meta-empty">No description.</p>
       )}

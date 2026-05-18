@@ -541,6 +541,31 @@ body { margin: 0; }
   margin: 0 0 10px; padding-left: 12px;
   border-left: 3px solid var(--border-2); color: var(--fg-3);
 }
+/* GFM tables (BACI-65) — remark-gfm renders tables as plain <table>
+ * elements; without these styles they collapse to unformatted text
+ * rows. Wrap in overflow-x so a wide table inside the workspace rail
+ * scrolls horizontally instead of breaking the column. */
+.mk-markdown table {
+  display: block; max-width: 100%; overflow-x: auto;
+  border-collapse: collapse; margin: 0 0 10px;
+  font-size: 13px;
+}
+.mk-markdown thead { background: var(--ink-50); }
+.mk-markdown th, .mk-markdown td {
+  border: 1px solid var(--border-1);
+  padding: 6px 10px; text-align: left; vertical-align: top;
+}
+.mk-markdown th { font-weight: 600; color: var(--fg-1); }
+.mk-markdown tbody tr:nth-child(even) { background: var(--ink-50); }
+/* GFM task lists — react-markdown renders them as <ul><li>
+ * containing a disabled checkbox. Drop the list marker on those rows
+ * and pull the checkbox flush so they read as a checklist. */
+.mk-markdown li input[type="checkbox"] {
+  margin: 0 6px 0 -16px; vertical-align: middle;
+}
+.mk-markdown li:has(> input[type="checkbox"]) { list-style: none; }
+/* GFM strikethrough */
+.mk-markdown del { color: var(--fg-3); }
 
 /* ---------- Attachments ---------- */
 .mk-attachments { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }

@@ -415,6 +415,12 @@ When you go to extend or fix this, the relevant files are:
 
 ---
 
+## 8a. Markdown rendering
+
+The web bundle reuses the React tree the Wails desktop ships, so the markdown story is identical across both surfaces: every read view (issue descriptions, comment timeline, linked-doc panel, feature description) goes through `desktop/frontend/src/lib/markdownView.tsx`'s `<MarkdownView>` wrapper, which is the only call-site for `react-markdown` outside DocsView's TipTap editor. `remark-gfm` is wired so GFM tables, task lists, autolinks and strikethrough render uniformly. See [`docs/markdown-rendering.md`](markdown-rendering.md) for the full per-surface audit, the canonical-renderer decision, and the rule against importing `react-markdown` directly elsewhere. `remark-gfm` adds ~50 KB minified to the embedded bundle — already inside the chunk-size budget Vite warns about.
+
+---
+
 ## 9. Out of scope, explicitly
 
 - **Replacing the Wails desktop app.** Wails gives us native window

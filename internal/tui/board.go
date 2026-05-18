@@ -164,7 +164,7 @@ type boardView struct {
 	openQuestions map[string][]*model.SessionQuestion
 	questionOlay  *questionOverlay
 
-	mdCache map[int]mdCacheEntry // see docsView for shape
+	mdCache mdCache // see internal/tui/markdown.go
 
 	// commentMD caches glamour-rendered comment bodies keyed by
 	// (commentID, width). Cleared whenever the selected issue changes
@@ -180,15 +180,7 @@ type commentMDKey struct {
 }
 
 func (b *boardView) cachedMD(id int64, src string, width int) string {
-	if b.mdCache == nil {
-		b.mdCache = map[int]mdCacheEntry{}
-	}
-	if e, ok := b.mdCache[width]; ok && e.id == id {
-		return e.out
-	}
-	out := renderMarkdown(src, width)
-	b.mdCache[width] = mdCacheEntry{id: id, out: out}
-	return out
+	return b.mdCache.get(id, src, width)
 }
 
 func newBoardView(s *store.Store, repo *model.Repo, actor string) (*boardView, error) {
@@ -341,7 +333,7 @@ func (b *boardView) reload() error {
 	// Issue descriptions may have changed under us — start the cache
 	// fresh so stale renders aren't served until a new render replaces
 	// them.
-	b.mdCache = nil
+	b.mdCache.reset()
 	return nil
 }
 

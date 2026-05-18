@@ -1190,6 +1190,7 @@ Verbs that touch the local filesystem or terminal error clearly in remote mode a
 - **Auto-created prefix can collide.** If two repos share a basename, `bacio init` allocates `XXX2`, `XXX3`, etc. Use `bacio repo list` to confirm what was assigned.
 - **Issue numbers never repeat.** Deleting `MINI-3` does not free up the number — the next issue is still `MINI-4`.
 - **JSON output is the contract.** When parsing programmatically, always pass `-o json`. Text output is for humans and may shift.
+- **Markdown rendering goes through one wrapper per surface family.** In the React tree (desktop + web bundle), every read view imports `<MarkdownView>` from `desktop/frontend/src/lib/markdownView.tsx` — never `react-markdown` directly. Tables, task lists, autolinks and strikethrough are GFM-enabled. In the TUI, every view calls `renderMarkdown` in `internal/tui/markdown.go` (glamour, GFM on by default). Full audit + per-surface decision: [`docs/markdown-rendering.md`](../../../docs/markdown-rendering.md).
 
 ## Installation
 

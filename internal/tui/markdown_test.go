@@ -52,6 +52,29 @@ func loadLargeMarkdown(b *testing.B) string {
 	return string(data)
 }
 
+// TestRenderMarkdownTable nails the BACI-65 contract: GFM tables render
+// as box-drawing characters through glamour. The TUI's renderer wires
+// extension.GFM by default so this should always be the case — guarding
+// it here means a future glamour upgrade or option change can't silently
+// regress the "tables render in the TUI" promise.
+func TestRenderMarkdownTable(t *testing.T) {
+	src := "| a | b |\n|---|---|\n| 1 | 2 |\n"
+	out := renderMarkdown(src, 90)
+	if out == "" {
+		t.Fatalf("renderMarkdown returned empty output for table input")
+	}
+	// Glamour's table renderer uses box-drawing chars. Look for any of
+	// them; the exact glyphs vary by glamour version, but at least one
+	// must appear or the table degraded to plain text.
+	wantAny := []string{"─", "│", "├", "┤", "┌", "┐", "└", "┘"}
+	for _, ch := range wantAny {
+		if strings.Contains(out, ch) {
+			return
+		}
+	}
+	t.Fatalf("renderMarkdown output did not contain any box-drawing characters; table likely did not render. got:\n%s", out)
+}
+
 // BenchmarkRenderMarkdownCold measures a single uncached glamour render
 // at our typical overlay width. This is the cost we pay every keystroke
 // without caching.

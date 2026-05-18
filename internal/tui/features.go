@@ -30,21 +30,13 @@ type featuresView struct {
 	overlay       bool
 	overlayScroll int
 
-	mdCache map[int]mdCacheEntry // see docsView for shape
+	mdCache mdCache // see internal/tui/markdown.go
 
 	err error
 }
 
 func (f *featuresView) cachedMD(id int64, src string, width int) string {
-	if f.mdCache == nil {
-		f.mdCache = map[int]mdCacheEntry{}
-	}
-	if e, ok := f.mdCache[width]; ok && e.id == id {
-		return e.out
-	}
-	out := renderMarkdown(src, width)
-	f.mdCache[width] = mdCacheEntry{id: id, out: out}
-	return out
+	return f.mdCache.get(id, src, width)
 }
 
 func newFeaturesView(s *store.Store, repo *model.Repo) *featuresView {
@@ -61,7 +53,7 @@ func (f *featuresView) reload() {
 		return
 	}
 	f.err = nil
-	f.mdCache = nil
+	f.mdCache.reset()
 	f.features = list
 	if f.row >= len(list) {
 		f.row = max(0, len(list)-1)

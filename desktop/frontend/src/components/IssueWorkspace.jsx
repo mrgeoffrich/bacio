@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
-import ReactMarkdown from 'react-markdown';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import MarkdownView from '../lib/markdownView';
 import Icon from './Icon.jsx';
 import IssueLockBanner from './issue/IssueLockBanner.jsx';
 import LinkedDocPanel from './issue/LinkedDocPanel.jsx';
@@ -213,16 +213,15 @@ export default function IssueWorkspace({
                 {brief.comments.map((c, i) => (
                   <li key={i} className="mk-tl-item">
                     <span className={`mk-tl-dot ${c.author === 'claude' ? 'is-claude' : ''}`} />
-                    {/* Wrapping <div> instead of <span> because react-markdown
-                        emits block elements (p / ul / pre) that mustn't nest
-                        inside a <span>; the timeline CSS pins the dot to the
-                        first line via align-items: flex-start + dot margin-top
-                        so a single-line comment still reads the same. */}
+                    {/* MarkdownView emits block elements (p / ul / pre /
+                        table) that mustn't nest inside a <span>, so the
+                        outer row is a <div>; the timeline CSS pins the
+                        dot to the first line via align-items: flex-start
+                        + dot margin-top so a single-line comment still
+                        reads the same. */}
                     <div className="mk-tl-text">
                       <b className="mk-tl-author">{c.author}</b>
-                      <div className="mk-markdown mk-tl-body">
-                        <ReactMarkdown>{c.body}</ReactMarkdown>
-                      </div>
+                      <MarkdownView className="mk-markdown mk-tl-body">{c.body}</MarkdownView>
                     </div>
                   </li>
                 ))}
