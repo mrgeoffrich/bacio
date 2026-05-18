@@ -324,6 +324,54 @@ deferred:
 
 ---
 
+## 7a. Issue workspace hash route (BACI-54)
+
+The IssueWorkspace (BACI-54) is a routed top-level view that replaces
+the legacy IssueDrawer + IssueEditModal. In web mode only, the open
+issue is reflected into the URL hash so the workspace is deep-linkable
+and copy-pasteable between tabs.
+
+- **Shape:** `#/<prefix>/<key>`, e.g. `#/BACI/BACI-54`. The hash
+  encodes both the repo (so the picker lands on the right one) and
+  the canonical issue key. Anything that doesn't match the regex
+  `^#/[A-Za-z0-9]+/[A-Za-z0-9]+-\d+$` is ignored.
+- **Inbound (hashchange listener).** `App.jsx` parses the hash on
+  mount and on every `hashchange`. If the parsed value differs from
+  current state, the active repo and `openIssueKey` are set together
+  and `activeView` flips to `'issue'`. If the hash is cleared while a
+  workspace is open (back button, manual edit), the workspace closes
+  and `activeView` returns to `previousView`. The guard "only act if
+  we'd actually change something" prevents fighting the outbound
+  reflect.
+- **Outbound (history.replaceState).** When `openIssueKey` /
+  `activeBoard` change, the canonical hash is written back. `replaceState`
+  (not `pushState`) is deliberate: opening a dozen cards leaves one
+  history entry, not twelve, so the browser back button still
+  reliably returns to whatever page the user navigated *from* into
+  the app.
+- **Desktop ignores both effects** — the `WEB_MODE` guard returns
+  early at the top of both hooks. There's no Wails-side router
+  primitive to integrate; the native app uses the existing
+  click-a-card / breadcrumb / esc affordances.
+- **No router library.** A single `hashchange` listener and a two-line
+  parser is enough — bringing in `react-router` would buy nothing
+  this view actually needs.
+- **Repo switch.** Picking a different repo while a workspace is
+  open follows the same "only act if we'd actually change something"
+  guard: the outbound effect rewrites the hash to the new prefix,
+  but the workspace stays mounted with the now-foreign issue key
+  until the user picks a card from the new repo. (Today this is
+  acceptable because the brief fetch will error out and surface
+  through the global modal; tightening it — clear `openIssueKey` on
+  repo change — is a 1-line follow-up if it ever bites.)
+
+The workspace's other surfaces (description editor, comment composer,
+PR attach form, dispatch button) all run through the same `api.*`
+calls in both modes; the seam aliases swap `api.ts` for `api.http.ts`
+and the workspace doesn't know the difference.
+
+---
+
 ## 8. Implementation map
 
 When you go to extend or fix this, the relevant files are:

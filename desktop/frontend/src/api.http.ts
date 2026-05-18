@@ -86,6 +86,64 @@ export interface IssueDetail {
   taken: boolean;
 }
 
+// IssueMetaDTO mirrors desktop/boardservice.go:IssueMetaDTO — the
+// issue-header slice of an IssueBriefDTO. Kept thin so the rail and
+// primary column don't have to thread the full brief.
+export interface IssueMetaDTO {
+  key: string;
+  column: string;
+  columnLabel: string;
+  title: string;
+  description: string;
+  tags: string[];
+  assignees: string[];
+  claude: boolean;
+  taken: boolean;
+  waitingForClaim: boolean;
+}
+
+export interface LinkedDocDTO {
+  filename: string;
+  type: string;
+  description: string;
+  sourcePath?: string;
+  linkedVia: string[];
+  content: string;
+}
+
+export interface FeatureRefDTO {
+  slug: string;
+  title: string;
+}
+
+export interface RelationDTO {
+  type: string;
+  otherKey: string;
+}
+
+export interface RelationsDTO {
+  outgoing: RelationDTO[];
+  incoming: RelationDTO[];
+}
+
+// IssueBriefDTO mirrors desktop/boardservice.go:IssueBriefDTO — the
+// workspace-shaped payload. The REST surface (GET /repos/.../brief)
+// emits the snake_case internal/client/views.go::IssueBrief shape;
+// reshapeApiBrief() collapses it into this shape so React reads the
+// same camelCase fields in both modes.
+export interface IssueBriefDTO {
+  issue: IssueMetaDTO;
+  feature: FeatureRefDTO | null;
+  relations: RelationsDTO;
+  pullRequests: PRDTO[];
+  documents: LinkedDocDTO[];
+  comments: CommentDTO[];
+  claimants: ClaimantDTO[];
+  taken: boolean;
+  waitingForClaim: boolean;
+  warnings: string[];
+}
+
 export interface ClaimDTO {
   issueKey: string;
   prompt: string;
@@ -479,6 +537,132 @@ export async function getIssue(repoPrefix: string, key: string): Promise<IssueDe
     })),
     taken: !!view.taken,
   };
+}
+
+interface ApiBriefDoc {
+  filename: string;
+  type: string;
+  description?: string;
+  source_path?: string;
+  linked_via?: string[];
+  content?: string;
+}
+
+interface ApiRelation {
+  // ListIssueRelations emits model.Relation, which serialises as
+  // {from_issue, to_issue, type, id, created_at}. The brief reshape
+  // resolves these into RelationDTO entries with the "other end" key.
+  from_issue: string;
+  to_issue: string;
+  type: string;
+}
+
+interface ApiIssueRelations {
+  outgoing?: ApiRelation[] | null;
+  incoming?: ApiRelation[] | null;
+}
+
+interface ApiFeatureRef {
+  slug: string;
+  title: string;
+}
+
+interface ApiIssueBrief {
+  issue: ApiIssue;
+  feature?: ApiFeatureRef | null;
+  relations?: ApiIssueRelations | null;
+  pull_requests?: ApiPR[] | null;
+  documents?: ApiBriefDoc[] | null;
+  comments?: ApiCommentEnvelope[] | null;
+  claimants?: ApiClaimant[] | null;
+  taken?: boolean;
+  warnings?: string[] | null;
+}
+
+function reshapeApiBrief(view: ApiIssueBrief): IssueBriefDTO {
+  const iss = view.issue;
+  const assignee = iss.assignee ?? '';
+  const meta: IssueMetaDTO = {
+    key: iss.key,
+    column: iss.state,
+    columnLabel: stateLabel(iss.state),
+    title: iss.title,
+    description: iss.description ?? '',
+    tags: iss.tags ?? [],
+    assignees: assigneeList(assignee),
+    claude: assignee === 'claude',
+    taken: !!view.taken,
+    waitingForClaim: !!iss.waiting_for_claim,
+  };
+  const feat: FeatureRefDTO | null = view.feature
+    ? { slug: view.feature.slug, title: view.feature.title }
+    : null;
+  const outgoing: RelationDTO[] = (view.relations?.outgoing ?? []).map(r => ({
+    type: r.type,
+    otherKey: r.to_issue,
+  }));
+  const incoming: RelationDTO[] = (view.relations?.incoming ?? []).map(r => ({
+    type: r.type,
+    otherKey: r.from_issue,
+  }));
+  return {
+    issue: meta,
+    feature: feat,
+    relations: { outgoing, incoming },
+    pullRequests: (view.pull_requests ?? []).map(p => ({ url: p.url })),
+    documents: (view.documents ?? []).map(d => ({
+      filename: d.filename,
+      type: d.type,
+      description: d.description ?? '',
+      sourcePath: d.source_path ?? '',
+      linkedVia: d.linked_via ?? [],
+      content: d.content ?? '',
+    })),
+    comments: (view.comments ?? []).map(c => ({
+      author: c.author, body: c.body, createdAt: c.created_at,
+    })),
+    claimants: (view.claimants ?? []).map(c => ({
+      sessionId: c.session_id,
+      agentName: c.agent_name,
+      prompt: c.prompt,
+      claimedAt: c.claimed_at,
+      releasedAt: c.released_at,
+      open: c.released_at == null,
+    })),
+    taken: !!view.taken,
+    waitingForClaim: !!iss.waiting_for_claim,
+    warnings: view.warnings ?? [],
+  };
+}
+
+export async function getIssueBrief(repoPrefix: string, key: string): Promise<IssueBriefDTO> {
+  if (!repoPrefix || repoPrefix === 'all') {
+    const i = key.lastIndexOf('-');
+    if (i <= 0) throw new Error(`invalid issue key: ${key}`);
+    repoPrefix = key.slice(0, i);
+  }
+  const view = await call<ApiIssueBrief>(`/repos/${repoPrefix}/issues/${key}/brief`);
+  return reshapeApiBrief(view);
+}
+
+// attachPullRequest POSTs to /repos/{prefix}/issues/{key}/pull-requests.
+// Validation failures (bad scheme / missing host) come back through the
+// {error} envelope and surface to the caller as Error messages.
+export async function attachPullRequest(
+  repoPrefix: string,
+  key: string,
+  url: string,
+): Promise<PRDTO> {
+  if (!repoPrefix || repoPrefix === 'all') {
+    const i = key.lastIndexOf('-');
+    if (i <= 0) throw new Error(`invalid issue key: ${key}`);
+    repoPrefix = key.slice(0, i);
+  }
+  const raw = await call<{ url: string }>(
+    `/repos/${repoPrefix}/issues/${key}/pull-requests`,
+    { method: 'POST', body: { url } },
+  );
+  return { url: raw.url };
 }
 
 export async function listAgents(repoPrefix: string): Promise<AgentCard[]> {

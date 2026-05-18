@@ -475,6 +475,36 @@ export class FeatureLinkedIssue {
 }
 
 /**
+ * FeatureRefDTO is the lightweight feature reference attached to an
+ * issue brief — slug + title. Just enough to render the feature pill
+ * in the workspace rail without leaking the full FeatureDetail.
+ */
+export class FeatureRefDTO {
+    "slug": string;
+    "title": string;
+
+    /** Creates a new FeatureRefDTO instance. */
+    constructor($$source: Partial<FeatureRefDTO> = {}) {
+        if (!("slug" in $$source)) {
+            this["slug"] = "";
+        }
+        if (!("title" in $$source)) {
+            this["title"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new FeatureRefDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): FeatureRefDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new FeatureRefDTO($$parsedSource as Partial<FeatureRefDTO>);
+    }
+}
+
+/**
  * FeatureSummary is one feature, shaped for the desktop feature list.
  */
 export class FeatureSummary {
@@ -597,6 +627,98 @@ export class HistoryPage {
 }
 
 /**
+ * IssueBriefDTO is the workspace-shaped payload — BoardService.GetIssueBrief's
+ * return value, mirroring internal/client/views.go::IssueBrief with desktop
+ * camelCase JSON tags. New fields over IssueDetail: feature, relations,
+ * waitingForClaim, warnings, and doc content (via LinkedDocDTO).
+ */
+export class IssueBriefDTO {
+    "issue": IssueMetaDTO;
+    "feature"?: FeatureRefDTO | null;
+    "relations": RelationsDTO;
+    "pullRequests": PRDTO[];
+    "documents": LinkedDocDTO[];
+    "comments": CommentDTO[];
+    "claimants": ClaimantDTO[];
+    "taken": boolean;
+    "waitingForClaim": boolean;
+    "warnings": string[];
+
+    /** Creates a new IssueBriefDTO instance. */
+    constructor($$source: Partial<IssueBriefDTO> = {}) {
+        if (!("issue" in $$source)) {
+            this["issue"] = (new IssueMetaDTO());
+        }
+        if (!("relations" in $$source)) {
+            this["relations"] = (new RelationsDTO());
+        }
+        if (!("pullRequests" in $$source)) {
+            this["pullRequests"] = [];
+        }
+        if (!("documents" in $$source)) {
+            this["documents"] = [];
+        }
+        if (!("comments" in $$source)) {
+            this["comments"] = [];
+        }
+        if (!("claimants" in $$source)) {
+            this["claimants"] = [];
+        }
+        if (!("taken" in $$source)) {
+            this["taken"] = false;
+        }
+        if (!("waitingForClaim" in $$source)) {
+            this["waitingForClaim"] = false;
+        }
+        if (!("warnings" in $$source)) {
+            this["warnings"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new IssueBriefDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): IssueBriefDTO {
+        const $$createField0_0 = $$createType5;
+        const $$createField1_0 = $$createType7;
+        const $$createField2_0 = $$createType8;
+        const $$createField3_0 = $$createType10;
+        const $$createField4_0 = $$createType12;
+        const $$createField5_0 = $$createType14;
+        const $$createField6_0 = $$createType16;
+        const $$createField9_0 = $$createType0;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("issue" in $$parsedSource) {
+            $$parsedSource["issue"] = $$createField0_0($$parsedSource["issue"]);
+        }
+        if ("feature" in $$parsedSource) {
+            $$parsedSource["feature"] = $$createField1_0($$parsedSource["feature"]);
+        }
+        if ("relations" in $$parsedSource) {
+            $$parsedSource["relations"] = $$createField2_0($$parsedSource["relations"]);
+        }
+        if ("pullRequests" in $$parsedSource) {
+            $$parsedSource["pullRequests"] = $$createField3_0($$parsedSource["pullRequests"]);
+        }
+        if ("documents" in $$parsedSource) {
+            $$parsedSource["documents"] = $$createField4_0($$parsedSource["documents"]);
+        }
+        if ("comments" in $$parsedSource) {
+            $$parsedSource["comments"] = $$createField5_0($$parsedSource["comments"]);
+        }
+        if ("claimants" in $$parsedSource) {
+            $$parsedSource["claimants"] = $$createField6_0($$parsedSource["claimants"]);
+        }
+        if ("warnings" in $$parsedSource) {
+            $$parsedSource["warnings"] = $$createField9_0($$parsedSource["warnings"]);
+        }
+        return new IssueBriefDTO($$parsedSource as Partial<IssueBriefDTO>);
+    }
+}
+
+/**
  * IssueDetail is the issue-drawer payload for a single issue.
  */
 export class IssueDetail {
@@ -670,10 +792,10 @@ export class IssueDetail {
     static createFrom($$source: any = {}): IssueDetail {
         const $$createField5_0 = $$createType0;
         const $$createField6_0 = $$createType0;
-        const $$createField8_0 = $$createType6;
-        const $$createField9_0 = $$createType8;
-        const $$createField10_0 = $$createType10;
-        const $$createField11_0 = $$createType12;
+        const $$createField8_0 = $$createType14;
+        const $$createField9_0 = $$createType10;
+        const $$createField10_0 = $$createType18;
+        const $$createField11_0 = $$createType16;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField5_0($$parsedSource["tags"]);
@@ -698,6 +820,79 @@ export class IssueDetail {
 }
 
 /**
+ * IssueMetaDTO is the workspace's issue-header payload: the bits the
+ * rail and primary column read repeatedly without going through the
+ * rest of the brief. Mirrors the BoardCard shape (column + label +
+ * title + tags + assignees), plus the description and the derived
+ * taken / waitingForClaim flags so the IssueWorkspace doesn't have to
+ * hop between brief.issue.{...} and brief.{taken,waitingForClaim}.
+ */
+export class IssueMetaDTO {
+    "key": string;
+    "column": string;
+    "columnLabel": string;
+    "title": string;
+    "description": string;
+    "tags": string[];
+    "assignees": string[];
+    "claude": boolean;
+    "taken": boolean;
+    "waitingForClaim": boolean;
+
+    /** Creates a new IssueMetaDTO instance. */
+    constructor($$source: Partial<IssueMetaDTO> = {}) {
+        if (!("key" in $$source)) {
+            this["key"] = "";
+        }
+        if (!("column" in $$source)) {
+            this["column"] = "";
+        }
+        if (!("columnLabel" in $$source)) {
+            this["columnLabel"] = "";
+        }
+        if (!("title" in $$source)) {
+            this["title"] = "";
+        }
+        if (!("description" in $$source)) {
+            this["description"] = "";
+        }
+        if (!("tags" in $$source)) {
+            this["tags"] = [];
+        }
+        if (!("assignees" in $$source)) {
+            this["assignees"] = [];
+        }
+        if (!("claude" in $$source)) {
+            this["claude"] = false;
+        }
+        if (!("taken" in $$source)) {
+            this["taken"] = false;
+        }
+        if (!("waitingForClaim" in $$source)) {
+            this["waitingForClaim"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new IssueMetaDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): IssueMetaDTO {
+        const $$createField5_0 = $$createType0;
+        const $$createField6_0 = $$createType0;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("tags" in $$parsedSource) {
+            $$parsedSource["tags"] = $$createField5_0($$parsedSource["tags"]);
+        }
+        if ("assignees" in $$parsedSource) {
+            $$parsedSource["assignees"] = $$createField6_0($$parsedSource["assignees"]);
+        }
+        return new IssueMetaDTO($$parsedSource as Partial<IssueMetaDTO>);
+    }
+}
+
+/**
  * LeaderStatusDTO is the state the desktop frontend receives on every
  * election tick via the "leaderStatus" Wails event and via
  * GetLeaderStatus on mount. It's a type alias of
@@ -716,6 +911,56 @@ export const LeaderStatusDTO = leaderservice$0.StatusDTO;
  * rooted at main.LeaderStatusDTO so the generated TS stays stable.
  */
 export type LeaderStatusDTO = leaderservice$0.StatusDTO;
+
+/**
+ * LinkedDocDTO is the per-doc shape used by the IssueWorkspace — the
+ * drawer-shaped DocLinkDTO plus the body content + source path +
+ * linked-via origin (so a doc reachable from both the issue and its
+ * feature renders one panel with "(issue + feature)"). Kept separate
+ * from DocLinkDTO so the existing drawer / Kanban card payloads don't
+ * get fattened.
+ */
+export class LinkedDocDTO {
+    "filename": string;
+    "type": string;
+    "description": string;
+    "sourcePath"?: string;
+    "linkedVia": string[];
+    "content": string;
+
+    /** Creates a new LinkedDocDTO instance. */
+    constructor($$source: Partial<LinkedDocDTO> = {}) {
+        if (!("filename" in $$source)) {
+            this["filename"] = "";
+        }
+        if (!("type" in $$source)) {
+            this["type"] = "";
+        }
+        if (!("description" in $$source)) {
+            this["description"] = "";
+        }
+        if (!("linkedVia" in $$source)) {
+            this["linkedVia"] = [];
+        }
+        if (!("content" in $$source)) {
+            this["content"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new LinkedDocDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): LinkedDocDTO {
+        const $$createField4_0 = $$createType0;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("linkedVia" in $$parsedSource) {
+            $$parsedSource["linkedVia"] = $$createField4_0($$parsedSource["linkedVia"]);
+        }
+        return new LinkedDocDTO($$parsedSource as Partial<LinkedDocDTO>);
+    }
+}
 
 /**
  * PRDTO is one attached pull request.
@@ -829,17 +1074,99 @@ export class PromptTemplateDTO {
     }
 }
 
+/**
+ * RelationDTO is one outgoing/incoming relation, resolved to the other
+ * end's issue key.
+ */
+export class RelationDTO {
+    /**
+     * blocks | relates_to | duplicate_of
+     */
+    "type": string;
+
+    /**
+     * the *other* end of the edge
+     */
+    "otherKey": string;
+
+    /** Creates a new RelationDTO instance. */
+    constructor($$source: Partial<RelationDTO> = {}) {
+        if (!("type" in $$source)) {
+            this["type"] = "";
+        }
+        if (!("otherKey" in $$source)) {
+            this["otherKey"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new RelationDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): RelationDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new RelationDTO($$parsedSource as Partial<RelationDTO>);
+    }
+}
+
+/**
+ * RelationsDTO splits an issue's relations into the outgoing edges
+ * (this issue → other) and incoming edges (other → this issue), each
+ * with the other end resolved to a key.
+ */
+export class RelationsDTO {
+    "outgoing": RelationDTO[];
+    "incoming": RelationDTO[];
+
+    /** Creates a new RelationsDTO instance. */
+    constructor($$source: Partial<RelationsDTO> = {}) {
+        if (!("outgoing" in $$source)) {
+            this["outgoing"] = [];
+        }
+        if (!("incoming" in $$source)) {
+            this["incoming"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new RelationsDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): RelationsDTO {
+        const $$createField0_0 = $$createType20;
+        const $$createField1_0 = $$createType20;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("outgoing" in $$parsedSource) {
+            $$parsedSource["outgoing"] = $$createField0_0($$parsedSource["outgoing"]);
+        }
+        if ("incoming" in $$parsedSource) {
+            $$parsedSource["incoming"] = $$createField1_0($$parsedSource["incoming"]);
+        }
+        return new RelationsDTO($$parsedSource as Partial<RelationsDTO>);
+    }
+}
+
 // Private type creation functions
 const $$createType0 = $Create.Array($Create.Any);
 const $$createType1 = FeatureLinkedIssue.createFrom;
 const $$createType2 = $Create.Array($$createType1);
 const $$createType3 = HistoryEntryDTO.createFrom;
 const $$createType4 = $Create.Array($$createType3);
-const $$createType5 = CommentDTO.createFrom;
-const $$createType6 = $Create.Array($$createType5);
-const $$createType7 = PRDTO.createFrom;
-const $$createType8 = $Create.Array($$createType7);
-const $$createType9 = DocLinkDTO.createFrom;
+const $$createType5 = IssueMetaDTO.createFrom;
+const $$createType6 = FeatureRefDTO.createFrom;
+const $$createType7 = $Create.Nullable($$createType6);
+const $$createType8 = RelationsDTO.createFrom;
+const $$createType9 = PRDTO.createFrom;
 const $$createType10 = $Create.Array($$createType9);
-const $$createType11 = agentcards$0.ClaimantDTO.createFrom;
+const $$createType11 = LinkedDocDTO.createFrom;
 const $$createType12 = $Create.Array($$createType11);
+const $$createType13 = CommentDTO.createFrom;
+const $$createType14 = $Create.Array($$createType13);
+const $$createType15 = agentcards$0.ClaimantDTO.createFrom;
+const $$createType16 = $Create.Array($$createType15);
+const $$createType17 = DocLinkDTO.createFrom;
+const $$createType18 = $Create.Array($$createType17);
+const $$createType19 = RelationDTO.createFrom;
+const $$createType20 = $Create.Array($$createType19);

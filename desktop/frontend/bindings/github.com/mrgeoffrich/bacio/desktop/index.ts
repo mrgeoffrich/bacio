@@ -30,11 +30,17 @@ export {
     DocSummary,
     FeatureDetail,
     FeatureLinkedIssue,
+    FeatureRefDTO,
     FeatureSummary,
     HistoryEntryDTO,
     HistoryPage,
+    IssueBriefDTO,
     IssueDetail,
+    IssueMetaDTO,
     LeaderStatusDTO,
+    LinkedDocDTO,
     PRDTO,
-    PromptTemplateDTO
+    PromptTemplateDTO,
+    RelationDTO,
+    RelationsDTO
 } from "./models.js";

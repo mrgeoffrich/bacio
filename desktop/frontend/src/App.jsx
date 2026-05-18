@@ -6,8 +6,7 @@ import DocsView from './components/DocsView.jsx';
 import FeaturesView from './components/FeaturesView.jsx';
 import AgentsView from './components/AgentsView.jsx';
 import HistoryView from './components/HistoryView.jsx';
-import IssueDrawer from './components/IssueDrawer.jsx';
-import IssueEditModal from './components/IssueEditModal.jsx';
+import IssueWorkspace from './components/IssueWorkspace.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
 import SettingsView from './components/SettingsView.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
@@ -59,8 +58,17 @@ export default function App() {
   const [activeBoard, setActiveBoard] = useState(readActiveRepo);
   const [activeView, setActiveView] = useState('board'); // 'board' | 'features' | 'docs' | 'agents' | 'history'
   const [cards, setCards] = useState([]);
-  const [openIssue, setOpenIssue] = useState(null);
-  const [editIssueOpen, setEditIssueOpen] = useState(false);
+  // The IssueWorkspace's routing state. openIssueKey is the source of
+  // truth for "which issue is open"; openIssueBrief is the App-owned
+  // brief payload (loaded eagerly on key change, polled every 10s
+  // while the view is mounted); previousView is the view to return to
+  // when the workspace closes. descEditing is propagated up by the
+  // workspace's InlineDescriptionEditor so the brief-poll merge can
+  // preserve the user's in-progress textarea buffer.
+  const [openIssueKey, setOpenIssueKey] = useState(null);
+  const [openIssueBrief, setOpenIssueBrief] = useState(null);
+  const [previousView, setPreviousView] = useState('board');
+  const [descEditing, setDescEditing] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [agents, setAgents] = useState([]);
@@ -182,6 +190,62 @@ export default function App() {
     if (activeBoard) persistActiveRepo(activeBoard);
   }, [activeBoard]);
 
+  // ---- Web-mode hash routing ----
+  //
+  // Web bundles reflect the open issue into the URL hash
+  // (`#/<prefix>/<key>`) so a workspace screen is shareable: copy-paste
+  // the URL into another tab and the same issue opens. Desktop ignores
+  // both effects via the WEB_MODE gate. No router library — single
+  // hashchange listener and a replaceState-based reflect so the
+  // browser history doesn't fill with one entry per card click.
+
+  // Inbound: react to a hash the user typed / pasted / navigated to.
+  // Only act on a real change to avoid fighting the outbound reflect.
+  useEffect(() => {
+    if (!WEB_MODE) return;
+    const parseHash = (hash) => {
+      const m = (hash || '').match(/^#\/([A-Za-z0-9]+)\/([A-Za-z0-9]+-\d+)$/);
+      return m ? { prefix: m[1], key: m[2] } : null;
+    };
+    const apply = () => {
+      const parsed = parseHash(window.location.hash);
+      if (parsed) {
+        if (parsed.prefix !== activeBoard) setActiveBoard(parsed.prefix);
+        if (parsed.key !== openIssueKey) {
+          setPreviousView(prev => activeView === 'issue' ? prev : activeView);
+          setOpenIssueKey(parsed.key);
+          setActiveView('issue');
+        }
+      } else if (openIssueKey) {
+        // The user cleared the hash (back button / Home link) — return
+        // to the previous view without re-pushing it onto history.
+        setOpenIssueKey(null);
+        setOpenIssueBrief(null);
+        setDescEditing(false);
+        setActiveView(previousView || 'board');
+      }
+    };
+    apply();
+    window.addEventListener('hashchange', apply);
+    return () => window.removeEventListener('hashchange', apply);
+    // activeBoard / openIssueKey / activeView / previousView are read
+    // through the `apply` closure but stable enough to skip from the
+    // deps array — re-binding on every change would churn the listener.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Outbound: when the open issue changes, write the canonical hash.
+  // replaceState (not pushState) keeps the browser history sane —
+  // opening 12 cards leaves 1 history entry, not 12.
+  useEffect(() => {
+    if (!WEB_MODE) return;
+    const desired = openIssueKey && activeBoard ? `#/${activeBoard}/${openIssueKey}` : '';
+    if (window.location.hash !== desired) {
+      const url = window.location.pathname + window.location.search + desired;
+      window.history.replaceState(null, '', url);
+    }
+  }, [openIssueKey, activeBoard]);
+
   // refreshCards / refreshAgents reload the App-owned card and agent lists
   // for the active repo. Used by the repo-change effect, the screen-switch
   // effect, the 10s poll, the Agents panel's refresh button, and after a
@@ -209,8 +273,9 @@ export default function App() {
   }, [activeBoard]);
 
   // Load cards + agents whenever the selected repository changes. Both stay
-  // loaded regardless of the active view — CommandPalette reads cards and
-  // IssueDrawer reads agents, and either can open from any screen.
+  // loaded regardless of the active view — CommandPalette reads cards
+  // (and IssueWorkspace reads them for prev/next siblings), the Agents
+  // tab reads agents, and either can open from any screen.
   useEffect(() => {
     if (!activeBoard) return;
     refreshCards();
@@ -239,34 +304,107 @@ export default function App() {
     return () => clearInterval(id);
   }, [activeView, activeBoard, refreshCards, refreshAgents]);
 
+  // refreshBrief reloads the IssueWorkspace payload for the open issue.
+  // Pass { silent: true } on the poll path so a transient failure logs
+  // instead of pushing through the modal — same convention as cards/agents.
+  // The descEditing guard preserves the user's in-progress description
+  // textarea: when set, the new brief is taken but its description is
+  // replaced by the previous one, so a poll landing mid-edit doesn't
+  // stomp the buffer. Everything else (tags, comments, claimants, ...)
+  // still refreshes.
+  const refreshBrief = useCallback((opts = {}) => {
+    if (!activeBoard || !openIssueKey) return;
+    api.getIssueBrief(activeBoard, openIssueKey)
+      .then(brief => {
+        setOpenIssueBrief(prev => {
+          if (descEditing && prev) {
+            return {
+              ...brief,
+              issue: { ...brief.issue, description: prev.issue.description },
+            };
+          }
+          return brief;
+        });
+      })
+      .catch(err => {
+        if (opts.silent) console.warn('brief refresh failed:', err);
+        else reportError(err, { headline: "Couldn't refresh issue" });
+      });
+  }, [activeBoard, openIssueKey, descEditing]);
+
+  // Eager load when openIssueKey changes (null → set, or one issue →
+  // another via prev/next). Clear the stale brief so the workspace
+  // skeleton renders instead of last issue's data flashing.
+  useEffect(() => {
+    if (!activeBoard || !openIssueKey) return;
+    setOpenIssueBrief(null);
+    refreshBrief();
+  }, [activeBoard, openIssueKey]);
+
+  // While the workspace is mounted, poll the brief every 10s alongside
+  // the other view polls. Off-screen views get no refresh; the cleanup
+  // clears the interval on close / repo change / unmount.
+  useEffect(() => {
+    if (!activeBoard || !openIssueKey || activeView !== 'issue') return;
+    const id = setInterval(() => refreshBrief({ silent: true }), POLL_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [activeBoard, openIssueKey, activeView, refreshBrief]);
+
+  // Open the issue workspace: remember where we came from, flip the
+  // view, and let the brief-load effect handle the fetch. SettingsView
+  // is also dismissed so the workspace is what the user sees.
+  const openCard = useCallback((card) => {
+    setSettingsOpen(false);
+    setPreviousView(prev => activeView === 'issue' ? prev : activeView);
+    setOpenIssueKey(card.key);
+    setActiveView('issue');
+  }, [activeView]);
+
+  // Close the workspace: clear the open issue and return to the view
+  // the user was on before opening it. The poll cleanup runs from its
+  // own effect when activeView flips.
+  const closeIssue = useCallback(() => {
+    setOpenIssueKey(null);
+    setOpenIssueBrief(null);
+    setDescEditing(false);
+    setActiveView(previousView || 'board');
+  }, [previousView]);
+
   useEffect(() => {
     const onKey = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setPaletteOpen(true);
       } else if (e.key === 'Escape') {
-        // IssueDrawer / IssueEditModal / SettingsView modals are Radix
-        // Dialogs and catch Escape themselves. Only the palette (still
-        // hand-rolled) needs the window-level handler.
-        setPaletteOpen(false);
+        // Palette + Settings are still hand-rolled; the workspace closes
+        // here when nothing else is in front of it.
+        if (paletteOpen) {
+          setPaletteOpen(false);
+        } else if (activeView === 'issue' && !isEditingTarget(e.target)) {
+          closeIssue();
+        } else if (settingsOpen) {
+          setSettingsOpen(false);
+        }
       } else if (!e.metaKey && !e.ctrlKey && !e.altKey && e.key >= '1' && e.key <= '9') {
         // Digit keys jump between nav views, like the TUI's tab shortcuts —
         // unless the user is typing into a field or the doc editor.
         if (isEditingTarget(e.target)) return;
         const idx = Number(e.key) - 1;
-        if (idx < NAV.length) setActiveView(NAV[idx].view);
+        if (idx < NAV.length) {
+          // Switching to a nav view from the workspace also clears the
+          // open issue so the breadcrumb pill disappears alongside.
+          if (activeView === 'issue') {
+            setOpenIssueKey(null);
+            setOpenIssueBrief(null);
+            setDescEditing(false);
+          }
+          setActiveView(NAV[idx].view);
+        }
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
-
-  // Open the issue drawer — fetch the full detail payload for the card.
-  const openCard = useCallback((card) => {
-    api.getIssue(activeBoard, card.key)
-      .then(setOpenIssue)
-      .catch(err => reportError(err, { headline: "Couldn't open issue" }));
-  }, [activeBoard]);
+  }, [paletteOpen, settingsOpen, activeView, closeIssue]);
 
   // Add a repository. Desktop pops a native folder picker (Wails);
   // web mode hands the path-input modal's submission through as a
@@ -345,34 +483,41 @@ export default function App() {
       .catch(err => reportError(err, { headline: "Couldn't cancel queued dispatch" }));
   }, [activeBoard]);
 
-  // Ship: close the drawer, optimistically flip the card to "done", and
-  // persist via setIssueState so the change survives the next 10s poll.
-  // Mirrors moveCard's shape; on failure, refresh from the source of
-  // truth rather than try to restore the (already-discarded) old state.
-  const ship = () => {
-    if (!openIssue) return;
-    const key = openIssue.key;
-    setOpenIssue(null);
-    setCards(cs => cs.map(c => c.key === key ? { ...c, column: 'done' } : c));
-    api.setIssueState(activeBoard, key, 'done')
-      .catch(err => {
-        reportError(err, { headline: "Couldn't ship issue" });
-        refreshCards();
-      });
-  };
+  // Workspace write callbacks — each wraps the existing api.* call and
+  // refreshes the brief so the inline view re-renders with the
+  // persisted state. Failures surface through reportError; the
+  // workspace components catch their own setBusy flags.
+  const saveDescription = useCallback(async (description) => {
+    if (!openIssueKey) return;
+    try {
+      await api.updateIssueDescription(activeBoard, openIssueKey, description);
+      refreshBrief();
+      // The Board card carries no description column, but the card list
+      // still benefits from a refresh so any concurrent state changes
+      // land on screen.
+      refreshCards({ silent: true });
+    } catch (err) {
+      reportError(err, { headline: "Couldn't save description" });
+      throw err;
+    }
+  }, [activeBoard, openIssueKey, refreshBrief, refreshCards]);
 
-  // The edit modal returns the refreshed IssueDetail after each write, so the
-  // drawer behind it reflects the new description / comment immediately.
-  const onIssueSaved = (updated) => {
-    setOpenIssue(updated);
-  };
+  const addComment = useCallback(async (author, body) => {
+    if (!openIssueKey) return;
+    try {
+      await api.addComment(activeBoard, openIssueKey, author, body);
+      refreshBrief();
+    } catch (err) {
+      reportError(err, { headline: "Couldn't add comment" });
+      throw err;
+    }
+  }, [activeBoard, openIssueKey, refreshBrief]);
 
-  // Closing the drawer also dismisses the edit modal — otherwise its open
-  // flag would survive and re-trigger when the next issue is opened.
-  const closeDrawer = () => {
-    setOpenIssue(null);
-    setEditIssueOpen(false);
-  };
+  const attachPR = useCallback(async (url) => {
+    if (!openIssueKey) return;
+    await api.attachPullRequest(activeBoard, openIssueKey, url);
+    refreshBrief();
+  }, [activeBoard, openIssueKey, refreshBrief]);
 
   return (
     <TooltipProvider delayDuration={250} skipDelayDuration={150}>
@@ -383,10 +528,22 @@ export default function App() {
         onPickBoard={setActiveBoard}
         onAddRepository={addRepository}
         activeView={activeView}
-        onChangeView={(v) => { setSettingsOpen(false); setActiveView(v); }}
+        onChangeView={(v) => {
+          setSettingsOpen(false);
+          // Switching to a nav view from the workspace also clears the
+          // open-issue state so the breadcrumb pill disappears.
+          if (activeView === 'issue') {
+            setOpenIssueKey(null);
+            setOpenIssueBrief(null);
+            setDescEditing(false);
+          }
+          setActiveView(v);
+        }}
         onOpenPalette={() => setPaletteOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
         leaderState={leaderState}
+        openIssueKey={openIssueKey}
+        onCloseIssue={closeIssue}
       />
       {loading ? (
         <div className="mk-app-state">Loading…</div>
@@ -418,6 +575,23 @@ export default function App() {
         <ErrorBoundary headline="Something went wrong in History" label="The History view crashed">
           <HistoryView activeBoard={activeBoard} />
         </ErrorBoundary>
+      ) : activeView === 'issue' ? (
+        <ErrorBoundary headline="Something went wrong in the issue view" label="The issue view crashed">
+          <IssueWorkspace
+            openIssueKey={openIssueKey}
+            brief={openIssueBrief}
+            promptConfig={promptConfig}
+            cards={cards}
+            onClose={closeIssue}
+            onSaveDescription={saveDescription}
+            onAddComment={addComment}
+            onDispatch={(mode) => dispatchFromCard(openIssueKey, mode)}
+            onCancelWaiting={() => cancelWaitingFromCard(openIssueKey)}
+            onAttachPR={attachPR}
+            onNavigateIssue={(key) => setOpenIssueKey(key)}
+            onDescEditingChange={setDescEditing}
+          />
+        </ErrorBoundary>
       ) : (
         <ErrorBoundary headline="Something went wrong on the board" label="The Board view crashed">
           <Board
@@ -429,24 +603,6 @@ export default function App() {
             onOpenCard={openCard}
             onDispatchFromCard={dispatchFromCard}
             onCancelWaitingCard={cancelWaitingFromCard}
-          />
-        </ErrorBoundary>
-      )}
-      <ErrorBoundary headline="Something went wrong in the issue drawer" label="The issue drawer crashed">
-        <IssueDrawer
-          issue={openIssue}
-          onClose={closeDrawer}
-          onShip={ship}
-          onEdit={() => setEditIssueOpen(true)}
-        />
-      </ErrorBoundary>
-      {editIssueOpen && openIssue && (
-        <ErrorBoundary headline="Something went wrong in the edit modal" label="The edit modal crashed">
-          <IssueEditModal
-            issue={openIssue}
-            repoPrefix={activeBoard}
-            onClose={() => setEditIssueOpen(false)}
-            onSaved={onIssueSaved}
           />
         </ErrorBoundary>
       )}

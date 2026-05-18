@@ -87,6 +87,80 @@ type DocLinkDTO struct {
 	Description string `json:"description"` // the link's --why reason
 }
 
+// LinkedDocDTO is the per-doc shape used by the IssueWorkspace — the
+// drawer-shaped DocLinkDTO plus the body content + source path +
+// linked-via origin (so a doc reachable from both the issue and its
+// feature renders one panel with "(issue + feature)"). Kept separate
+// from DocLinkDTO so the existing drawer / Kanban card payloads don't
+// get fattened.
+type LinkedDocDTO struct {
+	Filename    string   `json:"filename"`
+	Type        string   `json:"type"`
+	Description string   `json:"description"`
+	SourcePath  string   `json:"sourcePath,omitempty"`
+	LinkedVia   []string `json:"linkedVia"`
+	Content     string   `json:"content"`
+}
+
+// FeatureRefDTO is the lightweight feature reference attached to an
+// issue brief — slug + title. Just enough to render the feature pill
+// in the workspace rail without leaking the full FeatureDetail.
+type FeatureRefDTO struct {
+	Slug  string `json:"slug"`
+	Title string `json:"title"`
+}
+
+// RelationDTO is one outgoing/incoming relation, resolved to the other
+// end's issue key.
+type RelationDTO struct {
+	Type     string `json:"type"`     // blocks | relates_to | duplicate_of
+	OtherKey string `json:"otherKey"` // the *other* end of the edge
+}
+
+// RelationsDTO splits an issue's relations into the outgoing edges
+// (this issue → other) and incoming edges (other → this issue), each
+// with the other end resolved to a key.
+type RelationsDTO struct {
+	Outgoing []RelationDTO `json:"outgoing"`
+	Incoming []RelationDTO `json:"incoming"`
+}
+
+// IssueMetaDTO is the workspace's issue-header payload: the bits the
+// rail and primary column read repeatedly without going through the
+// rest of the brief. Mirrors the BoardCard shape (column + label +
+// title + tags + assignees), plus the description and the derived
+// taken / waitingForClaim flags so the IssueWorkspace doesn't have to
+// hop between brief.issue.{...} and brief.{taken,waitingForClaim}.
+type IssueMetaDTO struct {
+	Key             string   `json:"key"`
+	Column          string   `json:"column"`
+	ColumnLabel     string   `json:"columnLabel"`
+	Title           string   `json:"title"`
+	Description     string   `json:"description"`
+	Tags            []string `json:"tags"`
+	Assignees       []string `json:"assignees"`
+	Claude          bool     `json:"claude"`
+	Taken           bool     `json:"taken"`
+	WaitingForClaim bool     `json:"waitingForClaim"`
+}
+
+// IssueBriefDTO is the workspace-shaped payload — BoardService.GetIssueBrief's
+// return value, mirroring internal/client/views.go::IssueBrief with desktop
+// camelCase JSON tags. New fields over IssueDetail: feature, relations,
+// waitingForClaim, warnings, and doc content (via LinkedDocDTO).
+type IssueBriefDTO struct {
+	Issue           IssueMetaDTO   `json:"issue"`
+	Feature         *FeatureRefDTO `json:"feature,omitempty"`
+	Relations       RelationsDTO   `json:"relations"`
+	PullRequests    []PRDTO        `json:"pullRequests"`
+	Documents       []LinkedDocDTO `json:"documents"`
+	Comments        []CommentDTO   `json:"comments"`
+	Claimants       []ClaimantDTO  `json:"claimants"`
+	Taken           bool           `json:"taken"`
+	WaitingForClaim bool           `json:"waitingForClaim"`
+	Warnings        []string       `json:"warnings"`
+}
+
 // IssueDetail is the issue-drawer payload for a single issue.
 type IssueDetail struct {
 	Key          string        `json:"key"`
@@ -344,6 +418,126 @@ func (b *BoardService) GetIssue(repoPrefix, key string) (IssueDetail, error) {
 		Claimants:    claimants,
 		Taken:        view.Taken,
 	}, nil
+}
+
+// GetIssueBrief returns the workspace-shaped bulk payload for one
+// issue — issue meta + feature reference + relations (both directions)
+// + linked documents with body content (deduped between issue-link
+// and feature-link sources) + pull requests + comments + claimants +
+// derived taken / waitingForClaim flags. Backs the IssueWorkspace
+// top-level view; replaces the drawer's GetIssue payload for that
+// surface but doesn't retire GetIssue (the older payload still backs
+// callers like the IssueDrawer until BACI-54's deletion step). The
+// repo prefix may be empty or "all" — canonical issue keys (PREFIX-N)
+// resolve without one.
+func (b *BoardService) GetIssueBrief(repoPrefix, key string) (IssueBriefDTO, error) {
+	ctx := context.Background()
+	var repo *model.Repo
+	if repoPrefix != "" && repoPrefix != "all" {
+		r, err := b.client.GetRepoByPrefix(ctx, repoPrefix)
+		if err != nil {
+			return IssueBriefDTO{}, err
+		}
+		repo = r
+	}
+	brief, err := b.client.BriefIssue(ctx, repo, key, client.BriefOptions{})
+	if err != nil {
+		return IssueBriefDTO{}, err
+	}
+	iss := brief.Issue
+
+	tags := iss.Tags
+	if tags == nil {
+		tags = []string{}
+	}
+	meta := IssueMetaDTO{
+		Key:             iss.Key,
+		Column:          string(iss.State),
+		ColumnLabel:     stateLabel(iss.State),
+		Title:           iss.Title,
+		Description:     iss.Description,
+		Tags:            tags,
+		Assignees:       assigneeList(iss.Assignee),
+		Claude:          iss.Assignee == "claude",
+		Taken:           brief.Taken,
+		WaitingForClaim: iss.WaitingForClaim,
+	}
+
+	var feat *FeatureRefDTO
+	if brief.Feature != nil {
+		feat = &FeatureRefDTO{Slug: brief.Feature.Slug, Title: brief.Feature.Title}
+	}
+
+	rels := RelationsDTO{Outgoing: []RelationDTO{}, Incoming: []RelationDTO{}}
+	if brief.Relations != nil {
+		for _, r := range brief.Relations.Outgoing {
+			rels.Outgoing = append(rels.Outgoing, RelationDTO{Type: string(r.Type), OtherKey: r.ToIssue})
+		}
+		for _, r := range brief.Relations.Incoming {
+			rels.Incoming = append(rels.Incoming, RelationDTO{Type: string(r.Type), OtherKey: r.FromIssue})
+		}
+	}
+
+	prs := make([]PRDTO, 0, len(brief.PullRequests))
+	for _, p := range brief.PullRequests {
+		prs = append(prs, PRDTO{URL: p.URL})
+	}
+
+	docs := make([]LinkedDocDTO, 0, len(brief.Documents))
+	for _, d := range brief.Documents {
+		via := d.LinkedVia
+		if via == nil {
+			via = []string{}
+		}
+		docs = append(docs, LinkedDocDTO{
+			Filename:    d.Filename,
+			Type:        string(d.Type),
+			Description: d.Description,
+			SourcePath:  d.SourcePath,
+			LinkedVia:   via,
+			Content:     d.Content,
+		})
+	}
+
+	comments := make([]CommentDTO, 0, len(brief.Comments))
+	for _, c := range brief.Comments {
+		comments = append(comments, CommentDTO{Author: c.Author, Body: c.Body, CreatedAt: c.CreatedAt})
+	}
+
+	warnings := brief.Warnings
+	if warnings == nil {
+		warnings = []string{}
+	}
+
+	return IssueBriefDTO{
+		Issue:           meta,
+		Feature:         feat,
+		Relations:       rels,
+		PullRequests:    prs,
+		Documents:       docs,
+		Comments:        comments,
+		Claimants:       agentcards.MapClaimants(brief.Claimants),
+		Taken:           brief.Taken,
+		WaitingForClaim: iss.WaitingForClaim,
+		Warnings:        warnings,
+	}, nil
+}
+
+// AttachPullRequest attaches a pull-request URL to an issue and returns
+// the resolved PRDTO. Validation (http/https + host) lives in the
+// store layer; an invalid URL surfaces as the original error message
+// for the IssueWorkspace's PR-attach form to display.
+func (b *BoardService) AttachPullRequest(repoPrefix, key, url string) (PRDTO, error) {
+	ctx := context.Background()
+	repo, err := b.resolveRepoForKey(ctx, repoPrefix, key)
+	if err != nil {
+		return PRDTO{}, err
+	}
+	pr, err := b.client.AttachPR(ctx, repo, key, url, false)
+	if err != nil {
+		return PRDTO{}, err
+	}
+	return PRDTO{URL: pr.URL}, nil
 }
 
 // UpdateIssueDescription replaces an issue's description and returns the
