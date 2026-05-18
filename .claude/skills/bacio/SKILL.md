@@ -914,13 +914,29 @@ bacio settings template set-concurrency <slug> <n>
                                         enforces. 0 = unlimited; positive
                                         integers cap. Built-in `ship` seeds
                                         to 1; everything else seeds to 0.
+
+bacio settings template set-action-label <slug> [<label>]
+                                        BACI-67: set the imperative
+                                        action_label override rendered on
+                                        the dispatch action menus
+                                        (kanban-card + issue-workspace
+                                        dropdowns). Empty <label> (or no
+                                        positional) clears the override —
+                                        the UI then derives one from the
+                                        gerund `name` via the
+                                        gerund→imperative rule. The
+                                        activity pill on a taken card
+                                        keeps using `name` (lower-cased).
 ```
 
 Every mutating verb honours `--json`, `--dry-run`, and `bacio schema
 show settings.template.<verb>` per the six agent-CLI principles. Schema
 names: `settings.template.add` / `set` / `reset` / `rename` / `rm` /
 `restore-defaults` / `states.set` / `states.reset` /
-`set-concurrency`. A template body may
+`set-concurrency` / `set-action-label`. `settings.template.add` carries
+an optional `action_label` field (or `--action-label` flag on the
+positional path) so a new template can ship with both the gerund name
+and the imperative button text in one call. A template body may
 interpolate `{{issue_id}}`, `{{issue_title}}`, and `{{repo_prefix}}` —
 substituted with the dispatched issue's context at dispatch time; an
 unknown `{{...}}` token is left verbatim. The `bacio settings template

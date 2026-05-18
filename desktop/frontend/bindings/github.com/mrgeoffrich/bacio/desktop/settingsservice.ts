@@ -17,10 +17,12 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 import * as $models from "./models.js";
 
 /**
- * AddPromptTemplate creates a brand-new template.
+ * AddPromptTemplate creates a brand-new template. actionLabel is the
+ * BACI-67 imperative override rendered on the dispatch action menus;
+ * pass "" to skip the override (the UI derives one from name).
  */
-export function AddPromptTemplate(slug: string, name: string, body: string, states: string[]): $CancellablePromise<$models.PromptTemplateDTO> {
-    return $Call.ByID(2314996611, slug, name, body, states).then(($result: any) => {
+export function AddPromptTemplate(slug: string, name: string, body: string, states: string[], actionLabel: string): $CancellablePromise<$models.PromptTemplateDTO> {
+    return $Call.ByID(2314996611, slug, name, body, states, actionLabel).then(($result: any) => {
         return $$createType0($result);
     });
 }
@@ -99,6 +101,18 @@ export function RenamePromptTemplate(slug: string, newSlug: string, newName: str
 export function RestoreBuiltinPromptTemplates(): $CancellablePromise<$models.PromptTemplateDTO[]> {
     return $Call.ByID(3843909418).then(($result: any) => {
         return $$createType2($result);
+    });
+}
+
+/**
+ * SavePromptActionLabel (BACI-67) updates a template's imperative
+ * override — the verb the dispatch action menus render. An empty
+ * actionLabel clears the override (the UI then derives from Name via
+ * the gerund→imperative rule).
+ */
+export function SavePromptActionLabel(slug: string, actionLabel: string): $CancellablePromise<$models.PromptTemplateDTO> {
+    return $Call.ByID(2418293349, slug, actionLabel).then(($result: any) => {
+        return $$createType0($result);
     });
 }
 

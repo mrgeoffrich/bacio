@@ -33,6 +33,16 @@ type PromptTemplateDTO struct {
 	ConcurrencyLimit        int      `json:"concurrencyLimit"`
 	DefaultConcurrencyLimit int      `json:"defaultConcurrencyLimit"`
 	ConcurrencyIsDefault    bool     `json:"concurrencyIsDefault"`
+	// BACI-67: imperative override rendered on the dispatch action
+	// menus. ActionLabel is the persisted value (empty = derive from
+	// Name via the gerund→imperative rule); DefaultActionLabel is the
+	// built-in imperative seed for the slug (empty for user-created
+	// templates); ActionLabelIsDefault reports whether the persisted
+	// override still matches the built-in default — drives the
+	// Settings panel's "reset" affordance.
+	ActionLabel          string `json:"actionLabel"`
+	DefaultActionLabel   string `json:"defaultActionLabel"`
+	ActionLabelIsDefault bool   `json:"actionLabelIsDefault"`
 }
 
 // SettingsService is the Wails-bound API for the desktop Settings panel.
@@ -95,6 +105,7 @@ func dtoForTemplate(t *store.PromptTemplate) PromptTemplateDTO {
 		}
 	}
 	defConc := model.DefaultConcurrencyLimit(t.Slug)
+	defAction := model.BuiltinTemplateActionLabel(t.Slug)
 	return PromptTemplateDTO{
 		Slug:                    t.Slug,
 		Mode:                    t.Slug,
@@ -109,6 +120,9 @@ func dtoForTemplate(t *store.PromptTemplate) PromptTemplateDTO {
 		ConcurrencyLimit:        t.ConcurrencyLimit,
 		DefaultConcurrencyLimit: defConc,
 		ConcurrencyIsDefault:    t.IsBuiltin && t.ConcurrencyLimit == defConc,
+		ActionLabel:             t.ActionLabel,
+		DefaultActionLabel:      defAction,
+		ActionLabelIsDefault:    t.IsBuiltin && t.ActionLabel == defAction,
 	}
 }
 
@@ -163,19 +177,37 @@ func (s *SettingsService) SavePromptConcurrency(slug string, concurrencyLimit in
 	return s.refreshedDTO(ctx, slug)
 }
 
-// AddPromptTemplate creates a brand-new template.
-func (s *SettingsService) AddPromptTemplate(slug, name, body string, states []string) (PromptTemplateDTO, error) {
+// AddPromptTemplate creates a brand-new template. actionLabel is the
+// BACI-67 imperative override rendered on the dispatch action menus;
+// pass "" to skip the override (the UI derives one from name).
+func (s *SettingsService) AddPromptTemplate(slug, name, body string, states []string, actionLabel string) (PromptTemplateDTO, error) {
 	ctx := context.Background()
 	t, err := s.client.AddPromptTemplate(ctx, inputs.SettingsTemplateAddInput{
-		Slug:   slug,
-		Name:   name,
-		Body:   body,
-		States: states,
+		Slug:        slug,
+		Name:        name,
+		Body:        body,
+		States:      states,
+		ActionLabel: actionLabel,
 	}, false)
 	if err != nil {
 		return PromptTemplateDTO{}, err
 	}
 	return dtoForTemplate(t), nil
+}
+
+// SavePromptActionLabel (BACI-67) updates a template's imperative
+// override — the verb the dispatch action menus render. An empty
+// actionLabel clears the override (the UI then derives from Name via
+// the gerund→imperative rule).
+func (s *SettingsService) SavePromptActionLabel(slug, actionLabel string) (PromptTemplateDTO, error) {
+	ctx := context.Background()
+	if _, err := s.client.SetPromptTemplateActionLabel(ctx, inputs.SettingsTemplateSetActionLabelInput{
+		Slug:        slug,
+		ActionLabel: actionLabel,
+	}, false); err != nil {
+		return PromptTemplateDTO{}, err
+	}
+	return s.refreshedDTO(ctx, slug)
 }
 
 // RenamePromptTemplate renames an existing template — either the slug,

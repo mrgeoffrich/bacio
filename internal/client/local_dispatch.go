@@ -514,6 +514,35 @@ func (c *localClient) RestoreBuiltinPromptTemplates(ctx context.Context, dryRun 
 	return created, nil
 }
 
+func (c *localClient) SetPromptTemplateActionLabel(ctx context.Context, in inputs.SettingsTemplateSetActionLabelInput, dryRun bool) (*store.PromptTemplate, error) {
+	existing, err := c.store.GetPromptTemplateBySlug(in.Slug)
+	if err != nil {
+		return nil, err
+	}
+	cleaned, err := store.ValidatePromptTemplateActionLabel(in.ActionLabel)
+	if err != nil {
+		return nil, err
+	}
+	if dryRun {
+		// Project the would-be row without writing — mirrors the
+		// dry-run shape every other template mutator uses.
+		proj := *existing
+		proj.ActionLabel = cleaned
+		return &proj, nil
+	}
+	updated, err := c.store.SetPromptTemplateActionLabel(in.Slug, cleaned)
+	if err != nil {
+		return nil, err
+	}
+	id := updated.ID
+	c.recordOp(model.HistoryEntry{
+		Op: "template.set_action_label", Kind: "app_setting",
+		TargetID: &id, TargetLabel: "prompt_template:" + updated.Slug,
+		Details: fmt.Sprintf("slug=%s, action_label=%q", updated.Slug, updated.ActionLabel),
+	})
+	return updated, nil
+}
+
 func (c *localClient) SetPromptTemplateConcurrencyLimit(ctx context.Context, in inputs.SettingsTemplateSetConcurrencyInput, dryRun bool) (*store.PromptTemplate, error) {
 	existing, err := c.store.GetPromptTemplateBySlug(in.Slug)
 	if err != nil {

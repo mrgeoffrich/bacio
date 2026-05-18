@@ -57,15 +57,16 @@ type settingsView struct {
 	confirmReset  bool
 
 	// Per-overlay sub-state.
-	editIdx   int
-	editPane  settingsPane
-	ta        textarea.Model
-	slugInput textinput.Model
-	nameInput textinput.Model
-	gateStates map[model.State]bool
-	gateCur    int
-	addFocus   addField
-	editErr    error
+	editIdx          int
+	editPane         settingsPane
+	ta               textarea.Model
+	slugInput        textinput.Model
+	nameInput        textinput.Model
+	actionLabelInput textinput.Model
+	gateStates       map[model.State]bool
+	gateCur          int
+	addFocus         addField
+	editErr          error
 }
 
 type settingsPane int
@@ -81,6 +82,7 @@ type addField int
 const (
 	addFieldSlug addField = iota
 	addFieldName
+	addFieldActionLabel
 	addFieldBody
 	addFieldGate
 )
@@ -123,14 +125,17 @@ func (s *settingsView) refreshStage(idx int) {
 	if label == "" {
 		label = t.Slug
 	}
+	defAction := model.BuiltinTemplateActionLabel(t.Slug)
 	s.stages[idx] = stageRow{
-		slug:          t.Slug,
-		label:         label,
-		body:          t.Body,
-		states:        append([]model.State(nil), t.AllowedStates...),
-		bodyIsDefault: t.IsBuiltin && t.Body == model.DefaultPromptBodyForBuiltinSlug(t.Slug),
-		statesDefault: t.IsBuiltin && sameStates(t.AllowedStates, model.DefaultPromptStatesForBuiltinSlug(t.Slug)),
-		isBuiltin:     t.IsBuiltin,
+		slug:            t.Slug,
+		label:           label,
+		body:            t.Body,
+		actionLabel:     t.ActionLabel,
+		states:          append([]model.State(nil), t.AllowedStates...),
+		bodyIsDefault:   t.IsBuiltin && t.Body == model.DefaultPromptBodyForBuiltinSlug(t.Slug),
+		statesDefault:   t.IsBuiltin && sameStates(t.AllowedStates, model.DefaultPromptStatesForBuiltinSlug(t.Slug)),
+		actionIsDefault: t.IsBuiltin && t.ActionLabel == defAction,
+		isBuiltin:       t.IsBuiltin,
 	}
 }
 
@@ -151,6 +156,7 @@ func (s *settingsView) CloseOverlay() {
 	s.ta.Blur()
 	s.slugInput.Blur()
 	s.nameInput.Blur()
+	s.actionLabelInput.Blur()
 }
 
 // CapturesInput is true only while a focused textarea / textinput is
@@ -162,7 +168,8 @@ func (s *settingsView) CapturesInput() bool {
 	case s.editing && s.editPane == paneBody:
 		return true
 	case s.adding:
-		return s.addFocus == addFieldSlug || s.addFocus == addFieldName || s.addFocus == addFieldBody
+		return s.addFocus == addFieldSlug || s.addFocus == addFieldName ||
+			s.addFocus == addFieldActionLabel || s.addFocus == addFieldBody
 	case s.renaming:
 		return true
 	default:
@@ -451,6 +458,14 @@ func (s *settingsView) openAdd() tea.Cmd {
 	s.nameInput.CharLimit = 80
 	s.nameInput.Width = 40
 
+	// BACI-67: optional imperative override rendered on the dispatch
+	// action menus. Empty value = "derive from display name" via
+	// model.DeriveActionLabel.
+	s.actionLabelInput = textinput.New()
+	s.actionLabelInput.Placeholder = "Action label (optional; empty = derive from name)"
+	s.actionLabelInput.CharLimit = 80
+	s.actionLabelInput.Width = 40
+
 	ta := textarea.New()
 	ta.Prompt = ""
 	ta.ShowLineNumbers = false
@@ -492,6 +507,10 @@ func (s *settingsView) updateAdd(msg tea.Msg) tea.Cmd {
 		var cmd tea.Cmd
 		s.nameInput, cmd = s.nameInput.Update(msg)
 		return cmd
+	case addFieldActionLabel:
+		var cmd tea.Cmd
+		s.actionLabelInput, cmd = s.actionLabelInput.Update(msg)
+		return cmd
 	case addFieldBody:
 		var cmd tea.Cmd
 		s.ta, cmd = s.ta.Update(msg)
@@ -518,7 +537,7 @@ func (s *settingsView) updateAdd(msg tea.Msg) tea.Cmd {
 }
 
 func (s *settingsView) cycleAddField(delta int) tea.Cmd {
-	fields := []addField{addFieldSlug, addFieldName, addFieldBody, addFieldGate}
+	fields := []addField{addFieldSlug, addFieldName, addFieldActionLabel, addFieldBody, addFieldGate}
 	var idx int
 	for i, f := range fields {
 		if f == s.addFocus {
@@ -530,12 +549,15 @@ func (s *settingsView) cycleAddField(delta int) tea.Cmd {
 	s.addFocus = fields[idx]
 	s.slugInput.Blur()
 	s.nameInput.Blur()
+	s.actionLabelInput.Blur()
 	s.ta.Blur()
 	switch s.addFocus {
 	case addFieldSlug:
 		return s.slugInput.Focus()
 	case addFieldName:
 		return s.nameInput.Focus()
+	case addFieldActionLabel:
+		return s.actionLabelInput.Focus()
 	case addFieldBody:
 		return s.ta.Focus()
 	}
@@ -555,6 +577,7 @@ func (s *settingsView) commitAdd() {
 		Name:          s.nameInput.Value(),
 		Body:          s.ta.Value(),
 		AllowedStates: states,
+		ActionLabel:   s.actionLabelInput.Value(),
 	}
 	t, err := s.store.AddPromptTemplate(in)
 	if err != nil {
@@ -828,6 +851,7 @@ func (s *settingsView) viewAdd(width, height int) string {
 	s.ta.SetHeight(taHeight)
 	s.slugInput.Width = innerWidth - 6
 	s.nameInput.Width = innerWidth - 6
+	s.actionLabelInput.Width = innerWidth - 6
 
 	on := make([]model.State, 0)
 	all := model.AllStates()
@@ -841,8 +865,10 @@ func (s *settingsView) viewAdd(width, height int) string {
 		headerBar, "",
 		paneLabel("Slug", s.addFocus == addFieldSlug),
 		lipgloss.NewStyle().Padding(0, 1).Render(s.slugInput.View()),
-		paneLabel("Name", s.addFocus == addFieldName),
+		paneLabel("Name (gerund — used by activity pill)", s.addFocus == addFieldName),
 		lipgloss.NewStyle().Padding(0, 1).Render(s.nameInput.View()),
+		paneLabel("Action label (imperative — dispatch button text; empty = derive from name)", s.addFocus == addFieldActionLabel),
+		lipgloss.NewStyle().Padding(0, 1).Render(s.actionLabelInput.View()),
 		paneLabel("Body", s.addFocus == addFieldBody),
 		lipgloss.NewStyle().Padding(0, 1).Render(s.ta.View()),
 		paneLabel("Valid from states", s.addFocus == addFieldGate),

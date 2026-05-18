@@ -416,6 +416,102 @@ func BuiltinTemplateLabel(slug string) string {
 	return builtinTemplateLabels[slug]
 }
 
+// builtinTemplateActionLabels gives each built-in slug an imperative
+// action label — used by the seed step (the table's `action_label`
+// column) and as a fallback when the dropdown surface wants the verb
+// form ("Plan", "Design", …) instead of the gerund stored in Name
+// ("Planning", "Designing", …). BACI-67: the dispatch action menus
+// (kanban card + issue workspace shelf + TUI per-card picker) render
+// the action label so the button reads as a call to action; the
+// activity pill on a taken card continues to lowercase Name for the
+// status-description form. The reserved _dispatch_preamble row has
+// no state-gate and never reaches a dropdown, so it's omitted —
+// BuiltinTemplateActionLabel returns "" for it.
+var builtinTemplateActionLabels = map[string]string{
+	BuiltinTemplatePlan:      "Plan",
+	BuiltinTemplateDesign:    "Design",
+	BuiltinTemplateImplement: "Implement",
+	BuiltinTemplateReview:    "Review",
+	BuiltinTemplateShip:      "Ship",
+	BuiltinTemplateFixReview: "Fix review",
+}
+
+// BuiltinTemplateActionLabel returns the imperative action label for a
+// built-in template slug, or "" if the slug isn't a built-in (the
+// derivation fallback then runs on the stored Name). Mirrors the
+// BuiltinTemplateLabel shape so the seed step / restore-defaults can
+// pair the two with no extra plumbing.
+func BuiltinTemplateActionLabel(slug string) string {
+	return builtinTemplateActionLabels[slug]
+}
+
+// DeriveActionLabel turns a gerund display name ("Planning", "Shipping")
+// into its imperative form ("Plan", "Ship") for use as a dispatch
+// dropdown label when no explicit action_label override has been
+// stored. Used as the UI-side fallback: a user-created template that
+// hasn't set action_label gets a reasonable default without forcing
+// every editor to fill the field in.
+//
+// Rules (applied in order; the first match wins):
+//
+//   - "ying" (>= 5 chars, e.g. "Spying"): strip "ying" and append "y"
+//     ("Spy") — covers consonant+y verbs.
+//   - "ing" preceded by a doubled consonant ("nning", "pping",
+//     "tting" …): strip the suffix + one of the doubled consonants
+//     so "Planning" → "Plan", "Shipping" → "Ship".
+//   - "ing" (>= 5 chars): strip just the "ing" suffix so
+//     "Designing" → "Design", "Reviewing" → "Review".
+//   - Otherwise the Name is returned verbatim — already imperative
+//     ("Plan"), too short to safely strip ("Sing", "Ring"), or a
+//     non-English / unusual name where derivation would do more
+//     harm than good.
+//
+// The derivation is intentionally simple. A user who wants precise
+// wording (e.g. "Fix review" vs "Fix reviews", or "Sprint plan" from
+// "Sprint planning") sets action_label explicitly; the column is the
+// source of truth.
+func DeriveActionLabel(name string) string {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return ""
+	}
+	lower := strings.ToLower(trimmed)
+	if len(lower) >= 5 && strings.HasSuffix(lower, "ying") {
+		// "Spying" → "Spy"; preserve original case of the leading
+		// chars by slicing the original string.
+		return trimmed[:len(trimmed)-4] + "y"
+	}
+	if len(lower) >= 6 && strings.HasSuffix(lower, "ing") {
+		// Check for doubled-consonant gerund (e.g. "planning" — the
+		// last char before "ing" is "n", and the char before that is
+		// also "n"). Strip the doubled consonant + "ing" so "Planning"
+		// → "Plan", "Shipping" → "Ship", "Stopping" → "Stop".
+		c1 := lower[len(lower)-4]
+		c2 := lower[len(lower)-5]
+		if c1 == c2 && isConsonant(c1) {
+			return trimmed[:len(trimmed)-4]
+		}
+	}
+	if len(lower) >= 5 && strings.HasSuffix(lower, "ing") {
+		return trimmed[:len(trimmed)-3]
+	}
+	return trimmed
+}
+
+// isConsonant reports whether b is an ASCII consonant (lowercase
+// letter that is not a vowel and not 'y'). Used by DeriveActionLabel
+// to spot doubled-consonant gerunds like "nn"/"pp"/"tt".
+func isConsonant(b byte) bool {
+	if b < 'a' || b > 'z' {
+		return false
+	}
+	switch b {
+	case 'a', 'e', 'i', 'o', 'u', 'y':
+		return false
+	}
+	return true
+}
+
 // BuiltinTemplateShipConcurrency is the per-(repo, mode) cap the matcher
 // applies to ship-it by default (BACI-51). 1 = at most one ship-it
 // dispatch in flight per repo, so merging is serialised — the user

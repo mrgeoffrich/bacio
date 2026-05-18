@@ -611,6 +611,16 @@ bacio-side per-session cap is enforced; the per-template
 `prompt_templates.concurrency_limit` (BACI-51) is per-(repo, mode),
 not per-session, and would over-serialise.
 
+### Two display strings per template (BACI-67)
+
+`prompt_templates.action_label` is the imperative button text the
+dispatch action menus render ("Plan", "Design", "Implement"); the
+gerund `name` ("Planning", "Designing", …) keeps feeding the
+lower-cased activity-pill derivation on a taken card. Setting
+`action_label` doesn't affect the activity verb, and the matcher /
+state-gate / payload composition are all keyed on `slug`, so a
+rename of either string is purely cosmetic.
+
 Cancelling a dispatch in flight (the TUI `X` keybind on a waiting
 card, the desktop spinner-as-cancel button, `bacio agent cancel`)
 clears the queued dispatch and resets `waiting_for_claim`, but

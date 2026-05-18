@@ -960,6 +960,19 @@ export class PromptTemplateDTO {
     "defaultConcurrencyLimit": number;
     "concurrencyIsDefault": boolean;
 
+    /**
+     * BACI-67: imperative override rendered on the dispatch action
+     * menus. ActionLabel is the persisted value (empty = derive from
+     * Name via the gerund→imperative rule); DefaultActionLabel is the
+     * built-in imperative seed for the slug (empty for user-created
+     * templates); ActionLabelIsDefault reports whether the persisted
+     * override still matches the built-in default — drives the
+     * Settings panel's "reset" affordance.
+     */
+    "actionLabel": string;
+    "defaultActionLabel": string;
+    "actionLabelIsDefault": boolean;
+
     /** Creates a new PromptTemplateDTO instance. */
     constructor($$source: Partial<PromptTemplateDTO> = {}) {
         if (!("slug" in $$source)) {
@@ -1000,6 +1013,15 @@ export class PromptTemplateDTO {
         }
         if (!("concurrencyIsDefault" in $$source)) {
             this["concurrencyIsDefault"] = false;
+        }
+        if (!("actionLabel" in $$source)) {
+            this["actionLabel"] = "";
+        }
+        if (!("defaultActionLabel" in $$source)) {
+            this["defaultActionLabel"] = "";
+        }
+        if (!("actionLabelIsDefault" in $$source)) {
+            this["actionLabelIsDefault"] = false;
         }
 
         Object.assign(this, $$source);

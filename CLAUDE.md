@@ -79,6 +79,10 @@ The contract that tells the parent to delegate is the **dispatch preamble** — 
 
 Per-job todos don't leak across dispatches: when the PostToolUse hook records a `TaskCreate`, it stamps the row with the session's currently-claimed `issue_key` (resolved from the single open claim at hook time; orphan-bucketed when zero or many claims are open). The Agents view and the kanban card's `n/m` Tasks pill both filter per-(session, issue), so a session that handles two dispatches back-to-back only shows the current job's rows on each surface. Prior-job rows stay in `agent_session_todos` (queryable per `issue_key`), they just stop bleeding into the foreground UI (BACI-62).
 
+### Imperative `action_label` vs gerund `name` (BACI-67)
+
+Each `prompt_templates` row carries two display strings: `name` is the gerund ("Planning", "Designing", "Implementing") that lower-cases into the activity pill on a taken card ("planning · BACI-12"), and `action_label` is the imperative form ("Plan", "Design", "Implement") rendered as the button text on the dispatch action menus — the kanban-card dropdown, the issue-workspace shelf, and the TUI per-card picker. The split exists so a button reads as a call to action without breaking the status-description form the pill needs. Built-ins ship with both seeded; user-created templates can set `action_label` explicitly or leave it empty and the UI derives one from `name` via `model.DeriveActionLabel` (`Planning → Plan`, `Shipping → Ship`, etc.). Set / clear via `bacio settings template set-action-label <slug> <label>` (empty string clears the override), the `--action-label` flag on `bacio settings template add`, the Action label input in the desktop / web Settings panel, or the Action label pane in the TUI Settings tab's add overlay. The activity-pill derivation in `internal/boardcards/cards.go` still reads `name` — don't conflate the two when adding a surface.
+
 ## `agent_session_questions` — agent → user clarification (BACI-53)
 
 The bacio channel exposes a third MCP tool, `ask_user_question`, that

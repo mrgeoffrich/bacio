@@ -364,6 +364,36 @@ func migrate(db *sql.DB) error {
 			return fmt.Errorf("seed ship.concurrency_limit: %w", err)
 		}
 	}
+	// BACI-67: per-template action_label override. The CREATE TABLE in
+	// schema.sql carries the column for fresh DBs; this ALTER + seed
+	// brings older DBs up to date and stamps the imperative form for
+	// every built-in slug whose action_label is still empty (a user
+	// who has already customised the row is left alone). Only the
+	// initial ALTER seeds — once the column is present, this branch is
+	// skipped on every subsequent Open.
+	hasActionLabel, err := columnExists(db, "prompt_templates", "action_label")
+	if err != nil {
+		return err
+	}
+	if !hasActionLabel {
+		if _, err := db.Exec(`ALTER TABLE prompt_templates ADD COLUMN action_label TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add action_label to prompt_templates: %w", err)
+		}
+		for _, slug := range model.BuiltinTemplateSlugs() {
+			lbl := model.BuiltinTemplateActionLabel(slug)
+			if lbl == "" {
+				// Reserved slugs (e.g. _dispatch_preamble) have no
+				// imperative override — they never reach a dropdown.
+				continue
+			}
+			if _, err := db.Exec(
+				`UPDATE prompt_templates SET action_label = ? WHERE slug = ? AND action_label = ''`,
+				lbl, slug,
+			); err != nil {
+				return fmt.Errorf("seed action_label for %s: %w", slug, err)
+			}
+		}
+	}
 	// BACI-51: relax the agent_dispatches.status CHECK to include
 	// 'queued' and drop the (target_agent_id NOT NULL OR ...) row
 	// CHECK so queued rows can leave both targets unset until the
@@ -447,11 +477,12 @@ func backfillDispatchPreamble(db *sql.DB) error {
 	}
 	// allowed_states_json = '[]' (no state-gate) — keeps the row out of
 	// the per-card dispatch picker (availableDispatchModes filters by
-	// state-gate match).
+	// state-gate match). action_label = '' (preamble never reaches the
+	// dropdown either, so the imperative form is irrelevant).
 	if _, err := db.Exec(`
 		INSERT OR IGNORE INTO prompt_templates
-		  (slug, name, body, allowed_states_json, is_builtin, concurrency_limit, created_at, updated_at)
-		VALUES (?, ?, ?, '[]', 1, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+		  (slug, name, body, allowed_states_json, is_builtin, concurrency_limit, action_label, created_at, updated_at)
+		VALUES (?, ?, ?, '[]', 1, 0, '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
 		slug, name, body); err != nil {
 		return err
 	}
@@ -505,9 +536,9 @@ func migratePromptTemplates(db *sql.DB) error {
 			name = slug
 		}
 		if _, err := tx.Exec(`
-			INSERT INTO prompt_templates (slug, name, body, allowed_states_json, is_builtin, concurrency_limit, created_at, updated_at)
-			VALUES (?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-			slug, name, body, encoded, model.DefaultConcurrencyLimit(slug)); err != nil {
+			INSERT INTO prompt_templates (slug, name, body, allowed_states_json, is_builtin, concurrency_limit, action_label, created_at, updated_at)
+			VALUES (?, ?, ?, ?, 1, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+			slug, name, body, encoded, model.DefaultConcurrencyLimit(slug), model.BuiltinTemplateActionLabel(slug)); err != nil {
 			return err
 		}
 	}

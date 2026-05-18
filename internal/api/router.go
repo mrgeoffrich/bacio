@@ -179,6 +179,10 @@ func newRouter(d deps) http.Handler {
 	// state-gate PUTs; no DELETE because "unlimited" is just
 	// concurrency_limit=0 — the caller PUTs 0 to revert.
 	mux.HandleFunc("PUT /settings/templates/{mode}/concurrency", d.handlePromptTemplateConcurrencySet)
+	// BACI-67 per-template action_label override. PUT sets the
+	// imperative; DELETE clears (the UI then derives from Name).
+	mux.HandleFunc("PUT /settings/templates/{mode}/action-label", d.handlePromptTemplateActionLabelSet)
+	mux.HandleFunc("DELETE /settings/templates/{mode}/action-label", d.handlePromptTemplateActionLabelDelete)
 
 	// Board preferences (BACI-47/D). One scalar global flag today —
 	// board.hide_empty_columns. Lives at /settings/... alongside the

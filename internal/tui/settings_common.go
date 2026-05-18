@@ -22,15 +22,20 @@ import (
 // stageRow is one template's resolved settings, plus the derived
 // "still matches the built-in default" flags the chips render. For
 // user-created (non-built-in) templates the "default" flags are always
-// false — there's nothing to compare against.
+// false — there's nothing to compare against. actionLabel +
+// actionIsDefault track the BACI-67 imperative override; an empty
+// actionLabel means the UI derives one from the gerund Name via
+// model.DeriveActionLabel.
 type stageRow struct {
-	slug          string
-	label         string
-	body          string
-	states        []model.State
-	bodyIsDefault bool
-	statesDefault bool
-	isBuiltin     bool
+	slug            string
+	label           string
+	body            string
+	actionLabel     string
+	states          []model.State
+	bodyIsDefault   bool
+	statesDefault   bool
+	actionIsDefault bool
+	isBuiltin       bool
 }
 
 // loadStageRowsFromTemplates builds the per-template Settings list from
@@ -45,14 +50,17 @@ func loadStageRowsFromTemplates(templates []*store.PromptTemplate) []stageRow {
 		if label == "" {
 			label = t.Slug
 		}
+		defAction := model.BuiltinTemplateActionLabel(t.Slug)
 		rows = append(rows, stageRow{
-			slug:          t.Slug,
-			label:         label,
-			body:          t.Body,
-			states:        append([]model.State(nil), t.AllowedStates...),
-			bodyIsDefault: t.IsBuiltin && t.Body == model.DefaultPromptBodyForBuiltinSlug(t.Slug),
-			statesDefault: t.IsBuiltin && sameStates(t.AllowedStates, model.DefaultPromptStatesForBuiltinSlug(t.Slug)),
-			isBuiltin:     t.IsBuiltin,
+			slug:            t.Slug,
+			label:           label,
+			body:            t.Body,
+			actionLabel:     t.ActionLabel,
+			states:          append([]model.State(nil), t.AllowedStates...),
+			bodyIsDefault:   t.IsBuiltin && t.Body == model.DefaultPromptBodyForBuiltinSlug(t.Slug),
+			statesDefault:   t.IsBuiltin && sameStates(t.AllowedStates, model.DefaultPromptStatesForBuiltinSlug(t.Slug)),
+			actionIsDefault: t.IsBuiltin && t.ActionLabel == defAction,
+			isBuiltin:       t.IsBuiltin,
 		})
 	}
 	return rows
@@ -106,8 +114,23 @@ func renderSettingsList(width, height int, stages []stageRow, cursor int, err er
 		if i == cursor {
 			marker = "▸ "
 		}
-		line := fmt.Sprintf("%s%-18s %s  %s", marker, st.label,
-			chip("body", st.bodyIsDefault), chip("states", st.statesDefault))
+		// BACI-67: render the resolved action label (override or
+		// derived from name) inline with the row so the user can see
+		// what verb the dispatch picker shows for this template at a
+		// glance. Built-ins that still match the embedded imperative
+		// render as "default"; everything else as "custom".
+		action := st.actionLabel
+		if action == "" {
+			action = model.DeriveActionLabel(st.label)
+		}
+		if action == "" {
+			action = st.label
+		}
+		line := fmt.Sprintf("%s%-18s %s  %s  %s · %s",
+			marker, st.label,
+			chip("body", st.bodyIsDefault), chip("states", st.statesDefault),
+			chip("action", st.actionIsDefault || (st.actionLabel == "" && !st.isBuiltin)),
+			mutedStyle.Render(action))
 		styled := lipgloss.NewStyle().Width(innerWidth).Padding(0, 1)
 		if i == cursor {
 			styled = styled.Background(cardSelectedBG).Foreground(lipgloss.Color("231"))

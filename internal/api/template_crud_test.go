@@ -124,6 +124,102 @@ func TestPromptTemplateDelete(t *testing.T) {
 	assertHistoryOps(t, s, []string{"template.delete"})
 }
 
+// TestPromptTemplateActionLabel locks the BACI-67 REST surface: set
+// the imperative override via PUT, clear via DELETE, dry-run leaves
+// the row untouched, validator rejects control characters.
+func TestPromptTemplateActionLabel(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+
+	// Built-in `plan` ships with an action_label of "Plan".
+	resp, body := apiGet(t, ts.URL+"/settings/templates/full")
+	if resp.StatusCode != 200 {
+		t.Fatalf("list: %d body: %s", resp.StatusCode, body)
+	}
+	var rows []map[string]any
+	_ = json.Unmarshal(body, &rows)
+	var foundPlan map[string]any
+	for _, r := range rows {
+		if r["slug"] == "plan" {
+			foundPlan = r
+			break
+		}
+	}
+	if foundPlan == nil {
+		t.Fatalf("plan template missing from list")
+	}
+	if foundPlan["action_label"] != "Plan" {
+		t.Fatalf("action_label for plan: %v, want %q", foundPlan["action_label"], "Plan")
+	}
+	if foundPlan["default_action_label"] != "Plan" {
+		t.Fatalf("default_action_label for plan: %v, want %q", foundPlan["default_action_label"], "Plan")
+	}
+	if foundPlan["action_label_is_default"] != true {
+		t.Fatalf("action_label_is_default for plan: %v, want true", foundPlan["action_label_is_default"])
+	}
+
+	// PUT to override.
+	resp2, body2 := apiPut(t, ts.URL+"/settings/templates/plan/action-label", map[string]any{
+		"action_label": "Plan it",
+	})
+	if resp2.StatusCode != 200 {
+		t.Fatalf("put status: %d body: %s", resp2.StatusCode, body2)
+	}
+	var got map[string]any
+	_ = json.Unmarshal(body2, &got)
+	if got["action_label"] != "Plan it" {
+		t.Fatalf("post-put action_label: %v, want %q", got["action_label"], "Plan it")
+	}
+	if got["mode"] != "plan" {
+		t.Fatalf("post-put mode: %v, want \"plan\"", got["mode"])
+	}
+
+	// Dry-run PUT projects without writing.
+	resp3, _ := apiPut(t, ts.URL+"/settings/templates/plan/action-label?dry_run=1", map[string]any{
+		"action_label": "Plan v2",
+	})
+	if resp3.StatusCode != 200 {
+		t.Fatalf("dry-run put: %d", resp3.StatusCode)
+	}
+	if resp3.Header.Get("X-Dry-Run") != "applied" {
+		t.Fatalf("dry-run missing X-Dry-Run header")
+	}
+	// Real value should still be "Plan it".
+	respCheck, bodyCheck := apiGet(t, ts.URL+"/settings/templates/full")
+	if respCheck.StatusCode != 200 {
+		t.Fatalf("recheck list: %d", respCheck.StatusCode)
+	}
+	_ = json.Unmarshal(bodyCheck, &rows)
+	for _, r := range rows {
+		if r["slug"] == "plan" {
+			if r["action_label"] != "Plan it" {
+				t.Fatalf("dry-run leaked: action_label = %v", r["action_label"])
+			}
+		}
+	}
+
+	// Validator: control characters rejected.
+	respBad, _ := apiPut(t, ts.URL+"/settings/templates/plan/action-label", map[string]any{
+		"action_label": "Bad\x01label",
+	})
+	if respBad.StatusCode != 400 {
+		t.Fatalf("expected 400 on control chars, got %d", respBad.StatusCode)
+	}
+
+	// DELETE clears the override (UI then derives from Name).
+	respDel, bodyDel := apiDelete(t, ts.URL+"/settings/templates/plan/action-label", nil)
+	if respDel.StatusCode != 200 {
+		t.Fatalf("delete status: %d body: %s", respDel.StatusCode, bodyDel)
+	}
+	var gotDel map[string]any
+	_ = json.Unmarshal(bodyDel, &gotDel)
+	if gotDel["action_label"] != "" {
+		t.Fatalf("post-delete action_label: %v, want \"\"", gotDel["action_label"])
+	}
+
+	// History should have two action-label updates (PUT + DELETE).
+	assertHistoryOps(t, s, []string{"template.set_action_label", "template.set_action_label"})
+}
+
 func TestPromptTemplateRestoreBuiltins(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	// Delete one built-in.

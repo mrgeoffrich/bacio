@@ -14,11 +14,16 @@ import (
 // dispatchModeChoice is one row of the mode-picker step: the label
 // shown, the slug stored, and the body so the picker preview can show
 // what would be sent. Built today from the store's prompt_templates
-// table, filtered by the focused issue's state-gate.
+// table, filtered by the focused issue's state-gate. BACI-67: the
+// picker renders the imperative Action ("Plan", "Design", …) instead
+// of the gerund Label ("Planning", "Designing", …) on the dropdown
+// row — Label stays for backwards-compat / legacy consumers (none in
+// the TUI today, but keeps the struct shape stable for tests).
 type dispatchModeChoice struct {
-	Label string
-	Mode  model.DispatchMode
-	Desc  string
+	Label  string
+	Action string
+	Mode   model.DispatchMode
+	Desc   string
 }
 
 // maxDispatchNote bounds the free-form note typed in the picker. The
@@ -119,6 +124,16 @@ func availableDispatchModes(s *store.Store, issueState model.State) ([]dispatchM
 		if label == "" {
 			label = t.Slug
 		}
+		// BACI-67: prefer the imperative action_label override, fall
+		// back to the gerund→imperative derivation on Name, and only
+		// surface the raw Name if neither produced anything sensible.
+		action := strings.TrimSpace(t.ActionLabel)
+		if action == "" {
+			action = model.DeriveActionLabel(label)
+		}
+		if action == "" {
+			action = label
+		}
 		desc := strings.TrimSpace(t.Body)
 		if i := strings.IndexAny(desc, "\r\n"); i > 0 {
 			desc = desc[:i]
@@ -127,9 +142,10 @@ func availableDispatchModes(s *store.Store, issueState model.State) ([]dispatchM
 			desc = desc[:69] + "…"
 		}
 		out = append(out, dispatchModeChoice{
-			Label: label,
-			Mode:  model.DispatchMode(t.Slug),
-			Desc:  desc,
+			Label:  label,
+			Action: action,
+			Mode:   model.DispatchMode(t.Slug),
+			Desc:   desc,
 		})
 	}
 	return out, nil
@@ -395,9 +411,16 @@ func (b *boardView) viewDispatchPicker(width, height int) string {
 			rows = append(rows, mutedStyle.Italic(true).Render("(no template is valid for this issue's state — esc to close)"))
 		}
 		for i, c := range b.dispatchModes {
-			label := fmt.Sprintf("%-16s %s", truncate(c.Label, 16), mutedStyle.Render(c.Desc))
+			// BACI-67: render the imperative Action ("Plan", "Design")
+			// instead of the gerund Label ("Planning", "Designing")
+			// so the picker row reads as a call to action.
+			verb := c.Action
+			if verb == "" {
+				verb = c.Label
+			}
+			label := fmt.Sprintf("%-16s %s", truncate(verb, 16), mutedStyle.Render(c.Desc))
 			if i == b.dispatchRow {
-				label = fmt.Sprintf("%-16s %s", truncate(c.Label, 16), c.Desc)
+				label = fmt.Sprintf("%-16s %s", truncate(verb, 16), c.Desc)
 				rows = append(rows, selStyle.Render(label))
 			} else {
 				rows = append(rows, rowStyle.Render(label))

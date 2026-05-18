@@ -206,10 +206,15 @@ var (
 		Body:             "Spike on {{issue_id}} ({{issue_title}}) — produce a short investigation note, no code.",
 		States:           []string{"todo"},
 		ConcurrencyLimit: 0,
+		ActionLabel:      "Spike",
 	}
 	ExampleSettingsTemplateSetConcurrency = SettingsTemplateSetConcurrencyInput{
 		Slug:             "ship",
 		ConcurrencyLimit: 1,
+	}
+	ExampleSettingsTemplateSetActionLabel = SettingsTemplateSetActionLabelInput{
+		Slug:        "spike",
+		ActionLabel: "Investigate",
 	}
 	ExampleSettingsTemplateRename = SettingsTemplateRenameInput{
 		Slug:    "spike",
