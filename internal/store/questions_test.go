@@ -24,8 +24,9 @@ func seedQuestionSession(t *testing.T, sessionID string) (*Store, *model.Repo) {
 func validSinglePayload() model.QuestionPayload {
 	return model.QuestionPayload{
 		Questions: []model.QuestionItem{{
-			Question: "Which approach should I take?",
-			Header:   "Approach",
+			Question:    "Which approach should I take?",
+			Header:      "Approach",
+			MultiSelect: model.MultiSelectFlag(false),
 			Options: []model.QuestionOption{
 				{Label: "Option A", Description: "Quick and dirty"},
 				{Label: "Option B", Description: "Slow and clean"},
@@ -39,11 +40,11 @@ func validMultiPayload() model.QuestionPayload {
 		Questions: []model.QuestionItem{{
 			Question:    "Pick all the tags that apply",
 			Header:      "Tags",
-			MultiSelect: true,
+			MultiSelect: model.MultiSelectFlag(true),
 			Options: []model.QuestionOption{
-				{Label: "ui"},
-				{Label: "tui"},
-				{Label: "bug"},
+				{Label: "ui", Description: "UI work"},
+				{Label: "tui", Description: "TUI surface"},
+				{Label: "bug", Description: "defect / regression"},
 			},
 		}},
 	}

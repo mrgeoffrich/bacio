@@ -177,10 +177,12 @@ func setupClaimedIssue(t *testing.T, p *pair, sessionID string, state model.Stat
 func simplePayload() model.QuestionPayload {
 	return model.QuestionPayload{
 		Questions: []model.QuestionItem{{
-			Question: "Pick one?",
-			Header:   "Pick",
+			Question:    "Pick one?",
+			Header:      "Pick",
+			MultiSelect: model.MultiSelectFlag(false),
 			Options: []model.QuestionOption{
-				{Label: "A"}, {Label: "B"},
+				{Label: "A", Description: "first option"},
+				{Label: "B", Description: "second option"},
 			},
 		}},
 	}

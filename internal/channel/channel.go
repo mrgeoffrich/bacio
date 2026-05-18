@@ -426,8 +426,8 @@ func askUserQuestionToolSchema() map[string]any {
 			"desktop / web window where the active issue context is right there, and the exchange " +
 			"is recorded in bacio's audit log. " +
 			"Input shape mirrors AskUserQuestion: a `questions` array with 1-4 items, each carrying " +
-			"`question` text, a short `header` tag (<=12 chars), 2-4 `options` (each {label, optional description, optional preview}), " +
-			"and an optional `multiSelect` boolean. " +
+			"`question` text, a short `header` tag (<=12 chars), an explicit `multiSelect` boolean, " +
+			"and 2-4 `options` (each {label, description, optional preview}). " +
 			"`preview` on an option carries an ASCII mockup / code snippet / diagram the supervisor needs to see " +
 			"to compare options — when at least one option in a question has a preview, the modal switches to " +
 			"side-by-side mode showing the focused option's preview verbatim in monospace. Single-select only " +
@@ -440,7 +440,7 @@ func askUserQuestionToolSchema() map[string]any {
 			"properties": map[string]any{
 				"questions": map[string]any{
 					"type":        "array",
-					"description": "Between 1 and 4 questions to put to the user.",
+					"description": "Questions to ask the user (1-4 questions).",
 					"minItems":    1,
 					"maxItems":    4,
 					"items": map[string]any{
@@ -448,38 +448,45 @@ func askUserQuestionToolSchema() map[string]any {
 						"properties": map[string]any{
 							"question": map[string]any{
 								"type":        "string",
-								"description": "The full question text shown to the user.",
+								"description": "The complete question to ask the user. Should be clear, specific, and end with a question mark. Example: \"Which library should we use for date formatting?\" If multiSelect is true, phrase it accordingly, e.g. \"Which features do you want to enable?\"",
 							},
 							"header": map[string]any{
 								"type":        "string",
-								"description": "Short tag rendered next to the question (<=12 characters).",
+								"description": "Very short label displayed as a chip/tag (max 12 chars). Examples: \"Auth method\", \"Library\", \"Approach\".",
 								"maxLength":   12,
 							},
 							"multiSelect": map[string]any{
 								"type":        "boolean",
-								"description": "True to let the user pick multiple options (checkboxes); false/absent for a single radio.",
+								"default":     false,
+								"description": "Set to true to allow the user to select multiple options instead of just one. Use when choices are not mutually exclusive.",
 							},
 							"options": map[string]any{
 								"type":        "array",
-								"description": "Between 2 and 4 choices.",
+								"description": "The available choices for this question. Must have 2-4 options. Each option should be a distinct, mutually exclusive choice (unless multiSelect is enabled). There should be no 'Other' option, that will be provided automatically.",
 								"minItems":    2,
 								"maxItems":    4,
 								"items": map[string]any{
 									"type": "object",
 									"properties": map[string]any{
-										"label":       map[string]any{"type": "string", "description": "The choice label shown to the user."},
-										"description": map[string]any{"type": "string", "description": "Optional fine-print under the label."},
+										"label": map[string]any{
+											"type":        "string",
+											"description": "The display text for this option that the user will see and select. Should be concise (1-5 words) and clearly describe the choice.",
+										},
+										"description": map[string]any{
+											"type":        "string",
+											"description": "Explanation of what this option means or what will happen if chosen. Useful for providing context about trade-offs or implications.",
+										},
 										"preview": map[string]any{
 											"type":        "string",
-											"description": "Optional preview content (ASCII mockup, code snippet, diagram) rendered in monospace side-by-side with the option list. Multi-line allowed. Use for concrete artefacts the supervisor needs to compare. Single-select only (rejected on multiSelect questions).",
+											"description": "Optional preview content rendered when this option is focused. Use for mockups, code snippets, or visual comparisons that help users compare options. Multi-line allowed; rendered in monospace. Single-select only (rejected on multiSelect questions).",
 											"maxLength":   4096,
 										},
 									},
-									"required": []string{"label"},
+									"required": []string{"label", "description"},
 								},
 							},
 						},
-						"required": []string{"question", "header", "options"},
+						"required": []string{"question", "header", "options", "multiSelect"},
 					},
 				},
 			},

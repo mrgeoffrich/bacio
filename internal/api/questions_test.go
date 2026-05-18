@@ -25,11 +25,12 @@ func seedSessionWithQuestion(t *testing.T, s *store.Store, sessionID string) (*m
 		AskedBy:   "agent-claude",
 		Payload: model.QuestionPayload{
 			Questions: []model.QuestionItem{{
-				Question: "Pick a side",
-				Header:   "Side",
+				Question:    "Pick a side",
+				Header:      "Side",
+				MultiSelect: model.MultiSelectFlag(false),
 				Options: []model.QuestionOption{
-					{Label: "Left"},
-					{Label: "Right"},
+					{Label: "Left", Description: "go port-side"},
+					{Label: "Right", Description: "go starboard"},
 				},
 			}},
 		},

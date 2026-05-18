@@ -98,12 +98,34 @@ type QuestionPayload struct {
 // MaxQuestionHeaderLen, matching the AskUserQuestion docs). Options
 // is the 2-4 entry choice set. MultiSelect lets the user pick more
 // than one option (rendered as checkboxes vs. radios).
+//
+// MultiSelect is a *bool — not a bool — to mirror native
+// AskUserQuestion's "required" contract. The agent must explicitly
+// send `true` or `false`; an absent field is rejected at the
+// validation boundary. Readers should go through IsMultiSelect()
+// rather than dereferencing the pointer so nil is treated as false
+// at render time even if a row somehow slipped past validation.
 type QuestionItem struct {
 	Question    string           `json:"question"`
 	Header      string           `json:"header"`
-	MultiSelect bool             `json:"multiSelect,omitempty"`
+	MultiSelect *bool            `json:"multiSelect,omitempty"`
 	Options     []QuestionOption `json:"options"`
 }
+
+// IsMultiSelect returns the boolean value of MultiSelect, treating
+// nil as false. All UI code (modal, TUI overlay) should call this
+// helper rather than dereferencing the pointer directly — the
+// validator guarantees a non-nil value on freshly-validated
+// payloads, but defensive callers (e.g. those reading historical
+// rows from the store) won't NPE if a legacy row turns up.
+func (q QuestionItem) IsMultiSelect() bool {
+	return q.MultiSelect != nil && *q.MultiSelect
+}
+
+// MultiSelectFlag returns &b. Wrapper so test code (and the
+// occasional production caller building a QuestionItem in Go) can
+// say `MultiSelect: MultiSelectFlag(true)` without ceremony.
+func MultiSelectFlag(b bool) *bool { return &b }
 
 // QuestionOption is one choice on a question. Description is the
 // optional fine-print rendered under the label. Preview is the
@@ -188,6 +210,13 @@ func validateQuestionItem(idx int, q QuestionItem) error {
 	if utf8.RuneCountInString(q.Header) > MaxQuestionHeaderLen {
 		return fmt.Errorf("question %d: header too long (%d chars; max %d)", idx, utf8.RuneCountInString(q.Header), MaxQuestionHeaderLen)
 	}
+	// Match native AskUserQuestion's `required: [..., multiSelect]`
+	// contract — the agent must explicitly send true or false. nil
+	// means the caller omitted the field, which we reject so single-
+	// vs. multi-select intent is always stated, not inferred.
+	if q.MultiSelect == nil {
+		return fmt.Errorf("question %d: multiSelect is required (set to true or false explicitly)", idx)
+	}
 	m := len(q.Options)
 	if m < MinOptionsPerQuestion || m > MaxOptionsPerQuestion {
 		return fmt.Errorf("question %d: must carry between %d and %d options; got %d", idx, MinOptionsPerQuestion, MaxOptionsPerQuestion, m)
@@ -197,17 +226,20 @@ func validateQuestionItem(idx int, q QuestionItem) error {
 		if err := validateAskString(opt.Label, "option label", MaxQuestionOptionLen, true); err != nil {
 			return fmt.Errorf("question %d option %d: %w", idx, j, err)
 		}
-		if opt.Description != "" {
-			if err := validateAskString(opt.Description, "option description", MaxQuestionDescLen, false); err != nil {
-				return fmt.Errorf("question %d option %d: %w", idx, j, err)
-			}
+		// Match native: description is required on every option, not
+		// optional. Empty descriptions land in the modal as bare
+		// labels with no fine-print — fine for a one-word choice but
+		// unhelpful when the supervisor needs context. Force the
+		// agent to provide one.
+		if err := validateAskString(opt.Description, "option description", MaxQuestionDescLen, true); err != nil {
+			return fmt.Errorf("question %d option %d: %w", idx, j, err)
 		}
 		if opt.Preview != "" {
 			// Mirror native AskUserQuestion: previews only on
 			// single-select questions. Side-by-side preview + checkbox
 			// list doesn't read cleanly, and native flat-out rejects
 			// the combination — match that contract.
-			if q.MultiSelect {
+			if q.IsMultiSelect() {
 				return fmt.Errorf("question %d option %d: preview is not allowed on multi-select questions", idx, j)
 			}
 			if err := validateAskMultilineString(opt.Preview, "option preview", MaxQuestionPreviewLen); err != nil {
@@ -295,7 +327,7 @@ func ValidateQuestionAnswers(p QuestionPayload, a QuestionAnswers) error {
 		if !ok {
 			return fmt.Errorf("answer key %q does not match any question in the payload", key)
 		}
-		if q.MultiSelect {
+		if q.IsMultiSelect() {
 			arr, ok := val.([]any)
 			if !ok {
 				// JSON-decoded multi-select answers can also arrive as

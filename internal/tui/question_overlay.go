@@ -109,7 +109,7 @@ func (q *questionOverlay) update(key tea.KeyMsg) tea.Cmd {
 			q.option--
 		}
 	case " ", "x":
-		if item.MultiSelect {
+		if item.IsMultiSelect() {
 			if q.sel[q.item][q.option] {
 				delete(q.sel[q.item], q.option)
 			} else {
@@ -143,7 +143,7 @@ func (q *questionOverlay) submitCmd() tea.Msg {
 		if len(picked) == 0 {
 			continue
 		}
-		if item.MultiSelect {
+		if item.IsMultiSelect() {
 			answers[item.Question] = picked
 		} else {
 			answers[item.Question] = picked[0]
@@ -214,7 +214,7 @@ func (q *questionOverlay) view(width, height int) string {
 			lipgloss.NewStyle().Width(innerWidth).Render(header+item.Question),
 			"")
 		kind := "(single-select — space picks, replaces prior)"
-		if item.MultiSelect {
+		if item.IsMultiSelect() {
 			kind = "(multi-select — space toggles)"
 		}
 		rows = append(rows, mutedStyle.Render(kind))

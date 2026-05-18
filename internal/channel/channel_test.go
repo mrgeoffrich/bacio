@@ -392,7 +392,7 @@ func TestAskUserQuestionParksAndDelivers(t *testing.T) {
 	// notifications/initialized so the poller doesn't auto-start
 	// here — we call drainAnsweredQuestions by hand to keep timing
 	// deterministic.
-	askArgs := `{"questions":[{"question":"Pick one","header":"Q","options":[{"label":"A"},{"label":"B"}]}]}`
+	askArgs := `{"questions":[{"question":"Pick one","header":"Q","multiSelect":false,"options":[{"label":"A","description":"first"},{"label":"B","description":"second"}]}]}`
 	requests := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`,
 		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
@@ -472,7 +472,7 @@ func TestAskUserQuestionParksAndDelivers(t *testing.T) {
 // back to the same path as a no-answer return from the built-in.
 func TestAskUserQuestionCancelDeliversError(t *testing.T) {
 	src := &fakeSource{}
-	askArgs := `{"questions":[{"question":"Pick one","header":"Q","options":[{"label":"A"},{"label":"B"}]}]}`
+	askArgs := `{"questions":[{"question":"Pick one","header":"Q","multiSelect":false,"options":[{"label":"A","description":"first"},{"label":"B","description":"second"}]}]}`
 	requests := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`,
 		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
