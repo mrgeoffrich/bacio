@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mrgeoffrich/bacio/internal/git"
+	"github.com/mrgeoffrich/bacio/internal/wtenv"
 )
 
 // mcpServerName is the key bacio uses under "mcpServers" in .mcp.json,
@@ -85,12 +87,37 @@ research-preview channel path.`,
 			if err := reportChannelInstall(path, action); err != nil {
 				return err
 			}
+			printWorktreeManifestHint(os.Stderr, info.Root)
 			printActivationBanner(os.Stderr)
 			return nil
 		},
 	}
 	cmd.Flags().BoolVarP(&assumeYes, "yes", "y", false, "skip the confirmation prompt and accept the change")
 	return cmd
+}
+
+// printWorktreeManifestHint surfaces the per-worktree manifest's
+// existence (or absence) on stderr ahead of the activation banner.
+// Tells the user which DB / API port the channel + hooks will pick up
+// when they next launch Claude here. BACI-63: the channel resolves
+// from cwd at runtime, so no env baking is needed in .mcp.json — but
+// users still benefit from seeing what bacio thinks the right manifest
+// is.
+func printWorktreeManifestHint(w io.Writer, root string) {
+	manifest := filepath.Join(root, wtenv.DefaultManifestFilename)
+	if _, err := os.Stat(manifest); err == nil {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "Worktree manifest:")
+		fmt.Fprintf(w, "  %s\n", manifest)
+		fmt.Fprintln(w, "  The channel + hooks resolve this automatically from cwd — no")
+		fmt.Fprintln(w, "  env baking is required in .mcp.json.")
+		return
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "Worktree manifest:")
+	fmt.Fprintln(w, "  (none — this worktree will share ~/.bacio/db.sqlite + 127.0.0.1:5320")
+	fmt.Fprintln(w, "   with every other manifest-free bacio instance on this machine. Run")
+	fmt.Fprintln(w, "   `bacio worktree init` to give this worktree its own DB + port.)")
 }
 
 // bacioBinaryPath returns the absolute path of the running bacio binary

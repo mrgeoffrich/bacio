@@ -13,6 +13,7 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/git"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
+	"github.com/mrgeoffrich/bacio/internal/wtenv"
 )
 
 // statusReport is the unified shape returned by `bacio status`. `status` is
@@ -20,13 +21,16 @@ import (
 // registered without ever writing a row. Branches: registered repo,
 // unregistered git tree, or no git tree.
 type statusReport struct {
-	DBPath     string           `json:"db_path"`
-	InRepo     bool             `json:"in_repo"`
-	Registered bool             `json:"registered"`
-	Path       string           `json:"path,omitempty"`
-	Repo       *model.Repo      `json:"repo,omitempty"`
-	Stats      statusStats      `json:"stats"`
-	AgentMode  statusAgentMode  `json:"agent_mode"`
+	DBPath     string            `json:"db_path"`
+	APIAddr    string            `json:"api_addr"`
+	EnvSource  string            `json:"env_source"`             // "flag" | "env" | "worktree" | "default"
+	EnvPath    string            `json:"env_path,omitempty"`     // populated when a manifest fed resolution
+	InRepo     bool              `json:"in_repo"`
+	Registered bool              `json:"registered"`
+	Path       string            `json:"path,omitempty"`
+	Repo       *model.Repo       `json:"repo,omitempty"`
+	Stats      statusStats       `json:"stats"`
+	AgentMode  statusAgentMode   `json:"agent_mode"`
 
 	// LLMRecommendations carries plain-English, actionable advice for
 	// an agent reading `bacio status -o json`: setup problems bacio
@@ -64,15 +68,11 @@ func newStatusCmd() *cobra.Command {
 		Use:   "status",
 		Short: "Show current repo, DB location, and quick stats (read-only)",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			path := opts.dbPath
-			if path == "" {
-				p, err := store.DefaultPath()
-				if err != nil {
-					return err
-				}
-				path = p
+			res, err := resolveEnv()
+			if err != nil {
+				return err
 			}
-			s, err := store.Open(path)
+			s, err := store.Open(res.DBPath)
 			if err != nil {
 				return err
 			}
@@ -82,7 +82,7 @@ func newStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			report, err := buildStatusReport(s, path, cwd)
+			report, err := buildStatusReport(s, res, cwd)
 			if err != nil {
 				return err
 			}
@@ -97,9 +97,12 @@ func newStatusCmd() *cobra.Command {
 // buildStatusReport assembles the status payload without writing to the
 // store. Kept as a package-level helper so tests can drive it directly
 // after chdir-ing into a temp git tree.
-func buildStatusReport(s *store.Store, dbPath, cwd string) (*statusReport, error) {
+func buildStatusReport(s *store.Store, env wtenv.Resolved, cwd string) (*statusReport, error) {
 	report := &statusReport{
-		DBPath: dbPath,
+		DBPath:    env.DBPath,
+		APIAddr:   env.APIAddr,
+		EnvSource: string(env.Source),
+		EnvPath:   env.ManifestPath,
 		AgentMode: statusAgentMode{
 			EnvVar: agentmode.EnvVar,
 			Value:  os.Getenv(agentmode.EnvVar),
@@ -197,6 +200,8 @@ func printStatus(w io.Writer, r *statusReport) error {
 			fmt.Fprintf(w, "Remote:  %s\n", r.Repo.RemoteURL)
 		}
 		fmt.Fprintf(w, "DB:      %s\n", r.DBPath)
+		fmt.Fprintf(w, "API:     %s\n", r.APIAddr)
+		fmt.Fprintf(w, "Env:     %s\n", formatEnvSource(r))
 		fmt.Fprintf(w, "%s\n\n", formatAgentMode(r.AgentMode))
 
 		fmt.Fprintf(w, "Features: %d\n", r.Stats.Features)
@@ -212,10 +217,14 @@ func printStatus(w io.Writer, r *statusReport) error {
 		fmt.Fprintf(w, "Path:    %s\n", r.Path)
 		fmt.Fprintf(w, "Repo:    (unregistered — run `bacio init` to bind a prefix)\n")
 		fmt.Fprintf(w, "DB:      %s\n", r.DBPath)
+		fmt.Fprintf(w, "API:     %s\n", r.APIAddr)
+		fmt.Fprintf(w, "Env:     %s\n", formatEnvSource(r))
 		fmt.Fprintf(w, "%s\n", formatAgentMode(r.AgentMode))
 
 	default:
 		fmt.Fprintf(w, "DB:      %s\n", r.DBPath)
+		fmt.Fprintf(w, "API:     %s\n", r.APIAddr)
+		fmt.Fprintf(w, "Env:     %s\n", formatEnvSource(r))
 		fmt.Fprintf(w, "%s\n", formatAgentMode(r.AgentMode))
 		fmt.Fprintf(w, "Repos:   %d\n", r.Stats.TrackedRepos)
 		fmt.Fprintf(w, "Issues:  %d (across all repos)\n\n", r.Stats.TotalIssues)
@@ -226,6 +235,27 @@ func printStatus(w io.Writer, r *statusReport) error {
 		fmt.Fprintf(w, "\nRecommendation: %s\n", rec)
 	}
 	return nil
+}
+
+// formatEnvSource renders the env-source row. Tells the user whether
+// they're on the legacy default DB/port or a manifest-driven worktree
+// allocation, and where the manifest lives if so.
+func formatEnvSource(r *statusReport) string {
+	switch r.EnvSource {
+	case string(wtenv.SourceFlag):
+		if r.EnvPath != "" {
+			return fmt.Sprintf("flag (manifest at %s)", r.EnvPath)
+		}
+		return "flag (--db / --addr)"
+	case string(wtenv.SourceEnv):
+		return fmt.Sprintf("%s (%s)", wtenv.EnvVar, r.EnvPath)
+	case string(wtenv.SourceWorktree):
+		return fmt.Sprintf("worktree manifest (%s)", r.EnvPath)
+	case string(wtenv.SourceDefault), "":
+		return "default (legacy ~/.bacio/db.sqlite + 127.0.0.1:5320)"
+	default:
+		return r.EnvSource
+	}
 }
 
 // formatAgentMode renders the BACIO_AGENT_MODE row aligned with the

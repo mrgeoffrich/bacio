@@ -52,6 +52,8 @@ Use `needs_action` when an LLM agent is paused waiting on the user — keep the 
 
 **Identity:** the repo is keyed by its absolute git toplevel path. Moving the repo on disk creates a new row.
 
+**Worktree environments (BACI-63):** an *optional* `<worktree-root>/environment-config.yaml` binds the bacio instance running in that worktree to its own SQLite DB + API port, so two sibling git worktrees can run their own `bacio api` / desktop / TUI side by side without clashing on `~/.bacio/db.sqlite` or `127.0.0.1:5320`. Manifest-free worktrees keep today's behaviour exactly — set up is opt-in via `bacio worktree init`. Resolution order (highest precedence first): `--db` / `--addr` flags → `$BACIO_ENV` → worktree-root `environment-config.yaml` → legacy default (`~/.bacio/db.sqlite` + `127.0.0.1:5320`). `bacio status` surfaces the resolved `db_path`, `api_addr`, `env_source`, and (when relevant) `env_path` so agents can verify which DB they're talking to.
+
 ## Agent registry — declare yourself
 
 bacio tracks live agent sessions in a local SQLite registry (never synced) so you and the user can see who's working on what. Two layers:
@@ -218,7 +220,7 @@ Every mutation runs through validators in the store layer, so malformed input fa
 
 ## Command reference
 
-Every command supports `-o text|json` and `--db <path>` as global flags. Examples below omit them unless relevant.
+Every command supports `-o text|json` and `--db <path>` as global flags. Examples below omit them unless relevant. Two further globals introduced by BACI-63: `--env <path>` overrides the worktree manifest resolution chain (same precedence as `$BACIO_ENV`), and `--db` continues to be the highest-precedence override (manifest plus flag means flag wins).
 
 ### Repos
 
@@ -258,6 +260,61 @@ bacio status                            Read-only probe — never registers.
 ```bash
 cd ~/Repos/bacio && bacio init --prefix MINI
 bacio repo show
+```
+
+### Worktree environments
+
+Per-worktree manifests (BACI-63). Each git worktree can optionally bind itself to a separate SQLite DB + API port so sibling worktrees don't clash on the shared writer state at `~/.bacio/db.sqlite` or `127.0.0.1:5320`. Manifest-free worktrees keep today's behaviour exactly — opt in via `bacio worktree init`.
+
+```
+bacio worktree init [--slug <name>] [--port <n>] [--db-path <rel>] [--force]
+                                     Write environment-config.yaml at the
+                                     worktree root, register a row in
+                                     ~/.bacio/worktrees.yaml, and append
+                                     the manifest filename to .gitignore.
+                                     Slug defaults to the worktree
+                                     basename; port is auto-allocated
+                                     (deterministic hash of slug +
+                                     collision walk; port 5320 is
+                                     reserved for the legacy default).
+                                     Honours --json / --dry-run.
+                                     Schema: worktree.init.
+bacio worktree show [path]            Resolve and print the environment
+                                     for the given path (defaults to
+                                     cwd). Reports source (flag / env /
+                                     worktree / default), DB, API addr,
+                                     and the registry row when one
+                                     exists. Read-only.
+bacio worktree list                   Walk ~/.bacio/worktrees.yaml and
+                                     list every registered manifest.
+                                     Flags entries whose on-disk
+                                     manifest is missing with `!`.
+                                     Read-only.
+bacio worktree rm [path] --confirm <slug> [--purge-db]
+                                     Remove the manifest + registry row.
+                                     Confirm must equal the manifest's
+                                     slug. With --purge-db the
+                                     worktree's SQLite DB is deleted
+                                     too. Honours --json / --dry-run.
+                                     Schema: worktree.rm.
+```
+
+Resolution order, highest precedence first:
+
+1. `--db` / `--addr` flags (and the desktop binary's `--db` / `--env`).
+2. `$BACIO_ENV=<path to an environment-config.yaml>` (or the global `--env <path>` flag, which overrides the env var).
+3. Worktree-root `environment-config.yaml`, found via `git rev-parse --show-toplevel`.
+4. Legacy default: `~/.bacio/db.sqlite` + `127.0.0.1:5320`.
+
+The MCP channel + Claude Code hooks resolve from `cwd` at runtime — `bacio install-channel` and `bacio install-hooks` do **not** bake `BACIO_ENV` into `.mcp.json` or `.claude/settings.json`, so a single committed config keeps working across sibling worktrees. The desktop binary (`~/.local/bin/bacio-desktop`) honours the same chain and adds the resolved slug to its window title so two open desktop windows on different worktrees are visually distinguishable.
+
+**Example:**
+```bash
+cd ~/Repos/bacio-baci-63
+bacio worktree init                    # picks slug=bacio-baci-63, free port
+bacio worktree show                    # confirm DB + API resolved correctly
+bacio status                           # Env: worktree manifest (...)
+bacio api                              # binds to the worktree's allocated port
 ```
 
 ### Features

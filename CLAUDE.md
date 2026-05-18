@@ -23,6 +23,23 @@ The deeper context for all three lives in the topic sections below (`## Agent-CL
 - The SQLite database lives at `~/.bacio/db.sqlite` by default. Override via `--db <path>` when testing or validating changes.
 - **Smoke-testing a desktop / web change.** The same React tree drives both the Wails desktop binary and the web bundle, so the cheapest agent-driven validation is the web path: run `bacio api` (default `http://localhost:5320/ui/`) and drive the UI with the `playwright-cli` skill — no Wails native-window dance, and snapshots come back as readable accessibility trees. After a frontend change, `./build.sh --skip-desktop` is enough to refresh the embedded bundle; restart the running `bacio api` to pick up the new binary.
 
+## Worktree environments (BACI-63)
+
+Sibling git worktrees of this repo can clash on the shared writer at `~/.bacio/db.sqlite` and the `127.0.0.1:5320` API port. The fix is opt-in: `bacio worktree init` writes a `<worktree-root>/environment-config.yaml` that binds the bacio instance in that worktree (CLI / `bacio api` / desktop / channel / hooks) to its own SQLite DB and port. Manifest-free worktrees keep today's behaviour exactly — the legacy default DB and port — so nothing changes for users who don't `init`.
+
+Resolution order (highest precedence first):
+
+1. Explicit `--db` / `--addr` flags. The desktop binary takes `--db` and `--env` too.
+2. `$BACIO_ENV=<path to a manifest YAML>`. The global `--env <path>` flag overrides the env var.
+3. Worktree-root `environment-config.yaml`. Found by walking up from cwd to a git toplevel.
+4. Legacy default: `~/.bacio/db.sqlite` + `127.0.0.1:5320`.
+
+Step 3 returning "no manifest present" is not an error — it falls through to step 4 so existing users see no change.
+
+The MCP channel and `bacio hook` subprocesses inherit cwd from Claude Code, so `bacio install-channel` / `install-hooks` do NOT bake `BACIO_ENV` into `.mcp.json` / `.claude/settings.json` (regression-tested in `internal/cli/install_channel_test.go`). The desktop binary captures cwd before Wails has a chance to chdir, then routes through the same resolver — and surfaces the resolved slug in its window title so two open desktop windows on different worktrees stay visually distinct. `bacio status` is the canonical readout — every status report includes `db_path`, `api_addr`, `env_source`, and (when relevant) `env_path`.
+
+Designed and shipped per [`docs/worktree-environments.md`](docs/worktree-environments.md); CLI surface (`bacio worktree init / show / list / rm`) follows the six agent-CLI principles (`--json`, `--dry-run`, schema entries `worktree.init` / `worktree.rm`). Heavy lifting lives in [`internal/wtenv/`](internal/wtenv/).
+
 ## Profiling
 
 Three hidden persistent root flags capture profiles/traces — a dev/debug affordance, kept out of `--help`:

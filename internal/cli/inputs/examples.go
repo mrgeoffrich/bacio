@@ -220,4 +220,14 @@ var (
 		Slug: "spike",
 	}
 	ExampleSettingsTemplateRestoreDefaults = SettingsTemplateRestoreDefaultsInput{}
+
+	ExampleWorktreeInit = WorktreeInitInput{
+		Slug:   "bacio-baci-63",
+		Port:   5321,
+		DBPath: ".bacio/db.sqlite",
+	}
+	ExampleWorktreeRm = WorktreeRmInput{
+		Confirm: "bacio-baci-63",
+		PurgeDB: false,
+	}
 )

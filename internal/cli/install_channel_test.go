@@ -91,6 +91,32 @@ func TestPrintActivationBannerMentionsEnvVar(t *testing.T) {
 	}
 }
 
+// TestApplyBacioChannelDoesNotBakeEnv is the BACI-63 regression guard:
+// the .mcp.json entry for the bacio channel must NOT carry an `env`
+// block (and specifically must not bake $BACIO_ENV) — the channel
+// resolves the worktree manifest at runtime from cwd, which Claude
+// Code sets to the project root when spawning the MCP subprocess.
+// Baking env here would freeze the manifest path at install time and
+// break sibling worktrees that share a single .mcp.json.
+func TestApplyBacioChannelDoesNotBakeEnv(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/.mcp.json"
+	top := map[string]json.RawMessage{}
+	if err := applyBacioChannel(path, top, "/usr/local/bin/bacio"); err != nil {
+		t.Fatalf("applyBacioChannel: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if strings.Contains(string(data), "BACIO_ENV") {
+		t.Fatalf("BACI-63 regression: .mcp.json must not bake BACIO_ENV; got %s", data)
+	}
+	if strings.Contains(string(data), `"env"`) {
+		t.Fatalf("BACI-63 regression: .mcp.json should not carry an env block; got %s", data)
+	}
+}
+
 // captureStdoutText swaps os.Stdout for a pipe over the duration of fn
 // and returns what was written. Mirrors captureStderr in hook_test.go;
 // kept distinct so a single test can capture both.

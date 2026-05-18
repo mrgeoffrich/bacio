@@ -34,6 +34,17 @@ the port via --port. Set --token (or BACIO_API_TOKEN) to require
 The persistent --user flag is silently ignored by this command — incoming
 requests carry their own actor via the X-Actor header (default "api").`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// If --addr was left at its zero-value sentinel, resolve via
+			// the worktree manifest chain (BACI-63) — so a manifest-aware
+			// worktree picks up its allocated port without the user
+			// repeating --addr on every invocation.
+			if !cmd.Flags().Changed("addr") {
+				res, err := resolveEnv()
+				if err != nil {
+					return err
+				}
+				addr = res.APIAddr
+			}
 			if port > 0 {
 				host, _, err := net.SplitHostPort(addr)
 				if err != nil {

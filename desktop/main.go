@@ -4,6 +4,8 @@ import (
 	"context"
 	"embed"
 	_ "embed"
+	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"github.com/mrgeoffrich/bacio/internal/client"
+	"github.com/mrgeoffrich/bacio/internal/wtenv"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -35,12 +38,64 @@ func init() {
 // main function serves as the application's entry point. It initializes the application, creates a window,
 // and starts a goroutine that emits a time-based event every second. It subsequently runs the application and
 // logs any error that might occur.
-func main() {
+// desktopFlags carries the small CLI surface the desktop binary
+// accepts. Both fields override the worktree manifest resolution
+// chain (BACI-63); empty values let the resolver pick.
+type desktopFlags struct {
+	DBPath  string
+	EnvPath string
+}
 
-	// Open a local bacio client — the same API surface the CLI uses. An
-	// empty DBPath falls back to store.DefaultPath(); an empty Remote
-	// selects the local SQLite backend.
-	c, err := client.Open(context.Background(), client.Options{Actor: "desktop"})
+func parseDesktopFlags(args []string) desktopFlags {
+	fs := flag.NewFlagSet("bacio-desktop", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	var df desktopFlags
+	fs.StringVar(&df.DBPath, "db", "", "override database path (resolves before the worktree manifest chain)")
+	fs.StringVar(&df.EnvPath, "env", "", "path to a worktree environment manifest (overrides $BACIO_ENV)")
+	_ = fs.Parse(args)
+	return df
+}
+
+// resolveDesktopEnv runs wtenv.Resolve against the captured cwd and
+// the supplied flag values, so the desktop binary picks up the same
+// per-worktree DB the CLI / api / channel do.
+func resolveDesktopEnv(cwd string, df desktopFlags) (wtenv.Resolved, error) {
+	envLookup := os.Getenv
+	if df.EnvPath != "" {
+		envLookup = func(k string) string {
+			if k == wtenv.EnvVar {
+				return df.EnvPath
+			}
+			return os.Getenv(k)
+		}
+	}
+	return wtenv.Resolve(wtenv.ResolveOpts{
+		Cwd:       cwd,
+		FlagDB:    df.DBPath,
+		EnvLookup: envLookup,
+	})
+}
+
+func main() {
+	// Capture cwd before Wails has a chance to chdir — wtenv.Resolve's
+	// worktree-root walk needs it.
+	cwd, _ := os.Getwd()
+	df := parseDesktopFlags(os.Args[1:])
+	resolved, err := resolveDesktopEnv(cwd, df)
+	if err != nil {
+		log.Fatalf("resolve env: %v", err)
+	}
+	if resolved.ManifestPath != "" {
+		fmt.Fprintf(os.Stderr, "bacio-desktop: env source=%s db=%s manifest=%s\n", resolved.Source, resolved.DBPath, resolved.ManifestPath)
+	}
+
+	// Open a local bacio client — the same API surface the CLI uses.
+	// DBPath defaults to the resolved worktree manifest's value (or
+	// the legacy ~/.bacio/db.sqlite when no manifest is in play).
+	c, err := client.Open(context.Background(), client.Options{
+		Actor:  "desktop",
+		DBPath: resolved.DBPath,
+	})
 	if err != nil {
 		log.Fatalf("open bacio client: %v", err)
 	}
@@ -60,7 +115,7 @@ func main() {
 			application.NewService(NewFeatureService(c)),
 			application.NewService(NewHistoryService(c)),
 			application.NewService(NewSettingsService(c)),
-			application.NewService(NewLeaderService()),
+			application.NewService(NewLeaderService(resolved.DBPath, resolved.ManifestSlug())),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
@@ -75,8 +130,15 @@ func main() {
 	// 'Mac' options tailor the window when running on macOS.
 	// 'BackgroundColour' is the background colour of the window.
 	// 'URL' is the URL that will be loaded into the webview.
+	windowTitle := "bacio"
+	if slug := resolved.ManifestSlug(); slug != "" {
+		// Two desktop windows from sibling worktrees are visually
+		// identical otherwise — putting the manifest slug in the title
+		// is the cheapest way to tell them apart on the taskbar.
+		windowTitle = "bacio [" + slug + "]"
+	}
 	app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title: "Window 1",
+		Title: windowTitle,
 		Mac: application.MacWindow{
 			InvisibleTitleBarHeight: 50,
 			Backdrop:                application.MacBackdropTranslucent,

@@ -163,8 +163,19 @@ func loadHookContext() (*hookContext, error) {
 
 	// --remote is intentionally ignored here: the agent registry is
 	// local-only, so the hook always talks to the local SQLite store.
+	res, err := resolveEnv()
+	if err != nil {
+		return nil, err
+	}
+	if res.ManifestPath != "" {
+		// Defensive log line — surfaces in Claude Code's hook log so a
+		// misconfigured worktree (manifest in the wrong place, BACIO_ENV
+		// pointing at the wrong file, etc.) shows up explicitly rather
+		// than silently writing to the wrong DB.
+		fmt.Fprintf(os.Stderr, "bacio hook: env source=%s db=%s manifest=%s\n", res.Source, res.DBPath, res.ManifestPath)
+	}
 	c, err := client.Open(context.Background(), client.Options{
-		DBPath: opts.dbPath,
+		DBPath: res.DBPath,
 		Actor:  act,
 	})
 	if err != nil {
