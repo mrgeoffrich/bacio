@@ -525,6 +525,29 @@ func nullableEqualInt64(db sql.NullInt64, want *int64) bool {
 	return db.Int64 == *want
 }
 
+// nullableSqliteTimestamp formats a *time.Time as the SQLite-flavoured
+// string or returns nil so the driver writes a SQL NULL. Used to round-
+// trip archived_at on the BACI-68 sync path.
+func nullableSqliteTimestamp(t *time.Time) any {
+	if t == nil {
+		return nil
+	}
+	return sqliteTimestamp(*t)
+}
+
+// nullableTimeEqual compares a nullable DB column to a Go *time.Time.
+// Two nulls are equal; a null and a present value are not. Used by the
+// sync apply-step's "did archived_at change?" check.
+func nullableTimeEqual(db sql.NullTime, want *time.Time) bool {
+	if !db.Valid {
+		return want == nil
+	}
+	if want == nil {
+		return false
+	}
+	return db.Time.Equal(*want)
+}
+
 func mapKeys[V any](m map[string]V) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
@@ -545,14 +568,16 @@ func contentHashRepo(p *ParsedRepo) string {
 }
 
 func contentHashFeature(sf *scannedFeature) string {
-	return ContentHash([]byte(fmt.Sprintf("feature|%s|%s|%s|%s",
-		sf.Parsed.UUID, sf.Parsed.Slug, sf.Parsed.Title, sf.BodyHash)))
+	return ContentHash([]byte(fmt.Sprintf("feature|%s|%s|%s|%s|%s",
+		sf.Parsed.UUID, sf.Parsed.Slug, sf.Parsed.Title, sf.BodyHash,
+		hashableArchived(sf.Parsed.ArchivedAt))))
 }
 
 func contentHashIssue(si *scannedIssue) string {
-	return ContentHash([]byte(fmt.Sprintf("issue|%s|%d|%s|%s|%s|%s|%s",
+	return ContentHash([]byte(fmt.Sprintf("issue|%s|%d|%s|%s|%s|%s|%s|%s",
 		si.Parsed.UUID, si.Parsed.Number, si.Parsed.State, si.Parsed.Assignee,
-		si.Parsed.Title, si.BodyHash, strings.Join(si.Parsed.Tags, ","))))
+		si.Parsed.Title, si.BodyHash, strings.Join(si.Parsed.Tags, ","),
+		hashableArchived(si.Parsed.ArchivedAt))))
 }
 
 func contentHashComment(sc *scannedComment) string {
@@ -561,6 +586,18 @@ func contentHashComment(sc *scannedComment) string {
 }
 
 func contentHashDocument(sd *scannedDocument) string {
-	return ContentHash([]byte(fmt.Sprintf("document|%s|%s|%s|%s",
-		sd.Parsed.UUID, sd.Parsed.Filename, sd.Parsed.Type, sd.ContentHash)))
+	return ContentHash([]byte(fmt.Sprintf("document|%s|%s|%s|%s|%s",
+		sd.Parsed.UUID, sd.Parsed.Filename, sd.Parsed.Type, sd.ContentHash,
+		hashableArchived(sd.Parsed.ArchivedAt))))
+}
+
+// hashableArchived stringifies *time.Time for inclusion in a content
+// hash. Empty for a live row, RFC3339 UTC for an archived one, so
+// flipping the flag in either direction changes the hash and the next
+// markSynced writes the new value.
+func hashableArchived(t *time.Time) string {
+	if t == nil {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
 }

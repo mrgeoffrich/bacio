@@ -64,6 +64,56 @@ func TestAddDispatchRoundTrip(t *testing.T) {
 	}
 }
 
+// TestListQueuedHidesArchivedIssue — BACI-68 dispatcher guard. A
+// queued dispatch whose target issue has since been archived must
+// vanish from both ListQueuedModesByRepo and ListQueuedByRepoMode, so
+// the background matcher can't bind a fresh agent to it.
+func TestListQueuedHidesArchivedIssue(t *testing.T) {
+	s, repo, iss, _, _ := seedDispatchFixture(t)
+	if _, err := s.AddDispatch(AddDispatchIn{
+		RepoID:        repo.ID,
+		IssueID:       &iss.ID,
+		Mode:          model.DispatchMode("implement"),
+		Payload:       "first",
+		CreatedBy:     "supervisor",
+		InitialStatus: model.DispatchQueued,
+	}); err != nil {
+		t.Fatalf("add queued dispatch: %v", err)
+	}
+	// Sanity: before archiving, the queue is visible.
+	modes, err := s.ListQueuedModesByRepo(repo.ID)
+	if err != nil {
+		t.Fatalf("list modes: %v", err)
+	}
+	if len(modes) != 1 {
+		t.Fatalf("pre-archive: modes = %v, want 1", modes)
+	}
+	rows, err := s.ListQueuedByRepoMode(repo.ID, model.DispatchMode("implement"))
+	if err != nil {
+		t.Fatalf("list queued: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("pre-archive: queued = %d, want 1", len(rows))
+	}
+	if err := s.SetIssueArchived(iss.ID, true); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	modes, err = s.ListQueuedModesByRepo(repo.ID)
+	if err != nil {
+		t.Fatalf("list modes 2: %v", err)
+	}
+	if len(modes) != 0 {
+		t.Errorf("post-archive: modes = %v, want 0 (matcher must skip)", modes)
+	}
+	rows, err = s.ListQueuedByRepoMode(repo.ID, model.DispatchMode("implement"))
+	if err != nil {
+		t.Fatalf("list queued 2: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("post-archive: queued = %d, want 0 (matcher must skip)", len(rows))
+	}
+}
+
 // TestAddDispatchMode locks in that a structured mode round-trips and an
 // unknown mode is rejected at the store boundary.
 func TestAddDispatchMode(t *testing.T) {

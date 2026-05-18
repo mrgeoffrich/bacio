@@ -16,11 +16,10 @@ func (d deps) handleFeaturesList(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	withDesc := q.Get("with_description")
-	includeArchived := q.Get("include_archived")
 	feats, err := d.store.ListFeaturesFiltered(store.FeatureFilter{
 		RepoID:             repo.ID,
 		IncludeDescription: withDesc == "true" || withDesc == "1",
-		IncludeArchived:    includeArchived == "true" || includeArchived == "1",
+		IncludeArchived:    includeArchivedFromRequest(r, d.store),
 	})
 	if err != nil {
 		status, code := statusForError(err)

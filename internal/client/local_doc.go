@@ -356,10 +356,12 @@ func (c *localClient) setDocumentArchived(ctx context.Context, repo *model.Repo,
 	}
 	if dryRun {
 		projected := *d
-		if archived {
+		// Mirror the store's idempotent semantics — see local_issue.go's
+		// setIssueArchived for the rationale.
+		if archived && d.ArchivedAt == nil {
 			now := time.Now().UTC()
 			projected.ArchivedAt = &now
-		} else {
+		} else if !archived {
 			projected.ArchivedAt = nil
 		}
 		return &projected, nil

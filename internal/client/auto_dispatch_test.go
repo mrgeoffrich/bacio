@@ -72,6 +72,29 @@ func TestAutoDispatchIssueStateGate(t *testing.T) {
 	}
 }
 
+// TestAutoDispatchIssueArchivedRejected — BACI-68 dispatcher guard.
+// Archiving an issue removes it from the board; the dispatch entry
+// points must refuse to enqueue (or auto-pick) work for that issue
+// even when the state-gate would otherwise allow it.
+func TestAutoDispatchIssueArchivedRejected(t *testing.T) {
+	p := newPair(t)
+	defer p.cleanup()
+	ctx := context.Background()
+
+	iss, err := p.store.CreateIssue(p.repo.ID, nil, "archived", "", model.StateTodo, nil)
+	if err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+	if err := p.store.SetIssueArchived(iss.ID, true); err != nil {
+		t.Fatalf("SetIssueArchived: %v", err)
+	}
+	if _, err := p.local.AutoDispatchIssue(ctx, p.repo, iss.Key, "implement", false); err == nil {
+		t.Fatalf("expected error dispatching an archived issue, got nil")
+	} else if !strings.Contains(err.Error(), "archived") {
+		t.Fatalf("error = %v, want a message mentioning archived", err)
+	}
+}
+
 // TestAutoDispatchIssueNoFreeAgentQueues is the inverse of the
 // pre-BACI-51 behaviour: with zero free agents the dispatch is queued
 // instead of erroring. The matcher will bind it when an agent frees up.

@@ -57,6 +57,9 @@ func (e *Engine) Export(ctx context.Context, target string) (*ExportResult, erro
 	allIssues, err := e.Store.ListIssues(store.IssueFilter{
 		AllRepos:           true,
 		IncludeDescription: false, // we re-fetch with description per-repo below
+		// Sync is the source of truth across machines — archived rows
+		// must round-trip too, so explicitly opt in (BACI-68).
+		IncludeArchived: true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list issues: %w", err)
@@ -122,8 +125,13 @@ func (e *Engine) exportRepo(w *exportWriter, repo *model.Repo, issueByID map[int
 
 	// Features. We need a feature-id → (slug, uuid) lookup for issues
 	// that reference a feature, so build the map regardless of whether
-	// we end up writing any feature folders.
-	features, err := e.Store.ListFeatures(repo.ID, true)
+	// we end up writing any feature folders. Include archived so the
+	// archive flag round-trips (BACI-68).
+	features, err := e.Store.ListFeaturesFiltered(store.FeatureFilter{
+		RepoID:             repo.ID,
+		IncludeDescription: true,
+		IncludeArchived:    true,
+	})
 	if err != nil {
 		return fmt.Errorf("list features: %w", err)
 	}
@@ -146,6 +154,7 @@ func (e *Engine) exportRepo(w *exportWriter, repo *model.Repo, issueByID map[int
 	issues, err := e.Store.ListIssues(store.IssueFilter{
 		RepoID:             &id,
 		IncludeDescription: true,
+		IncludeArchived:    true,
 	})
 	if err != nil {
 		return fmt.Errorf("list issues: %w", err)
@@ -161,7 +170,7 @@ func (e *Engine) exportRepo(w *exportWriter, repo *model.Repo, issueByID map[int
 	}
 
 	// Documents.
-	docs, err := e.Store.ListDocuments(store.DocumentFilter{RepoID: repo.ID})
+	docs, err := e.Store.ListDocuments(store.DocumentFilter{RepoID: repo.ID, IncludeArchived: true})
 	if err != nil {
 		return fmt.Errorf("list documents: %w", err)
 	}
@@ -203,15 +212,20 @@ func (e *Engine) exportFeature(w *exportWriter, repo *model.Repo, f *model.Featu
 	}
 	descHash := ContentHash(descBytes)
 
-	root := Map(
-		Pair{"created_at", Time(f.CreatedAt)},
-		Pair{"description_hash", Str(descHash)},
-		Pair{"slug", Str(f.Slug)},
-		Pair{"title", Str(f.Title)},
-		Pair{"updated_at", Time(f.UpdatedAt)},
-		Pair{"uuid", Str(f.UUID)},
-	)
-	yamlBytes, err := Emit(root)
+	pairs := []Pair{
+		{"created_at", Time(f.CreatedAt)},
+		{"description_hash", Str(descHash)},
+		{"slug", Str(f.Slug)},
+		{"title", Str(f.Title)},
+		{"updated_at", Time(f.UpdatedAt)},
+		{"uuid", Str(f.UUID)},
+	}
+	if f.ArchivedAt != nil {
+		// Emit only when set so live features keep today's hash-stable
+		// YAML output (BACI-68 sync round-trip).
+		pairs = append(pairs, Pair{"archived_at", Time(*f.ArchivedAt)})
+	}
+	yamlBytes, err := Emit(Map(pairs...))
 	if err != nil {
 		return err
 	}
@@ -278,6 +292,9 @@ func (e *Engine) exportIssue(
 		// If the lookup misses (shouldn't be possible — the FK is
 		// enforced — but defensive), we silently drop the field rather
 		// than emitting a half-populated reference.
+	}
+	if iss.ArchivedAt != nil {
+		pairs = append(pairs, Pair{"archived_at", Time(*iss.ArchivedAt)})
 	}
 
 	yamlBytes, err := Emit(Map(pairs...))
@@ -351,6 +368,9 @@ func (e *Engine) exportDocument(
 		{"type", Str(string(d.Type))},
 		{"updated_at", Time(d.UpdatedAt)},
 		{"uuid", Str(d.UUID)},
+	}
+	if d.ArchivedAt != nil {
+		pairs = append(pairs, Pair{"archived_at", Time(*d.ArchivedAt)})
 	}
 	yamlBytes, err := Emit(Map(pairs...))
 	if err != nil {

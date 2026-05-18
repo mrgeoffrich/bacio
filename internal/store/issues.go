@@ -292,8 +292,10 @@ func (s *Store) SetIssueArchived(issueID int64, archived bool) error {
 }
 
 // nextCandidateQ picks the lowest-numbered ready issue in a feature: state='todo',
-// no assignee, and every `blocks`-blocker in a terminal state. Shared between
-// PeekNextIssue (read-only) and ClaimNextIssue (claim).
+// no assignee, archived_at IS NULL (BACI-68 — an archived row is hidden from
+// the auto-pick path so a manually-archived todo can't be silently revived),
+// and every `blocks`-blocker in a terminal state. Shared between PeekNextIssue
+// (read-only) and ClaimNextIssue (claim).
 const nextCandidateQ = `
 	SELECT i.id
 	FROM issues i
@@ -301,6 +303,7 @@ const nextCandidateQ = `
 	  AND i.feature_id = ?
 	  AND i.state = 'todo'
 	  AND i.assignee = ''
+	  AND i.archived_at IS NULL
 	  AND NOT EXISTS (
 	    SELECT 1
 	    FROM issue_relations ir

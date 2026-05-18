@@ -24,16 +24,20 @@ func (e *Engine) applyFeatures(tx *sql.Tx, sr *scannedRepo, repo *model.Repo, re
 		var existingID int64
 		var existingSlug, existingTitle, existingDescription string
 		var existingUpdatedAt time.Time
+		var existingArchivedAt sql.NullTime
 		err := tx.QueryRow(
-			`SELECT id, slug, title, description, updated_at FROM features WHERE uuid = ?`,
+			`SELECT id, slug, title, description, updated_at, archived_at FROM features WHERE uuid = ?`,
 			uuid,
-		).Scan(&existingID, &existingSlug, &existingTitle, &existingDescription, &existingUpdatedAt)
+		).Scan(&existingID, &existingSlug, &existingTitle, &existingDescription, &existingUpdatedAt, &existingArchivedAt)
 		if errors.Is(err, sql.ErrNoRows) {
-			// Insert.
+			// Insert. archived_at round-trips per BACI-68; sync is the
+			// source of truth across machines so an archived row on one
+			// machine becomes archived on the other when first imported.
 			if _, err := tx.Exec(
-				`INSERT INTO features (uuid, repo_id, slug, title, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+				`INSERT INTO features (uuid, repo_id, slug, title, description, created_at, updated_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 				uuid, repo.ID, sf.Parsed.Slug, sf.Parsed.Title, sf.Description,
 				sqliteTimestamp(sf.Parsed.CreatedAt), sqliteTimestamp(sf.Parsed.UpdatedAt),
+				nullableSqliteTimestamp(sf.Parsed.ArchivedAt),
 			); err != nil {
 				return fmt.Errorf("insert feature %s: %w", sf.Parsed.Slug, err)
 			}
@@ -61,11 +65,15 @@ func (e *Engine) applyFeatures(tx *sql.Tx, sr *scannedRepo, repo *model.Repo, re
 			})
 			continue
 		}
-		// Update if any field differs.
-		if existingSlug != sf.Parsed.Slug || existingTitle != sf.Parsed.Title || existingDescription != sf.Description {
+		// Update if any field differs. archived_at is compared as a
+		// nullable timestamp so flipping the flag in either direction
+		// triggers a write.
+		if existingSlug != sf.Parsed.Slug || existingTitle != sf.Parsed.Title || existingDescription != sf.Description ||
+			!nullableTimeEqual(existingArchivedAt, sf.Parsed.ArchivedAt) {
 			if _, err := tx.Exec(
-				`UPDATE features SET slug = ?, title = ?, description = ?, updated_at = ? WHERE id = ?`,
-				sf.Parsed.Slug, sf.Parsed.Title, sf.Description, sqliteTimestamp(sf.Parsed.UpdatedAt), existingID,
+				`UPDATE features SET slug = ?, title = ?, description = ?, updated_at = ?, archived_at = ? WHERE id = ?`,
+				sf.Parsed.Slug, sf.Parsed.Title, sf.Description, sqliteTimestamp(sf.Parsed.UpdatedAt),
+				nullableSqliteTimestamp(sf.Parsed.ArchivedAt), existingID,
 			); err != nil {
 				return fmt.Errorf("update feature %s: %w", sf.Parsed.Slug, err)
 			}
@@ -134,17 +142,19 @@ func (e *Engine) applyIssues(tx *sql.Tx, sr *scannedRepo, repo *model.Repo, res 
 			existingState       string
 			existingAssignee    string
 			existingUpdatedAt   time.Time
+			existingArchivedAt  sql.NullTime
 		)
 		err := tx.QueryRow(
-			`SELECT id, number, feature_id, title, description, state, assignee, updated_at FROM issues WHERE uuid = ?`,
+			`SELECT id, number, feature_id, title, description, state, assignee, updated_at, archived_at FROM issues WHERE uuid = ?`,
 			uuid,
-		).Scan(&existingID, &existingNumber, &existingFeatureID, &existingTitle, &existingDescription, &existingState, &existingAssignee, &existingUpdatedAt)
+		).Scan(&existingID, &existingNumber, &existingFeatureID, &existingTitle, &existingDescription, &existingState, &existingAssignee, &existingUpdatedAt, &existingArchivedAt)
 		if errors.Is(err, sql.ErrNoRows) {
 			res2, err := tx.Exec(
-				`INSERT INTO issues (uuid, repo_id, number, feature_id, title, description, state, assignee, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				`INSERT INTO issues (uuid, repo_id, number, feature_id, title, description, state, assignee, created_at, updated_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				uuid, repo.ID, si.Parsed.Number, nullableInt64(featureID),
 				si.Parsed.Title, si.Description, si.Parsed.State, si.Parsed.Assignee,
 				sqliteTimestamp(si.Parsed.CreatedAt), sqliteTimestamp(si.Parsed.UpdatedAt),
+				nullableSqliteTimestamp(si.Parsed.ArchivedAt),
 			)
 			if err != nil {
 				return fmt.Errorf("insert issue %s: %w", uuid, err)
@@ -181,13 +191,14 @@ func (e *Engine) applyIssues(tx *sql.Tx, sr *scannedRepo, repo *model.Repo, res 
 				existingTitle != si.Parsed.Title ||
 				existingDescription != si.Description ||
 				existingState != si.Parsed.State ||
-				existingAssignee != si.Parsed.Assignee
+				existingAssignee != si.Parsed.Assignee ||
+				!nullableTimeEqual(existingArchivedAt, si.Parsed.ArchivedAt)
 			if changed {
 				if _, err := tx.Exec(
-					`UPDATE issues SET number = ?, feature_id = ?, title = ?, description = ?, state = ?, assignee = ?, updated_at = ? WHERE id = ?`,
+					`UPDATE issues SET number = ?, feature_id = ?, title = ?, description = ?, state = ?, assignee = ?, updated_at = ?, archived_at = ? WHERE id = ?`,
 					si.Parsed.Number, nullableInt64(featureID),
 					si.Parsed.Title, si.Description, si.Parsed.State, si.Parsed.Assignee,
-					sqliteTimestamp(si.Parsed.UpdatedAt), existingID,
+					sqliteTimestamp(si.Parsed.UpdatedAt), nullableSqliteTimestamp(si.Parsed.ArchivedAt), existingID,
 				); err != nil {
 					return fmt.Errorf("update issue %s: %w", uuid, err)
 				}
@@ -417,17 +428,19 @@ func (e *Engine) applyDocuments(tx *sql.Tx, sr *scannedRepo, repo *model.Repo, r
 			existingContent    string
 			existingSourcePath string
 			existingUpdatedAt  time.Time
+			existingArchivedAt sql.NullTime
 		)
 		err := tx.QueryRow(
-			`SELECT id, filename, type, content, source_path, updated_at FROM documents WHERE uuid = ?`,
+			`SELECT id, filename, type, content, source_path, updated_at, archived_at FROM documents WHERE uuid = ?`,
 			uuid,
-		).Scan(&existingID, &existingFilename, &existingType, &existingContent, &existingSourcePath, &existingUpdatedAt)
+		).Scan(&existingID, &existingFilename, &existingType, &existingContent, &existingSourcePath, &existingUpdatedAt, &existingArchivedAt)
 		var stale bool
 		if errors.Is(err, sql.ErrNoRows) {
 			res2, err := tx.Exec(
-				`INSERT INTO documents (uuid, repo_id, filename, type, content, size_bytes, source_path, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				`INSERT INTO documents (uuid, repo_id, filename, type, content, size_bytes, source_path, created_at, updated_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				uuid, repo.ID, sd.Parsed.Filename, sd.Parsed.Type, sd.Content, len(sd.Content), sd.Parsed.SourcePath,
 				sqliteTimestamp(sd.Parsed.CreatedAt), sqliteTimestamp(sd.Parsed.UpdatedAt),
+				nullableSqliteTimestamp(sd.Parsed.ArchivedAt),
 			)
 			if err != nil {
 				return fmt.Errorf("insert document %s: %w", sd.Parsed.Filename, err)
@@ -458,12 +471,13 @@ func (e *Engine) applyDocuments(tx *sql.Tx, sr *scannedRepo, repo *model.Repo, r
 			changed := existingFilename != sd.Parsed.Filename ||
 				existingType != sd.Parsed.Type ||
 				existingContent != sd.Content ||
-				existingSourcePath != sd.Parsed.SourcePath
+				existingSourcePath != sd.Parsed.SourcePath ||
+				!nullableTimeEqual(existingArchivedAt, sd.Parsed.ArchivedAt)
 			if changed {
 				if _, err := tx.Exec(
-					`UPDATE documents SET filename = ?, type = ?, content = ?, size_bytes = ?, source_path = ?, updated_at = ? WHERE id = ?`,
+					`UPDATE documents SET filename = ?, type = ?, content = ?, size_bytes = ?, source_path = ?, updated_at = ?, archived_at = ? WHERE id = ?`,
 					sd.Parsed.Filename, sd.Parsed.Type, sd.Content, len(sd.Content), sd.Parsed.SourcePath,
-					sqliteTimestamp(sd.Parsed.UpdatedAt), existingID,
+					sqliteTimestamp(sd.Parsed.UpdatedAt), nullableSqliteTimestamp(sd.Parsed.ArchivedAt), existingID,
 				); err != nil {
 					return fmt.Errorf("update document %s: %w", sd.Parsed.Filename, err)
 				}

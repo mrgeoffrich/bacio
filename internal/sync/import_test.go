@@ -445,6 +445,109 @@ func TestImport_LWW_NewerRemote_Updates(t *testing.T) {
 	_ = uuids
 }
 
+// TestImport_RoundTripsArchivedAt is the BACI-68 reviewer follow-up
+// (point 5 on PR #103). Archive an issue, feature, and document on
+// machine A, export, import into machine B, and verify each row lands
+// archived. Then unarchive on A, re-export/import, and verify B
+// follows back to live. Without the sync-layer field add the second
+// machine would silently drop the flag in either direction.
+func TestImport_RoundTripsArchivedAt(t *testing.T) {
+	a, uuids := seedExportFixture(t)
+
+	// Archive one of each kind on machine A. Bump updated_at so the
+	// LWW gate inside applyIssues/applyFeatures/applyDocuments lets
+	// the change through on import.
+	if _, err := a.DB.Exec(
+		`UPDATE issues SET archived_at = '2026-05-10 12:00:00', updated_at = '2026-05-15 09:00:00' WHERE uuid = ?`,
+		uuids["iss1"]); err != nil {
+		t.Fatalf("archive iss: %v", err)
+	}
+	if _, err := a.DB.Exec(
+		`UPDATE features SET archived_at = '2026-05-10 12:01:00', updated_at = '2026-05-15 09:00:00' WHERE uuid = ?`,
+		uuids["feat"]); err != nil {
+		t.Fatalf("archive feat: %v", err)
+	}
+	if _, err := a.DB.Exec(
+		`UPDATE documents SET archived_at = '2026-05-10 12:02:00', updated_at = '2026-05-15 09:00:00' WHERE uuid = ?`,
+		uuids["doc"]); err != nil {
+		t.Fatalf("archive doc: %v", err)
+	}
+
+	dirA := t.TempDir()
+	if _, err := (&Engine{Store: a}).Export(context.Background(), dirA); err != nil {
+		t.Fatalf("export A: %v", err)
+	}
+
+	b, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open b: %v", err)
+	}
+	t.Cleanup(func() { b.Close() })
+	if _, err := (&Engine{Store: b}).Import(context.Background(), dirA); err != nil {
+		t.Fatalf("import into B: %v", err)
+	}
+
+	issB, err := b.GetIssueByKey("MINI", 1)
+	if err != nil {
+		t.Fatalf("get iss B: %v", err)
+	}
+	if issB.ArchivedAt == nil {
+		t.Error("issue archived_at did not round-trip into B")
+	}
+	featB, err := b.GetFeatureByUUID(uuids["feat"])
+	if err != nil {
+		t.Fatalf("get feat B: %v", err)
+	}
+	if featB.ArchivedAt == nil {
+		t.Error("feature archived_at did not round-trip into B")
+	}
+	docB, err := b.GetDocumentByUUID(uuids["doc"], false)
+	if err != nil {
+		t.Fatalf("get doc B: %v", err)
+	}
+	if docB.ArchivedAt == nil {
+		t.Error("document archived_at did not round-trip into B")
+	}
+
+	// Now unarchive on A, re-export, re-import — B should follow back
+	// to live (this exercises the apply-side update branch's
+	// nullableTimeEqual check).
+	if _, err := a.DB.Exec(
+		`UPDATE issues SET archived_at = NULL, updated_at = '2026-05-20 09:00:00' WHERE uuid = ?`,
+		uuids["iss1"]); err != nil {
+		t.Fatalf("unarchive iss: %v", err)
+	}
+	if _, err := a.DB.Exec(
+		`UPDATE features SET archived_at = NULL, updated_at = '2026-05-20 09:00:00' WHERE uuid = ?`,
+		uuids["feat"]); err != nil {
+		t.Fatalf("unarchive feat: %v", err)
+	}
+	if _, err := a.DB.Exec(
+		`UPDATE documents SET archived_at = NULL, updated_at = '2026-05-20 09:00:00' WHERE uuid = ?`,
+		uuids["doc"]); err != nil {
+		t.Fatalf("unarchive doc: %v", err)
+	}
+	dirA2 := t.TempDir()
+	if _, err := (&Engine{Store: a}).Export(context.Background(), dirA2); err != nil {
+		t.Fatalf("re-export A: %v", err)
+	}
+	if _, err := (&Engine{Store: b}).Import(context.Background(), dirA2); err != nil {
+		t.Fatalf("re-import into B: %v", err)
+	}
+	issB2, _ := b.GetIssueByKey("MINI", 1)
+	if issB2.ArchivedAt != nil {
+		t.Errorf("issue archived_at clear did not round-trip; got %v", issB2.ArchivedAt)
+	}
+	featB2, _ := b.GetFeatureByUUID(uuids["feat"])
+	if featB2.ArchivedAt != nil {
+		t.Errorf("feature archived_at clear did not round-trip; got %v", featB2.ArchivedAt)
+	}
+	docB2, _ := b.GetDocumentByUUID(uuids["doc"], false)
+	if docB2.ArchivedAt != nil {
+		t.Errorf("document archived_at clear did not round-trip; got %v", docB2.ArchivedAt)
+	}
+}
+
 // TestImport_EmptySource: importing from a folder with no repos/
 // directory is fine; reports zeros.
 func TestImport_EmptySource(t *testing.T) {

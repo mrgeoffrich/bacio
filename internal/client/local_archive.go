@@ -59,17 +59,14 @@ func (c *localClient) SetDisplayShowArchived(ctx context.Context, value, dryRun 
 		return false, err
 	}
 	c.recordOp(model.HistoryEntry{
-		Op:   "display.update",
-		Kind: "setting",
+		// kind/details shape matches handlers_archive.go's
+		// handleDisplayPreferencesSet so `bacio history --kind app_setting`
+		// returns the same rows whether the toggle was flipped from the CLI
+		// or the HTTP surface (nit #8 on PR #103).
+		Op:          "display.update",
+		Kind:        "app_setting",
 		TargetLabel: "display.show_archived",
-		Details:     boolDetails(value),
+		Details:     fmt.Sprintf("show_archived=%t", value),
 	})
 	return value, nil
-}
-
-func boolDetails(v bool) string {
-	if v {
-		return "true"
-	}
-	return "false"
 }

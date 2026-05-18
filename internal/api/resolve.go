@@ -9,6 +9,20 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
 
+// includeArchivedFromRequest resolves the per-call ?include_archived=1 query
+// flag against the display.show_archived global setting. Either source can
+// opt the caller in to archived rows (OR semantics); the query string wins
+// when it's the only signal asking for them. Mirrors the CLI's behaviour on
+// `bacio issue list --include-archived`. (BACI-68)
+func includeArchivedFromRequest(r *http.Request, s *store.Store) bool {
+	q := r.URL.Query().Get("include_archived")
+	if q == "true" || q == "1" {
+		return true
+	}
+	v, _ := s.GetDisplayShowArchived()
+	return v
+}
+
 // resolveRepoFromPath pulls {prefix} from the URL, uppercases it, and looks
 // up the repo. Writes a 404 envelope (or other statusForError) and returns
 // ok=false on failure so handlers can early-return.

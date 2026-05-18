@@ -82,10 +82,15 @@ func (c *localClient) setIssueArchived(ctx context.Context, repo *model.Repo, ke
 	}
 	if dryRun {
 		projected := *iss
-		if archived {
+		// Mirror the store's idempotent semantics: re-archiving preserves
+		// the original timestamp, and unarchiving an unarchived row is a
+		// no-op. Otherwise an agent comparing dry-run output to a real
+		// call would see a phantom "now" timestamp that the real write
+		// never produces.
+		if archived && iss.ArchivedAt == nil {
 			now := time.Now().UTC()
 			projected.ArchivedAt = &now
-		} else {
+		} else if !archived {
 			projected.ArchivedAt = nil
 		}
 		return &projected, nil

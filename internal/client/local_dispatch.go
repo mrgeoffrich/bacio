@@ -143,6 +143,14 @@ func (c *localClient) AutoDispatchIssue(ctx context.Context, repo *model.Repo, i
 	if err != nil {
 		return nil, err
 	}
+	// BACI-68: refuse to dispatch an archived issue. The kanban card
+	// for an archived todo wouldn't render an action button by default,
+	// but the REST/CLI entry points (and a stale desktop view) could
+	// still send a dispatch through — block it here so the manual
+	// archive lever isn't quietly bypassed.
+	if iss.ArchivedAt != nil {
+		return nil, fmt.Errorf("issue %s is archived; unarchive it before dispatching", iss.Key)
+	}
 	gates, err := c.GetPromptStates(ctx)
 	if err != nil {
 		return nil, err

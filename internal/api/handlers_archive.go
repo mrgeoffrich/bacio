@@ -22,6 +22,23 @@ import (
 // timestamp instead of a zero value.
 func nowUTC() time.Time { return time.Now().UTC() }
 
+// projectArchivedAt mirrors the store's idempotent semantics for the
+// archive dry-run projections (BACI-68 nit #10): re-archiving an
+// already-archived row preserves the original timestamp, unarchiving
+// an unarchived row is a no-op. Without this, an agent comparing
+// dry-run output to a real call would see a phantom `now` timestamp
+// that the real write never produces.
+func projectArchivedAt(current *time.Time, archive bool) *time.Time {
+	if !archive {
+		return nil
+	}
+	if current != nil {
+		return current
+	}
+	now := nowUTC()
+	return &now
+}
+
 // ------------ issue archive / unarchive ------------
 
 func (d deps) handleIssueArchive(w http.ResponseWriter, r *http.Request) {
@@ -43,12 +60,7 @@ func (d deps) runIssueArchive(w http.ResponseWriter, r *http.Request, archive bo
 	}
 	if isDryRun(r) {
 		projected := *iss
-		if archive {
-			now := nowUTC()
-			projected.ArchivedAt = &now
-		} else {
-			projected.ArchivedAt = nil
-		}
+		projected.ArchivedAt = projectArchivedAt(iss.ArchivedAt, archive)
 		writeDryRun(w, http.StatusOK, &projected)
 		return
 	}
@@ -107,12 +119,7 @@ func (d deps) runFeatureArchive(w http.ResponseWriter, r *http.Request, archive 
 	}
 	if isDryRun(r) {
 		projected := *feat
-		if archive {
-			now := nowUTC()
-			projected.ArchivedAt = &now
-		} else {
-			projected.ArchivedAt = nil
-		}
+		projected.ArchivedAt = projectArchivedAt(feat.ArchivedAt, archive)
 		writeDryRun(w, http.StatusOK, &projected)
 		return
 	}
@@ -171,12 +178,7 @@ func (d deps) runDocumentArchive(w http.ResponseWriter, r *http.Request, archive
 	}
 	if isDryRun(r) {
 		projected := *doc
-		if archive {
-			now := nowUTC()
-			projected.ArchivedAt = &now
-		} else {
-			projected.ArchivedAt = nil
-		}
+		projected.ArchivedAt = projectArchivedAt(doc.ArchivedAt, archive)
 		writeDryRun(w, http.StatusOK, &projected)
 		return
 	}
