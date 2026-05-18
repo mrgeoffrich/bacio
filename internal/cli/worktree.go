@@ -122,12 +122,17 @@ place. Honours --dry-run and --json (see ` + "`bacio schema show worktree.init`"
 			if err != nil {
 				return err
 			}
-			info, err := git.Detect(cwd)
+			// BACI-71: write the manifest at the LINKED worktree's own
+			// root, not the main worktree's. git.Detect intentionally
+			// returns the main worktree (so resolveRepo / install-hooks
+			// / sync share one repo identity); the manifest layer needs
+			// the opposite — see git.WorktreeRoot's godoc.
+			root, err := git.WorktreeRoot(cwd)
 			if err != nil {
 				return err
 			}
 
-			res, err := runWorktreeInit(info.Root, info.Name, in)
+			res, err := runWorktreeInit(root, filepath.Base(root), in)
 			if err != nil {
 				return err
 			}

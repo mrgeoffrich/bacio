@@ -18,7 +18,10 @@
 //
 //  1. Explicit flags (--db, --addr / --port). Power-user override.
 //  2. Env override: BACIO_ENV=<absolute path to a manifest YAML>.
-//  3. Worktree YAML: walk up from cwd to a git toplevel, look for
+//  3. Worktree YAML: resolve the LINKED worktree's own root via
+//     `git rev-parse --show-toplevel` (see git.WorktreeRoot — this
+//     is deliberately different from git.Detect, which returns the
+//     main worktree's root for repo-identity sharing), and look for
 //     <root>/environment-config.yaml.
 //  4. Default: ~/.bacio/db.sqlite + 127.0.0.1:5320.
 //
@@ -113,14 +116,24 @@ type Allocations struct {
 // Flag overrides take precedence over the env var / worktree
 // manifest; pass empty strings to skip a given override.
 type ResolveOpts struct {
-	Cwd        string // current working directory; defaults to os.Getwd()
-	FlagDB     string // explicit --db flag value, if any
-	FlagAddr   string // explicit --addr flag value, if any
-	EnvOnly    bool   // when true, skip the worktree-root walk (used by tests)
-	HomeDir    string // override for ~ — used by tests
-	EnvLookup  func(string) string
-	GitDetect  func(cwd string) (*git.Info, error)
-	FileExists func(path string) bool
+	Cwd       string // current working directory; defaults to os.Getwd()
+	FlagDB    string // explicit --db flag value, if any
+	FlagAddr  string // explicit --addr flag value, if any
+	EnvOnly   bool   // when true, skip the worktree-root walk (used by tests)
+	HomeDir   string // override for ~ — used by tests
+	EnvLookup func(string) string
+	// GitDetect resolves the main worktree's root for a given cwd
+	// (defaults to git.Detect). Kept around for callers that want
+	// repo-wide identity; the manifest-layer step uses
+	// GitWorktreeRoot instead.
+	GitDetect func(cwd string) (*git.Info, error)
+	// GitWorktreeRoot resolves the LINKED worktree's own root for a
+	// given cwd (defaults to git.WorktreeRoot). BACI-71: the
+	// manifest layer wants the linked worktree, not the main one,
+	// so the read side here matches the write side in
+	// `bacio worktree init`.
+	GitWorktreeRoot func(cwd string) (string, error)
+	FileExists      func(path string) bool
 }
 
 // Resolved is the output of Resolve. DBPath and APIAddr are always
@@ -153,6 +166,9 @@ func Resolve(opts ResolveOpts) (Resolved, error) {
 	}
 	if opts.GitDetect == nil {
 		opts.GitDetect = git.Detect
+	}
+	if opts.GitWorktreeRoot == nil {
+		opts.GitWorktreeRoot = git.WorktreeRoot
 	}
 	if opts.FileExists == nil {
 		opts.FileExists = func(p string) bool {
@@ -239,11 +255,13 @@ func Resolve(opts ResolveOpts) (Resolved, error) {
 		return fromManifest(SourceEnv, abs, m)
 	}
 
-	// Step 3: worktree-root environment-config.yaml.
+	// Step 3: worktree-root environment-config.yaml. BACI-71: probe
+	// the LINKED worktree's own root (the manifest lives there), not
+	// the main worktree's. Using GitDetect here was the bug that
+	// silently bypassed isolation for every linked worktree.
 	if !opts.EnvOnly && opts.Cwd != "" {
-		info, err := opts.GitDetect(opts.Cwd)
-		if err == nil && info != nil && info.Root != "" {
-			candidate := filepath.Join(info.Root, DefaultManifestFilename)
+		if root, err := opts.GitWorktreeRoot(opts.Cwd); err == nil && root != "" {
+			candidate := filepath.Join(root, DefaultManifestFilename)
 			if opts.FileExists(candidate) {
 				m, err := LoadManifest(candidate)
 				if err != nil {
