@@ -23,8 +23,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/controller"
 	"github.com/mrgeoffrich/bacio/internal/dispatcher"
+	"github.com/mrgeoffrich/bacio/internal/idlepinger"
 	"github.com/mrgeoffrich/bacio/internal/leader"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
@@ -119,6 +121,23 @@ func queueMatchTick() tea.Cmd {
 	})
 }
 
+// idlePingTickMsg fires on the BACI-57 idle-pinger cadence
+// (IdlePingTickInterval). Same shell-level pattern as the other
+// leader-gated tickers: only the leader runs the reaper; standby
+// ticks are no-ops; the cadence keeps running on standby so a
+// promotion picks up next tick. Must stay in lockstep with
+// controller.Controller's idle-ping goroutine so the TUI honours the
+// same loop set as desktop + api.
+type idlePingTickMsg time.Time
+
+// idlePingTick returns a Cmd that fires idlePingTickMsg after
+// IdlePingTickInterval.
+func idlePingTick() tea.Cmd {
+	return tea.Tick(store.IdlePingTickInterval, func(t time.Time) tea.Msg {
+		return idlePingTickMsg(t)
+	})
+}
+
 // Run boots the Bubble Tea program in alt-screen mode and blocks until
 // quit. The store is owned by the caller. It constructs a leader.Elector
 // for the process and releases the lease on graceful exit.
@@ -161,11 +180,24 @@ func NewModel(s *store.Store, repo *model.Repo, el *leader.Elector) (*Model, err
 	if err != nil {
 		return nil, err
 	}
+	// Build the pinger client off a borrowed wrapper — the TUI owns the
+	// store, the pinger borrows it for audited mutations. Actor is the
+	// elector's label when one exists, falling back to a generic "tui"
+	// so a WASM-demo run (nil elector) still attributes audit rows.
+	pingerActor := "tui"
+	if el != nil {
+		// Sharing the elector's label keeps audit rows pointing at the
+		// same identity the leader chip shows in the footer.
+		h, _ := os.Hostname()
+		pingerActor = fmt.Sprintf("tui pid=%d host=%s", os.Getpid(), h)
+	}
+	pingerClient := client.NewLocalFromStore(s, pingerActor)
 	return &Model{
 		repo:    repo,
 		store:   s,
 		elector: el,
 		matcher: dispatcher.New(s),
+		pinger:  idlepinger.New(s, pingerClient, nil),
 		tabs: []tab{
 			{"Board", board},
 			{"Features", newFeaturesView(s, repo)},
@@ -201,6 +233,10 @@ type Model struct {
 	// matcher binds BACI-51 queued dispatches to free agents on the
 	// queueMatchTick cadence. nil disables (e.g. WASM demo).
 	matcher *dispatcher.Matcher
+	// pinger is the BACI-57 idle-pinger reaper. Runs under the leader
+	// lease via controller.PingIfLeader on the idlePingTick cadence.
+	// nil disables (e.g. WASM demo).
+	pinger *idlepinger.Pinger
 }
 
 func (m *Model) Init() tea.Cmd {
@@ -228,6 +264,11 @@ func (m *Model) Init() tea.Cmd {
 		// all attempt a match in the same instant); the first tick
 		// runs QueueMatchInterval (~5s) after Init.
 		cmds = append(cmds, queueMatchTick())
+		// Seed the BACI-57 idle-pinger cadence. Same pattern: skip the
+		// immediate fire (the very first reaper sweep at startup buys
+		// nothing — any candidates were already candidates a moment ago).
+		// The first tick runs IdlePingTickInterval (~30s) after Init.
+		cmds = append(cmds, idlePingTick())
 	}
 	if len(cmds) == 0 {
 		return nil
@@ -273,6 +314,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, queueMatchTick()
+	case idlePingTickMsg:
+		// BACI-57 idle-pinger tick: queue "are you alive?" pings to
+		// long-idle sessions, force-end the ones that don't ack
+		// within AgentPingNoAckTimeout. Leader-gating + error
+		// handling lives in controller.PingIfLeader — same helper the
+		// desktop and api goroutines call, so all three UIs run the
+		// reaper identically.
+		controller.PingIfLeader(m.pinger, m.elector, nil)
+		if m.elector == nil {
+			return m, nil
+		}
+		return m, idlePingTick()
 	case openDocMsg:
 		// Cross-tab: hand the filename to the Documents tab and focus
 		// it. Remember where we came from so esc on the doc overlay

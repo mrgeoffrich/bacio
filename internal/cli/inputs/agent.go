@@ -35,7 +35,10 @@ type AgentHeartbeatInput struct {
 }
 
 // AgentEndInput is the payload for `bacio agent end --json`. Reason
-// must be one of: stop, clear, logout, crash, other.
+// must be one of: stop, clear, logout, crash, other, presumed_dead.
+// `presumed_dead` is normally written by the bacio idle-pinger
+// reaper (BACI-57) rather than by an agent, but the CLI accepts it
+// for symmetry with the model layer.
 type AgentEndInput struct {
 	SessionID string `json:"session_id"`
 	Reason    string `json:"reason"`

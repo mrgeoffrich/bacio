@@ -24,11 +24,13 @@
 package controller
 
 import (
+	"context"
 	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/mrgeoffrich/bacio/internal/dispatcher"
+	"github.com/mrgeoffrich/bacio/internal/idlepinger"
 	"github.com/mrgeoffrich/bacio/internal/leader"
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
@@ -62,38 +64,56 @@ func PruneIfLeader(s *store.Store, el *leader.Elector, log *slog.Logger) {
 	}
 }
 
-// Controller owns the three background goroutines (heartbeat, prune,
-// matcher) for desktop + api. The TUI does not use it — it drives the
-// per-tick work itself from bubbletea Update handlers using the
-// package-level helpers above — so this type intentionally has no
-// bubbletea coupling.
+// PingIfLeader runs one [idlepinger.Pinger] sweep if el holds the
+// lease (BACI-57). Errors are logged at warn level and never returned —
+// the reaper is mechanical janitor work (its audit rows give the
+// forensic trail), and a transient DB blip must not propagate up to
+// the caller's tick handler. A nil pinger or elector is a no-op.
+func PingIfLeader(p *idlepinger.Pinger, el *leader.Elector, log *slog.Logger) {
+	if p == nil || el == nil || !el.CurrentState().AmLeader {
+		return
+	}
+	if _, _, err := p.Tick(context.Background()); err != nil {
+		loggerOrDefault(log).Warn("bacio: idle ping sweep failed", "err", err)
+	}
+}
+
+// Controller owns the four background goroutines (heartbeat, prune,
+// matcher, idle-pinger) for desktop + api. The TUI does not use it —
+// it drives the per-tick work itself from bubbletea Update handlers
+// using the package-level helpers above — so this type intentionally
+// has no bubbletea coupling.
 type Controller struct {
 	st      *store.Store
 	el      *leader.Elector
 	matcher *dispatcher.Matcher
+	pinger  *idlepinger.Pinger
 	log     *slog.Logger
 
 	done chan struct{}
 	wg   sync.WaitGroup
 }
 
-// New builds a Controller backed by an already-constructed elector and
-// matcher. The Controller takes ownership of the elector for shutdown
-// (Stop calls Release); the store is not closed by the Controller —
-// the caller still owns the *store.Store handle's lifecycle.
+// New builds a Controller backed by an already-constructed elector,
+// matcher, and pinger. The Controller takes ownership of the elector
+// for shutdown (Stop calls Release); the store is not closed by the
+// Controller — the caller still owns the *store.Store handle's
+// lifecycle. matcher and pinger may be nil to disable their loops
+// (e.g. tests that exercise only the heartbeat path).
 //
 // log may be nil; helpers fall back to slog.Default().
-func New(s *store.Store, el *leader.Elector, m *dispatcher.Matcher, log *slog.Logger) *Controller {
-	return &Controller{st: s, el: el, matcher: m, log: log}
+func New(s *store.Store, el *leader.Elector, m *dispatcher.Matcher, p *idlepinger.Pinger, log *slog.Logger) *Controller {
+	return &Controller{st: s, el: el, matcher: m, pinger: p, log: log}
 }
 
 // Start fires the heartbeat synchronously once (so the caller sees a
-// non-zero leader state before Start returns), then spins three
+// non-zero leader state before Start returns), then spins four
 // goroutines: heartbeat on UILeaderHeartbeatInterval, prune on
-// UILeaderPruneInterval, matcher on QueueMatchInterval. If emit is
-// non-nil it is called with every heartbeat result (including the
-// synchronous startup tick) — used by the desktop to push leader state
-// to the Wails frontend.
+// UILeaderPruneInterval, matcher on QueueMatchInterval, idle-pinger
+// on IdlePingTickInterval (BACI-57). If emit is non-nil it is called
+// with every heartbeat result (including the synchronous startup
+// tick) — used by the desktop to push leader state to the Wails
+// frontend.
 //
 // Start is not safe to call twice on the same Controller; pair each
 // Start with exactly one Stop.
@@ -156,6 +176,21 @@ func (c *Controller) Start(emit func(leader.State)) {
 			select {
 			case <-ticker.C:
 				MatchIfLeader(c.matcher, c.el, c.log)
+			case <-done:
+				return
+			}
+		}
+	}()
+
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		ticker := time.NewTicker(store.IdlePingTickInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				PingIfLeader(c.pinger, c.el, c.log)
 			case <-done:
 				return
 			}

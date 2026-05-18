@@ -34,6 +34,16 @@ const (
 	// prune cadence, gated on the leader lease so one matcher runs
 	// across the cluster.
 	QueueMatchInterval = 5 * time.Second
+
+	// IdlePingTickInterval is how often the controlling UI fires the
+	// BACI-57 idle-pinger sweep (internal/idlepinger.Pinger.Tick). The
+	// reaper walks every alive registered session per tick — one
+	// ListAgentSessions plus one ListDispatches per candidate, so cheap.
+	// 30s drives latency on both the "first ping" step (worst case +30s)
+	// and the "end after no-ack" step (worst case +30s past the
+	// AgentPingNoAckTimeout, so ~2m30s end-to-end from ping to end).
+	// Leader-gated so exactly one reaper runs across the cluster.
+	IdlePingTickInterval = 30 * time.Second
 )
 
 // LeaderInfo is the current state of the ui_leader row, returned by

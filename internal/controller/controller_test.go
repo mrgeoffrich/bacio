@@ -120,6 +120,7 @@ func TestMatchIfLeaderRespectsLease(t *testing.T) {
 func TestNilGuards(t *testing.T) {
 	PruneIfLeader(nil, nil, nil)
 	MatchIfLeader(nil, nil, nil)
+	PingIfLeader(nil, nil, nil)
 }
 
 // TestControllerStartStop: Start spins the three goroutines and Stop
@@ -136,7 +137,10 @@ func TestControllerStartStop(t *testing.T) {
 
 	fb := &fakeElectorBackend{acquireOK: true, renewOK: true}
 	el := leader.New(fb, "test pid=1")
-	c := New(s, el, dispatcher.New(s), nil)
+	// pinger left nil — TestControllerStartStop only verifies Start/Stop
+	// semantics, not the loop's behaviour. The BACI-57 pinger goroutine
+	// becomes a quiet no-op via PingIfLeader's nil guard.
+	c := New(s, el, dispatcher.New(s), nil, nil)
 
 	var emits int
 	c.Start(func(leader.State) { emits++ })

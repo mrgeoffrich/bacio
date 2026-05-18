@@ -238,6 +238,14 @@ func (s *Store) MarkDispatchDelivered(id int64) (*model.AgentDispatch, error) {
 // optional free-form note. Pending or delivered dispatches move to
 // acked; an already-acked dispatch is returned unchanged (the first
 // ack's note wins). Acking a cancelled dispatch is an error.
+//
+// BACI-57: when the dispatch carries a target_session_id, the ack
+// also bumps agent_sessions.last_seen_at for that session inside the
+// same transaction — the ack is proof the session is alive (only the
+// bacio channel running inside the agent's Claude process can
+// produce one), so it counts as a heartbeat. This keeps the
+// idle-pinger's "last seen" clock honest without re-querying for
+// "latest acked ping" on every reaper tick.
 func (s *Store) AckDispatch(id int64, note string) (*model.AgentDispatch, error) {
 	d, err := s.GetDispatch(id)
 	if err != nil {
@@ -252,11 +260,30 @@ func (s *Store) AckDispatch(id int64, note string) (*model.AgentDispatch, error)
 	if len(note) > maxDispatchPayload {
 		return nil, fmt.Errorf("ack note too long (%d bytes; max %d)", len(note), maxDispatchPayload)
 	}
-	if _, err := s.DB.Exec(
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(
 		`UPDATE agent_dispatches
 		    SET status = 'acked', acked_at = CURRENT_TIMESTAMP, ack_note = ?
 		  WHERE id = ? AND status IN ('pending','delivered')`, note, id,
-	); err != nil {
+	)
+	if err != nil {
+		return nil, err
+	}
+	rows, _ := res.RowsAffected()
+	if rows > 0 && d.TargetSessionID != "" {
+		if _, err := tx.Exec(
+			`UPDATE agent_sessions SET last_seen_at = CURRENT_TIMESTAMP
+			  WHERE session_id = ? AND ended_at IS NULL`,
+			d.TargetSessionID,
+		); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return s.GetDispatch(id)
