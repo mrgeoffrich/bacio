@@ -2,6 +2,7 @@ import React from 'react';
 import Icon from './Icon.jsx';
 import RepoPicker from './RepoPicker.jsx';
 import Tooltip from './Tooltip.jsx';
+import { WEB_MODE } from '../env';
 
 // NAV is the ordered top-nav. Exported so App can map the digit
 // hotkeys onto the same views in the same order. As of BACI-50 the
@@ -20,7 +21,7 @@ export default function Topbar({ boards, activeBoard, onPickBoard, onAddReposito
   const syncEnabled = !!boards.find(b => b.prefix === activeBoard)?.syncEnabled;
   const isLeader = leaderState?.amLeader ?? false;
   return (
-    <header className="mk-topbar">
+    <header className={`mk-topbar${WEB_MODE ? ' is-web' : ''}`}>
       <div className="mk-brand">
         <img src={`${import.meta.env.BASE_URL}bacio-mark.png`} width="22" height="22" alt="" />
         <span className="mk-brand-name">bacio</span>
