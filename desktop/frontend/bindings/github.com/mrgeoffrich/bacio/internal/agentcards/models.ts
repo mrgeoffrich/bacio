@@ -354,11 +354,15 @@ export class QuestionDTO {
  * SessionTodoDTO is one row of the agent's mirrored TodoWrite list,
  * shaped for the Agents screen. Status is one of
  * pending|in_progress|completed, surfaced verbatim so the frontend can
- * pick its glyph.
+ * pick its glyph. IssueKey carries the BACI-62 per-job scope so a
+ * future "history" pane can group prior-job todos without a second
+ * fetch; omitted in JSON when empty so the on-wire shape stays
+ * back-compatible for callers that don't care.
  */
 export class SessionTodoDTO {
     "content": string;
     "status": string;
+    "issueKey"?: string;
 
     /** Creates a new SessionTodoDTO instance. */
     constructor($$source: Partial<SessionTodoDTO> = {}) {

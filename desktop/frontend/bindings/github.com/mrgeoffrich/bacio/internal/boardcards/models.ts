@@ -5,6 +5,10 @@
 // @ts-ignore: Unused imports
 import { Create as $Create } from "@wailsio/runtime";
 
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
+import * as time$0 from "../../../../../time/models.js";
+
 /**
  * BoardCard is one kanban card — one bacio issue, shaped for the
  * imported UI kit. Fields beyond the issue itself: Taken (an agent
@@ -42,6 +46,18 @@ export class BoardCard {
      */
     "todosDone": number;
     "todosTotal": number;
+
+    /**
+     * OpenQuestions are the BACI-53 ask_user_question rows posed by
+     * the winning claim's session against THIS issue. Drives the
+     * "? N — <header>" pill on the kanban card and the click-to-open
+     * answer modal. Empty when the issue isn't taken or the agent
+     * hasn't asked anything yet. The full QuestionPayload is fetched
+     * on demand via /agents/questions/{id} when the user opens the
+     * modal — the bare ID + a short summary is enough to render the
+     * badge.
+     */
+    "openQuestions"?: BoardCardQuestion[];
 
     /** Creates a new BoardCard instance. */
     constructor($$source: Partial<BoardCard> = {}) {
@@ -88,6 +104,7 @@ export class BoardCard {
     static createFrom($$source: any = {}): BoardCard {
         const $$createField4_0 = $$createType0;
         const $$createField5_0 = $$createType0;
+        const $$createField12_0 = $$createType2;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField4_0($$parsedSource["tags"]);
@@ -95,9 +112,59 @@ export class BoardCard {
         if ("assignees" in $$parsedSource) {
             $$parsedSource["assignees"] = $$createField5_0($$parsedSource["assignees"]);
         }
+        if ("openQuestions" in $$parsedSource) {
+            $$parsedSource["openQuestions"] = $$createField12_0($$parsedSource["openQuestions"]);
+        }
         return new BoardCard($$parsedSource as Partial<BoardCard>);
+    }
+}
+
+/**
+ * BoardCardQuestion is one open ask_user_question row surfaced on
+ * the issue's kanban card. Header is the user-facing tag (≤12 chars,
+ * the same field AskUserQuestion uses); FirstQuestion is the full
+ * text of the first question in the payload (intended as the brief
+ * detail next to the pill); Count is len(payload.questions) so a
+ * multi-question modal can advertise "answer 3 questions".
+ */
+export class BoardCardQuestion {
+    "id": number;
+    "header": string;
+    "firstQuestion": string;
+    "count": number;
+    "askedAt": time$0.Time;
+
+    /** Creates a new BoardCardQuestion instance. */
+    constructor($$source: Partial<BoardCardQuestion> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = 0;
+        }
+        if (!("header" in $$source)) {
+            this["header"] = "";
+        }
+        if (!("firstQuestion" in $$source)) {
+            this["firstQuestion"] = "";
+        }
+        if (!("count" in $$source)) {
+            this["count"] = 0;
+        }
+        if (!("askedAt" in $$source)) {
+            this["askedAt"] = null;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new BoardCardQuestion instance from a string or object.
+     */
+    static createFrom($$source: any = {}): BoardCardQuestion {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new BoardCardQuestion($$parsedSource as Partial<BoardCardQuestion>);
     }
 }
 
 // Private type creation functions
 const $$createType0 = $Create.Array($Create.Any);
+const $$createType1 = BoardCardQuestion.createFrom;
+const $$createType2 = $Create.Array($$createType1);

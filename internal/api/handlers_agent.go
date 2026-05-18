@@ -619,6 +619,12 @@ func (d deps) handleAgentSessionShow(w http.ResponseWriter, r *http.Request) {
 // snapshot for one session. Read-only: writes flow through the
 // `bacio hook post-tool-use` mirror, not over HTTP. Unknown session id
 // returns 404; an empty list is `[]`, never null.
+//
+// BACI-62: an optional `?issue_key=<PREFIX-N>` filter narrows the
+// returned rows to one job (the per-(session, issue) scope the
+// desktop/TUI Agents view uses). The unfiltered call shape stays the
+// same for back-compat — every existing caller keeps getting every
+// row for the session.
 func (d deps) handleAgentSessionTodos(w http.ResponseWriter, r *http.Request) {
 	sid := r.PathValue("session_id")
 	sess, err := d.store.ResolveAgentSession(sid)
@@ -632,7 +638,8 @@ func (d deps) handleAgentSessionTodos(w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, code, err.Error(), nil)
 		return
 	}
-	todos, err := d.store.ListSessionTodos(sess.SessionID)
+	issueKey := r.URL.Query().Get("issue_key")
+	todos, err := d.store.ListSessionTodos(sess.SessionID, issueKey)
 	if err != nil {
 		status, code := statusForError(err)
 		writeError(w, status, code, err.Error(), nil)

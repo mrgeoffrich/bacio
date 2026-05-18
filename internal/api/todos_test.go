@@ -48,7 +48,7 @@ func TestAgentSessionTodosRoundTrip(t *testing.T) {
 		{"c", "Review", model.TodoPending},
 	}
 	for _, sd := range seeds {
-		if err := s.UpsertSessionTodoFromTask("sess-todos", sd.taskID, sd.content, sd.status); err != nil {
+		if err := s.UpsertSessionTodoFromTask("sess-todos", sd.taskID, "MINI-1", sd.content, sd.status); err != nil {
 			t.Fatalf("seed %s: %v", sd.taskID, err)
 		}
 	}
@@ -67,6 +67,47 @@ func TestAgentSessionTodosRoundTrip(t *testing.T) {
 		if got[i].Content != sd.content || got[i].Status != sd.status || got[i].Position != i {
 			t.Fatalf("row %d = %+v, want pos=%d content=%q status=%q", i, got[i], i, sd.content, sd.status)
 		}
+	}
+}
+
+// TestAgentSessionTodosIssueKeyFilter (BACI-62): an optional
+// `?issue_key=` query param narrows the returned rows to one job.
+// Unfiltered call returns every row; filtered call returns only
+// the matching issue's rows.
+func TestAgentSessionTodosIssueKeyFilter(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	seedRepo(t, s)
+	if status, _ := registerSession(t, ts.URL, "MINI", "sess-juggle", nil); status != 201 {
+		t.Fatalf("register status %d", status)
+	}
+	// Session worked MINI-1 then MINI-2.
+	if err := s.UpsertSessionTodoFromTask("sess-juggle", "a", "MINI-1", "first job done", model.TodoCompleted); err != nil {
+		t.Fatalf("seed a: %v", err)
+	}
+	if err := s.UpsertSessionTodoFromTask("sess-juggle", "b", "MINI-2", "current job", model.TodoInProgress); err != nil {
+		t.Fatalf("seed b: %v", err)
+	}
+	resp, body := apiReq(t, "GET", ts.URL+"/agents/sessions/sess-juggle/todos", nil, nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("unfiltered status %d body %s", resp.StatusCode, body)
+	}
+	var unfiltered []model.SessionTodo
+	if err := json.Unmarshal(body, &unfiltered); err != nil {
+		t.Fatalf("decode unfiltered: %v", err)
+	}
+	if len(unfiltered) != 2 {
+		t.Fatalf("unfiltered len = %d, want 2", len(unfiltered))
+	}
+	resp, body = apiReq(t, "GET", ts.URL+"/agents/sessions/sess-juggle/todos?issue_key=MINI-2", nil, nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("filtered status %d body %s", resp.StatusCode, body)
+	}
+	var filtered []model.SessionTodo
+	if err := json.Unmarshal(body, &filtered); err != nil {
+		t.Fatalf("decode filtered: %v", err)
+	}
+	if len(filtered) != 1 || filtered[0].TaskID != "b" {
+		t.Fatalf("filtered = %+v, want one row task=b", filtered)
 	}
 }
 

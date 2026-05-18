@@ -22,6 +22,7 @@ import (
 
 	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/model"
+	"github.com/mrgeoffrich/bacio/internal/store"
 	"github.com/mrgeoffrich/bacio/internal/version"
 )
 
@@ -39,10 +40,14 @@ type ClaimDTO struct {
 // SessionTodoDTO is one row of the agent's mirrored TodoWrite list,
 // shaped for the Agents screen. Status is one of
 // pending|in_progress|completed, surfaced verbatim so the frontend can
-// pick its glyph.
+// pick its glyph. IssueKey carries the BACI-62 per-job scope so a
+// future "history" pane can group prior-job todos without a second
+// fetch; omitted in JSON when empty so the on-wire shape stays
+// back-compatible for callers that don't care.
 type SessionTodoDTO struct {
-	Content string `json:"content"`
-	Status  string `json:"status"`
+	Content  string `json:"content"`
+	Status   string `json:"status"`
+	IssueKey string `json:"issueKey,omitempty"`
 }
 
 // QuestionDTO is one open BACI-53 ask_user_question row — included
@@ -149,21 +154,37 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo) ([]AgentCa
 		return nil, err
 	}
 
-	// Bulk-read each session's TodoWrite mirror in one query, then fan
-	// back out by session PK — mirrors the OpenClaimsBySession
-	// hydration pattern so the 10s poll stays a single round trip per
-	// repo.
+	// Hydrate each session's claims once up front — the per-session
+	// view drives both the AgentCard.Claims drill-down and the
+	// per-(session, issue) scope BACI-62 uses to bulk-read the right
+	// todo subset for each card.
 	sessionIDs := make([]string, 0, len(sessions))
+	viewBySession := make(map[string]*client.AgentSessionView, len(sessions))
+	pairs := make([]store.SessionIssuePair, 0, len(sessions))
 	for _, s := range sessions {
 		sessionIDs = append(sessionIDs, s.SessionID)
+		view, err := c.ShowAgentSession(ctx, s.SessionID)
+		if err != nil {
+			return nil, err
+		}
+		viewBySession[s.SessionID] = view
+		pairs = append(pairs, store.SessionIssuePair{
+			SessionID: s.SessionID,
+			IssueKey:  newestOpenClaimIssueKey(view),
+		})
 	}
-	todosByPK, err := c.ListTodosBySessions(ctx, sessionIDs)
+
+	// Bulk-read each session's TodoWrite mirror in one query, scoped
+	// to the (session, current-job-issue) pair so a session that's
+	// handled multiple dispatches only flows the current job's rows
+	// onto its card — keeps the 10s poll to one round trip per repo.
+	todosByPK, err := c.ListTodosBySessionsAndIssue(ctx, pairs)
 	if err != nil {
 		return nil, err
 	}
 
 	// Bulk-read every session's open BACI-53 questions in one query
-	// — same shape as ListTodosBySessions so the 10s poll stays a
+	// — same shape as the todos read so the 10s poll stays a
 	// single round trip per repo.
 	questionsByPK, err := c.ListOpenQuestionsBySessions(ctx, sessionIDs)
 	if err != nil {
@@ -222,8 +243,9 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo) ([]AgentCa
 		todosDone := 0
 		for _, t := range sessTodos {
 			todosDTO = append(todosDTO, SessionTodoDTO{
-				Content: t.Content,
-				Status:  string(t.Status),
+				Content:  t.Content,
+				Status:   string(t.Status),
+				IssueKey: t.IssueKey,
 			})
 			if t.Status == model.TodoCompleted {
 				todosDone++
@@ -262,10 +284,7 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo) ([]AgentCa
 			TodosTotal:        len(todosDTO),
 			OpenQuestions:     questionsDTO,
 		}
-		view, err := c.ShowAgentSession(ctx, s.SessionID)
-		if err != nil {
-			return nil, err
-		}
+		view := viewBySession[s.SessionID]
 		var openClaims []*model.AgentClaim
 		for _, cl := range view.Claims {
 			if cl.ReleasedAt == nil {
@@ -302,6 +321,30 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo) ([]AgentCa
 		cards = append(cards, card)
 	}
 	return cards, nil
+}
+
+// newestOpenClaimIssueKey returns the issue key of the most-recently
+// claimed open issue on the session view, or "" when no open claim is
+// present. Drives the per-(session, issue) todo lookup so a paired
+// session shows the winning claim's job on its card (mirrors
+// boardcards' "last claim wins" semantics).
+func newestOpenClaimIssueKey(view *client.AgentSessionView) string {
+	if view == nil {
+		return ""
+	}
+	var newest *model.AgentClaim
+	for _, cl := range view.Claims {
+		if cl == nil || cl.ReleasedAt != nil {
+			continue
+		}
+		if newest == nil || cl.ClaimedAt.After(newest.ClaimedAt) {
+			newest = cl
+		}
+	}
+	if newest == nil {
+		return ""
+	}
+	return newest.IssueKey
 }
 
 // dispatchTargetsSession reports whether a dispatch is aimed at this

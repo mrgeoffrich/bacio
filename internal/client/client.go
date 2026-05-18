@@ -182,17 +182,26 @@ type Client interface {
 	ListOpenClaims(ctx context.Context, repo *model.Repo) ([]*model.AgentClaim, error)
 	// UpsertSessionTodoFromTask records one TaskCreate (insert) or
 	// TaskUpdate (update by task_id) event from the PostToolUse hook.
-	// Local-only — the agent registry has no HTTP write surface in v1.
-	UpsertSessionTodoFromTask(ctx context.Context, sessionID, taskID, content string, status model.TodoStatus) error
+	// issueKey stamps the inserted row's per-issue scope (BACI-62) so
+	// the Agents view filters per-(session, issue); pass "" for orphan
+	// rows the hook couldn't attribute to a single open claim. On the
+	// update path the parameter is ignored — the row keeps the issue
+	// key it was created with. Local-only — the agent registry has no
+	// HTTP write surface in v1.
+	UpsertSessionTodoFromTask(ctx context.Context, sessionID, taskID, issueKey, content string, status model.TodoStatus) error
 	// ListSessionTodos returns the latest snapshot for one session,
-	// position-ordered. Empty slice for an unknown / empty session.
-	// Local-only.
-	ListSessionTodos(ctx context.Context, sessionID string) ([]model.SessionTodo, error)
-	// ListTodosBySessions returns a session_pk → []SessionTodo map for
-	// the given session ids in one query — used by the desktop and TUI
-	// agent views to hydrate todos for every live session in one trip,
-	// like ListOpenClaims does for claims. Local-only.
-	ListTodosBySessions(ctx context.Context, sessionIDs []string) (map[int64][]model.SessionTodo, error)
+	// position-ordered. issueKey == "" returns every row regardless of
+	// issue scope (the back-compat path the REST `?issue_key=` unset
+	// route uses); a non-empty issueKey filters to that issue's rows.
+	// Empty slice for an unknown / empty session. Local-only.
+	ListSessionTodos(ctx context.Context, sessionID, issueKey string) ([]model.SessionTodo, error)
+	// ListTodosBySessionsAndIssue returns a session_pk → []SessionTodo
+	// map keyed off the (session, issue) pairs the caller asked for
+	// (BACI-62) — used by the desktop / TUI / web agent views to
+	// hydrate the current job's todos for every visible card in one
+	// trip. A session that's worked multiple issues only flows the
+	// requested pair's rows back. Local-only.
+	ListTodosBySessionsAndIssue(ctx context.Context, pairs []store.SessionIssuePair) (map[int64][]model.SessionTodo, error)
 	// EnsureAgentIdentity mints a fresh persistent agent identity (a
 	// random slug, retried against the UNIQUE constraint until it
 	// sticks) and adopts it as this client's audit actor. It's the

@@ -396,6 +396,29 @@ func migrate(db *sql.DB) error {
 	); err != nil {
 		return fmt.Errorf("create uq_agent_session_todos_task: %w", err)
 	}
+	// BACI-62: agent_session_todos.issue_key scopes each mirrored row to
+	// the issue the session was claiming at insert time, so the Agents
+	// view's `n/m` badge and drill-down can render only the current job's
+	// rows instead of every row the session has ever written. Pre-BACI-62
+	// rows keep the empty-string default ('') — they fall into the orphan
+	// bucket the new per-(session, issue) lookups ignore, which is the
+	// desired behaviour (the user's previous-job history stays queryable
+	// but stops bleeding into the foreground UI).
+	hasTodoIssueKey, err := columnExists(db, "agent_session_todos", "issue_key")
+	if err != nil {
+		return err
+	}
+	if !hasTodoIssueKey {
+		if _, err := db.Exec(`ALTER TABLE agent_session_todos ADD COLUMN issue_key TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add issue_key to agent_session_todos: %w", err)
+		}
+	}
+	if _, err := db.Exec(
+		`CREATE INDEX IF NOT EXISTS idx_agent_session_todos_session_issue
+			ON agent_session_todos(session_pk, issue_key)`,
+	); err != nil {
+		return fmt.Errorf("create idx_agent_session_todos_session_issue: %w", err)
+	}
 	// BACI-52: backfill the _dispatch_preamble row for existing users
 	// (the first-time seed step in migratePromptTemplates is gated on
 	// the table being empty, so DBs that already had per-mode templates

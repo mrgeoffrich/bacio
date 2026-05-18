@@ -127,12 +127,18 @@ func ParseTodoStatus(s string) (TodoStatus, error) {
 // bacio does not edit the agent's plan. Position is 0-indexed and
 // matches the order tasks were created. TaskID is the Claude Code-
 // assigned id (empty string on legacy TodoWrite rows, which can't be
-// updated in place).
+// updated in place). IssueKey is the canonical issue key the session
+// was claiming when the row was inserted (empty when zero or many
+// claims were open at hook time, or for rows written before BACI-62);
+// the Agents view filters per-(session, issue) so a session that
+// handles two dispatches back-to-back doesn't show the first job's
+// completed rows on the second job's card.
 type SessionTodo struct {
 	Position  int        `json:"position"`
 	Content   string     `json:"content"`
 	Status    TodoStatus `json:"status"`
 	TaskID    string     `json:"task_id,omitempty"`
+	IssueKey  string     `json:"issue_key,omitempty"`
 	UpdatedAt time.Time  `json:"updated_at"`
 }
 

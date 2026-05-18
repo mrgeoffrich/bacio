@@ -24,11 +24,18 @@ export type QuestionAnswers = { [_ in string]?: any };
  * MaxQuestionHeaderLen, matching the AskUserQuestion docs). Options
  * is the 2-4 entry choice set. MultiSelect lets the user pick more
  * than one option (rendered as checkboxes vs. radios).
+ * 
+ * MultiSelect is a *bool — not a bool — to mirror native
+ * AskUserQuestion's "required" contract. The agent must explicitly
+ * send `true` or `false`; an absent field is rejected at the
+ * validation boundary. Readers should go through IsMultiSelect()
+ * rather than dereferencing the pointer so nil is treated as false
+ * at render time even if a row somehow slipped past validation.
  */
 export class QuestionItem {
     "question": string;
     "header": string;
-    "multiSelect"?: boolean;
+    "multiSelect"?: boolean | null;
     "options": QuestionOption[];
 
     /** Creates a new QuestionItem instance. */
@@ -61,11 +68,16 @@ export class QuestionItem {
 
 /**
  * QuestionOption is one choice on a question. Description is the
- * optional fine-print rendered under the label.
+ * optional fine-print rendered under the label. Preview is the
+ * optional monospace block (ASCII mockup, code snippet, diagram)
+ * rendered side-by-side with the option list when at least one
+ * option carries one — mirrors native AskUserQuestion's preview
+ * affordance. Preview is single-select only (native constraint).
  */
 export class QuestionOption {
     "label": string;
     "description"?: string;
+    "preview"?: string;
 
     /** Creates a new QuestionOption instance. */
     constructor($$source: Partial<QuestionOption> = {}) {

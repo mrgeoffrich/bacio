@@ -25,6 +25,7 @@ import (
 
 	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/model"
+	"github.com/mrgeoffrich/bacio/internal/store"
 )
 
 // stateLabels maps each bacio issue state to a human-friendly column label.
@@ -243,14 +244,27 @@ func enrichmentByIssueKey(
 		}
 	}
 
-	// Bulk-read todos for the winning sessions only. The map is
-	// keyed by session PK to match the storage layer; we flip it to
-	// session-id-keyed for the per-claim lookup below.
+	// Bulk-read todos for the winning sessions only, scoped to each
+	// (session, issue) pair so a session that has worked multiple
+	// issues only flows the current job's rows onto this card
+	// (BACI-62). The map is keyed by session PK to match the storage
+	// layer; the per-issue rendering below picks pair-by-pair via the
+	// sessionByID lookup.
 	sessionIDList := make([]string, 0, len(wantSessionIDs))
 	for id := range wantSessionIDs {
 		sessionIDList = append(sessionIDList, id)
 	}
-	todosByPK, err := c.ListTodosBySessions(ctx, sessionIDList)
+	pairs := make([]store.SessionIssuePair, 0, len(newestByIssue))
+	for issueKey, cl := range newestByIssue {
+		if cl == nil || cl.SessionID == "" {
+			continue
+		}
+		pairs = append(pairs, store.SessionIssuePair{
+			SessionID: cl.SessionID,
+			IssueKey:  issueKey,
+		})
+	}
+	todosByPK, err := c.ListTodosBySessionsAndIssue(ctx, pairs)
 	if err != nil {
 		return nil, err
 	}
@@ -294,9 +308,15 @@ func enrichmentByIssueKey(
 		sess := sessionByID[claim.SessionID]
 		e := enrich[issueKey]
 		if sess != nil {
-			todos := todosByPK[sess.ID]
-			e.todosTotal = len(todos)
-			for _, t := range todos {
+			// todosByPK carries rows for every (session, issue) pair the
+			// bulk reader was asked about — filter by this card's
+			// issueKey so a session that wins multiple cards doesn't
+			// leak the other card's progress into this one.
+			for _, t := range todosByPK[sess.ID] {
+				if t.IssueKey != issueKey {
+					continue
+				}
+				e.todosTotal++
 				if t.Status == model.TodoCompleted {
 					e.todosDone++
 				}

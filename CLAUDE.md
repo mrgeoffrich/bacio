@@ -50,6 +50,8 @@ A `bacio channel`-equipped session is a **thin scheduler** for dispatched work: 
 
 The contract that tells the parent to delegate is the **dispatch preamble** — a reserved row (`slug = _dispatch_preamble`) in the `prompt_templates` table that `ComposeDispatchPayload` prepends to every per-mode template body at dispatch time. Edit it the same way as any other template: `bacio settings template show _dispatch_preamble` / `bacio settings template set _dispatch_preamble --body "..."`, or via the Settings panel in the TUI / desktop app. The embedded default body lives in [`internal/model/prompttemplates/_dispatch_preamble.txt`](internal/model/prompttemplates/_dispatch_preamble.txt); the row is backfilled into existing DBs by the `backfillDispatchPreamble` migration step. Full design lives in [`docs/agent-dispatch.md`](docs/agent-dispatch.md) under "Subagent delegation".
 
+Per-job todos don't leak across dispatches: when the PostToolUse hook records a `TaskCreate`, it stamps the row with the session's currently-claimed `issue_key` (resolved from the single open claim at hook time; orphan-bucketed when zero or many claims are open). The Agents view and the kanban card's `n/m` Tasks pill both filter per-(session, issue), so a session that handles two dispatches back-to-back only shows the current job's rows on each surface. Prior-job rows stay in `agent_session_todos` (queryable per `issue_key`), they just stop bleeding into the foreground UI (BACI-62).
+
 ## `agent_session_questions` — agent → user clarification (BACI-53)
 
 The bacio channel exposes a third MCP tool, `ask_user_question`, that

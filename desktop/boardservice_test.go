@@ -47,13 +47,14 @@ func (f *fakeBoardClient) ShowAgentSession(_ context.Context, sessionID string) 
 	return &client.AgentSessionView{Claims: f.sessClaims[sessionID]}, nil
 }
 
-// ListTodosBySessions is a fixed-empty stub — the existing tests don't
-// exercise the TodoWrite mirror, so the agentcards assembler reads an
-// empty map back and produces empty Todos arrays. Wiring it through
-// instead of relying on the embedded-interface panic was required once
-// BACI-50 moved ListAgents through agentcards.Assemble (which always
-// bulk-reads todos).
-func (f *fakeBoardClient) ListTodosBySessions(context.Context, []string) (map[int64][]model.SessionTodo, error) {
+// ListTodosBySessionsAndIssue is a fixed-empty stub — the existing tests
+// don't exercise the TodoWrite mirror, so the agentcards assembler
+// reads an empty map back and produces empty Todos arrays. Wiring it
+// through instead of relying on the embedded-interface panic was
+// required once BACI-50 moved ListAgents through agentcards.Assemble
+// (which always bulk-reads todos); BACI-62 reshaped the bulk reader to
+// the per-(session, issue) variant.
+func (f *fakeBoardClient) ListTodosBySessionsAndIssue(context.Context, []store.SessionIssuePair) (map[int64][]model.SessionTodo, error) {
 	return map[int64][]model.SessionTodo{}, nil
 }
 
