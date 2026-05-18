@@ -31,6 +31,28 @@ func Detect(dir string) (*Info, error) {
 	return info, nil
 }
 
+// WorktreeRoot returns the absolute path to the linked worktree
+// containing dir — i.e. the toplevel of *that* working tree, not the
+// main worktree's root. Use this for things that need per-worktree
+// isolation on the filesystem (bacio's environment-config.yaml is the
+// canonical example).
+//
+// This is deliberately NOT what Detect returns. Detect walks back to
+// the main worktree's root so resolveRepo / install-hooks / sync /
+// status etc. share one repo identity across every linked worktree of
+// a project. WorktreeRoot is the inverse — the file lives at *this*
+// worktree's root and only this worktree's bacio should read it.
+//
+// Built on `git rev-parse --show-toplevel`, which DOES return the
+// linked worktree's own root (in contrast to --git-common-dir).
+func WorktreeRoot(dir string) (string, error) {
+	root, err := run(dir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", ErrNotARepo
+	}
+	return filepath.Abs(root)
+}
+
 // mainWorktreeRoot returns the absolute path to the main worktree of
 // the repo containing dir. It uses --git-common-dir (the shared .git
 // directory across all worktrees) and takes its parent: for the main

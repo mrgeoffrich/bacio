@@ -25,6 +25,16 @@ func fakeGit(root string) func(string) (*git.Info, error) {
 	}
 }
 
+// fakeWorktreeRoot mirrors fakeGit for the linked-worktree probe
+// added in BACI-71. Tests that exercise Resolve's step 3 need both
+// fakes pointed at the same root so the legacy behaviour assertions
+// still hold.
+func fakeWorktreeRoot(root string) func(string) (string, error) {
+	return func(cwd string) (string, error) {
+		return root, nil
+	}
+}
+
 func TestResolve_PrecedenceFlagBeatsEverything(t *testing.T) {
 	tmp := t.TempDir()
 	home := filepath.Join(tmp, "home")
@@ -117,10 +127,11 @@ extras:
   vite_port: 5174
 `)
 	res, err := Resolve(ResolveOpts{
-		Cwd:       root,
-		HomeDir:   home,
-		EnvLookup: func(string) string { return "" },
-		GitDetect: fakeGit(root),
+		Cwd:             root,
+		HomeDir:         home,
+		EnvLookup:       func(string) string { return "" },
+		GitDetect:       fakeGit(root),
+		GitWorktreeRoot: fakeWorktreeRoot(root),
 	})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
@@ -148,10 +159,11 @@ func TestResolve_MissingManifestFallsThroughToDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	res, err := Resolve(ResolveOpts{
-		Cwd:       root,
-		HomeDir:   home,
-		EnvLookup: func(string) string { return "" },
-		GitDetect: fakeGit(root),
+		Cwd:             root,
+		HomeDir:         home,
+		EnvLookup:       func(string) string { return "" },
+		GitDetect:       fakeGit(root),
+		GitWorktreeRoot: fakeWorktreeRoot(root),
 	})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
@@ -175,8 +187,10 @@ func TestResolve_NoGitWithoutManifest(t *testing.T) {
 		Cwd:       tmp,
 		HomeDir:   home,
 		EnvLookup: func(string) string { return "" },
-		// Real git.Detect will fail outside a git repo; emulate it.
-		GitDetect: func(string) (*git.Info, error) { return nil, git.ErrNotARepo },
+		// Real git.Detect / git.WorktreeRoot will fail outside a git
+		// repo; emulate both so step 3 short-circuits to the default.
+		GitDetect:       func(string) (*git.Info, error) { return nil, git.ErrNotARepo },
+		GitWorktreeRoot: func(string) (string, error) { return "", git.ErrNotARepo },
 	})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
@@ -193,16 +207,77 @@ func TestResolve_AbsoluteDBPathInManifest(t *testing.T) {
 	absDB := filepath.Join(tmp, "abs.sqlite")
 	writeFile(t, filepath.Join(root, DefaultManifestFilename), "identity:\n  slug: wt\nallocations:\n  api_port: 5321\n  db_path: "+absDB+"\n")
 	res, err := Resolve(ResolveOpts{
-		Cwd:       root,
-		HomeDir:   home,
-		EnvLookup: func(string) string { return "" },
-		GitDetect: fakeGit(root),
+		Cwd:             root,
+		HomeDir:         home,
+		EnvLookup:       func(string) string { return "" },
+		GitDetect:       fakeGit(root),
+		GitWorktreeRoot: fakeWorktreeRoot(root),
 	})
 	if err != nil {
 		t.Fatalf("resolve: %v", err)
 	}
 	if res.DBPath != absDB {
 		t.Errorf("dbpath: got %q, want %q", res.DBPath, absDB)
+	}
+}
+
+// TestResolve_PicksLinkedWorktreeManifest is the BACI-71 reader-side
+// regression: step 3 must probe the LINKED worktree's own root, not
+// the main worktree's. If a (legacy / mis-placed) manifest also sits
+// at the main worktree's root, the resolver must prefer the linked
+// one when called from inside the linked tree.
+func TestResolve_PicksLinkedWorktreeManifest(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+	main := filepath.Join(tmp, "main")
+	linked := filepath.Join(tmp, "linked")
+	writeFile(t, filepath.Join(linked, DefaultManifestFilename), `identity:
+  slug: linked-wt
+allocations:
+  api_port: 5400
+  db_path: .bacio/db.sqlite
+`)
+	// Bonus: drop a stale manifest at the main root so we can be sure
+	// the resolver isn't accidentally picking the main one up.
+	writeFile(t, filepath.Join(main, DefaultManifestFilename), `identity:
+  slug: stale-main
+allocations:
+  api_port: 5500
+  db_path: .bacio/db.sqlite
+`)
+
+	res, err := Resolve(ResolveOpts{
+		Cwd:       linked,
+		HomeDir:   home,
+		EnvLookup: func(string) string { return "" },
+		// Mirror the bug: GitDetect returns the MAIN worktree's root
+		// (the contract Detect intentionally holds). Without the fix,
+		// step 3 would join that root with environment-config.yaml
+		// and load the stale-main manifest. With the fix, step 3
+		// uses GitWorktreeRoot — the linked root — and loads the
+		// correct manifest.
+		GitDetect:       fakeGit(main),
+		GitWorktreeRoot: fakeWorktreeRoot(linked),
+	})
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if res.Source != SourceWorktree {
+		t.Fatalf("source: got %q, want worktree", res.Source)
+	}
+	if res.Manifest == nil || res.Manifest.Identity.Slug != "linked-wt" {
+		t.Fatalf("manifest: got %+v, want slug=linked-wt (resolver picked the MAIN worktree's manifest — BACI-71 regression)", res.Manifest)
+	}
+	wantPath := filepath.Join(linked, DefaultManifestFilename)
+	if res.ManifestPath != wantPath {
+		t.Errorf("manifest_path: got %q, want %q", res.ManifestPath, wantPath)
+	}
+	wantDB := filepath.Join(linked, ".bacio", "db.sqlite")
+	if res.DBPath != wantDB {
+		t.Errorf("db_path: got %q, want %q", res.DBPath, wantDB)
+	}
+	if res.APIAddr != "127.0.0.1:5400" {
+		t.Errorf("api_addr: got %q, want %q (port from the linked manifest, not the stale main one)", res.APIAddr, "127.0.0.1:5400")
 	}
 }
 

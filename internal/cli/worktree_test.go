@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
+	"github.com/mrgeoffrich/bacio/internal/git"
 	"github.com/mrgeoffrich/bacio/internal/wtenv"
 )
 
@@ -137,6 +138,95 @@ func TestWorktreeInit_RejectsReservedPort(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "reserved") {
 		t.Errorf("err: %v", err)
+	}
+}
+
+// addLinkedWorktree adds a second working tree to an existing repo
+// (created with initRealGitRepo). The repo needs at least one commit
+// for `git worktree add` to succeed, so seed an empty commit first.
+// Returns the linked worktree's absolute (symlink-resolved) path.
+func addLinkedWorktree(t *testing.T, mainRoot, branch string) string {
+	t.Helper()
+	// Seed identity so the seed commit succeeds without inheriting
+	// the host's global git config.
+	t.Setenv("GIT_AUTHOR_NAME", "tester")
+	t.Setenv("GIT_AUTHOR_EMAIL", "tester@example.invalid")
+	t.Setenv("GIT_COMMITTER_NAME", "tester")
+	t.Setenv("GIT_COMMITTER_EMAIL", "tester@example.invalid")
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = mainRoot
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	run("commit", "--allow-empty", "-q", "-m", "seed")
+	wt := filepath.Join(t.TempDir(), "linked")
+	run("worktree", "add", "-q", wt, "-b", branch)
+	resolved, err := filepath.EvalSymlinks(wt)
+	if err != nil {
+		t.Fatalf("eval symlinks(linked): %v", err)
+	}
+	return resolved
+}
+
+// TestWorktreeInit_LinkedWorktreeWritesToLinkedRoot is the BACI-71
+// end-to-end regression on the writer side: running `bacio worktree
+// init` from inside a linked git worktree must land the manifest at
+// THAT worktree's root, not the main worktree's. Before the fix the
+// init path called git.Detect (which returns the main worktree) and
+// silently clobbered the parent's manifest.
+func TestWorktreeInit_LinkedWorktreeWritesToLinkedRoot(t *testing.T) {
+	main := initRealGitRepo(t)
+	linked := addLinkedWorktree(t, main, "feature/baci-71")
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	// This is what newWorktreeInitCmd does post-fix: ask git for the
+	// linked-worktree root and pass it to runWorktreeInit. Drive that
+	// same shape directly so the test fails LOUDLY if anyone reverts
+	// the call site back to git.Detect.
+	root, err := git.WorktreeRoot(linked)
+	if err != nil {
+		t.Fatalf("git.WorktreeRoot(linked): %v", err)
+	}
+	if root != linked {
+		t.Fatalf("git.WorktreeRoot(linked) = %q, want %q (BACI-71 regression)", root, linked)
+	}
+
+	res, err := runWorktreeInit(root, filepath.Base(root), inputs.WorktreeInitInput{Slug: "linked-wt"})
+	if err != nil {
+		t.Fatalf("runWorktreeInit: %v", err)
+	}
+	if err := commitWorktreeInit(res); err != nil {
+		t.Fatalf("commitWorktreeInit: %v", err)
+	}
+
+	wantManifest := filepath.Join(linked, wtenv.DefaultManifestFilename)
+	if res.ManifestPath != wantManifest {
+		t.Errorf("manifest_path: got %q, want %q (under the LINKED worktree, not main)", res.ManifestPath, wantManifest)
+	}
+	if _, err := os.Stat(wantManifest); err != nil {
+		t.Errorf("manifest missing under linked root: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(main, wtenv.DefaultManifestFilename)); err == nil {
+		t.Errorf("manifest leaked into MAIN worktree at %s — BACI-71 regression", main)
+	}
+	if got, want := res.Manifest.Identity.Worktree, linked; got != want {
+		t.Errorf("manifest.identity.worktree: got %q, want %q", got, want)
+	}
+
+	// Registry row points at the linked worktree, not the main one.
+	reg, err := wtenv.ReadRegistry(tmpHome)
+	if err != nil {
+		t.Fatalf("read registry: %v", err)
+	}
+	entry, ok := reg.FindBySlug("linked-wt")
+	if !ok {
+		t.Fatalf("registry missing slug: %+v", reg.Worktrees)
+	}
+	if entry.Path != linked {
+		t.Errorf("registry path: got %q, want %q (linked root)", entry.Path, linked)
 	}
 }
 

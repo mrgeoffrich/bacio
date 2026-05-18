@@ -34,3 +34,4 @@ go.work.sum
 .idea/
 .DS_Store
 .playwright-cli
+environment-config.yaml

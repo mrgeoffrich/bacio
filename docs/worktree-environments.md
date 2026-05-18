@@ -135,6 +135,19 @@ first:
 Step 3 returning "not present" is not an error — it falls through to
 step 4, which is the legacy behaviour that manifest-free users keep.
 
+Step 3 uses `git rev-parse --show-toplevel` (wrapped in
+`internal/git.WorktreeRoot`), which returns the LINKED worktree's own
+root. This is deliberately different from `internal/git.Detect`, which
+walks back to the *main* worktree's root so `resolveRepo`,
+`install-hooks`, `sync` etc. share one repo identity across every
+linked worktree of a project. The manifest layer wants the opposite
+contract — each linked worktree's bacio reads its own
+`environment-config.yaml`, not its parent's — so the writer
+(`bacio worktree init`) and the resolver both use `WorktreeRoot`.
+(BACI-71: this gap previously had the writer using `Detect` and the
+docs promising `--show-toplevel`, which meant `init` from a linked
+worktree silently clobbered the main worktree's manifest.)
+
 When both `--db` and `--addr` are set, the resolver short-circuits
 the manifest read entirely: an explicit flag pair is strictly more
 specific than any manifest, and a broken `BACIO_ENV` shouldn't be
