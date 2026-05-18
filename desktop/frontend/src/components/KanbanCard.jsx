@@ -87,6 +87,7 @@ function KanbanCard({ card, promptConfig, isDragging, onDragStart, onDragEnd, on
                       key={p.mode}
                       className="mk-card-action-item"
                       onSelect={() => onDispatch(card.key, p.mode)}
+                      onClick={(e) => e.stopPropagation()}
                     >
                       {p.label}
                     </DropdownMenu.Item>
