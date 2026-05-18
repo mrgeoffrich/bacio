@@ -99,8 +99,15 @@ to stderr.`,
 			if actorName == "" {
 				actorName = actor()
 			}
+			res, err := resolveEnv()
+			if err != nil {
+				return err
+			}
+			if res.ManifestPath != "" {
+				logf("env source=%s db=%s manifest=%s", res.Source, res.DBPath, res.ManifestPath)
+			}
 			c, err := client.Open(context.Background(), client.Options{
-				DBPath: opts.dbPath,
+				DBPath: res.DBPath,
 				Actor:  actorName,
 			})
 			if err != nil {

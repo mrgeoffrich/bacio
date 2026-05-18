@@ -119,6 +119,7 @@ is round-tripped through a JSON decode. Hook behaviour is unchanged.`,
 			if err := reportHookChanges(path, changes); err != nil {
 				return err
 			}
+			printWorktreeManifestHint(os.Stderr, info.Root)
 			printActivationBanner(os.Stderr)
 			return nil
 		},

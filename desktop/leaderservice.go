@@ -31,24 +31,33 @@ type LeaderStatusDTO = leaderservice.StatusDTO
 // consistent with how the CLI opens fresh store handles on every
 // invocation.
 type LeaderService struct {
-	st  *store.Store
-	svc *leaderservice.Service
+	dbPath string // resolved at construction time so a per-worktree manifest (BACI-63) routes the leader at the same DB as the rest of the desktop
+	slug   string // optional worktree slug — surfaces in the leader label so two desktop instances are distinguishable
+	st     *store.Store
+	svc    *leaderservice.Service
 
 	// mu guards svc reads from GetLeaderStatus during the early-startup
 	// window before ServiceStartup has assigned it.
 	mu sync.Mutex
 }
 
-// NewLeaderService creates an uninitialised LeaderService; Wails calls
-// ServiceStartup before the window opens.
-func NewLeaderService() *LeaderService {
-	return &LeaderService{}
+// NewLeaderService creates an uninitialised LeaderService bound to a
+// specific DB path and (optionally) a worktree slug. Wails calls
+// ServiceStartup before the window opens. An empty dbPath falls back
+// to store.DefaultPath() so old callers without a wtenv-resolved path
+// still work.
+func NewLeaderService(dbPath, slug string) *LeaderService {
+	return &LeaderService{dbPath: dbPath, slug: slug}
 }
 
 func (ls *LeaderService) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
-	dbPath, err := store.DefaultPath()
-	if err != nil {
-		return fmt.Errorf("leader election: resolve db path: %w", err)
+	dbPath := ls.dbPath
+	if dbPath == "" {
+		p, err := store.DefaultPath()
+		if err != nil {
+			return fmt.Errorf("leader election: resolve db path: %w", err)
+		}
+		dbPath = p
 	}
 	s, err := store.Open(dbPath)
 	if err != nil {
@@ -57,6 +66,9 @@ func (ls *LeaderService) ServiceStartup(_ context.Context, _ application.Service
 
 	h, _ := os.Hostname()
 	label := fmt.Sprintf("desktop pid=%d host=%s", os.Getpid(), h)
+	if ls.slug != "" {
+		label = fmt.Sprintf("desktop[%s] pid=%d host=%s", ls.slug, os.Getpid(), h)
+	}
 	svc := leaderservice.New(s, label, nil)
 
 	ls.mu.Lock()

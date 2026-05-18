@@ -22,7 +22,7 @@ func TestBuildStatusReport_AgentModeUnset(t *testing.T) {
 	withCwd(t, dir)
 	s := openMemStore(t)
 
-	report, err := buildStatusReport(s, "/db.sqlite", dir)
+	report, err := buildStatusReport(s, testEnv("/db.sqlite"), dir)
 	if err != nil {
 		t.Fatalf("buildStatusReport: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestBuildStatusReport_AgentModeActive(t *testing.T) {
 	withCwd(t, dir)
 	s := openMemStore(t)
 
-	report, err := buildStatusReport(s, "/db.sqlite", dir)
+	report, err := buildStatusReport(s, testEnv("/db.sqlite"), dir)
 	if err != nil {
 		t.Fatalf("buildStatusReport: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestBuildStatusReport_AgentModeInertWithBadValue(t *testing.T) {
 	withCwd(t, dir)
 	s := openMemStore(t)
 
-	report, err := buildStatusReport(s, "/db.sqlite", dir)
+	report, err := buildStatusReport(s, testEnv("/db.sqlite"), dir)
 	if err != nil {
 		t.Fatalf("buildStatusReport: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestPrintStatus_AgentModeText(t *testing.T) {
 			dir := t.TempDir()
 			withCwd(t, dir)
 			s := openMemStore(t)
-			report, err := buildStatusReport(s, "/db.sqlite", dir)
+			report, err := buildStatusReport(s, testEnv("/db.sqlite"), dir)
 			if err != nil {
 				t.Fatalf("buildStatusReport: %v", err)
 			}
@@ -152,7 +152,7 @@ func TestStatusReportJSONShape(t *testing.T) {
 	dir := t.TempDir()
 	withCwd(t, dir)
 	s := openMemStore(t)
-	report, err := buildStatusReport(s, "/db.sqlite", dir)
+	report, err := buildStatusReport(s, testEnv("/db.sqlite"), dir)
 	if err != nil {
 		t.Fatalf("buildStatusReport: %v", err)
 	}

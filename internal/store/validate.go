@@ -34,6 +34,35 @@ const (
 
 var slugRule = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
+// worktreeSlugRule allows the same kebab-case shape as a feature slug
+// plus underscores and dots — worktree slugs are derived from
+// directory basenames, which legitimately contain `_` and `.`. Still
+// no whitespace, no slashes, no leading punctuation.
+var worktreeSlugRule = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]*$`)
+
+// maxWorktreeSlugLen is the upper bound for a worktree manifest's
+// identity.slug. Wider than maxSlugLen (40 vs 60) — directory
+// basenames can run a little long, especially with date prefixes.
+const maxWorktreeSlugLen = 60
+
+// ValidateWorktreeSlug enforces the worktree-slug shape used by
+// `bacio worktree init` and ~/.bacio/worktrees.yaml. Lowercase
+// kebab-with-dots-and-underscores; required; capped at
+// maxWorktreeSlugLen.
+func ValidateWorktreeSlug(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", fmt.Errorf("worktree slug is required")
+	}
+	if len(s) > maxWorktreeSlugLen {
+		return "", fmt.Errorf("worktree slug too long: %d chars, max %d", len(s), maxWorktreeSlugLen)
+	}
+	if !worktreeSlugRule.MatchString(s) {
+		return "", fmt.Errorf("worktree slug %q must match [a-z0-9][a-z0-9._-]* (lowercase letters, digits, '.', '_', '-'; starting with a letter or digit)", s)
+	}
+	return s, nil
+}
+
 // ValidateTitle is for single-line titles (issues, features). Required,
 // trimmed, no control characters, no embedded newlines, capped at
 // maxTitleLen runes.

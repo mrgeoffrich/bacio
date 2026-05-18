@@ -11,6 +11,7 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
 	"github.com/mrgeoffrich/bacio/internal/sync"
+	"github.com/mrgeoffrich/bacio/internal/wtenv"
 )
 
 // errSyncRepoMode signals that the current working tree is the root
@@ -27,15 +28,30 @@ var errSyncRepoMode = errors.New("this is a bacio sync repo (bacio-sync.yaml at 
 
 // openStore opens the configured database.
 func openStore() (*store.Store, error) {
-	path := opts.dbPath
-	if path == "" {
-		p, err := store.DefaultPath()
-		if err != nil {
-			return nil, err
-		}
-		path = p
+	res, err := resolveEnv()
+	if err != nil {
+		return nil, err
 	}
-	return store.Open(path)
+	return store.Open(res.DBPath)
+}
+
+// resolveEnv runs the wtenv resolver with the current globals applied.
+// Used by openStore, openClient, and `bacio api`'s default-addr logic
+// so every entry point honours the same precedence chain.
+func resolveEnv() (wtenv.Resolved, error) {
+	envLookup := os.Getenv
+	if opts.envPath != "" {
+		envLookup = func(k string) string {
+			if k == wtenv.EnvVar {
+				return opts.envPath
+			}
+			return os.Getenv(k)
+		}
+	}
+	return wtenv.Resolve(wtenv.ResolveOpts{
+		FlagDB:    opts.dbPath,
+		EnvLookup: envLookup,
+	})
 }
 
 // remoteURL returns the configured remote URL, falling back to
@@ -61,8 +77,16 @@ func apiToken() string {
 // Replaces openStore() at every CLI handler call site as Phase 6
 // migrates them. Defer c.Close() in the same way you would the store.
 func openClient() (client.Client, error) {
+	dbPath := opts.dbPath
+	if dbPath == "" {
+		res, err := resolveEnv()
+		if err != nil {
+			return nil, err
+		}
+		dbPath = res.DBPath
+	}
 	return client.Open(context.Background(), client.Options{
-		DBPath: opts.dbPath,
+		DBPath: dbPath,
 		Remote: remoteURL(),
 		Token:  apiToken(),
 		Actor:  actor(),
