@@ -409,7 +409,8 @@ name a target: --to <agent-slug>, --session <id>, or both. The optional
 [issue-key] positional ties the dispatch to an issue.
 
 --mode marks the intent — one per stage of working a job: "plan"
-(produce an implementation plan, don't write code), "implement" (build
+(produce an implementation plan, don't write code), "design" (explore
+two design options and commit to a recommendation), "implement" (build
 it end-to-end), "review" (assess finished work), "ship" (final checks +
 PR), or "fix_review" (address review feedback). The agent's instruction
 body is the stage's prompt template (customisable in the desktop app's
@@ -456,7 +457,7 @@ its queue with ` + "`bacio agent inbox`" + `.`,
 	}
 	cmd.Flags().StringVar(&toAgent, "to", "", "target agent identity slug (e.g. swift-otter@claude.shiny)")
 	cmd.Flags().StringVar(&toSession, "session", "", "target session id")
-	cmd.Flags().StringVar(&mode, "mode", "", "dispatch intent: plan, implement, review, ship, or fix_review (default: untyped)")
+	cmd.Flags().StringVar(&mode, "mode", "", "dispatch intent: plan, design, implement, review, ship, or fix_review (default: untyped)")
 	cmd.Flags().StringVar(&message, "message", "", "optional free-form note appended to the instruction body")
 	addInputFlag(cmd, &rawInput)
 	return cmd

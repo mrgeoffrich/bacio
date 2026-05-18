@@ -368,7 +368,7 @@ func parseModePath(w http.ResponseWriter, r *http.Request) (model.DispatchMode, 
 	}
 	if mode == "" {
 		writeError(w, http.StatusBadRequest, "invalid_input",
-			"a job stage is required (plan, implement, review, ship, fix_review)",
+			"a job stage is required (plan, design, implement, review, ship, fix_review)",
 			map[string]any{"field": "mode"})
 		return "", false
 	}

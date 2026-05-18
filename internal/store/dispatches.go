@@ -15,10 +15,11 @@ import (
 // share one "what does bacio remember" window.
 const AgentDispatchRetention = 60 * 24 * time.Hour
 
-// maxDispatchPayload bounds the free-form instruction body. Generous
-// enough for a paragraph or two of context; a cap stops a runaway
-// caller filling the local DB.
-const maxDispatchPayload = 8192
+// maxDispatchPayload bounds the free-form instruction body. Comfortably
+// fits a multi-phase prompt template (the built-in `design` template is
+// ~22 KB) with headroom; a cap still stops a runaway caller filling
+// the local DB. Shared with the ack-note path — same reasoning.
+const maxDispatchPayload = 256 * 1024
 
 // AddDispatchIn is the validated tuple AddDispatch consumes. RepoID
 // and CreatedBy are always required.
