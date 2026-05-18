@@ -208,11 +208,11 @@ export default function SettingsView({
     }
   }, [notifyTemplatesChanged]);
 
-  // Track which built-in slugs are missing (so the "Restore built-ins"
-  // button can be disabled when they're all present).
-  const presentSlugs = new Set(templates.map(t => t.slug));
-  const BUILTIN_SLUGS = ['plan', 'implement', 'review', 'ship', 'fix_review'];
-  const missingBuiltins = BUILTIN_SLUGS.filter(s => !presentSlugs.has(s));
+  // The Restore button is always available — the backend's
+  // RestoreBuiltinPromptTemplates is idempotent (only inserts slugs that
+  // aren't already present). Computing "missing" client-side meant
+  // hardcoding the canonical built-in slug list, which silently went
+  // stale every time a new built-in was added.
 
   return (
     <div className="mk-settings-view">
@@ -289,15 +289,13 @@ export default function SettingsView({
             >
               {adding ? 'Cancel add' : '+ Add template'}
             </button>
-            <Tooltip label={missingBuiltins.length === 0
-              ? 'Every built-in template is already present'
-              : `Will re-seed: ${missingBuiltins.join(', ')}`}>
+            <Tooltip label="Re-seed any built-in template that's been deleted">
               <button
                 className="mk-segmented-btn"
                 onClick={() => setPendingRestore(true)}
-                disabled={savingSlug !== null || missingBuiltins.length === 0}
+                disabled={savingSlug !== null}
               >
-                Restore built-ins{missingBuiltins.length > 0 ? ` (${missingBuiltins.length})` : ''}
+                Restore built-ins
               </button>
             </Tooltip>
           </div>
