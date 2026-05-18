@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { reportError } from '../errors';
 import * as api from '../api';
+import MarkdownView from '../lib/markdownView';
 
 // Short date for the feature-list rows and detail metadata line.
 function shortDate(iso) {
@@ -91,7 +92,7 @@ export default function FeaturesView({ activeBoard }) {
             <section className="mk-features-section">
               <div className="mk-features-label">Description</div>
               {detail.description
-                ? <p className="mk-features-text">{detail.description}</p>
+                ? <MarkdownView className="mk-features-text mk-markdown">{detail.description}</MarkdownView>
                 : <p className="mk-features-text mk-meta-empty">No description.</p>}
             </section>
 

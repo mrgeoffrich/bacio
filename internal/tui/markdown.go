@@ -49,9 +49,51 @@ type mdCacheEntry struct {
 	out string
 }
 
+// mdCache is the shared "one rendered markdown body per width" cache used
+// by every TUI view that displays a single focused entity (board's
+// description overlay, docs view, features view). It stores at most one
+// entry per terminal width, keyed by the focused entity's ID — when the
+// selection changes the id check forces a re-render rather than serving a
+// stale body.
+//
+// A separate cachedCommentMD path exists for the comment timeline, since
+// that surface renders many comments simultaneously and needs per-(id,
+// width) entries instead of per-width entries.
+//
+// Zero value is ready to use; clear with reset() when the underlying body
+// could have changed (e.g. after a reload).
+type mdCache struct {
+	entries map[int]mdCacheEntry
+}
+
+// get returns the rendered markdown for `src` at `width`, rendering and
+// caching on the first call (or whenever the focused id or width changed).
+func (c *mdCache) get(id int64, src string, width int) string {
+	if c.entries == nil {
+		c.entries = map[int]mdCacheEntry{}
+	}
+	if e, ok := c.entries[width]; ok && e.id == id {
+		return e.out
+	}
+	out := renderMarkdown(src, width)
+	c.entries[width] = mdCacheEntry{id: id, out: out}
+	return out
+}
+
+// reset drops every cached entry. Call after a reload that may have
+// changed the underlying bodies.
+func (c *mdCache) reset() {
+	c.entries = nil
+}
+
 // renderMarkdown returns a styled rendering of `md` sized to `width`. On
 // error or empty input it returns a sensible fallback rather than panicking
 // — markdown formatting in this TUI is purely decorative.
+//
+// Glamour ships with GFM enabled by default (extension.GFM), so tables,
+// task lists, autolinks and strikethrough all render. Surfaces that show
+// markdown content from issues, comments, documents or features go
+// through this one helper to keep the rendered look identical everywhere.
 func renderMarkdown(md string, width int) string {
 	md = strings.TrimSpace(md)
 	if md == "" {

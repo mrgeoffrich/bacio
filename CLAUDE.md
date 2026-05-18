@@ -4,12 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Required reading before planning or implementing
 
-Two docs in `docs/` carry the non-obvious conventions this codebase relies on. Read whichever is relevant **before** you start planning a change — they'll shape the design, not just check it after the fact.
+Three docs in `docs/` carry the non-obvious conventions this codebase relies on. Read whichever is relevant **before** you start planning a change — they'll shape the design, not just check it after the fact.
 
 - **[`docs/agent-cli-principles.md`](docs/agent-cli-principles.md)** — the six rules every mutating CLI command honours (JSON in via `--json`, schema reachable via `bacio schema`, lean output by default, validation at the store boundary, `--dry-run` support, documented in `SKILL.md`) plus the explicit "deliberately don't do" list. Read before adding or changing any CLI command.
 - **[`docs/tui-cookbook.md`](docs/tui-cookbook.md)** — bubbletea v1.3.10 + lipgloss v1.1.0 + bubbles patterns, pinned to v1. Upstream READMEs have moved to v2 and will mislead you. Read before any non-trivial work in `internal/tui/`.
+- **[`docs/markdown-rendering.md`](docs/markdown-rendering.md)** — the per-surface markdown audit (BACI-65) and the rule that every React-side read surface goes through `<MarkdownView>` (never `react-markdown` directly), with `remark-gfm` providing tables / task lists / autolinks / strikethrough. Read before touching any markdown rendering on any surface.
 
-The deeper context for both lives in the topic sections below (`## Agent-CLI principles` and `## TUI cookbook`).
+The deeper context for all three lives in the topic sections below (`## Agent-CLI principles`, `## TUI cookbook`, `## Markdown rendering`).
 
 ## Quick commands
 
@@ -43,6 +44,15 @@ The exception is **harness-integration shims** (see below): `bacio tui`, `bacio 
 `docs/tui-cookbook.md` is a synthesised reference for bubbletea v1.3.10 + lipgloss v1.1.0 + bubbles. Read it before doing anything non-trivial in `internal/tui/`. The snippets are pinned to v1; upstream READMEs have already moved to v2 and will mislead you.
 
 Note: when changing or testing the TUI make sure to read `docs/tui-cookbook.md` for essential knowledge.
+
+## Markdown rendering
+
+`docs/markdown-rendering.md` is the per-surface audit (BACI-65) of how bacio renders markdown across the TUI, desktop and web. Two surface families, one canonical reader each:
+
+- **TUI:** `internal/tui/markdown.go`'s `renderMarkdown` (glamour, dark style, per-width cache). GFM is on by default. Every TUI view that displays markdown goes through that helper — the per-view `mdCache` plumbing is consolidated on a single value type.
+- **Desktop / web:** `desktop/frontend/src/lib/markdownView.tsx`'s `<MarkdownView>` (react-markdown + remark-gfm). **Never import `react-markdown` directly** outside that wrapper — the missing-`remark-gfm` regression that silently dropped GFM tables is structurally impossible to repeat once every read path runs through one seam. `.mk-markdown` in `app.css` carries the table / task-list / strikethrough styles. The TipTap editor in DocsView is the only WYSIWYG and stays separate.
+
+Read the doc before touching markdown rendering on any surface.
 
 ## Dispatched jobs are delegated to a `general-purpose` subagent
 

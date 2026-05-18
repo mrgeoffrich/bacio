@@ -581,6 +581,17 @@ A *rune* is one Unicode code point; a *cell* is one column of terminal grid. ASC
 
 ---
 
+## Markdown rendering
+
+Every TUI view that shows markdown — board's description overlay, comment overlay, features description, docs body — routes through `internal/tui/markdown.go`. Two pieces of plumbing:
+
+- `renderMarkdown(md, width)` builds and caches a `glamour.TermRenderer` per terminal width. Pinned to `glamour.WithStandardStyle("dark")` — auto-detect issues an OSC 11 background-colour query against stdin, which races bubbletea's input reader in alt-screen mode and can stall the first render after a resize. The TUI is dark-only by design, so the pin is intentional.
+- `mdCache` is a small value type with `get(id, src, width)` / `reset()` that every view embeds inline (board, features, docs). One entry per width, with an `id` check that invalidates stale renders when the selection changes. The comment timeline keeps a separate map keyed by `(commentID, width)` because the overlay renders many comments simultaneously rather than a single focused entity.
+
+Glamour ships `extension.GFM` enabled by default, so tables, task lists, autolinks and strikethrough render without further configuration. `TestRenderMarkdownTable` in `markdown_test.go` guards the "tables render" promise against future upstream changes. Full per-surface story (including the React tree's `<MarkdownView>` counterpart) lives in [`docs/markdown-rendering.md`](markdown-rendering.md) — read it before adding a fifth bespoke cache.
+
+---
+
 ## Sources
 
 - https://raw.githubusercontent.com/charmbracelet/bubbletea/main/README.md

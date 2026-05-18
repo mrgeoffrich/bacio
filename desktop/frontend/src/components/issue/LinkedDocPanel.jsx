@@ -1,15 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
+import MarkdownView from '../../lib/markdownView';
 import { isSvgDoc } from '../../lib/docFormat';
 
 // LinkedDocPanel renders one linked document inline. Markdown docs go
-// through react-markdown like the description; SVG docs (detected via
-// the shared isSvgDoc — filename suffix first, body sniff as fallback)
-// render via a Blob object URL the same way DocsView (BACI-56) does, so
-// a wireframe attached to a ticket shows as an image instead of raw
-// `<svg>` markup. Browsers don't execute JavaScript loaded via <img>,
-// so embedded <script> / event handlers are inert without any
-// sanitiser dependency.
+// through the shared <MarkdownView> wrapper like the description and
+// comment timeline; SVG docs (detected via the shared isSvgDoc —
+// filename suffix first, body sniff as fallback) render via a Blob
+// object URL the same way DocsView (BACI-56) does, so a wireframe
+// attached to a ticket shows as an image instead of raw `<svg>`
+// markup. Browsers don't execute JavaScript loaded via <img>, so
+// embedded <script> / event handlers are inert without any sanitiser
+// dependency.
 //
 // Native <details> handles the collapse — no extra Radix primitive —
 // and `defaultOpen` keeps short docs expanded so the user sees them
@@ -57,11 +58,11 @@ export default function LinkedDocPanel({ doc }) {
             ? <img className="mk-linked-doc-svg-img" src={svgUrl} alt={doc.filename} />
             : <p className="mk-meta-empty">SVG body is empty.</p>}
         </div>
+      ) : doc.content ? (
+        <MarkdownView className="mk-linked-doc-body mk-markdown">{doc.content}</MarkdownView>
       ) : (
         <div className="mk-linked-doc-body mk-markdown">
-          {doc.content
-            ? <ReactMarkdown>{doc.content}</ReactMarkdown>
-            : <p className="mk-meta-empty">Document body is empty.</p>}
+          <p className="mk-meta-empty">Document body is empty.</p>
         </div>
       )}
     </details>

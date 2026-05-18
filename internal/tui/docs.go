@@ -30,23 +30,16 @@ type docsView struct {
 
 	// Glamour rendering is multi-ms for long docs; cache the rendered
 	// output keyed on terminal width so scrolling within an overlay
-	// doesn't re-run glamour every keystroke. Different widths get
-	// different entries; reload() clears the whole map.
-	mdCache map[int]mdCacheEntry
+	// doesn't re-run glamour every keystroke. See mdCache in
+	// internal/tui/markdown.go — one entry per width, with an id check
+	// to invalidate stale renders when the focused doc changes.
+	mdCache mdCache
 
 	err error
 }
 
 func (d *docsView) cachedMD(id int64, src string, width int) string {
-	if d.mdCache == nil {
-		d.mdCache = map[int]mdCacheEntry{}
-	}
-	if e, ok := d.mdCache[width]; ok && e.id == id {
-		return e.out
-	}
-	out := renderMarkdown(src, width)
-	d.mdCache[width] = mdCacheEntry{id: id, out: out}
-	return out
+	return d.mdCache.get(id, src, width)
 }
 
 func newDocsView(s *store.Store, repo *model.Repo) *docsView {
@@ -63,7 +56,7 @@ func (d *docsView) reload() {
 		return
 	}
 	d.err = nil
-	d.mdCache = nil // doc bodies may have changed under us
+	d.mdCache.reset() // doc bodies may have changed under us
 	// Group rendering uses a stable sort by (type-order, filename). Doing
 	// this here keeps d.row indexing simple — the same flat slice drives
 	// both nav and the grouped view.
