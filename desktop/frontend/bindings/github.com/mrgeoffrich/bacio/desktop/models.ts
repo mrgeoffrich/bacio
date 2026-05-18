@@ -10,12 +10,16 @@ import { Create as $Create } from "@wailsio/runtime";
 import * as agentcards$0 from "../internal/agentcards/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as leaderservice$0 from "../internal/leaderservice/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as time$0 from "../../../../time/models.js";
 
 /**
- * ClaimDTO, SessionTodoDTO, DispatchDTO, and AgentCard live in
- * internal/agentcards so the bacio api can serve the same wire format
- * (BACI-50). Aliases keep the Wails-bound surface unchanged — the
+ * ClaimantDTO, ClaimDTO, SessionTodoDTO, DispatchDTO, and AgentCard
+ * live in internal/agentcards so the bacio api can serve the same wire
+ * format (BACI-50) and the per-issue claimant mapper has one home
+ * (BACI-55). Aliases keep the Wails-bound surface unchanged — the
  * generated TS bindings point at the same struct names from the
  * desktop's perspective, so the existing api.ts and components don't
  * need to update their imports.
@@ -23,9 +27,10 @@ import * as time$0 from "../../../../time/models.js";
 export const AgentCard = agentcards$0.AgentCard;
 
 /**
- * ClaimDTO, SessionTodoDTO, DispatchDTO, and AgentCard live in
- * internal/agentcards so the bacio api can serve the same wire format
- * (BACI-50). Aliases keep the Wails-bound surface unchanged — the
+ * ClaimantDTO, ClaimDTO, SessionTodoDTO, DispatchDTO, and AgentCard
+ * live in internal/agentcards so the bacio api can serve the same wire
+ * format (BACI-50) and the per-issue claimant mapper has one home
+ * (BACI-55). Aliases keep the Wails-bound surface unchanged — the
  * generated TS bindings point at the same struct names from the
  * desktop's perspective, so the existing api.ts and components don't
  * need to update their imports.
@@ -200,50 +205,26 @@ export class BoardPreferencesDTO {
 }
 
 /**
- * ClaimantDTO is one entry in an issue's claim history — a session that
- * has claimed the issue, with the prompt it ran and whether the claim
- * is still open.
+ * ClaimantDTO, ClaimDTO, SessionTodoDTO, DispatchDTO, and AgentCard
+ * live in internal/agentcards so the bacio api can serve the same wire
+ * format (BACI-50) and the per-issue claimant mapper has one home
+ * (BACI-55). Aliases keep the Wails-bound surface unchanged — the
+ * generated TS bindings point at the same struct names from the
+ * desktop's perspective, so the existing api.ts and components don't
+ * need to update their imports.
  */
-export class ClaimantDTO {
-    "sessionId": string;
-    "agentName": string;
-    "prompt": string;
-    "claimedAt": time$0.Time;
-    "releasedAt": time$0.Time | null;
-    "open": boolean;
+export const ClaimantDTO = agentcards$0.ClaimantDTO;
 
-    /** Creates a new ClaimantDTO instance. */
-    constructor($$source: Partial<ClaimantDTO> = {}) {
-        if (!("sessionId" in $$source)) {
-            this["sessionId"] = "";
-        }
-        if (!("agentName" in $$source)) {
-            this["agentName"] = "";
-        }
-        if (!("prompt" in $$source)) {
-            this["prompt"] = "";
-        }
-        if (!("claimedAt" in $$source)) {
-            this["claimedAt"] = null;
-        }
-        if (!("releasedAt" in $$source)) {
-            this["releasedAt"] = null;
-        }
-        if (!("open" in $$source)) {
-            this["open"] = false;
-        }
-
-        Object.assign(this, $$source);
-    }
-
-    /**
-     * Creates a new ClaimantDTO instance from a string or object.
-     */
-    static createFrom($$source: any = {}): ClaimantDTO {
-        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
-        return new ClaimantDTO($$parsedSource as Partial<ClaimantDTO>);
-    }
-}
+/**
+ * ClaimantDTO, ClaimDTO, SessionTodoDTO, DispatchDTO, and AgentCard
+ * live in internal/agentcards so the bacio api can serve the same wire
+ * format (BACI-50) and the per-issue claimant mapper has one home
+ * (BACI-55). Aliases keep the Wails-bound surface unchanged — the
+ * generated TS bindings point at the same struct names from the
+ * desktop's perspective, so the existing api.ts and components don't
+ * need to update their imports.
+ */
+export type ClaimantDTO = agentcards$0.ClaimantDTO;
 
 /**
  * CommentDTO is one issue comment.
@@ -278,9 +259,10 @@ export class CommentDTO {
 }
 
 /**
- * ClaimDTO, SessionTodoDTO, DispatchDTO, and AgentCard live in
- * internal/agentcards so the bacio api can serve the same wire format
- * (BACI-50). Aliases keep the Wails-bound surface unchanged — the
+ * ClaimantDTO, ClaimDTO, SessionTodoDTO, DispatchDTO, and AgentCard
+ * live in internal/agentcards so the bacio api can serve the same wire
+ * format (BACI-50) and the per-issue claimant mapper has one home
+ * (BACI-55). Aliases keep the Wails-bound surface unchanged — the
  * generated TS bindings point at the same struct names from the
  * desktop's perspective, so the existing api.ts and components don't
  * need to update their imports.
@@ -288,9 +270,10 @@ export class CommentDTO {
 export const DispatchDTO = agentcards$0.DispatchDTO;
 
 /**
- * ClaimDTO, SessionTodoDTO, DispatchDTO, and AgentCard live in
- * internal/agentcards so the bacio api can serve the same wire format
- * (BACI-50). Aliases keep the Wails-bound surface unchanged — the
+ * ClaimantDTO, ClaimDTO, SessionTodoDTO, DispatchDTO, and AgentCard
+ * live in internal/agentcards so the bacio api can serve the same wire
+ * format (BACI-50) and the per-issue claimant mapper has one home
+ * (BACI-55). Aliases keep the Wails-bound surface unchanged — the
  * generated TS bindings point at the same struct names from the
  * desktop's perspective, so the existing api.ts and components don't
  * need to update their imports.
@@ -715,42 +698,24 @@ export class IssueDetail {
 }
 
 /**
- * LeaderStatusDTO is the state the desktop frontend receives on every election
- * tick via the "leaderStatus" Wails event and via GetLeaderStatus on mount.
+ * LeaderStatusDTO is the state the desktop frontend receives on every
+ * election tick via the "leaderStatus" Wails event and via
+ * GetLeaderStatus on mount. It's a type alias of
+ * leaderservice.StatusDTO so the bacio api and desktop share one wire
+ * shape; the alias keeps the Wails binding generator emitting a type
+ * rooted at main.LeaderStatusDTO so the generated TS stays stable.
  */
-export class LeaderStatusDTO {
-    /**
-     * AmLeader is true when this desktop process holds the UI leader lease.
-     */
-    "amLeader": boolean;
+export const LeaderStatusDTO = leaderservice$0.StatusDTO;
 
-    /**
-     * HolderLabel is the human-readable label of the process that currently
-     * holds the lease — useful for "Standby — {HolderLabel} has control".
-     * Empty when AmLeader is true or the lease has never been acquired.
-     */
-    "holderLabel": string;
-
-    /** Creates a new LeaderStatusDTO instance. */
-    constructor($$source: Partial<LeaderStatusDTO> = {}) {
-        if (!("amLeader" in $$source)) {
-            this["amLeader"] = false;
-        }
-        if (!("holderLabel" in $$source)) {
-            this["holderLabel"] = "";
-        }
-
-        Object.assign(this, $$source);
-    }
-
-    /**
-     * Creates a new LeaderStatusDTO instance from a string or object.
-     */
-    static createFrom($$source: any = {}): LeaderStatusDTO {
-        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
-        return new LeaderStatusDTO($$parsedSource as Partial<LeaderStatusDTO>);
-    }
-}
+/**
+ * LeaderStatusDTO is the state the desktop frontend receives on every
+ * election tick via the "leaderStatus" Wails event and via
+ * GetLeaderStatus on mount. It's a type alias of
+ * leaderservice.StatusDTO so the bacio api and desktop share one wire
+ * shape; the alias keeps the Wails binding generator emitting a type
+ * rooted at main.LeaderStatusDTO so the generated TS stays stable.
+ */
+export type LeaderStatusDTO = leaderservice$0.StatusDTO;
 
 /**
  * PRDTO is one attached pull request.
@@ -876,5 +841,5 @@ const $$createType7 = PRDTO.createFrom;
 const $$createType8 = $Create.Array($$createType7);
 const $$createType9 = DocLinkDTO.createFrom;
 const $$createType10 = $Create.Array($$createType9);
-const $$createType11 = ClaimantDTO.createFrom;
+const $$createType11 = agentcards$0.ClaimantDTO.createFrom;
 const $$createType12 = $Create.Array($$createType11);

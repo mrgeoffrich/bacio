@@ -92,7 +92,7 @@ func (d deps) handleIssueBrief(w http.ResponseWriter, r *http.Request) {
 		Documents:    docs,
 		Comments:     comments,
 		Claimants:    claimants,
-		Taken:        anyOpenClaim(claimants),
+		Taken:        model.AnyOpenClaim(claimants),
 		Warnings:     warnings,
 	})
 }

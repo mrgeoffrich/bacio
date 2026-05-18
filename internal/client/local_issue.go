@@ -123,14 +123,7 @@ func (c *localClient) issueClaimants(issueID int64) ([]*model.AgentClaim, bool, 
 	if claimants == nil {
 		claimants = []*model.AgentClaim{}
 	}
-	taken := false
-	for _, cl := range claimants {
-		if cl.ReleasedAt == nil {
-			taken = true
-			break
-		}
-	}
-	return claimants, taken, nil
+	return claimants, model.AnyOpenClaim(claimants), nil
 }
 
 func (c *localClient) BriefIssue(ctx context.Context, repo *model.Repo, key string, opts BriefOptions) (*IssueBrief, error) {

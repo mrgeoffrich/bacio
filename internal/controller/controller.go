@@ -105,6 +105,11 @@ func (c *Controller) Start(emit func(leader.State)) {
 			emit(st)
 		}
 	}
+	// Capture done into each goroutine's local before the for-loop —
+	// Stop sets c.done = nil after closing it, and re-reading c.done
+	// after a ticker wake would turn <-c.done into <-nil and park the
+	// goroutine forever.
+	done := c.done
 
 	c.wg.Add(1)
 	go func() {
@@ -121,7 +126,7 @@ func (c *Controller) Start(emit func(leader.State)) {
 				if emit != nil {
 					emit(st)
 				}
-			case <-c.done:
+			case <-done:
 				return
 			}
 		}
@@ -136,7 +141,7 @@ func (c *Controller) Start(emit func(leader.State)) {
 			select {
 			case <-ticker.C:
 				PruneIfLeader(c.st, c.el, c.log)
-			case <-c.done:
+			case <-done:
 				return
 			}
 		}
@@ -151,7 +156,7 @@ func (c *Controller) Start(emit func(leader.State)) {
 			select {
 			case <-ticker.C:
 				MatchIfLeader(c.matcher, c.el, c.log)
-			case <-c.done:
+			case <-done:
 				return
 			}
 		}

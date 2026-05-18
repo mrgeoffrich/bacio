@@ -106,25 +106,15 @@ type IssueDetail struct {
 	Taken bool `json:"taken"`
 }
 
-// ClaimantDTO is one entry in an issue's claim history — a session that
-// has claimed the issue, with the prompt it ran and whether the claim
-// is still open.
-type ClaimantDTO struct {
-	SessionID  string     `json:"sessionId"`
-	AgentName  string     `json:"agentName"`
-	Prompt     string     `json:"prompt"`
-	ClaimedAt  time.Time  `json:"claimedAt"`
-	ReleasedAt *time.Time `json:"releasedAt"`
-	Open       bool       `json:"open"`
-}
-
-// ClaimDTO, SessionTodoDTO, DispatchDTO, and AgentCard live in
-// internal/agentcards so the bacio api can serve the same wire format
-// (BACI-50). Aliases keep the Wails-bound surface unchanged — the
+// ClaimantDTO, ClaimDTO, SessionTodoDTO, DispatchDTO, and AgentCard
+// live in internal/agentcards so the bacio api can serve the same wire
+// format (BACI-50) and the per-issue claimant mapper has one home
+// (BACI-55). Aliases keep the Wails-bound surface unchanged — the
 // generated TS bindings point at the same struct names from the
 // desktop's perspective, so the existing api.ts and components don't
 // need to update their imports.
 type (
+	ClaimantDTO    = agentcards.ClaimantDTO
 	ClaimDTO       = agentcards.ClaimDTO
 	SessionTodoDTO = agentcards.SessionTodoDTO
 	DispatchDTO    = agentcards.DispatchDTO
@@ -330,17 +320,7 @@ func (b *BoardService) GetIssue(repoPrefix, key string) (IssueDetail, error) {
 	for _, p := range view.PullRequests {
 		prs = append(prs, PRDTO{URL: p.URL})
 	}
-	claimants := make([]ClaimantDTO, 0, len(view.Claimants))
-	for _, c := range view.Claimants {
-		claimants = append(claimants, ClaimantDTO{
-			SessionID:  c.SessionID,
-			AgentName:  c.AgentName,
-			Prompt:     c.Prompt,
-			ClaimedAt:  c.ClaimedAt,
-			ReleasedAt: c.ReleasedAt,
-			Open:       c.ReleasedAt == nil,
-		})
-	}
+	claimants := agentcards.MapClaimants(view.Claimants)
 	docs := make([]DocLinkDTO, 0, len(view.Documents))
 	for _, d := range view.Documents {
 		docs = append(docs, DocLinkDTO{

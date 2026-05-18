@@ -119,19 +119,8 @@ func (d deps) handleIssueShow(w http.ResponseWriter, r *http.Request) {
 		PullRequests: prs,
 		Documents:    docs,
 		Claimants:    claimants,
-		Taken:        anyOpenClaim(claimants),
+		Taken:        model.AnyOpenClaim(claimants),
 	})
-}
-
-// anyOpenClaim reports whether a claim list has at least one open
-// (unreleased) claim — the derived "taken" signal.
-func anyOpenClaim(claims []*model.AgentClaim) bool {
-	for _, c := range claims {
-		if c.ReleasedAt == nil {
-			return true
-		}
-	}
-	return false
 }
 
 func (d deps) handleIssueCreate(w http.ResponseWriter, r *http.Request) {
