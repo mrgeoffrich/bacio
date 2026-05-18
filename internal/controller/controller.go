@@ -78,6 +78,32 @@ func PingIfLeader(p *idlepinger.Pinger, el *leader.Elector, log *slog.Logger) {
 	}
 }
 
+// ArchiveSweepIfLeader runs one Store.ArchiveSweep pass if el holds
+// the lease (BACI-68). Same logged-and-swallowed error contract as
+// the other …IfLeader helpers — auto-archive is mechanical janitor
+// work and a transient DB blip must not propagate up to the caller's
+// tick handler. A nil store or elector is a no-op. The post-sweep log
+// line only fires when at least one row was archived, so a quiet DB
+// doesn't generate hourly noise.
+func ArchiveSweepIfLeader(s *store.Store, el *leader.Elector, log *slog.Logger) {
+	if s == nil || el == nil || !el.CurrentState().AmLeader {
+		return
+	}
+	res, err := s.ArchiveSweep()
+	if err != nil {
+		loggerOrDefault(log).Warn("bacio: archive sweep failed", "err", err)
+		return
+	}
+	if res.Total() == 0 {
+		return
+	}
+	loggerOrDefault(log).Info("bacio: archive sweep stamped rows",
+		"issues", res.IssuesArchived,
+		"features", res.FeaturesArchived,
+		"documents", res.DocumentsArchived,
+	)
+}
+
 // Controller owns the four background goroutines (heartbeat, prune,
 // matcher, idle-pinger) for desktop + api. The TUI does not use it —
 // it drives the per-tick work itself from bubbletea Update handlers
@@ -191,6 +217,28 @@ func (c *Controller) Start(emit func(leader.State)) {
 			select {
 			case <-ticker.C:
 				PingIfLeader(c.pinger, c.el, c.log)
+			case <-done:
+				return
+			}
+		}
+	}()
+
+	// BACI-68: archive auto-sweep. Hourly, leader-gated, mechanical
+	// janitor work — three SQL passes in one transaction inside
+	// Store.ArchiveSweep that stamps archived_at on issues older than
+	// 4 days in a terminal state, then on features whose every child
+	// issue is archived, then on docs whose every linked parent is
+	// archived. Pattern matches the prune/matcher/pinger goroutines
+	// above; same nil-elector tolerance via …IfLeader.
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		ticker := time.NewTicker(store.ArchiveSweepInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				ArchiveSweepIfLeader(c.st, c.el, c.log)
 			case <-done:
 				return
 			}

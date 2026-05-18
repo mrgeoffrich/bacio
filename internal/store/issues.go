@@ -124,6 +124,13 @@ type IssueFilter struct {
 	// populated on each returned issue. Defaults to false so list responses
 	// stay lean — full bodies are available via `bacio issue show` / `brief`.
 	IncludeDescription bool
+	// IncludeArchived (BACI-68), when true, includes rows with a
+	// non-NULL archived_at. Defaults to false — archived issues are
+	// hidden from default lists (board, kanban, CLI / API JSON) and
+	// only surface via a per-call `--include-archived` or via the
+	// `display.show_archived` setting being on. Single-item lookups
+	// (GetIssueByID / GetIssueByKey) always return the row regardless.
+	IncludeArchived bool
 }
 
 func (s *Store) ListIssues(f IssueFilter) ([]*model.Issue, error) {
@@ -158,6 +165,13 @@ func (s *Store) ListIssues(f IssueFilter) ([]*model.Issue, error) {
 			`i.id IN (SELECT issue_id FROM issue_tags WHERE tag IN (%s) GROUP BY issue_id HAVING COUNT(DISTINCT tag) = %d)`,
 			strings.Join(ph, ","), len(f.Tags),
 		))
+	}
+	if !f.IncludeArchived {
+		// BACI-68: archived rows are hidden by default. The caller can
+		// flip IncludeArchived on (CLI --include-archived, API
+		// ?include_archived=1, or display.show_archived=true at the
+		// surface) to inflate the list.
+		where = append(where, "i.archived_at IS NULL")
 	}
 	q := issueSelect
 	if len(where) > 0 {
@@ -256,6 +270,24 @@ func (s *Store) SetIssueAssignee(id int64, assignee string) error {
 // sync churn on every dispatch/claim.
 func (s *Store) SetWaitingForClaim(issueID int64, waiting bool) error {
 	_, err := s.DB.Exec(`UPDATE issues SET waiting_for_claim = ? WHERE id = ?`, waiting, issueID)
+	return err
+}
+
+// SetIssueArchived stamps or clears the issue's archived_at column
+// (BACI-68). When archived is true the column is set to
+// CURRENT_TIMESTAMP if it's currently NULL — re-archiving a row that's
+// already archived is a no-op so the audit timestamp doesn't drift on
+// idempotent calls. When archived is false the column is unconditionally
+// cleared. Deliberately does NOT bump updated_at: archive is a lifecycle
+// boolean independent of content, and bumping updated_at would make
+// git-backed sync churn for every archive flip and confuse the
+// sweep's `updated_at < cutoff` predicate.
+func (s *Store) SetIssueArchived(issueID int64, archived bool) error {
+	if archived {
+		_, err := s.DB.Exec(`UPDATE issues SET archived_at = CURRENT_TIMESTAMP WHERE id = ? AND archived_at IS NULL`, issueID)
+		return err
+	}
+	_, err := s.DB.Exec(`UPDATE issues SET archived_at = NULL WHERE id = ?`, issueID)
 	return err
 }
 
@@ -665,21 +697,22 @@ SELECT i.id, i.uuid, i.repo_id, i.number, r.prefix, i.feature_id, COALESCE(f.slu
            AND c.released_at IS NULL
            AND s.ended_at IS NULL
        ) AS taken,
-       i.created_at, i.updated_at
+       i.archived_at, i.created_at, i.updated_at
 FROM issues i
 JOIN repos r ON r.id = i.repo_id
 LEFT JOIN features f ON f.id = i.feature_id`
 
 func scanIssue(row rowScanner) (*model.Issue, error) {
 	var (
-		i         model.Issue
-		prefix    string
-		featureID sql.NullInt64
-		featSlug  string
-		state     string
+		i          model.Issue
+		prefix     string
+		featureID  sql.NullInt64
+		featSlug   string
+		state      string
+		archivedAt sql.NullTime
 	)
 	err := row.Scan(&i.ID, &i.UUID, &i.RepoID, &i.Number, &prefix, &featureID, &featSlug,
-		&i.Title, &i.Description, &state, &i.Assignee, &i.WaitingForClaim, &i.Taken, &i.CreatedAt, &i.UpdatedAt)
+		&i.Title, &i.Description, &state, &i.Assignee, &i.WaitingForClaim, &i.Taken, &archivedAt, &i.CreatedAt, &i.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -692,6 +725,10 @@ func scanIssue(row rowScanner) (*model.Issue, error) {
 		v := featureID.Int64
 		i.FeatureID = &v
 		i.FeatureSlug = featSlug
+	}
+	if archivedAt.Valid {
+		t := archivedAt.Time
+		i.ArchivedAt = &t
 	}
 	return &i, nil
 }

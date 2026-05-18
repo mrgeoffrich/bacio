@@ -5,14 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
 
-func (c *localClient) ListDocuments(ctx context.Context, repo *model.Repo, typeStr string) ([]*model.Document, error) {
-	f := store.DocumentFilter{RepoID: repo.ID}
+func (c *localClient) ListDocuments(ctx context.Context, repo *model.Repo, typeStr string, includeArchived bool) ([]*model.Document, error) {
+	f := store.DocumentFilter{RepoID: repo.ID, IncludeArchived: includeArchived}
 	if typeStr != "" {
 		t, err := model.ParseDocumentType(typeStr)
 		if err != nil {
@@ -335,6 +336,47 @@ func (c *localClient) UnlinkDocument(ctx context.Context, repo *model.Repo, in i
 		Details: "↛ " + ref,
 	})
 	return nil, n, nil
+}
+
+// ArchiveDocument stamps the document's archived_at column (BACI-68).
+// Records a doc.archive audit row under the actor on --user.
+func (c *localClient) ArchiveDocument(ctx context.Context, repo *model.Repo, filename string, dryRun bool) (*model.Document, error) {
+	return c.setDocumentArchived(ctx, repo, filename, true, dryRun, "doc.archive")
+}
+
+// UnarchiveDocument clears archived_at (BACI-68).
+func (c *localClient) UnarchiveDocument(ctx context.Context, repo *model.Repo, filename string, dryRun bool) (*model.Document, error) {
+	return c.setDocumentArchived(ctx, repo, filename, false, dryRun, "doc.unarchive")
+}
+
+func (c *localClient) setDocumentArchived(ctx context.Context, repo *model.Repo, filename string, archived, dryRun bool, op string) (*model.Document, error) {
+	d, err := c.store.GetDocumentByFilename(repo.ID, filename, false)
+	if err != nil {
+		return nil, err
+	}
+	if dryRun {
+		projected := *d
+		if archived {
+			now := time.Now().UTC()
+			projected.ArchivedAt = &now
+		} else {
+			projected.ArchivedAt = nil
+		}
+		return &projected, nil
+	}
+	if err := c.store.SetDocumentArchived(d.ID, archived); err != nil {
+		return nil, err
+	}
+	updated, err := c.store.GetDocumentByID(d.ID, false)
+	if err != nil {
+		return nil, err
+	}
+	c.recordOp(model.HistoryEntry{
+		RepoID: &d.RepoID, RepoPrefix: repo.Prefix,
+		Op: op, Kind: "document",
+		TargetID: &updated.ID, TargetLabel: updated.Filename,
+	})
+	return updated, nil
 }
 
 // resolveDocLinkTarget mirrors the API's helper but without the HTTP

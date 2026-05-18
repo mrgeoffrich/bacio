@@ -87,6 +87,7 @@ func NewRoot() (*cobra.Command, func()) {
 		newChannelCmd(),
 		newSettingsCmd(),
 		newWorktreeCmd(),
+		newArchiveCmd(),
 	)
 	return root, stopProfiling
 }

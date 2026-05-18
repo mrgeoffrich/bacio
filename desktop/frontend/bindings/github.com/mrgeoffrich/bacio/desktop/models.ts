@@ -229,6 +229,31 @@ export const DispatchDTO = agentcards$0.DispatchDTO;
 export type DispatchDTO = agentcards$0.DispatchDTO;
 
 /**
+ * DisplayPreferencesDTO is the BACI-68 display.show_archived global
+ * toggle, shaped for the desktop Settings panel.
+ */
+export class DisplayPreferencesDTO {
+    "showArchived": boolean;
+
+    /** Creates a new DisplayPreferencesDTO instance. */
+    constructor($$source: Partial<DisplayPreferencesDTO> = {}) {
+        if (!("showArchived" in $$source)) {
+            this["showArchived"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new DisplayPreferencesDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): DisplayPreferencesDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new DisplayPreferencesDTO($$parsedSource as Partial<DisplayPreferencesDTO>);
+    }
+}
+
+/**
  * DocContent is one document with its markdown body, for the editor pane.
  */
 export class DocContent {

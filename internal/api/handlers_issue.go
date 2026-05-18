@@ -18,9 +18,11 @@ func (d deps) handleIssuesList(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	withDesc := q.Get("with_description")
+	includeArchived := q.Get("include_archived")
 	f := store.IssueFilter{
 		RepoID:             &repo.ID,
 		IncludeDescription: withDesc == "true" || withDesc == "1",
+		IncludeArchived:    includeArchived == "true" || includeArchived == "1",
 	}
 	if featureSlug := q.Get("feature"); featureSlug != "" {
 		feat, err := d.store.GetFeatureBySlug(repo.ID, featureSlug)

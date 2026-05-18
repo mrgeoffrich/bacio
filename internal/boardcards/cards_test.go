@@ -103,7 +103,7 @@ func TestAssembleVerbAndTodos(t *testing.T) {
 		todos: todos, templates: templates,
 	}
 
-	cards, err := Assemble(context.Background(), f, repo)
+	cards, err := Assemble(context.Background(), f, repo, false)
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestAssembleAgentIdentityDispatch(t *testing.T) {
 		sessions: []*model.AgentSession{sess}, dispatches: dispatches,
 		templates: templates,
 	}
-	cards, err := Assemble(context.Background(), f, repo)
+	cards, err := Assemble(context.Background(), f, repo, false)
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
@@ -199,7 +199,7 @@ func TestAssembleSurfacesOpenQuestions(t *testing.T) {
 		questions: questions,
 	}
 
-	cards, err := Assemble(context.Background(), f, repo)
+	cards, err := Assemble(context.Background(), f, repo, false)
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
@@ -255,7 +255,7 @@ func TestAssembleTodosScopedPerIssue(t *testing.T) {
 		repo: repo, issues: issues, claims: claims,
 		sessions: []*model.AgentSession{sess}, todos: todos,
 	}
-	cards, err := Assemble(context.Background(), f, repo)
+	cards, err := Assemble(context.Background(), f, repo, false)
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
@@ -285,7 +285,7 @@ func TestAssembleNoDispatchNoVerb(t *testing.T) {
 		repo: repo, issues: issues, claims: claims,
 		sessions: []*model.AgentSession{sess},
 	}
-	cards, err := Assemble(context.Background(), f, repo)
+	cards, err := Assemble(context.Background(), f, repo, false)
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}

@@ -59,6 +59,18 @@ export class BoardCard {
      */
     "openQuestions"?: BoardCardQuestion[];
 
+    /**
+     * Archived (BACI-68) mirrors the underlying issue's archived_at —
+     * true iff the column is non-NULL. When display.show_archived is
+     * on, the card surfaces with this flag set so the UI can render
+     * it visibly muted (lower opacity, "archived" pill, etc.). When
+     * display.show_archived is off, archived rows are filtered out
+     * earlier by the IncludeArchived parameter on Assemble — so this
+     * is only ever true on a board the user has explicitly opted in
+     * to seeing.
+     */
+    "archived"?: boolean;
+
     /** Creates a new BoardCard instance. */
     constructor($$source: Partial<BoardCard> = {}) {
         if (!("key" in $$source)) {

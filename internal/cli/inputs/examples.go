@@ -235,4 +235,13 @@ var (
 		Confirm: "bacio-baci-63",
 		PurgeDB: false,
 	}
+
+	ExampleIssueArchive       = IssueArchiveInput{Key: "MINI-42"}
+	ExampleIssueUnarchive     = IssueUnarchiveInput{Key: "MINI-42"}
+	ExampleFeatureArchive     = FeatureArchiveInput{Slug: "auth-old"}
+	ExampleFeatureUnarchive   = FeatureUnarchiveInput{Slug: "auth-old"}
+	ExampleDocArchive         = DocArchiveInput{Filename: "auth-old.md"}
+	ExampleDocUnarchive       = DocUnarchiveInput{Filename: "auth-old.md"}
+	ExampleArchiveSweep       = ArchiveSweepInput{}
+	ExampleSettingsShowArchived = SettingsShowArchivedInput{Value: true}
 )

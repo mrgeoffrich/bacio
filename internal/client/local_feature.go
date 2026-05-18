@@ -5,14 +5,19 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
 
-func (c *localClient) ListFeatures(ctx context.Context, repo *model.Repo, withDescription bool) ([]*model.Feature, error) {
-	feats, err := c.store.ListFeatures(repo.ID, withDescription)
+func (c *localClient) ListFeatures(ctx context.Context, repo *model.Repo, withDescription, includeArchived bool) ([]*model.Feature, error) {
+	feats, err := c.store.ListFeaturesFiltered(store.FeatureFilter{
+		RepoID:             repo.ID,
+		IncludeDescription: withDescription,
+		IncludeArchived:    includeArchived,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -255,4 +260,45 @@ func isOpenState(s model.State) bool {
 		return false
 	}
 	return true
+}
+
+// ArchiveFeature stamps the feature's archived_at column (BACI-68).
+// Records a feature.archive audit row under the actor on --user.
+func (c *localClient) ArchiveFeature(ctx context.Context, repo *model.Repo, slug string, dryRun bool) (*model.Feature, error) {
+	return c.setFeatureArchived(ctx, repo, slug, true, dryRun, "feature.archive")
+}
+
+// UnarchiveFeature clears archived_at (BACI-68).
+func (c *localClient) UnarchiveFeature(ctx context.Context, repo *model.Repo, slug string, dryRun bool) (*model.Feature, error) {
+	return c.setFeatureArchived(ctx, repo, slug, false, dryRun, "feature.unarchive")
+}
+
+func (c *localClient) setFeatureArchived(ctx context.Context, repo *model.Repo, slug string, archived, dryRun bool, op string) (*model.Feature, error) {
+	feat, err := c.store.GetFeatureBySlug(repo.ID, slug)
+	if err != nil {
+		return nil, err
+	}
+	if dryRun {
+		projected := *feat
+		if archived {
+			now := time.Now().UTC()
+			projected.ArchivedAt = &now
+		} else {
+			projected.ArchivedAt = nil
+		}
+		return &projected, nil
+	}
+	if err := c.store.SetFeatureArchived(feat.ID, archived); err != nil {
+		return nil, err
+	}
+	updated, err := c.store.GetFeatureByID(feat.ID)
+	if err != nil {
+		return nil, err
+	}
+	c.recordOp(model.HistoryEntry{
+		RepoID: &feat.RepoID, RepoPrefix: repo.Prefix,
+		Op: op, Kind: "feature",
+		TargetID: &updated.ID, TargetLabel: updated.Slug,
+	})
+	return updated, nil
 }

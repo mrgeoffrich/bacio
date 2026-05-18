@@ -94,6 +94,15 @@ var Registry = []Entry{
 
 	{"worktree.init", "Initialise a per-worktree bacio environment manifest (BACI-63). Writes environment-config.yaml at the worktree root, registers the slug + port + db_path in ~/.bacio/worktrees.yaml, and appends environment-config.yaml to .gitignore (idempotent). Slug defaults to the worktree basename; port is auto-allocated; db_path defaults to .bacio/db.sqlite.", typeOf[inputs.WorktreeInitInput](), inputs.ExampleWorktreeInit},
 	{"worktree.rm", "Remove a worktree's environment manifest and its row from ~/.bacio/worktrees.yaml. Confirm must equal the manifest's slug. With purge_db=true, the worktree's SQLite DB is deleted too.", typeOf[inputs.WorktreeRmInput](), inputs.ExampleWorktreeRm},
+
+	{"issue.archive", "Archive an issue — stamps archived_at and hides the row from default lists (BACI-68). The row, its comments, relations, PRs, tags and audit history are retained. Sticky: reopening an archived issue does NOT auto-unarchive it.", typeOf[inputs.IssueArchiveInput](), inputs.ExampleIssueArchive},
+	{"issue.unarchive", "Unarchive an issue — clears archived_at so the row shows up in default lists again (BACI-68).", typeOf[inputs.IssueUnarchiveInput](), inputs.ExampleIssueUnarchive},
+	{"feature.archive", "Archive a feature (BACI-68). Same semantics as issue.archive on the parent record.", typeOf[inputs.FeatureArchiveInput](), inputs.ExampleFeatureArchive},
+	{"feature.unarchive", "Unarchive a feature (BACI-68).", typeOf[inputs.FeatureUnarchiveInput](), inputs.ExampleFeatureUnarchive},
+	{"doc.archive", "Archive a document (BACI-68). The doc and its links remain; default lists hide it.", typeOf[inputs.DocArchiveInput](), inputs.ExampleDocArchive},
+	{"doc.unarchive", "Unarchive a document (BACI-68).", typeOf[inputs.DocUnarchiveInput](), inputs.ExampleDocUnarchive},
+	{"archive.sweep", "Manually trigger the BACI-68 archive sweep on demand. Same three SQL passes the leader-elected Controller runs hourly: archive issues older than 4 days in a terminal state, then features whose every child issue is archived, then docs whose every linked parent is archived. Idempotent. Returns {issues_archived, features_archived, documents_archived}.", typeOf[inputs.ArchiveSweepInput](), inputs.ExampleArchiveSweep},
+	{"settings.show-archived", "Toggle the BACI-68 display.show_archived global setting. When on, lists / boards / docs / features views include archived rows by default (the per-call --include-archived flag still works either way).", typeOf[inputs.SettingsShowArchivedInput](), inputs.ExampleSettingsShowArchived},
 }
 
 // repoRmDescription is the LLM-targeted warning text published via

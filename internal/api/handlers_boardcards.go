@@ -26,9 +26,19 @@ func (d deps) handleBoardCardsListRepo(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// BACI-68: per-call ?include_archived=1 OR the display.show_archived
+	// global setting opt the caller in to archived rows. The per-call
+	// query wins over the setting in either direction (true OR true is
+	// the only path to true, so we OR them) — the CLI does the same on
+	// `bacio issue list --include-archived`.
+	includeArchived := r.URL.Query().Get("include_archived") == "true" || r.URL.Query().Get("include_archived") == "1"
+	if !includeArchived {
+		v, _ := d.store.GetDisplayShowArchived()
+		includeArchived = v
+	}
 	c := client.NewLocalFromStore(d.store, ActorFromContext(r.Context()))
 	defer c.Close()
-	cards, err := boardcards.Assemble(r.Context(), c, repo)
+	cards, err := boardcards.Assemble(r.Context(), c, repo, includeArchived)
 	if err != nil {
 		status, code := statusForError(err)
 		writeError(w, status, code, err.Error(), nil)

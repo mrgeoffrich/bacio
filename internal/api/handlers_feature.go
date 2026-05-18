@@ -14,9 +14,14 @@ func (d deps) handleFeaturesList(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	withDesc := r.URL.Query().Get("with_description")
-	includeDesc := withDesc == "true" || withDesc == "1"
-	feats, err := d.store.ListFeatures(repo.ID, includeDesc)
+	q := r.URL.Query()
+	withDesc := q.Get("with_description")
+	includeArchived := q.Get("include_archived")
+	feats, err := d.store.ListFeaturesFiltered(store.FeatureFilter{
+		RepoID:             repo.ID,
+		IncludeDescription: withDesc == "true" || withDesc == "1",
+		IncludeArchived:    includeArchived == "true" || includeArchived == "1",
+	})
 	if err != nil {
 		status, code := statusForError(err)
 		writeError(w, status, code, err.Error(), nil)

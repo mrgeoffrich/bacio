@@ -63,8 +63,15 @@ type Document struct {
 	SizeBytes  int64        `json:"size_bytes"`
 	Content    string       `json:"content,omitempty"` // populated only on show
 	SourcePath string       `json:"source_path,omitempty"`
-	CreatedAt  time.Time    `json:"created_at"`
-	UpdatedAt  time.Time    `json:"updated_at"`
+	// ArchivedAt (BACI-68) is non-nil iff the document is archived —
+	// hidden from default lists, but the row and its links remain.
+	// The auto-sweep stamps it when every linked parent (issue and/or
+	// feature) is archived (and the doc had at least one link); docs
+	// with zero links are NOT orphans and stay visible. Manual
+	// `bacio doc archive` / `unarchive` writes or clears it on demand.
+	ArchivedAt *time.Time `json:"archived_at,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
 // DocumentLink describes one (document, issue|feature, description) edge.

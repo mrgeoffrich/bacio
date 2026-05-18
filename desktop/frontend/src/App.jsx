@@ -82,6 +82,12 @@ export default function App() {
   // mount; flipped live from the Settings screen. Passed to the
   // presentational Board alongside columns/cards.
   const [hideEmptyColumns, setHideEmptyColumns] = useState(false);
+  // BACI-68: the App-owned display preference. When true, archived
+  // rows surface in default lists / board / docs / features views
+  // (rendered visibly muted). When false (the default), they're
+  // hidden. The per-call --include-archived flag the CLI exposes has
+  // no desktop counterpart — toggle the setting from Settings instead.
+  const [showArchived, setShowArchived] = useState(false);
   // leaderState tracks the UI leader-election result from LeaderService.
   // amLeader = true means this desktop process holds the lease and may
   // dispatch. Standby processes show a chip and disable the per-card button.
@@ -119,12 +125,19 @@ export default function App() {
   // error, the Topbar stays usable, and the views render their own
   // empty states until the data lands.
   useEffect(() => {
-    Promise.all([api.listBoards(), api.listColumns(), api.listPromptTemplates(), api.getBoardPreferences()])
-      .then(([bs, cols, tpls, prefs]) => {
+    Promise.all([
+      api.listBoards(),
+      api.listColumns(),
+      api.listPromptTemplates(),
+      api.getBoardPreferences(),
+      api.getDisplayPreferences(),
+    ])
+      .then(([bs, cols, tpls, prefs, displayPrefs]) => {
         setBoards(bs);
         setColumns(cols);
         setPromptConfig(tpls);
         setHideEmptyColumns(prefs.hideEmptyColumns);
+        setShowArchived(displayPrefs.showArchived);
         setActiveBoard(prev => bs.some(b => b.prefix === prev) ? prev : (bs[0]?.prefix ?? ''));
         setLoading(false);
       })
@@ -160,6 +173,16 @@ export default function App() {
   const changeHideEmptyColumns = useCallback((next) => {
     api.setBoardPreferences(next)
       .then(prefs => setHideEmptyColumns(prefs.hideEmptyColumns))
+      .catch(err => reportError(err, { headline: "Couldn't save preference" }));
+  }, []);
+
+  // changeShowArchived persists the BACI-68 display.show_archived
+  // toggle, then updates the App-owned flag on success so the Board /
+  // Docs / Features views react immediately on the next refresh.
+  // Same optimistic-then-confirmed shape as changeHideEmptyColumns.
+  const changeShowArchived = useCallback((next) => {
+    api.setDisplayPreferences(next)
+      .then(prefs => setShowArchived(prefs.showArchived))
       .catch(err => reportError(err, { headline: "Couldn't save preference" }));
   }, []);
 
@@ -554,6 +577,8 @@ export default function App() {
             onChangeTheme={setTheme}
             hideEmptyColumns={hideEmptyColumns}
             onChangeHideEmptyColumns={changeHideEmptyColumns}
+            showArchived={showArchived}
+            onChangeShowArchived={changeShowArchived}
             columns={columns}
             onClose={closeSettings}
             onTemplatesChanged={refreshPromptConfig}

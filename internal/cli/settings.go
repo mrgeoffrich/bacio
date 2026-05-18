@@ -69,7 +69,103 @@ app's Settings panel and the TUI Settings tab; this is the CLI
 surface for them.`,
 	}
 	cmd.AddCommand(newSettingsTemplateCmd())
+	cmd.AddCommand(newSettingsShowArchivedCmd())
 	return cmd
+}
+
+// showArchivedResult is the JSON + text shape `bacio settings
+// show-archived` returns on both the get and set paths. Keeps the
+// payload typed so renderText prints a friendly line instead of the
+// anonymous-struct fallback (BACI-68).
+type showArchivedResult struct {
+	ShowArchived bool `json:"show_archived"`
+}
+
+// newSettingsShowArchivedCmd implements the BACI-68 display.show_archived
+// toggle. The verb doubles as get and set:
+//
+//   - `bacio settings show-archived`             — read the current value
+//   - `bacio settings show-archived true|false`  — write it
+//   - `bacio settings show-archived --json '{"value":true}'` — same write
+//
+// Per-call `--include-archived` on a list command still wins over the
+// setting either way.
+func newSettingsShowArchivedCmd() *cobra.Command {
+	var rawInput string
+	cmd := &cobra.Command{
+		Use:   "show-archived [true|false]",
+		Short: "Get or set the BACI-68 display.show_archived global toggle (default: false)",
+		Long: `Get or set the BACI-68 display.show_archived global toggle. When on,
+default list / board / kanban / docs views include archived rows
+(otherwise they're hidden). The per-call ` + "`--include-archived`" + ` flag on
+a list command overrides this setting for that one call.
+
+Examples:
+
+  bacio settings show-archived            # read current value
+  bacio settings show-archived true       # turn on
+  bacio settings show-archived false      # turn off (default)
+  bacio settings show-archived --json '{"value":true}'`,
+		Args: cobra.RangeArgs(0, 1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			raw, err := parseJSONInput(cmd, args, rawInput)
+			if err != nil {
+				return err
+			}
+			c, err := openClient()
+			if err != nil {
+				return err
+			}
+			defer c.Close()
+			// Get path — no args, no --json.
+			if raw == nil && len(args) == 0 {
+				cur, err := c.GetDisplayShowArchived(context.Background())
+				if err != nil {
+					return err
+				}
+				return emit(showArchivedResult{ShowArchived: cur})
+			}
+			// Set path — accept --json or a positional bool.
+			var value bool
+			if raw != nil {
+				in, _, err := inputio.DecodeStrict[inputs.SettingsShowArchivedInput](raw)
+				if err != nil {
+					return err
+				}
+				value = in.Value
+			} else {
+				v, err := parseBoolPositional(args[0])
+				if err != nil {
+					return err
+				}
+				value = v
+			}
+			out, err := c.SetDisplayShowArchived(context.Background(), value, opts.dryRun)
+			if err != nil {
+				return err
+			}
+			payload := showArchivedResult{ShowArchived: out}
+			if opts.dryRun {
+				return emitDryRun(payload)
+			}
+			return emit(payload)
+		},
+	}
+	addInputFlag(cmd, &rawInput)
+	return cmd
+}
+
+// parseBoolPositional accepts the same tokens as strconv.ParseBool plus
+// "on" / "off" so users can type "bacio settings show-archived on"
+// naturally. Returns an actionable error on a typo.
+func parseBoolPositional(s string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "true", "t", "1", "yes", "y", "on":
+		return true, nil
+	case "false", "f", "0", "no", "n", "off":
+		return false, nil
+	}
+	return false, fmt.Errorf("invalid boolean %q (expected true/false)", s)
 }
 
 func newSettingsTemplateCmd() *cobra.Command {

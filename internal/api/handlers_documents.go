@@ -26,7 +26,11 @@ func (d deps) handleDocumentsList(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	withContent := q.Get("with_content") == "true" || q.Get("with_content") == "1"
-	f := store.DocumentFilter{RepoID: repo.ID}
+	includeArchived := q.Get("include_archived")
+	f := store.DocumentFilter{
+		RepoID:          repo.ID,
+		IncludeArchived: includeArchived == "true" || includeArchived == "1",
+	}
 	if t := q.Get("type"); t != "" {
 		dt, err := model.ParseDocumentType(t)
 		if err != nil {

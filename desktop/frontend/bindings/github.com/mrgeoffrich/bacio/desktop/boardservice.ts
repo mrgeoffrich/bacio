@@ -65,6 +65,19 @@ export function AnswerSessionQuestion(id: number, answers: { [_ in string]?: any
 }
 
 /**
+ * ArchiveIssue (BACI-68) is the per-card "archive" Wails binding —
+ * stamps archived_at, returns the updated row. The desktop card menu
+ * calls this when the user selects Archive. The kanban refreshes via
+ * the regular ListCards path; archived cards stay visible only when
+ * display.show_archived is on (and then render visibly-muted).
+ */
+export function ArchiveIssue(repoPrefix: string, issueKey: string): $CancellablePromise<model$0.Issue | null> {
+    return $Call.ByID(543071120, repoPrefix, issueKey).then(($result: any) => {
+        return $$createType5($result);
+    });
+}
+
+/**
  * AttachPullRequest attaches a pull-request URL to an issue and returns
  * the resolved PRDTO. Validation (http/https + host) lives in the
  * store layer; an invalid URL surfaces as the original error message
@@ -72,7 +85,7 @@ export function AnswerSessionQuestion(id: number, answers: { [_ in string]?: any
  */
 export function AttachPullRequest(repoPrefix: string, key: string, url: string): $CancellablePromise<$models.PRDTO> {
     return $Call.ByID(1860090468, repoPrefix, key, url).then(($result: any) => {
-        return $$createType4($result);
+        return $$createType6($result);
     });
 }
 
@@ -108,7 +121,7 @@ export function CancelWaitingDispatch(repoPrefix: string, issueKey: string): $Ca
  */
 export function DispatchIssue(repoPrefix: string, issueKey: string, mode: string): $CancellablePromise<$models.DispatchDTO> {
     return $Call.ByID(715303058, repoPrefix, issueKey, mode).then(($result: any) => {
-        return $$createType5($result);
+        return $$createType7($result);
     });
 }
 
@@ -137,7 +150,7 @@ export function GetIssue(repoPrefix: string, key: string): $CancellablePromise<$
  */
 export function GetIssueBrief(repoPrefix: string, key: string): $CancellablePromise<$models.IssueBriefDTO> {
     return $Call.ByID(836296342, repoPrefix, key).then(($result: any) => {
-        return $$createType6($result);
+        return $$createType8($result);
     });
 }
 
@@ -166,7 +179,7 @@ export function GetSessionQuestion(id: number): $CancellablePromise<model$0.Sess
  */
 export function ListAgents(repoPrefix: string): $CancellablePromise<$models.AgentCard[]> {
     return $Call.ByID(3979848123, repoPrefix).then(($result: any) => {
-        return $$createType8($result);
+        return $$createType10($result);
     });
 }
 
@@ -176,7 +189,7 @@ export function ListAgents(repoPrefix: string): $CancellablePromise<$models.Agen
  */
 export function ListBoards(): $CancellablePromise<$models.Board[]> {
     return $Call.ByID(3235630628).then(($result: any) => {
-        return $$createType9($result);
+        return $$createType11($result);
     });
 }
 
@@ -184,10 +197,16 @@ export function ListBoards(): $CancellablePromise<$models.Board[]> {
  * ListCards returns issues as kanban cards — for one repo, or across every
  * repo when repoPrefix is empty or "all". Delegates to boardcards.Assemble
  * so the desktop and REST surface share one assembler.
+ * 
+ * Archived cards (BACI-68) follow the display.show_archived global
+ * setting — when on, archived rows surface as visibly-muted cards;
+ * when off (the default) they're hidden from the board entirely. The
+ * desktop has no per-call --include-archived knob — toggle the setting
+ * from the Settings panel.
  */
 export function ListCards(repoPrefix: string): $CancellablePromise<$models.BoardCard[]> {
     return $Call.ByID(4181487648, repoPrefix).then(($result: any) => {
-        return $$createType11($result);
+        return $$createType13($result);
     });
 }
 
@@ -196,7 +215,7 @@ export function ListCards(repoPrefix: string): $CancellablePromise<$models.Board
  */
 export function ListColumns(): $CancellablePromise<$models.BoardColumn[]> {
     return $Call.ByID(2117984856).then(($result: any) => {
-        return $$createType13($result);
+        return $$createType15($result);
     });
 }
 
@@ -209,7 +228,16 @@ export function ListColumns(): $CancellablePromise<$models.BoardColumn[]> {
  */
 export function SetIssueState(repoPrefix: string, key: string, state: string): $CancellablePromise<$models.BoardCard> {
     return $Call.ByID(2874048639, repoPrefix, key, state).then(($result: any) => {
-        return $$createType10($result);
+        return $$createType12($result);
+    });
+}
+
+/**
+ * UnarchiveIssue (BACI-68) clears archived_at.
+ */
+export function UnarchiveIssue(repoPrefix: string, issueKey: string): $CancellablePromise<model$0.Issue | null> {
+    return $Call.ByID(3350533803, repoPrefix, issueKey).then(($result: any) => {
+        return $$createType5($result);
     });
 }
 
@@ -229,13 +257,15 @@ const $$createType0 = $models.IssueDetail.createFrom;
 const $$createType1 = $models.Board.createFrom;
 const $$createType2 = model$0.SessionQuestion.createFrom;
 const $$createType3 = $Create.Nullable($$createType2);
-const $$createType4 = $models.PRDTO.createFrom;
-const $$createType5 = agentcards$0.DispatchDTO.createFrom;
-const $$createType6 = $models.IssueBriefDTO.createFrom;
-const $$createType7 = agentcards$0.AgentCard.createFrom;
-const $$createType8 = $Create.Array($$createType7);
-const $$createType9 = $Create.Array($$createType1);
-const $$createType10 = boardcards$0.BoardCard.createFrom;
-const $$createType11 = $Create.Array($$createType10);
-const $$createType12 = $models.BoardColumn.createFrom;
+const $$createType4 = model$0.Issue.createFrom;
+const $$createType5 = $Create.Nullable($$createType4);
+const $$createType6 = $models.PRDTO.createFrom;
+const $$createType7 = agentcards$0.DispatchDTO.createFrom;
+const $$createType8 = $models.IssueBriefDTO.createFrom;
+const $$createType9 = agentcards$0.AgentCard.createFrom;
+const $$createType10 = $Create.Array($$createType9);
+const $$createType11 = $Create.Array($$createType1);
+const $$createType12 = boardcards$0.BoardCard.createFrom;
 const $$createType13 = $Create.Array($$createType12);
+const $$createType14 = $models.BoardColumn.createFrom;
+const $$createType15 = $Create.Array($$createType14);

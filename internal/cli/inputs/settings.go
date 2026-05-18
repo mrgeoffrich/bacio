@@ -107,3 +107,18 @@ type SettingsTemplateRmInput struct {
 // verb re-seeds every built-in slug that's not currently present.
 // Idempotent.
 type SettingsTemplateRestoreDefaultsInput struct{}
+
+// SettingsShowArchivedInput is the payload for `bacio settings
+// show-archived --json` (BACI-68). The CLI verb doubles as get and
+// set: empty body reads the current value; non-empty `value` writes
+// it. The per-call `--include-archived` flag on `list` commands
+// overrides this setting for one call.
+type SettingsShowArchivedInput struct {
+	Value bool `json:"value"`
+}
+
+// ArchiveSweepInput is the payload for `bacio archive sweep --json`
+// (BACI-68). No fields — the verb runs the same three SQL passes the
+// hourly Controller tick runs, on demand. Useful for testing and for
+// users who want to skip the wait. Idempotent.
+type ArchiveSweepInput struct{}

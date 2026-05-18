@@ -15,14 +15,20 @@ type Repo struct {
 }
 
 type Feature struct {
-	ID          int64     `json:"id"`
-	UUID        string    `json:"uuid"`
-	RepoID      int64     `json:"repo_id"`
-	Slug        string    `json:"slug"`
-	Title       string    `json:"title"`
-	Description string    `json:"description,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          int64  `json:"id"`
+	UUID        string `json:"uuid"`
+	RepoID      int64  `json:"repo_id"`
+	Slug        string `json:"slug"`
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+	// ArchivedAt (BACI-68) is non-nil iff the feature is archived —
+	// hidden from default lists, but the row and its audit history
+	// remain. The auto-sweep stamps it when every child issue is
+	// archived; manual `bacio feature archive` / `unarchive` writes or
+	// clears it on demand.
+	ArchivedAt *time.Time `json:"archived_at,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
 type Issue struct {
@@ -50,10 +56,18 @@ type Issue struct {
 	// desktop's ListOpenClaims runs, so list responses don't need a
 	// second round trip. No omitempty: the field must be visible
 	// (including when false) in JSON output.
-	Taken     bool      `json:"taken"`
-	Tags      []string  `json:"tags"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Taken bool     `json:"taken"`
+	Tags  []string `json:"tags"`
+	// ArchivedAt (BACI-68) is non-nil iff the issue is archived —
+	// hidden from default lists / boards, but the row and its audit
+	// history are retained. The auto-sweep stamps it for issues older
+	// than 4 days in a terminal state; manual `bacio issue archive` /
+	// `unarchive` writes or clears it on demand. Reopening an archived
+	// issue (state -> todo/...) does NOT auto-unarchive — the user must
+	// unarchive explicitly.
+	ArchivedAt *time.Time `json:"archived_at,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
 type Comment struct {

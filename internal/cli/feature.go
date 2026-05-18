@@ -14,7 +14,16 @@ import (
 
 func newFeatureCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "feature", Short: "Manage features (groups of issues)"}
-	cmd.AddCommand(featureAddCmd(), featureListCmd(), featureShowCmd(), featureEditCmd(), featureRmCmd(), featurePlanCmd())
+	cmd.AddCommand(
+		featureAddCmd(),
+		featureListCmd(),
+		featureShowCmd(),
+		featureEditCmd(),
+		featureRmCmd(),
+		featurePlanCmd(),
+		featureArchiveCmd(),
+		featureUnarchiveCmd(),
+	)
 	return cmd
 }
 
@@ -84,7 +93,10 @@ func createFeature(in inputs.FeatureAddInput) error {
 }
 
 func featureListCmd() *cobra.Command {
-	var withDescription bool
+	var (
+		withDescription bool
+		includeArchived bool
+	)
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List features in the current repo (descriptions are stripped by default; pass --with-description to include them)",
@@ -98,7 +110,15 @@ func featureListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fs, err := c.ListFeatures(context.Background(), repo, withDescription)
+			// BACI-68: archived features hidden by default. Per-call
+			// --include-archived overrides; the display.show_archived
+			// setting also lifts the filter when on.
+			show := includeArchived
+			if !show {
+				v, _ := c.GetDisplayShowArchived(context.Background())
+				show = v
+			}
+			fs, err := c.ListFeatures(context.Background(), repo, withDescription, show)
 			if err != nil {
 				return err
 			}
@@ -106,6 +126,7 @@ func featureListCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&withDescription, "with-description", false, "include each feature's full description in JSON output (off by default to keep responses small)")
+	cmd.Flags().BoolVar(&includeArchived, "include-archived", false, "include archived features in the list (BACI-68); overrides the display.show_archived setting for this call")
 	return cmd
 }
 
@@ -291,4 +312,84 @@ type featureDeletePreview struct {
 	WouldDelete    bool           `json:"would_delete"`
 	IssuesUnlinked int            `json:"issues_unlinked"`
 	DocumentLinks  int            `json:"document_links"`
+}
+
+// featureArchiveCmd / featureUnarchiveCmd are the BACI-68 manual
+// archive verbs on the feature surface.
+func featureArchiveCmd() *cobra.Command {
+	var rawInput string
+	cmd := &cobra.Command{
+		Use:   "archive [SLUG]",
+		Short: "Archive a feature (BACI-68) — hides it from default lists; row + children are untouched",
+		Args:  cobra.RangeArgs(0, 1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runFeatureArchiveVerb(cmd, args, rawInput, true)
+		},
+	}
+	addInputFlag(cmd, &rawInput)
+	return cmd
+}
+
+func featureUnarchiveCmd() *cobra.Command {
+	var rawInput string
+	cmd := &cobra.Command{
+		Use:   "unarchive [SLUG]",
+		Short: "Unarchive a feature (BACI-68) — clears archived_at",
+		Args:  cobra.RangeArgs(0, 1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runFeatureArchiveVerb(cmd, args, rawInput, false)
+		},
+	}
+	addInputFlag(cmd, &rawInput)
+	return cmd
+}
+
+func runFeatureArchiveVerb(cmd *cobra.Command, args []string, rawInput string, archive bool) error {
+	raw, err := parseJSONInput(cmd, args, rawInput)
+	if err != nil {
+		return err
+	}
+	var slug string
+	if raw != nil {
+		if archive {
+			in, _, err := inputio.DecodeStrict[inputs.FeatureArchiveInput](raw)
+			if err != nil {
+				return err
+			}
+			slug = in.Slug
+		} else {
+			in, _, err := inputio.DecodeStrict[inputs.FeatureUnarchiveInput](raw)
+			if err != nil {
+				return err
+			}
+			slug = in.Slug
+		}
+	} else {
+		if len(args) != 1 {
+			return fmt.Errorf("requires <SLUG> positional or --json")
+		}
+		slug = args[0]
+	}
+	c, err := openClient()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	repo, err := resolveRepoC(c)
+	if err != nil {
+		return err
+	}
+	var updated *model.Feature
+	if archive {
+		updated, err = c.ArchiveFeature(context.Background(), repo, slug, opts.dryRun)
+	} else {
+		updated, err = c.UnarchiveFeature(context.Background(), repo, slug, opts.dryRun)
+	}
+	if err != nil {
+		return err
+	}
+	if opts.dryRun {
+		return emitDryRun(updated)
+	}
+	return emit(updated)
 }

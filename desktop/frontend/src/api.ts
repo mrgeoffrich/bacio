@@ -454,6 +454,30 @@ export async function setBoardPreferences(
   }
 }
 
+// BACI-68: display.show_archived global toggle. Same shape as the
+// board-preferences pair; lives behind a dedicated Wails endpoint so
+// the Settings panel can read / write it without coupling display
+// state to board state.
+export type DisplayPreferencesDTO = { showArchived: boolean };
+
+export async function getDisplayPreferences(): Promise<DisplayPreferencesDTO> {
+  try {
+    return await SettingsService.GetDisplayPreferences();
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+export async function setDisplayPreferences(
+  showArchived: boolean,
+): Promise<DisplayPreferencesDTO> {
+  try {
+    return await SettingsService.SetDisplayPreferences(showArchived);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
 // getLeaderStatus returns the current UI leader-election state synchronously.
 // Used on mount to seed the UI before the first "leaderStatus" event arrives.
 export async function getLeaderStatus(): Promise<LeaderStatusDTO> {

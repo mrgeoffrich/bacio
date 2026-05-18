@@ -58,13 +58,15 @@ func (f *FeatureService) resolveRepo(ctx context.Context, repoPrefix string) (*m
 }
 
 // ListFeatures returns every feature in one repo as a summary row.
+// Archived features (BACI-68) follow display.show_archived.
 func (f *FeatureService) ListFeatures(repoPrefix string) ([]FeatureSummary, error) {
 	ctx := context.Background()
 	repo, err := f.resolveRepo(ctx, repoPrefix)
 	if err != nil {
 		return nil, err
 	}
-	feats, err := f.client.ListFeatures(ctx, repo, false)
+	showArchived, _ := f.client.GetDisplayShowArchived(ctx)
+	feats, err := f.client.ListFeatures(ctx, repo, false, showArchived)
 	if err != nil {
 		return nil, err
 	}

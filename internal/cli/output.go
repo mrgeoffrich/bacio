@@ -148,6 +148,19 @@ func renderText(w io.Writer, v any) error {
 		for _, t := range x {
 			printPromptTemplateSummary(w, t)
 		}
+	case store.ArchiveSweepResult:
+		fmt.Fprintf(w, "Archived issues:    %d\n", x.IssuesArchived)
+		fmt.Fprintf(w, "Archived features:  %d\n", x.FeaturesArchived)
+		fmt.Fprintf(w, "Archived documents: %d\n", x.DocumentsArchived)
+		if x.Total() == 0 {
+			fmt.Fprintln(w, "Nothing to archive.")
+		}
+	case showArchivedResult:
+		if x.ShowArchived {
+			fmt.Fprintln(w, "show_archived: on")
+		} else {
+			fmt.Fprintln(w, "show_archived: off")
+		}
 	default:
 		fmt.Fprintf(w, "%v\n", v)
 	}

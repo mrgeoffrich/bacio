@@ -619,6 +619,71 @@ bacio pr list <KEY>                     One URL per line (or JSON)
 bacio pr attach MINI-42 https://github.com/owner/repo/pull/7
 ```
 
+### Archive lifecycle (BACI-68)
+
+Issues, features and documents grew an `archived_at` column doubling as the hidden-flag and the audit timestamp. Archiving hides the row from default lists / boards / docs / features views without deleting it — the data, links, comments and audit history are all retained. Archive is sticky: reopening an archived issue (state → todo/in_progress/…) does NOT auto-unarchive it, the user must unarchive explicitly.
+
+A leader-elected background **auto-sweep** ticks hourly (`store.ArchiveSweepInterval`) and runs three SQL passes in one transaction:
+
+- Issues in `(done, cancelled)` whose `updated_at < now - 4 days` (`store.ArchiveAgeWindow`).
+- Features whose every child issue is archived (and the feature had at least one child).
+- Documents whose every linked parent (issue and/or feature) is archived (and the doc had at least one link). Docs with zero links are NOT orphans — they were never attached, so the sweep leaves them alone.
+
+The leader logs counts via `slog` only when at least one row was archived (a quiet DB produces no noise). The same passes can be run on demand via `bacio archive sweep`.
+
+```
+bacio issue archive <KEY>               Hide an issue from default lists; row + history are kept
+bacio issue unarchive <KEY>             Clear archived_at — the issue shows up again
+
+bacio feature archive <SLUG>            Same on a feature; children are untouched
+bacio feature unarchive <SLUG>
+
+bacio doc archive <FILENAME>            Same on a document; links + content are kept
+bacio doc unarchive <FILENAME>
+
+bacio archive sweep                     Run the three-pass auto-sweep on demand (idempotent)
+                                        Returns {issues_archived, features_archived, documents_archived}
+
+bacio settings show-archived            Read the BACI-68 display.show_archived global toggle
+bacio settings show-archived true|false Write it
+```
+
+All six per-entity verbs honour `--json`, `--dry-run`, and have a `bacio schema` entry (`issue.archive`, `issue.unarchive`, `feature.archive`, `feature.unarchive`, `doc.archive`, `doc.unarchive`, `archive.sweep`, `settings.show-archived`).
+
+**Read-path filtering.** All `list` commands hide archived rows by default. Two levers opt you back in:
+
+- **Per-call:** `--include-archived` on `bacio issue list`, `bacio feature list`, and `bacio doc list`. Overrides the setting for one call. API mirrors via `?include_archived=1`.
+- **Global toggle:** `bacio settings show-archived true` (mirrors `display.show_archived` in `app_settings`) — when on, every default list / board / kanban view includes archived rows. The desktop / web Board respect this setting on every refresh.
+
+Single-item lookups (`bacio issue show`, `bacio feature show`, `bacio doc show`, `bacio issue brief`) always return the row regardless of archive state — hiding only applies to lists.
+
+**Example:**
+```bash
+# Manual archive of a done issue (sticky).
+bacio issue archive MINI-42
+
+# Bulk on-demand: hourly tick is gated on the leader; trigger now.
+bacio archive sweep
+
+# Inspect archived rows alongside live ones (one call, no setting flip).
+bacio issue list --include-archived -o json
+bacio doc list --include-archived -o json
+
+# Or flip the global setting so every list inflates by default.
+bacio settings show-archived true
+```
+
+**HTTP routes:**
+
+- `POST /repos/{prefix}/issues/{key}/archive` and `…/unarchive` — flip the column.
+- `POST /repos/{prefix}/features/{slug}/archive` and `…/unarchive`.
+- `POST /repos/{prefix}/documents/{filename}/archive` and `…/unarchive`.
+- `POST /archive/sweep` — same shape as the CLI.
+- `GET / PUT /settings/display-preferences` — body `{"show_archived": <bool>}`.
+- `?include_archived=1` query param on `GET /repos/{prefix}/issues`, `…/features`, `…/documents`, and `…/cards`.
+
+All routes follow the same `?dry_run=1` / `X-Dry-Run` and `X-Actor` conventions as the rest of the API.
+
 ### Agent registry
 
 Local-only — never replicated to GitHub via `bacio sync`.

@@ -59,6 +59,9 @@ func (c *remoteClient) ListIssues(ctx context.Context, f IssueFilter) ([]*model.
 	if len(f.Tags) > 0 {
 		q.Set("tag", strings.Join(f.Tags, ","))
 	}
+	if f.IncludeArchived {
+		q.Set("include_archived", "true")
+	}
 	var out []*model.Issue
 	if err := c.do(ctx, http.MethodGet, "/repos/"+f.Repo.Prefix+"/issues", q, nil, &out); err != nil {
 		return nil, err
@@ -283,4 +286,35 @@ func (c *remoteClient) ClaimNextIssue(ctx context.Context, repo *model.Repo, slu
 		return nil, err
 	}
 	return out.Issue, nil
+}
+
+// ArchiveIssue (BACI-68) — POST /repos/{prefix}/issues/{key}/archive.
+func (c *remoteClient) ArchiveIssue(ctx context.Context, repo *model.Repo, key string, dryRun bool) (*model.Issue, error) {
+	return c.archiveIssue(ctx, repo, key, true, dryRun)
+}
+
+// UnarchiveIssue (BACI-68) — POST /repos/{prefix}/issues/{key}/unarchive.
+func (c *remoteClient) UnarchiveIssue(ctx context.Context, repo *model.Repo, key string, dryRun bool) (*model.Issue, error) {
+	return c.archiveIssue(ctx, repo, key, false, dryRun)
+}
+
+func (c *remoteClient) archiveIssue(ctx context.Context, repo *model.Repo, key string, archive, dryRun bool) (*model.Issue, error) {
+	canonical, err := c.ResolveIssueKey(ctx, repo, key)
+	if err != nil {
+		return nil, err
+	}
+	prefix := strings.SplitN(canonical, "-", 2)[0]
+	q := url.Values{}
+	if dryRun {
+		q.Set("dry_run", "true")
+	}
+	verb := "archive"
+	if !archive {
+		verb = "unarchive"
+	}
+	var out model.Issue
+	if err := c.do(ctx, http.MethodPost, "/repos/"+prefix+"/issues/"+canonical+"/"+verb, q, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }

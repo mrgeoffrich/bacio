@@ -39,7 +39,7 @@ function KanbanCard({ card, promptConfig, isDragging, onDragStart, onDragEnd, on
 
   return (
     <article
-      className={`mk-card ${isDragging ? 'is-dragging' : ''} ${card.claude ? 'is-claude' : ''} ${taken ? 'is-taken' : ''} ${waiting ? 'is-waiting' : ''}`}
+      className={`mk-card ${isDragging ? 'is-dragging' : ''} ${card.claude ? 'is-claude' : ''} ${taken ? 'is-taken' : ''} ${waiting ? 'is-waiting' : ''} ${card.archived ? 'is-archived' : ''}`}
       draggable={!taken && !waiting}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}

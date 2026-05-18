@@ -191,6 +191,24 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("GET /settings/board-preferences", d.handleBoardPreferencesGet)
 	mux.HandleFunc("PUT /settings/board-preferences", d.handleBoardPreferencesSet)
 
+	// BACI-68 archive lifecycle. Per-entity archive / unarchive on
+	// issues, features, documents — flip archived_at without going
+	// through a PATCH (the verb shape matches the CLI's `bacio issue
+	// archive` family and the audit log records the op verb cleanly).
+	// `/archive/sweep` runs the same three SQL passes the leader-
+	// elected Controller runs hourly. `/settings/display-preferences`
+	// holds the display.show_archived global toggle alongside the
+	// other /settings/... routes.
+	mux.HandleFunc("POST /repos/{prefix}/issues/{key}/archive", d.handleIssueArchive)
+	mux.HandleFunc("POST /repos/{prefix}/issues/{key}/unarchive", d.handleIssueUnarchive)
+	mux.HandleFunc("POST /repos/{prefix}/features/{slug}/archive", d.handleFeatureArchive)
+	mux.HandleFunc("POST /repos/{prefix}/features/{slug}/unarchive", d.handleFeatureUnarchive)
+	mux.HandleFunc("POST /repos/{prefix}/documents/{filename}/archive", d.handleDocumentArchive)
+	mux.HandleFunc("POST /repos/{prefix}/documents/{filename}/unarchive", d.handleDocumentUnarchive)
+	mux.HandleFunc("POST /archive/sweep", d.handleArchiveSweep)
+	mux.HandleFunc("GET /settings/display-preferences", d.handleDisplayPreferencesGet)
+	mux.HandleFunc("PUT /settings/display-preferences", d.handleDisplayPreferencesSet)
+
 	// Outermost first: panic recovery wraps everything so a bug in any
 	// later layer still returns a 500 envelope. The CORS middleware
 	// sits *outside* auth so a cross-origin preflight (OPTIONS) is

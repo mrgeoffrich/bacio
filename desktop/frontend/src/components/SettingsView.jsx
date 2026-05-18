@@ -16,6 +16,15 @@ const HIDE_EMPTY_OPTIONS = [
   { id: true, label: 'On' },
 ];
 
+// BACI-68: the display.show_archived toggle uses the same two-button
+// shape as the other boolean preferences. "Off" hides archived rows
+// from default lists / boards (the default); "On" surfaces them
+// rendered visibly muted.
+const SHOW_ARCHIVED_OPTIONS = [
+  { id: false, label: 'Off' },
+  { id: true, label: 'On' },
+];
+
 // EMPTY_NEW_TEMPLATE is the seed state for the "Add template" inline form.
 // actionLabel (BACI-67) is optional — an empty string is the "no override,
 // derive from the gerund name" sentinel the backend honours.
@@ -37,6 +46,8 @@ export default function SettingsView({
   onChangeTheme,
   hideEmptyColumns,
   onChangeHideEmptyColumns,
+  showArchived,
+  onChangeShowArchived,
   columns,
   onClose,
   onTemplatesChanged,
@@ -275,6 +286,27 @@ export default function SettingsView({
                 className={`mk-segmented-btn ${hideEmptyColumns === opt.id ? 'is-active' : ''}`}
                 aria-pressed={hideEmptyColumns === opt.id}
                 onClick={() => onChangeHideEmptyColumns(opt.id)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="mk-settings-row">
+          <div className="mk-settings-row-text">
+            <div className="mk-settings-label">Show archived items</div>
+            <div className="mk-settings-hint">
+              When on, archived issues, documents and features surface in the board, doc list and feature list (rendered visibly muted). When off (the default), they&apos;re hidden. The hourly auto-sweep archives completed work older than 4 days; you can also archive any item manually.
+            </div>
+          </div>
+          <div className="mk-segmented" role="group" aria-label="Show archived items">
+            {SHOW_ARCHIVED_OPTIONS.map(opt => (
+              <button
+                key={String(opt.id)}
+                className={`mk-segmented-btn ${showArchived === opt.id ? 'is-active' : ''}`}
+                aria-pressed={showArchived === opt.id}
+                onClick={() => onChangeShowArchived(opt.id)}
               >
                 {opt.label}
               </button>

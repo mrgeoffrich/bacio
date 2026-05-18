@@ -25,6 +25,7 @@ export {
     ClaimantDTO,
     CommentDTO,
     DispatchDTO,
+    DisplayPreferencesDTO,
     DocContent,
     DocLinkDTO,
     DocSummary,

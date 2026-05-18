@@ -169,7 +169,7 @@ func TestRoundTripFeatureLifecycle(t *testing.T) {
 	}
 
 	// Remote can find it, lists it, and shows it.
-	feats, err := p.remote.ListFeatures(ctx, p.repo, false)
+	feats, err := p.remote.ListFeatures(ctx, p.repo, false, false)
 	if err != nil {
 		t.Fatalf("remote ListFeatures: %v", err)
 	}

@@ -60,6 +60,18 @@ export function GetBoardPreferences(): $CancellablePromise<$models.BoardPreferen
 }
 
 /**
+ * GetDisplayPreferences returns the current display.show_archived
+ * value (BACI-68). The desktop Board / Docs / Features views consult
+ * this on every refresh — when on, archived rows surface as visibly-
+ * muted cards; when off they're hidden entirely.
+ */
+export function GetDisplayPreferences(): $CancellablePromise<$models.DisplayPreferencesDTO> {
+    return $Call.ByID(4223916732).then(($result: any) => {
+        return $$createType2($result);
+    });
+}
+
+/**
  * ListPromptTemplates returns every registered template in store
  * iteration order — the desktop Settings panel renders them in this
  * order and the per-card action menu in the Board iterates the same
@@ -67,7 +79,7 @@ export function GetBoardPreferences(): $CancellablePromise<$models.BoardPreferen
  */
 export function ListPromptTemplates(): $CancellablePromise<$models.PromptTemplateDTO[]> {
     return $Call.ByID(1001854565).then(($result: any) => {
-        return $$createType2($result);
+        return $$createType3($result);
     });
 }
 
@@ -78,7 +90,7 @@ export function ListPromptTemplates(): $CancellablePromise<$models.PromptTemplat
  */
 export function PromptPlaceholders(): $CancellablePromise<string[]> {
     return $Call.ByID(1135988516).then(($result: any) => {
-        return $$createType3($result);
+        return $$createType4($result);
     });
 }
 
@@ -100,7 +112,7 @@ export function RenamePromptTemplate(slug: string, newSlug: string, newName: str
  */
 export function RestoreBuiltinPromptTemplates(): $CancellablePromise<$models.PromptTemplateDTO[]> {
     return $Call.ByID(3843909418).then(($result: any) => {
-        return $$createType2($result);
+        return $$createType3($result);
     });
 }
 
@@ -157,8 +169,19 @@ export function SetBoardPreferences(hideEmptyColumns: boolean): $CancellableProm
     });
 }
 
+/**
+ * SetDisplayPreferences writes display.show_archived and returns the
+ * refreshed DTO (BACI-68).
+ */
+export function SetDisplayPreferences(showArchived: boolean): $CancellablePromise<$models.DisplayPreferencesDTO> {
+    return $Call.ByID(1804218376, showArchived).then(($result: any) => {
+        return $$createType2($result);
+    });
+}
+
 // Private type creation functions
 const $$createType0 = $models.PromptTemplateDTO.createFrom;
 const $$createType1 = $models.BoardPreferencesDTO.createFrom;
-const $$createType2 = $Create.Array($$createType0);
-const $$createType3 = $Create.Array($Create.Any);
+const $$createType2 = $models.DisplayPreferencesDTO.createFrom;
+const $$createType3 = $Create.Array($$createType0);
+const $$createType4 = $Create.Array($Create.Any);

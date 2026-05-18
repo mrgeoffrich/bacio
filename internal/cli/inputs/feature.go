@@ -21,3 +21,15 @@ type FeatureEditInput struct {
 type FeatureRmInput struct {
 	Slug string `json:"slug"`
 }
+
+// FeatureArchiveInput is the payload for `bacio feature archive --json`
+// (BACI-68).
+type FeatureArchiveInput struct {
+	Slug string `json:"slug"`
+}
+
+// FeatureUnarchiveInput is the payload for `bacio feature unarchive
+// --json` (BACI-68).
+type FeatureUnarchiveInput struct {
+	Slug string `json:"slug"`
+}

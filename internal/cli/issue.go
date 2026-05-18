@@ -33,6 +33,8 @@ func newIssueCmd() *cobra.Command {
 		issueNextCmd(),
 		issuePeekCmd(),
 		issueRmCmd(),
+		issueArchiveCmd(),
+		issueUnarchiveCmd(),
 	)
 	return cmd
 }
@@ -122,6 +124,7 @@ func issueListCmd() *cobra.Command {
 		repoPrefix      string
 		allRepos        bool
 		withDescription bool
+		includeArchived bool
 	)
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -159,6 +162,14 @@ func issueListCmd() *cobra.Command {
 				}
 				f.Tags = cleanTags
 			}
+			// BACI-68: archived rows hidden by default. Per-call
+			// --include-archived overrides; the display.show_archived
+			// setting also lifts the filter when on.
+			f.IncludeArchived = includeArchived
+			if !f.IncludeArchived {
+				show, _ := c.GetDisplayShowArchived(context.Background())
+				f.IncludeArchived = show
+			}
 			issues, err := c.ListIssues(context.Background(), f)
 			if err != nil {
 				return err
@@ -172,6 +183,7 @@ func issueListCmd() *cobra.Command {
 	cmd.Flags().StringVar(&repoPrefix, "repo", "", "limit to a specific repo prefix; required when run inside a sync repo (or pass --all-repos)")
 	cmd.Flags().BoolVar(&allRepos, "all-repos", false, "search across all tracked repos")
 	cmd.Flags().BoolVar(&withDescription, "with-description", false, "include each issue's full description in JSON output (off by default to keep responses small)")
+	cmd.Flags().BoolVar(&includeArchived, "include-archived", false, "include archived issues in the list (BACI-68); overrides the display.show_archived setting for this call")
 	return cmd
 }
 
@@ -977,4 +989,98 @@ type cascadeCount struct {
 	PullRequests  int `json:"pull_requests"`
 	DocumentLinks int `json:"document_links"`
 	Tags          int `json:"tags"`
+}
+
+// issueArchiveCmd / issueUnarchiveCmd are the BACI-68 manual archive
+// verbs on the issue surface. The auto-sweep handles bulk archival
+// every hour on the leader, but users (and agents) can also flip
+// archived_at on demand.
+func issueArchiveCmd() *cobra.Command {
+	var rawInput string
+	cmd := &cobra.Command{
+		Use:   "archive [KEY]",
+		Short: "Archive an issue (BACI-68) — hides it from default lists; row + history are retained",
+		Long: `Archive an issue: stamps archived_at and hides it from default
+lists (board, kanban, JSON list, API). The row, its comments, relations,
+PRs, tags and audit history are kept. Idempotent — archiving an
+already-archived row is a no-op. Sticky: reopening (via ` + "`bacio issue state`" + `)
+does NOT auto-unarchive. Use ` + "`bacio issue unarchive`" + ` to undo.`,
+		Args: cobra.RangeArgs(0, 1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runIssueArchiveVerb(cmd, args, rawInput, true)
+		},
+	}
+	addInputFlag(cmd, &rawInput)
+	return cmd
+}
+
+func issueUnarchiveCmd() *cobra.Command {
+	var rawInput string
+	cmd := &cobra.Command{
+		Use:   "unarchive [KEY]",
+		Short: "Unarchive an issue (BACI-68) — clears archived_at",
+		Args:  cobra.RangeArgs(0, 1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runIssueArchiveVerb(cmd, args, rawInput, false)
+		},
+	}
+	addInputFlag(cmd, &rawInput)
+	return cmd
+}
+
+// runIssueArchiveVerb is the shared mutation path for archive +
+// unarchive. The two cobra commands collapse to one runner because the
+// positional / --json shapes are identical — only the boolean varies.
+func runIssueArchiveVerb(cmd *cobra.Command, args []string, rawInput string, archive bool) error {
+	raw, err := parseJSONInput(cmd, args, rawInput)
+	if err != nil {
+		return err
+	}
+	var key string
+	if raw != nil {
+		if archive {
+			in, _, err := inputio.DecodeStrict[inputs.IssueArchiveInput](raw)
+			if err != nil {
+				return err
+			}
+			key = in.Key
+		} else {
+			in, _, err := inputio.DecodeStrict[inputs.IssueUnarchiveInput](raw)
+			if err != nil {
+				return err
+			}
+			key = in.Key
+		}
+		key = strings.TrimSpace(key)
+		if !strings.Contains(key, "-") {
+			return fmt.Errorf("issue key %q must be canonical (e.g. \"MINI-42\")", key)
+		}
+	} else {
+		if len(args) != 1 {
+			return fmt.Errorf("requires <KEY> positional or --json")
+		}
+		key = args[0]
+	}
+	c, err := openClient()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	repo, err := repoForIssueKey(c, key)
+	if err != nil {
+		return err
+	}
+	var updated *model.Issue
+	if archive {
+		updated, err = c.ArchiveIssue(context.Background(), repo, key, opts.dryRun)
+	} else {
+		updated, err = c.UnarchiveIssue(context.Background(), repo, key, opts.dryRun)
+	}
+	if err != nil {
+		return err
+	}
+	if opts.dryRun {
+		return emitDryRun(updated)
+	}
+	return emit(updated)
 }

@@ -75,6 +75,15 @@ func (f *fakeBoardClient) ListPromptTemplates(context.Context) ([]*store.PromptT
 	return nil, nil
 }
 
+// GetDisplayShowArchived (BACI-68) is a fixed-false stub —
+// BoardService.ListCards now consults the display.show_archived global
+// setting to decide whether to inflate the BoardCards list with
+// archived rows. The taken-flag tests don't care either way; default
+// false matches production behaviour.
+func (f *fakeBoardClient) GetDisplayShowArchived(context.Context) (bool, error) {
+	return false, nil
+}
+
 func TestListCardsTaken(t *testing.T) {
 	issues := []*model.Issue{
 		{Key: "TEST-1", State: model.StateTodo, Title: "held by an agent"},
