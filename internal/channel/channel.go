@@ -426,8 +426,12 @@ func askUserQuestionToolSchema() map[string]any {
 			"desktop / web window where the active issue context is right there, and the exchange " +
 			"is recorded in bacio's audit log. " +
 			"Input shape mirrors AskUserQuestion: a `questions` array with 1-4 items, each carrying " +
-			"`question` text, a short `header` tag (<=12 chars), 2-4 `options` (each {label, optional description}), " +
+			"`question` text, a short `header` tag (<=12 chars), 2-4 `options` (each {label, optional description, optional preview}), " +
 			"and an optional `multiSelect` boolean. " +
+			"`preview` on an option carries an ASCII mockup / code snippet / diagram the supervisor needs to see " +
+			"to compare options — when at least one option in a question has a preview, the modal switches to " +
+			"side-by-side mode showing the focused option's preview verbatim in monospace. Single-select only " +
+			"(`multiSelect: true` + previews is rejected). " +
 			"The tool returns once the user submits: {questions: [...], answers: {question: <label|labels>}}. " +
 			"If the user dismisses the question the tool errors with \"user dismissed the question\" — " +
 			"handle that the same as the built-in returning with no answer.",
@@ -465,6 +469,11 @@ func askUserQuestionToolSchema() map[string]any {
 									"properties": map[string]any{
 										"label":       map[string]any{"type": "string", "description": "The choice label shown to the user."},
 										"description": map[string]any{"type": "string", "description": "Optional fine-print under the label."},
+										"preview": map[string]any{
+											"type":        "string",
+											"description": "Optional preview content (ASCII mockup, code snippet, diagram) rendered in monospace side-by-side with the option list. Multi-line allowed. Use for concrete artefacts the supervisor needs to compare. Single-select only (rejected on multiSelect questions).",
+											"maxLength":   4096,
+										},
 									},
 									"required": []string{"label"},
 								},

@@ -179,45 +179,35 @@ export default function QuestionModal({ questionId, onClose }) {
           }}
           className="mk-question-form"
         >
-          {items.map((item) => (
-            <fieldset key={item.question} className="mk-question-fieldset">
-              <legend className="mk-question-legend">
-                {item.header && (
-                  <span className="mk-pill mk-question-header">{item.header}</span>
-                )}{' '}
-                {item.question}
-              </legend>
-              {item.options.map((opt) => {
-                const inputId = `q-${item.question}-${opt.label}`;
-                if (item.multiSelect) {
-                  const arr = Array.isArray(answers[item.question])
-                    ? answers[item.question]
-                    : [];
-                  return (
-                    <label key={opt.label} className="mk-question-option" htmlFor={inputId}>
-                      <input
-                        id={inputId}
-                        type="checkbox"
-                        checked={arr.includes(opt.label)}
-                        onChange={(ev) =>
-                          toggleMultiAnswer(item.question, opt.label, ev.target.checked)
-                        }
-                      />
-                      <span className="mk-question-label">{opt.label}</span>
-                      {opt.description && (
-                        <span className="mk-question-desc">{opt.description}</span>
-                      )}
-                    </label>
-                  );
-                }
+          {items.map((item) => {
+            // BACI-53: previews live on single-select questions only.
+            // When at least one option carries one, switch the
+            // fieldset's option-list to a two-column layout — option
+            // list on the left, focused option's preview on the
+            // right. Mirrors native AskUserQuestion's behavior.
+            const hasPreview = !item.multiSelect &&
+              item.options.some((o) => o.preview && o.preview.length > 0);
+            const focused = item.options.find(
+              (o) => o.label === answers[item.question],
+            ) || item.options[0];
+            const focusedPreview = !otherSelected[item.question] && focused && focused.preview
+              ? focused.preview
+              : '';
+            const renderOption = (opt) => {
+              const inputId = `q-${item.question}-${opt.label}`;
+              if (item.multiSelect) {
+                const arr = Array.isArray(answers[item.question])
+                  ? answers[item.question]
+                  : [];
                 return (
                   <label key={opt.label} className="mk-question-option" htmlFor={inputId}>
                     <input
                       id={inputId}
-                      type="radio"
-                      name={`q-${item.question}`}
-                      checked={answers[item.question] === opt.label}
-                      onChange={() => pickSingleAnswer(item.question, opt.label)}
+                      type="checkbox"
+                      checked={arr.includes(opt.label)}
+                      onChange={(ev) =>
+                        toggleMultiAnswer(item.question, opt.label, ev.target.checked)
+                      }
                     />
                     <span className="mk-question-label">{opt.label}</span>
                     {opt.description && (
@@ -225,41 +215,92 @@ export default function QuestionModal({ questionId, onClose }) {
                     )}
                   </label>
                 );
-              })}
-              {/* "Other..." affordance per question. For single-select it
-                  shares the radio group with the labeled options (clicking
-                  it clears the label answer); for multi-select it's an
-                  independent checkbox that appends its typed text to the
-                  answer array. The textbox is revealed when picked. */}
-              <label className="mk-question-option" htmlFor={`q-${item.question}-other`}>
-                <input
-                  id={`q-${item.question}-other`}
-                  type={item.multiSelect ? 'checkbox' : 'radio'}
-                  name={`q-${item.question}`}
-                  checked={!!otherSelected[item.question]}
-                  onChange={(ev) => {
-                    if (ev.target.checked) {
-                      pickOther(item.question, !!item.multiSelect);
-                    } else {
-                      unpickOther(item.question);
-                    }
-                  }}
-                />
-                <span className="mk-question-label">Other…</span>
-                <span className="mk-question-desc">Type a custom response.</span>
-              </label>
-              {otherSelected[item.question] && (
-                <input
-                  type="text"
-                  className="mk-question-other-input"
-                  value={otherText[item.question] || ''}
-                  onChange={(ev) => setOtherTextFor(item.question, ev.target.value)}
-                  placeholder={`Your answer to "${item.header || item.question}"`}
-                  autoFocus
-                />
-              )}
+              }
+              return (
+                <label key={opt.label} className="mk-question-option" htmlFor={inputId}>
+                  <input
+                    id={inputId}
+                    type="radio"
+                    name={`q-${item.question}`}
+                    checked={answers[item.question] === opt.label}
+                    onChange={() => pickSingleAnswer(item.question, opt.label)}
+                  />
+                  <span className="mk-question-label">{opt.label}</span>
+                  {opt.description && (
+                    <span className="mk-question-desc">{opt.description}</span>
+                  )}
+                </label>
+              );
+            };
+            return (
+            <fieldset
+              key={item.question}
+              className={`mk-question-fieldset ${hasPreview ? 'mk-question-fieldset-preview' : ''}`}
+            >
+              <legend className="mk-question-legend">
+                {item.header && (
+                  <span className="mk-pill mk-question-header">{item.header}</span>
+                )}{' '}
+                {item.question}
+              </legend>
+              {(() => {
+                // "Other..." affordance + textbox. Single-select shares
+                // the radio group; multi-select is an independent
+                // checkbox. The textbox is revealed when picked.
+                const otherBlock = (
+                  <>
+                    <label className="mk-question-option" htmlFor={`q-${item.question}-other`}>
+                      <input
+                        id={`q-${item.question}-other`}
+                        type={item.multiSelect ? 'checkbox' : 'radio'}
+                        name={`q-${item.question}`}
+                        checked={!!otherSelected[item.question]}
+                        onChange={(ev) => {
+                          if (ev.target.checked) {
+                            pickOther(item.question, !!item.multiSelect);
+                          } else {
+                            unpickOther(item.question);
+                          }
+                        }}
+                      />
+                      <span className="mk-question-label">Other…</span>
+                      <span className="mk-question-desc">Type a custom response.</span>
+                    </label>
+                    {otherSelected[item.question] && (
+                      <input
+                        type="text"
+                        className="mk-question-other-input"
+                        value={otherText[item.question] || ''}
+                        onChange={(ev) => setOtherTextFor(item.question, ev.target.value)}
+                        placeholder={`Your answer to "${item.header || item.question}"`}
+                        autoFocus
+                      />
+                    )}
+                  </>
+                );
+                if (hasPreview) {
+                  return (
+                    <div className="mk-question-with-preview">
+                      <div className="mk-question-option-list">
+                        {item.options.map(renderOption)}
+                        {otherBlock}
+                      </div>
+                      <pre className="mk-question-preview" aria-label="Option preview">
+                        {focusedPreview || '(no preview for this option)'}
+                      </pre>
+                    </div>
+                  );
+                }
+                return (
+                  <>
+                    {item.options.map(renderOption)}
+                    {otherBlock}
+                  </>
+                );
+              })()}
             </fieldset>
-          ))}
+            );
+          })}
           <div className="mk-modal-actions">
             <Modal.Close asChild>
               <button type="button" className="mk-btn">

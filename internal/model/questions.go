@@ -106,10 +106,15 @@ type QuestionItem struct {
 }
 
 // QuestionOption is one choice on a question. Description is the
-// optional fine-print rendered under the label.
+// optional fine-print rendered under the label. Preview is the
+// optional monospace block (ASCII mockup, code snippet, diagram)
+// rendered side-by-side with the option list when at least one
+// option carries one — mirrors native AskUserQuestion's preview
+// affordance. Preview is single-select only (native constraint).
 type QuestionOption struct {
 	Label       string `json:"label"`
 	Description string `json:"description,omitempty"`
+	Preview     string `json:"preview,omitempty"`
 }
 
 // QuestionAnswers maps question text -> answer. For a single-select
@@ -136,6 +141,12 @@ const (
 	// type when they don't pick a built-in option. Single-line by
 	// convention — the modal renders a text input, not a textarea.
 	MaxOtherAnswerLen = 1024
+	// MaxQuestionPreviewLen caps the size of an option's preview
+	// content. Generous so an agent can paste ASCII layouts /
+	// 20-line code snippets, but tight enough that a runaway dump
+	// fails loud at validation time. Multi-line is allowed; control
+	// characters other than \t / \n / \r are not.
+	MaxQuestionPreviewLen = 4096
 )
 
 // ValidateQuestionPayload runs the boundary check on an
@@ -191,6 +202,18 @@ func validateQuestionItem(idx int, q QuestionItem) error {
 				return fmt.Errorf("question %d option %d: %w", idx, j, err)
 			}
 		}
+		if opt.Preview != "" {
+			// Mirror native AskUserQuestion: previews only on
+			// single-select questions. Side-by-side preview + checkbox
+			// list doesn't read cleanly, and native flat-out rejects
+			// the combination — match that contract.
+			if q.MultiSelect {
+				return fmt.Errorf("question %d option %d: preview is not allowed on multi-select questions", idx, j)
+			}
+			if err := validateAskMultilineString(opt.Preview, "option preview", MaxQuestionPreviewLen); err != nil {
+				return fmt.Errorf("question %d option %d: %w", idx, j, err)
+			}
+		}
 		if seen[opt.Label] {
 			return fmt.Errorf("question %d: duplicate option label %q", idx, opt.Label)
 		}
@@ -227,6 +250,29 @@ func validateAskString(s, field string, maxLen int, required bool) error {
 // format treats them as single-line too.
 func isDisallowedAskControl(r rune) bool {
 	return (r >= 0x00 && r <= 0x1F) || r == 0x7F
+}
+
+// validateAskMultilineString is the preview-friendly variant of
+// validateAskString: same UTF-8 + length + C0/DEL rejection, but
+// \t (0x09), \n (0x0A), and \r (0x0D) are explicitly allowed so
+// preview content can carry the layout the agent intends to show.
+// Always optional (no required path).
+func validateAskMultilineString(s, field string, maxLen int) error {
+	if !utf8.ValidString(s) {
+		return fmt.Errorf("%s is not valid UTF-8", field)
+	}
+	if len(s) > maxLen {
+		return fmt.Errorf("%s too long: %d chars, max %d", field, len(s), maxLen)
+	}
+	for _, r := range s {
+		if r == '\t' || r == '\n' || r == '\r' {
+			continue
+		}
+		if isDisallowedAskControl(r) {
+			return fmt.Errorf("%s contains a disallowed control character (U+%04X)", field, r)
+		}
+	}
+	return nil
 }
 
 // ValidateQuestionAnswers checks an answer map against the stored

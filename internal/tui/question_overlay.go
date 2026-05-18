@@ -236,6 +236,23 @@ func (q *questionOverlay) view(width, height int) string {
 				rows = append(rows, baseRow.Render(line))
 			}
 		}
+
+		// BACI-53: if the focused option carries a preview, render it
+		// as a bordered monospace block beneath the option list. The
+		// TUI stacks rather than going side-by-side (limited card
+		// width); native renders side-by-side, but the supervisor
+		// still gets the same content keyed off the cursor.
+		if q.option < len(item.Options) {
+			if pv := strings.TrimRight(item.Options[q.option].Preview, "\n"); pv != "" {
+				rows = append(rows, "",
+					mutedStyle.Render("preview · "+item.Options[q.option].Label))
+				previewBox := lipgloss.NewStyle().
+					Border(colBorder).BorderForeground(lipgloss.Color("240")).
+					Padding(0, 1).Width(innerWidth - 2).
+					Render(pv)
+				rows = append(rows, previewBox)
+			}
+		}
 	}
 
 	help := "j/k move · space toggle · tab next q · enter submit · d dismiss · esc close"

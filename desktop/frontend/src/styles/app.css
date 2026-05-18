@@ -400,6 +400,46 @@ body { margin: 0; }
   outline: none;
   border-color: var(--border-focus, var(--border-2));
 }
+
+/* Preview side-by-side layout. When any option in a single-select
+   question carries a `preview` field, the fieldset switches to a
+   two-column flex container: option list on the left, focused
+   option's preview rendered in monospace on the right. Mirrors
+   native AskUserQuestion's behavior. */
+.mk-question-with-preview {
+  display: flex; gap: 14px;
+  align-items: stretch;
+  margin-top: 4px;
+}
+.mk-question-with-preview .mk-question-option-list {
+  flex: 0 0 240px;
+  display: flex; flex-direction: column;
+}
+.mk-question-preview {
+  flex: 1 1 auto; min-width: 0;
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  font-family: var(--font-mono); font-size: 12px;
+  color: var(--fg-1); line-height: 1.45;
+  white-space: pre;
+  overflow: auto;
+  max-height: 360px;
+}
+
+/* When any fieldset has previews, widen the whole modal so the
+   side-by-side comparison has room to breathe. Stacks the option
+   list + preview in the narrower mobile-ish case. */
+.mk-modal:has(.mk-question-fieldset-preview) {
+  width: min(820px, 95vw);
+}
+@media (max-width: 640px) {
+  .mk-question-with-preview { flex-direction: column; }
+  .mk-question-with-preview .mk-question-option-list { flex: 0 0 auto; }
+  .mk-question-preview { max-height: 200px; }
+}
 .mk-card-tasks { color: var(--fg-3); white-space: nowrap; }
 
 /* ---------- Tooltip (Radix portal) ---------- */

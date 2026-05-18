@@ -738,12 +738,25 @@ see what was asked / how it was answered.
 
 **Input shape.** Mirrors AskUserQuestion verbatim — 1-4 questions,
 each with `question` text, `header` short tag (≤12 chars), 2-4
-`options` (each `{label, optional description}`), and an optional
-`multiSelect` boolean. The tool parks the JSON-RPC reply until the
-user submits, then returns `{questions, answers}` (single-select
-values are strings, multi-select are `[]string`). On dismissal the
-tool returns an error — handle it the same as `AskUserQuestion`
-returning with no answer.
+`options` (each `{label, optional description, optional preview}`),
+and an optional `multiSelect` boolean. The tool parks the JSON-RPC
+reply until the user submits, then returns `{questions, answers}`
+(single-select values are strings, multi-select are `[]string`).
+On dismissal the tool returns an error — handle it the same as
+`AskUserQuestion` returning with no answer.
+
+**Previews on options (single-select only).** Each option may carry
+a `preview` field — a multi-line string capped at 4096 chars,
+intended for ASCII mockups, code snippets, diagrams, or
+configuration examples the supervisor needs to compare. When any
+option in a question has a preview, the modal switches to
+side-by-side mode: option list on the left, focused option's
+preview rendered in monospace on the right. Same behavior as
+native AskUserQuestion. Constraints: previews are rejected on
+multi-select questions; multi-line is fine (`\n` / `\t` / `\r`
+are allowed); other C0 controls are still rejected. Use previews
+when you'd otherwise be quoting the same artefact in every option's
+description.
 
 **Batching: prefer one call with all your questions, not a chain.**
 The `questions` array is the lever here — pack every clarification
