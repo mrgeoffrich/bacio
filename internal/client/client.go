@@ -233,6 +233,47 @@ type Client interface {
 	// Local-only.
 	LinkSessionChannel(ctx context.Context, sessionID string, claudePID int64, host string) error
 
+	// ----- Agent questions (BACI-53; ask_user_question MCP tool) -----
+	// Questions are the agent->user counterpart to dispatches: a
+	// clarification an agent asked through the bacio channel's
+	// ask_user_question MCP tool, parked until the user answers (or
+	// dismisses) it through the TUI / desktop / web modal. Local-only
+	// in v1; the REST routes (Phase 4) cover the desktop and web
+	// surfaces.
+	//
+	// AddSessionQuestion is the channel's entry point — it inserts a new
+	// open row, mints the request_uuid the channel uses to correlate
+	// the parked JSON-RPC reply with the answered row on its next poll
+	// tick, and emits a question.ask audit row.
+	AddSessionQuestion(ctx context.Context, in AddSessionQuestionInput) (*model.SessionQuestion, error)
+	// ListSessionQuestions returns the questions for one session,
+	// optionally filtered by state. An empty states list returns every
+	// state.
+	ListSessionQuestions(ctx context.Context, sessionID string, states []model.QuestionState) ([]*model.SessionQuestion, error)
+	// ListOpenQuestionsBySessions returns a session_pk -> []*SessionQuestion
+	// map for the given session ids in one query — used by the desktop
+	// and TUI agent views to hydrate open questions for every live
+	// session in one trip.
+	ListOpenQuestionsBySessions(ctx context.Context, sessionIDs []string) (map[int64][]*model.SessionQuestion, error)
+	// GetSessionQuestion fetches one question by primary key.
+	GetSessionQuestion(ctx context.Context, id int64) (*model.SessionQuestion, error)
+	// AnswerSessionQuestion records the user's answer and flips the
+	// row to `answered`. Emits a question.answer audit row.
+	AnswerSessionQuestion(ctx context.Context, id int64, answers model.QuestionAnswers, dryRun bool) (*model.SessionQuestion, error)
+	// CancelSessionQuestion dismisses an open question — the agent
+	// receives a tool error on the next channel poll tick. Emits a
+	// question.cancel audit row.
+	CancelSessionQuestion(ctx context.Context, id int64, dryRun bool) (*model.SessionQuestion, error)
+	// AbandonOpenQuestionsForSession is the channel's startup sweep —
+	// any rows the previous channel process parked on are flipped to
+	// `abandoned`. No audit row (mechanical janitor work; matches the
+	// existing dispatch-drain precedent in internal/cli/hook.go).
+	AbandonOpenQuestionsForSession(ctx context.Context, sessionID string) (int, error)
+	// DrainSettledQuestionsForSession returns the answered + cancelled
+	// rows for the channel's poll tick to re-correlate against its
+	// in-memory parked-reply map. No audit row.
+	DrainSettledQuestionsForSession(ctx context.Context, sessionID string) ([]*model.SessionQuestion, error)
+
 	// ----- Agent dispatch queue (local-only in v1) -----
 	// Dispatches are supervisor->agent work items. CreateDispatch
 	// enqueues one; InboxDispatches drains everything aimed at a
@@ -443,4 +484,18 @@ type DocCreateInput struct {
 	Type       model.DocumentType
 	Body       string
 	SourcePath string
+}
+
+// AddSessionQuestionInput is the validated tuple AddSessionQuestion
+// consumes. SessionID is the external session id (the channel
+// resolves the agent session FK from it). IssueKey is the issue key
+// of the session's open claim at ask time, when there was one.
+// Payload is the validated AskUserQuestion-shaped questions array.
+// AskedBy is the persistent agent identity slug — recorded against
+// the row's `asked_by` column.
+type AddSessionQuestionInput struct {
+	SessionID string
+	IssueKey  string
+	Payload   model.QuestionPayload
+	AskedBy   string
 }

@@ -444,6 +444,57 @@ CREATE TABLE IF NOT EXISTS agent_session_todos (
 
 CREATE INDEX IF NOT EXISTS idx_agent_session_todos_session
     ON agent_session_todos(session_pk);
+
+-- agent_session_questions backs the BACI-53 ask_user_question MCP tool:
+-- a clarification an agent asked the user via the bacio channel,
+-- written by the channel, surfaced by the TUI/desktop/web, and answered
+-- or dismissed by the user. The channel parks the MCP reply in memory
+-- (request_uuid -> JSON-RPC id) and re-correlates via a poll tick that
+-- reads the row's state back. Cascaded out by the agent_sessions
+-- ON DELETE chain — no separate retention pass.
+--
+-- request_uuid is the channel-minted UUIDv7 used for in-memory
+-- correlation between the parked JSON-RPC reply and the answered row.
+-- issue_key is optional; when present it's the key of the issue the
+-- session's open claim was on at ask time (so per-issue surfaces can
+-- light up alongside the Agents-view modal).
+--
+-- payload_json holds the AskUserQuestion-shaped questions array; the
+-- shape is validated at the store boundary by ValidateQuestionPayload
+-- so a hallucinated payload can never reach the table. answers_json
+-- mirrors the AskUserQuestion result shape: a map keyed by question
+-- text, with single-select values as strings and multi-select values
+-- as []string. NULL while open.
+--
+-- state lifecycle:
+--   open      — the question is in the user's queue. The channel is
+--               parked on this row's request_uuid.
+--   answered  — the user submitted answers. The channel's next tick
+--               will deliver them back to the agent.
+--   cancelled — the user dismissed the question. The channel delivers
+--               an MCP tool error to the agent.
+--   abandoned — the channel restarted (or a fresh channel inherits the
+--               session). The parked reply is lost. The agent already
+--               restarted with the channel, so no recovery is possible.
+CREATE TABLE IF NOT EXISTS agent_session_questions (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_pk    INTEGER NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+    request_uuid  TEXT    NOT NULL UNIQUE,
+    issue_key     TEXT    NOT NULL DEFAULT '',
+    payload_json  TEXT    NOT NULL,
+    answers_json  TEXT,
+    state         TEXT    NOT NULL DEFAULT 'open'
+                    CHECK (state IN ('open','answered','cancelled','abandoned')),
+    asked_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    answered_at   DATETIME,
+    asked_by      TEXT    NOT NULL,
+    answered_by   TEXT    NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_asq_session_state
+    ON agent_session_questions(session_pk, state);
+CREATE INDEX IF NOT EXISTS idx_asq_state
+    ON agent_session_questions(state);
 -- The (session_pk, task_id) partial unique index lives in
 -- internal/store/store.go::migrate, not here. schema.sql runs before
 -- migrate(), so a DB upgrading from the pre-BACI-60 table doesn't have

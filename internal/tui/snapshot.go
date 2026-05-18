@@ -34,7 +34,7 @@ func Snapshot(s *store.Store, repo *model.Repo, opts SnapshotOpts) error {
 	}
 	features := newFeaturesView(s, repo)
 	docs := newDocsView(s, repo)
-	agents := newAgentsView(s, repo)
+	agents := newAgentsView(s, repo, "snapshot")
 	hist := newHistoryView(s, repo)
 	settings := newSettingsView(s, repo)
 

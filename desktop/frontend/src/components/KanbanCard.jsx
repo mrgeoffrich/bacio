@@ -3,7 +3,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import Icon from './Icon.jsx';
 import Tooltip from './Tooltip.jsx';
 
-function KanbanCard({ card, promptConfig, isDragging, onDragStart, onDragEnd, onOpen, onDispatch, onCancelWaiting }) {
+function KanbanCard({ card, promptConfig, isDragging, onDragStart, onDragEnd, onOpen, onDispatch, onCancelWaiting, onOpenQuestion }) {
   // The prompts valid to dispatch from this card's current state — the
   // state-gate config is global (App-owned), filtered per-card here.
   const validPrompts = (promptConfig || []).filter(
@@ -31,6 +31,12 @@ function KanbanCard({ card, promptConfig, isDragging, onDragStart, onDragEnd, on
   const todosDone = taken ? (card.todosDone || 0) : 0;
   const hasMeta = !!activeVerb || todosTotal > 0;
 
+  // BACI-53 open ask_user_question rows for this issue. The first
+  // one drives the pill copy (header is the agent's ≤12-char tag);
+  // clicking the pill auto-pops the modal for that row id.
+  const openQuestions = card.openQuestions || [];
+  const firstQuestion = openQuestions[0];
+
   return (
     <article
       className={`mk-card ${isDragging ? 'is-dragging' : ''} ${card.claude ? 'is-claude' : ''} ${taken ? 'is-taken' : ''} ${waiting ? 'is-waiting' : ''}`}
@@ -47,6 +53,27 @@ function KanbanCard({ card, promptConfig, isDragging, onDragStart, onDragEnd, on
         <div className="mk-tag-row">
           {card.tags.map(t => <span key={t} className="mk-tag">{t}</span>)}
         </div>
+      )}
+      {firstQuestion && (
+        <Tooltip label={firstQuestion.firstQuestion || 'User input needed'}>
+          <button
+            type="button"
+            className="mk-card-question-pill"
+            aria-label="Answer agent question"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (onOpenQuestion) onOpenQuestion(firstQuestion.id);
+            }}
+          >
+            <span className="mk-card-question-pill-tag">
+              ? {openQuestions.length > 1 ? `${openQuestions.length}` : ''}
+              {firstQuestion.header ? ` ${firstQuestion.header}` : ''}
+            </span>
+            <span className="mk-card-question-pill-text">
+              {firstQuestion.firstQuestion || 'Answer'}
+            </span>
+          </button>
+        </Tooltip>
       )}
       {hasFooter && (
         <footer className="mk-card-foot">

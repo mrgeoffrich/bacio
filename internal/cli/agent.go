@@ -58,6 +58,7 @@ the issue's state; use ` + "`bacio issue state`" + ` for that.`,
 		agentCancelCmd(),
 		agentListCmd(),
 		agentShowCmd(),
+		agentQuestionsCmd(),
 	)
 	return cmd
 }

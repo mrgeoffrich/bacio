@@ -76,6 +76,11 @@ var Registry = []Entry{
 	{"agent.cancel", "Cancel a pending or delivered dispatch and clear the targeted issue's waiting_for_claim flag.", typeOf[inputs.AgentCancelInput](), inputs.ExampleAgentCancel},
 	{"issue.dispatch", "State-gated auto-pick dispatch — re-check the stage's state-gate against the issue's current state, then pick the most-recently-active free agent automatically.", typeOf[inputs.IssueDispatchInput](), inputs.ExampleIssueDispatch},
 
+	{"agent.questions.list", "List ask_user_question rows for a session (defaults to open state).", typeOf[inputs.AgentQuestionsListInput](), inputs.ExampleAgentQuestionsList},
+	{"agent.questions.show", "Show one ask_user_question row by id.", typeOf[inputs.AgentQuestionsShowInput](), inputs.ExampleAgentQuestionsShow},
+	{"agent.questions.answer", "Answer an open ask_user_question — agent receives the answer as the tool result.", typeOf[inputs.AgentQuestionsAnswerInput](), inputs.ExampleAgentQuestionsAnswer},
+	{"agent.questions.cancel", "Cancel (dismiss) an open ask_user_question — agent receives a tool error.", typeOf[inputs.AgentQuestionsCancelInput](), inputs.ExampleAgentQuestionsCancel},
+
 	{"settings.template.set", "Set a dispatch prompt template's body.", typeOf[inputs.SettingsTemplateSetInput](), inputs.ExampleSettingsTemplateSet},
 	{"settings.template.reset", "Reset a built-in dispatch prompt template's body to its embedded default.", typeOf[inputs.SettingsTemplateResetInput](), inputs.ExampleSettingsTemplateReset},
 	{"settings.template.states.set", "Set the issue states a dispatch prompt template is valid to run from.", typeOf[inputs.SettingsTemplateStatesSetInput](), inputs.ExampleSettingsTemplateStatesSet},

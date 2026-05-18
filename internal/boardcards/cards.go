@@ -21,6 +21,7 @@ import (
 	"context"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/model"
@@ -74,6 +75,29 @@ type BoardCard struct {
 	// TodoList. The UI hides the Tasks counter when TodosTotal == 0.
 	TodosDone  int `json:"todosDone"`
 	TodosTotal int `json:"todosTotal"`
+	// OpenQuestions are the BACI-53 ask_user_question rows posed by
+	// the winning claim's session against THIS issue. Drives the
+	// "? N — <header>" pill on the kanban card and the click-to-open
+	// answer modal. Empty when the issue isn't taken or the agent
+	// hasn't asked anything yet. The full QuestionPayload is fetched
+	// on demand via /agents/questions/{id} when the user opens the
+	// modal — the bare ID + a short summary is enough to render the
+	// badge.
+	OpenQuestions []BoardCardQuestion `json:"openQuestions,omitempty"`
+}
+
+// BoardCardQuestion is one open ask_user_question row surfaced on
+// the issue's kanban card. Header is the user-facing tag (≤12 chars,
+// the same field AskUserQuestion uses); FirstQuestion is the full
+// text of the first question in the payload (intended as the brief
+// detail next to the pill); Count is len(payload.questions) so a
+// multi-question modal can advertise "answer 3 questions".
+type BoardCardQuestion struct {
+	ID            int64     `json:"id"`
+	Header        string    `json:"header"`
+	FirstQuestion string    `json:"firstQuestion"`
+	Count         int       `json:"count"`
+	AskedAt       time.Time `json:"askedAt"`
 }
 
 // Assemble returns one BoardCard per issue in scope. When repo is
@@ -131,6 +155,7 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo) ([]BoardCa
 			ActiveVerb:      e.verb,
 			TodosDone:       e.todosDone,
 			TodosTotal:      e.todosTotal,
+			OpenQuestions:   e.questions,
 		})
 	}
 	return cards, nil
@@ -148,6 +173,10 @@ type cardEnrichment struct {
 	verb       string
 	todosDone  int
 	todosTotal int
+	// questions are the winning-claim session's open ask_user_question
+	// rows whose issue_key matches this card's issue. Empty when the
+	// agent isn't blocked on anything for this issue.
+	questions []BoardCardQuestion
 }
 
 // enrichmentByIssueKey resolves the per-issue agent-derived fields:
@@ -225,6 +254,13 @@ func enrichmentByIssueKey(
 	if err != nil {
 		return nil, err
 	}
+	// Bulk-read open ask_user_question rows for the same winning
+	// sessions so each card can surface a "? N — <header>" pill when
+	// the agent posed a question against this card's issue.
+	questionsByPK, err := c.ListOpenQuestionsBySessions(ctx, sessionIDList)
+	if err != nil {
+		return nil, err
+	}
 
 	// Dispatches are scoped per repo — fan-out over the in-scope
 	// repos and concat. RepoDispatches is already newest-first.
@@ -269,6 +305,28 @@ func enrichmentByIssueKey(
 				if v, ok := verbBySlug[string(mode)]; ok {
 					e.verb = v
 				}
+			}
+			// Filter the session's open questions down to those whose
+			// issue_key matches this card's issue. A session juggling
+			// two issues should only light up each card with its own
+			// open questions.
+			for _, q := range questionsByPK[sess.ID] {
+				if q.IssueKey != issueKey {
+					continue
+				}
+				header := ""
+				first := ""
+				if len(q.Payload.Questions) > 0 {
+					header = q.Payload.Questions[0].Header
+					first = q.Payload.Questions[0].Question
+				}
+				e.questions = append(e.questions, BoardCardQuestion{
+					ID:            q.ID,
+					Header:        header,
+					FirstQuestion: first,
+					Count:         len(q.Payload.Questions),
+					AskedAt:       q.AskedAt,
+				})
 			}
 		}
 		enrich[issueKey] = e

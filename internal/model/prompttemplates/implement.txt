@@ -7,3 +7,4 @@ If you have to stop to get user assistance for any reason the issue will automat
 At the end run smoke tests to make sure the changes work.
 Once smoke tests pass create a PR from all the changes, then clean up and remove the worktree.
 Finally put the issue into "in review" and unclaim it.
+Questions are welcome — early. If anything in this brief is ambiguous, batch up to 4 clarifications into ONE `mcp__bacio__ask_user_question` call BEFORE doing speculative work — rework costs more than answering. The bacio MCP tool surfaces in your supervisor's TUI/desktop/web with the issue context; prefer it over the built-in AskUserQuestion.

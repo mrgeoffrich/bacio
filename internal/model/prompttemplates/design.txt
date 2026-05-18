@@ -281,3 +281,4 @@ bacio comment add {{issue_id}} --as <your-name> --body-file /tmp/design-comment.
 - **Never overwrite an existing design doc silently.** If a doc by the same name (or a prior design comment / `docs-designs-*` attachment) already exists on the ticket, stop and ask.
 - **Never use `git add .` for the worktree.** This run produces no PR — the artefacts ship as bacio docs. If you do commit anything in the worktree (you generally don't need to), stage the specific design files only so a stale lockfile change can't sneak in.
 - **Never produce an ExitPlanMode block.** The design doc *is* the plan.
+Questions are welcome — early. If anything in this brief is ambiguous, batch up to 4 clarifications into ONE `mcp__bacio__ask_user_question` call BEFORE doing speculative work — rework costs more than answering. The bacio MCP tool surfaces in your supervisor's TUI/desktop/web with the issue context; prefer it over the built-in AskUserQuestion.

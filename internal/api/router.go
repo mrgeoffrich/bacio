@@ -108,6 +108,15 @@ func newRouter(d deps) http.Handler {
 	// BACI-45: read the session's TodoWrite mirror. Writes happen via the
 	// post-tool-use hook only — no POST surface here.
 	mux.HandleFunc("GET /agents/sessions/{session_id}/todos", d.handleAgentSessionTodos)
+	// BACI-53 ask_user_question rows. Same shape rules as /todos:
+	// session-scoped GETs, plus per-question answer/cancel mutations
+	// addressable by primary key. The literal "open" segment is more
+	// specific than the bare list endpoint, so ServeMux disambiguates.
+	mux.HandleFunc("GET /agents/sessions/{session_id}/questions", d.handleSessionQuestionsList)
+	mux.HandleFunc("GET /agents/sessions/{session_id}/questions/open", d.handleSessionQuestionsOpen)
+	mux.HandleFunc("GET /agents/questions/{id}", d.handleQuestionShow)
+	mux.HandleFunc("POST /agents/questions/{id}/answer", d.handleQuestionAnswer)
+	mux.HandleFunc("POST /agents/questions/{id}/cancel", d.handleQuestionCancel)
 	mux.HandleFunc("POST /agents/dispatches/{id}/ack", d.handleAgentDispatchAck)
 	mux.HandleFunc("POST /agents/dispatches/{id}/cancel", d.handleAgentDispatchCancel)
 	mux.HandleFunc("GET /agents/claims/open", d.handleAgentClaimsOpen)

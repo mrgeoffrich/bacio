@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import Icon from './Icon.jsx';
+import QuestionModal from './QuestionModal.jsx';
 
 // relTime renders a coarse "time since" for the last-seen line.
 function relTime(iso) {
@@ -32,6 +33,10 @@ function todoGlyph(status) {
 // drawer, not from here.
 export default function AgentsView({ agents, onRefresh }) {
   const [expanded, setExpanded] = useState(null);
+  // BACI-53 ask_user_question modal state. activeQuestionId is the
+  // pending row's primary key (null when no modal is open); when set
+  // the modal fetches the full payload + renders the answer form.
+  const [activeQuestionId, setActiveQuestionId] = useState(null);
 
   return (
     <div className="mk-agents-view">
@@ -50,6 +55,7 @@ export default function AgentsView({ agents, onRefresh }) {
         {agents.map((a) => {
           const name = a.agentName || a.sessionId.slice(0, 12);
           const isOpen = expanded === a.sessionId;
+          const openQuestions = a.openQuestions || [];
           return (
             <div key={a.sessionId} className={`mk-agent-card ${isOpen ? 'is-open' : ''}`}>
               <button
@@ -70,6 +76,22 @@ export default function AgentsView({ agents, onRefresh }) {
                 {a.todosTotal > 0 && (
                   <span className="mk-pill mk-todos-badge">
                     todos {a.todosDone}/{a.todosTotal}
+                  </span>
+                )}
+                {openQuestions.length > 0 && (
+                  <span
+                    className="mk-pill mk-question-badge"
+                    role="button"
+                    title="User input needed — click to answer"
+                    onClick={(ev) => {
+                      ev.stopPropagation();
+                      // Auto-pop the first open question. The modal's
+                      // "Next" path (when there are multiple) walks
+                      // through them in order.
+                      setActiveQuestionId(openQuestions[0].id);
+                    }}
+                  >
+                    ? {openQuestions.length}
                   </span>
                 )}
                 <span className="mk-agent-meta">
@@ -96,6 +118,26 @@ export default function AgentsView({ agents, onRefresh }) {
                         {c.prompt && <span className="mk-agent-claim-prompt">{c.prompt}</span>}
                       </div>
                     ))
+                  )}
+
+                  {openQuestions.length > 0 && (
+                    <>
+                      <div className="mk-agent-detail-label">User input needed</div>
+                      {openQuestions.map((q) => (
+                        <div key={q.id} className="mk-agent-question-row">
+                          <button
+                            className="mk-btn mk-btn-small"
+                            onClick={() => setActiveQuestionId(q.id)}
+                          >
+                            Answer #{q.id} {q.header ? `(${q.header})` : ''}
+                          </button>
+                          {q.issueKey && (
+                            <span className="mk-mono mk-meta">{q.issueKey}</span>
+                          )}
+                          <span className="mk-meta">{relTime(q.askedAt)}</span>
+                        </div>
+                      ))}
+                    </>
                   )}
 
                   <div className="mk-agent-detail-label">
@@ -136,6 +178,14 @@ export default function AgentsView({ agents, onRefresh }) {
           );
         })}
       </div>
+
+      <QuestionModal
+        questionId={activeQuestionId}
+        onClose={() => {
+          setActiveQuestionId(null);
+          onRefresh?.();
+        }}
+      />
     </div>
   );
 }

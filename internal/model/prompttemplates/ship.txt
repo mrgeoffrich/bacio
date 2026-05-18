@@ -4,3 +4,4 @@ Make sure main is up to date then create a worktree to work in.
 Ship {{issue_id}}: merge the PR an deal with any merge issues and then once its merged put the issue into the done status.
 Clean up and remove the worktree.
 Finally unclaim the issue.
+Questions are welcome — early. If anything in this brief is ambiguous, batch up to 4 clarifications into ONE `mcp__bacio__ask_user_question` call BEFORE doing speculative work — rework costs more than answering. The bacio MCP tool surfaces in your supervisor's TUI/desktop/web with the issue context; prefer it over the built-in AskUserQuestion.

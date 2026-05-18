@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
@@ -156,6 +157,13 @@ type boardView struct {
 
 	lastRefresh time.Time
 
+	// BACI-53: per-issue-key open ask_user_question rows, populated in
+	// reload() from the same OpenClaimsBySession scan that drives the
+	// `taken` map. Drives the `?N` glyph on the card meta line and
+	// gates the `?` keybind that opens the answer overlay.
+	openQuestions map[string][]*model.SessionQuestion
+	questionOlay  *questionOverlay
+
 	mdCache map[int]mdCacheEntry // see docsView for shape
 
 	// commentMD caches glamour-rendered comment bodies keyed by
@@ -204,6 +212,7 @@ func newBoardView(s *store.Store, repo *model.Repo, actor string) (*boardView, e
 		scroll:         map[model.State]int{},
 		detailVisible:  true,
 	}
+	b.questionOlay = newQuestionOverlay(client.NewLocalFromStore(s, actor))
 	if err := b.reload(); err != nil {
 		return nil, err
 	}
@@ -279,12 +288,37 @@ func (b *boardView) reload() error {
 		return err
 	}
 	taken := map[int64]bool{}
+	sessIDSet := map[string]bool{}
 	for _, claims := range openClaims {
 		for _, c := range claims {
 			taken[c.IssueID] = true
+			if c.SessionID != "" {
+				sessIDSet[c.SessionID] = true
+			}
 		}
 	}
 	b.takenIssues = taken
+	// BACI-53: bulk-read open ask_user_question rows for every
+	// claiming session and bucket by issue_key so the card render +
+	// `?` keybind can look up by the focused issue.
+	b.openQuestions = map[string][]*model.SessionQuestion{}
+	if len(sessIDSet) > 0 {
+		sessIDList := make([]string, 0, len(sessIDSet))
+		for id := range sessIDSet {
+			sessIDList = append(sessIDList, id)
+		}
+		byPK, qerr := b.store.ListOpenQuestionsBySessions(sessIDList)
+		if qerr == nil {
+			for _, qs := range byPK {
+				for _, q := range qs {
+					if q.IssueKey == "" {
+						continue
+					}
+					b.openQuestions[q.IssueKey] = append(b.openQuestions[q.IssueKey], q)
+				}
+			}
+		}
+	}
 	// Repo-wide set of issues with a queued-but-unclaimed dispatch — read
 	// straight off the issue rows (waiting_for_claim is a stored column,
 	// unlike the derived `taken` flag).
@@ -443,7 +477,8 @@ func (b *boardView) Status() string {
 }
 
 func (b *boardView) HasOverlay() bool {
-	return b.overlay || b.picker || b.featurePicker || b.dispatchPicker
+	return b.overlay || b.picker || b.featurePicker || b.dispatchPicker ||
+		(b.questionOlay != nil && b.questionOlay.open)
 }
 
 func (b *boardView) CloseOverlay() {
@@ -452,6 +487,9 @@ func (b *boardView) CloseOverlay() {
 	b.featurePicker = false
 	b.commentOverlay = false
 	b.dispatchPicker = false
+	if b.questionOlay != nil {
+		b.questionOlay.close()
+	}
 }
 
 func (b *boardView) Breadcrumb() string {
@@ -478,6 +516,8 @@ func (b *boardView) CapturesInput() bool { return false }
 
 func (b *boardView) Help() string {
 	switch {
+	case b.questionOlay != nil && b.questionOlay.open:
+		return "j/k move · space toggle · tab next q · enter submit · d dismiss · esc close"
 	case b.picker:
 		return "j/k move · space toggle · a all · n none · esc close"
 	case b.featurePicker:
@@ -495,7 +535,7 @@ func (b *boardView) Help() string {
 		}
 		return "tab next pane · j/k scroll · g/G top/bottom · esc close"
 	}
-	return "h/l cols · j/k cards · enter open · x send · X cancel waiting · c columns · f features · H hide col · d detail · r reload · q quit"
+	return "h/l cols · j/k cards · enter open · x send · X cancel · ? answer · c columns · f features · H hide col · d detail · r reload · q quit"
 }
 
 func (b *boardView) Update(msg tea.Msg) tea.Cmd {
@@ -536,9 +576,24 @@ func (b *boardView) Update(msg tea.Msg) tea.Cmd {
 		b.spinnerFrame = (b.spinnerFrame + 1) % len(spinnerFrames)
 		return spinnerTick()
 	}
+	// BACI-53: question overlay submit/cancel results land here.
+	if rmsg, ok := msg.(questionResultMsg); ok {
+		if b.questionOlay != nil {
+			b.questionOlay.handleResult(rmsg)
+			if !b.questionOlay.open {
+				if err := b.reload(); err != nil {
+					b.err = err
+				}
+			}
+		}
+		return nil
+	}
 	key, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return nil
+	}
+	if b.questionOlay != nil && b.questionOlay.open {
+		return b.questionOlay.update(key)
 	}
 	if b.picker {
 		b.updatePicker(key)
@@ -642,6 +697,16 @@ func (b *boardView) Update(msg tea.Msg) tea.Cmd {
 		b.hidden[st] = true
 		b.persistHidden()
 		b.clampCol()
+	case "?":
+		// BACI-53: open the answer overlay for the focused card's
+		// first open ask_user_question row. No-op when the card's
+		// claiming session hasn't asked anything.
+		if b.selected != nil && b.questionOlay != nil {
+			qs := b.openQuestions[b.selected.Key]
+			if len(qs) > 0 {
+				b.questionOlay.reset(qs[0])
+			}
+		}
 	}
 	b.refreshSelection()
 	return nil
@@ -794,6 +859,9 @@ func boardColWidths(width, n, focus int) []int {
 func (b *boardView) View(width, height int) string {
 	if width == 0 || height == 0 {
 		return ""
+	}
+	if b.questionOlay != nil && b.questionOlay.open {
+		return b.questionOlay.view(width, height)
 	}
 	if b.picker {
 		return b.viewPicker(width, height)
@@ -1057,7 +1125,16 @@ func (b *boardView) renderColumn(st model.State, focused bool, width, height int
 			}
 			continue
 		}
-		titleLines := wrapLinesAt(iss.Title, func(line int) int {
+		// BACI-53: prefix the title with "? " when this card's claiming
+		// session has an open ask_user_question row tied to this issue.
+		// Two-column prefix consumes title width but keeps card height
+		// fixed — the badge has to live inline since the layout is a
+		// 3-row budget per card.
+		titleText := iss.Title
+		if len(b.openQuestions[iss.Key]) > 0 {
+			titleText = "? " + titleText
+		}
+		titleLines := wrapLinesAt(titleText, func(line int) int {
 			if line == 0 {
 				return firstW
 			}

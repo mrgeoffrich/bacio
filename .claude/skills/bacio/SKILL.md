@@ -664,8 +664,11 @@ An agent picks dispatches up two ways:
   list` shows a `CHANNEL` column (`live` / `-`) and an `MCP` column with
   the binary version the agent's channel reports (with a `!stale` flag
   if it doesn't match the binary running the list command).
-  The channel exposes two MCP tools: `reply` (ack a dispatch) and
-  `register` (complete the session's registration). The SessionStart
+  The channel exposes three MCP tools: `reply` (ack a dispatch),
+  `register` (complete the session's registration), and
+  `ask_user_question` (BACI-53 — surface a multi-choice clarification
+  question to the user through bacio's UI; the call blocks until the
+  user answers or dismisses). The SessionStart
   hook now writes only a minimal stub — `bacio agent list` filters those
   out by default (use `--all` to see them); they're invisible until
   `register` enriches the row. On startup the channel itself queues a
@@ -716,6 +719,96 @@ orphaned (the target session ends before acking, or just nothing
 ever picks it up), cancel it with `bacio agent cancel <dispatch-id>`
 — it marks the dispatch cancelled and clears `waiting_for_claim` in
 the same transaction.
+
+### Questions — agent → user clarification (BACI-53)
+
+`ask_user_question` is the agent → user counterpart to dispatches:
+a multi-choice clarification an agent poses via the bacio channel's
+MCP tool. The user answers (or dismisses) through the TUI, desktop,
+or web modal. The exchange is recorded in `agent_session_questions`
+with an audit trail (`question.ask` / `question.answer` /
+`question.cancel`).
+
+**When to use it.** Whenever you'd reach for Claude Code's built-in
+`AskUserQuestion`, prefer `mcp__bacio__ask_user_question` if you're
+running under bacio (i.e. the channel is loaded and you've
+`register`-ed). The user sees the prompt where the active issue
+context is already in front of them, and a second reviewer can
+see what was asked / how it was answered.
+
+**Input shape.** Mirrors AskUserQuestion verbatim — 1-4 questions,
+each with `question` text, `header` short tag (≤12 chars), 2-4
+`options` (each `{label, optional description, optional preview}`),
+and an optional `multiSelect` boolean. The tool parks the JSON-RPC
+reply until the user submits, then returns `{questions, answers}`
+(single-select values are strings, multi-select are `[]string`).
+On dismissal the tool returns an error — handle it the same as
+`AskUserQuestion` returning with no answer.
+
+**Previews on options (single-select only).** Each option may carry
+a `preview` field — a multi-line string capped at 4096 chars,
+intended for ASCII mockups, code snippets, diagrams, or
+configuration examples the supervisor needs to compare. When any
+option in a question has a preview, the modal switches to
+side-by-side mode: option list on the left, focused option's
+preview rendered in monospace on the right. Same behavior as
+native AskUserQuestion. Constraints: previews are rejected on
+multi-select questions; multi-line is fine (`\n` / `\t` / `\r`
+are allowed); other C0 controls are still rejected. Use previews
+when you'd otherwise be quoting the same artefact in every option's
+description.
+
+**Batching: prefer one call with all your questions, not a chain.**
+The `questions` array is the lever here — pack every clarification
+you currently need into a single `ask_user_question` call (up to
+four). The user sees one modal with the full set, answers everything
+in one pass, and the agent gets all answers in one response. Firing
+sequential single-question calls when you already know the full
+set is a UX regression: the user pays the context-switch cost N
+times, the issue bounces in and out of `needs_action` N times, and
+the answer-to-next-question latency multiplies. Only fire a second
+call if the FIRST answer surfaces a follow-up you couldn't have
+predicted up front.
+
+**Side effects of opening a question.** As soon as the row lands,
+bacio auto-flips the linked issue from `in_progress` to
+`needs_action` (best-effort; if the issue isn't in_progress, nothing
+moves). When the user answers or cancels and no other open question
+for that issue remains, bacio flips it back to `in_progress`. So
+the kanban board's `needs_action` column doubles as the "agent is
+parked waiting on me" column, and you don't need to flip the state
+yourself before/after asking.
+
+**CLI verbs (headless / scripts):**
+
+```bash
+bacio agent questions list             # open questions for $CLAUDE_CODE_SESSION_ID
+bacio agent questions list --state answered --all-states
+bacio agent questions show <id>        # full payload + answer (if any)
+bacio agent questions answer --json '{"id":7,"answers":{"Which approach?":"Option A"}}'
+bacio agent questions cancel <id>      # dismiss; agent gets a tool error
+```
+
+Multi-select answers pass an array: `{"id":7,"answers":{"Pick tags":["ui","bug"]}}`.
+Schemas: `bacio schema show agent.questions.{list,show,answer,cancel}`.
+
+**REST routes (desktop / web modal driver):**
+
+```
+GET    /agents/sessions/{session_id}/questions[?state=open|answered|cancelled|abandoned|all]
+GET    /agents/sessions/{session_id}/questions/open
+GET    /agents/questions/{id}
+POST   /agents/questions/{id}/answer    { "answers": { ... } }
+POST   /agents/questions/{id}/cancel
+```
+
+All auth-gated; `X-Actor` lands in `answered_by`; `?dry_run=1` /
+`X-Dry-Run` project the post-write row without touching the store.
+
+**State lifecycle.** `open → answered | cancelled | abandoned`. The
+channel flips orphaned rows to `abandoned` at startup (a previous
+channel process owned the parked reply — the agent restarted with
+the channel, so no recovery is possible).
 
 ### Dispatch prompt templates
 
