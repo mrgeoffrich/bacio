@@ -177,3 +177,24 @@ func TestSessionLiveness(t *testing.T) {
 		}
 	}
 }
+
+func TestAnyOpenClaim(t *testing.T) {
+	released := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name   string
+		claims []*AgentClaim
+		want   bool
+	}{
+		{"empty", nil, false},
+		{"all released", []*AgentClaim{{ReleasedAt: &released}, {ReleasedAt: &released}}, false},
+		{"one open", []*AgentClaim{{ReleasedAt: &released}, {ReleasedAt: nil}}, true},
+		{"all open", []*AgentClaim{{ReleasedAt: nil}, {ReleasedAt: nil}}, true},
+		{"nil entry mixed", []*AgentClaim{nil, {ReleasedAt: &released}}, false},
+		{"nil entry with open", []*AgentClaim{nil, {ReleasedAt: nil}}, true},
+	}
+	for _, c := range cases {
+		if got := AnyOpenClaim(c.claims); got != c.want {
+			t.Errorf("AnyOpenClaim(%s) = %v, want %v", c.name, got, c.want)
+		}
+	}
+}

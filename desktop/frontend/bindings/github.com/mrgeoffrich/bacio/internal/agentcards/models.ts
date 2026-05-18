@@ -196,6 +196,54 @@ export class ClaimDTO {
 }
 
 /**
+ * ClaimantDTO is the per-issue claim-history entry the desktop's
+ * IssueDetail surfaces. CamelCase JSON tags match the rest of the
+ * agentcards DTOs (BACI-50). Open is the derived
+ * model.AnyOpenClaim-style flag for a single row — true iff ReleasedAt
+ * is nil.
+ */
+export class ClaimantDTO {
+    "sessionId": string;
+    "agentName": string;
+    "prompt": string;
+    "claimedAt": time$0.Time;
+    "releasedAt": time$0.Time | null;
+    "open": boolean;
+
+    /** Creates a new ClaimantDTO instance. */
+    constructor($$source: Partial<ClaimantDTO> = {}) {
+        if (!("sessionId" in $$source)) {
+            this["sessionId"] = "";
+        }
+        if (!("agentName" in $$source)) {
+            this["agentName"] = "";
+        }
+        if (!("prompt" in $$source)) {
+            this["prompt"] = "";
+        }
+        if (!("claimedAt" in $$source)) {
+            this["claimedAt"] = null;
+        }
+        if (!("releasedAt" in $$source)) {
+            this["releasedAt"] = null;
+        }
+        if (!("open" in $$source)) {
+            this["open"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ClaimantDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ClaimantDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ClaimantDTO($$parsedSource as Partial<ClaimantDTO>);
+    }
+}
+
+/**
  * DispatchDTO is one queued dispatch — included inside an AgentCard
  * (the agent's drill-down).
  */

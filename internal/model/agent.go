@@ -165,6 +165,24 @@ type AgentClaim struct {
 	ReleasedAt *time.Time `json:"released_at,omitempty"`
 }
 
+// AnyOpenClaim reports whether claims has at least one entry with
+// ReleasedAt == nil — the derived "taken" signal used by per-issue
+// views. Mirrors the bulk shape that store.OpenClaimsBySession produces
+// (already pre-filtered to open), but operates on raw
+// store.ListClaimsForIssue results where the slice may include released
+// entries. A nil entry in the slice is tolerated; nil claims are
+// ignored. Use this anywhere a "did any agent claim this issue?" check
+// is needed; the inline `c.ReleasedAt == nil` pattern was reimplemented
+// in five sites before this helper landed.
+func AnyOpenClaim(claims []*AgentClaim) bool {
+	for _, c := range claims {
+		if c != nil && c.ReleasedAt == nil {
+			return true
+		}
+	}
+	return false
+}
+
 // SessionBusy reports whether a session is actively holding a job —
 // busy iff it has at least one open (unreleased) claim. issueKey is the
 // most-recently-claimed open issue, for a "busy (working BACI-12)"

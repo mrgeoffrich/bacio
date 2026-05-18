@@ -1528,7 +1528,7 @@ func (b *boardView) renderAttachmentsLines(cellW, h int) []string {
 		if len(body) > 0 {
 			body = append(body, "")
 		}
-		taken, _ := claimantsTaken(b.claimants)
+		taken := model.AnyOpenClaim(b.claimants)
 		label := "Claimed by"
 		if taken {
 			label += " · taken"
@@ -1552,17 +1552,6 @@ func (b *boardView) renderAttachmentsLines(cellW, h int) []string {
 
 	inner := paneScrollFrame(header, body, contentW, h, 0, false, titleSlot, false, focused)
 	return padCell(inner, cellW)
-}
-
-// claimantsTaken reports whether a claim list has at least one open
-// claim, and returns the issue key of that open claim.
-func claimantsTaken(claimants []*model.AgentClaim) (bool, string) {
-	for _, c := range claimants {
-		if c.ReleasedAt == nil {
-			return true, c.IssueKey
-		}
-	}
-	return false, ""
 }
 
 // paneScrollFrame composes a focused-pane: a sticky header row, a
