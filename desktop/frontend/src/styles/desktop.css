@@ -4,19 +4,25 @@
    macOS-window-specific lives here only.
    ============================================================ */
 
-/* The window uses MacTitleBarHiddenInset (see desktop/main.go), so the
-   webview renders *under* the inset traffic-light buttons at the top-left.
-   The top nav now spans the full width, so pad its left edge to clear the
-   buttons. `--wails-draggable: drag` also makes the nav a window-move
-   handle — it's a custom property so it inherits, hence interactive
-   children opt back out with `no-drag` to stay clickable. */
+/* The Wails window uses MacTitleBarHiddenInset (see desktop/main.go), so
+   the webview renders *under* the inset traffic-light buttons at the
+   top-left. The top nav spans the full width, so pad its left edge to
+   clear the buttons. `--wails-draggable: drag` also makes the nav a
+   window-move handle — it's a custom property so it inherits, hence
+   interactive children opt back out with `no-drag` to stay clickable.
+   Both are harmless in the web bundle (the drag custom property is
+   inert outside Wails, the themed background is desired everywhere)
+   and stay unconditional. The 84px inset, on the other hand, only
+   exists for the traffic-lights — gate it on :not(.is-web) so the
+   web bundle reverts to the kit's `padding: 0 20px`. The `is-web`
+   modifier is toggled by Topbar.jsx based on the WEB_MODE constant. */
 .mk-topbar {
-  padding-left: 84px;
   --wails-draggable: drag;
   /* Kit app.css hardcodes a light translucent fill here; re-point it
      at the themeable token so the dark theme can reach it. */
   background: var(--topbar-bg);
 }
+.mk-topbar:not(.is-web) { padding-left: 84px; }
 
 .mk-topbar button,
 .mk-topbar input,
