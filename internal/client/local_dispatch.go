@@ -734,6 +734,59 @@ func (c *localClient) EnsureSetupDispatch(ctx context.Context, repo *model.Repo,
 	return d, nil
 }
 
+// buildPingDispatchPayload renders the body the bacio idle-pinger
+// pushes to a long-idle session as a "are you still alive?" probe
+// (BACI-57). Short and action-oriented like the setup-dispatch payload:
+// the agent only needs to ack via the channel reply tool to refresh its
+// own liveness; no business logic, no parameters.
+func buildPingDispatchPayload() string {
+	return "bacio idle-check: your session hasn't seen activity in over 1 hour. " +
+		"Reply (ack) within 2 minutes to confirm you're still running, or bacio " +
+		"will end your session as presumed-dead."
+}
+
+// EnsurePingDispatch is the idle-pinger's "are you still alive?" probe
+// (BACI-57). Idempotent per session: skip if any pending|delivered
+// ping already exists for this session (matches the
+// SetupDispatchCreator pattern in EnsureSetupDispatch). Writes an
+// agent.dispatch audit row on enqueue with Actor=IdlePingDispatchCreator
+// — the forensic trail for "when did agent X get poked, and did they
+// answer?" — and returns the existing in-flight ping (no insert) when
+// one is already queued. A nil session is a no-op.
+func (c *localClient) EnsurePingDispatch(ctx context.Context, sess *model.AgentSession) (*model.AgentDispatch, error) {
+	if sess == nil || sess.SessionID == "" {
+		return nil, nil
+	}
+	existing, err := c.store.ListDispatches(store.DispatchFilter{
+		RepoID:          &sess.RepoID,
+		TargetSessionID: sess.SessionID,
+		Statuses:        []model.DispatchStatus{model.DispatchPending, model.DispatchDelivered},
+		CreatedBy:       model.IdlePingDispatchCreator,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(existing) > 0 {
+		return existing[0], nil // idempotent — drain will re-push it next tick
+	}
+	d, err := c.store.AddDispatch(store.AddDispatchIn{
+		RepoID:          sess.RepoID,
+		TargetSessionID: sess.SessionID,
+		Payload:         buildPingDispatchPayload(),
+		CreatedBy:       model.IdlePingDispatchCreator,
+	})
+	if err != nil {
+		return nil, err
+	}
+	c.recordOp(model.HistoryEntry{
+		RepoID: &sess.RepoID, RepoPrefix: sess.RepoPrefix,
+		Op: "agent.dispatch", Kind: "agent", Actor: model.IdlePingDispatchCreator,
+		TargetID: &d.ID, TargetLabel: dispatchTargetLabel(d),
+		Details: dispatchDetails(d),
+	})
+	return d, nil
+}
+
 // dispatchDetails builds the audit-log Details string for a dispatch op.
 func dispatchDetails(d *model.AgentDispatch) string {
 	var parts []string

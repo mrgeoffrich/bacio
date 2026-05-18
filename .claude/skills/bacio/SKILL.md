@@ -577,7 +577,12 @@ bacio agent register                    Register / refresh this session
   --host <hostname>                     Default: os.Hostname()
   --branch <name>                       Default: current git branch
 bacio agent heartbeat                   Bump last_seen_at on a registered session
-bacio agent end --reason <r>            Reason: stop|clear|logout|crash|other
+bacio agent end --reason <r>            Reason: stop|clear|logout|crash|other|presumed_dead
+                                     (`presumed_dead` is normally written by
+                                     the bacio idle-pinger reaper after a
+                                     session fails to ack its idle-check ping
+                                     within ~2 minutes; agents pass one of
+                                     the other values).
                                      (also auto-releases every open claim,
                                      unassigning any issue left unclaimed)
 bacio agent claim <ISSUE-KEY>           Record intent + stamp the issue's

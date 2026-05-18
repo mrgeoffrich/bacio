@@ -207,6 +207,94 @@ func TestMarkDeliveredIdempotent(t *testing.T) {
 	}
 }
 
+// TestAckBumpsSessionLastSeen (BACI-57) locks in that acking a
+// session-targeted dispatch advances the target session's
+// last_seen_at. The idle-pinger relies on this: when it queues a
+// ping and the agent acks it, the ack itself counts as a heartbeat
+// so the next reaper tick doesn't immediately re-queue another ping.
+func TestAckBumpsSessionLastSeen(t *testing.T) {
+	s, repo, _, _, sess := seedDispatchFixture(t)
+
+	// Force the session row to look stale, well past the
+	// AgentIdlePingThreshold of 1h, so we can prove the ack
+	// brings the timestamp forward rather than the test reading
+	// the wall clock value seeded at upsert time.
+	if _, err := s.DB.Exec(
+		`UPDATE agent_sessions SET last_seen_at = datetime('now','-2 hours') WHERE session_id = ?`,
+		sess.SessionID,
+	); err != nil {
+		t.Fatalf("force-stale last_seen_at: %v", err)
+	}
+	before, err := s.GetAgentSession(sess.SessionID)
+	if err != nil {
+		t.Fatalf("get session before ack: %v", err)
+	}
+
+	d, err := s.AddDispatch(AddDispatchIn{
+		RepoID:          repo.ID,
+		TargetSessionID: sess.SessionID,
+		Payload:         "bacio idle-check",
+		CreatedBy:       model.IdlePingDispatchCreator,
+	})
+	if err != nil {
+		t.Fatalf("add ping dispatch: %v", err)
+	}
+	if _, err := s.AckDispatch(d.ID, "still here"); err != nil {
+		t.Fatalf("ack ping dispatch: %v", err)
+	}
+
+	after, err := s.GetAgentSession(sess.SessionID)
+	if err != nil {
+		t.Fatalf("get session after ack: %v", err)
+	}
+	if !after.LastSeenAt.After(before.LastSeenAt) {
+		t.Fatalf("last_seen_at did not advance on session-targeted ack: before=%v after=%v",
+			before.LastSeenAt, after.LastSeenAt)
+	}
+}
+
+// TestAckAgentScopedDoesNotBumpSession (BACI-57) is the symmetric
+// no-op guard: an agent-identity-targeted ack (no target_session_id)
+// must NOT bump any session row's last_seen_at. The pinger's
+// liveness signal is strictly "this session acked", not "some
+// session for this identity acked".
+func TestAckAgentScopedDoesNotBumpSession(t *testing.T) {
+	s, repo, _, ag, sess := seedDispatchFixture(t)
+
+	if _, err := s.DB.Exec(
+		`UPDATE agent_sessions SET last_seen_at = datetime('now','-2 hours') WHERE session_id = ?`,
+		sess.SessionID,
+	); err != nil {
+		t.Fatalf("force-stale last_seen_at: %v", err)
+	}
+	before, err := s.GetAgentSession(sess.SessionID)
+	if err != nil {
+		t.Fatalf("get session before ack: %v", err)
+	}
+
+	d, err := s.AddDispatch(AddDispatchIn{
+		RepoID:        repo.ID,
+		TargetAgentID: &ag.ID,
+		Payload:       "agent-wide work",
+		CreatedBy:     "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add agent-scoped dispatch: %v", err)
+	}
+	if _, err := s.AckDispatch(d.ID, "got it"); err != nil {
+		t.Fatalf("ack agent-scoped dispatch: %v", err)
+	}
+
+	after, err := s.GetAgentSession(sess.SessionID)
+	if err != nil {
+		t.Fatalf("get session after ack: %v", err)
+	}
+	if !after.LastSeenAt.Equal(before.LastSeenAt) {
+		t.Fatalf("agent-scoped ack must not bump session last_seen_at: before=%v after=%v",
+			before.LastSeenAt, after.LastSeenAt)
+	}
+}
+
 // TestCancelThenAckRejected locks in that a cancelled dispatch can't be
 // acked — the withdrawal is final.
 func TestCancelThenAckRejected(t *testing.T) {

@@ -260,6 +260,10 @@ func (c *remoteClient) EnsureSetupDispatch(ctx context.Context, repo *model.Repo
 	return nil, remoteAgentNotSupported("channel")
 }
 
+func (c *remoteClient) EnsurePingDispatch(ctx context.Context, sess *model.AgentSession) (*model.AgentDispatch, error) {
+	return nil, remoteAgentNotSupported("channel-ping")
+}
+
 func (c *remoteClient) DrainAgentDispatches(ctx context.Context, repo *model.Repo, agentName string) ([]*model.AgentDispatch, error) {
 	return nil, remoteAgentNotSupported("channel")
 }

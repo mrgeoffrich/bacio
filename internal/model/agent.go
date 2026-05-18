@@ -234,20 +234,24 @@ func SessionWaiting(openClaims []*AgentClaim, needsActionKeys map[string]bool) (
 
 // EndReason values reported by `bacio agent end --reason`. Mirrors the
 // Claude Code SessionEnd.end_reason set, plus "stop" for explicit
-// shutdowns and "crash" for inferred ones (`agent list` flags stale
-// sessions an operator might `end --reason crash` after the fact).
+// shutdowns, "crash" for inferred ones (`agent list` flags stale
+// sessions an operator might `end --reason crash` after the fact), and
+// "presumed_dead" for sessions the bacio idle-pinger reaped after they
+// failed to ack an idle-check ping within AgentPingNoAckTimeout (BACI-57).
 type EndReason string
 
 const (
-	EndReasonStop   EndReason = "stop"
-	EndReasonClear  EndReason = "clear"
-	EndReasonLogout EndReason = "logout"
-	EndReasonCrash  EndReason = "crash"
-	EndReasonOther  EndReason = "other"
+	EndReasonStop         EndReason = "stop"
+	EndReasonClear        EndReason = "clear"
+	EndReasonLogout       EndReason = "logout"
+	EndReasonCrash        EndReason = "crash"
+	EndReasonOther        EndReason = "other"
+	EndReasonPresumedDead EndReason = "presumed_dead"
 )
 
 var allEndReasons = []EndReason{
 	EndReasonStop, EndReasonClear, EndReasonLogout, EndReasonCrash, EndReasonOther,
+	EndReasonPresumedDead,
 }
 
 func AllEndReasons() []EndReason { return append([]EndReason(nil), allEndReasons...) }
@@ -599,12 +603,36 @@ type AgentDispatch struct {
 // turns or the harness is closed.
 const AgentLivenessThreshold = 10 * time.Minute
 
+// AgentIdlePingThreshold is the gap after a session's last heartbeat
+// at which the controlling UI starts asking the agent "are you still
+// alive?" via a channel-pushed ping dispatch (BACI-57). Longer than
+// AgentLivenessThreshold (which only flips the UI's "idle" badge)
+// because the ping is a real action — we want a high-confidence
+// "this looks dead" signal before disturbing live sessions.
+const AgentIdlePingThreshold = 1 * time.Hour
+
+// AgentPingNoAckTimeout is how long after a ping is enqueued the
+// reaper waits before declaring the session presumed-dead and
+// force-ending it. The channel pushes the ping inside one drain tick
+// (sub-second under normal load); 2 minutes is generous enough to
+// absorb a single network blip or a parked-but-alive turn while
+// keeping the dead-session cleanup window tight.
+const AgentPingNoAckTimeout = 2 * time.Minute
+
 // SetupDispatchCreator marks dispatches that the bacio channel itself
 // enqueued to ask the agent to call the `register` tool. The BACI-51
 // matcher excludes these from its concurrency-count query so a setup
 // nudge never blocks a real ship-it dispatch from binding. Lives in
 // model so the store can reference it without importing client.
 const SetupDispatchCreator = "bacio-channel"
+
+// IdlePingDispatchCreator marks dispatches the bacio idle-pinger
+// (BACI-57) enqueued to probe whether a long-idle session is still
+// alive. Mirrors the SetupDispatchCreator pattern so EnsurePingDispatch
+// stays idempotent (skip when a pending|delivered ping already exists
+// for the session) and `bacio history` can distinguish reaper-driven
+// pings from human dispatches.
+const IdlePingDispatchCreator = "bacio-channel-ping"
 
 // SessionLiveness classifies a session as "ended", "active", or "idle"
 // relative to now. Shared by the TUI agent cards and the desktop Agents

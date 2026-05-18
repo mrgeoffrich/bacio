@@ -275,6 +275,12 @@ type Client interface {
 	// delivered]): returns the existing open dispatch rather than
 	// creating a duplicate. sessionID="" is a no-op. Local-only.
 	EnsureSetupDispatch(ctx context.Context, repo *model.Repo, sessionID string) (*model.AgentDispatch, error)
+	// EnsurePingDispatch (BACI-57) idempotently queues an idle-check
+	// ping at a session — the BACI-57 idle-pinger reaper's enqueue
+	// side. Skipped when any pending|delivered ping already exists
+	// for the session (CreatedBy=IdlePingDispatchCreator). Writes an
+	// agent.dispatch audit row on insert. Local-only.
+	EnsurePingDispatch(ctx context.Context, sess *model.AgentSession) (*model.AgentDispatch, error)
 	// AutoDispatchIssue is the state-gated auto-pick dispatch verb
 	// (BACI-40 + BACI-51): re-checks the mode's state-gate against
 	// the issue's current state, then enqueues a target-less queued

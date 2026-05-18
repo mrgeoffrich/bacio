@@ -15,8 +15,10 @@ package leaderservice
 import (
 	"log/slog"
 
+	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/controller"
 	"github.com/mrgeoffrich/bacio/internal/dispatcher"
+	"github.com/mrgeoffrich/bacio/internal/idlepinger"
 	"github.com/mrgeoffrich/bacio/internal/leader"
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
@@ -36,10 +38,10 @@ type StatusDTO struct {
 }
 
 // Service composes a *store.Store with a leader.Elector,
-// dispatcher.Matcher, and controller.Controller. It owns the elector +
-// controller lifecycle but NOT the store — the caller still owns the
-// *store.Store handle (matches the existing controller.Controller
-// contract).
+// dispatcher.Matcher, idlepinger.Pinger, and controller.Controller. It
+// owns the elector + controller lifecycle but NOT the store — the
+// caller still owns the *store.Store handle (matches the existing
+// controller.Controller contract).
 type Service struct {
 	elector *leader.Elector
 	ctrl    *controller.Controller
@@ -49,20 +51,34 @@ type Service struct {
 // ("desktop pid=… host=…" / "api pid=… host=… addr=…"); the caller
 // constructs it so the host-specific shape is preserved. logger may be
 // nil — defaults to slog.Default() inside controller helpers.
+//
+// The Service constructs the BACI-57 idle-pinger off a
+// client.NewLocalFromStore wrapper around s — the pinger calls
+// EnsurePingDispatch + EndAgent so its audit rows look identical to
+// any other audited mutation. The wrapped client borrows the caller's
+// store handle (doesn't open or close it), so the existing
+// "Service owns the controller, caller owns the store" contract still
+// holds.
 func New(s *store.Store, label string, logger *slog.Logger) *Service {
 	el := leader.New(s, label)
+	// Use the host process label as the audit actor for reaper-driven
+	// pings + ends. `recordOp` falls back to a generic default when the
+	// actor is empty; spelling it explicitly here makes the rare bug
+	// report ("who ended my session?") trivial to chase via the leader
+	// label embedded in the audit row.
+	pingerClient := client.NewLocalFromStore(s, label)
 	return &Service{
 		elector: el,
-		ctrl:    controller.New(s, el, dispatcher.New(s), logger),
+		ctrl:    controller.New(s, el, dispatcher.New(s), idlepinger.New(s, pingerClient, logger), logger),
 	}
 }
 
-// Start kicks off the controller's three tick loops (heartbeat, prune,
-// matcher) and runs the synchronous initial heartbeat before returning
-// so a caller seeding UI state from CurrentState gets a non-zero answer.
-// emit is forwarded to controller.Start — nil disables it, non-nil is
-// invoked on every heartbeat tick (including the synchronous startup
-// one). Pair each Start with exactly one Stop.
+// Start kicks off the controller's four tick loops (heartbeat, prune,
+// matcher, idle-pinger) and runs the synchronous initial heartbeat
+// before returning so a caller seeding UI state from CurrentState gets
+// a non-zero answer. emit is forwarded to controller.Start — nil
+// disables it, non-nil is invoked on every heartbeat tick (including
+// the synchronous startup one). Pair each Start with exactly one Stop.
 func (s *Service) Start(emit func(leader.State)) {
 	s.ctrl.Start(emit)
 }

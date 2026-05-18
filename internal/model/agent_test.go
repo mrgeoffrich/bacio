@@ -178,6 +178,43 @@ func TestSessionLiveness(t *testing.T) {
 	}
 }
 
+func TestParseEndReason(t *testing.T) {
+	cases := []struct {
+		in      string
+		want    EndReason
+		wantErr bool
+	}{
+		{"stop", EndReasonStop, false},
+		{"clear", EndReasonClear, false},
+		{"logout", EndReasonLogout, false},
+		{"crash", EndReasonCrash, false},
+		{"other", EndReasonOther, false},
+		// BACI-57: reaper-written reason for sessions force-ended after
+		// failing to ack an idle-check ping.
+		{"presumed_dead", EndReasonPresumedDead, false},
+		// No dash/space normalisation — these are short identifiers,
+		// agents send them verbatim.
+		{"presumed-dead", "", true},
+		{"unknown", "", true},
+		{"", "", true},
+	}
+	for _, c := range cases {
+		got, err := ParseEndReason(c.in)
+		if c.wantErr {
+			if err == nil {
+				t.Errorf("ParseEndReason(%q) = (%q, nil), want error", c.in, got)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("ParseEndReason(%q) errored unexpectedly: %v", c.in, err)
+		}
+		if got != c.want {
+			t.Errorf("ParseEndReason(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 func TestAnyOpenClaim(t *testing.T) {
 	released := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
 	cases := []struct {
