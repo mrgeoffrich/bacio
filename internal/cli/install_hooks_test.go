@@ -9,10 +9,12 @@ import (
 
 // TestBacioHookGroupMatcher locks in the matcher contract: the four
 // event-typed hooks never carry a matcher (the field is omitted), and
-// PostToolUse always carries one (today: TodoWrite). A drift here
-// silently breaks the PostToolUse → TodoWrite mirror because Claude
-// Code matches the entry against every tool call.
+// PostToolUse always carries one — the pipe-alternation literal
+// `TaskCreate|TaskUpdate` (BACI-60: Claude Code 2.1 renamed TodoWrite
+// into the Task* family). A drift here silently breaks the mirror
+// because Claude Code matches the entry against every tool call.
 func TestBacioHookGroupMatcher(t *testing.T) {
+	const wantPost = "TaskCreate|TaskUpdate"
 	for _, ev := range bacioHookEvents {
 		grp := bacioHookGroup(ev.Subcommand, ev.Matcher)
 		_, hasMatcher := grp["matcher"]
@@ -21,8 +23,8 @@ func TestBacioHookGroupMatcher(t *testing.T) {
 			if !hasMatcher {
 				t.Fatalf("%s group is missing matcher", ev.Event)
 			}
-			if grp["matcher"].(string) != "TodoWrite" {
-				t.Fatalf("%s matcher = %q, want TodoWrite", ev.Event, grp["matcher"])
+			if grp["matcher"].(string) != wantPost {
+				t.Fatalf("%s matcher = %q, want %q", ev.Event, grp["matcher"], wantPost)
 			}
 		default:
 			if hasMatcher {

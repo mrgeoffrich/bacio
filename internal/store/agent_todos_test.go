@@ -8,10 +8,12 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/model"
 )
 
-// TestReplaceSessionTodosRoundTrip covers the happy path: register a
-// session, mirror a todo list, read it back, replace it, confirm the
-// swap (no leftover rows from the previous snapshot), then empty it.
-func TestReplaceSessionTodosRoundTrip(t *testing.T) {
+// TestUpsertSessionTodoFromTaskRoundTrip covers the happy path: a
+// session registers, the hook records a TaskCreate (insert at the
+// next position with status=pending), then a TaskUpdate (preserve
+// position, flip status). List reads back the latest state with
+// task_id populated.
+func TestUpsertSessionTodoFromTaskRoundTrip(t *testing.T) {
 	s, repo, _ := seedRepoAndIssue(t)
 	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
 		SessionID: "todos-1", RepoID: repo.ID, Actor: "agent-claude",
@@ -19,81 +21,58 @@ func TestReplaceSessionTodosRoundTrip(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 
-	want := []model.SessionTodo{
-		{Position: 0, Content: "Read the brief", Status: model.TodoCompleted},
-		{Position: 1, Content: "Write the plan", Status: model.TodoInProgress},
-		{Position: 2, Content: "Open a PR", Status: model.TodoPending},
+	// TaskCreate "1" → inserts at position 0 with status=pending
+	if err := s.UpsertSessionTodoFromTask("todos-1", "1", "Read the brief", model.TodoPending); err != nil {
+		t.Fatalf("create 1: %v", err)
 	}
-	if err := s.ReplaceSessionTodos("todos-1", want); err != nil {
-		t.Fatalf("replace: %v", err)
+	// TaskCreate "2" → inserts at position 1
+	if err := s.UpsertSessionTodoFromTask("todos-1", "2", "Write the plan", model.TodoPending); err != nil {
+		t.Fatalf("create 2: %v", err)
 	}
+	// TaskUpdate "1" → flip status to completed, preserve position 0
+	if err := s.UpsertSessionTodoFromTask("todos-1", "1", "", model.TodoCompleted); err != nil {
+		t.Fatalf("update 1: %v", err)
+	}
+	// TaskUpdate "2" → flip status to in_progress
+	if err := s.UpsertSessionTodoFromTask("todos-1", "2", "", model.TodoInProgress); err != nil {
+		t.Fatalf("update 2: %v", err)
+	}
+
 	got, err := s.ListSessionTodos("todos-1")
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if len(got) != len(want) {
-		t.Fatalf("len(got) = %d, want %d", len(got), len(want))
+	if len(got) != 2 {
+		t.Fatalf("len(got) = %d, want 2", len(got))
 	}
-	for i, w := range want {
-		if got[i].Content != w.Content || got[i].Status != w.Status || got[i].Position != w.Position {
-			t.Fatalf("row %d = %+v, want %+v", i, got[i], w)
-		}
+	if got[0].Position != 0 || got[0].TaskID != "1" || got[0].Status != model.TodoCompleted || got[0].Content != "Read the brief" {
+		t.Fatalf("row 0 = %+v, want pos=0 task=1 completed/Read the brief", got[0])
 	}
-
-	// Swap to a shorter list — verifies the DELETE-then-INSERT atomic
-	// swap really discards the rows beyond the new length.
-	swap := []model.SessionTodo{
-		{Position: 0, Content: "Single item", Status: model.TodoInProgress},
-	}
-	if err := s.ReplaceSessionTodos("todos-1", swap); err != nil {
-		t.Fatalf("swap: %v", err)
-	}
-	got, err = s.ListSessionTodos("todos-1")
-	if err != nil {
-		t.Fatalf("list after swap: %v", err)
-	}
-	if len(got) != 1 || got[0].Content != "Single item" {
-		t.Fatalf("after swap got %+v", got)
-	}
-
-	// Clearing the list with an empty slice is the agent emptying its
-	// plan — exercise that path explicitly.
-	if err := s.ReplaceSessionTodos("todos-1", nil); err != nil {
-		t.Fatalf("clear: %v", err)
-	}
-	got, err = s.ListSessionTodos("todos-1")
-	if err != nil {
-		t.Fatalf("list after clear: %v", err)
-	}
-	if len(got) != 0 {
-		t.Fatalf("after clear got %d rows, want 0", len(got))
+	if got[1].Position != 1 || got[1].TaskID != "2" || got[1].Status != model.TodoInProgress || got[1].Content != "Write the plan" {
+		t.Fatalf("row 1 = %+v, want pos=1 task=2 in_progress/Write the plan", got[1])
 	}
 }
 
-// TestReplaceSessionTodosCapEnforced locks in the 200-row guardrail: an
-// over-cap batch is rejected wholesale rather than truncated, and the
-// previous snapshot survives.
-func TestReplaceSessionTodosCapEnforced(t *testing.T) {
+// TestUpsertSessionTodoFromTaskCapEnforced locks in the 200-row
+// guardrail on the insert path. The cap applies only to TaskCreate
+// (a TaskUpdate to an existing row never grows the count); attempting
+// to insert beyond the cap returns an error and leaves the table
+// untouched.
+func TestUpsertSessionTodoFromTaskCapEnforced(t *testing.T) {
 	s, repo, _ := seedRepoAndIssue(t)
 	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
 		SessionID: "todos-cap", RepoID: repo.ID, Actor: "agent-claude",
 	}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	// Seed one good snapshot first so we can prove it survives a
-	// rejected over-cap follow-up.
-	if err := s.ReplaceSessionTodos("todos-cap", []model.SessionTodo{
-		{Position: 0, Content: "keeper", Status: model.TodoPending},
-	}); err != nil {
-		t.Fatalf("seed: %v", err)
+	for i := 0; i < model.MaxSessionTodos; i++ {
+		if err := s.UpsertSessionTodoFromTask("todos-cap", taskIDFor(i), "x", model.TodoPending); err != nil {
+			t.Fatalf("seed %d: %v", i, err)
+		}
 	}
-	big := make([]model.SessionTodo, model.MaxSessionTodos+1)
-	for i := range big {
-		big[i] = model.SessionTodo{Position: i, Content: "x", Status: model.TodoPending}
-	}
-	err := s.ReplaceSessionTodos("todos-cap", big)
+	err := s.UpsertSessionTodoFromTask("todos-cap", taskIDFor(model.MaxSessionTodos), "overflow", model.TodoPending)
 	if err == nil {
-		t.Fatalf("expected over-cap batch to be rejected")
+		t.Fatalf("expected over-cap insert to be rejected")
 	}
 	if !strings.Contains(err.Error(), "too many todos") {
 		t.Fatalf("err = %v, want too-many-todos message", err)
@@ -102,21 +81,36 @@ func TestReplaceSessionTodosCapEnforced(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if len(got) != 1 || got[0].Content != "keeper" {
-		t.Fatalf("seed snapshot was lost: %+v", got)
+	if len(got) != model.MaxSessionTodos {
+		t.Fatalf("len(got) = %d, want %d (cap should not have grown)", len(got), model.MaxSessionTodos)
 	}
 }
 
-// TestReplaceSessionTodosUnknownSession returns ErrNotFound so the
-// hook handler can log-and-drop rather than fall through to a SQL-error
-// surface.
-func TestReplaceSessionTodosUnknownSession(t *testing.T) {
+// TestUpsertSessionTodoFromTaskUnknownSession returns ErrNotFound so
+// the hook handler can log-and-drop rather than fall through to a
+// SQL-error surface.
+func TestUpsertSessionTodoFromTaskUnknownSession(t *testing.T) {
 	s := newTestStore(t)
-	err := s.ReplaceSessionTodos("never-registered", []model.SessionTodo{
-		{Position: 0, Content: "x", Status: model.TodoPending},
-	})
+	err := s.UpsertSessionTodoFromTask("never-registered", "1", "x", model.TodoPending)
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
+}
+
+// TestUpsertSessionTodoFromTaskMissingTaskID rejects a call with no
+// task_id — without it the upsert can't key future updates. The
+// hook's extractTaskFields already guards this, but the store-side
+// check is the belt to the hook's braces.
+func TestUpsertSessionTodoFromTaskMissingTaskID(t *testing.T) {
+	s, repo, _ := seedRepoAndIssue(t)
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "todos-noid", RepoID: repo.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	err := s.UpsertSessionTodoFromTask("todos-noid", "", "x", model.TodoPending)
+	if err == nil || !strings.Contains(err.Error(), "task_id is required") {
+		t.Fatalf("err = %v, want task_id is required", err)
 	}
 }
 
@@ -131,10 +125,8 @@ func TestSessionTodosCascadeOnSessionDelete(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	if err := s.ReplaceSessionTodos("todos-cascade", []model.SessionTodo{
-		{Position: 0, Content: "doomed", Status: model.TodoPending},
-	}); err != nil {
-		t.Fatalf("replace: %v", err)
+	if err := s.UpsertSessionTodoFromTask("todos-cascade", "1", "doomed", model.TodoPending); err != nil {
+		t.Fatalf("seed: %v", err)
 	}
 
 	// End the session, then artificially age its ended_at past the
@@ -163,6 +155,7 @@ func TestSessionTodosCascadeOnSessionDelete(t *testing.T) {
 
 // TestListTodosBySessionsBulk covers the bulk-read shape used by the
 // agent views — one query per refresh, results keyed by session PK.
+// The TaskID round-trips through the bulk read.
 func TestListTodosBySessionsBulk(t *testing.T) {
 	s, repo, _ := seedRepoAndIssue(t)
 	a, err := s.UpsertAgentSession(UpsertAgentSessionIn{
@@ -177,29 +170,43 @@ func TestListTodosBySessionsBulk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("register b: %v", err)
 	}
-	if err := s.ReplaceSessionTodos("bulk-a", []model.SessionTodo{
-		{Position: 0, Content: "a0", Status: model.TodoCompleted},
-		{Position: 1, Content: "a1", Status: model.TodoInProgress},
-	}); err != nil {
-		t.Fatalf("replace a: %v", err)
+	if err := s.UpsertSessionTodoFromTask("bulk-a", "1", "a0", model.TodoCompleted); err != nil {
+		t.Fatalf("create a0: %v", err)
 	}
-	if err := s.ReplaceSessionTodos("bulk-b", []model.SessionTodo{
-		{Position: 0, Content: "b0", Status: model.TodoPending},
-	}); err != nil {
-		t.Fatalf("replace b: %v", err)
+	if err := s.UpsertSessionTodoFromTask("bulk-a", "2", "a1", model.TodoInProgress); err != nil {
+		t.Fatalf("create a1: %v", err)
+	}
+	if err := s.UpsertSessionTodoFromTask("bulk-b", "1", "b0", model.TodoPending); err != nil {
+		t.Fatalf("create b0: %v", err)
 	}
 
 	got, err := s.ListTodosBySessions([]string{"bulk-a", "bulk-b", "absent"})
 	if err != nil {
 		t.Fatalf("bulk: %v", err)
 	}
-	if len(got[a.ID]) != 2 || got[a.ID][0].Content != "a0" || got[a.ID][1].Content != "a1" {
+	if len(got[a.ID]) != 2 || got[a.ID][0].Content != "a0" || got[a.ID][0].TaskID != "1" || got[a.ID][1].Content != "a1" || got[a.ID][1].TaskID != "2" {
 		t.Fatalf("bulk[a] = %+v", got[a.ID])
 	}
-	if len(got[b.ID]) != 1 || got[b.ID][0].Content != "b0" {
+	if len(got[b.ID]) != 1 || got[b.ID][0].Content != "b0" || got[b.ID][0].TaskID != "1" {
 		t.Fatalf("bulk[b] = %+v", got[b.ID])
 	}
 	if _, present := got[0]; present {
 		t.Fatalf("absent session id should be missing from result map")
 	}
+}
+
+// taskIDFor turns an integer counter into a Claude Code-style
+// task_id string ("1", "2", ...). Test helper only — production
+// task_ids come from Claude Code's mint, not this function.
+func taskIDFor(n int) string {
+	// Avoid strconv import noise for a tiny helper — sprintf is plenty.
+	if n == 0 {
+		return "0"
+	}
+	var out []byte
+	for n > 0 {
+		out = append([]byte{byte('0' + n%10)}, out...)
+		n /= 10
+	}
+	return string(out)
 }
