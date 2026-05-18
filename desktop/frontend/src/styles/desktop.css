@@ -617,6 +617,64 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   border-bottom: 1px solid var(--border-1);
 }
 
+/* SVG document Render/Source toggle (BACI-56). Only renders when the
+   selected document is detected as SVG. The Render pane shows the
+   image over a faint checkered backdrop so transparent SVGs read
+   correctly in either theme. */
+.mk-docs-tabs {
+  display: inline-flex;
+  background: var(--bg-3);
+  border-radius: 6px;
+  padding: 2px;
+}
+.mk-docs-tab {
+  padding: 4px 10px;
+  font-size: var(--text-xs);
+  color: var(--fg-3);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.mk-docs-tab:hover {
+  color: var(--fg-2);
+}
+.mk-docs-tab.is-active {
+  background: var(--bg-1);
+  color: var(--fg-1);
+}
+.mk-docs-bar-actions {
+  display: inline-flex;
+  gap: 8px;
+  margin-left: auto;
+}
+/* mk-docs-bar already lays out children in a row with gap; once the
+   actions cluster claims margin-left: auto, the bar-status row sits
+   immediately to its left. */
+.mk-docs-svg-pane {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: auto;
+  min-height: 0;
+  padding: 24px;
+  background-color: var(--bg-2);
+  background-image:
+    linear-gradient(45deg, var(--bg-3) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--bg-3) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--bg-3) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--bg-3) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+.mk-docs-svg-img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
 /* ============================================================
    Features view — a read-only two-pane feature browser, the
    desktop mirror of the TUI's Features tab. Left pane lists the

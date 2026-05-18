@@ -121,6 +121,13 @@ own use of the elector — both UIs (desktop + every running api server)
 race for the lease, and only one wins at a time. Closing a desktop window
 hands the lease over to a running api server within one tick (~10s).
 
+**SVG document render (BACI-56)** is identical in both modes — the
+Render/Source toggle, the `<img>` over a Blob object URL, and the
+inert-script safety story all live in the shared React tree
+(`DocsView.jsx` + `lib/docFormat.ts`). The web bundle gets the feature
+for free because `DocContent.content` already streams the raw doc body
+over `GET /repos/{prefix}/documents/{filename}`.
+
 ---
 
 ## 4. Reshape table
