@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import * as Dialog from '@radix-ui/react-dialog';
+import Modal from './Modal.jsx';
 import Icon from './Icon.jsx';
 import Tooltip from './Tooltip.jsx';
 import { reportError } from '../errors';
@@ -499,79 +499,61 @@ export default function SettingsView({
         </section>
       </div>
 
-      <Dialog.Root open={!!renaming} onOpenChange={(open) => { if (!open) setRenaming(null); }}>
-        <Dialog.Portal>
-          <Dialog.Overlay className="mk-modal-backdrop" />
-          <Dialog.Content className="mk-modal" aria-describedby={undefined}>
-            <Dialog.Title className="mk-modal-title">Rename template</Dialog.Title>
-            {renaming && (
-              <>
-                <label className="mk-tmpl-add-field">
-                  <span>Slug</span>
-                  <input
-                    className="mk-tmpl-input"
-                    value={renaming.newSlug}
-                    onChange={e => setRenaming({ ...renaming, newSlug: e.target.value })}
-                  />
-                </label>
-                <label className="mk-tmpl-add-field">
-                  <span>Name</span>
-                  <input
-                    className="mk-tmpl-input"
-                    value={renaming.newName}
-                    onChange={e => setRenaming({ ...renaming, newName: e.target.value })}
-                  />
-                </label>
-                <div className="mk-modal-actions">
-                  <Dialog.Close asChild>
-                    <button className="mk-segmented-btn">Cancel</button>
-                  </Dialog.Close>
-                  <button className="mk-segmented-btn is-active" onClick={commitRename}>Save</button>
-                </div>
-              </>
-            )}
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
-
-      <Dialog.Root open={!!pendingDelete} onOpenChange={(open) => { if (!open) setPendingDelete(null); }}>
-        <Dialog.Portal>
-          <Dialog.Overlay className="mk-modal-backdrop" />
-          <Dialog.Content className="mk-modal" aria-describedby={undefined}>
-            <Dialog.Title className="mk-modal-title">Delete template</Dialog.Title>
-            <p>
-              Delete the template <code>{pendingDelete}</code>? Historical dispatches
-              that referenced this slug will keep it verbatim but won't have a body to
-              render anymore.
-            </p>
+      <Modal open={!!renaming} onClose={() => setRenaming(null)} title="Rename template">
+        {renaming && (
+          <>
+            <label className="mk-tmpl-add-field">
+              <span>Slug</span>
+              <input
+                className="mk-tmpl-input"
+                value={renaming.newSlug}
+                onChange={e => setRenaming({ ...renaming, newSlug: e.target.value })}
+              />
+            </label>
+            <label className="mk-tmpl-add-field">
+              <span>Name</span>
+              <input
+                className="mk-tmpl-input"
+                value={renaming.newName}
+                onChange={e => setRenaming({ ...renaming, newName: e.target.value })}
+              />
+            </label>
             <div className="mk-modal-actions">
-              <Dialog.Close asChild>
+              <Modal.Close asChild>
                 <button className="mk-segmented-btn">Cancel</button>
-              </Dialog.Close>
-              <button className="mk-segmented-btn is-active" onClick={commitDelete}>Delete</button>
+              </Modal.Close>
+              <button className="mk-segmented-btn is-active" onClick={commitRename}>Save</button>
             </div>
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
+          </>
+        )}
+      </Modal>
 
-      <Dialog.Root open={pendingRestore} onOpenChange={(open) => { if (!open) setPendingRestore(false); }}>
-        <Dialog.Portal>
-          <Dialog.Overlay className="mk-modal-backdrop" />
-          <Dialog.Content className="mk-modal" aria-describedby={undefined}>
-            <Dialog.Title className="mk-modal-title">Restore built-in templates</Dialog.Title>
-            <p>
-              Re-seed any built-in template that's been deleted, from the
-              embedded defaults. Existing templates won't be touched (idempotent).
-            </p>
-            <div className="mk-modal-actions">
-              <Dialog.Close asChild>
-                <button className="mk-segmented-btn">Cancel</button>
-              </Dialog.Close>
-              <button className="mk-segmented-btn is-active" onClick={commitRestore}>Restore</button>
-            </div>
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
+      <Modal open={!!pendingDelete} onClose={() => setPendingDelete(null)} title="Delete template">
+        <p>
+          Delete the template <code>{pendingDelete}</code>? Historical dispatches
+          that referenced this slug will keep it verbatim but won't have a body to
+          render anymore.
+        </p>
+        <div className="mk-modal-actions">
+          <Modal.Close asChild>
+            <button className="mk-segmented-btn">Cancel</button>
+          </Modal.Close>
+          <button className="mk-segmented-btn is-active" onClick={commitDelete}>Delete</button>
+        </div>
+      </Modal>
+
+      <Modal open={pendingRestore} onClose={() => setPendingRestore(false)} title="Restore built-in templates">
+        <p>
+          Re-seed any built-in template that's been deleted, from the
+          embedded defaults. Existing templates won't be touched (idempotent).
+        </p>
+        <div className="mk-modal-actions">
+          <Modal.Close asChild>
+            <button className="mk-segmented-btn">Cancel</button>
+          </Modal.Close>
+          <button className="mk-segmented-btn is-active" onClick={commitRestore}>Restore</button>
+        </div>
+      </Modal>
     </div>
   );
 }
