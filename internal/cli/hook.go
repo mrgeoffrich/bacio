@@ -433,21 +433,43 @@ func hookStopCmd() *cobra.Command {
 // ---------- post-tool-use ----------
 
 // postToolUseInput is the slice of the Claude Code PostToolUse payload
-// the TodoWrite mirror cares about. The decoder ignores unknown
-// fields, so this is a strict subset (no need to teach it about every
-// other tool's input shape).
+// the task-list mirror cares about. Both TaskCreate and TaskUpdate go
+// through this single struct; tool_input + tool_response together
+// carry every field the upsert path needs. The decoder ignores
+// unknown fields, so this is a strict subset (no need to teach it
+// about every other tool's input shape).
+//
+// TaskCreate:
+//   tool_input  = {subject, description?, activeForm?}
+//   tool_response = {task: {id, subject}}
+//   → use tool_response.task.id (Claude Code-assigned) as the key,
+//     tool_input.subject as the content, status defaults to pending.
+//
+// TaskUpdate:
+//   tool_input  = {taskId, status?}
+//   tool_response = {success, taskId, updatedFields, statusChange: {from, to}}
+//   → use tool_input.taskId as the key, tool_input.status (or
+//     tool_response.statusChange.to as a fallback) as the new status,
+//     leave content alone (the original subject was set on create).
 type postToolUseInput struct {
 	SessionID     string `json:"session_id"`
 	CWD           string `json:"cwd"`
 	HookEventName string `json:"hook_event_name"`
 	ToolName      string `json:"tool_name"`
 	ToolInput     struct {
-		Todos []struct {
-			Content string `json:"content"`
-			Status  string `json:"status"`
-			// activeForm / id / priority deliberately ignored in v1
-		} `json:"todos"`
+		Subject string `json:"subject"` // TaskCreate
+		TaskID  string `json:"taskId"`  // TaskUpdate
+		Status  string `json:"status"`  // TaskUpdate (sometimes)
 	} `json:"tool_input"`
+	ToolResponse struct {
+		Task struct {
+			ID      string `json:"id"`
+			Subject string `json:"subject"`
+		} `json:"task"` // TaskCreate
+		StatusChange struct {
+			To string `json:"to"`
+		} `json:"statusChange"` // TaskUpdate
+	} `json:"tool_response"`
 }
 
 func readPostToolUseInput() (*postToolUseInput, error) {
@@ -465,10 +487,16 @@ func readPostToolUseInput() (*postToolUseInput, error) {
 	return &in, nil
 }
 
+// postToolUseMatcher is the regex installed in .claude/settings.json's
+// PostToolUse matcher field — pipe-alternation per Claude Code's
+// matcher syntax. Keeping the literal here so the install-hooks plan
+// and the hook code can't drift.
+const postToolUseMatcher = "TaskCreate|TaskUpdate"
+
 func hookPostToolUseCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:    "post-tool-use",
-		Short:  "PostToolUse hook (matcher: TodoWrite): mirror the agent's TodoWrite list",
+		Short:  "PostToolUse hook (matcher: TaskCreate|TaskUpdate): mirror the agent's task list",
 		Args:   cobra.NoArgs,
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -480,15 +508,25 @@ func hookPostToolUseCmd() *cobra.Command {
 				fmt.Fprintln(os.Stderr, "bacio hook post-tool-use:", err)
 				return nil
 			}
-			// Belt-and-braces: the matcher in settings.json already gates
-			// this to TodoWrite, but if Claude Code ever broadens the
-			// matcher syntax behind us, ignore non-TodoWrite events
-			// rather than mirror them into the wrong table.
-			if in.ToolName != "" && in.ToolName != "TodoWrite" {
-				return nil
-			}
 			if in.SessionID == "" {
 				return nil // nothing to correlate against
+			}
+
+			taskID, content, statusRaw, ok := extractTaskFields(in)
+			if !ok {
+				// Unknown tool_name (e.g. matcher widened, or a future
+				// Task* variant we don't model) — log a one-liner so
+				// the user can notice the drift, but don't fail the
+				// session.
+				if in.ToolName != "" && in.ToolName != "TaskCreate" && in.ToolName != "TaskUpdate" {
+					fmt.Fprintf(os.Stderr, "bacio hook post-tool-use: unhandled tool_name %q; skipping\n", in.ToolName)
+				}
+				return nil
+			}
+			status, err := model.ParseTodoStatus(statusRaw)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "bacio hook post-tool-use: skip bad status %q: %v\n", statusRaw, err)
+				return nil
 			}
 
 			// The agent registry is local-only, so the hook always talks
@@ -498,7 +536,7 @@ func hookPostToolUseCmd() *cobra.Command {
 			// agent_sessions, not repos, so no working-directory context
 			// is needed. Less plumbing, less startup latency on a
 			// high-frequency hook, no spurious "not in a git repo"
-			// stderr noise if the agent runs TodoWrite from a non-git
+			// stderr noise if the agent runs Task* from a non-git
 			// scratch dir.
 			c, err := client.Open(context.Background(), client.Options{
 				DBPath: opts.dbPath,
@@ -510,25 +548,50 @@ func hookPostToolUseCmd() *cobra.Command {
 			}
 			defer c.Close()
 
-			todos := make([]model.SessionTodo, 0, len(in.ToolInput.Todos))
-			for i, t := range in.ToolInput.Todos {
-				st, err := model.ParseTodoStatus(t.Status)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "bacio hook post-tool-use: skip bad status %q at position %d: %v\n", t.Status, i, err)
-					return nil // drop the whole batch — partial mirrors are misleading
-				}
-				todos = append(todos, model.SessionTodo{
-					Position: i,
-					Content:  t.Content,
-					Status:   st,
-				})
-			}
-			if err := c.ReplaceSessionTodos(context.Background(), in.SessionID, todos); err != nil {
-				fmt.Fprintln(os.Stderr, "bacio hook post-tool-use: replace:", err)
+			if err := c.UpsertSessionTodoFromTask(context.Background(), in.SessionID, taskID, content, status); err != nil {
+				fmt.Fprintln(os.Stderr, "bacio hook post-tool-use: upsert:", err)
 			}
 			return nil
 		},
 	}
+}
+
+// extractTaskFields pulls (task_id, content, status) from the
+// PostToolUse payload based on the tool_name. Returns ok=false for
+// any tool_name bacio doesn't model — the caller silently drops
+// those events.
+//
+// TaskCreate: id comes from tool_response.task.id (Claude Code mints
+// it); content from tool_input.subject (the agent's planned-task
+// title); status defaults to "pending" because every newly created
+// task starts pending and the response carries no status field.
+//
+// TaskUpdate: id and status both come from tool_input — the agent
+// supplied them. statusChange.to in tool_response is a fallback only
+// in case Claude Code starts omitting status from tool_input in some
+// future variant. Empty content signals the upsert path to leave
+// the existing subject alone.
+func extractTaskFields(in *postToolUseInput) (taskID, content, status string, ok bool) {
+	switch in.ToolName {
+	case "TaskCreate":
+		taskID = in.ToolResponse.Task.ID
+		content = strings.TrimSpace(in.ToolInput.Subject)
+		if content == "" {
+			content = strings.TrimSpace(in.ToolResponse.Task.Subject)
+		}
+		status = string(model.TodoPending)
+		return taskID, content, status, taskID != "" && content != ""
+	case "TaskUpdate":
+		taskID = in.ToolInput.TaskID
+		status = in.ToolInput.Status
+		if status == "" {
+			status = in.ToolResponse.StatusChange.To
+		}
+		// content stays "" — the upsert path treats that as "leave the
+		// existing subject alone" so a TaskUpdate doesn't blank it.
+		return taskID, "", status, taskID != "" && status != ""
+	}
+	return "", "", "", false
 }
 
 // ---------- session-end ----------

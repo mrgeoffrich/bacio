@@ -36,13 +36,21 @@ func TestAgentSessionTodosRoundTrip(t *testing.T) {
 	if status, _ := registerSession(t, ts.URL, "MINI", "sess-todos", nil); status != 201 {
 		t.Fatalf("register status %d", status)
 	}
-	want := []model.SessionTodo{
-		{Position: 0, Content: "Plan", Status: model.TodoCompleted},
-		{Position: 1, Content: "Implement", Status: model.TodoInProgress},
-		{Position: 2, Content: "Review", Status: model.TodoPending},
+	// Seed three Task* events: TaskCreate "a"/"b"/"c" at positions 0/1/2
+	// (the order the post-tool-use hook would write them), then TaskUpdate
+	// to settle the statuses we want the HTTP read to see.
+	seeds := []struct {
+		taskID, content string
+		status          model.TodoStatus
+	}{
+		{"a", "Plan", model.TodoCompleted},
+		{"b", "Implement", model.TodoInProgress},
+		{"c", "Review", model.TodoPending},
 	}
-	if err := s.ReplaceSessionTodos("sess-todos", want); err != nil {
-		t.Fatalf("seed todos: %v", err)
+	for _, sd := range seeds {
+		if err := s.UpsertSessionTodoFromTask("sess-todos", sd.taskID, sd.content, sd.status); err != nil {
+			t.Fatalf("seed %s: %v", sd.taskID, err)
+		}
 	}
 	resp, body := apiReq(t, "GET", ts.URL+"/agents/sessions/sess-todos/todos", nil, nil)
 	if resp.StatusCode != 200 {
@@ -52,12 +60,12 @@ func TestAgentSessionTodosRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(body, &got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(got) != len(want) {
-		t.Fatalf("len(got) = %d, want %d", len(got), len(want))
+	if len(got) != len(seeds) {
+		t.Fatalf("len(got) = %d, want %d", len(got), len(seeds))
 	}
-	for i, w := range want {
-		if got[i].Content != w.Content || got[i].Status != w.Status || got[i].Position != w.Position {
-			t.Fatalf("row %d = %+v, want %+v", i, got[i], w)
+	for i, sd := range seeds {
+		if got[i].Content != sd.content || got[i].Status != sd.status || got[i].Position != i {
+			t.Fatalf("row %d = %+v, want pos=%d content=%q status=%q", i, got[i], i, sd.content, sd.status)
 		}
 	}
 }

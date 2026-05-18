@@ -406,33 +406,51 @@ CREATE TABLE IF NOT EXISTS agent_channels (
 
 CREATE INDEX IF NOT EXISTS idx_agent_channels_repo ON agent_channels(repo_id);
 
--- agent_session_todos mirrors the agent's TodoWrite tool list per session
--- — the in-progress plan a Claude Code session is executing. The list is
--- replaced wholesale on every TodoWrite event (atomic per-session swap
--- inside a single transaction so a partial write never shows a
--- frankenlist). Local-only — never synced. Cascaded out by the
--- agent_sessions ON DELETE chain, so the existing live-list / 60-day
--- session prune sweeps it too; no separate retention pass.
+-- agent_session_todos mirrors the agent's task list per session — the
+-- in-progress plan a Claude Code session is executing. Local-only — never
+-- synced. Cascaded out by the agent_sessions ON DELETE chain, so the
+-- existing live-list / 60-day session prune sweeps it too; no separate
+-- retention pass.
+--
+-- Two write paths share this table:
+--   * TaskCreate (Claude Code 2.1+): insert a new row at MAX(position)+1
+--     with content=subject, status=pending, task_id=<auto-assigned id>.
+--   * TaskUpdate (Claude Code 2.1+): update the row keyed by
+--     (session_pk, task_id); position is preserved so the agent view's
+--     insertion order is stable.
+--
+-- task_id is the Claude Code-assigned identifier on the Task* tool call
+-- (string-typed because Claude Code emits it as a string, e.g. "1",
+-- "2", ...; bacio doesn't interpret it). Empty string is reserved for
+-- rows written by the legacy whole-snapshot TodoWrite path that
+-- predates BACI-60; those rows stay valid but can't be updated
+-- in-place. The partial unique index keeps (session, task_id) unique
+-- only for non-empty ids.
 --
 -- session_pk (the int FK) rather than session_id (the external string)
--- matches the rest of the agent_* tables (agent_claims.session_pk,
--- agent_channels' (host, claude_pid) join key resolved server-side).
--- position is part of the PK because the list is replaced wholesale and
--- stable ordering is the only thing that matters; per-row identity buys
--- nothing. The CHECK on status is a defensive belt over
--- model.ParseTodoStatus / store.ValidateSessionTodos, which both run
--- before the row reaches the DB.
+-- matches the rest of the agent_* tables. position is part of the PK
+-- so the legacy whole-snapshot semantics still hold; the Task* path
+-- assigns the next free position on insert. CHECK on status is a
+-- defensive belt over model.ParseTodoStatus / store.ValidateSessionTodos.
 CREATE TABLE IF NOT EXISTS agent_session_todos (
     session_pk  INTEGER NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
     position    INTEGER NOT NULL,
     content     TEXT    NOT NULL,
     status      TEXT    NOT NULL CHECK (status IN ('pending','in_progress','completed')),
+    task_id     TEXT    NOT NULL DEFAULT '',
     updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (session_pk, position)
 );
 
 CREATE INDEX IF NOT EXISTS idx_agent_session_todos_session
     ON agent_session_todos(session_pk);
+-- The (session_pk, task_id) partial unique index lives in
+-- internal/store/store.go::migrate, not here. schema.sql runs before
+-- migrate(), so a DB upgrading from the pre-BACI-60 table doesn't have
+-- the task_id column yet — declaring the index here would fail on it.
+-- The migration adds the column and the index together; on fresh DBs
+-- migrate() still runs (the index ddl is idempotent) so coverage is
+-- the same.
 
 -- ui_leader is a single-row lease table. Only one UI process (TUI or desktop
 -- app) holds the lease at a time; all others stand by. The CHECK (id = 1)

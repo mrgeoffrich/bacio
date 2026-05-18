@@ -180,10 +180,10 @@ type Client interface {
 	// or across all repos when repo is nil. Local-only; remote returns
 	// ErrLocalOnly. Used by the desktop Board to derive each card's `taken`.
 	ListOpenClaims(ctx context.Context, repo *model.Repo) ([]*model.AgentClaim, error)
-	// ReplaceSessionTodos swaps a session's TodoWrite snapshot (the
-	// PostToolUse hook's mirror path). Local-only — the agent registry
-	// has no HTTP write surface in v1.
-	ReplaceSessionTodos(ctx context.Context, sessionID string, todos []model.SessionTodo) error
+	// UpsertSessionTodoFromTask records one TaskCreate (insert) or
+	// TaskUpdate (update by task_id) event from the PostToolUse hook.
+	// Local-only — the agent registry has no HTTP write surface in v1.
+	UpsertSessionTodoFromTask(ctx context.Context, sessionID, taskID, content string, status model.TodoStatus) error
 	// ListSessionTodos returns the latest snapshot for one session,
 	// position-ordered. Empty slice for an unknown / empty session.
 	// Local-only.

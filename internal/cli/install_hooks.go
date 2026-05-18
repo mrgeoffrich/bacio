@@ -22,14 +22,19 @@ import (
 //
 // Matcher is non-empty only for PostToolUse — the four event-typed
 // hooks don't support matchers, but PostToolUse needs one to scope
-// bacio's mirror to TodoWrite (firing on every tool call would be a
-// lot of stderr noise for a benign no-op).
+// bacio's mirror to the agent's task-list tools (firing on every tool
+// call would be a lot of stderr noise for a benign no-op). The matcher
+// uses pipe-alternation (Claude Code's matcher syntax supports
+// `Foo|Bar` for a literal multi-tool match) so one hook group
+// services both TaskCreate (insert a planned task) and TaskUpdate
+// (flip its status). Source of truth for the literal lives next to
+// the hook handler so the two can't drift — see internal/cli/hook.go.
 var bacioHookEvents = []struct{ Event, Subcommand, Matcher string }{
 	{"SessionStart", "session-start", ""},
 	{"UserPromptSubmit", "user-prompt-submit", ""},
 	{"Stop", "stop", ""},
 	{"SessionEnd", "session-end", ""},
-	{"PostToolUse", "post-tool-use", "TodoWrite"},
+	{"PostToolUse", "post-tool-use", postToolUseMatcher},
 }
 
 // bacioHookMarker identifies hook groups bacio owns, so re-running
@@ -56,11 +61,11 @@ bacio registers a small set of command hooks so a Claude Code session
 keeps the local agent registry in sync without the agent calling
 'bacio agent ...' by hand:
 
-    SessionStart                       register the session; inject assigned issues + claims
-    UserPromptSubmit                   heartbeat; nudge on open claims
-    Stop                               heartbeat
-    SessionEnd                         end the session; auto-release its claims
-    PostToolUse (matcher: TodoWrite)   mirror the agent's TodoWrite list into bacio
+    SessionStart                                 register the session; inject assigned issues + claims
+    UserPromptSubmit                             heartbeat; nudge on open claims
+    Stop                                         heartbeat
+    SessionEnd                                   end the session; auto-release its claims
+    PostToolUse (matcher: TaskCreate|TaskUpdate) mirror the agent's task list into bacio
 
 The merge is non-destructive: existing hooks for other events -- and
 any non-bacio hooks on these four events -- are preserved. Re-running
@@ -216,8 +221,9 @@ func applyBacioHooks(path string, top map[string]json.RawMessage) error {
 // command hook invoking `bacio hook <subcommand>`. matcher is included
 // only when non-empty — the four event-typed hooks (SessionStart,
 // UserPromptSubmit, Stop, SessionEnd) don't support matchers, but
-// PostToolUse needs one to scope bacio's mirror to a specific tool name
-// (TodoWrite) and dodge stderr noise on every other tool call.
+// PostToolUse needs one to scope bacio's mirror to the agent's task
+// list tools (TaskCreate|TaskUpdate) and dodge stderr noise on every
+// other tool call.
 func bacioHookGroup(subcommand, matcher string) map[string]any {
 	g := map[string]any{
 		"hooks": []map[string]any{
