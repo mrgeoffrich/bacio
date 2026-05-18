@@ -179,7 +179,7 @@ export default function QuestionModal({ questionId, onClose }) {
           }}
           className="mk-question-form"
         >
-          {items.map((item) => {
+          {items.map((item, idx) => {
             // BACI-53: previews live on single-select questions only.
             // When at least one option carries one, switch the
             // fieldset's option-list to a two-column layout — option
@@ -187,6 +187,7 @@ export default function QuestionModal({ questionId, onClose }) {
             // right. Mirrors native AskUserQuestion's behavior.
             const hasPreview = !item.multiSelect &&
               item.options.some((o) => o.preview && o.preview.length > 0);
+            const legendId = `q-legend-${idx}`;
             const focused = item.options.find(
               (o) => o.label === answers[item.question],
             ) || item.options[0];
@@ -236,13 +237,19 @@ export default function QuestionModal({ questionId, onClose }) {
             <fieldset
               key={item.question}
               className={`mk-question-fieldset ${hasPreview ? 'mk-question-fieldset-preview' : ''}`}
+              aria-labelledby={legendId}
             >
-              <legend className="mk-question-legend">
+              {/* Not <legend>: Chrome renders <legend> overlapping the
+                  fieldset's top border, so a long wrapped header bleeds
+                  visually into both the modal background above and the
+                  fieldset interior below. A normal block + aria-labelledby
+                  keeps the group semantics without the rendering quirk. */}
+              <div id={legendId} className="mk-question-legend">
                 {item.header && (
                   <span className="mk-pill mk-question-header">{item.header}</span>
                 )}{' '}
                 {item.question}
-              </legend>
+              </div>
               {(() => {
                 // "Other..." affordance + textbox. Single-select shares
                 // the radio group; multi-select is an independent
