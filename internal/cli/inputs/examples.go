@@ -156,6 +156,23 @@ var (
 		Mode: "implement",
 	}
 
+	ExampleAgentQuestionsList = AgentQuestionsListInput{
+		SessionID: "092d8907-a5ed-48cf-9fdd-22c3941f3710",
+		States:    []string{"open"},
+	}
+	ExampleAgentQuestionsShow = AgentQuestionsShowInput{
+		ID: 1,
+	}
+	ExampleAgentQuestionsAnswer = AgentQuestionsAnswerInput{
+		ID: 1,
+		Answers: map[string]any{
+			"Which approach should I take?": "Option A",
+		},
+	}
+	ExampleAgentQuestionsCancel = AgentQuestionsCancelInput{
+		ID: 1,
+	}
+
 	ExampleRepoCreate = RepoCreateInput{
 		Prefix:    "MINI",
 		Name:      "bacio",

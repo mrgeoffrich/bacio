@@ -45,6 +45,21 @@ type SessionTodoDTO struct {
 	Status  string `json:"status"`
 }
 
+// QuestionDTO is one open BACI-53 ask_user_question row — included
+// inside an AgentCard so the desktop and web bundle render the
+// "user input needed" badge and modal in one round trip.
+//
+// We don't ship the full QuestionPayload over the AgentCard payload —
+// the UI fetches it via /agents/questions/{id} only when the user
+// opens the modal. The bare ID + asked-at + a count of pending
+// questions is what the badge needs.
+type QuestionDTO struct {
+	ID       int64     `json:"id"`
+	IssueKey string    `json:"issueKey,omitempty"`
+	Header   string    `json:"header"`
+	AskedAt  time.Time `json:"askedAt"`
+}
+
 // DispatchDTO is one queued dispatch — included inside an AgentCard
 // (the agent's drill-down).
 type DispatchDTO struct {
@@ -103,6 +118,10 @@ type AgentCard struct {
 	Todos      []SessionTodoDTO `json:"todos"`
 	TodosDone  int              `json:"todosDone"`
 	TodosTotal int              `json:"todosTotal"`
+	// OpenQuestions are the BACI-53 ask_user_question rows the agent
+	// posed and the user hasn't answered or dismissed yet. Drives the
+	// "user input needed" badge and modal trigger in the Agents view.
+	OpenQuestions []QuestionDTO `json:"openQuestions"`
 }
 
 // Assemble returns one AgentCard per registered session in scope.
@@ -139,6 +158,14 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo) ([]AgentCa
 		sessionIDs = append(sessionIDs, s.SessionID)
 	}
 	todosByPK, err := c.ListTodosBySessions(ctx, sessionIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	// Bulk-read every session's open BACI-53 questions in one query
+	// — same shape as ListTodosBySessions so the 10s poll stays a
+	// single round trip per repo.
+	questionsByPK, err := c.ListOpenQuestionsBySessions(ctx, sessionIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -202,6 +229,20 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo) ([]AgentCa
 				todosDone++
 			}
 		}
+		sessQuestions := questionsByPK[s.ID]
+		questionsDTO := make([]QuestionDTO, 0, len(sessQuestions))
+		for _, q := range sessQuestions {
+			header := ""
+			if len(q.Payload.Questions) > 0 {
+				header = q.Payload.Questions[0].Header
+			}
+			questionsDTO = append(questionsDTO, QuestionDTO{
+				ID:       q.ID,
+				IssueKey: q.IssueKey,
+				Header:   header,
+				AskedAt:  q.AskedAt,
+			})
+		}
 		card := AgentCard{
 			SessionID:         s.SessionID,
 			AgentName:         s.AgentName,
@@ -219,6 +260,7 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo) ([]AgentCa
 			Todos:             todosDTO,
 			TodosDone:         todosDone,
 			TodosTotal:        len(todosDTO),
+			OpenQuestions:     questionsDTO,
 		}
 		view, err := c.ShowAgentSession(ctx, s.SessionID)
 		if err != nil {

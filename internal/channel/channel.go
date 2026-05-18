@@ -22,6 +22,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/mrgeoffrich/bacio/internal/model"
 )
 
 // Event is one unit of work pushed into the session. It maps onto a
@@ -68,6 +70,34 @@ type Source interface {
 	// Register has fired (or any other terminal signal it tracks). Best
 	// effort: errors are logged, not fatal.
 	EnsureSetup(ctx context.Context) error
+
+	// AskQuestion records a clarification question the agent posed
+	// via the bacio MCP `ask_user_question` tool. The source resolves
+	// session_id / agent identity / open-claim issue key on its side
+	// and returns the row's request_uuid — the channel uses it as
+	// the in-memory key to correlate the parked JSON-RPC reply with
+	// the answered row on the next poll tick. An error here means
+	// the row couldn't be inserted; the channel surfaces it as an
+	// MCP tool error so the agent can fall back to the built-in
+	// AskUserQuestion (or report the failure).
+	AskQuestion(ctx context.Context, payload model.QuestionPayload) (string, error)
+
+	// DrainAnsweredQuestions returns the answered + cancelled rows
+	// for the channel's session. The channel iterates and matches
+	// each row's request_uuid against its in-memory pending map; a
+	// hit fires the parked MCP tool result (answer or error). Per-
+	// process dedupe means returning the same row twice across two
+	// ticks is fine — the channel just no-ops the second time. Best
+	// effort: errors are logged.
+	DrainAnsweredQuestions(ctx context.Context) ([]model.SessionQuestion, error)
+
+	// AbandonOpenQuestions is called once at channel startup. Any
+	// rows the previous channel process parked on are flipped to
+	// `abandoned` — the parked JSON-RPC reply is gone with the
+	// previous process, and the agent restarted with the channel,
+	// so there's no path to recover. Returns the number of rows
+	// abandoned (for logging) and any error.
+	AbandonOpenQuestions(ctx context.Context) (int, error)
 }
 
 // Server speaks the channel protocol over a reader/writer pair (stdin
@@ -96,6 +126,23 @@ type Server struct {
 	// dispatch on its first tick before the handshake completes" bug.
 	initialized chan struct{}
 	initOnce    sync.Once
+
+	// pending parks ask_user_question MCP replies until the user
+	// answers (or dismisses) the row. Keyed by request_uuid (the
+	// id the source returns from AskQuestion). drainAnsweredQuestions
+	// pulls the matching JSON-RPC id back out, fires the result,
+	// and deletes the entry. Touched from both the read loop
+	// (insert on a fresh ask) and the poller (drain), so it carries
+	// its own mutex.
+	pendingMu sync.Mutex
+	pending   map[string]json.RawMessage
+
+	// poller drives whether the drain step is reachable. Set true
+	// by serve when withPoller is on; the read loop checks it before
+	// accepting an ask_user_question call so a no-poller channel
+	// (ServeMCP path) refuses the tool with a clear message rather
+	// than parking a reply that will never be delivered.
+	poller bool
 }
 
 // New builds a channel server. name is the source attribute Claude Code
@@ -122,6 +169,7 @@ func New(src Source, name, version string, in io.Reader, out io.Writer, logf fun
 		logf:         logf,
 		initialized:  make(chan struct{}),
 		pollInterval: 3 * time.Second,
+		pending:      map[string]json.RawMessage{},
 	}
 }
 
@@ -150,12 +198,40 @@ func (s *Server) ServeMCP(ctx context.Context) error {
 	return s.serve(ctx, false)
 }
 
+// runReadLoopOnlyForTest is a test-only entry point that runs the
+// read loop with the poller flag forced on (so ask_user_question is
+// advertised and accepted) but without starting the poller
+// goroutine. Tests drive drainAnsweredQuestions by hand for
+// deterministic timing.
+func (s *Server) runReadLoopOnlyForTest(ctx context.Context) error {
+	s.poller = true
+	return s.readLoop(ctx)
+}
+
 // serve is the shared poller-optional core. When withPoller is false
 // the poller goroutine isn't started and pollDone is closed up front,
 // so the read loop's exit still returns immediately.
 func (s *Server) serve(ctx context.Context, withPoller bool) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	s.poller = withPoller
+
+	// Startup sweep: any open questions our session left dangling
+	// have lost their parked reply (the previous channel process
+	// owned the in-memory map; the agent restarted with the
+	// channel). The source's AbandonOpenQuestions flips them to
+	// `abandoned` so the audit log shows the ask happened and was
+	// never answered. Best effort — a failure here just means the
+	// next tick will surface a stale row in DrainAnsweredQuestions
+	// (the channel won't have it in pending, so the row is ignored).
+	if withPoller {
+		if n, err := s.src.AbandonOpenQuestions(ctx); err != nil {
+			s.logf("bacio channel: abandon open questions: %v", err)
+		} else if n > 0 {
+			s.logf("bacio channel: abandoned %d open questions from previous session", n)
+		}
+	}
 
 	pollDone := make(chan struct{})
 	if withPoller {
@@ -241,7 +317,15 @@ func (s *Server) handle(ctx context.Context, msg *rpcMessage) {
 	case "ping":
 		s.reply(msg.ID, map[string]any{})
 	case "tools/list":
-		s.reply(msg.ID, map[string]any{"tools": []any{replyToolSchema(), registerToolSchema()}})
+		// ask_user_question only advertises when the poller is on —
+		// without the drain step a parked reply would never be
+		// delivered. See ServeMCP / Run split + the BACIO_AGENT_MODE
+		// gate in internal/cli/channel.go.
+		tools := []any{replyToolSchema(), registerToolSchema()}
+		if s.poller {
+			tools = append(tools, askUserQuestionToolSchema())
+		}
+		s.reply(msg.ID, map[string]any{"tools": tools})
 	case "tools/call":
 		s.handleToolCall(ctx, msg)
 	default:
@@ -329,6 +413,72 @@ func registerToolSchema() map[string]any {
 	}
 }
 
+// askUserQuestionToolSchema describes the bacio MCP `ask_user_question`
+// tool. Input shape mirrors the built-in AskUserQuestion so an agent
+// can build the same payload either way — the description is the
+// soft-nudge pointing supervised agents at the bacio variant.
+func askUserQuestionToolSchema() map[string]any {
+	return map[string]any{
+		"name": "ask_user_question",
+		"description": "Ask the user one or more multi-choice clarification questions through the bacio UI. " +
+			"The call blocks until the user answers (or dismisses). Prefer this over the built-in " +
+			"AskUserQuestion when running under bacio — the user sees the question in their TUI / " +
+			"desktop / web window where the active issue context is right there, and the exchange " +
+			"is recorded in bacio's audit log. " +
+			"Input shape mirrors AskUserQuestion: a `questions` array with 1-4 items, each carrying " +
+			"`question` text, a short `header` tag (<=12 chars), 2-4 `options` (each {label, optional description}), " +
+			"and an optional `multiSelect` boolean. " +
+			"The tool returns once the user submits: {questions: [...], answers: {question: <label|labels>}}. " +
+			"If the user dismisses the question the tool errors with \"user dismissed the question\" — " +
+			"handle that the same as the built-in returning with no answer.",
+		"inputSchema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"questions": map[string]any{
+					"type":        "array",
+					"description": "Between 1 and 4 questions to put to the user.",
+					"minItems":    1,
+					"maxItems":    4,
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"question": map[string]any{
+								"type":        "string",
+								"description": "The full question text shown to the user.",
+							},
+							"header": map[string]any{
+								"type":        "string",
+								"description": "Short tag rendered next to the question (<=12 characters).",
+								"maxLength":   12,
+							},
+							"multiSelect": map[string]any{
+								"type":        "boolean",
+								"description": "True to let the user pick multiple options (checkboxes); false/absent for a single radio.",
+							},
+							"options": map[string]any{
+								"type":        "array",
+								"description": "Between 2 and 4 choices.",
+								"minItems":    2,
+								"maxItems":    4,
+								"items": map[string]any{
+									"type": "object",
+									"properties": map[string]any{
+										"label":       map[string]any{"type": "string", "description": "The choice label shown to the user."},
+										"description": map[string]any{"type": "string", "description": "Optional fine-print under the label."},
+									},
+									"required": []string{"label"},
+								},
+							},
+						},
+						"required": []string{"question", "header", "options"},
+					},
+				},
+			},
+			"required": []string{"questions"},
+		},
+	}
+}
+
 func (s *Server) handleToolCall(ctx context.Context, msg *rpcMessage) {
 	var head struct {
 		Name      string          `json:"name"`
@@ -343,6 +493,8 @@ func (s *Server) handleToolCall(ctx context.Context, msg *rpcMessage) {
 		s.handleReplyCall(ctx, msg.ID, head.Arguments)
 	case "register":
 		s.handleRegisterCall(ctx, msg.ID, head.Arguments)
+	case "ask_user_question":
+		s.handleAskUserQuestionCall(ctx, msg.ID, head.Arguments)
 	default:
 		s.replyError(msg.ID, -32602, "unknown tool: "+head.Name)
 	}
@@ -409,6 +561,49 @@ func (s *Server) handleRegisterCall(ctx context.Context, id json.RawMessage, raw
 	s.toolResult(id, false, msg)
 }
 
+// handleAskUserQuestionCall validates the payload, asks the source
+// to record an open question, and parks the JSON-RPC reply against
+// the source's returned request_uuid. The reply is delivered later
+// by drainAnsweredQuestions when the user answers (or dismisses).
+//
+// On a no-poller channel (ServeMCP path — env var unset) the tool
+// isn't advertised in tools/list, but a paranoid agent might still
+// try it; we refuse with a clear tool-error so the agent can fall
+// back to the built-in AskUserQuestion rather than waiting forever.
+func (s *Server) handleAskUserQuestionCall(ctx context.Context, id json.RawMessage, rawArgs json.RawMessage) {
+	if !s.poller {
+		s.toolResult(id, true, "ask_user_question requires the bacio channel to be running its poller (set BACIO_AGENT_MODE=1 in the launching shell)")
+		return
+	}
+	var args model.QuestionPayload
+	if len(rawArgs) > 0 {
+		if err := json.Unmarshal(rawArgs, &args); err != nil {
+			s.toolResult(id, true, "invalid ask_user_question arguments: "+err.Error())
+			return
+		}
+	}
+	if err := model.ValidateQuestionPayload(args); err != nil {
+		s.toolResult(id, true, "ask_user_question payload rejected: "+err.Error())
+		return
+	}
+	requestUUID, err := s.src.AskQuestion(ctx, args)
+	if err != nil {
+		s.logf("bacio channel: ask_user_question: %v", err)
+		s.toolResult(id, true, "could not record question: "+err.Error())
+		return
+	}
+	// Park the reply. We copy the id (RawMessage is a slice over the
+	// read-loop's scanner buffer; the next Scan would overwrite it).
+	idCopy := make(json.RawMessage, len(id))
+	copy(idCopy, id)
+	s.pendingMu.Lock()
+	s.pending[requestUUID] = idCopy
+	s.pendingMu.Unlock()
+	s.logf("bacio channel: ask_user_question parked %s (%d questions)", requestUUID, len(args.Questions))
+	// No s.reply / toolResult here — the reply is parked until the
+	// drain step fires it.
+}
+
 // ---------- poller ----------
 
 // firstPushDelay is the settle wait between receiving
@@ -455,11 +650,12 @@ func (s *Server) poll(ctx context.Context) {
 }
 
 // tick is one poll cycle: heartbeat (record liveness), ensure-setup
-// (idempotently queue the call-register dispatch), then drain (push
-// queued work). EnsureSetup runs every tick — the source is responsible
-// for being a no-op once register has fired. Heartbeat runs every tick
-// regardless of whether there's anything to drain — it's how the
-// channel stays correlatable.
+// (idempotently queue the call-register dispatch), drain (push
+// queued work), then drain-answered-questions (deliver any settled
+// ask_user_question replies). EnsureSetup runs every tick — the
+// source is responsible for being a no-op once register has fired.
+// Heartbeat runs every tick regardless of whether there's anything
+// to drain — it's how the channel stays correlatable.
 func (s *Server) tick(ctx context.Context) {
 	if err := s.src.Heartbeat(ctx); err != nil {
 		s.logf("bacio channel: heartbeat: %v", err)
@@ -468,6 +664,60 @@ func (s *Server) tick(ctx context.Context) {
 		s.logf("bacio channel: ensure-setup: %v", err)
 	}
 	s.drainOnce(ctx)
+	s.drainAnsweredQuestions(ctx)
+}
+
+// drainAnsweredQuestions pulls every answered or cancelled
+// ask_user_question row for this session and fires the matching
+// parked MCP reply. Rows we don't have a parked reply for are
+// ignored — they belong to a previous channel process whose pending
+// map is gone (the startup AbandonOpenQuestions sweep flips
+// previous-session rows to `abandoned` so they don't appear here,
+// but this guard covers the edge where two channel processes raced
+// on the same session).
+func (s *Server) drainAnsweredQuestions(ctx context.Context) {
+	rows, err := s.src.DrainAnsweredQuestions(ctx)
+	if err != nil {
+		s.logf("bacio channel: drain answered questions: %v", err)
+		return
+	}
+	for _, q := range rows {
+		s.pendingMu.Lock()
+		id, ok := s.pending[q.RequestUUID]
+		if ok {
+			delete(s.pending, q.RequestUUID)
+		}
+		s.pendingMu.Unlock()
+		if !ok {
+			continue
+		}
+		switch q.State {
+		case model.QuestionAnswered:
+			// AskUserQuestion's documented return shape is the
+			// questions array echoed back alongside an answers
+			// map. We deliver both so the agent's parsing code
+			// has everything it had on the way in.
+			body, err := json.Marshal(map[string]any{
+				"questions": q.Payload.Questions,
+				"answers":   q.Answers,
+			})
+			if err != nil {
+				s.logf("bacio channel: marshal answer for %s: %v", q.RequestUUID, err)
+				s.toolResult(id, true, "internal error: could not encode answer JSON")
+				continue
+			}
+			s.toolResult(id, false, string(body))
+		case model.QuestionCancelled:
+			s.toolResult(id, true, "user dismissed the question without answering")
+		default:
+			// abandoned / open shouldn't be returned by
+			// DrainSettledQuestionsForSession, but if a source
+			// implementation slips, surface it as a tool error
+			// rather than silently sit on it.
+			s.logf("bacio channel: unexpected drained state %q for %s", q.State, q.RequestUUID)
+			s.toolResult(id, true, fmt.Sprintf("unexpected question state %q; the channel could not deliver an answer", q.State))
+		}
+	}
 }
 
 func (s *Server) drainOnce(ctx context.Context) {

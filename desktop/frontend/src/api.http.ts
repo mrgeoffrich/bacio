@@ -174,6 +174,53 @@ export interface SessionTodoDTO {
   status: string;
 }
 
+// QuestionDTO is one open BACI-53 ask_user_question row — the
+// minimal shape the agent card needs to render its "user input
+// needed" badge. Header is the question's short tag; the full
+// payload is fetched via getSessionQuestion when the user opens
+// the modal.
+export interface QuestionDTO {
+  id: number;
+  issueKey?: string;
+  header: string;
+  askedAt: string;
+}
+
+// SessionQuestion is the full row returned by the per-question
+// endpoints. Mirrors the Go shape (snake_case is the wire format
+// for these — the agent registry was built before we standardised
+// camelCase, and questions match the existing dispatch/claim
+// shapes for consistency).
+export interface SessionQuestionPayload {
+  questions: SessionQuestionItem[];
+}
+
+export interface SessionQuestionItem {
+  question: string;
+  header: string;
+  multiSelect?: boolean;
+  options: SessionQuestionOption[];
+}
+
+export interface SessionQuestionOption {
+  label: string;
+  description?: string;
+}
+
+export interface SessionQuestionRow {
+  id: number;
+  session_id: string;
+  request_uuid: string;
+  issue_key?: string;
+  payload: SessionQuestionPayload;
+  answers?: Record<string, unknown>;
+  state: 'open' | 'answered' | 'cancelled' | 'abandoned';
+  asked_at: string;
+  answered_at?: string;
+  asked_by: string;
+  answered_by?: string;
+}
+
 export interface AgentCard {
   sessionId: string;
   agentName: string;
@@ -195,6 +242,9 @@ export interface AgentCard {
   todos: SessionTodoDTO[];
   todosDone: number;
   todosTotal: number;
+  // BACI-53: open ask_user_question rows. Empty when the agent
+  // isn't waiting on the user.
+  openQuestions: QuestionDTO[];
 }
 
 export interface DocSummary {
@@ -692,7 +742,30 @@ export async function listAgents(repoPrefix: string): Promise<AgentCard[]> {
     claims: c.claims ?? [],
     dispatches: c.dispatches ?? [],
     todos: c.todos ?? [],
+    openQuestions: c.openQuestions ?? [],
   }));
+}
+
+// BACI-53 ask_user_question endpoints.
+
+export async function getSessionQuestion(id: number): Promise<SessionQuestionRow> {
+  return await call<SessionQuestionRow>(`/agents/questions/${id}`);
+}
+
+export async function answerSessionQuestion(
+  id: number,
+  answers: Record<string, unknown>,
+): Promise<SessionQuestionRow> {
+  return await call<SessionQuestionRow>(`/agents/questions/${id}/answer`, {
+    method: 'POST',
+    body: { answers },
+  });
+}
+
+export async function cancelSessionQuestion(id: number): Promise<SessionQuestionRow> {
+  return await call<SessionQuestionRow>(`/agents/questions/${id}/cancel`, {
+    method: 'POST',
+  });
 }
 
 interface ApiDocument {

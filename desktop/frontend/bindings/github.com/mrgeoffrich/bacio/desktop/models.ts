@@ -10,6 +10,9 @@ import { Create as $Create } from "@wailsio/runtime";
 import * as agentcards$0 from "../internal/agentcards/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as boardcards$0 from "../internal/boardcards/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as leaderservice$0 from "../internal/leaderservice/models.js";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
@@ -74,81 +77,26 @@ export class Board {
 }
 
 /**
- * BoardCard is a kanban card — one bacio issue, shaped for the imported UI kit.
+ * BoardCard is the kanban-card wire shape, hoisted into
+ * internal/boardcards so the bacio api can serve the same payload
+ * over REST (mirrors the BACI-50 agentcards extraction). The alias
+ * keeps the Wails-bound surface unchanged — the generated TS
+ * bindings still point at the same struct name from the desktop's
+ * perspective, so api.ts and components don't need to update their
+ * imports.
  */
-export class BoardCard {
-    "key": string;
-    "column": string;
-    "columnLabel": string;
-    "title": string;
-    "tags": string[];
-    "assignees": string[];
-    "claude": boolean;
+export const BoardCard = boardcards$0.BoardCard;
 
-    /**
-     * Taken is the derived "an agent is actively holding this issue"
-     * signal — true while the issue has an open agent claim. The Board
-     * bolds taken cards and disables drag / per-card actions on them.
-     */
-    "taken": boolean;
-
-    /**
-     * WaitingForClaim is true between a dispatch being queued against
-     * this issue and an agent recording an open claim — the UI shows a
-     * spinner and disables drag / the per-card action while it's set.
-     * Cleared the moment a claim lands. `taken` takes render precedence.
-     */
-    "waitingForClaim": boolean;
-
-    /** Creates a new BoardCard instance. */
-    constructor($$source: Partial<BoardCard> = {}) {
-        if (!("key" in $$source)) {
-            this["key"] = "";
-        }
-        if (!("column" in $$source)) {
-            this["column"] = "";
-        }
-        if (!("columnLabel" in $$source)) {
-            this["columnLabel"] = "";
-        }
-        if (!("title" in $$source)) {
-            this["title"] = "";
-        }
-        if (!("tags" in $$source)) {
-            this["tags"] = [];
-        }
-        if (!("assignees" in $$source)) {
-            this["assignees"] = [];
-        }
-        if (!("claude" in $$source)) {
-            this["claude"] = false;
-        }
-        if (!("taken" in $$source)) {
-            this["taken"] = false;
-        }
-        if (!("waitingForClaim" in $$source)) {
-            this["waitingForClaim"] = false;
-        }
-
-        Object.assign(this, $$source);
-    }
-
-    /**
-     * Creates a new BoardCard instance from a string or object.
-     */
-    static createFrom($$source: any = {}): BoardCard {
-        const $$createField4_0 = $$createType0;
-        const $$createField5_0 = $$createType0;
-        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
-        if ("tags" in $$parsedSource) {
-            $$parsedSource["tags"] = $$createField4_0($$parsedSource["tags"]);
-        }
-        if ("assignees" in $$parsedSource) {
-            $$parsedSource["assignees"] = $$createField5_0($$parsedSource["assignees"]);
-        }
-        return new BoardCard($$parsedSource as Partial<BoardCard>);
-    }
-}
+/**
+ * BoardCard is the kanban-card wire shape, hoisted into
+ * internal/boardcards so the bacio api can serve the same payload
+ * over REST (mirrors the BACI-50 agentcards extraction). The alias
+ * keeps the Wails-bound surface unchanged — the generated TS
+ * bindings still point at the same struct name from the desktop's
+ * perspective, so api.ts and components don't need to update their
+ * imports.
+ */
+export type BoardCard = boardcards$0.BoardCard;
 
 /**
  * BoardColumn is one kanban column — one bacio issue state.
@@ -429,7 +377,7 @@ export class FeatureDetail {
      * Creates a new FeatureDetail instance from a string or object.
      */
     static createFrom($$source: any = {}): FeatureDetail {
-        const $$createField5_0 = $$createType2;
+        const $$createField5_0 = $$createType1;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("issues" in $$parsedSource) {
             $$parsedSource["issues"] = $$createField5_0($$parsedSource["issues"]);
@@ -617,7 +565,7 @@ export class HistoryPage {
      * Creates a new HistoryPage instance from a string or object.
      */
     static createFrom($$source: any = {}): HistoryPage {
-        const $$createField0_0 = $$createType4;
+        const $$createField0_0 = $$createType3;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("entries" in $$parsedSource) {
             $$parsedSource["entries"] = $$createField0_0($$parsedSource["entries"]);
@@ -681,14 +629,14 @@ export class IssueBriefDTO {
      * Creates a new IssueBriefDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): IssueBriefDTO {
-        const $$createField0_0 = $$createType5;
-        const $$createField1_0 = $$createType7;
-        const $$createField2_0 = $$createType8;
-        const $$createField3_0 = $$createType10;
-        const $$createField4_0 = $$createType12;
-        const $$createField5_0 = $$createType14;
-        const $$createField6_0 = $$createType16;
-        const $$createField9_0 = $$createType0;
+        const $$createField0_0 = $$createType4;
+        const $$createField1_0 = $$createType6;
+        const $$createField2_0 = $$createType7;
+        const $$createField3_0 = $$createType9;
+        const $$createField4_0 = $$createType11;
+        const $$createField5_0 = $$createType13;
+        const $$createField6_0 = $$createType15;
+        const $$createField9_0 = $$createType16;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("issue" in $$parsedSource) {
             $$parsedSource["issue"] = $$createField0_0($$parsedSource["issue"]);
@@ -790,12 +738,12 @@ export class IssueDetail {
      * Creates a new IssueDetail instance from a string or object.
      */
     static createFrom($$source: any = {}): IssueDetail {
-        const $$createField5_0 = $$createType0;
-        const $$createField6_0 = $$createType0;
-        const $$createField8_0 = $$createType14;
-        const $$createField9_0 = $$createType10;
+        const $$createField5_0 = $$createType16;
+        const $$createField6_0 = $$createType16;
+        const $$createField8_0 = $$createType13;
+        const $$createField9_0 = $$createType9;
         const $$createField10_0 = $$createType18;
-        const $$createField11_0 = $$createType16;
+        const $$createField11_0 = $$createType15;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField5_0($$parsedSource["tags"]);
@@ -879,8 +827,8 @@ export class IssueMetaDTO {
      * Creates a new IssueMetaDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): IssueMetaDTO {
-        const $$createField5_0 = $$createType0;
-        const $$createField6_0 = $$createType0;
+        const $$createField5_0 = $$createType16;
+        const $$createField6_0 = $$createType16;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField5_0($$parsedSource["tags"]);
@@ -953,7 +901,7 @@ export class LinkedDocDTO {
      * Creates a new LinkedDocDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): LinkedDocDTO {
-        const $$createField4_0 = $$createType0;
+        const $$createField4_0 = $$createType16;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("linkedVia" in $$parsedSource) {
             $$parsedSource["linkedVia"] = $$createField4_0($$parsedSource["linkedVia"]);
@@ -1061,8 +1009,8 @@ export class PromptTemplateDTO {
      * Creates a new PromptTemplateDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): PromptTemplateDTO {
-        const $$createField7_0 = $$createType0;
-        const $$createField8_0 = $$createType0;
+        const $$createField7_0 = $$createType16;
+        const $$createField8_0 = $$createType16;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("allowedStates" in $$parsedSource) {
             $$parsedSource["allowedStates"] = $$createField7_0($$parsedSource["allowedStates"]);
@@ -1149,23 +1097,23 @@ export class RelationsDTO {
 }
 
 // Private type creation functions
-const $$createType0 = $Create.Array($Create.Any);
-const $$createType1 = FeatureLinkedIssue.createFrom;
-const $$createType2 = $Create.Array($$createType1);
-const $$createType3 = HistoryEntryDTO.createFrom;
-const $$createType4 = $Create.Array($$createType3);
-const $$createType5 = IssueMetaDTO.createFrom;
-const $$createType6 = FeatureRefDTO.createFrom;
-const $$createType7 = $Create.Nullable($$createType6);
-const $$createType8 = RelationsDTO.createFrom;
-const $$createType9 = PRDTO.createFrom;
-const $$createType10 = $Create.Array($$createType9);
-const $$createType11 = LinkedDocDTO.createFrom;
-const $$createType12 = $Create.Array($$createType11);
-const $$createType13 = CommentDTO.createFrom;
-const $$createType14 = $Create.Array($$createType13);
-const $$createType15 = agentcards$0.ClaimantDTO.createFrom;
-const $$createType16 = $Create.Array($$createType15);
+const $$createType0 = FeatureLinkedIssue.createFrom;
+const $$createType1 = $Create.Array($$createType0);
+const $$createType2 = HistoryEntryDTO.createFrom;
+const $$createType3 = $Create.Array($$createType2);
+const $$createType4 = IssueMetaDTO.createFrom;
+const $$createType5 = FeatureRefDTO.createFrom;
+const $$createType6 = $Create.Nullable($$createType5);
+const $$createType7 = RelationsDTO.createFrom;
+const $$createType8 = PRDTO.createFrom;
+const $$createType9 = $Create.Array($$createType8);
+const $$createType10 = LinkedDocDTO.createFrom;
+const $$createType11 = $Create.Array($$createType10);
+const $$createType12 = CommentDTO.createFrom;
+const $$createType13 = $Create.Array($$createType12);
+const $$createType14 = agentcards$0.ClaimantDTO.createFrom;
+const $$createType15 = $Create.Array($$createType14);
+const $$createType16 = $Create.Array($Create.Any);
 const $$createType17 = DocLinkDTO.createFrom;
 const $$createType18 = $Create.Array($$createType17);
 const $$createType19 = RelationDTO.createFrom;

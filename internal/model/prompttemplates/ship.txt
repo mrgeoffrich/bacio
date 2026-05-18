@@ -4,3 +4,4 @@ Make sure main is up to date then create a worktree to work in.
 Ship {{issue_id}}: merge the PR an deal with any merge issues and then once its merged put the issue into the done status.
 Clean up and remove the worktree.
 Finally unclaim the issue.
+If you need clarification, prefer `mcp__bacio__ask_user_question` over the built-in AskUserQuestion — it surfaces in the user's bacio TUI/desktop/web window with the issue context already in front of them.

@@ -556,6 +556,133 @@ func (c *localClient) ListTodosBySessions(ctx context.Context, sessionIDs []stri
 	return c.store.ListTodosBySessions(sessionIDs)
 }
 
+// AddSessionQuestion is the channel's entry point for the BACI-53
+// ask_user_question MCP tool. The channel resolves session_id /
+// agent identity / open-claim issue key on its side, then hands
+// the validated payload to the store. Writes a question.ask audit
+// row so `bacio history --op question.ask` surfaces every ask.
+func (c *localClient) AddSessionQuestion(ctx context.Context, in AddSessionQuestionInput) (*model.SessionQuestion, error) {
+	q, err := c.store.AddSessionQuestion(store.AddSessionQuestionIn{
+		SessionID: in.SessionID,
+		IssueKey:  in.IssueKey,
+		Payload:   in.Payload,
+		AskedBy:   in.AskedBy,
+	})
+	if err != nil {
+		return nil, err
+	}
+	c.recordOp(model.HistoryEntry{
+		Actor: in.AskedBy, Op: "question.ask", Kind: "question",
+		TargetID: &q.ID, TargetLabel: q.RequestUUID,
+		Details: questionAuditDetails(q),
+	})
+	return q, nil
+}
+
+func (c *localClient) ListSessionQuestions(ctx context.Context, sessionID string, states []model.QuestionState) ([]*model.SessionQuestion, error) {
+	return c.store.ListSessionQuestions(sessionID, states)
+}
+
+func (c *localClient) ListOpenQuestionsBySessions(ctx context.Context, sessionIDs []string) (map[int64][]*model.SessionQuestion, error) {
+	return c.store.ListOpenQuestionsBySessions(sessionIDs)
+}
+
+func (c *localClient) GetSessionQuestion(ctx context.Context, id int64) (*model.SessionQuestion, error) {
+	return c.store.GetSessionQuestion(id)
+}
+
+// AnswerSessionQuestion submits the user's answer. dryRun runs
+// every validator (payload-shape, state-guard) but writes nothing
+// — the returned row is the existing open row, unchanged.
+func (c *localClient) AnswerSessionQuestion(ctx context.Context, id int64, answers model.QuestionAnswers, dryRun bool) (*model.SessionQuestion, error) {
+	current, err := c.store.GetSessionQuestion(id)
+	if err != nil {
+		return nil, err
+	}
+	if current.State != model.QuestionOpen {
+		return nil, fmt.Errorf("question %d is %s; only open questions can be answered", id, current.State)
+	}
+	if err := model.ValidateQuestionAnswers(current.Payload, answers); err != nil {
+		return nil, err
+	}
+	if dryRun {
+		// Project the post-write shape so the caller sees what a real
+		// answer would look like, without touching the row.
+		projected := *current
+		projected.State = model.QuestionAnswered
+		projected.Answers = answers
+		now := time.Now().UTC()
+		projected.AnsweredAt = &now
+		projected.AnsweredBy = c.actor
+		return &projected, nil
+	}
+	updated, err := c.store.AnswerSessionQuestion(id, answers, c.actor)
+	if err != nil {
+		return nil, err
+	}
+	c.recordOp(model.HistoryEntry{
+		Op: "question.answer", Kind: "question",
+		TargetID: &updated.ID, TargetLabel: updated.RequestUUID,
+		Details: questionAuditDetails(updated),
+	})
+	return updated, nil
+}
+
+// CancelSessionQuestion dismisses an open question. dryRun runs
+// the state guard but writes nothing.
+func (c *localClient) CancelSessionQuestion(ctx context.Context, id int64, dryRun bool) (*model.SessionQuestion, error) {
+	current, err := c.store.GetSessionQuestion(id)
+	if err != nil {
+		return nil, err
+	}
+	if current.State != model.QuestionOpen {
+		return nil, fmt.Errorf("question %d is %s; only open questions can be cancelled", id, current.State)
+	}
+	if dryRun {
+		projected := *current
+		projected.State = model.QuestionCancelled
+		now := time.Now().UTC()
+		projected.AnsweredAt = &now
+		projected.AnsweredBy = c.actor
+		return &projected, nil
+	}
+	updated, err := c.store.CancelSessionQuestion(id, c.actor)
+	if err != nil {
+		return nil, err
+	}
+	c.recordOp(model.HistoryEntry{
+		Op: "question.cancel", Kind: "question",
+		TargetID: &updated.ID, TargetLabel: updated.RequestUUID,
+		Details: questionAuditDetails(updated),
+	})
+	return updated, nil
+}
+
+func (c *localClient) AbandonOpenQuestionsForSession(ctx context.Context, sessionID string) (int, error) {
+	// No audit row — janitor work the channel runs at startup, see
+	// the comment on store.AbandonOpenQuestionsForSession.
+	return c.store.AbandonOpenQuestionsForSession(sessionID)
+}
+
+func (c *localClient) DrainSettledQuestionsForSession(ctx context.Context, sessionID string) ([]*model.SessionQuestion, error) {
+	return c.store.DrainSettledQuestionsForSession(sessionID)
+}
+
+// questionAuditDetails composes a short human-readable line for
+// the audit-log Details column. Mirrors the dispatch convention —
+// pick out the high-signal fields without dumping the full payload.
+func questionAuditDetails(q *model.SessionQuestion) string {
+	parts := []string{"session=" + q.SessionID}
+	if q.IssueKey != "" {
+		parts = append(parts, "issue="+q.IssueKey)
+	}
+	parts = append(parts, fmt.Sprintf("state=%s", q.State))
+	if n := len(q.Payload.Questions); n > 0 {
+		parts = append(parts, fmt.Sprintf("questions=%d", n))
+	}
+	return strings.Join(parts, " ")
+}
+
 func agentRegisterDetails(sess *model.AgentSession) string {
 	var parts []string
 	if sess.AgentName != "" {

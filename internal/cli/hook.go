@@ -246,6 +246,12 @@ func emitSessionStartContext(h *hookContext, sess *model.AgentSession) {
 		// agents.json has the slug so the briefing can name the agent
 		// and surface any issues already assigned to it.
 		fmt.Fprintf(&b, "[bacio] Session opened against repo %s as %s (waiting for `register` from the bacio channel to complete).\n", h.repo.Prefix, h.slug)
+		// BACI-53 soft-nudge: point the agent at the bacio
+		// MCP ask_user_question tool. The user sees the
+		// question in their TUI / desktop / web window where
+		// the issue context is already in front of them, and
+		// the exchange is recorded in bacio's audit log.
+		fmt.Fprintln(&b, "Use `mcp__bacio__ask_user_question` for any clarification — it surfaces in bacio's UI rather than Claude Code's own terminal modal.")
 
 		if view, err := h.c.ShowAgentSession(context.Background(), sess.SessionID); err == nil {
 			var open []string

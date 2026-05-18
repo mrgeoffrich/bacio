@@ -49,3 +49,31 @@ Note: when changing or testing the TUI make sure to read `docs/tui-cookbook.md` 
 A `bacio channel`-equipped session is a **thin scheduler** for dispatched work: when an issue-tied `<channel>` event arrives, the parent session immediately calls `Task(subagent_type="general-purpose", model="opus", prompt=<worker brief>)` and forwards the subagent's one-line summary. All file reads / edits / bash calls happen inside the subagent's context, which is discarded on return, so the parent's context budget stays at "dispatch arrived → Task call → summary → reply" size across dozens of jobs (BACI-52). Don't add code that grows the parent's context per dispatch (e.g. don't push dispatch metadata back into the parent's TodoWrite).
 
 The contract that tells the parent to delegate is the **dispatch preamble** — a reserved row (`slug = _dispatch_preamble`) in the `prompt_templates` table that `ComposeDispatchPayload` prepends to every per-mode template body at dispatch time. Edit it the same way as any other template: `bacio settings template show _dispatch_preamble` / `bacio settings template set _dispatch_preamble --body "..."`, or via the Settings panel in the TUI / desktop app. The embedded default body lives in [`internal/model/prompttemplates/_dispatch_preamble.txt`](internal/model/prompttemplates/_dispatch_preamble.txt); the row is backfilled into existing DBs by the `backfillDispatchPreamble` migration step. Full design lives in [`docs/agent-dispatch.md`](docs/agent-dispatch.md) under "Subagent delegation".
+
+## `agent_session_questions` — agent → user clarification (BACI-53)
+
+The bacio channel exposes a third MCP tool, `ask_user_question`, that
+parks an agent's clarification question in `agent_session_questions`
+until the user submits an answer through the TUI, desktop, or web
+modal. The channel keeps an in-memory `request_uuid → JSON-RPC id`
+map so it can re-correlate the parked reply with the answered row on
+the next poll tick (3s), then delivers `{questions, answers}` (or an
+MCP tool error on cancel) back to the agent's tool call.
+
+State lifecycle: `open → answered | cancelled | abandoned`. The
+channel flips orphaned rows to `abandoned` at startup — the previous
+channel process owned the parked reply, and the agent restarted with
+the channel, so there's no path to recover.
+
+The drain step is the fourth thing `internal/channel.tick` does each
+poll, gated on `BACIO_AGENT_MODE` via the existing `Run` vs `ServeMCP`
+split: an interactive session that didn't opt in to agent mode never
+advertises the tool, and any call slips through with a clear "channel
+poller is parked" error rather than parking forever.
+
+Surfaces: TUI Agents tab shows a `?N` counter and lists the open rows
+in the drill-down (full answer overlay is a follow-up); the desktop
++ web Agents view renders a `? N` badge that pops a modal with each
+question rendered as radios/checkboxes plus an "Other" free-text per
+question. Same modal is used in web mode against `bacio api`'s
+`/agents/questions/{id}/answer` route.

@@ -307,6 +307,16 @@ func (c *remoteClient) ListTodosBySessions(ctx context.Context, sessionIDs []str
 	return nil, remoteAgentNotSupported("todos")
 }
 
+// Agent questions (BACI-53) — local-only at the channel/hook layer.
+// AnswerSessionQuestion / CancelSessionQuestion / ListSessionQuestions
+// are reachable over REST (Phase 4) so the desktop and web bundle
+// route through the typed HTTP routes; the CLI client's remote-mode
+// wiring for those verbs is the typical local-first / remote-follow-up
+// pattern. AddSessionQuestion / AbandonOpenQuestionsForSession /
+// DrainSettledQuestionsForSession stay channel-internal and never
+// get HTTP parity (the channel is per-process; no external caller
+// should be enqueuing asks).
+
 // Prompt templates + state-gates landed HTTP parity in BACI-36 for the
 // legacy four verbs (Get/SetPromptTemplate(s), Get/SetPromptStates);
 // these thread through the same `c.do(...)` pattern as the BACI-34
@@ -406,4 +416,93 @@ func (c *remoteClient) GetBoardPreferences(ctx context.Context) (BoardPreference
 
 func (c *remoteClient) SetBoardPreferences(ctx context.Context, prefs BoardPreferences, dryRun bool) error {
 	return remoteAgentNotSupported("board-preferences")
+}
+
+// Agent questions (BACI-53). REST parity for the user-side verbs
+// (list / show / answer / cancel) ships in Phase 4 so the desktop
+// and web bundle work in remote mode. The channel-side helpers
+// (AddSessionQuestion / AbandonOpenQuestionsForSession /
+// DrainSettledQuestionsForSession) remain local-only — they exist
+// to drive the per-machine `bacio channel` shim, which always
+// talks to the local store.
+
+func (c *remoteClient) AddSessionQuestion(ctx context.Context, in AddSessionQuestionInput) (*model.SessionQuestion, error) {
+	return nil, remoteAgentNotSupported("questions")
+}
+
+func (c *remoteClient) ListSessionQuestions(ctx context.Context, sessionID string, states []model.QuestionState) ([]*model.SessionQuestion, error) {
+	q := url.Values{}
+	if len(states) == 0 {
+		// CLI default is "open" — pass through verbatim so the REST
+		// surface returns the same shape.
+		q.Set("state", "open")
+	} else if len(states) == 1 {
+		q.Set("state", string(states[0]))
+	} else {
+		// Multi-state: comma-separated.
+		var b string
+		for i, st := range states {
+			if i > 0 {
+				b += ","
+			}
+			b += string(st)
+		}
+		q.Set("state", b)
+	}
+	var out []*model.SessionQuestion
+	if err := c.do(ctx, http.MethodGet, "/agents/sessions/"+url.PathEscape(sessionID)+"/questions", q, nil, &out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = []*model.SessionQuestion{}
+	}
+	return out, nil
+}
+
+// ListOpenQuestionsBySessions stays local-only — the REST surface
+// returns per-session lists, and a remote-mode UI making N
+// round-trips defeats the bulk read's purpose.
+func (c *remoteClient) ListOpenQuestionsBySessions(ctx context.Context, sessionIDs []string) (map[int64][]*model.SessionQuestion, error) {
+	return nil, remoteAgentNotSupported("questions")
+}
+
+func (c *remoteClient) GetSessionQuestion(ctx context.Context, id int64) (*model.SessionQuestion, error) {
+	var out model.SessionQuestion
+	if err := c.do(ctx, http.MethodGet, "/agents/questions/"+strconv.FormatInt(id, 10), nil, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *remoteClient) AnswerSessionQuestion(ctx context.Context, id int64, answers model.QuestionAnswers, dryRun bool) (*model.SessionQuestion, error) {
+	q := url.Values{}
+	if dryRun {
+		q.Set("dry_run", "true")
+	}
+	body := map[string]any{"answers": answers}
+	var out model.SessionQuestion
+	if err := c.do(ctx, http.MethodPost, "/agents/questions/"+strconv.FormatInt(id, 10)+"/answer", q, body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *remoteClient) CancelSessionQuestion(ctx context.Context, id int64, dryRun bool) (*model.SessionQuestion, error) {
+	q := url.Values{}
+	if dryRun {
+		q.Set("dry_run", "true")
+	}
+	var out model.SessionQuestion
+	if err := c.do(ctx, http.MethodPost, "/agents/questions/"+strconv.FormatInt(id, 10)+"/cancel", q, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *remoteClient) AbandonOpenQuestionsForSession(ctx context.Context, sessionID string) (int, error) {
+	return 0, remoteAgentNotSupported("questions")
+}
+
+func (c *remoteClient) DrainSettledQuestionsForSession(ctx context.Context, sessionID string) ([]*model.SessionQuestion, error) {
+	return nil, remoteAgentNotSupported("questions")
 }

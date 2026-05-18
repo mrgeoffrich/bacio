@@ -102,3 +102,44 @@ type AgentCancelInput struct {
 type IssueDispatchInput struct {
 	Mode string `json:"mode"`
 }
+
+// AgentQuestionsListInput is the payload for
+// `bacio agent questions list --json`. SessionID scopes the list to
+// one session id (defaults to $CLAUDE_CODE_SESSION_ID on the CLI
+// flag path). When empty AND AllSessions is false, the call errors
+// — the caller has to be explicit about scope to avoid surprising
+// cross-session reads. States is the lifecycle filter; an empty
+// list returns open questions only (the most useful default for an
+// agent or skill checking "is the user being asked anything
+// right now"). Pass {"open","answered","cancelled","abandoned"}
+// for "every state".
+type AgentQuestionsListInput struct {
+	SessionID   string   `json:"session_id,omitempty"`
+	AllSessions bool     `json:"all_sessions,omitempty"`
+	States      []string `json:"states,omitempty"`
+}
+
+// AgentQuestionsShowInput is the payload for
+// `bacio agent questions show --json`. ID is the row's primary key
+// (as printed by `bacio agent questions list`).
+type AgentQuestionsShowInput struct {
+	ID int64 `json:"id"`
+}
+
+// AgentQuestionsAnswerInput is the payload for
+// `bacio agent questions answer --json`. ID is the question row's
+// primary key; Answers maps question text -> answer label (or
+// []string for a multi-select question — JSON arrays decode into
+// []any which the validator accepts). The store re-validates the
+// shape against the stored payload at the boundary.
+type AgentQuestionsAnswerInput struct {
+	ID      int64          `json:"id"`
+	Answers map[string]any `json:"answers"`
+}
+
+// AgentQuestionsCancelInput is the payload for
+// `bacio agent questions cancel --json`. Cancelling an
+// already-cancelled / already-answered question is an error.
+type AgentQuestionsCancelInput struct {
+	ID int64 `json:"id"`
+}

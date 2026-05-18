@@ -640,6 +640,29 @@ func (b *BoardService) DispatchIssue(repoPrefix, issueKey, mode string) (Dispatc
 	return dispatchDTO(d), nil
 }
 
+// GetSessionQuestion fetches one BACI-53 ask_user_question row by id.
+// Backs the desktop Agents-view modal — the AgentCard composite ships
+// only the badge metadata, so the modal does one extra round trip
+// when the user opens it to fetch the full payload + any existing
+// answer.
+func (b *BoardService) GetSessionQuestion(id int64) (*model.SessionQuestion, error) {
+	return b.client.GetSessionQuestion(context.Background(), id)
+}
+
+// AnswerSessionQuestion submits the user's answer. answers is keyed
+// by question text; values are either string (single-select) or
+// []string (multi-select). The store re-validates against the
+// stored payload at the boundary.
+func (b *BoardService) AnswerSessionQuestion(id int64, answers map[string]any) (*model.SessionQuestion, error) {
+	return b.client.AnswerSessionQuestion(context.Background(), id, model.QuestionAnswers(answers), false)
+}
+
+// CancelSessionQuestion dismisses an open question — the agent
+// receives a tool error on the next channel poll tick.
+func (b *BoardService) CancelSessionQuestion(id int64) (*model.SessionQuestion, error) {
+	return b.client.CancelSessionQuestion(context.Background(), id, false)
+}
+
 // CancelWaitingDispatch (BACI-51) is the spinner-as-cancel-button
 // binding. Resolves the active (queued / pending / delivered) dispatch
 // for an issue and cancels it in a single Wails call so card DTOs

@@ -300,6 +300,144 @@ func (s *channelSource) Register(ctx context.Context, sessionID, modelID, branch
 	return nil
 }
 
+// AskQuestion records a BACI-53 ask_user_question row on behalf of
+// the channel. The session is resolved by walking the channel's
+// (host, claudePID) coordinates — the same join the dispatch
+// drain uses — and the most-recently-active session is picked
+// when more than one matches. The session's open-claim issue
+// key is stamped onto the row when there is one (so per-issue
+// surfaces can light up). The agent identity slug recorded
+// against `asked_by` comes from the channel's hintedAgentName()
+// helper (an empty string falls back to "bacio-channel").
+//
+// Returns the row's request_uuid — the channel uses this as the
+// in-memory key to correlate the parked JSON-RPC reply with the
+// answered row on the next poll tick.
+func (s *channelSource) AskQuestion(ctx context.Context, payload model.QuestionPayload) (string, error) {
+	if s.repo == nil || s.claudePID == 0 {
+		return "", fmt.Errorf("bacio channel: no resolved repo / claude_pid — cannot record question")
+	}
+	sess, err := s.pickLiveSession(ctx)
+	if err != nil {
+		return "", err
+	}
+	if sess == nil {
+		return "", fmt.Errorf("bacio channel: no live session matches (host=%s claude_pid=%d)", s.host, s.claudePID)
+	}
+	askedBy := s.hintedAgentName()
+	if askedBy == "" {
+		askedBy = "bacio-channel"
+	}
+	// Stamp the issue key from the session's most recent open
+	// claim, when one exists — best-effort, the row records "" if
+	// the session isn't claiming anything right now.
+	issueKey := s.openClaimIssueKey(ctx, sess)
+	q, err := s.c.AddSessionQuestion(ctx, client.AddSessionQuestionInput{
+		SessionID: sess.SessionID,
+		IssueKey:  issueKey,
+		Payload:   payload,
+		AskedBy:   askedBy,
+	})
+	if err != nil {
+		return "", err
+	}
+	return q.RequestUUID, nil
+}
+
+// DrainAnsweredQuestions returns the answered + cancelled questions
+// for whichever session this channel is currently serving. If the
+// channel is idle (no resolved repo / claude_pid) it returns nil so
+// the tick step is a no-op.
+func (s *channelSource) DrainAnsweredQuestions(ctx context.Context) ([]model.SessionQuestion, error) {
+	if s.repo == nil || s.claudePID == 0 {
+		return nil, nil
+	}
+	sessions, err := s.c.SessionsByClaudePID(ctx, s.host, s.claudePID)
+	if err != nil {
+		return nil, err
+	}
+	var out []model.SessionQuestion
+	for _, sess := range sessions {
+		rows, err := s.c.DrainSettledQuestionsForSession(ctx, sess.SessionID)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "bacio channel: drain settled questions for", sess.SessionID, ":", err)
+			continue
+		}
+		for _, r := range rows {
+			out = append(out, *r)
+		}
+	}
+	return out, nil
+}
+
+// AbandonOpenQuestions flips every still-open row for this
+// channel's sessions to `abandoned`. The previous channel's
+// parked-reply map is gone and the agent restarted with the
+// channel, so the rows can't be delivered any more.
+func (s *channelSource) AbandonOpenQuestions(ctx context.Context) (int, error) {
+	if s.repo == nil || s.claudePID == 0 {
+		return 0, nil
+	}
+	sessions, err := s.c.SessionsByClaudePID(ctx, s.host, s.claudePID)
+	if err != nil {
+		return 0, err
+	}
+	total := 0
+	for _, sess := range sessions {
+		n, err := s.c.AbandonOpenQuestionsForSession(ctx, sess.SessionID)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "bacio channel: abandon open questions for", sess.SessionID, ":", err)
+			continue
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// pickLiveSession returns the most-recently-active session matching
+// (host, claudePID). Empty result is nil/nil — the caller decides
+// what to do (AskQuestion errors out; the drain steps just return).
+func (s *channelSource) pickLiveSession(ctx context.Context) (*model.AgentSession, error) {
+	sessions, err := s.c.SessionsByClaudePID(ctx, s.host, s.claudePID)
+	if err != nil {
+		return nil, err
+	}
+	var best *model.AgentSession
+	for _, sess := range sessions {
+		if sess.EndedAt != nil {
+			continue
+		}
+		if best == nil || sess.LastSeenAt.After(best.LastSeenAt) {
+			best = sess
+		}
+	}
+	return best, nil
+}
+
+// openClaimIssueKey returns the most-recent open-claim issue key
+// for the session, or "" when none. Best effort — a transient
+// query error returns "" so the ask still proceeds (the issue
+// stamp is informational, not required).
+func (s *channelSource) openClaimIssueKey(ctx context.Context, sess *model.AgentSession) string {
+	view, err := s.c.ShowAgentSession(ctx, sess.SessionID)
+	if err != nil {
+		return ""
+	}
+	var newest *model.AgentClaim
+	for _, c := range view.Claims {
+		if c == nil || c.ReleasedAt != nil {
+			continue
+		}
+		if newest == nil || c.ClaimedAt.After(newest.ClaimedAt) {
+			newest = c
+		}
+	}
+	if newest == nil {
+		return ""
+	}
+	return newest.IssueKey
+}
+
 // EnsureSetup walks the open sessions for this channel's (host,
 // claudePID) and queues a setup dispatch for each one that hasn't
 // completed register yet. Idempotent — EnsureSetupDispatch dedupes via

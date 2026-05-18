@@ -69,6 +69,13 @@ export class AgentCard {
     "todosDone": number;
     "todosTotal": number;
 
+    /**
+     * OpenQuestions are the BACI-53 ask_user_question rows the agent
+     * posed and the user hasn't answered or dismissed yet. Drives the
+     * "user input needed" badge and modal trigger in the Agents view.
+     */
+    "openQuestions": QuestionDTO[];
+
     /** Creates a new AgentCard instance. */
     constructor($$source: Partial<AgentCard> = {}) {
         if (!("sessionId" in $$source)) {
@@ -131,6 +138,9 @@ export class AgentCard {
         if (!("todosTotal" in $$source)) {
             this["todosTotal"] = 0;
         }
+        if (!("openQuestions" in $$source)) {
+            this["openQuestions"] = [];
+        }
 
         Object.assign(this, $$source);
     }
@@ -142,6 +152,7 @@ export class AgentCard {
         const $$createField15_0 = $$createType1;
         const $$createField16_0 = $$createType3;
         const $$createField17_0 = $$createType5;
+        const $$createField20_0 = $$createType7;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("claims" in $$parsedSource) {
             $$parsedSource["claims"] = $$createField15_0($$parsedSource["claims"]);
@@ -151,6 +162,9 @@ export class AgentCard {
         }
         if ("todos" in $$parsedSource) {
             $$parsedSource["todos"] = $$createField17_0($$parsedSource["todos"]);
+        }
+        if ("openQuestions" in $$parsedSource) {
+            $$parsedSource["openQuestions"] = $$createField20_0($$parsedSource["openQuestions"]);
         }
         return new AgentCard($$parsedSource as Partial<AgentCard>);
     }
@@ -297,6 +311,46 @@ export class DispatchDTO {
 }
 
 /**
+ * QuestionDTO is one open BACI-53 ask_user_question row — included
+ * inside an AgentCard so the desktop and web bundle render the
+ * "user input needed" badge and modal in one round trip.
+ * 
+ * We don't ship the full QuestionPayload over the AgentCard payload —
+ * the UI fetches it via /agents/questions/{id} only when the user
+ * opens the modal. The bare ID + asked-at + a count of pending
+ * questions is what the badge needs.
+ */
+export class QuestionDTO {
+    "id": number;
+    "issueKey"?: string;
+    "header": string;
+    "askedAt": time$0.Time;
+
+    /** Creates a new QuestionDTO instance. */
+    constructor($$source: Partial<QuestionDTO> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = 0;
+        }
+        if (!("header" in $$source)) {
+            this["header"] = "";
+        }
+        if (!("askedAt" in $$source)) {
+            this["askedAt"] = null;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new QuestionDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): QuestionDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new QuestionDTO($$parsedSource as Partial<QuestionDTO>);
+    }
+}
+
+/**
  * SessionTodoDTO is one row of the agent's mirrored TodoWrite list,
  * shaped for the Agents screen. Status is one of
  * pending|in_progress|completed, surfaced verbatim so the frontend can
@@ -334,3 +388,5 @@ const $$createType2 = DispatchDTO.createFrom;
 const $$createType3 = $Create.Array($$createType2);
 const $$createType4 = SessionTodoDTO.createFrom;
 const $$createType5 = $Create.Array($$createType4);
+const $$createType6 = QuestionDTO.createFrom;
+const $$createType7 = $Create.Array($$createType6);

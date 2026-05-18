@@ -31,6 +31,12 @@ type agentsView struct {
 	pending     map[int64]int                   // session PK -> open dispatch count
 	needsAction map[string]bool                 // issue key set in state needs_action
 	todos       map[int64][]model.SessionTodo   // session PK -> latest TodoWrite snapshot
+	// BACI-53: open ask_user_question rows per session. Surfaced as a
+	// `?N` badge on the card so the user knows an agent is waiting on
+	// them. Full editor overlay is a follow-up; for v1 the user
+	// answers via the desktop / web modal or the
+	// `bacio agent questions answer --json '...'` CLI verb.
+	questions map[int64][]*model.SessionQuestion // session PK -> open questions
 
 	cursor    int  // selected card
 	scroll    int  // index of the first visible card
@@ -92,6 +98,13 @@ func (a *agentsView) reload() {
 		sessionIDs = append(sessionIDs, s.SessionID)
 	}
 	a.todos, err = a.store.ListTodosBySessions(sessionIDs)
+	if err != nil {
+		a.err = err
+		return
+	}
+	// BACI-53: bulk-read open ask_user_question rows. Same one-trip
+	// pattern as todos — used to render the per-card "?N" badge.
+	a.questions, err = a.store.ListOpenQuestionsBySessions(sessionIDs)
 	if err != nil {
 		a.err = err
 		return
@@ -318,6 +331,11 @@ func (a *agentsView) renderCard(s *model.AgentSession, selected bool, width int,
 	if total > 0 {
 		row4Text += fmt.Sprintf(" · todos %d/%d", done, total)
 	}
+	if n := len(a.questions[s.ID]); n > 0 {
+		// BACI-53: pending ask_user_question rows. Inline tag in row4
+		// for now; the answer overlay is a follow-up.
+		row4Text += fmt.Sprintf(" · ?%d", n)
+	}
 	row4 := mutedStyle.Render(truncate(row4Text, innerW))
 
 	inner := strings.Join([]string{row1, row2, row3, row4}, "\n")
@@ -395,6 +413,27 @@ func (a *agentsView) viewDetail(width, height int) string {
 			line = style.Render(line)
 		}
 		lines = append(lines, line)
+	}
+
+	// BACI-53: list open ask_user_question rows so the user can see
+	// what they're being asked. Answering happens via the desktop /
+	// web modal or `bacio agent questions answer --json '...'`
+	// (full TUI answer overlay is a follow-up).
+	qs := a.questions[s.ID]
+	if len(qs) > 0 {
+		lines = append(lines, "", boldStyle.Render(fmt.Sprintf("User input needed (%d)", len(qs))))
+		for _, q := range qs {
+			header := q.RequestUUID
+			text := "(payload unavailable)"
+			if len(q.Payload.Questions) > 0 {
+				header = q.Payload.Questions[0].Header
+				text = q.Payload.Questions[0].Question
+			}
+			line := truncate(fmt.Sprintf("  #%d %s — %s", q.ID, header, oneLine(text)), innerW)
+			lines = append(lines, line)
+		}
+		lines = append(lines, mutedStyle.Render(truncate(
+			"  Answer via the desktop/web modal or `bacio agent questions answer --json '...'`", innerW)))
 	}
 
 	var ds []*model.AgentDispatch

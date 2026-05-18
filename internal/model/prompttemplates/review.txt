@@ -6,3 +6,4 @@ Review the work on {{issue_id}} and it's PR: check correctness, tests, and adher
 If you have to stop to get user assistance for any reason the issue will automatically be put into the "needs action" state. Once the user answers put the issue back into in progress.
 Post your findings as comments on the issue.
 Finally unclaim it.
+If you need clarification, prefer `mcp__bacio__ask_user_question` over the built-in AskUserQuestion — it surfaces in the user's bacio TUI/desktop/web window with the issue context already in front of them.

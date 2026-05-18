@@ -132,6 +132,35 @@ export async function listAgents(repoPrefix: string): Promise<AgentCard[]> {
   }
 }
 
+// BACI-53 ask_user_question Wails bindings. Backs the desktop
+// Agents-view modal. Web mode (api.http.ts) exposes the same three
+// functions through the REST routes so the React components don't
+// branch on backend.
+
+export async function getSessionQuestion(id: number) {
+  try {
+    return await BoardService.GetSessionQuestion(id);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+export async function answerSessionQuestion(id: number, answers: Record<string, unknown>) {
+  try {
+    return await BoardService.AnswerSessionQuestion(id, answers);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+export async function cancelSessionQuestion(id: number) {
+  try {
+    return await BoardService.CancelSessionQuestion(id);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
 export async function listDocs(repoPrefix: string, typeFilter = ''): Promise<DocSummary[]> {
   try {
     return await DocService.ListDocs(repoPrefix, typeFilter);
