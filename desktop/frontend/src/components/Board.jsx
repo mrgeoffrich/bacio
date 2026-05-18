@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import KanbanCard from './KanbanCard.jsx';
+import QuestionModal from './QuestionModal.jsx';
 
 const EMPTY_COPY = {
   todo: 'drop a card here.',
@@ -10,9 +11,14 @@ const EMPTY_COPY = {
   cancelled: 'no write-offs.',
 };
 
-export default function Board({ columns, cards, promptConfig, hideEmptyColumns, onMoveCard, onOpenCard, onDispatchFromCard, onCancelWaitingCard }) {
+export default function Board({ columns, cards, promptConfig, hideEmptyColumns, onMoveCard, onOpenCard, onDispatchFromCard, onCancelWaitingCard, onAfterQuestionResolved }) {
   const [dragKey, setDragKey] = useState(null);
   const [overCol, setOverCol] = useState(null);
+  // BACI-53: the kanban card "? N" pill opens the shared
+  // QuestionModal. State lives here (rather than per-card) so the
+  // modal stays mounted across re-renders of the underlying card and
+  // closes cleanly when the user submits/dismisses.
+  const [activeQuestionId, setActiveQuestionId] = useState(null);
 
   // With the preference on, drop any column that has no cards. The
   // filter is derived from `cards`, which App refreshes on repo change
@@ -64,6 +70,7 @@ export default function Board({ columns, cards, promptConfig, hideEmptyColumns, 
                   onOpen={() => onOpenCard(card)}
                   onDispatch={onDispatchFromCard}
                   onCancelWaiting={onCancelWaitingCard}
+                  onOpenQuestion={(id) => setActiveQuestionId(id)}
                 />
               ))}
               {colCards.length === 0 && (
@@ -75,6 +82,13 @@ export default function Board({ columns, cards, promptConfig, hideEmptyColumns, 
           </div>
         );
       })}
+      <QuestionModal
+        questionId={activeQuestionId}
+        onClose={() => {
+          setActiveQuestionId(null);
+          if (onAfterQuestionResolved) onAfterQuestionResolved();
+        }}
+      />
     </div>
   );
 }

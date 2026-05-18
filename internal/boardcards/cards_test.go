@@ -21,6 +21,7 @@ type fakeClient struct {
 	dispatches []*model.AgentDispatch
 	todos      map[int64][]model.SessionTodo
 	templates  []*store.PromptTemplate
+	questions  map[int64][]*model.SessionQuestion
 }
 
 func (f *fakeClient) ListRepos(context.Context) ([]*model.Repo, error) {
@@ -49,6 +50,12 @@ func (f *fakeClient) ListTodosBySessions(context.Context, []string) (map[int64][
 }
 func (f *fakeClient) ListPromptTemplates(context.Context) ([]*store.PromptTemplate, error) {
 	return f.templates, nil
+}
+func (f *fakeClient) ListOpenQuestionsBySessions(context.Context, []string) (map[int64][]*model.SessionQuestion, error) {
+	if f.questions == nil {
+		return map[int64][]*model.SessionQuestion{}, nil
+	}
+	return f.questions, nil
 }
 
 // TestAssembleVerbAndTodos covers the BACI-60 enrichment: an open
@@ -151,6 +158,66 @@ func TestAssembleAgentIdentityDispatch(t *testing.T) {
 	}
 	if cards[0].ActiveVerb != "implementing" {
 		t.Errorf("ActiveVerb = %q, want %q", cards[0].ActiveVerb, "implementing")
+	}
+}
+
+// TestAssembleSurfacesOpenQuestions covers BACI-53 follow-up: the
+// winning claim's open ask_user_question rows whose issue_key matches
+// THIS card's issue surface as OpenQuestions entries. Rows tied to a
+// different issue (the same session juggling two claims) must not
+// leak across cards.
+func TestAssembleSurfacesOpenQuestions(t *testing.T) {
+	repo := &model.Repo{ID: 1, Prefix: "TEST"}
+	t0 := time.Date(2026, 5, 17, 9, 0, 0, 0, time.UTC)
+	sess := &model.AgentSession{ID: 20, SessionID: "sess-q", RepoID: repo.ID, RepoPrefix: repo.Prefix}
+	issues := []*model.Issue{
+		{Key: "TEST-10", State: model.StateNeedsAction, Title: "blocked on a question"},
+		{Key: "TEST-11", State: model.StateInProgress, Title: "free, sibling claim"},
+	}
+	claims := []*model.AgentClaim{
+		{SessionID: "sess-q", SessionPK: 20, IssueKey: "TEST-10", ClaimedAt: t0},
+		{SessionID: "sess-q", SessionPK: 20, IssueKey: "TEST-11", ClaimedAt: t0},
+	}
+	questions := map[int64][]*model.SessionQuestion{
+		20: {
+			{
+				ID: 7, IssueKey: "TEST-10", AskedAt: t0,
+				Payload: model.QuestionPayload{Questions: []model.QuestionItem{
+					{Header: "Pizza?", Question: "Pineapple on pizza: yes or no?"},
+					{Header: "Crust?", Question: "Thin or thick?"},
+				}},
+			},
+			{
+				ID: 8, IssueKey: "TEST-99", AskedAt: t0, // unrelated issue
+				Payload: model.QuestionPayload{Questions: []model.QuestionItem{{Header: "X", Question: "x?"}}},
+			},
+		},
+	}
+	f := &fakeClient{
+		repo: repo, issues: issues, claims: claims,
+		sessions: []*model.AgentSession{sess},
+		questions: questions,
+	}
+
+	cards, err := Assemble(context.Background(), f, repo)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	byKey := map[string]BoardCard{}
+	for _, c := range cards {
+		byKey[c.Key] = c
+	}
+	blocked := byKey["TEST-10"]
+	if len(blocked.OpenQuestions) != 1 {
+		t.Fatalf("TEST-10 OpenQuestions = %d, want 1", len(blocked.OpenQuestions))
+	}
+	got := blocked.OpenQuestions[0]
+	if got.ID != 7 || got.Header != "Pizza?" || got.FirstQuestion != "Pineapple on pizza: yes or no?" || got.Count != 2 {
+		t.Errorf("TEST-10 OpenQuestions[0] = %+v, want {ID:7 Header:Pizza? First:'Pineapple…' Count:2}", got)
+	}
+	sibling := byKey["TEST-11"]
+	if len(sibling.OpenQuestions) != 0 {
+		t.Errorf("TEST-11 OpenQuestions = %+v, want empty (the question is tied to TEST-10)", sibling.OpenQuestions)
 	}
 }
 

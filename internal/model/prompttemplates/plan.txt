@@ -6,4 +6,4 @@ Run a planning pass on {{issue_id}}: produce a thorough implementation plan, don
 Once you have a plan attach it to the issue as markdown.
 If you have to stop to get user assistance for any reason the issue will automatically be put into the "needs action" state. Once the user answers put the issue back into in progress.
 When the plan has been attached clean up the work tree and throw away any code changes and unclaim the job.
-If you need clarification, prefer `mcp__bacio__ask_user_question` over the built-in AskUserQuestion — it surfaces in the user's bacio TUI/desktop/web window with the issue context already in front of them.
+Questions are welcome — early. If anything in this brief is ambiguous, batch up to 4 clarifications into ONE `mcp__bacio__ask_user_question` call BEFORE doing speculative work — rework costs more than answering. The bacio MCP tool surfaces in your supervisor's TUI/desktop/web with the issue context; prefer it over the built-in AskUserQuestion.

@@ -745,6 +745,27 @@ values are strings, multi-select are `[]string`). On dismissal the
 tool returns an error — handle it the same as `AskUserQuestion`
 returning with no answer.
 
+**Batching: prefer one call with all your questions, not a chain.**
+The `questions` array is the lever here — pack every clarification
+you currently need into a single `ask_user_question` call (up to
+four). The user sees one modal with the full set, answers everything
+in one pass, and the agent gets all answers in one response. Firing
+sequential single-question calls when you already know the full
+set is a UX regression: the user pays the context-switch cost N
+times, the issue bounces in and out of `needs_action` N times, and
+the answer-to-next-question latency multiplies. Only fire a second
+call if the FIRST answer surfaces a follow-up you couldn't have
+predicted up front.
+
+**Side effects of opening a question.** As soon as the row lands,
+bacio auto-flips the linked issue from `in_progress` to
+`needs_action` (best-effort; if the issue isn't in_progress, nothing
+moves). When the user answers or cancels and no other open question
+for that issue remains, bacio flips it back to `in_progress`. So
+the kanban board's `needs_action` column doubles as the "agent is
+parked waiting on me" column, and you don't need to flip the state
+yourself before/after asking.
+
 **CLI verbs (headless / scripts):**
 
 ```bash

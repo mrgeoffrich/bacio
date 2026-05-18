@@ -202,7 +202,7 @@ func NewModel(s *store.Store, repo *model.Repo, el *leader.Elector) (*Model, err
 			{"Board", board},
 			{"Features", newFeaturesView(s, repo)},
 			{"Documents", newDocsView(s, repo)},
-			{"Agents", newAgentsView(s, repo)},
+			{"Agents", newAgentsView(s, repo, tuiActor())},
 			{"History", newHistoryView(s, repo)},
 			{"Settings", newSettingsView(s, repo)},
 		},

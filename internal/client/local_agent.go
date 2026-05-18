@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -560,7 +561,9 @@ func (c *localClient) ListTodosBySessions(ctx context.Context, sessionIDs []stri
 // ask_user_question MCP tool. The channel resolves session_id /
 // agent identity / open-claim issue key on its side, then hands
 // the validated payload to the store. Writes a question.ask audit
-// row so `bacio history --op question.ask` surfaces every ask.
+// row so `bacio history --op question.ask` surfaces every ask, and
+// auto-flips the linked issue from in_progress to needs_action so
+// the supervisor sees "agent is blocked on a question right now".
 func (c *localClient) AddSessionQuestion(ctx context.Context, in AddSessionQuestionInput) (*model.SessionQuestion, error) {
 	q, err := c.store.AddSessionQuestion(store.AddSessionQuestionIn{
 		SessionID: in.SessionID,
@@ -576,6 +579,7 @@ func (c *localClient) AddSessionQuestion(ctx context.Context, in AddSessionQuest
 		TargetID: &q.ID, TargetLabel: q.RequestUUID,
 		Details: questionAuditDetails(q),
 	})
+	c.autoFlipIssueOnQuestionChange(ctx, q, true, in.AskedBy)
 	return q, nil
 }
 
@@ -625,6 +629,7 @@ func (c *localClient) AnswerSessionQuestion(ctx context.Context, id int64, answe
 		TargetID: &updated.ID, TargetLabel: updated.RequestUUID,
 		Details: questionAuditDetails(updated),
 	})
+	c.autoFlipIssueOnQuestionChange(ctx, updated, false, c.actor)
 	return updated, nil
 }
 
@@ -655,7 +660,88 @@ func (c *localClient) CancelSessionQuestion(ctx context.Context, id int64, dryRu
 		TargetID: &updated.ID, TargetLabel: updated.RequestUUID,
 		Details: questionAuditDetails(updated),
 	})
+	c.autoFlipIssueOnQuestionChange(ctx, updated, false, c.actor)
 	return updated, nil
+}
+
+// autoFlipIssueOnQuestionChange mirrors the linked issue's state
+// against whether the agent is currently blocked on a question. When
+// `opening` is true, an open row was just inserted: if the issue is
+// in_progress, flip it to needs_action so the supervisor sees the
+// agent is parked. When `opening` is false, a row was just resolved
+// (answered or cancelled): if the issue is needs_action AND no other
+// open questions remain for the same (session, issue), flip back to
+// in_progress so it leaves the "needs action" column once the agent
+// is free to resume.
+//
+// Best-effort: every error is logged to stderr and swallowed —
+// failing the question write/update because the secondary state flip
+// failed would be worse than the temporary state mismatch (the Stop
+// hook's syncClaimedIssueStates will eventually reconcile it).
+func (c *localClient) autoFlipIssueOnQuestionChange(ctx context.Context, q *model.SessionQuestion, opening bool, actor string) {
+	if q == nil || q.IssueKey == "" {
+		return
+	}
+	sess, err := c.store.GetAgentSession(q.SessionID)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "bacio: auto-flip: lookup session", q.SessionID+":", err)
+		return
+	}
+	repo, err := c.store.GetRepoByID(sess.RepoID)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "bacio: auto-flip: lookup repo for session", q.SessionID+":", err)
+		return
+	}
+	iss, err := c.GetIssueByKey(ctx, repo, q.IssueKey)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "bacio: auto-flip: lookup issue", q.IssueKey+":", err)
+		return
+	}
+	var (
+		want   model.State
+		reason string
+	)
+	if opening {
+		if iss.State != model.StateInProgress {
+			return
+		}
+		want = model.StateNeedsAction
+		reason = "auto: question opened"
+	} else {
+		if iss.State != model.StateNeedsAction {
+			return
+		}
+		// Only flip back if THIS was the last blocker — count any
+		// other open question rows for the same session that share
+		// the issue key.
+		opens, err := c.store.ListOpenQuestionsBySessions([]string{q.SessionID})
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "bacio: auto-flip: list open questions:", err)
+			return
+		}
+		for _, row := range opens[sess.ID] {
+			if row.IssueKey == q.IssueKey {
+				return // still blocked on another question
+			}
+		}
+		want = model.StateInProgress
+		reason = "auto: question resolved"
+	}
+	if err := c.store.SetIssueState(iss.ID, want); err != nil {
+		fmt.Fprintln(os.Stderr, "bacio: auto-flip: set state", q.IssueKey+":", err)
+		return
+	}
+	auditActor := actor
+	if auditActor == "" {
+		auditActor = "bacio-channel"
+	}
+	c.recordOp(model.HistoryEntry{
+		Actor:  auditActor,
+		RepoID: &iss.RepoID, RepoPrefix: repo.Prefix,
+		Op: "issue.state", Kind: "issue",
+		TargetID: &iss.ID, TargetLabel: iss.Key,
+		Details:  fmt.Sprintf("%s → %s (%s)", iss.State, want, reason),
+	})
 }
 
 func (c *localClient) AbandonOpenQuestionsForSession(ctx context.Context, sessionID string) (int, error) {

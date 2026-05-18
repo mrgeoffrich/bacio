@@ -267,6 +267,139 @@ body { margin: 0; }
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .mk-card-meta-sep { color: var(--fg-4); }
+
+/* BACI-53: open ask_user_question pill on the kanban card. The agent
+   posed a question and is parked waiting for an answer — surface it
+   inline (issue.state has already auto-flipped to needs_action) so the
+   user can answer without drilling into the Agents tab. Click handler
+   is in KanbanCard; the pill itself is a button so it's keyboard-
+   reachable and screen-readers announce "Answer agent question". */
+.mk-card-question-pill {
+  display: flex; flex-direction: row; align-items: center; gap: 6px;
+  width: 100%; padding: 6px 8px;
+  background: var(--status-blocked-bg, var(--bg-4));
+  border: 1px solid var(--status-blocked, var(--border-2));
+  border-radius: var(--radius-md);
+  color: var(--status-blocked, var(--fg-1));
+  cursor: pointer; text-align: left;
+  font-family: var(--font-sans); font-size: 12px;
+  transition: background var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out);
+}
+.mk-card-question-pill:hover {
+  background: var(--bg-3);
+  border-color: var(--status-blocked, var(--fg-2));
+}
+.mk-card-question-pill-tag {
+  font-family: var(--font-mono); font-size: 10px;
+  letter-spacing: .06em; text-transform: uppercase;
+  padding: 2px 6px; border-radius: 4px;
+  background: var(--status-blocked, var(--fg-3));
+  color: var(--paper, #fff);
+  white-space: nowrap; flex: 0 0 auto;
+}
+.mk-card-question-pill-text {
+  flex: 1 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* ===== BACI-53 Question modal ===== */
+/* The default .mk-modal width (420px) is too narrow for 1-4
+   questions with descriptions. Widen + allow vertical scroll when
+   the form would otherwise blow past the viewport. */
+.mk-modal:has(.mk-question-form) {
+  width: min(560px, 92vw);
+  max-height: 80vh;
+  overflow-y: auto;
+}
+
+.mk-question-form {
+  display: flex; flex-direction: column; gap: 14px;
+  margin-top: 4px;
+}
+
+/* Each question is one bordered fieldset; legend sits in the
+   bordered area's top edge with the pill (header) + question text. */
+.mk-question-fieldset {
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  padding: 10px 14px 12px;
+  margin: 0;
+  background: var(--bg-2);
+}
+
+.mk-question-legend {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  padding: 0 4px;
+  font-size: 13px; color: var(--fg-1); line-height: 1.4;
+  font-weight: 500;
+}
+
+/* High-contrast variant of .mk-pill for the question header tag —
+   the base .mk-pill has no background by default, which made the
+   "PIZZA?" tag wash out. */
+.mk-pill.mk-question-header {
+  background: var(--status-blocked-bg, var(--ink-50));
+  color: var(--status-blocked, var(--fg-2));
+  font-weight: 600;
+}
+
+/* Options stack vertically, one per row. Two-column grid puts the
+   input in a fixed-width gutter on the left and lets the label +
+   description flow on the right. The whole row is clickable
+   (label wraps the input) — adding the hover affordance helps
+   discover that. */
+.mk-question-option {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  align-items: start;
+  column-gap: 10px;
+  padding: 6px 4px;
+  cursor: pointer;
+  border-radius: 4px;
+  margin-top: 4px;
+}
+.mk-question-option:hover { background: var(--bg-3); }
+
+.mk-question-option input[type="radio"],
+.mk-question-option input[type="checkbox"] {
+  width: 16px; height: 16px;
+  margin: 2px 0 0;
+  cursor: pointer;
+  grid-column: 1;
+  grid-row: 1 / span 2;
+}
+
+.mk-question-label {
+  font-size: 13px; color: var(--fg-1); line-height: 1.35;
+  grid-column: 2;
+}
+
+.mk-question-desc {
+  font-size: 12px; color: var(--fg-3); line-height: 1.45;
+  grid-column: 2;
+  margin-top: 2px;
+  display: block;
+}
+
+/* Other free-text reveal — sits inside the fieldset, full-width
+   below the Other option row. Border + paper background matches the
+   topbar search affordance so it visually reads as "input box". */
+.mk-question-other-input {
+  width: 100%;
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  font-family: var(--font-sans); font-size: 13px;
+  color: var(--fg-1);
+  background: var(--paper);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  box-sizing: border-box;
+}
+.mk-question-other-input:focus {
+  outline: none;
+  border-color: var(--border-focus, var(--border-2));
+}
 .mk-card-tasks { color: var(--fg-3); white-space: nowrap; }
 
 /* ---------- Tooltip (Radix portal) ---------- */

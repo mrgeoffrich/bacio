@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
 	"github.com/mrgeoffrich/bacio/internal/version"
@@ -22,32 +23,40 @@ const agentCardHeight = 6
 // and dispatches. Read-only — a window onto the local agent registry,
 // refreshed with `r`.
 type agentsView struct {
-	store *store.Store
-	repo  *model.Repo
+	store  *store.Store
+	repo   *model.Repo
+	client client.Client
 
 	sessions    []*model.AgentSession
-	claims      map[int64][]*model.AgentClaim   // session PK -> open claims
-	dispatches  []*model.AgentDispatch          // every dispatch in the repo
-	pending     map[int64]int                   // session PK -> open dispatch count
-	needsAction map[string]bool                 // issue key set in state needs_action
-	todos       map[int64][]model.SessionTodo   // session PK -> latest TodoWrite snapshot
+	claims      map[int64][]*model.AgentClaim // session PK -> open claims
+	dispatches  []*model.AgentDispatch        // every dispatch in the repo
+	pending     map[int64]int                 // session PK -> open dispatch count
+	needsAction map[string]bool               // issue key set in state needs_action
+	todos       map[int64][]model.SessionTodo // session PK -> latest TodoWrite snapshot
 	// BACI-53: open ask_user_question rows per session. Surfaced as a
 	// `?N` badge on the card so the user knows an agent is waiting on
-	// them. Full editor overlay is a follow-up; for v1 the user
-	// answers via the desktop / web modal or the
-	// `bacio agent questions answer --json '...'` CLI verb.
+	// them, and (BACI-53 follow-up) answerable via the in-TUI
+	// questionOverlay reached by `?` on the focused card.
 	questions map[int64][]*model.SessionQuestion // session PK -> open questions
 
-	cursor    int  // selected card
-	scroll    int  // index of the first visible card
-	detail    bool // drill-down overlay open for sessions[cursor]
-	detailRow int  // scroll offset within the detail overlay
-	showAll   bool // when false (default), hide SessionStart stubs that never registered
+	cursor    int              // selected card
+	scroll    int              // index of the first visible card
+	detail    bool             // drill-down overlay open for sessions[cursor]
+	detailRow int              // scroll offset within the detail overlay
+	showAll   bool             // when false (default), hide SessionStart stubs that never registered
+	overlay   *questionOverlay // BACI-53 answer modal for the focused session's first open question
 	err       error
 }
 
-func newAgentsView(s *store.Store, repo *model.Repo) *agentsView {
-	a := &agentsView{store: s, repo: repo, claims: map[int64][]*model.AgentClaim{}}
+func newAgentsView(s *store.Store, repo *model.Repo, actor string) *agentsView {
+	c := client.NewLocalFromStore(s, actor)
+	a := &agentsView{
+		store:  s,
+		repo:   repo,
+		client: c,
+		claims: map[int64][]*model.AgentClaim{},
+		overlay: newQuestionOverlay(c),
+	}
 	a.reload()
 	return a
 }
@@ -145,8 +154,8 @@ func dispatchTargetsSession(d *model.AgentDispatch, s *model.AgentSession) bool 
 func (a *agentsView) Init() tea.Cmd  { return nil }
 func (a *agentsView) Status() string { return "" }
 
-func (a *agentsView) HasOverlay() bool    { return a.detail }
-func (a *agentsView) CloseOverlay()       { a.detail = false }
+func (a *agentsView) HasOverlay() bool    { return a.detail || (a.overlay != nil && a.overlay.open) }
+func (a *agentsView) CloseOverlay()       { a.detail = false; if a.overlay != nil { a.overlay.close() } }
 func (a *agentsView) CapturesInput() bool { return false }
 
 func (a *agentsView) Breadcrumb() string {
@@ -157,6 +166,9 @@ func (a *agentsView) Breadcrumb() string {
 }
 
 func (a *agentsView) Help() string {
+	if a.overlay != nil && a.overlay.open {
+		return "j/k move · space toggle · tab next q · enter submit · d dismiss · esc close"
+	}
 	if a.detail {
 		return "j/k scroll · esc back · r reload · q quit"
 	}
@@ -164,13 +176,28 @@ func (a *agentsView) Help() string {
 	if a.showAll {
 		suffix = "a hide stubs"
 	}
-	return "j/k move · enter detail · g/G top/bottom · r reload · " + suffix + " · q quit"
+	return "j/k move · enter detail · ? answer · g/G top/bottom · r reload · " + suffix + " · q quit"
 }
 
 func (a *agentsView) Update(msg tea.Msg) tea.Cmd {
+	// BACI-53 question-overlay results land here as a typed msg the
+	// overlay returned from its submit/cancel Cmd. Apply, then refresh
+	// the agent cards so the `?N` badge clears.
+	if rmsg, ok := msg.(questionResultMsg); ok {
+		if a.overlay != nil {
+			a.overlay.handleResult(rmsg)
+			if !a.overlay.open {
+				a.reload()
+			}
+		}
+		return nil
+	}
 	key, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return nil
+	}
+	if a.overlay != nil && a.overlay.open {
+		return a.overlay.update(key)
 	}
 	if a.detail {
 		switch key.String() {
@@ -211,6 +238,16 @@ func (a *agentsView) Update(msg tea.Msg) tea.Cmd {
 		}
 	case "r":
 		a.reload()
+	case "?":
+		// BACI-53: open the answer overlay for the focused card's
+		// first open question. No-op when the card has none.
+		if a.cursor < len(a.sessions) && a.overlay != nil {
+			sess := a.sessions[a.cursor]
+			qs := a.questions[sess.ID]
+			if len(qs) > 0 {
+				a.overlay.reset(qs[0])
+			}
+		}
 	case "a":
 		// Toggle SessionStart-stub visibility. Off by default — stubs
 		// are noise unless you're debugging why an agent never
@@ -226,6 +263,12 @@ func (a *agentsView) Update(msg tea.Msg) tea.Cmd {
 func (a *agentsView) View(width, height int) string {
 	if width == 0 || height == 0 {
 		return ""
+	}
+	// BACI-53: when the answer overlay is open, render it on top of
+	// whatever underlying view is current (cards or detail). Mirrors
+	// the picker overlays in board.go.
+	if a.overlay != nil && a.overlay.open {
+		return a.overlay.view(width, height)
 	}
 	if a.detail && a.cursor < len(a.sessions) {
 		return a.viewDetail(width, height)
