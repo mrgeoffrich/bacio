@@ -36,7 +36,9 @@ CREATE TABLE IF NOT EXISTS features (
     UNIQUE(repo_id, slug)
 );
 
-CREATE INDEX IF NOT EXISTS idx_features_archived_at ON features(archived_at);
+-- idx_features_archived_at is created in migrate() so it works on
+-- databases that pre-date the archived_at column (BACI-68). Same
+-- pattern as idx_issues_assignee below.
 
 CREATE TABLE IF NOT EXISTS issues (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -69,14 +71,10 @@ CREATE TABLE IF NOT EXISTS issues (
 
 CREATE INDEX IF NOT EXISTS idx_issues_state ON issues(state);
 CREATE INDEX IF NOT EXISTS idx_issues_feature ON issues(feature_id);
--- idx_issues_archived_at backs the default list filter
--- (`archived_at IS NULL`) and the auto-sweep's
--- (state IN (done,cancelled) AND archived_at IS NULL AND updated_at < cutoff)
--- predicate. Cheap on the small bacio tables, but worth having.
-CREATE INDEX IF NOT EXISTS idx_issues_archived_at ON issues(archived_at);
--- idx_issues_assignee is created in migrate() so it works on databases that
--- pre-date the assignee column. The ALTER ADD COLUMN must run before the
--- index can reference it.
+-- idx_issues_archived_at (BACI-68) and idx_issues_assignee are created
+-- in migrate() so they work on databases that pre-date their referenced
+-- columns. The ALTER ADD COLUMN must run before the index can reference
+-- it; schema.sql runs before migrate() so the index can't live here.
 
 CREATE TABLE IF NOT EXISTS comments (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -149,7 +147,8 @@ CREATE TABLE IF NOT EXISTS documents (
 );
 
 CREATE INDEX IF NOT EXISTS idx_documents_type ON documents(type);
-CREATE INDEX IF NOT EXISTS idx_documents_archived_at ON documents(archived_at);
+-- idx_documents_archived_at is created in migrate() — same reason as
+-- idx_issues_archived_at above (BACI-68).
 
 CREATE TABLE IF NOT EXISTS document_links (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
