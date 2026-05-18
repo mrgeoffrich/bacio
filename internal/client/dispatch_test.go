@@ -141,6 +141,13 @@ func TestDispatchPromptTemplateRendering(t *testing.T) {
 
 	// Store a custom template, then dispatch with a note: the custom
 	// body is rendered and the note is appended after a blank line.
+	// The BACI-52 preamble is also prepended at compose time; delete the
+	// preamble row first so this test asserts the exact rendered body
+	// without having to chase the preamble's wording. A separate test
+	// covers the preamble-prepended shape (TestComposeDispatchPayload).
+	if _, err := p.store.DeletePromptTemplate(model.BuiltinTemplatePreamble); err != nil {
+		t.Fatalf("delete preamble: %v", err)
+	}
 	if err := p.local.SetPromptTemplate(ctx, string(model.DispatchModeImplement), "Build {{issue_id}} for {{repo_prefix}}.", false); err != nil {
 		t.Fatalf("SetPromptTemplate: %v", err)
 	}

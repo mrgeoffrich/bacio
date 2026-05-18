@@ -57,12 +57,18 @@ func (c *localClient) CreateDispatch(ctx context.Context, repo *model.Repo, in i
 	// Resolve the stage's prompt template (the user's custom override or
 	// the built-in default), render its placeholders against this
 	// issue's context, then append the free-form note. An untyped mode
-	// has no template, so the payload is just the note.
+	// has no template, so the payload is just the note. The BACI-52
+	// preamble is prepended whenever the template body is non-empty so
+	// the parent session delegates the work to a subagent.
 	template, err := c.store.GetPromptTemplate(mode)
 	if err != nil {
 		return nil, err
 	}
-	payload := model.ComposeDispatchPayload(template, map[string]string{
+	preamble, err := c.store.GetDispatchPreamble()
+	if err != nil {
+		return nil, err
+	}
+	payload := model.ComposeDispatchPayload(preamble, template, map[string]string{
 		"issue_id":    issueKey,
 		"issue_title": issueTitle,
 		"repo_prefix": repo.Prefix,
@@ -147,12 +153,18 @@ func (c *localClient) AutoDispatchIssue(ctx context.Context, repo *model.Repo, i
 
 	// Render the prompt body now so the queued dispatch carries the
 	// final instruction — agents that receive it (via the matcher's
-	// later bind + drain) don't need any further lookup.
+	// later bind + drain) don't need any further lookup. The BACI-52
+	// preamble is prepended so the parent session delegates the work
+	// to a subagent.
 	template, err := c.store.GetPromptTemplate(parsedMode)
 	if err != nil {
 		return nil, err
 	}
-	payload := model.ComposeDispatchPayload(template, map[string]string{
+	preamble, err := c.store.GetDispatchPreamble()
+	if err != nil {
+		return nil, err
+	}
+	payload := model.ComposeDispatchPayload(preamble, template, map[string]string{
 		"issue_id":    iss.Key,
 		"issue_title": iss.Title,
 		"repo_prefix": repo.Prefix,

@@ -453,6 +453,173 @@ the mode, and the composed payload.
 
 ---
 
+## Subagent delegation (BACI-52)
+
+The parent Claude Code session that owns the bacio channel is a **thin
+scheduler**. Each dispatched job's file reads, edits, bash calls, and
+intermediate scratchpad would otherwise pile up in the parent's
+context window — and once that fills, the session falls over. Instead
+the parent immediately delegates the work to a `Task`-spawned
+subagent, waits for the subagent to return a one-line summary,
+forwards that summary, and goes back to waiting for the next
+`<channel>` event.
+
+```
+   <channel> tag arrives in parent
+              │
+              ▼
+   parent reads tag + channel instructions, calls Task(
+        subagent_type = "general-purpose",
+        model         = "opus",
+        prompt        = <worker contract + dispatch payload + issue ref>,
+   )
+              │
+              ▼
+   subagent (own context window):
+       bacio agent claim <ISSUE> --prompt <payload first line>
+       … Read / Edit / Write / Bash / Grep / Glob …
+       bacio agent release <ISSUE>
+       mcp__bacio__reply --dispatch_id <id> --note <summary>
+       return to parent: <one-line summary>
+              │
+              ▼
+   parent writes a short user-visible status line, awaits next <channel>
+```
+
+Per dispatch the parent consumes roughly *dispatch arrived → Task
+call → short summary line*, not *all the work*.
+
+### Subagents share the parent's session id
+
+A `Task`-spawned subagent is **not** a separate Claude Code session.
+It shares the parent's `CLAUDE_CODE_SESSION_ID`, the parent's `claude`
+process (same PPID for spawned bash, so the same `.bacio/agents.json`
+entry), the parent's task store (a `TaskCreate` call from the
+subagent shows up in the parent's task list), and the parent's MCP
+connections. The bacio MCP server cannot tell a subagent's
+`mcp__bacio__reply` call apart from a parent's — both arrive under
+the same session id, claim the same agent identity, and write into
+the same audit-log actor. There is exactly one row in `agent_sessions`
+per `claude` process; subagents do not get their own.
+
+Practical consequences:
+
+- The session-start hook's identity registration and the channel's
+  `claude_pid`/identity resolution work unchanged.
+- `bacio agent claim` / `release` / `reply` from inside the subagent
+  attribute to the parent's session, which is what the registry
+  expects.
+- BACI-14's `Stop`-hook-flips-`in_progress`-to-`needs_action` path
+  still works without changes: the parent's `Stop` hook fires when
+  the parent's turn ends (after `Task` returns and the parent has
+  written its summary), and that's the precise *agent parked* signal.
+- No new schema rows, no `parent_session_pk` column, no per-subagent
+  registry entries.
+
+### Worker contract lives in the dispatch preamble
+
+The full delegation contract is the **dispatch preamble** — a reserved
+row (`slug = _dispatch_preamble`) in the `prompt_templates` table that
+`model.ComposeDispatchPayload` prepends to every per-mode template body
+at dispatch compose time. The agent receives the wrapper inside the
+dispatch payload itself; there is no system-prompt-level instruction
+to follow. The shape of a composed payload is:
+
+```
+<preamble: BACI-52 delegation wrapper>
+
+---
+
+<per-mode template body, rendered with {{issue_id}} etc.>
+
+<optional --note appended after a blank line>
+```
+
+The embedded default body lives in
+[`internal/model/prompttemplates/_dispatch_preamble.txt`](../internal/model/prompttemplates/_dispatch_preamble.txt);
+fresh installs seed the row from that file. Existing DBs are brought
+up to date by `backfillDispatchPreamble` in
+`internal/store/store.go` — idempotent, runs on every `Open`, no-op
+once the row is present (or has been deliberately deleted).
+
+Editing the contract is the same flow as editing any other template:
+
+- CLI: `bacio settings template show _dispatch_preamble` /
+  `bacio settings template set _dispatch_preamble --body "..."`.
+- TUI: open Settings (`s` from the main menu) → the preamble row
+  leads the template list with the label "Dispatch preamble
+  (prepended to every job)".
+- Desktop: same row in the Settings panel.
+- Restore to the embedded default: `bacio settings template reset
+  _dispatch_preamble`.
+
+There is deliberately **no** `.claude/agents/bacio-worker.md` file,
+**no** `bacio install-worker` command, and **no** `//go:embed` of the
+contract into a per-repo template. Two install steps —
+`bacio install-channel` and `bacio install-hooks` — remain the only
+setup story. Every dispatch picks up contract edits on the next
+compose; nothing to re-deploy across consuming repos.
+
+### Subagent tool surface and the TodoWrite-mirror gap
+
+`general-purpose` has a restricted tool list relative to the parent:
+Read, Edit, Write, Bash, Grep, Glob, `TaskCreate` (no `Task`, no
+`TodoWrite`), plus every MCP tool the parent has connected. For the
+work bacio dispatches care about — clone a worktree, edit code, run
+tests, open a PR — that surface is sufficient.
+
+The one **known limitation** is the `TodoWrite` gap: BACI-45's
+`PostToolUse`-on-`TodoWrite` mirror cannot fire for delegated work,
+because the subagent has no `TodoWrite` tool. The Agents view's
+per-card `n/m done` badge therefore stays at whatever the parent
+itself wrote — which is nothing, by design. Dispatch correctness is
+unaffected. If the missing sub-step telemetry becomes painful in
+practice, the follow-up is a small `mcp__bacio__todo_replace` MCP
+tool the worker contract would call at each plan step (~30 lines
+reusing `client.ReplaceSessionTodos`); the gap is documented here so
+the next reader doesn't waste a spike on it.
+
+### Trivial-dispatch carve-out (structural, not instruction-based)
+
+Not every dispatch is worth a subagent. The channel's own
+**setup-register** nudge (`from="bacio-channel"`) and the BACI-57
+**idle-ping** probe (`from="bacio-channel-ping"`) are each a single
+MCP call — calling `Task` to wrap them would cost more than the call
+itself. They don't need a carve-out instruction in the wrapper
+because they don't go through `ComposeDispatchPayload` at all:
+`client.buildSetupDispatchPayload` and `client.buildPingDispatchPayload`
+hand-roll their payloads and never see the preamble. The parent
+agent reads a tag with no delegation wrapper attached and handles it
+inline.
+
+For any dispatch that does go through `ComposeDispatchPayload` —
+which is every issue-tied per-mode dispatch (`plan` / `design` /
+`implement` / `review` / `ship` / `fix_review`, plus any user-added
+template) — the preamble is unconditionally prepended whenever the
+template body is non-empty. An untyped dispatch (no template, just a
+freeform `--note`) also skips the preamble: there's no work brief
+worth delegating.
+
+### Single concurrent, no mid-flight cancel
+
+v1 leans on the parent's natural serial execution: an LLM in the
+middle of a `Task` call processes its return before reading further
+events. A second `<channel>` event arriving mid-job is queued by
+Claude Code and read after the current `Task` returns — visible
+effect: the second job starts when the first finishes. No
+bacio-side per-session cap is enforced; the per-template
+`prompt_templates.concurrency_limit` (BACI-51) is per-(repo, mode),
+not per-session, and would over-serialise.
+
+Cancelling a dispatch in flight (the TUI `X` keybind on a waiting
+card, the desktop spinner-as-cancel button, `bacio agent cancel`)
+clears the queued dispatch and resets `waiting_for_claim`, but
+**does not stop a subagent already running**. That work runs to
+completion; the user just won't see it surfaced through the dispatch
+UI.
+
+---
+
 ## Acknowledging
 
 When the agent has handled a dispatch it acks it — which moves the

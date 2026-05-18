@@ -1,6 +1,7 @@
 package store
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/mrgeoffrich/bacio/internal/model"
@@ -34,9 +35,51 @@ func TestPromptTemplatesSeededOnFirstOpen(t *testing.T) {
 		if tmpl.Body == "" {
 			t.Errorf("%s: empty body", tmpl.Slug)
 		}
-		if len(tmpl.AllowedStates) == 0 {
+		// The reserved BACI-52 preamble row is deliberately stateless
+		// (no state-gate = excluded from the per-card mode picker). Every
+		// other built-in must declare at least one state.
+		if tmpl.Slug == model.BuiltinTemplatePreamble {
+			if len(tmpl.AllowedStates) != 0 {
+				t.Errorf("%s: AllowedStates = %v, want empty (preamble row is not dispatchable)", tmpl.Slug, tmpl.AllowedStates)
+			}
+		} else if len(tmpl.AllowedStates) == 0 {
 			t.Errorf("%s: empty allowed_states", tmpl.Slug)
 		}
+	}
+}
+
+// TestGetDispatchPreambleReturnsBody locks the BACI-52 helper that the
+// dispatch composer uses to fetch the preamble body. A fresh DB has
+// the row seeded from the embedded default — the body must contain
+// the load-bearing delegation phrase. Deleting the row degrades the
+// helper to "" so ComposeDispatchPayload skips the preamble + separator
+// (the pre-BACI-52 shape).
+func TestGetDispatchPreambleReturnsBody(t *testing.T) {
+	s := newTestStore(t)
+	body, err := s.GetDispatchPreamble()
+	if err != nil {
+		t.Fatalf("GetDispatchPreamble: %v", err)
+	}
+	if body == "" {
+		t.Fatal("GetDispatchPreamble returned empty body on a fresh DB")
+	}
+	// The delegation contract sticks Task / general-purpose / opus
+	// front-and-centre — if one of those phrases vanishes the wrapper
+	// has stopped doing its job.
+	for _, phrase := range []string{"Task(", "general-purpose", "opus"} {
+		if !strings.Contains(body, phrase) {
+			t.Errorf("preamble body missing %q\nfull body:\n%s", phrase, body)
+		}
+	}
+	if _, err := s.DeletePromptTemplate(model.BuiltinTemplatePreamble); err != nil {
+		t.Fatalf("delete preamble: %v", err)
+	}
+	body, err = s.GetDispatchPreamble()
+	if err != nil {
+		t.Fatalf("GetDispatchPreamble after delete: %v", err)
+	}
+	if body != "" {
+		t.Fatalf("GetDispatchPreamble after delete = %q, want \"\"", body)
 	}
 }
 

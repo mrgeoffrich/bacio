@@ -396,6 +396,42 @@ func migrate(db *sql.DB) error {
 	); err != nil {
 		return fmt.Errorf("create uq_agent_session_todos_task: %w", err)
 	}
+	// BACI-52: backfill the _dispatch_preamble row for existing users
+	// (the first-time seed step in migratePromptTemplates is gated on
+	// the table being empty, so DBs that already had per-mode templates
+	// won't pick it up otherwise). Idempotent: INSERT OR IGNORE keys off
+	// the UNIQUE slug, so re-running on an upgraded DB is a no-op, and a
+	// deliberate `bacio settings template rm _dispatch_preamble` won't
+	// be undone on the next Open (the delete also drops the row this
+	// step would reinsert — but a `restore-defaults` is the documented
+	// recovery path, identical to the other built-ins).
+	if err := backfillDispatchPreamble(db); err != nil {
+		return fmt.Errorf("backfill dispatch preamble: %w", err)
+	}
+	return nil
+}
+
+// backfillDispatchPreamble inserts the _dispatch_preamble row if it's
+// not already present. Used by the migration to bring older DBs (where
+// the first-time seed step has already run with only the per-mode
+// built-ins) up to date with the BACI-52 wrapper.
+func backfillDispatchPreamble(db *sql.DB) error {
+	slug := model.BuiltinTemplatePreamble
+	body := model.DefaultPromptBodyForBuiltinSlug(slug)
+	name := model.BuiltinTemplateLabel(slug)
+	if name == "" {
+		name = slug
+	}
+	// allowed_states_json = '[]' (no state-gate) — keeps the row out of
+	// the per-card dispatch picker (availableDispatchModes filters by
+	// state-gate match).
+	if _, err := db.Exec(`
+		INSERT OR IGNORE INTO prompt_templates
+		  (slug, name, body, allowed_states_json, is_builtin, concurrency_limit, created_at, updated_at)
+		VALUES (?, ?, ?, '[]', 1, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+		slug, name, body); err != nil {
+		return err
+	}
 	return nil
 }
 
