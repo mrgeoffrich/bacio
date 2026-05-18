@@ -1,6 +1,7 @@
 package dispatcher
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -370,5 +371,125 @@ func TestMatcherTick_BindRaceIsSwallowed(t *testing.T) {
 	}
 	if n != 0 {
 		t.Fatalf("bind count = %d, want 0 (race swallowed)", n)
+	}
+}
+
+// TestMatcherTick_UnblocksPastStaleOrphan (BACI-58 §A end-to-end) wires
+// the real *store.Store as the matcher's backend and proves the
+// integrated fix: a delivered dispatch to a long-dead agent no longer
+// strands the queue. Without the BACI-58 staleness gate the matcher's
+// CountInFlightByMode would return 1 (=ship's concurrency_limit) and
+// the fresh queued dispatch would sit forever.
+func TestMatcherTick_UnblocksPastStaleOrphan(t *testing.T) {
+	s, err := store.Open(filepath.Join(t.TempDir(), "matcher.sqlite"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+
+	repo, err := s.CreateRepo("STND", "stranded", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+	iss, err := s.CreateIssue(repo.ID, nil, "stranded ship", "", model.StateInReview, nil)
+	if err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+
+	// Force ship's concurrency_limit to 1 — same setup as the
+	// real-world repro the issue cites.
+	if _, err := s.SetPromptTemplateConcurrencyLimit(string(model.DispatchModeShip), 1); err != nil {
+		t.Fatalf("set ship concurrency: %v", err)
+	}
+
+	// Dead agent: registered, then its session forced stale beyond
+	// the AgentIdlePingThreshold. Its delivered ship dispatch would
+	// historically have permanently held the only ship slot.
+	deadAgent, _, err := s.UpsertAgent("dead-otter@claude.dead", true)
+	if err != nil {
+		t.Fatalf("upsert dead agent: %v", err)
+	}
+	deadSess, err := s.UpsertAgentSession(store.UpsertAgentSessionIn{
+		SessionID: "sess-dead", RepoID: repo.ID, AgentID: &deadAgent.ID, Actor: "agent-claude",
+		MarkRegistered: true,
+	})
+	if err != nil {
+		t.Fatalf("upsert dead session: %v", err)
+	}
+	deadDispatch, err := s.AddDispatch(store.AddDispatchIn{
+		RepoID:        repo.ID,
+		TargetAgentID: &deadAgent.ID,
+		IssueID:       &iss.ID,
+		Mode:          model.DispatchModeShip,
+		Payload:       "ship orphan",
+		CreatedBy:     "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add dead dispatch: %v", err)
+	}
+	if _, err := s.MarkDispatchDelivered(deadDispatch.ID); err != nil {
+		t.Fatalf("mark delivered: %v", err)
+	}
+	// Backdate the dead session's last_seen_at past the staleness
+	// window so the BACI-58 gate excludes its dispatch from the count.
+	if _, err := s.DB.Exec(
+		`UPDATE agent_sessions SET last_seen_at = datetime('now','-3 hours') WHERE session_id = ?`,
+		deadSess.SessionID,
+	); err != nil {
+		t.Fatalf("force-stale dead session: %v", err)
+	}
+
+	// Live agent + a fresh queued ship dispatch the matcher should bind.
+	liveAgent, _, err := s.UpsertAgent("live-otter@claude.alive", true)
+	if err != nil {
+		t.Fatalf("upsert live agent: %v", err)
+	}
+	if _, err := s.UpsertAgentSession(store.UpsertAgentSessionIn{
+		SessionID: "sess-live", RepoID: repo.ID, AgentID: &liveAgent.ID, Actor: "agent-claude",
+		MarkRegistered: true,
+	}); err != nil {
+		t.Fatalf("upsert live session: %v", err)
+	}
+	// Mark the live session as channel-connected. The picker only
+	// considers candidates whose session has a `channel_seen_at` —
+	// without this the live agent looks no better than the dead one.
+	if _, err := s.DB.Exec(
+		`UPDATE agent_sessions SET channel_seen_at = CURRENT_TIMESTAMP WHERE session_id = ?`,
+		"sess-live",
+	); err != nil {
+		t.Fatalf("mark live session channel-connected: %v", err)
+	}
+	freshIss, err := s.CreateIssue(repo.ID, nil, "fresh ship", "", model.StateInReview, nil)
+	if err != nil {
+		t.Fatalf("create fresh issue: %v", err)
+	}
+	queuedDispatch, err := s.AddDispatch(store.AddDispatchIn{
+		RepoID:        repo.ID,
+		IssueID:       &freshIss.ID,
+		Mode:          model.DispatchModeShip,
+		Payload:       "ship fresh",
+		CreatedBy:     "supervisor",
+		InitialStatus: model.DispatchQueued,
+	})
+	if err != nil {
+		t.Fatalf("add queued dispatch: %v", err)
+	}
+
+	bound, err := New(s).Tick()
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if bound != 1 {
+		t.Fatalf("matcher bound %d dispatches, want 1 (stale orphan should not have held the slot)", bound)
+	}
+	got, err := s.GetDispatch(queuedDispatch.ID)
+	if err != nil {
+		t.Fatalf("get queued dispatch: %v", err)
+	}
+	if got.Status != model.DispatchPending {
+		t.Fatalf("queued dispatch status after Tick = %q, want pending (matcher should have bound it)", got.Status)
+	}
+	if got.TargetAgentID == nil || *got.TargetAgentID != liveAgent.ID {
+		t.Fatalf("queued dispatch target agent = %v, want %d (live agent)", got.TargetAgentID, liveAgent.ID)
 	}
 }

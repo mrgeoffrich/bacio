@@ -75,7 +75,7 @@ func TestEndAgentSessionReleasesClaims(t *testing.T) {
 	if _, _, _, err := s.AddAgentClaim("sess-2", iss.ID, ""); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	if _, _, err := s.EndAgentSession("sess-2", string(model.EndReasonStop)); err != nil {
+	if _, _, _, err := s.EndAgentSession("sess-2", string(model.EndReasonStop)); err != nil {
 		t.Fatalf("end: %v", err)
 	}
 
@@ -106,7 +106,7 @@ func TestAddAgentClaimRejectsEndedSession(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	if _, _, err := s.EndAgentSession("sess-3", string(model.EndReasonStop)); err != nil {
+	if _, _, _, err := s.EndAgentSession("sess-3", string(model.EndReasonStop)); err != nil {
 		t.Fatalf("end: %v", err)
 	}
 	if _, _, _, err := s.AddAgentClaim("sess-3", iss.ID, ""); err == nil {
@@ -135,7 +135,7 @@ func TestPruneAgentSessionsKeepsActive(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("register stale: %v", err)
 	}
-	if _, _, err := s.EndAgentSession("stale", string(model.EndReasonStop)); err != nil {
+	if _, _, _, err := s.EndAgentSession("stale", string(model.EndReasonStop)); err != nil {
 		t.Fatalf("end stale: %v", err)
 	}
 	// Backdate to two retention windows ago.
@@ -170,7 +170,7 @@ func TestPruneEndedAgentSessionsCustomRetention(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("register %s: %v", id, err)
 		}
-		if _, _, err := s.EndAgentSession(id, string(model.EndReasonStop)); err != nil {
+		if _, _, _, err := s.EndAgentSession(id, string(model.EndReasonStop)); err != nil {
 			t.Fatalf("end %s: %v", id, err)
 		}
 	}
@@ -208,7 +208,7 @@ func TestPruneEndedAgentSessionsCascadesClaims(t *testing.T) {
 	if _, _, _, err := s.AddAgentClaim("cascade", iss.ID, ""); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	if _, _, err := s.EndAgentSession("cascade", string(model.EndReasonStop)); err != nil {
+	if _, _, _, err := s.EndAgentSession("cascade", string(model.EndReasonStop)); err != nil {
 		t.Fatalf("end: %v", err)
 	}
 	past := time.Now().Add(-5 * time.Hour).UTC().Format("2006-01-02 15:04:05")
@@ -248,7 +248,7 @@ func TestPruneEndedAgentSessionsLeavesDispatches(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("add dispatch: %v", err)
 	}
-	if _, _, err := s.EndAgentSession("dispatched", string(model.EndReasonStop)); err != nil {
+	if _, _, _, err := s.EndAgentSession("dispatched", string(model.EndReasonStop)); err != nil {
 		t.Fatalf("end: %v", err)
 	}
 	past := time.Now().Add(-5 * time.Hour).UTC().Format("2006-01-02 15:04:05")
@@ -392,7 +392,7 @@ func TestUpsertAgentSessionRejectsEndedSession(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("first register: %v", err)
 	}
-	if _, _, err := s.EndAgentSession("ended-then-reregister", string(model.EndReasonStop)); err != nil {
+	if _, _, _, err := s.EndAgentSession("ended-then-reregister", string(model.EndReasonStop)); err != nil {
 		t.Fatalf("end: %v", err)
 	}
 	_, err := s.UpsertAgentSession(UpsertAgentSessionIn{
@@ -631,7 +631,7 @@ func TestOpenClaimsBySession(t *testing.T) {
 	if _, _, _, err := s.AddAgentClaim("ended-sess", iss2.ID, "p3"); err != nil {
 		t.Fatalf("claim ended: %v", err)
 	}
-	if _, _, err := s.EndAgentSession("ended-sess", string(model.EndReasonStop)); err != nil {
+	if _, _, _, err := s.EndAgentSession("ended-sess", string(model.EndReasonStop)); err != nil {
 		t.Fatalf("end: %v", err)
 	}
 	bySession, err := s.OpenClaimsBySession(repo.ID)
@@ -890,7 +890,7 @@ func TestEndAgentSessionUnassignsReleasedIssues(t *testing.T) {
 	if _, _, _, err := s.AddAgentClaim("ending", iss2.ID, ""); err != nil {
 		t.Fatalf("claim 2: %v", err)
 	}
-	_, changes, err := s.EndAgentSession("ending", string(model.EndReasonStop))
+	_, changes, _, err := s.EndAgentSession("ending", string(model.EndReasonStop))
 	if err != nil {
 		t.Fatalf("end: %v", err)
 	}
@@ -907,5 +907,240 @@ func TestEndAgentSessionUnassignsReleasedIssues(t *testing.T) {
 	}
 	if got := assigneeOf(t, s, iss2.ID); got != "" {
 		t.Fatalf("issue 2 assignee = %q, want empty", got)
+	}
+}
+
+// TestEndAgentSessionCancelsSessionTargetedDispatch (BACI-58 §B) locks
+// in that an open dispatch targeted at the exact session is cancelled
+// inside the EndAgentSession transaction, and that the
+// CancelledDispatchInfo returned carries enough for the audit caller
+// to write the agent.cancel row.
+func TestEndAgentSessionCancelsSessionTargetedDispatch(t *testing.T) {
+	s, repo, iss := seedRepoAndIssue(t)
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "sess-tgt", RepoID: repo.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	d, err := s.AddDispatch(AddDispatchIn{
+		RepoID:          repo.ID,
+		TargetSessionID: "sess-tgt",
+		IssueID:         &iss.ID,
+		Mode:            model.DispatchModeShip,
+		Payload:         "do it",
+		CreatedBy:       "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add dispatch: %v", err)
+	}
+	_, _, cancelled, err := s.EndAgentSession("sess-tgt", string(model.EndReasonStop))
+	if err != nil {
+		t.Fatalf("end: %v", err)
+	}
+	if len(cancelled) != 1 {
+		t.Fatalf("cancelled count = %d, want 1; rows = %+v", len(cancelled), cancelled)
+	}
+	got := cancelled[0]
+	if got.ID != d.ID {
+		t.Fatalf("cancelled ID = %d, want %d", got.ID, d.ID)
+	}
+	if got.RepoPrefix != repo.Prefix {
+		t.Fatalf("RepoPrefix = %q, want %q", got.RepoPrefix, repo.Prefix)
+	}
+	if got.IssueKey != iss.Key {
+		t.Fatalf("IssueKey = %q, want %q", got.IssueKey, iss.Key)
+	}
+	if got.TargetSessionID != "sess-tgt" {
+		t.Fatalf("TargetSessionID = %q, want sess-tgt", got.TargetSessionID)
+	}
+	if got.Mode != string(model.DispatchModeShip) {
+		t.Fatalf("Mode = %q, want ship", got.Mode)
+	}
+	// Status persisted as cancelled.
+	got2, err := s.GetDispatch(d.ID)
+	if err != nil {
+		t.Fatalf("get dispatch: %v", err)
+	}
+	if got2.Status != model.DispatchCancelled {
+		t.Fatalf("dispatch status after end = %q, want cancelled", got2.Status)
+	}
+}
+
+// TestEndAgentSessionCancelsIdentityTargetedWhenLastLive (BACI-58 §B)
+// locks in that an identity-targeted dispatch is cancelled when the
+// session being ended is the identity's only live session — but a
+// sibling alive session for the same identity keeps it alive.
+func TestEndAgentSessionCancelsIdentityTargetedWhenLastLive(t *testing.T) {
+	s, repo, iss := seedRepoAndIssue(t)
+	ag, _, err := s.UpsertAgent("lone-fox@claude.shiny", true)
+	if err != nil {
+		t.Fatalf("upsert agent: %v", err)
+	}
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "only-live", RepoID: repo.ID, AgentID: &ag.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	d, err := s.AddDispatch(AddDispatchIn{
+		RepoID:        repo.ID,
+		TargetAgentID: &ag.ID,
+		IssueID:       &iss.ID,
+		Mode:          model.DispatchModeShip,
+		Payload:       "identity-targeted",
+		CreatedBy:     "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add identity dispatch: %v", err)
+	}
+	_, _, cancelled, err := s.EndAgentSession("only-live", string(model.EndReasonStop))
+	if err != nil {
+		t.Fatalf("end: %v", err)
+	}
+	if len(cancelled) != 1 || cancelled[0].ID != d.ID {
+		t.Fatalf("expected identity-targeted dispatch cancelled, got %+v", cancelled)
+	}
+}
+
+// TestEndAgentSessionPreservesIdentityWhenSiblingAlive (BACI-58 §B) —
+// pairing / review flows have two sessions sharing one identity;
+// ending one must NOT cancel the identity-targeted dispatches the
+// surviving sibling could still service.
+func TestEndAgentSessionPreservesIdentityWhenSiblingAlive(t *testing.T) {
+	s, repo, _ := seedRepoAndIssue(t)
+	ag, _, err := s.UpsertAgent("twin-lynx@claude.shiny", true)
+	if err != nil {
+		t.Fatalf("upsert agent: %v", err)
+	}
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "twin-a", RepoID: repo.ID, AgentID: &ag.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("upsert twin-a: %v", err)
+	}
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "twin-b", RepoID: repo.ID, AgentID: &ag.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("upsert twin-b: %v", err)
+	}
+	d, err := s.AddDispatch(AddDispatchIn{
+		RepoID:        repo.ID,
+		TargetAgentID: &ag.ID,
+		Mode:          model.DispatchModeShip,
+		Payload:       "pair-targeted",
+		CreatedBy:     "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add pair dispatch: %v", err)
+	}
+	_, _, cancelled, err := s.EndAgentSession("twin-a", string(model.EndReasonStop))
+	if err != nil {
+		t.Fatalf("end twin-a: %v", err)
+	}
+	for _, info := range cancelled {
+		if info.ID == d.ID {
+			t.Fatalf("identity dispatch cancelled despite sibling-alive session: %+v", info)
+		}
+	}
+	got, err := s.GetDispatch(d.ID)
+	if err != nil {
+		t.Fatalf("get dispatch: %v", err)
+	}
+	if got.Status == model.DispatchCancelled {
+		t.Fatalf("dispatch cancelled despite sibling alive; status = %q", got.Status)
+	}
+
+	// Now end the second sibling — last live session, identity dispatch
+	// should auto-cancel.
+	_, _, cancelled, err = s.EndAgentSession("twin-b", string(model.EndReasonStop))
+	if err != nil {
+		t.Fatalf("end twin-b: %v", err)
+	}
+	if len(cancelled) != 1 || cancelled[0].ID != d.ID {
+		t.Fatalf("end of last-live session should cancel identity dispatch, got %+v", cancelled)
+	}
+}
+
+// TestEndAgentSessionClearsWaitingForClaim (BACI-58 §B) locks in that
+// an auto-cancelled session-targeted dispatch clears its issue's
+// waiting_for_claim flag, same as the standalone CancelDispatch does.
+func TestEndAgentSessionClearsWaitingForClaim(t *testing.T) {
+	s, repo, iss := seedRepoAndIssue(t)
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "wait-sess", RepoID: repo.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if _, err := s.AddDispatch(AddDispatchIn{
+		RepoID:          repo.ID,
+		TargetSessionID: "wait-sess",
+		IssueID:         &iss.ID,
+		Payload:         "queue it",
+		CreatedBy:       "supervisor",
+	}); err != nil {
+		t.Fatalf("add dispatch: %v", err)
+	}
+	// AddDispatch sets waiting_for_claim = 1 transactionally — confirm
+	// the precondition before the end-session call.
+	var before int
+	if err := s.DB.QueryRow(`SELECT waiting_for_claim FROM issues WHERE id = ?`, iss.ID).Scan(&before); err != nil {
+		t.Fatalf("read waiting before: %v", err)
+	}
+	if before != 1 {
+		t.Fatalf("waiting_for_claim before end = %d, want 1 (AddDispatch should have set it)", before)
+	}
+	if _, _, _, err := s.EndAgentSession("wait-sess", string(model.EndReasonStop)); err != nil {
+		t.Fatalf("end: %v", err)
+	}
+	var after int
+	if err := s.DB.QueryRow(`SELECT waiting_for_claim FROM issues WHERE id = ?`, iss.ID).Scan(&after); err != nil {
+		t.Fatalf("read waiting after: %v", err)
+	}
+	if after != 0 {
+		t.Fatalf("waiting_for_claim after end = %d, want 0 (BACI-58 §B should clear)", after)
+	}
+}
+
+// TestEndAgentSessionLeavesAckedAndCancelledAlone (BACI-58 §B) — only
+// open (queued/pending/delivered) dispatches participate in the
+// auto-cancel. Already-acked or already-cancelled rows are left alone.
+func TestEndAgentSessionLeavesAckedAndCancelledAlone(t *testing.T) {
+	s, repo, _ := seedRepoAndIssue(t)
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "settled", RepoID: repo.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	acked, err := s.AddDispatch(AddDispatchIn{
+		RepoID: repo.ID, TargetSessionID: "settled",
+		Payload: "ack me", CreatedBy: "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add acked dispatch: %v", err)
+	}
+	if _, err := s.AckDispatch(acked.ID, "done"); err != nil {
+		t.Fatalf("ack: %v", err)
+	}
+	cancelled, err := s.AddDispatch(AddDispatchIn{
+		RepoID: repo.ID, TargetSessionID: "settled",
+		Payload: "cancel me", CreatedBy: "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add cancelled dispatch: %v", err)
+	}
+	if _, err := s.CancelDispatch(cancelled.ID); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	_, _, info, err := s.EndAgentSession("settled", string(model.EndReasonStop))
+	if err != nil {
+		t.Fatalf("end: %v", err)
+	}
+	if len(info) != 0 {
+		t.Fatalf("settled-dispatch end returned cancelled info = %+v, want empty", info)
+	}
+	got, err := s.GetDispatch(acked.ID)
+	if err != nil {
+		t.Fatalf("get acked: %v", err)
+	}
+	if got.Status != model.DispatchAcked {
+		t.Fatalf("acked status = %q, want acked (must not be reverted)", got.Status)
 	}
 }

@@ -299,7 +299,7 @@ func (d deps) handleAgentEnd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actor := ActorFromContext(r.Context())
-	sess, assigneeChanges, err := d.store.EndAgentSession(in.SessionID, in.Reason)
+	sess, assigneeChanges, cancelled, err := d.store.EndAgentSession(in.SessionID, in.Reason)
 	if err != nil {
 		status, code := statusForError(err)
 		writeError(w, status, code, err.Error(), nil)
@@ -315,6 +315,20 @@ func (d deps) handleAgentEnd(w http.ResponseWriter, r *http.Request) {
 	})
 	for _, ch := range assigneeChanges {
 		writeAssigneeChange(d.store, d.logger, actor, ch)
+	}
+	// BACI-58 §B — write the per-row agent.cancel history for every
+	// dispatch the end-session tx auto-cancelled. "auto-cancel:" prefix
+	// distinguishes reaper-driven cancels from manual `bacio agent
+	// cancel`s in `bacio history --op agent.cancel`.
+	for _, info := range cancelled {
+		recordOp(d.store, d.logger, model.HistoryEntry{
+			RepoID: &info.RepoID, RepoPrefix: info.RepoPrefix,
+			Actor:    actor,
+			Op:       "agent.cancel",
+			Kind:     "agent",
+			TargetID: &info.ID, TargetLabel: cancelledDispatchTargetLabel(info),
+			Details:  cancelledDispatchDetails(info, "auto-cancel: target session ended"),
+		})
 	}
 	writeJSON(w, http.StatusOK, sess)
 }
@@ -819,6 +833,33 @@ func dispatchDetails(d *model.AgentDispatch) string {
 		parts = append(parts, "session="+d.TargetSessionID)
 	}
 	parts = append(parts, "status="+string(d.Status))
+	return strings.Join(parts, ",")
+}
+
+// cancelledDispatchTargetLabel / cancelledDispatchDetails (BACI-58 §B)
+// shape the audit row for an auto-cancelled dispatch the same way the
+// regular agent.cancel path does, but starting from the lighter-weight
+// store.CancelledDispatchInfo (no full AgentDispatch fetch needed).
+func cancelledDispatchTargetLabel(info store.CancelledDispatchInfo) string {
+	if info.TargetAgentName != "" {
+		return info.TargetAgentName
+	}
+	return info.TargetSessionID
+}
+
+func cancelledDispatchDetails(info store.CancelledDispatchInfo, reason string) string {
+	var parts []string
+	parts = append(parts, reason)
+	if info.IssueKey != "" {
+		parts = append(parts, "issue="+info.IssueKey)
+	}
+	if info.TargetSessionID != "" {
+		parts = append(parts, "session="+info.TargetSessionID)
+	}
+	if info.Mode != "" {
+		parts = append(parts, "mode="+info.Mode)
+	}
+	parts = append(parts, "status=cancelled")
 	return strings.Join(parts, ",")
 }
 
