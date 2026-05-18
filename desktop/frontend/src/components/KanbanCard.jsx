@@ -23,6 +23,14 @@ function KanbanCard({ card, promptConfig, isDragging, onDragStart, onDragEnd, on
 
   const hasFooter = validPrompts.length > 0 || card.assignees.length > 0 || waiting;
 
+  // BACI-60 meta line — only on taken cards, only when at least one of
+  // verb or tasks is populated. Hidden entirely otherwise so cards that
+  // aren't being worked on stay visually quiet.
+  const activeVerb = taken ? (card.activeVerb || '') : '';
+  const todosTotal = taken ? (card.todosTotal || 0) : 0;
+  const todosDone = taken ? (card.todosDone || 0) : 0;
+  const hasMeta = !!activeVerb || todosTotal > 0;
+
   return (
     <article
       className={`mk-card ${isDragging ? 'is-dragging' : ''} ${card.claude ? 'is-claude' : ''} ${taken ? 'is-taken' : ''} ${waiting ? 'is-waiting' : ''}`}
@@ -97,6 +105,15 @@ function KanbanCard({ card, promptConfig, isDragging, onDragStart, onDragEnd, on
             </DropdownMenu.Root>
           )}
         </footer>
+      )}
+      {hasMeta && (
+        <div className="mk-card-meta-line">
+          {activeVerb && <span className="mk-card-verb">{activeVerb}</span>}
+          {activeVerb && todosTotal > 0 && <span className="mk-card-meta-sep">·</span>}
+          {todosTotal > 0 && (
+            <span className="mk-card-tasks">Tasks {todosDone}/{todosTotal}</span>
+          )}
+        </div>
       )}
     </article>
   );
