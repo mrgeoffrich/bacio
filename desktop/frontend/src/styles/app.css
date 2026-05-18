@@ -303,10 +303,23 @@ body { margin: 0; }
 .mk-drawer-section { display: flex; flex-direction: column; gap: 8px; }
 .mk-drawer-label { font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); letter-spacing: .06em; text-transform: uppercase; }
 .mk-drawer-text { margin: 0; font-size: 14px; color: var(--fg-2); line-height: 1.55; }
-.mk-timeline { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
-.mk-tl-item { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--fg-2); }
+.mk-timeline { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 14px; }
+/* align-items: flex-start (not center) so a multi-line markdown comment
+   sits top-aligned with the author dot; the dot's margin-top compensates
+   so a single-line comment still reads as aligned with the author label. */
+.mk-tl-item { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; color: var(--fg-2); }
 .mk-tl-item b { color: var(--fg-1); font-weight: 600; }
-.mk-tl-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-300); flex-shrink: 0; }
+.mk-tl-text { flex: 1; min-width: 0; }
+.mk-tl-author { display: block; margin-bottom: 4px; }
+.mk-tl-body { font-size: 13px; }
+/* Trim the trailing margin a markdown block adds so the row spacing
+   stays driven by .mk-timeline's gap rather than ballooning. */
+.mk-tl-body > :last-child { margin-bottom: 0; }
+.mk-tl-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--ink-300); flex-shrink: 0;
+  margin-top: 6px;
+}
 .mk-tl-dot.is-claude { background: var(--status-claude); }
 .mk-drawer-foot { padding: 14px 20px; border-top: 1px solid var(--border-1); display: flex; gap: 8px; background: var(--paper); }
 
