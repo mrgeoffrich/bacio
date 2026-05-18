@@ -116,6 +116,13 @@ func newRouter(d deps) http.Handler {
 	// so the browser does one round trip per refresh.
 	mux.HandleFunc("GET /repos/{prefix}/agents/cards", d.handleAgentCardsListRepo)
 	mux.HandleFunc("GET /agents/cards", d.handleAgentCardsListAll)
+	// BACI-60: composite kanban-cards endpoint — same pattern as
+	// /agents/cards but for the Board view. Web mode used to reshape
+	// raw /repos/{prefix}/issues client-side, which couldn't see the
+	// ActiveVerb / TodosDone / TodosTotal fields the desktop now
+	// computes server-side. Only the per-repo route is wired; the
+	// "all repos" pseudo-board is still gated to desktop only.
+	mux.HandleFunc("GET /repos/{prefix}/cards", d.handleBoardCardsListRepo)
 	// Dispatch CRUD (BACI-35) rounds out the four dispatch verbs — inbox
 	// and ack already shipped with BACI-34. Repo-scoped because a
 	// dispatch is always queued against one repo.

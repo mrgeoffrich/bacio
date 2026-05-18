@@ -7,6 +7,7 @@ import (
 
 	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/model"
+	"github.com/mrgeoffrich/bacio/internal/store"
 )
 
 // fakeBoardClient is a minimal client.Client for ListCards tests — it
@@ -63,6 +64,14 @@ func (f *fakeBoardClient) ListRepos(context.Context) ([]*model.Repo, error) {
 		return nil, nil
 	}
 	return []*model.Repo{f.repo}, nil
+}
+
+// ListPromptTemplates is a fixed-empty stub — boardcards.Assemble reads
+// the registered templates to resolve dispatch mode slugs into the
+// per-card ActiveVerb label. An empty list means no verb is ever
+// derived, which is what the existing taken-flag tests expect.
+func (f *fakeBoardClient) ListPromptTemplates(context.Context) ([]*store.PromptTemplate, error) {
+	return nil, nil
 }
 
 func TestListCardsTaken(t *testing.T) {

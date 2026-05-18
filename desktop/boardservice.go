@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/mrgeoffrich/bacio/internal/agentcards"
+	"github.com/mrgeoffrich/bacio/internal/boardcards"
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/git"
@@ -47,25 +48,14 @@ type BoardColumn struct {
 	Label string `json:"label"`
 }
 
-// BoardCard is a kanban card — one bacio issue, shaped for the imported UI kit.
-type BoardCard struct {
-	Key         string   `json:"key"`
-	Column      string   `json:"column"`
-	ColumnLabel string   `json:"columnLabel"`
-	Title       string   `json:"title"`
-	Tags        []string `json:"tags"`
-	Assignees   []string `json:"assignees"`
-	Claude      bool     `json:"claude"`
-	// Taken is the derived "an agent is actively holding this issue"
-	// signal — true while the issue has an open agent claim. The Board
-	// bolds taken cards and disables drag / per-card actions on them.
-	Taken bool `json:"taken"`
-	// WaitingForClaim is true between a dispatch being queued against
-	// this issue and an agent recording an open claim — the UI shows a
-	// spinner and disables drag / the per-card action while it's set.
-	// Cleared the moment a claim lands. `taken` takes render precedence.
-	WaitingForClaim bool `json:"waitingForClaim"`
-}
+// BoardCard is the kanban-card wire shape, hoisted into
+// internal/boardcards so the bacio api can serve the same payload
+// over REST (mirrors the BACI-50 agentcards extraction). The alias
+// keeps the Wails-bound surface unchanged — the generated TS
+// bindings still point at the same struct name from the desktop's
+// perspective, so api.ts and components don't need to update their
+// imports.
+type BoardCard = boardcards.BoardCard
 
 // CommentDTO is one issue comment.
 type CommentDTO struct {
@@ -228,6 +218,11 @@ func assigneeList(a string) []string {
 	return []string{a}
 }
 
+// cardFromIssue produces a BoardCard for one issue without the
+// agent-derived enrichment (ActiveVerb + TodosDone/Total). Used by
+// the single-issue refresh paths (SetIssueState after a drag) where
+// the active dispatch / todos can't change as part of the operation
+// — the next 10s poll re-runs ListCards and re-populates them.
 func cardFromIssue(iss *model.Issue, taken bool) BoardCard {
 	tags := iss.Tags
 	if tags == nil {
@@ -329,39 +324,19 @@ func (b *BoardService) ListColumns() ([]BoardColumn, error) {
 }
 
 // ListCards returns issues as kanban cards — for one repo, or across every
-// repo when repoPrefix is empty or "all".
+// repo when repoPrefix is empty or "all". Delegates to boardcards.Assemble
+// so the desktop and REST surface share one assembler.
 func (b *BoardService) ListCards(repoPrefix string) ([]BoardCard, error) {
 	ctx := context.Background()
-	filter := client.IssueFilter{}
-	if repoPrefix == "" || repoPrefix == "all" {
-		filter.AllRepos = true
-	} else {
-		repo, err := b.client.GetRepoByPrefix(ctx, repoPrefix)
+	var repo *model.Repo
+	if repoPrefix != "" && repoPrefix != "all" {
+		r, err := b.client.GetRepoByPrefix(ctx, repoPrefix)
 		if err != nil {
 			return nil, err
 		}
-		filter.Repo = repo
+		repo = r
 	}
-	issues, err := b.client.ListIssues(ctx, filter)
-	if err != nil {
-		return nil, err
-	}
-	// Derive each card's `taken` from the repo's open agent claims —
-	// one bulk query (filter.Repo is nil for the "all" board, which
-	// ListOpenClaims handles). Issue keys are globally unique (PREFIX-N).
-	claims, err := b.client.ListOpenClaims(ctx, filter.Repo)
-	if err != nil {
-		return nil, err
-	}
-	taken := make(map[string]bool, len(claims))
-	for _, c := range claims {
-		taken[c.IssueKey] = true
-	}
-	cards := make([]BoardCard, 0, len(issues))
-	for _, iss := range issues {
-		cards = append(cards, cardFromIssue(iss, taken[iss.Key]))
-	}
-	return cards, nil
+	return boardcards.Assemble(ctx, b.client, repo)
 }
 
 // GetIssue returns the full issue-drawer payload for one issue. repoPrefix

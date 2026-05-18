@@ -251,6 +251,24 @@ body { margin: 0; }
 }
 .mk-card-action-item:hover { background: var(--bg-4); }
 
+/* BACI-60: the per-card "what is this agent doing" meta line.
+   Sits below the footer on taken cards only; renders the verb
+   (lower-cased prompt-template label, e.g. "designing"), the
+   tasks count ("Tasks 4/11"), or both with a centred dot
+   separator. Quiet by default so untaken cards stay visually clean. */
+.mk-card-meta-line {
+  display: flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono); font-size: 11px; color: var(--fg-3);
+  margin-top: 4px;
+  min-width: 0;
+}
+.mk-card-verb {
+  font-style: italic; color: var(--status-claude);
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mk-card-meta-sep { color: var(--fg-4); }
+.mk-card-tasks { color: var(--fg-3); white-space: nowrap; }
+
 /* ---------- Tooltip (Radix portal) ---------- */
 .mk-tooltip {
   background: var(--bg-1); color: var(--fg-1);

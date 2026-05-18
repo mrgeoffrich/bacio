@@ -43,6 +43,13 @@ export interface BoardCard {
   claude: boolean;
   taken: boolean;
   waitingForClaim: boolean;
+  // BACI-60 enrichment: lower-cased prompt-template label of the
+  // newest open claim's most recent non-cancelled dispatch (empty
+  // when no verb can be derived) and the claiming session's
+  // TodoWrite progress (zeroes when no todos / not taken).
+  activeVerb?: string;
+  todosDone?: number;
+  todosTotal?: number;
 }
 
 export interface CommentDTO {
@@ -425,13 +432,16 @@ export async function listColumns(): Promise<BoardColumn[]> {
 
 export async function listCards(repoPrefix: string): Promise<BoardCard[]> {
   // The "all repos" pseudo-board isn't directly addressable over REST;
-  // a v2 follow-up could add `GET /issues?repo=all`. For now require a
+  // a v2 follow-up could add `GET /cards`. For now require a
   // concrete prefix in web mode.
   if (!repoPrefix || repoPrefix === 'all') {
     throw new Error('select a repository to view its board');
   }
-  const issues = await call<ApiIssue[]>(`/repos/${repoPrefix}/issues`);
-  return issues.map(cardFromIssue);
+  // BACI-60: the composite kanban endpoint emits BoardCard directly,
+  // including the ActiveVerb / TodosDone / TodosTotal fields the
+  // client-side cardFromIssue reshape couldn't see (they don't live
+  // on model.Issue). Same wire shape as the Wails BoardService.ListCards.
+  return await call<BoardCard[]>(`/repos/${repoPrefix}/cards`);
 }
 
 // AddRepositoryPayload is the shape the web bundle passes through to
