@@ -554,12 +554,43 @@ func hookPostToolUseCmd() *cobra.Command {
 			}
 			defer c.Close()
 
-			if err := c.UpsertSessionTodoFromTask(context.Background(), in.SessionID, taskID, content, status); err != nil {
+			issueKey := resolveOpenClaimIssueKey(context.Background(), c, in.SessionID)
+			if err := c.UpsertSessionTodoFromTask(context.Background(), in.SessionID, taskID, issueKey, content, status); err != nil {
 				fmt.Fprintln(os.Stderr, "bacio hook post-tool-use: upsert:", err)
 			}
 			return nil
 		},
 	}
+}
+
+// resolveOpenClaimIssueKey returns the issue key the post-tool-use
+// hook should stamp on a freshly-inserted SessionTodo row. When the
+// session has exactly one open claim, that claim's IssueKey is the
+// scope for the new row. Zero or many open claims fall back to "" —
+// the orphan bucket the per-(session, issue) UI lookups deliberately
+// skip, since neither a no-claim session nor a paired session can
+// disambiguate which job a new task belongs to. Best-effort: any
+// transient lookup error returns "" so the upsert still proceeds
+// (the issue stamp is a UI-grouping signal, not a correctness one).
+func resolveOpenClaimIssueKey(ctx context.Context, c client.Client, sessionID string) string {
+	view, err := c.ShowAgentSession(ctx, sessionID)
+	if err != nil {
+		return ""
+	}
+	var only *model.AgentClaim
+	for _, cl := range view.Claims {
+		if cl == nil || cl.ReleasedAt != nil {
+			continue
+		}
+		if only != nil {
+			return "" // more than one open claim — orphan
+		}
+		only = cl
+	}
+	if only == nil {
+		return ""
+	}
+	return only.IssueKey
 }
 
 // extractTaskFields pulls (task_id, content, status) from the

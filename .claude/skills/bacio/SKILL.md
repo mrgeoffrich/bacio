@@ -930,7 +930,7 @@ body) or `rm` it.
 | UserPromptSubmit                   | heartbeats; flips claimed `needs_action` issues back to `in_progress`; nudges on open claims; drains pending dispatches |
 | Stop                               | heartbeats; flips claimed `in_progress` issues to `needs_action` (the precise "agent parked" signal) |
 | SessionEnd                         | ends the session, auto-releasing every open claim                    |
-| PostToolUse (matcher: `TaskCreate\|TaskUpdate`) | mirrors the agent's task list into `agent_session_todos` (TaskCreate inserts a new row at the next position; TaskUpdate flips status keyed by `taskId`); surfaced as an `n/m` badge + drill-down list in the TUI/desktop Agents view (BACI-45, rewired in BACI-60 after Claude Code 2.1 retired TodoWrite) |
+| PostToolUse (matcher: `TaskCreate\|TaskUpdate`) | mirrors the agent's task list into `agent_session_todos` (TaskCreate inserts a new row at the next position, stamped with the session's open-claim `issue_key` so a session that handles two dispatches back-to-back only shows the current job's rows; TaskUpdate flips status keyed by `taskId` and keeps the row's original `issue_key`); surfaced as an `n/m` badge + drill-down list in the TUI/desktop Agents view, scoped per-(session, issue) so the prior job's rows stay queryable but don't bleed onto the current card (BACI-45, rewired in BACI-60 after Claude Code 2.1 retired TodoWrite, per-issue scoping added in BACI-62) |
 
 **All five entries are inert unless `BACIO_AGENT_MODE=1`** is set in the
 environment of the Claude session that loads them. Launch with

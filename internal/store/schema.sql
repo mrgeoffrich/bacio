@@ -427,6 +427,15 @@ CREATE INDEX IF NOT EXISTS idx_agent_channels_repo ON agent_channels(repo_id);
 -- in-place. The partial unique index keeps (session, task_id) unique
 -- only for non-empty ids.
 --
+-- issue_key (BACI-62) is the canonical issue key the session was
+-- claiming when the row was inserted (resolved from the session's
+-- single open claim at hook time; empty string when there were zero
+-- or many open claims). Per-(session, issue) UI lookups filter on it
+-- so an agent that handles two dispatches back-to-back doesn't show
+-- the first job's completed rows on the second job's card; pre-BACI-62
+-- rows keep '' and fall into the orphan bucket, which the new
+-- lookups deliberately skip.
+--
 -- session_pk (the int FK) rather than session_id (the external string)
 -- matches the rest of the agent_* tables. position is part of the PK
 -- so the legacy whole-snapshot semantics still hold; the Task* path
@@ -438,12 +447,18 @@ CREATE TABLE IF NOT EXISTS agent_session_todos (
     content     TEXT    NOT NULL,
     status      TEXT    NOT NULL CHECK (status IN ('pending','in_progress','completed')),
     task_id     TEXT    NOT NULL DEFAULT '',
+    issue_key   TEXT    NOT NULL DEFAULT '',
     updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (session_pk, position)
 );
 
 CREATE INDEX IF NOT EXISTS idx_agent_session_todos_session
     ON agent_session_todos(session_pk);
+-- The (session_pk, issue_key) index that backs the BACI-62 per-(session,
+-- issue) lookups lives in internal/store/store.go::migrate, not here.
+-- schema.sql runs before migrate(), so a DB upgrading from the pre-
+-- BACI-62 table doesn't have the issue_key column yet; the migration
+-- adds the column and the index together.
 
 -- agent_session_questions backs the BACI-53 ask_user_question MCP tool:
 -- a clarification an agent asked the user via the bacio channel,

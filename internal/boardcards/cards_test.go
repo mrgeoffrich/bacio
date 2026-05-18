@@ -42,7 +42,7 @@ func (f *fakeClient) ListAgentSessions(context.Context, client.AgentSessionFilte
 func (f *fakeClient) RepoDispatches(context.Context, *model.Repo) ([]*model.AgentDispatch, error) {
 	return f.dispatches, nil
 }
-func (f *fakeClient) ListTodosBySessions(context.Context, []string) (map[int64][]model.SessionTodo, error) {
+func (f *fakeClient) ListTodosBySessionsAndIssue(context.Context, []store.SessionIssuePair) (map[int64][]model.SessionTodo, error) {
 	if f.todos == nil {
 		return map[int64][]model.SessionTodo{}, nil
 	}
@@ -86,10 +86,10 @@ func TestAssembleVerbAndTodos(t *testing.T) {
 	}
 	todos := map[int64][]model.SessionTodo{
 		10: {
-			{Position: 0, Content: "step A", Status: model.TodoCompleted},
-			{Position: 1, Content: "step B", Status: model.TodoCompleted},
-			{Position: 2, Content: "step C", Status: model.TodoInProgress},
-			{Position: 3, Content: "step D", Status: model.TodoPending},
+			{Position: 0, Content: "step A", Status: model.TodoCompleted, IssueKey: "TEST-1"},
+			{Position: 1, Content: "step B", Status: model.TodoCompleted, IssueKey: "TEST-1"},
+			{Position: 2, Content: "step C", Status: model.TodoInProgress, IssueKey: "TEST-1"},
+			{Position: 3, Content: "step D", Status: model.TodoPending, IssueKey: "TEST-1"},
 		},
 	}
 	templates := []*store.PromptTemplate{
@@ -218,6 +218,58 @@ func TestAssembleSurfacesOpenQuestions(t *testing.T) {
 	sibling := byKey["TEST-11"]
 	if len(sibling.OpenQuestions) != 0 {
 		t.Errorf("TEST-11 OpenQuestions = %+v, want empty (the question is tied to TEST-10)", sibling.OpenQuestions)
+	}
+}
+
+// TestAssembleTodosScopedPerIssue (BACI-62) covers the live-repro
+// from the issue body: one session worked TEST-1 first, then TEST-2 —
+// the first job's completed rows must NOT show up in TEST-2's
+// progress count. Both issues are taken (the same session claims
+// both, pairing-style), so both cards have the session as their
+// winning claim.
+func TestAssembleTodosScopedPerIssue(t *testing.T) {
+	repo := &model.Repo{ID: 1, Prefix: "TEST"}
+	t0 := time.Date(2026, 5, 17, 9, 0, 0, 0, time.UTC)
+	sess := &model.AgentSession{ID: 30, SessionID: "sess-juggle", RepoID: repo.ID, RepoPrefix: repo.Prefix}
+	issues := []*model.Issue{
+		{Key: "TEST-1", State: model.StateInProgress, Title: "first job"},
+		{Key: "TEST-2", State: model.StateInProgress, Title: "second job"},
+	}
+	claims := []*model.AgentClaim{
+		{SessionID: "sess-juggle", SessionPK: 30, IssueKey: "TEST-1", ClaimedAt: t0.Add(-1 * time.Hour)},
+		{SessionID: "sess-juggle", SessionPK: 30, IssueKey: "TEST-2", ClaimedAt: t0},
+	}
+	// Session 30 has 4 TEST-1 rows (all completed — the prior job) and
+	// 2 TEST-2 rows (one in_progress, one pending — the current job).
+	todos := map[int64][]model.SessionTodo{
+		30: {
+			{Position: 0, Content: "test-1/a", Status: model.TodoCompleted, IssueKey: "TEST-1"},
+			{Position: 1, Content: "test-1/b", Status: model.TodoCompleted, IssueKey: "TEST-1"},
+			{Position: 2, Content: "test-1/c", Status: model.TodoCompleted, IssueKey: "TEST-1"},
+			{Position: 3, Content: "test-1/d", Status: model.TodoCompleted, IssueKey: "TEST-1"},
+			{Position: 4, Content: "test-2/a", Status: model.TodoInProgress, IssueKey: "TEST-2"},
+			{Position: 5, Content: "test-2/b", Status: model.TodoPending, IssueKey: "TEST-2"},
+		},
+	}
+	f := &fakeClient{
+		repo: repo, issues: issues, claims: claims,
+		sessions: []*model.AgentSession{sess}, todos: todos,
+	}
+	cards, err := Assemble(context.Background(), f, repo)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	byKey := map[string]BoardCard{}
+	for _, c := range cards {
+		byKey[c.Key] = c
+	}
+	one := byKey["TEST-1"]
+	if one.TodosDone != 4 || one.TodosTotal != 4 {
+		t.Errorf("TEST-1 todos = %d/%d, want 4/4 (its own four completed rows)", one.TodosDone, one.TodosTotal)
+	}
+	two := byKey["TEST-2"]
+	if two.TodosDone != 0 || two.TodosTotal != 2 {
+		t.Errorf("TEST-2 todos = %d/%d, want 0/2 (TEST-1's history must not leak)", two.TodosDone, two.TodosTotal)
 	}
 }
 

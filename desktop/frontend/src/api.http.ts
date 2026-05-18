@@ -172,6 +172,11 @@ export interface DispatchDTO {
 export interface SessionTodoDTO {
   content: string;
   status: string;
+  // BACI-62: per-job scope so a future "history" pane can group
+  // prior-job todos. Empty / absent on rows from sessions registered
+  // before BACI-62 or when the hook couldn't attribute a single
+  // open claim. Optional on the wire (omitempty server-side).
+  issueKey?: string;
 }
 
 // QuestionDTO is one open BACI-53 ask_user_question row — the

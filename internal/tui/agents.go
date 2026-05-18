@@ -99,14 +99,23 @@ func (a *agentsView) reload() {
 	for _, iss := range needs {
 		a.needsAction[iss.Key] = true
 	}
-	// Bulk-read each live session's TodoWrite mirror in one query —
-	// same one-trip pattern the claims map uses, so the card row +
-	// detail pane can render the n/m progress without N+1 lookups.
+	// Bulk-read each live session's TodoWrite mirror in one query,
+	// scoped to the (session, newest-open-claim-issue) pair so a
+	// session that has worked multiple jobs only flows the current
+	// one's rows onto its card (BACI-62). Same one-trip pattern the
+	// claims map uses, so the card row + detail pane render n/m
+	// progress without N+1 lookups.
 	sessionIDs := make([]string, 0, len(sessions))
+	pairs := make([]store.SessionIssuePair, 0, len(sessions))
 	for _, s := range sessions {
 		sessionIDs = append(sessionIDs, s.SessionID)
+		_, issueKey := model.SessionBusy(a.claims[s.ID])
+		pairs = append(pairs, store.SessionIssuePair{
+			SessionID: s.SessionID,
+			IssueKey:  issueKey,
+		})
 	}
-	a.todos, err = a.store.ListTodosBySessions(sessionIDs)
+	a.todos, err = a.store.ListTodosBySessionsAndIssue(pairs)
 	if err != nil {
 		a.err = err
 		return
