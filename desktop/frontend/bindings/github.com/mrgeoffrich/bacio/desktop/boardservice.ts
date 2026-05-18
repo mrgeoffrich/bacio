@@ -47,6 +47,18 @@ export function AddRepository(): $CancellablePromise<$models.Board> {
 }
 
 /**
+ * AttachPullRequest attaches a pull-request URL to an issue and returns
+ * the resolved PRDTO. Validation (http/https + host) lives in the
+ * store layer; an invalid URL surfaces as the original error message
+ * for the IssueWorkspace's PR-attach form to display.
+ */
+export function AttachPullRequest(repoPrefix: string, key: string, url: string): $CancellablePromise<$models.PRDTO> {
+    return $Call.ByID(1860090468, repoPrefix, key, url).then(($result: any) => {
+        return $$createType2($result);
+    });
+}
+
+/**
  * CancelWaitingDispatch (BACI-51) is the spinner-as-cancel-button
  * binding. Resolves the active (queued / pending / delivered) dispatch
  * for an issue and cancels it in a single Wails call so card DTOs
@@ -68,7 +80,7 @@ export function CancelWaitingDispatch(repoPrefix: string, issueKey: string): $Ca
  */
 export function DispatchIssue(repoPrefix: string, issueKey: string, mode: string): $CancellablePromise<$models.DispatchDTO> {
     return $Call.ByID(715303058, repoPrefix, issueKey, mode).then(($result: any) => {
-        return $$createType2($result);
+        return $$createType3($result);
     });
 }
 
@@ -84,6 +96,24 @@ export function GetIssue(repoPrefix: string, key: string): $CancellablePromise<$
 }
 
 /**
+ * GetIssueBrief returns the workspace-shaped bulk payload for one
+ * issue — issue meta + feature reference + relations (both directions)
+ * + linked documents with body content (deduped between issue-link
+ * and feature-link sources) + pull requests + comments + claimants +
+ * derived taken / waitingForClaim flags. Backs the IssueWorkspace
+ * top-level view; replaces the drawer's GetIssue payload for that
+ * surface but doesn't retire GetIssue (the older payload still backs
+ * callers like the IssueDrawer until BACI-54's deletion step). The
+ * repo prefix may be empty or "all" — canonical issue keys (PREFIX-N)
+ * resolve without one.
+ */
+export function GetIssueBrief(repoPrefix: string, key: string): $CancellablePromise<$models.IssueBriefDTO> {
+    return $Call.ByID(836296342, repoPrefix, key).then(($result: any) => {
+        return $$createType4($result);
+    });
+}
+
+/**
  * ListAgents returns the agent sessions for one repo (or every repo when
  * repoPrefix is empty or "all"), each carrying its status, open claims,
  * and the dispatches aimed at it. SessionStart stubs that never
@@ -95,7 +125,7 @@ export function GetIssue(repoPrefix: string, key: string): $CancellablePromise<$
  */
 export function ListAgents(repoPrefix: string): $CancellablePromise<$models.AgentCard[]> {
     return $Call.ByID(3979848123, repoPrefix).then(($result: any) => {
-        return $$createType4($result);
+        return $$createType6($result);
     });
 }
 
@@ -105,7 +135,7 @@ export function ListAgents(repoPrefix: string): $CancellablePromise<$models.Agen
  */
 export function ListBoards(): $CancellablePromise<$models.Board[]> {
     return $Call.ByID(3235630628).then(($result: any) => {
-        return $$createType5($result);
+        return $$createType7($result);
     });
 }
 
@@ -115,7 +145,7 @@ export function ListBoards(): $CancellablePromise<$models.Board[]> {
  */
 export function ListCards(repoPrefix: string): $CancellablePromise<$models.BoardCard[]> {
     return $Call.ByID(4181487648, repoPrefix).then(($result: any) => {
-        return $$createType7($result);
+        return $$createType9($result);
     });
 }
 
@@ -124,7 +154,7 @@ export function ListCards(repoPrefix: string): $CancellablePromise<$models.Board
  */
 export function ListColumns(): $CancellablePromise<$models.BoardColumn[]> {
     return $Call.ByID(2117984856).then(($result: any) => {
-        return $$createType9($result);
+        return $$createType11($result);
     });
 }
 
@@ -137,7 +167,7 @@ export function ListColumns(): $CancellablePromise<$models.BoardColumn[]> {
  */
 export function SetIssueState(repoPrefix: string, key: string, state: string): $CancellablePromise<$models.BoardCard> {
     return $Call.ByID(2874048639, repoPrefix, key, state).then(($result: any) => {
-        return $$createType6($result);
+        return $$createType8($result);
     });
 }
 
@@ -155,11 +185,13 @@ export function UpdateIssueDescription(repoPrefix: string, key: string, descript
 // Private type creation functions
 const $$createType0 = $models.IssueDetail.createFrom;
 const $$createType1 = $models.Board.createFrom;
-const $$createType2 = agentcards$0.DispatchDTO.createFrom;
-const $$createType3 = agentcards$0.AgentCard.createFrom;
-const $$createType4 = $Create.Array($$createType3);
-const $$createType5 = $Create.Array($$createType1);
-const $$createType6 = $models.BoardCard.createFrom;
-const $$createType7 = $Create.Array($$createType6);
-const $$createType8 = $models.BoardColumn.createFrom;
+const $$createType2 = $models.PRDTO.createFrom;
+const $$createType3 = agentcards$0.DispatchDTO.createFrom;
+const $$createType4 = $models.IssueBriefDTO.createFrom;
+const $$createType5 = agentcards$0.AgentCard.createFrom;
+const $$createType6 = $Create.Array($$createType5);
+const $$createType7 = $Create.Array($$createType1);
+const $$createType8 = $models.BoardCard.createFrom;
 const $$createType9 = $Create.Array($$createType8);
+const $$createType10 = $models.BoardColumn.createFrom;
+const $$createType11 = $Create.Array($$createType10);

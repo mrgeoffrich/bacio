@@ -16,7 +16,7 @@ export const NAV = [
   { view: 'history', label: 'History' },
 ];
 
-export default function Topbar({ boards, activeBoard, onPickBoard, onAddRepository, activeView, onChangeView, onOpenPalette, onOpenSettings, leaderState }) {
+export default function Topbar({ boards, activeBoard, onPickBoard, onAddRepository, activeView, onChangeView, onOpenPalette, onOpenSettings, leaderState, openIssueKey, onCloseIssue }) {
   const syncEnabled = !!boards.find(b => b.prefix === activeBoard)?.syncEnabled;
   const isLeader = leaderState?.amLeader ?? false;
   return (
@@ -37,6 +37,17 @@ export default function Topbar({ boards, activeBoard, onPickBoard, onAddReposito
           </button>
         ))}
       </div>
+
+      {openIssueKey && (
+        <button
+          type="button"
+          className="mk-breadcrumb"
+          onClick={onCloseIssue}
+          title="Back (esc)"
+        >
+          ← {openIssueKey}
+        </button>
+      )}
 
       <button className="mk-search" onClick={onOpenPalette}>
         <Icon name="search" />

@@ -12,6 +12,14 @@ import {
   BoardColumn,
   BoardCard,
   IssueDetail,
+  IssueBriefDTO,
+  IssueMetaDTO,
+  LinkedDocDTO,
+  FeatureRefDTO,
+  RelationDTO,
+  RelationsDTO,
+  PRDTO,
+  CommentDTO,
   AgentCard,
   DispatchDTO,
   DocSummary,
@@ -28,7 +36,7 @@ import {
 } from '../bindings/github.com/mrgeoffrich/bacio/desktop';
 import { ClaimDTO } from '../bindings/github.com/mrgeoffrich/bacio/internal/agentcards';
 
-export type { Board, BoardColumn, BoardCard, IssueDetail, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, BoardPreferencesDTO };
+export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, BoardPreferencesDTO };
 
 function normalize(err: unknown): Error {
   if (err instanceof Error) return err;
@@ -84,6 +92,33 @@ export async function addRepository(_payload?: AddRepositoryPayload): Promise<Bo
 export async function getIssue(repoPrefix: string, key: string): Promise<IssueDetail> {
   try {
     return await BoardService.GetIssue(repoPrefix, key);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// getIssueBrief returns the workspace-shaped payload — issue meta +
+// feature + relations + inlined linked-doc bodies + comments +
+// claimants + derived taken / waitingForClaim flags. Backs the
+// top-level IssueWorkspace view.
+export async function getIssueBrief(repoPrefix: string, key: string): Promise<IssueBriefDTO> {
+  try {
+    return await BoardService.GetIssueBrief(repoPrefix, key);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// attachPullRequest attaches a pull-request URL to an issue and returns
+// the resolved PRDTO. Used by the IssueWorkspace's PR-attach form;
+// validation errors (bad scheme / missing host) surface verbatim.
+export async function attachPullRequest(
+  repoPrefix: string,
+  key: string,
+  url: string,
+): Promise<PRDTO> {
+  try {
+    return await BoardService.AttachPullRequest(repoPrefix, key, url);
   } catch (err) {
     throw normalize(err);
   }
