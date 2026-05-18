@@ -1013,6 +1013,31 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   border-top: 1px solid var(--border-1);
   margin-top: 4px;
 }
+/* SVG-typed linked docs render via a Blob object URL instead of
+   markdown, with the same chequered transparent backdrop the
+   Documents view (BACI-56) uses — a visual cue the user already
+   associates with "this is an SVG preview". Cap the height so a
+   portrait SVG doesn't push the activity section completely
+   off-screen; reviewers' wireframes are usually landscape. */
+.mk-linked-doc-svg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background-color: var(--bg-2);
+  background-image:
+    linear-gradient(45deg, var(--bg-3) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--bg-3) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--bg-3) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--bg-3) 75%);
+  background-size: 12px 12px;
+  background-position: 0 0, 0 6px, 6px -6px, -6px 0;
+}
+.mk-linked-doc-svg-img {
+  max-width: 100%;
+  max-height: 480px;
+  object-fit: contain;
+}
 
 /* Inline description editor — pencil-button-as-text toggle + textarea
    reusing the legacy .mk-edit-* surfaces from app.css. */
