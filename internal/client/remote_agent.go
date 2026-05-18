@@ -295,7 +295,7 @@ func (c *remoteClient) LinkSessionChannel(ctx context.Context, sessionID string,
 // Session-todo mirror methods — local-only in v1, like the rest of the
 // agent registry's hook/channel-internal surface.
 
-func (c *remoteClient) ReplaceSessionTodos(ctx context.Context, sessionID string, todos []model.SessionTodo) error {
+func (c *remoteClient) UpsertSessionTodoFromTask(ctx context.Context, sessionID, taskID, content string, status model.TodoStatus) error {
 	return remoteAgentNotSupported("todos")
 }
 

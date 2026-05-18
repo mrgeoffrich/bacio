@@ -373,6 +373,29 @@ func migrate(db *sql.DB) error {
 	if err := migrateAgentDispatchesStatusCheck(db); err != nil {
 		return err
 	}
+	// BACI-60: agent_session_todos.task_id keys rows by the Claude Code
+	// Task* tool's task identifier so TaskUpdate can find a previously
+	// inserted TaskCreate row and flip its status in place. Older DBs
+	// from the TodoWrite-era keep their existing rows (task_id ''),
+	// which is fine — the legacy whole-snapshot path is gone, so those
+	// rows just age out with the session. The partial unique index has
+	// to be created here (not in schema.sql) because the column may
+	// have just been added by the ALTER.
+	hasTaskID, err := columnExists(db, "agent_session_todos", "task_id")
+	if err != nil {
+		return err
+	}
+	if !hasTaskID {
+		if _, err := db.Exec(`ALTER TABLE agent_session_todos ADD COLUMN task_id TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add task_id to agent_session_todos: %w", err)
+		}
+	}
+	if _, err := db.Exec(
+		`CREATE UNIQUE INDEX IF NOT EXISTS uq_agent_session_todos_task
+			ON agent_session_todos(session_pk, task_id) WHERE task_id != ''`,
+	); err != nil {
+		return fmt.Errorf("create uq_agent_session_todos_task: %w", err)
+	}
 	return nil
 }
 

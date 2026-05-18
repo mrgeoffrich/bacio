@@ -121,14 +121,18 @@ func ParseTodoStatus(s string) (TodoStatus, error) {
 	return "", fmt.Errorf("unknown todo status %q (valid: %s)", s, strings.Join(names, ", "))
 }
 
-// SessionTodo is one row from the agent's current TodoWrite list,
-// mirrored into bacio by the post-tool-use hook. Read-only mirror —
+// SessionTodo is one row from the agent's current task list, mirrored
+// into bacio by the post-tool-use hook (driven by TaskCreate +
+// TaskUpdate events; see internal/cli/hook.go). Read-only mirror —
 // bacio does not edit the agent's plan. Position is 0-indexed and
-// matches the array order the agent wrote.
+// matches the order tasks were created. TaskID is the Claude Code-
+// assigned id (empty string on legacy TodoWrite rows, which can't be
+// updated in place).
 type SessionTodo struct {
 	Position  int        `json:"position"`
 	Content   string     `json:"content"`
 	Status    TodoStatus `json:"status"`
+	TaskID    string     `json:"task_id,omitempty"`
 	UpdatedAt time.Time  `json:"updated_at"`
 }
 
