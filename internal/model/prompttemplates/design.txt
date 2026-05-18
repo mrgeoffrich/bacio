@@ -8,7 +8,7 @@ The substantive deliverable is a design markdown doc (plus sibling SVG wireframe
 
 1. Use the bacio skill. Register / refresh your agent session as needed.
 2. Claim {{issue_id}} (`bacio agent claim {{issue_id}} --user <your-name> --prompt "design"`).
-3. Make sure `main` is up to date, then create a worktree to work in.
+3. Make sure `main` is up to date, then create a worktree to work in. Run `bacio worktree init` inside it so this run has its own DB + api port and won't fight the parent worktree's bacio.
 4. Set {{issue_id}} to **in progress** (`bacio issue state {{issue_id}} in-progress --user <your-name>`).
 
 If at any point you have to stop to get user assistance, the issue is automatically put into **needs action**. Once the user answers, put it back to in progress and continue.
@@ -268,7 +268,7 @@ bacio comment add {{issue_id}} --as <your-name> --body-file /tmp/design-comment.
 
 ## Phase 6 — Close out
 
-1. Clean up and remove the worktree.
+1. Clean up and remove the worktree (drop its bacio registry row first with `bacio worktree rm <path> --confirm <slug>`).
 2. Set {{issue_id}} to **in review** (`bacio issue state {{issue_id}} in-review --user <your-name>`).
 3. Release your claim (`bacio agent end --reason stop --user <your-name>` releases every open claim the session holds — or `bacio agent release {{issue_id}} --user <your-name>` if you're keeping the session alive for other work).
 
