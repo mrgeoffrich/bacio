@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 	"sync"
-	"time"
 
+	"github.com/mrgeoffrich/bacio/internal/controller"
 	"github.com/mrgeoffrich/bacio/internal/dispatcher"
 	"github.com/mrgeoffrich/bacio/internal/leader"
 	"github.com/mrgeoffrich/bacio/internal/store"
@@ -34,8 +34,11 @@ type LeaderStatusDTO struct {
 type LeaderService struct {
 	st      *store.Store
 	elector *leader.Elector
-	done    chan struct{}
-	wg      sync.WaitGroup
+	ctrl    *controller.Controller
+
+	// mu guards elector reads from GetLeaderStatus during the early-startup
+	// window before ServiceStartup has assigned it.
+	mu sync.Mutex
 }
 
 // NewLeaderService creates an uninitialised LeaderService; Wails calls
@@ -53,98 +56,31 @@ func (ls *LeaderService) ServiceStartup(_ context.Context, _ application.Service
 	if err != nil {
 		return fmt.Errorf("leader election: open store: %w", err)
 	}
-	ls.st = s
 
 	h, _ := os.Hostname()
 	label := fmt.Sprintf("desktop pid=%d host=%s", os.Getpid(), h)
-	ls.elector = leader.New(s, label)
-	ls.done = make(chan struct{})
+	el := leader.New(s, label)
 
-	ls.wg.Add(1)
-	go func() {
-		defer ls.wg.Done()
-		// Tick immediately on startup so the frontend reflects the real
-		// state on first load rather than waiting 10 s.
-		ls.emitState(ls.elector.Tick())
-		ticker := time.NewTicker(store.UILeaderHeartbeatInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				ls.emitState(ls.elector.Tick())
-			case <-ls.done:
-				return
-			}
-		}
-	}()
+	ls.mu.Lock()
+	ls.st = s
+	ls.elector = el
+	ls.ctrl = controller.New(s, el, dispatcher.New(s), nil)
+	ls.mu.Unlock()
 
-	// Live-list prune ticker: only the controlling UI prunes ended
-	// agent_sessions older than AgentSessionLiveListRetention so two
-	// side-by-side UIs don't race on the same DELETE. The ticker keeps
-	// running regardless of leader state — the lease can flip back to us
-	// mid-run — but the prune itself is gated on the cached state.
-	// ServiceShutdown closes ls.done and ls.wg.Wait()s before the store
-	// is closed, so an in-flight tick can never race with store close.
-	ls.wg.Add(1)
-	go func() {
-		defer ls.wg.Done()
-		ticker := time.NewTicker(store.UILeaderPruneInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				if !ls.elector.CurrentState().AmLeader {
-					continue
-				}
-				if _, err := ls.st.PruneEndedAgentSessions(
-					store.AgentSessionLiveListRetention); err != nil {
-					fmt.Fprintln(os.Stderr,
-						"bacio: live agent-session prune failed:", err)
-				}
-			case <-ls.done:
-				return
-			}
-		}
-	}()
-
-	// BACI-51 dispatch-queue matcher ticker. Same leader-gated cadence
-	// pattern as the prune ticker above; runs ~every 5s and binds
-	// queued dispatches to free agents one (repo, mode) at a time.
-	// Mechanical work — no audit row, errors logged to stderr.
-	matcher := dispatcher.New(ls.st)
-	ls.wg.Add(1)
-	go func() {
-		defer ls.wg.Done()
-		ticker := time.NewTicker(store.QueueMatchInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				if !ls.elector.CurrentState().AmLeader {
-					continue
-				}
-				if _, err := matcher.Tick(); err != nil {
-					fmt.Fprintln(os.Stderr,
-						"bacio: queue match failed:", err)
-				}
-			case <-ls.done:
-				return
-			}
-		}
-	}()
+	// Start fires the heartbeat synchronously (so the frontend sees a real
+	// state on first load rather than waiting 10 s), then spins the three
+	// leader-gated goroutines. emit pushes every subsequent heartbeat
+	// through the Wails event bus.
+	ls.ctrl.Start(ls.emitState)
 	return nil
 }
 
 func (ls *LeaderService) ServiceShutdown() error {
-	// Stop the ticker goroutine and wait for it to exit before releasing the
-	// lease and closing the store — otherwise an in-flight Tick could run
-	// against a closed store.
-	if ls.done != nil {
-		close(ls.done)
-	}
-	ls.wg.Wait()
-	if ls.elector != nil {
-		ls.elector.Release()
+	// Stop the tick goroutines, wait for them to exit, and release the
+	// lease before closing the store — otherwise an in-flight tick could
+	// run against a closed store.
+	if ls.ctrl != nil {
+		ls.ctrl.Stop()
 	}
 	if ls.st != nil {
 		ls.st.Close()
@@ -155,10 +91,13 @@ func (ls *LeaderService) ServiceShutdown() error {
 // GetLeaderStatus returns the current election state synchronously — used by
 // the frontend on mount to seed its UI before the first event arrives.
 func (ls *LeaderService) GetLeaderStatus() LeaderStatusDTO {
-	if ls.elector == nil {
+	ls.mu.Lock()
+	el := ls.elector
+	ls.mu.Unlock()
+	if el == nil {
 		return LeaderStatusDTO{}
 	}
-	s := ls.elector.CurrentState()
+	s := el.CurrentState()
 	return LeaderStatusDTO{AmLeader: s.AmLeader, HolderLabel: s.HolderLabel}
 }
 

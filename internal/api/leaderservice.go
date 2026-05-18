@@ -8,17 +8,19 @@ package api
 //
 // The api's elector runs alongside the http.Server: started inside
 // Server.Run before ListenAndServe, stopped before Shutdown so the
-// release lands before the listener closes. A second goroutine prunes
-// ended agent_sessions on the 5-minute cadence, gated on the cached
-// leader state — same pattern as desktop/leaderservice.go.
+// release lands before the listener closes. The three background
+// loops — heartbeat, live-list prune, BACI-51 queue matcher — are
+// driven by the shared internal/controller package so the api can't
+// drift away from the desktop's tick set (which is how the matcher
+// goroutine ended up missing here originally).
 
 import (
 	"fmt"
 	"log/slog"
 	"os"
-	"sync"
-	"time"
 
+	"github.com/mrgeoffrich/bacio/internal/controller"
+	"github.com/mrgeoffrich/bacio/internal/dispatcher"
 	"github.com/mrgeoffrich/bacio/internal/leader"
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
@@ -31,76 +33,36 @@ type LeaderStatusDTO struct {
 	HolderLabel string `json:"holderLabel"`
 }
 
-// apiLeaderService owns the elector + tick goroutines. The pointer lives on
+// apiLeaderService owns the elector + controller. The pointer lives on
 // deps so GET /leader can read CurrentState() without contacting the store.
 type apiLeaderService struct {
 	elector *leader.Elector
-	done    chan struct{}
-	wg      sync.WaitGroup
+	ctrl    *controller.Controller
 }
 
-// newAPILeaderService starts the elector and its tickers. The first tick
-// runs synchronously so GET /leader returns a non-zero state immediately
-// after Run begins serving requests.
+// newAPILeaderService starts the elector and its tickers. The first heartbeat
+// runs synchronously inside Controller.Start so GET /leader returns a non-zero
+// state immediately after Run begins serving requests.
 func newAPILeaderService(s *store.Store, addr string, logger *slog.Logger) *apiLeaderService {
 	host, _ := os.Hostname()
 	label := fmt.Sprintf("api pid=%d host=%s addr=%s", os.Getpid(), host, addr)
+	el := leader.New(s, label)
 	ls := &apiLeaderService{
-		elector: leader.New(s, label),
-		done:    make(chan struct{}),
+		elector: el,
+		ctrl:    controller.New(s, el, dispatcher.New(s), logger),
 	}
-	ls.elector.Tick()
-
-	ls.wg.Add(1)
-	go func() {
-		defer ls.wg.Done()
-		ticker := time.NewTicker(store.UILeaderHeartbeatInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				ls.elector.Tick()
-			case <-ls.done:
-				return
-			}
-		}
-	}()
-
-	// Live-list prune ticker — only the controlling UI prunes ended
-	// agent_sessions older than AgentSessionLiveListRetention, so two
-	// side-by-side UIs don't race on the same DELETE. Mirrors the
-	// desktop's identical loop in leaderservice.go.
-	ls.wg.Add(1)
-	go func() {
-		defer ls.wg.Done()
-		ticker := time.NewTicker(store.UILeaderPruneInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				if !ls.elector.CurrentState().AmLeader {
-					continue
-				}
-				if _, err := s.PruneEndedAgentSessions(
-					store.AgentSessionLiveListRetention); err != nil {
-					logger.Warn("api: live agent-session prune failed", "err", err)
-				}
-			case <-ls.done:
-				return
-			}
-		}
-	}()
-
+	// emit=nil: the api has no event bus to push leader state through;
+	// GET /leader reads it on demand.
+	ls.ctrl.Start(nil)
 	return ls
 }
 
 // stop closes the tick goroutines, waits for them to exit, and releases
-// the lease. Safe to call multiple times — close() will panic the second
-// time on a re-close, but Server.Run only calls this once.
+// the lease.
 func (ls *apiLeaderService) stop() {
-	close(ls.done)
-	ls.wg.Wait()
-	ls.elector.Release()
+	if ls.ctrl != nil {
+		ls.ctrl.Stop()
+	}
 }
 
 // currentState returns the elector's cached state — used by GET /leader.

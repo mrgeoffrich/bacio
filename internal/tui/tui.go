@@ -14,7 +14,6 @@ package tui
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"os/signal"
 	"strings"
@@ -24,6 +23,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/mrgeoffrich/bacio/internal/controller"
 	"github.com/mrgeoffrich/bacio/internal/dispatcher"
 	"github.com/mrgeoffrich/bacio/internal/leader"
 	"github.com/mrgeoffrich/bacio/internal/model"
@@ -254,31 +254,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pruneTickMsg:
 		// Live-list prune tick: drop ended agent_sessions older than
 		// AgentSessionLiveListRetention so the Agents list stays tidy.
-		// Gated on the leader lease — only the controlling UI prunes so
-		// two UIs don't race on the same DELETE. The ticker keeps
-		// running on standby (the lease can flip back to us mid-run).
-		// Best-effort: a transient DB error is logged and we carry on.
-		if m.elector != nil && m.leaderState.AmLeader {
-			if _, err := m.store.PruneEndedAgentSessions(
-				store.AgentSessionLiveListRetention); err != nil {
-				log.Printf("bacio: live agent-session prune failed: %v", err)
-			}
-		}
+		// Leader-gating + error handling lives in controller.PruneIfLeader
+		// so this stays in lockstep with the desktop/api goroutine path.
+		// The ticker keeps running on standby (the lease can flip back to
+		// us mid-run).
+		controller.PruneIfLeader(m.store, m.elector, nil)
 		if m.elector == nil {
 			return m, nil
 		}
 		return m, pruneTick()
 	case queueMatchTickMsg:
 		// BACI-51 queue-matcher tick: bind queued dispatches to free
-		// agents. Same leader-gating rationale as the prune tick — one
-		// matcher across the cluster, ticker keeps running on standby
-		// so a promotion picks it up. Mechanical work: errors logged,
-		// no audit row, no user-visible surface change.
-		if m.elector != nil && m.leaderState.AmLeader && m.matcher != nil {
-			if _, err := m.matcher.Tick(); err != nil {
-				log.Printf("bacio: queue match failed: %v", err)
-			}
-		}
+		// agents. Leader-gating + error handling lives in
+		// controller.MatchIfLeader — same helper the desktop and api
+		// goroutines call, so all three UIs run the matcher identically.
+		controller.MatchIfLeader(m.matcher, m.elector, nil)
 		if m.elector == nil {
 			return m, nil
 		}
