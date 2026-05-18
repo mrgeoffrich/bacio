@@ -717,7 +717,7 @@ the same transaction.
 When you `bacio agent dispatch --mode <slug>`, the instruction body the
 agent sees is rendered from the template that matches that slug.
 Templates are **fully user-configurable**: bacio ships with a bundled
-set of five built-ins (`plan`, `implement`, `review`, `ship`,
+set of six built-ins (`plan`, `design`, `implement`, `review`, `ship`,
 `fix_review`) that are seeded into a `prompt_templates` SQLite table
 on first run, but after that the user owns every row — they can edit
 the body, change the state-gate, rename, delete, and add brand-new

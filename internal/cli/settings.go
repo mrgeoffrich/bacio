@@ -816,8 +816,8 @@ func settingsTemplateRestoreDefaultsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "restore-defaults",
 		Short: "Re-seed any missing built-in dispatch prompt templates (idempotent)",
-		Long: `Re-seed every built-in template slug (plan, implement, review, ship,
-fix_review) that doesn't currently have a row, using the embedded
+		Long: `Re-seed every built-in template slug (plan, design, implement,
+review, ship, fix_review) that doesn't currently have a row, using the embedded
 default body and state-gate. Existing rows (whether the user has
 edited them or not) are left alone. The output lists the slugs that
 were re-created.`,

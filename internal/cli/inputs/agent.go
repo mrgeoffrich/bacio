@@ -61,7 +61,8 @@ type AgentReleaseInput struct {
 // A dispatch must name a target: TargetAgent (a persistent identity
 // slug), TargetSession (a session id), or both. IssueKey is the issue
 // the dispatch concerns, when there is one. Mode is the dispatch intent
-// ("plan", "implement", or "" for untyped); Message is an optional
+// ("plan", "design", "implement", "review", "ship", "fix_review", or
+// "" for untyped — or any user-created template slug); Message is an optional
 // free-form note. The instruction body the agent sees is the mode's
 // canned text plus the note.
 type AgentDispatchInput struct {

@@ -2,7 +2,7 @@ package inputs
 
 // SettingsTemplateSetInput is the payload for
 // `bacio settings template set --json`. Slug is the template slug (one
-// of the built-ins — plan, implement, review, ship, fix_review — or any
+// of the built-ins — plan, design, implement, review, ship, fix_review — or any
 // user-created template). Body is the new prompt text; the
 // {{issue_id}}, {{issue_title}} and {{repo_prefix}} placeholders are
 // substituted with the issue's context at dispatch time. An empty Body

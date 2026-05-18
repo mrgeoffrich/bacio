@@ -45,7 +45,7 @@ talks to the store directly).
 | `RepoID`                       | the repo the dispatch belongs to                              |
 | `TargetAgentID` / `TargetSessionID` | who it's for — an agent identity, a session, or both     |
 | `IssueID` / `IssueKey`         | the issue it concerns (optional)                              |
-| `Mode`                         | job stage: `plan`, `implement`, `review`, `ship`, `fix_review`, or `""` (untyped) |
+| `Mode`                         | job stage: `plan`, `design`, `implement`, `review`, `ship`, `fix_review`, or `""` (untyped) |
 | `Payload`                      | the instruction body the agent reads                          |
 | `Status`                       | `pending` → `delivered` → `acked` (or `cancelled`)            |
 | `CreatedBy` / `CreatedAt`      | who queued it, when                                           |
@@ -55,7 +55,7 @@ talks to the store directly).
 
 `Mode` is a **structured field**, not parsed out of free text, so it's
 queryable and displayable everywhere. It names a **stage of working a
-job** — one of `plan`, `implement`, `review`, `ship`, `fix_review` (or
+job** — one of `plan`, `design`, `implement`, `review`, `ship`, `fix_review` (or
 `""` for untyped).
 
 Each stage has a **prompt template**: the instruction text, with
@@ -116,7 +116,7 @@ bacio agent dispatch BACI-12 --to swift-otter@claude.shiny \
 ```
 
 `--to` / `--session` name the target (at least one required); `--mode`
-is the job stage (`plan`, `implement`, `review`, `ship`, `fix_review`);
+is the job stage (`plan`, `design`, `implement`, `review`, `ship`, `fix_review`);
 `--message` is the optional note appended to the rendered template.
 Honours the six agent-CLI principles — `--json` input, `bacio schema
 show agent.dispatch`, `--dry-run`. Code: `internal/cli/agent.go`
@@ -159,7 +159,7 @@ longer carries any agent-selection UI.
 
 #### State-gated prompts
 
-Each dispatch stage (`plan`, `implement`, `review`, `ship`,
+Each dispatch stage (`plan`, `design`, `implement`, `review`, `ship`,
 `fix_review`) declares the set of issue states its prompt is valid to
 run from — its **state-gate**. The per-card action button only offers a
 prompt when the card's state is in that stage's gate. Built-in defaults
