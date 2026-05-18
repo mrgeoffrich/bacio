@@ -311,13 +311,16 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   font-size: 12px; color: var(--fg-2);
 }
 
-/* Small modal used by the Rename / Delete / Restore confirmations. */
+/* Small modal used by the Rename / Delete / Restore confirmations.
+   Radix Dialog renders Overlay and Content as siblings in a Portal, so the
+   backdrop can't centre the modal via flex — the modal positions itself. */
 .mk-modal-backdrop {
   position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5);
-  display: flex; align-items: center; justify-content: center;
   z-index: 100;
 }
 .mk-modal {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  z-index: 101;
   width: min(420px, 90vw); padding: 18px 20px;
   background: var(--bg-1); border: 1px solid var(--border-1); border-radius: var(--radius-md);
   display: flex; flex-direction: column; gap: 10px; box-shadow: var(--shadow-2);
@@ -334,6 +337,7 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
    "another confirmation". Sits above every other overlay. ----- */
 .mk-error-modal-backdrop { z-index: 200; }
 .mk-error-modal {
+  z-index: 201;
   border-color: var(--status-blocked);
   border-width: 1px;
   border-left-width: 4px;
