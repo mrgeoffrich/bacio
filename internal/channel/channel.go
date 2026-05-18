@@ -271,14 +271,64 @@ func (s *Server) initializeResult(rawParams json.RawMessage) map[string]any {
 			"experimental": map[string]any{"claude/channel": map[string]any{}},
 			"tools":        map[string]any{},
 		},
-		"serverInfo": map[string]any{"name": s.name, "version": s.version},
-		"instructions": "Events from the bacio channel arrive as " +
-			"<channel source=\"" + s.name + "\" dispatch_id=\"...\" issue=\"...\" from=\"...\">. " +
-			"Each is a work item dispatched to you (sometimes by a human supervisor, sometimes by the " +
-			"channel itself — e.g. a `from=\"bacio-channel\"` event asking you to call the `register` tool): " +
-			"read the instruction, do the work, then call the `reply` tool with the dispatch_id from the " +
-			"tag and a short note to acknowledge it.",
+		"serverInfo":   map[string]any{"name": s.name, "version": s.version},
+		"instructions": s.instructionsBlock(),
 	}
+}
+
+// instructionsBlock is the system-prompt addition Claude Code injects
+// into every session that loads this channel. It does two jobs:
+//
+//  1. The base contract: events arrive as <channel source="…"> tags;
+//     acknowledge each via the `reply` tool.
+//  2. The BACI-52 subagent-delegation contract: for issue-tied
+//     dispatches, the parent session is a thin scheduler — it calls
+//     Task(subagent_type="general-purpose", model="opus", …) so the
+//     subagent's context (file reads, edits, scratchpad) is discarded
+//     when the job ends, leaving the parent's context budget intact.
+//     Trivial dispatches (e.g. the channel's own setup-register nudge,
+//     from="bacio-channel") are handled inline because delegating them
+//     would cost more than the call itself.
+//
+// Editing the wording? Every load-bearing phrase is asserted in
+// internal/channel/channel_test.go (TestInstructionsBlockContainsContract)
+// so a tweak that drops one fails CI loudly. The contract is also
+// mirrored prose-wise in docs/agent-dispatch.md ("Subagent delegation")
+// and SKILL.md ("Handling dispatches"); update those if the contract
+// itself changes shape.
+func (s *Server) instructionsBlock() string {
+	var b strings.Builder
+	fmt.Fprintf(&b,
+		"Events from the bacio channel arrive as <channel source=%q dispatch_id=\"...\" issue=\"...\" from=\"...\" mode=\"...\">. "+
+			"Each is a work item dispatched to you (sometimes by a human supervisor, sometimes by the channel "+
+			"itself — e.g. a `from=\"bacio-channel\"` event asking you to call the `register` tool): read the "+
+			"instruction, do the work, then call the `reply` tool with the dispatch_id from the tag and a short "+
+			"note to acknowledge it.",
+		s.name)
+	b.WriteString("\n\n")
+	b.WriteString(
+		"Subagent delegation (BACI-52). For substantive issue-tied dispatches — the tag carries an " +
+			"issue=\"...\" attribute, or mode is one of plan / design / implement / review / ship / fix_review " +
+			"— do NOT do the work in your own context. Instead delegate to a subagent so your context budget " +
+			"stays at \"dispatch arrived → Task call → summary → reply\" size rather than absorbing every file " +
+			"read, edit, and tool call the job makes. Call Task with:\n\n" +
+			"    subagent_type = \"general-purpose\"\n" +
+			"    model         = \"opus\"\n" +
+			"    prompt        = a self-contained worker brief: (a) the dispatch tag's dispatch_id, issue, " +
+			"mode, from, and the verbatim payload; (b) instructions to first run `bacio agent claim <issue> " +
+			"--prompt \"<one-line summary of the payload>\"`, then do the work the payload describes, then " +
+			"run `bacio agent release <issue>`, then call `mcp__bacio__reply` with the dispatch_id and a " +
+			"short note, then return one summary line (≤ 200 chars) to you; (c) the fallback: if the " +
+			"subagent cannot proceed (missing context, ambiguous request, a tool fails), it must leave the " +
+			"issue claimed, NOT call reply, and return a single line `needs_input: <what is missing>`.\n\n" +
+			"After Task returns, forward the subagent's summary line as your visible response. If it returned " +
+			"`needs_input:`, your `Stop` hook will flip the still-claimed issue from `in_progress` to " +
+			"`needs_action` automatically (BACI-14) — surface the `needs_input` text so the supervisor can " +
+			"answer. Note: a running subagent is NOT interruptible mid-flight; cancelling a dispatch in the " +
+			"UI clears the queue but does not stop work already in progress.\n\n" +
+			"Trivial-dispatch carve-out. Dispatches from `from=\"bacio-channel\"` (the channel's own " +
+			"setup-register nudge) are a single MCP call — handle them inline. Don't delegate them.")
+	return b.String()
 }
 
 // ---------- tools ----------

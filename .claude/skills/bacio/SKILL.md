@@ -685,6 +685,45 @@ Either way, acknowledge each handled dispatch with `bacio agent ack <id>
 --note "..."` (or the channel's `reply` tool). Acked/cancelled dispatches
 drop out of `bacio agent inbox` and are pruned after 60 days.
 
+**Handling dispatches — delegate substantive work to a subagent
+(BACI-52).** When a `<channel source="bacio" ...>` event arrives that
+points at issue work (the tag carries an `issue="..."` attribute, or
+`mode` is one of `plan` / `design` / `implement` / `review` / `ship` /
+`fix_review`), do NOT do the work in your own context. Delegate to a
+subagent so the file reads, edits, bash calls, and scratchpad of the
+job are discarded when it ends — your context stays at "dispatch
+arrived → Task call → summary → reply" size, not "all the work":
+
+```
+Task(
+  subagent_type = "general-purpose",
+  model         = "opus",
+  prompt        = <worker brief: dispatch_id, issue, mode, from, the
+                   verbatim payload, plus instructions to claim the
+                   issue (bacio agent claim <KEY> --prompt "..."), do
+                   the work, release the issue (bacio agent release
+                   <KEY>), call mcp__bacio__reply with the dispatch_id
+                   and a short note, then return one ≤200-char summary
+                   line; or return "needs_input: <what>" if blocked,
+                   leaving the issue claimed>,
+)
+```
+
+Forward the subagent's summary as your visible response. If it
+returns `needs_input:`, your `Stop` hook flips the still-claimed
+issue from `in_progress` to `needs_action` automatically (BACI-14) —
+surface the `needs_input` text so the supervisor can answer. A
+running subagent is **not** interruptible mid-flight; cancelling a
+dispatch clears the queue but doesn't stop work already in progress.
+Single-concurrent for now — handle one dispatch at a time.
+
+**Trivial-dispatch carve-out.** Dispatches from `from="bacio-channel"`
+(the channel's own setup-register nudge) are a single MCP call —
+handle them inline. Delegating that would cost more than the call
+itself. The full contract is the system-prompt block the channel
+injects on every handshake (`internal/channel/channel.go::instructionsBlock`);
+this is the agent-facing summary.
+
 **The dispatch lifecycle (BACI-51).** Status progresses
 `queued → pending → delivered → acked`; cancel is valid from any of
 `queued`, `pending`, or `delivered`. The **auto-pick path**

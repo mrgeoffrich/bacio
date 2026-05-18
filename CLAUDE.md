@@ -43,3 +43,7 @@ The exception is **harness-integration shims** (see below): `bacio tui`, `bacio 
 `docs/tui-cookbook.md` is a synthesised reference for bubbletea v1.3.10 + lipgloss v1.1.0 + bubbles. Read it before doing anything non-trivial in `internal/tui/`. The snippets are pinned to v1; upstream READMEs have already moved to v2 and will mislead you.
 
 Note: when changing or testing the TUI make sure to read `docs/tui-cookbook.md` for essential knowledge.
+
+## Dispatched jobs are delegated to a `general-purpose` subagent
+
+A `bacio channel`-equipped session is a **thin scheduler** for dispatched work: when an issue-tied `<channel>` event arrives, the parent session immediately calls `Task(subagent_type="general-purpose", model="opus", prompt=<worker brief>)` and forwards the subagent's one-line summary. All file reads / edits / bash calls happen inside the subagent's context, which is discarded on return, so the parent's context budget stays at "dispatch arrived → Task call → summary → reply" size across dozens of jobs (BACI-52). Don't add code that grows the parent's context per dispatch (e.g. don't push dispatch metadata back into the parent's TodoWrite). The contract itself is the system-prompt block in `internal/channel/channel.go::instructionsBlock` — edit it there; `internal/channel/channel_test.go::TestInstructionsBlockContainsContract` asserts every load-bearing phrase so a rewrite that drops one fails CI. Full design lives in [`docs/agent-dispatch.md`](docs/agent-dispatch.md) under "Subagent delegation".
