@@ -139,7 +139,7 @@ func TestSessionTodosCascadeOnSessionDelete(t *testing.T) {
 
 	// End the session, then artificially age its ended_at past the
 	// retention window so the prune sweep collects it.
-	if _, _, err := s.EndAgentSession("todos-cascade", string(model.EndReasonStop)); err != nil {
+	if _, _, _, err := s.EndAgentSession("todos-cascade", string(model.EndReasonStop)); err != nil {
 		t.Fatalf("end: %v", err)
 	}
 	if _, err := s.DB.Exec(

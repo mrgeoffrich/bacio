@@ -72,7 +72,7 @@ func TestTakenInlinedOnListAndShow(t *testing.T) {
 	if _, _, _, err := s.AddAgentClaim("taken-sess", iss.ID, "again"); err != nil {
 		t.Fatalf("re-claim: %v", err)
 	}
-	if _, _, err := s.EndAgentSession("taken-sess", string(model.EndReasonStop)); err != nil {
+	if _, _, _, err := s.EndAgentSession("taken-sess", string(model.EndReasonStop)); err != nil {
 		t.Fatalf("end: %v", err)
 	}
 	got, err = s.GetIssueByID(iss.ID)

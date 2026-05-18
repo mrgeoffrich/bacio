@@ -295,6 +295,136 @@ func TestAckAgentScopedDoesNotBumpSession(t *testing.T) {
 	}
 }
 
+// TestCountInFlightByModeStalenessGate (BACI-58 §A) locks in that
+// CountInFlightByMode excludes delivered dispatches whose target is
+// past the staleness window — without the gate, a single dead agent's
+// undelivered dispatch permanently strands the queue (the original
+// repro from the issue description).
+func TestCountInFlightByModeStalenessGate(t *testing.T) {
+	s, repo, _, ag, sess := seedDispatchFixture(t)
+
+	// Sanity baseline — a fresh delivered dispatch counts.
+	d, err := s.AddDispatch(AddDispatchIn{
+		RepoID: repo.ID, TargetAgentID: &ag.ID,
+		Mode: model.DispatchModeShip, Payload: "do it", CreatedBy: "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add dispatch: %v", err)
+	}
+	if _, err := s.MarkDispatchDelivered(d.ID); err != nil {
+		t.Fatalf("deliver: %v", err)
+	}
+	n, err := s.CountInFlightByMode(repo.ID, model.DispatchModeShip)
+	if err != nil {
+		t.Fatalf("count fresh: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("fresh in-flight count = %d, want 1", n)
+	}
+
+	// Force the only session for this identity to look stale, well past
+	// the 1h AgentIdlePingThreshold. The dispatch should drop out of the
+	// in-flight count — the agent's plausibly dead, no slot consumed.
+	if _, err := s.DB.Exec(
+		`UPDATE agent_sessions SET last_seen_at = datetime('now','-2 hours') WHERE session_id = ?`,
+		sess.SessionID,
+	); err != nil {
+		t.Fatalf("force-stale: %v", err)
+	}
+	n, err = s.CountInFlightByMode(repo.ID, model.DispatchModeShip)
+	if err != nil {
+		t.Fatalf("count stale: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("stale in-flight count = %d, want 0 (BACI-58 §A excludes orphans)", n)
+	}
+
+	// A fresh sibling session for the same identity rescues the count —
+	// the identity is plausibly alive again. The matcher should treat
+	// the dispatch as occupying its slot.
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "sess-fresh-sibling", RepoID: repo.ID, AgentID: &ag.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("upsert sibling: %v", err)
+	}
+	n, err = s.CountInFlightByMode(repo.ID, model.DispatchModeShip)
+	if err != nil {
+		t.Fatalf("count sibling: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("sibling-alive in-flight count = %d, want 1", n)
+	}
+}
+
+// TestCountInFlightByModeEndedSessionExcluded (BACI-58 §A) covers the
+// other half of the staleness gate — a session-targeted dispatch whose
+// target session has ended_at set must not count, even if last_seen_at
+// is recent. The end IS the orphan signal in that branch.
+func TestCountInFlightByModeEndedSessionExcluded(t *testing.T) {
+	s, repo, _, _, sess := seedDispatchFixture(t)
+	d, err := s.AddDispatch(AddDispatchIn{
+		RepoID: repo.ID, TargetSessionID: sess.SessionID,
+		Mode: model.DispatchModeShip, Payload: "session work", CreatedBy: "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add dispatch: %v", err)
+	}
+	if _, err := s.MarkDispatchDelivered(d.ID); err != nil {
+		t.Fatalf("deliver: %v", err)
+	}
+
+	// Alive session, fresh: counts.
+	n, err := s.CountInFlightByMode(repo.ID, model.DispatchModeShip)
+	if err != nil {
+		t.Fatalf("count fresh session: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("fresh-session count = %d, want 1", n)
+	}
+
+	// End the session and the dispatch should drop out — the row will
+	// be auto-cancelled by §B in the real EndAgentSession path, but
+	// even before that the matcher should free the slot.
+	if _, err := s.DB.Exec(
+		`UPDATE agent_sessions SET ended_at = CURRENT_TIMESTAMP, end_reason = 'crash' WHERE session_id = ?`,
+		sess.SessionID,
+	); err != nil {
+		t.Fatalf("end session: %v", err)
+	}
+	n, err = s.CountInFlightByMode(repo.ID, model.DispatchModeShip)
+	if err != nil {
+		t.Fatalf("count ended session: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("ended-session count = %d, want 0 (BACI-58 §A excludes ended)", n)
+	}
+}
+
+// TestCountInFlightByModeChannelCreatorStillExcluded locks in that
+// the BACI-58 §A staleness gate didn't accidentally drop the
+// pre-existing exclusion of bacio-channel setup dispatches.
+func TestCountInFlightByModeChannelCreatorStillExcluded(t *testing.T) {
+	s, repo, _, _, sess := seedDispatchFixture(t)
+	d, err := s.AddDispatch(AddDispatchIn{
+		RepoID: repo.ID, TargetSessionID: sess.SessionID,
+		Mode: model.DispatchModeShip, Payload: "setup nudge",
+		CreatedBy: model.SetupDispatchCreator,
+	})
+	if err != nil {
+		t.Fatalf("add setup dispatch: %v", err)
+	}
+	if _, err := s.MarkDispatchDelivered(d.ID); err != nil {
+		t.Fatalf("deliver: %v", err)
+	}
+	n, err := s.CountInFlightByMode(repo.ID, model.DispatchModeShip)
+	if err != nil {
+		t.Fatalf("count setup: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("setup-dispatch count = %d, want 0 (creator-exclusion still wins)", n)
+	}
+}
+
 // TestCancelThenAckRejected locks in that a cancelled dispatch can't be
 // acked — the withdrawal is final.
 func TestCancelThenAckRejected(t *testing.T) {

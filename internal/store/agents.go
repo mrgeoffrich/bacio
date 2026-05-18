@@ -345,23 +345,46 @@ func clearAssigneeIfOwned(tx *sql.Tx, issueID int64, identity string) (*Assignee
 	return ch, nil
 }
 
+// CancelledDispatchInfo is one auto-cancelled dispatch row returned by
+// EndAgentSession (BACI-58 §B). Carries the fields the audit caller
+// needs to build a per-row `agent.cancel` history entry without
+// re-fetching: repo prefix for the audit-row scope, issue key (when
+// non-empty) for the human-readable label, target agent + session for
+// the dispatchTargetLabel helper, and mode for the Details string.
+type CancelledDispatchInfo struct {
+	ID              int64
+	RepoID          int64
+	RepoPrefix      string
+	IssueKey        string
+	TargetAgentName string
+	TargetSessionID string
+	Mode            string
+}
+
 // EndAgentSession stamps ended_at + end_reason, and auto-releases every
 // open claim for that session. Idempotent: ending an already-ended
 // session is a no-op (returns the row as-is) so a Stop hook firing twice
 // doesn't error. Each issue left with no open claims is also unassigned
 // (subject to clearAssigneeIfOwned's guard) — the returned slice carries
 // one entry per issue whose assignee actually changed, for the audit log.
-func (s *Store) EndAgentSession(sessionID, reason string) (*model.AgentSession, []AssigneeChange, error) {
+//
+// BACI-58 §B — the third return value carries every dispatch this
+// transaction auto-cancelled: every queued/pending/delivered row
+// targeting this session, plus the identity-targeted ones when this is
+// the agent identity's last live session. The caller writes one
+// `agent.cancel` audit row per entry so the auto-cancel is visible in
+// `bacio history` next to the originating `agent.end`.
+func (s *Store) EndAgentSession(sessionID, reason string) (*model.AgentSession, []AssigneeChange, []CancelledDispatchInfo, error) {
 	if _, err := ValidateSessionID(sessionID); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	parsed, err := model.ParseEndReason(reason)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	tx, err := s.DB.Begin()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	defer tx.Rollback()
 
@@ -375,18 +398,18 @@ func (s *Store) EndAgentSession(sessionID, reason string) (*model.AgentSession, 
 		// obvious to future readers).
 		_ = tx.Rollback()
 		sess, err := s.GetAgentSession(sessionID)
-		return sess, nil, err
+		return sess, nil, nil, err
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	var sessPK int64
 	if err := tx.QueryRow(`SELECT id FROM agent_sessions WHERE session_id = ?`, sessionID).Scan(&sessPK); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil, ErrNotFound
+			return nil, nil, nil, ErrNotFound
 		}
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// Capture the issues this session is about to auto-release *before*
@@ -396,20 +419,20 @@ func (s *Store) EndAgentSession(sessionID, reason string) (*model.AgentSession, 
 		`SELECT DISTINCT issue_id FROM agent_claims WHERE released_at IS NULL AND session_pk = ?`, sessPK,
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	var issueIDs []int64
 	for claimedRows.Next() {
 		var id int64
 		if err := claimedRows.Scan(&id); err != nil {
 			claimedRows.Close()
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		issueIDs = append(issueIDs, id)
 	}
 	if err := claimedRows.Err(); err != nil {
 		claimedRows.Close()
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	claimedRows.Close()
 
@@ -418,38 +441,171 @@ func (s *Store) EndAgentSession(sessionID, reason string) (*model.AgentSession, 
 		string(parsed), sessionID,
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return nil, nil, ErrNotFound
+		return nil, nil, nil, ErrNotFound
 	}
 	if _, err := tx.Exec(
 		`UPDATE agent_claims SET released_at = CURRENT_TIMESTAMP WHERE released_at IS NULL AND session_pk = ?`,
 		sessPK,
 	); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	identity, err := sessionIdentity(tx, sessPK)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	var changes []AssigneeChange
 	for _, issueID := range issueIDs {
 		ch, err := clearAssigneeIfOwned(tx, issueID, identity)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		if ch.Changed() {
 			changes = append(changes, *ch)
 		}
 	}
+
+	cancelled, err := cancelOpenDispatchesForSession(tx, sessPK, sessionID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
 	if err := tx.Commit(); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	sess, err := s.GetAgentSession(sessionID)
-	return sess, changes, err
+	return sess, changes, cancelled, err
+}
+
+// cancelOpenDispatchesForSession cancels the session's open
+// (queued, pending, delivered) dispatches inside the caller's tx and,
+// when this is the agent identity's last live session, the
+// identity-targeted ones too. Returns one CancelledDispatchInfo per
+// cancelled row so the audit caller can record per-row history
+// entries.
+//
+// Also clears issues.waiting_for_claim for each cancelled dispatch
+// that targets an issue, matching the standalone CancelDispatch
+// behaviour so the desktop / web spinner clears on the next refresh.
+//
+// The identity-scoped UPDATE is guarded by a NOT EXISTS clause that
+// keeps the dispatch alive when a sibling alive session for the same
+// identity could still service it — pairing/review flows shouldn't
+// lose work when one of two paired sessions ends.
+func cancelOpenDispatchesForSession(tx *sql.Tx, sessPK int64, sessionID string) ([]CancelledDispatchInfo, error) {
+	scanInfos := func(rows *sql.Rows) ([]CancelledDispatchInfo, error) {
+		var out []CancelledDispatchInfo
+		for rows.Next() {
+			var info CancelledDispatchInfo
+			var issueKey sql.NullString
+			var agentName sql.NullString
+			var targetSession sql.NullString
+			var mode sql.NullString
+			if err := rows.Scan(
+				&info.ID, &info.RepoID, &info.RepoPrefix,
+				&issueKey, &agentName, &targetSession, &mode,
+			); err != nil {
+				return nil, err
+			}
+			info.IssueKey = issueKey.String
+			info.TargetAgentName = agentName.String
+			info.TargetSessionID = targetSession.String
+			info.Mode = mode.String
+			out = append(out, info)
+		}
+		return out, rows.Err()
+	}
+
+	// Session-scoped cancel — every still-open dispatch targeting this
+	// exact session. RETURNING (SQLite >= 3.35, supported by
+	// modernc.org/sqlite) lets the same statement collect every audit
+	// payload we need.
+	sessRows, err := tx.Query(`
+		UPDATE agent_dispatches
+		   SET status = 'cancelled'
+		 WHERE target_session_id = (SELECT session_id FROM agent_sessions WHERE id = ?)
+		   AND status IN ('queued','pending','delivered')
+		RETURNING id, repo_id,
+		          (SELECT prefix FROM repos WHERE id = agent_dispatches.repo_id),
+		          (SELECT (r.prefix || '-' || i.number)
+		             FROM issues i JOIN repos r ON r.id = i.repo_id
+		            WHERE i.id = agent_dispatches.issue_id),
+		          (SELECT name FROM agents WHERE id = agent_dispatches.target_agent_id),
+		          target_session_id,
+		          mode
+	`, sessPK)
+	if err != nil {
+		return nil, err
+	}
+	sessInfos, err := scanInfos(sessRows)
+	sessRows.Close()
+	if err != nil {
+		return nil, err
+	}
+
+	// Identity-scoped cancel — only fires when this session is the
+	// identity's last live one. Lets paired/review setups keep their
+	// identity-targeted dispatches alive when one session ends but
+	// another for the same identity is still working.
+	idRows, err := tx.Query(`
+		UPDATE agent_dispatches
+		   SET status = 'cancelled'
+		 WHERE target_agent_id IS NOT NULL
+		   AND target_agent_id = (SELECT agent_id FROM agent_sessions WHERE id = ?)
+		   AND status IN ('queued','pending','delivered')
+		   AND NOT EXISTS (
+		     SELECT 1 FROM agent_sessions s
+		      WHERE s.agent_id = (SELECT agent_id FROM agent_sessions WHERE id = ?)
+		        AND s.id != ?
+		        AND s.ended_at IS NULL
+		   )
+		RETURNING id, repo_id,
+		          (SELECT prefix FROM repos WHERE id = agent_dispatches.repo_id),
+		          (SELECT (r.prefix || '-' || i.number)
+		             FROM issues i JOIN repos r ON r.id = i.repo_id
+		            WHERE i.id = agent_dispatches.issue_id),
+		          (SELECT name FROM agents WHERE id = agent_dispatches.target_agent_id),
+		          target_session_id,
+		          mode
+	`, sessPK, sessPK, sessPK)
+	if err != nil {
+		return nil, err
+	}
+	idInfos, err := scanInfos(idRows)
+	idRows.Close()
+	if err != nil {
+		return nil, err
+	}
+
+	out := append(sessInfos, idInfos...)
+	if len(out) == 0 {
+		return nil, nil
+	}
+
+	// Clear issues.waiting_for_claim for every cancelled dispatch that
+	// targets an issue — same logic CancelDispatch uses. The cancelled
+	// dispatch row still carries its issue_id (the update only touched
+	// status), so the subquery resolves correctly. Harmless if another
+	// open dispatch still targets the same issue: the next
+	// AddDispatch / AddAgentClaim re-establishes the flag.
+	for _, info := range out {
+		if info.IssueKey == "" {
+			continue
+		}
+		if _, err := tx.Exec(
+			`UPDATE issues SET waiting_for_claim = 0
+			  WHERE id = (SELECT issue_id FROM agent_dispatches WHERE id = ?)`,
+			info.ID,
+		); err != nil {
+			return nil, err
+		}
+	}
+
+	return out, nil
 }
 
 // AddAgentClaim records a new claim. Rejects if the session is already

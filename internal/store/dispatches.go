@@ -419,14 +419,52 @@ func (s *Store) ListQueuedByRepoMode(repoID int64, mode model.DispatchMode) ([]*
 // bacio-channel setup-dispatch creator so the channel's own register
 // nudges never block real dispatches from binding. This is the query
 // the BACI-51 matcher uses to enforce a template's concurrency_limit.
+//
+// BACI-58 — staleness gate. A `delivered` dispatch whose target agent
+// never returns used to permanently strand a slot in the per-(repo,
+// mode) count. Now a row only counts when its target is plausibly
+// alive — either the targeted identity has a session whose
+// `last_seen_at` is within `model.AgentIdlePingThreshold` (1h, aligned
+// with the BACI-57 reaper) and isn't ended, or the targeted session
+// itself satisfies the same. Pure exclusion (no write); the orphan
+// rows are tidied by EndAgentSession's BACI-58 §B auto-cancel once
+// the reaper (or a clean SessionEnd hook) stamps `ended_at`.
+//
+// The threshold is rendered as a SQLite duration string so the live
+// `datetime('now', '-3600 seconds')` evaluation matches the row's
+// `last_seen_at` exactly.
 func (s *Store) CountInFlightByMode(repoID int64, mode model.DispatchMode) (int, error) {
+	staleWindow := fmt.Sprintf("-%d seconds", int(model.AgentIdlePingThreshold/time.Second))
 	var n int
 	err := s.DB.QueryRow(`
-		SELECT COUNT(*) FROM agent_dispatches
-		 WHERE repo_id = ? AND mode = ?
-		   AND status IN ('pending','delivered')
-		   AND created_by != ?`,
-		repoID, string(mode), model.SetupDispatchCreator).Scan(&n)
+		SELECT COUNT(*)
+		  FROM agent_dispatches d
+		 WHERE d.repo_id = ? AND d.mode = ?
+		   AND d.status IN ('pending','delivered')
+		   AND d.created_by != ?
+		   AND (
+		     -- Identity-targeted: at least one alive session for this
+		     -- identity is fresh enough to plausibly be working it.
+		     (d.target_agent_id IS NOT NULL AND EXISTS (
+		       SELECT 1 FROM agent_sessions s
+		        WHERE s.agent_id = d.target_agent_id
+		          AND s.ended_at IS NULL
+		          AND s.last_seen_at > datetime('now', ?)
+		     ))
+		     OR
+		     -- Session-targeted: the named session itself is alive and
+		     -- recently seen. Rare for matcher-bound rows (matcher binds
+		     -- by identity) but covers the directly-targeted dispatch
+		     -- shape too.
+		     (d.target_session_id != '' AND EXISTS (
+		       SELECT 1 FROM agent_sessions s
+		        WHERE s.session_id = d.target_session_id
+		          AND s.ended_at IS NULL
+		          AND s.last_seen_at > datetime('now', ?)
+		     ))
+		   )`,
+		repoID, string(mode), model.SetupDispatchCreator, staleWindow, staleWindow,
+	).Scan(&n)
 	return n, err
 }
 

@@ -287,7 +287,7 @@ func (c *localClient) EndAgent(ctx context.Context, repo *model.Repo, in inputs.
 		projected.EndReason = in.Reason
 		return &projected, nil
 	}
-	sess, assigneeChanges, err := c.store.EndAgentSession(in.SessionID, in.Reason)
+	sess, assigneeChanges, cancelled, err := c.store.EndAgentSession(in.SessionID, in.Reason)
 	if err != nil {
 		return nil, err
 	}
@@ -301,7 +301,49 @@ func (c *localClient) EndAgent(ctx context.Context, repo *model.Repo, in inputs.
 	for _, ch := range assigneeChanges {
 		c.recordAssigneeChange(ch)
 	}
+	// BACI-58 §B — record per-row agent.cancel history for every
+	// dispatch the end-session tx auto-cancelled. The "auto-cancel:"
+	// prefix lets a reader of `bacio history --op agent.cancel`
+	// distinguish reaper-driven cancels from manual `bacio agent cancel`
+	// ones without breaking the existing op-name filter.
+	for _, info := range cancelled {
+		c.recordOp(model.HistoryEntry{
+			RepoID: &info.RepoID, RepoPrefix: info.RepoPrefix,
+			Op: "agent.cancel", Kind: "agent",
+			TargetID: &info.ID, TargetLabel: cancelledDispatchTargetLabel(info),
+			Details:  cancelledDispatchDetails(info, "auto-cancel: target session ended"),
+		})
+	}
 	return sess, nil
+}
+
+// cancelledDispatchTargetLabel / cancelledDispatchDetails shape an
+// agent.cancel audit row for a dispatch the store auto-cancelled
+// (BACI-58 §B) starting from the lightweight store.CancelledDispatchInfo,
+// without round-tripping through GetDispatch. Output mirrors the
+// dispatchTargetLabel / dispatchDetails helpers above so manual and
+// auto-cancels are visually consistent in `bacio history`.
+func cancelledDispatchTargetLabel(info store.CancelledDispatchInfo) string {
+	if info.TargetAgentName != "" {
+		return info.TargetAgentName
+	}
+	return info.TargetSessionID
+}
+
+func cancelledDispatchDetails(info store.CancelledDispatchInfo, reason string) string {
+	var parts []string
+	parts = append(parts, reason)
+	if info.IssueKey != "" {
+		parts = append(parts, "issue="+info.IssueKey)
+	}
+	if info.TargetSessionID != "" {
+		parts = append(parts, "session="+info.TargetSessionID)
+	}
+	if info.Mode != "" {
+		parts = append(parts, "mode="+info.Mode)
+	}
+	parts = append(parts, "status=cancelled")
+	return joinCSV(parts)
 }
 
 // recordAssigneeChange writes the issue.assign audit row for an
