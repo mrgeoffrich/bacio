@@ -318,8 +318,9 @@ body { margin: 0; }
   margin-top: 4px;
 }
 
-/* Each question is one bordered fieldset; legend sits in the
-   bordered area's top edge with the pill (header) + question text. */
+/* Each question is one bordered fieldset; a div (not <legend>) holds
+   the pill (header) + question text. <legend> overlaps the fieldset's
+   top border in Chrome, which mangles multi-line wrapped headers. */
 .mk-question-fieldset {
   border: 1px solid var(--border-1);
   border-radius: var(--radius-md);
@@ -330,7 +331,7 @@ body { margin: 0; }
 
 .mk-question-legend {
   display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
-  padding: 0 4px;
+  padding: 0 4px 6px;
   font-size: 13px; color: var(--fg-1); line-height: 1.4;
   font-weight: 500;
 }
