@@ -28,6 +28,7 @@ go.work.sum
 
 # Local Claude Code config (per-machine, not shared)
 .claude/settings.json
+.claude/worktrees/
 
 # IDE / OS
 .vscode/
