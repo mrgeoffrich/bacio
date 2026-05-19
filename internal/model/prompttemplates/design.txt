@@ -269,12 +269,12 @@ bacio comment add {{issue_id}} --as <your-name> --body-file /tmp/design-comment.
 ## Phase 6 — Close out
 
 1. Clean up and remove the worktree (drop its bacio registry row first with `bacio worktree rm <path> --confirm <slug>`).
-2. Set {{issue_id}} to **in review** (`bacio issue state {{issue_id}} in-review --user <your-name>`).
-3. Release your claim (`bacio agent end --reason stop --user <your-name>` releases every open claim the session holds — or `bacio agent release {{issue_id}} --user <your-name>` if you're keeping the session alive for other work).
+2. Release your claim (`bacio agent end --reason stop --user <your-name>` releases every open claim the session holds — or `bacio agent release {{issue_id}} --user <your-name>` if you're keeping the session alive for other work).
+3. Set {{issue_id}} back to **todo** (`bacio issue state {{issue_id}} todo --user <your-name>`). The design doc is now attached to the ticket — it's ready for an implementation pass to be picked up.
 
 ## Hard rules
 
-- **Only one state transition mid-run, and only at the end.** Set the issue to **in-progress** at setup, and to **in-review** at close-out. Never set **done** directly (that's the human reviewer's call once they're happy with the picked design); never re-transition mid-run.
+- **Only one state transition mid-run, and only at the end.** Set the issue to **in-progress** at setup, and back to **todo** at close-out (the design doc lives as an attached bacio doc, so the ticket itself returns to the backlog ready for implementation). Never set **done** or **in-review** directly; never re-transition mid-run.
 - **Never collapse two options into one.** If you genuinely can't think of two distinct approaches, surface that and ask the user whether to write a single recommendation with a "rejected alternatives" appendix instead.
 - **Never punt the recommendation back to the user.** The §Recommendation section must commit to one option. "No strong preference" / "either works" / "user picks" are invalid outputs — pick one and name what would flip the call.
 - **Never skip the prior-art search (Phase 2.4).** Designs that ignore the existing codebase are usually wrong about what's expensive vs. cheap. Even if you find nothing reusable, the search itself should inform your options.
