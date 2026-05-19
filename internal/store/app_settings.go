@@ -275,3 +275,31 @@ func (s *Store) SetBoardHideEmptyColumns(hide bool) error {
 	}
 	return s.SetAppSetting(boardHideEmptyColumnsKey, v)
 }
+
+// displayShowArchivedKey is the BACI-68 global toggle controlling
+// whether archived issues / documents / features appear in default
+// lists (board, kanban, doc list, feature list) and on the API. The
+// CLI's per-call `--include-archived` flag overrides this setting for
+// the lifetime of one command.
+const displayShowArchivedKey = "display.show_archived"
+
+// GetDisplayShowArchived reports whether archived rows should appear
+// in default lists (BACI-68). A missing/empty value — or any value
+// that isn't exactly "true" — reads as false (the default), matching
+// the defensive read style of GetBoardHideEmptyColumns.
+func (s *Store) GetDisplayShowArchived() (bool, error) {
+	v, err := s.GetAppSetting(displayShowArchivedKey)
+	if err != nil {
+		return false, err
+	}
+	return v == "true", nil
+}
+
+// SetDisplayShowArchived stores the BACI-68 display toggle.
+func (s *Store) SetDisplayShowArchived(show bool) error {
+	v := "false"
+	if show {
+		v = "true"
+	}
+	return s.SetAppSetting(displayShowArchivedKey, v)
+}

@@ -53,3 +53,17 @@ type IssueNextInput struct {
 type IssueRmInput struct {
 	Key string `json:"key"`
 }
+
+// IssueArchiveInput is the payload for `bacio issue archive --json`
+// (BACI-68). Archive is sticky — reopening an archived issue (state
+// -> todo/in_progress/...) does NOT auto-unarchive it; the user must
+// unarchive explicitly via IssueUnarchive.
+type IssueArchiveInput struct {
+	Key string `json:"key"`
+}
+
+// IssueUnarchiveInput is the payload for `bacio issue unarchive --json`
+// (BACI-68).
+type IssueUnarchiveInput struct {
+	Key string `json:"key"`
+}

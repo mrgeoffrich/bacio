@@ -115,3 +115,49 @@ func TestIssueUUIDRoundTrip(t *testing.T) {
 		t.Fatalf("get by key uuid mismatch: got %q want %q", gotByKey.UUID, first.UUID)
 	}
 }
+
+// TestPeekClaimNextIssueSkipArchived — BACI-68 dispatcher guard. An
+// archived todo must be invisible to both PeekNextIssue and
+// ClaimNextIssue so the auto-pick / matcher / `bacio issue next`
+// paths can't quietly revive work the user has hidden.
+func TestPeekClaimNextIssueSkipArchived(t *testing.T) {
+	s := newTestStore(t)
+	repo, err := s.CreateRepo("AR", "archive-next", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+	feat, err := s.CreateFeature(repo.ID, "f", "F", "")
+	if err != nil {
+		t.Fatalf("create feature: %v", err)
+	}
+	// Two todos in the same feature, both eligible. AR-1 is the
+	// lowest-numbered, so it would normally be picked first.
+	iss1, err := s.CreateIssue(repo.ID, &feat.ID, "first", "", model.StateTodo, nil)
+	if err != nil {
+		t.Fatalf("create iss1: %v", err)
+	}
+	iss2, err := s.CreateIssue(repo.ID, &feat.ID, "second", "", model.StateTodo, nil)
+	if err != nil {
+		t.Fatalf("create iss2: %v", err)
+	}
+	// Sanity: with neither archived, Peek picks iss1.
+	picked, err := s.PeekNextIssue(repo.ID, feat.ID)
+	if err != nil || picked == nil || picked.ID != iss1.ID {
+		t.Fatalf("pre-archive peek: got %+v err=%v, want iss1", picked, err)
+	}
+	// Archive iss1: Peek should now hand back iss2 instead of skipping
+	// to nil. A manually-hidden todo must not block the next eligible
+	// one underneath it.
+	if err := s.SetIssueArchived(iss1.ID, true); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	picked, err = s.PeekNextIssue(repo.ID, feat.ID)
+	if err != nil || picked == nil || picked.ID != iss2.ID {
+		t.Fatalf("post-archive peek: got %+v err=%v, want iss2", picked, err)
+	}
+	// Claim should also pick iss2, not the archived iss1.
+	claimed, err := s.ClaimNextIssue(repo.ID, feat.ID, "geoff")
+	if err != nil || claimed == nil || claimed.ID != iss2.ID {
+		t.Fatalf("post-archive claim: got %+v err=%v, want iss2", claimed, err)
+	}
+}

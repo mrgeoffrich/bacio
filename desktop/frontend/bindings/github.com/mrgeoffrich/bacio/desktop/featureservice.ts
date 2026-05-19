@@ -30,6 +30,7 @@ export function GetFeature(repoPrefix: string, slug: string): $CancellablePromis
 
 /**
  * ListFeatures returns every feature in one repo as a summary row.
+ * Archived features (BACI-68) follow display.show_archived.
  */
 export function ListFeatures(repoPrefix: string): $CancellablePromise<$models.FeatureSummary[]> {
     return $Call.ByID(640296380, repoPrefix).then(($result: any) => {

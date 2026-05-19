@@ -288,3 +288,31 @@ func (s *SettingsService) SetBoardPreferences(hideEmptyColumns bool) (BoardPrefe
 	}
 	return s.GetBoardPreferences()
 }
+
+// DisplayPreferencesDTO is the BACI-68 display.show_archived global
+// toggle, shaped for the desktop Settings panel.
+type DisplayPreferencesDTO struct {
+	ShowArchived bool `json:"showArchived"`
+}
+
+// GetDisplayPreferences returns the current display.show_archived
+// value (BACI-68). The desktop Board / Docs / Features views consult
+// this on every refresh — when on, archived rows surface as visibly-
+// muted cards; when off they're hidden entirely.
+func (s *SettingsService) GetDisplayPreferences() (DisplayPreferencesDTO, error) {
+	v, err := s.client.GetDisplayShowArchived(context.Background())
+	if err != nil {
+		return DisplayPreferencesDTO{}, err
+	}
+	return DisplayPreferencesDTO{ShowArchived: v}, nil
+}
+
+// SetDisplayPreferences writes display.show_archived and returns the
+// refreshed DTO (BACI-68).
+func (s *SettingsService) SetDisplayPreferences(showArchived bool) (DisplayPreferencesDTO, error) {
+	v, err := s.client.SetDisplayShowArchived(context.Background(), showArchived, false)
+	if err != nil {
+		return DisplayPreferencesDTO{}, err
+	}
+	return DisplayPreferencesDTO{ShowArchived: v}, nil
+}

@@ -50,7 +50,11 @@ func newDocsView(s *store.Store, repo *model.Repo) *docsView {
 }
 
 func (d *docsView) reload() {
-	docs, err := d.store.ListDocuments(store.DocumentFilter{RepoID: d.repo.ID})
+	includeArchived, _ := d.store.GetDisplayShowArchived()
+	docs, err := d.store.ListDocuments(store.DocumentFilter{
+		RepoID:          d.repo.ID,
+		IncludeArchived: includeArchived,
+	})
 	if err != nil {
 		d.err = err
 		return
@@ -149,7 +153,7 @@ func (d *docsView) Help() string {
 	if d.overlay {
 		return "j/k scroll · g/G top/bottom · esc close"
 	}
-	return "j/k docs · enter open · r reload · q quit"
+	return "j/k docs · enter open · a archive · A unarchive · r reload · q quit"
 }
 
 func (d *docsView) Update(msg tea.Msg) tea.Cmd {
@@ -204,9 +208,42 @@ func (d *docsView) Update(msg tea.Msg) tea.Cmd {
 			d.overlay = true
 			d.overlayScroll = 0
 		}
+	case "a":
+		// BACI-68: archive the focused document. Already-archived rows
+		// are a no-op (unarchive via `A`). Docs have no terminal/non-
+		// terminal distinction so no confirm — same convention as the
+		// CLI's `bacio doc archive`.
+		if cur := d.currentDoc(); cur != nil && cur.ArchivedAt == nil {
+			d.setArchived(cur, true)
+		}
+	case "A":
+		if cur := d.currentDoc(); cur != nil && cur.ArchivedAt != nil {
+			d.setArchived(cur, false)
+		}
 	}
 	d.refreshSelection()
 	return nil
+}
+
+func (d *docsView) setArchived(doc *model.Document, archived bool) {
+	if err := d.store.SetDocumentArchived(doc.ID, archived); err != nil {
+		d.err = err
+		return
+	}
+	op := "doc.archive"
+	if !archived {
+		op = "doc.unarchive"
+	}
+	recordTUIOp(d.store, model.HistoryEntry{
+		Actor:       tuiActor(),
+		RepoID:      &doc.RepoID,
+		RepoPrefix:  d.repo.Prefix,
+		Op:          op,
+		Kind:        "document",
+		TargetID:    &doc.ID,
+		TargetLabel: doc.Filename,
+	})
+	d.reload()
 }
 
 func (d *docsView) View(width, height int) string {
@@ -279,12 +316,20 @@ func (d *docsView) renderList(width, height int) string {
 			lastType = doc.Type
 		}
 		line := "  " + truncate(doc.Filename, bodyContentWidth-4)
+		// BACI-68: render archived doc rows faint so they read as
+		// background context once the toggle's on.
+		style := rowStyle
+		sel := selStyle
+		if doc.ArchivedAt != nil {
+			style = style.Faint(true)
+			sel = sel.Faint(true)
+		}
 		if i == d.row {
 			cursorStart = len(lines)
-			lines = append(lines, selStyle.Render(line))
+			lines = append(lines, sel.Render(line))
 			cursorEnd = len(lines)
 		} else {
-			lines = append(lines, rowStyle.Render(line))
+			lines = append(lines, style.Render(line))
 		}
 	}
 

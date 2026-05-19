@@ -58,3 +58,15 @@ type DocExportInput struct {
 	To       string `json:"to,omitempty"`
 	ToPath   bool   `json:"to_path,omitempty"`
 }
+
+// DocArchiveInput is the payload for `bacio doc archive --json`
+// (BACI-68).
+type DocArchiveInput struct {
+	Filename string `json:"filename"`
+}
+
+// DocUnarchiveInput is the payload for `bacio doc unarchive --json`
+// (BACI-68).
+type DocUnarchiveInput struct {
+	Filename string `json:"filename"`
+}

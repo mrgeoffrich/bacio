@@ -59,6 +59,10 @@ func (s *Store) GetDocumentByUUID(uuid string, withContent bool) (*model.Documen
 type DocumentFilter struct {
 	RepoID int64
 	Type   *model.DocumentType
+	// IncludeArchived (BACI-68), when true, includes rows with a
+	// non-NULL archived_at. Defaults to false — archived docs are
+	// hidden from default lists.
+	IncludeArchived bool
 }
 
 func (s *Store) ListDocuments(f DocumentFilter) ([]*model.Document, error) {
@@ -68,6 +72,9 @@ func (s *Store) ListDocuments(f DocumentFilter) ([]*model.Document, error) {
 	if f.Type != nil {
 		q += ` AND type = ?`
 		args = append(args, string(*f.Type))
+	}
+	if !f.IncludeArchived {
+		q += ` AND archived_at IS NULL`
 	}
 	q += ` ORDER BY filename`
 	rows, err := s.DB.Query(q, args...)
@@ -84,6 +91,18 @@ func (s *Store) ListDocuments(f DocumentFilter) ([]*model.Document, error) {
 		out = append(out, d)
 	}
 	return out, rows.Err()
+}
+
+// SetDocumentArchived stamps or clears the document's archived_at
+// column (BACI-68). Same idempotent / no-updated_at-bump semantics as
+// SetIssueArchived.
+func (s *Store) SetDocumentArchived(documentID int64, archived bool) error {
+	if archived {
+		_, err := s.DB.Exec(`UPDATE documents SET archived_at = CURRENT_TIMESTAMP WHERE id = ? AND archived_at IS NULL`, documentID)
+		return err
+	}
+	_, err := s.DB.Exec(`UPDATE documents SET archived_at = NULL WHERE id = ?`, documentID)
+	return err
 }
 
 // UpdateDocument patches the type, content, and/or source_path. Pass nil for
@@ -305,7 +324,7 @@ func (s *Store) CreateDocumentFromSync(repoID int64, uuid, filename string, t mo
 }
 
 func docCols(withContent bool) string {
-	c := "id, uuid, repo_id, filename, type, size_bytes, source_path, created_at, updated_at"
+	c := "id, uuid, repo_id, filename, type, size_bytes, source_path, archived_at, created_at, updated_at"
 	if withContent {
 		c += ", content"
 	}
@@ -314,14 +333,15 @@ func docCols(withContent bool) string {
 
 func scanDocument(row rowScanner, withContent bool) (*model.Document, error) {
 	var (
-		d   model.Document
-		typ string
-		err error
+		d          model.Document
+		typ        string
+		archivedAt sql.NullTime
+		err        error
 	)
 	if withContent {
-		err = row.Scan(&d.ID, &d.UUID, &d.RepoID, &d.Filename, &typ, &d.SizeBytes, &d.SourcePath, &d.CreatedAt, &d.UpdatedAt, &d.Content)
+		err = row.Scan(&d.ID, &d.UUID, &d.RepoID, &d.Filename, &typ, &d.SizeBytes, &d.SourcePath, &archivedAt, &d.CreatedAt, &d.UpdatedAt, &d.Content)
 	} else {
-		err = row.Scan(&d.ID, &d.UUID, &d.RepoID, &d.Filename, &typ, &d.SizeBytes, &d.SourcePath, &d.CreatedAt, &d.UpdatedAt)
+		err = row.Scan(&d.ID, &d.UUID, &d.RepoID, &d.Filename, &typ, &d.SizeBytes, &d.SourcePath, &archivedAt, &d.CreatedAt, &d.UpdatedAt)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -330,5 +350,9 @@ func scanDocument(row rowScanner, withContent bool) (*model.Document, error) {
 		return nil, fmt.Errorf("scan document: %w", err)
 	}
 	d.Type = model.DocumentType(typ)
+	if archivedAt.Valid {
+		t := archivedAt.Time
+		d.ArchivedAt = &t
+	}
 	return &d, nil
 }

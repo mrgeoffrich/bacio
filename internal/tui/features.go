@@ -47,7 +47,12 @@ func newFeaturesView(s *store.Store, repo *model.Repo) *featuresView {
 }
 
 func (f *featuresView) reload() {
-	list, err := f.store.ListFeatures(f.repo.ID, true)
+	includeArchived, _ := f.store.GetDisplayShowArchived()
+	list, err := f.store.ListFeaturesFiltered(store.FeatureFilter{
+		RepoID:             f.repo.ID,
+		IncludeDescription: true,
+		IncludeArchived:    includeArchived,
+	})
 	if err != nil {
 		f.err = err
 		return
@@ -115,7 +120,7 @@ func (f *featuresView) Help() string {
 	if f.overlay {
 		return "j/k scroll · g/G top/bottom · esc close"
 	}
-	return "j/k features · enter open · r reload · q quit"
+	return "j/k features · enter open · a archive · A unarchive · r reload · q quit"
 }
 
 func (f *featuresView) Update(msg tea.Msg) tea.Cmd {
@@ -170,9 +175,42 @@ func (f *featuresView) Update(msg tea.Msg) tea.Cmd {
 			f.overlay = true
 			f.overlayScroll = 0
 		}
+	case "a":
+		// BACI-68: archive the focused feature. No confirm — auto-
+		// sweep already does this when every child issue is archived.
+		// Manual control is a quick way to hide a feature whose
+		// children have just been bulk-archived from the kanban.
+		if cur := f.currentFeature(); cur != nil && cur.ArchivedAt == nil {
+			f.setArchived(cur, true)
+		}
+	case "A":
+		if cur := f.currentFeature(); cur != nil && cur.ArchivedAt != nil {
+			f.setArchived(cur, false)
+		}
 	}
 	f.refreshSelection()
 	return nil
+}
+
+func (f *featuresView) setArchived(feat *model.Feature, archived bool) {
+	if err := f.store.SetFeatureArchived(feat.ID, archived); err != nil {
+		f.err = err
+		return
+	}
+	op := "feature.archive"
+	if !archived {
+		op = "feature.unarchive"
+	}
+	recordTUIOp(f.store, model.HistoryEntry{
+		Actor:       tuiActor(),
+		RepoID:      &feat.RepoID,
+		RepoPrefix:  f.repo.Prefix,
+		Op:          op,
+		Kind:        "feature",
+		TargetID:    &feat.ID,
+		TargetLabel: feat.Slug,
+	})
+	f.reload()
 }
 
 func (f *featuresView) View(width, height int) string {
@@ -250,6 +288,11 @@ func (f *featuresView) renderList(width, height int) string {
 			styler = selStyle
 			slugRender = bracketed
 			cursorStart = len(lines)
+		}
+		// BACI-68: archived feature → faint so it reads as background
+		// context once the toggle's on.
+		if feat.ArchivedAt != nil {
+			styler = styler.Faint(true)
 		}
 		titleLines := wrapLines(feat.Title, titleW, 2)
 		for j := 0; j < featureRows; j++ {

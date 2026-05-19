@@ -326,6 +326,12 @@ func (b *BoardService) ListColumns() ([]BoardColumn, error) {
 // ListCards returns issues as kanban cards — for one repo, or across every
 // repo when repoPrefix is empty or "all". Delegates to boardcards.Assemble
 // so the desktop and REST surface share one assembler.
+//
+// Archived cards (BACI-68) follow the display.show_archived global
+// setting — when on, archived rows surface as visibly-muted cards;
+// when off (the default) they're hidden from the board entirely. The
+// desktop has no per-call --include-archived knob — toggle the setting
+// from the Settings panel.
 func (b *BoardService) ListCards(repoPrefix string) ([]BoardCard, error) {
 	ctx := context.Background()
 	var repo *model.Repo
@@ -336,7 +342,8 @@ func (b *BoardService) ListCards(repoPrefix string) ([]BoardCard, error) {
 		}
 		repo = r
 	}
-	return boardcards.Assemble(ctx, b.client, repo)
+	showArchived, _ := b.client.GetDisplayShowArchived(ctx)
+	return boardcards.Assemble(ctx, b.client, repo, showArchived)
 }
 
 // GetIssue returns the full issue-drawer payload for one issue. repoPrefix
@@ -690,4 +697,40 @@ func (b *BoardService) CancelWaitingDispatch(repoPrefix, issueKey string) error 
 	}
 	_, err = b.client.CancelDispatch(ctx, inputs.AgentCancelInput{ID: dsp.ID}, false)
 	return err
+}
+
+// ArchiveIssue (BACI-68) is the per-card "archive" Wails binding —
+// stamps archived_at, returns the updated row. The desktop card menu
+// calls this when the user selects Archive. The kanban refreshes via
+// the regular ListCards path; archived cards stay visible only when
+// display.show_archived is on (and then render visibly-muted).
+func (b *BoardService) ArchiveIssue(repoPrefix, issueKey string) (*model.Issue, error) {
+	ctx := context.Background()
+	prefix := repoPrefix
+	if prefix == "" || prefix == "all" {
+		if i := strings.LastIndex(issueKey, "-"); i > 0 {
+			prefix = issueKey[:i]
+		}
+	}
+	repo, err := b.client.GetRepoByPrefix(ctx, prefix)
+	if err != nil {
+		return nil, err
+	}
+	return b.client.ArchiveIssue(ctx, repo, issueKey, false)
+}
+
+// UnarchiveIssue (BACI-68) clears archived_at.
+func (b *BoardService) UnarchiveIssue(repoPrefix, issueKey string) (*model.Issue, error) {
+	ctx := context.Background()
+	prefix := repoPrefix
+	if prefix == "" || prefix == "all" {
+		if i := strings.LastIndex(issueKey, "-"); i > 0 {
+			prefix = issueKey[:i]
+		}
+	}
+	repo, err := b.client.GetRepoByPrefix(ctx, prefix)
+	if err != nil {
+		return nil, err
+	}
+	return b.client.UnarchiveIssue(ctx, repo, issueKey, false)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/model"
@@ -37,6 +38,7 @@ func (c *localClient) ListIssues(ctx context.Context, f IssueFilter) ([]*model.I
 		IncludeDescription: f.IncludeDescription,
 		States:             f.States,
 		Tags:               f.Tags,
+		IncludeArchived:    f.IncludeArchived,
 	}
 	if !f.AllRepos && f.Repo != nil {
 		sf.RepoID = &f.Repo.ID
@@ -56,6 +58,56 @@ func (c *localClient) ListIssues(ctx context.Context, f IssueFilter) ([]*model.I
 		issues = []*model.Issue{}
 	}
 	return issues, nil
+}
+
+// ArchiveIssue stamps the issue's archived_at column to CURRENT_TIMESTAMP
+// (BACI-68). Idempotent — archiving an already-archived row is a no-op
+// (the partial-WHERE in SetIssueArchived skips it). Sticky — reopening
+// an archived issue (via `bacio issue state`) does NOT auto-unarchive
+// it; the user must unarchive explicitly. Records an audit row under
+// the actor on --user.
+func (c *localClient) ArchiveIssue(ctx context.Context, repo *model.Repo, key string, dryRun bool) (*model.Issue, error) {
+	return c.setIssueArchived(ctx, repo, key, true, dryRun, "issue.archive")
+}
+
+// UnarchiveIssue clears archived_at (BACI-68). Records an audit row.
+func (c *localClient) UnarchiveIssue(ctx context.Context, repo *model.Repo, key string, dryRun bool) (*model.Issue, error) {
+	return c.setIssueArchived(ctx, repo, key, false, dryRun, "issue.unarchive")
+}
+
+func (c *localClient) setIssueArchived(ctx context.Context, repo *model.Repo, key string, archived, dryRun bool, op string) (*model.Issue, error) {
+	iss, err := c.GetIssueByKey(ctx, repo, key)
+	if err != nil {
+		return nil, err
+	}
+	if dryRun {
+		projected := *iss
+		// Mirror the store's idempotent semantics: re-archiving preserves
+		// the original timestamp, and unarchiving an unarchived row is a
+		// no-op. Otherwise an agent comparing dry-run output to a real
+		// call would see a phantom "now" timestamp that the real write
+		// never produces.
+		if archived && iss.ArchivedAt == nil {
+			now := time.Now().UTC()
+			projected.ArchivedAt = &now
+		} else if !archived {
+			projected.ArchivedAt = nil
+		}
+		return &projected, nil
+	}
+	if err := c.store.SetIssueArchived(iss.ID, archived); err != nil {
+		return nil, err
+	}
+	updated, err := c.store.GetIssueByID(iss.ID)
+	if err != nil {
+		return nil, err
+	}
+	c.recordOp(model.HistoryEntry{
+		RepoID: &iss.RepoID, RepoPrefix: repo.Prefix,
+		Op: op, Kind: "issue",
+		TargetID: &updated.ID, TargetLabel: updated.Key,
+	})
+	return updated, nil
 }
 
 func (c *localClient) GetIssueByKey(ctx context.Context, repo *model.Repo, key string) (*model.Issue, error) {

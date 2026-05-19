@@ -26,9 +26,10 @@ func (d deps) handleBoardCardsListRepo(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	includeArchived := includeArchivedFromRequest(r, d.store)
 	c := client.NewLocalFromStore(d.store, ActorFromContext(r.Context()))
 	defer c.Close()
-	cards, err := boardcards.Assemble(r.Context(), c, repo)
+	cards, err := boardcards.Assemble(r.Context(), c, repo, includeArchived)
 	if err != nil {
 		status, code := statusForError(err)
 		writeError(w, status, code, err.Error(), nil)

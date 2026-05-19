@@ -50,6 +50,11 @@ export interface BoardCard {
   activeVerb?: string;
   todosDone?: number;
   todosTotal?: number;
+  // BACI-68: mirror of issues.archived_at IS NOT NULL. Cards with
+  // archived=true only surface when display.show_archived is on; the
+  // kanban renders them visibly muted so an archived card stands out
+  // from the live ones around it.
+  archived?: boolean;
 }
 
 export interface CommentDTO {
@@ -1274,6 +1279,55 @@ export async function setBoardPreferences(hideEmptyColumns: boolean): Promise<Bo
     body: { hide_empty_columns: hideEmptyColumns },
   });
   return { hideEmptyColumns: res.hide_empty_columns };
+}
+
+// ---------- Display preferences (BACI-68) ----------
+//
+// display.show_archived global toggle — when on, default lists / board
+// / kanban views include archived rows; when off (the default) they're
+// hidden. The CLI's per-call --include-archived flag overrides this
+// setting for one call; the desktop / web UIs have no per-call knob,
+// so the setting is the single source of truth here.
+
+export type DisplayPreferencesDTO = { showArchived: boolean };
+
+export async function getDisplayPreferences(): Promise<DisplayPreferencesDTO> {
+  const res = await call<{ show_archived: boolean }>('/settings/display-preferences');
+  return { showArchived: res.show_archived };
+}
+
+export async function setDisplayPreferences(showArchived: boolean): Promise<DisplayPreferencesDTO> {
+  const res = await call<{ show_archived: boolean }>('/settings/display-preferences', {
+    method: 'PUT',
+    body: { show_archived: showArchived },
+  });
+  return { showArchived: res.show_archived };
+}
+
+// ---------- BACI-68 per-entity archive verbs ----------
+
+export async function archiveIssue(prefix: string, key: string): Promise<unknown> {
+  return call(`/repos/${encodeURIComponent(prefix)}/issues/${encodeURIComponent(key)}/archive`, { method: 'POST' });
+}
+
+export async function unarchiveIssue(prefix: string, key: string): Promise<unknown> {
+  return call(`/repos/${encodeURIComponent(prefix)}/issues/${encodeURIComponent(key)}/unarchive`, { method: 'POST' });
+}
+
+export async function archiveFeature(prefix: string, slug: string): Promise<unknown> {
+  return call(`/repos/${encodeURIComponent(prefix)}/features/${encodeURIComponent(slug)}/archive`, { method: 'POST' });
+}
+
+export async function unarchiveFeature(prefix: string, slug: string): Promise<unknown> {
+  return call(`/repos/${encodeURIComponent(prefix)}/features/${encodeURIComponent(slug)}/unarchive`, { method: 'POST' });
+}
+
+export async function archiveDocument(prefix: string, filename: string): Promise<unknown> {
+  return call(`/repos/${encodeURIComponent(prefix)}/documents/${encodeURIComponent(filename)}/archive`, { method: 'POST' });
+}
+
+export async function unarchiveDocument(prefix: string, filename: string): Promise<unknown> {
+  return call(`/repos/${encodeURIComponent(prefix)}/documents/${encodeURIComponent(filename)}/unarchive`, { method: 'POST' });
 }
 
 // ---------- Leader election (BACI-50) ----------

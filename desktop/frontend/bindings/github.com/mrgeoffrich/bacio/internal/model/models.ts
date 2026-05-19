@@ -9,6 +9,112 @@ import { Create as $Create } from "@wailsio/runtime";
 // @ts-ignore: Unused imports
 import * as time$0 from "../../../../../time/models.js";
 
+export class Issue {
+    "id": number;
+    "uuid": string;
+    "repo_id": number;
+    "number": number;
+
+    /**
+     * e.g. "MINI-42"
+     */
+    "key": string;
+    "feature_id"?: number | null;
+    "feature_slug"?: string;
+    "title": string;
+    "description"?: string;
+    "state": State;
+    "assignee"?: string;
+
+    /**
+     * WaitingForClaim is true between a dispatch being queued against
+     * this issue and an agent recording an open claim on it. Ephemeral
+     * runtime state — set by store.AddDispatch, cleared by
+     * store.AddAgentClaim / store.CancelDispatch. No omitempty: the
+     * field must be visible (including when false) in JSON output.
+     */
+    "waiting_for_claim": boolean;
+
+    /**
+     * Taken is true iff this issue currently has at least one open
+     * (unreleased) agent claim held by an alive session — the derived
+     * "an agent is actively holding this" signal also surfaced on the
+     * show/brief views. Computed at read time via the same join the
+     * desktop's ListOpenClaims runs, so list responses don't need a
+     * second round trip. No omitempty: the field must be visible
+     * (including when false) in JSON output.
+     */
+    "taken": boolean;
+    "tags": string[];
+
+    /**
+     * ArchivedAt (BACI-68) is non-nil iff the issue is archived —
+     * hidden from default lists / boards, but the row and its audit
+     * history are retained. The auto-sweep stamps it for issues older
+     * than 4 days in a terminal state; manual `bacio issue archive` /
+     * `unarchive` writes or clears it on demand. Reopening an archived
+     * issue (state -> todo/...) does NOT auto-unarchive — the user must
+     * unarchive explicitly.
+     */
+    "archived_at"?: time$0.Time | null;
+    "created_at": time$0.Time;
+    "updated_at": time$0.Time;
+
+    /** Creates a new Issue instance. */
+    constructor($$source: Partial<Issue> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = 0;
+        }
+        if (!("uuid" in $$source)) {
+            this["uuid"] = "";
+        }
+        if (!("repo_id" in $$source)) {
+            this["repo_id"] = 0;
+        }
+        if (!("number" in $$source)) {
+            this["number"] = 0;
+        }
+        if (!("key" in $$source)) {
+            this["key"] = "";
+        }
+        if (!("title" in $$source)) {
+            this["title"] = "";
+        }
+        if (!("state" in $$source)) {
+            this["state"] = State.$zero;
+        }
+        if (!("waiting_for_claim" in $$source)) {
+            this["waiting_for_claim"] = false;
+        }
+        if (!("taken" in $$source)) {
+            this["taken"] = false;
+        }
+        if (!("tags" in $$source)) {
+            this["tags"] = [];
+        }
+        if (!("created_at" in $$source)) {
+            this["created_at"] = null;
+        }
+        if (!("updated_at" in $$source)) {
+            this["updated_at"] = null;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new Issue instance from a string or object.
+     */
+    static createFrom($$source: any = {}): Issue {
+        const $$createField13_0 = $$createType0;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("tags" in $$parsedSource) {
+            $$parsedSource["tags"] = $$createField13_0($$parsedSource["tags"]);
+        }
+        return new Issue($$parsedSource as Partial<Issue>);
+    }
+}
+
 /**
  * QuestionAnswers maps question text -> answer. For a single-select
  * question the value is a string (an option label, or free-text
@@ -57,7 +163,7 @@ export class QuestionItem {
      * Creates a new QuestionItem instance from a string or object.
      */
     static createFrom($$source: any = {}): QuestionItem {
-        const $$createField3_0 = $$createType1;
+        const $$createField3_0 = $$createType2;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("options" in $$parsedSource) {
             $$parsedSource["options"] = $$createField3_0($$parsedSource["options"]);
@@ -119,7 +225,7 @@ export class QuestionPayload {
      * Creates a new QuestionPayload instance from a string or object.
      */
     static createFrom($$source: any = {}): QuestionPayload {
-        const $$createField0_0 = $$createType3;
+        const $$createField0_0 = $$createType4;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("questions" in $$parsedSource) {
             $$parsedSource["questions"] = $$createField0_0($$parsedSource["questions"]);
@@ -209,8 +315,8 @@ export class SessionQuestion {
      * Creates a new SessionQuestion instance from a string or object.
      */
     static createFrom($$source: any = {}): SessionQuestion {
-        const $$createField5_0 = $$createType4;
-        const $$createField6_0 = $$createType5;
+        const $$createField5_0 = $$createType5;
+        const $$createField6_0 = $$createType6;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("payload" in $$parsedSource) {
             $$parsedSource["payload"] = $$createField5_0($$parsedSource["payload"]);
@@ -222,16 +328,37 @@ export class SessionQuestion {
     }
 }
 
+export enum State {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    StateTodo = "todo",
+    StateInProgress = "in_progress",
+
+    /**
+     * StateNeedsAction parks an issue while an LLM agent is waiting on
+     * the user for input — the assignee stays, but the column signals
+     * that human attention (not more agent work) is the next step.
+     */
+    StateNeedsAction = "needs_action",
+    StateInReview = "in_review",
+    StateDone = "done",
+    StateCancelled = "cancelled",
+};
+
 // Private type creation functions
-const $$createType0 = QuestionOption.createFrom;
-const $$createType1 = $Create.Array($$createType0);
-const $$createType2 = QuestionItem.createFrom;
-const $$createType3 = $Create.Array($$createType2);
-const $$createType4 = QuestionPayload.createFrom;
-var $$createType5 = (function $$initCreateType5(...args: any[]): any {
-    if ($$createType5 === $$initCreateType5) {
-        $$createType5 = $$createType6;
+const $$createType0 = $Create.Array($Create.Any);
+const $$createType1 = QuestionOption.createFrom;
+const $$createType2 = $Create.Array($$createType1);
+const $$createType3 = QuestionItem.createFrom;
+const $$createType4 = $Create.Array($$createType3);
+const $$createType5 = QuestionPayload.createFrom;
+var $$createType6 = (function $$initCreateType6(...args: any[]): any {
+    if ($$createType6 === $$initCreateType6) {
+        $$createType6 = $$createType7;
     }
-    return $$createType5(...args);
+    return $$createType6(...args);
 });
-const $$createType6 = $Create.Map($Create.Any, $Create.Any);
+const $$createType7 = $Create.Map($Create.Any, $Create.Any);

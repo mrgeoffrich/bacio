@@ -41,6 +41,7 @@ func newDocCmd() *cobra.Command {
 		docAddCmd(), docUpsertCmd(), docListCmd(), docShowCmd(),
 		docEditCmd(), docRenameCmd(), docExportCmd(), docDownloadCmd(), docRmCmd(),
 		docLinkCmd(), docUnlinkCmd(),
+		docArchiveCmd(), docUnarchiveCmd(),
 	)
 	return cmd
 }
@@ -382,9 +383,10 @@ func upsertDocument(in *docInputs) error {
 
 func docListCmd() *cobra.Command {
 	var (
-		typeStr    string
-		repoPrefix string
-		allRepos   bool
+		typeStr         string
+		repoPrefix      string
+		allRepos        bool
+		includeArchived bool
 	)
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -402,7 +404,16 @@ func docListCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			docs, err := c.ListDocuments(context.Background(), repo, typeStr)
+			// BACI-68: archived docs are hidden by default. The per-call
+			// --include-archived flag forces them in; the
+			// display.show_archived setting also lifts the filter for
+			// every list call when on.
+			show := includeArchived
+			if !show {
+				v, _ := c.GetDisplayShowArchived(context.Background())
+				show = v
+			}
+			docs, err := c.ListDocuments(context.Background(), repo, typeStr, show)
 			if err != nil {
 				return err
 			}
@@ -412,6 +423,7 @@ func docListCmd() *cobra.Command {
 	cmd.Flags().StringVar(&typeStr, "type", "", "filter by type")
 	cmd.Flags().StringVar(&repoPrefix, "repo", "", "limit to a specific repo prefix; required when run inside a sync repo (or pass --all-repos)")
 	cmd.Flags().BoolVar(&allRepos, "all-repos", false, "list across all tracked repos (only meaningful inside a sync repo)")
+	cmd.Flags().BoolVar(&includeArchived, "include-archived", false, "include archived docs in the list (BACI-68); overrides the display.show_archived setting for this call")
 	return cmd
 }
 
@@ -877,4 +889,84 @@ type docDeletePreview struct {
 	Document     *model.Document `json:"document"`
 	WouldDelete  bool            `json:"would_delete"`
 	LinksRemoved int             `json:"links_removed"`
+}
+
+// docArchiveCmd / docUnarchiveCmd are the BACI-68 manual archive verbs
+// on the doc surface.
+func docArchiveCmd() *cobra.Command {
+	var rawInput string
+	cmd := &cobra.Command{
+		Use:   "archive [FILENAME]",
+		Short: "Archive a document (BACI-68) — hides it from default lists; links + content are kept",
+		Args:  cobra.RangeArgs(0, 1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runDocArchiveVerb(cmd, args, rawInput, true)
+		},
+	}
+	addInputFlag(cmd, &rawInput)
+	return cmd
+}
+
+func docUnarchiveCmd() *cobra.Command {
+	var rawInput string
+	cmd := &cobra.Command{
+		Use:   "unarchive [FILENAME]",
+		Short: "Unarchive a document (BACI-68) — clears archived_at",
+		Args:  cobra.RangeArgs(0, 1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runDocArchiveVerb(cmd, args, rawInput, false)
+		},
+	}
+	addInputFlag(cmd, &rawInput)
+	return cmd
+}
+
+func runDocArchiveVerb(cmd *cobra.Command, args []string, rawInput string, archive bool) error {
+	raw, err := parseJSONInput(cmd, args, rawInput)
+	if err != nil {
+		return err
+	}
+	var filename string
+	if raw != nil {
+		if archive {
+			in, _, err := inputio.DecodeStrict[inputs.DocArchiveInput](raw)
+			if err != nil {
+				return err
+			}
+			filename = in.Filename
+		} else {
+			in, _, err := inputio.DecodeStrict[inputs.DocUnarchiveInput](raw)
+			if err != nil {
+				return err
+			}
+			filename = in.Filename
+		}
+	} else {
+		if len(args) != 1 {
+			return fmt.Errorf("requires <FILENAME> positional or --json")
+		}
+		filename = args[0]
+	}
+	c, err := openClient()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	repo, err := resolveRepoC(c)
+	if err != nil {
+		return err
+	}
+	var updated *model.Document
+	if archive {
+		updated, err = c.ArchiveDocument(context.Background(), repo, filename, opts.dryRun)
+	} else {
+		updated, err = c.UnarchiveDocument(context.Background(), repo, filename, opts.dryRun)
+	}
+	if err != nil {
+		return err
+	}
+	if opts.dryRun {
+		return emitDryRun(updated)
+	}
+	return emit(updated)
 }

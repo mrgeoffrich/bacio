@@ -85,8 +85,11 @@ func placeholderTokens() string {
 }
 
 // renderSettingsList draws the stage-list base layout shared by the
-// native and wasm Settings views.
-func renderSettingsList(width, height int, stages []stageRow, cursor int, err error) string {
+// native and wasm Settings views. showArchived is the BACI-68 global
+// display toggle, surfaced as a one-line row above the templates so
+// the user can see — and (on the native build) toggle — it from the
+// same tab.
+func renderSettingsList(width, height int, stages []stageRow, cursor int, err error, showArchived bool) string {
 	innerWidth := width - 2
 	if innerWidth < 40 {
 		innerWidth = 40
@@ -107,6 +110,17 @@ func renderSettingsList(width, height int, stages []stageRow, cursor int, err er
 		Bold(true).Foreground(lipgloss.Color("231")).Background(colHeaderFocus).
 		Width(innerWidth).Padding(0, 1).
 		Render(fmt.Sprintf("Settings · Prompt templates · %d stages", len(stages)))
+
+	// BACI-68: one-line Display preferences row at the top of the
+	// list. Toggle (`T` on native) flips display.show_archived. The
+	// `[x]` checkbox keeps the wasm read-only stub legible too.
+	checkbox := "[ ]"
+	if showArchived {
+		checkbox = "[x]"
+	}
+	displayRow := lipgloss.NewStyle().Width(innerWidth).Padding(0, 1).
+		Render(checkbox + " Show archived items  " +
+			mutedStyle.Render("(T to toggle — archived issues, docs, features remain hidden by default)"))
 
 	var rows []string
 	for i, st := range stages {
@@ -145,7 +159,7 @@ func renderSettingsList(width, height int, stages []stageRow, cursor int, err er
 	hint := mutedStyle.Padding(0, 1).Render("Placeholders: " + placeholderTokens())
 	versionLine := mutedStyle.Padding(0, 1).Render("Bacio version: " + version.String())
 	body := lipgloss.JoinVertical(lipgloss.Left, rows...)
-	content := lipgloss.JoinVertical(lipgloss.Left, titleBar, "", body, "", hint, versionLine)
+	content := lipgloss.JoinVertical(lipgloss.Left, titleBar, "", displayRow, "", body, "", hint, versionLine)
 	return box.Render(content)
 }
 

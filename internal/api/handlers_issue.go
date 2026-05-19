@@ -21,6 +21,7 @@ func (d deps) handleIssuesList(w http.ResponseWriter, r *http.Request) {
 	f := store.IssueFilter{
 		RepoID:             &repo.ID,
 		IncludeDescription: withDesc == "true" || withDesc == "1",
+		IncludeArchived:    includeArchivedFromRequest(r, d.store),
 	}
 	if featureSlug := q.Get("feature"); featureSlug != "" {
 		feat, err := d.store.GetFeatureBySlug(repo.ID, featureSlug)

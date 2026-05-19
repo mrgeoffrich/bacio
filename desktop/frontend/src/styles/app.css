@@ -159,6 +159,15 @@ body { margin: 0; }
   cursor: not-allowed;
 }
 .mk-card.is-waiting:hover { border-color: var(--border-focus); transform: none; }
+/* .mk-card.is-archived (BACI-68) — surfaces when display.show_archived
+   is on. Visibly muted so a buried-but-shown card is clearly distinct
+   from a live one. Still clickable / draggable so the user can
+   unarchive it via the action menu or the issue workspace. */
+.mk-card.is-archived {
+  opacity: 0.55;
+  border-style: dashed;
+}
+.mk-card.is-archived:hover { opacity: 0.85; }
 .mk-card-spinner {
   width: 13px; height: 13px; margin-left: auto; flex: none;
   border: 2px solid var(--border-2);

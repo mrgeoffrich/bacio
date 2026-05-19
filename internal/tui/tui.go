@@ -138,6 +138,19 @@ func idlePingTick() tea.Cmd {
 	})
 }
 
+// archiveSweepTickMsg fires on the BACI-68 archive-sweep cadence
+// (store.ArchiveSweepInterval, currently 1h). Same leader-gated
+// shell-level pattern as the other tickers so a TUI-only deployment
+// still gets the auto-archive sweep that desktop / api receive from
+// the controller goroutine.
+type archiveSweepTickMsg time.Time
+
+func archiveSweepTick() tea.Cmd {
+	return tea.Tick(store.ArchiveSweepInterval, func(t time.Time) tea.Msg {
+		return archiveSweepTickMsg(t)
+	})
+}
+
 // Run boots the Bubble Tea program in alt-screen mode and blocks until
 // quit. The store is owned by the caller. It constructs a leader.Elector
 // for the process and releases the lease on graceful exit.
@@ -269,6 +282,10 @@ func (m *Model) Init() tea.Cmd {
 		// nothing — any candidates were already candidates a moment ago).
 		// The first tick runs IdlePingTickInterval (~30s) after Init.
 		cmds = append(cmds, idlePingTick())
+		// Seed the BACI-68 archive-sweep cadence. Hourly; first tick
+		// runs ArchiveSweepInterval after Init. Same skip-the-immediate
+		// pattern as the other ticks.
+		cmds = append(cmds, archiveSweepTick())
 	}
 	if len(cmds) == 0 {
 		return nil
@@ -326,6 +343,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, idlePingTick()
+	case archiveSweepTickMsg:
+		// BACI-68 archive-sweep tick: runs the three-pass sweep
+		// (terminal-issue-age → empty-feature → orphan-document) on
+		// the leader. Same leader-gating helper the controller
+		// goroutine uses so TUI and desktop/api stay in lockstep.
+		controller.ArchiveSweepIfLeader(m.store, m.elector, nil)
+		if m.elector == nil {
+			return m, nil
+		}
+		return m, archiveSweepTick()
 	case openDocMsg:
 		// Cross-tab: hand the filename to the Documents tab and focus
 		// it. Remember where we came from so esc on the doc overlay

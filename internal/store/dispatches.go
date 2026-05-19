@@ -369,11 +369,19 @@ func (s *Store) WaitingDispatchForIssue(repoID, issueID int64) (*model.AgentDisp
 // for a repo, in lifecycle-friendly order (mode ASC) so the matcher's
 // per-tick iteration is deterministic across runs. An empty result is
 // the "nothing waiting" case.
+//
+// Dispatches whose issue_id has since been archived (BACI-68) are
+// excluded — the issue's been manually hidden from the board, so the
+// matcher must not silently bind a fresh agent to it. AutoDispatchIssue
+// already refuses to create such queued rows, but a row created before
+// the archive (or a hand-inserted one) still needs the guard.
 func (s *Store) ListQueuedModesByRepo(repoID int64) ([]model.DispatchMode, error) {
 	rows, err := s.DB.Query(`
-		SELECT DISTINCT mode FROM agent_dispatches
-		 WHERE repo_id = ? AND status = 'queued'
-		 ORDER BY mode ASC`, repoID)
+		SELECT DISTINCT d.mode FROM agent_dispatches d
+		 LEFT JOIN issues i ON d.issue_id = i.id
+		 WHERE d.repo_id = ? AND d.status = 'queued'
+		   AND (d.issue_id IS NULL OR i.archived_at IS NULL)
+		 ORDER BY d.mode ASC`, repoID)
 	if err != nil {
 		return nil, err
 	}
@@ -396,8 +404,12 @@ func (s *Store) ListQueuedModesByRepo(repoID int64) ([]model.DispatchMode, error
 // tiebreaks so two dispatches inserted in the same second pick the
 // numerically older one first.
 func (s *Store) ListQueuedByRepoMode(repoID int64, mode model.DispatchMode) ([]*model.AgentDispatch, error) {
+	// BACI-68: skip queued dispatches whose target issue has been
+	// archived. Same rationale as ListQueuedModesByRepo's guard. The
+	// `i` alias is already joined in dispatchSelect; reuse it.
 	rows, err := s.DB.Query(dispatchSelect+`
 		WHERE d.repo_id = ? AND d.mode = ? AND d.status = 'queued'
+		  AND (d.issue_id IS NULL OR i.archived_at IS NULL)
 		ORDER BY d.created_at ASC, d.id ASC`, repoID, string(mode))
 	if err != nil {
 		return nil, err

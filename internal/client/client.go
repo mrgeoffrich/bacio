@@ -103,7 +103,10 @@ type Client interface {
 	DeleteRepo(ctx context.Context, prefix, confirm string, dryRun bool) (deletedRepo *model.Repo, preview *RepoDeletePreview, err error)
 
 	// ----- Features -----
-	ListFeatures(ctx context.Context, repo *model.Repo, withDescription bool) ([]*model.Feature, error)
+	// ListFeatures returns the features in repo. Archived features
+	// (BACI-68) are hidden by default — pass includeArchived=true to
+	// inflate.
+	ListFeatures(ctx context.Context, repo *model.Repo, withDescription, includeArchived bool) ([]*model.Feature, error)
 	GetFeatureBySlug(ctx context.Context, repo *model.Repo, slug string) (*model.Feature, error)
 	GetFeatureByID(ctx context.Context, repo *model.Repo, id int64) (*model.Feature, error)
 	CreateFeature(ctx context.Context, repo *model.Repo, in inputs.FeatureAddInput, dryRun bool) (*model.Feature, error)
@@ -111,6 +114,10 @@ type Client interface {
 	DeleteFeature(ctx context.Context, repo *model.Repo, slug string, dryRun bool) (deletedFeature *model.Feature, preview *FeatureDeletePreview, err error)
 	ShowFeature(ctx context.Context, repo *model.Repo, slug string) (*FeatureView, error)
 	PlanFeature(ctx context.Context, repo *model.Repo, slug string) (*PlanView, error)
+	// ArchiveFeature / UnarchiveFeature stamp / clear archived_at on
+	// the feature row (BACI-68). Same semantics as ArchiveIssue.
+	ArchiveFeature(ctx context.Context, repo *model.Repo, slug string, dryRun bool) (*model.Feature, error)
+	UnarchiveFeature(ctx context.Context, repo *model.Repo, slug string, dryRun bool) (*model.Feature, error)
 
 	// ----- Issues -----
 	// ResolveIssueKey converts a possibly-bare key ("42" or "MINI-42")
@@ -129,6 +136,13 @@ type Client interface {
 	DeleteIssue(ctx context.Context, repo *model.Repo, key string, dryRun bool) (deletedIssue *model.Issue, preview *IssueDeletePreview, err error)
 	PeekNextIssue(ctx context.Context, repo *model.Repo, slug string) (*model.Issue, error)
 	ClaimNextIssue(ctx context.Context, repo *model.Repo, slug string, dryRun bool) (*model.Issue, error)
+	// ArchiveIssue / UnarchiveIssue stamp / clear archived_at (BACI-68).
+	// Archive is sticky — reopening an archived issue does NOT
+	// auto-unarchive it. Idempotent: archiving an already-archived row
+	// is a no-op. Records an audit row (issue.archive /
+	// issue.unarchive) under the actor on --user.
+	ArchiveIssue(ctx context.Context, repo *model.Repo, key string, dryRun bool) (*model.Issue, error)
+	UnarchiveIssue(ctx context.Context, repo *model.Repo, key string, dryRun bool) (*model.Issue, error)
 
 	// ----- Comments / relations / PRs / tags -----
 	ListComments(ctx context.Context, repo *model.Repo, key string) ([]*model.Comment, error)
@@ -145,7 +159,10 @@ type Client interface {
 	RemoveTags(ctx context.Context, repo *model.Repo, key string, tags []string, dryRun bool) (*model.Issue, error)
 
 	// ----- Documents -----
-	ListDocuments(ctx context.Context, repo *model.Repo, typeStr string) ([]*model.Document, error)
+	// ListDocuments returns the docs in repo, optionally filtered to a
+	// single type. archived docs are hidden by default — pass
+	// includeArchived=true to inflate (BACI-68).
+	ListDocuments(ctx context.Context, repo *model.Repo, typeStr string, includeArchived bool) ([]*model.Document, error)
 	ShowDocument(ctx context.Context, repo *model.Repo, filename string, withContent bool) (*DocView, error)
 	GetDocumentRaw(ctx context.Context, repo *model.Repo, filename string) (*model.Document, error)
 	DownloadDocument(ctx context.Context, repo *model.Repo, filename string) (body []byte, err error)
@@ -156,6 +173,19 @@ type Client interface {
 	DeleteDocument(ctx context.Context, repo *model.Repo, filename string, dryRun bool) (deletedDocument *model.Document, preview *DocumentDeletePreview, err error)
 	LinkDocument(ctx context.Context, repo *model.Repo, in inputs.DocLinkInput, dryRun bool) (*model.DocumentLink, error)
 	UnlinkDocument(ctx context.Context, repo *model.Repo, in inputs.DocUnlinkInput, dryRun bool) (preview *DocumentUnlinkPreview, removed int64, err error)
+	// ArchiveDocument / UnarchiveDocument stamp / clear archived_at
+	// on the document row (BACI-68). Same semantics as ArchiveIssue.
+	ArchiveDocument(ctx context.Context, repo *model.Repo, filename string, dryRun bool) (*model.Document, error)
+	UnarchiveDocument(ctx context.Context, repo *model.Repo, filename string, dryRun bool) (*model.Document, error)
+	// ArchiveSweep runs the BACI-68 archive sweep on demand — same
+	// three SQL passes the leader-elected Controller runs hourly.
+	// Local-only (mechanical janitor work; no remote surface).
+	// Returns the per-pass counts.
+	ArchiveSweep(ctx context.Context, dryRun bool) (store.ArchiveSweepResult, error)
+	// GetDisplayShowArchived / SetDisplayShowArchived expose the
+	// BACI-68 display.show_archived global toggle. Local-only.
+	GetDisplayShowArchived(ctx context.Context) (bool, error)
+	SetDisplayShowArchived(ctx context.Context, value, dryRun bool) (bool, error)
 
 	// ----- History -----
 	// ListHistory queries the audit log. When repo is non-nil, results
@@ -474,6 +504,10 @@ type IssueFilter struct {
 	States             []model.State
 	Tags               []string
 	IncludeDescription bool
+	// IncludeArchived (BACI-68) — when true, the list includes rows
+	// with archived_at IS NOT NULL. Defaults to false; archived rows
+	// are hidden from default lists / board / kanban / API JSON.
+	IncludeArchived bool
 }
 
 // IssueEdit is the parameter bundle for UpdateIssue. Pointer-of-pointer

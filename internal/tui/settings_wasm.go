@@ -89,5 +89,6 @@ func (s *settingsView) View(width, height int) string {
 	if width == 0 || height == 0 {
 		return ""
 	}
-	return renderSettingsList(width, height, s.stages, s.cursor, s.err)
+	showArchived, _ := s.store.GetDisplayShowArchived()
+	return renderSettingsList(width, height, s.stages, s.cursor, s.err, showArchived)
 }

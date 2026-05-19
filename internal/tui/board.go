@@ -164,6 +164,15 @@ type boardView struct {
 	openQuestions map[string][]*model.SessionQuestion
 	questionOlay  *questionOverlay
 
+	// BACI-68: when `a` is pressed on a non-terminal issue we don't
+	// archive immediately — we set this confirm flag and surface a
+	// y/n prompt in the help footer. A subsequent `y` archives; any
+	// other key clears the flag without a write. The id field gates
+	// the confirmation to the exact card that triggered it so a
+	// scroll-and-confirm doesn't archive a different row by mistake.
+	confirmArchive   bool
+	confirmArchiveID int64
+
 	mdCache mdCache // see internal/tui/markdown.go
 
 	// commentMD caches glamour-rendered comment bodies keyed by
@@ -269,7 +278,14 @@ func (b *boardView) persistHidden() {
 }
 
 func (b *boardView) reload() error {
-	issues, err := b.store.ListIssues(store.IssueFilter{RepoID: &b.repo.ID})
+	// BACI-68: respect the global display.show_archived toggle so an
+	// archived row only surfaces here when the user has explicitly
+	// asked to see them. Default-off keeps the column the user knows.
+	includeArchived, _ := b.store.GetDisplayShowArchived()
+	issues, err := b.store.ListIssues(store.IssueFilter{
+		RepoID:          &b.repo.ID,
+		IncludeArchived: includeArchived,
+	})
 	if err != nil {
 		return err
 	}
@@ -527,7 +543,10 @@ func (b *boardView) Help() string {
 		}
 		return "tab next pane · j/k scroll · g/G top/bottom · esc close"
 	}
-	return "h/l cols · j/k cards · enter open · x send · X cancel · ? answer · c columns · f features · H hide col · d detail · r reload · q quit"
+	if b.confirmArchive && b.selected != nil && b.selected.ID == b.confirmArchiveID {
+		return fmt.Sprintf("archive %s (%s)? y to confirm · n to cancel", b.selected.Key, b.selected.State)
+	}
+	return "h/l cols · j/k cards · enter open · x send · X cancel · a archive · A unarchive · ? answer · c columns · f features · H hide col · d detail · r reload · q quit"
 }
 
 func (b *boardView) Update(msg tea.Msg) tea.Cmd {
@@ -699,9 +718,96 @@ func (b *boardView) Update(msg tea.Msg) tea.Cmd {
 				b.questionOlay.reset(qs[0])
 			}
 		}
+	case "a":
+		// BACI-68: archive the focused card. Already-archived rows
+		// are a no-op (unarchive via `A`). Non-terminal issues (todo /
+		// in_progress / in_review) arm the confirm prompt so a
+		// stray keystroke can't silently hide active work.
+		if b.selected != nil {
+			b.tryArchive(b.selected)
+		}
+	case "y", "Y":
+		if b.confirmArchive && b.selected != nil && b.selected.ID == b.confirmArchiveID {
+			b.confirmArchive = false
+			b.confirmArchiveID = 0
+			b.doArchive(b.selected)
+		}
+	case "n", "N":
+		if b.confirmArchive {
+			b.confirmArchive = false
+			b.confirmArchiveID = 0
+		}
+	case "A":
+		// BACI-68: unarchive the focused card. No-op when the card
+		// isn't archived.
+		if b.selected != nil && b.selected.ArchivedAt != nil {
+			b.doUnarchive(b.selected)
+		}
+	}
+	// Any other key cancels a pending archive confirm.
+	if b.confirmArchive {
+		s := key.String()
+		if s != "a" && s != "y" && s != "Y" && s != "n" && s != "N" {
+			b.confirmArchive = false
+			b.confirmArchiveID = 0
+		}
 	}
 	b.refreshSelection()
 	return nil
+}
+
+// tryArchive routes the `a` keystroke: already-archived → no-op,
+// terminal state (done/cancelled) → archive immediately, non-terminal
+// → arm the confirm prompt. The reviewer-asked-for guard so a stray
+// `a` on an in_progress card doesn't silently hide active work.
+func (b *boardView) tryArchive(iss *model.Issue) {
+	if iss.ArchivedAt != nil {
+		return
+	}
+	if iss.State == model.StateDone || iss.State == model.StateCancelled {
+		b.doArchive(iss)
+		return
+	}
+	b.confirmArchive = true
+	b.confirmArchiveID = iss.ID
+}
+
+func (b *boardView) doArchive(iss *model.Issue) {
+	if err := b.store.SetIssueArchived(iss.ID, true); err != nil {
+		b.err = err
+		return
+	}
+	b.recordArchiveOp(iss, "issue.archive")
+	if err := b.reload(); err != nil {
+		b.err = err
+		return
+	}
+	b.err = nil
+}
+
+func (b *boardView) doUnarchive(iss *model.Issue) {
+	if err := b.store.SetIssueArchived(iss.ID, false); err != nil {
+		b.err = err
+		return
+	}
+	b.recordArchiveOp(iss, "issue.unarchive")
+	if err := b.reload(); err != nil {
+		b.err = err
+		return
+	}
+	b.err = nil
+}
+
+func (b *boardView) recordArchiveOp(iss *model.Issue, op string) {
+	recordTUIOp(b.store, model.HistoryEntry{
+		Actor:       b.actor,
+		RepoID:      &iss.RepoID,
+		RepoPrefix:  b.repo.Prefix,
+		Op:          op,
+		Kind:        "issue",
+		TargetID:    &iss.ID,
+		TargetLabel: iss.Key,
+	})
 }
 
 // updateOverlay handles input while the fullscreen card overlay is up.
@@ -1038,6 +1144,12 @@ func (b *boardView) renderColumn(st model.State, focused bool, width, height int
 		// dispatch is also refused on it. Bold survives the selected
 		// state (selStyle.Bold) so the signal doesn't vanish on focus.
 		isTaken := b.takenIssues[iss.ID]
+		// BACI-68: an archived card rendered as Faint so it reads as
+		// muted background context. The toggle has to be on for this
+		// branch to even reach reload (reload's IncludeArchived filter
+		// drops archived rows otherwise) — once visible, the styling
+		// makes the lifecycle state legible at a glance.
+		isArchived := iss.ArchivedAt != nil
 		// A waiting card (dispatch queued, not yet claimed) shows an
 		// animated spinner where the opening bracket would be. `taken`
 		// wins: once an agent claims, waiting_for_claim is cleared in the
@@ -1046,6 +1158,9 @@ func (b *boardView) renderColumn(st model.State, focused bool, width, height int
 		styler := cardStyle
 		if isTaken {
 			styler = cardStyle.Bold(true)
+		}
+		if isArchived {
+			styler = styler.Faint(true)
 		}
 		// keyRender colours the [ and ] in the feature colour while
 		// leaving the number itself in keyStyle's lavender. That's the

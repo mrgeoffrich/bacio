@@ -461,6 +461,30 @@ func migrate(db *sql.DB) error {
 	if err := backfillDispatchPreamble(db); err != nil {
 		return fmt.Errorf("backfill dispatch preamble: %w", err)
 	}
+	// BACI-68: add archived_at columns + indexes to issues, features,
+	// documents on older DBs. The CREATE TABLE declarations in
+	// schema.sql carry the column for fresh DBs; this ALTER + index
+	// pair brings older DBs up to date. NULL = visible, non-NULL =
+	// archived (the auto-sweep stamps CURRENT_TIMESTAMP; manual archive
+	// / unarchive verbs read or write it). Index lives here (not in
+	// schema.sql) for the same reason as the other late-bound indexes:
+	// schema.sql runs before migrate() and would error on a DB without
+	// the column.
+	for _, table := range []string{"issues", "features", "documents"} {
+		has, err := columnExists(db, table, "archived_at")
+		if err != nil {
+			return err
+		}
+		if !has {
+			if _, err := db.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN archived_at DATETIME`, table)); err != nil {
+				return fmt.Errorf("add archived_at to %s: %w", table, err)
+			}
+		}
+		idx := fmt.Sprintf("idx_%s_archived_at", table)
+		if _, err := db.Exec(fmt.Sprintf(`CREATE INDEX IF NOT EXISTS %s ON %s(archived_at)`, idx, table)); err != nil {
+			return fmt.Errorf("create %s: %w", idx, err)
+		}
+	}
 	return nil
 }
 

@@ -55,7 +55,11 @@ func (d *DocService) ListDocs(repoPrefix, typeFilter string) ([]DocSummary, erro
 	if err != nil {
 		return nil, err
 	}
-	docs, err := d.client.ListDocuments(ctx, repo, typeFilter)
+	// BACI-68: archived docs follow the display.show_archived global
+	// setting. When on, the Docs view surfaces archived rows rendered
+	// visibly muted; when off (the default) they're hidden.
+	showArchived, _ := d.client.GetDisplayShowArchived(ctx)
+	docs, err := d.client.ListDocuments(ctx, repo, typeFilter, showArchived)
 	if err != nil {
 		return nil, err
 	}

@@ -26,10 +26,19 @@ CREATE TABLE IF NOT EXISTS features (
     slug        TEXT    NOT NULL,
     title       TEXT    NOT NULL,
     description TEXT    NOT NULL DEFAULT '',
+    -- archived_at (BACI-68) — same semantics as on issues. The auto-sweep
+    -- archives a feature when every child issue is archived (and the
+    -- feature had at least one child); manual `bacio feature archive` /
+    -- `unarchive` writes or clears it on demand.
+    archived_at DATETIME,
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(repo_id, slug)
 );
+
+-- idx_features_archived_at is created in migrate() so it works on
+-- databases that pre-date the archived_at column (BACI-68). Same
+-- pattern as idx_issues_assignee below.
 
 CREATE TABLE IF NOT EXISTS issues (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,6 +52,18 @@ CREATE TABLE IF NOT EXISTS issues (
                   ('todo','in_progress','needs_action','in_review','done','cancelled')),
     assignee    TEXT    NOT NULL DEFAULT '',
     waiting_for_claim INTEGER NOT NULL DEFAULT 0,
+    -- archived_at (BACI-68) doubles as the boolean "hidden from default
+    -- views" flag and the audit timestamp of when the row was hidden.
+    -- NULL = visible; non-NULL = archived. The auto-sweep stamps it with
+    -- CURRENT_TIMESTAMP for issues older than 4 days in a terminal
+    -- state; manual `bacio issue archive` / `unarchive` writes or clears
+    -- it on demand. Reopening an archived issue (state -> todo/...) does
+    -- NOT auto-unarchive — the user must unarchive explicitly. List read
+    -- paths filter `archived_at IS NULL` by default; single-item show /
+    -- brief always returns the row regardless. The display toggle
+    -- (`display.show_archived`) and the per-call `--include-archived`
+    -- flag opt in to seeing archived rows.
+    archived_at DATETIME,
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(repo_id, number)
@@ -50,9 +71,10 @@ CREATE TABLE IF NOT EXISTS issues (
 
 CREATE INDEX IF NOT EXISTS idx_issues_state ON issues(state);
 CREATE INDEX IF NOT EXISTS idx_issues_feature ON issues(feature_id);
--- idx_issues_assignee is created in migrate() so it works on databases that
--- pre-date the assignee column. The ALTER ADD COLUMN must run before the
--- index can reference it.
+-- idx_issues_archived_at (BACI-68) and idx_issues_assignee are created
+-- in migrate() so they work on databases that pre-date their referenced
+-- columns. The ALTER ADD COLUMN must run before the index can reference
+-- it; schema.sql runs before migrate() so the index can't live here.
 
 CREATE TABLE IF NOT EXISTS comments (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -113,12 +135,20 @@ CREATE TABLE IF NOT EXISTS documents (
     -- was created with an explicit filename. Used by `bacio doc export --to-path`
     -- to materialise the doc back to its canonical location.
     source_path TEXT    NOT NULL DEFAULT '',
+    -- archived_at (BACI-68) — same semantics as on issues. The auto-sweep
+    -- archives a document when every linked parent (issue and/or
+    -- feature) is archived (and the doc had at least one link); docs
+    -- with zero links are NOT orphans and are left alone. Manual
+    -- `bacio doc archive` / `unarchive` writes or clears it on demand.
+    archived_at DATETIME,
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(repo_id, filename)
 );
 
 CREATE INDEX IF NOT EXISTS idx_documents_type ON documents(type);
+-- idx_documents_archived_at is created in migrate() — same reason as
+-- idx_issues_archived_at above (BACI-68).
 
 CREATE TABLE IF NOT EXISTS document_links (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -11,10 +11,13 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/model"
 )
 
-func (c *remoteClient) ListFeatures(ctx context.Context, repo *model.Repo, withDescription bool) ([]*model.Feature, error) {
+func (c *remoteClient) ListFeatures(ctx context.Context, repo *model.Repo, withDescription, includeArchived bool) ([]*model.Feature, error) {
 	q := url.Values{}
 	if withDescription {
 		q.Set("with_description", "true")
+	}
+	if includeArchived {
+		q.Set("include_archived", "true")
 	}
 	var out []*model.Feature
 	if err := c.do(ctx, http.MethodGet, "/repos/"+repo.Prefix+"/features", q, nil, &out); err != nil {
@@ -116,3 +119,29 @@ func (c *remoteClient) PlanFeature(ctx context.Context, repo *model.Repo, slug s
 // strInt is a tiny helper so callers can inline url.Values without
 // importing strconv at every call site.
 func strInt(n int64) string { return strconv.FormatInt(n, 10) }
+
+// ArchiveFeature (BACI-68) — POST /repos/{prefix}/features/{slug}/archive.
+func (c *remoteClient) ArchiveFeature(ctx context.Context, repo *model.Repo, slug string, dryRun bool) (*model.Feature, error) {
+	return c.archiveFeature(ctx, repo, slug, true, dryRun)
+}
+
+// UnarchiveFeature (BACI-68) — POST /repos/{prefix}/features/{slug}/unarchive.
+func (c *remoteClient) UnarchiveFeature(ctx context.Context, repo *model.Repo, slug string, dryRun bool) (*model.Feature, error) {
+	return c.archiveFeature(ctx, repo, slug, false, dryRun)
+}
+
+func (c *remoteClient) archiveFeature(ctx context.Context, repo *model.Repo, slug string, archive, dryRun bool) (*model.Feature, error) {
+	q := url.Values{}
+	if dryRun {
+		q.Set("dry_run", "true")
+	}
+	verb := "archive"
+	if !archive {
+		verb = "unarchive"
+	}
+	var out model.Feature
+	if err := c.do(ctx, http.MethodPost, "/repos/"+repo.Prefix+"/features/"+slug+"/"+verb, q, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}

@@ -49,12 +49,16 @@ type ParsedRepo struct {
 
 // ParsedFeature is the on-disk shape of feature.yaml.
 type ParsedFeature struct {
-	UUID            string    `yaml:"uuid" json:"uuid"`
-	Slug            string    `yaml:"slug" json:"slug"`
-	Title           string    `yaml:"title" json:"title"`
-	DescriptionHash string    `yaml:"description_hash" json:"description_hash"`
-	CreatedAt       time.Time `yaml:"created_at" json:"created_at"`
-	UpdatedAt       time.Time `yaml:"updated_at" json:"updated_at"`
+	UUID            string     `yaml:"uuid" json:"uuid"`
+	Slug            string     `yaml:"slug" json:"slug"`
+	Title           string     `yaml:"title" json:"title"`
+	DescriptionHash string     `yaml:"description_hash" json:"description_hash"`
+	CreatedAt       time.Time  `yaml:"created_at" json:"created_at"`
+	UpdatedAt       time.Time  `yaml:"updated_at" json:"updated_at"`
+	// ArchivedAt round-trips the BACI-68 archive flag. Absent on disk
+	// when the feature is live; present (RFC3339 UTC) when archived.
+	// Pointer so omitempty actually omits the key on emit.
+	ArchivedAt *time.Time `yaml:"archived_at,omitempty" json:"archived_at,omitempty"`
 }
 
 // ParsedRef is a {label, uuid} cross-reference. Both fields are
@@ -89,6 +93,8 @@ type ParsedIssue struct {
 	DescriptionHash string          `yaml:"description_hash" json:"description_hash"`
 	CreatedAt       time.Time       `yaml:"created_at" json:"created_at"`
 	UpdatedAt       time.Time       `yaml:"updated_at" json:"updated_at"`
+	// ArchivedAt round-trips the BACI-68 archive flag. See ParsedFeature.
+	ArchivedAt *time.Time `yaml:"archived_at,omitempty" json:"archived_at,omitempty"`
 }
 
 // ParsedComment is the on-disk shape of a comment .yaml file.
@@ -116,6 +122,8 @@ type ParsedDocument struct {
 	ContentHash string          `yaml:"content_hash" json:"content_hash"`
 	CreatedAt   time.Time       `yaml:"created_at" json:"created_at"`
 	UpdatedAt   time.Time       `yaml:"updated_at" json:"updated_at"`
+	// ArchivedAt round-trips the BACI-68 archive flag. See ParsedFeature.
+	ArchivedAt *time.Time `yaml:"archived_at,omitempty" json:"archived_at,omitempty"`
 }
 
 // ParsedRedirect is one entry in redirects.yaml. The file is a

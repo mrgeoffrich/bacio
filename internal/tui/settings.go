@@ -246,6 +246,20 @@ func (s *settingsView) Update(msg tea.Msg) tea.Cmd {
 		s.openRestoreConfirm()
 	case "ctrl+r":
 		s.reload()
+	case "T":
+		// BACI-68: toggle display.show_archived from the Settings tab.
+		// Same audit shape as the REST + CLI paths (Kind=app_setting,
+		// Details=show_archived=<bool>) so `bacio history --kind
+		// app_setting` returns a consistent stream regardless of which
+		// surface flipped the bit.
+		cur, _ := s.store.GetDisplayShowArchived()
+		next := !cur
+		if err := s.store.SetDisplayShowArchived(next); err != nil {
+			s.err = err
+			return nil
+		}
+		s.recordSettingOp("display.update", "display.show_archived",
+			fmt.Sprintf("show_archived=%t", next))
 	}
 	return nil
 }
@@ -786,7 +800,8 @@ func (s *settingsView) View(width, height int) string {
 			"Restore missing built-in templates from the embedded defaults?",
 			"y to restore · n to cancel · esc to cancel")
 	}
-	return renderSettingsList(width, height, s.stages, s.cursor, s.err)
+	showArchived, _ := s.store.GetDisplayShowArchived()
+	return renderSettingsList(width, height, s.stages, s.cursor, s.err, showArchived)
 }
 
 func (s *settingsView) viewEditor(width, height int) string {

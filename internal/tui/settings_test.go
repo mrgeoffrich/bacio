@@ -39,6 +39,46 @@ func hasHistoryOp(t *testing.T, s *store.Store, op string) bool {
 	return len(rows) > 0
 }
 
+// TestSettingsToggleShowArchived — BACI-68 Settings-tab toggle.
+// Pressing `T` flips display.show_archived, persists it, and records
+// the same audit-row shape (kind=app_setting, details=show_archived=
+// <bool>) the CLI + REST paths use.
+func TestSettingsToggleShowArchived(t *testing.T) {
+	s, repo := settingsTestRepo(t)
+	sv := newSettingsView(s, repo)
+
+	if got, _ := s.GetDisplayShowArchived(); got {
+		t.Fatal("default show_archived must be false")
+	}
+	sv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("T")})
+	got, err := s.GetDisplayShowArchived()
+	if err != nil {
+		t.Fatalf("read setting: %v", err)
+	}
+	if !got {
+		t.Fatal("T should have flipped show_archived to true")
+	}
+	rows, err := s.ListHistory(store.HistoryFilter{Op: "display.update", Limit: 5})
+	if err != nil {
+		t.Fatalf("list history: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected one display.update row, got %d", len(rows))
+	}
+	if rows[0].Kind != "app_setting" {
+		t.Errorf("kind = %q, want app_setting", rows[0].Kind)
+	}
+	if rows[0].Details != "show_archived=true" {
+		t.Errorf("details = %q, want show_archived=true", rows[0].Details)
+	}
+	// Toggle back.
+	sv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("T")})
+	got, _ = s.GetDisplayShowArchived()
+	if got {
+		t.Fatal("T should have flipped show_archived back to false")
+	}
+}
+
 // TestSettingsLoadsAllStages: the Settings view loads every registered
 // template (the seeded built-ins on a fresh store) in stable iteration
 // order with its effective template body.

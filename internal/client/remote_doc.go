@@ -10,10 +10,13 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
 
-func (c *remoteClient) ListDocuments(ctx context.Context, repo *model.Repo, typeStr string) ([]*model.Document, error) {
+func (c *remoteClient) ListDocuments(ctx context.Context, repo *model.Repo, typeStr string, includeArchived bool) ([]*model.Document, error) {
 	q := url.Values{}
 	if typeStr != "" {
 		q.Set("type", typeStr)
+	}
+	if includeArchived {
+		q.Set("include_archived", "true")
 	}
 	var out []*model.Document
 	if err := c.do(ctx, http.MethodGet, "/repos/"+repo.Prefix+"/documents", q, nil, &out); err != nil {
@@ -208,4 +211,30 @@ func (c *remoteClient) ListHistory(ctx context.Context, repo *model.Repo, f stor
 		out = []*model.HistoryEntry{}
 	}
 	return out, nil
+}
+
+// ArchiveDocument (BACI-68) — POST /repos/{prefix}/documents/{filename}/archive.
+func (c *remoteClient) ArchiveDocument(ctx context.Context, repo *model.Repo, filename string, dryRun bool) (*model.Document, error) {
+	return c.archiveDoc(ctx, repo, filename, true, dryRun)
+}
+
+// UnarchiveDocument (BACI-68) — POST /repos/{prefix}/documents/{filename}/unarchive.
+func (c *remoteClient) UnarchiveDocument(ctx context.Context, repo *model.Repo, filename string, dryRun bool) (*model.Document, error) {
+	return c.archiveDoc(ctx, repo, filename, false, dryRun)
+}
+
+func (c *remoteClient) archiveDoc(ctx context.Context, repo *model.Repo, filename string, archive, dryRun bool) (*model.Document, error) {
+	q := url.Values{}
+	if dryRun {
+		q.Set("dry_run", "true")
+	}
+	verb := "archive"
+	if !archive {
+		verb = "unarchive"
+	}
+	var out model.Document
+	if err := c.do(ctx, http.MethodPost, "/repos/"+repo.Prefix+"/documents/"+url.PathEscape(filename)+"/"+verb, q, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }

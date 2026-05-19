@@ -85,6 +85,15 @@ type BoardCard struct {
 	// modal — the bare ID + a short summary is enough to render the
 	// badge.
 	OpenQuestions []BoardCardQuestion `json:"openQuestions,omitempty"`
+	// Archived (BACI-68) mirrors the underlying issue's archived_at —
+	// true iff the column is non-NULL. When display.show_archived is
+	// on, the card surfaces with this flag set so the UI can render
+	// it visibly muted (lower opacity, "archived" pill, etc.). When
+	// display.show_archived is off, archived rows are filtered out
+	// earlier by the IncludeArchived parameter on Assemble — so this
+	// is only ever true on a board the user has explicitly opted in
+	// to seeing.
+	Archived bool `json:"archived,omitempty"`
 }
 
 // BoardCardQuestion is one open ask_user_question row surfaced on
@@ -107,8 +116,12 @@ type BoardCardQuestion struct {
 // (Taken, ActiveVerb, TodosDone/Total) is computed by joining the
 // open claims onto their sessions and the most recent dispatch for
 // each (session, issue) pair, then mapped by issue key.
-func Assemble(ctx context.Context, c client.Client, repo *model.Repo) ([]BoardCard, error) {
-	filter := client.IssueFilter{}
+//
+// Archived issues (BACI-68) are hidden by default. Pass
+// includeArchived=true to inflate — the HTTP handler reads
+// ?include_archived=1 OR the display.show_archived global setting.
+func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArchived bool) ([]BoardCard, error) {
+	filter := client.IssueFilter{IncludeArchived: includeArchived}
 	var repos []*model.Repo
 	if repo == nil {
 		filter.AllRepos = true
@@ -157,6 +170,7 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo) ([]BoardCa
 			TodosDone:       e.todosDone,
 			TodosTotal:      e.todosTotal,
 			OpenQuestions:   e.questions,
+			Archived:        iss.ArchivedAt != nil,
 		})
 	}
 	return cards, nil
