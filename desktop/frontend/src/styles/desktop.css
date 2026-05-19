@@ -210,6 +210,25 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   background: var(--bg-2); color: var(--fg-1); box-shadow: var(--shadow-1);
 }
 
+/* BACI-74: available/busy counters tucked into the Agents nav button.
+   Two small .mk-pill chips sit to the right of the label, reusing the
+   agent-status palette so the colours read consistently with the
+   per-card pills on the Agents view. Hidden entirely (rendered only
+   when at least one count is positive) so the nav stays quiet on an
+   empty repo. The label inherits the segmented button's inline-flex
+   layout so the badges flow alongside the text without breaking the
+   button's vertical centring. */
+.mk-segmented-btn { display: inline-flex; align-items: center; gap: 6px; }
+.mk-agent-counts-badges {
+  display: inline-flex; align-items: center; gap: 3px;
+}
+.mk-agent-counts-badges .mk-pill {
+  font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+  padding: 1px 5px; min-width: 14px;
+  display: inline-flex; align-items: center; justify-content: center;
+  letter-spacing: 0;
+}
+
 /* Prompt-template editors — the second section of the Settings dialog.
    A stacked list of labelled textareas, one per dispatch stage. */
 .mk-settings-section {
