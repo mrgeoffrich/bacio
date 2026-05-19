@@ -72,6 +72,7 @@ const rawSidebar = [
       { text: 'bacio schema', link: '/reference/cli/schema' },
       { text: 'bacio sync', link: '/reference/cli/sync' },
       { text: 'bacio api', link: '/reference/cli/api' },
+      { text: 'bacio web', link: '/reference/cli/web' },
       { text: 'bacio install-skill', link: '/reference/cli/install-skill' },
       { text: 'bacio install-sample-skills', link: '/reference/cli/install-sample-skills' },
       { text: 'bacio tui', link: '/reference/cli/tui' },

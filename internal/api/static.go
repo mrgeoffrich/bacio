@@ -29,8 +29,8 @@ var webUIFS = func() fs.FS {
 // hasWebUI reports whether the bundle was populated at build time
 // (anything beyond the placeholder .gitkeep). When false, the /ui/
 // handler returns a polite 404 page rather than mounting an empty
-// SPA shell — useful so an operator who ran `bacio api` without
-// running `task build:web` first sees a clear hint.
+// SPA shell — useful so an operator who ran `bacio web` without
+// running `./build.sh` first sees a clear hint.
 func hasWebUI() bool {
 	f, err := webUIFS.Open("index.html")
 	if err != nil {
@@ -39,6 +39,13 @@ func hasWebUI() bool {
 	_ = f.Close()
 	return true
 }
+
+// HasWebUI is the exported sibling of hasWebUI so callers outside the
+// api package (notably the `bacio web` CLI command in internal/cli)
+// can probe for the embedded bundle at startup and surface a one-line
+// hint when it's missing, rather than waiting for the user to refresh
+// a tab to discover it.
+func HasWebUI() bool { return hasWebUI() }
 
 // handleUI serves the web bundle at /ui/. It's an SPA, so any
 // non-asset path under /ui/ that doesn't resolve to a real file

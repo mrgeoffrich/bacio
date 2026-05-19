@@ -23,10 +23,18 @@ import (
 // and preflight requests fall through to the route handler, which
 // returns 405. Populate it (via --cors-origin, repeatable) when the
 // React bundle is hosted on a different origin from the API.
+//
+// MountUI decides whether the embedded web bundle is served at /ui/
+// and the bare /ui → /ui/ redirect is registered. `bacio web` sets
+// this true; `bacio api` (BACI-72) leaves it false so an API-only
+// deployment never mounts the SPA — `GET /ui/` then falls through to
+// the ServeMux 404. Tests that need the UI surface opt in by passing
+// `api.Options{MountUI: true}`.
 type Options struct {
 	Addr        string
 	Token       string
 	CORSOrigins []string
+	MountUI     bool
 }
 
 // Server is the wired-up HTTP server. The caller (cmd/bacio) owns the store

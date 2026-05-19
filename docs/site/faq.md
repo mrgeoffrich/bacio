@@ -21,7 +21,7 @@ No. The CLI and TUI are first-class for humans — see [Drive it without an agen
 
 The premise is that you're already in the terminal, already running an LLM agent, and don't want to open a browser tab to file a bug. The TUI gives you the kanban visual without leaving the terminal; the CLI gives an agent a contract that doesn't leak credentials.
 
-If you want a web app, run `bacio api` and build one. The REST surface mirrors the CLI exactly.
+If you just want the bundled kanban in a browser, run [`bacio web`](/reference/cli/web) — same React tree as the desktop app, served at `/ui/`, with the OS browser popped automatically. If you want to build a different web app on top of bacio, run [`bacio api`](/reference/cli/api) (API-only, no `/ui/` mount) and point your client at it — the REST surface mirrors the CLI exactly.
 
 ## Will issue numbers ever repeat?
 
