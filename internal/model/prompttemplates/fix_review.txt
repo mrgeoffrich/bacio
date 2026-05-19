@@ -6,5 +6,5 @@ Pull down all the details for {{issue_id}} which should include comments and one
 If you have to stop to get user assistance for any reason the issue will automatically be put into the "needs action" state. Once the user answers put the issue back into in progress.
 At the end run smoke tests to make sure the changes work.
 Once smoke tests pass push the changes to the PR branch and add a comment to the issue about what was done. Clean up and remove the worktree (drop its bacio registry row first with `bacio worktree rm <path> --confirm <slug>`).
-Finally unclaim the issue.
+Tag the issue with "fixed", put it back into "in review" and unclaim it.
 Questions are welcome — early. If anything in this brief is ambiguous, batch up to 4 clarifications into ONE `mcp__bacio__ask_user_question` call BEFORE doing speculative work — rework costs more than answering. The bacio MCP tool surfaces in your supervisor's TUI/desktop/web with the issue context; prefer it over the built-in AskUserQuestion.
