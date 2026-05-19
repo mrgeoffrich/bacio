@@ -21,11 +21,11 @@ The deeper context for all three lives in the topic sections below (`## Agent-CL
 - `go test ./...` — run the unit tests.
 - `bacio <subcommand>` from inside any git working tree drives the CLI.
 - The SQLite database lives at `~/.bacio/db.sqlite` by default. Override via `--db <path>` when testing or validating changes.
-- **Smoke-testing a desktop / web change.** The same React tree drives both the Wails desktop binary and the web bundle, so the cheapest agent-driven validation is the web path: run `bacio api` (default `http://localhost:5320/ui/`) and drive the UI with the `playwright-cli` skill — no Wails native-window dance, and snapshots come back as readable accessibility trees. After a frontend change, `./build.sh --skip-desktop` is enough to refresh the embedded bundle; restart the running `bacio api` to pick up the new binary.
+- **Smoke-testing a desktop / web change.** The same React tree drives both the Wails desktop binary and the web bundle, so the cheapest agent-driven validation is the web path: run `bacio web --no-open` (default `http://localhost:5320/ui/`) and drive the UI with the `playwright-cli` skill — no Wails native-window dance, no browser pop, and snapshots come back as readable accessibility trees. `--no-open` is the right flag for hooks-in-the-loop testing: the agent drives the page through Playwright, so popping a real browser would just confuse the human watching the agent. (Humans iterating on the same surface can drop the flag and let `bacio web` pop the browser as a one-liner.) After a frontend change, `./build.sh --skip-desktop` is enough to refresh the embedded bundle; restart the running `bacio web` to pick up the new binary. `bacio api` is API-only after BACI-72 and serves 404 on `/ui/`, so reach for `bacio web` whenever the UI is in the loop.
 
 ## Worktree environments (BACI-63)
 
-Sibling git worktrees of this repo can clash on the shared writer at `~/.bacio/db.sqlite` and the `127.0.0.1:5320` API port. The fix is opt-in: `bacio worktree init` writes a `<worktree-root>/environment-config.yaml` that binds the bacio instance in that worktree (CLI / `bacio api` / desktop / channel / hooks) to its own SQLite DB and port. Manifest-free worktrees keep today's behaviour exactly — the legacy default DB and port — so nothing changes for users who don't `init`.
+Sibling git worktrees of this repo can clash on the shared writer at `~/.bacio/db.sqlite` and the `127.0.0.1:5320` API port. The fix is opt-in: `bacio worktree init` writes a `<worktree-root>/environment-config.yaml` that binds the bacio instance in that worktree (CLI / `bacio api` / `bacio web` / desktop / channel / hooks) to its own SQLite DB and port. Manifest-free worktrees keep today's behaviour exactly — the legacy default DB and port — so nothing changes for users who don't `init`.
 
 Resolution order (highest precedence first):
 
@@ -54,7 +54,7 @@ They start in the root `PersistentPreRunE` and flush in `stopProfiling` (`intern
 
 `docs/agent-cli-principles.md` is the durable reference for the conventions bacio adopted from Justin Poehnelt's "Rewrite Your CLI for AI Agents". Every mutating command accepts JSON via `--json`, publishes its schema via `bacio schema`, returns lean output by default, validates input at the store boundary, supports `--dry-run`, and is documented in `SKILL.md`. New CLI work should honour those six rules and the explicit "deliberately don't do" list (no NDJSON, no `--field` projection, no silent input normalisation, etc.).
 
-The exception is **harness-integration shims** (see below): `bacio tui`, `bacio api`, `bacio hook`, `bacio channel`. These aren't agent-facing mutation commands — they're glue to a host (a terminal, an HTTP client, the Claude Code hook/channel runtime) — so they deliberately skip the six rules (no `--json`, no `bacio schema` entry, no `--dry-run`). They're still documented in `SKILL.md`. Agent-facing dispatch verbs (`bacio agent dispatch` / `ack`) DO follow the six rules.
+The exception is **harness-integration shims** (see below): `bacio tui`, `bacio api`, `bacio web`, `bacio hook`, `bacio channel`. These aren't agent-facing mutation commands — they're glue to a host (a terminal, an HTTP client, the Claude Code hook/channel runtime) — so they deliberately skip the six rules (no `--json`, no `bacio schema` entry, no `--dry-run`). They're still documented in `SKILL.md`. Agent-facing dispatch verbs (`bacio agent dispatch` / `ack`) DO follow the six rules.
 
 ## TUI cookbook
 

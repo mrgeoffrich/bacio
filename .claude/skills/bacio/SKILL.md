@@ -52,7 +52,7 @@ Use `needs_action` when an LLM agent is paused waiting on the user — keep the 
 
 **Identity:** the repo is keyed by its absolute git toplevel path. Moving the repo on disk creates a new row.
 
-**Worktree environments (BACI-63):** an *optional* `<worktree-root>/environment-config.yaml` binds the bacio instance running in that worktree to its own SQLite DB + API port, so two sibling git worktrees can run their own `bacio api` / desktop / TUI side by side without clashing on `~/.bacio/db.sqlite` or `127.0.0.1:5320`. Manifest-free worktrees keep today's behaviour exactly — set up is opt-in via `bacio worktree init`. Resolution order (highest precedence first): `--db` / `--addr` flags → `$BACIO_ENV` → worktree-root `environment-config.yaml` → legacy default (`~/.bacio/db.sqlite` + `127.0.0.1:5320`). `bacio status` surfaces the resolved `db_path`, `api_addr`, `env_source`, and (when relevant) `env_path` so agents can verify which DB they're talking to.
+**Worktree environments (BACI-63):** an *optional* `<worktree-root>/environment-config.yaml` binds the bacio instance running in that worktree to its own SQLite DB + API port, so two sibling git worktrees can run their own `bacio api` / `bacio web` / desktop / TUI side by side without clashing on `~/.bacio/db.sqlite` or `127.0.0.1:5320`. Manifest-free worktrees keep today's behaviour exactly — set up is opt-in via `bacio worktree init`. Resolution order (highest precedence first): `--db` / `--addr` flags → `$BACIO_ENV` → worktree-root `environment-config.yaml` → legacy default (`~/.bacio/db.sqlite` + `127.0.0.1:5320`). `bacio status` surfaces the resolved `db_path`, `api_addr`, `env_source`, and (when relevant) `env_path` so agents can verify which DB they're talking to.
 
 ## Agent registry — declare yourself
 
@@ -314,7 +314,8 @@ cd ~/Repos/bacio-baci-63
 bacio worktree init                    # picks slug=bacio-baci-63, free port
 bacio worktree show                    # confirm DB + API resolved correctly
 bacio status                           # Env: worktree manifest (...)
-bacio api                              # binds to the worktree's allocated port
+bacio api                              # API-only, binds to the worktree's allocated port
+bacio web                              # API + /ui/ + browser, same port
 ```
 
 ### Features
@@ -1232,23 +1233,40 @@ bacio sync inspect <prefix> --doc filename    the flags, prints the parsed
 
 ## HTTP API
 
-`bacio api` exposes every CLI mutation and read over HTTP, backed by the same SQLite database, JSON shapes, validators, and audit log. **The CLI conventions above all apply** — discover schemas, compose JSON, dry-run, then commit. The only differences are HTTP plumbing.
+`bacio api` and `bacio web` both expose every CLI mutation and read over HTTP, backed by the same SQLite database, JSON shapes, validators, and audit log. **The CLI conventions above all apply** — discover schemas, compose JSON, dry-run, then commit. The only differences are HTTP plumbing.
+
+The split between the two commands (BACI-72): `bacio api` is API-only — headless, ideal for agents / scripts / `BACIO_REMOTE` rigs / CI. `bacio web` is the same API **plus** the embedded React bundle at `/ui/`, and it pops the OS default browser to the bundle on startup — the one-liner humans want for the web kanban.
 
 ```bash
-bacio api                                # bind 127.0.0.1:5320, no auth
+bacio api                                # bind 127.0.0.1:5320, no auth; API-only (no /ui/ mount)
 bacio api --addr 127.0.0.1:7777 --token T   # require Authorization: Bearer T
 BACIO_API_TOKEN=T bacio api                 # token via env
 bacio api --cors-origin http://localhost:5174   # opt in to cross-origin browser
                                             # callers (repeatable; default empty
                                             # = same-origin only)
+
+bacio web                                 # same API + /ui/ + opens browser
+bacio web --no-open                       # same API + /ui/, skip browser launch
+                                            # (SSH, headless CI, agent-driven testing)
 ```
 
-`GET /ui/` serves the BACI-30 web bundle when one was compiled in
-(via `./build.sh` populating `webui/` before `go build` — the web
-bundle now builds by default; pass `--skip-web` to opt out).
-Same-origin loopback is the recommended deployment; `--cors-origin`
-exists for dev rigs and split-host setups. Durable reference:
-`docs/web-app-mode.md`.
+### Web UI bundle (`bacio web`)
+
+`bacio web` is the recommended human entry point: it serves the JSON
+API, mounts the embedded React bundle at `/ui/`, and launches the OS
+default browser at `http://<addr>/ui/` once `/healthz` comes up. Same
+`--addr` / `--port` / `--token` / `--cors-origin` flags as `bacio api`,
+plus `--no-open` to skip the browser launch (useful when driving the
+page through Playwright or running headless).
+
+`bacio api` deliberately does **NOT** mount `/ui/` — a `GET /ui/`
+against an API-only server returns 404 from the standard ServeMux. The
+embedded bundle is built into the binary by `./build.sh` (default-on;
+pass `--skip-web` to opt out); when it's absent, `bacio web` still
+runs the API and prints a one-line hint instead of opening the
+browser. Same-origin loopback is the recommended deployment; the
+`--cors-origin` flag exists for cross-origin dev rigs and split-host
+setups. Durable reference: `docs/web-app-mode.md`.
 
 ### Discovery
 

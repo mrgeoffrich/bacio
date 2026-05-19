@@ -33,7 +33,7 @@ A required field on a mutating call is missing or empty. Check the schema for wh
 bacio schema show issue.add | jq .required
 ```
 
-### `unauthorized` from `bacio api`
+### `unauthorized` from `bacio api` / `bacio web`
 
 You started the server with `--token T` (or `BACIO_API_TOKEN=T`), but your request didn't include `Authorization: Bearer T`. With the CLI client:
 

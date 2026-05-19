@@ -94,7 +94,7 @@ Run it whenever — pushes your writes, pulls anyone else's. Multi-machine setup
 - **Local-first.** Your board starts life as a single SQLite DB file. Nothing leaves the laptop until you run `bacio sync`.
 - **Auditable.** Every mutation records who, when, and what changed. (claude knows to pass `--user claude` so the log attributes correctly.)
 - **Optional sync.** Want the same board on a laptop and a desktop? `bacio sync init`, plain git underneath.
-- **Optional REST API.** `bacio api` puts the CLI behind HTTP — handy for web UIs, IDE plugins, long-running agents.
+- **Optional REST API.** `bacio api` puts the CLI behind HTTP — handy for IDE plugins, long-running agents, and `BACIO_REMOTE` rigs. For humans who want the bundled kanban in a browser, `bacio web` serves the same API plus the embedded React bundle at `/ui/` and pops the OS default browser.
 
 ## Project status
 

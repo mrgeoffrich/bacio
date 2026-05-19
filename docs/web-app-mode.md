@@ -1,9 +1,18 @@
 # Web app mode — running bacio's React frontend in a browser
 
 The bacio desktop app's React frontend can also be built as a
-**browser-deployed bundle** served by `bacio api` at `/ui/`. Same
+**browser-deployed bundle** served by `bacio web` at `/ui/`. Same
 React tree, different transport: the desktop build talks to Wails-
 bound Go services; the web build talks to the existing HTTP API.
+
+After BACI-72 the two HTTP commands have distinct intents:
+
+- **`bacio web`** — HTTP API **plus** the embedded React bundle at
+  `/ui/`, **plus** opens the OS default browser to the bundle. The
+  one-liner humans want for the kanban board.
+- **`bacio api`** — HTTP API only. No `/ui/` mount; `GET /ui/` returns
+  404. The shape agents, scripts, `BACIO_REMOTE` rigs, and CI want
+  when the React bundle is just dead weight.
 
 This page is the durable reference for **what works**, **what
 doesn't**, **how to build it**, and **what the v2 follow-ups are**.
@@ -21,9 +30,12 @@ app (build-mode summary).
 # builds by default; --skip-desktop just avoids the Wails desktop step.
 ./build.sh --skip-desktop
 
-# Run the API server (loopback default) and open the UI.
-bacio api &
-open http://127.0.0.1:5320/ui/
+# Run the API server, mount the bundle, and pop the browser. One line.
+bacio web
+
+# Or, for SSH / headless / agent-driven Playwright rigs: same server,
+# no browser launch.
+bacio web --no-open &
 ```
 
 The bundle covers every surface the desktop app does after BACI-50: the
@@ -179,20 +191,23 @@ shapes into the desktop's `BoardCard` / `IssueDetail` / `DocSummary` /
 
 Two ways to iterate on the web bundle:
 
-**a) Same-origin against a real `bacio api`.** Closest to the
+**a) Same-origin against a real `bacio web`.** Closest to the
 recommended deployment.
 
 ```bash
 ./build.sh --skip-desktop                 # builds bundle + embeds + installs (web bundle is default-on)
-bacio api                                 # serves /ui/ + /repos/...
-open http://127.0.0.1:5320/ui/
+bacio web                                 # serves /ui/ + /repos/... + opens browser
 ```
 
 Edits to React/TS require a rebuild + reinstall (no Vite HMR — the
 bundle is baked into the Go binary).
 
-**b) Cross-origin against a real `bacio api`.** Faster iteration: Vite
-dev server with HMR, pointed at a separately-running API.
+**b) Cross-origin Vite dev server against a real `bacio api`.** Faster
+iteration: Vite HMR for the bundle, pointed at a separately-running
+API. `bacio api` (not `bacio web`) is the right backend here — the
+dev server hosts the bundle, so a second `/ui/` mount would be
+confusing and the browser-open behaviour would race the Vite dev
+server.
 
 ```bash
 # Terminal 1
@@ -260,14 +275,20 @@ still that today. Two changes were strictly necessary for a web bundle:
 ### Deployment shapes, ranked
 
 1. **Same-origin loopback, no token.** Recommended for personal use:
-   `bacio api` on `127.0.0.1`, browser on the same machine, no auth,
-   no CORS. This is the configuration `./build.sh` + `bacio api`
-   produces out of the box.
+   `bacio web` on `127.0.0.1`, browser on the same machine, no auth,
+   no CORS. This is the configuration `./build.sh` + `bacio web`
+   produces out of the box. (`bacio api` on the same host serves the
+   JSON API for the CLI / `BACIO_REMOTE` / scripts but does NOT mount
+   `/ui/` — reach for `bacio web` whenever the browser is in the
+   loop.)
 2. **Same-origin behind a reverse proxy with TLS.** Caddy or
-   Tailscale Funnel terminates TLS, forwards to a local `bacio api`.
-   Single shared bearer token via `--token`/`BACIO_API_TOKEN`
-   gates access. Trust model: any user with the token has full
-   write authority — same as a CLI user on the host.
+   Tailscale Funnel terminates TLS, forwards to a local `bacio web`
+   (or `bacio api` if you're only exposing the JSON API). Single
+   shared bearer token via `--token`/`BACIO_API_TOKEN` gates access.
+   Trust model: any user with the token has full write authority —
+   same as a CLI user on the host. Auth, CORS, and `X-Actor` rules
+   apply identically to both commands; the only difference is the
+   `/ui/` mount.
 3. **Cross-origin dev/test rigs.** As shown in §5.1(b).
 
 ### What's NOT in scope for v1
@@ -401,12 +422,23 @@ When you go to extend or fix this, the relevant files are:
     visible in both modes too.
 - **Backend**
   - `embed.go` — `//go:embed all:webui var WebUIFS`.
-  - `internal/api/static.go` — `/ui/` handler with SPA fallback.
+  - `internal/api/static.go` — `/ui/` handler with SPA fallback;
+    `HasWebUI()` exported so `bacio web` can probe at startup
+    (BACI-72).
   - `internal/api/middleware.go` — `cors()` allow-list middleware.
-  - `internal/api/router.go` — routes `/ui` + `/ui/`; cors sits
-    outside auth.
-  - `internal/api/server.go` — `Options.CORSOrigins`.
-  - `internal/cli/api.go` — `--cors-origin` flag.
+  - `internal/api/router.go` — `/ui` + `/ui/` routes register only
+    when `Options.MountUI` is true (BACI-72); cors sits outside auth.
+  - `internal/api/server.go` — `Options.CORSOrigins` + `Options.MountUI`
+    (BACI-72).
+  - `internal/cli/api.go` — `--cors-origin` flag; `MountUI` left at
+    its zero-value (API-only by design).
+  - `internal/cli/web.go` — `bacio web`: same flag surface as
+    `bacio api` plus `--no-open`, sets `MountUI: true`, spawns the
+    browser-launcher goroutine after `/healthz` reports up
+    (BACI-72).
+  - `internal/browseropen/` — pure-Go helper that opens the OS
+    default browser via `open` / `xdg-open` / `rundll32`. Test seam
+    swaps out the launcher (BACI-72).
 - **Build**
   - `build.sh` — npm install + `build:web` + dist-web/ → webui/ (default-on; opt out with `--skip-web`).
   - `.github/workflows/ci.yml` — extra `build:web` step.

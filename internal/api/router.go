@@ -82,12 +82,16 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("GET /history", d.handleHistoryAll)
 	mux.HandleFunc("GET /repos/{prefix}/history", d.handleHistoryRepo)
 
-	// Web UI bundle (BACI-30): serve the browser-deployed React build at
-	// /ui/, with a 301 from the unslashed /ui to keep the SPA's base
-	// path consistent. The bundle is embedded at compile time via
-	// root.WebUIFS — see internal/api/static.go.
-	mux.HandleFunc("GET /ui", d.handleUIRedirect)
-	mux.HandleFunc("GET /ui/", d.handleUI)
+	// Web UI bundle (BACI-30, gated by BACI-72): serve the browser-deployed
+	// React build at /ui/, with a 301 from the unslashed /ui to keep the
+	// SPA's base path consistent. The bundle is embedded at compile time
+	// via root.WebUIFS — see internal/api/static.go. `bacio web` sets
+	// MountUI=true; `bacio api` leaves it false so an API-only deployment
+	// returns 404 on /ui/.
+	if d.opts.MountUI {
+		mux.HandleFunc("GET /ui", d.handleUIRedirect)
+		mux.HandleFunc("GET /ui/", d.handleUI)
+	}
 
 	// Agent registry (BACI-34). Local-only data, but reachable over HTTP
 	// so a remote frontend can drive the same surface as the desktop.

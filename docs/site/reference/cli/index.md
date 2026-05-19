@@ -25,7 +25,8 @@ bacio's CLI is the same surface that agents drive — every mutating command acc
 | [`bacio history`](/reference/cli/history) | Query the audit log of mutations. |
 | [`bacio schema`](/reference/cli/schema) | List and show JSON schemas for every `--json` payload. |
 | [`bacio sync`](/reference/cli/sync) | Mirror the SQLite DB to a git-backed YAML+markdown repo. |
-| [`bacio api`](/reference/cli/api) | Run the REST API server. |
+| [`bacio api`](/reference/cli/api) | Run the REST API server (API only — no `/ui/` mount). |
+| [`bacio web`](/reference/cli/web) | Run the REST API + embedded web bundle and open the browser. |
 | [`bacio install-skill`](/reference/cli/install-skill) | Install the canonical `SKILL.md` for AI agents into the repo. |
 | [`bacio install-sample-skills`](/reference/cli/install-sample-skills) | Install the bundled flow-level skill packs (file-issue, triage, stand-up, plan-feature). |
 | [`bacio tui`](/reference/cli/tui) | Open the full-screen kanban TUI. |

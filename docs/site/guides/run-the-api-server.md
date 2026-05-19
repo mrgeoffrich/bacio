@@ -7,6 +7,8 @@ description: Put the bacio CLI behind HTTP for web UIs, IDE plugins, long-runnin
 
 `bacio api` exposes every CLI mutation and read over HTTP, backed by the same SQLite database, JSON shapes, validators, and audit log. The CLI conventions all apply — discover schemas, compose JSON, dry-run, then commit. Only the transport differs.
 
+`bacio api` is API-only. If you want the bundled web kanban (same React tree the desktop app ships, served at `/ui/`), reach for [`bacio web`](/reference/cli/web) — it serves the same API surface, mounts the bundle, and opens the OS default browser as a one-liner.
+
 ## Start the server
 
 ```bash

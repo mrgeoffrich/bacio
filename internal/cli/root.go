@@ -75,6 +75,7 @@ func NewRoot() (*cobra.Command, func()) {
 		newHistoryCmd(),
 		newSchemaCmd(),
 		newAPICmd(),
+		newWebCmd(),
 		newSyncCmd(),
 		newInstallSkillCmd(),
 		newInstallSampleSkillsCmd(),
