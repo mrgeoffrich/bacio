@@ -3,5 +3,6 @@
 
 export {
     BoardCard,
-    BoardCardQuestion
+    BoardCardQuestion,
+    BoardCardTodo
 } from "./models.js";

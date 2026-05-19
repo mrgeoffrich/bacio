@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import Icon from './Icon.jsx';
 import QuestionModal from './QuestionModal.jsx';
+import { todoGlyph } from '../lib/todoGlyph.js';
 
 // relTime renders a coarse "time since" for the last-seen line.
 function relTime(iso) {
@@ -11,20 +12,6 @@ function relTime(iso) {
   const h = Math.floor(m / 60);
   if (h < 24) return `${h}h ago`;
   return `${Math.floor(h / 24)}d ago`;
-}
-
-// todoGlyph maps a TodoWrite status to the leading glyph rendered in
-// the per-agent drill-down. Mirrors the TUI's vocabulary so an operator
-// can switch between them without re-learning.
-function todoGlyph(status) {
-  switch (status) {
-    case 'completed':
-      return '●';
-    case 'in_progress':
-      return '◐';
-    default:
-      return '○';
-  }
 }
 
 // AgentsView is the desktop Agents screen: a full-page list with a card per

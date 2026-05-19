@@ -33,6 +33,11 @@ export interface BoardColumn {
   label: string;
 }
 
+export interface BoardCardTodo {
+  content: string;
+  status: string;
+}
+
 export interface BoardCard {
   key: string;
   column: string;
@@ -50,6 +55,11 @@ export interface BoardCard {
   activeVerb?: string;
   todosDone?: number;
   todosTotal?: number;
+  // BACI-75: the per-task rows underlying todosDone/todosTotal,
+  // surfaced so the kanban card's "Tasks n/m" pill can expand inline
+  // without a follow-up fetch. Absent (omitempty server-side) on
+  // untaken cards / when the session never wrote a TodoList.
+  todos?: BoardCardTodo[];
   // BACI-68: mirror of issues.archived_at IS NOT NULL. Cards with
   // archived=true only surface when display.show_archived is on; the
   // kanban renders them visibly muted so an archived card stands out

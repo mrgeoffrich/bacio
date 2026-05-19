@@ -148,7 +148,7 @@ body { margin: 0; }
    separate signal) and .is-dragging. */
 .mk-card.is-taken {
   border-width: 2px; border-color: var(--status-claude);
-  cursor: not-allowed;
+  cursor: pointer;
 }
 .mk-card.is-taken:hover { border-color: var(--status-claude); transform: none; }
 /* A waiting card has a dispatch queued but no agent claim yet — a coral
@@ -156,7 +156,7 @@ body { margin: 0; }
    the action slot. Drag and dispatch are disabled like .is-taken. */
 .mk-card.is-waiting {
   border-width: 2px; border-color: var(--border-focus);
-  cursor: not-allowed;
+  cursor: pointer;
 }
 .mk-card.is-waiting:hover { border-color: var(--border-focus); transform: none; }
 /* .mk-card.is-archived (BACI-68) — surfaces when display.show_archived
@@ -451,6 +451,60 @@ body { margin: 0; }
   .mk-question-preview { max-height: 200px; }
 }
 .mk-card-tasks { color: var(--fg-3); white-space: nowrap; }
+/* BACI-75: the same pill, rendered as a <button> so the card can
+   expand its TodoWrite rows inline beneath the meta line. Strip the
+   default button chrome so it visually matches the read-only <span>
+   form, then add a subtle hover affordance + a focus ring so it
+   reads as interactive on keyboard nav. */
+.mk-card-tasks-btn {
+  appearance: none; background: transparent; border: 0;
+  padding: 0; margin: 0; font: inherit; color: inherit;
+  cursor: pointer;
+}
+.mk-card-tasks-btn:hover {
+  color: var(--fg-2);
+  text-decoration: underline; text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+.mk-card-tasks-btn:focus-visible {
+  outline: 1px dotted var(--border-focus); outline-offset: 2px;
+}
+/* The expanded todo list — sits directly under the meta line, one
+   <ul> with per-status <li> rows. Mirrors the AgentsView drill-down
+   palette (mk-agent-todo--*) at the card's smaller 11px scale. */
+.mk-card-todos-list {
+  list-style: none; margin: 4px 0 0; padding: 0;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.mk-card-todo {
+  display: flex; align-items: baseline; gap: 6px;
+  font-family: var(--font-mono); font-size: 11px; color: var(--fg-3);
+  min-width: 0;
+}
+.mk-card-todo-glyph {
+  font-family: var(--font-mono); font-size: 11px; line-height: 1;
+  color: var(--fg-3); min-width: 10px; text-align: center;
+}
+.mk-card-todo-text {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Per-status emphasis: completed reads muted + struck-through (the
+   work is settled); in_progress is bold + claude-tinted (where the
+   agent is right now). Pending stays plain so it doesn't out-shout
+   the active row. */
+.mk-card-todo--completed .mk-card-todo-text {
+  color: var(--fg-4); text-decoration: line-through;
+}
+.mk-card-todo--completed .mk-card-todo-glyph {
+  color: var(--status-doing);
+}
+.mk-card-todo--in_progress .mk-card-todo-text {
+  font-weight: 600; color: var(--fg-1);
+}
+.mk-card-todo--in_progress .mk-card-todo-glyph {
+  color: var(--status-claude);
+}
 
 /* ---------- Tooltip (Radix portal) ---------- */
 .mk-tooltip {
