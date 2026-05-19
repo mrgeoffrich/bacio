@@ -13,7 +13,12 @@
 # the React side.
 #
 # Default is full build — everything in, nothing skipped. Opt out of the
-# slower pieces when you know they're untouched.
+# slower pieces when you know they're untouched. This script does NOT install
+# the CLI binary anywhere on PATH — `go build ./...` just verifies it
+# compiles. Install it explicitly with
+# `go build -o ~/.local/bin/bacio ./cmd/bacio` from the worktree you want
+# on PATH; that way sibling worktrees can rebuild without clobbering each
+# other's installed binary.
 #
 # Usage:
 #   ./build.sh                            # rebuild everything
@@ -32,7 +37,7 @@ for arg in "$@"; do
         --skip-desktop) skip_desktop=1 ;;
         --skip-web) skip_web=1 ;;
         -h|--help)
-            sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -66,7 +71,13 @@ if [ "$skip_web" -eq 0 ]; then
     ls -la webui | head -10
 fi
 
-# ---------- main module: vet, test, install CLI/TUI ----------
+# ---------- main module: vet, test, build CLI/TUI ----------
+#
+# Build verifies the CLI/TUI compiles but deliberately does NOT install
+# to ~/.local/bin/bacio — that would let a build in one worktree clobber
+# the binary another worktree expects on PATH. Install explicitly when
+# you want this worktree's binary on PATH:
+#   go build -o ~/.local/bin/bacio ./cmd/bacio
 
 echo "==> go vet ./..."
 go vet ./...
@@ -74,10 +85,8 @@ go vet ./...
 echo "==> go test ./..."
 go test ./...
 
-echo "==> go build -o ~/.local/bin/bacio ./cmd/bacio"
-mkdir -p "$HOME/.local/bin"
-go build -o "$HOME/.local/bin/bacio" ./cmd/bacio
-ls -la "$HOME/.local/bin/bacio"
+echo "==> go build ./..."
+go build ./...
 
 if [ "$skip_desktop" -eq 1 ]; then
     echo "==> --skip-desktop set; done."
