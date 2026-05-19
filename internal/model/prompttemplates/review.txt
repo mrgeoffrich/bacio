@@ -5,5 +5,5 @@ Then set the status of the issue to "in progress".
 Review the work on {{issue_id}} and it's PR: check correctness, tests, and adherence to the issue's acceptance criteria. Report findings, don't change code.
 If you have to stop to get user assistance for any reason the issue will automatically be put into the "needs action" state. Once the user answers put the issue back into in progress.
 Post your findings as comments on the issue.
-Finally unclaim it.
+Tag the issue with "reviewed", put it back into "in review" and unclaim it.
 Questions are welcome — early. If anything in this brief is ambiguous, batch up to 4 clarifications into ONE `mcp__bacio__ask_user_question` call BEFORE doing speculative work — rework costs more than answering. The bacio MCP tool surfaces in your supervisor's TUI/desktop/web with the issue context; prefer it over the built-in AskUserQuestion.
