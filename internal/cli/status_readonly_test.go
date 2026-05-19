@@ -26,7 +26,7 @@ func TestStatus_ReadOnlyInUnregisteredGitTree(t *testing.T) {
 		t.Fatalf("git.Detect: %v", err)
 	}
 
-	report, err := buildStatusReport(s, testEnv("/db.sqlite"), dir)
+	report, err := buildStatusReport(s, testEnv("/db.sqlite"), testLog(), nil, dir)
 	if err != nil {
 		t.Fatalf("buildStatusReport: %v", err)
 	}
@@ -77,7 +77,7 @@ func TestStatus_RegisteredRepoReportsRegistered(t *testing.T) {
 		t.Fatalf("CreateRepo: %v", err)
 	}
 
-	report, err := buildStatusReport(s, testEnv("/db.sqlite"), dir)
+	report, err := buildStatusReport(s, testEnv("/db.sqlite"), testLog(), nil, dir)
 	if err != nil {
 		t.Fatalf("buildStatusReport: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestStatus_OutsideGitRepoUsesGlobalStats(t *testing.T) {
 	withCwd(t, dir)
 	s := openMemStore(t)
 
-	report, err := buildStatusReport(s, testEnv("/db.sqlite"), dir)
+	report, err := buildStatusReport(s, testEnv("/db.sqlite"), testLog(), nil, dir)
 	if err != nil {
 		t.Fatalf("buildStatusReport: %v", err)
 	}

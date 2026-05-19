@@ -107,9 +107,17 @@ type Identity struct {
 
 // Allocations is the per-worktree resource map. DBPath may be
 // relative (resolved against the worktree root) or absolute.
+//
+// LogDir is the optional per-worktree log directory (BACI-73). When
+// empty, the logging resolver synthesises `<worktree-root>/.bacio/logs/`.
+// Relative paths resolve against the manifest's directory, same as
+// DBPath. Hand-edited manifests can pin this to anything they like;
+// `bacio worktree init` deliberately leaves it empty so existing
+// manifests stay byte-stable.
 type Allocations struct {
-	APIPort int    `yaml:"api_port"  json:"api_port"`
-	DBPath  string `yaml:"db_path"   json:"db_path"`
+	APIPort int    `yaml:"api_port"             json:"api_port"`
+	DBPath  string `yaml:"db_path"              json:"db_path"`
+	LogDir  string `yaml:"log_dir,omitempty"    json:"log_dir,omitempty"`
 }
 
 // ResolveOpts feeds Resolve. Cwd defaults to os.Getwd() when empty.

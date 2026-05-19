@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -11,6 +12,7 @@ import (
 
 	"github.com/mrgeoffrich/bacio/internal/agentmode"
 	"github.com/mrgeoffrich/bacio/internal/git"
+	"github.com/mrgeoffrich/bacio/internal/logging"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
 	"github.com/mrgeoffrich/bacio/internal/wtenv"
@@ -21,16 +23,19 @@ import (
 // registered without ever writing a row. Branches: registered repo,
 // unregistered git tree, or no git tree.
 type statusReport struct {
-	DBPath     string            `json:"db_path"`
-	APIAddr    string            `json:"api_addr"`
-	EnvSource  string            `json:"env_source"`             // "flag" | "env" | "worktree" | "default"
-	EnvPath    string            `json:"env_path,omitempty"`     // populated when a manifest fed resolution
-	InRepo     bool              `json:"in_repo"`
-	Registered bool              `json:"registered"`
-	Path       string            `json:"path,omitempty"`
-	Repo       *model.Repo       `json:"repo,omitempty"`
-	Stats      statusStats       `json:"stats"`
-	AgentMode  statusAgentMode   `json:"agent_mode"`
+	DBPath     string          `json:"db_path"`
+	APIAddr    string          `json:"api_addr"`
+	EnvSource  string          `json:"env_source"`         // "flag" | "env" | "worktree" | "default"
+	EnvPath    string          `json:"env_path,omitempty"` // populated when a manifest fed resolution
+	LogDir     string          `json:"log_dir"`            // BACI-73: resolved log directory
+	LogSource  string          `json:"log_source"`         // "flag" | "env" | "worktree" | "default"
+	LogLevel   string          `json:"log_level"`          // "debug" | "info" | "warn" | "error"
+	InRepo     bool            `json:"in_repo"`
+	Registered bool            `json:"registered"`
+	Path       string          `json:"path,omitempty"`
+	Repo       *model.Repo     `json:"repo,omitempty"`
+	Stats      statusStats     `json:"stats"`
+	AgentMode  statusAgentMode `json:"agent_mode"`
 
 	// LLMRecommendations carries plain-English, actionable advice for
 	// an agent reading `bacio status -o json`: setup problems bacio
@@ -72,6 +77,11 @@ func newStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// BACI-73: surface the resolved log dir / source / level
+			// alongside the existing env knobs. A bad --log-level
+			// shouldn't block `bacio status` since it's strictly
+			// read-only — surface the error inline and keep going.
+			logRes, logErr := resolveLogging(res)
 			s, err := store.Open(res.DBPath)
 			if err != nil {
 				return err
@@ -82,7 +92,7 @@ func newStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			report, err := buildStatusReport(s, res, cwd)
+			report, err := buildStatusReport(s, res, logRes, logErr, cwd)
 			if err != nil {
 				return err
 			}
@@ -97,17 +107,29 @@ func newStatusCmd() *cobra.Command {
 // buildStatusReport assembles the status payload without writing to the
 // store. Kept as a package-level helper so tests can drive it directly
 // after chdir-ing into a temp git tree.
-func buildStatusReport(s *store.Store, env wtenv.Resolved, cwd string) (*statusReport, error) {
+//
+// logErr is the (possibly-non-nil) error logging.Resolve returned. When
+// non-nil, the report carries a single LLM recommendation pointing at
+// the bad value — log misconfiguration shouldn't fail status, but the
+// agent needs to see it.
+func buildStatusReport(s *store.Store, env wtenv.Resolved, logRes logging.Resolved, logErr error, cwd string) (*statusReport, error) {
 	report := &statusReport{
 		DBPath:    env.DBPath,
 		APIAddr:   env.APIAddr,
 		EnvSource: string(env.Source),
 		EnvPath:   env.ManifestPath,
+		LogDir:    logRes.Dir,
+		LogSource: string(logRes.Source),
+		LogLevel:  levelLabel(logRes.Level),
 		AgentMode: statusAgentMode{
 			EnvVar: agentmode.EnvVar,
 			Value:  os.Getenv(agentmode.EnvVar),
 			Active: agentmode.Enabled(),
 		},
+	}
+	if logErr != nil {
+		report.LLMRecommendations = append(report.LLMRecommendations,
+			fmt.Sprintf("Logging is misconfigured: %v. Fix --log-level / $BACIO_LOG_LEVEL / --log-dir to use a valid value.", logErr))
 	}
 	info, gitErr := git.Detect(cwd)
 	switch {
@@ -202,6 +224,7 @@ func printStatus(w io.Writer, r *statusReport) error {
 		fmt.Fprintf(w, "DB:      %s\n", r.DBPath)
 		fmt.Fprintf(w, "API:     %s\n", r.APIAddr)
 		fmt.Fprintf(w, "Env:     %s\n", formatEnvSource(r))
+		fmt.Fprintf(w, "Log:     %s\n", formatLogSource(r))
 		fmt.Fprintf(w, "%s\n\n", formatAgentMode(r.AgentMode))
 
 		fmt.Fprintf(w, "Features: %d\n", r.Stats.Features)
@@ -219,12 +242,14 @@ func printStatus(w io.Writer, r *statusReport) error {
 		fmt.Fprintf(w, "DB:      %s\n", r.DBPath)
 		fmt.Fprintf(w, "API:     %s\n", r.APIAddr)
 		fmt.Fprintf(w, "Env:     %s\n", formatEnvSource(r))
+		fmt.Fprintf(w, "Log:     %s\n", formatLogSource(r))
 		fmt.Fprintf(w, "%s\n", formatAgentMode(r.AgentMode))
 
 	default:
 		fmt.Fprintf(w, "DB:      %s\n", r.DBPath)
 		fmt.Fprintf(w, "API:     %s\n", r.APIAddr)
 		fmt.Fprintf(w, "Env:     %s\n", formatEnvSource(r))
+		fmt.Fprintf(w, "Log:     %s\n", formatLogSource(r))
 		fmt.Fprintf(w, "%s\n", formatAgentMode(r.AgentMode))
 		fmt.Fprintf(w, "Repos:   %d\n", r.Stats.TrackedRepos)
 		fmt.Fprintf(w, "Issues:  %d (across all repos)\n\n", r.Stats.TotalIssues)
@@ -235,6 +260,24 @@ func printStatus(w io.Writer, r *statusReport) error {
 		fmt.Fprintf(w, "\nRecommendation: %s\n", rec)
 	}
 	return nil
+}
+
+// levelLabel turns an slog.Level into a four-name canonical string for
+// the bacio status report. Falls back to the slog default ("INFO" etc.)
+// when the level is anything other than the four bacio supports.
+func levelLabel(l slog.Level) string {
+	switch l {
+	case slog.LevelDebug:
+		return "debug"
+	case slog.LevelInfo:
+		return "info"
+	case slog.LevelWarn:
+		return "warn"
+	case slog.LevelError:
+		return "error"
+	default:
+		return l.String()
+	}
 }
 
 // formatEnvSource renders the env-source row. Tells the user whether
@@ -256,6 +299,21 @@ func formatEnvSource(r *statusReport) string {
 	default:
 		return r.EnvSource
 	}
+}
+
+// formatLogSource renders the BACI-73 log row. Shows the resolved
+// directory, the level, and the source (flag / env / worktree /
+// default) so an operator can confirm at a glance which knob is in
+// effect.
+func formatLogSource(r *statusReport) string {
+	if r.LogDir == "" {
+		return "(unresolved)"
+	}
+	src := r.LogSource
+	if src == "" {
+		src = "default"
+	}
+	return fmt.Sprintf("%s (level=%s source=%s)", r.LogDir, r.LogLevel, src)
 }
 
 // formatAgentMode renders the BACIO_AGENT_MODE row aligned with the

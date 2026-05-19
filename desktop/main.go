@@ -7,12 +7,16 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"github.com/mrgeoffrich/bacio/internal/client"
+	"github.com/mrgeoffrich/bacio/internal/logging"
+	"github.com/mrgeoffrich/bacio/internal/version"
 	"github.com/mrgeoffrich/bacio/internal/wtenv"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -39,11 +43,14 @@ func init() {
 // and starts a goroutine that emits a time-based event every second. It subsequently runs the application and
 // logs any error that might occur.
 // desktopFlags carries the small CLI surface the desktop binary
-// accepts. Both fields override the worktree manifest resolution
-// chain (BACI-63); empty values let the resolver pick.
+// accepts. All fields override the worktree manifest resolution
+// chain (BACI-63 for DB/env, BACI-73 for log dir/level); empty
+// values let the resolver pick.
 type desktopFlags struct {
-	DBPath  string
-	EnvPath string
+	DBPath   string
+	EnvPath  string
+	LogDir   string
+	LogLevel string
 }
 
 func parseDesktopFlags(args []string) desktopFlags {
@@ -52,8 +59,43 @@ func parseDesktopFlags(args []string) desktopFlags {
 	var df desktopFlags
 	fs.StringVar(&df.DBPath, "db", "", "override database path (resolves before the worktree manifest chain)")
 	fs.StringVar(&df.EnvPath, "env", "", "path to a worktree environment manifest (overrides $BACIO_ENV)")
+	fs.StringVar(&df.LogDir, "log-dir", "", "directory for file logs (resolves: flag > $BACIO_LOG_DIR > worktree manifest > ~/.bacio/logs/)")
+	fs.StringVar(&df.LogLevel, "log-level", "", "log level: debug|info|warn|error (default info; falls back to $BACIO_LOG_LEVEL)")
 	_ = fs.Parse(args)
 	return df
+}
+
+// buildDesktopLogger wires the BACI-73 file-logging handler for the
+// desktop binary. The component label is "desktop" so log files land
+// at bacio-desktop-YYYY-MM-DD.log. Resolution mirrors the CLI's chain:
+// flag > env > worktree manifest > default fallback. Failures fall
+// back to a stderr-only handler so a bad knob never blocks the GUI.
+func buildDesktopLogger(env wtenv.Resolved, df desktopFlags) (*slog.Logger, func()) {
+	opts := logging.ResolveOpts{
+		FlagDir:   df.LogDir,
+		FlagLevel: df.LogLevel,
+	}
+	if env.ManifestPath != "" {
+		opts.ManifestDir = filepath.Dir(env.ManifestPath)
+		if env.Manifest != nil {
+			opts.ManifestLogDir = env.Manifest.Allocations.LogDir
+		}
+	}
+	logRes, err := logging.Resolve(opts)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "bacio-desktop: log config: %v — file logging disabled\n", err)
+		return slog.New(logging.StderrOnlyHandler(slog.LevelInfo)).With("component", "desktop"), func() {}
+	}
+	h, hErr := logging.NewHandler(logging.NewHandlerOpts{
+		Dir:       logRes.Dir,
+		Component: "desktop",
+		Level:     logRes.Level,
+	})
+	if hErr != nil {
+		fmt.Fprintf(os.Stderr, "bacio-desktop: file logging disabled: %v\n", hErr)
+		return slog.New(logging.StderrOnlyHandler(logRes.Level)).With("component", "desktop"), func() {}
+	}
+	return slog.New(h).With("component", "desktop"), func() { _ = h.Close() }
 }
 
 // resolveDesktopEnv runs wtenv.Resolve against the captured cwd and
@@ -88,6 +130,23 @@ func main() {
 	if resolved.ManifestPath != "" {
 		fmt.Fprintf(os.Stderr, "bacio-desktop: env source=%s db=%s manifest=%s\n", resolved.Source, resolved.DBPath, resolved.ManifestPath)
 	}
+
+	// BACI-73: wire the file-logging handler. Falls back to
+	// stderr-only on any resolution / open error so a misconfigured
+	// log knob can never prevent the desktop from starting.
+	logger, closeLogger := buildDesktopLogger(resolved, df)
+	defer closeLogger()
+	// Make slog.Default() route through the file sink so every
+	// service that uses slog without explicit plumbing (LeaderService,
+	// BoardService, etc.) inherits the same handler.
+	slog.SetDefault(logger)
+	logger.Info("bacio-desktop starting",
+		"db", resolved.DBPath,
+		"env_source", string(resolved.Source),
+		"env_path", resolved.ManifestPath,
+		"manifest_slug", resolved.ManifestSlug(),
+		"version", version.String(),
+	)
 
 	// Open a local bacio client — the same API surface the CLI uses.
 	// DBPath defaults to the resolved worktree manifest's value (or

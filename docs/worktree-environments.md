@@ -50,6 +50,7 @@ identity:
 allocations:
   api_port: 5321
   db_path: .bacio/db.sqlite       # relative to the worktree root
+  # log_dir: logs                 # optional (BACI-73); see below
 
 extras:
   # Free-form. bacio doesn't read these; scripts can. Examples:
@@ -72,6 +73,16 @@ Fields:
 - `allocations.db_path` — relative to the worktree root; absolute paths
   also accepted for hand-edits. Defaults to `.bacio/db.sqlite`, which
   the existing `.bacio/` gitignore rule already covers.
+- `allocations.log_dir` — optional, BACI-73. When set, the long-running
+  bacio processes (`bacio api`, `bacio channel`, the desktop binary)
+  write per-day log files under this directory. Relative paths resolve
+  against the worktree root; leave the field blank and the logging
+  resolver synthesises `<worktree-root>/.bacio/logs/` for you. Mirrors
+  the BACI-63 resolver chain (flag → `$BACIO_LOG_DIR` → manifest →
+  `~/.bacio/logs/`). `bacio worktree init` does NOT write this field —
+  the synthesised default works for everyone; the field is an opt-in
+  hand-edit for users who want to pin a path. Full spec:
+  [`logging.md`](logging.md).
 - `extras` — opaque map of strings. bacio round-trips it untouched on
   rewrite so adjacent tooling (Vite, Wails dev URL, future MCP
   listeners) can add keys without schema churn. Prefix keys by tool

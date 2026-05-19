@@ -1334,6 +1334,46 @@ bacio --remote http://team-bacio:5320 issue add "Login broken" --feature auth
 
 Verbs that touch the local filesystem or terminal error clearly in remote mode and stay local-direct: `bacio init`, `bacio install-skill`, `bacio install-hooks`, `bacio install-channel`, `bacio doc add --from-path` / `--content-file` (use `--content` inline instead), `bacio doc export` (use `bacio doc download <filename>` — writes to stdout or `--to <path>`), `bacio tui`, `bacio schema *`, `bacio status`, `bacio hook *`, `bacio channel`. The agent verbs `register / heartbeat / end / claim / release / list / show / inbox / ack` work in remote mode (BACI-34), `bacio agent dispatch` is remote-capable (BACI-35), and the state-gated auto-pick variant — `bacio agent dispatch <key> --mode <stage>` with neither --to nor --session — rides the same remote route (BACI-40); only the prompt-template / board-preference settings remain local-only.
 
+## File logging (BACI-73)
+
+Long-running bacio processes — `bacio api`, `bacio channel`, and the
+`bacio-desktop` binary — write a per-process log file alongside their
+existing stderr output. Short-lived CLI verbs (`bacio issue list`,
+`bacio comment add`, etc.) deliberately do NOT open a log file: their
+stderr-only behaviour is unchanged, and `--cpuprofile` / `--trace` are
+the right knobs when they misbehave.
+
+Two persistent root flags + matching env vars feed the resolver:
+
+- `--log-dir <path>` / `$BACIO_LOG_DIR` — where to write the file.
+- `--log-level <debug|info|warn|error>` / `$BACIO_LOG_LEVEL` — default
+  is `info`; bad values fail loud at startup.
+
+The desktop binary accepts the same two flags directly (it doesn't
+inherit cobra's persistent flags). Both are local-only knobs — they
+don't have a `bacio schema` entry, in keeping with the
+harness-integration-shim carve-out from
+[`docs/agent-cli-principles.md`](../../../docs/agent-cli-principles.md).
+
+Resolution order, highest precedence first:
+
+1. `--log-dir` flag.
+2. `$BACIO_LOG_DIR`.
+3. Worktree manifest at `<worktree-root>/environment-config.yaml`,
+   reading the optional `allocations.log_dir` field. When absent, the
+   resolver synthesises `<worktree-root>/.bacio/logs/`.
+4. Default fallback: `~/.bacio/logs/`.
+
+`bacio status` surfaces the resolved values:
+
+```bash
+bacio status -o json | jq '{log_dir, log_source, log_level}'
+```
+
+A directory-creation failure prints one stderr warning and falls back
+to stderr-only — never blocks the process from starting. Full design:
+[`docs/logging.md`](../../../docs/logging.md).
+
 ## Gotchas
 
 - **Never run `bacio` outside a git repo** when a command needs the current repo — it hard-errors with "not inside a git repository". `cd` first.
