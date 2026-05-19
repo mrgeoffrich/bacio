@@ -26,6 +26,10 @@ go.work.sum
 *.sqlite-wal
 .bacio/
 
+# Design docs produced by the design dispatch — shipped as bacio docs
+# attached to the issue, not as repo files.
+/docs/designs/
+
 # Local Claude Code config (per-machine, not shared)
 .claude/settings.json
 .claude/worktrees/
