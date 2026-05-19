@@ -60,6 +60,17 @@ export class BoardCard {
     "openQuestions"?: BoardCardQuestion[];
 
     /**
+     * Todos (BACI-75) carries the per-task TodoWrite rows of the
+     * session that holds the newest open claim, scoped to THIS card's
+     * issue. Same data the TodosDone/TodosTotal counts summarise —
+     * surfaced so the kanban card's expandable "Tasks n/m" pill can
+     * render the list inline without a follow-up fetch. Empty (and
+     * omitted from JSON) on untaken cards / when the session never
+     * wrote a TodoList for this issue.
+     */
+    "todos"?: BoardCardTodo[];
+
+    /**
      * Archived (BACI-68) mirrors the underlying issue's archived_at —
      * true iff the column is non-NULL. When display.show_archived is
      * on, the card surfaces with this flag set so the UI can render
@@ -117,6 +128,7 @@ export class BoardCard {
         const $$createField4_0 = $$createType0;
         const $$createField5_0 = $$createType0;
         const $$createField12_0 = $$createType2;
+        const $$createField13_0 = $$createType4;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField4_0($$parsedSource["tags"]);
@@ -126,6 +138,9 @@ export class BoardCard {
         }
         if ("openQuestions" in $$parsedSource) {
             $$parsedSource["openQuestions"] = $$createField12_0($$parsedSource["openQuestions"]);
+        }
+        if ("todos" in $$parsedSource) {
+            $$parsedSource["todos"] = $$createField13_0($$parsedSource["todos"]);
         }
         return new BoardCard($$parsedSource as Partial<BoardCard>);
     }
@@ -176,7 +191,40 @@ export class BoardCardQuestion {
     }
 }
 
+/**
+ * BoardCardTodo is one TodoWrite row surfaced on a kanban card —
+ * the inline-expansion list under the "Tasks n/m" pill. A thinner
+ * sibling of agentcards.SessionTodoDTO: no IssueKey field, because
+ * rows are pre-filtered server-side to this card's own issue.
+ */
+export class BoardCardTodo {
+    "content": string;
+    "status": string;
+
+    /** Creates a new BoardCardTodo instance. */
+    constructor($$source: Partial<BoardCardTodo> = {}) {
+        if (!("content" in $$source)) {
+            this["content"] = "";
+        }
+        if (!("status" in $$source)) {
+            this["status"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new BoardCardTodo instance from a string or object.
+     */
+    static createFrom($$source: any = {}): BoardCardTodo {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new BoardCardTodo($$parsedSource as Partial<BoardCardTodo>);
+    }
+}
+
 // Private type creation functions
 const $$createType0 = $Create.Array($Create.Any);
 const $$createType1 = BoardCardQuestion.createFrom;
 const $$createType2 = $Create.Array($$createType1);
+const $$createType3 = BoardCardTodo.createFrom;
+const $$createType4 = $Create.Array($$createType3);

@@ -1,9 +1,14 @@
-import React, { memo } from 'react';
+import React, { memo, useState } from 'react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import Icon from './Icon.jsx';
 import Tooltip from './Tooltip.jsx';
+import { todoGlyph } from '../lib/todoGlyph.js';
 
 function KanbanCard({ card, promptConfig, isDragging, onDragStart, onDragEnd, onOpen, onDispatch, onCancelWaiting, onOpenQuestion }) {
+  // BACI-75: local-only expansion state for the Tasks pill. Resets on
+  // unmount (board switch, repo switch, hard refresh) — that's
+  // intentional, we don't want to persist a row-level UI toggle.
+  const [tasksOpen, setTasksOpen] = useState(false);
   // The prompts valid to dispatch from this card's current state — the
   // state-gate config is global (App-owned), filtered per-card here.
   const validPrompts = (promptConfig || []).filter(
@@ -143,13 +148,45 @@ function KanbanCard({ card, promptConfig, isDragging, onDragStart, onDragEnd, on
         </footer>
       )}
       {hasMeta && (
-        <div className="mk-card-meta-line">
-          {activeVerb && <span className="mk-card-verb">{activeVerb}</span>}
-          {activeVerb && todosTotal > 0 && <span className="mk-card-meta-sep">·</span>}
-          {todosTotal > 0 && (
-            <span className="mk-card-tasks">Tasks {todosDone}/{todosTotal}</span>
+        <>
+          <div className="mk-card-meta-line">
+            {activeVerb && <span className="mk-card-verb">{activeVerb}</span>}
+            {activeVerb && todosTotal > 0 && <span className="mk-card-meta-sep">·</span>}
+            {todosTotal > 0 && (
+              <button
+                type="button"
+                className="mk-card-tasks mk-card-tasks-btn"
+                aria-expanded={tasksOpen}
+                aria-controls={`card-todos-${card.key}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if ((card.todos || []).length) setTasksOpen(o => !o);
+                }}
+              >
+                Tasks {todosDone}/{todosTotal}
+              </button>
+            )}
+          </div>
+          {tasksOpen && (card.todos || []).length > 0 && (
+            <ul
+              id={`card-todos-${card.key}`}
+              className="mk-card-todos-list"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {card.todos.map((t, i) => (
+                <li
+                  key={i}
+                  className={`mk-card-todo mk-card-todo--${t.status}`}
+                >
+                  <span className="mk-card-todo-glyph" aria-hidden>
+                    {todoGlyph(t.status)}
+                  </span>
+                  <span className="mk-card-todo-text">{t.content}</span>
+                </li>
+              ))}
+            </ul>
           )}
-        </div>
+        </>
       )}
     </article>
   );

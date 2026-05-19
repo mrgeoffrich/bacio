@@ -124,9 +124,30 @@ func TestAssembleVerbAndTodos(t *testing.T) {
 	if taken.TodosDone != 2 || taken.TodosTotal != 4 {
 		t.Errorf("TEST-1 todos = %d/%d, want 2/4", taken.TodosDone, taken.TodosTotal)
 	}
+	// BACI-75: the per-task rows flow through with the same shape the
+	// kanban card expects — content + status, in storage (Position)
+	// order. The counts above already check the totals; this locks in
+	// the list view that drives the click-to-expand Tasks pill.
+	wantTodos := []BoardCardTodo{
+		{Content: "step A", Status: "completed"},
+		{Content: "step B", Status: "completed"},
+		{Content: "step C", Status: "in_progress"},
+		{Content: "step D", Status: "pending"},
+	}
+	if len(taken.Todos) != len(wantTodos) {
+		t.Fatalf("TEST-1 Todos len = %d, want %d", len(taken.Todos), len(wantTodos))
+	}
+	for i, want := range wantTodos {
+		if taken.Todos[i] != want {
+			t.Errorf("TEST-1 Todos[%d] = %+v, want %+v", i, taken.Todos[i], want)
+		}
+	}
 	free := byKey["TEST-2"]
 	if free.Taken || free.ActiveVerb != "" || free.TodosTotal != 0 {
 		t.Errorf("TEST-2 should stay un-enriched, got Taken=%v Verb=%q Total=%d", free.Taken, free.ActiveVerb, free.TodosTotal)
+	}
+	if len(free.Todos) != 0 {
+		t.Errorf("TEST-2 Todos = %+v, want empty (untaken card)", free.Todos)
 	}
 }
 
@@ -270,6 +291,34 @@ func TestAssembleTodosScopedPerIssue(t *testing.T) {
 	two := byKey["TEST-2"]
 	if two.TodosDone != 0 || two.TodosTotal != 2 {
 		t.Errorf("TEST-2 todos = %d/%d, want 0/2 (TEST-1's history must not leak)", two.TodosDone, two.TodosTotal)
+	}
+	// BACI-75: same scoping invariant for the list view. TEST-1 sees
+	// only its own four rows; TEST-2 sees only its own two.
+	wantOne := []BoardCardTodo{
+		{Content: "test-1/a", Status: "completed"},
+		{Content: "test-1/b", Status: "completed"},
+		{Content: "test-1/c", Status: "completed"},
+		{Content: "test-1/d", Status: "completed"},
+	}
+	if len(one.Todos) != len(wantOne) {
+		t.Fatalf("TEST-1 Todos len = %d, want %d", len(one.Todos), len(wantOne))
+	}
+	for i, want := range wantOne {
+		if one.Todos[i] != want {
+			t.Errorf("TEST-1 Todos[%d] = %+v, want %+v", i, one.Todos[i], want)
+		}
+	}
+	wantTwo := []BoardCardTodo{
+		{Content: "test-2/a", Status: "in_progress"},
+		{Content: "test-2/b", Status: "pending"},
+	}
+	if len(two.Todos) != len(wantTwo) {
+		t.Fatalf("TEST-2 Todos len = %d, want %d (TEST-1's history must not leak)", len(two.Todos), len(wantTwo))
+	}
+	for i, want := range wantTwo {
+		if two.Todos[i] != want {
+			t.Errorf("TEST-2 Todos[%d] = %+v, want %+v", i, two.Todos[i], want)
+		}
 	}
 }
 

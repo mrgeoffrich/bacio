@@ -85,6 +85,14 @@ type BoardCard struct {
 	// modal — the bare ID + a short summary is enough to render the
 	// badge.
 	OpenQuestions []BoardCardQuestion `json:"openQuestions,omitempty"`
+	// Todos (BACI-75) carries the per-task TodoWrite rows of the
+	// session that holds the newest open claim, scoped to THIS card's
+	// issue. Same data the TodosDone/TodosTotal counts summarise —
+	// surfaced so the kanban card's expandable "Tasks n/m" pill can
+	// render the list inline without a follow-up fetch. Empty (and
+	// omitted from JSON) on untaken cards / when the session never
+	// wrote a TodoList for this issue.
+	Todos []BoardCardTodo `json:"todos,omitempty"`
 	// Archived (BACI-68) mirrors the underlying issue's archived_at —
 	// true iff the column is non-NULL. When display.show_archived is
 	// on, the card surfaces with this flag set so the UI can render
@@ -108,6 +116,15 @@ type BoardCardQuestion struct {
 	FirstQuestion string    `json:"firstQuestion"`
 	Count         int       `json:"count"`
 	AskedAt       time.Time `json:"askedAt"`
+}
+
+// BoardCardTodo is one TodoWrite row surfaced on a kanban card —
+// the inline-expansion list under the "Tasks n/m" pill. A thinner
+// sibling of agentcards.SessionTodoDTO: no IssueKey field, because
+// rows are pre-filtered server-side to this card's own issue.
+type BoardCardTodo struct {
+	Content string `json:"content"`
+	Status  string `json:"status"`
 }
 
 // Assemble returns one BoardCard per issue in scope. When repo is
@@ -169,6 +186,7 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 			ActiveVerb:      e.verb,
 			TodosDone:       e.todosDone,
 			TodosTotal:      e.todosTotal,
+			Todos:           e.todos,
 			OpenQuestions:   e.questions,
 			Archived:        iss.ArchivedAt != nil,
 		})
@@ -188,6 +206,12 @@ type cardEnrichment struct {
 	verb       string
 	todosDone  int
 	todosTotal int
+	// todos are the winning-claim session's TodoWrite rows whose
+	// issue_key matches this card's issue, in storage order
+	// (Position ascending). Same per-(session, issue) scoping as the
+	// counts above — a session that won this card after another
+	// won't leak the prior job's rows here.
+	todos []BoardCardTodo
 	// questions are the winning-claim session's open ask_user_question
 	// rows whose issue_key matches this card's issue. Empty when the
 	// agent isn't blocked on anything for this issue.
@@ -334,6 +358,10 @@ func enrichmentByIssueKey(
 				if t.Status == model.TodoCompleted {
 					e.todosDone++
 				}
+				e.todos = append(e.todos, BoardCardTodo{
+					Content: t.Content,
+					Status:  string(t.Status),
+				})
 			}
 			if mode := pickActiveMode(allDispatches, sess, issueKey); mode != "" {
 				if v, ok := verbBySlug[string(mode)]; ok {
