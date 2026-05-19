@@ -17,9 +17,17 @@ export const NAV = [
   { view: 'history', label: 'History' },
 ];
 
-export default function Topbar({ boards, activeBoard, onPickBoard, onAddRepository, activeView, onChangeView, onOpenPalette, onOpenSettings, leaderState, openIssueKey, onCloseIssue }) {
+export default function Topbar({ boards, activeBoard, onPickBoard, onAddRepository, activeView, onChangeView, onOpenPalette, onOpenSettings, leaderState, openIssueKey, onCloseIssue, agentCounts }) {
   const syncEnabled = !!boards.find(b => b.prefix === activeBoard)?.syncEnabled;
   const isLeader = leaderState?.amLeader ?? false;
+  // BACI-74: small pills tucked into the Agents button when the active
+  // repo has any non-ended sessions. Available = idle or active AND
+  // !busy; busy folds waiting in. Hidden entirely when both are zero so
+  // the nav stays quiet on an empty repo.
+  const available = agentCounts?.available ?? 0;
+  const busy = agentCounts?.busy ?? 0;
+  const showAgentCounts = (available + busy) > 0;
+  const agentCountsLabel = `${available} available, ${busy} busy`;
   return (
     <header className={`mk-topbar${WEB_MODE ? ' is-web' : ''}`}>
       <div className="mk-brand">
@@ -28,15 +36,27 @@ export default function Topbar({ boards, activeBoard, onPickBoard, onAddReposito
       </div>
 
       <div className="mk-segmented">
-        {NAV.map(({ view, label }) => (
-          <button
-            key={view}
-            className={`mk-segmented-btn ${activeView === view ? 'is-active' : ''}`}
-            onClick={() => onChangeView(view)}
-          >
-            {label}
-          </button>
-        ))}
+        {NAV.map(({ view, label }) => {
+          const isAgents = view === 'agents';
+          const button = (
+            <button
+              className={`mk-segmented-btn ${activeView === view ? 'is-active' : ''}`}
+              onClick={() => onChangeView(view)}
+            >
+              {label}
+              {isAgents && showAgentCounts && (
+                <span className="mk-agent-counts-badges" aria-label={agentCountsLabel}>
+                  <span className="mk-pill mk-status-idle mk-agent-counts-available">{available}</span>
+                  <span className="mk-pill mk-status-busy mk-agent-counts-busy">{busy}</span>
+                </span>
+              )}
+            </button>
+          );
+          if (isAgents && showAgentCounts) {
+            return <Tooltip key={view} label={agentCountsLabel}>{button}</Tooltip>;
+          }
+          return <React.Fragment key={view}>{button}</React.Fragment>;
+        })}
       </div>
 
       {openIssueKey && (

@@ -327,6 +327,18 @@ export default function App() {
     return () => clearInterval(id);
   }, [activeView, activeBoard, refreshCards, refreshAgents]);
 
+  // BACI-74: keep the top-nav Agents counters live regardless of which
+  // view is showing. The Agents view's own poll above re-fetches on the
+  // same cadence and overwrites the same state — running both is a
+  // harmless duplicate hit, not a correctness issue, so the simpler
+  // "always poll while a board is selected" rule wins. One small GET
+  // per 10s is cheap.
+  useEffect(() => {
+    if (!activeBoard) return;
+    const id = setInterval(() => refreshAgents({ silent: true }), POLL_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [activeBoard, refreshAgents]);
+
   // refreshBrief reloads the IssueWorkspace payload for the open issue.
   // Pass { silent: true } on the poll path so a transient failure logs
   // instead of pushing through the modal — same convention as cards/agents.
@@ -542,6 +554,23 @@ export default function App() {
     refreshBrief();
   }, [activeBoard, openIssueKey, refreshBrief]);
 
+  // BACI-74: derive available/busy counts from the existing 10s-polled
+  // agents array so the top-nav Agents button can show two small numeric
+  // counters when the active repo has any non-ended sessions. Source of
+  // truth + derivation rules: BACI-74's design notes — `status: ended`
+  // is excluded; `busy` (which already folds `waiting` in) decides the
+  // busy bucket; available = non-ended - busy.
+  const agentCounts = React.useMemo(() => {
+    let available = 0;
+    let busy = 0;
+    for (const a of agents) {
+      if (a.status === 'ended') continue;
+      if (a.busy) busy++;
+      else available++;
+    }
+    return { available, busy };
+  }, [agents]);
+
   return (
     <TooltipProvider delayDuration={250} skipDelayDuration={150}>
     <div className="mk-app">
@@ -567,6 +596,7 @@ export default function App() {
         leaderState={leaderState}
         openIssueKey={openIssueKey}
         onCloseIssue={closeIssue}
+        agentCounts={agentCounts}
       />
       {loading ? (
         <div className="mk-app-state">Loading…</div>
