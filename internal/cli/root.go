@@ -24,6 +24,13 @@ type globalOpts struct {
 	cpuProfile string
 	memProfile string
 	traceFile  string
+	// logDir / logLevel are harness-only knobs (BACI-73). They take effect
+	// on the long-running commands — `bacio api`, `bacio channel`, the
+	// desktop binary — and are silently ignored by short-lived CLI verbs.
+	// Mirrors the wtenv resolution chain in internal/logging: flag → env
+	// → manifest → default fallback.
+	logDir   string
+	logLevel string
 }
 
 var opts = globalOpts{output: outputText}
@@ -56,6 +63,8 @@ func NewRoot() (*cobra.Command, func()) {
 	root.PersistentFlags().StringVar(&opts.cpuProfile, "cpuprofile", "", "write a CPU profile to this path (dev/debug)")
 	root.PersistentFlags().StringVar(&opts.memProfile, "memprofile", "", "write a heap profile to this path (dev/debug)")
 	root.PersistentFlags().StringVar(&opts.traceFile, "trace", "", "write an execution trace to this path (dev/debug)")
+	root.PersistentFlags().StringVar(&opts.logDir, "log-dir", "", "directory for file logs (applies to long-running commands only: bacio api / channel / desktop; resolves: flag > $BACIO_LOG_DIR > worktree manifest > ~/.bacio/logs/)")
+	root.PersistentFlags().StringVar(&opts.logLevel, "log-level", "", "log level: debug|info|warn|error (default info; falls back to $BACIO_LOG_LEVEL)")
 	_ = root.PersistentFlags().MarkHidden("cpuprofile")
 	_ = root.PersistentFlags().MarkHidden("memprofile")
 	_ = root.PersistentFlags().MarkHidden("trace")

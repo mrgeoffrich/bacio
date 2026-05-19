@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"sort"
@@ -16,8 +17,10 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/git"
+	"github.com/mrgeoffrich/bacio/internal/logging"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/version"
+	"github.com/mrgeoffrich/bacio/internal/wtenv"
 )
 
 func newChannelCmd() *cobra.Command {
@@ -60,8 +63,31 @@ to stderr.`,
 			if inRemoteMode() {
 				return fmt.Errorf("bacio channel: not supported in remote mode — the agent registry is local-only")
 			}
+			// BACI-73: every diagnostic the channel emits today
+			// formats `bacio channel: <msg>` and writes it to
+			// stderr. To keep that flow but ALSO mirror it to the
+			// per-process log file, we route the `logf` closure
+			// through slog. The log file lives under the resolved
+			// log dir; a creation failure falls back to stderr-only
+			// with a single warning (never block the process from
+			// starting). The component label includes the PID
+			// (and, once register has fired, the session id is
+			// embedded in further log lines as a structured field)
+			// so two channels for the same project don't stomp on
+			// each other.
+			env, envErr := resolveEnv()
+			if envErr != nil {
+				return envErr
+			}
+			logger, closeLogger := buildChannelLogger(env)
+			defer closeLogger()
 			logf := func(format string, a ...any) {
-				fmt.Fprintf(os.Stderr, "bacio channel: "+format+"\n", a...)
+				// slog handles the timestamp + level; the existing
+				// callers pass `bacio channel: <stuff>` so trim
+				// the prefix to keep messages clean inside the
+				// structured event.
+				msg := strings.TrimPrefix(fmt.Sprintf(format, a...), "bacio channel: ")
+				logger.Info(msg)
 			}
 
 			// Claude Code sets CLAUDE_PROJECT_DIR in a stdio MCP server's
@@ -99,10 +125,7 @@ to stderr.`,
 			if actorName == "" {
 				actorName = actor()
 			}
-			res, err := resolveEnv()
-			if err != nil {
-				return err
-			}
+			res := env
 			if res.ManifestPath != "" {
 				logf("env source=%s db=%s manifest=%s", res.Source, res.DBPath, res.ManifestPath)
 			}
@@ -519,4 +542,30 @@ func dumpChannelDiagnostics(logf func(string, ...any), projectDir string, info *
 		logf("environ: %d vars (set BACIO_CHANNEL_DEBUG=1 to dump)", len(os.Environ()))
 	}
 	logf("--- end channel diagnostics ---")
+}
+
+// buildChannelLogger wires the BACI-73 file-logging handler for
+// `bacio channel`. The per-process filename includes a PID stamp so
+// two concurrent channel processes on the same machine don't stomp on
+// each other; the day stamp comes from the underlying NewHandler.
+// Creation failures fall back to stderr-only — never block the
+// channel from starting because of a log dir problem.
+func buildChannelLogger(env wtenv.Resolved) (*slog.Logger, func()) {
+	logRes, err := resolveLogging(env)
+	component := fmt.Sprintf("channel-pid%d", os.Getpid())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "bacio channel: log config: %v — file logging disabled\n", err)
+		return slog.New(logging.StderrOnlyHandler(slog.LevelInfo)).With("component", "channel", "channel_pid", os.Getpid()), func() {}
+	}
+	h, hErr := logging.NewHandler(logging.NewHandlerOpts{
+		Dir:       logRes.Dir,
+		Component: component,
+		Level:     logRes.Level,
+	})
+	if hErr != nil {
+		fmt.Fprintf(os.Stderr, "bacio channel: file logging disabled: %v\n", hErr)
+		return slog.New(logging.StderrOnlyHandler(logRes.Level)).With("component", "channel", "channel_pid", os.Getpid()), func() {}
+	}
+	logger := slog.New(h).With("component", "channel", "channel_pid", os.Getpid())
+	return logger, func() { _ = h.Close() }
 }

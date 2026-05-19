@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/git"
+	"github.com/mrgeoffrich/bacio/internal/logging"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
 	"github.com/mrgeoffrich/bacio/internal/sync"
@@ -52,6 +54,41 @@ func resolveEnv() (wtenv.Resolved, error) {
 		FlagDB:    opts.dbPath,
 		EnvLookup: envLookup,
 	})
+}
+
+// resolveLogging walks the BACI-73 log-destination chain (flag → env →
+// worktree manifest → default fallback) on top of the wtenv resolver
+// result. The wtenv layer already tells us whether a manifest fed
+// resolution and, when it did, both the manifest's directory and its
+// optional allocations.log_dir field — the two values logging.Resolve
+// needs to synthesise the per-worktree default
+// (`<worktree-root>/.bacio/logs/`) or honour an explicit override.
+//
+// Callers that haven't run the wtenv resolver yet should call this via
+// resolveLoggingFromEnv below, which handles the call internally.
+func resolveLogging(env wtenv.Resolved) (logging.Resolved, error) {
+	opt := logging.ResolveOpts{
+		FlagDir:   opts.logDir,
+		FlagLevel: opts.logLevel,
+	}
+	if env.ManifestPath != "" {
+		opt.ManifestDir = filepath.Dir(env.ManifestPath)
+		if env.Manifest != nil {
+			opt.ManifestLogDir = env.Manifest.Allocations.LogDir
+		}
+	}
+	return logging.Resolve(opt)
+}
+
+// resolveLoggingFromEnv is the convenience wrapper used by command
+// handlers that haven't already resolved wtenv. Calls resolveEnv
+// internally and then defers to resolveLogging.
+func resolveLoggingFromEnv() (logging.Resolved, error) {
+	env, err := resolveEnv()
+	if err != nil {
+		return logging.Resolved{}, err
+	}
+	return resolveLogging(env)
 }
 
 // remoteURL returns the configured remote URL, falling back to

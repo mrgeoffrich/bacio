@@ -322,6 +322,44 @@ func TestManifestRoundTrip_PreservesExtras(t *testing.T) {
 	}
 }
 
+func TestManifestRoundTrip_PreservesLogDir(t *testing.T) {
+	// BACI-73: allocations.log_dir is an optional per-worktree log
+	// directory. Round-trip a manifest that sets it explicitly so a
+	// future binary upgrade can't silently drop the field.
+	tmp := t.TempDir()
+	path := filepath.Join(tmp, "env.yaml")
+	in := &Manifest{
+		Identity: Identity{Slug: "log-dir", Worktree: "/tmp/wt"},
+		Allocations: Allocations{
+			APIPort: 5333,
+			DBPath:  ".bacio/db.sqlite",
+			LogDir:  "logs",
+		},
+	}
+	if err := SaveManifest(path, in); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	out, err := LoadManifest(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if out.Allocations.LogDir != "logs" {
+		t.Errorf("log_dir: got %q, want %q", out.Allocations.LogDir, "logs")
+	}
+	// Sanity: leaving log_dir empty must not flip omitempty off.
+	in.Allocations.LogDir = ""
+	if err := SaveManifest(path, in); err != nil {
+		t.Fatalf("save (empty log_dir): %v", err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if strings.Contains(string(body), "log_dir:") {
+		t.Errorf("empty log_dir leaked into YAML:\n%s", string(body))
+	}
+}
+
 func TestManifest_UnknownTypedFieldRejected(t *testing.T) {
 	body := `identity:
   slug: foo

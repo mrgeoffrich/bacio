@@ -104,6 +104,26 @@ curl -X POST 'http://127.0.0.1:5320/repos/MINI/issues?dry_run=true' \
 - **`GET /repos/{prefix}/documents/{filename}/download`** is the only non-JSON endpoint. Streams the body as `text/markdown` with `Content-Disposition: attachment`. No audit row, no dry-run.
 - **No CLI equivalent → not exposed:** `bacio install-skill` (writes a file in the caller's repo), `bacio tui` (terminal-bound), `bacio doc add --from-path` (read the file yourself and inline the content).
 
+## Logs
+
+`bacio api` writes a per-day log file in addition to its existing
+stderr output. The destination follows the same resolver chain as the
+per-worktree DB / port (BACI-73): `--log-dir` flag > `$BACIO_LOG_DIR`
+> worktree manifest > `~/.bacio/logs/`. The filename is
+`bacio-api-YYYY-MM-DD.log`. Each line carries a timestamp, level
+(default `info`; override with `--log-level debug` for verbose
+output), the request method/path/status/latency/actor, and any
+structured fields the emitter passed.
+
+```bash
+# Tail the resolved log file.
+tail -F "$(bacio status -o json | jq -r .log_dir)/bacio-api-$(date +%F).log"
+```
+
+A log-dir creation failure prints one stderr warning and continues
+without a file sink — `bacio api` never refuses to start because of a
+log problem. Full spec: [`docs/logging.md`](https://github.com/mrgeoffrich/bacio/blob/main/docs/logging.md).
+
 ## When to use the API
 
 - **You're building a web UI or IDE plugin** on top of bacio.
