@@ -32,10 +32,19 @@ set -euo pipefail
 
 skip_desktop=0
 skip_web=0
+install_cli=0
 for arg in "$@"; do
     case "$arg" in
         --skip-desktop) skip_desktop=1 ;;
         --skip-web) skip_web=1 ;;
+        # --install is intentionally undocumented in --help / the header
+        # comment. It exists as an escape hatch for the rare workflow
+        # where rebuilding and installing in one step is more convenient
+        # than the explicit two-step (build.sh, then
+        # `go build -o ~/.local/bin/bacio ./cmd/bacio`). The default
+        # remains "do not touch the binary on PATH" so sibling worktrees
+        # can rebuild without clobbering each other.
+        --install) install_cli=1 ;;
         -h|--help)
             sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
@@ -87,6 +96,11 @@ go test ./...
 
 echo "==> go build ./..."
 go build ./...
+
+if [ "$install_cli" -eq 1 ]; then
+    echo "==> go build -o ~/.local/bin/bacio ./cmd/bacio (--install)"
+    go build -o "$HOME/.local/bin/bacio" ./cmd/bacio
+fi
 
 if [ "$skip_desktop" -eq 1 ]; then
     echo "==> --skip-desktop set; done."
