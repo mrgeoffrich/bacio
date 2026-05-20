@@ -27,7 +27,10 @@ With --snapshot, renders a view to stdout non-interactively at the given
 size. Useful for layout debugging and CI snapshot tests.
 
 Snapshot targets:
-  board, features, docs, agents, history  — the five tabs as drawn
+  board, features, docs, agents, history,
+  settings                                — the six tabs as drawn
+  settings-editor                         — Settings tab with the template
+                                            editor open
   card-overlay                            — focused card's fullscreen view
   doc-overlay, feature-overlay            — fullscreen reader for the
                                             first item in that tab
@@ -66,7 +69,7 @@ Snapshot targets:
 			return tui.Run(s, repo)
 		},
 	}
-	cmd.Flags().StringVar(&snapshot, "snapshot", "", "render a view to stdout instead of starting the TUI (board|features|docs|agents|history|card-overlay|doc-overlay|feature-overlay|agent-detail|picker|feature-picker|dispatch-picker)")
+	cmd.Flags().StringVar(&snapshot, "snapshot", "", "render a view to stdout instead of starting the TUI (board|features|docs|agents|history|settings|settings-editor|card-overlay|doc-overlay|feature-overlay|agent-detail|picker|feature-picker|dispatch-picker)")
 	cmd.Flags().StringVar(&snapIss, "issue", "", "issue key (e.g. MINI-1) to focus for board/card-overlay snapshots")
 	cmd.Flags().IntVar(&snapW, "width", 120, "terminal width for --snapshot")
 	cmd.Flags().IntVar(&snapH, "height", 40, "terminal height for --snapshot")

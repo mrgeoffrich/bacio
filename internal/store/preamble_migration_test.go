@@ -50,6 +50,35 @@ func TestRefreshDispatchPreambleUpgradesOldDefault(t *testing.T) {
 	}
 }
 
+// TestRefreshDispatchPreambleUpgradesBACI76TypoDefault: simulate a
+// post-BACI-76 / pre-BACI-80 DB by writing the typo'd default (the one
+// that told the supervisor to run the retired `bacio install-agents`
+// plural verb) into the row, then re-run the refresh — it must replace
+// the body with the corrected default that says `bacio install-agent`.
+func TestRefreshDispatchPreambleUpgradesBACI76TypoDefault(t *testing.T) {
+	s := newTestStore(t)
+	typo := strings.TrimRight(oldDispatchPreambleBACI76Typo, "\r\n")
+	if _, err := s.DB.Exec(
+		`UPDATE prompt_templates SET body = ? WHERE slug = ?`,
+		typo, model.BuiltinTemplatePreamble,
+	); err != nil {
+		t.Fatalf("seed typo'd preamble: %v", err)
+	}
+	if err := refreshDispatchPreamble(s.DB); err != nil {
+		t.Fatalf("refreshDispatchPreamble: %v", err)
+	}
+	body, err := s.GetDispatchPreamble()
+	if err != nil {
+		t.Fatalf("GetDispatchPreamble: %v", err)
+	}
+	if body != model.DefaultPromptBodyForBuiltinSlug(model.BuiltinTemplatePreamble) {
+		t.Fatalf("typo'd default was not refreshed to the new default:\n%s", body)
+	}
+	if strings.Contains(body, "install-agents") {
+		t.Fatalf("refreshed preamble still contains the `install-agents` plural typo:\n%s", body)
+	}
+}
+
 // TestRefreshDispatchPreambleLeavesCustomBody: a user-customised
 // preamble body is left untouched by the refresh.
 func TestRefreshDispatchPreambleLeavesCustomBody(t *testing.T) {
