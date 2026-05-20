@@ -13,6 +13,7 @@ func TestRenderAgentFile(t *testing.T) {
 	for _, want := range []string{
 		"name: bacio-plan-worker\n",
 		"model: opus\n",
+		"isolation: worktree\n",
 		"tools: Read, Edit, Write, Bash, Grep, Glob, TaskCreate, TaskUpdate, TaskList, TaskGet, Skill, WebFetch, WebSearch, mcp__bacio__register, mcp__bacio__reply, mcp__bacio__ask_user_question\n",
 		"Do the planning work.\n",
 	} {

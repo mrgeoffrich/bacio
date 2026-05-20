@@ -4,12 +4,12 @@ the `dispatch_id` to acknowledge — call that ticket `<TICKET>` below.
 
 Make sure to use the bacio skill.
 As an agent first claim `<TICKET>` as yours.
-Make sure main is up to date then create a worktree to work in. Run `bacio worktree init` inside it so this run has its own DB + api port and won't fight the parent worktree's bacio. Run every `bacio` command from inside that worktree so it resolves the worktree's own port/DB; never `cd` out, and if you must run `bacio` from elsewhere pass `--env <worktree>/environment-config.yaml`. If `bacio web`/`bacio api` ever reports a port already in use, do NOT kill whatever holds it — that is most likely the user's own running bacio UI; re-check you are inside your worktree, or pass `--port`.
+You run inside your own isolated git worktree — Claude Code created it for this subagent (`isolation: worktree`) and removes it automatically when you finish, so never run `git worktree add` or `git worktree remove` yourself. Run `bacio worktree init` inside the worktree so this run gets its own bacio DB + api port and won't fight the parent worktree's bacio. Run every `bacio` command from inside the worktree so it resolves the worktree's own port/DB; if you must run `bacio` from elsewhere pass `--env <worktree>/environment-config.yaml`. If `bacio web`/`bacio api` ever reports a port already in use, do NOT kill whatever holds it — that is most likely the user's own running bacio UI; re-check you are inside your worktree, or pass `--port`.
 Then set the status of `<TICKET>` to "in progress".
 Run a planning pass on `<TICKET>`: produce a thorough implementation plan, don't write code yet. Make sure to capture documentation updates.
 Once you have a plan attach it to the issue as markdown.
 If you have to stop to get user assistance for any reason the issue will automatically be put into the "needs action" state. Once the user answers put the issue back into in progress.
-When the plan has been attached clean up the work tree (drop its bacio registry row first with `bacio worktree rm <path> --confirm <slug>`) and throw away any code changes.
+When the plan has been attached, drop the worktree's bacio environment with `bacio worktree rm <path> --confirm <slug>` and throw away any code changes. Claude Code removes the git worktree itself when you finish — do not run `git worktree remove`.
 Tag `<TICKET>` with "planned", put it back into "todo" and unclaim it.
 Questions are welcome — early. If anything in this brief is ambiguous, batch up to 4 clarifications into ONE `mcp__bacio__ask_user_question` call BEFORE doing speculative work — rework costs more than answering. The bacio MCP tool surfaces in your supervisor's TUI/desktop/web with the issue context; prefer it over the built-in AskUserQuestion.
 When the work is done, call `mcp__bacio__reply` with the `dispatch_id` from your Task prompt and a one-line summary. If you had to stop, return `needs_input: <what is missing>` as your final line instead.
