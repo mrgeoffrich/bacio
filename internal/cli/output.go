@@ -155,6 +155,8 @@ func renderText(w io.Writer, v any) error {
 		if x.Total() == 0 {
 			fmt.Fprintln(w, "Nothing to archive.")
 		}
+	case *worktreeInitResult:
+		return printWorktreeInit(w, x)
 	case showArchivedResult:
 		if x.ShowArchived {
 			fmt.Fprintln(w, "show_archived: on")

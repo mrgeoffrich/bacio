@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -17,6 +18,28 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/api"
 	"github.com/mrgeoffrich/bacio/internal/browseropen"
 )
+
+// friendlyServeErr rewrites a raw "bind: address already in use" from
+// the API server into an actionable message. The bare syscall error
+// reads as "free this port", which invites a dispatched agent to kill
+// whatever holds it — and when the holder is the user's own running
+// `bacio web` / desktop app, that takes a live UI down. Naming the
+// likely cause and pointing at the right fix (a per-worktree port, or
+// an explicit free one — never a kill) heads that off. Non-bind
+// errors pass straight through.
+func friendlyServeErr(addr string, err error) error {
+	if err == nil || !errors.Is(err, syscall.EADDRINUSE) {
+		return err
+	}
+	return fmt.Errorf("cannot bind %s: another process is already listening there.\n\n"+
+		"This is almost certainly another bacio instance — your own `bacio web`,\n"+
+		"the desktop app, or a sibling worktree. Do NOT kill the process holding\n"+
+		"the port; that may take down a UI you depend on. Instead either:\n"+
+		"  • run this from a worktree set up with `bacio worktree init`, so it\n"+
+		"    gets its own port automatically, or\n"+
+		"  • pass an explicit free port with --port / --addr.\n"+
+		"`bacio status` reports the port this instance resolved.", addr)
+}
 
 // browserPollInterval and browserPollDeadline bound how long the
 // goroutine waits for /healthz to come up before launching the
@@ -129,7 +152,7 @@ incoming requests carry their own actor via the X-Actor header
 				go openBrowserWhenReady(ctx, addr, logger)
 			}
 
-			return srv.Run(ctx)
+			return friendlyServeErr(addr, srv.Run(ctx))
 		},
 	}
 	cmd.Flags().StringVar(&addr, "addr", "127.0.0.1:5320", "bind address (host:port)")

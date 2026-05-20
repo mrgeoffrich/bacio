@@ -91,7 +91,7 @@ requests carry their own actor via the X-Actor header (default "api").`,
 
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
-			err = srv.Run(ctx)
+			err = friendlyServeErr(addr, srv.Run(ctx))
 			if err != nil {
 				logger.Error("api shutdown", "err", err)
 			} else {

@@ -4,14 +4,37 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"go.yaml.in/yaml/v4"
 )
+
+// probePortFree reports whether a TCP port on the loopback host can be
+// bound right now. AllocatePort consults it so a freshly-init'd
+// worktree never gets handed a port some other process is already
+// listening on. The registry is authoritative only for ports bacio
+// knows it allocated; this probe covers everything it doesn't — a
+// dropped/rebuilt registry entry, a hand-rolled `bacio web --port`,
+// the user's own running instance, or an unrelated process. Without
+// it, a new worktree's `bacio web` would EADDRINUSE against a live
+// port and tempt a cleanup into killing the occupant.
+//
+// Overridable so tests stay deterministic (a real probe's result
+// depends on whatever happens to be bound on the test host).
+var probePortFree = func(port int) bool {
+	ln, err := net.Listen("tcp", net.JoinHostPort(DefaultAPIHost, strconv.Itoa(port)))
+	if err != nil {
+		return false
+	}
+	_ = ln.Close()
+	return true
+}
 
 // RegistryFilename is the per-user file that tracks every worktree
 // manifest bacio knows about. It lives under HOME/.bacio.
@@ -151,9 +174,17 @@ func (r *Registry) FindBySlug(slug string) (*RegistryEntry, bool) {
 
 // AllocatePort picks a free port for a new worktree. The chosen port
 // is deterministically seeded from the slug (DefaultAPIPort +
-// HashPortOffset(slug)); if that port is already taken by another
-// registry entry the search walks forward by 1 until a free slot
-// turns up or MaxAutoPortWalk is exhausted.
+// HashPortOffset(slug)); the search walks forward by 1 until a slot
+// turns up that is both unclaimed by another registry entry and not
+// currently bound by a live process (probePortFree), or until
+// MaxAutoPortWalk is exhausted.
+//
+// The OS probe matters because the registry is not a complete record
+// of what is listening: an entry can be dropped on a registry rebuild,
+// a `bacio web --port` may bind a port no manifest claims, and
+// non-bacio processes are invisible to it entirely. Probing keeps a
+// new worktree from being handed a port the user's own `bacio web` is
+// already serving on.
 //
 // The default port (DefaultAPIPort) is reserved — manifest-free
 // users keep using it, so a worktree init that lands there would
@@ -171,9 +202,13 @@ func (r *Registry) AllocatePort(slug string) (int, error) {
 		if candidate > 65535 {
 			return 0, fmt.Errorf("no free port within %d slots above %d", MaxAutoPortWalk, start)
 		}
-		if !taken[candidate] {
-			return candidate, nil
+		if taken[candidate] {
+			continue
 		}
+		if !probePortFree(candidate) {
+			continue
+		}
+		return candidate, nil
 	}
 	return 0, fmt.Errorf("no free port found within %d slots starting at %d (registry has %d entries)", MaxAutoPortWalk, start, len(r.Worktrees))
 }

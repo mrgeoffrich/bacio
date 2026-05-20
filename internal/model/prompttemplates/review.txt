@@ -4,7 +4,7 @@ the `dispatch_id` to acknowledge — call that ticket `<TICKET>` below.
 
 Make sure to use the bacio skill.
 As an agent first claim `<TICKET>` as yours.
-Make sure main is up to date then create a worktree to work in. Run `bacio worktree init` inside it so this run has its own DB + api port and won't fight the parent worktree's bacio.
+Make sure main is up to date then create a worktree to work in. Run `bacio worktree init` inside it so this run has its own DB + api port and won't fight the parent worktree's bacio. Run every `bacio` command from inside that worktree so it resolves the worktree's own port/DB; never `cd` out, and if you must run `bacio` from elsewhere pass `--env <worktree>/environment-config.yaml`. If `bacio web`/`bacio api` ever reports a port already in use, do NOT kill whatever holds it — that is most likely the user's own running bacio UI; re-check you are inside your worktree, or pass `--port`.
 Then set the status of `<TICKET>` to "in progress".
 Review the work on `<TICKET>` and its PR: check correctness, tests, and adherence to the issue's acceptance criteria. Report findings, don't change code.
 If you have to stop to get user assistance for any reason the issue will automatically be put into the "needs action" state. Once the user answers put the issue back into in progress.

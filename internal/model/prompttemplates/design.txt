@@ -11,7 +11,7 @@ The substantive deliverable is a design markdown doc (plus sibling SVG wireframe
 
 1. Use the bacio skill. Register / refresh your agent session as needed.
 2. Claim `<TICKET>` (`bacio agent claim <TICKET> --user <your-name> --prompt "design"`).
-3. Make sure `main` is up to date, then create a worktree to work in. Run `bacio worktree init` inside it so this run has its own DB + api port and won't fight the parent worktree's bacio.
+3. Make sure `main` is up to date, then create a worktree to work in. Run `bacio worktree init` inside it so this run has its own DB + api port and won't fight the parent worktree's bacio. Run every `bacio` command from inside that worktree so it resolves the worktree's own port/DB; never `cd` out, and if you must run `bacio` from elsewhere pass `--env <worktree>/environment-config.yaml`. If `bacio web`/`bacio api` ever reports a port already in use, do NOT kill whatever holds it — that is most likely the user's own running bacio UI; re-check you are inside your worktree, or pass `--port`.
 4. Set `<TICKET>` to **in progress** (`bacio issue state <TICKET> in-progress --user <your-name>`).
 
 If at any point you have to stop to get user assistance, the issue is automatically put into **needs action**. Once the user answers, put it back to in progress and continue.

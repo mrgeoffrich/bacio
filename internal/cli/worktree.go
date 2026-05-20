@@ -369,6 +369,49 @@ func newWorktreeShowCmd() *cobra.Command {
 	return cmd
 }
 
+// printWorktreeInit renders the human-readable summary for a
+// successful `bacio worktree init` — the resolved slug / port / DB /
+// log dir, plus the explicit `--env` invocation. cwd-based resolution
+// only fires for commands run from inside the worktree; the `--env`
+// line is the get-it-right-anywhere escape hatch (and survives across
+// shells, unlike an exported env var), so it is spelled out in full.
+func printWorktreeInit(w io.Writer, r *worktreeInitResult) error {
+	m := r.Manifest
+	root := filepath.Dir(r.ManifestPath)
+
+	dbPath := m.Allocations.DBPath
+	if !filepath.IsAbs(dbPath) {
+		dbPath = filepath.Join(root, dbPath)
+	}
+	// Mirror logging.Resolve's per-worktree default: an explicit
+	// allocations.log_dir wins, otherwise <worktree-root>/.bacio/logs/.
+	logDir := strings.TrimSpace(m.Allocations.LogDir)
+	switch {
+	case logDir == "":
+		logDir = filepath.Join(root, ".bacio", "logs")
+	case !filepath.IsAbs(logDir):
+		logDir = filepath.Join(root, logDir)
+	}
+
+	fmt.Fprintln(w, "Worktree environment initialised.")
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "  Slug:      %s\n", m.Identity.Slug)
+	fmt.Fprintf(w, "  API:       %s:%d\n", wtenv.DefaultAPIHost, m.Allocations.APIPort)
+	fmt.Fprintf(w, "  DB:        %s\n", dbPath)
+	fmt.Fprintf(w, "  Log dir:   %s\n", logDir)
+	fmt.Fprintf(w, "  Manifest:  %s\n", r.ManifestPath)
+	if r.GitignoreAdded {
+		fmt.Fprintf(w, "  Gitignore: added %s\n", wtenv.DefaultManifestFilename)
+	}
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "bacio commands run from inside this worktree pick this up")
+	fmt.Fprintln(w, "automatically — resolution walks up from cwd. To target this")
+	fmt.Fprintln(w, "environment from anywhere else, pass the manifest explicitly:")
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "  bacio --env %s <command>\n", r.ManifestPath)
+	return nil
+}
+
 func printWorktreeShow(w io.Writer, r *worktreeShowResult) error {
 	fmt.Fprintf(w, "Source:   %s\n", r.Source)
 	if r.ManifestPath != "" {
