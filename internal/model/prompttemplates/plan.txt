@@ -5,10 +5,10 @@ the `dispatch_id` to acknowledge — call that ticket `<TICKET>` below.
 ## Setup
 
 1. Use the bacio skill, then claim `<TICKET>` as yours.
-2. **Worktree.** You already run in an isolated git worktree (Claude Code created it for this subagent via `isolation: worktree` and removes it when you finish) — never run `git worktree add` or `git worktree remove` yourself.
+2. Set `<TICKET>` to **in progress**.
+3. **Worktree.** You already run in an isolated git worktree (Claude Code created it for this subagent via `isolation: worktree` and removes it when you finish) — never run `git worktree add` or `git worktree remove` yourself.
    - Run `bacio worktree init` inside the worktree so this run gets its own bacio DB + api port. Run every `bacio` command from inside the worktree; if you must run one from elsewhere, pass `--env <worktree>/environment-config.yaml`.
    - If `bacio web`/`bacio api` reports a port already in use, do NOT kill whatever holds it — that is most likely the user's own running bacio UI. Re-check you are inside your worktree, or pass `--port`.
-3. Set `<TICKET>` to **in progress**.
 
 ## Plan
 
