@@ -13,7 +13,7 @@ bacio is a kanban board for a single developer (or a tiny team) who already has 
 
 1. **You already have an agent in the loop.** If you talk to Claude Code or Codex while you code, asking it to *"file an issue for this bug"* is faster than opening a browser tab. bacio is built so an agent can drive the CLI reliably — every mutation accepts JSON, every payload schema is published at runtime, every destructive call has `--dry-run`. The agent has a skill (one markdown file) that teaches it the contract; you almost never type a `bacio` command yourself.
 2. **Your laptop is the source of truth.** Your kanban is a single SQLite file at `~/.bacio/db.sqlite`. No cloud, no signup, no API key. If you want a second machine to see it, [opt into git-backed sync](/guides/sync-across-machines); the sync repo is plain YAML + markdown you can read in your editor.
-3. **Read in the terminal.** A full-screen TUI with four tabs (Board, Features, Docs, History) means you never leave the place you already are. Cards are kanban-style, columns are issue states, the audit log shows who did what.
+3. **Read in the terminal.** A full-screen TUI with six tabs (Board, Features, Documents, Agents, History, Settings) means you never leave the place you already are. Cards are kanban-style, columns are issue states, the audit log shows who did what.
 
 ## What it's a good fit for
 
