@@ -150,7 +150,7 @@ Step 3 uses `git rev-parse --show-toplevel` (wrapped in
 `internal/git.WorktreeRoot`), which returns the LINKED worktree's own
 root. This is deliberately different from `internal/git.Detect`, which
 walks back to the *main* worktree's root so `resolveRepo`,
-`install-hooks`, `sync` etc. share one repo identity across every
+`install-agent`, `sync` etc. share one repo identity across every
 linked worktree of a project. The manifest layer wants the opposite
 contract — each linked worktree's bacio reads its own
 `environment-config.yaml`, not its parent's — so the writer

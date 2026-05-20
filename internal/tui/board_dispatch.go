@@ -288,7 +288,7 @@ func (b *boardView) confirmDispatch() {
 	issueID := b.dispatchIssue.ID
 	// BACI-76: the dispatch payload is the rewritten preamble plus a
 	// tiny stub (ticket / mode / subagent type) — the per-mode brief is
-	// the subagent's system prompt now (`bacio install-agents`). Same
+	// the subagent's system prompt now (`bacio install-agent`). Same
 	// shape the client's CreateDispatch produces for the desktop path.
 	preamble, err := b.store.GetDispatchPreamble()
 	if err != nil {

@@ -9,50 +9,46 @@ import (
 	"testing"
 )
 
-// TestReportChannelInstallDropsDangerousFlag is the BACI-48 regression
-// guard: the post-install success body (everything routed through ok(),
-// so it round-trips through -o json) must NOT include the
+// TestReportInstallAgentDropsDangerousFlag is the BACI-48 regression
+// guard, retargeted at the consolidated install-agent reporter
+// (BACI-79): the post-install success body (everything routed through
+// ok(), so it round-trips through -o json) must NOT include the
 // --dangerously-load-development-channels launch flag — that paragraph
 // of human-facing guidance belongs in the stderr banner
 // printActivationBanner produces, not the machine-parsed structured
-// success body. BACI-49 brought the flag back into the activation
-// banner, but the structured success body stays lean.
-func TestReportChannelInstallDropsDangerousFlag(t *testing.T) {
+// success body.
+func TestReportInstallAgentDropsDangerousFlag(t *testing.T) {
 	for _, action := range []string{"add", "update"} {
 		t.Run(action, func(t *testing.T) {
 			stdout := captureStdoutText(t, func() {
-				if err := reportChannelInstall("/repo/.mcp.json", action); err != nil {
-					t.Fatalf("reportChannelInstall: %v", err)
+				if err := reportInstallAgent("/repo/.claude/settings.json", nil, "/repo/.mcp.json", action, []string{"/repo/.claude/agents/bacio-plan-worker.md"}); err != nil {
+					t.Fatalf("reportInstallAgent: %v", err)
 				}
 			})
-			// The ok() helper routes through emit, which respects opts.output.
-			// In tests opts is zero-valued (outputText), so we get a single
-			// plain message line. Either way, the regression contract is
-			// the same: nothing in the body should mention the flag.
 			if strings.Contains(stdout, "--dangerously-load-development-channels") {
-				t.Fatalf("reportChannelInstall must not surface --dangerously-load-development-channels in the structured success body; got:\n%s", stdout)
+				t.Fatalf("reportInstallAgent must not surface --dangerously-load-development-channels in the structured success body; got:\n%s", stdout)
 			}
 			// Belt-and-braces: the success body should still confirm what
 			// happened, so callers grepping for the file path still match.
 			if !strings.Contains(stdout, "/repo/.mcp.json") {
-				t.Fatalf("reportChannelInstall output missing path; got:\n%s", stdout)
+				t.Fatalf("reportInstallAgent output missing .mcp.json path; got:\n%s", stdout)
 			}
 		})
 	}
 }
 
-// TestReportChannelInstallJSONShape pins the structured success body
+// TestReportInstallAgentJSONShape pins the structured success body
 // shape: a single object with a "message" field (the shape ok()
 // produces). Asserting on the field set catches accidental drift from
 // the standard ok() wrapper.
-func TestReportChannelInstallJSONShape(t *testing.T) {
+func TestReportInstallAgentJSONShape(t *testing.T) {
 	prev := opts.output
 	opts.output = outputJSON
 	t.Cleanup(func() { opts.output = prev })
 
 	stdout := captureStdoutText(t, func() {
-		if err := reportChannelInstall("/repo/.mcp.json", "add"); err != nil {
-			t.Fatalf("reportChannelInstall: %v", err)
+		if err := reportInstallAgent("/repo/.claude/settings.json", nil, "/repo/.mcp.json", "add", []string{"/repo/.claude/agents/bacio-plan-worker.md"}); err != nil {
+			t.Fatalf("reportInstallAgent: %v", err)
 		}
 	})
 	got := map[string]any{}
@@ -69,13 +65,12 @@ func TestReportChannelInstallJSONShape(t *testing.T) {
 }
 
 // TestPrintActivationBannerMentionsEnvVar pins the shared banner's
-// content. The banner is the install commands' way of telling the user
-// how to opt in; if the env-var name or the launch incantation drift
-// the user will be left wondering why the supervision they just
-// installed isn't firing. BACI-49 added two dangerously-* flags to
-// the launch line — they're pinned here so the one-line copy-paste
-// hint can't silently regress to the bare 'BACIO_AGENT_MODE=1 claude'
-// form again.
+// content. The banner is install-agent's way of telling the user how
+// to opt in; if the env-var name or the launch incantation drift the
+// user will be left wondering why the supervision they just installed
+// isn't firing. BACI-49 added two dangerously-* flags to the launch
+// line — they're pinned here so the one-line copy-paste hint can't
+// silently regress to the bare 'BACIO_AGENT_MODE=1 claude' form again.
 func TestPrintActivationBannerMentionsEnvVar(t *testing.T) {
 	var buf bytes.Buffer
 	printActivationBanner(&buf)

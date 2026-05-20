@@ -50,8 +50,8 @@ must be launched with --dangerously-load-development-channels, e.g.:
 
     claude --dangerously-load-development-channels server:bacio
 
-with a .mcp.json entry running 'bacio channel' (see 'bacio
-install-channel'). Requires Claude Code v2.1.80 or later, and the
+with a .mcp.json entry running 'bacio channel' (registered by 'bacio
+install-agent'). Requires Claude Code v2.1.80 or later, and the
 protocol contract may still change.
 
 Like 'bacio hook' and 'bacio tui', this is a harness-integration shim,

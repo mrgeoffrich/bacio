@@ -11,11 +11,11 @@ The shape of the week, in one paragraph: *you mostly talk to your agent, your ag
 
 ## Monday morning — stand-up
 
-You sit down with coffee and Claude Code. Either:
+You sit down with coffee and Claude Code:
 
-> stand-up
+> What changed yesterday, and what's in flight?
 
-(if you've installed [`bacio install-sample-skills`](/reference/cli/install-sample-skills) and the `stand-up` skill is enabled) — Claude runs `bacio issue list -o json --state in_progress`, `bacio issue list -o json --state in_review`, and `bacio history --since 1d -o json`, then summarises what's in flight, what's blocked, and what changed yesterday. Read-only — no writes.
+Claude runs `bacio issue list -o json --state in_progress`, `bacio issue list -o json --state in_review`, and `bacio history --since 1d -o json`, then summarises what's in flight, what's blocked, and what changed yesterday. Read-only — no writes.
 
 Or:
 
@@ -97,4 +97,4 @@ After a week or so, most users stop doing things they did with their old tracker
 
 - **[Work with Claude Code](/guides/work-with-claude-code)** — prompt patterns to lean on.
 - **[Sync across machines](/guides/sync-across-machines)** — for multi-machine workflows.
-- **[Sample skills](/reference/cli/install-sample-skills)** — `file-issue`, `triage`, `stand-up`, `plan-feature`.
+- **[`bacio install-agent`](/reference/cli/install-agent)** — set the repo up for agent-driven dispatch.

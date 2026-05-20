@@ -76,4 +76,4 @@ installed bacio skill (12345 bytes) at /Users/you/code/my-project/.claude/skills
 
 Restart Claude Code in this repo so the new skill loads. From here, your agent can file issues, link features, write doc pages, and read history — all without leaving the repo. Re-run `install-skill` after upgrading bacio (`brew upgrade bacio` / `scoop update bacio`) to pick up doc updates.
 
-Looking for higher-level workflows (file-issue, triage, stand-up, plan-feature)? See [`bacio install-sample-skills`](/reference/cli/install-sample-skills).
+Want your agent to pick up dispatched work? Run [`bacio install-agent`](/reference/cli/install-agent) — it wires up the subagent files, hooks, and channel MCP server in one command.

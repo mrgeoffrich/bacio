@@ -72,7 +72,7 @@ func refreshDispatchPreamble(db *sql.DB) error {
 	if strings.Contains(stored, "general-purpose") {
 		slog.Warn("bacio: your customised dispatch preamble still tells the supervisor to spawn `general-purpose`; " +
 			"BACI-76 moved the per-mode brief into custom subagents — review it against the new default " +
-			"(`bacio settings template reset _dispatch_preamble` takes ours, then `bacio install-agents`)")
+			"(`bacio settings template reset _dispatch_preamble` takes ours, then `bacio install-agent`)")
 	}
 	return nil
 }

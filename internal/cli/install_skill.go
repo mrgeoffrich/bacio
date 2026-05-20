@@ -19,9 +19,8 @@ func newInstallSkillCmd() *cobra.Command {
 the directory if needed. Overwrites any existing copy with the version
 embedded in this build of bacio so re-running picks up doc updates.
 
-See also: 'bacio install-sample-skills' for the flow-level workflow skills
-(file-issue, triage, stand-up, plan-feature) that build on top of this
-canonical reference.`,
+See also: 'bacio install-agent' to set the repo up for agent-driven
+dispatch (subagent files + hooks + channel).`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if inRemoteMode() {
 				return fmt.Errorf("bacio install-skill: not supported in remote mode (writes the skill file to the local repo); run this verb against the local DB instead")

@@ -109,38 +109,7 @@ If a request maps to something `bacio` exposes, claude will pick it up.
 
 ---
 
-## 3. Sample skills (optional)
-
-The canonical `bacio` skill teaches claude **how** to call the CLI. The sample skills bundled with `bacio` teach claude **when** and **why** for common flows — they're shortcuts you can drop into your repo when the bare canonical skill isn't picking up your phrasing.
-
-Install all four into the current repo:
-
-```bash
-bacio install-sample-skills
-```
-
-Or install only the ones you want:
-
-```bash
-bacio install-sample-skills triage stand-up
-```
-
-Each lands at `<repo-root>/.claude/skills/<name>/SKILL.md` and is overwritten on every run, so re-running picks up updates from a newer build of `bacio`. The file is checked into your repo alongside everything else, so the rest of your team gets the same shortcuts.
-
-Restart Claude Code so the new skills load, then:
-
-| Skill | Trigger phrase | What it does |
-|---|---|---|
-| `file-issue` | *"file an issue"*, *"log this"*, *"add a ticket"* | Takes a one-line description, writes a clean title, body, and tags; attaches to a feature if obvious. |
-| `triage` | *"triage the backlog"*, *"groom the board"*, *"what should I look at"* | Sweeps open issues in `todo`, proposes tags / priorities / feature groupings — asks before writing. |
-| `stand-up` | *"stand-up"*, *"daily summary"*, *"what changed yesterday"* | Pure-read summary of `in_progress`, blocked items, and the last 24h of audit history. |
-| `plan-feature` | *"plan the auth rewrite"*, *"break this down"* | Creates a feature, child issues, blocks/blocked-by edges, and (optionally) a linked design doc. |
-
-These are templates — open them, tweak the trigger phrases or the procedural steps to match your workflow, and commit the changes. Re-running `bacio install-sample-skills` will overwrite your edits with the bundled version, so once you've customised, leave the install command alone.
-
----
-
-## 4. The CLI as a fallback
+## 3. The CLI as a fallback
 
 You don't need to drive `bacio` directly, but you can. Useful for tab-completion-friendly commands, scripts, and getting a quick read on something without opening Claude Code:
 
@@ -156,7 +125,7 @@ For the full surface, `bacio --help` and `bacio <subcommand> --help` cover every
 
 ---
 
-## 5. Sync across machines (when you're ready)
+## 4. Sync across machines (when you're ready)
 
 Single-machine `bacio` is the fast path. If you want the same board on a laptop and a desktop, or to share a board with a teammate, set up git-backed sync.
 

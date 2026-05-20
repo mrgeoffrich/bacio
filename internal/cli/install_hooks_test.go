@@ -112,13 +112,13 @@ func readJSON(t *testing.T, path string, out any) error {
 	return json.Unmarshal(data, out)
 }
 
-// TestInstallHooksActivationBannerIncludesEnvVar pins the BACI-48 +
+// TestInstallAgentActivationBannerIncludesEnvVar pins the BACI-48 +
 // BACI-49 contract: the post-install activation banner mentions
 // BACIO_AGENT_MODE, the recommended launch command, and the two
 // dangerously-* flags BACI-49 added so a user who just ran
-// install-hooks sees one copy-paste line that wires up the env var,
+// install-agent sees one copy-paste line that wires up the env var,
 // the per-tool approval waiver, and the native-channels transport.
-func TestInstallHooksActivationBannerIncludesEnvVar(t *testing.T) {
+func TestInstallAgentActivationBannerIncludesEnvVar(t *testing.T) {
 	var buf strings.Builder
 	printActivationBanner(&buf)
 	got := buf.String()
