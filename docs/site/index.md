@@ -56,14 +56,16 @@ Open the full-screen kanban for the current repo:
 $ bacio tui
 ```
 
-Four tabs, all keyboard:
+Six tabs, all keyboard:
 
 - **Board** — kanban view, one column per state.
 - **Features** — group issues into shipping units.
-- **Docs** — markdown notes that live next to the work.
+- **Documents** — markdown notes that live next to the work.
+- **Agents** — live agent sessions, their claims, and dispatch queue.
 - **History** — audit log of every mutation, with actor and op.
+- **Settings** — edit dispatch prompt templates and board preferences.
 
-Switch tabs with `1`–`4`. The footer always shows the keybindings for whatever view you're in — there's no hidden help screen. `q` (or `ctrl-c`) quits; inside an overlay `esc` closes the overlay first. See the [keybindings cheat sheet](/reference/tui/keybindings) for the full surface.
+Switch tabs with `1`–`6`. The footer always shows the keybindings for whatever view you're in — there's no hidden help screen. `q` (or `ctrl-c`) quits; inside an overlay `esc` closes the overlay first. See the [keybindings cheat sheet](/reference/tui/keybindings) for the full surface.
 
 ## 4. Let your agent in
 

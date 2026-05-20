@@ -13,7 +13,7 @@ These work from any tab. Inside an overlay, `q` and digits still quit / switch t
 
 | Key | Action |
 |---|---|
-| `1` – `4` | Switch to tab N (Board, Features, Docs, History). Digits beyond the tab count fall through to the active view. |
+| `1` – `6` | Switch to tab N (Board, Features, Documents, Agents, History, Settings). Digits beyond the tab count fall through to the active view. |
 | `q` | Quit. Always. |
 | `ctrl-c` | Quit. Always. |
 | `esc` | Close the active overlay; quit if no overlay is open. |
@@ -130,6 +130,39 @@ Cycles through three inner panes — description, comments, attachments — via 
 
 Cross-tab note: when a card's *Linked documents* attachment is opened (via `enter` on the attachments pane), the TUI jumps to the Docs tab with that file selected and remembers the original tab so `esc` returns you there.
 
+## Agents tab
+
+| Key | Action |
+|---|---|
+| `j` / `k` (or `down` / `up`) | Move between agent sessions. |
+| `g` / `home` | First session. |
+| `G` / `end` | Last session. |
+| `enter` | Open the focused session's detail view. |
+| `?` | Answer the session's open clarification question(s). |
+| `a` | Toggle stub sessions (un-registered sessions) in/out of the list. |
+| `r` | Reload. |
+| `q` | Quit. |
+
+### Session detail
+
+| Key | Action |
+|---|---|
+| `j` / `k` (or `down` / `up`) | Scroll. |
+| `esc` | Back to the session list. |
+| `r` | Reload. |
+| `q` | Quit. |
+
+### Question overlay (open with `?`)
+
+| Key | Action |
+|---|---|
+| `j` / `k` | Move selection. |
+| `space` | Toggle the focused option. |
+| `tab` | Next question. |
+| `enter` | Submit the answer(s). |
+| `d` | Dismiss the question. |
+| `esc` | Close the overlay. |
+
 ## History tab
 
 | Key | Action |
@@ -141,6 +174,31 @@ Cross-tab note: when a card's *Linked documents* attachment is opened (via `ente
 | `G` / `end` | Bottom. |
 | `r` | Reload. |
 | `q` | Quit. |
+
+## Settings tab
+
+The Settings tab edits the dispatch prompt templates and board preferences.
+
+| Key | Action |
+|---|---|
+| `j` / `k` (or `down` / `up`) | Move between templates. |
+| `enter` | Edit the focused template. |
+| `a` | Add a new template. |
+| `r` | Rename the focused template. |
+| `d` | Delete the focused template. |
+| `R` | Restore the built-in templates. |
+| `q` | Quit. |
+
+### Template editor (open with `enter`)
+
+| Key | Action |
+|---|---|
+| `tab` | Switch between the body and state-gate panes. |
+| `ctrl+s` | Save. |
+| `ctrl+r` | Reset a built-in template to its default. |
+| `h` / `l` | Move between states (state-gate pane). |
+| `space` | Toggle the focused state (saves immediately). |
+| `esc` | Close the editor. |
 
 ## Source of truth
 

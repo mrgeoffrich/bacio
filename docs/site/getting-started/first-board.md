@@ -108,12 +108,13 @@ Time to look at what you've built:
 bacio tui
 ```
 
-The four tabs are `1` Board, `2` Features, `3` Docs, `4` History. Switch with plain digits; the footer shows the bindings for the current view (there's no hidden `?` screen).
+The six tabs are `1` Board, `2` Features, `3` Documents, `4` Agents, `5` History, `6` Settings. Switch with plain digits; the footer shows the bindings for the current view (there's no hidden `?` screen).
 
 Try this:
 
 - **Board** — `h`/`l` between columns, `j`/`k` between cards, `enter` to open one. Inside the card overlay, `tab` cycles description / comments / attachments.
 - **Features** — `j`/`k`, `enter` for the overlay with the feature's description and child issues.
+- **Agents** — the live agent sessions working this repo, their open claims, and the dispatch queue.
 - **History** — every mutation, with actor and op. Notice that the issue you filed by hand attributed to your OS user, and the ones Claude filed attributed to `agent-claude`.
 
 `q` or `esc` quits. The full keybinding surface is on the [cheat sheet](/reference/tui/keybindings).

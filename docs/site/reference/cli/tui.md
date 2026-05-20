@@ -5,7 +5,7 @@ description: Open the full-screen kanban TUI for the current repo, or snapshot a
 
 # `bacio tui`
 
-Open the full-screen kanban board. Four tabs (Board, Features, Docs, History), all keyboard-driven. See the [TUI reference](/reference/tui/board) for what each tab does.
+Open the full-screen kanban board. Six tabs (Board, Features, Documents, Agents, History, Settings), all keyboard-driven. See the [TUI reference](/reference/tui/board) for what each tab does.
 
 ```bash
 bacio tui
@@ -23,7 +23,7 @@ bacio tui
 
 | Flag | What it does |
 |---|---|
-| `--snapshot <target>` | Render one view and exit. Targets: `board`, `features`, `docs`, `history`, `card-overlay`, `doc-overlay`, `feature-overlay`, `picker`. |
+| `--snapshot <target>` | Render one view and exit. Targets: `board`, `features`, `docs`, `agents`, `agent-detail`, `history`, `settings`, `settings-editor`, `card-overlay`, `doc-overlay`, `feature-overlay`, `picker`, `feature-picker`, `dispatch-picker`. |
 | `--issue <KEY>` | Issue to focus for `board` / `card-overlay` snapshots (e.g. `MINI-1`). |
 | `--width <int>` | Terminal width for snapshot. Default `120`. |
 | `--height <int>` | Terminal height for snapshot. Default `40`. |
