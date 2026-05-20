@@ -7,21 +7,27 @@ import (
 
 // AgentFileToolAllowlist is the explicit `tools:` allowlist BACI-76
 // writes into every generated per-mode subagent file. It is the
-// general-purpose code-work core (Read/Edit/Write/Bash/Grep/Glob/
-// TaskCreate, no Task, no TodoWrite) plus WebFetch/WebSearch (plan and
-// design briefs do real research) plus only the three bacio channel
-// MCP tools a dispatched worker needs. Every other MCP surface the
-// general-purpose subagent inherits today (Gmail / Calendar / Drive /
-// Linear / Slack / plugin-dev) is deliberately dropped — that is the
-// surface-narrowing win the ticket calls out, and it also trims the
-// tool-definition block in the subagent's prefill.
+// general-purpose code-work core (Read/Edit/Write/Bash/Grep/Glob) plus
+// the session task-list family (TaskCreate/TaskUpdate/TaskList/TaskGet —
+// no `Task`/`Agent`, since subagents can't spawn subagents, and no
+// `TodoWrite`, disabled upstream since v2.1.142 in favour of the Task*
+// tools) plus WebFetch/WebSearch (plan and design briefs do real
+// research) plus `Skill` (every brief opens with "use the bacio skill"
+// and smoke-tests via the playwright-cli skill — an allowlist that
+// omits `Skill` blocks all skill invocation) plus only the three bacio
+// channel MCP tools a dispatched worker needs. Every other MCP surface
+// the general-purpose subagent inherits today (Gmail / Calendar /
+// Drive / Linear / Slack / plugin-dev) is deliberately dropped — that
+// is the surface-narrowing win the ticket calls out, and it also trims
+// the tool-definition block in the subagent's prefill.
 //
 // v1 keeps the list uniform across all six modes; per-mode narrowing
 // is a follow-up. The list is generated, so tightening it later is a
 // generator change, not a per-file edit.
 var AgentFileToolAllowlist = []string{
-	"Read", "Edit", "Write", "Bash", "Grep", "Glob", "TaskCreate",
-	"WebFetch", "WebSearch",
+	"Read", "Edit", "Write", "Bash", "Grep", "Glob",
+	"TaskCreate", "TaskUpdate", "TaskList", "TaskGet",
+	"Skill", "WebFetch", "WebSearch",
 	"mcp__bacio__register", "mcp__bacio__reply", "mcp__bacio__ask_user_question",
 }
 

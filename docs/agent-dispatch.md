@@ -607,20 +607,35 @@ reader — that there should be *no* `.claude/agents/` file and *no*
 install verb. The prompt-cache / TTFT win, plus the per-worker
 tool-surface narrowing, made the per-mode subagent the better seam.)
 
-### Subagent tool surface and the TodoWrite-mirror gap
+### Subagent tool surface
 
 The generated agent files set an explicit `tools:` allowlist
 (`model.AgentFileToolAllowlist`), uniform across all six modes for v1:
 
 ```
-Read, Edit, Write, Bash, Grep, Glob, TaskCreate,
-WebFetch, WebSearch,
+Read, Edit, Write, Bash, Grep, Glob,
+TaskCreate, TaskUpdate, TaskList, TaskGet,
+Skill, WebFetch, WebSearch,
 mcp__bacio__register, mcp__bacio__reply, mcp__bacio__ask_user_question
 ```
 
-This is the general-purpose code-work core (no `Task`, no `TodoWrite`)
-plus `WebFetch`/`WebSearch` (the `plan` and `design` briefs do real
-research) plus only the three bacio channel MCP tools a worker needs.
+This is the general-purpose code-work core plus:
+
+- The **session task-list family** (`TaskCreate`/`TaskUpdate`/`TaskList`/
+  `TaskGet`). `Task`/`Agent` is excluded — subagents can't spawn
+  subagents — and `TodoWrite` is excluded because it's disabled upstream
+  since v2.1.142 in favour of the `Task*` tools. Earlier the allowlist
+  carried `TaskCreate` alone, which made the task list write-only: a
+  worker could create sub-steps but never mark them in-progress or
+  complete. The full family closes that gap.
+- `Skill` — **required**: every per-mode brief opens with "use the
+  bacio skill", and smoke-testing runs through the `playwright-cli`
+  skill. Because `tools:` is an allowlist, omitting `Skill` blocks *all*
+  skill invocation, so a worker without it cannot follow its own brief.
+- `WebFetch`/`WebSearch` — the `plan` and `design` briefs do real
+  research.
+- Only the three bacio channel MCP tools a worker needs.
+
 Every other MCP server the parent has connected — Gmail / Calendar /
 Drive / Linear / Slack / plugin-dev — is **dropped**: a dispatched
 worker never needs them, and excluding them trims the tool-definition
@@ -628,15 +643,8 @@ block in the subagent's prefill. Per-mode narrowing of this list is a
 filed follow-up; the list is generated, so tightening it is a
 generator change.
 
-The one **known limitation** is the `TodoWrite` gap: BACI-45's
-`PostToolUse`-on-`TaskCreate`/`TaskUpdate` mirror still fires
-(subagent `TaskCreate` calls share the parent's task store), but a
-custom subagent has no `TodoWrite` tool — same as the old
-`general-purpose`. Dispatch correctness is unaffected. If the missing
-sub-step telemetry becomes painful, the follow-up is a small
-`mcp__bacio__todo_replace` MCP tool (~30 lines reusing
-`client.ReplaceSessionTodos`); the gap is documented here so the next
-reader doesn't waste a spike on it.
+BACI-45's `PostToolUse`-on-`TaskCreate`/`TaskUpdate` mirror fires for
+subagent task-list calls too — they share the parent's task store.
 
 ### Trivial-dispatch carve-out (structural, not instruction-based)
 
