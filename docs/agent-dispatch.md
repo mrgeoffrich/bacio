@@ -25,7 +25,8 @@ under [Agent identity](#agent-identity--the-claude_pid-correlation).
 ```
 
 A **dispatch** is one unit of supervisor→agent work: an issue to look
-at, an intent (plan vs implement), and an optional note. The data is
+at, a mode (a job stage — see [Mode](#mode-prompt-templates-and-the-payload)
+below), and an optional note. The data is
 never synced to GitHub (like the rest of the registry), but the full
 CRUD — create / list / inbox / ack — is reachable over `bacio api`
 (BACI-34 + BACI-35), so a remote supervisor can queue work for an
@@ -125,20 +126,29 @@ show agent.dispatch`, `--dry-run`. Code: `internal/cli/agent.go`
 
 ### From the TUI
 
-On the board, select a **todo** issue and press **`x`**. A three-step
-picker opens (`internal/tui/board_dispatch.go`):
+On the board, select an issue and press **`x`**. A three-step picker
+opens (`internal/tui/board_dispatch.go`):
 
 1. **pick an agent** — the repo's live sessions. Busy sessions (see
    [Busy agents](#busy-agents--dispatch-target-eligibility)) render
    greyed with a `busy · working <ISSUE-KEY>` reason and are
    non-selectable — `j`/`k` skip them and `enter` refuses them.
-2. **pick a mode** — Plan or Implement
+2. **pick a mode** — the dispatch stages whose state-gate admits the
+   focused issue's current state, rendered with their imperative action
+   labels. For a `todo` issue that is **Plan**, **Design**, and
+   **Implement**; for an `in_review` issue it is **Review**, **Ship**,
+   and **Fix-review**. The list is built by
+   `availableDispatchModes(store, issueState)`, so it tracks the
+   templates' state-gates and any user-added templates rather than being
+   a fixed set.
 3. **add a note** — optional, free-form
 
 Confirm and the dispatch is written + an `agent.dispatch` history row is
-recorded. `x` on a non-todo issue is a no-op with a one-line hint.
-`confirmDispatch` re-checks the chosen session isn't busy before writing,
-so a session that goes busy mid-picker is caught.
+recorded. `x` opens the picker on any issue; when no template's
+state-gate admits the issue's current state (`availableDispatchModes`
+returns an empty list) the picker is suppressed with a one-line hint
+instead. `confirmDispatch` re-checks the chosen session isn't busy
+before writing, so a session that goes busy mid-picker is caught.
 
 ### From the desktop app
 
@@ -168,6 +178,7 @@ prompt when the card's state is in that stage's gate. Built-in defaults
 | stage        | valid-from states |
 | ------------ | ----------------- |
 | `plan`       | `todo`            |
+| `design`     | `todo`            |
 | `implement`  | `todo`            |
 | `review`     | `in_review`       |
 | `ship`       | `in_review`       |
@@ -608,6 +619,34 @@ channel MCP server — all in a single invocation with one plan/confirm.
 reader — that there should be *no* `.claude/agents/` file and *no*
 install verb. The prompt-cache / TTFT win, plus the per-worker
 tool-surface narrowing, made the per-mode subagent the better seam.)
+
+### Worktree-isolated workers (#114)
+
+Each generated `.claude/agents/bacio-<mode>-worker.md` carries an
+`isolation: worktree` line in its frontmatter (`model.AgentFileIsolation`,
+`internal/model/agentfile.go`). Claude Code reads that and runs every
+dispatched worker in its **own throwaway git worktree** — created when
+the subagent spawns, removed automatically on a clean finish. The worker
+never runs `git worktree add` / `remove` itself, and concurrent
+dispatches can never edit each other's files.
+
+This is **complementary to**, not a replacement for, `bacio worktree
+init`. The two isolate different things:
+
+- Claude Code's `isolation: worktree` isolates the **filesystem** — each
+  worker gets a clean checkout.
+- `bacio worktree init` isolates **bacio's own state** — a separate
+  SQLite DB and API port, so the worker's `bacio` calls don't clash on
+  `~/.bacio/db.sqlite` or `127.0.0.1:5320` with the user's running TUI /
+  desktop / other workers.
+
+So every per-mode brief still opens by running `bacio worktree init`
+*inside* its Claude-Code-provided worktree: the worktree gives it an
+isolated filesystem, and `bacio worktree init` gives that worktree its
+own bacio environment. The worker tears the bacio environment down with
+`bacio worktree rm` on close; Claude Code removes the git worktree
+itself. See [`docs/worktree-environments.md`](worktree-environments.md)
+for the bacio-side of that isolation.
 
 ### Subagent tool surface
 
