@@ -22,6 +22,18 @@ import (
 //go:embed migrationdata/old_dispatch_preamble_baci52.txt
 var oldDispatchPreambleBACI52 string
 
+// oldDispatchPreambleBACI76Typo is the verbatim _dispatch_preamble body
+// bacio shipped between BACI-76 and BACI-80. It is identical to the
+// post-BACI-80 default except that it told the supervisor to run the
+// retired `bacio install-agents` (plural) verb in two places. BACI-79
+// consolidated setup into `bacio install-agent` (singular); the plural
+// form errors with `unknown command`. Embedded frozen so the BACI-80
+// refresh migration can byte-compare a stored preamble against it and
+// replace it in place when the user never customised the row.
+//
+//go:embed migrationdata/old_dispatch_preamble_baci76.txt
+var oldDispatchPreambleBACI76Typo string
+
 // refreshDispatchPreamble is the BACI-76 one-time migration of the
 // stored _dispatch_preamble body. Before BACI-76 the preamble told the
 // supervisor to spawn `general-purpose` and paste the full brief; after
@@ -55,7 +67,7 @@ func refreshDispatchPreamble(db *sql.DB) error {
 		return nil // already on the new default.
 	}
 	// loadDefaultPromptBodies stores bodies with trailing \r\n stripped,
-	// so compare the old embedded file the same way.
+	// so compare the old embedded files the same way.
 	oldDefault := strings.TrimRight(oldDispatchPreambleBACI52, "\r\n")
 	if stored == oldDefault {
 		if _, err := db.Exec(
@@ -64,7 +76,22 @@ func refreshDispatchPreamble(db *sql.DB) error {
 		); err != nil {
 			return err
 		}
-		slog.Info("bacio: refreshed the _dispatch_preamble body to the BACI-76 default (spawn per-mode subagent)")
+		slog.Info("bacio: refreshed the _dispatch_preamble body to the current default (spawn per-mode subagent)")
+		return nil
+	}
+	// BACI-80: the BACI-76 default carried a `bacio install-agents`
+	// (plural) typo. If the stored body matches that frozen typo'd
+	// default, the user never customised it — replace it with the
+	// corrected default in place.
+	oldTypoDefault := strings.TrimRight(oldDispatchPreambleBACI76Typo, "\r\n")
+	if stored == oldTypoDefault {
+		if _, err := db.Exec(
+			`UPDATE prompt_templates SET body = ?, updated_at = CURRENT_TIMESTAMP WHERE slug = ?`,
+			newDefault, slug,
+		); err != nil {
+			return err
+		}
+		slog.Info("bacio: refreshed the _dispatch_preamble body to the BACI-80 default (`bacio install-agents` typo fixed)")
 		return nil
 	}
 	// Customised body — leave it, but warn: it may still say
