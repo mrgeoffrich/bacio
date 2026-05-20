@@ -461,6 +461,14 @@ func migrate(db *sql.DB) error {
 	if err := backfillDispatchPreamble(db); err != nil {
 		return fmt.Errorf("backfill dispatch preamble: %w", err)
 	}
+	// BACI-76: refresh the stored _dispatch_preamble body from the old
+	// (spawn `general-purpose` + paste brief) default to the new (spawn
+	// the per-mode subagent + tiny stub) default — but only when the
+	// user never customised it. Must run after backfillDispatchPreamble
+	// so the row exists.
+	if err := refreshDispatchPreamble(db); err != nil {
+		return fmt.Errorf("refresh dispatch preamble: %w", err)
+	}
 	// BACI-68: add archived_at columns + indexes to issues, features,
 	// documents on older DBs. The CREATE TABLE declarations in
 	// schema.sql carry the column for fresh DBs; this ALTER + index

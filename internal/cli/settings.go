@@ -3,6 +3,8 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"strconv"
 	"strings"
 
@@ -547,10 +549,15 @@ func settingsTemplateSetCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "set [SLUG] [BODY]",
 		Short: "Update a dispatch prompt template's body",
-		Long: `Update the body of an existing template. BODY may use the
-{{issue_id}}, {{issue_title}} and {{repo_prefix}} placeholders — they're
-substituted with the issue's context at dispatch time. To revert a
-built-in template to its embedded default, use ` + "`bacio settings template reset`" + `.`,
+		Long: `Update the body of an existing template. To revert a built-in
+template to its embedded default, use ` + "`bacio settings template reset`" + `.
+
+A dispatch template's body becomes a per-mode subagent's system prompt
+(BACI-76). Run ` + "`bacio install-agents`" + ` after editing a body to apply
+the change to dispatched workers. {{issue_id}} / {{issue_title}} /
+{{repo_prefix}} placeholders are a compose-time feature and do NOT
+survive into an agent file — write the body to refer to "the ticket
+named in your dispatch prompt" instead.`,
 		Args: cobra.RangeArgs(0, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			raw, err := parseJSONInput(cmd, args, rawInput)
@@ -825,7 +832,25 @@ func applyTemplateBody(slugArg, body string) error {
 	if err != nil {
 		return wrapTemplateLookup(slug, err)
 	}
+	// BACI-76: changing a dispatchable template's body leaves the
+	// generated .claude/agents/bacio-<slug>-worker.md file stale until
+	// `bacio install-agents` re-runs. Surface that as stderr guidance
+	// (not part of the structured success body — same split as the
+	// install-channel activation banner).
+	printTemplateStaleAgentHint(os.Stderr, slug)
 	return emit(templateViewForRow(t))
+}
+
+// printTemplateStaleAgentHint reminds the user, on stderr, that a
+// template-body change does not reach the dispatched workers until the
+// generated agent file is regenerated. No-op for the reserved
+// _dispatch_preamble row (it has no agent file — it stays in the
+// dispatch payload).
+func printTemplateStaleAgentHint(w io.Writer, slug string) {
+	if slug == model.BuiltinTemplatePreamble {
+		return
+	}
+	fmt.Fprintf(w, "note: the agent file for %q is now stale — run `bacio install-agents %s` to apply this change to dispatched workers.\n", slug, slug)
 }
 
 func settingsTemplateAddCmd() *cobra.Command {

@@ -286,26 +286,20 @@ func (b *boardView) confirmDispatch() {
 	}
 	sess := b.dispatchSessions[b.dispatchAgentRow]
 	issueID := b.dispatchIssue.ID
-	// Resolve the stage's prompt template (custom override or built-in
-	// default) and render it against this issue before storing — same
-	// substitution the client's CreateDispatch does for the desktop path.
-	// The BACI-52 preamble is prepended so the parent session delegates
-	// the work to a subagent.
-	template, err := b.store.GetPromptTemplate(b.dispatchMode)
-	if err != nil {
-		b.err = err
-		return
-	}
+	// BACI-76: the dispatch payload is the rewritten preamble plus a
+	// tiny stub (ticket / mode / subagent type) — the per-mode brief is
+	// the subagent's system prompt now (`bacio install-agents`). Same
+	// shape the client's CreateDispatch produces for the desktop path.
 	preamble, err := b.store.GetDispatchPreamble()
 	if err != nil {
 		b.err = err
 		return
 	}
-	payload := model.ComposeDispatchPayload(preamble, template, map[string]string{
-		"issue_id":    b.dispatchIssue.Key,
-		"issue_title": b.dispatchIssue.Title,
-		"repo_prefix": b.repo.Prefix,
-	}, b.dispatchNote)
+	stub := model.DispatchStub{IssueKey: b.dispatchIssue.Key, Mode: string(b.dispatchMode)}
+	if b.dispatchMode != "" {
+		stub.SubagentType = model.SubagentTypeForTemplate(string(b.dispatchMode))
+	}
+	payload := model.ComposeDispatchPayload(preamble, stub, b.dispatchNote)
 	d, err := b.store.AddDispatch(store.AddDispatchIn{
 		RepoID: b.repo.ID,
 		// Pass both targets: the session id is always reliable, and

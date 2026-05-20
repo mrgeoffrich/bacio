@@ -52,8 +52,8 @@ func TestPromptTemplatesSeededOnFirstOpen(t *testing.T) {
 // dispatch composer uses to fetch the preamble body. A fresh DB has
 // the row seeded from the embedded default — the body must contain
 // the load-bearing delegation phrase. Deleting the row degrades the
-// helper to "" so ComposeDispatchPayload skips the preamble + separator
-// (the pre-BACI-52 shape).
+// helper to "" so ComposeDispatchPayload skips the preamble (the
+// pre-BACI-52 shape).
 func TestGetDispatchPreambleReturnsBody(t *testing.T) {
 	s := newTestStore(t)
 	body, err := s.GetDispatchPreamble()
@@ -63,13 +63,18 @@ func TestGetDispatchPreambleReturnsBody(t *testing.T) {
 	if body == "" {
 		t.Fatal("GetDispatchPreamble returned empty body on a fresh DB")
 	}
-	// The delegation contract sticks Task / general-purpose / opus
-	// front-and-centre — if one of those phrases vanishes the wrapper
-	// has stopped doing its job.
-	for _, phrase := range []string{"Task(", "general-purpose", "opus"} {
+	// BACI-76: the delegation contract now tells the supervisor to spawn
+	// the per-mode custom subagent named by the stub's `Subagent:` line
+	// — Task( front-and-centre, and the `Subagent:` stub reference.
+	for _, phrase := range []string{"Task(", "Subagent:", "subagent_type"} {
 		if !strings.Contains(body, phrase) {
 			t.Errorf("preamble body missing %q\nfull body:\n%s", phrase, body)
 		}
+	}
+	// BACI-76 retired the `general-purpose` spawn — the preamble must no
+	// longer name it.
+	if strings.Contains(body, "general-purpose") {
+		t.Errorf("preamble body still names the retired general-purpose subagent:\n%s", body)
 	}
 	if _, err := s.DeletePromptTemplate(model.BuiltinTemplatePreamble); err != nil {
 		t.Fatalf("delete preamble: %v", err)

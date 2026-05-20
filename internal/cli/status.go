@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -37,6 +38,12 @@ type statusReport struct {
 	Stats      statusStats     `json:"stats"`
 	AgentMode  statusAgentMode `json:"agent_mode"`
 
+	// Agents (BACI-76) reports the freshness of the per-mode dispatch
+	// subagent files in <repo-root>/.claude/agents/ relative to the
+	// current prompt_templates rows. Populated only inside a git tree;
+	// nil otherwise.
+	Agents *statusAgents `json:"agents,omitempty"`
+
 	// LLMRecommendations carries plain-English, actionable advice for
 	// an agent reading `bacio status -o json`: setup problems bacio
 	// noticed and a concrete fix for each. Empty (and omitted) when
@@ -54,6 +61,26 @@ type statusAgentMode struct {
 	EnvVar string `json:"env_var"`
 	Value  string `json:"value"`
 	Active bool   `json:"active"`
+}
+
+// statusAgents (BACI-76) is the dispatch-subagent-file freshness
+// readout. For every dispatchable template, it records whether the
+// generated `.claude/agents/bacio-<mode>-worker.md` file exists and
+// whether its body matches the current template body.
+type statusAgents struct {
+	// Files is one entry per dispatchable template, slug-sorted.
+	Files []statusAgentFile `json:"files"`
+	// AllUpToDate is true iff every entry is "up-to-date".
+	AllUpToDate bool `json:"all_up_to_date"`
+}
+
+// statusAgentFile is the per-template freshness verdict.
+type statusAgentFile struct {
+	Slug    string `json:"slug"`
+	Path    string `json:"path"`
+	Subtype string `json:"subagent_type"`
+	// State is one of "up-to-date" | "missing" | "stale".
+	State string `json:"state"`
 }
 
 type statusStats struct {
@@ -137,6 +164,15 @@ func buildStatusReport(s *store.Store, env wtenv.Resolved, logRes logging.Resolv
 		report.InRepo = true
 		report.Path = info.Root
 		report.LLMRecommendations = statusRecommendations(info.Root)
+		agents, err := buildStatusAgents(s, info.Root)
+		if err != nil {
+			return nil, err
+		}
+		report.Agents = agents
+		if agents != nil && !agents.AllUpToDate {
+			report.LLMRecommendations = append(report.LLMRecommendations,
+				"One or more dispatch subagent files in .claude/agents/ are missing or stale. Run `bacio install-agents` to (re)generate them — without them, a dispatched Task() spawn fails with an unknown subagent type.")
+		}
 		repo, err := s.GetRepoByPath(info.Root)
 		if errors.Is(err, store.ErrNotFound) {
 			return report, nil
@@ -213,6 +249,53 @@ func statusRecommendations(repoRoot string) []string {
 	return recs
 }
 
+// buildStatusAgents (BACI-76) compares the generated dispatch-subagent
+// files in <repoRoot>/.claude/agents/ against the current
+// prompt_templates rows. Read-only — it renders the expected content in
+// memory and stats / reads the on-disk files, never writing. A template
+// whose body still carries a {{...}} placeholder (so RenderAgentFile
+// would reject it) is skipped — it is not installable as an agent file,
+// so it can't be "stale".
+func buildStatusAgents(s *store.Store, repoRoot string) (*statusAgents, error) {
+	tmpls, err := s.ListPromptTemplates()
+	if err != nil {
+		return nil, err
+	}
+	out := &statusAgents{AllUpToDate: true}
+	base := filepath.Join(repoRoot, agentFilesDir)
+	for _, t := range tmpls {
+		if t.Slug == model.BuiltinTemplatePreamble {
+			continue
+		}
+		if strings.TrimSpace(t.Body) == "" {
+			continue
+		}
+		expected, err := model.RenderAgentFile(t.Slug, t.Name, t.Body)
+		if err != nil {
+			// Body has a {{...}} placeholder — not installable. Skip.
+			continue
+		}
+		subtype := model.SubagentTypeForTemplate(t.Slug)
+		dest := filepath.Join(base, subtype+".md")
+		entry := statusAgentFile{Slug: t.Slug, Path: dest, Subtype: subtype}
+		switch actual, err := os.ReadFile(dest); {
+		case errors.Is(err, os.ErrNotExist):
+			entry.State = "missing"
+		case err != nil:
+			return nil, err
+		case string(actual) == expected:
+			entry.State = "up-to-date"
+		default:
+			entry.State = "stale"
+		}
+		if entry.State != "up-to-date" {
+			out.AllUpToDate = false
+		}
+		out.Files = append(out.Files, entry)
+	}
+	return out, nil
+}
+
 func printStatus(w io.Writer, r *statusReport) error {
 	switch {
 	case r.InRepo && r.Registered && r.Repo != nil:
@@ -226,6 +309,8 @@ func printStatus(w io.Writer, r *statusReport) error {
 		fmt.Fprintf(w, "Env:     %s\n", formatEnvSource(r))
 		fmt.Fprintf(w, "Log:     %s\n", formatLogSource(r))
 		fmt.Fprintf(w, "%s\n\n", formatAgentMode(r.AgentMode))
+
+		fmt.Fprintf(w, "Agents:  %s\n", formatAgents(r.Agents))
 
 		fmt.Fprintf(w, "Features: %d\n", r.Stats.Features)
 		fmt.Fprintf(w, "Issues:   %d\n", r.Stats.Issues)
@@ -244,6 +329,7 @@ func printStatus(w io.Writer, r *statusReport) error {
 		fmt.Fprintf(w, "Env:     %s\n", formatEnvSource(r))
 		fmt.Fprintf(w, "Log:     %s\n", formatLogSource(r))
 		fmt.Fprintf(w, "%s\n", formatAgentMode(r.AgentMode))
+		fmt.Fprintf(w, "Agents:  %s\n", formatAgents(r.Agents))
 
 	default:
 		fmt.Fprintf(w, "DB:      %s\n", r.DBPath)
@@ -314,6 +400,29 @@ func formatLogSource(r *statusReport) string {
 		src = "default"
 	}
 	return fmt.Sprintf("%s (level=%s source=%s)", r.LogDir, r.LogLevel, src)
+}
+
+// formatAgents renders the BACI-76 dispatch-subagent-file freshness
+// row. Summarises the per-template verdicts into one line: all
+// up-to-date, or a count of missing / stale files with the hint to
+// re-run `bacio install-agents`.
+func formatAgents(a *statusAgents) string {
+	if a == nil || len(a.Files) == 0 {
+		return "(no dispatch templates)"
+	}
+	if a.AllUpToDate {
+		return fmt.Sprintf("%d subagent file(s) up-to-date", len(a.Files))
+	}
+	var missing, stale int
+	for _, f := range a.Files {
+		switch f.State {
+		case "missing":
+			missing++
+		case "stale":
+			stale++
+		}
+	}
+	return fmt.Sprintf("%d missing, %d stale — run `bacio install-agents`", missing, stale)
 }
 
 // formatAgentMode renders the BACIO_AGENT_MODE row aligned with the

@@ -468,15 +468,14 @@ forwards that summary, and goes back to waiting for the next
    <channel> tag arrives in parent
               │
               ▼
-   parent reads tag + channel instructions, calls Task(
-        subagent_type = "general-purpose",
-        model         = "opus",
-        prompt        = <worker contract + dispatch payload + issue ref>,
+   parent reads tag + preamble, calls Task(
+        subagent_type = "bacio-<mode>-worker",   (from the stub)
+        prompt        = <tiny stub: ticket + mode + dispatch_id>,
    )
               │
               ▼
-   subagent (own context window):
-       bacio agent claim <ISSUE> --prompt <payload first line>
+   subagent (own context window; per-mode brief is its SYSTEM PROMPT):
+       bacio agent claim <ISSUE> --prompt <mode>
        … Read / Edit / Write / Bash / Grep / Glob …
        bacio agent release <ISSUE>
        mcp__bacio__reply --dispatch_id <id> --note <summary>
@@ -488,6 +487,15 @@ forwards that summary, and goes back to waiting for the next
 
 Per dispatch the parent consumes roughly *dispatch arrived → Task
 call → short summary line*, not *all the work*.
+
+The per-mode brief is **not** in the dispatch payload (BACI-76). It is
+the system prompt of a per-mode custom subagent — one of
+`bacio-design-worker`, `bacio-plan-worker`, `bacio-implement-worker`,
+`bacio-review-worker`, `bacio-ship-worker`, `bacio-fix-review-worker`
+— generated into `.claude/agents/` by `bacio install-agents`. The
+payload the parent receives is just the rewritten preamble plus a
+short stub naming the ticket, the mode, and the subagent type to
+spawn. See "Worker contract" below.
 
 ### Subagents share the parent's session id
 
@@ -516,68 +524,119 @@ Practical consequences:
 - No new schema rows, no `parent_session_pk` column, no per-subagent
   registry entries.
 
-### Worker contract lives in the dispatch preamble
+### Worker contract: per-mode subagent system prompts (BACI-76)
 
-The full delegation contract is the **dispatch preamble** — a reserved
-row (`slug = _dispatch_preamble`) in the `prompt_templates` table that
-`model.ComposeDispatchPayload` prepends to every per-mode template body
-at dispatch compose time. The agent receives the wrapper inside the
-dispatch payload itself; there is no system-prompt-level instruction
-to follow. The shape of a composed payload is:
+The delegation contract has two pieces, both editable as
+`prompt_templates` rows:
+
+1. **The dispatch preamble** — a reserved row (`slug =
+   _dispatch_preamble`) that `model.ComposeDispatchPayload` prepends
+   to every typed dispatch. It instructs the parent supervisor session
+   to spawn the per-mode subagent named in the stub. It stays in the
+   dispatch payload — the parent supervisor is not a custom subagent,
+   so it has no agent file. It is small and identical on every
+   dispatch.
+2. **The per-mode brief** — the `design` / `plan` / `implement` /
+   `review` / `ship` / `fix_review` rows. Each brief is the **system
+   prompt of a per-mode custom subagent**, written to
+   `.claude/agents/bacio-<mode>-worker.md` by `bacio install-agents`.
+
+The shape of a composed payload (BACI-76) is the preamble plus a tiny
+stub — no brief body:
 
 ```
-<preamble: BACI-52 delegation wrapper>
+<preamble: spawn the per-mode subagent>
 
----
-
-<per-mode template body, rendered with {{issue_id}} etc.>
+Ticket: BACI-76
+Mode: implement
+Subagent: bacio-implement-worker
 
 <optional --note appended after a blank line>
 ```
 
-The embedded default body lives in
-[`internal/model/prompttemplates/_dispatch_preamble.txt`](../internal/model/prompttemplates/_dispatch_preamble.txt);
-fresh installs seed the row from that file. Existing DBs are brought
-up to date by `backfillDispatchPreamble` in
-`internal/store/store.go` — idempotent, runs on every `Open`, no-op
-once the row is present (or has been deliberately deleted).
+The `dispatch_id` is **not** in the stub — the channel already emits it
+as the `<channel dispatch_id="...">` tag attribute, and the preamble
+tells the parent to read it from there and hand it to the worker.
 
-Editing the contract is the same flow as editing any other template:
+**Why this shape.** Before BACI-76 the whole per-mode brief (the
+`design` brief is ~10K tokens) was interpolated into every dispatch's
+`Task(...)` prompt. Because the brief was interpolated per-issue and
+prefixed per-dispatch, every dispatch produced a unique content block
+that never hit the prompt cache — the supervisor paid full prefill
+TTFT on every spawn. Moving the brief into the subagent's system
+prompt makes it a stable prefix across back-to-back same-mode spawns
+(prompt-cache eligible within the 5-minute TTL) and shrinks the
+per-dispatch channel `content` roughly an order of magnitude. The
+subagent type is derived from the slug by
+`model.SubagentTypeForTemplate` (`fix_review` → `bacio-fix-review-worker`).
 
-- CLI: `bacio settings template show _dispatch_preamble` /
-  `bacio settings template set _dispatch_preamble --body "..."`.
-- TUI: open Settings (`s` from the main menu) → the preamble row
-  leads the template list with the label "Dispatch preamble
-  (prepended to every job)".
-- Desktop: same row in the Settings panel.
-- Restore to the embedded default: `bacio settings template reset
-  _dispatch_preamble`.
+The `bacio install-agents` command renders one
+`.claude/agents/bacio-<mode>-worker.md` per dispatchable template from
+the current `prompt_templates` rows. Each generated file's frontmatter
+carries the agent `name` (== file basename == `subagent_type`), a
+narrowed tool allowlist (see below), and `model: opus`; its body is the
+template body verbatim. The briefs are written verbatim, *not*
+`{{token}}`-rendered — a system prompt is fixed per agent type and
+cannot embed a specific issue id, so the six built-in briefs were
+rewritten to refer to "the ticket named in your dispatch prompt". A
+leftover `{{` in a body is a packaging bug — `model.RenderAgentFile`
+rejects it (and a build-time test guards the built-ins).
 
-There is deliberately **no** `.claude/agents/bacio-worker.md` file,
-**no** `bacio install-worker` command, and **no** `//go:embed` of the
-contract into a per-repo template. Two install steps —
-`bacio install-channel` and `bacio install-hooks` — remain the only
-setup story. Every dispatch picks up contract edits on the next
-compose; nothing to re-deploy across consuming repos.
+The embedded default bodies live in
+[`internal/model/prompttemplates/`](../internal/model/prompttemplates/);
+fresh installs seed the rows from those files. Existing DBs are brought
+up to date by `backfillDispatchPreamble` (inserts the preamble row if
+absent) and `refreshDispatchPreamble` (rewrites the old `general-purpose`
+preamble to the new spawn-the-subagent default, but only when the user
+never customised it) — both in `internal/store/store.go`, both
+idempotent.
+
+Editing a brief is the same flow as before — `bacio settings template
+set <slug> --body "..."`, the TUI Settings tab, the desktop Settings
+panel — but the body is now a generated artefact's source. **After
+editing a body, run `bacio install-agents` to regenerate the agent
+file**; until then the dispatched worker still uses the previous
+brief. `bacio status` reports the per-template agent-file freshness
+(`up-to-date` / `missing` / `stale`) so a forgotten re-run is visible.
+
+Setup is now three install steps: `bacio install-channel`,
+`bacio install-hooks`, and `bacio install-agents`.
+
+(This reverses the pre-BACI-76 decision — recorded here for the next
+reader — that there should be *no* `.claude/agents/` file and *no*
+install verb. The prompt-cache / TTFT win, plus the per-worker
+tool-surface narrowing, made the per-mode subagent the better seam.)
 
 ### Subagent tool surface and the TodoWrite-mirror gap
 
-`general-purpose` has a restricted tool list relative to the parent:
-Read, Edit, Write, Bash, Grep, Glob, `TaskCreate` (no `Task`, no
-`TodoWrite`), plus every MCP tool the parent has connected. For the
-work bacio dispatches care about — clone a worktree, edit code, run
-tests, open a PR — that surface is sufficient.
+The generated agent files set an explicit `tools:` allowlist
+(`model.AgentFileToolAllowlist`), uniform across all six modes for v1:
+
+```
+Read, Edit, Write, Bash, Grep, Glob, TaskCreate,
+WebFetch, WebSearch,
+mcp__bacio__register, mcp__bacio__reply, mcp__bacio__ask_user_question
+```
+
+This is the general-purpose code-work core (no `Task`, no `TodoWrite`)
+plus `WebFetch`/`WebSearch` (the `plan` and `design` briefs do real
+research) plus only the three bacio channel MCP tools a worker needs.
+Every other MCP server the parent has connected — Gmail / Calendar /
+Drive / Linear / Slack / plugin-dev — is **dropped**: a dispatched
+worker never needs them, and excluding them trims the tool-definition
+block in the subagent's prefill. Per-mode narrowing of this list is a
+filed follow-up; the list is generated, so tightening it is a
+generator change.
 
 The one **known limitation** is the `TodoWrite` gap: BACI-45's
-`PostToolUse`-on-`TodoWrite` mirror cannot fire for delegated work,
-because the subagent has no `TodoWrite` tool. The Agents view's
-per-card `n/m done` badge therefore stays at whatever the parent
-itself wrote — which is nothing, by design. Dispatch correctness is
-unaffected. If the missing sub-step telemetry becomes painful in
-practice, the follow-up is a small `mcp__bacio__todo_replace` MCP
-tool the worker contract would call at each plan step (~30 lines
-reusing `client.ReplaceSessionTodos`); the gap is documented here so
-the next reader doesn't waste a spike on it.
+`PostToolUse`-on-`TaskCreate`/`TaskUpdate` mirror still fires
+(subagent `TaskCreate` calls share the parent's task store), but a
+custom subagent has no `TodoWrite` tool — same as the old
+`general-purpose`. Dispatch correctness is unaffected. If the missing
+sub-step telemetry becomes painful, the follow-up is a small
+`mcp__bacio__todo_replace` MCP tool (~30 lines reusing
+`client.ReplaceSessionTodos`); the gap is documented here so the next
+reader doesn't waste a spike on it.
 
 ### Trivial-dispatch carve-out (structural, not instruction-based)
 
