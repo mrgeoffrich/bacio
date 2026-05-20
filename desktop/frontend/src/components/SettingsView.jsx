@@ -320,6 +320,9 @@ export default function SettingsView({
             <div className="mk-settings-hint">
               The instruction sent to an agent when you dispatch a job at each template, and the issue states each template&apos;s prompt can be launched from. You can add, rename, and delete templates here — built-ins can be deleted too, and &quot;Restore built-ins&quot; re-seeds any that are missing.
             </div>
+            <div className="mk-settings-hint">
+              A template body becomes a per-mode subagent&apos;s system prompt. After editing a body, run <code>bacio install-agents</code> in the repo to regenerate the <code>.claude/agents/</code> files — until then, dispatched workers still use the previous body.
+            </div>
           </div>
           {placeholders.length > 0 && (
             <div className="mk-tmpl-tokens">

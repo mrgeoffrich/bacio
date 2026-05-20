@@ -1011,7 +1011,7 @@ func (d deps) handleAgentDispatchCreate(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var issueID *int64
-	var issueKey, issueTitle string
+	var issueKey string
 	if in.IssueKey != "" {
 		prefix, num, err := store.ParseIssueKey(in.IssueKey)
 		if err != nil {
@@ -1038,27 +1038,23 @@ func (d deps) handleAgentDispatchCreate(w http.ResponseWriter, r *http.Request) 
 		}
 		issueID = &iss.ID
 		issueKey = iss.Key
-		issueTitle = iss.Title
 	}
 
 	mode := model.DispatchMode(in.Mode)
-	template, err := d.store.GetPromptTemplate(mode)
-	if err != nil {
-		status, code := statusForError(err)
-		writeError(w, status, code, err.Error(), nil)
-		return
-	}
+	// BACI-76: the payload is the rewritten preamble plus a tiny stub
+	// (ticket / mode / subagent type); the per-mode brief is the
+	// subagent's system prompt now.
 	preamble, err := d.store.GetDispatchPreamble()
 	if err != nil {
 		status, code := statusForError(err)
 		writeError(w, status, code, err.Error(), nil)
 		return
 	}
-	payload := model.ComposeDispatchPayload(preamble, template, map[string]string{
-		"issue_id":    issueKey,
-		"issue_title": issueTitle,
-		"repo_prefix": repo.Prefix,
-	}, in.Message)
+	stub := model.DispatchStub{IssueKey: issueKey, Mode: string(mode)}
+	if mode != "" {
+		stub.SubagentType = model.SubagentTypeForTemplate(string(mode))
+	}
+	payload := model.ComposeDispatchPayload(preamble, stub, in.Message)
 
 	who := ActorFromContext(r.Context())
 	if isDryRun(r) {

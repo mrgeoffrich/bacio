@@ -90,6 +90,7 @@ func NewRoot() (*cobra.Command, func()) {
 		newInstallSampleSkillsCmd(),
 		newInstallHooksCmd(),
 		newInstallChannelCmd(),
+		newInstallAgentsCmd(),
 		newTUICmd(),
 		newDemoCmd(),
 		newAgentCmd(),

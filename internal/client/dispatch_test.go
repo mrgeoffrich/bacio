@@ -103,9 +103,9 @@ func TestDispatchDryRunLocal(t *testing.T) {
 }
 
 // TestDispatchPromptTemplateRendering checks that CreateDispatch
-// resolves the stage's prompt template, substitutes the issue context
-// into its placeholders, and appends the free-form note — both for the
-// built-in default and a user's custom override.
+// composes the BACI-76 short payload: the rewritten preamble plus a
+// tiny stub (ticket / mode / subagent type). The per-mode brief no
+// longer lands in the payload — it is the subagent's system prompt.
 func TestDispatchPromptTemplateRendering(t *testing.T) {
 	p := newPair(t)
 	defer p.cleanup()
@@ -120,10 +120,9 @@ func TestDispatchPromptTemplateRendering(t *testing.T) {
 		t.Fatalf("UpsertAgent: %v", err)
 	}
 
-	// No custom template stored → the built-in default, with {{issue_id}}
-	// substituted for the canonical key. The default text itself lives in
-	// editable data files (internal/model/prompttemplates), so assert on
-	// the resolve-and-substitute contract, not the exact wording.
+	// A typed dispatch's payload carries the preamble + stub. No brief
+	// body, no {{token}} placeholders — the stub names the ticket, mode,
+	// and the subagent type the supervisor must spawn.
 	d, err := p.local.CreateDispatch(ctx, p.repo, inputs.AgentDispatchInput{
 		TargetAgent: ag.Name,
 		IssueKey:    iss.Key,
@@ -135,16 +134,20 @@ func TestDispatchPromptTemplateRendering(t *testing.T) {
 	if d.Payload == "" || strings.Contains(d.Payload, "{{") {
 		t.Fatalf("default payload not resolved/substituted: %q", d.Payload)
 	}
-	if !strings.Contains(d.Payload, iss.Key) {
-		t.Fatalf("default payload = %q, want it to mention issue %s", d.Payload, iss.Key)
+	for _, want := range []string{
+		"Ticket: " + iss.Key,
+		"Mode: implement",
+		"Subagent: " + model.SubagentTypeForTemplate(string(model.DispatchModeImplement)),
+	} {
+		if !strings.Contains(d.Payload, want) {
+			t.Fatalf("default payload = %q, want it to contain %q", d.Payload, want)
+		}
 	}
 
-	// Store a custom template, then dispatch with a note: the custom
-	// body is rendered and the note is appended after a blank line.
-	// The BACI-52 preamble is also prepended at compose time; delete the
-	// preamble row first so this test asserts the exact rendered body
-	// without having to chase the preamble's wording. A separate test
-	// covers the preamble-prepended shape (TestComposeDispatchPayload).
+	// The brief body never appears in the payload, even if the user
+	// customised the template. Delete the preamble row so the payload
+	// asserts to the bare stub; a separate test covers the
+	// preamble-prepended shape (TestComposeDispatchPayload).
 	if _, err := p.store.DeletePromptTemplate(model.BuiltinTemplatePreamble); err != nil {
 		t.Fatalf("delete preamble: %v", err)
 	}
@@ -160,9 +163,14 @@ func TestDispatchPromptTemplateRendering(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateDispatch (custom): %v", err)
 	}
-	wantCustom := "Build " + iss.Key + " for " + p.repo.Prefix + ".\n\nwatch the migration"
+	wantCustom := "Ticket: " + iss.Key + "\nMode: implement\nSubagent: " +
+		model.SubagentTypeForTemplate(string(model.DispatchModeImplement)) +
+		"\n\nwatch the migration"
 	if d.Payload != wantCustom {
 		t.Fatalf("custom payload = %q, want %q", d.Payload, wantCustom)
+	}
+	if strings.Contains(d.Payload, "Build "+iss.Key) {
+		t.Fatalf("custom payload should NOT contain the brief body: %q", d.Payload)
 	}
 
 	// GetPromptTemplates reflects the override; the other stages stay

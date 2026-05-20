@@ -1,10 +1,16 @@
+You are a bacio dispatched-work subagent running a **fix-review**
+pass. Your Task prompt names the ticket to work on (the `Ticket:`
+line) and the `dispatch_id` to acknowledge — call that ticket
+`<TICKET>` below.
+
 Make sure to use the bacio skill.
-As an agent first claim the issue as yours.
+As an agent first claim `<TICKET>` as yours.
 Make sure main is up to date then create a worktree to work in. Run `bacio worktree init` inside it so this run has its own DB + api port and won't fight the parent worktree's bacio.
-Then set the status of the issue to "in progress".
-Pull down all the details for {{issue_id}} which should include comments and one of those comments will be a review. Please fix all medium high and critical issues on the PR branch.
+Then set the status of `<TICKET>` to "in progress".
+Pull down all the details for `<TICKET>` which should include comments and one of those comments will be a review. Please fix all medium, high and critical issues on the PR branch.
 If you have to stop to get user assistance for any reason the issue will automatically be put into the "needs action" state. Once the user answers put the issue back into in progress.
 At the end run smoke tests to make sure the changes work.
 Once smoke tests pass push the changes to the PR branch and add a comment to the issue about what was done. Clean up and remove the worktree (drop its bacio registry row first with `bacio worktree rm <path> --confirm <slug>`).
-Tag the issue with "fixed", put it back into "in review" and unclaim it.
+Tag `<TICKET>` with "fixed", put it back into "in review" and unclaim it.
 Questions are welcome — early. If anything in this brief is ambiguous, batch up to 4 clarifications into ONE `mcp__bacio__ask_user_question` call BEFORE doing speculative work — rework costs more than answering. The bacio MCP tool surfaces in your supervisor's TUI/desktop/web with the issue context; prefer it over the built-in AskUserQuestion.
+When the work is done, call `mcp__bacio__reply` with the `dispatch_id` from your Task prompt and a one-line summary. If you had to stop, return `needs_input: <what is missing>` as your final line instead.

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -48,53 +49,77 @@ func TestParseDispatchMode(t *testing.T) {
 	}
 }
 
+func TestSubagentTypeForTemplate(t *testing.T) {
+	cases := map[string]string{
+		"plan":               "bacio-plan-worker",
+		"design":             "bacio-design-worker",
+		"implement":          "bacio-implement-worker",
+		"review":             "bacio-review-worker",
+		"ship":               "bacio-ship-worker",
+		"fix_review":         "bacio-fix-review-worker",
+		"my-custom":          "bacio-my-custom-worker",
+		"my_custom_stage":    "bacio-my-custom-stage-worker",
+		"_dispatch_preamble": "bacio--dispatch-preamble-worker",
+	}
+	for slug, want := range cases {
+		if got := SubagentTypeForTemplate(slug); got != want {
+			t.Errorf("SubagentTypeForTemplate(%q) = %q, want %q", slug, got, want)
+		}
+	}
+	// Every built-in dispatchable slug must round-trip into a valid
+	// Claude Code agent name ([a-z0-9-] only).
+	valid := regexp.MustCompile(`^[a-z0-9-]+$`)
+	for _, slug := range []string{
+		BuiltinTemplatePlan, BuiltinTemplateDesign, BuiltinTemplateImplement,
+		BuiltinTemplateReview, BuiltinTemplateShip, BuiltinTemplateFixReview,
+	} {
+		if name := SubagentTypeForTemplate(slug); !valid.MatchString(name) {
+			t.Errorf("SubagentTypeForTemplate(%q) = %q — not a valid agent name", slug, name)
+		}
+	}
+}
+
 func TestComposeDispatchPayload(t *testing.T) {
 	cases := []struct {
 		name     string
 		preamble string
-		template string
-		vars     map[string]string
+		stub     DispatchStub
 		note     string
 		want     string
 	}{
-		// Behaviour without a preamble — pre-BACI-52 shape.
-		{"empty everything", "", "", nil, "", ""},
-		{"note only", "", "", nil, "just a note", "just a note"},
-		{"template only", "", "Implement {{issue_id}}.", map[string]string{"issue_id": "BACI-10"}, "", "Implement BACI-10."},
-		{"template + note", "", "Implement {{issue_id}}.", map[string]string{"issue_id": "BACI-10"}, "watch the migration", "Implement BACI-10.\n\nwatch the migration"},
-		{"note trimmed", "", "Plan {{issue_id}}.", map[string]string{"issue_id": "BACI-10"}, "  trimmed  ", "Plan BACI-10.\n\ntrimmed"},
-		{"template trimmed", "", "  Plan {{issue_id}}.  ", map[string]string{"issue_id": "BACI-10"}, "", "Plan BACI-10."},
+		// Untyped dispatch (no mode) — payload is just the note.
+		{"empty everything", "", DispatchStub{}, "", ""},
+		{"note only", "", DispatchStub{}, "just a note", "just a note"},
+		{"note trimmed, no mode", "Delegate.", DispatchStub{}, "  trimmed  ", "trimmed"},
+		{"preamble dropped without mode", "Delegate.", DispatchStub{}, "just a note", "just a note"},
 
-		// BACI-52: when both preamble and template are non-empty, the
-		// preamble leads, separated from the body by a `---` line.
+		// Typed dispatch — preamble + stub.
 		{
-			"preamble + template",
-			"Delegate {{issue_id}} to a subagent.",
-			"Implement {{issue_id}}.",
-			map[string]string{"issue_id": "BACI-10"},
+			"preamble + stub",
+			"Spawn the per-mode subagent.",
+			DispatchStub{IssueKey: "BACI-10", Mode: "implement", SubagentType: "bacio-implement-worker"},
 			"",
-			"Delegate BACI-10 to a subagent.\n\n---\n\nImplement BACI-10.",
+			"Spawn the per-mode subagent.\n\nTicket: BACI-10\nMode: implement\nSubagent: bacio-implement-worker",
 		},
 		{
-			"preamble + template + note",
+			"preamble + stub + note",
 			"Delegate.",
-			"Plan {{issue_id}}.",
-			map[string]string{"issue_id": "BACI-10"},
+			DispatchStub{IssueKey: "BACI-10", Mode: "plan", SubagentType: "bacio-plan-worker"},
 			"extra context",
-			"Delegate.\n\n---\n\nPlan BACI-10.\n\nextra context",
+			"Delegate.\n\nTicket: BACI-10\nMode: plan\nSubagent: bacio-plan-worker\n\nextra context",
 		},
-
-		// Preamble without a template body is dropped (note-only and
-		// setup-style dispatches don't carry a delegatable work brief).
-		{"preamble without template (note only)", "Delegate.", "", nil, "just a note", "just a note"},
-		{"preamble without anything", "Delegate.", "", nil, "", ""},
-
 		// A preamble that trims to "" behaves identically to no preamble.
-		{"whitespace-only preamble", "   \n  ", "Plan {{issue_id}}.", map[string]string{"issue_id": "BACI-10"}, "", "Plan BACI-10."},
+		{
+			"whitespace-only preamble",
+			"   \n  ",
+			DispatchStub{IssueKey: "BACI-10", Mode: "plan", SubagentType: "bacio-plan-worker"},
+			"",
+			"Ticket: BACI-10\nMode: plan\nSubagent: bacio-plan-worker",
+		},
 	}
 	for _, c := range cases {
-		if got := ComposeDispatchPayload(c.preamble, c.template, c.vars, c.note); got != c.want {
-			t.Errorf("%s: ComposeDispatchPayload(%q, %q, %v, %q) = %q, want %q", c.name, c.preamble, c.template, c.vars, c.note, got, c.want)
+		if got := ComposeDispatchPayload(c.preamble, c.stub, c.note); got != c.want {
+			t.Errorf("%s: ComposeDispatchPayload(%q, %+v, %q) = %q, want %q", c.name, c.preamble, c.stub, c.note, got, c.want)
 		}
 	}
 }
