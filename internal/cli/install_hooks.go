@@ -10,10 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/spf13/cobra"
-
-	"github.com/mrgeoffrich/bacio/internal/git"
 )
 
 // bacioHookEvents maps each Claude Code hook event bacio handles to the
@@ -50,83 +46,10 @@ type hookChange struct {
 	Action     string
 }
 
-func newInstallHooksCmd() *cobra.Command {
-	var assumeYes bool
-	cmd := &cobra.Command{
-		Use:   "install-hooks",
-		Short: "Install bacio's Claude Code hooks into the current repo",
-		Long: `Merge bacio's agent-supervision hooks into <repo-root>/.claude/settings.json.
-
-bacio registers a small set of command hooks so a Claude Code session
-keeps the local agent registry in sync without the agent calling
-'bacio agent ...' by hand:
-
-    SessionStart                                 register the session; inject assigned issues + claims
-    UserPromptSubmit                             heartbeat; nudge on open claims
-    Stop                                         heartbeat
-    SessionEnd                                   end the session; auto-release its claims
-    PostToolUse (matcher: TaskCreate|TaskUpdate) mirror the agent's task list into bacio
-
-The merge is non-destructive: existing hooks for other events -- and
-any non-bacio hooks on these four events -- are preserved. Re-running
-replaces bacio's own hook groups in place so command updates land.
-
-install-hooks prints the planned changes and asks for confirmation
-before writing. Pass --yes (-y) to skip the prompt and accept
-automatically -- needed when running non-interactively.
-
-Activation: the hooks above are inert unless BACIO_AGENT_MODE=1 is set
-in the environment of the Claude session that loads them. See the
-post-install output for the recommended launch incantation.
-
-Note: top-level keys in settings.json may be reordered, since the file
-is round-tripped through a JSON decode. Hook behaviour is unchanged.`,
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if inRemoteMode() {
-				return fmt.Errorf("bacio install-hooks: not supported in remote mode (writes the settings file to the local repo); run this verb against the local DB instead")
-			}
-			cwd, err := os.Getwd()
-			if err != nil {
-				return err
-			}
-			info, err := git.Detect(cwd)
-			if err != nil {
-				return err
-			}
-			path := filepath.Join(info.Root, ".claude", "settings.json")
-
-			top, changes, err := planBacioHooks(path)
-			if err != nil {
-				return err
-			}
-
-			if !assumeYes {
-				printHookPlan(path, changes)
-				confirmed, err := confirmPrompt("Proceed?")
-				if err != nil {
-					return err
-				}
-				if !confirmed {
-					fmt.Fprintln(os.Stderr, "aborted — no changes made")
-					return nil
-				}
-			}
-
-			if err := applyBacioHooks(path, top); err != nil {
-				return err
-			}
-			if err := reportHookChanges(path, changes); err != nil {
-				return err
-			}
-			printWorktreeManifestHint(os.Stderr, info.Root)
-			printActivationBanner(os.Stderr)
-			return nil
-		},
-	}
-	cmd.Flags().BoolVarP(&assumeYes, "yes", "y", false, "skip the confirmation prompt and accept the changes")
-	return cmd
-}
+// The reusable hook-planning helpers below are consumed by
+// `bacio install-agent` (the consolidated installer, BACI-79) and the
+// hook-helper unit tests. There is no standalone `install-hooks`
+// command any more.
 
 // planBacioHooks reads .claude/settings.json (treating an absent file as
 // empty) and reports what applyBacioHooks would do — without writing.
@@ -235,27 +158,6 @@ func bacioHookGroup(subcommand, matcher string) map[string]any {
 		g["matcher"] = matcher
 	}
 	return g
-}
-
-// printHookPlan writes the planned changes to stderr, ahead of the
-// confirmation prompt.
-func printHookPlan(path string, changes []hookChange) {
-	fmt.Fprintf(os.Stderr, "bacio install-hooks will update %s:\n", path)
-	for _, c := range changes {
-		fmt.Fprintf(os.Stderr, "  %-7s %-17s → bacio hook %s\n", c.Action, c.Event, c.Subcommand)
-	}
-	fmt.Fprintln(os.Stderr, "Existing hooks for other events are left untouched.")
-}
-
-// reportHookChanges emits the post-write summary on stdout (via ok(), so
-// it round-trips to JSON like every other command's success output).
-func reportHookChanges(path string, changes []hookChange) error {
-	var b strings.Builder
-	fmt.Fprintf(&b, "installed bacio hooks into %s", path)
-	for _, c := range changes {
-		fmt.Fprintf(&b, "\n  %-7s %-17s → bacio hook %s", c.Action, c.Event, c.Subcommand)
-	}
-	return ok("%s", b.String())
 }
 
 // confirmPrompt asks a yes/no question on stderr and reads the answer

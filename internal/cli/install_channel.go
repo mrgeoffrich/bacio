@@ -10,9 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/spf13/cobra"
-
-	"github.com/mrgeoffrich/bacio/internal/git"
 	"github.com/mrgeoffrich/bacio/internal/wtenv"
 )
 
@@ -21,80 +18,10 @@ import (
 // server:<name>`.
 const mcpServerName = "bacio"
 
-func newInstallChannelCmd() *cobra.Command {
-	var assumeYes bool
-	cmd := &cobra.Command{
-		Use:   "install-channel",
-		Short: "Register the bacio channel MCP server in the current repo's .mcp.json",
-		Long: `Add a "bacio" entry to <repo-root>/.mcp.json so Claude Code can spawn
-'bacio channel' -- the MCP server that pushes queued dispatches into a
-running session live (see 'bacio channel --help').
-
-The merge is non-destructive: other mcpServers entries and other
-top-level keys in .mcp.json are preserved. Re-running refreshes bacio's
-entry in place.
-
-install-channel prints the planned change and asks for confirmation
-before writing. Pass --yes (-y) to skip the prompt.
-
-Activation: the channel (and bacio's hooks) are inert unless
-BACIO_AGENT_MODE=1 is set in the environment of the Claude session
-that loads them. See the post-install output for the recommended
-launch incantation, which also passes
---dangerously-load-development-channels server:bacio (Claude Code
-v2.1.80+) so dispatches stream live over the native-channels
-transport. The plain .mcp.json transport — Claude Code loads it
-automatically once the entry is written, no extra flags required —
-remains a working fallback if you prefer not to opt in to the
-research-preview channel path.`,
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if inRemoteMode() {
-				return fmt.Errorf("bacio install-channel: not supported in remote mode (writes the .mcp.json file to the local repo); run this verb against the local DB instead")
-			}
-			cwd, err := os.Getwd()
-			if err != nil {
-				return err
-			}
-			info, err := git.Detect(cwd)
-			if err != nil {
-				return err
-			}
-			path := filepath.Join(info.Root, ".mcp.json")
-			command := bacioBinaryPath()
-
-			top, action, err := planBacioChannel(path)
-			if err != nil {
-				return err
-			}
-
-			if !assumeYes {
-				fmt.Fprintf(os.Stderr, "bacio install-channel will %s the %q MCP server in %s:\n", action, mcpServerName, path)
-				fmt.Fprintf(os.Stderr, "  command: %s channel\n", command)
-				confirmed, err := confirmPrompt("Proceed?")
-				if err != nil {
-					return err
-				}
-				if !confirmed {
-					fmt.Fprintln(os.Stderr, "aborted — no changes made")
-					return nil
-				}
-			}
-
-			if err := applyBacioChannel(path, top, command); err != nil {
-				return err
-			}
-			if err := reportChannelInstall(path, action); err != nil {
-				return err
-			}
-			printWorktreeManifestHint(os.Stderr, info.Root)
-			printActivationBanner(os.Stderr)
-			return nil
-		},
-	}
-	cmd.Flags().BoolVarP(&assumeYes, "yes", "y", false, "skip the confirmation prompt and accept the change")
-	return cmd
-}
+// The reusable channel-planning helpers below are consumed by
+// `bacio install-agent` (the consolidated installer, BACI-79) and the
+// channel-helper unit tests. There is no standalone `install-channel`
+// command any more.
 
 // printWorktreeManifestHint surfaces the per-worktree manifest's
 // existence (or absence) on stderr ahead of the activation banner.
@@ -196,21 +123,3 @@ func applyBacioChannel(path string, top map[string]json.RawMessage, command stri
 	return os.WriteFile(path, out, 0o644)
 }
 
-// reportChannelInstall emits the success summary on stdout via ok() so
-// it round-trips to JSON like every other command's success output. The
-// activation guidance (which flag/env var to launch with) is intentionally
-// kept out of this payload and printed separately to stderr by
-// printActivationBanner — folding paragraphs of human guidance into
-// the structured success body would clutter machine consumers' parse
-// path. BACI-49 brought --dangerously-load-development-channels
-// server:bacio back into the banner (alongside the new
-// --dangerously-skip-permissions) as a one-line copy-paste launch hint,
-// but the structured success body stays lean — the regression guard
-// in install_channel_test.go pins that.
-func reportChannelInstall(path, action string) error {
-	done := "added"
-	if action == "update" {
-		done = "updated"
-	}
-	return ok("%s the %q MCP server in %s", done, mcpServerName, path)
-}

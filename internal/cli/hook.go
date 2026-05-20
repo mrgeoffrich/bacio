@@ -37,7 +37,7 @@ func skipUnlessAgentMode(subcommand string) bool {
 
 // newHookCmd builds the hidden `bacio hook` command group — the Claude
 // Code hook integration shim. Each subcommand reads a hook-event JSON
-// payload on stdin (wired up by `bacio install-hooks`), correlates it
+// payload on stdin (wired up by `bacio install-agent`), correlates it
 // to the agent registry by session_id, and keeps the registry in sync
 // without the agent calling `bacio agent …` by hand.
 //
@@ -506,7 +506,7 @@ func readPostToolUseInput() (*postToolUseInput, error) {
 
 // postToolUseMatcher is the regex installed in .claude/settings.json's
 // PostToolUse matcher field — pipe-alternation per Claude Code's
-// matcher syntax. Keeping the literal here so the install-hooks plan
+// matcher syntax. Keeping the literal here so the install-agent plan
 // and the hook code can't drift.
 const postToolUseMatcher = "TaskCreate|TaskUpdate"
 

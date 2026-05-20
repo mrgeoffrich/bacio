@@ -77,8 +77,8 @@ installed bacio skill (12345 bytes) at /Users/you/code/my-project/.claude/skills
 
 Restart Claude Code in this repo so the new skill loads. Re-run `install-skill` after upgrading bacio (`brew upgrade bacio` / `scoop update bacio`) to pick up updates.
 
-::: tip Workflow skills
-For trigger-phrase shortcuts on common flows (*"triage the todo column"*, *"daily stand-up"*, *"plan this feature"*), see [`bacio install-sample-skills`](/reference/cli/install-sample-skills).
+::: tip Agent-driven dispatch
+To set this repo up so Claude Code can pick up dispatched work (subagent files, hooks, and the channel MCP server), run [`bacio install-agent`](/reference/cli/install-agent).
 :::
 
 ## 4. File your second issue through Claude

@@ -29,6 +29,6 @@ The bundled SKILL.md is whatever was embedded into the bacio binary at build tim
 
 ## See also
 
-- **[`bacio install-sample-skills`](/reference/cli/install-sample-skills)** — workflow-level skill packs (file-issue, triage, stand-up, plan-feature) that build on this one.
+- **[`bacio install-agent`](/reference/cli/install-agent)** — set the repo up for agent-driven dispatch (subagent files, hooks, and the channel MCP server) in one command.
 - **[Work with Claude Code](/guides/work-with-claude-code)** — the agent-side experience.
 - **[Work with Codex](/guides/work-with-codex)** — the same flow, Codex-flavoured.

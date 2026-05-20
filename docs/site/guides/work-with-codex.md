@@ -84,24 +84,6 @@ The handful of practical differences:
 - **Persistent slug.** Codex picks its own `--agent <slug>` and persists it to `.bacio/agent` — the harness suffix differs from Claude (`codex` vs `claude`) but the bootstrap loop in [`bacio agent`](/reference/cli/agent#pick-your-identity) is identical. Make sure `.bacio/agent` is gitignored.
 - **Restart cadence.** After `bacio install-skill` or `brew upgrade bacio`, restart Codex in this repo so the new skill loads.
 
-## Sample skills work the same way
-
-The bundled flow-level skill packs land in `.claude/skills/<name>/` too:
-
-```bash
-bacio install-sample-skills                       # install all four
-bacio install-sample-skills triage stand-up       # subset
-```
-
-| Skill | Trigger phrase | What it does |
-|---|---|---|
-| `file-issue` | *"file an issue"*, *"log this"*, *"add a ticket"* | Cleans up a one-line description into a proper title, body, and tags. |
-| `triage` | *"triage the backlog"*, *"groom the board"* | Sweeps open issues in `todo`, proposes tags / priorities / feature groupings; asks before writing. |
-| `stand-up` | *"stand-up"*, *"daily summary"* | Pure-read summary of in-progress, blocked items, and the last 24h of history. |
-| `plan-feature` | *"plan the auth rewrite"*, *"break this down"* | Creates a feature + child issues + blocks/blocked-by edges + an optional linked design doc. |
-
-These files are checked into your repo. Once you've customised one, **stop re-running** `install-sample-skills` — it overwrites your edits.
-
 ## How to spot when the agent is wrong
 
 The same tells apply across both agents:
@@ -117,4 +99,4 @@ The same tells apply across both agents:
 - **[How agents drive bacio](/concepts/how-agents-drive-bacio)** — the six rules behind the contract.
 - **[`bacio agent`](/reference/cli/agent)** — the registry Codex registers itself against.
 - **[`bacio install-skill`](/reference/cli/install-skill)** — installs the canonical skill at `.claude/skills/bacio/SKILL.md`.
-- **[`bacio install-sample-skills`](/reference/cli/install-sample-skills)** — the workflow packs.
+- **[`bacio install-agent`](/reference/cli/install-agent)** — set the repo up for agent-driven dispatch.

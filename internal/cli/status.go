@@ -171,7 +171,7 @@ func buildStatusReport(s *store.Store, env wtenv.Resolved, logRes logging.Resolv
 		report.Agents = agents
 		if agents != nil && !agents.AllUpToDate {
 			report.LLMRecommendations = append(report.LLMRecommendations,
-				"One or more dispatch subagent files in .claude/agents/ are missing or stale. Run `bacio install-agents` to (re)generate them — without them, a dispatched Task() spawn fails with an unknown subagent type.")
+				"One or more dispatch subagent files in .claude/agents/ are missing or stale. Run `bacio install-agent` to (re)generate them — without them, a dispatched Task() spawn fails with an unknown subagent type.")
 		}
 		repo, err := s.GetRepoByPath(info.Root)
 		if errors.Is(err, store.ErrNotFound) {
@@ -405,7 +405,7 @@ func formatLogSource(r *statusReport) string {
 // formatAgents renders the BACI-76 dispatch-subagent-file freshness
 // row. Summarises the per-template verdicts into one line: all
 // up-to-date, or a count of missing / stale files with the hint to
-// re-run `bacio install-agents`.
+// re-run `bacio install-agent`.
 func formatAgents(a *statusAgents) string {
 	if a == nil || len(a.Files) == 0 {
 		return "(no dispatch templates)"
@@ -422,7 +422,7 @@ func formatAgents(a *statusAgents) string {
 			stale++
 		}
 	}
-	return fmt.Sprintf("%d missing, %d stale — run `bacio install-agents`", missing, stale)
+	return fmt.Sprintf("%d missing, %d stale — run `bacio install-agent`", missing, stale)
 }
 
 // formatAgentMode renders the BACIO_AGENT_MODE row aligned with the

@@ -553,7 +553,7 @@ func settingsTemplateSetCmd() *cobra.Command {
 template to its embedded default, use ` + "`bacio settings template reset`" + `.
 
 A dispatch template's body becomes a per-mode subagent's system prompt
-(BACI-76). Run ` + "`bacio install-agents`" + ` after editing a body to apply
+(BACI-76). Run ` + "`bacio install-agent`" + ` after editing a body to apply
 the change to dispatched workers. {{issue_id}} / {{issue_title}} /
 {{repo_prefix}} placeholders are a compose-time feature and do NOT
 survive into an agent file — write the body to refer to "the ticket
@@ -834,9 +834,9 @@ func applyTemplateBody(slugArg, body string) error {
 	}
 	// BACI-76: changing a dispatchable template's body leaves the
 	// generated .claude/agents/bacio-<slug>-worker.md file stale until
-	// `bacio install-agents` re-runs. Surface that as stderr guidance
+	// `bacio install-agent` re-runs. Surface that as stderr guidance
 	// (not part of the structured success body — same split as the
-	// install-channel activation banner).
+	// install-agent activation banner).
 	printTemplateStaleAgentHint(os.Stderr, slug)
 	return emit(templateViewForRow(t))
 }
@@ -850,7 +850,7 @@ func printTemplateStaleAgentHint(w io.Writer, slug string) {
 	if slug == model.BuiltinTemplatePreamble {
 		return
 	}
-	fmt.Fprintf(w, "note: the agent file for %q is now stale — run `bacio install-agents %s` to apply this change to dispatched workers.\n", slug, slug)
+	fmt.Fprintf(w, "note: the agent file for %q is now stale — run `bacio install-agent` to apply this change to dispatched workers.\n", slug)
 }
 
 func settingsTemplateAddCmd() *cobra.Command {

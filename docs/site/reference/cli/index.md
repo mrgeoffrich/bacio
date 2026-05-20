@@ -28,7 +28,7 @@ bacio's CLI is the same surface that agents drive — every mutating command acc
 | [`bacio api`](/reference/cli/api) | Run the REST API server (API only — no `/ui/` mount). |
 | [`bacio web`](/reference/cli/web) | Run the REST API + embedded web bundle and open the browser. |
 | [`bacio install-skill`](/reference/cli/install-skill) | Install the canonical `SKILL.md` for AI agents into the repo. |
-| [`bacio install-sample-skills`](/reference/cli/install-sample-skills) | Install the bundled flow-level skill packs (file-issue, triage, stand-up, plan-feature). |
+| [`bacio install-agent`](/reference/cli/install-agent) | Set the repo up for agent-driven dispatch — subagent files, hooks, and the channel MCP server in one command. |
 | [`bacio tui`](/reference/cli/tui) | Open the full-screen kanban TUI. |
 
 ## Global flags

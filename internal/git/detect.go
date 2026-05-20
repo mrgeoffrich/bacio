@@ -38,7 +38,7 @@ func Detect(dir string) (*Info, error) {
 // canonical example).
 //
 // This is deliberately NOT what Detect returns. Detect walks back to
-// the main worktree's root so resolveRepo / install-hooks / sync /
+// the main worktree's root so resolveRepo / install-agent / sync /
 // status etc. share one repo identity across every linked worktree of
 // a project. WorktreeRoot is the inverse — the file lives at *this*
 // worktree's root and only this worktree's bacio should read it.

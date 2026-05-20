@@ -845,9 +845,9 @@ func (s *settingsView) viewEditor(width, height int) string {
 		parts = append(parts, errorStyle.Render(s.editErr.Error()))
 	}
 	parts = append(parts, mutedStyle.Padding(0, 1).Render("Placeholders: "+placeholderTokens()))
-	// BACI-76: a body edit goes stale until `bacio install-agents` runs.
+	// BACI-76: a body edit goes stale until `bacio install-agent` runs.
 	parts = append(parts, mutedStyle.Padding(0, 1).Render(
-		"After saving, run `bacio install-agents` to apply the change to dispatched workers."))
+		"After saving, run `bacio install-agent` to apply the change to dispatched workers."))
 	return box.Render(lipgloss.JoinVertical(lipgloss.Left, parts...))
 }
 

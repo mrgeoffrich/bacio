@@ -388,7 +388,7 @@ are two delivery paths — an agent can use either or both.
 
 ### Pull — via hooks (default)
 
-If the repo has `bacio install-hooks` set up, the **SessionStart** and
+If the repo has `bacio install-agent` set up, the **SessionStart** and
 **UserPromptSubmit** hooks call `emitDrainedDispatches`
 (`internal/cli/hook.go`): they drain the session's **un-acked**
 dispatches (`pending` *and* `delivered`), flip any still-`pending` ones
@@ -429,8 +429,9 @@ it. (A bare `--session`-only dispatch with no agent identity therefore
 can't reach a channel; it's delivered via the hook pull path, which
 *does* know the session id.)
 
-Wiring it up takes two steps, both handled by **`bacio install-channel`**
-(`internal/cli/install_channel.go`):
+Wiring it up takes two steps, both handled by **`bacio install-agent`**
+(`internal/cli/install_agent.go`, which performs the channel step
+alongside the hook and agent-file steps):
 
 1. it merges a `bacio` entry into the repo's `.mcp.json` so Claude Code
    knows how to spawn `bacio channel` (non-destructive — other MCP
@@ -492,7 +493,7 @@ The per-mode brief is **not** in the dispatch payload (BACI-76). It is
 the system prompt of a per-mode custom subagent — one of
 `bacio-design-worker`, `bacio-plan-worker`, `bacio-implement-worker`,
 `bacio-review-worker`, `bacio-ship-worker`, `bacio-fix-review-worker`
-— generated into `.claude/agents/` by `bacio install-agents`. The
+— generated into `.claude/agents/` by `bacio install-agent`. The
 payload the parent receives is just the rewritten preamble plus a
 short stub naming the ticket, the mode, and the subagent type to
 spawn. See "Worker contract" below.
@@ -539,7 +540,7 @@ The delegation contract has two pieces, both editable as
 2. **The per-mode brief** — the `design` / `plan` / `implement` /
    `review` / `ship` / `fix_review` rows. Each brief is the **system
    prompt of a per-mode custom subagent**, written to
-   `.claude/agents/bacio-<mode>-worker.md` by `bacio install-agents`.
+   `.claude/agents/bacio-<mode>-worker.md` by `bacio install-agent`.
 
 The shape of a composed payload (BACI-76) is the preamble plus a tiny
 stub — no brief body:
@@ -570,7 +571,7 @@ per-dispatch channel `content` roughly an order of magnitude. The
 subagent type is derived from the slug by
 `model.SubagentTypeForTemplate` (`fix_review` → `bacio-fix-review-worker`).
 
-The `bacio install-agents` command renders one
+The `bacio install-agent` command renders one
 `.claude/agents/bacio-<mode>-worker.md` per dispatchable template from
 the current `prompt_templates` rows. Each generated file's frontmatter
 carries the agent `name` (== file basename == `subagent_type`), a
@@ -594,13 +595,14 @@ idempotent.
 Editing a brief is the same flow as before — `bacio settings template
 set <slug> --body "..."`, the TUI Settings tab, the desktop Settings
 panel — but the body is now a generated artefact's source. **After
-editing a body, run `bacio install-agents` to regenerate the agent
+editing a body, run `bacio install-agent` to regenerate the agent
 file**; until then the dispatched worker still uses the previous
 brief. `bacio status` reports the per-template agent-file freshness
 (`up-to-date` / `missing` / `stale`) so a forgotten re-run is visible.
 
-Setup is now three install steps: `bacio install-channel`,
-`bacio install-hooks`, and `bacio install-agents`.
+Setup is now one install step: `bacio install-agent` renders the agent
+files, merges bacio's Claude Code hooks, and registers the bacio
+channel MCP server — all in a single invocation with one plan/confirm.
 
 (This reverses the pre-BACI-76 decision — recorded here for the next
 reader — that there should be *no* `.claude/agents/` file and *no*

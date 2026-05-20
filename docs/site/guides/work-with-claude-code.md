@@ -103,29 +103,21 @@ A few tells:
 - **It's listing with full bodies.** If Claude is pulling huge JSON to summarise a backlog, it's missed the lean-by-default convention. Ask it to use the lean form (`-o json` without `--with-description`).
 - **It tried to write without `--dry-run` on something destructive.** Especially `bacio issue rm` or `bacio feature rm`. Ask it to rehearse first.
 
-## Sample skills for common flows
+## Set the repo up for dispatched work
 
-The canonical skill teaches Claude *how* to call the CLI. The sample skills teach it *when* and *why* for common flows:
+The canonical skill teaches Claude *how* to call the CLI. To let Claude pick up work *dispatched* to it — issues handed off to a per-mode subagent — run [`bacio install-agent`](/reference/cli/install-agent):
 
 ```bash
-bacio install-sample-skills                       # install all four
-bacio install-sample-skills triage stand-up       # subset
+bacio install-agent --yes    # subagent files + hooks + channel, in one command
 ```
 
-| Skill | Trigger phrase | What it does |
-|---|---|---|
-| `file-issue` | *"file an issue"*, *"log this"*, *"add a ticket"* | Cleans up a one-line description into a proper title, body, and tags. |
-| `triage` | *"triage the backlog"*, *"groom the board"* | Sweeps open issues in `todo`, proposes tags / priorities / feature groupings; asks before writing. |
-| `stand-up` | *"stand-up"*, *"daily summary"* | Pure-read summary of in-progress, blocked items, and the last 24h of history. |
-| `plan-feature` | *"plan the auth rewrite"*, *"break this down"* | Creates a feature + child issues + blocks/blocked-by edges + an optional linked design doc. |
-
-These files are checked into your repo. Once you've customised one, **stop re-running** `install-sample-skills` — it overwrites your edits.
+It renders the per-mode subagent files into `.claude/agents/`, merges bacio's supervision hooks into `.claude/settings.json`, and registers the `bacio` channel MCP server in `.mcp.json` — the three things a repo needs before it can run as a bacio agent.
 
 ## See also
 
 - **[How agents drive bacio](/concepts/how-agents-drive-bacio)** — the six rules behind the contract.
 - **[`bacio agent`](/reference/cli/agent)** — the registry Claude registers itself against.
 - **[`bacio install-skill`](/reference/cli/install-skill)** — the canonical reference install.
-- **[`bacio install-sample-skills`](/reference/cli/install-sample-skills)** — the workflow packs.
+- **[`bacio install-agent`](/reference/cli/install-agent)** — set the repo up for agent-driven dispatch.
 - **[JSON payloads](/reference/json-payloads)** — the agent contract from the human side.
 - **[Drive it without an agent](/guides/drive-it-without-an-agent)** — if you want to skip Claude entirely.
