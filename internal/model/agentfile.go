@@ -37,13 +37,25 @@ var AgentFileToolAllowlist = []string{
 // field is present so the follow-up is a one-line edit per file.
 const AgentFileModel = "opus"
 
+// AgentFileIsolation is the worktree-isolation mode written into every
+// generated subagent's frontmatter. "worktree" makes Claude Code run
+// each dispatched worker in its own throwaway git worktree — created on
+// spawn, removed automatically on a clean finish — so concurrent
+// dispatches never edit each other's files and the worker never has to
+// hand-roll `git worktree add` / `remove`. This is complementary to,
+// not a replacement for, `bacio worktree init`: Claude Code isolates
+// the filesystem, while `bacio worktree init` (still run inside the
+// worktree by every brief) isolates bacio's SQLite DB + API port. The
+// briefs were rewritten to lean on this — see prompttemplates/*.txt.
+const AgentFileIsolation = "worktree"
+
 // RenderAgentFile produces the contents of a per-mode custom subagent
 // file (`.claude/agents/<SubagentTypeForTemplate(slug)>.md`) for a
 // dispatch template (BACI-76). The frontmatter carries the agent name
 // (== the file basename, == the subagent_type the supervisor spawns), a
-// generated description, the tool allowlist, and the model; the body is
-// the template body verbatim — that body is the subagent's durable
-// system prompt.
+// generated description, the tool allowlist, the model, and the
+// worktree-isolation mode; the body is the template body verbatim —
+// that body is the subagent's durable system prompt.
 //
 // body is written verbatim, NOT {{token}}-rendered: a system prompt is
 // fixed per agent type and cannot embed a specific issue id. The six
@@ -70,6 +82,7 @@ func RenderAgentFile(slug, name, body string) (string, error) {
 	fmt.Fprintf(&b, "description: bacio dispatched-work subagent for the %q stage. Spawned by the supervisor session on a %s dispatch.\n", label, slug)
 	fmt.Fprintf(&b, "tools: %s\n", strings.Join(AgentFileToolAllowlist, ", "))
 	fmt.Fprintf(&b, "model: %s\n", AgentFileModel)
+	fmt.Fprintf(&b, "isolation: %s\n", AgentFileIsolation)
 	b.WriteString("---\n\n")
 	b.WriteString(body)
 	b.WriteString("\n")
