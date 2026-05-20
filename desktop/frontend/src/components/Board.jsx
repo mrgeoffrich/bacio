@@ -2,15 +2,6 @@ import React, { useState } from 'react';
 import KanbanCard from './KanbanCard.jsx';
 import QuestionModal from './QuestionModal.jsx';
 
-const EMPTY_COPY = {
-  todo: 'drop a card here.',
-  in_progress: 'doing nothing. (literally.)',
-  needs_action: 'nothing needs a human. yet.',
-  in_review: 'nothing in review. nice.',
-  done: 'nothing shipped yet.',
-  cancelled: 'no write-offs.',
-};
-
 export default function Board({ columns, cards, promptConfig, hideEmptyColumns, onMoveCard, onOpenCard, onDispatchFromCard, onCancelWaitingCard, onAfterQuestionResolved }) {
   const [dragKey, setDragKey] = useState(null);
   const [overCol, setOverCol] = useState(null);
@@ -41,10 +32,16 @@ export default function Board({ columns, cards, promptConfig, hideEmptyColumns, 
     <div className="mk-board">
       {visibleColumns.map(col => {
         const colCards = cards.filter(c => c.column === col.state);
+        // BACI-77: an empty column collapses to a narrow vertical-title
+        // strip instead of eating a full 304px slot. `hideEmptyColumns`
+        // (which removes the column entirely) wins by construction —
+        // `visibleColumns` has already filtered hidden columns out, so
+        // by the time we reach here an empty column is always collapsed.
+        const isCollapsed = colCards.length === 0;
         return (
           <div
             key={col.state}
-            className={`mk-col ${overCol === col.state ? 'is-over' : ''}`}
+            className={`mk-col ${isCollapsed ? 'is-collapsed' : ''} ${overCol === col.state ? 'is-over' : ''}`}
             onDragOver={(e) => { e.preventDefault(); setOverCol(col.state); }}
             onDragLeave={() => setOverCol(null)}
             onDrop={(e) => {
@@ -54,31 +51,34 @@ export default function Board({ columns, cards, promptConfig, hideEmptyColumns, 
               setOverCol(null);
             }}
           >
-            <header className="mk-col-head">
-              <span className={`mk-col-pill mk-status-${col.state}`}>{col.label}</span>
-              <span className="mk-col-count">{colCards.length}</span>
-            </header>
-            <div className="mk-col-body">
-              {colCards.map(card => (
-                <KanbanCard
-                  key={card.key}
-                  card={card}
-                  promptConfig={promptConfig}
-                  isDragging={dragKey === card.key}
-                  onDragStart={() => { if (!card.taken && !card.waitingForClaim) setDragKey(card.key); }}
-                  onDragEnd={() => { setDragKey(null); setOverCol(null); }}
-                  onOpen={() => onOpenCard(card)}
-                  onDispatch={onDispatchFromCard}
-                  onCancelWaiting={onCancelWaitingCard}
-                  onOpenQuestion={(id) => setActiveQuestionId(id)}
-                />
-              ))}
-              {colCards.length === 0 && (
-                <div className="mk-col-empty">
-                  {EMPTY_COPY[col.state] || 'drop a card here.'}
+            {isCollapsed ? (
+              <div className={`mk-col-collapsed-title mk-status-${col.state}`}>
+                {col.label}
+              </div>
+            ) : (
+              <>
+                <header className="mk-col-head">
+                  <span className={`mk-col-pill mk-status-${col.state}`}>{col.label}</span>
+                  <span className="mk-col-count">{colCards.length}</span>
+                </header>
+                <div className="mk-col-body">
+                  {colCards.map(card => (
+                    <KanbanCard
+                      key={card.key}
+                      card={card}
+                      promptConfig={promptConfig}
+                      isDragging={dragKey === card.key}
+                      onDragStart={() => { if (!card.taken && !card.waitingForClaim) setDragKey(card.key); }}
+                      onDragEnd={() => { setDragKey(null); setOverCol(null); }}
+                      onOpen={() => onOpenCard(card)}
+                      onDispatch={onDispatchFromCard}
+                      onCancelWaiting={onCancelWaitingCard}
+                      onOpenQuestion={(id) => setActiveQuestionId(id)}
+                    />
+                  ))}
                 </div>
-              )}
-            </div>
+              </>
+            )}
           </div>
         );
       })}

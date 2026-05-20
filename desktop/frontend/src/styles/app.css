@@ -100,6 +100,27 @@ body { margin: 0; }
   font-family: var(--font-sans); font-size: 12px; color: var(--fg-4);
   padding: 16px 8px; text-align: center; line-height: 1.5;
 }
+/* BACI-77: an empty column collapses to a narrow vertical-title strip.
+   The explicit `width` overrides the 304px grid-auto-columns track for
+   this cell; the strip stays a live drop zone (drop handlers are on the
+   same .mk-col div) and widens on drag-hover so it's a comfortable
+   target. On a drop the column is no longer empty, `is-collapsed` drops
+   off, and it expands back to full width. */
+.mk-col.is-collapsed {
+  width: 44px;
+  align-items: center; justify-content: center;
+  padding: 12px 4px;
+  transition: width var(--dur-fast) var(--ease-out),
+              background var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out);
+}
+.mk-col.is-collapsed.is-over { width: 80px; }
+.mk-col-collapsed-title.mk-col-collapsed-title {
+  writing-mode: vertical-rl; text-orientation: mixed;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 500;
+  letter-spacing: .1em; text-transform: uppercase;
+  background: transparent;
+}
 /* Whole-board placeholder: shown when "hide empty columns" is on and
    every column would be empty. Overrides .mk-board's grid layout so the
    message centres in the board region instead of leaving it blank. */
