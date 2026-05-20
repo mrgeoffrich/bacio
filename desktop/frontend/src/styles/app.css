@@ -76,13 +76,18 @@ body { margin: 0; }
 /* ---------- Board ---------- */
 .mk-board {
   flex: 1; display: grid;
-  grid-auto-flow: column; grid-auto-columns: 304px;
+  /* BACI-78: max-content auto-columns let each track shrink-wrap its
+     column's declared width — a collapsed strip gets a narrow track
+     instead of a full 304px one, so a row of collapsed columns sits
+     flush with no dead gutters. Populated columns pin width: 304px. */
+  grid-auto-flow: column; grid-auto-columns: max-content;
   gap: 16px; padding: 20px 24px;
   overflow-x: auto; overflow-y: hidden;
   align-items: stretch;
 }
 .mk-col {
   display: flex; flex-direction: column;
+  width: 304px;
   background: var(--bg-3); border-radius: var(--radius-lg);
   padding: 12px; gap: 10px; min-height: 0;
   border: 1px solid transparent;
@@ -101,14 +106,19 @@ body { margin: 0; }
   padding: 16px 8px; text-align: center; line-height: 1.5;
 }
 /* BACI-77: an empty column collapses to a narrow vertical-title strip.
-   The explicit `width` overrides the 304px grid-auto-columns track for
-   this cell; the strip stays a live drop zone (drop handlers are on the
-   same .mk-col div) and widens on drag-hover so it's a comfortable
-   target. On a drop the column is no longer empty, `is-collapsed` drops
-   off, and it expands back to full width. */
+   The explicit `width` overrides the populated column's 304px width and,
+   with BACI-78's `grid-auto-columns: max-content`, shrinks the grid
+   track to match — so a row of collapsed columns sits flush. The strip
+   stays a live drop zone (drop handlers are on the same .mk-col div) and
+   widens on drag-hover so it's a comfortable target. On a drop the
+   column is no longer empty, `is-collapsed` drops off, and it expands
+   back to full width.
+   BACI-78: justify-content: flex-start top-anchors the rotated title so
+   an empty column reads its label level with a populated column's
+   header pill, instead of floating it mid-column. */
 .mk-col.is-collapsed {
   width: 44px;
-  align-items: center; justify-content: center;
+  align-items: center; justify-content: flex-start;
   padding: 12px 4px;
   transition: width var(--dur-fast) var(--ease-out),
               background var(--dur-fast) var(--ease-out),
