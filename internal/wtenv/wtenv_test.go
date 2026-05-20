@@ -419,7 +419,23 @@ func TestRegistry_ReadMissingFileIsEmpty(t *testing.T) {
 	}
 }
 
+// stubPortProbe makes AllocatePort treat the listed ports as already
+// bound and every other port as free, restoring the real OS probe
+// when the test ends. Keeps AllocatePort tests deterministic — the
+// real probe's result depends on whatever is bound on the test host.
+func stubPortProbe(t *testing.T, busy ...int) {
+	t.Helper()
+	busySet := make(map[int]bool, len(busy))
+	for _, p := range busy {
+		busySet[p] = true
+	}
+	orig := probePortFree
+	probePortFree = func(port int) bool { return !busySet[port] }
+	t.Cleanup(func() { probePortFree = orig })
+}
+
 func TestRegistry_AllocatePortAvoidsDefaultAndCollisions(t *testing.T) {
+	stubPortProbe(t) // no ports bound — isolate from the host
 	reg := &Registry{}
 	// First slug picks its hash slot.
 	first, err := reg.AllocatePort("alpha")
@@ -446,9 +462,29 @@ func TestRegistry_AllocatePortAvoidsDefaultAndCollisions(t *testing.T) {
 }
 
 func TestRegistry_AllocatePortDeterministicPerSlug(t *testing.T) {
+	stubPortProbe(t)
 	a, _ := (&Registry{}).AllocatePort("slug-x")
 	b, _ := (&Registry{}).AllocatePort("slug-x")
 	if a != b {
 		t.Errorf("non-deterministic: got %d vs %d", a, b)
+	}
+}
+
+// AllocatePort must skip a port that is live (a process is listening
+// on it) even when no registry entry claims it — the case that, left
+// unhandled, hands a new worktree the port the user's own running
+// `bacio web` is serving on.
+func TestRegistry_AllocatePortSkipsBoundPortNotInRegistry(t *testing.T) {
+	seed := DefaultAPIPort + 1 + HashPortOffset("alpha")
+	stubPortProbe(t, seed) // seed slot is bound, but no registry entry says so
+	got, err := (&Registry{}).AllocatePort("alpha")
+	if err != nil {
+		t.Fatalf("AllocatePort: %v", err)
+	}
+	if got == seed {
+		t.Errorf("returned the bound port %d instead of walking past it", seed)
+	}
+	if got != seed+1 {
+		t.Errorf("expected the next slot %d, got %d", seed+1, got)
 	}
 }

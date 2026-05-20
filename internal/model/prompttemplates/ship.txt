@@ -4,7 +4,7 @@ the `dispatch_id` to acknowledge — call that ticket `<TICKET>` below.
 
 Make sure to use the bacio skill.
 As an agent first claim `<TICKET>` as yours.
-Make sure main is up to date then create a worktree to work in. Run `bacio worktree init` inside it so this run has its own DB + api port and won't fight the parent worktree's bacio.
+Make sure main is up to date then create a worktree to work in. Run `bacio worktree init` inside it so this run has its own DB + api port and won't fight the parent worktree's bacio. Run every `bacio` command from inside that worktree so it resolves the worktree's own port/DB; never `cd` out, and if you must run `bacio` from elsewhere pass `--env <worktree>/environment-config.yaml`. If `bacio web`/`bacio api` ever reports a port already in use, do NOT kill whatever holds it — that is most likely the user's own running bacio UI; re-check you are inside your worktree, or pass `--port`.
 Ship `<TICKET>`: merge the PR and deal with any merge issues, then once it's merged put the issue into the done status.
 Clean up and remove the worktree (drop its bacio registry row first with `bacio worktree rm <path> --confirm <slug>`).
 Finally unclaim the issue.
