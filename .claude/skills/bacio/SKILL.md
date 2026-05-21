@@ -52,7 +52,7 @@ Use `needs_action` when an LLM agent is paused waiting on the user — keep the 
 
 **Identity:** the repo is keyed by its absolute git toplevel path. Moving the repo on disk creates a new row.
 
-**Worktree environments (BACI-63):** an *optional* `<worktree-root>/environment-config.yaml` binds the bacio instance running in that worktree to its own SQLite DB + API port, so two sibling git worktrees can run their own `bacio api` / `bacio web` / desktop / TUI side by side without clashing on `~/.bacio/db.sqlite` or `127.0.0.1:5320`. Manifest-free worktrees keep today's behaviour exactly — set up is opt-in via `bacio worktree init`. Resolution order (highest precedence first): `--db` / `--addr` flags → `$BACIO_ENV` → worktree-root `environment-config.yaml` → legacy default (`~/.bacio/db.sqlite` + `127.0.0.1:5320`). `bacio status` surfaces the resolved `db_path`, `api_addr`, `env_source`, and (when relevant) `env_path` so agents can verify which DB they're talking to.
+**Worktree environments (BACI-63):** an *optional* `<worktree-root>/environment-config.yaml` binds the bacio instance running in that worktree to its own API port, so two sibling git worktrees can run their own `bacio api` / `bacio web` / desktop / TUI side by side without clashing on `127.0.0.1:5320`. By default the DB stays shared (`~/.bacio/db.sqlite`); a per-worktree DB is opt-in via `--isolate-db` (BACI-87). Manifest-free worktrees keep today's behaviour exactly — set up is opt-in via `bacio worktree init`. Resolution order (highest precedence first): `--db` / `--addr` flags → `$BACIO_ENV` → worktree-root `environment-config.yaml` → legacy default (`~/.bacio/db.sqlite` + `127.0.0.1:5320`). `bacio status` surfaces the resolved `db_path`, `api_addr`, `env_source`, and (when relevant) `env_path` so agents can verify which DB they're talking to.
 
 ## Agent registry — declare yourself
 
@@ -264,10 +264,10 @@ bacio repo show
 
 ### Worktree environments
 
-Per-worktree manifests (BACI-63). Each git worktree can optionally bind itself to a separate SQLite DB + API port so sibling worktrees don't clash on the shared writer state at `~/.bacio/db.sqlite` or `127.0.0.1:5320`. Manifest-free worktrees keep today's behaviour exactly — opt in via `bacio worktree init`.
+Per-worktree manifests (BACI-63). Each git worktree can optionally bind itself to its own API port so sibling worktrees don't clash on `127.0.0.1:5320`. Manifest-free worktrees keep today's behaviour exactly — opt in via `bacio worktree init`. By default `init` gives **port isolation only** and pins the shared `~/.bacio/db.sqlite`, so issue calls still reach the ticket; DB isolation is opt-in (BACI-87, see `--isolate-db` below).
 
 ```
-bacio worktree init [--slug <name>] [--port <n>] [--db-path <rel>] [--force]
+bacio worktree init [--slug <name>] [--port <n>] [--isolate-db] [--db-path <path>] [--force]
                                      Write environment-config.yaml at the
                                      worktree root, register a row in
                                      ~/.bacio/worktrees.yaml, and append
@@ -277,7 +277,13 @@ bacio worktree init [--slug <name>] [--port <n>] [--db-path <rel>] [--force]
                                      (deterministic hash of slug +
                                      collision walk; port 5320 is
                                      reserved for the legacy default).
-                                     Honours --json / --dry-run.
+                                     DB defaults to the shared
+                                     ~/.bacio/db.sqlite. --isolate-db
+                                     (or BACIO_WORKTREE_ISOLATE_DB=1,
+                                     set per-invocation only) binds a
+                                     per-worktree .bacio/db.sqlite
+                                     instead; --db-path pins an explicit
+                                     path. Honours --json / --dry-run.
                                      Schema: worktree.init.
 bacio worktree show [path]            Resolve and print the environment
                                      for the given path (defaults to

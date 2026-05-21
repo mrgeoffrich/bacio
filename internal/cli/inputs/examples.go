@@ -227,9 +227,8 @@ var (
 	ExampleSettingsTemplateRestoreDefaults = SettingsTemplateRestoreDefaultsInput{}
 
 	ExampleWorktreeInit = WorktreeInitInput{
-		Slug:   "bacio-baci-63",
-		Port:   5321,
-		DBPath: ".bacio/db.sqlite",
+		Slug: "bacio-baci-63",
+		Port: 5321,
 	}
 	ExampleWorktreeRm = WorktreeRmInput{
 		Confirm: "bacio-baci-63",

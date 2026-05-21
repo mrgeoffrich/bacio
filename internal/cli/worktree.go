@@ -71,13 +71,34 @@ type worktreeInitResult struct {
 	GitignoreAdded bool           `json:"gitignore_added"`
 }
 
+// worktreeIsolateDBEnv supplies the default for `bacio worktree init
+// --isolate-db`. Set it per-invocation only (e.g.
+// `BACIO_WORKTREE_ISOLATE_DB=1 bacio worktree init`). An ambient
+// setting (shell profile / .envrc) would be inherited by a dispatched
+// worker running in a git worktree of the bacio repo, re-breaking
+// BACI-87 — the worker's ticket lives in the shared DB.
+const worktreeIsolateDBEnv = "BACIO_WORKTREE_ISOLATE_DB"
+
+// isolateDBEnvDefault reports whether BACIO_WORKTREE_ISOLATE_DB asks for
+// DB isolation. Accepts 1/true/yes (case-insensitive); everything else,
+// including unset, reads as false — the shared-DB default.
+func isolateDBEnvDefault() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(worktreeIsolateDBEnv))) {
+	case "1", "true", "yes":
+		return true
+	default:
+		return false
+	}
+}
+
 func newWorktreeInitCmd() *cobra.Command {
 	var (
-		slug    string
-		port    int
-		dbPath  string
-		force   bool
-		rawJSON string
+		slug      string
+		port      int
+		dbPath    string
+		isolateDB bool
+		force     bool
+		rawJSON   string
 	)
 	cmd := &cobra.Command{
 		Use:   "init",
@@ -91,7 +112,16 @@ Defaults:
   slug    derived from the worktree directory basename
   port    auto-allocated from the registry (deterministic hash of slug
           with collision walk; the legacy default port 5320 is reserved)
-  db_path .bacio/db.sqlite (relative to the worktree root)
+  db_path the shared ~/.bacio/db.sqlite — the worktree gets API-port
+          isolation only, so issue calls still reach the shared store
+
+DB isolation is opt-in. Pass --isolate-db (or set
+BACIO_WORKTREE_ISOLATE_DB=1) to bind a per-worktree DB at
+.bacio/db.sqlite — useful when developing bacio itself and testing
+schema migrations across sibling worktrees. Set the env var
+per-invocation only: an ambient setting would be inherited by a
+dispatched worker, whose ticket lives in the shared DB. --db-path pins
+an explicit path and overrides --isolate-db.
 
 Fails if a manifest is already present — pass --force to overwrite in
 place. Honours --dry-run and --json (see ` + "`bacio schema show worktree.init`" + `).`,
@@ -100,15 +130,16 @@ place. Honours --dry-run and --json (see ` + "`bacio schema show worktree.init`"
 			if inRemoteMode() {
 				return fmt.Errorf("bacio worktree init: not supported in remote mode (touches the local filesystem); run against the local DB instead")
 			}
-			payload, err := parseJSONInput(cmd, args, rawJSON, "slug", "port", "db-path", "force")
+			payload, err := parseJSONInput(cmd, args, rawJSON, "slug", "port", "db-path", "isolate-db", "force")
 			if err != nil {
 				return err
 			}
 			in := inputs.WorktreeInitInput{
-				Slug:   slug,
-				Port:   port,
-				DBPath: dbPath,
-				Force:  force,
+				Slug:      slug,
+				Port:      port,
+				DBPath:    dbPath,
+				IsolateDB: isolateDB,
+				Force:     force,
 			}
 			if payload != nil {
 				in = inputs.WorktreeInitInput{}
@@ -147,7 +178,8 @@ place. Honours --dry-run and --json (see ` + "`bacio schema show worktree.init`"
 	}
 	cmd.Flags().StringVar(&slug, "slug", "", "manifest slug (defaults to worktree basename)")
 	cmd.Flags().IntVar(&port, "port", 0, "API port to bind (defaults to a hash-derived free port from ~/.bacio/worktrees.yaml)")
-	cmd.Flags().StringVar(&dbPath, "db-path", "", "SQLite DB path relative to the worktree root (defaults to .bacio/db.sqlite)")
+	cmd.Flags().StringVar(&dbPath, "db-path", "", "explicit SQLite DB path (relative to the worktree root, or absolute); overrides --isolate-db")
+	cmd.Flags().BoolVar(&isolateDB, "isolate-db", isolateDBEnvDefault(), "bind a per-worktree DB at .bacio/db.sqlite instead of the shared ~/.bacio/db.sqlite (default from "+worktreeIsolateDBEnv+")")
 	cmd.Flags().BoolVar(&force, "force", false, "overwrite an existing manifest at the worktree root")
 	addInputFlag(cmd, &rawJSON)
 	return cmd
@@ -174,14 +206,25 @@ func runWorktreeInit(root, baseName string, in inputs.WorktreeInitInput) (*workt
 	if err != nil {
 		return nil, err
 	}
+	// db_path precedence (BACI-87): an explicit --db-path wins; else
+	// --isolate-db binds a per-worktree .bacio/db.sqlite (relative —
+	// resolved under the worktree root); else the shared store is
+	// pinned by absolute path. The shared path must be written out, not
+	// left empty: wtenv.manifestDBPath reads an empty db_path as a
+	// per-worktree DB, so omitting it would isolate the DB. Pinning the
+	// shared path is what a dispatched worker needs — its ticket lives
+	// in ~/.bacio/db.sqlite.
 	dbPath := strings.TrimSpace(in.DBPath)
 	if dbPath == "" {
-		dbPath = filepath.Join(".bacio", "db.sqlite")
-	}
-	if filepath.IsAbs(dbPath) {
-		// Absolute paths are accepted as a power-user override (e.g.
-		// pointing two worktrees at a shared external DB intentionally),
-		// but warn — the standard flow keeps the DB inside the worktree.
+		if in.IsolateDB {
+			dbPath = filepath.Join(".bacio", "db.sqlite")
+		} else {
+			shared, err := wtenv.DefaultDBPath("")
+			if err != nil {
+				return nil, fmt.Errorf("resolve shared DB path: %w", err)
+			}
+			dbPath = shared
+		}
 	}
 
 	reg, err := wtenv.ReadRegistry("")
@@ -397,7 +440,7 @@ func printWorktreeInit(w io.Writer, r *worktreeInitResult) error {
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "  Slug:      %s\n", m.Identity.Slug)
 	fmt.Fprintf(w, "  API:       %s:%d\n", wtenv.DefaultAPIHost, m.Allocations.APIPort)
-	fmt.Fprintf(w, "  DB:        %s\n", dbPath)
+	fmt.Fprintf(w, "  DB:        %s%s\n", dbPath, dbScopeSuffix(dbPath))
 	fmt.Fprintf(w, "  Log dir:   %s\n", logDir)
 	fmt.Fprintf(w, "  Manifest:  %s\n", r.ManifestPath)
 	if r.GitignoreAdded {
@@ -417,7 +460,7 @@ func printWorktreeShow(w io.Writer, r *worktreeShowResult) error {
 	if r.ManifestPath != "" {
 		fmt.Fprintf(w, "Manifest: %s\n", r.ManifestPath)
 	}
-	fmt.Fprintf(w, "DB:       %s\n", r.DBPath)
+	fmt.Fprintf(w, "DB:       %s%s\n", r.DBPath, dbScopeSuffix(r.DBPath))
 	fmt.Fprintf(w, "API:      %s\n", r.APIAddr)
 	if r.Manifest != nil {
 		fmt.Fprintf(w, "Slug:     %s\n", r.Manifest.Identity.Slug)
@@ -583,6 +626,13 @@ accident. Use --purge-db to also delete the worktree's SQLite DB.`,
 				if !filepath.IsAbs(db) {
 					db = filepath.Join(root, db)
 				}
+				// A shared-DB manifest (the default since BACI-87) pins
+				// the global ~/.bacio/db.sqlite. Purging it would wipe
+				// every project's issues — refuse, and name the path so
+				// the user sees why.
+				if shared, err := wtenv.DefaultDBPath(""); err == nil && filepath.Clean(db) == filepath.Clean(shared) {
+					return fmt.Errorf("--purge-db refused: manifest db_path is the shared store %s (this worktree has DB isolation off); drop --purge-db, or re-init with --isolate-db if you meant a per-worktree DB", shared)
+				}
 				res.DBPath = db
 				res.DBPurged = true
 			}
@@ -612,6 +662,21 @@ accident. Use --purge-db to also delete the worktree's SQLite DB.`,
 	cmd.Flags().BoolVar(&purgeDB, "purge-db", false, "also delete the worktree's SQLite DB file")
 	addInputFlag(cmd, &rawJSON)
 	return cmd
+}
+
+// dbScopeSuffix labels a resolved DB path for human-readable worktree
+// output: the shared ~/.bacio/db.sqlite store vs an isolated
+// per-worktree DB (BACI-87). Empty when the home dir can't be resolved
+// — a label is a nicety, not worth failing the command over.
+func dbScopeSuffix(dbPath string) string {
+	shared, err := wtenv.DefaultDBPath("")
+	if err != nil {
+		return ""
+	}
+	if filepath.Clean(dbPath) == filepath.Clean(shared) {
+		return "  (shared)"
+	}
+	return "  (isolated)"
 }
 
 // envLookupWithFlag returns an env-lookup func that swaps in the

@@ -67,6 +67,23 @@ const DefaultAPIHost = "127.0.0.1"
 // manifest lookup.
 const EnvVar = "BACIO_ENV"
 
+// DefaultDBPath returns the legacy/default bacio SQLite path,
+// <homeDir>/.bacio/db.sqlite. An empty homeDir resolves via
+// os.UserHomeDir(). This is the DB a manifest-free worktree resolves
+// to, and the path `bacio worktree init` pins into the manifest when
+// DB isolation is not requested (BACI-87) — so a dispatched worker's
+// issue calls reach the shared store where its ticket lives.
+func DefaultDBPath(homeDir string) (string, error) {
+	if homeDir == "" {
+		h, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		homeDir = h
+	}
+	return filepath.Join(homeDir, ".bacio", "db.sqlite"), nil
+}
+
 // Source identifies which step of the resolution chain produced a
 // given DBPath/APIAddr pair. Surfaced on `bacio status` so a user can
 // see at a glance which manifest (if any) is in effect.

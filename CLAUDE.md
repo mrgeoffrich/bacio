@@ -25,7 +25,9 @@ The deeper context for all three lives in the topic sections below (`## Agent-CL
 
 ## Worktree environments (BACI-63)
 
-Sibling git worktrees of this repo can clash on the shared writer at `~/.bacio/db.sqlite` and the `127.0.0.1:5320` API port. The fix is opt-in: `bacio worktree init` writes a `<worktree-root>/environment-config.yaml` that binds the bacio instance in that worktree (CLI / `bacio api` / `bacio web` / desktop / channel / hooks) to its own SQLite DB and port. Manifest-free worktrees keep today's behaviour exactly — the legacy default DB and port — so nothing changes for users who don't `init`.
+Sibling git worktrees of this repo can clash on the shared writer at `~/.bacio/db.sqlite` and the `127.0.0.1:5320` API port. The fix is opt-in: `bacio worktree init` writes a `<worktree-root>/environment-config.yaml` that binds the bacio instance in that worktree (CLI / `bacio api` / `bacio web` / desktop / channel / hooks) to its own port. Manifest-free worktrees keep today's behaviour exactly — the legacy default DB and port — so nothing changes for users who don't `init`.
+
+**DB isolation is opt-in (BACI-87).** `bacio worktree init` defaults to **port isolation only** — it pins the shared `~/.bacio/db.sqlite` into the manifest so issue calls still reach the ticket. This is what a dispatched worker needs (its ticket lives in the shared DB) and what a normal user wants. DB isolation — a fresh per-worktree `.bacio/db.sqlite`, useful when testing bacio's own schema migrations across sibling worktrees — is opt-in via `--isolate-db` or `BACIO_WORKTREE_ISOLATE_DB=1`. Set that env var **per-invocation only**: ambiently set, a dispatched worker would inherit it and re-break BACI-87.
 
 Resolution order (highest precedence first):
 

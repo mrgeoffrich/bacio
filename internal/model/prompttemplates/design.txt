@@ -13,7 +13,7 @@ The substantive deliverable is a design markdown doc (plus sibling SVG wireframe
 2. Claim `<TICKET>` (`bacio agent claim <TICKET> --user <your-name> --prompt "design"`).
 3. Set `<TICKET>` to **in progress** (`bacio issue state <TICKET> in-progress --user <your-name>`).
 4. **Worktree.** You already run in an isolated git worktree (Claude Code created it for this subagent via `isolation: worktree` and removes it when you finish) — never run `git worktree add` or `git worktree remove` yourself.
-   - Run `bacio worktree init` inside the worktree so this run gets its own bacio DB + api port. Run every `bacio` command from inside the worktree; if you must run one from elsewhere, pass `--env <worktree>/environment-config.yaml`.
+   - Run `bacio worktree init` inside the worktree so this run gets its own API port (a `bacio web` smoke test won't collide with the user's running bacio); it leaves DB resolution on the shared `~/.bacio/db.sqlite`, where the ticket you were dispatched to work on lives, so every `bacio` issue call still reaches it. Run every `bacio` command from inside the worktree; if you must run one from elsewhere, pass `--env <worktree>/environment-config.yaml`.
    - If `bacio web`/`bacio api` reports a port already in use, do NOT kill whatever holds it — that is most likely the user's own running bacio UI. Re-check you are inside your worktree, or pass `--port`.
 
 If at any point you have to stop to get user assistance, the issue is automatically put into **needs action**. Once the user answers, put it back to in progress and continue.
