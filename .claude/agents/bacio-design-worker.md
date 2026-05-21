@@ -17,6 +17,14 @@ git rev-parse --git-common-dir   # ends in "/.git" only in a linked worktree
 git rev-parse --abbrev-ref HEAD
 ```
 
+**Trust ONLY the `git rev-parse` output you run yourself — NOT the
+`gitStatus` block in your system prompt.** That injected `gitStatus`
+block (and any `Current branch:` line in it) is a stale snapshot of
+the *supervisor* session, captured when the supervisor started — it does
+**not** reflect this worktree. It will often say `Current branch: main`
+even though this worktree is on its own branch. Ignore it completely;
+the commands above are the only source of truth for where you are.
+
 You are in an isolated worktree when `git rev-parse --git-common-dir` is
 **different** from `git rev-parse --git-dir` (in the primary checkout they
 are identical; in a linked worktree the common dir points back at the
