@@ -42,6 +42,23 @@
   color: var(--status-done);
   flex-shrink: 0;
 }
+/* BACI-89: the Sync badge is a live status indicator. .is-syncing
+   pulses while a background sync runs; .is-error switches to the
+   blocked (red) status colour when the last run failed. The default
+   (idle, last run OK) keeps the pistachio "Sync Enabled" look above. */
+.mk-sync-badge.is-syncing {
+  background: var(--status-review-bg);
+  color: var(--status-review);
+  animation: mk-sync-pulse 1.2s ease-in-out infinite;
+}
+.mk-sync-badge.is-error {
+  background: var(--status-blocked-bg);
+  color: var(--status-blocked);
+}
+@keyframes mk-sync-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.5; }
+}
 .mk-leader-badge {
   background: color-mix(in srgb, var(--status-done-bg) 60%, transparent);
   color: var(--status-done);

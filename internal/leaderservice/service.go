@@ -21,6 +21,7 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/idlepinger"
 	"github.com/mrgeoffrich/bacio/internal/leader"
 	"github.com/mrgeoffrich/bacio/internal/store"
+	bsync "github.com/mrgeoffrich/bacio/internal/sync"
 )
 
 // StatusDTO is the wire shape both the desktop ("leaderStatus" Wails
@@ -43,14 +44,18 @@ type StatusDTO struct {
 // caller still owns the *store.Store handle (matches the existing
 // controller.Controller contract).
 type Service struct {
-	elector *leader.Elector
-	ctrl    *controller.Controller
+	elector    *leader.Elector
+	ctrl       *controller.Controller
+	syncRunner *bsync.BackgroundRunner
 }
 
 // New builds a Service. label is the human-readable lease label
 // ("desktop pid=… host=…" / "api pid=… host=… addr=…"); the caller
-// constructs it so the host-specific shape is preserved. logger may be
-// nil — defaults to slog.Default() inside controller helpers.
+// constructs it so the host-specific shape is preserved. dbPath is the
+// resolved SQLite path, threaded through to the BACI-89 background
+// sync runner for its cross-process lock (an empty string falls back
+// to store.DefaultPath at tick time). logger may be nil — defaults to
+// slog.Default() inside controller helpers.
 //
 // The Service constructs the BACI-57 idle-pinger off a
 // client.NewLocalFromStore wrapper around s — the pinger calls
@@ -59,7 +64,12 @@ type Service struct {
 // store handle (doesn't open or close it), so the existing
 // "Service owns the controller, caller owns the store" contract still
 // holds.
-func New(s *store.Store, label string, logger *slog.Logger) *Service {
+//
+// The BACI-89 background sync runner is constructed unconditionally —
+// it self-gates on the sync.background_enabled toggle and on whether
+// any repo is sync-enabled, so a non-sync user pays only an empty
+// ListRepos loop every SyncTickInterval.
+func New(s *store.Store, label, dbPath string, logger *slog.Logger) *Service {
 	el := leader.New(s, label)
 	// Use the host process label as the audit actor for reaper-driven
 	// pings + ends. `recordOp` falls back to a generic default when the
@@ -67,14 +77,25 @@ func New(s *store.Store, label string, logger *slog.Logger) *Service {
 	// report ("who ended my session?") trivial to chase via the leader
 	// label embedded in the audit row.
 	pingerClient := client.NewLocalFromStore(s, label)
+	syncRunner := bsync.NewBackgroundRunner(s, dbPath, label, logger)
 	return &Service{
-		elector: el,
-		ctrl:    controller.New(s, el, dispatcher.New(s), idlepinger.New(s, pingerClient, logger), logger),
+		elector:    el,
+		ctrl:       controller.New(s, el, dispatcher.New(s), idlepinger.New(s, pingerClient, logger), syncRunner, logger),
+		syncRunner: syncRunner,
 	}
 }
 
-// Start kicks off the controller's four tick loops (heartbeat, prune,
-// matcher, idle-pinger) and runs the synchronous initial heartbeat
+// SyncInProgress reports whether the background sync runner is
+// currently mid-tick. Only meaningful on the leader process — a
+// standby never runs Tick, so it always reports false there. Used by
+// the HTTP sync-status handler to surface a live "syncing now" flag.
+func (s *Service) SyncInProgress() bool {
+	return s.syncRunner.InProgress()
+}
+
+// Start kicks off the controller's six tick loops (heartbeat, prune,
+// matcher, idle-pinger, archive sweep, background sync) and runs the
+// synchronous initial heartbeat
 // before returning so a caller seeding UI state from CurrentState gets
 // a non-zero answer. emit is forwarded to controller.Start — nil
 // disables it, non-nil is invoked on every heartbeat tick (including

@@ -69,7 +69,7 @@ func (ls *LeaderService) ServiceStartup(_ context.Context, _ application.Service
 	if ls.slug != "" {
 		label = fmt.Sprintf("desktop[%s] pid=%d host=%s", ls.slug, os.Getpid(), h)
 	}
-	svc := leaderservice.New(s, label, nil)
+	svc := leaderservice.New(s, label, dbPath, nil)
 
 	ls.mu.Lock()
 	ls.st = s

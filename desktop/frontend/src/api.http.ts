@@ -25,7 +25,27 @@ export interface Board {
   prefix: string;
   name: string;
   issueCount: number;
+  // BACI-89 background-sync status. syncEnabled = "this repo has git
+  // sync configured"; the other three reflect the controller's
+  // background sync runner last / current state. syncLastAt /
+  // syncLastError are absent when the repo has never synced / the last
+  // sync succeeded.
   syncEnabled: boolean;
+  syncInProgress: boolean;
+  syncLastAt?: string;
+  syncLastError?: string;
+}
+
+// SyncStatusApi mirrors api.SyncStatusOut — the wire shape of the
+// BACI-89 GET /sync endpoint.
+interface SyncStatusApi {
+  prefix: string;
+  configured: boolean;
+  background_enabled: boolean;
+  in_progress: boolean;
+  last_sync_at?: string;
+  last_error?: string;
+  remote?: string;
 }
 
 export interface BoardColumn {
@@ -485,22 +505,44 @@ function cardFromIssue(iss: ApiIssue): BoardCard {
 
 export async function listBoards(): Promise<Board[]> {
   // GET /repos returns the bare repo rows; the desktop's Board carries
-  // an issue count and a syncEnabled flag. Issue count comes from a
-  // per-repo issue-list query; syncEnabled isn't readable over HTTP at
-  // all (lives in a machine-local config file), so it stays false in
-  // the web build.
+  // an issue count and the BACI-89 background-sync status. Issue count
+  // comes from a per-repo issue-list query; sync status comes from
+  // GET /sync (one call, every repo) — no longer hardcoded false.
   const repos = await call<Array<{ prefix: string; name: string }>>('/repos');
+  // Sync status is badge polish — a failure here must not break the
+  // board picker, so fall back to an empty map.
+  let syncByPrefix = new Map<string, SyncStatusApi>();
+  try {
+    const statuses = await call<SyncStatusApi[]>('/sync');
+    syncByPrefix = new Map(statuses.map((s) => [s.prefix, s]));
+  } catch {
+    // ignore — boards still render, just without sync badges
+  }
   const boards: Board[] = [];
   for (const r of repos) {
     const issues = await call<ApiIssue[]>(`/repos/${r.prefix}/issues`);
-    boards.push({
-      prefix: r.prefix,
-      name: r.name,
-      issueCount: issues.length,
-      syncEnabled: false,
-    });
+    boards.push(boardWithSync(r.prefix, r.name, issues.length, syncByPrefix.get(r.prefix)));
   }
   return boards;
+}
+
+// boardWithSync folds a SyncStatusApi (possibly undefined) into a
+// Board. Centralised so listBoards and addRepository stay in lockstep.
+function boardWithSync(
+  prefix: string,
+  name: string,
+  issueCount: number,
+  sync: SyncStatusApi | undefined,
+): Board {
+  return {
+    prefix,
+    name,
+    issueCount,
+    syncEnabled: sync?.configured ?? false,
+    syncInProgress: sync?.in_progress ?? false,
+    syncLastAt: sync?.last_sync_at,
+    syncLastError: sync?.last_error,
+  };
 }
 
 export async function listColumns(): Promise<BoardColumn[]> {
@@ -552,15 +594,11 @@ export async function addRepository(payload?: AddRepositoryPayload): Promise<Boa
     path: string;
   }
   const repo = await call<ApiRepo>('/repos', { method: 'POST', body });
-  // Match listBoards: issueCount=0 on a freshly-created repo;
-  // syncEnabled stays false in web mode (no machine-local config to
-  // probe). The Board picker shows these the moment listBoards refreshes.
-  return {
-    prefix: repo.prefix,
-    name: repo.name,
-    issueCount: 0,
-    syncEnabled: false,
-  };
+  // Match listBoards: issueCount=0 on a freshly-created repo. A
+  // freshly-added repo almost never has sync configured yet — the
+  // zero SyncStatusApi gives syncEnabled=false. The next listBoards
+  // refresh picks up real sync status from GET /sync.
+  return boardWithSync(repo.prefix, repo.name, 0, undefined);
 }
 
 interface ApiCommentEnvelope { author: string; body: string; created_at: string; }

@@ -41,11 +41,13 @@ type apiLeaderService struct {
 
 // newAPILeaderService starts the leaderservice. The first heartbeat
 // runs synchronously inside Service.Start so GET /leader returns a
-// non-zero state immediately after Run begins serving requests.
-func newAPILeaderService(s *store.Store, addr string, logger *slog.Logger) *apiLeaderService {
+// non-zero state immediately after Run begins serving requests. dbPath
+// is threaded to the BACI-89 background sync runner's cross-process
+// lock.
+func newAPILeaderService(s *store.Store, addr, dbPath string, logger *slog.Logger) *apiLeaderService {
 	host, _ := os.Hostname()
 	label := fmt.Sprintf("api pid=%d host=%s addr=%s", os.Getpid(), host, addr)
-	ls := &apiLeaderService{svc: leaderservice.New(s, label, logger)}
+	ls := &apiLeaderService{svc: leaderservice.New(s, label, dbPath, logger)}
 	// emit=nil: the api has no event bus to push leader state through;
 	// GET /leader reads it on demand.
 	ls.svc.Start(nil)
@@ -63,4 +65,14 @@ func (ls *apiLeaderService) stop() {
 // currentState returns the elector's cached state — used by GET /leader.
 func (ls *apiLeaderService) currentState() leader.State {
 	return ls.svc.CurrentState()
+}
+
+// syncInProgress reports whether this process's background sync runner
+// is mid-tick (BACI-89). Only meaningful when this process is the
+// leader; a standby always reports false.
+func (ls *apiLeaderService) syncInProgress() bool {
+	if ls == nil || ls.svc == nil {
+		return false
+	}
+	return ls.svc.SyncInProgress()
 }

@@ -375,13 +375,16 @@ CREATE INDEX IF NOT EXISTS idx_agent_claims_by_session
 -- local path is per-machine and lives only in this table.
 --
 -- last_sync_at is bumped at the end of every successful `bacio sync`.
--- It's purely informational today — useful for `bacio status`-style
--- summaries; never used to gate behaviour.
+-- last_sync_error (BACI-89) carries the last run's failure message, or
+-- NULL when the last run succeeded — the background sync ticker writes
+-- it so the web UI can surface a failed mirror. Both are informational;
+-- never used to gate behaviour.
 CREATE TABLE IF NOT EXISTS sync_remotes (
-    remote_url   TEXT NOT NULL PRIMARY KEY,
-    local_path   TEXT NOT NULL,
-    cloned_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    last_sync_at DATETIME
+    remote_url      TEXT NOT NULL PRIMARY KEY,
+    local_path      TEXT NOT NULL,
+    cloned_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_sync_at    DATETIME,
+    last_sync_error TEXT
 );
 
 -- agent_dispatches is the supervisor->agent work queue. A dispatch is a

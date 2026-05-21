@@ -35,6 +35,10 @@ type Options struct {
 	Token       string
 	CORSOrigins []string
 	MountUI     bool
+	// DBPath is the resolved SQLite path. Threaded through to the
+	// BACI-89 background sync runner so its cross-process lock file
+	// lands beside the right DB. Empty falls back to store.DefaultPath.
+	DBPath string
 }
 
 // Server is the wired-up HTTP server. The caller (cmd/bacio) owns the store
@@ -88,7 +92,7 @@ func (s *Server) Handler() http.Handler { return s.handler }
 // Server.Handler() directly bypass this and see the inert leader
 // handler from New.
 func (s *Server) Run(ctx context.Context) error {
-	leaderSvc := newAPILeaderService(s.store, s.opts.Addr, s.logger)
+	leaderSvc := newAPILeaderService(s.store, s.opts.Addr, s.opts.DBPath, s.logger)
 	s.httpServer.Handler = newRouter(deps{
 		store:  s.store,
 		opts:   s.opts,

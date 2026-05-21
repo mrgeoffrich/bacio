@@ -72,6 +72,99 @@ surface for them.`,
 	}
 	cmd.AddCommand(newSettingsTemplateCmd())
 	cmd.AddCommand(newSettingsShowArchivedCmd())
+	cmd.AddCommand(newSettingsSyncBackgroundCmd())
+	return cmd
+}
+
+// syncBackgroundResult is the JSON + text shape `bacio settings
+// sync-background` returns on both the get and set paths (BACI-89).
+type syncBackgroundResult struct {
+	BackgroundEnabled bool `json:"background_enabled"`
+}
+
+// newSettingsSyncBackgroundCmd implements the BACI-89
+// sync.background_enabled toggle. The verb doubles as get and set:
+//
+//   - `bacio settings sync-background`             — read the current value
+//   - `bacio settings sync-background true|false`  — write it
+//   - `bacio settings sync-background --json '{"value":false}'` — same write
+//
+// Background sync is opt-OUT — the value defaults to true once sync is
+// configured, so this verb is how a user who wants manual-only sync
+// turns the continual-mirror controller ticker off. Local-only — the
+// toggle is read by the in-process controller, so it has no remote
+// path.
+func newSettingsSyncBackgroundCmd() *cobra.Command {
+	var rawInput string
+	cmd := &cobra.Command{
+		Use:   "sync-background [true|false]",
+		Short: "Get or set the BACI-89 sync.background_enabled global toggle (default: true)",
+		Long: `Get or set the BACI-89 sync.background_enabled global toggle. When on
+(the default — background sync is opt-OUT), the leader-elected
+controller continually mirrors every sync-enabled repo on a timer,
+running the same pull → import → export → commit → push pipeline a
+manual ` + "`bacio sync`" + ` runs. Set to false for manual-only sync.
+
+Examples:
+
+  bacio settings sync-background           # read current value
+  bacio settings sync-background false     # disable background sync
+  bacio settings sync-background true      # re-enable (default)
+  bacio settings sync-background --json '{"value":false}'`,
+		Args: cobra.RangeArgs(0, 1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if inRemoteMode() {
+				return fmt.Errorf("bacio settings sync-background: local-only (the toggle is read by the in-process controller)")
+			}
+			raw, err := parseJSONInput(cmd, args, rawInput)
+			if err != nil {
+				return err
+			}
+			s, err := openStore()
+			if err != nil {
+				return err
+			}
+			defer s.Close()
+			// Get path — no args, no --json.
+			if raw == nil && len(args) == 0 {
+				cur, err := s.GetSyncBackgroundEnabled()
+				if err != nil {
+					return err
+				}
+				return emit(syncBackgroundResult{BackgroundEnabled: cur})
+			}
+			// Set path — accept --json or a positional bool.
+			var value bool
+			if raw != nil {
+				in, _, err := inputio.DecodeStrict[inputs.SettingsSyncBackgroundInput](raw)
+				if err != nil {
+					return err
+				}
+				value = in.Value
+			} else {
+				v, err := parseBoolPositional(args[0])
+				if err != nil {
+					return err
+				}
+				value = v
+			}
+			payload := syncBackgroundResult{BackgroundEnabled: value}
+			if opts.dryRun {
+				return emitDryRun(payload)
+			}
+			if err := s.SetSyncBackgroundEnabled(value); err != nil {
+				return err
+			}
+			recordOp(s, model.HistoryEntry{
+				Op:          "sync_pref.update",
+				Kind:        "app_setting",
+				TargetLabel: "sync.background_enabled",
+				Details:     fmt.Sprintf("background_enabled=%t", value),
+			})
+			return emit(payload)
+		},
+	}
+	addInputFlag(cmd, &rawInput)
 	return cmd
 }
 

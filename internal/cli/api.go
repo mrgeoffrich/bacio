@@ -87,6 +87,7 @@ requests carry their own actor via the X-Actor header (default "api").`,
 				Addr:        addr,
 				Token:       token,
 				CORSOrigins: corsOrigins,
+				DBPath:      env.DBPath,
 			}, logger)
 
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

@@ -13,7 +13,6 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/git"
 	"github.com/mrgeoffrich/bacio/internal/model"
-	"github.com/mrgeoffrich/bacio/internal/sync"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -35,11 +34,19 @@ func stateLabel(s model.State) string {
 }
 
 // Board is one bacio repo, offered in the top-nav repository selector.
+//
+// The SyncEnabled / SyncInProgress / SyncLastAt / SyncLastError fields
+// (BACI-89) drive the topbar's live sync-status badge: SyncEnabled is
+// "this repo has git sync configured"; the other three reflect the
+// background sync runner's last / current state.
 type Board struct {
-	Prefix      string `json:"prefix"`
-	Name        string `json:"name"`
-	IssueCount  int    `json:"issueCount"`
-	SyncEnabled bool   `json:"syncEnabled"`
+	Prefix         string     `json:"prefix"`
+	Name           string     `json:"name"`
+	IssueCount     int        `json:"issueCount"`
+	SyncEnabled    bool       `json:"syncEnabled"`
+	SyncInProgress bool       `json:"syncInProgress"`
+	SyncLastAt     *time.Time `json:"syncLastAt,omitempty"`
+	SyncLastError  string     `json:"syncLastError,omitempty"`
 }
 
 // BoardColumn is one kanban column — one bacio issue state.
@@ -241,24 +248,21 @@ func cardFromIssue(iss *model.Issue, taken bool) BoardCard {
 	}
 }
 
-// repoSyncEnabled reports whether the repo's working tree has git sync
-// configured — a readable .bacio/config.yaml with a sync.remote set. Any
-// read/parse failure (missing dir, broken config) counts as not-enabled.
-func repoSyncEnabled(path string) bool {
-	if path == "" {
-		return false
-	}
-	cfg, err := sync.ReadProjectConfig(path)
-	return err == nil && cfg.Sync.Remote != ""
-}
-
 // ListBoards returns every bacio repo as a sidebar board, with its issue count
-// and whether git sync is configured for it.
+// and its BACI-89 background-sync status.
 func (b *BoardService) ListBoards() ([]Board, error) {
 	ctx := context.Background()
 	repos, err := b.client.ListRepos(ctx)
 	if err != nil {
 		return nil, err
+	}
+	// Per-repo sync status, keyed by prefix. A failure here is
+	// non-fatal — sync status is badge polish, not load-bearing.
+	syncByPrefix := map[string]client.SyncStatus{}
+	if statuses, serr := b.client.SyncStatuses(ctx); serr == nil {
+		for _, st := range statuses {
+			syncByPrefix[st.Prefix] = st
+		}
 	}
 	boards := make([]Board, 0, len(repos))
 	for _, r := range repos {
@@ -266,14 +270,27 @@ func (b *BoardService) ListBoards() ([]Board, error) {
 		if err != nil {
 			return nil, err
 		}
-		boards = append(boards, Board{
-			Prefix:      r.Prefix,
-			Name:        r.Name,
-			IssueCount:  len(issues),
-			SyncEnabled: repoSyncEnabled(r.Path),
-		})
+		boards = append(boards, boardWithSync(r, len(issues), syncByPrefix[r.Prefix]))
 	}
 	return boards, nil
+}
+
+// boardWithSync builds a Board from a repo, issue count, and the
+// repo's sync status. Centralises the SyncEnabled / Sync* mapping so
+// ListBoards and AddRepository stay in lockstep.
+func boardWithSync(r *model.Repo, issueCount int, st client.SyncStatus) Board {
+	bd := Board{
+		Prefix:      r.Prefix,
+		Name:        r.Name,
+		IssueCount:  issueCount,
+		SyncEnabled: st.Configured,
+	}
+	bd.SyncInProgress = st.InProgress
+	bd.SyncLastAt = st.LastSyncAt
+	if st.LastError != nil {
+		bd.SyncLastError = *st.LastError
+	}
+	return bd
 }
 
 // AddRepository opens a native folder picker and registers the chosen git
@@ -305,12 +322,19 @@ func (b *BoardService) AddRepository() (Board, error) {
 	if err != nil {
 		return Board{}, err
 	}
-	return Board{
-		Prefix:      repo.Prefix,
-		Name:        repo.Name,
-		IssueCount:  len(issues),
-		SyncEnabled: repoSyncEnabled(repo.Path),
-	}, nil
+	// Freshly-added repo: sync is almost never configured yet, but
+	// look it up anyway so an add-after-`bacio sync init` reflects
+	// reality. A failure is non-fatal — fall back to the zero status.
+	var st client.SyncStatus
+	if statuses, serr := b.client.SyncStatuses(ctx); serr == nil {
+		for _, s := range statuses {
+			if s.Prefix == repo.Prefix {
+				st = s
+				break
+			}
+		}
+	}
+	return boardWithSync(repo, len(issues), st), nil
 }
 
 // ListColumns returns the kanban columns — bacio's issue states, in order.

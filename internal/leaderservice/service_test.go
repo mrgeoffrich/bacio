@@ -29,7 +29,7 @@ func TestStartEmitsSynchronouslyAndStopReleases(t *testing.T) {
 	}
 	defer s.Close()
 
-	svc := New(s, "leaderservice-test pid=1", nil)
+	svc := New(s, "leaderservice-test pid=1", "", nil)
 
 	var emits int
 	var lastState leader.State
@@ -86,7 +86,7 @@ func TestStartNilEmitTolerated(t *testing.T) {
 	}
 	defer s.Close()
 
-	svc := New(s, "leaderservice-test pid=1", nil)
+	svc := New(s, "leaderservice-test pid=1", "", nil)
 	svc.Start(nil)
 	// Defer Stop in a goroutine so the test fails fast if the controller
 	// hangs rather than waiting for the 10-minute -timeout fallback.

@@ -243,4 +243,5 @@ var (
 	ExampleDocUnarchive       = DocUnarchiveInput{Filename: "auth-old.md"}
 	ExampleArchiveSweep       = ArchiveSweepInput{}
 	ExampleSettingsShowArchived = SettingsShowArchivedInput{Value: true}
+	ExampleSettingsSyncBackground = SettingsSyncBackgroundInput{Value: false}
 )

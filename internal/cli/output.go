@@ -163,6 +163,12 @@ func renderText(w io.Writer, v any) error {
 		} else {
 			fmt.Fprintln(w, "show_archived: off")
 		}
+	case syncBackgroundResult:
+		if x.BackgroundEnabled {
+			fmt.Fprintln(w, "sync.background_enabled: on")
+		} else {
+			fmt.Fprintln(w, "sync.background_enabled: off")
+		}
 	default:
 		fmt.Fprintf(w, "%v\n", v)
 	}

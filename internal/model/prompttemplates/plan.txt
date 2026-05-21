@@ -12,9 +12,7 @@ the `dispatch_id` to acknowledge — call that ticket `<TICKET>` below.
 
 ## Plan
 
-Run a planning pass on `<TICKET>`: produce a thorough implementation plan — do not write code yet. Capture any documentation updates the work implies. When the plan is ready, attach it to the issue as a markdown comment.
-
-If the plan is large enough that you write it to its own document instead of a comment, link that document to the issue **only** — `bacio doc link <file> <TICKET>`. Never link a plan to its feature: a feature link fans the document out onto every sibling issue's brief, so a plan for one ticket would surface as if it belonged to every other ticket in the feature.
+Run a planning pass on `<TICKET>`: produce a thorough implementation plan — do not write code yet. Capture any documentation updates the work implies. When the plan is ready, attach it to the document. Link that document to the issue **only** — `bacio doc link <file> <TICKET>`. Never link a plan to its feature: a feature link fans the document out onto every sibling issue's brief, so a plan for one ticket would surface as if it belonged to every other ticket in the feature.
 
 If you have to stop for user input, the issue is automatically moved to **needs action**; once the user answers, put it back to **in progress** and continue.
 

@@ -41,6 +41,13 @@ Snapshot targets:
 			if inRemoteMode() {
 				return fmt.Errorf("bacio tui: not supported in remote mode (TUI talks to SQLite directly); start the TUI against a local DB")
 			}
+			// Resolve the env once: openStore routes through the same
+			// chain, and env.DBPath also feeds the BACI-89 background
+			// sync runner's cross-process lock.
+			env, err := resolveEnv()
+			if err != nil {
+				return err
+			}
 			s, err := openStore()
 			if err != nil {
 				return err
@@ -66,7 +73,7 @@ Snapshot targets:
 					Height: snapH,
 				})
 			}
-			return tui.Run(s, repo)
+			return tui.Run(s, repo, env.DBPath)
 		},
 	}
 	cmd.Flags().StringVar(&snapshot, "snapshot", "", "render a view to stdout instead of starting the TUI (board|features|docs|agents|history|settings|settings-editor|card-overlay|doc-overlay|feature-overlay|agent-detail|picker|feature-picker|dispatch-picker)")
