@@ -11,6 +11,19 @@ import (
 // field is present so the follow-up is a one-line edit per file.
 const AgentFileModel = "opus"
 
+// AgentFileSkills lists the skills preloaded into every generated
+// subagent via the frontmatter `skills:` field (BACI-97). Claude Code
+// injects each named skill's full content into the subagent's context
+// at startup, so the worker no longer has to take an explicit "Use the
+// bacio skill" step — and the preloaded content is prompt-cache-
+// eligible across back-to-back same-mode spawns.
+//
+// "bacio" is the skill directory basename written by `bacio
+// install-skill` (`.claude/skills/bacio/SKILL.md`). Only *skills* can
+// be preloaded this way; the deferred Task tools (`TaskCreate` etc.)
+// cannot — the briefs keep the `ToolSearch` instruction for those.
+var AgentFileSkills = []string{"bacio"}
+
 // AgentFileIsolation is the worktree-isolation mode written into every
 // generated subagent's frontmatter. "worktree" makes Claude Code run
 // each dispatched worker in its own throwaway git worktree — created on
@@ -143,9 +156,10 @@ The task tools (` + "`TaskCreate`" + ` / ` + "`TaskUpdate`" + ` / ` + "`TaskList
 // file (`.claude/agents/<SubagentTypeForTemplate(slug)>.md`) for a
 // dispatch template (BACI-76). The frontmatter carries the agent name
 // (== the file basename, == the subagent_type the supervisor spawns), a
-// generated description, the model, and the worktree-isolation mode;
-// the body is the template body verbatim — that body is the subagent's
-// durable system prompt.
+// generated description, the model, the preloaded `skills:` list
+// (BACI-97 — Claude Code injects each named skill's full content at
+// startup), and the worktree-isolation mode; the body is the template
+// body verbatim — that body is the subagent's durable system prompt.
 //
 // Deliberately no `tools:` line: omitting the field makes Claude Code
 // give the subagent the parent session's full tool set. The earlier
@@ -190,6 +204,9 @@ func RenderAgentFile(slug, name, body string) (string, error) {
 	fmt.Fprintf(&b, "name: %s\n", agentName)
 	fmt.Fprintf(&b, "description: bacio dispatched-work subagent for the %q stage. Spawned by the supervisor session on a %s dispatch.\n", label, slug)
 	fmt.Fprintf(&b, "model: %s\n", AgentFileModel)
+	if len(AgentFileSkills) > 0 {
+		fmt.Fprintf(&b, "skills: [%s]\n", strings.Join(AgentFileSkills, ", "))
+	}
 	fmt.Fprintf(&b, "isolation: %s\n", AgentFileIsolation)
 	b.WriteString("---\n\n")
 	b.WriteString(body)
