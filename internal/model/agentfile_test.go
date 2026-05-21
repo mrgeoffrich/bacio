@@ -14,7 +14,6 @@ func TestRenderAgentFile(t *testing.T) {
 		"name: bacio-plan-worker\n",
 		"model: opus\n",
 		"isolation: worktree\n",
-		"tools: Read, Edit, Write, Bash, Grep, Glob, TaskCreate, TaskUpdate, TaskList, TaskGet, Skill, WebFetch, WebSearch, mcp__bacio__register, mcp__bacio__reply, mcp__bacio__ask_user_question\n",
 		"Do the planning work.\n",
 	} {
 		if !strings.Contains(got, want) {
@@ -24,6 +23,11 @@ func TestRenderAgentFile(t *testing.T) {
 	// Frontmatter is a leading --- ... --- block.
 	if !strings.HasPrefix(got, "---\n") {
 		t.Errorf("RenderAgentFile output does not start with frontmatter:\n%s", got)
+	}
+	// No `tools:` line — the field is deliberately omitted so the
+	// subagent inherits the parent session's full tool set.
+	if strings.Contains(got, "\ntools:") {
+		t.Errorf("RenderAgentFile output should not carry a tools: line:\n%s", got)
 	}
 	// The description must NOT leak the gerund into the agent-name slot.
 	if !strings.Contains(got, `subagent for the "Planning" stage`) {

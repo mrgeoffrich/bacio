@@ -585,9 +585,8 @@ subagent type is derived from the slug by
 The `bacio install-agent` command renders one
 `.claude/agents/bacio-<mode>-worker.md` per dispatchable template from
 the current `prompt_templates` rows. Each generated file's frontmatter
-carries the agent `name` (== file basename == `subagent_type`), a
-narrowed tool allowlist (see below), and `model: opus`; its body is the
-template body verbatim. The briefs are written verbatim, *not*
+carries the agent `name` (== file basename == `subagent_type`) and
+`model: opus`; its body is the template body verbatim. The briefs are written verbatim, *not*
 `{{token}}`-rendered — a system prompt is fixed per agent type and
 cannot embed a specific issue id, so the six built-in briefs were
 rewritten to refer to "the ticket named in your dispatch prompt". A
@@ -617,8 +616,8 @@ channel MCP server — all in a single invocation with one plan/confirm.
 
 (This reverses the pre-BACI-76 decision — recorded here for the next
 reader — that there should be *no* `.claude/agents/` file and *no*
-install verb. The prompt-cache / TTFT win, plus the per-worker
-tool-surface narrowing, made the per-mode subagent the better seam.)
+install verb. The prompt-cache / TTFT win made the per-mode subagent
+the better seam.)
 
 ### Worktree-isolated workers (#114)
 
@@ -650,39 +649,20 @@ for the bacio-side of that isolation.
 
 ### Subagent tool surface
 
-The generated agent files set an explicit `tools:` allowlist
-(`model.AgentFileToolAllowlist`), uniform across all six modes for v1:
+The generated agent files carry **no `tools:` line**. Omitting the
+field makes Claude Code give each dispatched worker the parent
+session's full tool set — every code-work tool, the `Task*` task-list
+family, `Skill`, `WebFetch`/`WebSearch`, and every MCP surface the
+supervisor has connected (including the bacio channel tools).
 
-```
-Read, Edit, Write, Bash, Grep, Glob,
-TaskCreate, TaskUpdate, TaskList, TaskGet,
-Skill, WebFetch, WebSearch,
-mcp__bacio__register, mcp__bacio__reply, mcp__bacio__ask_user_question
-```
-
-This is the general-purpose code-work core plus:
-
-- The **session task-list family** (`TaskCreate`/`TaskUpdate`/`TaskList`/
-  `TaskGet`). `Task`/`Agent` is excluded — subagents can't spawn
-  subagents — and `TodoWrite` is excluded because it's disabled upstream
-  since v2.1.142 in favour of the `Task*` tools. Earlier the allowlist
-  carried `TaskCreate` alone, which made the task list write-only: a
-  worker could create sub-steps but never mark them in-progress or
-  complete. The full family closes that gap.
-- `Skill` — **required**: every per-mode brief opens with "use the
-  bacio skill", and smoke-testing runs through the `playwright-cli`
-  skill. Because `tools:` is an allowlist, omitting `Skill` blocks *all*
-  skill invocation, so a worker without it cannot follow its own brief.
-- `WebFetch`/`WebSearch` — the `plan` and `design` briefs do real
-  research.
-- Only the three bacio channel MCP tools a worker needs.
-
-Every other MCP server the parent has connected — Gmail / Calendar /
-Drive / Linear / Slack / plugin-dev — is **dropped**: a dispatched
-worker never needs them, and excluding them trims the tool-definition
-block in the subagent's prefill. Per-mode narrowing of this list is a
-filed follow-up; the list is generated, so tightening it is a
-generator change.
+This drops the earlier BACI-76 allowlist. That allowlist was uniform
+across the six modes and named ~15 tools explicitly; in practice it
+kept costing dispatched workers tools they legitimately needed (a brief
+that referenced a skill or an MCP surface the list didn't enumerate),
+and the failure mode of a missing tool is *silent* — the worker just
+can't do the step, with no error pointing at the allowlist. Inheriting
+the full set is the simpler, more robust default; `model.RenderAgentFile`
+no longer emits the field at all.
 
 BACI-45's `PostToolUse`-on-`TaskCreate`/`TaskUpdate` mirror fires for
 subagent task-list calls too — they share the parent's task store.

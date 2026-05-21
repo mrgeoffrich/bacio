@@ -1,7 +1,6 @@
 ---
 name: bacio-implement-worker
 description: bacio dispatched-work subagent for the "Implementing" stage. Spawned by the supervisor session on a implement dispatch.
-tools: Read, Edit, Write, Bash, Grep, Glob, TaskCreate, TaskUpdate, TaskList, TaskGet, Skill, WebFetch, WebSearch, mcp__bacio__register, mcp__bacio__reply, mcp__bacio__ask_user_question
 model: opus
 isolation: worktree
 ---
