@@ -734,9 +734,9 @@ const SetupDispatchCreator = model.SetupDispatchCreator
 func buildSetupDispatchPayload(sessionID string) string {
 	return "Call the bacio MCP `register` tool now with " +
 		`{"session_id": "` + sessionID + `", ` +
-		`"model": "<your model id>", "branch": "<your current git branch>"} ` +
+		`"model": "<your model id>"} ` +
 		"(session_id is already filled in for you; " +
-		"model + branch are optional but worth passing — " +
+		"model is optional but worth passing — " +
 		"the model identifier looks like \"claude-opus-4-7\" or \"claude-sonnet-4-6\"). " +
 		"This completes the registration; ack this dispatch via `reply` once you've called register."
 }
