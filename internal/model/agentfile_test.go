@@ -123,3 +123,61 @@ func TestRenderAgentFileBuiltinsCarryGuard(t *testing.T) {
 		}
 	}
 }
+
+// TestRenderAgentFileCarriesWorkerProtocol is the BACI-96 guard: every
+// rendered agent file prepends the centralised worker-protocol preamble
+// — the curated harness/behaviour prose and task-tool usage spec — and
+// it sits *after* the worktree guard but *before* the template's own
+// brief.
+func TestRenderAgentFileCarriesWorkerProtocol(t *testing.T) {
+	const brief = "Do the implementation work for the ticket."
+	out, err := RenderAgentFile("implement", "Implementing", brief)
+	if err != nil {
+		t.Fatalf("RenderAgentFile: %v", err)
+	}
+	if !strings.Contains(out, WorkerProtocolPreamble) {
+		t.Fatalf("RenderAgentFile output missing the worker protocol preamble:\n%s", out)
+	}
+	// Ordering: worktree guard → worker protocol → template brief.
+	guardAt := strings.Index(out, "Worktree safety guard")
+	protocolAt := strings.Index(out, "Worker protocol")
+	briefAt := strings.Index(out, brief)
+	if guardAt < 0 || protocolAt < 0 || briefAt < 0 {
+		t.Fatalf("RenderAgentFile output missing guard, protocol, or brief:\n%s", out)
+	}
+	if !(guardAt < protocolAt && protocolAt < briefAt) {
+		t.Errorf("preamble ordering wrong: guard=%d protocol=%d brief=%d (want guard < protocol < brief)", guardAt, protocolAt, briefAt)
+	}
+	// The protocol must carry both curated pieces: the autonomous-agent
+	// framing / harness notes, and the task-tool usage spec.
+	for _, want := range []string{
+		"autonomous agent",
+		"<system-reminder>",
+		"file_path:line_number",
+		"TaskCreate",
+		"in_progress",
+		"thin scheduler",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("worker protocol preamble missing %q\n--- got ---\n%s", want, out)
+		}
+	}
+}
+
+// TestRenderAgentFileBuiltinsCarryWorkerProtocol checks the protocol
+// preamble reaches every built-in dispatchable brief, not just one.
+func TestRenderAgentFileBuiltinsCarryWorkerProtocol(t *testing.T) {
+	for _, slug := range []string{
+		BuiltinTemplatePlan, BuiltinTemplateDesign, BuiltinTemplateImplement,
+		BuiltinTemplateReview, BuiltinTemplateShip, BuiltinTemplateFixReview,
+	} {
+		body := DefaultPromptBodyForBuiltinSlug(slug)
+		out, err := RenderAgentFile(slug, BuiltinTemplateLabel(slug), body)
+		if err != nil {
+			t.Fatalf("RenderAgentFile(%q): %v", slug, err)
+		}
+		if !strings.Contains(out, WorkerProtocolPreamble) {
+			t.Errorf("built-in %q agent file missing the worker protocol preamble", slug)
+		}
+	}
+}

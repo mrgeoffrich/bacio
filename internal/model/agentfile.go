@@ -83,6 +83,62 @@ non-main branch — continue with the rest of this brief.
 
 `
 
+// WorkerProtocolPreamble is the shared worker brief block prepended to
+// every generated subagent file's body (BACI-96), directly after the
+// WorktreeGuardPreamble and before the template's own brief.
+//
+// A dispatched `bacio-<mode>-worker` subagent does NOT inherit the
+// Claude Code default system prompt — confirmed by a mitmproxy capture
+// (BACI-95, `docs/subagent-default-prompt-gap.md`). So harness
+// conventions a normal Claude session takes for granted (what a
+// `<system-reminder>` tag means, that hook output is feedback, the
+// `file_path:line_number` citation form) and the task-tool usage
+// guidance are simply absent from a worker's prompt. This preamble
+// folds a curated subset back in.
+//
+// Two parts:
+//
+//  1. A worker-adapted trim of the Claude Code default prompt — the
+//     "autonomous agent" framing plus the harness/behaviour notes. The
+//     terminal-markdown line and the security-policy paragraph are
+//     dropped as not applicable to a headless worker.
+//  2. A short spec for the task tools (`TaskCreate` / `TaskUpdate` /
+//     `TaskList` / `TaskGet`). They are deferred tools with no usage
+//     guidance in a worker's system prompt; the spec tells the worker
+//     when and how to track multi-step dispatch work.
+//
+// Centralising it here (rather than copying it into each
+// prompttemplates/*.txt body) means it cannot drift and is inherited
+// by any future or user-created template — the same rationale as
+// WorktreeGuardPreamble.
+const WorkerProtocolPreamble = `## Worker protocol
+
+You are an autonomous agent that performs software engineering tasks.
+
+### Harness
+
+- ` + "`<system-reminder>`" + ` tags in messages and tool results are injected by the harness, not the user. Hooks may intercept tool calls; treat hook output as user feedback.
+- Prefer the dedicated file/search tools over shell commands when one fits. Independent tool calls can run in parallel in one response.
+- Reference code as ` + "`file_path:line_number`" + ` — it's clickable.
+
+Write code that reads like the surrounding code: match its comment density, naming, and idiom.
+
+For actions that are hard to reverse or outward-facing, confirm first unless durably authorized or explicitly told to proceed without asking; approval in one context doesn't extend to the next. Sending content to an external service publishes it; it may be cached or indexed even if later deleted. Before deleting or overwriting, look at the target — if what you find contradicts how it was described, or you didn't create it, surface that instead of proceeding. Report outcomes faithfully: if tests fail, say so with the output; if a step was skipped, say that; when something is done and verified, state it plainly without hedging.
+
+### Tracking your work with the task tools
+
+The task tools (` + "`TaskCreate`" + ` / ` + "`TaskUpdate`" + ` / ` + "`TaskList`" + ` / ` + "`TaskGet`" + ` — the successor to ` + "`TodoWrite`" + `) let you track multi-step dispatch work. They are deferred tools — load their schemas via ` + "`ToolSearch`" + ` (` + "`select:TaskCreate,TaskUpdate,TaskList,TaskGet,TaskOutput,TaskStop`" + `) before calling them.
+
+- Use ` + "`TaskCreate`" + ` when the dispatch needs 3+ distinct steps; skip it for trivial single-step jobs.
+- Fields: ` + "`subject`" + ` (imperative title), ` + "`description`" + `, optional ` + "`activeForm`" + ` (spinner text). Tasks start ` + "`pending`" + `.
+- Mark a task ` + "`in_progress`" + ` before starting it; ` + "`completed`" + ` only when fully done — never with failing tests, partial work, or unresolved errors. When blocked, keep it ` + "`in_progress`" + ` and add a new task for the blocker.
+- ` + "`TaskGet`" + ` the latest state before ` + "`TaskUpdate`" + ` (staleness). ` + "`addBlocks`" + ` / ` + "`addBlockedBy`" + ` wire dependencies.
+- This applies to YOU, the worker doing the real work. The supervisor that dispatched you stays a thin scheduler — it does not grow a per-dispatch task list.
+
+---
+
+`
+
 // RenderAgentFile produces the contents of a per-mode custom subagent
 // file (`.claude/agents/<SubagentTypeForTemplate(slug)>.md`) for a
 // dispatch template (BACI-76). The frontmatter carries the agent name
@@ -104,13 +160,17 @@ non-main branch — continue with the rest of this brief.
 // `{{` sequence is a packaging bug — RenderAgentFile rejects it so a
 // leftover placeholder never ships into an agent file.
 //
-// Every rendered file's body is prefixed with WorktreeGuardPreamble
-// (BACI-91): a centralised worktree+branch safety guard that runs
-// before the template's own brief, so a worker spawned outside an
-// isolated worktree (or on the main branch) aborts before mutating
-// anything. The placeholder check above runs against the *template*
-// body only — the guard preamble is bacio-authored and carries no
-// `{{...}}` tokens.
+// Every rendered file's body is prefixed with two bacio-authored
+// preamble blocks, in order: WorktreeGuardPreamble (BACI-91) — a
+// centralised worktree+branch safety guard that runs before anything
+// else so a worker spawned outside an isolated worktree (or on the
+// main branch) aborts before mutating anything — then
+// WorkerProtocolPreamble (BACI-96) — the curated harness/behaviour
+// prose and task-tool usage spec a worker would otherwise lack,
+// because dispatched subagents do not inherit the Claude Code default
+// system prompt. The template's own brief follows both. The
+// placeholder check above runs against the *template* body only — both
+// preambles are bacio-authored and carry no `{{...}}` tokens.
 func RenderAgentFile(slug, name, body string) (string, error) {
 	body = strings.TrimRight(body, "\r\n")
 	if strings.TrimSpace(body) == "" {
@@ -119,7 +179,7 @@ func RenderAgentFile(slug, name, body string) (string, error) {
 	if strings.Contains(body, "{{") {
 		return "", fmt.Errorf("template %q body still contains a {{...}} placeholder — a subagent system prompt is fixed per agent type and cannot interpolate a specific ticket; rewrite the body to refer to \"the ticket named in your dispatch prompt\"", slug)
 	}
-	body = WorktreeGuardPreamble + body
+	body = WorktreeGuardPreamble + WorkerProtocolPreamble + body
 	agentName := SubagentTypeForTemplate(slug)
 	label := name
 	if strings.TrimSpace(label) == "" {
