@@ -10,6 +10,7 @@ import (
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/git"
+	"github.com/mrgeoffrich/bacio/internal/procfind"
 	"github.com/mrgeoffrich/bacio/internal/wtenv"
 )
 
@@ -365,6 +366,177 @@ func TestWorktreeRm_PurgeDBRefusesSharedDB(t *testing.T) {
 	}
 	if _, statErr := os.Stat(sharedDB); statErr != nil {
 		t.Errorf("shared DB was removed despite the refusal: %v", statErr)
+	}
+}
+
+// stubReapSeams swaps the BACI-93 process-reap seams for the duration
+// of a test and restores them on cleanup. listeners is the canned
+// discovery result; signalled records each PID a Term/Kill was sent
+// to; alive controls the post-signal liveness poll.
+func stubReapSeams(t *testing.T, listeners []procfind.Listener, discErr error, aliveAfter bool) *[]int {
+	t.Helper()
+	origList := listenersOnPortFn
+	origTerm := reapProcSignalTerm
+	origKill := reapProcSignalKill
+	origAlive := reapProcAlive
+	t.Cleanup(func() {
+		listenersOnPortFn = origList
+		reapProcSignalTerm = origTerm
+		reapProcSignalKill = origKill
+		reapProcAlive = origAlive
+	})
+	var signalled []int
+	listenersOnPortFn = func(int) ([]procfind.Listener, error) {
+		return listeners, discErr
+	}
+	reapProcSignalTerm = func(pid int) error { signalled = append(signalled, pid); return nil }
+	reapProcSignalKill = func(pid int) error { signalled = append(signalled, pid); return nil }
+	reapProcAlive = func(int) bool { return aliveAfter }
+	return &signalled
+}
+
+// TestReapWorktreeProcesses_DefaultReap: a matched bacio listener is
+// signalled and reported killed.
+func TestReapWorktreeProcesses_DefaultReap(t *testing.T) {
+	signalled := stubReapSeams(t, []procfind.Listener{{PID: 4242, Command: "/usr/bin/bacio"}}, nil, false)
+	res := &worktreeRmResult{}
+	reapWorktreeProcesses(res, 5401, false)
+	if len(res.ReapedProcesses) != 1 {
+		t.Fatalf("got %d reaped, want 1", len(res.ReapedProcesses))
+	}
+	rp := res.ReapedProcesses[0]
+	if rp.PID != 4242 || !rp.Killed || rp.Signal != "term" {
+		t.Errorf("reaped = %+v, want pid 4242 killed via term", rp)
+	}
+	if len(*signalled) != 1 || (*signalled)[0] != 4242 {
+		t.Errorf("signalled = %v, want [4242]", *signalled)
+	}
+}
+
+// TestReapWorktreeProcesses_NonBacioLeftAlive: a stranger on our port
+// is reported but never signalled.
+func TestReapWorktreeProcesses_NonBacioLeftAlive(t *testing.T) {
+	signalled := stubReapSeams(t, []procfind.Listener{{PID: 99, Command: "python"}}, nil, false)
+	res := &worktreeRmResult{}
+	reapWorktreeProcesses(res, 5401, false)
+	if len(res.ReapedProcesses) != 1 {
+		t.Fatalf("got %d reaped, want 1", len(res.ReapedProcesses))
+	}
+	rp := res.ReapedProcesses[0]
+	if rp.Killed || rp.Signal != "" {
+		t.Errorf("non-bacio listener was signalled: %+v", rp)
+	}
+	if !strings.Contains(rp.Note, "not a bacio process") {
+		t.Errorf("note = %q, want a 'not a bacio process' note", rp.Note)
+	}
+	if len(*signalled) != 0 {
+		t.Errorf("signalled = %v, want nothing", *signalled)
+	}
+}
+
+// TestReapWorktreeProcesses_Port5320Guard: a manifest somehow pointing
+// at the legacy default port skips reaping entirely.
+func TestReapWorktreeProcesses_Port5320Guard(t *testing.T) {
+	signalled := stubReapSeams(t, []procfind.Listener{{PID: 1, Command: "bacio"}}, nil, false)
+	res := &worktreeRmResult{}
+	reapWorktreeProcesses(res, wtenv.DefaultAPIPort, false)
+	if len(res.ReapedProcesses) != 0 {
+		t.Errorf("reaped %d on port 5320, want 0", len(res.ReapedProcesses))
+	}
+	if !strings.Contains(res.ProcessScanNote, "5320") {
+		t.Errorf("scan note = %q, want a port-5320 refusal", res.ProcessScanNote)
+	}
+	if len(*signalled) != 0 {
+		t.Errorf("signalled %v on port 5320, want nothing", *signalled)
+	}
+}
+
+// TestReapWorktreeProcesses_DryRun: a dry run lists the would-signal
+// PID but signals nothing.
+func TestReapWorktreeProcesses_DryRun(t *testing.T) {
+	signalled := stubReapSeams(t, []procfind.Listener{{PID: 7, Command: "bacio"}}, nil, false)
+	res := &worktreeRmResult{}
+	reapWorktreeProcesses(res, 5401, true)
+	if len(res.ReapedProcesses) != 1 || res.ReapedProcesses[0].PID != 7 {
+		t.Fatalf("reaped = %+v, want one would-signal pid 7", res.ReapedProcesses)
+	}
+	if res.ReapedProcesses[0].Killed || res.ReapedProcesses[0].Signal != "" {
+		t.Errorf("dry-run entry was signalled: %+v", res.ReapedProcesses[0])
+	}
+	if len(*signalled) != 0 {
+		t.Errorf("dry-run signalled %v, want nothing", *signalled)
+	}
+}
+
+// TestReapWorktreeProcesses_DiscoveryError: a discovery failure is
+// non-fatal — recorded as a note, nothing signalled.
+func TestReapWorktreeProcesses_DiscoveryError(t *testing.T) {
+	signalled := stubReapSeams(t, nil, procfind.ErrToolMissing, false)
+	res := &worktreeRmResult{}
+	reapWorktreeProcesses(res, 5401, false)
+	if len(res.ReapedProcesses) != 0 {
+		t.Errorf("reaped %d on discovery error, want 0", len(res.ReapedProcesses))
+	}
+	if !strings.Contains(res.ProcessScanNote, "could not scan") {
+		t.Errorf("scan note = %q, want a discovery-failure note", res.ProcessScanNote)
+	}
+	if len(*signalled) != 0 {
+		t.Errorf("signalled %v after discovery error, want nothing", *signalled)
+	}
+}
+
+// TestReapWorktreeProcesses_SigtermGraceEscalates: a process that
+// survives the SIGTERM grace window is escalated to SIGKILL.
+func TestReapWorktreeProcesses_SigtermGraceEscalates(t *testing.T) {
+	signalled := stubReapSeams(t, []procfind.Listener{{PID: 555, Command: "bacio"}}, nil, true /* stays alive */)
+	res := &worktreeRmResult{}
+	reapWorktreeProcesses(res, 5401, false)
+	rp := res.ReapedProcesses[0]
+	if rp.Signal != "kill" || !rp.Killed {
+		t.Errorf("reaped = %+v, want escalated to kill", rp)
+	}
+	if !strings.Contains(rp.Note, "SIGKILL") {
+		t.Errorf("note = %q, want a SIGKILL escalation note", rp.Note)
+	}
+	// Both SIGTERM and SIGKILL should have been sent to 555.
+	if len(*signalled) != 2 {
+		t.Errorf("signalled = %v, want both term + kill", *signalled)
+	}
+}
+
+// TestWorktreeRm_KeepProcessesSkipsDiscovery: --keep-processes never
+// calls the discovery seam.
+func TestWorktreeRm_KeepProcessesSkipsDiscovery(t *testing.T) {
+	root := initRealGitRepo(t)
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	res, err := runWorktreeInit(root, filepath.Base(root), inputs.WorktreeInitInput{Slug: "keep-wt"})
+	if err != nil {
+		t.Fatalf("runWorktreeInit: %v", err)
+	}
+	if err := commitWorktreeInit(res); err != nil {
+		t.Fatalf("commitWorktreeInit: %v", err)
+	}
+
+	origList := listenersOnPortFn
+	t.Cleanup(func() { listenersOnPortFn = origList })
+	called := false
+	listenersOnPortFn = func(int) ([]procfind.Listener, error) {
+		called = true
+		return nil, nil
+	}
+
+	cmd := newWorktreeRmCmd()
+	cmd.SetArgs([]string{root, "--confirm", "keep-wt", "--keep-processes"})
+	cmd.SilenceErrors, cmd.SilenceUsage = true, true
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("worktree rm --keep-processes: %v", err)
+	}
+	if called {
+		t.Error("--keep-processes still ran process discovery")
+	}
+	if _, statErr := os.Stat(filepath.Join(root, wtenv.DefaultManifestFilename)); statErr == nil {
+		t.Error("manifest survived worktree rm")
 	}
 }
 

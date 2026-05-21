@@ -210,6 +210,44 @@ dispatched worker from the developer. Typing `--isolate-db` on the one
 `db_path` — purging the global store would wipe every project's
 issues — and names the path in the error so the refusal is legible.
 
+## Teardown process reaping (BACI-93)
+
+`bacio worktree rm` removes the manifest and the registry row, but a
+long-running bacio process (`bacio api` / `bacio web` /
+`bacio-desktop`) that was bound to that worktree keeps running after
+teardown. Such an orphan keeps heartbeating the shared `ui_leader`
+lease, so a stale `bacio web --no-open` from a torn-down worktree can
+hold the controller lease and starve the "Controlling" badge on the
+bacio instance the user is actually looking at — killing the orphan
+flips the lease over within one election tick.
+
+So `bacio worktree rm` **reaps port-bound processes by default**.
+Before any filesystem mutation it discovers every process holding a
+`LISTEN` socket on the manifest's `allocations.api_port`
+(`internal/procfind`, the only platform-specific surface — `lsof` on
+unix, `netstat -ano` + `tasklist` on Windows), then for each one whose
+command names a bacio binary (`bacio` / `bacio-desktop`) it sends
+`SIGTERM`, waits a short grace (~3 s), and escalates to `SIGKILL` if
+the process is still alive. Safety rails:
+
+- **Non-bacio listeners are never signalled.** A stranger that merely
+  grabbed the worktree's port is reported in the result with a "not a
+  bacio process; left running" note.
+- **Port 5320 is never touched.** A manifest somehow pointing at the
+  legacy default port skips the reap entirely — `worktree init` won't
+  allocate 5320, but a hand-edited manifest could.
+- **Discovery failure is non-fatal.** A missing `lsof`/`netstat`, or
+  any discovery error, is recorded as a `process_scan_note` and
+  teardown still completes — the user is told to kill manually.
+- **`--keep-processes`** (`keep_processes: true` in `--json`) opts out
+  of the reap entirely.
+- **`--dry-run`** lists the PIDs it *would* signal under "Would
+  signal:" without touching anything.
+
+Documented limitation: a `bacio channel` process has no HTTP listener,
+so the port-listener match cannot find it — channels are not reaped.
+Catching one would need a cwd-walk; that is deliberately out of scope.
+
 ## Surfaces touched
 
 | Surface | How it picks the right env |
@@ -231,7 +269,7 @@ desktop launches outside a shell that exports it).
 bacio worktree init [--slug <name>] [--port <n>] [--isolate-db] [--db-path <path>] [--force] [--json] [--dry-run]
 bacio worktree show [path]
 bacio worktree list
-bacio worktree rm [path] --confirm <slug> [--purge-db] [--json] [--dry-run]
+bacio worktree rm [path] --confirm <slug> [--purge-db] [--keep-processes] [--json] [--dry-run]
 ```
 
 - The two mutating verbs (`init`, `rm`) follow the six agent-CLI

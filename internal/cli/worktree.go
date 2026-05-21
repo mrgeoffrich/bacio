@@ -15,6 +15,7 @@ import (
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/git"
+	"github.com/mrgeoffrich/bacio/internal/procfind"
 	"github.com/mrgeoffrich/bacio/internal/store"
 	"github.com/mrgeoffrich/bacio/internal/wtenv"
 )
@@ -455,6 +456,53 @@ func printWorktreeInit(w io.Writer, r *worktreeInitResult) error {
 	return nil
 }
 
+// printWorktreeRm renders the human-readable summary for
+// `bacio worktree rm`: the manifest/registry removal lines, the
+// optional DB purge, and — when non-empty — the reaped-process block.
+// dryRun swaps "Reaped processes:" for "Would signal:".
+func printWorktreeRm(w io.Writer, r *worktreeRmResult, dryRun bool) error {
+	fmt.Fprintln(w, "Worktree environment removed.")
+	fmt.Fprintln(w)
+	if r.Slug != "" {
+		fmt.Fprintf(w, "  Slug:      %s\n", r.Slug)
+	}
+	if r.ManifestPath != "" {
+		fmt.Fprintf(w, "  Manifest:  %s\n", r.ManifestPath)
+	}
+	fmt.Fprintf(w, "  Registry:  %s\n", r.RegistryPath)
+	if r.DBPurged {
+		fmt.Fprintf(w, "  DB purged: %s\n", r.DBPath)
+	}
+	if len(r.ReapedProcesses) > 0 {
+		fmt.Fprintln(w)
+		if dryRun {
+			fmt.Fprintln(w, "Would signal:")
+		} else {
+			fmt.Fprintln(w, "Reaped processes:")
+		}
+		for _, p := range r.ReapedProcesses {
+			line := fmt.Sprintf("  pid=%-7d %-14s", p.PID, p.Command)
+			switch {
+			case dryRun:
+				// no signal column on a dry-run row
+			case p.Signal == "kill":
+				line += " SIGKILL"
+			case p.Signal == "term":
+				line += " SIGTERM"
+			}
+			if p.Note != "" {
+				line += " (" + p.Note + ")"
+			}
+			fmt.Fprintln(w, strings.TrimRight(line, " "))
+		}
+	}
+	if r.ProcessScanNote != "" {
+		fmt.Fprintln(w)
+		fmt.Fprintf(w, "Process scan: %s\n", r.ProcessScanNote)
+	}
+	return nil
+}
+
 func printWorktreeShow(w io.Writer, r *worktreeShowResult) error {
 	fmt.Fprintf(w, "Source:   %s\n", r.Source)
 	if r.ManifestPath != "" {
@@ -543,21 +591,138 @@ func printWorktreeList(w io.Writer, r *worktreeListResult) error {
 	return nil
 }
 
+// reapedProcess reports one process discovered listening on a torn-down
+// worktree's API port (BACI-93). Signal is "term", "kill", or "" (a
+// dry-run / would-signal entry, or a non-bacio listener left alone).
+type reapedProcess struct {
+	PID     int    `json:"pid"`
+	Command string `json:"command"`
+	Signal  string `json:"signal"`
+	Killed  bool   `json:"killed"`
+	Note    string `json:"note,omitempty"`
+}
+
 // worktreeRmResult is the structured payload for `bacio worktree rm`.
 type worktreeRmResult struct {
-	ManifestPath string `json:"manifest_path,omitempty"`
-	RegistryPath string `json:"registry_path"`
-	Slug         string `json:"slug,omitempty"`
-	DBPurged     bool   `json:"db_purged"`
-	DBPath       string `json:"db_path,omitempty"`
+	ManifestPath    string          `json:"manifest_path,omitempty"`
+	RegistryPath    string          `json:"registry_path"`
+	Slug            string          `json:"slug,omitempty"`
+	DBPurged        bool            `json:"db_purged"`
+	DBPath          string          `json:"db_path,omitempty"`
+	APIPort         int             `json:"api_port,omitempty"`
+	ReapedProcesses []reapedProcess `json:"reaped_processes,omitempty"`
+	ProcessScanNote string          `json:"process_scan_note,omitempty"`
+}
+
+// procReapGrace is how long `worktree rm` waits for a SIGTERM'd
+// process to exit before escalating to SIGKILL.
+const procReapGrace = 3 * time.Second
+
+// listenersOnPortFn is the discovery seam for the process reap — a
+// package var so worktree_test.go can stub it without spawning real
+// listeners. Production points it at procfind.ListenersOnPort.
+var listenersOnPortFn = procfind.ListenersOnPort
+
+// reapProcSignalTerm / reapProcSignalKill / reapProcAlive are the
+// signalling seams, stubbable the same way. Production wraps procfind.
+var (
+	reapProcSignalTerm = procfind.SignalTerm
+	reapProcSignalKill = procfind.SignalKill
+	reapProcAlive      = procfind.Alive
+)
+
+// isBacioComm reports whether a discovered listener's command names a
+// bacio binary — `bacio` or `bacio-desktop`. `worktree rm` only ever
+// signals a process whose command passes this check, so a stranger
+// that merely grabbed the worktree's port is never killed. Matches on
+// the basename because the discovery tool may report an absolute path.
+func isBacioComm(comm string) bool {
+	base := filepath.Base(strings.TrimSpace(comm))
+	return base == "bacio" || base == "bacio-desktop"
+}
+
+// reapWorktreeProcesses discovers processes listening on the worktree's
+// API port and signals the bacio ones. It mutates res in place
+// (ReapedProcesses / ProcessScanNote). When dryRun is set it only
+// records the would-signal entries and signals nothing. Errors from
+// discovery are non-fatal — the teardown should still proceed — so
+// they are recorded as a note rather than returned.
+func reapWorktreeProcesses(res *worktreeRmResult, port int, dryRun bool) {
+	if port == 0 {
+		res.ProcessScanNote = "manifest has no API port allocated; nothing to reap"
+		return
+	}
+	if port == wtenv.DefaultAPIPort {
+		res.ProcessScanNote = fmt.Sprintf("manifest API port is the legacy default %d; refusing to signal processes on the shared port", wtenv.DefaultAPIPort)
+		return
+	}
+	listeners, err := listenersOnPortFn(port)
+	if err != nil {
+		res.ProcessScanNote = fmt.Sprintf("could not scan for processes on port %d: %v; check and kill manually", port, err)
+		return
+	}
+	self := os.Getpid()
+	for _, l := range listeners {
+		rp := reapedProcess{PID: l.PID, Command: l.Command}
+		switch {
+		case l.PID == self:
+			// Defensive: `worktree rm` doesn't bind the port, but
+			// never signal ourselves if a future caller does.
+			rp.Note = "this process; left running"
+		case !isBacioComm(l.Command):
+			rp.Note = "not a bacio process; left running"
+		case dryRun:
+			// Would-signal entry: no Signal, not Killed.
+		default:
+			signalReapedProcess(&rp)
+		}
+		res.ReapedProcesses = append(res.ReapedProcesses, rp)
+	}
+}
+
+// signalReapedProcess performs the SIGTERM→grace→SIGKILL dance against
+// one matched bacio process, recording the outcome on rp.
+func signalReapedProcess(rp *reapedProcess) {
+	if err := reapProcSignalTerm(rp.PID); err != nil {
+		rp.Note = fmt.Sprintf("SIGTERM failed: %v", err)
+		// The process may already be gone — treat that as success.
+		if !reapProcAlive(rp.PID) {
+			rp.Signal = "term"
+			rp.Killed = true
+			rp.Note = "process already gone"
+		}
+		return
+	}
+	rp.Signal = "term"
+	deadline := time.Now().Add(procReapGrace)
+	for time.Now().Before(deadline) {
+		if !reapProcAlive(rp.PID) {
+			rp.Killed = true
+			return
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	if !reapProcAlive(rp.PID) {
+		rp.Killed = true
+		return
+	}
+	// Survived the grace window — escalate.
+	if err := reapProcSignalKill(rp.PID); err != nil {
+		rp.Note = fmt.Sprintf("survived SIGTERM grace; SIGKILL failed: %v", err)
+		return
+	}
+	rp.Signal = "kill"
+	rp.Killed = true
+	rp.Note = "survived SIGTERM grace; sent SIGKILL"
 }
 
 func newWorktreeRmCmd() *cobra.Command {
 	var (
-		pathArg string
-		confirm string
-		purgeDB bool
-		rawJSON string
+		pathArg       string
+		confirm       string
+		purgeDB       bool
+		keepProcesses bool
+		rawJSON       string
 	)
 	cmd := &cobra.Command{
 		Use:   "rm [path]",
@@ -567,20 +732,30 @@ to the current dir) and drop its row from ~/.bacio/worktrees.yaml.
 
 ` + "`confirm`" + ` must equal the manifest's slug — same friction as
 ` + "`bacio repo rm`" + ` so an agent can't blow away the manifest by
-accident. Use --purge-db to also delete the worktree's SQLite DB.`,
+accident. Use --purge-db to also delete the worktree's SQLite DB.
+
+By default rm also reaps any bacio process (bacio api / bacio web /
+bacio-desktop) still listening on the manifest's API port — SIGTERM,
+then SIGKILL after a short grace — so a torn-down worktree can't leave
+an orphan holding the shared ui_leader lease. Pass --keep-processes to
+skip that step. --dry-run lists the PIDs it would signal without
+touching anything. A bacio channel process has no HTTP listener and is
+not reaped; processes on the legacy default port 5320 are never
+signalled.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if inRemoteMode() {
 				return fmt.Errorf("bacio worktree rm: not supported in remote mode (touches the local filesystem)")
 			}
-			payload, err := parseJSONInput(cmd, args, rawJSON, "confirm", "purge-db")
+			payload, err := parseJSONInput(cmd, args, rawJSON, "confirm", "purge-db", "keep-processes")
 			if err != nil {
 				return err
 			}
 			in := inputs.WorktreeRmInput{
-				Path:    pathArg,
-				Confirm: confirm,
-				PurgeDB: purgeDB,
+				Path:          pathArg,
+				Confirm:       confirm,
+				PurgeDB:       purgeDB,
+				KeepProcesses: keepProcesses,
 			}
 			if len(args) == 1 {
 				in.Path = args[0]
@@ -620,6 +795,14 @@ accident. Use --purge-db to also delete the worktree's SQLite DB.`,
 				ManifestPath: manifestPath,
 				RegistryPath: regPath,
 				Slug:         m.Identity.Slug,
+				APIPort:      m.Allocations.APIPort,
+			}
+			// Reap port-bound processes (BACI-93) before any
+			// filesystem mutation, so a failure here leaves the
+			// manifest intact for a retry. Skipped on --keep-processes;
+			// in --dry-run it only lists the would-signal PIDs.
+			if !in.KeepProcesses {
+				reapWorktreeProcesses(res, m.Allocations.APIPort, opts.dryRun)
 			}
 			if in.PurgeDB {
 				db := m.Allocations.DBPath
@@ -660,6 +843,7 @@ accident. Use --purge-db to also delete the worktree's SQLite DB.`,
 	}
 	cmd.Flags().StringVar(&confirm, "confirm", "", "confirmation token (must equal the manifest slug)")
 	cmd.Flags().BoolVar(&purgeDB, "purge-db", false, "also delete the worktree's SQLite DB file")
+	cmd.Flags().BoolVar(&keepProcesses, "keep-processes", false, "do not reap bacio processes listening on the worktree's API port")
 	addInputFlag(cmd, &rawJSON)
 	return cmd
 }
