@@ -5,32 +5,6 @@ import (
 	"strings"
 )
 
-// AgentFileToolAllowlist is the explicit `tools:` allowlist BACI-76
-// writes into every generated per-mode subagent file. It is the
-// general-purpose code-work core (Read/Edit/Write/Bash/Grep/Glob) plus
-// the session task-list family (TaskCreate/TaskUpdate/TaskList/TaskGet —
-// no `Task`/`Agent`, since subagents can't spawn subagents, and no
-// `TodoWrite`, disabled upstream since v2.1.142 in favour of the Task*
-// tools) plus WebFetch/WebSearch (plan and design briefs do real
-// research) plus `Skill` (every brief opens with "use the bacio skill"
-// and smoke-tests via the playwright-cli skill — an allowlist that
-// omits `Skill` blocks all skill invocation) plus only the three bacio
-// channel MCP tools a dispatched worker needs. Every other MCP surface
-// the general-purpose subagent inherits today (Gmail / Calendar /
-// Drive / Linear / Slack / plugin-dev) is deliberately dropped — that
-// is the surface-narrowing win the ticket calls out, and it also trims
-// the tool-definition block in the subagent's prefill.
-//
-// v1 keeps the list uniform across all six modes; per-mode narrowing
-// is a follow-up. The list is generated, so tightening it later is a
-// generator change, not a per-file edit.
-var AgentFileToolAllowlist = []string{
-	"Read", "Edit", "Write", "Bash", "Grep", "Glob",
-	"TaskCreate", "TaskUpdate", "TaskList", "TaskGet",
-	"Skill", "WebFetch", "WebSearch",
-	"mcp__bacio__register", "mcp__bacio__reply", "mcp__bacio__ask_user_question",
-}
-
 // AgentFileModel is the model pinned in every generated subagent file's
 // frontmatter. Uniform for v1 — per-mode right-sizing (Sonnet for ship
 // / fix_review, Opus for design / plan) is explicitly out of scope; the
@@ -53,9 +27,15 @@ const AgentFileIsolation = "worktree"
 // file (`.claude/agents/<SubagentTypeForTemplate(slug)>.md`) for a
 // dispatch template (BACI-76). The frontmatter carries the agent name
 // (== the file basename, == the subagent_type the supervisor spawns), a
-// generated description, the tool allowlist, the model, and the
-// worktree-isolation mode; the body is the template body verbatim —
-// that body is the subagent's durable system prompt.
+// generated description, the model, and the worktree-isolation mode;
+// the body is the template body verbatim — that body is the subagent's
+// durable system prompt.
+//
+// Deliberately no `tools:` line: omitting the field makes Claude Code
+// give the subagent the parent session's full tool set. The earlier
+// BACI-76 allowlist was removed — narrowing the surface was costing
+// dispatched workers tools they legitimately need, and the failure
+// mode of a missing tool is silent.
 //
 // body is written verbatim, NOT {{token}}-rendered: a system prompt is
 // fixed per agent type and cannot embed a specific issue id. The six
@@ -80,7 +60,6 @@ func RenderAgentFile(slug, name, body string) (string, error) {
 	b.WriteString("---\n")
 	fmt.Fprintf(&b, "name: %s\n", agentName)
 	fmt.Fprintf(&b, "description: bacio dispatched-work subagent for the %q stage. Spawned by the supervisor session on a %s dispatch.\n", label, slug)
-	fmt.Fprintf(&b, "tools: %s\n", strings.Join(AgentFileToolAllowlist, ", "))
 	fmt.Fprintf(&b, "model: %s\n", AgentFileModel)
 	fmt.Fprintf(&b, "isolation: %s\n", AgentFileIsolation)
 	b.WriteString("---\n\n")

@@ -1,7 +1,6 @@
 ---
 name: bacio-ship-worker
 description: bacio dispatched-work subagent for the "Shipping" stage. Spawned by the supervisor session on a ship dispatch.
-tools: Read, Edit, Write, Bash, Grep, Glob, TaskCreate, TaskUpdate, TaskList, TaskGet, Skill, WebFetch, WebSearch, mcp__bacio__register, mcp__bacio__reply, mcp__bacio__ask_user_question
 model: opus
 isolation: worktree
 ---
