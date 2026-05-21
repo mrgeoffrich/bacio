@@ -53,15 +53,16 @@ type Source interface {
 	Heartbeat(ctx context.Context) error
 	// Register completes the agent's session: links the channel to the
 	// agent-supplied session id and enriches the session row with the
-	// agent's self-description (model, branch). The SessionStart hook
-	// only creates a minimal stub; this is the path that flips
+	// agent's self-description (model). The SessionStart hook only
+	// creates a minimal stub; this is the path that flips
 	// registered_at and makes the session visible to the default
-	// agent-list view. model/branch are optional — empty leaves the
-	// column unchanged. The bacio binary version stamped onto the
-	// session row is taken from the channel itself (the agent doesn't
-	// know it, and shouldn't be trusted to report it), so it isn't
-	// part of this signature.
-	Register(ctx context.Context, sessionID, model, branch string) error
+	// agent-list view. model is optional — empty leaves the column
+	// unchanged. The session's git branch is resolved by the
+	// SessionStart hook, so the agent doesn't supply it here. The
+	// bacio binary version stamped onto the session row is taken from
+	// the channel itself (the agent doesn't know it, and shouldn't be
+	// trusted to report it), so it isn't part of this signature.
+	Register(ctx context.Context, sessionID, model string) error
 	// EnsureSetup is called on every poll tick. It is the source's hook
 	// to idempotently queue a "call register" dispatch into the agent's
 	// inbox so the next Drain picks it up — routing setup through the
@@ -405,7 +406,7 @@ func replyToolSchema() map[string]any {
 func registerToolSchema() map[string]any {
 	return map[string]any{
 		"name":        "register",
-		"description": "Complete the registration of your Claude Code session with bacio. The SessionStart hook only creates a minimal stub; this call enriches it and makes the session visible to the agent list. Call once on your first turn with the session_id the bacio channel pre-filled for you in the setup-dispatch payload (copy the JSON verbatim — do not paste the literal $CLAUDE_CODE_SESSION_ID placeholder; the validator will refuse it). Pass model if you know it; pass branch if you know it. Safe to call again — idempotent (first-registration timestamp wins).",
+		"description": "Complete the registration of your Claude Code session with bacio. The SessionStart hook only creates a minimal stub; this call enriches it and makes the session visible to the agent list. Call once on your first turn with the session_id the bacio channel pre-filled for you in the setup-dispatch payload (copy the JSON verbatim — do not paste the literal $CLAUDE_CODE_SESSION_ID placeholder; the validator will refuse it). Pass model if you know it. Safe to call again — idempotent (first-registration timestamp wins).",
 		"inputSchema": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -416,10 +417,6 @@ func registerToolSchema() map[string]any {
 				"model": map[string]any{
 					"type":        "string",
 					"description": "Your model identifier, e.g. \"claude-opus-4-7\" or \"claude-sonnet-4-6\". Optional.",
-				},
-				"branch": map[string]any{
-					"type":        "string",
-					"description": "Your current git branch, if you know it. Optional.",
 				},
 			},
 			"required": []string{"session_id"},
@@ -594,7 +591,6 @@ func (s *Server) handleRegisterCall(ctx context.Context, id json.RawMessage, raw
 	var args struct {
 		SessionID string `json:"session_id"`
 		Model     string `json:"model"`
-		Branch    string `json:"branch"`
 	}
 	if len(rawArgs) > 0 {
 		if err := json.Unmarshal(rawArgs, &args); err != nil {
@@ -608,8 +604,7 @@ func (s *Server) handleRegisterCall(ctx context.Context, id json.RawMessage, raw
 		return
 	}
 	modelID := strings.TrimSpace(args.Model)
-	branch := strings.TrimSpace(args.Branch)
-	if err := s.src.Register(ctx, sid, modelID, branch); err != nil {
+	if err := s.src.Register(ctx, sid, modelID); err != nil {
 		s.logf("bacio channel: register session %s: %v", sid, err)
 		s.toolResult(id, true, fmt.Sprintf("could not register session %s: %v", sid, err))
 		return
@@ -617,9 +612,6 @@ func (s *Server) handleRegisterCall(ctx context.Context, id json.RawMessage, raw
 	var extras []string
 	if modelID != "" {
 		extras = append(extras, "model="+modelID)
-	}
-	if branch != "" {
-		extras = append(extras, "branch="+branch)
 	}
 	msg := fmt.Sprintf("registered session %s with the bacio channel", sid)
 	if len(extras) > 0 {

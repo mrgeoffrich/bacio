@@ -277,11 +277,12 @@ func (s *channelSource) Ack(ctx context.Context, eventID int64, note string) err
 
 // Register is the agent-driven side of the channel<->session join.
 // The agent calls the bacio MCP `register` tool with its own session
-// id (and optionally model, branch); we resolve/mint its persistent
-// identity, write agents.json so future hook invocations can name the
-// agent in their briefings, enrich the session row (CompleteRegistration
-// sets agent_id, actor, model, branch, channel_version,
-// registered_at), and stamp channel_seen_at via LinkSessionChannel.
+// id (and optionally model); we resolve/mint its persistent identity,
+// write agents.json so future hook invocations can name the agent in
+// their briefings, enrich the session row (CompleteRegistration sets
+// agent_id, actor, model, channel_version, registered_at), and stamp
+// channel_seen_at via LinkSessionChannel. The session's git branch is
+// resolved and written by the SessionStart hook, not by this path.
 //
 // Identity preservation across /clear: we look up the existing slug
 // for this claude_pid in agents.json and pass it through, so the new
@@ -300,7 +301,7 @@ func (s *channelSource) Ack(ctx context.Context, eventID int64, note string) err
 // claudePID may legitimately be 0 (no `claude` ancestor walkable);
 // LinkSessionChannel treats a 0 join key as "no channel" and leaves
 // channel_seen_at untouched — register's other side-effects still apply.
-func (s *channelSource) Register(ctx context.Context, sessionID, modelID, branch string) error {
+func (s *channelSource) Register(ctx context.Context, sessionID, modelID string) error {
 	if s.repo == nil {
 		return fmt.Errorf("channel has no resolved repo — cannot register")
 	}
@@ -312,7 +313,6 @@ func (s *channelSource) Register(ctx context.Context, sessionID, modelID, branch
 		Agent:     s.hintedAgentName(),
 		Host:      s.host,
 		Model:     modelID,
-		Branch:    branch,
 	}, version.String())
 	if err != nil {
 		return err
