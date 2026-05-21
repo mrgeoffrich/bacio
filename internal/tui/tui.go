@@ -165,6 +165,30 @@ func syncTick() tea.Cmd {
 	})
 }
 
+// syncDoneMsg signals that an off-thread background-sync run finished.
+// Unlike the other leader-gated tickers (matcher / pinger / archive
+// sweep) whose work is fast local SQLite and safe to run inline in
+// Update, SyncIfLeader → BackgroundRunner.Tick → Engine.Run() does
+// git pull/push network I/O. Running that in Update would freeze the
+// single-threaded bubbletea UI loop for the whole sync (cookbook:
+// "Don't perform I/O in Update or View; wrap it in a Cmd."). So the
+// syncTickMsg handler dispatches runSyncCmd, which does the git I/O
+// on a goroutine and returns this message; the handler for it
+// reschedules the next syncTick.
+type syncDoneMsg struct{}
+
+// runSyncCmd runs one background-sync tick off the UI goroutine. The
+// runner and elector are captured by value (both are pointers); the
+// elector is read concurrently by other goroutines and SyncIfLeader's
+// CurrentState() read is already safe for that. A nil runner/elector
+// is a no-op inside SyncIfLeader.
+func runSyncCmd(r *bsync.BackgroundRunner, el *leader.Elector) tea.Cmd {
+	return func() tea.Msg {
+		controller.SyncIfLeader(r, el, nil)
+		return syncDoneMsg{}
+	}
+}
+
 // Run boots the Bubble Tea program in alt-screen mode and blocks until
 // quit. The store is owned by the caller. It constructs a leader.Elector
 // for the process and releases the lease on graceful exit.
@@ -385,10 +409,21 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// controller goroutine uses so TUI and desktop/api stay in
 		// lockstep. The runner self-gates on the
 		// sync.background_enabled toggle.
-		controller.SyncIfLeader(m.syncRunner, m.elector, nil)
+		//
+		// Unlike the other tickers, SyncIfLeader does git pull/push
+		// network I/O, which must not run inline in Update — it would
+		// freeze the bubbletea UI loop for the whole sync. Dispatch it
+		// as a Cmd so the I/O runs on a goroutine; syncDoneMsg
+		// reschedules the next tick.
 		if m.elector == nil {
 			return m, nil
 		}
+		return m, runSyncCmd(m.syncRunner, m.elector)
+	case syncDoneMsg:
+		// An off-thread background-sync run finished — reschedule the
+		// next tick. (syncTickMsg returns early when m.elector is nil,
+		// so runSyncCmd is never dispatched in that case and this
+		// branch only fires for a real elector.)
 		return m, syncTick()
 	case openDocMsg:
 		// Cross-tab: hand the filename to the Documents tab and focus
