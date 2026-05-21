@@ -296,13 +296,30 @@ bacio worktree list                   Walk ~/.bacio/worktrees.yaml and
                                      Flags entries whose on-disk
                                      manifest is missing with `!`.
                                      Read-only.
-bacio worktree rm [path] --confirm <slug> [--purge-db]
+bacio worktree rm [path] --confirm <slug> [--purge-db] [--keep-processes]
                                      Remove the manifest + registry row.
                                      Confirm must equal the manifest's
                                      slug. With --purge-db the
                                      worktree's SQLite DB is deleted
-                                     too. Honours --json / --dry-run.
-                                     Schema: worktree.rm.
+                                     too. By default also reaps any
+                                     bacio process (api / web /
+                                     desktop) holding a LISTEN socket
+                                     on the manifest's API port —
+                                     SIGTERM, then SIGKILL after a
+                                     short grace — so a torn-down
+                                     worktree can't orphan a process
+                                     that keeps holding the shared
+                                     ui_leader lease. --keep-processes
+                                     skips that. A non-bacio process on
+                                     the port is reported but left
+                                     running, and a process on the
+                                     legacy default port 5320 is never
+                                     signalled. --dry-run lists the
+                                     PIDs it would signal without
+                                     touching anything. A bacio channel
+                                     process has no HTTP listener and
+                                     is not reaped. Honours --json /
+                                     --dry-run. Schema: worktree.rm.
 ```
 
 Resolution order, highest precedence first:

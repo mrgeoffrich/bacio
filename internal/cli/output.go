@@ -157,6 +157,8 @@ func renderText(w io.Writer, v any) error {
 		}
 	case *worktreeInitResult:
 		return printWorktreeInit(w, x)
+	case *worktreeRmResult:
+		return printWorktreeRm(w, x, opts.dryRun)
 	case showArchivedResult:
 		if x.ShowArchived {
 			fmt.Fprintln(w, "show_archived: on")

@@ -20,8 +20,16 @@ type WorktreeInitInput struct {
 // defaults to the current working tree when empty. Confirm must equal
 // the manifest's slug — same pattern as `bacio repo rm`. PurgeDB drops
 // the worktree's SQLite DB alongside the manifest.
+//
+// KeepProcesses opts out of the BACI-93 process reap: by default
+// `worktree rm` discovers any bacio process holding a LISTEN socket on
+// the manifest's API port and terminates it (SIGTERM, then SIGKILL
+// after a short grace), so a torn-down worktree can't leave an orphan
+// holding the shared `ui_leader` lease. KeepProcesses=true skips
+// discovery and signalling entirely.
 type WorktreeRmInput struct {
-	Path     string `json:"path,omitempty"`
-	Confirm  string `json:"confirm"`
-	PurgeDB  bool   `json:"purge_db,omitempty"`
+	Path          string `json:"path,omitempty"`
+	Confirm       string `json:"confirm"`
+	PurgeDB       bool   `json:"purge_db,omitempty"`
+	KeepProcesses bool   `json:"keep_processes,omitempty"`
 }
