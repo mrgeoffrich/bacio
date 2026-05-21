@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -50,8 +51,11 @@ func TestWorktreeInit_RoundTrip(t *testing.T) {
 	if res.Manifest.Allocations.APIPort == wtenv.DefaultAPIPort || res.Manifest.Allocations.APIPort == 0 {
 		t.Fatalf("port: got %d", res.Manifest.Allocations.APIPort)
 	}
-	if res.Manifest.Allocations.DBPath != filepath.Join(".bacio", "db.sqlite") {
-		t.Fatalf("db_path: got %q", res.Manifest.Allocations.DBPath)
+	// BACI-87: a default init (no --isolate-db) pins the shared store
+	// by absolute path, not a per-worktree .bacio/db.sqlite.
+	wantShared := filepath.Join(tmpHome, ".bacio", "db.sqlite")
+	if res.Manifest.Allocations.DBPath != wantShared {
+		t.Fatalf("db_path: got %q, want shared %q", res.Manifest.Allocations.DBPath, wantShared)
 	}
 
 	if err := commitWorktreeInit(res); err != nil {
@@ -227,6 +231,140 @@ func TestWorktreeInit_LinkedWorktreeWritesToLinkedRoot(t *testing.T) {
 	}
 	if entry.Path != linked {
 		t.Errorf("registry path: got %q, want %q (linked root)", entry.Path, linked)
+	}
+}
+
+// TestWorktreeInit_DBIsolationModes covers the BACI-87 db_path
+// precedence: default → shared store pinned absolute; --isolate-db →
+// per-worktree .bacio/db.sqlite; --db-path → explicit, and it wins
+// even when --isolate-db is also set.
+func TestWorktreeInit_DBIsolationModes(t *testing.T) {
+	t.Run("default is the shared store", func(t *testing.T) {
+		root := initRealGitRepo(t)
+		tmpHome := t.TempDir()
+		t.Setenv("HOME", tmpHome)
+
+		res, err := runWorktreeInit(root, filepath.Base(root), inputs.WorktreeInitInput{Slug: "shared-wt"})
+		if err != nil {
+			t.Fatalf("runWorktreeInit: %v", err)
+		}
+		want := filepath.Join(tmpHome, ".bacio", "db.sqlite")
+		if res.Manifest.Allocations.DBPath != want {
+			t.Errorf("db_path: got %q, want %q", res.Manifest.Allocations.DBPath, want)
+		}
+		// Still gets an isolated, non-default port.
+		if p := res.Manifest.Allocations.APIPort; p == wtenv.DefaultAPIPort || p == 0 {
+			t.Errorf("api_port: got %d, want a freshly allocated non-default port", p)
+		}
+	})
+
+	t.Run("--isolate-db binds a per-worktree DB", func(t *testing.T) {
+		root := initRealGitRepo(t)
+		t.Setenv("HOME", t.TempDir())
+
+		res, err := runWorktreeInit(root, filepath.Base(root), inputs.WorktreeInitInput{Slug: "iso-wt", IsolateDB: true})
+		if err != nil {
+			t.Fatalf("runWorktreeInit: %v", err)
+		}
+		if want := filepath.Join(".bacio", "db.sqlite"); res.Manifest.Allocations.DBPath != want {
+			t.Errorf("db_path: got %q, want %q", res.Manifest.Allocations.DBPath, want)
+		}
+	})
+
+	t.Run("--db-path overrides --isolate-db", func(t *testing.T) {
+		root := initRealGitRepo(t)
+		t.Setenv("HOME", t.TempDir())
+
+		res, err := runWorktreeInit(root, filepath.Base(root), inputs.WorktreeInitInput{
+			Slug: "explicit-wt", IsolateDB: true, DBPath: "/tmp/pinned/db.sqlite",
+		})
+		if err != nil {
+			t.Fatalf("runWorktreeInit: %v", err)
+		}
+		if res.Manifest.Allocations.DBPath != "/tmp/pinned/db.sqlite" {
+			t.Errorf("db_path: got %q, want the explicit --db-path", res.Manifest.Allocations.DBPath)
+		}
+	})
+}
+
+// TestWorktreeInit_DefaultResolvesToSharedDB is the BACI-87 end-to-end
+// check: after a default init, resolution from inside the worktree
+// returns the shared ~/.bacio/db.sqlite (so a dispatched worker's
+// issue calls reach the ticket) AND the worktree's own API port.
+func TestWorktreeInit_DefaultResolvesToSharedDB(t *testing.T) {
+	root := initRealGitRepo(t)
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	res, err := runWorktreeInit(root, filepath.Base(root), inputs.WorktreeInitInput{Slug: "resolve-wt"})
+	if err != nil {
+		t.Fatalf("runWorktreeInit: %v", err)
+	}
+	if err := commitWorktreeInit(res); err != nil {
+		t.Fatalf("commitWorktreeInit: %v", err)
+	}
+
+	resolved, err := wtenv.Resolve(wtenv.ResolveOpts{Cwd: root, HomeDir: tmpHome})
+	if err != nil {
+		t.Fatalf("wtenv.Resolve: %v", err)
+	}
+	if want := filepath.Join(tmpHome, ".bacio", "db.sqlite"); resolved.DBPath != want {
+		t.Errorf("resolved DB: got %q, want shared %q", resolved.DBPath, want)
+	}
+	wantPort := res.Manifest.Allocations.APIPort
+	if !strings.HasSuffix(resolved.APIAddr, ":"+strconv.Itoa(wantPort)) {
+		t.Errorf("resolved API addr %q: want the worktree's allocated port %d", resolved.APIAddr, wantPort)
+	}
+}
+
+// TestIsolateDBEnvDefault checks the BACIO_WORKTREE_ISOLATE_DB parsing
+// that supplies the --isolate-db flag default.
+func TestIsolateDBEnvDefault(t *testing.T) {
+	cases := map[string]bool{
+		"1": true, "true": true, "yes": true, "TRUE": true, " 1 ": true,
+		"0": false, "false": false, "": false, "off": false,
+	}
+	for v, want := range cases {
+		t.Setenv(worktreeIsolateDBEnv, v)
+		if got := isolateDBEnvDefault(); got != want {
+			t.Errorf("isolateDBEnvDefault() with %q=%q: got %v, want %v", worktreeIsolateDBEnv, v, got, want)
+		}
+	}
+}
+
+// TestWorktreeRm_PurgeDBRefusesSharedDB drives `worktree rm --purge-db`
+// against a default (shared-DB) manifest: it must refuse and leave the
+// shared store on disk (BACI-87).
+func TestWorktreeRm_PurgeDBRefusesSharedDB(t *testing.T) {
+	root := initRealGitRepo(t)
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	res, err := runWorktreeInit(root, filepath.Base(root), inputs.WorktreeInitInput{Slug: "rm-wt"})
+	if err != nil {
+		t.Fatalf("runWorktreeInit: %v", err)
+	}
+	if err := commitWorktreeInit(res); err != nil {
+		t.Fatalf("commitWorktreeInit: %v", err)
+	}
+	// Stand in a shared DB file so we can prove it survives the refusal.
+	sharedDB := filepath.Join(tmpHome, ".bacio", "db.sqlite")
+	if err := os.WriteFile(sharedDB, []byte("real data"), 0o644); err != nil {
+		t.Fatalf("seed shared DB: %v", err)
+	}
+
+	cmd := newWorktreeRmCmd()
+	cmd.SetArgs([]string{root, "--confirm", "rm-wt", "--purge-db"})
+	cmd.SilenceErrors, cmd.SilenceUsage = true, true
+	err = cmd.Execute()
+	if err == nil {
+		t.Fatal("worktree rm --purge-db against a shared-DB manifest: want error")
+	}
+	if !strings.Contains(err.Error(), "purge-db refused") {
+		t.Errorf("err: got %v, want a 'purge-db refused' message", err)
+	}
+	if _, statErr := os.Stat(sharedDB); statErr != nil {
+		t.Errorf("shared DB was removed despite the refusal: %v", statErr)
 	}
 }
 

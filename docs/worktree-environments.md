@@ -49,8 +49,9 @@ identity:
 
 allocations:
   api_port: 5321
-  db_path: .bacio/db.sqlite       # relative to the worktree root
-  # log_dir: logs                 # optional (BACI-73); see below
+  db_path: /Users/geoff/.bacio/db.sqlite   # shared store — the default
+  # db_path: .bacio/db.sqlite              # per-worktree DB (--isolate-db)
+  # log_dir: logs                          # optional (BACI-73); see below
 
 extras:
   # Free-form. bacio doesn't read these; scripts can. Examples:
@@ -70,9 +71,14 @@ Fields:
   Auto-allocated at `init` time (deterministic hash of the slug plus a
   collision walk against the global registry); port `5320` is reserved
   for the legacy manifest-free default.
-- `allocations.db_path` — relative to the worktree root; absolute paths
-  also accepted for hand-edits. Defaults to `.bacio/db.sqlite`, which
-  the existing `.bacio/` gitignore rule already covers.
+- `allocations.db_path` — the SQLite DB this worktree's bacio resolves
+  to. `bacio worktree init` pins the **shared** `~/.bacio/db.sqlite` by
+  absolute path here unless DB isolation was requested (see
+  "Dispatched-work worktrees" below). With `--isolate-db` it writes the
+  relative `.bacio/db.sqlite` (resolved against the worktree root, and
+  covered by the existing `.bacio/` gitignore rule). Hand-edits may use
+  a relative or absolute path; an empty value resolves to the
+  per-worktree `.bacio/db.sqlite`.
 - `allocations.log_dir` — optional, BACI-73. When set, the long-running
   bacio processes (`bacio api`, `bacio channel`, the desktop binary)
   write per-day log files under this directory. Relative paths resolve
@@ -167,6 +173,43 @@ able to take down a call where the user has named the DB directly.
 The global `--env <path>` CLI flag is equivalent to setting `BACIO_ENV`
 for one invocation; it wins over the env var when both are set.
 
+## Dispatched-work worktrees: port isolation without DB isolation (BACI-87)
+
+A manifest bundles two isolations — an API port **and** a SQLite DB —
+but their audiences differ. Port isolation is for everyone: a
+worktree's `bacio web` smoke test shouldn't collide with the user's
+running UI on `5320`. DB isolation is narrow: its only real use is
+testing bacio's *own* schema migrations across sibling worktrees, so a
+stale binary in one worktree doesn't hit a migrated schema in another.
+A normal user — and every dispatched worker — wants the issue DB to
+stay shared: a worker dispatched onto `BACI-12` needs every `bacio`
+issue call (claim, brief, state, pr attach, release) to reach the
+`~/.bacio/db.sqlite` where that ticket actually lives.
+
+So `bacio worktree init` **defaults to port isolation only**. It
+allocates a fresh port and pins the shared `~/.bacio/db.sqlite` into
+`allocations.db_path` by absolute path. DB isolation is opt-in:
+
+- `--isolate-db` — bind a per-worktree `.bacio/db.sqlite` instead.
+- `BACIO_WORKTREE_ISOLATE_DB=1` — supplies the default for the
+  `--isolate-db` flag, so `BACIO_WORKTREE_ISOLATE_DB=1 bacio worktree
+  init` is equivalent. `--isolate-db=false` overrides the env var back
+  off; `--db-path <path>` pins an explicit path and overrides both.
+
+**Set `BACIO_WORKTREE_ISOLATE_DB` per-invocation only** — never in a
+shell profile or a checked-in `.envrc`. A worker dispatched onto a
+bacio ticket runs in a git worktree of the bacio repo and would
+inherit an ambient setting, re-introducing exactly the bug BACI-87
+fixed (its `in_review` / pr-attach written into a throwaway DB).
+`BACIO_AGENT_MODE` can't be used to auto-detect and undo this: an
+interactive bacio-dev session sets it too, so it doesn't distinguish a
+dispatched worker from the developer. Typing `--isolate-db` on the one
+`init` command per dev worktree is the reliable override.
+
+`bacio worktree rm --purge-db` refuses to delete a shared-DB
+`db_path` — purging the global store would wipe every project's
+issues — and names the path in the error so the refusal is legible.
+
 ## Surfaces touched
 
 | Surface | How it picks the right env |
@@ -185,7 +228,7 @@ desktop launches outside a shell that exports it).
 ## CLI surface
 
 ```
-bacio worktree init [--slug <name>] [--port <n>] [--db-path <rel>] [--force] [--json] [--dry-run]
+bacio worktree init [--slug <name>] [--port <n>] [--isolate-db] [--db-path <path>] [--force] [--json] [--dry-run]
 bacio worktree show [path]
 bacio worktree list
 bacio worktree rm [path] --confirm <slug> [--purge-db] [--json] [--dry-run]
@@ -236,10 +279,10 @@ bacio worktree rm [path] --confirm <slug> [--purge-db] [--json] [--dry-run]
 cd ~/Repos/bacio
 bacio status                            # Env: default
 
-# Worktree B — manifest-driven, isolated DB + port.
+# Worktree B — manifest-driven: isolated port, shared DB (the default).
 git worktree add ../bacio-spike -b spike
 cd ../bacio-spike
-bacio worktree init --slug spike
+bacio worktree init --slug spike        # add --isolate-db for a per-worktree DB
 bacio status                            # Env: worktree manifest (...)
 bacio worktree show -o json | jq .api_addr
 
