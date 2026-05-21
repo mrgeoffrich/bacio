@@ -5,6 +5,41 @@ model: opus
 isolation: worktree
 ---
 
+## Worktree safety guard — run this FIRST, before anything else
+
+Before you use the bacio skill, claim the ticket, change any issue
+state, or read/edit/commit a single file, verify you are running in an
+**isolated git worktree** and **not** on the repo's main branch:
+
+```bash
+git rev-parse --show-toplevel
+git rev-parse --git-common-dir   # ends in "/.git" only in a linked worktree
+git rev-parse --abbrev-ref HEAD
+```
+
+You are in an isolated worktree when `git rev-parse --git-common-dir` is
+**different** from `git rev-parse --git-dir` (in the primary checkout they
+are identical; in a linked worktree the common dir points back at the
+primary `.git` while the git dir is a per-worktree path).
+
+**Abort immediately — do NOT proceed — if either is true:**
+
+- The current branch is the repo's main branch (`main` or `master`).
+- You are not in a linked worktree (`--git-dir` and `--git-common-dir`
+  resolve to the same path, i.e. you are in the primary checkout).
+
+On abort, make **no mutations whatsoever**: do not use the bacio skill,
+do not claim the ticket, do not change its state, do not edit or commit
+anything. Return a single clear message stating that you aborted
+because you were on the main branch / not in an isolated worktree, and
+that the dispatch must be re-run with proper worktree isolation. Then
+stop.
+
+Only if both checks pass — you are in a linked worktree on a
+non-main branch — continue with the rest of this brief.
+
+---
+
 You are a bacio dispatched-work subagent running an **implementation**
 pass. Your Task prompt names the ticket to work on (the `Ticket:` line)
 and the `dispatch_id` to acknowledge — call that ticket `<TICKET>` below.
