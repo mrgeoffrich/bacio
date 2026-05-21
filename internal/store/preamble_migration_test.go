@@ -79,6 +79,35 @@ func TestRefreshDispatchPreambleUpgradesBACI76TypoDefault(t *testing.T) {
 	}
 }
 
+// TestRefreshDispatchPreambleUpgradesBACI80Default: simulate a
+// post-BACI-80 / pre-BACI-85 DB by writing the BACI-80 default (which
+// did not yet mention attach_transcript) into the row, then re-run the
+// refresh — it must replace the body with the BACI-85 default that
+// tells the supervisor to call mcp__bacio__attach_transcript.
+func TestRefreshDispatchPreambleUpgradesBACI80Default(t *testing.T) {
+	s := newTestStore(t)
+	old := strings.TrimRight(oldDispatchPreambleBACI80, "\r\n")
+	if _, err := s.DB.Exec(
+		`UPDATE prompt_templates SET body = ? WHERE slug = ?`,
+		old, model.BuiltinTemplatePreamble,
+	); err != nil {
+		t.Fatalf("seed BACI-80 preamble: %v", err)
+	}
+	if err := refreshDispatchPreamble(s.DB); err != nil {
+		t.Fatalf("refreshDispatchPreamble: %v", err)
+	}
+	body, err := s.GetDispatchPreamble()
+	if err != nil {
+		t.Fatalf("GetDispatchPreamble: %v", err)
+	}
+	if body != model.DefaultPromptBodyForBuiltinSlug(model.BuiltinTemplatePreamble) {
+		t.Fatalf("BACI-80 default was not refreshed to the new default:\n%s", body)
+	}
+	if !strings.Contains(body, "attach_transcript") {
+		t.Fatalf("refreshed preamble does not mention attach_transcript:\n%s", body)
+	}
+}
+
 // TestRefreshDispatchPreambleLeavesCustomBody: a user-customised
 // preamble body is left untouched by the refresh.
 func TestRefreshDispatchPreambleLeavesCustomBody(t *testing.T) {

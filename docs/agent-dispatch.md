@@ -463,6 +463,62 @@ alongside the hook and agent-file steps):
 Either way — pull or push — the agent sees the same thing: the issue,
 the mode, and the composed payload.
 
+### Channel MCP tools
+
+The `bacio channel` MCP server exposes four tools:
+
+| Tool                | Purpose                                                                 |
+| ------------------- | ----------------------------------------------------------------------- |
+| `reply`             | Acknowledge a dispatch (the channel-native form of `bacio agent ack`).  |
+| `register`          | Complete the session's registration (links the channel to a session id).|
+| `ask_user_question` | Surface a multi-choice clarification question to the user (BACI-53).    |
+| `attach_transcript` | Attach a completed subagent's transcript to an issue (BACI-85).         |
+
+`reply`, `register`, and `attach_transcript` advertise unconditionally —
+none of them park a JSON-RPC reply, so the poller-gate that defers
+`ask_user_question` (a parked reply would never be delivered without
+the drain step) does not apply to them. None of the four has a REST or
+CLI equivalent — they are channel-only.
+
+### `attach_transcript` — subagent transcript traceability (BACI-85)
+
+Once a dispatched per-mode subagent finishes, the supervisor attaches
+that subagent's transcript to the issue so a later reviewer can open
+the ticket and read exactly what the worker did. The dispatch preamble
+instructs the supervisor to call `mcp__bacio__attach_transcript` after
+`Task` returns (with the issue key and the `agentId` from the `Task`
+result), then `mcp__bacio__reply` to ack the dispatch.
+
+**Transcript location contract.** Claude Code 2.1.x persists every
+`Task`-spawned subagent's conversation at
+`~/.claude/projects/<project-slug>/<parent-session-id>/subagents/agent-<agentId>.jsonl`,
+with a sibling `agent-<agentId>.meta.json` carrying `agentType` /
+`description`. The channel knows the project dir (from
+`CLAUDE_PROJECT_DIR`) but not the parent session id, so the resolver
+globs every session dir under the project slug for the matching
+`agent-<id>.jsonl`.
+
+**Storage decision — a rendered digest, not the raw file.** A raw
+`.jsonl` transcript is line-delimited JSON with embedded tool I/O
+(median ~266 KB, max observed 1.74 MB) — a poor artefact to read inside
+bacio, and the largest ones exceed the 1 MiB doc-body cap. So
+`attach_transcript` renders a **markdown digest** (`internal/channel/transcript.go`)
+— user/assistant turns verbatim, tool calls/results truncated, the
+whole digest capped at 256 KB so it always fits — and stores it as a
+`project_complete` document named
+`bacio-transcript-<ISSUE-KEY>-agent-<id>.md`, linked to the issue. The
+absolute path to the raw `.jsonl` is recorded in the digest header and
+on the doc's `source_path`, so a reviewer who wants the unrendered
+transcript can still open it. `UpsertDocument` makes re-attaching the
+same (issue, agent) pair idempotent. A real binary/large-file
+attachment store for issues is a possible follow-up — deliberately
+deferred so BACI-85 stayed a self-contained channel change with no
+store-schema work.
+
+The tool errors clearly (an MCP tool error) when the issue or
+transcript cannot be found — e.g. an older harness that does not
+persist per-subagent transcripts.
+
 ---
 
 ## Subagent delegation (BACI-52)

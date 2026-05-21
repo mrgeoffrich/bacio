@@ -39,21 +39,6 @@ stop — your `Stop` hook will flip the still-claimed issue from
 `in_progress` to `needs_action` automatically so the supervisor
 can answer.
 
-After Task returns, attach the subagent's transcript to the ticket
-for traceability — call:
-
-    mcp__bacio__attach_transcript(
-      issue_key = <the "Ticket:" value from the stub below>,
-      agent_id  = <the agentId from the Task result>,
-      note      = <the subagent's one-line summary>,
-    )
-
-The Task result carries an `agentId` alongside the summary; pass it
-verbatim. If the call fails (e.g. a harness too old to persist
-subagent transcripts), note it and carry on — it is not fatal to the
-dispatch. Then call mcp__bacio__reply with the dispatch_id from the
-<channel> tag to acknowledge the dispatch.
-
 Caveat: a running subagent is NOT interruptible mid-flight.
 Cancelling a dispatch in the UI clears the queue but does not stop
 work already in progress.

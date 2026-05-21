@@ -42,6 +42,19 @@ type fakeSource struct {
 	questions        map[string]model.SessionQuestion
 	abandonedOpenN   int
 	abandonOpenCalls int
+
+	// attach_transcript state. attached records every
+	// AttachTranscript call; attachResult / attachErr let a test
+	// inject the canned return.
+	attached     []attachRec
+	attachResult string
+	attachErr    error
+}
+
+type attachRec struct {
+	issueKey string
+	agentID  string
+	note     string
 }
 
 type regRec struct {
@@ -146,6 +159,19 @@ func (f *fakeSource) AbandonOpenQuestions(ctx context.Context) (int, error) {
 	return f.abandonedOpenN, nil
 }
 
+func (f *fakeSource) AttachTranscript(ctx context.Context, issueKey, agentID, note string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.attachErr != nil {
+		return "", f.attachErr
+	}
+	f.attached = append(f.attached, attachRec{issueKey, agentID, note})
+	if f.attachResult != "" {
+		return f.attachResult, nil
+	}
+	return fmt.Sprintf("attached transcript agent-%s to %s", agentID, issueKey), nil
+}
+
 // decodeFrames splits the newline-delimited JSON-RPC output into
 // generic maps for assertion.
 func decodeFrames(t *testing.T, out string) []map[string]any {
@@ -203,16 +229,17 @@ func TestChannelHandshakeAndReply(t *testing.T) {
 	list := byID[2]
 	tools, _ := list["result"].(map[string]any)["tools"].([]any)
 	// Run() turns the poller on, so ask_user_question (BACI-53)
-	// joins reply + register on the advertised list.
-	if len(tools) != 3 {
-		t.Fatalf("tools/list returned %d tools, want 3", len(tools))
+	// joins reply + register + attach_transcript (BACI-85) on the
+	// advertised list.
+	if len(tools) != 4 {
+		t.Fatalf("tools/list returned %d tools, want 4", len(tools))
 	}
 	seen := map[string]bool{}
 	for _, tool := range tools {
 		name, _ := tool.(map[string]any)["name"].(string)
 		seen[name] = true
 	}
-	if !seen["reply"] || !seen["register"] || !seen["ask_user_question"] {
+	if !seen["reply"] || !seen["register"] || !seen["ask_user_question"] || !seen["attach_transcript"] {
 		t.Fatalf("tools/list missing entries: %+v", seen)
 	}
 
@@ -538,6 +565,97 @@ func TestAskUserQuestionRejectsInvalidPayload(t *testing.T) {
 	defer src.mu.Unlock()
 	if len(src.asked) != 0 {
 		t.Fatalf("source.AskQuestion was reached on invalid payload: %+v", src.asked)
+	}
+}
+
+// TestChannelAttachTranscriptTool drives a tools/call(attach_transcript):
+// the happy path reaches Source.AttachTranscript with the trimmed args,
+// a missing issue_key / agent_id is rejected with isError=true without
+// reaching the source, and the "agent-" prefix is stripped.
+func TestChannelAttachTranscriptTool(t *testing.T) {
+	src := &fakeSource{attachResult: "attached"}
+	requests := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`,
+		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"attach_transcript","arguments":{"issue_key":"BACI-9","agent_id":"agent-abc123","note":"all done"}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"attach_transcript","arguments":{"agent_id":"abc123"}}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"attach_transcript","arguments":{"issue_key":"BACI-9"}}}`,
+	}, "\n") + "\n"
+
+	var out bytes.Buffer
+	srv := New(src, "bacio", "test", strings.NewReader(requests), &out, nil)
+	if err := srv.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	frames := decodeFrames(t, out.String())
+	byID := map[float64]map[string]any{}
+	for _, f := range frames {
+		if id, ok := f["id"].(float64); ok {
+			byID[id] = f
+		}
+	}
+
+	ok := byID[2]
+	if isErr, _ := ok["result"].(map[string]any)["isError"].(bool); isErr {
+		t.Fatalf("attach_transcript tool-call reported an error: %+v", ok)
+	}
+	// "agent-" prefix stripped, args trimmed and forwarded.
+	want := attachRec{"BACI-9", "abc123", "all done"}
+	if len(src.attached) != 1 || src.attached[0] != want {
+		t.Fatalf("attached = %+v, want [%+v]", src.attached, want)
+	}
+
+	missingIssue := byID[3]
+	if isErr, _ := missingIssue["result"].(map[string]any)["isError"].(bool); !isErr {
+		t.Fatalf("attach_transcript without issue_key should report isError=true: %+v", missingIssue)
+	}
+	missingAgent := byID[4]
+	if isErr, _ := missingAgent["result"].(map[string]any)["isError"].(bool); !isErr {
+		t.Fatalf("attach_transcript without agent_id should report isError=true: %+v", missingAgent)
+	}
+	if len(src.attached) != 1 {
+		t.Fatalf("Source.AttachTranscript reached on invalid args: %+v", src.attached)
+	}
+}
+
+// TestChannelAttachTranscriptAdvertisedWithoutPoller locks in the
+// decision that attach_transcript advertises unconditionally — it does
+// not park a JSON-RPC reply, so the poller-gate that applies to
+// ask_user_question does not apply to it.
+func TestChannelAttachTranscriptAdvertisedWithoutPoller(t *testing.T) {
+	src := &fakeSource{}
+	requests := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`,
+		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`,
+	}, "\n") + "\n"
+
+	var out bytes.Buffer
+	srv := New(src, "bacio", "test", strings.NewReader(requests), &out, nil)
+	if err := srv.ServeMCP(context.Background()); err != nil {
+		t.Fatalf("ServeMCP: %v", err)
+	}
+	frames := decodeFrames(t, out.String())
+	var list map[string]any
+	for _, f := range frames {
+		if id, ok := f["id"].(float64); ok && id == 2 {
+			list = f
+		}
+	}
+	tools, _ := list["result"].(map[string]any)["tools"].([]any)
+	seen := map[string]bool{}
+	for _, tool := range tools {
+		name, _ := tool.(map[string]any)["name"].(string)
+		seen[name] = true
+	}
+	// No poller: reply + register + attach_transcript, but NOT
+	// ask_user_question.
+	if !seen["attach_transcript"] {
+		t.Fatalf("attach_transcript must advertise even without the poller: %+v", seen)
+	}
+	if seen["ask_user_question"] {
+		t.Fatalf("ask_user_question must NOT advertise without the poller: %+v", seen)
 	}
 }
 

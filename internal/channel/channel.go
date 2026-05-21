@@ -98,6 +98,17 @@ type Source interface {
 	// so there's no path to recover. Returns the number of rows
 	// abandoned (for logging) and any error.
 	AbandonOpenQuestions(ctx context.Context) (int, error)
+
+	// AttachTranscript locates the transcript of a completed
+	// subagent (identified by agentID — the `agentId` from a Task
+	// result) and attaches a rendered digest of it to issueKey as a
+	// linked document. note is an optional supervisor-supplied
+	// string recorded in the digest header. It returns a short
+	// human-readable confirmation the channel surfaces as the tool
+	// result, or an error the channel surfaces as an MCP tool error
+	// (issue/agent not found, harness too old to persist subagent
+	// transcripts, etc.).
+	AttachTranscript(ctx context.Context, issueKey, agentID, note string) (string, error)
 }
 
 // Server speaks the channel protocol over a reader/writer pair (stdin
@@ -317,11 +328,14 @@ func (s *Server) handle(ctx context.Context, msg *rpcMessage) {
 	case "ping":
 		s.reply(msg.ID, map[string]any{})
 	case "tools/list":
-		// ask_user_question only advertises when the poller is on —
-		// without the drain step a parked reply would never be
-		// delivered. See ServeMCP / Run split + the BACIO_AGENT_MODE
-		// gate in internal/cli/channel.go.
-		tools := []any{replyToolSchema(), registerToolSchema()}
+		// reply / register / attach_transcript advertise
+		// unconditionally — none of them park a JSON-RPC reply, so
+		// the poller-gate reasoning that applies to ask_user_question
+		// (a parked reply would never be delivered without the drain
+		// step) does not apply to them. ask_user_question only
+		// advertises when the poller is on. See ServeMCP / Run split
+		// + the BACIO_AGENT_MODE gate in internal/cli/channel.go.
+		tools := []any{replyToolSchema(), registerToolSchema(), attachTranscriptToolSchema()}
 		if s.poller {
 			tools = append(tools, askUserQuestionToolSchema())
 		}
@@ -409,6 +423,41 @@ func registerToolSchema() map[string]any {
 				},
 			},
 			"required": []string{"session_id"},
+		},
+	}
+}
+
+// attachTranscriptToolSchema describes the bacio MCP `attach_transcript`
+// tool. It takes an issue key and a completed subagent's agentId,
+// locates that subagent's transcript on disk, renders a markdown
+// digest, and links it to the issue as a document.
+func attachTranscriptToolSchema() map[string]any {
+	return map[string]any{
+		"name": "attach_transcript",
+		"description": "Attach a completed subagent's transcript to a bacio issue for traceability. " +
+			"After a dispatched Task subagent finishes, call this with the issue key and the agentId " +
+			"from the Task result — bacio locates that subagent's transcript, renders a readable " +
+			"markdown digest, and links it to the issue as a document (visible from `bacio issue show` " +
+			"and the bacio UIs). The digest is capped well under the 1 MiB doc limit; the absolute path " +
+			"to the raw transcript is recorded in the digest header. Re-calling for the same (issue, " +
+			"agent) pair refreshes the digest. Errors clearly if the issue or transcript cannot be found.",
+		"inputSchema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"issue_key": map[string]any{
+					"type":        "string",
+					"description": "The canonical issue key (e.g. \"BACI-42\") the transcript belongs to.",
+				},
+				"agent_id": map[string]any{
+					"type":        "string",
+					"description": "The subagent's agentId from the Task tool result (e.g. \"a8d9f1ea8797ea776\"). A leading \"agent-\" is accepted and stripped.",
+				},
+				"note": map[string]any{
+					"type":        "string",
+					"description": "Optional free-text note recorded in the digest header — e.g. the subagent's one-line summary.",
+				},
+			},
+			"required": []string{"issue_key", "agent_id"},
 		},
 	}
 }
@@ -511,6 +560,8 @@ func (s *Server) handleToolCall(ctx context.Context, msg *rpcMessage) {
 		s.handleRegisterCall(ctx, msg.ID, head.Arguments)
 	case "ask_user_question":
 		s.handleAskUserQuestionCall(ctx, msg.ID, head.Arguments)
+	case "attach_transcript":
+		s.handleAttachTranscriptCall(ctx, msg.ID, head.Arguments)
 	default:
 		s.replyError(msg.ID, -32602, "unknown tool: "+head.Name)
 	}
@@ -575,6 +626,44 @@ func (s *Server) handleRegisterCall(ctx context.Context, id json.RawMessage, raw
 		msg += " (" + strings.Join(extras, ", ") + ")"
 	}
 	s.toolResult(id, false, msg)
+}
+
+// handleAttachTranscriptCall validates the issue key + agent id, asks
+// the source to locate the subagent transcript and link a digest to
+// the issue, and returns the confirmation as a tool result. Any
+// failure (missing args, issue/transcript not found) surfaces as an
+// MCP tool error rather than dropping the JSON-RPC connection.
+func (s *Server) handleAttachTranscriptCall(ctx context.Context, id json.RawMessage, rawArgs json.RawMessage) {
+	var args struct {
+		IssueKey string `json:"issue_key"`
+		AgentID  string `json:"agent_id"`
+		Note     string `json:"note"`
+	}
+	if len(rawArgs) > 0 {
+		if err := json.Unmarshal(rawArgs, &args); err != nil {
+			s.replyError(id, -32602, "invalid attach_transcript arguments: "+err.Error())
+			return
+		}
+	}
+	issueKey := strings.TrimSpace(args.IssueKey)
+	agentID := strings.TrimSpace(args.AgentID)
+	// Accept both "agent-<id>" and bare "<id>" forms.
+	agentID = strings.TrimPrefix(agentID, "agent-")
+	if issueKey == "" {
+		s.toolResult(id, true, "attach_transcript requires an issue_key (e.g. \"BACI-42\")")
+		return
+	}
+	if agentID == "" {
+		s.toolResult(id, true, "attach_transcript requires an agent_id (the agentId from the Task result)")
+		return
+	}
+	confirmation, err := s.src.AttachTranscript(ctx, issueKey, agentID, strings.TrimSpace(args.Note))
+	if err != nil {
+		s.logf("bacio channel: attach_transcript %s agent-%s: %v", issueKey, agentID, err)
+		s.toolResult(id, true, fmt.Sprintf("could not attach transcript for agent-%s to %s: %v", agentID, issueKey, err))
+		return
+	}
+	s.toolResult(id, false, confirmation)
 }
 
 // handleAskUserQuestionCall validates the payload, asks the source
