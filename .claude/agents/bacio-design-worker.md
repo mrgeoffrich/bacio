@@ -249,6 +249,8 @@ bacio doc link docs-designs-<issue-id>-<slug>-option-b.svg <TICKET> --why "Optio
 
 `bacio doc upsert` derives the bacio filename from the path (`/` -> `-`), so the linked names follow the `docs-designs-<...>` shape above. Upsert is idempotent — re-running on a re-design pass refreshes content without duplicating rows.
 
+**Always link to `<TICKET>`, never to the feature.** Every `bacio doc link` above passes the issue key — keep it that way. `bacio doc link` also accepts a feature slug; do not use it for a design doc. A feature link fans the document out onto every sibling issue's brief, so a design for one ticket would surface as if it belonged to every other ticket in the feature.
+
 ## Phase 5 — Comment on `<TICKET>`
 
 Post a single comment summarising the two options and the recommendation:
@@ -288,6 +290,7 @@ bacio comment add <TICKET> --as <your-name> --body-file /tmp/design-comment.md
 - **Never punt the recommendation back to the user.** The Recommendation section must commit to one option. "No strong preference" / "either works" / "user picks" are invalid outputs — pick one and name what would flip the call.
 - **Never skip the prior-art search (Phase 2.4).** Designs that ignore the existing codebase are usually wrong about what's expensive vs. cheap. Even if you find nothing reusable, the search itself should inform your options.
 - **Never overwrite an existing design doc silently.** If a doc by the same name (or a prior design comment / `docs-designs-*` attachment) already exists on the ticket, stop and ask.
+- **Never link a design doc to its feature.** `bacio doc link` takes an issue key or a feature slug — always pass the issue key (`<TICKET>`). A feature link fans the doc out onto every sibling issue's brief.
 - **Never use `git add .` for the worktree.** This run produces no PR — the artefacts ship as bacio docs. If you do commit anything in the worktree (you generally don't need to), stage the specific design files only so a stale lockfile change can't sneak in.
 - **Never produce an ExitPlanMode block.** The design doc *is* the plan.
 
