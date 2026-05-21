@@ -703,6 +703,41 @@ own bacio environment. The worker tears the bacio environment down with
 itself. See [`docs/worktree-environments.md`](worktree-environments.md)
 for the bacio-side of that isolation.
 
+### Worktree+branch safety guard (BACI-91)
+
+`isolation: worktree` is what Claude Code is *supposed* to honour — but
+nothing verifies it actually did. If worktree isolation silently fails,
+or a brief is somehow run in a non-worktree context, a dispatched
+worker would otherwise claim the ticket and start editing/committing on
+the **primary checkout's main branch**.
+
+To make that failure mode loud, `model.RenderAgentFile` prepends a
+shared **worktree safety guard** (`model.WorktreeGuardPreamble`,
+`internal/model/agentfile.go`) to *every* generated agent file's body —
+before the template's own `## Setup` section. The guard instructs the
+worker, as its very first action, to verify with `git rev-parse` that:
+
+- it is in a **linked worktree** — `--git-dir` and `--git-common-dir`
+  resolve to *different* paths (they are identical in the primary
+  checkout); and
+- the current branch is **not** the repo's main branch (`main` /
+  `master`).
+
+If either check fails the worker aborts immediately — no bacio skill,
+no claim, no state change, no edits, no commits — and returns a clear
+message that the dispatch must be re-run with proper worktree
+isolation.
+
+The guard is centralised in `RenderAgentFile` rather than copied into
+each of the six `prompttemplates/*.txt` bodies, so it cannot drift and
+is automatically inherited by any future or user-created template — the
+built-in template bodies are untouched. It is a *soft* (prompt-level)
+guard: editing a template body and re-running `bacio install-agent`
+regenerates the `.claude/agents/` files with the guard already in
+place, since the guard lives in the renderer, not the source bodies.
+Covered by `TestRenderAgentFileCarriesWorktreeGuard` /
+`TestRenderAgentFileBuiltinsCarryGuard`.
+
 ### Subagent tool surface
 
 The generated agent files carry **no `tools:` line**. Omitting the
