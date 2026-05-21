@@ -122,3 +122,12 @@ type SettingsShowArchivedInput struct {
 // hourly Controller tick runs, on demand. Useful for testing and for
 // users who want to skip the wait. Idempotent.
 type ArchiveSweepInput struct{}
+
+// SettingsSyncBackgroundInput is the payload for `bacio settings
+// sync-background --json` (BACI-89). The CLI verb doubles as get and
+// set: empty body reads the current value; non-empty `value` writes
+// it. Background sync is opt-OUT — the value defaults to true, so this
+// verb is how a user turns the continual-mirror ticker off.
+type SettingsSyncBackgroundInput struct {
+	Value bool `json:"value"`
+}

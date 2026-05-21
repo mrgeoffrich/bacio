@@ -92,12 +92,16 @@ incoming requests carry their own actor via the X-Actor header
 			// the worktree manifest chain (BACI-63) — so a manifest-aware
 			// worktree picks up its allocated port without the user
 			// repeating --addr on every invocation.
+			//
+			// Resolved unconditionally (not just when --addr is
+			// unchanged) because env.DBPath also feeds the BACI-89
+			// background sync runner's cross-process lock.
+			env, err := resolveEnv()
+			if err != nil {
+				return err
+			}
 			if !cmd.Flags().Changed("addr") {
-				res, err := resolveEnv()
-				if err != nil {
-					return err
-				}
-				addr = res.APIAddr
+				addr = env.APIAddr
 			}
 			if port > 0 {
 				host, _, err := net.SplitHostPort(addr)
@@ -138,6 +142,7 @@ incoming requests carry their own actor via the X-Actor header
 				Token:       token,
 				CORSOrigins: corsOrigins,
 				MountUI:     true,
+				DBPath:      env.DBPath,
 			}, logger)
 
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

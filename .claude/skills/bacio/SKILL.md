@@ -1295,6 +1295,34 @@ bacio sync inspect <prefix> --doc filename    the flags, prints the parsed
 
 **Sync is local-only.** All sync commands error in remote mode (`--remote` / `BACIO_REMOTE`); the server is the source of truth there.
 
+### Background sync (BACI-89)
+
+Once a repo has sync configured (`bacio sync init` / `clone`), the
+leader-elected controller mirrors it automatically — it runs the same
+`pull → import → export → commit → push` pipeline as a manual `bacio
+sync` on a 5-minute timer (`store.SyncTickInterval`), so the repo stays
+continually mirrored with no manual call. Only the `ui_leader`
+lease-holder runs the loop; overlapping ticks are skipped, not stacked;
+repeated push failures back off exponentially (capped ~1h).
+
+Background sync is **opt-OUT** — it defaults ON once sync is configured.
+Turn it off for manual-only sync:
+
+```
+bacio settings sync-background            Read the BACI-89 sync.background_enabled toggle
+bacio settings sync-background true|false Write it (false → manual-only `bacio sync`)
+```
+
+The verb honours `--json`, `--dry-run`, and has a `bacio schema` entry
+(`settings.sync-background`). Last-sync state — last run time,
+in-progress, last error — is observable in the desktop / web `Sync`
+topbar badge (a live status indicator, not a button) and over the HTTP
+API:
+
+- `GET /sync` — sync status for every tracked repo (the web UI's badge source).
+- `GET /repos/{prefix}/sync` — per-repo sync status.
+- `GET / PUT /settings/sync-preferences` — body `{"background_enabled": <bool>}`, the disable toggle over HTTP.
+
 ## HTTP API
 
 `bacio api` and `bacio web` both expose every CLI mutation and read over HTTP, backed by the same SQLite database, JSON shapes, validators, and audit log. **The CLI conventions above all apply** — discover schemas, compose JSON, dry-run, then commit. The only differences are HTTP plumbing.

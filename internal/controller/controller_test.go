@@ -12,6 +12,7 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/dispatcher"
 	"github.com/mrgeoffrich/bacio/internal/leader"
 	"github.com/mrgeoffrich/bacio/internal/store"
+	bsync "github.com/mrgeoffrich/bacio/internal/sync"
 )
 
 // fakeElectorBackend lets us flip the elector's leader state inside a
@@ -115,12 +116,43 @@ func TestMatchIfLeaderRespectsLease(t *testing.T) {
 	}
 }
 
+// TestSyncIfLeaderRespectsLease: SyncIfLeader is a no-op on standby and
+// does not log a failure on the leader when no repo is sync-enabled
+// (BACI-89). Mirrors TestMatchIfLeaderRespectsLease.
+func TestSyncIfLeaderRespectsLease(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.Open(filepath.Join(dir, "db.sqlite"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	runner := bsync.NewBackgroundRunner(s, filepath.Join(dir, "db.sqlite"), "test", log)
+
+	standby, _ := newFakeElector(t, false)
+	SyncIfLeader(runner, standby, log)
+	if buf.Len() != 0 {
+		t.Fatalf("standby sync should be silent, got: %s", buf.String())
+	}
+
+	leaderEl, _ := newFakeElector(t, true)
+	SyncIfLeader(runner, leaderEl, log)
+	if strings.Contains(buf.String(), "failed") {
+		t.Fatalf("leader sync against an empty store should not log a failure, got: %s", buf.String())
+	}
+}
+
 // TestNilGuards: every helper tolerates nil inputs without panicking —
 // this matches the "background work must never crash the host" contract.
 func TestNilGuards(t *testing.T) {
 	PruneIfLeader(nil, nil, nil)
 	MatchIfLeader(nil, nil, nil)
 	PingIfLeader(nil, nil, nil)
+	ArchiveSweepIfLeader(nil, nil, nil)
+	SyncIfLeader(nil, nil, nil)
 }
 
 // TestControllerStartStop: Start spins the three goroutines and Stop
@@ -140,7 +172,7 @@ func TestControllerStartStop(t *testing.T) {
 	// pinger left nil — TestControllerStartStop only verifies Start/Stop
 	// semantics, not the loop's behaviour. The BACI-57 pinger goroutine
 	// becomes a quiet no-op via PingIfLeader's nil guard.
-	c := New(s, el, dispatcher.New(s), nil, nil)
+	c := New(s, el, dispatcher.New(s), nil, nil, nil)
 
 	var emits int
 	c.Start(func(leader.State) { emits++ })

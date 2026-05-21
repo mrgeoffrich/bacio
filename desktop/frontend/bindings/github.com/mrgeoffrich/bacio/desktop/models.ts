@@ -42,12 +42,20 @@ export type AgentCard = agentcards$0.AgentCard;
 
 /**
  * Board is one bacio repo, offered in the top-nav repository selector.
+ * 
+ * The SyncEnabled / SyncInProgress / SyncLastAt / SyncLastError fields
+ * (BACI-89) drive the topbar's live sync-status badge: SyncEnabled is
+ * "this repo has git sync configured"; the other three reflect the
+ * background sync runner's last / current state.
  */
 export class Board {
     "prefix": string;
     "name": string;
     "issueCount": number;
     "syncEnabled": boolean;
+    "syncInProgress": boolean;
+    "syncLastAt"?: time$0.Time | null;
+    "syncLastError"?: string;
 
     /** Creates a new Board instance. */
     constructor($$source: Partial<Board> = {}) {
@@ -62,6 +70,9 @@ export class Board {
         }
         if (!("syncEnabled" in $$source)) {
             this["syncEnabled"] = false;
+        }
+        if (!("syncInProgress" in $$source)) {
+            this["syncInProgress"] = false;
         }
 
         Object.assign(this, $$source);

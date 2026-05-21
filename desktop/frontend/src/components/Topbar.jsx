@@ -17,8 +17,38 @@ export const NAV = [
   { view: 'history', label: 'History' },
 ];
 
+// formatSyncTime renders an ISO timestamp as a short local string for
+// the sync badge's hover tooltip. Falls back to the raw string if the
+// date can't be parsed.
+function formatSyncTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString();
+}
+
 export default function Topbar({ boards, activeBoard, onPickBoard, onAddRepository, activeView, onChangeView, onOpenPalette, onOpenSettings, leaderState, openIssueKey, onCloseIssue, agentCounts }) {
-  const syncEnabled = !!boards.find(b => b.prefix === activeBoard)?.syncEnabled;
+  const board = boards.find(b => b.prefix === activeBoard);
+  const syncEnabled = !!board?.syncEnabled;
+  // BACI-89: the Sync badge is now a live status indicator, not just a
+  // static "enabled" pill. Spinner-ish pulse while a background sync
+  // runs; error variant when the last run failed; plain pill (with a
+  // last-synced hover) when idle.
+  const syncInProgress = !!board?.syncInProgress;
+  const syncLastError = board?.syncLastError || '';
+  const syncLastAt = board?.syncLastAt || '';
+  let syncBadgeClass = 'mk-pill mk-sync-badge';
+  let syncBadgeLabel = 'Sync Enabled';
+  let syncBadgeTitle = syncLastAt ? `Last synced ${formatSyncTime(syncLastAt)}` : 'Background sync configured';
+  if (syncInProgress) {
+    syncBadgeClass += ' is-syncing';
+    syncBadgeLabel = 'Syncing…';
+    syncBadgeTitle = 'Background sync in progress';
+  } else if (syncLastError) {
+    syncBadgeClass += ' is-error';
+    syncBadgeLabel = 'Sync Failed';
+    syncBadgeTitle = `Last sync failed: ${syncLastError}`;
+  }
   const isLeader = leaderState?.amLeader ?? false;
   // BACI-74: small pills tucked into the Agents button when the active
   // repo has any non-ended sessions. Available = idle or active AND
@@ -77,7 +107,9 @@ export default function Topbar({ boards, activeBoard, onPickBoard, onAddReposito
       </button>
 
       <div className="mk-topbar-right">
-        {syncEnabled && <span className="mk-pill mk-sync-badge">Sync Enabled</span>}
+        {syncEnabled && (
+          <span className={syncBadgeClass} title={syncBadgeTitle}>{syncBadgeLabel}</span>
+        )}
         {isLeader && (
           <Tooltip label="This window holds the UI leader lease">
             <span className="mk-pill mk-leader-badge">Controlling</span>

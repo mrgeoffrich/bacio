@@ -197,12 +197,26 @@ func migrate(db *sql.DB) error {
 	// gain the table here; newer DBs already have it from schema.sql.
 	if _, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS sync_remotes (
-			remote_url   TEXT NOT NULL PRIMARY KEY,
-			local_path   TEXT NOT NULL,
-			cloned_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			last_sync_at DATETIME
+			remote_url      TEXT NOT NULL PRIMARY KEY,
+			local_path      TEXT NOT NULL,
+			cloned_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			last_sync_at    DATETIME,
+			last_sync_error TEXT
 		)`); err != nil {
 		return fmt.Errorf("create sync_remotes: %w", err)
+	}
+	// sync_remotes.last_sync_error is a BACI-89 addition — the
+	// background sync ticker records the last run's failure here so
+	// the web UI badge can surface it. Older DBs that already created
+	// sync_remotes gain the column with this idempotent ALTER.
+	hasSyncErr, err := columnExists(db, "sync_remotes", "last_sync_error")
+	if err != nil {
+		return err
+	}
+	if !hasSyncErr {
+		if _, err := db.Exec(`ALTER TABLE sync_remotes ADD COLUMN last_sync_error TEXT`); err != nil {
+			return fmt.Errorf("add last_sync_error to sync_remotes: %w", err)
+		}
 	}
 	// agent_sessions.agent_id was added when the persistent agent-identity
 	// layer landed. Older DBs that already created agent_sessions (from

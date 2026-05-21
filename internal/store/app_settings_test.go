@@ -28,6 +28,86 @@ func TestAppSettingRoundTrip(t *testing.T) {
 	}
 }
 
+// TestSyncBackgroundEnabledDefaultsTrue locks in the BACI-89 inverted
+// default: a missing sync.background_enabled value reads back as true
+// (background sync is opt-OUT), and only the exact string "false"
+// disables it.
+func TestSyncBackgroundEnabledDefaultsTrue(t *testing.T) {
+	s := newTestStore(t)
+
+	// Never set → defaults to true.
+	if v, err := s.GetSyncBackgroundEnabled(); err != nil || !v {
+		t.Fatalf("GetSyncBackgroundEnabled(unset) = %v, %v; want true, nil", v, err)
+	}
+	// Explicit false disables.
+	if err := s.SetSyncBackgroundEnabled(false); err != nil {
+		t.Fatalf("SetSyncBackgroundEnabled(false): %v", err)
+	}
+	if v, _ := s.GetSyncBackgroundEnabled(); v {
+		t.Fatal("after Set(false), GetSyncBackgroundEnabled = true, want false")
+	}
+	// Back to true.
+	if err := s.SetSyncBackgroundEnabled(true); err != nil {
+		t.Fatalf("SetSyncBackgroundEnabled(true): %v", err)
+	}
+	if v, _ := s.GetSyncBackgroundEnabled(); !v {
+		t.Fatal("after Set(true), GetSyncBackgroundEnabled = false, want true")
+	}
+	// An unexpected stored value reads as true (only "false" disables).
+	if err := s.SetAppSetting(syncBackgroundEnabledKey, "garbage"); err != nil {
+		t.Fatalf("SetAppSetting: %v", err)
+	}
+	if v, _ := s.GetSyncBackgroundEnabled(); !v {
+		t.Fatal("a non-\"false\" stored value should read as true")
+	}
+}
+
+// TestMarkSyncFailedAndCompleted checks the BACI-89 last_sync_error
+// bookkeeping: MarkSyncFailed records the message, MarkSyncCompleted
+// clears it and stamps last_sync_at.
+func TestMarkSyncFailedAndCompleted(t *testing.T) {
+	s := newTestStore(t)
+
+	const remote = "git@github.com:user/sync.git"
+	if err := s.UpsertSyncRemote(remote, "/local/sync"); err != nil {
+		t.Fatalf("UpsertSyncRemote: %v", err)
+	}
+
+	// Fresh row: no error, no last_sync_at.
+	rec, err := s.GetSyncRemote(remote)
+	if err != nil {
+		t.Fatalf("GetSyncRemote: %v", err)
+	}
+	if rec.LastSyncError != nil || rec.LastSyncAt != nil {
+		t.Fatalf("fresh sync_remote: error=%v lastSyncAt=%v; want both nil",
+			rec.LastSyncError, rec.LastSyncAt)
+	}
+
+	// MarkSyncFailed records the message.
+	if err := s.MarkSyncFailed(remote, "git push: non-fast-forward"); err != nil {
+		t.Fatalf("MarkSyncFailed: %v", err)
+	}
+	rec, _ = s.GetSyncRemote(remote)
+	if rec.LastSyncError == nil || *rec.LastSyncError != "git push: non-fast-forward" {
+		t.Fatalf("after MarkSyncFailed, error = %v, want the message", rec.LastSyncError)
+	}
+	if rec.LastSyncAt != nil {
+		t.Fatal("MarkSyncFailed must not touch last_sync_at")
+	}
+
+	// MarkSyncCompleted clears the error and stamps last_sync_at.
+	if err := s.MarkSyncCompleted(remote); err != nil {
+		t.Fatalf("MarkSyncCompleted: %v", err)
+	}
+	rec, _ = s.GetSyncRemote(remote)
+	if rec.LastSyncError != nil {
+		t.Fatalf("MarkSyncCompleted must clear last_sync_error, got %v", *rec.LastSyncError)
+	}
+	if rec.LastSyncAt == nil {
+		t.Fatal("MarkSyncCompleted must stamp last_sync_at")
+	}
+}
+
 // TestPromptTemplateSeedAndOverride checks that the migration seeds the
 // built-in templates on first run, that the legacy SetPromptTemplate /
 // GetPromptTemplate shims edit the prompt_templates rows in place, and

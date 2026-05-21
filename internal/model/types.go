@@ -120,8 +120,14 @@ type SyncState struct {
 // the local path is per-machine and lives only in this DB. LastSyncAt
 // is bumped at the end of every successful `bacio sync`.
 type SyncRemote struct {
-	RemoteURL  string     `json:"remote_url"`
-	LocalPath  string     `json:"local_path"`
-	ClonedAt   time.Time  `json:"cloned_at"`
+	RemoteURL string    `json:"remote_url"`
+	LocalPath string    `json:"local_path"`
+	ClonedAt  time.Time `json:"cloned_at"`
+	// LastSyncAt is the time of the last successful sync, or nil if
+	// none has succeeded yet.
 	LastSyncAt *time.Time `json:"last_sync_at,omitempty"`
+	// LastSyncError carries the failure message from the last sync
+	// run, or nil when the last run succeeded (BACI-89). Written by the
+	// background sync ticker; cleared on the next success.
+	LastSyncError *string `json:"last_sync_error,omitempty"`
 }

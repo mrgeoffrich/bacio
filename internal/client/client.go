@@ -187,6 +187,18 @@ type Client interface {
 	GetDisplayShowArchived(ctx context.Context) (bool, error)
 	SetDisplayShowArchived(ctx context.Context, value, dryRun bool) (bool, error)
 
+	// SyncStatuses returns the BACI-89 background-sync status of every
+	// tracked repo — last_sync_at, last error, configured, and the
+	// global background_enabled toggle. The local backend reads the
+	// store + each repo's machine-local .bacio/config.yaml; the
+	// remote backend calls GET /sync. InProgress is process-local on
+	// the leader and always false over HTTP from a non-leader.
+	SyncStatuses(ctx context.Context) ([]SyncStatus, error)
+	// GetSyncBackgroundEnabled / SetSyncBackgroundEnabled expose the
+	// BACI-89 sync.background_enabled opt-out toggle.
+	GetSyncBackgroundEnabled(ctx context.Context) (bool, error)
+	SetSyncBackgroundEnabled(ctx context.Context, value, dryRun bool) (bool, error)
+
 	// ----- History -----
 	// ListHistory queries the audit log. When repo is non-nil, results
 	// are scoped to that repo (the remote backend uses the repo's

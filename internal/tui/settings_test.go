@@ -199,7 +199,7 @@ func TestSettingsToggleStateSaves(t *testing.T) {
 // the state-gate pane, `q` quits again.
 func TestSettingsCapturesInput(t *testing.T) {
 	s, repo := settingsTestRepo(t)
-	m, err := NewModel(s, repo, nil)
+	m, err := NewModel(s, repo, nil, "")
 	if err != nil {
 		t.Fatalf("new model: %v", err)
 	}

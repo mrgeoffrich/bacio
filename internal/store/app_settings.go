@@ -303,3 +303,36 @@ func (s *Store) SetDisplayShowArchived(show bool) error {
 	}
 	return s.SetAppSetting(displayShowArchivedKey, v)
 }
+
+// syncBackgroundEnabledKey is the BACI-89 global toggle controlling
+// whether the leader-elected controller runs its background git-sync
+// ticker (internal/sync.BackgroundRunner). It is the opt-OUT switch
+// for the continual-mirror behaviour.
+const syncBackgroundEnabledKey = "sync.background_enabled"
+
+// GetSyncBackgroundEnabled reports whether the controller's background
+// git-sync ticker should run (BACI-89).
+//
+// IMPORTANT: unlike the other boolean getters in this file, this one
+// DEFAULTS TO TRUE. A missing/empty value reads as true; only the
+// exact string "false" disables it. Background sync is opt-OUT, not
+// opt-in: a user only reaches this code path by having explicitly run
+// `bacio sync init` / `bacio sync clone`, so continual mirroring of an
+// already-configured sync repo is the expected behaviour. The inverted
+// default is deliberate — do not "fix" it to match GetDisplayShowArchived.
+func (s *Store) GetSyncBackgroundEnabled() (bool, error) {
+	v, err := s.GetAppSetting(syncBackgroundEnabledKey)
+	if err != nil {
+		return true, err
+	}
+	return v != "false", nil
+}
+
+// SetSyncBackgroundEnabled stores the BACI-89 background-sync toggle.
+func (s *Store) SetSyncBackgroundEnabled(enabled bool) error {
+	v := "false"
+	if enabled {
+		v = "true"
+	}
+	return s.SetAppSetting(syncBackgroundEnabledKey, v)
+}

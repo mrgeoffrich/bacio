@@ -35,6 +35,17 @@ const (
 	// across the cluster.
 	QueueMatchInterval = 5 * time.Second
 
+	// SyncTickInterval is how often the controlling UI fires the
+	// BACI-89 background git-sync ticker
+	// (internal/sync.BackgroundRunner.Tick). Five minutes is the
+	// middle ground for an unattended mirror — frequent enough to be
+	// "continual", infrequent enough that the git network I/O isn't
+	// constant. The first tick fires one interval after Start, not
+	// immediately, so process startup is never blocked on a slow
+	// `git pull`. Leader-gated so exactly one process across the
+	// cluster runs the sync loop.
+	SyncTickInterval = 5 * time.Minute
+
 	// IdlePingTickInterval is how often the controlling UI fires the
 	// BACI-57 idle-pinger sweep (internal/idlepinger.Pinger.Tick). The
 	// reaper walks every alive registered session per tick — one

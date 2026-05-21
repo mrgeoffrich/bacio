@@ -30,6 +30,7 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/leader"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
+	bsync "github.com/mrgeoffrich/bacio/internal/sync"
 )
 
 // view is the contract every tab implements. Shell mutates state by handing
@@ -151,6 +152,19 @@ func archiveSweepTick() tea.Cmd {
 	})
 }
 
+// syncTickMsg fires on the BACI-89 background git-sync cadence
+// (store.SyncTickInterval, currently 5m). Same leader-gated shell-
+// level pattern as the other tickers so a TUI-only deployment still
+// gets the continual-mirror sync that desktop / api receive from the
+// controller goroutine.
+type syncTickMsg time.Time
+
+func syncTick() tea.Cmd {
+	return tea.Tick(store.SyncTickInterval, func(t time.Time) tea.Msg {
+		return syncTickMsg(t)
+	})
+}
+
 // Run boots the Bubble Tea program in alt-screen mode and blocks until
 // quit. The store is owned by the caller. It constructs a leader.Elector
 // for the process and releases the lease on graceful exit.
@@ -159,12 +173,12 @@ func archiveSweepTick() tea.Cmd {
 // el.Release fires and a standby UI can promote within one tick (~10s)
 // rather than waiting out the 180s stale window. SIGINT is left to
 // bubbletea, which already converts it into a graceful quit.
-func Run(s *store.Store, repo *model.Repo) error {
+func Run(s *store.Store, repo *model.Repo, dbPath string) error {
 	h, _ := os.Hostname()
 	label := fmt.Sprintf("tui pid=%d host=%s", os.Getpid(), h)
 	el := leader.New(s, label)
 	defer el.Release()
-	m, err := NewModel(s, repo, el)
+	m, err := NewModel(s, repo, el, dbPath)
 	if err != nil {
 		return err
 	}
@@ -188,7 +202,10 @@ func Run(s *store.Store, repo *model.Repo) error {
 // embed the model into their own tea.Program with different program
 // options — e.g. WithInput/WithOutput for an xterm.js bridge.
 // Pass el as nil to disable leader election (WASM demo — always acts as leader).
-func NewModel(s *store.Store, repo *model.Repo, el *leader.Elector) (*Model, error) {
+// dbPath is the resolved SQLite path threaded to the BACI-89
+// background sync runner's cross-process lock (empty falls back to
+// store.DefaultPath at tick time).
+func NewModel(s *store.Store, repo *model.Repo, el *leader.Elector, dbPath string) (*Model, error) {
 	board, err := newBoardView(s, repo, tuiActor())
 	if err != nil {
 		return nil, err
@@ -206,11 +223,12 @@ func NewModel(s *store.Store, repo *model.Repo, el *leader.Elector) (*Model, err
 	}
 	pingerClient := client.NewLocalFromStore(s, pingerActor)
 	return &Model{
-		repo:    repo,
-		store:   s,
-		elector: el,
-		matcher: dispatcher.New(s),
-		pinger:  idlepinger.New(s, pingerClient, nil),
+		repo:       repo,
+		store:      s,
+		elector:    el,
+		matcher:    dispatcher.New(s),
+		pinger:     idlepinger.New(s, pingerClient, nil),
+		syncRunner: bsync.NewBackgroundRunner(s, dbPath, pingerActor, nil),
 		tabs: []tab{
 			{"Board", board},
 			{"Features", newFeaturesView(s, repo)},
@@ -250,6 +268,10 @@ type Model struct {
 	// lease via controller.PingIfLeader on the idlePingTick cadence.
 	// nil disables (e.g. WASM demo).
 	pinger *idlepinger.Pinger
+	// syncRunner is the BACI-89 background git-sync runner. Runs under
+	// the leader lease via controller.SyncIfLeader on the syncTick
+	// cadence. nil disables (e.g. WASM demo).
+	syncRunner *bsync.BackgroundRunner
 }
 
 func (m *Model) Init() tea.Cmd {
@@ -286,6 +308,10 @@ func (m *Model) Init() tea.Cmd {
 		// runs ArchiveSweepInterval after Init. Same skip-the-immediate
 		// pattern as the other ticks.
 		cmds = append(cmds, archiveSweepTick())
+		// Seed the BACI-89 background git-sync cadence. First tick runs
+		// SyncTickInterval (~5m) after Init — never on startup, so a
+		// freshly-launched TUI isn't blocked on a slow `git pull`.
+		cmds = append(cmds, syncTick())
 	}
 	if len(cmds) == 0 {
 		return nil
@@ -353,6 +379,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, archiveSweepTick()
+	case syncTickMsg:
+		// BACI-89 background git-sync tick: runs the continual-mirror
+		// pipeline on the leader. Same leader-gating helper the
+		// controller goroutine uses so TUI and desktop/api stay in
+		// lockstep. The runner self-gates on the
+		// sync.background_enabled toggle.
+		controller.SyncIfLeader(m.syncRunner, m.elector, nil)
+		if m.elector == nil {
+			return m, nil
+		}
+		return m, syncTick()
 	case openDocMsg:
 		// Cross-tab: hand the filename to the Documents tab and focus
 		// it. Remember where we came from so esc on the doc overlay

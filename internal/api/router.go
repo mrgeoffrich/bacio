@@ -195,6 +195,17 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("GET /settings/board-preferences", d.handleBoardPreferencesGet)
 	mux.HandleFunc("PUT /settings/board-preferences", d.handleBoardPreferencesSet)
 
+	// BACI-89 background sync. GET /sync (cross-repo) + GET
+	// /repos/{prefix}/sync (per-repo) report live sync status —
+	// last_sync_at, last_error, in_progress, configured — so the web
+	// UI's Sync badge reflects real state instead of a hardcoded
+	// false. /settings/sync-preferences is the background-sync
+	// opt-out toggle, mirroring /settings/board-preferences.
+	mux.HandleFunc("GET /sync", d.handleSyncStatusList)
+	mux.HandleFunc("GET /repos/{prefix}/sync", d.handleSyncStatusGet)
+	mux.HandleFunc("GET /settings/sync-preferences", d.handleSyncPreferencesGet)
+	mux.HandleFunc("PUT /settings/sync-preferences", d.handleSyncPreferencesSet)
+
 	// BACI-68 archive lifecycle. Per-entity archive / unarchive on
 	// issues, features, documents — flip archived_at without going
 	// through a PATCH (the verb shape matches the CLI's `bacio issue

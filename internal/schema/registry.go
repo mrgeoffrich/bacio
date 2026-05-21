@@ -103,6 +103,7 @@ var Registry = []Entry{
 	{"doc.unarchive", "Unarchive a document (BACI-68).", typeOf[inputs.DocUnarchiveInput](), inputs.ExampleDocUnarchive},
 	{"archive.sweep", "Manually trigger the BACI-68 archive sweep on demand. Same three SQL passes the leader-elected Controller runs hourly: archive issues older than 4 days in a terminal state, then features whose every child issue is archived, then docs whose every linked parent is archived. Idempotent. Returns {issues_archived, features_archived, documents_archived}.", typeOf[inputs.ArchiveSweepInput](), inputs.ExampleArchiveSweep},
 	{"settings.show-archived", "Toggle the BACI-68 display.show_archived global setting. When on, lists / boards / docs / features views include archived rows by default (the per-call --include-archived flag still works either way).", typeOf[inputs.SettingsShowArchivedInput](), inputs.ExampleSettingsShowArchived},
+	{"settings.sync-background", "Toggle the BACI-89 sync.background_enabled global setting. When on (the default — background sync is opt-OUT), the leader-elected controller continually mirrors every sync-enabled repo on a timer. Set to false for manual-only `bacio sync`.", typeOf[inputs.SettingsSyncBackgroundInput](), inputs.ExampleSettingsSyncBackground},
 }
 
 // repoRmDescription is the LLM-targeted warning text published via

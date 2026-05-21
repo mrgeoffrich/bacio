@@ -152,7 +152,7 @@ shapes into the desktop's `BoardCard` / `IssueDetail` / `DocSummary` /
 
 | `api.ts` call | REST equivalent | Notes |
 |---|---|---|
-| `listBoards()` | `GET /repos` + per-repo `GET /repos/{p}/issues` | Issue count comes from a list-then-count; `syncEnabled` is local-only (always false in web mode). |
+| `listBoards()` | `GET /repos` + per-repo `GET /repos/{p}/issues` | Issue count comes from a list-then-count; `syncEnabled` and the live sync fields come from `GET /sync` (BACI-89), not a hardcoded `false`. |
 | `listColumns()` | static | Inlined as a constant. |
 | `listCards(prefix)` | `GET /repos/{p}/issues` | `model.Issue` already inlines `tags`, `taken`, `waiting_for_claim` — no extra round-trip needed. |
 | `getIssue(prefix, key)` | `GET /repos/{p}/issues/{k}` | Reshape `IssueView` → `IssueDetail`. |
