@@ -21,11 +21,19 @@ import { isSvgDoc } from '../../lib/docFormat';
 //
 // `linkedVia` carries the doc's origin path(s) — `issue`, `feature/<slug>`,
 // or both when the same doc is reachable from the issue and its parent
-// feature (deduped by client.BriefIssue). When both are present, surface
-// "(issue + feature)" so the source is obvious.
+// feature (deduped by client.BriefIssue). A doc reachable ONLY via the
+// parent feature is not this issue's own doc — without a label it reads
+// as the issue's plan (the BACI-87 confusion: a sibling issue's plan,
+// linked to the shared feature, surfaced as if it belonged here). So:
+// surface "(issue + feature)" when both, "(via feature/<slug>)" when
+// feature-only, and nothing when it's the issue's own link.
 export default function LinkedDocPanel({ doc }) {
   const defaultOpen = (doc.content?.length ?? 0) < 6000;
-  const viaBoth = (doc.linkedVia || []).length === 2;
+  const via = doc.linkedVia || [];
+  const featureVia = via.find(v => v.startsWith('feature/'));
+  const viaLabel = via.includes('issue')
+    ? (featureVia ? '(issue + feature)' : '')
+    : (featureVia ? `(via ${featureVia})` : '');
 
   const isSvg = useMemo(
     () => isSvgDoc(doc.filename || '', doc.content || ''),
@@ -50,7 +58,7 @@ export default function LinkedDocPanel({ doc }) {
         <span className="mk-attachment-badge">{doc.type || 'doc'}</span>
         <span className="mk-attachment-name">{doc.filename}</span>
         {doc.description && <span className="mk-attachment-why">— {doc.description}</span>}
-        {viaBoth && <span className="mk-attachment-why">(issue + feature)</span>}
+        {viaLabel && <span className="mk-attachment-why">{viaLabel}</span>}
       </summary>
       {isSvg ? (
         <div className="mk-linked-doc-body mk-linked-doc-svg">
