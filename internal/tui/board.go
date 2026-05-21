@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -9,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/mrgeoffrich/bacio/internal/boardcards"
 	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
@@ -345,6 +347,16 @@ func (b *boardView) reload() error {
 			continue
 		}
 		b.columns[iss.State] = append(b.columns[iss.State], iss)
+	}
+	// BACI-101: Done and Cancelled render newest-completed first. Other
+	// columns keep their creation order. Shares the comparator with
+	// boardcards.Assemble so the TUI and desktop/web stay consistent.
+	for _, st := range []model.State{model.StateDone, model.StateCancelled} {
+		col := b.columns[st]
+		sort.SliceStable(col, func(i, j int) bool {
+			return boardcards.CompletionSortKey(col[i]).After(
+				boardcards.CompletionSortKey(col[j]))
+		})
 	}
 	// Issue descriptions may have changed under us — start the cache
 	// fresh so stale renders aren't served until a new render replaces

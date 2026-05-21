@@ -342,3 +342,103 @@ func TestAssembleNoDispatchNoVerb(t *testing.T) {
 		t.Errorf("got Taken=%v Verb=%q Total=%d, want Taken=true Verb=\"\" Total=0", cards[0].Taken, cards[0].ActiveVerb, cards[0].TodosTotal)
 	}
 }
+
+// TestCompletionSortKey covers the BACI-101 ordering key: updated_at
+// when set, created_at as the fallback.
+func TestCompletionSortKey(t *testing.T) {
+	created := time.Date(2026, 5, 1, 9, 0, 0, 0, time.UTC)
+	updated := time.Date(2026, 5, 10, 9, 0, 0, 0, time.UTC)
+
+	withUpdated := &model.Issue{CreatedAt: created, UpdatedAt: updated}
+	if got := CompletionSortKey(withUpdated); !got.Equal(updated) {
+		t.Errorf("CompletionSortKey with updated_at = %v, want %v", got, updated)
+	}
+	zeroUpdated := &model.Issue{CreatedAt: created}
+	if got := CompletionSortKey(zeroUpdated); !got.Equal(created) {
+		t.Errorf("CompletionSortKey with zero updated_at = %v, want created_at %v", got, created)
+	}
+	if got := CompletionSortKey(nil); !got.IsZero() {
+		t.Errorf("CompletionSortKey(nil) = %v, want zero time", got)
+	}
+}
+
+// TestIsCompletedColumn covers the BACI-101 column predicate.
+func TestIsCompletedColumn(t *testing.T) {
+	for _, st := range []model.State{model.StateDone, model.StateCancelled} {
+		if !IsCompletedColumn(st) {
+			t.Errorf("IsCompletedColumn(%q) = false, want true", st)
+		}
+	}
+	for _, st := range []model.State{
+		model.StateTodo, model.StateInProgress,
+		model.StateNeedsAction, model.StateInReview,
+	} {
+		if IsCompletedColumn(st) {
+			t.Errorf("IsCompletedColumn(%q) = true, want false", st)
+		}
+	}
+}
+
+// TestAssembleSortsCompletedColumns covers the BACI-101 board sort:
+// Done and Cancelled cards render newest-completed first (updated_at
+// descending), while non-completed columns keep their incoming
+// creation order.
+func TestAssembleSortsCompletedColumns(t *testing.T) {
+	repo := &model.Repo{ID: 1, Prefix: "TEST"}
+	created := time.Date(2026, 5, 1, 9, 0, 0, 0, time.UTC)
+
+	// Issues arrive in creation order (the store's prefix,number sort).
+	// Done/Cancelled rows deliberately get updated_at values out of
+	// creation order so the sort has something to do; the created_at
+	// fallback row (TEST-7) has a zero updated_at.
+	issues := []*model.Issue{
+		// Todo column — order must be preserved.
+		{Key: "TEST-1", State: model.StateTodo, Title: "todo a", CreatedAt: created},
+		{Key: "TEST-2", State: model.StateTodo, Title: "todo b", CreatedAt: created},
+		// Done column — closed out of creation order.
+		{Key: "TEST-3", State: model.StateDone, Title: "done oldest",
+			CreatedAt: created, UpdatedAt: time.Date(2026, 5, 5, 9, 0, 0, 0, time.UTC)},
+		{Key: "TEST-4", State: model.StateDone, Title: "done newest",
+			CreatedAt: created, UpdatedAt: time.Date(2026, 5, 20, 9, 0, 0, 0, time.UTC)},
+		{Key: "TEST-5", State: model.StateDone, Title: "done middle",
+			CreatedAt: created, UpdatedAt: time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC)},
+		// Cancelled column.
+		{Key: "TEST-6", State: model.StateCancelled, Title: "cancelled older",
+			CreatedAt: created, UpdatedAt: time.Date(2026, 5, 3, 9, 0, 0, 0, time.UTC)},
+		// created_at fallback — zero updated_at, recent created_at.
+		{Key: "TEST-7", State: model.StateCancelled, Title: "cancelled newest via created_at",
+			CreatedAt: time.Date(2026, 5, 15, 9, 0, 0, 0, time.UTC)},
+	}
+	f := &fakeClient{repo: repo, issues: issues}
+	cards, err := Assemble(context.Background(), f, repo, false)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+
+	column := func(col model.State) []string {
+		var keys []string
+		for _, c := range cards {
+			if model.State(c.Column) == col {
+				keys = append(keys, c.Key)
+			}
+		}
+		return keys
+	}
+	eq := func(name string, got, want []string) {
+		if len(got) != len(want) {
+			t.Fatalf("%s column = %v, want %v", name, got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("%s column = %v, want %v", name, got, want)
+			}
+		}
+	}
+
+	// Done: newest updated_at first.
+	eq("Done", column(model.StateDone), []string{"TEST-4", "TEST-5", "TEST-3"})
+	// Cancelled: TEST-7's created_at (May 15) beats TEST-6's updated_at (May 3).
+	eq("Cancelled", column(model.StateCancelled), []string{"TEST-7", "TEST-6"})
+	// Todo: untouched creation order.
+	eq("Todo", column(model.StateTodo), []string{"TEST-1", "TEST-2"})
+}
