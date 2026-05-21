@@ -429,18 +429,18 @@ func registerToolSchema() map[string]any {
 
 // attachTranscriptToolSchema describes the bacio MCP `attach_transcript`
 // tool. It takes an issue key and a completed subagent's agentId,
-// locates that subagent's transcript on disk, renders a markdown
-// digest, and links it to the issue as a document.
+// locates that subagent's transcript on disk, and links the raw
+// .jsonl to the issue as a document.
 func attachTranscriptToolSchema() map[string]any {
 	return map[string]any{
 		"name": "attach_transcript",
 		"description": "Attach a completed subagent's transcript to a bacio issue for traceability. " +
 			"After a dispatched Task subagent finishes, call this with the issue key and the agentId " +
-			"from the Task result — bacio locates that subagent's transcript, renders a readable " +
-			"markdown digest, and links it to the issue as a document (visible from `bacio issue show` " +
-			"and the bacio UIs). The digest is capped well under the 1 MiB doc limit; the absolute path " +
-			"to the raw transcript is recorded in the digest header. Re-calling for the same (issue, " +
-			"agent) pair refreshes the digest. Errors clearly if the issue or transcript cannot be found.",
+			"from the Task result — bacio locates that subagent's transcript and links the raw .jsonl " +
+			"transcript verbatim to the issue as a document (visible from `bacio issue show` " +
+			"and the bacio UIs). The transcript is capped at ~2.5 MB; an over-cap transcript is " +
+			"truncated with a footer. Re-calling for the same (issue, " +
+			"agent) pair refreshes the attachment. Errors clearly if the issue or transcript cannot be found.",
 		"inputSchema": map[string]any{
 			"type": "object",
 			"properties": map[string]any{

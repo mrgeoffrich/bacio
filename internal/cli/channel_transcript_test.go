@@ -78,8 +78,8 @@ func TestLocateSubagentTranscript(t *testing.T) {
 }
 
 // TestAttachTranscriptEndToEnd drives channelSource.AttachTranscript
-// against a temp DB + a faked transcript tree, then confirms the digest
-// doc was created and linked to the issue.
+// against a temp DB + a faked transcript tree, then confirms the raw
+// .jsonl doc was created and linked to the issue.
 func TestAttachTranscriptEndToEnd(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -130,7 +130,7 @@ func TestAttachTranscriptEndToEnd(t *testing.T) {
 		t.Errorf("confirmation %q missing issue key / agent id", msg)
 	}
 
-	// The digest doc should be visible from the issue brief.
+	// The raw transcript doc should be visible from the issue brief.
 	brief, err := c.BriefIssue(ctx, repo, iss.Key, client.BriefOptions{})
 	if err != nil {
 		t.Fatalf("issue brief: %v", err)
@@ -139,12 +139,20 @@ func TestAttachTranscriptEndToEnd(t *testing.T) {
 		t.Fatalf("expected 1 linked document, got %d", len(brief.Documents))
 	}
 	doc := brief.Documents[0]
-	wantName := "bacio-transcript-" + iss.Key + "-agent-deadbeef.md"
+	wantName := "bacio-transcript-" + iss.Key + "-agent-deadbeef.jsonl"
 	if doc.Filename != wantName {
 		t.Errorf("doc filename = %q, want %q", doc.Filename, wantName)
 	}
-	if !strings.Contains(doc.Content, "Did it.") || !strings.Contains(doc.Content, "the summary") {
-		t.Errorf("digest content missing transcript text / note:\n%s", doc.Content)
+	// The body is the raw .jsonl, stored verbatim (fixture is well under cap).
+	if doc.Content != jsonl {
+		t.Errorf("doc content should byte-equal the raw transcript fixture:\ngot:  %q\nwant: %q", doc.Content, jsonl)
+	}
+	// The supervisor's note is moved onto the link description, not the body.
+	if !strings.Contains(doc.Description, "the summary") {
+		t.Errorf("link description should carry the supervisor note: %q", doc.Description)
+	}
+	if !strings.Contains(doc.Description, "raw .jsonl") {
+		t.Errorf("link description should mention raw .jsonl: %q", doc.Description)
 	}
 
 	// Idempotent: re-attaching the same (issue, agent) pair just refreshes.

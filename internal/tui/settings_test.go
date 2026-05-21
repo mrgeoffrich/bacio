@@ -245,17 +245,18 @@ func TestSettingsCapturesInput(t *testing.T) {
 }
 
 // TestSettingsValidationErrorSurfaced: a body the store rejects (over
-// the 1 MiB cap) surfaces the error in the editor without losing the
-// draft or writing anything. An over-long body is used rather than a
-// control char because the textarea sanitises control runes on input,
-// so a too-long body is the reliable way to drive a store rejection.
+// the 10 MiB doc-body cap) surfaces the error in the editor without
+// losing the draft or writing anything. An over-long body is used
+// rather than a control char because the textarea sanitises control
+// runes on input, so a too-long body is the reliable way to drive a
+// store rejection.
 func TestSettingsValidationErrorSurfaced(t *testing.T) {
 	s, repo := settingsTestRepo(t)
 	sv := newSettingsView(s, repo)
 	sv.openEditor(0)
 	mode := model.DispatchMode(sv.stages[0].slug)
 
-	tooLong := strings.Repeat("x", (1<<20)+1)
+	tooLong := strings.Repeat("x", (10<<20)+1)
 	sv.ta.SetValue(tooLong)
 	sv.saveBody()
 
