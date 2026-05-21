@@ -794,11 +794,13 @@ An agent picks dispatches up two ways:
   list` shows a `CHANNEL` column (`live` / `-`) and an `MCP` column with
   the binary version the agent's channel reports (with a `!stale` flag
   if it doesn't match the binary running the list command).
-  The channel exposes three MCP tools: `reply` (ack a dispatch),
-  `register` (complete the session's registration), and
+  The channel exposes four MCP tools: `reply` (ack a dispatch),
+  `register` (complete the session's registration),
   `ask_user_question` (BACI-53 — surface a multi-choice clarification
   question to the user through bacio's UI; the call blocks until the
-  user answers or dismisses). The SessionStart
+  user answers or dismisses), and `attach_transcript` (BACI-85 —
+  attach a completed subagent's transcript to an issue; see
+  "Attaching a subagent transcript" below). The SessionStart
   hook now writes only a minimal stub — `bacio agent list` filters those
   out by default (use `--all` to see them); they're invisible until
   `register` enriches the row. On startup the channel itself queues a
@@ -939,6 +941,47 @@ All auth-gated; `X-Actor` lands in `answered_by`; `?dry_run=1` /
 channel flips orphaned rows to `abandoned` at startup (a previous
 channel process owned the parked reply — the agent restarted with
 the channel, so no recovery is possible).
+
+### Attaching a subagent transcript (BACI-85)
+
+`attach_transcript` is the fourth bacio channel MCP tool. It exists
+for traceability: once a dispatched per-mode subagent finishes, the
+supervisor attaches that subagent's full transcript to the issue so a
+later reviewer can open the ticket and read exactly what the worker
+did.
+
+**The flow.** A dispatch arrives; the supervisor spawns a per-mode
+subagent via `Task(subagent_type="bacio-<mode>-worker", ...)`. The
+`Task` result carries the subagent's one-line summary **and an
+`agentId`** (e.g. `a8d9f1ea8797ea776`). After `Task` returns, the
+supervisor calls `mcp__bacio__attach_transcript` with the issue key
+and that `agentId`, then `mcp__bacio__reply` to ack the dispatch.
+
+**Inputs:**
+
+- `issue_key` — canonical `PREFIX-N`, required.
+- `agent_id` — the `agentId` from the `Task` result, required. Both
+  bare (`a8d9f1...`) and `agent-`-prefixed forms are accepted.
+- `note` — optional free-text (e.g. the subagent's one-line summary),
+  appended to the digest header.
+
+**What it does.** bacio locates the subagent's transcript under
+`~/.claude/projects/<project-slug>/<parent-session>/subagents/agent-<id>.jsonl`,
+renders a readable **markdown digest** of it (user/assistant turns,
+tool calls, tool results — tool I/O truncated, the whole digest capped
+at 256 KB so it always fits the doc-body limit), and links it to the
+issue as a `project_complete` document named
+`bacio-transcript-<ISSUE-KEY>-agent-<id>.md`. The absolute path to the
+raw `.jsonl` is recorded in the digest header for anyone who wants the
+unrendered transcript. The digest doc shows up in `bacio issue show` /
+`bacio issue brief` and the UIs. Re-calling for the same (issue, agent)
+pair just refreshes the digest — it's idempotent.
+
+The tool errors clearly (an MCP tool error, not a dropped connection)
+when the issue or transcript cannot be found — e.g. an older Claude
+Code harness that doesn't persist per-subagent transcripts. Like the
+other channel tools, it has no REST/CLI equivalent — it is
+channel-only.
 
 ### Dispatch prompt templates
 

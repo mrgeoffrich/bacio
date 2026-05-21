@@ -34,6 +34,16 @@ var oldDispatchPreambleBACI52 string
 //go:embed migrationdata/old_dispatch_preamble_baci76.txt
 var oldDispatchPreambleBACI76Typo string
 
+// oldDispatchPreambleBACI80 is the verbatim _dispatch_preamble body
+// bacio shipped between BACI-80 and BACI-85 — the BACI-76 wrapper with
+// the `install-agents` plural typo corrected, but before BACI-85 added
+// the `mcp__bacio__attach_transcript` step. Embedded frozen so the
+// BACI-85 refresh migration can byte-compare a stored preamble against
+// it and replace it in place when the user never customised the row.
+//
+//go:embed migrationdata/old_dispatch_preamble_baci80.txt
+var oldDispatchPreambleBACI80 string
+
 // refreshDispatchPreamble is the BACI-76 one-time migration of the
 // stored _dispatch_preamble body. Before BACI-76 the preamble told the
 // supervisor to spawn `general-purpose` and paste the full brief; after
@@ -92,6 +102,21 @@ func refreshDispatchPreamble(db *sql.DB) error {
 			return err
 		}
 		slog.Info("bacio: refreshed the _dispatch_preamble body to the BACI-80 default (`bacio install-agents` typo fixed)")
+		return nil
+	}
+	// BACI-85: the BACI-80 default did not yet tell the supervisor to
+	// call `mcp__bacio__attach_transcript` after Task returns. If the
+	// stored body matches that frozen default, the user never
+	// customised it — replace it with the BACI-85 default in place.
+	oldBACI80Default := strings.TrimRight(oldDispatchPreambleBACI80, "\r\n")
+	if stored == oldBACI80Default {
+		if _, err := db.Exec(
+			`UPDATE prompt_templates SET body = ?, updated_at = CURRENT_TIMESTAMP WHERE slug = ?`,
+			newDefault, slug,
+		); err != nil {
+			return err
+		}
+		slog.Info("bacio: refreshed the _dispatch_preamble body to the BACI-85 default (attach_transcript step added)")
 		return nil
 	}
 	// Customised body — leave it, but warn: it may still say

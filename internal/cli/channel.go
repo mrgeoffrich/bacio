@@ -159,6 +159,7 @@ to stderr.`,
 				c:          c,
 				repo:       repo,
 				repoRoot:   repoRoot,
+				projectDir: projectDir,
 				host:       host,
 				claudePID:  int64(claudePID),
 				channelPID: int64(os.Getpid()),
@@ -198,6 +199,7 @@ type channelSource struct {
 	c          client.Client
 	repo       *model.Repo // stable for the channel's lifetime
 	repoRoot   string      // repo root — agents.json still lives here (read-only here; register writes it)
+	projectDir string      // resolved CLAUDE_PROJECT_DIR — the first path segment under ~/.claude/projects/ (used by attach_transcript)
 	host       string
 	claudePID  int64
 	channelPID int64
