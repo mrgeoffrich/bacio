@@ -1,0 +1,4 @@
+This is a dummy file created by the bacio implement-worker.
+Purpose: verify the worker does its file edits and git operations
+inside its own isolated worktree, not in the user's main checkout.
+Test run for BACI-84.
