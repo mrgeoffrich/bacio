@@ -58,6 +58,8 @@ Run a planning pass on `<TICKET>`: produce a thorough implementation plan — do
 
 If the plan is large enough that you write it to its own document instead of a comment, link that document to the issue **only** — `bacio doc link <file> <TICKET>`. Never link a plan to its feature: a feature link fans the document out onto every sibling issue's brief, so a plan for one ticket would surface as if it belonged to every other ticket in the feature.
 
+**Reference repo files relative to `<project_root>`.** When the plan names a file in the repository, write it as a path relative to the worktree git toplevel (run `git rev-parse --show-toplevel` to find it) — e.g. `internal/tui/markdown.go`, never an absolute path like `/Users/.../bacio/internal/tui/markdown.go` and never a worktree-specific path like `/Users/.../bacio-some-worktree/internal/tui/markdown.go`. Absolute and worktree-specific paths are brittle: a plan written in one worktree breaks when read or executed from another, and machine-specific home-directory paths leak into a doc that may be synced or read elsewhere.
+
 If you have to stop for user input, the issue is automatically moved to **needs action**; once the user answers, put it back to **in progress** and continue.
 
 ## Close out
