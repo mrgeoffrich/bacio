@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/mrgeoffrich/bacio/internal/channel"
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
@@ -18,8 +17,9 @@ import (
 
 // AttachTranscript implements channel.Source. Given a completed
 // subagent's agentID and an issue key, it locates the subagent's
-// transcript under ~/.claude/projects/, renders a markdown digest, and
-// links it to the issue as a project_complete document.
+// transcript under ~/.claude/projects/, stores the raw .jsonl bytes
+// verbatim (capped at channel.TranscriptCap), and links it to the
+// issue as a project_complete document.
 //
 // Transcript location contract (Claude Code 2.1.x): every Task-spawned
 // subagent's conversation is persisted at
@@ -51,43 +51,36 @@ func (s *channelSource) AttachTranscript(ctx context.Context, issueKey, agentID,
 		return "", fmt.Errorf("read transcript %s: %w", tr.path, err)
 	}
 
-	meta := channel.TranscriptMeta{
-		AgentID:         agentID,
-		AgentType:       tr.agentType,
-		Description:     tr.description,
-		ParentSessionID: tr.parentSessionID,
-		SourcePath:      tr.path,
-		SizeBytes:       int64(len(raw)),
-		Note:            note,
-		GeneratedAt:     time.Now().UTC().Format(time.RFC3339),
-	}
-	digest := channel.RenderTranscriptDigest(raw, meta)
+	body := channel.CapTranscript(raw, tr.path)
 
-	filename := fmt.Sprintf("bacio-transcript-%s-agent-%s.md", canonicalKey, agentID)
+	filename := fmt.Sprintf("bacio-transcript-%s-agent-%s.jsonl", canonicalKey, agentID)
 	if _, err := s.c.UpsertDocument(ctx, s.repo, client.DocCreateInput{
 		Filename:   filename,
 		Type:       model.DocTypeProjectComplete,
-		Body:       digest,
+		Body:       string(body),
 		SourcePath: tr.path,
 	}, false); err != nil {
-		return "", fmt.Errorf("store transcript digest as document %s: %w", filename, err)
+		return "", fmt.Errorf("store raw transcript as document %s: %w", filename, err)
 	}
 
 	linkDesc := "subagent transcript"
 	if tr.agentType != "" {
 		linkDesc = tr.agentType + " subagent transcript"
 	}
-	linkDesc += fmt.Sprintf(" (agent-%s)", agentID)
+	linkDesc += fmt.Sprintf(" (agent-%s) — raw .jsonl", agentID)
+	if note = strings.TrimSpace(note); note != "" {
+		linkDesc += " — " + note
+	}
 	if _, err := s.c.LinkDocument(ctx, s.repo, inputs.DocLinkInput{
 		Filename:    filename,
 		IssueKey:    canonicalKey,
 		Description: linkDesc,
 	}, false); err != nil {
-		return "", fmt.Errorf("link transcript digest to %s: %w", canonicalKey, err)
+		return "", fmt.Errorf("link raw transcript to %s: %w", canonicalKey, err)
 	}
 
-	return fmt.Sprintf("attached transcript agent-%s to %s as doc %s (%d bytes raw → %d byte digest)",
-		agentID, canonicalKey, filename, len(raw), len(digest)), nil
+	return fmt.Sprintf("attached transcript agent-%s to %s as doc %s (%d bytes raw, stored %d bytes)",
+		agentID, canonicalKey, filename, len(raw), len(body)), nil
 }
 
 // locatedTranscript is the result of resolving a subagent transcript

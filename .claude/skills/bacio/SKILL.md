@@ -963,19 +963,21 @@ and that `agentId`, then `mcp__bacio__reply` to ack the dispatch.
 - `agent_id` — the `agentId` from the `Task` result, required. Both
   bare (`a8d9f1...`) and `agent-`-prefixed forms are accepted.
 - `note` — optional free-text (e.g. the subagent's one-line summary),
-  appended to the digest header.
+  recorded on the document's link description.
 
 **What it does.** bacio locates the subagent's transcript under
 `~/.claude/projects/<project-slug>/<parent-session>/subagents/agent-<id>.jsonl`,
-renders a readable **markdown digest** of it (user/assistant turns,
-tool calls, tool results — tool I/O truncated, the whole digest capped
-at 256 KB so it always fits the doc-body limit), and links it to the
-issue as a `project_complete` document named
-`bacio-transcript-<ISSUE-KEY>-agent-<id>.md`. The absolute path to the
-raw `.jsonl` is recorded in the digest header for anyone who wants the
-unrendered transcript. The digest doc shows up in `bacio issue show` /
-`bacio issue brief` and the UIs. Re-calling for the same (issue, agent)
-pair just refreshes the digest — it's idempotent.
+stores the **raw `.jsonl` bytes verbatim** (capped at ~2.5 MB — an
+over-cap transcript is truncated with a footer naming the omitted byte
+count and the source path), and links it to the issue as a
+`project_complete` document named
+`bacio-transcript-<ISSUE-KEY>-agent-<id>.jsonl`. The doc's
+`source_path` records the absolute path to the raw `.jsonl`. The doc
+shows up in `bacio issue show` / `bacio issue brief` and the UIs.
+Re-calling for the same (issue, agent) pair just refreshes the
+attachment — it's idempotent. The raw `.jsonl` displays unformatted in
+the UIs (they render `project_complete` docs through the markdown
+reader); a proper transcript viewer is a deferred follow-up.
 
 The tool errors clearly (an MCP tool error, not a dropped connection)
 when the issue or transcript cannot be found — e.g. an older Claude

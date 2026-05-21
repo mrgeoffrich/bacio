@@ -498,22 +498,27 @@ with a sibling `agent-<agentId>.meta.json` carrying `agentType` /
 globs every session dir under the project slug for the matching
 `agent-<id>.jsonl`.
 
-**Storage decision — a rendered digest, not the raw file.** A raw
-`.jsonl` transcript is line-delimited JSON with embedded tool I/O
-(median ~266 KB, max observed 1.74 MB) — a poor artefact to read inside
-bacio, and the largest ones exceed the 1 MiB doc-body cap. So
-`attach_transcript` renders a **markdown digest** (`internal/channel/transcript.go`)
-— user/assistant turns verbatim, tool calls/results truncated, the
-whole digest capped at 256 KB so it always fits — and stores it as a
-`project_complete` document named
-`bacio-transcript-<ISSUE-KEY>-agent-<id>.md`, linked to the issue. The
-absolute path to the raw `.jsonl` is recorded in the digest header and
-on the doc's `source_path`, so a reviewer who wants the unrendered
-transcript can still open it. `UpsertDocument` makes re-attaching the
-same (issue, agent) pair idempotent. A real binary/large-file
-attachment store for issues is a possible follow-up — deliberately
-deferred so BACI-85 stayed a self-contained channel change with no
-store-schema work.
+**Storage decision — the raw `.jsonl` verbatim (BACI-90).**
+`attach_transcript` stores the raw subagent transcript bytes
+verbatim, capped at ~2.5 MB (`channel.TranscriptCap`,
+`internal/channel/transcript.go`). An over-cap transcript is
+truncated with a one-line footer naming the omitted byte count and
+the source path; an under-cap transcript is stored byte-identical.
+The result is a `project_complete` document named
+`bacio-transcript-<ISSUE-KEY>-agent-<id>.jsonl` (the `.jsonl`
+extension flags it as a raw transcript, not rendered markdown),
+linked to the issue. The doc's `source_path` records the absolute
+path to the raw `.jsonl`, and the supervisor's optional `note` lands
+on the link description. `UpsertDocument` makes re-attaching the same
+(issue, agent) pair idempotent. The store's generic doc-body cap was
+raised to 10 MiB (`maxBodyBytes`, `internal/store/validate.go`) so a
+2.5 MB transcript is accepted rather than rejected. The UIs render
+`project_complete` docs through the markdown reader, so the raw
+`.jsonl` displays as an unformatted blob — a proper transcript viewer
+is a deliberate deferred follow-up. (BACI-85 originally rendered a
+markdown digest capped at 256 KB; BACI-90 replaced that with the raw
+file because the digest lossily dropped tool I/O a reviewer often
+needs.)
 
 The tool errors clearly (an MCP tool error) when the issue or
 transcript cannot be found — e.g. an older harness that does not

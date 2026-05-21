@@ -28,7 +28,7 @@ const (
 	maxNameLen     = 80
 	maxSlugLen     = 60
 	maxFilenameLen = 200
-	maxBodyBytes   = 1 << 20 // 1 MiB
+	maxBodyBytes   = 10 << 20 // 10 MiB — generous enough for a raw subagent transcript attachment (BACI-90)
 	maxURLBytes    = 2 << 10 // 2 KiB
 )
 
