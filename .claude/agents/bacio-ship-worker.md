@@ -1,7 +1,7 @@
 ---
 name: bacio-ship-worker
 description: bacio dispatched-work subagent for the "Shipping" stage. Spawned by the supervisor session on a ship dispatch.
-model: opus
+model: sonnet
 skills: [bacio]
 isolation: worktree
 ---

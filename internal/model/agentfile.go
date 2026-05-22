@@ -5,11 +5,38 @@ import (
 	"strings"
 )
 
-// AgentFileModel is the model pinned in every generated subagent file's
-// frontmatter. Uniform for v1 — per-mode right-sizing (Sonnet for ship
-// / fix_review, Opus for design / plan) is explicitly out of scope; the
-// field is present so the follow-up is a one-line edit per file.
+// AgentFileModel is the default model pinned in a generated subagent
+// file's frontmatter — used for every mode that does not have a
+// per-mode override in agentFileModelOverrides.
 const AgentFileModel = "opus"
+
+// agentFileModelOverrides records per-mode model right-sizing (BACI-118):
+// a dispatch template slug whose generated `.claude/agents/` file should
+// carry a `model:` other than AgentFileModel. The review and ship
+// workers run on Sonnet — their jobs (reviewing a diff, merging a PR)
+// don't need the heavier default. Every other mode (plan, design,
+// implement, fix_review) is absent here and inherits AgentFileModel.
+//
+// Keyed by built-in template slug; a user-created template slug has no
+// entry and falls through to the default. Mirrors the
+// builtinTemplateActionLabels shape so the per-mode override sits next
+// to its peers and a future mode is a one-line addition.
+var agentFileModelOverrides = map[string]string{
+	BuiltinTemplateReview: "sonnet",
+	BuiltinTemplateShip:   "sonnet",
+}
+
+// AgentFileModelForSlug returns the model a generated subagent file
+// should pin for a template slug — the per-mode override from
+// agentFileModelOverrides when one exists, else the default
+// AgentFileModel. RenderAgentFile uses this to set the frontmatter
+// `model:` line.
+func AgentFileModelForSlug(slug string) string {
+	if m, ok := agentFileModelOverrides[slug]; ok {
+		return m
+	}
+	return AgentFileModel
+}
 
 // AgentFileSkills lists the skills preloaded into every generated
 // subagent via the frontmatter `skills:` field (BACI-97). Claude Code
@@ -132,7 +159,8 @@ The task tools (` + "`TaskCreate`" + ` / ` + "`TaskUpdate`" + ` / ` + "`TaskList
 // file (`.claude/agents/<SubagentTypeForTemplate(slug)>.md`) for a
 // dispatch template (BACI-76). The frontmatter carries the agent name
 // (== the file basename, == the subagent_type the supervisor spawns), a
-// generated description, the model, the preloaded `skills:` list
+// generated description, the model (per-mode via AgentFileModelForSlug —
+// BACI-118), the preloaded `skills:` list
 // (BACI-97 — Claude Code injects each named skill's full content at
 // startup), and the worktree-isolation mode; the body is the template
 // body verbatim — that body is the subagent's durable system prompt.
@@ -179,7 +207,7 @@ func RenderAgentFile(slug, name, body string) (string, error) {
 	b.WriteString("---\n")
 	fmt.Fprintf(&b, "name: %s\n", agentName)
 	fmt.Fprintf(&b, "description: bacio dispatched-work subagent for the %q stage. Spawned by the supervisor session on a %s dispatch.\n", label, slug)
-	fmt.Fprintf(&b, "model: %s\n", AgentFileModel)
+	fmt.Fprintf(&b, "model: %s\n", AgentFileModelForSlug(slug))
 	if len(AgentFileSkills) > 0 {
 		fmt.Fprintf(&b, "skills: [%s]\n", strings.Join(AgentFileSkills, ", "))
 	}

@@ -1,7 +1,7 @@
 ---
 name: bacio-review-worker
 description: bacio dispatched-work subagent for the "Reviewing" stage. Spawned by the supervisor session on a review dispatch.
-model: opus
+model: sonnet
 skills: [bacio]
 isolation: worktree
 ---
