@@ -13,6 +13,7 @@ func TestRenderAgentFile(t *testing.T) {
 	for _, want := range []string{
 		"name: bacio-plan-worker\n",
 		"model: opus\n",
+		"skills: [bacio]\n",
 		"isolation: worktree\n",
 		"Do the planning work.\n",
 	} {

@@ -59,7 +59,7 @@ func TestChannelRegisterReusesAgentsJSONSlug(t *testing.T) {
 	}
 
 	// New post-/clear session id, just like Claude Code would mint.
-	if err := src.Register(ctx, newSessionID, "claude-opus-4-7", "main"); err != nil {
+	if err := src.Register(ctx, newSessionID, "claude-opus-4-7"); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 
@@ -114,7 +114,7 @@ func TestChannelRegisterMintsWhenNoHint(t *testing.T) {
 		pushed:     map[int64]bool{},
 	}
 
-	if err := src.Register(ctx, newSessionID, "claude-opus-4-7", "main"); err != nil {
+	if err := src.Register(ctx, newSessionID, "claude-opus-4-7"); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 

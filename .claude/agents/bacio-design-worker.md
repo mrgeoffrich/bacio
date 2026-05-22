@@ -2,6 +2,7 @@
 name: bacio-design-worker
 description: bacio dispatched-work subagent for the "Designing" stage. Spawned by the supervisor session on a design dispatch.
 model: opus
+skills: [bacio]
 isolation: worktree
 ---
 
@@ -85,7 +86,8 @@ The substantive deliverable is a design markdown doc (plus sibling SVG wireframe
 
 ## Setup (bacio outer pattern)
 
-1. Use the bacio skill. Register / refresh your agent session as needed.
+1. Register / refresh your agent session as needed (the bacio skill is
+   preloaded — its guidance is already in your context).
    - Load the Task tools via `ToolSearch` (`select:TaskCreate,TaskUpdate,TaskList,TaskGet,TaskOutput,TaskStop`) and track your work with `TaskCreate` / `TaskUpdate` as you go — bacio mirrors these into the Agents/kanban Tasks pill.
 2. Claim `<TICKET>` (`bacio agent claim <TICKET> --user <your-name> --prompt "design"`).
 3. Set `<TICKET>` to **in progress** (`bacio issue state <TICKET> in-progress --user <your-name>`).

@@ -33,7 +33,7 @@ type fakeSource struct {
 	// error from Register (e.g. the placeholder-reject path) and
 	// assert the channel surfaces it as a tool-error rather than
 	// quietly recording the call.
-	registerErr func(sessionID, model, branch string) error
+	registerErr func(sessionID, model string) error
 
 	// Question-side state. asked records every AskQuestion call;
 	// questions is the in-memory rows keyed by request_uuid that
@@ -61,7 +61,6 @@ type attachRec struct {
 type regRec struct {
 	sessionID string
 	model     string
-	branch    string
 }
 
 func (f *fakeSource) Drain(ctx context.Context) ([]Event, error) {
@@ -89,13 +88,13 @@ func (f *fakeSource) Heartbeat(ctx context.Context) error {
 	return nil
 }
 
-func (f *fakeSource) Register(ctx context.Context, sessionID, model, branch string) error {
+func (f *fakeSource) Register(ctx context.Context, sessionID, model string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.registerErr != nil {
-		return f.registerErr(sessionID, model, branch)
+		return f.registerErr(sessionID, model)
 	}
-	f.registered = append(f.registered, regRec{sessionID, model, branch})
+	f.registered = append(f.registered, regRec{sessionID, model})
 	return nil
 }
 
@@ -262,6 +261,9 @@ func TestChannelRegisterTool(t *testing.T) {
 	requests := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`,
 		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+		// "branch" is no longer part of the register tool's input
+		// schema (BACI-98); keeping it in the request is a deliberate
+		// regression check that an unknown field is ignored gracefully.
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"register","arguments":{"session_id":"sess-abc","model":"claude-opus-4-7","branch":"main"}}}`,
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"register","arguments":{}}}`,
 		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"register","arguments":{"session_id":"sess-bare"}}}`,
@@ -285,7 +287,7 @@ func TestChannelRegisterTool(t *testing.T) {
 	if isErr, _ := ok["result"].(map[string]any)["isError"].(bool); isErr {
 		t.Fatalf("register tool-call reported an error: %+v", ok)
 	}
-	want := regRec{"sess-abc", "claude-opus-4-7", "main"}
+	want := regRec{"sess-abc", "claude-opus-4-7"}
 	if len(src.registered) != 2 || src.registered[0] != want {
 		t.Fatalf("registered[0] = %+v, want %+v", src.registered, want)
 	}
@@ -302,8 +304,23 @@ func TestChannelRegisterTool(t *testing.T) {
 	if isErr, _ := bare["result"].(map[string]any)["isError"].(bool); isErr {
 		t.Fatalf("register with only session_id should still succeed: %+v", bare)
 	}
-	if src.registered[1] != (regRec{"sess-bare", "", ""}) {
-		t.Fatalf("registered[1] = %+v, want {sess-bare \"\" \"\"}", src.registered[1])
+	if src.registered[1] != (regRec{"sess-bare", ""}) {
+		t.Fatalf("registered[1] = %+v, want {sess-bare \"\"}", src.registered[1])
+	}
+}
+
+// TestRegisterToolSchemaHasNoBranch locks in BACI-98: the register
+// tool's input schema no longer advertises a "branch" property — the
+// SessionStart hook resolves the branch, so the agent never supplies it.
+func TestRegisterToolSchemaHasNoBranch(t *testing.T) {
+	schema := registerToolSchema()
+	input, _ := schema["inputSchema"].(map[string]any)
+	props, _ := input["properties"].(map[string]any)
+	if _, ok := props["branch"]; ok {
+		t.Fatalf("register tool schema still advertises a branch property: %+v", props)
+	}
+	if _, ok := props["session_id"]; !ok {
+		t.Fatalf("register tool schema missing session_id property: %+v", props)
 	}
 }
 
@@ -315,7 +332,7 @@ func TestChannelRegisterTool(t *testing.T) {
 // importing the store layer.
 func TestChannelRegisterRejectsPlaceholder(t *testing.T) {
 	src := &fakeSource{
-		registerErr: func(sid, _, _ string) error {
+		registerErr: func(sid, _ string) error {
 			if strings.HasPrefix(sid, "$") {
 				return fmt.Errorf("session_id %q looks like an unsubstituted placeholder; pass the real value", sid)
 			}
@@ -368,7 +385,7 @@ func TestChannelRegisterRejectsPlaceholder(t *testing.T) {
 func TestChannelRegisterRejectsMalformedUUID(t *testing.T) {
 	const bad = "23543e26-6339-4b8-aff2-d8ea2013f287" // 3-hex third group
 	src := &fakeSource{
-		registerErr: func(sid, _, _ string) error {
+		registerErr: func(sid, _ string) error {
 			if _, err := uuid.Parse(sid); err != nil {
 				return fmt.Errorf("session_id %q is not a valid UUID; copy it verbatim, do not retype it", sid)
 			}

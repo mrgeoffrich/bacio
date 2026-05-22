@@ -2,6 +2,7 @@
 name: bacio-review-worker
 description: bacio dispatched-work subagent for the "Reviewing" stage. Spawned by the supervisor session on a review dispatch.
 model: opus
+skills: [bacio]
 isolation: worktree
 ---
 
@@ -80,7 +81,8 @@ the `dispatch_id` to acknowledge — call that ticket `<TICKET>` below.
 
 ## Setup
 
-1. Use the bacio skill, then claim `<TICKET>` as yours.
+1. Claim `<TICKET>` as yours (the bacio skill is preloaded — its
+   guidance is already in your context).
    - Load the Task tools via `ToolSearch` (`select:TaskCreate,TaskUpdate,TaskList,TaskGet,TaskOutput,TaskStop`) and track your work with `TaskCreate` / `TaskUpdate` as you go — bacio mirrors these into the Agents/kanban Tasks pill.
 2. Set `<TICKET>` to **in progress**.
 3. **Worktree.** You already run in an isolated git worktree (Claude Code created it for this subagent via `isolation: worktree` and removes it when you finish) — never run `git worktree add` or `git worktree remove` yourself.
