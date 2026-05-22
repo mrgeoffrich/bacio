@@ -36,6 +36,36 @@ func TestRenderAgentFile(t *testing.T) {
 	}
 }
 
+// TestRenderAgentFileModelPerMode is the BACI-118 guard: the review and
+// ship workers render with `model: sonnet`, every other built-in mode
+// keeps the default `model: opus`.
+func TestRenderAgentFileModelPerMode(t *testing.T) {
+	cases := map[string]string{
+		BuiltinTemplatePlan:      "opus",
+		BuiltinTemplateDesign:    "opus",
+		BuiltinTemplateImplement: "opus",
+		BuiltinTemplateReview:    "sonnet",
+		BuiltinTemplateShip:      "sonnet",
+		BuiltinTemplateFixReview: "opus",
+	}
+	for slug, wantModel := range cases {
+		body := DefaultPromptBodyForBuiltinSlug(slug)
+		out, err := RenderAgentFile(slug, BuiltinTemplateLabel(slug), body)
+		if err != nil {
+			t.Fatalf("RenderAgentFile(%q): %v", slug, err)
+		}
+		wantLine := "model: " + wantModel + "\n"
+		if !strings.Contains(out, wantLine) {
+			t.Errorf("built-in %q agent file missing %q\n--- got ---\n%s", slug, wantLine, out)
+		}
+	}
+	// A user-created (non-built-in) slug has no override and inherits the
+	// default.
+	if got := AgentFileModelForSlug("spike"); got != AgentFileModel {
+		t.Errorf("AgentFileModelForSlug(custom slug) = %q, want %q", got, AgentFileModel)
+	}
+}
+
 // TestRenderAgentFileBuiltinsHaveNoPlaceholder is the §8 guard: every
 // built-in dispatchable brief must render into an agent file with no
 // leftover {{...}} placeholder. A leftover token is a packaging bug —
