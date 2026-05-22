@@ -48,6 +48,12 @@ type PRDetachPreview struct {
 	WouldRemove int    `json:"would_remove"`
 }
 
+type CommentDeletePreview struct {
+	IssueKey    string `json:"issue_key"`
+	CommentUUID string `json:"comment_uuid"`
+	WouldRemove int    `json:"would_remove"`
+}
+
 // FeatureView mirrors internal/cli/output.go:featureView so JSON consumers
 // see the same shape from `bacio feature show -o json` and the API.
 type FeatureView struct {

@@ -209,6 +209,49 @@ func TestImport_DeletionPropagated(t *testing.T) {
 	}
 }
 
+// TestImport_CommentDeletionPropagated: a user-initiated hard delete of
+// a comment (the path behind `bacio comment rm` and the API/UI delete)
+// is absence-driven — the deleted comment's file disappears from the
+// sync tree, and a second importer drops the row via the same
+// propagateDeletes pass that handles issue/feature/doc deletes.
+func TestImport_CommentDeletionPropagated(t *testing.T) {
+	a, _ := seedExportFixture(t)
+	dirA := t.TempDir()
+	if _, err := (&Engine{Store: a}).Export(context.Background(), dirA); err != nil {
+		t.Fatalf("export A: %v", err)
+	}
+	b, _ := store.Open(":memory:")
+	t.Cleanup(func() { b.Close() })
+	if _, err := (&Engine{Store: b}).Import(context.Background(), dirA); err != nil {
+		t.Fatalf("seed B: %v", err)
+	}
+	// B sees the seeded comment (the fixture's one comment on MINI-1).
+	repoB, _ := b.GetRepoByPrefix("MINI")
+	iss1B, err := b.GetIssueByKey(repoB.Prefix, 1)
+	if err != nil {
+		t.Fatalf("get MINI-1 on B: %v", err)
+	}
+	if cs, _ := b.ListComments(iss1B.ID); len(cs) != 1 {
+		t.Fatalf("B should have 1 comment after seed, got %d", len(cs))
+	}
+	// A hard delete drops the comment's files from the sync tree.
+	commentDir := filepath.Join(dirA, "repos", "MINI", "issues", "MINI-1", "comments")
+	if err := os.RemoveAll(commentDir); err != nil {
+		t.Fatalf("rm comment dir: %v", err)
+	}
+	// Re-import on B drops the comment via propagateDeletes.
+	res, err := (&Engine{Store: b}).Import(context.Background(), dirA)
+	if err != nil {
+		t.Fatalf("re-import B: %v", err)
+	}
+	if len(res.Deleted) != 1 || res.Deleted[0].Kind != store.SyncKindComment {
+		t.Fatalf("expected 1 comment deletion, got %+v", res.Deleted)
+	}
+	if cs, _ := b.ListComments(iss1B.ID); len(cs) != 0 {
+		t.Fatalf("B still has the deleted comment: %d", len(cs))
+	}
+}
+
 // TestImport_DryRunRollsBack: a dry-run import reports what would
 // happen but leaves the DB unchanged.
 func TestImport_DryRunRollsBack(t *testing.T) {

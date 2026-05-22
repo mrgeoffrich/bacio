@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
@@ -80,4 +81,55 @@ func (d deps) handleCommentAdd(w http.ResponseWriter, r *http.Request) {
 		Details:     "by " + in.Author,
 	})
 	writeJSON(w, http.StatusCreated, c)
+}
+
+func (d deps) handleCommentDelete(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	iss, ok := resolveIssueOnRepo(w, r, d.store, repo)
+	if !ok {
+		return
+	}
+	uuid := r.PathValue("uuid")
+	if uuid == "" {
+		writeError(w, http.StatusBadRequest, "invalid_input", "comment uuid is required", nil)
+		return
+	}
+	cm, err := d.store.GetCommentByUUID(uuid)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if cm.IssueID != iss.ID {
+		writeError(w, http.StatusNotFound, "not_found",
+			fmt.Sprintf("comment %q does not belong to %s", uuid, iss.Key), nil)
+		return
+	}
+	if isDryRun(r) {
+		writeDryRun(w, http.StatusOK, &CommentDeletePreview{
+			IssueKey:    iss.Key,
+			CommentUUID: cm.UUID,
+			WouldRemove: 1,
+		})
+		return
+	}
+	if err := d.store.DeleteCommentByUUID(cm.UUID); err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	recordOp(d.store, d.logger, model.HistoryEntry{
+		RepoID:      &iss.RepoID,
+		RepoPrefix:  repo.Prefix,
+		Actor:       ActorFromContext(r.Context()),
+		Op:          "comment.delete",
+		Kind:        "issue",
+		TargetID:    &iss.ID,
+		TargetLabel: iss.Key,
+		Details:     "by " + cm.Author,
+	})
+	w.WriteHeader(http.StatusNoContent)
 }

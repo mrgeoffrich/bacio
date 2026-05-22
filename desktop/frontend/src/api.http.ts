@@ -88,6 +88,7 @@ export interface BoardCard {
 }
 
 export interface CommentDTO {
+  uuid: string;
   author: string;
   body: string;
   createdAt: string;
@@ -601,7 +602,7 @@ export async function addRepository(payload?: AddRepositoryPayload): Promise<Boa
   return boardWithSync(repo.prefix, repo.name, 0, undefined);
 }
 
-interface ApiCommentEnvelope { author: string; body: string; created_at: string; }
+interface ApiCommentEnvelope { uuid: string; author: string; body: string; created_at: string; }
 interface ApiPR { url: string; }
 interface ApiDocLink {
   document_filename: string;
@@ -645,7 +646,7 @@ export async function getIssue(repoPrefix: string, key: string): Promise<IssueDe
     assignees: assigneeList(assignee),
     claude: assignee === 'claude',
     comments: (view.comments ?? []).map(c => ({
-      author: c.author, body: c.body, createdAt: c.created_at,
+      uuid: c.uuid, author: c.author, body: c.body, createdAt: c.created_at,
     })),
     pullRequests: (view.pull_requests ?? []).map(p => ({ url: p.url })),
     documents: (view.documents ?? []).map(d => ({
@@ -745,7 +746,7 @@ function reshapeApiBrief(view: ApiIssueBrief): IssueBriefDTO {
       content: d.content ?? '',
     })),
     comments: (view.comments ?? []).map(c => ({
-      author: c.author, body: c.body, createdAt: c.created_at,
+      uuid: c.uuid, author: c.author, body: c.body, createdAt: c.created_at,
     })),
     claimants: (view.claimants ?? []).map(c => ({
       sessionId: c.session_id,
@@ -997,6 +998,23 @@ export async function addComment(
     method: 'POST',
     body: { author: effectiveAuthor, body },
   });
+  return getIssue(repoPrefix, key);
+}
+
+export async function deleteComment(
+  repoPrefix: string,
+  key: string,
+  commentUUID: string,
+): Promise<IssueDetail> {
+  if (!repoPrefix || repoPrefix === 'all') {
+    const i = key.lastIndexOf('-');
+    if (i <= 0) throw new Error(`invalid issue key: ${key}`);
+    repoPrefix = key.slice(0, i);
+  }
+  await call<unknown>(
+    `/repos/${repoPrefix}/issues/${key}/comments/${commentUUID}`,
+    { method: 'DELETE' },
+  );
   return getIssue(repoPrefix, key);
 }
 

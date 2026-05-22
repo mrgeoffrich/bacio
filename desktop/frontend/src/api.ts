@@ -243,6 +243,20 @@ export async function addComment(
   }
 }
 
+// deleteComment removes a comment from an issue and returns the
+// refreshed issue-drawer payload. The comment is addressed by its uuid.
+export async function deleteComment(
+  repoPrefix: string,
+  key: string,
+  commentUUID: string,
+): Promise<IssueDetail> {
+  try {
+    return await BoardService.DeleteComment(repoPrefix, key, commentUUID);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
 export async function listFeatures(repoPrefix: string): Promise<FeatureSummary[]> {
   try {
     return await FeatureService.ListFeatures(repoPrefix);

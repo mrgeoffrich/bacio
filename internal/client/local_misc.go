@@ -55,6 +55,36 @@ func (c *localClient) AddComment(ctx context.Context, repo *model.Repo, in input
 	return cm, nil
 }
 
+func (c *localClient) DeleteComment(ctx context.Context, repo *model.Repo, in inputs.CommentRmInput, dryRun bool) (*CommentDeletePreview, int64, error) {
+	if in.IssueKey == "" || in.CommentUUID == "" {
+		return nil, 0, fmt.Errorf("issue_key and comment_uuid are required")
+	}
+	iss, err := c.GetIssueByKey(ctx, repo, in.IssueKey)
+	if err != nil {
+		return nil, 0, err
+	}
+	cm, err := c.store.GetCommentByUUID(in.CommentUUID)
+	if err != nil {
+		return nil, 0, err
+	}
+	if cm.IssueID != iss.ID {
+		return nil, 0, fmt.Errorf("comment %q does not belong to %s", in.CommentUUID, iss.Key)
+	}
+	if dryRun {
+		return &CommentDeletePreview{IssueKey: iss.Key, CommentUUID: cm.UUID, WouldRemove: 1}, 0, nil
+	}
+	if err := c.store.DeleteCommentByUUID(cm.UUID); err != nil {
+		return nil, 0, err
+	}
+	c.recordOp(model.HistoryEntry{
+		RepoID: &iss.RepoID, RepoPrefix: repo.Prefix,
+		Op: "comment.delete", Kind: "issue",
+		TargetID: &iss.ID, TargetLabel: iss.Key,
+		Details: "by " + cm.Author,
+	})
+	return nil, 1, nil
+}
+
 // ----- Relations -----
 
 func parseRelType(s string) (model.RelationType, error) {

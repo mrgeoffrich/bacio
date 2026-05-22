@@ -57,6 +57,7 @@ func newRouter(d deps) http.Handler {
 
 	mux.HandleFunc("GET /repos/{prefix}/issues/{key}/comments", d.handleCommentsList)
 	mux.HandleFunc("POST /repos/{prefix}/issues/{key}/comments", d.handleCommentAdd)
+	mux.HandleFunc("DELETE /repos/{prefix}/issues/{key}/comments/{uuid}", d.handleCommentDelete)
 
 	mux.HandleFunc("POST /repos/{prefix}/relations", d.handleRelationCreate)
 	mux.HandleFunc("DELETE /repos/{prefix}/relations", d.handleRelationDelete)

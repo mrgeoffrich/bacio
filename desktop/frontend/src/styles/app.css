@@ -607,6 +607,24 @@ body { margin: 0; }
   margin-top: 6px;
 }
 .mk-tl-dot.is-claude { background: var(--status-claude); }
+/* Quiet per-comment delete affordance — invisible until the row is
+   hovered, so the timeline still reads cleanly. */
+.mk-tl-delete {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--fg-2);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.1s ease, color 0.1s ease, background 0.1s ease;
+}
+.mk-tl-item:hover .mk-tl-delete,
+.mk-tl-delete:focus-visible { opacity: 1; }
+.mk-tl-delete:hover { color: var(--status-blocked, #d9534f); background: var(--status-blocked-bg, rgba(0,0,0,0.05)); }
 .mk-drawer-foot { padding: 14px 20px; border-top: 1px solid var(--border-1); display: flex; gap: 8px; background: var(--paper); }
 
 /* ---------- Markdown (rendered issue description) ---------- */

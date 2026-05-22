@@ -64,8 +64,10 @@ type BoardColumn struct {
 // imports.
 type BoardCard = boardcards.BoardCard
 
-// CommentDTO is one issue comment.
+// CommentDTO is one issue comment. UUID is the immutable identity the
+// React layer addresses a delete with.
 type CommentDTO struct {
+	UUID      string    `json:"uuid"`
 	Author    string    `json:"author"`
 	Body      string    `json:"body"`
 	CreatedAt time.Time `json:"createdAt"`
@@ -394,7 +396,7 @@ func (b *BoardService) GetIssue(repoPrefix, key string) (IssueDetail, error) {
 	}
 	comments := make([]CommentDTO, 0, len(view.Comments))
 	for _, c := range view.Comments {
-		comments = append(comments, CommentDTO{Author: c.Author, Body: c.Body, CreatedAt: c.CreatedAt})
+		comments = append(comments, CommentDTO{UUID: c.UUID, Author: c.Author, Body: c.Body, CreatedAt: c.CreatedAt})
 	}
 	prs := make([]PRDTO, 0, len(view.PullRequests))
 	for _, p := range view.PullRequests {
@@ -507,7 +509,7 @@ func (b *BoardService) GetIssueBrief(repoPrefix, key string) (IssueBriefDTO, err
 
 	comments := make([]CommentDTO, 0, len(brief.Comments))
 	for _, c := range brief.Comments {
-		comments = append(comments, CommentDTO{Author: c.Author, Body: c.Body, CreatedAt: c.CreatedAt})
+		comments = append(comments, CommentDTO{UUID: c.UUID, Author: c.Author, Body: c.Body, CreatedAt: c.CreatedAt})
 	}
 
 	warnings := brief.Warnings
@@ -606,6 +608,25 @@ func (b *BoardService) AddComment(repoPrefix, key, author, body string) (IssueDe
 		IssueKey: key,
 		Author:   author,
 		Body:     body,
+	}, false); err != nil {
+		return IssueDetail{}, err
+	}
+	return b.GetIssue(repoPrefix, key)
+}
+
+// DeleteComment removes a comment from an issue and returns the
+// refreshed issue-drawer payload. The comment is addressed by its
+// immutable uuid. repoPrefix may be empty or "all" — the prefix is then
+// derived from the canonical issue key.
+func (b *BoardService) DeleteComment(repoPrefix, key, commentUUID string) (IssueDetail, error) {
+	ctx := context.Background()
+	repo, err := b.resolveRepoForKey(ctx, repoPrefix, key)
+	if err != nil {
+		return IssueDetail{}, err
+	}
+	if _, _, err := b.client.DeleteComment(ctx, repo, inputs.CommentRmInput{
+		IssueKey:    key,
+		CommentUUID: commentUUID,
 	}, false); err != nil {
 		return IssueDetail{}, err
 	}

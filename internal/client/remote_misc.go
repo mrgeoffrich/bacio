@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -44,6 +45,31 @@ func (c *remoteClient) AddComment(ctx context.Context, repo *model.Repo, in inpu
 		return nil, err
 	}
 	return &out, nil
+}
+
+func (c *remoteClient) DeleteComment(ctx context.Context, repo *model.Repo, in inputs.CommentRmInput, dryRun bool) (*CommentDeletePreview, int64, error) {
+	if in.CommentUUID == "" {
+		return nil, 0, fmt.Errorf("comment_uuid is required")
+	}
+	canonical, err := c.ResolveIssueKey(ctx, repo, in.IssueKey)
+	if err != nil {
+		return nil, 0, err
+	}
+	prefix := strings.SplitN(canonical, "-", 2)[0]
+	path := "/repos/" + prefix + "/issues/" + canonical + "/comments/" + in.CommentUUID
+	if dryRun {
+		q := url.Values{}
+		q.Set("dry_run", "true")
+		var preview CommentDeletePreview
+		if err := c.do(ctx, http.MethodDelete, path, q, nil, &preview); err != nil {
+			return nil, 0, err
+		}
+		return &preview, 0, nil
+	}
+	if err := c.do(ctx, http.MethodDelete, path, nil, nil, nil); err != nil {
+		return nil, 0, err
+	}
+	return nil, 1, nil
 }
 
 // ----- Relations -----

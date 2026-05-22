@@ -112,6 +112,18 @@ export function CancelWaitingDispatch(repoPrefix: string, issueKey: string): $Ca
 }
 
 /**
+ * DeleteComment removes a comment from an issue and returns the
+ * refreshed issue-drawer payload. The comment is addressed by its
+ * immutable uuid. repoPrefix may be empty or "all" — the prefix is then
+ * derived from the canonical issue key.
+ */
+export function DeleteComment(repoPrefix: string, key: string, commentUUID: string): $CancellablePromise<$models.IssueDetail> {
+    return $Call.ByID(475927367, repoPrefix, key, commentUUID).then(($result: any) => {
+        return $$createType0($result);
+    });
+}
+
+/**
  * DispatchIssue queues a dispatch against an issue for a given job stage
  * (mode). The state-gate check and the free-agent auto-pick both live
  * on client.Client.AutoDispatchIssue (BACI-40), so the per-card button,

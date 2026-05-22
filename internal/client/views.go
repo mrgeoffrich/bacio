@@ -66,6 +66,12 @@ type PRDetachPreview struct {
 	WouldRemove int    `json:"would_remove"`
 }
 
+type CommentDeletePreview struct {
+	IssueKey    string `json:"issue_key"`
+	CommentUUID string `json:"comment_uuid"`
+	WouldRemove int    `json:"would_remove"`
+}
+
 type PlanEntry struct {
 	Key       string      `json:"key"`
 	Title     string      `json:"title"`
