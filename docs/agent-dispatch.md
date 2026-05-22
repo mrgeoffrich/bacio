@@ -631,6 +631,14 @@ The `dispatch_id` is **not** in the stub — the channel already emits it
 as the `<channel dispatch_id="...">` tag attribute, and the preamble
 tells the parent to read it from there and hand it to the worker.
 
+The worker's `Task` prompt is a **fixed verbatim stub**, not a
+supervisor-composed paragraph (BACI-103). The preamble instructs the
+parent to copy the stub's `Ticket:` and `Mode:` lines verbatim and
+append exactly one `Dispatch ID: <n>` line read from the `<channel>`
+tag — no rephrasing, no free-form prose. The only variable content
+reaching the worker is those three values; the per-mode agent file is
+the single source of truth for what to do.
+
 **Why this shape.** Before BACI-76 the whole per-mode brief (the
 `design` brief is ~10K tokens) was interpolated into every dispatch's
 `Task(...)` prompt. Because the brief was interpolated per-issue and

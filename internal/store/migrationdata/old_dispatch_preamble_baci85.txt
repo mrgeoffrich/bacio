@@ -14,20 +14,11 @@ Call:
 
     Task(
       subagent_type = <the "Subagent:" value from the stub below>,
-      prompt        = <the stub block below — the "Ticket:" and "Mode:"
-                       lines — copied VERBATIM, with exactly one line
-                       appended: "Dispatch ID: <n>" where <n> is the
-                       dispatch_id attribute of the <channel> tag.
-                       Do NOT rephrase, summarise, or add anything else.>,
+      prompt        = <a few lines giving the worker its job — the
+                       "Ticket:" value, the "Mode:" value, and the
+                       dispatch_id from the <channel> tag so the
+                       subagent can call mcp__bacio__reply when done>,
     )
-
-The worker's `Task` prompt is a fixed three-line stub — `Ticket:`,
-`Mode:`, `Dispatch ID:` — and nothing else. Do not write a sentence
-describing the job; the subagent's own system prompt (its agent file)
-is the single source of truth for what to do. Your only job here is to
-copy the `Ticket:` and `Mode:` stub lines verbatim and append the
-`Dispatch ID:` line. The `Subagent:` stub line is your input for the
-`subagent_type` argument — it is not part of the worker's prompt.
 
 Do NOT set `model` on the Task call — the subagent's agent file
 already pins it. Do NOT paste a brief — the subagent already has it.
