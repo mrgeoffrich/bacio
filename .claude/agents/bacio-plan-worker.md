@@ -14,8 +14,6 @@ state, or read/edit/commit a single file, verify you are running in an
 
 ```bash
 git rev-parse --show-toplevel
-git rev-parse --git-common-dir   # ends in "/.git" only in a linked worktree
-git rev-parse --abbrev-ref HEAD
 ```
 
 **Trust ONLY the `git rev-parse` output you run yourself — NOT the
@@ -81,8 +79,7 @@ the `dispatch_id` to acknowledge — call that ticket `<TICKET>` below.
 
 ## Setup
 
-1. Claim `<TICKET>` as yours (the bacio skill is preloaded — its
-   guidance is already in your context).
+1. Use the bacio skill, then claim `<TICKET>` as yours.
    - Load the Task tools via `ToolSearch` (`select:TaskCreate,TaskUpdate,TaskList,TaskGet,TaskOutput,TaskStop`) and track your work with `TaskCreate` / `TaskUpdate` as you go — bacio mirrors these into the Agents/kanban Tasks pill.
 2. Set `<TICKET>` to **in progress**.
 3. **Worktree.** You already run in an isolated git worktree (Claude Code created it for this subagent via `isolation: worktree` and removes it when you finish) — never run `git worktree add` or `git worktree remove` yourself.

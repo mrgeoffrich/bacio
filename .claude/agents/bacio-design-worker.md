@@ -14,8 +14,6 @@ state, or read/edit/commit a single file, verify you are running in an
 
 ```bash
 git rev-parse --show-toplevel
-git rev-parse --git-common-dir   # ends in "/.git" only in a linked worktree
-git rev-parse --abbrev-ref HEAD
 ```
 
 **Trust ONLY the `git rev-parse` output you run yourself — NOT the
@@ -86,8 +84,7 @@ The substantive deliverable is a design markdown doc (plus sibling SVG wireframe
 
 ## Setup (bacio outer pattern)
 
-1. Register / refresh your agent session as needed (the bacio skill is
-   preloaded — its guidance is already in your context).
+1. Use the bacio skill. Register / refresh your agent session as needed.
    - Load the Task tools via `ToolSearch` (`select:TaskCreate,TaskUpdate,TaskList,TaskGet,TaskOutput,TaskStop`) and track your work with `TaskCreate` / `TaskUpdate` as you go — bacio mirrors these into the Agents/kanban Tasks pill.
 2. Claim `<TICKET>` (`bacio agent claim <TICKET> --user <your-name> --prompt "design"`).
 3. Set `<TICKET>` to **in progress** (`bacio issue state <TICKET> in-progress --user <your-name>`).

@@ -59,8 +59,6 @@ state, or read/edit/commit a single file, verify you are running in an
 
 ` + "```bash" + `
 git rev-parse --show-toplevel
-git rev-parse --git-common-dir   # ends in "/.git" only in a linked worktree
-git rev-parse --abbrev-ref HEAD
 ` + "```" + `
 
 **Trust ONLY the ` + "`git rev-parse`" + ` output you run yourself — NOT the
