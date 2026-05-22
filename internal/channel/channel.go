@@ -405,13 +405,13 @@ func replyToolSchema() map[string]any {
 func registerToolSchema() map[string]any {
 	return map[string]any{
 		"name":        "register",
-		"description": "Complete the registration of your Claude Code session with bacio. The SessionStart hook only creates a minimal stub; this call enriches it and makes the session visible to the agent list. Call once on your first turn with the session_id the bacio channel pre-filled for you in the setup-dispatch payload (copy the JSON verbatim — do not paste the literal $CLAUDE_CODE_SESSION_ID placeholder; the validator will refuse it). Pass model if you know it; pass branch if you know it. Safe to call again — idempotent (first-registration timestamp wins).",
+		"description": "Complete the registration of your Claude Code session with bacio. The SessionStart hook only creates a minimal stub; this call enriches it and makes the session visible to the agent list. Call once on your first turn with the session_id the bacio channel pre-filled for you in the setup-dispatch payload (copy the JSON verbatim — do not paste the literal $CLAUDE_CODE_SESSION_ID placeholder; the validator will refuse it). The session_id must be a structurally valid UUID — a malformed id (e.g. a retyped UUID with a wrong-length group) is rejected, so copy it, do not retype it. A second register from the same `claude` process reconciles to one live session row. Pass model if you know it; pass branch if you know it. Safe to call again — idempotent (first-registration timestamp wins).",
 		"inputSchema": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"session_id": map[string]any{
 					"type":        "string",
-					"description": "Your Claude Code session id. The bacio channel pre-fills the real value into the setup-dispatch JSON — copy that value verbatim, do not paste the literal $CLAUDE_CODE_SESSION_ID placeholder.",
+					"description": "Your Claude Code session id — a UUID. The bacio channel pre-fills the real value into the setup-dispatch JSON — copy that value verbatim, do not retype it and do not paste the literal $CLAUDE_CODE_SESSION_ID placeholder. A non-UUID id is rejected.",
 				},
 				"model": map[string]any{
 					"type":        "string",

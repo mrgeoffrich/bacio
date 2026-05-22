@@ -245,9 +245,13 @@ func SessionWaiting(openClaims []*AgentClaim, needsActionKeys map[string]bool) (
 // EndReason values reported by `bacio agent end --reason`. Mirrors the
 // Claude Code SessionEnd.end_reason set, plus "stop" for explicit
 // shutdowns, "crash" for inferred ones (`agent list` flags stale
-// sessions an operator might `end --reason crash` after the fact), and
+// sessions an operator might `end --reason crash` after the fact),
 // "presumed_dead" for sessions the bacio idle-pinger reaped after they
-// failed to ack an idle-check ping within AgentPingNoAckTimeout (BACI-57).
+// failed to ack an idle-check ping within AgentPingNoAckTimeout (BACI-57),
+// and "superseded" for the extra live rows reconciled away when a
+// `claude` process registers a second session_id for the same
+// claude_pid (BACI-100 — one OS process should not accumulate N live
+// registry rows).
 type EndReason string
 
 const (
@@ -257,11 +261,12 @@ const (
 	EndReasonCrash        EndReason = "crash"
 	EndReasonOther        EndReason = "other"
 	EndReasonPresumedDead EndReason = "presumed_dead"
+	EndReasonSuperseded   EndReason = "superseded"
 )
 
 var allEndReasons = []EndReason{
 	EndReasonStop, EndReasonClear, EndReasonLogout, EndReasonCrash, EndReasonOther,
-	EndReasonPresumedDead,
+	EndReasonPresumedDead, EndReasonSuperseded,
 }
 
 func AllEndReasons() []EndReason { return append([]EndReason(nil), allEndReasons...) }

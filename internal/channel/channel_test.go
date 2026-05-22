@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/mrgeoffrich/bacio/internal/model"
 )
 
@@ -356,6 +357,56 @@ func TestChannelRegisterRejectsPlaceholder(t *testing.T) {
 	body, _ := content[0].(map[string]any)["text"].(string)
 	if !strings.Contains(body, "placeholder") {
 		t.Fatalf("response text does not mention placeholder: %q", body)
+	}
+}
+
+// TestChannelRegisterRejectsMalformedUUID locks in the BACI-100
+// contract: a register call whose session_id is not a structurally
+// valid UUID (the fat-fingered-retry bug) surfaces to the agent as an
+// MCP tool error, exactly like the placeholder reject. The fake source
+// mimics ValidateSessionUUID rejecting a wrong-length hex group.
+func TestChannelRegisterRejectsMalformedUUID(t *testing.T) {
+	const bad = "23543e26-6339-4b8-aff2-d8ea2013f287" // 3-hex third group
+	src := &fakeSource{
+		registerErr: func(sid, _, _ string) error {
+			if _, err := uuid.Parse(sid); err != nil {
+				return fmt.Errorf("session_id %q is not a valid UUID; copy it verbatim, do not retype it", sid)
+			}
+			return nil
+		},
+	}
+	requests := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`,
+		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"register","arguments":{"session_id":"` + bad + `"}}}`,
+	}, "\n") + "\n"
+
+	var out bytes.Buffer
+	srv := New(src, "bacio", "test", strings.NewReader(requests), &out, nil)
+	if err := srv.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	frames := decodeFrames(t, out.String())
+	var call map[string]any
+	for _, f := range frames {
+		if id, ok := f["id"].(float64); ok && id == 2 {
+			call = f
+		}
+	}
+	if call == nil {
+		t.Fatal("no register tool-call response")
+	}
+	res, _ := call["result"].(map[string]any)
+	if isErr, _ := res["isError"].(bool); !isErr {
+		t.Fatalf("register with malformed UUID must surface isError=true: %+v", call)
+	}
+	content, _ := res["content"].([]any)
+	if len(content) == 0 {
+		t.Fatalf("response missing content: %+v", res)
+	}
+	body, _ := content[0].(map[string]any)["text"].(string)
+	if !strings.Contains(body, "not a valid UUID") {
+		t.Fatalf("response text does not mention the UUID problem: %q", body)
 	}
 }
 

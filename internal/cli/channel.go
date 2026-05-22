@@ -313,6 +313,10 @@ func (s *channelSource) Register(ctx context.Context, sessionID, modelID, branch
 		Host:      s.host,
 		Model:     modelID,
 		Branch:    branch,
+		// ClaudePID feeds the BACI-100 duplicate-registration dedupe.
+		// May legitimately be 0 (no `claude` ancestor walkable), in
+		// which case CompleteRegistration skips the dedupe.
+		ClaudePID: s.claudePID,
 	}, version.String())
 	if err != nil {
 		return err

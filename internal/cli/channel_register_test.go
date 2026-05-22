@@ -19,7 +19,8 @@ import (
 func TestChannelRegisterReusesAgentsJSONSlug(t *testing.T) {
 	const existingSlug = "lively-kestrel@claude.testhost"
 	const host = "testhost"
-	const newSessionID = "post-clear-session-id"
+	// BACI-100: register requires a structurally valid UUID session_id.
+	const newSessionID = "5f8c2a10-3b4d-4e6f-8a9b-0c1d2e3f4a5b"
 	// agents.json save() calls pruneDead() which drops entries whose pid
 	// isn't in the live process table. Use this test process's own pid
 	// so the seeded entry survives the save.
@@ -81,7 +82,8 @@ func TestChannelRegisterReusesAgentsJSONSlug(t *testing.T) {
 // BACI-44 fix could regress to "Register requires a pre-existing hint".
 func TestChannelRegisterMintsWhenNoHint(t *testing.T) {
 	const host = "testhost"
-	const newSessionID = "fresh-session-id"
+	// BACI-100: register requires a structurally valid UUID session_id.
+	const newSessionID = "6a9d3b21-4c5e-4f70-9bac-1d2e3f4a5b6c"
 	// Live pid for symmetry with the sibling test, though no agents.json
 	// entry is seeded here.
 	claudePID := int64(os.Getpid())

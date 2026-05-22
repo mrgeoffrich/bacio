@@ -8,9 +8,21 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
+
+// uuidFor maps a friendly test name (e.g. "sess-a") to a deterministic,
+// structurally valid UUID. Since BACI-100 the register entry points
+// reject a non-UUID session_id, so tests can't use bare "sess-X"
+// strings as session ids any more — uuidFor keeps each test's id stable
+// and readable while satisfying the validator. Deterministic so the
+// same name resolves to the same UUID across the register call, the
+// URL path, and the later GetAgentSession lookup.
+func uuidFor(name string) string {
+	return uuid.NewSHA1(uuid.NameSpaceDNS, []byte(name)).String()
+}
 
 func seedRepo(t *testing.T, s *store.Store) *model.Repo {
 	t.Helper()

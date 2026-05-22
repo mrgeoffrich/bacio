@@ -12,6 +12,11 @@ import (
 )
 
 // ---------- helpers ----------
+//
+// Since BACI-100 the API register route rejects a non-UUID session_id,
+// so these tests address sessions by uuidFor("friendly-name") — a
+// deterministic, structurally valid UUID — instead of bare "sess-X"
+// strings. uuidFor lives in helpers_test.go.
 
 func registerSession(t *testing.T, ts string, prefix, sid string, body map[string]any) (int, []byte) {
 	t.Helper()
@@ -28,7 +33,8 @@ func registerSession(t *testing.T, ts string, prefix, sid string, body map[strin
 func TestAgentRegisterHappy(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	seedRepo(t, s)
-	status, body := registerSession(t, ts.URL, "MINI", "sess-1", nil)
+	sid := uuidFor("sess-1")
+	status, body := registerSession(t, ts.URL, "MINI", sid, nil)
 	if status != 201 {
 		t.Fatalf("status: %d body: %s", status, body)
 	}
@@ -36,7 +42,7 @@ func TestAgentRegisterHappy(t *testing.T) {
 	if err := json.Unmarshal(body, &sess); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if sess.SessionID != "sess-1" || sess.Actor != "agent-alice" {
+	if sess.SessionID != sid || sess.Actor != "agent-alice" {
 		t.Fatalf("unexpected session: %+v", sess)
 	}
 	assertHistoryOps(t, s, []string{"agent.register"})
@@ -45,25 +51,91 @@ func TestAgentRegisterHappy(t *testing.T) {
 func TestAgentRegisterDryRun(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	seedRepo(t, s)
+	sid := uuidFor("sess-dr")
 	resp, body := apiReq(t, "POST",
 		ts.URL+"/repos/MINI/agents/sessions?dry_run=true",
-		map[string]any{"session_id": "sess-dr", "actor": "agent-dr"},
+		map[string]any{"session_id": sid, "actor": "agent-dr"},
 		map[string]string{"X-Actor": "agent-dr"})
 	if resp.StatusCode != 201 || resp.Header.Get("X-Dry-Run") != "applied" {
 		t.Fatalf("status: %d header=%q body=%s", resp.StatusCode, resp.Header.Get("X-Dry-Run"), body)
 	}
 	// No session row written.
-	if _, err := s.GetAgentSession("sess-dr"); err == nil {
+	if _, err := s.GetAgentSession(sid); err == nil {
 		t.Fatalf("dry-run wrote session row")
 	}
 	assertHistoryOps(t, s, nil)
+}
+
+// TestAgentRegisterRejectsMalformedUUID locks in BACI-100: the API
+// register route rejects a session_id that is not a structurally valid
+// UUID with a 400 invalid_input naming the session_id field, and the
+// dry-run path rejects it too.
+func TestAgentRegisterRejectsMalformedUUID(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	seedRepo(t, s)
+	const bad = "23543e26-6339-4b8-aff2-d8ea2013f287" // 3-hex third group
+
+	for _, suffix := range []string{"", "?dry_run=true"} {
+		resp, body := apiReq(t, "POST", ts.URL+"/repos/MINI/agents/sessions"+suffix,
+			map[string]any{"session_id": bad, "actor": "agent-x"},
+			map[string]string{"X-Actor": "agent-x"})
+		if resp.StatusCode != 400 {
+			t.Fatalf("suffix %q: status %d body %s", suffix, resp.StatusCode, body)
+		}
+		env := decode[map[string]any](t, strings.NewReader(string(body)))
+		if env["code"] != "invalid_input" {
+			t.Fatalf("suffix %q: code = %v", suffix, env["code"])
+		}
+		if details, _ := env["details"].(map[string]any); details["field"] != "session_id" {
+			t.Fatalf("suffix %q: details.field = %v", suffix, details["field"])
+		}
+	}
+	if _, err := s.GetAgentSession(bad); err == nil {
+		t.Fatal("malformed-UUID session row was written")
+	}
+}
+
+// TestAgentRegisterDedupesOnClaudePID locks in BACI-100: a second
+// register for the same (host, claude_pid) under a different session_id
+// reconciles the earlier live row away so one OS process holds exactly
+// one live registry row.
+func TestAgentRegisterDedupesOnClaudePID(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	seedRepo(t, s)
+	first := uuidFor("dedupe-first")
+	later := uuidFor("dedupe-later")
+
+	for _, sid := range []string{first, later} {
+		status, body := registerSession(t, ts.URL, "MINI", sid, map[string]any{
+			"session_id": sid, "actor": "agent-alice",
+			"host": "smoke-host", "claude_pid": 4242,
+		})
+		if status != 201 {
+			t.Fatalf("register %s: status %d body %s", sid, status, body)
+		}
+	}
+
+	live, err := s.SessionsByClaudePID("smoke-host", 4242)
+	if err != nil {
+		t.Fatalf("SessionsByClaudePID: %v", err)
+	}
+	if len(live) != 1 || live[0].SessionID != later {
+		t.Fatalf("got %d live sessions, want 1 (=%s): %+v", len(live), later, live)
+	}
+	prior, err := s.GetAgentSession(first)
+	if err != nil {
+		t.Fatalf("GetAgentSession(first): %v", err)
+	}
+	if prior.EndedAt == nil || prior.EndReason != string(model.EndReasonSuperseded) {
+		t.Fatalf("first session not superseded: %+v", prior)
+	}
 }
 
 func TestAgentRegisterUnknownField(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	seedRepo(t, s)
 	resp, body := apiReq(t, "POST", ts.URL+"/repos/MINI/agents/sessions",
-		map[string]any{"session_id": "x", "actor": "a", "bogus": true},
+		map[string]any{"session_id": uuidFor("x"), "actor": "a", "bogus": true},
 		map[string]string{"X-Actor": "a"})
 	if resp.StatusCode != 400 {
 		t.Fatalf("status: %d, body: %s", resp.StatusCode, body)
@@ -87,7 +159,7 @@ func TestAgentRegisterMissingSessionID(t *testing.T) {
 func TestAgentRegisterRepoNotFound(t *testing.T) {
 	ts, _ := newTestAPI(t, api.Options{})
 	resp, _ := apiReq(t, "POST", ts.URL+"/repos/NONE/agents/sessions",
-		map[string]any{"session_id": "x", "actor": "a"},
+		map[string]any{"session_id": uuidFor("x"), "actor": "a"},
 		map[string]string{"X-Actor": "a"})
 	if resp.StatusCode != 404 {
 		t.Fatalf("status: %d", resp.StatusCode)
@@ -99,13 +171,14 @@ func TestAgentRegisterActorDefaultsToHeader(t *testing.T) {
 	// session row with it.
 	ts, s := newTestAPI(t, api.Options{})
 	seedRepo(t, s)
+	sid := uuidFor("sess-h")
 	resp, body := apiReq(t, "POST", ts.URL+"/repos/MINI/agents/sessions",
-		map[string]any{"session_id": "sess-h"},
+		map[string]any{"session_id": sid},
 		map[string]string{"X-Actor": "agent-from-header"})
 	if resp.StatusCode != 201 {
 		t.Fatalf("status: %d body: %s", resp.StatusCode, body)
 	}
-	sess, err := s.GetAgentSession("sess-h")
+	sess, err := s.GetAgentSession(sid)
 	if err != nil {
 		t.Fatalf("get session: %v", err)
 	}
@@ -118,7 +191,7 @@ func TestAgentRegisterIdempotent(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	seedRepo(t, s)
 	for i := 0; i < 2; i++ {
-		status, body := registerSession(t, ts.URL, "MINI", "sess-id", nil)
+		status, body := registerSession(t, ts.URL, "MINI", uuidFor("sess-id"), nil)
 		if status != 201 {
 			t.Fatalf("attempt %d: status %d body %s", i, status, body)
 		}
@@ -140,8 +213,8 @@ func TestAgentRegisterAgentNameConflict(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	seedRepo(t, s)
 	// First register mints the identity.
-	status, _ := registerSession(t, ts.URL, "MINI", "sess-a", map[string]any{
-		"session_id": "sess-a", "actor": "agent-a", "agent": "lively-frog@claude.x",
+	status, _ := registerSession(t, ts.URL, "MINI", uuidFor("sess-a"), map[string]any{
+		"session_id": uuidFor("sess-a"), "actor": "agent-a", "agent": "lively-frog@claude.x",
 	})
 	if status != 201 {
 		t.Fatalf("first register status: %d", status)
@@ -149,7 +222,7 @@ func TestAgentRegisterAgentNameConflict(t *testing.T) {
 	// Second tries to claim the same name with --new (NewIdentity=true) → 409.
 	resp, body := apiReq(t, "POST", ts.URL+"/repos/MINI/agents/sessions",
 		map[string]any{
-			"session_id":   "sess-b",
+			"session_id":   uuidFor("sess-b"),
 			"actor":        "agent-b",
 			"agent":        "lively-frog@claude.x",
 			"new_identity": true,
@@ -164,13 +237,14 @@ func TestAgentRegisterAgentNameConflict(t *testing.T) {
 func TestAgentHeartbeatHappy(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	seedRepo(t, s)
-	registerSession(t, ts.URL, "MINI", "sess-hb", nil)
-	resp, body := apiReq(t, "POST", ts.URL+"/agents/sessions/sess-hb/heartbeat",
-		map[string]any{"session_id": "sess-hb", "model": "claude-sonnet-4-6"}, nil)
+	sid := uuidFor("sess-hb")
+	registerSession(t, ts.URL, "MINI", sid, nil)
+	resp, body := apiReq(t, "POST", ts.URL+"/agents/sessions/"+sid+"/heartbeat",
+		map[string]any{"session_id": sid, "model": "claude-sonnet-4-6"}, nil)
 	if resp.StatusCode != 200 {
 		t.Fatalf("status: %d body: %s", resp.StatusCode, body)
 	}
-	sess, _ := s.GetAgentSession("sess-hb")
+	sess, _ := s.GetAgentSession(sid)
 	if sess.Model != "claude-sonnet-4-6" {
 		t.Fatalf("model not updated: %q", sess.Model)
 	}
@@ -179,8 +253,9 @@ func TestAgentHeartbeatHappy(t *testing.T) {
 func TestAgentHeartbeatSessionMismatch(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	seedRepo(t, s)
-	registerSession(t, ts.URL, "MINI", "sess-hb", nil)
-	resp, _ := apiReq(t, "POST", ts.URL+"/agents/sessions/sess-hb/heartbeat",
+	sid := uuidFor("sess-hb")
+	registerSession(t, ts.URL, "MINI", sid, nil)
+	resp, _ := apiReq(t, "POST", ts.URL+"/agents/sessions/"+sid+"/heartbeat",
 		map[string]any{"session_id": "different"}, nil)
 	if resp.StatusCode != 400 {
 		t.Fatalf("status: %d", resp.StatusCode)
@@ -201,14 +276,15 @@ func TestAgentHeartbeatSessionMissing(t *testing.T) {
 func TestAgentEndHappy(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	seedRepo(t, s)
-	registerSession(t, ts.URL, "MINI", "sess-end", nil)
-	resp, body := apiReq(t, "POST", ts.URL+"/agents/sessions/sess-end/end",
+	sid := uuidFor("sess-end")
+	registerSession(t, ts.URL, "MINI", sid, nil)
+	resp, body := apiReq(t, "POST", ts.URL+"/agents/sessions/"+sid+"/end",
 		map[string]any{"reason": "stop"},
 		map[string]string{"X-Actor": "agent-alice"})
 	if resp.StatusCode != 200 {
 		t.Fatalf("status: %d body: %s", resp.StatusCode, body)
 	}
-	sess, _ := s.GetAgentSession("sess-end")
+	sess, _ := s.GetAgentSession(sid)
 	if sess.EndedAt == nil || sess.EndReason != "stop" {
 		t.Fatalf("session not ended: %+v", sess)
 	}
@@ -217,8 +293,9 @@ func TestAgentEndHappy(t *testing.T) {
 func TestAgentEndBadReason(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	seedRepo(t, s)
-	registerSession(t, ts.URL, "MINI", "sess-end", nil)
-	resp, _ := apiReq(t, "POST", ts.URL+"/agents/sessions/sess-end/end",
+	sid := uuidFor("sess-end")
+	registerSession(t, ts.URL, "MINI", sid, nil)
+	resp, _ := apiReq(t, "POST", ts.URL+"/agents/sessions/"+sid+"/end",
 		map[string]any{"reason": "explode"}, nil)
 	if resp.StatusCode != 400 {
 		t.Fatalf("status: %d", resp.StatusCode)
@@ -229,13 +306,14 @@ func TestAgentEndAutoReleasesClaims(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	iss := seedIssue(t, s, repo, "to-do")
-	registerSession(t, ts.URL, "MINI", "sess-e", nil)
+	sid := uuidFor("sess-e")
+	registerSession(t, ts.URL, "MINI", sid, nil)
 	// Claim it.
-	apiReq(t, "POST", ts.URL+"/agents/sessions/sess-e/claims",
+	apiReq(t, "POST", ts.URL+"/agents/sessions/"+sid+"/claims",
 		map[string]any{"issue_key": iss.Key, "prompt": "do the thing"},
 		map[string]string{"X-Actor": "agent-alice"})
 	// Now end.
-	apiReq(t, "POST", ts.URL+"/agents/sessions/sess-e/end",
+	apiReq(t, "POST", ts.URL+"/agents/sessions/"+sid+"/end",
 		map[string]any{"reason": "stop"},
 		map[string]string{"X-Actor": "agent-alice"})
 	// Issue should be unassigned (claim auto-released, lockstep clear).
@@ -251,8 +329,9 @@ func TestAgentClaimHappy(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	iss := seedIssue(t, s, repo, "first")
-	registerSession(t, ts.URL, "MINI", "sess-c", nil)
-	resp, body := apiReq(t, "POST", ts.URL+"/agents/sessions/sess-c/claims",
+	sid := uuidFor("sess-c")
+	registerSession(t, ts.URL, "MINI", sid, nil)
+	resp, body := apiReq(t, "POST", ts.URL+"/agents/sessions/"+sid+"/claims",
 		map[string]any{"issue_key": iss.Key, "prompt": "go"},
 		map[string]string{"X-Actor": "agent-alice"})
 	if resp.StatusCode != 201 {
@@ -271,8 +350,9 @@ func TestAgentClaimHappy(t *testing.T) {
 func TestAgentClaimRequiresIssueKey(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	seedRepo(t, s)
-	registerSession(t, ts.URL, "MINI", "sess-c", nil)
-	resp, _ := apiReq(t, "POST", ts.URL+"/agents/sessions/sess-c/claims",
+	sid := uuidFor("sess-c")
+	registerSession(t, ts.URL, "MINI", sid, nil)
+	resp, _ := apiReq(t, "POST", ts.URL+"/agents/sessions/"+sid+"/claims",
 		map[string]any{}, nil)
 	if resp.StatusCode != 400 {
 		t.Fatalf("status: %d", resp.StatusCode)
@@ -282,8 +362,9 @@ func TestAgentClaimRequiresIssueKey(t *testing.T) {
 func TestAgentClaimIssueNotFound(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	seedRepo(t, s)
-	registerSession(t, ts.URL, "MINI", "sess-c", nil)
-	resp, _ := apiReq(t, "POST", ts.URL+"/agents/sessions/sess-c/claims",
+	sid := uuidFor("sess-c")
+	registerSession(t, ts.URL, "MINI", sid, nil)
+	resp, _ := apiReq(t, "POST", ts.URL+"/agents/sessions/"+sid+"/claims",
 		map[string]any{"issue_key": "MINI-999"}, nil)
 	if resp.StatusCode != 404 {
 		t.Fatalf("status: %d", resp.StatusCode)
@@ -294,9 +375,10 @@ func TestAgentClaimDryRun(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	iss := seedIssue(t, s, repo, "first")
-	registerSession(t, ts.URL, "MINI", "sess-c", nil)
+	sid := uuidFor("sess-c")
+	registerSession(t, ts.URL, "MINI", sid, nil)
 	resp, _ := apiReq(t, "POST",
-		ts.URL+"/agents/sessions/sess-c/claims?dry_run=true",
+		ts.URL+"/agents/sessions/"+sid+"/claims?dry_run=true",
 		map[string]any{"issue_key": iss.Key},
 		map[string]string{"X-Actor": "agent-alice"})
 	if resp.StatusCode != 201 || resp.Header.Get("X-Dry-Run") != "applied" {
@@ -312,11 +394,12 @@ func TestAgentReleaseHappy(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	iss := seedIssue(t, s, repo, "first")
-	registerSession(t, ts.URL, "MINI", "sess-r", nil)
-	apiReq(t, "POST", ts.URL+"/agents/sessions/sess-r/claims",
+	sid := uuidFor("sess-r")
+	registerSession(t, ts.URL, "MINI", sid, nil)
+	apiReq(t, "POST", ts.URL+"/agents/sessions/"+sid+"/claims",
 		map[string]any{"issue_key": iss.Key},
 		map[string]string{"X-Actor": "agent-alice"})
-	resp, body := apiReq(t, "DELETE", ts.URL+"/agents/sessions/sess-r/claims",
+	resp, body := apiReq(t, "DELETE", ts.URL+"/agents/sessions/"+sid+"/claims",
 		map[string]any{"issue_key": iss.Key},
 		map[string]string{"X-Actor": "agent-alice"})
 	if resp.StatusCode != 200 {
@@ -332,8 +415,9 @@ func TestAgentReleaseNoClaim(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	iss := seedIssue(t, s, repo, "first")
-	registerSession(t, ts.URL, "MINI", "sess-r", nil)
-	resp, _ := apiReq(t, "DELETE", ts.URL+"/agents/sessions/sess-r/claims",
+	sid := uuidFor("sess-r")
+	registerSession(t, ts.URL, "MINI", sid, nil)
+	resp, _ := apiReq(t, "DELETE", ts.URL+"/agents/sessions/"+sid+"/claims",
 		map[string]any{"issue_key": iss.Key}, nil)
 	if resp.StatusCode != 404 {
 		t.Fatalf("status: %d", resp.StatusCode)
@@ -345,12 +429,13 @@ func TestAgentReleaseNoClaim(t *testing.T) {
 func TestAgentSessionsListRepoScoped(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	seedRepo(t, s)
-	registerSession(t, ts.URL, "MINI", "sess-l", nil)
+	sid := uuidFor("sess-l")
+	registerSession(t, ts.URL, "MINI", sid, nil)
 	resp, body := apiGet(t, ts.URL+"/repos/MINI/agents/sessions")
 	if resp.StatusCode != 200 {
 		t.Fatalf("status: %d body: %s", resp.StatusCode, body)
 	}
-	if !strings.Contains(string(body), `"session_id": "sess-l"`) {
+	if !strings.Contains(string(body), `"session_id": "`+sid+`"`) {
 		t.Fatalf("missing session in body: %s", body)
 	}
 }
@@ -371,13 +456,15 @@ func TestAgentSessionsListCrossRepo(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	seedRepo(t, s)
 	seedRepo2(t, s)
-	registerSession(t, ts.URL, "MINI", "sess-x", nil)
-	registerSession(t, ts.URL, "OTHR", "sess-y", nil)
+	sidX := uuidFor("sess-x")
+	sidY := uuidFor("sess-y")
+	registerSession(t, ts.URL, "MINI", sidX, nil)
+	registerSession(t, ts.URL, "OTHR", sidY, nil)
 	resp, body := apiGet(t, ts.URL+"/agents/sessions")
 	if resp.StatusCode != 200 {
 		t.Fatalf("status: %d", resp.StatusCode)
 	}
-	for _, want := range []string{"sess-x", "sess-y"} {
+	for _, want := range []string{sidX, sidY} {
 		if !strings.Contains(string(body), want) {
 			t.Fatalf("missing %q in cross-repo list: %s", want, body)
 		}
@@ -387,7 +474,9 @@ func TestAgentSessionsListCrossRepo(t *testing.T) {
 func TestAgentSessionsListHidesStubsByDefault(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
-	// Insert a stub (registered_at NULL) directly.
+	// Insert a stub (registered_at NULL) directly. The store-level upsert
+	// keeps accepting non-UUID ids — only the register entry points
+	// require a UUID (BACI-100) — so "stub-1" is a fine direct seed.
 	if _, err := s.UpsertAgentSession(store.UpsertAgentSessionIn{
 		SessionID: "stub-1",
 		RepoID:    repo.ID,
@@ -398,7 +487,8 @@ func TestAgentSessionsListHidesStubsByDefault(t *testing.T) {
 		t.Fatalf("seed stub: %v", err)
 	}
 	// Plus a real registered session.
-	registerSession(t, ts.URL, "MINI", "real-1", nil)
+	realSID := uuidFor("real-1")
+	registerSession(t, ts.URL, "MINI", realSID, nil)
 
 	// Default hides stubs.
 	resp, body := apiGet(t, ts.URL+"/repos/MINI/agents/sessions")
@@ -408,7 +498,7 @@ func TestAgentSessionsListHidesStubsByDefault(t *testing.T) {
 	if strings.Contains(string(body), "stub-1") {
 		t.Fatalf("stub leaked into default list: %s", body)
 	}
-	if !strings.Contains(string(body), "real-1") {
+	if !strings.Contains(string(body), realSID) {
 		t.Fatalf("real session missing: %s", body)
 	}
 	// ?all=true surfaces it.
@@ -425,11 +515,12 @@ func TestAgentSessionShow(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	iss := seedIssue(t, s, repo, "first")
-	registerSession(t, ts.URL, "MINI", "sess-sh", nil)
-	apiReq(t, "POST", ts.URL+"/agents/sessions/sess-sh/claims",
+	sid := uuidFor("sess-sh")
+	registerSession(t, ts.URL, "MINI", sid, nil)
+	apiReq(t, "POST", ts.URL+"/agents/sessions/"+sid+"/claims",
 		map[string]any{"issue_key": iss.Key, "prompt": "instruction"},
 		map[string]string{"X-Actor": "agent-alice"})
-	resp, body := apiGet(t, ts.URL+"/agents/sessions/sess-sh")
+	resp, body := apiGet(t, ts.URL+"/agents/sessions/"+sid)
 	if resp.StatusCode != 200 {
 		t.Fatalf("status: %d body: %s", resp.StatusCode, body)
 	}
@@ -454,12 +545,13 @@ func TestAgentInboxAndAck(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	iss := seedIssue(t, s, repo, "first")
-	registerSession(t, ts.URL, "MINI", "sess-in", nil)
+	sid := uuidFor("sess-in")
+	registerSession(t, ts.URL, "MINI", sid, nil)
 	// Create a dispatch directly via the store (the dispatch HTTP verb is
 	// out of scope for BACI-34).
 	d, err := s.AddDispatch(store.AddDispatchIn{
 		RepoID:          repo.ID,
-		TargetSessionID: "sess-in",
+		TargetSessionID: sid,
 		IssueID:         &iss.ID,
 		Payload:         "go work the thing",
 		CreatedBy:       "supervisor",
@@ -467,7 +559,7 @@ func TestAgentInboxAndAck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add dispatch: %v", err)
 	}
-	resp, body := apiGet(t, ts.URL+"/agents/sessions/sess-in/inbox")
+	resp, body := apiGet(t, ts.URL+"/agents/sessions/"+sid+"/inbox")
 	if resp.StatusCode != 200 {
 		t.Fatalf("status: %d body: %s", resp.StatusCode, body)
 	}
@@ -518,8 +610,9 @@ func TestAgentOpenClaimsRepoScoped(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	iss := seedIssue(t, s, repo, "first")
-	registerSession(t, ts.URL, "MINI", "sess-oc", nil)
-	apiReq(t, "POST", ts.URL+"/agents/sessions/sess-oc/claims",
+	sid := uuidFor("sess-oc")
+	registerSession(t, ts.URL, "MINI", sid, nil)
+	apiReq(t, "POST", ts.URL+"/agents/sessions/"+sid+"/claims",
 		map[string]any{"issue_key": iss.Key},
 		map[string]string{"X-Actor": "agent-alice"})
 	resp, body := apiGet(t, ts.URL+"/repos/MINI/agents/claims/open")
@@ -535,11 +628,12 @@ func TestAgentOpenClaimsExcludesReleased(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	iss := seedIssue(t, s, repo, "first")
-	registerSession(t, ts.URL, "MINI", "sess-oc", nil)
-	apiReq(t, "POST", ts.URL+"/agents/sessions/sess-oc/claims",
+	sid := uuidFor("sess-oc")
+	registerSession(t, ts.URL, "MINI", sid, nil)
+	apiReq(t, "POST", ts.URL+"/agents/sessions/"+sid+"/claims",
 		map[string]any{"issue_key": iss.Key},
 		map[string]string{"X-Actor": "agent-alice"})
-	apiReq(t, "DELETE", ts.URL+"/agents/sessions/sess-oc/claims",
+	apiReq(t, "DELETE", ts.URL+"/agents/sessions/"+sid+"/claims",
 		map[string]any{"issue_key": iss.Key},
 		map[string]string{"X-Actor": "agent-alice"})
 	resp, body := apiGet(t, ts.URL+"/repos/MINI/agents/claims/open")
@@ -557,12 +651,14 @@ func TestAgentOpenClaimsCrossRepo(t *testing.T) {
 	repo2 := seedRepo2(t, s)
 	iss := seedIssue(t, s, repo, "first")
 	iss2 := seedIssue(t, s, repo2, "second")
-	registerSession(t, ts.URL, "MINI", "sess-a", nil)
-	registerSession(t, ts.URL, "OTHR", "sess-b", nil)
-	apiReq(t, "POST", ts.URL+"/agents/sessions/sess-a/claims",
+	sidA := uuidFor("sess-a")
+	sidB := uuidFor("sess-b")
+	registerSession(t, ts.URL, "MINI", sidA, nil)
+	registerSession(t, ts.URL, "OTHR", sidB, nil)
+	apiReq(t, "POST", ts.URL+"/agents/sessions/"+sidA+"/claims",
 		map[string]any{"issue_key": iss.Key},
 		map[string]string{"X-Actor": "agent-alice"})
-	apiReq(t, "POST", ts.URL+"/agents/sessions/sess-b/claims",
+	apiReq(t, "POST", ts.URL+"/agents/sessions/"+sidB+"/claims",
 		map[string]any{"issue_key": iss2.Key},
 		map[string]string{"X-Actor": "agent-bob"})
 	resp, body := apiGet(t, ts.URL+"/agents/claims/open")
