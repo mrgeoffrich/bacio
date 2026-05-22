@@ -345,7 +345,7 @@ func (e *Engine) exportDocument(
 	featureByID map[int64]*model.Feature,
 ) error {
 	folder := DocumentFolder(repo.Prefix, d.Filename)
-	contentPath := DocumentContentFile(folder)
+	contentPath := DocumentContentFile(folder, d.Filename)
 	yamlPath := DocumentYAMLFile(folder)
 
 	contentBytes := NormalizeBody([]byte(d.Content))

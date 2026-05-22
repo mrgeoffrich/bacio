@@ -254,7 +254,7 @@ func (e *Engine) scanDocuments(source, prefix string, sr *scannedRepo, scan *sca
 		if err != nil {
 			return fmt.Errorf("parse doc %s: %w", filename, err)
 		}
-		body, err := readBody(filepath.Join(source, filepath.FromSlash(DocumentContentFile(folder))))
+		body, err := readBody(resolveDocBody(source, folder, filename))
 		if err != nil {
 			return err
 		}
@@ -269,8 +269,28 @@ func (e *Engine) scanDocuments(source, prefix string, sr *scannedRepo, scan *sca
 	return nil
 }
 
-// readBody reads a markdown sibling and normalises line endings to
-// LF. A missing file is fine — empty body. Caller hashes the result.
+// resolveDocBody returns the absolute on-disk path of a document body:
+// content<ext> derived from the document's filename (BACI-102), falling
+// back to the legacy content.md when the extension-derived file is
+// absent — documents synced before BACI-102 always wrote content.md
+// regardless of the real extension. When both are absent the primary
+// (extension-derived) path is returned and readBody yields an empty
+// body. The fallback keeps pre-BACI-102 non-markdown documents readable
+// without a migration.
+func resolveDocBody(syncRepoRoot, folder, filename string) string {
+	primary := filepath.Join(syncRepoRoot, filepath.FromSlash(DocumentContentFile(folder, filename)))
+	if _, err := os.Stat(primary); err == nil {
+		return primary
+	}
+	legacy := filepath.Join(syncRepoRoot, filepath.FromSlash(LegacyDocumentContentFile(folder)))
+	if _, err := os.Stat(legacy); err == nil {
+		return legacy
+	}
+	return primary
+}
+
+// readBody reads a body sibling and normalises line endings to LF. A
+// missing file is fine — empty body. Caller hashes the result.
 func readBody(path string) ([]byte, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {

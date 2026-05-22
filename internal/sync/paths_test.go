@@ -53,6 +53,48 @@ func TestDocumentFolder_NFCNormalisation(t *testing.T) {
 	}
 }
 
+func TestDocumentContentFile_ExtensionFromFilename(t *testing.T) {
+	const folder = "repos/MINI/docs/auth-overview.md"
+	cases := []struct {
+		filename string
+		want     string
+	}{
+		{"auth-overview.md", "content.md"},
+		{"bacio-transcript-BACI-12-agent-7.jsonl", "content.jsonl"},
+		{"notes.txt", "content.txt"},
+		{"Makefile", "content"},        // no extension
+		{"archive.tar.gz", "content.gz"}, // path.Ext keeps only the last segment
+	}
+	for _, tc := range cases {
+		got := DocumentContentFile(folder, tc.filename)
+		want := folder + "/" + tc.want
+		if got != want {
+			t.Errorf("DocumentContentFile(%q): got %q want %q", tc.filename, got, want)
+		}
+	}
+}
+
+func TestDocumentContentFile_NFCNormalisation(t *testing.T) {
+	// The extension is taken from the NFC-normalised filename, matching
+	// DocumentFolder. NFD "Café.jsonl" -> ".jsonl" either way; this
+	// pins that the helper normalises before path.Ext.
+	const folder = "repos/MINI/docs/Café.jsonl"
+	const nfd = "Café.jsonl"
+	got := DocumentContentFile(folder, nfd)
+	want := folder + "/content.jsonl"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
+func TestLegacyDocumentContentFile(t *testing.T) {
+	got := LegacyDocumentContentFile("repos/MINI/docs/t.jsonl")
+	want := "repos/MINI/docs/t.jsonl/content.md"
+	if got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+}
+
 func TestCommentFile(t *testing.T) {
 	at := time.Date(2026, 5, 9, 14, 22, 0, 0, time.UTC)
 	uuid := "0190c2a3-7f3a-7b2c-8b21-ffffffffffff"

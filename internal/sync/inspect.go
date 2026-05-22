@@ -275,7 +275,7 @@ func inspectDocument(syncRepoRoot, prefix, filename string) (*InspectDocument, e
 	if err != nil {
 		return nil, err
 	}
-	bodyAbs := filepath.Join(syncRepoRoot, filepath.FromSlash(DocumentContentFile(folder)))
+	bodyAbs := resolveDocBody(syncRepoRoot, folder, filename)
 	body, _ := os.ReadFile(bodyAbs)
 	return &InspectDocument{
 		Document: parsed,

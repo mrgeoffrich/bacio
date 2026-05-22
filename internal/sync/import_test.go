@@ -605,3 +605,93 @@ func TestImport_EmptySource(t *testing.T) {
 		t.Errorf("expected zero counts, got %+v", res)
 	}
 }
+
+// seedJSONLDocStore builds a minimal store with one .jsonl document and
+// returns the store plus the document's UUID and body. Shared by the
+// BACI-102 round-trip and legacy-fallback import tests.
+func seedJSONLDocStore(t *testing.T) (*store.Store, string, string) {
+	t.Helper()
+	const body = "{\"line\":1}\n{\"line\":2}\n"
+	s, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	r, err := s.CreateRepo("MINI", "bacio", "/local/path", "git@github.com:user/bacio.git")
+	if err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+	doc, err := s.CreateDocument(r.ID, "bacio-transcript-BACI-12-agent-7.jsonl", model.DocTypeProjectComplete, body, "docs/transcript.jsonl")
+	if err != nil {
+		t.Fatalf("create jsonl doc: %v", err)
+	}
+	return s, doc.UUID, body
+}
+
+// TestImport_RoundTrip_JSONLDocument exports a .jsonl document from
+// store A and imports it into a fresh store B, asserting the body
+// survives. This proves export and import agree on the content<ext>
+// extension derived from the document filename (BACI-102).
+func TestImport_RoundTrip_JSONLDocument(t *testing.T) {
+	a, docUUID, body := seedJSONLDocStore(t)
+	dirA := t.TempDir()
+	if _, err := (&Engine{Store: a}).Export(context.Background(), dirA); err != nil {
+		t.Fatalf("export A: %v", err)
+	}
+	// Sanity: the body is on disk as content.jsonl, not content.md.
+	jsonlPath := filepath.Join(dirA, "repos", "MINI", "docs", "bacio-transcript-BACI-12-agent-7.jsonl", "content.jsonl")
+	if _, err := os.Stat(jsonlPath); err != nil {
+		t.Fatalf("expected content.jsonl on disk: %v", err)
+	}
+
+	b, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open b: %v", err)
+	}
+	t.Cleanup(func() { b.Close() })
+	if _, err := (&Engine{Store: b, Actor: "tester"}).Import(context.Background(), dirA); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	d, err := b.GetDocumentByUUID(docUUID, true)
+	if err != nil {
+		t.Fatalf("get doc: %v", err)
+	}
+	if d.Content != body {
+		t.Errorf("round-trip body mismatch:\ngot:  %q\nwant: %q", d.Content, body)
+	}
+}
+
+// TestImport_LegacyContentMD_JSONLDocument pins the no-migration
+// fallback (BACI-102 Option 1): a .jsonl document synced by a
+// pre-BACI-102 binary has its body on disk as content.md. A new-binary
+// import must still read that body via the legacy fallback rather than
+// treating it as an empty body.
+func TestImport_LegacyContentMD_JSONLDocument(t *testing.T) {
+	a, docUUID, body := seedJSONLDocStore(t)
+	dirA := t.TempDir()
+	if _, err := (&Engine{Store: a}).Export(context.Background(), dirA); err != nil {
+		t.Fatalf("export A: %v", err)
+	}
+	// Simulate a pre-BACI-102 sync layout: the body lives at
+	// content.md regardless of the .jsonl filename.
+	docFolder := filepath.Join(dirA, "repos", "MINI", "docs", "bacio-transcript-BACI-12-agent-7.jsonl")
+	if err := os.Rename(filepath.Join(docFolder, "content.jsonl"), filepath.Join(docFolder, "content.md")); err != nil {
+		t.Fatalf("rename to legacy content.md: %v", err)
+	}
+
+	b, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open b: %v", err)
+	}
+	t.Cleanup(func() { b.Close() })
+	if _, err := (&Engine{Store: b, Actor: "tester"}).Import(context.Background(), dirA); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	d, err := b.GetDocumentByUUID(docUUID, true)
+	if err != nil {
+		t.Fatalf("get doc: %v", err)
+	}
+	if d.Content != body {
+		t.Errorf("legacy-fallback body mismatch:\ngot:  %q\nwant: %q", d.Content, body)
+	}
+}

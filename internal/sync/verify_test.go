@@ -44,6 +44,53 @@ func TestVerify_CleanRepoReportsNoFindings(t *testing.T) {
 	}
 }
 
+// TestVerify_JSONLDocumentBodyReportsNoDrift exports a .jsonl document
+// (body on disk as content.jsonl) and asserts Verify reports no
+// hash-mismatch — the document verify scan must hash the resolved
+// content<ext> file, not a non-existent content.md (BACI-102).
+func TestVerify_JSONLDocumentBodyReportsNoDrift(t *testing.T) {
+	s, _, _ := seedJSONLDocStore(t)
+	dir := t.TempDir()
+	if _, err := (&Engine{Store: s}).Export(context.Background(), dir); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	if err := WriteSentinel(dir, Sentinel{SchemaVersion: 1}); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
+	res, err := (&Engine{}).Verify(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if len(res.Errors) != 0 || len(res.Warnings) != 0 {
+		t.Errorf("expected clean verify for .jsonl doc, got errors=%+v warnings=%+v", res.Errors, res.Warnings)
+	}
+}
+
+// TestVerify_LegacyContentMDJSONLDocReportsNoDrift covers the
+// no-migration window: a .jsonl document whose body is still at the
+// legacy content.md path must verify clean via the read fallback.
+func TestVerify_LegacyContentMDJSONLDocReportsNoDrift(t *testing.T) {
+	s, _, _ := seedJSONLDocStore(t)
+	dir := t.TempDir()
+	if _, err := (&Engine{Store: s}).Export(context.Background(), dir); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	docFolder := filepath.Join(dir, "repos", "MINI", "docs", "bacio-transcript-BACI-12-agent-7.jsonl")
+	if err := os.Rename(filepath.Join(docFolder, "content.jsonl"), filepath.Join(docFolder, "content.md")); err != nil {
+		t.Fatalf("rename to legacy content.md: %v", err)
+	}
+	if err := WriteSentinel(dir, Sentinel{SchemaVersion: 1}); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
+	res, err := (&Engine{}).Verify(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if len(res.Errors) != 0 || len(res.Warnings) != 0 {
+		t.Errorf("expected clean verify for legacy content.md .jsonl doc, got errors=%+v warnings=%+v", res.Errors, res.Warnings)
+	}
+}
+
 func TestVerify_DetectsCorruptDescriptionHash(t *testing.T) {
 	dir := buildVerifyFixture(t)
 	// Stomp on the issue.yaml description_hash with a bogus value.

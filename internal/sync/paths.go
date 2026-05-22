@@ -86,8 +86,27 @@ func FeatureYAMLFile(featureFolder string) string {
 	return path.Join(featureFolder, "feature.yaml")
 }
 
-// DocumentContentFile is the markdown sibling of doc.yaml.
-func DocumentContentFile(docFolder string) string {
+// DocumentContentFile is the body sibling of doc.yaml. The body file is
+// named "content" plus the extension carried by the document's own
+// filename (".md", ".jsonl", ".txt", ...) so a synced body's on-disk
+// type is honest — a JSONL transcript syncs as content.jsonl, not
+// content.md. A filename with no extension yields a bare "content".
+//
+// The extension is taken from the NFC-normalised filename for parity
+// with DocumentFolder (which NFC-normalises the filename before using
+// it as the folder segment); in practice extensions are ASCII so the
+// normalisation is a no-op, but it keeps the two helpers consistent.
+func DocumentContentFile(docFolder, filename string) string {
+	ext := path.Ext(NormalizeNFC(filename))
+	return path.Join(docFolder, "content"+ext)
+}
+
+// LegacyDocumentContentFile is the pre-BACI-102 body path: every
+// document body synced as content.md regardless of the document's real
+// extension. The import / verify / inspect read paths fall back to this
+// when the extension-derived file is absent, so documents synced by an
+// old binary stay readable without a migration.
+func LegacyDocumentContentFile(docFolder string) string {
 	return path.Join(docFolder, "content.md")
 }
 

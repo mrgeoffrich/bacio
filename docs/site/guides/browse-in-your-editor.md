@@ -33,7 +33,7 @@ Inside the sync repo:
         └── docs/
             └── design.md/                # one folder per document, named by filename
                 ├── doc.yaml
-                └── content.md
+                └── content.md            # body file: "content" + the document's extension
 ```
 
 A second project synced to the same sync repo just adds another folder under `repos/` — `repos/AUTH/`, `repos/SITE/`, and so on. The audit log is **not** exported to the sync repo (there's no `history.yaml`); it stays in the local SQLite at `~/.bacio/db.sqlite`.
@@ -46,7 +46,7 @@ $EDITOR repos/MINI/issues/MINI-7/issue.yaml
 $EDITOR repos/MINI/issues/MINI-7/description.md
 ```
 
-Markdown bodies are sibling files inside each record's folder (`description.md` for issues and features, `content.md` for documents, a per-comment `.md` next to each comment YAML), so a markdown preview Just Works. Comments live in `repos/<PREFIX>/issues/<KEY>/comments/`, named with the comment's UTC timestamp and full UUID so concurrent comments from different machines never collide on filename.
+Bodies are sibling files inside each record's folder, so a preview Just Works. Issue and feature descriptions are always markdown (`description.md`), as is each per-comment `.md` next to its comment YAML. A document's body file is `content` plus the document's own extension — `content.md` for a markdown doc, `content.jsonl` for a JSONL transcript, `content.txt` for a plain-text doc — so the synced file's type is honest. Comments live in `repos/<PREFIX>/issues/<KEY>/comments/`, named with the comment's UTC timestamp and full UUID so concurrent comments from different machines never collide on filename.
 
 ## Grep / ripgrep
 

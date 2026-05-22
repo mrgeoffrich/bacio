@@ -211,6 +211,45 @@ func TestExport_ProducesExpectedTopLevelLayout(t *testing.T) {
 	}
 }
 
+// TestExport_DocumentBodyUsesRealExtension asserts a non-markdown
+// document (e.g. a .jsonl transcript) syncs its body as content.jsonl,
+// not the legacy hardcoded content.md (BACI-102).
+func TestExport_DocumentBodyUsesRealExtension(t *testing.T) {
+	s, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	r, err := s.CreateRepo("MINI", "bacio", "/local/path", "git@github.com:user/bacio.git")
+	if err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+	if _, err := s.CreateDocument(r.ID, "auth-overview.md", model.DocTypeArchitecture, "# Auth overview\n", "docs/auth-overview.md"); err != nil {
+		t.Fatalf("create md doc: %v", err)
+	}
+	if _, err := s.CreateDocument(r.ID, "bacio-transcript-BACI-12-agent-7.jsonl", model.DocTypeProjectComplete, "{\"line\":1}\n{\"line\":2}\n", "docs/transcript.jsonl"); err != nil {
+		t.Fatalf("create jsonl doc: %v", err)
+	}
+	dir := t.TempDir()
+	if _, err := (&Engine{Store: s}).Export(context.Background(), dir); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	must := []string{
+		"repos/MINI/docs/auth-overview.md/content.md",
+		"repos/MINI/docs/bacio-transcript-BACI-12-agent-7.jsonl/content.jsonl",
+	}
+	for _, p := range must {
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(p))); err != nil {
+			t.Errorf("missing %s: %v", p, err)
+		}
+	}
+	// The .jsonl document must NOT have produced a content.md.
+	stale := filepath.Join(dir, filepath.FromSlash("repos/MINI/docs/bacio-transcript-BACI-12-agent-7.jsonl/content.md"))
+	if _, err := os.Stat(stale); err == nil {
+		t.Errorf("unexpected legacy content.md for .jsonl document at %s", stale)
+	}
+}
+
 // TestExport_EmptyDB exercises the no-data path: an empty store must
 // produce an empty target dir (or at least no files), not an error.
 func TestExport_EmptyDB(t *testing.T) {

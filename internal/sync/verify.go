@@ -609,7 +609,7 @@ func verifyScanDocuments(syncRepoRoot, prefix string, sr *verifyScannedRepo, sca
 		filename := entry.Name()
 		folder := DocumentFolder(prefix, filename)
 		yamlPath := DocumentYAMLFile(folder)
-		contentPath := DocumentContentFile(folder)
+		contentPath := DocumentContentFile(folder, filename)
 		yamlAbs := filepath.Join(syncRepoRoot, filepath.FromSlash(yamlPath))
 		yamlBytes, err := os.ReadFile(yamlAbs)
 		if err != nil {
@@ -630,7 +630,10 @@ func verifyScanDocuments(syncRepoRoot, prefix string, sr *verifyScannedRepo, sca
 			})
 			continue
 		}
-		contentAbs := filepath.Join(syncRepoRoot, filepath.FromSlash(contentPath))
+		// Hash the resolved body: content<ext> when present, the
+		// legacy content.md fallback for documents synced before
+		// BACI-102 (resolveDocBody picks whichever exists).
+		contentAbs := resolveDocBody(syncRepoRoot, folder, filename)
 		contentHash := hashBodyOrEmpty(contentAbs)
 		if existing, ok := sr.documents[parsed.UUID]; ok {
 			recordIfDuplicate(scan, "document", parsed.UUID, yamlPath, true, existing.yamlPath)
