@@ -33,6 +33,7 @@ export default function IssueWorkspace({
   onClose,
   onSaveDescription,
   onAddComment,
+  onDeleteComment,
   onDispatch,
   onCancelWaiting,
   onAttachPR,
@@ -211,7 +212,7 @@ export default function IssueWorkspace({
             {brief.comments.length > 0 ? (
               <ul className="mk-timeline">
                 {brief.comments.map((c, i) => (
-                  <li key={i} className="mk-tl-item">
+                  <li key={c.uuid || i} className="mk-tl-item">
                     <span className={`mk-tl-dot ${c.author === 'claude' ? 'is-claude' : ''}`} />
                     {/* MarkdownView emits block elements (p / ul / pre /
                         table) that mustn't nest inside a <span>, so the
@@ -223,6 +224,21 @@ export default function IssueWorkspace({
                       <b className="mk-tl-author">{c.author}</b>
                       <MarkdownView className="mk-markdown mk-tl-body">{c.body}</MarkdownView>
                     </div>
+                    {onDeleteComment && c.uuid && (
+                      <button
+                        type="button"
+                        className="mk-tl-delete"
+                        title="Delete comment"
+                        aria-label="Delete comment"
+                        onClick={() => {
+                          if (window.confirm('Delete this comment? This cannot be undone.')) {
+                            onDeleteComment(c.uuid);
+                          }
+                        }}
+                      >
+                        ✕
+                      </button>
+                    )}
                   </li>
                 ))}
               </ul>

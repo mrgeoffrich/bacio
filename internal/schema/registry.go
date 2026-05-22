@@ -45,6 +45,7 @@ var Registry = []Entry{
 	{"feature.rm", "Delete a feature (issues are kept, unlinked).", typeOf[inputs.FeatureRmInput](), inputs.ExampleFeatureRm},
 
 	{"comment.add", "Add a comment to an issue.", typeOf[inputs.CommentAddInput](), inputs.ExampleCommentAdd},
+	{"comment.rm", "Delete a comment from an issue.", typeOf[inputs.CommentRmInput](), inputs.ExampleCommentRm},
 
 	{"link", "Create a relation (blocks, relates-to, duplicate-of) between two issues.", typeOf[inputs.LinkInput](), inputs.ExampleLink},
 	{"unlink", "Remove all relations between two issues.", typeOf[inputs.UnlinkInput](), inputs.ExampleUnlink},

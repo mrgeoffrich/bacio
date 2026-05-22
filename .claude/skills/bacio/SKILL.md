@@ -468,12 +468,24 @@ bacio comment add <KEY>                 Add a comment
   --body <text|->                       Inline or stdin
   --body-file <path>                    Read body from a file
 bacio comment list <KEY>                List comments on an issue
+bacio comment rm <KEY> <COMMENT-UUID>   Delete a comment (hard delete; the
+                                     uuid comes from `bacio comment
+                                     list -o json`)
 ```
+
+`bacio comment rm` follows the six agent-CLI principles — `--json`
+(`{"issue_key":"MINI-42","comment_uuid":"..."}`), `--dry-run`, and a
+`bacio schema show comment.rm` entry. Deletion is a hard delete recorded
+in the audit log as `comment.delete`; there is no undo.
 
 **Example:**
 ```bash
 printf 'Repro:\n1. open /login\n2. submit\n3. 500\n' \
   | bacio comment add MINI-42 --as Claude --body -
+
+# Find the uuid, then delete.
+bacio comment list MINI-42 -o json   # each entry carries "uuid"
+bacio comment rm MINI-42 019e4d42-15ab-7daf-b65d-c576164691db --user Claude
 ```
 
 ### Relations between issues
@@ -518,7 +530,7 @@ bacio history                           Last 50 mutations in the current repo
 
 `--from` / `--to` accept either local-time stamps (`YYYY-MM-DD`, `YYYY-MM-DD HH:MM`, `YYYY-MM-DD HH:MM:SS`) or RFC 3339 (e.g. `2026-05-03T07:27:14Z`). Bare dates start at 00:00 in the local timezone.
 
-Op naming is dotted: `repo.create`, `feature.{create,update,delete}`, `issue.{create,update,state,assign,claim,delete}`, `comment.add`, `relation.{create,delete}`, `pr.{attach,detach}`, `tag.{add,remove}`, `document.{create,update,rename,delete,link,unlink}` (`bacio doc upsert` records `document.create` or `document.update` depending on whether it created the row). Filtering by op prefix is not currently supported — match exactly, or use `--kind` for an entity-level cut.
+Op naming is dotted: `repo.create`, `feature.{create,update,delete}`, `issue.{create,update,state,assign,claim,delete}`, `comment.{add,delete}`, `relation.{create,delete}`, `pr.{attach,detach}`, `tag.{add,remove}`, `document.{create,update,rename,delete,link,unlink}` (`bacio doc upsert` records `document.create` or `document.update` depending on whether it created the row). Filtering by op prefix is not currently supported — match exactly, or use `--kind` for an entity-level cut.
 
 **Examples:**
 ```bash
@@ -1392,6 +1404,7 @@ A few non-obvious mappings:
 - **Tags:** `POST/DELETE /repos/{prefix}/issues/{key}/tags` with `{"tags":[...]}` (batch, not per-tag URLs).
 - **Relations:** `POST /repos/{prefix}/relations` with `{"from","type","to"}`; `DELETE` with `{"a","b"}` (bidirectional).
 - **PR detach:** `DELETE /repos/{prefix}/issues/{key}/pull-requests` with `{"url"}` or `?url=`.
+- **Comment delete:** `DELETE /repos/{prefix}/issues/{key}/comments/{uuid}` — the comment uuid is the path segment (it has no per-issue ordinal). 204 on success, 404 if the uuid is unknown or belongs to a different issue.
 - **Documents:** link/unlink at `POST/DELETE /documents/{filename}/links`; rename at `POST /documents/{filename}/rename`.
 - **State / assignee:** `PUT /issues/{key}/state`, `PUT/DELETE /issues/{key}/assignee`.
 - **State-gated auto-pick dispatch (BACI-40):** `POST /repos/{prefix}/issues/{key}/dispatch` with `{"mode":"<stage>"}` — server re-checks the stage's state-gate against the issue's current state, picks the most-recently-active free agent automatically, and returns the queued `AgentDispatch`. Supports `?dry_run=1`.

@@ -53,6 +53,10 @@ var (
 		Author:   "agent-alice",
 		Body:     "Reproduced locally; the clip arithmetic is off by one cell on overflow.",
 	}
+	ExampleCommentRm = CommentRmInput{
+		IssueKey:    "MINI-42",
+		CommentUUID: "019e4d42-15ab-7daf-b65d-c576164691db",
+	}
 
 	ExampleLink = LinkInput{
 		From: "MINI-42",

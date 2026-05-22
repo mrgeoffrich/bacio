@@ -147,6 +147,7 @@ type Client interface {
 	// ----- Comments / relations / PRs / tags -----
 	ListComments(ctx context.Context, repo *model.Repo, key string) ([]*model.Comment, error)
 	AddComment(ctx context.Context, repo *model.Repo, in inputs.CommentAddInput, dryRun bool) (*model.Comment, error)
+	DeleteComment(ctx context.Context, repo *model.Repo, in inputs.CommentRmInput, dryRun bool) (preview *CommentDeletePreview, removed int64, err error)
 
 	LinkRelation(ctx context.Context, repo *model.Repo, in inputs.LinkInput, dryRun bool) (*model.Relation, error)
 	UnlinkRelation(ctx context.Context, repo *model.Repo, in inputs.UnlinkInput, dryRun bool) (preview *RelationDeletePreview, removed int64, err error)

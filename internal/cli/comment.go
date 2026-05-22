@@ -12,7 +12,7 @@ import (
 
 func newCommentCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "comment", Short: "Manage issue comments"}
-	cmd.AddCommand(commentAddCmd(), commentListCmd())
+	cmd.AddCommand(commentAddCmd(), commentRmCmd(), commentListCmd())
 	return cmd
 }
 
@@ -86,6 +86,77 @@ func addComment(in inputs.CommentAddInput, strict bool) error {
 		return emitDryRun(cm)
 	}
 	return emit(cm)
+}
+
+func commentRmCmd() *cobra.Command {
+	var rawInput string
+	cmd := &cobra.Command{
+		Use:   "rm [KEY] [COMMENT-UUID]",
+		Short: "Delete a comment from an issue",
+		Long: "Delete a comment from an issue. Comments are addressed by their " +
+			"immutable uuid, discoverable via `bacio comment list -o json`.",
+		Args: cobra.RangeArgs(0, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			raw, err := parseJSONInput(cmd, args, rawInput)
+			if err != nil {
+				return err
+			}
+			if raw != nil {
+				in, _, err := inputio.DecodeStrict[inputs.CommentRmInput](raw)
+				if err != nil {
+					return err
+				}
+				if in.IssueKey == "" || in.CommentUUID == "" {
+					return fmt.Errorf("issue_key and comment_uuid are required")
+				}
+				return rmComment(*in, true)
+			}
+			if len(args) != 2 {
+				return fmt.Errorf("requires <KEY> <COMMENT-UUID> positionals or --json")
+			}
+			return rmComment(inputs.CommentRmInput{
+				IssueKey:    args[0],
+				CommentUUID: args[1],
+			}, false)
+		},
+	}
+	addInputFlag(cmd, &rawInput)
+	return cmd
+}
+
+// commentDeletePreview is the output payload for `bacio comment rm`.
+type commentDeletePreview struct {
+	IssueKey    string `json:"issue_key"`
+	CommentUUID string `json:"comment_uuid"`
+	WouldRemove int    `json:"would_remove"`
+}
+
+func rmComment(in inputs.CommentRmInput, strict bool) error {
+	c, err := openClient()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	if strict && !isIssueKey(in.IssueKey) {
+		return fmt.Errorf("issue_key %q must be canonical (e.g. \"MINI-42\")", in.IssueKey)
+	}
+	repo, err := repoForIssueKey(c, in.IssueKey)
+	if err != nil {
+		return err
+	}
+	preview, _, err := c.DeleteComment(context.Background(), repo, in, opts.dryRun)
+	if err != nil {
+		return err
+	}
+	if opts.dryRun {
+		return emitDryRun(&commentDeletePreview{
+			IssueKey:    preview.IssueKey,
+			CommentUUID: preview.CommentUUID,
+			WouldRemove: preview.WouldRemove,
+		})
+	}
+	canonical, _ := c.ResolveIssueKey(context.Background(), repo, in.IssueKey)
+	return ok("deleted comment %s from %s", in.CommentUUID, canonical)
 }
 
 func commentListCmd() *cobra.Command {

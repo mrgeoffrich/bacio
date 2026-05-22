@@ -223,6 +223,50 @@ func TestRoundTripCommentsAndDocs(t *testing.T) {
 		t.Fatalf("remote ShowIssue comments: %+v", view.Comments)
 	}
 
+	// Delete the comment over the remote client; local must agree it's gone.
+	uuid := view.Comments[0].UUID
+	if _, _, err := p.remote.DeleteComment(ctx, p.repo, inputs.CommentRmInput{
+		IssueKey: iss.Key, CommentUUID: uuid,
+	}, false); err != nil {
+		t.Fatalf("remote DeleteComment: %v", err)
+	}
+	localCs, err := p.local.ListComments(ctx, p.repo, iss.Key)
+	if err != nil {
+		t.Fatalf("local ListComments: %v", err)
+	}
+	if len(localCs) != 0 {
+		t.Fatalf("local still sees deleted comment: %+v", localCs)
+	}
+
+	// Re-add a comment, then delete via the local client with a dry-run
+	// first — the dry-run must not remove the row.
+	cm2, err := p.local.AddComment(ctx, p.repo, inputs.CommentAddInput{
+		IssueKey: iss.Key, Author: "bob", Body: "second comment",
+	}, false)
+	if err != nil {
+		t.Fatalf("AddComment #2: %v", err)
+	}
+	preview, _, err := p.local.DeleteComment(ctx, p.repo, inputs.CommentRmInput{
+		IssueKey: iss.Key, CommentUUID: cm2.UUID,
+	}, true)
+	if err != nil {
+		t.Fatalf("local DeleteComment dry-run: %v", err)
+	}
+	if preview == nil || preview.WouldRemove != 1 {
+		t.Fatalf("dry-run preview: %+v", preview)
+	}
+	if cs, _ := p.local.ListComments(ctx, p.repo, iss.Key); len(cs) != 1 {
+		t.Fatalf("dry-run deleted the comment: %d", len(cs))
+	}
+	if _, _, err := p.local.DeleteComment(ctx, p.repo, inputs.CommentRmInput{
+		IssueKey: iss.Key, CommentUUID: cm2.UUID,
+	}, false); err != nil {
+		t.Fatalf("local DeleteComment: %v", err)
+	}
+	if cs, _ := p.remote.ListComments(ctx, p.repo, iss.Key); len(cs) != 0 {
+		t.Fatalf("remote still sees deleted comment: %d", len(cs))
+	}
+
 	// Document round-trip.
 	doc, err := p.remote.CreateDocument(ctx, p.repo, client.DocCreateInput{
 		Filename: "design.md",

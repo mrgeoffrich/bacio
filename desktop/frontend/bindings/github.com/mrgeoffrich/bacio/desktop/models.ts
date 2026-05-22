@@ -186,15 +186,20 @@ export const ClaimantDTO = agentcards$0.ClaimantDTO;
 export type ClaimantDTO = agentcards$0.ClaimantDTO;
 
 /**
- * CommentDTO is one issue comment.
+ * CommentDTO is one issue comment. UUID is the immutable identity the
+ * React layer addresses a delete with.
  */
 export class CommentDTO {
+    "uuid": string;
     "author": string;
     "body": string;
     "createdAt": time$0.Time;
 
     /** Creates a new CommentDTO instance. */
     constructor($$source: Partial<CommentDTO> = {}) {
+        if (!("uuid" in $$source)) {
+            this["uuid"] = "";
+        }
         if (!("author" in $$source)) {
             this["author"] = "";
         }

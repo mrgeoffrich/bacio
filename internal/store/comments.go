@@ -78,8 +78,13 @@ func (s *Store) CreateCommentFromSync(issueID int64, uuid, author, body string, 
 	return s.GetCommentByID(id)
 }
 
-// DeleteCommentByUUID is the sync-side delete: the importer drops a
-// row when the on-disk file disappears.
+// DeleteCommentByUUID is both the sync-side delete (the importer drops
+// a row when the on-disk file disappears) and the user-facing delete
+// primitive behind `bacio comment rm` and the API/UI delete affordance.
+// Comments are leaf records — no children, relations or links — so a
+// hard DELETE is the whole story; audit logging is the caller's
+// responsibility, consistent with how CreateComment leaves the
+// comment.add history entry to the client layer.
 func (s *Store) DeleteCommentByUUID(uuid string) error {
 	res, err := s.DB.Exec(`DELETE FROM comments WHERE uuid = ?`, uuid)
 	if err != nil {

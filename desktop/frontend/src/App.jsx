@@ -548,6 +548,17 @@ export default function App() {
     }
   }, [activeBoard, openIssueKey, refreshBrief]);
 
+  const deleteComment = useCallback(async (commentUUID) => {
+    if (!openIssueKey || !commentUUID) return;
+    try {
+      await api.deleteComment(activeBoard, openIssueKey, commentUUID);
+      refreshBrief();
+    } catch (err) {
+      reportError(err, { headline: "Couldn't delete comment" });
+      throw err;
+    }
+  }, [activeBoard, openIssueKey, refreshBrief]);
+
   const attachPR = useCallback(async (url) => {
     if (!openIssueKey) return;
     await api.attachPullRequest(activeBoard, openIssueKey, url);
@@ -640,6 +651,7 @@ export default function App() {
             onClose={closeIssue}
             onSaveDescription={saveDescription}
             onAddComment={addComment}
+            onDeleteComment={deleteComment}
             onDispatch={(mode) => dispatchFromCard(openIssueKey, mode)}
             onCancelWaiting={() => cancelWaitingFromCard(openIssueKey)}
             onAttachPR={attachPR}
