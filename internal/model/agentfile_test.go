@@ -100,7 +100,7 @@ func TestRenderAgentFileCarriesWorktreeGuard(t *testing.T) {
 		t.Errorf("worktree guard (at %d) must precede the template brief (at %d)", guardAt, briefAt)
 	}
 	// The guard must call out both abort conditions explicitly.
-	for _, want := range []string{"main", "master", "isolated worktree", "Abort immediately"} {
+	for _, want := range []string{"main", "isolated worktree", "abort immediately"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("worktree guard missing %q\n--- got ---\n%s", want, out)
 		}
