@@ -108,6 +108,38 @@ func TestRefreshDispatchPreambleUpgradesBACI80Default(t *testing.T) {
 	}
 }
 
+// TestRefreshDispatchPreambleUpgradesBACI85Default: simulate a
+// post-BACI-85 / pre-BACI-103 DB by writing the BACI-85 default (which
+// told the supervisor to compose the Task `prompt` argument free-form)
+// into the row, then re-run the refresh — it must replace the body with
+// the BACI-103 default that passes a fixed verbatim Task-prompt stub.
+func TestRefreshDispatchPreambleUpgradesBACI85Default(t *testing.T) {
+	s := newTestStore(t)
+	old := strings.TrimRight(oldDispatchPreambleBACI85, "\r\n")
+	if _, err := s.DB.Exec(
+		`UPDATE prompt_templates SET body = ? WHERE slug = ?`,
+		old, model.BuiltinTemplatePreamble,
+	); err != nil {
+		t.Fatalf("seed BACI-85 preamble: %v", err)
+	}
+	if err := refreshDispatchPreamble(s.DB); err != nil {
+		t.Fatalf("refreshDispatchPreamble: %v", err)
+	}
+	body, err := s.GetDispatchPreamble()
+	if err != nil {
+		t.Fatalf("GetDispatchPreamble: %v", err)
+	}
+	if body != model.DefaultPromptBodyForBuiltinSlug(model.BuiltinTemplatePreamble) {
+		t.Fatalf("BACI-85 default was not refreshed to the new default:\n%s", body)
+	}
+	if strings.Contains(body, "a few lines giving the worker its job") {
+		t.Fatalf("refreshed preamble still tells the supervisor to compose a free-form prompt:\n%s", body)
+	}
+	if !strings.Contains(body, "Dispatch ID:") {
+		t.Fatalf("refreshed preamble does not reference the Dispatch ID stub line:\n%s", body)
+	}
+}
+
 // TestRefreshDispatchPreambleLeavesCustomBody: a user-customised
 // preamble body is left untouched by the refresh.
 func TestRefreshDispatchPreambleLeavesCustomBody(t *testing.T) {
