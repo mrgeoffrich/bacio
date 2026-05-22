@@ -123,3 +123,10 @@ in the drill-down (full answer overlay is a follow-up); the desktop
 question rendered as radios/checkboxes plus an "Other" free-text per
 question. Same modal is used in web mode against `bacio api`'s
 `/agents/questions/{id}/answer` route.
+
+BACI-100 hardened `register` against phantom registry rows: the register
+entry points validate `session_id` is a structurally valid UUID
+(`store.ValidateSessionUUID`, opt-in via `UpsertAgentSessionIn.RequireUUID`)
+and dedupe on `claude_pid` — a second register for one OS process
+supersedes the extra live rows (`EndReasonSuperseded`) so it can't
+accumulate N "live" sessions.

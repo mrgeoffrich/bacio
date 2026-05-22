@@ -14,11 +14,12 @@ import (
 func TestAgentSessionTodosEmpty(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	seedRepo(t, s)
-	status, _ := registerSession(t, ts.URL, "MINI", "sess-empty", nil)
+	sid := uuidFor("sess-empty")
+	status, _ := registerSession(t, ts.URL, "MINI", sid, nil)
 	if status != 201 {
 		t.Fatalf("register status %d", status)
 	}
-	resp, body := apiReq(t, "GET", ts.URL+"/agents/sessions/sess-empty/todos", nil, nil)
+	resp, body := apiReq(t, "GET", ts.URL+"/agents/sessions/"+sid+"/todos", nil, nil)
 	if resp.StatusCode != 200 {
 		t.Fatalf("status %d body %s", resp.StatusCode, body)
 	}
@@ -33,7 +34,8 @@ func TestAgentSessionTodosEmpty(t *testing.T) {
 func TestAgentSessionTodosRoundTrip(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	seedRepo(t, s)
-	if status, _ := registerSession(t, ts.URL, "MINI", "sess-todos", nil); status != 201 {
+	sid := uuidFor("sess-todos")
+	if status, _ := registerSession(t, ts.URL, "MINI", sid, nil); status != 201 {
 		t.Fatalf("register status %d", status)
 	}
 	// Seed three Task* events: TaskCreate "a"/"b"/"c" at positions 0/1/2
@@ -48,11 +50,11 @@ func TestAgentSessionTodosRoundTrip(t *testing.T) {
 		{"c", "Review", model.TodoPending},
 	}
 	for _, sd := range seeds {
-		if err := s.UpsertSessionTodoFromTask("sess-todos", sd.taskID, "MINI-1", sd.content, sd.status); err != nil {
+		if err := s.UpsertSessionTodoFromTask(sid, sd.taskID, "MINI-1", sd.content, sd.status); err != nil {
 			t.Fatalf("seed %s: %v", sd.taskID, err)
 		}
 	}
-	resp, body := apiReq(t, "GET", ts.URL+"/agents/sessions/sess-todos/todos", nil, nil)
+	resp, body := apiReq(t, "GET", ts.URL+"/agents/sessions/"+sid+"/todos", nil, nil)
 	if resp.StatusCode != 200 {
 		t.Fatalf("status %d body %s", resp.StatusCode, body)
 	}
@@ -77,17 +79,18 @@ func TestAgentSessionTodosRoundTrip(t *testing.T) {
 func TestAgentSessionTodosIssueKeyFilter(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	seedRepo(t, s)
-	if status, _ := registerSession(t, ts.URL, "MINI", "sess-juggle", nil); status != 201 {
+	sid := uuidFor("sess-juggle")
+	if status, _ := registerSession(t, ts.URL, "MINI", sid, nil); status != 201 {
 		t.Fatalf("register status %d", status)
 	}
 	// Session worked MINI-1 then MINI-2.
-	if err := s.UpsertSessionTodoFromTask("sess-juggle", "a", "MINI-1", "first job done", model.TodoCompleted); err != nil {
+	if err := s.UpsertSessionTodoFromTask(sid, "a", "MINI-1", "first job done", model.TodoCompleted); err != nil {
 		t.Fatalf("seed a: %v", err)
 	}
-	if err := s.UpsertSessionTodoFromTask("sess-juggle", "b", "MINI-2", "current job", model.TodoInProgress); err != nil {
+	if err := s.UpsertSessionTodoFromTask(sid, "b", "MINI-2", "current job", model.TodoInProgress); err != nil {
 		t.Fatalf("seed b: %v", err)
 	}
-	resp, body := apiReq(t, "GET", ts.URL+"/agents/sessions/sess-juggle/todos", nil, nil)
+	resp, body := apiReq(t, "GET", ts.URL+"/agents/sessions/"+sid+"/todos", nil, nil)
 	if resp.StatusCode != 200 {
 		t.Fatalf("unfiltered status %d body %s", resp.StatusCode, body)
 	}
@@ -98,7 +101,7 @@ func TestAgentSessionTodosIssueKeyFilter(t *testing.T) {
 	if len(unfiltered) != 2 {
 		t.Fatalf("unfiltered len = %d, want 2", len(unfiltered))
 	}
-	resp, body = apiReq(t, "GET", ts.URL+"/agents/sessions/sess-juggle/todos?issue_key=MINI-2", nil, nil)
+	resp, body = apiReq(t, "GET", ts.URL+"/agents/sessions/"+sid+"/todos?issue_key=MINI-2", nil, nil)
 	if resp.StatusCode != 200 {
 		t.Fatalf("filtered status %d body %s", resp.StatusCode, body)
 	}

@@ -46,6 +46,12 @@ func (c *localClient) RegisterAgent(ctx context.Context, repo *model.Repo, in in
 	// returns ErrAgentNameTaken and we surface it verbatim so the
 	// agent loop can detect the case (`errors.Is(..., ErrAgentNameTaken)`)
 	// and retry with a fresh slug.
+	// BACI-100: validate the session_id UUID shape up front so a
+	// --dry-run register of a malformed id rejects too (projectAgentSession
+	// doesn't validate). The non-dry-run path re-checks via RequireUUID.
+	if _, err := store.ValidateSessionUUID(in.SessionID); err != nil {
+		return nil, err
+	}
 	var agentID *int64
 	var agentCreated bool
 	if in.Agent != "" && !dryRun {
@@ -67,6 +73,9 @@ func (c *localClient) RegisterAgent(ctx context.Context, repo *model.Repo, in in
 		Model:     in.Model,
 		Host:      in.Host,
 		Branch:    in.Branch,
+		// BACI-100: `bacio agent register` is a register entry point —
+		// require a structurally valid UUID session_id here too.
+		RequireUUID: true,
 	})
 	if err != nil {
 		return nil, err
@@ -156,6 +165,24 @@ func (c *localClient) SessionsByClaudePID(ctx context.Context, host string, clau
 }
 
 func (c *localClient) CompleteRegistration(ctx context.Context, repo *model.Repo, in inputs.AgentRegisterInput, channelVersion string) (*model.AgentSession, error) {
+	// BACI-100: validate the session_id UUID shape up front, before any
+	// identity-mint or dedupe side effects. A fat-fingered, non-UUID
+	// session_id (the bug this ticket fixes) must be rejected without
+	// reconciling away the genuine live row first.
+	if _, err := store.ValidateSessionUUID(in.SessionID); err != nil {
+		return nil, err
+	}
+	// BACI-100 dedupe: when the caller supplied a claude_pid, reconcile
+	// any pre-existing live session rows for that OS process whose
+	// session_id differs from the incoming one. These are phantom rows —
+	// a single `claude` process should hold exactly one live registry
+	// row. End them with reason "superseded" so they drop out of the
+	// live set; the register then proceeds against the incoming id.
+	if in.ClaudePID != 0 {
+		if err := c.supersedeStaleSessions(in.Host, in.ClaudePID, in.SessionID, repo); err != nil {
+			return nil, err
+		}
+	}
 	// Resolve or mint the agent identity. Empty in.Agent means "mint a
 	// fresh one"; non-empty looks up (or creates if NewIdentity is set).
 	var agentID *int64
@@ -191,8 +218,10 @@ func (c *localClient) CompleteRegistration(ctx context.Context, repo *model.Repo
 		Model:          in.Model,
 		Host:           in.Host,
 		Branch:         in.Branch,
+		ClaudePID:      in.ClaudePID,
 		ChannelVersion: channelVersion,
 		MarkRegistered: true,
+		RequireUUID:    true,
 	})
 	if err != nil {
 		return nil, err
@@ -211,6 +240,43 @@ func (c *localClient) CompleteRegistration(ctx context.Context, repo *model.Repo
 		Details: agentRegisterDetails(sess),
 	})
 	return sess, nil
+}
+
+// supersedeStaleSessions reaps the phantom registry rows the BACI-100
+// dedupe targets: any *other* live session (ended_at IS NULL) for the
+// same (host, claude_pid) whose session_id differs from keepID. A single
+// `claude` process should hold exactly one live registry row — the
+// genuine session that keeps heartbeating. The extras are typically a
+// fat-fingered register retry (a different, wrong UUID) that minted a
+// row no one will ever heartbeat or end. End each with reason
+// "superseded" so it drops out of the live set and can't be picked as a
+// dispatch target; the caller then proceeds with the register against
+// keepID. Best-effort per row: a failure to end one phantom is logged
+// and doesn't fail the register.
+func (c *localClient) supersedeStaleSessions(host string, claudePID int64, keepID string, repo *model.Repo) error {
+	live, err := c.store.SessionsByClaudePID(host, claudePID)
+	if err != nil {
+		return err
+	}
+	for _, s := range live {
+		if s.SessionID == keepID {
+			continue
+		}
+		ended, _, _, err := c.store.EndAgentSession(s.SessionID, string(model.EndReasonSuperseded))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "bacio: superseding stale session %s: %v\n", s.SessionID, err)
+			continue
+		}
+		if ended != nil {
+			c.recordOp(model.HistoryEntry{
+				RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+				Op: "agent.end", Kind: "agent",
+				TargetID: &ended.ID, TargetLabel: ended.SessionID,
+				Details: fmt.Sprintf("reason=superseded (claude_pid %d re-registered as %s)", claudePID, keepID),
+			})
+		}
+	}
+	return nil
 }
 
 // recordIdentityMintFailure writes a paper-trail audit row when

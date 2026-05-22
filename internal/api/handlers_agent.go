@@ -58,6 +58,16 @@ func (d deps) handleAgentRegister(w http.ResponseWriter, r *http.Request) {
 			"session_id is required", map[string]any{"field": "session_id"})
 		return
 	}
+	// BACI-100: register requires a structurally valid UUID session_id.
+	// Checked here (before the dry-run branch) so a dry-run of a
+	// malformed id rejects with a clean 400 too — projectAgentSession
+	// doesn't validate, and the deeper RequireUUID store check would
+	// otherwise surface as a 500.
+	if _, err := store.ValidateSessionUUID(in.SessionID); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input",
+			err.Error(), map[string]any{"field": "session_id"})
+		return
+	}
 	if in.NewIdentity && in.Agent == "" {
 		writeError(w, http.StatusBadRequest, "invalid_input",
 			"new_identity requires agent", map[string]any{"field": "agent"})
@@ -106,6 +116,18 @@ func (d deps) handleAgentRegister(w http.ResponseWriter, r *http.Request) {
 // MarkRegistered flag is first-mark-wins so re-runs preserve the
 // original timestamp.
 func (d deps) registerAgent(repo *model.Repo, in inputs.AgentRegisterInput) (*model.AgentSession, error) {
+	// BACI-100 dedupe: the server can't see the caller's process tree, so
+	// claude_pid must arrive in the request body. When non-zero, reap any
+	// other live session row for that OS process whose session_id differs
+	// from the incoming one — a single `claude` process should hold
+	// exactly one live registry row. Absent (0), behave as before. The
+	// UUID-shape check already ran in handleAgentRegister (before the
+	// dry-run branch), and UpsertAgentSession re-checks via RequireUUID.
+	if in.ClaudePID != 0 {
+		if err := d.supersedeStaleSessions(repo, in.Host, in.ClaudePID, in.SessionID); err != nil {
+			return nil, err
+		}
+	}
 	var agentID *int64
 	if in.Agent != "" {
 		ag, created, err := d.store.UpsertAgent(in.Agent, in.NewIdentity)
@@ -131,8 +153,44 @@ func (d deps) registerAgent(repo *model.Repo, in inputs.AgentRegisterInput) (*mo
 		Model:          in.Model,
 		Host:           in.Host,
 		Branch:         in.Branch,
+		ClaudePID:      in.ClaudePID,
 		MarkRegistered: true,
+		RequireUUID:    true,
 	})
+}
+
+// supersedeStaleSessions is the API-side twin of
+// localClient.supersedeStaleSessions (BACI-100): it ends every other
+// live session row for the given (host, claude_pid) whose session_id
+// differs from keepID, so one OS process can't accumulate N phantom
+// "live" registry rows. Best-effort per row — a failure to end one
+// phantom is logged and doesn't fail the register.
+func (d deps) supersedeStaleSessions(repo *model.Repo, host string, claudePID int64, keepID string) error {
+	live, err := d.store.SessionsByClaudePID(host, claudePID)
+	if err != nil {
+		return err
+	}
+	for _, s := range live {
+		if s.SessionID == keepID {
+			continue
+		}
+		ended, _, _, err := d.store.EndAgentSession(s.SessionID, string(model.EndReasonSuperseded))
+		if err != nil {
+			if d.logger != nil {
+				d.logger.Warn("superseding stale session", "session_id", s.SessionID, "err", err)
+			}
+			continue
+		}
+		if ended != nil {
+			recordOp(d.store, d.logger, model.HistoryEntry{
+				RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+				Op: "agent.end", Kind: "agent",
+				TargetID: &ended.ID, TargetLabel: ended.SessionID,
+				Details: fmt.Sprintf("reason=superseded (claude_pid %d re-registered as %s)", claudePID, keepID),
+			})
+		}
+	}
+	return nil
 }
 
 // projectAgentSession is the API-side twin of client.projectAgentSession —

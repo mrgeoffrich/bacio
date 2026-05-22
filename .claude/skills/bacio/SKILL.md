@@ -831,7 +831,14 @@ An agent picks dispatches up two ways:
   dispatch with `reply`. **Never paste the literal
   `$CLAUDE_CODE_SESSION_ID` placeholder** — the validator refuses it
   with a clear error (BACI-46 hardening); use the value the channel
-  pre-filled for you.
+  pre-filled for you. **Copy the session_id verbatim — do not retype
+  it.** `register` rejects a `session_id` that is not a structurally
+  valid UUID (BACI-100), so a hand-typed UUID with a wrong-length hex
+  group fails the call instead of landing a phantom registry row. A
+  second `register` from the same `claude` process reconciles to one
+  live session row — bacio ends the extra rows (reason `superseded`)
+  rather than letting one OS process accumulate N phantom "live"
+  sessions.
 
 Either way, acknowledge each handled dispatch with `bacio agent ack <id>
 --note "..."` (or the channel's `reply` tool). Acked/cancelled dispatches
