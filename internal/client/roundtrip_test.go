@@ -420,14 +420,16 @@ func TestRoundTripAgentLifecycle(t *testing.T) {
 		t.Fatalf("CreateIssue: %v", err)
 	}
 
-	// Register via remote.
+	// Register via remote. BACI-100: the register route requires a
+	// structurally valid UUID session_id, so use a real one.
+	const sid = "9c0f7a32-3ab2-4c4d-8e6f-0a1b2c3d4e5f"
 	sess, err := p.remote.RegisterAgent(ctx, p.repo, inputs.AgentRegisterInput{
-		SessionID: "rt-sess", Actor: "tester", Model: "claude-opus-4-7",
+		SessionID: sid, Actor: "tester", Model: "claude-opus-4-7",
 	}, false)
 	if err != nil {
 		t.Fatalf("remote RegisterAgent: %v", err)
 	}
-	if sess.SessionID != "rt-sess" {
+	if sess.SessionID != sid {
 		t.Fatalf("remote RegisterAgent session_id = %q", sess.SessionID)
 	}
 
@@ -438,13 +440,13 @@ func TestRoundTripAgentLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("local ListAgentSessions: %v", err)
 	}
-	if len(got) != 1 || got[0].SessionID != "rt-sess" {
+	if len(got) != 1 || got[0].SessionID != sid {
 		t.Fatalf("local list after remote register: %+v", got)
 	}
 
 	// Remote claim, observed by local-side derived `taken`.
 	if _, err := p.remote.ClaimAgent(ctx, p.repo, inputs.AgentClaimInput{
-		SessionID: "rt-sess", IssueKey: iss.Key, Prompt: "do the thing",
+		SessionID: sid, IssueKey: iss.Key, Prompt: "do the thing",
 	}, false); err != nil {
 		t.Fatalf("remote ClaimAgent: %v", err)
 	}
@@ -461,7 +463,7 @@ func TestRoundTripAgentLifecycle(t *testing.T) {
 	}
 
 	// Remote show (cross-repo verb) sees the claim history.
-	view, err := p.remote.ShowAgentSession(ctx, "rt-sess")
+	view, err := p.remote.ShowAgentSession(ctx, sid)
 	if err != nil {
 		t.Fatalf("remote ShowAgentSession: %v", err)
 	}
@@ -471,7 +473,7 @@ func TestRoundTripAgentLifecycle(t *testing.T) {
 
 	// Remote release clears the assignee back out.
 	if _, err := p.remote.ReleaseAgent(ctx, p.repo, inputs.AgentReleaseInput{
-		SessionID: "rt-sess", IssueKey: iss.Key,
+		SessionID: sid, IssueKey: iss.Key,
 	}, false); err != nil {
 		t.Fatalf("remote ReleaseAgent: %v", err)
 	}
@@ -486,18 +488,18 @@ func TestRoundTripAgentLifecycle(t *testing.T) {
 
 	// Heartbeat is silent (no audit row, just bumps last_seen_at).
 	if _, err := p.remote.HeartbeatAgent(ctx, p.repo, inputs.AgentHeartbeatInput{
-		SessionID: "rt-sess",
+		SessionID: sid,
 	}, false); err != nil {
 		t.Fatalf("remote HeartbeatAgent: %v", err)
 	}
 
 	// End closes the session out.
 	if _, err := p.remote.EndAgent(ctx, p.repo, inputs.AgentEndInput{
-		SessionID: "rt-sess", Reason: "stop",
+		SessionID: sid, Reason: "stop",
 	}, false); err != nil {
 		t.Fatalf("remote EndAgent: %v", err)
 	}
-	ended, _ := p.store.GetAgentSession("rt-sess")
+	ended, _ := p.store.GetAgentSession(sid)
 	if ended.EndedAt == nil || ended.EndReason != "stop" {
 		t.Fatalf("ended state: %+v", ended)
 	}

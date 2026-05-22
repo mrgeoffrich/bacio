@@ -324,6 +324,93 @@ func TestValidateSessionIDRejectsPlaceholders(t *testing.T) {
 	}
 }
 
+// TestValidateSessionUUID locks in BACI-100: the register entry points
+// require a structurally valid UUID, so a fat-fingered retry (the
+// observed bug — a UUID with a wrong-length hex group) is rejected
+// before it can land a phantom session row. The shared ValidateSessionID
+// is deliberately NOT tightened — this test guards the split.
+func TestValidateSessionUUID(t *testing.T) {
+	good := []string{
+		"698f641f-4df1-4880-ab89-0ab2693c115a", // v4
+		"019e4ce7-e4c1-78f1-b547-5349910c1b9d", // v7
+		"23543E26-6339-4B8A-AFF2-D8EA2013F287", // uppercase hex
+	}
+	for _, s := range good {
+		if _, err := ValidateSessionUUID(s); err != nil {
+			t.Errorf("ValidateSessionUUID(%q) = %v, want nil", s, err)
+		}
+	}
+
+	bad := []struct {
+		name  string
+		input string
+	}{
+		{"short third group", "23543e26-6339-4b8-aff2-d8ea2013f287"},
+		{"long second group", "23543e26-63390-4b8a-aff2-d8ea2013f287"},
+		{"non-hex char", "23543e26-6339-4b8g-aff2-d8ea2013f287"},
+		{"missing group", "23543e26-6339-4b8a-d8ea2013f287"},
+		{"not a uuid at all", "sess-abc"},
+		{"empty", ""},
+	}
+	for _, tc := range bad {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := ValidateSessionUUID(tc.input); err == nil {
+				t.Fatalf("ValidateSessionUUID(%q) = nil, want error", tc.input)
+			}
+		})
+	}
+
+	// The BACI-46 placeholder guard still fires through the stricter
+	// validator (placeholder rejected before the UUID parse).
+	if _, err := ValidateSessionUUID("$CLAUDE_CODE_SESSION_ID"); err == nil {
+		t.Fatal("ValidateSessionUUID accepted the env-var placeholder")
+	} else if !strings.Contains(err.Error(), "placeholder") {
+		t.Fatalf("placeholder error not surfaced: %v", err)
+	}
+
+	// The shared validator stays permissive — non-UUID ids still pass
+	// it, so dispatch/todo/claim callers that only reference an id are
+	// unaffected (the no-blast-radius guarantee).
+	if _, err := ValidateSessionID("sess-abc"); err != nil {
+		t.Fatalf("ValidateSessionID tightened unexpectedly: %v", err)
+	}
+}
+
+// TestUpsertAgentSessionRequireUUID locks in the opt-in store flag:
+// RequireUUID=true rejects a malformed session_id at the register
+// boundary; the default (false) keeps accepting non-UUID ids so every
+// existing caller is unchanged.
+func TestUpsertAgentSessionRequireUUID(t *testing.T) {
+	st, repo, _ := seedRepoAndIssue(t)
+
+	if _, err := st.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID:   "23543e26-6339-4b8-aff2-d8ea2013f287",
+		RepoID:      repo.ID,
+		Actor:       "agent-x",
+		RequireUUID: true,
+	}); err == nil {
+		t.Fatal("RequireUUID=true accepted a malformed session_id")
+	}
+
+	if _, err := st.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID:   "698f641f-4df1-4880-ab89-0ab2693c115a",
+		RepoID:      repo.ID,
+		Actor:       "agent-x",
+		RequireUUID: true,
+	}); err != nil {
+		t.Fatalf("RequireUUID=true rejected a valid UUID: %v", err)
+	}
+
+	// Default (RequireUUID:false) still tolerates a non-UUID id.
+	if _, err := st.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "sess-legacy",
+		RepoID:    repo.ID,
+		Actor:     "agent-x",
+	}); err != nil {
+		t.Fatalf("RequireUUID=false rejected a non-UUID id: %v", err)
+	}
+}
+
 // Ensure newTestStore is reachable (declared in issues_test.go); a
 // no-op test guards against import-only regressions.
 var _ = filepath.Join

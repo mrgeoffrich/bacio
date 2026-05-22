@@ -136,6 +136,14 @@ type UpsertAgentSessionIn struct {
 	// register tool sets it true; the SessionStart-stub path and
 	// heartbeats leave it false (preserving whatever's already there).
 	MarkRegistered bool
+	// RequireUUID opts the write into the stricter ValidateSessionUUID
+	// check (BACI-100). The register entry points — CompleteRegistration,
+	// the SessionStart stub, and the API registerAgent path — set it true
+	// so a fat-fingered, non-UUID session_id is rejected before it can
+	// land a phantom row. Callers that merely refresh an existing session
+	// (heartbeat, dispatch-side writers) leave it false; default-false
+	// keeps ValidateSessionID's behaviour for every existing caller.
+	RequireUUID bool
 }
 
 // UpsertAgentSession inserts a new row or refreshes an existing one
@@ -146,7 +154,11 @@ type UpsertAgentSessionIn struct {
 //
 // Returns the row as it sits after the write.
 func (s *Store) UpsertAgentSession(in UpsertAgentSessionIn) (*model.AgentSession, error) {
-	if _, err := ValidateSessionID(in.SessionID); err != nil {
+	if in.RequireUUID {
+		if _, err := ValidateSessionUUID(in.SessionID); err != nil {
+			return nil, err
+		}
+	} else if _, err := ValidateSessionID(in.SessionID); err != nil {
 		return nil, err
 	}
 	actor, err := ValidateActor(in.Actor)

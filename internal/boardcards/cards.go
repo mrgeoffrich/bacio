@@ -47,6 +47,27 @@ func StateLabel(s model.State) string {
 	return string(s)
 }
 
+// CompletionSortKey returns the timestamp used to order an issue within
+// the Done / Cancelled columns: updated_at when set (the state change
+// into done/cancelled bumps it), else created_at. Newest-first ordering
+// sorts these descending. updated_at is a proxy for "completed at" —
+// bacio has no dedicated completion timestamp (BACI-101).
+func CompletionSortKey(iss *model.Issue) time.Time {
+	if iss == nil {
+		return time.Time{}
+	}
+	if !iss.UpdatedAt.IsZero() {
+		return iss.UpdatedAt
+	}
+	return iss.CreatedAt
+}
+
+// IsCompletedColumn reports whether a state is one of the two columns
+// BACI-101 sorts newest-first (Done, Cancelled).
+func IsCompletedColumn(s model.State) bool {
+	return s == model.StateDone || s == model.StateCancelled
+}
+
 // BoardCard is one kanban card — one bacio issue, shaped for the
 // imported UI kit. Fields beyond the issue itself: Taken (an agent
 // holds an open claim on this issue), WaitingForClaim (a dispatch is
@@ -191,6 +212,32 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 			Archived:        iss.ArchivedAt != nil,
 		})
 	}
+
+	// BACI-101: Done and Cancelled columns render newest-completed first.
+	// Stable sort with a "same completed column only" comparator so
+	// non-completed columns keep their incoming creation order, and ties
+	// within Done/Cancelled fall back to creation order naturally. The
+	// flat slice mixes all columns — the web/desktop re-bucket by
+	// `column` with an order-preserving filter, so a stable sort here is
+	// correct for them too.
+	issueByKey := make(map[string]*model.Issue, len(issues))
+	for _, iss := range issues {
+		issueByKey[iss.Key] = iss
+	}
+	sort.SliceStable(cards, func(i, j int) bool {
+		ci, cj := cards[i], cards[j]
+		if ci.Column != cj.Column {
+			return false // different columns: leave global order alone
+		}
+		if !IsCompletedColumn(model.State(ci.Column)) {
+			return false // non-completed column: keep creation order
+		}
+		ii, ij := issueByKey[ci.Key], issueByKey[cj.Key]
+		if ii == nil || ij == nil {
+			return false
+		}
+		return CompletionSortKey(ii).After(CompletionSortKey(ij))
+	})
 	return cards, nil
 }
 

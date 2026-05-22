@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/google/uuid"
 )
 
 // Defensive validators that run at every mutation boundary so hallucinated
@@ -142,6 +144,31 @@ func ValidateSessionID(s string) (string, error) {
 	}
 	if err := rejectSessionIDPlaceholder(s); err != nil {
 		return "", err
+	}
+	return s, nil
+}
+
+// ValidateSessionUUID is the stricter session-id validator used at the
+// agent-register entry points (CompleteRegistration, the SessionStart
+// stub, the API registerAgent path). It first runs every ValidateSessionID
+// shape rule — UTF-8, non-empty, no whitespace, printable ASCII, length
+// cap, BACI-46 placeholder reject — then additionally requires a
+// structurally valid UUID.
+//
+// The split exists deliberately: ValidateSessionID is shared by many
+// callers that merely *reference* a session id (dispatch targets, todo
+// rows, claim/release, ...), and test fixtures across the codebase use
+// non-UUID ids pervasively. Tightening the shared validator would have a
+// large blast radius. A register call, by contrast, is meant to carry
+// $CLAUDE_CODE_SESSION_ID verbatim — a UUID — so the UUID requirement is
+// correct there and only there (BACI-100).
+func ValidateSessionUUID(s string) (string, error) {
+	s, err := ValidateSessionID(s)
+	if err != nil {
+		return "", err
+	}
+	if _, err := uuid.Parse(s); err != nil {
+		return "", fmt.Errorf("session_id %q is not a valid UUID; it must be copied verbatim from the bacio channel's pre-filled register payload (or $CLAUDE_CODE_SESSION_ID from your environment) — do not retype it by hand", s)
 	}
 	return s, nil
 }

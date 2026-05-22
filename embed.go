@@ -1,12 +1,18 @@
 // Package bacio exposes embedded asset bytes for the bacio binary.
 // It lives at the module root because //go:embed cannot traverse parent
-// directories — by being a sibling of the .claude/ tree it can reach
-// the canonical SKILL.md without copying.
+// directories — being at the root it can reach skill/SKILL.md and the
+// webui/ bundle.
 package bacio
 
 import "embed"
 
-//go:embed .claude/skills/bacio/SKILL.md
+// SkillMarkdown is the bacio Claude Code skill shipped into a target repo
+// by `bacio install-skill`. It is sourced from skill/SKILL.md, deliberately
+// kept separate from .claude/skills/bacio/SKILL.md — the latter is the
+// skill loaded for bacio's own development sessions, and the two can now
+// diverge (e.g. trim the installed copy) without affecting each other.
+//
+//go:embed skill/SKILL.md
 var SkillMarkdown []byte
 
 // WebUIFS holds the browser-served React bundle produced by

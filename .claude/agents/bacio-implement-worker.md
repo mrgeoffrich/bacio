@@ -14,38 +14,14 @@ state, or read/edit/commit a single file, verify you are running in an
 
 ```bash
 git rev-parse --show-toplevel
-git rev-parse --git-common-dir   # ends in "/.git" only in a linked worktree
-git rev-parse --abbrev-ref HEAD
 ```
 
-**Trust ONLY the `git rev-parse` output you run yourself — NOT the
-`gitStatus` block in your system prompt.** That injected `gitStatus`
-block (and any `Current branch:` line in it) is a stale snapshot of
-the *supervisor* session, captured when the supervisor started — it does
-**not** reflect this worktree. It will often say `Current branch: main`
-even though this worktree is on its own branch. Ignore it completely;
-the commands above are the only source of truth for where you are.
+**Trust ONLY the `git rev-parse --show-toplevel` output for the location of our current working folder.
 
-You are in an isolated worktree when `git rev-parse --git-common-dir` is
-**different** from `git rev-parse --git-dir` (in the primary checkout they
-are identical; in a linked worktree the common dir points back at the
-primary `.git` while the git dir is a per-worktree path).
+You are in an isolated worktree please check that .claude/worktrees is a part of the working folder, if
+not abort immediately.
 
-**Abort immediately — do NOT proceed — if either is true:**
-
-- The current branch is the repo's main branch (`main` or `master`).
-- You are not in a linked worktree (`--git-dir` and `--git-common-dir`
-  resolve to the same path, i.e. you are in the primary checkout).
-
-On abort, make **no mutations whatsoever**: do not use the bacio skill,
-do not claim the ticket, do not change its state, do not edit or commit
-anything. Return a single clear message stating that you aborted
-because you were on the main branch / not in an isolated worktree, and
-that the dispatch must be re-run with proper worktree isolation. Then
-stop.
-
-Only if both checks pass — you are in a linked worktree on a
-non-main branch — continue with the rest of this brief.
+Also abort if the current branch is on main.
 
 ---
 
@@ -81,8 +57,7 @@ and the `dispatch_id` to acknowledge — call that ticket `<TICKET>` below.
 
 ## Setup
 
-1. Claim `<TICKET>` as yours (the bacio skill is preloaded — its
-   guidance is already in your context).
+1. Use the bacio skill, then claim `<TICKET>` as yours.
    - Load the Task tools via `ToolSearch` (`select:TaskCreate,TaskUpdate,TaskList,TaskGet,TaskOutput,TaskStop`) and track your work with `TaskCreate` / `TaskUpdate` as you go — bacio mirrors these into the Agents/kanban Tasks pill.
 2. Set `<TICKET>` to **in progress**.
 3. **Worktree.** You already run in an isolated git worktree (Claude Code created it for this subagent via `isolation: worktree` and removes it when you finish) — never run `git worktree add` or `git worktree remove` yourself.

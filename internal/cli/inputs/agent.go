@@ -22,6 +22,14 @@ type AgentRegisterInput struct {
 	Model       string `json:"model,omitempty"`
 	Host        string `json:"host,omitempty"`
 	Branch      string `json:"branch,omitempty"`
+	// ClaudePID is optional: the pid of the `claude` process driving this
+	// session. When non-zero it enables duplicate-registration dedupe
+	// (BACI-100) — a register call whose claude_pid already has a live
+	// session row under a different session_id reconciles the extras away
+	// rather than minting another phantom "live" row. Zero (no walkable
+	// `claude` ancestor, or a caller that doesn't supply it) skips the
+	// dedupe and behaves as before.
+	ClaudePID int64 `json:"claude_pid,omitempty"`
 }
 
 // AgentHeartbeatInput is the payload for `bacio agent heartbeat --json`.
