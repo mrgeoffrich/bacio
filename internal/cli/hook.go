@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -18,6 +19,7 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
 	"github.com/mrgeoffrich/bacio/internal/sync"
+	"github.com/mrgeoffrich/bacio/internal/wtenv"
 )
 
 // skipUnlessAgentMode is the single guard every hook subcommand calls at
@@ -61,6 +63,7 @@ func newHookCmd() *cobra.Command {
 		hookStopCmd(),
 		hookSessionEndCmd(),
 		hookPostToolUseCmd(),
+		hookPreToolUseCmd(),
 	)
 	return cmd
 }
@@ -640,6 +643,226 @@ func extractTaskFields(in *postToolUseInput) (taskID, content, status string, ok
 		return taskID, "", status, taskID != "" && status != ""
 	}
 	return "", "", "", false
+}
+
+// ---------- pre-tool-use ----------
+
+// preToolUseInput is the slice of the Claude Code PreToolUse payload
+// the worktree-confinement guard cares about. The matcher is exactly
+// `Write|Edit`, both of which carry a `file_path` in tool_input; the
+// decoder ignores unknown fields, so this is a strict subset and needs
+// no knowledge of any other tool's input shape.
+type preToolUseInput struct {
+	SessionID string `json:"session_id"`
+	CWD       string `json:"cwd"`
+	ToolName  string `json:"tool_name"`
+	ToolInput struct {
+		FilePath string `json:"file_path"` // Write / Edit
+	} `json:"tool_input"`
+}
+
+func readPreToolUseInput() (*preToolUseInput, error) {
+	raw, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return nil, err
+	}
+	var in preToolUseInput
+	if len(strings.TrimSpace(string(raw))) == 0 {
+		return &in, nil
+	}
+	if err := json.Unmarshal(raw, &in); err != nil {
+		return nil, fmt.Errorf("parse hook input: %w", err)
+	}
+	return &in, nil
+}
+
+// preToolUseMatcher is the regex installed in .claude/settings.json's
+// PreToolUse matcher field — pipe-alternation per Claude Code's matcher
+// syntax. Keeping the literal here so the install-agent plan and the
+// hook code can't drift (same convention as postToolUseMatcher). Bash
+// is deliberately NOT in the matcher: tool_input.command is a raw
+// string and parsing it for paths is fragile and easy to bypass.
+// Confining the write tools defuses the Bash escape for free — with the
+// parent checkout kept clean by the write-tool denial, a stray
+// `cd <main> && git commit` has nothing to commit.
+const preToolUseMatcher = "Write|Edit"
+
+// preToolUseDecision is the verdict the confinement guard reaches for
+// one tool call. allow=true emits nothing (the call proceeds); allow=
+// false emits the PreToolUse deny JSON naming the worktree root so the
+// model self-corrects. reason is non-empty only on a deny.
+type preToolUseDecision struct {
+	allow  bool
+	reason string
+}
+
+// worktreeRootResolver finds the dispatch worktree root that confines a
+// given cwd, or "" when cwd is not inside a manifest-bearing worktree.
+// Defaulted to the wtenv-backed resolver; swapped in tests.
+type worktreeRootResolver func(cwd string) string
+
+// resolveWorktreeRoot walks up from cwd via the wtenv resolver and
+// returns the directory of the worktree manifest (environment-config.yaml)
+// — the allowed worktree root. Returns "" when no manifest fed
+// resolution (Source default), i.e. this is not a dispatch worktree, so
+// confinement does not engage. Any resolver error returns "" too:
+// fail-open is the invariant, a guard that can't resolve must not deny.
+func resolveWorktreeRoot(cwd string) string {
+	res, err := wtenv.Resolve(wtenv.ResolveOpts{Cwd: cwd})
+	if err != nil || res.ManifestPath == "" {
+		return ""
+	}
+	return filepath.Dir(res.ManifestPath)
+}
+
+// pathWithin reports whether target is the directory root itself or a
+// path strictly underneath it. It is boundary-safe: a plain
+// strings.HasPrefix(target, root) would wrongly accept a sibling like
+// `…/agent-abc-evil` for root `…/agent-abc`, so the under-root case
+// requires the separator. Both inputs are expected to be cleaned
+// absolute paths.
+func pathWithin(root, target string) bool {
+	if root == "" || target == "" {
+		return false
+	}
+	root = filepath.Clean(root)
+	target = filepath.Clean(target)
+	if target == root {
+		return true
+	}
+	return strings.HasPrefix(target, root+string(os.PathSeparator))
+}
+
+// evalSymlinksLenient resolves symlinks in path. A path component that
+// does not exist yet (a brand-new file the worker is about to Write,
+// possibly in a not-yet-created directory) is not an error: it walks up
+// to the deepest existing ancestor, resolves symlinks there, then
+// rejoins the missing tail — so a Write to a not-yet-created path still
+// gets a symlink-safe answer that shares a prefix with a resolved
+// worktree root. Returns the cleaned absolute path when nothing on the
+// chain exists rather than failing — fail-open.
+func evalSymlinksLenient(path string) string {
+	path = filepath.Clean(path)
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	// Walk up to the deepest existing ancestor, resolve it, then rejoin
+	// the non-existent tail. filepath.Dir eventually yields the root
+	// ("/" or a volume) which always exists, so this terminates.
+	var tail []string
+	cur := path
+	for {
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return path // reached the root without finding anything
+		}
+		tail = append([]string{filepath.Base(cur)}, tail...)
+		if resolved, err := filepath.EvalSymlinks(parent); err == nil {
+			return filepath.Join(append([]string{resolved}, tail...)...)
+		}
+		cur = parent
+	}
+}
+
+// decidePreToolUse is the pure decision function for the PreToolUse
+// confinement guard — no stdin, no stdout, directly unit-testable. It
+// allows in every ambiguous or error case (fail-open) and denies ONLY
+// on a positive "the file_path resolves outside a known dispatch
+// worktree root" determination.
+func decidePreToolUse(in *preToolUseInput, resolveRoot worktreeRootResolver) preToolUseDecision {
+	allow := preToolUseDecision{allow: true}
+
+	// Defends against a matcher widening or a tool variant we don't
+	// model — only Write/Edit carry a file_path we can confine.
+	if in.ToolName != "Write" && in.ToolName != "Edit" {
+		return allow
+	}
+	if strings.TrimSpace(in.ToolInput.FilePath) == "" {
+		return allow
+	}
+
+	// Confinement engages only when cwd sits inside a manifest-bearing
+	// worktree — exactly the dispatched-worker case (`bacio worktree
+	// init` is in every brief's Setup). No manifest → not a dispatch
+	// worktree → allow.
+	root := resolveRoot(in.CWD)
+	if root == "" {
+		return allow
+	}
+
+	// Normalise the target: a Write/Edit file_path is normally already
+	// absolute, but resolve it against cwd defensively. Then eval
+	// symlinks on both sides so a symlink can't slip the check.
+	target := in.ToolInput.FilePath
+	if !filepath.IsAbs(target) {
+		base := in.CWD
+		if base == "" {
+			if wd, err := os.Getwd(); err == nil {
+				base = wd
+			}
+		}
+		target = filepath.Join(base, target)
+	}
+	target = evalSymlinksLenient(target)
+	root = evalSymlinksLenient(root)
+
+	if pathWithin(root, target) {
+		return allow
+	}
+	return preToolUseDecision{
+		allow: false,
+		reason: fmt.Sprintf(
+			"bacio: this dispatched-worker session is confined to its git worktree %s. "+
+				"The %s file_path %s resolves outside it (the parent checkout). "+
+				"Re-issue the edit with a path under %s.",
+			root, in.ToolName, in.ToolInput.FilePath, root),
+	}
+}
+
+// emitPreToolUseDeny writes the PreToolUse deny decision JSON to stdout.
+// Claude Code reads this on a hook exit 0 and blocks the tool call,
+// surfacing permissionDecisionReason to the model so it self-corrects.
+func emitPreToolUseDeny(reason string) {
+	out := map[string]any{
+		"hookSpecificOutput": map[string]any{
+			"hookEventName":            "PreToolUse",
+			"permissionDecision":       "deny",
+			"permissionDecisionReason": reason,
+		},
+	}
+	enc := json.NewEncoder(os.Stdout)
+	if err := enc.Encode(out); err != nil {
+		fmt.Fprintln(os.Stderr, "bacio hook pre-tool-use: encode decision:", err)
+	}
+}
+
+func hookPreToolUseCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:    "pre-tool-use",
+		Short:  "PreToolUse hook (matcher: Write|Edit): confine a dispatched worker to its git worktree",
+		Args:   cobra.NoArgs,
+		Hidden: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// skipUnlessAgentMode: an interactive (non-agent) session is
+			// never confined — only dispatched workers run agent mode.
+			if skipUnlessAgentMode("pre-tool-use") {
+				return nil
+			}
+			in, err := readPreToolUseInput()
+			if err != nil {
+				// Fail-open: a guard that can't read its input must not
+				// wedge a legitimate session. Log and allow.
+				fmt.Fprintln(os.Stderr, "bacio hook pre-tool-use:", err)
+				return nil
+			}
+			d := decidePreToolUse(in, resolveWorktreeRoot)
+			if d.allow {
+				return nil
+			}
+			emitPreToolUseDeny(d.reason)
+			return nil
+		},
+	}
 }
 
 // ---------- session-end ----------

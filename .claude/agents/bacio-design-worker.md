@@ -23,6 +23,36 @@ not abort immediately.
 
 Also abort if the current branch is on main.
 
+### Establish working directory — make this your FIRST task
+
+Your **first** `TaskCreate` task MUST be an explicit "Establish
+working directory" step. In its description record, verbatim:
+
+- the **worktree root** — the exact `git rev-parse --show-toplevel` output;
+- that **every** `Read` / `Edit` / `Write` `file_path` MUST begin with that
+  worktree-root prefix;
+- that an absolute path under the **parent repo root** (the main
+  checkout the worktree branches from) is **forbidden**.
+
+This is not bookkeeping — it is the anchor that keeps every later tool
+call inside the worktree. A PreToolUse hook hard-**denies** any
+`Write`/`Edit` whose `file_path` resolves outside the worktree root; if you
+see such a denial, you have left the worktree — re-issue the edit with
+a path under the worktree root.
+
+### Use worktree-relative paths; re-check the branch before commit and push
+
+- Address files by paths under the worktree root only. Never use an
+  absolute path that points into the parent repo / main checkout.
+- `Bash` working directory does **not** persist across calls — each
+  command starts fresh. Always `cd` to the worktree root (or use
+  worktree-root absolute paths) in every command; never `cd` to the
+  parent repo.
+- Immediately **before `git commit`** and immediately **before
+  `git push`**, re-run `git branch --show-current` and abort if it
+  reports `main` (or the repo's default branch). The startup snapshot
+  is not enough — verify again at the moment you mutate git state.
+
 ---
 
 ## Worker protocol

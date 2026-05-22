@@ -16,21 +16,22 @@ import (
 // `bacio hook` subcommand that services it. install-hooks writes one
 // command hook per event into the repo's .claude/settings.json.
 //
-// Matcher is non-empty only for PostToolUse — the four event-typed
-// hooks don't support matchers, but PostToolUse needs one to scope
-// bacio's mirror to the agent's task-list tools (firing on every tool
-// call would be a lot of stderr noise for a benign no-op). The matcher
-// uses pipe-alternation (Claude Code's matcher syntax supports
-// `Foo|Bar` for a literal multi-tool match) so one hook group
-// services both TaskCreate (insert a planned task) and TaskUpdate
-// (flip its status). Source of truth for the literal lives next to
-// the hook handler so the two can't drift — see internal/cli/hook.go.
+// Matcher is non-empty for the two tool-call hooks — the four
+// event-typed hooks don't support matchers. PostToolUse uses one to
+// scope bacio's task-list mirror to TaskCreate|TaskUpdate (firing on
+// every tool call would be a lot of stderr noise for a benign no-op);
+// PreToolUse uses one to scope the worktree-confinement guard to
+// Write|Edit. Both matchers use pipe-alternation (Claude Code's matcher
+// syntax supports `Foo|Bar` for a literal multi-tool match). Source of
+// truth for each literal lives next to its hook handler so the two
+// can't drift — see internal/cli/hook.go.
 var bacioHookEvents = []struct{ Event, Subcommand, Matcher string }{
 	{"SessionStart", "session-start", ""},
 	{"UserPromptSubmit", "user-prompt-submit", ""},
 	{"Stop", "stop", ""},
 	{"SessionEnd", "session-end", ""},
 	{"PostToolUse", "post-tool-use", postToolUseMatcher},
+	{"PreToolUse", "pre-tool-use", preToolUseMatcher},
 }
 
 // bacioHookMarker identifies hook groups bacio owns, so re-running

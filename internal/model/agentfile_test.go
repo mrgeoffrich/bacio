@@ -105,6 +105,19 @@ func TestRenderAgentFileCarriesWorktreeGuard(t *testing.T) {
 			t.Errorf("worktree guard missing %q\n--- got ---\n%s", want, out)
 		}
 	}
+	// BACI-116: the guard must mandate the "Establish working directory"
+	// first task and the pre-commit / pre-push branch re-check.
+	for _, want := range []string{
+		"Establish working directory",
+		"PreToolUse hook",
+		"git commit",
+		"git push",
+		"git branch --show-current",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("worktree guard missing BACI-116 line %q\n--- got ---\n%s", want, out)
+		}
+	}
 }
 
 // TestRenderAgentFileBuiltinsCarryGuard checks the guard reaches every

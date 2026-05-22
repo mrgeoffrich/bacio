@@ -751,6 +751,60 @@ place, since the guard lives in the renderer, not the source bodies.
 Covered by `TestRenderAgentFileCarriesWorktreeGuard` /
 `TestRenderAgentFileBuiltinsCarryGuard`.
 
+The guard also mandates two **process-layer** mitigations (BACI-116):
+the worker's *first* `TaskCreate` task must be an explicit "Establish
+working directory" step that records the worktree-root prefix verbatim,
+and the worker must re-run `git branch --show-current` immediately
+before `git commit` and before `git push`. These raise the floor and
+leave an audit signal — they do not *enforce*; the PreToolUse hook
+below does.
+
+### Worktree confinement — the PreToolUse `Write|Edit` hook (BACI-116)
+
+The worktree+branch guard above is a one-time **cwd snapshot**: it
+proves where the worker stood at startup, but it does not constrain
+where later `Read`/`Edit`/`Write` calls point. Those tools take an
+absolute `file_path` — cwd is irrelevant to them — and a dispatch
+worktree lives *inside* the repo it branches from, so a parent-repo
+absolute path is always a valid, existing file. A worker can therefore
+silently do every edit / commit / push in the primary checkout while
+its startup check reported "I'm in a worktree" (this is exactly the
+BACI-102 failure).
+
+The enforcement is a sixth `bacio hook` subcommand, `pre-tool-use`,
+wired by `bacio install-agent` as a **PreToolUse** hook with matcher
+`Write|Edit`. On every `Write`/`Edit` call it:
+
+1. resolves the dispatch worktree root by walking up from the call's
+   `cwd` to a worktree manifest (`environment-config.yaml`) via the
+   `wtenv` resolver — confinement engages **only** when a manifest is
+   present, which is exactly the dispatched-worker case;
+2. resolves the tool's `file_path` (symlink-evaluated, boundary-safe
+   prefix test) against that root;
+3. **denies** the call — `permissionDecision: "deny"` with a
+   `permissionDecisionReason` that names the worktree root verbatim —
+   when the path resolves outside the root, so the model self-corrects
+   and retries with the worktree path.
+
+This collapses the whole BACI-102 chain at the first edit: deny the
+edit → the parent checkout stays clean → a later `cd <main> &&
+git commit` commits nothing → the push carries nothing.
+
+`Bash` is **deliberately not** confined: `tool_input.command` is a raw
+string and parsing it for paths is fragile and easy to bypass.
+Confining the write tools defuses the Bash escape for free — with the
+parent checkout kept clean, a stray `cd <main> && git commit` has
+nothing to commit.
+
+The handler honours the same **fail-open** invariant as every other
+hook: stdin unreadable, JSON malformed, resolver error, symlink eval
+failure — every failure mode *allows* the call (exit 0, no deny
+payload) and logs one line to stderr. A `deny` is emitted only on a
+positive "resolved outside a known worktree root" determination. The
+pure decision function `decidePreToolUse` (`internal/cli/hook.go`) is
+unit-tested directly (`hook_pretooluse_test.go`), as is the
+boundary-safe `pathWithin` helper.
+
 ### Subagent tool surface
 
 The generated agent files carry **no `tools:` line**. Omitting the
