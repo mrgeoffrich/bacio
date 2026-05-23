@@ -98,7 +98,13 @@ type LinkedDocDTO struct {
 	Description string   `json:"description"`
 	SourcePath  string   `json:"sourcePath,omitempty"`
 	LinkedVia   []string `json:"linkedVia"`
-	Content     string   `json:"content"`
+	// SizeBytes is the doc's on-disk size in bytes. Always populated, even
+	// when Content is omitted from the brief (BACI-115 keeps transcript
+	// bodies out of the inlined payload but carries the size so the
+	// LinkedDocPanel can render "body not inlined — N KB" instead of the
+	// misleading "Document body is empty.").
+	SizeBytes int64  `json:"sizeBytes"`
+	Content   string `json:"content"`
 }
 
 // FeatureRefDTO is the lightweight feature reference attached to an
@@ -503,6 +509,7 @@ func (b *BoardService) GetIssueBrief(repoPrefix, key string) (IssueBriefDTO, err
 			Description: d.Description,
 			SourcePath:  d.SourcePath,
 			LinkedVia:   via,
+			SizeBytes:   d.SizeBytes,
 			Content:     d.Content,
 		})
 	}

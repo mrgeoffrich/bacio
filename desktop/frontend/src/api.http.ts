@@ -151,6 +151,11 @@ export interface LinkedDocDTO {
   description: string;
   sourcePath?: string;
   linkedVia: string[];
+  // sizeBytes is the doc's on-disk size in bytes. Always populated, even
+  // when content is omitted from the brief (BACI-115 keeps transcript
+  // bodies out of the inlined payload but carries the size so a consumer
+  // can render "body not inlined — N KB" instead of "body is empty").
+  sizeBytes: number;
   content: string;
 }
 
@@ -672,6 +677,7 @@ interface ApiBriefDoc {
   description?: string;
   source_path?: string;
   linked_via?: string[];
+  size_bytes?: number;
   content?: string;
 }
 
@@ -743,6 +749,7 @@ function reshapeApiBrief(view: ApiIssueBrief): IssueBriefDTO {
       description: d.description ?? '',
       sourcePath: d.source_path ?? '',
       linkedVia: d.linked_via ?? [],
+      sizeBytes: d.size_bytes ?? 0,
       content: d.content ?? '',
     })),
     comments: (view.comments ?? []).map(c => ({
