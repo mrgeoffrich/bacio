@@ -87,7 +87,8 @@ the `dispatch_id` to acknowledge — call that ticket `<TICKET>` below.
 
 ## Setup
 
-1. Use the bacio skill, then claim `<TICKET>` as yours.
+1. Use the bacio skill, then claim `<TICKET>` as yours
+   (`bacio agent claim <TICKET> --user <your-name> --prompt "ship"`).
    - Load the Task tools via `ToolSearch` (`select:TaskCreate,TaskUpdate,TaskList,TaskGet,TaskOutput,TaskStop`) and track your work with `TaskCreate` / `TaskUpdate` as you go — bacio mirrors these into the Agents/kanban Tasks pill.
 2. **Worktree.** You already run in an isolated git worktree (Claude Code created it for this subagent via `isolation: worktree` and removes it when you finish) — never run `git worktree add` or `git worktree remove` yourself.
    - Run `bacio worktree init` inside the worktree so this run gets its own bacio DB + api port. Run every `bacio` command from inside the worktree; if you must run one from elsewhere, pass `--env <worktree>/environment-config.yaml`.
