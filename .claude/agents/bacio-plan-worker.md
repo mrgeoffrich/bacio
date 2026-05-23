@@ -92,16 +92,14 @@ the `dispatch_id` to acknowledge — call that ticket `<TICKET>` below.
    - Load the Task tools via `ToolSearch` (`select:TaskCreate,TaskUpdate,TaskList,TaskGet,TaskOutput,TaskStop`) and track your work with `TaskCreate` / `TaskUpdate` as you go — bacio mirrors these into the Agents/kanban Tasks pill.
 2. Set `<TICKET>` to **in progress**.
 3. **Worktree.** You already run in an isolated git worktree (Claude Code created it for this subagent via `isolation: worktree` and removes it when you finish) — never run `git worktree add` or `git worktree remove` yourself.
-   - Run `bacio worktree init` inside the worktree so this run gets its own bacio DB + api port. Run every `bacio` command from inside the worktree; if you must run one from elsewhere, pass `--env <worktree>/environment-config.yaml`.
+   - Run `bacio worktree init` inside the worktree so this run gets its own API port (a `bacio web` smoke test won't collide with the user's running bacio); it leaves DB resolution on the shared `~/.bacio/db.sqlite`, where the ticket you were dispatched to work on lives, so every `bacio` issue call still reaches it. Run every `bacio` command from inside the worktree; if you must run one from elsewhere, pass `--env <worktree>/environment-config.yaml`.
    - If `bacio web`/`bacio api` reports a port already in use, do NOT kill whatever holds it — that is most likely the user's own running bacio UI. Re-check you are inside your worktree, or pass `--port`.
 
 ## Plan
 
-Run a planning pass on `<TICKET>`: produce a thorough implementation plan — do not write code yet. Capture any documentation updates the work implies. When the plan is ready, attach it to the issue as a markdown comment.
+Run a planning pass on `<TICKET>`: produce a thorough implementation plan — do not write code yet. Capture any documentation updates the work implies. When the plan is ready, attach it to the document. Link that document to the issue **only** — `bacio doc link <file> <TICKET>`. Never link a plan to its feature: a feature link fans the document out onto every sibling issue's brief, so a plan for one ticket would surface as if it belonged to every other ticket in the feature.
 
-If the plan is large enough that you write it to its own document instead of a comment, link that document to the issue **only** — `bacio doc link <file> <TICKET>`. Never link a plan to its feature: a feature link fans the document out onto every sibling issue's brief, so a plan for one ticket would surface as if it belonged to every other ticket in the feature.
-
-**Reference repo files relative to `<project_root>`.** When the plan names a file in the repository, write it as a path relative to the worktree git toplevel (run `git rev-parse --show-toplevel` to find it) — e.g. `internal/tui/markdown.go`, never an absolute path like `/Users/.../bacio/internal/tui/markdown.go` and never a worktree-specific path like `/Users/.../bacio-some-worktree/internal/tui/markdown.go`. Absolute and worktree-specific paths are brittle: a plan written in one worktree breaks when read or executed from another, and machine-specific home-directory paths leak into a doc that may be synced or read elsewhere.
+**Reference repo files relative to workspace root.** When the plan names a file in the repository, write it as a path relative — e.g. `internal/tui/markdown.go`, never an absolute path like `/Users/.../bacio/internal/tui/markdown.go` and never a worktree-specific path like `/Users/.../bacio-some-worktree/internal/tui/markdown.go`. Absolute and worktree-specific paths are brittle: a plan written in one worktree breaks when read or executed from another, and machine-specific home-directory paths leak into a doc that may be synced or read elsewhere.
 
 If you have to stop for user input, the issue is automatically moved to **needs action**; once the user answers, put it back to **in progress** and continue.
 

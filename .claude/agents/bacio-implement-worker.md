@@ -105,10 +105,9 @@ If you have to stop for user input, the issue is automatically moved to **needs 
 ## Close out
 
 1. Once smoke tests pass, create a PR from all the changes.
-2. Attach the PR to the ticket: `bacio pr attach <TICKET> <pr-url> --user <your agent name>`. Do this whenever you open a PR — without it the PR never shows up on the issue, its brief, or the UIs.
-3. Drop the worktree's bacio environment with `bacio worktree rm <path> --confirm <slug>` (Claude Code removes the git worktree itself).
-4. Put `<TICKET>` into **in review** and unclaim it.
-5. Call `mcp__bacio__reply` with the `dispatch_id` from your Task prompt and a one-line summary. If you had to stop, return `needs_input: <what is missing>` as your final line instead.
+2. Drop the worktree's bacio environment with `bacio worktree rm <path> --confirm <slug>` (Claude Code removes the git worktree itself).
+3. Put `<TICKET>` into **in review** and unclaim it.
+4. Call `mcp__bacio__reply` with the `dispatch_id` from your Task prompt and a one-line summary. If you had to stop, return `needs_input: <what is missing>` as your final line instead.
 
 ## Questions
 
