@@ -174,7 +174,7 @@ func main() {
 			application.NewService(NewFeatureService(c)),
 			application.NewService(NewHistoryService(c)),
 			application.NewService(NewSettingsService(c)),
-			application.NewService(NewLeaderService(resolved.DBPath, resolved.ManifestSlug())),
+			application.NewService(NewLeaderService(resolved.DBPath, resolved.ManifestSlug(), logger)),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),

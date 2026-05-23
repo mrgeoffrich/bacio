@@ -89,6 +89,8 @@ prune` subcommand.
 | Process         | Filename                                |
 | --------------- | --------------------------------------- |
 | `bacio api`     | `bacio-api-YYYY-MM-DD.log`              |
+| `bacio web`     | `bacio-web-YYYY-MM-DD.log`              |
+| `bacio tui`     | `bacio-tui-YYYY-MM-DD.log`              |
 | `bacio channel` | `bacio-channel-pid<N>-YYYY-MM-DD.log`   |
 | `bacio-desktop` | `bacio-desktop-YYYY-MM-DD.log`          |
 
@@ -96,12 +98,21 @@ The channel filename carries the channel process's PID stamp so two
 concurrent channels for the same project (rare — a transient race
 during a `/clear`) don't stomp on each other.
 
+`bacio web` keeps its own per-day filename (rather than reusing
+`bacio-api-*`) so a user running both `bacio web` and `bacio api`
+side-by-side doesn't have the two processes fighting over one log
+handle. `bacio tui` writes the BACI-89 background-sync runner and the
+other leader-gated tickers (idle-pinger, archive sweep, queue matcher,
+prune) into its own file, so an operator running a long-lived TUI
+session can grep for sync push failures or leader-lease flaps after
+the fact.
+
 ## Log format
 
 Plain text, one event per line, slog's default `TextHandler`
 encoding. Every line carries a `time=` (RFC 3339 with milliseconds),
-a `level=` (DEBUG/INFO/WARN/ERROR), a `component=` (`api`,
-`channel`, `desktop`), a `msg=`, and any structured fields the
+a `level=` (DEBUG/INFO/WARN/ERROR), a `component=` (`api`, `web`,
+`tui`, `channel`, `desktop`), a `msg=`, and any structured fields the
 emitter passed.
 
 ```
@@ -115,18 +126,24 @@ Greppable by design — structured JSON output is a possible v2.
 
 ## What gets logged
 
-- **Server lifecycle.** `api starting` (with addr, db, env source,
-  env path, version), `api listening`, `api shutdown`. Same shape
-  on the channel: handshake notification, register, MCP tool calls,
-  drain ticks, abandoned-question startup sweep. The desktop emits
-  a single `bacio-desktop starting` line at boot.
-- **HTTP request/response** for `bacio api` — method, path, status,
-  latency, actor (`X-Actor`), remote addr.
+- **Server lifecycle.** `api starting` / `web starting` (with addr,
+  db, env source, env path, version), `api listening`, `api shutdown`
+  / `web shutdown`. Same shape on the channel: handshake
+  notification, register, MCP tool calls, drain ticks,
+  abandoned-question startup sweep. The desktop emits a single
+  `bacio-desktop starting` line at boot, and `bacio tui` emits a
+  `tui starting` line.
+- **HTTP request/response** for `bacio api` / `bacio web` — method,
+  path, status, latency, actor (`X-Actor`), remote addr.
 - **MCP tool calls** for `bacio channel` — every `initialize`,
   `tools/list`, `tools/call`, and the reply/register/ask_user_question
   outcomes.
-- **Dispatch lifecycle** — queued→pending bind, ack, cancel — when
-  the matcher logger has a file sink.
+- **Leader-gated background work** (BACI-121) — sync push failures
+  and completions, dispatch matcher bind/ack/cancel, idle-pinger
+  reaper actions, archive-sweep results, prune outcomes. The
+  long-running surfaces (`bacio api`, `bacio web`, the desktop
+  binary, `bacio tui`) all route these through the file sink so a
+  grep on the log dir surfaces them after the fact.
 - **SQLite errors and unexpected panics** with stack — the existing
   `recoverPanic` middleware already routes these through slog.
 

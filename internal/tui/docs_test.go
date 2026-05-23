@@ -34,7 +34,7 @@ func TestEnterOnAttachmentOpensDoc(t *testing.T) {
 
 	// Build the model first — the Documents view loads an empty list.
 	// nil elector: the test acts as leader, no election needed.
-	m, err := NewModel(s, repo, nil, "")
+	m, err := NewModel(s, repo, nil, "", nil)
 	if err != nil {
 		t.Fatalf("new model: %v", err)
 	}

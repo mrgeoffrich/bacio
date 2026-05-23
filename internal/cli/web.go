@@ -17,6 +17,7 @@ import (
 
 	"github.com/mrgeoffrich/bacio/internal/api"
 	"github.com/mrgeoffrich/bacio/internal/browseropen"
+	"github.com/mrgeoffrich/bacio/internal/version"
 )
 
 // friendlyServeErr rewrites a raw "bind: address already in use" from
@@ -120,7 +121,21 @@ incoming requests carry their own actor via the X-Actor header
 			}
 			defer s.Close()
 
-			logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+			// BACI-121: route web + leader + sync + controller events into
+			// a per-process log file via the BACI-73 chain. Component
+			// "web" so concurrent `bacio api` + `bacio web` processes
+			// don't fight over the same bacio-api-YYYY-MM-DD.log handle.
+			// A creation failure falls back to stderr-only with a single
+			// warning — never blocks the process from starting.
+			logger, closeLogger := buildComponentLogger(env, "web")
+			defer closeLogger()
+			logger.Info("web starting",
+				"addr", addr,
+				"db", env.DBPath,
+				"env_source", string(env.Source),
+				"env_path", env.ManifestPath,
+				"version", version.String(),
+			)
 
 			// Bundle-absence check at startup so the user sees the hint
 			// without having to refresh a tab. The server still runs —
@@ -157,7 +172,13 @@ incoming requests carry their own actor via the X-Actor header
 				go openBrowserWhenReady(ctx, addr, logger)
 			}
 
-			return friendlyServeErr(addr, srv.Run(ctx))
+			err = friendlyServeErr(addr, srv.Run(ctx))
+			if err != nil {
+				logger.Error("web shutdown", "err", err)
+			} else {
+				logger.Info("web shutdown", "reason", "signal")
+			}
+			return err
 		},
 	}
 	cmd.Flags().StringVar(&addr, "addr", "127.0.0.1:5320", "bind address (host:port)")

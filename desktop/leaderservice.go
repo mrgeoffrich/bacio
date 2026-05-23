@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"sync"
 
@@ -33,6 +34,7 @@ type LeaderStatusDTO = leaderservice.StatusDTO
 type LeaderService struct {
 	dbPath string // resolved at construction time so a per-worktree manifest (BACI-63) routes the leader at the same DB as the rest of the desktop
 	slug   string // optional worktree slug — surfaces in the leader label so two desktop instances are distinguishable
+	logger *slog.Logger
 	st     *store.Store
 	svc    *leaderservice.Service
 
@@ -46,8 +48,15 @@ type LeaderService struct {
 // ServiceStartup before the window opens. An empty dbPath falls back
 // to store.DefaultPath() so old callers without a wtenv-resolved path
 // still work.
-func NewLeaderService(dbPath, slug string) *LeaderService {
-	return &LeaderService{dbPath: dbPath, slug: slug}
+//
+// BACI-121: the desktop binary builds a file-backed *slog.Logger in
+// main and threads it in here so leader-lease + background-sync +
+// controller events land in the BACI-73 log file rather than relying
+// on slog.Default(). A nil logger falls back to slog.Default() —
+// preserves the historic behaviour for callers (e.g. tests) that
+// haven't built one.
+func NewLeaderService(dbPath, slug string, logger *slog.Logger) *LeaderService {
+	return &LeaderService{dbPath: dbPath, slug: slug, logger: logger}
 }
 
 func (ls *LeaderService) ServiceStartup(_ context.Context, _ application.ServiceOptions) error {
@@ -69,7 +78,11 @@ func (ls *LeaderService) ServiceStartup(_ context.Context, _ application.Service
 	if ls.slug != "" {
 		label = fmt.Sprintf("desktop[%s] pid=%d host=%s", ls.slug, os.Getpid(), h)
 	}
-	svc := leaderservice.New(s, label, dbPath, nil)
+	// BACI-121: pass an explicit logger so leader / sync / controller
+	// events land in the file sink rather than relying on
+	// slog.Default() (which is technically wired up too — main calls
+	// slog.SetDefault — but the explicit hand-off is the contract).
+	svc := leaderservice.New(s, label, dbPath, ls.logger)
 
 	ls.mu.Lock()
 	ls.st = s
