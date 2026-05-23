@@ -1,8 +1,48 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useLayoutEffect, useCallback } from 'react';
 import KanbanCard from './KanbanCard.jsx';
 import QuestionModal from './QuestionModal.jsx';
 
-export default function Board({ columns, cards, promptConfig, hideEmptyColumns, onMoveCard, onOpenCard, onDispatchFromCard, onCancelWaitingCard, onAfterQuestionResolved }) {
+// BACI-119: the board's horizontal scroll offset is persisted per repo to
+// localStorage so navigating away (Features / Docs / single issue / etc.)
+// and back lands the user where they were instead of resetting to 0. The
+// board element unmounts on every nav switch (see App.jsx's activeView
+// ternary), so React itself can't preserve the offset — we have to restore
+// it explicitly on mount. Keyed by repo prefix because switching repos
+// changes the column / card set, so a global offset would point at a
+// stale position.
+const BOARD_SCROLL_KEY = 'bacio-board-scroll';
+
+// localStorage may throw under hardened browser profiles — every access
+// is wrapped in try/catch and falls back to a no-op / 0 (same pattern as
+// App.jsx's theme + active-repo helpers).
+function readBoardScrollMap() {
+  try {
+    const raw = localStorage.getItem(BOARD_SCROLL_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+function readBoardScroll(repo) {
+  if (!repo) return 0;
+  const map = readBoardScrollMap();
+  const v = map[repo];
+  return typeof v === 'number' && Number.isFinite(v) ? v : 0;
+}
+function persistBoardScroll(repo, offset) {
+  if (!repo) return;
+  try {
+    const map = readBoardScrollMap();
+    map[repo] = Math.max(0, Math.round(offset));
+    localStorage.setItem(BOARD_SCROLL_KEY, JSON.stringify(map));
+  } catch {
+    /* non-fatal — the offset just won't survive the next nav/relaunch */
+  }
+}
+
+export default function Board({ activeBoard, columns, cards, promptConfig, hideEmptyColumns, onMoveCard, onOpenCard, onDispatchFromCard, onCancelWaitingCard, onAfterQuestionResolved }) {
   const [dragKey, setDragKey] = useState(null);
   const [overCol, setOverCol] = useState(null);
   // BACI-53: the kanban card "? N" pill opens the shared
@@ -10,6 +50,12 @@ export default function Board({ columns, cards, promptConfig, hideEmptyColumns, 
   // modal stays mounted across re-renders of the underlying card and
   // closes cleanly when the user submits/dismisses.
   const [activeQuestionId, setActiveQuestionId] = useState(null);
+  // BACI-119: ref on the scrolling .mk-board element so the restore
+  // effect can drive scrollLeft and the onScroll handler can read it.
+  const boardRef = useRef(null);
+  // BACI-119: debounce token for the scroll-write so we don't hit
+  // localStorage on every scroll tick.
+  const scrollWriteTimer = useRef(null);
 
   // With the preference on, drop any column that has no cards. The
   // filter is derived from `cards`, which App refreshes on repo change
@@ -18,8 +64,41 @@ export default function Board({ columns, cards, promptConfig, hideEmptyColumns, 
     ? columns.filter(col => cards.some(c => c.column === col.state))
     : columns;
 
+  // BACI-119: restore the saved horizontal scrollLeft on mount, on repo
+  // switch, and whenever the rendered card/column set changes width.
+  // The dependency on cards.length / visibleColumns.length matters: cards
+  // load async, so the first mount may render a 0-width board (clamping
+  // any restore to 0). Re-running once cards land lets the assignment
+  // stick. Setting scrollLeft past the current scrollWidth is a no-op
+  // (the browser clamps); once content is wide enough it lands. Using
+  // useLayoutEffect (not useEffect) restores before paint — no flash at
+  // offset 0 first.
+  useLayoutEffect(() => {
+    const el = boardRef.current;
+    if (!el || !activeBoard) return;
+    const saved = readBoardScroll(activeBoard);
+    if (saved > 0 && el.scrollLeft !== saved) {
+      el.scrollLeft = saved;
+    }
+  }, [activeBoard, cards.length, visibleColumns.length]);
+
+  // BACI-119: persist the offset on scroll with a small debounce. A
+  // useEffect cleanup on unmount would also work, but capturing live
+  // also covers tab-close / window-quit paths where React doesn't get
+  // a clean unmount.
+  const onBoardScroll = useCallback((e) => {
+    const left = e.currentTarget.scrollLeft;
+    if (scrollWriteTimer.current) clearTimeout(scrollWriteTimer.current);
+    scrollWriteTimer.current = setTimeout(() => {
+      persistBoardScroll(activeBoard, left);
+    }, 150);
+  }, [activeBoard]);
+
   // Everything hidden — a genuinely empty repo with the toggle on.
-  // Show a placeholder rather than a blank board region.
+  // Show a placeholder rather than a blank board region. The empty
+  // branch deliberately does not carry boardRef / the scroll handler
+  // — there is nothing to scroll, and the restore effect null-checks
+  // boardRef.current.
   if (visibleColumns.length === 0) {
     return (
       <div className="mk-board mk-board-empty-wrap">
@@ -29,7 +108,7 @@ export default function Board({ columns, cards, promptConfig, hideEmptyColumns, 
   }
 
   return (
-    <div className="mk-board">
+    <div className="mk-board" ref={boardRef} onScroll={onBoardScroll}>
       {visibleColumns.map(col => {
         const colCards = cards.filter(c => c.column === col.state);
         // BACI-77: an empty column collapses to a narrow vertical-title

@@ -662,6 +662,7 @@ export default function App() {
       ) : (
         <ErrorBoundary headline="Something went wrong on the board" label="The Board view crashed">
           <Board
+            activeBoard={activeBoard}
             columns={columns}
             cards={cards}
             promptConfig={promptConfig}
