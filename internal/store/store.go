@@ -507,6 +507,17 @@ func migrate(db *sql.DB) error {
 			return fmt.Errorf("create %s: %w", idx, err)
 		}
 	}
+	// BACI-115: the documents.type CHECK was widened to admit four new
+	// values (plan, transcript, rendered_transcript, review). A DB
+	// carrying the pre-BACI-115 narrow CHECK would reject inserts of
+	// those new types with a constraint failure. SQLite can't widen a
+	// column CHECK in place, so this is the table-rebuild dance — the
+	// same pattern as migrateAgentDispatchesModeCheck. Keyed off the
+	// stored CREATE TABLE SQL: a DB whose CHECK already lists `plan`
+	// (fresh schema.sql or a prior run of this migration) is a no-op.
+	if err := migrateDocumentsTypeCheck(db); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -934,6 +945,113 @@ func agentDispatchesModeCheckPresent(db *sql.DB) (bool, error) {
 	}
 	collapsed := strings.Join(strings.Fields(sqlText.String), " ")
 	return strings.Contains(collapsed, "CHECK (mode IN"), nil
+}
+
+// migrateDocumentsTypeCheck rebuilds documents to widen the column
+// CHECK on `type` to admit the four BACI-115 values (plan, transcript,
+// rendered_transcript, review). SQLite can't widen a column CHECK in
+// place, so this is the table-rebuild dance — the same pattern as
+// migrateAgentDispatchesModeCheck. Keyed off the stored CREATE TABLE
+// SQL: a DB whose CHECK already lists 'plan' (fresh schema.sql or a
+// prior run of this migration) is a no-op.
+func migrateDocumentsTypeCheck(db *sql.DB) error {
+	stale, err := documentsTypeCheckIsStale(db)
+	if err != nil {
+		return err
+	}
+	if !stale {
+		return nil
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// defer_foreign_keys is transaction-scoped — it keeps the DROP TABLE
+	// from cascading through document_links (which REFERENCEs documents
+	// with ON DELETE CASCADE) during the rebuild.
+	if _, err := tx.Exec(`PRAGMA defer_foreign_keys = ON`); err != nil {
+		return fmt.Errorf("defer fk: %w", err)
+	}
+	// Mirror schema.sql's documents shape exactly, with the widened CHECK.
+	// SELECT *-style copy round-trips because columns line up.
+	if _, err := tx.Exec(`
+		CREATE TABLE documents_new (
+			id          INTEGER PRIMARY KEY AUTOINCREMENT,
+			uuid        TEXT    NOT NULL,
+			repo_id     INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+			filename    TEXT    NOT NULL,
+			type        TEXT    NOT NULL CHECK (type IN
+			              ('user_docs','project_in_planning','project_in_progress',
+			               'project_complete','vendor_docs','architecture','designs',
+			               'testing_plans','plan','transcript','rendered_transcript',
+			               'review')),
+			content     TEXT    NOT NULL,
+			size_bytes  INTEGER NOT NULL,
+			source_path TEXT    NOT NULL DEFAULT '',
+			archived_at DATETIME,
+			created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(repo_id, filename)
+		)
+	`); err != nil {
+		return fmt.Errorf("create documents_new: %w", err)
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO documents_new
+			(id, uuid, repo_id, filename, type, content, size_bytes,
+			 source_path, archived_at, created_at, updated_at)
+		SELECT
+			id, uuid, repo_id, filename, type, content, size_bytes,
+			source_path, archived_at, created_at, updated_at
+		FROM documents
+	`); err != nil {
+		return fmt.Errorf("copy documents rows: %w", err)
+	}
+	if _, err := tx.Exec(`DROP TABLE documents`); err != nil {
+		return fmt.Errorf("drop old documents: %w", err)
+	}
+	if _, err := tx.Exec(`ALTER TABLE documents_new RENAME TO documents`); err != nil {
+		return fmt.Errorf("rename documents_new: %w", err)
+	}
+	// Re-create the indexes the dropped table carried. idx_documents_type
+	// is declared in schema.sql; idx_documents_archived_at is created
+	// later in migrate() (so it can run after the archived_at column is
+	// backfilled on very old DBs) but we recreate it here too so a
+	// freshly-rebuilt table never has a missing index.
+	for _, stmt := range []string{
+		`CREATE INDEX IF NOT EXISTS idx_documents_type ON documents(type)`,
+		`CREATE INDEX IF NOT EXISTS idx_documents_archived_at ON documents(archived_at)`,
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("recreate documents index: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+// documentsTypeCheckIsStale reports whether the documents table still
+// carries the pre-BACI-115 narrow CHECK on `type` — i.e. one that does
+// not mention 'plan'. Whitespace-collapsed lookup on the stored
+// CREATE TABLE SQL so trivial reformatting doesn't fool it.
+func documentsTypeCheckIsStale(db *sql.DB) (bool, error) {
+	var sqlText sql.NullString
+	err := db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'documents'`).Scan(&sqlText)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !sqlText.Valid {
+		return false, nil
+	}
+	collapsed := strings.Join(strings.Fields(sqlText.String), " ")
+	// The widened CHECK lists 'plan' (one of the four new BACI-115
+	// values). A stored CREATE TABLE that omits it predates BACI-115
+	// and needs the rebuild.
+	return !strings.Contains(collapsed, "'plan'"), nil
 }
 
 // reposPathUniqueNeedsRelax reports whether the repos table still

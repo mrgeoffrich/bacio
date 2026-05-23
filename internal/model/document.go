@@ -17,6 +17,16 @@ const (
 	DocTypeArchitecture      DocumentType = "architecture"
 	DocTypeDesigns           DocumentType = "designs"
 	DocTypeTestingPlans      DocumentType = "testing_plans"
+	// BACI-115 — typed attachments. `attach_transcript` and the per-mode
+	// dispatch templates set these at attach time so `bacio issue brief`
+	// can decide whether to inline a doc's body or surface metadata only.
+	// The canonical stored form uses underscores (the DB CHECK and
+	// ParseDocumentType's output are underscore-cased); the dash form
+	// (e.g. `--type rendered-transcript`) still parses on input.
+	DocTypePlan               DocumentType = "plan"
+	DocTypeTranscript         DocumentType = "transcript"
+	DocTypeRenderedTranscript DocumentType = "rendered_transcript"
+	DocTypeReview             DocumentType = "review"
 )
 
 var allDocTypes = []DocumentType{
@@ -28,6 +38,10 @@ var allDocTypes = []DocumentType{
 	DocTypeArchitecture,
 	DocTypeDesigns,
 	DocTypeTestingPlans,
+	DocTypePlan,
+	DocTypeTranscript,
+	DocTypeRenderedTranscript,
+	DocTypeReview,
 }
 
 func AllDocumentTypes() []DocumentType { return append([]DocumentType(nil), allDocTypes...) }
@@ -52,6 +66,35 @@ func docTypeStrings() []string {
 		out[i] = string(t)
 	}
 	return out
+}
+
+// DocTypeInlinedInBrief reports whether `bacio issue brief` should
+// inline the body of a doc of this type. Today only `plan` and
+// `review` docs are inlined; transcripts (which can run to MBs after a
+// full plan → implement → ship cycle) and every other type are
+// surfaced as metadata only. See BACI-115.
+func DocTypeInlinedInBrief(t DocumentType) bool {
+	switch t {
+	case DocTypePlan, DocTypeReview:
+		return true
+	}
+	return false
+}
+
+// IsBacioTranscriptFilename reports whether the filename matches the
+// `attach_transcript` naming convention — `bacio-transcript-<KEY>-agent-<id>.jsonl`.
+// Used as a read-side fallback (BACI-115) so transcripts attached
+// before the `transcript` type existed (i.e. still stored as
+// `project_complete`) are never inlined in `bacio issue brief`.
+func IsBacioTranscriptFilename(name string) bool {
+	name = strings.TrimSpace(name)
+	if !strings.HasPrefix(name, "bacio-transcript-") {
+		return false
+	}
+	if !strings.HasSuffix(name, ".jsonl") {
+		return false
+	}
+	return strings.Contains(name, "-agent-")
 }
 
 type Document struct {

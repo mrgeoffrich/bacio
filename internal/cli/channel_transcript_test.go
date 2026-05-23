@@ -10,6 +10,7 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/git"
+	"github.com/mrgeoffrich/bacio/internal/model"
 )
 
 func TestClaudeProjectSlug(t *testing.T) {
@@ -143,9 +144,29 @@ func TestAttachTranscriptEndToEnd(t *testing.T) {
 	if doc.Filename != wantName {
 		t.Errorf("doc filename = %q, want %q", doc.Filename, wantName)
 	}
-	// The body is the raw .jsonl, stored verbatim (fixture is well under cap).
-	if doc.Content != jsonl {
-		t.Errorf("doc content should byte-equal the raw transcript fixture:\ngot:  %q\nwant: %q", doc.Content, jsonl)
+	// BACI-115: the attached transcript MUST be typed `transcript`, not
+	// `project_complete`.
+	if doc.Type != model.DocTypeTranscript {
+		t.Errorf("doc type = %q, want %q", doc.Type, model.DocTypeTranscript)
+	}
+	// BACI-115: brief never inlines a transcript body — it surfaces
+	// metadata + size_bytes only. The raw bytes are still in the DB
+	// (verified via DocShow / GetDocumentByID below); they just don't
+	// land in the brief.
+	if doc.Content != "" {
+		t.Errorf("brief should not inline transcript body; got %d bytes of content", len(doc.Content))
+	}
+	if doc.SizeBytes != int64(len(jsonl)) {
+		t.Errorf("doc size_bytes = %d, want %d", doc.SizeBytes, len(jsonl))
+	}
+	// The raw body still round-trips via the doc-show path — only the
+	// brief omits it.
+	full, err := c.GetDocumentRaw(ctx, repo, wantName)
+	if err != nil {
+		t.Fatalf("get document: %v", err)
+	}
+	if full.Content != jsonl {
+		t.Errorf("stored doc content should byte-equal the raw transcript fixture:\ngot:  %q\nwant: %q", full.Content, jsonl)
 	}
 	// The supervisor's note is moved onto the link description, not the body.
 	if !strings.Contains(doc.Description, "the summary") {

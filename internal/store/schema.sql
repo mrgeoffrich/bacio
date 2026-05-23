@@ -127,7 +127,8 @@ CREATE TABLE IF NOT EXISTS documents (
     type        TEXT    NOT NULL CHECK (type IN
                   ('user_docs','project_in_planning','project_in_progress',
                    'project_complete','vendor_docs','architecture','designs',
-                   'testing_plans')),
+                   'testing_plans','plan','transcript','rendered_transcript',
+                   'review')),
     content     TEXT    NOT NULL,
     size_bytes  INTEGER NOT NULL,
     -- source_path is the repo-relative on-disk path the document was last

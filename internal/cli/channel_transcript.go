@@ -19,7 +19,10 @@ import (
 // subagent's agentID and an issue key, it locates the subagent's
 // transcript under ~/.claude/projects/, stores the raw .jsonl bytes
 // verbatim (capped at channel.TranscriptCap), and links it to the
-// issue as a project_complete document.
+// issue as a `transcript`-typed document (BACI-115 — was
+// project_complete pre-BACI-115; the new `transcript` type lets
+// `bacio issue brief` surface transcript metadata without inlining
+// MBs of .jsonl body).
 //
 // Transcript location contract (Claude Code 2.1.x): every Task-spawned
 // subagent's conversation is persisted at
@@ -56,7 +59,7 @@ func (s *channelSource) AttachTranscript(ctx context.Context, issueKey, agentID,
 	filename := fmt.Sprintf("bacio-transcript-%s-agent-%s.jsonl", canonicalKey, agentID)
 	if _, err := s.c.UpsertDocument(ctx, s.repo, client.DocCreateInput{
 		Filename:   filename,
-		Type:       model.DocTypeProjectComplete,
+		Type:       model.DocTypeTranscript,
 		Body:       string(body),
 		SourcePath: tr.path,
 	}, false); err != nil {
