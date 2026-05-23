@@ -164,6 +164,7 @@ to stderr.`,
 				claudePID:  int64(claudePID),
 				channelPID: int64(os.Getpid()),
 				pushed:     map[int64]bool{},
+				logger:     logger,
 			}
 			srv := channel.New(src, "bacio", version.String(), os.Stdin, os.Stdout, logf)
 
@@ -212,6 +213,31 @@ type channelSource struct {
 	// set, so a restart still re-pushes work the previous process's push
 	// may not have landed. Only touched from the single poller goroutine.
 	pushed map[int64]bool
+
+	// logger is the BACI-73 slog logger the glue-layer methods on
+	// channelSource use for their error paths (drain / register /
+	// drain-answered / abandon-open / ensure-setup). It is the same
+	// logger that powers the top-level `logf` closure in RunE — both
+	// land in the per-process log file under the resolved log dir,
+	// carrying the `component=channel` + `channel_pid=<PID>` attrs.
+	// Nil-safe via the s.errlog helper for tests that construct a
+	// channelSource directly without going through RunE.
+	logger *slog.Logger
+}
+
+// errlog emits a structured Error event through the channelSource
+// logger. Used by the glue-layer error paths (drain / register /
+// drain-answered / abandon-open / ensure-setup) so they land in the
+// BACI-73 per-process log file rather than only in Claude Code's
+// MCP server-stderr capture. The session id and error are passed
+// as structured attributes so operators can grep + filter cleanly.
+// When the logger is nil (the test path constructs channelSource
+// directly without wiring buildChannelLogger), the call is a no-op.
+func (s *channelSource) errlog(msg string, attrs ...any) {
+	if s.logger == nil {
+		return
+	}
+	s.logger.Error(msg, attrs...)
 }
 
 // hintedAgentName is a best-effort lookup of the agent identity slug
@@ -237,7 +263,7 @@ func (s *channelSource) Drain(ctx context.Context) ([]channel.Event, error) {
 	for _, sess := range sessions {
 		ds, derr := s.c.DrainDispatches(ctx, sess.SessionID)
 		if derr != nil {
-			fmt.Fprintln(os.Stderr, "bacio channel: drain session", sess.SessionID, ":", derr)
+			s.errlog("drain session", "session_id", sess.SessionID, "err", derr)
 			continue
 		}
 		for _, d := range ds {
@@ -306,7 +332,7 @@ func (s *channelSource) Register(ctx context.Context, sessionID, modelID string)
 		return fmt.Errorf("channel has no resolved repo — cannot register")
 	}
 	if err := s.Heartbeat(ctx); err != nil {
-		fmt.Fprintln(os.Stderr, "bacio channel: heartbeat before register:", err)
+		s.errlog("heartbeat before register", "session_id", sessionID, "err", err)
 	}
 	sess, err := s.c.CompleteRegistration(ctx, s.repo, inputs.AgentRegisterInput{
 		SessionID: sessionID,
@@ -327,11 +353,11 @@ func (s *channelSource) Register(ctx context.Context, sessionID, modelID string)
 	// Best-effort: a write failure doesn't fail register.
 	if sess.AgentName != "" && s.repoRoot != "" && s.claudePID != 0 {
 		if rerr := recordAgentSession(s.repoRoot, int(s.claudePID), s.host, sess.AgentName, sessionID); rerr != nil {
-			fmt.Fprintln(os.Stderr, "bacio channel: update agents.json:", rerr)
+			s.errlog("update agents.json", "session_id", sessionID, "err", rerr)
 		}
 	}
 	if err := s.c.LinkSessionChannel(ctx, sessionID, s.claudePID, s.host); err != nil {
-		fmt.Fprintln(os.Stderr, "bacio channel: link session channel:", err)
+		s.errlog("link session channel", "session_id", sessionID, "err", err)
 	}
 	return nil
 }
@@ -396,7 +422,7 @@ func (s *channelSource) DrainAnsweredQuestions(ctx context.Context) ([]model.Ses
 	for _, sess := range sessions {
 		rows, err := s.c.DrainSettledQuestionsForSession(ctx, sess.SessionID)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "bacio channel: drain settled questions for", sess.SessionID, ":", err)
+			s.errlog("drain settled questions", "session_id", sess.SessionID, "err", err)
 			continue
 		}
 		for _, r := range rows {
@@ -422,7 +448,7 @@ func (s *channelSource) AbandonOpenQuestions(ctx context.Context) (int, error) {
 	for _, sess := range sessions {
 		n, err := s.c.AbandonOpenQuestionsForSession(ctx, sess.SessionID)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "bacio channel: abandon open questions for", sess.SessionID, ":", err)
+			s.errlog("abandon open questions", "session_id", sess.SessionID, "err", err)
 			continue
 		}
 		total += n
@@ -493,7 +519,7 @@ func (s *channelSource) EnsureSetup(ctx context.Context) error {
 			continue // already registered — no nudge needed
 		}
 		if _, err := s.c.EnsureSetupDispatch(ctx, s.repo, sess.SessionID); err != nil {
-			fmt.Fprintln(os.Stderr, "bacio channel: ensure setup dispatch for", sess.SessionID, ":", err)
+			s.errlog("ensure setup dispatch", "session_id", sess.SessionID, "err", err)
 		}
 	}
 	return nil
