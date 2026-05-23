@@ -14,6 +14,7 @@ package tui
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
@@ -182,9 +183,13 @@ type syncDoneMsg struct{}
 // elector is read concurrently by other goroutines and SyncIfLeader's
 // CurrentState() read is already safe for that. A nil runner/elector
 // is a no-op inside SyncIfLeader.
-func runSyncCmd(r *bsync.BackgroundRunner, el *leader.Elector) tea.Cmd {
+//
+// BACI-121: the logger is threaded through so a sync push failure
+// surfaces in the BACI-73 log file rather than being swallowed by
+// slog.Default().
+func runSyncCmd(r *bsync.BackgroundRunner, el *leader.Elector, log *slog.Logger) tea.Cmd {
 	return func() tea.Msg {
-		controller.SyncIfLeader(r, el, nil)
+		controller.SyncIfLeader(r, el, log)
 		return syncDoneMsg{}
 	}
 }
@@ -197,12 +202,19 @@ func runSyncCmd(r *bsync.BackgroundRunner, el *leader.Elector) tea.Cmd {
 // el.Release fires and a standby UI can promote within one tick (~10s)
 // rather than waiting out the 180s stale window. SIGINT is left to
 // bubbletea, which already converts it into a graceful quit.
-func Run(s *store.Store, repo *model.Repo, dbPath string) error {
+//
+// BACI-121: log is the file-backed *slog.Logger built by the CLI shell
+// so the TUI's leader-gated tickers (sync, idle-ping, archive sweep,
+// matcher, prune) route their events into the BACI-73 log file. A nil
+// log falls back to slog.Default() inside the controller helpers — keeps
+// alt entry points (the WASM demo) working without forcing them to
+// wire a logger.
+func Run(s *store.Store, repo *model.Repo, dbPath string, log *slog.Logger) error {
 	h, _ := os.Hostname()
 	label := fmt.Sprintf("tui pid=%d host=%s", os.Getpid(), h)
 	el := leader.New(s, label)
 	defer el.Release()
-	m, err := NewModel(s, repo, el, dbPath)
+	m, err := NewModel(s, repo, el, dbPath, log)
 	if err != nil {
 		return err
 	}
@@ -229,7 +241,12 @@ func Run(s *store.Store, repo *model.Repo, dbPath string) error {
 // dbPath is the resolved SQLite path threaded to the BACI-89
 // background sync runner's cross-process lock (empty falls back to
 // store.DefaultPath at tick time).
-func NewModel(s *store.Store, repo *model.Repo, el *leader.Elector, dbPath string) (*Model, error) {
+//
+// BACI-121: log is the file-backed *slog.Logger the CLI shell built —
+// threaded to the idle-pinger + background sync runner so their tick
+// events land in the BACI-73 log file. A nil log keeps the WASM-demo
+// path working (controller helpers fall back to slog.Default()).
+func NewModel(s *store.Store, repo *model.Repo, el *leader.Elector, dbPath string, log *slog.Logger) (*Model, error) {
 	board, err := newBoardView(s, repo, tuiActor())
 	if err != nil {
 		return nil, err
@@ -250,9 +267,10 @@ func NewModel(s *store.Store, repo *model.Repo, el *leader.Elector, dbPath strin
 		repo:       repo,
 		store:      s,
 		elector:    el,
+		log:        log,
 		matcher:    dispatcher.New(s),
-		pinger:     idlepinger.New(s, pingerClient, nil),
-		syncRunner: bsync.NewBackgroundRunner(s, dbPath, pingerActor, nil),
+		pinger:     idlepinger.New(s, pingerClient, log),
+		syncRunner: bsync.NewBackgroundRunner(s, dbPath, pingerActor, log),
 		tabs: []tab{
 			{"Board", board},
 			{"Features", newFeaturesView(s, repo)},
@@ -282,6 +300,12 @@ type Model struct {
 	// matcher tickers use (views still hold their own copies for their
 	// own queries).
 	store *store.Store
+	// log is the file-backed *slog.Logger threaded into the
+	// leader-gated controller helpers (BACI-121) so a sync push
+	// failure, leader-lease flap, archive sweep error, etc. surfaces
+	// in the BACI-73 log file. nil falls back to slog.Default() inside
+	// the helpers — keeps the WASM-demo path working.
+	log *slog.Logger
 	// elector runs the UI leader election; nil in the WASM demo.
 	elector     *leader.Elector
 	leaderState leader.State
@@ -366,7 +390,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// so this stays in lockstep with the desktop/api goroutine path.
 		// The ticker keeps running on standby (the lease can flip back to
 		// us mid-run).
-		controller.PruneIfLeader(m.store, m.elector, nil)
+		//
+		// BACI-121: pass the file-backed logger so prune errors surface
+		// in the per-process log file rather than slog.Default()'s
+		// stderr fallback.
+		controller.PruneIfLeader(m.store, m.elector, m.log)
 		if m.elector == nil {
 			return m, nil
 		}
@@ -376,7 +404,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// agents. Leader-gating + error handling lives in
 		// controller.MatchIfLeader — same helper the desktop and api
 		// goroutines call, so all three UIs run the matcher identically.
-		controller.MatchIfLeader(m.matcher, m.elector, nil)
+		controller.MatchIfLeader(m.matcher, m.elector, m.log)
 		if m.elector == nil {
 			return m, nil
 		}
@@ -388,7 +416,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// handling lives in controller.PingIfLeader — same helper the
 		// desktop and api goroutines call, so all three UIs run the
 		// reaper identically.
-		controller.PingIfLeader(m.pinger, m.elector, nil)
+		controller.PingIfLeader(m.pinger, m.elector, m.log)
 		if m.elector == nil {
 			return m, nil
 		}
@@ -398,7 +426,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// (terminal-issue-age → empty-feature → orphan-document) on
 		// the leader. Same leader-gating helper the controller
 		// goroutine uses so TUI and desktop/api stay in lockstep.
-		controller.ArchiveSweepIfLeader(m.store, m.elector, nil)
+		controller.ArchiveSweepIfLeader(m.store, m.elector, m.log)
 		if m.elector == nil {
 			return m, nil
 		}
@@ -418,7 +446,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.elector == nil {
 			return m, nil
 		}
-		return m, runSyncCmd(m.syncRunner, m.elector)
+		return m, runSyncCmd(m.syncRunner, m.elector, m.log)
 	case syncDoneMsg:
 		// An off-thread background-sync run finished — reschedule the
 		// next tick. (syncTickMsg returns early when m.elector is nil,

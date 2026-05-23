@@ -42,7 +42,7 @@ func main() {
 		fmt.Fprintf(out, "\r\n\x1b[31mfailed to seed demo data: %v\x1b[0m\r\n", err)
 		return
 	}
-	innerModel, err := tui.NewModel(s, repo, nil, "") // nil elector: WASM demo always acts as leader; no DB path (no background sync)
+	innerModel, err := tui.NewModel(s, repo, nil, "", nil) // nil elector: WASM demo always acts as leader; no DB path (no background sync); nil log: controller helpers fall back to slog.Default()
 	if err != nil {
 		fmt.Fprintf(out, "\r\n\x1b[31mfailed to build TUI model: %v\x1b[0m\r\n", err)
 		return
