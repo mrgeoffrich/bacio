@@ -2,6 +2,13 @@ import React, { useEffect, useMemo, useState } from 'react';
 import MarkdownView from '../../lib/markdownView';
 import { isSvgDoc } from '../../lib/docFormat';
 
+function formatBytes(n) {
+  if (!Number.isFinite(n) || n <= 0) return '0 B';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 // LinkedDocPanel renders one linked document inline. Markdown docs go
 // through the shared <MarkdownView> wrapper like the description and
 // comment timeline; SVG docs (detected via the shared isSvgDoc —
@@ -70,7 +77,19 @@ export default function LinkedDocPanel({ doc }) {
         <MarkdownView className="mk-linked-doc-body mk-markdown">{doc.content}</MarkdownView>
       ) : (
         <div className="mk-linked-doc-body mk-markdown">
-          <p className="mk-meta-empty">Document body is empty.</p>
+          {/* BACI-115 strips bodies from the brief for everything except
+              plan / review docs (transcripts in particular), but the
+              metadata row still carries sizeBytes. Distinguish "body
+              deliberately omitted" from "doc is truly empty" so a
+              transcript attachment doesn't read as a broken empty link. */}
+          {doc.sizeBytes > 0 ? (
+            <p className="mk-meta-empty">
+              Body not inlined in the brief ({formatBytes(doc.sizeBytes)}).
+              Run <code>bacio doc show {doc.filename}</code> to view.
+            </p>
+          ) : (
+            <p className="mk-meta-empty">Document body is empty.</p>
+          )}
         </div>
       )}
     </details>

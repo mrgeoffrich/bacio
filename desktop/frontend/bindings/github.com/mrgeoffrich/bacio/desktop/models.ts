@@ -915,6 +915,15 @@ export class LinkedDocDTO {
     "description": string;
     "sourcePath"?: string;
     "linkedVia": string[];
+
+    /**
+     * SizeBytes is the doc's on-disk size in bytes. Always populated, even
+     * when Content is omitted from the brief (BACI-115 keeps transcript
+     * bodies out of the inlined payload but carries the size so the
+     * LinkedDocPanel can render "body not inlined — N KB" instead of the
+     * misleading "Document body is empty.").
+     */
+    "sizeBytes": number;
     "content": string;
 
     /** Creates a new LinkedDocDTO instance. */
@@ -930,6 +939,9 @@ export class LinkedDocDTO {
         }
         if (!("linkedVia" in $$source)) {
             this["linkedVia"] = [];
+        }
+        if (!("sizeBytes" in $$source)) {
+            this["sizeBytes"] = 0;
         }
         if (!("content" in $$source)) {
             this["content"] = "";
