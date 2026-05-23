@@ -108,13 +108,16 @@ type IssueBrief struct {
 
 // BriefDoc mirrors internal/cli/issue.go:briefDoc — one linked document
 // with its full content inlined and an attribution path captured in
-// LinkedVia.
+// LinkedVia. After BACI-115 the body is inlined only for `plan` and
+// `review` doc types; every other type carries metadata + size_bytes
+// and an empty Content string.
 type BriefDoc struct {
 	Filename    string             `json:"filename"`
 	Type        model.DocumentType `json:"type"`
 	Description string             `json:"description,omitempty"`
 	SourcePath  string             `json:"source_path,omitempty"`
 	LinkedVia   []string           `json:"linked_via"`
+	SizeBytes   int64              `json:"size_bytes"`
 	Content     string             `json:"content"`
 }
 

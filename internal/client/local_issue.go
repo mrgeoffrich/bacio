@@ -257,7 +257,8 @@ func (c *localClient) collectBriefDocs(issueID int64, feat *model.Feature, inclu
 			Description: l.Description,
 			SourcePath:  d.SourcePath,
 			LinkedVia:   []string{"issue"},
-			Content:     d.Content,
+			SizeBytes:   d.SizeBytes,
+			Content:     briefDocContent(d),
 		}
 		out = append(out, entry)
 		byDocID[d.ID] = entry
@@ -292,13 +293,33 @@ func (c *localClient) collectBriefDocs(issueID int64, feat *model.Feature, inclu
 				Description: l.Description,
 				SourcePath:  d.SourcePath,
 				LinkedVia:   []string{via},
-				Content:     d.Content,
+				SizeBytes:   d.SizeBytes,
+				Content:     briefDocContent(d),
 			}
 			out = append(out, entry)
 			byDocID[d.ID] = entry
 		}
 	}
 	return out, warnings, nil
+}
+
+// briefDocContent applies the BACI-115 inlining rule: a doc's body is
+// inlined in the brief only if its type is `plan` or `review`. Every
+// other type — transcripts, project_complete, designs, etc. — surfaces
+// metadata only. A read-side fallback also catches transcript docs
+// stored before the `transcript` type existed (still typed
+// `project_complete`) by matching the filename pattern.
+func briefDocContent(d *model.Document) string {
+	if d == nil {
+		return ""
+	}
+	if model.IsBacioTranscriptFilename(d.Filename) {
+		return ""
+	}
+	if !model.DocTypeInlinedInBrief(d.Type) {
+		return ""
+	}
+	return d.Content
 }
 
 func (c *localClient) CreateIssue(ctx context.Context, repo *model.Repo, in inputs.IssueAddInput, dryRun bool) (*model.Issue, error) {

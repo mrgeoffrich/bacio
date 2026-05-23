@@ -107,7 +107,12 @@ type BriefDoc struct {
 	Description string             `json:"description,omitempty"`
 	SourcePath  string             `json:"source_path,omitempty"`
 	LinkedVia   []string           `json:"linked_via"`
-	Content     string             `json:"content"`
+	// SizeBytes mirrors model.Document.SizeBytes — populated for every
+	// brief doc regardless of whether the body is inlined, so a consumer
+	// reading the metadata of an omitted (e.g. transcript) doc still
+	// knows its size (BACI-115).
+	SizeBytes int64  `json:"size_bytes"`
+	Content   string `json:"content"`
 }
 
 type DocView struct {

@@ -594,13 +594,16 @@ type issueBrief struct {
 // briefDoc is a single linked document with its full content inlined and
 // attribution path captured in LinkedVia (e.g. ["issue"], or
 // ["issue", "feature/auth-rewrite"] when the same doc is reachable via
-// both the issue and its parent feature).
+// both the issue and its parent feature). After BACI-115, Content is
+// populated only for `plan` / `review` docs; every other type carries
+// metadata + SizeBytes and an empty Content.
 type briefDoc struct {
 	Filename    string             `json:"filename"`
 	Type        model.DocumentType `json:"type"`
 	Description string             `json:"description,omitempty"`
 	SourcePath  string             `json:"source_path,omitempty"`
 	LinkedVia   []string           `json:"linked_via"`
+	SizeBytes   int64              `json:"size_bytes"`
 	Content     string             `json:"content"`
 }
 
@@ -621,12 +624,15 @@ that every skill was open-coding into one read.
 Linked docs from the parent feature are included by default (use
 --no-feature-docs to skip). Each doc carries a "linked_via" array that
 records every attribution path (e.g. ["issue"] or
-["issue", "feature/auth-rewrite"]).
+["issue", "feature/auth-rewrite"]) and a "size_bytes" field carrying
+the document size.
 
-Pass --no-doc-content to keep doc metadata (filename, type, source_path,
-linked_via, description) but drop the bodies — useful when you want the
-shape of an issue's context without paying for every linked doc's full
-text. Fetch specific bodies later via bacio doc show.`,
+Document bodies are inlined only for the "plan" and "review" doc types.
+Every other type (transcripts, designs, project_complete, …) is
+surfaced as metadata only — filename, type, source_path, linked_via,
+description, size_bytes — with an empty content string. Fetch a
+specific body via bacio doc show. Pass --no-doc-content to drop the
+plan/review bodies too.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := openClient()
@@ -654,6 +660,7 @@ text. Fetch specific bodies later via bacio doc show.`,
 					Description: d.Description,
 					SourcePath:  d.SourcePath,
 					LinkedVia:   d.LinkedVia,
+					SizeBytes:   d.SizeBytes,
 					Content:     d.Content,
 				})
 			}

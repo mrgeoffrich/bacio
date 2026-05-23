@@ -102,6 +102,10 @@ func (d deps) handleIssueBrief(w http.ResponseWriter, r *http.Request) {
 // append to existing entries (extending linked_via) or create new ones.
 // When both link rows have differing --why descriptions, the issue's wins
 // and a warning is appended so nothing is silently dropped.
+//
+// After BACI-115 the body is inlined only for `plan` and `review` doc
+// types; transcripts and everything else carry SizeBytes + metadata
+// with an empty Content string.
 func collectBriefDocs(s *store.Store, issueID int64, feat *model.Feature, includeFeature bool) ([]*BriefDoc, []string, error) {
 	warnings := []string{}
 	out := []*BriefDoc{}
@@ -122,7 +126,8 @@ func collectBriefDocs(s *store.Store, issueID int64, feat *model.Feature, includ
 			Description: l.Description,
 			SourcePath:  doc.SourcePath,
 			LinkedVia:   []string{"issue"},
-			Content:     doc.Content,
+			SizeBytes:   doc.SizeBytes,
+			Content:     briefDocContent(doc),
 		}
 		out = append(out, entry)
 		byDocID[doc.ID] = entry
@@ -158,7 +163,8 @@ func collectBriefDocs(s *store.Store, issueID int64, feat *model.Feature, includ
 				Description: l.Description,
 				SourcePath:  doc.SourcePath,
 				LinkedVia:   []string{via},
-				Content:     doc.Content,
+				SizeBytes:   doc.SizeBytes,
+				Content:     briefDocContent(doc),
 			}
 			out = append(out, entry)
 			byDocID[doc.ID] = entry
@@ -166,4 +172,23 @@ func collectBriefDocs(s *store.Store, issueID int64, feat *model.Feature, includ
 	}
 
 	return out, warnings, nil
+}
+
+// briefDocContent applies the BACI-115 inlining rule: a doc's body is
+// inlined in the brief only if its type is `plan` or `review`. Mirrors
+// the client-side briefDocContent in internal/client/local_issue.go so
+// both code paths produce identical bodies. The transcript-filename
+// fallback catches `attach_transcript` docs created before the
+// `transcript` type existed (still typed `project_complete`).
+func briefDocContent(d *model.Document) string {
+	if d == nil {
+		return ""
+	}
+	if model.IsBacioTranscriptFilename(d.Filename) {
+		return ""
+	}
+	if !model.DocTypeInlinedInBrief(d.Type) {
+		return ""
+	}
+	return d.Content
 }

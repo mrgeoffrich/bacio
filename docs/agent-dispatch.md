@@ -504,7 +504,8 @@ verbatim, capped at ~2.5 MB (`channel.TranscriptCap`,
 `internal/channel/transcript.go`). An over-cap transcript is
 truncated with a one-line footer naming the omitted byte count and
 the source path; an under-cap transcript is stored byte-identical.
-The result is a `project_complete` document named
+The result is a `transcript`-typed document (BACI-115 — was
+`project_complete` pre-BACI-115) named
 `bacio-transcript-<ISSUE-KEY>-agent-<id>.jsonl` (the `.jsonl`
 extension flags it as a raw transcript, not rendered markdown),
 linked to the issue. The doc's `source_path` records the absolute
@@ -513,12 +514,21 @@ on the link description. `UpsertDocument` makes re-attaching the same
 (issue, agent) pair idempotent. The store's generic doc-body cap was
 raised to 10 MiB (`maxBodyBytes`, `internal/store/validate.go`) so a
 2.5 MB transcript is accepted rather than rejected. The UIs render
-`project_complete` docs through the markdown reader, so the raw
-`.jsonl` displays as an unformatted blob — a proper transcript viewer
-is a deliberate deferred follow-up. (BACI-85 originally rendered a
+transcript docs through the markdown reader, so the raw `.jsonl`
+displays as an unformatted blob — a proper transcript viewer is a
+deliberate deferred follow-up. (BACI-85 originally rendered a
 markdown digest capped at 256 KB; BACI-90 replaced that with the raw
 file because the digest lossily dropped tool I/O a reviewer often
 needs.)
+
+`bacio issue brief` (BACI-115) does **not** inline transcript bodies
+— only `plan` and `review` docs are inlined; transcripts surface as
+metadata (`filename`, `type: "transcript"`, `size_bytes`,
+`source_path`, `linked_via`, `description`) with an empty
+`content` string. The filename pattern
+(`bacio-transcript-*-agent-*.jsonl`) is also a read-side fallback:
+even a legacy `project_complete`-typed transcript attached before
+BACI-115 is excluded from inlining.
 
 The tool errors clearly (an MCP tool error) when the issue or
 transcript cannot be found — e.g. an older harness that does not

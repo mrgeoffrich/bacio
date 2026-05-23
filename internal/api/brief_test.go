@@ -56,7 +56,10 @@ func TestIssueBriefNoFeatureDocs(t *testing.T) {
 	repo := seedRepo(t, s)
 	feat := seedFeature(t, s, repo, "auth", "Auth")
 	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "x", "", model.StateTodo, nil)
-	doc, err := s.CreateDocument(repo.ID, "feat-doc.md", model.DocTypeArchitecture, "feature body content", "")
+	// Use DocTypePlan so the doc's body would be inlined by default —
+	// that gives the `no_feature_docs=1` query string something to
+	// suppress so the assertion stays meaningful after BACI-115.
+	doc, err := s.CreateDocument(repo.ID, "feat-doc.md", model.DocTypePlan, "feature body content", "")
 	if err != nil {
 		t.Fatalf("create doc: %v", err)
 	}
@@ -83,7 +86,10 @@ func TestIssueBriefNoDocContent(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	iss := seedIssue(t, s, repo, "x")
-	doc, err := s.CreateDocument(repo.ID, "iss-doc.md", model.DocTypeArchitecture, "the secret body", "")
+	// Use DocTypePlan so the doc body would be inlined by default —
+	// otherwise `no_doc_content=true` would be a tautology after
+	// BACI-115 narrowed inlining to plan/review.
+	doc, err := s.CreateDocument(repo.ID, "iss-doc.md", model.DocTypePlan, "the secret body", "")
 	if err != nil {
 		t.Fatalf("create doc: %v", err)
 	}
@@ -105,13 +111,84 @@ func TestIssueBriefNoDocContent(t *testing.T) {
 	}
 }
 
+// TestIssueBriefDocContentIncludedByDefault covers the BACI-115 inline
+// rule end-to-end: plan + review doc bodies are inlined; transcript
+// and other types surface metadata + size_bytes only.
 func TestIssueBriefDocContentIncludedByDefault(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	iss := seedIssue(t, s, repo, "x")
-	doc, err := s.CreateDocument(repo.ID, "iss-doc.md", model.DocTypeArchitecture, "the body", "")
+	// A plan doc — body MUST be inlined.
+	planDoc, err := s.CreateDocument(repo.ID, "iss-plan.md", model.DocTypePlan, "the plan body", "")
 	if err != nil {
-		t.Fatalf("create doc: %v", err)
+		t.Fatalf("create plan doc: %v", err)
+	}
+	if _, err := s.LinkDocument(planDoc.ID, store.LinkTarget{IssueID: &iss.ID}, ""); err != nil {
+		t.Fatalf("link plan: %v", err)
+	}
+	// A review doc — body MUST be inlined.
+	reviewDoc, err := s.CreateDocument(repo.ID, "iss-review.md", model.DocTypeReview, "the review body", "")
+	if err != nil {
+		t.Fatalf("create review doc: %v", err)
+	}
+	if _, err := s.LinkDocument(reviewDoc.ID, store.LinkTarget{IssueID: &iss.ID}, ""); err != nil {
+		t.Fatalf("link review: %v", err)
+	}
+	// A transcript doc — body MUST NOT be inlined.
+	trDoc, err := s.CreateDocument(repo.ID, "bacio-transcript-MINI-1-agent-x.jsonl", model.DocTypeTranscript, "transcript body bytes", "")
+	if err != nil {
+		t.Fatalf("create transcript doc: %v", err)
+	}
+	if _, err := s.LinkDocument(trDoc.ID, store.LinkTarget{IssueID: &iss.ID}, ""); err != nil {
+		t.Fatalf("link transcript: %v", err)
+	}
+	// An `architecture` doc — body MUST NOT be inlined (only plan/review are).
+	archDoc, err := s.CreateDocument(repo.ID, "arch-notes.md", model.DocTypeArchitecture, "arch body words", "")
+	if err != nil {
+		t.Fatalf("create arch doc: %v", err)
+	}
+	if _, err := s.LinkDocument(archDoc.ID, store.LinkTarget{IssueID: &iss.ID}, ""); err != nil {
+		t.Fatalf("link arch: %v", err)
+	}
+	resp, body := apiGet(t, ts.URL+"/repos/MINI/issues/"+iss.Key+"/brief")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+	s_ := string(body)
+	for _, want := range []string{
+		"the plan body",
+		"the review body",
+		// Filenames + size_bytes for every doc, including the omitted ones.
+		"iss-plan.md", "iss-review.md",
+		"bacio-transcript-MINI-1-agent-x.jsonl", "arch-notes.md",
+		`"size_bytes"`,
+	} {
+		if !strings.Contains(s_, want) {
+			t.Errorf("expected %q in brief: %s", want, s_)
+		}
+	}
+	for _, omit := range []string{
+		"transcript body bytes",
+		"arch body words",
+	} {
+		if strings.Contains(s_, omit) {
+			t.Errorf("unexpectedly inlined %q in brief: %s", omit, s_)
+		}
+	}
+}
+
+// TestIssueBriefLegacyTranscriptFilenameFallback covers the read-side
+// filename fallback (BACI-115): a transcript attached before the
+// `transcript` type existed is still typed `project_complete` in the
+// DB. The brief must NOT inline it — the filename pattern guard kicks
+// in regardless of the stored type.
+func TestIssueBriefLegacyTranscriptFilenameFallback(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	iss := seedIssue(t, s, repo, "x")
+	doc, err := s.CreateDocument(repo.ID, "bacio-transcript-MINI-1-agent-legacy.jsonl", model.DocTypeProjectComplete, "legacy transcript body", "")
+	if err != nil {
+		t.Fatalf("create legacy transcript doc: %v", err)
 	}
 	if _, err := s.LinkDocument(doc.ID, store.LinkTarget{IssueID: &iss.ID}, ""); err != nil {
 		t.Fatalf("link: %v", err)
@@ -120,8 +197,12 @@ func TestIssueBriefDocContentIncludedByDefault(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("status: %d", resp.StatusCode)
 	}
-	if !strings.Contains(string(body), "the body") {
-		t.Fatalf("expected doc content inline: %s", body)
+	s_ := string(body)
+	if strings.Contains(s_, "legacy transcript body") {
+		t.Fatalf("legacy transcript body leaked through brief: %s", s_)
+	}
+	if !strings.Contains(s_, "bacio-transcript-MINI-1-agent-legacy.jsonl") {
+		t.Fatalf("transcript filename missing from brief metadata: %s", s_)
 	}
 }
 
