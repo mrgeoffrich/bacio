@@ -26,9 +26,11 @@ The task tools (`TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet` — the suc
 
 ---
 
-## Worktree safety guard — run these checks first
+## First moves — run these in order, before anything else
 
-Before you use the bacio skill, claim the ticket, change any issue state, or read/edit/commit a single file, run:
+### 1. Worktree safety guard
+
+Before you use the bacio skill, change any issue state, or read/edit/commit a single file, run:
 
 ```bash
 git rev-parse --show-toplevel   # path must contain .claude/worktrees
@@ -37,11 +39,23 @@ git branch --show-current        # must not be main
 
 Abort if either check fails. Trust ONLY the `git rev-parse --show-toplevel` output for the current working folder.
 
-### Read the project conventions
+### 2. Claim the ticket — BEFORE your first `TaskCreate`
+
+Run:
+
+```bash
+bacio agent claim <issue_id> --prompt "<mode>"
+```
+
+substituting the values from the `<issue_id>` and `<mode>` tags in your Task prompt (e.g. `bacio agent claim BACI-42 --prompt "plan"`). The claim auto-transitions the issue to **in progress** (BACI-126a) — no separate `bacio issue state` call is needed.
+
+This must happen **before** your first `TaskCreate` call. bacio mirrors `TaskCreate` / `TaskUpdate` into the Agents/kanban Tasks pill, but the row is stamped with the issue scope **at insert time** from the session's open claim. Rows inserted before the claim land in the orphan bucket and stay invisible to the issue's UI surface for the life of the session — `TaskUpdate` deliberately does not re-stamp the scope later. Claim first, then plan your tasks.
+
+### 3. Read the project conventions
 
 Subagents don't auto-load CLAUDE.md. Read `<worktree-root>/CLAUDE.md` before doing real work — it's the index of project conventions, build commands, and topic-specific docs. If a CLAUDE.md entry points at a `docs/<topic>.md` file relevant to what you're about to change, read that doc too.
 
-### Establish working directory — make this your FIRST task
+### 4. Establish working directory — your first `TaskCreate` task
 
 Your **first** `TaskCreate` task MUST be an explicit "Establish working directory" step. In its description record, verbatim:
 
