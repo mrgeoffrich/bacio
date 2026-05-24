@@ -477,6 +477,59 @@ func TestCountInFlightByModeChannelCreatorStillExcluded(t *testing.T) {
 	}
 }
 
+// TestInflightByModeForRepo (BACI-145) covers the bulked form: one
+// query per repo returns mode → count for every mode that has at
+// least one in-flight row, matching what the matcher's per-mode
+// CountInFlightByMode walk would have produced. Modes with zero
+// in-flight rows are omitted from the map.
+func TestInflightByModeForRepo(t *testing.T) {
+	s, repo, _, ag, _ := seedDispatchFixture(t)
+
+	// One delivered ship + one pending plan = the two modes the bulk
+	// form should surface.
+	dShip, err := s.AddDispatch(AddDispatchIn{
+		RepoID: repo.ID, TargetAgentID: &ag.ID,
+		Mode: model.DispatchModeShip, CreatedBy: "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add ship: %v", err)
+	}
+	if _, err := s.MarkDispatchDelivered(dShip.ID); err != nil {
+		t.Fatalf("deliver ship: %v", err)
+	}
+	if _, err := s.AddDispatch(AddDispatchIn{
+		RepoID: repo.ID, TargetAgentID: &ag.ID,
+		Mode: model.DispatchModePlan, CreatedBy: "supervisor",
+	}); err != nil {
+		t.Fatalf("add plan: %v", err)
+	}
+
+	got, err := s.InflightByModeForRepo(repo.ID)
+	if err != nil {
+		t.Fatalf("bulk: %v", err)
+	}
+	if got[model.DispatchModeShip] != 1 {
+		t.Errorf("ship count = %d, want 1", got[model.DispatchModeShip])
+	}
+	if got[model.DispatchModePlan] != 1 {
+		t.Errorf("plan count = %d, want 1", got[model.DispatchModePlan])
+	}
+	// Cross-check against the single-mode form so the two stay in sync.
+	for mode := range got {
+		n, err := s.CountInFlightByMode(repo.ID, mode)
+		if err != nil {
+			t.Fatalf("CountInFlightByMode(%s): %v", mode, err)
+		}
+		if n != got[mode] {
+			t.Errorf("bulk vs single-row mismatch for %s: bulk=%d, single=%d", mode, got[mode], n)
+		}
+	}
+	// A non-existent mode is absent from the map (not present as zero).
+	if _, ok := got[model.DispatchMode("review")]; ok {
+		t.Errorf("review present in map = true, want absent (no in-flight rows)")
+	}
+}
+
 // TestCancelThenAckRejected locks in that a cancelled dispatch can't be
 // acked — the withdrawal is final.
 func TestCancelThenAckRejected(t *testing.T) {

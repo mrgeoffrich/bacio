@@ -5,6 +5,7 @@
 package api
 
 import (
+	"github.com/mrgeoffrich/bacio/internal/boardcards"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
@@ -105,6 +106,12 @@ type PlanView struct {
 // IssueBrief mirrors internal/cli/issue.go:issueBrief — bulk-context JSON
 // payload for an issue (issue + feature + linked docs + comments + relations
 // + PRs) collapsed into one structured response.
+//
+// BACI-145: WaitingState carries the structured "why is this card
+// waiting?" projection — same shape and same wording as the kanban
+// card. Nil (and omitted from JSON) when the issue isn't waiting; the
+// IssueLockBanner falls back to the "taken" branch when an agent has
+// the claim.
 type IssueBrief struct {
 	Issue        *model.Issue          `json:"issue"`
 	Feature      *model.Feature        `json:"feature,omitempty"`
@@ -115,9 +122,10 @@ type IssueBrief struct {
 	// Claimants is the per-issue agent-claim history (open + released,
 	// newest first), each carrying the prompt that session ran; Taken is
 	// the derived "an agent is actively holding this" signal.
-	Claimants []*model.AgentClaim `json:"claimants"`
-	Taken     bool                `json:"taken"`
-	Warnings  []string            `json:"warnings"`
+	Claimants    []*model.AgentClaim      `json:"claimants"`
+	Taken        bool                     `json:"taken"`
+	WaitingState *boardcards.WaitingState `json:"waiting_state,omitempty"`
+	Warnings     []string                 `json:"warnings"`
 }
 
 // BriefDoc mirrors internal/cli/issue.go:briefDoc — one linked document

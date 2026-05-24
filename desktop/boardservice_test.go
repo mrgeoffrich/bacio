@@ -103,6 +103,13 @@ func (f *fakeBoardClient) BlockersFor(context.Context, []int64) (map[int64][]sto
 	return map[int64][]store.IssueBlocker{}, nil
 }
 
+// InflightByModeForRepo (BACI-145) — empty map is the "no in-flight
+// dispatches" case, which keeps every WaitingState derivation off the
+// queued_blocked branch in these tests.
+func (f *fakeBoardClient) InflightByModeForRepo(context.Context, *model.Repo) (map[model.DispatchMode]int, error) {
+	return map[model.DispatchMode]int{}, nil
+}
+
 func TestListCardsTaken(t *testing.T) {
 	issues := []*model.Issue{
 		{Key: "TEST-1", State: model.StateTodo, Title: "held by an agent"},

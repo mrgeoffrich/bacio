@@ -444,6 +444,15 @@ type Client interface {
 	// today (REST parity is a follow-up).
 	WaitingDispatchForIssue(ctx context.Context, repo *model.Repo, issueKey string) (*model.AgentDispatch, error)
 
+	// InflightByModeForRepo (BACI-145) returns mode → count of in-flight
+	// dispatches in this repo, gated by the same staleness predicate the
+	// matcher uses. Used by boardcards.Assemble to derive each card's
+	// WaitingState (queued vs queued_blocked-by-concurrency-cap) without
+	// fanning out a per-mode CountInFlightByMode call. Local-only —
+	// remote returns ErrLocalOnly until the kanban surface switches to a
+	// bulk REST endpoint.
+	InflightByModeForRepo(ctx context.Context, repo *model.Repo) (map[model.DispatchMode]int, error)
+
 	// ----- Prompt templates (local-only; `bacio settings template`) -----
 	// ListPromptTemplates returns every registered template — slug,
 	// name, body, state-gate, IsBuiltin — in stable order (created_at

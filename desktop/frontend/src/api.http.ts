@@ -135,6 +135,20 @@ export interface BoardCardBlocker {
   state: string; // todo | in_progress | needs_action | in_review — open-state set
 }
 
+// BACI-145: WaitingKind / WaitingState mirror the Go-side types in
+// internal/boardcards/cards.go. Kept as a hand-written copy here (the
+// web bundle doesn't import the Wails bindings — those drag in
+// runtime-only deps unavailable in the browser). See api.ts for the
+// Wails-driven import path; both files re-export the same names so
+// React components can switch transports without a type rewrite.
+export type WaitingKind = 'queued_no_agent' | 'queued_blocked' | 'delivered';
+
+export interface WaitingState {
+  kind: WaitingKind;
+  mode?: string;
+  actionLabel?: string;
+}
+
 export interface BoardCard {
   key: string;
   column: string;
@@ -144,14 +158,13 @@ export interface BoardCard {
   assignees: string[];
   claude: boolean;
   taken: boolean;
-  waitingForClaim: boolean;
-  // BACI-130: true when the issue's active dispatch is already in the
-  // `delivered` state — the worker has the Task in hand and the store
-  // rejects cancel-after-delivery. The kanban renders the spinner
-  // glyph without the click affordance when this is true. Absent
-  // (omitempty server-side) when false, so older payloads that don't
-  // carry the field render as today.
-  waitingDispatchDelivered?: boolean;
+  // BACI-145: structured "why is this card waiting?" state. Replaces
+  // the two booleans waitingForClaim + waitingDispatchDelivered that
+  // the BoardCard used to carry — neither could carry the active
+  // dispatch's mode for the inline label. Absent (omitempty
+  // server-side) when the card isn't waiting; the KanbanCard renders
+  // no spinner in that case.
+  waitingState?: WaitingState | null;
   // BACI-60 enrichment: lower-cased prompt-template label of the
   // newest open claim's most recent non-cancelled dispatch (empty
   // when no verb can be derived) and the claiming session's
@@ -292,6 +305,9 @@ export interface IssueBriefDTO {
   claimants: ClaimantDTO[];
   taken: boolean;
   waitingForClaim: boolean;
+  // BACI-145: structured waiting state for the IssueLockBanner.
+  // Absent (server-side omitempty) when the issue isn't waiting.
+  waitingState?: WaitingState | null;
   warnings: string[];
 }
 
@@ -625,7 +641,10 @@ function cardFromIssue(iss: ApiIssue): BoardCard {
     assignees: assigneeList(assignee),
     claude: assignee === 'claude',
     taken: !!iss.taken,
-    waitingForClaim: !!iss.waiting_for_claim,
+    // BACI-145: setIssueState (a drag-to-move) is blocked for waiting
+    // cards by the UI, so the wire shape produced here can't be
+    // observably waiting. Leave waitingState undefined; the next 10s
+    // poll re-runs listCards and re-populates it from the server.
   };
 }
 
@@ -895,6 +914,11 @@ interface ApiIssueBrief {
   comments?: ApiCommentEnvelope[] | null;
   claimants?: ApiClaimant[] | null;
   taken?: boolean;
+  // BACI-145: snake-case wire shape mirroring internal/api/views.go
+  // IssueBrief.WaitingState. WaitingState's own field names stay
+  // camelCase server-side (the boardcards JSON tags are camel) so no
+  // per-field rename here — only the outer wrapper is snake.
+  waiting_state?: WaitingState | null;
   warnings?: string[] | null;
 }
 
@@ -949,6 +973,7 @@ function reshapeApiBrief(view: ApiIssueBrief): IssueBriefDTO {
     })),
     taken: !!view.taken,
     waitingForClaim: !!iss.waiting_for_claim,
+    waitingState: view.waiting_state ?? null,
     warnings: view.warnings ?? [],
   };
 }
@@ -1146,6 +1171,9 @@ export async function cancelWaitingDispatch(
 
 interface ApiBoardCard {
   // setIssueState returns the model.Issue; same reshape as listCards.
+  // waiting_for_claim is on the model.Issue wire shape but the
+  // cardFromIssue reshape ignores it — see the comment in
+  // cardFromIssue for the rationale (drag is blocked on waiting cards).
   key: string;
   state: string;
   title: string;

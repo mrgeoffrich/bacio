@@ -15,8 +15,8 @@ import * as time$0 from "../../../../../time/models.js";
 /**
  * BoardCard is one kanban card — one bacio issue, shaped for the
  * imported UI kit. Fields beyond the issue itself: Taken (an agent
- * holds an open claim on this issue), WaitingForClaim (a dispatch is
- * queued but no claim yet), ActiveVerb (the lower-cased
+ * holds an open claim on this issue), WaitingState (a dispatch is
+ * queued/pending/delivered; BACI-145), ActiveVerb (the lower-cased
  * prompt-template label of the newest open claim's dispatch — e.g.
  * "designing", "planning"), and TodosDone / TodosTotal (the TodoWrite
  * progress of the claiming session).
@@ -30,19 +30,17 @@ export class BoardCard {
     "assignees": string[];
     "claude": boolean;
     "taken": boolean;
-    "waitingForClaim": boolean;
 
     /**
-     * WaitingDispatchDelivered (BACI-130) is true when the issue's
-     * active (queued / pending / delivered) dispatch is already in the
-     * `delivered` state — the worker has the Task in hand. Drives the
-     * spinner-cancel UI gate: cards with this flag set render the
-     * spinner glyph without the click affordance, because cancelling a
-     * delivered dispatch is now rejected at the store boundary.
-     * Omitted from JSON when false (common case) so the wire payload
-     * doesn't grow on untaken / queued / pending cards.
+     * WaitingState (BACI-145) carries the structured reason a card is
+     * rendering the spinner — queued without an agent, queued but
+     * blocked by the template's concurrency cap, or delivered to the
+     * worker. Replaces the two booleans WaitingForClaim and
+     * WaitingDispatchDelivered the BoardCard previously carried. Nil
+     * (and omitted from JSON) when the card isn't waiting — keeps the
+     * wire payload lean on untaken / settled cards.
      */
-    "waitingDispatchDelivered"?: boolean;
+    "waitingState"?: WaitingState | null;
 
     /**
      * ActiveVerb is the lower-cased display label of the prompt template
@@ -152,9 +150,6 @@ export class BoardCard {
         if (!("taken" in $$source)) {
             this["taken"] = false;
         }
-        if (!("waitingForClaim" in $$source)) {
-            this["waitingForClaim"] = false;
-        }
         if (!("todosDone" in $$source)) {
             this["todosDone"] = 0;
         }
@@ -171,9 +166,10 @@ export class BoardCard {
     static createFrom($$source: any = {}): BoardCard {
         const $$createField4_0 = $$createType0;
         const $$createField5_0 = $$createType0;
-        const $$createField13_0 = $$createType2;
-        const $$createField14_0 = $$createType4;
-        const $$createField16_0 = $$createType6;
+        const $$createField8_0 = $$createType2;
+        const $$createField12_0 = $$createType4;
+        const $$createField13_0 = $$createType6;
+        const $$createField15_0 = $$createType8;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField4_0($$parsedSource["tags"]);
@@ -181,14 +177,17 @@ export class BoardCard {
         if ("assignees" in $$parsedSource) {
             $$parsedSource["assignees"] = $$createField5_0($$parsedSource["assignees"]);
         }
+        if ("waitingState" in $$parsedSource) {
+            $$parsedSource["waitingState"] = $$createField8_0($$parsedSource["waitingState"]);
+        }
         if ("openQuestions" in $$parsedSource) {
-            $$parsedSource["openQuestions"] = $$createField13_0($$parsedSource["openQuestions"]);
+            $$parsedSource["openQuestions"] = $$createField12_0($$parsedSource["openQuestions"]);
         }
         if ("todos" in $$parsedSource) {
-            $$parsedSource["todos"] = $$createField14_0($$parsedSource["todos"]);
+            $$parsedSource["todos"] = $$createField13_0($$parsedSource["todos"]);
         }
         if ("blockedBy" in $$parsedSource) {
-            $$parsedSource["blockedBy"] = $$createField16_0($$parsedSource["blockedBy"]);
+            $$parsedSource["blockedBy"] = $$createField15_0($$parsedSource["blockedBy"]);
         }
         return new BoardCard($$parsedSource as Partial<BoardCard>);
     }
@@ -302,11 +301,85 @@ export class BoardCardTodo {
     }
 }
 
+/**
+ * WaitingKind enumerates the three reasons a card may be displaying a
+ * waiting spinner — together with the optional Mode/ActionLabel on
+ * WaitingState they're the data the kanban / TUI render as the inline
+ * "why is this card waiting?" label (BACI-145).
+ */
+export enum WaitingKind {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * WaitingQueuedNoAgent: a `queued` dispatch is sitting in the
+     * per-(repo, mode) FIFO; no free agent has picked it up yet.
+     * Label: "Waiting for an available agent".
+     */
+    WaitingQueuedNoAgent = "queued_no_agent",
+
+    /**
+     * WaitingQueuedBlocked: a `queued` (or pending) dispatch is gated by
+     * the template's concurrency_limit — the per-(repo, mode) cap is
+     * full so the matcher won't bind it yet. Label: "Waiting on <Mode>
+     * job to finish" (Mode is the same mode as this card's dispatch —
+     * the cap is per-template).
+     */
+    WaitingQueuedBlocked = "queued_blocked",
+
+    /**
+     * WaitingDelivered: the worker has taken the Task in hand (BACI-130);
+     * cancel-after-delivery is rejected at the store boundary so the
+     * card renders the spinner without the cancel affordance. Label:
+     * "Worker has the <Mode> job".
+     */
+    WaitingDelivered = "delivered",
+};
+
+/**
+ * WaitingState is the structured "why is this card waiting?" projection
+ * surfaced on every kanban card with an active dispatch (BACI-145).
+ * Replaces the two booleans WaitingForClaim / WaitingDispatchDelivered
+ * that the React tree and TUI previously pivoted on — the booleans
+ * couldn't carry the active dispatch's mode for the label.
+ * 
+ * Nil when the card isn't waiting. When non-nil, Kind is always
+ * populated; Mode/ActionLabel are set for every kind that names a job
+ * in the label (i.e. queued_blocked and delivered), and best-effort on
+ * queued_no_agent — the mode is known but the label doesn't render it.
+ */
+export class WaitingState {
+    "kind": WaitingKind;
+    "mode"?: model$0.DispatchMode;
+    "actionLabel"?: string;
+
+    /** Creates a new WaitingState instance. */
+    constructor($$source: Partial<WaitingState> = {}) {
+        if (!("kind" in $$source)) {
+            this["kind"] = WaitingKind.$zero;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new WaitingState instance from a string or object.
+     */
+    static createFrom($$source: any = {}): WaitingState {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new WaitingState($$parsedSource as Partial<WaitingState>);
+    }
+}
+
 // Private type creation functions
 const $$createType0 = $Create.Array($Create.Any);
-const $$createType1 = BoardCardQuestion.createFrom;
-const $$createType2 = $Create.Array($$createType1);
-const $$createType3 = BoardCardTodo.createFrom;
+const $$createType1 = WaitingState.createFrom;
+const $$createType2 = $Create.Nullable($$createType1);
+const $$createType3 = BoardCardQuestion.createFrom;
 const $$createType4 = $Create.Array($$createType3);
-const $$createType5 = BoardCardBlocker.createFrom;
+const $$createType5 = BoardCardTodo.createFrom;
 const $$createType6 = $Create.Array($$createType5);
+const $$createType7 = BoardCardBlocker.createFrom;
+const $$createType8 = $Create.Array($$createType7);

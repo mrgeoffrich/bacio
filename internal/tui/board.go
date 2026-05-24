@@ -97,6 +97,12 @@ type boardView struct {
 	// and refuse the `x` dispatch, same guard as takenIssues. `taken`
 	// wins over `waiting` when (defensively) a card is somehow both.
 	waitingIssues map[int64]bool
+	// waitingStateByIssue (BACI-145) is the per-issue WaitingState
+	// projection — same derivation the React tree uses via
+	// boardcards.DeriveWaitingState. Keyed by issue ID; entries exist
+	// only for waiting cards. Drives the inline label on the bottom
+	// line of a waiting card, in lockstep with the kanban surface.
+	waitingStateByIssue map[int64]*boardcards.WaitingState
 	// spinnerFrame is the current spinner animation frame; spinnerRunning
 	// guards against stacking concurrent tick-chains.
 	spinnerFrame   int
@@ -339,6 +345,49 @@ func (b *boardView) reload() error {
 		}
 	}
 	b.waitingIssues = waiting
+	// BACI-145: per-issue WaitingState — same derivation the kanban
+	// uses, so the inline "why is this card waiting?" label stays in
+	// lockstep with the React surface. Best-effort: a failure in any
+	// of the three reads leaves waitingStateByIssue without entries
+	// for the affected issues, which degrades to the unlabeled
+	// spinner — no worse than the pre-BACI-145 baseline.
+	b.waitingStateByIssue = map[int64]*boardcards.WaitingState{}
+	if len(waiting) > 0 {
+		allDispatches, derr := b.store.ListDispatches(store.DispatchFilter{RepoID: &b.repo.ID})
+		if derr == nil {
+			activeByIssue := map[int64]*model.AgentDispatch{}
+			for _, d := range allDispatches {
+				if d == nil || d.IssueID == nil {
+					continue
+				}
+				id := *d.IssueID
+				if _, ok := activeByIssue[id]; ok {
+					continue
+				}
+				switch d.Status {
+				case model.DispatchQueued, model.DispatchPending, model.DispatchDelivered:
+					activeByIssue[id] = d
+				}
+			}
+			inflight, ierr := b.store.InflightByModeForRepo(b.repo.ID)
+			if ierr != nil {
+				inflight = map[model.DispatchMode]int{}
+			}
+			templates, terr := b.store.ListPromptTemplates()
+			if terr != nil {
+				templates = nil
+			}
+			for _, iss := range issues {
+				if !iss.WaitingForClaim {
+					continue
+				}
+				ws := boardcards.DeriveWaitingState(iss, activeByIssue[iss.ID], inflight, templates)
+				if ws != nil {
+					b.waitingStateByIssue[iss.ID] = ws
+				}
+			}
+		}
+	}
 	for _, st := range b.states {
 		b.columns[st] = nil
 	}
@@ -1262,16 +1311,42 @@ func (b *boardView) renderColumn(st model.State, focused bool, width, height int
 		if len(b.openQuestions[iss.Key]) > 0 {
 			titleText = "? " + titleText
 		}
+		// BACI-145: on a waiting card the bottom (third) row carries the
+		// inline "why is this card waiting?" label, so the title's wrap
+		// budget shrinks from 3 rows to 2 (cardHeight - 1). A long
+		// title's last wrap line gets dropped rather than collide with
+		// the label — acceptable because waiting cards are short-lived
+		// (seconds-to-minutes) and the title is still readable on rows
+		// 1-2. Non-waiting cards keep the full 3-row budget.
+		titleBudget := cardHeight
+		var waitingLabel string
+		if isWaiting {
+			if ws := b.waitingStateByIssue[iss.ID]; ws != nil {
+				waitingLabel = boardcards.WaitingStateLabel(ws)
+			}
+			if waitingLabel != "" {
+				titleBudget = cardHeight - 1
+				if titleBudget < 1 {
+					titleBudget = 1
+				}
+			}
+		}
 		titleLines := wrapLinesAt(titleText, func(line int) int {
 			if line == 0 {
 				return firstW
 			}
 			return fullW
-		}, cardHeight)
+		}, titleBudget)
 
 		for j := 0; j < cardHeight; j++ {
 			var content string
 			switch {
+			case waitingLabel != "" && j == cardHeight-1:
+				// Bottom row: render the waiting label in waitingColor so
+				// it reads as motion-adjacent (matches the spinner's
+				// colour), truncated to the column width.
+				content = lipgloss.NewStyle().Foreground(waitingColor).
+					Render(truncate(waitingLabel, fullW))
 			case j == 0:
 				if len(titleLines) > 0 {
 					content = keyRender + " " + titleLines[0]

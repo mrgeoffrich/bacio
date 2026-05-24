@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/mrgeoffrich/bacio/internal/boardcards"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
@@ -84,6 +85,27 @@ func (d deps) handleIssueBrief(w http.ResponseWriter, r *http.Request) {
 		claimants = []*model.AgentClaim{}
 	}
 
+	// BACI-145: derive WaitingState for the IssueLockBanner. Best-
+	// effort — a failure in any of the three reads degrades to a nil
+	// WaitingState (the banner falls back to the unlabelled spinner
+	// rather than the inline label), so brief read latency isn't
+	// gated on the dispatch / templates tables being live.
+	var waitingState *boardcards.WaitingState
+	if iss.WaitingForClaim {
+		activeDispatch, derr := d.store.WaitingDispatchForIssue(repo.ID, iss.ID)
+		if derr == nil {
+			inflight, ierr := d.store.InflightByModeForRepo(repo.ID)
+			if ierr != nil {
+				inflight = map[model.DispatchMode]int{}
+			}
+			templates, terr := d.store.ListPromptTemplates()
+			if terr != nil {
+				templates = nil
+			}
+			waitingState = boardcards.DeriveWaitingState(iss, activeDispatch, inflight, templates)
+		}
+	}
+
 	writeJSON(w, http.StatusOK, &IssueBrief{
 		Issue:        iss,
 		Feature:      feat,
@@ -93,6 +115,7 @@ func (d deps) handleIssueBrief(w http.ResponseWriter, r *http.Request) {
 		Comments:     comments,
 		Claimants:    claimants,
 		Taken:        model.AnyOpenClaim(claimants),
+		WaitingState: waitingState,
 		Warnings:     warnings,
 	})
 }

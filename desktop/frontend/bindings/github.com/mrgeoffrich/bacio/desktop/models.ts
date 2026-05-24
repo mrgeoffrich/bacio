@@ -693,6 +693,11 @@ export class HistoryPage {
  * return value, mirroring internal/client/views.go::IssueBrief with desktop
  * camelCase JSON tags. New fields over IssueDetail: feature, relations,
  * waitingForClaim, warnings, and doc content (via LinkedDocDTO).
+ * 
+ * BACI-145: WaitingState is the structured "why is this card waiting?"
+ * projection used by the IssueLockBanner — same shape and same wording
+ * as the kanban-card label. Nil when the issue isn't waiting; the
+ * banner falls back to its "taken" branch when an agent has the claim.
  */
 export class IssueBriefDTO {
     "issue": IssueMetaDTO;
@@ -704,6 +709,7 @@ export class IssueBriefDTO {
     "claimants": ClaimantDTO[];
     "taken": boolean;
     "waitingForClaim": boolean;
+    "waitingState"?: boardcards$0.WaitingState | null;
     "warnings": string[];
 
     /** Creates a new IssueBriefDTO instance. */
@@ -750,7 +756,8 @@ export class IssueBriefDTO {
         const $$createField4_0 = $$createType13;
         const $$createField5_0 = $$createType15;
         const $$createField6_0 = $$createType17;
-        const $$createField9_0 = $$createType18;
+        const $$createField9_0 = $$createType19;
+        const $$createField10_0 = $$createType20;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("issue" in $$parsedSource) {
             $$parsedSource["issue"] = $$createField0_0($$parsedSource["issue"]);
@@ -773,8 +780,11 @@ export class IssueBriefDTO {
         if ("claimants" in $$parsedSource) {
             $$parsedSource["claimants"] = $$createField6_0($$parsedSource["claimants"]);
         }
+        if ("waitingState" in $$parsedSource) {
+            $$parsedSource["waitingState"] = $$createField9_0($$parsedSource["waitingState"]);
+        }
         if ("warnings" in $$parsedSource) {
-            $$parsedSource["warnings"] = $$createField9_0($$parsedSource["warnings"]);
+            $$parsedSource["warnings"] = $$createField10_0($$parsedSource["warnings"]);
         }
         return new IssueBriefDTO($$parsedSource as Partial<IssueBriefDTO>);
     }
@@ -852,11 +862,11 @@ export class IssueDetail {
      * Creates a new IssueDetail instance from a string or object.
      */
     static createFrom($$source: any = {}): IssueDetail {
-        const $$createField5_0 = $$createType18;
-        const $$createField6_0 = $$createType18;
+        const $$createField5_0 = $$createType20;
+        const $$createField6_0 = $$createType20;
         const $$createField8_0 = $$createType15;
         const $$createField9_0 = $$createType11;
-        const $$createField10_0 = $$createType20;
+        const $$createField10_0 = $$createType22;
         const $$createField11_0 = $$createType17;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
@@ -941,8 +951,8 @@ export class IssueMetaDTO {
      * Creates a new IssueMetaDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): IssueMetaDTO {
-        const $$createField5_0 = $$createType18;
-        const $$createField6_0 = $$createType18;
+        const $$createField5_0 = $$createType20;
+        const $$createField6_0 = $$createType20;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField5_0($$parsedSource["tags"]);
@@ -1027,7 +1037,7 @@ export class LinkedDocDTO {
      * Creates a new LinkedDocDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): LinkedDocDTO {
-        const $$createField4_0 = $$createType18;
+        const $$createField4_0 = $$createType20;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("linkedVia" in $$parsedSource) {
             $$parsedSource["linkedVia"] = $$createField4_0($$parsedSource["linkedVia"]);
@@ -1157,8 +1167,8 @@ export class PromptTemplateDTO {
      * Creates a new PromptTemplateDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): PromptTemplateDTO {
-        const $$createField7_0 = $$createType18;
-        const $$createField8_0 = $$createType18;
+        const $$createField7_0 = $$createType20;
+        const $$createField8_0 = $$createType20;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("allowedStates" in $$parsedSource) {
             $$parsedSource["allowedStates"] = $$createField7_0($$parsedSource["allowedStates"]);
@@ -1231,8 +1241,8 @@ export class RelationsDTO {
      * Creates a new RelationsDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): RelationsDTO {
-        const $$createField0_0 = $$createType22;
-        const $$createField1_0 = $$createType22;
+        const $$createField0_0 = $$createType24;
+        const $$createField1_0 = $$createType24;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("outgoing" in $$parsedSource) {
             $$parsedSource["outgoing"] = $$createField0_0($$parsedSource["outgoing"]);
@@ -1263,8 +1273,10 @@ const $$createType14 = CommentDTO.createFrom;
 const $$createType15 = $Create.Array($$createType14);
 const $$createType16 = agentcards$0.ClaimantDTO.createFrom;
 const $$createType17 = $Create.Array($$createType16);
-const $$createType18 = $Create.Array($Create.Any);
-const $$createType19 = DocLinkDTO.createFrom;
-const $$createType20 = $Create.Array($$createType19);
-const $$createType21 = RelationDTO.createFrom;
+const $$createType18 = boardcards$0.WaitingState.createFrom;
+const $$createType19 = $Create.Nullable($$createType18);
+const $$createType20 = $Create.Array($Create.Any);
+const $$createType21 = DocLinkDTO.createFrom;
 const $$createType22 = $Create.Array($$createType21);
+const $$createType23 = RelationDTO.createFrom;
+const $$createType24 = $Create.Array($$createType23);
