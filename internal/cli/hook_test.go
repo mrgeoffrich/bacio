@@ -1,12 +1,17 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
+	"github.com/mrgeoffrich/bacio/internal/client"
+	"github.com/mrgeoffrich/bacio/internal/git"
 	"github.com/mrgeoffrich/bacio/internal/model"
 )
 
@@ -206,6 +211,146 @@ func TestExtractTaskFieldsTaskCreateMissingId(t *testing.T) {
 	if _, _, _, ok := extractTaskFields(&in); ok {
 		t.Fatal("expected ok=false when TaskCreate response lacks task.id")
 	}
+}
+
+// TestHookPostToolUseDropsTaskCreateWithoutClaim covers the BACI-136
+// log-and-drop path: a session with no open claim fires a TaskCreate;
+// the hook short-circuits before the store call, the table stays
+// empty, and stderr carries the documented one-liner.
+func TestHookPostToolUseDropsTaskCreateWithoutClaim(t *testing.T) {
+	dbPath, c, sess, _ := setupHookTestEnv(t)
+
+	stderr := runHookPostToolUseWith(t, dbPath, `{
+		"session_id": "`+sess.SessionID+`",
+		"hook_event_name": "PostToolUse",
+		"tool_name": "TaskCreate",
+		"tool_input": {"subject": "First task"},
+		"tool_response": {"task": {"id": "1", "subject": "First task"}}
+	}`)
+
+	if !strings.Contains(stderr, "no single open claim") {
+		t.Fatalf("stderr missing 'no single open claim' one-liner: %q", stderr)
+	}
+	if !strings.Contains(stderr, sess.SessionID) {
+		t.Fatalf("stderr missing session_id %q: %q", sess.SessionID, stderr)
+	}
+	rows, err := c.ListSessionTodos(context.Background(), sess.SessionID, "")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("rows = %d, want 0 (log-and-drop must not insert)", len(rows))
+	}
+}
+
+// TestHookPostToolUseDropsTaskCreateWithoutDispatch covers BACI-136's
+// dispatch-resolution log-and-drop: a session with an open claim but
+// no active dispatch fires a TaskCreate; the hook short-circuits
+// after dispatch lookup, the table stays empty, and stderr carries
+// the documented one-liner.
+func TestHookPostToolUseDropsTaskCreateWithoutDispatch(t *testing.T) {
+	dbPath, c, sess, repo := setupHookTestEnv(t)
+
+	ctx := context.Background()
+	iss, err := c.CreateIssue(ctx, repo, inputs.IssueAddInput{Title: "ClaimedIssue"}, false)
+	if err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	if _, err := c.ClaimAgent(ctx, repo, inputs.AgentClaimInput{
+		IssueKey:  iss.Key,
+		SessionID: sess.SessionID,
+		Prompt:    "implement",
+	}, false); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+
+	stderr := runHookPostToolUseWith(t, dbPath, `{
+		"session_id": "`+sess.SessionID+`",
+		"hook_event_name": "PostToolUse",
+		"tool_name": "TaskCreate",
+		"tool_input": {"subject": "First task"},
+		"tool_response": {"task": {"id": "1", "subject": "First task"}}
+	}`)
+
+	if !strings.Contains(stderr, "no active dispatch") {
+		t.Fatalf("stderr missing 'no active dispatch' one-liner: %q", stderr)
+	}
+	if !strings.Contains(stderr, iss.Key) {
+		t.Fatalf("stderr missing issue_key %q: %q", iss.Key, stderr)
+	}
+	rows, err := c.ListSessionTodos(ctx, sess.SessionID, "")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("rows = %d, want 0 (log-and-drop must not insert)", len(rows))
+	}
+}
+
+// setupHookTestEnv wires up the bits the post-tool-use hook needs to
+// run end-to-end against a throwaway sqlite db: BACIO_AGENT_MODE on,
+// opts.dbPath pointing at a temp DB, a repo row, and a registered
+// session. Returns the dbPath, an open client (closed via t.Cleanup),
+// the registered session, and the repo so callers can seed claims /
+// dispatches if they need to.
+func setupHookTestEnv(t *testing.T) (string, client.Client, *model.AgentSession, *model.Repo) {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "db.sqlite")
+	t.Setenv("BACIO_AGENT_MODE", "1")
+	t.Setenv("HOME", t.TempDir()) // keep client.Open away from ~/.bacio
+
+	// Hook RunE reads opts.dbPath; patch it for the test duration.
+	prev := opts.dbPath
+	opts.dbPath = dbPath
+	t.Cleanup(func() { opts.dbPath = prev })
+
+	ctx := context.Background()
+	c, err := client.Open(ctx, client.Options{DBPath: dbPath, Actor: "tester"})
+	if err != nil {
+		t.Fatalf("open client: %v", err)
+	}
+	t.Cleanup(func() { _ = c.Close() })
+
+	repo, _, err := c.EnsureRepo(ctx, &git.Info{Root: t.TempDir(), Name: "proj"})
+	if err != nil {
+		t.Fatalf("ensure repo: %v", err)
+	}
+	sess, err := c.RegisterAgent(ctx, repo, inputs.AgentRegisterInput{
+		SessionID: "f4cef4ce-f4ce-f4ce-f4ce-f4cef4cef4ce",
+		Actor:     "tester",
+	}, false)
+	if err != nil {
+		t.Fatalf("register session: %v", err)
+	}
+	return dbPath, c, sess, repo
+}
+
+// runHookPostToolUseWith feeds the given JSON payload to
+// hookPostToolUseCmd's RunE via os.Stdin and returns whatever the hook
+// writes to stderr. Wraps the stdin / stderr swap so the test bodies
+// stay focused on the assertions.
+func runHookPostToolUseWith(t *testing.T, _ , payload string) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("stdin pipe: %v", err)
+	}
+	origStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = origStdin })
+	if _, err := w.WriteString(payload); err != nil {
+		t.Fatalf("write payload: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close payload writer: %v", err)
+	}
+
+	cmd := hookPostToolUseCmd()
+	return captureStderr(t, func() {
+		if err := cmd.RunE(cmd, nil); err != nil {
+			t.Fatalf("RunE: %v", err)
+		}
+	})
 }
 
 // captureStderr swaps os.Stderr for a pipe over the duration of fn and

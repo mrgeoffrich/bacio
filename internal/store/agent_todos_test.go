@@ -89,37 +89,62 @@ func TestUpsertSessionTodoFromTaskUpdatePreservesIssueKey(t *testing.T) {
 	}
 }
 
-// TestUpsertSessionTodoFromTaskOrphanWhenNoClaim covers the hook's
-// "zero or many open claims → fall back to empty issue_key" rule by
-// checking the store accepts an empty issueKey on insert and the row
-// is invisible to a per-issue ListSessionTodos call (but still shows
-// up in the unfiltered list).
-func TestUpsertSessionTodoFromTaskOrphanWhenNoClaim(t *testing.T) {
+// TestUpsertSessionTodoFromTaskRejectsEmptyIssueKey locks in the
+// BACI-136 contract: an insert with an empty issueKey is rejected at
+// the store boundary, and the table stays untouched. The hook short-
+// circuits to log-and-drop before this check fires in production —
+// but the belt is here either way for any future caller that bypasses
+// the hook.
+func TestUpsertSessionTodoFromTaskRejectsEmptyIssueKey(t *testing.T) {
 	s, repo, _ := seedRepoAndIssue(t)
 	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
-		SessionID: "todos-orphan", RepoID: repo.ID, Actor: "agent-claude",
+		SessionID: "todos-empty-issue", RepoID: repo.ID, Actor: "agent-claude",
 	}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	if err := s.UpsertSessionTodoFromTask("todos-orphan", "1", "", "no claim resolved", model.TodoPending, nil); err != nil {
-		t.Fatalf("orphan insert: %v", err)
+	err := s.UpsertSessionTodoFromTask("todos-empty-issue", "1", "", "no claim resolved", model.TodoPending, nil)
+	if err == nil || !strings.Contains(err.Error(), "issue_key is required") {
+		t.Fatalf("err = %v, want issue_key is required", err)
 	}
-	if err := s.UpsertSessionTodoFromTask("todos-orphan", "2", "MINI-1", "with claim", model.TodoPending, nil); err != nil {
-		t.Fatalf("attributed insert: %v", err)
+	got, listErr := s.ListSessionTodos("todos-empty-issue", "")
+	if listErr != nil {
+		t.Fatalf("list: %v", listErr)
 	}
-	unfiltered, err := s.ListSessionTodos("todos-orphan", "")
+	if len(got) != 0 {
+		t.Fatalf("rows = %d, want 0 (reject must leave the table empty)", len(got))
+	}
+}
+
+// TestUpsertSessionTodoFromTaskUpdateAcceptsEmptyIssueKey locks in
+// the BACI-136 "insert-only" scope of the new reject: a TaskUpdate-
+// shape call (existing row + content="") with issueKey="" still
+// succeeds, preserving the row's original issue_key. This is the
+// behaviour the hook depends on so a TaskUpdate fired after the
+// agent's claim window closed still lands cleanly.
+func TestUpsertSessionTodoFromTaskUpdateAcceptsEmptyIssueKey(t *testing.T) {
+	s, repo, _ := seedRepoAndIssue(t)
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "todos-update-empty", RepoID: repo.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if err := s.UpsertSessionTodoFromTask("todos-update-empty", "1", "MINI-1", "seeded", model.TodoPending, nil); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	// Update with issueKey="" must succeed — the update branch ignores
+	// the supplied issueKey and keeps MINI-1.
+	if err := s.UpsertSessionTodoFromTask("todos-update-empty", "1", "", "", model.TodoCompleted, nil); err != nil {
+		t.Fatalf("update with empty issueKey: %v", err)
+	}
+	got, err := s.ListSessionTodos("todos-update-empty", "")
 	if err != nil {
-		t.Fatalf("list unfiltered: %v", err)
+		t.Fatalf("list: %v", err)
 	}
-	if len(unfiltered) != 2 {
-		t.Fatalf("unfiltered len = %d, want 2", len(unfiltered))
+	if len(got) != 1 || got[0].IssueKey != "MINI-1" {
+		t.Fatalf("got = %+v, want one row scoped to MINI-1", got)
 	}
-	scoped, err := s.ListSessionTodos("todos-orphan", "MINI-1")
-	if err != nil {
-		t.Fatalf("list MINI-1: %v", err)
-	}
-	if len(scoped) != 1 || scoped[0].TaskID != "2" {
-		t.Fatalf("MINI-1 scoped = %+v, want one row task=2", scoped)
+	if got[0].Status != model.TodoCompleted {
+		t.Fatalf("Status = %q, want completed", got[0].Status)
 	}
 }
 
@@ -373,48 +398,6 @@ func TestUpsertSessionTodoFromTaskUpdatePreservesDispatchID(t *testing.T) {
 	}
 	if got[0].Status != model.TodoCompleted {
 		t.Fatalf("Status = %q, want completed", got[0].Status)
-	}
-}
-
-// TestUpsertSessionTodoFromTaskOrphanWhenNoDispatch covers the
-// "no dispatch resolvable at hook time" path: store accepts a nil
-// dispatchID paired with an empty issueKey (the orphan bucket) and
-// the row falls out of the wider triple-keyed bulk read while still
-// appearing in the unfiltered list.
-func TestUpsertSessionTodoFromTaskOrphanWhenNoDispatch(t *testing.T) {
-	s, repo, issue := seedRepoAndIssue(t)
-	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
-		SessionID: "todos-orphan-disp", RepoID: repo.ID, Actor: "agent-claude",
-	}); err != nil {
-		t.Fatalf("register: %v", err)
-	}
-	if err := s.UpsertSessionTodoFromTask("todos-orphan-disp", "1", "", "no dispatch", model.TodoPending, nil); err != nil {
-		t.Fatalf("orphan insert: %v", err)
-	}
-	dispatchID := seedDispatch(t, s, repo.ID, &issue.ID, "")
-	if err := s.UpsertSessionTodoFromTask("todos-orphan-disp", "2", issue.Key, "real", model.TodoPending, &dispatchID); err != nil {
-		t.Fatalf("attributed insert: %v", err)
-	}
-	unfiltered, err := s.ListSessionTodos("todos-orphan-disp", "")
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
-	if len(unfiltered) != 2 {
-		t.Fatalf("unfiltered len = %d, want 2", len(unfiltered))
-	}
-	// Triple filter with the real dispatch id excludes the orphan row.
-	got, err := s.ListTodosBySessionsAndIssue([]SessionIssuePair{{
-		SessionID: "todos-orphan-disp", IssueKey: issue.Key, DispatchID: &dispatchID,
-	}})
-	if err != nil {
-		t.Fatalf("triple bulk: %v", err)
-	}
-	totalRows := 0
-	for _, list := range got {
-		totalRows += len(list)
-	}
-	if totalRows != 1 {
-		t.Fatalf("triple-filtered total rows = %d, want 1", totalRows)
 	}
 }
 
