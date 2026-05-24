@@ -26,9 +26,25 @@ Do not create new bacio issues, features, or external tickets (e.g. via `bacio i
 
 The ask-first rule also applies to *modifying* unrelated tickets (re-tagging, re-prioritising, closing). You may freely update the ticket you were dispatched to work on.
 
-### Tracking your work with the task tools
+1
 
-The task tools (`TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet` — the successor to `TodoWrite`) let you track multi-step dispatch work. They are deferred tools — load their schemas via `ToolSearch` (`select:TaskCreate,TaskUpdate,TaskList,TaskGet,TaskOutput,TaskStop`) before calling them.
+---
+
+## First moves — run these in order, before anything else
+
+### 1. Claim the ticket — BEFORE your first `TaskCreate`
+
+Run:
+
+```bash
+bacio agent claim <issue_id> --prompt "<mode>"
+```
+
+substituting the values from the `<issue_id>` and `<mode>` tags in your Task prompt (e.g. `bacio agent claim BACI-42 --prompt "plan"`). The claim auto-transitions the issue to **in progress** — no separate `bacio issue state` call is needed.
+
+### 2. Load TaskCreate, TaskUpdate, TaskList, TaskGet and TaskStop - Tracking your work with the task tools
+
+The task tools (`TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet` / `TaskStop` — the successor to `TodoWrite`) let you track multi-step dispatch work. They are deferred tools — load their schemas via `ToolSearch` (`select:TaskCreate,TaskUpdate,TaskList,TaskGet,TaskOutput,TaskStop`) before calling them.
 
 - Use `TaskCreate` when the dispatch needs 3+ distinct steps; skip it for trivial single-step jobs.
 - Fields: `subject` (imperative title), `description`, optional `activeForm` (spinner text). Tasks start `pending`.
@@ -36,11 +52,9 @@ The task tools (`TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet` — the suc
 - `TaskGet` the latest state before `TaskUpdate` (staleness). `addBlocks` / `addBlockedBy` wire dependencies.
 - This applies to YOU, the worker doing the real work. The supervisor that dispatched you stays a thin scheduler — it does not grow a per-dispatch task list.
 
----
+### 3. Worktree safety guard
 
-## Worktree safety guard — run these checks first
-
-Before you use the bacio skill, claim the ticket, change any issue state, or read/edit/commit a single file, run:
+Before you use the bacio skill, change any issue state, or read/edit/commit a single file, run:
 
 ```bash
 git rev-parse --show-toplevel   # path must contain .claude/worktrees
@@ -49,11 +63,11 @@ git branch --show-current        # must not be main
 
 Abort if either check fails. Trust ONLY the `git rev-parse --show-toplevel` output for the current working folder.
 
-### Read the project conventions
+### 4. Read the project conventions
 
 Subagents don't auto-load CLAUDE.md. Read `<worktree-root>/CLAUDE.md` before doing real work — it's the index of project conventions, build commands, and topic-specific docs. If a CLAUDE.md entry points at a `docs/<topic>.md` file relevant to what you're about to change, read that doc too.
 
-### Establish working directory — make this your FIRST task
+### 5. Establish working directory — your first `TaskCreate` task
 
 Your **first** `TaskCreate` task MUST be an explicit "Establish working directory" step. In its description record, verbatim:
 
@@ -65,10 +79,11 @@ Your **first** `TaskCreate` task MUST be an explicit "Establish working director
 
 ## Setup
 
+The claim is already covered by the preamble's "First moves" block — do not repeat it here.
+
 Run from inside the worktree (Claude Code already created it via `isolation: worktree` and will remove it when you finish — never run `git worktree add` / `remove` yourself):
 
 ```bash
-bacio agent claim <issue_id> --prompt "design"      # auto-transitions to in progress (BACI-126a)
 bacio worktree init                                  # claims an API port for this run
 bacio issue brief <issue_id> > /tmp/brief-<issue_id>.json
 ```
@@ -157,12 +172,23 @@ Cite the file path and (where helpful) a line range so the reader can jump to it
 
 From the patterns you surveyed and the prior art you found, pick **two options that differ along at least one axis**. Useful axes to differ along:
 
+**Backend / structural:**
+
 - **Coupling** — one shared module vs. one-per-consumer; one service vs. composed pipeline of small services.
 - **Data placement** — DB-backed state vs. in-memory + event-sourced; row-per-thing vs. JSON blob; new table vs. extend existing.
 - **Synchrony** — sync request/response vs. fire-and-forget over a bus; polling vs. push.
 - **Pattern family** — strategy vs. inheritance; visitor vs. switch; adapter wrapping a SDK vs. bespoke client.
 - **Reuse vs. greenfield** — extend an existing service vs. build a parallel one with cleaner separation.
 - **Blast radius** — minimal-scope change in one file vs. broader refactor that pays down debt while solving the problem.
+
+**UI / layout** (only if the ticket has a UI surface):
+
+- **Surface family** — full page vs. dialog vs. sheet/drawer vs. inline expand vs. stepped wizard vs. dedicated route.
+- **Data shape** — table vs. card grid vs. dense list vs. kanban vs. tree/hierarchy.
+- **Form shape** — single form vs. stepped wizard vs. inline-edit vs. per-row dialog vs. split-pane editor.
+- **Navigation** — tabs vs. segmented control vs. sidebar vs. single long scroll vs. accordion sections.
+
+**For UI tickets, at least one of the differing axes must be a UI / layout axis** — not just a backend axis. Two options with identical layouts and the same controls but different services behind them are twins from the operator's perspective; the design exploration should give the reader a real choice about what they'll *see* and *touch*, not just what's under the hood. If the layout is genuinely fixed (e.g. the ticket says "add a row to this existing table") and the only meaningful variance is backend, say that explicitly in `## Context` and proceed with backend-only axes.
 
 If both designs end up with the same key abstractions and the same file layout, you've produced one design twice — go back and find a real alternative. If you can only think of one good design and the alternatives all feel weaker, surface that and ask the user whether to write a single recommendation with a "rejected alternatives" appendix instead. Forcing a weak second option produces noise.
 

@@ -28,9 +28,25 @@ Do not create new bacio issues, features, or external tickets (e.g. via `bacio i
 
 The ask-first rule also applies to *modifying* unrelated tickets (re-tagging, re-prioritising, closing). You may freely update the ticket you were dispatched to work on.
 
-### Tracking your work with the task tools
+1
 
-The task tools (`TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet` — the successor to `TodoWrite`) let you track multi-step dispatch work. They are deferred tools — load their schemas via `ToolSearch` (`select:TaskCreate,TaskUpdate,TaskList,TaskGet,TaskOutput,TaskStop`) before calling them.
+---
+
+## First moves — run these in order, before anything else
+
+### 1. Claim the ticket — BEFORE your first `TaskCreate`
+
+Run:
+
+```bash
+bacio agent claim <issue_id> --prompt "<mode>"
+```
+
+substituting the values from the `<issue_id>` and `<mode>` tags in your Task prompt (e.g. `bacio agent claim BACI-42 --prompt "plan"`). The claim auto-transitions the issue to **in progress** — no separate `bacio issue state` call is needed.
+
+### 2. Load TaskCreate, TaskUpdate, TaskList, TaskGet and TaskStop - Tracking your work with the task tools
+
+The task tools (`TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet` / `TaskStop` — the successor to `TodoWrite`) let you track multi-step dispatch work. They are deferred tools — load their schemas via `ToolSearch` (`select:TaskCreate,TaskUpdate,TaskList,TaskGet,TaskOutput,TaskStop`) before calling them.
 
 - Use `TaskCreate` when the dispatch needs 3+ distinct steps; skip it for trivial single-step jobs.
 - Fields: `subject` (imperative title), `description`, optional `activeForm` (spinner text). Tasks start `pending`.
@@ -38,11 +54,9 @@ The task tools (`TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet` — the suc
 - `TaskGet` the latest state before `TaskUpdate` (staleness). `addBlocks` / `addBlockedBy` wire dependencies.
 - This applies to YOU, the worker doing the real work. The supervisor that dispatched you stays a thin scheduler — it does not grow a per-dispatch task list.
 
----
+### 3. Worktree safety guard
 
-## Worktree safety guard — run these checks first
-
-Before you use the bacio skill, claim the ticket, change any issue state, or read/edit/commit a single file, run:
+Before you use the bacio skill, change any issue state, or read/edit/commit a single file, run:
 
 ```bash
 git rev-parse --show-toplevel   # path must contain .claude/worktrees
@@ -51,11 +65,11 @@ git branch --show-current        # must not be main
 
 Abort if either check fails. Trust ONLY the `git rev-parse --show-toplevel` output for the current working folder.
 
-### Read the project conventions
+### 4. Read the project conventions
 
 Subagents don't auto-load CLAUDE.md. Read `<worktree-root>/CLAUDE.md` before doing real work — it's the index of project conventions, build commands, and topic-specific docs. If a CLAUDE.md entry points at a `docs/<topic>.md` file relevant to what you're about to change, read that doc too.
 
-### Establish working directory — make this your FIRST task
+### 5. Establish working directory — your first `TaskCreate` task
 
 Your **first** `TaskCreate` task MUST be an explicit "Establish working directory" step. In its description record, verbatim:
 
@@ -67,12 +81,9 @@ Your **first** `TaskCreate` task MUST be an explicit "Establish working director
 
 ## Setup
 
-1. Use the bacio skill, then claim `<issue_id>` as yours
-   (`bacio agent claim <issue_id> --prompt "review"`). The claim
-   auto-transitions the issue to **in progress** (BACI-126a) — no
-   separate `bacio issue state` call is needed.
-   - Load the Task tools via `ToolSearch` (`select:TaskCreate,TaskUpdate,TaskList,TaskGet,TaskOutput,TaskStop`) and track your work with `TaskCreate` / `TaskUpdate` as you go — bacio mirrors these into the Agents/kanban Tasks pill.
-2. **Worktree.** You already run in an isolated git worktree (Claude Code created it for this subagent via `isolation: worktree` and removes it when you finish) — never run `git worktree add` or `git worktree remove` yourself.
+(The claim and Task-tools load are already covered by the preamble's "First moves" block — do not repeat them here.)
+
+1. **Worktree.** You already run in an isolated git worktree (Claude Code created it for this subagent via `isolation: worktree` and removes it when you finish) — never run `git worktree add` or `git worktree remove` yourself.
    - Run `bacio worktree init` inside the worktree so this run gets its own API port (a `bacio web` smoke test won't collide with the user's running bacio); it leaves DB resolution on the shared `~/.bacio/db.sqlite`, where the ticket you were dispatched to work on lives, so every `bacio` issue call still reaches it. Run every `bacio` command from inside the worktree; if you must run one from elsewhere, pass `--env <worktree>/environment-config.yaml`.
    - If `bacio web`/`bacio api` reports a port already in use, do NOT kill whatever holds it — that is most likely the user's own running bacio UI. Re-check you are inside your worktree, or pass `--port`.
 
