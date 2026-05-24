@@ -1142,3 +1142,330 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   border-radius: var(--radius-md);
   opacity: 0.6;
 }
+
+/* ---------- Transcript viewer (BACI-125) ----------
+   Dedicated reader for the `bacio-transcript-*.jsonl` subagent
+   transcripts attached to issues. Vertically dense — single-line
+   event headers, tight padding, monospace for tool I/O. No truncation:
+   long bodies collapse with a visible line count and expand to the
+   full content. */
+.mk-transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: var(--fg-1);
+}
+.mk-transcript-head { display: flex; flex-direction: column; gap: 4px; }
+.mk-transcript-head-row {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.mk-transcript-head-name {
+  font-family: var(--font-mono); font-size: 12px;
+  color: var(--fg-2);
+}
+.mk-transcript-head-spacer { flex: 1; }
+.mk-transcript-head-meta {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  font-size: 12px; color: var(--fg-3);
+}
+.mk-transcript-head-meta-item {
+  font-family: var(--font-mono); font-size: 11px;
+  padding: 2px 6px; border-radius: 4px;
+  background: var(--ink-50); color: var(--fg-2);
+}
+.mk-transcript-controls {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 8px 10px;
+  background: var(--bg-3);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+}
+.mk-transcript-control-group {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+}
+.mk-transcript-control-toggle {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 12px; color: var(--fg-2); user-select: none;
+}
+.mk-transcript-filter-row { flex: 1; }
+.mk-transcript-filter-label {
+  font-family: var(--font-mono); font-size: 10px; text-transform: uppercase;
+  letter-spacing: .04em; color: var(--fg-3);
+}
+.mk-transcript-filter-chip {
+  font-family: var(--font-mono); font-size: 11px;
+  padding: 2px 8px; border-radius: var(--radius-full);
+  background: var(--paper); color: var(--fg-2);
+  border: 1px solid var(--border-1); cursor: pointer;
+}
+.mk-transcript-filter-chip:hover { border-color: var(--border-2); }
+.mk-transcript-filter-chip.is-active {
+  background: var(--coral-500); color: var(--fg-on-primary); border-color: transparent;
+}
+.mk-transcript-filter-clear {
+  font-size: 11px; color: var(--fg-3); background: transparent;
+  border: 0; cursor: pointer; padding: 2px 6px;
+}
+.mk-transcript-filter-clear:hover { color: var(--fg-1); text-decoration: underline; }
+.mk-transcript-warnings {
+  flex: 1 0 100%; font-size: 12px; color: var(--status-blocked);
+  background: var(--status-blocked-bg); padding: 4px 8px; border-radius: var(--radius-sm);
+}
+.mk-transcript-warnings-text { font-family: var(--font-mono); font-size: 11px; }
+
+/* Two-column grid: sticky mini-map + scrolling stream. The stream
+   owns its own overflow so the IntersectionObserver in TranscriptView
+   can use it as a viewport root and the body keeps the issue
+   workspace's own scroll. */
+.mk-transcript-grid {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 10px;
+  align-items: start;
+}
+.mk-transcript-minimap {
+  position: sticky; top: 0;
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 4px 2px;
+  max-height: 70vh; overflow: auto;
+}
+.mk-transcript-tick {
+  display: block; width: 12px; height: 6px;
+  border: 0; padding: 0; cursor: pointer;
+  border-radius: 2px;
+  background: var(--ink-200);
+}
+.mk-transcript-tick:hover { transform: scaleX(1.4); }
+.mk-transcript-tick.is-dispatch { background: var(--coral-500); }
+.mk-transcript-tick.is-assistant { background: var(--sky-500); }
+.mk-transcript-tick.is-tool { background: var(--ink-400); }
+.mk-transcript-tick.is-sysmeta { background: var(--ink-100); }
+.mk-transcript-tick.is-attachment { background: var(--ink-50); border: 1px dashed var(--ink-200); }
+.mk-transcript-tick.is-error { background: var(--status-blocked); }
+.mk-transcript-tick.is-cursor {
+  outline: 1px solid var(--coral-700);
+  outline-offset: 1px;
+}
+
+.mk-transcript-stream {
+  display: flex; flex-direction: column; gap: 8px;
+  max-height: 70vh; overflow: auto;
+  padding-right: 4px;
+}
+
+/* Per-event card. The header is single-line; the body padding stays
+   tight so a long transcript is scannable. */
+.mk-transcript-event {
+  flex: 0 0 auto;
+  background: var(--paper);
+  border: 1px solid var(--border-1);
+  border-left: 3px solid var(--ink-200);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.mk-transcript-event.is-dispatch { border-left-color: var(--coral-500); }
+.mk-transcript-event.is-assistant { border-left-color: var(--sky-500); }
+.mk-transcript-event.is-tool { border-left-color: var(--ink-400); }
+.mk-transcript-event.is-meta { border-left-color: var(--ink-200); background: var(--bg-3); }
+.mk-transcript-event.is-attachment {
+  border-left-color: var(--ink-100); background: var(--bg-3);
+  opacity: 0.85;
+}
+.mk-transcript-event.is-error { border-left-color: var(--status-blocked); }
+.mk-transcript-event-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px;
+  font-size: 12px; color: var(--fg-2);
+  border-bottom: 1px solid var(--border-3);
+}
+.mk-transcript-event-role {
+  font-family: var(--font-mono); font-size: 11px; text-transform: uppercase;
+  letter-spacing: .04em; color: var(--fg-2);
+}
+.mk-transcript-event-delta {
+  font-family: var(--font-mono); font-size: 11px; color: var(--fg-4);
+}
+.mk-transcript-event-middle { color: var(--fg-3); font-size: 12px; }
+.mk-transcript-event-spacer { flex: 1; }
+.mk-transcript-event-right {
+  font-family: var(--font-mono); font-size: 11px; color: var(--fg-4);
+}
+.mk-transcript-event-usage {
+  font-family: var(--font-mono); font-size: 11px; color: var(--fg-3);
+}
+.mk-transcript-raw-toggle {
+  font-family: var(--font-mono); font-size: 11px;
+  padding: 1px 6px; border-radius: var(--radius-sm);
+  background: transparent; border: 1px solid var(--border-1); color: var(--fg-3);
+  cursor: pointer;
+}
+.mk-transcript-raw-toggle:hover { border-color: var(--border-2); color: var(--fg-1); }
+.mk-transcript-raw-toggle.is-open { background: var(--ink-50); color: var(--fg-1); }
+.mk-transcript-event-body {
+  padding: 8px 12px;
+  font-size: 13px;
+}
+.mk-transcript-event-pill { display: inline-flex; }
+
+.mk-transcript-pill {
+  font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+  letter-spacing: .04em; text-transform: uppercase;
+  padding: 1px 6px; border-radius: var(--radius-sm);
+  background: var(--ink-50); color: var(--fg-3);
+}
+.mk-transcript-pill.is-error {
+  background: var(--status-blocked-bg); color: var(--status-blocked);
+}
+.mk-transcript-pill.is-warn {
+  background: var(--status-doing-bg); color: var(--status-doing);
+}
+.mk-transcript-pill.is-meta { background: var(--ink-50); color: var(--fg-3); }
+
+/* Dispatch prompt card — chip strip + monospace body. */
+.mk-transcript-dispatch {
+  display: flex; flex-direction: column; gap: 8px;
+}
+.mk-transcript-dispatch-tags {
+  display: flex; gap: 6px; flex-wrap: wrap;
+}
+.mk-transcript-chip {
+  font-family: var(--font-mono); font-size: 11px;
+  padding: 2px 8px; border-radius: var(--radius-full);
+  background: var(--ink-50); color: var(--fg-2);
+}
+.mk-transcript-chip.is-issue { background: var(--coral-100); color: var(--coral-700); }
+.mk-transcript-chip.is-mode { background: var(--sky-100); color: var(--sky-700); }
+.mk-transcript-chip.is-dispatch { background: var(--ink-100); color: var(--fg-2); }
+
+/* Collapse helper — never an ellipsis, always a line-count + expand. */
+.mk-transcript-collapse-wrap { display: flex; flex-direction: column; gap: 4px; }
+.mk-transcript-collapse {
+  align-self: flex-start;
+  display: flex; align-items: center; gap: 6px;
+  padding: 2px 6px; border-radius: var(--radius-sm);
+  background: var(--bg-3); border: 1px solid var(--border-1);
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--fg-3); cursor: pointer;
+}
+.mk-transcript-collapse:hover { color: var(--fg-1); border-color: var(--border-2); }
+.mk-transcript-collapse.is-open { color: var(--fg-1); background: var(--paper); }
+.mk-transcript-collapse-arrow { font-size: 10px; }
+.mk-transcript-collapse-label { text-transform: lowercase; }
+.mk-transcript-collapse-count { color: var(--fg-4); }
+.mk-transcript-collapse-native > summary {
+  cursor: pointer; font-size: 12px; color: var(--fg-3);
+  font-family: var(--font-mono);
+}
+
+/* Tool body — fence + sections. */
+.mk-transcript-tool-body { display: flex; flex-direction: column; gap: 8px; }
+.mk-transcript-section { display: flex; flex-direction: column; gap: 4px; }
+.mk-transcript-section.is-error .mk-transcript-pre {
+  background: var(--status-blocked-bg);
+  border-color: var(--status-blocked);
+}
+.mk-transcript-section-label {
+  font-family: var(--font-mono); font-size: 11px; text-transform: uppercase;
+  letter-spacing: .04em; color: var(--fg-3);
+}
+.mk-transcript-pre {
+  font-family: var(--font-mono); font-size: 12px; line-height: 1.45;
+  color: var(--fg-1);
+  background: var(--bg-3); border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px; margin: 0;
+  white-space: pre-wrap; word-break: break-word; overflow-x: auto;
+}
+.mk-transcript-tool-name {
+  font-family: var(--font-mono); font-size: 12px; font-weight: 600;
+  color: var(--fg-1);
+}
+.mk-transcript-inline-code {
+  font-family: var(--font-mono); font-size: 11px;
+  padding: 1px 4px; border-radius: 3px;
+  background: var(--ink-50); color: var(--fg-1);
+}
+.mk-transcript-shell-comment { color: var(--fg-3); }
+.mk-transcript-shell-prompt { color: var(--coral-600); }
+
+/* Edit/Write diff lines */
+.mk-transcript-diff {
+  font-family: var(--font-mono); font-size: 12px; line-height: 1.45;
+  background: var(--bg-3); border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm); padding: 4px 0;
+  overflow-x: auto;
+}
+.mk-transcript-diff-line {
+  display: flex; gap: 6px; padding: 0 8px;
+  white-space: pre-wrap; word-break: break-word;
+}
+.mk-transcript-diff-line.is-add { background: var(--status-done-bg); color: var(--status-done); }
+.mk-transcript-diff-line.is-remove { background: var(--status-blocked-bg); color: var(--status-blocked); }
+.mk-transcript-diff-prefix { user-select: none; opacity: 0.7; }
+.mk-transcript-diff-text { flex: 1; }
+
+/* Todo / Task lists */
+.mk-transcript-todos {
+  list-style: none; padding: 0; margin: 0;
+  display: flex; flex-direction: column; gap: 3px;
+}
+.mk-transcript-todo {
+  display: flex; align-items: flex-start; gap: 8px;
+  font-size: 13px; color: var(--fg-1);
+}
+.mk-transcript-todo-icon {
+  font-family: var(--font-mono); font-size: 12px;
+  color: var(--fg-3); min-width: 12px;
+}
+.mk-transcript-todo.is-completed { color: var(--fg-3); text-decoration: line-through; }
+.mk-transcript-todo.is-completed .mk-transcript-todo-icon { color: var(--status-done); }
+.mk-transcript-todo.is-active .mk-transcript-todo-icon { color: var(--status-doing); }
+.mk-transcript-todo.is-cancelled { color: var(--fg-4); text-decoration: line-through; }
+.mk-transcript-todo.is-cancelled .mk-transcript-todo-icon { color: var(--status-blocked); }
+.mk-transcript-todo-desc { color: var(--fg-3); }
+
+/* Bacio MCP summary chip */
+.mk-transcript-bacio-summary {
+  padding: 4px 8px; border-radius: var(--radius-sm);
+  background: var(--coral-50); color: var(--fg-1);
+  border-left: 2px solid var(--coral-500);
+  font-size: 13px;
+}
+
+/* Assistant blocks: markdown text + thinking */
+.mk-transcript-assistant-blocks { display: flex; flex-direction: column; gap: 6px; }
+.mk-transcript-assistant-text { font-size: 13px; }
+.mk-transcript-thinking {
+  background: var(--bg-3); border-left: 2px solid var(--ink-300);
+  padding: 6px 10px; border-radius: var(--radius-sm);
+  font-size: 12px; color: var(--fg-2);
+}
+.mk-transcript-thinking-head {
+  font-family: var(--font-mono); font-size: 10px; text-transform: uppercase;
+  letter-spacing: .04em; color: var(--fg-3); margin-bottom: 4px;
+}
+.mk-transcript-thinking-body { font-size: 12px; }
+
+/* Raw-event drawer (the [▶] disclosure) */
+.mk-transcript-raw {
+  margin-top: 6px; padding: 8px 10px;
+  background: var(--bg-3); border-top: 1px dashed var(--border-1);
+}
+.mk-transcript-raw-head {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 4px;
+}
+.mk-transcript-raw-title {
+  font-family: var(--font-mono); font-size: 10px; text-transform: uppercase;
+  letter-spacing: .04em; color: var(--fg-3);
+  flex: 1;
+}
+
+/* DocsView Render-tab pane for transcripts */
+.mk-docs-transcript-pane {
+  flex: 1; min-height: 0; overflow: auto;
+  padding: 16px; background: var(--bg-1);
+}
+.mk-linked-doc-transcript { padding: 8px; }
+

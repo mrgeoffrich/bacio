@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { NotionEditor } from './editor/NotionEditor';
+import TranscriptView from '../lib/transcript/TranscriptView';
 import { reportError } from '../errors';
-import { isSvgDoc } from '../lib/docFormat';
+import { isJsonlTranscriptDoc, isSvgDoc } from '../lib/docFormat';
 import * as api from '../api';
 
 // Human label for a bacio document-type enum value.
@@ -16,8 +17,14 @@ function typeLabel(t) {
 // shows an <img> backed by a Blob object URL — browsers don't execute
 // JavaScript in <img>-loaded SVGs, so embedded <script> and event
 // handlers are inert without needing DOMPurify. The Source tab is the
-// existing NotionEditor for raw text editing. Non-SVG docs see no UI
-// change.
+// existing NotionEditor for raw text editing.
+//
+// Subagent JSONL transcripts (BACI-125) follow the same Render/Source
+// pattern — Render mounts <TranscriptView>, Source falls back to the
+// NotionEditor so the raw JSONL is one click away if rendering can't
+// cope with a malformed line.
+//
+// Non-SVG, non-transcript docs see no UI change.
 export default function DocsView({ activeBoard }) {
   const [docs, setDocs] = useState([]);
   const [selected, setSelected] = useState(null); // filename
@@ -25,7 +32,7 @@ export default function DocsView({ activeBoard }) {
   const [savedContent, setSavedContent] = useState(''); // last persisted body
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [view, setView] = useState('render');      // 'render' | 'source' (SVG only)
+  const [view, setView] = useState('render');      // 'render' | 'source'
 
   const repoSelected = !!activeBoard;
   const dirty = content !== savedContent;
@@ -45,8 +52,8 @@ export default function DocsView({ activeBoard }) {
   }, [activeBoard, repoSelected]);
 
   // Load the chosen document's body. Reset the Render/Source toggle to
-  // Render whenever a different doc is opened so the user sees the image
-  // first.
+  // Render whenever a different doc is opened so the user sees the
+  // rendered surface first.
   useEffect(() => {
     if (!selected || !repoSelected) return;
     setLoading(true);
@@ -85,13 +92,25 @@ export default function DocsView({ activeBoard }) {
     [selected, content],
   );
 
-  // Object URL for the Render tab. Created and revoked inside a single
-  // useEffect so each URL.createObjectURL is paired with exactly one
-  // URL.revokeObjectURL — important under React StrictMode, which mounts
-  // / unmounts / remounts effects in dev and would otherwise leave the
-  // first-mount URL revoked while the JSX kept rendering it. Refreshes
-  // on every content edit so a dirty Source-tab buffer renders live
-  // when the user tabs back.
+  // Transcript detection is filename-driven (predicate is conservative
+  // so a hand-uploaded `.jsonl` doesn't accidentally trigger this
+  // surface).
+  const isTranscript = useMemo(
+    () => !!selected && isJsonlTranscriptDoc(selected),
+    [selected],
+  );
+
+  // A renderable doc has a Render/Source tab pair. Save still works
+  // from the Source tab — symmetric with the SVG flow.
+  const renderable = isSvg || isTranscript;
+
+  // Object URL for the SVG Render tab. Created and revoked inside a
+  // single useEffect so each URL.createObjectURL is paired with exactly
+  // one URL.revokeObjectURL — important under React StrictMode, which
+  // mounts / unmounts / remounts effects in dev and would otherwise
+  // leave the first-mount URL revoked while the JSX kept rendering it.
+  // Refreshes on every content edit so a dirty Source-tab buffer
+  // renders live when the user tabs back.
   const [svgUrl, setSvgUrl] = useState('');
   useEffect(() => {
     if (!isSvg) { setSvgUrl(''); return undefined; }
@@ -145,7 +164,7 @@ export default function DocsView({ activeBoard }) {
           <>
             <header className="mk-docs-bar">
               <span className="mk-docs-bar-name">{selected}</span>
-              {isSvg && (
+              {renderable && (
                 <div className="mk-docs-tabs" role="tablist" aria-label="View mode">
                   <button
                     role="tab"
@@ -169,11 +188,11 @@ export default function DocsView({ activeBoard }) {
                 {dirty ? 'Unsaved changes' : 'Saved'}
               </span>
               <div className="mk-docs-bar-actions">
-                {isSvg && (
+                {renderable && (
                   <button
                     className="mk-btn-secondary"
                     onClick={copySource}
-                    title="Copy SVG source to clipboard"
+                    title="Copy source to clipboard"
                   >
                     Copy source
                   </button>
@@ -190,6 +209,10 @@ export default function DocsView({ activeBoard }) {
             {isSvg && view === 'render' ? (
               <div className="mk-docs-svg-pane">
                 <img className="mk-docs-svg-img" src={svgUrl} alt={selected} />
+              </div>
+            ) : isTranscript && view === 'render' ? (
+              <div className="mk-docs-transcript-pane">
+                <TranscriptView source={content} filename={selected} sizeBytes={content?.length} />
               </div>
             ) : (
               <div className="mk-docs-editor">
