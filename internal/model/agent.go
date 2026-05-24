@@ -379,6 +379,7 @@ type DispatchMode string
 const (
 	BuiltinTemplatePreamble  = "_dispatch_preamble"
 	BuiltinTemplatePlan      = "plan"
+	BuiltinTemplatePlanLarge = "plan_large"
 	BuiltinTemplateDesign    = "design"
 	BuiltinTemplateImplement = "implement"
 	BuiltinTemplateReview    = "review"
@@ -406,7 +407,7 @@ const (
 // by created_at, id).
 var builtinTemplateSlugs = []string{
 	BuiltinTemplatePreamble,
-	BuiltinTemplatePlan, BuiltinTemplateDesign, BuiltinTemplateImplement,
+	BuiltinTemplatePlan, BuiltinTemplatePlanLarge, BuiltinTemplateDesign, BuiltinTemplateImplement,
 	BuiltinTemplateReview, BuiltinTemplateShip, BuiltinTemplateFixReview,
 }
 
@@ -423,6 +424,7 @@ func BuiltinTemplateSlugs() []string {
 var builtinTemplateLabels = map[string]string{
 	BuiltinTemplatePreamble:  "Dispatch preamble (prepended to every job)",
 	BuiltinTemplatePlan:      "Planning",
+	BuiltinTemplatePlanLarge: "Planning (large)",
 	BuiltinTemplateDesign:    "Designing",
 	BuiltinTemplateImplement: "Implementing",
 	BuiltinTemplateReview:    "Reviewing",
@@ -451,6 +453,7 @@ func BuiltinTemplateLabel(slug string) string {
 // BuiltinTemplateActionLabel returns "" for it.
 var builtinTemplateActionLabels = map[string]string{
 	BuiltinTemplatePlan:      "Plan",
+	BuiltinTemplatePlanLarge: "Plan (large)",
 	BuiltinTemplateDesign:    "Design",
 	BuiltinTemplateImplement: "Implement",
 	BuiltinTemplateReview:    "Review",
@@ -725,6 +728,7 @@ func DefaultPromptTemplate(mode DispatchMode) string {
 // prompt_templates table.
 var builtinPromptStates = map[string][]State{
 	BuiltinTemplatePlan:      {StateTodo},
+	BuiltinTemplatePlanLarge: {StateTodo},
 	BuiltinTemplateDesign:    {StateTodo},
 	BuiltinTemplateImplement: {StateTodo},
 	BuiltinTemplateReview:    {StateInReview},
