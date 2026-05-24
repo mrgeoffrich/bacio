@@ -39,6 +39,13 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, o
   // `taken` wins: once an agent claims, waiting_for_claim is cleared, so
   // they shouldn't overlap, but render defensively if they do.
   const waiting = !!card.waitingForClaim && !taken;
+  // BACI-130: once the active dispatch has been delivered, the worker
+  // has taken the Task and cancel-after-delivery is rejected at the
+  // store boundary. Keep the spinner glyph (the card is still in
+  // flight) but drop the click affordance — the cancel button would
+  // either no-op (if the spinner re-renders without it on the next
+  // tick) or surface a confusing error toast.
+  const waitingDelivered = waiting && !!card.waitingDispatchDelivered;
   const dispatchDisabled = taken || waiting;
 
   const hasFooter = validPrompts.length > 0 || card.assignees.length > 0 || waiting;
@@ -155,17 +162,32 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, o
             </Tooltip>
           )}
           {waiting ? (
-            <Tooltip label="Cancel queued dispatch">
-              <button
-                type="button"
-                className="mk-card-spinner mk-card-spinner-btn"
-                aria-label="Cancel queued dispatch"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  if (onCancelWaiting) onCancelWaiting(card.key);
-                }}
-              />
-            </Tooltip>
+            waitingDelivered ? (
+              // BACI-130: delivered — keep the spinner glyph, drop the
+              // cancel affordance. The worker has the Task and the
+              // store rejects cancel-after-delivery; surface the
+              // status non-interactively rather than show a button
+              // that can't act.
+              <Tooltip label="Worker has taken this dispatch — interrupt the agent to stop it">
+                <span
+                  className="mk-card-spinner"
+                  role="status"
+                  aria-label="Dispatch delivered to worker"
+                />
+              </Tooltip>
+            ) : (
+              <Tooltip label="Cancel queued dispatch">
+                <button
+                  type="button"
+                  className="mk-card-spinner mk-card-spinner-btn"
+                  aria-label="Cancel queued dispatch"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (onCancelWaiting) onCancelWaiting(card.key);
+                  }}
+                />
+              </Tooltip>
+            )
           ) : validPrompts.length > 0 && (
             <DropdownMenu.Root>
               <DropdownMenu.Trigger asChild>

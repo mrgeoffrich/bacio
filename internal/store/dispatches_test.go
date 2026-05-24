@@ -1,6 +1,8 @@
 package store
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/mrgeoffrich/bacio/internal/model"
@@ -490,5 +492,52 @@ func TestCancelThenAckRejected(t *testing.T) {
 	}
 	if _, err := s.AckDispatch(d.ID, "too late"); err == nil {
 		t.Fatal("expected ack of cancelled dispatch to error, got nil")
+	}
+}
+
+// TestCancelDeliveredRejected (BACI-130) locks in the store-level
+// guard: once a dispatch is delivered (the worker has taken the Task
+// call) the row must not be cancellable, because doing so would just
+// drop the kanban activity pill while the work continues. The reject
+// happens before the transaction so neither the dispatch row nor the
+// issue's waiting_for_claim flag is mutated.
+func TestCancelDeliveredRejected(t *testing.T) {
+	s, repo, iss, ag, _ := seedDispatchFixture(t)
+	d, err := s.AddDispatch(AddDispatchIn{
+		RepoID:        repo.ID,
+		TargetAgentID: &ag.ID,
+		IssueID:       &iss.ID,
+		Payload:       "do a thing",
+		CreatedBy:     "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add dispatch: %v", err)
+	}
+	if _, err := s.MarkDispatchDelivered(d.ID); err != nil {
+		t.Fatalf("mark delivered: %v", err)
+	}
+	if _, err := s.CancelDispatch(d.ID); err == nil {
+		t.Fatal("expected cancel of delivered dispatch to error, got nil")
+	} else if !strings.Contains(err.Error(), "delivered") {
+		t.Errorf("error %q should contain \"delivered\"", err.Error())
+	} else if !strings.Contains(err.Error(), fmt.Sprint(d.ID)) {
+		t.Errorf("error %q should contain dispatch id %d", err.Error(), d.ID)
+	}
+	// The reject must not mutate the dispatch row.
+	got, err := s.GetDispatch(d.ID)
+	if err != nil {
+		t.Fatalf("re-read dispatch: %v", err)
+	}
+	if got.Status != model.DispatchDelivered {
+		t.Errorf("status after rejected cancel = %q, want delivered", got.Status)
+	}
+	// The reject must not clear the issue's waiting_for_claim flag
+	// either — the claim path is what clears it, not a failed cancel.
+	issAfter, err := s.GetIssueByID(iss.ID)
+	if err != nil {
+		t.Fatalf("re-read issue: %v", err)
+	}
+	if !issAfter.WaitingForClaim {
+		t.Errorf("issue.waiting_for_claim = false, want true (rejected cancel must not clear)")
 	}
 }

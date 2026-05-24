@@ -92,6 +92,7 @@ bacio issue brief MINI-42                      # one-shot bulk context for an LL
 - **Mixing `--json` with positionals/flags is rejected** — choose one mode per call.
 - **Auto-created prefixes can collide** — two repos sharing a basename get `XXX2`, `XXX3`, … Confirm with `bacio repo list`.
 - **Issue numbers never repeat** — deleting `MINI-3` does not free the number.
+- **`bacio agent cancel` is pre-delivery-only** (BACI-130). A dispatch with `delivered_at` set has been handed to the worker; cancelling it would just lie in the model — the work continues but the kanban activity pill drops out. Use the agent's interrupt path to stop a live worker, and `bacio agent cancel <id>` only for queued / pending rows that haven't been delivered yet.
 
 ## Installation
 

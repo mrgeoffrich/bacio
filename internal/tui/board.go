@@ -397,6 +397,15 @@ func (b *boardView) cancelWaitingOnSelection() error {
 		// the spinner render and the key press. Nothing to do.
 		return nil
 	}
+	// BACI-130: cancel-after-delivery is rejected at the store boundary.
+	// Short-circuit here so the X key on a delivered card is a quiet
+	// no-op instead of a TUI error toast — the card is still in flight,
+	// the worker has the Task, and the right way to stop them is
+	// interrupting the agent itself. Defence in depth: if this guard is
+	// missed, the store still rejects.
+	if dsp.Status == model.DispatchDelivered {
+		return nil
+	}
 	if _, err := b.store.CancelDispatch(dsp.ID); err != nil {
 		return err
 	}

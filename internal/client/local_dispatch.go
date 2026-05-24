@@ -276,6 +276,14 @@ func (c *localClient) CancelDispatch(ctx context.Context, in inputs.AgentCancelI
 	if d.Status == model.DispatchAcked {
 		return nil, fmt.Errorf("dispatch %d is already acked; cannot cancel", in.ID)
 	}
+	// BACI-130: a delivered dispatch is past the point where cancelling
+	// the row does anything useful — the worker has the Task in hand
+	// and the work is happening. Mirror the store-level reject here so
+	// `--dry-run` reports the conflict instead of synthesising a
+	// "would-be cancelled" projection.
+	if d.Status == model.DispatchDelivered {
+		return nil, fmt.Errorf("dispatch %d has been delivered; cannot cancel", in.ID)
+	}
 	if dryRun {
 		proj := *d
 		proj.Status = model.DispatchCancelled
