@@ -16,6 +16,10 @@ func TestParseDocumentType_NewBACI115Types(t *testing.T) {
 		{"rendered transcript", DocTypeRenderedTranscript},
 		{"RENDERED-TRANSCRIPT", DocTypeRenderedTranscript},
 		{"review", DocTypeReview},
+		// session_retro — same dash/underscore/space normalisation rules.
+		{"session_retro", DocTypeSessionRetro},
+		{"session-retro", DocTypeSessionRetro},
+		{"Session Retro", DocTypeSessionRetro},
 		// Existing types still parse — BACI-115 extends, doesn't replace.
 		{"project_complete", DocTypeProjectComplete},
 		{"user-docs", DocTypeUserDocs},
@@ -48,6 +52,7 @@ func TestAllDocumentTypes_IncludesBACI115Types(t *testing.T) {
 		DocTypeTranscript,
 		DocTypeRenderedTranscript,
 		DocTypeReview,
+		DocTypeSessionRetro,
 	} {
 		if !have[want] {
 			t.Errorf("AllDocumentTypes() missing %q", want)
@@ -62,6 +67,7 @@ func TestDocTypeInlinedInBrief(t *testing.T) {
 	}{
 		{DocTypePlan, true},
 		{DocTypeReview, true},
+		{DocTypeSessionRetro, true},
 		// Every other type is NOT inlined — these are the cases that
 		// matter for BACI-115 (transcript was the bug; the rest just
 		// confirm the rule is narrow).
