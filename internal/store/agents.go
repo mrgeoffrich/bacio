@@ -377,13 +377,18 @@ func clearAssigneeIfOwned(tx *sql.Tx, issueID int64, identity string) (*Assignee
 	return ch, nil
 }
 
-// CancelledDispatchInfo is one auto-cancelled dispatch row returned by
-// EndAgentSession (BACI-58 §B). Carries the fields the audit caller
-// needs to build a per-row `agent.cancel` history entry without
+// DispatchCascadeInfo is one dispatch row resolved by EndAgentSession's
+// open-dispatch cascade (BACI-58 §B + BACI-133). Carries the fields the
+// audit caller needs to build a per-row history entry without
 // re-fetching: repo prefix for the audit-row scope, issue key (when
 // non-empty) for the human-readable label, target agent + session for
-// the dispatchTargetLabel helper, and mode for the Details string.
-type CancelledDispatchInfo struct {
+// the dispatchTargetLabel helper, mode for the Details string, and the
+// NewStatus the cascade landed the row in. NewStatus is
+// model.DispatchCancelled for the default cancel-on-end path and
+// model.DispatchQueued for the BACI-133 reaper requeue path — the
+// caller switches on it to decide between an `agent.cancel` and an
+// `agent.dispatch.requeue` history row.
+type DispatchCascadeInfo struct {
 	ID              int64
 	RepoID          int64
 	RepoPrefix      string
@@ -391,7 +396,38 @@ type CancelledDispatchInfo struct {
 	TargetAgentName string
 	TargetSessionID string
 	Mode            string
+	NewStatus       model.DispatchStatus
 }
+
+// CancelledDispatchInfo is a deprecated alias for DispatchCascadeInfo,
+// kept so old call sites that only spoke the cancel-cascade language
+// keep compiling. New code should use DispatchCascadeInfo directly and
+// switch on NewStatus.
+//
+// Deprecated: use DispatchCascadeInfo.
+type CancelledDispatchInfo = DispatchCascadeInfo
+
+// DispatchCascadeMode controls what EndAgentSession does with the
+// session's still-open (queued/pending/delivered) dispatches inside
+// the same transaction. Default is cancel-on-end (today's behaviour
+// for every user-driven / hook-driven / supersede path);
+// DispatchCascadeRequeue flips them back to `queued` with the target
+// fields cleared so the BACI-51 matcher rebinds them to a fresh
+// agent — the BACI-133 reaper-only recovery path for `presumed_dead`.
+type DispatchCascadeMode int
+
+const (
+	// DispatchCascadeCancel: still-open dispatches land in
+	// `status='cancelled'`. The existing behaviour for every end
+	// reason except the BACI-133 reaper path.
+	DispatchCascadeCancel DispatchCascadeMode = iota
+	// DispatchCascadeRequeue: still-open dispatches flip back to
+	// `status='queued'` with target_session_id='' and
+	// target_agent_id=NULL so the matcher rebinds them. Only valid
+	// when EndAgentSession's reason is `presumed_dead` — the reaper's
+	// recovery path (BACI-133).
+	DispatchCascadeRequeue
+)
 
 // EndAgentSession stamps ended_at + end_reason, and auto-releases every
 // open claim for that session. Idempotent: ending an already-ended
@@ -400,26 +436,44 @@ type CancelledDispatchInfo struct {
 // (subject to clearAssigneeIfOwned's guard) — the returned slice carries
 // one entry per issue whose assignee actually changed, for the audit log.
 //
-// BACI-58 §B — the third return value carries every dispatch this
-// transaction auto-cancelled: every queued/pending/delivered row
-// targeting this session, plus the identity-targeted ones when this is
-// the agent identity's last live session. The caller writes one
-// `agent.cancel` audit row per entry so the auto-cancel is visible in
-// `bacio history` next to the originating `agent.end`.
+// BACI-58 §B / BACI-133 — the fourth return value carries every
+// still-open dispatch this transaction touched: every
+// queued/pending/delivered row targeting this session, plus the
+// identity-targeted ones when this is the agent identity's last live
+// session. The cascade parameter controls what happens to each row:
+//   - DispatchCascadeCancel (default): rows land in `status='cancelled'`
+//     — today's behaviour for every user-driven / hook-driven /
+//     supersede end path. The caller writes one `agent.cancel` audit
+//     row per entry.
+//   - DispatchCascadeRequeue: rows flip back to `status='queued'`
+//     with target_session_id='' and target_agent_id=NULL so the
+//     BACI-51 matcher rebinds them to a fresh agent. Only valid when
+//     `reason == presumed_dead` (the BACI-133 reaper recovery path);
+//     any other combination is rejected. The caller writes one
+//     `agent.dispatch.requeue` audit row per entry.
+//
+// Each cascade entry's NewStatus carries which path took it, so a
+// caller serving both can branch on it without re-fetching.
 //
 // BACI-126c: orphanState is the state every auto-released claim's
 // issue lands in (typically `in_progress` — the "work abandoned" default
-// the agent end flow picks when it doesn't know better). The fourth
+// the agent end flow picks when it doesn't know better). The third
 // return value carries one StateChange per claimed issue whose state
 // actually moved, so the caller can fold them into the per-issue audit
 // rows next to the cascaded `agent.release` entries.
-func (s *Store) EndAgentSession(sessionID, reason string, orphanState model.State) (*model.AgentSession, []AssigneeChange, []StateChange, []CancelledDispatchInfo, error) {
+func (s *Store) EndAgentSession(sessionID, reason string, orphanState model.State, cascade DispatchCascadeMode) (*model.AgentSession, []AssigneeChange, []StateChange, []DispatchCascadeInfo, error) {
 	if _, err := ValidateSessionID(sessionID); err != nil {
 		return nil, nil, nil, nil, err
 	}
 	parsed, err := model.ParseEndReason(reason)
 	if err != nil {
 		return nil, nil, nil, nil, err
+	}
+	// BACI-133: re-queue is reserved for the reaper recovery path. Any
+	// other end reason paired with Requeue is a caller bug — reject at
+	// the boundary so we never silently re-queue a user-driven end.
+	if cascade == DispatchCascadeRequeue && parsed != model.EndReasonPresumedDead {
+		return nil, nil, nil, nil, fmt.Errorf("EndAgentSession: DispatchCascadeRequeue requires reason=%q, got %q", model.EndReasonPresumedDead, parsed)
 	}
 	tx, err := s.DB.Begin()
 	if err != nil {
@@ -521,7 +575,7 @@ func (s *Store) EndAgentSession(sessionID, reason string, orphanState model.Stat
 		}
 	}
 
-	cancelled, err := cancelOpenDispatchesForSession(tx, sessPK, sessionID)
+	cascadeInfos, err := resolveOpenDispatchesForSession(tx, sessPK, cascade)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -530,29 +584,62 @@ func (s *Store) EndAgentSession(sessionID, reason string, orphanState model.Stat
 		return nil, nil, nil, nil, err
 	}
 	sess, err := s.GetAgentSession(sessionID)
-	return sess, assigneeChanges, stateChanges, cancelled, err
+	return sess, assigneeChanges, stateChanges, cascadeInfos, err
 }
 
-// cancelOpenDispatchesForSession cancels the session's open
-// (queued, pending, delivered) dispatches inside the caller's tx and,
-// when this is the agent identity's last live session, the
-// identity-targeted ones too. Returns one CancelledDispatchInfo per
-// cancelled row so the audit caller can record per-row history
-// entries.
+// resolveOpenDispatchesForSession applies the dispatch-cascade
+// (BACI-58 §B / BACI-133) to the session's still-open
+// (queued, pending, delivered) dispatches inside the caller's tx, and,
+// when this is the agent identity's last live session, to the
+// identity-targeted ones too. Returns one DispatchCascadeInfo per
+// touched row so the audit caller can record per-row history entries.
 //
-// Also clears issues.waiting_for_claim for each cancelled dispatch
-// that targets an issue, matching the standalone CancelDispatch
-// behaviour so the desktop / web spinner clears on the next refresh.
+// Cascade modes (see DispatchCascadeMode):
+//   - Cancel: rows land in `status='cancelled'`. NewStatus is
+//     DispatchCancelled. Also clears issues.waiting_for_claim for each
+//     dispatch that targets an issue — same logic CancelDispatch uses,
+//     so the desktop / web spinner clears on the next refresh.
+//   - Requeue (BACI-133, presumed_dead only): rows flip back to
+//     `status='queued'` with target_session_id='' and
+//     target_agent_id=NULL so the BACI-51 matcher rebinds them to a
+//     fresh agent on its next tick. NewStatus is DispatchQueued.
+//     issues.waiting_for_claim is intentionally LEFT SET — a queued
+//     row is exactly the case the flag exists for, and the matcher's
+//     next bind keeps it set; a subsequent claim clears it the usual
+//     way.
+//
+// Identity-scoped re-queue: when the dying session is the identity's
+// last live one, an identity-targeted dispatch loses its identity
+// binding (`target_agent_id` cleared). The matcher then re-picks via
+// the normal candidate-selection path — the original intent ("this
+// identity") is forfeited because the identity has no live session
+// left, which is the right behaviour: we want the next free agent to
+// ship the work, not wait for the dead identity to come back.
 //
 // The identity-scoped UPDATE is guarded by a NOT EXISTS clause that
 // keeps the dispatch alive when a sibling alive session for the same
 // identity could still service it — pairing/review flows shouldn't
-// lose work when one of two paired sessions ends.
-func cancelOpenDispatchesForSession(tx *sql.Tx, sessPK int64, sessionID string) ([]CancelledDispatchInfo, error) {
-	scanInfos := func(rows *sql.Rows) ([]CancelledDispatchInfo, error) {
-		var out []CancelledDispatchInfo
+// lose work (cancel branch) and shouldn't lose target binding
+// (requeue branch) when one of two paired sessions ends.
+func resolveOpenDispatchesForSession(tx *sql.Tx, sessPK int64, cascade DispatchCascadeMode) ([]DispatchCascadeInfo, error) {
+	// SQL fragments differ only in the SET clause. The WHERE / RETURNING
+	// shape is identical so a future reader can see both branches do the
+	// same row selection — only the landing status differs.
+	var setClause string
+	var newStatus model.DispatchStatus
+	switch cascade {
+	case DispatchCascadeRequeue:
+		setClause = `status = 'queued', target_session_id = '', target_agent_id = NULL`
+		newStatus = model.DispatchQueued
+	default:
+		setClause = `status = 'cancelled'`
+		newStatus = model.DispatchCancelled
+	}
+
+	scanInfos := func(rows *sql.Rows) ([]DispatchCascadeInfo, error) {
+		var out []DispatchCascadeInfo
 		for rows.Next() {
-			var info CancelledDispatchInfo
+			info := DispatchCascadeInfo{NewStatus: newStatus}
 			var issueKey sql.NullString
 			var agentName sql.NullString
 			var targetSession sql.NullString
@@ -572,13 +659,15 @@ func cancelOpenDispatchesForSession(tx *sql.Tx, sessPK int64, sessionID string) 
 		return out, rows.Err()
 	}
 
-	// Session-scoped cancel — every still-open dispatch targeting this
+	// Session-scoped cascade — every still-open dispatch targeting this
 	// exact session. RETURNING (SQLite >= 3.35, supported by
 	// modernc.org/sqlite) lets the same statement collect every audit
-	// payload we need.
+	// payload we need. The target_session_id / target_agent_id captured
+	// in RETURNING reflects the row's value *before* the SET clause
+	// rewrote it — exactly the audit context we want.
 	sessRows, err := tx.Query(`
 		UPDATE agent_dispatches
-		   SET status = 'cancelled'
+		   SET `+setClause+`
 		 WHERE target_session_id = (SELECT session_id FROM agent_sessions WHERE id = ?)
 		   AND status IN ('queued','pending','delivered')
 		RETURNING id, repo_id,
@@ -599,13 +688,14 @@ func cancelOpenDispatchesForSession(tx *sql.Tx, sessPK int64, sessionID string) 
 		return nil, err
 	}
 
-	// Identity-scoped cancel — only fires when this session is the
+	// Identity-scoped cascade — only fires when this session is the
 	// identity's last live one. Lets paired/review setups keep their
-	// identity-targeted dispatches alive when one session ends but
+	// identity-targeted dispatches alive (cancel branch) or keep their
+	// identity binding (requeue branch) when one session ends but
 	// another for the same identity is still working.
 	idRows, err := tx.Query(`
 		UPDATE agent_dispatches
-		   SET status = 'cancelled'
+		   SET `+setClause+`
 		 WHERE target_agent_id IS NOT NULL
 		   AND target_agent_id = (SELECT agent_id FROM agent_sessions WHERE id = ?)
 		   AND status IN ('queued','pending','delivered')
@@ -638,22 +728,28 @@ func cancelOpenDispatchesForSession(tx *sql.Tx, sessPK int64, sessionID string) 
 		return nil, nil
 	}
 
-	// Clear issues.waiting_for_claim for every cancelled dispatch that
-	// targets an issue — same logic CancelDispatch uses. The cancelled
-	// dispatch row still carries its issue_id (the update only touched
-	// status), so the subquery resolves correctly. Harmless if another
-	// open dispatch still targets the same issue: the next
-	// AddDispatch / AddAgentClaim re-establishes the flag.
-	for _, info := range out {
-		if info.IssueKey == "" {
-			continue
-		}
-		if _, err := tx.Exec(
-			`UPDATE issues SET waiting_for_claim = 0
-			  WHERE id = (SELECT issue_id FROM agent_dispatches WHERE id = ?)`,
-			info.ID,
-		); err != nil {
-			return nil, err
+	// Cancel branch only: clear issues.waiting_for_claim for every
+	// cancelled dispatch that targets an issue — same logic
+	// CancelDispatch uses. The cancelled dispatch row still carries its
+	// issue_id (the update only touched status), so the subquery
+	// resolves correctly. Harmless if another open dispatch still
+	// targets the same issue: the next AddDispatch / AddAgentClaim
+	// re-establishes the flag.
+	//
+	// Requeue branch deliberately leaves the flag set — a queued row is
+	// exactly the "waiting for claim" case.
+	if cascade == DispatchCascadeCancel {
+		for _, info := range out {
+			if info.IssueKey == "" {
+				continue
+			}
+			if _, err := tx.Exec(
+				`UPDATE issues SET waiting_for_claim = 0
+				  WHERE id = (SELECT issue_id FROM agent_dispatches WHERE id = ?)`,
+				info.ID,
+			); err != nil {
+				return nil, err
+			}
 		}
 	}
 

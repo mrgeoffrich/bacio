@@ -883,6 +883,42 @@ hand-roll their payloads and never see the preamble. The parent
 agent reads a tag with no delegation wrapper attached and handles it
 inline.
 
+#### Reaper cadence + re-queue on `presumed_dead` (BACI-133)
+
+The BACI-57 idle-pinger runs on a tightened **20 minute** cadence
+(`model.AgentIdlePingThreshold`, was 1 h). With
+`AgentPingNoAckTimeout = 2 min` the worst-case end-to-end reap window
+is ~22 min from last heartbeat to force-end — tight enough that the
+autonomous recovery beats a user noticing the silence and intervening
+manually. The same constant doubles as the BACI-58 staleness window
+in `store.CountInFlightByMode`, so a delivered-but-unacknowledged
+dispatch on a quiet session drops out of the per-(repo, mode)
+concurrency cap promptly.
+
+When the reaper force-ends a session with `reason=presumed_dead`,
+the dispatch cascade inside `EndAgentSession` no longer cancels the
+session's still-open (`queued`/`pending`/`delivered`) dispatches —
+it **re-queues** them. Each touched row flips back to
+`status='queued'` with `target_session_id=''` and
+`target_agent_id=NULL`, so the BACI-51 matcher rebinds the row to a
+fresh live agent on its next tick. Per-row audit lands as
+`agent.dispatch.requeue` (kind `agent`, actor
+`bacio-channel-ping`), so `bacio history --op agent.dispatch.requeue`
+or `--user-filter bacio-channel-ping` returns a coherent
+reaper-activity ledger. The linked issue's
+`waiting_for_claim` flag stays set — a queued row is exactly the
+case the flag exists for; the next `AddAgentClaim` clears it the
+usual way.
+
+Every other end reason keeps today's cancel-on-end semantics
+(hook-driven `stop`/`clear`/`logout`/`other`, operator-driven
+`bacio agent end`, the BACI-100 `superseded` phantom-row dedupe).
+The store-side `DispatchCascadeMode` parameter enforces the pairing
+— `DispatchCascadeRequeue` with any reason other than
+`presumed_dead` is rejected at the boundary. The cascade is derived
+from `reason` inside `EndAgent` (client + API handler), so the
+public JSON surface on `agent.end` is unchanged.
+
 For any dispatch that does go through `ComposeDispatchPayload` —
 which is every issue-tied per-mode dispatch (`plan` / `design` /
 `implement` / `review` / `ship` / `fix_review`, plus any user-added

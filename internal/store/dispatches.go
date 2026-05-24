@@ -451,11 +451,12 @@ func (s *Store) ListQueuedByRepoMode(repoID int64, mode model.DispatchMode) ([]*
 // never returns used to permanently strand a slot in the per-(repo,
 // mode) count. Now a row only counts when its target is plausibly
 // alive — either the targeted identity has a session whose
-// `last_seen_at` is within `model.AgentIdlePingThreshold` (1h, aligned
-// with the BACI-57 reaper) and isn't ended, or the targeted session
-// itself satisfies the same. Pure exclusion (no write); the orphan
-// rows are tidied by EndAgentSession's BACI-58 §B auto-cancel once
-// the reaper (or a clean SessionEnd hook) stamps `ended_at`.
+// `last_seen_at` is within `model.AgentIdlePingThreshold` (20m after
+// BACI-133, aligned with the BACI-57 reaper) and isn't ended, or the
+// targeted session itself satisfies the same. Pure exclusion (no
+// write); the orphan rows are tidied (cancelled or BACI-133-requeued)
+// by EndAgentSession's BACI-58 §B cascade once the reaper (or a clean
+// SessionEnd hook) stamps `ended_at`.
 //
 // The threshold is rendered as a SQLite duration string so the live
 // `datetime('now', '-3600 seconds')` evaluation matches the row's

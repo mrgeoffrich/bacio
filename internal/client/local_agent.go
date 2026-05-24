@@ -265,8 +265,11 @@ func (c *localClient) supersedeStaleSessions(host string, claudePID int64, keepI
 		// Supersede path: end the phantom row with an empty orphanState so
 		// the claim cascade leaves issue state alone. The phantom session
 		// only exists because a non-UUID register clobbered it; its
-		// claims (if any) should not be retroactively state-mutated.
-		ended, _, _, _, err := c.store.EndAgentSession(s.SessionID, string(model.EndReasonSuperseded), "")
+		// claims (if any) should not be retroactively state-mutated, and
+		// the dispatch cascade must NOT re-queue (BACI-133's requeue is
+		// reserved for the reaper on a real session that went dark — a
+		// phantom never owned the work).
+		ended, _, _, _, err := c.store.EndAgentSession(s.SessionID, string(model.EndReasonSuperseded), "", store.DispatchCascadeCancel)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "bacio: superseding stale session %s: %v\n", s.SessionID, err)
 			continue
@@ -369,7 +372,19 @@ func (c *localClient) EndAgent(ctx context.Context, repo *model.Repo, in inputs.
 		projected.EndReason = in.Reason
 		return &projected, nil
 	}
-	sess, assigneeChanges, stateChanges, cancelled, err := c.store.EndAgentSession(in.SessionID, in.Reason, orphanState)
+	// BACI-133: derive the dispatch cascade from the end reason — only
+	// the reaper-driven presumed_dead path re-queues; every other end
+	// reason (hook-driven SessionEnd via mapEndReason, operator-driven
+	// `bacio agent end`, supersede via the dedicated call site above)
+	// keeps today's cancel-on-end semantics. The store validates the
+	// pairing — Requeue with any other reason is rejected at the
+	// boundary, so this two-line derivation is the only place that
+	// decides.
+	cascade := store.DispatchCascadeCancel
+	if model.EndReason(in.Reason) == model.EndReasonPresumedDead {
+		cascade = store.DispatchCascadeRequeue
+	}
+	sess, assigneeChanges, stateChanges, cascadeInfos, err := c.store.EndAgentSession(in.SessionID, in.Reason, orphanState, cascade)
 	if err != nil {
 		return nil, err
 	}
@@ -389,18 +404,32 @@ func (c *localClient) EndAgent(ctx context.Context, repo *model.Repo, in inputs.
 	for _, sc := range stateChanges {
 		c.recordOrphanStateChange(sc, sess.SessionID)
 	}
-	// BACI-58 §B — record per-row agent.cancel history for every
-	// dispatch the end-session tx auto-cancelled. The "auto-cancel:"
-	// prefix lets a reader of `bacio history --op agent.cancel`
-	// distinguish reaper-driven cancels from manual `bacio agent cancel`
-	// ones without breaking the existing op-name filter.
-	for _, info := range cancelled {
-		c.recordOp(model.HistoryEntry{
-			RepoID: &info.RepoID, RepoPrefix: info.RepoPrefix,
-			Op: "agent.cancel", Kind: "agent",
-			TargetID: &info.ID, TargetLabel: cancelledDispatchTargetLabel(info),
-			Details:  cancelledDispatchDetails(info, "auto-cancel: target session ended"),
-		})
+	// BACI-58 §B / BACI-133 — record one per-row history entry for every
+	// dispatch the end-session tx touched. Branch on the cascade's
+	// NewStatus: cancelled rows write `agent.cancel` (the "auto-cancel:"
+	// prefix lets `bacio history --op agent.cancel` distinguish
+	// reaper-driven cancels from manual `bacio agent cancel`s), queued
+	// rows write `agent.dispatch.requeue` (BACI-133 reaper recovery —
+	// actor=bacio-channel-ping so `bacio history --user-filter
+	// bacio-channel-ping` returns a coherent reaper-activity ledger).
+	for _, info := range cascadeInfos {
+		switch info.NewStatus {
+		case model.DispatchCancelled:
+			c.recordOp(model.HistoryEntry{
+				RepoID: &info.RepoID, RepoPrefix: info.RepoPrefix,
+				Op: "agent.cancel", Kind: "agent",
+				TargetID: &info.ID, TargetLabel: cancelledDispatchTargetLabel(info),
+				Details:  cancelledDispatchDetails(info, "auto-cancel: target session ended"),
+			})
+		case model.DispatchQueued:
+			c.recordOp(model.HistoryEntry{
+				RepoID: &info.RepoID, RepoPrefix: info.RepoPrefix,
+				Actor:  string(model.IdlePingDispatchCreator),
+				Op:     "agent.dispatch.requeue", Kind: "agent",
+				TargetID: &info.ID, TargetLabel: cancelledDispatchTargetLabel(info),
+				Details:  cancelledDispatchDetails(info, "auto-requeue: target session reaped (presumed_dead)"),
+			})
+		}
 	}
 	return sess, nil
 }

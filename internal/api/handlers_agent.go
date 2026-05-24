@@ -176,8 +176,11 @@ func (d deps) supersedeStaleSessions(repo *model.Repo, host string, claudePID in
 			continue
 		}
 		// Supersede path: end the phantom row with an empty orphanState so
-		// the claim cascade leaves issue state alone (BACI-126c).
-		ended, _, _, _, err := d.store.EndAgentSession(s.SessionID, string(model.EndReasonSuperseded), "")
+		// the claim cascade leaves issue state alone (BACI-126c), and
+		// DispatchCascadeCancel because the phantom never owned the
+		// work (BACI-133's requeue is reserved for the reaper recovery
+		// path on a real session that went dark).
+		ended, _, _, _, err := d.store.EndAgentSession(s.SessionID, string(model.EndReasonSuperseded), "", store.DispatchCascadeCancel)
 		if err != nil {
 			if d.logger != nil {
 				d.logger.Warn("superseding stale session", "session_id", s.SessionID, "err", err)
@@ -372,7 +375,16 @@ func (d deps) handleAgentEnd(w http.ResponseWriter, r *http.Request) {
 		orphanState = parsed
 	}
 	actor := ActorFromContext(r.Context())
-	sess, assigneeChanges, stateChanges, cancelled, err := d.store.EndAgentSession(in.SessionID, in.Reason, orphanState)
+	// BACI-133: derive the dispatch cascade from the end reason — only
+	// the reaper-driven presumed_dead path re-queues; every other end
+	// reason keeps today's cancel-on-end semantics. The audit row each
+	// cascade entry produces (agent.cancel vs agent.dispatch.requeue)
+	// is picked off info.NewStatus below.
+	cascade := store.DispatchCascadeCancel
+	if model.EndReason(in.Reason) == model.EndReasonPresumedDead {
+		cascade = store.DispatchCascadeRequeue
+	}
+	sess, assigneeChanges, stateChanges, cascadeInfos, err := d.store.EndAgentSession(in.SessionID, in.Reason, orphanState, cascade)
 	if err != nil {
 		status, code := statusForError(err)
 		writeError(w, status, code, err.Error(), nil)
@@ -393,19 +405,34 @@ func (d deps) handleAgentEnd(w http.ResponseWriter, r *http.Request) {
 	for _, sc := range stateChanges {
 		writeOrphanStateChange(d.store, d.logger, actor, sc, sess.SessionID)
 	}
-	// BACI-58 §B — write the per-row agent.cancel history for every
-	// dispatch the end-session tx auto-cancelled. "auto-cancel:" prefix
-	// distinguishes reaper-driven cancels from manual `bacio agent
-	// cancel`s in `bacio history --op agent.cancel`.
-	for _, info := range cancelled {
-		recordOp(d.store, d.logger, model.HistoryEntry{
-			RepoID: &info.RepoID, RepoPrefix: info.RepoPrefix,
-			Actor:    actor,
-			Op:       "agent.cancel",
-			Kind:     "agent",
-			TargetID: &info.ID, TargetLabel: cancelledDispatchTargetLabel(info),
-			Details:  cancelledDispatchDetails(info, "auto-cancel: target session ended"),
-		})
+	// BACI-58 §B / BACI-133 — write the per-row history entry for every
+	// dispatch the end-session tx touched. Branch on the cascade's
+	// NewStatus: cancelled rows write `agent.cancel` (today's behaviour
+	// for user/hook/supersede ends), queued rows write
+	// `agent.dispatch.requeue` (the BACI-133 reaper recovery path,
+	// actor=bacio-channel-ping so `bacio history --user-filter
+	// bacio-channel-ping` returns a coherent reaper-activity ledger).
+	for _, info := range cascadeInfos {
+		switch info.NewStatus {
+		case model.DispatchCancelled:
+			recordOp(d.store, d.logger, model.HistoryEntry{
+				RepoID: &info.RepoID, RepoPrefix: info.RepoPrefix,
+				Actor:    actor,
+				Op:       "agent.cancel",
+				Kind:     "agent",
+				TargetID: &info.ID, TargetLabel: cancelledDispatchTargetLabel(info),
+				Details:  cancelledDispatchDetails(info, "auto-cancel: target session ended"),
+			})
+		case model.DispatchQueued:
+			recordOp(d.store, d.logger, model.HistoryEntry{
+				RepoID: &info.RepoID, RepoPrefix: info.RepoPrefix,
+				Actor:    string(model.IdlePingDispatchCreator),
+				Op:       "agent.dispatch.requeue",
+				Kind:     "agent",
+				TargetID: &info.ID, TargetLabel: cancelledDispatchTargetLabel(info),
+				Details:  cancelledDispatchDetails(info, "auto-requeue: target session reaped (presumed_dead)"),
+			})
+		}
 	}
 	writeJSON(w, http.StatusOK, sess)
 }
