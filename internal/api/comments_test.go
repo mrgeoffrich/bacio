@@ -235,6 +235,27 @@ func TestCommentAddEvalResolvesContext(t *testing.T) {
 	}
 }
 
+// TestCommentAddTranscriptEventRef (BACI-141) locks in the per-event
+// anchor round-trip — the field surfaces in the JSON response and is
+// persisted on the row exactly as posted.
+func TestCommentAddTranscriptEventRef(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	iss := seedIssue(t, s, repo, "x")
+	resp, body := apiPost(t, ts.URL+"/repos/MINI/issues/"+iss.Key+"/comments",
+		`{"author":"alice","body":"typo at line 12","transcript_event_ref":"tool_use_id:toolu_1234"}`)
+	if resp.StatusCode != 201 {
+		t.Fatalf("status: %d, body=%s", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), `"transcript_event_ref": "tool_use_id:toolu_1234"`) {
+		t.Fatalf("transcript_event_ref missing from response: %s", body)
+	}
+	cs, _ := s.ListComments(iss.ID)
+	if len(cs) != 1 || cs[0].TranscriptEventRef != "tool_use_id:toolu_1234" {
+		t.Fatalf("transcript_event_ref not persisted: %+v", cs)
+	}
+}
+
 // TestCommentAddEvalNoClaim (BACI-131) keeps the store defensive when
 // an eval write lands on an untaken issue — the UI blocks this case
 // but the API still accepts the row, leaves the context fields empty.

@@ -153,6 +153,18 @@ type BoardCard struct {
 	// goes through the brief's RelationsDTO instead so the chip
 	// surface covers all four edge types, not just blocks.
 	BlockedBy []BoardCardBlocker `json:"blockedBy,omitempty"`
+	// TranscriptDocCount (BACI-141) is the number of `.jsonl`
+	// transcript documents linked to this issue — typed `transcript`
+	// rows plus legacy `project_complete` rows whose filename matches
+	// the bacio-transcript naming convention. Drives the kanban
+	// combined eval/transcript indicator. Omitempty so unaffected
+	// cards stay compact on the wire.
+	TranscriptDocCount int `json:"transcriptDocCount,omitempty"`
+	// EvalCommentCount (BACI-141) is the number of eval-flagged
+	// comments on this issue. Surfaces on the kanban card regardless
+	// of `Taken` state, so eval notes posted on a previously-active
+	// card stay discoverable after the agent releases its claim.
+	EvalCommentCount int `json:"evalCommentCount,omitempty"`
 }
 
 // BoardCardBlocker (BACI-114) is one open `blocks` edge pointing at
@@ -269,6 +281,23 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 		}
 	}
 
+	// BACI-141: two bulk reads — one per indicator — that fan onto every
+	// card regardless of `taken` state. Both queries are O(N issues in
+	// scope) and ride existing indices (idx_comments_issue_eval for
+	// evals; the document_links FK indices for transcripts). Surfacing
+	// these counts on untaken cards too is the whole point of the
+	// ticket: the BACI-131 quick-eval composer only renders while a
+	// claim is held, so eval notes on a since-released card would
+	// otherwise be invisible from the board.
+	evalCountsByID, err := c.CountEvalCommentsByIssue(ctx, issueIDs)
+	if err != nil {
+		return nil, err
+	}
+	transcriptCountsByID, err := c.CountTranscriptDocsByIssue(ctx, issueIDs)
+	if err != nil {
+		return nil, err
+	}
+
 	cards := make([]BoardCard, 0, len(issues))
 	for _, iss := range issues {
 		tags := iss.Tags
@@ -294,6 +323,8 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 			OpenQuestions:            e.questions,
 			Archived:                 iss.ArchivedAt != nil,
 			BlockedBy:                blockedByID[iss.ID],
+			TranscriptDocCount:       transcriptCountsByID[iss.ID],
+			EvalCommentCount:         evalCountsByID[iss.ID],
 		})
 	}
 

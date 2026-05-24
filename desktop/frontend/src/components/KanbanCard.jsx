@@ -100,6 +100,29 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, o
   const blockedBy = card.blockedBy || [];
   const isBlocked = blockedBy.length > 0;
 
+  // BACI-141: combined transcript + eval chip. Visible on every card
+  // regardless of `taken` state — the whole point of the ticket is
+  // making eval notes / transcripts discoverable AFTER an agent
+  // releases its claim (the BACI-131 quick-eval composer only renders
+  // while taken, so eval notes on a since-released card would
+  // otherwise be invisible from the board). Click delegates to the
+  // existing card-open path (the wrapping <article>'s onClick), which
+  // lands the user on the issue workspace where the timeline +
+  // transcript panels surface the full notes.
+  const transcriptDocCount = card.transcriptDocCount || 0;
+  const evalCommentCount = card.evalCommentCount || 0;
+  const hasEvalChip = transcriptDocCount + evalCommentCount > 0;
+  const evalChipLabel = (() => {
+    const tParts = transcriptDocCount > 0
+      ? `${transcriptDocCount} transcript${transcriptDocCount === 1 ? '' : 's'}`
+      : '';
+    const eParts = evalCommentCount > 0
+      ? `${evalCommentCount} eval note${evalCommentCount === 1 ? '' : 's'}`
+      : '';
+    const joined = [tParts, eParts].filter(Boolean).join(', ');
+    return `${joined} — click to open`;
+  })();
+
   return (
     <article
       className={`mk-card ${isDragging ? 'is-dragging' : ''} ${card.claude ? 'is-claude' : ''} ${taken ? 'is-taken' : ''} ${waiting ? 'is-waiting' : ''} ${card.archived ? 'is-archived' : ''}`}
@@ -327,7 +350,7 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, o
           </div>
         </div>
       )}
-      {hasMeta && (
+      {(hasMeta || hasEvalChip) && (
         <>
           <div className="mk-card-meta-line">
             {activeVerb && <span className="mk-card-verb">{activeVerb}</span>}
@@ -345,6 +368,23 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, o
               >
                 Tasks {todosDone}/{todosTotal}
               </button>
+            )}
+            {hasEvalChip && (activeVerb || todosTotal > 0) && <span className="mk-card-meta-sep">·</span>}
+            {hasEvalChip && (
+              // BACI-141: combined transcript + eval chip. Clicking
+              // bubbles to the card's onClick (open the workspace) —
+              // no per-chip handler needed.
+              <Tooltip label={evalChipLabel}>
+                <span
+                  className="mk-card-eval-chip"
+                  aria-label={evalChipLabel}
+                >
+                  <Icon name="comment" />
+                  {transcriptDocCount > 0 && evalCommentCount > 0
+                    ? `${transcriptDocCount}/${evalCommentCount}`
+                    : `${transcriptDocCount + evalCommentCount}`}
+                </span>
+              </Tooltip>
             )}
           </div>
           {tasksOpen && (card.todos || []).length > 0 && (

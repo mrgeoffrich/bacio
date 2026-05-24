@@ -274,6 +274,19 @@ type Client interface {
 	// endpoint (today the UI runs against the local DB / Wails / `bacio
 	// web`, never `bacio --remote`).
 	BlockersFor(ctx context.Context, ids []int64) (map[int64][]store.IssueBlocker, error)
+	// CountEvalCommentsByIssue (BACI-141) returns issue_id → count of
+	// eval-flagged comments. Used by boardcards.Assemble to render the
+	// per-card eval-notes indicator on the kanban board. Local-only —
+	// only the assembler uses it, and the assembler runs server-side on
+	// the local client or the REST handler.
+	CountEvalCommentsByIssue(ctx context.Context, ids []int64) (map[int64]int, error)
+	// CountTranscriptDocsByIssue (BACI-141) returns issue_id → count of
+	// `.jsonl` transcript documents linked to each issue. Matches both
+	// typed-transcript rows (BACI-115) and legacy `project_complete` rows
+	// whose filename matches the bacio-transcript naming convention.
+	// Used alongside CountEvalCommentsByIssue to drive the kanban card's
+	// combined transcript+eval indicator. Local-only.
+	CountTranscriptDocsByIssue(ctx context.Context, ids []int64) (map[int64]int, error)
 	// EnsureAgentIdentity mints a fresh persistent agent identity (a
 	// random slug, retried against the UNIQUE constraint until it
 	// sticks) and adopts it as this client's audit actor. It's the

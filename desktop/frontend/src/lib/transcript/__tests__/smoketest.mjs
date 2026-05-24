@@ -30,6 +30,7 @@ const { extractDispatchTags } = await import(path.join(moduleRoot, 'dispatchTags
 // plan (Playwright through `bacio web`); this script focuses on the
 // pure parser/pairing/format/tokens logic.
 const { flattenResultContent, countLines, formatTimeDelta } = await import(path.join(moduleRoot, 'format.ts'));
+const { resolveAnchor, evalEventRefFor } = await import(path.join(moduleRoot, 'evalAnchor.ts'));
 
 // ---- helpers ----
 const tests = [];
@@ -291,6 +292,50 @@ test('formatTimeDelta handles seconds and minutes', () => {
     formatTimeDelta('2026-05-24T12:00:02.000Z', '2026-05-24T12:00:00.500Z'),
     '+1.5s',
   );
+});
+
+// ---- BACI-141: eval-anchor resolution ----
+test('resolveAnchor matches tool_use_id to the tool-call card', () => {
+  const r = parse(sampleTranscript);
+  const items = pair(r.events);
+  const hit = resolveAnchor(items, 'tool_use_id:toolu_abc');
+  assert.ok(hit, 'expected resolveAnchor to find the Bash tool-call');
+  assert.equal(hit.kind, 'tool-call');
+  assert.equal(hit.use.id, 'toolu_abc');
+});
+
+test('resolveAnchor matches line_index to the originating event', () => {
+  const r = parse(sampleTranscript);
+  const items = pair(r.events);
+  // The dispatch prompt is the first line — line_index 0.
+  const hit = resolveAnchor(items, 'line_index:0');
+  assert.ok(hit, 'expected resolveAnchor to land on the dispatch prompt');
+  assert.equal(hit.kind, 'dispatch');
+});
+
+test('resolveAnchor returns null for unknown refs', () => {
+  const r = parse(sampleTranscript);
+  const items = pair(r.events);
+  assert.equal(resolveAnchor(items, 'tool_use_id:no-such-id'), null);
+  assert.equal(resolveAnchor(items, 'line_index:999'), null);
+  assert.equal(resolveAnchor(items, ''), null);
+  assert.equal(resolveAnchor(items, 'garbage'), null);
+});
+
+test('evalEventRefFor prefers tool_use_id on tool-call cards', () => {
+  const r = parse(sampleTranscript);
+  const items = pair(r.events);
+  const tool = items.find(i => i.kind === 'tool-call');
+  assert.ok(tool);
+  assert.equal(evalEventRefFor(tool), 'tool_use_id:toolu_abc');
+});
+
+test('evalEventRefFor falls back to line_index on non-tool cards', () => {
+  const r = parse(sampleTranscript);
+  const items = pair(r.events);
+  const dispatch = items.find(i => i.kind === 'dispatch');
+  assert.ok(dispatch);
+  assert.equal(evalEventRefFor(dispatch), 'line_index:0');
 });
 
 // ---- runner ----

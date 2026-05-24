@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/mrgeoffrich/bacio/internal/model"
 )
@@ -176,6 +177,54 @@ func (s *Store) ListDocumentsLinkedToIssue(issueID int64) ([]*model.DocumentLink
 		return nil, err
 	}
 	return scanDocumentLinks(rows)
+}
+
+// CountTranscriptDocsByIssue (BACI-141) returns a map keyed by issue id
+// of the number of `.jsonl` transcript documents linked to each issue.
+// Backs the per-card "N transcript(s)" chip surfaced on the kanban
+// board. Matches both rows of `type = 'transcript'` (the typed-doc
+// path BACI-115 introduced) AND legacy rows whose filename matches
+// model.IsBacioTranscriptFilename (pre-BACI-115 transcripts that still
+// carry `project_complete` as their type). The legacy filter is
+// applied Go-side; the per-issue candidate set is tiny (one or two
+// docs per issue typically) so the post-filter is cheap.
+//
+// An issue with zero matching transcripts is absent from the result
+// map (not present-with-zero), mirroring CountEvalCommentsByIssue.
+func (s *Store) CountTranscriptDocsByIssue(issueIDs []int64) (map[int64]int, error) {
+	out := make(map[int64]int, len(issueIDs))
+	if len(issueIDs) == 0 {
+		return out, nil
+	}
+	placeholders := make([]string, len(issueIDs))
+	args := make([]any, len(issueIDs))
+	for i, id := range issueIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	q := `SELECT dl.issue_id, d.type, d.filename
+	       FROM document_links dl
+	       JOIN documents d ON d.id = dl.document_id
+	       WHERE dl.issue_id IN (` + strings.Join(placeholders, ", ") + `)`
+	rows, err := s.DB.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			issueID  int64
+			docType  string
+			filename string
+		)
+		if err := rows.Scan(&issueID, &docType, &filename); err != nil {
+			return nil, err
+		}
+		if docType == string(model.DocTypeTranscript) || model.IsBacioTranscriptFilename(filename) {
+			out[issueID]++
+		}
+	}
+	return out, rows.Err()
 }
 
 // ListDocumentsLinkedToFeature returns links from any document to a given feature.

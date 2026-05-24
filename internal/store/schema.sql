@@ -112,6 +112,17 @@ CREATE TABLE IF NOT EXISTS comments (
     agent_session_id  TEXT    NOT NULL DEFAULT '',
     dispatch_id       INTEGER REFERENCES agent_dispatches(id) ON DELETE SET NULL,
     mode              TEXT    NOT NULL DEFAULT '',
+    -- BACI-141: transcript_event_ref pins an eval comment to a specific
+    -- event inside a `.jsonl` transcript. NULL = unanchored (existing
+    -- behaviour: dispatch-card-level note). Two anchor formats are used
+    -- by the per-event composer in the transcript viewer:
+    --   `tool_use_id:<id>` for tool-call events (durable across re-renders;
+    --   the same id appears on both the assistant tool_use and the matching
+    --   user-tool-result events).
+    --   `line_index:<n>` fallback for assistant / dispatch / system-reminder
+    --   / attachment events that don't carry a tool_use_id. `.jsonl`
+    --   transcripts are append-only on disk so line indices are durable.
+    transcript_event_ref TEXT,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

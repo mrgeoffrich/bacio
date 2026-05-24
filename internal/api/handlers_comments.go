@@ -76,24 +76,26 @@ func (d deps) handleCommentAdd(w http.ResponseWriter, r *http.Request) {
 	}
 	if isDryRun(r) {
 		writeDryRun(w, http.StatusCreated, &model.Comment{
-			IssueID:        iss.ID,
-			Author:         in.Author,
-			Body:           in.Body,
-			Eval:           in.Eval,
-			AgentSessionID: evalCtx.AgentSessionID,
-			DispatchID:     evalCtx.DispatchID,
-			Mode:           evalCtx.Mode,
+			IssueID:            iss.ID,
+			Author:             in.Author,
+			Body:               in.Body,
+			Eval:               in.Eval,
+			AgentSessionID:     evalCtx.AgentSessionID,
+			DispatchID:         evalCtx.DispatchID,
+			Mode:               evalCtx.Mode,
+			TranscriptEventRef: in.TranscriptEventRef,
 		})
 		return
 	}
 	c, err := d.store.CreateComment(store.CreateCommentIn{
-		IssueID:        iss.ID,
-		Author:         in.Author,
-		Body:           in.Body,
-		Eval:           in.Eval,
-		AgentSessionID: evalCtx.AgentSessionID,
-		DispatchID:     evalCtx.DispatchID,
-		Mode:           evalCtx.Mode,
+		IssueID:            iss.ID,
+		Author:             in.Author,
+		Body:               in.Body,
+		Eval:               in.Eval,
+		AgentSessionID:     evalCtx.AgentSessionID,
+		DispatchID:         evalCtx.DispatchID,
+		Mode:               evalCtx.Mode,
+		TranscriptEventRef: in.TranscriptEventRef,
 	})
 	if err != nil {
 		status, code := statusForError(err)

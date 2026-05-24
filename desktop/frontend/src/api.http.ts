@@ -1194,7 +1194,7 @@ export async function addComment(
   key: string,
   author: string,
   body: string,
-  opts?: { eval?: boolean },
+  opts?: { eval?: boolean; transcriptEventRef?: string },
 ): Promise<IssueDetail> {
   if (!repoPrefix || repoPrefix === 'all') {
     const i = key.lastIndexOf('-');
@@ -1202,11 +1202,17 @@ export async function addComment(
     repoPrefix = key.slice(0, i);
   }
   const effectiveAuthor = author?.trim() || readActor() || 'web';
-  const reqBody: { author: string; body: string; eval?: boolean } = {
+  const reqBody: {
+    author: string;
+    body: string;
+    eval?: boolean;
+    transcript_event_ref?: string;
+  } = {
     author: effectiveAuthor,
     body,
   };
   if (opts?.eval) reqBody.eval = true;
+  if (opts?.transcriptEventRef) reqBody.transcript_event_ref = opts.transcriptEventRef;
   await call<unknown>(`/repos/${repoPrefix}/issues/${key}/comments`, {
     method: 'POST',
     body: reqBody,
