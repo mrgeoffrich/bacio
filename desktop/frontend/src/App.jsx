@@ -644,6 +644,7 @@ export default function App() {
       ) : activeView === 'issue' ? (
         <ErrorBoundary headline="Something went wrong in the issue view" label="The issue view crashed">
           <IssueWorkspace
+            activeBoard={activeBoard}
             openIssueKey={openIssueKey}
             brief={openIssueBrief}
             promptConfig={promptConfig}

@@ -1,6 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import MarkdownView from '../../lib/markdownView';
-import { isSvgDoc } from '../../lib/docFormat';
+import TranscriptView from '../../lib/transcript/TranscriptView';
+import { isJsonlTranscriptDoc, isSvgDoc } from '../../lib/docFormat';
+import * as api from '../../api';
+import { reportError } from '../../errors';
 
 function formatBytes(n) {
   if (!Number.isFinite(n) || n <= 0) return '0 B';
@@ -19,12 +22,22 @@ function formatBytes(n) {
 // embedded <script> / event handlers are inert without any sanitiser
 // dependency.
 //
+// Subagent JSONL transcripts (BACI-125) take the third branch —
+// `isJsonlTranscriptDoc` matches the `bacio-transcript-…-agent-….jsonl`
+// filename shape `attach_transcript` produces, and renders the body
+// through <TranscriptView>. The body is NOT inlined in the brief
+// (BACI-115 strips it), so the panel fetches it lazily on first
+// expand from the per-repo /documents/{filename} route via api.getDoc.
+//
 // Native <details> handles the collapse — no extra Radix primitive —
 // and `defaultOpen` keeps short docs expanded so the user sees them
 // without a click. The 6 KB threshold is the heuristic the design doc
 // names; longer docs default closed so the workspace doesn't drown in
 // walls of text. SVG bodies frequently exceed 6 KB, but the same
 // heuristic still applies — the open/close cue stays consistent.
+// Transcript panels always default closed — they're large and the
+// per-event chrome is heavy enough that we want the user's intent
+// before parsing.
 //
 // `linkedVia` carries the doc's origin path(s) — `issue`, `feature/<slug>`,
 // or both when the same doc is reachable from the issue and its parent
@@ -34,8 +47,13 @@ function formatBytes(n) {
 // linked to the shared feature, surfaced as if it belonged here). So:
 // surface "(issue + feature)" when both, "(via feature/<slug>)" when
 // feature-only, and nothing when it's the issue's own link.
-export default function LinkedDocPanel({ doc }) {
-  const defaultOpen = (doc.content?.length ?? 0) < 6000;
+export default function LinkedDocPanel({ doc, activeBoard }) {
+  const isTranscript = useMemo(
+    () => isJsonlTranscriptDoc(doc.filename || ''),
+    [doc.filename],
+  );
+  const defaultOpen =
+    !isTranscript && (doc.content?.length ?? 0) < 6000;
   const via = doc.linkedVia || [];
   const featureVia = via.find(v => v.startsWith('feature/'));
   const viaLabel = via.includes('issue')
@@ -43,8 +61,8 @@ export default function LinkedDocPanel({ doc }) {
     : (featureVia ? `(via ${featureVia})` : '');
 
   const isSvg = useMemo(
-    () => isSvgDoc(doc.filename || '', doc.content || ''),
-    [doc.filename, doc.content],
+    () => !isTranscript && isSvgDoc(doc.filename || '', doc.content || ''),
+    [isTranscript, doc.filename, doc.content],
   );
 
   // Object URL for the SVG render. Created and revoked inside one
@@ -59,39 +77,98 @@ export default function LinkedDocPanel({ doc }) {
     return () => URL.revokeObjectURL(url);
   }, [isSvg, doc.content]);
 
+  // Transcript bodies are stripped from the brief (BACI-115). Fetch on
+  // first open and cache per (filename, sizeBytes) so the 10s brief
+  // poll doesn't re-fetch a 450 KB body each tick.
+  const [transcriptBody, setTranscriptBody] = useState('');
+  const [transcriptFetching, setTranscriptFetching] = useState(false);
+  const [transcriptError, setTranscriptError] = useState('');
+  const cacheKey = `${doc.filename}:${doc.sizeBytes ?? 0}`;
+  const [cachedKey, setCachedKey] = useState('');
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (!open || !isTranscript || !activeBoard) return;
+    if (cachedKey === cacheKey && transcriptBody) return;
+    if (transcriptFetching) return;
+    setTranscriptFetching(true);
+    setTranscriptError('');
+    api.getDoc(activeBoard, doc.filename)
+      .then(d => {
+        setTranscriptBody(d.content ?? '');
+        setCachedKey(cacheKey);
+        setTranscriptFetching(false);
+      })
+      .catch(err => {
+        reportError(err, { headline: "Couldn't load transcript" });
+        setTranscriptError((err && err.message) || String(err));
+        setTranscriptFetching(false);
+      });
+  }, [open, isTranscript, activeBoard, doc.filename, cacheKey, cachedKey, transcriptBody, transcriptFetching]);
+
+  // Inline-doc body picker — same `details` chrome, four mutually
+  // exclusive branches: SVG, transcript, markdown, or "body omitted".
+  const renderBody = () => {
+    if (isSvg) {
+      return (
+        <div className="mk-linked-doc-body mk-linked-doc-svg">
+          {svgUrl
+            ? <img className="mk-linked-doc-svg-img" src={svgUrl} alt={doc.filename} />
+            : <p className="mk-meta-empty">SVG body is empty.</p>}
+        </div>
+      );
+    }
+    if (isTranscript) {
+      if (transcriptFetching) {
+        return <div className="mk-linked-doc-body"><p className="mk-meta-empty">Loading transcript…</p></div>;
+      }
+      if (transcriptError) {
+        return <div className="mk-linked-doc-body"><p className="mk-meta-empty">Couldn't load transcript: {transcriptError}</p></div>;
+      }
+      if (transcriptBody) {
+        return (
+          <div className="mk-linked-doc-body mk-linked-doc-transcript">
+            <TranscriptView source={transcriptBody} filename={doc.filename} sizeBytes={doc.sizeBytes} />
+          </div>
+        );
+      }
+      // Open but no body yet — fall through to a small placeholder.
+      return <div className="mk-linked-doc-body"><p className="mk-meta-empty">Opening transcript…</p></div>;
+    }
+    if (doc.content) {
+      return <MarkdownView className="mk-linked-doc-body mk-markdown">{doc.content}</MarkdownView>;
+    }
+    return (
+      <div className="mk-linked-doc-body mk-markdown">
+        {/* BACI-115 strips bodies from the brief for everything except
+            plan / review docs (transcripts in particular), but the
+            metadata row still carries sizeBytes. Distinguish "body
+            deliberately omitted" from "doc is truly empty" so a
+            transcript attachment doesn't read as a broken empty link. */}
+        {doc.sizeBytes > 0 ? (
+          <p className="mk-meta-empty">
+            Body not inlined in the brief ({formatBytes(doc.sizeBytes)}).
+            Run <code>bacio doc show {doc.filename}</code> to view.
+          </p>
+        ) : (
+          <p className="mk-meta-empty">Document body is empty.</p>
+        )}
+      </div>
+    );
+  };
+
   return (
-    <details className="mk-linked-doc" {...(defaultOpen ? { open: true } : {})}>
+    <details
+      className="mk-linked-doc"
+      open={defaultOpen || open}
+      onToggle={(e) => setOpen(e.currentTarget.open)}
+    >
       <summary className="mk-linked-doc-head">
         <span className="mk-attachment-badge">{doc.type || 'doc'}</span>
         <span className="mk-attachment-name">{doc.filename}</span>
         {doc.description && <span className="mk-attachment-why">— {doc.description}</span>}
         {viaLabel && <span className="mk-attachment-why">{viaLabel}</span>}
       </summary>
-      {isSvg ? (
-        <div className="mk-linked-doc-body mk-linked-doc-svg">
-          {svgUrl
-            ? <img className="mk-linked-doc-svg-img" src={svgUrl} alt={doc.filename} />
-            : <p className="mk-meta-empty">SVG body is empty.</p>}
-        </div>
-      ) : doc.content ? (
-        <MarkdownView className="mk-linked-doc-body mk-markdown">{doc.content}</MarkdownView>
-      ) : (
-        <div className="mk-linked-doc-body mk-markdown">
-          {/* BACI-115 strips bodies from the brief for everything except
-              plan / review docs (transcripts in particular), but the
-              metadata row still carries sizeBytes. Distinguish "body
-              deliberately omitted" from "doc is truly empty" so a
-              transcript attachment doesn't read as a broken empty link. */}
-          {doc.sizeBytes > 0 ? (
-            <p className="mk-meta-empty">
-              Body not inlined in the brief ({formatBytes(doc.sizeBytes)}).
-              Run <code>bacio doc show {doc.filename}</code> to view.
-            </p>
-          ) : (
-            <p className="mk-meta-empty">Document body is empty.</p>
-          )}
-        </div>
-      )}
+      {renderBody()}
     </details>
   );
 }

@@ -26,6 +26,7 @@ function prLabel(url) {
 // from `openIssueKey` so the head doesn't flash empty during the first
 // fetch.
 export default function IssueWorkspace({
+  activeBoard,
   openIssueKey,
   brief,
   promptConfig,
@@ -201,7 +202,11 @@ export default function IssueWorkspace({
               <div className="mk-drawer-label">Plan &amp; linked docs</div>
               <div className="mk-linked-doc-list">
                 {brief.documents.map(d => (
-                  <LinkedDocPanel key={`${d.filename}:${(d.linkedVia || []).join('+')}`} doc={d} />
+                  <LinkedDocPanel
+                    key={`${d.filename}:${(d.linkedVia || []).join('+')}`}
+                    doc={d}
+                    activeBoard={activeBoard}
+                  />
                 ))}
               </div>
             </section>
