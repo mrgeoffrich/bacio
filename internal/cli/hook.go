@@ -568,21 +568,37 @@ func hookPostToolUseCmd() *cobra.Command {
 			defer c.Close()
 
 			issueKey := resolveOpenClaimIssueKey(context.Background(), c, in.SessionID)
+			// BACI-136: empty issueKey on TaskCreate (zero or many open
+			// claims) is log-and-drop. The store rejects the orphan
+			// insert at the boundary; pre-empting the call here keeps
+			// the stderr line a clean one-liner instead of the bare
+			// "upsert: issue_key is required" surface a TaskCreate
+			// fired before `bacio agent claim` would otherwise produce.
+			// TaskUpdate is exempt — the update branch in the store
+			// ignores the supplied issueKey and keeps the row's
+			// existing scope, so an empty issueKey is harmless there.
+			if in.ToolName == "TaskCreate" && issueKey == "" {
+				fmt.Fprintf(os.Stderr,
+					"bacio hook post-tool-use: skipping TaskCreate todo: no single open claim for session %q\n",
+					in.SessionID)
+				return nil
+			}
 			// BACI-132: resolve the active dispatch for the (session,
 			// issue) at TaskCreate time so the row carries the dispatch
 			// scope. Only matters for inserts — TaskUpdate keeps the
 			// row's original dispatch_id, so spending the lookup on the
-			// update path is wasted work. A non-nil dispatchID paired
-			// with an empty issueKey is rejected at the store boundary
-			// (defence-in-depth); if the dispatch can't be resolved we
-			// drop the row to the orphan bucket (empty issueKey, nil
-			// dispatchID) the same way the zero/many-claims path
-			// already does.
+			// update path is wasted work. If the dispatch can't be
+			// resolved, log-and-drop (BACI-136 symmetry with the
+			// no-claim path) rather than landing a row without dispatch
+			// attribution.
 			var dispatchID *int64
-			if issueKey != "" && in.ToolName == "TaskCreate" {
+			if in.ToolName == "TaskCreate" {
 				dispatchID = resolveActiveDispatchID(context.Background(), c, in.SessionID, issueKey)
 				if dispatchID == nil {
-					issueKey = ""
+					fmt.Fprintf(os.Stderr,
+						"bacio hook post-tool-use: skipping TaskCreate todo: no active dispatch for session %q issue %q\n",
+						in.SessionID, issueKey)
+					return nil
 				}
 			}
 			if err := c.UpsertSessionTodoFromTask(context.Background(), in.SessionID, taskID, issueKey, content, status, dispatchID); err != nil {

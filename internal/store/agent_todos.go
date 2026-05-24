@@ -39,20 +39,24 @@ type SessionIssuePair struct {
 //
 // issueKey stamps the new row's issue scope on insert (BACI-62) —
 // resolved by the caller from the session's single open claim at hook
-// time; "" is allowed (orphan bucket, not surfaced in the per-(session,
-// issue) UI). On the update path it's ignored — the row's existing
-// issue_key stays put so a TaskUpdate fired after the agent flipped
-// claims still lands with the job that created it.
+// time. issue_key is required on insert (BACI-136); an empty issueKey
+// is rejected loud so the hook can't quietly land an orphan row when
+// claim resolution comes back zero or many. On the update path it's
+// ignored — the row's existing issue_key stays put so a TaskUpdate
+// fired after the agent flipped claims still lands with the job that
+// created it.
 //
 // dispatchID stamps the new row's dispatch scope on insert (BACI-132)
 // — resolved by the caller from the (session, issue)'s newest
-// non-cancelled dispatch at hook time; nil is allowed (orphan bucket
-// or pre-BACI-132 row) but only paired with issueKey="" — a non-nil
-// dispatchID with an empty issueKey is rejected at the boundary as a
-// defensive belt over the hook's resolution path. On the update path
-// dispatchID is ignored — the row's existing dispatch_id stays put
-// so a TaskUpdate fired after the agent flipped dispatches still
-// lands with the dispatch that created it.
+// non-cancelled dispatch at hook time; nil is allowed (pre-BACI-132
+// row shape). The "dispatch_id requires issue_key" guard is a
+// belt-and-braces check left in place after BACI-136 made empty
+// issueKey unreachable from the insert path — the cheap pre-tx
+// rejection still pays off if a future refactor reintroduces the
+// pairing. On the update path dispatchID is ignored — the row's
+// existing dispatch_id stays put so a TaskUpdate fired after the
+// agent flipped dispatches still lands with the dispatch that
+// created it.
 //
 // The session-level MaxSessionTodos cap is enforced on insert only —
 // updates to existing rows never push the count up. Hitting the cap
@@ -137,9 +141,12 @@ func (s *Store) UpsertSessionTodoFromTask(sessionID, taskID, issueKey, content s
 		return tx.Commit()
 	}
 
-	// Insert path — needs content + room under the cap.
+	// Insert path — needs content + issue_key + room under the cap.
 	if content == "" {
 		return fmt.Errorf("content is required when inserting a new todo")
+	}
+	if issueKey == "" {
+		return fmt.Errorf("issue_key is required")
 	}
 	var count int
 	if err := tx.QueryRow(
