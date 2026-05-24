@@ -404,3 +404,120 @@ func TestRoundTripDispatchCreate(t *testing.T) {
 		t.Fatalf("RepoDispatches = %+v, want [%d]", list, d.ID)
 	}
 }
+
+// TestEndAgentPresumedDeadWritesRequeueAudit (BACI-133) drives the full
+// client path: register a session, attach a delivered dispatch, end the
+// session with reason=presumed_dead, and assert (a) the dispatch flips
+// back to queued and (b) bacio history grows an
+// `agent.dispatch.requeue` row attributed to the bacio-channel-ping
+// reaper actor. Locks in the audit-trail contract `bacio history --op
+// agent.dispatch.requeue` (or --user-filter bacio-channel-ping) relies
+// on. Runs against both the local and remote (HTTP) clients to make
+// sure the api handler's cascade derivation matches the local one.
+func TestEndAgentPresumedDeadWritesRequeueAudit(t *testing.T) {
+	for _, mode := range []string{"local", "remote"} {
+		t.Run(mode, func(t *testing.T) {
+			p := newPair(t)
+			defer p.cleanup()
+			ctx := context.Background()
+			c := p.local
+			if mode == "remote" {
+				c = p.remote
+			}
+
+			iss, err := p.store.CreateIssue(p.repo.ID, nil, "stuck on stale session", "", model.StateTodo, nil)
+			if err != nil {
+				t.Fatalf("CreateIssue: %v", err)
+			}
+			ag, _, err := p.store.UpsertAgent("going-dark-otter@claude.test-"+mode, true)
+			if err != nil {
+				t.Fatalf("UpsertAgent: %v", err)
+			}
+			// Use a structurally valid UUID so the BACI-100 register path
+			// accepts it on the remote/HTTP side too. The mode suffix in
+			// the last group keeps local/remote variants distinct.
+			suffix := "1111"
+			if mode == "remote" {
+				suffix = "2222"
+			}
+			sid := "11111111-1111-4111-8111-1111111111" + suffix
+			if _, err := p.store.UpsertAgentSession(store.UpsertAgentSessionIn{
+				SessionID: sid, RepoID: p.repo.ID, AgentID: &ag.ID, Actor: "tester",
+			}); err != nil {
+				t.Fatalf("UpsertAgentSession: %v", err)
+			}
+
+			d, err := p.local.CreateDispatch(ctx, p.repo, inputs.AgentDispatchInput{
+				TargetAgent: ag.Name,
+				IssueKey:    iss.Key,
+				Mode:        string(model.DispatchModeImplement),
+				Message:     "do the thing",
+			}, false)
+			if err != nil {
+				t.Fatalf("CreateDispatch: %v", err)
+			}
+			// Flip to delivered so the cascade has a non-queued source row
+			// to operate on — mirrors the production state the reaper most
+			// commonly catches.
+			if _, err := p.store.DB.Exec(
+				`UPDATE agent_dispatches SET status = 'delivered', target_session_id = ? WHERE id = ?`,
+				sid, d.ID,
+			); err != nil {
+				t.Fatalf("flip to delivered: %v", err)
+			}
+
+			if _, err := c.EndAgent(ctx, p.repo, inputs.AgentEndInput{
+				SessionID: sid,
+				Reason:    string(model.EndReasonPresumedDead),
+			}, false); err != nil {
+				t.Fatalf("EndAgent presumed_dead: %v", err)
+			}
+
+			// Dispatch is back to queued.
+			got, err := p.store.GetDispatch(d.ID)
+			if err != nil {
+				t.Fatalf("GetDispatch: %v", err)
+			}
+			if got.Status != model.DispatchQueued {
+				t.Fatalf("dispatch status = %q, want queued (BACI-133 reaper recovery)", got.Status)
+			}
+
+			// Audit trail has the requeue row, attributed to the reaper.
+			rows, err := p.store.ListHistory(store.HistoryFilter{
+				RepoID: &p.repo.ID,
+				Op:     "agent.dispatch.requeue",
+			})
+			if err != nil {
+				t.Fatalf("ListHistory: %v", err)
+			}
+			if len(rows) != 1 {
+				t.Fatalf("agent.dispatch.requeue rows = %d, want 1", len(rows))
+			}
+			row := rows[0]
+			if row.Actor != model.IdlePingDispatchCreator {
+				t.Fatalf("requeue row actor = %q, want %q", row.Actor, model.IdlePingDispatchCreator)
+			}
+			if !strings.Contains(row.Details, "auto-requeue") {
+				t.Fatalf("requeue row Details = %q, missing 'auto-requeue' prefix", row.Details)
+			}
+			if !strings.Contains(row.Details, "issue="+iss.Key) {
+				t.Fatalf("requeue row Details = %q, missing issue=%s clause", row.Details, iss.Key)
+			}
+
+			// And: no agent.cancel row for the same dispatch — the cancel
+			// branch must not also fire for a reaper-driven end.
+			cancelRows, err := p.store.ListHistory(store.HistoryFilter{
+				RepoID: &p.repo.ID,
+				Op:     "agent.cancel",
+			})
+			if err != nil {
+				t.Fatalf("ListHistory(agent.cancel): %v", err)
+			}
+			for _, r := range cancelRows {
+				if r.TargetID != nil && *r.TargetID == d.ID {
+					t.Fatalf("unexpected agent.cancel row for requeued dispatch %d: %+v", d.ID, r)
+				}
+			}
+		})
+	}
+}

@@ -94,11 +94,12 @@ func ping(targetSession string, ageFromNow time.Duration, now time.Time) *model.
 }
 
 // TestTickFreshSession — a session that's seen recent activity must be
-// left alone.
+// left alone. Picks 5 min, well inside the new 20 min idle threshold
+// (BACI-133 tightened it from 1 h).
 func TestTickFreshSession(t *testing.T) {
 	now := time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC)
 	b := &fakeBackend{
-		sessions: []*model.AgentSession{aliveSession("fresh", 30*time.Minute, now)},
+		sessions: []*model.AgentSession{aliveSession("fresh", 5*time.Minute, now)},
 		repo:     &model.Repo{ID: 1, Prefix: "BACI"},
 	}
 	c := &recordedClient{}

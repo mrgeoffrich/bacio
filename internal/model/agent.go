@@ -827,14 +827,25 @@ const AgentLivenessThreshold = 10 * time.Minute
 // AgentLivenessThreshold (which only flips the UI's "idle" badge)
 // because the ping is a real action — we want a high-confidence
 // "this looks dead" signal before disturbing live sessions.
-const AgentIdlePingThreshold = 1 * time.Hour
+//
+// BACI-133: 20 min (was 1 h). Combined with AgentPingNoAckTimeout (2
+// min) the new worst-case end-to-end reap window is ~22 min, tight
+// enough that an autonomous recovery beats a user noticing the
+// silence and intervening manually. The constant also doubles as the
+// BACI-58 staleness window in CountInFlightByMode — tightening it
+// makes a delivered-but-unacknowledged dispatch on a quiet session
+// drop out of the per-mode concurrency cap sooner, so a fresh agent
+// can take the slot the moment the reaper re-queues (BACI-133 §B).
+const AgentIdlePingThreshold = 20 * time.Minute
 
 // AgentPingNoAckTimeout is how long after a ping is enqueued the
 // reaper waits before declaring the session presumed-dead and
 // force-ending it. The channel pushes the ping inside one drain tick
 // (sub-second under normal load); 2 minutes is generous enough to
 // absorb a single network blip or a parked-but-alive turn while
-// keeping the dead-session cleanup window tight.
+// keeping the dead-session cleanup window tight. Stacks with
+// AgentIdlePingThreshold for the BACI-133 worst-case (~22 min from
+// last heartbeat to force-end + dispatch re-queue).
 const AgentPingNoAckTimeout = 2 * time.Minute
 
 // SetupDispatchCreator marks dispatches that the bacio channel itself
