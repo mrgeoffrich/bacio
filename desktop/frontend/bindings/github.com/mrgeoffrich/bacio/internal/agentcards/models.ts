@@ -357,12 +357,17 @@ export class QuestionDTO {
  * pick its glyph. IssueKey carries the BACI-62 per-job scope so a
  * future "history" pane can group prior-job todos without a second
  * fetch; omitted in JSON when empty so the on-wire shape stays
- * back-compatible for callers that don't care.
+ * back-compatible for callers that don't care. DispatchID (BACI-132)
+ * carries the per-dispatch scope so the UI could one day group two
+ * dispatches on the same (session, issue) as separate task lists;
+ * omitted on pre-BACI-132 rows and orphan rows so the on-wire shape
+ * stays back-compatible.
  */
 export class SessionTodoDTO {
     "content": string;
     "status": string;
     "issueKey"?: string;
+    "dispatch_id"?: number | null;
 
     /** Creates a new SessionTodoDTO instance. */
     constructor($$source: Partial<SessionTodoDTO> = {}) {

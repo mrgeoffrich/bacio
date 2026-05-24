@@ -122,4 +122,4 @@ If you have to stop for user input, the issue is automatically moved to **needs 
 
 ## Questions
 
-If anything in this brief is ambiguous, batch up to 4 clarifications into ONE `mcp__bacio__ask_user_question` call BEFORE doing speculative work — rework costs more than answering. Prefer it over the built-in AskUserQuestion: it surfaces in your supervisor's TUI/desktop/web with the issue context.
+If anything in this brief is ambiguous, batch up to 4 clarifications into ONE `mcp__bacio__ask_user_question` call BEFORE doing speculative work — rework costs more than answering. Prefer it over the built-in AskUserQuestion: it surfaces in your supervisor's TUI/desktop/web with the issue context. Pass `issue_id: <issue_id>` in the call so the question surfaces on the right kanban card.
