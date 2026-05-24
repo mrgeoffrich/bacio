@@ -39,23 +39,23 @@ func (s *Store) UpsertSyncRemote(remoteURL, localPath string) error {
 	return err
 }
 
-// GetSyncRemote returns the row for remoteURL, or ErrNotFound if no
-// such row exists. Used by `bacio sync` to resolve the local clone
-// path for the remote declared in the project's .bacio/config.yaml.
-func (s *Store) GetSyncRemote(remoteURL string) (*model.SyncRemote, error) {
+// syncRemoteCols is the column list every sync_remotes read uses, kept
+// in one place so the scan helper and its callers can't drift.
+const syncRemoteCols = `remote_url, local_path, cloned_at, last_sync_at, last_sync_error`
+
+// scanSyncRemote unpacks one sync_remotes row from a Scanner. Shared by
+// GetSyncRemote (single-row) and ListSyncRemotes (per-row in a loop) so
+// the NullTime / NullString unpacking only lives in one place.
+func scanSyncRemote(row rowScanner) (*model.SyncRemote, error) {
 	var (
 		r          model.SyncRemote
 		lastSyncAt sql.NullTime
 		lastErr    sql.NullString
 	)
-	err := s.DB.QueryRow(
-		`SELECT remote_url, local_path, cloned_at, last_sync_at, last_sync_error FROM sync_remotes WHERE remote_url = ?`,
-		remoteURL,
-	).Scan(&r.RemoteURL, &r.LocalPath, &r.ClonedAt, &lastSyncAt, &lastErr)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, ErrNotFound
-	}
-	if err != nil {
+	if err := row.Scan(&r.RemoteURL, &r.LocalPath, &r.ClonedAt, &lastSyncAt, &lastErr); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
 		return nil, fmt.Errorf("scan sync_remote: %w", err)
 	}
 	if lastSyncAt.Valid {
@@ -67,6 +67,43 @@ func (s *Store) GetSyncRemote(remoteURL string) (*model.SyncRemote, error) {
 		r.LastSyncError = &msg
 	}
 	return &r, nil
+}
+
+// GetSyncRemote returns the row for remoteURL, or ErrNotFound if no
+// such row exists. Used by `bacio sync` to resolve the local clone
+// path for the remote declared in the project's .bacio/config.yaml.
+func (s *Store) GetSyncRemote(remoteURL string) (*model.SyncRemote, error) {
+	return scanSyncRemote(s.DB.QueryRow(
+		`SELECT `+syncRemoteCols+` FROM sync_remotes WHERE remote_url = ?`,
+		remoteURL,
+	))
+}
+
+// ListSyncRemotes returns every row in sync_remotes — the per-machine
+// registry of sync repos this bacio knows about. Ordered by remote_url
+// ASC for determinism (callers that want a different order can re-sort
+// in their own renderer). Returns an empty slice (never nil) when the
+// table is empty so JSON encoders emit `[]` rather than `null`.
+//
+// Used by the registry-surface code (BACI-105 and friends) — `bacio sync
+// remotes` CLI, the desktop / web Sync view, the TUI sync surface.
+func (s *Store) ListSyncRemotes() ([]*model.SyncRemote, error) {
+	rows, err := s.DB.Query(
+		`SELECT ` + syncRemoteCols + ` FROM sync_remotes ORDER BY remote_url ASC`,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]*model.SyncRemote, 0)
+	for rows.Next() {
+		r, err := scanSyncRemote(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 // MarkSyncCompleted bumps last_sync_at on the row for remoteURL to

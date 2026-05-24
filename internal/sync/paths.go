@@ -139,6 +139,27 @@ func RepoFolder(prefix string) string {
 	return path.Join("repos", prefix)
 }
 
+// DeriveSyncLabel turns a canonical sync-remote URL into a short
+// human-facing label: the trailing path segment with any `.git` suffix
+// stripped. Cheap and prefix-agnostic so it handles `git@host:user/repo.git`
+// and `https://host/user/repo.git` alike without parsing as a URL.
+//
+// Returns "" for degenerate input (empty / bare `.git`). Every caller
+// picks its own fallback (`bacio sync init`'s clone-path default is
+// "default"; the UI may fall back to the full URL) — pushing one
+// hard-coded fallback into the helper would force the wrong default on
+// the other callers.
+//
+// Single source of truth for the URL→label rule shared across CLI, TUI,
+// desktop, and web (BACI-105).
+func DeriveSyncLabel(remoteURL string) string {
+	base := strings.TrimRight(remoteURL, "/")
+	if i := strings.LastIndexAny(base, "/:"); i >= 0 {
+		base = base[i+1:]
+	}
+	return strings.TrimSuffix(base, ".git")
+}
+
 // DetectCaseInsensitiveCollisions groups folder names that case-fold
 // (NFC-normalised + lower-cased) to the same value. The map's key is
 // the case-folded form; the value is the list of original names that

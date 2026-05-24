@@ -170,6 +170,40 @@ func TestRepoYAMLFile(t *testing.T) {
 	}
 }
 
+// TestDeriveSyncLabel pins the URL→label rule (BACI-105) shared across
+// CLI / TUI / desktop / web. Covers the canonical SSH and HTTPS forms,
+// trailing-slash collapsing, and the degenerate cases where the helper
+// returns "" so the caller can choose its own fallback.
+func TestDeriveSyncLabel(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		// Canonical forms.
+		{"git@github.com:user/sync.git", "sync"},
+		{"https://github.com/user/sync.git", "sync"},
+		{"https://github.com/user/sync", "sync"},
+		// Trailing slash collapses before deriving the segment.
+		{"https://github.com/user/sync/", "sync"},
+		{"https://github.com/user/sync.git/", "sync"},
+		// SSH without a /user path component.
+		{"git@host:sync.git", "sync"},
+		// Degenerate: empty / bare `.git` returns "" so the caller
+		// picks its own fallback (defaultClonePath -> "default";
+		// UI -> the full URL).
+		{"", ""},
+		{".git", ""},
+		// No path separators: the URL is itself the label.
+		{"sync", "sync"},
+	}
+	for _, tc := range cases {
+		got := DeriveSyncLabel(tc.in)
+		if got != tc.want {
+			t.Errorf("DeriveSyncLabel(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestIssueYAMLAndDescription(t *testing.T) {
 	folder := IssueFolder("MINI", 7)
 	if got, want := IssueYAMLFile(folder), "repos/MINI/issues/MINI-7/issue.yaml"; got != want {
