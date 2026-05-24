@@ -85,6 +85,15 @@ type BoardCard struct {
 	Claude          bool     `json:"claude"`
 	Taken           bool     `json:"taken"`
 	WaitingForClaim bool     `json:"waitingForClaim"`
+	// WaitingDispatchDelivered (BACI-130) is true when the issue's
+	// active (queued / pending / delivered) dispatch is already in the
+	// `delivered` state — the worker has the Task in hand. Drives the
+	// spinner-cancel UI gate: cards with this flag set render the
+	// spinner glyph without the click affordance, because cancelling a
+	// delivered dispatch is now rejected at the store boundary.
+	// Omitted from JSON when false (common case) so the wire payload
+	// doesn't grow on untaken / queued / pending cards.
+	WaitingDispatchDelivered bool `json:"waitingDispatchDelivered,omitempty"`
 	// ActiveVerb is the lower-cased display label of the prompt template
 	// behind the newest open claim's most recent non-cancelled dispatch
 	// — e.g. "designing", "planning", or a custom template's lowered
@@ -200,7 +209,24 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 		return nil, err
 	}
 
-	enrichByKey, err := enrichmentByIssueKey(ctx, c, repos, claims)
+	// BACI-130: read every dispatch in scope once and reuse the slice
+	// for both the per-(session, issue) ActiveVerb derivation
+	// (`pickActiveMode`) and the new per-issue `WaitingDispatchDelivered`
+	// flag. The flag drives the kanban spinner-cancel UI: a card whose
+	// active dispatch has been delivered hides the cancel affordance,
+	// because cancelling a delivered dispatch is rejected at the store
+	// boundary now. RepoDispatches is already newest-first.
+	var allDispatches []*model.AgentDispatch
+	for _, r := range repos {
+		ds, err := c.RepoDispatches(ctx, r)
+		if err != nil {
+			return nil, err
+		}
+		allDispatches = append(allDispatches, ds...)
+	}
+	deliveredByIssueID := waitingDeliveredByIssueID(allDispatches)
+
+	enrichByKey, err := enrichmentByIssueKey(ctx, c, claims, allDispatches)
 	if err != nil {
 		return nil, err
 	}
@@ -238,22 +264,23 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 		}
 		e := enrichByKey[iss.Key]
 		cards = append(cards, BoardCard{
-			Key:             iss.Key,
-			Column:          string(iss.State),
-			ColumnLabel:     StateLabel(iss.State),
-			Title:           iss.Title,
-			Tags:            tags,
-			Assignees:       assigneeList(iss.Assignee),
-			Claude:          iss.Assignee == "claude",
-			Taken:           e.taken,
-			WaitingForClaim: iss.WaitingForClaim,
-			ActiveVerb:      e.verb,
-			TodosDone:       e.todosDone,
-			TodosTotal:      e.todosTotal,
-			Todos:           e.todos,
-			OpenQuestions:   e.questions,
-			Archived:        iss.ArchivedAt != nil,
-			BlockedBy:       blockedByID[iss.ID],
+			Key:                      iss.Key,
+			Column:                   string(iss.State),
+			ColumnLabel:              StateLabel(iss.State),
+			Title:                    iss.Title,
+			Tags:                     tags,
+			Assignees:                assigneeList(iss.Assignee),
+			Claude:                   iss.Assignee == "claude",
+			Taken:                    e.taken,
+			WaitingForClaim:          iss.WaitingForClaim,
+			WaitingDispatchDelivered: iss.WaitingForClaim && deliveredByIssueID[iss.ID],
+			ActiveVerb:               e.verb,
+			TodosDone:                e.todosDone,
+			TodosTotal:               e.todosTotal,
+			Todos:                    e.todos,
+			OpenQuestions:            e.questions,
+			Archived:                 iss.ArchivedAt != nil,
+			BlockedBy:                blockedByID[iss.ID],
 		})
 	}
 
@@ -317,14 +344,16 @@ type cardEnrichment struct {
 // Algorithm: for each issue with at least one open claim, pick the
 // newest claim (by ClaimedAt); look up that claim's session for its
 // agent identity; find the newest non-cancelled dispatch for that
-// (session, issue) pair (matching either by session_id or agent_id);
+// (session, issue) pair (matching either by session_id or agent_id)
+// from the supplied `allDispatches` slice (already read in Assemble so
+// the BACI-130 delivered-flag derivation can share the same query);
 // resolve the dispatch's mode slug to the prompt template's display
 // label, lower-cased; read the session's TodoWrite mirror counts.
 func enrichmentByIssueKey(
 	ctx context.Context,
 	c client.Client,
-	repos []*model.Repo,
 	claims []*model.AgentClaim,
+	allDispatches []*model.AgentDispatch,
 ) (map[string]cardEnrichment, error) {
 	enrich := make(map[string]cardEnrichment, len(claims))
 	if len(claims) == 0 {
@@ -371,19 +400,6 @@ func enrichmentByIssueKey(
 		if wantSessionIDs[s.SessionID] {
 			sessionByID[s.SessionID] = s
 		}
-	}
-
-	// Dispatches are scoped per repo — fan-out over the in-scope
-	// repos and concat. RepoDispatches is already newest-first. Built
-	// before the todo bulk-read so the (session, issue, dispatch)
-	// triple (BACI-132) is available when constructing the pairs.
-	var allDispatches []*model.AgentDispatch
-	for _, r := range repos {
-		ds, err := c.RepoDispatches(ctx, r)
-		if err != nil {
-			return nil, err
-		}
-		allDispatches = append(allDispatches, ds...)
 	}
 
 	// Bulk-read todos for the winning sessions only, scoped to each
@@ -499,6 +515,43 @@ func enrichmentByIssueKey(
 		enrich[issueKey] = e
 	}
 	return enrich, nil
+}
+
+// waitingDeliveredByIssueID maps issue id → true when the issue's
+// active (queued / pending / delivered) dispatch is in the `delivered`
+// state. Drives BoardCard.WaitingDispatchDelivered, which gates the
+// kanban spinner-cancel UI (BACI-130): a card whose active dispatch
+// has been delivered hides the cancel affordance because the store
+// rejects cancel-after-delivery now.
+//
+// "Active" is the newest non-cancelled / non-acked dispatch per issue
+// — same shape as Store.WaitingDispatchForIssue, computed in-memory
+// from the dispatches slice the caller already read. `allDispatches`
+// is newest-first (RepoDispatches' contract), so the first matching
+// row per issue wins.
+func waitingDeliveredByIssueID(allDispatches []*model.AgentDispatch) map[int64]bool {
+	out := make(map[int64]bool)
+	seen := make(map[int64]bool)
+	for _, d := range allDispatches {
+		if d == nil || d.IssueID == nil {
+			continue
+		}
+		id := *d.IssueID
+		if seen[id] {
+			continue
+		}
+		switch d.Status {
+		case model.DispatchQueued, model.DispatchPending:
+			seen[id] = true
+			out[id] = false
+		case model.DispatchDelivered:
+			seen[id] = true
+			out[id] = true
+		}
+		// Cancelled / acked rows don't establish the "active" dispatch
+		// — keep walking newer-to-older for the same issue.
+	}
+	return out
 }
 
 // pickActiveDispatch returns the most-recent non-cancelled dispatch

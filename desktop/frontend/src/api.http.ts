@@ -77,6 +77,13 @@ export interface BoardCard {
   claude: boolean;
   taken: boolean;
   waitingForClaim: boolean;
+  // BACI-130: true when the issue's active dispatch is already in the
+  // `delivered` state — the worker has the Task in hand and the store
+  // rejects cancel-after-delivery. The kanban renders the spinner
+  // glyph without the click affordance when this is true. Absent
+  // (omitempty server-side) when false, so older payloads that don't
+  // carry the field render as today.
+  waitingDispatchDelivered?: boolean;
   // BACI-60 enrichment: lower-cased prompt-template label of the
   // newest open claim's most recent non-cancelled dispatch (empty
   // when no verb can be derived) and the claiming session's
@@ -951,6 +958,14 @@ export async function dispatchIssue(
 // the issue, POST cancel against its id. A 404 from the GET means the
 // dispatch cleared between the click and the call landing (e.g. the
 // matcher bound it) — that's a no-op success, not an error.
+//
+// BACI-130: the POST can also race a delivery — the matcher binds a
+// queued row to a worker and immediately delivers, between the
+// spinner-button render and the click landing. The server now
+// rejects cancel-after-delivery with a 409 ("dispatch N has been
+// delivered; cannot cancel"). Swallow that the same way as the 404
+// — the UI's spinner-cancel button is best-effort, not a "did you
+// really want to do this" confirm.
 export async function cancelWaitingDispatch(
   repoPrefix: string,
   issueKey: string,
@@ -975,7 +990,15 @@ export async function cancelWaitingDispatch(
     if (msg.startsWith('no waiting dispatch')) return;
     throw err;
   }
-  await call<unknown>(`/agents/dispatches/${dsp.id}/cancel`, { method: 'POST' });
+  try {
+    await call<unknown>(`/agents/dispatches/${dsp.id}/cancel`, { method: 'POST' });
+  } catch (err: unknown) {
+    // BACI-130: a 409 "delivered, cannot cancel" race is a no-op
+    // success — the worker took the Task between render and click.
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('has been delivered')) return;
+    throw err;
+  }
 }
 
 interface ApiBoardCard {

@@ -54,9 +54,9 @@ After Task returns, attach the subagent's transcript to the ticket
 for traceability — call:
 
     mcp__bacio__attach_transcript(
-      issue_id = <the value inside the <issue_id>...</issue_id> tag from the stub below>,
-      agent_id = <the agentId from the Task result>,
-      note     = <the subagent's one-line summary>,
+      issue_key = <the value inside the <issue_id>...</issue_id> tag from the stub below>,
+      agent_id  = <the agentId from the Task result>,
+      note      = <the subagent's one-line summary>,
     )
 
 The Task result carries an `agentId` alongside the summary; pass it

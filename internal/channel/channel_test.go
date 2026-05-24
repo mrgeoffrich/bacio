@@ -35,10 +35,11 @@ type fakeSource struct {
 	// quietly recording the call.
 	registerErr func(sessionID, model string) error
 
-	// Question-side state. asked records every AskQuestion call;
+	// Question-side state. asked records every AskQuestion call
+	// (including the issue id the channel threaded through);
 	// questions is the in-memory rows keyed by request_uuid that
 	// the next DrainAnsweredQuestions returns and clears.
-	asked            []model.QuestionPayload
+	asked            []askRec
 	askErr           error
 	questions        map[string]model.SessionQuestion
 	abandonedOpenN   int
@@ -56,6 +57,15 @@ type attachRec struct {
 	issueKey string
 	agentID  string
 	note     string
+}
+
+// askRec records one AskQuestion call with the issue id the
+// channel threaded through alongside the payload. BACI-128: the
+// channel now validates and forwards a required issue_id, so the
+// test asserts both fields.
+type askRec struct {
+	issueID string
+	payload model.QuestionPayload
 }
 
 type regRec struct {
@@ -105,19 +115,19 @@ func (f *fakeSource) EnsureSetup(ctx context.Context) error {
 	return nil
 }
 
-func (f *fakeSource) AskQuestion(ctx context.Context, payload model.QuestionPayload) (string, error) {
+func (f *fakeSource) AskQuestion(ctx context.Context, issueID string, payload model.QuestionPayload) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.askErr != nil {
 		return "", f.askErr
 	}
-	f.asked = append(f.asked, payload)
+	f.asked = append(f.asked, askRec{issueID: issueID, payload: payload})
 	uuid := fmt.Sprintf("req-%d", len(f.asked))
 	if f.questions == nil {
 		f.questions = map[string]model.SessionQuestion{}
 	}
 	f.questions[uuid] = model.SessionQuestion{
-		RequestUUID: uuid, Payload: payload, State: model.QuestionOpen,
+		RequestUUID: uuid, IssueKey: issueID, Payload: payload, State: model.QuestionOpen,
 	}
 	return uuid, nil
 }
@@ -487,7 +497,7 @@ func TestAskUserQuestionParksAndDelivers(t *testing.T) {
 	// notifications/initialized so the poller doesn't auto-start
 	// here — we call drainAnsweredQuestions by hand to keep timing
 	// deterministic.
-	askArgs := `{"questions":[{"question":"Pick one","header":"Q","multiSelect":false,"options":[{"label":"A","description":"first"},{"label":"B","description":"second"}]}]}`
+	askArgs := `{"issue_id":"BACI-42","questions":[{"question":"Pick one","header":"Q","multiSelect":false,"options":[{"label":"A","description":"first"},{"label":"B","description":"second"}]}]}`
 	requests := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`,
 		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
@@ -536,6 +546,10 @@ func TestAskUserQuestionParksAndDelivers(t *testing.T) {
 		src.mu.Unlock()
 		t.Fatalf("AskQuestion called %d times, want 1", len(src.asked))
 	}
+	if src.asked[0].issueID != "BACI-42" {
+		src.mu.Unlock()
+		t.Fatalf("AskQuestion issueID = %q, want %q", src.asked[0].issueID, "BACI-42")
+	}
 	src.mu.Unlock()
 
 	// Simulate the user answering "A" on the only question. The
@@ -567,7 +581,7 @@ func TestAskUserQuestionParksAndDelivers(t *testing.T) {
 // back to the same path as a no-answer return from the built-in.
 func TestAskUserQuestionCancelDeliversError(t *testing.T) {
 	src := &fakeSource{}
-	askArgs := `{"questions":[{"question":"Pick one","header":"Q","multiSelect":false,"options":[{"label":"A","description":"first"},{"label":"B","description":"second"}]}]}`
+	askArgs := `{"issue_id":"BACI-42","questions":[{"question":"Pick one","header":"Q","multiSelect":false,"options":[{"label":"A","description":"first"},{"label":"B","description":"second"}]}]}`
 	requests := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`,
 		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
@@ -606,7 +620,7 @@ func TestAskUserQuestionRejectsInvalidPayload(t *testing.T) {
 	requests := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`,
 		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ask_user_question","arguments":{"questions":[]}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ask_user_question","arguments":{"issue_id":"BACI-42","questions":[]}}}`,
 	}, "\n") + "\n"
 
 	var out bytes.Buffer
@@ -638,16 +652,17 @@ func TestAskUserQuestionRejectsInvalidPayload(t *testing.T) {
 
 // TestChannelAttachTranscriptTool drives a tools/call(attach_transcript):
 // the happy path reaches Source.AttachTranscript with the trimmed args,
-// a missing issue_key / agent_id is rejected with isError=true without
+// a missing issue_id / agent_id is rejected with isError=true without
 // reaching the source, and the "agent-" prefix is stripped.
+// BACI-128 renamed the MCP arg from issue_key to issue_id.
 func TestChannelAttachTranscriptTool(t *testing.T) {
 	src := &fakeSource{attachResult: "attached"}
 	requests := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`,
 		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"attach_transcript","arguments":{"issue_key":"BACI-9","agent_id":"agent-abc123","note":"all done"}}}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"attach_transcript","arguments":{"issue_id":"BACI-9","agent_id":"agent-abc123","note":"all done"}}}`,
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"attach_transcript","arguments":{"agent_id":"abc123"}}}`,
-		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"attach_transcript","arguments":{"issue_key":"BACI-9"}}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"attach_transcript","arguments":{"issue_id":"BACI-9"}}}`,
 	}, "\n") + "\n"
 
 	var out bytes.Buffer
@@ -676,7 +691,7 @@ func TestChannelAttachTranscriptTool(t *testing.T) {
 
 	missingIssue := byID[3]
 	if isErr, _ := missingIssue["result"].(map[string]any)["isError"].(bool); !isErr {
-		t.Fatalf("attach_transcript without issue_key should report isError=true: %+v", missingIssue)
+		t.Fatalf("attach_transcript without issue_id should report isError=true: %+v", missingIssue)
 	}
 	missingAgent := byID[4]
 	if isErr, _ := missingAgent["result"].(map[string]any)["isError"].(bool); !isErr {
@@ -763,5 +778,136 @@ func TestServeMCPLeavesPollerParked(t *testing.T) {
 	frames := decodeFrames(t, out.String())
 	if len(frames) < 3 {
 		t.Fatalf("expected at least 3 frames (initialize, tools/list, register), got %d: %v", len(frames), frames)
+	}
+}
+
+// TestAskUserQuestionRequiresIssueID locks in BACI-128: an
+// ask_user_question call with a valid payload but no issue_id arg
+// is rejected at the channel with an MCP tool error, and the
+// source's AskQuestion is never reached. Without this guard the
+// row would land with issue_key="" and the kanban-card pill
+// surface would never light up.
+func TestAskUserQuestionRequiresIssueID(t *testing.T) {
+	src := &fakeSource{}
+	requests := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`,
+		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ask_user_question","arguments":{"questions":[{"question":"Pick one","header":"Q","multiSelect":false,"options":[{"label":"A","description":"first"},{"label":"B","description":"second"}]}]}}}`,
+	}, "\n") + "\n"
+
+	var out bytes.Buffer
+	srv := New(src, "bacio", "test", strings.NewReader(requests), &out, nil)
+	srv.poller = true
+	if err := srv.runReadLoopOnlyForTest(context.Background()); err != nil {
+		t.Skipf("test scaffolding: %v", err)
+	}
+	frames := decodeFrames(t, out.String())
+	var bad map[string]any
+	for _, f := range frames {
+		if id, ok := f["id"].(float64); ok && id == 2 {
+			bad = f
+		}
+	}
+	if bad == nil {
+		t.Fatalf("no reply for ask without issue_id")
+	}
+	res, _ := bad["result"].(map[string]any)
+	if isErr, _ := res["isError"].(bool); !isErr {
+		t.Fatalf("ask without issue_id must surface isError=true: %+v", bad)
+	}
+	content, _ := res["content"].([]any)
+	body, _ := content[0].(map[string]any)["text"].(string)
+	if !strings.Contains(body, "issue_id") {
+		t.Fatalf("error text %q should mention issue_id", body)
+	}
+	src.mu.Lock()
+	defer src.mu.Unlock()
+	if len(src.asked) != 0 {
+		t.Fatalf("source.AskQuestion was reached without issue_id: %+v", src.asked)
+	}
+}
+
+// TestAskUserQuestionRejectsMalformedIssueID locks in BACI-128:
+// every parser-rejected issue_id surfaces as an MCP tool error
+// and never reaches the source.
+func TestAskUserQuestionRejectsMalformedIssueID(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+	}{
+		{"non-numeric-suffix", "BACI-foo"},
+		{"three-char-prefix", "foo-1"},
+		{"embedded-space", "BACI 1"},
+		{"trim-to-empty", "   "},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			src := &fakeSource{}
+			askArgs := fmt.Sprintf(
+				`{"issue_id":%q,"questions":[{"question":"Pick one","header":"Q","multiSelect":false,"options":[{"label":"A","description":"first"},{"label":"B","description":"second"}]}]}`,
+				tc.raw,
+			)
+			requests := strings.Join([]string{
+				`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`,
+				`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+				`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ask_user_question","arguments":` + askArgs + `}}`,
+			}, "\n") + "\n"
+
+			var out bytes.Buffer
+			srv := New(src, "bacio", "test", strings.NewReader(requests), &out, nil)
+			srv.poller = true
+			if err := srv.runReadLoopOnlyForTest(context.Background()); err != nil {
+				t.Skipf("test scaffolding: %v", err)
+			}
+			frames := decodeFrames(t, out.String())
+			var bad map[string]any
+			for _, f := range frames {
+				if id, ok := f["id"].(float64); ok && id == 2 {
+					bad = f
+				}
+			}
+			if bad == nil {
+				t.Fatalf("no reply for ask with malformed issue_id %q", tc.raw)
+			}
+			res, _ := bad["result"].(map[string]any)
+			if isErr, _ := res["isError"].(bool); !isErr {
+				t.Fatalf("malformed issue_id %q must surface isError=true: %+v", tc.raw, bad)
+			}
+			src.mu.Lock()
+			defer src.mu.Unlock()
+			if len(src.asked) != 0 {
+				t.Fatalf("source.AskQuestion was reached with malformed issue_id %q: %+v", tc.raw, src.asked)
+			}
+		})
+	}
+}
+
+// TestAskUserQuestionNormalisesLowerCasePrefix locks in BACI-128:
+// the channel parses issue_id via store.ParseIssueKey and threads
+// the canonical (upper-case prefix) form into the source. An
+// agent that writes "baci-42" gets stamped as "BACI-42".
+func TestAskUserQuestionNormalisesLowerCasePrefix(t *testing.T) {
+	src := &fakeSource{}
+	askArgs := `{"issue_id":"baci-42","questions":[{"question":"Pick one","header":"Q","multiSelect":false,"options":[{"label":"A","description":"first"},{"label":"B","description":"second"}]}]}`
+	requests := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`,
+		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"ask_user_question","arguments":` + askArgs + `}}`,
+	}, "\n") + "\n"
+
+	var out bytes.Buffer
+	srv := New(src, "bacio", "test", strings.NewReader(requests), &out, nil)
+	srv.poller = true
+	if err := srv.runReadLoopOnlyForTest(context.Background()); err != nil {
+		t.Skipf("test scaffolding: %v", err)
+	}
+	src.mu.Lock()
+	defer src.mu.Unlock()
+	if len(src.asked) != 1 {
+		t.Fatalf("AskQuestion called %d times, want 1", len(src.asked))
+	}
+	if src.asked[0].issueID != "BACI-42" {
+		t.Fatalf("AskQuestion issueID = %q, want %q (canonical-form normalisation)", src.asked[0].issueID, "BACI-42")
 	}
 }

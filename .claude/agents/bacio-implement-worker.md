@@ -125,11 +125,12 @@ If you have to stop for user input, the issue is automatically moved to **needs 
 
    If the issue has no parent feature (`feature` field absent / null on the brief), skip this step.
 3. Drop the worktree's bacio environment with `bacio worktree rm <path> --confirm <slug>` (Claude Code removes the git worktree itself).
-4. Release the claim and move the issue to **in review** in one
+4. Tag `<issue_id>` with `implemented` (`bacio tag add <issue_id> implemented`). Idempotent — safe on re-runs.
+5. Release the claim and move the issue to **in review** in one
    atomic step: `bacio agent release <issue_id> --state in_review`
    (BACI-126c — `--state` is required; this replaces the old
    two-step "set state, then release" dance).
-5. Call `mcp__bacio__reply` with the `dispatch_id` from your Task prompt and a one-line summary. If you had to stop, return `needs_input: <what is missing>` as your final line instead.
+6. Call `mcp__bacio__reply` with the `dispatch_id` from your Task prompt and a one-line summary. If you had to stop, return `needs_input: <what is missing>` as your final line instead.
 
 ## Questions
 

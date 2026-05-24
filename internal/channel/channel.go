@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/mrgeoffrich/bacio/internal/model"
+	"github.com/mrgeoffrich/bacio/internal/store"
 )
 
 // Event is one unit of work pushed into the session. It maps onto a
@@ -73,15 +74,18 @@ type Source interface {
 	EnsureSetup(ctx context.Context) error
 
 	// AskQuestion records a clarification question the agent posed
-	// via the bacio MCP `ask_user_question` tool. The source resolves
-	// session_id / agent identity / open-claim issue key on its side
-	// and returns the row's request_uuid — the channel uses it as
-	// the in-memory key to correlate the parked JSON-RPC reply with
-	// the answered row on the next poll tick. An error here means
-	// the row couldn't be inserted; the channel surfaces it as an
-	// MCP tool error so the agent can fall back to the built-in
-	// AskUserQuestion (or report the failure).
-	AskQuestion(ctx context.Context, payload model.QuestionPayload) (string, error)
+	// via the bacio MCP `ask_user_question` tool. issueID is the
+	// canonical issue key the channel parsed from the tool args
+	// (BACI-128 — the MCP arg is now required and validated against
+	// store.ParseIssueKey before this call); sources may stamp it onto
+	// the row verbatim. The source resolves session_id / agent
+	// identity on its side and returns the row's request_uuid — the
+	// channel uses it as the in-memory key to correlate the parked
+	// JSON-RPC reply with the answered row on the next poll tick.
+	// An error here means the row couldn't be inserted; the channel
+	// surfaces it as an MCP tool error so the agent can fall back to
+	// the built-in AskUserQuestion (or report the failure).
+	AskQuestion(ctx context.Context, issueID string, payload model.QuestionPayload) (string, error)
 
 	// DrainAnsweredQuestions returns the answered + cancelled rows
 	// for the channel's session. The channel iterates and matches
@@ -441,7 +445,7 @@ func attachTranscriptToolSchema() map[string]any {
 		"inputSchema": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"issue_key": map[string]any{
+				"issue_id": map[string]any{
 					"type":        "string",
 					"description": "The canonical issue key (e.g. \"BACI-42\") the transcript belongs to.",
 				},
@@ -454,7 +458,7 @@ func attachTranscriptToolSchema() map[string]any {
 					"description": "Optional free-text note recorded in the digest header — e.g. the subagent's one-line summary.",
 				},
 			},
-			"required": []string{"issue_key", "agent_id"},
+			"required": []string{"issue_id", "agent_id"},
 		},
 	}
 }
@@ -471,6 +475,8 @@ func askUserQuestionToolSchema() map[string]any {
 			"AskUserQuestion when running under bacio — the user sees the question in their TUI / " +
 			"desktop / web window where the active issue context is right there, and the exchange " +
 			"is recorded in bacio's audit log. " +
+			"Pass the `issue_id` of the dispatched ticket (e.g. \"BACI-42\") so the question is recorded " +
+			"against that issue and surfaces on its kanban card pill and issue workspace shelf — required. " +
 			"Input shape mirrors AskUserQuestion: a `questions` array with 1-4 items, each carrying " +
 			"`question` text, a short `header` tag (<=12 chars), an explicit `multiSelect` boolean, " +
 			"and 2-4 `options` (each {label, description, optional preview}). " +
@@ -484,6 +490,10 @@ func askUserQuestionToolSchema() map[string]any {
 		"inputSchema": map[string]any{
 			"type": "object",
 			"properties": map[string]any{
+				"issue_id": map[string]any{
+					"type":        "string",
+					"description": "The canonical issue key (e.g. \"BACI-42\") the question is asked against. The question is recorded against this issue and surfaces on the issue's kanban card pill and the issue workspace's question shelf. Required — even if the agent has not yet claimed the issue.",
+				},
 				"questions": map[string]any{
 					"type":        "array",
 					"description": "Questions to ask the user (1-4 questions).",
@@ -536,7 +546,7 @@ func askUserQuestionToolSchema() map[string]any {
 					},
 				},
 			},
-			"required": []string{"questions"},
+			"required": []string{"issue_id", "questions"},
 		},
 	}
 }
@@ -627,9 +637,9 @@ func (s *Server) handleRegisterCall(ctx context.Context, id json.RawMessage, raw
 // MCP tool error rather than dropping the JSON-RPC connection.
 func (s *Server) handleAttachTranscriptCall(ctx context.Context, id json.RawMessage, rawArgs json.RawMessage) {
 	var args struct {
-		IssueKey string `json:"issue_key"`
-		AgentID  string `json:"agent_id"`
-		Note     string `json:"note"`
+		IssueID string `json:"issue_id"`
+		AgentID string `json:"agent_id"`
+		Note    string `json:"note"`
 	}
 	if len(rawArgs) > 0 {
 		if err := json.Unmarshal(rawArgs, &args); err != nil {
@@ -637,22 +647,22 @@ func (s *Server) handleAttachTranscriptCall(ctx context.Context, id json.RawMess
 			return
 		}
 	}
-	issueKey := strings.TrimSpace(args.IssueKey)
+	issueID := strings.TrimSpace(args.IssueID)
 	agentID := strings.TrimSpace(args.AgentID)
 	// Accept both "agent-<id>" and bare "<id>" forms.
 	agentID = strings.TrimPrefix(agentID, "agent-")
-	if issueKey == "" {
-		s.toolResult(id, true, "attach_transcript requires an issue_key (e.g. \"BACI-42\")")
+	if issueID == "" {
+		s.toolResult(id, true, "attach_transcript requires an issue_id (e.g. \"BACI-42\")")
 		return
 	}
 	if agentID == "" {
 		s.toolResult(id, true, "attach_transcript requires an agent_id (the agentId from the Task result)")
 		return
 	}
-	confirmation, err := s.src.AttachTranscript(ctx, issueKey, agentID, strings.TrimSpace(args.Note))
+	confirmation, err := s.src.AttachTranscript(ctx, issueID, agentID, strings.TrimSpace(args.Note))
 	if err != nil {
-		s.logf("bacio channel: attach_transcript %s agent-%s: %v", issueKey, agentID, err)
-		s.toolResult(id, true, fmt.Sprintf("could not attach transcript for agent-%s to %s: %v", agentID, issueKey, err))
+		s.logf("bacio channel: attach_transcript %s agent-%s: %v", issueID, agentID, err)
+		s.toolResult(id, true, fmt.Sprintf("could not attach transcript for agent-%s to %s: %v", agentID, issueID, err))
 		return
 	}
 	s.toolResult(id, false, confirmation)
@@ -672,18 +682,37 @@ func (s *Server) handleAskUserQuestionCall(ctx context.Context, id json.RawMessa
 		s.toolResult(id, true, "ask_user_question requires the bacio channel to be running its poller (set BACIO_AGENT_MODE=1 in the launching shell)")
 		return
 	}
-	var args model.QuestionPayload
+	// BACI-128: issue_id is a required, validated input — without it
+	// the parked row goes nowhere (the kanban card surface filters by
+	// issue_key) and the MCP call hangs forever. Unmarshal a thin
+	// wrapper so we can validate the issue id before the payload.
+	var args struct {
+		IssueID   string               `json:"issue_id"`
+		Questions []model.QuestionItem `json:"questions"`
+	}
 	if len(rawArgs) > 0 {
 		if err := json.Unmarshal(rawArgs, &args); err != nil {
 			s.toolResult(id, true, "invalid ask_user_question arguments: "+err.Error())
 			return
 		}
 	}
-	if err := model.ValidateQuestionPayload(args); err != nil {
+	payload := model.QuestionPayload{Questions: args.Questions}
+	if err := model.ValidateQuestionPayload(payload); err != nil {
 		s.toolResult(id, true, "ask_user_question payload rejected: "+err.Error())
 		return
 	}
-	requestUUID, err := s.src.AskQuestion(ctx, args)
+	rawIssueID := strings.TrimSpace(args.IssueID)
+	if rawIssueID == "" {
+		s.toolResult(id, true, "ask_user_question requires an issue_id (e.g. \"BACI-42\") so the question is recorded against that issue and surfaces on its kanban card")
+		return
+	}
+	prefix, number, err := store.ParseIssueKey(rawIssueID)
+	if err != nil {
+		s.toolResult(id, true, "ask_user_question issue_id rejected: "+err.Error())
+		return
+	}
+	issueID := fmt.Sprintf("%s-%d", prefix, number)
+	requestUUID, err := s.src.AskQuestion(ctx, issueID, payload)
 	if err != nil {
 		s.logf("bacio channel: ask_user_question: %v", err)
 		s.toolResult(id, true, "could not record question: "+err.Error())

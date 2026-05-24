@@ -990,6 +990,17 @@ func (d deps) handleAgentDispatchCancel(w http.ResponseWriter, r *http.Request) 
 			fmt.Sprintf("dispatch %d is already acked; cannot cancel", in.ID), nil)
 		return
 	}
+	if existing.Status == model.DispatchDelivered {
+		// BACI-130: a delivered dispatch means the worker has taken the
+		// Task call and is doing the work — cancelling the row would
+		// just drop the kanban activity pill while the work continues.
+		// Return 409 (matching the already-acked arm) and short-circuit
+		// the dry-run projection — projecting "would-be cancelled" for
+		// a row that's about to reject is misleading.
+		writeError(w, http.StatusConflict, "conflict",
+			fmt.Sprintf("dispatch %d has been delivered; cannot cancel", in.ID), nil)
+		return
+	}
 	if isDryRun(r) {
 		projected := *existing
 		projected.Status = model.DispatchCancelled

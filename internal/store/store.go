@@ -506,6 +506,18 @@ func migrate(db *sql.DB) error {
 	if err := refreshDispatchPreamble(db); err != nil {
 		return fmt.Errorf("refresh dispatch preamble: %w", err)
 	}
+	// BACI-128: refresh the per-mode dispatch templates (and the
+	// dispatch preamble's `attach_transcript` example) when the
+	// stored body byte-matches the pre-BACI-128 default. Adds the
+	// `Pass issue_id: <issue_id>` instruction to each per-mode
+	// template's Questions paragraph and renames the
+	// `attach_transcript` example arg in the preamble. Must run
+	// after refreshDispatchPreamble (the BACI-128 preamble pre-frozen
+	// body is the post-XML-stub default — running this after means
+	// we never byte-compare against a row we just replaced).
+	if err := refreshAskUserQuestionTemplates(db); err != nil {
+		return fmt.Errorf("refresh ask_user_question templates: %w", err)
+	}
 	// BACI-68: add archived_at columns + indexes to issues, features,
 	// documents on older DBs. The CREATE TABLE declarations in
 	// schema.sql carry the column for fresh DBs; this ALTER + index
