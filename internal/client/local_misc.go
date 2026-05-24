@@ -35,22 +35,52 @@ func (c *localClient) AddComment(ctx context.Context, repo *model.Repo, in input
 	if err != nil {
 		return nil, err
 	}
+	// BACI-131: when in.Eval is true, the store snapshots the in-flight
+	// (session, dispatch, mode) triple so the row carries the exact run
+	// context that was live the moment the user clicked the kanban
+	// quick-eval button. Non-eval calls skip the lookup entirely.
+	var evalCtx store.EvalContext
+	if in.Eval {
+		ec, err := c.store.ResolveEvalContext(iss.ID)
+		if err != nil {
+			return nil, err
+		}
+		evalCtx = ec
+	}
 	if dryRun {
 		return &model.Comment{
-			IssueID: iss.ID,
-			Author:  in.Author,
-			Body:    in.Body,
+			IssueID:        iss.ID,
+			Author:         in.Author,
+			Body:           in.Body,
+			Eval:           in.Eval,
+			AgentSessionID: evalCtx.AgentSessionID,
+			DispatchID:     evalCtx.DispatchID,
+			Mode:           evalCtx.Mode,
 		}, nil
 	}
-	cm, err := c.store.CreateComment(iss.ID, in.Author, in.Body)
+	cm, err := c.store.CreateComment(store.CreateCommentIn{
+		IssueID:        iss.ID,
+		Author:         in.Author,
+		Body:           in.Body,
+		Eval:           in.Eval,
+		AgentSessionID: evalCtx.AgentSessionID,
+		DispatchID:     evalCtx.DispatchID,
+		Mode:           evalCtx.Mode,
+	})
 	if err != nil {
 		return nil, err
+	}
+	details := "by " + in.Author
+	if in.Eval {
+		// Distinguishes eval rows in `bacio history -o json` without
+		// the reviewer having to re-query the comment row.
+		details += " (eval)"
 	}
 	c.recordOp(model.HistoryEntry{
 		RepoID: &iss.RepoID, RepoPrefix: repo.Prefix,
 		Op: "comment.add", Kind: "issue",
 		TargetID: &iss.ID, TargetLabel: iss.Key,
-		Details: "by " + in.Author,
+		Details: details,
 	})
 	return cm, nil
 }

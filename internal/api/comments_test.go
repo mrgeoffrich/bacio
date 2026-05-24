@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/mrgeoffrich/bacio/internal/api"
+	"github.com/mrgeoffrich/bacio/internal/store"
 )
 
 func TestCommentsListEmpty(t *testing.T) {
@@ -119,7 +120,7 @@ func TestCommentDeleteHappy(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	iss := seedIssue(t, s, repo, "x")
-	cm, err := s.CreateComment(iss.ID, "alice", "hello")
+	cm, err := s.CreateComment(store.CreateCommentIn{IssueID: iss.ID, Author: "alice", Body: "hello"})
 	if err != nil {
 		t.Fatalf("CreateComment: %v", err)
 	}
@@ -140,7 +141,7 @@ func TestCommentDeleteDryRun(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	iss := seedIssue(t, s, repo, "x")
-	cm, err := s.CreateComment(iss.ID, "alice", "hello")
+	cm, err := s.CreateComment(store.CreateCommentIn{IssueID: iss.ID, Author: "alice", Body: "hello"})
 	if err != nil {
 		t.Fatalf("CreateComment: %v", err)
 	}
@@ -174,7 +175,7 @@ func TestCommentDeleteWrongIssue(t *testing.T) {
 	repo := seedRepo(t, s)
 	a := seedIssue(t, s, repo, "a")
 	b := seedIssue(t, s, repo, "b")
-	cm, err := s.CreateComment(a.ID, "alice", "hello")
+	cm, err := s.CreateComment(store.CreateCommentIn{IssueID: a.ID, Author: "alice", Body: "hello"})
 	if err != nil {
 		t.Fatalf("CreateComment: %v", err)
 	}
@@ -186,5 +187,71 @@ func TestCommentDeleteWrongIssue(t *testing.T) {
 	cs, _ := s.ListComments(a.ID)
 	if len(cs) != 1 {
 		t.Fatalf("comment on wrong issue was deleted: %d", len(cs))
+	}
+}
+
+// TestCommentAddEvalResolvesContext (BACI-131) locks in that
+// {"eval": true} writes the row with eval=1 and the resolved
+// (agent_session_id, mode) snapshotted from the open claim + matching
+// dispatch. The dispatch_id FK is set to the matching dispatch's id.
+func TestCommentAddEvalResolvesContext(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	iss := seedIssue(t, s, repo, "x")
+	if _, err := s.UpsertAgentSession(store.UpsertAgentSessionIn{
+		SessionID: "watcher", RepoID: repo.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("UpsertAgentSession: %v", err)
+	}
+	if _, _, _, _, err := s.AddAgentClaim("watcher", iss.ID, "watching"); err != nil {
+		t.Fatalf("AddAgentClaim: %v", err)
+	}
+	if _, err := s.AddDispatch(store.AddDispatchIn{
+		RepoID: repo.ID, TargetSessionID: "watcher", IssueID: &iss.ID,
+		Mode: "implement", CreatedBy: "supervisor",
+	}); err != nil {
+		t.Fatalf("AddDispatch: %v", err)
+	}
+	resp, body := apiPost(t, ts.URL+"/repos/MINI/issues/"+iss.Key+"/comments",
+		`{"author":"alice","body":"missed criterion 3","eval":true}`)
+	if resp.StatusCode != 201 {
+		t.Fatalf("status: %d, body=%s", resp.StatusCode, body)
+	}
+	for _, want := range []string{
+		`"eval": true`,
+		`"agent_session_id": "watcher"`,
+		`"mode": "implement"`,
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("missing %s in: %s", want, body)
+		}
+	}
+	cs, _ := s.ListComments(iss.ID)
+	if len(cs) != 1 || !cs[0].Eval || cs[0].AgentSessionID != "watcher" || cs[0].Mode != "implement" {
+		t.Fatalf("eval row not persisted correctly: %+v", cs)
+	}
+	if cs[0].DispatchID == nil {
+		t.Fatalf("DispatchID nil — expected the resolved dispatch row's id")
+	}
+}
+
+// TestCommentAddEvalNoClaim (BACI-131) keeps the store defensive when
+// an eval write lands on an untaken issue — the UI blocks this case
+// but the API still accepts the row, leaves the context fields empty.
+func TestCommentAddEvalNoClaim(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	iss := seedIssue(t, s, repo, "x")
+	resp, body := apiPost(t, ts.URL+"/repos/MINI/issues/"+iss.Key+"/comments",
+		`{"author":"alice","body":"no claim","eval":true}`)
+	if resp.StatusCode != 201 {
+		t.Fatalf("status: %d, body=%s", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), `"eval": true`) {
+		t.Fatalf("eval missing: %s", body)
+	}
+	cs, _ := s.ListComments(iss.ID)
+	if len(cs) != 1 || !cs[0].Eval || cs[0].AgentSessionID != "" || cs[0].Mode != "" {
+		t.Fatalf("expected eval row with empty context, got %+v", cs)
 	}
 }

@@ -71,11 +71,28 @@ type Issue struct {
 }
 
 type Comment struct {
-	ID        int64     `json:"id"`
-	UUID      string    `json:"uuid"`
-	IssueID   int64     `json:"issue_id"`
-	Author    string    `json:"author"`
-	Body      string    `json:"body"`
+	ID      int64  `json:"id"`
+	UUID    string `json:"uuid"`
+	IssueID int64  `json:"issue_id"`
+	Author  string `json:"author"`
+	Body    string `json:"body"`
+	// Eval (BACI-131) is true when the row was posted from the kanban
+	// card's quick-eval composer; the (AgentSessionID, DispatchID,
+	// Mode) triple is captured server-side at write time. All four
+	// fields are zero values on normal (non-eval) comments. Eval has
+	// no `omitempty` so a `bacio comment list -o json` consumer never
+	// has to guess whether the row is an eval note.
+	Eval           bool   `json:"eval"`
+	AgentSessionID string `json:"agent_session_id,omitempty"`
+	DispatchID     *int64 `json:"dispatch_id,omitempty"`
+	Mode           string `json:"mode,omitempty"`
+	// AgentName (BACI-131) is the persistent agent identity slug
+	// resolved from AgentSessionID at read time — not persisted on the
+	// comment row. Populated by the brief / issue-detail JOIN so the
+	// timeline footer can render "during: planning · vivid-finch"
+	// without a second client-side fetch. Empty when the session id
+	// is empty or the session has no agent identity attached.
+	AgentName string    `json:"agent_name,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 }
 

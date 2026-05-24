@@ -40,7 +40,7 @@ func TestDeleteRepoCascades(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create issue 2: %v", err)
 	}
-	if _, err := s.CreateComment(iss1.ID, "tester", "hi"); err != nil {
+	if _, err := s.CreateComment(CreateCommentIn{IssueID: iss1.ID, Author: "tester", Body: "hi"}); err != nil {
 		t.Fatalf("create comment: %v", err)
 	}
 	if err := s.CreateRelation(iss1.ID, iss2.ID, model.RelBlocks); err != nil {

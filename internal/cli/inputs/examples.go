@@ -51,7 +51,8 @@ var (
 	ExampleCommentAdd = CommentAddInput{
 		IssueKey: "MINI-42",
 		Author:   "agent-alice",
-		Body:     "Reproduced locally; the clip arithmetic is off by one cell on overflow.",
+		Body:     "agent is editing the wrong file — see comment thread on PR 123",
+		Eval:     true,
 	}
 	ExampleCommentRm = CommentRmInput{
 		IssueKey:    "MINI-42",

@@ -374,12 +374,27 @@ func (e *Engine) exportComment(w *exportWriter, issueFolder string, c *model.Com
 		return err
 	}
 	bodyHash := ContentHash(bodyBytes)
-	yamlBytes, err := Emit(Map(
-		Pair{"author", Str(c.Author)},
-		Pair{"body_hash", Str(bodyHash)},
-		Pair{"created_at", Time(c.CreatedAt)},
-		Pair{"uuid", Str(c.UUID)},
-	))
+	// BACI-131: emit the optional eval-context fields only when eval is
+	// true (and only when the underlying value is non-empty). Keeps a
+	// normal comment's on-disk YAML byte-identical to the pre-BACI-131
+	// shape, so no diff churn on the sync repo for every existing row.
+	// dispatch_id is deliberately omitted — see ParsedComment for why.
+	pairs := []Pair{
+		{"author", Str(c.Author)},
+		{"body_hash", Str(bodyHash)},
+		{"created_at", Time(c.CreatedAt)},
+		{"uuid", Str(c.UUID)},
+	}
+	if c.Eval {
+		pairs = append(pairs, Pair{"eval", Bool(true)})
+		if c.AgentSessionID != "" {
+			pairs = append(pairs, Pair{"agent_session_id", Str(c.AgentSessionID)})
+		}
+		if c.Mode != "" {
+			pairs = append(pairs, Pair{"mode", Str(c.Mode)})
+		}
+	}
+	yamlBytes, err := Emit(Map(pairs...))
 	if err != nil {
 		return err
 	}

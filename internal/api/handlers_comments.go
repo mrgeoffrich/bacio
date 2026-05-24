@@ -7,6 +7,7 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/inputio"
 	"github.com/mrgeoffrich/bacio/internal/model"
+	"github.com/mrgeoffrich/bacio/internal/store"
 )
 
 func (d deps) handleCommentsList(w http.ResponseWriter, r *http.Request) {
@@ -56,19 +57,54 @@ func (d deps) handleCommentAdd(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_input", "body is required", map[string]any{"field": "body"})
 		return
 	}
+	// BACI-131: when in.Eval is true, snapshot the in-flight dispatch
+	// context server-side so the row carries the exact (session,
+	// dispatch, mode) triple that was live the moment the user clicked
+	// the kanban quick-eval button. ResolveEvalContext returns a zero
+	// EvalContext when the issue has no open claim (the UI blocks that,
+	// the store stays defensive). Non-eval calls skip the lookup
+	// entirely.
+	var evalCtx store.EvalContext
+	if in.Eval {
+		ec, err := d.store.ResolveEvalContext(iss.ID)
+		if err != nil {
+			status, code := statusForError(err)
+			writeError(w, status, code, err.Error(), nil)
+			return
+		}
+		evalCtx = ec
+	}
 	if isDryRun(r) {
 		writeDryRun(w, http.StatusCreated, &model.Comment{
-			IssueID: iss.ID,
-			Author:  in.Author,
-			Body:    in.Body,
+			IssueID:        iss.ID,
+			Author:         in.Author,
+			Body:           in.Body,
+			Eval:           in.Eval,
+			AgentSessionID: evalCtx.AgentSessionID,
+			DispatchID:     evalCtx.DispatchID,
+			Mode:           evalCtx.Mode,
 		})
 		return
 	}
-	c, err := d.store.CreateComment(iss.ID, in.Author, in.Body)
+	c, err := d.store.CreateComment(store.CreateCommentIn{
+		IssueID:        iss.ID,
+		Author:         in.Author,
+		Body:           in.Body,
+		Eval:           in.Eval,
+		AgentSessionID: evalCtx.AgentSessionID,
+		DispatchID:     evalCtx.DispatchID,
+		Mode:           evalCtx.Mode,
+	})
 	if err != nil {
 		status, code := statusForError(err)
 		writeError(w, status, code, err.Error(), nil)
 		return
+	}
+	details := "by " + in.Author
+	if in.Eval {
+		// Distinguishes eval rows in `bacio history -o json` without
+		// the reviewer having to re-query the comment row.
+		details += " (eval)"
 	}
 	recordOp(d.store, d.logger, model.HistoryEntry{
 		RepoID:      &iss.RepoID,
@@ -78,7 +114,7 @@ func (d deps) handleCommentAdd(w http.ResponseWriter, r *http.Request) {
 		Kind:        "issue",
 		TargetID:    &iss.ID,
 		TargetLabel: iss.Key,
-		Details:     "by " + in.Author,
+		Details:     details,
 	})
 	writeJSON(w, http.StatusCreated, c)
 }

@@ -62,7 +62,7 @@ func seedExportFixture(t *testing.T) (*store.Store, map[string]string) {
 	if _, err := s.AttachPR(iss1.ID, "https://github.com/x/y/pull/42"); err != nil {
 		t.Fatalf("attach pr: %v", err)
 	}
-	c1, err := s.CreateComment(iss1.ID, "geoff", "Looks good to me.\n")
+	c1, err := s.CreateComment(store.CreateCommentIn{IssueID: iss1.ID, Author: "geoff", Body: "Looks good to me.\n"})
 	if err != nil {
 		t.Fatalf("create comment: %v", err)
 	}

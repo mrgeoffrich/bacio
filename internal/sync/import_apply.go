@@ -374,31 +374,50 @@ func (e *Engine) applyComments(tx *sql.Tx, sr *scannedRepo, res *ImportResult) e
 		})
 		for _, sc := range si.Comments {
 			hash := contentHashComment(sc)
+			// BACI-131: pull existing eval triple alongside body/author
+			// so the update branch knows when only the triple changed.
+			// dispatch_id is local-only and never imported — it stays
+			// NULL until / unless a local write resolves a new context.
 			var (
 				existingID     int64
 				existingAuthor string
 				existingBody   string
+				existingEval   bool
+				existingSess   string
+				existingMode   string
 			)
 			err := tx.QueryRow(
-				`SELECT id, author, body FROM comments WHERE uuid = ?`,
+				`SELECT id, author, body, eval, agent_session_id, mode FROM comments WHERE uuid = ?`,
 				sc.Parsed.UUID,
-			).Scan(&existingID, &existingAuthor, &existingBody)
+			).Scan(&existingID, &existingAuthor, &existingBody, &existingEval, &existingSess, &existingMode)
+			evalInt := 0
+			if sc.Parsed.Eval {
+				evalInt = 1
+			}
 			if errors.Is(err, sql.ErrNoRows) {
 				if _, err := tx.Exec(
-					`INSERT INTO comments (uuid, issue_id, author, body, created_at) VALUES (?, ?, ?, ?, ?)`,
+					`INSERT INTO comments (uuid, issue_id, author, body, created_at, eval, agent_session_id, mode)
+					 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 					sc.Parsed.UUID, issueID, sc.Parsed.Author, sc.Body,
 					sqliteTimestamp(sc.Parsed.CreatedAt),
+					evalInt, sc.Parsed.AgentSessionID, sc.Parsed.Mode,
 				); err != nil {
 					return fmt.Errorf("insert comment %s: %w", sc.Parsed.UUID, err)
 				}
 				res.Inserted++
 			} else if err != nil {
 				return err
-			} else if existingAuthor != sc.Parsed.Author || existingBody != sc.Body {
-				// Update body / author.
+			} else if existingAuthor != sc.Parsed.Author ||
+				existingBody != sc.Body ||
+				existingEval != sc.Parsed.Eval ||
+				existingSess != sc.Parsed.AgentSessionID ||
+				existingMode != sc.Parsed.Mode {
 				if _, err := tx.Exec(
-					`UPDATE comments SET author = ?, body = ? WHERE id = ?`,
-					sc.Parsed.Author, sc.Body, existingID,
+					`UPDATE comments
+					 SET author = ?, body = ?, eval = ?, agent_session_id = ?, mode = ?
+					 WHERE id = ?`,
+					sc.Parsed.Author, sc.Body, evalInt,
+					sc.Parsed.AgentSessionID, sc.Parsed.Mode, existingID,
 				); err != nil {
 					return fmt.Errorf("update comment %s: %w", sc.Parsed.UUID, err)
 				}

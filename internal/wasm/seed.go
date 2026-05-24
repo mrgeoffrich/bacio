@@ -718,7 +718,11 @@ func seedOnePass(s *store.Store, repo *model.Repo, copyIdx int) error {
 			}
 		}
 		for _, c := range iss.comments {
-			if _, err := s.CreateComment(created.ID, c.author, c.body); err != nil {
+			if _, err := s.CreateComment(store.CreateCommentIn{
+				IssueID: created.ID,
+				Author:  c.author,
+				Body:    c.body,
+			}); err != nil {
 				return fmt.Errorf("seed: create comment on %q: %w", title, err)
 			}
 		}

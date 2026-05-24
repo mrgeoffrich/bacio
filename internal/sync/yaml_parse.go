@@ -98,11 +98,28 @@ type ParsedIssue struct {
 }
 
 // ParsedComment is the on-disk shape of a comment .yaml file.
+//
+// BACI-131 added `eval`, `agent_session_id`, and `mode` as optional
+// frontmatter keys carrying the in-flight context captured when an
+// eval comment was posted. They are emitted only when `eval` is true
+// (and only when their values are non-empty), so a normal comment's
+// on-disk file stays byte-identical to today — no diff churn on every
+// existing comment.
+//
+// `dispatch_id` is deliberately NOT round-tripped: it is a local-DB
+// integer FK to agent_dispatches.id, which can't survive a sync to a
+// sibling machine (the agent_* tables are never synced, so the FK
+// targets nothing on the other side). The (agent_session_id, mode)
+// pair is the durable cross-machine snapshot; dispatch_id stays
+// local-only and is rebuilt-by-implication if a reviewer needs it.
 type ParsedComment struct {
-	UUID      string    `yaml:"uuid" json:"uuid"`
-	Author    string    `yaml:"author" json:"author"`
-	BodyHash  string    `yaml:"body_hash" json:"body_hash"`
-	CreatedAt time.Time `yaml:"created_at" json:"created_at"`
+	UUID           string    `yaml:"uuid" json:"uuid"`
+	Author         string    `yaml:"author" json:"author"`
+	BodyHash       string    `yaml:"body_hash" json:"body_hash"`
+	CreatedAt      time.Time `yaml:"created_at" json:"created_at"`
+	Eval           bool      `yaml:"eval,omitempty" json:"eval,omitempty"`
+	AgentSessionID string    `yaml:"agent_session_id,omitempty" json:"agent_session_id,omitempty"`
+	Mode           string    `yaml:"mode,omitempty" json:"mode,omitempty"`
 }
 
 // ParsedDocLink is one entry in doc.yaml's `links:` sequence.

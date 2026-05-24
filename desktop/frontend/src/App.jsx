@@ -560,6 +560,26 @@ export default function App() {
     }
   }, [activeBoard, openIssueKey, refreshBrief]);
 
+  // BACI-131: kanban quick-eval handler. Posts an eval-tagged comment
+  // for the targeted card (which is "taken" by an agent — the only
+  // surface that exposes the affordance) without leaving the board.
+  // The author falls back through api.addComment's existing OS-user /
+  // 'web' fallback — no per-card author input. We refresh the card
+  // list silently so the spinner / claim badges stay current, and
+  // re-pull the brief only when the eval was posted on the
+  // currently-open issue (otherwise the brief belongs to a different
+  // ticket and would do an unnecessary fetch).
+  const quickEvalComment = useCallback(async (cardKey, body) => {
+    try {
+      await api.addComment(activeBoard, cardKey, '', body, { eval: true });
+      refreshCards({ silent: true });
+      if (openIssueKey === cardKey) refreshBrief({ silent: true });
+    } catch (err) {
+      reportError(err, { headline: "Couldn't add eval comment" });
+      throw err;
+    }
+  }, [activeBoard, openIssueKey, refreshBrief, refreshCards]);
+
   const deleteComment = useCallback(async (commentUUID) => {
     if (!openIssueKey || !commentUUID) return;
     try {
@@ -685,6 +705,7 @@ export default function App() {
             onOpenIssue={openIssueByKey}
             onDispatchFromCard={dispatchFromCard}
             onCancelWaitingCard={cancelWaitingFromCard}
+            onQuickEval={quickEvalComment}
           />
         </ErrorBoundary>
       )}

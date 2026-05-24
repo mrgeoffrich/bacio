@@ -66,11 +66,22 @@ type BoardCard = boardcards.BoardCard
 
 // CommentDTO is one issue comment. UUID is the immutable identity the
 // React layer addresses a delete with.
+//
+// BACI-131 added the four eval-context fields the kanban quick-eval
+// composer pins onto a comment at write time. They're zero values on
+// a normal comment; AgentName is the persistent agent-identity slug
+// resolved server-side via the agent_sessions → agents JOIN at read
+// time (never persisted on the row).
 type CommentDTO struct {
-	UUID      string    `json:"uuid"`
-	Author    string    `json:"author"`
-	Body      string    `json:"body"`
-	CreatedAt time.Time `json:"createdAt"`
+	UUID           string    `json:"uuid"`
+	Author         string    `json:"author"`
+	Body           string    `json:"body"`
+	CreatedAt      time.Time `json:"createdAt"`
+	Eval           bool      `json:"eval"`
+	AgentSessionID string    `json:"agentSessionId,omitempty"`
+	DispatchID     *int64    `json:"dispatchId,omitempty"`
+	Mode           string    `json:"mode,omitempty"`
+	AgentName      string    `json:"agentName,omitempty"`
 }
 
 // PRDTO is one attached pull request.
@@ -402,7 +413,14 @@ func (b *BoardService) GetIssue(repoPrefix, key string) (IssueDetail, error) {
 	}
 	comments := make([]CommentDTO, 0, len(view.Comments))
 	for _, c := range view.Comments {
-		comments = append(comments, CommentDTO{UUID: c.UUID, Author: c.Author, Body: c.Body, CreatedAt: c.CreatedAt})
+		comments = append(comments, CommentDTO{
+			UUID: c.UUID, Author: c.Author, Body: c.Body, CreatedAt: c.CreatedAt,
+			Eval:           c.Eval,
+			AgentSessionID: c.AgentSessionID,
+			DispatchID:     c.DispatchID,
+			Mode:           c.Mode,
+			AgentName:      c.AgentName,
+		})
 	}
 	prs := make([]PRDTO, 0, len(view.PullRequests))
 	for _, p := range view.PullRequests {
@@ -516,7 +534,14 @@ func (b *BoardService) GetIssueBrief(repoPrefix, key string) (IssueBriefDTO, err
 
 	comments := make([]CommentDTO, 0, len(brief.Comments))
 	for _, c := range brief.Comments {
-		comments = append(comments, CommentDTO{UUID: c.UUID, Author: c.Author, Body: c.Body, CreatedAt: c.CreatedAt})
+		comments = append(comments, CommentDTO{
+			UUID: c.UUID, Author: c.Author, Body: c.Body, CreatedAt: c.CreatedAt,
+			Eval:           c.Eval,
+			AgentSessionID: c.AgentSessionID,
+			DispatchID:     c.DispatchID,
+			Mode:           c.Mode,
+			AgentName:      c.AgentName,
+		})
 	}
 
 	warnings := brief.Warnings
@@ -598,7 +623,12 @@ func (b *BoardService) SetIssueState(repoPrefix, key, state string) (BoardCard, 
 // issue-drawer payload. An empty author falls back to the OS username,
 // the same default the CLI uses for human actors. repoPrefix may be empty
 // or "all" — the prefix is then derived from the canonical issue key.
-func (b *BoardService) AddComment(repoPrefix, key, author, body string) (IssueDetail, error) {
+//
+// `eval` (BACI-131) flags the row as a quality-review note posted from
+// the kanban quick-eval composer — the server pins the in-flight
+// (agent_session_id, dispatch_id, mode) snapshot onto the comment at
+// write time.
+func (b *BoardService) AddComment(repoPrefix, key, author, body string, isEval bool) (IssueDetail, error) {
 	ctx := context.Background()
 	repo, err := b.resolveRepoForKey(ctx, repoPrefix, key)
 	if err != nil {
@@ -615,6 +645,7 @@ func (b *BoardService) AddComment(repoPrefix, key, author, body string) (IssueDe
 		IssueKey: key,
 		Author:   author,
 		Body:     body,
+		Eval:     isEval,
 	}, false); err != nil {
 		return IssueDetail{}, err
 	}

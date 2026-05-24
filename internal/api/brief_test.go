@@ -14,7 +14,7 @@ func TestIssueBriefHappy(t *testing.T) {
 	repo := seedRepo(t, s)
 	feat := seedFeature(t, s, repo, "auth", "Auth")
 	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "x", "", model.StateTodo, nil)
-	if _, err := s.CreateComment(iss.ID, "alice", "first comment"); err != nil {
+	if _, err := s.CreateComment(store.CreateCommentIn{IssueID: iss.ID, Author: "alice", Body: "first comment"}); err != nil {
 		t.Fatalf("comment: %v", err)
 	}
 	resp, body := apiGet(t, ts.URL+"/repos/MINI/issues/"+iss.Key+"/brief")
@@ -36,7 +36,7 @@ func TestIssueBriefNoComments(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	iss := seedIssue(t, s, repo, "x")
-	if _, err := s.CreateComment(iss.ID, "alice", "should be skipped"); err != nil {
+	if _, err := s.CreateComment(store.CreateCommentIn{IssueID: iss.ID, Author: "alice", Body: "should be skipped"}); err != nil {
 		t.Fatalf("comment: %v", err)
 	}
 	resp, body := apiGet(t, ts.URL+"/repos/MINI/issues/"+iss.Key+"/brief?no_comments=true")

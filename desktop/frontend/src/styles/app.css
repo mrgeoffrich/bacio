@@ -856,3 +856,78 @@ body { margin: 0; }
 .mk-palette-id { color: var(--fg-3); flex-shrink: 0; }
 .mk-palette-title { font-size: 13px; color: var(--fg-1); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mk-palette-empty { padding: 16px; font-size: 13px; color: var(--fg-4); text-align: center; }
+
+/* BACI-131: kanban quick-eval composer + issue-detail eval pill / footer.
+   The button slots into the right edge of .mk-card-foot on a taken card,
+   replacing the disabled zap dropdown (taken cards can't dispatch anyway).
+   Sized to match .mk-card-action-btn so the swap is visually invisible.
+   The composer renders below the footer when the user opens it. */
+.mk-card-eval-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; padding: 0;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-3);
+  color: var(--fg-2);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out);
+}
+.mk-card-eval-btn:hover {
+  background: var(--coral-500);
+  color: var(--paper, #fff);
+  border-color: var(--coral-500);
+}
+.mk-card-eval-btn .mk-icon { width: 13px; height: 13px; }
+.mk-card-eval-composer {
+  margin: 8px -2px -2px -2px;
+  padding: 8px;
+  display: flex; flex-direction: column; gap: 6px;
+  border-top: 1px solid var(--border-1);
+  background: var(--bg-3);
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+}
+.mk-card-eval-textarea {
+  width: 100%; box-sizing: border-box;
+  font-family: var(--font-sans); font-size: 12px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
+  color: var(--fg-1);
+  resize: vertical;
+}
+.mk-card-eval-textarea:focus { outline: 1px solid var(--coral-500); outline-offset: -1px; }
+.mk-card-eval-actions {
+  display: flex; gap: 6px; justify-content: flex-end;
+}
+.mk-card-eval-actions button {
+  font-size: 11px; padding: 4px 10px;
+  border-radius: var(--radius-sm); cursor: pointer;
+}
+
+/* BACI-131: subtle pill + footer on eval-flagged comments in the
+   issue-detail Activity timeline. The pill sits inline next to the
+   author label; the footer renders below the markdown body with the
+   captured (mode, agent) snapshot. */
+.mk-tl-eval-pill {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 0 6px;
+  font-family: var(--font-mono);
+  font-size: 10px; line-height: 14px;
+  letter-spacing: .06em; text-transform: uppercase;
+  color: var(--coral-600, var(--coral-500));
+  background: var(--coral-100, var(--bg-4));
+  border: 1px solid var(--coral-300, var(--border-2));
+  border-radius: 999px;
+  vertical-align: middle;
+}
+.mk-tl-eval-footer {
+  margin-top: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-3);
+}
+.mk-tl-dot.is-eval { background: var(--coral-500); }

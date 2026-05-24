@@ -553,6 +553,52 @@ func migrate(db *sql.DB) error {
 	if err := migrateDocumentsTypeCheck(db); err != nil {
 		return err
 	}
+	// BACI-131: four columns on `comments` for eval comments — the
+	// quick-eval notes the kanban card's composer posts while watching
+	// an agent work an issue. The CREATE TABLE in schema.sql carries
+	// them for fresh DBs; the ALTERs below bring older DBs up to date.
+	// SQLite ALTER TABLE can't carry a CHECK (eval IN (0,1)) — that's
+	// fine: writes only ever set eval to 0 or 1 and the partial index
+	// predicate works regardless of CHECK presence.
+	hasEval, err := columnExists(db, "comments", "eval")
+	if err != nil {
+		return err
+	}
+	if !hasEval {
+		if _, err := db.Exec(`ALTER TABLE comments ADD COLUMN eval INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("add eval to comments: %w", err)
+		}
+	}
+	hasCommentSession, err := columnExists(db, "comments", "agent_session_id")
+	if err != nil {
+		return err
+	}
+	if !hasCommentSession {
+		if _, err := db.Exec(`ALTER TABLE comments ADD COLUMN agent_session_id TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add agent_session_id to comments: %w", err)
+		}
+	}
+	hasCommentDispatch, err := columnExists(db, "comments", "dispatch_id")
+	if err != nil {
+		return err
+	}
+	if !hasCommentDispatch {
+		if _, err := db.Exec(`ALTER TABLE comments ADD COLUMN dispatch_id INTEGER REFERENCES agent_dispatches(id) ON DELETE SET NULL`); err != nil {
+			return fmt.Errorf("add dispatch_id to comments: %w", err)
+		}
+	}
+	hasCommentMode, err := columnExists(db, "comments", "mode")
+	if err != nil {
+		return err
+	}
+	if !hasCommentMode {
+		if _, err := db.Exec(`ALTER TABLE comments ADD COLUMN mode TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add mode to comments: %w", err)
+		}
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_comments_issue_eval ON comments(issue_id, created_at) WHERE eval = 1`); err != nil {
+		return fmt.Errorf("create idx_comments_issue_eval: %w", err)
+	}
 	if err := migrateSyncStateKindCheck(db); err != nil {
 		return err
 	}

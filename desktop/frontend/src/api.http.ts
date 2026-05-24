@@ -114,6 +114,19 @@ export interface CommentDTO {
   author: string;
   body: string;
   createdAt: string;
+  // BACI-131 eval-comment fields. eval is true when the row was
+  // posted from the kanban card's quick-eval composer; the triple
+  // (agentSessionId, dispatchId, mode) is the in-flight context
+  // captured server-side at write time. agentName is the persistent
+  // agent identity slug resolved from agentSessionId at read time
+  // (via a JOIN on agent_sessions → agents) — never persisted on
+  // the row. All five fields are zero values on a normal (non-eval)
+  // comment.
+  eval?: boolean;
+  agentSessionId?: string;
+  dispatchId?: number;
+  mode?: string;
+  agentName?: string;
 }
 
 export interface PRDTO {
@@ -648,7 +661,21 @@ export async function addRepository(payload?: AddRepositoryPayload): Promise<Boa
   return boardWithSync(repo.prefix, repo.name, 0, undefined);
 }
 
-interface ApiCommentEnvelope { uuid: string; author: string; body: string; created_at: string; }
+interface ApiCommentEnvelope {
+  uuid: string;
+  author: string;
+  body: string;
+  created_at: string;
+  // BACI-131 — wire-shape mirror of model.Comment. eval is always
+  // present on the wire (the server omits no field), agent_name is
+  // populated only by the JOIN-aware list endpoint. The four context
+  // fields stay omitted on normal comments via the model's omitempty.
+  eval?: boolean;
+  agent_session_id?: string;
+  dispatch_id?: number;
+  mode?: string;
+  agent_name?: string;
+}
 interface ApiPR { url: string; }
 interface ApiDocLink {
   document_filename: string;
@@ -691,9 +718,7 @@ export async function getIssue(repoPrefix: string, key: string): Promise<IssueDe
     tags: iss.tags ?? [],
     assignees: assigneeList(assignee),
     claude: assignee === 'claude',
-    comments: (view.comments ?? []).map(c => ({
-      uuid: c.uuid, author: c.author, body: c.body, createdAt: c.created_at,
-    })),
+    comments: (view.comments ?? []).map(mapApiComment),
     pullRequests: (view.pull_requests ?? []).map(p => ({ url: p.url })),
     documents: (view.documents ?? []).map(d => ({
       filename: d.document_filename,
@@ -709,6 +734,25 @@ export async function getIssue(repoPrefix: string, key: string): Promise<IssueDe
       open: c.released_at == null,
     })),
     taken: !!view.taken,
+  };
+}
+
+// mapApiComment normalises the wire-shape envelope (snake_case,
+// always-defined-but-maybe-zero context fields) to the CommentDTO
+// the React tree consumes (camelCase, optional-when-zero context).
+// Shared by getIssue() and reshapeApiBrief() so the BACI-131 fields
+// stay in lock-step across both read paths.
+function mapApiComment(c: ApiCommentEnvelope): CommentDTO {
+  return {
+    uuid: c.uuid,
+    author: c.author,
+    body: c.body,
+    createdAt: c.created_at,
+    eval: !!c.eval,
+    agentSessionId: c.agent_session_id ?? '',
+    dispatchId: c.dispatch_id,
+    mode: c.mode ?? '',
+    agentName: c.agent_name ?? '',
   };
 }
 
@@ -793,9 +837,7 @@ function reshapeApiBrief(view: ApiIssueBrief): IssueBriefDTO {
       sizeBytes: d.size_bytes ?? 0,
       content: d.content ?? '',
     })),
-    comments: (view.comments ?? []).map(c => ({
-      uuid: c.uuid, author: c.author, body: c.body, createdAt: c.created_at,
-    })),
+    comments: (view.comments ?? []).map(mapApiComment),
     claimants: (view.claimants ?? []).map(c => ({
       sessionId: c.session_id,
       agentName: c.agent_name,
@@ -1051,6 +1093,7 @@ export async function addComment(
   key: string,
   author: string,
   body: string,
+  opts?: { eval?: boolean },
 ): Promise<IssueDetail> {
   if (!repoPrefix || repoPrefix === 'all') {
     const i = key.lastIndexOf('-');
@@ -1058,9 +1101,14 @@ export async function addComment(
     repoPrefix = key.slice(0, i);
   }
   const effectiveAuthor = author?.trim() || readActor() || 'web';
+  const reqBody: { author: string; body: string; eval?: boolean } = {
+    author: effectiveAuthor,
+    body,
+  };
+  if (opts?.eval) reqBody.eval = true;
   await call<unknown>(`/repos/${repoPrefix}/issues/${key}/comments`, {
     method: 'POST',
-    body: { author: effectiveAuthor, body },
+    body: reqBody,
   });
   return getIssue(repoPrefix, key);
 }
