@@ -25,6 +25,13 @@ type fakeClient struct {
 	// blockers (BACI-114) is keyed by blocked-issue id — the same
 	// shape store.BlockersFor returns.
 	blockers map[int64][]store.IssueBlocker
+	// dispatchAware (BACI-132) opts the fake into filtering the
+	// returned todos by the pair's IssueKey and DispatchID — needed
+	// for the per-dispatch scope test. Existing tests that pass the
+	// todos map verbatim leave it false and the fake returns
+	// everything (the assembler's per-row issue_key match still
+	// catches the cross-card cases).
+	dispatchAware bool
 }
 
 func (f *fakeClient) ListRepos(context.Context) ([]*model.Repo, error) {
@@ -45,11 +52,54 @@ func (f *fakeClient) ListAgentSessions(context.Context, client.AgentSessionFilte
 func (f *fakeClient) RepoDispatches(context.Context, *model.Repo) ([]*model.AgentDispatch, error) {
 	return f.dispatches, nil
 }
-func (f *fakeClient) ListTodosBySessionsAndIssue(context.Context, []store.SessionIssuePair) (map[int64][]model.SessionTodo, error) {
+func (f *fakeClient) ListTodosBySessionsAndIssue(_ context.Context, pairs []store.SessionIssuePair) (map[int64][]model.SessionTodo, error) {
 	if f.todos == nil {
 		return map[int64][]model.SessionTodo{}, nil
 	}
-	return f.todos, nil
+	if !f.dispatchAware {
+		return f.todos, nil
+	}
+	// Build a (sessionID, issueKey, dispatchID-or-0) → bucket lookup
+	// and filter each session's rows accordingly. Mirrors the store's
+	// COALESCE(t.dispatch_id, 0) triple match.
+	type key struct {
+		issue    string
+		dispatch int64
+	}
+	wants := make(map[string][]key)
+	for _, p := range pairs {
+		var d int64
+		if p.DispatchID != nil {
+			d = *p.DispatchID
+		}
+		wants[p.SessionID] = append(wants[p.SessionID], key{issue: p.IssueKey, dispatch: d})
+	}
+	// Map sessionPK → sessionID via the fake's sessions slice.
+	idByPK := make(map[int64]string)
+	for _, s := range f.sessions {
+		idByPK[s.ID] = s.SessionID
+	}
+	out := make(map[int64][]model.SessionTodo, len(f.todos))
+	for pk, list := range f.todos {
+		sid, ok := idByPK[pk]
+		if !ok {
+			continue
+		}
+		want := wants[sid]
+		for _, t := range list {
+			var rowDispatch int64
+			if t.DispatchID != nil {
+				rowDispatch = *t.DispatchID
+			}
+			for _, k := range want {
+				if k.issue == t.IssueKey && k.dispatch == rowDispatch {
+					out[pk] = append(out[pk], t)
+					break
+				}
+			}
+		}
+	}
+	return out, nil
 }
 func (f *fakeClient) ListPromptTemplates(context.Context) ([]*store.PromptTemplate, error) {
 	return f.templates, nil
@@ -328,6 +378,68 @@ func TestAssembleTodosScopedPerIssue(t *testing.T) {
 		if two.Todos[i] != want {
 			t.Errorf("TEST-2 Todos[%d] = %+v, want %+v", i, two.Todos[i], want)
 		}
+	}
+}
+
+// TestAssembleTodosScopedPerDispatch covers BACI-132: when one
+// session has worked two dispatches on the same issue back-to-back
+// (plan → implement), the card's Tasks pill and task list show only
+// the active dispatch's rows. The fake client honours the
+// DispatchID-keyed filter so we can assert the assembler asks for
+// the right triple.
+func TestAssembleTodosScopedPerDispatch(t *testing.T) {
+	repo := &model.Repo{ID: 1, Prefix: "TEST"}
+	t0 := time.Date(2026, 5, 24, 10, 0, 0, 0, time.UTC)
+	sess := &model.AgentSession{ID: 30, SessionID: "sess-plan-impl", RepoID: repo.ID, RepoPrefix: repo.Prefix}
+	issues := []*model.Issue{
+		{Key: "TEST-1", State: model.StateInProgress, Title: "plan-then-implement"},
+	}
+	claims := []*model.AgentClaim{
+		{SessionID: "sess-plan-impl", SessionPK: 30, IssueKey: "TEST-1", ClaimedAt: t0.Add(-1 * time.Hour)},
+	}
+	planID := int64(11)
+	implID := int64(22)
+	dispatches := []*model.AgentDispatch{
+		{ID: planID, IssueKey: "TEST-1", TargetSessionID: "sess-plan-impl",
+			Mode: model.DispatchMode("plan"), Status: model.DispatchAcked, CreatedAt: t0.Add(-2 * time.Hour)},
+		{ID: implID, IssueKey: "TEST-1", TargetSessionID: "sess-plan-impl",
+			Mode: model.DispatchMode("implement"), Status: model.DispatchDelivered, CreatedAt: t0},
+	}
+	// All rows belong to session 30; the BACI-132 filter is the bulk
+	// reader's job. The fake honours the DispatchID on the pair so we
+	// can assert the assembler keys correctly.
+	todos := map[int64][]model.SessionTodo{
+		30: {
+			{Position: 0, Content: "plan/a", Status: model.TodoCompleted, IssueKey: "TEST-1", DispatchID: &planID},
+			{Position: 1, Content: "plan/b", Status: model.TodoCompleted, IssueKey: "TEST-1", DispatchID: &planID},
+			{Position: 2, Content: "impl/a", Status: model.TodoInProgress, IssueKey: "TEST-1", DispatchID: &implID},
+			{Position: 3, Content: "impl/b", Status: model.TodoPending, IssueKey: "TEST-1", DispatchID: &implID},
+		},
+	}
+	f := &fakeClient{
+		repo: repo, issues: issues, claims: claims,
+		sessions: []*model.AgentSession{sess}, dispatches: dispatches,
+		todos: todos, dispatchAware: true,
+	}
+	cards, err := Assemble(context.Background(), f, repo, false)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	byKey := map[string]BoardCard{}
+	for _, c := range cards {
+		byKey[c.Key] = c
+	}
+	got := byKey["TEST-1"]
+	// Only the implement dispatch's rows must flow through — 2 rows,
+	// one in_progress and one pending.
+	if got.TodosTotal != 2 {
+		t.Errorf("TodosTotal = %d, want 2 (only implement dispatch)", got.TodosTotal)
+	}
+	if got.TodosDone != 0 {
+		t.Errorf("TodosDone = %d, want 0 (plan rows must not bleed)", got.TodosDone)
+	}
+	if len(got.Todos) != 2 || got.Todos[0].Content != "impl/a" || got.Todos[1].Content != "impl/b" {
+		t.Fatalf("Todos = %+v, want [impl/a, impl/b]", got.Todos)
 	}
 }
 

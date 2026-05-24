@@ -463,6 +463,29 @@ func migrate(db *sql.DB) error {
 	); err != nil {
 		return fmt.Errorf("create idx_agent_session_todos_session_issue: %w", err)
 	}
+	// BACI-132: agent_session_todos.dispatch_id narrows the scope key one
+	// step further — (session, issue, dispatch) — so two dispatches on
+	// the same issue (e.g. plan → implement on BACI-X) don't share a task
+	// list on the kanban Tasks pill and the Agents view. Pre-BACI-132
+	// rows have NULL here and fall out of the wider card-side filter; the
+	// unfiltered HTTP path (`GET /agents/sessions/{id}/todos` without
+	// `dispatch_id`) still returns them. The orphan path at hook time
+	// also lands here as NULL when no dispatch can be resolved.
+	hasTodoDispatchID, err := columnExists(db, "agent_session_todos", "dispatch_id")
+	if err != nil {
+		return err
+	}
+	if !hasTodoDispatchID {
+		if _, err := db.Exec(`ALTER TABLE agent_session_todos ADD COLUMN dispatch_id INTEGER REFERENCES agent_dispatches(id)`); err != nil {
+			return fmt.Errorf("add dispatch_id to agent_session_todos: %w", err)
+		}
+	}
+	if _, err := db.Exec(
+		`CREATE INDEX IF NOT EXISTS idx_agent_session_todos_session_issue_dispatch
+			ON agent_session_todos(session_pk, issue_key, dispatch_id)`,
+	); err != nil {
+		return fmt.Errorf("create idx_agent_session_todos_session_issue_dispatch: %w", err)
+	}
 	// BACI-52: backfill the _dispatch_preamble row for existing users
 	// (the first-time seed step in migratePromptTemplates is gated on
 	// the table being empty, so DBs that already had per-mode templates

@@ -264,6 +264,12 @@ func (c *remoteClient) RepoDispatches(ctx context.Context, repo *model.Repo) ([]
 	return out, nil
 }
 
+// SessionDispatches is local-only (used by the post-tool-use hook,
+// which always talks to the local store).
+func (c *remoteClient) SessionDispatches(ctx context.Context, sessionID string) ([]*model.AgentDispatch, error) {
+	return nil, remoteAgentNotSupported("session-dispatches")
+}
+
 func (c *remoteClient) EnsureSetupDispatch(ctx context.Context, repo *model.Repo, sessionID string) (*model.AgentDispatch, error) {
 	return nil, remoteAgentNotSupported("channel")
 }
@@ -303,7 +309,7 @@ func (c *remoteClient) LinkSessionChannel(ctx context.Context, sessionID string,
 // Session-todo mirror methods — local-only in v1, like the rest of the
 // agent registry's hook/channel-internal surface.
 
-func (c *remoteClient) UpsertSessionTodoFromTask(ctx context.Context, sessionID, taskID, issueKey, content string, status model.TodoStatus) error {
+func (c *remoteClient) UpsertSessionTodoFromTask(ctx context.Context, sessionID, taskID, issueKey, content string, status model.TodoStatus, dispatchID *int64) error {
 	return remoteAgentNotSupported("todos")
 }
 

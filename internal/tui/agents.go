@@ -100,19 +100,28 @@ func (a *agentsView) reload() {
 		a.needsAction[iss.Key] = true
 	}
 	// Bulk-read each live session's TodoWrite mirror in one query,
-	// scoped to the (session, newest-open-claim-issue) pair so a
-	// session that has worked multiple jobs only flows the current
-	// one's rows onto its card (BACI-62). Same one-trip pattern the
-	// claims map uses, so the card row + detail pane render n/m
-	// progress without N+1 lookups.
+	// scoped to the (session, newest-open-claim-issue, active-dispatch)
+	// triple so a session that has worked multiple dispatches only
+	// flows the active dispatch's rows onto its card (BACI-62 + BACI-132).
+	// Same one-trip pattern the claims map uses, so the card row +
+	// detail pane render n/m progress without N+1 lookups.
 	sessionIDs := make([]string, 0, len(sessions))
 	pairs := make([]store.SessionIssuePair, 0, len(sessions))
 	for _, s := range sessions {
 		sessionIDs = append(sessionIDs, s.SessionID)
 		_, issueKey := model.SessionBusy(a.claims[s.ID])
+		dispatchID := pickActiveDispatchID(dispatches, s, issueKey)
+		if dispatchID == nil {
+			// No in-flight dispatch — skip the pair so the card
+			// shows no tasks. Matches the kanban + Agents-view
+			// surfaces and what the activity pill does today
+			// when pickActiveMode returns "".
+			continue
+		}
 		pairs = append(pairs, store.SessionIssuePair{
-			SessionID: s.SessionID,
-			IssueKey:  issueKey,
+			SessionID:  s.SessionID,
+			IssueKey:   issueKey,
+			DispatchID: dispatchID,
 		})
 	}
 	a.todos, err = a.store.ListTodosBySessionsAndIssue(pairs)
@@ -158,6 +167,39 @@ func dispatchTargetsSession(d *model.AgentDispatch, s *model.AgentSession) bool 
 		return true
 	}
 	return false
+}
+
+// pickActiveDispatchID returns the id of the newest non-cancelled
+// dispatch targeting (session, issue) — BACI-132's per-dispatch
+// scope for the kanban Tasks pill and the agent card's todo list.
+// Mirrors boardcards.pickActiveDispatchID and the one in
+// internal/agentcards/cards.go; kept duplicated rather than hoisted
+// to avoid an import-cycle into internal/boardcards (same reasoning
+// the existing dispatchTargetsSession copies use).
+func pickActiveDispatchID(dispatches []*model.AgentDispatch, s *model.AgentSession, issueKey string) *int64 {
+	if s == nil || issueKey == "" {
+		return nil
+	}
+	var best *model.AgentDispatch
+	for _, d := range dispatches {
+		if d == nil || d.IssueKey != issueKey {
+			continue
+		}
+		if d.Status == model.DispatchCancelled {
+			continue
+		}
+		if !dispatchTargetsSession(d, s) {
+			continue
+		}
+		if best == nil || d.CreatedAt.After(best.CreatedAt) {
+			best = d
+		}
+	}
+	if best == nil {
+		return nil
+	}
+	id := best.ID
+	return &id
 }
 
 func (a *agentsView) Init() tea.Cmd  { return nil }

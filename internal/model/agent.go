@@ -132,14 +132,22 @@ func ParseTodoStatus(s string) (TodoStatus, error) {
 // claims were open at hook time, or for rows written before BACI-62);
 // the Agents view filters per-(session, issue) so a session that
 // handles two dispatches back-to-back doesn't show the first job's
-// completed rows on the second job's card.
+// completed rows on the second job's card. DispatchID (BACI-132)
+// narrows that scope one step further: it's the id of the dispatch
+// in flight when the TaskCreate row was inserted, so two dispatches
+// on the same issue (e.g. plan → implement) get separate task lists
+// on the kanban Tasks pill and the Agents view. Nil for pre-BACI-132
+// rows and for orphan rows (no dispatch resolvable at hook time);
+// those rows fall out of the per-dispatch card filter but stay in
+// the unfiltered HTTP list path.
 type SessionTodo struct {
-	Position  int        `json:"position"`
-	Content   string     `json:"content"`
-	Status    TodoStatus `json:"status"`
-	TaskID    string     `json:"task_id,omitempty"`
-	IssueKey  string     `json:"issue_key,omitempty"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	Position   int        `json:"position"`
+	Content    string     `json:"content"`
+	Status     TodoStatus `json:"status"`
+	TaskID     string     `json:"task_id,omitempty"`
+	IssueKey   string     `json:"issue_key,omitempty"`
+	DispatchID *int64     `json:"dispatch_id,omitempty"`
+	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
 // MaxSessionTodos caps how many todo rows a single agent session may

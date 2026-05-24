@@ -43,11 +43,16 @@ type ClaimDTO struct {
 // pick its glyph. IssueKey carries the BACI-62 per-job scope so a
 // future "history" pane can group prior-job todos without a second
 // fetch; omitted in JSON when empty so the on-wire shape stays
-// back-compatible for callers that don't care.
+// back-compatible for callers that don't care. DispatchID (BACI-132)
+// carries the per-dispatch scope so the UI could one day group two
+// dispatches on the same (session, issue) as separate task lists;
+// omitted on pre-BACI-132 rows and orphan rows so the on-wire shape
+// stays back-compatible.
 type SessionTodoDTO struct {
-	Content  string `json:"content"`
-	Status   string `json:"status"`
-	IssueKey string `json:"issueKey,omitempty"`
+	Content    string `json:"content"`
+	Status     string `json:"status"`
+	IssueKey   string `json:"issueKey,omitempty"`
+	DispatchID *int64 `json:"dispatch_id,omitempty"`
 }
 
 // QuestionDTO is one open BACI-53 ask_user_question row — included
@@ -160,7 +165,6 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo) ([]AgentCa
 	// todo subset for each card.
 	sessionIDs := make([]string, 0, len(sessions))
 	viewBySession := make(map[string]*client.AgentSessionView, len(sessions))
-	pairs := make([]store.SessionIssuePair, 0, len(sessions))
 	for _, s := range sessions {
 		sessionIDs = append(sessionIDs, s.SessionID)
 		view, err := c.ShowAgentSession(ctx, s.SessionID)
@@ -168,16 +172,50 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo) ([]AgentCa
 			return nil, err
 		}
 		viewBySession[s.SessionID] = view
+	}
+
+	// Gather dispatches across the in-scope repos once. Hoisted ahead
+	// of the todo pair construction so the BACI-132 per-dispatch
+	// scope can be resolved up front; downstream code still buckets
+	// the same slice onto each session.
+	var allDispatches []*model.AgentDispatch
+	for _, r := range repos {
+		ds, err := c.RepoDispatches(ctx, r)
+		if err != nil {
+			return nil, err
+		}
+		allDispatches = append(allDispatches, ds...)
+	}
+
+	// Build (session, issue, dispatch) triples so the todo bulk-read
+	// flows only the active dispatch's rows onto each card (BACI-132).
+	// If no in-flight dispatch matches a (session, issue) we skip the
+	// pair — the orphan / pre-migration rows the card would otherwise
+	// pick up have been stamped with NULL dispatch_id and fall out of
+	// the wider filter.
+	pairs := make([]store.SessionIssuePair, 0, len(sessions))
+	for _, s := range sessions {
+		view := viewBySession[s.SessionID]
+		issueKey := newestOpenClaimIssueKey(view)
+		dispatchID := pickActiveDispatchID(allDispatches, s, issueKey)
+		if dispatchID == nil {
+			// No in-flight dispatch — render the card with an empty
+			// task list. Matches the kanban-card behaviour and the
+			// blank activity pill an unrecognised dispatch produces.
+			continue
+		}
 		pairs = append(pairs, store.SessionIssuePair{
-			SessionID: s.SessionID,
-			IssueKey:  newestOpenClaimIssueKey(view),
+			SessionID:  s.SessionID,
+			IssueKey:   issueKey,
+			DispatchID: dispatchID,
 		})
 	}
 
 	// Bulk-read each session's TodoWrite mirror in one query, scoped
-	// to the (session, current-job-issue) pair so a session that's
-	// handled multiple dispatches only flows the current job's rows
-	// onto its card — keeps the 10s poll to one round trip per repo.
+	// to the (session, current-job-issue, active-dispatch) triple so
+	// a session that's handled multiple dispatches only flows the
+	// active dispatch's rows onto its card — keeps the 10s poll to
+	// one round trip per repo.
 	todosByPK, err := c.ListTodosBySessionsAndIssue(ctx, pairs)
 	if err != nil {
 		return nil, err
@@ -189,17 +227,6 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo) ([]AgentCa
 	questionsByPK, err := c.ListOpenQuestionsBySessions(ctx, sessionIDs)
 	if err != nil {
 		return nil, err
-	}
-
-	// Gather dispatches across the in-scope repos once, then bucket
-	// them onto each session below.
-	var allDispatches []*model.AgentDispatch
-	for _, r := range repos {
-		ds, err := c.RepoDispatches(ctx, r)
-		if err != nil {
-			return nil, err
-		}
-		allDispatches = append(allDispatches, ds...)
 	}
 
 	// Build a key→state lookup of every non-terminal issue across the
@@ -243,9 +270,10 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo) ([]AgentCa
 		todosDone := 0
 		for _, t := range sessTodos {
 			todosDTO = append(todosDTO, SessionTodoDTO{
-				Content:  t.Content,
-				Status:   string(t.Status),
-				IssueKey: t.IssueKey,
+				Content:    t.Content,
+				Status:     string(t.Status),
+				IssueKey:   t.IssueKey,
+				DispatchID: t.DispatchID,
 			})
 			if t.Status == model.TodoCompleted {
 				todosDone++
@@ -357,4 +385,37 @@ func dispatchTargetsSession(d *model.AgentDispatch, s *model.AgentSession) bool 
 		return true
 	}
 	return false
+}
+
+// pickActiveDispatchID returns the id of the newest non-cancelled
+// dispatch targeting (session, issue) — the BACI-132 per-dispatch
+// scope used to scope this card's TodoWrite mirror to the active
+// dispatch instead of merging every dispatch's rows for the same
+// (session, issue). Mirrors boardcards.pickActiveDispatchID; kept
+// duplicated here to avoid an import-cycle into internal/boardcards
+// (matches the existing dispatchTargetsSession duplication).
+func pickActiveDispatchID(dispatches []*model.AgentDispatch, s *model.AgentSession, issueKey string) *int64 {
+	if s == nil || issueKey == "" {
+		return nil
+	}
+	var best *model.AgentDispatch
+	for _, d := range dispatches {
+		if d == nil || d.IssueKey != issueKey {
+			continue
+		}
+		if d.Status == model.DispatchCancelled {
+			continue
+		}
+		if !dispatchTargetsSession(d, s) {
+			continue
+		}
+		if best == nil || d.CreatedAt.After(best.CreatedAt) {
+			best = d
+		}
+	}
+	if best == nil {
+		return nil
+	}
+	id := best.ID
+	return &id
 }

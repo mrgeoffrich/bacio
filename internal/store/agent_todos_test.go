@@ -23,19 +23,19 @@ func TestUpsertSessionTodoFromTaskRoundTrip(t *testing.T) {
 
 	// TaskCreate "1" → inserts at position 0 with status=pending,
 	// stamped with MINI-1.
-	if err := s.UpsertSessionTodoFromTask("todos-1", "1", "MINI-1", "Read the brief", model.TodoPending); err != nil {
+	if err := s.UpsertSessionTodoFromTask("todos-1", "1", "MINI-1", "Read the brief", model.TodoPending, nil); err != nil {
 		t.Fatalf("create 1: %v", err)
 	}
 	// TaskCreate "2" → inserts at position 1
-	if err := s.UpsertSessionTodoFromTask("todos-1", "2", "MINI-1", "Write the plan", model.TodoPending); err != nil {
+	if err := s.UpsertSessionTodoFromTask("todos-1", "2", "MINI-1", "Write the plan", model.TodoPending, nil); err != nil {
 		t.Fatalf("create 2: %v", err)
 	}
 	// TaskUpdate "1" → flip status to completed, preserve position 0
-	if err := s.UpsertSessionTodoFromTask("todos-1", "1", "MINI-1", "", model.TodoCompleted); err != nil {
+	if err := s.UpsertSessionTodoFromTask("todos-1", "1", "MINI-1", "", model.TodoCompleted, nil); err != nil {
 		t.Fatalf("update 1: %v", err)
 	}
 	// TaskUpdate "2" → flip status to in_progress
-	if err := s.UpsertSessionTodoFromTask("todos-1", "2", "MINI-1", "", model.TodoInProgress); err != nil {
+	if err := s.UpsertSessionTodoFromTask("todos-1", "2", "MINI-1", "", model.TodoInProgress, nil); err != nil {
 		t.Fatalf("update 2: %v", err)
 	}
 
@@ -66,12 +66,12 @@ func TestUpsertSessionTodoFromTaskUpdatePreservesIssueKey(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	if err := s.UpsertSessionTodoFromTask("todos-reflip", "1", "MINI-1", "first job", model.TodoPending); err != nil {
+	if err := s.UpsertSessionTodoFromTask("todos-reflip", "1", "MINI-1", "first job", model.TodoPending, nil); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	// Caller now claims a different issue and updates the same task_id.
 	// The update path ignores the new issueKey and keeps MINI-1.
-	if err := s.UpsertSessionTodoFromTask("todos-reflip", "1", "MINI-2", "", model.TodoCompleted); err != nil {
+	if err := s.UpsertSessionTodoFromTask("todos-reflip", "1", "MINI-2", "", model.TodoCompleted, nil); err != nil {
 		t.Fatalf("update: %v", err)
 	}
 	got, err := s.ListSessionTodos("todos-reflip", "")
@@ -101,10 +101,10 @@ func TestUpsertSessionTodoFromTaskOrphanWhenNoClaim(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	if err := s.UpsertSessionTodoFromTask("todos-orphan", "1", "", "no claim resolved", model.TodoPending); err != nil {
+	if err := s.UpsertSessionTodoFromTask("todos-orphan", "1", "", "no claim resolved", model.TodoPending, nil); err != nil {
 		t.Fatalf("orphan insert: %v", err)
 	}
-	if err := s.UpsertSessionTodoFromTask("todos-orphan", "2", "MINI-1", "with claim", model.TodoPending); err != nil {
+	if err := s.UpsertSessionTodoFromTask("todos-orphan", "2", "MINI-1", "with claim", model.TodoPending, nil); err != nil {
 		t.Fatalf("attributed insert: %v", err)
 	}
 	unfiltered, err := s.ListSessionTodos("todos-orphan", "")
@@ -137,11 +137,11 @@ func TestUpsertSessionTodoFromTaskCapEnforced(t *testing.T) {
 		t.Fatalf("register: %v", err)
 	}
 	for i := 0; i < model.MaxSessionTodos; i++ {
-		if err := s.UpsertSessionTodoFromTask("todos-cap", taskIDFor(i), "MINI-1", "x", model.TodoPending); err != nil {
+		if err := s.UpsertSessionTodoFromTask("todos-cap", taskIDFor(i), "MINI-1", "x", model.TodoPending, nil); err != nil {
 			t.Fatalf("seed %d: %v", i, err)
 		}
 	}
-	err := s.UpsertSessionTodoFromTask("todos-cap", taskIDFor(model.MaxSessionTodos), "MINI-2", "overflow", model.TodoPending)
+	err := s.UpsertSessionTodoFromTask("todos-cap", taskIDFor(model.MaxSessionTodos), "MINI-2", "overflow", model.TodoPending, nil)
 	if err == nil {
 		t.Fatalf("expected over-cap insert to be rejected")
 	}
@@ -162,7 +162,7 @@ func TestUpsertSessionTodoFromTaskCapEnforced(t *testing.T) {
 // SQL-error surface.
 func TestUpsertSessionTodoFromTaskUnknownSession(t *testing.T) {
 	s := newTestStore(t)
-	err := s.UpsertSessionTodoFromTask("never-registered", "1", "MINI-1", "x", model.TodoPending)
+	err := s.UpsertSessionTodoFromTask("never-registered", "1", "MINI-1", "x", model.TodoPending, nil)
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
@@ -179,7 +179,7 @@ func TestUpsertSessionTodoFromTaskMissingTaskID(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	err := s.UpsertSessionTodoFromTask("todos-noid", "", "MINI-1", "x", model.TodoPending)
+	err := s.UpsertSessionTodoFromTask("todos-noid", "", "MINI-1", "x", model.TodoPending, nil)
 	if err == nil || !strings.Contains(err.Error(), "task_id is required") {
 		t.Fatalf("err = %v, want task_id is required", err)
 	}
@@ -196,7 +196,7 @@ func TestSessionTodosCascadeOnSessionDelete(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	if err := s.UpsertSessionTodoFromTask("todos-cascade", "1", "MINI-1", "doomed", model.TodoPending); err != nil {
+	if err := s.UpsertSessionTodoFromTask("todos-cascade", "1", "MINI-1", "doomed", model.TodoPending, nil); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 
@@ -242,13 +242,13 @@ func TestListTodosBySessionsBulk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("register b: %v", err)
 	}
-	if err := s.UpsertSessionTodoFromTask("bulk-a", "1", "MINI-1", "a0", model.TodoCompleted); err != nil {
+	if err := s.UpsertSessionTodoFromTask("bulk-a", "1", "MINI-1", "a0", model.TodoCompleted, nil); err != nil {
 		t.Fatalf("create a0: %v", err)
 	}
-	if err := s.UpsertSessionTodoFromTask("bulk-a", "2", "MINI-1", "a1", model.TodoInProgress); err != nil {
+	if err := s.UpsertSessionTodoFromTask("bulk-a", "2", "MINI-1", "a1", model.TodoInProgress, nil); err != nil {
 		t.Fatalf("create a1: %v", err)
 	}
-	if err := s.UpsertSessionTodoFromTask("bulk-b", "1", "MINI-2", "b0", model.TodoPending); err != nil {
+	if err := s.UpsertSessionTodoFromTask("bulk-b", "1", "MINI-2", "b0", model.TodoPending, nil); err != nil {
 		t.Fatalf("create b0: %v", err)
 	}
 
@@ -286,16 +286,16 @@ func TestListTodosBySessionsAndIssue(t *testing.T) {
 		t.Fatalf("register b: %v", err)
 	}
 	// pair-a worked MINI-1 then MINI-2; pair-b worked only MINI-1.
-	if err := s.UpsertSessionTodoFromTask("pair-a", "a1", "MINI-1", "a/mini-1/first", model.TodoCompleted); err != nil {
+	if err := s.UpsertSessionTodoFromTask("pair-a", "a1", "MINI-1", "a/mini-1/first", model.TodoCompleted, nil); err != nil {
 		t.Fatalf("a1: %v", err)
 	}
-	if err := s.UpsertSessionTodoFromTask("pair-a", "a2", "MINI-1", "a/mini-1/second", model.TodoCompleted); err != nil {
+	if err := s.UpsertSessionTodoFromTask("pair-a", "a2", "MINI-1", "a/mini-1/second", model.TodoCompleted, nil); err != nil {
 		t.Fatalf("a2: %v", err)
 	}
-	if err := s.UpsertSessionTodoFromTask("pair-a", "a3", "MINI-2", "a/mini-2/first", model.TodoInProgress); err != nil {
+	if err := s.UpsertSessionTodoFromTask("pair-a", "a3", "MINI-2", "a/mini-2/first", model.TodoInProgress, nil); err != nil {
 		t.Fatalf("a3: %v", err)
 	}
-	if err := s.UpsertSessionTodoFromTask("pair-b", "b1", "MINI-1", "b/mini-1/only", model.TodoPending); err != nil {
+	if err := s.UpsertSessionTodoFromTask("pair-b", "b1", "MINI-1", "b/mini-1/only", model.TodoPending, nil); err != nil {
 		t.Fatalf("b1: %v", err)
 	}
 	// Ask for: (pair-a, MINI-2) and (pair-b, MINI-1). pair-a's MINI-1
@@ -313,6 +313,261 @@ func TestListTodosBySessionsAndIssue(t *testing.T) {
 	if len(got[b.ID]) != 1 || got[b.ID][0].Content != "b/mini-1/only" {
 		t.Fatalf("pair-b@MINI-1 = %+v, want one row b/mini-1/only", got[b.ID])
 	}
+}
+
+// TestUpsertSessionTodoFromTaskStampsDispatchID covers BACI-132's
+// per-dispatch scope on the insert path: a non-nil dispatchID is
+// stamped on the new row and round-trips through both the unfiltered
+// list and the triple-keyed bulk read.
+func TestUpsertSessionTodoFromTaskStampsDispatchID(t *testing.T) {
+	s, repo, issue := seedRepoAndIssue(t)
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "todos-dispatch", RepoID: repo.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	dispatchID := seedDispatch(t, s, repo.ID, &issue.ID, "")
+
+	if err := s.UpsertSessionTodoFromTask("todos-dispatch", "1", issue.Key, "stamped", model.TodoPending, &dispatchID); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	got, err := s.ListSessionTodos("todos-dispatch", "")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1", len(got))
+	}
+	if got[0].DispatchID == nil || *got[0].DispatchID != dispatchID {
+		t.Fatalf("DispatchID = %v, want %d", got[0].DispatchID, dispatchID)
+	}
+}
+
+// TestUpsertSessionTodoFromTaskUpdatePreservesDispatchID locks in
+// the BACI-132 rule that TaskUpdate keeps the row's original
+// dispatch_id, regardless of which dispatch the caller passes —
+// mirroring the BACI-62 issue_key behaviour.
+func TestUpsertSessionTodoFromTaskUpdatePreservesDispatchID(t *testing.T) {
+	s, repo, issue := seedRepoAndIssue(t)
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "todos-disp-update", RepoID: repo.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	dispatchA := seedDispatch(t, s, repo.ID, &issue.ID, "")
+	dispatchB := seedDispatch(t, s, repo.ID, &issue.ID, "")
+
+	if err := s.UpsertSessionTodoFromTask("todos-disp-update", "1", issue.Key, "row", model.TodoPending, &dispatchA); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	// Update with dispatchB — store must keep dispatchA.
+	if err := s.UpsertSessionTodoFromTask("todos-disp-update", "1", issue.Key, "", model.TodoCompleted, &dispatchB); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	got, err := s.ListSessionTodos("todos-disp-update", "")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(got) != 1 || got[0].DispatchID == nil || *got[0].DispatchID != dispatchA {
+		t.Fatalf("DispatchID after update = %v, want %d (must not re-stamp)", got[0].DispatchID, dispatchA)
+	}
+	if got[0].Status != model.TodoCompleted {
+		t.Fatalf("Status = %q, want completed", got[0].Status)
+	}
+}
+
+// TestUpsertSessionTodoFromTaskOrphanWhenNoDispatch covers the
+// "no dispatch resolvable at hook time" path: store accepts a nil
+// dispatchID paired with an empty issueKey (the orphan bucket) and
+// the row falls out of the wider triple-keyed bulk read while still
+// appearing in the unfiltered list.
+func TestUpsertSessionTodoFromTaskOrphanWhenNoDispatch(t *testing.T) {
+	s, repo, issue := seedRepoAndIssue(t)
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "todos-orphan-disp", RepoID: repo.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if err := s.UpsertSessionTodoFromTask("todos-orphan-disp", "1", "", "no dispatch", model.TodoPending, nil); err != nil {
+		t.Fatalf("orphan insert: %v", err)
+	}
+	dispatchID := seedDispatch(t, s, repo.ID, &issue.ID, "")
+	if err := s.UpsertSessionTodoFromTask("todos-orphan-disp", "2", issue.Key, "real", model.TodoPending, &dispatchID); err != nil {
+		t.Fatalf("attributed insert: %v", err)
+	}
+	unfiltered, err := s.ListSessionTodos("todos-orphan-disp", "")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(unfiltered) != 2 {
+		t.Fatalf("unfiltered len = %d, want 2", len(unfiltered))
+	}
+	// Triple filter with the real dispatch id excludes the orphan row.
+	got, err := s.ListTodosBySessionsAndIssue([]SessionIssuePair{{
+		SessionID: "todos-orphan-disp", IssueKey: issue.Key, DispatchID: &dispatchID,
+	}})
+	if err != nil {
+		t.Fatalf("triple bulk: %v", err)
+	}
+	totalRows := 0
+	for _, list := range got {
+		totalRows += len(list)
+	}
+	if totalRows != 1 {
+		t.Fatalf("triple-filtered total rows = %d, want 1", totalRows)
+	}
+}
+
+// TestUpsertSessionTodoFromTaskRejectsDispatchWithoutIssue is the
+// defensive belt: a non-nil dispatchID paired with an empty issueKey
+// is a hook-bug shape and the store rejects it loud. The hook never
+// produces this pairing in practice (it nullifies dispatchID when
+// dropping to the orphan bucket) — this lock keeps a future
+// refactor from quietly inserting bad rows.
+func TestUpsertSessionTodoFromTaskRejectsDispatchWithoutIssue(t *testing.T) {
+	s, repo, issue := seedRepoAndIssue(t)
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "todos-disp-no-issue", RepoID: repo.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	dispatchID := seedDispatch(t, s, repo.ID, &issue.ID, "")
+	err := s.UpsertSessionTodoFromTask("todos-disp-no-issue", "1", "", "bad", model.TodoPending, &dispatchID)
+	if err == nil || !strings.Contains(err.Error(), "dispatch_id requires issue_key") {
+		t.Fatalf("err = %v, want dispatch_id requires issue_key", err)
+	}
+}
+
+// TestListTodosBySessionsAndIssueFiltersByDispatchID covers the
+// BACI-132 triple-key bulk read: two dispatches on one (session,
+// issue), each with their own rows, return only the dispatch
+// asked for.
+func TestListTodosBySessionsAndIssueFiltersByDispatchID(t *testing.T) {
+	s, repo, issue := seedRepoAndIssue(t)
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "todos-two-disp", RepoID: repo.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	dispatchA := seedDispatch(t, s, repo.ID, &issue.ID, "")
+	dispatchB := seedDispatch(t, s, repo.ID, &issue.ID, "")
+
+	if err := s.UpsertSessionTodoFromTask("todos-two-disp", "a1", issue.Key, "a/first", model.TodoCompleted, &dispatchA); err != nil {
+		t.Fatalf("a1: %v", err)
+	}
+	if err := s.UpsertSessionTodoFromTask("todos-two-disp", "a2", issue.Key, "a/second", model.TodoCompleted, &dispatchA); err != nil {
+		t.Fatalf("a2: %v", err)
+	}
+	if err := s.UpsertSessionTodoFromTask("todos-two-disp", "b1", issue.Key, "b/first", model.TodoPending, &dispatchB); err != nil {
+		t.Fatalf("b1: %v", err)
+	}
+
+	gotA, err := s.ListTodosBySessionsAndIssue([]SessionIssuePair{{
+		SessionID: "todos-two-disp", IssueKey: issue.Key, DispatchID: &dispatchA,
+	}})
+	if err != nil {
+		t.Fatalf("triple bulk A: %v", err)
+	}
+	flatA := []model.SessionTodo(nil)
+	for _, list := range gotA {
+		flatA = append(flatA, list...)
+	}
+	if len(flatA) != 2 || flatA[0].Content != "a/first" || flatA[1].Content != "a/second" {
+		t.Fatalf("dispatch A = %+v, want two rows a/first, a/second", flatA)
+	}
+	gotB, err := s.ListTodosBySessionsAndIssue([]SessionIssuePair{{
+		SessionID: "todos-two-disp", IssueKey: issue.Key, DispatchID: &dispatchB,
+	}})
+	if err != nil {
+		t.Fatalf("triple bulk B: %v", err)
+	}
+	flatB := []model.SessionTodo(nil)
+	for _, list := range gotB {
+		flatB = append(flatB, list...)
+	}
+	if len(flatB) != 1 || flatB[0].Content != "b/first" {
+		t.Fatalf("dispatch B = %+v, want one row b/first", flatB)
+	}
+}
+
+// TestListTodosBySessionsAndIssueIgnoresPreMigrationNULLRows covers
+// the BACI-132 rule that a pre-migration row (dispatch_id IS NULL)
+// falls out of the triple-keyed filter even though it still matches
+// on (session, issue). The pair-keyed BACI-62 lookup (no dispatch
+// filter) still sees it — back-compat for callers that don't care.
+func TestListTodosBySessionsAndIssueIgnoresPreMigrationNULLRows(t *testing.T) {
+	s, repo, issue := seedRepoAndIssue(t)
+	sess, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "todos-legacy", RepoID: repo.ID, Actor: "agent-claude",
+	})
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	// Insert a legacy row directly — NULL dispatch_id.
+	if _, err := s.DB.Exec(
+		`INSERT INTO agent_session_todos (session_pk, position, content, status, task_id, issue_key, dispatch_id)
+			VALUES (?, 0, 'legacy', 'pending', 'legacy-1', ?, NULL)`,
+		sess.ID, issue.Key,
+	); err != nil {
+		t.Fatalf("seed legacy: %v", err)
+	}
+	dispatchID := seedDispatch(t, s, repo.ID, &issue.ID, "")
+	if err := s.UpsertSessionTodoFromTask("todos-legacy", "fresh-1", issue.Key, "fresh", model.TodoPending, &dispatchID); err != nil {
+		t.Fatalf("fresh insert: %v", err)
+	}
+
+	// Triple-keyed read excludes the legacy row.
+	got, err := s.ListTodosBySessionsAndIssue([]SessionIssuePair{{
+		SessionID: "todos-legacy", IssueKey: issue.Key, DispatchID: &dispatchID,
+	}})
+	if err != nil {
+		t.Fatalf("triple bulk: %v", err)
+	}
+	totalRows := 0
+	for _, list := range got {
+		totalRows += len(list)
+	}
+	if totalRows != 1 {
+		t.Fatalf("triple total rows = %d, want 1 (legacy NULL row excluded)", totalRows)
+	}
+
+	// Pair-keyed read (no dispatch filter) still sees both.
+	pair, err := s.ListTodosBySessionsAndIssue([]SessionIssuePair{{
+		SessionID: "todos-legacy", IssueKey: issue.Key,
+	}})
+	if err != nil {
+		t.Fatalf("pair bulk: %v", err)
+	}
+	pairRows := 0
+	for _, list := range pair {
+		pairRows += len(list)
+	}
+	if pairRows != 2 {
+		t.Fatalf("pair total rows = %d, want 2 (back-compat shape includes NULL)", pairRows)
+	}
+}
+
+// seedDispatch inserts one dispatch row targeting the given issue
+// (the test helper passes the seeded issue id directly to avoid the
+// (prefix, number) split GetIssueByKey wants) and returns the new
+// row's id. Defaults to mode="implement" when blank.
+func seedDispatch(t *testing.T, s *Store, repoID int64, issueID *int64, mode string) int64 {
+	t.Helper()
+	if mode == "" {
+		mode = "implement"
+	}
+	d, err := s.AddDispatch(AddDispatchIn{
+		RepoID:          repoID,
+		TargetSessionID: "todos-dispatch-target",
+		IssueID:         issueID,
+		Mode:            model.DispatchMode(mode),
+		Payload:         "stub",
+		CreatedBy:       "test-seeder",
+	})
+	if err != nil {
+		t.Fatalf("seedDispatch: %v", err)
+	}
+	return d.ID
 }
 
 // taskIDFor turns an integer counter into a Claude Code-style

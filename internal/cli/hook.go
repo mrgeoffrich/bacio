@@ -569,12 +569,71 @@ func hookPostToolUseCmd() *cobra.Command {
 			defer c.Close()
 
 			issueKey := resolveOpenClaimIssueKey(context.Background(), c, in.SessionID)
-			if err := c.UpsertSessionTodoFromTask(context.Background(), in.SessionID, taskID, issueKey, content, status); err != nil {
+			// BACI-132: resolve the active dispatch for the (session,
+			// issue) at TaskCreate time so the row carries the dispatch
+			// scope. Only matters for inserts — TaskUpdate keeps the
+			// row's original dispatch_id, so spending the lookup on the
+			// update path is wasted work. A non-nil dispatchID paired
+			// with an empty issueKey is rejected at the store boundary
+			// (defence-in-depth); if the dispatch can't be resolved we
+			// drop the row to the orphan bucket (empty issueKey, nil
+			// dispatchID) the same way the zero/many-claims path
+			// already does.
+			var dispatchID *int64
+			if issueKey != "" && in.ToolName == "TaskCreate" {
+				dispatchID = resolveActiveDispatchID(context.Background(), c, in.SessionID, issueKey)
+				if dispatchID == nil {
+					issueKey = ""
+				}
+			}
+			if err := c.UpsertSessionTodoFromTask(context.Background(), in.SessionID, taskID, issueKey, content, status, dispatchID); err != nil {
 				fmt.Fprintln(os.Stderr, "bacio hook post-tool-use: upsert:", err)
 			}
 			return nil
 		},
 	}
+}
+
+// resolveActiveDispatchID returns the id of the most-recent
+// non-cancelled dispatch targeting (session, issue) — the BACI-132
+// per-dispatch scope for a freshly-inserted SessionTodo row. Mirrors
+// boardcards.pickActiveDispatch (newest non-cancelled match on the
+// (session, issue) pair, agent-identity-fallback for targeting) but
+// returns just the id since that's all the store layer needs.
+// Best-effort: any lookup error returns nil so the caller drops the
+// row to the orphan bucket instead of failing the hook.
+func resolveActiveDispatchID(ctx context.Context, c client.Client, sessionID, issueKey string) *int64 {
+	if sessionID == "" || issueKey == "" {
+		return nil
+	}
+	dispatches, err := c.SessionDispatches(ctx, sessionID)
+	if err != nil {
+		return nil
+	}
+	// SessionDispatches returns newest-first already, but be explicit
+	// rather than relying on the contract — pick the latest by
+	// CreatedAt, skipping cancelled rows and anything not targeting
+	// this issue. A multi-issue session that's stamped TaskCreates
+	// against the old issue while a new dispatch is in flight on
+	// another issue still gets the right dispatch picked, since we
+	// filter on IssueKey first.
+	var best *model.AgentDispatch
+	for _, d := range dispatches {
+		if d == nil || d.IssueKey != issueKey {
+			continue
+		}
+		if d.Status == model.DispatchCancelled {
+			continue
+		}
+		if best == nil || d.CreatedAt.After(best.CreatedAt) {
+			best = d
+		}
+	}
+	if best == nil {
+		return nil
+	}
+	id := best.ID
+	return &id
 }
 
 // resolveOpenClaimIssueKey returns the issue key the post-tool-use

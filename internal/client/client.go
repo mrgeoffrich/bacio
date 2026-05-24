@@ -244,10 +244,15 @@ type Client interface {
 	// issueKey stamps the inserted row's per-issue scope (BACI-62) so
 	// the Agents view filters per-(session, issue); pass "" for orphan
 	// rows the hook couldn't attribute to a single open claim. On the
-	// update path the parameter is ignored — the row keeps the issue
-	// key it was created with. Local-only — the agent registry has no
-	// HTTP write surface in v1.
-	UpsertSessionTodoFromTask(ctx context.Context, sessionID, taskID, issueKey, content string, status model.TodoStatus) error
+	// update path the issueKey parameter is ignored — the row keeps the
+	// issue key it was created with. dispatchID (BACI-132) stamps the
+	// row's per-dispatch scope so two dispatches on the same issue get
+	// separate task lists; pass nil for orphan rows (paired with an
+	// empty issueKey) or when called from non-dispatched contexts. On
+	// the update path dispatchID is ignored — the row keeps the
+	// dispatch id it was created with. Local-only — the agent registry
+	// has no HTTP write surface in v1.
+	UpsertSessionTodoFromTask(ctx context.Context, sessionID, taskID, issueKey, content string, status model.TodoStatus, dispatchID *int64) error
 	// ListSessionTodos returns the latest snapshot for one session,
 	// position-ordered. issueKey == "" returns every row regardless of
 	// issue scope (the back-compat path the REST `?issue_key=` unset
@@ -383,6 +388,13 @@ type Client interface {
 	// first, regardless of status — the read surface the desktop Agents
 	// screen needs. Local-only in v1.
 	RepoDispatches(ctx context.Context, repo *model.Repo) ([]*model.AgentDispatch, error)
+	// SessionDispatches returns every dispatch targeting one session,
+	// newest first, regardless of status — used by the post-tool-use
+	// hook to resolve the active dispatch id for a (session, issue) at
+	// TaskCreate time (BACI-132). Matches both the bare session id and
+	// the agent identity behind it (mirrors targetsSession in
+	// internal/boardcards). Local-only.
+	SessionDispatches(ctx context.Context, sessionID string) ([]*model.AgentDispatch, error)
 	// EnsureSetupDispatch idempotently queues a dispatch telling the
 	// agent to call the bacio channel's `register` tool — the path that
 	// completes a SessionStart stub into a fully-registered session.

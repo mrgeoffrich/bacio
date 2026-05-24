@@ -498,6 +498,14 @@ CREATE INDEX IF NOT EXISTS idx_agent_channels_repo ON agent_channels(repo_id);
 -- rows keep '' and fall into the orphan bucket, which the new
 -- lookups deliberately skip.
 --
+-- dispatch_id (BACI-132) widens the scope key from (session, issue) to
+-- (session, issue, dispatch) so two dispatches on the same issue
+-- (e.g. plan → implement on BACI-X) get separate task lists on the
+-- kanban Tasks pill and the Agents view. NULL means "orphan" (no
+-- dispatch resolvable at hook time) or "legacy" (pre-BACI-132 row).
+-- Card surfaces filter on a real dispatch id so orphan + legacy rows
+-- fall out of those views; the unfiltered list reads still see them.
+--
 -- session_pk (the int FK) rather than session_id (the external string)
 -- matches the rest of the agent_* tables. position is part of the PK
 -- so the legacy whole-snapshot semantics still hold; the Task* path
@@ -510,6 +518,7 @@ CREATE TABLE IF NOT EXISTS agent_session_todos (
     status      TEXT    NOT NULL CHECK (status IN ('pending','in_progress','completed')),
     task_id     TEXT    NOT NULL DEFAULT '',
     issue_key   TEXT    NOT NULL DEFAULT '',
+    dispatch_id INTEGER REFERENCES agent_dispatches(id),
     updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (session_pk, position)
 );
@@ -520,7 +529,10 @@ CREATE INDEX IF NOT EXISTS idx_agent_session_todos_session
 -- issue) lookups lives in internal/store/store.go::migrate, not here.
 -- schema.sql runs before migrate(), so a DB upgrading from the pre-
 -- BACI-62 table doesn't have the issue_key column yet; the migration
--- adds the column and the index together.
+-- adds the column and the index together. The
+-- idx_agent_session_todos_session_issue_dispatch index (BACI-132) lives
+-- in migrate() for the same reason — the dispatch_id column is added
+-- there for upgrading DBs.
 
 -- agent_session_questions backs the BACI-53 ask_user_question MCP tool:
 -- a clarification an agent asked the user via the bacio channel,

@@ -10,13 +10,20 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/model"
 )
 
-// SessionIssuePair targets one (session, issue) bucket in
+// SessionIssuePair targets one (session, issue[, dispatch]) bucket in
 // ListTodosBySessionsAndIssue. issueKey "" matches orphan rows the
 // hook couldn't attribute to a single open claim — kept addressable
-// so an explicit lookup still works.
+// so an explicit lookup still works. DispatchID (BACI-132) narrows
+// the scope further: when non-nil the lookup filters on the triple
+// (session, issue, dispatch), so two dispatches on the same issue
+// (e.g. plan → implement) get separate task lists on the kanban
+// Tasks pill and the Agents view. Nil means "any dispatch for this
+// (session, issue)" — used by back-compat callers that don't want
+// to filter by dispatch.
 type SessionIssuePair struct {
-	SessionID string
-	IssueKey  string
+	SessionID  string
+	IssueKey   string
+	DispatchID *int64
 }
 
 // UpsertSessionTodoFromTask records (or updates) one row from a Claude
@@ -37,11 +44,21 @@ type SessionIssuePair struct {
 // issue_key stays put so a TaskUpdate fired after the agent flipped
 // claims still lands with the job that created it.
 //
+// dispatchID stamps the new row's dispatch scope on insert (BACI-132)
+// — resolved by the caller from the (session, issue)'s newest
+// non-cancelled dispatch at hook time; nil is allowed (orphan bucket
+// or pre-BACI-132 row) but only paired with issueKey="" — a non-nil
+// dispatchID with an empty issueKey is rejected at the boundary as a
+// defensive belt over the hook's resolution path. On the update path
+// dispatchID is ignored — the row's existing dispatch_id stays put
+// so a TaskUpdate fired after the agent flipped dispatches still
+// lands with the dispatch that created it.
+//
 // The session-level MaxSessionTodos cap is enforced on insert only —
 // updates to existing rows never push the count up. Hitting the cap
 // returns an error so the hook log-and-drops without writing a
 // confusing partial mirror.
-func (s *Store) UpsertSessionTodoFromTask(sessionID, taskID, issueKey, content string, status model.TodoStatus) error {
+func (s *Store) UpsertSessionTodoFromTask(sessionID, taskID, issueKey, content string, status model.TodoStatus, dispatchID *int64) error {
 	if _, err := ValidateSessionID(sessionID); err != nil {
 		return err
 	}
@@ -52,6 +69,9 @@ func (s *Store) UpsertSessionTodoFromTask(sessionID, taskID, issueKey, content s
 		if _, err := validateSingleLine(issueKey, "issue_key", maxNameLen, true); err != nil {
 			return err
 		}
+	}
+	if dispatchID != nil && issueKey == "" {
+		return fmt.Errorf("dispatch_id requires issue_key")
 	}
 	switch status {
 	case model.TodoPending, model.TodoInProgress, model.TodoCompleted:
@@ -92,9 +112,10 @@ func (s *Store) UpsertSessionTodoFromTask(sessionID, taskID, issueKey, content s
 
 	if existingPos.Valid {
 		// Update path. content="" means "leave the existing subject".
-		// issue_key is left alone deliberately — the row belongs to the
-		// job that created it, even if the agent has since flipped to a
-		// new claim.
+		// issue_key and dispatch_id are left alone deliberately — the
+		// row belongs to the job (and the dispatch) that created it,
+		// even if the agent has since flipped to a new claim or a new
+		// dispatch has taken over.
 		if content == "" {
 			if _, err := tx.Exec(
 				`UPDATE agent_session_todos SET status = ?, updated_at = CURRENT_TIMESTAMP
@@ -140,10 +161,14 @@ func (s *Store) UpsertSessionTodoFromTask(sessionID, taskID, issueKey, content s
 	if maxPos.Valid {
 		nextPos = maxPos.Int64 + 1
 	}
+	var dispatchArg any
+	if dispatchID != nil {
+		dispatchArg = *dispatchID
+	}
 	if _, err := tx.Exec(
-		`INSERT INTO agent_session_todos (session_pk, position, content, status, task_id, issue_key)
-			VALUES (?, ?, ?, ?, ?, ?)`,
-		sessPK, nextPos, content, string(status), taskID, issueKey,
+		`INSERT INTO agent_session_todos (session_pk, position, content, status, task_id, issue_key, dispatch_id)
+			VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		sessPK, nextPos, content, string(status), taskID, issueKey, dispatchArg,
 	); err != nil {
 		return err
 	}
@@ -161,7 +186,7 @@ func (s *Store) ListSessionTodos(sessionID, issueKey string) ([]model.SessionTod
 	if _, err := ValidateSessionID(sessionID); err != nil {
 		return nil, err
 	}
-	q := `SELECT t.position, t.content, t.status, t.task_id, t.issue_key, t.updated_at
+	q := `SELECT t.position, t.content, t.status, t.task_id, t.issue_key, t.dispatch_id, t.updated_at
 		FROM agent_session_todos t
 		JOIN agent_sessions s ON s.id = t.session_pk
 		WHERE s.session_id = ?`
@@ -191,23 +216,46 @@ func (s *Store) ListSessionTodos(sessionID, issueKey string) ([]model.SessionTod
 }
 
 // ListTodosBySessionsAndIssue returns a session_pk → []SessionTodo
-// map keyed off the (session, issue) pairs the caller asked for.
-// Mirrors ListTodosBySessions' single-query shape so the desktop /
-// TUI / web Agents view can hydrate every visible card in one trip;
-// the per-(session, issue) scope means a session that has worked
-// multiple issues only flows the current job's rows to each card.
+// map keyed off the (session, issue[, dispatch]) pairs the caller
+// asked for. Mirrors ListTodosBySessions' single-query shape so the
+// desktop / TUI / web Agents view can hydrate every visible card in
+// one trip; the per-(session, issue) scope (BACI-62) means a session
+// that has worked multiple issues only flows the current job's rows
+// to each card, and the per-dispatch scope (BACI-132, when a pair
+// carries a non-nil DispatchID) narrows that further so two
+// dispatches on the same issue get separate task lists.
+//
+// When a pair's DispatchID is non-nil the row must match on
+// (session, issue, dispatch_id) — pre-BACI-132 NULL rows fall out of
+// the filter. When DispatchID is nil the lookup matches every row
+// for that (session, issue) regardless of dispatch (back-compat
+// shape for callers that don't filter by dispatch). The query
+// COALESCEs t.dispatch_id to 0 on the row side and binds 0 for the
+// nil-dispatch case, so a "nil pair from a card surface" mistake
+// matches nothing (card surfaces pass real, non-zero dispatch ids).
+//
 // An empty input is a no-op (empty map, no SQL).
 func (s *Store) ListTodosBySessionsAndIssue(pairs []SessionIssuePair) (map[int64][]model.SessionTodo, error) {
 	out := make(map[int64][]model.SessionTodo)
 	if len(pairs) == 0 {
 		return out, nil
 	}
-	// Build a `(s.session_id, t.issue_key) IN ((?, ?), ...)` row-value
-	// IN — SQLite supports it natively. Per-pair validation happens up
-	// front so a bad input fails the call rather than returning a
-	// partial result.
+	// Decide query shape up front. If any pair carries a non-nil
+	// DispatchID we widen the row-value IN to a triple
+	// (session, issue, COALESCE(dispatch_id, 0)) and bind 0 for nil
+	// dispatch ids — that's a sentinel that can't match a real row
+	// (auto-increment dispatch ids start at 1). When no pair filters
+	// by dispatch we keep the original two-tuple IN so legacy NULL
+	// rows continue to match a per-(session, issue) lookup.
+	anyDispatchFilter := false
+	for _, p := range pairs {
+		if p.DispatchID != nil {
+			anyDispatchFilter = true
+			break
+		}
+	}
 	clauses := make([]string, 0, len(pairs))
-	args := make([]any, 0, len(pairs)*2)
+	args := make([]any, 0, len(pairs)*3)
 	for _, p := range pairs {
 		if _, err := ValidateSessionID(p.SessionID); err != nil {
 			return nil, err
@@ -217,14 +265,32 @@ func (s *Store) ListTodosBySessionsAndIssue(pairs []SessionIssuePair) (map[int64
 				return nil, err
 			}
 		}
-		clauses = append(clauses, "(?, ?)")
-		args = append(args, p.SessionID, p.IssueKey)
+		if anyDispatchFilter {
+			clauses = append(clauses, "(?, ?, ?)")
+			var dispatchArg int64
+			if p.DispatchID != nil {
+				dispatchArg = *p.DispatchID
+			}
+			args = append(args, p.SessionID, p.IssueKey, dispatchArg)
+		} else {
+			clauses = append(clauses, "(?, ?)")
+			args = append(args, p.SessionID, p.IssueKey)
+		}
 	}
-	q := `SELECT t.session_pk, t.position, t.content, t.status, t.task_id, t.issue_key, t.updated_at
-		FROM agent_session_todos t
-		JOIN agent_sessions s ON s.id = t.session_pk
-		WHERE (s.session_id, t.issue_key) IN (VALUES ` + strings.Join(clauses, ", ") + `)
-		ORDER BY t.session_pk ASC, t.position ASC`
+	var q string
+	if anyDispatchFilter {
+		q = `SELECT t.session_pk, t.position, t.content, t.status, t.task_id, t.issue_key, t.dispatch_id, t.updated_at
+			FROM agent_session_todos t
+			JOIN agent_sessions s ON s.id = t.session_pk
+			WHERE (s.session_id, t.issue_key, COALESCE(t.dispatch_id, 0)) IN (VALUES ` + strings.Join(clauses, ", ") + `)
+			ORDER BY t.session_pk ASC, t.position ASC`
+	} else {
+		q = `SELECT t.session_pk, t.position, t.content, t.status, t.task_id, t.issue_key, t.dispatch_id, t.updated_at
+			FROM agent_session_todos t
+			JOIN agent_sessions s ON s.id = t.session_pk
+			WHERE (s.session_id, t.issue_key) IN (VALUES ` + strings.Join(clauses, ", ") + `)
+			ORDER BY t.session_pk ASC, t.position ASC`
+	}
 	rows, err := s.DB.Query(q, args...)
 	if err != nil {
 		return nil, err
@@ -234,10 +300,15 @@ func (s *Store) ListTodosBySessionsAndIssue(pairs []SessionIssuePair) (map[int64
 		var pk int64
 		var t model.SessionTodo
 		var st string
-		if err := rows.Scan(&pk, &t.Position, &t.Content, &st, &t.TaskID, &t.IssueKey, &t.UpdatedAt); err != nil {
+		var dispatchNullable sql.NullInt64
+		if err := rows.Scan(&pk, &t.Position, &t.Content, &st, &t.TaskID, &t.IssueKey, &dispatchNullable, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		t.Status = model.TodoStatus(st)
+		if dispatchNullable.Valid {
+			id := dispatchNullable.Int64
+			t.DispatchID = &id
+		}
 		out[pk] = append(out[pk], t)
 	}
 	return out, rows.Err()
@@ -258,7 +329,7 @@ func (s *Store) ListTodosBySessions(sessionIDs []string) (map[int64][]model.Sess
 	// Build a `IN (?, ?, ...)` placeholder list. sqlite has a high enough
 	// host-parameter ceiling that the realistic per-repo session count
 	// (tens) sails through.
-	q := `SELECT t.session_pk, t.position, t.content, t.status, t.task_id, t.issue_key, t.updated_at
+	q := `SELECT t.session_pk, t.position, t.content, t.status, t.task_id, t.issue_key, t.dispatch_id, t.updated_at
 		FROM agent_session_todos t
 		JOIN agent_sessions s ON s.id = t.session_pk
 		WHERE s.session_id IN (` + placeholders(len(sessionIDs)) + `)
@@ -276,10 +347,15 @@ func (s *Store) ListTodosBySessions(sessionIDs []string) (map[int64][]model.Sess
 		var pk int64
 		var t model.SessionTodo
 		var st string
-		if err := rows.Scan(&pk, &t.Position, &t.Content, &st, &t.TaskID, &t.IssueKey, &t.UpdatedAt); err != nil {
+		var dispatchNullable sql.NullInt64
+		if err := rows.Scan(&pk, &t.Position, &t.Content, &st, &t.TaskID, &t.IssueKey, &dispatchNullable, &t.UpdatedAt); err != nil {
 			return nil, err
 		}
 		t.Status = model.TodoStatus(st)
+		if dispatchNullable.Valid {
+			id := dispatchNullable.Int64
+			t.DispatchID = &id
+		}
 		out[pk] = append(out[pk], t)
 	}
 	return out, rows.Err()
@@ -288,10 +364,15 @@ func (s *Store) ListTodosBySessions(sessionIDs []string) (map[int64][]model.Sess
 func scanSessionTodo(r rowScanner) (model.SessionTodo, error) {
 	var t model.SessionTodo
 	var st string
-	if err := r.Scan(&t.Position, &t.Content, &st, &t.TaskID, &t.IssueKey, &t.UpdatedAt); err != nil {
+	var dispatchNullable sql.NullInt64
+	if err := r.Scan(&t.Position, &t.Content, &st, &t.TaskID, &t.IssueKey, &dispatchNullable, &t.UpdatedAt); err != nil {
 		return t, err
 	}
 	t.Status = model.TodoStatus(st)
+	if dispatchNullable.Valid {
+		id := dispatchNullable.Int64
+		t.DispatchID = &id
+	}
 	return t, nil
 }
 

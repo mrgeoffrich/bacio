@@ -240,6 +240,15 @@ export interface SessionTodoDTO {
   // before BACI-62 or when the hook couldn't attribute a single
   // open claim. Optional on the wire (omitempty server-side).
   issueKey?: string;
+  // BACI-132: per-dispatch scope so two dispatches on the same
+  // (session, issue) get separate task lists. Absent on pre-BACI-132
+  // rows and on orphan rows the hook couldn't attribute to an
+  // in-flight dispatch. Optional on the wire (omitempty server-side).
+  // The JSON tag is `dispatch_id` (snake_case) to match the
+  // model.SessionTodo wire shape exposed by the unfiltered
+  // /agents/sessions/{id}/todos endpoint — the AgentCard DTO uses
+  // the same key for symmetry.
+  dispatch_id?: number;
 }
 
 // QuestionDTO is one open BACI-53 ask_user_question row — the

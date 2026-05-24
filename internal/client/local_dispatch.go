@@ -353,6 +353,29 @@ func (c *localClient) RepoDispatches(ctx context.Context, repo *model.Repo) ([]*
 	return c.store.ListDispatches(store.DispatchFilter{RepoID: &repo.ID})
 }
 
+// SessionDispatches returns every dispatch targeting one session,
+// newest first, regardless of status. Mirrors the targetsSession
+// predicate used by the card surfaces — matches both the bare
+// session id and the agent identity behind it. Empty agent id is
+// fine (a registered session may not yet have an agent identity
+// resolved); in that case only the session-id half of the filter
+// applies. An unknown session returns the typed ErrNotFound from
+// the underlying GetAgentSession so the caller can distinguish a
+// missing session from "no dispatches".
+func (c *localClient) SessionDispatches(ctx context.Context, sessionID string) ([]*model.AgentDispatch, error) {
+	if sessionID == "" {
+		return nil, fmt.Errorf("SessionDispatches requires a session_id")
+	}
+	sess, err := c.store.GetAgentSession(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	return c.store.ListDispatches(store.DispatchFilter{
+		TargetAgentID:   sess.AgentID,
+		TargetSessionID: sess.SessionID,
+	})
+}
+
 func (c *localClient) DrainAgentDispatches(ctx context.Context, repo *model.Repo, agentName string) ([]*model.AgentDispatch, error) {
 	// An unscoped channel (no repo / no agents.json identity yet) has
 	// nothing to drain — that's not an error, the channel just idles.
