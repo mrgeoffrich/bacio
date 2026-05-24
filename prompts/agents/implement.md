@@ -32,6 +32,8 @@ Read the implementation plan in the brief and execute it top to bottom. `CLAUDE.
 
 ## Smoke test
 
+If your smoke test would create real bacio entities — issues, features, dispatches, comments — re-run `bacio worktree init --isolate-db` first. The isolated DB is thrown away when the worktree is dropped, so no cleanup is needed and no real issue numbers get burned. The shared `~/.bacio/db.sqlite` is for real work, not smoke fixtures; the PreToolUse hook (BACI-134) denies raw `sqlite3` cleanup against it anyway.
+
 Run `./build.sh` (with `--skip-web` / `--skip-desktop` as appropriate) and exercise the change.
 
 For UI changes, the cheapest agent-driven path is `bacio web --no-open` + the `playwright-cli` skill. Capture the PID and stop ONLY that process:

@@ -28,6 +28,10 @@ Do not create new bacio issues, features, or external tickets (e.g. via `bacio i
 
 The ask-first rule also applies to *modifying* unrelated tickets (re-tagging, re-prioritising, closing). You may freely update the ticket you were dispatched to work on.
 
+### Never bypass the store boundary
+
+Every bacio mutation must go through a `bacio` CLI verb so the audit log records it. Do not `sqlite3 ~/.bacio/db.sqlite ...` to work around a refused verb — the PreToolUse hook (BACI-134) denies it anyway, and even a `SELECT` against the live store is denied because raw SQL on the shared DB is not a path a dispatched worker should reach for. If the legitimate verb refuses you (e.g. `bacio issue rm` is gated on holding a claim on that issue), ask the user via `mcp__bacio__ask_user_question` rather than reaching for raw SQL. For throwaway state, re-run `bacio worktree init --isolate-db` so the worker's DB is its own isolated file that nobody else depends on.
+
 1
 
 ---
@@ -91,6 +95,8 @@ Your **first** `TaskCreate` task MUST be an explicit "Establish working director
 ## Fix the review
 
 Pull down all the details for `<issue_id>` — the comments will include a review. Fix every medium, high, and critical issue it raises, on the PR branch. When the fixes are done, run smoke tests to confirm the changes work.
+
+If your smoke test would create real bacio entities — issues, features, dispatches, comments — re-run `bacio worktree init --isolate-db` first. The isolated DB is thrown away when the worktree is dropped, so no cleanup is needed and no real issue numbers get burned. The shared `~/.bacio/db.sqlite` is for real work, not smoke fixtures; the PreToolUse hook (BACI-134) denies raw `sqlite3` cleanup against it anyway.
 
 If you have to stop for user input, the issue is automatically moved to **needs action**; once the user answers, put it back to **in progress** and continue.
 

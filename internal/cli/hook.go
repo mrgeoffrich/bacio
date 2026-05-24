@@ -19,6 +19,7 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
 	"github.com/mrgeoffrich/bacio/internal/sync"
+	"github.com/mrgeoffrich/bacio/internal/wtenv"
 )
 
 // skipUnlessAgentMode is the single guard every hook subcommand calls at
@@ -706,16 +707,18 @@ func extractTaskFields(in *postToolUseInput) (taskID, content, status string, ok
 // ---------- pre-tool-use ----------
 
 // preToolUseInput is the slice of the Claude Code PreToolUse payload
-// the worktree-confinement guard cares about. The matcher is exactly
-// `Write|Edit`, both of which carry a `file_path` in tool_input; the
-// decoder ignores unknown fields, so this is a strict subset and needs
-// no knowledge of any other tool's input shape.
+// the worktree-confinement guard and the BACI-134 sqlite3 confinement
+// guard care about. The matcher is `Write|Edit|Bash`: the Write/Edit
+// branch reads `file_path`, the Bash branch reads `command`. The decoder
+// ignores unknown fields, so this is a strict subset and needs no
+// knowledge of any other tool's input shape.
 type preToolUseInput struct {
 	SessionID string `json:"session_id"`
 	CWD       string `json:"cwd"`
 	ToolName  string `json:"tool_name"`
 	ToolInput struct {
 		FilePath string `json:"file_path"` // Write / Edit
+		Command  string `json:"command"`   // Bash (BACI-134)
 	} `json:"tool_input"`
 }
 
@@ -737,15 +740,27 @@ func readPreToolUseInput() (*preToolUseInput, error) {
 // preToolUseMatcher is the regex installed in .claude/settings.json's
 // PreToolUse matcher field — pipe-alternation per Claude Code's matcher
 // syntax. Keeping the literal here so the install-agent plan and the
-// hook code can't drift (same convention as postToolUseMatcher). Bash
-// is deliberately NOT in the matcher: tool_input.command is a raw
-// string and parsing it for paths is fragile and easy to bypass.
-// Confining the write tools defuses the Bash escape for free — with the
-// parent checkout kept clean by the write-tool denial, a stray
-// `cd <main> && git commit` has nothing to commit. BACI-129 extended
-// the same matcher's enforcement to cover the supervisor's own cwd in
-// the main checkout — same matcher, broader precondition.
-const preToolUseMatcher = "Write|Edit"
+// hook code can't drift (same convention as postToolUseMatcher).
+//
+// The matcher covers two distinct guards that share the same hook entry:
+//
+//   - Write|Edit — the BACI-116 / BACI-129 worktree confinement guard.
+//     Denies edits that resolve outside a linked-worktree root, and any
+//     edit at all when cwd is the primary checkout. The original BACI-116
+//     reasoning to exclude Bash held: parsing tool_input.command for
+//     paths in general is fragile, and confining Write/Edit defuses the
+//     Bash escape — with the parent checkout kept clean by the write
+//     denial, a stray `cd <main> && git commit` has nothing to commit.
+//
+//   - Bash — the BACI-134 sqlite3 confinement guard. Different escape
+//     class: `sqlite3 ~/.bacio/db.sqlite "DELETE ..."` mutates the live
+//     store directly, bypassing every internal/store/* path that writes
+//     the audit-log `history` row. The Write/Edit confinement above
+//     doesn't catch it because no file_path is involved. Denies only the
+//     specific shape `sqlite3 <path>` where `<path>` resolves to the
+//     default `~/.bacio/db.sqlite`; everything else (including a
+//     worktree-isolated `.bacio/db.sqlite`) fails open.
+const preToolUseMatcher = "Write|Edit|Bash"
 
 // preToolUseDecision is the verdict the confinement guard reaches for
 // one tool call. allow=true emits nothing (the call proceeds); allow=
@@ -919,6 +934,165 @@ func decidePreToolUse(in *preToolUseInput, resolveRoot worktreeRootResolver) pre
 	}
 }
 
+// liveDBResolver returns the absolute, symlink-resolved path of the
+// "live" bacio SQLite store — the default shared DB under the user's
+// home (~/.bacio/db.sqlite). Returns "" when the path cannot be
+// resolved, which collapses to fail-open inside decideBashSqlite3.
+//
+// Deliberately narrow: this is *not* the per-worktree wtenv resolver.
+// A worktree-isolated DB (BACI-87) sits at <worktree>/.bacio/db.sqlite
+// and is therefore a different absolute path — it never matches this
+// resolver, so the BACI-134 guard naturally allows sqlite3 calls against
+// it without consulting the wtenv layer.
+type liveDBResolver func() string
+
+func defaultLiveDBResolver() string {
+	p, err := wtenv.DefaultDBPath("")
+	if err != nil {
+		return ""
+	}
+	return evalSymlinksLenient(p)
+}
+
+// decideBashSqlite3 is the pure decision function for the BACI-134
+// sqlite3 confinement guard — no stdin, no stdout, directly
+// unit-testable. The matcher (`Write|Edit|Bash`) hands every Bash call
+// to this function; it denies only the specific shape
+// `sqlite3 <path> [...]` where `<path>` resolves to the live shared DB.
+//
+// Path-based, not verb-based: the goal is to keep every mutation
+// audit-logged via the store boundary. Even a `SELECT 1` against the
+// live DB is denied — a dispatched worker has no business reading the
+// shared store with raw SQL (the `bacio` read verbs and `bacio history`
+// cover legitimate diagnostics). A worktree-isolated DB
+// (`<worktree>/.bacio/db.sqlite`) is a different absolute path and is
+// therefore allowed by virtue of not matching.
+//
+// Fail-open invariant: every ambiguous case (shell substitution,
+// pipes, env-var-referenced paths, the basename not being a literal
+// `sqlite3`, no candidate path token, an unreadable resolver) allows
+// the call and logs nothing. A deny is emitted only on a positive
+// "this command targets the live DB" determination, and the deny
+// reason names the live DB path so the model self-corrects.
+func decideBashSqlite3(in *preToolUseInput, resolveLiveDB liveDBResolver) preToolUseDecision {
+	allow := preToolUseDecision{allow: true}
+
+	if in.ToolName != "Bash" {
+		return allow
+	}
+	cmd := strings.TrimSpace(in.ToolInput.Command)
+	if cmd == "" {
+		return allow
+	}
+
+	// Fail-open on any shell construct that would let the actual sqlite3
+	// invocation hide from a plain strings.Fields tokenisation: pipes,
+	// command substitution, backticks, sub-shells. The guard's job is to
+	// make the obvious bypass loud, not to be a general bash sandbox.
+	if strings.ContainsAny(cmd, "|`") || strings.Contains(cmd, "$(") {
+		return allow
+	}
+
+	tokens := strings.Fields(cmd)
+	idx := -1
+	for i, tok := range tokens {
+		// Strip leading quotes the same way the path candidate below
+		// does, so `"sqlite3"` is recognised but `bash` (with sqlite3
+		// only inside a -c string) is not.
+		stripped := strings.Trim(tok, `"'`)
+		if filepath.Base(stripped) == "sqlite3" {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		return allow
+	}
+
+	// Walk tokens after the sqlite3 binary: skip flags (anything starting
+	// with `-`), pick the first plain token as the DB path argument.
+	var candidate string
+	for _, tok := range tokens[idx+1:] {
+		if strings.HasPrefix(tok, "-") {
+			continue
+		}
+		candidate = tok
+		break
+	}
+	if candidate == "" {
+		return allow
+	}
+
+	// Strip a single layer of surrounding quotes so
+	// `"~/.bacio/db.sqlite"` and `'~/.bacio/db.sqlite'` resolve the same
+	// as a bare path. Anything fancier (escaped quotes inside, multi-word
+	// expansion) is left as-is and naturally drops below to fail-open via
+	// the env-var / glob check.
+	candidate = strings.Trim(candidate, `"'`)
+
+	// Fail-open on shell-evaluated path tokens: env vars, command
+	// substitution, globs, parameter expansion. We can't statically
+	// resolve them at hook time, and a worker that genuinely wants to
+	// bypass via `$BACIO_DB` is a different (harder) problem the guard
+	// deliberately doesn't try to solve.
+	if strings.ContainsAny(candidate, "$*?(){}") {
+		return allow
+	}
+
+	// Expand a leading `~/` against the user's home so
+	// `sqlite3 ~/.bacio/db.sqlite "..."` resolves to the same absolute
+	// path as `sqlite3 /Users/<u>/.bacio/db.sqlite "..."`. Anything else
+	// (`~user/...`) falls through to fail-open.
+	if strings.HasPrefix(candidate, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return allow
+		}
+		candidate = filepath.Join(home, candidate[2:])
+	} else if candidate == "~" {
+		return allow
+	}
+
+	// Resolve relative paths against cwd (the worker's worktree). A
+	// `sqlite3 .bacio/db.sqlite` from inside a worktree resolves to that
+	// worktree's isolated DB and is therefore *not* the live DB.
+	if !filepath.IsAbs(candidate) {
+		base := in.CWD
+		if base == "" {
+			if wd, err := os.Getwd(); err == nil {
+				base = wd
+			}
+		}
+		if base == "" {
+			return allow
+		}
+		candidate = filepath.Join(base, candidate)
+	}
+
+	liveDB := resolveLiveDB()
+	if liveDB == "" {
+		return allow
+	}
+	resolved := evalSymlinksLenient(candidate)
+
+	if resolved != liveDB {
+		return allow
+	}
+
+	return preToolUseDecision{
+		allow: false,
+		reason: fmt.Sprintf(
+			"bacio: this agent-mode session must not invoke sqlite3 against the live shared "+
+				"bacio store %s. Every mutation must go through a `bacio` CLI verb so the audit "+
+				"log records it. For read-only diagnostics use the `bacio` read verbs (e.g. "+
+				"`bacio issue show`, `bacio history`); for throwaway state, re-run "+
+				"`bacio worktree init --isolate-db` so the worker's DB is its own isolated "+
+				"file. If the legitimate verb refuses you, ask the user via "+
+				"`mcp__bacio__ask_user_question` rather than reaching for raw SQL.",
+			liveDB),
+	}
+}
+
 // emitPreToolUseDeny writes the PreToolUse deny decision JSON to stdout.
 // Claude Code reads this on a hook exit 0 and blocks the tool call,
 // surfacing permissionDecisionReason to the model so it self-corrects.
@@ -939,7 +1113,7 @@ func emitPreToolUseDeny(reason string) {
 func hookPreToolUseCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:    "pre-tool-use",
-		Short:  "PreToolUse hook (matcher: Write|Edit): confine a dispatched worker to its git worktree",
+		Short:  "PreToolUse hook (matcher: Write|Edit|Bash): confine writes to a linked worktree and block raw sqlite3 against the live store",
 		Args:   cobra.NoArgs,
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -955,11 +1129,19 @@ func hookPreToolUseCmd() *cobra.Command {
 				fmt.Fprintln(os.Stderr, "bacio hook pre-tool-use:", err)
 				return nil
 			}
-			d := decidePreToolUse(in, gitLinkedWorktreeRoot)
-			if d.allow {
+			// Two sibling deciders share the hook entry. Write/Edit goes
+			// through the worktree-confinement guard (BACI-116 / BACI-129);
+			// Bash goes through the sqlite3 confinement guard (BACI-134).
+			// Only one deny ever leaves the hook so Claude Code's surface
+			// stays uncluttered — Write/Edit checked first, then Bash.
+			if d := decidePreToolUse(in, gitLinkedWorktreeRoot); !d.allow {
+				emitPreToolUseDeny(d.reason)
 				return nil
 			}
-			emitPreToolUseDeny(d.reason)
+			if d := decideBashSqlite3(in, defaultLiveDBResolver); !d.allow {
+				emitPreToolUseDeny(d.reason)
+				return nil
+			}
 			return nil
 		},
 	}

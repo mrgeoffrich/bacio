@@ -19,6 +19,8 @@ key (e.g. `BACI-42`), referred to below as `<issue_id>`.
 
 Pull down all the details for `<issue_id>` — the comments will include a review. Fix every medium, high, and critical issue it raises, on the PR branch. When the fixes are done, run smoke tests to confirm the changes work.
 
+If your smoke test would create real bacio entities — issues, features, dispatches, comments — re-run `bacio worktree init --isolate-db` first. The isolated DB is thrown away when the worktree is dropped, so no cleanup is needed and no real issue numbers get burned. The shared `~/.bacio/db.sqlite` is for real work, not smoke fixtures; the PreToolUse hook (BACI-134) denies raw `sqlite3` cleanup against it anyway.
+
 If you have to stop for user input, the issue is automatically moved to **needs action**; once the user answers, put it back to **in progress** and continue.
 
 ## Close out
