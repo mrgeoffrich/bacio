@@ -35,7 +35,10 @@ const agentFilesDir = ".claude/agents"
 // One combined plan is printed, one confirmation prompt is asked, and
 // --yes (-y) accepts all three steps non-interactively.
 func newInstallAgentCmd() *cobra.Command {
-	var assumeYes bool
+	var (
+		assumeYes      bool
+		resetTemplates bool
+	)
 	cmd := &cobra.Command{
 		Use:   "install-agent",
 		Short: "Set the current repo up to run as a bacio agent (hooks + channel + subagent files)",
@@ -62,6 +65,16 @@ install-agent prints one combined plan covering all three steps and
 asks for confirmation before writing. Pass --yes (-y) to skip the
 prompt and accept automatically -- needed when running
 non-interactively.
+
+Pass --reset-templates to also revert every built-in prompt template
+body (plan, design, implement, review, ship, fix_review, and the
+_dispatch_preamble) to its embedded default before regenerating the
+subagent files. Use this after a bacio upgrade that changed the
+embedded defaults — without it, local customisations and pre-upgrade
+bodies persist in the DB and the regenerated subagent files keep the
+old contents. Any custom edits to those built-ins are wiped (run
+'bacio settings template show <slug>' first if you want to preserve
+them).
 
 Activation: the hooks and channel are inert unless BACIO_AGENT_MODE=1
 is set in the environment of the Claude session that loads them. See
@@ -104,7 +117,7 @@ unchanged.`,
 
 			// --- Confirm phase ---
 			if !assumeYes {
-				printInstallAgentPlan(os.Stderr, settingsPath, hookChanges, mcpPath, channelAction, channelCommand, agentPlans)
+				printInstallAgentPlan(os.Stderr, settingsPath, hookChanges, mcpPath, channelAction, channelCommand, agentPlans, resetTemplates)
 				confirmed, err := confirmPrompt("Proceed?")
 				if err != nil {
 					return err
@@ -116,6 +129,21 @@ unchanged.`,
 			}
 
 			// --- Apply phase ---
+			// Reset before applyAgentFiles so the regenerated subagent
+			// files reflect the post-reset bodies. Re-plan the agent
+			// files with the fresh bodies — the planning-phase
+			// agentPlans were rendered from the stale ones.
+			var resetSlugs []string
+			if resetTemplates {
+				resetSlugs, err = resetBuiltinTemplateBodies()
+				if err != nil {
+					return err
+				}
+				agentPlans, agentWarnings, err = planAgentFiles(info.Root, args)
+				if err != nil {
+					return err
+				}
+			}
 			if err := applyBacioHooks(settingsPath, hooksTop); err != nil {
 				return err
 			}
@@ -128,7 +156,7 @@ unchanged.`,
 			}
 
 			// --- Report phase ---
-			if err := reportInstallAgent(settingsPath, hookChanges, mcpPath, channelAction, written); err != nil {
+			if err := reportInstallAgent(settingsPath, hookChanges, mcpPath, channelAction, written, resetSlugs); err != nil {
 				return err
 			}
 			for _, w := range agentWarnings {
@@ -141,12 +169,44 @@ unchanged.`,
 		},
 	}
 	cmd.Flags().BoolVarP(&assumeYes, "yes", "y", false, "skip the confirmation prompt and accept the changes")
+	cmd.Flags().BoolVar(&resetTemplates, "reset-templates", false, "before regenerating the subagent files, reset every built-in prompt template body to its embedded default (wipes local customisations)")
 	return cmd
+}
+
+// resetBuiltinTemplateBodies reverts every built-in prompt template
+// row (the per-mode bodies plus the _dispatch_preamble) to its
+// embedded default by calling SetPromptTemplate with an empty body —
+// the same code path `bacio settings template reset` uses. Returns
+// the list of slugs that were reset in canonical order, for the plan
+// announcement and post-install report.
+//
+// This is the install-agent --reset-templates path: per-mode bodies
+// are user-owned after first DB init (see store.migratePromptTemplates),
+// so a bacio upgrade that changes the embedded defaults won't reach
+// existing installs until the user explicitly opts in. The preamble is
+// included for symmetry — a customised preamble would otherwise still
+// fall through the byte-compare migration in preamble_migration.go.
+func resetBuiltinTemplateBodies() ([]string, error) {
+	c, err := openClient()
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+	ctx := context.Background()
+	slugs := model.BuiltinTemplateSlugs()
+	reset := make([]string, 0, len(slugs))
+	for _, slug := range slugs {
+		if err := c.SetPromptTemplate(ctx, slug, "", false); err != nil {
+			return nil, fmt.Errorf("reset template %q: %w", slug, err)
+		}
+		reset = append(reset, slug)
+	}
+	return reset, nil
 }
 
 // printInstallAgentPlan writes the one combined plan covering all three
 // steps to stderr, ahead of the single confirmation prompt.
-func printInstallAgentPlan(w io.Writer, settingsPath string, hookChanges []hookChange, mcpPath, channelAction, channelCommand string, agentPlans []agentFilePlan) {
+func printInstallAgentPlan(w io.Writer, settingsPath string, hookChanges []hookChange, mcpPath, channelAction, channelCommand string, agentPlans []agentFilePlan, resetTemplates bool) {
 	fmt.Fprintln(w, "bacio install-agent will perform three steps:")
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "1. Hooks — update %s:\n", settingsPath)
@@ -162,12 +222,20 @@ func printInstallAgentPlan(w io.Writer, settingsPath string, hookChanges []hookC
 	for _, p := range agentPlans {
 		fmt.Fprintf(w, "     %s\n", p.dest)
 	}
+	if resetTemplates {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "Plus: --reset-templates — every built-in prompt template body will be reset to its embedded default BEFORE the subagent files are written:")
+		for _, slug := range model.BuiltinTemplateSlugs() {
+			fmt.Fprintf(w, "     %s\n", slug)
+		}
+		fmt.Fprintln(w, "   Any local customisations to these bodies will be lost.")
+	}
 }
 
 // reportInstallAgent emits the combined post-write summary on stdout
 // via ok(), so it round-trips to JSON like every other command's
 // success output.
-func reportInstallAgent(settingsPath string, hookChanges []hookChange, mcpPath, channelAction string, written []string) error {
+func reportInstallAgent(settingsPath string, hookChanges []hookChange, mcpPath, channelAction string, written, resetSlugs []string) error {
 	var b strings.Builder
 	fmt.Fprintln(&b, "set up this repo as a bacio agent:")
 	fmt.Fprintf(&b, "  hooks → %s", settingsPath)
@@ -179,6 +247,9 @@ func reportInstallAgent(settingsPath string, hookChanges []hookChange, mcpPath, 
 		channelDone = "updated"
 	}
 	fmt.Fprintf(&b, "\n  channel → %s the %q MCP server in %s", channelDone, mcpServerName, mcpPath)
+	if len(resetSlugs) > 0 {
+		fmt.Fprintf(&b, "\n  templates → reset %d built-in template body(ies) to embedded defaults:\n    %s", len(resetSlugs), strings.Join(resetSlugs, "\n    "))
+	}
 	fmt.Fprintf(&b, "\n  subagent files → %d written:\n    %s", len(written), strings.Join(written, "\n    "))
 	return ok("%s", b.String())
 }
