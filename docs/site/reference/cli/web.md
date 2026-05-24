@@ -23,7 +23,7 @@ bacio web --addr 127.0.0.1:7777 --token T  # bind elsewhere, require bearer
 | `--cors-origin` | — (empty allow-list) | Allow cross-origin browser requests from this origin (repeatable; e.g. `http://localhost:5174`). Empty allow-list = same-origin only. |
 | `--no-open` | off | Mount the bundle but skip the browser launch. Use for SSH sessions, headless CI, or agent-driven smoke tests that drive the page via Playwright. |
 
-Plus all [global flags](/reference/cli/index#global-flags). One caveat: the persistent `--user` flag is silently ignored under `bacio web` — incoming requests carry their own actor via the `X-Actor` header (default `"api"`).
+Plus all [global flags](/reference/cli/index#global-flags). Incoming requests carry their own actor via the `X-Actor` header (default `"api"`) — the local-side actor resolution (agent identity via `.bacio/agents.json`, fallback `"user"`) is for the CLI path only.
 
 ## What it does
 

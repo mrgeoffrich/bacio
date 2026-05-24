@@ -92,7 +92,7 @@ Run it whenever — pushes your writes, pulls anyone else's. Multi-machine setup
 
 - **Built for LLMs.** The CLI reads return JSON. CLI updates/writes take JSON. Every payload schema is reachable at runtime via `bacio schema`. The bundled skill (`bacio install-skill`) is the single source of truth for agents.
 - **Local-first.** Your board starts life as a single SQLite DB file. Nothing leaves the laptop until you run `bacio sync`.
-- **Auditable.** Every mutation records who, when, and what changed. (claude knows to pass `--user claude` so the log attributes correctly.)
+- **Auditable.** Every mutation records who, when, and what changed. (Agent-driven calls attribute to the agent's identity automatically via `.bacio/agents.json` — no flag needed.)
 - **Optional sync.** Want the same board on a laptop and a desktop? `bacio sync init`, plain git underneath.
 - **Optional REST API.** `bacio api` puts the CLI behind HTTP — handy for IDE plugins, long-running agents, and `BACIO_REMOTE` rigs. For humans who want the bundled kanban in a browser, `bacio web` serves the same API plus the embedded React bundle at `/ui/` and pops the OS default browser.
 

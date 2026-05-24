@@ -37,4 +37,4 @@ The file is only created if you've enabled [git-backed sync](/guides/sync-across
 
 - **History retention:** 60 days. Pruned on every DB open.
 - **Output format:** `text`. Override per call with `-o json` for agent / script use.
-- **Actor (`--user`):** OS user. Agents must pass this explicitly so audits attribute work correctly.
+- **Actor:** resolved automatically. Agent-driven calls (with `bacio install-agent` set up) attribute to the agent's identity via `.bacio/agents.json`; all other calls stamp the literal `"user"` placeholder until real auth lands.

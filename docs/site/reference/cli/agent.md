@@ -45,7 +45,7 @@ At session start, before any other bacio call, walk this loop:
    - **hostname** — `hostname -s` on Unix, `%COMPUTERNAME%` on Windows.
 3. Register with `--new`:
    ```bash
-   bacio agent register --user <name> --agent <slug> --new
+   bacio agent register --agent <slug> --new
    ```
 4. If bacio errors with `agent name "<slug>" already taken`, your random slug clashed with another agent's. Pick a different adjective/animal and retry — the host suffix keeps cross-machine identities apart, the retry handles same-machine clashes.
 5. On success, write the slug to `.bacio/agent` (just the slug — no surrounding quotes; trailing whitespace is tolerated). Make sure `.bacio/agent` is gitignored — it's per-machine identity, not project state.
@@ -53,7 +53,7 @@ At session start, before any other bacio call, walk this loop:
 On subsequent sessions in the same repo, step 1 short-circuits the loop. Register **without** `--new`:
 
 ```bash
-bacio agent register --user <name> --agent "$(cat .bacio/agent)"
+bacio agent register --agent "$(cat .bacio/agent)"
 ```
 
 Re-registering is idempotent: bacio refreshes `last_seen_at` and re-links the session to the existing identity row.
@@ -122,19 +122,19 @@ A short agent loop, from first session in a repo through to teardown:
 # Identity bootstrap: read saved slug, else generate + claim + persist.
 if [ -f .bacio/agent ]; then
     SLUG=$(cat .bacio/agent)
-    bacio agent register --user agent-claude --agent "$SLUG"
+    bacio agent register --agent "$SLUG"
 else
     SLUG="cheerful-otter@claude.$(hostname -s)"
-    until bacio agent register --user agent-claude --agent "$SLUG" --new 2>/dev/null; do
+    until bacio agent register --agent "$SLUG" --new 2>/dev/null; do
         SLUG="quiet-falcon@claude.$(hostname -s)"   # …regenerate
     done
     printf '%s' "$SLUG" > .bacio/agent
 fi
 
-bacio agent claim MINI-42 --user agent-claude
+bacio agent claim MINI-42
 # ...do the work: bacio issue state, bacio comment add, edits, commits ...
-bacio agent release MINI-42 --user agent-claude
-bacio agent end --reason stop --user agent-claude
+bacio agent release MINI-42
+bacio agent end --reason stop
 ```
 
 ## See also

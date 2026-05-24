@@ -263,7 +263,7 @@ func isOpenState(s model.State) bool {
 }
 
 // ArchiveFeature stamps the feature's archived_at column (BACI-68).
-// Records a feature.archive audit row under the actor on --user.
+// Records a feature.archive audit row under the resolved actor.
 func (c *localClient) ArchiveFeature(ctx context.Context, repo *model.Repo, slug string, dryRun bool) (*model.Feature, error) {
 	return c.setFeatureArchived(ctx, repo, slug, true, dryRun, "feature.archive")
 }

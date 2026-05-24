@@ -83,10 +83,10 @@ Projection flags trim the brief when the full payload is too much:
 
 ## `next` / `peek` — the atomic claim pattern
 
-`bacio issue next --feature <slug>` claims the next ready issue: the lowest-numbered `todo` issue with **all blockers in a terminal state** (`done`, `cancelled`) and **no existing assignee**. It flips the issue to `in_progress` and stamps the assignee from `--user`.
+`bacio issue next --feature <slug>` claims the next ready issue: the lowest-numbered `todo` issue with **all blockers in a terminal state** (`done`, `cancelled`) and **no existing assignee**. It flips the issue to `in_progress` and stamps the assignee with the calling agent's identity (resolved via `.bacio/agents.json`).
 
 ```bash
-bacio issue next --feature auth-rewrite --user agent-claude -o json
+bacio issue next --feature auth-rewrite -o json
 ```
 
 When nothing is currently claimable it emits `{"issue": null}` and **exits 0** — callers poll / retry rather than treating that as an error.
@@ -104,4 +104,4 @@ bacio issue unassign MINI-3
 
 - **[`bacio feature plan`](/reference/cli/feature)** — print open issues in execution order, respecting `blocks`.
 - **[`bacio link`](/reference/cli/link)** — wire up `blocks` / `relates-to` / `duplicate-of`.
-- **[How agents drive bacio](/concepts/how-agents-drive-bacio)** — the JSON + `--dry-run` + `--user` flow.
+- **[How agents drive bacio](/concepts/how-agents-drive-bacio)** — the JSON + `--dry-run` flow and how agent identity is resolved.

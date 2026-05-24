@@ -7,7 +7,7 @@ key (e.g. `BACI-42`), referred to below as `<issue_id>`.
 ## Setup
 
 1. Use the bacio skill, then claim `<issue_id>` as yours
-   (`bacio agent claim <issue_id> --user <your-name> --prompt "implement"`).
+   (`bacio agent claim <issue_id> --prompt "implement"`).
    - Load the Task tools via `ToolSearch` (`select:TaskCreate,TaskUpdate,TaskList,TaskGet,TaskOutput,TaskStop`) and track your work with `TaskCreate` / `TaskUpdate` as you go — bacio mirrors these into the Agents/kanban Tasks pill.
 2. Set `<issue_id>` to **in progress**.
 3. **Worktree.** You already run in an isolated git worktree (Claude Code created it for this subagent via `isolation: worktree` and removes it when you finish) — never run `git worktree add` or `git worktree remove` yourself.

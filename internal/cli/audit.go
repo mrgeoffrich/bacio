@@ -3,49 +3,24 @@ package cli
 import (
 	"fmt"
 	"os"
-	osuser "os/user"
 	"strings"
 
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
 
-// actor returns the resolved name for who is performing the operation.
-// Resolution order: --user flag → agent identity (this process's
-// claude_pid in .bacio/agents.json) → OS username → "unknown". The
-// agents.json step is what lets an agent-driven `bacio` call attribute
-// history correctly without passing --user on every command. Falls back
-// rather than panicking at the boundary — the caller should validate
-// up-front via validateActor when --user came from the command line.
+// actor returns the name stamped on audit-log rows for CLI mutations.
+// An agent-driven call resolves via .bacio/agents.json (PID → identity);
+// everything else lands as the literal "user", a placeholder until real
+// auth lands. The OS-username fallback was deliberately removed — too
+// easy for an LLM that saw a `--user` flag in help text to mis-attribute.
 func actor() string {
-	if opts.user != "" {
-		if clean, err := store.ValidateActor(opts.user); err == nil {
-			return clean
-		}
-	}
 	if id := agentIdentityForProcess(); id != "" {
 		if clean, err := store.ValidateActor(id); err == nil {
 			return clean
 		}
 	}
-	if u, err := osuser.Current(); err == nil && u.Username != "" {
-		if clean, err := store.ValidateActor(u.Username); err == nil {
-			return clean
-		}
-	}
-	return "unknown"
-}
-
-// validateActorFlag runs once at the start of each command, surfacing a
-// clear error if --user was supplied with a malformed value (control
-// chars, embedded newlines, > 80 chars). Called from PersistentPreRunE
-// so every mutating command rejects bad --user before doing any work.
-func validateActorFlag() error {
-	if opts.user == "" {
-		return nil
-	}
-	_, err := store.ValidateActor(opts.user)
-	return err
+	return "user"
 }
 
 // recordOp writes an audit-log entry. Failures are reported on stderr but

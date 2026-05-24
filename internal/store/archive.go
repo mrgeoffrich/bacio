@@ -64,8 +64,8 @@ func (r ArchiveSweepResult) Total() int64 {
 // is mechanical janitor work like the prune and matcher loops, so
 // flooding the audit log with per-row entries every hour would be
 // noise. The leader logs the totals via slog instead. Manual archive
-// verbs DO emit history entries (under the actor on the --user flag),
-// per the agent-CLI principles.
+// verbs DO emit history entries (under the resolved actor), per the
+// agent-CLI principles.
 func (s *Store) ArchiveSweep() (ArchiveSweepResult, error) {
 	tx, err := s.DB.Begin()
 	if err != nil {

@@ -5,7 +5,7 @@ description: Query the audit log — every mutation bacio has ever recorded, wit
 
 # `bacio history`
 
-Every mutation in bacio records an audit row: actor (`--user`), op (`issue.create`, `feature.update`, `sync.renumber`, …), target, and a short details blob. **Reads are not logged.** `bacio history` is how you query that log.
+Every mutation in bacio records an audit row: actor (the agent's identity for agent-driven calls, or the literal `user` placeholder for human-driven ones), op (`issue.create`, `feature.update`, `sync.renumber`, …), target, and a short details blob. **Reads are not logged.** `bacio history` is how you query that log.
 
 ```bash
 bacio history                            # last 50 mutations in the current repo (newest-first)

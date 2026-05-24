@@ -25,7 +25,7 @@ bacio api --cors-origin http://localhost:5174   # opt in to cross-origin browser
 | `--token` | — | Require `Authorization: Bearer <token>` on every request **except `/healthz`** (so liveness probes never need to know the token). Falls back to `BACIO_API_TOKEN`. |
 | `--cors-origin` | — (empty allow-list) | Allow cross-origin browser requests from this origin (repeatable; e.g. `http://localhost:5174`). Empty allow-list = same-origin only. |
 
-Plus all [global flags](/reference/cli/index#global-flags). One caveat: the persistent `--user` flag is silently ignored under `bacio api` — incoming requests carry their own actor via the `X-Actor` header (default `"api"`).
+Plus all [global flags](/reference/cli/index#global-flags). Incoming requests carry their own actor via the `X-Actor` header (default `"api"`) — the local-side actor resolution (agent identity via `.bacio/agents.json`, fallback `"user"`) is for the CLI path only.
 
 Once running, point any client at the server — or set `BACIO_REMOTE` so other `bacio` calls go through the API instead of the local DB:
 

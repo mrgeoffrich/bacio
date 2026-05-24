@@ -20,11 +20,11 @@ That drops `SKILL.md` into `<repo>/.claude/skills/bacio/`. Restart Claude Code i
 
 You don't need to know this to use it, but it helps to recognise good vs. confused behaviour. Behind every prompt, Claude follows the same flow, bracketed by *register* and *end*:
 
-0. **Declare itself** — `bacio agent register --user agent-claude --agent <slug>` at session start, then `bacio agent claim <KEY>` when it starts focused work on an issue. The first time Claude touches a repo it generates a memorable slug (e.g. `cheerful-otter@claude.shiny`), registers it with `--new`, and persists it to `.bacio/agent` so the same identity is reused next time.
+0. **Declare itself** — `bacio agent register --agent <slug>` at session start, then `bacio agent claim <KEY>` when it starts focused work on an issue. The first time Claude touches a repo it generates a memorable slug (e.g. `cheerful-otter@claude.shiny`), registers it with `--new`, and persists it to `.bacio/agent` so the same identity is reused next time. With `bacio install-agent` set up, the SessionStart hook does this register for you and records the `(claude_pid → identity)` mapping in `.bacio/agents.json`.
 1. **Discover** — `bacio schema show <command>` if it's unsure of the payload shape (rare, but happens for less-common verbs).
 2. **Compose** — build the JSON payload.
 3. **Rehearse** — `--dry-run` for anything destructive (rm verbs especially). Stdout shape matches the real call; cascade counts are reported.
-4. **Execute** — run for real with `--user agent-claude` so the audit log attributes the work to the agent, not to your OS user.
+4. **Execute** — run for real. The audit log resolves the actor from `.bacio/agents.json` (via the PID lookup the hook set up), so no flag is needed.
 5. **Query lean** — `*.list` with filters, `*.show` only when full detail is needed.
 6. **Tear down** — `bacio agent release <KEY>` when it stops working on an issue; `bacio agent end --reason stop` at session end (auto-releases anything still claimed).
 
@@ -99,7 +99,7 @@ If you find yourself watching Claude make ten reads in a row, ask it to use `bri
 A few tells:
 
 - **It's making things up.** Claude can confidently invent a flag (`--with-skill`, `--agent`). Both don't exist. If the output looks like prose instead of bacio's structured output, ask for the real command and stdout. The skill teaches Claude to lean on `bacio schema show <name>` when unsure — nudge it that way.
-- **It skipped `--user`.** Audit log will attribute to your OS user. Not catastrophic, but the history tab gets confusing. Worth pointing out once so it sticks for the session.
+- **Mutations are attributed to `user`, not Claude's agent name.** The PID → identity mapping in `.bacio/agents.json` is missing — `bacio install-agent` hasn't been run in this repo, or the SessionStart hook didn't fire. Re-run `bacio install-agent` and start a fresh session.
 - **It's listing with full bodies.** If Claude is pulling huge JSON to summarise a backlog, it's missed the lean-by-default convention. Ask it to use the lean form (`-o json` without `--with-description`).
 - **It tried to write without `--dry-run` on something destructive.** Especially `bacio issue rm` or `bacio feature rm`. Ask it to rehearse first.
 

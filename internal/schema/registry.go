@@ -1,7 +1,7 @@
 // Package schema centralises the JSON-input schema registry used by both
-// `bacio schema` and `GET /schema*`. Keeping the registry here avoids the
-// HTTP layer reaching into internal/cli (which would also pull in CLI
-// globals like opts.user).
+// `bacio schema` and `GET /schema*`. Keeping the registry here avoids
+// the HTTP layer reaching into internal/cli (which would drag CLI flag
+// globals along with it).
 package schema
 
 import (

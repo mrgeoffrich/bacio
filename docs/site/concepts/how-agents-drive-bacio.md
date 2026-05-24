@@ -20,11 +20,11 @@ bacio's CLI was rebuilt around six rules so an LLM can drive it reliably. These 
 
 The five-step pattern agents use, bracketed by a *declare yourself* / *tear down* pair:
 
-0. **Declare yourself** — `bacio agent register --user <name> --agent <slug>` (with `--new` on first session, then persisting the slug to `.bacio/agent`). `bacio agent claim <KEY>` when you start focused work on an issue.
+0. **Declare yourself** — `bacio agent register --agent <slug>` (with `--new` on first session, then persisting the slug to `.bacio/agent`). With `bacio install-agent` set up, the SessionStart hook does this for you and records the `(claude_pid → identity)` mapping in `.bacio/agents.json`. `bacio agent claim <KEY>` when you start focused work on an issue.
 1. **Discover** — `bacio schema show issue.add` if the agent is unsure.
 2. **Compose** — build the JSON payload.
 3. **Rehearse** — `--dry-run` to validate without writing.
-4. **Execute** — run for real with `--user <agent-name>` for clean audit attribution.
+4. **Execute** — run for real. The audit log resolves your actor automatically from `.bacio/agents.json` (via the PID lookup the hook set up).
 5. **Query lean** — `*.list` with filters, not bulk reads.
 6. **Tear down** — `bacio agent release <KEY>` when you stop, then `bacio agent end --reason stop` (which auto-releases any remaining claims).
 

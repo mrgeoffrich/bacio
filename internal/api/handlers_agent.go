@@ -9,7 +9,8 @@ package api
 //
 // Audit actor: every mutating verb stamps history with the X-Actor
 // header (falling back to defaultActor) so a remote agent's identity
-// flows through the same audit chain as the CLI's `--user`. Register
+// flows through the same audit chain as the local CLI (which resolves
+// actor via .bacio/agents.json for agent-driven calls). Register
 // additionally writes that actor into the new session row's `actor`
 // field unless the JSON payload supplies its own.
 

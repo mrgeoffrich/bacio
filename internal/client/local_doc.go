@@ -339,7 +339,7 @@ func (c *localClient) UnlinkDocument(ctx context.Context, repo *model.Repo, in i
 }
 
 // ArchiveDocument stamps the document's archived_at column (BACI-68).
-// Records a doc.archive audit row under the actor on --user.
+// Records a doc.archive audit row under the resolved actor.
 func (c *localClient) ArchiveDocument(ctx context.Context, repo *model.Repo, filename string, dryRun bool) (*model.Document, error) {
 	return c.setDocumentArchived(ctx, repo, filename, true, dryRun, "doc.archive")
 }

@@ -22,7 +22,7 @@ If you're driving an agent through a feature in dependency order, the canonical 
 
 ```bash
 while true; do
-  result=$(bacio issue next --feature auth-rewrite --user agent-claude -o json)
+  result=$(bacio issue next --feature auth-rewrite -o json)
   if [ "$(echo "$result" | jq -r .issue)" = "null" ]; then
     sleep 30                    # nothing ready — wait and retry
   else
