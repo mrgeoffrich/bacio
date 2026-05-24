@@ -84,6 +84,25 @@ func (f *fakeBoardClient) GetDisplayShowArchived(context.Context) (bool, error) 
 	return false, nil
 }
 
+// ListOpenQuestionsBySessions is a fixed-empty stub — boardcards.Assemble
+// reads open clarification questions per session to set the per-card
+// needs-action flag. The taken-flag tests don't exercise that flow, so
+// an empty map matches the "no outstanding questions" production case.
+// Wiring this through (rather than relying on the embedded-interface
+// panic) is the same pattern as ListTodosBySessionsAndIssue above.
+func (f *fakeBoardClient) ListOpenQuestionsBySessions(context.Context, []string) (map[int64][]*model.SessionQuestion, error) {
+	return map[int64][]*model.SessionQuestion{}, nil
+}
+
+// BlockersFor is a fixed-empty stub — boardcards.Assemble reads
+// per-issue blockers to surface a per-card "blocked by N" badge. The
+// taken-flag tests don't exercise blocker relations, so an empty map
+// matches the "no blockers" case. Mirrors the fakeClient stub in
+// internal/boardcards/cards_test.go.
+func (f *fakeBoardClient) BlockersFor(context.Context, []int64) (map[int64][]store.IssueBlocker, error) {
+	return map[int64][]store.IssueBlocker{}, nil
+}
+
 func TestListCardsTaken(t *testing.T) {
 	issues := []*model.Issue{
 		{Key: "TEST-1", State: model.StateTodo, Title: "held by an agent"},

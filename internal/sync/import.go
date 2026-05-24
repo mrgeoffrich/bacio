@@ -321,6 +321,16 @@ func (e *Engine) applyImport(ctx context.Context, tx *sql.Tx, source string, sca
 // repos are upgraded if they were previously phantom; otherwise we
 // just patch name/remote_url/next_issue_number from the file.
 //
+// For next_issue_number we write MAX(local_current, remote), not the
+// remote value verbatim. The counter is a high-water mark; a peer
+// pushing an older snapshot must not drag the local cache backwards
+// or a subsequent `bacio issue add` could re-mint a number that
+// already lived in audit history. RecomputeNextIssueNumber runs post-
+// import to clamp against MAX(issues.number)+1 as well, but that
+// clamp can only see the post-upsert value — preserving the local
+// high-water mark here is what keeps the invariant whole when
+// propagateDeletes removes the rows that bumped the local counter.
+//
 // Returns the resolved repo so per-record passes can use repo.ID.
 func (e *Engine) upsertRepo(tx *sql.Tx, sr *scannedRepo, res *ImportResult) (*model.Repo, error) {
 	parsed := sr.Parsed
@@ -368,11 +378,17 @@ func (e *Engine) upsertRepo(tx *sql.Tx, sr *scannedRepo, res *ImportResult) (*mo
 		return repo, nil
 	}
 	// DB row exists. Patch fields that may have shifted on the
-	// remote: name, remote_url, next_issue_number.
-	if existing.Name != parsed.Name || existing.RemoteURL != parsed.RemoteURL || existing.NextIssueNumber != parsed.NextIssueNumber {
+	// remote: name, remote_url, next_issue_number. next_issue_number
+	// is monotonic — see the function docstring; never let the remote
+	// drag the local cache backwards.
+	effective := parsed.NextIssueNumber
+	if existing.NextIssueNumber > effective {
+		effective = existing.NextIssueNumber
+	}
+	if existing.Name != parsed.Name || existing.RemoteURL != parsed.RemoteURL || existing.NextIssueNumber != effective {
 		if _, err := tx.Exec(
 			`UPDATE repos SET name = ?, remote_url = ?, next_issue_number = ?, updated_at = ? WHERE uuid = ?`,
-			parsed.Name, parsed.RemoteURL, parsed.NextIssueNumber, sqliteTimestamp(now), parsed.UUID,
+			parsed.Name, parsed.RemoteURL, effective, sqliteTimestamp(now), parsed.UUID,
 		); err != nil {
 			return nil, fmt.Errorf("update repo %s: %w", parsed.Prefix, err)
 		}

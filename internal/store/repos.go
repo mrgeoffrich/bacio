@@ -173,6 +173,12 @@ func (s *Store) UpdateRepoByUUID(uuid string, name, remoteURL *string, nextIssue
 // the deleted records on another machine. The high-water mark is
 // the safe lower bound.
 //
+// The sync importer's upsertRepo enforces the same invariant for the
+// remote side: it writes MAX(local_current, remote) so a peer pushing
+// an older counter can't drag the local cache backwards. This
+// function then handles the issues-MAX clamp on top of whatever value
+// upsertRepo left behind.
+//
 // next_issue_number is advisory (the design doc downgraded it from
 // a hard counter once collision handling exists), but it's a
 // fast-path cache for the per-repo MAX query that issue create still

@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -273,6 +274,162 @@ func TestImport_DryRunRollsBack(t *testing.T) {
 	repos, _ := b.ListRepos()
 	if len(repos) != 0 {
 		t.Errorf("dry-run wrote %d repos; expected 0", len(repos))
+	}
+}
+
+// TestImport_RepoCounterMonotonic_OlderRemote pins BACI-135: when a
+// peer pushes a `repo.yaml` whose `next_issue_number` is *behind* the
+// local high-water mark, the importer must preserve the local value
+// rather than rewinding the counter. A rewound counter would let a
+// subsequent `bacio issue add` re-mint a number that already lived in
+// audit history.
+//
+// To isolate the upsertRepo monotonic-MAX (and not lean on the
+// post-import RecomputeNextIssueNumber clamp doing the work), we
+// force the local counter above MAX(issues.number)+1 before the
+// import so the clamp has nothing to add — the only thing that can
+// preserve the local value is upsertRepo itself.
+func TestImport_RepoCounterMonotonic_OlderRemote(t *testing.T) {
+	a, _ := seedExportFixture(t)
+	dirA := t.TempDir()
+	if _, err := (&Engine{Store: a}).Export(context.Background(), dirA); err != nil {
+		t.Fatalf("export A: %v", err)
+	}
+	b, _ := store.Open(":memory:")
+	t.Cleanup(func() { b.Close() })
+	if _, err := (&Engine{Store: b}).Import(context.Background(), dirA); err != nil {
+		t.Fatalf("seed B: %v", err)
+	}
+	repoB, err := b.GetRepoByPrefix("MINI")
+	if err != nil {
+		t.Fatalf("get repo B: %v", err)
+	}
+	// Push the local counter above MAX(issues.number)+1 — simulates a
+	// local that allocated numbers for issues that were later deleted
+	// (so the safe high-water mark is genuinely above what the issues
+	// table would otherwise indicate).
+	const localHigh int64 = 50
+	if _, err := b.DB.Exec(`UPDATE repos SET next_issue_number = ? WHERE id = ?`, localHigh, repoB.ID); err != nil {
+		t.Fatalf("bump local next_issue_number: %v", err)
+	}
+
+	// Mutate the exported repo.yaml so the remote claims a value
+	// *behind* the local cache. Bump remote updated_at past local so
+	// the LWW gate isn't what's preserving the counter — we want the
+	// monotonic-MAX in upsertRepo to be the only thing doing the work.
+	repoPath := filepath.Join(dirA, "repos", "MINI", "repo.yaml")
+	body, err := os.ReadFile(repoPath)
+	if err != nil {
+		t.Fatalf("read repo.yaml: %v", err)
+	}
+	// The exported repo.yaml carries whatever value the in-memory store
+	// had at export time (the original 3 from seedExportFixture, two
+	// seeded issues +1). Older-remote = a smaller value still.
+	const remoteOlder int64 = 2
+	bodyStr := strings.Replace(
+		string(body),
+		"next_issue_number: 3",
+		fmt.Sprintf("next_issue_number: %d", remoteOlder),
+		1,
+	)
+	if bodyStr == string(body) {
+		t.Fatalf("expected to rewrite next_issue_number in repo.yaml; body:\n%s", body)
+	}
+	bodyStr = strings.Replace(bodyStr, "2025-11-01T09:00:00.000Z", "2026-06-01T10:00:00.000Z", -1)
+	if err := os.WriteFile(repoPath, []byte(bodyStr), 0o644); err != nil {
+		t.Fatalf("write repo.yaml: %v", err)
+	}
+
+	if _, err := (&Engine{Store: b}).Import(context.Background(), dirA); err != nil {
+		t.Fatalf("re-import: %v", err)
+	}
+	repoB2, err := b.GetRepoByPrefix("MINI")
+	if err != nil {
+		t.Fatalf("get repo B post-import: %v", err)
+	}
+	if repoB2.NextIssueNumber < localHigh {
+		t.Errorf("next_issue_number rewound: pre=%d post=%d remote=%d (monotonic-MAX should have held the local value)",
+			localHigh, repoB2.NextIssueNumber, remoteOlder)
+	}
+}
+
+// TestImport_RepoCounterMonotonic_AfterPropagateDeletes pins the
+// second BACI-135 scenario: a peer's `repo.yaml` carries a counter
+// *behind* the local high-water mark AND the same import propagates
+// deletes that remove the local issues that justified that counter.
+// The monotonic-MAX in upsertRepo must still preserve the local value
+// — RecomputeNextIssueNumber's MAX(issues.number)+1 clamp can't save
+// us here, because the issues whose numbers it would clamp against
+// are exactly the ones propagateDeletes just dropped.
+func TestImport_RepoCounterMonotonic_AfterPropagateDeletes(t *testing.T) {
+	a, _ := seedExportFixture(t)
+	dirA := t.TempDir()
+	if _, err := (&Engine{Store: a}).Export(context.Background(), dirA); err != nil {
+		t.Fatalf("export A: %v", err)
+	}
+	b, _ := store.Open(":memory:")
+	t.Cleanup(func() { b.Close() })
+	if _, err := (&Engine{Store: b}).Import(context.Background(), dirA); err != nil {
+		t.Fatalf("seed B: %v", err)
+	}
+	repoB, err := b.GetRepoByPrefix("MINI")
+	if err != nil {
+		t.Fatalf("get repo B: %v", err)
+	}
+	nin0 := repoB.NextIssueNumber
+	if nin0 < 3 {
+		t.Fatalf("fixture should leave next_issue_number >= 3; got %d", nin0)
+	}
+
+	// Mimic a peer that already collapsed the namespace: drop the
+	// high-numbered issue from the export tree (propagateDeletes will
+	// remove it from B on re-import) AND lower next_issue_number in the
+	// remote repo.yaml so the importer is faced with a smaller value.
+	if err := os.RemoveAll(filepath.Join(dirA, "repos", "MINI", "issues", "MINI-2")); err != nil {
+		t.Fatalf("rm MINI-2: %v", err)
+	}
+	repoPath := filepath.Join(dirA, "repos", "MINI", "repo.yaml")
+	body, err := os.ReadFile(repoPath)
+	if err != nil {
+		t.Fatalf("read repo.yaml: %v", err)
+	}
+	older := nin0 - 2
+	bodyStr := strings.Replace(
+		string(body),
+		fmt.Sprintf("next_issue_number: %d", nin0),
+		fmt.Sprintf("next_issue_number: %d", older),
+		1,
+	)
+	if bodyStr == string(body) {
+		t.Fatalf("expected to rewrite next_issue_number from %d in repo.yaml; body:\n%s", nin0, body)
+	}
+	bodyStr = strings.Replace(bodyStr, "2025-11-01T09:00:00.000Z", "2026-06-01T10:00:00.000Z", -1)
+	if err := os.WriteFile(repoPath, []byte(bodyStr), 0o644); err != nil {
+		t.Fatalf("write repo.yaml: %v", err)
+	}
+
+	res, err := (&Engine{Store: b}).Import(context.Background(), dirA)
+	if err != nil {
+		t.Fatalf("re-import: %v", err)
+	}
+	// Sanity: propagateDeletes did drop MINI-2.
+	var sawIssueDelete bool
+	for _, d := range res.Deleted {
+		if d.Kind == store.SyncKindIssue && d.Label == "MINI-2" {
+			sawIssueDelete = true
+			break
+		}
+	}
+	if !sawIssueDelete {
+		t.Fatalf("expected MINI-2 deletion to propagate; got %+v", res.Deleted)
+	}
+	repoB2, err := b.GetRepoByPrefix("MINI")
+	if err != nil {
+		t.Fatalf("get repo B post-import: %v", err)
+	}
+	if repoB2.NextIssueNumber < nin0 {
+		t.Errorf("next_issue_number rewound after propagateDeletes: pre=%d post=%d remote=%d (monotonic-MAX should have held the local value)",
+			nin0, repoB2.NextIssueNumber, older)
 	}
 }
 
