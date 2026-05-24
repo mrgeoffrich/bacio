@@ -95,6 +95,7 @@ bacio issue brief MINI-42                      # one-shot bulk context for an LL
 - **`bacio agent release` requires `--state <name>`** (BACI-126c). Choose the state the work is being left in (`in_review` for impl/fix-review/review, `todo` for plan/design, `done` for ship, `in_progress` if stepping away). `final_state` on the JSON path.
 - **Agent issue calls require an open claim** (BACI-126b). When the caller resolves to an agent identity (via `.bacio/agents.json`), every `bacio issue *` / `bacio comment *` / `bacio tag *` / `bacio pr *` / `bacio link` / `bacio unlink` call requires the session to hold an open claim; key-targeted verbs also require the held claim to cover the targeted issue. Humans (actor `"user"`) are exempt.
 - **`bacio agent cancel` is pre-delivery-only** (BACI-130). A dispatch with `delivered_at` set has been handed to the worker; cancelling it would just lie in the model — the work continues but the kanban activity pill drops out. Use the agent's interrupt path to stop a live worker, and `bacio agent cancel <id>` only for queued / pending rows that haven't been delivered yet.
+- **An agent-mode session in the main checkout cannot Write/Edit anything** (BACI-129). When `bacio install-agent` is wired and `BACIO_AGENT_MODE=1` is set, the PreToolUse hook denies every `Write`/`Edit` whose cwd is the primary git worktree. Linked worktrees (`git worktree add` / `bacio worktree init`) are the allowed write surface. A supervisor that wants to edit the parent checkout directly must drop `BACIO_AGENT_MODE` for that shell.
 
 ## Installation
 

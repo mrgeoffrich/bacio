@@ -113,6 +113,80 @@ func TestWorktreeRoot_LinkedWorktree(t *testing.T) {
 	}
 }
 
+// TestLinkedWorktreeRoot_DistinguishesPrimaryAndLinked is the BACI-129
+// contract test: the helper must report the primary checkout as
+// (root, linked=false) and a linked worktree as (root, linked=true),
+// and must surface ErrNotARepo when cwd is outside any git repo. This
+// is what the PreToolUse confinement guard relies on to deny
+// main-checkout edits without consulting bacio's manifest layer.
+func TestLinkedWorktreeRoot_DistinguishesPrimaryAndLinked(t *testing.T) {
+	requireGit(t)
+	withGitIdentity(t)
+
+	tmp := t.TempDir()
+	main := filepath.Join(tmp, "repo")
+	wt := filepath.Join(tmp, "wt-feature")
+
+	mustGit(t, tmp, "init", "-q", "repo")
+	mustGit(t, main, "commit", "--allow-empty", "-q", "-m", "init")
+	mustGit(t, main, "worktree", "add", "-q", wt, "-b", "feature")
+
+	mainWant, _ := filepath.EvalSymlinks(main)
+	wtWant, _ := filepath.EvalSymlinks(wt)
+
+	// Primary worktree.
+	if root, linked, err := LinkedWorktreeRoot(main); err != nil {
+		t.Fatalf("LinkedWorktreeRoot(main): %v", err)
+	} else {
+		gotRoot, _ := filepath.EvalSymlinks(root)
+		if linked {
+			t.Errorf("LinkedWorktreeRoot(main): linked=true, want false")
+		}
+		if gotRoot != mainWant {
+			t.Errorf("LinkedWorktreeRoot(main): root=%q, want %q", gotRoot, mainWant)
+		}
+	}
+
+	// Linked worktree.
+	if root, linked, err := LinkedWorktreeRoot(wt); err != nil {
+		t.Fatalf("LinkedWorktreeRoot(worktree): %v", err)
+	} else {
+		gotRoot, _ := filepath.EvalSymlinks(root)
+		if !linked {
+			t.Errorf("LinkedWorktreeRoot(worktree): linked=false, want true")
+		}
+		if gotRoot != wtWant {
+			t.Errorf("LinkedWorktreeRoot(worktree): root=%q, want %q (the linked worktree's own toplevel)", gotRoot, wtWant)
+		}
+	}
+
+	// Subdirectory inside the linked worktree must still report the
+	// linked worktree's root (not the main one, not the subdir).
+	sub := filepath.Join(wt, "sub", "deeper")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatalf("mkdir sub: %v", err)
+	}
+	if root, linked, err := LinkedWorktreeRoot(sub); err != nil {
+		t.Fatalf("LinkedWorktreeRoot(sub): %v", err)
+	} else {
+		gotRoot, _ := filepath.EvalSymlinks(root)
+		if !linked {
+			t.Errorf("LinkedWorktreeRoot(sub): linked=false, want true")
+		}
+		if gotRoot != wtWant {
+			t.Errorf("LinkedWorktreeRoot(sub): root=%q, want %q", gotRoot, wtWant)
+		}
+	}
+
+	// Outside any git repo: ErrNotARepo.
+	outside := t.TempDir()
+	if _, _, err := LinkedWorktreeRoot(outside); err == nil {
+		t.Fatalf("LinkedWorktreeRoot(non-repo): err=nil, want ErrNotARepo")
+	} else if err != ErrNotARepo {
+		t.Fatalf("LinkedWorktreeRoot(non-repo): err=%v, want ErrNotARepo", err)
+	}
+}
+
 func mustGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)

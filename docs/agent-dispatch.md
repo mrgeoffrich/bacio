@@ -800,7 +800,7 @@ before `git commit` and before `git push`. These raise the floor and
 leave an audit signal — they do not *enforce*; the PreToolUse hook
 below does.
 
-### Worktree confinement — the PreToolUse `Write|Edit` hook (BACI-116)
+### Worktree confinement — the PreToolUse `Write|Edit` hook (BACI-116, BACI-129)
 
 The worktree+branch guard above is a one-time **cwd snapshot**: it
 proves where the worker stood at startup, but it does not constrain
@@ -816,16 +816,20 @@ The enforcement is a sixth `bacio hook` subcommand, `pre-tool-use`,
 wired by `bacio install-agent` as a **PreToolUse** hook with matcher
 `Write|Edit`. On every `Write`/`Edit` call it:
 
-1. resolves the dispatch worktree root by walking up from the call's
-   `cwd` to a worktree manifest (`environment-config.yaml`) via the
-   `wtenv` resolver — confinement engages **only** when a manifest is
-   present, which is exactly the dispatched-worker case;
+1. classifies `cwd` via `git rev-parse --git-dir` vs `--git-common-dir`
+   into one of (a) not-in-a-repo (allow), (b) primary worktree (deny
+   every edit — the main-checkout escape closed by BACI-129), or
+   (c) linked worktree (allow edits under its root). BACI-116
+   originally consulted bacio's `wtenv` manifest layer here, which
+   left supervisors in the main checkout uncontained; BACI-129
+   replaced that with the manifest-free git classification;
 2. resolves the tool's `file_path` (symlink-evaluated, boundary-safe
-   prefix test) against that root;
+   prefix test) against the linked-worktree root;
 3. **denies** the call — `permissionDecision: "deny"` with a
-   `permissionDecisionReason` that names the worktree root verbatim —
-   when the path resolves outside the root, so the model self-corrects
-   and retries with the worktree path.
+   `permissionDecisionReason` that names the relevant root verbatim —
+   either because the cwd is the primary checkout (BACI-129) or
+   because the path resolves outside the linked-worktree root
+   (BACI-116), so the model self-corrects and retries.
 
 This collapses the whole BACI-102 chain at the first edit: deny the
 edit → the parent checkout stays clean → a later `cd <main> &&

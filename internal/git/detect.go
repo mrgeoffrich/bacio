@@ -53,6 +53,58 @@ func WorktreeRoot(dir string) (string, error) {
 	return filepath.Abs(root)
 }
 
+// LinkedWorktreeRoot reports the linked-worktree root containing dir,
+// distinguishing it from the primary worktree of the same repo. It
+// returns one of three results:
+//
+//   - root != "", linked == true   — dir is inside a *linked* worktree,
+//     root is that worktree's toplevel.
+//   - root != "", linked == false  — dir is inside the *primary*
+//     worktree (the main checkout), root is its toplevel.
+//   - root == "", err != nil       — dir is not inside any git repo (or
+//     git is unusable).
+//
+// The classification is via `git rev-parse --git-dir` vs
+// `--git-common-dir`: equal paths ⇒ primary, distinct paths ⇒ linked.
+// This is what the BACI-129 PreToolUse guard needs: a fast, manifest-
+// free way to tell "main checkout that must be denied" from "linked
+// worktree that is allowed". Errors collapse to the no-repo case so
+// the hook's fail-open invariant has a single error path to handle.
+func LinkedWorktreeRoot(dir string) (string, bool, error) {
+	gitDir, err := run(dir, "rev-parse", "--git-dir")
+	if err != nil {
+		return "", false, ErrNotARepo
+	}
+	commonDir, err := run(dir, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return "", false, ErrNotARepo
+	}
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(dir, gitDir)
+	}
+	if !filepath.IsAbs(commonDir) {
+		commonDir = filepath.Join(dir, commonDir)
+	}
+	gitDir = filepath.Clean(gitDir)
+	commonDir = filepath.Clean(commonDir)
+
+	// Primary worktree iff --git-dir == --git-common-dir.
+	linked := gitDir != commonDir
+
+	// --show-toplevel returns the *current* worktree's toplevel —
+	// the linked worktree's own root in a linked-worktree cwd, the
+	// main worktree's root in the primary case.
+	top, err := run(dir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", false, ErrNotARepo
+	}
+	root, err := filepath.Abs(top)
+	if err != nil {
+		return "", false, err
+	}
+	return root, linked, nil
+}
+
 // mainWorktreeRoot returns the absolute path to the main worktree of
 // the repo containing dir. It uses --git-common-dir (the shared .git
 // directory across all worktrees) and takes its parent: for the main
