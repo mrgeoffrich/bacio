@@ -12,13 +12,14 @@ import (
 // the two tool-call hooks always carry one — PostToolUse the
 // pipe-alternation literal `TaskCreate|TaskUpdate` (BACI-60: Claude
 // Code 2.1 renamed TodoWrite into the Task* family), PreToolUse
-// `Write|Edit` (BACI-116: the worktree-confinement guard). A drift here
-// silently breaks the relevant hook because Claude Code matches the
-// entry against every tool call.
+// `Write|Edit|Bash` (BACI-116: the worktree-confinement guard;
+// BACI-134: widened to cover Bash for the sqlite3 confinement guard).
+// A drift here silently breaks the relevant hook because Claude Code
+// matches the entry against every tool call.
 func TestBacioHookGroupMatcher(t *testing.T) {
 	wantMatcher := map[string]string{
 		"PostToolUse": "TaskCreate|TaskUpdate",
-		"PreToolUse":  "Write|Edit",
+		"PreToolUse":  "Write|Edit|Bash",
 	}
 	for _, ev := range bacioHookEvents {
 		grp := bacioHookGroup(ev.Subcommand, ev.Matcher)

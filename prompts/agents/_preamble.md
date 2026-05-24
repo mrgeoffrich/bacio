@@ -14,6 +14,10 @@ Do not create new bacio issues, features, or external tickets (e.g. via `bacio i
 
 The ask-first rule also applies to *modifying* unrelated tickets (re-tagging, re-prioritising, closing). You may freely update the ticket you were dispatched to work on.
 
+### Never bypass the store boundary
+
+Every bacio mutation must go through a `bacio` CLI verb so the audit log records it. Do not `sqlite3 ~/.bacio/db.sqlite ...` to work around a refused verb — the PreToolUse hook (BACI-134) denies it anyway, and even a `SELECT` against the live store is denied because raw SQL on the shared DB is not a path a dispatched worker should reach for. If the legitimate verb refuses you (e.g. `bacio issue rm` is gated on holding a claim on that issue), ask the user via `mcp__bacio__ask_user_question` rather than reaching for raw SQL. For throwaway state, re-run `bacio worktree init --isolate-db` so the worker's DB is its own isolated file that nobody else depends on.
+
 1
 
 ---

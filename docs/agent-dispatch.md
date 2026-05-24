@@ -807,7 +807,7 @@ before `git commit` and before `git push`. These raise the floor and
 leave an audit signal — they do not *enforce*; the PreToolUse hook
 below does.
 
-### Worktree confinement — the PreToolUse `Write|Edit` hook (BACI-116, BACI-129)
+### Worktree confinement — the PreToolUse `Write|Edit|Bash` hook (BACI-116, BACI-129, BACI-134)
 
 The worktree+branch guard above is a one-time **cwd snapshot**: it
 proves where the worker stood at startup, but it does not constrain
@@ -821,7 +821,15 @@ BACI-102 failure).
 
 The enforcement is a sixth `bacio hook` subcommand, `pre-tool-use`,
 wired by `bacio install-agent` as a **PreToolUse** hook with matcher
-`Write|Edit`. On every `Write`/`Edit` call it:
+`Write|Edit|Bash`. Two sibling deciders share the hook entry: Write/Edit
+goes through the worktree-confinement guard below, Bash goes through the
+sqlite3 confinement guard (BACI-134) further down. Only one deny ever
+leaves the hook so Claude Code's surface stays uncluttered — Write/Edit
+checked first, then Bash.
+
+#### Write/Edit confinement (BACI-116, BACI-129)
+
+On every `Write`/`Edit` call the Write/Edit decider:
 
 1. classifies `cwd` via `git rev-parse --git-dir` vs `--git-common-dir`
    into one of (a) not-in-a-repo (allow), (b) primary worktree (deny
@@ -842,19 +850,68 @@ This collapses the whole BACI-102 chain at the first edit: deny the
 edit → the parent checkout stays clean → a later `cd <main> &&
 git commit` commits nothing → the push carries nothing.
 
-`Bash` is **deliberately not** confined: `tool_input.command` is a raw
-string and parsing it for paths is fragile and easy to bypass.
-Confining the write tools defuses the Bash escape for free — with the
-parent checkout kept clean, a stray `cd <main> && git commit` has
-nothing to commit.
+Bash is **not** routed through this decider: `tool_input.command` is a
+raw string and parsing it for paths in general is fragile. Confining
+the write tools defuses the file-confinement Bash escape for free —
+with the parent checkout kept clean, a stray `cd <main> && git commit`
+has nothing to commit.
 
-The handler honours the same **fail-open** invariant as every other
+#### Bash `sqlite3` confinement (BACI-134)
+
+A different escape class lives in Bash that the Write/Edit confinement
+above doesn't cover: a worker can shell straight to `sqlite3
+~/.bacio/db.sqlite "DELETE ..."` and mutate the live shared store
+without ever taking a `Write`/`Edit` path. Every audit-log `history`
+row depends on the SQL going through `internal/store/*` paths, so a
+raw `sqlite3` invocation drops the row through the floor — the
+incident that motivated BACI-134 had a dispatched worker delete two
+tickets this way after `bacio issue rm` refused them, leaving orphaned
+`issue.create` / `agent.dispatch` / `agent.claim` rows pointing at gone
+issues.
+
+The Bash decider (`decideBashSqlite3`) is **path-based, not
+verb-based**. It tokenises `tool_input.command`, finds the first token
+whose basename is `sqlite3`, then walks for the first non-flag token
+after it — the DB path argument. Strips surrounding quotes, expands a
+leading `~/` against `$HOME`, resolves relative paths against `cwd`,
+symlink-evals both sides, and **denies iff** the candidate resolves to
+the live shared DB (`~/.bacio/db.sqlite`, via `wtenv.DefaultDBPath`).
+Anything else — a worktree-isolated `<worktree>/.bacio/db.sqlite`, a
+`/tmp/scratch.db`, no path at all — is allowed by virtue of not
+matching. There is no verb-based carve-out: even a `SELECT 1` against
+the live DB is denied, because raw SQL on the shared store is not a
+path a dispatched worker should reach for (the `bacio` read verbs and
+`bacio history` cover legitimate diagnostics).
+
+The decider is deliberately **fail-open on every ambiguous shell
+construct**: a pipe (`|`), command substitution (`$(...)`), backtick
+substitution, env-var or glob in the candidate path (`$X`, `*`, `?`,
+`{`, `(`), a `~user/...` form — each falls through to allow. A worker
+that actively wants to evade the guard can:
+`bash -c "sqlite3 ~/.bacio/db.sqlite ..."`,
+`eval "sqlite3 ..."`, `BACIO_DB=$HOME/.bacio/db.sqlite; sqlite3
+"$BACIO_DB" ...`, heredoc-pipe stdin, etc. The plan explicitly accepts
+these as fail-open by design — the guard's job is to make the obvious
+bypass loud, not to be a general bash sandbox. The brief layer's
+"ask via `mcp__bacio__ask_user_question` instead of reaching for raw
+SQL" rule is the complementary nudge.
+
+The supervisor-mode angle: a session that has `BACIO_AGENT_MODE=1` set
+(the BACI-129 case) is also gated by this hook, including the
+sqlite3 confinement. That's the right behaviour — a supervisor that
+needs to mutate the live DB by hand should drop
+`BACIO_AGENT_MODE` for that shell.
+
+#### Shared invariants
+
+Both deciders honour the same **fail-open** invariant as every other
 hook: stdin unreadable, JSON malformed, resolver error, symlink eval
 failure — every failure mode *allows* the call (exit 0, no deny
 payload) and logs one line to stderr. A `deny` is emitted only on a
-positive "resolved outside a known worktree root" determination. The
-pure decision function `decidePreToolUse` (`internal/cli/hook.go`) is
-unit-tested directly (`hook_pretooluse_test.go`), as is the
+positive "resolved outside a known worktree root" / "this command
+targets the live DB" determination. The pure decision functions
+`decidePreToolUse` and `decideBashSqlite3` (`internal/cli/hook.go`)
+are unit-tested directly (`hook_pretooluse_test.go`), as is the
 boundary-safe `pathWithin` helper.
 
 ### Subagent tool surface

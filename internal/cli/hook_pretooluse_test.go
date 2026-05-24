@@ -165,9 +165,10 @@ func TestDecidePreToolUseLinkedWorktreeAllowed(t *testing.T) {
 	}
 }
 
-// TestDecidePreToolUseNonWriteTool: a tool other than Write/Edit is
-// always allowed — the matcher should never deliver one, but the guard
-// defends against a matcher widening.
+// TestDecidePreToolUseNonWriteTool: decidePreToolUse only handles
+// Write/Edit — every other tool (notably Bash, since BACI-134 widened
+// the matcher to Write|Edit|Bash) is allowed here and routed to a
+// sibling decider in the caller.
 func TestDecidePreToolUseNonWriteTool(t *testing.T) {
 	in := &preToolUseInput{ToolName: "Bash", CWD: t.TempDir()}
 	in.ToolInput.FilePath = "/anywhere/at/all.go"
@@ -231,6 +232,201 @@ func TestDecidePreToolUseRelativeFilePath(t *testing.T) {
 	d := decidePreToolUse(in, func(cwd string) (string, bool) { return root, true })
 	if !d.allow {
 		t.Fatalf("expected allow for relative path under cwd, got deny: %s", d.reason)
+	}
+}
+
+// TestDecideBashSqlite3 pins the BACI-134 path-based sqlite3 confinement
+// guard: a Bash call that targets the live shared bacio DB is denied;
+// every other shape (different path, fail-open ambiguous cases, no
+// sqlite3 invocation at all) is allowed. Path-based, not verb-based —
+// even a SELECT against the live DB is denied because the guard's job
+// is to keep every interaction with the shared store going through the
+// audit-logged store boundary.
+func TestDecideBashSqlite3(t *testing.T) {
+	parent := t.TempDir()
+	liveDB := filepath.Join(parent, "home", ".bacio", "db.sqlite")
+	if err := os.MkdirAll(filepath.Dir(liveDB), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(liveDB, []byte{}, 0o644); err != nil {
+		t.Fatalf("write live db: %v", err)
+	}
+	resolveLive := func() string { return evalSymlinksLenient(liveDB) }
+
+	// A worktree-isolated DB sitting at <worktree>/.bacio/db.sqlite —
+	// the BACI-87 isolated-store shape. Different absolute path; the
+	// guard must allow it.
+	worktree := filepath.Join(parent, "worktree")
+	worktreeDB := filepath.Join(worktree, ".bacio", "db.sqlite")
+	if err := os.MkdirAll(filepath.Dir(worktreeDB), 0o755); err != nil {
+		t.Fatalf("mkdir worktree: %v", err)
+	}
+	if err := os.WriteFile(worktreeDB, []byte{}, 0o644); err != nil {
+		t.Fatalf("write worktree db: %v", err)
+	}
+
+	cases := []struct {
+		name      string
+		toolName  string
+		cwd       string
+		command   string
+		wantAllow bool
+	}{
+		{
+			name:      "delete-against-live-db",
+			toolName:  "Bash",
+			cwd:       worktree,
+			command:   `sqlite3 ` + liveDB + ` "DELETE FROM issues WHERE id=1"`,
+			wantAllow: false,
+		},
+		{
+			// Path-based, not verb-based: even a SELECT is denied
+			// because reading the shared DB with raw SQL bypasses the
+			// audit-logged read surface too. The brief points the worker
+			// at `bacio` read verbs instead.
+			name:      "select-against-live-db",
+			toolName:  "Bash",
+			cwd:       worktree,
+			command:   `sqlite3 ` + liveDB + ` "SELECT 1"`,
+			wantAllow: false,
+		},
+		{
+			name:      "worktree-isolated-db-allowed",
+			toolName:  "Bash",
+			cwd:       worktree,
+			command:   `sqlite3 ` + worktreeDB + ` "SELECT 1"`,
+			wantAllow: true,
+		},
+		{
+			// Relative path resolved against cwd (the worktree) — same
+			// absolute path as worktreeDB above, allowed.
+			name:      "relative-worktree-db-allowed",
+			toolName:  "Bash",
+			cwd:       worktree,
+			command:   `sqlite3 .bacio/db.sqlite "SELECT 1"`,
+			wantAllow: true,
+		},
+		{
+			name:      "scratch-tmp-db-allowed",
+			toolName:  "Bash",
+			cwd:       worktree,
+			command:   `sqlite3 /tmp/scratch.db "SELECT 1"`,
+			wantAllow: true,
+		},
+		{
+			name:      "no-sqlite3-token-allowed",
+			toolName:  "Bash",
+			cwd:       worktree,
+			command:   `ls -la ~/.bacio/db.sqlite`,
+			wantAllow: true,
+		},
+		{
+			// Command substitution hides the actual invocation from a
+			// plain strings.Fields tokenisation — fail-open by design.
+			name:      "command-substitution-allowed",
+			toolName:  "Bash",
+			cwd:       worktree,
+			command:   `echo $(sqlite3 ` + liveDB + ` "DELETE FROM issues")`,
+			wantAllow: true,
+		},
+		{
+			// Pipe — same fail-open reason.
+			name:      "pipe-allowed",
+			toolName:  "Bash",
+			cwd:       worktree,
+			command:   `echo "x" | sqlite3 ` + liveDB,
+			wantAllow: true,
+		},
+		{
+			// Env-var-referenced path — we can't statically resolve $X.
+			name:      "envvar-path-allowed",
+			toolName:  "Bash",
+			cwd:       worktree,
+			command:   `sqlite3 $BACIO_DB "DELETE FROM issues"`,
+			wantAllow: true,
+		},
+		{
+			name:      "empty-command-allowed",
+			toolName:  "Bash",
+			cwd:       worktree,
+			command:   ``,
+			wantAllow: true,
+		},
+		{
+			// Tool isn't Bash — this decider doesn't fire. (Write/Edit
+			// goes through decidePreToolUse instead; the caller routes.)
+			name:      "non-bash-tool-allowed",
+			toolName:  "Edit",
+			cwd:       worktree,
+			command:   `sqlite3 ` + liveDB + ` "DELETE FROM issues"`,
+			wantAllow: true,
+		},
+		{
+			// Quoted DB path resolves the same as a bare path.
+			name:      "quoted-live-db-denied",
+			toolName:  "Bash",
+			cwd:       worktree,
+			command:   `sqlite3 "` + liveDB + `" "SELECT 1"`,
+			wantAllow: false,
+		},
+		{
+			// Flags between the sqlite3 binary and the DB path are
+			// skipped — `sqlite3 -batch <live-db> ...` still denies.
+			name:      "flags-then-live-db-denied",
+			toolName:  "Bash",
+			cwd:       worktree,
+			command:   `sqlite3 -batch ` + liveDB + ` "SELECT 1"`,
+			wantAllow: false,
+		},
+		{
+			// `sqlite3` with no path at all (e.g. interactive shell or
+			// stdin-driven) — no candidate token to test, fail-open.
+			name:      "sqlite3-no-path-allowed",
+			toolName:  "Bash",
+			cwd:       worktree,
+			command:   `sqlite3 -version`,
+			wantAllow: true,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			in := &preToolUseInput{ToolName: c.toolName, CWD: c.cwd}
+			in.ToolInput.Command = c.command
+
+			d := decideBashSqlite3(in, resolveLive)
+			if d.allow != c.wantAllow {
+				t.Fatalf("decideBashSqlite3 allow=%v, want %v (reason=%q)", d.allow, c.wantAllow, d.reason)
+			}
+			if !c.wantAllow && !strings.Contains(d.reason, evalSymlinksLenient(liveDB)) {
+				t.Fatalf("deny reason should name the live DB %q; got: %s", evalSymlinksLenient(liveDB), d.reason)
+			}
+		})
+	}
+}
+
+// TestDecideBashSqlite3HomeExpansion: a `~/` prefix in the candidate
+// path is expanded against $HOME so `sqlite3 ~/.bacio/db.sqlite` is
+// recognised as targeting the live DB. Set HOME to a temp dir so the
+// test doesn't depend on the actual user's home.
+func TestDecideBashSqlite3HomeExpansion(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	liveDB := filepath.Join(home, ".bacio", "db.sqlite")
+	if err := os.MkdirAll(filepath.Dir(liveDB), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(liveDB, []byte{}, 0o644); err != nil {
+		t.Fatalf("write live db: %v", err)
+	}
+	resolveLive := func() string { return evalSymlinksLenient(liveDB) }
+
+	in := &preToolUseInput{ToolName: "Bash", CWD: t.TempDir()}
+	in.ToolInput.Command = `sqlite3 ~/.bacio/db.sqlite "DELETE FROM issues"`
+
+	d := decideBashSqlite3(in, resolveLive)
+	if d.allow {
+		t.Fatalf("expected deny for sqlite3 against ~/.bacio/db.sqlite, got allow")
 	}
 }
 
