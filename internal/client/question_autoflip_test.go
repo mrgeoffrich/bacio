@@ -2,6 +2,7 @@ package client_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/mrgeoffrich/bacio/internal/client"
@@ -120,11 +121,14 @@ func TestQuestionAutoFlipSkipsWhenIssueNotInProgress(t *testing.T) {
 	mustState(t, p, iss.Key, model.StateTodo, "todo issue should not flip")
 }
 
-// TestQuestionAutoFlipWithoutIssueKey is the no-claim path — the
-// channel records "" as the issue_key when the session isn't claiming
-// anything, and the helper must accept that without erroring or
-// touching unrelated issues.
-func TestQuestionAutoFlipWithoutIssueKey(t *testing.T) {
+// TestAddSessionQuestionRejectsEmptyIssueKey locks in BACI-128:
+// the client-side guard rejects an empty issue_key at the
+// boundary, so a buggy future caller (or a regressed channel)
+// cannot insert an orphan row that the kanban-card surface would
+// never light up on. Replaces the pre-BACI-128
+// TestQuestionAutoFlipWithoutIssueKey, which exercised the
+// dropped open-claim-best-effort path.
+func TestAddSessionQuestionRejectsEmptyIssueKey(t *testing.T) {
 	p := newPair(t)
 	defer p.cleanup()
 	ctx := context.Background()
@@ -140,11 +144,25 @@ func TestQuestionAutoFlipWithoutIssueKey(t *testing.T) {
 		t.Fatalf("UpsertAgentSession: %v", err)
 	}
 
-	if _, err := p.local.AddSessionQuestion(ctx, client.AddSessionQuestionInput{
+	_, err = p.local.AddSessionQuestion(ctx, client.AddSessionQuestionInput{
 		SessionID: sess.SessionID, IssueKey: "", Payload: simplePayload(),
 		AskedBy: "agent-x@claude.test",
-	}); err != nil {
-		t.Fatalf("AddSessionQuestion: %v", err)
+	})
+	if err == nil {
+		t.Fatalf("AddSessionQuestion with empty IssueKey must error (BACI-128 boundary guard)")
+	}
+	if !strings.Contains(err.Error(), "issue_key is required") {
+		t.Fatalf("AddSessionQuestion empty-issue error %q should mention issue_key requirement", err.Error())
+	}
+
+	// Belt-and-braces: a malformed-but-non-empty issue_key trips the
+	// same boundary and never reaches the store.
+	_, err = p.local.AddSessionQuestion(ctx, client.AddSessionQuestionInput{
+		SessionID: sess.SessionID, IssueKey: "BACI-foo", Payload: simplePayload(),
+		AskedBy: "agent-x@claude.test",
+	})
+	if err == nil {
+		t.Fatalf("AddSessionQuestion with malformed IssueKey must error (BACI-128 boundary guard)")
 	}
 }
 

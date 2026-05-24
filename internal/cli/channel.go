@@ -366,16 +366,17 @@ func (s *channelSource) Register(ctx context.Context, sessionID, modelID string)
 // the channel. The session is resolved by walking the channel's
 // (host, claudePID) coordinates — the same join the dispatch
 // drain uses — and the most-recently-active session is picked
-// when more than one matches. The session's open-claim issue
-// key is stamped onto the row when there is one (so per-issue
-// surfaces can light up). The agent identity slug recorded
-// against `asked_by` comes from the channel's hintedAgentName()
-// helper (an empty string falls back to "bacio-channel").
+// when more than one matches. issueID is the canonical issue key
+// the channel parsed and validated from the MCP tool args
+// (BACI-128); it is stamped onto the row verbatim. The agent
+// identity slug recorded against `asked_by` comes from the
+// channel's hintedAgentName() helper (an empty string falls back
+// to "bacio-channel").
 //
 // Returns the row's request_uuid — the channel uses this as the
 // in-memory key to correlate the parked JSON-RPC reply with the
 // answered row on the next poll tick.
-func (s *channelSource) AskQuestion(ctx context.Context, payload model.QuestionPayload) (string, error) {
+func (s *channelSource) AskQuestion(ctx context.Context, issueID string, payload model.QuestionPayload) (string, error) {
 	if s.repo == nil || s.claudePID == 0 {
 		return "", fmt.Errorf("bacio channel: no resolved repo / claude_pid — cannot record question")
 	}
@@ -390,13 +391,9 @@ func (s *channelSource) AskQuestion(ctx context.Context, payload model.QuestionP
 	if askedBy == "" {
 		askedBy = "bacio-channel"
 	}
-	// Stamp the issue key from the session's most recent open
-	// claim, when one exists — best-effort, the row records "" if
-	// the session isn't claiming anything right now.
-	issueKey := s.openClaimIssueKey(ctx, sess)
 	q, err := s.c.AddSessionQuestion(ctx, client.AddSessionQuestionInput{
 		SessionID: sess.SessionID,
-		IssueKey:  issueKey,
+		IssueKey:  issueID,
 		Payload:   payload,
 		AskedBy:   askedBy,
 	})
@@ -474,30 +471,6 @@ func (s *channelSource) pickLiveSession(ctx context.Context) (*model.AgentSessio
 		}
 	}
 	return best, nil
-}
-
-// openClaimIssueKey returns the most-recent open-claim issue key
-// for the session, or "" when none. Best effort — a transient
-// query error returns "" so the ask still proceeds (the issue
-// stamp is informational, not required).
-func (s *channelSource) openClaimIssueKey(ctx context.Context, sess *model.AgentSession) string {
-	view, err := s.c.ShowAgentSession(ctx, sess.SessionID)
-	if err != nil {
-		return ""
-	}
-	var newest *model.AgentClaim
-	for _, c := range view.Claims {
-		if c == nil || c.ReleasedAt != nil {
-			continue
-		}
-		if newest == nil || c.ClaimedAt.After(newest.ClaimedAt) {
-			newest = c
-		}
-	}
-	if newest == nil {
-		return ""
-	}
-	return newest.IssueKey
 }
 
 // EnsureSetup walks the open sessions for this channel's (host,

@@ -486,8 +486,17 @@ Once a dispatched per-mode subagent finishes, the supervisor attaches
 that subagent's transcript to the issue so a later reviewer can open
 the ticket and read exactly what the worker did. The dispatch preamble
 instructs the supervisor to call `mcp__bacio__attach_transcript` after
-`Task` returns (with the issue key and the `agentId` from the `Task`
+`Task` returns (with the `issue_id` and the `agent_id` from the `Task`
 result), then `mcp__bacio__reply` to ack the dispatch.
+
+**MCP arg naming — `issue_id` (BACI-128).** Both `attach_transcript`
+and `ask_user_question` take the canonical issue key as an `issue_id`
+arg. The `issue_id` is required on both tools — `ask_user_question`
+without one parks an orphan row that the kanban-card pill surface
+filters out, so the channel hard-rejects a missing or malformed value
+with an MCP tool error before any row is inserted. Internally bacio
+still calls the column `issue_key`; the MCP tool surface alone uses
+`issue_id` for consistency.
 
 **Transcript location contract.** Claude Code 2.1.x persists every
 `Task`-spawned subagent's conversation at
