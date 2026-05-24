@@ -73,6 +73,18 @@ func Open(path string) (*Store, error) {
 	if err := pruneAgentSessions(db, AgentSessionRetention); err != nil {
 		fmt.Fprintln(os.Stderr, "bacio: warning: agent-session prune failed:", err)
 	}
+	// BACI-140: agent_claims.issue_id has ON DELETE CASCADE + foreign_keys
+	// ON, so an orphan should be impossible. But raw `sqlite3` writes
+	// from pre-BACI-134 smoke-test scaffolding bypassed the cascade and
+	// left rows pointing at vanished issues, which then crashes
+	// EndAgentSession (`sql: no rows in result set`) and stalls the idle
+	// pinger. Sweep them at Open so the reaper can make progress; a
+	// recurrence here means a future code path is bypassing the FK.
+	if n, err := pruneOrphanAgentClaims(db); err != nil {
+		fmt.Fprintln(os.Stderr, "bacio: warning: orphan agent_claims prune failed:", err)
+	} else if n > 0 {
+		fmt.Fprintf(os.Stderr, "bacio: warning: orphan agent_claims pruned: %d\n", n)
+	}
 	if err := pruneDispatches(db, AgentDispatchRetention); err != nil {
 		fmt.Fprintln(os.Stderr, "bacio: warning: dispatch prune failed:", err)
 	}
