@@ -124,6 +124,14 @@ func (c *remoteClient) ShowAgentSession(ctx context.Context, sessionID string) (
 	return &out, nil
 }
 
+// OpenClaimsForSession isn't wired over HTTP — the BACI-126b gate is a
+// CLI-only guard for now (the API doesn't auto-bind a session id to a
+// request). Return ErrLocalOnly so an agent that's mid-conversion to
+// --remote gets a clear error.
+func (c *remoteClient) OpenClaimsForSession(ctx context.Context, sessionID string) ([]string, error) {
+	return nil, ErrLocalOnly
+}
+
 func (c *remoteClient) ListOpenClaims(ctx context.Context, repo *model.Repo) ([]*model.AgentClaim, error) {
 	path := "/agents/claims/open"
 	if repo != nil {

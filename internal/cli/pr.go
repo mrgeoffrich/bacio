@@ -12,7 +12,11 @@ import (
 )
 
 func newPRCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "pr", Short: "Attach pull requests to an issue"}
+	cmd := &cobra.Command{
+		Use:               "pr",
+		Short:             "Attach pull requests to an issue",
+		PersistentPreRunE: requireClaimForGroup, // BACI-126b
+	}
 	cmd.AddCommand(prAttachCmd(), prDetachCmd(), prListCmd())
 	return cmd
 }

@@ -400,7 +400,7 @@ func TestAgentReleaseHappy(t *testing.T) {
 		map[string]any{"issue_key": iss.Key},
 		map[string]string{"X-Actor": "agent-alice"})
 	resp, body := apiReq(t, "DELETE", ts.URL+"/agents/sessions/"+sid+"/claims",
-		map[string]any{"issue_key": iss.Key},
+		map[string]any{"issue_key": iss.Key, "final_state": "in_review"},
 		map[string]string{"X-Actor": "agent-alice"})
 	if resp.StatusCode != 200 {
 		t.Fatalf("status: %d body: %s", resp.StatusCode, body)
@@ -408,6 +408,10 @@ func TestAgentReleaseHappy(t *testing.T) {
 	updated, _ := s.GetIssueByID(iss.ID)
 	if updated.Assignee != "" {
 		t.Fatalf("release did not clear assignee: %q", updated.Assignee)
+	}
+	// BACI-126c: the release also moves the issue to the supplied final state.
+	if updated.State != model.StateInReview {
+		t.Fatalf("release did not move state: %q, want in_review", updated.State)
 	}
 }
 
@@ -418,9 +422,32 @@ func TestAgentReleaseNoClaim(t *testing.T) {
 	sid := uuidFor("sess-r")
 	registerSession(t, ts.URL, "MINI", sid, nil)
 	resp, _ := apiReq(t, "DELETE", ts.URL+"/agents/sessions/"+sid+"/claims",
-		map[string]any{"issue_key": iss.Key}, nil)
+		map[string]any{"issue_key": iss.Key, "final_state": "in_review"}, nil)
 	if resp.StatusCode != 404 {
 		t.Fatalf("status: %d", resp.StatusCode)
+	}
+}
+
+// TestAgentReleaseRequiresFinalState locks in BACI-126c: a release
+// without final_state is a hard 400 — the protocol now demands the
+// agent declare what state the work is being left in.
+func TestAgentReleaseRequiresFinalState(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	iss := seedIssue(t, s, repo, "first")
+	sid := uuidFor("sess-r")
+	registerSession(t, ts.URL, "MINI", sid, nil)
+	apiReq(t, "POST", ts.URL+"/agents/sessions/"+sid+"/claims",
+		map[string]any{"issue_key": iss.Key},
+		map[string]string{"X-Actor": "agent-alice"})
+	resp, body := apiReq(t, "DELETE", ts.URL+"/agents/sessions/"+sid+"/claims",
+		map[string]any{"issue_key": iss.Key},
+		map[string]string{"X-Actor": "agent-alice"})
+	if resp.StatusCode != 400 {
+		t.Fatalf("status: %d body: %s", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), "final_state") {
+		t.Fatalf("expected error to mention final_state, got: %s", body)
 	}
 }
 
@@ -634,7 +661,7 @@ func TestAgentOpenClaimsExcludesReleased(t *testing.T) {
 		map[string]any{"issue_key": iss.Key},
 		map[string]string{"X-Actor": "agent-alice"})
 	apiReq(t, "DELETE", ts.URL+"/agents/sessions/"+sid+"/claims",
-		map[string]any{"issue_key": iss.Key},
+		map[string]any{"issue_key": iss.Key, "final_state": "in_review"},
 		map[string]string{"X-Actor": "agent-alice"})
 	resp, body := apiGet(t, ts.URL+"/repos/MINI/agents/claims/open")
 	if resp.StatusCode != 200 {

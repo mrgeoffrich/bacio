@@ -263,6 +263,26 @@ type AssigneeChange struct {
 // Changed reports whether the assignee actually moved.
 func (a AssigneeChange) Changed() bool { return a.Old != a.New }
 
+// StateChange describes an issues.state mutation a claim/release made
+// as a side effect of keeping the worker protocol honest (BACI-126):
+// claim auto-moves the issue to in_progress, release moves it to the
+// caller-supplied final state. The client / API layers fold a *changed*
+// StateChange into the `agent.claim` / `agent.release` audit row's
+// Details string rather than emitting a separate `issue.state` row, so
+// a reader of `bacio history` sees one combined entry per operation.
+// Old == New means the store looked but nothing moved.
+type StateChange struct {
+	IssueID    int64
+	IssueKey   string
+	RepoID     int64
+	RepoPrefix string
+	Old        model.State
+	New        model.State
+}
+
+// Changed reports whether the state actually moved.
+func (s StateChange) Changed() bool { return s.Old != s.New }
+
 // sessionIdentity resolves the assignee string for a session: the
 // linked agent identity slug if the session has one, else the session's
 // actor (itself validated at register time). Never the OS user.
@@ -386,17 +406,24 @@ type CancelledDispatchInfo struct {
 // the agent identity's last live session. The caller writes one
 // `agent.cancel` audit row per entry so the auto-cancel is visible in
 // `bacio history` next to the originating `agent.end`.
-func (s *Store) EndAgentSession(sessionID, reason string) (*model.AgentSession, []AssigneeChange, []CancelledDispatchInfo, error) {
+//
+// BACI-126c: orphanState is the state every auto-released claim's
+// issue lands in (typically `in_progress` — the "work abandoned" default
+// the agent end flow picks when it doesn't know better). The fourth
+// return value carries one StateChange per claimed issue whose state
+// actually moved, so the caller can fold them into the per-issue audit
+// rows next to the cascaded `agent.release` entries.
+func (s *Store) EndAgentSession(sessionID, reason string, orphanState model.State) (*model.AgentSession, []AssigneeChange, []StateChange, []CancelledDispatchInfo, error) {
 	if _, err := ValidateSessionID(sessionID); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	parsed, err := model.ParseEndReason(reason)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	tx, err := s.DB.Begin()
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	defer tx.Rollback()
 
@@ -410,18 +437,18 @@ func (s *Store) EndAgentSession(sessionID, reason string) (*model.AgentSession, 
 		// obvious to future readers).
 		_ = tx.Rollback()
 		sess, err := s.GetAgentSession(sessionID)
-		return sess, nil, nil, err
+		return sess, nil, nil, nil, err
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	var sessPK int64
 	if err := tx.QueryRow(`SELECT id FROM agent_sessions WHERE session_id = ?`, sessionID).Scan(&sessPK); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil, nil, ErrNotFound
+			return nil, nil, nil, nil, ErrNotFound
 		}
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	// Capture the issues this session is about to auto-release *before*
@@ -431,20 +458,20 @@ func (s *Store) EndAgentSession(sessionID, reason string) (*model.AgentSession, 
 		`SELECT DISTINCT issue_id FROM agent_claims WHERE released_at IS NULL AND session_pk = ?`, sessPK,
 	)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	var issueIDs []int64
 	for claimedRows.Next() {
 		var id int64
 		if err := claimedRows.Scan(&id); err != nil {
 			claimedRows.Close()
-			return nil, nil, nil, err
+			return nil, nil, nil, nil, err
 		}
 		issueIDs = append(issueIDs, id)
 	}
 	if err := claimedRows.Err(); err != nil {
 		claimedRows.Close()
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	claimedRows.Close()
 
@@ -453,44 +480,57 @@ func (s *Store) EndAgentSession(sessionID, reason string) (*model.AgentSession, 
 		string(parsed), sessionID,
 	)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return nil, nil, nil, ErrNotFound
+		return nil, nil, nil, nil, ErrNotFound
 	}
 	if _, err := tx.Exec(
 		`UPDATE agent_claims SET released_at = CURRENT_TIMESTAMP WHERE released_at IS NULL AND session_pk = ?`,
 		sessPK,
 	); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	identity, err := sessionIdentity(tx, sessPK)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
-	var changes []AssigneeChange
+	var assigneeChanges []AssigneeChange
+	var stateChanges []StateChange
 	for _, issueID := range issueIDs {
 		ch, err := clearAssigneeIfOwned(tx, issueID, identity)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, nil, err
 		}
 		if ch.Changed() {
-			changes = append(changes, *ch)
+			assigneeChanges = append(assigneeChanges, *ch)
+		}
+		// BACI-126c: cascade the orphan state to every auto-released
+		// claim's issue. Skip when orphanState is empty — the legacy
+		// "leave the state alone" behaviour the supersede path uses.
+		if orphanState != "" {
+			sc, err := setIssueStateForRelease(tx, issueID, orphanState)
+			if err != nil {
+				return nil, nil, nil, nil, err
+			}
+			if sc.Changed() {
+				stateChanges = append(stateChanges, *sc)
+			}
 		}
 	}
 
 	cancelled, err := cancelOpenDispatchesForSession(tx, sessPK, sessionID)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	if err := tx.Commit(); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	sess, err := s.GetAgentSession(sessionID)
-	return sess, changes, cancelled, err
+	return sess, assigneeChanges, stateChanges, cancelled, err
 }
 
 // cancelOpenDispatchesForSession cancels the session's open
@@ -637,17 +677,24 @@ func cancelOpenDispatchesForSession(tx *sql.Tx, sessPK int64, sessionID string) 
 // same transaction, so the claim and the assignee can never drift. The
 // returned *AssigneeChange describes that mutation for the audit log; it
 // is nil on the no-op re-claim path.
-func (s *Store) AddAgentClaim(sessionID string, issueID int64, prompt string) (*model.AgentClaim, bool, *AssigneeChange, error) {
+//
+// BACI-126a: a freshly-created claim also auto-transitions the issue to
+// `in_progress` inside the same transaction, regardless of its current
+// state. The returned *StateChange describes that move for the audit
+// log — Old == New when the issue was already in_progress (no SQL
+// write happened either, thanks to the predicate). nil on the no-op
+// re-claim path.
+func (s *Store) AddAgentClaim(sessionID string, issueID int64, prompt string) (*model.AgentClaim, bool, *AssigneeChange, *StateChange, error) {
 	if _, err := ValidateSessionID(sessionID); err != nil {
-		return nil, false, nil, err
+		return nil, false, nil, nil, err
 	}
 	prompt, err := ValidateBody(prompt, "prompt", false)
 	if err != nil {
-		return nil, false, nil, err
+		return nil, false, nil, nil, err
 	}
 	tx, err := s.DB.Begin()
 	if err != nil {
-		return nil, false, nil, err
+		return nil, false, nil, nil, err
 	}
 	defer tx.Rollback()
 
@@ -655,13 +702,13 @@ func (s *Store) AddAgentClaim(sessionID string, issueID int64, prompt string) (*
 	var ended sql.NullTime
 	err = tx.QueryRow(`SELECT id, ended_at FROM agent_sessions WHERE session_id = ?`, sessionID).Scan(&sessPK, &ended)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, false, nil, fmt.Errorf("session %q is not registered", sessionID)
+		return nil, false, nil, nil, fmt.Errorf("session %q is not registered", sessionID)
 	}
 	if err != nil {
-		return nil, false, nil, err
+		return nil, false, nil, nil, err
 	}
 	if ended.Valid {
-		return nil, false, nil, fmt.Errorf("session %q is already ended; cannot claim", sessionID)
+		return nil, false, nil, nil, fmt.Errorf("session %q is already ended; cannot claim", sessionID)
 	}
 
 	var existing int64
@@ -669,21 +716,22 @@ func (s *Store) AddAgentClaim(sessionID string, issueID int64, prompt string) (*
 	if err == nil {
 		// No-op re-claim. If the caller supplied a fresher prompt, update
 		// it in place — the claim row still counts as "not created" so the
-		// audit log isn't flooded by a poll loop. Ownership is unchanged,
-		// so the assignee is left alone (nil AssigneeChange).
+		// audit log isn't flooded by a poll loop. Ownership and state are
+		// unchanged, so the assignee and state side-effects are skipped
+		// (nil AssigneeChange / StateChange).
 		if prompt != "" {
 			if _, err := tx.Exec(`UPDATE agent_claims SET prompt = ? WHERE id = ?`, prompt, existing); err != nil {
-				return nil, false, nil, err
+				return nil, false, nil, nil, err
 			}
 		}
 		if err := tx.Commit(); err != nil {
-			return nil, false, nil, err
+			return nil, false, nil, nil, err
 		}
 		c, err := s.getAgentClaimByID(existing)
-		return c, false, nil, err
+		return c, false, nil, nil, err
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return nil, false, nil, err
+		return nil, false, nil, nil, err
 	}
 
 	res, err := tx.Exec(
@@ -691,24 +739,32 @@ func (s *Store) AddAgentClaim(sessionID string, issueID int64, prompt string) (*
 		sessPK, issueID, prompt,
 	)
 	if err != nil {
-		return nil, false, nil, err
+		return nil, false, nil, nil, err
 	}
 	id, err := res.LastInsertId()
 	if err != nil {
-		return nil, false, nil, err
+		return nil, false, nil, nil, err
 	}
 	if _, err := tx.Exec(
 		`UPDATE agent_sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?`, sessPK,
 	); err != nil {
-		return nil, false, nil, err
+		return nil, false, nil, nil, err
 	}
 	identity, err := sessionIdentity(tx, sessPK)
 	if err != nil {
-		return nil, false, nil, err
+		return nil, false, nil, nil, err
 	}
 	change, err := applyClaimAssignee(tx, issueID, identity)
 	if err != nil {
-		return nil, false, nil, err
+		return nil, false, nil, nil, err
+	}
+	// BACI-126a: auto-transition the issue to in_progress, regardless of
+	// its current state. The predicate makes the UPDATE a no-op when the
+	// row is already in_progress, so the audit row reads cleanly in that
+	// case (Old == New, client skips the state clause).
+	stateChange, err := setIssueStateForClaim(tx, issueID)
+	if err != nil {
+		return nil, false, nil, nil, err
 	}
 	// A fresh open claim clears the issue's waiting_for_claim flag — an
 	// agent has picked the work up, so the dispatch→claim gap is closed.
@@ -716,13 +772,47 @@ func (s *Store) AddAgentClaim(sessionID string, issueID int64, prompt string) (*
 	if _, err := tx.Exec(
 		`UPDATE issues SET waiting_for_claim = 0 WHERE id = ?`, issueID,
 	); err != nil {
-		return nil, false, nil, err
+		return nil, false, nil, nil, err
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, false, nil, err
+		return nil, false, nil, nil, err
 	}
 	c, err := s.getAgentClaimByID(id)
-	return c, true, change, err
+	return c, true, change, stateChange, err
+}
+
+// setIssueStateForClaim moves the issue to in_progress inside the
+// caller's tx and returns the before/after for the audit row. The SQL
+// predicate `state != 'in_progress'` makes the UPDATE a no-op when the
+// row is already in_progress — the returned StateChange still
+// describes the (unchanged) state so the caller has the IssueKey and
+// repo prefix it needs without a second read.
+func setIssueStateForClaim(tx *sql.Tx, issueID int64) (*StateChange, error) {
+	var oldState string
+	var repoID int64
+	var prefix string
+	var number int64
+	if err := tx.QueryRow(
+		`SELECT i.state, i.repo_id, r.prefix, i.number FROM issues i JOIN repos r ON r.id = i.repo_id WHERE i.id = ?`,
+		issueID,
+	).Scan(&oldState, &repoID, &prefix, &number); err != nil {
+		return nil, err
+	}
+	ch := &StateChange{
+		IssueID: issueID, IssueKey: fmt.Sprintf("%s-%d", prefix, number),
+		RepoID: repoID, RepoPrefix: prefix,
+		Old: model.State(oldState), New: model.StateInProgress,
+	}
+	if model.State(oldState) == model.StateInProgress {
+		return ch, nil // already in_progress — SQL no-op too
+	}
+	if _, err := tx.Exec(
+		`UPDATE issues SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND state != ?`,
+		string(model.StateInProgress), issueID, string(model.StateInProgress),
+	); err != nil {
+		return nil, err
+	}
+	return ch, nil
 }
 
 // ReleaseAgentClaim stamps released_at on the latest open claim for
@@ -733,23 +823,29 @@ func (s *Store) AddAgentClaim(sessionID string, issueID int64, prompt string) (*
 // identity (clearAssigneeIfOwned's guard preserves a human's deliberate
 // reassignment). The returned *AssigneeChange describes that mutation
 // for the audit log — Old == New when nothing was cleared.
-func (s *Store) ReleaseAgentClaim(sessionID string, issueID int64) (*model.AgentClaim, *AssigneeChange, error) {
+//
+// BACI-126c: finalState is the state the issue lands in, applied
+// atomically in the same transaction. Required — the caller has
+// validated it via model.ParseState. The returned *StateChange
+// describes the move for the audit log; Old == New when the issue was
+// already in the requested state (no SQL write happened).
+func (s *Store) ReleaseAgentClaim(sessionID string, issueID int64, finalState model.State) (*model.AgentClaim, *AssigneeChange, *StateChange, error) {
 	if _, err := ValidateSessionID(sessionID); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	tx, err := s.DB.Begin()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	defer tx.Rollback()
 
 	var sessPK int64
 	err = tx.QueryRow(`SELECT id FROM agent_sessions WHERE session_id = ?`, sessionID).Scan(&sessPK)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil, fmt.Errorf("session %q is not registered", sessionID)
+		return nil, nil, nil, fmt.Errorf("session %q is not registered", sessionID)
 	}
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	var claimID int64
@@ -758,30 +854,69 @@ func (s *Store) ReleaseAgentClaim(sessionID string, issueID int64) (*model.Agent
 		sessPK, issueID,
 	).Scan(&claimID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil, ErrNotFound
+		return nil, nil, nil, ErrNotFound
 	}
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if _, err := tx.Exec(`UPDATE agent_claims SET released_at = CURRENT_TIMESTAMP WHERE id = ?`, claimID); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if _, err := tx.Exec(`UPDATE agent_sessions SET last_seen_at = CURRENT_TIMESTAMP WHERE id = ?`, sessPK); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	identity, err := sessionIdentity(tx, sessPK)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	change, err := clearAssigneeIfOwned(tx, issueID, identity)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
+	}
+	// BACI-126c: apply the caller-supplied final state inside the same tx
+	// so the release and the state move land atomically.
+	stateChange, err := setIssueStateForRelease(tx, issueID, finalState)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	claim, err := s.getAgentClaimByID(claimID)
-	return claim, change, err
+	return claim, change, stateChange, err
+}
+
+// setIssueStateForRelease moves the issue to the caller-supplied final
+// state inside the caller's tx and returns the before/after for the
+// audit row. Mirrors setIssueStateForClaim — the predicate makes the
+// UPDATE a no-op when state is already at the target so the audit row
+// reads cleanly (Old == New, client skips the state clause).
+func setIssueStateForRelease(tx *sql.Tx, issueID int64, target model.State) (*StateChange, error) {
+	var oldState string
+	var repoID int64
+	var prefix string
+	var number int64
+	if err := tx.QueryRow(
+		`SELECT i.state, i.repo_id, r.prefix, i.number FROM issues i JOIN repos r ON r.id = i.repo_id WHERE i.id = ?`,
+		issueID,
+	).Scan(&oldState, &repoID, &prefix, &number); err != nil {
+		return nil, err
+	}
+	ch := &StateChange{
+		IssueID: issueID, IssueKey: fmt.Sprintf("%s-%d", prefix, number),
+		RepoID: repoID, RepoPrefix: prefix,
+		Old: model.State(oldState), New: target,
+	}
+	if model.State(oldState) == target {
+		return ch, nil
+	}
+	if _, err := tx.Exec(
+		`UPDATE issues SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND state != ?`,
+		string(target), issueID, string(target),
+	); err != nil {
+		return nil, err
+	}
+	return ch, nil
 }
 
 // AgentSessionFilter scopes ListAgentSessions. Zero value = all
@@ -973,6 +1108,39 @@ func (s *Store) ListClaimsForIssue(issueID int64) ([]*model.AgentClaim, error) {
 		JOIN issues i ON i.id = c.issue_id
 		JOIN repos r ON r.id = i.repo_id
 		WHERE c.issue_id = ? ORDER BY c.claimed_at DESC`, issueID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.AgentClaim
+	for rows.Next() {
+		c, err := scanAgentClaim(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// OpenClaimsForSession returns the open (unreleased) claims for one
+// alive session, joined to the issue key for the BACI-126b agent gate.
+// Empty slice when the session is unknown, ended, or holds no open
+// claims. Mirrors OpenClaimsBySession's columns; single query.
+func (s *Store) OpenClaimsForSession(sessionID string) ([]*model.AgentClaim, error) {
+	if _, err := ValidateSessionID(sessionID); err != nil {
+		return nil, err
+	}
+	rows, err := s.DB.Query(
+		`SELECT c.id, c.session_pk, s.session_id, a.name, c.issue_id, r.prefix || '-' || i.number, c.prompt, c.claimed_at, c.released_at
+		FROM agent_claims c
+		JOIN agent_sessions s ON s.id = c.session_pk
+		LEFT JOIN agents a ON a.id = s.agent_id
+		JOIN issues i ON i.id = c.issue_id
+		JOIN repos r ON r.id = i.repo_id
+		WHERE c.released_at IS NULL AND s.ended_at IS NULL AND s.session_id = ?
+		ORDER BY c.claimed_at DESC`, sessionID,
 	)
 	if err != nil {
 		return nil, err

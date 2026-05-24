@@ -12,7 +12,11 @@ import (
 )
 
 func newTagCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "tag", Short: "Manage tags on issues"}
+	cmd := &cobra.Command{
+		Use:               "tag",
+		Short:             "Manage tags on issues",
+		PersistentPreRunE: requireClaimForGroup, // BACI-126b
+	}
 	cmd.AddCommand(tagAddCmd(), tagRmCmd())
 	return cmd
 }

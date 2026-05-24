@@ -47,9 +47,18 @@ type AgentHeartbeatInput struct {
 // `presumed_dead` is normally written by the bacio idle-pinger
 // reaper (BACI-57) rather than by an agent, but the CLI accepts it
 // for symmetry with the model layer.
+//
+// StateOnOrphan is the state every auto-released claim's issue lands
+// in when `agent end` cascades a release on every open claim the
+// session holds (BACI-126c). Optional — defaults to "in_progress"
+// (typical `agent end` fires when the harness stops, so the work is
+// abandoned, not finished; leaving the issue at in_progress lets the
+// next agent or the user pick the ticket up). Must be a valid issue
+// state when set.
 type AgentEndInput struct {
-	SessionID string `json:"session_id"`
-	Reason    string `json:"reason"`
+	SessionID     string `json:"session_id"`
+	Reason        string `json:"reason"`
+	StateOnOrphan string `json:"state_on_orphan,omitempty"`
 }
 
 // AgentClaimInput is the payload for `bacio agent claim --json`.
@@ -63,9 +72,17 @@ type AgentClaimInput struct {
 }
 
 // AgentReleaseInput is the payload for `bacio agent release --json`.
+//
+// FinalState is the issue state the release leaves the issue in
+// (BACI-126c). Required — pass any valid issue state (`todo`,
+// `in_progress`, `needs_action`, `in_review`, `done`, `cancelled`).
+// `in_progress` is legal — "I am stepping away, work is not finished"
+// — but must be declared explicitly. There is no implicit default;
+// missing or empty is a hard error.
 type AgentReleaseInput struct {
-	SessionID string `json:"session_id"`
-	IssueKey  string `json:"issue_key"`
+	SessionID  string `json:"session_id"`
+	IssueKey   string `json:"issue_key"`
+	FinalState string `json:"final_state"`
 }
 
 // AgentDispatchInput is the payload for `bacio agent dispatch --json`.

@@ -168,8 +168,19 @@ func setupClaimedIssue(t *testing.T, p *pair, sessionID string, state model.Stat
 	if err != nil {
 		t.Fatalf("UpsertAgentSession: %v", err)
 	}
-	if _, _, _, err := p.store.AddAgentClaim(sess.SessionID, iss.ID, ""); err != nil {
+	if _, _, _, _, err := p.store.AddAgentClaim(sess.SessionID, iss.ID, ""); err != nil {
 		t.Fatalf("AddAgentClaim: %v", err)
+	}
+	// BACI-126a: AddAgentClaim auto-moves the issue to in_progress, but
+	// these tests need to verify auto-flip behaviour across the full
+	// state space. Stamp the requested state back after the claim so the
+	// fixture starts in the state the test asks for, regardless of the
+	// claim's implicit transition.
+	if state != model.StateInProgress {
+		if err := p.store.SetIssueState(iss.ID, state); err != nil {
+			t.Fatalf("SetIssueState: %v", err)
+		}
+		iss.State = state
 	}
 	return iss, sess
 }

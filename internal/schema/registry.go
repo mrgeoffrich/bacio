@@ -71,9 +71,9 @@ var Registry = []Entry{
 
 	{"agent.register", "Register (or refresh) an AI-agent session against the current repo.", typeOf[inputs.AgentRegisterInput](), inputs.ExampleAgentRegister},
 	{"agent.heartbeat", "Bump last_seen_at on an existing agent session (optional — register / claim / release already bump it).", typeOf[inputs.AgentHeartbeatInput](), inputs.ExampleAgentHeartbeat},
-	{"agent.end", "End an agent session and auto-release every open claim it holds (unassigning any issue left with no open claims).", typeOf[inputs.AgentEndInput](), inputs.ExampleAgentEnd},
-	{"agent.claim", "Focus an agent on an issue — records the claim and stamps the issue's assignee with the claiming identity (does not move the issue's state).", typeOf[inputs.AgentClaimInput](), inputs.ExampleAgentClaim},
-	{"agent.release", "Release an agent's claim on an issue — clears the assignee once the issue has no open claims left (does not move the issue's state).", typeOf[inputs.AgentReleaseInput](), inputs.ExampleAgentRelease},
+	{"agent.end", "End an agent session and auto-release every open claim it holds (unassigning any issue left with no open claims). BACI-126c: each cascaded release moves its issue to `state_on_orphan` (default: in_progress — the \"work abandoned\" default for a Stop/clear-driven end).", typeOf[inputs.AgentEndInput](), inputs.ExampleAgentEnd},
+	{"agent.claim", "Focus an agent on an issue — records the claim, stamps the issue's assignee with the claiming identity, and auto-transitions the issue to in_progress regardless of source state (BACI-126a). No-op on a re-claim by the same session.", typeOf[inputs.AgentClaimInput](), inputs.ExampleAgentClaim},
+	{"agent.release", "Release an agent's claim on an issue — clears the assignee once the issue has no open claims left, and moves the issue to the required `final_state` atomically (BACI-126c). final_state must be a valid issue state; in_progress is legal (explicit \"work not finished\" intent).", typeOf[inputs.AgentReleaseInput](), inputs.ExampleAgentRelease},
 	{"agent.dispatch", "Queue a unit of work (an issue, an instruction) for an agent identity and/or a session.", typeOf[inputs.AgentDispatchInput](), inputs.ExampleAgentDispatch},
 	{"agent.ack", "Acknowledge a dispatch and record an optional reply note.", typeOf[inputs.AgentAckInput](), inputs.ExampleAgentAck},
 	{"agent.cancel", "Cancel a pending or delivered dispatch and clear the targeted issue's waiting_for_claim flag.", typeOf[inputs.AgentCancelInput](), inputs.ExampleAgentCancel},

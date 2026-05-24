@@ -262,7 +262,11 @@ func (c *localClient) supersedeStaleSessions(host string, claudePID int64, keepI
 		if s.SessionID == keepID {
 			continue
 		}
-		ended, _, _, err := c.store.EndAgentSession(s.SessionID, string(model.EndReasonSuperseded))
+		// Supersede path: end the phantom row with an empty orphanState so
+		// the claim cascade leaves issue state alone. The phantom session
+		// only exists because a non-UUID register clobbered it; its
+		// claims (if any) should not be retroactively state-mutated.
+		ended, _, _, _, err := c.store.EndAgentSession(s.SessionID, string(model.EndReasonSuperseded), "")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "bacio: superseding stale session %s: %v\n", s.SessionID, err)
 			continue
@@ -343,6 +347,17 @@ func (c *localClient) EndAgent(ctx context.Context, repo *model.Repo, in inputs.
 	if _, err := model.ParseEndReason(in.Reason); err != nil {
 		return nil, err
 	}
+	// BACI-126c: state_on_orphan defaults to in_progress when unset — the
+	// "work abandoned, not finished" default for a Stop/clear-driven
+	// agent end. Validated via ParseState so dash/space variants work.
+	orphanState := model.StateInProgress
+	if strings.TrimSpace(in.StateOnOrphan) != "" {
+		parsed, err := model.ParseState(in.StateOnOrphan)
+		if err != nil {
+			return nil, fmt.Errorf("state_on_orphan: %w", err)
+		}
+		orphanState = parsed
+	}
 	existing, err := c.store.GetAgentSession(in.SessionID)
 	if err != nil {
 		return nil, err
@@ -354,7 +369,7 @@ func (c *localClient) EndAgent(ctx context.Context, repo *model.Repo, in inputs.
 		projected.EndReason = in.Reason
 		return &projected, nil
 	}
-	sess, assigneeChanges, cancelled, err := c.store.EndAgentSession(in.SessionID, in.Reason)
+	sess, assigneeChanges, stateChanges, cancelled, err := c.store.EndAgentSession(in.SessionID, in.Reason, orphanState)
 	if err != nil {
 		return nil, err
 	}
@@ -367,6 +382,12 @@ func (c *localClient) EndAgent(ctx context.Context, repo *model.Repo, in inputs.
 	// Auto-releasing claims may have unassigned issues — audit each one.
 	for _, ch := range assigneeChanges {
 		c.recordAssigneeChange(ch)
+	}
+	// BACI-126c: a cascaded release that moved an issue's state writes a
+	// per-issue `issue.state` audit row tagged with the auto-release
+	// reason so a reader can distinguish it from a deliberate state move.
+	for _, sc := range stateChanges {
+		c.recordOrphanStateChange(sc, sess.SessionID)
 	}
 	// BACI-58 §B — record per-row agent.cancel history for every
 	// dispatch the end-session tx auto-cancelled. The "auto-cancel:"
@@ -382,6 +403,24 @@ func (c *localClient) EndAgent(ctx context.Context, repo *model.Repo, in inputs.
 		})
 	}
 	return sess, nil
+}
+
+// recordOrphanStateChange writes the issue.state audit row for a state
+// move made as a side effect of a cascaded `agent end` release
+// (BACI-126c). Mirrors recordAssigneeChange's shape; the details
+// string names the originating session and the auto-release reason so
+// `bacio history --op issue.state` makes the cascade visible.
+func (c *localClient) recordOrphanStateChange(ch store.StateChange, sessionID string) {
+	if !ch.Changed() {
+		return
+	}
+	repoID, issueID := ch.RepoID, ch.IssueID
+	c.recordOp(model.HistoryEntry{
+		RepoID: &repoID, RepoPrefix: ch.RepoPrefix,
+		Op: "issue.state", Kind: "issue",
+		TargetID: &issueID, TargetLabel: ch.IssueKey,
+		Details: fmt.Sprintf("%s → %s (auto: session %s ended)", ch.Old, ch.New, sessionID),
+	})
 }
 
 // cancelledDispatchTargetLabel / cancelledDispatchDetails shape an
@@ -457,15 +496,22 @@ func (c *localClient) ClaimAgent(ctx context.Context, repo *model.Repo, in input
 	}
 	if dryRun {
 		now := time.Now().UTC()
+		// BACI-126a: project the post-claim state on the dry-run so the
+		// rehearsal output makes the implicit in_progress move visible
+		// without polluting the persisted row. IssueStateBefore is the
+		// issue's current state; IssueStateAfter is always in_progress
+		// (the claim auto-transitions regardless of source state).
 		return &model.AgentClaim{
-			SessionID: in.SessionID,
-			IssueID:   iss.ID,
-			IssueKey:  iss.Key,
-			Prompt:    in.Prompt,
-			ClaimedAt: now,
+			SessionID:         in.SessionID,
+			IssueID:           iss.ID,
+			IssueKey:          iss.Key,
+			Prompt:            in.Prompt,
+			ClaimedAt:         now,
+			IssueStateBefore:  iss.State,
+			IssueStateAfter:   model.StateInProgress,
 		}, nil
 	}
-	claim, created, assigneeChange, err := c.store.AddAgentClaim(in.SessionID, iss.ID, in.Prompt)
+	claim, created, assigneeChange, stateChange, err := c.store.AddAgentClaim(in.SessionID, iss.ID, in.Prompt)
 	if err != nil {
 		return nil, err
 	}
@@ -484,16 +530,43 @@ func (c *localClient) ClaimAgent(ctx context.Context, repo *model.Repo, in input
 		RepoID: &issRepoID, RepoPrefix: issRepoPrefix,
 		Op: "agent.claim", Kind: "agent",
 		TargetID: &claim.ID, TargetLabel: in.SessionID,
-		Details: "issue=" + iss.Key,
+		Details: claimAuditDetails(iss.Key, stateChange),
 	})
 	// A fresh claim also stamps the assignee — audit that move too.
 	if assigneeChange != nil {
 		c.recordAssigneeChange(*assigneeChange)
 	}
+	// BACI-126a: surface the post-claim state on the returned object so
+	// callers can render `claim BACI-42 (todo → in_progress)` without a
+	// second read. JSON-only — not a column on the claim row.
+	if stateChange != nil {
+		claim.IssueStateBefore = stateChange.Old
+		claim.IssueStateAfter = stateChange.New
+	}
 	return claim, nil
 }
 
+// claimAuditDetails formats the agent.claim audit row's Details column
+// (BACI-126a). When the claim moved the issue's state, the line is
+// `issue=<KEY>, state: <old> → <new>`; when the issue was already
+// in_progress, the state clause is omitted so the audit reads cleanly.
+func claimAuditDetails(issueKey string, ch *store.StateChange) string {
+	if ch == nil || !ch.Changed() {
+		return "issue=" + issueKey
+	}
+	return fmt.Sprintf("issue=%s, state: %s → %s", issueKey, ch.Old, ch.New)
+}
+
 func (c *localClient) ReleaseAgent(ctx context.Context, repo *model.Repo, in inputs.AgentReleaseInput, dryRun bool) (*model.AgentClaim, error) {
+	// BACI-126c: final_state is required — parse and reject at the
+	// boundary so a missing or malformed state errors before any read.
+	if strings.TrimSpace(in.FinalState) == "" {
+		return nil, fmt.Errorf("final_state is required — pass --state <name> (one of: todo, in_progress, needs_action, in_review, done, cancelled)")
+	}
+	finalState, err := model.ParseState(in.FinalState)
+	if err != nil {
+		return nil, fmt.Errorf("final_state: %w", err)
+	}
 	iss, err := c.GetIssueByKey(ctx, repo, in.IssueKey)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -509,14 +582,18 @@ func (c *localClient) ReleaseAgent(ctx context.Context, repo *model.Repo, in inp
 	}
 	if dryRun {
 		now := time.Now().UTC()
+		// BACI-126c: project the post-release state so the rehearsal
+		// mirrors the live call.
 		return &model.AgentClaim{
-			SessionID:  in.SessionID,
-			IssueID:    iss.ID,
-			IssueKey:   iss.Key,
-			ReleasedAt: &now,
+			SessionID:        in.SessionID,
+			IssueID:          iss.ID,
+			IssueKey:         iss.Key,
+			ReleasedAt:       &now,
+			IssueStateBefore: iss.State,
+			IssueStateAfter:  finalState,
 		}, nil
 	}
-	claim, assigneeChange, err := c.store.ReleaseAgentClaim(in.SessionID, iss.ID)
+	claim, assigneeChange, stateChange, err := c.store.ReleaseAgentClaim(in.SessionID, iss.ID, finalState)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, fmt.Errorf("session %q has no open claim on %s", in.SessionID, iss.Key)
@@ -528,13 +605,31 @@ func (c *localClient) ReleaseAgent(ctx context.Context, repo *model.Repo, in inp
 		RepoID: &issRepoID, RepoPrefix: issRepoPrefix,
 		Op: "agent.release", Kind: "agent",
 		TargetID: &claim.ID, TargetLabel: in.SessionID,
-		Details: "issue=" + iss.Key,
+		Details: releaseAuditDetails(iss.Key, stateChange),
 	})
 	// Releasing the last open claim unassigns the issue — audit that.
 	if assigneeChange != nil {
 		c.recordAssigneeChange(*assigneeChange)
 	}
+	// BACI-126c: surface the post-release state on the returned object so
+	// callers can render `release BACI-42 (in_progress → in_review)` without
+	// a second read.
+	if stateChange != nil {
+		claim.IssueStateBefore = stateChange.Old
+		claim.IssueStateAfter = stateChange.New
+	}
 	return claim, nil
+}
+
+// releaseAuditDetails formats the agent.release audit row's Details
+// column (BACI-126c). Same shape as claimAuditDetails — the line is
+// `issue=<KEY>, state: <old> → <new>` when the release moved state,
+// or `issue=<KEY>` when state was already at the target.
+func releaseAuditDetails(issueKey string, ch *store.StateChange) string {
+	if ch == nil || !ch.Changed() {
+		return "issue=" + issueKey
+	}
+	return fmt.Sprintf("issue=%s, state: %s → %s", issueKey, ch.Old, ch.New)
 }
 
 // prefixFromIssueKey returns the PREFIX portion of a canonical issue
@@ -570,6 +665,25 @@ func (c *localClient) ShowAgentSession(ctx context.Context, sessionID string) (*
 		return nil, err
 	}
 	return &AgentSessionView{Session: sess, Claims: claims}, nil
+}
+
+// OpenClaimsForSession returns the canonical issue keys of every open
+// claim held by sessionID, for the BACI-126b issue-group gate. Empty
+// slice when the session is unknown / ended / claimless. Single store
+// query.
+func (c *localClient) OpenClaimsForSession(ctx context.Context, sessionID string) ([]string, error) {
+	claims, err := c.store.OpenClaimsForSession(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(claims))
+	for _, cl := range claims {
+		if cl == nil || cl.IssueKey == "" {
+			continue
+		}
+		out = append(out, cl.IssueKey)
+	}
+	return out, nil
 }
 
 // ListOpenClaims flattens store.OpenClaimsBySession (which buckets open

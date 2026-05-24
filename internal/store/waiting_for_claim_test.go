@@ -37,7 +37,7 @@ func TestTakenInlinedOnListAndShow(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	if _, _, _, err := s.AddAgentClaim("taken-sess", iss.ID, "claimed"); err != nil {
+	if _, _, _, _, err := s.AddAgentClaim("taken-sess", iss.ID, "claimed"); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 	got, err = s.GetIssueByID(iss.ID)
@@ -56,7 +56,7 @@ func TestTakenInlinedOnListAndShow(t *testing.T) {
 	}
 
 	// Releasing the claim flips taken back to false.
-	if _, _, err := s.ReleaseAgentClaim("taken-sess", iss.ID); err != nil {
+	if _, _, _, err := s.ReleaseAgentClaim("taken-sess", iss.ID, model.StateInProgress); err != nil {
 		t.Fatalf("release: %v", err)
 	}
 	got, err = s.GetIssueByID(iss.ID)
@@ -69,10 +69,10 @@ func TestTakenInlinedOnListAndShow(t *testing.T) {
 
 	// Claim again, then end the session — taken must drop back to false
 	// (an ended session isn't busy, matching OpenClaimsBySession's gate).
-	if _, _, _, err := s.AddAgentClaim("taken-sess", iss.ID, "again"); err != nil {
+	if _, _, _, _, err := s.AddAgentClaim("taken-sess", iss.ID, "again"); err != nil {
 		t.Fatalf("re-claim: %v", err)
 	}
-	if _, _, _, err := s.EndAgentSession("taken-sess", string(model.EndReasonStop)); err != nil {
+	if _, _, _, _, err := s.EndAgentSession("taken-sess", string(model.EndReasonStop), model.StateInProgress); err != nil {
 		t.Fatalf("end: %v", err)
 	}
 	got, err = s.GetIssueByID(iss.ID)
@@ -196,7 +196,7 @@ func TestAddAgentClaimClearsWaitingForClaim(t *testing.T) {
 		t.Fatal("waiting_for_claim = false after dispatch, want true")
 	}
 
-	if _, created, _, err := s.AddAgentClaim(sess.SessionID, iss.ID, "on it"); err != nil {
+	if _, created, _, _, err := s.AddAgentClaim(sess.SessionID, iss.ID, "on it"); err != nil {
 		t.Fatalf("add claim: %v", err)
 	} else if !created {
 		t.Fatal("AddAgentClaim reported created = false for a fresh claim")
@@ -218,7 +218,7 @@ func TestNoopReclaimDoesNotTouchWaitingForClaim(t *testing.T) {
 	s, _, iss, _, sess := seedDispatchFixture(t)
 	// First claim — the new-claim path; clears the flag (which is false
 	// here anyway).
-	if _, created, _, err := s.AddAgentClaim(sess.SessionID, iss.ID, "first"); err != nil {
+	if _, created, _, _, err := s.AddAgentClaim(sess.SessionID, iss.ID, "first"); err != nil {
 		t.Fatalf("first claim: %v", err)
 	} else if !created {
 		t.Fatal("first claim reported created = false")
@@ -228,7 +228,7 @@ func TestNoopReclaimDoesNotTouchWaitingForClaim(t *testing.T) {
 	if err := s.SetWaitingForClaim(iss.ID, true); err != nil {
 		t.Fatalf("set flag: %v", err)
 	}
-	if _, created, _, err := s.AddAgentClaim(sess.SessionID, iss.ID, "again"); err != nil {
+	if _, created, _, _, err := s.AddAgentClaim(sess.SessionID, iss.ID, "again"); err != nil {
 		t.Fatalf("re-claim: %v", err)
 	} else if created {
 		t.Fatal("re-claim reported created = true, want false (no-op)")

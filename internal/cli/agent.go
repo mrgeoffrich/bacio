@@ -43,8 +43,11 @@ Typical lifecycle, driven by an agent (see SKILL.md):
 
 ` + "`--session`" + ` defaults to $CLAUDE_CODE_SESSION_ID. Claiming an
 issue also stamps its assignee with the claiming agent's identity (and
-releasing the last open claim clears it again) — but it does NOT move
-the issue's state; use ` + "`bacio issue state`" + ` for that.`,
+releasing the last open claim clears it again). As of BACI-126a, claim
+auto-transitions the issue to in_progress (unconditionally — claim from
+any state is valid). Release takes a required ` + "`--state`" + ` flag
+(BACI-126c) so the issue lands in a declared final state rather than
+drifting.`,
 	}
 	cmd.AddCommand(
 		agentRegisterCmd(),
@@ -226,15 +229,21 @@ func runAgentHeartbeat(in inputs.AgentHeartbeatInput) error {
 
 func agentEndCmd() *cobra.Command {
 	var (
-		sessionID, reason, rawInput string
+		sessionID, reason, stateOnOrphan, rawInput string
 	)
 	cmd := &cobra.Command{
 		Use:   "end",
 		Short: "End an agent session and auto-release every open claim",
-		Args:  cobra.NoArgs,
+		Long: `End an agent session and auto-release every open claim it holds.
+
+BACI-126c: every cascaded release moves its issue to ` + "`--state-on-orphan`" + `
+(default: in_progress). Use the default when the harness is stopping and
+the work is abandoned, not finished — leaving the issue at in_progress
+lets the next agent (or the user) pick the ticket up.`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			raw, err := parseJSONInput(cmd, args, rawInput,
-				"session", "reason")
+				"session", "reason", "state-on-orphan")
 			if err != nil {
 				return err
 			}
@@ -252,11 +261,16 @@ func agentEndCmd() *cobra.Command {
 			if reason == "" {
 				reason = string(model.EndReasonStop)
 			}
-			return runAgentEnd(inputs.AgentEndInput{SessionID: sid, Reason: reason})
+			return runAgentEnd(inputs.AgentEndInput{
+				SessionID:     sid,
+				Reason:        reason,
+				StateOnOrphan: stateOnOrphan,
+			})
 		},
 	}
 	cmd.Flags().StringVar(&sessionID, "session", "", "session id (default: $CLAUDE_CODE_SESSION_ID)")
 	cmd.Flags().StringVar(&reason, "reason", "", "end_reason: stop|clear|logout|crash|other (default: stop)")
+	cmd.Flags().StringVar(&stateOnOrphan, "state-on-orphan", "", "state every auto-released claim's issue lands in (default: in_progress)")
 	addInputFlag(cmd, &rawInput)
 	return cmd
 }
@@ -289,7 +303,7 @@ func agentClaimCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "claim [issue-key]",
-		Short: "Focus this session on an issue — records the claim and stamps the assignee (not state)",
+		Short: "Focus this session on an issue — records the claim, stamps the assignee, and auto-moves the issue to in_progress (BACI-126a)",
 		Args:  cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			raw, err := parseJSONInput(cmd, args, rawInput, "session", "prompt")
@@ -343,14 +357,21 @@ func runAgentClaim(in inputs.AgentClaimInput) error {
 
 func agentReleaseCmd() *cobra.Command {
 	var (
-		sessionID, rawInput string
+		sessionID, finalState, rawInput string
 	)
 	cmd := &cobra.Command{
 		Use:   "release [issue-key]",
-		Short: "Release this session's claim on an issue",
-		Args:  cobra.RangeArgs(0, 1),
+		Short: "Release this session's claim on an issue (BACI-126c: --state is required)",
+		Long: `Release this session's claim on an issue. The release also moves the
+issue to ` + "`--state`" + ` atomically (BACI-126c).
+
+` + "`--state`" + ` is required. Allowed values: todo, in_progress,
+needs_action, in_review, done, cancelled. ` + "`in_progress`" + ` is a
+legal release state — "I am stepping away, work is not finished" — but
+it has to be declared explicitly so the agent commits to intent.`,
+		Args: cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, err := parseJSONInput(cmd, args, rawInput, "session")
+			raw, err := parseJSONInput(cmd, args, rawInput, "session", "state")
 			if err != nil {
 				return err
 			}
@@ -364,14 +385,22 @@ func agentReleaseCmd() *cobra.Command {
 			if len(args) != 1 {
 				return fmt.Errorf("requires <issue-key> positional or --json")
 			}
+			if finalState == "" {
+				return fmt.Errorf("--state is required (one of: todo, in_progress, needs_action, in_review, done, cancelled)")
+			}
 			sid, err := resolveSessionID(sessionID)
 			if err != nil {
 				return err
 			}
-			return runAgentRelease(inputs.AgentReleaseInput{SessionID: sid, IssueKey: args[0]})
+			return runAgentRelease(inputs.AgentReleaseInput{
+				SessionID:  sid,
+				IssueKey:   args[0],
+				FinalState: finalState,
+			})
 		},
 	}
 	cmd.Flags().StringVar(&sessionID, "session", "", "session id (default: $CLAUDE_CODE_SESSION_ID)")
+	cmd.Flags().StringVar(&finalState, "state", "", "final issue state — required (todo|in_progress|needs_action|in_review|done|cancelled)")
 	addInputFlag(cmd, &rawInput)
 	return cmd
 }

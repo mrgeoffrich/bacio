@@ -548,7 +548,7 @@ func TestRoundTripAgentLifecycle(t *testing.T) {
 
 	// Remote release clears the assignee back out.
 	if _, err := p.remote.ReleaseAgent(ctx, p.repo, inputs.AgentReleaseInput{
-		SessionID: sid, IssueKey: iss.Key,
+		SessionID: sid, IssueKey: iss.Key, FinalState: string(model.StateInReview),
 	}, false); err != nil {
 		t.Fatalf("remote ReleaseAgent: %v", err)
 	}

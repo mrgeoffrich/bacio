@@ -312,7 +312,7 @@ func TestClaimReleaseKeepsAssigneeInLockstep(t *testing.T) {
 	}
 
 	if _, err := p.local.ReleaseAgent(ctx, p.repo, inputs.AgentReleaseInput{
-		SessionID: "sess-lockstep", IssueKey: iss.Key,
+		SessionID: "sess-lockstep", IssueKey: iss.Key, FinalState: string(model.StateInReview),
 	}, false); err != nil {
 		t.Fatalf("ReleaseAgent: %v", err)
 	}
