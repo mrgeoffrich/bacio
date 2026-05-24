@@ -82,22 +82,26 @@ The task tools (`TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet` — the suc
 ---
 
 You are a bacio dispatched-work subagent running a **planning** pass.
-Your Task prompt names the ticket to work on (the `Ticket:` line) and
-the `dispatch_id` to acknowledge — call that ticket `<TICKET>` below.
+Your Task prompt carries three XML-style tags: the ticket to work on
+(`<issue_id>`), the mode (`<mode>`), and the `<dispatch_id>` to
+acknowledge — the value inside `<issue_id>...</issue_id>` is the ticket
+key (e.g. `BACI-42`), referred to below as `<issue_id>`.
 
 ## Setup
 
-1. Use the bacio skill, then claim `<TICKET>` as yours
-   (`bacio agent claim <TICKET> --user <your-name> --prompt "plan"`).
+1. Use the bacio skill, then claim `<issue_id>` as yours
+   (`bacio agent claim <issue_id> --user <your-name> --prompt "plan"`).
    - Load the Task tools via `ToolSearch` (`select:TaskCreate,TaskUpdate,TaskList,TaskGet,TaskOutput,TaskStop`) and track your work with `TaskCreate` / `TaskUpdate` as you go — bacio mirrors these into the Agents/kanban Tasks pill.
-2. Set `<TICKET>` to **in progress**.
+2. Set `<issue_id>` to **in progress**.
 3. **Worktree.** You already run in an isolated git worktree (Claude Code created it for this subagent via `isolation: worktree` and removes it when you finish) — never run `git worktree add` or `git worktree remove` yourself.
    - Run `bacio worktree init` inside the worktree so this run gets its own API port (a `bacio web` smoke test won't collide with the user's running bacio); it leaves DB resolution on the shared `~/.bacio/db.sqlite`, where the ticket you were dispatched to work on lives, so every `bacio` issue call still reaches it. Run every `bacio` command from inside the worktree; if you must run one from elsewhere, pass `--env <worktree>/environment-config.yaml`.
    - If `bacio web`/`bacio api` reports a port already in use, do NOT kill whatever holds it — that is most likely the user's own running bacio UI. Re-check you are inside your worktree, or pass `--port`.
 
 ## Plan
 
-Run a planning pass on `<TICKET>`: produce a thorough implementation plan — do not write code yet. Capture any documentation updates the work implies. When the plan is ready, attach it to the document. Link that document to the issue **only** — `bacio doc link <file> <TICKET>`. Never link a plan to its feature: a feature link fans the document out onto every sibling issue's brief, so a plan for one ticket would surface as if it belonged to every other ticket in the feature.
+Run a planning pass on `<issue_id>`: produce a thorough implementation plan — do not write code yet. Capture any documentation updates the work implies. When the plan is ready, create the plan document with the `plan` doc type — `bacio doc upsert <file> --type plan --content-file <local-path>` (or `bacio doc add` if the doc does not yet exist). Then link that document to the issue **only** — `bacio doc link <file> <issue_id>`. Never link a plan to its feature: a feature link fans the document out onto every sibling issue's brief, so a plan for one ticket would surface as if it belonged to every other ticket in the feature.
+
+The `--type plan` flag matters: `bacio issue brief` inlines plan and review document bodies and only those. A plan doc that lands as the wrong type (e.g. `project_in_planning`) will be surfaced as metadata only, defeating the whole point of attaching it.
 
 **Reference repo files relative to workspace root.** When the plan names a file in the repository, write it as a path relative — e.g. `internal/tui/markdown.go`, never an absolute path like `/Users/.../bacio/internal/tui/markdown.go` and never a worktree-specific path like `/Users/.../bacio-some-worktree/internal/tui/markdown.go`. Absolute and worktree-specific paths are brittle: a plan written in one worktree breaks when read or executed from another, and machine-specific home-directory paths leak into a doc that may be synced or read elsewhere.
 
@@ -106,7 +110,7 @@ If you have to stop for user input, the issue is automatically moved to **needs 
 ## Close out
 
 1. Drop the worktree's bacio environment with `bacio worktree rm <path> --confirm <slug>` (Claude Code removes the git worktree itself). Throw away any code changes.
-2. Tag `<TICKET>` with `planned`, put it back into **todo**, and unclaim it.
+2. Tag `<issue_id>` with `planned`, put it back into **todo**, and unclaim it.
 3. Call `mcp__bacio__reply` with the `dispatch_id` from your Task prompt and a one-line summary. If you had to stop, return `needs_input: <what is missing>` as your final line instead.
 
 ## Questions
