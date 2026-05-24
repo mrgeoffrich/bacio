@@ -16,9 +16,18 @@ If you must run a `bacio` command thats isolated to our worktree (as to not inte
 
 ## Implement
 
-Read the implementation plan in the brief and execute it. `CLAUDE.md` carries build commands (`./build.sh`), test conventions, and the three required-reading design docs.
+Read the implementation plan in the brief and execute it top to bottom. `CLAUDE.md` carries build commands (`./build.sh`), test conventions, and the topic-specific design docs.
 
-If you stop for user input, the issue auto-moves to **needs action**; once the user answers, move it back to **in progress** and continue.
+1. **Read the whole plan before touching code.** Read `## Files & changes` and `## Implementation steps` together first — see the shape before starting on file 1. The plan was written cold, so verify each named file path still exists before you edit it.
+2. **TaskCreate one task per plan step.** Mirrors onto the kanban Tasks pill so the human can see progress without opening the transcript. Mark each `in_progress` when you start it, `completed` only when its tests pass.
+3. **One plan step ≈ one commit.** Walk the steps top to bottom; commit each as an atomic, reviewable unit. If a step balloons past ~300 lines, that is a planning miss — flag it (post a question via `mcp__bacio__ask_user_question` or capture it in the close-out handoff) rather than absorbing it silently.
+4. **Tests at each layer as you go, not at the end.** If the plan named test function names, use those names — don't rename without a reason. The smoke test from the **Smoke test** section below runs after every non-trivial change, not just at the end — UI in particular regresses quietly.
+5. **Plan vs reality — record deviations.** Trivial deviation (renamed a helper, struct field changed) — proceed and capture in the close-out handoff (against the parent feature if there is one, otherwise as a comment on the issue itself). **Structural deviation** (the plan's data model doesn't actually work, the proposed abstraction collides with existing code) — STOP, ask the user via `mcp__bacio__ask_user_question`, do not quietly redesign.
+6. **No scope creep — except a red build/test suite.** The plan's `## Out of scope` section is the contract. If you find an adjacent bug, **ask the user via `mcp__bacio__ask_user_question`** whether to file a follow-up ticket — don't file silently (see preamble). The single exception to the no-scope-creep rule: a broken build or failing tests on the branch must be fixed before the PR ships, even if the breakage pre-existed your work or sits in code you didn't touch — see the **Green gate** below. Don't punt a red main onto the reviewer.
+7. **Check for existing seams before writing new ones.** Before adding a new helper, type, util, or module, grep for one that already solves the same shape — the plan's `## Reuse & placement` section names the candidates the planner spotted, but it's not exhaustive. Extend what's there rather than landing a parallel implementation. Counter-rule: don't contort a near-miss helper to cover two cases — if the existing seam doesn't fit cleanly, write new code (three similar lines beats a premature abstraction).
+8. **Match surrounding code conventions** — naming, comment density, error handling, log style. The plan doesn't restate conventions; CLAUDE.md and the linked `docs/<topic>.md` are authoritative. When in doubt, read three nearby files and copy the idiom.
+9. **Build hygiene.** `./build.sh` after schema / embed / Wails-binding changes — they regenerate. Plain `go build ./...` won't catch them and won't cover `desktop/` (separate nested module). After editing an agent prompt body in `prompts/agents/`, run `bacio install-agent` so the dispatched worker picks up the new body.
+10. **When stuck: two reads, one grep, then ask.** Don't spelunk for an hour. Asking via `mcp__bacio__ask_user_question` auto-moves the issue to **needs action** while you wait; once the user answers it moves back to **in progress** and you continue.
 
 ## Smoke test
 
@@ -35,10 +44,25 @@ kill "$web_pid"
 - If `bacio web` / `bacio api` reports a port already in use, do NOT kill whatever holds it — it's the user's own bacio. Re-check you're inside your worktree, or pass `--port`.
 - NEVER run `pkill -f "bacio web"` or `pkill -f bacio` — they match every bacio process on the machine and will kill the user's own UI.
 
+## Green gate
+
+Before you open the PR, the branch must be green. Run these from the worktree root and confirm each one exits clean:
+
+1. **`./build.sh`** — the full rebuild (use `--skip-web` / `--skip-desktop` only if you're certain the skipped surface wasn't touched, directly or transitively). A failing build is a hard stop.
+2. **`go vet ./...`** — must be clean.
+3. **`go test ./...`** — must pass. If `desktop/` was touched, run its tests too (nested module, not covered by the root `go test`).
+4. Frontend type-check / lint if the change reached `desktop/frontend/` — see CLAUDE.md / `package.json` scripts.
+
+**Failures that pre-date your work are still yours to fix.** If the build was already broken when you branched, fix it as part of this PR rather than punting it to the reviewer — call it out explicitly in the PR description under a "Drive-by fixes" subheading so the reviewer can scan it. The fact that you didn't cause the breakage is irrelevant; landing on top of a red main makes every subsequent PR harder to land.
+
+The single carve-out: if a pre-existing failure is genuinely large (a multi-hour refactor) or touches a subsystem outside your competence, **stop and ask** via `mcp__bacio__ask_user_question` rather than silently shipping red or sinking a day into an unrelated fix. Default is fix; ask only when the cost is obviously disproportionate.
+
 ## Close out
 
-1. Open a PR with all the changes.
-2. **Feature handoff (if the issue belongs to a feature).** Check `feature.slug` on the brief. If set, post a chronological handoff on the parent feature so the next worker on a sibling issue inherits the context you built up:
+1. Open a PR with all the changes. Mirror the plan's `## Implementation steps` structure in the PR description and call out any deviations explicitly — the reviewer (often another bacio worker) reads this first.
+2. **Handoff.** Post a chronological handoff so the next worker (or the reviewer) inherits the context you built up. Check `feature.slug` on the brief — if set, post against the parent feature so sibling issues benefit too; otherwise post as a comment on the issue itself.
+
+   With a parent feature:
 
    ```
    bacio feature comment add --json '{
@@ -48,12 +72,20 @@ kill "$web_pid"
    }'
    ```
 
+   Without a parent feature:
+
+   ```
+   bacio comment add --json '{
+     "issue_key": "<issue_id>",
+     "author": "<your agent identity>",
+     "body": "## Handoff\n\n**Files of context.** ...\n\n**Deviations from plan.** ...\n\n**Work not done.** ..."
+   }'
+   ```
+
    Capture concretely:
    - **Files of context** — repo-relative paths the next worker needs to read.
    - **Deviations from the original plan** — where the implementation diverged, and why.
    - **Work not done** — anything scoped out, deferred, or punted to a follow-up, with the reason.
-
-   If the issue has no parent feature, skip.
 3. `bacio worktree rm <path> --confirm <slug>` — drops the bacio environment (Claude Code removes the git worktree itself).
 4. `bacio tag add <issue_id> implemented` — idempotent.
 5. `bacio agent release <issue_id> --state in_review` — releases the claim and moves to **in review** in one step (BACI-126c).

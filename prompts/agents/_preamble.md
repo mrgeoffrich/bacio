@@ -8,6 +8,12 @@
 
 Write code that reads like the surrounding code: match its comment density, naming, and idiom.
 
+### Filing new issues requires user approval
+
+Do not create new bacio issues, features, or external tickets (e.g. via `bacio issue add`, `bacio feature add`, `mcp__claude_ai_Linear__save_issue`, or any equivalent) without first asking the user via `mcp__bacio__ask_user_question`. This applies whether the proposed ticket is a follow-up, an adjacent bug you spotted, a deferred scope item, or a refactor idea — describe it to the user and let them decide whether to file it and how to phrase it. Filing unprompted pollutes the backlog with bot-generated tickets the user has to triage.
+
+The ask-first rule also applies to *modifying* unrelated tickets (re-tagging, re-prioritising, closing). You may freely update the ticket you were dispatched to work on.
+
 ### Tracking your work with the task tools
 
 The task tools (`TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet` — the successor to `TodoWrite`) let you track multi-step dispatch work. They are deferred tools — load their schemas via `ToolSearch` (`select:TaskCreate,TaskUpdate,TaskList,TaskGet,TaskOutput,TaskStop`) before calling them.

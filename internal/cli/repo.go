@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/mrgeoffrich/bacio/internal/agentmode"
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/inputio"
@@ -146,6 +147,9 @@ func repoRmCmd() *cobra.Command {
 		Long:  repoRmLongHelp,
 		Args:  cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := agentmode.DenyIfEnabled("repo rm"); err != nil {
+				return err
+			}
 			raw, err := parseJSONInput(cmd, args, rawInput, "confirm")
 			if err != nil {
 				return err

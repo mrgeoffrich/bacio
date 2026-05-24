@@ -3,7 +3,10 @@
 // the parsing rule lives in one place and the import surface is tiny.
 package agentmode
 
-import "os"
+import (
+	"fmt"
+	"os"
+)
 
 // EnvVar is the env var bacio consults to decide whether the
 // hook subcommands and the channel poller should activate.
@@ -26,4 +29,20 @@ func Enabled() bool {
 	default:
 		return false
 	}
+}
+
+// DenyIfEnabled returns a non-nil error when agent mode is on, naming
+// the command path so the message tells the agent which verb was
+// blocked and why. CLI commands that delete shared state in a
+// destructive, hard-to-reverse way (`bacio issue rm`, `bacio feature
+// rm`, `bacio doc rm`, …) call this at the top of their RunE so an
+// agent-driven session has to consult the human before deleting
+// anything. The escape hatch is for the human to run the command
+// themselves from an interactive shell with BACIO_AGENT_MODE unset —
+// agents should not unset the env var themselves.
+func DenyIfEnabled(command string) error {
+	if !Enabled() {
+		return nil
+	}
+	return fmt.Errorf("`bacio %s` is blocked in agent mode (%s=1): destructive deletions need human approval — ask via mcp__bacio__ask_user_question and let the user run this", command, EnvVar)
 }

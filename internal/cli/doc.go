@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/mrgeoffrich/bacio/internal/agentmode"
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/inputio"
@@ -834,6 +835,9 @@ func docRmCmd() *cobra.Command {
 		Short: "Delete a document (and its links)",
 		Args:  cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := agentmode.DenyIfEnabled("doc rm"); err != nil {
+				return err
+			}
 			raw, err := parseJSONInput(cmd, args, rawInput)
 			if err != nil {
 				return err
