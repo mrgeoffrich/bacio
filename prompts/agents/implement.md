@@ -34,6 +34,15 @@ Read the implementation plan in the brief and execute it top to bottom. `CLAUDE.
 
 If your smoke test would create real bacio entities — issues, features, dispatches, comments — re-run `bacio worktree init --isolate-db` first. The isolated DB is thrown away when the worktree is dropped, so no cleanup is needed and no real issue numbers get burned. The shared `~/.bacio/db.sqlite` is for real work, not smoke fixtures; the PreToolUse hook (BACI-134) denies raw `sqlite3` cleanup against it anyway.
 
+### Workspace vs system `bacio` (bacio-on-bacio only)
+
+When the repo you are working on **is bacio itself**, your worktree contains the source for the very binary you would otherwise call. Two separate binaries are now in play and you must keep them straight:
+
+- **System `bacio` (bare command)** — the binary the user installed on PATH (`~/.local/bin/bacio` or `brew`). Built before your change, known-good, used by the rest of the dispatch pipeline. **Use it for everything except smoke-testing your change** — in particular, every close-out bookkeeping call: `bacio pr attach`, `bacio agent release`, `bacio tag add`, `bacio worktree rm`, `bacio comment add`, `bacio install-agent`, `bacio install-skill`.
+- **Workspace `./.bin/bacio-agent-<slug>`** — produced by `./build.sh` inside your worktree (using the wtenv slug from `environment-config.yaml`), embeds whatever schema / prompt / hook state you just edited. **Use it only to smoke-test the change you are implementing.** Never invoke it for close-out — a mid-flight binary running `install-agent` or `pr attach` can derail the dispatch pipeline.
+
+Workers on any other repo can ignore this — they only have the system `bacio`, no workspace binary, no naming risk.
+
 Run `./build.sh` (with `--skip-web` / `--skip-desktop` as appropriate) and exercise the change.
 
 For UI changes, the cheapest agent-driven path is `bacio web --no-open` + the `playwright-cli` skill. Capture the PID and stop ONLY that process:

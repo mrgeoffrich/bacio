@@ -3,6 +3,12 @@
 *.exe
 /dist/
 
+# Per-worktree workspace bacio binary (BACI-139) — `./build.sh` inside a
+# linked worktree writes `.bin/bacio-agent-<slug>` for smoke-testing the
+# in-progress change. Never installed to PATH; lives and dies with the
+# worktree, so it must never end up in a commit.
+/.bin/
+
 # Web UI bundle (BACI-30) — populated by `./build.sh --web` or
 # `npm --prefix desktop/frontend run build:web` + copy. The .gitkeep
 # is the embed.go anchor so `//go:embed all:webui` doesn't error on
