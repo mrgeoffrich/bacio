@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/mrgeoffrich/bacio/internal/agentmode"
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/inputio"
 	"github.com/mrgeoffrich/bacio/internal/model"
@@ -1083,6 +1084,9 @@ Historical ` + "`agent_dispatches.mode`" + ` rows that reference the slug are
 left intact — a dispatch is a snapshot, not a live foreign key.`,
 		Args: cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := agentmode.DenyIfEnabled("settings template rm"); err != nil {
+				return err
+			}
 			if err := requireLocalForSettings("template rm"); err != nil {
 				return err
 			}

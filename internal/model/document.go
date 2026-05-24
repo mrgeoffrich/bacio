@@ -27,6 +27,12 @@ const (
 	DocTypeTranscript         DocumentType = "transcript"
 	DocTypeRenderedTranscript DocumentType = "rendered_transcript"
 	DocTypeReview             DocumentType = "review"
+	// SessionRetro — a retrospective on a dispatched worker's session(s)
+	// for an issue. Produced by the bacio-transcript-review skill: distils
+	// each attached transcript and grades behaviour against the per-mode
+	// brief. Inlined in `bacio issue brief` so the retro surfaces with
+	// plan / review docs without a second round trip.
+	DocTypeSessionRetro DocumentType = "session_retro"
 )
 
 var allDocTypes = []DocumentType{
@@ -42,6 +48,7 @@ var allDocTypes = []DocumentType{
 	DocTypeTranscript,
 	DocTypeRenderedTranscript,
 	DocTypeReview,
+	DocTypeSessionRetro,
 }
 
 func AllDocumentTypes() []DocumentType { return append([]DocumentType(nil), allDocTypes...) }
@@ -69,13 +76,14 @@ func docTypeStrings() []string {
 }
 
 // DocTypeInlinedInBrief reports whether `bacio issue brief` should
-// inline the body of a doc of this type. Today only `plan` and
-// `review` docs are inlined; transcripts (which can run to MBs after a
-// full plan → implement → ship cycle) and every other type are
-// surfaced as metadata only. See BACI-115.
+// inline the body of a doc of this type. Inlined: `plan`, `review`,
+// `session_retro` — the three doc shapes a reader needs in full when
+// they open the ticket. Transcripts (which can run to MBs after a full
+// plan → implement → ship cycle) and every other type are surfaced as
+// metadata only. See BACI-115.
 func DocTypeInlinedInBrief(t DocumentType) bool {
 	switch t {
-	case DocTypePlan, DocTypeReview:
+	case DocTypePlan, DocTypeReview, DocTypeSessionRetro:
 		return true
 	}
 	return false

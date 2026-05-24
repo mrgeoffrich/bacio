@@ -60,130 +60,8 @@ var AgentFileSkills = []string{"bacio"}
 // not a replacement for, `bacio worktree init`: Claude Code isolates
 // the filesystem, while `bacio worktree init` (still run inside the
 // worktree by every brief) isolates bacio's SQLite DB + API port. The
-// briefs were rewritten to lean on this — see prompttemplates/*.txt.
+// briefs were rewritten to lean on this — see prompts/agents/*.md.
 const AgentFileIsolation = "worktree"
-
-// WorktreeGuardPreamble is the safety guard prepended to every
-// generated subagent file's body (BACI-91). The agent-file frontmatter
-// sets `isolation: worktree`, so Claude Code is *supposed* to spawn
-// each dispatched worker in its own throwaway git worktree — but
-// nothing verifies it. If worktree isolation silently fails, or a
-// brief is run in a non-worktree context, a worker would otherwise
-// happily claim the ticket and start editing/committing on the primary
-// checkout's main branch.
-//
-// Centralising the guard here (rather than copying it into each of the
-// six prompttemplates/*.txt bodies) means it cannot drift and is
-// automatically inherited by any future or user-created template — the
-// six built-in bodies stay untouched. The guard runs *before* the
-// brief's own `## Setup` section, so a worker that fails the check
-// aborts before claiming the ticket or mutating any state.
-const WorktreeGuardPreamble = `## Worktree safety guard — run this FIRST, before anything else
-
-Before you use the bacio skill, claim the ticket, change any issue
-state, or read/edit/commit a single file, verify you are running in an
-**isolated git worktree** and **not** on the repo's main branch:
-
-` + "```bash" + `
-git rev-parse --show-toplevel
-` + "```" + `
-
-**Trust ONLY the ` + "`git rev-parse --show-toplevel`" + ` output for the location of our current working folder.
-
-You are in an isolated worktree please check that .claude/worktrees is a part of the working folder, if
-not abort immediately.
-
-Also abort if the current branch is on main.
-
-### Establish working directory — make this your FIRST task
-
-Your **first** ` + "`TaskCreate`" + ` task MUST be an explicit "Establish
-working directory" step. In its description record, verbatim:
-
-- the **worktree root** — the exact ` + "`git rev-parse --show-toplevel`" + ` output;
-- that **every** ` + "`Read`" + ` / ` + "`Edit`" + ` / ` + "`Write`" + ` ` + "`file_path`" + ` MUST begin with that
-  worktree-root prefix;
-- that an absolute path under the **parent repo root** (the main
-  checkout the worktree branches from) is **forbidden**.
-
-This is not bookkeeping — it is the anchor that keeps every later tool
-call inside the worktree. A PreToolUse hook hard-**denies** any
-` + "`Write`" + `/` + "`Edit`" + ` whose ` + "`file_path`" + ` resolves outside the worktree root; if you
-see such a denial, you have left the worktree — re-issue the edit with
-a path under the worktree root.
-
-### Use worktree-relative paths; re-check the branch before commit and push
-
-- Address files by paths under the worktree root only. Never use an
-  absolute path that points into the parent repo / main checkout.
-- ` + "`Bash`" + ` working directory does **not** persist across calls — each
-  command starts fresh. Always ` + "`cd`" + ` to the worktree root (or use
-  worktree-root absolute paths) in every command; never ` + "`cd`" + ` to the
-  parent repo.
-- Immediately **before ` + "`git commit`" + `** and immediately **before
-  ` + "`git push`" + `**, re-run ` + "`git branch --show-current`" + ` and abort if it
-  reports ` + "`main`" + ` (or the repo's default branch). The startup snapshot
-  is not enough — verify again at the moment you mutate git state.
-
----
-
-`
-
-// WorkerProtocolPreamble is the shared worker brief block prepended to
-// every generated subagent file's body (BACI-96), directly after the
-// WorktreeGuardPreamble and before the template's own brief.
-//
-// A dispatched `bacio-<mode>-worker` subagent does NOT inherit the
-// Claude Code default system prompt — confirmed by a mitmproxy capture
-// (BACI-95, `docs/subagent-default-prompt-gap.md`). So harness
-// conventions a normal Claude session takes for granted (what a
-// `<system-reminder>` tag means, that hook output is feedback, the
-// `file_path:line_number` citation form) and the task-tool usage
-// guidance are simply absent from a worker's prompt. This preamble
-// folds a curated subset back in.
-//
-// Two parts:
-//
-//  1. A worker-adapted trim of the Claude Code default prompt — the
-//     "autonomous agent" framing plus the harness/behaviour notes. The
-//     terminal-markdown line and the security-policy paragraph are
-//     dropped as not applicable to a headless worker.
-//  2. A short spec for the task tools (`TaskCreate` / `TaskUpdate` /
-//     `TaskList` / `TaskGet`). They are deferred tools with no usage
-//     guidance in a worker's system prompt; the spec tells the worker
-//     when and how to track multi-step dispatch work.
-//
-// Centralising it here (rather than copying it into each
-// prompttemplates/*.txt body) means it cannot drift and is inherited
-// by any future or user-created template — the same rationale as
-// WorktreeGuardPreamble.
-const WorkerProtocolPreamble = `## Worker protocol
-
-You are an autonomous agent that performs software engineering tasks.
-
-### Harness
-
-- ` + "`<system-reminder>`" + ` tags in messages and tool results are injected by the harness, not the user. Hooks may intercept tool calls; treat hook output as user feedback.
-- Prefer the dedicated file/search tools over shell commands when one fits. Independent tool calls can run in parallel in one response.
-- Reference code as ` + "`file_path:line_number`" + ` — it's clickable.
-
-Write code that reads like the surrounding code: match its comment density, naming, and idiom.
-
-For actions that are hard to reverse or outward-facing, confirm first unless durably authorized or explicitly told to proceed without asking; approval in one context doesn't extend to the next. Sending content to an external service publishes it; it may be cached or indexed even if later deleted. Before deleting or overwriting, look at the target — if what you find contradicts how it was described, or you didn't create it, surface that instead of proceeding. Report outcomes faithfully: if tests fail, say so with the output; if a step was skipped, say that; when something is done and verified, state it plainly without hedging.
-
-### Tracking your work with the task tools
-
-The task tools (` + "`TaskCreate`" + ` / ` + "`TaskUpdate`" + ` / ` + "`TaskList`" + ` / ` + "`TaskGet`" + ` — the successor to ` + "`TodoWrite`" + `) let you track multi-step dispatch work. They are deferred tools — load their schemas via ` + "`ToolSearch`" + ` (` + "`select:TaskCreate,TaskUpdate,TaskList,TaskGet,TaskOutput,TaskStop`" + `) before calling them.
-
-- Use ` + "`TaskCreate`" + ` when the dispatch needs 3+ distinct steps; skip it for trivial single-step jobs.
-- Fields: ` + "`subject`" + ` (imperative title), ` + "`description`" + `, optional ` + "`activeForm`" + ` (spinner text). Tasks start ` + "`pending`" + `.
-- Mark a task ` + "`in_progress`" + ` before starting it; ` + "`completed`" + ` only when fully done — never with failing tests, partial work, or unresolved errors. When blocked, keep it ` + "`in_progress`" + ` and add a new task for the blocker.
-- ` + "`TaskGet`" + ` the latest state before ` + "`TaskUpdate`" + ` (staleness). ` + "`addBlocks`" + ` / ` + "`addBlockedBy`" + ` wire dependencies.
-- This applies to YOU, the worker doing the real work. The supervisor that dispatched you stays a thin scheduler — it does not grow a per-dispatch task list.
-
----
-
-`
 
 // RenderAgentFile produces the contents of a per-mode custom subagent
 // file (`.claude/agents/<SubagentTypeForTemplate(slug)>.md`) for a
@@ -201,33 +79,30 @@ The task tools (` + "`TaskCreate`" + ` / ` + "`TaskUpdate`" + ` / ` + "`TaskList
 // dispatched workers tools they legitimately need, and the failure
 // mode of a missing tool is silent.
 //
-// body is written verbatim, NOT {{token}}-rendered: a system prompt is
-// fixed per agent type and cannot embed a specific issue id. The six
-// built-in briefs were rewritten (BACI-76) to refer to "the ticket
-// named in your dispatch prompt" instead. A body that still contains a
-// `{{` sequence is a packaging bug — RenderAgentFile rejects it so a
-// leftover placeholder never ships into an agent file.
-//
-// Every rendered file's body is prefixed with two bacio-authored
-// preamble blocks, in order: WorktreeGuardPreamble (BACI-91) — a
-// centralised worktree+branch safety guard that runs before anything
-// else so a worker spawned outside an isolated worktree (or on the
-// main branch) aborts before mutating anything — then
-// WorkerProtocolPreamble (BACI-96) — the curated harness/behaviour
-// prose and task-tool usage spec a worker would otherwise lack,
-// because dispatched subagents do not inherit the Claude Code default
-// system prompt. The template's own brief follows both. The
-// placeholder check above runs against the *template* body only — both
-// preambles are bacio-authored and carry no `{{...}}` tokens.
+// body composition: the source files at prompts/agents/<slug>.md
+// carry a `{{> _preamble}}` directive (after the per-mode role intro)
+// so every built-in body inlines the shared operating-protocol +
+// worktree-safety guard block. The default loader expands that
+// directive at package init, so a freshly seeded body already carries
+// the shared block verbatim. RenderAgentFile also expands directives
+// on the passed-in body, so a user-customised template that keeps (or
+// moves) the directive still resolves it — and a custom template that
+// omits it deliberately gets no preamble. After expansion, the body
+// must contain no remaining `{{...}}` placeholder: a subagent system
+// prompt is fixed per agent type and cannot embed a specific issue id.
 func RenderAgentFile(slug, name, body string) (string, error) {
 	body = strings.TrimRight(body, "\r\n")
 	if strings.TrimSpace(body) == "" {
 		return "", fmt.Errorf("template %q has an empty body — nothing to render into an agent file", slug)
 	}
-	if strings.Contains(body, "{{") {
-		return "", fmt.Errorf("template %q body still contains a {{...}} placeholder — a subagent system prompt is fixed per agent type and cannot interpolate a specific ticket; rewrite the body to refer to \"the ticket named in your dispatch prompt\"", slug)
+	expanded, err := ExpandPromptIncludes(body)
+	if err != nil {
+		return "", fmt.Errorf("template %q: %w", slug, err)
 	}
-	body = WorktreeGuardPreamble + WorkerProtocolPreamble + body
+	if strings.Contains(expanded, "{{") {
+		return "", fmt.Errorf("template %q body still contains a {{...}} placeholder after include expansion — a subagent system prompt is fixed per agent type and cannot interpolate a specific ticket; rewrite the body to refer to \"the ticket named in your dispatch prompt\"", slug)
+	}
+	body = expanded
 	agentName := SubagentTypeForTemplate(slug)
 	label := name
 	if strings.TrimSpace(label) == "" {

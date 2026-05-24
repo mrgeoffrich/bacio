@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/mrgeoffrich/bacio/internal/agentmode"
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/inputio"
@@ -919,6 +920,9 @@ func issueRmCmd() *cobra.Command {
 		Short: "Delete an issue (and its comments)",
 		Args:  cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := agentmode.DenyIfEnabled("issue rm"); err != nil {
+				return err
+			}
 			raw, err := parseJSONInput(cmd, args, rawInput)
 			if err != nil {
 				return err

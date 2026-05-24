@@ -1032,12 +1032,13 @@ func agentDispatchesModeCheckPresent(db *sql.DB) (bool, error) {
 }
 
 // migrateDocumentsTypeCheck rebuilds documents to widen the column
-// CHECK on `type` to admit the four BACI-115 values (plan, transcript,
-// rendered_transcript, review). SQLite can't widen a column CHECK in
-// place, so this is the table-rebuild dance — the same pattern as
-// migrateAgentDispatchesModeCheck. Keyed off the stored CREATE TABLE
-// SQL: a DB whose CHECK already lists 'plan' (fresh schema.sql or a
-// prior run of this migration) is a no-op.
+// CHECK on `type` to admit the BACI-115 values (plan, transcript,
+// rendered_transcript, review) plus the later `session_retro` addition.
+// SQLite can't widen a column CHECK in place, so this is the
+// table-rebuild dance — the same pattern as migrateAgentDispatchesModeCheck.
+// Keyed off the stored CREATE TABLE SQL: a DB whose CHECK already
+// lists 'session_retro' (fresh schema.sql or a prior run of this
+// migration that's been re-cut) is a no-op.
 func migrateDocumentsTypeCheck(db *sql.DB) error {
 	stale, err := documentsTypeCheckIsStale(db)
 	if err != nil {
@@ -1070,7 +1071,7 @@ func migrateDocumentsTypeCheck(db *sql.DB) error {
 			              ('user_docs','project_in_planning','project_in_progress',
 			               'project_complete','vendor_docs','architecture','designs',
 			               'testing_plans','plan','transcript','rendered_transcript',
-			               'review')),
+			               'review','session_retro')),
 			content     TEXT    NOT NULL,
 			size_bytes  INTEGER NOT NULL,
 			source_path TEXT    NOT NULL DEFAULT '',
@@ -1116,9 +1117,13 @@ func migrateDocumentsTypeCheck(db *sql.DB) error {
 }
 
 // documentsTypeCheckIsStale reports whether the documents table still
-// carries the pre-BACI-115 narrow CHECK on `type` — i.e. one that does
-// not mention 'plan'. Whitespace-collapsed lookup on the stored
-// CREATE TABLE SQL so trivial reformatting doesn't fool it.
+// carries a narrow CHECK on `type` — i.e. one that does not yet mention
+// 'session_retro'. Whitespace-collapsed lookup on the stored CREATE
+// TABLE SQL so trivial reformatting doesn't fool it. Gating on
+// 'session_retro' (rather than the older BACI-115 'plan' sentinel) also
+// re-runs the rebuild on any DB that pre-dates the session-retro
+// addition — the latest token in the allow-list is always the right
+// staleness gate.
 func documentsTypeCheckIsStale(db *sql.DB) (bool, error) {
 	var sqlText sql.NullString
 	err := db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'documents'`).Scan(&sqlText)
@@ -1132,10 +1137,7 @@ func documentsTypeCheckIsStale(db *sql.DB) (bool, error) {
 		return false, nil
 	}
 	collapsed := strings.Join(strings.Fields(sqlText.String), " ")
-	// The widened CHECK lists 'plan' (one of the four new BACI-115
-	// values). A stored CREATE TABLE that omits it predates BACI-115
-	// and needs the rebuild.
-	return !strings.Contains(collapsed, "'plan'"), nil
+	return !strings.Contains(collapsed, "'session_retro'"), nil
 }
 
 // reposPathUniqueNeedsRelax reports whether the repos table still

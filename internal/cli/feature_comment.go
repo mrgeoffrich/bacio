@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/mrgeoffrich/bacio/internal/agentmode"
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/inputio"
 )
@@ -100,6 +101,9 @@ func featureCommentRmCmd() *cobra.Command {
 			"`bacio feature comment list <slug> -o json`.",
 		Args: cobra.RangeArgs(0, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := agentmode.DenyIfEnabled("feature comment rm"); err != nil {
+				return err
+			}
 			raw, err := parseJSONInput(cmd, args, rawInput)
 			if err != nil {
 				return err

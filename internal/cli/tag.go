@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/mrgeoffrich/bacio/internal/agentmode"
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/inputio"
 	"github.com/mrgeoffrich/bacio/internal/model"
@@ -59,6 +60,9 @@ func tagRmCmd() *cobra.Command {
 		Short: "Remove one or more tags from an issue",
 		Args:  cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := agentmode.DenyIfEnabled("tag rm"); err != nil {
+				return err
+			}
 			raw, err := parseJSONInput(cmd, args, rawInput)
 			if err != nil {
 				return err

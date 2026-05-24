@@ -1,7 +1,8 @@
 # File logging for long-running bacio processes (BACI-73)
 
-`bacio api`, `bacio channel`, and the desktop binary can now write a
-per-process log file alongside their stderr output. The feature is
+The long-running bacio processes — `bacio api`, `bacio web`, `bacio tui`,
+`bacio channel`, and the desktop binary — write a per-process log file
+alongside their stderr output. The feature is
 opt-out free at the file-format level (every long-running process
 writes a log file when the resolver picks a directory), but the
 directory itself is opt-in by way of the same precedence chain

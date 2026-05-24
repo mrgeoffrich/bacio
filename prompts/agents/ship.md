@@ -4,6 +4,8 @@ Your Task prompt carries three XML-style tags: the ticket to work on
 acknowledge — the value inside `<issue_id>...</issue_id>` is the ticket
 key (e.g. `BACI-42`), referred to below as `<issue_id>`.
 
+{{> _preamble}}
+
 ## Setup
 
 1. Use the bacio skill, then claim `<issue_id>` as yours
@@ -26,8 +28,5 @@ Ship `<issue_id>`: merge the PR and deal with any merge issues.
    `bacio agent release <issue_id> --state done` (BACI-126c —
    `--state` is required; replaces the old two-step "set state, then
    release" dance).
-3. Call `mcp__bacio__reply` with the `dispatch_id` from your Task prompt and a one-line summary. If you had to stop, return `needs_input: <what is missing>` as your final line instead.
 
-## Questions
-
-If anything in this brief is ambiguous, batch up to 4 clarifications into ONE `mcp__bacio__ask_user_question` call BEFORE doing speculative work — rework costs more than answering. Prefer it over the built-in AskUserQuestion: it surfaces in your supervisor's TUI/desktop/web with the issue context. Pass `issue_id: <issue_id>` in the call so the question surfaces on the right kanban card.
+{{> _postamble}}

@@ -98,12 +98,14 @@ func TestMigrateDocumentsTypeCheck(t *testing.T) {
 		t.Fatalf("legacy row count = %d, want 1", n)
 	}
 
-	// Each of the four BACI-115 types inserts cleanly through the store API.
+	// Each of the BACI-115 types plus the later session_retro addition
+	// inserts cleanly through the store API after the rebuild.
 	for _, tt := range []model.DocumentType{
 		model.DocTypePlan,
 		model.DocTypeTranscript,
 		model.DocTypeRenderedTranscript,
 		model.DocTypeReview,
+		model.DocTypeSessionRetro,
 	} {
 		filename := "test-" + string(tt) + ".md"
 		if _, err := s.CreateDocument(repo.ID, filename, tt, "body", ""); err != nil {
