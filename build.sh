@@ -26,6 +26,14 @@
 #   ./build.sh --skip-desktop             # skip the desktop app
 #   ./build.sh --skip-web --skip-desktop  # CLI/TUI only (inner loop)
 #
+# Inside a linked worktree with `environment-config.yaml` present,
+# build.sh additionally writes `./.bin/bacio-agent-<slug>` — a workspace
+# binary uniquely named after the wtenv slug so it can't be confused
+# with the system `bacio` on PATH. Use it for smoke-testing THIS
+# change only; close-out bookkeeping (`pr attach`, `agent release`,
+# `tag add`, `worktree rm`, `comment add`, `install-agent`,
+# `install-skill`) must use the system `bacio`. See BACI-139.
+#
 # Run from the repo root.
 
 set -euo pipefail
@@ -46,7 +54,7 @@ for arg in "$@"; do
         # can rebuild without clobbering each other.
         --install) install_cli=1 ;;
         -h|--help)
-            sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'
+            sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//'
             exit 0
             ;;
         *)
@@ -58,6 +66,25 @@ done
 
 repo_root=$(cd "$(dirname "$0")" && pwd)
 cd "$repo_root"
+
+# ---------- worktree slug detection (BACI-139) ----------
+#
+# When run inside a linked git worktree that has a wtenv manifest, build a
+# uniquely-named workspace binary at .bin/bacio-agent-<slug>. The name keeps
+# it off PATH and prevents the muscle-memory `./.bin/bacio` shortcut that
+# otherwise routes close-out bookkeeping (pr attach, agent release, tag add,
+# worktree rm, comment add, install-agent, install-skill) through a
+# potentially mid-flight binary. In the main checkout (or any manifest-free
+# worktree) there is no environment-config.yaml and this step is skipped —
+# behaviour is unchanged.
+#
+# The grep+awk is deliberately shell-only to match build.sh house style (no
+# YAML parser). store.ValidateWorktreeSlug constrains slugs to [a-z0-9-]+,
+# so the value drops straight into `go build -o`.
+worktree_slug=""
+if [ -f environment-config.yaml ]; then
+    worktree_slug=$(grep -E '^  slug:' environment-config.yaml | awk '{print $2}')
+fi
 
 # ---------- web bundle ----------
 #
@@ -100,6 +127,20 @@ go build ./...
 if [ "$install_cli" -eq 1 ]; then
     echo "==> go build -o ~/.local/bin/bacio ./cmd/bacio (--install)"
     go build -o "$HOME/.local/bin/bacio" ./cmd/bacio
+fi
+
+# ---------- workspace binary (BACI-139) ----------
+#
+# Only built when we detected a worktree slug above. Path is
+# .bin/bacio-agent-<slug> so it can't be confused with the system `bacio`
+# on PATH (`which bacio` still returns ~/.local/bin/bacio). Use this
+# binary for smoke-testing THIS change only.
+if [ -n "$worktree_slug" ]; then
+    mkdir -p .bin
+    workspace_bin="./.bin/bacio-agent-${worktree_slug}"
+    echo "==> go build -o ${workspace_bin} ./cmd/bacio"
+    go build -o "$workspace_bin" ./cmd/bacio
+    echo "==> workspace binary: ${workspace_bin} (use for smoke tests of THIS change only)"
 fi
 
 if [ "$skip_desktop" -eq 1 ]; then
