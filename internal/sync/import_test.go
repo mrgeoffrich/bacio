@@ -818,6 +818,153 @@ func TestImport_RoundTrip_JSONLDocument(t *testing.T) {
 	}
 }
 
+// TestImport_LWW_PreservesLocallyAttachedPR pins BACI-142 for the
+// pull_requests table. A worker calls AttachPR after export; the next
+// import sees stale YAML that doesn't list the new URL. The local
+// row must survive — pre-fix the LWW gate missed because the
+// pull_requests writer didn't bump issues.updated_at, so
+// replacePRsTx wiped the new row.
+func TestImport_LWW_PreservesLocallyAttachedPR(t *testing.T) {
+	s, uuids := seedExportFixture(t)
+	dir := t.TempDir()
+	if _, err := (&Engine{Store: s}).Export(context.Background(), dir); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	// Attach a new PR locally — the on-disk YAML doesn't list it.
+	iss1, err := s.GetIssueByUUID(uuids["iss1"])
+	if err != nil {
+		t.Fatalf("get iss1: %v", err)
+	}
+	const newPR = "https://github.com/x/y/pull/99"
+	if _, err := s.AttachPR(iss1.ID, newPR); err != nil {
+		t.Fatalf("attach pr: %v", err)
+	}
+	if _, err := (&Engine{Store: s, Actor: "tester"}).Import(context.Background(), dir); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	prs, err := s.ListPRs(iss1.ID)
+	if err != nil {
+		t.Fatalf("list prs: %v", err)
+	}
+	found := false
+	for _, pr := range prs {
+		if pr.URL == newPR {
+			found = true
+			break
+		}
+	}
+	if !found {
+		urls := make([]string, 0, len(prs))
+		for _, pr := range prs {
+			urls = append(urls, pr.URL)
+		}
+		t.Fatalf("locally-attached PR %q was wiped by sync re-import; surviving PRs: %v", newPR, urls)
+	}
+}
+
+// TestImport_LWW_PreservesLocallyCreatedRelation pins BACI-142 for
+// the issue_relations table. A worker creates a new relation between
+// two issues that already exist after export; the next import sees
+// stale YAML that doesn't list the new edge. The local edge must
+// survive — pre-fix replaceRelationsTx wiped it because the
+// relations writer didn't bump issues.updated_at.
+func TestImport_LWW_PreservesLocallyCreatedRelation(t *testing.T) {
+	s, uuids := seedExportFixture(t)
+	// Create a third issue and export, so the new relation we'll add
+	// below can point at a target that already round-trips through the
+	// fixture's YAML (otherwise the import would dangle it).
+	r, err := s.GetRepoByUUID(uuids["repo"])
+	if err != nil {
+		t.Fatalf("get repo: %v", err)
+	}
+	iss3, err := s.CreateIssue(r.ID, nil, "Third issue", "", model.StateTodo, nil)
+	if err != nil {
+		t.Fatalf("create iss3: %v", err)
+	}
+	// Pin iss3 timestamps so they're older than CURRENT_TIMESTAMP, so
+	// LWW doesn't mis-fire on iss3 when re-imported.
+	if _, err := s.DB.Exec(
+		`UPDATE issues SET created_at = '2026-05-02 10:00:00', updated_at = '2026-05-03 10:00:00' WHERE id = ?`,
+		iss3.ID,
+	); err != nil {
+		t.Fatalf("force ts iss3: %v", err)
+	}
+	dir := t.TempDir()
+	if _, err := (&Engine{Store: s}).Export(context.Background(), dir); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	// Add a relates_to edge from iss2 → iss3 after export — the YAML
+	// for iss2 doesn't list it. iss2 has no relations in the fixture
+	// so this is a from-scratch add that exercises the wipe path.
+	iss2, err := s.GetIssueByUUID(uuids["iss2"])
+	if err != nil {
+		t.Fatalf("get iss2: %v", err)
+	}
+	if err := s.CreateRelation(iss2.ID, iss3.ID, model.RelRelatesTo); err != nil {
+		t.Fatalf("create relation: %v", err)
+	}
+	if _, err := (&Engine{Store: s, Actor: "tester"}).Import(context.Background(), dir); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	rels, err := s.ListIssueRelations(iss2.ID)
+	if err != nil {
+		t.Fatalf("list relations: %v", err)
+	}
+	found := false
+	for _, r := range rels.Outgoing {
+		if r.ToIssue == "MINI-3" && r.Type == model.RelRelatesTo {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("locally-created relation iss2→iss3 was wiped by sync re-import; surviving outgoing: %+v", rels.Outgoing)
+	}
+}
+
+// TestImport_LWW_PreservesLocallyLinkedDoc pins BACI-142 for the
+// document_links table. A worker calls LinkDocument after export;
+// the next import sees stale YAML that doesn't list the new target.
+// The local link must survive — pre-fix replaceDocLinksTx wiped it
+// because the doc-link writer didn't bump documents.updated_at.
+func TestImport_LWW_PreservesLocallyLinkedDoc(t *testing.T) {
+	s, uuids := seedExportFixture(t)
+	dir := t.TempDir()
+	if _, err := (&Engine{Store: s}).Export(context.Background(), dir); err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	// Link the document to iss2 after export — the on-disk YAML
+	// only lists the link to iss1.
+	doc, err := s.GetDocumentByUUID(uuids["doc"], true)
+	if err != nil {
+		t.Fatalf("get doc: %v", err)
+	}
+	iss2, err := s.GetIssueByUUID(uuids["iss2"])
+	if err != nil {
+		t.Fatalf("get iss2: %v", err)
+	}
+	if _, err := s.LinkDocument(doc.ID, store.LinkTarget{IssueID: &iss2.ID}, "added after export"); err != nil {
+		t.Fatalf("link doc: %v", err)
+	}
+	if _, err := (&Engine{Store: s, Actor: "tester"}).Import(context.Background(), dir); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	links, err := s.ListDocumentLinks(doc.ID)
+	if err != nil {
+		t.Fatalf("list links: %v", err)
+	}
+	found := false
+	for _, l := range links {
+		if l.IssueID != nil && *l.IssueID == iss2.ID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("locally-created doc link to iss2 was wiped by sync re-import; surviving links: %+v", links)
+	}
+}
+
 // TestImport_LegacyContentMD_JSONLDocument pins the no-migration
 // fallback (BACI-102 Option 1): a .jsonl document synced by a
 // pre-BACI-102 binary has its body on disk as content.md. A new-binary

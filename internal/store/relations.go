@@ -9,16 +9,44 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/model"
 )
 
+// CreateRelation inserts the edge and bumps issues.updated_at on
+// both endpoints. The bump keeps the sync importer's last-writer-wins
+// gate (which keys on issues.updated_at) from clobbering the new
+// edge on the next round-trip — replaceRelationsTx wipes-and-rewrites
+// outgoing relations whenever the gate misses. Both endpoints get the
+// bump because the edge affects how each side renders. See BACI-142.
 func (s *Store) CreateRelation(fromID, toID int64, t model.RelationType) error {
-	_, err := s.DB.Exec(
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(
 		`INSERT INTO issue_relations (from_issue_id, to_issue_id, type) VALUES (?, ?, ?)`,
 		fromID, toID, string(t),
-	)
-	return err
+	); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(
+		`UPDATE issues SET updated_at = CURRENT_TIMESTAMP WHERE id IN (?, ?)`,
+		fromID, toID,
+	); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
+// DeleteRelation removes the edge in either direction and, when a
+// row actually went away, bumps issues.updated_at on both endpoints
+// so the LWW gate preserves the deletion through the next sync. See
+// BACI-142.
 func (s *Store) DeleteRelation(fromID, toID int64) (int64, error) {
-	res, err := s.DB.Exec(
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(
 		`DELETE FROM issue_relations
 		   WHERE (from_issue_id = ? AND to_issue_id = ?)
 		      OR (from_issue_id = ? AND to_issue_id = ?)`,
@@ -27,7 +55,19 @@ func (s *Store) DeleteRelation(fromID, toID int64) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return res.RowsAffected()
+	n, _ := res.RowsAffected()
+	if n > 0 {
+		if _, err := tx.Exec(
+			`UPDATE issues SET updated_at = CURRENT_TIMESTAMP WHERE id IN (?, ?)`,
+			fromID, toID,
+		); err != nil {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return n, nil
 }
 
 // ReplaceRelationsForIssue clears every outgoing relation from
