@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/mrgeoffrich/bacio/internal/git"
@@ -506,24 +505,18 @@ func previewClone(ctx context.Context, e *Engine, syncRepo *git.Repo) (*Collisio
 
 // defaultClonePath computes the default local path for a sync repo
 // given its remote URL. Strategy: ~/.bacio/sync/<basename> where
-// <basename> is the last path component minus a trailing `.git`.
+// <basename> is DeriveSyncLabel(remote), falling back to "default" for
+// a degenerate URL the helper can't derive a label from.
 func defaultClonePath(remote string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	base := remote
-	// Strip any URL prefix so we end up at the last path segment. Cheap
-	// rather than parsing as a URL — supports `git@host:user/repo.git`
-	// and `https://host/user/repo.git` alike.
-	if i := strings.LastIndexAny(base, "/:"); i >= 0 {
-		base = base[i+1:]
+	label := DeriveSyncLabel(remote)
+	if label == "" {
+		label = "default"
 	}
-	base = strings.TrimSuffix(base, ".git")
-	if base == "" {
-		base = "default"
-	}
-	return filepath.Join(home, ".bacio", "sync", base), nil
+	return filepath.Join(home, ".bacio", "sync", label), nil
 }
 
 // initTargetState classifies the state of the directory passed to
