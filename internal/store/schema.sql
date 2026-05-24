@@ -64,6 +64,22 @@ CREATE TABLE IF NOT EXISTS issues (
     -- (`display.show_archived`) and the per-call `--include-archived`
     -- flag opt in to seeing archived rows.
     archived_at DATETIME,
+    -- terminal_at (BACI-138) is the timestamp the issue most recently
+    -- entered a terminal state (`done` or `cancelled`). NULL whenever
+    -- the row is in a non-terminal state. Drives the kanban Done /
+    -- Cancelled column ordering (newest-first) without joining the
+    -- audit log — chosen over a recover-from-history approach because
+    -- it survives the 60-day history prune and lets the board sort with
+    -- a plain ORDER BY. Stamped by SetIssueState / setIssueStateForRelease
+    -- / setIssueStateForClaim whenever state transitions INTO a terminal
+    -- state; cleared whenever state transitions OUT. Re-entering a
+    -- terminal state re-stamps with CURRENT_TIMESTAMP (a re-close beats
+    -- an old close on the board). Insert paths that land directly in a
+    -- terminal state seed terminal_at = CURRENT_TIMESTAMP for the same
+    -- reason. The pre-BACI-138 sort used `updated_at` as a proxy, which
+    -- was wrong because tag / title / description edits bump it without
+    -- changing state.
+    terminal_at DATETIME,
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(repo_id, number)
@@ -71,10 +87,11 @@ CREATE TABLE IF NOT EXISTS issues (
 
 CREATE INDEX IF NOT EXISTS idx_issues_state ON issues(state);
 CREATE INDEX IF NOT EXISTS idx_issues_feature ON issues(feature_id);
--- idx_issues_archived_at (BACI-68) and idx_issues_assignee are created
--- in migrate() so they work on databases that pre-date their referenced
--- columns. The ALTER ADD COLUMN must run before the index can reference
--- it; schema.sql runs before migrate() so the index can't live here.
+-- idx_issues_archived_at (BACI-68), idx_issues_terminal_at (BACI-138),
+-- and idx_issues_assignee are created in migrate() so they work on
+-- databases that pre-date their referenced columns. The ALTER ADD
+-- COLUMN must run before the index can reference it; schema.sql runs
+-- before migrate() so the index can't live here.
 
 CREATE TABLE IF NOT EXISTS comments (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,

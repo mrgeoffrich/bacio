@@ -902,8 +902,12 @@ func setIssueStateForClaim(tx *sql.Tx, issueID int64) (*StateChange, error) {
 	if model.State(oldState) == model.StateInProgress {
 		return ch, nil // already in_progress — SQL no-op too
 	}
+	// BACI-138: a claim auto-transitions the issue to in_progress, so
+	// terminal_at must be cleared if the issue was reopened from a
+	// terminal state via the claim path. The literal SQL clause (not a
+	// bound `?`) matches how SetIssueState writes it.
 	if _, err := tx.Exec(
-		`UPDATE issues SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND state != ?`,
+		`UPDATE issues SET state = ?, updated_at = CURRENT_TIMESTAMP, terminal_at = `+terminalAtClause(model.StateInProgress)+` WHERE id = ? AND state != ?`,
 		string(model.StateInProgress), issueID, string(model.StateInProgress),
 	); err != nil {
 		return nil, err
@@ -1006,8 +1010,14 @@ func setIssueStateForRelease(tx *sql.Tx, issueID int64, target model.State) (*St
 	if model.State(oldState) == target {
 		return ch, nil
 	}
+	// BACI-138: keep terminal_at in lockstep with state — the release
+	// path is the primary way an issue lands in `done`/`cancelled`
+	// (BACI-126c handoff) and the primary way it's reopened to
+	// `in_progress` after an EndAgentSession's `presumed_dead` cascade.
+	// terminalAtClause is a SQL literal (NULL / CURRENT_TIMESTAMP), not
+	// a bound `?` value — same rationale as SetIssueState.
 	if _, err := tx.Exec(
-		`UPDATE issues SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND state != ?`,
+		`UPDATE issues SET state = ?, updated_at = CURRENT_TIMESTAMP, terminal_at = `+terminalAtClause(target)+` WHERE id = ? AND state != ?`,
 		string(target), issueID, string(target),
 	); err != nil {
 		return nil, err

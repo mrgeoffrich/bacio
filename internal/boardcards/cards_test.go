@@ -464,16 +464,30 @@ func TestAssembleNoDispatchNoVerb(t *testing.T) {
 	}
 }
 
-// TestCompletionSortKey covers the BACI-101 ordering key: updated_at
-// when set, created_at as the fallback.
+// TestCompletionSortKey covers the BACI-138 ordering key:
+// terminal_at when set (the source of truth post-BACI-138), else
+// updated_at, else created_at as the final fallback. The
+// terminal_at-wins case is the load-bearing one — a stray tag or
+// title edit on a closed issue bumps updated_at but must NOT
+// reshuffle the card, because terminal_at stayed put.
 func TestCompletionSortKey(t *testing.T) {
 	created := time.Date(2026, 5, 1, 9, 0, 0, 0, time.UTC)
 	updated := time.Date(2026, 5, 10, 9, 0, 0, 0, time.UTC)
+	terminal := time.Date(2026, 5, 5, 9, 0, 0, 0, time.UTC)
 
+	// Terminal beats updated. The stray-edit scenario: updated_at is
+	// newer (a tag edit landed after close), terminal_at is older
+	// (the actual close time). The sort key must follow terminal_at.
+	withTerminal := &model.Issue{CreatedAt: created, UpdatedAt: updated, TerminalAt: &terminal}
+	if got := CompletionSortKey(withTerminal); !got.Equal(terminal) {
+		t.Errorf("CompletionSortKey with terminal_at = %v, want %v (terminal wins over newer updated)", got, terminal)
+	}
+	// terminal_at nil → fall back to updated_at (pre-BACI-138 row).
 	withUpdated := &model.Issue{CreatedAt: created, UpdatedAt: updated}
 	if got := CompletionSortKey(withUpdated); !got.Equal(updated) {
 		t.Errorf("CompletionSortKey with updated_at = %v, want %v", got, updated)
 	}
+	// terminal_at nil + updated_at zero → fall back to created_at.
 	zeroUpdated := &model.Issue{CreatedAt: created}
 	if got := CompletionSortKey(zeroUpdated); !got.Equal(created) {
 		t.Errorf("CompletionSortKey with zero updated_at = %v, want created_at %v", got, created)
@@ -687,4 +701,57 @@ func TestAssembleSortsCompletedColumns(t *testing.T) {
 	eq("Cancelled", column(model.StateCancelled), []string{"TEST-7", "TEST-6"})
 	// Todo: untouched creation order.
 	eq("Todo", column(model.StateTodo), []string{"TEST-1", "TEST-2"})
+}
+
+// TestAssembleSortsCompletedColumnsByTerminalAt — BACI-138. When
+// terminal_at is populated (the post-BACI-138 production path), the
+// sort uses it instead of updated_at. The crucial assertion: a row
+// whose updated_at is *newer* (because a stray tag / title edit
+// landed after close) but whose terminal_at is *older* must NOT jump
+// to the top of the column. That was the BACI-101 proxy's failure
+// mode that the BACI-138 brief flagged.
+func TestAssembleSortsCompletedColumnsByTerminalAt(t *testing.T) {
+	repo := &model.Repo{ID: 1, Prefix: "TEST"}
+	created := time.Date(2026, 5, 1, 9, 0, 0, 0, time.UTC)
+	mk := func(t time.Time) *time.Time { return &t }
+
+	// Done column: three rows, each with a distinct terminal_at.
+	// TEST-3 was closed on May 5 but then got a tag edit on May 25
+	// (updated_at). The proxy-era sort would have put TEST-3 at the
+	// top — it must NOT, because terminal_at says May 5.
+	issues := []*model.Issue{
+		{Key: "TEST-1", State: model.StateDone, Title: "done newest",
+			CreatedAt: created,
+			UpdatedAt:  time.Date(2026, 5, 20, 9, 0, 0, 0, time.UTC),
+			TerminalAt: mk(time.Date(2026, 5, 20, 9, 0, 0, 0, time.UTC))},
+		{Key: "TEST-2", State: model.StateDone, Title: "done middle",
+			CreatedAt: created,
+			UpdatedAt:  time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC),
+			TerminalAt: mk(time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC))},
+		{Key: "TEST-3", State: model.StateDone, Title: "done oldest (recent updated_at)",
+			CreatedAt: created,
+			// Newer updated_at — would jump to top under the old proxy.
+			UpdatedAt:  time.Date(2026, 5, 25, 9, 0, 0, 0, time.UTC),
+			TerminalAt: mk(time.Date(2026, 5, 5, 9, 0, 0, 0, time.UTC))},
+	}
+	f := &fakeClient{repo: repo, issues: issues}
+	cards, err := Assemble(context.Background(), f, repo, false)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	var done []string
+	for _, c := range cards {
+		if model.State(c.Column) == model.StateDone {
+			done = append(done, c.Key)
+		}
+	}
+	want := []string{"TEST-1", "TEST-2", "TEST-3"}
+	if len(done) != len(want) {
+		t.Fatalf("Done column = %v, want %v", done, want)
+	}
+	for i := range want {
+		if done[i] != want[i] {
+			t.Fatalf("Done column = %v, want %v (TEST-3's stray edit must not jump it to the top)", done, want)
+		}
+	}
 }

@@ -66,6 +66,16 @@ type Issue struct {
 	// issue (state -> todo/...) does NOT auto-unarchive — the user must
 	// unarchive explicitly.
 	ArchivedAt *time.Time `json:"archived_at,omitempty"`
+	// TerminalAt (BACI-138) is non-nil iff the issue is currently in
+	// a terminal state (done / cancelled), and carries the timestamp
+	// of the most recent transition INTO that state. Cleared whenever
+	// state moves out of a terminal value. Drives the kanban Done /
+	// Cancelled column ordering (newest-first) without joining the
+	// audit log. Omitempty so non-terminal rows don't carry a JSON
+	// `terminal_at: null` field. Replaces the pre-BACI-138 sort that
+	// proxied via UpdatedAt — that proxy was wrong because tag /
+	// title / description edits bump UpdatedAt without changing state.
+	TerminalAt *time.Time `json:"terminal_at,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
 }

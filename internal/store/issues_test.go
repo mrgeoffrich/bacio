@@ -161,3 +161,105 @@ func TestPeekClaimNextIssueSkipArchived(t *testing.T) {
 		t.Fatalf("post-archive claim: got %+v err=%v, want iss2", claimed, err)
 	}
 }
+
+// TestTerminalAtLifecycle — BACI-138. The denormalised terminal_at
+// column on issues must follow the state transitions:
+//
+//   - CreateIssue in a non-terminal state → terminal_at is NULL.
+//   - CreateIssue directly in a terminal state → terminal_at is set.
+//   - SetIssueState(terminal) → terminal_at is set.
+//   - SetIssueState(non-terminal) → terminal_at is cleared.
+//   - Re-closing a row re-stamps terminal_at (a re-close beats an
+//     old close on the board's newest-first sort).
+//   - Non-state edits (tags, title/description, archive, assignee)
+//     must NOT touch terminal_at. This is the BACI-138 bug: the
+//     pre-BACI-138 sort used updated_at as a proxy and a stray tag
+//     edit on a Done issue jumped the card to the top of the column.
+func TestTerminalAtLifecycle(t *testing.T) {
+	s := newTestStore(t)
+	repo, err := s.CreateRepo("TER", "terminal", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+
+	// Non-terminal create — terminal_at must stay NULL.
+	open, err := s.CreateIssue(repo.ID, nil, "open issue", "", model.StateTodo, nil)
+	if err != nil {
+		t.Fatalf("create open: %v", err)
+	}
+	if open.TerminalAt != nil {
+		t.Fatalf("fresh todo TerminalAt = %v, want nil", *open.TerminalAt)
+	}
+
+	// Direct-to-done create — terminal_at must be set.
+	closed, err := s.CreateIssue(repo.ID, nil, "born done", "", model.StateDone, nil)
+	if err != nil {
+		t.Fatalf("create closed: %v", err)
+	}
+	if closed.TerminalAt == nil {
+		t.Fatalf("CreateIssue(StateDone) TerminalAt = nil, want set")
+	}
+	firstClose := *closed.TerminalAt
+
+	// Move open → done. terminal_at must populate.
+	if err := s.SetIssueState(open.ID, model.StateDone); err != nil {
+		t.Fatalf("set state done: %v", err)
+	}
+	got, _ := s.GetIssueByID(open.ID)
+	if got.TerminalAt == nil {
+		t.Fatal("after SetIssueState(StateDone), TerminalAt = nil, want set")
+	}
+	openClose := *got.TerminalAt
+
+	// Move done → in_progress (reopen). terminal_at must clear.
+	if err := s.SetIssueState(open.ID, model.StateInProgress); err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	got, _ = s.GetIssueByID(open.ID)
+	if got.TerminalAt != nil {
+		t.Fatalf("after reopen, TerminalAt = %v, want nil", *got.TerminalAt)
+	}
+
+	// Re-close — terminal_at must re-stamp with a fresh value (and at
+	// minimum not regress to the original close time). SQLite's
+	// CURRENT_TIMESTAMP has 1-second granularity, so we only assert
+	// that the timestamp is at least the original openClose value
+	// (re-close happens later than the original close in wall-clock
+	// time, so >= is the deterministic predicate).
+	if err := s.SetIssueState(open.ID, model.StateCancelled); err != nil {
+		t.Fatalf("re-close as cancelled: %v", err)
+	}
+	got, _ = s.GetIssueByID(open.ID)
+	if got.TerminalAt == nil {
+		t.Fatal("after re-close, TerminalAt = nil, want set")
+	}
+	if got.TerminalAt.Before(openClose) {
+		t.Fatalf("re-close TerminalAt %v regressed before original %v", *got.TerminalAt, openClose)
+	}
+
+	// Non-state edits on the still-closed `closed` issue must NOT
+	// touch terminal_at. This is the BACI-138 regression guard.
+	beforeEdit, _ := s.GetIssueByID(closed.ID)
+	if beforeEdit.TerminalAt == nil || !beforeEdit.TerminalAt.Equal(firstClose) {
+		t.Fatalf("setup: closed TerminalAt drifted before edits: was %v, now %v",
+			firstClose, beforeEdit.TerminalAt)
+	}
+	newTitle := "renamed"
+	if err := s.UpdateIssue(closed.ID, &newTitle, nil, nil); err != nil {
+		t.Fatalf("rename title: %v", err)
+	}
+	if err := s.AddTagsToIssue(closed.ID, []string{"ui"}); err != nil {
+		t.Fatalf("add tag: %v", err)
+	}
+	if err := s.SetIssueAssignee(closed.ID, "geoff"); err != nil {
+		t.Fatalf("set assignee: %v", err)
+	}
+	if err := s.SetIssueArchived(closed.ID, true); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	got, _ = s.GetIssueByID(closed.ID)
+	if got.TerminalAt == nil || !got.TerminalAt.Equal(firstClose) {
+		t.Fatalf("non-state edits drifted TerminalAt: was %v, now %v",
+			firstClose, got.TerminalAt)
+	}
+}

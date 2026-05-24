@@ -57,6 +57,19 @@ export class Issue {
      * unarchive explicitly.
      */
     "archived_at"?: time$0.Time | null;
+
+    /**
+     * TerminalAt (BACI-138) is non-nil iff the issue is currently in
+     * a terminal state (done / cancelled), and carries the timestamp
+     * of the most recent transition INTO that state. Cleared whenever
+     * state moves out of a terminal value. Drives the kanban Done /
+     * Cancelled column ordering (newest-first) without joining the
+     * audit log. Omitempty so non-terminal rows don't carry a JSON
+     * `terminal_at: null` field. Replaces the pre-BACI-138 sort that
+     * proxied via UpdatedAt — that proxy was wrong because tag /
+     * title / description edits bump UpdatedAt without changing state.
+     */
+    "terminal_at"?: time$0.Time | null;
     "created_at": time$0.Time;
     "updated_at": time$0.Time;
 
