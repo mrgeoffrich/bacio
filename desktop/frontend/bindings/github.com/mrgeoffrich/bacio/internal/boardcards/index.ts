@@ -3,6 +3,7 @@
 
 export {
     BoardCard,
+    BoardCardBlocker,
     BoardCardQuestion,
     BoardCardTodo
 } from "./models.js";

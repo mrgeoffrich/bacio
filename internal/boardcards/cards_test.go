@@ -22,6 +22,9 @@ type fakeClient struct {
 	todos      map[int64][]model.SessionTodo
 	templates  []*store.PromptTemplate
 	questions  map[int64][]*model.SessionQuestion
+	// blockers (BACI-114) is keyed by blocked-issue id — the same
+	// shape store.BlockersFor returns.
+	blockers map[int64][]store.IssueBlocker
 }
 
 func (f *fakeClient) ListRepos(context.Context) ([]*model.Repo, error) {
@@ -56,6 +59,12 @@ func (f *fakeClient) ListOpenQuestionsBySessions(context.Context, []string) (map
 		return map[int64][]*model.SessionQuestion{}, nil
 	}
 	return f.questions, nil
+}
+func (f *fakeClient) BlockersFor(context.Context, []int64) (map[int64][]store.IssueBlocker, error) {
+	if f.blockers == nil {
+		return map[int64][]store.IssueBlocker{}, nil
+	}
+	return f.blockers, nil
 }
 
 // TestAssembleVerbAndTodos covers the BACI-60 enrichment: an open
@@ -376,6 +385,58 @@ func TestIsCompletedColumn(t *testing.T) {
 		if IsCompletedColumn(st) {
 			t.Errorf("IsCompletedColumn(%q) = true, want false", st)
 		}
+	}
+}
+
+// TestAssembleBlockedBy (BACI-114) covers the per-card BlockedBy
+// surfacing: an inbound open-state `blocks` edge populates the
+// blocked card's BlockedBy slice with the blocker's key + state, the
+// blocker card stays unblocked (no inbound edge), and a closed-state
+// blocker does NOT mark the target as blocked (the open-state filter
+// is exercised).
+func TestAssembleBlockedBy(t *testing.T) {
+	repo := &model.Repo{ID: 1, Prefix: "TEST"}
+	issues := []*model.Issue{
+		{ID: 1, Key: "TEST-1", State: model.StateTodo, Title: "blocker (todo)"},
+		{ID: 2, Key: "TEST-2", State: model.StateTodo, Title: "blocked by TEST-1"},
+		{ID: 3, Key: "TEST-3", State: model.StateDone, Title: "blocker (done)"},
+		{ID: 4, Key: "TEST-4", State: model.StateTodo, Title: "blocked by TEST-3 only"},
+		{ID: 5, Key: "TEST-5", State: model.StateTodo, Title: "lone, no edges"},
+	}
+	// TEST-2 is blocked by TEST-1 (open). TEST-4 is blocked by TEST-3
+	// (done — should be filtered out by isCardBlockerOpen).
+	blockers := map[int64][]store.IssueBlocker{
+		2: {{BlockedID: 2, BlockerID: 1, BlockerKey: "TEST-1", BlockerState: model.StateTodo}},
+		4: {{BlockedID: 4, BlockerID: 3, BlockerKey: "TEST-3", BlockerState: model.StateDone}},
+	}
+	f := &fakeClient{repo: repo, issues: issues, blockers: blockers}
+	cards, err := Assemble(context.Background(), f, repo, false)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	byKey := map[string]BoardCard{}
+	for _, c := range cards {
+		byKey[c.Key] = c
+	}
+	// Blocked card surfaces an open blocker.
+	blocked := byKey["TEST-2"]
+	if len(blocked.BlockedBy) != 1 {
+		t.Fatalf("TEST-2 BlockedBy = %d, want 1", len(blocked.BlockedBy))
+	}
+	if blocked.BlockedBy[0].Key != "TEST-1" || blocked.BlockedBy[0].State != model.StateTodo {
+		t.Errorf("TEST-2 BlockedBy[0] = %+v, want {TEST-1 todo}", blocked.BlockedBy[0])
+	}
+	// Blocker card carries no inbound edge, so its BlockedBy stays nil.
+	if len(byKey["TEST-1"].BlockedBy) != 0 {
+		t.Errorf("TEST-1 BlockedBy = %+v, want nil (it's the blocker, not the blocked)", byKey["TEST-1"].BlockedBy)
+	}
+	// A done blocker is filtered out — TEST-4 stays unblocked.
+	if len(byKey["TEST-4"].BlockedBy) != 0 {
+		t.Errorf("TEST-4 BlockedBy = %+v, want nil (its only blocker is in a done state)", byKey["TEST-4"].BlockedBy)
+	}
+	// Cards with no edges stay clean.
+	if len(byKey["TEST-5"].BlockedBy) != 0 {
+		t.Errorf("TEST-5 BlockedBy = %+v, want nil (no edges at all)", byKey["TEST-5"].BlockedBy)
 	}
 }
 

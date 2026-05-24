@@ -148,6 +148,15 @@ body { margin: 0; }
 .mk-status-review  { background: var(--status-review-bg);  color: var(--status-review); }
 .mk-status-done    { background: var(--status-done-bg);    color: var(--status-done); }
 .mk-status-blocked { background: var(--status-blocked-bg); color: var(--status-blocked); }
+/* BACI-114: the degraded chip pill rendered when a relation chip
+   points at an issue not in the current `cards` array (cross-board
+   target, archived-and-hidden, not-yet-loaded). Neutral colours
+   distinguish it from the live state pills without ambiguity. */
+.mk-status-unknown {
+  background: var(--bg-3, var(--ink-50));
+  color: var(--fg-3);
+  border: 1px dashed var(--border-2);
+}
 .mk-pill {
   font-family: var(--font-mono); font-size: 10px; font-weight: 500;
   letter-spacing: .06em; padding: 2px 6px; border-radius: 4px; text-transform: uppercase;
@@ -340,6 +349,100 @@ body { margin: 0; }
 }
 .mk-card-question-pill-text {
   flex: 1 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* BACI-114: the blocked indicator on the kanban card. Renders only
+   when card.blockedBy is non-empty (the server filters to open-state
+   blockers). The button sits to the right of .mk-card-id in the
+   .mk-card-top row; clicking it opens a Radix DropdownMenu listing
+   the open blockers as clickable rows. Sized small (18px square) so
+   it reads as a metadata chip, not a primary affordance. */
+.mk-card-blocked-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; padding: 0;
+  border: 1px solid var(--status-blocked, var(--border-2));
+  border-radius: var(--radius-sm);
+  background: var(--status-blocked-bg, var(--bg-4));
+  color: var(--status-blocked, var(--fg-2));
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+.mk-card-blocked-btn:hover {
+  background: var(--status-blocked, var(--fg-2));
+  color: var(--paper, #fff);
+}
+.mk-card-blocked-btn .mk-icon { width: 11px; height: 11px; }
+.mk-card-blocked-menu {
+  z-index: 100;
+  min-width: 220px; padding: 4px;
+  display: flex; flex-direction: column; gap: 2px;
+  background: var(--bg-2); border: 1px solid var(--border-1);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-3);
+  animation: mk-pop-y var(--dur-fast) var(--ease-out);
+}
+.mk-card-blocked-menu-label {
+  font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+  letter-spacing: .06em; text-transform: uppercase;
+  color: var(--fg-3);
+  padding: 6px 10px 4px;
+}
+.mk-card-blocked-item {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-family: var(--font-sans); font-size: 12px; text-align: left;
+  padding: 6px 10px; border: 0; border-radius: 6px; cursor: pointer;
+  background: transparent; color: var(--fg-1);
+  outline: none;
+}
+.mk-card-blocked-item:hover,
+.mk-card-blocked-item[data-highlighted] { background: var(--bg-4); }
+.mk-card-blocked-item .mk-card-id { margin-left: 0; }
+.mk-card-blocked-title {
+  flex: 1 1 100%;
+  color: var(--fg-2);
+  font-size: 12px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* BACI-114: relations rail panel in the issue workspace. One section
+   per edge type (Blocked by / Blocking / Relates to / Duplicate of)
+   under a single Relations label. Chips are buttons (keyboard-
+   reachable, screen-reader announces the related issue) — click
+   navigates to that issue via onNavigate. A degraded chip (target
+   not in the current `cards` array) renders the key + a neutral "?"
+   pill in lieu of state + title, and stays clickable. */
+.mk-rel-group { margin-bottom: 8px; }
+.mk-rel-group:last-child { margin-bottom: 0; }
+.mk-rel-group-label {
+  font-size: 11px; font-weight: 600;
+  color: var(--fg-3);
+  margin-bottom: 4px;
+  letter-spacing: .04em;
+}
+.mk-rel-chips {
+  list-style: none; padding: 0; margin: 0;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.mk-rel-chip {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  width: 100%; text-align: left;
+  padding: 5px 8px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
+  background: transparent; color: var(--fg-1); cursor: pointer;
+  font-family: var(--font-sans); font-size: 12px;
+  transition: border-color var(--dur-fast) var(--ease-out),
+              background var(--dur-fast) var(--ease-out);
+}
+.mk-rel-chip:hover {
+  border-color: var(--border-2);
+  background: var(--bg-3);
+}
+.mk-rel-chip .mk-card-id { margin-left: 0; }
+.mk-rel-chip-title {
+  flex: 1 1 100%;
+  color: var(--fg-2);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 

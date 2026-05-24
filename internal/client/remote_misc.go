@@ -9,6 +9,7 @@ import (
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/model"
+	"github.com/mrgeoffrich/bacio/internal/store"
 )
 
 // ----- Comments -----
@@ -123,6 +124,13 @@ func (c *remoteClient) UnlinkRelation(ctx context.Context, repo *model.Repo, in 
 		return nil, 0, err
 	}
 	return nil, resp.Removed, nil
+}
+
+// BlockersFor stays local-only (BACI-114). The kanban surface always
+// runs against the local DB / Wails / `bacio web`, never via `bacio
+// --remote`, so the bulk read has no HTTP analogue today.
+func (c *remoteClient) BlockersFor(ctx context.Context, ids []int64) (map[int64][]store.IssueBlocker, error) {
+	return nil, ErrLocalOnly
 }
 
 // ----- PRs -----

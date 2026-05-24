@@ -6,6 +6,7 @@ import IssueLockBanner from './issue/IssueLockBanner.jsx';
 import LinkedDocPanel from './issue/LinkedDocPanel.jsx';
 import InlineDescriptionEditor from './issue/InlineDescriptionEditor.jsx';
 import CommentComposer from './issue/CommentComposer.jsx';
+import RelationsPanel from './issue/RelationsPanel.jsx';
 import { reportError } from '../errors';
 
 // prLabel shortens a GitHub PR URL to "owner/repo#N" for the rail.
@@ -274,6 +275,18 @@ export default function IssueWorkspace({
                 : <span className="mk-meta-empty">—</span>}
             </div>
           </section>
+
+          {/*
+            BACI-114: full per-edge-type relations rail. Renders nothing
+            when the issue has no relations of any kind, so quiet issues
+            stay quiet. Sits above Pull requests — relations rank as
+            higher-priority context than PRs per the design doc.
+          */}
+          <RelationsPanel
+            relations={brief.relations}
+            cards={cards}
+            onNavigate={onNavigateIssue}
+          />
 
           <section className="mk-drawer-section">
             <div className="mk-drawer-label">Pull requests</div>

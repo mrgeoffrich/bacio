@@ -7,6 +7,9 @@ import { Create as $Create } from "@wailsio/runtime";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as model$0 from "../model/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as time$0 from "../../../../../time/models.js";
 
 /**
@@ -82,6 +85,17 @@ export class BoardCard {
      */
     "archived"?: boolean;
 
+    /**
+     * BlockedBy (BACI-114) carries the keys + states of every open-
+     * state `blocks` edge pointing AT this issue. Empty (and omitted
+     * from JSON) when the issue is unblocked. Used by the kanban
+     * blocked-icon indicator and the click-to-show-blockers popover
+     * on each card; the issue-workspace rail's full relations panel
+     * goes through the brief's RelationsDTO instead so the chip
+     * surface covers all four edge types, not just blocks.
+     */
+    "blockedBy"?: BoardCardBlocker[];
+
     /** Creates a new BoardCard instance. */
     constructor($$source: Partial<BoardCard> = {}) {
         if (!("key" in $$source)) {
@@ -129,6 +143,7 @@ export class BoardCard {
         const $$createField5_0 = $$createType0;
         const $$createField12_0 = $$createType2;
         const $$createField13_0 = $$createType4;
+        const $$createField15_0 = $$createType6;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField4_0($$parsedSource["tags"]);
@@ -142,7 +157,42 @@ export class BoardCard {
         if ("todos" in $$parsedSource) {
             $$parsedSource["todos"] = $$createField13_0($$parsedSource["todos"]);
         }
+        if ("blockedBy" in $$parsedSource) {
+            $$parsedSource["blockedBy"] = $$createField15_0($$parsedSource["blockedBy"]);
+        }
         return new BoardCard($$parsedSource as Partial<BoardCard>);
+    }
+}
+
+/**
+ * BoardCardBlocker (BACI-114) is one open `blocks` edge pointing at
+ * this card. Key is the canonical PREFIX-N of the blocker; State is
+ * the blocker's state at assembly time. Title is intentionally NOT
+ * on the wire — the React popover joins it from the same `cards`
+ * array (Option A: thin renderer over data the brief already has).
+ */
+export class BoardCardBlocker {
+    "key": string;
+    "state": model$0.State;
+
+    /** Creates a new BoardCardBlocker instance. */
+    constructor($$source: Partial<BoardCardBlocker> = {}) {
+        if (!("key" in $$source)) {
+            this["key"] = "";
+        }
+        if (!("state" in $$source)) {
+            this["state"] = model$0.State.$zero;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new BoardCardBlocker instance from a string or object.
+     */
+    static createFrom($$source: any = {}): BoardCardBlocker {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new BoardCardBlocker($$parsedSource as Partial<BoardCardBlocker>);
     }
 }
 
@@ -228,3 +278,5 @@ const $$createType1 = BoardCardQuestion.createFrom;
 const $$createType2 = $Create.Array($$createType1);
 const $$createType3 = BoardCardTodo.createFrom;
 const $$createType4 = $Create.Array($$createType3);
+const $$createType5 = BoardCardBlocker.createFrom;
+const $$createType6 = $Create.Array($$createType5);

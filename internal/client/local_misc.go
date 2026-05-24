@@ -139,6 +139,13 @@ func (c *localClient) LinkRelation(ctx context.Context, repo *model.Repo, in inp
 	}, nil
 }
 
+// BlockersFor is a thin pass-through to the store (BACI-114). Used by
+// boardcards.Assemble for the per-card "blocked by open issue" marker —
+// one bulk read per board poll, no audit row (it's a pure read).
+func (c *localClient) BlockersFor(ctx context.Context, ids []int64) (map[int64][]store.IssueBlocker, error) {
+	return c.store.BlockersFor(ids)
+}
+
 func (c *localClient) UnlinkRelation(ctx context.Context, repo *model.Repo, in inputs.UnlinkInput, dryRun bool) (*RelationDeletePreview, int64, error) {
 	a, err := c.GetIssueByKey(ctx, repo, in.A)
 	if err != nil {

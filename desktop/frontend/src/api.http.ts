@@ -58,6 +58,15 @@ export interface BoardCardTodo {
   status: string;
 }
 
+// BoardCardBlocker (BACI-114) is one open `blocks` edge pointing AT
+// a card. Title is intentionally NOT on the wire — the kanban
+// popover joins it from the same `cards` array (Option A: thin
+// renderer over data the brief already has).
+export interface BoardCardBlocker {
+  key: string;
+  state: string; // todo | in_progress | needs_action | in_review — open-state set
+}
+
 export interface BoardCard {
   key: string;
   column: string;
@@ -85,6 +94,12 @@ export interface BoardCard {
   // kanban renders them visibly muted so an archived card stands out
   // from the live ones around it.
   archived?: boolean;
+  // BACI-114: the open-state `blocks` edges pointing at this card.
+  // Empty (and omitted from JSON) when nothing is blocking — the
+  // kanban indicator only lights up when at least one entry is
+  // present. Absent in older payloads so the renderer must null-
+  // check (`card.blockedBy?.length ?? 0`).
+  blockedBy?: BoardCardBlocker[];
 }
 
 export interface CommentDTO {

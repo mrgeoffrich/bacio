@@ -395,6 +395,18 @@ export default function App() {
     setActiveView('issue');
   }, [activeView]);
 
+  // BACI-114: the kanban blocked popover navigates by key — the
+  // target may not be the card the popover is rendered on (it's the
+  // blocker, not this card). Same effect as openCard but takes a key
+  // directly, mirroring the `onNavigateIssue` path the workspace rail
+  // already uses for prev/next sibling jumps.
+  const openIssueByKey = useCallback((key) => {
+    setSettingsOpen(false);
+    setPreviousView(prev => activeView === 'issue' ? prev : activeView);
+    setOpenIssueKey(key);
+    setActiveView('issue');
+  }, [activeView]);
+
   // Close the workspace: clear the open issue and return to the view
   // the user was on before opening it. The poll cleanup runs from its
   // own effect when activeView flips.
@@ -669,6 +681,7 @@ export default function App() {
             hideEmptyColumns={hideEmptyColumns}
             onMoveCard={moveCard}
             onOpenCard={openCard}
+            onOpenIssue={openIssueByKey}
             onDispatchFromCard={dispatchFromCard}
             onCancelWaitingCard={cancelWaitingFromCard}
           />

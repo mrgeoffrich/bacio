@@ -4,7 +4,22 @@ import Icon from './Icon.jsx';
 import Tooltip from './Tooltip.jsx';
 import { todoGlyph } from '../lib/todoGlyph.js';
 
-function KanbanCard({ card, promptConfig, isDragging, onDragStart, onDragEnd, onOpen, onDispatch, onCancelWaiting, onOpenQuestion }) {
+// stateLabel mirrors api.http.ts's STATE_LABELS — duplicated here so the
+// blocked popover can render a blocker's state pill ("In Progress")
+// without an extra prop drill. Kept in sync with api.http.ts:STATE_LABELS.
+const STATE_LABELS = {
+  todo: 'Todo',
+  in_progress: 'In Progress',
+  needs_action: 'Needs Action',
+  in_review: 'In Review',
+  done: 'Done',
+  cancelled: 'Cancelled',
+};
+function stateLabel(s) {
+  return STATE_LABELS[s] ?? s;
+}
+
+function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, onDragEnd, onOpen, onDispatch, onCancelWaiting, onOpenQuestion, onOpenIssue }) {
   // BACI-75: local-only expansion state for the Tasks pill. Resets on
   // unmount (board switch, repo switch, hard refresh) — that's
   // intentional, we don't want to persist a row-level UI toggle.
@@ -42,6 +57,15 @@ function KanbanCard({ card, promptConfig, isDragging, onDragStart, onDragEnd, on
   const openQuestions = card.openQuestions || [];
   const firstQuestion = openQuestions[0];
 
+  // BACI-114: the per-card blocked indicator. card.blockedBy is the
+  // server-filtered open-state list, so a non-empty array means this
+  // card has at least one open blocker. The icon-button trigger lives
+  // in the .mk-card-top row, click expands a popover listing each
+  // blocker (key + state pill + title joined via cardsByKey). The
+  // popover is read-only — clicking a row navigates to that issue.
+  const blockedBy = card.blockedBy || [];
+  const isBlocked = blockedBy.length > 0;
+
   return (
     <article
       className={`mk-card ${isDragging ? 'is-dragging' : ''} ${card.claude ? 'is-claude' : ''} ${taken ? 'is-taken' : ''} ${waiting ? 'is-waiting' : ''} ${card.archived ? 'is-archived' : ''}`}
@@ -52,6 +76,47 @@ function KanbanCard({ card, promptConfig, isDragging, onDragStart, onDragEnd, on
     >
       <div className="mk-card-top">
         <span className="mk-card-id">{card.key}</span>
+        {isBlocked && (
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger asChild>
+              <button
+                type="button"
+                className="mk-card-blocked-btn"
+                aria-label={`Blocked by ${blockedBy.length} issue${blockedBy.length === 1 ? '' : 's'}`}
+                title={`Blocked by ${blockedBy.length} issue${blockedBy.length === 1 ? '' : 's'}`}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <Icon name="lock" />
+              </button>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Portal>
+              <DropdownMenu.Content
+                className="mk-card-blocked-menu"
+                align="end"
+                side="bottom"
+                sideOffset={4}
+                collisionPadding={8}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="mk-card-blocked-menu-label">Blocked by</div>
+                {blockedBy.map(b => {
+                  const other = cardsByKey?.get(b.key);
+                  return (
+                    <DropdownMenu.Item
+                      key={b.key}
+                      className="mk-card-blocked-item"
+                      onSelect={() => onOpenIssue?.(b.key)}
+                    >
+                      <span className="mk-card-id">{b.key}</span>
+                      <span className={`mk-pill mk-status-${b.state}`}>{stateLabel(b.state)}</span>
+                      {other && <span className="mk-card-blocked-title">{other.title}</span>}
+                    </DropdownMenu.Item>
+                  );
+                })}
+              </DropdownMenu.Content>
+            </DropdownMenu.Portal>
+          </DropdownMenu.Root>
+        )}
       </div>
       <h3 className="mk-card-title">{card.title}</h3>
       {card.tags && card.tags.length > 0 && (
