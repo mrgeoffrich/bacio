@@ -33,3 +33,21 @@ type FeatureArchiveInput struct {
 type FeatureUnarchiveInput struct {
 	Slug string `json:"slug"`
 }
+
+// FeatureCommentAddInput is the payload for `bacio feature comment add
+// --json` (BACI-124). The feature-scoped mirror of CommentAddInput —
+// feature_slug replaces issue_key because feature comments live under a
+// slug-addressed parent.
+type FeatureCommentAddInput struct {
+	FeatureSlug string `json:"feature_slug"`
+	Author      string `json:"author"`
+	Body        string `json:"body"`
+}
+
+// FeatureCommentRmInput is the payload for `bacio feature comment rm
+// --json` (BACI-124). Feature comments are addressed by their immutable
+// uuid — discoverable via `bacio feature comment list -o json`.
+type FeatureCommentRmInput struct {
+	FeatureSlug string `json:"feature_slug"`
+	CommentUUID string `json:"comment_uuid"`
+}

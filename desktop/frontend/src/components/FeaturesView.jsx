@@ -2,10 +2,21 @@ import React, { useState, useEffect } from 'react';
 import { reportError } from '../errors';
 import * as api from '../api';
 import MarkdownView from '../lib/markdownView';
+import CommentComposer from './issue/CommentComposer';
 
 // Short date for the feature-list rows and detail metadata line.
 function shortDate(iso) {
   return new Date(iso).toLocaleDateString();
+}
+
+// commentTimestamp formats a feature comment's createdAt for display
+// next to its author — matches the issue drawer's comment metadata.
+function commentTimestamp(iso) {
+  try {
+    return new Date(iso).toLocaleString();
+  } catch {
+    return iso;
+  }
 }
 
 // FeaturesView is the desktop feature browser: a read-only two-pane mirror of
@@ -112,9 +123,68 @@ export default function FeaturesView({ activeBoard }) {
                 </ul>
               )}
             </section>
+
+            <FeatureCommentsSection
+              repoPrefix={activeBoard}
+              detail={detail}
+              onChange={setDetail}
+            />
           </div>
         ) : null}
       </div>
     </div>
+  );
+}
+
+// FeatureCommentsSection renders the BACI-124 handoff timeline plus an
+// inline composer. Reuses the same MarkdownView + CommentComposer used
+// by the issue drawer so the markdown rendering rule (`<MarkdownView>`
+// is the canonical reader, never `react-markdown` directly) holds.
+function FeatureCommentsSection({ repoPrefix, detail, onChange }) {
+  const comments = detail.comments ?? [];
+  const onSubmit = async (author, body) => {
+    try {
+      const updated = await api.addFeatureComment(repoPrefix, detail.slug, author, body);
+      onChange(updated);
+    } catch (err) {
+      reportError(err, { headline: "Couldn't add comment" });
+    }
+  };
+  const onDelete = async (uuid) => {
+    try {
+      const updated = await api.deleteFeatureComment(repoPrefix, detail.slug, uuid);
+      onChange(updated);
+    } catch (err) {
+      reportError(err, { headline: "Couldn't delete comment" });
+    }
+  };
+  return (
+    <section className="mk-features-section">
+      <div className="mk-features-label">Comments · {comments.length}</div>
+      {comments.length === 0 ? (
+        <p className="mk-features-text mk-meta-empty">No comments yet.</p>
+      ) : (
+        <ul className="mk-features-comments">
+          {comments.map(c => (
+            <li key={c.uuid} className="mk-comment-row">
+              <div className="mk-comment-meta">
+                <span className="mk-comment-author">{c.author}</span>
+                <span className="mk-comment-time">{commentTimestamp(c.createdAt)}</span>
+                <button
+                  type="button"
+                  className="mk-link-btn"
+                  onClick={() => onDelete(c.uuid)}
+                  title="Delete this comment"
+                >
+                  delete
+                </button>
+              </div>
+              <MarkdownView className="mk-comment-body mk-markdown">{c.body}</MarkdownView>
+            </li>
+          ))}
+        </ul>
+      )}
+      <CommentComposer onSubmit={onSubmit} />
+    </section>
   );
 }

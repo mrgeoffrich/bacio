@@ -57,9 +57,11 @@ type CommentDeletePreview struct {
 // FeatureView mirrors internal/cli/output.go:featureView so JSON consumers
 // see the same shape from `bacio feature show -o json` and the API.
 type FeatureView struct {
-	Feature   *model.Feature        `json:"feature"`
-	Issues    []*model.Issue        `json:"issues"`
-	Documents []*model.DocumentLink `json:"documents"`
+	Feature   *model.Feature          `json:"feature"`
+	Issues    []*model.Issue          `json:"issues"`
+	Documents []*model.DocumentLink   `json:"documents"`
+	// Comments is the BACI-124 chronological-handoff timeline.
+	Comments []*model.FeatureComment `json:"comments"`
 }
 
 // FeatureDeletePreview mirrors internal/cli/feature.go:featureDeletePreview.
@@ -71,6 +73,18 @@ type FeatureDeletePreview struct {
 	WouldDelete    bool           `json:"would_delete"`
 	IssuesUnlinked int            `json:"issues_unlinked"`
 	DocumentLinks  int            `json:"document_links"`
+	// Comments counts feature_comments rows that the ON DELETE CASCADE
+	// FK would wipe (BACI-124).
+	Comments int `json:"comments"`
+}
+
+// FeatureCommentDeletePreview mirrors
+// internal/cli/feature_comment.go:featureCommentDeletePreview — the
+// dry-run payload for `DELETE /repos/{prefix}/features/{slug}/comments/{uuid}`.
+type FeatureCommentDeletePreview struct {
+	FeatureSlug string `json:"feature_slug"`
+	CommentUUID string `json:"comment_uuid"`
+	WouldRemove int    `json:"would_remove"`
 }
 
 // PlanEntry mirrors internal/cli/plan.go:planEntry.

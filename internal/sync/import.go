@@ -25,11 +25,15 @@ type ImportResult struct {
 	Source string `json:"source"`
 	DryRun bool   `json:"dry_run,omitempty"`
 
-	Repos     int `json:"repos"`
-	Features  int `json:"features"`
-	Issues    int `json:"issues"`
-	Comments  int `json:"comments"`
-	Documents int `json:"documents"`
+	Repos    int `json:"repos"`
+	Features int `json:"features"`
+	Issues   int `json:"issues"`
+	// Comments counts issue-scoped comments seen on disk. Kept
+	// issue-only so pinned-output tests stay green; BACI-124 feature
+	// comments roll up into FeatureComments.
+	Comments        int `json:"comments"`
+	FeatureComments int `json:"feature_comments"`
+	Documents       int `json:"documents"`
 
 	Inserted int `json:"inserted"`
 	Updated  int `json:"updated"`
@@ -129,6 +133,20 @@ type scannedFeature struct {
 	Folder      string
 	Description string
 	BodyHash    string
+	// Comments holds the BACI-124 feature-scoped comments scanned from
+	// <featureFolder>/comments/. Same shape as scannedIssue.Comments.
+	Comments []*scannedFeatureComment
+}
+
+// scannedFeatureComment is the parsed on-disk feature comment (BACI-124).
+// Identical YAML / MD schema to scannedComment — the type is distinct so
+// the apply pass keys off the right table.
+type scannedFeatureComment struct {
+	Parsed   *ParsedComment
+	YAMLPath string
+	MDPath   string
+	Body     string
+	BodyHash string
 }
 
 type scannedIssue struct {
@@ -199,6 +217,9 @@ func (e *Engine) Import(ctx context.Context, source string) (*ImportResult, erro
 		for _, si := range sr.Issues {
 			res.Comments += len(si.Comments)
 		}
+		for _, sf := range sr.Features {
+			res.FeatureComments += len(sf.Comments)
+		}
 	}
 
 	tx, err := e.Store.DB.Begin()
@@ -265,6 +286,12 @@ func (e *Engine) applyImport(ctx context.Context, tx *sql.Tx, source string, sca
 		// resolution works), then comments, then documents.
 		if err := e.applyFeatures(tx, sr, repo, res); err != nil {
 			return fmt.Errorf("apply features for %s: %w", sr.Prefix, err)
+		}
+		// BACI-124 feature comments live under their feature folder, so
+		// apply them immediately after features (before issues) — the
+		// foreign key resolves to the just-applied feature row.
+		if err := e.applyFeatureComments(tx, sr, res); err != nil {
+			return fmt.Errorf("apply feature comments for %s: %w", sr.Prefix, err)
 		}
 		if err := e.applyIssues(tx, sr, repo, res); err != nil {
 			return fmt.Errorf("apply issues for %s: %w", sr.Prefix, err)
@@ -368,6 +395,7 @@ func (e *Engine) propagateDeletes(tx *sql.Tx, scan *scanResult, res *ImportResul
 		Tbl  string
 	}{
 		{store.SyncKindComment, "comments"},
+		{store.SyncKindFeatureComment, "feature_comments"},
 		{store.SyncKindIssue, "issues"},
 		{store.SyncKindFeature, "features"},
 		{store.SyncKindDocument, "documents"},
@@ -582,6 +610,16 @@ func contentHashIssue(si *scannedIssue) string {
 
 func contentHashComment(sc *scannedComment) string {
 	return ContentHash([]byte(fmt.Sprintf("comment|%s|%s|%s",
+		sc.Parsed.UUID, sc.Parsed.Author, sc.BodyHash)))
+}
+
+// contentHashFeatureComment distinguishes feature comments from issue
+// comments in the sync_state hash space (BACI-124). The kind=feature_comment
+// prefix means a colliding uuid between an issue comment and a feature
+// comment (astronomically unlikely with UUIDv7, but defensive) would
+// surface as a hash change rather than a silent no-op.
+func contentHashFeatureComment(sc *scannedFeatureComment) string {
+	return ContentHash([]byte(fmt.Sprintf("feature_comment|%s|%s|%s",
 		sc.Parsed.UUID, sc.Parsed.Author, sc.BodyHash)))
 }
 

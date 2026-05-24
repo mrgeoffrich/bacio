@@ -288,6 +288,81 @@ func TestRoundTripCommentsAndDocs(t *testing.T) {
 	}
 }
 
+// TestRoundTripFeatureComments pins the BACI-124 feature-comment add /
+// list / show / delete cycle across the local + remote backends — the
+// dual-backend equivalent of TestRoundTripCommentsAndDocs.
+func TestRoundTripFeatureComments(t *testing.T) {
+	p := newPair(t)
+	defer p.cleanup()
+	ctx := context.Background()
+
+	// Create a feature via the local backend.
+	feat, err := p.local.CreateFeature(ctx, p.repo, inputs.FeatureAddInput{
+		Title: "Auth rewrite", Slug: "auth",
+	}, false)
+	if err != nil {
+		t.Fatalf("CreateFeature: %v", err)
+	}
+
+	// Add a comment over local; the remote ShowFeature sees it.
+	if _, err := p.local.AddFeatureComment(ctx, p.repo, inputs.FeatureCommentAddInput{
+		FeatureSlug: feat.Slug, Author: "alice", Body: "first handoff",
+	}, false); err != nil {
+		t.Fatalf("AddFeatureComment: %v", err)
+	}
+	view, err := p.remote.ShowFeature(ctx, p.repo, feat.Slug)
+	if err != nil {
+		t.Fatalf("remote ShowFeature: %v", err)
+	}
+	if len(view.Comments) != 1 || view.Comments[0].Body != "first handoff" {
+		t.Fatalf("remote ShowFeature comments: %+v", view.Comments)
+	}
+
+	// Delete via the remote client — local agrees the row is gone.
+	uuid := view.Comments[0].UUID
+	if _, _, err := p.remote.DeleteFeatureComment(ctx, p.repo, inputs.FeatureCommentRmInput{
+		FeatureSlug: feat.Slug, CommentUUID: uuid,
+	}, false); err != nil {
+		t.Fatalf("remote DeleteFeatureComment: %v", err)
+	}
+	localCs, err := p.local.ListFeatureComments(ctx, p.repo, feat.Slug)
+	if err != nil {
+		t.Fatalf("local ListFeatureComments: %v", err)
+	}
+	if len(localCs) != 0 {
+		t.Fatalf("local still sees deleted feature comment: %+v", localCs)
+	}
+
+	// Re-add through remote; the local dry-run path returns a preview
+	// without removing the row.
+	cm2, err := p.remote.AddFeatureComment(ctx, p.repo, inputs.FeatureCommentAddInput{
+		FeatureSlug: feat.Slug, Author: "bob", Body: "second handoff",
+	}, false)
+	if err != nil {
+		t.Fatalf("remote AddFeatureComment #2: %v", err)
+	}
+	preview, _, err := p.local.DeleteFeatureComment(ctx, p.repo, inputs.FeatureCommentRmInput{
+		FeatureSlug: feat.Slug, CommentUUID: cm2.UUID,
+	}, true)
+	if err != nil {
+		t.Fatalf("local DeleteFeatureComment dry-run: %v", err)
+	}
+	if preview == nil || preview.WouldRemove != 1 {
+		t.Fatalf("dry-run preview: %+v", preview)
+	}
+	if cs, _ := p.local.ListFeatureComments(ctx, p.repo, feat.Slug); len(cs) != 1 {
+		t.Fatalf("dry-run deleted the comment: %d", len(cs))
+	}
+	if _, _, err := p.local.DeleteFeatureComment(ctx, p.repo, inputs.FeatureCommentRmInput{
+		FeatureSlug: feat.Slug, CommentUUID: cm2.UUID,
+	}, false); err != nil {
+		t.Fatalf("local DeleteFeatureComment: %v", err)
+	}
+	if cs, _ := p.remote.ListFeatureComments(ctx, p.repo, feat.Slug); len(cs) != 0 {
+		t.Fatalf("remote still sees deleted feature comment: %d", len(cs))
+	}
+}
+
 func TestRoundTripDryRun(t *testing.T) {
 	p := newPair(t)
 	defer p.cleanup()

@@ -25,14 +25,17 @@ const IndexSchemaVersion = 1
 // from in-memory data the export already loaded; we don't re-scan
 // the filesystem to derive them.
 type RepoIndexEntry struct {
-	Prefix    string `yaml:"prefix"`
-	UUID      string `yaml:"uuid"`
-	Name      string `yaml:"name"`
-	Remote    string `yaml:"remote"`
-	Issues    int    `yaml:"issues"`
-	Features  int    `yaml:"features"`
-	Documents int    `yaml:"documents"`
-	Comments  int    `yaml:"comments"`
+	Prefix          string `yaml:"prefix"`
+	UUID            string `yaml:"uuid"`
+	Name            string `yaml:"name"`
+	Remote          string `yaml:"remote"`
+	Issues          int    `yaml:"issues"`
+	Features        int    `yaml:"features"`
+	Documents       int    `yaml:"documents"`
+	Comments        int    `yaml:"comments"`
+	// FeatureComments (BACI-124) tracks the per-repo feature_comments
+	// row count alongside the existing issue-scoped Comments.
+	FeatureComments int `yaml:"feature_comments"`
 }
 
 // Index is the parsed shape of index.yaml. Used by the sync-repo
@@ -56,6 +59,7 @@ func BuildIndex(entries []RepoIndexEntry) Node {
 		items[i] = Map(
 			Pair{"comments", Int(int64(e.Comments))},
 			Pair{"documents", Int(int64(e.Documents))},
+			Pair{"feature_comments", Int(int64(e.FeatureComments))},
 			Pair{"features", Int(int64(e.Features))},
 			Pair{"issues", Int(int64(e.Issues))},
 			Pair{"name", Str(e.Name)},

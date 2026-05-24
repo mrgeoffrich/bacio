@@ -414,6 +414,65 @@ func (e *Engine) applyComments(tx *sql.Tx, sr *scannedRepo, res *ImportResult) e
 	return nil
 }
 
+// applyFeatureComments mirrors applyComments but writes feature-scoped
+// rows (BACI-124). Same UPSERT-by-uuid semantics; runs after
+// applyFeatures so the FK to features.id is resolvable.
+func (e *Engine) applyFeatureComments(tx *sql.Tx, sr *scannedRepo, res *ImportResult) error {
+	now := time.Now().UTC()
+	featUUIDs := mapKeys(sr.Features)
+	sort.Strings(featUUIDs)
+	for _, featUUID := range featUUIDs {
+		sf := sr.Features[featUUID]
+		var featureID int64
+		if err := tx.QueryRow(`SELECT id FROM features WHERE uuid = ?`, featUUID).Scan(&featureID); err != nil {
+			// Feature insert failed earlier? skip; no point applying its
+			// comments without a parent row.
+			continue
+		}
+		sort.Slice(sf.Comments, func(i, j int) bool {
+			return sf.Comments[i].Parsed.UUID < sf.Comments[j].Parsed.UUID
+		})
+		for _, sc := range sf.Comments {
+			hash := contentHashFeatureComment(sc)
+			var (
+				existingID     int64
+				existingAuthor string
+				existingBody   string
+			)
+			err := tx.QueryRow(
+				`SELECT id, author, body FROM feature_comments WHERE uuid = ?`,
+				sc.Parsed.UUID,
+			).Scan(&existingID, &existingAuthor, &existingBody)
+			if errors.Is(err, sql.ErrNoRows) {
+				if _, err := tx.Exec(
+					`INSERT INTO feature_comments (uuid, feature_id, author, body, created_at) VALUES (?, ?, ?, ?, ?)`,
+					sc.Parsed.UUID, featureID, sc.Parsed.Author, sc.Body,
+					sqliteTimestamp(sc.Parsed.CreatedAt),
+				); err != nil {
+					return fmt.Errorf("insert feature comment %s: %w", sc.Parsed.UUID, err)
+				}
+				res.Inserted++
+			} else if err != nil {
+				return err
+			} else if existingAuthor != sc.Parsed.Author || existingBody != sc.Body {
+				if _, err := tx.Exec(
+					`UPDATE feature_comments SET author = ?, body = ? WHERE id = ?`,
+					sc.Parsed.Author, sc.Body, existingID,
+				); err != nil {
+					return fmt.Errorf("update feature comment %s: %w", sc.Parsed.UUID, err)
+				}
+				res.Updated++
+			} else {
+				res.NoOp++
+			}
+			if err := e.markSyncedTx(tx, sc.Parsed.UUID, store.SyncKindFeatureComment, hash, now); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func (e *Engine) applyDocuments(tx *sql.Tx, sr *scannedRepo, repo *model.Repo, res *ImportResult) error {
 	now := time.Now().UTC()
 	uuids := mapKeys(sr.Documents)

@@ -149,6 +149,15 @@ type Client interface {
 	AddComment(ctx context.Context, repo *model.Repo, in inputs.CommentAddInput, dryRun bool) (*model.Comment, error)
 	DeleteComment(ctx context.Context, repo *model.Repo, in inputs.CommentRmInput, dryRun bool) (preview *CommentDeletePreview, removed int64, err error)
 
+	// ----- Feature comments (BACI-124) -----
+	// Feature comments are the feature-scoped chronological-handoff
+	// scratchpad implement-mode workers post to on close-out so the
+	// next worker on a sibling issue in the same feature inherits the
+	// context. Same shape as issue comments but parented on slug.
+	ListFeatureComments(ctx context.Context, repo *model.Repo, slug string) ([]*model.FeatureComment, error)
+	AddFeatureComment(ctx context.Context, repo *model.Repo, in inputs.FeatureCommentAddInput, dryRun bool) (*model.FeatureComment, error)
+	DeleteFeatureComment(ctx context.Context, repo *model.Repo, in inputs.FeatureCommentRmInput, dryRun bool) (preview *FeatureCommentDeletePreview, removed int64, err error)
+
 	LinkRelation(ctx context.Context, repo *model.Repo, in inputs.LinkInput, dryRun bool) (*model.Relation, error)
 	UnlinkRelation(ctx context.Context, repo *model.Repo, in inputs.UnlinkInput, dryRun bool) (preview *RelationDeletePreview, removed int64, err error)
 

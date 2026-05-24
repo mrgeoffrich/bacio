@@ -44,6 +44,9 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("GET /repos/{prefix}/features/{slug}/plan", d.handleFeaturePlan)
 	mux.HandleFunc("GET /repos/{prefix}/features/{slug}/next", d.handleFeatureNextPeek)
 	mux.HandleFunc("POST /repos/{prefix}/features/{slug}/next", d.handleFeatureNextClaim)
+	mux.HandleFunc("GET /repos/{prefix}/features/{slug}/comments", d.handleFeatureCommentsList)
+	mux.HandleFunc("POST /repos/{prefix}/features/{slug}/comments", d.handleFeatureCommentAdd)
+	mux.HandleFunc("DELETE /repos/{prefix}/features/{slug}/comments/{uuid}", d.handleFeatureCommentDelete)
 
 	mux.HandleFunc("GET /repos/{prefix}/issues", d.handleIssuesList)
 	mux.HandleFunc("POST /repos/{prefix}/issues", d.handleIssueCreate)

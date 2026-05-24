@@ -23,9 +23,13 @@ type featuresView struct {
 	row        int
 	listScroll int
 
-	selected  *model.Feature
-	issues    []*model.Issue
-	issuesErr error
+	selected    *model.Feature
+	issues      []*model.Issue
+	issuesErr   error
+	// comments holds the BACI-124 chronological-handoff timeline for the
+	// focused feature; read-only display in the TUI.
+	comments    []*model.FeatureComment
+	commentsErr error
 
 	overlay       bool
 	overlayScroll int
@@ -98,6 +102,9 @@ func (f *featuresView) refreshSelection() {
 	})
 	f.issues = issues
 	f.issuesErr = err
+	comments, cerr := f.store.ListFeatureComments(cur.ID)
+	f.comments = comments
+	f.commentsErr = cerr
 	f.overlayScroll = 0
 }
 
@@ -471,5 +478,23 @@ func (f *featuresView) viewOverlay(width, height int) string {
 
 	all := []string{title, meta, "", descHeader, desc, "", issuesHeader}
 	all = append(all, issueBlocks...)
+
+	// BACI-124 feature comments — read-only display under the issues
+	// table. Each comment renders as "author — time" followed by its
+	// glamour-rendered body, mirroring the issue-show comment surface.
+	commentsHeader := boldStyle.Render(fmt.Sprintf("Comments · %d", len(f.comments)))
+	all = append(all, "", commentsHeader)
+	switch {
+	case f.commentsErr != nil:
+		all = append(all, errorStyle.Render(f.commentsErr.Error()))
+	case len(f.comments) == 0:
+		all = append(all, mutedStyle.Italic(true).Render("(none)"))
+	default:
+		for _, c := range f.comments {
+			meta := mutedStyle.Render(fmt.Sprintf("%s — %s", c.Author, c.CreatedAt.Format("2006-01-02 15:04")))
+			body := f.cachedMD(-c.ID, c.Body, contentWidth)
+			all = append(all, "", meta, body)
+		}
+	}
 	return markdownPanel(width, height, strings.Join(all, "\n"), &f.overlayScroll, true)
 }

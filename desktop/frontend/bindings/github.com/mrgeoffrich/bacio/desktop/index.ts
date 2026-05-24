@@ -29,6 +29,7 @@ export {
     DocContent,
     DocLinkDTO,
     DocSummary,
+    FeatureComment,
     FeatureDetail,
     FeatureLinkedIssue,
     FeatureRefDTO,

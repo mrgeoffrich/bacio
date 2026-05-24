@@ -379,6 +379,43 @@ export class DocSummary {
 }
 
 /**
+ * FeatureComment mirrors model.FeatureComment, shaped for the desktop
+ * feature detail pane (BACI-124).
+ */
+export class FeatureComment {
+    "uuid": string;
+    "author": string;
+    "body": string;
+    "createdAt": time$0.Time;
+
+    /** Creates a new FeatureComment instance. */
+    constructor($$source: Partial<FeatureComment> = {}) {
+        if (!("uuid" in $$source)) {
+            this["uuid"] = "";
+        }
+        if (!("author" in $$source)) {
+            this["author"] = "";
+        }
+        if (!("body" in $$source)) {
+            this["body"] = "";
+        }
+        if (!("createdAt" in $$source)) {
+            this["createdAt"] = null as any;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new FeatureComment instance from a string or object.
+     */
+    static createFrom($$source: any = {}): FeatureComment {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new FeatureComment($$parsedSource as Partial<FeatureComment>);
+    }
+}
+
+/**
  * FeatureDetail is one feature with its description and linked issues — the
  * payload for the desktop feature detail pane.
  */
@@ -389,6 +426,7 @@ export class FeatureDetail {
     "createdAt": time$0.Time;
     "updatedAt": time$0.Time;
     "issues": FeatureLinkedIssue[];
+    "comments": FeatureComment[];
 
     /** Creates a new FeatureDetail instance. */
     constructor($$source: Partial<FeatureDetail> = {}) {
@@ -402,13 +440,16 @@ export class FeatureDetail {
             this["description"] = "";
         }
         if (!("createdAt" in $$source)) {
-            this["createdAt"] = null;
+            this["createdAt"] = null as any;
         }
         if (!("updatedAt" in $$source)) {
-            this["updatedAt"] = null;
+            this["updatedAt"] = null as any;
         }
         if (!("issues" in $$source)) {
             this["issues"] = [];
+        }
+        if (!("comments" in $$source)) {
+            this["comments"] = [];
         }
 
         Object.assign(this, $$source);
@@ -419,13 +460,24 @@ export class FeatureDetail {
      */
     static createFrom($$source: any = {}): FeatureDetail {
         const $$createField5_0 = $$createType1;
+        const $$createField6_0 = $$createTypeFeatureCommentArray;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("issues" in $$parsedSource) {
             $$parsedSource["issues"] = $$createField5_0($$parsedSource["issues"]);
         }
+        if ("comments" in $$parsedSource) {
+            $$parsedSource["comments"] = $$createField6_0($$parsedSource["comments"]);
+        }
         return new FeatureDetail($$parsedSource as Partial<FeatureDetail>);
     }
 }
+
+// $$createTypeFeatureCommentArray (BACI-124) is the FeatureComment[] hydrator
+// used by FeatureDetail.createFrom. Declared inline rather than in the
+// renumbered $$createType pool at file bottom so the ID space stays
+// stable for the rest of the generated models.
+const $$createTypeFeatureComment = FeatureComment.createFrom;
+const $$createTypeFeatureCommentArray = $Create.Array($$createTypeFeatureComment);
 
 /**
  * FeatureLinkedIssue is one issue grouped under a feature, for the detail pane.

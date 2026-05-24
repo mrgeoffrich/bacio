@@ -28,9 +28,13 @@ type IssueView struct {
 }
 
 type FeatureView struct {
-	Feature   *model.Feature        `json:"feature"`
-	Issues    []*model.Issue        `json:"issues"`
-	Documents []*model.DocumentLink `json:"documents"`
+	Feature   *model.Feature          `json:"feature"`
+	Issues    []*model.Issue          `json:"issues"`
+	Documents []*model.DocumentLink   `json:"documents"`
+	// Comments is the BACI-124 chronological-handoff timeline — every
+	// `feature_comments` row for this feature, oldest first, mirroring
+	// the issue-show comment surface.
+	Comments []*model.FeatureComment `json:"comments"`
 }
 
 type CascadeCount struct {
@@ -52,6 +56,9 @@ type FeatureDeletePreview struct {
 	WouldDelete    bool           `json:"would_delete"`
 	IssuesUnlinked int            `json:"issues_unlinked"`
 	DocumentLinks  int            `json:"document_links"`
+	// Comments is the count of BACI-124 feature_comments rows that
+	// would be wiped by the ON DELETE CASCADE FK.
+	Comments int `json:"comments"`
 }
 
 type RelationDeletePreview struct {
@@ -68,6 +75,15 @@ type PRDetachPreview struct {
 
 type CommentDeletePreview struct {
 	IssueKey    string `json:"issue_key"`
+	CommentUUID string `json:"comment_uuid"`
+	WouldRemove int    `json:"would_remove"`
+}
+
+// FeatureCommentDeletePreview is the dry-run payload for
+// `bacio feature comment rm` (BACI-124) — feature-scoped mirror of
+// CommentDeletePreview.
+type FeatureCommentDeletePreview struct {
+	FeatureSlug string `json:"feature_slug"`
 	CommentUUID string `json:"comment_uuid"`
 	WouldRemove int    `json:"would_remove"`
 }

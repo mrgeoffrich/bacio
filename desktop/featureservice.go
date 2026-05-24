@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/model"
 )
@@ -24,6 +25,15 @@ type FeatureLinkedIssue struct {
 	StateLabel string `json:"stateLabel"`
 }
 
+// FeatureComment mirrors model.FeatureComment, shaped for the desktop
+// feature detail pane (BACI-124).
+type FeatureComment struct {
+	UUID      string    `json:"uuid"`
+	Author    string    `json:"author"`
+	Body      string    `json:"body"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
 // FeatureDetail is one feature with its description and linked issues — the
 // payload for the desktop feature detail pane.
 type FeatureDetail struct {
@@ -33,6 +43,9 @@ type FeatureDetail struct {
 	CreatedAt   time.Time            `json:"createdAt"`
 	UpdatedAt   time.Time            `json:"updatedAt"`
 	Issues      []FeatureLinkedIssue `json:"issues"`
+	// Comments is the BACI-124 chronological-handoff timeline, oldest
+	// first. Drives the feature drawer's comment panel.
+	Comments []FeatureComment `json:"comments"`
 }
 
 // FeatureService is the Wails-bound feature API the desktop frontend talks to.
@@ -103,6 +116,15 @@ func (f *FeatureService) GetFeature(repoPrefix, slug string) (FeatureDetail, err
 			StateLabel: stateLabel(iss.State),
 		})
 	}
+	comments := make([]FeatureComment, 0, len(view.Comments))
+	for _, c := range view.Comments {
+		comments = append(comments, FeatureComment{
+			UUID:      c.UUID,
+			Author:    c.Author,
+			Body:      c.Body,
+			CreatedAt: c.CreatedAt,
+		})
+	}
 	return FeatureDetail{
 		Slug:        feat.Slug,
 		Title:       feat.Title,
@@ -110,5 +132,41 @@ func (f *FeatureService) GetFeature(repoPrefix, slug string) (FeatureDetail, err
 		CreatedAt:   feat.CreatedAt,
 		UpdatedAt:   feat.UpdatedAt,
 		Issues:      issues,
+		Comments:    comments,
 	}, nil
+}
+
+// AddFeatureComment posts a chronological handoff comment to a feature
+// (BACI-124) and returns the refreshed detail.
+func (f *FeatureService) AddFeatureComment(repoPrefix, slug, author, body string) (FeatureDetail, error) {
+	ctx := context.Background()
+	repo, err := f.resolveRepo(ctx, repoPrefix)
+	if err != nil {
+		return FeatureDetail{}, err
+	}
+	if _, err := f.client.AddFeatureComment(ctx, repo, inputs.FeatureCommentAddInput{
+		FeatureSlug: slug,
+		Author:      author,
+		Body:        body,
+	}, false); err != nil {
+		return FeatureDetail{}, err
+	}
+	return f.GetFeature(repoPrefix, slug)
+}
+
+// DeleteFeatureComment removes a feature comment by uuid (BACI-124) and
+// returns the refreshed detail.
+func (f *FeatureService) DeleteFeatureComment(repoPrefix, slug, commentUUID string) (FeatureDetail, error) {
+	ctx := context.Background()
+	repo, err := f.resolveRepo(ctx, repoPrefix)
+	if err != nil {
+		return FeatureDetail{}, err
+	}
+	if _, _, err := f.client.DeleteFeatureComment(ctx, repo, inputs.FeatureCommentRmInput{
+		FeatureSlug: slug,
+		CommentUUID: commentUUID,
+	}, false); err != nil {
+		return FeatureDetail{}, err
+	}
+	return f.GetFeature(repoPrefix, slug)
 }

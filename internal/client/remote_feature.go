@@ -145,3 +145,49 @@ func (c *remoteClient) archiveFeature(ctx context.Context, repo *model.Repo, slu
 	}
 	return &out, nil
 }
+
+// ListFeatureComments (BACI-124) — GET /repos/{prefix}/features/{slug}/comments.
+func (c *remoteClient) ListFeatureComments(ctx context.Context, repo *model.Repo, slug string) ([]*model.FeatureComment, error) {
+	var out []*model.FeatureComment
+	if err := c.do(ctx, http.MethodGet, "/repos/"+repo.Prefix+"/features/"+slug+"/comments", nil, nil, &out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = []*model.FeatureComment{}
+	}
+	return out, nil
+}
+
+// AddFeatureComment (BACI-124) — POST /repos/{prefix}/features/{slug}/comments.
+func (c *remoteClient) AddFeatureComment(ctx context.Context, repo *model.Repo, in inputs.FeatureCommentAddInput, dryRun bool) (*model.FeatureComment, error) {
+	q := url.Values{}
+	if dryRun {
+		q.Set("dry_run", "true")
+	}
+	var out model.FeatureComment
+	if err := c.do(ctx, http.MethodPost, "/repos/"+repo.Prefix+"/features/"+in.FeatureSlug+"/comments", q, in, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// DeleteFeatureComment (BACI-124) — DELETE /repos/{prefix}/features/{slug}/comments/{uuid}.
+func (c *remoteClient) DeleteFeatureComment(ctx context.Context, repo *model.Repo, in inputs.FeatureCommentRmInput, dryRun bool) (*FeatureCommentDeletePreview, int64, error) {
+	if in.CommentUUID == "" {
+		return nil, 0, fmt.Errorf("comment_uuid is required")
+	}
+	path := "/repos/" + repo.Prefix + "/features/" + in.FeatureSlug + "/comments/" + in.CommentUUID
+	if dryRun {
+		q := url.Values{}
+		q.Set("dry_run", "true")
+		var preview FeatureCommentDeletePreview
+		if err := c.do(ctx, http.MethodDelete, path, q, nil, &preview); err != nil {
+			return nil, 0, err
+		}
+		return &preview, 0, nil
+	}
+	if err := c.do(ctx, http.MethodDelete, path, nil, nil, nil); err != nil {
+		return nil, 0, err
+	}
+	return nil, 1, nil
+}

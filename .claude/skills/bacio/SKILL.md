@@ -46,9 +46,9 @@ Run `bacio <group> --help` for the subcommands of each.
 
 - **`bacio init` / `bacio repo`** — bind a repo, list/show, `repo rm` (destructive — needs `--confirm <PREFIX>`).
 - **`bacio status`** — read-only probe: repo, DB path, env resolution, stats, and an `llm_recommendations` array of setup fixes to action.
-- **`bacio feature`** — add/list/show/edit/rm; `feature plan <slug>` prints open issues in dependency order.
+- **`bacio feature`** — add/list/show/edit/rm; `feature plan <slug>` prints open issues in dependency order; `feature comment add/list/rm` is the feature-scoped chronological-handoff scratchpad mirror of `bacio comment` (BACI-124). Same `author`-required rule as issue comments.
 - **`bacio issue`** — add/list/show/edit/rm, `state`, `assign`/`unassign`, `archive`/`unarchive`; `brief <KEY>` is a one-shot bulk-context JSON read; `next`/`peek` atomically claim the next ready issue in a feature.
-- **`bacio comment`** — add/list/rm.
+- **`bacio comment`** — add/list/rm issue-scoped comments. Feature-scoped comments live under `bacio feature comment ...`.
 - **`bacio link` / `bacio unlink`** — issue relations: `blocks`, `relates-to`, `duplicate-of` (`blocked-by` is the inverse view of `blocks`).
 - **`bacio tag`** — add/rm free-form labels; filter with `--tag` on `issue list`.
 - **`bacio pr`** — attach/detach/list PR URLs.

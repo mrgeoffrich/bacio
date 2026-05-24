@@ -59,10 +59,20 @@ func (d deps) handleFeatureShow(w http.ResponseWriter, r *http.Request) {
 	if docs == nil {
 		docs = []*model.DocumentLink{}
 	}
+	comments, err := d.store.ListFeatureComments(feat.ID)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if comments == nil {
+		comments = []*model.FeatureComment{}
+	}
 	writeJSON(w, http.StatusOK, &FeatureView{
 		Feature:   feat,
 		Issues:    issues,
 		Documents: docs,
+		Comments:  comments,
 	})
 }
 
@@ -238,10 +248,15 @@ func buildFeatureDeletePreview(s *store.Store, repo *model.Repo, feat *model.Fea
 	if err != nil {
 		return nil, err
 	}
+	comments, err := s.CountFeatureComments(feat.ID)
+	if err != nil {
+		return nil, err
+	}
 	return &FeatureDeletePreview{
 		Feature:        feat,
 		WouldDelete:    true,
 		IssuesUnlinked: len(issues),
 		DocumentLinks:  len(docs),
+		Comments:       comments,
 	}, nil
 }
