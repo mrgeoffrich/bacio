@@ -624,17 +624,20 @@ func agentCancelCmd() *cobra.Command {
 	var rawInput string
 	cmd := &cobra.Command{
 		Use:   "cancel <dispatch-id>",
-		Short: "Cancel a pending or delivered dispatch (clears the issue's waiting_for_claim flag)",
-		Long: `Withdraw a dispatch that hasn't been acked yet — the dispatcher's
-side of ack.
+		Short: "Cancel a queued or pending dispatch (clears the issue's waiting_for_claim flag)",
+		Long: `Withdraw a dispatch that hasn't been delivered to its worker yet —
+the dispatcher's side of ack.
 
 Use when a queued dispatch was orphaned (target session ended before
 acking, or the dispatch is simply no longer wanted). If the dispatch
 targets an issue, the issue's waiting_for_claim flag is cleared in the
 same transaction, unsticking the desktop/TUI spinner.
 
-Cancelling an acked dispatch is an error (the work was acknowledged).
-Cancelling an already-cancelled dispatch is a no-op.`,
+Cancelling a dispatch that has already been delivered to the worker is
+an error (BACI-130): the worker is past the point where it can be
+stopped by mutating the dispatch row. Interrupt the agent itself
+instead. Cancelling an acked dispatch is an error too (the work was
+acknowledged). Cancelling an already-cancelled dispatch is a no-op.`,
 		Args: cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			raw, err := parseJSONInput(cmd, args, rawInput)

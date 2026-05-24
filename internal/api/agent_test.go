@@ -3,6 +3,7 @@ package api_test
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 
@@ -628,6 +629,53 @@ func TestAgentAckBadID(t *testing.T) {
 	resp, _ := apiReq(t, "POST", ts.URL+"/agents/dispatches/abc/ack", nil, nil)
 	if resp.StatusCode != 400 {
 		t.Fatalf("status: %d", resp.StatusCode)
+	}
+}
+
+// TestAgentCancelDeliveredRejected (BACI-130) locks in the HTTP
+// boundary's mirror of the store-level guard: cancelling a delivered
+// dispatch returns 409 "conflict" with a clear message, and the row
+// itself stays delivered (the reject happens before any write). The
+// kanban spinner-cancel button hides the click affordance for
+// delivered cards, but a stale view can still hit the endpoint —
+// matching the existing already-acked → 409 pattern keeps the surface
+// symmetric.
+func TestAgentCancelDeliveredRejected(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	iss := seedIssue(t, s, repo, "delivered-dispatch")
+	sid := uuidFor("sess-deliver")
+	registerSession(t, ts.URL, "MINI", sid, nil)
+	d, err := s.AddDispatch(store.AddDispatchIn{
+		RepoID:          repo.ID,
+		TargetSessionID: sid,
+		IssueID:         &iss.ID,
+		Payload:         "deliver me",
+		CreatedBy:       "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add dispatch: %v", err)
+	}
+	if _, err := s.MarkDispatchDelivered(d.ID); err != nil {
+		t.Fatalf("mark delivered: %v", err)
+	}
+	url := fmt.Sprintf("%s/agents/dispatches/%d/cancel", ts.URL, d.ID)
+	resp, body := apiReq(t, "POST", url, map[string]any{"id": d.ID}, nil)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("cancel status = %d, want 409 (body %s)", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), `"code":"conflict"`) {
+		t.Errorf("missing conflict code in body: %s", body)
+	}
+	if !strings.Contains(string(body), "has been delivered") {
+		t.Errorf("missing 'has been delivered' fragment in body: %s", body)
+	}
+	got, err := s.GetDispatch(d.ID)
+	if err != nil {
+		t.Fatalf("re-read dispatch: %v", err)
+	}
+	if got.Status != model.DispatchDelivered {
+		t.Errorf("status after rejected cancel = %q, want delivered", got.Status)
 	}
 }
 

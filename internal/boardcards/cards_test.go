@@ -440,6 +440,79 @@ func TestAssembleBlockedBy(t *testing.T) {
 	}
 }
 
+// TestAssembleWaitingDispatchDelivered (BACI-130) locks in the
+// per-issue derivation that gates the kanban spinner-cancel UI:
+//   - Queued/pending dispatches keep WaitingDispatchDelivered=false
+//     (the spinner stays a cancel button — the row is cancellable).
+//   - Delivered dispatches set WaitingDispatchDelivered=true (the
+//     spinner glyph stays, but the click affordance disappears,
+//     because the store rejects cancel-after-delivery now).
+//   - Cancelled / acked rows are skipped — they're not the "active"
+//     dispatch for the issue.
+//   - The flag only surfaces on cards whose WaitingForClaim is true,
+//     so a card whose active dispatch was acked & is no longer
+//     waiting doesn't accidentally light it up.
+func TestAssembleWaitingDispatchDelivered(t *testing.T) {
+	repo := &model.Repo{ID: 1, Prefix: "TEST"}
+	t0 := time.Date(2026, 5, 24, 9, 0, 0, 0, time.UTC)
+	issueIDs := struct{ pending, delivered, cancelled, acked, none int64 }{
+		pending:   101,
+		delivered: 102,
+		cancelled: 103,
+		acked:     104,
+		none:      105,
+	}
+	issues := []*model.Issue{
+		{ID: issueIDs.pending, Key: "TEST-1", State: model.StateTodo, Title: "pending dispatch", WaitingForClaim: true},
+		{ID: issueIDs.delivered, Key: "TEST-2", State: model.StateTodo, Title: "delivered dispatch", WaitingForClaim: true},
+		{ID: issueIDs.cancelled, Key: "TEST-3", State: model.StateTodo, Title: "only cancelled dispatch", WaitingForClaim: false},
+		{ID: issueIDs.acked, Key: "TEST-4", State: model.StateTodo, Title: "only acked dispatch", WaitingForClaim: false},
+		{ID: issueIDs.none, Key: "TEST-5", State: model.StateTodo, Title: "no dispatch"},
+	}
+	pendingID := issueIDs.pending
+	deliveredID := issueIDs.delivered
+	cancelledID := issueIDs.cancelled
+	ackedID := issueIDs.acked
+	// RepoDispatches is newest-first. Mimic that here: each fake
+	// dispatch row gets a CreatedAt that's older for older entries.
+	dispatches := []*model.AgentDispatch{
+		// TEST-2: the newest row is delivered — the flag should be true.
+		{ID: 200, IssueID: &deliveredID, IssueKey: "TEST-2", Status: model.DispatchDelivered, CreatedAt: t0},
+		// TEST-1: pending → flag false.
+		{ID: 201, IssueID: &pendingID, IssueKey: "TEST-1", Status: model.DispatchPending, CreatedAt: t0.Add(-1 * time.Minute)},
+		// TEST-3: a cancelled row is not "active" — the issue gets no entry
+		// in deliveredByIssueID, so the flag stays false (and WaitingForClaim
+		// is false anyway, gating it doubly).
+		{ID: 202, IssueID: &cancelledID, IssueKey: "TEST-3", Status: model.DispatchCancelled, CreatedAt: t0.Add(-2 * time.Minute)},
+		// TEST-4: an acked row is not "active" either.
+		{ID: 203, IssueID: &ackedID, IssueKey: "TEST-4", Status: model.DispatchAcked, CreatedAt: t0.Add(-3 * time.Minute)},
+	}
+	f := &fakeClient{repo: repo, issues: issues, dispatches: dispatches}
+	cards, err := Assemble(context.Background(), f, repo, false)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	byKey := map[string]BoardCard{}
+	for _, c := range cards {
+		byKey[c.Key] = c
+	}
+	if got := byKey["TEST-1"].WaitingDispatchDelivered; got {
+		t.Errorf("TEST-1 (pending) WaitingDispatchDelivered = true, want false")
+	}
+	if got := byKey["TEST-2"].WaitingDispatchDelivered; !got {
+		t.Errorf("TEST-2 (delivered) WaitingDispatchDelivered = false, want true")
+	}
+	if got := byKey["TEST-3"].WaitingDispatchDelivered; got {
+		t.Errorf("TEST-3 (cancelled-only) WaitingDispatchDelivered = true, want false")
+	}
+	if got := byKey["TEST-4"].WaitingDispatchDelivered; got {
+		t.Errorf("TEST-4 (acked-only) WaitingDispatchDelivered = true, want false")
+	}
+	if got := byKey["TEST-5"].WaitingDispatchDelivered; got {
+		t.Errorf("TEST-5 (no dispatch) WaitingDispatchDelivered = true, want false")
+	}
+}
+
 // TestAssembleSortsCompletedColumns covers the BACI-101 board sort:
 // Done and Cancelled cards render newest-completed first (updated_at
 // descending), while non-completed columns keep their incoming

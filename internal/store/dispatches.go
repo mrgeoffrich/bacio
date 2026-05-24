@@ -289,11 +289,16 @@ func (s *Store) AckDispatch(id int64, note string) (*model.AgentDispatch, error)
 	return s.GetDispatch(id)
 }
 
-// CancelDispatch withdraws a queued, pending, or delivered dispatch.
+// CancelDispatch withdraws a queued or pending dispatch.
 // An already-cancelled dispatch is returned unchanged; cancelling an
 // acked dispatch is an error (the work was already acknowledged).
-// BACI-51: queued cancellation rides the same path as pending/delivered
-// so the UI's spinner-as-cancel button can clear an un-matched item.
+// BACI-130: cancelling a delivered dispatch is also an error — once
+// delivered_at is set the worker has taken the Task call and is doing
+// the real work; cancelling the row at that point doesn't stop the
+// worker, it just lies in the model. The right way to stop a worker
+// mid-flight is to interrupt the agent itself.
+// BACI-51: queued cancellation rides the same path as pending so the
+// UI's spinner-as-cancel button can clear an un-matched item.
 func (s *Store) CancelDispatch(id int64) (*model.AgentDispatch, error) {
 	d, err := s.GetDispatch(id)
 	if err != nil {
@@ -304,6 +309,16 @@ func (s *Store) CancelDispatch(id int64) (*model.AgentDispatch, error) {
 		return d, nil
 	case model.DispatchAcked:
 		return nil, fmt.Errorf("dispatch %d is already acked; cannot cancel", id)
+	case model.DispatchDelivered:
+		// BACI-130: the worker has taken the Task — cancelling the row
+		// would drop the kanban activity pill while the work continues.
+		// Reject before the transaction so nothing in the issues table
+		// is touched.
+		ts := ""
+		if d.DeliveredAt != nil {
+			ts = d.DeliveredAt.UTC().Format(time.RFC3339)
+		}
+		return nil, fmt.Errorf("dispatch %d has been delivered; cannot cancel (delivered_at %s)", id, ts)
 	}
 	tx, err := s.DB.Begin()
 	if err != nil {
@@ -313,7 +328,7 @@ func (s *Store) CancelDispatch(id int64) (*model.AgentDispatch, error) {
 	if _, err := tx.Exec(
 		`UPDATE agent_dispatches
 		    SET status = 'cancelled'
-		  WHERE id = ? AND status IN ('queued','pending','delivered')`, id,
+		  WHERE id = ? AND status IN ('queued','pending')`, id,
 	); err != nil {
 		return nil, err
 	}

@@ -33,6 +33,18 @@ export class BoardCard {
     "waitingForClaim": boolean;
 
     /**
+     * WaitingDispatchDelivered (BACI-130) is true when the issue's
+     * active (queued / pending / delivered) dispatch is already in the
+     * `delivered` state — the worker has the Task in hand. Drives the
+     * spinner-cancel UI gate: cards with this flag set render the
+     * spinner glyph without the click affordance, because cancelling a
+     * delivered dispatch is now rejected at the store boundary.
+     * Omitted from JSON when false (common case) so the wire payload
+     * doesn't grow on untaken / queued / pending cards.
+     */
+    "waitingDispatchDelivered"?: boolean;
+
+    /**
      * ActiveVerb is the lower-cased display label of the prompt template
      * behind the newest open claim's most recent non-cancelled dispatch
      * — e.g. "designing", "planning", or a custom template's lowered
@@ -141,9 +153,9 @@ export class BoardCard {
     static createFrom($$source: any = {}): BoardCard {
         const $$createField4_0 = $$createType0;
         const $$createField5_0 = $$createType0;
-        const $$createField12_0 = $$createType2;
-        const $$createField13_0 = $$createType4;
-        const $$createField15_0 = $$createType6;
+        const $$createField13_0 = $$createType2;
+        const $$createField14_0 = $$createType4;
+        const $$createField16_0 = $$createType6;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField4_0($$parsedSource["tags"]);
@@ -152,13 +164,13 @@ export class BoardCard {
             $$parsedSource["assignees"] = $$createField5_0($$parsedSource["assignees"]);
         }
         if ("openQuestions" in $$parsedSource) {
-            $$parsedSource["openQuestions"] = $$createField12_0($$parsedSource["openQuestions"]);
+            $$parsedSource["openQuestions"] = $$createField13_0($$parsedSource["openQuestions"]);
         }
         if ("todos" in $$parsedSource) {
-            $$parsedSource["todos"] = $$createField13_0($$parsedSource["todos"]);
+            $$parsedSource["todos"] = $$createField14_0($$parsedSource["todos"]);
         }
         if ("blockedBy" in $$parsedSource) {
-            $$parsedSource["blockedBy"] = $$createField15_0($$parsedSource["blockedBy"]);
+            $$parsedSource["blockedBy"] = $$createField16_0($$parsedSource["blockedBy"]);
         }
         return new BoardCard($$parsedSource as Partial<BoardCard>);
     }
