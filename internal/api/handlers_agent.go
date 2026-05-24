@@ -775,6 +775,12 @@ func (d deps) handleAgentSessionShow(w http.ResponseWriter, r *http.Request) {
 // desktop/TUI Agents view uses). The unfiltered call shape stays the
 // same for back-compat — every existing caller keeps getting every
 // row for the session.
+//
+// BACI-132: an optional `?dispatch_id=<int>` further narrows to one
+// dispatch within the (session, issue), so plan-then-implement on
+// the same issue can be inspected as two task lists. dispatch_id
+// requires issue_key (400 otherwise) — the unfiltered shape and the
+// issue_key-only shape both stay back-compat.
 func (d deps) handleAgentSessionTodos(w http.ResponseWriter, r *http.Request) {
 	sid := r.PathValue("session_id")
 	sess, err := d.store.ResolveAgentSession(sid)
@@ -789,6 +795,42 @@ func (d deps) handleAgentSessionTodos(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	issueKey := r.URL.Query().Get("issue_key")
+	dispatchIDStr := r.URL.Query().Get("dispatch_id")
+	if dispatchIDStr != "" {
+		if issueKey == "" {
+			writeError(w, http.StatusBadRequest, "bad_request",
+				"dispatch_id requires issue_key",
+				map[string]any{"field": "dispatch_id"})
+			return
+		}
+		dispatchID, err := strconv.ParseInt(dispatchIDStr, 10, 64)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "bad_request",
+				fmt.Sprintf("dispatch_id %q is not an integer", dispatchIDStr),
+				map[string]any{"field": "dispatch_id"})
+			return
+		}
+		todosByPK, err := d.store.ListTodosBySessionsAndIssue([]store.SessionIssuePair{{
+			SessionID:  sess.SessionID,
+			IssueKey:   issueKey,
+			DispatchID: &dispatchID,
+		}})
+		if err != nil {
+			status, code := statusForError(err)
+			writeError(w, status, code, err.Error(), nil)
+			return
+		}
+		// One session, one bucket — flatten.
+		var todos []model.SessionTodo
+		for _, list := range todosByPK {
+			todos = list
+		}
+		if todos == nil {
+			todos = []model.SessionTodo{}
+		}
+		writeJSON(w, http.StatusOK, todos)
+		return
+	}
 	todos, err := d.store.ListSessionTodos(sess.SessionID, issueKey)
 	if err != nil {
 		status, code := statusForError(err)

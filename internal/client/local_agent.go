@@ -725,8 +725,8 @@ func (c *localClient) ListOpenClaims(ctx context.Context, repo *model.Repo) ([]*
 // TaskUpdate event); the desktop/TUI agent views drive the read side.
 // No audit row — Task* is high-frequency, like heartbeats; flooding
 // `bacio history` would drown the audit log.
-func (c *localClient) UpsertSessionTodoFromTask(ctx context.Context, sessionID, taskID, issueKey, content string, status model.TodoStatus) error {
-	return c.store.UpsertSessionTodoFromTask(sessionID, taskID, issueKey, content, status)
+func (c *localClient) UpsertSessionTodoFromTask(ctx context.Context, sessionID, taskID, issueKey, content string, status model.TodoStatus, dispatchID *int64) error {
+	return c.store.UpsertSessionTodoFromTask(sessionID, taskID, issueKey, content, status, dispatchID)
 }
 
 func (c *localClient) ListSessionTodos(ctx context.Context, sessionID, issueKey string) ([]model.SessionTodo, error) {

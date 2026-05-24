@@ -373,12 +373,26 @@ func enrichmentByIssueKey(
 		}
 	}
 
+	// Dispatches are scoped per repo — fan-out over the in-scope
+	// repos and concat. RepoDispatches is already newest-first. Built
+	// before the todo bulk-read so the (session, issue, dispatch)
+	// triple (BACI-132) is available when constructing the pairs.
+	var allDispatches []*model.AgentDispatch
+	for _, r := range repos {
+		ds, err := c.RepoDispatches(ctx, r)
+		if err != nil {
+			return nil, err
+		}
+		allDispatches = append(allDispatches, ds...)
+	}
+
 	// Bulk-read todos for the winning sessions only, scoped to each
-	// (session, issue) pair so a session that has worked multiple
-	// issues only flows the current job's rows onto this card
-	// (BACI-62). The map is keyed by session PK to match the storage
-	// layer; the per-issue rendering below picks pair-by-pair via the
-	// sessionByID lookup.
+	// (session, issue, dispatch) triple so a session that has worked
+	// multiple issues only flows the current job's rows onto this
+	// card (BACI-62) and two dispatches on the same issue get
+	// separate task lists (BACI-132). The map is keyed by session PK
+	// to match the storage layer; the per-issue rendering below picks
+	// pair-by-pair via the sessionByID lookup.
 	sessionIDList := make([]string, 0, len(wantSessionIDs))
 	for id := range wantSessionIDs {
 		sessionIDList = append(sessionIDList, id)
@@ -388,9 +402,20 @@ func enrichmentByIssueKey(
 		if cl == nil || cl.SessionID == "" {
 			continue
 		}
+		sess := sessionByID[cl.SessionID]
+		dispatchID := pickActiveDispatchID(allDispatches, sess, issueKey)
+		if dispatchID == nil {
+			// No in-flight dispatch for this (session, issue) — every
+			// task this card would show was either pre-BACI-132 or
+			// orphaned at the hook. Skip the pair so the card renders
+			// no tasks, matching how the activity pill goes blank
+			// when pickActiveMode returns "".
+			continue
+		}
 		pairs = append(pairs, store.SessionIssuePair{
-			SessionID: cl.SessionID,
-			IssueKey:  issueKey,
+			SessionID:  cl.SessionID,
+			IssueKey:   issueKey,
+			DispatchID: dispatchID,
 		})
 	}
 	todosByPK, err := c.ListTodosBySessionsAndIssue(ctx, pairs)
@@ -403,17 +428,6 @@ func enrichmentByIssueKey(
 	questionsByPK, err := c.ListOpenQuestionsBySessions(ctx, sessionIDList)
 	if err != nil {
 		return nil, err
-	}
-
-	// Dispatches are scoped per repo — fan-out over the in-scope
-	// repos and concat. RepoDispatches is already newest-first.
-	var allDispatches []*model.AgentDispatch
-	for _, r := range repos {
-		ds, err := c.RepoDispatches(ctx, r)
-		if err != nil {
-			return nil, err
-		}
-		allDispatches = append(allDispatches, ds...)
 	}
 
 	// Prompt-template lookup — slug → display label (lower-cased).
@@ -487,15 +501,14 @@ func enrichmentByIssueKey(
 	return enrich, nil
 }
 
-// pickActiveMode returns the mode slug of the most recent dispatch
-// for (session, issue) that's still in flight or settled (not
-// cancelled). Used to label the card with the prompt-template
-// behind the currently-claimed work. Returns "" when no matching
-// dispatch exists (e.g. the agent claimed manually without a
-// dispatch, or the most recent matching dispatch was cancelled).
-func pickActiveMode(dispatches []*model.AgentDispatch, sess *model.AgentSession, issueKey string) model.DispatchMode {
+// pickActiveDispatch returns the most-recent non-cancelled dispatch
+// targeting (session, issue) — the shared selection used by
+// pickActiveMode (for the card's activity pill) and
+// pickActiveDispatchID (for BACI-132's per-dispatch todo scope).
+// Returns nil when no matching dispatch exists.
+func pickActiveDispatch(dispatches []*model.AgentDispatch, sess *model.AgentSession, issueKey string) *model.AgentDispatch {
 	if sess == nil {
-		return ""
+		return nil
 	}
 	matches := make([]*model.AgentDispatch, 0)
 	for _, d := range dispatches {
@@ -511,12 +524,41 @@ func pickActiveMode(dispatches []*model.AgentDispatch, sess *model.AgentSession,
 		matches = append(matches, d)
 	}
 	if len(matches) == 0 {
-		return ""
+		return nil
 	}
 	sort.SliceStable(matches, func(i, j int) bool {
 		return matches[i].CreatedAt.After(matches[j].CreatedAt)
 	})
-	return matches[0].Mode
+	return matches[0]
+}
+
+// pickActiveMode returns the mode slug of the most recent dispatch
+// for (session, issue) that's still in flight or settled (not
+// cancelled). Used to label the card with the prompt-template
+// behind the currently-claimed work. Returns "" when no matching
+// dispatch exists (e.g. the agent claimed manually without a
+// dispatch, or the most recent matching dispatch was cancelled).
+func pickActiveMode(dispatches []*model.AgentDispatch, sess *model.AgentSession, issueKey string) model.DispatchMode {
+	d := pickActiveDispatch(dispatches, sess, issueKey)
+	if d == nil {
+		return ""
+	}
+	return d.Mode
+}
+
+// pickActiveDispatchID is the ID-returning sibling of pickActiveMode
+// — the BACI-132 lookup that scopes the kanban Tasks pill's todos to
+// the active dispatch instead of merging every dispatch's rows for
+// the same (session, issue). Returns nil when no matching dispatch
+// exists, so callers can pass that through to the orphan path or
+// suppress the card's task list entirely.
+func pickActiveDispatchID(dispatches []*model.AgentDispatch, sess *model.AgentSession, issueKey string) *int64 {
+	d := pickActiveDispatch(dispatches, sess, issueKey)
+	if d == nil {
+		return nil
+	}
+	id := d.ID
+	return &id
 }
 
 // isCardBlockerOpen reports whether a blocker's state is one of the
