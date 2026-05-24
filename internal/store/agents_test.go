@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"path/filepath"
@@ -1640,5 +1641,242 @@ func TestEndAgentSession_RequeueRejectsNonPresumedDeadReason(t *testing.T) {
 	}
 	if sess.EndedAt != nil {
 		t.Fatalf("session ended despite store-boundary rejection")
+	}
+}
+
+// seedOrphanIssueDelete drops the named issue row from the DB while
+// leaving any agent_claims rows that reference it in place — the
+// pre-BACI-134 corruption shape that BACI-140 has to tolerate. The FK on
+// agent_claims.issue_id declares ON DELETE CASCADE, so we have to bypass
+// FK enforcement for the DELETE; modernc/sqlite's `PRAGMA foreign_keys`
+// is connection-scoped and the database/sql pool would otherwise hand
+// us a fresh connection between the pragma and the DELETE, so the whole
+// sequence pins a single *sql.Conn.
+func seedOrphanIssueDelete(t *testing.T, s *Store, issueID int64) {
+	t.Helper()
+	ctx := context.Background()
+	conn, err := s.DB.Conn(ctx)
+	if err != nil {
+		t.Fatalf("conn: %v", err)
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+		t.Fatalf("pragma off: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `DELETE FROM issues WHERE id = ?`, issueID); err != nil {
+		t.Fatalf("orphan delete: %v", err)
+	}
+	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = ON`); err != nil {
+		t.Fatalf("pragma on: %v", err)
+	}
+}
+
+// TestEndAgentSession_TolerantOfOrphanClaim (BACI-140) locks in the
+// crash fix: an agent_claims row whose issue_id no longer points at a
+// row in `issues` must not block EndAgentSession. The session ends
+// cleanly (ended_at stamped), the orphan claim is released, the idle
+// pinger stops looping on `sql: no rows in result set`.
+func TestEndAgentSession_TolerantOfOrphanClaim(t *testing.T) {
+	s, repo, iss := seedRepoAndIssue(t)
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "orphan-end", RepoID: repo.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if _, _, _, _, err := s.AddAgentClaim("orphan-end", iss.ID, ""); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	// Corrupt the store: delete the issue out from under the claim
+	// without firing the cascade. Mirrors the BACI-140 ticket repro.
+	seedOrphanIssueDelete(t, s, iss.ID)
+
+	sess, assigneeChanges, stateChanges, _, err := s.EndAgentSession(
+		"orphan-end", string(model.EndReasonPresumedDead),
+		model.StateInProgress, DispatchCascadeCancel,
+	)
+	if err != nil {
+		t.Fatalf("end with orphan claim: %v", err)
+	}
+	if sess.EndedAt == nil {
+		t.Fatalf("ended_at not stamped — session is still alive after EndAgentSession")
+	}
+	if len(assigneeChanges) != 0 {
+		t.Fatalf("got %d assignee changes from orphan claim, want 0", len(assigneeChanges))
+	}
+	if len(stateChanges) != 0 {
+		t.Fatalf("got %d state changes from orphan claim, want 0", len(stateChanges))
+	}
+	// Claim row exists and is released — the bulk UPDATE doesn't read
+	// issues, so the orphan never blocks it.
+	var released sql.NullTime
+	if err := s.DB.QueryRow(`
+		SELECT released_at FROM agent_claims c
+		JOIN agent_sessions s ON s.id = c.session_pk
+		WHERE s.session_id = ?
+		ORDER BY c.claimed_at DESC LIMIT 1`,
+		"orphan-end",
+	).Scan(&released); err != nil {
+		t.Fatalf("query claim: %v", err)
+	}
+	if !released.Valid {
+		t.Fatalf("orphan claim was not released")
+	}
+}
+
+// TestEndAgentSession_TolerantOfMixedOrphanAndLiveClaims (BACI-140)
+// guards the per-issue release loop: a session holding both a live
+// claim and an orphan claim must still process the live one cleanly
+// (assignee cleared, state cascaded) — the orphan is dropped by the
+// upfront filter and never reaches the per-issue helpers.
+func TestEndAgentSession_TolerantOfMixedOrphanAndLiveClaims(t *testing.T) {
+	s, repo, iss := seedRepoAndIssue(t)
+	live, err := s.CreateIssue(repo.ID, nil, "live", "", model.StateTodo, nil)
+	if err != nil {
+		t.Fatalf("create live issue: %v", err)
+	}
+	ag, _, err := s.UpsertAgent("orphan-pair@claude.shiny", true)
+	if err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "mixed", RepoID: repo.ID, AgentID: &ag.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if _, _, _, _, err := s.AddAgentClaim("mixed", iss.ID, ""); err != nil {
+		t.Fatalf("claim orphan: %v", err)
+	}
+	if _, _, _, _, err := s.AddAgentClaim("mixed", live.ID, ""); err != nil {
+		t.Fatalf("claim live: %v", err)
+	}
+	// Vanish the first issue out from under its claim.
+	seedOrphanIssueDelete(t, s, iss.ID)
+
+	sess, changes, states, _, err := s.EndAgentSession(
+		"mixed", string(model.EndReasonStop),
+		model.StateInProgress, DispatchCascadeCancel,
+	)
+	if err != nil {
+		t.Fatalf("end mixed: %v", err)
+	}
+	if sess.EndedAt == nil {
+		t.Fatalf("ended_at not stamped")
+	}
+	// Live issue is the only one that should surface an assignee change.
+	if len(changes) != 1 {
+		t.Fatalf("got %d assignee changes, want 1 (live issue only)", len(changes))
+	}
+	if changes[0].IssueID != live.ID || changes[0].New != "" {
+		t.Fatalf("unexpected assignee change: %+v", changes[0])
+	}
+	// State stays at in_progress (the claim auto-moved it on AddAgentClaim),
+	// so no state change row — the helper returns Old == New == in_progress.
+	for _, sc := range states {
+		if sc.Changed() {
+			t.Fatalf("unexpected state change for live issue: %+v", sc)
+		}
+	}
+}
+
+// TestReleaseAgentClaim_TolerantOfOrphanIssue (BACI-140) protects the
+// single-claim release path: a human (or future caller) deleting an
+// issue with a live claim attached used to crash ReleaseAgentClaim with
+// a naked sql.ErrNoRows from the per-issue helpers. The hardened
+// helpers turn that crash into a logged no-op so the release
+// transaction commits and the claim row is stamped released_at.
+//
+// The post-commit getAgentClaimByID re-fetch INNER JOINs `issues`, so
+// the function still returns ErrNotFound for an orphan claim — the
+// release just can't be re-rendered with an issue key. The test
+// asserts on the DB-side outcome (released_at present) rather than the
+// returned struct, which is what the caller in EndAgentSession's loop
+// actually relies on.
+func TestReleaseAgentClaim_TolerantOfOrphanIssue(t *testing.T) {
+	s, repo, iss := seedRepoAndIssue(t)
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "orphan-rel", RepoID: repo.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if _, _, _, _, err := s.AddAgentClaim("orphan-rel", iss.ID, ""); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	seedOrphanIssueDelete(t, s, iss.ID)
+
+	_, _, _, err := s.ReleaseAgentClaim("orphan-rel", iss.ID, model.StateInProgress)
+	// The post-commit re-fetch can't see the orphan claim (its
+	// getAgentClaimByID INNER JOIN drops it), so the function returns
+	// ErrNotFound — but the underlying tx must still have committed.
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		t.Fatalf("release with orphan issue: unexpected %v", err)
+	}
+	var released sql.NullTime
+	if err := s.DB.QueryRow(`
+		SELECT released_at FROM agent_claims c
+		JOIN agent_sessions s ON s.id = c.session_pk
+		WHERE s.session_id = ?
+		ORDER BY c.claimed_at DESC LIMIT 1`,
+		"orphan-rel",
+	).Scan(&released); err != nil {
+		t.Fatalf("query claim: %v", err)
+	}
+	if !released.Valid {
+		t.Fatalf("orphan claim was not released — release tx did not commit")
+	}
+}
+
+// TestOpenPrunesOrphanAgentClaims (BACI-140) locks in the startup-time
+// janitor: an orphan agent_claims row left in the DB by a pre-BACI-134
+// raw `sqlite3` write is swept by the next store.Open. Both the
+// historical corruption + future safety net rely on this.
+func TestOpenPrunesOrphanAgentClaims(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.sqlite")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	repo, err := s.CreateRepo("AGNT", "orphan-prune", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+	iss, err := s.CreateIssue(repo.ID, nil, "stub", "", model.StateTodo, nil)
+	if err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "to-orphan", RepoID: repo.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if _, _, _, _, err := s.AddAgentClaim("to-orphan", iss.ID, ""); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	seedOrphanIssueDelete(t, s, iss.ID)
+
+	// Sanity: the orphan claim is in the DB before Close/re-Open.
+	var before int
+	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM agent_claims WHERE issue_id = ?`, iss.ID).Scan(&before); err != nil {
+		t.Fatalf("count before: %v", err)
+	}
+	if before != 1 {
+		t.Fatalf("orphan claim was not seeded, count = %d", before)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	s2, err := Open(path)
+	if err != nil {
+		t.Fatalf("re-open: %v", err)
+	}
+	t.Cleanup(func() { _ = s2.Close() })
+
+	var after int
+	if err := s2.DB.QueryRow(`SELECT COUNT(*) FROM agent_claims WHERE issue_id = ?`, iss.ID).Scan(&after); err != nil {
+		t.Fatalf("count after: %v", err)
+	}
+	if after != 0 {
+		t.Fatalf("orphan claim survived Open() janitor: have %d, want 0", after)
 	}
 }

@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/mrgeoffrich/bacio/internal/model"
@@ -302,6 +304,53 @@ func sessionIdentity(tx *sql.Tx, sessPK int64) (string, error) {
 	return actor, nil
 }
 
+// filterLiveIssueIDs drops ids from the input slice whose row no longer
+// exists in `issues`, logging one warn per drop (BACI-140). Used by
+// EndAgentSession to pre-filter the per-issue assignee/state cascade so
+// a single orphan claim doesn't roll back the whole transaction. The
+// orphan claim row itself is still released by the bulk UPDATE upstream;
+// only the per-issue follow-ups need to skip it.
+//
+// One round-trip via an IN clause (cheaper than N point reads) — orphans
+// are expected to be rare so the slice is tiny in practice; we cap query
+// arg count by bailing on empty input.
+func filterLiveIssueIDs(tx *sql.Tx, ids []int64) ([]int64, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	placeholders := strings.Repeat("?,", len(ids))
+	placeholders = placeholders[:len(placeholders)-1]
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	rows, err := tx.Query(`SELECT id FROM issues WHERE id IN (`+placeholders+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	live := make(map[int64]struct{}, len(ids))
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		live[id] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]int64, 0, len(ids))
+	for _, id := range ids {
+		if _, ok := live[id]; ok {
+			out = append(out, id)
+			continue
+		}
+		slog.Default().Warn("bacio store: skipping orphan claim issue", "issue_id", id, "op", "EndAgentSession")
+	}
+	return out, nil
+}
+
 // issueAssigneeContext reads the fields the assignee-lockstep helpers
 // need inside a tx: the current assignee plus the issue's repo/key for
 // the audit row.
@@ -324,6 +373,15 @@ func applyClaimAssignee(tx *sql.Tx, issueID int64, identity string) (*AssigneeCh
 	}
 	old, repoID, prefix, number, err := issueAssigneeContext(tx, issueID)
 	if err != nil {
+		// BACI-140: an orphan claim → vanished issue should never exist
+		// (FK + cascade) but pre-BACI-134 raw sqlite3 writes left some
+		// around. Treat as a no-op so the claim/end paths still complete;
+		// the upstream EndAgentSession pre-filter normally skips these
+		// before we get here.
+		if errors.Is(err, sql.ErrNoRows) {
+			slog.Default().Warn("bacio store: skipping orphan claim issue", "issue_id", issueID, "op", "applyClaimAssignee")
+			return &AssigneeChange{IssueID: issueID}, nil
+		}
 		return nil, err
 	}
 	ch := &AssigneeChange{
@@ -358,6 +416,14 @@ func clearAssigneeIfOwned(tx *sql.Tx, issueID int64, identity string) (*Assignee
 	}
 	old, repoID, prefix, number, err := issueAssigneeContext(tx, issueID)
 	if err != nil {
+		// BACI-140: orphan claim — issue has been deleted out from
+		// under us. Treat as a no-op so EndAgentSession / ReleaseAgentClaim
+		// can still finish their work; the bulk release already stamped
+		// released_at on the claim row.
+		if errors.Is(err, sql.ErrNoRows) {
+			slog.Default().Warn("bacio store: skipping orphan claim issue", "issue_id", issueID, "op", "clearAssigneeIfOwned")
+			return &AssigneeChange{IssueID: issueID}, nil
+		}
 		return nil, err
 	}
 	ch := &AssigneeChange{
@@ -528,6 +594,21 @@ func (s *Store) EndAgentSession(sessionID, reason string, orphanState model.Stat
 		return nil, nil, nil, nil, err
 	}
 	claimedRows.Close()
+
+	// BACI-140: filter out orphan claim → issue ids. agent_claims.issue_id
+	// is FK ON DELETE CASCADE with foreign_keys ON, so this should be
+	// empty — but raw `sqlite3` writes from pre-BACI-134 scaffolding
+	// bypassed the cascade and left rows pointing at vanished issues.
+	// Walking the per-issue assignee/state helpers for an orphan id
+	// surfaces a naked sql.ErrNoRows and rolls the whole transaction
+	// back — the session never ends, the idle pinger loops on the same
+	// error forever. Drop them here so the loop body only sees live ids;
+	// the orphan claim itself is still released by the bulk UPDATE below
+	// (it doesn't read `issues` so it can't crash).
+	issueIDs, err = filterLiveIssueIDs(tx, issueIDs)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
 
 	res, err := tx.Exec(
 		`UPDATE agent_sessions SET ended_at = CURRENT_TIMESTAMP, end_reason = ? WHERE session_id = ? AND ended_at IS NULL`,
@@ -892,6 +973,13 @@ func setIssueStateForClaim(tx *sql.Tx, issueID int64) (*StateChange, error) {
 		`SELECT i.state, i.repo_id, r.prefix, i.number FROM issues i JOIN repos r ON r.id = i.repo_id WHERE i.id = ?`,
 		issueID,
 	).Scan(&oldState, &repoID, &prefix, &number); err != nil {
+		// BACI-140: orphan claim — issue vanished out from under the
+		// claim. Treat as a no-op so the claim path still completes; the
+		// caller's Changed() gate then skips the audit row cleanly.
+		if errors.Is(err, sql.ErrNoRows) {
+			slog.Default().Warn("bacio store: skipping orphan claim issue", "issue_id", issueID, "op", "setIssueStateForClaim")
+			return &StateChange{IssueID: issueID}, nil
+		}
 		return nil, err
 	}
 	ch := &StateChange{
@@ -1000,6 +1088,14 @@ func setIssueStateForRelease(tx *sql.Tx, issueID int64, target model.State) (*St
 		`SELECT i.state, i.repo_id, r.prefix, i.number FROM issues i JOIN repos r ON r.id = i.repo_id WHERE i.id = ?`,
 		issueID,
 	).Scan(&oldState, &repoID, &prefix, &number); err != nil {
+		// BACI-140: orphan claim — issue vanished out from under the
+		// claim. Treat as a no-op so EndAgentSession / ReleaseAgentClaim
+		// can still finish; the bulk release already stamped released_at
+		// on the claim row.
+		if errors.Is(err, sql.ErrNoRows) {
+			slog.Default().Warn("bacio store: skipping orphan claim issue", "issue_id", issueID, "op", "setIssueStateForRelease")
+			return &StateChange{IssueID: issueID}, nil
+		}
 		return nil, err
 	}
 	ch := &StateChange{
@@ -1319,6 +1415,25 @@ func (s *Store) PruneEndedAgentSessions(retention time.Duration) (int64, error) 
 func pruneAgentSessions(db *sql.DB, retention time.Duration) error {
 	_, err := (&Store{DB: db}).PruneEndedAgentSessions(retention)
 	return err
+}
+
+// pruneOrphanAgentClaims deletes agent_claims rows whose issue_id no
+// longer points at a row in `issues`. The FK on agent_claims.issue_id
+// declares ON DELETE CASCADE and `PRAGMA foreign_keys = ON` is set on
+// every connection, so orphans should be impossible — but pre-BACI-134
+// smoke-test scaffolding wrote directly to the DB via raw `sqlite3` and
+// bypassed the cascade, leaving rows that crash EndAgentSession with a
+// naked sql.ErrNoRows and stall the idle pinger forever (BACI-140).
+//
+// One-shot sweep at Open: returns the number of rows deleted so the
+// caller can surface a warning when N > 0 (the audit log deliberately
+// stays silent — this is mechanical housekeeping, not a user action).
+func pruneOrphanAgentClaims(db *sql.DB) (int64, error) {
+	res, err := db.Exec(`DELETE FROM agent_claims WHERE issue_id NOT IN (SELECT id FROM issues)`)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 func (s *Store) getAgentClaimByID(id int64) (*model.AgentClaim, error) {
