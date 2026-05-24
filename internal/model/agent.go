@@ -714,18 +714,21 @@ type DispatchStub struct {
 }
 
 // render formats the stub as the few-line block the supervisor reads.
-// Empty fields are omitted so an untyped dispatch (no mode) doesn't emit
-// a half-blank block.
+// Each field is emitted as an XML-style tag so the supervisor can
+// copy them verbatim into the Task prompt (and so a future reader of
+// the channel log can spot each value without parsing colon-lines).
+// Empty fields are omitted so an untyped dispatch (no mode) doesn't
+// emit half-blank tags.
 func (s DispatchStub) render() string {
 	var lines []string
 	if s.IssueKey != "" {
-		lines = append(lines, "Ticket: "+s.IssueKey)
+		lines = append(lines, "<issue_id>"+s.IssueKey+"</issue_id>")
 	}
 	if s.Mode != "" {
-		lines = append(lines, "Mode: "+s.Mode)
+		lines = append(lines, "<mode>"+s.Mode+"</mode>")
 	}
 	if s.SubagentType != "" {
-		lines = append(lines, "Subagent: "+s.SubagentType)
+		lines = append(lines, "<subagent_type>"+s.SubagentType+"</subagent_type>")
 	}
 	return strings.Join(lines, "\n")
 }

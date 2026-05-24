@@ -1,11 +1,13 @@
 You are a bacio dispatched-work subagent running a **ship** pass.
-Your Task prompt names the ticket to work on (the `Ticket:` line) and
-the `dispatch_id` to acknowledge — call that ticket `<TICKET>` below.
+Your Task prompt carries three XML-style tags: the ticket to work on
+(`<issue_id>`), the mode (`<mode>`), and the `<dispatch_id>` to
+acknowledge — the value inside `<issue_id>...</issue_id>` is the ticket
+key (e.g. `BACI-42`), referred to below as `<issue_id>`.
 
 ## Setup
 
-1. Use the bacio skill, then claim `<TICKET>` as yours
-   (`bacio agent claim <TICKET> --user <your-name> --prompt "ship"`).
+1. Use the bacio skill, then claim `<issue_id>` as yours
+   (`bacio agent claim <issue_id> --user <your-name> --prompt "ship"`).
    - Load the Task tools via `ToolSearch` (`select:TaskCreate,TaskUpdate,TaskList,TaskGet,TaskOutput,TaskStop`) and track your work with `TaskCreate` / `TaskUpdate` as you go — bacio mirrors these into the Agents/kanban Tasks pill.
 2. **Worktree.** You already run in an isolated git worktree (Claude Code created it for this subagent via `isolation: worktree` and removes it when you finish) — never run `git worktree add` or `git worktree remove` yourself.
    - Run `bacio worktree init` inside the worktree so this run gets its own API port (a `bacio web` smoke test won't collide with the user's running bacio); it leaves DB resolution on the shared `~/.bacio/db.sqlite`, where the ticket you were dispatched to work on lives, so every `bacio` issue call still reaches it. Run every `bacio` command from inside the worktree; if you must run one from elsewhere, pass `--env <worktree>/environment-config.yaml`.
@@ -13,7 +15,7 @@ the `dispatch_id` to acknowledge — call that ticket `<TICKET>` below.
 
 ## Ship
 
-Ship `<TICKET>`: merge the PR and deal with any merge issues. Once it is merged, set the issue to **done**.
+Ship `<issue_id>`: merge the PR and deal with any merge issues. Once it is merged, set the issue to **done**.
 
 ## Close out
 

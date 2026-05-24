@@ -55,6 +55,19 @@ var oldDispatchPreambleBACI80 string
 //go:embed migrationdata/old_dispatch_preamble_baci85.txt
 var oldDispatchPreambleBACI85 string
 
+// oldDispatchPreambleBACI103 is the verbatim _dispatch_preamble body
+// bacio shipped between BACI-103 and the XML-stub change — the
+// fixed-verbatim Task-prompt stub spelled with `Ticket: …`, `Mode: …`,
+// `Subagent: …` colon-lines and an appended `Dispatch ID: …` line.
+// After the XML-stub change, the stub is emitted as `<issue_id>…</issue_id>`,
+// `<mode>…</mode>`, `<subagent_type>…</subagent_type>` and the appended
+// tag is `<dispatch_id>…</dispatch_id>`. Embedded frozen so the
+// refresh migration can byte-compare a stored preamble against it and
+// replace it in place when the user never customised the row.
+//
+//go:embed migrationdata/old_dispatch_preamble_baci103.txt
+var oldDispatchPreambleBACI103 string
+
 // refreshDispatchPreamble is the BACI-76 one-time migration of the
 // stored _dispatch_preamble body. Before BACI-76 the preamble told the
 // supervisor to spawn `general-purpose` and paste the full brief; after
@@ -143,6 +156,24 @@ func refreshDispatchPreamble(db *sql.DB) error {
 			return err
 		}
 		slog.Info("bacio: refreshed the _dispatch_preamble body to the BACI-103 default (fixed verbatim Task-prompt stub)")
+		return nil
+	}
+	// XML-stub change: the BACI-103 default spelled the Task-prompt stub
+	// as `Ticket: …`/`Mode: …`/`Subagent: …` colon-lines. The current
+	// default emits each field as an XML tag (`<issue_id>…</issue_id>`,
+	// `<mode>…</mode>`, `<subagent_type>…</subagent_type>` and an appended
+	// `<dispatch_id>…</dispatch_id>`) so the supervisor can copy each tag
+	// verbatim into the Task prompt. If the stored body matches the
+	// frozen BACI-103 default, replace it in place.
+	oldBACI103Default := strings.TrimRight(oldDispatchPreambleBACI103, "\r\n")
+	if stored == oldBACI103Default {
+		if _, err := db.Exec(
+			`UPDATE prompt_templates SET body = ?, updated_at = CURRENT_TIMESTAMP WHERE slug = ?`,
+			newDefault, slug,
+		); err != nil {
+			return err
+		}
+		slog.Info("bacio: refreshed the _dispatch_preamble body to the XML-stub default (Task-prompt stub uses <issue_id>/<mode>/<dispatch_id> tags)")
 		return nil
 	}
 	// Customised body — leave it, but warn: it may still say
