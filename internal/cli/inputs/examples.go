@@ -142,8 +142,9 @@ var (
 		Branch:    "feat/auth-rewrite",
 	}
 	ExampleAgentEnd = AgentEndInput{
-		SessionID: "092d8907-a5ed-48cf-9fdd-22c3941f3710",
-		Reason:    "stop",
+		SessionID:     "092d8907-a5ed-48cf-9fdd-22c3941f3710",
+		Reason:        "stop",
+		StateOnOrphan: "in_progress",
 	}
 	ExampleAgentClaim = AgentClaimInput{
 		SessionID: "092d8907-a5ed-48cf-9fdd-22c3941f3710",
@@ -151,8 +152,9 @@ var (
 		Prompt:    "Implement the tab-strip pinning fix end-to-end, then open a PR.",
 	}
 	ExampleAgentRelease = AgentReleaseInput{
-		SessionID: "092d8907-a5ed-48cf-9fdd-22c3941f3710",
-		IssueKey:  "MINI-42",
+		SessionID:  "092d8907-a5ed-48cf-9fdd-22c3941f3710",
+		IssueKey:   "MINI-42",
+		FinalState: "in_review",
 	}
 	ExampleAgentDispatch = AgentDispatchInput{
 		TargetAgent: "swift-otter@claude.shiny",

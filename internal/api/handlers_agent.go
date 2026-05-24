@@ -175,7 +175,9 @@ func (d deps) supersedeStaleSessions(repo *model.Repo, host string, claudePID in
 		if s.SessionID == keepID {
 			continue
 		}
-		ended, _, _, err := d.store.EndAgentSession(s.SessionID, string(model.EndReasonSuperseded))
+		// Supersede path: end the phantom row with an empty orphanState so
+		// the claim cascade leaves issue state alone (BACI-126c).
+		ended, _, _, _, err := d.store.EndAgentSession(s.SessionID, string(model.EndReasonSuperseded), "")
 		if err != nil {
 			if d.logger != nil {
 				d.logger.Warn("superseding stale session", "session_id", s.SessionID, "err", err)
@@ -357,8 +359,20 @@ func (d deps) handleAgentEnd(w http.ResponseWriter, r *http.Request) {
 		writeDryRun(w, http.StatusOK, &projected)
 		return
 	}
+	// BACI-126c: state_on_orphan defaults to in_progress when unset.
+	orphanState := model.StateInProgress
+	if strings.TrimSpace(in.StateOnOrphan) != "" {
+		parsed, perr := model.ParseState(in.StateOnOrphan)
+		if perr != nil {
+			writeError(w, http.StatusBadRequest, "invalid_input",
+				"state_on_orphan: "+perr.Error(),
+				map[string]any{"field": "state_on_orphan"})
+			return
+		}
+		orphanState = parsed
+	}
 	actor := ActorFromContext(r.Context())
-	sess, assigneeChanges, cancelled, err := d.store.EndAgentSession(in.SessionID, in.Reason)
+	sess, assigneeChanges, stateChanges, cancelled, err := d.store.EndAgentSession(in.SessionID, in.Reason, orphanState)
 	if err != nil {
 		status, code := statusForError(err)
 		writeError(w, status, code, err.Error(), nil)
@@ -374,6 +388,10 @@ func (d deps) handleAgentEnd(w http.ResponseWriter, r *http.Request) {
 	})
 	for _, ch := range assigneeChanges {
 		writeAssigneeChange(d.store, d.logger, actor, ch)
+	}
+	// BACI-126c: per-issue state move audit for every cascaded release.
+	for _, sc := range stateChanges {
+		writeOrphanStateChange(d.store, d.logger, actor, sc, sess.SessionID)
 	}
 	// BACI-58 §B — write the per-row agent.cancel history for every
 	// dispatch the end-session tx auto-cancelled. "auto-cancel:" prefix
@@ -444,17 +462,22 @@ func (d deps) handleAgentClaim(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if isDryRun(r) {
+		// BACI-126a: surface the post-claim state on the dry-run so the
+		// rehearsal output mirrors the live call. Auto-transition is
+		// unconditional — IssueStateAfter is always in_progress.
 		writeDryRun(w, http.StatusCreated, &model.AgentClaim{
-			SessionID: sid,
-			IssueID:   iss.ID,
-			IssueKey:  iss.Key,
-			Prompt:    in.Prompt,
-			ClaimedAt: time.Now().UTC(),
+			SessionID:        sid,
+			IssueID:          iss.ID,
+			IssueKey:         iss.Key,
+			Prompt:           in.Prompt,
+			ClaimedAt:        time.Now().UTC(),
+			IssueStateBefore: iss.State,
+			IssueStateAfter:  model.StateInProgress,
 		})
 		return
 	}
 	actor := ActorFromContext(r.Context())
-	claim, created, assigneeChange, err := d.store.AddAgentClaim(sid, iss.ID, in.Prompt)
+	claim, created, assigneeChange, stateChange, err := d.store.AddAgentClaim(sid, iss.ID, in.Prompt)
 	if err != nil {
 		status, code := statusForError(err)
 		writeError(w, status, code, err.Error(), nil)
@@ -467,13 +490,28 @@ func (d deps) handleAgentClaim(w http.ResponseWriter, r *http.Request) {
 			Op:       "agent.claim",
 			Kind:     "agent",
 			TargetID: &claim.ID, TargetLabel: sid,
-			Details:  "issue=" + iss.Key,
+			Details:  claimAuditDetails(iss.Key, stateChange),
 		})
 		if assigneeChange != nil {
 			writeAssigneeChange(d.store, d.logger, actor, *assigneeChange)
 		}
+		// BACI-126a: surface the post-claim state on the returned object.
+		if stateChange != nil {
+			claim.IssueStateBefore = stateChange.Old
+			claim.IssueStateAfter = stateChange.New
+		}
 	}
 	writeJSON(w, http.StatusCreated, claim)
+}
+
+// claimAuditDetails formats the agent.claim audit row's Details column
+// (BACI-126a). Mirrors client.claimAuditDetails so the line reads
+// identically across surfaces.
+func claimAuditDetails(issueKey string, ch *store.StateChange) string {
+	if ch == nil || !ch.Changed() {
+		return "issue=" + issueKey
+	}
+	return fmt.Sprintf("issue=%s, state: %s → %s", issueKey, ch.Old, ch.New)
 }
 
 // ---------- release ----------
@@ -498,6 +536,20 @@ func (d deps) handleAgentRelease(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(in.IssueKey) == "" {
 		writeError(w, http.StatusBadRequest, "invalid_input",
 			"issue_key is required", map[string]any{"field": "issue_key"})
+		return
+	}
+	// BACI-126c: final_state is required.
+	if strings.TrimSpace(in.FinalState) == "" {
+		writeError(w, http.StatusBadRequest, "invalid_input",
+			"final_state is required — pass a valid issue state (todo, in_progress, needs_action, in_review, done, cancelled)",
+			map[string]any{"field": "final_state"})
+		return
+	}
+	finalState, err := model.ParseState(in.FinalState)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input",
+			"final_state: "+err.Error(),
+			map[string]any{"field": "final_state"})
 		return
 	}
 	prefix, num, err := store.ParseIssueKey(in.IssueKey)
@@ -529,16 +581,19 @@ func (d deps) handleAgentRelease(w http.ResponseWriter, r *http.Request) {
 	}
 	if isDryRun(r) {
 		now := time.Now().UTC()
+		// BACI-126c: project the post-release state on the dry-run.
 		writeDryRun(w, http.StatusOK, &model.AgentClaim{
-			SessionID:  sid,
-			IssueID:    iss.ID,
-			IssueKey:   iss.Key,
-			ReleasedAt: &now,
+			SessionID:        sid,
+			IssueID:          iss.ID,
+			IssueKey:         iss.Key,
+			ReleasedAt:       &now,
+			IssueStateBefore: iss.State,
+			IssueStateAfter:  finalState,
 		})
 		return
 	}
 	actor := ActorFromContext(r.Context())
-	claim, assigneeChange, err := d.store.ReleaseAgentClaim(sid, iss.ID)
+	claim, assigneeChange, stateChange, err := d.store.ReleaseAgentClaim(sid, iss.ID, finalState)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "not_found",
@@ -555,12 +610,48 @@ func (d deps) handleAgentRelease(w http.ResponseWriter, r *http.Request) {
 		Op:       "agent.release",
 		Kind:     "agent",
 		TargetID: &claim.ID, TargetLabel: sid,
-		Details:  "issue=" + iss.Key,
+		Details:  releaseAuditDetails(iss.Key, stateChange),
 	})
 	if assigneeChange != nil {
 		writeAssigneeChange(d.store, d.logger, actor, *assigneeChange)
 	}
+	if stateChange != nil {
+		claim.IssueStateBefore = stateChange.Old
+		claim.IssueStateAfter = stateChange.New
+	}
 	writeJSON(w, http.StatusOK, claim)
+}
+
+// releaseAuditDetails mirrors client.releaseAuditDetails (BACI-126c).
+func releaseAuditDetails(issueKey string, ch *store.StateChange) string {
+	if ch == nil || !ch.Changed() {
+		return "issue=" + issueKey
+	}
+	return fmt.Sprintf("issue=%s, state: %s → %s", issueKey, ch.Old, ch.New)
+}
+
+// writeOrphanStateChange writes the issue.state audit row for a state
+// move made as a side effect of a cascaded `agent end` release
+// (BACI-126c). Mirrors writeAssigneeChange's shape.
+func writeOrphanStateChange(s *store.Store, logger interface {
+	Warn(string, ...any)
+}, actor string, ch store.StateChange, sessionID string) {
+	if !ch.Changed() {
+		return
+	}
+	repoID, issueID := ch.RepoID, ch.IssueID
+	entry := model.HistoryEntry{
+		RepoID: &repoID, RepoPrefix: ch.RepoPrefix,
+		Actor:       actor,
+		Op:          "issue.state",
+		Kind:        "issue",
+		TargetID:    &issueID,
+		TargetLabel: ch.IssueKey,
+		Details:     fmt.Sprintf("%s → %s (auto: session %s ended)", ch.Old, ch.New, sessionID),
+	}
+	if err := s.RecordHistory(entry); err != nil {
+		logger.Warn("failed to record history", "err", err, "op", entry.Op)
+	}
 }
 
 // writeAssigneeChange writes the issue.assign audit row for an

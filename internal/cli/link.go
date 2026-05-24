@@ -13,10 +13,11 @@ import (
 func newLinkCmd() *cobra.Command {
 	var rawInput string
 	cmd := &cobra.Command{
-		Use:   "link [FROM] [type] [TO]",
-		Short: "Create a relation between two issues",
-		Long:  "Types: blocks, relates-to, duplicate-of",
-		Args:  cobra.RangeArgs(0, 3),
+		Use:     "link [FROM] [type] [TO]",
+		Short:   "Create a relation between two issues",
+		Long:    "Types: blocks, relates-to, duplicate-of",
+		Args:    cobra.RangeArgs(0, 3),
+		PreRunE: requireClaimForGroup, // BACI-126b
 		RunE: func(cmd *cobra.Command, args []string) error {
 			raw, err := parseJSONInput(cmd, args, rawInput)
 			if err != nil {
@@ -77,9 +78,10 @@ func createRelation(in inputs.LinkInput, strict bool) error {
 func newUnlinkCmd() *cobra.Command {
 	var rawInput string
 	cmd := &cobra.Command{
-		Use:   "unlink [A] [B]",
-		Short: "Remove all relations between two issues",
-		Args:  cobra.RangeArgs(0, 2),
+		Use:     "unlink [A] [B]",
+		Short:   "Remove all relations between two issues",
+		Args:    cobra.RangeArgs(0, 2),
+		PreRunE: requireClaimForGroup, // BACI-126b
 		RunE: func(cmd *cobra.Command, args []string) error {
 			raw, err := parseJSONInput(cmd, args, rawInput)
 			if err != nil {

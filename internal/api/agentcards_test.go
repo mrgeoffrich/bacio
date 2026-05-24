@@ -112,7 +112,7 @@ func TestAgentCardsBusyDerivation(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	if _, _, _, err := s.AddAgentClaim("sess-busy", iss.ID, "do the thing"); err != nil {
+	if _, _, _, _, err := s.AddAgentClaim("sess-busy", iss.ID, "do the thing"); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 

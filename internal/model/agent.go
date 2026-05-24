@@ -173,6 +173,14 @@ type AgentClaim struct {
 	Prompt     string     `json:"prompt,omitempty"`
 	ClaimedAt  time.Time  `json:"claimed_at"`
 	ReleasedAt *time.Time `json:"released_at,omitempty"`
+	// IssueStateBefore / IssueStateAfter surface the implicit state
+	// transition a claim / release made as a side effect (BACI-126a/c).
+	// JSON-only — not columns on the claim row. Populated by the client
+	// layer immediately after the write so callers can render
+	// `claim BACI-42 (todo → in_progress)` without a second read. Empty
+	// on the no-op re-claim path and when nothing moved.
+	IssueStateBefore State `json:"issue_state_before,omitempty"`
+	IssueStateAfter  State `json:"issue_state_after,omitempty"`
 }
 
 // AnyOpenClaim reports whether claims has at least one entry with

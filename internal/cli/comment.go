@@ -11,7 +11,11 @@ import (
 )
 
 func newCommentCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "comment", Short: "Manage issue comments"}
+	cmd := &cobra.Command{
+		Use:               "comment",
+		Short:             "Manage issue comments",
+		PersistentPreRunE: requireClaimForGroup, // BACI-126b
+	}
 	cmd.AddCommand(commentAddCmd(), commentRmCmd(), commentListCmd())
 	return cmd
 }

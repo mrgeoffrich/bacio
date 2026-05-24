@@ -232,6 +232,13 @@ type Client interface {
 	// or across all repos when repo is nil. Local-only; remote returns
 	// ErrLocalOnly. Used by the desktop Board to derive each card's `taken`.
 	ListOpenClaims(ctx context.Context, repo *model.Repo) ([]*model.AgentClaim, error)
+	// OpenClaimsForSession returns the open (unreleased) claim issue keys
+	// held by one alive session. Empty slice for an unknown / ended /
+	// claimless session. Backs the BACI-126b issue-group gate: agents
+	// must have at least one open claim (and the held set must include
+	// the targeted key for key-bearing verbs) before `bacio issue *` /
+	// adjacent groups will run. Local-only — remote returns ErrLocalOnly.
+	OpenClaimsForSession(ctx context.Context, sessionID string) ([]string, error)
 	// UpsertSessionTodoFromTask records one TaskCreate (insert) or
 	// TaskUpdate (update by task_id) event from the PostToolUse hook.
 	// issueKey stamps the inserted row's per-issue scope (BACI-62) so

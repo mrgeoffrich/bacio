@@ -20,7 +20,11 @@ import (
 )
 
 func newIssueCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "issue", Short: "Manage issues"}
+	cmd := &cobra.Command{
+		Use:               "issue",
+		Short:             "Manage issues",
+		PersistentPreRunE: requireClaimForGroup, // BACI-126b
+	}
 	cmd.AddCommand(
 		issueAddCmd(),
 		issueListCmd(),
