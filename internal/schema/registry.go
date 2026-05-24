@@ -43,6 +43,8 @@ var Registry = []Entry{
 	{"feature.add", "Create a feature in the current repo.", typeOf[inputs.FeatureAddInput](), inputs.ExampleFeatureAdd},
 	{"feature.edit", "Update a feature's title or description.", typeOf[inputs.FeatureEditInput](), inputs.ExampleFeatureEdit},
 	{"feature.rm", "Delete a feature (issues are kept, unlinked).", typeOf[inputs.FeatureRmInput](), inputs.ExampleFeatureRm},
+	{"feature.comment.add", "Add a comment to a feature — the BACI-124 chronological-handoff scratchpad implement-mode workers post to on close-out.", typeOf[inputs.FeatureCommentAddInput](), inputs.ExampleFeatureCommentAdd},
+	{"feature.comment.rm", "Delete a comment from a feature (BACI-124). Addressed by the comment's immutable uuid.", typeOf[inputs.FeatureCommentRmInput](), inputs.ExampleFeatureCommentRm},
 
 	{"comment.add", "Add a comment to an issue.", typeOf[inputs.CommentAddInput](), inputs.ExampleCommentAdd},
 	{"comment.rm", "Delete a comment from an issue.", typeOf[inputs.CommentRmInput](), inputs.ExampleCommentRm},

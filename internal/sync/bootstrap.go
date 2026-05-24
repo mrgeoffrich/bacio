@@ -626,6 +626,17 @@ func (e *Engine) markAllAsSynced() error {
 			if err := e.Store.MarkSynced(f.UUID, store.SyncKindFeature, ""); err != nil {
 				return err
 			}
+			// BACI-124: feature-scoped comments mirror the issue-comment
+			// bootstrap path.
+			fcs, err := e.Store.ListFeatureComments(f.ID)
+			if err != nil {
+				return err
+			}
+			for _, c := range fcs {
+				if err := e.Store.MarkSynced(c.UUID, store.SyncKindFeatureComment, ""); err != nil {
+					return err
+				}
+			}
 		}
 		issues, err := e.Store.ListIssues(store.IssueFilter{RepoID: &repo.ID})
 		if err != nil {

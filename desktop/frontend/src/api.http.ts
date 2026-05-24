@@ -320,6 +320,15 @@ export interface FeatureLinkedIssue {
   stateLabel: string;
 }
 
+// FeatureCommentDTO mirrors model.FeatureComment (BACI-124) — the
+// feature-scoped chronological-handoff scratchpad row.
+export interface FeatureCommentDTO {
+  uuid: string;
+  author: string;
+  body: string;
+  createdAt: string;
+}
+
 export interface FeatureDetail {
   slug: string;
   title: string;
@@ -327,6 +336,7 @@ export interface FeatureDetail {
   createdAt: string;
   updatedAt: string;
   issues: FeatureLinkedIssue[];
+  comments: FeatureCommentDTO[];
 }
 
 export interface HistoryEntryDTO {
@@ -1041,9 +1051,17 @@ export async function listFeatures(repoPrefix: string): Promise<FeatureSummary[]
   return feats.map(f => ({ slug: f.slug, title: f.title, updatedAt: f.updated_at }));
 }
 
+interface ApiFeatureComment {
+  uuid: string;
+  author: string;
+  body: string;
+  created_at: string;
+}
+
 interface ApiFeatureView {
   feature: ApiFeature;
   issues: Array<{ key: string; title: string; state: string }>;
+  comments?: ApiFeatureComment[];
 }
 
 export async function getFeature(repoPrefix: string, slug: string): Promise<FeatureDetail> {
@@ -1064,7 +1082,48 @@ export async function getFeature(repoPrefix: string, slug: string): Promise<Feat
       state: iss.state,
       stateLabel: stateLabel(iss.state),
     })),
+    comments: (view.comments ?? []).map(c => ({
+      uuid: c.uuid,
+      author: c.author,
+      body: c.body,
+      createdAt: c.created_at,
+    })),
   };
+}
+
+// addFeatureComment posts a chronological handoff comment to a feature
+// (BACI-124). Returns the refreshed FeatureDetail so the caller can
+// drop the new row straight into its panel state.
+export async function addFeatureComment(
+  repoPrefix: string,
+  slug: string,
+  author: string,
+  body: string,
+): Promise<FeatureDetail> {
+  if (!repoPrefix || repoPrefix === 'all') {
+    throw new Error('select a repository to comment on a feature');
+  }
+  const effectiveAuthor = author?.trim() || readActor() || 'web';
+  await call<unknown>(`/repos/${repoPrefix}/features/${slug}/comments`, {
+    method: 'POST',
+    body: { author: effectiveAuthor, body },
+  });
+  return getFeature(repoPrefix, slug);
+}
+
+// deleteFeatureComment removes a feature comment by uuid (BACI-124).
+export async function deleteFeatureComment(
+  repoPrefix: string,
+  slug: string,
+  commentUUID: string,
+): Promise<FeatureDetail> {
+  if (!repoPrefix || repoPrefix === 'all') {
+    throw new Error('select a repository to comment on a feature');
+  }
+  await call<unknown>(`/repos/${repoPrefix}/features/${slug}/comments/${commentUUID}`, {
+    method: 'DELETE',
+  });
+  return getFeature(repoPrefix, slug);
 }
 
 interface ApiHistoryEntry {

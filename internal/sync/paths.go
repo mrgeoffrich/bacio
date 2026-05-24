@@ -66,6 +66,18 @@ func CommentFile(issueFolder string, createdAt time.Time, uuid string) (yamlPath
 	return path.Join(dir, base+".yaml"), path.Join(dir, base+".md")
 }
 
+// FeatureCommentFile returns the (yaml, md) sibling paths for one
+// feature-scoped comment under its feature folder (BACI-124). Mirrors
+// CommentFile 1:1 — the on-disk YAML / MD schema is identical between
+// issue and feature comments — but lives under
+// <featureFolder>/comments/ rather than <issueFolder>/comments/.
+func FeatureCommentFile(featureFolder string, createdAt time.Time, uuid string) (yamlPath, mdPath string) {
+	stamp := createdAt.UTC().Truncate(time.Millisecond).Format("2006-01-02T15-04-05.000Z")
+	base := stamp + "--" + uuid
+	dir := path.Join(featureFolder, "comments")
+	return path.Join(dir, base+".yaml"), path.Join(dir, base+".md")
+}
+
 // IssueDescriptionFile is the markdown sibling of issue.yaml.
 func IssueDescriptionFile(issueFolder string) string {
 	return path.Join(issueFolder, "description.md")

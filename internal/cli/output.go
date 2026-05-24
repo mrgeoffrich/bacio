@@ -249,9 +249,10 @@ type issueView struct {
 }
 
 type featureView struct {
-	Feature   *model.Feature        `json:"feature"`
-	Issues    []*model.Issue        `json:"issues"`
-	Documents []*model.DocumentLink `json:"documents"`
+	Feature   *model.Feature          `json:"feature"`
+	Issues    []*model.Issue          `json:"issues"`
+	Documents []*model.DocumentLink   `json:"documents"`
+	Comments  []*model.FeatureComment `json:"comments"`
 }
 
 func printIssueView(w io.Writer, v *issueView) error {
@@ -350,6 +351,14 @@ func printFeatureView(w io.Writer, v *featureView) error {
 		fmt.Fprintln(w, "Linked documents:")
 		for _, l := range v.Documents {
 			printDocLinkInEntityContext(w, l)
+		}
+	}
+	if len(v.Comments) > 0 {
+		fmt.Fprintln(w)
+		fmt.Fprintln(w, "Comments:")
+		fmt.Fprintln(w, strings.Repeat("-", 40))
+		for _, c := range v.Comments {
+			fmt.Fprintf(w, "%s — %s\n%s\n\n", c.Author, localTime(c.CreatedAt), c.Body)
 		}
 	}
 	return nil

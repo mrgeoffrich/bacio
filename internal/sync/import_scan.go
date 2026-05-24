@@ -17,11 +17,12 @@ func (e *Engine) scanWorkingTree(ctx context.Context, source string) (*scanResul
 	scan := &scanResult{
 		repos: make(map[string]*scannedRepo),
 		seenUUIDs: map[string]map[string]struct{}{
-			store.SyncKindIssue:    {},
-			store.SyncKindFeature:  {},
-			store.SyncKindDocument: {},
-			store.SyncKindComment:  {},
-			store.SyncKindRepo:     {},
+			store.SyncKindIssue:          {},
+			store.SyncKindFeature:        {},
+			store.SyncKindDocument:       {},
+			store.SyncKindComment:        {},
+			store.SyncKindFeatureComment: {},
+			store.SyncKindRepo:           {},
 		},
 	}
 	reposRoot := filepath.Join(source, "repos")
@@ -133,12 +134,52 @@ func (e *Engine) scanFeatures(source, prefix string, sr *scannedRepo, scan *scan
 		if err != nil {
 			return err
 		}
-		sr.Features[parsed.UUID] = &scannedFeature{
+		sf := &scannedFeature{
 			Parsed:      parsed,
 			Folder:      folder,
 			Description: string(body),
 			BodyHash:    ContentHash(body),
 		}
+		// BACI-124 feature comments. Mirrors the issue-comment scan path
+		// — same YAML / MD pair, rooted at <featureFolder>/comments/.
+		commentsDir := filepath.Join(source, filepath.FromSlash(folder), "comments")
+		commentEntries, err := os.ReadDir(commentsDir)
+		if err == nil {
+			for _, ce := range commentEntries {
+				if ce.IsDir() {
+					continue
+				}
+				name := ce.Name()
+				if !strings.HasSuffix(name, ".yaml") {
+					continue
+				}
+				yamlPath := filepath.Join(commentsDir, name)
+				mdPath := strings.TrimSuffix(yamlPath, ".yaml") + ".md"
+				cBytes, err := os.ReadFile(yamlPath)
+				if err != nil {
+					return fmt.Errorf("read feature comment %s: %w", name, err)
+				}
+				cParsed, err := ParseCommentYAML(cBytes)
+				if err != nil {
+					return fmt.Errorf("parse feature comment %s: %w", name, err)
+				}
+				cBody, err := readBody(mdPath)
+				if err != nil {
+					return err
+				}
+				sf.Comments = append(sf.Comments, &scannedFeatureComment{
+					Parsed:   cParsed,
+					YAMLPath: yamlPath,
+					MDPath:   mdPath,
+					Body:     string(cBody),
+					BodyHash: ContentHash(cBody),
+				})
+				scan.seenUUIDs[store.SyncKindFeatureComment][cParsed.UUID] = struct{}{}
+			}
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("read feature comments dir: %w", err)
+		}
+		sr.Features[parsed.UUID] = sf
 		scan.seenUUIDs[store.SyncKindFeature][parsed.UUID] = struct{}{}
 	}
 	return nil

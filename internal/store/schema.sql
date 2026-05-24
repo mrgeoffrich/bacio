@@ -87,6 +87,24 @@ CREATE TABLE IF NOT EXISTS comments (
 
 CREATE INDEX IF NOT EXISTS idx_comments_issue ON comments(issue_id);
 
+-- feature_comments is the feature-scoped chronological-handoff
+-- scratchpad (BACI-124). Same shape as `comments` but parented on
+-- `features` instead of `issues`. A dispatched implement-mode worker
+-- posts to this surface on close-out so the next worker on a sibling
+-- issue in the same feature has the context it needs (files of context,
+-- deviations from the plan, work deferred / scoped out) — no per-worker
+-- transcript-archaeology required.
+CREATE TABLE IF NOT EXISTS feature_comments (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    uuid       TEXT    NOT NULL,
+    feature_id INTEGER NOT NULL REFERENCES features(id) ON DELETE CASCADE,
+    author     TEXT    NOT NULL,
+    body       TEXT    NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_feature_comments_feature ON feature_comments(feature_id);
+
 CREATE TABLE IF NOT EXISTS issue_relations (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     from_issue_id INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
@@ -271,7 +289,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uniq_prompt_templates_name_ci
 CREATE TABLE IF NOT EXISTS sync_state (
     uuid             TEXT    NOT NULL PRIMARY KEY,
     kind             TEXT    NOT NULL CHECK (kind IN
-                       ('issue','feature','document','comment','repo')),
+                       ('issue','feature','document','comment','feature_comment','repo')),
     last_synced_at   DATETIME NOT NULL,
     last_synced_hash TEXT    NOT NULL
 );

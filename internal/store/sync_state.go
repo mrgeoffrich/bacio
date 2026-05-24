@@ -22,11 +22,12 @@ import (
 // schema.sql. Exposed here so callers don't have to remember the
 // magic strings.
 const (
-	SyncKindIssue    = "issue"
-	SyncKindFeature  = "feature"
-	SyncKindDocument = "document"
-	SyncKindComment  = "comment"
-	SyncKindRepo     = "repo"
+	SyncKindIssue          = "issue"
+	SyncKindFeature        = "feature"
+	SyncKindDocument       = "document"
+	SyncKindComment        = "comment"
+	SyncKindFeatureComment = "feature_comment"
+	SyncKindRepo           = "repo"
 )
 
 // MarkSynced upserts a sync_state row with last_synced_at = now and
@@ -135,7 +136,7 @@ func (s *Store) ListSyncedUUIDs(kind string) ([]string, error) {
 // Go-side validation rather than the SQLite-side write.
 func validSyncKind(kind string) bool {
 	switch kind {
-	case SyncKindIssue, SyncKindFeature, SyncKindDocument, SyncKindComment, SyncKindRepo:
+	case SyncKindIssue, SyncKindFeature, SyncKindDocument, SyncKindComment, SyncKindFeatureComment, SyncKindRepo:
 		return true
 	}
 	return false

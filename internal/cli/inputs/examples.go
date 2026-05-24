@@ -58,6 +58,16 @@ var (
 		CommentUUID: "019e4d42-15ab-7daf-b65d-c576164691db",
 	}
 
+	ExampleFeatureCommentAdd = FeatureCommentAddInput{
+		FeatureSlug: "auth",
+		Author:      "agent-alice",
+		Body:        "## MINI-42 handoff\n\n**Files of context.** internal/auth/session.go.\n**Deviations from plan.** None.\n**Work not done.** Cookie scoping deferred to MINI-43.",
+	}
+	ExampleFeatureCommentRm = FeatureCommentRmInput{
+		FeatureSlug: "auth",
+		CommentUUID: "019e4d42-15ab-7daf-b65d-c576164691db",
+	}
+
 	ExampleLink = LinkInput{
 		From: "MINI-42",
 		Type: "blocks",

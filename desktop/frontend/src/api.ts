@@ -28,6 +28,7 @@ import {
   FeatureSummary,
   FeatureDetail,
   FeatureLinkedIssue,
+  FeatureComment as FeatureCommentDTO,
   HistoryPage,
   HistoryEntryDTO,
   LeaderStatusDTO,
@@ -36,7 +37,7 @@ import {
 } from '../bindings/github.com/mrgeoffrich/bacio/desktop';
 import { ClaimDTO } from '../bindings/github.com/mrgeoffrich/bacio/internal/agentcards';
 
-export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, BoardPreferencesDTO };
+export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, BoardPreferencesDTO };
 
 function normalize(err: unknown): Error {
   if (err instanceof Error) return err;
@@ -268,6 +269,35 @@ export async function listFeatures(repoPrefix: string): Promise<FeatureSummary[]
 export async function getFeature(repoPrefix: string, slug: string): Promise<FeatureDetail> {
   try {
     return await FeatureService.GetFeature(repoPrefix, slug);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// addFeatureComment posts a chronological handoff comment to a feature
+// (BACI-124) and returns the refreshed feature detail.
+export async function addFeatureComment(
+  repoPrefix: string,
+  slug: string,
+  author: string,
+  body: string,
+): Promise<FeatureDetail> {
+  try {
+    return await FeatureService.AddFeatureComment(repoPrefix, slug, author, body);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// deleteFeatureComment removes a feature comment by uuid (BACI-124) and
+// returns the refreshed feature detail.
+export async function deleteFeatureComment(
+  repoPrefix: string,
+  slug: string,
+  commentUUID: string,
+): Promise<FeatureDetail> {
+  try {
+    return await FeatureService.DeleteFeatureComment(repoPrefix, slug, commentUUID);
   } catch (err) {
     throw normalize(err);
   }

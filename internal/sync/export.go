@@ -16,15 +16,19 @@ import (
 // (or would have been) written. Phase 2 reports only counts; later
 // phases will likely add per-record diffs and op-level details.
 type ExportResult struct {
-	Repos        int    `json:"repos"`
-	Features     int    `json:"features"`
-	Issues       int    `json:"issues"`
-	Comments     int    `json:"comments"`
-	Documents    int    `json:"documents"`
-	Files        int    `json:"files"`
-	BytesWritten int64  `json:"bytes_written"`
-	Target       string `json:"target"`
-	DryRun       bool   `json:"dry_run,omitempty"`
+	Repos    int `json:"repos"`
+	Features int `json:"features"`
+	Issues   int `json:"issues"`
+	// Comments counts issue-scoped comments written. Kept semantically
+	// issue-only so pinned-output tests stay green; the BACI-124
+	// feature-scoped comments roll up into FeatureComments below.
+	Comments        int    `json:"comments"`
+	FeatureComments int    `json:"feature_comments"`
+	Documents       int    `json:"documents"`
+	Files           int    `json:"files"`
+	BytesWritten    int64  `json:"bytes_written"`
+	Target          string `json:"target"`
+	DryRun          bool   `json:"dry_run,omitempty"`
 
 	// Index carries the per-repo summaries used to render the
 	// top-level index.yaml. Populated as each repo finishes exporting
@@ -112,6 +116,7 @@ func (e *Engine) exportRepo(w *exportWriter, repo *model.Repo, issueByID map[int
 	preFeatures := res.Features
 	preIssues := res.Issues
 	preComments := res.Comments
+	preFeatureComments := res.FeatureComments
 	preDocuments := res.Documents
 
 	// repo.yaml
@@ -141,10 +146,12 @@ func (e *Engine) exportRepo(w *exportWriter, repo *model.Repo, issueByID map[int
 	}
 
 	for _, f := range features {
-		if err := e.exportFeature(w, repo, f); err != nil {
+		fc, err := e.exportFeature(w, repo, f)
+		if err != nil {
 			return fmt.Errorf("feature %s: %w", f.Slug, err)
 		}
 		res.Features++
+		res.FeatureComments += fc
 	}
 
 	// Issues. We re-fetch with description for this repo specifically,
@@ -189,26 +196,30 @@ func (e *Engine) exportRepo(w *exportWriter, repo *model.Repo, issueByID map[int
 	}
 
 	res.Index = append(res.Index, RepoIndexEntry{
-		Prefix:    repo.Prefix,
-		UUID:      repo.UUID,
-		Name:      repo.Name,
-		Remote:    repo.RemoteURL,
-		Features:  res.Features - preFeatures,
-		Issues:    res.Issues - preIssues,
-		Comments:  res.Comments - preComments,
-		Documents: res.Documents - preDocuments,
+		Prefix:          repo.Prefix,
+		UUID:            repo.UUID,
+		Name:            repo.Name,
+		Remote:          repo.RemoteURL,
+		Features:        res.Features - preFeatures,
+		Issues:          res.Issues - preIssues,
+		Comments:        res.Comments - preComments,
+		FeatureComments: res.FeatureComments - preFeatureComments,
+		Documents:       res.Documents - preDocuments,
 	})
 	return nil
 }
 
-func (e *Engine) exportFeature(w *exportWriter, repo *model.Repo, f *model.Feature) error {
+// exportFeature writes the feature.yaml + description.md + each feature
+// comment under the feature folder. Returns the number of feature
+// comments written so the caller can roll counts up into ExportResult.
+func (e *Engine) exportFeature(w *exportWriter, repo *model.Repo, f *model.Feature) (int, error) {
 	folder := FeatureFolder(repo.Prefix, f.Slug)
 	descPath := FeatureDescriptionFile(folder)
 	yamlPath := FeatureYAMLFile(folder)
 
 	descBytes := NormalizeBody([]byte(f.Description))
 	if err := w.writeRaw(descPath, descBytes); err != nil {
-		return err
+		return 0, err
 	}
 	descHash := ContentHash(descBytes)
 
@@ -226,6 +237,44 @@ func (e *Engine) exportFeature(w *exportWriter, repo *model.Repo, f *model.Featu
 		pairs = append(pairs, Pair{"archived_at", Time(*f.ArchivedAt)})
 	}
 	yamlBytes, err := Emit(Map(pairs...))
+	if err != nil {
+		return 0, err
+	}
+	if err := w.writeRaw(yamlPath, yamlBytes); err != nil {
+		return 0, err
+	}
+
+	// BACI-124 feature comments. Mirrors the issue-comment loop in
+	// exportIssue exactly; identical YAML / MD schema, just rooted at
+	// the feature folder instead of the issue folder.
+	comments, err := e.Store.ListFeatureComments(f.ID)
+	if err != nil {
+		return 0, fmt.Errorf("list feature comments: %w", err)
+	}
+	for _, c := range comments {
+		if err := e.exportFeatureComment(w, folder, c); err != nil {
+			return 0, fmt.Errorf("feature comment %s: %w", c.UUID, err)
+		}
+	}
+	return len(comments), nil
+}
+
+// exportFeatureComment writes one feature-scoped comment (BACI-124).
+// Mirrors exportComment 1:1 except for the path helper — the on-disk
+// YAML / MD schema is identical between issue and feature comments.
+func (e *Engine) exportFeatureComment(w *exportWriter, featureFolder string, c *model.FeatureComment) error {
+	yamlPath, mdPath := FeatureCommentFile(featureFolder, c.CreatedAt, c.UUID)
+	bodyBytes := NormalizeBody([]byte(c.Body))
+	if err := w.writeRaw(mdPath, bodyBytes); err != nil {
+		return err
+	}
+	bodyHash := ContentHash(bodyBytes)
+	yamlBytes, err := Emit(Map(
+		Pair{"author", Str(c.Author)},
+		Pair{"body_hash", Str(bodyHash)},
+		Pair{"created_at", Time(c.CreatedAt)},
+		Pair{"uuid", Str(c.UUID)},
+	))
 	if err != nil {
 		return err
 	}

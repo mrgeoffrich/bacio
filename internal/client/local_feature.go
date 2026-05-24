@@ -115,11 +115,16 @@ func (c *localClient) DeleteFeature(ctx context.Context, repo *model.Repo, slug 
 		if err != nil {
 			return nil, nil, err
 		}
+		comments, err := c.store.CountFeatureComments(f.ID)
+		if err != nil {
+			return nil, nil, err
+		}
 		return nil, &FeatureDeletePreview{
 			Feature:        f,
 			WouldDelete:    true,
 			IssuesUnlinked: len(issues),
 			DocumentLinks:  len(docs),
+			Comments:       comments,
 		}, nil
 	}
 	if err := c.store.DeleteFeature(f.ID); err != nil {
@@ -153,7 +158,14 @@ func (c *localClient) ShowFeature(ctx context.Context, repo *model.Repo, slug st
 	if docs == nil {
 		docs = []*model.DocumentLink{}
 	}
-	return &FeatureView{Feature: f, Issues: issues, Documents: docs}, nil
+	comments, err := c.store.ListFeatureComments(f.ID)
+	if err != nil {
+		return nil, err
+	}
+	if comments == nil {
+		comments = []*model.FeatureComment{}
+	}
+	return &FeatureView{Feature: f, Issues: issues, Documents: docs, Comments: comments}, nil
 }
 
 // PlanFeature is kept in sync with internal/api/handlers_plan.go:buildPlanView.

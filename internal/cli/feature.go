@@ -23,6 +23,7 @@ func newFeatureCmd() *cobra.Command {
 		featurePlanCmd(),
 		featureArchiveCmd(),
 		featureUnarchiveCmd(),
+		newFeatureCommentCmd(),
 	)
 	return cmd
 }
@@ -156,6 +157,7 @@ func featureShowCmd() *cobra.Command {
 				Feature:   view.Feature,
 				Issues:    view.Issues,
 				Documents: view.Documents,
+				Comments:  view.Comments,
 			})
 		},
 	}
@@ -298,6 +300,7 @@ func removeFeature(slug string) error {
 			WouldDelete:    preview.WouldDelete,
 			IssuesUnlinked: preview.IssuesUnlinked,
 			DocumentLinks:  preview.DocumentLinks,
+			Comments:       preview.Comments,
 		})
 	}
 	return ok("feature %s deleted", deleted.Slug)
@@ -312,6 +315,8 @@ type featureDeletePreview struct {
 	WouldDelete    bool           `json:"would_delete"`
 	IssuesUnlinked int            `json:"issues_unlinked"`
 	DocumentLinks  int            `json:"document_links"`
+	// Comments is the BACI-124 feature_comments cascade count.
+	Comments int `json:"comments"`
 }
 
 // featureArchiveCmd / featureUnarchiveCmd are the BACI-68 manual

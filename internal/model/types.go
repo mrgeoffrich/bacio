@@ -79,6 +79,21 @@ type Comment struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// FeatureComment is the feature-scoped chronological-handoff scratchpad
+// row (BACI-124). Same shape as Comment but parented to a feature
+// instead of an issue, used by dispatched implement-mode workers to
+// post a close-out handoff note (files of context, deviations from
+// plan, work deferred) so the next worker on a sibling issue in the
+// same feature inherits the context.
+type FeatureComment struct {
+	ID        int64     `json:"id"`
+	UUID      string    `json:"uuid"`
+	FeatureID int64     `json:"feature_id"`
+	Author    string    `json:"author"`
+	Body      string    `json:"body"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type RelationType string
 
 const (

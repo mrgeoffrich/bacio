@@ -518,6 +518,9 @@ func migrate(db *sql.DB) error {
 	if err := migrateDocumentsTypeCheck(db); err != nil {
 		return err
 	}
+	if err := migrateSyncStateKindCheck(db); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -1191,3 +1194,72 @@ func columnExists(db *sql.DB, table, column string) (bool, error) {
 }
 
 func (s *Store) Close() error { return s.DB.Close() }
+
+// migrateSyncStateKindCheck rebuilds sync_state to widen its `kind`
+// CHECK so that 'feature_comment' (BACI-124) joins the existing
+// allowlist. SQLite can't alter CHECK constraints in place, so we
+// follow the same drop-and-recopy pattern as
+// migrateDocumentsTypeCheck. Keyed off the stored CREATE TABLE SQL: a
+// DB whose CHECK already lists `feature_comment` (a fresh schema.sql
+// or a prior run of this migration) is a no-op.
+func migrateSyncStateKindCheck(db *sql.DB) error {
+	stale, err := syncStateKindCheckIsStale(db)
+	if err != nil {
+		return err
+	}
+	if !stale {
+		return nil
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(`PRAGMA defer_foreign_keys = ON`); err != nil {
+		return fmt.Errorf("defer fk: %w", err)
+	}
+	if _, err := tx.Exec(`
+		CREATE TABLE sync_state_new (
+			uuid             TEXT    NOT NULL PRIMARY KEY,
+			kind             TEXT    NOT NULL CHECK (kind IN
+			                   ('issue','feature','document','comment','feature_comment','repo')),
+			last_synced_at   DATETIME NOT NULL,
+			last_synced_hash TEXT    NOT NULL
+		)
+	`); err != nil {
+		return fmt.Errorf("create sync_state_new: %w", err)
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO sync_state_new (uuid, kind, last_synced_at, last_synced_hash)
+		SELECT uuid, kind, last_synced_at, last_synced_hash FROM sync_state
+	`); err != nil {
+		return fmt.Errorf("copy sync_state rows: %w", err)
+	}
+	if _, err := tx.Exec(`DROP TABLE sync_state`); err != nil {
+		return fmt.Errorf("drop old sync_state: %w", err)
+	}
+	if _, err := tx.Exec(`ALTER TABLE sync_state_new RENAME TO sync_state`); err != nil {
+		return fmt.Errorf("rename sync_state_new: %w", err)
+	}
+	if _, err := tx.Exec(`CREATE INDEX IF NOT EXISTS idx_sync_state_kind ON sync_state(kind)`); err != nil {
+		return fmt.Errorf("recreate idx_sync_state_kind: %w", err)
+	}
+	return tx.Commit()
+}
+
+func syncStateKindCheckIsStale(db *sql.DB) (bool, error) {
+	var sqlText sql.NullString
+	err := db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'sync_state'`).Scan(&sqlText)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !sqlText.Valid {
+		return false, nil
+	}
+	collapsed := strings.Join(strings.Fields(sqlText.String), " ")
+	return !strings.Contains(collapsed, "'feature_comment'"), nil
+}

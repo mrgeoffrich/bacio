@@ -698,6 +698,28 @@ reader — that there should be *no* `.claude/agents/` file and *no*
 install verb. The prompt-cache / TTFT win made the per-mode subagent
 the better seam.)
 
+### Feature handoff comments (BACI-124)
+
+The `bacio-implement-worker` close-out includes a fourth step (after
+"create a PR", before "drop the worktree"): if the dispatched issue
+belongs to a feature, the worker posts a chronological handoff note on
+the **parent feature** via `bacio feature comment add`. The note
+captures three buckets — files of context, deviations from the
+original plan, and work deferred / scoped out — so the next worker on
+a sibling issue in the same feature inherits the context this run
+built up rather than re-deriving it from the transcript.
+
+Feature comments live in their own table (`feature_comments`) and are
+addressed under `bacio feature comment {add,list,rm}` / `GET POST
+DELETE /repos/{prefix}/features/{slug}/comments[/{uuid}]`. They sync
+through the same git-backed round-trip as issue comments, just rooted
+at `<featureFolder>/comments/` rather than `<issueFolder>/comments/`.
+`bacio feature show <slug>` surfaces them in the `comments` field of
+its FeatureView response.
+
+Plan-mode and design-mode workers do not yet post handoff comments —
+the same need applies and is tracked as a follow-up.
+
 ### Worktree-isolated workers (#114)
 
 Each generated `.claude/agents/bacio-<mode>-worker.md` carries an

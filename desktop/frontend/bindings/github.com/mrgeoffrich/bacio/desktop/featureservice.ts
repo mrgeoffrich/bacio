@@ -38,6 +38,26 @@ export function ListFeatures(repoPrefix: string): $CancellablePromise<$models.Fe
     });
 }
 
+/**
+ * AddFeatureComment posts a chronological handoff comment to a feature
+ * (BACI-124) and returns the refreshed detail.
+ */
+export function AddFeatureComment(repoPrefix: string, slug: string, author: string, body: string): $CancellablePromise<$models.FeatureDetail> {
+    return $Call.ByID(517388757, repoPrefix, slug, author, body).then(($result: any) => {
+        return $$createType0($result);
+    });
+}
+
+/**
+ * DeleteFeatureComment removes a feature comment by uuid (BACI-124) and
+ * returns the refreshed detail.
+ */
+export function DeleteFeatureComment(repoPrefix: string, slug: string, commentUUID: string): $CancellablePromise<$models.FeatureDetail> {
+    return $Call.ByID(1504383339, repoPrefix, slug, commentUUID).then(($result: any) => {
+        return $$createType0($result);
+    });
+}
+
 // Private type creation functions
 const $$createType0 = $models.FeatureDetail.createFrom;
 const $$createType1 = $models.FeatureSummary.createFrom;
