@@ -642,3 +642,88 @@ CREATE TABLE IF NOT EXISTS ui_leader (
     heartbeat_at DATETIME
 );
 INSERT OR IGNORE INTO ui_leader (id, heartbeat_at) VALUES (1, 0);
+
+-- Triggers — keep <parent>.updated_at in sync with side-data writes.
+-- See BACI-144.
+--
+-- The sync importer's last-writer-wins gate (BACI-5) keys on
+-- issues.updated_at / documents.updated_at: when the remote YAML is
+-- older than the local row the importer preserves local, otherwise it
+-- replays the YAML over local. The replay path wipes-and-rewrites the
+-- side-data tables (issue_pull_requests, issue_relations, issue_tags,
+-- document_links). For a locally-added side-data row to survive the
+-- next round-trip its parent's updated_at MUST advance past the YAML's
+-- timestamp — otherwise the gate misses, the replay fires, and the
+-- new row is silently dropped (BACI-142 fixed three concrete cases of
+-- exactly this bug at the call sites).
+--
+-- These triggers promote the bump out of per-call-site Go code into
+-- the schema so a future side-data table author can't forget. The
+-- importer's pass-2 re-stamp (sync/import_apply.go::applyIssues /
+-- applyDocuments) restores the YAML timestamp at end of pass 2 so the
+-- triggers' CURRENT_TIMESTAMP bump from the DELETE+INSERT cycle doesn't
+-- clobber the LWW-correct value.
+
+-- issue_pull_requests → issues.updated_at
+CREATE TRIGGER IF NOT EXISTS bump_issue_updated_on_pr_insert
+AFTER INSERT ON issue_pull_requests
+BEGIN
+    UPDATE issues SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.issue_id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS bump_issue_updated_on_pr_delete
+AFTER DELETE ON issue_pull_requests
+BEGIN
+    UPDATE issues SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.issue_id;
+END;
+
+-- issue_relations → issues.updated_at (both endpoints; the edge
+-- affects how each side renders).
+CREATE TRIGGER IF NOT EXISTS bump_issue_updated_on_relation_insert
+AFTER INSERT ON issue_relations
+BEGIN
+    UPDATE issues SET updated_at = CURRENT_TIMESTAMP
+      WHERE id IN (NEW.from_issue_id, NEW.to_issue_id);
+END;
+
+CREATE TRIGGER IF NOT EXISTS bump_issue_updated_on_relation_delete
+AFTER DELETE ON issue_relations
+BEGIN
+    UPDATE issues SET updated_at = CURRENT_TIMESTAMP
+      WHERE id IN (OLD.from_issue_id, OLD.to_issue_id);
+END;
+
+-- issue_tags → issues.updated_at
+CREATE TRIGGER IF NOT EXISTS bump_issue_updated_on_tag_insert
+AFTER INSERT ON issue_tags
+BEGIN
+    UPDATE issues SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.issue_id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS bump_issue_updated_on_tag_delete
+AFTER DELETE ON issue_tags
+BEGIN
+    UPDATE issues SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.issue_id;
+END;
+
+-- document_links → documents.updated_at. The UPDATE variant fires on
+-- description-only edits so a LinkDocument call that just re-stamps
+-- the description (the UPDATE branch inside the upsert) still bumps
+-- documents.updated_at.
+CREATE TRIGGER IF NOT EXISTS bump_document_updated_on_link_insert
+AFTER INSERT ON document_links
+BEGIN
+    UPDATE documents SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.document_id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS bump_document_updated_on_link_delete
+AFTER DELETE ON document_links
+BEGIN
+    UPDATE documents SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.document_id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS bump_document_updated_on_link_description_update
+AFTER UPDATE OF description ON document_links
+BEGIN
+    UPDATE documents SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.document_id;
+END;

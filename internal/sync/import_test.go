@@ -965,6 +965,71 @@ func TestImport_LWW_PreservesLocallyLinkedDoc(t *testing.T) {
 	}
 }
 
+// TestImport_LWW_PreservesIssueUpdatedAtThroughPass2 pins the BACI-144
+// re-stamp. Without it, pass 2's wipe-and-rewrite of issue side-data
+// fires the schema triggers, which bump issues.updated_at to
+// CURRENT_TIMESTAMP and silently clobber the LWW-correct value from
+// the YAML. The test re-imports the fixture into a fresh DB and
+// asserts that an issue's UpdatedAt matches the YAML exactly — not
+// the import-time wall clock.
+func TestImport_LWW_PreservesIssueUpdatedAtThroughPass2(t *testing.T) {
+	a, uuids := seedExportFixture(t)
+	dirA := t.TempDir()
+	if _, err := (&Engine{Store: a}).Export(context.Background(), dirA); err != nil {
+		t.Fatalf("export A: %v", err)
+	}
+	b, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open b: %v", err)
+	}
+	t.Cleanup(func() { b.Close() })
+	if _, err := (&Engine{Store: b, Actor: "tester"}).Import(context.Background(), dirA); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	// iss1 carries side-data (a PR, a tag, an outgoing relation) so
+	// pass 2 actually fires the trigger bumps for it. The fixture
+	// forces iss1.updated_at to '2026-05-09 14:22:00'.
+	iss1, err := b.GetIssueByUUID(uuids["iss1"])
+	if err != nil {
+		t.Fatalf("get iss1: %v", err)
+	}
+	want := "2026-05-09T14:22:00Z"
+	if got := iss1.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"); got != want {
+		t.Fatalf("issue updated_at = %s, want %s (trigger CURRENT_TIMESTAMP overwrote YAML?)", got, want)
+	}
+}
+
+// TestImport_LWW_PreservesDocumentUpdatedAtThroughPass2 mirrors the
+// issue variant above for the documents table — pass 2's
+// replaceDocLinksTx fires bump_document_updated_on_link_insert /
+// _delete, which without the re-stamp would clobber the YAML's
+// documents.updated_at.
+func TestImport_LWW_PreservesDocumentUpdatedAtThroughPass2(t *testing.T) {
+	a, uuids := seedExportFixture(t)
+	dirA := t.TempDir()
+	if _, err := (&Engine{Store: a}).Export(context.Background(), dirA); err != nil {
+		t.Fatalf("export A: %v", err)
+	}
+	b, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open b: %v", err)
+	}
+	t.Cleanup(func() { b.Close() })
+	if _, err := (&Engine{Store: b, Actor: "tester"}).Import(context.Background(), dirA); err != nil {
+		t.Fatalf("import: %v", err)
+	}
+	// The fixture's doc has a link to iss1, so pass 2 fires the
+	// link triggers. Forced timestamp is '2026-05-01 11:00:00'.
+	doc, err := b.GetDocumentByUUID(uuids["doc"], true)
+	if err != nil {
+		t.Fatalf("get doc: %v", err)
+	}
+	want := "2026-05-01T11:00:00Z"
+	if got := doc.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"); got != want {
+		t.Fatalf("document updated_at = %s, want %s (trigger CURRENT_TIMESTAMP overwrote YAML?)", got, want)
+	}
+}
+
 // TestImport_LegacyContentMD_JSONLDocument pins the no-migration
 // fallback (BACI-102 Option 1): a .jsonl document synced by a
 // pre-BACI-102 binary has its body on disk as content.md. A new-binary

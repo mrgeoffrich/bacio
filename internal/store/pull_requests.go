@@ -11,59 +11,38 @@ import (
 
 var ErrPRAlreadyAttached = errors.New("PR already attached to this issue")
 
-// AttachPR inserts the PR row and bumps issues.updated_at so the sync
-// importer's last-writer-wins gate (which keys on issues.updated_at)
-// will preserve the new row through the next round-trip. Without the
-// bump, replacePRsTx silently wipes the local row — see BACI-142.
+// AttachPR inserts the PR row. The bump_issue_updated_on_pr_insert
+// schema trigger advances issues.updated_at so the sync importer's
+// last-writer-wins gate (which keys on issues.updated_at) preserves
+// the new row through the next round-trip — see BACI-144 (and
+// BACI-142, which fixed the same drift at the call site before the
+// invariant was promoted into the schema).
 func (s *Store) AttachPR(issueID int64, url string) (*model.PullRequest, error) {
 	url, err := ValidatePRURLStrict(url)
 	if err != nil {
 		return nil, err
 	}
-	tx, err := s.DB.Begin()
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-	res, err := tx.Exec(`INSERT INTO issue_pull_requests (issue_id, url) VALUES (?, ?)`, issueID, url)
+	res, err := s.DB.Exec(`INSERT INTO issue_pull_requests (issue_id, url) VALUES (?, ?)`, issueID, url)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
 			return nil, ErrPRAlreadyAttached
 		}
 		return nil, err
 	}
-	if _, err := tx.Exec(`UPDATE issues SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`, issueID); err != nil {
-		return nil, err
-	}
 	id, _ := res.LastInsertId()
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
 	return s.getPRByID(id)
 }
 
-// DetachPR deletes the PR row and, when a row actually went away,
-// bumps issues.updated_at so the LWW gate preserves the deletion
-// through the next sync. See BACI-142.
+// DetachPR deletes the PR row. The bump_issue_updated_on_pr_delete
+// schema trigger advances issues.updated_at when a row went away so
+// the LWW gate preserves the deletion through the next sync — see
+// BACI-144.
 func (s *Store) DetachPR(issueID int64, url string) (int64, error) {
-	tx, err := s.DB.Begin()
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback()
-	res, err := tx.Exec(`DELETE FROM issue_pull_requests WHERE issue_id = ? AND url = ?`, issueID, url)
+	res, err := s.DB.Exec(`DELETE FROM issue_pull_requests WHERE issue_id = ? AND url = ?`, issueID, url)
 	if err != nil {
 		return 0, err
 	}
 	n, _ := res.RowsAffected()
-	if n > 0 {
-		if _, err := tx.Exec(`UPDATE issues SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`, issueID); err != nil {
-			return 0, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
 	return n, nil
 }
 
