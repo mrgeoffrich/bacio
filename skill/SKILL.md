@@ -48,7 +48,7 @@ Run `bacio <group> --help` for the subcommands of each.
 - **`bacio status`** — read-only probe: repo, DB path, env resolution, stats, and an `llm_recommendations` array of setup fixes to action.
 - **`bacio feature`** — add/list/show/edit/rm; `feature plan <slug>` prints open issues in dependency order.
 - **`bacio issue`** — add/list/show/edit/rm, `state`, `assign`/`unassign`, `archive`/`unarchive`; `brief <KEY>` is a one-shot bulk-context JSON read; `next`/`peek` atomically claim the next ready issue in a feature.
-- **`bacio comment`** — add/list/rm.
+- **`bacio comment`** — add/list/rm. Pass `--eval` (or `"eval": true` on the JSON path) on `bacio comment add` to mark the row as a BACI-131 quality-review note — the server pins the in-flight `(agent_session_id, dispatch_id, mode)` snapshot onto the comment at write time, and `bacio comment list -o json` surfaces the four fields on every row.
 - **`bacio link` / `bacio unlink`** — issue relations: `blocks`, `relates-to`, `duplicate-of` (`blocked-by` is the inverse view of `blocks`).
 - **`bacio tag`** — add/rm free-form labels; filter with `--tag` on `issue list`.
 - **`bacio pr`** — attach/detach/list PR URLs.

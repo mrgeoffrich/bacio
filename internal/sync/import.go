@@ -609,8 +609,15 @@ func contentHashIssue(si *scannedIssue) string {
 }
 
 func contentHashComment(sc *scannedComment) string {
-	return ContentHash([]byte(fmt.Sprintf("comment|%s|%s|%s",
-		sc.Parsed.UUID, sc.Parsed.Author, sc.BodyHash)))
+	// BACI-131: fold the eval triple into the hash so a previously-
+	// imported non-eval row that later acquires eval=true via a sync
+	// pull triggers an update rather than a silent no-op. The empty-
+	// triple case stringifies as "comment|uuid|author|body|false||"
+	// which differs from the pre-BACI-131 hash but only on the first
+	// re-sync; that one cycle is the migration cost.
+	return ContentHash([]byte(fmt.Sprintf("comment|%s|%s|%s|%t|%s|%s",
+		sc.Parsed.UUID, sc.Parsed.Author, sc.BodyHash,
+		sc.Parsed.Eval, sc.Parsed.AgentSessionID, sc.Parsed.Mode)))
 }
 
 // contentHashFeatureComment distinguishes feature comments from issue

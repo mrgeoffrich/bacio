@@ -231,14 +231,20 @@ export async function updateIssueDescription(
 
 // addComment appends a comment to an issue and returns the refreshed
 // issue-drawer payload. An empty author falls back to the OS username.
+// opts.eval (BACI-131) flags the row as a quality-review note posted
+// from the kanban quick-eval composer — the server pins the in-flight
+// (agent_session_id, dispatch_id, mode) snapshot onto the comment.
 export async function addComment(
   repoPrefix: string,
   key: string,
   author: string,
   body: string,
+  opts?: { eval?: boolean },
 ): Promise<IssueDetail> {
   try {
-    return await BoardService.AddComment(repoPrefix, key, author, body);
+    return await BoardService.AddComment(repoPrefix, key, author, body, !!opts?.eval);
+    // ^ Wails binding parameter is `isEval` (renamed from `eval` so the
+    //   generated TS doesn't clash with the JavaScript reserved word).
   } catch (err) {
     throw normalize(err);
   }

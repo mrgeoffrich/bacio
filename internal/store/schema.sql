@@ -82,10 +82,29 @@ CREATE TABLE IF NOT EXISTS comments (
     issue_id   INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
     author     TEXT    NOT NULL,
     body       TEXT    NOT NULL,
+    -- BACI-131: eval comments are quick observations a user posts from
+    -- the kanban card while watching an agent work an issue. They are
+    -- pinned to the in-flight run via (agent_session_id, dispatch_id,
+    -- mode) so a future review can correlate the note to the exact
+    -- claim/dispatch that was live at write time. eval=0 (default) is a
+    -- normal comment with all three context fields empty. dispatch_id is
+    -- a nullable FK to agent_dispatches so a comment whose dispatch row
+    -- ages out via the 60-day prune sweep keeps its eval flag and its
+    -- (session, mode) snapshot — only the FK silently nulls out.
+    eval              INTEGER NOT NULL DEFAULT 0 CHECK (eval IN (0,1)),
+    agent_session_id  TEXT    NOT NULL DEFAULT '',
+    dispatch_id       INTEGER REFERENCES agent_dispatches(id) ON DELETE SET NULL,
+    mode              TEXT    NOT NULL DEFAULT '',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_comments_issue ON comments(issue_id);
+-- Partial index for the future eval-only review feed: queries that
+-- filter eval comments on one issue (or scan recently-posted eval rows
+-- across the repo) hit this directly; the non-eval comment list keeps
+-- using the existing idx_comments_issue index.
+CREATE INDEX IF NOT EXISTS idx_comments_issue_eval
+    ON comments(issue_id, created_at) WHERE eval = 1;
 
 -- feature_comments is the feature-scoped chronological-handoff
 -- scratchpad (BACI-124). Same shape as `comments` but parented on

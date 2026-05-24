@@ -188,12 +188,23 @@ export type ClaimantDTO = agentcards$0.ClaimantDTO;
 /**
  * CommentDTO is one issue comment. UUID is the immutable identity the
  * React layer addresses a delete with.
+ * 
+ * BACI-131 added the four eval-context fields the kanban quick-eval
+ * composer pins onto a comment at write time. They're zero values on
+ * a normal comment; AgentName is the persistent agent-identity slug
+ * resolved server-side via the agent_sessions → agents JOIN at read
+ * time (never persisted on the row).
  */
 export class CommentDTO {
     "uuid": string;
     "author": string;
     "body": string;
     "createdAt": time$0.Time;
+    "eval": boolean;
+    "agentSessionId"?: string;
+    "dispatchId"?: number | null;
+    "mode"?: string;
+    "agentName"?: string;
 
     /** Creates a new CommentDTO instance. */
     constructor($$source: Partial<CommentDTO> = {}) {
@@ -208,6 +219,9 @@ export class CommentDTO {
         }
         if (!("createdAt" in $$source)) {
             this["createdAt"] = null;
+        }
+        if (!("eval" in $$source)) {
+            this["eval"] = false;
         }
 
         Object.assign(this, $$source);

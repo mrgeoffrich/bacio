@@ -33,9 +33,14 @@ import * as $models from "./models.js";
  * issue-drawer payload. An empty author falls back to the OS username,
  * the same default the CLI uses for human actors. repoPrefix may be empty
  * or "all" — the prefix is then derived from the canonical issue key.
+ * 
+ * `eval` (BACI-131) flags the row as a quality-review note posted from
+ * the kanban quick-eval composer — the server pins the in-flight
+ * (agent_session_id, dispatch_id, mode) snapshot onto the comment at
+ * write time.
  */
-export function AddComment(repoPrefix: string, key: string, author: string, body: string): $CancellablePromise<$models.IssueDetail> {
-    return $Call.ByID(1143577105, repoPrefix, key, author, body).then(($result: any) => {
+export function AddComment(repoPrefix: string, key: string, author: string, body: string, isEval: boolean): $CancellablePromise<$models.IssueDetail> {
+    return $Call.ByID(1143577105, repoPrefix, key, author, body, isEval).then(($result: any) => {
         return $$createType0($result);
     });
 }

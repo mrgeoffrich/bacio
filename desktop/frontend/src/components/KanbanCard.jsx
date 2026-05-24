@@ -1,4 +1,4 @@
-import React, { memo, useState } from 'react';
+import React, { memo, useEffect, useRef, useState } from 'react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import Icon from './Icon.jsx';
 import Tooltip from './Tooltip.jsx';
@@ -19,11 +19,35 @@ function stateLabel(s) {
   return STATE_LABELS[s] ?? s;
 }
 
-function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, onDragEnd, onOpen, onDispatch, onCancelWaiting, onOpenQuestion, onOpenIssue }) {
+function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, onDragEnd, onOpen, onDispatch, onCancelWaiting, onOpenQuestion, onOpenIssue, onQuickEval }) {
   // BACI-75: local-only expansion state for the Tasks pill. Resets on
   // unmount (board switch, repo switch, hard refresh) — that's
   // intentional, we don't want to persist a row-level UI toggle.
   const [tasksOpen, setTasksOpen] = useState(false);
+  // BACI-131: local-only eval composer state. Reset on unmount /
+  // board switch — same justification as tasksOpen.
+  const [evalOpen, setEvalOpen] = useState(false);
+  const [evalBody, setEvalBody] = useState('');
+  const [evalSending, setEvalSending] = useState(false);
+  const evalRef = useRef(null);
+  useEffect(() => {
+    if (evalOpen) evalRef.current?.focus();
+  }, [evalOpen]);
+  const submitEval = async () => {
+    const body = evalBody.trim();
+    if (!body || evalSending) return;
+    setEvalSending(true);
+    try {
+      await onQuickEval?.(card.key, body);
+      setEvalOpen(false);
+      setEvalBody('');
+    } catch {
+      // App-side error handler surfaces the toast; keep the
+      // composer open so the user doesn't lose their typed note.
+    } finally {
+      setEvalSending(false);
+    }
+  };
   // The prompts valid to dispatch from this card's current state — the
   // state-gate config is global (App-owned), filtered per-card here.
   const validPrompts = (promptConfig || []).filter(
@@ -48,7 +72,10 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, o
   const waitingDelivered = waiting && !!card.waitingDispatchDelivered;
   const dispatchDisabled = taken || waiting;
 
-  const hasFooter = validPrompts.length > 0 || card.assignees.length > 0 || waiting;
+  // BACI-131: the quick-eval composer is the right-edge affordance on
+  // a taken card. A taken card disables the zap dropdown anyway, so
+  // taking the slot replaces a dead affordance with a live one.
+  const hasFooter = validPrompts.length > 0 || card.assignees.length > 0 || waiting || taken;
 
   // BACI-60 meta line — only on taken cards, only when at least one of
   // verb or tasks is populated. Hidden entirely otherwise so cards that
@@ -188,6 +215,24 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, o
                 />
               </Tooltip>
             )
+          ) : taken ? (
+            // BACI-131: replace the disabled zap dropdown with the
+            // quick-eval affordance — only on taken cards. Untaken
+            // cards keep the zap menu below; the eval composer is the
+            // "watching an agent work" surface.
+            <Tooltip label="Add a quick eval note">
+              <button
+                type="button"
+                className="mk-card-eval-btn"
+                aria-label="Add a quick eval comment"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setEvalOpen(true);
+                }}
+              >
+                <Icon name="comment" />
+              </button>
+            </Tooltip>
           ) : validPrompts.length > 0 && (
             <DropdownMenu.Root>
               <DropdownMenu.Trigger asChild>
@@ -233,6 +278,54 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, o
             </DropdownMenu.Root>
           )}
         </footer>
+      )}
+      {evalOpen && taken && (
+        // BACI-131 quick-eval inline composer. Cmd/Ctrl+Enter submits,
+        // Escape cancels. Wrapper stops propagation so clicks inside
+        // the composer don't open the drawer.
+        <div className="mk-card-eval-composer" onClick={(e) => e.stopPropagation()}>
+          <textarea
+            ref={evalRef}
+            className="mk-card-eval-textarea"
+            rows={3}
+            placeholder="Quick eval note…"
+            value={evalBody}
+            disabled={evalSending}
+            onChange={(e) => setEvalBody(e.target.value)}
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+                e.preventDefault();
+                submitEval();
+              }
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                setEvalOpen(false);
+                setEvalBody('');
+              }
+            }}
+          />
+          <div className="mk-card-eval-actions">
+            <button
+              type="button"
+              className="mk-btn-ghost"
+              disabled={evalSending}
+              onClick={(e) => {
+                e.stopPropagation();
+                setEvalOpen(false);
+                setEvalBody('');
+              }}
+            >Cancel</button>
+            <button
+              type="button"
+              className="mk-btn-primary"
+              disabled={!evalBody.trim() || evalSending}
+              onClick={(e) => {
+                e.stopPropagation();
+                submitEval();
+              }}
+            >{evalSending ? 'Saving…' : 'Save'}</button>
+          </div>
+        </div>
       )}
       {hasMeta && (
         <>

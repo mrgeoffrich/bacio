@@ -23,13 +23,14 @@ func newCommentCmd() *cobra.Command {
 func commentAddCmd() *cobra.Command {
 	var (
 		author, body, bodyFile, rawInput string
+		eval                             bool
 	)
 	cmd := &cobra.Command{
 		Use:   "add [KEY]",
 		Short: "Add a comment to an issue",
 		Args:  cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, err := parseJSONInput(cmd, args, rawInput, "as", "body", "body-file")
+			raw, err := parseJSONInput(cmd, args, rawInput, "as", "body", "body-file", "eval")
 			if err != nil {
 				return err
 			}
@@ -57,12 +58,14 @@ func commentAddCmd() *cobra.Command {
 				IssueKey: args[0],
 				Author:   author,
 				Body:     text,
+				Eval:     eval,
 			}, false)
 		},
 	}
 	cmd.Flags().StringVar(&author, "as", "", "comment author name (required when not using --json)")
 	cmd.Flags().StringVar(&body, "body", "", "comment body or '-' for stdin")
 	cmd.Flags().StringVar(&bodyFile, "body-file", "", "path to a markdown file")
+	cmd.Flags().BoolVar(&eval, "eval", false, "mark this as an eval comment (BACI-131) — server pins the in-flight (agent_session_id, dispatch_id, mode) onto the row")
 	addInputFlag(cmd, &rawInput)
 	return cmd
 }

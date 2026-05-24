@@ -10,18 +10,42 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/model"
 )
 
-func (s *Store) CreateComment(issueID int64, author, body string) (*model.Comment, error) {
-	author, err := ValidateName(author, "author")
+// CreateCommentIn is the validated tuple CreateComment consumes. The
+// Eval / AgentSessionID / DispatchID / Mode quartet (BACI-131) is the
+// in-flight context the kanban quick-eval composer pins onto the row
+// server-side via ResolveEvalContext; on normal comments the four
+// fields stay at zero values.
+type CreateCommentIn struct {
+	IssueID        int64
+	Author         string
+	Body           string
+	Eval           bool
+	AgentSessionID string
+	DispatchID     *int64
+	Mode           string
+}
+
+func (s *Store) CreateComment(in CreateCommentIn) (*model.Comment, error) {
+	author, err := ValidateName(in.Author, "author")
 	if err != nil {
 		return nil, err
 	}
-	body, err = ValidateBody(body, "body", true)
+	body, err := ValidateBody(in.Body, "body", true)
 	if err != nil {
 		return nil, err
+	}
+	sess, mode, err := validateEvalTriple(in.AgentSessionID, in.Mode)
+	if err != nil {
+		return nil, err
+	}
+	evalInt := 0
+	if in.Eval {
+		evalInt = 1
 	}
 	res, err := s.DB.Exec(
-		`INSERT INTO comments (uuid, issue_id, author, body) VALUES (?, ?, ?, ?)`,
-		identity.New(), issueID, author, body,
+		`INSERT INTO comments (uuid, issue_id, author, body, eval, agent_session_id, dispatch_id, mode)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		identity.New(), in.IssueID, author, body, evalInt, sess, nullableInt(in.DispatchID), mode,
 	)
 	if err != nil {
 		return nil, err
@@ -30,7 +54,15 @@ func (s *Store) CreateComment(issueID int64, author, body string) (*model.Commen
 	return s.GetCommentByID(id)
 }
 
-const commentCols = `id, uuid, issue_id, author, body, created_at`
+// commentCols / commentSelect drive every single-row read of a comment.
+// agent_name is filled by the brief / issue-detail JOIN at a separate
+// query — the read helpers here keep to the persisted columns.
+const commentCols = `id, uuid, issue_id, author, body, eval, agent_session_id, dispatch_id, mode, created_at`
+
+// commentColsQualified mirrors commentCols but prefixes every column
+// with the `c.` alias — needed by the ListComments JOIN where bare
+// `id` would clash with agent_sessions.id and agents.id.
+const commentColsQualified = `c.id, c.uuid, c.issue_id, c.author, c.body, c.eval, c.agent_session_id, c.dispatch_id, c.mode, c.created_at`
 
 func (s *Store) GetCommentByID(id int64) (*model.Comment, error) {
 	row := s.DB.QueryRow(`SELECT `+commentCols+` FROM comments WHERE id = ?`, id)
@@ -45,31 +77,57 @@ func (s *Store) GetCommentByUUID(uuid string) (*model.Comment, error) {
 	return scanComment(row)
 }
 
+// CreateCommentFromSyncIn carries the sync-import payload. Mirrors
+// CreateCommentIn but adds the caller-supplied uuid and createdAt that
+// the importer recovered from the on-disk file. DispatchID is
+// deliberately absent: dispatch_id is a local-DB integer FK that can't
+// round-trip cross-machine, so the sync import path leaves it nil and
+// rebuilds-by-implication from (AgentSessionID, Mode) if a reviewer
+// needs it.
+type CreateCommentFromSyncIn struct {
+	IssueID        int64
+	UUID           string
+	Author         string
+	Body           string
+	CreatedAt      sql.NullTime
+	Eval           bool
+	AgentSessionID string
+	Mode           string
+}
+
 // CreateCommentFromSync inserts a comment with a caller-supplied
 // uuid, for the sync import path. Mirrors CreateComment but bypasses
 // auto-uuid generation and accepts createdAt to preserve the
 // timestamp embedded in the on-disk filename.
-func (s *Store) CreateCommentFromSync(issueID int64, uuid, author, body string, createdAt sql.NullTime) (*model.Comment, error) {
-	if uuid == "" {
+func (s *Store) CreateCommentFromSync(in CreateCommentFromSyncIn) (*model.Comment, error) {
+	if in.UUID == "" {
 		return nil, fmt.Errorf("CreateCommentFromSync: uuid is required")
 	}
-	author, err := ValidateName(author, "author")
+	author, err := ValidateName(in.Author, "author")
 	if err != nil {
 		return nil, err
 	}
-	body, err = ValidateBody(body, "body", true)
+	body, err := ValidateBody(in.Body, "body", true)
 	if err != nil {
 		return nil, err
 	}
-	q := `INSERT INTO comments (uuid, issue_id, author, body`
-	vals := `?, ?, ?, ?`
-	args := []any{uuid, issueID, author, body}
-	if createdAt.Valid {
-		q += `, created_at`
-		vals += `, ?`
-		args = append(args, createdAt.Time)
+	sess, mode, err := validateEvalTriple(in.AgentSessionID, in.Mode)
+	if err != nil {
+		return nil, err
 	}
-	q += `) VALUES (` + vals + `)`
+	evalInt := 0
+	if in.Eval {
+		evalInt = 1
+	}
+	cols := []string{"uuid", "issue_id", "author", "body", "eval", "agent_session_id", "mode"}
+	placeholders := []string{"?", "?", "?", "?", "?", "?", "?"}
+	args := []any{in.UUID, in.IssueID, author, body, evalInt, sess, mode}
+	if in.CreatedAt.Valid {
+		cols = append(cols, "created_at")
+		placeholders = append(placeholders, "?")
+		args = append(args, in.CreatedAt.Time)
+	}
+	q := `INSERT INTO comments (` + strings.Join(cols, ", ") + `) VALUES (` + strings.Join(placeholders, ", ") + `)`
 	res, err := s.DB.Exec(q, args...)
 	if err != nil {
 		return nil, err
@@ -142,14 +200,25 @@ func (s *Store) UpdateCommentByUUID(uuid string, author, body *string) error {
 }
 
 func (s *Store) ListComments(issueID int64) ([]*model.Comment, error) {
-	rows, err := s.DB.Query(`SELECT `+commentCols+` FROM comments WHERE issue_id = ? ORDER BY created_at, id`, issueID)
+	// Resolve the agent identity slug for each comment via a LEFT JOIN
+	// from comments.agent_session_id -> agent_sessions.session_id ->
+	// agents.name. The eval-footer copy on the issue-detail timeline
+	// reads it ("during: planning · vivid-finch"); non-eval rows keep
+	// agent_name empty by construction (their agent_session_id is '').
+	// The two LEFT JOINs are O(N rows on this issue) — cheap.
+	rows, err := s.DB.Query(`
+		SELECT `+commentColsQualified+`, COALESCE(a.name, '')
+		FROM comments c
+		LEFT JOIN agent_sessions s ON s.session_id = c.agent_session_id AND c.agent_session_id != ''
+		LEFT JOIN agents a ON a.id = s.agent_id
+		WHERE c.issue_id = ? ORDER BY c.created_at, c.id`, issueID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []*model.Comment
 	for rows.Next() {
-		c, err := scanComment(rows)
+		c, err := scanCommentWithAgent(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -160,12 +229,147 @@ func (s *Store) ListComments(issueID int64) ([]*model.Comment, error) {
 
 func scanComment(row rowScanner) (*model.Comment, error) {
 	var c model.Comment
-	err := row.Scan(&c.ID, &c.UUID, &c.IssueID, &c.Author, &c.Body, &c.CreatedAt)
+	var sess, mode sql.NullString
+	var dispatchID sql.NullInt64
+	err := row.Scan(
+		&c.ID, &c.UUID, &c.IssueID, &c.Author, &c.Body,
+		&c.Eval, &sess, &dispatchID, &mode, &c.CreatedAt,
+	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("scan comment: %w", err)
 	}
+	c.AgentSessionID = sess.String
+	c.Mode = mode.String
+	if dispatchID.Valid {
+		id := dispatchID.Int64
+		c.DispatchID = &id
+	}
 	return &c, nil
+}
+
+// scanCommentWithAgent extends scanComment with the trailing
+// agent_name column the ListComments JOIN appends.
+func scanCommentWithAgent(row rowScanner) (*model.Comment, error) {
+	var c model.Comment
+	var sess, mode, agentName sql.NullString
+	var dispatchID sql.NullInt64
+	err := row.Scan(
+		&c.ID, &c.UUID, &c.IssueID, &c.Author, &c.Body,
+		&c.Eval, &sess, &dispatchID, &mode, &c.CreatedAt,
+		&agentName,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("scan comment: %w", err)
+	}
+	c.AgentSessionID = sess.String
+	c.Mode = mode.String
+	if dispatchID.Valid {
+		id := dispatchID.Int64
+		c.DispatchID = &id
+	}
+	c.AgentName = agentName.String
+	return &c, nil
+}
+
+// validateEvalTriple normalises and validates the (agent_session_id,
+// mode) pair the eval-comment context fields carry. Both fields are
+// optional on the row (a non-eval comment leaves them empty); when
+// present, agent_session_id must be a valid session-id shape and mode
+// must be a valid dispatch-mode slug. Trims and returns the cleaned
+// values to use in the INSERT.
+func validateEvalTriple(sessionID, mode string) (string, string, error) {
+	cleanSess := strings.TrimSpace(sessionID)
+	if cleanSess != "" {
+		v, err := ValidateSessionID(cleanSess)
+		if err != nil {
+			return "", "", err
+		}
+		cleanSess = v
+	}
+	cleanMode := strings.TrimSpace(mode)
+	if cleanMode != "" {
+		m, err := model.ParseDispatchMode(cleanMode)
+		if err != nil {
+			return "", "", err
+		}
+		cleanMode = string(m)
+	}
+	return cleanSess, cleanMode, nil
+}
+
+// EvalContext is the in-flight snapshot ResolveEvalContext returns —
+// the (session, dispatch, mode) triple captured server-side at write
+// time so the kanban card's quick-eval composer can post a comment
+// pinned to the exact agent run that was live when the user clicked
+// the button. All three fields are zero values when the issue has no
+// open claim (i.e. an eval was posted on an untaken card — the UI
+// blocks that, the store stays defensive).
+type EvalContext struct {
+	AgentSessionID string
+	DispatchID     *int64
+	Mode           string
+}
+
+// ResolveEvalContext snapshots the in-flight dispatch context the
+// kanban card's "taken" state derives from — what we want to pin onto
+// an eval comment at write time. Mirrors what
+// internal/boardcards/cards.go's pickActiveMode does over already-bulked
+// board data, lifted into the store layer so the HTTP and local-client
+// paths share one implementation.
+//
+// Returns a zero EvalContext when issueID has no open claim. When a
+// claim is held but no non-cancelled dispatch matches that session and
+// issue, AgentSessionID is set and DispatchID stays nil with Mode "".
+func (s *Store) ResolveEvalContext(issueID int64) (EvalContext, error) {
+	claims, err := s.ListClaimsForIssue(issueID)
+	if err != nil {
+		return EvalContext{}, err
+	}
+	// Newest *open* claim wins (the claim list is already newest-first
+	// by claimed_at DESC). Pairing/review can hold two open claims at
+	// once; the newer-first ordering matches the kanban card's "active
+	// session" derivation.
+	var sess *model.AgentClaim
+	for _, c := range claims {
+		if c.ReleasedAt == nil {
+			sess = c
+			break
+		}
+	}
+	if sess == nil {
+		return EvalContext{}, nil
+	}
+	ctx := EvalContext{AgentSessionID: sess.SessionID}
+	// Look up the issue's repo so the dispatch filter scopes correctly
+	// (a session id is per-host; the repo guard is belt-and-braces).
+	iss, err := s.GetIssueByID(issueID)
+	if err != nil {
+		return EvalContext{}, err
+	}
+	disps, err := s.ListDispatches(DispatchFilter{
+		RepoID:          &iss.RepoID,
+		TargetSessionID: sess.SessionID,
+	})
+	if err != nil {
+		return EvalContext{}, err
+	}
+	for _, d := range disps {
+		if d.Status == model.DispatchCancelled {
+			continue
+		}
+		if d.IssueKey != iss.Key {
+			continue
+		}
+		id := d.ID
+		ctx.DispatchID = &id
+		ctx.Mode = string(d.Mode)
+		break
+	}
+	return ctx, nil
 }

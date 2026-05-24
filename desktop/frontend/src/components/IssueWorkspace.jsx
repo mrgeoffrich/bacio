@@ -218,8 +218,8 @@ export default function IssueWorkspace({
             {brief.comments.length > 0 ? (
               <ul className="mk-timeline">
                 {brief.comments.map((c, i) => (
-                  <li key={c.uuid || i} className="mk-tl-item">
-                    <span className={`mk-tl-dot ${c.author === 'claude' ? 'is-claude' : ''}`} />
+                  <li key={c.uuid || i} className={`mk-tl-item ${c.eval ? 'is-eval' : ''}`}>
+                    <span className={`mk-tl-dot ${c.author === 'claude' ? 'is-claude' : ''} ${c.eval ? 'is-eval' : ''}`} />
                     {/* MarkdownView emits block elements (p / ul / pre /
                         table) that mustn't nest inside a <span>, so the
                         outer row is a <div>; the timeline CSS pins the
@@ -228,7 +228,20 @@ export default function IssueWorkspace({
                         reads the same. */}
                     <div className="mk-tl-text">
                       <b className="mk-tl-author">{c.author}</b>
+                      {/* BACI-131: visible marker that this row is a
+                          quality-review note posted from the kanban
+                          quick-eval composer. */}
+                      {c.eval && (
+                        <span className="mk-tl-eval-pill" title="Eval / quality-review note">eval</span>
+                      )}
                       <MarkdownView className="mk-markdown mk-tl-body">{c.body}</MarkdownView>
+                      {c.eval && (c.mode || c.agentName || c.agentSessionId) && (
+                        <div className="mk-tl-eval-footer">
+                          during: {c.mode || 'no mode'}
+                          {(c.agentName || c.agentSessionId) && ' · '}
+                          {c.agentName || (c.agentSessionId ? c.agentSessionId.slice(0, 8) : '')}
+                        </div>
+                      )}
                     </div>
                     {onDeleteComment && c.uuid && (
                       <button
