@@ -11,28 +11,60 @@ import (
 
 var ErrPRAlreadyAttached = errors.New("PR already attached to this issue")
 
+// AttachPR inserts the PR row and bumps issues.updated_at so the sync
+// importer's last-writer-wins gate (which keys on issues.updated_at)
+// will preserve the new row through the next round-trip. Without the
+// bump, replacePRsTx silently wipes the local row — see BACI-142.
 func (s *Store) AttachPR(issueID int64, url string) (*model.PullRequest, error) {
 	url, err := ValidatePRURLStrict(url)
 	if err != nil {
 		return nil, err
 	}
-	res, err := s.DB.Exec(`INSERT INTO issue_pull_requests (issue_id, url) VALUES (?, ?)`, issueID, url)
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	res, err := tx.Exec(`INSERT INTO issue_pull_requests (issue_id, url) VALUES (?, ?)`, issueID, url)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
 			return nil, ErrPRAlreadyAttached
 		}
 		return nil, err
 	}
+	if _, err := tx.Exec(`UPDATE issues SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`, issueID); err != nil {
+		return nil, err
+	}
 	id, _ := res.LastInsertId()
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
 	return s.getPRByID(id)
 }
 
+// DetachPR deletes the PR row and, when a row actually went away,
+// bumps issues.updated_at so the LWW gate preserves the deletion
+// through the next sync. See BACI-142.
 func (s *Store) DetachPR(issueID int64, url string) (int64, error) {
-	res, err := s.DB.Exec(`DELETE FROM issue_pull_requests WHERE issue_id = ? AND url = ?`, issueID, url)
+	tx, err := s.DB.Begin()
 	if err != nil {
 		return 0, err
 	}
-	return res.RowsAffected()
+	defer tx.Rollback()
+	res, err := tx.Exec(`DELETE FROM issue_pull_requests WHERE issue_id = ? AND url = ?`, issueID, url)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	if n > 0 {
+		if _, err := tx.Exec(`UPDATE issues SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`, issueID); err != nil {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return n, nil
 }
 
 // ReplacePRsForIssue clears every PR row for issueID and re-attaches
