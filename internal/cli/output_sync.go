@@ -291,6 +291,47 @@ func printInspectFeature(w io.Writer, prefix string, fr *sync.InspectFeature) {
 	}
 }
 
+// printSyncRemotesResult renders the per-machine sync-repo registry as
+// one block per entry. Lean text — matches the per-line `  key: value`
+// style of printSyncRunResult and friends. JSON callers get the full
+// shape via emit's -o json branch; this is only the human path.
+//
+// Per-row branches:
+//   - empty registry → "(no sync remotes registered)".
+//   - clone_present == false → "clone: <path> (missing)", skip projects.
+//   - last_sync_error != nil → "error: <msg>" instead of "last sync:".
+func printSyncRemotesResult(w io.Writer, r syncRemotesResult) {
+	if len(r.Remotes) == 0 {
+		fmt.Fprintln(w, "(no sync remotes registered)")
+		return
+	}
+	for i, e := range r.Remotes {
+		if i > 0 {
+			fmt.Fprintln(w)
+		}
+		fmt.Fprintf(w, "%s  (label: %s)\n", e.RemoteURL, e.Label)
+		if e.ClonePresent {
+			fmt.Fprintf(w, "  local:        %s\n", e.LocalPath)
+		} else {
+			fmt.Fprintf(w, "  clone:        %s (missing)\n", e.LocalPath)
+		}
+		fmt.Fprintf(w, "  cloned:       %s\n", e.ClonedAt.UTC().Format(time.RFC3339))
+		switch {
+		case e.LastSyncError != nil:
+			fmt.Fprintf(w, "  error:        %s\n", *e.LastSyncError)
+		case e.LastSyncAt != nil:
+			fmt.Fprintf(w, "  last sync:    %s\n", e.LastSyncAt.UTC().Format(time.RFC3339))
+		}
+		if !e.ClonePresent {
+			continue
+		}
+		fmt.Fprintf(w, "  projects:     %d\n", len(e.Projects))
+		for _, p := range e.Projects {
+			fmt.Fprintf(w, "    %-6s %s\n", p.Prefix, p.Status)
+		}
+	}
+}
+
 func printInspectDocument(w io.Writer, prefix string, dr *sync.InspectDocument) {
 	d := dr.Document
 	fmt.Fprintf(w, "%s/docs/%s\n", prefix, d.Filename)

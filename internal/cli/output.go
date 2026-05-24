@@ -123,6 +123,8 @@ func renderText(w io.Writer, v any) error {
 		printSyncVerifyResult(w, x)
 	case syncInspectResult:
 		printSyncInspectResult(w, x)
+	case syncRemotesResult:
+		printSyncRemotesResult(w, x)
 	case demoSeedResult:
 		fmt.Fprintf(w, "Seeded demo repo %s (%s) at %s\n", x.Repo.Prefix, x.Repo.Name, x.Repo.Path)
 		fmt.Fprintf(w, "  copies:    %d\n", x.Copies)

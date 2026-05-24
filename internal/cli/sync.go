@@ -46,6 +46,7 @@ hidden commands for low-level debugging.`,
 		newSyncCloneCmd(),
 		newSyncVerifyCmd(),
 		newSyncInspectCmd(),
+		newSyncRemotesCmd(),
 		newSyncExportCmd(),
 		newSyncImportCmd(),
 	)
