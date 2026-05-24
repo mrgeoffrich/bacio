@@ -63,10 +63,11 @@ func TestGetDispatchPreambleReturnsBody(t *testing.T) {
 	if body == "" {
 		t.Fatal("GetDispatchPreamble returned empty body on a fresh DB")
 	}
-	// BACI-76: the delegation contract now tells the supervisor to spawn
-	// the per-mode custom subagent named by the stub's `Subagent:` line
-	// — Task( front-and-centre, and the `Subagent:` stub reference.
-	for _, phrase := range []string{"Task(", "Subagent:", "subagent_type"} {
+	// BACI-76: the delegation contract tells the supervisor to spawn
+	// the per-mode custom subagent named by the stub. The stub spells
+	// each field as an XML-style tag — Task( front-and-centre, the
+	// `<subagent_type>` stub tag, and the `subagent_type` Task arg name.
+	for _, phrase := range []string{"Task(", "<subagent_type>", "subagent_type"} {
 		if !strings.Contains(body, phrase) {
 			t.Errorf("preamble body missing %q\nfull body:\n%s", phrase, body)
 		}

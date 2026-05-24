@@ -46,7 +46,7 @@ bacio feature edit auth-rewrite --title "Auth rewrite (Q2)"
 
 # Plan + claim loop
 bacio feature plan auth-rewrite -o json
-bacio issue next --feature auth-rewrite --user agent-claude -o json
+bacio issue next --feature auth-rewrite -o json
 ```
 
 ## See also

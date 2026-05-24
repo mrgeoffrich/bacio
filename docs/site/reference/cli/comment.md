@@ -22,7 +22,7 @@ bacio comment add MINI-3 --as Geoff --body "Tried clearing the cookie, didn't he
 
 # Delete: find the uuid via `list -o json`, then `rm`.
 bacio comment list MINI-3 -o json
-bacio comment rm MINI-3 019e4d42-15ab-7daf-b65d-c576164691db --user Geoff
+bacio comment rm MINI-3 019e4d42-15ab-7daf-b65d-c576164691db
 ```
 
 ## Validation

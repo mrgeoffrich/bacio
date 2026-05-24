@@ -29,7 +29,7 @@ You're coding. You hit a bug. You ask Claude:
 
 > File an issue: this caching layer drops the X-Forwarded-For header when the request body is gzip'd. Tag it bug, P1.
 
-Claude composes the JSON, runs `bacio issue add --user agent-claude --json '{…}'`, prints the issue key. You go back to coding. Maybe twenty seconds elapsed.
+Claude composes the JSON, runs `bacio issue add --json '{…}'`, prints the issue key. You go back to coding. Maybe twenty seconds elapsed.
 
 Five minutes later you remember another thing:
 
@@ -79,7 +79,7 @@ Same outcome, more setup per call.
 
 Things that have caught real users out:
 
-- **Claude attributes work to your OS user instead of `agent-claude`.** It forgot `--user`. Mention it once and the skill self-corrects for the rest of the session.
+- **Claude's mutations are attributed to `user` instead of its agent name.** The audit log resolves an agent's actor from `.bacio/agents.json`; that mapping is populated by the SessionStart hook installed by `bacio install-agent`. Re-run `bacio install-agent` in the repo and start a fresh Claude session.
 - **You can't find an issue from last week.** Either filter the History tab (`5`) by the day, or `bacio history --since 1w`, or — if you've enabled sync — `cd ~/sync/your-project && git log --since="1 week ago"`.
 - **A prefix collision on a second machine.** `bacio sync clone` refuses to overwrite. Re-run with `--allow-renumber` (after looking at `--dry-run` first) to let the joining side renumber.
 - **A stale skill.** After upgrading bacio (`brew upgrade bacio` / `scoop update bacio`), re-run `bacio install-skill` so the doc updates land. Restart Claude Code.

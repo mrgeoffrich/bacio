@@ -17,18 +17,18 @@ bacio install-skill
 That drops `SKILL.md` into `<repo>/.claude/skills/bacio/`. Restart Codex in this repo so the new skill loads. Re-run `bacio install-skill` after `brew upgrade bacio` to pick up doc updates.
 
 ::: tip Heads up
-`bacio install-skill` is named after Claude Code's skill convention, but the skill itself is agent-agnostic — it documents the JSON CLI contract (`bacio schema show <name>`, `--json`, `--dry-run`, `--user`) without assuming any particular host. Codex picks it up from the same `.claude/skills/` path.
+`bacio install-skill` is named after Claude Code's skill convention, but the skill itself is agent-agnostic — it documents the JSON CLI contract (`bacio schema show <name>`, `--json`, `--dry-run`) without assuming any particular host. Codex picks it up from the same `.claude/skills/` path.
 :::
 
 ## How Codex drives bacio
 
 Same flow as Claude Code, because the contract is the same — bracketed by *register* and *end*:
 
-0. **Declare itself** — `bacio agent register --user agent-codex --agent <slug>` at session start, then `bacio agent claim <KEY>` when it starts focused work. On first contact with a repo, Codex generates a memorable slug (e.g. `clever-lynx@codex.shiny`), registers with `--new`, and persists it to `.bacio/agent` so the identity is reused next time.
+0. **Declare itself** — `bacio agent register --agent <slug>` at session start, then `bacio agent claim <KEY>` when it starts focused work. On first contact with a repo, Codex generates a memorable slug (e.g. `clever-lynx@codex.shiny`), registers with `--new`, and persists it to `.bacio/agent` so the identity is reused next time.
 1. **Discover** — `bacio schema show <command>` if Codex is unsure of the payload shape.
 2. **Compose** — build the JSON payload.
 3. **Rehearse** — `--dry-run` for anything destructive.
-4. **Execute** — run for real with `--user <agent-name>` so the audit log attributes the work to the agent, not to your OS user.
+4. **Execute** — run for real. The audit log resolves the actor from `.bacio/agents.json` (the PID lookup the bacio hook wires up), so no flag is needed.
 5. **Query lean** — `*.list` with filters; `bacio issue brief <KEY>` for bulk-context reads.
 6. **Tear down** — `bacio agent release <KEY>` when Codex stops, `bacio agent end --reason stop` at session end (auto-releases anything still claimed).
 
@@ -76,11 +76,10 @@ In practice, almost nothing. Both agents:
 
 - Read the same `<repo>/.claude/skills/bacio/SKILL.md`.
 - Compose the same JSON payloads.
-- Honour the same `--dry-run` / `--user` discipline.
+- Honour the same `--dry-run` discipline.
 
 The handful of practical differences:
 
-- **Identity in the audit log.** Pass `--user agent-codex` (or whatever name you give the agent) so `bacio history` distinguishes its work from yours.
 - **Persistent slug.** Codex picks its own `--agent <slug>` and persists it to `.bacio/agent` — the harness suffix differs from Claude (`codex` vs `claude`) but the bootstrap loop in [`bacio agent`](/reference/cli/agent#pick-your-identity) is identical. Make sure `.bacio/agent` is gitignored.
 - **Restart cadence.** After `bacio install-skill` or `brew upgrade bacio`, restart Codex in this repo so the new skill loads.
 
@@ -89,7 +88,7 @@ The handful of practical differences:
 The same tells apply across both agents:
 
 - **Made-up flags.** `bacio init --with-skill`, `bacio install-skill --agent codex` — neither exists. If Codex is reaching for a flag that looks too convenient, ask it to check `bacio --help` or `bacio schema show <name>`.
-- **Skipped `--user`.** Audit log attribution falls back to your OS user. Worth pointing out once so the agent self-corrects for the session.
+- **Mutations attributed to `user`, not Codex's agent name.** The `(claude_pid → identity)` mapping in `.bacio/agents.json` is missing. Re-run the hook setup (the bacio hook is what populates that mapping at session start).
 - **Reads the description-heavy form by default.** Lists are lean for a reason — ask the agent to use `bacio issue list` without `--with-description` when summarising.
 - **Destructive call without `--dry-run`.** Especially `bacio issue rm` / `bacio feature rm` / `bacio repo rm`. Ask the agent to rehearse first; `bacio repo rm` additionally requires `--confirm <PREFIX>` and refuses without it.
 

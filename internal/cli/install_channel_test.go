@@ -21,7 +21,7 @@ func TestReportInstallAgentDropsDangerousFlag(t *testing.T) {
 	for _, action := range []string{"add", "update"} {
 		t.Run(action, func(t *testing.T) {
 			stdout := captureStdoutText(t, func() {
-				if err := reportInstallAgent("/repo/.claude/settings.json", nil, "/repo/.mcp.json", action, []string{"/repo/.claude/agents/bacio-plan-worker.md"}); err != nil {
+				if err := reportInstallAgent("/repo/.claude/settings.json", nil, "/repo/.mcp.json", action, []string{"/repo/.claude/agents/bacio-plan-worker.md"}, nil); err != nil {
 					t.Fatalf("reportInstallAgent: %v", err)
 				}
 			})
@@ -47,7 +47,7 @@ func TestReportInstallAgentJSONShape(t *testing.T) {
 	t.Cleanup(func() { opts.output = prev })
 
 	stdout := captureStdoutText(t, func() {
-		if err := reportInstallAgent("/repo/.claude/settings.json", nil, "/repo/.mcp.json", "add", []string{"/repo/.claude/agents/bacio-plan-worker.md"}); err != nil {
+		if err := reportInstallAgent("/repo/.claude/settings.json", nil, "/repo/.mcp.json", "add", []string{"/repo/.claude/agents/bacio-plan-worker.md"}, nil); err != nil {
 			t.Fatalf("reportInstallAgent: %v", err)
 		}
 	})

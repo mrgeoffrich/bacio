@@ -78,7 +78,7 @@ func ValidateName(s, field string) (string, error) {
 	return validateSingleLine(s, field, maxNameLen, true)
 }
 
-// ValidateActor validates a `--user` value before it lands in the audit
+// ValidateActor validates an actor string before it lands in the audit
 // log. Same shape as ValidateName.
 func ValidateActor(s string) (string, error) {
 	return validateSingleLine(s, "user", maxNameLen, true)

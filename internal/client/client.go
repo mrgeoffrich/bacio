@@ -140,7 +140,7 @@ type Client interface {
 	// Archive is sticky — reopening an archived issue does NOT
 	// auto-unarchive it. Idempotent: archiving an already-archived row
 	// is a no-op. Records an audit row (issue.archive /
-	// issue.unarchive) under the actor on --user.
+	// issue.unarchive) under the resolved actor.
 	ArchiveIssue(ctx context.Context, repo *model.Repo, key string, dryRun bool) (*model.Issue, error)
 	UnarchiveIssue(ctx context.Context, repo *model.Repo, key string, dryRun bool) (*model.Issue, error)
 

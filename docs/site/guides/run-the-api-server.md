@@ -31,7 +31,7 @@ bacio issue list                           # now hits the API
 bacio issue add "New bug" --feature auth   # mutating verbs work too
 ```
 
-Every read and mutating verb behaves identically over remote — same flags, same JSON output, same `--dry-run`, same `--user`. Audit rows are written by the server.
+Every read and mutating verb behaves identically over remote — same flags, same JSON output, same `--dry-run`. Audit rows are written by the server (actor comes from the `X-Actor` header, default `"api"`).
 
 Verbs that touch the local filesystem or terminal error clearly in remote mode and stay local-direct: `bacio init`, `bacio install-skill`, `bacio doc add --from-path` / `--content-file`, `bacio doc export`, `bacio tui`, `bacio schema *`, `bacio status`.
 

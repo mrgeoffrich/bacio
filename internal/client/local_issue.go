@@ -65,7 +65,7 @@ func (c *localClient) ListIssues(ctx context.Context, f IssueFilter) ([]*model.I
 // (the partial-WHERE in SetIssueArchived skips it). Sticky — reopening
 // an archived issue (via `bacio issue state`) does NOT auto-unarchive
 // it; the user must unarchive explicitly. Records an audit row under
-// the actor on --user.
+// the resolved actor.
 func (c *localClient) ArchiveIssue(ctx context.Context, repo *model.Repo, key string, dryRun bool) (*model.Issue, error) {
 	return c.setIssueArchived(ctx, repo, key, true, dryRun, "issue.archive")
 }

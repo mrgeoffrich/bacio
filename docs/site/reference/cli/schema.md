@@ -31,9 +31,9 @@ bacio schema show issue.add | jq .examples[0]
 
 # Compose, rehearse, commit
 bacio schema show issue.add | jq .examples[0] \
-  | bacio issue add --user agent-claude --dry-run --json -
+  | bacio issue add --dry-run --json -
 bacio schema show issue.add | jq .examples[0] \
-  | bacio issue add --user agent-claude --json -
+  | bacio issue add --json -
 
 # One-shot ingestion of everything (useful for an agent's first run in a repo)
 bacio schema all

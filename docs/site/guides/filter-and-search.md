@@ -36,7 +36,7 @@ bacio history --kind issue --since 1w
 bacio history --all-repos --since 1d
 ```
 
-Combine freely. The `--since` flag accepts durations like `1h`, `2d`, `1w`. `bacio history` doesn't have a `--target` filter — narrow by `--kind` / `--op` / `--user-filter` / time range, or `jq` the JSON output on `target_label` if you need a specific target. The persistent `--user` records who's running the call rather than filtering output; the filter flag is `--user-filter`.
+Combine freely. The `--since` flag accepts durations like `1h`, `2d`, `1w`. `bacio history` doesn't have a `--target` filter — narrow by `--kind` / `--op` / `--user-filter` / time range, or `jq` the JSON output on `target_label` if you need a specific target. The actor-filter flag is `--user-filter` (matches the recorded actor name).
 
 ## TUI: the column picker (`c`)
 

@@ -38,7 +38,7 @@ The global `--dry-run` flag short-circuits every mutation right after validators
 - Server-time fields (`id`, `created_at`, `updated_at`) come back as zero values in dry-run output. Everything else is faithful.
 
 ### 6. `SKILL.md` is the agent-facing reference
-`.claude/skills/bacio/SKILL.md` is the single source of truth for how to drive bacio from an agent. The "Agent quick start" section ties the rules together as discover (schema) → compose (`--json`) → rehearse (`--dry-run`) → execute (with `--user`) → query lean.
+`.claude/skills/bacio/SKILL.md` is the single source of truth for how to drive bacio from an agent. The "Agent quick start" section ties the rules together as discover (schema) → compose (`--json`) → rehearse (`--dry-run`) → execute (actor resolved from `.bacio/agents.json`) → query lean.
 
 - When adding a feature that changes the agent surface, update SKILL.md in the same commit.
 - `embed.go` embeds the file at build time and `bacio install-skill` redistributes it. Re-running after a build picks up the latest doc automatically.

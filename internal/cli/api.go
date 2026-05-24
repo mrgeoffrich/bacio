@@ -34,8 +34,7 @@ Defaults to 127.0.0.1:5320. Override the bind via --addr (host:port) or just
 the port via --port. Set --token (or BACIO_API_TOKEN) to require
 "Authorization: Bearer <token>" on every request except /healthz.
 
-The persistent --user flag is silently ignored by this command — incoming
-requests carry their own actor via the X-Actor header (default "api").`,
+Incoming requests carry their own actor via the X-Actor header (default "api").`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Resolve the worktree env once: we need it for the default
 			// bind addr AND for the BACI-73 logging resolver, which

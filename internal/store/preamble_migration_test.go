@@ -21,8 +21,8 @@ func TestRefreshDispatchPreambleNewDefault(t *testing.T) {
 	if strings.Contains(body, `subagent_type = "general-purpose"`) {
 		t.Fatalf("fresh-DB preamble still spawns general-purpose:\n%s", body)
 	}
-	if !strings.Contains(body, "Subagent:") {
-		t.Fatalf("fresh-DB preamble does not reference the Subagent stub line:\n%s", body)
+	if !strings.Contains(body, "<subagent_type>") {
+		t.Fatalf("fresh-DB preamble does not reference the <subagent_type> stub tag:\n%s", body)
 	}
 }
 
@@ -135,8 +135,41 @@ func TestRefreshDispatchPreambleUpgradesBACI85Default(t *testing.T) {
 	if strings.Contains(body, "a few lines giving the worker its job") {
 		t.Fatalf("refreshed preamble still tells the supervisor to compose a free-form prompt:\n%s", body)
 	}
-	if !strings.Contains(body, "Dispatch ID:") {
-		t.Fatalf("refreshed preamble does not reference the Dispatch ID stub line:\n%s", body)
+	if !strings.Contains(body, "<dispatch_id>") {
+		t.Fatalf("refreshed preamble does not reference the <dispatch_id> stub tag:\n%s", body)
+	}
+}
+
+// TestRefreshDispatchPreambleUpgradesBACI103Default: simulate a
+// post-BACI-103 / pre-XML-stub DB by writing the BACI-103 default
+// (which spelled the stub as `Ticket: …`/`Mode: …`/`Subagent: …`
+// colon-lines plus an appended `Dispatch ID: …` line) into the row,
+// then re-run the refresh — it must replace the body with the
+// XML-stub default that uses <issue_id>/<mode>/<subagent_type> tags.
+func TestRefreshDispatchPreambleUpgradesBACI103Default(t *testing.T) {
+	s := newTestStore(t)
+	old := strings.TrimRight(oldDispatchPreambleBACI103, "\r\n")
+	if _, err := s.DB.Exec(
+		`UPDATE prompt_templates SET body = ? WHERE slug = ?`,
+		old, model.BuiltinTemplatePreamble,
+	); err != nil {
+		t.Fatalf("seed BACI-103 preamble: %v", err)
+	}
+	if err := refreshDispatchPreamble(s.DB); err != nil {
+		t.Fatalf("refreshDispatchPreamble: %v", err)
+	}
+	body, err := s.GetDispatchPreamble()
+	if err != nil {
+		t.Fatalf("GetDispatchPreamble: %v", err)
+	}
+	if body != model.DefaultPromptBodyForBuiltinSlug(model.BuiltinTemplatePreamble) {
+		t.Fatalf("BACI-103 default was not refreshed to the XML-stub default:\n%s", body)
+	}
+	if !strings.Contains(body, "<issue_id>") || !strings.Contains(body, "<mode>") || !strings.Contains(body, "<dispatch_id>") {
+		t.Fatalf("refreshed preamble does not reference the XML stub tags:\n%s", body)
+	}
+	if strings.Contains(body, "Ticket: ") {
+		t.Fatalf("refreshed preamble still spells the stub as `Ticket: …`:\n%s", body)
 	}
 }
 

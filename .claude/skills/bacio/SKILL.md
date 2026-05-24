@@ -32,7 +32,7 @@ This skill orients you and states the conventions that aren't obvious from `--he
 ## Conventions that matter
 
 - **`cd` to the repo first.** Most commands resolve the repo from `cwd`. (`bacio issue list` and `bacio history` also take `--all-repos`.)
-- **Always pass `--user <your-agent-name>`** on every mutating command. Every mutation is audit-logged with its actor; without `--user` the CLI silently falls back to the OS username, making the log useless.
+- **Audit attribution is automatic.** Every mutation is audit-logged with an actor. With `bacio install-agent` set up in the repo, the SessionStart hook records your `(claude_pid → agent identity)` mapping in `.bacio/agents.json`; subsequent `bacio` calls resolve actor through that mapping with no flag needed. Calls without an agent identity (humans at the terminal) stamp the placeholder `"user"`.
 - **Prefer `--json` over typed flags** when driving `bacio`. It is strict (typos surface as `unknown field` errors), takes long text as inline strings (no file/stdin dance), and its shape is published via `bacio schema`. Accepts `--json '<json>'`, `--json -` (stdin), or `--json @path`. It is mutually exclusive with positionals and per-field flags.
 - **Rehearse with `--dry-run`.** Every mutating command accepts it: runs everything up to the SQL write, emits the projected result, touches nothing. Use it before deletes (`issue rm` / `feature rm` / `doc rm` / `repo rm` report cascade counts) and to validate a `--json` payload.
 - **Pass `-o json` when parsing.** Default output is human text and may shift; JSON is the contract. List commands are lean by default — `bacio issue list -o json` drops `description` (add `--with-description`); `bacio doc list` is metadata-only.
@@ -69,14 +69,14 @@ cd ~/Repos/myproject                          # repo resolves from cwd
 
 bacio schema show issue.add | jq .examples[0]  # discover the payload shape
 
-bacio issue add --user agent-claude --dry-run --json '{
+bacio issue add --dry-run --json '{
   "title": "Login broken on Safari",
   "feature_slug": "auth-rewrite",
   "description": "500 on submit. Repro inline.",
   "tags": ["bug", "P0"]
 }' -o json                                     # rehearse
 
-bacio issue add --user agent-claude --json '{ ...same... }' -o json   # commit
+bacio issue add --json '{ ...same... }' -o json   # commit
 bacio issue brief MINI-42                      # one-shot bulk context for an LLM
 ```
 
@@ -87,7 +87,7 @@ bacio issue brief MINI-42                      # one-shot bulk context for an LL
 ## Gotchas
 
 - **Never run `bacio` outside a git repo** when a command needs the current repo — it hard-errors. `cd` first.
-- **`--user` and comment author are easy to forget** and the CLI won't stop you — pass them consistently.
+- **Comment author (`--as <name>` / `"author"`) is required** on every comment add — the CLI rejects the call if it's missing.
 - **Long text in JSON is just an inline string** — JSON's own `\n` escapes work; no `--description-file` needed on the JSON path.
 - **Mixing `--json` with positionals/flags is rejected** — choose one mode per call.
 - **Auto-created prefixes can collide** — two repos sharing a basename get `XXX2`, `XXX3`, … Confirm with `bacio repo list`.

@@ -85,8 +85,7 @@ When the embedded bundle is absent (e.g. './build.sh --skip-web') the
 server still runs, but a one-line hint is printed and the browser
 launch is skipped — there is nothing meaningful to open.
 
-The persistent --user flag is silently ignored by this command —
-incoming requests carry their own actor via the X-Actor header
+Incoming requests carry their own actor via the X-Actor header
 (default "api").`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// If --addr was left at its zero-value sentinel, resolve via

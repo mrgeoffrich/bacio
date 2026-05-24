@@ -135,9 +135,9 @@ func TestDispatchPromptTemplateRendering(t *testing.T) {
 		t.Fatalf("default payload not resolved/substituted: %q", d.Payload)
 	}
 	for _, want := range []string{
-		"Ticket: " + iss.Key,
-		"Mode: implement",
-		"Subagent: " + model.SubagentTypeForTemplate(string(model.DispatchModeImplement)),
+		"<issue_id>" + iss.Key + "</issue_id>",
+		"<mode>implement</mode>",
+		"<subagent_type>" + model.SubagentTypeForTemplate(string(model.DispatchModeImplement)) + "</subagent_type>",
 	} {
 		if !strings.Contains(d.Payload, want) {
 			t.Fatalf("default payload = %q, want it to contain %q", d.Payload, want)
@@ -163,8 +163,8 @@ func TestDispatchPromptTemplateRendering(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateDispatch (custom): %v", err)
 	}
-	wantCustom := "Ticket: " + iss.Key + "\nMode: implement\nSubagent: " +
-		model.SubagentTypeForTemplate(string(model.DispatchModeImplement)) +
+	wantCustom := "<issue_id>" + iss.Key + "</issue_id>\n<mode>implement</mode>\n<subagent_type>" +
+		model.SubagentTypeForTemplate(string(model.DispatchModeImplement)) + "</subagent_type>" +
 		"\n\nwatch the migration"
 	if d.Payload != wantCustom {
 		t.Fatalf("custom payload = %q, want %q", d.Payload, wantCustom)

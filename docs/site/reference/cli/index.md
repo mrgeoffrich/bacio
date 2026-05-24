@@ -39,7 +39,6 @@ All commands inherit these from the root:
 |---|---|---|
 | `-o`, `--output` | `text` | Output format — `text` for humans, `json` for agents and scripts. |
 | `--db` | `~/.bacio/db.sqlite` | Override the database path. Useful for tests and isolated experiments. |
-| `--user` | OS user | Actor name recorded in history. AI agents should pass this explicitly. |
 | `--dry-run` | off | Validate the request and emit the projected result without writing. No audit log entry. |
 | `--remote` | — | Talk to a `bacio api` server at this URL instead of the local DB. Falls back to `BACIO_REMOTE`. |
 | `--token` | — | Bearer token for the remote API. Falls back to `BACIO_API_TOKEN`. |

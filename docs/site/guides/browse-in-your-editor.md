@@ -67,7 +67,7 @@ In VS Code (`⌘P`) or Zed or Helix, typing `MINI-` and a number jumps straight 
 
 It's tempting. Don't. Two reasons:
 
-1. **You lose the audit log.** Changes you make through your editor are commits in git, but they aren't `bacio` mutations — there's no `history` row, no `--user` attribution, and the next `bacio sync` may renumber-around your edit.
+1. **You lose the audit log.** Changes you make through your editor are commits in git, but they aren't `bacio` mutations — there's no `history` row, no actor attribution, and the next `bacio sync` may renumber-around your edit.
 2. **You lose validation.** bacio's validators run at the store boundary; bypassing them risks corrupting state (illegal control chars in titles, slug whitespace, malformed UUIDs).
 
 Use the sync repo for **reading**. For writing, go through the CLI or the API. If you need a bulk edit, write a script that calls `bacio issue edit` per row.

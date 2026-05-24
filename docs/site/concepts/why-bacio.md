@@ -39,7 +39,7 @@ bacio is a kanban board for a single developer (or a tiny team) who already has 
 
 ## The agent angle
 
-The reason bacio exists, in one paragraph: an LLM agent can already file an issue in any tracker if you give it API credentials and a long-enough prompt. But the trackers weren't designed for agents — schemas are undocumented or buried in OpenAPI specs, error messages are vague, and there's no `--dry-run`. bacio's CLI was rebuilt around six rules so the agent flow is *reliable* — discover the shape with `bacio schema show <name>`, compose JSON, rehearse with `--dry-run`, run with `--user <agent>` for attribution, then query lean. See [How agents drive bacio](/concepts/how-agents-drive-bacio) for the rules.
+The reason bacio exists, in one paragraph: an LLM agent can already file an issue in any tracker if you give it API credentials and a long-enough prompt. But the trackers weren't designed for agents — schemas are undocumented or buried in OpenAPI specs, error messages are vague, and there's no `--dry-run`. bacio's CLI was rebuilt around six rules so the agent flow is *reliable* — discover the shape with `bacio schema show <name>`, compose JSON, rehearse with `--dry-run`, run for real (audit attribution is automatic via `.bacio/agents.json`), then query lean. See [How agents drive bacio](/concepts/how-agents-drive-bacio) for the rules.
 
 ## See also
 

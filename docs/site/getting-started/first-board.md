@@ -94,11 +94,11 @@ Claude reads its installed `SKILL.md`, composes a JSON payload, optionally rehea
 Behind the scenes Claude is calling things like:
 
 ```bash
-bacio feature add --user agent-claude --json '{"slug":"auth-rewrite","title":"..."}'
-bacio issue add --user agent-claude --json '{"title":"...","feature_slug":"auth-rewrite"}'
+bacio feature add --json '{"slug":"auth-rewrite","title":"..."}'
+bacio issue add --json '{"title":"...","feature_slug":"auth-rewrite"}'
 ```
 
-The `--user agent-claude` flag is how the audit log attributes work to the agent, not to you. See [How agents drive bacio](/concepts/how-agents-drive-bacio) for the principles behind the contract.
+Audit attribution happens automatically: with `bacio install-agent` set up, the SessionStart hook records Claude's `(claude_pid → agent identity)` mapping in `.bacio/agents.json`, and every subsequent `bacio` call resolves the agent's identity from there — no flag needed. See [How agents drive bacio](/concepts/how-agents-drive-bacio) for the principles behind the contract.
 
 ## 5. Open the TUI
 

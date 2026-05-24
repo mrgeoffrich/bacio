@@ -818,16 +818,13 @@ func issueNextCmd() *cobra.Command {
 		Short: "Atomically claim the next ready issue in a feature",
 		Long: `Picks the lowest-numbered todo issue in --feature whose blockers are all
 done/cancelled and whose assignee is empty, flips it to in_progress,
-and stamps the assignee with --user.
+and stamps the assignee with the calling agent's identity.
 
 Designed for agent loops: call repeatedly to walk through a feature in
 dependency order. When nothing is currently claimable (everything is
 either claimed, done, or still blocked) the command emits an empty
 result with exit code 0 — the caller should wait and retry rather than
-treat it as an error.
-
-Pass --user explicitly so the audit log and assignee reflect the agent's
-identity instead of the OS username.`,
+treat it as an error.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			raw, err := parseJSONInput(cmd, args, rawInput, "feature")

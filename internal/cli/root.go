@@ -17,7 +17,6 @@ type globalOpts struct {
 	output     outputFormat
 	dbPath     string
 	envPath    string // --env: explicit path to a worktree manifest YAML (overrides BACIO_ENV)
-	user       string
 	dryRun     bool
 	remote     string
 	token      string
@@ -47,16 +46,12 @@ func NewRoot() (*cobra.Command, func()) {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			if err := validateActorFlag(); err != nil {
-				return err
-			}
 			return startProfiling()
 		},
 	}
 	root.PersistentFlags().VarP(newOutputFlag(&opts.output), "output", "o", "output format: text|json")
 	root.PersistentFlags().StringVar(&opts.dbPath, "db", "", "override database path (default: resolved per-worktree manifest or ~/.bacio/db.sqlite)")
 	root.PersistentFlags().StringVar(&opts.envPath, "env", "", "path to a bacio worktree environment manifest (overrides $BACIO_ENV; takes precedence over a worktree-resolved manifest)")
-	root.PersistentFlags().StringVar(&opts.user, "user", "", "actor name recorded in history (defaults to OS user; AI agents must pass this explicitly)")
 	root.PersistentFlags().BoolVar(&opts.dryRun, "dry-run", false, "validate the request and emit the projected result without writing to the database (no audit log entry)")
 	root.PersistentFlags().StringVar(&opts.remote, "remote", "", "talk to a bacio api server at this URL instead of the local DB; falls back to BACIO_REMOTE")
 	root.PersistentFlags().StringVar(&opts.token, "token", "", "bearer token for the remote API; falls back to BACIO_API_TOKEN")

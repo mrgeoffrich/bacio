@@ -371,7 +371,7 @@ is `findClaudeAncestor` in `internal/cli/proctree.go`.
 | -------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | `bacio hook`         | yes (payload)    | walk to `claude_pid` → look up (or **mint**) in `agents.json`, then record the session id under that pid               |
 | `bacio channel`      | no               | walk to `claude_pid` → look up in `agents.json`, **re-read every poll tick** (the entry is written by the session-start hook, which can race the channel's spawn) |
-| any `bacio` CLI call | no               | walk to `claude_pid` → `agents.json`, so `actor()` attributes history to the agent and `resolveSessionID()` finds the session — no `--user` / `$CLAUDE_CODE_SESSION_ID` needed |
+| any `bacio` CLI call | no               | walk to `claude_pid` → `agents.json`, so `actor()` attributes history to the agent and `resolveSessionID()` finds the session — no `$CLAUDE_CODE_SESSION_ID` or any explicit identity flag needed |
 
 The session-start hook **mints** a fresh identity (a random
 `adjective-animal@claude.host` slug, retried against the `agents.name`

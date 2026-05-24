@@ -24,7 +24,7 @@ bacio re-applies its schema (`CREATE TABLE IF NOT EXISTS …`) on every DB open.
 
 Every mutation records a row:
 
-- **Actor** — `--user <name>`. Defaults to your OS user. AI agents are expected to pass `--user <agent-name>` so attribution stays clean.
+- **Actor** — resolved automatically. Agent-driven calls walk to the `claude` parent PID and look up the agent identity in `.bacio/agents.json` (populated by the SessionStart hook installed by `bacio install-agent`). All other calls stamp the literal `"user"` placeholder.
 - **Op** — the canonical operation name (`issue.create`, `feature.update`, `sync.renumber`, …). Closely related to the JSON schema names but uses CRUD-flavoured verbs: schemas expose `bacio issue add` as `issue.add` while the corresponding audit row records `issue.create`.
 - **Target** — the entity touched (`MINI-42`, the feature slug, the document filename, …).
 - **Details** — a free-text blob with context (the title that was set, the cascade counts, the source phrase, …).
@@ -33,7 +33,7 @@ Every mutation records a row:
 You can read the audit log:
 
 - **From the TUI** — the History tab, newest-first.
-- **From the CLI** — `bacio history`, with filters like `--since 1d`, `--user-filter claude`, `--op issue.create`, plus `--kind` and `--from`/`--to`. `--user` on a `bacio history` call sets the actor recorded on the (read-only) call rather than filtering; use `--user-filter` to filter.
+- **From the CLI** — `bacio history`, with filters like `--since 1d`, `--user-filter claude`, `--op issue.create`, plus `--kind` and `--from`/`--to`.
 - **Inside an agent prompt** — *"what did Claude do yesterday?"* triggers `bacio history -o json --since 1d --user-filter agent-claude`.
 
 ## Retention: 60 days, by default
@@ -87,4 +87,4 @@ If your kanban contains sensitive data (security issues, customer data), the rel
 - **[Configuration](/reference/config)** — where files live, env vars, `--db` override.
 - **[`bacio history`](/reference/cli/history)** — the CLI reference for the audit log.
 - **[Sync across machines](/guides/sync-across-machines)** — long-term retention through a git remote.
-- **[How agents drive bacio](/concepts/how-agents-drive-bacio)** — why `--user` matters on agent calls.
+- **[How agents drive bacio](/concepts/how-agents-drive-bacio)** — how an agent's identity is resolved on every call.

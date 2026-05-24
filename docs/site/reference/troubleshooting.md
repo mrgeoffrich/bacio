@@ -52,9 +52,9 @@ Prefixes are exactly 4 alphanumeric characters, no whitespace. `bacio init --pre
 
 ## Behaviour that surprises people
 
-### "Why did everything in my audit log attribute to my OS user?"
+### "My agent's mutations are all attributed to `user`, not its agent name"
 
-Your agent forgot to pass `--user <agent-name>` on every call. The flag is permissive — bacio doesn't reject calls without it — so this is on you (or your agent) to pass consistently. Reminding the agent once usually sticks for the session.
+The audit log resolves an agent's actor by walking up the process tree to the `claude` parent PID and looking up `.bacio/agents.json`. If the entry is missing — most often because `bacio install-agent` wasn't run in the repo, or the SessionStart hook didn't fire — `actor()` falls back to the literal `"user"`. Re-run `bacio install-agent` in the repo and start a fresh agent session.
 
 ### "I deleted MINI-3 and the next issue is MINI-5"
 
@@ -127,10 +127,6 @@ Required. bacio has no auth — you name yourself. JSON path uses `"author"` ins
 ### `--confirm <PREFIX>` on `bacio repo rm`
 
 Required. The command refuses to run without it, printing the cascade preview instead. Rehearse with `--dry-run` first.
-
-### `--user <agent-name>` on every agent call
-
-Permissive (bacio won't reject the call), but the audit log attribution depends on it. Set it once at the top of your agent's bacio interactions.
 
 ## When in doubt
 

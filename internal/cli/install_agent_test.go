@@ -154,6 +154,64 @@ func TestInstallAgentWritesAllThreeArtefacts(t *testing.T) {
 	}
 }
 
+// TestInstallAgentResetTemplatesRevertsBuiltinBodies asserts that
+// `install-agent --reset-templates --yes` rewrites every built-in
+// prompt template body back to its embedded default before regenerating
+// the subagent files: a stored customisation is wiped, and the
+// generated agent file reflects the embedded default instead.
+func TestInstallAgentResetTemplatesRevertsBuiltinBodies(t *testing.T) {
+	repo := initGitRepo(t)
+	withCwd(t, repo)
+
+	dbPath := filepath.Join(t.TempDir(), "db.sqlite")
+	prevDB := opts.dbPath
+	opts.dbPath = dbPath
+	t.Cleanup(func() { opts.dbPath = prevDB })
+	s, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("seed store: %v", err)
+	}
+	const customSentinel = "CUSTOM PLAN BODY — RESET ME"
+	if err := s.SetPromptTemplate(model.BuiltinTemplatePlan, customSentinel); err != nil {
+		t.Fatalf("seed customised plan body: %v", err)
+	}
+	_ = s.Close()
+
+	cmd := newInstallAgentCmd()
+	cmd.SetArgs([]string{"--yes", "--reset-templates"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("install-agent --yes --reset-templates: %v", err)
+	}
+
+	// Re-open the store and confirm the customisation is gone.
+	s, err = store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	plan, err := s.GetPromptTemplateBySlug(model.BuiltinTemplatePlan)
+	if err != nil {
+		t.Fatalf("GetPromptTemplateBySlug(plan): %v", err)
+	}
+	if plan.Body == customSentinel {
+		t.Fatalf("plan body still has the pre-reset customisation: %q", plan.Body)
+	}
+	if plan.Body != model.DefaultPromptBodyForBuiltinSlug(model.BuiltinTemplatePlan) {
+		t.Fatalf("plan body is not the embedded default after --reset-templates")
+	}
+
+	// The generated agent file must reflect the reset body, not the
+	// pre-reset customisation.
+	agentFile := filepath.Join(repo, agentFilesDir, model.SubagentTypeForTemplate(model.BuiltinTemplatePlan)+".md")
+	agentData, err := os.ReadFile(agentFile)
+	if err != nil {
+		t.Fatalf("read agent file: %v", err)
+	}
+	if strings.Contains(string(agentData), customSentinel) {
+		t.Fatalf("agent file still contains the pre-reset customisation:\n%s", agentData)
+	}
+}
+
 // TestRemovedInstallCommandsAreUnregistered guards the BACI-79 removal:
 // the four retired verbs (install-agents, install-hooks, install-channel,
 // install-sample-skills) must no longer be registered on the root

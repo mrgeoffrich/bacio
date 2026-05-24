@@ -65,7 +65,7 @@ Open Claude Code in the project and try this conversation.
 > **claude**: *(calls `bacio issue add` with title, description, tag `bug`)*
 > filed as `YOUR-1`.
 
-claude doesn't ask you to confirm a flag dump — it composes a JSON payload, optionally rehearses with `--dry-run`, then commits and tells you the issue key. The audit log records the action against `--user claude` (or whatever name your agent identifies as) so you can later see who wrote what.
+claude doesn't ask you to confirm a flag dump — it composes a JSON payload, optionally rehearses with `--dry-run`, then commits and tells you the issue key. The audit log records the action against claude's agent identity (resolved automatically from `.bacio/agents.json`, populated by the SessionStart hook that `bacio install-agent` wires up) so you can later see who wrote what.
 
 ### Ask what's on your plate
 

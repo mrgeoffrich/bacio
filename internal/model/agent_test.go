@@ -99,14 +99,14 @@ func TestComposeDispatchPayload(t *testing.T) {
 			"Spawn the per-mode subagent.",
 			DispatchStub{IssueKey: "BACI-10", Mode: "implement", SubagentType: "bacio-implement-worker"},
 			"",
-			"Spawn the per-mode subagent.\n\nTicket: BACI-10\nMode: implement\nSubagent: bacio-implement-worker",
+			"Spawn the per-mode subagent.\n\n<issue_id>BACI-10</issue_id>\n<mode>implement</mode>\n<subagent_type>bacio-implement-worker</subagent_type>",
 		},
 		{
 			"preamble + stub + note",
 			"Delegate.",
 			DispatchStub{IssueKey: "BACI-10", Mode: "plan", SubagentType: "bacio-plan-worker"},
 			"extra context",
-			"Delegate.\n\nTicket: BACI-10\nMode: plan\nSubagent: bacio-plan-worker\n\nextra context",
+			"Delegate.\n\n<issue_id>BACI-10</issue_id>\n<mode>plan</mode>\n<subagent_type>bacio-plan-worker</subagent_type>\n\nextra context",
 		},
 		// A preamble that trims to "" behaves identically to no preamble.
 		{
@@ -114,7 +114,7 @@ func TestComposeDispatchPayload(t *testing.T) {
 			"   \n  ",
 			DispatchStub{IssueKey: "BACI-10", Mode: "plan", SubagentType: "bacio-plan-worker"},
 			"",
-			"Ticket: BACI-10\nMode: plan\nSubagent: bacio-plan-worker",
+			"<issue_id>BACI-10</issue_id>\n<mode>plan</mode>\n<subagent_type>bacio-plan-worker</subagent_type>",
 		},
 	}
 	for _, c := range cases {

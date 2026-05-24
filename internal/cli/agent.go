@@ -35,11 +35,11 @@ they're focused on. Local-only — never synced to GitHub.
 
 Typical lifecycle, driven by an agent (see SKILL.md):
 
-    bacio agent register --user agent-claude
-    bacio agent claim    MINI-42 --user agent-claude
+    bacio agent register
+    bacio agent claim    MINI-42
     ...do work...
-    bacio agent release  MINI-42 --user agent-claude
-    bacio agent end      --reason stop --user agent-claude
+    bacio agent release  MINI-42
+    bacio agent end      --reason stop
 
 ` + "`--session`" + ` defaults to $CLAUDE_CODE_SESSION_ID. Claiming an
 issue also stamps its assignee with the claiming agent's identity (and

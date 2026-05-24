@@ -131,7 +131,7 @@ bacio history --op issue.create
 bacio history --kind issue --since 1w      # filter by entity kind
 ```
 
-`bacio history` has no `--target` filter — narrow by kind, op, actor, or time range, or pipe `-o json` through `jq` to filter on `target_label`. Note that the actor-filter flag is `--user-filter`; the persistent `--user` records who's running the call but doesn't filter the output.
+`bacio history` has no `--target` filter — narrow by kind, op, actor, or time range, or pipe `-o json` through `jq` to filter on `target_label`. The actor-filter flag is `--user-filter` (matches the recorded actor name).
 
 Or open the TUI and switch to tab `4` History.
 
