@@ -90,10 +90,11 @@ key (e.g. `BACI-42`), referred to below as `<issue_id>`.
 ## Setup
 
 1. Use the bacio skill, then claim `<issue_id>` as yours
-   (`bacio agent claim <issue_id> --prompt "implement"`).
+   (`bacio agent claim <issue_id> --prompt "implement"`). The claim
+   auto-transitions the issue to **in progress** (BACI-126a) — no
+   separate `bacio issue state` call is needed.
    - Load the Task tools via `ToolSearch` (`select:TaskCreate,TaskUpdate,TaskList,TaskGet,TaskOutput,TaskStop`) and track your work with `TaskCreate` / `TaskUpdate` as you go — bacio mirrors these into the Agents/kanban Tasks pill.
-2. Set `<issue_id>` to **in progress**.
-3. **Worktree.** You already run in an isolated git worktree (Claude Code created it for this subagent via `isolation: worktree` and removes it when you finish) — never run `git worktree add` or `git worktree remove` yourself.
+2. **Worktree.** You already run in an isolated git worktree (Claude Code created it for this subagent via `isolation: worktree` and removes it when you finish) — never run `git worktree add` or `git worktree remove` yourself.
    - Run `bacio worktree init` inside the worktree so this run gets its own API port (a `bacio web` smoke test won't collide with the user's running bacio); it leaves DB resolution on the shared `~/.bacio/db.sqlite`, where the ticket you were dispatched to work on lives, so every `bacio` issue call still reaches it. Run every `bacio` command — including `bacio web` for smoke tests — from inside the worktree; if you must run one from elsewhere, pass `--env <worktree>/environment-config.yaml`.
    - If `bacio web`/`bacio api` reports a port already in use, do NOT kill whatever holds it — that is most likely the user's own running bacio UI. Re-check you are inside your worktree, or pass `--port`.
    - When you start `bacio web` (or `bacio api`) in the background for a smoke test, capture its PID — `bacio web --no-open >/tmp/bacio-web.log 2>&1 & web_pid=$!` — and stop ONLY that process with `kill "$web_pid"` when done. NEVER run `pkill -f "bacio web"` or `pkill -f bacio`: they match every bacio process on the machine and will kill the user's own running bacio UI.
@@ -107,9 +108,28 @@ If you have to stop for user input, the issue is automatically moved to **needs 
 ## Close out
 
 1. Once smoke tests pass, create a PR from all the changes.
-2. Drop the worktree's bacio environment with `bacio worktree rm <path> --confirm <slug>` (Claude Code removes the git worktree itself).
-3. Put `<issue_id>` into **in review** and unclaim it.
-4. Call `mcp__bacio__reply` with the `dispatch_id` from your Task prompt and a one-line summary. If you had to stop, return `needs_input: <what is missing>` as your final line instead.
+2. **Feature handoff (if the issue belongs to a feature).** Pull down the issue brief — `bacio issue brief <issue_id> -o json` — and check whether `feature.slug` is set. If it is, post a chronological handoff note on the parent feature so the next worker on a sibling issue inherits the context you built up:
+
+   ```
+   bacio feature comment add --json '{
+     "feature_slug": "<slug>",
+     "author": "<your agent identity>",
+     "body": "## <issue_id> handoff\n\n**Files of context.** ...\n\n**Deviations from plan.** ...\n\n**Work not done.** ..."
+   }'
+   ```
+
+   Capture concretely:
+   - **Files of context** — repo-relative paths (per the cwd / worktree-prefix rule above) the next worker needs to read to understand the design as it stands now.
+   - **Deviations from the original plan** — places where the implementation diverged from the planning doc, and why.
+   - **Work not done** — anything scoped out, deferred, blocked, or punted to a follow-up issue, with the reason.
+
+   If the issue has no parent feature (`feature` field absent / null on the brief), skip this step.
+3. Drop the worktree's bacio environment with `bacio worktree rm <path> --confirm <slug>` (Claude Code removes the git worktree itself).
+4. Release the claim and move the issue to **in review** in one
+   atomic step: `bacio agent release <issue_id> --state in_review`
+   (BACI-126c — `--state` is required; this replaces the old
+   two-step "set state, then release" dance).
+5. Call `mcp__bacio__reply` with the `dispatch_id` from your Task prompt and a one-line summary. If you had to stop, return `needs_input: <what is missing>` as your final line instead.
 
 ## Questions
 

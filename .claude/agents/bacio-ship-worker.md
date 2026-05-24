@@ -90,7 +90,9 @@ key (e.g. `BACI-42`), referred to below as `<issue_id>`.
 ## Setup
 
 1. Use the bacio skill, then claim `<issue_id>` as yours
-   (`bacio agent claim <issue_id> --prompt "ship"`).
+   (`bacio agent claim <issue_id> --prompt "ship"`). The claim
+   auto-transitions the issue to **in progress** (BACI-126a) — no
+   separate `bacio issue state` call is needed.
    - Load the Task tools via `ToolSearch` (`select:TaskCreate,TaskUpdate,TaskList,TaskGet,TaskOutput,TaskStop`) and track your work with `TaskCreate` / `TaskUpdate` as you go — bacio mirrors these into the Agents/kanban Tasks pill.
 2. **Worktree.** You already run in an isolated git worktree (Claude Code created it for this subagent via `isolation: worktree` and removes it when you finish) — never run `git worktree add` or `git worktree remove` yourself.
    - Run `bacio worktree init` inside the worktree so this run gets its own API port (a `bacio web` smoke test won't collide with the user's running bacio); it leaves DB resolution on the shared `~/.bacio/db.sqlite`, where the ticket you were dispatched to work on lives, so every `bacio` issue call still reaches it. Run every `bacio` command from inside the worktree; if you must run one from elsewhere, pass `--env <worktree>/environment-config.yaml`.
@@ -98,12 +100,15 @@ key (e.g. `BACI-42`), referred to below as `<issue_id>`.
 
 ## Ship
 
-Ship `<issue_id>`: merge the PR and deal with any merge issues. Once it is merged, set the issue to **done**.
+Ship `<issue_id>`: merge the PR and deal with any merge issues.
 
 ## Close out
 
 1. Drop the worktree's bacio environment with `bacio worktree rm <path> --confirm <slug>` (Claude Code removes the git worktree itself).
-2. Unclaim the issue.
+2. Release the claim and mark the issue **done** in one atomic step:
+   `bacio agent release <issue_id> --state done` (BACI-126c —
+   `--state` is required; replaces the old two-step "set state, then
+   release" dance).
 3. Call `mcp__bacio__reply` with the `dispatch_id` from your Task prompt and a one-line summary. If you had to stop, return `needs_input: <what is missing>` as your final line instead.
 
 ## Questions

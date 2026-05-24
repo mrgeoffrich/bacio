@@ -19,26 +19,6 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 import * as $models from "./models.js";
 
 /**
- * GetFeature returns one feature with its description and the issues grouped
- * under it, for the detail pane.
- */
-export function GetFeature(repoPrefix: string, slug: string): $CancellablePromise<$models.FeatureDetail> {
-    return $Call.ByID(3103647661, repoPrefix, slug).then(($result: any) => {
-        return $$createType0($result);
-    });
-}
-
-/**
- * ListFeatures returns every feature in one repo as a summary row.
- * Archived features (BACI-68) follow display.show_archived.
- */
-export function ListFeatures(repoPrefix: string): $CancellablePromise<$models.FeatureSummary[]> {
-    return $Call.ByID(640296380, repoPrefix).then(($result: any) => {
-        return $$createType2($result);
-    });
-}
-
-/**
  * AddFeatureComment posts a chronological handoff comment to a feature
  * (BACI-124) and returns the refreshed detail.
  */
@@ -55,6 +35,26 @@ export function AddFeatureComment(repoPrefix: string, slug: string, author: stri
 export function DeleteFeatureComment(repoPrefix: string, slug: string, commentUUID: string): $CancellablePromise<$models.FeatureDetail> {
     return $Call.ByID(1504383339, repoPrefix, slug, commentUUID).then(($result: any) => {
         return $$createType0($result);
+    });
+}
+
+/**
+ * GetFeature returns one feature with its description and the issues grouped
+ * under it, for the detail pane.
+ */
+export function GetFeature(repoPrefix: string, slug: string): $CancellablePromise<$models.FeatureDetail> {
+    return $Call.ByID(3103647661, repoPrefix, slug).then(($result: any) => {
+        return $$createType0($result);
+    });
+}
+
+/**
+ * ListFeatures returns every feature in one repo as a summary row.
+ * Archived features (BACI-68) follow display.show_archived.
+ */
+export function ListFeatures(repoPrefix: string): $CancellablePromise<$models.FeatureSummary[]> {
+    return $Call.ByID(640296380, repoPrefix).then(($result: any) => {
+        return $$createType2($result);
     });
 }
 
