@@ -50,6 +50,26 @@ export default function IssueWorkspace({
   const issueMeta = brief?.issue;
   const taken = !!brief?.taken;
   const waiting = !!brief?.waitingForClaim && !taken;
+
+  // BACI-141: the eval-comment subset the transcript viewer needs.
+  // Filtering happens inside TranscriptView (by dispatchId), so we
+  // pass the issue's full eval set down — multiple transcripts on
+  // one issue each pick their own anchored notes.
+  const evalComments = useMemo(() => {
+    if (!brief?.comments) return [];
+    return brief.comments.filter(c => c?.eval);
+  }, [brief?.comments]);
+
+  // BACI-141: the per-event composer submit handler the transcript
+  // viewer mounts. Forwards into the existing onAddComment chain
+  // with the transcriptEventRef populated so the new note lands in
+  // the right anchor bucket. The empty-string author tells
+  // boardservice.AddComment to fall back to the OS user (same path
+  // BACI-131's quick-eval composer takes).
+  const postEvalFromTranscript = useCallback(async (body, eventRef) => {
+    if (!onAddComment) return;
+    await onAddComment('', body, { eval: true, transcriptEventRef: eventRef });
+  }, [onAddComment]);
   // The most recent open claimant — the holder of an active claim.
   // ClaimantDTO is shaped {sessionId, agentName, prompt, open, ...}.
   const openClaimant = useMemo(() => {
@@ -207,6 +227,13 @@ export default function IssueWorkspace({
                     key={`${d.filename}:${(d.linkedVia || []).join('+')}`}
                     doc={d}
                     activeBoard={activeBoard}
+                    /* BACI-141: feed the transcript viewer every eval
+                       comment on the issue so it can annotate the
+                       matching transcript's events. LinkedDocPanel
+                       passes the array straight to TranscriptView,
+                       which filters by dispatchId. */
+                    evalComments={evalComments}
+                    onPostEval={postEvalFromTranscript}
                   />
                 ))}
               </div>

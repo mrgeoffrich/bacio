@@ -49,23 +49,25 @@ func (c *localClient) AddComment(ctx context.Context, repo *model.Repo, in input
 	}
 	if dryRun {
 		return &model.Comment{
-			IssueID:        iss.ID,
-			Author:         in.Author,
-			Body:           in.Body,
-			Eval:           in.Eval,
-			AgentSessionID: evalCtx.AgentSessionID,
-			DispatchID:     evalCtx.DispatchID,
-			Mode:           evalCtx.Mode,
+			IssueID:            iss.ID,
+			Author:             in.Author,
+			Body:               in.Body,
+			Eval:               in.Eval,
+			AgentSessionID:     evalCtx.AgentSessionID,
+			DispatchID:         evalCtx.DispatchID,
+			Mode:               evalCtx.Mode,
+			TranscriptEventRef: in.TranscriptEventRef,
 		}, nil
 	}
 	cm, err := c.store.CreateComment(store.CreateCommentIn{
-		IssueID:        iss.ID,
-		Author:         in.Author,
-		Body:           in.Body,
-		Eval:           in.Eval,
-		AgentSessionID: evalCtx.AgentSessionID,
-		DispatchID:     evalCtx.DispatchID,
-		Mode:           evalCtx.Mode,
+		IssueID:            iss.ID,
+		Author:             in.Author,
+		Body:               in.Body,
+		Eval:               in.Eval,
+		AgentSessionID:     evalCtx.AgentSessionID,
+		DispatchID:         evalCtx.DispatchID,
+		Mode:               evalCtx.Mode,
+		TranscriptEventRef: in.TranscriptEventRef,
 	})
 	if err != nil {
 		return nil, err
@@ -174,6 +176,20 @@ func (c *localClient) LinkRelation(ctx context.Context, repo *model.Repo, in inp
 // one bulk read per board poll, no audit row (it's a pure read).
 func (c *localClient) BlockersFor(ctx context.Context, ids []int64) (map[int64][]store.IssueBlocker, error) {
 	return c.store.BlockersFor(ids)
+}
+
+// CountEvalCommentsByIssue is a thin pass-through to the store
+// (BACI-141). Used by boardcards.Assemble for the per-card combined
+// eval / transcript chip — one bulk read per board poll, no audit row.
+func (c *localClient) CountEvalCommentsByIssue(ctx context.Context, ids []int64) (map[int64]int, error) {
+	return c.store.CountEvalCommentsByIssue(ids)
+}
+
+// CountTranscriptDocsByIssue is a thin pass-through to the store
+// (BACI-141). Sibling of CountEvalCommentsByIssue — both drive the
+// kanban card's combined eval / transcript chip.
+func (c *localClient) CountTranscriptDocsByIssue(ctx context.Context, ids []int64) (map[int64]int, error) {
+	return c.store.CountTranscriptDocsByIssue(ids)
 }
 
 func (c *localClient) UnlinkRelation(ctx context.Context, repo *model.Repo, in inputs.UnlinkInput, dryRun bool) (*RelationDeletePreview, int64, error) {

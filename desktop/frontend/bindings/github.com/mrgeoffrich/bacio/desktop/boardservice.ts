@@ -37,10 +37,12 @@ import * as $models from "./models.js";
  * `eval` (BACI-131) flags the row as a quality-review note posted from
  * the kanban quick-eval composer — the server pins the in-flight
  * (agent_session_id, dispatch_id, mode) snapshot onto the comment at
- * write time.
+ * write time. `transcriptEventRef` (BACI-141) is the caller-supplied
+ * per-event anchor handle the in-transcript composer fills before
+ * posting; empty leaves the comment dispatch-level anchored.
  */
-export function AddComment(repoPrefix: string, key: string, author: string, body: string, isEval: boolean): $CancellablePromise<$models.IssueDetail> {
-    return $Call.ByID(1143577105, repoPrefix, key, author, body, isEval).then(($result: any) => {
+export function AddComment(repoPrefix: string, key: string, author: string, body: string, isEval: boolean, transcriptEventRef: string): $CancellablePromise<$models.IssueDetail> {
+    return $Call.ByID(1143577105, repoPrefix, key, author, body, isEval, transcriptEventRef).then(($result: any) => {
         return $$createType0($result);
     });
 }

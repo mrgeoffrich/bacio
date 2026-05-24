@@ -96,6 +96,16 @@ type Comment struct {
 	AgentSessionID string `json:"agent_session_id,omitempty"`
 	DispatchID     *int64 `json:"dispatch_id,omitempty"`
 	Mode           string `json:"mode,omitempty"`
+	// TranscriptEventRef (BACI-141) anchors an eval comment to a
+	// specific event inside a `.jsonl` transcript. Empty string keeps
+	// the BACI-131 dispatch-level anchoring; non-empty takes the form
+	// `tool_use_id:<id>` (anchor to an assistant tool_use block by the
+	// durable Claude Code id) or `line_index:<n>` (fallback for
+	// assistant / dispatch / system-reminder / attachment events that
+	// don't carry a tool_use_id). Caller-supplied (the per-event
+	// transcript composer fills it before POSTing); the store does not
+	// derive it.
+	TranscriptEventRef string `json:"transcript_event_ref,omitempty"`
 	// AgentName (BACI-131) is the persistent agent identity slug
 	// resolved from AgentSessionID at read time — not persisted on the
 	// comment row. Populated by the brief / issue-detail JOIN so the

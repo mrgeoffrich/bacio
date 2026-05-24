@@ -49,10 +49,11 @@ var (
 	}
 
 	ExampleCommentAdd = CommentAddInput{
-		IssueKey: "MINI-42",
-		Author:   "agent-alice",
-		Body:     "agent is editing the wrong file — see comment thread on PR 123",
-		Eval:     true,
+		IssueKey:           "MINI-42",
+		Author:             "agent-alice",
+		Body:               "agent is editing the wrong file — see comment thread on PR 123",
+		Eval:               true,
+		TranscriptEventRef: "tool_use_id:toolu_01abc123",
 	}
 	ExampleCommentRm = CommentRmInput{
 		IssueKey:    "MINI-42",

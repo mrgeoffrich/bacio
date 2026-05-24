@@ -9,8 +9,11 @@
 // toggle plumbing.
 
 import React from 'react';
+import EvalComposer from './EvalComposer';
+import EvalNotePanel from './EvalNotePanel';
 import RawEventDrawer from './RawEventDrawer';
 import { formatTimeDelta } from './format';
+import type { EvalComment } from './types';
 
 type EventCardProps = {
   // The card's id — used to wire the raw drawer open state into
@@ -35,6 +38,18 @@ type EventCardProps = {
   raw?: unknown;
   rawOpen?: boolean;
   onToggleRaw?: () => void;
+  // BACI-141: the eval comments anchored to THIS event (one or more,
+  // newest-last by the caller's iteration order). Empty / absent on
+  // events with no eval notes attached. Renders under the event body
+  // via <EvalNotePanel>.
+  evalNotes?: EvalComment[];
+  // BACI-141: when set, surface the per-event eval composer. The
+  // eventRef is the durable handle for this event — `tool_use_id:<id>`
+  // for tool-call events, `line_index:<n>` for everything else. The
+  // submit callback is forwarded straight from TranscriptView through
+  // EvalComposer (which wraps the textarea + button chrome).
+  evalEventRef?: string;
+  onPostEval?: (body: string, eventRef: string) => Promise<void> | void;
 };
 
 export default function EventCard({
@@ -50,8 +65,12 @@ export default function EventCard({
   raw,
   rawOpen,
   onToggleRaw,
+  evalNotes,
+  evalEventRef,
+  onPostEval,
 }: EventCardProps): React.ReactElement {
   const delta = formatTimeDelta(ts, prevTs);
+  const notes = evalNotes ?? [];
   return (
     <div
       id={scrollAnchorId}
@@ -83,6 +102,20 @@ export default function EventCard({
       </div>
       <div className="mk-transcript-event-body">{children}</div>
       {rawOpen && raw !== undefined && <RawEventDrawer raw={raw} />}
+      {notes.length > 0 && (
+        <div className="mk-transcript-eval-notes">
+          {notes.map(n => (
+            <EvalNotePanel key={n.uuid} note={n} />
+          ))}
+        </div>
+      )}
+      {onPostEval && evalEventRef !== undefined && (
+        <EvalComposer
+          eventRef={evalEventRef}
+          onSubmit={onPostEval}
+          triggerLabel="Eval this event"
+        />
+      )}
     </div>
   );
 }

@@ -72,10 +72,26 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, o
   const waitingDelivered = waiting && !!card.waitingDispatchDelivered;
   const dispatchDisabled = taken || waiting;
 
+  // BACI-141: combined eval / transcript indicator chip. Surfaces on
+  // every card with at least one transcript or eval comment in the
+  // store — independent of `taken`, which is the whole point: notes
+  // posted while taken stay discoverable after release. Counts both
+  // come from server-side bulk reads in boardcards.Assemble (BACI-141).
+  const transcriptCount = card.transcriptDocCount || 0;
+  const evalCount = card.evalCommentCount || 0;
+  const hasEvalChip = transcriptCount > 0 || evalCount > 0;
+  const evalChipTooltip = `${transcriptCount} transcript${transcriptCount === 1 ? '' : 's'}, ${evalCount} eval note${evalCount === 1 ? '' : 's'} — click to open`;
+  // Compact display: prefer the slash-separated form when both are
+  // non-zero so the reader can tell at a glance which side is which;
+  // fall back to the single non-zero count otherwise.
+  const evalChipLabel = transcriptCount > 0 && evalCount > 0
+    ? `${transcriptCount}/${evalCount}`
+    : `${transcriptCount + evalCount}`;
+
   // BACI-131: the quick-eval composer is the right-edge affordance on
   // a taken card. A taken card disables the zap dropdown anyway, so
   // taking the slot replaces a dead affordance with a live one.
-  const hasFooter = validPrompts.length > 0 || card.assignees.length > 0 || waiting || taken;
+  const hasFooter = validPrompts.length > 0 || card.assignees.length > 0 || waiting || taken || hasEvalChip;
 
   // BACI-60 meta line — only on taken cards, only when at least one of
   // verb or tasks is populated. Hidden entirely otherwise so cards that
@@ -181,6 +197,22 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, o
       )}
       {hasFooter && (
         <footer className="mk-card-foot">
+          {hasEvalChip && (
+            // BACI-141: combined eval / transcript indicator chip. The
+            // click defers to the card's own onOpen handler (no
+            // stopPropagation) — opening the card lands the user on
+            // the Activity timeline + linked-doc panel where the
+            // material lives.
+            <Tooltip label={evalChipTooltip}>
+              <span
+                className="mk-card-eval-chip"
+                aria-label={evalChipTooltip}
+              >
+                <Icon name="comment" />
+                <span className="mk-card-eval-chip-count">{evalChipLabel}</span>
+              </span>
+            </Tooltip>
+          )}
           {card.assignees.length > 0 && (
             <Tooltip label={card.assignees.join(', ')}>
               <span className={`mk-card-assignee ${card.claude ? 'is-claude' : ''}`}>

@@ -880,6 +880,24 @@ body { margin: 0; }
   border-color: var(--coral-500);
 }
 .mk-card-eval-btn .mk-icon { width: 13px; height: 13px; }
+
+/* BACI-141: combined eval / transcript indicator chip.
+   Surfaces on every card with at least one transcript or eval comment.
+   Stays visible regardless of `taken` — eval notes posted while taken
+   stay discoverable on the board after release. Tiny so it doesn't
+   fight the rest of the footer; pairs an icon + a count label. */
+.mk-card-eval-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 18px; padding: 0 6px;
+  border: 1px solid var(--border-2);
+  border-radius: 9px;
+  background: var(--bg-3);
+  color: var(--fg-2);
+  font-size: 11px; line-height: 1;
+  cursor: default;
+}
+.mk-card-eval-chip .mk-icon { width: 11px; height: 11px; }
+.mk-card-eval-chip-count { font-variant-numeric: tabular-nums; }
 .mk-card-eval-composer {
   margin: 8px -2px -2px -2px;
   padding: 8px;

@@ -84,6 +84,24 @@ export type ParseResult = {
   rawLines: string[];
 };
 
+// EvalComment (BACI-141) is the trimmed eval-comment payload the
+// transcript viewer reads to render inline annotations. Mirrors the
+// fields of CommentDTO the renderer actually needs: identity (uuid +
+// author), body + timestamp, and the (dispatchId / agentSessionId)
+// pair the filter matches against the transcript's `<dispatch_id>`
+// tag. transcriptEventRef is the per-event anchor handle —
+// `tool_use_id:<id>` or `line_index:<n>`; empty means the comment is
+// dispatch-level anchored and pins to the dispatch prompt card.
+export type EvalComment = {
+  uuid: string;
+  author: string;
+  body: string;
+  createdAt: string;
+  dispatchId?: number;
+  agentSessionId?: string;
+  transcriptEventRef?: string;
+};
+
 // The flattened, render-ready item the viewer iterates over. Pairing
 // (`pair.ts`) turns the `events` stream into a `RenderItem[]`.
 //

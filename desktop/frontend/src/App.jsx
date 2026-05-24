@@ -549,10 +549,16 @@ export default function App() {
     }
   }, [activeBoard, openIssueKey, refreshBrief, refreshCards]);
 
-  const addComment = useCallback(async (author, body) => {
+  // BACI-141: opts forwards through to api.addComment so the
+  // transcript-viewer per-event composer can pass
+  // { eval: true, transcriptEventRef: '<handle>' } without growing a
+  // second App-level handler. The workspace's plain Activity
+  // composer keeps calling with two args (opts undefined) — same
+  // wire shape as before BACI-141.
+  const addComment = useCallback(async (author, body, opts) => {
     if (!openIssueKey) return;
     try {
-      await api.addComment(activeBoard, openIssueKey, author, body);
+      await api.addComment(activeBoard, openIssueKey, author, body, opts);
       refreshBrief();
     } catch (err) {
       reportError(err, { headline: "Couldn't add comment" });

@@ -25,6 +25,11 @@ type fakeClient struct {
 	// blockers (BACI-114) is keyed by blocked-issue id — the same
 	// shape store.BlockersFor returns.
 	blockers map[int64][]store.IssueBlocker
+	// evalCounts / transcriptCounts (BACI-141) drive the per-card
+	// combined chip. Keyed by issue id, same shape the store readers
+	// return. nil = "no eval / transcript material on any issue".
+	evalCounts       map[int64]int
+	transcriptCounts map[int64]int
 	// dispatchAware (BACI-132) opts the fake into filtering the
 	// returned todos by the pair's IssueKey and DispatchID — needed
 	// for the per-dispatch scope test. Existing tests that pass the
@@ -115,6 +120,20 @@ func (f *fakeClient) BlockersFor(context.Context, []int64) (map[int64][]store.Is
 		return map[int64][]store.IssueBlocker{}, nil
 	}
 	return f.blockers, nil
+}
+
+func (f *fakeClient) CountEvalCommentsByIssue(context.Context, []int64) (map[int64]int, error) {
+	if f.evalCounts == nil {
+		return map[int64]int{}, nil
+	}
+	return f.evalCounts, nil
+}
+
+func (f *fakeClient) CountTranscriptDocsByIssue(context.Context, []int64) (map[int64]int, error) {
+	if f.transcriptCounts == nil {
+		return map[int64]int{}, nil
+	}
+	return f.transcriptCounts, nil
 }
 
 // TestAssembleVerbAndTodos covers the BACI-60 enrichment: an open
@@ -753,5 +772,49 @@ func TestAssembleSortsCompletedColumnsByTerminalAt(t *testing.T) {
 		if done[i] != want[i] {
 			t.Fatalf("Done column = %v, want %v (TEST-3's stray edit must not jump it to the top)", done, want)
 		}
+	}
+}
+
+// TestAssembleSurfacesEvalAndTranscriptCounts (BACI-141) covers the
+// combined eval / transcript chip on the kanban card. Three issues:
+// one with both counts populated (the chip's mixed case), one with
+// only a transcript count (a closed-out card the agent released —
+// the eval composer affordance no longer renders, but the chip
+// still surfaces the transcript), and one with neither (no chip).
+// The crucial assertion: counts surface even when Taken is false.
+func TestAssembleSurfacesEvalAndTranscriptCounts(t *testing.T) {
+	repo := &model.Repo{ID: 1, Prefix: "TEST"}
+	issues := []*model.Issue{
+		{ID: 1, Key: "TEST-1", State: model.StateInProgress, Title: "taken with both"},
+		{ID: 2, Key: "TEST-2", State: model.StateInReview, Title: "released with transcript"},
+		{ID: 3, Key: "TEST-3", State: model.StateTodo, Title: "no eval material"},
+	}
+	f := &fakeClient{
+		repo:             repo,
+		issues:           issues,
+		evalCounts:       map[int64]int{1: 2},
+		transcriptCounts: map[int64]int{1: 1, 2: 3},
+	}
+	cards, err := Assemble(context.Background(), f, repo, false)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	byKey := map[string]BoardCard{}
+	for _, c := range cards {
+		byKey[c.Key] = c
+	}
+	if got := byKey["TEST-1"]; got.EvalCommentCount != 2 || got.TranscriptDocCount != 1 {
+		t.Fatalf("TEST-1: eval=%d transcript=%d, want 2/1", got.EvalCommentCount, got.TranscriptDocCount)
+	}
+	// TEST-2 is not Taken but still surfaces the transcript count — the
+	// whole point of the ticket.
+	if got := byKey["TEST-2"]; got.Taken {
+		t.Fatalf("TEST-2 Taken = true, want false (untaken card)")
+	}
+	if got := byKey["TEST-2"]; got.EvalCommentCount != 0 || got.TranscriptDocCount != 3 {
+		t.Fatalf("TEST-2 (untaken): eval=%d transcript=%d, want 0/3", got.EvalCommentCount, got.TranscriptDocCount)
+	}
+	if got := byKey["TEST-3"]; got.EvalCommentCount != 0 || got.TranscriptDocCount != 0 {
+		t.Fatalf("TEST-3: eval=%d transcript=%d, want 0/0", got.EvalCommentCount, got.TranscriptDocCount)
 	}
 }

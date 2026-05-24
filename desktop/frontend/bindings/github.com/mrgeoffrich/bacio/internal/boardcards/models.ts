@@ -108,6 +108,19 @@ export class BoardCard {
      */
     "blockedBy"?: BoardCardBlocker[];
 
+    /**
+     * TranscriptDocCount + EvalCommentCount (BACI-141) drive the
+     * kanban card's combined eval / transcript indicator chip — the
+     * "this card has attached transcripts and/or eval notes" signal
+     * that surfaces regardless of `Taken` (the BACI-131 composer
+     * affordance only rendered on taken cards, leaving eval notes on
+     * released cards invisible from the board). Both are omitempty so
+     * the wire payload doesn't grow on cards with neither (the common
+     * case). The UI renders the chip when either is non-zero.
+     */
+    "transcriptDocCount"?: number;
+    "evalCommentCount"?: number;
+
     /** Creates a new BoardCard instance. */
     constructor($$source: Partial<BoardCard> = {}) {
         if (!("key" in $$source)) {

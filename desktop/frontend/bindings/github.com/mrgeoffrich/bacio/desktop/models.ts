@@ -204,6 +204,16 @@ export class CommentDTO {
     "agentSessionId"?: string;
     "dispatchId"?: number | null;
     "mode"?: string;
+
+    /**
+     * TranscriptEventRef (BACI-141) anchors an eval comment to a
+     * specific event inside a `.jsonl` transcript. Two shapes:
+     * `tool_use_id:<id>` or `line_index:<n>`. Empty keeps the
+     * dispatch-level anchoring. Drives the per-event annotation
+     * overlay in the transcript viewer; the in-line composer there
+     * fills it before POSTing.
+     */
+    "transcriptEventRef"?: string;
     "agentName"?: string;
 
     /** Creates a new CommentDTO instance. */

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/mrgeoffrich/bacio/internal/model"
 )
@@ -218,6 +219,60 @@ func scanDocumentLinks(rows *sql.Rows) ([]*model.DocumentLink, error) {
 			return nil, err
 		}
 		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
+// CountTranscriptDocsByIssue (BACI-141) returns, keyed by issue id,
+// the number of `.jsonl` transcript documents linked to that issue —
+// the count surfaced on the kanban card's combined eval / transcript
+// chip. A doc qualifies in two ways:
+//
+//   - documents.type = 'transcript' (the post-BACI-115 canonical form
+//     `attach_transcript` writes).
+//   - filename matching the legacy `bacio-transcript-<KEY>-agent-<id>.jsonl`
+//     naming convention — covers transcripts attached before the
+//     `transcript` type existed, still stored as `project_complete`. The
+//     brief route already uses the same fallback at
+//     internal/api/handlers_brief.go.
+//
+// The SQL fetches both candidate sets in one round trip; the legacy
+// filename predicate runs in Go because reproducing
+// model.IsBacioTranscriptFilename in pure SQL would be brittle. Issues
+// with zero matches don't appear in the map — the caller treats
+// absence as zero.
+func (s *Store) CountTranscriptDocsByIssue(issueIDs []int64) (map[int64]int, error) {
+	out := make(map[int64]int, len(issueIDs))
+	if len(issueIDs) == 0 {
+		return out, nil
+	}
+	placeholders := make([]string, len(issueIDs))
+	args := make([]any, len(issueIDs))
+	for i, id := range issueIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	q := `SELECT dl.issue_id, d.type, d.filename
+	      FROM document_links dl
+	      JOIN documents d ON d.id = dl.document_id
+	      WHERE dl.issue_id IN (` + strings.Join(placeholders, ", ") + `)`
+	rows, err := s.DB.Query(q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("count transcript docs: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			issueID  int64
+			docType  string
+			filename string
+		)
+		if err := rows.Scan(&issueID, &docType, &filename); err != nil {
+			return nil, fmt.Errorf("scan transcript-count row: %w", err)
+		}
+		if model.DocumentType(docType) == model.DocTypeTranscript || model.IsBacioTranscriptFilename(filename) {
+			out[issueID]++
+		}
 	}
 	return out, rows.Err()
 }

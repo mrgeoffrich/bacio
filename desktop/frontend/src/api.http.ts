@@ -107,6 +107,14 @@ export interface BoardCard {
   // present. Absent in older payloads so the renderer must null-
   // check (`card.blockedBy?.length ?? 0`).
   blockedBy?: BoardCardBlocker[];
+  // BACI-141: counts driving the combined eval / transcript indicator
+  // chip on the kanban card. Both are omitempty server-side so the
+  // chip only renders when at least one is non-zero. The chip stays
+  // visible regardless of `taken`, which is the whole point of the
+  // ticket — eval notes posted while the card was taken stay
+  // discoverable on the board after the agent releases.
+  transcriptDocCount?: number;
+  evalCommentCount?: number;
 }
 
 export interface CommentDTO {
@@ -126,6 +134,12 @@ export interface CommentDTO {
   agentSessionId?: string;
   dispatchId?: number;
   mode?: string;
+  // BACI-141: per-event anchor handle. Two shapes — `tool_use_id:<id>`
+  // anchors to an assistant tool_use block by the durable Claude Code
+  // id; `line_index:<n>` is the fallback for assistant / dispatch /
+  // system-reminder / attachment events. Empty / absent keeps the
+  // dispatch-level anchoring (the BACI-131 default).
+  transcriptEventRef?: string;
   agentName?: string;
 }
 
@@ -674,6 +688,9 @@ interface ApiCommentEnvelope {
   agent_session_id?: string;
   dispatch_id?: number;
   mode?: string;
+  // BACI-141 per-event anchor handle. Snake-case on the wire to match
+  // the Go side's json tag; mapped to camelCase by mapApiComment.
+  transcript_event_ref?: string;
   agent_name?: string;
 }
 interface ApiPR { url: string; }
@@ -752,6 +769,7 @@ function mapApiComment(c: ApiCommentEnvelope): CommentDTO {
     agentSessionId: c.agent_session_id ?? '',
     dispatchId: c.dispatch_id,
     mode: c.mode ?? '',
+    transcriptEventRef: c.transcript_event_ref ?? '',
     agentName: c.agent_name ?? '',
   };
 }
@@ -1093,7 +1111,7 @@ export async function addComment(
   key: string,
   author: string,
   body: string,
-  opts?: { eval?: boolean },
+  opts?: { eval?: boolean; transcriptEventRef?: string },
 ): Promise<IssueDetail> {
   if (!repoPrefix || repoPrefix === 'all') {
     const i = key.lastIndexOf('-');
@@ -1101,11 +1119,19 @@ export async function addComment(
     repoPrefix = key.slice(0, i);
   }
   const effectiveAuthor = author?.trim() || readActor() || 'web';
-  const reqBody: { author: string; body: string; eval?: boolean } = {
+  // BACI-141: pass `transcript_event_ref` only when non-empty so the
+  // payload stays minimal for the common dispatch-level case.
+  const reqBody: {
+    author: string;
+    body: string;
+    eval?: boolean;
+    transcript_event_ref?: string;
+  } = {
     author: effectiveAuthor,
     body,
   };
   if (opts?.eval) reqBody.eval = true;
+  if (opts?.transcriptEventRef) reqBody.transcript_event_ref = opts.transcriptEventRef;
   await call<unknown>(`/repos/${repoPrefix}/issues/${key}/comments`, {
     method: 'POST',
     body: reqBody,

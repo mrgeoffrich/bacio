@@ -234,15 +234,25 @@ export async function updateIssueDescription(
 // opts.eval (BACI-131) flags the row as a quality-review note posted
 // from the kanban quick-eval composer — the server pins the in-flight
 // (agent_session_id, dispatch_id, mode) snapshot onto the comment.
+// opts.transcriptEventRef (BACI-141) anchors the comment to a specific
+// event inside a `.jsonl` transcript — set by the per-event composer
+// surface; empty leaves the comment dispatch-level anchored.
 export async function addComment(
   repoPrefix: string,
   key: string,
   author: string,
   body: string,
-  opts?: { eval?: boolean },
+  opts?: { eval?: boolean; transcriptEventRef?: string },
 ): Promise<IssueDetail> {
   try {
-    return await BoardService.AddComment(repoPrefix, key, author, body, !!opts?.eval);
+    return await BoardService.AddComment(
+      repoPrefix,
+      key,
+      author,
+      body,
+      !!opts?.eval,
+      opts?.transcriptEventRef ?? "",
+    );
     // ^ Wails binding parameter is `isEval` (renamed from `eval` so the
     //   generated TS doesn't clash with the JavaScript reserved word).
   } catch (err) {

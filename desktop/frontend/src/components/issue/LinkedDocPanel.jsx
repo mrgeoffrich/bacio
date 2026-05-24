@@ -47,7 +47,11 @@ function formatBytes(n) {
 // linked to the shared feature, surfaced as if it belonged here). So:
 // surface "(issue + feature)" when both, "(via feature/<slug>)" when
 // feature-only, and nothing when it's the issue's own link.
-export default function LinkedDocPanel({ doc, activeBoard }) {
+// BACI-141: evalComments + onPostEval are forwarded into TranscriptView
+// only for transcript docs — the other branches (markdown, SVG, body-
+// omitted) ignore them. Both are optional, so callers that pre-date
+// the feature continue to work unchanged.
+export default function LinkedDocPanel({ doc, activeBoard, evalComments, onPostEval }) {
   const isTranscript = useMemo(
     () => isJsonlTranscriptDoc(doc.filename || ''),
     [doc.filename],
@@ -127,7 +131,13 @@ export default function LinkedDocPanel({ doc, activeBoard }) {
       if (transcriptBody) {
         return (
           <div className="mk-linked-doc-body mk-linked-doc-transcript">
-            <TranscriptView source={transcriptBody} filename={doc.filename} sizeBytes={doc.sizeBytes} />
+            <TranscriptView
+              source={transcriptBody}
+              filename={doc.filename}
+              sizeBytes={doc.sizeBytes}
+              evalComments={evalComments}
+              onPostEval={onPostEval}
+            />
           </div>
         );
       }

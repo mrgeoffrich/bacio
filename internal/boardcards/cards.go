@@ -153,6 +153,16 @@ type BoardCard struct {
 	// goes through the brief's RelationsDTO instead so the chip
 	// surface covers all four edge types, not just blocks.
 	BlockedBy []BoardCardBlocker `json:"blockedBy,omitempty"`
+	// TranscriptDocCount + EvalCommentCount (BACI-141) drive the
+	// kanban card's combined eval / transcript indicator chip — the
+	// "this card has attached transcripts and/or eval notes" signal
+	// that surfaces regardless of `Taken` (the BACI-131 composer
+	// affordance only rendered on taken cards, leaving eval notes on
+	// released cards invisible from the board). Both are omitempty so
+	// the wire payload doesn't grow on cards with neither (the common
+	// case). The UI renders the chip when either is non-zero.
+	TranscriptDocCount int `json:"transcriptDocCount,omitempty"`
+	EvalCommentCount   int `json:"evalCommentCount,omitempty"`
 }
 
 // BoardCardBlocker (BACI-114) is one open `blocks` edge pointing at
@@ -269,6 +279,18 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 		}
 	}
 
+	// BACI-141: two bulk reads for the combined eval / transcript chip.
+	// Both stay O(N issues in scope) and share the existing
+	// idx_comments_issue_eval index / document_links FK indices.
+	evalCountByID, err := c.CountEvalCommentsByIssue(ctx, issueIDs)
+	if err != nil {
+		return nil, err
+	}
+	transcriptCountByID, err := c.CountTranscriptDocsByIssue(ctx, issueIDs)
+	if err != nil {
+		return nil, err
+	}
+
 	cards := make([]BoardCard, 0, len(issues))
 	for _, iss := range issues {
 		tags := iss.Tags
@@ -294,6 +316,8 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 			OpenQuestions:            e.questions,
 			Archived:                 iss.ArchivedAt != nil,
 			BlockedBy:                blockedByID[iss.ID],
+			TranscriptDocCount:       transcriptCountByID[iss.ID],
+			EvalCommentCount:         evalCountByID[iss.ID],
 		})
 	}
 

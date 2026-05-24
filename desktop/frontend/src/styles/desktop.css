@@ -1244,9 +1244,84 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
 .mk-transcript-tick.is-sysmeta { background: var(--ink-100); }
 .mk-transcript-tick.is-attachment { background: var(--ink-50); border: 1px dashed var(--ink-200); }
 .mk-transcript-tick.is-error { background: var(--status-blocked); }
+/* BACI-141: eval ticks ride alongside the per-event ticks, distinguished
+   by a contrasting orange so they jump out from the row of event ticks. */
+.mk-transcript-tick.is-eval {
+  background: var(--coral-300, var(--coral-500));
+  border: 1px solid var(--coral-500);
+}
 .mk-transcript-tick.is-cursor {
   outline: 1px solid var(--coral-700);
   outline-offset: 1px;
+}
+
+/* BACI-141: per-event eval note panel + composer. The note panel
+   pins below an EventCard body; the composer pops over below it on
+   click. Both share the small card-internal styling so the
+   transcript reading flow stays continuous. */
+.mk-transcript-eval-notes {
+  display: flex; flex-direction: column; gap: 6px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border-2);
+}
+.mk-transcript-eval-note {
+  padding: 6px 8px;
+  background: var(--bg-3);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+}
+.mk-transcript-eval-note-head {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--fg-3);
+}
+.mk-transcript-eval-note-pill {
+  display: inline-flex; align-items: center;
+  padding: 1px 6px;
+  background: var(--coral-500); color: var(--paper, #fff);
+  border-radius: 9px;
+  font-size: 10px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.mk-transcript-eval-note-author { color: var(--fg-1); }
+.mk-transcript-eval-note-ts { margin-left: auto; }
+.mk-transcript-eval-note-body { margin-top: 4px; font-size: 12px; }
+
+.mk-transcript-eval-composer-trigger-row {
+  display: flex; justify-content: flex-end;
+  margin-top: 6px;
+}
+.mk-transcript-eval-composer-trigger {
+  font-size: 11px; padding: 2px 8px;
+  background: transparent;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  color: var(--fg-3);
+  cursor: pointer;
+}
+.mk-transcript-eval-composer-trigger:hover {
+  color: var(--coral-700); border-color: var(--coral-500);
+}
+.mk-transcript-eval-composer {
+  margin-top: 6px;
+  padding: 8px;
+  display: flex; flex-direction: column; gap: 6px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-3);
+}
+.mk-transcript-eval-composer-textarea {
+  width: 100%; box-sizing: border-box;
+  font-family: var(--font-sans); font-size: 12px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  background: var(--paper);
+  color: var(--fg-1);
+  resize: vertical;
+}
+.mk-transcript-eval-composer-actions {
+  display: flex; justify-content: flex-end; gap: 6px;
 }
 
 .mk-transcript-stream {

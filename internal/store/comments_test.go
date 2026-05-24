@@ -153,6 +153,128 @@ func TestResolveEvalContextClaimNoDispatch(t *testing.T) {
 	}
 }
 
+// TestCommentTranscriptEventRefRoundTrips (BACI-141) locks in that the
+// new per-event anchor handle round-trips through CreateComment /
+// ListComments verbatim and that an empty handle leaves the column NULL
+// (no leakage into the read shape).
+func TestCommentTranscriptEventRefRoundTrips(t *testing.T) {
+	s, _, iss := seedRepoAndIssue(t)
+	// Empty ref: dispatch-level anchoring (the BACI-131 default).
+	plain, err := s.CreateComment(CreateCommentIn{
+		IssueID: iss.ID,
+		Author:  "alice",
+		Body:    "plain note",
+	})
+	if err != nil {
+		t.Fatalf("CreateComment plain: %v", err)
+	}
+	if plain.TranscriptEventRef != "" {
+		t.Fatalf("plain comment leaked ref: %q", plain.TranscriptEventRef)
+	}
+	// Non-empty ref: per-event anchoring (BACI-141).
+	anchored, err := s.CreateComment(CreateCommentIn{
+		IssueID:            iss.ID,
+		Author:             "alice",
+		Body:               "anchored note",
+		TranscriptEventRef: "tool_use_id:abc123",
+	})
+	if err != nil {
+		t.Fatalf("CreateComment anchored: %v", err)
+	}
+	if anchored.TranscriptEventRef != "tool_use_id:abc123" {
+		t.Fatalf("ref round-trip lost: %q", anchored.TranscriptEventRef)
+	}
+	// Line-index variant for non-tool events.
+	lineRef, err := s.CreateComment(CreateCommentIn{
+		IssueID:            iss.ID,
+		Author:             "alice",
+		Body:               "by line",
+		TranscriptEventRef: "line_index:42",
+	})
+	if err != nil {
+		t.Fatalf("CreateComment line_index: %v", err)
+	}
+	if lineRef.TranscriptEventRef != "line_index:42" {
+		t.Fatalf("line_index ref lost: %q", lineRef.TranscriptEventRef)
+	}
+	listed, err := s.ListComments(iss.ID)
+	if err != nil {
+		t.Fatalf("ListComments: %v", err)
+	}
+	if len(listed) != 3 {
+		t.Fatalf("listed %d, want 3", len(listed))
+	}
+	wantRefs := map[string]string{
+		plain.UUID:    "",
+		anchored.UUID: "tool_use_id:abc123",
+		lineRef.UUID:  "line_index:42",
+	}
+	for _, c := range listed {
+		if got := c.TranscriptEventRef; got != wantRefs[c.UUID] {
+			t.Fatalf("listed %q ref = %q, want %q", c.UUID, got, wantRefs[c.UUID])
+		}
+	}
+}
+
+// TestCommentTranscriptEventRefRejectsControlChar locks the
+// boundary-validator down: a malformed handle (control char) fails
+// loud rather than landing in the DB.
+func TestCommentTranscriptEventRefRejectsControlChar(t *testing.T) {
+	s, _, iss := seedRepoAndIssue(t)
+	_, err := s.CreateComment(CreateCommentIn{
+		IssueID:            iss.ID,
+		Author:             "alice",
+		Body:               "nope",
+		TranscriptEventRef: "tool_use_id:bad\x00id",
+	})
+	if err == nil {
+		t.Fatalf("expected control-char rejection, got nil")
+	}
+	if !strings.Contains(err.Error(), "transcript_event_ref") {
+		t.Fatalf("error %q does not mention transcript_event_ref", err.Error())
+	}
+}
+
+// TestCountEvalCommentsByIssue (BACI-141) covers the bulk reader that
+// fans the per-issue eval-comment count onto each board card.
+func TestCountEvalCommentsByIssue(t *testing.T) {
+	s, repo, iss := seedRepoAndIssue(t)
+	// A second issue in the same repo, used as a negative control.
+	iss2, err := s.CreateIssue(repo.ID, nil, "Second issue", "", model.StateTodo, nil)
+	if err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+	// One normal comment, one eval comment, on iss; nothing on iss2.
+	if _, err := s.CreateComment(CreateCommentIn{
+		IssueID: iss.ID, Author: "alice", Body: "normal",
+	}); err != nil {
+		t.Fatalf("CreateComment normal: %v", err)
+	}
+	if _, err := s.CreateComment(CreateCommentIn{
+		IssueID: iss.ID, Author: "geoff", Body: "eval", Eval: true,
+	}); err != nil {
+		t.Fatalf("CreateComment eval: %v", err)
+	}
+	counts, err := s.CountEvalCommentsByIssue([]int64{iss.ID, iss2.ID})
+	if err != nil {
+		t.Fatalf("CountEvalCommentsByIssue: %v", err)
+	}
+	if got := counts[iss.ID]; got != 1 {
+		t.Fatalf("counts[iss] = %d, want 1", got)
+	}
+	if _, ok := counts[iss2.ID]; ok {
+		t.Fatalf("counts[iss2] present, want absent (zero matches)")
+	}
+	// Empty input returns empty map, not nil.
+	empty, err := s.CountEvalCommentsByIssue(nil)
+	if err != nil {
+		t.Fatalf("CountEvalCommentsByIssue empty: %v", err)
+	}
+	if empty == nil || len(empty) != 0 {
+		t.Fatalf("empty input got %v, want empty map", empty)
+	}
+}
+
 // TestResolveEvalContextClaimWithDispatch surfaces the newest matching
 // non-cancelled dispatch's mode and id.
 func TestResolveEvalContextClaimWithDispatch(t *testing.T) {

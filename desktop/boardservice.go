@@ -81,7 +81,14 @@ type CommentDTO struct {
 	AgentSessionID string    `json:"agentSessionId,omitempty"`
 	DispatchID     *int64    `json:"dispatchId,omitempty"`
 	Mode           string    `json:"mode,omitempty"`
-	AgentName      string    `json:"agentName,omitempty"`
+	// TranscriptEventRef (BACI-141) anchors an eval comment to a
+	// specific event inside a `.jsonl` transcript. Two shapes:
+	// `tool_use_id:<id>` or `line_index:<n>`. Empty keeps the
+	// dispatch-level anchoring. Drives the per-event annotation
+	// overlay in the transcript viewer; the in-line composer there
+	// fills it before POSTing.
+	TranscriptEventRef string `json:"transcriptEventRef,omitempty"`
+	AgentName          string `json:"agentName,omitempty"`
 }
 
 // PRDTO is one attached pull request.
@@ -415,11 +422,12 @@ func (b *BoardService) GetIssue(repoPrefix, key string) (IssueDetail, error) {
 	for _, c := range view.Comments {
 		comments = append(comments, CommentDTO{
 			UUID: c.UUID, Author: c.Author, Body: c.Body, CreatedAt: c.CreatedAt,
-			Eval:           c.Eval,
-			AgentSessionID: c.AgentSessionID,
-			DispatchID:     c.DispatchID,
-			Mode:           c.Mode,
-			AgentName:      c.AgentName,
+			Eval:               c.Eval,
+			AgentSessionID:     c.AgentSessionID,
+			DispatchID:         c.DispatchID,
+			Mode:               c.Mode,
+			TranscriptEventRef: c.TranscriptEventRef,
+			AgentName:          c.AgentName,
 		})
 	}
 	prs := make([]PRDTO, 0, len(view.PullRequests))
@@ -536,11 +544,12 @@ func (b *BoardService) GetIssueBrief(repoPrefix, key string) (IssueBriefDTO, err
 	for _, c := range brief.Comments {
 		comments = append(comments, CommentDTO{
 			UUID: c.UUID, Author: c.Author, Body: c.Body, CreatedAt: c.CreatedAt,
-			Eval:           c.Eval,
-			AgentSessionID: c.AgentSessionID,
-			DispatchID:     c.DispatchID,
-			Mode:           c.Mode,
-			AgentName:      c.AgentName,
+			Eval:               c.Eval,
+			AgentSessionID:     c.AgentSessionID,
+			DispatchID:         c.DispatchID,
+			Mode:               c.Mode,
+			TranscriptEventRef: c.TranscriptEventRef,
+			AgentName:          c.AgentName,
 		})
 	}
 
@@ -627,8 +636,10 @@ func (b *BoardService) SetIssueState(repoPrefix, key, state string) (BoardCard, 
 // `eval` (BACI-131) flags the row as a quality-review note posted from
 // the kanban quick-eval composer — the server pins the in-flight
 // (agent_session_id, dispatch_id, mode) snapshot onto the comment at
-// write time.
-func (b *BoardService) AddComment(repoPrefix, key, author, body string, isEval bool) (IssueDetail, error) {
+// write time. `transcriptEventRef` (BACI-141) is the caller-supplied
+// per-event anchor handle the in-transcript composer fills before
+// posting; empty leaves the comment dispatch-level anchored.
+func (b *BoardService) AddComment(repoPrefix, key, author, body string, isEval bool, transcriptEventRef string) (IssueDetail, error) {
 	ctx := context.Background()
 	repo, err := b.resolveRepoForKey(ctx, repoPrefix, key)
 	if err != nil {
@@ -642,10 +653,11 @@ func (b *BoardService) AddComment(repoPrefix, key, author, body string, isEval b
 		}
 	}
 	if _, err := b.client.AddComment(ctx, repo, inputs.CommentAddInput{
-		IssueKey: key,
-		Author:   author,
-		Body:     body,
-		Eval:     isEval,
+		IssueKey:           key,
+		Author:             author,
+		Body:               body,
+		Eval:               isEval,
+		TranscriptEventRef: transcriptEventRef,
 	}, false); err != nil {
 		return IssueDetail{}, err
 	}

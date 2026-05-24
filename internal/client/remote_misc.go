@@ -133,6 +133,19 @@ func (c *remoteClient) BlockersFor(ctx context.Context, ids []int64) (map[int64]
 	return nil, ErrLocalOnly
 }
 
+// CountEvalCommentsByIssue stays local-only (BACI-141). Same locality
+// rationale as BlockersFor — only the local assembler reads it, and
+// the web UI fetches the pre-baked card DTO from `/cards`.
+func (c *remoteClient) CountEvalCommentsByIssue(ctx context.Context, ids []int64) (map[int64]int, error) {
+	return nil, ErrLocalOnly
+}
+
+// CountTranscriptDocsByIssue stays local-only (BACI-141). Same
+// locality rationale as CountEvalCommentsByIssue above.
+func (c *remoteClient) CountTranscriptDocsByIssue(ctx context.Context, ids []int64) (map[int64]int, error) {
+	return nil, ErrLocalOnly
+}
+
 // ----- PRs -----
 
 func (c *remoteClient) ListPRs(ctx context.Context, repo *model.Repo, key string) ([]*model.PullRequest, error) {

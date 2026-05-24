@@ -14,15 +14,18 @@ import (
 // Eval / AgentSessionID / DispatchID / Mode quartet (BACI-131) is the
 // in-flight context the kanban quick-eval composer pins onto the row
 // server-side via ResolveEvalContext; on normal comments the four
-// fields stay at zero values.
+// fields stay at zero values. TranscriptEventRef (BACI-141) is the
+// caller-supplied anchor pointing at a specific event in a `.jsonl`
+// transcript — empty string keeps the dispatch-level anchoring.
 type CreateCommentIn struct {
-	IssueID        int64
-	Author         string
-	Body           string
-	Eval           bool
-	AgentSessionID string
-	DispatchID     *int64
-	Mode           string
+	IssueID            int64
+	Author             string
+	Body               string
+	Eval               bool
+	AgentSessionID     string
+	DispatchID         *int64
+	Mode               string
+	TranscriptEventRef string
 }
 
 func (s *Store) CreateComment(in CreateCommentIn) (*model.Comment, error) {
@@ -38,14 +41,18 @@ func (s *Store) CreateComment(in CreateCommentIn) (*model.Comment, error) {
 	if err != nil {
 		return nil, err
 	}
+	ref, err := validateTranscriptEventRef(in.TranscriptEventRef)
+	if err != nil {
+		return nil, err
+	}
 	evalInt := 0
 	if in.Eval {
 		evalInt = 1
 	}
 	res, err := s.DB.Exec(
-		`INSERT INTO comments (uuid, issue_id, author, body, eval, agent_session_id, dispatch_id, mode)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		identity.New(), in.IssueID, author, body, evalInt, sess, nullableInt(in.DispatchID), mode,
+		`INSERT INTO comments (uuid, issue_id, author, body, eval, agent_session_id, dispatch_id, mode, transcript_event_ref)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		identity.New(), in.IssueID, author, body, evalInt, sess, nullableInt(in.DispatchID), mode, nullableString(ref),
 	)
 	if err != nil {
 		return nil, err
@@ -57,12 +64,12 @@ func (s *Store) CreateComment(in CreateCommentIn) (*model.Comment, error) {
 // commentCols / commentSelect drive every single-row read of a comment.
 // agent_name is filled by the brief / issue-detail JOIN at a separate
 // query — the read helpers here keep to the persisted columns.
-const commentCols = `id, uuid, issue_id, author, body, eval, agent_session_id, dispatch_id, mode, created_at`
+const commentCols = `id, uuid, issue_id, author, body, eval, agent_session_id, dispatch_id, mode, transcript_event_ref, created_at`
 
 // commentColsQualified mirrors commentCols but prefixes every column
 // with the `c.` alias — needed by the ListComments JOIN where bare
 // `id` would clash with agent_sessions.id and agents.id.
-const commentColsQualified = `c.id, c.uuid, c.issue_id, c.author, c.body, c.eval, c.agent_session_id, c.dispatch_id, c.mode, c.created_at`
+const commentColsQualified = `c.id, c.uuid, c.issue_id, c.author, c.body, c.eval, c.agent_session_id, c.dispatch_id, c.mode, c.transcript_event_ref, c.created_at`
 
 func (s *Store) GetCommentByID(id int64) (*model.Comment, error) {
 	row := s.DB.QueryRow(`SELECT `+commentCols+` FROM comments WHERE id = ?`, id)
@@ -83,16 +90,19 @@ func (s *Store) GetCommentByUUID(uuid string) (*model.Comment, error) {
 // deliberately absent: dispatch_id is a local-DB integer FK that can't
 // round-trip cross-machine, so the sync import path leaves it nil and
 // rebuilds-by-implication from (AgentSessionID, Mode) if a reviewer
-// needs it.
+// needs it. TranscriptEventRef (BACI-141) is carried so the per-event
+// anchor survives a sync round-trip; the column itself is a TEXT
+// anchor handle and is portable.
 type CreateCommentFromSyncIn struct {
-	IssueID        int64
-	UUID           string
-	Author         string
-	Body           string
-	CreatedAt      sql.NullTime
-	Eval           bool
-	AgentSessionID string
-	Mode           string
+	IssueID            int64
+	UUID               string
+	Author             string
+	Body               string
+	CreatedAt          sql.NullTime
+	Eval               bool
+	AgentSessionID     string
+	Mode               string
+	TranscriptEventRef string
 }
 
 // CreateCommentFromSync inserts a comment with a caller-supplied
@@ -115,6 +125,10 @@ func (s *Store) CreateCommentFromSync(in CreateCommentFromSyncIn) (*model.Commen
 	if err != nil {
 		return nil, err
 	}
+	ref, err := validateTranscriptEventRef(in.TranscriptEventRef)
+	if err != nil {
+		return nil, err
+	}
 	evalInt := 0
 	if in.Eval {
 		evalInt = 1
@@ -122,6 +136,11 @@ func (s *Store) CreateCommentFromSync(in CreateCommentFromSyncIn) (*model.Commen
 	cols := []string{"uuid", "issue_id", "author", "body", "eval", "agent_session_id", "mode"}
 	placeholders := []string{"?", "?", "?", "?", "?", "?", "?"}
 	args := []any{in.UUID, in.IssueID, author, body, evalInt, sess, mode}
+	if ref != "" {
+		cols = append(cols, "transcript_event_ref")
+		placeholders = append(placeholders, "?")
+		args = append(args, ref)
+	}
 	if in.CreatedAt.Valid {
 		cols = append(cols, "created_at")
 		placeholders = append(placeholders, "?")
@@ -229,11 +248,11 @@ func (s *Store) ListComments(issueID int64) ([]*model.Comment, error) {
 
 func scanComment(row rowScanner) (*model.Comment, error) {
 	var c model.Comment
-	var sess, mode sql.NullString
+	var sess, mode, transcriptRef sql.NullString
 	var dispatchID sql.NullInt64
 	err := row.Scan(
 		&c.ID, &c.UUID, &c.IssueID, &c.Author, &c.Body,
-		&c.Eval, &sess, &dispatchID, &mode, &c.CreatedAt,
+		&c.Eval, &sess, &dispatchID, &mode, &transcriptRef, &c.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -243,6 +262,7 @@ func scanComment(row rowScanner) (*model.Comment, error) {
 	}
 	c.AgentSessionID = sess.String
 	c.Mode = mode.String
+	c.TranscriptEventRef = transcriptRef.String
 	if dispatchID.Valid {
 		id := dispatchID.Int64
 		c.DispatchID = &id
@@ -254,11 +274,11 @@ func scanComment(row rowScanner) (*model.Comment, error) {
 // agent_name column the ListComments JOIN appends.
 func scanCommentWithAgent(row rowScanner) (*model.Comment, error) {
 	var c model.Comment
-	var sess, mode, agentName sql.NullString
+	var sess, mode, transcriptRef, agentName sql.NullString
 	var dispatchID sql.NullInt64
 	err := row.Scan(
 		&c.ID, &c.UUID, &c.IssueID, &c.Author, &c.Body,
-		&c.Eval, &sess, &dispatchID, &mode, &c.CreatedAt,
+		&c.Eval, &sess, &dispatchID, &mode, &transcriptRef, &c.CreatedAt,
 		&agentName,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -269,12 +289,85 @@ func scanCommentWithAgent(row rowScanner) (*model.Comment, error) {
 	}
 	c.AgentSessionID = sess.String
 	c.Mode = mode.String
+	c.TranscriptEventRef = transcriptRef.String
 	if dispatchID.Valid {
 		id := dispatchID.Int64
 		c.DispatchID = &id
 	}
 	c.AgentName = agentName.String
 	return &c, nil
+}
+
+// maxTranscriptEventRefLen caps the per-event anchor handle. Generous
+// for the two supported shapes (`tool_use_id:<uuid>` ≈ 50 chars,
+// `line_index:<n>` ≈ 20 chars); tight enough that a runaway paste
+// fails fast.
+const maxTranscriptEventRefLen = 200
+
+// validateTranscriptEventRef normalises and validates the BACI-141
+// per-event anchor handle. Empty is allowed (the row keeps the
+// dispatch-level anchoring). Trims whitespace, rejects control
+// characters, caps length. The two recognised shapes are
+// `tool_use_id:<id>` and `line_index:<n>`; we only enforce the broad
+// shape (single line, printable ASCII) rather than re-parsing the two
+// formats — callers that produce these handles already know what
+// they're writing, and a future third shape shouldn't need a
+// boundary-validator change.
+func validateTranscriptEventRef(s string) (string, error) {
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "" {
+		return "", nil
+	}
+	if len(trimmed) > maxTranscriptEventRefLen {
+		return "", fmt.Errorf("transcript_event_ref too long: %d chars, max %d", len(trimmed), maxTranscriptEventRefLen)
+	}
+	for _, r := range trimmed {
+		if r < 0x20 || r == 0x7F {
+			return "", fmt.Errorf("transcript_event_ref contains a disallowed control character (U+%04X)", r)
+		}
+	}
+	return trimmed, nil
+}
+
+func nullableString(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+// CountEvalCommentsByIssue (BACI-141) returns, keyed by issue id, the
+// count of comments on that issue with eval = 1. Rides the partial
+// `idx_comments_issue_eval` index. Issues with zero eval comments
+// don't appear in the map — the caller treats absence as zero.
+func (s *Store) CountEvalCommentsByIssue(issueIDs []int64) (map[int64]int, error) {
+	out := make(map[int64]int, len(issueIDs))
+	if len(issueIDs) == 0 {
+		return out, nil
+	}
+	placeholders := make([]string, len(issueIDs))
+	args := make([]any, len(issueIDs))
+	for i, id := range issueIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	q := `SELECT issue_id, COUNT(*) FROM comments
+	      WHERE eval = 1 AND issue_id IN (` + strings.Join(placeholders, ", ") + `)
+	      GROUP BY issue_id`
+	rows, err := s.DB.Query(q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("count eval comments: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var n int
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, fmt.Errorf("scan eval-count row: %w", err)
+		}
+		out[id] = n
+	}
+	return out, rows.Err()
 }
 
 // validateEvalTriple normalises and validates the (agent_session_id,

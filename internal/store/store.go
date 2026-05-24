@@ -626,6 +626,21 @@ func migrate(db *sql.DB) error {
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_comments_issue_eval ON comments(issue_id, created_at) WHERE eval = 1`); err != nil {
 		return fmt.Errorf("create idx_comments_issue_eval: %w", err)
 	}
+	// BACI-141: comments.transcript_event_ref anchors an eval comment to
+	// a specific event inside a `.jsonl` transcript (`tool_use_id:<id>`
+	// or `line_index:<n>`). The CREATE TABLE in schema.sql carries the
+	// column for fresh DBs; the ALTER below brings older DBs up to date.
+	// Nullable — NULL keeps the BACI-131 dispatch-level anchoring
+	// unchanged.
+	hasTranscriptRef, err := columnExists(db, "comments", "transcript_event_ref")
+	if err != nil {
+		return err
+	}
+	if !hasTranscriptRef {
+		if _, err := db.Exec(`ALTER TABLE comments ADD COLUMN transcript_event_ref TEXT`); err != nil {
+			return fmt.Errorf("add transcript_event_ref to comments: %w", err)
+		}
+	}
 	if err := migrateSyncStateKindCheck(db); err != nil {
 		return err
 	}

@@ -11,12 +11,36 @@
 import React from 'react';
 import type { RenderItem } from './types';
 
+// EvalTick (BACI-141) is a synthetic minimap entry inserted alongside
+// the per-event ticks. anchorItemIndex points into the underlying
+// `items` array (the same index space the cursor uses) so the tick
+// renders at the matching event's vertical position; `count` lets a
+// single tick stand in for N notes anchored to the same event.
+export type EvalTick = {
+  // Stable key for React reconciliation. The parent uses the comment
+  // uuid (or a slash-joined set of uuids for a multi-note tick).
+  key: string;
+  // Index into `items` the tick sits next to. Unanchored notes pass 0
+  // so they pin to the dispatch prompt card.
+  anchorItemIndex: number;
+  // Number of notes the tick represents — drives the aria-label only,
+  // the rendered glyph stays the same size regardless.
+  count: number;
+  // The scroll-anchor id to jump to on click. Caller-supplied because
+  // an unanchored note jumps to the dispatch prompt and an anchored
+  // note jumps to its EventCard.
+  scrollTargetId: string;
+};
+
 type MinimapProps = {
   items: RenderItem[];
   cursorIdx: number;
   // Scroll-anchor id format the rail dereferences. Stays in
   // lockstep with the id TranscriptView passes to each EventCard.
   anchorId: (item: RenderItem) => string;
+  // BACI-141: extra ticks the viewer inserts for eval notes. Empty /
+  // absent on transcripts with no eval material.
+  evalTicks?: EvalTick[];
 };
 
 function tickClass(item: RenderItem): string {
@@ -65,6 +89,7 @@ export default function Minimap({
   items,
   cursorIdx,
   anchorId,
+  evalTicks,
 }: MinimapProps): React.ReactElement {
   const scrollTo = (id: string) => {
     const el = typeof document !== 'undefined' ? document.getElementById(id) : null;
@@ -72,18 +97,46 @@ export default function Minimap({
       el.scrollIntoView({ block: 'center', behavior: 'smooth' });
     }
   };
+  // BACI-141: bucket eval ticks by anchorItemIndex so the rail can
+  // render the per-event tick + its companion eval glyph(s) inline.
+  // Multiple notes anchored to the same event get one combined tick
+  // (the per-tick `count` lights up the aria-label).
+  const evalByItemIndex = new Map<number, EvalTick[]>();
+  for (const tick of evalTicks ?? []) {
+    const existing = evalByItemIndex.get(tick.anchorItemIndex);
+    if (existing) existing.push(tick);
+    else evalByItemIndex.set(tick.anchorItemIndex, [tick]);
+  }
   return (
     <nav className="mk-transcript-minimap" aria-label="Transcript event minimap">
-      {items.map((item, i) => (
-        <button
-          key={item.id}
-          type="button"
-          className={`${tickClass(item)} ${i === cursorIdx ? 'is-cursor' : ''}`}
-          aria-label={tickLabel(item, i)}
-          title={tickLabel(item, i)}
-          onClick={() => scrollTo(anchorId(item))}
-        />
-      ))}
+      {items.map((item, i) => {
+        const ticks = evalByItemIndex.get(i) ?? [];
+        return (
+          <React.Fragment key={item.id}>
+            <button
+              type="button"
+              className={`${tickClass(item)} ${i === cursorIdx ? 'is-cursor' : ''}`}
+              aria-label={tickLabel(item, i)}
+              title={tickLabel(item, i)}
+              onClick={() => scrollTo(anchorId(item))}
+            />
+            {ticks.map(tick => {
+              const total = tick.count;
+              const label = `Eval note${total === 1 ? '' : 's'} (${total}) at #${i + 1}`;
+              return (
+                <button
+                  key={tick.key}
+                  type="button"
+                  className="mk-transcript-tick is-eval"
+                  aria-label={label}
+                  title={label}
+                  onClick={() => scrollTo(tick.scrollTargetId)}
+                />
+              );
+            })}
+          </React.Fragment>
+        );
+      })}
     </nav>
   );
 }
