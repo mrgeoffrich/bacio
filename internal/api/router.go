@@ -205,7 +205,15 @@ func newRouter(d deps) http.Handler {
 	// UI's Sync badge reflects real state instead of a hardcoded
 	// false. /settings/sync-preferences is the background-sync
 	// opt-out toggle, mirroring /settings/board-preferences.
+	//
+	// BACI-107 adds the inverse, registry-shaped read at GET
+	// /sync/repos — one entry per sync_remotes row with its project
+	// members nested, plus a sibling list of tracked project repos
+	// with no sync config. The literal "repos" segment under /sync is
+	// more specific than the bare /sync handler so ServeMux
+	// disambiguates without a conflicting pattern.
 	mux.HandleFunc("GET /sync", d.handleSyncStatusList)
+	mux.HandleFunc("GET /sync/repos", d.handleSyncRegistryList)
 	mux.HandleFunc("GET /repos/{prefix}/sync", d.handleSyncStatusGet)
 	mux.HandleFunc("GET /settings/sync-preferences", d.handleSyncPreferencesGet)
 	mux.HandleFunc("PUT /settings/sync-preferences", d.handleSyncPreferencesSet)

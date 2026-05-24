@@ -48,6 +48,74 @@ interface SyncStatusApi {
   remote?: string;
 }
 
+// SyncRegistryApi / SyncRepoApi / MemberProjectApi / UnsyncedProjectApi
+// mirror api.SyncRegistryOut and friends — the wire shape of the
+// BACI-107 GET /sync/repos endpoint. Snake-case on the wire matches
+// every other api.http.ts wire DTO; getSyncRegistry() below reshapes
+// to the camelCase SyncRegistry the React tree consumes.
+interface SyncRegistryApi {
+  sync_repos: SyncRepoApi[];
+  unsynced_projects: UnsyncedProjectApi[];
+}
+
+interface SyncRepoApi {
+  remote_url: string;
+  label: string;
+  local_path: string;
+  cloned_at: string;
+  last_sync_at?: string;
+  last_error?: string;
+  in_progress: boolean;
+  projects: MemberProjectApi[];
+}
+
+interface MemberProjectApi {
+  prefix: string;
+  name: string;
+  uuid?: string;
+  status: 'linked' | 'phantom' | 'absent';
+}
+
+interface UnsyncedProjectApi {
+  prefix: string;
+  name: string;
+  uuid: string;
+  path: string;
+}
+
+// SyncRegistry / SyncRepoEntry / MemberProject / UnsyncedProject are
+// the camelCase DTOs the React tree consumes. Same shape as the
+// SyncRegistryApi wire types, just snake → camel on the field names.
+export interface SyncRegistry {
+  syncRepos: SyncRepoEntry[];
+  unsyncedProjects: UnsyncedProject[];
+}
+
+export interface SyncRepoEntry {
+  remoteUrl: string;
+  label: string;
+  localPath: string;
+  clonedAt: string;
+  lastSyncAt?: string;
+  lastError?: string;
+  inProgress: boolean;
+  projects: MemberProject[];
+}
+
+export interface MemberProject {
+  prefix: string;
+  name: string;
+  uuid?: string;
+  status: 'linked' | 'phantom' | 'absent';
+}
+
+export interface UnsyncedProject {
+  prefix: string;
+  name: string;
+  uuid: string;
+  path: string;
+}
+
 export interface BoardColumn {
   state: string;
   label: string;
@@ -603,6 +671,39 @@ function boardWithSync(
     syncLastAt: sync?.last_sync_at,
     syncLastError: sync?.last_error,
   };
+}
+
+// getSyncRegistry fetches BACI-107's GET /sync/repos and reshapes the
+// snake-case wire payload to the camelCase SyncRegistry the React
+// tree consumes. The reshape is mechanical — every field is renamed
+// 1:1 — so the helper stays a thin map() over the two slices.
+export async function getSyncRegistry(): Promise<SyncRegistry> {
+  const wire = await call<SyncRegistryApi>('/sync/repos');
+  return {
+    syncRepos: wire.sync_repos.map(reshapeSyncRepo),
+    unsyncedProjects: wire.unsynced_projects.map(reshapeUnsyncedProject),
+  };
+}
+
+function reshapeSyncRepo(r: SyncRepoApi): SyncRepoEntry {
+  return {
+    remoteUrl: r.remote_url,
+    label: r.label,
+    localPath: r.local_path,
+    clonedAt: r.cloned_at,
+    lastSyncAt: r.last_sync_at,
+    lastError: r.last_error,
+    inProgress: r.in_progress,
+    projects: r.projects.map(reshapeMemberProject),
+  };
+}
+
+function reshapeMemberProject(m: MemberProjectApi): MemberProject {
+  return { prefix: m.prefix, name: m.name, uuid: m.uuid, status: m.status };
+}
+
+function reshapeUnsyncedProject(u: UnsyncedProjectApi): UnsyncedProject {
+  return { prefix: u.prefix, name: u.name, uuid: u.uuid, path: u.path };
 }
 
 export async function listColumns(): Promise<BoardColumn[]> {
