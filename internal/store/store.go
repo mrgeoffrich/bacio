@@ -553,6 +553,33 @@ func migrate(db *sql.DB) error {
 	if err := migrateDocumentsTypeCheck(db); err != nil {
 		return err
 	}
+	// BACI-138: add issues.terminal_at + index on older DBs. The
+	// CREATE TABLE declaration in schema.sql carries the column for
+	// fresh DBs; this ALTER + backfill + index brings older DBs up to
+	// date. The backfill seeds terminal_at = updated_at for every row
+	// already in a terminal state — same fidelity as the pre-BACI-138
+	// updated_at-as-proxy sort, so a freshly migrated board picks up
+	// roughly the same order it had before the upgrade. From that point
+	// forward, only state transitions in/out of done/cancelled touch
+	// the column, so a non-state edit (tag/title/etc.) on a closed
+	// issue no longer reshuffles the column.
+	hasTerminalAt, err := columnExists(db, "issues", "terminal_at")
+	if err != nil {
+		return err
+	}
+	if !hasTerminalAt {
+		if _, err := db.Exec(`ALTER TABLE issues ADD COLUMN terminal_at DATETIME`); err != nil {
+			return fmt.Errorf("add terminal_at to issues: %w", err)
+		}
+		if _, err := db.Exec(
+			`UPDATE issues SET terminal_at = updated_at WHERE state IN ('done','cancelled') AND terminal_at IS NULL`,
+		); err != nil {
+			return fmt.Errorf("backfill terminal_at: %w", err)
+		}
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_issues_terminal_at ON issues(terminal_at)`); err != nil {
+		return fmt.Errorf("create idx_issues_terminal_at: %w", err)
+	}
 	// BACI-131: four columns on `comments` for eval comments — the
 	// quick-eval notes the kanban card's composer posts while watching
 	// an agent work an issue. The CREATE TABLE in schema.sql carries

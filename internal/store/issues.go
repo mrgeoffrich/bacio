@@ -53,8 +53,13 @@ func (s *Store) CreateIssue(repoID int64, featureID *int64, title, description s
 		return nil, err
 	}
 
+	// BACI-138: terminal_at is seeded on insert when the issue lands
+	// directly in a terminal state, so a `bacio issue add --state done`
+	// shows up on the Done column with a populated sort key from the
+	// first read. terminalAtClause yields CURRENT_TIMESTAMP for
+	// done/cancelled and NULL otherwise.
 	res, err := tx.Exec(
-		`INSERT INTO issues (uuid, repo_id, number, feature_id, title, description, state) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO issues (uuid, repo_id, number, feature_id, title, description, state, terminal_at) VALUES (?, ?, ?, ?, ?, ?, ?, `+terminalAtClause(state)+`)`,
 		identity.New(), repoID, num, nullableInt(featureID), title, description, string(state),
 	)
 	if err != nil {
@@ -245,8 +250,34 @@ func (s *Store) UpdateIssue(id int64, title, description *string, featureID **in
 }
 
 func (s *Store) SetIssueState(id int64, state model.State) error {
-	_, err := s.DB.Exec(`UPDATE issues SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, string(state), id)
+	// BACI-138: terminal_at follows the state column — stamped on a
+	// transition INTO done/cancelled, cleared on a transition OUT.
+	// The terminalAtClause helper builds a CASE expression that
+	// inspects the NEW state (not the current row), which is the only
+	// state info we have without a SELECT-then-UPDATE round trip.
+	_, err := s.DB.Exec(
+		`UPDATE issues SET state = ?, updated_at = CURRENT_TIMESTAMP, terminal_at = `+terminalAtClause(state)+` WHERE id = ?`,
+		string(state), id,
+	)
 	return err
+}
+
+// terminalAtClause returns the SQL expression to assign to terminal_at
+// when the row's state column is being set to `target`. Terminal
+// targets evaluate to CURRENT_TIMESTAMP (stamping the fresh entry into
+// the terminal state); non-terminal targets evaluate to NULL (clearing
+// the column so a reopened issue no longer sorts as completed).
+//
+// Returned as a literal SQL fragment rather than a value bound through
+// `?` because SQLite parameter binding can't carry CURRENT_TIMESTAMP
+// the way a literal can, and the two-branch decision is a closed set
+// driven by the caller's typed model.State input — there's no
+// SQL-injection surface.
+func terminalAtClause(target model.State) string {
+	if target == model.StateDone || target == model.StateCancelled {
+		return "CURRENT_TIMESTAMP"
+	}
+	return "NULL"
 }
 
 // SetIssueAssignee writes the assignee field. An empty string clears it.
@@ -357,9 +388,13 @@ func (s *Store) ClaimNextIssue(repoID int64, featureID int64, assignee string) (
 		return nil, err
 	}
 
+	// BACI-138: terminal_at stays NULL — ClaimNextIssue's predicate
+	// only matches `state = 'todo'`, where terminal_at is already NULL.
+	// Listing it explicitly is belt-and-braces in case the predicate
+	// ever loosens.
 	res, err := tx.Exec(`
 		UPDATE issues
-		SET state = 'in_progress', assignee = ?, updated_at = CURRENT_TIMESTAMP
+		SET state = 'in_progress', assignee = ?, updated_at = CURRENT_TIMESTAMP, terminal_at = NULL
 		WHERE id = ? AND state = 'todo' AND assignee = ''`, assignee, id)
 	if err != nil {
 		return nil, err
@@ -539,6 +574,11 @@ func (s *Store) UpdateIssueByUUID(uuid string, p IssuePatch) error {
 	if p.State != nil {
 		sets = append(sets, "state = ?")
 		args = append(args, string(*p.State))
+		// BACI-138: keep terminal_at in lockstep with state on the
+		// sync-import path too. terminalAtClause is a SQL literal
+		// (NULL / CURRENT_TIMESTAMP), not a bound value — see the
+		// SetIssueState comment for the rationale.
+		sets = append(sets, "terminal_at = "+terminalAtClause(*p.State))
 	}
 	if p.Assignee != nil {
 		clean := *p.Assignee
@@ -615,8 +655,13 @@ func (s *Store) CreateIssueFromSync(repoID int64, uuid string, number int64, fea
 	}
 	defer tx.Rollback()
 
-	q := `INSERT INTO issues (uuid, repo_id, number, feature_id, title, description, state, assignee`
-	vals := `?, ?, ?, ?, ?, ?, ?, ?`
+	// BACI-138: seed terminal_at when the imported row is already in
+	// a terminal state. terminalAtClause yields CURRENT_TIMESTAMP for
+	// done/cancelled and NULL otherwise — embedded as a SQL literal
+	// (not a bound `?` value) because CURRENT_TIMESTAMP only resolves
+	// from a literal at parse time.
+	q := `INSERT INTO issues (uuid, repo_id, number, feature_id, title, description, state, assignee, terminal_at`
+	vals := `?, ?, ?, ?, ?, ?, ?, ?, ` + terminalAtClause(state)
 	args := []any{uuid, repoID, number, nullableInt(featureID), title, description, string(state), assignee}
 	if createdAt.Valid {
 		q += `, created_at`
@@ -700,7 +745,7 @@ SELECT i.id, i.uuid, i.repo_id, i.number, r.prefix, i.feature_id, COALESCE(f.slu
            AND c.released_at IS NULL
            AND s.ended_at IS NULL
        ) AS taken,
-       i.archived_at, i.created_at, i.updated_at
+       i.archived_at, i.terminal_at, i.created_at, i.updated_at
 FROM issues i
 JOIN repos r ON r.id = i.repo_id
 LEFT JOIN features f ON f.id = i.feature_id`
@@ -713,9 +758,11 @@ func scanIssue(row rowScanner) (*model.Issue, error) {
 		featSlug   string
 		state      string
 		archivedAt sql.NullTime
+		terminalAt sql.NullTime
 	)
 	err := row.Scan(&i.ID, &i.UUID, &i.RepoID, &i.Number, &prefix, &featureID, &featSlug,
-		&i.Title, &i.Description, &state, &i.Assignee, &i.WaitingForClaim, &i.Taken, &archivedAt, &i.CreatedAt, &i.UpdatedAt)
+		&i.Title, &i.Description, &state, &i.Assignee, &i.WaitingForClaim, &i.Taken,
+		&archivedAt, &terminalAt, &i.CreatedAt, &i.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -732,6 +779,10 @@ func scanIssue(row rowScanner) (*model.Issue, error) {
 	if archivedAt.Valid {
 		t := archivedAt.Time
 		i.ArchivedAt = &t
+	}
+	if terminalAt.Valid {
+		t := terminalAt.Time
+		i.TerminalAt = &t
 	}
 	return &i, nil
 }

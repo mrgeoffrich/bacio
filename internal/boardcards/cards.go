@@ -47,14 +47,27 @@ func StateLabel(s model.State) string {
 	return string(s)
 }
 
-// CompletionSortKey returns the timestamp used to order an issue within
-// the Done / Cancelled columns: updated_at when set (the state change
-// into done/cancelled bumps it), else created_at. Newest-first ordering
-// sorts these descending. updated_at is a proxy for "completed at" —
-// bacio has no dedicated completion timestamp (BACI-101).
+// CompletionSortKey returns the timestamp used to order an issue
+// within the Done / Cancelled columns: terminal_at (the dedicated
+// "moved into done/cancelled" timestamp, BACI-138), else updated_at,
+// else created_at. Newest-first ordering sorts descending.
+//
+// terminal_at is the load-bearing field — it's stamped by every state
+// transition INTO done/cancelled and cleared on every transition OUT,
+// so a tag / title / description edit on a closed issue no longer
+// reshuffles the column (the BACI-101 proxy the BACI-138 brief
+// flagged). The updated_at / created_at fallback handles two narrow
+// cases: (1) the migration backfill seeds terminal_at = updated_at
+// for pre-BACI-138 closed rows, but a fresh DB created before the
+// row migrated could still race with the read; (2) defence in depth
+// for unit tests that build a *model.Issue by hand without setting
+// TerminalAt.
 func CompletionSortKey(iss *model.Issue) time.Time {
 	if iss == nil {
 		return time.Time{}
+	}
+	if iss.TerminalAt != nil && !iss.TerminalAt.IsZero() {
+		return *iss.TerminalAt
 	}
 	if !iss.UpdatedAt.IsZero() {
 		return iss.UpdatedAt
