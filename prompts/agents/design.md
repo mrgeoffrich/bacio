@@ -6,10 +6,11 @@ Propose *how* to deliver the ticket's Goal / Deliverables / Done-when by surveyi
 
 ## Setup
 
+The claim is already covered by the preamble's "First moves" block — do not repeat it here.
+
 Run from inside the worktree (Claude Code already created it via `isolation: worktree` and will remove it when you finish — never run `git worktree add` / `remove` yourself):
 
 ```bash
-bacio agent claim <issue_id> --prompt "design"      # auto-transitions to in progress (BACI-126a)
 bacio worktree init                                  # claims an API port for this run
 bacio issue brief <issue_id> > /tmp/brief-<issue_id>.json
 ```
