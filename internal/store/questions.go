@@ -46,6 +46,12 @@ func (s *Store) AddSessionQuestion(in AddSessionQuestionIn) (*model.SessionQuest
 	if err := model.ValidateQuestionPayload(in.Payload); err != nil {
 		return nil, err
 	}
+	// The client layer guarantees a non-empty canonical key — see
+	// localClient.AddSessionQuestion (BACI-128). Historical empty
+	// rows on disk stay queryable; the new write path can't insert
+	// one. Defensive: still single-line / no-control-char-validate
+	// here so an unknown future caller skipping the client layer
+	// trips this guard too.
 	if in.IssueKey != "" {
 		// Single-line, no control chars — the issue_key column
 		// carries a denormalised snapshot so per-issue lookups in

@@ -739,12 +739,24 @@ func (c *localClient) ListTodosBySessionsAndIssue(ctx context.Context, pairs []s
 
 // AddSessionQuestion is the channel's entry point for the BACI-53
 // ask_user_question MCP tool. The channel resolves session_id /
-// agent identity / open-claim issue key on its side, then hands
-// the validated payload to the store. Writes a question.ask audit
-// row so `bacio history --op question.ask` surfaces every ask, and
-// auto-flips the linked issue from in_progress to needs_action so
-// the supervisor sees "agent is blocked on a question right now".
+// agent identity / issue id on its side (BACI-128 — issue_id is a
+// required, validated MCP tool arg), then hands the validated
+// payload to the store. Writes a question.ask audit row so `bacio
+// history --op question.ask` surfaces every ask, and auto-flips
+// the linked issue from in_progress to needs_action so the
+// supervisor sees "agent is blocked on a question right now".
 func (c *localClient) AddSessionQuestion(ctx context.Context, in AddSessionQuestionInput) (*model.SessionQuestion, error) {
+	// BACI-128 boundary guard: every legitimate caller now threads a
+	// validated canonical key through from the channel. Reject empty
+	// here defensively so a future caller that regresses to the old
+	// "best-effort open-claim lookup" behaviour fails loud instead of
+	// quietly inserting an orphan row the kanban surface can't see.
+	if strings.TrimSpace(in.IssueKey) == "" {
+		return nil, fmt.Errorf("AddSessionQuestion: issue_key is required (the BACI-128 validator caller must thread it through)")
+	}
+	if _, _, err := store.ParseIssueKey(in.IssueKey); err != nil {
+		return nil, fmt.Errorf("AddSessionQuestion: %w", err)
+	}
 	q, err := c.store.AddSessionQuestion(store.AddSessionQuestionIn{
 		SessionID: in.SessionID,
 		IssueKey:  in.IssueKey,
