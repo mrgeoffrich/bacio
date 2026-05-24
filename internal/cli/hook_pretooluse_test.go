@@ -38,7 +38,7 @@ func TestPathWithin(t *testing.T) {
 }
 
 // TestDecidePreToolUseInsideWorktree: an edit to a file under the
-// resolved worktree root is allowed.
+// resolved linked-worktree root is allowed.
 func TestDecidePreToolUseInsideWorktree(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "internal", "cli", "hook.go")
@@ -48,15 +48,15 @@ func TestDecidePreToolUseInsideWorktree(t *testing.T) {
 	in := &preToolUseInput{ToolName: "Edit", CWD: root}
 	in.ToolInput.FilePath = target
 
-	d := decidePreToolUse(in, func(cwd string) string { return root })
+	d := decidePreToolUse(in, func(cwd string) (string, bool) { return root, true })
 	if !d.allow {
 		t.Fatalf("expected allow for in-worktree edit, got deny: %s", d.reason)
 	}
 }
 
 // TestDecidePreToolUseOutsideWorktree: an edit addressing a parent-repo
-// absolute path is denied, and the reason names the worktree root — the
-// BACI-116 regression case.
+// absolute path is denied, and the reason names the linked-worktree
+// root — the BACI-116 regression case, reworded in BACI-129.
 func TestDecidePreToolUseOutsideWorktree(t *testing.T) {
 	parent := t.TempDir()
 	root := filepath.Join(parent, ".claude", "worktrees", "agent-abc")
@@ -72,13 +72,16 @@ func TestDecidePreToolUseOutsideWorktree(t *testing.T) {
 	in := &preToolUseInput{ToolName: "Write", CWD: root}
 	in.ToolInput.FilePath = escape
 
-	d := decidePreToolUse(in, func(cwd string) string { return root })
+	d := decidePreToolUse(in, func(cwd string) (string, bool) { return root, true })
 	if d.allow {
 		t.Fatalf("expected deny for parent-repo edit, got allow")
 	}
 	resolvedRoot := evalSymlinksLenient(root)
 	if !strings.Contains(d.reason, resolvedRoot) {
 		t.Fatalf("deny reason should name the worktree root %q; got: %s", resolvedRoot, d.reason)
+	}
+	if !strings.Contains(d.reason, "linked git worktree") {
+		t.Fatalf("deny reason should mention 'linked git worktree' wording; got: %s", d.reason)
 	}
 }
 
@@ -97,22 +100,68 @@ func TestDecidePreToolUseSiblingWorktree(t *testing.T) {
 	in := &preToolUseInput{ToolName: "Edit", CWD: root}
 	in.ToolInput.FilePath = filepath.Join(sibling, "file.go")
 
-	d := decidePreToolUse(in, func(cwd string) string { return root })
+	d := decidePreToolUse(in, func(cwd string) (string, bool) { return root, true })
 	if d.allow {
 		t.Fatalf("expected deny for sibling-worktree edit, got allow")
 	}
 }
 
-// TestDecidePreToolUseNoManifest: cwd is not inside a manifest-bearing
-// worktree (resolver returns "") — confinement does not engage, the
-// edit is allowed wherever it points.
-func TestDecidePreToolUseNoManifest(t *testing.T) {
+// TestDecidePreToolUseNoGitRepo: cwd is not inside any git repository
+// (resolver returns "", false) — confinement does not engage, the
+// edit is allowed wherever it points. BACI-129 dropped the
+// no-manifest carve-out: the carve-out is now "no git repo" instead.
+func TestDecidePreToolUseNoGitRepo(t *testing.T) {
 	in := &preToolUseInput{ToolName: "Write", CWD: t.TempDir()}
 	in.ToolInput.FilePath = "/anywhere/at/all.go"
 
-	d := decidePreToolUse(in, func(cwd string) string { return "" })
+	d := decidePreToolUse(in, func(cwd string) (string, bool) { return "", false })
 	if !d.allow {
-		t.Fatalf("expected allow when no worktree manifest is present, got deny: %s", d.reason)
+		t.Fatalf("expected allow when cwd is outside any git repo, got deny: %s", d.reason)
+	}
+}
+
+// TestDecidePreToolUsePrimaryWorktreeDenied: cwd is inside the *primary*
+// worktree of a git repo (resolver returns root, linked=false) — the
+// BACI-129 case. Every Write/Edit is denied regardless of where
+// file_path points, and the deny reason names the primary root so the
+// model is told to move to a linked worktree.
+func TestDecidePreToolUsePrimaryWorktreeDenied(t *testing.T) {
+	primary := t.TempDir()
+	target := filepath.Join(primary, "internal", "cli", "hook.go")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	in := &preToolUseInput{ToolName: "Edit", CWD: primary}
+	in.ToolInput.FilePath = target
+
+	d := decidePreToolUse(in, func(cwd string) (string, bool) { return primary, false })
+	if d.allow {
+		t.Fatalf("expected deny for primary-worktree edit, got allow")
+	}
+	resolvedPrimary := evalSymlinksLenient(primary)
+	if !strings.Contains(d.reason, resolvedPrimary) {
+		t.Fatalf("deny reason should name the primary root %q; got: %s", resolvedPrimary, d.reason)
+	}
+	if !strings.Contains(d.reason, "primary worktree") {
+		t.Fatalf("deny reason should mention 'primary worktree' wording; got: %s", d.reason)
+	}
+}
+
+// TestDecidePreToolUseLinkedWorktreeAllowed: cwd is inside a linked
+// worktree (resolver returns root, linked=true) and the edit lands
+// under that root — allowed. This is the dispatched-worker happy path.
+func TestDecidePreToolUseLinkedWorktreeAllowed(t *testing.T) {
+	linked := t.TempDir()
+	target := filepath.Join(linked, "internal", "cli", "hook.go")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	in := &preToolUseInput{ToolName: "Edit", CWD: linked}
+	in.ToolInput.FilePath = target
+
+	d := decidePreToolUse(in, func(cwd string) (string, bool) { return linked, true })
+	if !d.allow {
+		t.Fatalf("expected allow for linked-worktree edit, got deny: %s", d.reason)
 	}
 }
 
@@ -123,9 +172,9 @@ func TestDecidePreToolUseNonWriteTool(t *testing.T) {
 	in := &preToolUseInput{ToolName: "Bash", CWD: t.TempDir()}
 	in.ToolInput.FilePath = "/anywhere/at/all.go"
 
-	d := decidePreToolUse(in, func(cwd string) string {
+	d := decidePreToolUse(in, func(cwd string) (string, bool) {
 		t.Fatalf("resolver must not be consulted for a non-Write/Edit tool")
-		return ""
+		return "", false
 	})
 	if !d.allow {
 		t.Fatalf("expected allow for non-Write/Edit tool, got deny")
@@ -138,9 +187,9 @@ func TestDecidePreToolUseEmptyFilePath(t *testing.T) {
 	in := &preToolUseInput{ToolName: "Edit", CWD: t.TempDir()}
 	in.ToolInput.FilePath = "  "
 
-	d := decidePreToolUse(in, func(cwd string) string {
+	d := decidePreToolUse(in, func(cwd string) (string, bool) {
 		t.Fatalf("resolver must not be consulted when file_path is empty")
-		return ""
+		return "", false
 	})
 	if !d.allow {
 		t.Fatalf("expected allow for empty file_path, got deny")
@@ -166,7 +215,7 @@ func TestDecidePreToolUseSymlinkEscape(t *testing.T) {
 	in := &preToolUseInput{ToolName: "Write", CWD: root}
 	in.ToolInput.FilePath = filepath.Join(link, "engine.go")
 
-	d := decidePreToolUse(in, func(cwd string) string { return root })
+	d := decidePreToolUse(in, func(cwd string) (string, bool) { return root, true })
 	if d.allow {
 		t.Fatalf("expected deny for symlink-escape edit, got allow")
 	}
@@ -179,7 +228,7 @@ func TestDecidePreToolUseRelativeFilePath(t *testing.T) {
 	in := &preToolUseInput{ToolName: "Edit", CWD: root}
 	in.ToolInput.FilePath = filepath.Join("internal", "cli", "hook.go")
 
-	d := decidePreToolUse(in, func(cwd string) string { return root })
+	d := decidePreToolUse(in, func(cwd string) (string, bool) { return root, true })
 	if !d.allow {
 		t.Fatalf("expected allow for relative path under cwd, got deny: %s", d.reason)
 	}

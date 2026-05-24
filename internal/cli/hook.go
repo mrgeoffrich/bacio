@@ -19,7 +19,6 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
 	"github.com/mrgeoffrich/bacio/internal/sync"
-	"github.com/mrgeoffrich/bacio/internal/wtenv"
 )
 
 // skipUnlessAgentMode is the single guard every hook subcommand calls at
@@ -743,7 +742,9 @@ func readPreToolUseInput() (*preToolUseInput, error) {
 // string and parsing it for paths is fragile and easy to bypass.
 // Confining the write tools defuses the Bash escape for free — with the
 // parent checkout kept clean by the write-tool denial, a stray
-// `cd <main> && git commit` has nothing to commit.
+// `cd <main> && git commit` has nothing to commit. BACI-129 extended
+// the same matcher's enforcement to cover the supervisor's own cwd in
+// the main checkout — same matcher, broader precondition.
 const preToolUseMatcher = "Write|Edit"
 
 // preToolUseDecision is the verdict the confinement guard reaches for
@@ -755,23 +756,33 @@ type preToolUseDecision struct {
 	reason string
 }
 
-// worktreeRootResolver finds the dispatch worktree root that confines a
-// given cwd, or "" when cwd is not inside a manifest-bearing worktree.
-// Defaulted to the wtenv-backed resolver; swapped in tests.
-type worktreeRootResolver func(cwd string) string
+// worktreeRootResolver classifies a given cwd into one of three
+// PreToolUse outcomes the guard cares about:
+//
+//   - linked == true,  root != ""  : cwd is in a *linked* worktree —
+//     edits under root are allowed; edits outside it are denied.
+//   - linked == false, root != ""  : cwd is in the *primary* worktree
+//     of a git repo — every edit is denied (the main-checkout case
+//     closed by BACI-129).
+//   - linked == false, root == ""  : cwd is not in a git repo (or the
+//     classification failed) — fail-open, edits are allowed.
+//
+// The production implementation is gitLinkedWorktreeRoot; tests
+// substitute their own.
+type worktreeRootResolver func(cwd string) (root string, linked bool)
 
-// resolveWorktreeRoot walks up from cwd via the wtenv resolver and
-// returns the directory of the worktree manifest (environment-config.yaml)
-// — the allowed worktree root. Returns "" when no manifest fed
-// resolution (Source default), i.e. this is not a dispatch worktree, so
-// confinement does not engage. Any resolver error returns "" too:
-// fail-open is the invariant, a guard that can't resolve must not deny.
-func resolveWorktreeRoot(cwd string) string {
-	res, err := wtenv.Resolve(wtenv.ResolveOpts{Cwd: cwd})
-	if err != nil || res.ManifestPath == "" {
-		return ""
+// gitLinkedWorktreeRoot asks git directly whether cwd is in the primary
+// or a linked worktree (BACI-129), replacing the previous wtenv-backed
+// resolver that engaged only when an environment-config.yaml manifest
+// was present. Collapses any classification error to the
+// (root="", linked=false) outcome so the decision function's fail-open
+// invariant has a single error path to handle.
+func gitLinkedWorktreeRoot(cwd string) (string, bool) {
+	root, linked, err := git.LinkedWorktreeRoot(cwd)
+	if err != nil {
+		return "", false
 	}
-	return filepath.Dir(res.ManifestPath)
+	return root, linked
 }
 
 // pathWithin reports whether target is the directory root itself or a
@@ -824,10 +835,21 @@ func evalSymlinksLenient(path string) string {
 }
 
 // decidePreToolUse is the pure decision function for the PreToolUse
-// confinement guard — no stdin, no stdout, directly unit-testable. It
-// allows in every ambiguous or error case (fail-open) and denies ONLY
-// on a positive "the file_path resolves outside a known dispatch
-// worktree root" determination.
+// confinement guard — no stdin, no stdout, directly unit-testable.
+//
+// Confinement engages whenever BACIO_AGENT_MODE=1 is set (the outer
+// gate in hookPreToolUseCmd) and cwd sits inside any git repository.
+// Inside the primary worktree (the main checkout) every Write/Edit is
+// denied — this is the BACI-129 widening of the BACI-116 guard, which
+// previously short-circuited to allow when no worktree manifest was
+// present. Inside a linked worktree the call is allowed only if its
+// file_path resolves under that worktree's root (the original BACI-116
+// containment check). Outside any git repository the call is allowed
+// (fail-open).
+//
+// Every ambiguous or error case allows; a deny is emitted only on a
+// positive "this edit must not land here" determination, and the
+// deny reason names the relevant root so the model self-corrects.
 func decidePreToolUse(in *preToolUseInput, resolveRoot worktreeRootResolver) preToolUseDecision {
 	allow := preToolUseDecision{allow: true}
 
@@ -840,18 +862,37 @@ func decidePreToolUse(in *preToolUseInput, resolveRoot worktreeRootResolver) pre
 		return allow
 	}
 
-	// Confinement engages only when cwd sits inside a manifest-bearing
-	// worktree — exactly the dispatched-worker case (`bacio worktree
-	// init` is in every brief's Setup). No manifest → not a dispatch
-	// worktree → allow.
-	root := resolveRoot(in.CWD)
+	root, linked := resolveRoot(in.CWD)
+
+	// Outside any git repo → fail-open. A non-dispatch agent run
+	// against arbitrary scratch paths is not in scope for confinement.
 	if root == "" {
 		return allow
 	}
 
-	// Normalise the target: a Write/Edit file_path is normally already
-	// absolute, but resolve it against cwd defensively. Then eval
-	// symlinks on both sides so a symlink can't slip the check.
+	// Inside the *primary* worktree (the main checkout): deny every
+	// edit, regardless of where file_path points. This is the BACI-129
+	// case — a supervisor with BACIO_AGENT_MODE=1 set must not write to
+	// the parent checkout. The reason names the primary root so the
+	// model is told what to do next (move into a linked worktree, or
+	// drop BACIO_AGENT_MODE for this shell).
+	if !linked {
+		root = evalSymlinksLenient(root)
+		return preToolUseDecision{
+			allow: false,
+			reason: fmt.Sprintf(
+				"bacio: this agent-mode session must edit files inside a linked git worktree, "+
+					"not the primary worktree %s. The %s file_path %s resolves into the primary "+
+					"checkout. Run `bacio worktree init` to create a linked worktree (or move into "+
+					"an existing one) and re-issue the edit there.",
+				root, in.ToolName, in.ToolInput.FilePath),
+		}
+	}
+
+	// Linked worktree: BACI-116 containment check. Normalise the
+	// target — a Write/Edit file_path is normally already absolute, but
+	// resolve it against cwd defensively. Then eval symlinks on both
+	// sides so a symlink can't slip the check.
 	target := in.ToolInput.FilePath
 	if !filepath.IsAbs(target) {
 		base := in.CWD
@@ -871,9 +912,9 @@ func decidePreToolUse(in *preToolUseInput, resolveRoot worktreeRootResolver) pre
 	return preToolUseDecision{
 		allow: false,
 		reason: fmt.Sprintf(
-			"bacio: this dispatched-worker session is confined to its git worktree %s. "+
-				"The %s file_path %s resolves outside it (the parent checkout). "+
-				"Re-issue the edit with a path under %s.",
+			"bacio: this dispatched-worker session is confined to its linked git worktree %s. "+
+				"The %s file_path %s resolves outside it (into the primary checkout or a "+
+				"sibling worktree). Re-issue the edit with a path under %s.",
 			root, in.ToolName, in.ToolInput.FilePath, root),
 	}
 }
@@ -914,7 +955,7 @@ func hookPreToolUseCmd() *cobra.Command {
 				fmt.Fprintln(os.Stderr, "bacio hook pre-tool-use:", err)
 				return nil
 			}
-			d := decidePreToolUse(in, resolveWorktreeRoot)
+			d := decidePreToolUse(in, gitLinkedWorktreeRoot)
 			if d.allow {
 				return nil
 			}

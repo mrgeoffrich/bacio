@@ -256,7 +256,7 @@ Catching one would need a cwd-walk; that is deliberately out of scope.
 | `bacio api` | `--addr` defaults to `Resolve().APIAddr` when the flag wasn't set |
 | `bacio status` | Surfaces `db_path`, `api_addr`, `env_source`, `env_path` in JSON; one extra `Env:` row in text mode |
 | `bacio channel` | Resolves at startup from cwd (Claude Code spawns the MCP subprocess with the project root as cwd) |
-| `bacio hook *` | Resolves at every hook fire; logs the resolved DB when a manifest is in play, so misconfigured projects show up in the hook log. The `bacio hook pre-tool-use` confinement hook (BACI-116) also uses `wtenv.Resolve` to find the dispatch worktree root from the call's `cwd`: a present manifest means a dispatched worker, and any `Write`/`Edit` whose `file_path` resolves outside that root is denied |
+| `bacio hook *` | Resolves at every hook fire; logs the resolved DB when a manifest is in play, so misconfigured projects show up in the hook log. The `bacio hook pre-tool-use` confinement hook (BACI-116, BACI-129) no longer relies on `wtenv.Resolve`; it classifies cwd directly via `git rev-parse` (primary vs linked worktree) so confinement engages even when no manifest is present — e.g. a supervisor running in the main checkout with `BACIO_AGENT_MODE=1` set |
 | Desktop binary | `desktop/main.go` captures cwd before any chdir, calls `wtenv.Resolve`, threads the result into `client.Open` and `LeaderService`. Adds the resolved slug to the window title |
 
 The desktop binary takes two new flags — `--db <path>` (was missing
