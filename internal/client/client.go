@@ -245,6 +245,14 @@ type Client interface {
 	// trip. A session that's worked multiple issues only flows the
 	// requested pair's rows back. Local-only.
 	ListTodosBySessionsAndIssue(ctx context.Context, pairs []store.SessionIssuePair) (map[int64][]model.SessionTodo, error)
+	// BlockersFor returns, keyed by blocked-issue id, every `blocks`
+	// edge whose blocked-end id is in `ids` (BACI-114). Used by
+	// boardcards.Assemble to derive each card's blocked-by-open marker
+	// without N+1 lookups. Local-only — the remote backend errors with
+	// ErrLocalOnly until the kanban surface switches to a bulk REST
+	// endpoint (today the UI runs against the local DB / Wails / `bacio
+	// web`, never `bacio --remote`).
+	BlockersFor(ctx context.Context, ids []int64) (map[int64][]store.IssueBlocker, error)
 	// EnsureAgentIdentity mints a fresh persistent agent identity (a
 	// random slug, retried against the UNIQUE constraint until it
 	// sticks) and adopts it as this client's audit actor. It's the

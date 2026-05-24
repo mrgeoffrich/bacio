@@ -1,4 +1,4 @@
-import React, { useState, useRef, useLayoutEffect, useCallback } from 'react';
+import React, { useState, useRef, useLayoutEffect, useCallback, useMemo } from 'react';
 import KanbanCard from './KanbanCard.jsx';
 import QuestionModal from './QuestionModal.jsx';
 
@@ -42,7 +42,7 @@ function persistBoardScroll(repo, offset) {
   }
 }
 
-export default function Board({ activeBoard, columns, cards, promptConfig, hideEmptyColumns, onMoveCard, onOpenCard, onDispatchFromCard, onCancelWaitingCard, onAfterQuestionResolved }) {
+export default function Board({ activeBoard, columns, cards, promptConfig, hideEmptyColumns, onMoveCard, onOpenCard, onOpenIssue, onDispatchFromCard, onCancelWaitingCard, onAfterQuestionResolved }) {
   const [dragKey, setDragKey] = useState(null);
   const [overCol, setOverCol] = useState(null);
   // BACI-53: the kanban card "? N" pill opens the shared
@@ -63,6 +63,13 @@ export default function Board({ activeBoard, columns, cards, promptConfig, hideE
   const visibleColumns = hideEmptyColumns
     ? columns.filter(col => cards.some(c => c.column === col.state))
     : columns;
+
+  // BACI-114: per-key card lookup so each KanbanCard's blocked popover
+  // can join in the blocker's title from the same `cards` array it
+  // already has — Option A's "thin renderer over data the brief
+  // already has" rule. Built once per render and re-derived when the
+  // poll lands a fresh cards array.
+  const cardsByKey = useMemo(() => new Map(cards.map(c => [c.key, c])), [cards]);
 
   // BACI-119: restore the saved horizontal scrollLeft on mount, on repo
   // switch, and whenever the rendered card/column set changes width.
@@ -145,6 +152,7 @@ export default function Board({ activeBoard, columns, cards, promptConfig, hideE
                     <KanbanCard
                       key={card.key}
                       card={card}
+                      cardsByKey={cardsByKey}
                       promptConfig={promptConfig}
                       isDragging={dragKey === card.key}
                       onDragStart={() => { if (!card.taken && !card.waitingForClaim) setDragKey(card.key); }}
@@ -153,6 +161,7 @@ export default function Board({ activeBoard, columns, cards, promptConfig, hideE
                       onDispatch={onDispatchFromCard}
                       onCancelWaiting={onCancelWaitingCard}
                       onOpenQuestion={(id) => setActiveQuestionId(id)}
+                      onOpenIssue={onOpenIssue}
                     />
                   ))}
                 </div>

@@ -123,6 +123,24 @@ type BoardCard struct {
 	// is only ever true on a board the user has explicitly opted in
 	// to seeing.
 	Archived bool `json:"archived,omitempty"`
+	// BlockedBy (BACI-114) carries the keys + states of every open-
+	// state `blocks` edge pointing AT this issue. Empty (and omitted
+	// from JSON) when the issue is unblocked. Used by the kanban
+	// blocked-icon indicator and the click-to-show-blockers popover
+	// on each card; the issue-workspace rail's full relations panel
+	// goes through the brief's RelationsDTO instead so the chip
+	// surface covers all four edge types, not just blocks.
+	BlockedBy []BoardCardBlocker `json:"blockedBy,omitempty"`
+}
+
+// BoardCardBlocker (BACI-114) is one open `blocks` edge pointing at
+// this card. Key is the canonical PREFIX-N of the blocker; State is
+// the blocker's state at assembly time. Title is intentionally NOT
+// on the wire — the React popover joins it from the same `cards`
+// array (Option A: thin renderer over data the brief already has).
+type BoardCardBlocker struct {
+	Key   string      `json:"key"`
+	State model.State `json:"state"`
 }
 
 // BoardCardQuestion is one open ask_user_question row surfaced on
@@ -187,6 +205,31 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 		return nil, err
 	}
 
+	// BACI-114: one bulk read for every inbound `blocks` edge whose
+	// blocked end is in scope, filtered to open-state blockers only.
+	// The result is keyed by blocked-issue id — used below to fan
+	// BlockedBy onto each card.
+	issueIDs := make([]int64, 0, len(issues))
+	for _, iss := range issues {
+		issueIDs = append(issueIDs, iss.ID)
+	}
+	blockersByID, err := c.BlockersFor(ctx, issueIDs)
+	if err != nil {
+		return nil, err
+	}
+	blockedByID := make(map[int64][]BoardCardBlocker, len(blockersByID))
+	for blockedID, bs := range blockersByID {
+		for _, b := range bs {
+			if !isCardBlockerOpen(b.BlockerState) {
+				continue
+			}
+			blockedByID[blockedID] = append(blockedByID[blockedID], BoardCardBlocker{
+				Key:   b.BlockerKey,
+				State: b.BlockerState,
+			})
+		}
+	}
+
 	cards := make([]BoardCard, 0, len(issues))
 	for _, iss := range issues {
 		tags := iss.Tags
@@ -210,6 +253,7 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 			Todos:           e.todos,
 			OpenQuestions:   e.questions,
 			Archived:        iss.ArchivedAt != nil,
+			BlockedBy:       blockedByID[iss.ID],
 		})
 	}
 
@@ -473,6 +517,21 @@ func pickActiveMode(dispatches []*model.AgentDispatch, sess *model.AgentSession,
 		return matches[i].CreatedAt.After(matches[j].CreatedAt)
 	})
 	return matches[0].Mode
+}
+
+// isCardBlockerOpen reports whether a blocker's state is one of the
+// open states that still gate a card. Mirrors the `isOpenState`
+// duplication already present in internal/api/handlers_plan.go and
+// internal/client/local_feature.go — kept inline here rather than
+// imported so internal/boardcards stays free of API / feature-pkg
+// import-cycle risk. The three copies drift on cosmetic things
+// (comment style) but the predicate itself stays in lockstep.
+func isCardBlockerOpen(s model.State) bool {
+	switch s {
+	case model.StateDone, model.StateCancelled:
+		return false
+	}
+	return true
 }
 
 // targetsSession reports whether a dispatch is aimed at this
