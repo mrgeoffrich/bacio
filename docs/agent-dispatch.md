@@ -682,8 +682,11 @@ leftover `{{` in a body is a packaging bug — `model.RenderAgentFile`
 rejects it (and a build-time test guards the built-ins).
 
 The embedded default bodies live in
-[`internal/model/prompttemplates/`](../internal/model/prompttemplates/);
-fresh installs seed the rows from those files. Existing DBs are brought
+[`prompts/agents/`](../prompts/agents/) — one `.md` file per slug,
+with shared blocks (`_preamble.md`, `_postamble.md`) inlined via the
+`{{> name}}` include directive expanded by `model.ExpandPromptIncludes`
+at load and render time. Fresh installs seed the rows from those files
+with the directives already expanded. Existing DBs are brought
 up to date by `backfillDispatchPreamble` (inserts the preamble row if
 absent) and `refreshDispatchPreamble` (rewrites the old `general-purpose`
 preamble to the new spawn-the-subagent default, but only when the user
@@ -782,13 +785,17 @@ no claim, no state change, no edits, no commits — and returns a clear
 message that the dispatch must be re-run with proper worktree
 isolation.
 
-The guard is centralised in `RenderAgentFile` rather than copied into
-each of the six `prompttemplates/*.txt` bodies, so it cannot drift and
-is automatically inherited by any future or user-created template — the
-built-in template bodies are untouched. It is a *soft* (prompt-level)
-guard: editing a template body and re-running `bacio install-agent`
-regenerates the `.claude/agents/` files with the guard already in
-place, since the guard lives in the renderer, not the source bodies.
+The guard is centralised in `prompts/agents/_preamble.md` and inlined
+into every built-in body via a `{{> _preamble}}` include at the top of
+each `prompts/agents/<slug>.md` source file. The include is resolved
+by `model.ExpandPromptIncludes` at both load time (so the seeded body
+already carries the guard) and at `RenderAgentFile` time (so a
+user-customised body that keeps the directive still resolves it). A
+custom template that omits the directive deliberately gets no guard —
+this is the explicit-opt-in trade-off of the include model. It is a
+*soft* (prompt-level) guard: editing a template body and re-running
+`bacio install-agent` regenerates the `.claude/agents/` files with the
+guard already in place.
 Covered by `TestRenderAgentFileCarriesWorktreeGuard` /
 `TestRenderAgentFileBuiltinsCarryGuard`.
 

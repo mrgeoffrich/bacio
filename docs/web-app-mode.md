@@ -16,9 +16,9 @@ After BACI-72 the two HTTP commands have distinct intents:
 
 This page is the durable reference for **what works**, **what
 doesn't**, **how to build it**, and **what the v2 follow-ups are**.
-Companion to [`docs/rest-api-design.md`](rest-api-design.md) (HTTP
-API design) and `CLAUDE.md` ## Architecture in one screen → Desktop
-app (build-mode summary).
+Companion to [`ARCHITECTURE.md`](../ARCHITECTURE.md) (system-wide
+mental model — see "The React tree — one codebase, two transports"
+for the build-mode summary).
 
 ---
 

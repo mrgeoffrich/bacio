@@ -1,13 +1,14 @@
 package model
 
 import (
-	"embed"
 	"fmt"
 	"math/rand/v2"
 	"os"
 	"regexp"
 	"strings"
 	"time"
+
+	root "github.com/mrgeoffrich/bacio"
 )
 
 // Agent is the persistent identity layer above sessions. Name is the
@@ -363,7 +364,7 @@ func ParseDispatchStatus(s string) (DispatchStatus, error) {
 type DispatchMode string
 
 // Built-in template slugs that ship with bacio. They have embedded
-// default bodies at prompttemplates/<slug>.txt and entries in
+// default bodies at prompts/agents/<slug>.md and entries in
 // builtinPromptStates / builtinTemplateLabels. Users can edit or delete
 // any of them; `bacio settings template restore-defaults` re-seeds the
 // missing ones. Order matches a job's lifecycle, which is also the
@@ -603,35 +604,99 @@ func ParseDispatchMode(s string) (DispatchMode, error) {
 // so users know what they can interpolate into a custom template.
 var PromptTemplateTokens = []string{"issue_id", "issue_title", "repo_prefix"}
 
-// promptTemplateFS embeds the shipped default dispatch templates, one
-// plain-text file per stage (prompttemplates/<mode>.txt). Editing those
-// files is how you change a built-in default — no Go change needed.
-//
-//go:embed prompttemplates/*.txt
-var promptTemplateFS embed.FS
-
 // defaultPromptBodies is the per-slug built-in template body, loaded
-// once from promptTemplateFS at package init. Keyed by built-in slug
-// (a non-built-in slug has no entry and returns "" via the lookups).
+// once from root.PromptsFS at package init with `{{> name}}` include
+// directives expanded. Keyed by built-in slug (a non-built-in slug has
+// no entry and returns "" via the lookups).
 var defaultPromptBodies = loadDefaultPromptBodies()
 
-// loadDefaultPromptBodies reads prompttemplates/<slug>.txt for every
-// built-in slug. A missing or blank file is a packaging error, so it
-// panics — the files are embedded, so this can only fail at build time.
+// loadDefaultPromptBodies reads prompts/agents/<slug>.md for every
+// built-in slug and runs ExpandPromptIncludes on it, so the cached
+// default is the fully-rendered body the store seeds. A missing,
+// blank, or unresolvable file is a packaging error, so this panics
+// — the files are embedded, so it can only fail at build time.
 func loadDefaultPromptBodies() map[string]string {
 	out := make(map[string]string, len(builtinTemplateSlugs))
 	for _, slug := range builtinTemplateSlugs {
-		b, err := promptTemplateFS.ReadFile("prompttemplates/" + slug + ".txt")
+		body, err := readPromptFile(slug)
 		if err != nil {
 			panic(fmt.Sprintf("model: missing built-in prompt template for slug %q: %v", slug, err))
 		}
-		t := strings.TrimRight(string(b), "\r\n")
-		if strings.TrimSpace(t) == "" {
+		if strings.TrimSpace(body) == "" {
 			panic(fmt.Sprintf("model: built-in prompt template for slug %q is empty", slug))
 		}
-		out[slug] = t
+		expanded, err := ExpandPromptIncludes(body)
+		if err != nil {
+			panic(fmt.Sprintf("model: include expansion failed for slug %q: %v", slug, err))
+		}
+		out[slug] = expanded
 	}
 	return out
+}
+
+// readPromptFile reads prompts/agents/<name>.md from the embedded
+// PromptsFS and right-trims trailing newlines. Used by the default-body
+// loader and by ExpandPromptIncludes.
+func readPromptFile(name string) (string, error) {
+	b, err := root.PromptsFS.ReadFile("prompts/agents/" + name + ".md")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimRight(string(b), "\r\n"), nil
+}
+
+// promptIncludeRe matches the `{{> name}}` include directive used in
+// prompts/agents/*.md. Names are kebab-case slugs (matching the
+// underscored leading-character form used by the shared `_preamble`
+// block).
+var promptIncludeRe = regexp.MustCompile(`\{\{>\s*([A-Za-z0-9_][A-Za-z0-9_\-]*)\s*\}\}`)
+
+// ExpandPromptIncludes resolves every `{{> name}}` directive in body by
+// substituting the contents of prompts/agents/<name>.md (right-trimmed
+// of trailing whitespace). Inclusion is recursive; depth is bounded and
+// cycles are detected, so a `{{> a}}` → `{{> b}}` → `{{> a}}` chain
+// surfaces as an error rather than blowing the stack. The directive
+// language is deliberately tiny — exactly one form, no conditionals or
+// arguments — so the rendered prompt remains easy to reason about.
+func ExpandPromptIncludes(body string) (string, error) {
+	return expandPromptIncludes(body, nil)
+}
+
+const maxPromptIncludeDepth = 8
+
+func expandPromptIncludes(body string, stack []string) (string, error) {
+	if len(stack) > maxPromptIncludeDepth {
+		return "", fmt.Errorf("prompt include depth exceeded %d (path: %s)", maxPromptIncludeDepth, strings.Join(stack, " -> "))
+	}
+	var firstErr error
+	out := promptIncludeRe.ReplaceAllStringFunc(body, func(match string) string {
+		if firstErr != nil {
+			return match
+		}
+		m := promptIncludeRe.FindStringSubmatch(match)
+		name := m[1]
+		for _, prev := range stack {
+			if prev == name {
+				firstErr = fmt.Errorf("prompt include cycle: %s -> %s", strings.Join(stack, " -> "), name)
+				return match
+			}
+		}
+		s, err := readPromptFile(name)
+		if err != nil {
+			firstErr = fmt.Errorf("prompt include %q: %w", name, err)
+			return match
+		}
+		expanded, err := expandPromptIncludes(s, append(stack, name))
+		if err != nil {
+			firstErr = err
+			return match
+		}
+		return expanded
+	})
+	if firstErr != nil {
+		return "", firstErr
+	}
+	return out, nil
 }
 
 // DefaultPromptBodyForBuiltinSlug returns the embedded default body for
