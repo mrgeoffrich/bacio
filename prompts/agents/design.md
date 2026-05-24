@@ -98,12 +98,23 @@ Cite the file path and (where helpful) a line range so the reader can jump to it
 
 From the patterns you surveyed and the prior art you found, pick **two options that differ along at least one axis**. Useful axes to differ along:
 
+**Backend / structural:**
+
 - **Coupling** — one shared module vs. one-per-consumer; one service vs. composed pipeline of small services.
 - **Data placement** — DB-backed state vs. in-memory + event-sourced; row-per-thing vs. JSON blob; new table vs. extend existing.
 - **Synchrony** — sync request/response vs. fire-and-forget over a bus; polling vs. push.
 - **Pattern family** — strategy vs. inheritance; visitor vs. switch; adapter wrapping a SDK vs. bespoke client.
 - **Reuse vs. greenfield** — extend an existing service vs. build a parallel one with cleaner separation.
 - **Blast radius** — minimal-scope change in one file vs. broader refactor that pays down debt while solving the problem.
+
+**UI / layout** (only if the ticket has a UI surface):
+
+- **Surface family** — full page vs. dialog vs. sheet/drawer vs. inline expand vs. stepped wizard vs. dedicated route.
+- **Data shape** — table vs. card grid vs. dense list vs. kanban vs. tree/hierarchy.
+- **Form shape** — single form vs. stepped wizard vs. inline-edit vs. per-row dialog vs. split-pane editor.
+- **Navigation** — tabs vs. segmented control vs. sidebar vs. single long scroll vs. accordion sections.
+
+**For UI tickets, at least one of the differing axes must be a UI / layout axis** — not just a backend axis. Two options with identical layouts and the same controls but different services behind them are twins from the operator's perspective; the design exploration should give the reader a real choice about what they'll *see* and *touch*, not just what's under the hood. If the layout is genuinely fixed (e.g. the ticket says "add a row to this existing table") and the only meaningful variance is backend, say that explicitly in `## Context` and proceed with backend-only axes.
 
 If both designs end up with the same key abstractions and the same file layout, you've produced one design twice — go back and find a real alternative. If you can only think of one good design and the alternatives all feel weaker, surface that and ask the user whether to write a single recommendation with a "rejected alternatives" appendix instead. Forcing a weak second option produces noise.
 
