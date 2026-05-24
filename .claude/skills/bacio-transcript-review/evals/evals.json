@@ -1,0 +1,26 @@
+{
+  "skill_name": "bacio-transcript-review",
+  "evals": [
+    {
+      "id": 1,
+      "name": "baci-127-implement-ship",
+      "prompt": "Review the transcripts on BACI-127 and write up findings. Don't actually post the eval comments — just save the markdown body you'd post for each transcript to a file named comment-<filename>.md in the current directory, and print a one-paragraph summary at the end naming each transcript with its blocker/major/nit counts. BACI-127 was the implement-worker-tags-implemented work; you should see two transcripts (one implement run, one ship run). I want to see whether either worker followed its brief.",
+      "expected_output": "Two markdown files saved (one per transcript), each with a per-severity finding breakdown anchored on transcript line numbers; a final one-paragraph summary in stdout. The reviewer should identify mode correctly for each transcript (implement vs ship), and recognise the implement run was the very work that added the `implemented` tag step — so the tag may or may not be present depending on which side of the change it landed. A clean run should be called out as clean rather than padded with fabricated findings.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "baci-130-multi-transcript",
+      "prompt": "Run a transcript review on BACI-130 — there are three .jsonl transcripts attached. For each one, work out what mode it was (plan/design/implement/review/fix_review/ship), compare what the worker actually did to the brief in prompts/agents/<mode>.md, and tell me which transcripts have real findings vs which ran clean. Save one markdown comment per transcript to ./comment-<filename>.md so I can read them before deciding whether to post anything. End with a short summary naming each transcript by mode + blocker/major/nit count.",
+      "expected_output": "Three markdown files saved. Each file correctly identifies the mode from the dispatch payload and grades against the matching prompts/agents/<mode>.md. Findings should cite line numbers from the transcript. The summary should let me see at a glance which transcripts are interesting without opening any file.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "baci-131-largest-transcript",
+      "prompt": "I want to audit the dispatched work on BACI-131 (the eval-comment button feature). Three transcripts are attached including one that's about 1.4 MB. Distil each one and tell me whether the workers followed their per-mode briefs — claim, worktree init, edits inside the worktree, correct release state, correct close-out tag, mcp__bacio__reply at the end. Save the per-transcript markdown comment bodies as ./comment-<filename>.md and give me a one-paragraph rollup. Don't post anything yet.",
+      "expected_output": "Three markdown files plus a chat summary. The large transcript should be handled without truncation issues (the analyzer script keeps the digest small). Each comment body anchors findings on line numbers. The reviewer should pick up on the eval-comment feature itself being implemented in one of these runs, but should grade behaviour against the brief, not against the feature being implemented.",
+      "files": []
+    }
+  ]
+}
