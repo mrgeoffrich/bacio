@@ -603,6 +603,20 @@ body { margin: 0; }
 .mk-card-tasks-btn:focus-visible {
   outline: 1px dotted var(--border-focus); outline-offset: 2px;
 }
+/* BACI-141: combined transcript + eval chip on the card meta line.
+   Surfaces on every card with at least one transcript or eval note,
+   regardless of taken state — the whole point of the ticket is making
+   eval material discoverable AFTER the agent has released its claim.
+   Click bubbles to the wrapping <article>'s onClick (open workspace);
+   no per-chip handler. */
+.mk-card-eval-chip {
+  display: inline-flex; align-items: center; gap: 3px;
+  color: var(--fg-3); white-space: nowrap;
+  font-family: var(--font-mono); font-size: 11px;
+}
+.mk-card-eval-chip .mk-icon {
+  width: 11px; height: 11px;
+}
 /* The expanded todo list — sits directly under the meta line, one
    <ul> with per-status <li> rows. Mirrors the AgentsView drill-down
    palette (mk-agent-todo--*) at the card's smaller 11px scale. */

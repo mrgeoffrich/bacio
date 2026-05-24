@@ -12,6 +12,14 @@ type CommentAddInput struct {
 	// Omit / false = a normal comment with the four context fields
 	// left at zero values.
 	Eval bool `json:"eval,omitempty"`
+	// TranscriptEventRef (BACI-141) is the optional per-event anchor
+	// set by the transcript viewer's per-event composer when the user
+	// pins a note to a specific event inside a `.jsonl` transcript.
+	// Two practical formats: `tool_use_id:<id>` (durable across re-
+	// renders) and `line_index:<n>` (fallback for events without a
+	// tool_use_id). Empty = unanchored, the dispatch-card-level note
+	// the viewer pins to the prompt card.
+	TranscriptEventRef string `json:"transcript_event_ref,omitempty"`
 }
 
 // CommentRmInput is the payload for `bacio comment rm --json`.

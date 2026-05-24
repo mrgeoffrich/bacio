@@ -206,6 +206,15 @@ export class CommentDTO {
     "mode"?: string;
     "agentName"?: string;
 
+    /**
+     * TranscriptEventRef (BACI-141) pins this comment to a specific
+     * event inside a `.jsonl` transcript when set, so the transcript
+     * viewer can render it as an inline annotation next to the matching
+     * event card. Empty = unanchored, rendered pinned to the dispatch
+     * prompt card at the top of the transcript view.
+     */
+    "transcriptEventRef"?: string;
+
     /** Creates a new CommentDTO instance. */
     constructor($$source: Partial<CommentDTO> = {}) {
         if (!("uuid" in $$source)) {

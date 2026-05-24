@@ -50,6 +50,27 @@ export default function IssueWorkspace({
   const issueMeta = brief?.issue;
   const taken = !!brief?.taken;
   const waiting = !!brief?.waitingForClaim && !taken;
+
+  // BACI-141: pluck the eval-flagged comments out of the brief once
+  // so every <LinkedDocPanel> can render anchored notes inline with
+  // the matching transcript events. The panels filter again on
+  // dispatchId / agentSessionId, but the issue-level filter here
+  // means uninvolved cards skip the prop entirely (one identity
+  // ref-equal empty array vs. a per-render new one).
+  const evalComments = useMemo(() => {
+    if (!brief?.comments) return [];
+    return brief.comments.filter(c => !!c.eval);
+  }, [brief]);
+
+  // Per-event composer submit hook: route through the existing
+  // onAddComment path with the transcriptEventRef so the comment row
+  // carries the anchor. Empty body falls through to onAddComment's
+  // OS-username fallback. The wrapper is stable across renders so
+  // the LinkedDocPanel useMemo doesn't tear.
+  const onPostEvalComment = useCallback(async (body, eventRef) => {
+    if (!onAddComment) return;
+    await onAddComment('', body, { eval: true, transcriptEventRef: eventRef });
+  }, [onAddComment]);
   // The most recent open claimant — the holder of an active claim.
   // ClaimantDTO is shaped {sessionId, agentName, prompt, open, ...}.
   const openClaimant = useMemo(() => {
@@ -207,6 +228,8 @@ export default function IssueWorkspace({
                     key={`${d.filename}:${(d.linkedVia || []).join('+')}`}
                     doc={d}
                     activeBoard={activeBoard}
+                    evalComments={evalComments}
+                    onPostEval={onPostEvalComment}
                   />
                 ))}
               </div>

@@ -14,15 +14,18 @@ import (
 // Eval / AgentSessionID / DispatchID / Mode quartet (BACI-131) is the
 // in-flight context the kanban quick-eval composer pins onto the row
 // server-side via ResolveEvalContext; on normal comments the four
-// fields stay at zero values.
+// fields stay at zero values. TranscriptEventRef (BACI-141) is the
+// optional per-event anchor populated by the transcript viewer's
+// per-event composer — empty for board-level eval notes.
 type CreateCommentIn struct {
-	IssueID        int64
-	Author         string
-	Body           string
-	Eval           bool
-	AgentSessionID string
-	DispatchID     *int64
-	Mode           string
+	IssueID            int64
+	Author             string
+	Body               string
+	Eval               bool
+	AgentSessionID     string
+	DispatchID         *int64
+	Mode               string
+	TranscriptEventRef string
 }
 
 func (s *Store) CreateComment(in CreateCommentIn) (*model.Comment, error) {
@@ -38,14 +41,18 @@ func (s *Store) CreateComment(in CreateCommentIn) (*model.Comment, error) {
 	if err != nil {
 		return nil, err
 	}
+	eventRef, err := validateTranscriptEventRef(in.TranscriptEventRef)
+	if err != nil {
+		return nil, err
+	}
 	evalInt := 0
 	if in.Eval {
 		evalInt = 1
 	}
 	res, err := s.DB.Exec(
-		`INSERT INTO comments (uuid, issue_id, author, body, eval, agent_session_id, dispatch_id, mode)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		identity.New(), in.IssueID, author, body, evalInt, sess, nullableInt(in.DispatchID), mode,
+		`INSERT INTO comments (uuid, issue_id, author, body, eval, agent_session_id, dispatch_id, mode, transcript_event_ref)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		identity.New(), in.IssueID, author, body, evalInt, sess, nullableInt(in.DispatchID), mode, nullableString(eventRef),
 	)
 	if err != nil {
 		return nil, err
@@ -57,12 +64,12 @@ func (s *Store) CreateComment(in CreateCommentIn) (*model.Comment, error) {
 // commentCols / commentSelect drive every single-row read of a comment.
 // agent_name is filled by the brief / issue-detail JOIN at a separate
 // query — the read helpers here keep to the persisted columns.
-const commentCols = `id, uuid, issue_id, author, body, eval, agent_session_id, dispatch_id, mode, created_at`
+const commentCols = `id, uuid, issue_id, author, body, eval, agent_session_id, dispatch_id, mode, transcript_event_ref, created_at`
 
 // commentColsQualified mirrors commentCols but prefixes every column
 // with the `c.` alias — needed by the ListComments JOIN where bare
 // `id` would clash with agent_sessions.id and agents.id.
-const commentColsQualified = `c.id, c.uuid, c.issue_id, c.author, c.body, c.eval, c.agent_session_id, c.dispatch_id, c.mode, c.created_at`
+const commentColsQualified = `c.id, c.uuid, c.issue_id, c.author, c.body, c.eval, c.agent_session_id, c.dispatch_id, c.mode, c.transcript_event_ref, c.created_at`
 
 func (s *Store) GetCommentByID(id int64) (*model.Comment, error) {
 	row := s.DB.QueryRow(`SELECT `+commentCols+` FROM comments WHERE id = ?`, id)
@@ -85,14 +92,15 @@ func (s *Store) GetCommentByUUID(uuid string) (*model.Comment, error) {
 // rebuilds-by-implication from (AgentSessionID, Mode) if a reviewer
 // needs it.
 type CreateCommentFromSyncIn struct {
-	IssueID        int64
-	UUID           string
-	Author         string
-	Body           string
-	CreatedAt      sql.NullTime
-	Eval           bool
-	AgentSessionID string
-	Mode           string
+	IssueID            int64
+	UUID               string
+	Author             string
+	Body               string
+	CreatedAt          sql.NullTime
+	Eval               bool
+	AgentSessionID     string
+	Mode               string
+	TranscriptEventRef string
 }
 
 // CreateCommentFromSync inserts a comment with a caller-supplied
@@ -115,6 +123,10 @@ func (s *Store) CreateCommentFromSync(in CreateCommentFromSyncIn) (*model.Commen
 	if err != nil {
 		return nil, err
 	}
+	eventRef, err := validateTranscriptEventRef(in.TranscriptEventRef)
+	if err != nil {
+		return nil, err
+	}
 	evalInt := 0
 	if in.Eval {
 		evalInt = 1
@@ -122,6 +134,11 @@ func (s *Store) CreateCommentFromSync(in CreateCommentFromSyncIn) (*model.Commen
 	cols := []string{"uuid", "issue_id", "author", "body", "eval", "agent_session_id", "mode"}
 	placeholders := []string{"?", "?", "?", "?", "?", "?", "?"}
 	args := []any{in.UUID, in.IssueID, author, body, evalInt, sess, mode}
+	if eventRef != "" {
+		cols = append(cols, "transcript_event_ref")
+		placeholders = append(placeholders, "?")
+		args = append(args, eventRef)
+	}
 	if in.CreatedAt.Valid {
 		cols = append(cols, "created_at")
 		placeholders = append(placeholders, "?")
@@ -229,11 +246,11 @@ func (s *Store) ListComments(issueID int64) ([]*model.Comment, error) {
 
 func scanComment(row rowScanner) (*model.Comment, error) {
 	var c model.Comment
-	var sess, mode sql.NullString
+	var sess, mode, eventRef sql.NullString
 	var dispatchID sql.NullInt64
 	err := row.Scan(
 		&c.ID, &c.UUID, &c.IssueID, &c.Author, &c.Body,
-		&c.Eval, &sess, &dispatchID, &mode, &c.CreatedAt,
+		&c.Eval, &sess, &dispatchID, &mode, &eventRef, &c.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -243,6 +260,7 @@ func scanComment(row rowScanner) (*model.Comment, error) {
 	}
 	c.AgentSessionID = sess.String
 	c.Mode = mode.String
+	c.TranscriptEventRef = eventRef.String
 	if dispatchID.Valid {
 		id := dispatchID.Int64
 		c.DispatchID = &id
@@ -254,11 +272,11 @@ func scanComment(row rowScanner) (*model.Comment, error) {
 // agent_name column the ListComments JOIN appends.
 func scanCommentWithAgent(row rowScanner) (*model.Comment, error) {
 	var c model.Comment
-	var sess, mode, agentName sql.NullString
+	var sess, mode, eventRef, agentName sql.NullString
 	var dispatchID sql.NullInt64
 	err := row.Scan(
 		&c.ID, &c.UUID, &c.IssueID, &c.Author, &c.Body,
-		&c.Eval, &sess, &dispatchID, &mode, &c.CreatedAt,
+		&c.Eval, &sess, &dispatchID, &mode, &eventRef, &c.CreatedAt,
 		&agentName,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -269,6 +287,7 @@ func scanCommentWithAgent(row rowScanner) (*model.Comment, error) {
 	}
 	c.AgentSessionID = sess.String
 	c.Mode = mode.String
+	c.TranscriptEventRef = eventRef.String
 	if dispatchID.Valid {
 		id := dispatchID.Int64
 		c.DispatchID = &id
@@ -301,6 +320,75 @@ func validateEvalTriple(sessionID, mode string) (string, string, error) {
 		cleanMode = string(m)
 	}
 	return cleanSess, cleanMode, nil
+}
+
+// validateTranscriptEventRef normalises and length-bounds the BACI-141
+// per-event anchor — a short opaque string written into
+// comments.transcript_event_ref. Empty is the unanchored default.
+// Practical formats in use today: `tool_use_id:<id>` and
+// `line_index:<n>`; the format is caller-defined so we only reject
+// control characters and absurdly long values rather than gate the
+// shape (a future format change shouldn't need a schema-side update).
+func validateTranscriptEventRef(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", nil
+	}
+	if len(s) > 256 {
+		return "", fmt.Errorf("transcript_event_ref too long: %d bytes, max 256", len(s))
+	}
+	for _, r := range s {
+		if isDisallowedControlSingle(r) {
+			return "", fmt.Errorf("transcript_event_ref contains a disallowed control character (U+%04X)", r)
+		}
+	}
+	return s, nil
+}
+
+// nullableString maps the empty string to a SQL NULL via the
+// driver.Valuer convention. Used by the BACI-141 transcript_event_ref
+// INSERT so an unanchored eval comment writes NULL (not the empty
+// string) into the column.
+func nullableString(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+// CountEvalCommentsByIssue (BACI-141) returns a map keyed by issue id
+// of the number of eval-flagged comments on each issue. Backs the
+// per-card "M eval note(s)" chip surfaced on the kanban board. Rides
+// the partial idx_comments_issue_eval index so the cost scales with
+// the eval-comment count, not the full comment table.
+func (s *Store) CountEvalCommentsByIssue(issueIDs []int64) (map[int64]int, error) {
+	out := make(map[int64]int, len(issueIDs))
+	if len(issueIDs) == 0 {
+		return out, nil
+	}
+	placeholders := make([]string, len(issueIDs))
+	args := make([]any, len(issueIDs))
+	for i, id := range issueIDs {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	q := `SELECT issue_id, COUNT(*) FROM comments
+	       WHERE eval = 1 AND issue_id IN (` + strings.Join(placeholders, ", ") + `)
+	       GROUP BY issue_id`
+	rows, err := s.DB.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var n int
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, err
+		}
+		out[id] = n
+	}
+	return out, rows.Err()
 }
 
 // EvalContext is the in-flight snapshot ResolveEvalContext returns —

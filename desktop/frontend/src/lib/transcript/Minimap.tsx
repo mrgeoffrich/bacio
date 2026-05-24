@@ -11,12 +11,26 @@
 import React from 'react';
 import type { RenderItem } from './types';
 
+// EvalTick (BACI-141) is one synthetic eval-comment marker on the
+// rail. TranscriptView builds these by walking the filtered eval
+// comments and resolving each one's anchor (tool_use_id or
+// line_index) to an item index; unanchored notes anchor to the
+// dispatch prompt card at index 0. Each tick is its own clickable
+// button on the rail so a reviewer can jump straight to the matching
+// <EvalNotePanel>.
+export type EvalTick = {
+  anchorIndex: number;
+  label: string;
+  anchorId: string;
+};
+
 type MinimapProps = {
   items: RenderItem[];
   cursorIdx: number;
   // Scroll-anchor id format the rail dereferences. Stays in
   // lockstep with the id TranscriptView passes to each EventCard.
   anchorId: (item: RenderItem) => string;
+  evalTicks?: EvalTick[];
 };
 
 function tickClass(item: RenderItem): string {
@@ -65,6 +79,7 @@ export default function Minimap({
   items,
   cursorIdx,
   anchorId,
+  evalTicks,
 }: MinimapProps): React.ReactElement {
   const scrollTo = (id: string) => {
     const el = typeof document !== 'undefined' ? document.getElementById(id) : null;
@@ -72,18 +87,44 @@ export default function Minimap({
       el.scrollIntoView({ block: 'center', behavior: 'smooth' });
     }
   };
+  // Group eval ticks by their anchor item index so the rail can
+  // render them inline next to the matching item tick. Multiple
+  // notes on the same event collapse to a single visible mark with
+  // a count in the label.
+  const evalByIndex = new Map<number, EvalTick[]>();
+  for (const t of evalTicks || []) {
+    const list = evalByIndex.get(t.anchorIndex);
+    if (list) list.push(t);
+    else evalByIndex.set(t.anchorIndex, [t]);
+  }
   return (
     <nav className="mk-transcript-minimap" aria-label="Transcript event minimap">
-      {items.map((item, i) => (
-        <button
-          key={item.id}
-          type="button"
-          className={`${tickClass(item)} ${i === cursorIdx ? 'is-cursor' : ''}`}
-          aria-label={tickLabel(item, i)}
-          title={tickLabel(item, i)}
-          onClick={() => scrollTo(anchorId(item))}
-        />
-      ))}
+      {items.map((item, i) => {
+        const evals = evalByIndex.get(i) || [];
+        const evalLabel = evals.length > 0
+          ? `${evals.length} eval note${evals.length === 1 ? '' : 's'} — ${evals[0].label}`
+          : '';
+        return (
+          <span key={item.id} className="mk-transcript-tick-row">
+            <button
+              type="button"
+              className={`${tickClass(item)} ${i === cursorIdx ? 'is-cursor' : ''}`}
+              aria-label={tickLabel(item, i)}
+              title={tickLabel(item, i)}
+              onClick={() => scrollTo(anchorId(item))}
+            />
+            {evals.length > 0 && (
+              <button
+                type="button"
+                className="mk-transcript-tick is-eval"
+                aria-label={evalLabel}
+                title={evalLabel}
+                onClick={() => scrollTo(evals[0].anchorId)}
+              />
+            )}
+          </span>
+        );
+      })}
     </nav>
   );
 }

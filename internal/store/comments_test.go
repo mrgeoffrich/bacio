@@ -94,6 +94,89 @@ func TestCreateCommentRoundTripsEval(t *testing.T) {
 	}
 }
 
+// TestCommentTranscriptEventRefRoundTrips locks in that the BACI-141
+// per-event anchor survives the round trip through CreateComment /
+// ListComments — and that omitting it leaves the column empty (the
+// dispatch-level fallback the transcript viewer pins to the prompt card).
+func TestCommentTranscriptEventRefRoundTrips(t *testing.T) {
+	s, _, iss := seedRepoAndIssue(t)
+	anchored, err := s.CreateComment(CreateCommentIn{
+		IssueID:            iss.ID,
+		Author:             "geoff",
+		Body:               "missed a typo here",
+		TranscriptEventRef: "tool_use_id:toolu_1234",
+	})
+	if err != nil {
+		t.Fatalf("CreateComment anchored: %v", err)
+	}
+	if anchored.TranscriptEventRef != "tool_use_id:toolu_1234" {
+		t.Fatalf("TranscriptEventRef = %q, want tool_use_id:toolu_1234", anchored.TranscriptEventRef)
+	}
+	unanchored, err := s.CreateComment(CreateCommentIn{
+		IssueID: iss.ID,
+		Author:  "geoff",
+		Body:    "dispatch-level note",
+	})
+	if err != nil {
+		t.Fatalf("CreateComment unanchored: %v", err)
+	}
+	if unanchored.TranscriptEventRef != "" {
+		t.Fatalf("TranscriptEventRef = %q, want empty", unanchored.TranscriptEventRef)
+	}
+	listed, err := s.ListComments(iss.ID)
+	if err != nil {
+		t.Fatalf("ListComments: %v", err)
+	}
+	if len(listed) != 2 {
+		t.Fatalf("listed %d comments, want 2", len(listed))
+	}
+	if listed[0].TranscriptEventRef != "tool_use_id:toolu_1234" {
+		t.Fatalf("listed[0].TranscriptEventRef = %q, want anchored value", listed[0].TranscriptEventRef)
+	}
+	if listed[1].TranscriptEventRef != "" {
+		t.Fatalf("listed[1].TranscriptEventRef = %q, want empty", listed[1].TranscriptEventRef)
+	}
+}
+
+// TestCountEvalCommentsByIssue covers the bulk-count helper that powers
+// the BACI-141 board-card eval indicator: only eval=1 rows are counted,
+// non-eval comments stay out of the result, and an issue with zero eval
+// notes is absent from the map (not present-with-zero).
+func TestCountEvalCommentsByIssue(t *testing.T) {
+	s, repo, iss := seedRepoAndIssue(t)
+	other, err := s.CreateIssue(repo.ID, nil, "other", "", model.StateTodo, nil)
+	if err != nil {
+		t.Fatalf("CreateIssue other: %v", err)
+	}
+	// Plain comment on `iss` — must NOT be counted.
+	if _, err := s.CreateComment(CreateCommentIn{
+		IssueID: iss.ID, Author: "alice", Body: "plain note",
+	}); err != nil {
+		t.Fatalf("CreateComment plain: %v", err)
+	}
+	// Two eval comments on `iss`.
+	if _, err := s.CreateComment(CreateCommentIn{
+		IssueID: iss.ID, Author: "alice", Body: "eval one", Eval: true,
+	}); err != nil {
+		t.Fatalf("CreateComment eval 1: %v", err)
+	}
+	if _, err := s.CreateComment(CreateCommentIn{
+		IssueID: iss.ID, Author: "alice", Body: "eval two", Eval: true,
+	}); err != nil {
+		t.Fatalf("CreateComment eval 2: %v", err)
+	}
+	counts, err := s.CountEvalCommentsByIssue([]int64{iss.ID, other.ID})
+	if err != nil {
+		t.Fatalf("CountEvalCommentsByIssue: %v", err)
+	}
+	if got, want := counts[iss.ID], 2; got != want {
+		t.Fatalf("counts[iss] = %d, want %d", got, want)
+	}
+	if _, ok := counts[other.ID]; ok {
+		t.Fatalf("counts[other] = %d, want absent (zero eval comments)", counts[other.ID])
+	}
+}
+
 // TestCreateCommentRejectsControlCharInSession proves the eval-triple
 // validator rejects a malformed agent_session_id at the store boundary
 // (defence-in-depth — the HTTP path resolves the field server-side).

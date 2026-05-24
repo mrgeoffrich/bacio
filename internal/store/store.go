@@ -635,6 +635,20 @@ func migrate(db *sql.DB) error {
 			return fmt.Errorf("add mode to comments: %w", err)
 		}
 	}
+	// BACI-141: nullable per-event anchor for eval comments. Pattern-
+	// matches the four BACI-131 ALTERs above. NULL is the default for
+	// existing rows and for any eval comment posted without an event
+	// handle — that's the "dispatch-card-level" fallback the transcript
+	// viewer renders pinned to the prompt card.
+	hasCommentEventRef, err := columnExists(db, "comments", "transcript_event_ref")
+	if err != nil {
+		return err
+	}
+	if !hasCommentEventRef {
+		if _, err := db.Exec(`ALTER TABLE comments ADD COLUMN transcript_event_ref TEXT`); err != nil {
+			return fmt.Errorf("add transcript_event_ref to comments: %w", err)
+		}
+	}
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_comments_issue_eval ON comments(issue_id, created_at) WHERE eval = 1`); err != nil {
 		return fmt.Errorf("create idx_comments_issue_eval: %w", err)
 	}

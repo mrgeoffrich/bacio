@@ -549,10 +549,14 @@ export default function App() {
     }
   }, [activeBoard, openIssueKey, refreshBrief, refreshCards]);
 
-  const addComment = useCallback(async (author, body) => {
+  // BACI-141: opts is an optional third arg carrying the eval flag and
+  // the transcript_event_ref the per-event composer in the transcript
+  // viewer fills in. The existing CommentComposer path keeps passing
+  // (author, body) and lands the comment as a plain row.
+  const addComment = useCallback(async (author, body, opts) => {
     if (!openIssueKey) return;
     try {
-      await api.addComment(activeBoard, openIssueKey, author, body);
+      await api.addComment(activeBoard, openIssueKey, author, body, opts);
       refreshBrief();
     } catch (err) {
       reportError(err, { headline: "Couldn't add comment" });

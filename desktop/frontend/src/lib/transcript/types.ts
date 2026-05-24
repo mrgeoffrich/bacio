@@ -84,6 +84,30 @@ export type ParseResult = {
   rawLines: string[];
 };
 
+// EvalComment (BACI-141) is the transcript-viewer's shape for an
+// eval-flagged comment posted against the dispatch this transcript
+// captures. Sourced from the brief's comment timeline, filtered to
+// eval-flagged rows whose dispatchId / agentSessionId matches the
+// transcript's <dispatch_id> tag (with the defensive session-id
+// fallback for transcripts that carry no dispatch tag).
+//
+// transcriptEventRef is the optional per-event anchor — either
+// `tool_use_id:<id>` (durable across re-renders; the same id appears
+// on the assistant tool_use event and the matching user-tool-result
+// event) or `line_index:<n>` (fallback for events without a
+// tool_use_id; `.jsonl` transcripts are append-only so line indices
+// are durable). Empty = unanchored, rendered pinned to the dispatch
+// prompt card at the top of the transcript view.
+export type EvalComment = {
+  uuid: string;
+  author: string;
+  body: string;
+  createdAt: string;
+  dispatchId?: number | null;
+  agentSessionId?: string;
+  transcriptEventRef?: string;
+};
+
 // The flattened, render-ready item the viewer iterates over. Pairing
 // (`pair.ts`) turns the `events` stream into a `RenderItem[]`.
 //

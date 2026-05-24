@@ -27,18 +27,31 @@ import ControlsBar from './ControlsBar';
 import DispatchPromptCard from './DispatchPromptCard';
 import { extractDispatchTags } from './dispatchTags';
 import EventCard from './EventCard';
-import Minimap from './Minimap';
+import Minimap, { type EvalTick } from './Minimap';
+import { evalEventRefFor, resolveAnchor } from './evalAnchor';
 import { formatBytes, formatTimestamp, prettyJSON } from './format';
 import { parse } from './parse';
 import { pair } from './pair';
 import { formatKilo, summariseTokens } from './tokenSummary';
 import { rendererFor } from './tools/index';
-import type { RenderItem } from './types';
+import type { EvalComment, RenderItem } from './types';
 
 type TranscriptViewProps = {
   source: string;
   filename?: string;
   sizeBytes?: number;
+  // BACI-141: eval comments to render inline with the matching
+  // events. The viewer filters the array by dispatch id / session id
+  // before resolving each comment's anchor, so the caller can pass the
+  // full issue-level eval list and rely on the viewer to keep only the
+  // rows that belong to THIS transcript's run.
+  evalComments?: EvalComment[];
+  // Post-eval callback fired when the per-event composer submits. The
+  // callback receives the typed body and the `transcriptEventRef`
+  // string (empty for the unanchored fallback). Optional — read-only
+  // surfaces (e.g. tests, exports) leave it unset and the composer
+  // affordance hides.
+  onPostEval?: (body: string, eventRef: string) => Promise<void> | void;
 };
 
 function anchorIdFor(item: RenderItem): string {
@@ -57,6 +70,8 @@ export default function TranscriptView({
   source,
   filename,
   sizeBytes,
+  evalComments,
+  onPostEval,
 }: TranscriptViewProps): React.ReactElement {
   // Parse + pair is a useMemo on `source` so a no-op refetch (the
   // 10s brief poll handing us the same body string back) re-uses the
@@ -82,6 +97,65 @@ export default function TranscriptView({
     if (!first || first.kind !== 'dispatch') return null;
     return extractDispatchTags(first.ev.text);
   }, [items]);
+
+  // BACI-141: filter the incoming eval-comment list to those that
+  // belong to THIS transcript's dispatch, then resolve each comment's
+  // anchor (or bucket it as unanchored). Defensive: if the transcript
+  // carries no <dispatch_id> tag, fall back to matching the session id
+  // — a dispatch tag is the primary key but a hand-uploaded transcript
+  // (no tag) still has a sessionId via filename / source path.
+  const { anchoredByItemId, unanchoredNotes, evalTicks } = useMemo(() => {
+    const anchoredByItemId = new Map<string, EvalComment[]>();
+    const unanchoredNotes: EvalComment[] = [];
+    const evalTicks: EvalTick[] = [];
+    if (!evalComments || evalComments.length === 0) {
+      return { anchoredByItemId, unanchoredNotes, evalTicks };
+    }
+    const dispatchID = dispatchTags?.dispatchId;
+    const dispatchPrompt = items.find(i => i.kind === 'dispatch');
+    const dispatchAnchorIdx = items.findIndex(i => i.kind === 'dispatch');
+    for (const c of evalComments) {
+      // Filter by dispatchId; fall back to agentSessionId when the
+      // transcript carries no dispatch tag (legacy uploads / manual
+      // attaches). A comment with neither field set never matches —
+      // safe default.
+      let belongs = false;
+      if (dispatchID && c.dispatchId != null && String(c.dispatchId) === dispatchID) {
+        belongs = true;
+      } else if (!dispatchID && c.agentSessionId) {
+        belongs = true;
+      }
+      if (!belongs) continue;
+      if (c.transcriptEventRef) {
+        const item = resolveAnchor(items, c.transcriptEventRef);
+        if (item) {
+          const list = anchoredByItemId.get(item.id);
+          if (list) list.push(c);
+          else anchoredByItemId.set(item.id, [c]);
+          const idx = items.indexOf(item);
+          if (idx >= 0) {
+            evalTicks.push({
+              anchorIndex: idx,
+              label: c.body.slice(0, 60),
+              anchorId: anchorIdFor(item),
+            });
+          }
+          continue;
+        }
+        // Ref didn't resolve — fall back to unanchored bucket so we
+        // never silently drop a note.
+      }
+      unanchoredNotes.push(c);
+      if (dispatchPrompt && dispatchAnchorIdx >= 0) {
+        evalTicks.push({
+          anchorIndex: dispatchAnchorIdx,
+          label: c.body.slice(0, 60),
+          anchorId: anchorIdFor(dispatchPrompt),
+        });
+      }
+    }
+    return { anchoredByItemId, unanchoredNotes, evalTicks };
+  }, [evalComments, items, dispatchTags]);
 
   // ----- UI state -----
   const [hideEnvelope, setHideEnvelope] = useState(true);
@@ -265,7 +339,7 @@ export default function TranscriptView({
         warnings={parsed.warnings}
       />
       <div className="mk-transcript-grid">
-        <Minimap items={items} cursorIdx={cursorIdx} anchorId={anchorIdFor} />
+        <Minimap items={items} cursorIdx={cursorIdx} anchorId={anchorIdFor} evalTicks={evalTicks} />
         <div ref={streamRef} className="mk-transcript-stream">
           {visibleItems.length === 0 ? (
             <div className="mk-meta-empty">
@@ -282,6 +356,10 @@ export default function TranscriptView({
                 rawOpen={rawOpenIds.has(it.id)}
                 onToggleRaw={() => toggleRaw(it.id)}
                 prevTs={prevTsById.get(it.id)}
+                evalNotes={anchoredByItemId.get(it.id)}
+                unanchoredNotes={it.kind === 'dispatch' ? unanchoredNotes : undefined}
+                onPostEval={onPostEval}
+                evalEventRef={evalEventRefFor(it)}
               />
             ))
           )}
@@ -299,6 +377,11 @@ type CardForProps = {
   rawOpen: boolean;
   onToggleRaw: () => void;
   prevTs?: string;
+  // BACI-141: eval-comment props forwarded to the per-card chrome.
+  evalNotes?: EvalComment[];
+  unanchoredNotes?: EvalComment[];
+  onPostEval?: (body: string, eventRef: string) => Promise<void> | void;
+  evalEventRef?: string;
 };
 
 function CardFor({
@@ -307,6 +390,10 @@ function CardFor({
   rawOpen,
   onToggleRaw,
   prevTs,
+  evalNotes,
+  unanchoredNotes,
+  onPostEval,
+  evalEventRef,
 }: CardForProps): React.ReactElement {
   const anchor = anchorIdFor(item);
   const ts = item.ts;
@@ -326,7 +413,17 @@ function CardFor({
           rawOpen={rawOpen}
           onToggleRaw={onToggleRaw}
         >
-          <DispatchPromptCard text={item.ev.text} />
+          {/*
+            BACI-141: the dispatch prompt card owns the unanchored
+            eval fallback + the dispatch-level composer. Per-event
+            anchored notes (if any) ride on the outer EventCard's
+            evalNotes slot via the explicit props below.
+          */}
+          <DispatchPromptCard
+            text={item.ev.text}
+            evalNotes={unanchoredNotes}
+            onPostEval={onPostEval}
+          />
         </EventCard>
       );
     case 'assistant': {
@@ -351,6 +448,9 @@ function CardFor({
           raw={item.ev.raw}
           rawOpen={rawOpen}
           onToggleRaw={onToggleRaw}
+          evalNotes={evalNotes}
+          onPostEval={onPostEval}
+          evalEventRef={evalEventRef}
         >
           <AssistantText blocks={item.blocks} />
         </EventCard>
@@ -381,6 +481,9 @@ function CardFor({
           raw={item.assistantEv.raw}
           rawOpen={rawOpen}
           onToggleRaw={onToggleRaw}
+          evalNotes={evalNotes}
+          onPostEval={onPostEval}
+          evalEventRef={evalEventRef}
         >
           <Renderer
             toolName={item.toolName}
@@ -404,6 +507,9 @@ function CardFor({
           raw={item.ev.raw}
           rawOpen={rawOpen}
           onToggleRaw={onToggleRaw}
+          evalNotes={evalNotes}
+          onPostEval={onPostEval}
+          evalEventRef={evalEventRef}
         >
           <details className="mk-transcript-collapse-native">
             <summary>Show reminder</summary>
@@ -431,6 +537,9 @@ function CardFor({
           raw={item.ev.raw}
           rawOpen={rawOpen}
           onToggleRaw={onToggleRaw}
+          evalNotes={evalNotes}
+          onPostEval={onPostEval}
+          evalEventRef={evalEventRef}
         >
           <div className="mk-meta-empty">
             Harness-emitted attachment ({item.ev.attachmentType}). Open Raw for

@@ -25,6 +25,11 @@ type fakeClient struct {
 	// blockers (BACI-114) is keyed by blocked-issue id — the same
 	// shape store.BlockersFor returns.
 	blockers map[int64][]store.IssueBlocker
+	// evalCounts / transcriptCounts (BACI-141) drive the per-card
+	// combined eval/transcript indicator. Keyed by issue id, same
+	// shape as the store helpers.
+	evalCounts       map[int64]int
+	transcriptCounts map[int64]int
 	// dispatchAware (BACI-132) opts the fake into filtering the
 	// returned todos by the pair's IssueKey and DispatchID — needed
 	// for the per-dispatch scope test. Existing tests that pass the
@@ -115,6 +120,18 @@ func (f *fakeClient) BlockersFor(context.Context, []int64) (map[int64][]store.Is
 		return map[int64][]store.IssueBlocker{}, nil
 	}
 	return f.blockers, nil
+}
+func (f *fakeClient) CountEvalCommentsByIssue(context.Context, []int64) (map[int64]int, error) {
+	if f.evalCounts == nil {
+		return map[int64]int{}, nil
+	}
+	return f.evalCounts, nil
+}
+func (f *fakeClient) CountTranscriptDocsByIssue(context.Context, []int64) (map[int64]int, error) {
+	if f.transcriptCounts == nil {
+		return map[int64]int{}, nil
+	}
+	return f.transcriptCounts, nil
 }
 
 // TestAssembleVerbAndTodos covers the BACI-60 enrichment: an open
@@ -753,5 +770,63 @@ func TestAssembleSortsCompletedColumnsByTerminalAt(t *testing.T) {
 		if done[i] != want[i] {
 			t.Fatalf("Done column = %v, want %v (TEST-3's stray edit must not jump it to the top)", done, want)
 		}
+	}
+}
+
+// TestAssembleTranscriptAndEvalCounts (BACI-141) covers the new
+// per-card counts: a taken card surfaces them, an untaken card with
+// only eval/transcript data still surfaces them (the whole point of
+// the ticket is making this material visible after the agent has
+// released), and a card with neither stays at zero values.
+func TestAssembleTranscriptAndEvalCounts(t *testing.T) {
+	repo := &model.Repo{ID: 1, Prefix: "TEST"}
+	t0 := time.Date(2026, 5, 25, 9, 0, 0, 0, time.UTC)
+	sess := &model.AgentSession{ID: 30, SessionID: "sess-e", RepoID: repo.ID, RepoPrefix: repo.Prefix}
+	issues := []*model.Issue{
+		{ID: 100, Key: "TEST-100", State: model.StateInProgress, Title: "taken with both indicators"},
+		{ID: 101, Key: "TEST-101", State: model.StateTodo, Title: "untaken but still has eval / transcript"},
+		{ID: 102, Key: "TEST-102", State: model.StateTodo, Title: "no indicators"},
+	}
+	claims := []*model.AgentClaim{
+		{SessionID: "sess-e", SessionPK: 30, IssueKey: "TEST-100", ClaimedAt: t0},
+	}
+	evalCounts := map[int64]int{
+		100: 3,
+		101: 1,
+	}
+	transcriptCounts := map[int64]int{
+		100: 2,
+		101: 1,
+	}
+	f := &fakeClient{
+		repo: repo, issues: issues, claims: claims,
+		sessions: []*model.AgentSession{sess},
+		evalCounts: evalCounts, transcriptCounts: transcriptCounts,
+	}
+	cards, err := Assemble(context.Background(), f, repo, false)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	byKey := map[string]BoardCard{}
+	for _, c := range cards {
+		byKey[c.Key] = c
+	}
+	taken := byKey["TEST-100"]
+	if taken.EvalCommentCount != 3 || taken.TranscriptDocCount != 2 {
+		t.Errorf("TEST-100 counts = (eval=%d, transcript=%d), want (3, 2)",
+			taken.EvalCommentCount, taken.TranscriptDocCount)
+	}
+	released := byKey["TEST-101"]
+	if released.Taken {
+		t.Errorf("TEST-101 Taken = true, want false (no open claim)")
+	}
+	if released.EvalCommentCount != 1 || released.TranscriptDocCount != 1 {
+		t.Errorf("TEST-101 (untaken) counts = (eval=%d, transcript=%d), want (1, 1) — the whole point of BACI-141 is surfacing these even when not taken",
+			released.EvalCommentCount, released.TranscriptDocCount)
+	}
+	empty := byKey["TEST-102"]
+	if empty.EvalCommentCount != 0 || empty.TranscriptDocCount != 0 {
+		t.Errorf("TEST-102 counts = (eval=%d, transcript=%d), want (0, 0)",
+			empty.EvalCommentCount, empty.TranscriptDocCount)
 	}
 }

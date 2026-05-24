@@ -108,6 +108,24 @@ export class BoardCard {
      */
     "blockedBy"?: BoardCardBlocker[];
 
+    /**
+     * TranscriptDocCount (BACI-141) is the number of `.jsonl`
+     * transcript documents linked to this issue — typed `transcript`
+     * rows plus legacy `project_complete` rows whose filename matches
+     * the bacio-transcript naming convention. Drives the kanban
+     * combined eval/transcript indicator. Omitempty so unaffected
+     * cards stay compact on the wire.
+     */
+    "transcriptDocCount"?: number;
+
+    /**
+     * EvalCommentCount (BACI-141) is the number of eval-flagged
+     * comments on this issue. Surfaces on the kanban card regardless
+     * of `Taken` state, so eval notes posted on a previously-active
+     * card stay discoverable after the agent releases its claim.
+     */
+    "evalCommentCount"?: number;
+
     /** Creates a new BoardCard instance. */
     constructor($$source: Partial<BoardCard> = {}) {
         if (!("key" in $$source)) {

@@ -53,6 +53,11 @@ var (
 		Author:   "agent-alice",
 		Body:     "agent is editing the wrong file — see comment thread on PR 123",
 		Eval:     true,
+		// BACI-141: optional anchor pinning the note to a specific event
+		// inside a `.jsonl` transcript (`tool_use_id:<id>` or
+		// `line_index:<n>`). Omit on board-level eval notes — they
+		// surface pinned to the dispatch prompt card.
+		TranscriptEventRef: "tool_use_id:toolu_01ABCDEFGhij",
 	}
 	ExampleCommentRm = CommentRmInput{
 		IssueKey:    "MINI-42",

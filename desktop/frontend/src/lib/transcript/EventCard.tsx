@@ -8,9 +8,12 @@
 // then EventCard only owns the visual frame and the raw-drawer
 // toggle plumbing.
 
-import React from 'react';
+import React, { useState } from 'react';
+import EvalComposer from './EvalComposer';
+import EvalNotePanel from './EvalNotePanel';
 import RawEventDrawer from './RawEventDrawer';
 import { formatTimeDelta } from './format';
+import type { EvalComment } from './types';
 
 type EventCardProps = {
   // The card's id — used to wire the raw drawer open state into
@@ -35,6 +38,14 @@ type EventCardProps = {
   raw?: unknown;
   rawOpen?: boolean;
   onToggleRaw?: () => void;
+  // BACI-141: eval notes already posted against this event (one or
+  // more rows whose `transcriptEventRef` matches this card's anchor)
+  // and the per-event composer's submit hook + the anchor string the
+  // composer should pin a fresh note to. Both optional — passing
+  // neither keeps the card a pure renderer.
+  evalNotes?: EvalComment[];
+  onPostEval?: (body: string, eventRef: string) => Promise<void> | void;
+  evalEventRef?: string;
 };
 
 export default function EventCard({
@@ -50,8 +61,13 @@ export default function EventCard({
   raw,
   rawOpen,
   onToggleRaw,
+  evalNotes,
+  onPostEval,
+  evalEventRef,
 }: EventCardProps): React.ReactElement {
   const delta = formatTimeDelta(ts, prevTs);
+  const [composerOpen, setComposerOpen] = useState(false);
+  const canCompose = !!(onPostEval && evalEventRef);
   return (
     <div
       id={scrollAnchorId}
@@ -68,6 +84,18 @@ export default function EventCard({
         {headRight && (
           <span className="mk-transcript-event-right">{headRight}</span>
         )}
+        {canCompose && (
+          <button
+            type="button"
+            className="mk-transcript-eval-toggle"
+            onClick={() => setComposerOpen(o => !o)}
+            aria-expanded={composerOpen}
+            aria-label="Eval this event"
+            title="Add an eval note pinned to this event"
+          >
+            Eval
+          </button>
+        )}
         {raw !== undefined && onToggleRaw && (
           <button
             type="button"
@@ -82,6 +110,20 @@ export default function EventCard({
         )}
       </div>
       <div className="mk-transcript-event-body">{children}</div>
+      {evalNotes && evalNotes.length > 0 && (
+        <div className="mk-transcript-eval-notes">
+          {evalNotes.map(n => (
+            <EvalNotePanel key={n.uuid} note={n} />
+          ))}
+        </div>
+      )}
+      {composerOpen && canCompose && (
+        <EvalComposer
+          eventRef={evalEventRef!}
+          onSubmit={onPostEval!}
+          onClose={() => setComposerOpen(false)}
+        />
+      )}
       {rawOpen && raw !== undefined && <RawEventDrawer raw={raw} />}
     </div>
   );
