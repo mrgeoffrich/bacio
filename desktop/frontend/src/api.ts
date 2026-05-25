@@ -596,6 +596,105 @@ export async function getSyncRegistry(): Promise<SyncRegistryDTO> {
   }
 }
 
+// ---------- Sync setup wizard (BACI-111) ----------
+//
+// setupSync POSTs the wizard's form payload to the server-side handler
+// (POST /repos/{prefix}/sync/setup in remote mode; the equivalent
+// Wails-bound entry point on desktop). The renumber-collision case
+// (the engine refuses an additive clone whose import would renumber /
+// rename local rows) flows back as `SyncSetupCollisionError` — the
+// modal `instanceof`-checks and branches to its step-2 preview.
+
+// SyncSetupRenumber mirrors the camelCase Wails DTO field; the web
+// seam re-shapes the snake-case wire payload into the same shape.
+export interface SyncSetupRenumber {
+  prefix: string;
+  uuid: string;
+  oldNumber: number;
+  newNumber: number;
+}
+
+export interface SyncSetupRename {
+  kind: string;
+  prefix: string;
+  uuid: string;
+  old: string;
+  new: string;
+}
+
+export interface SyncSetupPreviewCollisions {
+  renumbered: SyncSetupRenumber[];
+  renamed: SyncSetupRename[];
+}
+
+export interface SyncSetupResult {
+  mode: string;
+  localPath?: string;
+  remote?: string;
+  commitSha?: string;
+  pushed?: boolean;
+  attached?: boolean;
+}
+
+// SyncSetupPayload mirrors SyncSetupPayloadDTO on the Go side. The
+// modal builds one and hands it off to setupSync.
+export interface SyncSetupPayload {
+  mode: 'init' | 'clone' | 'attach';
+  remote?: string;
+  localPath?: string;
+  allowRenumber?: boolean;
+}
+
+// SyncSetupCollisionError is thrown by setupSync when the server
+// refuses the clone / attach because the import would renumber or
+// rename local rows. The modal catches this specific class to switch
+// to its step-2 preview; any other thrown Error is treated as a hard
+// failure.
+export class SyncSetupCollisionError extends Error {
+  previewCollisions: SyncSetupPreviewCollisions;
+  constructor(previewCollisions: SyncSetupPreviewCollisions) {
+    super('Joining would renumber existing issues');
+    this.name = 'SyncSetupCollisionError';
+    this.previewCollisions = previewCollisions;
+  }
+}
+
+// setupSync calls the Wails SetupSync method. The Go-side method
+// flattens the (result, collision-sentinel) pair into a single result
+// where `previewCollisions` is populated on the collision case — we
+// branch on that here and throw the typed error so the modal's
+// try/catch can recognise it.
+export async function setupSync(
+  prefix: string,
+  payload: SyncSetupPayload,
+): Promise<SyncSetupResult> {
+  try {
+    const out = await SettingsService.SetupSync(prefix, {
+      mode: payload.mode,
+      remote: payload.remote ?? '',
+      localPath: payload.localPath ?? '',
+      allowRenumber: !!payload.allowRenumber,
+    });
+    if (out?.previewCollisions) {
+      throw new SyncSetupCollisionError({
+        renumbered: out.previewCollisions.renumbered ?? [],
+        renamed: out.previewCollisions.renamed ?? [],
+      });
+    }
+    return {
+      mode: out.mode,
+      localPath: out.localPath,
+      remote: out.remote,
+      commitSha: out.commitSha,
+      pushed: out.pushed,
+      attached: out.attached,
+    };
+  } catch (err) {
+    if (err instanceof SyncSetupCollisionError) throw err;
+    throw normalize(err);
+  }
+}
+
 // getLeaderStatus returns the current UI leader-election state synchronously.
 // Used on mount to seed the UI before the first "leaderStatus" event arrives.
 export async function getLeaderStatus(): Promise<LeaderStatusDTO> {

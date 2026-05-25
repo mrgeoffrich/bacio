@@ -1666,6 +1666,183 @@ export async function setSyncPreferences(backgroundEnabled: boolean): Promise<Sy
   return { backgroundEnabled: res.background_enabled };
 }
 
+// ---------- Sync setup wizard (BACI-111) ----------
+
+export interface SyncSetupRenumber {
+  prefix: string;
+  uuid: string;
+  oldNumber: number;
+  newNumber: number;
+}
+
+export interface SyncSetupRename {
+  kind: string;
+  prefix: string;
+  uuid: string;
+  old: string;
+  new: string;
+}
+
+export interface SyncSetupPreviewCollisions {
+  renumbered: SyncSetupRenumber[];
+  renamed: SyncSetupRename[];
+}
+
+export interface SyncSetupResult {
+  mode: string;
+  localPath?: string;
+  remote?: string;
+  commitSha?: string;
+  pushed?: boolean;
+  attached?: boolean;
+}
+
+export interface SyncSetupPayload {
+  mode: 'init' | 'clone' | 'attach';
+  remote?: string;
+  localPath?: string;
+  allowRenumber?: boolean;
+}
+
+// Wire-shape (snake_case) for the POST /repos/{prefix}/sync/setup
+// response. Mirrors api.SyncSetupOut. Only the field for the chosen
+// mode is populated on success; preview_collisions on the 409 path.
+interface ApiSyncSetupOut {
+  mode: string;
+  init?: {
+    local_path?: string;
+    remote?: string;
+    commit_sha?: string;
+    pushed?: boolean;
+    attached?: boolean;
+  };
+  clone?: {
+    local_path?: string;
+    remote?: string;
+  };
+  preview_collisions?: {
+    renumbered?: Array<{
+      prefix: string;
+      uuid: string;
+      old_number: number;
+      new_number: number;
+    }>;
+    renamed?: Array<{
+      kind: string;
+      prefix: string;
+      uuid: string;
+      old: string;
+      new: string;
+    }>;
+  };
+}
+
+// SyncSetupCollisionError is thrown by setupSync when the server
+// responds 409 — the import would renumber / rename local rows
+// without allow_renumber set. The modal `instanceof`-checks to switch
+// to its step-2 preview banner.
+export class SyncSetupCollisionError extends Error {
+  previewCollisions: SyncSetupPreviewCollisions;
+  constructor(previewCollisions: SyncSetupPreviewCollisions) {
+    super('Joining would renumber existing issues');
+    this.name = 'SyncSetupCollisionError';
+    this.previewCollisions = previewCollisions;
+  }
+}
+
+// setupSync POSTs the wizard's payload to POST /repos/{prefix}/sync/setup.
+// Uses a direct fetch (not `call`) so the 409 body is readable — the
+// shared helper throws on any !ok status and loses the structured
+// collision preview. Other non-2xx flow through the standard
+// {error, code, details} envelope.
+export async function setupSync(
+  prefix: string,
+  payload: SyncSetupPayload,
+): Promise<SyncSetupResult> {
+  if (!prefix) throw new Error('setupSync: prefix is required');
+  const url = new URL(`${API_BASE}/repos/${encodeURIComponent(prefix)}/sync/setup`,
+    window.location.origin);
+  const body: Record<string, unknown> = { mode: payload.mode };
+  if (payload.remote) body.remote = payload.remote;
+  if (payload.localPath) body.local_path = payload.localPath;
+  if (payload.allowRenumber) body.allow_renumber = true;
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'X-Actor': readActor(),
+  };
+  const token = readToken();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(url.toString(), {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  if (res.status === 200) {
+    const parsed = text ? (JSON.parse(text) as ApiSyncSetupOut) : { mode: payload.mode };
+    return reshapeSyncSetup(parsed);
+  }
+  if (res.status === 409) {
+    let preview: SyncSetupPreviewCollisions = { renumbered: [], renamed: [] };
+    if (text) {
+      try {
+        const parsed = JSON.parse(text) as ApiSyncSetupOut;
+        preview = reshapePreviewCollisions(parsed.preview_collisions);
+      } catch {
+        // Fall through with an empty preview — the banner still renders;
+        // the operator will see no specific collisions listed.
+      }
+    }
+    throw new SyncSetupCollisionError(preview);
+  }
+  // Non-2xx, non-409 — same envelope handling as call().
+  let msg = `${res.status} ${res.statusText}`;
+  if (text) {
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed?.error) msg = parsed.error;
+    } catch { msg = text; }
+  }
+  throw new Error(msg);
+}
+
+function reshapeSyncSetup(out: ApiSyncSetupOut): SyncSetupResult {
+  const r: SyncSetupResult = { mode: out.mode };
+  if (out.init) {
+    r.localPath = out.init.local_path;
+    r.remote = out.init.remote;
+    r.commitSha = out.init.commit_sha;
+    r.pushed = out.init.pushed;
+    r.attached = out.init.attached;
+  } else if (out.clone) {
+    r.localPath = out.clone.local_path;
+    r.remote = out.clone.remote;
+    // attach mode reuses the clone path; mark Attached so the modal
+    // can render a slightly different success message.
+    if (out.mode === 'attach') r.attached = true;
+  }
+  return r;
+}
+
+function reshapePreviewCollisions(p: ApiSyncSetupOut['preview_collisions']): SyncSetupPreviewCollisions {
+  if (!p) return { renumbered: [], renamed: [] };
+  return {
+    renumbered: (p.renumbered ?? []).map((r) => ({
+      prefix: r.prefix,
+      uuid: r.uuid,
+      oldNumber: r.old_number,
+      newNumber: r.new_number,
+    })),
+    renamed: (p.renamed ?? []).map((r) => ({
+      kind: r.kind,
+      prefix: r.prefix,
+      uuid: r.uuid,
+      old: r.old,
+      new: r.new,
+    })),
+  };
+}
+
 // ---------- Display preferences (BACI-68) ----------
 //
 // display.show_archived global toggle — when on, default lists / board

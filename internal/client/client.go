@@ -217,6 +217,18 @@ type Client interface {
 	// ReadProjectConfig); the remote calls GET /sync/repos.
 	SyncRegistry(ctx context.Context) (*SyncRegistry, error)
 
+	// SetupSync (BACI-111) is the cross-transport entry point for the
+	// desktop / web "Set up sync…" wizard. It mirrors the HTTP handler
+	// at POST /repos/{prefix}/sync/setup: validates the mode (init /
+	// clone / attach), acquires the cross-process sync lock, and
+	// dispatches into the engine's InitSyncRepo or CloneSyncRepo paths.
+	// The renumber-collision gate is structured: when AllowRenumber is
+	// false and the import would renumber / rename existing rows, the
+	// call returns a non-nil *SyncSetupResult with PreviewCollisions
+	// populated AND the sentinel ErrSetupCollision so the caller can
+	// branch on it and re-submit with allow_renumber=true.
+	SetupSync(ctx context.Context, repo *model.Repo, in inputs.SyncSetupInput) (*SyncSetupResult, error)
+
 	// ----- History -----
 	// ListHistory queries the audit log. When repo is non-nil, results
 	// are scoped to that repo (the remote backend uses the repo's

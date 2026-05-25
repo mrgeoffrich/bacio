@@ -212,6 +212,21 @@ export function SetSyncPreferences(backgroundEnabled: boolean): $CancellableProm
     });
 }
 
+/**
+ * SetupSync drives the BACI-111 sync setup wizard. Resolves the repo
+ * from prefix, calls client.SetupSync, and reshapes the result into
+ * the camelCase DTO the React modal consumes. The collision case
+ * (client returns ErrSetupCollision + a populated *SyncSetupResult)
+ * flattens to a successful return with PreviewCollisions populated —
+ * the modal branches on that field rather than catching a typed error
+ * across the Wails boundary. Other errors propagate verbatim.
+ */
+export function SetupSync(prefix: string, $in: $models.SyncSetupPayloadDTO): $CancellablePromise<$models.SyncSetupResultDTO> {
+    return $Call.ByID(3158355382, prefix, $in).then(($result: any) => {
+        return $$createType7($result);
+    });
+}
+
 // Private type creation functions
 const $$createType0 = $models.PromptTemplateDTO.createFrom;
 const $$createType1 = $models.BoardPreferencesDTO.createFrom;
@@ -220,3 +235,4 @@ const $$createType3 = $models.SyncPreferencesDTO.createFrom;
 const $$createType4 = $models.SyncRegistryDTO.createFrom;
 const $$createType5 = $Create.Array($$createType0);
 const $$createType6 = $Create.Array($Create.Any);
+const $$createType7 = $models.SyncSetupResultDTO.createFrom;

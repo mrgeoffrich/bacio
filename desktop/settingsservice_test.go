@@ -6,7 +6,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/client"
+	"github.com/mrgeoffrich/bacio/internal/model"
+	bsync "github.com/mrgeoffrich/bacio/internal/sync"
 )
 
 // fakeSyncClient is a minimal client.Client for SettingsService sync
@@ -23,6 +26,31 @@ type fakeSyncClient struct {
 	// lastSet records the most recent SetSyncBackgroundEnabled value so
 	// tests can assert the round-trip.
 	lastSet bool
+	// repo is the fake repo returned by GetRepoByPrefix; setupResult /
+	// setupErr drive SetupSync's outcome. setupLastIn captures the input
+	// so tests can assert it was passed through verbatim.
+	repo         *model.Repo
+	repoErr      error
+	setupResult  *client.SyncSetupResult
+	setupErr     error
+	setupLastIn  inputs.SyncSetupInput
+	setupCalls   int
+}
+
+func (f *fakeSyncClient) GetRepoByPrefix(_ context.Context, _ string) (*model.Repo, error) {
+	if f.repoErr != nil {
+		return nil, f.repoErr
+	}
+	if f.repo == nil {
+		return &model.Repo{Prefix: "TEST", Path: "/tmp/test"}, nil
+	}
+	return f.repo, nil
+}
+
+func (f *fakeSyncClient) SetupSync(_ context.Context, _ *model.Repo, in inputs.SyncSetupInput) (*client.SyncSetupResult, error) {
+	f.setupCalls++
+	f.setupLastIn = in
+	return f.setupResult, f.setupErr
 }
 
 func (f *fakeSyncClient) GetSyncBackgroundEnabled(context.Context) (bool, error) {
@@ -236,5 +264,158 @@ func TestSettingsService_GetSyncRegistry_ErrorPropagates(t *testing.T) {
 	s := NewSettingsService(&fakeSyncClient{registryErr: want})
 	if _, err := s.GetSyncRegistry(); !errors.Is(err, want) {
 		t.Fatalf("expected sentinel error, got %v", err)
+	}
+}
+
+// TestSettingsService_SetupSync_HappyInit pins the happy-path DTO
+// reshape for mode="init" — the client.SyncSetupResult's *InitResult
+// flows into the camelCase top-level fields (localPath, remote,
+// commitSha, pushed, attached) and no previewCollisions.
+func TestSettingsService_SetupSync_HappyInit(t *testing.T) {
+	fake := &fakeSyncClient{
+		setupResult: &client.SyncSetupResult{
+			Mode: "init",
+			Init: &bsync.InitResult{
+				LocalPath: "/Users/x/sync",
+				Remote:    "git@example.com:team/sync.git",
+				CommitSHA: "abc123",
+				Pushed:    true,
+				Attached:  false,
+			},
+		},
+	}
+	s := NewSettingsService(fake)
+	got, err := s.SetupSync("TEST", SyncSetupPayloadDTO{
+		Mode:      "init",
+		Remote:    "git@example.com:team/sync.git",
+		LocalPath: "/Users/x/sync",
+	})
+	if err != nil {
+		t.Fatalf("SetupSync: %v", err)
+	}
+	if got.Mode != "init" {
+		t.Errorf("Mode=%q", got.Mode)
+	}
+	if got.LocalPath != "/Users/x/sync" {
+		t.Errorf("LocalPath=%q", got.LocalPath)
+	}
+	if got.CommitSHA != "abc123" {
+		t.Errorf("CommitSHA=%q", got.CommitSHA)
+	}
+	if !got.Pushed {
+		t.Errorf("Pushed=false")
+	}
+	if got.PreviewCollisions != nil {
+		t.Errorf("PreviewCollisions populated on happy path: %+v", got.PreviewCollisions)
+	}
+	// The Wails method forwards the payload verbatim into inputs.SyncSetupInput.
+	if fake.setupLastIn.Mode != "init" || fake.setupLastIn.LocalPath != "/Users/x/sync" {
+		t.Errorf("setupLastIn=%+v", fake.setupLastIn)
+	}
+}
+
+// TestSettingsService_SetupSync_HappyAttach pins the attach mode's
+// DTO: the Clone field carries local_path / remote, and the Wails
+// reshape stamps attached=true so the modal can render a slightly
+// different success message.
+func TestSettingsService_SetupSync_HappyAttach(t *testing.T) {
+	fake := &fakeSyncClient{
+		setupResult: &client.SyncSetupResult{
+			Mode: "attach",
+			Clone: &bsync.CloneResult{
+				LocalPath: "/Users/x/.bacio/sync/team",
+				Remote:    "git@example.com:team/sync.git",
+			},
+		},
+	}
+	s := NewSettingsService(fake)
+	got, err := s.SetupSync("TEST", SyncSetupPayloadDTO{
+		Mode:   "attach",
+		Remote: "git@example.com:team/sync.git",
+	})
+	if err != nil {
+		t.Fatalf("SetupSync: %v", err)
+	}
+	if got.Mode != "attach" {
+		t.Errorf("Mode=%q", got.Mode)
+	}
+	if got.LocalPath != "/Users/x/.bacio/sync/team" {
+		t.Errorf("LocalPath=%q", got.LocalPath)
+	}
+	if !got.Attached {
+		t.Errorf("Attached=false on attach mode")
+	}
+}
+
+// TestSettingsService_SetupSync_CollisionFlattens drives the BACI-111
+// "outcome on nil error" contract: when the client returns
+// ErrSetupCollision alongside a populated *SyncSetupResult, the Wails
+// method swallows the error and returns the DTO with a populated
+// previewCollisions block — the React modal branches on that field
+// rather than catching a typed error across the Wails boundary.
+func TestSettingsService_SetupSync_CollisionFlattens(t *testing.T) {
+	fake := &fakeSyncClient{
+		setupResult: &client.SyncSetupResult{
+			Mode: "clone",
+			PreviewCollisions: &bsync.CollisionPreview{
+				Renumbered: []bsync.RenumberEntry{
+					{Prefix: "MINI", UUID: "u1", OldNumber: 1, NewNumber: 3},
+				},
+				Renamed: []bsync.RenameEntry{
+					{Kind: "feature", Prefix: "MINI", UUID: "u2", Old: "auth", New: "auth-2"},
+				},
+			},
+		},
+		setupErr: client.ErrSetupCollision,
+	}
+	s := NewSettingsService(fake)
+	got, err := s.SetupSync("TEST", SyncSetupPayloadDTO{
+		Mode:   "clone",
+		Remote: "git@example.com:team/sync.git",
+	})
+	if err != nil {
+		t.Fatalf("expected nil error on collision flatten, got %v", err)
+	}
+	if got.PreviewCollisions == nil {
+		t.Fatalf("expected previewCollisions, got nil")
+	}
+	if got.Mode != "clone" {
+		t.Errorf("Mode=%q", got.Mode)
+	}
+	if len(got.PreviewCollisions.Renumbered) != 1 {
+		t.Fatalf("Renumbered len=%d", len(got.PreviewCollisions.Renumbered))
+	}
+	r := got.PreviewCollisions.Renumbered[0]
+	if r.Prefix != "MINI" || r.OldNumber != 1 || r.NewNumber != 3 {
+		t.Errorf("Renumbered[0]=%+v", r)
+	}
+	if len(got.PreviewCollisions.Renamed) != 1 {
+		t.Fatalf("Renamed len=%d", len(got.PreviewCollisions.Renamed))
+	}
+	rn := got.PreviewCollisions.Renamed[0]
+	if rn.Kind != "feature" || rn.Old != "auth" || rn.New != "auth-2" {
+		t.Errorf("Renamed[0]=%+v", rn)
+	}
+}
+
+// TestSettingsService_SetupSync_RepoLookupErrors surfaces a
+// repo-resolution failure verbatim so the desktop's reportError
+// modal triggers and the operator sees the failure.
+func TestSettingsService_SetupSync_RepoLookupErrors(t *testing.T) {
+	want := errors.New("no such repo")
+	s := NewSettingsService(&fakeSyncClient{repoErr: want})
+	if _, err := s.SetupSync("NONE", SyncSetupPayloadDTO{Mode: "init", LocalPath: "/x"}); !errors.Is(err, want) {
+		t.Fatalf("expected sentinel, got %v", err)
+	}
+}
+
+// TestSettingsService_SetupSync_GenericErrorPropagates pins the non-
+// collision error case — the modal sees the real error message.
+func TestSettingsService_SetupSync_GenericErrorPropagates(t *testing.T) {
+	want := errors.New("git push failed")
+	fake := &fakeSyncClient{setupErr: want}
+	s := NewSettingsService(fake)
+	if _, err := s.SetupSync("TEST", SyncSetupPayloadDTO{Mode: "init", LocalPath: "/x"}); !errors.Is(err, want) {
+		t.Fatalf("expected sentinel, got %v", err)
 	}
 }

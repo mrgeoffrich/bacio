@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
+	bsync "github.com/mrgeoffrich/bacio/internal/sync"
 	"github.com/mrgeoffrich/bacio/internal/version"
 )
 
@@ -430,3 +432,148 @@ func (s *SettingsService) GetSyncRegistry() (SyncRegistryDTO, error) {
 	}
 	return out, nil
 }
+
+// SyncSetupPayloadDTO is the BACI-111 sync setup form input — camelCase
+// JSON tags for the generated TS bindings. Mirrors
+// internal/cli/inputs.SyncSetupInput; the Wails method re-casts to the
+// snake-case input the client layer expects.
+type SyncSetupPayloadDTO struct {
+	Mode          string `json:"mode"`
+	Remote        string `json:"remote,omitempty"`
+	LocalPath     string `json:"localPath,omitempty"`
+	AllowRenumber bool   `json:"allowRenumber,omitempty"`
+}
+
+// SyncSetupResultDTO is the BACI-111 sync setup outcome, shaped for the
+// React modal. Mirrors client.SyncSetupResult / api.SyncSetupOut with
+// camelCase JSON tags. The collision case (the server returns 409 on
+// the wire / the client returns ErrSetupCollision) shows up as a
+// non-nil PreviewCollisions on a nil error return — the Wails seam
+// flattens the (result, sentinel-error) shape from the underlying
+// client into a single result the modal can branch on by checking
+// previewCollisions != null. A "normal" failure (network blip, mode
+// validation, engine boom) still returns a non-nil error.
+type SyncSetupResultDTO struct {
+	Mode              string                       `json:"mode"`
+	LocalPath         string                       `json:"localPath,omitempty"`
+	Remote            string                       `json:"remote,omitempty"`
+	CommitSHA         string                       `json:"commitSha,omitempty"`
+	Pushed            bool                         `json:"pushed,omitempty"`
+	Attached          bool                         `json:"attached,omitempty"`
+	PreviewCollisions *SyncSetupPreviewCollisions  `json:"previewCollisions,omitempty"`
+}
+
+// SyncSetupPreviewCollisions mirrors sync.CollisionPreview — the
+// renumber / rename projections returned when a clone or attach would
+// collide with local rows. Both slices are non-nil even when empty so
+// the React tree can iterate without null checks.
+type SyncSetupPreviewCollisions struct {
+	Renumbered []SyncSetupRenumberDTO `json:"renumbered"`
+	Renamed    []SyncSetupRenameDTO   `json:"renamed"`
+}
+
+// SyncSetupRenumberDTO mirrors sync.RenumberEntry.
+type SyncSetupRenumberDTO struct {
+	Prefix    string `json:"prefix"`
+	UUID      string `json:"uuid"`
+	OldNumber int64  `json:"oldNumber"`
+	NewNumber int64  `json:"newNumber"`
+}
+
+// SyncSetupRenameDTO mirrors sync.RenameEntry.
+type SyncSetupRenameDTO struct {
+	Kind   string `json:"kind"`
+	Prefix string `json:"prefix"`
+	UUID   string `json:"uuid"`
+	Old    string `json:"old"`
+	New    string `json:"new"`
+}
+
+// SetupSync drives the BACI-111 sync setup wizard. Resolves the repo
+// from prefix, calls client.SetupSync, and reshapes the result into
+// the camelCase DTO the React modal consumes. The collision case
+// (client returns ErrSetupCollision + a populated *SyncSetupResult)
+// flattens to a successful return with PreviewCollisions populated —
+// the modal branches on that field rather than catching a typed error
+// across the Wails boundary. Other errors propagate verbatim.
+func (s *SettingsService) SetupSync(prefix string, in SyncSetupPayloadDTO) (SyncSetupResultDTO, error) {
+	ctx := context.Background()
+	repo, err := s.client.GetRepoByPrefix(ctx, prefix)
+	if err != nil {
+		return SyncSetupResultDTO{}, err
+	}
+	res, err := s.client.SetupSync(ctx, repo, inputs.SyncSetupInput{
+		Mode:          in.Mode,
+		Remote:        in.Remote,
+		LocalPath:     in.LocalPath,
+		AllowRenumber: in.AllowRenumber,
+	})
+	if err != nil {
+		// The collision sentinel is a structured outcome the JS modal
+		// branches on — flatten it into the DTO and return a nil err.
+		if errors.Is(err, client.ErrSetupCollision) && res != nil {
+			return setupResultDTO(res), nil
+		}
+		return SyncSetupResultDTO{}, err
+	}
+	if res == nil {
+		// Defensive: SetupSync never returns (nil, nil), but if it does,
+		// surface a clear failure rather than panic on a nil deref.
+		return SyncSetupResultDTO{}, errors.New("sync setup: no result returned")
+	}
+	return setupResultDTO(res), nil
+}
+
+// setupResultDTO maps client.SyncSetupResult into the camelCase wire
+// shape. Only the field for the chosen mode is populated on success;
+// PreviewCollisions is set on the collision-refused path.
+func setupResultDTO(res *client.SyncSetupResult) SyncSetupResultDTO {
+	out := SyncSetupResultDTO{Mode: res.Mode}
+	switch {
+	case res.PreviewCollisions != nil:
+		out.PreviewCollisions = previewCollisionsDTO(res.PreviewCollisions)
+	case res.Init != nil:
+		out.LocalPath = res.Init.LocalPath
+		out.Remote = res.Init.Remote
+		out.CommitSHA = res.Init.CommitSHA
+		out.Pushed = res.Init.Pushed
+		out.Attached = res.Init.Attached
+	case res.Clone != nil:
+		out.LocalPath = res.Clone.LocalPath
+		out.Remote = res.Clone.Remote
+		// attach reuses the clone path; the engine never sets Attached on
+		// CloneResult, so we mark attach mode here from the parent res.
+		if res.Mode == "attach" {
+			out.Attached = true
+		}
+	}
+	return out
+}
+
+// previewCollisionsDTO non-nil-ifies the inner slices so the JS side
+// can iterate with a bare `.length` and no optional-chaining noise.
+func previewCollisionsDTO(p *bsync.CollisionPreview) *SyncSetupPreviewCollisions {
+	out := &SyncSetupPreviewCollisions{
+		Renumbered: make([]SyncSetupRenumberDTO, 0, len(p.Renumbered)),
+		Renamed:    make([]SyncSetupRenameDTO, 0, len(p.Renamed)),
+	}
+	for _, r := range p.Renumbered {
+		out.Renumbered = append(out.Renumbered, SyncSetupRenumberDTO{
+			Prefix:    r.Prefix,
+			UUID:      r.UUID,
+			OldNumber: r.OldNumber,
+			NewNumber: r.NewNumber,
+		})
+	}
+	for _, r := range p.Renamed {
+		out.Renamed = append(out.Renamed, SyncSetupRenameDTO{
+			Kind:   r.Kind,
+			Prefix: r.Prefix,
+			UUID:   r.UUID,
+			Old:    r.Old,
+			New:    r.New,
+		})
+	}
+	return out
+}
+

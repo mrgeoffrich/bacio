@@ -14,10 +14,13 @@ import (
 // localClient is the in-process backend wrapping a *store.Store. It
 // owns the store's lifecycle (Open in newLocalClient, Close on Close).
 // Audit-log writes happen here, mirroring what cli handlers used to do
-// inline.
+// inline. dbPath is remembered so BACI-111 SetupSync can acquire the
+// cross-process sync lock at <dbPath>.sync.lock — the same path the
+// HTTP handler resolves from its server options.
 type localClient struct {
-	store *store.Store
-	actor string
+	store  *store.Store
+	actor  string
+	dbPath string
 }
 
 func newLocalClient(opts Options) (*localClient, error) {
@@ -33,7 +36,7 @@ func newLocalClient(opts Options) (*localClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &localClient{store: s, actor: opts.Actor}, nil
+	return &localClient{store: s, actor: opts.Actor, dbPath: path}, nil
 }
 
 // NewLocalFromStore wraps an already-open *store.Store as a Client without

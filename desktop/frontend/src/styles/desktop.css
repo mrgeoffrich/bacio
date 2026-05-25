@@ -1506,3 +1506,74 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
 .mk-pill.mk-status-linked  { background: var(--status-done-bg);   color: var(--status-done); }
 .mk-pill.mk-status-phantom { background: var(--status-blocked-bg); color: var(--status-blocked); }
 .mk-pill.mk-status-absent  { background: var(--ink-50);            color: var(--fg-4); }
+
+/* ----- BACI-111: sync setup wizard ----------------------------------
+   The modal is wider than the default `.mk-modal` so the per-mode
+   form sub-blocks (attach picker, clone fields, init fields) fit
+   comfortably. Layout-only additions — no new design tokens. The
+   collision banner uses the existing `is-error` palette via the
+   shared `mk-settings-error` red, kept off the action button itself
+   (the in-banner preview carries the warning weight). */
+.mk-sync-setup-modal { width: min(560px, 92vw); display: contents; }
+.mk-sync-setup-modal > * + * { margin-top: 0; }
+/* The wrapper just widens the Radix Content; Radix's .mk-modal sets
+   its own width via the inline-style positioning, so we override on
+   the outermost modal frame via a contextual descendant rule. */
+.mk-modal:has(> .mk-sync-setup-modal) {
+  width: min(560px, 92vw);
+}
+
+.mk-sync-setup-radios {
+  display: flex; flex-direction: column; gap: 8px; margin-top: 4px;
+}
+.mk-sync-setup-radio {
+  padding: 10px 12px;
+  border: 1px solid var(--border-1); border-radius: var(--radius-md);
+  background: var(--bg-2);
+  display: flex; flex-direction: column; gap: 4px;
+  transition: border-color var(--dur-fast) var(--ease-out),
+              background var(--dur-fast) var(--ease-out);
+}
+.mk-sync-setup-radio.is-checked {
+  border-color: var(--border-focus);
+  background: var(--bg-1);
+}
+.mk-sync-setup-radio.is-disabled { opacity: 0.55; }
+.mk-sync-setup-radio-head {
+  display: flex; align-items: center; gap: 8px; cursor: pointer;
+}
+.mk-sync-setup-radio.is-disabled .mk-sync-setup-radio-head { cursor: not-allowed; }
+.mk-sync-setup-radio-title {
+  font-size: 13px; font-weight: 500; color: var(--fg-1);
+}
+.mk-sync-setup-radio-subtitle {
+  font-size: 12px; color: var(--fg-3); margin-left: 22px;
+}
+.mk-sync-setup-form-fields {
+  display: flex; flex-direction: column; gap: 6px;
+  margin: 6px 0 0 22px; padding-top: 6px;
+  border-top: 1px dashed var(--border-1);
+}
+
+.mk-sync-setup-error { color: var(--status-blocked); }
+
+.mk-sync-setup-collision-banner {
+  padding: 8px 10px; border-radius: var(--radius-md);
+  background: var(--bg-2); border: 1px solid var(--border-1);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.mk-sync-setup-collision-list {
+  list-style: none; padding: 0; margin: 0;
+  display: flex; flex-direction: column; gap: 2px;
+  font-size: 12px; color: var(--fg-2);
+  max-height: 220px; overflow-y: auto;
+}
+.mk-sync-setup-collision-list code {
+  font-family: var(--font-mono); font-size: 11px;
+  padding: 1px 4px; border-radius: var(--radius-sm);
+  background: var(--bg-4); color: var(--fg-1);
+}
+.mk-sync-setup-collision-kind {
+  font-size: 11px; color: var(--fg-3); text-transform: uppercase;
+  letter-spacing: .04em; margin-right: 4px;
+}

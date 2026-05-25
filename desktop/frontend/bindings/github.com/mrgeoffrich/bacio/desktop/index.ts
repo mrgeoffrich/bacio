@@ -49,5 +49,10 @@ export {
     SyncPreferencesDTO,
     SyncRegistryDTO,
     SyncRepoDTO,
+    SyncSetupPayloadDTO,
+    SyncSetupPreviewCollisions,
+    SyncSetupRenameDTO,
+    SyncSetupRenumberDTO,
+    SyncSetupResultDTO,
     UnsyncedProjectDTO
 } from "./models.js";

@@ -1403,6 +1403,193 @@ export class SyncRepoDTO {
 }
 
 /**
+ * SyncSetupPayloadDTO is the BACI-111 sync setup form input — camelCase
+ * JSON tags for the generated TS bindings. Mirrors
+ * internal/cli/inputs.SyncSetupInput; the Wails method re-casts to the
+ * snake-case input the client layer expects.
+ */
+export class SyncSetupPayloadDTO {
+    "mode": string;
+    "remote"?: string;
+    "localPath"?: string;
+    "allowRenumber"?: boolean;
+
+    /** Creates a new SyncSetupPayloadDTO instance. */
+    constructor($$source: Partial<SyncSetupPayloadDTO> = {}) {
+        if (!("mode" in $$source)) {
+            this["mode"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new SyncSetupPayloadDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): SyncSetupPayloadDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new SyncSetupPayloadDTO($$parsedSource as Partial<SyncSetupPayloadDTO>);
+    }
+}
+
+/**
+ * SyncSetupPreviewCollisions mirrors sync.CollisionPreview — the
+ * renumber / rename projections returned when a clone or attach would
+ * collide with local rows. Both slices are non-nil even when empty so
+ * the React tree can iterate without null checks.
+ */
+export class SyncSetupPreviewCollisions {
+    "renumbered": SyncSetupRenumberDTO[];
+    "renamed": SyncSetupRenameDTO[];
+
+    /** Creates a new SyncSetupPreviewCollisions instance. */
+    constructor($$source: Partial<SyncSetupPreviewCollisions> = {}) {
+        if (!("renumbered" in $$source)) {
+            this["renumbered"] = [];
+        }
+        if (!("renamed" in $$source)) {
+            this["renamed"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new SyncSetupPreviewCollisions instance from a string or object.
+     */
+    static createFrom($$source: any = {}): SyncSetupPreviewCollisions {
+        const $$createField0_0 = $$createType32;
+        const $$createField1_0 = $$createType34;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("renumbered" in $$parsedSource) {
+            $$parsedSource["renumbered"] = $$createField0_0($$parsedSource["renumbered"]);
+        }
+        if ("renamed" in $$parsedSource) {
+            $$parsedSource["renamed"] = $$createField1_0($$parsedSource["renamed"]);
+        }
+        return new SyncSetupPreviewCollisions($$parsedSource as Partial<SyncSetupPreviewCollisions>);
+    }
+}
+
+/**
+ * SyncSetupRenameDTO mirrors sync.RenameEntry.
+ */
+export class SyncSetupRenameDTO {
+    "kind": string;
+    "prefix": string;
+    "uuid": string;
+    "old": string;
+    "new": string;
+
+    /** Creates a new SyncSetupRenameDTO instance. */
+    constructor($$source: Partial<SyncSetupRenameDTO> = {}) {
+        if (!("kind" in $$source)) {
+            this["kind"] = "";
+        }
+        if (!("prefix" in $$source)) {
+            this["prefix"] = "";
+        }
+        if (!("uuid" in $$source)) {
+            this["uuid"] = "";
+        }
+        if (!("old" in $$source)) {
+            this["old"] = "";
+        }
+        if (!("new" in $$source)) {
+            this["new"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new SyncSetupRenameDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): SyncSetupRenameDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new SyncSetupRenameDTO($$parsedSource as Partial<SyncSetupRenameDTO>);
+    }
+}
+
+/**
+ * SyncSetupRenumberDTO mirrors sync.RenumberEntry.
+ */
+export class SyncSetupRenumberDTO {
+    "prefix": string;
+    "uuid": string;
+    "oldNumber": number;
+    "newNumber": number;
+
+    /** Creates a new SyncSetupRenumberDTO instance. */
+    constructor($$source: Partial<SyncSetupRenumberDTO> = {}) {
+        if (!("prefix" in $$source)) {
+            this["prefix"] = "";
+        }
+        if (!("uuid" in $$source)) {
+            this["uuid"] = "";
+        }
+        if (!("oldNumber" in $$source)) {
+            this["oldNumber"] = 0;
+        }
+        if (!("newNumber" in $$source)) {
+            this["newNumber"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new SyncSetupRenumberDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): SyncSetupRenumberDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new SyncSetupRenumberDTO($$parsedSource as Partial<SyncSetupRenumberDTO>);
+    }
+}
+
+/**
+ * SyncSetupResultDTO is the BACI-111 sync setup outcome, shaped for the
+ * React modal. Mirrors client.SyncSetupResult / api.SyncSetupOut with
+ * camelCase JSON tags. The collision case (the server returns 409 on
+ * the wire / the client returns ErrSetupCollision) shows up as a
+ * non-nil PreviewCollisions on a nil error return — the Wails seam
+ * flattens the (result, sentinel-error) shape from the underlying
+ * client into a single result the modal can branch on by checking
+ * previewCollisions != null. A "normal" failure (network blip, mode
+ * validation, engine boom) still returns a non-nil error.
+ */
+export class SyncSetupResultDTO {
+    "mode": string;
+    "localPath"?: string;
+    "remote"?: string;
+    "commitSha"?: string;
+    "pushed"?: boolean;
+    "attached"?: boolean;
+    "previewCollisions"?: SyncSetupPreviewCollisions | null;
+
+    /** Creates a new SyncSetupResultDTO instance. */
+    constructor($$source: Partial<SyncSetupResultDTO> = {}) {
+        if (!("mode" in $$source)) {
+            this["mode"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new SyncSetupResultDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): SyncSetupResultDTO {
+        const $$createField6_0 = $$createType36;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("previewCollisions" in $$parsedSource) {
+            $$parsedSource["previewCollisions"] = $$createField6_0($$parsedSource["previewCollisions"]);
+        }
+        return new SyncSetupResultDTO($$parsedSource as Partial<SyncSetupResultDTO>);
+    }
+}
+
+/**
  * UnsyncedProjectDTO mirrors client.UnsyncedProject.
  */
 export class UnsyncedProjectDTO {
@@ -1470,3 +1657,9 @@ const $$createType27 = UnsyncedProjectDTO.createFrom;
 const $$createType28 = $Create.Array($$createType27);
 const $$createType29 = MemberProjectDTO.createFrom;
 const $$createType30 = $Create.Array($$createType29);
+const $$createType31 = SyncSetupRenumberDTO.createFrom;
+const $$createType32 = $Create.Array($$createType31);
+const $$createType33 = SyncSetupRenameDTO.createFrom;
+const $$createType34 = $Create.Array($$createType33);
+const $$createType35 = SyncSetupPreviewCollisions.createFrom;
+const $$createType36 = $Create.Nullable($$createType35);
