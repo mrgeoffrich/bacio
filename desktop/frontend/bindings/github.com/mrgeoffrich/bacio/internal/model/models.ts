@@ -9,6 +9,38 @@ import { Create as $Create } from "@wailsio/runtime";
 // @ts-ignore: Unused imports
 import * as time$0 from "../../../../../time/models.js";
 
+/**
+ * DispatchMode is the slug of the prompt template a dispatch was queued
+ * against — for the built-in templates that ship with bacio it's one of
+ * "plan", "design", "implement", "review", "ship", or "fix_review"; for
+ * a user-created template it's whatever the user named it. "" = untyped (the
+ * pre-Mode default; delivery treats it as unspecified). The mode is the
+ * per-dispatch snapshot of which template was used; it deliberately
+ * outlives the template (a deleted template's historical dispatches
+ * keep the slug verbatim — renderers should treat an unrecognised slug
+ * as "removed", not error out). The shape rule is a slug
+ * (^[a-z0-9][a-z0-9-_]*$) capped at 60 chars; the registered set lives
+ * in the prompt_templates store table, not this enum.
+ */
+export enum DispatchMode {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    /**
+     * DispatchModePlan etc. are deprecated aliases — kept so older callers
+     * that still reference the typed constants keep compiling. New code
+     * should use the BuiltinTemplate* string constants above and the
+     * runtime slug values from the prompt_templates table.
+     */
+    DispatchModePlan = "plan",
+    DispatchModeImplement = "implement",
+    DispatchModeReview = "review",
+    DispatchModeShip = "ship",
+    DispatchModeFixReview = "fix_review",
+};
+
 export class Issue {
     "id": number;
     "uuid": string;

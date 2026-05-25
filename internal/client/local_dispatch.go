@@ -218,6 +218,17 @@ func (c *localClient) WaitingDispatchForIssue(ctx context.Context, repo *model.R
 	return c.store.WaitingDispatchForIssue(repo.ID, iss.ID)
 }
 
+// InflightByModeForRepo (BACI-145) is the bulked sibling of
+// CountInFlightByMode — one read per repo for the kanban / brief
+// assembler's WaitingState derivation. Modes with zero in-flight rows
+// are omitted from the map.
+func (c *localClient) InflightByModeForRepo(ctx context.Context, repo *model.Repo) (map[model.DispatchMode]int, error) {
+	if repo == nil {
+		return nil, fmt.Errorf("InflightByModeForRepo requires a repo")
+	}
+	return c.store.InflightByModeForRepo(repo.ID)
+}
+
 func (c *localClient) InboxDispatches(ctx context.Context, sessionID string) ([]*model.AgentDispatch, error) {
 	sess, err := c.store.GetAgentSession(sessionID)
 	if err != nil {

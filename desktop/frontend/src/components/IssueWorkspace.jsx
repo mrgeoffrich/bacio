@@ -71,6 +71,12 @@ export default function IssueWorkspace({
     if (!onAddComment) return;
     await onAddComment('', body, { eval: true, transcriptEventRef: eventRef });
   }, [onAddComment]);
+
+  // BACI-145: the brief now carries the structured WaitingState used
+  // by the IssueLockBanner's inline label. Fall back to null when the
+  // server didn't populate it (a brief read race against the dispatch
+  // tables, or pre-BACI-145 payloads — the banner copes).
+  const waitingState = brief?.waitingState || null;
   // The most recent open claimant — the holder of an active claim.
   // ClaimantDTO is shaped {sessionId, agentName, prompt, open, ...}.
   const openClaimant = useMemo(() => {
@@ -174,6 +180,7 @@ export default function IssueWorkspace({
         <IssueLockBanner
           taken={taken}
           waiting={waiting}
+          waitingState={waitingState}
           claimant={openClaimant}
           onCancelWaiting={onCancelWaiting}
         />

@@ -5,5 +5,7 @@ export {
     BoardCard,
     BoardCardBlocker,
     BoardCardQuestion,
-    BoardCardTodo
+    BoardCardTodo,
+    WaitingKind,
+    WaitingState
 } from "./models.js";

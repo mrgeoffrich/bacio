@@ -504,28 +504,31 @@ export default function App() {
   // Post-BACI-51 the call always succeeds (gate-aside); the waiting
   // spinner takes over until the matcher binds.
   //
-  // Set waitingForClaim *before* the request so the spinner and drag-
-  // disable kick in on the click, not when the request returns. The
-  // backend sets the same flag on the issue row inside AddDispatch, so
-  // the next refresh keeps it true until the matcher binds (then
-  // waiting clears and taken takes over). Revert on failure.
+  // BACI-145: set an optimistic waitingState *before* the request so the
+  // spinner and drag-disable kick in on the click. The optimistic state
+  // is the no-agent flavour ("Waiting for an available agent") — the
+  // first poll tick that arrives after the matcher actually classifies
+  // the dispatch will replace it with the authoritative state (which
+  // might be queued_blocked-by-concurrency-cap, or delivered if the
+  // matcher binds + delivers fast). Revert to null on failure so the
+  // spinner disappears.
   const dispatchFromCard = useCallback((cardKey, mode) => {
-    setCards(cs => cs.map(c => c.key === cardKey ? { ...c, waitingForClaim: true } : c));
+    setCards(cs => cs.map(c => c.key === cardKey ? { ...c, waitingState: { kind: 'queued_no_agent', mode } } : c));
     api.dispatchIssue(activeBoard, cardKey, mode)
       .catch(err => {
-        setCards(cs => cs.map(c => c.key === cardKey ? { ...c, waitingForClaim: false } : c));
+        setCards(cs => cs.map(c => c.key === cardKey ? { ...c, waitingState: null } : c));
         reportError(err, { headline: "Couldn't dispatch agent" });
       });
   }, [activeBoard]);
 
   // BACI-51 spinner-as-cancel-button handler: withdraw a card's queued
   // (or pending/delivered) dispatch. Optimistically clears the local
-  // waitingForClaim flag so the spinner disappears immediately; the
-  // refresh poll reads the authoritative state.
+  // waitingState so the spinner disappears immediately; the refresh
+  // poll reads the authoritative state.
   const cancelWaitingFromCard = useCallback((cardKey) => {
     api.cancelWaitingDispatch(activeBoard, cardKey)
       .then(() => {
-        setCards(cs => cs.map(c => c.key === cardKey ? { ...c, waitingForClaim: false } : c));
+        setCards(cs => cs.map(c => c.key === cardKey ? { ...c, waitingState: null } : c));
       })
       .catch(err => reportError(err, { headline: "Couldn't cancel queued dispatch" }));
   }, [activeBoard]);

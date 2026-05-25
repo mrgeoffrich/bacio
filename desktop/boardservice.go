@@ -170,17 +170,23 @@ type IssueMetaDTO struct {
 // return value, mirroring internal/client/views.go::IssueBrief with desktop
 // camelCase JSON tags. New fields over IssueDetail: feature, relations,
 // waitingForClaim, warnings, and doc content (via LinkedDocDTO).
+//
+// BACI-145: WaitingState is the structured "why is this card waiting?"
+// projection used by the IssueLockBanner — same shape and same wording
+// as the kanban-card label. Nil when the issue isn't waiting; the
+// banner falls back to its "taken" branch when an agent has the claim.
 type IssueBriefDTO struct {
-	Issue           IssueMetaDTO   `json:"issue"`
-	Feature         *FeatureRefDTO `json:"feature,omitempty"`
-	Relations       RelationsDTO   `json:"relations"`
-	PullRequests    []PRDTO        `json:"pullRequests"`
-	Documents       []LinkedDocDTO `json:"documents"`
-	Comments        []CommentDTO   `json:"comments"`
-	Claimants       []ClaimantDTO  `json:"claimants"`
-	Taken           bool           `json:"taken"`
-	WaitingForClaim bool           `json:"waitingForClaim"`
-	Warnings        []string       `json:"warnings"`
+	Issue           IssueMetaDTO              `json:"issue"`
+	Feature         *FeatureRefDTO            `json:"feature,omitempty"`
+	Relations       RelationsDTO              `json:"relations"`
+	PullRequests    []PRDTO                   `json:"pullRequests"`
+	Documents       []LinkedDocDTO            `json:"documents"`
+	Comments        []CommentDTO              `json:"comments"`
+	Claimants       []ClaimantDTO             `json:"claimants"`
+	Taken           bool                      `json:"taken"`
+	WaitingForClaim bool                      `json:"waitingForClaim"`
+	WaitingState    *boardcards.WaitingState  `json:"waitingState,omitempty"`
+	Warnings        []string                  `json:"warnings"`
 }
 
 // IssueDetail is the issue-drawer payload for a single issue.
@@ -251,25 +257,27 @@ func assigneeList(a string) []string {
 }
 
 // cardFromIssue produces a BoardCard for one issue without the
-// agent-derived enrichment (ActiveVerb + TodosDone/Total). Used by
-// the single-issue refresh paths (SetIssueState after a drag) where
-// the active dispatch / todos can't change as part of the operation
-// — the next 10s poll re-runs ListCards and re-populates them.
+// agent-derived enrichment (ActiveVerb + TodosDone/Total or BACI-145
+// WaitingState). Used by the single-issue refresh paths (SetIssueState
+// after a drag) where the active dispatch / todos can't change as part
+// of the operation — the next 10s poll re-runs ListCards and
+// re-populates them. Dragging a waiting card is blocked by the UI
+// anyway, so the missing WaitingState here doesn't cause a flicker on
+// any real interaction.
 func cardFromIssue(iss *model.Issue, taken bool) BoardCard {
 	tags := iss.Tags
 	if tags == nil {
 		tags = []string{}
 	}
 	return BoardCard{
-		Key:             iss.Key,
-		Column:          string(iss.State),
-		ColumnLabel:     stateLabel(iss.State),
-		Title:           iss.Title,
-		Tags:            tags,
-		Assignees:       assigneeList(iss.Assignee),
-		Claude:          iss.Assignee == "claude",
-		Taken:           taken,
-		WaitingForClaim: iss.WaitingForClaim,
+		Key:         iss.Key,
+		Column:      string(iss.State),
+		ColumnLabel: stateLabel(iss.State),
+		Title:       iss.Title,
+		Tags:        tags,
+		Assignees:   assigneeList(iss.Assignee),
+		Claude:      iss.Assignee == "claude",
+		Taken:       taken,
 	}
 }
 
@@ -557,6 +565,35 @@ func (b *BoardService) GetIssueBrief(repoPrefix, key string) (IssueBriefDTO, err
 		warnings = []string{}
 	}
 
+	// BACI-145: derive WaitingState for the IssueLockBanner. Only worth
+	// the round-trips when the issue is actually flagged as waiting;
+	// otherwise the deriver returns nil regardless. The "all" pseudo-
+	// board doesn't have a *model.Repo handy, so resolve it from the
+	// issue's canonical key (PREFIX-N) for that case.
+	var waitingState *boardcards.WaitingState
+	if iss.WaitingForClaim {
+		dispatchRepo := repo
+		if dispatchRepo == nil {
+			if r, err := b.resolveRepoForKey(ctx, repoPrefix, iss.Key); err == nil {
+				dispatchRepo = r
+			}
+		}
+		if dispatchRepo != nil {
+			activeDispatch, derr := b.client.WaitingDispatchForIssue(ctx, dispatchRepo, iss.Key)
+			if derr == nil {
+				inflight, ierr := b.client.InflightByModeForRepo(ctx, dispatchRepo)
+				if ierr != nil {
+					inflight = map[model.DispatchMode]int{}
+				}
+				templates, terr := b.client.ListPromptTemplates(ctx)
+				if terr != nil {
+					templates = nil
+				}
+				waitingState = boardcards.DeriveWaitingState(iss, activeDispatch, inflight, templates)
+			}
+		}
+	}
+
 	return IssueBriefDTO{
 		Issue:           meta,
 		Feature:         feat,
@@ -567,6 +604,7 @@ func (b *BoardService) GetIssueBrief(repoPrefix, key string) (IssueBriefDTO, err
 		Claimants:       agentcards.MapClaimants(brief.Claimants),
 		Taken:           brief.Taken,
 		WaitingForClaim: iss.WaitingForClaim,
+		WaitingState:    waitingState,
 		Warnings:        warnings,
 	}, nil
 }

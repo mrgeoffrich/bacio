@@ -238,6 +238,15 @@ func (c *remoteClient) WaitingDispatchForIssue(ctx context.Context, repo *model.
 	return nil, remoteAgentNotSupported("waiting-dispatch-for-issue")
 }
 
+// InflightByModeForRepo (BACI-145) has no REST parity today — the
+// kanban / brief assembler runs in-process on the desktop or `bacio
+// web` server, both of which talk to the local store. A future
+// web-mode follow-up could surface a /repos/{prefix}/agents/inflight
+// endpoint; until then this returns ErrLocalOnly cleanly.
+func (c *remoteClient) InflightByModeForRepo(ctx context.Context, repo *model.Repo) (map[model.DispatchMode]int, error) {
+	return nil, remoteAgentNotSupported("inflight-by-mode")
+}
+
 // DrainDispatches is the side-effect-bearing "list pending+delivered
 // AND mark pending → delivered" call used by the bacio hook to feed an
 // agent's context. The hook talks to the local store directly (it

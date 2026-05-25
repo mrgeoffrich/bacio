@@ -3,6 +3,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import Icon from './Icon.jsx';
 import Tooltip from './Tooltip.jsx';
 import { todoGlyph } from '../lib/todoGlyph.js';
+import { waitingStateLabel } from '../lib/waitingLabels.ts';
 
 // stateLabel mirrors api.http.ts's STATE_LABELS — duplicated here so the
 // blocked popover can render a blocker's state pill ("In Progress")
@@ -58,19 +59,22 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, o
   // or dispatching from it until the claim is released. Opening the
   // read-only drawer stays allowed (viewing isn't a mutation).
   const taken = !!card.taken;
-  // A waiting card has a dispatch queued but no agent claim yet — the
-  // gap this feature closes. Show a spinner, block drag/dispatch.
-  // `taken` wins: once an agent claims, waiting_for_claim is cleared, so
-  // they shouldn't overlap, but render defensively if they do.
-  const waiting = !!card.waitingForClaim && !taken;
-  // BACI-130: once the active dispatch has been delivered, the worker
-  // has taken the Task and cancel-after-delivery is rejected at the
-  // store boundary. Keep the spinner glyph (the card is still in
-  // flight) but drop the click affordance — the cancel button would
-  // either no-op (if the spinner re-renders without it on the next
-  // tick) or surface a confusing error toast.
-  const waitingDelivered = waiting && !!card.waitingDispatchDelivered;
+  // BACI-145: card.waitingState is the structured "why is this card
+  // waiting?" projection. Non-null when a dispatch is in flight (any
+  // of queued / pending / delivered); the label and the cancel-button
+  // gate flow off its `kind`. `taken` wins — once an agent claims,
+  // waiting_for_claim is cleared in the same txn so the two shouldn't
+  // overlap, but render defensively if they do.
+  const waitingState = card.waitingState || null;
+  const waiting = !!waitingState && !taken;
+  // delivered: the worker has taken the Task and cancel-after-delivery
+  // is rejected at the store boundary (BACI-130). Keep the spinner
+  // glyph (the card is still in flight) but drop the click affordance
+  // — the cancel button would either no-op (next tick re-renders
+  // without it) or surface a confusing error toast.
+  const waitingDelivered = waiting && waitingState.kind === 'delivered';
   const dispatchDisabled = taken || waiting;
+  const waitingLabel = waiting ? waitingStateLabel(waitingState) : '';
 
   // BACI-131: the quick-eval composer is the right-edge affordance on
   // a taken card. A taken card disables the zap dropdown anyway, so
@@ -212,32 +216,35 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, o
             </Tooltip>
           )}
           {waiting ? (
-            waitingDelivered ? (
-              // BACI-130: delivered — keep the spinner glyph, drop the
-              // cancel affordance. The worker has the Task and the
-              // store rejects cancel-after-delivery; surface the
-              // status non-interactively rather than show a button
-              // that can't act.
-              <Tooltip label="Worker has taken this dispatch — interrupt the agent to stop it">
+            // BACI-145: the spinner + the inline label render together
+            // so the user can read "why is this card waiting?" at a
+            // glance. waitingDelivered drops the cancel affordance —
+            // BACI-130 store rejects cancel-after-delivery. The label
+            // is the affordance now, so the tooltip wrapping is gone
+            // (the cancel button itself still carries aria-label).
+            <span className="mk-card-waiting">
+              {waitingDelivered ? (
                 <span
                   className="mk-card-spinner"
                   role="status"
                   aria-label="Dispatch delivered to worker"
                 />
-              </Tooltip>
-            ) : (
-              <Tooltip label="Cancel queued dispatch">
+              ) : (
                 <button
                   type="button"
                   className="mk-card-spinner mk-card-spinner-btn"
                   aria-label="Cancel queued dispatch"
+                  title="Cancel queued dispatch"
                   onClick={(e) => {
                     e.stopPropagation();
                     if (onCancelWaiting) onCancelWaiting(card.key);
                   }}
                 />
-              </Tooltip>
-            )
+              )}
+              {waitingLabel && (
+                <span className="mk-card-spinner-label">{waitingLabel}</span>
+              )}
+            </span>
           ) : taken ? (
             // BACI-131: replace the disabled zap dropdown with the
             // quick-eval affordance — only on taken cards. Untaken

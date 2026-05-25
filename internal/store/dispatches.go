@@ -496,6 +496,61 @@ func (s *Store) CountInFlightByMode(repoID int64, mode model.DispatchMode) (int,
 	return n, err
 }
 
+// InflightByModeForRepo is the bulked sibling of CountInFlightByMode —
+// it returns the same count for every mode that has at least one
+// in-flight row in `repoID`, in one query. Used by the kanban /
+// IssueBrief assembler (BACI-145) so the per-card WaitingState deriver
+// can spot a concurrency-cap-blocked queued dispatch without fanning
+// out an N-mode CountInFlightByMode walk per repo. Modes with zero
+// in-flight rows are omitted from the map — the deriver treats a
+// missing entry as zero.
+//
+// Same staleness gate as the single-row form: a `delivered` dispatch
+// only counts when its target identity (or named session) is plausibly
+// alive (last_seen_at fresh within model.AgentIdlePingThreshold) so
+// stranded orphans don't permanently mark a card as blocked.
+func (s *Store) InflightByModeForRepo(repoID int64) (map[model.DispatchMode]int, error) {
+	staleWindow := fmt.Sprintf("-%d seconds", int(model.AgentIdlePingThreshold/time.Second))
+	rows, err := s.DB.Query(`
+		SELECT d.mode, COUNT(*)
+		  FROM agent_dispatches d
+		 WHERE d.repo_id = ?
+		   AND d.status IN ('pending','delivered')
+		   AND d.created_by != ?
+		   AND (
+		     (d.target_agent_id IS NOT NULL AND EXISTS (
+		       SELECT 1 FROM agent_sessions s
+		        WHERE s.agent_id = d.target_agent_id
+		          AND s.ended_at IS NULL
+		          AND s.last_seen_at > datetime('now', ?)
+		     ))
+		     OR
+		     (d.target_session_id != '' AND EXISTS (
+		       SELECT 1 FROM agent_sessions s
+		        WHERE s.session_id = d.target_session_id
+		          AND s.ended_at IS NULL
+		          AND s.last_seen_at > datetime('now', ?)
+		     ))
+		   )
+		 GROUP BY d.mode`,
+		repoID, model.SetupDispatchCreator, staleWindow, staleWindow,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[model.DispatchMode]int)
+	for rows.Next() {
+		var mode string
+		var n int
+		if err := rows.Scan(&mode, &n); err != nil {
+			return nil, err
+		}
+		out[model.DispatchMode(mode)] = n
+	}
+	return out, rows.Err()
+}
+
 // BindQueuedDispatch atomically binds a queued dispatch to a target
 // agent and flips it to pending — the matcher's commit step. The
 // WHERE status='queued' guard makes the bind a no-op if a concurrent
