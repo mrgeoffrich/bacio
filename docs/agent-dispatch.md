@@ -934,6 +934,29 @@ no longer emits the field at all.
 BACI-45's `PostToolUse`-on-`TaskCreate`/`TaskUpdate` mirror fires for
 subagent task-list calls too — they share the parent's task store.
 
+### Terminal title — `PostToolUse` on `mcp__bacio__register` (BACI-147)
+
+`bacio install-agent` wires a second `PostToolUse` group alongside the
+task-list mirror, matcher `mcp__bacio__register`, command
+`bacio hook set-title`. The moment the agent calls the bacio channel's
+`register` tool — i.e. the moment the session's identity slug is
+written into `.bacio/agents.json` keyed on the `claude` pid — the
+hook resolves that slug and writes the standard
+`ESC ] 0 ; <slug> BEL` OSC sequence to `/dev/tty`, so the host
+terminal's window title flips to the agent's slug
+(`brave-koala@claude.shiny`). An operator with several dispatched
+workers open in tabs can tell them apart at a glance.
+
+The OSC bytes go to `/dev/tty`, **not** `stdout` — Claude Code injects
+hook stdout into the model's context, and a stray escape would land in
+the transcript. Gated by `BACIO_AGENT_MODE` like every other hook, so
+human-driven sessions don't get retitled. Fail-open everywhere: a
+missing `/dev/tty` (CI, headless pipe), an open or write failure, or
+a still-empty `agents.json` slug (the rare race where `register` fires
+before the entry lands) — each logs one stderr line and returns
+nil. MVP scope is slug-only; appending the open-claim issue key into
+the title and resetting it on `SessionEnd` are noted follow-ups.
+
 ### Trivial-dispatch carve-out (structural, not instruction-based)
 
 Not every dispatch is worth a subagent. The channel's own

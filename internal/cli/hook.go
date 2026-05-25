@@ -64,6 +64,7 @@ func newHookCmd() *cobra.Command {
 		hookSessionEndCmd(),
 		hookPostToolUseCmd(),
 		hookPreToolUseCmd(),
+		hookSetTitleCmd(),
 	)
 	return cmd
 }
@@ -718,6 +719,87 @@ func extractTaskFields(in *postToolUseInput) (taskID, content, status string, ok
 		return taskID, "", status, taskID != "" && status != ""
 	}
 	return "", "", "", false
+}
+
+// ---------- set-title ----------
+
+// setTitleMatcher is the matcher installed in .claude/settings.json for
+// the BACI-147 terminal-title hook — Claude Code fires this PostToolUse
+// entry only when the agent calls the bacio channel's `register` tool,
+// which is the precise moment the session's identity slug becomes
+// resolvable from .bacio/agents.json (`register` writes the entry). The
+// literal lives next to the handler so the install-side wiring and the
+// hook can't drift, matching the postToolUseMatcher / preToolUseMatcher
+// convention.
+const setTitleMatcher = "mcp__bacio__register"
+
+// titleWriter is the side-effect surface for writeTerminalTitle. Tests
+// substitute a captured *bytes.Buffer; production opens /dev/tty inside
+// openTerminalTTY. Pulled out so the OSC emission is unit-testable
+// without ever touching the host terminal.
+var titleWriter = openTerminalTTY
+
+// openTerminalTTY opens /dev/tty for write-only output. Going via
+// /dev/tty (not os.Stdout) keeps the escape sequence out of Claude
+// Code's stdout-injection path, so the OSC never reaches the model's
+// context. A missing or non-writable /dev/tty (CI host, headless pipe)
+// surfaces as the open error and is swallowed by the caller — the
+// fail-open invariant.
+func openTerminalTTY() (io.WriteCloser, error) {
+	return os.OpenFile("/dev/tty", os.O_WRONLY, 0)
+}
+
+// writeTerminalTitle emits the `ESC ] 0 ; <title> BEL` OSC sequence to
+// /dev/tty (via titleWriter so tests can capture it). The sequence is
+// honoured by every mainstream terminal emulator on macOS and Linux
+// (iTerm2, Apple Terminal, GNOME Terminal, tmux, Alacritty, kitty,
+// Ghostty, Windows Terminal). Returns the underlying error so the
+// caller can log it; the hook itself swallows after one stderr line.
+func writeTerminalTitle(title string) error {
+	w, err := titleWriter()
+	if err != nil {
+		return err
+	}
+	defer w.Close()
+	_, err = io.WriteString(w, "\x1b]0;"+title+"\x07")
+	return err
+}
+
+func hookSetTitleCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:    "set-title",
+		Short:  "PostToolUse hook (matcher: mcp__bacio__register): set the terminal window title to the agent slug",
+		Args:   cobra.NoArgs,
+		Hidden: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if skipUnlessAgentMode("set-title") {
+				return nil
+			}
+			h, err := loadHookContext()
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "bacio hook set-title:", err)
+				return nil
+			}
+			if h == nil {
+				return nil
+			}
+			defer h.close()
+			if h.slug == "" {
+				// register has fired but agents.json doesn't yet carry an
+				// entry for this claude_pid — rare race, no slug to set.
+				// One-line skip notice keeps a tailing user informed.
+				fmt.Fprintln(os.Stderr, "bacio hook set-title: no agent slug for this claude_pid yet — skipping")
+				return nil
+			}
+			if err := writeTerminalTitle(h.slug); err != nil {
+				// Fail-open: /dev/tty unavailable (CI, headless pipe),
+				// write failed, etc. Log one line and carry on — the
+				// hook must NEVER fail the agent's session.
+				fmt.Fprintln(os.Stderr, "bacio hook set-title: write /dev/tty:", err)
+			}
+			return nil
+		},
+	}
 }
 
 // ---------- pre-tool-use ----------

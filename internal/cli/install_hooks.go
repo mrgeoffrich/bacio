@@ -16,21 +16,27 @@ import (
 // `bacio hook` subcommand that services it. install-hooks writes one
 // command hook per event into the repo's .claude/settings.json.
 //
-// Matcher is non-empty for the two tool-call hooks — the four
-// event-typed hooks don't support matchers. PostToolUse uses one to
-// scope bacio's task-list mirror to TaskCreate|TaskUpdate (firing on
-// every tool call would be a lot of stderr noise for a benign no-op);
-// PreToolUse uses one to scope the worktree-confinement guard to
-// Write|Edit. Both matchers use pipe-alternation (Claude Code's matcher
-// syntax supports `Foo|Bar` for a literal multi-tool match). Source of
-// truth for each literal lives next to its hook handler so the two
-// can't drift — see internal/cli/hook.go.
+// Matcher is non-empty for the tool-call hooks — the four event-typed
+// hooks don't support matchers. PostToolUse carries two rows: the
+// task-list mirror scoped to `TaskCreate|TaskUpdate` and the BACI-147
+// terminal-title hook scoped to `mcp__bacio__register`. PreToolUse
+// scopes the worktree- and sqlite3-confinement guards to
+// `Write|Edit|Bash`. All matchers use Claude Code's pipe-alternation
+// syntax (`Foo|Bar` for a literal multi-tool match). Source of truth
+// for each literal lives next to its hook handler so the two can't
+// drift — see internal/cli/hook.go.
+//
+// Two rows can share an Event (PostToolUse here). applyBacioHooks
+// groups by Event before rewriting the settings array so a second
+// iteration over an Event doesn't clobber the group the first one just
+// wrote.
 var bacioHookEvents = []struct{ Event, Subcommand, Matcher string }{
 	{"SessionStart", "session-start", ""},
 	{"UserPromptSubmit", "user-prompt-submit", ""},
 	{"Stop", "stop", ""},
 	{"SessionEnd", "session-end", ""},
 	{"PostToolUse", "post-tool-use", postToolUseMatcher},
+	{"PostToolUse", "set-title", setTitleMatcher},
 	{"PreToolUse", "pre-tool-use", preToolUseMatcher},
 }
 
@@ -92,6 +98,13 @@ func planBacioHooks(path string) (map[string]json.RawMessage, []hookChange, erro
 // top-level settings object and writes it back. Non-bacio content is
 // preserved; bacio's own groups are replaced in place so the merge is
 // idempotent.
+//
+// bacioHookEvents may carry multiple rows for one Event (BACI-147 added
+// a second PostToolUse row). The rewrite groups bacio-owned rows by
+// Event and applies them in a single pass per event — strip every
+// bacio-owned group from the existing array once, then append every
+// grouped bacio entry — so a second iteration over the same event
+// can't clobber what the first one wrote.
 func applyBacioHooks(path string, top map[string]json.RawMessage) error {
 	hooks := map[string]json.RawMessage{}
 	if raw, ok := top["hooks"]; ok {
@@ -100,11 +113,24 @@ func applyBacioHooks(path string, top map[string]json.RawMessage) error {
 		}
 	}
 
+	// Group bacio-owned rows by Event and keep the events in their
+	// first-seen order so the on-disk JSON ordering stays deterministic
+	// across runs (matches the iteration order of bacioHookEvents).
+	type pendingRow struct{ Subcommand, Matcher string }
+	pending := map[string][]pendingRow{}
+	var eventOrder []string
 	for _, ev := range bacioHookEvents {
+		if _, seen := pending[ev.Event]; !seen {
+			eventOrder = append(eventOrder, ev.Event)
+		}
+		pending[ev.Event] = append(pending[ev.Event], pendingRow{Subcommand: ev.Subcommand, Matcher: ev.Matcher})
+	}
+
+	for _, event := range eventOrder {
 		var groups []json.RawMessage
-		if raw, ok := hooks[ev.Event]; ok {
+		if raw, ok := hooks[event]; ok {
 			if err := json.Unmarshal(raw, &groups); err != nil {
-				return fmt.Errorf("parse %s: \"hooks.%s\" is not an array: %w", path, ev.Event, err)
+				return fmt.Errorf("parse %s: \"hooks.%s\" is not an array: %w", path, event, err)
 			}
 		}
 		var kept []json.RawMessage
@@ -113,16 +139,18 @@ func applyBacioHooks(path string, top map[string]json.RawMessage) error {
 				kept = append(kept, g)
 			}
 		}
-		grp, err := json.Marshal(bacioHookGroup(ev.Subcommand, ev.Matcher))
-		if err != nil {
-			return err
+		for _, row := range pending[event] {
+			grp, err := json.Marshal(bacioHookGroup(row.Subcommand, row.Matcher))
+			if err != nil {
+				return err
+			}
+			kept = append(kept, grp)
 		}
-		kept = append(kept, grp)
 		merged, err := json.Marshal(kept)
 		if err != nil {
 			return err
 		}
-		hooks[ev.Event] = merged
+		hooks[event] = merged
 	}
 
 	hooksRaw, err := json.Marshal(hooks)
