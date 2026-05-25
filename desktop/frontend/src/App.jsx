@@ -84,11 +84,10 @@ export default function App() {
   // to run from. Board → KanbanCard reads it to gate the per-card action
   // button. Loaded on mount; reloaded when the Settings view closes.
   const [promptConfig, setPromptConfig] = useState([]);
-  // hideEmptyColumns is the App-owned Board preference: when true, the
-  // Board drops columns with zero cards. Loaded from app_settings on
-  // mount; flipped live from the Settings screen. Passed to the
-  // presentational Board alongside columns/cards.
-  const [hideEmptyColumns, setHideEmptyColumns] = useState(false);
+  // BACI-188: per-column collapse state lives in Board.jsx now —
+  // localStorage-backed, per-repo. The App-wide hide-empty-columns
+  // preference was removed in BACI-188 (Settings toggle gone, REST /
+  // Wails / store endpoints deleted).
   // BACI-68: the App-owned display preference. When true, archived
   // rows surface in default lists / board / docs / features views
   // (rendered visibly muted). When false (the default), they're
@@ -144,15 +143,13 @@ export default function App() {
       api.listBoards(),
       api.listColumns(),
       api.listPromptTemplates(),
-      api.getBoardPreferences(),
       api.getDisplayPreferences(),
       api.getArchivePreferences(),
     ])
-      .then(([bs, cols, tpls, prefs, displayPrefs, archivePrefs]) => {
+      .then(([bs, cols, tpls, displayPrefs, archivePrefs]) => {
         setBoards(bs);
         setColumns(cols);
         setPromptConfig(tpls);
-        setHideEmptyColumns(prefs.hideEmptyColumns);
         setShowArchived(displayPrefs.showArchived);
         setArchiveAutoEnabled(archivePrefs.autoEnabled);
         setArchiveRetentionDays(archivePrefs.retentionDays);
@@ -183,21 +180,10 @@ export default function App() {
     return () => { if (typeof off === 'function') off(); };
   }, []);
 
-  // changeHideEmptyColumns persists the Board preference, then updates
-  // the App-owned flag on success so the Board reacts immediately —
-  // optimistic-then-confirmed, the same shape as the theme handler. A
-  // failed write reports through the modal and leaves the toggle where
-  // it was.
-  const changeHideEmptyColumns = useCallback((next) => {
-    api.setBoardPreferences(next)
-      .then(prefs => setHideEmptyColumns(prefs.hideEmptyColumns))
-      .catch(err => reportError(err, { headline: "Couldn't save preference" }));
-  }, []);
-
   // changeShowArchived persists the BACI-68 display.show_archived
   // toggle, then updates the App-owned flag on success so the Board /
   // Docs / Features views react immediately on the next refresh.
-  // Same optimistic-then-confirmed shape as changeHideEmptyColumns.
+  // Optimistic-then-confirmed shape — the theme handler is the model.
   const changeShowArchived = useCallback((next) => {
     api.setDisplayPreferences(next)
       .then(prefs => setShowArchived(prefs.showArchived))
@@ -763,8 +749,6 @@ export default function App() {
           <SettingsView
             theme={theme}
             onChangeTheme={setTheme}
-            hideEmptyColumns={hideEmptyColumns}
-            onChangeHideEmptyColumns={changeHideEmptyColumns}
             showArchived={showArchived}
             onChangeShowArchived={changeShowArchived}
             archiveAutoEnabled={archiveAutoEnabled}
@@ -825,7 +809,6 @@ export default function App() {
             columns={columns}
             cards={cards}
             promptConfig={promptConfig}
-            hideEmptyColumns={hideEmptyColumns}
             onMoveCard={moveCard}
             onOpenCard={openCard}
             onOpenIssue={openIssueByKey}

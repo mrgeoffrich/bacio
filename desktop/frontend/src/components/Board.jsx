@@ -1,6 +1,8 @@
-import React, { useState, useRef, useLayoutEffect, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import KanbanCard from './KanbanCard.jsx';
 import QuestionModal from './QuestionModal.jsx';
+import Icon from './Icon.jsx';
+import { readCollapsed, persistCollapsed } from './boardCollapsePersistence.ts';
 
 // BACI-119: the board's horizontal scroll offset is persisted per repo to
 // localStorage so navigating away (Features / Docs / single issue / etc.)
@@ -42,7 +44,7 @@ function persistBoardScroll(repo, offset) {
   }
 }
 
-export default function Board({ activeBoard, columns, cards, promptConfig, hideEmptyColumns, onMoveCard, onOpenCard, onOpenIssue, onDispatchFromCard, onCancelWaitingCard, onAfterQuestionResolved, onQuickEval }) {
+export default function Board({ activeBoard, columns, cards, promptConfig, onMoveCard, onOpenCard, onOpenIssue, onDispatchFromCard, onCancelWaitingCard, onAfterQuestionResolved, onQuickEval }) {
   const [dragKey, setDragKey] = useState(null);
   const [overCol, setOverCol] = useState(null);
   // BACI-53: the kanban card "? N" pill opens the shared
@@ -56,13 +58,15 @@ export default function Board({ activeBoard, columns, cards, promptConfig, hideE
   // BACI-119: debounce token for the scroll-write so we don't hit
   // localStorage on every scroll tick.
   const scrollWriteTimer = useRef(null);
-
-  // With the preference on, drop any column that has no cards. The
-  // filter is derived from `cards`, which App refreshes on repo change
-  // and on the poll — so the visible set recomputes on every refresh.
-  const visibleColumns = hideEmptyColumns
-    ? columns.filter(col => cards.some(c => c.column === col.state))
-    : columns;
+  // BACI-188: per-column user-collapsed set, persisted to localStorage
+  // keyed by repo prefix. Seeded on mount and re-seeded on every repo
+  // switch (the persisted shape is per-repo, so the cross-repo carry-over
+  // would be wrong). Empty columns still collapse via the existing rule
+  // — `isCollapsed` below ORs the two predicates.
+  const [userCollapsed, setUserCollapsed] = useState(() => readCollapsed(activeBoard));
+  useEffect(() => {
+    setUserCollapsed(readCollapsed(activeBoard));
+  }, [activeBoard]);
 
   // BACI-114: per-key card lookup so each KanbanCard's blocked popover
   // can join in the blocker's title from the same `cards` array it
@@ -71,9 +75,31 @@ export default function Board({ activeBoard, columns, cards, promptConfig, hideE
   // poll lands a fresh cards array.
   const cardsByKey = useMemo(() => new Map(cards.map(c => [c.key, c])), [cards]);
 
+  // BACI-188: toggle helpers. `collapseColumn` adds the state to the
+  // user-collapsed set and persists; `expandColumn` removes it. Both
+  // are no-ops on a redundant flip, so the persisted shape stays tidy.
+  const collapseColumn = useCallback((state) => {
+    setUserCollapsed(prev => {
+      if (prev.has(state)) return prev;
+      const next = new Set(prev);
+      next.add(state);
+      persistCollapsed(activeBoard, next);
+      return next;
+    });
+  }, [activeBoard]);
+  const expandColumn = useCallback((state) => {
+    setUserCollapsed(prev => {
+      if (!prev.has(state)) return prev;
+      const next = new Set(prev);
+      next.delete(state);
+      persistCollapsed(activeBoard, next);
+      return next;
+    });
+  }, [activeBoard]);
+
   // BACI-119: restore the saved horizontal scrollLeft on mount, on repo
   // switch, and whenever the rendered card/column set changes width.
-  // The dependency on cards.length / visibleColumns.length matters: cards
+  // The dependency on cards.length / columns.length matters: cards
   // load async, so the first mount may render a 0-width board (clamping
   // any restore to 0). Re-running once cards land lets the assignment
   // stick. Setting scrollLeft past the current scrollWidth is a no-op
@@ -87,7 +113,7 @@ export default function Board({ activeBoard, columns, cards, promptConfig, hideE
     if (saved > 0 && el.scrollLeft !== saved) {
       el.scrollLeft = saved;
     }
-  }, [activeBoard, cards.length, visibleColumns.length]);
+  }, [activeBoard, cards.length, columns.length]);
 
   // BACI-119: persist the offset on scroll with a small debounce. A
   // useEffect cleanup on unmount would also work, but capturing live
@@ -101,29 +127,18 @@ export default function Board({ activeBoard, columns, cards, promptConfig, hideE
     }, 150);
   }, [activeBoard]);
 
-  // Everything hidden — a genuinely empty repo with the toggle on.
-  // Show a placeholder rather than a blank board region. The empty
-  // branch deliberately does not carry boardRef / the scroll handler
-  // — there is nothing to scroll, and the restore effect null-checks
-  // boardRef.current.
-  if (visibleColumns.length === 0) {
-    return (
-      <div className="mk-board mk-board-empty-wrap">
-        <div className="mk-board-empty">No cards in this repo yet.</div>
-      </div>
-    );
-  }
-
   return (
     <div className="mk-board" ref={boardRef} onScroll={onBoardScroll}>
-      {visibleColumns.map(col => {
+      {columns.map(col => {
         const colCards = cards.filter(c => c.column === col.state);
-        // BACI-77: an empty column collapses to a narrow vertical-title
-        // strip instead of eating a full 304px slot. `hideEmptyColumns`
-        // (which removes the column entirely) wins by construction —
-        // `visibleColumns` has already filtered hidden columns out, so
-        // by the time we reach here an empty column is always collapsed.
-        const isCollapsed = colCards.length === 0;
+        // BACI-77 + BACI-188: a column collapses to the narrow vertical-
+        // title strip when it's empty (the original behaviour) OR when
+        // the user has explicitly collapsed it via the header chevron.
+        // The two predicates render the same compact visual; the only
+        // difference is which one the strip's expand button can clear
+        // (user-collapse only — emptiness is intrinsic).
+        const isUserCollapsed = userCollapsed.has(col.state);
+        const isCollapsed = colCards.length === 0 || isUserCollapsed;
         return (
           <div
             key={col.state}
@@ -132,20 +147,55 @@ export default function Board({ activeBoard, columns, cards, promptConfig, hideE
             onDragLeave={() => setOverCol(null)}
             onDrop={(e) => {
               e.preventDefault();
-              if (dragKey) onMoveCard(dragKey, col.state);
+              if (dragKey) {
+                onMoveCard(dragKey, col.state);
+                // BACI-188: a drop onto a user-collapsed strip expands
+                // the destination so the user sees the card land instead
+                // of it vanishing behind the rotated title.
+                if (isUserCollapsed) expandColumn(col.state);
+              }
               setDragKey(null);
               setOverCol(null);
             }}
           >
             {isCollapsed ? (
-              <div className={`mk-col-collapsed-title mk-status-${col.state}`}>
-                {col.label}
-              </div>
+              <>
+                {/* BACI-188: only user-collapsed strips carry the expand
+                    affordance — an empty column has nothing to expand to.
+                    Mounted above the rotated title so clicking the
+                    chevron doesn't fight the title text for the cursor. */}
+                {isUserCollapsed && (
+                  <button
+                    type="button"
+                    className="mk-col-expand-btn"
+                    aria-label={`Expand ${col.label} column`}
+                    onClick={() => expandColumn(col.state)}
+                  >
+                    <Icon name="chevrons-right" />
+                  </button>
+                )}
+                <div className={`mk-col-collapsed-title mk-status-${col.state}`}>
+                  {col.label}
+                </div>
+              </>
             ) : (
               <>
                 <header className="mk-col-head">
                   <span className={`mk-col-pill mk-status-${col.state}`}>{col.label}</span>
                   <span className="mk-col-count">{colCards.length}</span>
+                  {/* BACI-188: the collapse affordance only appears on
+                      populated columns — an empty column already wears
+                      the strip via the existing rule. Right-aligned so
+                      the title pill + count keep the natural reading
+                      order on the left edge of the header. */}
+                  <button
+                    type="button"
+                    className="mk-col-collapse-btn"
+                    aria-label={`Collapse ${col.label} column`}
+                    onClick={() => collapseColumn(col.state)}
+                  >
+                    <Icon name="chevrons-left" />
+                  </button>
                 </header>
                 <div className="mk-col-body">
                   {colCards.map(card => (

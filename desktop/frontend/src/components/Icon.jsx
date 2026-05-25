@@ -1,5 +1,5 @@
 import React from 'react';
-import { Search, Plus, Columns3, GitBranch, Settings, X, Zap, Lock, MessageSquare, AlertTriangle } from 'lucide-react';
+import { Search, Plus, Columns3, GitBranch, Settings, X, Zap, Lock, MessageSquare, AlertTriangle, ChevronsLeft, ChevronsRight } from 'lucide-react';
 
 // ClaudeMark is a brand glyph — no icon library carries Claude's logo, so it
 // stays a hand-rolled SVG. It ignores any props passed by <Icon>.
@@ -29,6 +29,11 @@ const ICONS = {
   lock: Lock,
   comment: MessageSquare,
   'alert-triangle': AlertTriangle,
+  // BACI-188: per-column collapse / expand chevrons on the kanban
+  // board. ChevronsLeft sits in the populated-column header;
+  // ChevronsRight sits at the top of the collapsed strip.
+  'chevrons-left': ChevronsLeft,
+  'chevrons-right': ChevronsRight,
   claude: ClaudeMark,
 };
 

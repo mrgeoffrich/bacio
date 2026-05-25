@@ -277,11 +277,13 @@ CREATE TABLE IF NOT EXISTS tui_settings (
 
 -- Global (not per-repo) KV store — the sibling of tui_settings for
 -- preferences that aren't tied to a single repo. Used today for scalar
--- preferences (board.hide_empty_columns). Same generic-KV rationale as
--- tui_settings. Dispatch prompt templates used to live here keyed
--- `prompt_template.<mode>`; they were promoted to the dedicated
--- prompt_templates table (BACI-31) so users can add / rename / delete
--- arbitrary templates instead of editing a fixed five-stage set.
+-- preferences (display.show_archived, archive.auto_enabled,
+-- archive.retention_days, sync.background_enabled). Same generic-KV
+-- rationale as tui_settings. Dispatch prompt templates used to live
+-- here keyed `prompt_template.<mode>`; they were promoted to the
+-- dedicated prompt_templates table (BACI-31) so users can add / rename
+-- / delete arbitrary templates instead of editing a fixed five-stage
+-- set.
 CREATE TABLE IF NOT EXISTS app_settings (
     key        TEXT    NOT NULL PRIMARY KEY,
     value      TEXT    NOT NULL DEFAULT '',

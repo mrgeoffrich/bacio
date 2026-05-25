@@ -687,6 +687,15 @@ func migrate(db *sql.DB) error {
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_dispatches_queued_after ON agent_dispatches(queued_after_dispatch_id) WHERE queued_after_dispatch_id IS NOT NULL`); err != nil {
 		return fmt.Errorf("create idx_dispatches_queued_after: %w", err)
 	}
+	// BACI-188: the global "Hide empty board columns" preference (Settings
+	// toggle, REST endpoint, store helpers, app_settings KV row) was
+	// removed in favour of per-column collapse persisted client-side. Drop
+	// the leftover KV row from existing DBs so `bacio history` readers
+	// don't keep tripping over a key with no live writer. Idempotent on
+	// every startup — `DELETE WHERE` is a no-op once the row is gone.
+	if _, err := db.Exec(`DELETE FROM app_settings WHERE key = 'board.hide_empty_columns'`); err != nil {
+		return fmt.Errorf("drop board.hide_empty_columns KV row: %w", err)
+	}
 	return nil
 }
 

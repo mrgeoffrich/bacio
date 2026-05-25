@@ -97,7 +97,7 @@ export default function SyncView({ onClose }) {
 
   // changeBackgroundEnabled flips the toggle optimistically, then
   // confirms with the server response — same shape as App.jsx's
-  // changeHideEmptyColumns. On failure the modal surfaces and the UI
+  // changeShowArchived. On failure the modal surfaces and the UI
   // reverts to the persisted value.
   const changeBackgroundEnabled = useCallback((next) => {
     if (savingPrefs) return;

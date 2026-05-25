@@ -22,7 +22,6 @@ export {
     Board,
     BoardCard,
     BoardColumn,
-    BoardPreferencesDTO,
     ClaimantDTO,
     CollisionPreviewDTO,
     CommentDTO,
