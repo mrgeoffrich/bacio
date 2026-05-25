@@ -3,6 +3,7 @@ import KanbanCard from './KanbanCard.jsx';
 import QuestionModal from './QuestionModal.jsx';
 import Icon from './Icon.jsx';
 import { readCollapsed, persistCollapsed } from './boardCollapsePersistence.ts';
+import { readCompact, persistCompact } from './boardCompactPersistence.ts';
 
 // BACI-119: the board's horizontal scroll offset is persisted per repo to
 // localStorage so navigating away (Features / Docs / single issue / etc.)
@@ -67,6 +68,14 @@ export default function Board({ activeBoard, columns, cards, promptConfig, onMov
   useEffect(() => {
     setUserCollapsed(readCollapsed(activeBoard));
   }, [activeBoard]);
+  // BACI-191: per-column user-compact set, persisted to localStorage.
+  // Parallel to userCollapsed — same per-repo seeding, same re-seed on
+  // repo switch. Compact and collapsed are independent: a column can be
+  // compact without being collapsed.
+  const [userCompact, setUserCompact] = useState(() => readCompact(activeBoard));
+  useEffect(() => {
+    setUserCompact(readCompact(activeBoard));
+  }, [activeBoard]);
 
   // BACI-114: per-key card lookup so each KanbanCard's blocked popover
   // can join in the blocker's title from the same `cards` array it
@@ -93,6 +102,30 @@ export default function Board({ activeBoard, columns, cards, promptConfig, onMov
       const next = new Set(prev);
       next.delete(state);
       persistCollapsed(activeBoard, next);
+      return next;
+    });
+  }, [activeBoard]);
+
+  // BACI-191: compact/uncompact toggle helpers. `compactColumn` adds
+  // the state to the user-compact set; `uncompactColumn` removes it.
+  // Both are no-ops on a redundant flip, so the persisted shape stays
+  // tidy. Only populated columns carry the toggle button (same
+  // constraint as BACI-188's collapse button).
+  const compactColumn = useCallback((state) => {
+    setUserCompact(prev => {
+      if (prev.has(state)) return prev;
+      const next = new Set(prev);
+      next.add(state);
+      persistCompact(activeBoard, next);
+      return next;
+    });
+  }, [activeBoard]);
+  const uncompactColumn = useCallback((state) => {
+    setUserCompact(prev => {
+      if (!prev.has(state)) return prev;
+      const next = new Set(prev);
+      next.delete(state);
+      persistCompact(activeBoard, next);
       return next;
     });
   }, [activeBoard]);
@@ -183,6 +216,19 @@ export default function Board({ activeBoard, columns, cards, promptConfig, onMov
                 <header className="mk-col-head">
                   <span className={`mk-col-pill mk-status-${col.state}`}>{col.label}</span>
                   <span className="mk-col-count">{colCards.length}</span>
+                  {/* BACI-191: compact-cards toggle sits between the count
+                      and the collapse chevron. Active (is-active class)
+                      when the column is already compact so the user can
+                      read the current state at a glance. */}
+                  <button
+                    type="button"
+                    className={`mk-col-compact-btn${userCompact.has(col.state) ? ' is-active' : ''}`}
+                    aria-label={userCompact.has(col.state) ? `Expand cards in ${col.label} column` : `Compact cards in ${col.label} column`}
+                    aria-pressed={userCompact.has(col.state)}
+                    onClick={() => userCompact.has(col.state) ? uncompactColumn(col.state) : compactColumn(col.state)}
+                  >
+                    <Icon name="rows-3" />
+                  </button>
                   {/* BACI-188: the collapse affordance only appears on
                       populated columns — an empty column already wears
                       the strip via the existing rule. Right-aligned so
@@ -205,6 +251,7 @@ export default function Board({ activeBoard, columns, cards, promptConfig, onMov
                       cardsByKey={cardsByKey}
                       promptConfig={promptConfig}
                       isDragging={dragKey === card.key}
+                      compact={userCompact.has(col.state)}
                       onDragStart={() => { if (!card.taken && !card.waitingState) setDragKey(card.key); }}
                       onDragEnd={() => { setDragKey(null); setOverCol(null); }}
                       onOpen={() => onOpenCard(card)}
