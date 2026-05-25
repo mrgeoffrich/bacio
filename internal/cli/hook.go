@@ -63,6 +63,7 @@ func newHookCmd() *cobra.Command {
 		hookStopCmd(),
 		hookSessionEndCmd(),
 		hookPostToolUseCmd(),
+		hookPostToolUseHeartbeatCmd(),
 		hookPreToolUseCmd(),
 		hookSetTitleCmd(),
 	)
@@ -805,6 +806,63 @@ func hookSetTitleCmd() *cobra.Command {
 				// hook must NEVER fail the agent's session.
 				fmt.Fprintln(os.Stderr, "bacio hook set-title: write /dev/tty:", err)
 			}
+			return nil
+		},
+	}
+}
+
+// ---------- post-tool-use-heartbeat ----------
+
+// hookPostToolUseHeartbeatCmd is the BACI-159 supervisor heartbeat
+// hook. The bacio idle-pinger relies on `agent_sessions.last_seen_at`
+// as the sole liveness signal, but Claude Code only fires the
+// supervisor-side `UserPromptSubmit` / `Stop` hooks at turn
+// boundaries — a long Task-spawned subagent run has no parent-side
+// turns until it returns. Without a heartbeat the supervisor's
+// last_seen_at can fall past `AgentIdlePingThreshold` while the
+// subagent is still doing real work, and the reaper force-ends the
+// session.
+//
+// This hook fires on every supervisor tool call (matcher empty in
+// install_hooks.go) — `Task`'s eventual PostToolUse when the
+// subagent returns, every `mcp__bacio__*` call, every Bash, every
+// Read/Edit/Write. Each one bumps last_seen_at via the shared
+// `heartbeatOrRegister` helper. The cost is one cheap indexed
+// UPDATE on a single SQLite row inside the connection
+// `loadHookContext` already opens; measured well sub-millisecond on
+// existing high-frequency hook paths.
+//
+// **Stdout discipline.** Claude Code merges PostToolUse hook stdout
+// into the supervisor's context, so this hook MUST stay silent on
+// stdout. Every failure goes to stderr (logged, not surfaced) per
+// the standard hook fail-open invariant.
+func hookPostToolUseHeartbeatCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:    "post-tool-use-heartbeat",
+		Short:  "PostToolUse hook (no matcher): heartbeat the supervisor session on every tool call",
+		Args:   cobra.NoArgs,
+		Hidden: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if skipUnlessAgentMode("post-tool-use-heartbeat") {
+				return nil
+			}
+			h, err := loadHookContext()
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "bacio hook post-tool-use-heartbeat:", err)
+				return nil
+			}
+			if h == nil {
+				return nil
+			}
+			defer h.close()
+			// heartbeatOrRegister logs its own register-fallback failure
+			// path; a transient bump failure that fell through is silent
+			// here by design — failing the hook would propagate to the
+			// supervisor's tool call result, and the BACI-148 fresh-
+			// dispatch gate plus the existing UserPromptSubmit / Stop
+			// heartbeats give the reaper plenty of redundant signal if
+			// this one tick goes missing.
+			_ = h.heartbeatOrRegister()
 			return nil
 		},
 	}

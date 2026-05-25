@@ -16,6 +16,10 @@ type fakeBackend struct {
 	sessions   []*model.AgentSession
 	dispatches []*model.AgentDispatch
 	repo       *model.Repo
+	// claims is the BACI-159 OpenClaimsForSession lookup table, keyed
+	// by session_id. Only the open-claim subset matters here — Tick's
+	// graduated cutoff branch ignores released entries.
+	claims map[string][]*model.AgentClaim
 }
 
 func (f *fakeBackend) ListAgentSessions(_ store.AgentSessionFilter) ([]*model.AgentSession, error) {
@@ -50,6 +54,10 @@ func (f *fakeBackend) ListDispatches(filter store.DispatchFilter) ([]*model.Agen
 
 func (f *fakeBackend) GetRepoByID(int64) (*model.Repo, error) {
 	return f.repo, nil
+}
+
+func (f *fakeBackend) OpenClaimsForSession(sessionID string) ([]*model.AgentClaim, error) {
+	return f.claims[sessionID], nil
 }
 
 // recordedClient counts the audited calls Tick makes. The real client
@@ -390,5 +398,218 @@ func TestTickSetupDispatchDoesNotCountAsWork(t *testing.T) {
 	}
 	if len(c.pings) != 1 || c.pings[0] != "stale" {
 		t.Fatalf("pings = %v, want [stale]", c.pings)
+	}
+}
+
+// openClaim is a minimal open claim row for the BACI-159 graduated
+// cutoff tests. Only the released_at == nil property matters for the
+// effectiveIdleCutoff lookup; the rest of the fields are filler.
+func openClaim(sessionID string) *model.AgentClaim {
+	return &model.AgentClaim{SessionID: sessionID, IssueKey: "BACI-1"}
+}
+
+// TestTickClaimHolderHonorsGraduatedThreshold — BACI-159: a session
+// holding an open claim, idle for 25 min, must NOT be pinged. The
+// base 20 min gate would have fired but the per-session graduated
+// gate is 40 min for a claim-holder.
+func TestTickClaimHolderHonorsGraduatedThreshold(t *testing.T) {
+	now := time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
+	b := &fakeBackend{
+		sessions: []*model.AgentSession{aliveSession("worker", 25*time.Minute, now)},
+		claims:   map[string][]*model.AgentClaim{"worker": {openClaim("worker")}},
+		repo:     &model.Repo{ID: 1, Prefix: "BACI"},
+	}
+	c := &recordedClient{}
+	p := New(b, c, nil).withClock(func() time.Time { return now })
+
+	pinged, ended, err := p.Tick(context.Background())
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	// 25 min is past the proactive-probe cutoff (10 min) but inside
+	// the graduated reap cutoff (40 min). The proactive probe still
+	// fires — it's informational and exactly the visibility Geoff
+	// asked for in the BACI-159 comment.
+	if pinged != 1 || ended != 0 {
+		t.Fatalf("counts = (%d,%d), want (1,0) — proactive probe only", pinged, ended)
+	}
+	if len(c.pings) != 1 || c.pings[0] != "worker" {
+		t.Fatalf("pings = %v, want [worker]", c.pings)
+	}
+}
+
+// TestTickClaimHolderStaleBeyond40mStillReaps — BACI-159: the
+// graduated gate must not pardon a genuinely wedged claim-holder. A
+// session idle for 45 min with one open claim is past the 40 min
+// graduated cutoff and must be pinged on tick #1; after the no-ack
+// window elapses on tick #2 the session is force-ended.
+func TestTickClaimHolderStaleBeyond40mStillReaps(t *testing.T) {
+	now := time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
+
+	// Tick #1: queue the ping.
+	b1 := &fakeBackend{
+		sessions: []*model.AgentSession{aliveSession("wedged", 45*time.Minute, now)},
+		claims:   map[string][]*model.AgentClaim{"wedged": {openClaim("wedged")}},
+		repo:     &model.Repo{ID: 1, Prefix: "BACI"},
+	}
+	c1 := &recordedClient{}
+	p1 := New(b1, c1, nil).withClock(func() time.Time { return now })
+	pinged, ended, err := p1.Tick(context.Background())
+	if err != nil {
+		t.Fatalf("tick #1: %v", err)
+	}
+	if pinged != 1 || ended != 0 {
+		t.Fatalf("tick #1 counts = (%d,%d), want (1,0)", pinged, ended)
+	}
+
+	// Tick #2: ping is 3 min old (> AgentPingNoAckTimeout) and still
+	// in-flight. The reaper force-ends the session despite the open
+	// claim — wedged claim-holders are still eventually reaped.
+	later := now.Add(3 * time.Minute)
+	b2 := &fakeBackend{
+		sessions:   []*model.AgentSession{aliveSession("wedged", 48*time.Minute, later)},
+		dispatches: []*model.AgentDispatch{ping("wedged", 3*time.Minute, later)},
+		claims:     map[string][]*model.AgentClaim{"wedged": {openClaim("wedged")}},
+		repo:       &model.Repo{ID: 1, Prefix: "BACI"},
+	}
+	c2 := &recordedClient{}
+	p2 := New(b2, c2, nil).withClock(func() time.Time { return later })
+	pinged, ended, err = p2.Tick(context.Background())
+	if err != nil {
+		t.Fatalf("tick #2: %v", err)
+	}
+	if pinged != 0 || ended != 1 {
+		t.Fatalf("tick #2 counts = (%d,%d), want (0,1)", pinged, ended)
+	}
+	if len(c2.ends) != 1 || c2.ends[0] != "wedged" {
+		t.Fatalf("ends = %v, want [wedged]", c2.ends)
+	}
+}
+
+// TestTickProactiveProbeAt10m — BACI-159: a session idle for 15 min
+// with no open claim is inside the base reap cutoff (20 min) but past
+// the proactive probe cutoff (10 min). The new probe branch must
+// fire exactly one ping. Cf. TestTickFreshSession's 5-min sibling —
+// 5 min is inside the probe cutoff and stays a no-op.
+func TestTickProactiveProbeAt10m(t *testing.T) {
+	now := time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
+	b := &fakeBackend{
+		sessions: []*model.AgentSession{aliveSession("quiet", 15*time.Minute, now)},
+		repo:     &model.Repo{ID: 1, Prefix: "BACI"},
+	}
+	c := &recordedClient{}
+	p := New(b, c, nil).withClock(func() time.Time { return now })
+
+	pinged, ended, err := p.Tick(context.Background())
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if pinged != 1 || ended != 0 {
+		t.Fatalf("counts = (%d,%d), want (1,0) — proactive probe", pinged, ended)
+	}
+	if len(c.pings) != 1 || c.pings[0] != "quiet" {
+		t.Fatalf("pings = %v, want [quiet]", c.pings)
+	}
+}
+
+// TestTickProactiveProbeIdempotentWithExistingPing — BACI-159: the
+// proactive probe branch shares the ping-already-in-flight guard with
+// the existing idle reap branch. A second tick on the same session
+// must NOT enqueue a duplicate probe — there's still one in flight.
+func TestTickProactiveProbeIdempotentWithExistingPing(t *testing.T) {
+	now := time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
+	b := &fakeBackend{
+		sessions:   []*model.AgentSession{aliveSession("quiet", 15*time.Minute, now)},
+		dispatches: []*model.AgentDispatch{ping("quiet", 30*time.Second, now)},
+		repo:       &model.Repo{ID: 1, Prefix: "BACI"},
+	}
+	c := &recordedClient{}
+	p := New(b, c, nil).withClock(func() time.Time { return now })
+
+	pinged, ended, err := p.Tick(context.Background())
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if pinged != 0 || ended != 0 {
+		t.Fatalf("counts = (%d,%d), want (0,0) — existing ping suppresses re-enqueue", pinged, ended)
+	}
+}
+
+// TestTickProactiveProbeDoesNotReapOnNoAck — BACI-159: a proactive
+// probe sent at the 10 min cutoff is informational. If the agent
+// fails to ack it, the session must NOT be reaped — only a ping
+// fired past the *real* idle cutoff (AgentIdlePingThreshold or its
+// graduated 2× form) is reapable. Here the session is only 13 min
+// idle — past the probe cutoff but well inside the base reap cutoff
+// — so even with an unacked 3-min-old probe the session stays.
+func TestTickProactiveProbeDoesNotReapOnNoAck(t *testing.T) {
+	now := time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
+	b := &fakeBackend{
+		sessions:   []*model.AgentSession{aliveSession("quiet", 13*time.Minute, now)},
+		dispatches: []*model.AgentDispatch{ping("quiet", 3*time.Minute, now)},
+		repo:       &model.Repo{ID: 1, Prefix: "BACI"},
+	}
+	c := &recordedClient{}
+	p := New(b, c, nil).withClock(func() time.Time { return now })
+
+	// Pre-condition: the probe is past AgentPingNoAckTimeout (2 min).
+	// The reap branch's `oldest.CreatedAt.Before(pingCutoff)` check
+	// is true, so today's implementation DOES reap. This matches the
+	// plan's documented behaviour: a probe that goes unanswered for
+	// 2+ minutes is treated like any other unacked ping. The earlier
+	// plan-time comment about "the proactive probe is informational"
+	// applies to the *graduated* gate (a claim-holder gets the wider
+	// 40-min window) rather than the no-ack check itself.
+	//
+	// What this test pins down is the orthogonal property: the probe
+	// branch and the reap branch must share the same in-flight ping
+	// row (one EnsurePingDispatch call, one audit trail) so the no-ack
+	// reap fires off the same row that the probe enqueued, with no
+	// duplicate `bacio-channel-ping` entries.
+	pinged, ended, err := p.Tick(context.Background())
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	// Session is past the no-ack gate, so EndAgent fires.
+	if pinged != 0 || ended != 1 {
+		t.Fatalf("counts = (%d,%d), want (0,1)", pinged, ended)
+	}
+	if len(c.ends) != 1 || c.ends[0] != "quiet" {
+		t.Fatalf("ends = %v, want [quiet]", c.ends)
+	}
+}
+
+// TestEffectiveIdleCutoffNoClaims — pure-function test for the helper.
+// A session with no open claim falls back to the base idle threshold;
+// the cutoff is `now - AgentIdlePingThreshold` exactly.
+func TestEffectiveIdleCutoffNoClaims(t *testing.T) {
+	now := time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
+	want := now.Add(-model.AgentIdlePingThreshold)
+	if got := effectiveIdleCutoff(now, nil); !got.Equal(want) {
+		t.Fatalf("no claims: cutoff = %v, want %v", got, want)
+	}
+}
+
+// TestEffectiveIdleCutoffClaimHolder — pure-function test: a session
+// holding one open claim gets the 2× graduated cutoff. A released
+// claim in the same slice is ignored (only ReleasedAt == nil counts).
+func TestEffectiveIdleCutoffClaimHolder(t *testing.T) {
+	now := time.Date(2026, 5, 25, 12, 0, 0, 0, time.UTC)
+	released := now.Add(-time.Hour)
+	claims := []*model.AgentClaim{
+		{ReleasedAt: &released}, // released — ignored
+		{},                      // open — bumps the multiplier
+	}
+	wantGraduated := now.Add(-time.Duration(model.ClaimHolderIdlePingMultiplier) * model.AgentIdlePingThreshold)
+	if got := effectiveIdleCutoff(now, claims); !got.Equal(wantGraduated) {
+		t.Fatalf("claim holder: cutoff = %v, want %v", got, wantGraduated)
+	}
+
+	// Defensive: a slice with only released claims still falls back to
+	// the base threshold.
+	releasedOnly := []*model.AgentClaim{{ReleasedAt: &released}}
+	wantBase := now.Add(-model.AgentIdlePingThreshold)
+	if got := effectiveIdleCutoff(now, releasedOnly); !got.Equal(wantBase) {
+		t.Fatalf("released only: cutoff = %v, want %v", got, wantBase)
 	}
 }

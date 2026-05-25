@@ -109,14 +109,16 @@ func TestApplyBacioHooksWritesPostToolUseMatcher(t *testing.T) {
 	}
 }
 
-// TestApplyBacioHooksKeepsBothPostToolUseGroups is the BACI-147
-// regression guard for the multi-group case: two bacio rows share the
-// PostToolUse event (post-tool-use + set-title); applyBacioHooks must
-// land both groups under PostToolUse in a single pass, not let the
-// second iteration clobber the first one's write. Re-runs apply twice
-// in a row to also catch a drift where the second run drops the
-// just-written group.
-func TestApplyBacioHooksKeepsBothPostToolUseGroups(t *testing.T) {
+// TestApplyBacioHooksKeepsAllPostToolUseGroups is the multi-row
+// regression guard for the PostToolUse event. BACI-147 added the
+// `set-title` row alongside the original task-list mirror; BACI-159
+// added a third heartbeat row with an empty matcher (it must fire on
+// every supervisor tool call, not only TaskCreate / register).
+// applyBacioHooks must land all three groups under PostToolUse in a
+// single pass, not let a subsequent iteration clobber the earlier
+// ones. Re-runs apply twice in a row to also catch a drift where the
+// second run drops a just-written group.
+func TestApplyBacioHooksKeepsAllPostToolUseGroups(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/settings.json"
 	for pass := 1; pass <= 2; pass++ {
@@ -143,24 +145,45 @@ func TestApplyBacioHooksKeepsBothPostToolUseGroups(t *testing.T) {
 				bacioGroups = append(bacioGroups, g)
 			}
 		}
-		if len(bacioGroups) != 2 {
-			t.Fatalf("pass %d: PostToolUse bacio-owned groups = %d, want 2", pass, len(bacioGroups))
+		if len(bacioGroups) != 3 {
+			t.Fatalf("pass %d: PostToolUse bacio-owned groups = %d, want 3", pass, len(bacioGroups))
 		}
 
-		// Each bacio group must carry its own distinct matcher — the
-		// task-list mirror's TaskCreate|TaskUpdate and BACI-147's
-		// mcp__bacio__register. The two are sentinels: a regression
-		// that drops one of them or rewrites both with the same matcher
-		// fails here loudly.
-		gotMatchers := map[string]bool{}
+		// Each matched bacio group is identified by the command marker:
+		// post-tool-use → TaskCreate|TaskUpdate, set-title →
+		// mcp__bacio__register, post-tool-use-heartbeat → no matcher.
+		// Group lookups by command so a regression that drops one
+		// (e.g. a refactor that rewrites both with the same matcher)
+		// fails loudly here.
+		byCommand := map[string]map[string]any{}
 		for _, g := range bacioGroups {
-			m, _ := g["matcher"].(string)
-			gotMatchers[m] = true
-		}
-		for _, want := range []string{"TaskCreate|TaskUpdate", "mcp__bacio__register"} {
-			if !gotMatchers[want] {
-				t.Fatalf("pass %d: missing PostToolUse matcher %q (got %v)", pass, want, gotMatchers)
+			raw := string(mustJSON(t, g))
+			switch {
+			case strings.Contains(raw, "bacio hook post-tool-use-heartbeat"):
+				byCommand["post-tool-use-heartbeat"] = g
+			case strings.Contains(raw, "bacio hook set-title"):
+				byCommand["set-title"] = g
+			case strings.Contains(raw, "bacio hook post-tool-use"):
+				byCommand["post-tool-use"] = g
 			}
+		}
+		for _, want := range []string{"post-tool-use", "set-title", "post-tool-use-heartbeat"} {
+			if _, ok := byCommand[want]; !ok {
+				t.Fatalf("pass %d: missing PostToolUse group for command %q", pass, want)
+			}
+		}
+		if m, _ := byCommand["post-tool-use"]["matcher"].(string); m != "TaskCreate|TaskUpdate" {
+			t.Fatalf("pass %d: post-tool-use matcher = %q, want TaskCreate|TaskUpdate", pass, m)
+		}
+		if m, _ := byCommand["set-title"]["matcher"].(string); m != "mcp__bacio__register" {
+			t.Fatalf("pass %d: set-title matcher = %q, want mcp__bacio__register", pass, m)
+		}
+		// The heartbeat group MUST NOT carry a matcher — it has to
+		// fire on every supervisor tool call so a long Task-spawned
+		// subagent run keeps bumping the parent's last_seen_at.
+		if _, hasMatcher := byCommand["post-tool-use-heartbeat"]["matcher"]; hasMatcher {
+			t.Fatalf("pass %d: post-tool-use-heartbeat must not carry a matcher (got %v)",
+				pass, byCommand["post-tool-use-heartbeat"]["matcher"])
 		}
 	}
 }
