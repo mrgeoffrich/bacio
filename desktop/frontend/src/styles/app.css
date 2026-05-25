@@ -232,15 +232,19 @@ body { margin: 0; }
   outline: 2px solid var(--border-focus); outline-offset: 2px;
 }
 /* BACI-145: wrapper for the spinner + inline "why is this card
-   waiting?" label. The wrapper slots into the right edge of
-   .mk-card-foot, pushing past the assignee chip via margin-left:auto.
-   The label sits to the right of the spinner with a 6px gap; on a
-   narrow card the label truncates with ellipsis so the card height
-   stays fixed. The colour matches the rest of the footer (var(--fg-3))
-   so the label reads as secondary metadata rather than a heading. */
+   waiting?" label. BACI-173: the wrapper always hugs the right edge
+   of .mk-card-foot — flex:1 so it consumes any remaining row space
+   (margin-left:auto no-ops when the wrapper is the only child of
+   space-between footer), and justify-content:flex-end so the
+   label-then-spinner pair sits flush with the trailing edge. The
+   label sits to the left of the spinner with a 6px gap; on a narrow
+   card the label truncates with ellipsis so the spinner stays
+   visible and the card height stays fixed. The colour matches the
+   rest of the footer (var(--fg-3)) so the label reads as secondary
+   metadata rather than a heading. */
 .mk-card-waiting {
   display: inline-flex; align-items: center; gap: 6px;
-  margin-left: auto; min-width: 0;
+  flex: 1 1 auto; justify-content: flex-end; min-width: 0;
 }
 .mk-card-spinner-label {
   font-family: var(--font-mono); font-size: 11px; color: var(--fg-3);
