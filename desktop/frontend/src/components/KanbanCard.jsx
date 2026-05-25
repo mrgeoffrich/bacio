@@ -20,7 +20,7 @@ function stateLabel(s) {
   return STATE_LABELS[s] ?? s;
 }
 
-function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, onDragEnd, onOpen, onDispatch, onCancelWaiting, onOpenQuestion, onOpenIssue, onQuickEval }) {
+function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, onDragEnd, onOpen, onDispatch, onCancelWaiting, onOpenQuestion, onOpenIssue, onQuickEval, onQueueFollowOn, onCancelFollowOn }) {
   // BACI-75: local-only expansion state for the Tasks pill. Resets on
   // unmount (board switch, repo switch, hard refresh) — that's
   // intentional, we don't want to persist a row-level UI toggle.
@@ -84,7 +84,13 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, o
   // invisible from the board (the BACI-141 chip is read-only).
   const hasTranscript = (card.transcriptDocCount || 0) > 0;
   const showEvalAffordance = taken || hasTranscript;
-  const hasFooter = validPrompts.length > 0 || card.assignees.length > 0 || waiting || showEvalAffordance;
+  // BACI-182: dormant follow-on dispatch (queued behind the in-flight
+  // parent). When present we render a chip in the chevron's slot; the
+  // chevron itself only paints on a taken card with no follow-on
+  // already queued. Single-slot per issue per the Phase 1 design.
+  const followOn = card.followOnDispatch || null;
+  const showFollowOnSlot = taken; // chevron OR chip lives here, taken-only
+  const hasFooter = validPrompts.length > 0 || card.assignees.length > 0 || waiting || showEvalAffordance || showFollowOnSlot;
 
   // BACI-60 meta line — only on taken cards, only when at least one of
   // verb or tasks is populated. Hidden entirely otherwise so cards that
@@ -281,6 +287,81 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, o
             // prompt (e.g. fix-review). When neither condition holds,
             // fall back to the zap-only menu.
             <>
+              {/*
+                BACI-182: chevron-or-chip follow-on slot. Taken cards only —
+                a not-taken card uses the zap dropdown to start the first
+                dispatch, follow-ons only make sense once one is in flight.
+                The chevron opens an unfiltered prompt-template menu (the
+                Phase 1 promote-time recheck is the real guard, a UI filter
+                would have to second-guess the worker's eventual release
+                state and would almost always be wrong). When a follow-on
+                is queued the chip replaces the chevron in the same slot,
+                with body click bubbling to the article's onClick (open
+                workspace) and the trailing × stopping propagation and
+                firing onCancelFollowOn.
+              */}
+              {showFollowOnSlot && followOn && (
+                <Tooltip label={`Follow-on ${followOn.actionLabel || followOn.mode} queued — click × to cancel`}>
+                  <span
+                    className="mk-card-followon-chip"
+                    aria-label={`Follow-on ${followOn.actionLabel || followOn.mode} queued`}
+                  >
+                    <span className="mk-card-followon-chip-text">
+                      → {followOn.actionLabel || followOn.mode} queued
+                    </span>
+                    <button
+                      type="button"
+                      className="mk-card-followon-chip-x"
+                      aria-label="Cancel queued follow-on"
+                      title="Cancel queued follow-on"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (onCancelFollowOn) onCancelFollowOn(card.key);
+                      }}
+                    >
+                      <Icon name="x" />
+                    </button>
+                  </span>
+                </Tooltip>
+              )}
+              {showFollowOnSlot && !followOn && (
+                <DropdownMenu.Root>
+                  <DropdownMenu.Trigger asChild>
+                    <button
+                      type="button"
+                      className="mk-card-followon-chevron"
+                      aria-label="Queue a follow-on dispatch"
+                      title="Queue a follow-on dispatch"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Icon name="chevron-right" />
+                    </button>
+                  </DropdownMenu.Trigger>
+                  <DropdownMenu.Portal>
+                    <DropdownMenu.Content
+                      className="mk-card-action-menu"
+                      align="end"
+                      side="top"
+                      sideOffset={4}
+                      collisionPadding={8}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {(promptConfig || []).map(p => (
+                        <DropdownMenu.Item
+                          key={p.mode}
+                          className="mk-card-action-item"
+                          onSelect={() => {
+                            if (onQueueFollowOn) onQueueFollowOn(card.key, p.mode);
+                          }}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {p.actionLabel || p.label}
+                        </DropdownMenu.Item>
+                      ))}
+                    </DropdownMenu.Content>
+                  </DropdownMenu.Portal>
+                </DropdownMenu.Root>
+              )}
               {showEvalAffordance && (
                 <Tooltip label="Add a quick eval note">
                   <button

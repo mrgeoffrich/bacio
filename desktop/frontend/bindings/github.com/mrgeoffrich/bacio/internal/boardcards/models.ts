@@ -155,6 +155,16 @@ export class BoardCard {
      */
     "terminalAt"?: time$0.Time | null;
 
+    /**
+     * FollowOnDispatch (BACI-182) carries the dormant follow-on dispatch
+     * the user has queued behind the issue's currently-in-flight parent
+     * dispatch (BACI-179 storage, BACI-180 queue/cancel verbs). Nil (and
+     * omitted from JSON) when no follow-on is dormant — the kanban
+     * renderer's chevron-or-chip slot reads non-nil here as "render the
+     * chip, hide the chevron". Single-slot per issue (Phase 1 design).
+     */
+    "followOnDispatch"?: FollowOnInfo | null;
+
     /** Creates a new BoardCard instance. */
     constructor($$source: Partial<BoardCard> = {}) {
         if (!("key" in $$source)) {
@@ -201,6 +211,7 @@ export class BoardCard {
         const $$createField14_0 = $$createType4;
         const $$createField15_0 = $$createType6;
         const $$createField17_0 = $$createType8;
+        const $$createField21_0 = $$createType10;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField5_0($$parsedSource["tags"]);
@@ -219,6 +230,9 @@ export class BoardCard {
         }
         if ("blockedBy" in $$parsedSource) {
             $$parsedSource["blockedBy"] = $$createField17_0($$parsedSource["blockedBy"]);
+        }
+        if ("followOnDispatch" in $$parsedSource) {
+            $$parsedSource["followOnDispatch"] = $$createField21_0($$parsedSource["followOnDispatch"]);
         }
         return new BoardCard($$parsedSource as Partial<BoardCard>);
     }
@@ -333,6 +347,45 @@ export class BoardCardTodo {
 }
 
 /**
+ * FollowOnInfo (BACI-182) is the per-issue dormant follow-on the kanban
+ * card chip renders. Mode is the prompt template slug ("implement", a
+ * custom slug, etc.); ActionLabel is the imperative phrase derived from
+ * the template (e.g. "Implement") so the chip can read "→ Implement
+ * queued" without re-resolving on the client; DispatchID is the
+ * dormant agent_dispatches row's id, surfaced for parity with
+ * activeByIssueID's pattern even though the cancel verb is issue-scoped
+ * and doesn't actually need it.
+ */
+export class FollowOnInfo {
+    "mode": model$0.DispatchMode;
+    "actionLabel": string;
+    "dispatchID": number;
+
+    /** Creates a new FollowOnInfo instance. */
+    constructor($$source: Partial<FollowOnInfo> = {}) {
+        if (!("mode" in $$source)) {
+            this["mode"] = model$0.DispatchMode.$zero;
+        }
+        if (!("actionLabel" in $$source)) {
+            this["actionLabel"] = "";
+        }
+        if (!("dispatchID" in $$source)) {
+            this["dispatchID"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new FollowOnInfo instance from a string or object.
+     */
+    static createFrom($$source: any = {}): FollowOnInfo {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new FollowOnInfo($$parsedSource as Partial<FollowOnInfo>);
+    }
+}
+
+/**
  * WaitingKind enumerates the three reasons a card may be displaying a
  * waiting spinner — together with the optional Mode/ActionLabel on
  * WaitingState they're the data the kanban / TUI render as the inline
@@ -414,3 +467,5 @@ const $$createType5 = BoardCardTodo.createFrom;
 const $$createType6 = $Create.Array($$createType5);
 const $$createType7 = BoardCardBlocker.createFrom;
 const $$createType8 = $Create.Array($$createType7);
+const $$createType9 = FollowOnInfo.createFrom;
+const $$createType10 = $Create.Nullable($$createType9);

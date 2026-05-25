@@ -232,6 +232,27 @@ type BoardCard struct {
 	// way to avoid a second poll loop. Omitempty keeps open cards
 	// lean on the wire — they outnumber done cards on a healthy board.
 	TerminalAt *time.Time `json:"terminalAt,omitempty"`
+	// FollowOnDispatch (BACI-182) carries the dormant follow-on dispatch
+	// the user has queued behind the issue's currently-in-flight parent
+	// dispatch (BACI-179 storage, BACI-180 queue/cancel verbs). Nil (and
+	// omitted from JSON) when no follow-on is dormant — the kanban
+	// renderer's chevron-or-chip slot reads non-nil here as "render the
+	// chip, hide the chevron". Single-slot per issue (Phase 1 design).
+	FollowOnDispatch *FollowOnInfo `json:"followOnDispatch,omitempty"`
+}
+
+// FollowOnInfo (BACI-182) is the per-issue dormant follow-on the kanban
+// card chip renders. Mode is the prompt template slug ("implement", a
+// custom slug, etc.); ActionLabel is the imperative phrase derived from
+// the template (e.g. "Implement") so the chip can read "→ Implement
+// queued" without re-resolving on the client; DispatchID is the
+// dormant agent_dispatches row's id, surfaced for parity with
+// activeByIssueID's pattern even though the cancel verb is issue-scoped
+// and doesn't actually need it.
+type FollowOnInfo struct {
+	Mode        model.DispatchMode `json:"mode"`
+	ActionLabel string             `json:"actionLabel"`
+	DispatchID  int64              `json:"dispatchID"`
 }
 
 // BoardCardBlocker (BACI-114) is one open `blocks` edge pointing at
@@ -329,6 +350,11 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 		allDispatches = append(allDispatches, ds...)
 	}
 	activeByIssueID := activeDispatchByIssueID(allDispatches)
+	// BACI-182: the dormant follow-on (if any) per issue. Walks the
+	// same allDispatches slice the active-dispatch derivation reads, so
+	// no new SQL — the BACI-179 column is already scanned on every
+	// agent_dispatches row.
+	followOnByIssueID := followOnByIssueID(allDispatches)
 
 	// BACI-145: bulked per-(repo, mode) in-flight count so the deriver
 	// can spot a concurrency-cap-blocked queued dispatch without an N+1
@@ -407,6 +433,14 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 		}
 		e := enrichByKey[iss.Key]
 		ws := DeriveWaitingState(iss, activeByIssueID[iss.ID], inflightByRepo[iss.RepoID], templates)
+		var followOn *FollowOnInfo
+		if d := followOnByIssueID[iss.ID]; d != nil {
+			followOn = &FollowOnInfo{
+				Mode:        d.Mode,
+				ActionLabel: actionLabelForMode(d.Mode, templates),
+				DispatchID:  d.ID,
+			}
+		}
 		cards = append(cards, BoardCard{
 			Key:                iss.Key,
 			Column:             string(iss.State),
@@ -429,6 +463,7 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 			TranscriptDocCount: transcriptCountsByID[iss.ID],
 			EvalCommentCount:   evalCountsByID[iss.ID],
 			TerminalAt:         iss.TerminalAt,
+			FollowOnDispatch:   followOn,
 		})
 	}
 
@@ -742,6 +777,34 @@ func activeDispatchByIssueID(allDispatches []*model.AgentDispatch) map[int64]*mo
 		}
 		// Cancelled / acked rows don't establish the "active" dispatch
 		// — keep walking newer-to-older for the same issue.
+	}
+	return out
+}
+
+// followOnByIssueID (BACI-182) maps issue id → the issue's dormant
+// follow-on dispatch row (status=queued AND queued_after_dispatch_id IS
+// NOT NULL), or absent when no follow-on is queued. Walks the same
+// `allDispatches` slice (newest-first per RepoDispatches' contract) so
+// the first matching row per issue wins — mirrors activeDispatchByIssueID
+// in shape and per-issue uniqueness.
+//
+// Drives BACI-182's kanban chevron-or-chip slot: a non-nil entry tells
+// the renderer to paint the chip (replacing the chevron) and the chip
+// carries the dispatch's mode + action label.
+func followOnByIssueID(allDispatches []*model.AgentDispatch) map[int64]*model.AgentDispatch {
+	out := make(map[int64]*model.AgentDispatch)
+	for _, d := range allDispatches {
+		if d == nil || d.IssueID == nil {
+			continue
+		}
+		if d.Status != model.DispatchQueued || d.QueuedAfterDispatchID == nil {
+			continue
+		}
+		id := *d.IssueID
+		if _, ok := out[id]; ok {
+			continue
+		}
+		out[id] = d
 	}
 	return out
 }

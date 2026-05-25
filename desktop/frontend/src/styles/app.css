@@ -948,6 +948,67 @@ body { margin: 0; }
   border-color: var(--coral-500);
 }
 .mk-card-eval-btn .mk-icon { width: 13px; height: 13px; }
+
+/* BACI-182: kanban "queue a follow-on dispatch" chevron + queued chip.
+   Slot polymorphism (Option A from the Phase 3 design): on a taken
+   card with no queued follow-on the chevron sits next to the eval
+   button; once a follow-on is queued the chip replaces the chevron in
+   the same slot. Visually mirrors .mk-card-eval-btn (22x22, same
+   border + hover treatment, cooler colour) so the swap reads as a
+   single affordance changing state, not a new family of controls. */
+.mk-card-followon-chevron {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; padding: 0;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-3);
+  color: var(--fg-2);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out);
+}
+.mk-card-followon-chevron:hover {
+  background: var(--coral-100);
+  color: var(--coral-700, var(--coral-600));
+  border-color: var(--coral-300);
+}
+.mk-card-followon-chevron .mk-icon { width: 13px; height: 13px; }
+/* The chip's body bubbles to the article's onClick (open workspace);
+   only the trailing × stops propagation and fires onCancelFollowOn.
+   Coral-100 background + coral-600 border quietly says "queued, not
+   yet running" without competing with the spinner/verb on the same
+   row. The flex layout keeps the action label and × on a single line;
+   the parent footer's min-width-0 chain truncates the label first if
+   the column is narrow. */
+.mk-card-followon-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 22px; padding: 0 4px 0 6px;
+  border: 1px solid var(--coral-300);
+  border-radius: var(--radius-sm);
+  background: var(--coral-100, var(--bg-4));
+  color: var(--coral-700, var(--coral-600));
+  cursor: pointer;
+  font-family: var(--font-mono); font-size: 10px;
+  white-space: nowrap;
+  max-width: 100%;
+  min-width: 0;
+}
+.mk-card-followon-chip-text {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  min-width: 0;
+}
+.mk-card-followon-chip-x {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px; padding: 0;
+  border: 0; border-radius: 3px;
+  background: transparent;
+  color: var(--coral-700, var(--coral-600));
+  cursor: pointer;
+}
+.mk-card-followon-chip-x:hover { background: var(--coral-300); }
+.mk-card-followon-chip-x .mk-icon { width: 11px; height: 11px; }
+
 .mk-card-eval-composer {
   margin: 8px -2px -2px -2px;
   padding: 8px;

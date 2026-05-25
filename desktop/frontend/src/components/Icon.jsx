@@ -1,5 +1,5 @@
 import React from 'react';
-import { Search, Plus, Columns3, GitBranch, Settings, X, Zap, Lock, MessageSquare, AlertTriangle, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import { Search, Plus, Columns3, GitBranch, Settings, X, Zap, Lock, MessageSquare, AlertTriangle, ChevronsLeft, ChevronsRight, ChevronRight } from 'lucide-react';
 
 // ClaudeMark is a brand glyph — no icon library carries Claude's logo, so it
 // stays a hand-rolled SVG. It ignores any props passed by <Icon>.
@@ -34,6 +34,9 @@ const ICONS = {
   // ChevronsRight sits at the top of the collapsed strip.
   'chevrons-left': ChevronsLeft,
   'chevrons-right': ChevronsRight,
+  // BACI-182: chevron trigger for the kanban card's "queue a follow-on
+  // dispatch" dropdown (taken cards only).
+  'chevron-right': ChevronRight,
   claude: ClaudeMark,
 };
 

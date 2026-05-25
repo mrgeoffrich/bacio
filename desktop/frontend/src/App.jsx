@@ -598,6 +598,52 @@ export default function App() {
       .catch(err => reportError(err, { headline: "Couldn't cancel queued dispatch" }));
   }, [activeBoard]);
 
+  // BACI-182: kanban chevron handler — queue a dormant follow-on dispatch
+  // behind the issue's in-flight parent. Optimistic: paint the chip
+  // immediately with the action label resolved from the global
+  // promptConfig (fallback to the bare mode slug if the user added a
+  // custom template mid-session and it isn't loaded yet — next poll will
+  // overwrite with the authoritative actionLabel from the assembler).
+  // On failure revert the optimistic chip and toast.
+  const queueFollowOnFromCard = useCallback((cardKey, mode) => {
+    const tmpl = (promptConfig || []).find(p => p.mode === mode);
+    const optimistic = {
+      mode,
+      actionLabel: tmpl?.actionLabel || tmpl?.label || mode,
+      dispatchID: 0,
+    };
+    setCards(cs => cs.map(c => c.key === cardKey ? { ...c, followOnDispatch: optimistic } : c));
+    api.queueFollowOnDispatch(activeBoard, cardKey, mode)
+      .then(() => {
+        refreshCards({ silent: true });
+      })
+      .catch(err => {
+        setCards(cs => cs.map(c => c.key === cardKey ? { ...c, followOnDispatch: null } : c));
+        reportError(err, { headline: "Couldn't queue follow-on dispatch" });
+      });
+  }, [activeBoard, promptConfig, refreshCards]);
+
+  // BACI-182: chip × handler — cancel the dormant follow-on. Optimistic
+  // clear so the chip disappears on click. A 404 / no-op race (the row
+  // promoted between click and call) is swallowed silently by the API
+  // wrapper, so the success branch is the only one that doesn't revert.
+  const cancelFollowOnFromCard = useCallback((cardKey) => {
+    let prior = null;
+    setCards(cs => cs.map(c => {
+      if (c.key !== cardKey) return c;
+      prior = c.followOnDispatch || null;
+      return { ...c, followOnDispatch: null };
+    }));
+    api.cancelFollowOnDispatch(activeBoard, cardKey)
+      .then(() => {
+        refreshCards({ silent: true });
+      })
+      .catch(err => {
+        setCards(cs => cs.map(c => c.key === cardKey ? { ...c, followOnDispatch: prior } : c));
+        reportError(err, { headline: "Couldn't cancel follow-on dispatch" });
+      });
+  }, [activeBoard, refreshCards]);
+
   // Workspace write callbacks — each wraps the existing api.* call and
   // refreshes the brief so the inline view re-renders with the
   // persisted state. Failures surface through reportError; the
@@ -815,6 +861,8 @@ export default function App() {
             onDispatchFromCard={dispatchFromCard}
             onCancelWaitingCard={cancelWaitingFromCard}
             onQuickEval={quickEvalComment}
+            onQueueFollowOnCard={queueFollowOnFromCard}
+            onCancelFollowOnCard={cancelFollowOnFromCard}
           />
         </ErrorBoundary>
       )}
