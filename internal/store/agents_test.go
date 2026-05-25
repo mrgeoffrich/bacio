@@ -1880,3 +1880,70 @@ func TestOpenPrunesOrphanAgentClaims(t *testing.T) {
 		t.Fatalf("orphan claim survived Open() janitor: have %d, want 0", after)
 	}
 }
+
+// TestReleaseAgentClaim_TerminalStateNoop (BACI-200, Bug 2) locks in
+// that a release against an issue that has already reached a terminal
+// state (`done` / `cancelled`) leaves the state unchanged. The claim
+// is still dropped — the worker's bookkeeping completes — but a
+// parallel worker finishing late cannot drag a shipped ticket
+// backwards into `in_review`. This is the BACI-197 regression
+// (`done → in_review`) the issue calls out.
+func TestReleaseAgentClaim_TerminalStateNoop(t *testing.T) {
+	cases := []struct {
+		name     string
+		terminal model.State
+	}{
+		{"done stays done", model.StateDone},
+		{"cancelled stays cancelled", model.StateCancelled},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s, repo, iss := seedRepoAndIssue(t)
+			sid := "term-" + string(tc.terminal)
+			if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+				SessionID: sid, RepoID: repo.ID, Actor: "agent-claude",
+			}); err != nil {
+				t.Fatalf("register: %v", err)
+			}
+			if _, _, _, _, err := s.AddAgentClaim(sid, iss.ID, ""); err != nil {
+				t.Fatalf("AddAgentClaim: %v", err)
+			}
+			// Drive the issue to the terminal state out-of-band (the
+			// BACI-197 scenario: the sibling worker shipped first and the
+			// issue is already `done` by the time this worker's release
+			// lands).
+			if err := s.SetIssueState(iss.ID, tc.terminal); err != nil {
+				t.Fatalf("set terminal state: %v", err)
+			}
+			claim, _, sc, err := s.ReleaseAgentClaim(sid, iss.ID, model.StateInReview)
+			if err != nil {
+				t.Fatalf("ReleaseAgentClaim: %v", err)
+			}
+			if claim == nil {
+				t.Fatal("expected a released claim, got nil")
+			}
+			// Release bookkeeping still completes — the claim row is
+			// stamped released_at.
+			if claim.ReleasedAt == nil {
+				t.Fatalf("claim released_at = nil, want a timestamp")
+			}
+			// StateChange shows Old == New == terminal (no movement).
+			if sc == nil {
+				t.Fatal("expected a StateChange on release, got nil")
+			}
+			if sc.Old != tc.terminal || sc.New != tc.terminal {
+				t.Errorf("StateChange = (%s → %s), want (%s → %s) (terminal no-op)",
+					sc.Old, sc.New, tc.terminal, tc.terminal)
+			}
+			// Issue itself is unmoved.
+			got, err := s.GetIssueByID(iss.ID)
+			if err != nil {
+				t.Fatalf("GetIssueByID: %v", err)
+			}
+			if got.State != tc.terminal {
+				t.Errorf("issue state after release = %q, want %q (BACI-200 terminal gate)",
+					got.State, tc.terminal)
+			}
+		})
+	}
+}

@@ -710,7 +710,12 @@ func resolveOpenDispatchesForSession(tx *sql.Tx, sessPK int64, cascade DispatchC
 	var newStatus model.DispatchStatus
 	switch cascade {
 	case DispatchCascadeRequeue:
-		setClause = `status = 'queued', target_session_id = '', target_agent_id = NULL`
+		// BACI-200: reset delivered_at alongside status/target so the
+		// matcher's `delivered_at IS NULL` rebind gate (BindQueuedDispatch)
+		// admits this row again. Otherwise a genuinely-dead worker's
+		// delivered dispatch would be locked in a perpetual queued state,
+		// breaking BACI-133's "rebind to a fresh agent" recovery path.
+		setClause = `status = 'queued', target_session_id = '', target_agent_id = NULL, delivered_at = NULL`
 		newStatus = model.DispatchQueued
 	default:
 		setClause = `status = 'cancelled'`
@@ -1079,6 +1084,18 @@ func (s *Store) ReleaseAgentClaim(sessionID string, issueID int64, finalState mo
 // audit row. Mirrors setIssueStateForClaim — the predicate makes the
 // UPDATE a no-op when state is already at the target so the audit row
 // reads cleanly (Old == New, client skips the state clause).
+//
+// BACI-200: if the issue is already in a terminal state (`done` /
+// `cancelled`) the release MUST NOT drag it backwards — the dispatch
+// race fix in BindQueuedDispatch prevents most of these, but an
+// intermittent path (a slow worktree, a follow-on dispatch landing
+// during release, a manual `bacio issue state` from a human while a
+// worker is mid-flight) shouldn't be able to undo a terminal verdict
+// either. The returned StateChange has `Old == New == <terminal>` so
+// the caller sees the same "no state move" shape it sees when the
+// issue is already at the target, and the release itself still
+// completes (claim drops, PR can still be attached, bookkeeping
+// proceeds).
 func setIssueStateForRelease(tx *sql.Tx, issueID int64, target model.State) (*StateChange, error) {
 	var oldState string
 	var repoID int64
@@ -1098,12 +1115,25 @@ func setIssueStateForRelease(tx *sql.Tx, issueID int64, target model.State) (*St
 		}
 		return nil, err
 	}
+	old := model.State(oldState)
+	// BACI-200: terminal-state gate. A `done` / `cancelled` issue is the
+	// product of a previous release (or a manual `bacio issue state`);
+	// the work has been signed off. Leaving the state unchanged here
+	// keeps Old == New, so the release proceeds without writing an
+	// issue.state audit row or bumping terminal_at.
+	if isTerminalState(old) {
+		return &StateChange{
+			IssueID: issueID, IssueKey: fmt.Sprintf("%s-%d", prefix, number),
+			RepoID: repoID, RepoPrefix: prefix,
+			Old: old, New: old,
+		}, nil
+	}
 	ch := &StateChange{
 		IssueID: issueID, IssueKey: fmt.Sprintf("%s-%d", prefix, number),
 		RepoID: repoID, RepoPrefix: prefix,
-		Old: model.State(oldState), New: target,
+		Old: old, New: target,
 	}
-	if model.State(oldState) == target {
+	if old == target {
 		return ch, nil
 	}
 	// BACI-138: keep terminal_at in lockstep with state — the release
@@ -1119,6 +1149,14 @@ func setIssueStateForRelease(tx *sql.Tx, issueID int64, target model.State) (*St
 		return nil, err
 	}
 	return ch, nil
+}
+
+// isTerminalState (BACI-200) returns true when the issue state is a
+// signed-off verdict that a subsequent agent.release must not undo.
+// Mirrors the constants in pruneDispatches' settled-status filter, but
+// scoped to issue state.
+func isTerminalState(s model.State) bool {
+	return s == model.StateDone || s == model.StateCancelled
 }
 
 // AgentSessionFilter scopes ListAgentSessions. Zero value = all
