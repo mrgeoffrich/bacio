@@ -54,11 +54,13 @@ CREATE TABLE IF NOT EXISTS issues (
     waiting_for_claim INTEGER NOT NULL DEFAULT 0,
     -- archived_at (BACI-68) doubles as the boolean "hidden from default
     -- views" flag and the audit timestamp of when the row was hidden.
-    -- NULL = visible; non-NULL = archived. The auto-sweep stamps it with
-    -- CURRENT_TIMESTAMP for issues older than 4 days in a terminal
-    -- state; manual `bacio issue archive` / `unarchive` writes or clears
-    -- it on demand. Reopening an archived issue (state -> todo/...) does
-    -- NOT auto-unarchive — the user must unarchive explicitly. List read
+    -- NULL = visible; non-NULL = archived. The auto-sweep stamps it
+    -- with CURRENT_TIMESTAMP for issues whose terminal_at is older
+    -- than the configured retention window (BACI-162; default 7 days,
+    -- editable via the `archive.retention_days` app_setting); manual
+    -- `bacio issue archive` / `unarchive` writes or clears it on
+    -- demand. Reopening an archived issue (state -> todo/...) does NOT
+    -- auto-unarchive — the user must unarchive explicitly. List read
     -- paths filter `archived_at IS NULL` by default; single-item show /
     -- brief always returns the row regardless. The display toggle
     -- (`display.show_archived`) and the per-call `--include-archived`

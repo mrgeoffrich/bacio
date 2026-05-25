@@ -62,6 +62,82 @@ func TestSyncBackgroundEnabledDefaultsTrue(t *testing.T) {
 	}
 }
 
+// TestArchivePreferencesDefaults — BACI-162. A fresh store reads
+// archive.auto_enabled as TRUE (auto-archive is opt-OUT, matching the
+// historical behaviour) and archive.retention_days as the embedded
+// DefaultArchiveRetentionDays (7). A malformed stored retention value
+// (non-numeric, out-of-range) reads back as the default — the
+// defensive read style every other getter in this file uses.
+func TestArchivePreferencesDefaults(t *testing.T) {
+	s := newTestStore(t)
+
+	if v, err := s.GetArchiveAutoEnabled(); err != nil || !v {
+		t.Fatalf("GetArchiveAutoEnabled(unset) = %v, %v; want true, nil", v, err)
+	}
+	if v, err := s.GetArchiveRetentionDays(); err != nil || v != DefaultArchiveRetentionDays {
+		t.Fatalf("GetArchiveRetentionDays(unset) = %d, %v; want %d, nil", v, err, DefaultArchiveRetentionDays)
+	}
+
+	// Garbage retention reads back as default.
+	if err := s.SetAppSetting(archiveRetentionDaysKey, "garbage"); err != nil {
+		t.Fatalf("set garbage: %v", err)
+	}
+	if v, _ := s.GetArchiveRetentionDays(); v != DefaultArchiveRetentionDays {
+		t.Fatalf("garbage retention reads %d, want default %d", v, DefaultArchiveRetentionDays)
+	}
+	// Out-of-range reads back as default too.
+	if err := s.SetAppSetting(archiveRetentionDaysKey, "99999"); err != nil {
+		t.Fatalf("set huge: %v", err)
+	}
+	if v, _ := s.GetArchiveRetentionDays(); v != DefaultArchiveRetentionDays {
+		t.Fatalf("out-of-range retention reads %d, want default %d", v, DefaultArchiveRetentionDays)
+	}
+}
+
+// TestArchivePreferencesPersist — BACI-162 round-trip on both keys.
+func TestArchivePreferencesPersist(t *testing.T) {
+	s := newTestStore(t)
+	if err := s.SetArchiveAutoEnabled(false); err != nil {
+		t.Fatalf("set auto false: %v", err)
+	}
+	if v, _ := s.GetArchiveAutoEnabled(); v {
+		t.Fatal("after Set(false), GetArchiveAutoEnabled = true, want false")
+	}
+	if err := s.SetArchiveAutoEnabled(true); err != nil {
+		t.Fatalf("set auto true: %v", err)
+	}
+	if v, _ := s.GetArchiveAutoEnabled(); !v {
+		t.Fatal("after Set(true), GetArchiveAutoEnabled = false, want true")
+	}
+
+	if err := s.SetArchiveRetentionDays(14); err != nil {
+		t.Fatalf("set retention 14: %v", err)
+	}
+	if v, _ := s.GetArchiveRetentionDays(); v != 14 {
+		t.Fatalf("after Set(14), GetArchiveRetentionDays = %d, want 14", v)
+	}
+}
+
+// TestValidateArchiveRetentionDays — BACI-162 store-boundary
+// validator. Zero / negatives / huge values are rejected; the valid
+// range 1..3650 round-trips.
+func TestValidateArchiveRetentionDays(t *testing.T) {
+	for _, bad := range []int{0, -1, -100, 3651, 99999} {
+		if _, err := ValidateArchiveRetentionDays(bad); err == nil {
+			t.Errorf("ValidateArchiveRetentionDays(%d) = nil, want error", bad)
+		}
+	}
+	for _, ok := range []int{1, 7, 30, 365, 3650} {
+		got, err := ValidateArchiveRetentionDays(ok)
+		if err != nil {
+			t.Errorf("ValidateArchiveRetentionDays(%d) errored: %v", ok, err)
+		}
+		if got != ok {
+			t.Errorf("ValidateArchiveRetentionDays(%d) = %d, want %d", ok, got, ok)
+		}
+	}
+}
+
 // TestMarkSyncFailedAndCompleted checks the BACI-89 last_sync_error
 // bookkeeping: MarkSyncFailed records the message, MarkSyncCompleted
 // clears it and stamps last_sync_at.

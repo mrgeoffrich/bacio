@@ -94,6 +94,14 @@ export default function App() {
   // hidden. The per-call --include-archived flag the CLI exposes has
   // no desktop counterpart — toggle the setting from Settings instead.
   const [showArchived, setShowArchived] = useState(false);
+  // BACI-162: the App-owned auto-archive settings. archiveAutoEnabled
+  // gates the hourly issue auto-archive pass (defaults to true);
+  // archiveRetentionDays is the number of days a terminal-state issue's
+  // terminal_at must sit before the next sweep archives it. Loaded
+  // alongside the other settings on mount; flipped from the Settings
+  // screen via setArchivePreferences (atomic pair write).
+  const [archiveAutoEnabled, setArchiveAutoEnabled] = useState(true);
+  const [archiveRetentionDays, setArchiveRetentionDays] = useState(7);
   // leaderState tracks the UI leader-election result from LeaderService.
   // amLeader = true means this desktop process holds the lease and may
   // dispatch. Standby processes show a chip and disable the per-card button.
@@ -137,13 +145,16 @@ export default function App() {
       api.listPromptTemplates(),
       api.getBoardPreferences(),
       api.getDisplayPreferences(),
+      api.getArchivePreferences(),
     ])
-      .then(([bs, cols, tpls, prefs, displayPrefs]) => {
+      .then(([bs, cols, tpls, prefs, displayPrefs, archivePrefs]) => {
         setBoards(bs);
         setColumns(cols);
         setPromptConfig(tpls);
         setHideEmptyColumns(prefs.hideEmptyColumns);
         setShowArchived(displayPrefs.showArchived);
+        setArchiveAutoEnabled(archivePrefs.autoEnabled);
+        setArchiveRetentionDays(archivePrefs.retentionDays);
         setActiveBoard(prev => bs.some(b => b.prefix === prev) ? prev : (bs[0]?.prefix ?? ''));
         setLoading(false);
       })
@@ -189,6 +200,21 @@ export default function App() {
   const changeShowArchived = useCallback((next) => {
     api.setDisplayPreferences(next)
       .then(prefs => setShowArchived(prefs.showArchived))
+      .catch(err => reportError(err, { headline: "Couldn't save preference" }));
+  }, []);
+
+  // changeArchivePreferences persists the BACI-162 auto-archive pair
+  // atomically, then updates the App-owned state on success. Both
+  // fields travel together; the API rejects retention_days outside
+  // 1..3650 with a 400, surfaced via reportError. The Settings UI
+  // gates the numeric input on the boolean so the operator can flip
+  // off auto-archive without first nudging the number into range.
+  const changeArchivePreferences = useCallback((autoEnabled, retentionDays) => {
+    api.setArchivePreferences(autoEnabled, retentionDays)
+      .then(prefs => {
+        setArchiveAutoEnabled(prefs.autoEnabled);
+        setArchiveRetentionDays(prefs.retentionDays);
+      })
       .catch(err => reportError(err, { headline: "Couldn't save preference" }));
   }, []);
 
@@ -713,6 +739,9 @@ export default function App() {
             onChangeHideEmptyColumns={changeHideEmptyColumns}
             showArchived={showArchived}
             onChangeShowArchived={changeShowArchived}
+            archiveAutoEnabled={archiveAutoEnabled}
+            archiveRetentionDays={archiveRetentionDays}
+            onChangeArchivePreferences={changeArchivePreferences}
             columns={columns}
             onClose={closeSettings}
             onTemplatesChanged={refreshPromptConfig}

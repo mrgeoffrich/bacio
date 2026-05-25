@@ -82,8 +82,10 @@ export class Issue {
     /**
      * ArchivedAt (BACI-68) is non-nil iff the issue is archived —
      * hidden from default lists / boards, but the row and its audit
-     * history are retained. The auto-sweep stamps it for issues older
-     * than 4 days in a terminal state; manual `bacio issue archive` /
+     * history are retained. The auto-sweep stamps it for issues whose
+     * terminal_at is older than the configured retention window
+     * (BACI-162; default 7 days, editable via `bacio settings archive`
+     * or the desktop Settings panel); manual `bacio issue archive` /
      * `unarchive` writes or clears it on demand. Reopening an archived
      * issue (state -> todo/...) does NOT auto-unarchive — the user must
      * unarchive explicitly.

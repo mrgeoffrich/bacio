@@ -36,5 +36,6 @@ The file is only created if you've enabled [git-backed sync](/guides/sync-across
 ## Defaults that matter
 
 - **History retention:** 60 days. Pruned on every DB open.
+- **Auto-archive (BACI-162):** the hourly archive sweep hides done / cancelled issues whose `terminal_at` is older than the configured retention window. Default `7` days. Configurable via `bacio settings archive` (CLI) or the desktop / web Settings panel (toggle + numeric input). When the boolean `archive.auto_enabled` is set to `false` the issue pass is skipped entirely; the feature + linked-doc cascade passes still run, so a manually archived issue still cascades.
 - **Output format:** `text`. Override per call with `-o json` for agent / script use.
 - **Actor:** resolved automatically. Agent-driven calls (with `bacio install-agent` set up) attribute to the agent's identity via `.bacio/agents.json`; all other calls stamp the literal `"user"` placeholder until real auth lands.

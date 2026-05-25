@@ -261,10 +261,15 @@ func TestArchiveSweepIfLeaderWritesAudit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
-	// Back-date updated_at past the 4-day ArchiveAgeWindow so the
-	// terminal-issue pass picks the row up.
+	// Back-date terminal_at past the configurable retention window
+	// (BACI-162 made it configurable; default is 7 days) so the
+	// terminal-issue pass picks the row up. The store seeds terminal_at
+	// on insert when the issue starts in a terminal state, but the
+	// retention clock runs against `terminal_at` post-BACI-162 — and
+	// `datetime('now','-30 days')` is comfortably past any sane
+	// retention default.
 	if _, err := s.DB.Exec(
-		`UPDATE issues SET updated_at = datetime('now','-30 days') WHERE id = ?`,
+		`UPDATE issues SET terminal_at = datetime('now','-30 days') WHERE id = ?`,
 		iss.ID,
 	); err != nil {
 		t.Fatalf("backdate issue: %v", err)

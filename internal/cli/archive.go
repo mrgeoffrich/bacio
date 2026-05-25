@@ -37,7 +37,7 @@ func archiveSweepCmd() *cobra.Command {
 		Short: "Run the BACI-68 archive sweep on demand (same three SQL passes the leader runs hourly)",
 		Long: `Run the archive sweep on demand. The sweep:
 
-  1. Archives issues in (done, cancelled) older than 4 days that aren't already archived.
+  1. Archives issues in (done, cancelled) whose terminal_at is older than the configured retention period (BACI-162; default 7 days, editable via ` + "`bacio settings archive`" + ` or the desktop Settings panel) and that aren't already archived. Skipped entirely when ` + "`archive.auto_enabled`" + ` is false.
   2. Archives features whose every child issue is archived (and the feature had at least one child).
   3. Archives documents whose every linked parent (issue and/or feature) is archived (and the doc had at least one link).
 

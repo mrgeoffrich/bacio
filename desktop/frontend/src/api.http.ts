@@ -1920,6 +1920,32 @@ export async function setDisplayPreferences(showArchived: boolean): Promise<Disp
   return { showArchived: res.show_archived };
 }
 
+// ---------- Archive preferences (BACI-162) ----------
+//
+// archive.auto_enabled + archive.retention_days global settings. When
+// auto_enabled is false the hourly issue auto-archive pass is skipped
+// entirely; retention_days (1..3650) is the number of days a
+// terminal-state issue's terminal_at must sit before the next sweep
+// archives it.
+
+export type ArchivePreferencesDTO = { autoEnabled: boolean; retentionDays: number };
+
+export async function getArchivePreferences(): Promise<ArchivePreferencesDTO> {
+  const res = await call<{ auto_enabled: boolean; retention_days: number }>('/settings/archive-preferences');
+  return { autoEnabled: res.auto_enabled, retentionDays: res.retention_days };
+}
+
+export async function setArchivePreferences(
+  autoEnabled: boolean,
+  retentionDays: number,
+): Promise<ArchivePreferencesDTO> {
+  const res = await call<{ auto_enabled: boolean; retention_days: number }>('/settings/archive-preferences', {
+    method: 'PUT',
+    body: { auto_enabled: autoEnabled, retention_days: retentionDays },
+  });
+  return { autoEnabled: res.auto_enabled, retentionDays: res.retention_days };
+}
+
 // ---------- BACI-68 per-entity archive verbs ----------
 
 export async function archiveIssue(prefix: string, key: string): Promise<unknown> {

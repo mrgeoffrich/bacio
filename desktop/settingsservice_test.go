@@ -38,6 +38,15 @@ type fakeSyncClient struct {
 	setupErr        error
 	lastSetupRepo   *model.Repo
 	lastSetupInput  inputs.SyncSetupInput
+
+	// BACI-162 archive-preferences fixture surface. archivePrefs is
+	// the value returned by Get; archivePrefsErr forces Get to error.
+	// archiveSetErr forces Set to error; lastArchiveSet records the
+	// payload reached the client so tests can assert the round trip.
+	archivePrefs    client.ArchivePreferences
+	archivePrefsErr error
+	archiveSetErr   error
+	lastArchiveSet  client.ArchivePreferences
 }
 
 func (f *fakeSyncClient) GetRepoByPrefix(_ context.Context, prefix string) (*model.Repo, error) {
@@ -58,6 +67,24 @@ func (f *fakeSyncClient) SetupSync(_ context.Context, repo *model.Repo, in input
 
 func (f *fakeSyncClient) GetSyncBackgroundEnabled(context.Context) (bool, error) {
 	return f.bgEnabled, f.bgEnabledErr
+}
+
+// BACI-162 fixture fields and method overrides. Mirrors the sync pair
+// above so the same fake type can exercise both round trips.
+func (f *fakeSyncClient) GetArchivePreferences(context.Context) (client.ArchivePreferences, error) {
+	if f.archivePrefsErr != nil {
+		return client.ArchivePreferences{}, f.archivePrefsErr
+	}
+	return f.archivePrefs, nil
+}
+
+func (f *fakeSyncClient) SetArchivePreferences(_ context.Context, in client.ArchivePreferences, _ bool) (client.ArchivePreferences, error) {
+	f.lastArchiveSet = in
+	if f.archiveSetErr != nil {
+		return client.ArchivePreferences{}, f.archiveSetErr
+	}
+	f.archivePrefs = in
+	return in, nil
 }
 
 func (f *fakeSyncClient) SetSyncBackgroundEnabled(_ context.Context, value, _ bool) (bool, error) {
@@ -120,6 +147,54 @@ func TestSettingsService_SyncPreferencesRoundTrip(t *testing.T) {
 	}
 	if got.BackgroundEnabled {
 		t.Fatalf("expected off after Set, got %+v", got)
+	}
+}
+
+// TestSettingsService_ArchivePreferencesRoundTrip — BACI-162. The
+// service surfaces the client's pair on Get; Set forwards the typed
+// pair atomically and the response reflects the client's projection.
+func TestSettingsService_ArchivePreferencesRoundTrip(t *testing.T) {
+	fake := &fakeSyncClient{archivePrefs: client.ArchivePreferences{AutoEnabled: true, RetentionDays: 7}}
+	s := NewSettingsService(fake)
+
+	// Initial state — defaults.
+	got, err := s.GetArchivePreferences()
+	if err != nil {
+		t.Fatalf("GetArchivePreferences: %v", err)
+	}
+	if !got.AutoEnabled || got.RetentionDays != 7 {
+		t.Fatalf("expected defaults {true, 7}, got %+v", got)
+	}
+
+	// Flip off + custom retention.
+	got, err = s.SetArchivePreferences(false, 14)
+	if err != nil {
+		t.Fatalf("SetArchivePreferences(false, 14): %v", err)
+	}
+	if got.AutoEnabled || got.RetentionDays != 14 {
+		t.Fatalf("after Set: got %+v, want {false, 14}", got)
+	}
+	if fake.lastArchiveSet.AutoEnabled || fake.lastArchiveSet.RetentionDays != 14 {
+		t.Fatalf("client received %+v, want {false, 14}", fake.lastArchiveSet)
+	}
+
+	// Round-trip via Get.
+	got, err = s.GetArchivePreferences()
+	if err != nil {
+		t.Fatalf("GetArchivePreferences after Set: %v", err)
+	}
+	if got.AutoEnabled || got.RetentionDays != 14 {
+		t.Fatalf("after Set, Get: %+v, want {false, 14}", got)
+	}
+}
+
+// TestSettingsService_ArchivePreferences_ErrorPropagates surfaces a
+// client-side read failure as an error from the Wails method.
+func TestSettingsService_ArchivePreferences_ErrorPropagates(t *testing.T) {
+	want := errors.New("read failed")
+	s := NewSettingsService(&fakeSyncClient{archivePrefsErr: want})
+	if _, err := s.GetArchivePreferences(); !errors.Is(err, want) {
+		t.Fatalf("expected sentinel error, got %v", err)
 	}
 }
 

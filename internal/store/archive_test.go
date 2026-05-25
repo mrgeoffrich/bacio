@@ -2,13 +2,13 @@
 // per-entity Set*Archived methods plus the three-pass auto-sweep.
 //
 // Per the user's "Use SQLite datetime('now') and skip age-based unit
-// tests" call on BACI-68, the sweep tests deliberately exercise the
-// structural cases (already-archived skip, parent-cascade semantics,
-// childless features ignored, zero-link docs ignored) but skip the
-// "issue older than 4 days" age window — that path relies on
-// datetime('now') which is hard to fake without a clock injection.
-// The bulk of the auto-sweep's logic lives in the parent-cascade
-// passes anyway; the age-window predicate is a one-line SQL filter.
+// tests" call on BACI-68, the legacy sweep tests deliberately exercise
+// the structural cases (already-archived skip, parent-cascade
+// semantics, childless features ignored, zero-link docs ignored) and
+// archive the issue children by hand. BACI-162 added direct age-window
+// coverage on top — using `terminal_at` back-dating via SQL — so the
+// configurable retention window + auto_enabled toggle are now locked
+// in alongside the cascade structural cases.
 package store
 
 import (
@@ -292,6 +292,162 @@ func TestArchiveSweepIdempotent(t *testing.T) {
 	}
 	if r2.Total() != 0 {
 		t.Fatalf("second sweep must be a no-op; got %+v", r2)
+	}
+}
+
+// TestArchiveSweepRespectsAutoEnabledFalse — BACI-162. When the
+// archive.auto_enabled toggle is false the issue pass is skipped
+// entirely, even for terminal-state rows whose terminal_at is
+// comfortably past the retention window. Flipping the toggle back on
+// (without changing the row) lets the next sweep archive it.
+func TestArchiveSweepRespectsAutoEnabledFalse(t *testing.T) {
+	s := newTestStore(t)
+	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
+	iss, _ := s.CreateIssue(repo.ID, nil, "ancient", "", model.StateDone, nil)
+	// Back-date terminal_at past any sane retention window.
+	if _, err := s.DB.Exec(
+		`UPDATE issues SET terminal_at = datetime('now','-365 days') WHERE id = ?`,
+		iss.ID,
+	); err != nil {
+		t.Fatalf("backdate: %v", err)
+	}
+
+	// Disable auto-archive and sweep: the row should stay live.
+	if err := s.SetArchiveAutoEnabled(false); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	res, err := s.ArchiveSweep()
+	if err != nil {
+		t.Fatalf("sweep (disabled): %v", err)
+	}
+	if res.IssuesArchived != 0 {
+		t.Fatalf("auto_enabled=false: IssuesArchived = %d, want 0", res.IssuesArchived)
+	}
+	got, _ := s.GetIssueByID(iss.ID)
+	if got.ArchivedAt != nil {
+		t.Fatal("auto_enabled=false must NOT archive an issue, even if terminal_at is ancient")
+	}
+
+	// Re-enable and re-sweep: the row should now archive.
+	if err := s.SetArchiveAutoEnabled(true); err != nil {
+		t.Fatalf("re-enable: %v", err)
+	}
+	res, err = s.ArchiveSweep()
+	if err != nil {
+		t.Fatalf("sweep (enabled): %v", err)
+	}
+	if res.IssuesArchived != 1 {
+		t.Fatalf("auto_enabled=true: IssuesArchived = %d, want 1", res.IssuesArchived)
+	}
+}
+
+// TestArchiveSweepRespectsRetentionDays — BACI-162. The configured
+// retention window drives the cutoff: an issue whose terminal_at is
+// older than retention_days archives; one whose terminal_at is
+// fresher than retention_days stays live.
+func TestArchiveSweepRespectsRetentionDays(t *testing.T) {
+	s := newTestStore(t)
+	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
+
+	// Two terminal-state issues. One ancient, one fresh.
+	old, _ := s.CreateIssue(repo.ID, nil, "old", "", model.StateDone, nil)
+	young, _ := s.CreateIssue(repo.ID, nil, "young", "", model.StateDone, nil)
+	if _, err := s.DB.Exec(
+		`UPDATE issues SET terminal_at = datetime('now','-2 days') WHERE id = ?`, old.ID,
+	); err != nil {
+		t.Fatalf("backdate old: %v", err)
+	}
+	if _, err := s.DB.Exec(
+		`UPDATE issues SET terminal_at = datetime('now','-30 minutes') WHERE id = ?`, young.ID,
+	); err != nil {
+		t.Fatalf("backdate young: %v", err)
+	}
+
+	// Retention=1 day: old (2 days) is eligible; young (30 min) is not.
+	if err := s.SetArchiveRetentionDays(1); err != nil {
+		t.Fatalf("set retention: %v", err)
+	}
+	res, err := s.ArchiveSweep()
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if res.IssuesArchived != 1 {
+		t.Fatalf("retention=1: IssuesArchived = %d, want 1", res.IssuesArchived)
+	}
+	gotOld, _ := s.GetIssueByID(old.ID)
+	if gotOld.ArchivedAt == nil {
+		t.Fatal("old (terminal_at=-2d) must archive at retention=1")
+	}
+	gotYoung, _ := s.GetIssueByID(young.ID)
+	if gotYoung.ArchivedAt != nil {
+		t.Fatal("young (terminal_at=-30m) must NOT archive at retention=1")
+	}
+}
+
+// TestArchiveSweepUsesTerminalAtNotUpdatedAt — BACI-162 / BACI-138.
+// The retention clock anchors on terminal_at, not updated_at. Bumping
+// updated_at via an unrelated edit (here, an updated_at SQL write
+// directly; the equivalent end-user action would be a tag add) on a
+// closed issue must NOT extend the retention window.
+func TestArchiveSweepUsesTerminalAtNotUpdatedAt(t *testing.T) {
+	s := newTestStore(t)
+	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
+	iss, _ := s.CreateIssue(repo.ID, nil, "edited recently", "", model.StateDone, nil)
+	// terminal_at well past the retention window; updated_at fresh
+	// (simulates a tag edit on a long-closed issue).
+	if _, err := s.DB.Exec(
+		`UPDATE issues SET terminal_at = datetime('now','-30 days'), updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		iss.ID,
+	); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+	if err := s.SetArchiveRetentionDays(7); err != nil {
+		t.Fatalf("set retention: %v", err)
+	}
+	res, err := s.ArchiveSweep()
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if res.IssuesArchived != 1 {
+		t.Fatalf("IssuesArchived = %d, want 1 (terminal_at is the clock anchor; updated_at must be ignored)", res.IssuesArchived)
+	}
+}
+
+// TestArchiveSweepCascadeRunsEvenWhenAutoOff — BACI-162. Disabling
+// archive.auto_enabled skips ONLY the issue pass. The feature +
+// document cascade passes still run, so a manually-archived issue
+// continues to cascade to its parent feature and linked docs.
+func TestArchiveSweepCascadeRunsEvenWhenAutoOff(t *testing.T) {
+	s := newTestStore(t)
+	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
+	feat, _ := s.CreateFeature(repo.ID, "f", "F", "")
+	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "manual", "", model.StateDone, nil)
+	doc, _ := s.CreateDocument(repo.ID, "d.md", model.DocTypeArchitecture, "", "")
+	if _, err := s.LinkDocument(doc.ID, LinkTarget{IssueID: &iss.ID}, ""); err != nil {
+		t.Fatalf("link doc: %v", err)
+	}
+
+	// Manually archive the child issue.
+	if err := s.SetIssueArchived(iss.ID, true); err != nil {
+		t.Fatalf("archive issue: %v", err)
+	}
+
+	// Disable auto-archive — the cascade passes should still run.
+	if err := s.SetArchiveAutoEnabled(false); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	res, err := s.ArchiveSweep()
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if res.IssuesArchived != 0 {
+		t.Fatalf("issue pass must be skipped: IssuesArchived = %d, want 0", res.IssuesArchived)
+	}
+	if res.FeaturesArchived != 1 {
+		t.Fatalf("cascade must still run: FeaturesArchived = %d, want 1", res.FeaturesArchived)
+	}
+	if res.DocumentsArchived != 1 {
+		t.Fatalf("cascade must still run: DocumentsArchived = %d, want 1", res.DocumentsArchived)
 	}
 }
 

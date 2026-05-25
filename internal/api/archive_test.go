@@ -206,6 +206,67 @@ func TestDisplayPreferencesRoundtrip(t *testing.T) {
 	}
 }
 
+// TestArchivePreferencesRoundtrip — BACI-162. GET returns the
+// defaults (auto_enabled=true, retention_days=7). PUT writes a
+// custom pair atomically. Subsequent GET reflects the write. PUT
+// with retention_days=0 is rejected with 400.
+func TestArchivePreferencesRoundtrip(t *testing.T) {
+	ts, _ := newTestAPI(t, api.Options{})
+
+	type out struct {
+		AutoEnabled   bool `json:"auto_enabled"`
+		RetentionDays int  `json:"retention_days"`
+	}
+
+	// Default — auto_enabled=true, retention_days=7.
+	resp, body := apiGet(t, ts.URL+"/settings/archive-preferences")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("get: status %d, body %s", resp.StatusCode, body)
+	}
+	var got out
+	mustJSON(t, body, &got)
+	if !got.AutoEnabled || got.RetentionDays != 7 {
+		t.Fatalf("defaults: got %+v, want {true, 7}", got)
+	}
+
+	// Set custom — atomic write of both fields.
+	resp, body = apiPut(t, ts.URL+"/settings/archive-preferences", map[string]any{
+		"auto_enabled":   false,
+		"retention_days": 14,
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("set: status %d, body %s", resp.StatusCode, body)
+	}
+	mustJSON(t, body, &got)
+	if got.AutoEnabled || got.RetentionDays != 14 {
+		t.Fatalf("after PUT: got %+v, want {false, 14}", got)
+	}
+
+	// Re-read — persists.
+	_, body = apiGet(t, ts.URL+"/settings/archive-preferences")
+	mustJSON(t, body, &got)
+	if got.AutoEnabled || got.RetentionDays != 14 {
+		t.Fatalf("after PUT, GET: got %+v, want {false, 14}", got)
+	}
+
+	// Zero retention_days is rejected — disable via the boolean
+	// instead. Other out-of-range values 400 the same way.
+	resp, body = apiPut(t, ts.URL+"/settings/archive-preferences", map[string]any{
+		"auto_enabled":   true,
+		"retention_days": 0,
+	})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("PUT retention=0: status %d, want 400; body %s", resp.StatusCode, body)
+	}
+	resp, body = apiPut(t, ts.URL+"/settings/archive-preferences", map[string]any{
+		"auto_enabled":   true,
+		"retention_days": 99999,
+	})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("PUT retention=huge: status %d, want 400; body %s", resp.StatusCode, body)
+	}
+}
+
 // decodeIssue / decodeIssues / mustJSON are local helpers that
 // duplicate the shape work helpers_test.go uses for other entities —
 // not factored into helpers_test.go because the existing helpers there

@@ -131,3 +131,16 @@ type ArchiveSweepInput struct{}
 type SettingsSyncBackgroundInput struct {
 	Value bool `json:"value"`
 }
+
+// SettingsArchiveInput is the payload for `bacio settings archive
+// --json` (BACI-162). Both fields are required on the write path —
+// the verb writes both atomically rather than juggling a partial
+// update; the read path returns the current pair. AutoEnabled gates
+// the hourly issue auto-archive pass; RetentionDays is the number of
+// days a terminal-state issue's terminal_at must sit before the next
+// sweep archives it. 1..3650; explicitly does NOT accept 0 (use the
+// boolean to disable instead — see store.ValidateArchiveRetentionDays).
+type SettingsArchiveInput struct {
+	AutoEnabled   bool `json:"auto_enabled"`
+	RetentionDays int  `json:"retention_days"`
+}

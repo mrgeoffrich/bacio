@@ -70,3 +70,49 @@ func (c *localClient) SetDisplayShowArchived(ctx context.Context, value, dryRun 
 	})
 	return value, nil
 }
+
+// GetArchivePreferences reads the BACI-162 auto-archive settings pair.
+func (c *localClient) GetArchivePreferences(ctx context.Context) (ArchivePreferences, error) {
+	autoEnabled, err := c.store.GetArchiveAutoEnabled()
+	if err != nil {
+		return ArchivePreferences{}, err
+	}
+	retention, err := c.store.GetArchiveRetentionDays()
+	if err != nil {
+		return ArchivePreferences{}, err
+	}
+	return ArchivePreferences{AutoEnabled: autoEnabled, RetentionDays: retention}, nil
+}
+
+// SetArchivePreferences writes both BACI-162 keys atomically and
+// records an audit row. The retention_days validator runs at the
+// client boundary so the HTTP / desktop callers all see the same
+// rejection. Returns the projected pair on dry-run; the post-write
+// pair otherwise.
+func (c *localClient) SetArchivePreferences(ctx context.Context, in ArchivePreferences, dryRun bool) (ArchivePreferences, error) {
+	retention, err := store.ValidateArchiveRetentionDays(in.RetentionDays)
+	if err != nil {
+		return ArchivePreferences{}, err
+	}
+	out := ArchivePreferences{AutoEnabled: in.AutoEnabled, RetentionDays: retention}
+	if dryRun {
+		return out, nil
+	}
+	if err := c.store.SetArchiveAutoEnabled(in.AutoEnabled); err != nil {
+		return ArchivePreferences{}, err
+	}
+	if err := c.store.SetArchiveRetentionDays(retention); err != nil {
+		return ArchivePreferences{}, err
+	}
+	c.recordOp(model.HistoryEntry{
+		// kind / target / details match the CLI's newSettingsArchiveCmd
+		// audit row so `bacio history --kind app_setting` returns the
+		// same rows whether the pair was changed from the CLI, HTTP,
+		// or the desktop.
+		Op:          "archive.update",
+		Kind:        "app_setting",
+		TargetLabel: "archive.preferences",
+		Details:     fmt.Sprintf("auto_enabled=%t retention_days=%d", in.AutoEnabled, retention),
+	})
+	return out, nil
+}

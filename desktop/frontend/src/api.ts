@@ -34,6 +34,7 @@ import {
   LeaderStatusDTO,
   PromptTemplateDTO,
   BoardPreferencesDTO,
+  ArchivePreferencesDTO,
   SyncPreferencesDTO,
   SyncRegistryDTO,
   SyncRepoDTO,
@@ -53,7 +54,7 @@ import { ClaimDTO } from '../bindings/github.com/mrgeoffrich/bacio/internal/agen
 // scattered through the kanban code).
 import { WaitingState, WaitingKind } from '../bindings/github.com/mrgeoffrich/bacio/internal/boardcards';
 
-export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, BoardPreferencesDTO, WaitingState, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO, SyncSetupDTO, CollisionPreviewDTO, RenumberEntryDTO, RenameEntryDTO, RepoLinkResultDTO };
+export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, BoardPreferencesDTO, ArchivePreferencesDTO, WaitingState, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO, SyncSetupDTO, CollisionPreviewDTO, RenumberEntryDTO, RenameEntryDTO, RepoLinkResultDTO };
 
 // BACI-108: cross-transport aliases — components import from `./api`
 // and stay unaware of whether they're on the Wails or HTTP seam. The
@@ -593,6 +594,30 @@ export async function setDisplayPreferences(
 ): Promise<DisplayPreferencesDTO> {
   try {
     return await SettingsService.SetDisplayPreferences(showArchived);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// BACI-162: auto-archive settings — archive.auto_enabled +
+// archive.retention_days. Both fields are written atomically through
+// setArchivePreferences; the read path returns the pair. Same shape
+// pattern as the display / sync preference pairs.
+
+export async function getArchivePreferences(): Promise<ArchivePreferencesDTO> {
+  try {
+    return await SettingsService.GetArchivePreferences();
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+export async function setArchivePreferences(
+  autoEnabled: boolean,
+  retentionDays: number,
+): Promise<ArchivePreferencesDTO> {
+  try {
+    return await SettingsService.SetArchivePreferences(autoEnabled, retentionDays);
   } catch (err) {
     throw normalize(err);
   }

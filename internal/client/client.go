@@ -253,6 +253,14 @@ type Client interface {
 	// BACI-68 display.show_archived global toggle. Local-only.
 	GetDisplayShowArchived(ctx context.Context) (bool, error)
 	SetDisplayShowArchived(ctx context.Context, value, dryRun bool) (bool, error)
+	// GetArchivePreferences / SetArchivePreferences expose the BACI-162
+	// auto-archive settings (archive.auto_enabled and
+	// archive.retention_days). Both fields are written atomically by
+	// SetArchivePreferences; the validator on retention_days runs at
+	// the client boundary so the HTTP / desktop callers get the same
+	// rejection.
+	GetArchivePreferences(ctx context.Context) (ArchivePreferences, error)
+	SetArchivePreferences(ctx context.Context, in ArchivePreferences, dryRun bool) (ArchivePreferences, error)
 
 	// SyncStatuses returns the BACI-89 background-sync status of every
 	// tracked repo — last_sync_at, last error, configured, and the
@@ -624,6 +632,18 @@ type Client interface {
 // analogue in v1, like the rest of the app_settings store.
 type BoardPreferences struct {
 	HideEmptyColumns bool `json:"hideEmptyColumns"`
+}
+
+// ArchivePreferences holds the BACI-162 auto-archive settings,
+// persisted in the global app_settings KV. AutoEnabled gates the
+// hourly issue auto-archive pass (defaults to true — opt-OUT);
+// RetentionDays is the number of days a terminal-state issue's
+// terminal_at must sit before the next sweep archives it (default 7,
+// range 1..3650). Both fields travel together: SetArchivePreferences
+// writes the pair atomically, GetArchivePreferences reads them back.
+type ArchivePreferences struct {
+	AutoEnabled   bool `json:"auto_enabled"`
+	RetentionDays int  `json:"retention_days"`
 }
 
 // AgentSessionFilter mirrors store.AgentSessionFilter; the wrapper lets

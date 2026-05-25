@@ -50,12 +50,24 @@ export function DeletePromptTemplate(slug: string): $CancellablePromise<$models.
 }
 
 /**
+ * GetArchivePreferences returns the current BACI-162 auto-archive
+ * settings. The desktop Settings panel renders the pair on mount and
+ * after every flip / numeric change so the UI stays consistent with
+ * the persisted row.
+ */
+export function GetArchivePreferences(): $CancellablePromise<$models.ArchivePreferencesDTO> {
+    return $Call.ByID(799256876).then(($result: any) => {
+        return $$createType1($result);
+    });
+}
+
+/**
  * GetBoardPreferences returns the persisted desktop Board UI
  * preferences (or the built-in defaults when none are stored).
  */
 export function GetBoardPreferences(): $CancellablePromise<$models.BoardPreferencesDTO> {
     return $Call.ByID(749217122).then(($result: any) => {
-        return $$createType1($result);
+        return $$createType2($result);
     });
 }
 
@@ -67,7 +79,7 @@ export function GetBoardPreferences(): $CancellablePromise<$models.BoardPreferen
  */
 export function GetDisplayPreferences(): $CancellablePromise<$models.DisplayPreferencesDTO> {
     return $Call.ByID(4223916732).then(($result: any) => {
-        return $$createType2($result);
+        return $$createType3($result);
     });
 }
 
@@ -78,7 +90,7 @@ export function GetDisplayPreferences(): $CancellablePromise<$models.DisplayPref
  */
 export function GetSyncPreferences(): $CancellablePromise<$models.SyncPreferencesDTO> {
     return $Call.ByID(3481112815).then(($result: any) => {
-        return $$createType3($result);
+        return $$createType4($result);
     });
 }
 
@@ -90,7 +102,7 @@ export function GetSyncPreferences(): $CancellablePromise<$models.SyncPreference
  */
 export function GetSyncRegistry(): $CancellablePromise<$models.SyncRegistryDTO> {
     return $Call.ByID(3389817124).then(($result: any) => {
-        return $$createType4($result);
+        return $$createType5($result);
     });
 }
 
@@ -106,7 +118,7 @@ export function GetSyncRegistry(): $CancellablePromise<$models.SyncRegistryDTO> 
  */
 export function LinkPhantomRepo(prefix: string, path: string): $CancellablePromise<$models.RepoLinkResultDTO> {
     return $Call.ByID(3604398369, prefix, path).then(($result: any) => {
-        return $$createType5($result);
+        return $$createType6($result);
     });
 }
 
@@ -118,7 +130,7 @@ export function LinkPhantomRepo(prefix: string, path: string): $CancellablePromi
  */
 export function ListPromptTemplates(): $CancellablePromise<$models.PromptTemplateDTO[]> {
     return $Call.ByID(1001854565).then(($result: any) => {
-        return $$createType6($result);
+        return $$createType7($result);
     });
 }
 
@@ -129,7 +141,7 @@ export function ListPromptTemplates(): $CancellablePromise<$models.PromptTemplat
  */
 export function PromptPlaceholders(): $CancellablePromise<string[]> {
     return $Call.ByID(1135988516).then(($result: any) => {
-        return $$createType7($result);
+        return $$createType8($result);
     });
 }
 
@@ -151,7 +163,7 @@ export function RenamePromptTemplate(slug: string, newSlug: string, newName: str
  */
 export function RestoreBuiltinPromptTemplates(): $CancellablePromise<$models.PromptTemplateDTO[]> {
     return $Call.ByID(3843909418).then(($result: any) => {
-        return $$createType6($result);
+        return $$createType7($result);
     });
 }
 
@@ -199,12 +211,22 @@ export function SavePromptTemplate(slug: string, body: string): $CancellableProm
 }
 
 /**
+ * SetArchivePreferences writes both BACI-162 keys atomically and
+ * returns the refreshed DTO. The client records the audit row.
+ */
+export function SetArchivePreferences(autoEnabled: boolean, retentionDays: number): $CancellablePromise<$models.ArchivePreferencesDTO> {
+    return $Call.ByID(3981288536, autoEnabled, retentionDays).then(($result: any) => {
+        return $$createType1($result);
+    });
+}
+
+/**
  * SetBoardPreferences stores the desktop Board's hide-empty-columns
  * preference and returns the refreshed DTO.
  */
 export function SetBoardPreferences(hideEmptyColumns: boolean): $CancellablePromise<$models.BoardPreferencesDTO> {
     return $Call.ByID(3601263486, hideEmptyColumns).then(($result: any) => {
-        return $$createType1($result);
+        return $$createType2($result);
     });
 }
 
@@ -214,7 +236,7 @@ export function SetBoardPreferences(hideEmptyColumns: boolean): $CancellableProm
  */
 export function SetDisplayPreferences(showArchived: boolean): $CancellablePromise<$models.DisplayPreferencesDTO> {
     return $Call.ByID(1804218376, showArchived).then(($result: any) => {
-        return $$createType2($result);
+        return $$createType3($result);
     });
 }
 
@@ -224,7 +246,7 @@ export function SetDisplayPreferences(showArchived: boolean): $CancellablePromis
  */
 export function SetSyncPreferences(backgroundEnabled: boolean): $CancellablePromise<$models.SyncPreferencesDTO> {
     return $Call.ByID(2076274475, backgroundEnabled).then(($result: any) => {
-        return $$createType3($result);
+        return $$createType4($result);
     });
 }
 
@@ -240,17 +262,18 @@ export function SetSyncPreferences(backgroundEnabled: boolean): $CancellableProm
  */
 export function SetupSync(prefix: string, $in: $models.SetupSyncIn): $CancellablePromise<$models.SyncSetupDTO> {
     return $Call.ByID(3158355382, prefix, $in).then(($result: any) => {
-        return $$createType8($result);
+        return $$createType9($result);
     });
 }
 
 // Private type creation functions
 const $$createType0 = $models.PromptTemplateDTO.createFrom;
-const $$createType1 = $models.BoardPreferencesDTO.createFrom;
-const $$createType2 = $models.DisplayPreferencesDTO.createFrom;
-const $$createType3 = $models.SyncPreferencesDTO.createFrom;
-const $$createType4 = $models.SyncRegistryDTO.createFrom;
-const $$createType5 = $models.RepoLinkResultDTO.createFrom;
-const $$createType6 = $Create.Array($$createType0);
-const $$createType7 = $Create.Array($Create.Any);
-const $$createType8 = $models.SyncSetupDTO.createFrom;
+const $$createType1 = $models.ArchivePreferencesDTO.createFrom;
+const $$createType2 = $models.BoardPreferencesDTO.createFrom;
+const $$createType3 = $models.DisplayPreferencesDTO.createFrom;
+const $$createType4 = $models.SyncPreferencesDTO.createFrom;
+const $$createType5 = $models.SyncRegistryDTO.createFrom;
+const $$createType6 = $models.RepoLinkResultDTO.createFrom;
+const $$createType7 = $Create.Array($$createType0);
+const $$createType8 = $Create.Array($Create.Any);
+const $$createType9 = $models.SyncSetupDTO.createFrom;

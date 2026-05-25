@@ -50,3 +50,29 @@ func (c *remoteClient) SetDisplayShowArchived(ctx context.Context, value, dryRun
 	}
 	return out.ShowArchived, nil
 }
+
+// GetArchivePreferences (BACI-162) — GET /settings/archive-preferences.
+func (c *remoteClient) GetArchivePreferences(ctx context.Context) (ArchivePreferences, error) {
+	var out ArchivePreferences
+	if err := c.do(ctx, http.MethodGet, "/settings/archive-preferences", nil, nil, &out); err != nil {
+		return ArchivePreferences{}, err
+	}
+	return out, nil
+}
+
+// SetArchivePreferences (BACI-162) — PUT /settings/archive-preferences.
+func (c *remoteClient) SetArchivePreferences(ctx context.Context, in ArchivePreferences, dryRun bool) (ArchivePreferences, error) {
+	q := url.Values{}
+	if dryRun {
+		q.Set("dry_run", "true")
+	}
+	body := map[string]any{
+		"auto_enabled":   in.AutoEnabled,
+		"retention_days": in.RetentionDays,
+	}
+	var out ArchivePreferences
+	if err := c.do(ctx, http.MethodPut, "/settings/archive-preferences", q, body, &out); err != nil {
+		return ArchivePreferences{}, err
+	}
+	return out, nil
+}
