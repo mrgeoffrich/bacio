@@ -9,38 +9,49 @@ import (
 
 // TestBacioHookGroupMatcher locks in the matcher contract: the four
 // event-typed hooks never carry a matcher (the field is omitted), and
-// the two tool-call hooks always carry one — PostToolUse the
-// pipe-alternation literal `TaskCreate|TaskUpdate` (BACI-60: Claude
-// Code 2.1 renamed TodoWrite into the Task* family), PreToolUse
-// `Write|Edit|Bash` (BACI-116: the worktree-confinement guard;
-// BACI-134: widened to cover Bash for the sqlite3 confinement guard).
-// A drift here silently breaks the relevant hook because Claude Code
-// matches the entry against every tool call.
+// each tool-call subcommand always carries the literal scoped to its
+// handler — `post-tool-use` → `TaskCreate|TaskUpdate` (BACI-60: Claude
+// Code 2.1 renamed TodoWrite into the Task* family), `set-title` →
+// `mcp__bacio__register` (BACI-147: only fire on a successful
+// `register` MCP call), `pre-tool-use` → `Write|Edit|Bash` (BACI-116:
+// worktree-confinement guard; BACI-134: widened to cover Bash for
+// the sqlite3 confinement guard). A drift here silently breaks the
+// relevant hook because Claude Code matches the entry against every
+// tool call.
 func TestBacioHookGroupMatcher(t *testing.T) {
+	// Keyed by subcommand so two PostToolUse entries carrying distinct
+	// matchers are both covered (BACI-147 added the second one).
 	wantMatcher := map[string]string{
-		"PostToolUse": "TaskCreate|TaskUpdate",
-		"PreToolUse":  "Write|Edit|Bash",
+		"post-tool-use": "TaskCreate|TaskUpdate",
+		"set-title":     "mcp__bacio__register",
+		"pre-tool-use":  "Write|Edit|Bash",
 	}
 	for _, ev := range bacioHookEvents {
 		grp := bacioHookGroup(ev.Subcommand, ev.Matcher)
 		_, hasMatcher := grp["matcher"]
-		if want, ok := wantMatcher[ev.Event]; ok {
+		if want, ok := wantMatcher[ev.Subcommand]; ok {
 			if !hasMatcher {
-				t.Fatalf("%s group is missing matcher", ev.Event)
+				t.Fatalf("%s/%s group is missing matcher", ev.Event, ev.Subcommand)
 			}
 			if grp["matcher"].(string) != want {
-				t.Fatalf("%s matcher = %q, want %q", ev.Event, grp["matcher"], want)
+				t.Fatalf("%s/%s matcher = %q, want %q", ev.Event, ev.Subcommand, grp["matcher"], want)
 			}
 		} else if hasMatcher {
-			t.Fatalf("%s group should not carry a matcher (got %q)", ev.Event, grp["matcher"])
+			t.Fatalf("%s/%s group should not carry a matcher (got %q)", ev.Event, ev.Subcommand, grp["matcher"])
 		}
 	}
 }
 
 // TestApplyBacioHooksWritesPostToolUseMatcher roundtrips the apply
 // step into a temp settings.json and confirms the on-disk JSON carries
-// the matcher exactly once on PostToolUse and nowhere else. Catches a
-// future regression where the JSON shape changes underfoot.
+// the matcher per bacio-owned group: every event-typed entry has none,
+// and each tool-call entry carries the literal scoped to its handler.
+// Catches a future regression where the JSON shape changes underfoot.
+//
+// PostToolUse carries two bacio groups (BACI-147 added set-title
+// alongside the existing post-tool-use mirror), so groups are located
+// by command marker rather than by "first bacio-owned group on the
+// event".
 func TestApplyBacioHooksWritesPostToolUseMatcher(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/settings.json"
@@ -68,30 +79,87 @@ func TestApplyBacioHooksWritesPostToolUseMatcher(t *testing.T) {
 		if err := json.Unmarshal(raw, &groups); err != nil {
 			t.Fatalf("%s groups unmarshal: %v", ev.Event, err)
 		}
-		// Find bacio's own group via its command marker — non-bacio
-		// hooks on the same event would be passed through untouched.
+		// Find the bacio-owned group for THIS subcommand — multiple
+		// bacio groups can share one event (PostToolUse since BACI-147).
+		wantCommand := "bacio hook " + ev.Subcommand
 		var bacioGroup map[string]any
 		for _, g := range groups {
-			if strings.Contains(string(mustJSON(t, g)), bacioHookMarker) {
+			if strings.Contains(string(mustJSON(t, g)), wantCommand) {
 				bacioGroup = g
 				break
 			}
 		}
 		if bacioGroup == nil {
-			t.Fatalf("%s: no bacio-owned group present", ev.Event)
+			t.Fatalf("%s/%s: no bacio-owned group present", ev.Event, ev.Subcommand)
 		}
 		matcher, hasMatcher := bacioGroup["matcher"]
 		switch ev.Matcher {
 		case "":
 			if hasMatcher {
-				t.Fatalf("%s group should not carry a matcher (got %v)", ev.Event, matcher)
+				t.Fatalf("%s/%s group should not carry a matcher (got %v)", ev.Event, ev.Subcommand, matcher)
 			}
 		default:
 			if !hasMatcher {
-				t.Fatalf("%s group should carry matcher %q", ev.Event, ev.Matcher)
+				t.Fatalf("%s/%s group should carry matcher %q", ev.Event, ev.Subcommand, ev.Matcher)
 			}
 			if got := matcher.(string); got != ev.Matcher {
-				t.Fatalf("%s matcher = %q, want %q", ev.Event, got, ev.Matcher)
+				t.Fatalf("%s/%s matcher = %q, want %q", ev.Event, ev.Subcommand, got, ev.Matcher)
+			}
+		}
+	}
+}
+
+// TestApplyBacioHooksKeepsBothPostToolUseGroups is the BACI-147
+// regression guard for the multi-group case: two bacio rows share the
+// PostToolUse event (post-tool-use + set-title); applyBacioHooks must
+// land both groups under PostToolUse in a single pass, not let the
+// second iteration clobber the first one's write. Re-runs apply twice
+// in a row to also catch a drift where the second run drops the
+// just-written group.
+func TestApplyBacioHooksKeepsBothPostToolUseGroups(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/settings.json"
+	for pass := 1; pass <= 2; pass++ {
+		top, _, err := planBacioHooks(path)
+		if err != nil {
+			t.Fatalf("pass %d plan: %v", pass, err)
+		}
+		if err := applyBacioHooks(path, top); err != nil {
+			t.Fatalf("pass %d apply: %v", pass, err)
+		}
+
+		var settings struct {
+			Hooks struct {
+				PostToolUse []map[string]any `json:"PostToolUse"`
+			} `json:"hooks"`
+		}
+		if err := readJSON(t, path, &settings); err != nil {
+			t.Fatalf("pass %d read: %v", pass, err)
+		}
+
+		var bacioGroups []map[string]any
+		for _, g := range settings.Hooks.PostToolUse {
+			if strings.Contains(string(mustJSON(t, g)), bacioHookMarker) {
+				bacioGroups = append(bacioGroups, g)
+			}
+		}
+		if len(bacioGroups) != 2 {
+			t.Fatalf("pass %d: PostToolUse bacio-owned groups = %d, want 2", pass, len(bacioGroups))
+		}
+
+		// Each bacio group must carry its own distinct matcher — the
+		// task-list mirror's TaskCreate|TaskUpdate and BACI-147's
+		// mcp__bacio__register. The two are sentinels: a regression
+		// that drops one of them or rewrites both with the same matcher
+		// fails here loudly.
+		gotMatchers := map[string]bool{}
+		for _, g := range bacioGroups {
+			m, _ := g["matcher"].(string)
+			gotMatchers[m] = true
+		}
+		for _, want := range []string{"TaskCreate|TaskUpdate", "mcp__bacio__register"} {
+			if !gotMatchers[want] {
+				t.Fatalf("pass %d: missing PostToolUse matcher %q (got %v)", pass, want, gotMatchers)
 			}
 		}
 	}

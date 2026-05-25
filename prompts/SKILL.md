@@ -60,7 +60,7 @@ Run `bacio <group> --help` for the subcommands of each.
 - **`bacio sync`** — git-backed sync of the local DB to a separate sync repo: `init`, `clone`, bare `sync` (steady state), `verify`, `inspect`, `remotes` (per-machine registry listing).
 - **`bacio worktree`** — per-worktree environment manifests so sibling worktrees don't clash on the API port: `init`/`show`/`list`/`rm`.
 - **`bacio install-skill` / `bacio install-agent`** — set another repo up (see Installation).
-- **Harness shims** — `bacio tui` (terminal kanban), `bacio api` / `bacio web` (HTTP API ± embedded UI), `bacio hook` / `bacio channel` (Claude Code integration). These take no `--json` / `--dry-run` and have no `bacio schema` entry.
+- **Harness shims** — `bacio tui` (terminal kanban), `bacio api` / `bacio web` (HTTP API ± embedded UI), `bacio hook` / `bacio channel` (Claude Code integration). These take no `--json` / `--dry-run` and have no `bacio schema` entry. `bacio install-agent` wires a PostToolUse `bacio hook set-title` entry (matcher `mcp__bacio__register`) alongside the existing task-list mirror so a dispatched worker's terminal title flips to its agent slug as soon as `register` completes (BACI-147).
 
 ## Worked example
 

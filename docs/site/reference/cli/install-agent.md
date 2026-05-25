@@ -8,7 +8,7 @@ description: Set the current repo up for agent-driven bacio work — subagent fi
 Set `<repo-root>` up for agent-driven bacio work in a single command. `install-agent` performs three steps in one invocation:
 
 1. **Subagent files** — render `.claude/agents/bacio-<mode>-worker.md` for every dispatchable prompt template. Each file is a Claude Code custom subagent whose system prompt is the dispatch template's brief.
-2. **Hooks** — merge bacio's agent-supervision hooks into `.claude/settings.json` (`SessionStart`, `UserPromptSubmit`, `Stop`, `SessionEnd`, `PostToolUse`). The hooks keep the local agent registry in sync without the agent calling `bacio agent ...` by hand.
+2. **Hooks** — merge bacio's agent-supervision hooks into `.claude/settings.json` (`SessionStart`, `UserPromptSubmit`, `Stop`, `SessionEnd`, `PostToolUse`, `PreToolUse`). The hooks keep the local agent registry in sync without the agent calling `bacio agent ...` by hand. `PostToolUse` carries two entries: the task-list mirror (matcher `TaskCreate|TaskUpdate`, command `bacio hook post-tool-use`) and the BACI-147 terminal-title hook (matcher `mcp__bacio__register`, command `bacio hook set-title`) which flips the host terminal's window title to the agent slug as soon as the channel's `register` tool completes.
 3. **Channel** — register the `bacio` MCP server in `.mcp.json` so Claude Code can spawn `bacio channel` to push queued dispatches into a running session live.
 
 ```bash

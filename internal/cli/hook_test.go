@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -377,3 +379,140 @@ func captureStderr(t *testing.T, fn func()) string {
 	os.Stderr = orig
 	return <-done
 }
+
+// captureTitleWriter swaps the package-level titleWriter for one that
+// captures into the returned buffer. The cleanup restores the original
+// so a failing test can't leak state into a later test.
+//
+// If openErr is non-nil, the substitute writer returns that error
+// instead of a writer — used by tests that exercise the fail-open path
+// (no /dev/tty) without touching the real filesystem.
+func captureTitleWriter(t *testing.T, openErr error) *bytes.Buffer {
+	t.Helper()
+	buf := &bytes.Buffer{}
+	prev := titleWriter
+	titleWriter = func() (io.WriteCloser, error) {
+		if openErr != nil {
+			return nil, openErr
+		}
+		return nopCloser{buf}, nil
+	}
+	t.Cleanup(func() { titleWriter = prev })
+	return buf
+}
+
+// nopCloser wraps a bytes.Buffer so it satisfies io.WriteCloser without
+// turning Close into anything that could fail a test.
+type nopCloser struct{ *bytes.Buffer }
+
+func (nopCloser) Close() error { return nil }
+
+// TestWriteTerminalTitleEmitsOSC pins the wire format: the helper writes
+// the standard `ESC ] 0 ; <title> BEL` OSC sequence to the injected
+// writer — no trailing newline, no other bytes. Every mainstream
+// terminal emulator on macOS / Linux honours this exact byte sequence.
+func TestWriteTerminalTitleEmitsOSC(t *testing.T) {
+	buf := captureTitleWriter(t, nil)
+	if err := writeTerminalTitle("brave-koala@claude.shiny"); err != nil {
+		t.Fatalf("writeTerminalTitle: %v", err)
+	}
+	want := "\x1b]0;brave-koala@claude.shiny\x07"
+	if got := buf.String(); got != want {
+		t.Fatalf("title bytes = %q, want %q", got, want)
+	}
+}
+
+// TestWriteTerminalTitleSurfacesOpenError covers the fail-open invariant
+// the hook caller relies on: a /dev/tty open failure (CI host, headless
+// pipe) surfaces as a non-nil error from writeTerminalTitle and writes
+// nothing. The hook's RunE then logs one stderr line and carries on
+// without failing the agent's session.
+func TestWriteTerminalTitleSurfacesOpenError(t *testing.T) {
+	captureTitleWriter(t, errors.New("no /dev/tty here"))
+	if err := writeTerminalTitle("brave-koala@claude.shiny"); err == nil {
+		t.Fatal("expected error when titleWriter open fails")
+	}
+}
+
+// TestHookSetTitleSkipsWithoutAgentMode is a focused version of the
+// table-driven TestHookSubcommandsGatedByAgentMode for the new
+// subcommand: BACIO_AGENT_MODE unset → one stderr skip line, RunE
+// returns nil, the title writer is never invoked.
+func TestHookSetTitleSkipsWithoutAgentMode(t *testing.T) {
+	t.Setenv("BACIO_AGENT_MODE", "scratch")
+	if err := os.Unsetenv("BACIO_AGENT_MODE"); err != nil {
+		t.Fatalf("unset: %v", err)
+	}
+	buf := captureTitleWriter(t, nil)
+
+	cmd := hookSetTitleCmd()
+	stderr := captureStderr(t, func() {
+		if err := cmd.RunE(cmd, nil); err != nil {
+			t.Fatalf("RunE: %v", err)
+		}
+	})
+	if !strings.Contains(stderr, "bacio hook set-title") {
+		t.Fatalf("stderr missing subcommand name: %q", stderr)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("title writer should not run when gated; got %q", buf.String())
+	}
+}
+
+// TestHookSetTitleSkipsWithoutSlug feeds the hook a payload whose
+// session_id has no resolvable claude_pid → empty slug → the hook logs
+// one stderr line and writes nothing. Exercises the "register fired but
+// agents.json doesn't yet carry an entry" race documented in RunE.
+func TestHookSetTitleSkipsWithoutSlug(t *testing.T) {
+	// BACIO_AGENT_MODE on; loadHookContext needs a real git repo to walk
+	// out of so it doesn't bail on git.Detect. Same shape as the
+	// post-tool-use happy-path setup, minus the agents.json seed —
+	// readAgentIdentity returns "" when the file is absent.
+	tmp := initGitRepo(t)
+	t.Setenv("BACIO_AGENT_MODE", "1")
+	t.Setenv("HOME", t.TempDir())
+
+	prev := opts.dbPath
+	opts.dbPath = filepath.Join(t.TempDir(), "db.sqlite")
+	t.Cleanup(func() { opts.dbPath = prev })
+
+	buf := captureTitleWriter(t, nil)
+
+	payload := `{"session_id": "f4cef4ce-f4ce-f4ce-f4ce-f4cef4cef4ce", "cwd": "` + tmp + `", "hook_event_name": "PostToolUse", "tool_name": "mcp__bacio__register"}`
+	stderr := runHookSetTitleWith(t, payload)
+
+	if !strings.Contains(stderr, "no agent slug") {
+		t.Fatalf("stderr missing 'no agent slug' one-liner: %q", stderr)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("expected no OSC write when slug is empty; got %q", buf.String())
+	}
+}
+
+// runHookSetTitleWith feeds the given JSON payload to hookSetTitleCmd's
+// RunE via os.Stdin and returns whatever the hook writes to stderr.
+// Mirrors runHookPostToolUseWith so the test bodies stay focused on
+// the assertions.
+func runHookSetTitleWith(t *testing.T, payload string) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("stdin pipe: %v", err)
+	}
+	origStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = origStdin })
+	if _, err := w.WriteString(payload); err != nil {
+		t.Fatalf("write payload: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close payload writer: %v", err)
+	}
+	cmd := hookSetTitleCmd()
+	return captureStderr(t, func() {
+		if err := cmd.RunE(cmd, nil); err != nil {
+			t.Fatalf("RunE: %v", err)
+		}
+	})
+}
+
