@@ -61,6 +61,49 @@ func (e *RepoConfirmError) Error() string {
 	return "confirm value " + e.GotConfirm + " does not match repo prefix " + e.Prefix
 }
 
+// RepoLinkError is the typed-error envelope LinkPhantomRepo (BACI-112)
+// returns for every refusal that has structured detail the HTTP handler
+// must map to a specific status code. Kind is one of:
+//   - "not_phantom"          — the row exists but already has a path.
+//   - "path_not_absolute"    — the user passed a relative path.
+//   - "path_not_exists"      — the path does not exist on disk.
+//   - "path_not_git"         — the path exists but is not a git working tree.
+//   - "path_already_bound"   — the path is already the working tree of another repo.
+//   - "no_owning_sync_repo"  — no sync_remotes row carries repos/<prefix>/ on disk.
+//
+// CurrentPath / ExistingPrefix populate the per-Kind detail fields.
+// `errors.As` against this type lets callers (handler, CLI renderer)
+// branch on Kind without string-matching the message.
+type RepoLinkError struct {
+	Kind           string
+	Prefix         string
+	Path           string
+	CurrentPath    string
+	ExistingPrefix string
+	Message        string
+}
+
+func (e *RepoLinkError) Error() string {
+	if e.Message != "" {
+		return e.Message
+	}
+	switch e.Kind {
+	case "not_phantom":
+		return "repo " + e.Prefix + " is not a phantom (path=" + e.CurrentPath + ")"
+	case "path_not_absolute":
+		return "path must be absolute: " + e.Path
+	case "path_not_exists":
+		return "path does not exist: " + e.Path
+	case "path_not_git":
+		return "path is not a git working tree: " + e.Path
+	case "path_already_bound":
+		return "path " + e.Path + " is already bound to repo " + e.ExistingPrefix
+	case "no_owning_sync_repo":
+		return "no sync repository on this machine carries repos/" + e.Prefix + "/"
+	}
+	return "repo link: " + e.Kind
+}
+
 // Open constructs a Client based on opts. Remote backends do not open
 // the local DB; the DBPath is ignored when Remote is set.
 func Open(ctx context.Context, opts Options) (Client, error) {
@@ -101,6 +144,20 @@ type Client interface {
 	// callers / agents can show the impact and ask the user before
 	// retrying.
 	DeleteRepo(ctx context.Context, prefix, confirm string, dryRun bool) (deletedRepo *model.Repo, preview *RepoDeletePreview, err error)
+	// LinkPhantomRepo (BACI-112) binds a phantom repo (path=='') to a
+	// local working tree at `path`. Runs UpgradePhantomRepo and writes
+	// the project's .bacio/config.yaml pointing at the owning sync
+	// repo's remote URL. The owning sync repo is discovered by walking
+	// the sync_remotes registry and finding the first row whose local
+	// clone carries repos/<prefix>/ on disk; if none does the call
+	// fails with a no_owning_sync_repo RepoLinkError. Idempotent: when
+	// the row's path already equals `path`, returns AlreadyLinked=true
+	// and skips both the store write and the config write — no audit
+	// row. Every other refusal returns a typed RepoLinkError so the
+	// HTTP handler can map to the right status code without
+	// string-matching. dryRun short-circuits before the upgrade and the
+	// config write and returns the projected result.
+	LinkPhantomRepo(ctx context.Context, prefix, path string, dryRun bool) (*RepoLinkResult, error)
 
 	// ----- Features -----
 	// ListFeatures returns the features in repo. Archived features

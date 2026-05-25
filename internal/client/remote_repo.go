@@ -132,3 +132,41 @@ func decodePreviewFromDetails(details map[string]any) *RepoDeletePreview {
 	}
 	return &preview
 }
+
+// LinkPhantomRepo (BACI-112) — `POST /repos/{prefix}/link` with body
+// `{path: ...}` and `?dry_run=true` for the rehearsal path. Typed-error
+// rehydration matches the handler's status-code mapping: 409 with a
+// `kind` field in the details envelope rehydrates as a RepoLinkError so
+// `errors.As` lets the CLI surface the right per-kind message.
+func (c *remoteClient) LinkPhantomRepo(ctx context.Context, prefix, path string, dryRun bool) (*RepoLinkResult, error) {
+	prefix = strings.ToUpper(strings.TrimSpace(prefix))
+	q := url.Values{}
+	if dryRun {
+		q.Set("dry_run", "true")
+	}
+	body := map[string]any{"path": path}
+	var result RepoLinkResult
+	if err := c.do(ctx, http.MethodPost, "/repos/"+prefix+"/link", q, body, &result); err != nil {
+		// Map the typed-error envelope back to a *RepoLinkError so the
+		// CLI / desktop can branch by Kind. The handler emits 409 for
+		// the "we found the row but refuse the operation" cases and 400
+		// for the path-shape failures; both carry `kind` in details.
+		var he *HTTPError
+		if errors.As(err, &he) && he.Details != nil {
+			if kindAny, ok := he.Details["kind"]; ok {
+				if kind, _ := kindAny.(string); kind != "" {
+					linkErr := &RepoLinkError{Kind: kind, Prefix: prefix, Path: path, Message: he.Message}
+					if cp, ok := he.Details["current_path"].(string); ok {
+						linkErr.CurrentPath = cp
+					}
+					if ep, ok := he.Details["existing_prefix"].(string); ok {
+						linkErr.ExistingPrefix = ep
+					}
+					return nil, linkErr
+				}
+			}
+		}
+		return nil, err
+	}
+	return &result, nil
+}

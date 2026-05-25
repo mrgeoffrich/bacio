@@ -44,7 +44,7 @@ This skill orients you and states the conventions that aren't obvious from `--he
 
 Run `bacio <group> --help` for the subcommands of each.
 
-- **`bacio init` / `bacio repo`** — bind a repo, list/show, `repo rm` (destructive — needs `--confirm <PREFIX>`).
+- **`bacio init` / `bacio repo`** — bind a repo, list/show, `repo rm` (destructive — needs `--confirm <PREFIX>`), `repo link <PREFIX> <PATH>` (bind a phantom repo — sync-imported with no local working tree — to an absolute path; writes `.bacio/config.yaml` pointing at the owning sync repo's remote).
 - **`bacio status`** — read-only probe: repo, DB path, env resolution, stats, and an `llm_recommendations` array of setup fixes to action.
 - **`bacio feature`** — add/list/show/edit/rm; `feature plan <slug>` prints open issues in dependency order.
 - **`bacio issue`** — add/list/show/edit/rm, `state`, `assign`/`unassign`, `archive`/`unarchive`; `brief <KEY>` is a one-shot bulk-context JSON read; `next`/`peek` atomically claim the next ready issue in a feature.

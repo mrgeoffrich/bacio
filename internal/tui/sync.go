@@ -3,24 +3,29 @@
 package tui
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
 	bsync "github.com/mrgeoffrich/bacio/internal/sync"
 )
 
 // syncView is the BACI-109 sync-repo registry surface — the TUI peer of
-// the BACI-108 desktop / web Sync view. Read-only by design (setup +
-// linking are follow-ups in BACI-111 / BACI-112): one cursor over a flat
-// list rendered in three sections (global toggle, per-sync-repo cards,
-// unsynced project residual).
+// the BACI-108 desktop / web Sync view. One cursor over a flat list
+// rendered in three sections (global toggle, per-sync-repo cards,
+// unsynced project residual). BACI-112 adds an `l` keybinding on a
+// phantom row that opens an inline path-entry overlay backed by
+// client.LinkPhantomRepo.
 //
 // The data load mirrors the BACI-107 HTTP composition — same call to
 // sync.BuildRegistry the GET /sync/repos handler now uses. A
@@ -41,6 +46,22 @@ type syncView struct {
 	// indexes into this slice.
 	rows   []syncRow
 	cursor int
+
+	// link is the BACI-112 path-entry overlay state. Non-nil while the
+	// overlay is open; CapturesInput / HasOverlay key off it. Cleared
+	// on success, cancel, or a successful reload.
+	link *syncLinkOverlay
+}
+
+// syncLinkOverlay is the BACI-112 inline text-capture overlay for
+// binding a phantom repo to a local working tree. Lives on syncView;
+// only one open at a time. The textinput.Model handles cursor
+// rendering + character append/backspace; we own the submit / cancel
+// keys.
+type syncLinkOverlay struct {
+	phantom *bsync.MemberProjectEntry
+	pathIn  textinput.Model
+	err     error
 }
 
 // syncRowKind discriminates the renderable shapes the flat row list
@@ -179,19 +200,48 @@ func (v *syncView) rebuildRows() {
 
 func (v *syncView) Init() tea.Cmd       { return syncTabRefreshTick() }
 func (v *syncView) Status() string      { return "" }
-func (v *syncView) HasOverlay() bool    { return false }
-func (v *syncView) CloseOverlay()       {}
-func (v *syncView) CapturesInput() bool { return false }
+func (v *syncView) HasOverlay() bool    { return v.link != nil }
+func (v *syncView) CloseOverlay()       { v.link = nil }
+func (v *syncView) CapturesInput() bool { return v.link != nil }
 func (v *syncView) Breadcrumb() string  { return "" }
 
 func (v *syncView) Help() string {
-	return "j/k move · g/G top/bottom · t toggle background sync · r reload · q quit"
+	if v.link != nil {
+		return "type path · enter link · esc cancel"
+	}
+	help := "j/k move · g/G top/bottom · t toggle background sync · r reload · q quit"
+	// Hint at the link action when the cursor sits on a phantom row.
+	if cur := v.currentRow(); cur != nil && cur.Kind == syncRowRepoMember &&
+		cur.Member != nil && cur.Member.Status == bsync.StatusPhantom {
+		help = "l link phantom · " + help
+	}
+	return help
+}
+
+// currentRow returns the row at the cursor, or nil if the cursor is
+// out of bounds. Used by Help() and Update() to gate the `l` link
+// keybinding.
+func (v *syncView) currentRow() *syncRow {
+	if v.cursor < 0 || v.cursor >= len(v.rows) {
+		return nil
+	}
+	return &v.rows[v.cursor]
 }
 
 func (v *syncView) Update(msg tea.Msg) tea.Cmd {
 	if _, ok := msg.(syncTabRefreshTickMsg); ok {
-		v.reload()
+		// Don't reload while the link overlay is open — the row list
+		// would rebuild underneath the user mid-edit.
+		if v.link == nil {
+			v.reload()
+		}
 		return syncTabRefreshTick()
+	}
+	// Overlay-first dispatch: while the link overlay is open, all keys
+	// belong to it (CapturesInput true). The shell stops intercepting
+	// j/k/q/etc. so the user can freely type a path.
+	if v.link != nil {
+		return v.updateLinkOverlay(msg)
 	}
 	key, ok := msg.(tea.KeyMsg)
 	if !ok {
@@ -216,8 +266,79 @@ func (v *syncView) Update(msg tea.Msg) tea.Cmd {
 		v.reload()
 	case "t":
 		v.toggleBackgroundSync()
+	case "l":
+		v.openLinkOverlay()
 	}
 	return nil
+}
+
+// openLinkOverlay opens the BACI-112 path-entry overlay if the cursor
+// is on a phantom row. No-op otherwise.
+func (v *syncView) openLinkOverlay() {
+	row := v.currentRow()
+	if row == nil || row.Kind != syncRowRepoMember || row.Member == nil {
+		return
+	}
+	if row.Member.Status != bsync.StatusPhantom {
+		return
+	}
+	ti := textinput.New()
+	ti.Placeholder = "/absolute/path/to/working/tree"
+	ti.CharLimit = 1024
+	ti.Width = 60
+	ti.Focus()
+	v.link = &syncLinkOverlay{phantom: row.Member, pathIn: ti}
+}
+
+// updateLinkOverlay handles keystrokes while the overlay is open. esc
+// cancels, enter submits, every other key flows to the textinput.
+func (v *syncView) updateLinkOverlay(msg tea.Msg) tea.Cmd {
+	key, isKey := msg.(tea.KeyMsg)
+	if !isKey {
+		var cmd tea.Cmd
+		v.link.pathIn, cmd = v.link.pathIn.Update(msg)
+		return cmd
+	}
+	switch key.String() {
+	case "esc":
+		v.CloseOverlay()
+		return nil
+	case "enter":
+		v.submitLinkOverlay()
+		return nil
+	}
+	var cmd tea.Cmd
+	v.link.pathIn, cmd = v.link.pathIn.Update(msg)
+	return cmd
+}
+
+// submitLinkOverlay drives client.LinkPhantomRepo with the typed path.
+// On success the overlay closes and the row list reloads (the phantom
+// flips to linked). Typed-error refusals (RepoLinkError) are surfaced
+// inline so the user can correct the path; any other error stays in
+// link.err for visibility.
+func (v *syncView) submitLinkOverlay() {
+	if v.link == nil || v.link.phantom == nil {
+		return
+	}
+	path := strings.TrimSpace(v.link.pathIn.Value())
+	if path == "" {
+		v.link.err = fmt.Errorf("path is required")
+		return
+	}
+	c := client.NewLocalFromStore(v.store, v.actor)
+	_, err := c.LinkPhantomRepo(context.Background(), v.link.phantom.Prefix, path, false)
+	if err != nil {
+		// Typed RepoLinkError carries a per-kind human message that
+		// reads cleanly inline; fall through to the same display path
+		// for any wrapped error.
+		var linkErr *client.RepoLinkError
+		_ = errors.As(err, &linkErr)
+		v.link.err = err
+		return
+	}
+	v.link = nil
+	v.reload()
 }
 
 // toggleBackgroundSync flips sync.background_enabled and writes the
@@ -274,7 +395,42 @@ func (v *syncView) View(width, height int) string {
 	}
 	body = scrollSyncBody(body, v.cursor, lines, bodyHeight)
 	content := lipgloss.JoinVertical(lipgloss.Left, titleBar, "", body)
+	// BACI-112 phantom-link overlay: when open, render it appended below
+	// the body so the user keeps the table context while typing. The
+	// overlay is bounded by innerWidth so it stays inside the box border.
+	if v.link != nil {
+		content = lipgloss.JoinVertical(
+			lipgloss.Left,
+			titleBar,
+			"",
+			body,
+			renderSyncLinkOverlay(v.link, innerWidth),
+		)
+	}
 	return box.Render(content)
+}
+
+// renderSyncLinkOverlay paints the BACI-112 path-entry overlay as a
+// bordered footer block. innerWidth is the parent box's inner width;
+// the overlay borrows the same border style so it visually sits inside
+// the sync card. A long typed path is clipped by the textinput's
+// internal scrolling so we don't need to truncate here.
+func renderSyncLinkOverlay(o *syncLinkOverlay, innerWidth int) string {
+	if o == nil || o.phantom == nil {
+		return ""
+	}
+	style := lipgloss.NewStyle().
+		Border(colBorder).BorderForeground(colFocusBorder).
+		Width(innerWidth - 2).Padding(0, 1)
+	header := boldStyle.Render("Link "+o.phantom.Prefix+" to a working tree") +
+		mutedStyle.Render("  (absolute path to an existing git working tree)")
+	row := mutedStyle.Render("path: ") + o.pathIn.View()
+	lines := []string{header, "", row}
+	if o.err != nil {
+		lines = append(lines, errorStyle.Render(truncate(o.err.Error(), max(8, innerWidth-6))))
+	}
+	lines = append(lines, mutedStyle.Render("enter submit · esc cancel"))
+	return style.Render(strings.Join(lines, "\n"))
 }
 
 func (v *syncView) titleText() string {

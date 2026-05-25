@@ -19,3 +19,14 @@ type RepoRmInput struct {
 	Prefix  string `json:"prefix"`
 	Confirm string `json:"confirm,omitempty"`
 }
+
+// RepoLinkInput is the payload for `bacio repo link --json` / `POST
+// /repos/{prefix}/link` (BACI-112). Binds a phantom repo (a sync_clone-
+// imported row with `repos.path == ''`) to a local working tree at
+// `path`. The backend resolves the owning sync repo by walking the
+// sync_remotes registry, runs `UpgradePhantomRepo`, then writes the
+// project's `.bacio/config.yaml` pointing at the sync remote.
+type RepoLinkInput struct {
+	Prefix string `json:"prefix"`
+	Path   string `json:"path"`
+}

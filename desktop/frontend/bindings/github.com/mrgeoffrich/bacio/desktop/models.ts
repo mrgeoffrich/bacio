@@ -1393,6 +1393,46 @@ export class RenumberEntryDTO {
 }
 
 /**
+ * RepoLinkResultDTO is the camelCase Wails-side outcome of
+ * LinkPhantomRepo (BACI-112). Mirrors client.RepoLinkResult — the
+ * upgraded repo row plus the URL of the sync repo whose
+ * repos/<prefix>/ folder owns the phantom, plus AlreadyLinked which
+ * is true on an idempotent re-link.
+ */
+export class RepoLinkResultDTO {
+    "prefix": string;
+    "path": string;
+    "syncRemoteUrl": string;
+    "alreadyLinked": boolean;
+
+    /** Creates a new RepoLinkResultDTO instance. */
+    constructor($$source: Partial<RepoLinkResultDTO> = {}) {
+        if (!("prefix" in $$source)) {
+            this["prefix"] = "";
+        }
+        if (!("path" in $$source)) {
+            this["path"] = "";
+        }
+        if (!("syncRemoteUrl" in $$source)) {
+            this["syncRemoteUrl"] = "";
+        }
+        if (!("alreadyLinked" in $$source)) {
+            this["alreadyLinked"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new RepoLinkResultDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): RepoLinkResultDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new RepoLinkResultDTO($$parsedSource as Partial<RepoLinkResultDTO>);
+    }
+}
+
+/**
  * SetupSyncIn is the camelCase Wails-side input for SetupSync — the
  * React tree builds it in SyncSetupModal. Mirrors the snake-case
  * inputs.SyncSetupInput the HTTP layer accepts; the field set is the

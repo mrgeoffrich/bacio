@@ -95,6 +95,22 @@ export function GetSyncRegistry(): $CancellablePromise<$models.SyncRegistryDTO> 
 }
 
 /**
+ * LinkPhantomRepo (BACI-112) is the Wails-side entry point for the
+ * desktop / web PhantomLinkModal. Thin shim over
+ * client.LinkPhantomRepo. dryRun is not exposed on the UI side; if a
+ * future "rehearse" affordance is wanted it can pass the bool through.
+ * On a typed-error refusal (client.RepoLinkError) the human message is
+ * returned verbatim so the modal can render it inline — the kind
+ * classification isn't exposed across the Wails bridge today; the modal
+ * just renders the message.
+ */
+export function LinkPhantomRepo(prefix: string, path: string): $CancellablePromise<$models.RepoLinkResultDTO> {
+    return $Call.ByID(3604398369, prefix, path).then(($result: any) => {
+        return $$createType5($result);
+    });
+}
+
+/**
  * ListPromptTemplates returns every registered template in store
  * iteration order — the desktop Settings panel renders them in this
  * order and the per-card action menu in the Board iterates the same
@@ -102,7 +118,7 @@ export function GetSyncRegistry(): $CancellablePromise<$models.SyncRegistryDTO> 
  */
 export function ListPromptTemplates(): $CancellablePromise<$models.PromptTemplateDTO[]> {
     return $Call.ByID(1001854565).then(($result: any) => {
-        return $$createType5($result);
+        return $$createType6($result);
     });
 }
 
@@ -113,7 +129,7 @@ export function ListPromptTemplates(): $CancellablePromise<$models.PromptTemplat
  */
 export function PromptPlaceholders(): $CancellablePromise<string[]> {
     return $Call.ByID(1135988516).then(($result: any) => {
-        return $$createType6($result);
+        return $$createType7($result);
     });
 }
 
@@ -135,7 +151,7 @@ export function RenamePromptTemplate(slug: string, newSlug: string, newName: str
  */
 export function RestoreBuiltinPromptTemplates(): $CancellablePromise<$models.PromptTemplateDTO[]> {
     return $Call.ByID(3843909418).then(($result: any) => {
-        return $$createType5($result);
+        return $$createType6($result);
     });
 }
 
@@ -224,7 +240,7 @@ export function SetSyncPreferences(backgroundEnabled: boolean): $CancellableProm
  */
 export function SetupSync(prefix: string, $in: $models.SetupSyncIn): $CancellablePromise<$models.SyncSetupDTO> {
     return $Call.ByID(3158355382, prefix, $in).then(($result: any) => {
-        return $$createType7($result);
+        return $$createType8($result);
     });
 }
 
@@ -234,6 +250,7 @@ const $$createType1 = $models.BoardPreferencesDTO.createFrom;
 const $$createType2 = $models.DisplayPreferencesDTO.createFrom;
 const $$createType3 = $models.SyncPreferencesDTO.createFrom;
 const $$createType4 = $models.SyncRegistryDTO.createFrom;
-const $$createType5 = $Create.Array($$createType0);
-const $$createType6 = $Create.Array($Create.Any);
-const $$createType7 = $models.SyncSetupDTO.createFrom;
+const $$createType5 = $models.RepoLinkResultDTO.createFrom;
+const $$createType6 = $Create.Array($$createType0);
+const $$createType7 = $Create.Array($Create.Any);
+const $$createType8 = $models.SyncSetupDTO.createFrom;
