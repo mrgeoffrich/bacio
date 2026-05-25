@@ -8,6 +8,11 @@
 // via client.EndAgent (audited, auto-releases claims and clears
 // assignees). No new infrastructure.
 //
+// BACI-148 added a per-tick busy-work gate in front of both branches:
+// if any fresh non-probe inbound dispatch is in flight for the session
+// the reaper leaves it alone, because the matcher's bind is itself
+// proof the session was healthy moments ago.
+//
 // Mirrors internal/dispatcher's shape: a Backend interface declaring
 // the minimal store surface needed, a Client interface declaring the
 // audited mutation surface, a Pinger struct, and a Tick that one
@@ -71,6 +76,12 @@ func (p *Pinger) withClock(clock func() time.Time) *Pinger {
 
 // Tick runs one sweep. For each alive registered session it walks:
 //
+//   - Skip if any fresh non-probe inbound dispatch exists for the
+//     session — the matcher already vouches for liveness when it binds
+//     a real dispatch, and the agent's eventual AckDispatch will bump
+//     LastSeenAt and clear staleness naturally (BACI-148). Avoids the
+//     race where the matcher delivers an implement dispatch ~seconds
+//     before the reaper would otherwise force-end the session.
 //   - If any pending|delivered ping older than AgentPingNoAckTimeout
 //     exists for the session → EndAgent(reason=presumed_dead).
 //   - Else if LastSeenAt is older than AgentIdlePingThreshold AND no
@@ -107,6 +118,28 @@ func (p *Pinger) Tick(ctx context.Context) (pinged, ended int, err error) {
 		// happen for an alive registered row, but a future schema-rename
 		// race shouldn't kill the sweep).
 		if sess.RepoID == 0 {
+			continue
+		}
+
+		// BACI-148 gate: if the matcher has bound a real inbound
+		// dispatch to this session within the last idle window, leave
+		// the session alone — the bind is itself proof of liveness and
+		// the agent's eventual AckDispatch will bump LastSeenAt. Shares
+		// firstErr with the ping-only query below; both are read-only
+		// list calls, so a transient error on either is reported once.
+		inbound, err := p.b.ListDispatches(store.DispatchFilter{
+			RepoID:          &sess.RepoID,
+			TargetSessionID: sess.SessionID,
+			Statuses:        []model.DispatchStatus{model.DispatchPending, model.DispatchDelivered},
+		})
+		if err != nil {
+			p.warn("list inbound dispatches", err, sess.SessionID)
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if hasFreshNonProbeWork(inbound, idleCutoff) {
 			continue
 		}
 
@@ -189,4 +222,28 @@ func (p *Pinger) warn(what string, err error, sessionID string) {
 		log = slog.Default()
 	}
 	log.Warn("bacio idlepinger: "+what, "err", err, "session_id", sessionID)
+}
+
+// hasFreshNonProbeWork reports whether rows contains a non-probe
+// inbound dispatch created after cutoff. The reaper's own ping
+// (IdlePingDispatchCreator) and the channel's register-yourself nudge
+// (SetupDispatchCreator) are themselves liveness probes, not work, and
+// must not count — otherwise a wedged session that the reaper has
+// already pinged would never be reaped (BACI-148).
+func hasFreshNonProbeWork(rows []*model.AgentDispatch, cutoff time.Time) bool {
+	for _, d := range rows {
+		if d == nil {
+			continue
+		}
+		if d.CreatedBy == model.IdlePingDispatchCreator {
+			continue
+		}
+		if d.CreatedBy == model.SetupDispatchCreator {
+			continue
+		}
+		if d.CreatedAt.After(cutoff) {
+			return true
+		}
+	}
+	return false
 }
