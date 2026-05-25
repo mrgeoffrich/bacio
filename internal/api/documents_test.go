@@ -41,6 +41,45 @@ func TestDocumentsListEmpty(t *testing.T) {
 	}
 }
 
+// TestDocumentsList_LinksAndSnippet locks the BACI-204 wire shape on
+// GET /repos/{prefix}/documents: each row carries the new `links` and
+// `snippet` fields when the underlying ListDocuments populates them.
+// Hydration runs through the existing handleDocumentsList path — no
+// handler change.
+func TestDocumentsList_LinksAndSnippet(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	doc := seedDocument(t, s, repo, "plan.md", model.DocTypePlan, "first sentence of the plan body")
+	iss := seedIssue(t, s, repo, "linked issue")
+	if _, err := s.LinkDocument(doc.ID, store.LinkTarget{IssueID: &iss.ID}, "context"); err != nil {
+		t.Fatalf("link: %v", err)
+	}
+
+	resp, raw := apiGet(t, ts.URL+"/repos/"+repo.Prefix+"/documents")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d body=%s", resp.StatusCode, raw)
+	}
+	var docs []*model.Document
+	if err := json.Unmarshal(raw, &docs); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(docs) != 1 {
+		t.Fatalf("len: %d", len(docs))
+	}
+	got := docs[0]
+	if got.Snippet != "first sentence of the plan body" {
+		t.Fatalf("snippet: %q", got.Snippet)
+	}
+	if len(got.Links) != 1 || got.Links[0].IssueKey != iss.Key {
+		t.Fatalf("links: %+v", got.Links)
+	}
+	// The raw wire bytes also contain the new keys (omitempty doesn't
+	// strip them when they're populated).
+	if !strings.Contains(string(raw), `"snippet"`) || !strings.Contains(string(raw), `"links"`) {
+		t.Fatalf("raw JSON missing new keys: %s", raw)
+	}
+}
+
 func TestDocumentsListLeanByDefault(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)

@@ -546,6 +546,32 @@ export async function saveDoc(
   }
 }
 
+// archiveDocument / unarchiveDocument (BACI-204) are the Wails parity
+// of the HTTP /documents/{filename}/{archive,unarchive} routes — added
+// here so the redesigned Documents page (DocsViewer header strip)
+// stays transport-agnostic.
+export async function archiveDocument(
+  repoPrefix: string,
+  filename: string,
+): Promise<void> {
+  try {
+    await DocService.ArchiveDoc(repoPrefix, filename);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+export async function unarchiveDocument(
+  repoPrefix: string,
+  filename: string,
+): Promise<void> {
+  try {
+    await DocService.UnarchiveDoc(repoPrefix, filename);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
 // listPromptTemplates returns every registered dispatch prompt template
 // (built-ins + user-created), in store iteration order.
 export async function listPromptTemplates(): Promise<PromptTemplateDTO[]> {

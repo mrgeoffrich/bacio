@@ -1,0 +1,253 @@
+// Smoke tests for the BACI-204 Documents filter helpers in
+// `lib/docsFilter.ts`. Plain Node + assert, no Vitest dependency,
+// same shape as boardCompactPersistence.smoketest.mjs.
+//
+// Run from the worktree root:
+//   node desktop/frontend/src/lib/__tests__/docsFilter.smoketest.mjs
+
+import assert from 'node:assert/strict';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const moduleRoot = path.resolve(__dirname, '..');
+
+const { filterDocs, sortDocs, countFacets, isTranscriptDoc } =
+  await import(path.join(moduleRoot, 'docsFilter.ts'));
+
+// makeDoc builds a minimal DocSummary-shaped row. updatedAt/createdAt
+// default to a deterministic per-index timestamp so sort ties are
+// predictable.
+function makeDoc(over = {}) {
+  const i = over.i ?? 0;
+  return {
+    filename: over.filename ?? `doc-${i}.md`,
+    type: over.type ?? 'plan',
+    sizeBytes: over.sizeBytes ?? 100,
+    updatedAt: over.updatedAt ?? `2026-05-${String(20 + i).padStart(2, '0')}T00:00:00Z`,
+    createdAt: over.createdAt ?? `2026-05-${String(10 + i).padStart(2, '0')}T00:00:00Z`,
+    archivedAt: over.archivedAt ?? null,
+    snippet: over.snippet ?? '',
+    links: over.links ?? [],
+  };
+}
+
+const tests = [];
+function test(name, fn) { tests.push({ name, fn }); }
+
+// ---- isTranscriptDoc ----
+
+test('isTranscriptDoc matches type=transcript', () => {
+  assert.equal(isTranscriptDoc(makeDoc({ type: 'transcript', filename: 'whatever.md' })), true);
+});
+
+test('isTranscriptDoc matches legacy filename even when type is project_complete', () => {
+  // Pre-BACI-115 transcripts were stored as project_complete; the
+  // filename predicate keeps them out of the browsing surface.
+  assert.equal(
+    isTranscriptDoc(makeDoc({
+      type: 'project_complete',
+      filename: 'bacio-transcript-BACI-1-agent-deadbeef.jsonl',
+    })),
+    true,
+  );
+});
+
+test('isTranscriptDoc rejects a hand-uploaded .jsonl without the bacio prefix', () => {
+  assert.equal(isTranscriptDoc(makeDoc({ type: 'user_docs', filename: 'data.jsonl' })), false);
+});
+
+// ---- countFacets ----
+
+test('countFacets returns absolute per-bucket totals', () => {
+  const docs = [
+    makeDoc({ i: 0, type: 'plan', links: [{ issueKey: 'BACI-1' }] }),
+    makeDoc({ i: 1, type: 'plan', links: [] }),
+    makeDoc({ i: 2, type: 'designs', links: [{ featureSlug: 'auth' }] }),
+    makeDoc({ i: 3, type: 'transcript', filename: 'bacio-transcript-X-agent-abc.jsonl' }),
+    makeDoc({ i: 4, type: 'plan', archivedAt: '2026-05-25T00:00:00Z' }),
+  ];
+  const c = countFacets(docs);
+  assert.equal(c.total, 5);
+  assert.equal(c.active, 4);
+  assert.equal(c.archived, 1);
+  assert.equal(c.withIssueLink, 1);
+  assert.equal(c.withFeatureLink, 1);
+  // i=1 plan, i=3 transcript, i=4 archived plan — three docs with no link rows.
+  assert.equal(c.unlinked, 3);
+  assert.equal(c.transcript, 1);
+  assert.deepEqual(c.byType, { plan: 3, designs: 1, transcript: 1 });
+});
+
+// ---- filterDocs: facet behaviours ----
+
+const defaultQuery = {
+  search: '',
+  type: '',
+  links: 'all',
+  status: 'active',
+  hideTranscripts: false,
+  sort: 'updated',
+};
+
+test('filterDocs default query returns every active row', () => {
+  const docs = [
+    makeDoc({ i: 0 }),
+    makeDoc({ i: 1 }),
+    makeDoc({ i: 2, archivedAt: '2026-05-25T00:00:00Z' }),
+  ];
+  const r = filterDocs(docs, defaultQuery, false);
+  assert.equal(r.visible.length, 2);
+  // Counts ignore the in-flight query.
+  assert.equal(r.counts.total, 3);
+  assert.equal(r.counts.archived, 1);
+});
+
+test('filterDocs type facet narrows to exactly the chosen type', () => {
+  const docs = [
+    makeDoc({ i: 0, type: 'plan' }),
+    makeDoc({ i: 1, type: 'designs' }),
+    makeDoc({ i: 2, type: 'plan' }),
+  ];
+  const r = filterDocs(docs, { ...defaultQuery, type: 'plan' }, false);
+  assert.equal(r.visible.length, 2);
+  assert.deepEqual(r.visible.map(d => d.type), ['plan', 'plan']);
+});
+
+test('filterDocs links=issue / feature / unlinked each match the right subset', () => {
+  const docs = [
+    makeDoc({ i: 0, links: [{ issueKey: 'BACI-1' }] }),
+    makeDoc({ i: 1, links: [{ featureSlug: 'auth' }] }),
+    makeDoc({ i: 2, links: [] }),
+    makeDoc({ i: 3, links: [{ issueKey: 'BACI-2' }, { featureSlug: 'shipping' }] }),
+  ];
+  assert.equal(filterDocs(docs, { ...defaultQuery, links: 'issue' }, false).visible.length, 2);
+  assert.equal(filterDocs(docs, { ...defaultQuery, links: 'feature' }, false).visible.length, 2);
+  assert.equal(filterDocs(docs, { ...defaultQuery, links: 'unlinked' }, false).visible.length, 1);
+});
+
+test('filterDocs status=active hides archived, =archived shows only archived, =all defers to showArchived', () => {
+  const docs = [
+    makeDoc({ i: 0 }),
+    makeDoc({ i: 1, archivedAt: '2026-05-25T00:00:00Z' }),
+  ];
+  assert.equal(filterDocs(docs, { ...defaultQuery, status: 'active' }, false).visible.length, 1);
+  assert.equal(filterDocs(docs, { ...defaultQuery, status: 'archived' }, false).visible.length, 1);
+  // status='all' + showArchived=false still hides archived (parity with the
+  // global toggle's read-side default).
+  assert.equal(filterDocs(docs, { ...defaultQuery, status: 'all' }, false).visible.length, 1);
+  // status='all' + showArchived=true surfaces both rows.
+  assert.equal(filterDocs(docs, { ...defaultQuery, status: 'all' }, true).visible.length, 2);
+});
+
+test('filterDocs search hits filename, snippet, type, and link targets', () => {
+  const docs = [
+    makeDoc({ i: 0, filename: 'BACI-204-plan.md' }),
+    makeDoc({ i: 1, filename: 'unrelated.md', snippet: 'Discusses BACI-204 in passing' }),
+    makeDoc({ i: 2, filename: 'arch.md', links: [{ issueKey: 'BACI-204' }] }),
+    makeDoc({ i: 3, filename: 'something.md', type: 'designs' }),
+    makeDoc({ i: 4, filename: 'noise.md', snippet: 'nothing relevant' }),
+  ];
+  const r = filterDocs(docs, { ...defaultQuery, search: 'BACI-204' }, false);
+  assert.equal(r.visible.length, 3);
+  const rd = filterDocs(docs, { ...defaultQuery, search: 'designs' }, false);
+  assert.equal(rd.visible.length, 1);
+  assert.equal(rd.visible[0].filename, 'something.md');
+});
+
+test('filterDocs hideTranscripts folds transcripts out of visible but keeps counts honest', () => {
+  const docs = [
+    makeDoc({ i: 0, type: 'plan' }),
+    makeDoc({
+      i: 1,
+      type: 'transcript',
+      filename: 'bacio-transcript-X-agent-abc.jsonl',
+    }),
+    makeDoc({
+      i: 2,
+      type: 'transcript',
+      filename: 'bacio-transcript-Y-agent-def.jsonl',
+    }),
+  ];
+  const r = filterDocs(docs, { ...defaultQuery, hideTranscripts: true }, false);
+  assert.equal(r.visible.length, 1);
+  assert.equal(r.visible[0].type, 'plan');
+  assert.equal(r.transcripts.length, 2);
+  assert.equal(r.counts.transcript, 2);
+});
+
+test('filterDocs hideTranscripts=false keeps transcripts in the main list', () => {
+  const docs = [
+    makeDoc({ i: 0, type: 'plan' }),
+    makeDoc({
+      i: 1,
+      type: 'transcript',
+      filename: 'bacio-transcript-X-agent-abc.jsonl',
+    }),
+  ];
+  const r = filterDocs(docs, defaultQuery, false);
+  assert.equal(r.visible.length, 2);
+  assert.equal(r.transcripts.length, 0);
+});
+
+// ---- sortDocs ----
+
+test('sortDocs Updated is newest-first', () => {
+  const docs = [
+    makeDoc({ i: 0, updatedAt: '2026-05-20T00:00:00Z', filename: 'a' }),
+    makeDoc({ i: 1, updatedAt: '2026-05-25T00:00:00Z', filename: 'b' }),
+    makeDoc({ i: 2, updatedAt: '2026-05-22T00:00:00Z', filename: 'c' }),
+  ];
+  const sorted = sortDocs(docs, 'updated');
+  assert.deepEqual(sorted.map(d => d.filename), ['b', 'c', 'a']);
+});
+
+test('sortDocs Name is case-insensitive', () => {
+  const docs = [
+    makeDoc({ i: 0, filename: 'Zoo.md' }),
+    makeDoc({ i: 1, filename: 'apple.md' }),
+    makeDoc({ i: 2, filename: 'Banana.md' }),
+  ];
+  const sorted = sortDocs(docs, 'name');
+  assert.deepEqual(sorted.map(d => d.filename), ['apple.md', 'Banana.md', 'Zoo.md']);
+});
+
+test('sortDocs Size is largest-first', () => {
+  const docs = [
+    makeDoc({ i: 0, sizeBytes: 100, filename: 'a' }),
+    makeDoc({ i: 1, sizeBytes: 500, filename: 'b' }),
+    makeDoc({ i: 2, sizeBytes: 50, filename: 'c' }),
+  ];
+  const sorted = sortDocs(docs, 'size');
+  assert.deepEqual(sorted.map(d => d.filename), ['b', 'a', 'c']);
+});
+
+test('sortDocs is stable on ties (preserves input order)', () => {
+  const ts = '2026-05-25T00:00:00Z';
+  const docs = [
+    makeDoc({ i: 0, updatedAt: ts, filename: 'x' }),
+    makeDoc({ i: 1, updatedAt: ts, filename: 'y' }),
+    makeDoc({ i: 2, updatedAt: ts, filename: 'z' }),
+  ];
+  const sorted = sortDocs(docs, 'updated');
+  // All timestamps equal — input order preserved.
+  assert.deepEqual(sorted.map(d => d.filename), ['x', 'y', 'z']);
+});
+
+// ---- runner ----
+let failed = 0;
+for (const t of tests) {
+  try {
+    await t.fn();
+    console.log(`ok  - ${t.name}`);
+  } catch (err) {
+    failed++;
+    console.log(`FAIL - ${t.name}`);
+    console.log(err.stack || err.message || String(err));
+  }
+}
+if (failed > 0) {
+  console.log(`\n${failed} test(s) failed`);
+  process.exit(1);
+}
+console.log(`\nall ${tests.length} test(s) passed`);

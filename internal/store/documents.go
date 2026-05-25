@@ -66,9 +66,13 @@ type DocumentFilter struct {
 }
 
 func (s *Store) ListDocuments(f DocumentFilter) ([]*model.Document, error) {
-	cols := docCols(false)
+	// BACI-204: project a snippet alongside the lean column set so the
+	// Documents list rich-row gets its title + ~200-char preview in
+	// one round trip. The snippet column is empty for transcript-typed
+	// rows (their body is audit JSONL, not browsing material).
+	cols := docCols(false) + `, CASE WHEN type = 'transcript' THEN '' ELSE substr(content, 1, ?) END AS snippet`
 	q := `SELECT ` + cols + ` FROM documents WHERE repo_id = ?`
-	args := []any{f.RepoID}
+	args := []any{snippetByteLimit, f.RepoID}
 	if f.Type != nil {
 		q += ` AND type = ?`
 		args = append(args, string(*f.Type))
@@ -83,14 +87,86 @@ func (s *Store) ListDocuments(f DocumentFilter) ([]*model.Document, error) {
 	}
 	defer rows.Close()
 	var out []*model.Document
+	ids := []int64{}
 	for rows.Next() {
-		d, err := scanDocument(rows, false)
+		d, snippet, err := scanDocumentWithSnippet(rows)
 		if err != nil {
 			return nil, err
 		}
+		d.Snippet = trimSnippetAtWordBoundary(snippet)
 		out = append(out, d)
+		ids = append(ids, d.ID)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// BACI-204: hydrate links for the listed docs in one IN-query so
+	// the Documents page's linked-issue / linked-feature chips don't
+	// fan out into N per-row round trips. A doc with zero links stays
+	// with a nil Links slice — omitempty drops it from the JSON.
+	if len(out) > 0 {
+		linksByDoc, err := s.linksForDocuments(ids)
+		if err != nil {
+			return nil, err
+		}
+		for _, d := range out {
+			d.Links = linksByDoc[d.ID]
+		}
+	}
+	return out, nil
+}
+
+// snippetByteLimit caps the per-row preview the Documents list
+// renders under each title. ~200 chars is enough for a one-line
+// preview; trimSnippetAtWordBoundary clips back to whitespace so we
+// don't slice mid-word.
+const snippetByteLimit = 200
+
+// trimSnippetAtWordBoundary clips a substr-projected snippet back to
+// the last whitespace boundary so the rendered preview doesn't end
+// mid-word. Bodies shorter than the cap pass through unchanged; rows
+// with no whitespace inside the cap (a long URL, say) keep the hard
+// byte slice — better than blank.
+func trimSnippetAtWordBoundary(s string) string {
+	if len(s) < snippetByteLimit {
+		return s
+	}
+	for i := len(s) - 1; i > snippetByteLimit/2; i-- {
+		switch s[i] {
+		case ' ', '\n', '\t':
+			return s[:i]
+		}
+	}
+	return s
+}
+
+// linksForDocuments returns a documentID → []*DocumentLink map for
+// the supplied set of document ids, fetched in one IN-query (BACI-204).
+// A doc with zero links is absent from the map.
+func (s *Store) linksForDocuments(ids []int64) (map[int64][]*model.DocumentLink, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	placeholders := make([]string, len(ids))
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	q := docLinkSelect + ` WHERE dl.document_id IN (` + strings.Join(placeholders, ", ") + `) ORDER BY dl.document_id, dl.created_at, dl.id`
+	rows, err := s.DB.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	links, err := scanDocumentLinks(rows)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64][]*model.DocumentLink, len(ids))
+	for _, l := range links {
+		out[l.DocumentID] = append(out[l.DocumentID], l)
+	}
+	return out, nil
 }
 
 // SetDocumentArchived stamps or clears the document's archived_at
@@ -331,6 +407,32 @@ func docCols(withContent bool) string {
 		c += ", content"
 	}
 	return c
+}
+
+// scanDocumentWithSnippet scans the lean column set + the trailing
+// snippet column ListDocuments projects (BACI-204). The snippet is
+// returned separately so the caller can apply the word-boundary
+// trim before stamping it onto the Document.
+func scanDocumentWithSnippet(row rowScanner) (*model.Document, string, error) {
+	var (
+		d          model.Document
+		typ        string
+		archivedAt sql.NullTime
+		snippet    string
+	)
+	err := row.Scan(&d.ID, &d.UUID, &d.RepoID, &d.Filename, &typ, &d.SizeBytes, &d.SourcePath, &archivedAt, &d.CreatedAt, &d.UpdatedAt, &snippet)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, "", ErrNotFound
+	}
+	if err != nil {
+		return nil, "", fmt.Errorf("scan document with snippet: %w", err)
+	}
+	d.Type = model.DocumentType(typ)
+	if archivedAt.Valid {
+		t := archivedAt.Time
+		d.ArchivedAt = &t
+	}
+	return &d, snippet, nil
 }
 
 func scanDocument(row rowScanner, withContent bool) (*model.Document, error) {

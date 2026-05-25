@@ -10,11 +10,31 @@ import (
 )
 
 // DocSummary is one document, shaped for the desktop document list.
+//
+// BACI-204 adds Links + Snippet + ArchivedAt + CreatedAt so the
+// redesigned Documents page can render the linked-issue / linked-feature
+// chips, a per-row snippet under each title, sort by created date,
+// and mute archived rows — all without a second round trip per row.
+// Existing fields stay first so the wire shape is purely additive.
 type DocSummary struct {
-	Filename  string    `json:"filename"`
-	Type      string    `json:"type"`
-	SizeBytes int64     `json:"sizeBytes"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	Filename   string       `json:"filename"`
+	Type       string       `json:"type"`
+	SizeBytes  int64        `json:"sizeBytes"`
+	UpdatedAt  time.Time    `json:"updatedAt"`
+	CreatedAt  time.Time    `json:"createdAt"`
+	ArchivedAt *time.Time   `json:"archivedAt,omitempty"`
+	Snippet    string       `json:"snippet,omitempty"`
+	Links      []DocSummaryLinkDTO `json:"links,omitempty"`
+}
+
+// DocSummaryLinkDTO is one link row on a DocSummary — issue or feature plus
+// the per-link description. Same fields as the brief endpoint's
+// LinkedDocDTO so the React rendering stays consistent across the
+// document-detail and document-list surfaces.
+type DocSummaryLinkDTO struct {
+	IssueKey    string `json:"issueKey,omitempty"`
+	FeatureSlug string `json:"featureSlug,omitempty"`
+	Description string `json:"description,omitempty"`
 }
 
 // DocContent is one document with its markdown body, for the editor pane.
@@ -65,14 +85,57 @@ func (d *DocService) ListDocs(repoPrefix, typeFilter string) ([]DocSummary, erro
 	}
 	out := make([]DocSummary, 0, len(docs))
 	for _, doc := range docs {
-		out = append(out, DocSummary{
-			Filename:  doc.Filename,
-			Type:      string(doc.Type),
-			SizeBytes: doc.SizeBytes,
-			UpdatedAt: doc.UpdatedAt,
-		})
+		row := DocSummary{
+			Filename:   doc.Filename,
+			Type:       string(doc.Type),
+			SizeBytes:  doc.SizeBytes,
+			UpdatedAt:  doc.UpdatedAt,
+			CreatedAt:  doc.CreatedAt,
+			ArchivedAt: doc.ArchivedAt,
+			Snippet:    doc.Snippet,
+		}
+		// BACI-204: reshape link rows into the desktop DTO. A doc with
+		// no links keeps Links nil so omitempty drops it from the wire
+		// JSON.
+		if len(doc.Links) > 0 {
+			row.Links = make([]DocSummaryLinkDTO, 0, len(doc.Links))
+			for _, l := range doc.Links {
+				row.Links = append(row.Links, DocSummaryLinkDTO{
+					IssueKey:    l.IssueKey,
+					FeatureSlug: l.FeatureSlug,
+					Description: l.Description,
+				})
+			}
+		}
+		out = append(out, row)
 	}
 	return out, nil
+}
+
+// ArchiveDoc / UnarchiveDoc are the Wails parity for the existing
+// HTTP /repos/{prefix}/documents/{filename}/{archive,unarchive}
+// routes — surfaced through the same client.SetDocumentArchived path
+// the CLI uses (BACI-68). They power the redesigned Documents page's
+// per-row archive toggle (BACI-204); the desktop binding had to grow
+// these so the React surface stays transport-agnostic.
+func (d *DocService) ArchiveDoc(repoPrefix, filename string) error {
+	ctx := context.Background()
+	repo, err := d.resolveRepo(ctx, repoPrefix)
+	if err != nil {
+		return err
+	}
+	_, err = d.client.ArchiveDocument(ctx, repo, filename, false)
+	return err
+}
+
+func (d *DocService) UnarchiveDoc(repoPrefix, filename string) error {
+	ctx := context.Background()
+	repo, err := d.resolveRepo(ctx, repoPrefix)
+	if err != nil {
+		return err
+	}
+	_, err = d.client.UnarchiveDocument(ctx, repo, filename, false)
+	return err
 }
 
 // GetDoc returns one document with its markdown content for editing.

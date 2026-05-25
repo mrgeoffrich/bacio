@@ -481,11 +481,27 @@ export interface AgentCard {
   openQuestions: QuestionDTO[];
 }
 
+// DocSummaryLink (BACI-204) is one link row on a DocSummary —
+// matches the desktop Wails-side DocSummaryLinkDTO so callers can
+// share the rendering between transports.
+export interface DocSummaryLink {
+  issueKey?: string;
+  featureSlug?: string;
+  description?: string;
+}
+
 export interface DocSummary {
   filename: string;
   type: string;
   sizeBytes: number;
   updatedAt: string;
+  // BACI-204: lifecycle dates + the per-row snippet + linked-issue /
+  // linked-feature chips ride back on every row so the redesigned
+  // Documents page renders without an N+1 per-row round trip.
+  createdAt: string;
+  archivedAt?: string;
+  snippet?: string;
+  links?: DocSummaryLink[];
 }
 
 export interface DocContent {
@@ -1143,12 +1159,30 @@ export async function cancelSessionQuestion(id: number): Promise<SessionQuestion
   });
 }
 
+// ApiDocumentLink is the raw wire shape for one document_link row
+// returned alongside a doc in the list response. Field naming follows
+// the Go-side snake_case the API serialises (links carry the issue
+// key / feature slug pre-formatted, so the client doesn't need to
+// resolve them).
+interface ApiDocumentLink {
+  issue_key?: string;
+  feature_slug?: string;
+  description?: string;
+}
+
 interface ApiDocument {
   filename: string;
   type: string;
   size_bytes: number;
   updated_at: string;
+  created_at: string;
+  archived_at?: string;
   content?: string;
+  // BACI-204: per-row snippet + link rows hydrated by the store-side
+  // IN-query so the Documents page renders chips and previews without
+  // an N+1 round trip.
+  snippet?: string;
+  links?: ApiDocumentLink[];
 }
 
 export async function listDocs(repoPrefix: string, typeFilter = ''): Promise<DocSummary[]> {
@@ -1163,6 +1197,14 @@ export async function listDocs(repoPrefix: string, typeFilter = ''): Promise<Doc
     type: d.type,
     sizeBytes: d.size_bytes,
     updatedAt: d.updated_at,
+    createdAt: d.created_at,
+    archivedAt: d.archived_at,
+    snippet: d.snippet,
+    links: d.links?.map(l => ({
+      issueKey: l.issue_key,
+      featureSlug: l.feature_slug,
+      description: l.description,
+    })),
   }));
 }
 
