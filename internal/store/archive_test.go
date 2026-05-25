@@ -462,6 +462,220 @@ func TestArchiveSweepCascadeRunsEvenWhenAutoOff(t *testing.T) {
 	}
 }
 
+// TestArchiveSweepBumpsUpdatedAt — BACI-189. The bump_*_updated_on_
+// archive_change schema triggers must fire on every row the sweep
+// stamps, so the next sync round-trip's LWW gate sees the local
+// archive as newer than the remote YAML. Without the bump, sync
+// imports the unchanged YAML over the local row and silently clears
+// archived_at — symptom: the sweep reports the same N rows archived
+// every tick and never converges.
+func TestArchiveSweepBumpsUpdatedAt(t *testing.T) {
+	s := newTestStore(t)
+	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
+
+	feat, _ := s.CreateFeature(repo.ID, "f", "F", "", "")
+	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "old", "", model.StateDone, nil)
+	doc, _ := s.CreateDocument(repo.ID, "d.md", model.DocTypeArchitecture, "", "")
+	if _, err := s.LinkDocument(doc.ID, LinkTarget{IssueID: &iss.ID}, ""); err != nil {
+		t.Fatalf("link doc: %v", err)
+	}
+
+	// Back-date terminal_at past the default retention window so the
+	// issue pass picks it up; back-date updated_at on every entity so
+	// we can detect the trigger's bump as a forward jump.
+	if _, err := s.DB.Exec(
+		`UPDATE issues SET terminal_at = datetime('now','-30 days'), updated_at = '2026-01-01 00:00:00' WHERE id = ?`,
+		iss.ID,
+	); err != nil {
+		t.Fatalf("backdate issue: %v", err)
+	}
+	if _, err := s.DB.Exec(
+		`UPDATE features SET updated_at = '2026-01-01 00:00:00' WHERE id = ?`, feat.ID,
+	); err != nil {
+		t.Fatalf("backdate feature: %v", err)
+	}
+	if _, err := s.DB.Exec(
+		`UPDATE documents SET updated_at = '2026-01-01 00:00:00' WHERE id = ?`, doc.ID,
+	); err != nil {
+		t.Fatalf("backdate document: %v", err)
+	}
+
+	sweepStart := time.Now().UTC().Add(-1 * time.Second)
+	res, err := s.ArchiveSweep()
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if res.IssuesArchived != 1 || res.FeaturesArchived != 1 || res.DocumentsArchived != 1 {
+		t.Fatalf("expected to archive 1 of each kind; got %+v", res)
+	}
+
+	gotIss, _ := s.GetIssueByID(iss.ID)
+	if !gotIss.UpdatedAt.After(sweepStart) {
+		t.Errorf("issue updated_at = %v, want > sweepStart %v (trigger did not fire?)", gotIss.UpdatedAt, sweepStart)
+	}
+	gotFeat, _ := s.GetFeatureByID(feat.ID)
+	if !gotFeat.UpdatedAt.After(sweepStart) {
+		t.Errorf("feature updated_at = %v, want > sweepStart %v", gotFeat.UpdatedAt, sweepStart)
+	}
+	gotDoc, _ := s.GetDocumentByID(doc.ID, false)
+	if !gotDoc.UpdatedAt.After(sweepStart) {
+		t.Errorf("document updated_at = %v, want > sweepStart %v", gotDoc.UpdatedAt, sweepStart)
+	}
+}
+
+// TestSetIssueArchivedBumpsUpdatedAtOnEveryFlip — BACI-189 manual-verb
+// path. Each SetIssueArchived(true/false) must bump updated_at via
+// the schema trigger so a manual `bacio issue archive` followed by a
+// sync round-trip preserves the local archive state. Same property
+// holds for features and documents — covered by the sibling tests
+// below.
+func TestSetIssueArchivedBumpsUpdatedAtOnEveryFlip(t *testing.T) {
+	s := newTestStore(t)
+	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
+	iss, _ := s.CreateIssue(repo.ID, nil, "i", "", model.StateDone, nil)
+
+	// Back-date updated_at so the post-archive bump is observably
+	// later. CURRENT_TIMESTAMP is second-precision, so a same-second
+	// flip can read as equal — back-dating sidesteps that.
+	if _, err := s.DB.Exec(
+		`UPDATE issues SET updated_at = '2026-01-01 00:00:00' WHERE id = ?`, iss.ID,
+	); err != nil {
+		t.Fatalf("backdate: %v", err)
+	}
+	before, _ := s.GetIssueByID(iss.ID)
+
+	if err := s.SetIssueArchived(iss.ID, true); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	afterArchive, _ := s.GetIssueByID(iss.ID)
+	if !afterArchive.UpdatedAt.After(before.UpdatedAt) {
+		t.Errorf("archive: updated_at did not advance; before=%v after=%v", before.UpdatedAt, afterArchive.UpdatedAt)
+	}
+
+	// Back-date again so the unarchive flip's bump is detectable.
+	if _, err := s.DB.Exec(
+		`UPDATE issues SET updated_at = '2026-01-01 00:00:00' WHERE id = ?`, iss.ID,
+	); err != nil {
+		t.Fatalf("backdate 2: %v", err)
+	}
+	beforeUnarchive, _ := s.GetIssueByID(iss.ID)
+
+	if err := s.SetIssueArchived(iss.ID, false); err != nil {
+		t.Fatalf("unarchive: %v", err)
+	}
+	afterUnarchive, _ := s.GetIssueByID(iss.ID)
+	if !afterUnarchive.UpdatedAt.After(beforeUnarchive.UpdatedAt) {
+		t.Errorf("unarchive: updated_at did not advance; before=%v after=%v", beforeUnarchive.UpdatedAt, afterUnarchive.UpdatedAt)
+	}
+}
+
+// TestSetFeatureArchivedBumpsUpdatedAtOnEveryFlip — BACI-189 manual
+// feature archive path.
+func TestSetFeatureArchivedBumpsUpdatedAtOnEveryFlip(t *testing.T) {
+	s := newTestStore(t)
+	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
+	feat, _ := s.CreateFeature(repo.ID, "f", "F", "", "")
+
+	if _, err := s.DB.Exec(
+		`UPDATE features SET updated_at = '2026-01-01 00:00:00' WHERE id = ?`, feat.ID,
+	); err != nil {
+		t.Fatalf("backdate: %v", err)
+	}
+	before, _ := s.GetFeatureByID(feat.ID)
+
+	if err := s.SetFeatureArchived(feat.ID, true); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	afterArchive, _ := s.GetFeatureByID(feat.ID)
+	if !afterArchive.UpdatedAt.After(before.UpdatedAt) {
+		t.Errorf("archive: updated_at did not advance; before=%v after=%v", before.UpdatedAt, afterArchive.UpdatedAt)
+	}
+
+	if _, err := s.DB.Exec(
+		`UPDATE features SET updated_at = '2026-01-01 00:00:00' WHERE id = ?`, feat.ID,
+	); err != nil {
+		t.Fatalf("backdate 2: %v", err)
+	}
+	beforeUnarchive, _ := s.GetFeatureByID(feat.ID)
+
+	if err := s.SetFeatureArchived(feat.ID, false); err != nil {
+		t.Fatalf("unarchive: %v", err)
+	}
+	afterUnarchive, _ := s.GetFeatureByID(feat.ID)
+	if !afterUnarchive.UpdatedAt.After(beforeUnarchive.UpdatedAt) {
+		t.Errorf("unarchive: updated_at did not advance; before=%v after=%v", beforeUnarchive.UpdatedAt, afterUnarchive.UpdatedAt)
+	}
+}
+
+// TestSetDocumentArchivedBumpsUpdatedAtOnEveryFlip — BACI-189 manual
+// document archive path.
+func TestSetDocumentArchivedBumpsUpdatedAtOnEveryFlip(t *testing.T) {
+	s := newTestStore(t)
+	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
+	doc, _ := s.CreateDocument(repo.ID, "d.md", model.DocTypeArchitecture, "", "")
+
+	if _, err := s.DB.Exec(
+		`UPDATE documents SET updated_at = '2026-01-01 00:00:00' WHERE id = ?`, doc.ID,
+	); err != nil {
+		t.Fatalf("backdate: %v", err)
+	}
+	before, _ := s.GetDocumentByID(doc.ID, false)
+
+	if err := s.SetDocumentArchived(doc.ID, true); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	afterArchive, _ := s.GetDocumentByID(doc.ID, false)
+	if !afterArchive.UpdatedAt.After(before.UpdatedAt) {
+		t.Errorf("archive: updated_at did not advance; before=%v after=%v", before.UpdatedAt, afterArchive.UpdatedAt)
+	}
+
+	if _, err := s.DB.Exec(
+		`UPDATE documents SET updated_at = '2026-01-01 00:00:00' WHERE id = ?`, doc.ID,
+	); err != nil {
+		t.Fatalf("backdate 2: %v", err)
+	}
+	beforeUnarchive, _ := s.GetDocumentByID(doc.ID, false)
+
+	if err := s.SetDocumentArchived(doc.ID, false); err != nil {
+		t.Fatalf("unarchive: %v", err)
+	}
+	afterUnarchive, _ := s.GetDocumentByID(doc.ID, false)
+	if !afterUnarchive.UpdatedAt.After(beforeUnarchive.UpdatedAt) {
+		t.Errorf("unarchive: updated_at did not advance; before=%v after=%v", beforeUnarchive.UpdatedAt, afterUnarchive.UpdatedAt)
+	}
+}
+
+// TestArchiveTriggerNoOpsWhenCallerSetsUpdatedAt — BACI-189. The sync
+// importer's pass-1 wholesale UPDATE writes archived_at AND updated_at
+// in the same statement. The trigger's `WHEN NEW.updated_at = OLD.
+// updated_at` guard must keep the trigger from clobbering the
+// LWW-authoritative timestamp. Without this guard, an imported row's
+// updated_at would jump to CURRENT_TIMESTAMP on every import and
+// permanently lose LWW orientation.
+func TestArchiveTriggerNoOpsWhenCallerSetsUpdatedAt(t *testing.T) {
+	s := newTestStore(t)
+	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
+	iss, _ := s.CreateIssue(repo.ID, nil, "i", "", model.StateDone, nil)
+
+	// Mimic the importer: one UPDATE setting both columns to YAML's
+	// values. The trigger's WHEN clause should be false (NEW.updated_at
+	// differs from OLD.updated_at) so the trigger does NOT fire and
+	// the YAML's updated_at survives byte-for-byte.
+	authoritative := "2026-05-15 09:00:00"
+	if _, err := s.DB.Exec(
+		`UPDATE issues SET archived_at = '2026-05-10 12:00:00', updated_at = ? WHERE id = ?`,
+		authoritative, iss.ID,
+	); err != nil {
+		t.Fatalf("authoritative update: %v", err)
+	}
+
+	got, _ := s.GetIssueByID(iss.ID)
+	wantTS, _ := time.Parse("2006-01-02 15:04:05", authoritative)
+	if !got.UpdatedAt.UTC().Equal(wantTS) {
+		t.Errorf("updated_at = %v, want %v (trigger fired despite caller setting updated_at)", got.UpdatedAt.UTC(), wantTS)
+	}
+}
+
 func TestDisplayShowArchivedDefaultsFalse(t *testing.T) {
 	s := newTestStore(t)
 	v, err := s.GetDisplayShowArchived()

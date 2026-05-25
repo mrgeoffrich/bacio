@@ -1064,3 +1064,152 @@ func TestImport_LegacyContentMD_JSONLDocument(t *testing.T) {
 		t.Errorf("legacy-fallback body mismatch:\ngot:  %q\nwant: %q", d.Content, body)
 	}
 }
+
+// TestImport_RoundTrip_SweepArchivedSurvivesNextImport reproduces the
+// BACI-189 symptom: machine A's auto-archive sweep stamps a terminal-
+// state issue, machine A exports, machine B imports + re-exports, A
+// pulls B's export, A's archived_at must survive.
+//
+// Pre-fix the local sweep bumped archived_at but NOT updated_at, so on
+// the next import the LWW gate saw `YAML.updated_at == local.
+// updated_at` and fell into the wholesale-UPDATE branch with YAML's
+// NULL archived_at — silently clobbering the sweep's work. With the
+// BACI-189 schema trigger the sweep also bumps updated_at, so the
+// LWW gate (in either direction) sees the local row as newer and
+// preserves it.
+func TestImport_RoundTrip_SweepArchivedSurvivesNextImport(t *testing.T) {
+	a, uuids := seedExportFixture(t)
+
+	// Back-date iss2's terminal_at past the retention window so the
+	// sweep on A picks it up. iss2 is terminal (StateTodo by default
+	// in the fixture, so move it to done first).
+	if err := a.SetIssueState(idFromUUID(t, a, uuids["iss2"]), model.StateDone); err != nil {
+		t.Fatalf("close iss2: %v", err)
+	}
+	if _, err := a.DB.Exec(
+		`UPDATE issues SET terminal_at = datetime('now','-30 days'), updated_at = '2026-05-03 10:00:00' WHERE uuid = ?`,
+		uuids["iss2"],
+	); err != nil {
+		t.Fatalf("backdate iss2: %v", err)
+	}
+
+	// Run the sweep on A — this is the writer that pre-fix forgot to
+	// bump updated_at. Post-fix the schema trigger bumps it for us.
+	res, err := a.ArchiveSweep()
+	if err != nil {
+		t.Fatalf("sweep on A: %v", err)
+	}
+	if res.IssuesArchived < 1 {
+		t.Fatalf("sweep on A archived %d issues, want >= 1", res.IssuesArchived)
+	}
+
+	// Round-trip A → B → A. The classic BACI-189 symptom: A's
+	// archived_at gets clobbered on the second import.
+	dirA := t.TempDir()
+	if _, err := (&Engine{Store: a}).Export(context.Background(), dirA); err != nil {
+		t.Fatalf("export A: %v", err)
+	}
+	b, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open b: %v", err)
+	}
+	t.Cleanup(func() { b.Close() })
+	if _, err := (&Engine{Store: b, Actor: "tester"}).Import(context.Background(), dirA); err != nil {
+		t.Fatalf("import into B: %v", err)
+	}
+	// B re-exports and A re-imports. Pre-fix this is where the
+	// archived_at gets silently cleared because A's stale updated_at
+	// lets the YAML's NULL win.
+	dirB := t.TempDir()
+	if _, err := (&Engine{Store: b}).Export(context.Background(), dirB); err != nil {
+		t.Fatalf("export B: %v", err)
+	}
+	if _, err := (&Engine{Store: a, Actor: "tester"}).Import(context.Background(), dirB); err != nil {
+		t.Fatalf("re-import into A: %v", err)
+	}
+
+	gotA, err := a.GetIssueByUUID(uuids["iss2"])
+	if err != nil {
+		t.Fatalf("get iss2 on A after round-trip: %v", err)
+	}
+	if gotA.ArchivedAt == nil {
+		t.Fatal("archived_at clobbered to NULL on second import — sweep did not bump updated_at, BACI-189 still reproduces")
+	}
+}
+
+// TestImport_LWW_ExplicitUnarchiveStillWins is the inverse of the
+// BACI-189 fix: a YAML row with `archived_at=null, updated_at=newer`
+// (i.e. machine B explicitly unarchived) must still win over A's
+// locally-archived row. The trigger is gated on
+// `NEW.updated_at = OLD.updated_at`, so an importer UPDATE that writes
+// BOTH columns leaves the YAML's NULL archived_at and YAML's newer
+// updated_at intact.
+func TestImport_LWW_ExplicitUnarchiveStillWins(t *testing.T) {
+	a, uuids := seedExportFixture(t)
+
+	// On A: archive iss2 with an OLD updated_at — this is the row B
+	// will overwrite.
+	if _, err := a.DB.Exec(
+		`UPDATE issues SET archived_at = '2026-04-01 12:00:00', updated_at = '2026-04-01 12:00:00' WHERE uuid = ?`,
+		uuids["iss2"],
+	); err != nil {
+		t.Fatalf("archive iss2 on A: %v", err)
+	}
+
+	// Stage YAML representing machine B's authoritative unarchive
+	// (archived_at=null, updated_at=newer). Easiest path: build it by
+	// exporting from a fresh store that mirrors A but with the
+	// unarchive applied + a newer updated_at.
+	b, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open b: %v", err)
+	}
+	t.Cleanup(func() { b.Close() })
+
+	// Bootstrap B from A's current state.
+	dirSeed := t.TempDir()
+	if _, err := (&Engine{Store: a}).Export(context.Background(), dirSeed); err != nil {
+		t.Fatalf("seed export from A: %v", err)
+	}
+	if _, err := (&Engine{Store: b, Actor: "tester"}).Import(context.Background(), dirSeed); err != nil {
+		t.Fatalf("seed import into B: %v", err)
+	}
+
+	// On B: explicitly unarchive with a NEWER updated_at than A's
+	// stale '2026-04-01' stamp. Both columns are set in one UPDATE
+	// (importer pattern); the trigger's WHEN clause should keep the
+	// YAML's updated_at byte-for-byte.
+	if _, err := b.DB.Exec(
+		`UPDATE issues SET archived_at = NULL, updated_at = '2026-05-20 09:00:00' WHERE uuid = ?`,
+		uuids["iss2"],
+	); err != nil {
+		t.Fatalf("unarchive on B: %v", err)
+	}
+
+	dirB := t.TempDir()
+	if _, err := (&Engine{Store: b}).Export(context.Background(), dirB); err != nil {
+		t.Fatalf("export B: %v", err)
+	}
+	if _, err := (&Engine{Store: a, Actor: "tester"}).Import(context.Background(), dirB); err != nil {
+		t.Fatalf("import B into A: %v", err)
+	}
+
+	gotA, err := a.GetIssueByUUID(uuids["iss2"])
+	if err != nil {
+		t.Fatalf("get iss2 on A: %v", err)
+	}
+	if gotA.ArchivedAt != nil {
+		t.Errorf("LWW unarchive lost: A still has archived_at=%v, want NULL", gotA.ArchivedAt)
+	}
+}
+
+// idFromUUID is a small test helper: look up the integer id of an
+// issue by its uuid via the store's DB handle.
+func idFromUUID(t *testing.T, s *store.Store, uuid string) int64 {
+	t.Helper()
+	var id int64
+	if err := s.DB.QueryRow(`SELECT id FROM issues WHERE uuid = ?`, uuid).Scan(&id); err != nil {
+		t.Fatalf("lookup id for %s: %v", uuid, err)
+	}
+	return id
+}
