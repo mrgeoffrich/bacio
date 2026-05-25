@@ -73,8 +73,9 @@ func (s *Store) addTagsTx(tx *sql.Tx, issueID int64, tags []string) error {
 	return nil
 }
 
-// AddTagsToIssue idempotently attaches tags to an issue and bumps updated_at
-// when at least one tag was new.
+// AddTagsToIssue idempotently attaches tags to an issue. The
+// bump_issue_updated_on_tag_insert schema trigger advances
+// issues.updated_at when at least one new row lands. See BACI-144.
 func (s *Store) AddTagsToIssue(issueID int64, tags []string) error {
 	if len(tags) == 0 {
 		return nil
@@ -87,24 +88,16 @@ func (s *Store) AddTagsToIssue(issueID int64, tags []string) error {
 	if err := s.addTagsTx(tx, issueID, tags); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`UPDATE issues SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`, issueID); err != nil {
-		return err
-	}
 	return tx.Commit()
 }
 
-// RemoveTagsFromIssue detaches tags from an issue and bumps updated_at when
-// any rows were removed.
+// RemoveTagsFromIssue detaches tags from an issue. The
+// bump_issue_updated_on_tag_delete schema trigger advances
+// issues.updated_at when any rows are actually removed. See BACI-144.
 func (s *Store) RemoveTagsFromIssue(issueID int64, tags []string) error {
 	if len(tags) == 0 {
 		return nil
 	}
-	tx, err := s.DB.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
 	placeholders := make([]string, len(tags))
 	args := make([]any, 0, len(tags)+1)
 	args = append(args, issueID)
@@ -114,17 +107,10 @@ func (s *Store) RemoveTagsFromIssue(issueID int64, tags []string) error {
 	}
 	q := fmt.Sprintf(`DELETE FROM issue_tags WHERE issue_id = ? AND tag IN (%s)`,
 		strings.Join(placeholders, ","))
-	res, err := tx.Exec(q, args...)
-	if err != nil {
+	if _, err := s.DB.Exec(q, args...); err != nil {
 		return err
 	}
-	n, _ := res.RowsAffected()
-	if n > 0 {
-		if _, err := tx.Exec(`UPDATE issues SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`, issueID); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
+	return nil
 }
 
 // loadTagsForIssues returns a map of issueID → sorted tag list for the given

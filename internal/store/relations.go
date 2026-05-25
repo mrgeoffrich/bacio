@@ -9,44 +9,30 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/model"
 )
 
-// CreateRelation inserts the edge and bumps issues.updated_at on
-// both endpoints. The bump keeps the sync importer's last-writer-wins
-// gate (which keys on issues.updated_at) from clobbering the new
-// edge on the next round-trip — replaceRelationsTx wipes-and-rewrites
-// outgoing relations whenever the gate misses. Both endpoints get the
-// bump because the edge affects how each side renders. See BACI-142.
+// CreateRelation inserts the edge. The
+// bump_issue_updated_on_relation_insert schema trigger advances
+// issues.updated_at on both endpoints so the sync importer's
+// last-writer-wins gate (which keys on issues.updated_at) doesn't
+// clobber the new edge on the next round-trip — replaceRelationsTx
+// wipes-and-rewrites outgoing relations whenever the gate misses.
+// Both endpoints get bumped because the edge affects how each side
+// renders. See BACI-144 (and BACI-142, which fixed the same drift
+// at the call site before the invariant was promoted into the
+// schema).
 func (s *Store) CreateRelation(fromID, toID int64, t model.RelationType) error {
-	tx, err := s.DB.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	if _, err := tx.Exec(
+	_, err := s.DB.Exec(
 		`INSERT INTO issue_relations (from_issue_id, to_issue_id, type) VALUES (?, ?, ?)`,
 		fromID, toID, string(t),
-	); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(
-		`UPDATE issues SET updated_at = CURRENT_TIMESTAMP WHERE id IN (?, ?)`,
-		fromID, toID,
-	); err != nil {
-		return err
-	}
-	return tx.Commit()
+	)
+	return err
 }
 
-// DeleteRelation removes the edge in either direction and, when a
-// row actually went away, bumps issues.updated_at on both endpoints
-// so the LWW gate preserves the deletion through the next sync. See
-// BACI-142.
+// DeleteRelation removes the edge in either direction. The
+// bump_issue_updated_on_relation_delete schema trigger advances
+// issues.updated_at on both endpoints when a row went away so the LWW
+// gate preserves the deletion through the next sync. See BACI-144.
 func (s *Store) DeleteRelation(fromID, toID int64) (int64, error) {
-	tx, err := s.DB.Begin()
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback()
-	res, err := tx.Exec(
+	res, err := s.DB.Exec(
 		`DELETE FROM issue_relations
 		   WHERE (from_issue_id = ? AND to_issue_id = ?)
 		      OR (from_issue_id = ? AND to_issue_id = ?)`,
@@ -56,17 +42,6 @@ func (s *Store) DeleteRelation(fromID, toID int64) (int64, error) {
 		return 0, err
 	}
 	n, _ := res.RowsAffected()
-	if n > 0 {
-		if _, err := tx.Exec(
-			`UPDATE issues SET updated_at = CURRENT_TIMESTAMP WHERE id IN (?, ?)`,
-			fromID, toID,
-		); err != nil {
-			return 0, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
 	return n, nil
 }
 

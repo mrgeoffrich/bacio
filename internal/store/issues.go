@@ -608,14 +608,14 @@ func (s *Store) UpdateIssueByUUID(uuid string, p IssuePatch) error {
 	}
 
 	if p.Tags != nil {
-		// Replace tags wholesale: clear existing, re-insert.
+		// Replace tags wholesale: clear existing, re-insert. The
+		// bump_issue_updated_on_tag_insert / _delete schema triggers
+		// advance issues.updated_at on every affected row, so an
+		// explicit body UPDATE here would be redundant. See BACI-144.
 		if _, err := tx.Exec(`DELETE FROM issue_tags WHERE issue_id = ?`, id); err != nil {
 			return err
 		}
 		if err := s.addTagsTx(tx, id, *p.Tags); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(`UPDATE issues SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`, id); err != nil {
 			return err
 		}
 	}

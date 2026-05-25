@@ -1112,6 +1112,21 @@ func migrateDocumentsTypeCheck(db *sql.DB) error {
 	if _, err := tx.Exec(`PRAGMA defer_foreign_keys = ON`); err != nil {
 		return fmt.Errorf("defer fk: %w", err)
 	}
+	// Drop the BACI-144 document_links triggers that reference
+	// `documents` before the rebuild. SQLite parses every trigger body
+	// during ALTER TABLE RENAME to find references to the old name; a
+	// trigger whose body still references the just-dropped `documents`
+	// table fails that parse with "no such table" before the rename
+	// re-creates it. We re-add the triggers below after the rename.
+	for _, stmt := range []string{
+		`DROP TRIGGER IF EXISTS bump_document_updated_on_link_insert`,
+		`DROP TRIGGER IF EXISTS bump_document_updated_on_link_delete`,
+		`DROP TRIGGER IF EXISTS bump_document_updated_on_link_description_update`,
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("drop doc-link trigger: %w", err)
+		}
+	}
 	// Mirror schema.sql's documents shape exactly, with the widened CHECK.
 	// SELECT *-style copy round-trips because columns line up.
 	if _, err := tx.Exec(`
@@ -1164,6 +1179,32 @@ func migrateDocumentsTypeCheck(db *sql.DB) error {
 	} {
 		if _, err := tx.Exec(stmt); err != nil {
 			return fmt.Errorf("recreate documents index: %w", err)
+		}
+	}
+	// Re-create the BACI-144 document_links triggers dropped above. The
+	// statements are byte-identical to the schema.sql definitions so a
+	// freshly-rebuilt table behaves the same as a fresh schema.sql
+	// install. Kept inline rather than re-applying schemaSQL to avoid
+	// double-defining the rest of the schema.
+	for _, stmt := range []string{
+		`CREATE TRIGGER IF NOT EXISTS bump_document_updated_on_link_insert
+		 AFTER INSERT ON document_links
+		 BEGIN
+		     UPDATE documents SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.document_id;
+		 END`,
+		`CREATE TRIGGER IF NOT EXISTS bump_document_updated_on_link_delete
+		 AFTER DELETE ON document_links
+		 BEGIN
+		     UPDATE documents SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.document_id;
+		 END`,
+		`CREATE TRIGGER IF NOT EXISTS bump_document_updated_on_link_description_update
+		 AFTER UPDATE OF description ON document_links
+		 BEGIN
+		     UPDATE documents SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.document_id;
+		 END`,
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("recreate doc-link trigger: %w", err)
 		}
 	}
 	return tx.Commit()

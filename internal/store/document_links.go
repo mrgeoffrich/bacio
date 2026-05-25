@@ -24,11 +24,14 @@ func (t LinkTarget) check() error {
 }
 
 // LinkDocument upserts: creating the link if absent, or replacing the
-// description if the (document, target) pair already exists. Bumps
-// documents.updated_at so the sync importer's last-writer-wins gate
-// (which keys on documents.updated_at) preserves the new link through
-// the next round-trip; without the bump, replaceDocLinksTx silently
-// wipes the local row — see BACI-142.
+// description if the (document, target) pair already exists. The
+// bump_document_updated_on_link_insert /
+// bump_document_updated_on_link_description_update schema triggers
+// advance documents.updated_at on either path so the sync importer's
+// last-writer-wins gate (which keys on documents.updated_at) preserves
+// the new/edited link through the next round-trip — see BACI-144 (and
+// BACI-142, which fixed the same drift at the call site before the
+// invariant was promoted into the schema).
 func (s *Store) LinkDocument(documentID int64, t LinkTarget, description string) (*model.DocumentLink, error) {
 	if err := t.check(); err != nil {
 		return nil, err
@@ -64,46 +67,34 @@ func (s *Store) LinkDocument(documentID int64, t LinkTarget, description string)
 			return nil, err
 		}
 	}
-	if _, err := tx.Exec(`UPDATE documents SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`, documentID); err != nil {
-		return nil, err
-	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return s.getLink(documentID, t)
 }
 
-// UnlinkDocument deletes the link row and, when a row actually went
-// away, bumps documents.updated_at so the LWW gate preserves the
-// deletion through the next sync. See BACI-142.
+// UnlinkDocument deletes the link row. The
+// bump_document_updated_on_link_delete schema trigger advances
+// documents.updated_at when a row went away so the LWW gate preserves
+// the deletion through the next sync. See BACI-144.
 func (s *Store) UnlinkDocument(documentID int64, t LinkTarget) (int64, error) {
 	if err := t.check(); err != nil {
 		return 0, err
 	}
-	tx, err := s.DB.Begin()
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback()
-	var res sql.Result
+	var (
+		res sql.Result
+		err error
+	)
 	switch {
 	case t.IssueID != nil:
-		res, err = tx.Exec(`DELETE FROM document_links WHERE document_id = ? AND issue_id = ?`, documentID, *t.IssueID)
+		res, err = s.DB.Exec(`DELETE FROM document_links WHERE document_id = ? AND issue_id = ?`, documentID, *t.IssueID)
 	case t.FeatureID != nil:
-		res, err = tx.Exec(`DELETE FROM document_links WHERE document_id = ? AND feature_id = ?`, documentID, *t.FeatureID)
+		res, err = s.DB.Exec(`DELETE FROM document_links WHERE document_id = ? AND feature_id = ?`, documentID, *t.FeatureID)
 	}
 	if err != nil {
 		return 0, err
 	}
 	n, _ := res.RowsAffected()
-	if n > 0 {
-		if _, err := tx.Exec(`UPDATE documents SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`, documentID); err != nil {
-			return 0, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
 	return n, nil
 }
 

@@ -233,6 +233,19 @@ func (e *Engine) applyIssues(tx *sql.Tx, sr *scannedRepo, repo *model.Repo, res 
 		if err := e.replaceRelationsTx(tx, issueID, uuid, repo.Prefix, si.Parsed.Number, si.Parsed.Relations, res); err != nil {
 			return fmt.Errorf("replace relations for %s: %w", uuid, err)
 		}
+		// BACI-144: pass 2's wipe-and-rewrite of issue_tags /
+		// issue_pull_requests / issue_relations fires the schema
+		// triggers, which bump issues.updated_at to CURRENT_TIMESTAMP.
+		// That overwrites the YAML's UpdatedAt that pass 1 just wrote,
+		// breaking LWW for the next round-trip (an imported row would
+		// suddenly look "fresh" on the next compare). Re-stamp here so
+		// the in-DB value matches the YAML byte-for-byte.
+		if _, err := tx.Exec(
+			`UPDATE issues SET updated_at = ? WHERE id = ?`,
+			sqliteTimestamp(si.Parsed.UpdatedAt), issueID,
+		); err != nil {
+			return fmt.Errorf("re-stamp updated_at for %s: %w", uuid, err)
+		}
 		if err := e.markSyncedTx(tx, uuid, store.SyncKindIssue, hash, now); err != nil {
 			return err
 		}
@@ -572,6 +585,19 @@ func (e *Engine) applyDocuments(tx *sql.Tx, sr *scannedRepo, repo *model.Repo, r
 		// Replace links wholesale.
 		if err := e.replaceDocLinksTx(tx, existingID, sd.Parsed.Filename, uuid, sd.Parsed.Links, res); err != nil {
 			return fmt.Errorf("replace doc links for %s: %w", sd.Parsed.Filename, err)
+		}
+		// BACI-144: the wipe-and-rewrite above fires the
+		// bump_document_updated_on_link_insert / _delete schema
+		// triggers, which bump documents.updated_at to
+		// CURRENT_TIMESTAMP. That overwrites the YAML's UpdatedAt that
+		// the insert/update branch above just wrote, breaking LWW for
+		// the next round-trip. Re-stamp here so the in-DB value matches
+		// the YAML byte-for-byte.
+		if _, err := tx.Exec(
+			`UPDATE documents SET updated_at = ? WHERE id = ?`,
+			sqliteTimestamp(sd.Parsed.UpdatedAt), existingID,
+		); err != nil {
+			return fmt.Errorf("re-stamp updated_at for %s: %w", sd.Parsed.Filename, err)
 		}
 		if err := e.markSyncedTx(tx, uuid, store.SyncKindDocument, hash, now); err != nil {
 			return err
