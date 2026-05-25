@@ -288,143 +288,63 @@ type UnsyncedProjectOut struct {
 	Path   string `json:"path"`
 }
 
-// memberProjectsFor maps the sync.DiscoverMembership output to the wire
-// DTOs and collects the set of prefixes that appear as linked or
-// phantom across the registry — the latter is used to subtract
-// already-classified repos from the unsynced projects slice.
-func memberProjectsFor(members []bsync.MemberProject) []MemberProjectOut {
-	out := make([]MemberProjectOut, 0, len(members))
-	for _, m := range members {
-		entry := MemberProjectOut{
-			Prefix: m.Prefix,
-			Status: string(m.Status),
-		}
-		if m.Repo != nil {
-			entry.Name = m.Repo.Name
-			entry.UUID = m.Repo.UUID
-		}
-		out = append(out, entry)
-	}
-	return out
-}
-
-// handleSyncRegistryList is the GET /sync/repos handler. Pure
-// composition over BACI-105 primitives + the existing
-// ReadProjectConfig — no new store / filesystem code.
+// handleSyncRegistryList is the GET /sync/repos handler. Composes the
+// registry via sync.BuildRegistry (BACI-109 lifted the three-pass body
+// into internal/sync so the TUI shares the same code) and maps the
+// resulting Registry into the snake-case wire DTOs declared above.
 //
-// The unsynced_projects slice is computed by walking ListRepos and
-// excluding any repo that (a) is a phantom (path == "") or (b) appears
-// as linked/phantom under some sync repo's discovered membership or
-// (c) has a parseable .bacio/config.yaml whose sync.remote resolves to
-// a registry row. Everything else is "tracked locally, not synced".
+// The in-progress bit lives only here — it's process-local (only
+// meaningful on the leader) so the shared sync.Registry deliberately
+// does NOT carry it; the handler stitches it onto each SyncRepoOut.
 func (d deps) handleSyncRegistryList(w http.ResponseWriter, r *http.Request) {
-	remotes, err := d.store.ListSyncRemotes()
-	if err != nil {
-		status, code := statusForError(err)
-		writeError(w, status, code, err.Error(), nil)
-		return
-	}
-	repos, err := d.store.ListRepos()
+	reg, err := bsync.BuildRegistry(d.store, d.logger)
 	if err != nil {
 		status, code := statusForError(err)
 		writeError(w, status, code, err.Error(), nil)
 		return
 	}
 	inProgress := d.syncBackgroundInProgress()
-
-	// First pass: assemble the registry list AND remember every prefix
-	// the registry already accounts for (linked or phantom under any
-	// sync repo). Absent prefixes don't disqualify a tracked repo from
-	// unsynced_projects — they signal "this sync repo carries something
-	// the local DB has never heard of", not "this prefix is accounted for".
-	accountedPrefixes := make(map[string]bool, 0)
-	registryURLs := make(map[string]bool, len(remotes))
-	syncRepos := make([]SyncRepoOut, 0, len(remotes))
-	for _, rec := range remotes {
-		registryURLs[rec.RemoteURL] = true
-		members, err := bsync.DiscoverMembership(rec.LocalPath, d.store)
-		if err != nil {
-			// Membership failure on one row shouldn't sink the whole
-			// payload — log it and surface an empty membership list so
-			// the UI still renders the registry card.
-			if d.logger != nil {
-				d.logger.Warn("sync.discover_membership",
-					slog.String("remote_url", rec.RemoteURL),
-					slog.String("local_path", rec.LocalPath),
-					slog.String("err", err.Error()),
-				)
-			}
-			members = nil
-		}
-		for _, m := range members {
-			if m.Status == bsync.StatusLinked || m.Status == bsync.StatusPhantom {
-				accountedPrefixes[m.Prefix] = true
-			}
-		}
+	syncRepos := make([]SyncRepoOut, 0, len(reg.SyncRepos))
+	for _, e := range reg.SyncRepos {
 		syncRepos = append(syncRepos, SyncRepoOut{
-			RemoteURL:  rec.RemoteURL,
-			Label:      bsync.DeriveSyncLabel(rec.RemoteURL),
-			LocalPath:  rec.LocalPath,
-			ClonedAt:   rec.ClonedAt,
-			LastSyncAt: rec.LastSyncAt,
-			LastError:  rec.LastSyncError,
+			RemoteURL:  e.RemoteURL,
+			Label:      e.Label,
+			LocalPath:  e.LocalPath,
+			ClonedAt:   e.ClonedAt,
+			LastSyncAt: e.LastSyncAt,
+			LastError:  e.LastError,
 			InProgress: inProgress,
-			Projects:   memberProjectsFor(members),
+			Projects:   memberProjectsOutFor(e.Members),
 		})
 	}
-
-	// Second pass: the unsynced-projects residual. A repo qualifies iff
-	// it has a real working tree (path != "") AND it isn't already
-	// surfaced via the registry AND its .bacio/config.yaml either is
-	// missing, empty, or points at a remote the registry doesn't carry.
-	unsynced := make([]UnsyncedProjectOut, 0)
-	for _, repo := range repos {
-		if repo.Path == "" {
-			continue
-		}
-		if accountedPrefixes[repo.Prefix] {
-			continue
-		}
-		if syncedRepoIsRegistered(repo.Path, registryURLs, d.logger) {
-			continue
-		}
+	unsynced := make([]UnsyncedProjectOut, 0, len(reg.UnsyncedProjects))
+	for _, u := range reg.UnsyncedProjects {
 		unsynced = append(unsynced, UnsyncedProjectOut{
-			Prefix: repo.Prefix,
-			Name:   repo.Name,
-			UUID:   repo.UUID,
-			Path:   repo.Path,
+			Prefix: u.Prefix,
+			Name:   u.Name,
+			UUID:   u.UUID,
+			Path:   u.Path,
 		})
 	}
-
 	writeJSON(w, http.StatusOK, &SyncRegistryOut{
 		SyncRepos:        syncRepos,
 		UnsyncedProjects: unsynced,
 	})
 }
 
-// syncedRepoIsRegistered reports whether the project repo at path has
-// a .bacio/config.yaml whose sync.remote is in the registry. A missing
-// config (ErrNoConfig) returns false. A broken config (any other read
-// error) is logged and treated as not-registered — the user still sees
-// the repo in "Unsynced projects" so they can fix it. The handler's
-// own dedup against accountedPrefixes guards against the rare case
-// where the registry carries the repo's prefix as a member even though
-// its config is broken.
-func syncedRepoIsRegistered(path string, registryURLs map[string]bool, logger *slog.Logger) bool {
-	cfg, err := bsync.ReadProjectConfig(path)
-	if err != nil {
-		if !errors.Is(err, bsync.ErrNoConfig) && logger != nil {
-			logger.Warn("sync.read_project_config",
-				slog.String("path", path),
-				slog.String("err", err.Error()),
-			)
-		}
-		return false
+// memberProjectsOutFor maps the registry's leaf MemberProjectEntry into
+// the wire DTO with snake-case JSON tags.
+func memberProjectsOutFor(members []bsync.MemberProjectEntry) []MemberProjectOut {
+	out := make([]MemberProjectOut, 0, len(members))
+	for _, m := range members {
+		out = append(out, MemberProjectOut{
+			Prefix: m.Prefix,
+			Name:   m.Name,
+			UUID:   m.UUID,
+			Status: string(m.Status),
+		})
 	}
-	if cfg.Sync.Remote == "" {
-		return false
-	}
-	return registryURLs[cfg.Sync.Remote]
+	return out
 }
 
 // ---------- sync setup (BACI-110) ----------

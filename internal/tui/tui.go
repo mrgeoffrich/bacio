@@ -277,6 +277,7 @@ func NewModel(s *store.Store, repo *model.Repo, el *leader.Elector, dbPath strin
 			{"Documents", newDocsView(s, repo)},
 			{"Agents", newAgentsView(s, repo, tuiActor())},
 			{"History", newHistoryView(s, repo)},
+			{"Sync", newSyncView(s, repo, tuiActor())},
 			{"Settings", newSettingsView(s, repo)},
 		},
 		returnTab: -1,

@@ -556,6 +556,7 @@ Map upstream concepts to bacio code:
 - `internal/tui/history.go` — audit log tab; same shape.
 - `internal/tui/styles.go` — shared lipgloss styles. Single source of truth for the palette (purple `"57"` accent, `"231"` foreground, `"196"` errors, `"238"`/`"241"`/`"244"` grey ramp). Edit here to retheme.
 - `internal/tui/helpers.go` — small render utilities (truncation, key/value rows) used by multiple views.
+- `internal/tui/sync.go` (BACI-109) — example of a tab with a self-re-arming view-local refresh tick (`syncTabRefreshTickMsg`/`syncTabRefreshTick`) driving a local I/O reload. Distinct from the leader-gated controller tickers in `tui.go` — this one is not gated, so the WASM demo's stand-in carries the same cadence.
 
 The shell is a `*Model` (pointer receiver) so the tabs can mutate through their handles. Each tab is also a pointer-receiver type so its `Update` can mutate its own fields directly; the shell just calls the view's `Update` and bubbles the returned `Cmd`.
 
