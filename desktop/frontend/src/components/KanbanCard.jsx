@@ -222,7 +222,14 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, o
             // BACI-130 store rejects cancel-after-delivery. The label
             // is the affordance now, so the tooltip wrapping is gone
             // (the cancel button itself still carries aria-label).
+            // BACI-173: label leads, spinner trails — the spinner is
+            // the live thing and reads more naturally at the right
+            // edge of the card; the label hangs off its left so the
+            // eye lands on the spinner then reads back to the reason.
             <span className="mk-card-waiting">
+              {waitingLabel && (
+                <span className="mk-card-spinner-label">{waitingLabel}</span>
+              )}
               {waitingDelivered ? (
                 <span
                   className="mk-card-spinner"
@@ -240,9 +247,6 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, o
                     if (onCancelWaiting) onCancelWaiting(card.key);
                   }}
                 />
-              )}
-              {waitingLabel && (
-                <span className="mk-card-spinner-label">{waitingLabel}</span>
               )}
             </span>
           ) : taken ? (
