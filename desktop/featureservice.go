@@ -11,9 +11,13 @@ import (
 )
 
 // FeatureSummary is one feature, shaped for the desktop feature list.
+// Emoji (BACI-184) carries the per-feature glyph so the Features panel
+// list can render it alongside the title — same glyph BACI-172 paints
+// on every kanban card. Empty when no emoji has been set.
 type FeatureSummary struct {
 	Slug      string    `json:"slug"`
 	Title     string    `json:"title"`
+	Emoji     string    `json:"emoji"`
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
@@ -93,6 +97,7 @@ func (f *FeatureService) ListFeatures(repoPrefix string) ([]FeatureSummary, erro
 		out = append(out, FeatureSummary{
 			Slug:      feat.Slug,
 			Title:     feat.Title,
+			Emoji:     feat.Emoji,
 			UpdatedAt: feat.UpdatedAt,
 		})
 	}

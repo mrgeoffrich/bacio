@@ -449,6 +449,11 @@ export interface DocContent {
 export interface FeatureSummary {
   slug: string;
   title: string;
+  // BACI-184: per-feature emoji glyph for the Features panel list.
+  // Empty when none is set — the list renders nothing (no placeholder)
+  // in that case. Mirrors FeatureDetail.emoji so both surfaces share
+  // the same glyph BACI-172 paints on every kanban card.
+  emoji: string;
   updatedAt: string;
 }
 
@@ -1304,7 +1309,12 @@ export async function listFeatures(repoPrefix: string): Promise<FeatureSummary[]
     throw new Error('select a repository to view its features');
   }
   const feats = await call<ApiFeature[]>(`/repos/${repoPrefix}/features`);
-  return feats.map(f => ({ slug: f.slug, title: f.title, updatedAt: f.updated_at }));
+  return feats.map(f => ({
+    slug: f.slug,
+    title: f.title,
+    emoji: f.emoji ?? '',
+    updatedAt: f.updated_at,
+  }));
 }
 
 interface ApiFeatureComment {

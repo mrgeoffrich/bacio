@@ -787,12 +787,29 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   text-transform: uppercase;
   color: var(--fg-3);
 }
+/* BACI-184: row that wraps the per-feature emoji glyph and the
+   feature title so they sit side-by-side under the slug. min-width:0
+   on the title lets it ellipsize cleanly when the panel is narrow. */
+.mk-features-item-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.mk-features-item-emoji {
+  font-size: 14px;
+  line-height: 1;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+}
 .mk-features-item-title {
   font-family: var(--font-sans);
   font-size: var(--text-sm);
   font-weight: 500;
   color: var(--fg-1);
   line-height: 1.35;
+  min-width: 0;
 }
 .mk-features-main {
   flex: 1;

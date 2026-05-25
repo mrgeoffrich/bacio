@@ -644,10 +644,14 @@ export class FeatureRefDTO {
 
 /**
  * FeatureSummary is one feature, shaped for the desktop feature list.
+ * Emoji (BACI-184) carries the per-feature glyph so the Features panel
+ * list can render it alongside the title — same glyph BACI-172 paints
+ * on every kanban card. Empty when no emoji has been set.
  */
 export class FeatureSummary {
     "slug": string;
     "title": string;
+    "emoji": string;
     "updatedAt": time$0.Time;
 
     /** Creates a new FeatureSummary instance. */
@@ -657,6 +661,9 @@ export class FeatureSummary {
         }
         if (!("title" in $$source)) {
             this["title"] = "";
+        }
+        if (!("emoji" in $$source)) {
+            this["emoji"] = "";
         }
         if (!("updatedAt" in $$source)) {
             this["updatedAt"] = null;
