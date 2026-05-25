@@ -28,7 +28,7 @@ function formatSyncTime(iso) {
   return d.toLocaleString();
 }
 
-export default function Topbar({ boards, activeBoard, onPickBoard, onAddRepository, activeView, onChangeView, onOpenPalette, onOpenSettings, onOpenSync, leaderState, openIssueKey, onCloseIssue, agentCounts, shippedCount, onOpenIssue }) {
+export default function Topbar({ boards, activeBoard, onPickBoard, onAddRepository, activeView, onChangeView, onOpenPalette, onOpenSettings, onOpenSync, leaderState, openIssueKey, onCloseIssue, agentCounts, shippedCount, onOpenIssue, flyingShipKey, shipFlashing, onShipFlightDone }) {
   const board = boards.find(b => b.prefix === activeBoard);
   const syncEnabled = !!board?.syncEnabled;
   // BACI-89: the Sync badge is now a live status indicator, not just a
@@ -125,6 +125,9 @@ export default function Topbar({ boards, activeBoard, onPickBoard, onAddReposito
           activeBoard={activeBoard}
           shippedCount={shippedCount ?? 0}
           onOpenIssue={onOpenIssue}
+          flyingShipKey={flyingShipKey}
+          shipFlashing={shipFlashing}
+          onShipFlightDone={onShipFlightDone}
         />
         <button
           type="button"
