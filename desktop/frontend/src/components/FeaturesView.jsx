@@ -83,7 +83,20 @@ export default function FeaturesView({ activeBoard }) {
               onClick={() => setSelected(f.slug)}
             >
               <span className="mk-features-item-slug">{f.slug}</span>
-              <span className="mk-features-item-title">{f.title}</span>
+              <span className="mk-features-item-title-row">
+                {/* BACI-184: same per-feature glyph BACI-172 paints on
+                    every kanban card, rendered to the left of the title
+                    so the Features panel is scannable at a glance.
+                    aria-hidden because the glyph is a visual marker —
+                    the title carries the real semantics. Nothing
+                    rendered (no placeholder) when emoji is empty. */}
+                {f.emoji && (
+                  <span className="mk-features-item-emoji" aria-hidden="true">
+                    {f.emoji}
+                  </span>
+                )}
+                <span className="mk-features-item-title">{f.title}</span>
+              </span>
             </button>
           ))
         )}
