@@ -230,3 +230,99 @@ func TestRequireClaimNoOpenClaimErrorWording(t *testing.T) {
 		t.Errorf("wording drift: error must contain %q", want2)
 	}
 }
+
+// TestClaimPolicyAllRequiresEveryKey covers the default BACI-126b
+// behaviour: holding only one of two targeted keys is refused, and the
+// error names the missing one.
+func TestClaimPolicyAllRequiresEveryKey(t *testing.T) {
+	held := map[string]struct{}{"MINI-1": {}}
+	err := checkClaims(held, []string{"MINI-1", "MINI-2"}, policyAll, "bacio issue edit")
+	if err == nil {
+		t.Fatal("policyAll with one of two keys held should fail")
+	}
+	if !strings.Contains(err.Error(), "MINI-2") {
+		t.Errorf("error should name the missing key MINI-2: %v", err)
+	}
+	if !strings.Contains(err.Error(), "cannot operate on") {
+		t.Errorf("policyAll wording drift; got: %v", err)
+	}
+}
+
+// TestClaimPolicyAllPassesWhenAllPresent locks in the pass case for
+// the default policy.
+func TestClaimPolicyAllPassesWhenAllPresent(t *testing.T) {
+	held := map[string]struct{}{"MINI-1": {}, "MINI-2": {}}
+	if err := checkClaims(held, []string{"MINI-1", "MINI-2"}, policyAll, "bacio link"); err != nil {
+		t.Errorf("policyAll with all keys held should pass; got: %v", err)
+	}
+}
+
+// TestClaimPolicyAnyPassesOnPrimary covers the BACI-170 relaxation:
+// for link / unlink, a claim on the primary (from / a) side is
+// sufficient.
+func TestClaimPolicyAnyPassesOnPrimary(t *testing.T) {
+	held := map[string]struct{}{"MINI-1": {}}
+	if err := checkClaims(held, []string{"MINI-1", "MINI-2"}, policyAny, "bacio link"); err != nil {
+		t.Errorf("policyAny with primary claimed should pass; got: %v", err)
+	}
+}
+
+// TestClaimPolicyAnyPassesOnSecondary covers the symmetric branch:
+// a claim on the secondary (to / b) side also satisfies the gate, so
+// a reviewer agent can back-fill the relation from its own ticket.
+func TestClaimPolicyAnyPassesOnSecondary(t *testing.T) {
+	held := map[string]struct{}{"MINI-2": {}}
+	if err := checkClaims(held, []string{"MINI-1", "MINI-2"}, policyAny, "bacio link"); err != nil {
+		t.Errorf("policyAny with secondary claimed should pass; got: %v", err)
+	}
+}
+
+// TestClaimPolicyAnyRefusesWhenNeitherHeld locks in the drift case
+// the relaxed gate still catches, and pins the new error wording —
+// agents will grep this message to recover gracefully.
+func TestClaimPolicyAnyRefusesWhenNeitherHeld(t *testing.T) {
+	held := map[string]struct{}{"MINI-3": {}}
+	err := checkClaims(held, []string{"MINI-1", "MINI-2"}, policyAny, "bacio link")
+	if err == nil {
+		t.Fatal("policyAny with neither side claimed should fail")
+	}
+	if !strings.Contains(err.Error(), "requires a claim on at least one side of the relation") {
+		t.Errorf("policyAny error wording drift; got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "MINI-1") || !strings.Contains(err.Error(), "MINI-2") {
+		t.Errorf("policyAny error must list both extracted keys; got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "MINI-3") {
+		t.Errorf("policyAny error must show the held claim so the agent knows what it has; got: %v", err)
+	}
+}
+
+// TestKeyExtractorsLinkUsesPolicyAny sanity-checks that the link /
+// unlink entries declare the relaxed policy. A future refactor that
+// drops the policy field on these would silently revert BACI-170.
+func TestKeyExtractorsLinkUsesPolicyAny(t *testing.T) {
+	for _, name := range []string{"link", "unlink"} {
+		ext, ok := keyExtractors[name]
+		if !ok {
+			t.Errorf("keyExtractors missing %q", name)
+			continue
+		}
+		if ext.policy != policyAny {
+			t.Errorf("keyExtractors[%q].policy = %d, want policyAny (%d)", name, ext.policy, policyAny)
+		}
+	}
+}
+
+// TestKeyExtractorsOtherGatedVerbsUsePolicyAll guards against
+// accidentally relaxing the gate on a verb that really does mutate
+// the targeted ticket.
+func TestKeyExtractorsOtherGatedVerbsUsePolicyAll(t *testing.T) {
+	for name, ext := range keyExtractors {
+		if name == "link" || name == "unlink" {
+			continue
+		}
+		if ext.policy != policyAll {
+			t.Errorf("keyExtractors[%q].policy = %d, want policyAll (%d) — only link/unlink should be policyAny", name, ext.policy, policyAll)
+		}
+	}
+}

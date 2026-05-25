@@ -42,16 +42,35 @@ import (
 // The gate is a `PersistentPreRunE` on each affected cobra group so
 // the rule lives in one place and the per-verb RunE stays unchanged.
 
+// claimPolicy names how the gate combines the extracted keys with the
+// held-claims set. The zero value (policyAll) is the original BACI-126b
+// behaviour: every extracted key must be in the held-claims set, so
+// drift ("agent operates on a ticket it doesn't own") fails loud.
+// policyAny relaxes that for verbs whose secondary key is referenced
+// rather than mutated — BACI-170 set this on `link` / `unlink` so an
+// agent claimed on either side of a relation can run the verb. The
+// relaxation is intentionally symmetric (not directional on `from`/`a`)
+// so a reviewer agent claimed on the secondary side can back-fill the
+// relation without the human needing to re-run.
+type claimPolicy int
+
+const (
+	policyAll claimPolicy = iota // every extracted key must be held (default)
+	policyAny                    // at least one extracted key must be held (link / unlink)
+)
+
 // keyExtractor names how to find the issue key (or keys, for link)
 // the gated verb targets. fromArgs is the positional slot to read;
 // negative means "no key from positionals". fromJSONField is the JSON
 // field name; empty means "no key from JSON". secondaryArg / secondaryJSONField
-// cover the link / unlink shape (two keys).
+// cover the link / unlink shape (two keys). policy picks the
+// combination rule the gate applies once both slots are extracted.
 type keyExtractor struct {
-	fromArgs            int
-	secondaryArgs       int
-	fromJSONField       string
-	secondaryJSONField  string
+	fromArgs           int
+	secondaryArgs      int
+	fromJSONField      string
+	secondaryJSONField string
+	policy             claimPolicy
 }
 
 // keyExtractors lists, per cobra-command path, how to resolve the
@@ -81,9 +100,14 @@ var keyExtractors = map[string]keyExtractor{
 	"pr detach": {fromArgs: 0, fromJSONField: "issue_key"},
 	"pr list":   {fromArgs: 0},
 
-	// link / unlink take two keys; both must be in the held-claims set.
-	"link":   {fromArgs: 0, secondaryArgs: 2, fromJSONField: "from", secondaryJSONField: "to"},
-	"unlink": {fromArgs: 0, secondaryArgs: 1, fromJSONField: "a", secondaryJSONField: "b"},
+	// link / unlink take two keys. Per BACI-170 the gate accepts a claim
+	// on EITHER side — the secondary key is being referenced (the
+	// relation's symmetric backlink), not mutated, so requiring a claim
+	// on both would block legitimate planning / reviewer work. Other
+	// gated verbs keep the default policyAll because they really do
+	// mutate the targeted ticket.
+	"link":   {fromArgs: 0, secondaryArgs: 2, fromJSONField: "from", secondaryJSONField: "to", policy: policyAny},
+	"unlink": {fromArgs: 0, secondaryArgs: 1, fromJSONField: "a", secondaryJSONField: "b", policy: policyAny},
 }
 
 // requireClaimForGroup is the PersistentPreRunE wired onto the gated
@@ -156,14 +180,42 @@ func requireClaimForGroup(cmd *cobra.Command, args []string) error {
 		// any-claim test already ran above.
 		return nil
 	}
+	return checkClaims(held, keys, ext.policy, cmd.CommandPath())
+}
+
+// checkClaims is the policy step extracted from requireClaimForGroup
+// so it can be unit-tested without standing up an agent session.
+// `held` is the set of issue keys the calling agent has open claims on;
+// `keys` is what the verb is targeting (already canonicalised by
+// extractTargetedKeys); `policy` picks the combination rule; `cmdPath`
+// is interpolated into the error message so the operator sees which
+// verb refused.
+func checkClaims(held map[string]struct{}, keys []string, policy claimPolicy, cmdPath string) error {
 	heldList := sortedKeys(held)
-	for _, k := range keys {
-		if _, ok := held[k]; !ok {
-			return fmt.Errorf("bacio: this agent is claimed against %s; cannot operate on %s without an open claim on it",
-				strings.Join(heldList, ", "), k)
+	switch policy {
+	case policyAny:
+		// At least one extracted key must be in held — the relaxed
+		// rule for `link` / `unlink`. The error names both sides of
+		// the relation so the agent knows which extra ticket would
+		// satisfy the gate.
+		for _, k := range keys {
+			if _, ok := held[k]; ok {
+				return nil
+			}
 		}
+		return fmt.Errorf("bacio: this agent is claimed against %s; `%s` requires a claim on at least one side of the relation (got %s)",
+			strings.Join(heldList, ", "), cmdPath, strings.Join(keys, ", "))
+	default:
+		// policyAll — every extracted key must be held (the original
+		// BACI-126b behaviour, used by every verb except link/unlink).
+		for _, k := range keys {
+			if _, ok := held[k]; !ok {
+				return fmt.Errorf("bacio: this agent is claimed against %s; cannot operate on %s without an open claim on it",
+					strings.Join(heldList, ", "), k)
+			}
+		}
+		return nil
 	}
-	return nil
 }
 
 // extractTargetedKeys reads the issue key(s) the verb is targeting,
