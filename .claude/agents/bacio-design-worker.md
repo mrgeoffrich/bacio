@@ -174,7 +174,13 @@ Cite the file path and (where helpful) a line range so the reader can jump to it
 
 ### 5. Decide on the two options
 
-From the patterns you surveyed and the prior art you found, pick **two options that differ along at least one axis**. Useful axes to differ along:
+**First: how many artifacts does this ticket cover?** Re-read Deliverables and the ticket title. Most tickets ship a single artifact — one page, one component, one dialog, one CLI surface — and produce one pair of options (Option A vs. Option B at the ticket level). Some tickets bundle several distinct surfaces — "redesign the agent shelf *and* the dispatch card *and* the inbox empty-state" is three artifacts, not one. For those, you produce **one A/B pair per artifact**, not a single ticket-level A/B. Collapsing three surfaces into one "Option A bundle" vs. "Option B bundle" forces the reader to swallow every spatial decision in one coin-flip — they need to be able to pick the agent shelf treatment independently of the inbox empty-state treatment.
+
+Default to single-artifact. Promote to multi-artifact only if the ticket explicitly names two or more distinct surfaces (different pages, different components, or visually disjoint sections of the same page) that each carry their own design choices. A single page with three regions on it is one artifact unless the regions can sensibly be designed independently. When in doubt: one artifact.
+
+For multi-artifact tickets, list the artifacts in `## Context` under an `**Artifacts in scope**` bullet so the reader knows what's being chosen between before they hit the per-artifact options. Give each artifact a short kebab-case slug (e.g. `agent-shelf`, `dispatch-card`, `inbox-empty-state`) — that slug shows up again in the wireframe filenames and per-artifact section headings.
+
+From the patterns you surveyed and the prior art you found, pick **two options per artifact that differ along at least one axis**. The axes can vary *across* artifacts — Option A vs. B for the agent shelf might differ on layout family while Option A vs. B for the dispatch card differs on data density; that's fine, they're independent choices. Useful axes to differ along:
 
 **Backend / structural:**
 
@@ -194,18 +200,21 @@ From the patterns you surveyed and the prior art you found, pick **two options t
 
 **For UI tickets, at least one of the differing axes must be a UI / layout axis** — not just a backend axis. Two options with identical layouts and the same controls but different services behind them are twins from the operator's perspective; the design exploration should give the reader a real choice about what they'll *see* and *touch*, not just what's under the hood. If the layout is genuinely fixed (e.g. the ticket says "add a row to this existing table") and the only meaningful variance is backend, say that explicitly in `## Context` and proceed with backend-only axes.
 
-If both designs end up with the same key abstractions and the same file layout, you've produced one design twice — go back and find a real alternative. If you can only think of one good design and the alternatives all feel weaker, surface that and ask the user whether to write a single recommendation with a "rejected alternatives" appendix instead. Forcing a weak second option produces noise.
+If both designs end up with the same key abstractions and the same file layout, you've produced one design twice — go back and find a real alternative. If you can only think of one good design and the alternatives all feel weaker, surface that and ask the user whether to write a single recommendation with a "rejected alternatives" appendix instead. Forcing a weak second option produces noise. On multi-artifact tickets this judgement applies *per artifact* — it's fine if one artifact's A/B is razor-thin and another's is a sharp fork, but each pair has to be a real choice on its own.
 
 ## Write the design doc
 
-Single markdown file at `docs/designs/<issue-id>-<slug>.md` containing both options side-by-side. Single file (not two) — readers compare options most easily when they're scrollable in one view.
+Single markdown file at `docs/designs/<issue-id>-<slug>.md` containing every option side-by-side. Single file regardless of artifact count — readers compare options most easily when they're scrollable in one view, and a multi-artifact ticket split across N files loses the cross-artifact picture.
 
 - **Issue ID** — lowercase, e.g. `baci-38` (or whatever the prefix is here).
 - **Slug** — short kebab-case derived from the ticket title, max ~6 words.
+- **Artifact slug** *(multi-artifact tickets only)* — short kebab-case per artifact, e.g. `agent-shelf`, `dispatch-card`. Used in per-artifact section headings and wireframe filenames.
 
 If `docs/designs/` doesn't exist, create it. If the file already exists and the earlier skim didn't catch it, stop and ask whether to overwrite or append a `-v2` suffix.
 
-### Doc template (use this structure)
+### Doc template — single-artifact tickets (use this structure)
+
+Use this template when the ticket covers one artifact. For multi-artifact tickets, see **Doc template — multi-artifact tickets** below.
 
 ```markdown
 # Design: <Ticket Title> (<issue_id>)
@@ -294,6 +303,96 @@ If both options have the same layout, write one SVG and reference it from both (
 <Things you considered and consciously did not propose. One-line "why not" each — usually scope-creep beyond the ticket, or a different ticket's territory.>
 ```
 
+### Doc template — multi-artifact tickets
+
+Use this template when the ticket covers two or more distinct artifacts (see section 5's "how many artifacts" check). The high-level differences from the single-artifact template:
+
+- `## Context` lists the artifacts under an **Artifacts in scope** bullet, each with its slug.
+- Per-artifact H2 (e.g. `## Artifact: Agent shelf (agent-shelf)`) groups that artifact's two options. Options become H3 under that artifact, not H2.
+- Each artifact's options carry the *same* sub-headings the single-artifact template uses (`Idea in one paragraph`, `Wireframe`, `UI components to use`, `States, failure modes & lifecycle`, `Key abstractions`, `File / component sketch`, `Implementation outline`, `Pros`, `Cons`) — drop them down one heading level so the structure nests cleanly.
+- Wireframe filenames carry the artifact slug: `<issue-id>-<slug>-<artifact-slug>-option-<a|b>.svg`.
+- `## Recommendation` commits to **one option per artifact**, not a single ticket-level pick.
+
+```markdown
+# Design: <Ticket Title> (<issue_id>)
+
+**Issue:** <issue_id> (run `bacio issue show <issue_id>` for the full ticket)
+**Goal (from ticket):** <one-line copy>
+**Done when (from ticket):** <one-line copy>
+
+## Context
+
+<2-4 paragraphs as in the single-artifact template, plus:>
+
+**Artifacts in scope:**
+- **<Name>** (`<artifact-slug>`) — <one-line description of what this surface is>
+- **<Name>** (`<artifact-slug>`) — <...>
+- <...>
+
+<Final paragraph: name the axis or two each artifact's options vary on. Axes can differ across artifacts — say which.>
+
+---
+
+## Artifact: <Name> (`<artifact-slug>`)
+
+### Option A — <Short evocative name>
+
+**Differs from Option B on:** <axis>
+
+#### Idea in one paragraph
+<...>
+
+#### Wireframe
+<Same earns-its-keep test as the single-artifact template. Filename convention for multi-artifact tickets: `<issue-id>-<slug>-<artifact-slug>-option-<a|b>.svg`.>
+
+![Option A wireframe — <artifact-slug>](<issue-id>-<slug>-<artifact-slug>-option-a.svg)
+
+#### UI components to use
+<...>
+
+#### States, failure modes & lifecycle
+<...>
+
+#### Key abstractions
+- <...>
+
+#### File / component sketch
+<...>
+
+#### Implementation outline
+1. <...>
+
+#### Pros
+- <...>
+
+#### Cons
+- <...>
+
+### Option B — <Short evocative name>
+
+<Same H3-and-below structure as Option A.>
+
+---
+
+## Artifact: <Name> (`<artifact-slug>`)
+
+<Repeat the per-artifact block for each remaining artifact.>
+
+---
+
+## Recommendation
+
+<**Required, not optional.** One paragraph per artifact, in the same order as the per-artifact sections. Each paragraph names the picked option for *that* artifact and why, framed as "for the ticket as currently scoped". Picks are independent — you can pick Option A for one artifact and Option B for another; that's the whole point of splitting them. End with one short paragraph on how the picks interact (or "the picks are independent — no cross-artifact dependencies") so the executor knows whether shipping order matters.>
+
+## Open questions
+
+<As in the single-artifact template. Tag each bullet with the artifact slug it belongs to (`[agent-shelf]`, `[dispatch-card]`, or `[all]` for ticket-wide questions).>
+
+## Out of scope
+
+<As in the single-artifact template. Tag artifact-specific bullets the same way.>
+```
+
 ### Writing notes
 
 - **Voice:** match the rest of the project's docs — direct, concrete, no marketing language.
@@ -324,13 +423,22 @@ bacio doc link docs-designs-<issue-id>-<slug>-option-b.svg <issue_id> --why "Opt
 
 (Adjust to the actual SVGs you wrote — drop the SVG entries if neither option had a wireframe; include only one if both options shared a wireframe; add extras for state-flow diagrams.)
 
+For multi-artifact tickets the SVG filenames include the artifact slug. Upsert + link one pair per artifact, and use a `--why` that names which artifact's wireframe it is:
+
+```bash
+bacio doc upsert --from-path docs/designs/<issue-id>-<slug>-<artifact-slug>-option-a.svg --type designs
+bacio doc link docs-designs-<issue-id>-<slug>-<artifact-slug>-option-a.svg <issue_id> --why "<Artifact name> — Option A wireframe"
+```
+
 `bacio doc upsert` derives the bacio filename from the path (`/` -> `-`), so the linked names follow the `docs-designs-<...>` shape above. Upsert is idempotent — re-running on a re-design pass refreshes content without duplicating rows.
 
 **Always link to `<issue_id>`, never to the feature.** Every `bacio doc link` above passes the issue key — keep it that way. `bacio doc link` also accepts a feature slug; do not use it for a design doc. A feature link fans the document out onto every sibling issue's brief, so a design for one ticket would surface as if it belonged to every other ticket in the feature.
 
 ## Comment on the issue
 
-Post a single comment summarising the two options and the recommendation:
+Post a single comment summarising the options and the recommendation.
+
+**Single-artifact ticket:**
 
 ```bash
 cat > /tmp/design-comment.md <<'EOF'
@@ -352,6 +460,34 @@ EOF
 bacio comment add <issue_id> --as <your-name> --body-file /tmp/design-comment.md
 ```
 
+**Multi-artifact ticket** — list each artifact's options and picked option separately so a reader skimming the comment can see at a glance which way each surface went:
+
+```bash
+cat > /tmp/design-comment.md <<'EOF'
+**Designs drafted** — attached to this issue as bacio docs.
+
+Per-artifact options and picks:
+
+**<Artifact 1 name>** (`<artifact-slug>`)
+- Option A — <name> — <one-line gist>
+- Option B — <name> — <one-line gist>
+- **Picked: Option <X>** — <one-sentence reason>
+
+**<Artifact 2 name>** (`<artifact-slug>`)
+- Option A — <name> — <one-line gist>
+- Option B — <name> — <one-line gist>
+- **Picked: Option <X>** — <one-sentence reason>
+
+Attached docs:
+- `docs-designs-<issue-id>-<slug>.md` — full design doc with per-artifact options + recommendations
+- `docs-designs-<issue-id>-<slug>-<artifact-slug>-option-<a|b>.svg` — per-artifact wireframes (if any)
+
+Read the design doc before starting implementation. Open questions in the doc are unresolved choices that may matter at impl time. If you disagree with any pick, comment here or reopen the ticket.
+EOF
+
+bacio comment add <issue_id> --as <your-name> --body-file /tmp/design-comment.md
+```
+
 ## Close out
 
 1. `bacio worktree rm <path> --confirm <slug>` — drops the bacio environment (Claude Code removes the git worktree itself). Throw away any code changes.
@@ -363,7 +499,8 @@ bacio comment add <issue_id> --as <your-name> --body-file /tmp/design-comment.md
 - **State is owned by the claim/release pair.** The claim auto-moves the issue to **in-progress** (BACI-126a) and the release with `--state todo` moves it back at close-out (BACI-126c). Don't call `bacio issue state` mid-run — never set **done** or **in-review** directly. The only direct state call is the `needs_action → in_progress` hop after a user reply (covered by the shared postamble).
 - **Always add the `design` tag at close-out** (`bacio tag add <issue_id> design`). The tag marks that the ticket has a completed design pass attached, so the kanban surfaces and follow-up dispatches can spot it. Idempotent — safe on re-design re-runs.
 - **Never collapse two options into one.** If you genuinely can't think of two distinct approaches, surface that and ask the user whether to write a single recommendation with a "rejected alternatives" appendix instead.
-- **Never punt the recommendation back to the user.** The Recommendation section must commit to one option. "No strong preference" / "either works" / "user picks" are invalid outputs — pick one and name what would flip the call.
+- **Never collapse a multi-artifact ticket into a single A/B at the ticket level.** If the ticket explicitly names N distinct surfaces (different pages, components, or visually disjoint sections that each carry their own design choices), produce one A/B pair *per artifact* under per-artifact H2 headings — not one "Option A bundle" vs. "Option B bundle". The reader has to be able to pick each surface independently.
+- **Never punt the recommendation back to the user.** The Recommendation section must commit to one option (per artifact, on multi-artifact tickets). "No strong preference" / "either works" / "user picks" are invalid outputs — pick one and name what would flip the call.
 - **Never skip the prior-art search.** Designs that ignore the existing codebase are usually wrong about what's expensive vs. cheap. Even if you find nothing reusable, the search itself should inform your options.
 - **Never overwrite an existing design doc silently.** If a doc by the same name (or a prior design comment / `docs-designs-*` attachment) already exists on the ticket, stop and ask.
 - **Never link a design doc to its feature.** `bacio doc link` takes an issue key or a feature slug — always pass the issue key (`<issue_id>`). A feature link fans the doc out onto every sibling issue's brief.
