@@ -312,6 +312,124 @@ func TestArchiveSweepIfLeaderWritesAudit(t *testing.T) {
 	}
 }
 
+// TestControllerStartRunsArchiveSweepOnStartup (BACI-175) pins the
+// sweep-on-startup pass. A short-lived process that exits before the
+// ArchiveSweepInterval ticker fires must still archive overdue rows on
+// the way in. Seeds one done issue with a back-dated terminal_at,
+// starts the Controller with a leader-true elector, then asserts one
+// `archive.sweep` audit row landed before Stop. Mirrors
+// TestArchiveSweepIfLeaderWritesAudit's setup; the only difference is
+// who triggers the sweep (Start's synchronous startup pass vs a direct
+// ArchiveSweepIfLeader call).
+func TestControllerStartRunsArchiveSweepOnStartup(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.Open(filepath.Join(dir, "db.sqlite"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	repo, err := s.CreateRepo("STRT", "startup-repo", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+	iss, err := s.CreateIssue(repo.ID, nil, "done long ago", "", model.StateDone, nil)
+	if err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	if _, err := s.DB.Exec(
+		`UPDATE issues SET terminal_at = datetime('now','-30 days') WHERE id = ?`,
+		iss.ID,
+	); err != nil {
+		t.Fatalf("backdate issue: %v", err)
+	}
+
+	fb := &fakeElectorBackend{acquireOK: true, renewOK: true}
+	el := leader.New(fb, "test pid=1")
+	c := New(s, el, nil, nil, nil, nil)
+
+	c.Start(nil)
+
+	// Sweep runs synchronously inside Start (after the initial
+	// heartbeat, before goroutines spin), so the audit row must be
+	// present before Stop returns — no sleep needed.
+	rows, err := s.ListHistory(store.HistoryFilter{Op: "archive.sweep"})
+	if err != nil {
+		t.Fatalf("ListHistory: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("archive.sweep rows after Start = %d, want 1", len(rows))
+	}
+	if rows[0].Actor != model.ControllerActor {
+		t.Fatalf("startup sweep Actor = %q, want %q", rows[0].Actor, model.ControllerActor)
+	}
+	if !strings.Contains(rows[0].Details, `"issues":1`) {
+		t.Fatalf("startup sweep Details = %q, missing issues:1", rows[0].Details)
+	}
+
+	// Eligibility cleared — the issue is now archived.
+	got, err := s.GetIssueByID(iss.ID)
+	if err != nil {
+		t.Fatalf("get issue: %v", err)
+	}
+	if got.ArchivedAt == nil {
+		t.Fatal("startup sweep must stamp archived_at on the eligible issue")
+	}
+
+	c.Stop()
+}
+
+// TestControllerStartStartupSweepStandbyNoop (BACI-175) verifies the
+// sweep-on-startup pass respects the leader gate: a standby Controller
+// must NOT sweep on Start, even when there are overdue rows. Otherwise
+// every standby UI would race to archive on launch.
+func TestControllerStartStartupSweepStandbyNoop(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.Open(filepath.Join(dir, "db.sqlite"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	repo, err := s.CreateRepo("STBY", "standby-repo", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+	iss, err := s.CreateIssue(repo.ID, nil, "done long ago", "", model.StateDone, nil)
+	if err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	if _, err := s.DB.Exec(
+		`UPDATE issues SET terminal_at = datetime('now','-30 days') WHERE id = ?`,
+		iss.ID,
+	); err != nil {
+		t.Fatalf("backdate issue: %v", err)
+	}
+
+	fb := &fakeElectorBackend{acquireOK: false, renewOK: false}
+	el := leader.New(fb, "test pid=1")
+	c := New(s, el, nil, nil, nil, nil)
+
+	c.Start(nil)
+
+	rows, err := s.ListHistory(store.HistoryFilter{Op: "archive.sweep"})
+	if err != nil {
+		t.Fatalf("ListHistory: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("standby Start wrote %d archive.sweep rows, want 0", len(rows))
+	}
+	got, err := s.GetIssueByID(iss.ID)
+	if err != nil {
+		t.Fatalf("get issue: %v", err)
+	}
+	if got.ArchivedAt != nil {
+		t.Fatal("standby Start must NOT archive — leader gate violated")
+	}
+
+	c.Stop()
+}
+
 // TestNilGuards: every helper tolerates nil inputs without panicking —
 // this matches the "background work must never crash the host" contract.
 func TestNilGuards(t *testing.T) {

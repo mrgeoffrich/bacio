@@ -277,6 +277,15 @@ func (c *Controller) Start(emit func(leader.State)) {
 			emit(st)
 		}
 	}
+	// BACI-175: sweep-on-startup. Short-lived processes (a 30s `bacio
+	// web --no-open` smoke run, a one-minute desktop peek, a dispatch
+	// worker's controller spin-up) never live long enough for the
+	// ArchiveSweepInterval ticker to fire. Running one sweep after the
+	// synchronous initial heartbeat (above) catches any overdue rows
+	// even if the process exits seconds later. Leader-gated via the
+	// helper, so a standby controller is a no-op; idempotent on a
+	// quiet DB so an over-fire across surfaces is harmless.
+	ArchiveSweepIfLeader(c.st, c.el, c.log)
 	// Capture done into each goroutine's local before the for-loop —
 	// Stop sets c.done = nil after closing it, and re-reading c.done
 	// after a ticker wake would turn <-c.done into <-nil and park the
