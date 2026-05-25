@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/mrgeoffrich/bacio/internal/client"
+	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
@@ -133,6 +134,33 @@ func (f *fakeBoardClient) CountTranscriptDocsByIssue(context.Context, []int64) (
 // into boardcards.Assemble.
 func (f *fakeBoardClient) ListHiddenFeatureSlugs(context.Context, *model.Repo) ([]string, error) {
 	return nil, nil
+}
+
+// CreateIssue (BACI-166) — stub the client.Client.CreateIssue path the
+// BoardService.AddIssue Wails seam takes. Append the new row to the
+// fake's issues slice with the input's title/description so the
+// subsequent boardcards.Assemble round-trip (which calls ListIssues
+// again) sees the freshly-created card. Mirrors the "the store would
+// have written this" semantics the real client.LocalImpl gives.
+func (f *fakeBoardClient) CreateIssue(_ context.Context, _ *model.Repo, in inputs.IssueAddInput, _ bool) (*model.Issue, error) {
+	state := model.StateTodo
+	if in.State != "" {
+		st, err := model.ParseState(in.State)
+		if err != nil {
+			return nil, err
+		}
+		state = st
+	}
+	iss := &model.Issue{
+		ID:          int64(len(f.issues)) + 1,
+		Key:         "TEST-99",
+		State:       state,
+		Title:       in.Title,
+		Description: in.Description,
+		Tags:        in.Tags,
+	}
+	f.issues = append(f.issues, iss)
+	return iss, nil
 }
 
 func TestListCardsTaken(t *testing.T) {
@@ -317,5 +345,52 @@ func TestListShippedRejectsAllRepos(t *testing.T) {
 	}
 	if _, err := svc.ListShipped("all", 0, 0); err == nil {
 		t.Error("ListShipped(\"all\") = nil, want error (per-repo only)")
+	}
+}
+
+// TestBoardService_AddIssue covers the BACI-166 Wails seam — the React
+// composer (+ button in the Topbar) calls AddIssue to create an issue
+// before queuing the scope dispatch via the existing DispatchIssue
+// path. The returned BoardCard must carry the new key, column, label,
+// and propagated title so the optimistic prepend in App.jsx matches
+// the shape ListCards would draw on the next poll.
+func TestBoardService_AddIssue(t *testing.T) {
+	svc := NewBoardService(&fakeBoardClient{
+		repo:   &model.Repo{Prefix: "TEST"},
+		issues: nil,
+	})
+
+	card, err := svc.AddIssue("TEST", "Login broken on Safari", "500 on submit")
+	if err != nil {
+		t.Fatalf("AddIssue: %v", err)
+	}
+	if card.Key != "TEST-99" {
+		t.Errorf("Key = %q, want TEST-99", card.Key)
+	}
+	if card.Column != string(model.StateTodo) {
+		t.Errorf("Column = %q, want %q", card.Column, model.StateTodo)
+	}
+	if card.ColumnLabel != "Todo" {
+		t.Errorf("ColumnLabel = %q, want Todo", card.ColumnLabel)
+	}
+	if card.Title != "Login broken on Safari" {
+		t.Errorf("Title = %q, want propagated", card.Title)
+	}
+	if card.Taken {
+		t.Errorf("Taken = true on a fresh issue, want false")
+	}
+}
+
+// TestBoardService_AddIssueRejectsAllRepos — the composer always has a
+// real prefix in hand from activeBoard; the "all" pseudo-board has no
+// concept of "which repo do I create in", so AddIssue must reject empty
+// and "all" prefixes with a clear error.
+func TestBoardService_AddIssueRejectsAllRepos(t *testing.T) {
+	svc := NewBoardService(&fakeBoardClient{repo: &model.Repo{Prefix: "TEST"}})
+	if _, err := svc.AddIssue("", "t", ""); err == nil {
+		t.Error("AddIssue(\"\") = nil, want error (cross-repo not supported)")
+	}
+	if _, err := svc.AddIssue("all", "t", ""); err == nil {
+		t.Error("AddIssue(\"all\") = nil, want error (cross-repo not supported)")
 	}
 }

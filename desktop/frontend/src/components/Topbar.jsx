@@ -28,7 +28,7 @@ function formatSyncTime(iso) {
   return d.toLocaleString();
 }
 
-export default function Topbar({ boards, activeBoard, onPickBoard, onAddRepository, activeView, onChangeView, onOpenPalette, onOpenSettings, onOpenSync, leaderState, openIssueKey, onCloseIssue, agentCounts, shippedCount, onOpenIssue, flyingShipKey, shipFlashing, onShipFlightDone }) {
+export default function Topbar({ boards, activeBoard, onPickBoard, onAddRepository, activeView, onChangeView, onOpenPalette, onOpenSettings, onOpenSync, onOpenComposer, leaderState, openIssueKey, onCloseIssue, agentCounts, shippedCount, onOpenIssue, flyingShipKey, shipFlashing, onShipFlightDone }) {
   const board = boards.find(b => b.prefix === activeBoard);
   const syncEnabled = !!board?.syncEnabled;
   // BACI-89: the Sync badge is now a live status indicator, not just a
@@ -129,6 +129,21 @@ export default function Topbar({ boards, activeBoard, onPickBoard, onAddReposito
           shipFlashing={shipFlashing}
           onShipFlightDone={onShipFlightDone}
         />
+        {/* BACI-166: + opens the IssueComposer modal. Hidden on the
+            cross-repo "all" pseudo-board — the composer needs a real
+            prefix to create against. */}
+        {onOpenComposer && activeBoard && activeBoard !== 'all' && (
+          <Tooltip label="New issue (⌘N)">
+            <button
+              type="button"
+              className="mk-icbtn"
+              aria-label="New issue"
+              onClick={onOpenComposer}
+            >
+              <Icon name="plus" />
+            </button>
+          </Tooltip>
+        )}
         <button
           type="button"
           className={syncBadgeClass}
