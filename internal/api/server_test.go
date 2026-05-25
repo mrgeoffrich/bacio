@@ -19,11 +19,18 @@ import (
 
 func newTestAPI(t *testing.T, opts api.Options) (*httptest.Server, *store.Store) {
 	t.Helper()
-	s, err := store.Open(filepath.Join(t.TempDir(), "test.sqlite"))
+	dbPath := filepath.Join(t.TempDir(), "test.sqlite")
+	s, err := store.Open(dbPath)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
+	// Propagate the temp DB path so handlers that derive a lock-file path
+	// (e.g. handleSyncSetup → AcquireSyncLock) don't fall back to
+	// store.DefaultPath() / ~/.bacio, which may not exist in CI.
+	if opts.DBPath == "" {
+		opts.DBPath = dbPath
+	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	srv := api.New(s, opts, logger)
 	ts := httptest.NewServer(srv.Handler())
