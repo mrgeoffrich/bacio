@@ -126,9 +126,12 @@ func (d deps) handleIssueBrief(w http.ResponseWriter, r *http.Request) {
 // When both link rows have differing --why descriptions, the issue's wins
 // and a warning is appended so nothing is silently dropped.
 //
-// After BACI-115 the body is inlined only for `plan` and `review` doc
-// types; transcripts and everything else carry SizeBytes + metadata
-// with an empty Content string.
+// After BACI-203 NO linked-doc body is inlined — every doc surfaces
+// metadata + SizeBytes only. The LinkedDocPanel renders a link into the
+// canonical /documents/<filename> page rather than embedding the body
+// inline. This narrows the previous BACI-115 rule (plan + review only)
+// to "never" so the brief stays slim even for issues with large plan
+// docs attached.
 func collectBriefDocs(s *store.Store, issueID int64, feat *model.Feature, includeFeature bool) ([]*BriefDoc, []string, error) {
 	warnings := []string{}
 	out := []*BriefDoc{}
@@ -197,21 +200,14 @@ func collectBriefDocs(s *store.Store, issueID int64, feat *model.Feature, includ
 	return out, warnings, nil
 }
 
-// briefDocContent applies the BACI-115 inlining rule: a doc's body is
-// inlined in the brief only if its type is `plan` or `review`. Mirrors
-// the client-side briefDocContent in internal/client/local_issue.go so
-// both code paths produce identical bodies. The transcript-filename
-// fallback catches `attach_transcript` docs created before the
-// `transcript` type existed (still typed `project_complete`).
-func briefDocContent(d *model.Document) string {
-	if d == nil {
-		return ""
-	}
-	if model.IsBacioTranscriptFilename(d.Filename) {
-		return ""
-	}
-	if !model.DocTypeInlinedInBrief(d.Type) {
-		return ""
-	}
-	return d.Content
+// briefDocContent applied the BACI-115 plan/review inlining rule
+// historically. BACI-203 narrows it to "always empty": the linked-doc
+// panel is now a link to the canonical /documents/<filename> page, so
+// no caller in the React tree reads the inlined body. Kept as a named
+// no-op so the call site reads as an intentional strip rather than an
+// always-empty literal — the symbol also keeps `model` imported, and
+// the symmetry with internal/client/local_issue.go (which keeps the
+// same shape for the Wails-bound brief) makes the parity obvious.
+func briefDocContent(_ *model.Document) string {
+	return ""
 }

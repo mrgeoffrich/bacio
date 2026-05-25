@@ -83,6 +83,8 @@ Every leader-gated piece of background work — including [BACI-89 background sy
 
 The CLI binary `//go:embed`s `webui/`. **`bacio web` mounts the bundle at `/ui/` and pops the browser; `bacio api` is API-only after BACI-72 and returns 404 on `/ui/`.** Reach for `bacio web` whenever the UI is in the loop — including agent-driven Playwright smoke testing (`bacio web --no-open` is the right flag, then drive with the `playwright-cli` skill).
 
+Client-side routing via `react-router` v7, `<BrowserRouter>` on both surfaces (BACI-203). Basename derives from `import.meta.env.BASE_URL` so the same source tree resolves to `/ui` in web mode and `/` in desktop mode; both asset servers (`internal/api/static.go` for `bacio web`, `application.AssetFileServerFS` for Wails) implement SPA fallback on unknown paths. See [`docs/web-app-mode.md`](docs/web-app-mode.md) §7a for the route map and the path-helper module at `desktop/frontend/src/lib/routes.ts`.
+
 Markdown rendering across both surfaces follows one rule: every read surface in the React tree goes through `<MarkdownView>` (`desktop/frontend/src/lib/markdownView.tsx`); never `react-markdown` directly. The TUI side uses `internal/tui/markdown.go`'s `renderMarkdown` (glamour). See [`docs/markdown-rendering.md`](docs/markdown-rendering.md).
 
 ## Claude Code integration

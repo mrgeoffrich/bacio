@@ -304,23 +304,17 @@ func (c *localClient) collectBriefDocs(issueID int64, feat *model.Feature, inclu
 	return out, warnings, nil
 }
 
-// briefDocContent applies the BACI-115 inlining rule: a doc's body is
-// inlined in the brief only if its type is `plan` or `review`. Every
-// other type — transcripts, project_complete, designs, etc. — surfaces
-// metadata only. A read-side fallback also catches transcript docs
-// stored before the `transcript` type existed (still typed
-// `project_complete`) by matching the filename pattern.
-func briefDocContent(d *model.Document) string {
-	if d == nil {
-		return ""
-	}
-	if model.IsBacioTranscriptFilename(d.Filename) {
-		return ""
-	}
-	if !model.DocTypeInlinedInBrief(d.Type) {
-		return ""
-	}
-	return d.Content
+// briefDocContent applied the BACI-115 plan/review inlining rule
+// historically. BACI-203 narrows it to "always empty": the linked-doc
+// panel is now a link to the canonical /documents/<filename> page on
+// both the desktop and web surfaces, so no caller in the React tree
+// reads the inlined body. Kept as a named no-op so the call site
+// reads as an intentional strip rather than an always-empty literal —
+// the symbol also keeps `model` imported, and the symmetry with
+// internal/api/handlers_brief.go's brief assembler keeps the two
+// paths trivially in sync.
+func briefDocContent(_ *model.Document) string {
+	return ""
 }
 
 func (c *localClient) CreateIssue(ctx context.Context, repo *model.Repo, in inputs.IssueAddInput, dryRun bool) (*model.Issue, error) {
