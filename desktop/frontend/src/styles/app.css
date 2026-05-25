@@ -225,6 +225,35 @@ body { margin: 0; }
 .mk-card.is-dragging { box-shadow: var(--shadow-2); transform: rotate(-1.5deg); cursor: grabbing; opacity: .9; }
 .mk-card.is-claude { animation: mk-breathe 2.4s ease-in-out infinite; }
 @keyframes mk-breathe { 0%,100% { box-shadow: var(--shadow-1); } 50% { box-shadow: 0 0 0 2px var(--status-claude-bg), var(--shadow-1); } }
+/* BACI-193: ship flourish — when a card lands in `done`, the Shipped
+   pill in the topbar briefly pulses. Two iterations of --dur-slow
+   (~480ms total) mirror the existing mk-breathe shape but bounded.
+   The @media guard below disables the pulse when the user prefers
+   reduced motion (Motion handles the layout-animation half of the
+   flourish itself via useReducedMotion). */
+.mk-shipped-pill.is-flash {
+  animation: mk-ship-flash var(--dur-slow) var(--ease-out) 2;
+}
+@keyframes mk-ship-flash {
+  0%, 100% { box-shadow: var(--shadow-1); }
+  50% { box-shadow: 0 0 0 3px var(--sky-300), var(--shadow-1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mk-shipped-pill.is-flash { animation: none; }
+}
+/* BACI-193: the invisible destination slot Motion uses to anchor the
+   shared-element flight. Sits absolutely positioned inside the pill;
+   the actual visual is the FLIPing card-shape Motion paints from the
+   leaving card's layoutId. 16×16 keeps the destination near the
+   pill's centre — Motion measures the slot to plan the path. */
+.mk-shipped-flight-target {
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 16px; height: 16px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  opacity: 0;
+}
 /* A taken card is held by an agent — bolder accent border. Drag is
    disabled (see KanbanCard.jsx `draggable={!taken && !waiting}`), so the
    .is-dragging override can't fire and the base `cursor: pointer` is

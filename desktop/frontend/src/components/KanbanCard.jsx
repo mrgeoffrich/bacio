@@ -1,5 +1,6 @@
 import React, { memo, useEffect, useRef, useState } from 'react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import { m } from 'motion/react';
 import Icon from './Icon.jsx';
 import Tooltip from './Tooltip.jsx';
 import { todoGlyph } from '../lib/todoGlyph.js';
@@ -25,6 +26,12 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDra
   // unmount (board switch, repo switch, hard refresh) — that's
   // intentional, we don't want to persist a row-level UI toggle.
   const [tasksOpen, setTasksOpen] = useState(false);
+  // BACI-193: while Motion is mid-FLIP, `var(--radius-lg)` and
+  // `var(--shadow-1)` distort because the layout animation interpolates
+  // a snapshot of the resolved CSS — research called this out. Inline
+  // concrete values for the duration of the animation, drop back to
+  // the CSS variables (which keep theme-correct values) when at rest.
+  const [animating, setAnimating] = useState(false);
   // BACI-131: local-only eval composer state. Reset on unmount /
   // board switch — same justification as tasksOpen.
   const [evalOpen, setEvalOpen] = useState(false);
@@ -159,7 +166,40 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDra
   })();
 
   return (
-    <article
+    // BACI-193: motion.article (via the `m.` short form required by
+    // LazyMotion `strict`) gives us FLIP-based layout reorders inside
+    // a column, exit animations when a card leaves, and shared-element
+    // flight to the topbar Shipped pill via `layoutId`. The layoutId
+    // matches the card.key so when this card transitions into `done`
+    // and the App re-renders the destination slot inside ShippedPopover
+    // with the same layoutId, Motion animates the position between
+    // the two subtrees.
+    //
+    // `transition.layout` is tuned to --dur-slow (240ms) so layout
+    // animation matches the rest of the kanban's transition family.
+    // exit is snappier (--dur-medium-ish at 180ms) so removed cards
+    // don't linger.
+    //
+    // The mid-flight inline style overrides borderRadius / boxShadow
+    // because Motion's CSS-variable snapshotting distorts them during
+    // the animation (see the research note in the plan).
+    <m.article
+      layout
+      layoutId={card.key}
+      initial={{ opacity: 0, scale: 0.96 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 0.96 }}
+      transition={{
+        layout: { duration: 0.28, ease: [0.2, 0, 0, 1] },
+        opacity: { duration: 0.18 },
+        scale: { duration: 0.18 },
+      }}
+      onLayoutAnimationStart={() => setAnimating(true)}
+      onLayoutAnimationComplete={() => setAnimating(false)}
+      style={animating ? {
+        borderRadius: 12,
+        boxShadow: '0 1px 0 rgba(27,35,54,0.04), 0 1px 2px rgba(27,35,54,0.05)',
+      } : undefined}
       className={`mk-card ${isDragging ? 'is-dragging' : ''} ${card.claude ? 'is-claude' : ''} ${taken ? 'is-taken' : ''} ${waiting ? 'is-waiting' : ''} ${card.archived ? 'is-archived' : ''} ${compact ? 'is-compact' : ''}`}
       draggable={!taken && !waiting}
       onDragStart={onDragStart}
@@ -578,7 +618,7 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDra
           )}
         </>
       )}
-    </article>
+    </m.article>
   );
 }
 

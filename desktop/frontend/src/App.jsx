@@ -15,10 +15,12 @@ import SyncView from './components/SyncView.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import ErrorModal from './components/ErrorModal.jsx';
 import { Provider as TooltipProvider } from '@radix-ui/react-tooltip';
+import { LazyMotion, domMax, LayoutGroup } from 'motion/react';
 import { reportError } from './errors';
 import { WEB_MODE } from './env';
 import * as api from './api';
 import { isTerminalState, stripBlockerFromCards, restoreBlockedByFromSnapshot } from './lib/issueState';
+import { useShipFlourish } from './lib/shipFlourish';
 
 const THEME_KEY = 'bacio-theme'; // persisted preference: 'system' | 'light' | 'dark'
 const REPO_KEY = 'bacio-active-repo'; // persisted preference: last-selected repo prefix
@@ -794,9 +796,23 @@ export default function App() {
     return n;
   }, [cards]);
 
+  // BACI-193 ship flourish: detect cards that just transitioned into
+  // `done` from a non-terminal column, expose the flying key + flash
+  // signal to Topbar / ShippedPopover. The hook diffs the `cards`
+  // array against its own internal previous-columns snapshot so the
+  // poll-driven re-render is the only thing it needs.
+  const { flyingKey: flyingShipKey, flashing: shipFlashing, onFlightDone: onShipFlightDone } = useShipFlourish(cards);
+
   return (
     <TooltipProvider delayDuration={250} skipDelayDuration={150}>
+    <LazyMotion features={domMax} strict>
     <div className="mk-app">
+      {/* BACI-193: wrap Topbar + main view in one LayoutGroup so the
+          ship-flourish layoutId match can cross from the kanban card
+          to the Shipped pill destination inside Topbar. Without the
+          group, Motion namespaces layoutIds per subtree and the two
+          ends never see each other. */}
+      <LayoutGroup id="kanban">
       <Topbar
         boards={boards}
         activeBoard={activeBoard}
@@ -824,6 +840,9 @@ export default function App() {
         agentCounts={agentCounts}
         shippedCount={shippedCount}
         onOpenIssue={openIssueByKey}
+        flyingShipKey={flyingShipKey}
+        shipFlashing={shipFlashing}
+        onShipFlightDone={onShipFlightDone}
       />
       {loading ? (
         <div className="mk-app-state">Loading…</div>
@@ -928,7 +947,9 @@ export default function App() {
         />
       </ErrorBoundary>
       <ErrorModal />
+      </LayoutGroup>
     </div>
+    </LazyMotion>
     </TooltipProvider>
   );
 }

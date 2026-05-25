@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { m } from 'motion/react';
 import { reportError } from '../errors';
 import * as api from '../api';
 import { formatWhen } from '../lib/formatWhen';
@@ -26,7 +27,16 @@ const LIMIT = 20;
 //                  derived in App.jsx via useMemo over the polled cards.
 //   onOpenIssue  — invoked with the row's canonical key on click;
 //                  the popover closes itself afterwards.
-export default function ShippedPopover({ activeBoard, shippedCount, onOpenIssue }) {
+//   flyingShipKey — BACI-193: when set, the popover renders an
+//                  absolutely-positioned destination slot inside the
+//                  pill with a matching Motion `layoutId`, so a card
+//                  leaving the kanban flies into the pill. Cleared
+//                  by App once the destination reports completion.
+//   shipFlashing — BACI-193: true for ~520ms after a flight lands.
+//                  Toggles `.is-flash` on the pill so it pulses.
+//   onShipFlightDone — BACI-193: invoked by the destination slot's
+//                  `onLayoutAnimationComplete`. Triggers the flash.
+export default function ShippedPopover({ activeBoard, shippedCount, onOpenIssue, flyingShipKey, shipFlashing, onShipFlightDone }) {
   const [open, setOpen] = useState(false);
   // status: 'idle' | 'loading' | 'ready' | 'error'
   // rows is the last successful fetch (preserved across closes so the
@@ -120,7 +130,7 @@ export default function ShippedPopover({ activeBoard, shippedCount, onOpenIssue 
     <div className="mk-shipped-popover-root" ref={rootRef}>
       <button
         type="button"
-        className="mk-pill mk-shipped-pill"
+        className={`mk-pill mk-shipped-pill${shipFlashing ? ' is-flash' : ''}`}
         title={tooltip}
         disabled={disabled}
         onClick={() => { if (!disabled) setOpen(o => !o); }}
@@ -128,6 +138,21 @@ export default function ShippedPopover({ activeBoard, shippedCount, onOpenIssue 
         aria-expanded={open}
       >
         {pillLabel}
+        {/* BACI-193 ship-flourish destination slot. Mounted only
+            while a card is mid-flight (flyingShipKey set); the matching
+            layoutId on the kanban card makes Motion animate the card-
+            shape from its column position to this slot inside the
+            pill. After completion, onShipFlightDone clears the slot
+            and triggers .is-flash on the parent pill. */}
+        {flyingShipKey && (
+          <m.div
+            key={flyingShipKey}
+            layoutId={flyingShipKey}
+            className="mk-shipped-flight-target"
+            aria-hidden="true"
+            onLayoutAnimationComplete={onShipFlightDone}
+          />
+        )}
       </button>
       {open && (
         <div className="mk-shipped-popover" role="dialog" aria-label="Recently shipped issues">

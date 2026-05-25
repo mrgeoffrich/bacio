@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
+import { AnimatePresence } from 'motion/react';
 import KanbanCard from './KanbanCard.jsx';
 import QuestionModal from './QuestionModal.jsx';
 import Icon from './Icon.jsx';
@@ -244,28 +245,40 @@ export default function Board({ activeBoard, columns, cards, promptConfig, onMov
                   </button>
                 </header>
                 <div className="mk-col-body">
-                  {colCards.map(card => (
-                    <KanbanCard
-                      key={card.key}
-                      card={card}
-                      cardsByKey={cardsByKey}
-                      promptConfig={promptConfig}
-                      isDragging={dragKey === card.key}
-                      compact={userCompact.has(col.state)}
-                      onDragStart={() => { if (!card.taken && !card.waitingState) setDragKey(card.key); }}
-                      onDragEnd={() => { setDragKey(null); setOverCol(null); }}
-                      onOpen={() => onOpenCard(card)}
-                      onDispatch={onDispatchFromCard}
-                      onCancelWaiting={onCancelWaitingCard}
-                      onOpenQuestion={(id) => setActiveQuestionId(id)}
-                      onOpenIssue={onOpenIssue}
-                      onQuickEval={onQuickEval}
-                      isPinned={pinnedKeys?.has(card.key) || false}
-                      onTogglePin={onTogglePin}
-                      onSetFollowOn={onSetFollowOn}
-                      onCancelFollowOn={onCancelFollowOn}
-                    />
-                  ))}
+                  {/* BACI-193: AnimatePresence wraps the card list so a
+                      removed card (poll lands the issue in `done`, drag
+                      pulls it to another column, etc.) plays its exit
+                      animation before unmount. `mode="popLayout"` keeps
+                      siblings FLIP-ing while the exit runs — the
+                      alternative ("wait") would freeze the column on
+                      removal until the exit finishes, which fights the
+                      cross-column layout move. `initial={false}` skips
+                      the entry animation on first mount so a freshly-
+                      loaded board doesn't pop in. */}
+                  <AnimatePresence mode="popLayout" initial={false}>
+                    {colCards.map(card => (
+                      <KanbanCard
+                        key={card.key}
+                        card={card}
+                        cardsByKey={cardsByKey}
+                        promptConfig={promptConfig}
+                        isDragging={dragKey === card.key}
+                        compact={userCompact.has(col.state)}
+                        onDragStart={() => { if (!card.taken && !card.waitingState) setDragKey(card.key); }}
+                        onDragEnd={() => { setDragKey(null); setOverCol(null); }}
+                        onOpen={() => onOpenCard(card)}
+                        onDispatch={onDispatchFromCard}
+                        onCancelWaiting={onCancelWaitingCard}
+                        onOpenQuestion={(id) => setActiveQuestionId(id)}
+                        onOpenIssue={onOpenIssue}
+                        onQuickEval={onQuickEval}
+                        isPinned={pinnedKeys?.has(card.key) || false}
+                        onTogglePin={onTogglePin}
+                        onSetFollowOn={onSetFollowOn}
+                        onCancelFollowOn={onCancelFollowOn}
+                      />
+                    ))}
+                  </AnimatePresence>
                 </div>
               </>
             )}
