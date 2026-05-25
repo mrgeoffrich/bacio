@@ -101,6 +101,13 @@ func Snapshot(s *store.Store, repo *model.Repo, opts SnapshotOpts) error {
 			return err
 		}
 		board.openDispatchPicker()
+	case "composer":
+		// BACI-168 "+ from prompt" overlay. The wasm build's
+		// openComposeOverlay is a no-op (no textarea), so this target
+		// renders a plain board on the wasm snapshot binary; on native
+		// it renders the composer chrome centred over the board.
+		m.active = 0
+		board.openComposeOverlay()
 	case "doc-overlay":
 		m.active = 2
 		if docs.loaded != nil {
@@ -112,7 +119,7 @@ func Snapshot(s *store.Store, repo *model.Repo, opts SnapshotOpts) error {
 			features.overlay = true
 		}
 	default:
-		return fmt.Errorf("unknown snapshot target %q (try board, features, docs, agents, agent-detail, history, sync, settings, settings-editor, card-overlay, doc-overlay, feature-overlay, picker, feature-picker, dispatch-picker)", opts.Target)
+		return fmt.Errorf("unknown snapshot target %q (try board, features, docs, agents, agent-detail, history, sync, settings, settings-editor, card-overlay, doc-overlay, feature-overlay, picker, feature-picker, dispatch-picker, composer)", opts.Target)
 	}
 
 	out := m.View()
@@ -123,24 +130,10 @@ func Snapshot(s *store.Store, repo *model.Repo, opts SnapshotOpts) error {
 	return err
 }
 
-// focusIssue repositions the board so the issue with the given key (e.g.
-// "MINI-1") becomes the selected card. Returns an error if the key is set
-// but doesn't match any visible issue. A blank key is a no-op.
+// focusIssue is a snapshot-side alias for boardView.focusOnKey. Kept so
+// the existing snapshot call sites and tests continue to compile; the
+// real implementation lives on boardView so production code (the
+// compose overlay's post-submit cursor jump) can share it.
 func focusIssue(b *boardView, key string) error {
-	key = strings.TrimSpace(key)
-	if key == "" {
-		return nil
-	}
-	visible := b.visibleStates()
-	for ci, st := range visible {
-		for ri, iss := range b.columns[st] {
-			if strings.EqualFold(iss.Key, key) {
-				b.col = ci
-				b.rows[st] = ri
-				b.refreshSelection()
-				return nil
-			}
-		}
-	}
-	return fmt.Errorf("issue %q not found in any visible column", key)
+	return b.focusOnKey(key)
 }

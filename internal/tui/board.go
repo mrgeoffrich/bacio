@@ -172,6 +172,13 @@ type boardView struct {
 	openQuestions map[string][]*model.SessionQuestion
 	questionOlay  *questionOverlay
 
+	// BACI-168: "+ from prompt" composer overlay. Open via `N` from the
+	// board (capital — lowercase `n` keeps its archive-decline duty);
+	// submit (ctrl+s) creates an issue + queues a `scope` dispatch;
+	// `esc` cancels with no writes. Nil when not open. See
+	// board_compose.go for the type + Update / View bodies.
+	composeOverlay *composeOverlay
+
 	// BACI-68: when `a` is pressed on a non-terminal issue we don't
 	// archive immediately — we set this confirm flag and surface a
 	// y/n prompt in the help footer. A subsequent `y` archives; any
@@ -470,6 +477,30 @@ func (b *boardView) cancelWaitingOnSelection() error {
 	return nil
 }
 
+// focusOnKey repositions the cursor so the issue with the given key
+// becomes the selected card. Returns an error if the key is non-empty
+// but doesn't match any visible issue. A blank key is a no-op. Lifted
+// out of the snapshot-only helper so production code (the compose
+// overlay's post-submit cursor jump) can share a single implementation.
+func (b *boardView) focusOnKey(key string) error {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return nil
+	}
+	visible := b.visibleStates()
+	for ci, st := range visible {
+		for ri, iss := range b.columns[st] {
+			if strings.EqualFold(iss.Key, key) {
+				b.col = ci
+				b.rows[st] = ri
+				b.refreshSelection()
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("issue %q not found in any visible column", key)
+}
+
 func (b *boardView) currentIssue() *model.Issue {
 	v := b.visibleStates()
 	if b.col < 0 || b.col >= len(v) {
@@ -556,7 +587,8 @@ func (b *boardView) Status() string {
 
 func (b *boardView) HasOverlay() bool {
 	return b.overlay || b.picker || b.featurePicker || b.dispatchPicker ||
-		(b.questionOlay != nil && b.questionOlay.open)
+		(b.questionOlay != nil && b.questionOlay.open) ||
+		b.composeOverlay != nil
 }
 
 func (b *boardView) CloseOverlay() {
@@ -568,10 +600,13 @@ func (b *boardView) CloseOverlay() {
 	if b.questionOlay != nil {
 		b.questionOlay.close()
 	}
+	b.composeOverlay = nil
 }
 
 func (b *boardView) Breadcrumb() string {
 	switch {
+	case b.composeOverlay != nil:
+		return "New issue"
 	case b.commentOverlay && b.selected != nil:
 		return "[" + b.selected.Key + "] → Comments"
 	case b.overlay && b.selected != nil:
@@ -586,14 +621,18 @@ func (b *boardView) Breadcrumb() string {
 	return ""
 }
 
-// CapturesInput is always false for the board — its overlays handle
-// keys themselves but none is a free-text editor (the dispatch-note
-// step is a bounded single-line capture handled inside the view, and it
-// deliberately leaves global q/digit routing intact).
-func (b *boardView) CapturesInput() bool { return false }
+// CapturesInput returns true while the BACI-168 compose overlay is
+// open so the shell yields `q` and the digit keys 1-9 to the textarea
+// instead of treating them as quit / tab-switch. The other overlays
+// (dispatch picker's note step, picker, etc.) are bounded captures
+// handled in-view; only the composer is a free-text editor that needs
+// the shell-level CapturesInput contract.
+func (b *boardView) CapturesInput() bool { return b.composeOverlay != nil }
 
 func (b *boardView) Help() string {
 	switch {
+	case b.composeOverlay != nil:
+		return "type to describe · ctrl+s create & scope · esc cancel"
 	case b.questionOlay != nil && b.questionOlay.open:
 		return "j/k move · space toggle · tab next q · enter submit · d dismiss · esc close"
 	case b.picker:
@@ -616,7 +655,7 @@ func (b *boardView) Help() string {
 	if b.confirmArchive && b.selected != nil && b.selected.ID == b.confirmArchiveID {
 		return fmt.Sprintf("archive %s (%s)? y to confirm · n to cancel", b.selected.Key, b.selected.State)
 	}
-	return "h/l cols · j/k cards · enter open · x send · X cancel · a archive · A unarchive · ? answer · c columns · f features · H hide col · d detail · r reload · q quit"
+	return "h/l cols · j/k cards · enter open · N new · x send · X cancel · a archive · A unarchive · ? answer · c columns · f features · H hide col · d detail · r reload · q quit"
 }
 
 func (b *boardView) Update(msg tea.Msg) tea.Cmd {
@@ -675,6 +714,13 @@ func (b *boardView) Update(msg tea.Msg) tea.Cmd {
 	}
 	if b.questionOlay != nil && b.questionOlay.open {
 		return b.questionOlay.update(key)
+	}
+	if b.composeOverlay != nil {
+		// BACI-168: while the "+ from prompt" composer is open, every
+		// key is the composer's — ctrl+s submits, esc cancels, every
+		// other key flows to the textarea (including q and digits,
+		// gated at the shell via CapturesInput above).
+		return b.composeOverlay.Update(b, key)
 	}
 	if b.picker {
 		b.updatePicker(key)
@@ -802,10 +848,21 @@ func (b *boardView) Update(msg tea.Msg) tea.Cmd {
 			b.confirmArchiveID = 0
 			b.doArchive(b.selected)
 		}
-	case "n", "N":
+	case "n":
+		// Decline a pending archive confirm. Lowercase only — capital
+		// `N` opens the BACI-168 compose overlay (below) so we don't
+		// want it doing double duty here.
 		if b.confirmArchive {
 			b.confirmArchive = false
 			b.confirmArchiveID = 0
+		}
+	case "N":
+		// BACI-168: open the "+ from prompt" composer overlay. Gated on
+		// no other overlay being open so a stray N mid-confirm /
+		// mid-picker doesn't surprise the user with a half-armed prompt
+		// underneath a fresh composer.
+		if !b.confirmArchive && !b.HasOverlay() {
+			return b.openComposeOverlay()
 		}
 	case "A":
 		// BACI-68: unarchive the focused card. No-op when the card
@@ -814,10 +871,14 @@ func (b *boardView) Update(msg tea.Msg) tea.Cmd {
 			b.doUnarchive(b.selected)
 		}
 	}
-	// Any other key cancels a pending archive confirm.
+	// Any other key cancels a pending archive confirm. `N` is no longer
+	// on the don't-cancel list — capital N opens the BACI-168 composer
+	// (handled by the case "N" arm above, which is gated on
+	// !b.confirmArchive), so a user who hits `a` then `N` clearly
+	// wants the confirm gone whether the composer opens or not.
 	if b.confirmArchive {
 		s := key.String()
-		if s != "a" && s != "y" && s != "Y" && s != "n" && s != "N" {
+		if s != "a" && s != "y" && s != "Y" && s != "n" {
 			b.confirmArchive = false
 			b.confirmArchiveID = 0
 		}
@@ -1027,6 +1088,9 @@ func boardColWidths(width, n, focus int) []int {
 func (b *boardView) View(width, height int) string {
 	if width == 0 || height == 0 {
 		return ""
+	}
+	if b.composeOverlay != nil {
+		return b.viewComposeOverlay(width, height)
 	}
 	if b.questionOlay != nil && b.questionOlay.open {
 		return b.questionOlay.view(width, height)
