@@ -351,10 +351,12 @@ func (c *Controller) Start(emit func(leader.State)) {
 
 	// BACI-68: archive auto-sweep. Hourly, leader-gated, mechanical
 	// janitor work — three SQL passes in one transaction inside
-	// Store.ArchiveSweep that stamps archived_at on issues older than
-	// 4 days in a terminal state, then on features whose every child
-	// issue is archived, then on docs whose every linked parent is
-	// archived. Pattern matches the prune/matcher/pinger goroutines
+	// Store.ArchiveSweep that stamps archived_at on issues whose
+	// terminal_at is older than the configured retention window
+	// (BACI-162; default 7 days, settable via `bacio settings archive`
+	// or the desktop Settings panel), then on features whose every
+	// child issue is archived, then on docs whose every linked parent
+	// is archived. Pattern matches the prune/matcher/pinger goroutines
 	// above; same nil-elector tolerance via …IfLeader.
 	c.wg.Add(1)
 	go func() {

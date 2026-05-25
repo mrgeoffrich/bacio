@@ -17,16 +17,20 @@ import (
 )
 
 // ArchiveSweepInterval is the period the leader's Controller invokes
-// ArchiveSweep at. The 4-day window means a tighter cadence buys
-// nothing.
+// ArchiveSweep at. Hourly cadence is independent of the per-tick
+// retention window — the window decides which issues are eligible,
+// the cadence decides how often we re-check.
 const ArchiveSweepInterval = 1 * time.Hour
 
-// ArchiveAgeWindow is the threshold the issue auto-sweep applies on
-// `updated_at`. An issue must be in a terminal state (done/cancelled)
-// AND its updated_at must be older than now-ArchiveAgeWindow for the
-// auto-sweep to archive it. Exported so the desktop/TUI can render the
-// "archives in N days" hint if they ever want to.
-const ArchiveAgeWindow = 4 * 24 * time.Hour
+// DefaultArchiveRetentionDays is the fallback retention window the
+// BACI-162 settings layer falls back to when the configured value is
+// missing, blank, or out of range. The live value lives in
+// app_settings as `archive.retention_days` and is configurable from
+// the Settings page.
+//
+// Exported so non-store callers (the Settings UI, schema docs, the
+// CLI defaults) can quote the same number.
+const DefaultArchiveRetentionDays = 7
 
 // ArchiveSweepResult is the per-tick summary. Returned by ArchiveSweep
 // for logging and the optional `bacio archive sweep` CLI verb. Each
@@ -46,14 +50,23 @@ func (r ArchiveSweepResult) Total() int64 {
 
 // ArchiveSweep runs the three SQL passes in one transaction:
 //
-//  1. Issues in (done, cancelled) older than 4 days that aren't
-//     already archived.
+//  1. Issues in (done, cancelled) whose terminal_at is older than the
+//     configured retention window and that aren't already archived.
+//     BACI-162 makes the window configurable (archive.retention_days);
+//     BACI-138's terminal_at column is the clock anchor (NOT
+//     updated_at — editing a closed issue's tags no longer resets the
+//     retention countdown). When archive.auto_enabled is false the
+//     issue pass is skipped entirely.
 //  2. Features whose every child issue is archived (and the feature
 //     had at least one child) that aren't already archived.
 //  3. Documents whose every linked parent (issue and/or feature) is
 //     archived (and the doc had at least one link) that aren't
 //     already archived. Docs with zero links are NOT orphans — they
 //     were never attached, so the sweep leaves them alone.
+//
+// The cascade passes (2 + 3) run regardless of archive.auto_enabled:
+// they cascade off per-entity archived_at writes, so a manually
+// archived issue should still cascade to its feature and docs.
 //
 // Idempotent. Safe to run on a quiet DB (every pass affects zero rows)
 // and safe to run concurrently with manual archive verbs (the WHERE
@@ -70,6 +83,15 @@ func (r ArchiveSweepResult) Total() int64 {
 // `archive.sweep` summary row per non-empty sweep — distinct from the
 // "no per-row" guarantee.
 func (s *Store) ArchiveSweep() (ArchiveSweepResult, error) {
+	autoEnabled, err := s.GetArchiveAutoEnabled()
+	if err != nil {
+		return ArchiveSweepResult{}, fmt.Errorf("read archive.auto_enabled: %w", err)
+	}
+	retentionDays, err := s.GetArchiveRetentionDays()
+	if err != nil {
+		return ArchiveSweepResult{}, fmt.Errorf("read archive.retention_days: %w", err)
+	}
+
 	tx, err := s.DB.Begin()
 	if err != nil {
 		return ArchiveSweepResult{}, err
@@ -78,23 +100,30 @@ func (s *Store) ArchiveSweep() (ArchiveSweepResult, error) {
 
 	var res ArchiveSweepResult
 
-	// Pass 1: issues older than 4 days in a terminal state. The
-	// `updated_at < datetime('now','-N days')` predicate matches
-	// the existing pruneHistory pattern — SQLite's datetime()
-	// arithmetic is the load-bearing call here, and the index on
-	// archived_at lets the IS NULL filter scan a small set.
-	ageWindowExpr := fmt.Sprintf("datetime('now', '-%d days')", int(ArchiveAgeWindow/(24*time.Hour)))
-	issueQ := `
-		UPDATE issues
-		   SET archived_at = CURRENT_TIMESTAMP
-		 WHERE archived_at IS NULL
-		   AND state IN ('done','cancelled')
-		   AND updated_at < ` + ageWindowExpr
-	r, err := tx.Exec(issueQ)
-	if err != nil {
-		return ArchiveSweepResult{}, fmt.Errorf("archive issues: %w", err)
+	// Pass 1: issues whose terminal_at is older than the configured
+	// retention window. Skipped entirely when auto_enabled=false — the
+	// cascade passes (2 + 3) still run so a manually-archived issue
+	// cascades to its feature / docs as expected.
+	if autoEnabled {
+		// `terminal_at < datetime('now','-N days')` is the eligibility
+		// predicate. The IS NOT NULL guard is defensive — state IN
+		// ('done','cancelled') already implies terminal_at IS NOT NULL
+		// post-BACI-138, but stating both clarifies intent and protects
+		// against a future state-vs-terminal_at drift.
+		ageWindowExpr := fmt.Sprintf("datetime('now', '-%d days')", retentionDays)
+		issueQ := `
+			UPDATE issues
+			   SET archived_at = CURRENT_TIMESTAMP
+			 WHERE archived_at IS NULL
+			   AND state IN ('done','cancelled')
+			   AND terminal_at IS NOT NULL
+			   AND terminal_at < ` + ageWindowExpr
+		r, err := tx.Exec(issueQ)
+		if err != nil {
+			return ArchiveSweepResult{}, fmt.Errorf("archive issues: %w", err)
+		}
+		res.IssuesArchived, _ = r.RowsAffected()
 	}
-	res.IssuesArchived, _ = r.RowsAffected()
 
 	// Pass 2: features whose every child issue is archived and that
 	// had at least one child. The inner SELECT groups by feature_id
@@ -104,7 +133,7 @@ func (s *Store) ArchiveSweep() (ArchiveSweepResult, error) {
 	// children never appears in the inner result), but stated for
 	// clarity in the comment: the brief explicitly excludes
 	// childless features from the auto-archive path.
-	r, err = tx.Exec(`
+	r, err := tx.Exec(`
 		UPDATE features
 		   SET archived_at = CURRENT_TIMESTAMP
 		 WHERE archived_at IS NULL
@@ -153,4 +182,3 @@ func (s *Store) ArchiveSweep() (ArchiveSweepResult, error) {
 	}
 	return res, nil
 }
-

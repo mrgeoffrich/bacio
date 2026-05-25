@@ -270,6 +270,10 @@ var (
 	ExampleArchiveSweep       = ArchiveSweepInput{}
 	ExampleSettingsShowArchived = SettingsShowArchivedInput{Value: true}
 	ExampleSettingsSyncBackground = SettingsSyncBackgroundInput{Value: false}
+	ExampleSettingsArchive        = SettingsArchiveInput{
+		AutoEnabled:   true,
+		RetentionDays: 7,
+	}
 
 	// SyncSetup (BACI-110) — three representative payloads, one per mode.
 	// The registry only attaches one example to the schema, but the

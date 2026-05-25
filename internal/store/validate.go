@@ -301,6 +301,28 @@ func ValidateDocFilenameStrict(name string) (string, error) {
 // internal/store/agent_todos.go's per-row validator.
 const maxTodoContentBytes = 1 << 10 // 1 KiB
 
+// maxArchiveRetentionDays caps the BACI-162 archive.retention_days
+// setting. Roughly ten years — the rendered "in N days" hint in the
+// Settings UI stays sensible, and a typo (e.g. 999999) is rejected
+// rather than silently turning auto-archive into a no-op. Zero is
+// rejected because the disable signal is the separate archive.auto_enabled
+// boolean; a retention of zero on the value path is ambiguous.
+const maxArchiveRetentionDays = 3650
+
+// ValidateArchiveRetentionDays enforces the 1..maxArchiveRetentionDays
+// range on the BACI-162 retention-days setting. Returns the integer
+// unchanged on success; a clear error otherwise. Zero / negatives are
+// rejected — disable auto-archive via the boolean toggle instead.
+func ValidateArchiveRetentionDays(n int) (int, error) {
+	if n < 1 {
+		return 0, fmt.Errorf("retention_days must be >= 1 (disable auto-archive via the auto_enabled toggle instead, got %d)", n)
+	}
+	if n > maxArchiveRetentionDays {
+		return 0, fmt.Errorf("retention_days too large: %d, max %d", n, maxArchiveRetentionDays)
+	}
+	return n, nil
+}
+
 func validateSingleLine(s, field string, maxLen int, required bool) (string, error) {
 	if !utf8.ValidString(s) {
 		return "", fmt.Errorf("%s is not valid UTF-8", field)

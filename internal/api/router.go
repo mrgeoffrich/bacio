@@ -241,6 +241,8 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("POST /archive/sweep", d.handleArchiveSweep)
 	mux.HandleFunc("GET /settings/display-preferences", d.handleDisplayPreferencesGet)
 	mux.HandleFunc("PUT /settings/display-preferences", d.handleDisplayPreferencesSet)
+	mux.HandleFunc("GET /settings/archive-preferences", d.handleArchivePreferencesGet)
+	mux.HandleFunc("PUT /settings/archive-preferences", d.handleArchivePreferencesSet)
 
 	// Outermost first: panic recovery wraps everything so a bug in any
 	// later layer still returns a 500 envelope. The CORS middleware

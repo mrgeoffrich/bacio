@@ -12,6 +12,7 @@ import (
 
 	"github.com/mrgeoffrich/bacio/internal/agentmode"
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
+	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/inputio"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
@@ -74,6 +75,100 @@ surface for them.`,
 	cmd.AddCommand(newSettingsTemplateCmd())
 	cmd.AddCommand(newSettingsShowArchivedCmd())
 	cmd.AddCommand(newSettingsSyncBackgroundCmd())
+	cmd.AddCommand(newSettingsArchiveCmd())
+	return cmd
+}
+
+// archivePreferencesResult is the JSON + text shape `bacio settings
+// archive` returns on both the get and set paths (BACI-162). Mirrors
+// the snake-case shape used elsewhere in this file.
+type archivePreferencesResult struct {
+	AutoEnabled   bool `json:"auto_enabled"`
+	RetentionDays int  `json:"retention_days"`
+}
+
+// newSettingsArchiveCmd implements the BACI-162 auto-archive config
+// verb. The verb doubles as get and set:
+//
+//   - `bacio settings archive`        — read the current pair
+//   - `bacio settings archive --json '{"auto_enabled":true,"retention_days":14}'`
+//     — write both atomically
+//
+// Both fields are required on the write path — there is no per-field
+// positional form (two fields don't fit a single positional cleanly,
+// and the value semantic for one field changes the other's
+// interpretation). Honours --dry-run. Audit op `archive.update`, kind
+// `app_setting`, target `archive.preferences`. Local-only — the
+// settings are read by the in-process controller.
+func newSettingsArchiveCmd() *cobra.Command {
+	var rawInput string
+	cmd := &cobra.Command{
+		Use:   "archive",
+		Short: "Get or set the BACI-162 auto-archive global settings (default: auto_enabled=true, retention_days=7)",
+		Long: `Get or set the BACI-162 auto-archive global settings. Two keys,
+written atomically:
+
+  - ` + "`auto_enabled`" + ` (bool, default true) gates the hourly issue
+    auto-archive pass. When false the issue pass is skipped entirely;
+    the feature / document cascade passes still run, so a manually
+    archived issue still cascades to its parent feature and linked
+    docs.
+  - ` + "`retention_days`" + ` (int, default 7) is the number of days a
+    terminal-state issue's ` + "`terminal_at`" + ` must sit before the next
+    sweep archives it. Range 1..3650; explicitly does NOT accept 0
+    (disable auto-archive via the boolean instead).
+
+Examples:
+
+  bacio settings archive                                                       # read current value
+  bacio settings archive --json '{"auto_enabled":true,"retention_days":14}'    # 14-day window
+  bacio settings archive --json '{"auto_enabled":false,"retention_days":7}'    # disable auto-archive`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			raw, err := parseJSONInput(cmd, args, rawInput)
+			if err != nil {
+				return err
+			}
+			c, err := openClient()
+			if err != nil {
+				return err
+			}
+			defer c.Close()
+			ctx := context.Background()
+			// Get path — no --json.
+			if raw == nil {
+				prefs, err := c.GetArchivePreferences(ctx)
+				if err != nil {
+					return err
+				}
+				return emit(archivePreferencesResult{
+					AutoEnabled:   prefs.AutoEnabled,
+					RetentionDays: prefs.RetentionDays,
+				})
+			}
+			// Set path — --json with both fields.
+			in, _, err := inputio.DecodeStrict[inputs.SettingsArchiveInput](raw)
+			if err != nil {
+				return err
+			}
+			out, err := c.SetArchivePreferences(ctx, client.ArchivePreferences{
+				AutoEnabled:   in.AutoEnabled,
+				RetentionDays: in.RetentionDays,
+			}, opts.dryRun)
+			if err != nil {
+				return err
+			}
+			payload := archivePreferencesResult{
+				AutoEnabled:   out.AutoEnabled,
+				RetentionDays: out.RetentionDays,
+			}
+			if opts.dryRun {
+				return emitDryRun(payload)
+			}
+			return emit(payload)
+		},
+	}
+	addInputFlag(cmd, &rawInput)
 	return cmd
 }
 

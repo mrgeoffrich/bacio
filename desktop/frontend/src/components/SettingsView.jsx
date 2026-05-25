@@ -48,10 +48,22 @@ export default function SettingsView({
   onChangeHideEmptyColumns,
   showArchived,
   onChangeShowArchived,
+  archiveAutoEnabled,
+  archiveRetentionDays,
+  onChangeArchivePreferences,
   columns,
   onClose,
   onTemplatesChanged,
 }) {
+  // BACI-162: local draft for the retention-days input. We commit to
+  // the App-owned state via onChangeArchivePreferences on blur (rather
+  // than every keystroke) so a half-typed value doesn't round-trip
+  // through the API on every digit. Kept in lockstep with the App
+  // state by syncing on prop change.
+  const [retentionDraft, setRetentionDraft] = useState(String(archiveRetentionDays));
+  useEffect(() => {
+    setRetentionDraft(String(archiveRetentionDays));
+  }, [archiveRetentionDays]);
   const [templates, setTemplates] = useState([]);
   const [placeholders, setPlaceholders] = useState([]);
   const [drafts, setDrafts] = useState({});
@@ -297,7 +309,7 @@ export default function SettingsView({
           <div className="mk-settings-row-text">
             <div className="mk-settings-label">Show archived items</div>
             <div className="mk-settings-hint">
-              When on, archived issues, documents and features surface in the board, doc list and feature list (rendered visibly muted). When off (the default), they&apos;re hidden. The hourly auto-sweep archives completed work older than 4 days; you can also archive any item manually.
+              When on, archived issues, documents and features surface in the board, doc list and feature list (rendered visibly muted). When off (the default), they&apos;re hidden. The hourly auto-sweep archives completed work older than the retention window below; you can also archive any item manually.
             </div>
           </div>
           <div className="mk-segmented" role="group" aria-label="Show archived items">
@@ -312,6 +324,60 @@ export default function SettingsView({
               </button>
             ))}
           </div>
+        </section>
+
+        <section className="mk-settings-row">
+          <div className="mk-settings-row-text">
+            <div className="mk-settings-label">Auto-archive completed issues</div>
+            <div className="mk-settings-hint">
+              When on (the default), the hourly sweep hides done / cancelled issues whose terminal-state timestamp is older than the retention window. You can always unarchive items from the board. The feature + linked-doc cascade still runs when this is off, so manually archiving an issue still tidies up its parents.
+            </div>
+          </div>
+          <div className="mk-segmented" role="group" aria-label="Auto-archive completed issues">
+            {SHOW_ARCHIVED_OPTIONS.map(opt => (
+              <button
+                key={String(opt.id)}
+                className={`mk-segmented-btn ${archiveAutoEnabled === opt.id ? 'is-active' : ''}`}
+                aria-pressed={archiveAutoEnabled === opt.id}
+                onClick={() => onChangeArchivePreferences(opt.id, archiveRetentionDays)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="mk-settings-row">
+          <div className="mk-settings-row-text">
+            <div className="mk-settings-label">Retention window (days)</div>
+            <div className="mk-settings-hint">
+              How long a done / cancelled issue stays visible before the hourly auto-sweep archives it. Measured against the state-transition timestamp, so editing a closed issue&apos;s tags or description doesn&apos;t reset the clock. 1–3650; default 7.
+            </div>
+          </div>
+          <input
+            type="number"
+            min={1}
+            max={3650}
+            step={1}
+            className="mk-tmpl-input"
+            style={{ width: '6rem' }}
+            value={retentionDraft}
+            disabled={!archiveAutoEnabled}
+            aria-label="Retention window in days"
+            onChange={e => setRetentionDraft(e.target.value)}
+            onBlur={() => {
+              const n = parseInt(retentionDraft, 10);
+              if (Number.isNaN(n) || n < 1 || n > 3650) {
+                // Snap back to the last good value so a half-typed
+                // entry doesn't fire a 400 on every blur.
+                setRetentionDraft(String(archiveRetentionDays));
+                return;
+              }
+              if (n !== archiveRetentionDays) {
+                onChangeArchivePreferences(archiveAutoEnabled, n);
+              }
+            }}
+          />
         </section>
 
         <section className="mk-settings-section">

@@ -290,3 +290,82 @@ func (d deps) handleDisplayPreferencesSet(w http.ResponseWriter, r *http.Request
 	})
 	writeJSON(w, http.StatusOK, &DisplayPreferencesOut{ShowArchived: parsed.ShowArchived})
 }
+
+// ------------ BACI-162 archive.auto_enabled + retention_days ------------
+
+// ArchivePreferencesOut is the response shape for
+// /settings/archive-preferences. Underscore on the wire to match
+// every other JSON field in this package.
+type ArchivePreferencesOut struct {
+	AutoEnabled   bool `json:"auto_enabled"`
+	RetentionDays int  `json:"retention_days"`
+}
+
+// archivePreferencesIn is the strict-decoded input for PUT. Both
+// fields are required — the handler writes the pair atomically
+// rather than juggling a partial update; the meaning of one field
+// depends on the other (auto_enabled gates whether retention_days
+// matters at all).
+type archivePreferencesIn struct {
+	AutoEnabled   bool `json:"auto_enabled"`
+	RetentionDays int  `json:"retention_days"`
+}
+
+func (d deps) handleArchivePreferencesGet(w http.ResponseWriter, r *http.Request) {
+	autoEnabled, err := d.store.GetArchiveAutoEnabled()
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	retention, err := d.store.GetArchiveRetentionDays()
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, &ArchivePreferencesOut{
+		AutoEnabled:   autoEnabled,
+		RetentionDays: retention,
+	})
+}
+
+func (d deps) handleArchivePreferencesSet(w http.ResponseWriter, r *http.Request) {
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	parsed, _, err := inputio.DecodeStrict[archivePreferencesIn](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	retention, err := store.ValidateArchiveRetentionDays(parsed.RetentionDays)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	out := &ArchivePreferencesOut{AutoEnabled: parsed.AutoEnabled, RetentionDays: retention}
+	if isDryRun(r) {
+		writeDryRun(w, http.StatusOK, out)
+		return
+	}
+	if err := d.store.SetArchiveAutoEnabled(parsed.AutoEnabled); err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if err := d.store.SetArchiveRetentionDays(retention); err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	recordOp(d.store, d.logger, model.HistoryEntry{
+		Actor:       ActorFromContext(r.Context()),
+		Op:          "archive.update",
+		Kind:        "app_setting",
+		TargetLabel: "archive.preferences",
+		Details:     fmt.Sprintf("auto_enabled=%t retention_days=%d", parsed.AutoEnabled, retention),
+	})
+	writeJSON(w, http.StatusOK, out)
+}

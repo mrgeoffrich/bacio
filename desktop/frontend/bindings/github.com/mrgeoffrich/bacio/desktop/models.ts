@@ -41,6 +41,38 @@ export const AgentCard = agentcards$0.AgentCard;
 export type AgentCard = agentcards$0.AgentCard;
 
 /**
+ * ArchivePreferencesDTO is the BACI-162 auto-archive pair shaped for
+ * the desktop Settings panel. AutoEnabled gates the hourly issue
+ * auto-archive pass; RetentionDays is the number of days a
+ * terminal-state issue's terminal_at must sit before the next sweep
+ * archives it (1..3650; default 7).
+ */
+export class ArchivePreferencesDTO {
+    "autoEnabled": boolean;
+    "retentionDays": number;
+
+    /** Creates a new ArchivePreferencesDTO instance. */
+    constructor($$source: Partial<ArchivePreferencesDTO> = {}) {
+        if (!("autoEnabled" in $$source)) {
+            this["autoEnabled"] = false;
+        }
+        if (!("retentionDays" in $$source)) {
+            this["retentionDays"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ArchivePreferencesDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ArchivePreferencesDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ArchivePreferencesDTO($$parsedSource as Partial<ArchivePreferencesDTO>);
+    }
+}
+
+/**
  * Board is one bacio repo, offered in the top-nav repository selector.
  * 
  * The SyncEnabled / SyncInProgress / SyncLastAt / SyncLastError fields

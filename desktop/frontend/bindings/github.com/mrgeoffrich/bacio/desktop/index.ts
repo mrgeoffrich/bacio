@@ -18,6 +18,7 @@ export {
 
 export {
     AgentCard,
+    ArchivePreferencesDTO,
     Board,
     BoardCard,
     BoardColumn,

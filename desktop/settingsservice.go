@@ -319,6 +319,47 @@ func (s *SettingsService) SetDisplayPreferences(showArchived bool) (DisplayPrefe
 	return DisplayPreferencesDTO{ShowArchived: v}, nil
 }
 
+// ArchivePreferencesDTO is the BACI-162 auto-archive pair shaped for
+// the desktop Settings panel. AutoEnabled gates the hourly issue
+// auto-archive pass; RetentionDays is the number of days a
+// terminal-state issue's terminal_at must sit before the next sweep
+// archives it (1..3650; default 7).
+type ArchivePreferencesDTO struct {
+	AutoEnabled   bool `json:"autoEnabled"`
+	RetentionDays int  `json:"retentionDays"`
+}
+
+// GetArchivePreferences returns the current BACI-162 auto-archive
+// settings. The desktop Settings panel renders the pair on mount and
+// after every flip / numeric change so the UI stays consistent with
+// the persisted row.
+func (s *SettingsService) GetArchivePreferences() (ArchivePreferencesDTO, error) {
+	prefs, err := s.client.GetArchivePreferences(context.Background())
+	if err != nil {
+		return ArchivePreferencesDTO{}, err
+	}
+	return ArchivePreferencesDTO{
+		AutoEnabled:   prefs.AutoEnabled,
+		RetentionDays: prefs.RetentionDays,
+	}, nil
+}
+
+// SetArchivePreferences writes both BACI-162 keys atomically and
+// returns the refreshed DTO. The client records the audit row.
+func (s *SettingsService) SetArchivePreferences(autoEnabled bool, retentionDays int) (ArchivePreferencesDTO, error) {
+	prefs, err := s.client.SetArchivePreferences(context.Background(), client.ArchivePreferences{
+		AutoEnabled:   autoEnabled,
+		RetentionDays: retentionDays,
+	}, false)
+	if err != nil {
+		return ArchivePreferencesDTO{}, err
+	}
+	return ArchivePreferencesDTO{
+		AutoEnabled:   prefs.AutoEnabled,
+		RetentionDays: prefs.RetentionDays,
+	}, nil
+}
+
 // SyncPreferencesDTO is the BACI-89 background-sync toggle shaped for
 // the desktop Sync view. Mirrors BoardPreferencesDTO / DisplayPreferencesDTO.
 type SyncPreferencesDTO struct {

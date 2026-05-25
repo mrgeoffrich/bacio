@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 
 	"github.com/mrgeoffrich/bacio/internal/model"
 )
@@ -302,6 +303,73 @@ func (s *Store) SetDisplayShowArchived(show bool) error {
 		v = "true"
 	}
 	return s.SetAppSetting(displayShowArchivedKey, v)
+}
+
+// archiveAutoEnabledKey is the BACI-162 global toggle controlling
+// whether the leader-elected controller's hourly archive sweep
+// archives terminal-state issues. When false, the issue pass is
+// skipped entirely (manual `bacio issue archive` still works, and
+// the feature / document cascade passes still run — they're driven
+// by per-entity archived_at writes, not by the retention window).
+const archiveAutoEnabledKey = "archive.auto_enabled"
+
+// archiveRetentionDaysKey is the BACI-162 global setting controlling
+// how many days a terminal-state issue (done / cancelled) must sit
+// before the auto-sweep stamps archived_at. Measured against the
+// BACI-138 `terminal_at` column (the timestamp of the latest
+// transition into a terminal state), not `updated_at` — editing a
+// closed issue's tags doesn't reset the retention countdown.
+const archiveRetentionDaysKey = "archive.retention_days"
+
+// GetArchiveAutoEnabled reports whether the BACI-162 hourly issue
+// auto-archive pass should run. Defaults to TRUE — auto-archive is
+// opt-OUT (the historical behaviour). Only the exact string "false"
+// disables it; any other stored value (missing, blank, "garbage") reads
+// as true. Same defensive shape as GetSyncBackgroundEnabled.
+func (s *Store) GetArchiveAutoEnabled() (bool, error) {
+	v, err := s.GetAppSetting(archiveAutoEnabledKey)
+	if err != nil {
+		return true, err
+	}
+	return v != "false", nil
+}
+
+// SetArchiveAutoEnabled stores the BACI-162 archive.auto_enabled toggle.
+func (s *Store) SetArchiveAutoEnabled(enabled bool) error {
+	v := "false"
+	if enabled {
+		v = "true"
+	}
+	return s.SetAppSetting(archiveAutoEnabledKey, v)
+}
+
+// GetArchiveRetentionDays reports the BACI-162 retention window in
+// days. Defaults to DefaultArchiveRetentionDays (7) when the value is
+// missing, blank, or unparseable. Values outside the 1..3650 range
+// (validator bounds) also fall back to the default — defensive read
+// style: never error on a malformed stored value.
+func (s *Store) GetArchiveRetentionDays() (int, error) {
+	v, err := s.GetAppSetting(archiveRetentionDaysKey)
+	if err != nil {
+		return DefaultArchiveRetentionDays, err
+	}
+	if v == "" {
+		return DefaultArchiveRetentionDays, nil
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return DefaultArchiveRetentionDays, nil
+	}
+	if n < 1 || n > maxArchiveRetentionDays {
+		return DefaultArchiveRetentionDays, nil
+	}
+	return n, nil
+}
+
+// SetArchiveRetentionDays stores the BACI-162 retention window in
+// days. Callers should run ValidateArchiveRetentionDays first.
+func (s *Store) SetArchiveRetentionDays(days int) error {
+	return s.SetAppSetting(archiveRetentionDaysKey, strconv.Itoa(days))
 }
 
 // syncBackgroundEnabledKey is the BACI-89 global toggle controlling

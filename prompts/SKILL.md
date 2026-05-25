@@ -56,7 +56,7 @@ Run `bacio <group> --help` for the subcommands of each.
 - **`bacio history`** — the per-DB audit log (60-day retention); filter by `--since`/`--from`/`--to`, `--op`, `--kind`, `--user-filter`. Background subsystems stamp their own actor strings (`bacio-matcher` for matcher binds, `bacio-controller` for leader-driven sweeps, `bacio-channel-ping` for the idle pinger) so `--user-filter <actor>` is a coherent per-subsystem ledger. Ops include the standard CRUD set plus background-only entries: `agent.bind` (matcher hand-off), `agent.deliver` (first push to the worker), `leader.takeover` (lease changed hands — one row per holder change, not per renewal), and `question.abandon` (channel-restart sweep of orphaned questions).
 - **`bacio archive`** — `archive sweep` runs the auto-archive passes on demand.
 - **`bacio agent`** — the local agent-session registry: register/heartbeat/end, claim/release, dispatch/inbox/ack/cancel, list/show, and `agent questions` for user clarifications. Never synced.
-- **`bacio settings`** — global settings: `template` (dispatch prompt templates), `show-archived`, `sync-background`.
+- **`bacio settings`** — global settings: `template` (dispatch prompt templates), `show-archived`, `sync-background`, `archive` (BACI-162 auto-archive toggle + retention window).
 - **`bacio sync`** — git-backed sync of the local DB to a separate sync repo: `init`, `clone`, bare `sync` (steady state), `verify`, `inspect`, `remotes` (per-machine registry listing).
 - **`bacio worktree`** — per-worktree environment manifests so sibling worktrees don't clash on the API port: `init`/`show`/`list`/`rm`.
 - **`bacio install-skill` / `bacio install-agent`** — set another repo up (see Installation).
