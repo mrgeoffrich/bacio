@@ -1,12 +1,13 @@
 package api
 
-// HTTP read surface for the BACI-89 background sync feature. Four
-// routes:
+// HTTP read + setup surface for the BACI-89 background sync feature.
+// Six routes:
 //
 //   - GET /repos/{prefix}/sync          — per-repo sync status
 //   - GET /sync                         — every tracked repo's status
 //   - GET /sync/repos                   — sync-repo registry (BACI-107)
 //   - GET / PUT /settings/sync-preferences — the background-sync toggle
+//   - POST /repos/{prefix}/sync/setup   — set up sync for a repo (BACI-110)
 //
 // "Sync status" is read straight from the shared SQLite store (the
 // sync_remotes row's last_sync_at / last_sync_error) plus the project
@@ -22,12 +23,26 @@ package api
 // sync.remote in their .bacio/config.yaml. It composes the BACI-105
 // primitives — ListSyncRemotes + DiscoverMembership + DeriveSyncLabel —
 // with ReadProjectConfig; no new store calls, no new filesystem walking.
+//
+// The setup endpoint (BACI-110) is the HTTP equivalent of the existing
+// `bacio sync init` / `bacio sync clone` CLI verbs. It resolves the
+// project root from the URL prefix (no cwd detection), acquires
+// AcquireSyncLock so the call can't race a background controller tick,
+// and dispatches to the engine's InitSyncRepo or CloneSyncRepo. v1 is
+// synchronous with a generous timeout — async-with-polling is a noted
+// follow-up. Renumber collisions return 409 + the preview body; the
+// caller re-POSTs with allow_renumber=true to confirm.
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
+	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/inputio"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
@@ -330,4 +345,344 @@ func memberProjectsOutFor(members []bsync.MemberProjectEntry) []MemberProjectOut
 		})
 	}
 	return out
+}
+
+// ---------- sync setup (BACI-110) ----------
+
+// SyncSetupOut is the response shape for POST /repos/{prefix}/sync/setup.
+// Mode echoes the request so the caller can confirm which engine path
+// ran without re-parsing its own request. Init/Clone carry the
+// engine's structured result; only the field for the chosen mode is
+// populated, and only on success. PreviewCollisions is set on the 409
+// renumber-collision response (mode="clone" or "attach" only); when it
+// is set, neither Init nor Clone is populated and the call wrote
+// nothing.
+type SyncSetupOut struct {
+	Mode              string                   `json:"mode"`
+	Init              *bsync.InitResult        `json:"init,omitempty"`
+	Clone             *bsync.CloneResult       `json:"clone,omitempty"`
+	PreviewCollisions *bsync.CollisionPreview  `json:"preview_collisions,omitempty"`
+}
+
+// syncSetupTimeout bounds one synchronous setup call. v1 is sync-with-
+// generous-timeout; an async-with-polling follow-up is noted on
+// BACI-110. The cap covers a fresh clone of a chunky team sync repo
+// plus the import — anything longer suggests a stuck git network or a
+// pathological collision-resolution pass and is better surfaced as a
+// 5xx than left to drift.
+const syncSetupTimeout = 5 * time.Minute
+
+// handleSyncSetup is the POST /repos/{prefix}/sync/setup handler. Three
+// modes — init / clone / attach — dispatch into the engine's
+// InitSyncRepo / CloneSyncRepo entry points, with a per-call timeout
+// and the cross-process sync lock held for the duration.
+func (d deps) handleSyncSetup(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	// A phantom (path=="") has no working tree; we can't write its
+	// .bacio/config.yaml. Surface the explicit reason rather than
+	// letting the engine fail deep with a misleading "not a git repo"
+	// error.
+	if repo.Path == "" {
+		writeError(w, http.StatusBadRequest, "invalid_input",
+			"repo has no local working tree (phantom); link it via POST /repos/{prefix}/link first",
+			map[string]any{"field": "prefix"})
+		return
+	}
+
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	parsed, _, err := inputio.DecodeStrict[inputs.SyncSetupInput](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	mode := strings.ToLower(strings.TrimSpace(parsed.Mode))
+	if mode != "init" && mode != "clone" && mode != "attach" {
+		writeError(w, http.StatusBadRequest, "invalid_input",
+			`mode must be one of "init", "clone", "attach"`,
+			map[string]any{"field": "mode"})
+		return
+	}
+
+	// Per-mode argument validation. The engine layer also validates,
+	// but surfacing a 400 here keeps the message field-anchored.
+	switch mode {
+	case "init":
+		if parsed.LocalPath == "" {
+			writeError(w, http.StatusBadRequest, "invalid_input",
+				`mode="init" requires local_path`,
+				map[string]any{"field": "local_path"})
+			return
+		}
+	case "clone":
+		if parsed.Remote == "" {
+			writeError(w, http.StatusBadRequest, "invalid_input",
+				`mode="clone" requires remote`,
+				map[string]any{"field": "remote"})
+			return
+		}
+	case "attach":
+		if parsed.Remote == "" {
+			writeError(w, http.StatusBadRequest, "invalid_input",
+				`mode="attach" requires remote (the registry key to look up)`,
+				map[string]any{"field": "remote"})
+			return
+		}
+		if parsed.LocalPath != "" {
+			writeError(w, http.StatusBadRequest, "invalid_input",
+				`mode="attach" must not set local_path — the registry's local_path is used`,
+				map[string]any{"field": "local_path"})
+			return
+		}
+	}
+
+	dryRun := isDryRun(r)
+	actor := ActorFromContext(r.Context())
+
+	// Acquire the cross-process sync lock so a background controller
+	// tick can't race the bootstrap. Held for the whole call (even on
+	// dry-run, so the projection matches what a live call would see).
+	dbPath := d.opts.DBPath
+	if dbPath == "" {
+		def, err := store.DefaultPath()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal", err.Error(), nil)
+			return
+		}
+		dbPath = def
+	}
+	release, err := bsync.AcquireSyncLock(dbPath)
+	if err != nil {
+		// ErrLockTimeout is the only expected error here — the only
+		// reason AcquireSyncLock blocks is the timeout, which means
+		// another bacio sync is mid-flight. Surface 503 so the caller
+		// can retry rather than treat it as a permanent failure.
+		if errors.Is(err, bsync.ErrLockTimeout) {
+			writeError(w, http.StatusServiceUnavailable, "sync_busy", err.Error(), nil)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal", err.Error(), nil)
+		return
+	}
+	defer release() //nolint:errcheck — best-effort lock release
+
+	ctx, cancel := context.WithTimeout(r.Context(), syncSetupTimeout)
+	defer cancel()
+
+	eng := &bsync.Engine{Store: d.store, Actor: actor, DryRun: dryRun}
+
+	switch mode {
+	case "init":
+		d.runSyncSetupInit(ctx, w, r, eng, repo, parsed, dryRun, actor)
+	case "clone":
+		d.runSyncSetupClone(ctx, w, r, eng, repo, parsed, dryRun, actor)
+	case "attach":
+		d.runSyncSetupAttach(ctx, w, r, eng, repo, parsed, dryRun, actor)
+	}
+}
+
+// runSyncSetupInit handles mode="init" — InitSyncRepo against the
+// supplied local_path. Mirrors `bacio sync init` (internal/cli/sync.go).
+func (d deps) runSyncSetupInit(ctx context.Context, w http.ResponseWriter, r *http.Request,
+	eng *bsync.Engine, repo *model.Repo, in *inputs.SyncSetupInput, dryRun bool, actor string) {
+	res, err := eng.InitSyncRepo(ctx, repo.Path, bsync.InitOptions{
+		LocalPath: in.LocalPath,
+		Remote:    in.Remote,
+	})
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if !dryRun {
+		recordOp(d.store, d.logger, model.HistoryEntry{
+			Actor:      actor,
+			RepoID:     &repo.ID,
+			RepoPrefix: repo.Prefix,
+			Op:         "sync.init",
+			Kind:       "repo",
+			Details: fmt.Sprintf("local=%s remote=%s commit=%s pushed=%v attached=%v",
+				res.LocalPath, res.Remote, res.CommitSHA, res.Pushed, res.Attached),
+		})
+		if res.Import != nil {
+			recordSyncImportOps(d.store, d.logger, res.Import)
+		}
+	}
+	out := &SyncSetupOut{Mode: "init", Init: res}
+	if dryRun {
+		writeDryRun(w, http.StatusOK, out)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// runSyncSetupClone handles mode="clone" — CloneSyncRepo with the
+// caller-supplied local_path (or the engine's default). Honours
+// AllowRenumber for the BACI-4 collision-preview gate; on a refused
+// clone (collisions + !AllowRenumber + !DryRun), the engine populates
+// res.PreviewCollisions and we return 409 + that preview.
+func (d deps) runSyncSetupClone(ctx context.Context, w http.ResponseWriter, r *http.Request,
+	eng *bsync.Engine, repo *model.Repo, in *inputs.SyncSetupInput, dryRun bool, actor string) {
+	res, err := eng.CloneSyncRepo(ctx, repo.Path, bsync.CloneOptions{
+		LocalPath:     in.LocalPath,
+		Remote:        in.Remote,
+		AllowRenumber: in.AllowRenumber,
+		DryRun:        dryRun,
+	})
+	if err != nil {
+		// Collision-refused path: the engine returns a non-nil res
+		// with PreviewCollisions populated AND an error. Surface the
+		// preview as a 409 so the caller can render it and re-POST
+		// with allow_renumber=true.
+		if res != nil && res.PreviewCollisions != nil {
+			writeJSON(w, http.StatusConflict, &SyncSetupOut{
+				Mode:              "clone",
+				PreviewCollisions: res.PreviewCollisions,
+			})
+			return
+		}
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if !dryRun {
+		recordOp(d.store, d.logger, model.HistoryEntry{
+			Actor:      actor,
+			RepoID:     &repo.ID,
+			RepoPrefix: repo.Prefix,
+			Op:         "sync.clone",
+			Kind:       "repo",
+			Details:    fmt.Sprintf("local=%s remote=%s", res.LocalPath, res.Remote),
+		})
+		if res.Import != nil {
+			recordSyncImportOps(d.store, d.logger, res.Import)
+		}
+	}
+	out := &SyncSetupOut{Mode: "clone", Clone: res}
+	if dryRun {
+		writeDryRun(w, http.StatusOK, out)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// runSyncSetupAttach handles mode="attach" — looks the remote up in
+// the sync_remotes registry, then routes through CloneSyncRepo against
+// the registry's local_path. The clone path short-circuits via
+// openOrCloneSyncRepo when the directory exists and carries the bacio
+// sentinel, so no git clone runs and the call boils down to an
+// additive import + writing .bacio/config.yaml.
+func (d deps) runSyncSetupAttach(ctx context.Context, w http.ResponseWriter, r *http.Request,
+	eng *bsync.Engine, repo *model.Repo, in *inputs.SyncSetupInput, dryRun bool, actor string) {
+	rec, err := d.store.GetSyncRemote(in.Remote)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found",
+				fmt.Sprintf("no sync_remotes registry entry for remote %q; use mode=\"clone\" to add one", in.Remote),
+				map[string]any{"field": "remote"})
+			return
+		}
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	res, err := eng.CloneSyncRepo(ctx, repo.Path, bsync.CloneOptions{
+		LocalPath:     rec.LocalPath,
+		Remote:        in.Remote,
+		AllowRenumber: in.AllowRenumber,
+		DryRun:        dryRun,
+	})
+	if err != nil {
+		if res != nil && res.PreviewCollisions != nil {
+			writeJSON(w, http.StatusConflict, &SyncSetupOut{
+				Mode:              "attach",
+				PreviewCollisions: res.PreviewCollisions,
+			})
+			return
+		}
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if !dryRun {
+		// Same op verb as the clone path — the engine's behaviour is
+		// identical (import + write config), and the audit log is
+		// kept narrow (sync.init / sync.clone) to match the CLI.
+		recordOp(d.store, d.logger, model.HistoryEntry{
+			Actor:      actor,
+			RepoID:     &repo.ID,
+			RepoPrefix: repo.Prefix,
+			Op:         "sync.clone",
+			Kind:       "repo",
+			Details:    fmt.Sprintf("local=%s remote=%s attach=true", res.LocalPath, res.Remote),
+		})
+		if res.Import != nil {
+			recordSyncImportOps(d.store, d.logger, res.Import)
+		}
+	}
+	out := &SyncSetupOut{Mode: "attach", Clone: res}
+	if dryRun {
+		writeDryRun(w, http.StatusOK, out)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// recordSyncImportOps mirrors the helper in internal/cli/sync.go: one
+// sync.import row plus per-renumber / per-rename / per-deletion audit
+// entries for the side effects of an import. Lives in the api package
+// so the HTTP setup handler doesn't import internal/cli. Dry-run leaves
+// no audit trail.
+func recordSyncImportOps(s *store.Store, logger *slog.Logger, res *bsync.ImportResult) {
+	if res == nil {
+		return
+	}
+	details := fmt.Sprintf("repos=%d issues=%d features=%d documents=%d comments=%d inserted=%d updated=%d noop=%d",
+		res.Repos, res.Issues, res.Features, res.Documents, res.Comments,
+		res.Inserted, res.Updated, res.NoOp)
+	if res.Skipped > 0 {
+		details += fmt.Sprintf(" skipped=%d", res.Skipped)
+	}
+	recordOp(s, logger, model.HistoryEntry{
+		Op:      "sync.import",
+		Kind:    "repo",
+		Details: details,
+	})
+	for _, sk := range res.SkippedStale {
+		recordOp(s, logger, model.HistoryEntry{
+			Op:          "sync.skip_stale_remote",
+			Kind:        sk.Kind,
+			TargetLabel: sk.Label,
+			Details:     fmt.Sprintf("uuid=%s local=%s remote=%s", sk.UUID, sk.LocalUpdated, sk.RemoteUpdated),
+		})
+	}
+	for _, r := range res.Renumbered {
+		recordOp(s, logger, model.HistoryEntry{
+			Op:          "sync.renumber",
+			Kind:        "issue",
+			TargetLabel: fmt.Sprintf("%s-%d", r.Prefix, r.NewNumber),
+			Details:     fmt.Sprintf("from %s-%d (uuid=%s)", r.Prefix, r.OldNumber, r.UUID),
+		})
+	}
+	for _, r := range res.Renamed {
+		recordOp(s, logger, model.HistoryEntry{
+			Op:          "sync.rename",
+			Kind:        r.Kind,
+			TargetLabel: r.New,
+			Details:     fmt.Sprintf("from %s (uuid=%s)", r.Old, r.UUID),
+		})
+	}
+	for _, d := range res.Deleted {
+		recordOp(s, logger, model.HistoryEntry{
+			Op:          "sync.delete",
+			Kind:        d.Kind,
+			TargetLabel: d.Label,
+			Details:     fmt.Sprintf("uuid=%s", d.UUID),
+		})
+	}
 }

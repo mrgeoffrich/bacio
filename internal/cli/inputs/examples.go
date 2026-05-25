@@ -266,4 +266,21 @@ var (
 	ExampleArchiveSweep       = ArchiveSweepInput{}
 	ExampleSettingsShowArchived = SettingsShowArchivedInput{Value: true}
 	ExampleSettingsSyncBackground = SettingsSyncBackgroundInput{Value: false}
+
+	// SyncSetup (BACI-110) — three representative payloads, one per mode.
+	// The registry only attaches one example to the schema, but the
+	// other two are kept available for tests and future doc generators.
+	ExampleSyncSetupClone = SyncSetupInput{
+		Mode:   "clone",
+		Remote: "git@example.com:bacio/team-sync.git",
+	}
+	ExampleSyncSetupInit = SyncSetupInput{
+		Mode:      "init",
+		Remote:    "git@example.com:bacio/team-sync.git",
+		LocalPath: "/Users/dev/.bacio/sync/team-sync",
+	}
+	ExampleSyncSetupAttach = SyncSetupInput{
+		Mode:   "attach",
+		Remote: "git@example.com:bacio/team-sync.git",
+	}
 )
