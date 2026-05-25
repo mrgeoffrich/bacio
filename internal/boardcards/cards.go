@@ -269,12 +269,22 @@ type BoardCardTodo struct {
 // Archived issues (BACI-68) are hidden by default. Pass
 // includeArchived=true to inflate — the HTTP handler reads
 // ?include_archived=1 OR the display.show_archived global setting.
-func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArchived bool) ([]BoardCard, error) {
+//
+// hiddenFeatureSlugs (BACI-177) is the set of feature slugs to exclude
+// from the board — the per-feature "Show on board" toggle flipped off
+// from the Features screen. Cards belonging to those features never
+// ship over the wire. Empty slice = no filter. The caller (REST or
+// Wails) loads the set from the per-repo board-hide KV first.
+func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArchived bool, hiddenFeatureSlugs []string) ([]BoardCard, error) {
 	// BACI-171: request descriptions so the per-card DescriptionExcerpt
 	// can be computed below. ListIssues otherwise strips the description
 	// column to keep list responses lean; the excerpt is short (~140
 	// runes) so the bulk-read cost stays modest.
-	filter := client.IssueFilter{IncludeArchived: includeArchived, IncludeDescription: true}
+	filter := client.IssueFilter{
+		IncludeArchived:    includeArchived,
+		IncludeDescription: true,
+		HiddenFeatureSlugs: hiddenFeatureSlugs,
+	}
 	var repos []*model.Repo
 	if repo == nil {
 		filter.AllRepos = true

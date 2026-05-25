@@ -27,9 +27,21 @@ func (d deps) handleBoardCardsListRepo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	includeArchived := includeArchivedFromRequest(r, d.store)
+	// BACI-177: load the per-repo board-hide set so cards belonging to
+	// hidden features never ship over the wire. A read failure is
+	// non-fatal — the board still renders, just without the filter.
+	var hiddenSlugs []string
+	if hidden, herr := d.store.LoadHiddenFeatures(repo.ID); herr == nil && len(hidden) > 0 {
+		hiddenSlugs = make([]string, 0, len(hidden))
+		for slug, on := range hidden {
+			if on {
+				hiddenSlugs = append(hiddenSlugs, slug)
+			}
+		}
+	}
 	c := client.NewLocalFromStore(d.store, ActorFromContext(r.Context()))
 	defer c.Close()
-	cards, err := boardcards.Assemble(r.Context(), c, repo, includeArchived)
+	cards, err := boardcards.Assemble(r.Context(), c, repo, includeArchived, hiddenSlugs)
 	if err != nil {
 		status, code := statusForError(err)
 		writeError(w, status, code, err.Error(), nil)

@@ -5,6 +5,15 @@ import MarkdownView from '../lib/markdownView';
 import CommentComposer from './issue/CommentComposer';
 import FeatureEmojiPicker from './FeatureEmojiPicker.jsx';
 
+// BACI-177: per-feature "Show on board" toggle. The id is the value
+// the toggle should set on the feature — true = show on board (the
+// default), false = hide. Matches the two-button mk-segmented shape
+// used elsewhere (theme, show-archived, hide-empty-columns).
+const SHOW_ON_BOARD_OPTIONS = [
+  { id: true, label: 'Show' },
+  { id: false, label: 'Hide' },
+];
+
 // Short date for the feature-list rows and detail metadata line.
 function shortDate(iso) {
   return new Date(iso).toLocaleDateString();
@@ -25,8 +34,15 @@ function commentTimestamp(iso) {
 // right pane shows the selected feature's description and the issues
 // grouped under it. BACI-172 widened the right pane with an emoji
 // picker — the per-feature glyph rendered on every kanban card under
-// this feature. Everything else still flows through the CLI.
-export default function FeaturesView({ activeBoard }) {
+// this feature. BACI-177 added a "Show on board" toggle that hides
+// every kanban card belonging to the feature when flipped off.
+// Everything else still flows through the CLI.
+//
+// onChangeHidden (BACI-177) is fired by the toggle so the parent
+// (App.jsx) can refresh the cached board cards — flipping the toggle
+// changes which cards ship over the wire, and the App-owned `cards`
+// state would otherwise show stale entries until the 10s poll.
+export default function FeaturesView({ activeBoard, onChangeHidden }) {
   const [features, setFeatures] = useState([]);
   const [selected, setSelected] = useState(null); // slug
   const [detail, setDetail] = useState(null);
@@ -131,6 +147,69 @@ export default function FeaturesView({ activeBoard }) {
               {' · '}created {shortDate(detail.createdAt)}
               {' · '}updated {shortDate(detail.updatedAt)}
             </div>
+
+            <section className="mk-features-section">
+              <div className="mk-features-toggle-row">
+                <div className="mk-features-label">Show on board</div>
+                <div
+                  className="mk-segmented"
+                  role="group"
+                  aria-label="Show this feature's cards on the board"
+                >
+                  {SHOW_ON_BOARD_OPTIONS.map(opt => {
+                    // The toggle reads "are cards visible?" — i.e. the
+                    // inverse of detail.hiddenOnBoard. The id we set
+                    // is the same shape: true = show. The store
+                    // writes hidden=!shown.
+                    const shown = !detail.hiddenOnBoard;
+                    return (
+                      <button
+                        key={String(opt.id)}
+                        className={`mk-segmented-btn ${shown === opt.id ? 'is-active' : ''}`}
+                        aria-pressed={shown === opt.id}
+                        onClick={async () => {
+                          if (shown === opt.id) return; // already at this value
+                          try {
+                            const updated = await api.setFeatureHiddenOnBoard(
+                              activeBoard,
+                              detail.slug,
+                              !opt.id, // hidden = !shown
+                            );
+                            setDetail(updated);
+                            // Refresh the cached board cards in the
+                            // parent so the change is visible without
+                            // waiting for the 10s poll.
+                            if (typeof onChangeHidden === 'function') {
+                              onChangeHidden();
+                            }
+                            // Also refresh the list so the row's flag
+                            // stays in lockstep with the detail pane.
+                            try {
+                              const feats = await api.listFeatures(activeBoard);
+                              setFeatures(feats);
+                            } catch {
+                              // non-fatal — the next selection refresh
+                              // will pick up the new state.
+                            }
+                          } catch (err) {
+                            reportError(err, { headline: "Couldn't update visibility" });
+                          }
+                        }}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="mk-features-hint">
+                When hidden, every kanban card belonging to this
+                feature is dropped from the board on this machine.
+                Reverse it any time. Lives alongside the TUI feature
+                picker — flipping it here is visible on the TUI on the
+                next reload.
+              </div>
+            </section>
 
             <section className="mk-features-section">
               <div className="mk-features-label">Description</div>

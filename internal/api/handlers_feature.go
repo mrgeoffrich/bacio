@@ -2,12 +2,20 @@ package api
 
 import (
 	"net/http"
+	"sort"
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/inputio"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
+
+// featureHideInput is the body shape for PUT /repos/{prefix}/features/{slug}/hide
+// (BACI-177). Pointer-of-bool so the "hidden field omitted" case is
+// distinguishable from "hidden: false".
+type featureHideInput struct {
+	Hidden *bool `json:"hidden"`
+}
 
 func (d deps) handleFeaturesList(w http.ResponseWriter, r *http.Request) {
 	repo, ok := resolveRepoFromPath(w, r, d.store)
@@ -20,6 +28,10 @@ func (d deps) handleFeaturesList(w http.ResponseWriter, r *http.Request) {
 		RepoID:             repo.ID,
 		IncludeDescription: withDesc == "true" || withDesc == "1",
 		IncludeArchived:    includeArchivedFromRequest(r, d.store),
+		// BACI-177: every features-list response carries the per-feature
+		// "Show on board" flag so the Features screen reads it without
+		// a second round-trip.
+		WithHiddenOnBoard: true,
 	})
 	if err != nil {
 		status, code := statusForError(err)
@@ -40,6 +52,12 @@ func (d deps) handleFeatureShow(w http.ResponseWriter, r *http.Request) {
 	feat, ok := resolveFeatureOnRepo(w, r, d.store, repo)
 	if !ok {
 		return
+	}
+	// BACI-177: inflate HiddenOnBoard from the per-repo board-hide KV
+	// so the FeaturesView toggle reads the current state without an
+	// extra round-trip.
+	if hidden, herr := d.store.IsFeatureHiddenOnBoard(repo.ID, feat.Slug); herr == nil {
+		feat.HiddenOnBoard = hidden
 	}
 	issues, err := d.store.ListIssues(store.IssueFilter{RepoID: &repo.ID, FeatureID: &feat.ID})
 	if err != nil {
@@ -250,6 +268,93 @@ func (d deps) handleFeatureDelete(w http.ResponseWriter, r *http.Request) {
 		Details: feat.Title,
 	})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleFeaturesHidden (BACI-177) returns the set of feature slugs the
+// user has hidden on the kanban board. Backs the per-feature toggle on
+// the Features screen so the React component reads the current state
+// without iterating ListFeatures looking for the flag.
+func (d deps) handleFeaturesHidden(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	hidden, err := d.store.LoadHiddenFeatures(repo.ID)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	slugs := make([]string, 0, len(hidden))
+	for slug, on := range hidden {
+		if on {
+			slugs = append(slugs, slug)
+		}
+	}
+	sort.Strings(slugs)
+	writeJSON(w, http.StatusOK, map[string]any{"slugs": slugs})
+}
+
+// handleFeatureHide (BACI-177) flips the per-feature "Show on board"
+// toggle. Body: {"hidden": bool}. Idempotent — flipping to the same
+// state is a no-op write and skips the audit row. Audits as
+// feature.hide / feature.unhide so `bacio history --op feature.hide`
+// works out of the box.
+func (d deps) handleFeatureHide(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	feat, ok := resolveFeatureOnRepo(w, r, d.store, repo)
+	if !ok {
+		return
+	}
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	body, _, err := inputio.DecodeStrict[featureHideInput](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	if body.Hidden == nil {
+		writeError(w, http.StatusBadRequest, "invalid_input",
+			"hidden is required", map[string]any{"field": "hidden"})
+		return
+	}
+	want := *body.Hidden
+	if isDryRun(r) {
+		writeDryRun(w, http.StatusOK, map[string]any{"slug": feat.Slug, "hidden": want})
+		return
+	}
+	current, err := d.store.IsFeatureHiddenOnBoard(repo.ID, feat.Slug)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if current != want {
+		if err := d.store.SetFeatureHiddenOnBoard(repo.ID, feat.Slug, want); err != nil {
+			status, code := statusForError(err)
+			writeError(w, status, code, err.Error(), nil)
+			return
+		}
+		op := "feature.unhide"
+		if want {
+			op = "feature.hide"
+		}
+		recordOp(d.store, d.logger, model.HistoryEntry{
+			Actor:       ActorFromContext(r.Context()),
+			RepoID:      &repo.ID,
+			RepoPrefix:  repo.Prefix,
+			Op:          op,
+			Kind:        "feature",
+			TargetID:    &feat.ID,
+			TargetLabel: feat.Slug,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"slug": feat.Slug, "hidden": want})
 }
 
 // buildFeatureDeletePreview is kept in sync with the local Client backend's

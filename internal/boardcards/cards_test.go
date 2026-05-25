@@ -43,6 +43,10 @@ type fakeClient struct {
 	// everything (the assembler's per-row issue_key match still
 	// catches the cross-card cases).
 	dispatchAware bool
+	// lastIssueFilter (BACI-177) captures the IssueFilter the
+	// assembler passed to ListIssues so a test can pin the
+	// HiddenFeatureSlugs threading without spinning up a real store.
+	lastIssueFilter *client.IssueFilter
 }
 
 func (f *fakeClient) ListRepos(context.Context) ([]*model.Repo, error) {
@@ -51,7 +55,11 @@ func (f *fakeClient) ListRepos(context.Context) ([]*model.Repo, error) {
 	}
 	return []*model.Repo{f.repo}, nil
 }
-func (f *fakeClient) ListIssues(context.Context, client.IssueFilter) ([]*model.Issue, error) {
+func (f *fakeClient) ListIssues(_ context.Context, filter client.IssueFilter) ([]*model.Issue, error) {
+	// Stash the filter so BACI-177 / similar threading tests can
+	// assert which slugs Assemble forwarded.
+	captured := filter
+	f.lastIssueFilter = &captured
 	return f.issues, nil
 }
 func (f *fakeClient) ListOpenClaims(context.Context, *model.Repo) ([]*model.AgentClaim, error) {
@@ -191,7 +199,7 @@ func TestAssembleVerbAndTodos(t *testing.T) {
 		todos: todos, templates: templates,
 	}
 
-	cards, err := Assemble(context.Background(), f, repo, false)
+	cards, err := Assemble(context.Background(), f, repo, false, nil)
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
@@ -261,7 +269,7 @@ func TestAssembleAgentIdentityDispatch(t *testing.T) {
 		sessions: []*model.AgentSession{sess}, dispatches: dispatches,
 		templates: templates,
 	}
-	cards, err := Assemble(context.Background(), f, repo, false)
+	cards, err := Assemble(context.Background(), f, repo, false, nil)
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
@@ -308,7 +316,7 @@ func TestAssembleSurfacesOpenQuestions(t *testing.T) {
 		questions: questions,
 	}
 
-	cards, err := Assemble(context.Background(), f, repo, false)
+	cards, err := Assemble(context.Background(), f, repo, false, nil)
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
@@ -364,7 +372,7 @@ func TestAssembleTodosScopedPerIssue(t *testing.T) {
 		repo: repo, issues: issues, claims: claims,
 		sessions: []*model.AgentSession{sess}, todos: todos,
 	}
-	cards, err := Assemble(context.Background(), f, repo, false)
+	cards, err := Assemble(context.Background(), f, repo, false, nil)
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
@@ -450,7 +458,7 @@ func TestAssembleTodosScopedPerDispatch(t *testing.T) {
 		sessions: []*model.AgentSession{sess}, dispatches: dispatches,
 		todos: todos, dispatchAware: true,
 	}
-	cards, err := Assemble(context.Background(), f, repo, false)
+	cards, err := Assemble(context.Background(), f, repo, false, nil)
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
@@ -484,7 +492,7 @@ func TestAssembleNoDispatchNoVerb(t *testing.T) {
 		repo: repo, issues: issues, claims: claims,
 		sessions: []*model.AgentSession{sess},
 	}
-	cards, err := Assemble(context.Background(), f, repo, false)
+	cards, err := Assemble(context.Background(), f, repo, false, nil)
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
@@ -565,7 +573,7 @@ func TestAssembleBlockedBy(t *testing.T) {
 		4: {{BlockedID: 4, BlockerID: 3, BlockerKey: "TEST-3", BlockerState: model.StateDone}},
 	}
 	f := &fakeClient{repo: repo, issues: issues, blockers: blockers}
-	cards, err := Assemble(context.Background(), f, repo, false)
+	cards, err := Assemble(context.Background(), f, repo, false, nil)
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
@@ -648,7 +656,7 @@ func TestAssembleWaitingState(t *testing.T) {
 		{Slug: "ship", Name: "Shipping", ActionLabel: "Ship it", ConcurrencyLimit: 1},
 	}
 	f := &fakeClient{repo: repo, issues: issues, dispatches: dispatches, templates: templates}
-	cards, err := Assemble(context.Background(), f, repo, false)
+	cards, err := Assemble(context.Background(), f, repo, false, nil)
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
@@ -704,7 +712,7 @@ func TestAssembleWaitingStateBlockedByCap(t *testing.T) {
 		repo: repo, issues: issues, dispatches: dispatches, templates: templates,
 		inflightByMode: inflight,
 	}
-	cards, err := Assemble(context.Background(), f, repo, false)
+	cards, err := Assemble(context.Background(), f, repo, false, nil)
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
@@ -818,7 +826,7 @@ func TestAssembleSortsCompletedColumns(t *testing.T) {
 			CreatedAt: time.Date(2026, 5, 15, 9, 0, 0, 0, time.UTC)},
 	}
 	f := &fakeClient{repo: repo, issues: issues}
-	cards, err := Assemble(context.Background(), f, repo, false)
+	cards, err := Assemble(context.Background(), f, repo, false, nil)
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
@@ -883,7 +891,7 @@ func TestAssembleSortsCompletedColumnsByTerminalAt(t *testing.T) {
 			TerminalAt: mk(time.Date(2026, 5, 5, 9, 0, 0, 0, time.UTC))},
 	}
 	f := &fakeClient{repo: repo, issues: issues}
-	cards, err := Assemble(context.Background(), f, repo, false)
+	cards, err := Assemble(context.Background(), f, repo, false, nil)
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
@@ -997,7 +1005,7 @@ func TestAssembleDescriptionExcerpt(t *testing.T) {
 		{ID: 3, Key: "TEST-3", State: model.StateTodo, Title: "long", Description: longBody},
 	}
 	f := &fakeClient{repo: repo, issues: issues}
-	cards, err := Assemble(context.Background(), f, repo, false)
+	cards, err := Assemble(context.Background(), f, repo, false, nil)
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
@@ -1050,7 +1058,7 @@ func TestAssembleTranscriptAndEvalCounts(t *testing.T) {
 		sessions: []*model.AgentSession{sess},
 		evalCounts: evalCounts, transcriptCounts: transcriptCounts,
 	}
-	cards, err := Assemble(context.Background(), f, repo, false)
+	cards, err := Assemble(context.Background(), f, repo, false, nil)
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
@@ -1076,4 +1084,54 @@ func TestAssembleTranscriptAndEvalCounts(t *testing.T) {
 		t.Errorf("TEST-102 counts = (eval=%d, transcript=%d), want (0, 0)",
 			empty.EvalCommentCount, empty.TranscriptDocCount)
 	}
+}
+
+// TestAssembleHidesFeatureCards (BACI-177) pins that the
+// hiddenFeatureSlugs parameter Assemble accepts is threaded straight
+// into the IssueFilter handed to ListIssues. The actual row filtering
+// is the store's responsibility (TestStore_ListIssues_HiddenFeatureSlugsFilter
+// pins that), so this layer just verifies the wiring.
+func TestAssembleHidesFeatureCards(t *testing.T) {
+	repo := &model.Repo{ID: 1, Prefix: "TEST", Name: "test"}
+	// No issues required — the threading assertion is on the filter,
+	// not the cards array.
+	f := &fakeClient{repo: repo}
+
+	hidden := []string{"auth", "ops"}
+	if _, err := Assemble(context.Background(), f, repo, false, hidden); err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	if f.lastIssueFilter == nil {
+		t.Fatalf("ListIssues was never called")
+	}
+	if !stringSliceEqual(f.lastIssueFilter.HiddenFeatureSlugs, hidden) {
+		t.Fatalf("HiddenFeatureSlugs threaded as %v, want %v",
+			f.lastIssueFilter.HiddenFeatureSlugs, hidden)
+	}
+
+	// nil slice → filter carries nil too (and the store-side WHERE
+	// shortcuts on len == 0).
+	f2 := &fakeClient{repo: repo}
+	if _, err := Assemble(context.Background(), f2, repo, false, nil); err != nil {
+		t.Fatalf("Assemble (nil): %v", err)
+	}
+	if f2.lastIssueFilter == nil {
+		t.Fatalf("ListIssues was never called (nil case)")
+	}
+	if len(f2.lastIssueFilter.HiddenFeatureSlugs) != 0 {
+		t.Fatalf("nil hidden slice: filter carried %v, want empty",
+			f2.lastIssueFilter.HiddenFeatureSlugs)
+	}
+}
+
+func stringSliceEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

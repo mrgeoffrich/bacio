@@ -179,6 +179,17 @@ type Client interface {
 	// the feature row (BACI-68). Same semantics as ArchiveIssue.
 	ArchiveFeature(ctx context.Context, repo *model.Repo, slug string, dryRun bool) (*model.Feature, error)
 	UnarchiveFeature(ctx context.Context, repo *model.Repo, slug string, dryRun bool) (*model.Feature, error)
+	// IsFeatureHiddenOnBoard / SetFeatureHiddenOnBoard / ListHiddenFeatureSlugs
+	// (BACI-177) expose the per-feature "Show on board" toggle that
+	// drives the Features-screen affordance. The flag is per-repo
+	// display state (stored in tui_settings), not bacio state — same
+	// shape as GetDisplayShowArchived / SetDisplayShowArchived. The
+	// remote backend hits the REST endpoints
+	// GET /repos/{prefix}/features/hidden and
+	// PUT /repos/{prefix}/features/{slug}/hide.
+	IsFeatureHiddenOnBoard(ctx context.Context, repo *model.Repo, slug string) (bool, error)
+	SetFeatureHiddenOnBoard(ctx context.Context, repo *model.Repo, slug string, hidden, dryRun bool) (bool, error)
+	ListHiddenFeatureSlugs(ctx context.Context, repo *model.Repo) ([]string, error)
 
 	// ----- Issues -----
 	// ResolveIssueKey converts a possibly-bare key ("42" or "MINI-42")
@@ -681,6 +692,14 @@ type IssueFilter struct {
 	// with archived_at IS NOT NULL. Defaults to false; archived rows
 	// are hidden from default lists / board / kanban / API JSON.
 	IncludeArchived bool
+	// HiddenFeatureSlugs (BACI-177) excludes issues whose feature has
+	// a slug in this list — the per-feature "Show on board" toggle
+	// from the Features screen. Empty slice = no filter. Threaded
+	// straight through to the store-side IssueFilter; the local
+	// backend uses it as-is, and the remote backend hasn't yet wired
+	// a URL-query equivalent (the board-cards REST endpoint loads
+	// the set server-side so the wire shape doesn't need it).
+	HiddenFeatureSlugs []string
 }
 
 // IssueEdit is the parameter bundle for UpdateIssue. Pointer-of-pointer

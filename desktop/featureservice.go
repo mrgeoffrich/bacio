@@ -11,14 +11,22 @@ import (
 )
 
 // FeatureSummary is one feature, shaped for the desktop feature list.
+//
 // Emoji (BACI-184) carries the per-feature glyph so the Features panel
 // list can render it alongside the title — same glyph BACI-172 paints
 // on every kanban card. Empty when no emoji has been set.
+//
+// HiddenOnBoard (BACI-177) mirrors the per-feature "Show on board"
+// toggle on the Features screen — when true, every kanban card
+// belonging to this feature is hidden from the board on this machine.
+// Lives in the per-repo board-hide KV (tui_settings), not on the
+// features row.
 type FeatureSummary struct {
-	Slug      string    `json:"slug"`
-	Title     string    `json:"title"`
-	Emoji     string    `json:"emoji"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	Slug          string    `json:"slug"`
+	Title         string    `json:"title"`
+	Emoji         string    `json:"emoji"`
+	UpdatedAt     time.Time `json:"updatedAt"`
+	HiddenOnBoard bool      `json:"hiddenOnBoard"`
 }
 
 // FeatureLinkedIssue is one issue grouped under a feature, for the detail pane.
@@ -55,6 +63,10 @@ type FeatureDetail struct {
 	// Comments is the BACI-124 chronological-handoff timeline, oldest
 	// first. Drives the feature drawer's comment panel.
 	Comments []FeatureComment `json:"comments"`
+	// HiddenOnBoard (BACI-177) mirrors the per-feature "Show on board"
+	// toggle. When true, every kanban card belonging to this feature
+	// is hidden from the board on this machine.
+	HiddenOnBoard bool `json:"hiddenOnBoard"`
 }
 
 // FeatureService is the Wails-bound feature API the desktop frontend talks to.
@@ -95,10 +107,11 @@ func (f *FeatureService) ListFeatures(repoPrefix string) ([]FeatureSummary, erro
 	out := make([]FeatureSummary, 0, len(feats))
 	for _, feat := range feats {
 		out = append(out, FeatureSummary{
-			Slug:      feat.Slug,
-			Title:     feat.Title,
-			Emoji:     feat.Emoji,
-			UpdatedAt: feat.UpdatedAt,
+			Slug:          feat.Slug,
+			Title:         feat.Title,
+			Emoji:         feat.Emoji,
+			UpdatedAt:     feat.UpdatedAt,
+			HiddenOnBoard: feat.HiddenOnBoard,
 		})
 	}
 	return out, nil
@@ -136,14 +149,15 @@ func (f *FeatureService) GetFeature(repoPrefix, slug string) (FeatureDetail, err
 		})
 	}
 	return FeatureDetail{
-		Slug:        feat.Slug,
-		Title:       feat.Title,
-		Description: feat.Description,
-		Emoji:       feat.Emoji,
-		CreatedAt:   feat.CreatedAt,
-		UpdatedAt:   feat.UpdatedAt,
-		Issues:      issues,
-		Comments:    comments,
+		Slug:          feat.Slug,
+		Title:         feat.Title,
+		Description:   feat.Description,
+		Emoji:         feat.Emoji,
+		CreatedAt:     feat.CreatedAt,
+		UpdatedAt:     feat.UpdatedAt,
+		Issues:        issues,
+		Comments:      comments,
+		HiddenOnBoard: feat.HiddenOnBoard,
 	}, nil
 }
 
@@ -158,6 +172,25 @@ func (f *FeatureService) SetFeatureEmoji(repoPrefix, slug, emoji string) (Featur
 		return FeatureDetail{}, err
 	}
 	if _, err := f.client.UpdateFeature(ctx, repo, slug, nil, nil, &emoji, false); err != nil {
+		return FeatureDetail{}, err
+	}
+	return f.GetFeature(repoPrefix, slug)
+}
+
+// SetHiddenOnBoard (BACI-177) flips the per-feature "Show on board"
+// toggle and returns the refreshed FeatureDetail. true hides every
+// kanban card belonging to this feature on this machine; false makes
+// them visible again. Idempotent — flipping to the same state is a
+// no-op write. The flag lives in the per-repo board-hide KV
+// (tui_settings), shared with the TUI's feature picker; flipping it
+// here is visible on the TUI's next reload.
+func (f *FeatureService) SetHiddenOnBoard(repoPrefix, slug string, hidden bool) (FeatureDetail, error) {
+	ctx := context.Background()
+	repo, err := f.resolveRepo(ctx, repoPrefix)
+	if err != nil {
+		return FeatureDetail{}, err
+	}
+	if _, err := f.client.SetFeatureHiddenOnBoard(ctx, repo, slug, hidden, false); err != nil {
 		return FeatureDetail{}, err
 	}
 	return f.GetFeature(repoPrefix, slug)

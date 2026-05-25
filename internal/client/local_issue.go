@@ -39,6 +39,7 @@ func (c *localClient) ListIssues(ctx context.Context, f IssueFilter) ([]*model.I
 		States:             f.States,
 		Tags:               f.Tags,
 		IncludeArchived:    f.IncludeArchived,
+		HiddenFeatureSlugs: f.HiddenFeatureSlugs,
 	}
 	if !f.AllRepos && f.Repo != nil {
 		sf.RepoID = &f.Repo.ID

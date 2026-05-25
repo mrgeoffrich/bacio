@@ -365,6 +365,23 @@ export async function setFeatureEmoji(
   }
 }
 
+// setFeatureHiddenOnBoard (BACI-177) flips the per-feature "Show on
+// board" toggle and returns the refreshed FeatureDetail. true hides
+// every kanban card belonging to this feature on this machine; false
+// makes them visible again. Idempotent — flipping to the same state
+// is a no-op write.
+export async function setFeatureHiddenOnBoard(
+  repoPrefix: string,
+  slug: string,
+  hidden: boolean,
+): Promise<FeatureDetail> {
+  try {
+    return await FeatureService.SetHiddenOnBoard(repoPrefix, slug, hidden);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
 // addFeatureComment posts a chronological handoff comment to a feature
 // (BACI-124) and returns the refreshed feature detail.
 export async function addFeatureComment(

@@ -69,6 +69,13 @@ type FeatureFilter struct {
 	// archived_at. Defaults to false — archived features are hidden
 	// from default lists.
 	IncludeArchived bool
+	// WithHiddenOnBoard (BACI-177), when true, populates each returned
+	// Feature.HiddenOnBoard from the per-repo board-hide KV
+	// (LoadHiddenFeatures). Off by default so the many call sites
+	// that don't care about the toggle don't pay for the extra
+	// lookup. AllRepos is supported — the load runs once per repo
+	// the scan touches.
+	WithHiddenOnBoard bool
 }
 
 func (s *Store) GetFeatureByID(id int64) (*model.Feature, error) {
@@ -148,7 +155,50 @@ func (s *Store) ListFeaturesFiltered(f FeatureFilter) ([]*model.Feature, error) 
 		}
 		out = append(out, feat)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// BACI-177: opt-in enrichment from the per-repo board-hide KV.
+	// Loaded once per repo we touched and folded onto each row's
+	// HiddenOnBoard field — no extra round-trip when the caller
+	// didn't ask for it.
+	if f.WithHiddenOnBoard && len(out) > 0 {
+		hiddenByRepo := make(map[int64]map[string]bool)
+		for _, feat := range out {
+			if _, ok := hiddenByRepo[feat.RepoID]; ok {
+				continue
+			}
+			hidden, herr := s.LoadHiddenFeatures(feat.RepoID)
+			if herr != nil {
+				return nil, herr
+			}
+			hiddenByRepo[feat.RepoID] = hidden
+		}
+		for _, feat := range out {
+			if set := hiddenByRepo[feat.RepoID]; set != nil {
+				feat.HiddenOnBoard = set[feat.Slug]
+			}
+		}
+	}
+	return out, nil
+}
+
+// GetFeatureBySlugWithHidden (BACI-177) wraps GetFeatureBySlug and
+// also populates Feature.HiddenOnBoard from the per-repo board-hide KV
+// — the single-row sibling to ListFeaturesFiltered's WithHiddenOnBoard
+// branch. Used by the API/Wails show-feature handlers so the toggle
+// state arrives in lockstep with the rest of the row.
+func (s *Store) GetFeatureBySlugWithHidden(repoID int64, slug string) (*model.Feature, error) {
+	feat, err := s.GetFeatureBySlug(repoID, slug)
+	if err != nil {
+		return nil, err
+	}
+	hidden, err := s.IsFeatureHiddenOnBoard(repoID, slug)
+	if err != nil {
+		return nil, err
+	}
+	feat.HiddenOnBoard = hidden
+	return feat, nil
 }
 
 // SetFeatureArchived stamps or clears the feature's archived_at column
