@@ -354,6 +354,122 @@ body { margin: 0; }
 }
 .mk-card-action-item:hover { background: var(--bg-4); }
 
+/* BACI-192: follow-on dispatch button — a footer affordance that sits
+   alongside the assignee / eval / spinner triad on a taken or waiting
+   card. The button reuses the .mk-card-action-btn metrics so the row
+   stays in lockstep with the other footer chiclets; .is-attached
+   swaps to the accent fill + reveals the inline mode label. The
+   menu's separator + the is-current modifier let the dropdown narrate
+   "here is the currently-attached mode" without an extra row. */
+.mk-card-followon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 4px;
+  min-width: 24px; height: 24px; padding: 0 6px;
+  border: 1px solid var(--border-1); border-radius: var(--radius-md);
+  background: var(--paper); color: var(--fg-3); cursor: pointer;
+  font-family: var(--font-mono); font-size: 11px;
+  transition: border-color var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out),
+              background var(--dur-fast) var(--ease-out);
+}
+.mk-card-followon-btn:hover {
+  border-color: var(--border-2); color: var(--status-claude);
+  background: var(--status-claude-bg);
+}
+.mk-card-followon-btn .mk-icon { width: 13px; height: 13px; }
+.mk-card-followon-btn.is-attached {
+  border-color: var(--status-claude);
+  background: var(--status-claude-bg);
+  color: var(--status-claude);
+}
+.mk-card-followon-label {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; max-width: 96px;
+}
+.mk-card-action-menu-label {
+  font-family: var(--font-mono); font-size: 10px;
+  letter-spacing: .06em; text-transform: uppercase;
+  color: var(--fg-4);
+  padding: 4px 8px 2px;
+}
+.mk-card-action-sep {
+  height: 1px; margin: 4px 2px;
+  background: var(--border-1);
+}
+.mk-card-action-item.is-current {
+  background: var(--status-claude-bg);
+  color: var(--status-claude);
+}
+.mk-card-action-item.is-danger {
+  color: var(--status-blocked, var(--coral-500));
+}
+.mk-card-action-item.is-danger:hover {
+  background: var(--status-blocked-bg, var(--coral-100, var(--bg-4)));
+}
+
+/* BACI-192: activity-tray pin corner — a 16×16 triangular overlay in
+   the top-right of the card that toggles the issue's membership in the
+   tray's PINNED section. The clip-path shape is the visual; the
+   <button> underneath gives keyboard / screen-reader access. Faint
+   outline by default, hover brightens, .is-pinned swaps to the solid
+   accent fill (same colour family as .mk-card.is-taken so the user
+   recognises it as the "marked" affordance). The corner sits absolutely
+   inside .mk-card so it doesn't displace the existing top-row layout. */
+.mk-card-pin-corner {
+  position: absolute;
+  top: 0; right: 0;
+  width: 18px; height: 18px;
+  padding: 0; margin: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  clip-path: polygon(100% 0, 0 0, 100% 100%);
+  /* The base shape — a faint outlined triangle. Pure CSS: a transparent
+     interior with a coloured background, masked by the clip-path, so a
+     hover/pinned state only flips the background colour. */
+  background-color: var(--border-1);
+  transition: background-color var(--dur-fast) var(--ease-out);
+  z-index: 1;
+}
+.mk-card-pin-corner:hover {
+  background-color: var(--status-claude);
+  opacity: 0.55;
+}
+.mk-card-pin-corner.is-pinned {
+  background-color: var(--status-claude);
+  opacity: 1;
+}
+.mk-card-pin-corner:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+}
+/* .mk-card has position:static today, but the pin corner needs an
+   absolutely-positioned anchor. Promote to relative so the corner
+   sticks to the card rather than the next positioned ancestor. */
+.mk-card { position: relative; }
+
+/* BACI-192: activity-tray PINNED section — a dedicated row group
+   above the existing transition list so pinned items don't get buried
+   by a noisy board. The header label reuses the .mk-tray-title font
+   metrics; the divider keeps the two regions visually distinct. */
+.mk-tray-section-head {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 14px 4px;
+  font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+  letter-spacing: .08em; text-transform: uppercase;
+  color: var(--fg-3);
+  border-top: 1px solid var(--border-1);
+}
+.mk-tray-section-head:first-child {
+  /* When the PINNED section is the only one rendering (the transition
+     list is empty), drop the top divider so the head isn't doubled-up
+     with the tray's own border. */
+  border-top: 0;
+}
+.mk-tray-section-head .mk-icon {
+  width: 12px; height: 12px;
+}
+
 /* BACI-60: the per-card "what is this agent doing" meta line.
    Sits below the footer on taken cards only; renders the verb
    (lower-cased prompt-template label, e.g. "designing"), the

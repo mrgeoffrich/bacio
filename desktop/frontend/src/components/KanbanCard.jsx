@@ -20,7 +20,7 @@ function stateLabel(s) {
   return STATE_LABELS[s] ?? s;
 }
 
-function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, onDragEnd, onOpen, onDispatch, onCancelWaiting, onOpenQuestion, onOpenIssue, onQuickEval }) {
+function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, onDragEnd, onOpen, onDispatch, onCancelWaiting, onOpenQuestion, onOpenIssue, onQuickEval, isPinned, onTogglePin, onSetFollowOn, onCancelFollowOn }) {
   // BACI-75: local-only expansion state for the Tasks pill. Resets on
   // unmount (board switch, repo switch, hard refresh) — that's
   // intentional, we don't want to persist a row-level UI toggle.
@@ -84,7 +84,21 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, o
   // invisible from the board (the BACI-141 chip is read-only).
   const hasTranscript = (card.transcriptDocCount || 0) > 0;
   const showEvalAffordance = taken || hasTranscript;
-  const hasFooter = validPrompts.length > 0 || card.assignees.length > 0 || waiting || showEvalAffordance;
+  // BACI-192: follow-on dispatch is only meaningful while a parent
+  // dispatch is in flight on the same issue (the BACI-180 backend
+  // resolves the parent via WaitingDispatchForIssue and rejects when
+  // there is none). Gate the button visually on either a taken or
+  // waiting card; the dropdown stays closed on idle cards. The
+  // follow-on shape comes from the server-side denorm onto BoardCard
+  // (BACI-192) — undefined on cards without a dormant follow-on row.
+  const followOn = card.followOn || null;
+  const followOnEligible = taken || waiting;
+  // showFollowOn also needs the footer to exist on taken / waiting
+  // cards — those normally already render the footer (assignee +
+  // spinner), but if the assignee slot is empty the showFollowOn
+  // condition keeps the footer alive so the button has a home.
+  const showFollowOn = followOnEligible && !!onSetFollowOn;
+  const hasFooter = validPrompts.length > 0 || card.assignees.length > 0 || waiting || showEvalAffordance || showFollowOn;
 
   // BACI-60 meta line — only on taken cards, only when at least one of
   // verb or tasks is populated. Hidden entirely otherwise so cards that
@@ -140,6 +154,28 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, o
       onDragEnd={onDragEnd}
       onClick={onOpen}
     >
+      {/*
+        BACI-192: pin corner — a decorative triangular clip-path
+        overlay in the top-right of the card that toggles activity-tray
+        membership. Faint outline by default, hover brightens, pinned
+        renders solid accent. The element is a real <button> for a11y
+        (aria-pressed reflects state) but visually a corner shape; the
+        16×16 hit target is small by design (the canonical pin gesture
+        also lives in the tray's PINNED row dismiss). Sits before
+        .mk-card-top so the absolute positioning slides under the
+        existing top row content rather than displacing the issue key.
+      */}
+      <button
+        type="button"
+        className={`mk-card-pin-corner ${isPinned ? 'is-pinned' : ''}`}
+        aria-pressed={!!isPinned}
+        aria-label={isPinned ? 'Unpin from Activity' : 'Pin to Activity'}
+        title={isPinned ? 'Unpin from Activity' : 'Pin to Activity'}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (onTogglePin) onTogglePin(card.key);
+        }}
+      />
       <div className="mk-card-top">
         {/*
           BACI-172: per-feature glyph rendered top-left of the card,
@@ -230,6 +266,76 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, o
                 {card.assignees.join(', ')}
               </span>
             </Tooltip>
+          )}
+          {/*
+            BACI-192: follow-on dispatch button — gated on a taken /
+            waiting card (BACI-180 needs an active parent dispatch to
+            attach to). Outline glyph when no follow-on is queued; the
+            mode label sits inside the button when one is attached. The
+            DropdownMenu lists every prompt template (the state-gate is
+            re-evaluated server-side at *promote* time, so a mode that's
+            invalid from the issue's *current* column may still be the
+            right pick if the parent dispatch will move the card before
+            firing). Cancel item appears at the bottom only when a
+            follow-on is already attached.
+          */}
+          {showFollowOn && (
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger asChild>
+                <button
+                  type="button"
+                  className={`mk-card-followon-btn ${followOn ? 'is-attached' : ''}`}
+                  aria-label={followOn
+                    ? `Follow-on: ${followOn.actionLabel || followOn.mode} — click to change or cancel`
+                    : 'Queue a follow-on dispatch'}
+                  title={followOn
+                    ? `Follow-on queued: ${followOn.actionLabel || followOn.mode}`
+                    : 'Queue follow-on'}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Icon name="forward" />
+                  {followOn && (
+                    <span className="mk-card-followon-label">
+                      {followOn.actionLabel || followOn.mode}
+                    </span>
+                  )}
+                </button>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content
+                  className="mk-card-action-menu mk-card-followon-menu"
+                  align="end"
+                  side="top"
+                  sideOffset={4}
+                  collisionPadding={8}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="mk-card-action-menu-label">After current →</div>
+                  {(promptConfig || []).map(p => (
+                    <DropdownMenu.Item
+                      key={p.mode}
+                      className={`mk-card-action-item ${followOn?.mode === p.mode ? 'is-current' : ''}`}
+                      onSelect={() => onSetFollowOn && onSetFollowOn(card.key, p.mode)}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {p.actionLabel || p.label}
+                    </DropdownMenu.Item>
+                  ))}
+                  {followOn && (
+                    <>
+                      <DropdownMenu.Separator className="mk-card-action-sep" />
+                      <DropdownMenu.Item
+                        className="mk-card-action-item is-danger"
+                        onSelect={() => onCancelFollowOn && onCancelFollowOn(card.key)}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        Cancel follow-on
+                      </DropdownMenu.Item>
+                    </>
+                  )}
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
           )}
           {waiting ? (
             // BACI-145: the spinner + the inline label render together

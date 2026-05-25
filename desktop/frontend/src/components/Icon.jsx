@@ -1,5 +1,5 @@
 import React from 'react';
-import { Search, Plus, Columns3, GitBranch, Settings, X, Zap, Lock, MessageSquare, AlertTriangle, ChevronsLeft, ChevronsRight } from 'lucide-react';
+import { Search, Plus, Columns3, GitBranch, Settings, X, Zap, Lock, MessageSquare, AlertTriangle, ChevronsLeft, ChevronsRight, SkipForward, Pin } from 'lucide-react';
 
 // ClaudeMark is a brand glyph — no icon library carries Claude's logo, so it
 // stays a hand-rolled SVG. It ignores any props passed by <Icon>.
@@ -34,6 +34,12 @@ const ICONS = {
   // ChevronsRight sits at the top of the collapsed strip.
   'chevrons-left': ChevronsLeft,
   'chevrons-right': ChevronsRight,
+  // BACI-192: SkipForward is the kanban footer follow-on dispatch
+  // button glyph — "after this, do …". Pin is the activity-tray
+  // PINNED section header glyph (the corner button itself is a
+  // CSS-only clip-path triangle, no glyph).
+  forward: SkipForward,
+  pin: Pin,
   claude: ClaudeMark,
 };
 

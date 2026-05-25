@@ -232,6 +232,14 @@ type BoardCard struct {
 	// way to avoid a second poll loop. Omitempty keeps open cards
 	// lean on the wire — they outnumber done cards on a healthy board.
 	TerminalAt *time.Time `json:"terminalAt,omitempty"`
+	// FollowOn (BACI-192) is the denormalised view of the dormant
+	// follow-on dispatch attached to this issue's currently in-flight
+	// (parent) dispatch — the single-slot row written by BACI-180's
+	// AddFollowOnDispatch. Drives the kanban card's footer follow-on
+	// button visual state. Nil (and omitted from JSON) when no
+	// dormant follow-on exists; the footer button stays in its
+	// outline state in that case.
+	FollowOn *BoardCardFollowOn `json:"followOn,omitempty"`
 }
 
 // BoardCardBlocker (BACI-114) is one open `blocks` edge pointing at
@@ -242,6 +250,24 @@ type BoardCard struct {
 type BoardCardBlocker struct {
 	Key   string      `json:"key"`
 	State model.State `json:"state"`
+}
+
+// BoardCardFollowOn (BACI-192) is the denormalised view of the dormant
+// follow-on dispatch attached to this issue's currently in-flight
+// (parent) dispatch — the single-slot row that BACI-180's
+// WaitingDispatchForIssue + AddFollowOnDispatch wrote. Surfaced on
+// every taken / waiting card so the kanban footer button can render
+// the queued mode without a per-card REST call.
+//
+// Mode is the prompt-template slug the BACI-180 backend stored on the
+// dispatch row; ActionLabel is the imperative verb (resolved via the
+// same prompt-template lookup as ActiveVerb / WaitingState) so the
+// button label can read "▶| Plan" rather than the bare slug. Nil (and
+// omitted from JSON) when the issue has no dormant follow-on — the
+// renderer only paints the .is-attached state when truthy.
+type BoardCardFollowOn struct {
+	Mode        model.DispatchMode `json:"mode"`
+	ActionLabel string             `json:"actionLabel"`
 }
 
 // BoardCardQuestion is one open ask_user_question row surfaced on
@@ -330,6 +356,28 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 	}
 	activeByIssueID := activeDispatchByIssueID(allDispatches)
 
+	// BACI-192: per-issue dormant follow-on lookup. The dispatch slice
+	// is already newest-first; first match wins per issue. A row is a
+	// dormant follow-on when its status is queued AND its queued_after
+	// link is set (the same predicate store.FollowOnForIssue uses, but
+	// derived here client-side so we don't N+1 against the store).
+	followOnByIssueID := make(map[int64]*model.AgentDispatch, len(allDispatches))
+	for _, d := range allDispatches {
+		if d == nil || d.IssueID == nil {
+			continue
+		}
+		if d.Status != model.DispatchQueued {
+			continue
+		}
+		if d.QueuedAfterDispatchID == nil {
+			continue
+		}
+		if _, seen := followOnByIssueID[*d.IssueID]; seen {
+			continue
+		}
+		followOnByIssueID[*d.IssueID] = d
+	}
+
 	// BACI-145: bulked per-(repo, mode) in-flight count so the deriver
 	// can spot a concurrency-cap-blocked queued dispatch without an N+1
 	// scan per card. One read per repo. The matcher reads the same
@@ -407,6 +455,17 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 		}
 		e := enrichByKey[iss.Key]
 		ws := DeriveWaitingState(iss, activeByIssueID[iss.ID], inflightByRepo[iss.RepoID], templates)
+		// BACI-192: shape the dormant follow-on row (if any) into the
+		// wire DTO. The action label resolves via the same lookup the
+		// WaitingState path uses, so the button reads consistently
+		// with the spinner label.
+		var followOn *BoardCardFollowOn
+		if fo := followOnByIssueID[iss.ID]; fo != nil {
+			followOn = &BoardCardFollowOn{
+				Mode:        fo.Mode,
+				ActionLabel: actionLabelForMode(fo.Mode, templates),
+			}
+		}
 		cards = append(cards, BoardCard{
 			Key:                iss.Key,
 			Column:             string(iss.State),
@@ -429,6 +488,7 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 			TranscriptDocCount: transcriptCountsByID[iss.ID],
 			EvalCommentCount:   evalCountsByID[iss.ID],
 			TerminalAt:         iss.TerminalAt,
+			FollowOn:           followOn,
 		})
 	}
 
