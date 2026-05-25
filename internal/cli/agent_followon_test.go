@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -287,4 +288,53 @@ func TestAgentCancelFollowOnNothingToCancel(t *testing.T) {
 			t.Fatalf("idempotent no-op should not write an audit row, found: %+v", r)
 		}
 	}
+}
+
+// TestAgentQueueFollowOn_InProgress_BACI195 locks in the BACI-195
+// fix at the CLI layer: queueing an implement follow-on while the
+// parent dispatch is running (issue is in_progress) must succeed.
+// Pre-BACI-195 the queue-time gate refused this exact call with
+// "the implement prompt can't run from a in_progress issue".
+func TestAgentQueueFollowOn_InProgress_BACI195(t *testing.T) {
+	key, _ := setupFollowOnTest(t, true)
+	// Flip the seeded todo issue to in_progress — the state a
+	// research/plan-mode parent leaves it in while running. Resolve
+	// the issue via the canonical prefix + number split from the key
+	// (the store's GetIssueByKey takes those two halves).
+	s, err := store.Open(opts.dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	prefix, num := splitIssueKey(t, key)
+	iss, err := s.GetIssueByKey(prefix, num)
+	if err != nil {
+		t.Fatalf("get issue %s: %v", key, err)
+	}
+	if err := s.SetIssueState(iss.ID, model.StateInProgress); err != nil {
+		t.Fatalf("set in_progress: %v", err)
+	}
+	_ = s.Close()
+
+	if err := runAgentQueueFollowOn(inputs.AgentQueueFollowOnInput{
+		IssueKey: key,
+		Mode:     string(model.DispatchModeImplement),
+	}); err != nil {
+		t.Fatalf("queue must succeed even when issue is in_progress: %v", err)
+	}
+}
+
+// splitIssueKey splits a canonical PREFIX-N key into its halves;
+// store.GetIssueByKey takes them separately.
+func splitIssueKey(t *testing.T, key string) (string, int64) {
+	t.Helper()
+	i := strings.IndexByte(key, '-')
+	if i < 0 {
+		t.Fatalf("issue key %q is missing a `-`", key)
+	}
+	prefix := key[:i]
+	var n int64
+	if _, err := fmt.Sscanf(key[i+1:], "%d", &n); err != nil {
+		t.Fatalf("parse issue number from %q: %v", key, err)
+	}
+	return prefix, n
 }

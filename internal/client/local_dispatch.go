@@ -205,18 +205,26 @@ func (c *localClient) AutoDispatchIssue(ctx context.Context, repo *model.Repo, i
 	return d, nil
 }
 
-// QueueFollowOnDispatch (BACI-179) queues a dormant follow-on dispatch
-// against an issue's currently-in-flight (parent) dispatch. Resolves
-// the parent via WaitingDispatchForIssue — the open dispatch the
-// claimed issue is wearing — then delegates to store.AddFollowOnDispatch
-// for the validate+insert. Returns the new dormant row.
+// QueueFollowOnDispatch (BACI-179, BACI-195) queues a dormant follow-on
+// dispatch against an issue's currently-in-flight (parent) dispatch.
+// Resolves the parent via WaitingDispatchForIssue — the open dispatch
+// the claimed issue is wearing — then delegates to
+// store.AddFollowOnDispatch for the validate+insert. Returns the new
+// dormant row.
 //
-// Validates the mode (must be parseable, must be non-empty) and the
-// state-gate (the prompt must be valid to run from the issue's
-// *current* state — yes, the same gate AutoDispatchIssue runs; the
-// brief acknowledges the user may want a different gate for the
-// post-release state, but Phase 1 mirrors the existing gate semantics
-// to stay mechanical).
+// Validates the mode (must be parseable, must be non-empty). NB: the
+// state-gate is **not** checked here — the whole point of a follow-on
+// is to queue the *next* mode while the current one is still running,
+// so the issue is almost always in a state the next-mode gate doesn't
+// admit at queue time (e.g. queueing `implement` while a research-mode
+// parent has the issue in_progress; implement's gate is `todo`). The
+// gate is re-evaluated at **fire time** by the controller's promote
+// sweep, which sees the issue's post-release state and either promotes
+// the row to a regular queued dispatch (gate passes) or cancels it
+// with op=agent.followon.gate_fail (gate fails). BACI-195 dropped the
+// queue-time check that was previously here — see the matching
+// fire-time logic in store.PromoteReadyFollowOns /
+// controller.FollowOnSweepIfLeader.
 //
 // Writes one `agent.followon.queue` audit row attributed to the
 // calling actor (vs the orphan-cancel sweep's bacio-controller
@@ -240,15 +248,6 @@ func (c *localClient) QueueFollowOnDispatch(ctx context.Context, repo *model.Rep
 	iss, err := c.GetIssueByKey(ctx, repo, issueKey)
 	if err != nil {
 		return nil, err
-	}
-	// State-gate parity with AutoDispatchIssue — see the comment there
-	// for the rationale.
-	gates, err := c.GetPromptStates(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if !slices.Contains(gates[mode], string(iss.State)) {
-		return nil, fmt.Errorf("the %s prompt can't run from a %s issue", mode, iss.State)
 	}
 	parent, err := c.store.WaitingDispatchForIssue(repo.ID, iss.ID)
 	if err != nil {

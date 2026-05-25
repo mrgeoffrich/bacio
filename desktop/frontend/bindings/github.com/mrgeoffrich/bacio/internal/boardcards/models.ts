@@ -388,45 +388,6 @@ export class BoardCardTodo {
 }
 
 /**
- * FollowOnInfo (BACI-182) is the per-issue dormant follow-on the kanban
- * card chip renders. Mode is the prompt template slug ("implement", a
- * custom slug, etc.); ActionLabel is the imperative phrase derived from
- * the template (e.g. "Implement") so the chip can read "→ Implement
- * queued" without re-resolving on the client; DispatchID is the
- * dormant agent_dispatches row's id, surfaced for parity with
- * activeByIssueID's pattern even though the cancel verb is issue-scoped
- * and doesn't actually need it.
- */
-export class FollowOnInfo {
-    "mode": model$0.DispatchMode;
-    "actionLabel": string;
-    "dispatchID": number;
-
-    /** Creates a new FollowOnInfo instance. */
-    constructor($$source: Partial<FollowOnInfo> = {}) {
-        if (!("mode" in $$source)) {
-            this["mode"] = model$0.DispatchMode.$zero;
-        }
-        if (!("actionLabel" in $$source)) {
-            this["actionLabel"] = "";
-        }
-        if (!("dispatchID" in $$source)) {
-            this["dispatchID"] = 0;
-        }
-
-        Object.assign(this, $$source);
-    }
-
-    /**
-     * Creates a new FollowOnInfo instance from a string or object.
-     */
-    static createFrom($$source: any = {}): FollowOnInfo {
-        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
-        return new FollowOnInfo($$parsedSource as Partial<FollowOnInfo>);
-    }
-}
-
-/**
  * WaitingKind enumerates the three reasons a card may be displaying a
  * waiting spinner — together with the optional Mode/ActionLabel on
  * WaitingState they're the data the kanban / TUI render as the inline
