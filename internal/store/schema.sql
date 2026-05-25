@@ -514,14 +514,10 @@ CREATE INDEX IF NOT EXISTS idx_dispatches_session
     ON agent_dispatches(target_session_id, status);
 CREATE INDEX IF NOT EXISTS idx_dispatches_repo
     ON agent_dispatches(repo_id, status);
--- idx_dispatches_queued_after (BACI-179) backs the controller's promote
--- + orphan-cancel sweeps, which walk the dormant pool by predecessor
--- id. The matcher's per-tick predicate uses the PK index on the
--- referenced parent dispatch instead; this index is for the sweep's
--- "find every row pointing at parent X" direction.
-CREATE INDEX IF NOT EXISTS idx_dispatches_queued_after
-    ON agent_dispatches(queued_after_dispatch_id)
-    WHERE queued_after_dispatch_id IS NOT NULL;
+-- idx_dispatches_queued_after (BACI-179) lives in migrate() in store.go,
+-- not here: schema.sql runs before migrate(), and on an upgraded DB the
+-- column doesn't exist until the ALTER in migrate() runs. The migrate()
+-- copy is IF NOT EXISTS so fresh DBs pick it up too.
 
 -- agent_channels records live `bacio channel` subprocesses. Claude Code
 -- never tells a channel its session id (only hooks get that), so a
