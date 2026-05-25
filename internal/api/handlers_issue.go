@@ -23,6 +23,23 @@ func (d deps) handleIssuesList(w http.ResponseWriter, r *http.Request) {
 		IncludeDescription: withDesc == "true" || withDesc == "1",
 		IncludeArchived:    includeArchivedFromRequest(r, d.store),
 	}
+	// BACI-177: filter out issues whose feature has been hidden on the
+	// board via the per-feature toggle. Loaded once per request from the
+	// per-repo tui_settings KV. The board list endpoint is the canonical
+	// consumer; the per-feature `?feature=` path below short-circuits
+	// the filter since the user explicitly asked for that feature.
+	if q.Get("feature") == "" {
+		hidden, herr := d.store.LoadHiddenFeatures(repo.ID)
+		if herr == nil && len(hidden) > 0 {
+			slugs := make([]string, 0, len(hidden))
+			for slug, on := range hidden {
+				if on {
+					slugs = append(slugs, slug)
+				}
+			}
+			f.HiddenFeatureSlugs = slugs
+		}
+	}
 	if featureSlug := q.Get("feature"); featureSlug != "" {
 		feat, err := d.store.GetFeatureBySlug(repo.ID, featureSlug)
 		if err != nil {

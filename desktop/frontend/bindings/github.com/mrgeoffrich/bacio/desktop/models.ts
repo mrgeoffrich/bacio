@@ -529,6 +529,13 @@ export class FeatureDetail {
      */
     "comments": FeatureComment[];
 
+    /**
+     * HiddenOnBoard (BACI-177) mirrors the per-feature "Show on board"
+     * toggle. When true, every kanban card belonging to this feature
+     * is hidden from the board on this machine.
+     */
+    "hiddenOnBoard": boolean;
+
     /** Creates a new FeatureDetail instance. */
     constructor($$source: Partial<FeatureDetail> = {}) {
         if (!("slug" in $$source)) {
@@ -554,6 +561,9 @@ export class FeatureDetail {
         }
         if (!("comments" in $$source)) {
             this["comments"] = [];
+        }
+        if (!("hiddenOnBoard" in $$source)) {
+            this["hiddenOnBoard"] = false;
         }
 
         Object.assign(this, $$source);
@@ -644,11 +654,18 @@ export class FeatureRefDTO {
 
 /**
  * FeatureSummary is one feature, shaped for the desktop feature list.
+ * 
+ * HiddenOnBoard (BACI-177) mirrors the per-feature "Show on board"
+ * toggle on the Features screen — when true, every kanban card
+ * belonging to this feature is hidden from the board on this machine.
+ * Lives in the per-repo board-hide KV (tui_settings), not on the
+ * features row.
  */
 export class FeatureSummary {
     "slug": string;
     "title": string;
     "updatedAt": time$0.Time;
+    "hiddenOnBoard": boolean;
 
     /** Creates a new FeatureSummary instance. */
     constructor($$source: Partial<FeatureSummary> = {}) {
@@ -660,6 +677,9 @@ export class FeatureSummary {
         }
         if (!("updatedAt" in $$source)) {
             this["updatedAt"] = null;
+        }
+        if (!("hiddenOnBoard" in $$source)) {
+            this["hiddenOnBoard"] = false;
         }
 
         Object.assign(this, $$source);

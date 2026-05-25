@@ -127,6 +127,170 @@ func TestFeaturesReadDoesNotWriteHistory(t *testing.T) {
 	assertHistoryOps(t, s, nil)
 }
 
+// TestAPI_PutFeatureHide (BACI-177) round-trips the per-feature "Show
+// on board" toggle through the REST endpoint:
+//   - GET /repos/{p}/features/hidden returns the empty set at first
+//   - PUT /repos/{p}/features/{slug}/hide with {hidden:true} flips it
+//   - GET reflects the new state and stamps a feature.hide audit row
+//   - PUT with {hidden:false} clears it and stamps feature.unhide
+//   - the feature show endpoint surfaces hidden_on_board=true while hidden
+func TestAPI_PutFeatureHide(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedFeature(t, s, repo, "auth", "Auth")
+
+	// Initially nothing hidden.
+	resp, body := apiGet(t, ts.URL+"/repos/MINI/features/hidden")
+	if resp.StatusCode != 200 {
+		t.Fatalf("GET hidden: %d, body=%s", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), `"slugs": []`) && !strings.Contains(string(body), `"slugs":[]`) {
+		t.Fatalf("expected empty slugs, got %s", body)
+	}
+
+	// Flip on.
+	resp, body = apiPut(t, ts.URL+"/repos/MINI/features/auth/hide", map[string]any{"hidden": true})
+	if resp.StatusCode != 200 {
+		t.Fatalf("PUT hide=true: %d, body=%s", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), `"hidden": true`) && !strings.Contains(string(body), `"hidden":true`) {
+		t.Fatalf("PUT response missing hidden:true, got %s", body)
+	}
+
+	// GET reflects the new state.
+	resp, body = apiGet(t, ts.URL+"/repos/MINI/features/hidden")
+	if resp.StatusCode != 200 {
+		t.Fatalf("GET hidden (after set): %d", resp.StatusCode)
+	}
+	if !strings.Contains(string(body), `"auth"`) {
+		t.Fatalf("auth missing from hidden slugs: %s", body)
+	}
+
+	// Feature show carries the derived flag.
+	resp, body = apiGet(t, ts.URL+"/repos/MINI/features/auth")
+	if resp.StatusCode != 200 {
+		t.Fatalf("GET feature show: %d", resp.StatusCode)
+	}
+	if !strings.Contains(string(body), `"hidden_on_board": true`) && !strings.Contains(string(body), `"hidden_on_board":true`) {
+		t.Fatalf("feature show missing hidden_on_board:true, got %s", body)
+	}
+
+	// Audit row for the flip.
+	assertHistoryOps(t, s, []string{"feature.hide"})
+
+	// Flip off.
+	resp, _ = apiPut(t, ts.URL+"/repos/MINI/features/auth/hide", map[string]any{"hidden": false})
+	if resp.StatusCode != 200 {
+		t.Fatalf("PUT hide=false: %d", resp.StatusCode)
+	}
+	assertHistoryOps(t, s, []string{"feature.hide", "feature.unhide"})
+
+	// GET back to empty.
+	resp, body = apiGet(t, ts.URL+"/repos/MINI/features/hidden")
+	if resp.StatusCode != 200 {
+		t.Fatalf("GET hidden (after unset): %d", resp.StatusCode)
+	}
+	if strings.Contains(string(body), `"auth"`) {
+		t.Fatalf("auth still in hidden slugs after unset: %s", body)
+	}
+}
+
+// TestAPI_PutFeatureHide_MissingHiddenField rejects a request with no
+// hidden field — pointer-of-bool with no default catches the absent
+// case rather than silently setting hidden=false.
+func TestAPI_PutFeatureHide_MissingHiddenField(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedFeature(t, s, repo, "auth", "Auth")
+	resp, body := apiPut(t, ts.URL+"/repos/MINI/features/auth/hide", map[string]any{})
+	if resp.StatusCode != 400 {
+		t.Fatalf("expected 400 for missing hidden, got %d, body=%s", resp.StatusCode, body)
+	}
+}
+
+// TestAPI_PutFeatureHide_IdempotentSkipsAudit pins that flipping to the
+// current state is a no-op write and produces no audit row.
+func TestAPI_PutFeatureHide_IdempotentSkipsAudit(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	seedFeature(t, s, repo, "auth", "Auth")
+	// Default is visible. PUT hidden=false again — should be a no-op.
+	resp, _ := apiPut(t, ts.URL+"/repos/MINI/features/auth/hide", map[string]any{"hidden": false})
+	if resp.StatusCode != 200 {
+		t.Fatalf("PUT no-op: %d", resp.StatusCode)
+	}
+	assertHistoryOps(t, s, nil)
+}
+
+// TestAPI_BoardCards_HidesHiddenFeatures (BACI-177) hides a feature
+// and then checks that the cards endpoint drops every card belonging
+// to that feature. Mirrors what the React Board sees after a toggle.
+func TestAPI_BoardCards_HidesHiddenFeatures(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	authFeat := seedFeature(t, s, repo, "auth", "Auth")
+	opsFeat := seedFeature(t, s, repo, "ops", "Ops")
+	if _, err := s.CreateIssue(repo.ID, &authFeat.ID, "auth-issue", "", model.StateTodo, nil); err != nil {
+		t.Fatalf("create auth issue: %v", err)
+	}
+	if _, err := s.CreateIssue(repo.ID, &opsFeat.ID, "ops-issue", "", model.StateTodo, nil); err != nil {
+		t.Fatalf("create ops issue: %v", err)
+	}
+	if _, err := s.CreateIssue(repo.ID, nil, "unattached-issue", "", model.StateTodo, nil); err != nil {
+		t.Fatalf("create unattached issue: %v", err)
+	}
+
+	// Default: every card shows.
+	resp, body := apiGet(t, ts.URL+"/repos/MINI/cards")
+	if resp.StatusCode != 200 {
+		t.Fatalf("GET cards: %d, body=%s", resp.StatusCode, body)
+	}
+	for _, want := range []string{"auth-issue", "ops-issue", "unattached-issue"} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("expected %q in default board: %s", want, body)
+		}
+	}
+
+	// Hide auth.
+	resp, _ = apiPut(t, ts.URL+"/repos/MINI/features/auth/hide", map[string]any{"hidden": true})
+	if resp.StatusCode != 200 {
+		t.Fatalf("PUT hide: %d", resp.StatusCode)
+	}
+
+	// auth-issue gone; ops-issue + unattached stay.
+	resp, body = apiGet(t, ts.URL+"/repos/MINI/cards")
+	if resp.StatusCode != 200 {
+		t.Fatalf("GET cards (after hide): %d", resp.StatusCode)
+	}
+	if strings.Contains(string(body), "auth-issue") {
+		t.Fatalf("auth-issue still in board after hiding auth: %s", body)
+	}
+	for _, want := range []string{"ops-issue", "unattached-issue"} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("expected %q to remain visible: %s", want, body)
+		}
+	}
+
+	// Also pin /repos/MINI/issues (no feature filter) drops the auth one.
+	resp, body = apiGet(t, ts.URL+"/repos/MINI/issues")
+	if resp.StatusCode != 200 {
+		t.Fatalf("GET issues: %d", resp.StatusCode)
+	}
+	if strings.Contains(string(body), "auth-issue") {
+		t.Fatalf("auth-issue still in /issues after hide: %s", body)
+	}
+
+	// But a feature-scoped query (?feature=auth) still returns the auth
+	// issue — the explicit ask short-circuits the global hide filter.
+	resp, body = apiGet(t, ts.URL+"/repos/MINI/issues?feature=auth")
+	if resp.StatusCode != 200 {
+		t.Fatalf("GET issues?feature=auth: %d", resp.StatusCode)
+	}
+	if !strings.Contains(string(body), "auth-issue") {
+		t.Fatalf("?feature=auth missing auth-issue (the explicit ask should bypass hide): %s", body)
+	}
+}
+
 func TestFeatureCreateHappy(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	seedRepo(t, s)

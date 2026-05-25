@@ -70,6 +70,21 @@ export function SetFeatureEmoji(repoPrefix: string, slug: string, emoji: string)
     });
 }
 
+/**
+ * SetHiddenOnBoard (BACI-177) flips the per-feature "Show on board"
+ * toggle and returns the refreshed FeatureDetail. true hides every
+ * kanban card belonging to this feature on this machine; false makes
+ * them visible again. Idempotent — flipping to the same state is a
+ * no-op write. The flag lives in the per-repo board-hide KV
+ * (tui_settings), shared with the TUI's feature picker; flipping it
+ * here is visible on the TUI's next reload.
+ */
+export function SetHiddenOnBoard(repoPrefix: string, slug: string, hidden: boolean): $CancellablePromise<$models.FeatureDetail> {
+    return $Call.ByID(1990222744, repoPrefix, slug, hidden).then(($result: any) => {
+        return $$createType0($result);
+    });
+}
+
 // Private type creation functions
 const $$createType0 = $models.FeatureDetail.createFrom;
 const $$createType1 = $models.FeatureSummary.createFrom;

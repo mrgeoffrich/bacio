@@ -186,10 +186,10 @@ export class BoardCard {
     static createFrom($$source: any = {}): BoardCard {
         const $$createField5_0 = $$createType0;
         const $$createField6_0 = $$createType0;
-        const $$createField9_0 = $$createType2;
-        const $$createField13_0 = $$createType4;
-        const $$createField14_0 = $$createType6;
-        const $$createField16_0 = $$createType8;
+        const $$createField10_0 = $$createType2;
+        const $$createField14_0 = $$createType4;
+        const $$createField15_0 = $$createType6;
+        const $$createField17_0 = $$createType8;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField5_0($$parsedSource["tags"]);
@@ -198,16 +198,16 @@ export class BoardCard {
             $$parsedSource["assignees"] = $$createField6_0($$parsedSource["assignees"]);
         }
         if ("waitingState" in $$parsedSource) {
-            $$parsedSource["waitingState"] = $$createField9_0($$parsedSource["waitingState"]);
+            $$parsedSource["waitingState"] = $$createField10_0($$parsedSource["waitingState"]);
         }
         if ("openQuestions" in $$parsedSource) {
-            $$parsedSource["openQuestions"] = $$createField13_0($$parsedSource["openQuestions"]);
+            $$parsedSource["openQuestions"] = $$createField14_0($$parsedSource["openQuestions"]);
         }
         if ("todos" in $$parsedSource) {
-            $$parsedSource["todos"] = $$createField14_0($$parsedSource["todos"]);
+            $$parsedSource["todos"] = $$createField15_0($$parsedSource["todos"]);
         }
         if ("blockedBy" in $$parsedSource) {
-            $$parsedSource["blockedBy"] = $$createField16_0($$parsedSource["blockedBy"]);
+            $$parsedSource["blockedBy"] = $$createField17_0($$parsedSource["blockedBy"]);
         }
         return new BoardCard($$parsedSource as Partial<BoardCard>);
     }

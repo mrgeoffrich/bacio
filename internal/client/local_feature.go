@@ -17,6 +17,10 @@ func (c *localClient) ListFeatures(ctx context.Context, repo *model.Repo, withDe
 		RepoID:             repo.ID,
 		IncludeDescription: withDescription,
 		IncludeArchived:    includeArchived,
+		// BACI-177: every local feature read inflates the per-feature
+		// "Show on board" flag so the React component reads it without
+		// a second round-trip. The lookup is one cheap KV get per repo.
+		WithHiddenOnBoard: true,
 	})
 	if err != nil {
 		return nil, err
@@ -28,7 +32,10 @@ func (c *localClient) ListFeatures(ctx context.Context, repo *model.Repo, withDe
 }
 
 func (c *localClient) GetFeatureBySlug(ctx context.Context, repo *model.Repo, slug string) (*model.Feature, error) {
-	return c.store.GetFeatureBySlug(repo.ID, slug)
+	// BACI-177: inflate HiddenOnBoard alongside the row so the
+	// FeaturesView toggle reads the current state without an extra
+	// fetch.
+	return c.store.GetFeatureBySlugWithHidden(repo.ID, slug)
 }
 
 func (c *localClient) GetFeatureByID(ctx context.Context, repo *model.Repo, id int64) (*model.Feature, error) {
@@ -288,6 +295,70 @@ func (c *localClient) ArchiveFeature(ctx context.Context, repo *model.Repo, slug
 // UnarchiveFeature clears archived_at (BACI-68).
 func (c *localClient) UnarchiveFeature(ctx context.Context, repo *model.Repo, slug string, dryRun bool) (*model.Feature, error) {
 	return c.setFeatureArchived(ctx, repo, slug, false, dryRun, "feature.unarchive")
+}
+
+// IsFeatureHiddenOnBoard (BACI-177) returns the per-feature board-hide
+// flag for slug in repo. Defaults to false on an unknown slug — the
+// caller's existence check is the feature read upstream of this.
+func (c *localClient) IsFeatureHiddenOnBoard(ctx context.Context, repo *model.Repo, slug string) (bool, error) {
+	return c.store.IsFeatureHiddenOnBoard(repo.ID, slug)
+}
+
+// SetFeatureHiddenOnBoard (BACI-177) flips the per-feature board-hide
+// flag and returns the resulting state. Records an audit row under
+// feature.hide / feature.unhide so the history surface tracks who
+// toggled it; idempotent flips skip the audit (the store-side
+// SetFeatureHiddenOnBoard is a no-op for unchanged state, but we still
+// want the audit row only on a real flip).
+func (c *localClient) SetFeatureHiddenOnBoard(ctx context.Context, repo *model.Repo, slug string, hidden, dryRun bool) (bool, error) {
+	// Resolve the feature first so the audit row carries a real
+	// target id + slug, and so a typo (unknown slug) errors here
+	// instead of silently writing an orphan KV entry.
+	feat, err := c.store.GetFeatureBySlug(repo.ID, slug)
+	if err != nil {
+		return false, err
+	}
+	current, err := c.store.IsFeatureHiddenOnBoard(repo.ID, slug)
+	if err != nil {
+		return false, err
+	}
+	if dryRun {
+		return hidden, nil
+	}
+	if current == hidden {
+		// No-op — don't churn the audit log on idempotent flips.
+		return current, nil
+	}
+	if err := c.store.SetFeatureHiddenOnBoard(repo.ID, slug, hidden); err != nil {
+		return false, err
+	}
+	op := "feature.unhide"
+	if hidden {
+		op = "feature.hide"
+	}
+	c.recordOp(model.HistoryEntry{
+		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+		Op: op, Kind: "feature",
+		TargetID: &feat.ID, TargetLabel: feat.Slug,
+	})
+	return hidden, nil
+}
+
+// ListHiddenFeatureSlugs (BACI-177) returns every slug currently
+// hidden in repo, sorted alphabetically for stable JSON output.
+func (c *localClient) ListHiddenFeatureSlugs(ctx context.Context, repo *model.Repo) ([]string, error) {
+	hidden, err := c.store.LoadHiddenFeatures(repo.ID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(hidden))
+	for slug, on := range hidden {
+		if on {
+			out = append(out, slug)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 func (c *localClient) setFeatureArchived(ctx context.Context, repo *model.Repo, slug string, archived, dryRun bool, op string) (*model.Feature, error) {

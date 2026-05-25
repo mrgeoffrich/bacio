@@ -450,6 +450,11 @@ export interface FeatureSummary {
   slug: string;
   title: string;
   updatedAt: string;
+  // BACI-177: per-feature "Show on board" toggle state. When true,
+  // every kanban card belonging to this feature is hidden from the
+  // board on this machine. Lives in the per-repo board-hide KV
+  // (tui_settings), not on the features row.
+  hiddenOnBoard: boolean;
 }
 
 export interface FeatureLinkedIssue {
@@ -479,6 +484,10 @@ export interface FeatureDetail {
   updatedAt: string;
   issues: FeatureLinkedIssue[];
   comments: FeatureCommentDTO[];
+  // BACI-177: per-feature "Show on board" toggle state. When true,
+  // every kanban card belonging to this feature is hidden from the
+  // board on this machine.
+  hiddenOnBoard: boolean;
 }
 
 export interface HistoryEntryDTO {
@@ -1297,6 +1306,11 @@ interface ApiFeature {
   emoji?: string;
   created_at: string;
   updated_at: string;
+  // BACI-177: per-feature "Show on board" toggle state. Always
+  // present in JSON (no omitempty) so the React component reads it
+  // without an `?? false`. Defaults to false on a server that hasn't
+  // shipped BACI-177 yet — the field will simply be absent.
+  hidden_on_board?: boolean;
 }
 
 export async function listFeatures(repoPrefix: string): Promise<FeatureSummary[]> {
@@ -1304,7 +1318,12 @@ export async function listFeatures(repoPrefix: string): Promise<FeatureSummary[]
     throw new Error('select a repository to view its features');
   }
   const feats = await call<ApiFeature[]>(`/repos/${repoPrefix}/features`);
-  return feats.map(f => ({ slug: f.slug, title: f.title, updatedAt: f.updated_at }));
+  return feats.map(f => ({
+    slug: f.slug,
+    title: f.title,
+    updatedAt: f.updated_at,
+    hiddenOnBoard: !!f.hidden_on_board,
+  }));
 }
 
 interface ApiFeatureComment {
@@ -1345,6 +1364,7 @@ export async function getFeature(repoPrefix: string, slug: string): Promise<Feat
       body: c.body,
       createdAt: c.created_at,
     })),
+    hiddenOnBoard: !!f.hidden_on_board,
   };
 }
 
@@ -1366,6 +1386,26 @@ export async function setFeatureEmoji(
     method: 'PATCH',
     body: { slug, emoji },
   });
+  return getFeature(repoPrefix, slug);
+}
+
+// setFeatureHiddenOnBoard (BACI-177) flips the per-feature "Show on
+// board" toggle and returns the refreshed FeatureDetail. true hides
+// every kanban card belonging to this feature on this machine; false
+// makes them visible again. Idempotent — flipping to the same state
+// is a no-op write.
+export async function setFeatureHiddenOnBoard(
+  repoPrefix: string,
+  slug: string,
+  hidden: boolean,
+): Promise<FeatureDetail> {
+  if (!repoPrefix || repoPrefix === 'all') {
+    throw new Error('select a repository to edit a feature');
+  }
+  await call<{ slug: string; hidden: boolean }>(
+    `/repos/${repoPrefix}/features/${slug}/hide`,
+    { method: 'PUT', body: { hidden } },
+  );
   return getFeature(repoPrefix, slug);
 }
 

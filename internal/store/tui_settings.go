@@ -80,6 +80,13 @@ func (s *Store) SaveHiddenStates(repoID int64, hidden map[model.State]bool) erro
 	return s.SetTUISetting(repoID, boardHiddenKey, strings.Join(names, ","))
 }
 
+// boardHiddenFeaturesKey is the per-repo KV key for the set of feature
+// slugs hidden from the kanban board. Shared by the TUI's feature
+// picker (internal/tui/board_pickers.go) and the BACI-177 per-feature
+// "Show on board" toggle exposed on the desktop / web Features screen
+// — flipping the hide state on any surface is visible to the others
+// on the same machine, since all three surfaces read and write this
+// same KV row.
 const boardHiddenFeaturesKey = "board.hidden_features"
 
 // HiddenFeaturesUnassigned is the sentinel slug stored when the user
@@ -121,4 +128,42 @@ func (s *Store) SaveHiddenFeatures(repoID int64, hidden map[string]bool) error {
 	}
 	sort.Strings(names)
 	return s.SetTUISetting(repoID, boardHiddenFeaturesKey, strings.Join(names, ","))
+}
+
+// IsFeatureHiddenOnBoard (BACI-177) reports whether the per-feature
+// "Show on board" toggle is currently off for slug in repo — i.e.
+// whether the slug is present in the boardHiddenFeaturesKey comma-set.
+// Wraps LoadHiddenFeatures so REST / Wails handlers don't reach for
+// the map directly. Returns false on an empty set / unknown slug.
+func (s *Store) IsFeatureHiddenOnBoard(repoID int64, slug string) (bool, error) {
+	hidden, err := s.LoadHiddenFeatures(repoID)
+	if err != nil {
+		return false, err
+	}
+	return hidden[slug], nil
+}
+
+// SetFeatureHiddenOnBoard (BACI-177) flips the per-feature board-hide
+// flag for slug in repo. Idempotent — setting an already-hidden slug
+// to hidden (or an already-visible slug to visible) is a no-op write.
+// The slug is stored verbatim; callers should resolve it against a
+// known feature row before flipping, since the store-of-truth here is
+// the per-repo KV, not the features table.
+func (s *Store) SetFeatureHiddenOnBoard(repoID int64, slug string, hidden bool) error {
+	current, err := s.LoadHiddenFeatures(repoID)
+	if err != nil {
+		return err
+	}
+	if hidden {
+		if current[slug] {
+			return nil
+		}
+		current[slug] = true
+	} else {
+		if !current[slug] {
+			return nil
+		}
+		delete(current, slug)
+	}
+	return s.SaveHiddenFeatures(repoID, current)
 }

@@ -400,7 +400,19 @@ func (b *BoardService) ListCards(repoPrefix string) ([]BoardCard, error) {
 		repo = r
 	}
 	showArchived, _ := b.client.GetDisplayShowArchived(ctx)
-	return boardcards.Assemble(ctx, b.client, repo, showArchived)
+	// BACI-177: load the per-repo board-hide set so cards belonging to
+	// hidden features never ship over the wire. Skipped for the cross-
+	// repo "all" pseudo-board — the hide set is per-repo, and the
+	// cross-repo path goes through ListRepos in Assemble. (A failure
+	// here is non-fatal — the board still renders, just without the
+	// filter for this trip.)
+	var hiddenSlugs []string
+	if repo != nil {
+		if slugs, herr := b.client.ListHiddenFeatureSlugs(ctx, repo); herr == nil {
+			hiddenSlugs = slugs
+		}
+	}
+	return boardcards.Assemble(ctx, b.client, repo, showArchived, hiddenSlugs)
 }
 
 // GetIssue returns the full issue-drawer payload for one issue. repoPrefix

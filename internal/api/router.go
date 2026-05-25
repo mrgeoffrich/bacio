@@ -39,9 +39,15 @@ func newRouter(d deps) http.Handler {
 
 	mux.HandleFunc("GET /repos/{prefix}/features", d.handleFeaturesList)
 	mux.HandleFunc("POST /repos/{prefix}/features", d.handleFeatureCreate)
+	// BACI-177: per-feature "Show on board" toggle. The "hidden"
+	// literal segment is more specific than "{slug}" so ServeMux
+	// disambiguates without conflict. The PUT lives at
+	// /features/{slug}/hide for symmetry with /archive + /unarchive.
+	mux.HandleFunc("GET /repos/{prefix}/features/hidden", d.handleFeaturesHidden)
 	mux.HandleFunc("GET /repos/{prefix}/features/{slug}", d.handleFeatureShow)
 	mux.HandleFunc("PATCH /repos/{prefix}/features/{slug}", d.handleFeatureEdit)
 	mux.HandleFunc("DELETE /repos/{prefix}/features/{slug}", d.handleFeatureDelete)
+	mux.HandleFunc("PUT /repos/{prefix}/features/{slug}/hide", d.handleFeatureHide)
 	mux.HandleFunc("GET /repos/{prefix}/features/{slug}/plan", d.handleFeaturePlan)
 	mux.HandleFunc("GET /repos/{prefix}/features/{slug}/next", d.handleFeatureNextPeek)
 	mux.HandleFunc("POST /repos/{prefix}/features/{slug}/next", d.handleFeatureNextClaim)

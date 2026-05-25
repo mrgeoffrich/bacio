@@ -906,6 +906,25 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   color: var(--fg-3);
   margin-bottom: 8px;
 }
+/* BACI-177: "Show on board" toggle row — label on the left, segmented
+   buttons on the right, with a hint under the lot. Same spacing as
+   the SettingsView toggles so the affordance reads as native. */
+.mk-features-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+.mk-features-toggle-row .mk-features-label {
+  margin-bottom: 0;
+}
+.mk-features-hint {
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  color: var(--fg-3);
+  line-height: 1.4;
+}
 .mk-features-text {
   font-family: var(--font-sans);
   font-size: var(--text-sm);
