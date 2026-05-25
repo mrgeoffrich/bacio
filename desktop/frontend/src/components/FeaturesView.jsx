@@ -1,10 +1,12 @@
 import React, { useMemo, useState, useEffect } from 'react';
+import { useNavigate, useParams } from 'react-router';
 import { EyeOff, Search, X } from 'lucide-react';
 import { reportError } from '../errors';
 import * as api from '../api';
 import MarkdownView from '../lib/markdownView';
 import CommentComposer from './issue/CommentComposer';
 import FeatureEmojiPicker from './FeatureEmojiPicker.jsx';
+import { featurePath } from '../lib/routes';
 
 // BACI-177: per-feature "Show on board" toggle. The id is the value
 // the toggle should set on the feature — true = show on board (the
@@ -120,8 +122,16 @@ function mockFeatures() {
 // changes which cards ship over the wire, and the App-owned `cards`
 // state would otherwise show stale entries until the 10s poll.
 export default function FeaturesView({ activeBoard, onChangeHidden }) {
+  // BACI-203: the selected slug is mirrored to/from the URL via
+  // useParams + navigate. Click handlers in the master pane call
+  // navigate(featurePath(slug)); the URL is the source of truth so
+  // refresh / deep-link / back-forward all work, but the rest of the
+  // component still reads from `selected` so the layout / data
+  // effects stay unchanged.
+  const navigate = useNavigate();
+  const { slug: slugParam } = useParams();
   const [features, setFeatures] = useState([]);
-  const [selected, setSelected] = useState(null); // slug
+  const [selected, setSelected] = useState(slugParam ?? null); // slug
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(false);
   // BACI-199 filter strip: which state bucket the list is restricted
@@ -142,9 +152,25 @@ export default function FeaturesView({ activeBoard, onChangeHidden }) {
     typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).has('mock');
 
+  // BACI-203: sync `selected` from useParams when the URL changes
+  // (back/forward, deep-link, manual edit). Outbound writes happen in
+  // the FeatureRow click handler via navigate(featurePath(...)). The
+  // mount-time read in useState's initialiser already covers the
+  // first paint; this covers subsequent URL changes.
+  useEffect(() => {
+    if (slugParam && slugParam !== selected) {
+      setSelected(slugParam);
+    } else if (!slugParam && selected) {
+      // The user navigated to /features (no slug) — clear the
+      // selection so the auto-select effect below can land on the
+      // first visible feature.
+      setSelected(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slugParam]);
+
   // Reload the feature list whenever the selected repo changes.
   useEffect(() => {
-    setSelected(null);
     setDetail(null);
     if (!repoSelected) {
       setFeatures([]);
@@ -230,11 +256,15 @@ export default function FeaturesView({ activeBoard, onChangeHidden }) {
   // empty on first load. Re-runs when the filter changes if the
   // currently-selected slug drops out of the visible set — keeps the
   // detail pane in lockstep with what the user is actually looking at.
+  //
+  // BACI-203: auto-selection writes through navigate so the URL
+  // stays in sync. Replaces the bare setSelected from the BACI-54
+  // era — the URL is the source of truth now.
   useEffect(() => {
     if (!repoSelected || visible.length === 0) return;
     const currentInView = visible.some((f) => f.slug === selected);
-    if (!currentInView) setSelected(visible[0].slug);
-  }, [visible, selected, repoSelected]);
+    if (!currentInView) navigate(featurePath(visible[0].slug), { replace: true });
+  }, [visible, selected, repoSelected, navigate]);
 
   if (!repoSelected) {
     return (
@@ -307,7 +337,7 @@ export default function FeaturesView({ activeBoard, onChangeHidden }) {
                 key={f.slug}
                 feature={f}
                 isActive={selected === f.slug}
-                onSelect={() => setSelected(f.slug)}
+                onSelect={() => navigate(featurePath(f.slug))}
               />
             ))
           )}

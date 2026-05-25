@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useNavigate, useParams } from 'react-router';
 import { reportError } from '../errors';
 import * as api from '../api';
 import DocsFacetRail from './DocsFacetRail.jsx';
@@ -10,6 +11,7 @@ import {
   readSort, persistSort,
   DEFAULT_HIDE_TRANSCRIPTS, DEFAULT_SORT,
 } from './DocsPersistence';
+import { documentPath } from '../lib/routes';
 
 // DocsView (BACI-204) — desktop document browser + editor, redesigned
 // as a three-pane faceted library that scales to hundreds of docs
@@ -24,11 +26,18 @@ import {
 // working unchanged — DocsViewer lifts that block verbatim. The
 // per-repo `hideTranscripts` and `sort` preferences round-trip
 // through DocsPersistence so a reload preserves the user's setup.
+//
+// BACI-203: the selected filename is mirrored to/from the URL via
+// useParams + navigate. The decode pairs with documentPath's encode
+// so a filename with dots / unusual characters survives the round-trip.
 export default function DocsView({ activeBoard, onOpenIssue }) {
+  const navigate = useNavigate();
+  const { slug: slugParam } = useParams();
+  const decodedSlug = slugParam ? decodeURIComponent(slugParam) : null;
   const [docs, setDocs] = useState([]);
-  const [selected, setSelected] = useState(null); // filename
-  const [content, setContent] = useState('');
-  const [savedContent, setSavedContent] = useState('');
+  const [selected, setSelected] = useState(decodedSlug); // filename
+  const [content, setContent] = useState('');      // live editor buffer
+  const [savedContent, setSavedContent] = useState(''); // last persisted body
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
@@ -76,11 +85,24 @@ export default function DocsView({ activeBoard, onOpenIssue }) {
     return () => { cancelled = true; };
   }, [activeBoard, repoSelected]);
 
+  // BACI-203: sync `selected` from useParams on URL changes. Outbound
+  // writes happen in the onSelectDoc handler via navigate(documentPath(...)).
+  useEffect(() => {
+    if (decodedSlug && decodedSlug !== selected) {
+      setSelected(decodedSlug);
+    } else if (!decodedSlug && selected) {
+      setSelected(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [decodedSlug]);
+
   // Reload the document list whenever the selected repo changes, or
   // a reload tick fires. Selection / content state resets on repo
   // change but is preserved across a reload tick (archive toggle is
   // the only writer today and doesn't move the cursor).
   useEffect(() => {
+    setContent('');
+    setSavedContent('');
     if (!repoSelected) {
       setSelected(null);
       setContent('');
@@ -144,9 +166,12 @@ export default function DocsView({ activeBoard, onOpenIssue }) {
     });
   }, [activeBoard]);
 
+  // BACI-203: navigate to the document URL so reload/deep-link work.
+  // The URL change also feeds back into the decodedSlug effect to keep
+  // selected in sync without a double-setState.
   const onSelectDoc = useCallback((filename) => {
-    setSelected(filename);
-  }, []);
+    navigate(filename ? documentPath(filename) : '/documents');
+  }, [navigate]);
 
   const selectedDoc = useMemo(
     () => docs.find((d) => d.filename === selected) ?? null,

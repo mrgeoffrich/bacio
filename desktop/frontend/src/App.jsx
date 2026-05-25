@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Routes, Route, Navigate, useNavigate, useLocation, useParams } from 'react-router';
 import { Events } from '@wailsio/runtime';
 import Topbar, { NAV } from './components/Topbar.jsx';
 import Board from './components/Board.jsx';
@@ -22,6 +23,7 @@ import { WEB_MODE } from './env';
 import * as api from './api';
 import { isTerminalState, stripBlockerFromCards, restoreBlockedByFromSnapshot } from './lib/issueState';
 import { useShipFlourish } from './lib/shipFlourish';
+import { viewPath, issuePath, viewFromPath } from './lib/routes';
 
 const THEME_KEY = 'bacio-theme'; // persisted preference: 'system' | 'light' | 'dark'
 const REPO_KEY = 'bacio-active-repo'; // persisted preference: last-selected repo prefix
@@ -57,24 +59,23 @@ function isEditingTarget(el) {
 }
 
 export default function App() {
+  const navigate = useNavigate();
+  const location = useLocation();
+
   const [boards, setBoards] = useState([]);
   const [columns, setColumns] = useState([]);
   // The selected repo prefix. Starts from the persisted preference (or "" on
   // first run / before the repo list resolves); the mount effect lands it on
   // a real repo once boards load.
   const [activeBoard, setActiveBoard] = useState(readActiveRepo);
-  const [activeView, setActiveView] = useState('board'); // 'board' | 'features' | 'docs' | 'agents' | 'history'
   const [cards, setCards] = useState([]);
-  // The IssueWorkspace's routing state. openIssueKey is the source of
-  // truth for "which issue is open"; openIssueBrief is the App-owned
-  // brief payload (loaded eagerly on key change, polled every 10s
-  // while the view is mounted); previousView is the view to return to
-  // when the workspace closes. descEditing is propagated up by the
-  // workspace's InlineDescriptionEditor so the brief-poll merge can
-  // preserve the user's in-progress textarea buffer.
-  const [openIssueKey, setOpenIssueKey] = useState(null);
+  // BACI-203: openIssueKey is now derived from the URL — the
+  // `/issues/:key` workspace route owns the source of truth. The App
+  // still keeps the brief payload around (loaded eagerly on key change,
+  // polled every 10s while the workspace route is mounted) and a
+  // descEditing flag the workspace's InlineDescriptionEditor propagates
+  // up so the brief-poll merge can preserve the in-progress textarea.
   const [openIssueBrief, setOpenIssueBrief] = useState(null);
-  const [previousView, setPreviousView] = useState('board');
   const [descEditing, setDescEditing] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -124,6 +125,18 @@ export default function App() {
   // because an issue key is only meaningful inside its repo.
   const [pinnedKeys, setPinnedKeys] = useState(() => readPinnedKeys(readActiveRepo()));
   const [loading, setLoading] = useState(true);
+
+  // BACI-203: derive the active view from the URL path. The Topbar
+  // reads the same value (via useLocation()), so the App and the
+  // Topbar stay in lockstep without a prop ping-pong.
+  const activeView = viewFromPath(location.pathname) || 'board';
+  // BACI-203: derive the open issue key from the route. Matches the
+  // `/issues/:key` URL shape; null when we're on a list or detail
+  // route that isn't an issue workspace.
+  const openIssueKey = (() => {
+    const m = location.pathname.match(/^\/issues\/([^/]+)$/);
+    return m ? m[1] : null;
+  })();
 
   // Resolve the System/Light/Dark preference to a concrete light|dark value
   // and write it to <html data-theme>. In 'system' mode, track the OS setting
@@ -325,62 +338,6 @@ export default function App() {
     };
   }, []);
 
-  // ---- Web-mode hash routing ----
-  //
-  // Web bundles reflect the open issue into the URL hash
-  // (`#/<prefix>/<key>`) so a workspace screen is shareable: copy-paste
-  // the URL into another tab and the same issue opens. Desktop ignores
-  // both effects via the WEB_MODE gate. No router library — single
-  // hashchange listener and a replaceState-based reflect so the
-  // browser history doesn't fill with one entry per card click.
-
-  // Inbound: react to a hash the user typed / pasted / navigated to.
-  // Only act on a real change to avoid fighting the outbound reflect.
-  useEffect(() => {
-    if (!WEB_MODE) return;
-    const parseHash = (hash) => {
-      const m = (hash || '').match(/^#\/([A-Za-z0-9]+)\/([A-Za-z0-9]+-\d+)$/);
-      return m ? { prefix: m[1], key: m[2] } : null;
-    };
-    const apply = () => {
-      const parsed = parseHash(window.location.hash);
-      if (parsed) {
-        if (parsed.prefix !== activeBoard) setActiveBoard(parsed.prefix);
-        if (parsed.key !== openIssueKey) {
-          setPreviousView(prev => activeView === 'issue' ? prev : activeView);
-          setOpenIssueKey(parsed.key);
-          setActiveView('issue');
-        }
-      } else if (openIssueKey) {
-        // The user cleared the hash (back button / Home link) — return
-        // to the previous view without re-pushing it onto history.
-        setOpenIssueKey(null);
-        setOpenIssueBrief(null);
-        setDescEditing(false);
-        setActiveView(previousView || 'board');
-      }
-    };
-    apply();
-    window.addEventListener('hashchange', apply);
-    return () => window.removeEventListener('hashchange', apply);
-    // activeBoard / openIssueKey / activeView / previousView are read
-    // through the `apply` closure but stable enough to skip from the
-    // deps array — re-binding on every change would churn the listener.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Outbound: when the open issue changes, write the canonical hash.
-  // replaceState (not pushState) keeps the browser history sane —
-  // opening 12 cards leaves 1 history entry, not 12.
-  useEffect(() => {
-    if (!WEB_MODE) return;
-    const desired = openIssueKey && activeBoard ? `#/${activeBoard}/${openIssueKey}` : '';
-    if (window.location.hash !== desired) {
-      const url = window.location.pathname + window.location.search + desired;
-      window.history.replaceState(null, '', url);
-    }
-  }, [openIssueKey, activeBoard]);
-
   // refreshCards / refreshAgents reload the App-owned card and agent lists
   // for the active repo. Used by the repo-change effect, the screen-switch
   // effect, the 10s poll, the Agents panel's refresh button, and after a
@@ -492,20 +449,23 @@ export default function App() {
   // the other view polls. Off-screen views get no refresh; the cleanup
   // clears the interval on close / repo change / unmount.
   useEffect(() => {
-    if (!activeBoard || !openIssueKey || activeView !== 'issue') return;
+    if (!activeBoard || !openIssueKey || activeView !== 'board') return;
+    // activeView === 'board' covers /issues and /issues/:key (both
+    // derive to 'board' via viewFromPath); the openIssueKey guard
+    // narrows the poll to the workspace route specifically.
     const id = setInterval(() => refreshBrief({ silent: true }), POLL_INTERVAL_MS);
     return () => clearInterval(id);
   }, [activeBoard, openIssueKey, activeView, refreshBrief]);
 
-  // Open the issue workspace: remember where we came from, flip the
-  // view, and let the brief-load effect handle the fetch. SettingsView
-  // is also dismissed so the workspace is what the user sees.
+  // BACI-203: open the issue workspace by routing to /issues/:key.
+  // SettingsView and SyncView are App-owned overlays, not routes —
+  // dismiss them so the workspace is what the user sees on arrival.
   const openCard = useCallback((card) => {
+    if (!card?.key) return;
     setSettingsOpen(false);
-    setPreviousView(prev => activeView === 'issue' ? prev : activeView);
-    setOpenIssueKey(card.key);
-    setActiveView('issue');
-  }, [activeView]);
+    setSyncOpen(false);
+    navigate(issuePath(card.key));
+  }, [navigate]);
 
   // BACI-114: the kanban blocked popover navigates by key — the
   // target may not be the card the popover is rendered on (it's the
@@ -513,21 +473,27 @@ export default function App() {
   // directly, mirroring the `onNavigateIssue` path the workspace rail
   // already uses for prev/next sibling jumps.
   const openIssueByKey = useCallback((key) => {
+    if (!key) return;
     setSettingsOpen(false);
-    setPreviousView(prev => activeView === 'issue' ? prev : activeView);
-    setOpenIssueKey(key);
-    setActiveView('issue');
-  }, [activeView]);
+    setSyncOpen(false);
+    navigate(issuePath(key));
+  }, [navigate]);
 
-  // Close the workspace: clear the open issue and return to the view
-  // the user was on before opening it. The poll cleanup runs from its
-  // own effect when activeView flips.
+  // Close the workspace: navigate back. With BrowserRouter the browser's
+  // back stack handles "back to the previous view"; navigate(-1) goes
+  // one step back, falling through to /issues if there's nothing on the
+  // back stack (e.g. the user landed directly via a deep link).
   const closeIssue = useCallback(() => {
-    setOpenIssueKey(null);
     setOpenIssueBrief(null);
     setDescEditing(false);
-    setActiveView(previousView || 'board');
-  }, [previousView]);
+    // history.state is null on the very first entry — fall back to the
+    // board route so a deep-link refresh doesn't strand the user.
+    if (window.history.state && window.history.length > 1) {
+      navigate(-1);
+    } else {
+      navigate(viewPath('board'));
+    }
+  }, [navigate]);
 
   // BACI-166: composer success handler — optimistically prepend the new
   // card with a queued_no_agent waitingState in the 'scope' mode so the
@@ -544,14 +510,12 @@ export default function App() {
     ]);
     setSettingsOpen(false);
     setSyncOpen(false);
-    setPreviousView(prev => activeView === 'issue' ? prev : activeView);
-    setOpenIssueKey(newCard.key);
-    setActiveView('issue');
+    navigate(issuePath(newCard.key));
     // Don't fire refreshCards synchronously — the dispatch is queued
     // *after* this callback returns (the composer awaits it post-route),
     // so an immediate refetch could race past it. The standing 10s poll
     // catches the authoritative shape on its next tick.
-  }, [activeView]);
+  }, [navigate]);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -574,7 +538,7 @@ export default function App() {
         // intercept Escape for it here.
         if (paletteOpen) {
           setPaletteOpen(false);
-        } else if (activeView === 'issue' && !isEditingTarget(e.target)) {
+        } else if (openIssueKey && !isEditingTarget(e.target)) {
           closeIssue();
         } else if (settingsOpen) {
           setSettingsOpen(false);
@@ -587,20 +551,13 @@ export default function App() {
         if (isEditingTarget(e.target)) return;
         const idx = Number(e.key) - 1;
         if (idx < NAV.length) {
-          // Switching to a nav view from the workspace also clears the
-          // open issue so the breadcrumb pill disappears alongside.
-          if (activeView === 'issue') {
-            setOpenIssueKey(null);
-            setOpenIssueBrief(null);
-            setDescEditing(false);
-          }
-          setActiveView(NAV[idx].view);
+          navigate(viewPath(NAV[idx].view));
         }
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [paletteOpen, settingsOpen, syncOpen, activeView, activeBoard, closeIssue]);
+  }, [paletteOpen, settingsOpen, syncOpen, openIssueKey, activeBoard, closeIssue, navigate]);
 
   // Add a repository. Desktop pops a native folder picker (Wails);
   // web mode hands the path-input modal's submission through as a
@@ -891,6 +848,44 @@ export default function App() {
   // poll-driven re-render is the only thing it needs.
   const { flyingKey: flyingShipKey, flashing: shipFlashing, onFlightDone: onShipFlightDone } = useShipFlourish(cards);
 
+  // BACI-203: navigate-by-key callback for prev/next sibling jumps and
+  // the kanban blocked-popover link. Kept as a memoised callback so
+  // KanbanCard / IssueWorkspace / RelationsPanel can drop it into
+  // effect-dep arrays without thrashing.
+  const navigateToIssue = useCallback((key) => {
+    if (!key) return;
+    navigate(issuePath(key));
+  }, [navigate]);
+
+  // BACI-203: the workspace route reads :key from useParams via a
+  // tiny adapter — IssueWorkspace itself stays callable from a
+  // future test harness with an explicit openIssueKey prop. The
+  // wrapper just plumbs the URL param + the App-owned data and
+  // callbacks into one props bag.
+  const WorkspaceRoute = () => {
+    const { key } = useParams();
+    return (
+      <ErrorBoundary headline="Something went wrong in the issue view" label="The issue view crashed">
+        <IssueWorkspace
+          activeBoard={activeBoard}
+          openIssueKey={key}
+          brief={openIssueBrief}
+          promptConfig={promptConfig}
+          cards={cards}
+          onClose={closeIssue}
+          onSaveDescription={saveDescription}
+          onAddComment={addComment}
+          onDeleteComment={deleteComment}
+          onDispatch={(mode) => dispatchFromCard(key, mode)}
+          onCancelWaiting={() => cancelWaitingFromCard(key)}
+          onAttachPR={attachPR}
+          onNavigateIssue={navigateToIssue}
+          onDescEditingChange={setDescEditing}
+        />
+      </ErrorBoundary>
+    );
+  };
+
   return (
     <TooltipProvider delayDuration={250} skipDelayDuration={150}>
     <LazyMotion features={domMax} strict>
@@ -906,29 +901,15 @@ export default function App() {
         activeBoard={activeBoard}
         onPickBoard={setActiveBoard}
         onAddRepository={addRepository}
-        activeView={activeView}
-        onChangeView={(v) => {
-          setSettingsOpen(false);
-          setSyncOpen(false);
-          // Switching to a nav view from the workspace also clears the
-          // open-issue state so the breadcrumb pill disappears.
-          if (activeView === 'issue') {
-            setOpenIssueKey(null);
-            setOpenIssueBrief(null);
-            setDescEditing(false);
-          }
-          setActiveView(v);
-        }}
+        onBeforeNavigate={() => { setSettingsOpen(false); setSyncOpen(false); }}
         onOpenPalette={() => setPaletteOpen(true)}
         onOpenSettings={() => { setSyncOpen(false); setSettingsOpen(true); }}
         onOpenSync={openSync}
         onOpenComposer={() => setComposerOpen(true)}
         leaderState={leaderState}
-        openIssueKey={openIssueKey}
-        onCloseIssue={closeIssue}
         agentCounts={agentCounts}
         shippedCount={shippedCount}
-        onOpenIssue={openIssueByKey}
+        onOpenIssue={navigateToIssue}
         flyingShipKey={flyingShipKey}
         shipFlashing={shipFlashing}
         onShipFlightDone={onShipFlightDone}
@@ -954,67 +935,93 @@ export default function App() {
         <ErrorBoundary headline="Something went wrong in Sync" label="The Sync view crashed">
           <SyncView onClose={closeSync} />
         </ErrorBoundary>
-      ) : activeView === 'docs' ? (
-        <ErrorBoundary headline="Something went wrong in Docs" label="The Docs view crashed">
-          <DocsView activeBoard={activeBoard} onOpenIssue={openIssueByKey} />
-        </ErrorBoundary>
-      ) : activeView === 'features' ? (
-        <ErrorBoundary headline="Something went wrong in Features" label="The Features view crashed">
-          {/* BACI-177: refresh the cached board cards when the user
-              flips the per-feature "Show on board" toggle so the
-              change is visible on the next nav back to the board
-              without waiting for the 10s poll. */}
-          <FeaturesView activeBoard={activeBoard} onChangeHidden={refreshCards} />
-        </ErrorBoundary>
-      ) : activeView === 'agents' ? (
-        <ErrorBoundary headline="Something went wrong in Agents" label="The Agents view crashed">
-          <AgentsView agents={agents} onRefresh={refreshAgents} />
-        </ErrorBoundary>
-      ) : activeView === 'history' ? (
-        <ErrorBoundary headline="Something went wrong in History" label="The History view crashed">
-          <HistoryView activeBoard={activeBoard} />
-        </ErrorBoundary>
-      ) : activeView === 'issue' ? (
-        <ErrorBoundary headline="Something went wrong in the issue view" label="The issue view crashed">
-          <IssueWorkspace
-            activeBoard={activeBoard}
-            openIssueKey={openIssueKey}
-            brief={openIssueBrief}
-            promptConfig={promptConfig}
-            cards={cards}
-            onClose={closeIssue}
-            onSaveDescription={saveDescription}
-            onAddComment={addComment}
-            onDeleteComment={deleteComment}
-            onDispatch={(mode) => dispatchFromCard(openIssueKey, mode)}
-            onCancelWaiting={() => cancelWaitingFromCard(openIssueKey)}
-            onAttachPR={attachPR}
-            onNavigateIssue={(key) => setOpenIssueKey(key)}
-            onDescEditingChange={setDescEditing}
-          />
-        </ErrorBoundary>
       ) : (
-        <ErrorBoundary headline="Something went wrong on the board" label="The Board view crashed">
-          <Board
-            activeBoard={activeBoard}
-            columns={columns}
-            cards={cards}
-            promptConfig={promptConfig}
-            onMoveCard={moveCard}
-            onOpenCard={openCard}
-            onOpenIssue={openIssueByKey}
-            onDispatchFromCard={dispatchFromCard}
-            onCancelWaitingCard={cancelWaitingFromCard}
-            onQuickEval={quickEvalComment}
-            pinnedKeys={pinnedKeys}
-            onTogglePin={togglePinKey}
-            onSetFollowOn={setFollowOnFromCard}
-            onCancelFollowOn={cancelFollowOnFromCard}
-            hoveredKey={hoveredKey}
-            jumpKey={jumpKey}
-            flyingShipKey={flyingShipKey}
+        <Routes>
+          {/* Redirect / to /issues so a bare hit lands on the kanban. */}
+          <Route path="/" element={<Navigate to={viewPath('board')} replace />} />
+          <Route
+            path="/issues"
+            element={
+              <ErrorBoundary headline="Something went wrong on the board" label="The Board view crashed">
+                <Board
+                  activeBoard={activeBoard}
+                  columns={columns}
+                  cards={cards}
+                  promptConfig={promptConfig}
+                  onMoveCard={moveCard}
+                  onOpenCard={openCard}
+                  onOpenIssue={navigateToIssue}
+                  onDispatchFromCard={dispatchFromCard}
+                  onCancelWaitingCard={cancelWaitingFromCard}
+                  onQuickEval={quickEvalComment}
+                  pinnedKeys={pinnedKeys}
+                  onTogglePin={togglePinKey}
+                  onSetFollowOn={setFollowOnFromCard}
+                  onCancelFollowOn={cancelFollowOnFromCard}
+                  hoveredKey={hoveredKey}
+                  jumpKey={jumpKey}
+                  flyingShipKey={flyingShipKey}
+                />
+              </ErrorBoundary>
+            }
           />
-        </ErrorBoundary>
+          <Route path="/issues/:key" element={<WorkspaceRoute />} />
+          <Route
+            path="/features"
+            element={
+              <ErrorBoundary headline="Something went wrong in Features" label="The Features view crashed">
+                {/* BACI-177: refresh the cached board cards when the user
+                    flips the per-feature "Show on board" toggle so the
+                    change is visible on the next nav back to the board
+                    without waiting for the 10s poll. */}
+                <FeaturesView activeBoard={activeBoard} onChangeHidden={refreshCards} />
+              </ErrorBoundary>
+            }
+          />
+          <Route
+            path="/features/:slug"
+            element={
+              <ErrorBoundary headline="Something went wrong in Features" label="The Features view crashed">
+                <FeaturesView activeBoard={activeBoard} onChangeHidden={refreshCards} />
+              </ErrorBoundary>
+            }
+          />
+          <Route
+            path="/documents"
+            element={
+              <ErrorBoundary headline="Something went wrong in Docs" label="The Docs view crashed">
+                <DocsView activeBoard={activeBoard} onOpenIssue={navigateToIssue} />
+              </ErrorBoundary>
+            }
+          />
+          <Route
+            path="/documents/:slug"
+            element={
+              <ErrorBoundary headline="Something went wrong in Docs" label="The Docs view crashed">
+                <DocsView activeBoard={activeBoard} onOpenIssue={navigateToIssue} />
+              </ErrorBoundary>
+            }
+          />
+          <Route
+            path="/agents"
+            element={
+              <ErrorBoundary headline="Something went wrong in Agents" label="The Agents view crashed">
+                <AgentsView agents={agents} onRefresh={refreshAgents} />
+              </ErrorBoundary>
+            }
+          />
+          <Route
+            path="/history"
+            element={
+              <ErrorBoundary headline="Something went wrong in History" label="The History view crashed">
+                <HistoryView activeBoard={activeBoard} />
+              </ErrorBoundary>
+            }
+          />
+          {/* Unknown route lands on the board so refreshes / stray links
+              don't strand the user on a 404 we don't render. */}
+          <Route path="*" element={<Navigate to={viewPath('board')} replace />} />
+        </Routes>
       )}
       <ErrorBoundary headline="Something went wrong in the command palette" label="The command palette crashed">
         <CommandPalette

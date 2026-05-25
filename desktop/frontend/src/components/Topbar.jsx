@@ -1,9 +1,11 @@
 import React from 'react';
+import { useLocation, useNavigate } from 'react-router';
 import Icon from './Icon.jsx';
 import RepoPicker from './RepoPicker.jsx';
 import ShippedPopover from './ShippedPopover.jsx';
 import Tooltip from './Tooltip.jsx';
 import { WEB_MODE } from '../env';
+import { viewPath, viewFromPath } from '../lib/routes';
 
 // NAV is the ordered top-nav. Exported so App can map the digit
 // hotkeys onto the same views in the same order. As of BACI-50 the
@@ -28,7 +30,19 @@ function formatSyncTime(iso) {
   return d.toLocaleString();
 }
 
-export default function Topbar({ boards, activeBoard, onPickBoard, onAddRepository, activeView, onChangeView, onOpenPalette, onOpenSettings, onOpenSync, onOpenComposer, leaderState, openIssueKey, onCloseIssue, agentCounts, shippedCount, onOpenIssue, flyingShipKey, shipFlashing, onShipFlightDone }) {
+export default function Topbar({ boards, activeBoard, onPickBoard, onAddRepository, onBeforeNavigate, onOpenPalette, onOpenSettings, onOpenSync, onOpenComposer, leaderState, agentCounts, shippedCount, onOpenIssue, flyingShipKey, shipFlashing, onShipFlightDone }) {
+  // BACI-203: the active view is derived from the URL, not a prop.
+  // useLocation re-renders on every navigation so the segmented
+  // button's `is-active` class stays in lockstep. The breadcrumb
+  // pill is derived from the same pathname — when the workspace
+  // route is mounted, the path matches `/issues/:key` and the key is
+  // pulled directly off the path so the breadcrumb doesn't need a
+  // separate prop.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const activeView = viewFromPath(location.pathname) || 'board';
+  const issueMatch = location.pathname.match(/^\/issues\/([^/]+)$/);
+  const openIssueKey = issueMatch ? issueMatch[1] : null;
   const board = boards.find(b => b.prefix === activeBoard);
   const syncEnabled = !!board?.syncEnabled;
   // BACI-89: the Sync badge is now a live status indicator, not just a
@@ -85,7 +99,10 @@ export default function Topbar({ boards, activeBoard, onPickBoard, onAddReposito
           const button = (
             <button
               className={`mk-segmented-btn ${activeView === view ? 'is-active' : ''}`}
-              onClick={() => onChangeView(view)}
+              onClick={() => {
+                if (onBeforeNavigate) onBeforeNavigate();
+                navigate(viewPath(view));
+              }}
             >
               {label}
               {isAgents && showAgentCounts && (
@@ -107,7 +124,7 @@ export default function Topbar({ boards, activeBoard, onPickBoard, onAddReposito
         <button
           type="button"
           className="mk-breadcrumb"
-          onClick={onCloseIssue}
+          onClick={() => navigate(-1)}
           title="Back (esc)"
         >
           ← {openIssueKey}

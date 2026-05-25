@@ -345,46 +345,81 @@ deferred:
 
 ---
 
-## 7a. Issue workspace hash route (BACI-54)
+## 7a. Routing — BrowserRouter on both surfaces (BACI-203)
 
-The IssueWorkspace (BACI-54) is a routed top-level view that replaces
-the legacy IssueDrawer + IssueEditModal. In web mode only, the open
-issue is reflected into the URL hash so the workspace is deep-linkable
-and copy-pasteable between tabs.
+Every top-level screen and per-entity detail has a real URL. The same
+`react-router` v7 `<BrowserRouter>` drives both `bacio web` and the
+Wails desktop app — refresh / back-forward / deep-link / shareable
+URLs all work without surface-specific code. Retired the BACI-54
+hash route — `<BrowserRouter>` is its strict superset.
 
-- **Shape:** `#/<prefix>/<key>`, e.g. `#/BACI/BACI-54`. The hash
-  encodes both the repo (so the picker lands on the right one) and
-  the canonical issue key. Anything that doesn't match the regex
-  `^#/[A-Za-z0-9]+/[A-Za-z0-9]+-\d+$` is ignored.
-- **Inbound (hashchange listener).** `App.jsx` parses the hash on
-  mount and on every `hashchange`. If the parsed value differs from
-  current state, the active repo and `openIssueKey` are set together
-  and `activeView` flips to `'issue'`. If the hash is cleared while a
-  workspace is open (back button, manual edit), the workspace closes
-  and `activeView` returns to `previousView`. The guard "only act if
-  we'd actually change something" prevents fighting the outbound
-  reflect.
-- **Outbound (history.replaceState).** When `openIssueKey` /
-  `activeBoard` change, the canonical hash is written back. `replaceState`
-  (not `pushState`) is deliberate: opening a dozen cards leaves one
-  history entry, not twelve, so the browser back button still
-  reliably returns to whatever page the user navigated *from* into
-  the app.
-- **Desktop ignores both effects** — the `WEB_MODE` guard returns
-  early at the top of both hooks. There's no Wails-side router
-  primitive to integrate; the native app uses the existing
-  click-a-card / breadcrumb / esc affordances.
-- **No router library.** A single `hashchange` listener and a two-line
-  parser is enough — bringing in `react-router` would buy nothing
-  this view actually needs.
-- **Repo switch.** Picking a different repo while a workspace is
-  open follows the same "only act if we'd actually change something"
-  guard: the outbound effect rewrites the hash to the new prefix,
-  but the workspace stays mounted with the now-foreign issue key
-  until the user picks a card from the new repo. (Today this is
-  acceptable because the brief fetch will error out and surface
-  through the global modal; tightening it — clear `openIssueKey` on
-  repo change — is a 1-line follow-up if it ever bites.)
+- **The route map.**
+  - `/issues` → kanban (the `Board` view).
+  - `/issues/:key` → `IssueWorkspace` for that key.
+  - `/features`, `/features/:slug` → `FeaturesView` with the slug
+    pre-selected when present.
+  - `/docs`, `/docs/:slug` → `DocsView` with the filename pre-selected.
+    The `:slug` segment carries a `documentPath`-encoded filename, so
+    dots / unusual characters survive the round-trip.
+  - `/agents` → `AgentsView`.
+  - `/history` → `HistoryView`.
+  - `/` redirects to `/issues`; unknown paths fall back to the same
+    redirect so refreshes / stray links don't strand the user.
+- **Basename derivation.** `main.tsx` reads
+  `import.meta.env.BASE_URL.replace(/\/$/, '')` into `<BrowserRouter
+  basename={...}>`. This evaluates to `/ui` in web mode (matches the
+  `bacio web` mount under `/ui/`) and the empty string in desktop
+  mode (Wails serves the bundle at `/`). One source tree drives both
+  targets — Vite's `base` and the router's `basename` stay coupled.
+- **SPA-fallback contract.** The router needs an asset server that
+  returns `index.html` for every unknown non-asset path under the
+  root. `internal/api/static.go::handleUI` does this for `bacio web`
+  (extension-less paths fall through to `index.html`; asset-shaped
+  paths still 404 cleanly). The Wails desktop uses
+  `application.AssetFileServerFS` in `desktop/main.go`, which
+  implements the same SPA fallback. If a future Wails v3 release
+  breaks that, the fallback is `<HashRouter>` everywhere with the
+  same path shapes (`#/issues/BACI-100`) — a one-line change in
+  `main.tsx`, no other code touched.
+- **Keys-only URLs.** Issue keys (`/issues/BACI-100`) encode their
+  repo in the prefix already, so the URL doesn't repeat it. The
+  active repo lives in `localStorage` (`bacio-active-repo`); a deep
+  link to a key that belongs to a different repo lands on the
+  workspace skeleton until the user picks the matching repo from the
+  picker — same behaviour the BACI-54 hash route had for an unloaded
+  repo. Cross-repo sharing via `?repo=BACI` is a deferred follow-up.
+- **Path helpers.** `desktop/frontend/src/lib/routes.ts` is the single
+  source of truth for path shapes — `viewPath`, `issuePath`,
+  `featurePath`, `documentPath`. Every callsite that needs a path
+  imports from here rather than template-stringing inline. The
+  smoke test in `lib/__tests__/routes.smoketest.mjs` (plain Node +
+  assert, the existing pattern) covers the helpers.
+- **localStorage keeps its job.** Per-view UI state (board horizontal
+  scroll, column collapse / compact, pinned-keys, theme, active
+  repo) stays in `localStorage`. These are per-user preferences, not
+  addressable state, and don't belong on a shareable URL. The URL
+  carries only the path.
+- **Topbar derives the active view from `useLocation`.** The
+  segmented `Issues / Features / Documents / Agents / History`
+  buttons highlight the matching segment via `viewFromPath`
+  (`/issues/...` → `board`, `/features/...` → `features`, ...). The
+  breadcrumb pill that surfaces while the workspace route is mounted
+  reads the key off the path directly, then calls `navigate(-1)` on
+  click — the browser back stack handles the prior view.
+- **Linked-doc panels are links.** `LinkedDocPanel` no longer renders
+  markdown / SVG / transcript bodies inline; it surfaces metadata + a
+  `<Link to={documentPath(filename)}>` to the canonical document
+  page. The brief assemblers (`internal/api/handlers_brief.go::briefDocContent`
+  and `internal/client/local_issue.go::briefDocContent`) strip every
+  linked-doc body before serving the brief, narrowing the BACI-115
+  plan/review carve-out to "never". This saves a chunk of bytes on
+  every 10s brief poll. The BACI-141 transcript-anchored eval
+  composer migrates onto the document detail page as a follow-up;
+  eval-flagged comments continue to surface in the issue workspace's
+  main Activity timeline today.
+- **No more BACI-54 hash route.** No backend code emits the old
+  `#/<prefix>/<key>` shape, so there's nothing to redirect. External
+  notes pointing at old hash URLs are a one-shot fix-up.
 
 The workspace's other surfaces (description editor, comment composer,
 PR attach form, dispatch button) all run through the same `api.*`

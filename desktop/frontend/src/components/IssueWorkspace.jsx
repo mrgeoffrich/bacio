@@ -51,26 +51,12 @@ export default function IssueWorkspace({
   const taken = !!brief?.taken;
   const waiting = !!brief?.waitingForClaim && !taken;
 
-  // BACI-141: pluck the eval-flagged comments out of the brief once
-  // so every <LinkedDocPanel> can render anchored notes inline with
-  // the matching transcript events. The panels filter again on
-  // dispatchId / agentSessionId, but the issue-level filter here
-  // means uninvolved cards skip the prop entirely (one identity
-  // ref-equal empty array vs. a per-render new one).
-  const evalComments = useMemo(() => {
-    if (!brief?.comments) return [];
-    return brief.comments.filter(c => !!c.eval);
-  }, [brief]);
-
-  // Per-event composer submit hook: route through the existing
-  // onAddComment path with the transcriptEventRef so the comment row
-  // carries the anchor. Empty body falls through to onAddComment's
-  // OS-username fallback. The wrapper is stable across renders so
-  // the LinkedDocPanel useMemo doesn't tear.
-  const onPostEvalComment = useCallback(async (body, eventRef) => {
-    if (!onAddComment) return;
-    await onAddComment('', body, { eval: true, transcriptEventRef: eventRef });
-  }, [onAddComment]);
+  // BACI-203: LinkedDocPanel no longer renders bodies inline (it's a
+  // link to the canonical /documents/<filename> page now), so the
+  // per-event composer that used to live inside the inline transcript
+  // view is gone. Eval-flagged comments continue to surface in the
+  // main Activity timeline below; the BACI-141 transcript-anchored
+  // composer is deferred to the document detail page (follow-up).
 
   // BACI-145: the brief now carries the structured WaitingState used
   // by the IssueLockBanner's inline label. Fall back to null when the
@@ -234,9 +220,6 @@ export default function IssueWorkspace({
                   <LinkedDocPanel
                     key={`${d.filename}:${(d.linkedVia || []).join('+')}`}
                     doc={d}
-                    activeBoard={activeBoard}
-                    evalComments={evalComments}
-                    onPostEval={onPostEvalComment}
                   />
                 ))}
               </div>
