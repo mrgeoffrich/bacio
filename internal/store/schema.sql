@@ -766,3 +766,54 @@ AFTER UPDATE OF description ON document_links
 BEGIN
     UPDATE documents SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.document_id;
 END;
+
+-- BACI-189: archived_at writes on issues/features/documents must bump
+-- updated_at so background sync's LWW gate sees the local change as
+-- newer than the YAML on disk. Without this, the BACI-68 auto-archive
+-- sweep (and the manual `bacio issue archive` / feature / doc verbs)
+-- stamp archived_at but leave updated_at untouched. The next sync
+-- round-trip then sees `YAML.updated_at >= local.updated_at`, the LWW
+-- gate falls into the wholesale UPDATE branch, and YAML's NULL
+-- archived_at clobbers the local stamp back to NULL. On a sync-enabled
+-- repo with a fleet of terminal-state issues the symptom is a sweep
+-- that reports the same N rows archived on every 5-minute tick and
+-- never converges.
+--
+-- Same pattern as the BACI-144 side-data triggers above: hoist the
+-- invariant into the schema so a future writer of archived_at can't
+-- forget. Each trigger only fires when the caller did NOT also set
+-- updated_at — `NEW.updated_at = OLD.updated_at` keeps the sync
+-- importer's authoritative `(archived_at, updated_at)` pair UPDATEs
+-- working (the importer always writes both columns, so the trigger
+-- no-ops and YAML's timestamp survives). The naked archive writes
+-- (sweep + manual archive verbs, none of which touch updated_at)
+-- trigger the bump.
+--
+-- No trigger recursion: the bump UPDATE doesn't touch archived_at, so
+-- the recursive AFTER UPDATE OF archived_at fires on a column the
+-- bump never wrote and the WHEN clause is false on every recursive
+-- call.
+
+CREATE TRIGGER IF NOT EXISTS bump_issue_updated_on_archive_change
+AFTER UPDATE OF archived_at ON issues
+WHEN NEW.archived_at IS NOT OLD.archived_at
+  AND NEW.updated_at = OLD.updated_at
+BEGIN
+    UPDATE issues SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS bump_feature_updated_on_archive_change
+AFTER UPDATE OF archived_at ON features
+WHEN NEW.archived_at IS NOT OLD.archived_at
+  AND NEW.updated_at = OLD.updated_at
+BEGIN
+    UPDATE features SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS bump_document_updated_on_archive_change
+AFTER UPDATE OF archived_at ON documents
+WHEN NEW.archived_at IS NOT OLD.archived_at
+  AND NEW.updated_at = OLD.updated_at
+BEGIN
+    UPDATE documents SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+END;
