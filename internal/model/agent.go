@@ -378,6 +378,7 @@ type DispatchMode string
 // it naturally.
 const (
 	BuiltinTemplatePreamble  = "_dispatch_preamble"
+	BuiltinTemplateResearch  = "research"
 	BuiltinTemplatePlan      = "plan"
 	BuiltinTemplatePlanLarge = "plan_large"
 	BuiltinTemplateDesign    = "design"
@@ -407,7 +408,7 @@ const (
 // by created_at, id).
 var builtinTemplateSlugs = []string{
 	BuiltinTemplatePreamble,
-	BuiltinTemplatePlan, BuiltinTemplatePlanLarge, BuiltinTemplateDesign, BuiltinTemplateImplement,
+	BuiltinTemplateResearch, BuiltinTemplatePlan, BuiltinTemplatePlanLarge, BuiltinTemplateDesign, BuiltinTemplateImplement,
 	BuiltinTemplateReview, BuiltinTemplateShip, BuiltinTemplateFixReview,
 }
 
@@ -423,6 +424,7 @@ func BuiltinTemplateSlugs() []string {
 // when a UI surfaces a slug whose stored row is missing.
 var builtinTemplateLabels = map[string]string{
 	BuiltinTemplatePreamble:  "Dispatch preamble (prepended to every job)",
+	BuiltinTemplateResearch:  "Researching",
 	BuiltinTemplatePlan:      "Planning",
 	BuiltinTemplatePlanLarge: "Planning (large)",
 	BuiltinTemplateDesign:    "Designing",
@@ -452,6 +454,7 @@ func BuiltinTemplateLabel(slug string) string {
 // no state-gate and never reaches a dropdown, so it's omitted —
 // BuiltinTemplateActionLabel returns "" for it.
 var builtinTemplateActionLabels = map[string]string{
+	BuiltinTemplateResearch:  "Research",
 	BuiltinTemplatePlan:      "Plan",
 	BuiltinTemplatePlanLarge: "Plan (large)",
 	BuiltinTemplateDesign:    "Design",
@@ -727,6 +730,7 @@ func DefaultPromptTemplate(mode DispatchMode) string {
 // Users override these per-template; the override lives in the
 // prompt_templates table.
 var builtinPromptStates = map[string][]State{
+	BuiltinTemplateResearch:  {StateTodo},
 	BuiltinTemplatePlan:      {StateTodo},
 	BuiltinTemplatePlanLarge: {StateTodo},
 	BuiltinTemplateDesign:    {StateTodo},

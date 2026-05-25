@@ -696,6 +696,41 @@ func migrate(db *sql.DB) error {
 	if _, err := db.Exec(`DELETE FROM app_settings WHERE key = 'board.hide_empty_columns'`); err != nil {
 		return fmt.Errorf("drop board.hide_empty_columns KV row: %w", err)
 	}
+	// BACI-194: backfill the `research` template row for existing DBs.
+	// Mirrors the backfillDispatchPreamble pattern: INSERT OR IGNORE so a
+	// deliberate user delete is not resurrected on the next Open, and the
+	// operation is idempotent on DBs that already have the row.
+	if err := backfillResearchTemplate(db); err != nil {
+		return fmt.Errorf("backfill research template: %w", err)
+	}
+	return nil
+}
+
+// backfillResearchTemplate inserts the `research` built-in template row
+// for existing DBs where the first-time seed step already ran before
+// BACI-194 added the template. Mirrors backfillDispatchPreamble:
+// INSERT OR IGNORE is idempotent, and a deliberate user delete is not
+// resurrected (the migration skips rows that never existed).
+func backfillResearchTemplate(db *sql.DB) error {
+	slug := model.BuiltinTemplateResearch
+	body := model.DefaultPromptBodyForBuiltinSlug(slug)
+	name := model.BuiltinTemplateLabel(slug)
+	if name == "" {
+		name = slug
+	}
+	states := model.DefaultPromptStatesForBuiltinSlug(slug)
+	encoded, err := encodeStates(states)
+	if err != nil {
+		return err
+	}
+	actionLabel := model.BuiltinTemplateActionLabel(slug)
+	if _, err := db.Exec(`
+		INSERT OR IGNORE INTO prompt_templates
+		  (slug, name, body, allowed_states_json, is_builtin, concurrency_limit, action_label, created_at, updated_at)
+		VALUES (?, ?, ?, ?, 1, 0, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+		slug, name, body, encoded, actionLabel); err != nil {
+		return err
+	}
 	return nil
 }
 
