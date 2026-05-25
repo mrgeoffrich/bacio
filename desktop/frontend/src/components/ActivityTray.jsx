@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { isTerminalState } from '../lib/issueState';
+import { waitingStateLabel } from '../lib/waitingLabels.ts';
+import Icon from './Icon.jsx';
 
 // ActivityTray (BACI-171) — a bottom-right floating panel that narrates
 // what's just happened on the board. Position-fixed, overlays the
@@ -50,9 +52,9 @@ function queuedKey(card) {
 // computeTransitions diffs two `cards` arrays (keyed by card.key) and
 // returns the list of transitions that should land in the tray. Each
 // transition carries the card itself (so the renderer can pull
-// title/tags/excerpt straight off it) plus a `reason` enum for
-// debugging. Pure function — no React state — so it's testable in
-// isolation if a future refactor wants to lift it into lib/.
+// title/column straight off it) plus a `reason` enum for debugging.
+// Pure function — no React state — so it's testable in isolation if
+// a future refactor wants to lift it into lib/.
 //
 // Transition rules (any one of which produces an entry):
 //
@@ -87,16 +89,54 @@ export function computeTransitions(prevCards, nextCards) {
 // entryFromCard builds a tray Entry from a board card. The renderer
 // reads these directly; `addedAt` keeps the LIFO ordering stable when
 // two entries share the same poll tick.
+//
+// BACI-183: the Entry only carries the immutable-at-insert-time fields
+// (key, title, column, columnLabel, addedAt). The status row that
+// replaced the old tags + description preview reads from the *live*
+// card snapshot via `cardsByKey` at render time, so a verb flip
+// ("designing" → "implementing") on a card already in the tray
+// updates in place without re-inserting the row.
 function entryFromCard(card) {
   return {
     key: card.key,
     title: card.title || '',
-    tags: card.tags || [],
-    descriptionExcerpt: card.descriptionExcerpt || '',
     column: card.column,
     columnLabel: card.columnLabel || card.column,
     addedAt: Date.now() + Math.random(), // unique even within one tick
   };
+}
+
+// entryStatus picks the single status row to render under the entry's
+// title, with a precedence ladder: needs-action (the user must act
+// before anything moves) wins over an active-claim verb ("still
+// working" — interesting but secondary) wins over the pre-claim
+// waiting label ("not yet started"). Returns `{kind: 'none'}` when no
+// row should render — the entry collapses to head + title only, which
+// is the common shape for a column-move with no dispatch in flight.
+//
+// The verb path title-cases the wire string for the user-visible
+// "{Verb} in progress" wording without mutating the wire format; the
+// waiting path reuses `waitingStateLabel` so the tray narrates the
+// same sentence the kanban card already shows.
+//
+// Falls back to `{kind:'none'}` when `card` is null — entries whose
+// underlying card dropped from `cards` between polls still render
+// their immutable fields without a stale status line.
+export function entryStatus(card) {
+  if (!card) return { kind: 'none' };
+  if (card.column === 'needs_action') {
+    return { kind: 'needs_action', text: 'Needs action' };
+  }
+  if (card.taken && card.activeVerb) {
+    const verb = card.activeVerb;
+    const titled = verb.charAt(0).toUpperCase() + verb.slice(1);
+    return { kind: 'verb', text: `${titled} in progress` };
+  }
+  if (card.waitingState) {
+    const label = waitingStateLabel(card.waitingState);
+    if (label) return { kind: 'waiting', text: label };
+  }
+  return { kind: 'none' };
 }
 
 // stateClass maps a card's column to the existing .mk-status-* token
@@ -166,9 +206,11 @@ export default function ActivityTray({ cards }) {
         // through the same insert/update path here; the post-flash
         // cleanup further down removes them.
         if (byKey.has(card.key)) {
-          // Update in place: refresh excerpt/title/column from the
-          // latest card snapshot but keep the original addedAt so
-          // the row doesn't jump back to the top. Mark for flash.
+          // Update in place: refresh title/column from the latest
+          // card snapshot but keep the original addedAt so the row
+          // doesn't jump back to the top. Mark for flash. The
+          // status row (BACI-183) is derived live from cardsByKey
+          // at render time, so it doesn't need re-seeding here.
           const existing = byKey.get(card.key);
           byKey.set(card.key, {
             ...entryFromCard(card),
@@ -292,6 +334,20 @@ export default function ActivityTray({ cards }) {
     setEntries(current => current.filter(e => e.key !== key));
   };
 
+  // BACI-183: build a live key → card lookup once per render so the
+  // per-entry status row can read the freshest card snapshot (verb,
+  // waitingState, column). The Entry itself only carries
+  // immutable-at-insert-time fields; the status row updates in place
+  // when the poll lands a new verb on a card already in the tray.
+  // Same pattern as KanbanCard's `cardsByKey` prop.
+  const cardsByKey = useMemo(() => {
+    const m = new Map();
+    if (Array.isArray(cards)) {
+      for (const c of cards) m.set(c.key, c);
+    }
+    return m;
+  }, [cards]);
+
   // Empty tray — return null. An "no activity" placeholder would be
   // pure visual clutter for a feature whose whole point is being
   // ignorable when nothing's happening.
@@ -326,37 +382,55 @@ export default function ActivityTray({ cards }) {
         </button>
       </div>
       <ul className="mk-tray-list">
-        {entries.map(e => (
-          <li
-            key={e.key}
-            className={`mk-tray-entry${flashingKeys.has(e.key) ? ' is-flashing' : ''}`}
-          >
-            <div className="mk-tray-entry-head">
-              <span className="mk-card-id">{e.key}</span>
-              <span className={`mk-pill ${stateClass(e.column)}`}>{e.columnLabel}</span>
-              <button
-                type="button"
-                className="mk-tray-dismiss"
-                onClick={() => dismiss(e.key)}
-                title="Dismiss"
-                aria-label={`Dismiss ${e.key}`}
-              >
-                ×
-              </button>
-            </div>
-            <div className="mk-tray-entry-title">{e.title}</div>
-            {e.tags && e.tags.length > 0 ? (
-              <div className="mk-tag-row mk-tray-entry-tags">
-                {e.tags.map(t => (
-                  <span key={t} className="mk-tag">{t}</span>
-                ))}
+        {entries.map(e => {
+          // BACI-183: read the live card for the status row. Falls
+          // back to undefined when the card dropped from `cards`
+          // between polls — entryStatus handles that by returning
+          // `{kind:'none'}`, so the entry still renders its title.
+          // Column on the head pill stays on the Entry's
+          // immutable-at-insert-time snapshot (we want the head to
+          // reflect the *transition* that put this row in the tray,
+          // not the column the card moved to afterwards).
+          const liveCard = cardsByKey.get(e.key);
+          const status = entryStatus(liveCard);
+          return (
+            <li
+              key={e.key}
+              className={`mk-tray-entry${flashingKeys.has(e.key) ? ' is-flashing' : ''}`}
+            >
+              <div className="mk-tray-entry-head">
+                <span className="mk-card-id">{e.key}</span>
+                <span className={`mk-pill ${stateClass(e.column)}`}>{e.columnLabel}</span>
+                <button
+                  type="button"
+                  className="mk-tray-dismiss"
+                  onClick={() => dismiss(e.key)}
+                  title="Dismiss"
+                  aria-label={`Dismiss ${e.key}`}
+                >
+                  ×
+                </button>
               </div>
-            ) : null}
-            {e.descriptionExcerpt ? (
-              <div className="mk-tray-entry-desc">{e.descriptionExcerpt}</div>
-            ) : null}
-          </li>
-        ))}
+              <div className="mk-tray-entry-title">{e.title}</div>
+              {status.kind === 'needs_action' && (
+                <div className="mk-tray-entry-status is-needs-action">
+                  <Icon name="alert-triangle" />
+                  <span>{status.text}</span>
+                </div>
+              )}
+              {status.kind === 'verb' && (
+                <div className="mk-tray-entry-status">
+                  <span className="mk-tray-entry-verb">{status.text}</span>
+                </div>
+              )}
+              {status.kind === 'waiting' && (
+                <div className="mk-tray-entry-status is-waiting">
+                  <span>{status.text}</span>
+                </div>
+              )}
+            </li>
+          );
+        })}
       </ul>
     </aside>
   );
