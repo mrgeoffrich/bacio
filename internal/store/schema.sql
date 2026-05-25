@@ -487,7 +487,21 @@ CREATE TABLE IF NOT EXISTS agent_dispatches (
     created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     delivered_at      DATETIME,
     acked_at          DATETIME,
-    ack_note          TEXT    NOT NULL DEFAULT ''
+    ack_note          TEXT    NOT NULL DEFAULT '',
+    -- queued_after_dispatch_id (BACI-179) is the optional "fire after"
+    -- link for follow-on dispatches (umbrella BACI-176). When set, the
+    -- dormant queued row is excluded from the BACI-51 matcher's pool
+    -- until the named parent dispatch settles (acked or cancelled). A
+    -- leader-gated controller sweep clears the column ("promotes" the
+    -- row) once the predecessor settles AND no open claim races in on
+    -- the issue; a sibling sweep cancels the dormant row if the issue
+    -- lands in done/cancelled before promote. ON DELETE SET NULL so a
+    -- 60-day retention prune of the parent leaves the follow-on
+    -- reachable — the promote sweep's NULL short-circuit then binds it
+    -- on the next matcher tick. No CHECK constraint on the column: the
+    -- Go-side validator in AddDispatch is the single guard (see design
+    -- §5) and a SQL CHECK would tax every status-changing UPDATE.
+    queued_after_dispatch_id INTEGER REFERENCES agent_dispatches(id) ON DELETE SET NULL
     -- Target CHECK is intentionally absent: queued (BACI-51) rows leave
     -- target_agent_id NULL and target_session_id '' until the matcher
     -- binds them; the Go-side validator in AddDispatch enforces "queued
@@ -500,6 +514,14 @@ CREATE INDEX IF NOT EXISTS idx_dispatches_session
     ON agent_dispatches(target_session_id, status);
 CREATE INDEX IF NOT EXISTS idx_dispatches_repo
     ON agent_dispatches(repo_id, status);
+-- idx_dispatches_queued_after (BACI-179) backs the controller's promote
+-- + orphan-cancel sweeps, which walk the dormant pool by predecessor
+-- id. The matcher's per-tick predicate uses the PK index on the
+-- referenced parent dispatch instead; this index is for the sweep's
+-- "find every row pointing at parent X" direction.
+CREATE INDEX IF NOT EXISTS idx_dispatches_queued_after
+    ON agent_dispatches(queued_after_dispatch_id)
+    WHERE queued_after_dispatch_id IS NOT NULL;
 
 -- agent_channels records live `bacio channel` subprocesses. Claude Code
 -- never tells a channel its session id (only hooks get that), so a

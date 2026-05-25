@@ -881,6 +881,15 @@ type AgentDispatch struct {
 	DeliveredAt     *time.Time     `json:"delivered_at,omitempty"`
 	AckedAt         *time.Time     `json:"acked_at,omitempty"`
 	AckNote         string         `json:"ack_note,omitempty"`
+	// QueuedAfterDispatchID (BACI-179) is the "fire after" link for
+	// follow-on dispatches: when non-nil, the dormant queued row is
+	// excluded from the matcher's pool until the named parent dispatch
+	// settles (acked or cancelled). Cleared by the controller's promote
+	// sweep when the predecessor settles AND no open claim races in on
+	// the issue, after which the matcher binds the row on its next tick.
+	// Never set on rows in any state other than queued — the AddDispatch
+	// validator rejects the combination at the store boundary.
+	QueuedAfterDispatchID *int64 `json:"queued_after_dispatch_id,omitempty"`
 }
 
 // AgentLivenessThreshold is the gap after a session's last heartbeat
