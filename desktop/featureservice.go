@@ -12,6 +12,10 @@ import (
 
 // FeatureSummary is one feature, shaped for the desktop feature list.
 //
+// Emoji (BACI-184) carries the per-feature glyph so the Features panel
+// list can render it alongside the title — same glyph BACI-172 paints
+// on every kanban card. Empty when no emoji has been set.
+//
 // HiddenOnBoard (BACI-177) mirrors the per-feature "Show on board"
 // toggle on the Features screen — when true, every kanban card
 // belonging to this feature is hidden from the board on this machine.
@@ -20,6 +24,7 @@ import (
 type FeatureSummary struct {
 	Slug          string    `json:"slug"`
 	Title         string    `json:"title"`
+	Emoji         string    `json:"emoji"`
 	UpdatedAt     time.Time `json:"updatedAt"`
 	HiddenOnBoard bool      `json:"hiddenOnBoard"`
 }
@@ -104,6 +109,7 @@ func (f *FeatureService) ListFeatures(repoPrefix string) ([]FeatureSummary, erro
 		out = append(out, FeatureSummary{
 			Slug:          feat.Slug,
 			Title:         feat.Title,
+			Emoji:         feat.Emoji,
 			UpdatedAt:     feat.UpdatedAt,
 			HiddenOnBoard: feat.HiddenOnBoard,
 		})

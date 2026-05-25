@@ -449,6 +449,11 @@ export interface DocContent {
 export interface FeatureSummary {
   slug: string;
   title: string;
+  // BACI-184: per-feature emoji glyph for the Features panel list.
+  // Empty when none is set — the list renders nothing (no placeholder)
+  // in that case. Mirrors FeatureDetail.emoji so both surfaces share
+  // the same glyph BACI-172 paints on every kanban card.
+  emoji: string;
   updatedAt: string;
   // BACI-177: per-feature "Show on board" toggle state. When true,
   // every kanban card belonging to this feature is hidden from the
@@ -1321,6 +1326,7 @@ export async function listFeatures(repoPrefix: string): Promise<FeatureSummary[]
   return feats.map(f => ({
     slug: f.slug,
     title: f.title,
+    emoji: f.emoji ?? '',
     updatedAt: f.updated_at,
     hiddenOnBoard: !!f.hidden_on_board,
   }));
