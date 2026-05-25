@@ -49,12 +49,18 @@ type ParsedRepo struct {
 
 // ParsedFeature is the on-disk shape of feature.yaml.
 type ParsedFeature struct {
-	UUID            string     `yaml:"uuid" json:"uuid"`
-	Slug            string     `yaml:"slug" json:"slug"`
-	Title           string     `yaml:"title" json:"title"`
-	DescriptionHash string     `yaml:"description_hash" json:"description_hash"`
-	CreatedAt       time.Time  `yaml:"created_at" json:"created_at"`
-	UpdatedAt       time.Time  `yaml:"updated_at" json:"updated_at"`
+	UUID            string    `yaml:"uuid" json:"uuid"`
+	Slug            string    `yaml:"slug" json:"slug"`
+	Title           string    `yaml:"title" json:"title"`
+	DescriptionHash string    `yaml:"description_hash" json:"description_hash"`
+	CreatedAt       time.Time `yaml:"created_at" json:"created_at"`
+	UpdatedAt       time.Time `yaml:"updated_at" json:"updated_at"`
+	// Emoji (BACI-172) round-trips the per-feature glyph used by the
+	// kanban card decoration. Empty (the default) is the unset
+	// signal — omitempty keeps live features without a glyph
+	// byte-identical on disk to the pre-BACI-172 shape, so the sync
+	// LWW gate doesn't churn on every existing feature.
+	Emoji string `yaml:"emoji,omitempty" json:"emoji,omitempty"`
 	// ArchivedAt round-trips the BACI-68 archive flag. Absent on disk
 	// when the feature is live; present (RFC3339 UTC) when archived.
 	// Pointer so omitempty actually omits the key on emit.
