@@ -20,6 +20,7 @@ func TestParseDispatchMode(t *testing.T) {
 		{"review", DispatchModeReview, false},
 		{"ship", DispatchModeShip, false},
 		{"fix_review", DispatchModeFixReview, false},
+		{"scope", DispatchMode(BuiltinTemplateScope), false},
 		{" plan ", DispatchModePlan, false},
 		// User-created slugs validate too (the slug-shape check is
 		// orthogonal to whether the template exists — a deleted
@@ -57,6 +58,7 @@ func TestSubagentTypeForTemplate(t *testing.T) {
 		"review":             "bacio-review-worker",
 		"ship":               "bacio-ship-worker",
 		"fix_review":         "bacio-fix-review-worker",
+		"scope":              "bacio-scope-worker",
 		"my-custom":          "bacio-my-custom-worker",
 		"my_custom_stage":    "bacio-my-custom-stage-worker",
 		"_dispatch_preamble": "bacio--dispatch-preamble-worker",
@@ -70,12 +72,56 @@ func TestSubagentTypeForTemplate(t *testing.T) {
 	// Claude Code agent name ([a-z0-9-] only).
 	valid := regexp.MustCompile(`^[a-z0-9-]+$`)
 	for _, slug := range []string{
-		BuiltinTemplateResearch, BuiltinTemplatePlan, BuiltinTemplateDesign, BuiltinTemplateImplement,
+		BuiltinTemplateScope, BuiltinTemplateResearch, BuiltinTemplatePlan, BuiltinTemplateDesign, BuiltinTemplateImplement,
 		BuiltinTemplateReview, BuiltinTemplateShip, BuiltinTemplateFixReview,
 	} {
 		if name := SubagentTypeForTemplate(slug); !valid.MatchString(name) {
 			t.Errorf("SubagentTypeForTemplate(%q) = %q — not a valid agent name", slug, name)
 		}
+	}
+}
+
+// TestBuiltinTemplateScope is the BACI-164 guard for the new `scope`
+// built-in: the slug must round-trip through ParseDispatchMode, carry a
+// non-empty label / action label, gate to [StateTodo], render a
+// non-empty default body that survives include expansion (no leftover
+// `{{` tokens), and resolve to the canonical `bacio-scope-worker`
+// subagent type.
+func TestBuiltinTemplateScope(t *testing.T) {
+	if got, err := ParseDispatchMode("scope"); err != nil || string(got) != BuiltinTemplateScope {
+		t.Errorf("ParseDispatchMode(\"scope\") = (%q, %v), want (%q, nil)", got, err, BuiltinTemplateScope)
+	}
+	if got := BuiltinTemplateLabel(BuiltinTemplateScope); got != "Scoping" {
+		t.Errorf("BuiltinTemplateLabel(scope) = %q, want %q", got, "Scoping")
+	}
+	if got := BuiltinTemplateActionLabel(BuiltinTemplateScope); got != "Scope" {
+		t.Errorf("BuiltinTemplateActionLabel(scope) = %q, want %q", got, "Scope")
+	}
+	states := DefaultPromptStatesForBuiltinSlug(BuiltinTemplateScope)
+	if len(states) != 1 || states[0] != StateTodo {
+		t.Errorf("DefaultPromptStatesForBuiltinSlug(scope) = %v, want [%q]", states, StateTodo)
+	}
+	body := DefaultPromptBodyForBuiltinSlug(BuiltinTemplateScope)
+	if strings.TrimSpace(body) == "" {
+		t.Fatal("DefaultPromptBodyForBuiltinSlug(scope) is empty — every built-in needs a shipped default")
+	}
+	if strings.Contains(body, "{{") {
+		t.Errorf("DefaultPromptBodyForBuiltinSlug(scope) still contains a {{...}} token after include expansion:\n%s", body)
+	}
+	if got := SubagentTypeForTemplate(BuiltinTemplateScope); got != "bacio-scope-worker" {
+		t.Errorf("SubagentTypeForTemplate(scope) = %q, want %q", got, "bacio-scope-worker")
+	}
+	// The slug must appear in the canonical lifecycle list so the seed
+	// step and `restore-defaults` know about it.
+	var found bool
+	for _, s := range BuiltinTemplateSlugs() {
+		if s == BuiltinTemplateScope {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("BuiltinTemplateSlugs() does not include the scope slug")
 	}
 }
 
@@ -157,6 +203,7 @@ func TestRenderPromptTemplate(t *testing.T) {
 // override; non-built-in slugs fall back to the derivation rule.
 func TestBuiltinTemplateActionLabel(t *testing.T) {
 	cases := map[string]string{
+		BuiltinTemplateScope:     "Scope",
 		BuiltinTemplateResearch:  "Research",
 		BuiltinTemplatePlan:      "Plan",
 		BuiltinTemplateDesign:    "Design",
