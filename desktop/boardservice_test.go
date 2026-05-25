@@ -126,6 +126,15 @@ func (f *fakeBoardClient) CountTranscriptDocsByIssue(context.Context, []int64) (
 	return map[int64]int{}, nil
 }
 
+// ListHiddenFeatureSlugs (BACI-177) — empty slice means "no features
+// are hidden", which matches the production default and lets every
+// taken-flag / waiting-state test pass cards through unchanged.
+// BoardService.ListCards calls this once per repo to thread the set
+// into boardcards.Assemble.
+func (f *fakeBoardClient) ListHiddenFeatureSlugs(context.Context, *model.Repo) ([]string, error) {
+	return nil, nil
+}
+
 func TestListCardsTaken(t *testing.T) {
 	issues := []*model.Issue{
 		{Key: "TEST-1", State: model.StateTodo, Title: "held by an agent"},

@@ -667,6 +667,26 @@ func migrate(db *sql.DB) error {
 	if err := migrateSyncStateKindCheck(db); err != nil {
 		return err
 	}
+	// BACI-179: queued_after_dispatch_id is the optional "fire after"
+	// link for follow-on dispatches. schema.sql carries it for fresh
+	// DBs; the ALTER + partial index backfill older ones. ON DELETE
+	// SET NULL must be expressed inline since SQLite ALTERs can't
+	// retroactively add FK constraints — the FK still applies for fresh
+	// DBs from schema.sql, and the controller sweep's NULL short-circuit
+	// (§4 row 4 of the design doc) handles the "parent pruned, follow-on
+	// dangles" case on upgraded DBs too.
+	hasQueuedAfter, err := columnExists(db, "agent_dispatches", "queued_after_dispatch_id")
+	if err != nil {
+		return err
+	}
+	if !hasQueuedAfter {
+		if _, err := db.Exec(`ALTER TABLE agent_dispatches ADD COLUMN queued_after_dispatch_id INTEGER REFERENCES agent_dispatches(id) ON DELETE SET NULL`); err != nil {
+			return fmt.Errorf("add queued_after_dispatch_id to agent_dispatches: %w", err)
+		}
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_dispatches_queued_after ON agent_dispatches(queued_after_dispatch_id) WHERE queued_after_dispatch_id IS NOT NULL`); err != nil {
+		return fmt.Errorf("create idx_dispatches_queued_after: %w", err)
+	}
 	return nil
 }
 
@@ -923,7 +943,10 @@ func migrateAgentDispatchesModeCheck(db *sql.DB) error {
 		return fmt.Errorf("defer fk: %w", err)
 	}
 	// Mirror schema.sql's agent_dispatches shape exactly, minus the
-	// CHECK on `mode`, so SELECT *-style copy round-trips.
+	// CHECK on `mode`, so SELECT *-style copy round-trips. BACI-179:
+	// include queued_after_dispatch_id so the rebuilt table carries
+	// the column whether or not the source table did (the source may
+	// pre-date BACI-179; the column gets backfilled to NULL).
 	if _, err := tx.Exec(`
 		CREATE TABLE agent_dispatches_new (
 			id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -940,20 +963,41 @@ func migrateAgentDispatchesModeCheck(db *sql.DB) error {
 			delivered_at      DATETIME,
 			acked_at          DATETIME,
 			ack_note          TEXT    NOT NULL DEFAULT '',
+			queued_after_dispatch_id INTEGER REFERENCES agent_dispatches(id) ON DELETE SET NULL,
 			CHECK (target_agent_id IS NOT NULL OR target_session_id != '')
 		)
 	`); err != nil {
 		return fmt.Errorf("create agent_dispatches_new: %w", err)
 	}
-	if _, err := tx.Exec(`
+	// Discover whether the source table carries queued_after_dispatch_id
+	// already: a DB rebuilt by this migration after BACI-179 lands does,
+	// a pre-BACI-179 DB doesn't. The SELECT clause varies accordingly so
+	// the older shape doesn't error on the missing column.
+	hasQueuedAfter, err := txColumnExists(tx, "agent_dispatches", "queued_after_dispatch_id")
+	if err != nil {
+		return err
+	}
+	copyStmt := `
 		INSERT INTO agent_dispatches_new
 			(id, repo_id, target_agent_id, target_session_id, issue_id, mode,
 			 payload, status, created_by, created_at, delivered_at, acked_at, ack_note)
 		SELECT
 			id, repo_id, target_agent_id, target_session_id, issue_id, mode,
 			payload, status, created_by, created_at, delivered_at, acked_at, ack_note
-		FROM agent_dispatches
-	`); err != nil {
+		FROM agent_dispatches`
+	if hasQueuedAfter {
+		copyStmt = `
+		INSERT INTO agent_dispatches_new
+			(id, repo_id, target_agent_id, target_session_id, issue_id, mode,
+			 payload, status, created_by, created_at, delivered_at, acked_at, ack_note,
+			 queued_after_dispatch_id)
+		SELECT
+			id, repo_id, target_agent_id, target_session_id, issue_id, mode,
+			payload, status, created_by, created_at, delivered_at, acked_at, ack_note,
+			queued_after_dispatch_id
+		FROM agent_dispatches`
+	}
+	if _, err := tx.Exec(copyStmt); err != nil {
 		return fmt.Errorf("copy agent_dispatches rows: %w", err)
 	}
 	if _, err := tx.Exec(`DROP TABLE agent_dispatches`); err != nil {
@@ -968,6 +1012,7 @@ func migrateAgentDispatchesModeCheck(db *sql.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_dispatches_agent ON agent_dispatches(target_agent_id, status)`,
 		`CREATE INDEX IF NOT EXISTS idx_dispatches_session ON agent_dispatches(target_session_id, status)`,
 		`CREATE INDEX IF NOT EXISTS idx_dispatches_repo ON agent_dispatches(repo_id, status)`,
+		`CREATE INDEX IF NOT EXISTS idx_dispatches_queued_after ON agent_dispatches(queued_after_dispatch_id) WHERE queued_after_dispatch_id IS NOT NULL`,
 	} {
 		if _, err := tx.Exec(stmt); err != nil {
 			return fmt.Errorf("recreate agent_dispatches index: %w", err)
@@ -1002,7 +1047,9 @@ func migrateAgentDispatchesStatusCheck(db *sql.DB) error {
 	}
 	// Mirror the post-BACI-51 schema.sql shape exactly: relaxed status
 	// CHECK, no target CHECK. Everything else matches the existing
-	// columns so a SELECT * INSERT * copy round-trips.
+	// columns so a SELECT * INSERT * copy round-trips. BACI-179: include
+	// queued_after_dispatch_id so the rebuilt table carries the column
+	// even when the source table pre-dates it.
 	if _, err := tx.Exec(`
 		CREATE TABLE agent_dispatches_new (
 			id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1018,20 +1065,37 @@ func migrateAgentDispatchesStatusCheck(db *sql.DB) error {
 			created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			delivered_at      DATETIME,
 			acked_at          DATETIME,
-			ack_note          TEXT    NOT NULL DEFAULT ''
+			ack_note          TEXT    NOT NULL DEFAULT '',
+			queued_after_dispatch_id INTEGER REFERENCES agent_dispatches(id) ON DELETE SET NULL
 		)
 	`); err != nil {
 		return fmt.Errorf("create agent_dispatches_new: %w", err)
 	}
-	if _, err := tx.Exec(`
+	hasQueuedAfter, err := txColumnExists(tx, "agent_dispatches", "queued_after_dispatch_id")
+	if err != nil {
+		return err
+	}
+	copyStmt := `
 		INSERT INTO agent_dispatches_new
 			(id, repo_id, target_agent_id, target_session_id, issue_id, mode,
 			 payload, status, created_by, created_at, delivered_at, acked_at, ack_note)
 		SELECT
 			id, repo_id, target_agent_id, target_session_id, issue_id, mode,
 			payload, status, created_by, created_at, delivered_at, acked_at, ack_note
-		FROM agent_dispatches
-	`); err != nil {
+		FROM agent_dispatches`
+	if hasQueuedAfter {
+		copyStmt = `
+		INSERT INTO agent_dispatches_new
+			(id, repo_id, target_agent_id, target_session_id, issue_id, mode,
+			 payload, status, created_by, created_at, delivered_at, acked_at, ack_note,
+			 queued_after_dispatch_id)
+		SELECT
+			id, repo_id, target_agent_id, target_session_id, issue_id, mode,
+			payload, status, created_by, created_at, delivered_at, acked_at, ack_note,
+			queued_after_dispatch_id
+		FROM agent_dispatches`
+	}
+	if _, err := tx.Exec(copyStmt); err != nil {
 		return fmt.Errorf("copy agent_dispatches rows: %w", err)
 	}
 	if _, err := tx.Exec(`DROP TABLE agent_dispatches`); err != nil {
@@ -1044,6 +1108,7 @@ func migrateAgentDispatchesStatusCheck(db *sql.DB) error {
 		`CREATE INDEX IF NOT EXISTS idx_dispatches_agent ON agent_dispatches(target_agent_id, status)`,
 		`CREATE INDEX IF NOT EXISTS idx_dispatches_session ON agent_dispatches(target_session_id, status)`,
 		`CREATE INDEX IF NOT EXISTS idx_dispatches_repo ON agent_dispatches(repo_id, status)`,
+		`CREATE INDEX IF NOT EXISTS idx_dispatches_queued_after ON agent_dispatches(queued_after_dispatch_id) WHERE queued_after_dispatch_id IS NOT NULL`,
 	} {
 		if _, err := tx.Exec(stmt); err != nil {
 			return fmt.Errorf("recreate agent_dispatches index: %w", err)
@@ -1359,6 +1424,35 @@ func backfillUUIDs(db *sql.DB, table string) error {
 
 func columnExists(db *sql.DB, table, column string) (bool, error) {
 	rows, err := db.Query(fmt.Sprintf(`PRAGMA table_info(%q)`, table))
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			cid     int
+			name    string
+			ctype   string
+			notnull int
+			dflt    sql.NullString
+			pk      int
+		)
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
+
+// txColumnExists mirrors columnExists but runs inside a *sql.Tx.
+// PRAGMA table_info reads the live schema; running it inside the
+// rebuild tx ensures the migration sees the table shape it's about
+// to drop (rather than a sibling caller's view of the world).
+func txColumnExists(tx *sql.Tx, table, column string) (bool, error) {
+	rows, err := tx.Query(fmt.Sprintf(`PRAGMA table_info(%q)`, table))
 	if err != nil {
 		return false, err
 	}

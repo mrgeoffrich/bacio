@@ -204,6 +204,156 @@ func (c *localClient) AutoDispatchIssue(ctx context.Context, repo *model.Repo, i
 	return d, nil
 }
 
+// QueueFollowOnDispatch (BACI-179) queues a dormant follow-on dispatch
+// against an issue's currently-in-flight (parent) dispatch. Resolves
+// the parent via WaitingDispatchForIssue — the open dispatch the
+// claimed issue is wearing — then delegates to store.AddFollowOnDispatch
+// for the validate+insert. Returns the new dormant row.
+//
+// Validates the mode (must be parseable, must be non-empty) and the
+// state-gate (the prompt must be valid to run from the issue's
+// *current* state — yes, the same gate AutoDispatchIssue runs; the
+// brief acknowledges the user may want a different gate for the
+// post-release state, but Phase 1 mirrors the existing gate semantics
+// to stay mechanical).
+//
+// Writes one `agent.followon.queue` audit row attributed to the
+// calling actor (vs the orphan-cancel sweep's bacio-controller
+// attribution) so `bacio history --op agent.followon.queue` records
+// who queued each follow-on.
+//
+// Phase 1 callers go through this method directly (e.g. tests / phase
+// 2 wiring); Phase 2 promotes it to the Client interface so the CLI
+// and REST surface share the same path.
+func (c *localClient) QueueFollowOnDispatch(ctx context.Context, repo *model.Repo, issueKey string, mode string, dryRun bool) (*model.AgentDispatch, error) {
+	if repo == nil {
+		return nil, fmt.Errorf("QueueFollowOnDispatch requires a repo")
+	}
+	parsedMode, err := model.ParseDispatchMode(mode)
+	if err != nil {
+		return nil, err
+	}
+	if parsedMode == "" {
+		return nil, fmt.Errorf("a dispatch mode is required")
+	}
+	iss, err := c.GetIssueByKey(ctx, repo, issueKey)
+	if err != nil {
+		return nil, err
+	}
+	// State-gate parity with AutoDispatchIssue — see the comment there
+	// for the rationale.
+	gates, err := c.GetPromptStates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !slices.Contains(gates[mode], string(iss.State)) {
+		return nil, fmt.Errorf("the %s prompt can't run from a %s issue", mode, iss.State)
+	}
+	parent, err := c.store.WaitingDispatchForIssue(repo.ID, iss.ID)
+	if err != nil {
+		return nil, err
+	}
+	if parent == nil {
+		return nil, fmt.Errorf("issue %s has no active dispatch to follow on from", iss.Key)
+	}
+	if dryRun {
+		// Project the would-be row — mirrors AutoDispatchIssue's dry-run
+		// shape so the caller sees the same fields as a real insert.
+		return &model.AgentDispatch{
+			RepoID:                repo.ID,
+			RepoPrefix:            repo.Prefix,
+			IssueID:               &iss.ID,
+			IssueKey:              iss.Key,
+			Mode:                  parsedMode,
+			Status:                model.DispatchQueued,
+			CreatedBy:             c.actor,
+			CreatedAt:             time.Now().UTC(),
+			QueuedAfterDispatchID: &parent.ID,
+		}, nil
+	}
+	d, err := c.store.AddFollowOnDispatch(repo.ID, parent.ID, parsedMode, c.actor)
+	if err != nil {
+		return nil, err
+	}
+	c.recordOp(model.HistoryEntry{
+		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+		Op: "agent.followon.queue", Kind: "agent",
+		TargetID: &d.ID, TargetLabel: iss.Key,
+		Details: followOnDetailsForClient(d),
+	})
+	return d, nil
+}
+
+// CancelFollowOnDispatch (BACI-179) cancels the dormant follow-on
+// attached to an issue. Idempotent: returns (nil, nil) when there is
+// nothing to cancel. Writes one `agent.followon.cancel` audit row
+// attributed to the calling actor when a row actually flipped — the
+// orphan-cancel sweep writes the same op with `bacio-controller` as
+// the actor so `bacio history --op agent.followon.cancel` distinguishes
+// the two paths.
+func (c *localClient) CancelFollowOnDispatch(ctx context.Context, repo *model.Repo, issueKey string, dryRun bool) (*model.AgentDispatch, error) {
+	if repo == nil {
+		return nil, fmt.Errorf("CancelFollowOnDispatch requires a repo")
+	}
+	iss, err := c.GetIssueByKey(ctx, repo, issueKey)
+	if err != nil {
+		return nil, err
+	}
+	existing, err := c.store.FollowOnForIssue(repo.ID, iss.ID)
+	if err != nil {
+		return nil, err
+	}
+	if existing == nil {
+		// Idempotent no-op — mirror CancelDispatch's already-cancelled path.
+		return nil, nil
+	}
+	if dryRun {
+		proj := *existing
+		proj.Status = model.DispatchCancelled
+		return &proj, nil
+	}
+	cancelled, err := c.store.CancelFollowOnDispatch(repo.ID, iss.ID)
+	if err != nil {
+		return nil, err
+	}
+	if cancelled == nil {
+		// Raced with the orphan-cancel sweep — that sweep already wrote
+		// its own audit row, nothing to add here.
+		return nil, nil
+	}
+	c.recordOp(model.HistoryEntry{
+		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+		Op: "agent.followon.cancel", Kind: "agent",
+		TargetID: &cancelled.ID, TargetLabel: iss.Key,
+		Details: followOnDetailsForClient(cancelled),
+	})
+	return cancelled, nil
+}
+
+// followOnDetailsForClient composes the audit-log Details string for
+// client-driven follow-on ops (queue / cancel). Mirrors the
+// controller-side followOnDetails helper — kept package-local here so
+// the client doesn't import the controller package just for the
+// helper. Same shape so a reader of `bacio history --op
+// agent.followon.queue` sees identical fields regardless of which
+// writer the row came from.
+func followOnDetailsForClient(d *model.AgentDispatch) string {
+	if d == nil {
+		return ""
+	}
+	parts := []string{fmt.Sprintf("dispatch_id=%d", d.ID)}
+	if d.IssueKey != "" {
+		parts = append(parts, "issue="+d.IssueKey)
+	}
+	if d.Mode != "" {
+		parts = append(parts, "mode="+string(d.Mode))
+	}
+	if d.QueuedAfterDispatchID != nil {
+		parts = append(parts, fmt.Sprintf("parent_dispatch_id=%d", *d.QueuedAfterDispatchID))
+	}
+	return strings.Join(parts, ",")
+}
+
 // WaitingDispatchForIssue returns the active (queued/pending/delivered)
 // dispatch targeting an issue or (nil, nil) if none. Backs the
 // spinner-as-cancel UI added in BACI-51.

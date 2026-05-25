@@ -548,6 +548,494 @@ func TestCancelThenAckRejected(t *testing.T) {
 	}
 }
 
+// TestAddFollowOnDispatchSkipsMatcher (BACI-179) inserts a parent
+// dispatch + a dormant follow-on (queued_after_dispatch_id set) and
+// asserts the matcher's queued-row lists ignore the follow-on while
+// its predecessor remains open. The parent itself is still pending
+// (not queued), so it doesn't appear in the queued lists either —
+// the test exercises the predicate, not the FIFO order.
+func TestAddFollowOnDispatchSkipsMatcher(t *testing.T) {
+	s, repo, iss, ag, _ := seedDispatchFixture(t)
+	parent, err := s.AddDispatch(AddDispatchIn{
+		RepoID:        repo.ID,
+		TargetAgentID: &ag.ID,
+		IssueID:       &iss.ID,
+		Mode:          model.DispatchModePlan,
+		Payload:       "plan it",
+		CreatedBy:     "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add parent: %v", err)
+	}
+	follow, err := s.AddFollowOnDispatch(repo.ID, parent.ID, model.DispatchModeImplement, "supervisor")
+	if err != nil {
+		t.Fatalf("add follow-on: %v", err)
+	}
+	if follow.QueuedAfterDispatchID == nil || *follow.QueuedAfterDispatchID != parent.ID {
+		t.Fatalf("follow.QueuedAfterDispatchID = %v, want %d", follow.QueuedAfterDispatchID, parent.ID)
+	}
+	if follow.Status != model.DispatchQueued {
+		t.Fatalf("follow status = %q, want queued", follow.Status)
+	}
+	// Matcher predicate: the dormant row must not appear.
+	modes, err := s.ListQueuedModesByRepo(repo.ID)
+	if err != nil {
+		t.Fatalf("list modes: %v", err)
+	}
+	if len(modes) != 0 {
+		t.Fatalf("dormant follow-on visible to matcher: modes = %v, want empty", modes)
+	}
+	rows, err := s.ListQueuedByRepoMode(repo.ID, model.DispatchModeImplement)
+	if err != nil {
+		t.Fatalf("list queued: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("dormant follow-on visible: queued = %d, want 0", len(rows))
+	}
+}
+
+// TestAddFollowOnDispatchRejectsSecondSlot (BACI-179) — single-slot
+// invariant: a second follow-on on the same issue is rejected at the
+// store boundary.
+func TestAddFollowOnDispatchRejectsSecondSlot(t *testing.T) {
+	s, repo, iss, ag, _ := seedDispatchFixture(t)
+	parent, err := s.AddDispatch(AddDispatchIn{
+		RepoID:        repo.ID,
+		TargetAgentID: &ag.ID,
+		IssueID:       &iss.ID,
+		Mode:          model.DispatchModePlan,
+		CreatedBy:     "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add parent: %v", err)
+	}
+	if _, err := s.AddFollowOnDispatch(repo.ID, parent.ID, model.DispatchModeImplement, "supervisor"); err != nil {
+		t.Fatalf("first follow-on: %v", err)
+	}
+	if _, err := s.AddFollowOnDispatch(repo.ID, parent.ID, model.DispatchModeImplement, "supervisor"); err == nil {
+		t.Fatal("expected second follow-on to be rejected, got nil")
+	}
+}
+
+// TestAddFollowOnDispatchRejectsSettledParent (BACI-179) — the parent
+// must still be open. A predecessor that's already acked is past the
+// point where attaching a follow-on makes sense (the matcher would
+// promote it on the next sweep, racing with the eventual bind).
+func TestAddFollowOnDispatchRejectsSettledParent(t *testing.T) {
+	s, repo, iss, ag, _ := seedDispatchFixture(t)
+	parent, err := s.AddDispatch(AddDispatchIn{
+		RepoID:        repo.ID,
+		TargetAgentID: &ag.ID,
+		IssueID:       &iss.ID,
+		Mode:          model.DispatchModePlan,
+		CreatedBy:     "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add parent: %v", err)
+	}
+	if _, err := s.AckDispatch(parent.ID, ""); err != nil {
+		t.Fatalf("ack parent: %v", err)
+	}
+	if _, err := s.AddFollowOnDispatch(repo.ID, parent.ID, model.DispatchModeImplement, "supervisor"); err == nil {
+		t.Fatal("expected follow-on against acked parent to be rejected, got nil")
+	}
+}
+
+// TestAddFollowOnDispatchRequiresIssue (BACI-179) — follow-ons are
+// issue-scoped (the orphan-cancel sweep keys on issue state). A
+// parent dispatch without an issue can't carry a follow-on chain.
+func TestAddFollowOnDispatchRequiresIssue(t *testing.T) {
+	s, repo, _, ag, _ := seedDispatchFixture(t)
+	parent, err := s.AddDispatch(AddDispatchIn{
+		RepoID:        repo.ID,
+		TargetAgentID: &ag.ID,
+		Mode:          model.DispatchModePlan,
+		CreatedBy:     "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add issue-less parent: %v", err)
+	}
+	if _, err := s.AddFollowOnDispatch(repo.ID, parent.ID, model.DispatchModeImplement, "supervisor"); err == nil {
+		t.Fatal("expected follow-on against issue-less parent to be rejected, got nil")
+	}
+}
+
+// TestSchemaInvariant_FollowOnRejectedOnNonQueued (BACI-179 design §5)
+// — the Go-side validator is the single guard for "follow-on link
+// only on queued rows". Passing QueuedAfterDispatchID with
+// InitialStatus = pending must error at the store boundary.
+func TestSchemaInvariant_FollowOnRejectedOnNonQueued(t *testing.T) {
+	s, repo, iss, ag, _ := seedDispatchFixture(t)
+	parent, err := s.AddDispatch(AddDispatchIn{
+		RepoID:        repo.ID,
+		TargetAgentID: &ag.ID,
+		IssueID:       &iss.ID,
+		Mode:          model.DispatchModePlan,
+		CreatedBy:     "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add parent: %v", err)
+	}
+	// InitialStatus defaults to DispatchPending — a follow-on link on a
+	// pending row is the case the validator must reject.
+	if _, err := s.AddDispatch(AddDispatchIn{
+		RepoID:                repo.ID,
+		TargetAgentID:         &ag.ID,
+		IssueID:               &iss.ID,
+		Mode:                  model.DispatchModeImplement,
+		CreatedBy:             "supervisor",
+		QueuedAfterDispatchID: &parent.ID,
+	}); err == nil {
+		t.Fatal("expected QueuedAfterDispatchID on pending dispatch to be rejected, got nil")
+	}
+}
+
+// TestPromoteReadyFollowOns (BACI-179) walks the promote happy path:
+// parent → bind → ack settles the predecessor, no open claim races
+// in, and one PromoteReadyFollowOns call clears the
+// queued_after_dispatch_id so the next matcher tick can bind the
+// follow-on. A re-run of the sweep against the now-cleared row is a
+// no-op.
+func TestPromoteReadyFollowOns(t *testing.T) {
+	s, repo, iss, ag, _ := seedDispatchFixture(t)
+	parent, err := s.AddDispatch(AddDispatchIn{
+		RepoID:        repo.ID,
+		TargetAgentID: &ag.ID,
+		IssueID:       &iss.ID,
+		Mode:          model.DispatchModePlan,
+		CreatedBy:     "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add parent: %v", err)
+	}
+	follow, err := s.AddFollowOnDispatch(repo.ID, parent.ID, model.DispatchModeImplement, "supervisor")
+	if err != nil {
+		t.Fatalf("add follow-on: %v", err)
+	}
+	// Predecessor still pending → sweep is a no-op.
+	promoted, err := s.PromoteReadyFollowOns()
+	if err != nil {
+		t.Fatalf("promote (pre-ack): %v", err)
+	}
+	if len(promoted) != 0 {
+		t.Fatalf("promoted with open parent = %d, want 0", len(promoted))
+	}
+	// Settle the predecessor.
+	if _, err := s.AckDispatch(parent.ID, ""); err != nil {
+		t.Fatalf("ack parent: %v", err)
+	}
+	promoted, err = s.PromoteReadyFollowOns()
+	if err != nil {
+		t.Fatalf("promote: %v", err)
+	}
+	if len(promoted) != 1 {
+		t.Fatalf("promoted = %d, want 1", len(promoted))
+	}
+	if promoted[0].ID != follow.ID {
+		t.Fatalf("promoted id = %d, want %d", promoted[0].ID, follow.ID)
+	}
+	if promoted[0].QueuedAfterDispatchID != nil {
+		t.Fatalf("promoted row still has queued_after_dispatch_id = %v", promoted[0].QueuedAfterDispatchID)
+	}
+	// Matcher predicate now sees the row.
+	modes, err := s.ListQueuedModesByRepo(repo.ID)
+	if err != nil {
+		t.Fatalf("list modes: %v", err)
+	}
+	if len(modes) != 1 || modes[0] != model.DispatchModeImplement {
+		t.Fatalf("post-promote modes = %v, want [implement]", modes)
+	}
+	// Re-run is a no-op.
+	promoted, err = s.PromoteReadyFollowOns()
+	if err != nil {
+		t.Fatalf("promote rerun: %v", err)
+	}
+	if len(promoted) != 0 {
+		t.Fatalf("promote rerun = %d, want 0", len(promoted))
+	}
+}
+
+// TestPromoteSweep_BlockedByOpenClaim (BACI-179 design §8) — the
+// second NOT EXISTS guards against a re-claim racing in between
+// predecessor-ack and the promote tick. If the same issue has a fresh
+// open claim, the sweep must NOT promote — the claim holder should
+// service the issue first.
+func TestPromoteSweep_BlockedByOpenClaim(t *testing.T) {
+	s, repo, iss, ag, sess := seedDispatchFixture(t)
+	parent, err := s.AddDispatch(AddDispatchIn{
+		RepoID: repo.ID, TargetAgentID: &ag.ID, IssueID: &iss.ID,
+		Mode: model.DispatchModePlan, CreatedBy: "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add parent: %v", err)
+	}
+	if _, err := s.AddFollowOnDispatch(repo.ID, parent.ID, model.DispatchModeImplement, "supervisor"); err != nil {
+		t.Fatalf("add follow-on: %v", err)
+	}
+	if _, err := s.AckDispatch(parent.ID, ""); err != nil {
+		t.Fatalf("ack parent: %v", err)
+	}
+	// Add a fresh open claim on the issue. The sweep must skip the row.
+	if _, _, _, _, err := s.AddAgentClaim(sess.SessionID, iss.ID, "in-progress"); err != nil {
+		t.Fatalf("add claim: %v", err)
+	}
+	promoted, err := s.PromoteReadyFollowOns()
+	if err != nil {
+		t.Fatalf("promote (claim open): %v", err)
+	}
+	if len(promoted) != 0 {
+		t.Fatalf("promote with open claim = %d, want 0", len(promoted))
+	}
+	// Release the claim → sweep promotes.
+	if _, _, _, err := s.ReleaseAgentClaim(sess.SessionID, iss.ID, model.StateTodo); err != nil {
+		t.Fatalf("release claim: %v", err)
+	}
+	promoted, err = s.PromoteReadyFollowOns()
+	if err != nil {
+		t.Fatalf("promote after release: %v", err)
+	}
+	if len(promoted) != 1 {
+		t.Fatalf("promote after release = %d, want 1", len(promoted))
+	}
+}
+
+// TestPromoteSweep_TolerantOfOrphanClaim (BACI-179 design §8 /
+// BACI-140 mirror) — a claim held by a session whose ended_at is set
+// must NOT block promote. Without this carve-out, a reaper-killed
+// claim that didn't get released would strand the follow-on
+// indefinitely.
+func TestPromoteSweep_TolerantOfOrphanClaim(t *testing.T) {
+	s, repo, iss, ag, sess := seedDispatchFixture(t)
+	parent, err := s.AddDispatch(AddDispatchIn{
+		RepoID: repo.ID, TargetAgentID: &ag.ID, IssueID: &iss.ID,
+		Mode: model.DispatchModePlan, CreatedBy: "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add parent: %v", err)
+	}
+	if _, err := s.AddFollowOnDispatch(repo.ID, parent.ID, model.DispatchModeImplement, "supervisor"); err != nil {
+		t.Fatalf("add follow-on: %v", err)
+	}
+	if _, err := s.AckDispatch(parent.ID, ""); err != nil {
+		t.Fatalf("ack parent: %v", err)
+	}
+	// Add an open claim, then end the session without releasing it —
+	// simulates the BACI-140 reaper-killed-but-not-released path.
+	if _, _, _, _, err := s.AddAgentClaim(sess.SessionID, iss.ID, "in-progress"); err != nil {
+		t.Fatalf("add claim: %v", err)
+	}
+	if _, err := s.DB.Exec(
+		`UPDATE agent_sessions SET ended_at = CURRENT_TIMESTAMP, end_reason = 'presumed_dead' WHERE session_id = ?`,
+		sess.SessionID,
+	); err != nil {
+		t.Fatalf("end session: %v", err)
+	}
+	promoted, err := s.PromoteReadyFollowOns()
+	if err != nil {
+		t.Fatalf("promote tolerant: %v", err)
+	}
+	if len(promoted) != 1 {
+		t.Fatalf("promote with orphan claim = %d, want 1 (ended-session claim must not block)", len(promoted))
+	}
+}
+
+// TestCancelOrphanedFollowOns (BACI-179) — when the issue lands in a
+// terminal state (done or cancelled) before the predecessor settles,
+// the orphan-cancel sweep flips the dormant row to cancelled. A
+// non-terminal issue is a no-op.
+func TestCancelOrphanedFollowOns(t *testing.T) {
+	s, repo, iss, ag, _ := seedDispatchFixture(t)
+	parent, err := s.AddDispatch(AddDispatchIn{
+		RepoID: repo.ID, TargetAgentID: &ag.ID, IssueID: &iss.ID,
+		Mode: model.DispatchModePlan, CreatedBy: "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add parent: %v", err)
+	}
+	follow, err := s.AddFollowOnDispatch(repo.ID, parent.ID, model.DispatchModeImplement, "supervisor")
+	if err != nil {
+		t.Fatalf("add follow-on: %v", err)
+	}
+	// Non-terminal issue → no-op.
+	cancelled, err := s.CancelOrphanedFollowOns()
+	if err != nil {
+		t.Fatalf("orphan-cancel (non-terminal): %v", err)
+	}
+	if len(cancelled) != 0 {
+		t.Fatalf("orphan-cancel on non-terminal = %d, want 0", len(cancelled))
+	}
+	// Land the issue in done; the sweep should cancel the follow-on.
+	if err := s.SetIssueState(iss.ID, model.StateDone); err != nil {
+		t.Fatalf("set issue done: %v", err)
+	}
+	cancelled, err = s.CancelOrphanedFollowOns()
+	if err != nil {
+		t.Fatalf("orphan-cancel: %v", err)
+	}
+	if len(cancelled) != 1 {
+		t.Fatalf("orphan-cancel = %d, want 1", len(cancelled))
+	}
+	if cancelled[0].ID != follow.ID {
+		t.Fatalf("cancelled id = %d, want %d", cancelled[0].ID, follow.ID)
+	}
+	if cancelled[0].Status != model.DispatchCancelled {
+		t.Fatalf("cancelled status = %q, want cancelled", cancelled[0].Status)
+	}
+}
+
+// TestOrphanCancelSweep_ArchivedNotTerminalIsNoop (BACI-179 design
+// §4.a) — archive alone must NOT trigger cancel. The matcher already
+// hides archived issues; the lifecycle terminal is the trigger, not
+// the visibility flag.
+func TestOrphanCancelSweep_ArchivedNotTerminalIsNoop(t *testing.T) {
+	s, repo, iss, ag, _ := seedDispatchFixture(t)
+	parent, err := s.AddDispatch(AddDispatchIn{
+		RepoID: repo.ID, TargetAgentID: &ag.ID, IssueID: &iss.ID,
+		Mode: model.DispatchModePlan, CreatedBy: "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add parent: %v", err)
+	}
+	if _, err := s.AddFollowOnDispatch(repo.ID, parent.ID, model.DispatchModeImplement, "supervisor"); err != nil {
+		t.Fatalf("add follow-on: %v", err)
+	}
+	// Issue is still in_progress when archived (not a terminal state).
+	if err := s.SetIssueState(iss.ID, model.StateInProgress); err != nil {
+		t.Fatalf("set in_progress: %v", err)
+	}
+	if err := s.SetIssueArchived(iss.ID, true); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	cancelled, err := s.CancelOrphanedFollowOns()
+	if err != nil {
+		t.Fatalf("orphan-cancel (archived): %v", err)
+	}
+	if len(cancelled) != 0 {
+		t.Fatalf("orphan-cancel on archived-but-not-terminal = %d, want 0", len(cancelled))
+	}
+}
+
+// TestOrphanCancelSweep_IssuelessRowIgnored (BACI-179 design §4.c) —
+// a dormant row whose issue_id has been nulled (FK ON DELETE SET NULL
+// after a hard-delete) is NOT the orphan-cancel sweep's
+// responsibility. The promote sweep eventually clears the column
+// (via the §3 row-4 fallback) and the matcher binds the row.
+func TestOrphanCancelSweep_IssuelessRowIgnored(t *testing.T) {
+	s, repo, iss, ag, _ := seedDispatchFixture(t)
+	parent, err := s.AddDispatch(AddDispatchIn{
+		RepoID: repo.ID, TargetAgentID: &ag.ID, IssueID: &iss.ID,
+		Mode: model.DispatchModePlan, CreatedBy: "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add parent: %v", err)
+	}
+	follow, err := s.AddFollowOnDispatch(repo.ID, parent.ID, model.DispatchModeImplement, "supervisor")
+	if err != nil {
+		t.Fatalf("add follow-on: %v", err)
+	}
+	// Simulate the FK cascade — null the issue_id on the follow-on
+	// directly (a hard-delete of the issue would also cascade-delete
+	// the parent dispatch via the FK, which would interfere with the
+	// rest of the assertion). We're testing the sweep's predicate, not
+	// the cascade mechanics.
+	if _, err := s.DB.Exec(
+		`UPDATE agent_dispatches SET issue_id = NULL WHERE id = ?`, follow.ID,
+	); err != nil {
+		t.Fatalf("null issue_id: %v", err)
+	}
+	cancelled, err := s.CancelOrphanedFollowOns()
+	if err != nil {
+		t.Fatalf("orphan-cancel (issueless): %v", err)
+	}
+	if len(cancelled) != 0 {
+		t.Fatalf("orphan-cancel on issueless = %d, want 0 (promote sweep handles this case)", len(cancelled))
+	}
+}
+
+// TestMatcherIgnoresDormant_ParentRequeued (BACI-179 design §3) — the
+// reaper requeue path puts the parent back to `queued`, which the
+// predicate treats as not-yet-settled. The follow-on must stay
+// dormant until the parent eventually acks (or is cancelled).
+func TestMatcherIgnoresDormant_ParentRequeued(t *testing.T) {
+	s, repo, iss, ag, _ := seedDispatchFixture(t)
+	parent, err := s.AddDispatch(AddDispatchIn{
+		RepoID: repo.ID, TargetAgentID: &ag.ID, IssueID: &iss.ID,
+		Mode: model.DispatchModePlan, CreatedBy: "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add parent: %v", err)
+	}
+	if _, err := s.AddFollowOnDispatch(repo.ID, parent.ID, model.DispatchModeImplement, "supervisor"); err != nil {
+		t.Fatalf("add follow-on: %v", err)
+	}
+	// Reaper-requeue analogue: flip the parent back to queued (status
+	// the matcher sees as "not settled" per the design §1 predicate).
+	if _, err := s.DB.Exec(
+		`UPDATE agent_dispatches SET status = 'queued', target_agent_id = NULL, target_session_id = '' WHERE id = ?`,
+		parent.ID,
+	); err != nil {
+		t.Fatalf("requeue parent: %v", err)
+	}
+	promoted, err := s.PromoteReadyFollowOns()
+	if err != nil {
+		t.Fatalf("promote: %v", err)
+	}
+	if len(promoted) != 0 {
+		t.Fatalf("promote with requeued parent = %d, want 0", len(promoted))
+	}
+	// Move the parent through ack — the requeue cycle has resolved.
+	if _, err := s.DB.Exec(
+		`UPDATE agent_dispatches SET status = 'acked' WHERE id = ?`, parent.ID,
+	); err != nil {
+		t.Fatalf("ack parent: %v", err)
+	}
+	promoted, err = s.PromoteReadyFollowOns()
+	if err != nil {
+		t.Fatalf("promote post-cycle: %v", err)
+	}
+	if len(promoted) != 1 {
+		t.Fatalf("post-cycle promote = %d, want 1", len(promoted))
+	}
+}
+
+// TestFollowOnForIssue_DormantOnly (BACI-179) — FollowOnForIssue
+// returns the row only while it's dormant. After the promote sweep
+// clears queued_after_dispatch_id, it's a regular queued dispatch
+// (the BoardCard chip surface stops showing it as a follow-on).
+func TestFollowOnForIssue_DormantOnly(t *testing.T) {
+	s, repo, iss, ag, _ := seedDispatchFixture(t)
+	parent, err := s.AddDispatch(AddDispatchIn{
+		RepoID: repo.ID, TargetAgentID: &ag.ID, IssueID: &iss.ID,
+		Mode: model.DispatchModePlan, CreatedBy: "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add parent: %v", err)
+	}
+	if _, err := s.AddFollowOnDispatch(repo.ID, parent.ID, model.DispatchModeImplement, "supervisor"); err != nil {
+		t.Fatalf("add follow-on: %v", err)
+	}
+	got, err := s.FollowOnForIssue(repo.ID, iss.ID)
+	if err != nil {
+		t.Fatalf("follow-on for issue: %v", err)
+	}
+	if got == nil {
+		t.Fatal("FollowOnForIssue returned nil for live dormant row")
+	}
+	if _, err := s.AckDispatch(parent.ID, ""); err != nil {
+		t.Fatalf("ack parent: %v", err)
+	}
+	if _, err := s.PromoteReadyFollowOns(); err != nil {
+		t.Fatalf("promote: %v", err)
+	}
+	got, err = s.FollowOnForIssue(repo.ID, iss.ID)
+	if err != nil {
+		t.Fatalf("follow-on for issue (post-promote): %v", err)
+	}
+	if got != nil {
+		t.Fatal("FollowOnForIssue returned non-nil after promote — chip surface should stop showing the row")
+	}
+}
+
 // TestCancelDeliveredRejected (BACI-130) locks in the store-level
 // guard: once a dispatch is delivered (the worker has taken the Task
 // call) the row must not be cancellable, because doing so would just

@@ -43,6 +43,13 @@ type AddDispatchIn struct {
 	Payload         string
 	CreatedBy       string
 	InitialStatus   model.DispatchStatus
+	// QueuedAfterDispatchID (BACI-179), when non-nil, links this dispatch
+	// as a follow-on to the named parent dispatch. Valid only on
+	// InitialStatus = DispatchQueued; rejected otherwise. The BACI-51
+	// matcher skips queued rows whose parent isn't yet acked/cancelled;
+	// the controller's promote sweep clears the column once the
+	// predecessor settles and no open claim races in on the issue.
+	QueuedAfterDispatchID *int64
 }
 
 // AddDispatch records a new dispatch. Defaults to status='pending'
@@ -79,6 +86,13 @@ func (s *Store) AddDispatch(in AddDispatchIn) (*model.AgentDispatch, error) {
 	default:
 		return nil, fmt.Errorf("dispatch InitialStatus %q not supported (use queued or pending)", status)
 	}
+	// BACI-179: a follow-on link is only valid on dormant queued rows —
+	// a dispatch already targeted at an agent / session can't sensibly
+	// wait for a predecessor. The matcher's dormant gate keys on
+	// status='queued' AND queued_after_dispatch_id IS NOT NULL.
+	if in.QueuedAfterDispatchID != nil && status != model.DispatchQueued {
+		return nil, errors.New("queued_after_dispatch_id is only valid on queued dispatches")
+	}
 	if in.TargetSessionID != "" {
 		if _, err := ValidateSessionID(in.TargetSessionID); err != nil {
 			return nil, err
@@ -99,10 +113,11 @@ func (s *Store) AddDispatch(in AddDispatchIn) (*model.AgentDispatch, error) {
 
 	res, err := tx.Exec(`
 		INSERT INTO agent_dispatches
-		    (repo_id, target_agent_id, target_session_id, issue_id, mode, payload, status, created_by)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		    (repo_id, target_agent_id, target_session_id, issue_id, mode, payload, status, created_by, queued_after_dispatch_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		in.RepoID, nullableInt(in.TargetAgentID), in.TargetSessionID,
 		nullableInt(in.IssueID), string(in.Mode), in.Payload, string(status), actor,
+		nullableInt(in.QueuedAfterDispatchID),
 	)
 	if err != nil {
 		return nil, err
@@ -146,7 +161,8 @@ const dispatchSelect = `
 	       d.target_session_id, d.issue_id,
 	       COALESCE(r2.prefix || '-' || i.number, ''),
 	       d.mode, d.payload, d.status, d.created_by, d.created_at,
-	       d.delivered_at, d.acked_at, d.ack_note
+	       d.delivered_at, d.acked_at, d.ack_note,
+	       d.queued_after_dispatch_id
 	FROM agent_dispatches d
 	LEFT JOIN repos  r  ON r.id  = d.repo_id
 	LEFT JOIN agents a  ON a.id  = d.target_agent_id
@@ -391,11 +407,23 @@ func (s *Store) WaitingDispatchForIssue(repoID, issueID int64) (*model.AgentDisp
 // already refuses to create such queued rows, but a row created before
 // the archive (or a hand-inserted one) still needs the guard.
 func (s *Store) ListQueuedModesByRepo(repoID int64) ([]model.DispatchMode, error) {
+	// BACI-179: skip dormant follow-on rows whose predecessor isn't yet
+	// settled (acked/cancelled). Correlated NOT EXISTS — design §1
+	// picked it over a LEFT JOIN because rows with
+	// queued_after_dispatch_id IS NULL short-circuit to constant-true
+	// (no probe), and the subquery is a PK-equality lookup on the
+	// referenced parent. No new index for this gate; the sweep index
+	// (idx_dispatches_queued_after) is for the opposite-direction walk.
 	rows, err := s.DB.Query(`
 		SELECT DISTINCT d.mode FROM agent_dispatches d
 		 LEFT JOIN issues i ON d.issue_id = i.id
 		 WHERE d.repo_id = ? AND d.status = 'queued'
 		   AND (d.issue_id IS NULL OR i.archived_at IS NULL)
+		   AND NOT EXISTS (
+		     SELECT 1 FROM agent_dispatches p
+		      WHERE p.id = d.queued_after_dispatch_id
+		        AND p.status NOT IN ('acked','cancelled')
+		   )
 		 ORDER BY d.mode ASC`, repoID)
 	if err != nil {
 		return nil, err
@@ -422,9 +450,16 @@ func (s *Store) ListQueuedByRepoMode(repoID int64, mode model.DispatchMode) ([]*
 	// BACI-68: skip queued dispatches whose target issue has been
 	// archived. Same rationale as ListQueuedModesByRepo's guard. The
 	// `i` alias is already joined in dispatchSelect; reuse it.
+	// BACI-179: also skip dormant follow-ons whose predecessor isn't
+	// yet settled (see ListQueuedModesByRepo for the design choice).
 	rows, err := s.DB.Query(dispatchSelect+`
 		WHERE d.repo_id = ? AND d.mode = ? AND d.status = 'queued'
 		  AND (d.issue_id IS NULL OR i.archived_at IS NULL)
+		  AND NOT EXISTS (
+		    SELECT 1 FROM agent_dispatches p
+		     WHERE p.id = d.queued_after_dispatch_id
+		       AND p.status NOT IN ('acked','cancelled')
+		  )
 		ORDER BY d.created_at ASC, d.id ASC`, repoID, string(mode))
 	if err != nil {
 		return nil, err
@@ -578,20 +613,21 @@ func (s *Store) BindQueuedDispatch(id int64, agentID int64) (*model.AgentDispatc
 
 func scanDispatch(r rowScanner) (*model.AgentDispatch, error) {
 	var (
-		d         model.AgentDispatch
-		prefix    sql.NullString
-		agentID   sql.NullInt64
-		agentName sql.NullString
-		issueID   sql.NullInt64
-		issueKey  string
-		delivered sql.NullTime
-		acked     sql.NullTime
+		d            model.AgentDispatch
+		prefix       sql.NullString
+		agentID      sql.NullInt64
+		agentName    sql.NullString
+		issueID      sql.NullInt64
+		issueKey     string
+		delivered    sql.NullTime
+		acked        sql.NullTime
+		queuedAfter  sql.NullInt64
 	)
 	err := r.Scan(
 		&d.ID, &d.RepoID, &prefix, &agentID, &agentName,
 		&d.TargetSessionID, &issueID, &issueKey,
 		&d.Mode, &d.Payload, &d.Status, &d.CreatedBy, &d.CreatedAt,
-		&delivered, &acked, &d.AckNote,
+		&delivered, &acked, &d.AckNote, &queuedAfter,
 	)
 	if err != nil {
 		return nil, err
@@ -617,5 +653,286 @@ func scanDispatch(r rowScanner) (*model.AgentDispatch, error) {
 	if acked.Valid {
 		d.AckedAt = &acked.Time
 	}
+	if queuedAfter.Valid {
+		v := queuedAfter.Int64
+		d.QueuedAfterDispatchID = &v
+	}
 	return &d, nil
+}
+
+// AddFollowOnDispatch creates a dormant follow-on row (BACI-179) linked
+// to an open parent dispatch on the same repo. The parent must still be
+// open (queued, pending, or delivered) AND targeted at an issue —
+// follow-ons are issue-scoped, since the matcher's eventual bind
+// derives "free agent for this mode" without an issue context anyway,
+// but the controller's promote sweep needs the issue id to gate on
+// "no open claim races in". At most one dormant follow-on per issue at
+// a time (single-slot v1 — multi-step chains are explicitly out of
+// scope per the parent plan).
+//
+// Returns ErrNotFound when the parent dispatch doesn't exist; an
+// explicit error when the parent isn't open, when it has no issue,
+// when the supplied mode is unparseable, or when a dormant follow-on
+// already exists for the parent's issue. Writes no audit row — the
+// caller (typically the client wrapper QueueFollowOnDispatch) records
+// the `agent.followon.queue` entry so the audit log carries the
+// requesting actor rather than a generic store-layer attribution.
+func (s *Store) AddFollowOnDispatch(repoID, parentDispatchID int64, mode model.DispatchMode, createdBy string) (*model.AgentDispatch, error) {
+	if repoID == 0 {
+		return nil, errors.New("follow-on dispatch requires a repo")
+	}
+	if _, err := ValidateActor(createdBy); err != nil {
+		return nil, err
+	}
+	if _, err := model.ParseDispatchMode(string(mode)); err != nil {
+		return nil, err
+	}
+	if mode == "" {
+		return nil, errors.New("follow-on dispatch requires a mode")
+	}
+	parent, err := s.GetDispatch(parentDispatchID)
+	if err != nil {
+		return nil, err
+	}
+	if parent.RepoID != repoID {
+		return nil, fmt.Errorf("follow-on parent dispatch %d is in a different repo", parentDispatchID)
+	}
+	switch parent.Status {
+	case model.DispatchQueued, model.DispatchPending, model.DispatchDelivered:
+		// OK — predecessor still open. Note: queued is allowed so a
+		// supervisor can chain follow-ons onto a freshly-queued
+		// dispatch that hasn't yet bound. The matcher's NOT EXISTS
+		// gate handles both queued and pending parents identically:
+		// neither is "settled".
+	default:
+		return nil, fmt.Errorf("follow-on parent dispatch %d is %s; predecessor must still be open", parentDispatchID, parent.Status)
+	}
+	if parent.IssueID == nil {
+		return nil, fmt.Errorf("follow-on parent dispatch %d has no issue; follow-ons are issue-scoped", parentDispatchID)
+	}
+	// Single-slot per issue: only one dormant follow-on at a time.
+	existing, err := s.FollowOnForIssue(repoID, *parent.IssueID)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		return nil, fmt.Errorf("issue %s already has a follow-on dispatch (id=%d)", parent.IssueKey, existing.ID)
+	}
+	return s.AddDispatch(AddDispatchIn{
+		RepoID:                repoID,
+		IssueID:               parent.IssueID,
+		Mode:                  mode,
+		CreatedBy:             createdBy,
+		InitialStatus:         model.DispatchQueued,
+		QueuedAfterDispatchID: &parent.ID,
+	})
+}
+
+// CancelFollowOnDispatch cancels the current dormant follow-on for an
+// issue (BACI-179) — user-driven removal of a chip from the kanban.
+// Idempotent: returns (nil, nil) when there is no dormant row to
+// cancel (e.g. already promoted, already cancelled, never existed).
+// Returns the cancelled row when the cancel actually flipped one.
+// Writes no audit row — the caller records the
+// `agent.followon.cancel` entry. The orphan-cancel sweep uses
+// CancelOrphanedFollowOns instead so the per-row audit attribution
+// stays distinct.
+func (s *Store) CancelFollowOnDispatch(repoID, issueID int64) (*model.AgentDispatch, error) {
+	d, err := s.FollowOnForIssue(repoID, issueID)
+	if err != nil {
+		return nil, err
+	}
+	if d == nil {
+		return nil, nil
+	}
+	return s.CancelDispatch(d.ID)
+}
+
+// FollowOnForIssue (BACI-179) returns the current dormant follow-on
+// for an issue, or (nil, nil) when none exists. Used by the kanban
+// board assembler to fill the chip data on a card (Phase 3) and by
+// AddFollowOnDispatch to enforce the single-slot invariant. NB: the
+// returned row is the dormant one (queued_after_dispatch_id IS NOT
+// NULL); a promoted row is no longer a "follow-on" — it's a regular
+// queued dispatch heading for the matcher.
+func (s *Store) FollowOnForIssue(repoID, issueID int64) (*model.AgentDispatch, error) {
+	row := s.DB.QueryRow(dispatchSelect+`
+		WHERE d.repo_id = ? AND d.issue_id = ?
+		  AND d.status = 'queued'
+		  AND d.queued_after_dispatch_id IS NOT NULL
+		ORDER BY d.id DESC LIMIT 1`, repoID, issueID)
+	d, err := scanDispatch(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return d, err
+}
+
+// PromoteReadyFollowOns (BACI-179) is the controller's promote sweep:
+// clears queued_after_dispatch_id on every dormant row whose
+// predecessor has settled (acked OR cancelled) AND whose issue has no
+// open claim held by a live session. Returns the slice of cleared
+// rows so the caller can write per-row audit history; empty slice
+// (no error) when no row was promotable. Leader-gated by the caller.
+//
+// The second NOT EXISTS guards against a re-claim racing in between
+// predecessor-ack and the promote tick: if the same issue is already
+// being worked again, the new claim should service whatever the
+// holder needs and a follow-on bind would step on it. The
+// agent_sessions.ended_at = NULL join keeps a reaper-killed-but-not-
+// yet-released claim from blocking the promote indefinitely (mirrors
+// the live-claim check in OpenClaimsForSession).
+//
+// When issue_id IS NULL the claim EXISTS subquery short-circuits to
+// false (no claim is keyed on a NULL issue), so a follow-on whose
+// issue was hard-deleted gets promoted on the next tick — which is
+// fine: the matcher's existing path handles issue-less queued rows
+// already, and there's nothing to gate on.
+func (s *Store) PromoteReadyFollowOns() ([]*model.AgentDispatch, error) {
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	// SELECT first (inside the tx) so we can return the post-update
+	// rows with their queued_after_dispatch_id-was-NULL view to the
+	// caller. UPDATE … RETURNING is supported by modernc/sqlite but
+	// would still need a second query to hydrate the joined repo /
+	// agent / issue columns scanDispatch expects.
+	rows, err := tx.Query(`
+		SELECT d.id FROM agent_dispatches d
+		 WHERE d.status = 'queued'
+		   AND d.queued_after_dispatch_id IS NOT NULL
+		   AND NOT EXISTS (
+		     SELECT 1 FROM agent_dispatches p
+		      WHERE p.id = d.queued_after_dispatch_id
+		        AND p.status NOT IN ('acked','cancelled')
+		   )
+		   AND NOT EXISTS (
+		     SELECT 1 FROM agent_claims c
+		       JOIN agent_sessions s ON s.id = c.session_pk
+		      WHERE c.issue_id = d.issue_id
+		        AND c.released_at IS NULL
+		        AND s.ended_at IS NULL
+		   )`)
+	if err != nil {
+		return nil, err
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		// Nothing to do — release the tx and return empty.
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+	for _, id := range ids {
+		if _, err := tx.Exec(
+			`UPDATE agent_dispatches SET queued_after_dispatch_id = NULL WHERE id = ?`, id,
+		); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	out := make([]*model.AgentDispatch, 0, len(ids))
+	for _, id := range ids {
+		d, err := s.GetDispatch(id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, nil
+}
+
+// CancelOrphanedFollowOns (BACI-179) is the controller's orphan-cancel
+// sweep: flips every dormant follow-on whose issue has landed in
+// `done` or `cancelled` to status='cancelled'. Returns the slice of
+// cancelled rows so the caller can write per-row audit history; empty
+// slice (no error) when no row was orphan-cancellable. Leader-gated
+// by the caller.
+//
+// Archive (archived_at IS NOT NULL) alone does NOT trigger cancel —
+// archive is a visibility flag, not a lifecycle terminal. An
+// archived-but-still-in_progress issue could be unarchived and
+// worked; we don't want a passing archive sweep to cascade-cancel
+// follow-ons on it. The matcher's existing BACI-68 archive guard
+// already prevents binding a fresh agent to an archived issue, which
+// is the correct safety boundary.
+//
+// Rows with issue_id IS NULL are skipped: a follow-on whose issue was
+// hard-deleted (FK ON DELETE SET NULL nulled the column) has nothing
+// to be orphaned against. The promote sweep handles that case
+// instead (predecessor settles → column clears → matcher binds).
+func (s *Store) CancelOrphanedFollowOns() ([]*model.AgentDispatch, error) {
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.Query(`
+		SELECT d.id FROM agent_dispatches d
+		 WHERE d.status = 'queued'
+		   AND d.queued_after_dispatch_id IS NOT NULL
+		   AND d.issue_id IS NOT NULL
+		   AND EXISTS (
+		     SELECT 1 FROM issues i
+		      WHERE i.id = d.issue_id
+		        AND i.state IN ('done','cancelled')
+		   )`)
+	if err != nil {
+		return nil, err
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+	for _, id := range ids {
+		if _, err := tx.Exec(
+			`UPDATE agent_dispatches SET status = 'cancelled' WHERE id = ?`, id,
+		); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	out := make([]*model.AgentDispatch, 0, len(ids))
+	for _, id := range ids {
+		d, err := s.GetDispatch(id)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, nil
 }

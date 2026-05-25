@@ -136,6 +136,14 @@ type IssueFilter struct {
 	// `display.show_archived` setting being on. Single-item lookups
 	// (GetIssueByID / GetIssueByKey) always return the row regardless.
 	IncludeArchived bool
+	// HiddenFeatureSlugs (BACI-177) excludes issues whose feature row
+	// has a slug in this list — the per-feature "Show on board" toggle
+	// flipped off on the Features screen. Empty slice = no filter;
+	// unknown slugs are silently ignored (the subselect simply doesn't
+	// match any feature row). Issues with feature_id IS NULL pass
+	// through regardless; the toggle is per-feature, not per-issue,
+	// so an unattached issue can't be hidden via this path.
+	HiddenFeatureSlugs []string
 }
 
 func (s *Store) ListIssues(f IssueFilter) ([]*model.Issue, error) {
@@ -177,6 +185,25 @@ func (s *Store) ListIssues(f IssueFilter) ([]*model.Issue, error) {
 		// ?include_archived=1, or display.show_archived=true at the
 		// surface) to inflate the list.
 		where = append(where, "i.archived_at IS NULL")
+	}
+	if len(f.HiddenFeatureSlugs) > 0 {
+		// BACI-177: drop any issue whose feature_id resolves to a slug
+		// the user has hidden via the per-feature "Show on board"
+		// toggle. The set is per-repo in tui_settings (boardHiddenFeaturesKey)
+		// — the board / web / TUI surfaces all hit this same KV row.
+		// Issues with feature_id IS NULL pass through: the toggle is
+		// per-feature, so unattached issues aren't addressable.
+		ph := make([]string, len(f.HiddenFeatureSlugs))
+		for i, slug := range f.HiddenFeatureSlugs {
+			ph[i] = "?"
+			args = append(args, slug)
+		}
+		where = append(where, fmt.Sprintf(
+			`(i.feature_id IS NULL OR i.feature_id NOT IN (
+				SELECT id FROM features WHERE repo_id = i.repo_id AND slug IN (%s)
+			))`,
+			strings.Join(ph, ","),
+		))
 	}
 	q := issueSelect
 	if len(where) > 0 {

@@ -35,6 +35,17 @@ type Feature struct {
 	ArchivedAt *time.Time `json:"archived_at,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
+	// HiddenOnBoard (BACI-177) reflects the per-feature "Show on
+	// board" toggle exposed on the Features screen — true iff every
+	// kanban card belonging to this feature is hidden from the board.
+	// The flag lives in the per-repo `tui_settings` KV (not on the
+	// features row); this field is derived post-scan by callers that
+	// opt in via FeatureFilter.WithHiddenOnBoard. Defaults to false
+	// on reads that don't ask — the field never lies, it just always
+	// reads false when the caller didn't request enrichment. No
+	// omitempty: the toggle is visible (including when false) in JSON
+	// output so the React component reads it without an `?? false`.
+	HiddenOnBoard bool `json:"hidden_on_board"`
 }
 
 type Issue struct {

@@ -177,6 +177,55 @@ func (c *remoteClient) AddFeatureComment(ctx context.Context, repo *model.Repo, 
 	return &out, nil
 }
 
+// IsFeatureHiddenOnBoard (BACI-177) — GET /repos/{prefix}/features/hidden
+// and check membership client-side. One round-trip; the hidden set is
+// small (usually < 10 slugs) so it's cheaper than a dedicated
+// per-slug endpoint.
+func (c *remoteClient) IsFeatureHiddenOnBoard(ctx context.Context, repo *model.Repo, slug string) (bool, error) {
+	slugs, err := c.ListHiddenFeatureSlugs(ctx, repo)
+	if err != nil {
+		return false, err
+	}
+	for _, s := range slugs {
+		if s == slug {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// SetFeatureHiddenOnBoard (BACI-177) — PUT /repos/{prefix}/features/{slug}/hide
+// with body {hidden: bool}. Server stamps a feature.hide / feature.unhide
+// audit row.
+func (c *remoteClient) SetFeatureHiddenOnBoard(ctx context.Context, repo *model.Repo, slug string, hidden, dryRun bool) (bool, error) {
+	q := url.Values{}
+	if dryRun {
+		q.Set("dry_run", "true")
+	}
+	body := map[string]any{"hidden": hidden}
+	var out struct {
+		Hidden bool `json:"hidden"`
+	}
+	if err := c.do(ctx, http.MethodPut, "/repos/"+repo.Prefix+"/features/"+slug+"/hide", q, body, &out); err != nil {
+		return false, err
+	}
+	return out.Hidden, nil
+}
+
+// ListHiddenFeatureSlugs (BACI-177) — GET /repos/{prefix}/features/hidden.
+func (c *remoteClient) ListHiddenFeatureSlugs(ctx context.Context, repo *model.Repo) ([]string, error) {
+	var out struct {
+		Slugs []string `json:"slugs"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/repos/"+repo.Prefix+"/features/hidden", nil, nil, &out); err != nil {
+		return nil, err
+	}
+	if out.Slugs == nil {
+		out.Slugs = []string{}
+	}
+	return out.Slugs, nil
+}
+
 // DeleteFeatureComment (BACI-124) — DELETE /repos/{prefix}/features/{slug}/comments/{uuid}.
 func (c *remoteClient) DeleteFeatureComment(ctx context.Context, repo *model.Repo, in inputs.FeatureCommentRmInput, dryRun bool) (*FeatureCommentDeletePreview, int64, error) {
 	if in.CommentUUID == "" {

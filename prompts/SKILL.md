@@ -39,6 +39,7 @@ This skill orients you and states the conventions that aren't obvious from `--he
 - **Issue keys in JSON must be canonical** (`MINI-42`). The bare-number shortcut (`42`) works on the flag path only.
 - **Comment author is required** — `--as <name>` on the flag path, `"author"` on the JSON path.
 - **Validation is strict at the store boundary.** No control characters, no silent trimming of identifiers, kebab-case slugs, `http`/`https` PR URLs, unknown JSON fields rejected — malformed input fails loud rather than being normalised.
+- **Per-feature board-hide toggle (BACI-177)** is per-repo display state, not bacio state — it lives in the per-repo `tui_settings` KV alongside the TUI's feature picker, not on the features row. REST entry points: `GET /repos/{prefix}/features/hidden` returns `{slugs: []}`, and `PUT /repos/{prefix}/features/{slug}/hide` with body `{hidden: bool}` flips it (audits as `feature.hide` / `feature.unhide`). Flipping the toggle on the desktop / web Features screen is visible to the TUI on its next reload. There is no `bacio feature hide` CLI verb today — it's a display preference (same precedent as `bacio settings show-archived`).
 
 ## What's in the box
 

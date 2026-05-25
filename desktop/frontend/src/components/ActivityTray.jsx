@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { isTerminalState } from '../lib/issueState';
 import { waitingStateLabel } from '../lib/waitingLabels.ts';
 import Icon from './Icon.jsx';
+import { readCollapsed, persistCollapsed } from './activityTrayPersistence';
 
 // ActivityTray (BACI-171) — a bottom-right floating panel that narrates
 // what's just happened on the board. Position-fixed, overlays the
@@ -15,8 +16,10 @@ import Icon from './Icon.jsx';
 // the last `cards` snapshot for the diff, an `entries` state holds
 // the LIFO list, and a `dismissedRef` Set tracks keys the user has
 // dismissed (so a fresh transition on the same card after dismissal
-// re-enters). Nothing persists across reloads — a hard refresh starts
-// the tray empty, which matches "things that have happened recently".
+// re-enters). The *entries* list does not persist across reloads — a
+// hard refresh starts the tray empty, which matches "things that have
+// happened recently". The user's *collapsed/expanded preference* does
+// persist via localStorage (BACI-186) — see activityTrayPersistence.ts.
 
 // FLASH_MS is how long the row's pulse animation runs before the
 // `.is-flashing` modifier is stripped — matches the keyframe
@@ -162,7 +165,17 @@ function stateClass(column) {
 
 export default function ActivityTray({ cards }) {
   const [entries, setEntries] = useState([]);
-  const [collapsed, setCollapsed] = useState(false);
+  // Seed from localStorage via the lazy initialiser so the first paint
+  // already reflects the user's saved preference (BACI-186); writes go
+  // through setCollapsedPersisted below.
+  const [collapsed, setCollapsed] = useState(readCollapsed);
+  // setCollapsedPersisted is the single write seam — every flip of the
+  // collapse state updates React and writes through to localStorage so
+  // the next reload picks it up.
+  const setCollapsedPersisted = (v) => {
+    setCollapsed(v);
+    persistCollapsed(v);
+  };
   // Track which entry keys are currently flashing — toggled per entry
   // rather than re-rendering the whole list on every flash on/off.
   const [flashingKeys, setFlashingKeys] = useState(() => new Set());
@@ -358,7 +371,7 @@ export default function ActivityTray({ cards }) {
       <button
         type="button"
         className="mk-tray-badge mk-pill mk-status-doing"
-        onClick={() => setCollapsed(false)}
+        onClick={() => setCollapsedPersisted(false)}
         title="Show activity tray"
       >
         Activity · {entries.length}
@@ -374,7 +387,7 @@ export default function ActivityTray({ cards }) {
         <button
           type="button"
           className="mk-icbtn mk-tray-collapse"
-          onClick={() => setCollapsed(true)}
+          onClick={() => setCollapsedPersisted(true)}
           title="Minimise activity tray"
           aria-label="Minimise activity tray"
         >

@@ -758,7 +758,11 @@ export default function App() {
         </ErrorBoundary>
       ) : activeView === 'features' ? (
         <ErrorBoundary headline="Something went wrong in Features" label="The Features view crashed">
-          <FeaturesView activeBoard={activeBoard} />
+          {/* BACI-177: refresh the cached board cards when the user
+              flips the per-feature "Show on board" toggle so the
+              change is visible on the next nav back to the board
+              without waiting for the 10s poll. */}
+          <FeaturesView activeBoard={activeBoard} onChangeHidden={refreshCards} />
         </ErrorBoundary>
       ) : activeView === 'agents' ? (
         <ErrorBoundary headline="Something went wrong in Agents" label="The Agents view crashed">

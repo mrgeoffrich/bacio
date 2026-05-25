@@ -116,6 +116,13 @@ func (b *boardView) openFeaturePicker() {
 
 // persistHiddenFeatures writes the current hidden-features set to disk;
 // errors surface in the footer rather than crashing the loop.
+//
+// BACI-177: the per-repo `board.hidden_features` KV is now shared with
+// the desktop / web Features-screen toggle (PUT /repos/{p}/features/{slug}/hide).
+// Flipping the toggle on either surface is visible to the other on
+// the next boardView.reload() tick — the TUI's `hiddenFeatures`
+// in-memory cache is re-loaded by `LoadHiddenFeatures` on every
+// reload, so no extra wiring is needed here for the cross-surface sync.
 func (b *boardView) persistHiddenFeatures() {
 	if err := b.store.SaveHiddenFeatures(b.repo.ID, b.hiddenFeatures); err != nil {
 		b.err = err

@@ -430,6 +430,189 @@ func TestControllerStartStartupSweepStandbyNoop(t *testing.T) {
 	c.Stop()
 }
 
+// TestFollowOnSweepIfLeaderRespectsLease (BACI-179) mirrors the other
+// …IfLeader lease tests: standby is silent, leader runs against an
+// empty store without warning. The combined helper is one tick that
+// runs orphan-cancel then promote; an empty store has nothing to
+// touch on either pass.
+func TestFollowOnSweepIfLeaderRespectsLease(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.Open(filepath.Join(dir, "db.sqlite"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	standby, _ := newFakeElector(t, false)
+	FollowOnSweepIfLeader(s, standby, log)
+	if buf.Len() != 0 {
+		t.Fatalf("standby follow-on sweep should be silent, got: %s", buf.String())
+	}
+
+	leaderEl, _ := newFakeElector(t, true)
+	FollowOnSweepIfLeader(s, leaderEl, log)
+	if strings.Contains(buf.String(), "failed") {
+		t.Fatalf("leader follow-on sweep against empty store should not log a failure, got: %s", buf.String())
+	}
+}
+
+// TestFollowOnSweepIfLeader_LeaderWrites (BACI-179) drives the
+// integrated promote path: a pending parent + a dormant follow-on +
+// ack the parent + run the sweep as leader. One
+// `agent.followon.promote` audit row must land, attributed to
+// ControllerActor, with the issue key surfaced in TargetLabel and
+// the dispatch id in Details. Mirrors TestMatchIfLeaderWritesBindAudit's
+// shape so the two sweep-audit paths read consistently.
+func TestFollowOnSweepIfLeader_LeaderWrites(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.Open(filepath.Join(dir, "db.sqlite"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	repo, err := s.CreateRepo("FLOW", "followon-repo", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+	iss, err := s.CreateIssue(repo.ID, nil, "promote me", "", model.StateTodo, nil)
+	if err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	ag, _, err := s.UpsertAgent("brave-otter@claude.test", true)
+	if err != nil {
+		t.Fatalf("upsert agent: %v", err)
+	}
+	parent, err := s.AddDispatch(store.AddDispatchIn{
+		RepoID: repo.ID, TargetAgentID: &ag.ID, IssueID: &iss.ID,
+		Mode: model.DispatchModePlan, Payload: "plan", CreatedBy: "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add parent: %v", err)
+	}
+	follow, err := s.AddFollowOnDispatch(repo.ID, parent.ID, model.DispatchModeImplement, "supervisor")
+	if err != nil {
+		t.Fatalf("add follow-on: %v", err)
+	}
+	if _, err := s.AckDispatch(parent.ID, ""); err != nil {
+		t.Fatalf("ack parent: %v", err)
+	}
+
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	leaderEl, _ := newFakeElector(t, true)
+
+	FollowOnSweepIfLeader(s, leaderEl, log)
+
+	// The promote sweep should have cleared queued_after_dispatch_id.
+	got, err := s.GetDispatch(follow.ID)
+	if err != nil {
+		t.Fatalf("get follow: %v", err)
+	}
+	if got.QueuedAfterDispatchID != nil {
+		t.Fatalf("post-sweep queued_after_dispatch_id = %v, want nil", got.QueuedAfterDispatchID)
+	}
+
+	rows, err := s.ListHistory(store.HistoryFilter{Op: "agent.followon.promote"})
+	if err != nil {
+		t.Fatalf("ListHistory: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("agent.followon.promote rows = %d, want 1", len(rows))
+	}
+	row := rows[0]
+	if row.Actor != model.ControllerActor {
+		t.Fatalf("promote row Actor = %q, want %q", row.Actor, model.ControllerActor)
+	}
+	if row.Kind != "agent" {
+		t.Fatalf("promote row Kind = %q, want agent", row.Kind)
+	}
+	if row.TargetID == nil || *row.TargetID != follow.ID {
+		t.Fatalf("promote row TargetID = %v, want %d", row.TargetID, follow.ID)
+	}
+	if row.TargetLabel != iss.Key {
+		t.Fatalf("promote row TargetLabel = %q, want %q", row.TargetLabel, iss.Key)
+	}
+	if !strings.Contains(row.Details, "issue="+iss.Key) {
+		t.Fatalf("promote row Details = %q, missing issue= clause", row.Details)
+	}
+	if !strings.Contains(row.Details, "mode=implement") {
+		t.Fatalf("promote row Details = %q, missing mode=implement clause", row.Details)
+	}
+}
+
+// TestFollowOnSweepIfLeader_OrphanCancelWrites (BACI-179) — the orphan
+// path: dormant follow-on + issue lands in done before the
+// predecessor settles. The sweep cancels the row and emits one
+// `agent.followon.cancel` row attributed to ControllerActor.
+func TestFollowOnSweepIfLeader_OrphanCancelWrites(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.Open(filepath.Join(dir, "db.sqlite"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	repo, err := s.CreateRepo("ORPH", "orphan-repo", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+	iss, err := s.CreateIssue(repo.ID, nil, "cancel me", "", model.StateTodo, nil)
+	if err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	ag, _, err := s.UpsertAgent("clever-fox@claude.test", true)
+	if err != nil {
+		t.Fatalf("upsert agent: %v", err)
+	}
+	parent, err := s.AddDispatch(store.AddDispatchIn{
+		RepoID: repo.ID, TargetAgentID: &ag.ID, IssueID: &iss.ID,
+		Mode: model.DispatchModePlan, CreatedBy: "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add parent: %v", err)
+	}
+	follow, err := s.AddFollowOnDispatch(repo.ID, parent.ID, model.DispatchModeImplement, "supervisor")
+	if err != nil {
+		t.Fatalf("add follow-on: %v", err)
+	}
+	if err := s.SetIssueState(iss.ID, model.StateDone); err != nil {
+		t.Fatalf("set issue done: %v", err)
+	}
+
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	leaderEl, _ := newFakeElector(t, true)
+
+	FollowOnSweepIfLeader(s, leaderEl, log)
+
+	got, err := s.GetDispatch(follow.ID)
+	if err != nil {
+		t.Fatalf("get follow: %v", err)
+	}
+	if got.Status != model.DispatchCancelled {
+		t.Fatalf("follow status post-sweep = %q, want cancelled", got.Status)
+	}
+
+	rows, err := s.ListHistory(store.HistoryFilter{Op: "agent.followon.cancel"})
+	if err != nil {
+		t.Fatalf("ListHistory: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("agent.followon.cancel rows = %d, want 1", len(rows))
+	}
+	row := rows[0]
+	if row.Actor != model.ControllerActor {
+		t.Fatalf("orphan-cancel row Actor = %q, want %q", row.Actor, model.ControllerActor)
+	}
+	if row.TargetID == nil || *row.TargetID != follow.ID {
+		t.Fatalf("orphan-cancel row TargetID = %v, want %d", row.TargetID, follow.ID)
+	}
+}
+
 // TestNilGuards: every helper tolerates nil inputs without panicking —
 // this matches the "background work must never crash the host" contract.
 func TestNilGuards(t *testing.T) {
@@ -438,6 +621,7 @@ func TestNilGuards(t *testing.T) {
 	PingIfLeader(nil, nil, nil)
 	ArchiveSweepIfLeader(nil, nil, nil)
 	SyncIfLeader(nil, nil, nil)
+	FollowOnSweepIfLeader(nil, nil, nil)
 }
 
 // TestControllerStartStop: Start spins the three goroutines and Stop
