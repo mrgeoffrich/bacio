@@ -51,6 +51,7 @@ export {
     RenumberEntryDTO,
     RepoLinkResultDTO,
     SetupSyncIn,
+    ShippedIssueDTO,
     SyncPreferencesDTO,
     SyncRegistryDTO,
     SyncRepoDTO,

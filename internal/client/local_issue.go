@@ -603,3 +603,21 @@ func (c *localClient) ClaimNextIssue(ctx context.Context, repo *model.Repo, slug
 	}
 	return iss, nil
 }
+
+// ListShippedIssues (BACI-187) is the local-backend shipping-log read.
+// repo is required (the popover is per-repo); the caller's f.RepoID is
+// overwritten with repo.ID so the surface is unambiguous.
+func (c *localClient) ListShippedIssues(ctx context.Context, repo *model.Repo, f store.ShippedFilter) ([]*model.Issue, error) {
+	if repo == nil {
+		return nil, fmt.Errorf("ListShippedIssues requires a repo")
+	}
+	f.RepoID = &repo.ID
+	rows, err := c.store.ListShippedIssues(f)
+	if err != nil {
+		return nil, err
+	}
+	if rows == nil {
+		rows = []*model.Issue{}
+	}
+	return rows, nil
+}

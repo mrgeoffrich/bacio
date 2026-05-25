@@ -1,0 +1,112 @@
+package store
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/mrgeoffrich/bacio/internal/model"
+)
+
+// ShippedFilter scopes the BACI-187 shipping-log read. RepoID is
+// required (the popover is per-repo, same as every other surface);
+// Since clamps the window to a lower bound on `terminal_at` (omit for
+// "as far back as Limit allows"); Limit caps the result count.
+type ShippedFilter struct {
+	RepoID *int64
+	Since  *time.Time
+	Limit  int
+}
+
+const (
+	// shippedDefaultLimit is the popover's default row count when the
+	// caller passes Limit=0. Matches the desktop popover's first-open
+	// fetch — twenty rows is enough for the "what landed this week"
+	// glance the ticket asked for without overflowing the menu.
+	shippedDefaultLimit = 20
+	// shippedMaxLimit caps the result count regardless of caller
+	// request. Past this the operator wants the History tab — keeps the
+	// SQL bounded and the JSON payload modest.
+	shippedMaxLimit = 200
+)
+
+// ListShippedIssues returns issues that landed in the Done column —
+// `state = 'done' AND terminal_at IS NOT NULL` — newest-first by
+// `terminal_at`. The popover that drives this read deliberately
+// excludes cancelled rows: this is a "what shipped" view, not a
+// "what closed" view (see BACI-187 plan, Out of scope).
+//
+// terminal_at is the BACI-138 timestamp stamped on every transition
+// into a terminal state. The migration backfill seeds the column from
+// updated_at for pre-BACI-138 rows; LWW edits on a closed issue after
+// the backfill can drift the column forward of the actual close time,
+// which is an acceptable quirk for a momentum-tracking surface
+// (documented in the design doc).
+//
+// Uses idx_issues_terminal_at; the EXPLAIN QUERY PLAN assertion in
+// the store test pins the index against a future regression.
+func (s *Store) ListShippedIssues(f ShippedFilter) ([]*model.Issue, error) {
+	limit := f.Limit
+	if limit <= 0 {
+		limit = shippedDefaultLimit
+	}
+	if limit > shippedMaxLimit {
+		limit = shippedMaxLimit
+	}
+	var (
+		where = []string{
+			"i.state = ?",
+			"i.terminal_at IS NOT NULL",
+		}
+		args = []any{string(model.StateDone)}
+	)
+	if f.RepoID != nil {
+		where = append(where, "i.repo_id = ?")
+		args = append(args, *f.RepoID)
+	}
+	if f.Since != nil {
+		where = append(where, "i.terminal_at >= ?")
+		args = append(args, f.Since.UTC().Format("2006-01-02 15:04:05"))
+	}
+	q := issueSelect + ` WHERE `
+	for i, w := range where {
+		if i > 0 {
+			q += " AND "
+		}
+		q += w
+	}
+	q += fmt.Sprintf(` ORDER BY i.terminal_at DESC, i.id DESC LIMIT %d`, limit)
+
+	rows, err := s.DB.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*model.Issue
+	var ids []int64
+	for rows.Next() {
+		iss, err := scanIssue(rows)
+		if err != nil {
+			return nil, err
+		}
+		// Strip the heavy description column — the popover only renders
+		// key + title + relative date + tags + (optional) PR chip. Same
+		// rule the default IssueFilter applies.
+		iss.Description = ""
+		out = append(out, iss)
+		ids = append(ids, iss.ID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	tagMap, err := s.loadTagsForIssues(ids)
+	if err != nil {
+		return nil, err
+	}
+	for _, iss := range out {
+		iss.Tags = tagMap[iss.ID]
+		if iss.Tags == nil {
+			iss.Tags = []string{}
+		}
+	}
+	return out, nil
+}

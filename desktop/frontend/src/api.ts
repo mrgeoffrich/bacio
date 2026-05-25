@@ -45,6 +45,7 @@ import {
   RenumberEntryDTO,
   RenameEntryDTO,
   RepoLinkResultDTO,
+  ShippedIssueDTO,
 } from '../bindings/github.com/mrgeoffrich/bacio/desktop';
 import { ClaimDTO } from '../bindings/github.com/mrgeoffrich/bacio/internal/agentcards';
 // BACI-145: re-export the WaitingState / WaitingKind enums from the
@@ -53,7 +54,7 @@ import { ClaimDTO } from '../bindings/github.com/mrgeoffrich/bacio/internal/agen
 // scattered through the kanban code).
 import { WaitingState, WaitingKind } from '../bindings/github.com/mrgeoffrich/bacio/internal/boardcards';
 
-export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, ArchivePreferencesDTO, WaitingState, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO, SyncSetupDTO, CollisionPreviewDTO, RenumberEntryDTO, RenameEntryDTO, RepoLinkResultDTO };
+export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, ArchivePreferencesDTO, WaitingState, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO, SyncSetupDTO, CollisionPreviewDTO, RenumberEntryDTO, RenameEntryDTO, RepoLinkResultDTO, ShippedIssueDTO };
 
 // BACI-108: cross-transport aliases — components import from `./api`
 // and stay unaware of whether they're on the Wails or HTTP seam. The
@@ -261,6 +262,39 @@ export async function cancelWaitingDispatch(
   }
 }
 
+// queueFollowOnDispatch (BACI-180) attaches a dormant follow-on dispatch
+// to the issue's in-flight (parent) dispatch — the kanban chip
+// click handler. The backend resolves the parent via WaitingDispatchForIssue
+// and re-runs the state-gate so the UI can't queue something the matcher
+// would reject. Errors (no open dispatch, state-gate, single-slot) surface
+// as Error.message and bubble through reportError() in App.jsx.
+export async function queueFollowOnDispatch(
+  repoPrefix: string,
+  issueKey: string,
+  mode: string,
+): Promise<DispatchDTO> {
+  try {
+    return await BoardService.QueueFollowOnDispatch(repoPrefix, issueKey, mode);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// cancelFollowOnDispatch (BACI-180) removes the dormant follow-on attached
+// to an issue — the chip-remove click handler. Idempotent on the backend:
+// an issue with no dormant follow-on returns a zero DispatchDTO and no
+// error, so a stale click doesn't surface as a failure.
+export async function cancelFollowOnDispatch(
+  repoPrefix: string,
+  issueKey: string,
+): Promise<DispatchDTO> {
+  try {
+    return await BoardService.CancelFollowOnDispatch(repoPrefix, issueKey);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
 // setIssueState changes an issue's state — backs the board's drag-to-move,
 // persisting the column change so it survives the next refresh poll.
 export async function setIssueState(
@@ -417,6 +451,23 @@ export async function listHistory(
 ): Promise<HistoryPage> {
   try {
     return await HistoryService.ListHistory(repoPrefix, page, pageSize);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// listShippedIssues (BACI-187) returns the topbar shipping-log popover
+// rows for one repo, newest-first. `sinceDays` clamps the window (0 =
+// the server's default ~30 days); `limit` caps the row count (0 = the
+// server's default 20, max 100). The HTTP twin in api.http.ts MUST
+// keep the same name + shape so callers stay transport-agnostic.
+export async function listShippedIssues(
+  repoPrefix: string,
+  sinceDays: number,
+  limit: number,
+): Promise<ShippedIssueDTO[]> {
+  try {
+    return await BoardService.ListShipped(repoPrefix, sinceDays, limit);
   } catch (err) {
     throw normalize(err);
   }

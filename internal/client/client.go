@@ -215,6 +215,17 @@ type Client interface {
 	// issue.unarchive) under the resolved actor.
 	ArchiveIssue(ctx context.Context, repo *model.Repo, key string, dryRun bool) (*model.Issue, error)
 	UnarchiveIssue(ctx context.Context, repo *model.Repo, key string, dryRun bool) (*model.Issue, error)
+	// ListShippedIssues (BACI-187) returns recently-shipped issues
+	// (state='done' AND terminal_at IS NOT NULL), newest-first by
+	// terminal_at. Per-repo only; the popover the call backs is a
+	// per-repo surface. f.RepoID is ignored here — the wrapper sets
+	// it from `repo.ID` so the call shape matches the other per-repo
+	// readers in this interface. The local backend delegates to
+	// store.ListShippedIssues; the remote backend hits
+	// GET /repos/{prefix}/shipped (DTOs decoded back into a sparse
+	// *model.Issue — pull request URLs and other DTO-side fields are
+	// not part of model.Issue and are dropped on the remote path).
+	ListShippedIssues(ctx context.Context, repo *model.Repo, f store.ShippedFilter) ([]*model.Issue, error)
 
 	// ----- Comments / relations / PRs / tags -----
 	ListComments(ctx context.Context, repo *model.Repo, key string) ([]*model.Comment, error)
@@ -536,6 +547,25 @@ type Client interface {
 	// case is now expressed as a queued dispatch sitting in the per-
 	// (repo, mode) FIFO until the matcher binds it.
 	AutoDispatchIssue(ctx context.Context, repo *model.Repo, issueKey, mode string, dryRun bool) (*model.AgentDispatch, error)
+
+	// QueueFollowOnDispatch (BACI-179 / BACI-180) queues a dormant
+	// follow-on dispatch against the in-flight (parent) dispatch on an
+	// issue: re-resolves the parent via WaitingDispatchForIssue, re-runs
+	// the mode's state-gate against the issue's current state (parity
+	// with AutoDispatchIssue), and rejects when there is no open
+	// dispatch to follow on from. Single-slot per issue — a second call
+	// against the same issue while a dormant follow-on already exists is
+	// rejected at the store boundary. Writes one `agent.followon.queue`
+	// audit row on success, attributed to the calling actor.
+	QueueFollowOnDispatch(ctx context.Context, repo *model.Repo, issueKey, mode string, dryRun bool) (*model.AgentDispatch, error)
+
+	// CancelFollowOnDispatch (BACI-179 / BACI-180) cancels the dormant
+	// follow-on attached to an issue. Idempotent: returns (nil, nil)
+	// when there is no dormant row to cancel (e.g. already promoted,
+	// already cancelled, never existed) so a stale UI click doesn't
+	// error. Writes one `agent.followon.cancel` audit row when a row
+	// actually flipped, attributed to the calling actor.
+	CancelFollowOnDispatch(ctx context.Context, repo *model.Repo, issueKey string, dryRun bool) (*model.AgentDispatch, error)
 
 	// WaitingDispatchForIssue returns the active (queued / pending /
 	// delivered) dispatch targeting an issue, or (nil, nil) when none

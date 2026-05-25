@@ -239,3 +239,83 @@ func TestListAgentsWaiting(t *testing.T) {
 // pickFreeAgent moved to client.autoPickFreeAgent (BACI-40) so REST,
 // CLI, and desktop share it. The unit-test for the picker now lives in
 // internal/client; this file no longer needs to exercise it.
+
+// fakeShippedClient is a narrow stub for ListShipped — it serves the
+// GetRepoByPrefix + ListShippedIssues + ListPRs trio the popover hits
+// and nothing else.
+type fakeShippedClient struct {
+	client.Client
+	repo    *model.Repo
+	shipped []*model.Issue
+	prs     map[string][]*model.PullRequest
+}
+
+func (f *fakeShippedClient) GetRepoByPrefix(context.Context, string) (*model.Repo, error) {
+	return f.repo, nil
+}
+func (f *fakeShippedClient) ListShippedIssues(_ context.Context, _ *model.Repo, _ store.ShippedFilter) ([]*model.Issue, error) {
+	return f.shipped, nil
+}
+func (f *fakeShippedClient) ListPRs(_ context.Context, _ *model.Repo, key string) ([]*model.PullRequest, error) {
+	if f.prs == nil {
+		return nil, nil
+	}
+	return f.prs[key], nil
+}
+
+// TestListShipped — BACI-187. Two done issues + one open issue;
+// ListShipped surfaces only the done rows, in the order the fake
+// returns them (newest-first is the store's responsibility, asserted
+// in internal/store/shipped_test.go). Locks in the Wails binding's
+// (issue → DTO) mapping including the first-PR-only chip rule.
+func TestListShipped(t *testing.T) {
+	repo := &model.Repo{ID: 1, Prefix: "TEST"}
+	stamp := time.Date(2026, 5, 20, 9, 0, 0, 0, time.UTC)
+	older := time.Date(2026, 5, 15, 9, 0, 0, 0, time.UTC)
+	shipped := []*model.Issue{
+		{Key: "TEST-2", Title: "newer", State: model.StateDone, TerminalAt: &stamp, Tags: []string{"feat"}},
+		{Key: "TEST-1", Title: "older", State: model.StateDone, TerminalAt: &older, Tags: []string{}},
+	}
+	prs := map[string][]*model.PullRequest{
+		"TEST-2": {
+			{URL: "https://example.com/pr/2-first"},
+			{URL: "https://example.com/pr/2-second"},
+		},
+	}
+	svc := NewBoardService(&fakeShippedClient{repo: repo, shipped: shipped, prs: prs})
+
+	rows, err := svc.ListShipped("TEST", 30, 20)
+	if err != nil {
+		t.Fatalf("ListShipped: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("got %d rows, want 2", len(rows))
+	}
+	if rows[0].Key != "TEST-2" || rows[0].Title != "newer" {
+		t.Fatalf("row 0 = %+v, want TEST-2/newer", rows[0])
+	}
+	if !rows[0].TerminalAt.Equal(stamp) {
+		t.Fatalf("row 0 TerminalAt = %v, want %v", rows[0].TerminalAt, stamp)
+	}
+	if rows[0].PRURL != "https://example.com/pr/2-first" {
+		t.Errorf("row 0 PR chip = %q, want first PR url", rows[0].PRURL)
+	}
+	if rows[1].PRURL != "" {
+		t.Errorf("row 1 PR chip = %q, want empty (no PRs attached)", rows[1].PRURL)
+	}
+	if rows[0].Tags == nil {
+		t.Errorf("row 0 Tags must not be nil — popover iterates unconditionally")
+	}
+}
+
+// TestListShippedRejectsAllRepos — the popover is per-repo by design;
+// calling ListShipped with "" or "all" must surface a clear error.
+func TestListShippedRejectsAllRepos(t *testing.T) {
+	svc := NewBoardService(&fakeShippedClient{repo: &model.Repo{Prefix: "TEST"}})
+	if _, err := svc.ListShipped("", 0, 0); err == nil {
+		t.Error("ListShipped(\"\") = nil, want error (per-repo only)")
+	}
+	if _, err := svc.ListShipped("all", 0, 0); err == nil {
+		t.Error("ListShipped(\"all\") = nil, want error (per-repo only)")
+	}
+}

@@ -912,6 +912,41 @@ func TestAssembleSortsCompletedColumnsByTerminalAt(t *testing.T) {
 	}
 }
 
+// TestAssembleTerminalAtThreaded — BACI-187. The shipping-log topbar
+// pill derives its "last 7 days of done" count client-side from the
+// already-polled `cards` array, so BoardCard must carry the issue's
+// terminal_at through. A done card with terminal_at set surfaces it on
+// the wire; an open card with terminal_at nil leaves the field absent
+// (omitempty drops it).
+func TestAssembleTerminalAtThreaded(t *testing.T) {
+	repo := &model.Repo{ID: 1, Prefix: "TEST"}
+	stamp := time.Date(2026, 5, 20, 9, 0, 0, 0, time.UTC)
+	issues := []*model.Issue{
+		{Key: "TEST-1", State: model.StateDone, Title: "done", TerminalAt: &stamp},
+		{Key: "TEST-2", State: model.StateTodo, Title: "open"},
+	}
+	f := &fakeClient{repo: repo, issues: issues}
+	cards, err := Assemble(context.Background(), f, repo, false, nil)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	byKey := map[string]BoardCard{}
+	for _, c := range cards {
+		byKey[c.Key] = c
+	}
+	done := byKey["TEST-1"]
+	if done.TerminalAt == nil {
+		t.Fatalf("TEST-1 TerminalAt = nil, want %v", stamp)
+	}
+	if !done.TerminalAt.Equal(stamp) {
+		t.Errorf("TEST-1 TerminalAt = %v, want %v", *done.TerminalAt, stamp)
+	}
+	open := byKey["TEST-2"]
+	if open.TerminalAt != nil {
+		t.Errorf("TEST-2 TerminalAt = %v, want nil (open card)", *open.TerminalAt)
+	}
+}
+
 // TestDescriptionExcerpt (BACI-171) pins the per-card excerpt
 // truncation the ActivityTray feeds into its entry rows: empty
 // descriptions stay empty (so the BoardCard's omitempty drops the

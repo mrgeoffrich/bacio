@@ -13,6 +13,7 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/git"
 	"github.com/mrgeoffrich/bacio/internal/model"
+	"github.com/mrgeoffrich/bacio/internal/store"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -206,6 +207,22 @@ type IssueDetail struct {
 	// Taken is the derived "an agent is actively holding this" signal —
 	// true iff Claimants has an open (unreleased) claim.
 	Taken bool `json:"taken"`
+}
+
+// ShippedIssueDTO is one row in the BACI-187 shipping-log popover.
+// Lean by design — the popover renders key + title + a relative date
+// chip + tags + an optional PR chip. The DTO shape mirrors the HTTP
+// /repos/{prefix}/shipped response so the React side imports the
+// same type from either api.ts (Wails) or api.http.ts (HTTP) without
+// reshape.
+type ShippedIssueDTO struct {
+	Key          string    `json:"key"`
+	Title        string    `json:"title"`
+	TerminalAt   time.Time `json:"terminalAt"`
+	Tags         []string  `json:"tags"`
+	FeatureSlug  string    `json:"featureSlug,omitempty"`
+	FeatureEmoji string    `json:"featureEmoji,omitempty"`
+	PRURL        string    `json:"prUrl,omitempty"`
 }
 
 // ClaimantDTO, ClaimDTO, SessionTodoDTO, DispatchDTO, and AgentCard
@@ -413,6 +430,63 @@ func (b *BoardService) ListCards(repoPrefix string) ([]BoardCard, error) {
 		}
 	}
 	return boardcards.Assemble(ctx, b.client, repo, showArchived, hiddenSlugs)
+}
+
+// ListShipped (BACI-187) returns the recently-shipped issues for one
+// repo, newest-first. sinceDays clamps the window (0 = the popover's
+// default ~30 days); limit caps the row count (0 = the popover's
+// default 20, max 100). Sibling of ListCards in shape — one repo, one
+// trip, lean rows the popover renders without follow-up fetches.
+func (b *BoardService) ListShipped(repoPrefix string, sinceDays, limit int) ([]ShippedIssueDTO, error) {
+	ctx := context.Background()
+	if repoPrefix == "" || repoPrefix == "all" {
+		return nil, fmt.Errorf("ListShipped: a repo is required (cross-repo popover is out of scope)")
+	}
+	repo, err := b.client.GetRepoByPrefix(ctx, repoPrefix)
+	if err != nil {
+		return nil, err
+	}
+	f := store.ShippedFilter{}
+	if limit > 0 {
+		if limit > 100 {
+			limit = 100
+		}
+		f.Limit = limit
+	}
+	if sinceDays > 0 {
+		cutoff := time.Now().Add(-time.Duration(sinceDays) * 24 * time.Hour)
+		f.Since = &cutoff
+	}
+	issues, err := b.client.ListShippedIssues(ctx, repo, f)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ShippedIssueDTO, 0, len(issues))
+	for _, iss := range issues {
+		tags := iss.Tags
+		if tags == nil {
+			tags = []string{}
+		}
+		row := ShippedIssueDTO{
+			Key:          iss.Key,
+			Title:        iss.Title,
+			Tags:         tags,
+			FeatureSlug:  iss.FeatureSlug,
+			FeatureEmoji: iss.FeatureEmoji,
+		}
+		if iss.TerminalAt != nil {
+			row.TerminalAt = *iss.TerminalAt
+		}
+		// First PR by insertion order — same rule as the HTTP handler.
+		// A list error is non-fatal — the row still renders without
+		// the PR chip.
+		prs, perr := b.client.ListPRs(ctx, repo, iss.Key)
+		if perr == nil && len(prs) > 0 {
+			row.PRURL = prs[0].URL
+		}
+		out = append(out, row)
+	}
+	return out, nil
 }
 
 // GetIssue returns the full issue-drawer payload for one issue. repoPrefix
@@ -814,6 +888,47 @@ func (b *BoardService) AnswerSessionQuestion(id int64, answers map[string]any) (
 // receives a tool error on the next channel poll tick.
 func (b *BoardService) CancelSessionQuestion(id int64) (*model.SessionQuestion, error) {
 	return b.client.CancelSessionQuestion(context.Background(), id, false)
+}
+
+// QueueFollowOnDispatch (BACI-180) attaches a dormant follow-on
+// dispatch to the issue's in-flight (parent) dispatch. Mirrors
+// DispatchIssue's shape — same DTO out, repo prefix derivable from
+// the issue key — but routes through client.QueueFollowOnDispatch so
+// the gate + parent-resolution path stays in one place. Errors when
+// there is no open dispatch on the issue, when the state-gate
+// rejects, or when a dormant follow-on already exists (single-slot
+// per issue).
+func (b *BoardService) QueueFollowOnDispatch(repoPrefix, issueKey, mode string) (DispatchDTO, error) {
+	ctx := context.Background()
+	repo, err := b.resolveRepoForKey(ctx, repoPrefix, issueKey)
+	if err != nil {
+		return DispatchDTO{}, err
+	}
+	d, err := b.client.QueueFollowOnDispatch(ctx, repo, issueKey, mode, false)
+	if err != nil {
+		return DispatchDTO{}, err
+	}
+	return dispatchDTO(d), nil
+}
+
+// CancelFollowOnDispatch (BACI-180) is the chip-remove handler: cancel
+// the dormant follow-on attached to an issue. Idempotent — a no-op on
+// an issue with no dormant follow-on (returns the zero DispatchDTO and
+// nil error) so a stale UI click doesn't surface as an error.
+func (b *BoardService) CancelFollowOnDispatch(repoPrefix, issueKey string) (DispatchDTO, error) {
+	ctx := context.Background()
+	repo, err := b.resolveRepoForKey(ctx, repoPrefix, issueKey)
+	if err != nil {
+		return DispatchDTO{}, err
+	}
+	d, err := b.client.CancelFollowOnDispatch(ctx, repo, issueKey, false)
+	if err != nil {
+		return DispatchDTO{}, err
+	}
+	if d == nil {
+		return DispatchDTO{}, nil
+	}
+	return dispatchDTO(d), nil
 }
 
 // CancelWaitingDispatch (BACI-51) is the spinner-as-cancel-button

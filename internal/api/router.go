@@ -93,6 +93,11 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("GET /history", d.handleHistoryAll)
 	mux.HandleFunc("GET /repos/{prefix}/history", d.handleHistoryRepo)
 
+	// BACI-187: shipping-log popover — list of recently-done issues,
+	// newest-first, sibling of /history. Per-repo only; cross-repo is
+	// deliberately out of scope (matches the rest of the surface).
+	mux.HandleFunc("GET /repos/{prefix}/shipped", d.handleShippedList)
+
 	// Web UI bundle (BACI-30, gated by BACI-72): serve the browser-deployed
 	// React build at /ui/, with a 301 from the unslashed /ui to keep the
 	// SPA's base path consistent. The bundle is embedded at compile time
@@ -158,6 +163,15 @@ func newRouter(d deps) http.Handler {
 	// desktop per-card action button and the CLI's target-less
 	// `bacio agent dispatch <key> --mode <stage>`.
 	mux.HandleFunc("POST /repos/{prefix}/issues/{key}/dispatch", d.handleIssueDispatch)
+	// BACI-180 follow-on dispatch (issue-scoped): attach a dormant
+	// follow-on to the issue's in-flight (parent) dispatch (POST),
+	// remove it again (DELETE). Mirrors the CLI verbs `bacio agent
+	// queue-followon` / `bacio agent cancel-followon` and the Wails
+	// `BoardService.QueueFollowOnDispatch` / `CancelFollowOnDispatch`
+	// methods — all three routes funnel through client.QueueFollowOnDispatch
+	// / CancelFollowOnDispatch.
+	mux.HandleFunc("POST /repos/{prefix}/issues/{key}/followon", d.handleIssueQueueFollowOn)
+	mux.HandleFunc("DELETE /repos/{prefix}/issues/{key}/followon", d.handleIssueCancelFollowOn)
 	// BACI-51 spinner-as-cancel UI read: returns the active queued /
 	// pending / delivered dispatch on an issue, or 404 when none. Used
 	// by the desktop + (future) web cancel button to resolve the

@@ -238,6 +238,49 @@ func (c *remoteClient) WaitingDispatchForIssue(ctx context.Context, repo *model.
 	return nil, remoteAgentNotSupported("waiting-dispatch-for-issue")
 }
 
+// QueueFollowOnDispatch (BACI-180) targets the REST follow-on route,
+// sending only the mode in the body — the issue is in the URL and the
+// server resolves the parent dispatch + re-checks the state-gate.
+// Returns the dormant queued row on success, or the projected row when
+// dryRun is set.
+func (c *remoteClient) QueueFollowOnDispatch(ctx context.Context, repo *model.Repo, issueKey, mode string, dryRun bool) (*model.AgentDispatch, error) {
+	if repo == nil {
+		return nil, fmt.Errorf("QueueFollowOnDispatch requires a repo")
+	}
+	q := url.Values{}
+	if dryRun {
+		q.Set("dry_run", "true")
+	}
+	body := inputs.AgentQueueFollowOnInput{IssueKey: issueKey, Mode: mode}
+	var out model.AgentDispatch
+	if err := c.do(ctx, http.MethodPost, "/repos/"+repo.Prefix+"/issues/"+issueKey+"/followon", q, body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// CancelFollowOnDispatch (BACI-180) targets the REST follow-on route
+// with DELETE. The server returns 200 + a JSON-null body when there
+// was no dormant follow-on to cancel (idempotent no-op) — the remote
+// client surfaces that as (nil, nil) to match the local client.
+func (c *remoteClient) CancelFollowOnDispatch(ctx context.Context, repo *model.Repo, issueKey string, dryRun bool) (*model.AgentDispatch, error) {
+	if repo == nil {
+		return nil, fmt.Errorf("CancelFollowOnDispatch requires a repo")
+	}
+	q := url.Values{}
+	if dryRun {
+		q.Set("dry_run", "true")
+	}
+	// Use a pointer destination so the server's JSON-null body decodes
+	// as a nil *AgentDispatch (idempotent no-op) rather than the
+	// zero-value struct.
+	var out *model.AgentDispatch
+	if err := c.do(ctx, http.MethodDelete, "/repos/"+repo.Prefix+"/issues/"+issueKey+"/followon", q, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // InflightByModeForRepo (BACI-145) has no REST parity today — the
 // kanban / brief assembler runs in-process on the desktop or `bacio
 // web` server, both of which talk to the local store. A future

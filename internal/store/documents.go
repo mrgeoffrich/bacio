@@ -94,8 +94,10 @@ func (s *Store) ListDocuments(f DocumentFilter) ([]*model.Document, error) {
 }
 
 // SetDocumentArchived stamps or clears the document's archived_at
-// column (BACI-68). Same idempotent / no-updated_at-bump semantics as
-// SetIssueArchived.
+// column (BACI-68). Same idempotent semantics as SetIssueArchived.
+// updated_at is bumped by the bump_document_updated_on_archive_change
+// schema trigger (BACI-189); see the SetIssueArchived doc-comment for
+// the rationale.
 func (s *Store) SetDocumentArchived(documentID int64, archived bool) error {
 	if archived {
 		_, err := s.DB.Exec(`UPDATE documents SET archived_at = CURRENT_TIMESTAMP WHERE id = ? AND archived_at IS NULL`, documentID)

@@ -199,6 +199,27 @@ export interface BoardCard {
   // present. Absent in older payloads so the renderer must null-
   // check (`card.blockedBy?.length ?? 0`).
   blockedBy?: BoardCardBlocker[];
+  // BACI-187: the BACI-138 terminal_at stamp — non-null on done /
+  // cancelled cards, absent on open cards. The topbar Shipped pill
+  // derives its "last 7 days" count client-side from this field on
+  // the already-polled cards array; the binding twin in api.ts mirrors
+  // the same wire shape.
+  terminalAt?: string;
+}
+
+// ShippedIssueDTO (BACI-187) is one row in the topbar shipping-log
+// popover. Mirrors desktop/boardservice.go:ShippedIssueDTO and the
+// /repos/{prefix}/shipped wire shape exactly — the React-side
+// ShippedPopover imports the type from `./api` (this file in web
+// mode, api.ts in desktop mode) without reshape.
+export interface ShippedIssueDTO {
+  key: string;
+  title: string;
+  terminalAt: string;
+  tags: string[];
+  featureSlug?: string;
+  featureEmoji?: string;
+  prUrl?: string;
 }
 
 export interface CommentDTO {
@@ -1201,6 +1222,62 @@ export async function cancelWaitingDispatch(
   }
 }
 
+// queueFollowOnDispatch (BACI-180) attaches a dormant follow-on dispatch
+// to the issue's in-flight (parent) dispatch in web mode. Mirrors
+// dispatchIssue's POST shape — the server resolves the parent via
+// WaitingDispatchForIssue and re-runs the state-gate. Errors (no open
+// dispatch, state-gate mismatch, single-slot rejection) surface as the
+// usual error envelope through reportError() in App.jsx.
+export async function queueFollowOnDispatch(
+  repoPrefix: string,
+  issueKey: string,
+  mode: string,
+): Promise<DispatchDTO> {
+  if (!repoPrefix || repoPrefix === 'all') {
+    const i = issueKey.lastIndexOf('-');
+    if (i <= 0) throw new Error(`invalid issue key: ${issueKey}`);
+    repoPrefix = issueKey.slice(0, i);
+  }
+  const raw = await call<ApiDispatch>(
+    `/repos/${repoPrefix}/issues/${issueKey}/followon`,
+    { method: 'POST', body: { issue_key: issueKey, mode } },
+  );
+  return reshapeDispatch(raw);
+}
+
+// cancelFollowOnDispatch (BACI-180) removes the dormant follow-on
+// attached to an issue. Idempotent on the backend — a DELETE against
+// an issue with no dormant follow-on returns 200 with a JSON-null body,
+// which we surface as the zero DispatchDTO (no error). Mirrors the
+// Wails seam's CancelFollowOnDispatch behaviour.
+export async function cancelFollowOnDispatch(
+  repoPrefix: string,
+  issueKey: string,
+): Promise<DispatchDTO> {
+  if (!repoPrefix || repoPrefix === 'all') {
+    const i = issueKey.lastIndexOf('-');
+    if (i <= 0) throw new Error(`invalid issue key: ${issueKey}`);
+    repoPrefix = issueKey.slice(0, i);
+  }
+  const raw = await call<ApiDispatch | null>(
+    `/repos/${repoPrefix}/issues/${issueKey}/followon`,
+    { method: 'DELETE' },
+  );
+  if (!raw) {
+    return {
+      id: 0,
+      issueKey: '',
+      targetAgent: '',
+      mode: '',
+      status: '',
+      payload: '',
+      createdBy: '',
+      createdAt: '',
+    } as DispatchDTO;
+  }
+  return reshapeDispatch(raw);
+}
+
 interface ApiBoardCard {
   // setIssueState returns the model.Issue; same reshape as listCards.
   // waiting_for_claim is on the model.Issue wire shape but the
@@ -1480,6 +1557,27 @@ export async function listHistory(
     createdAt: e.created_at,
   }));
   return { entries, page, pageSize, hasMore };
+}
+
+// listShippedIssues (BACI-187) is the HTTP twin of api.ts's
+// listShippedIssues. Keep the parameter list and return type in
+// lockstep with the desktop binding — the React-side ShippedPopover
+// imports the same name from `./api` in both modes.
+export async function listShippedIssues(
+  repoPrefix: string,
+  sinceDays: number,
+  limit: number,
+): Promise<ShippedIssueDTO[]> {
+  if (!repoPrefix || repoPrefix === 'all') {
+    throw new Error('select a repository to view its shipping log');
+  }
+  const query: Record<string, string | number> = {};
+  if (sinceDays > 0) query.since = `${sinceDays}d`;
+  if (limit > 0) query.limit = limit;
+  const rows = await call<ShippedIssueDTO[]>(`/repos/${repoPrefix}/shipped`, { query });
+  // The server returns `[]` on an empty repo (never null), but be
+  // defensive in case the call helper ever surfaces null on 204.
+  return rows ?? [];
 }
 
 interface ApiDocView {

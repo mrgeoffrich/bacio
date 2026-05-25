@@ -686,6 +686,31 @@ export default function App() {
     return { available, busy };
   }, [agents]);
 
+  // shippedCount (BACI-187) feeds the topbar "Shipped · N" pill —
+  // count of done cards whose terminal_at falls in the last 7 days,
+  // derived from the already-polled `cards` array so we avoid a
+  // separate poll loop. The popover itself fetches its rows on first
+  // open via the listShippedIssues endpoint.
+  //
+  // Caveat: cards are filtered server-side by the per-feature
+  // "Show on board" toggle (BACI-177), so this count undercounts when
+  // a hidden feature has done issues in the window. The popover's own
+  // fetch deliberately does NOT honour that toggle — "shipped" is
+  // about what landed, not what's on the board — so the popover may
+  // legitimately list rows the pill count didn't include. Documented
+  // and intentional; don't try to "fix" the mismatch.
+  const shippedCount = React.useMemo(() => {
+    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    let n = 0;
+    for (const c of cards) {
+      if (c.column !== 'done') continue;
+      if (!c.terminalAt) continue;
+      const t = Date.parse(c.terminalAt);
+      if (!Number.isNaN(t) && t >= cutoff) n++;
+    }
+    return n;
+  }, [cards]);
+
   return (
     <TooltipProvider delayDuration={250} skipDelayDuration={150}>
     <div className="mk-app">
@@ -714,6 +739,8 @@ export default function App() {
         openIssueKey={openIssueKey}
         onCloseIssue={closeIssue}
         agentCounts={agentCounts}
+        shippedCount={shippedCount}
+        onOpenIssue={openIssueByKey}
       />
       {loading ? (
         <div className="mk-app-state">Loading…</div>
