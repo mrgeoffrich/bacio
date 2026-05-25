@@ -34,6 +34,11 @@ import {
   LeaderStatusDTO,
   PromptTemplateDTO,
   BoardPreferencesDTO,
+  SyncPreferencesDTO,
+  SyncRegistryDTO,
+  SyncRepoDTO,
+  MemberProjectDTO,
+  UnsyncedProjectDTO,
 } from '../bindings/github.com/mrgeoffrich/bacio/desktop';
 import { ClaimDTO } from '../bindings/github.com/mrgeoffrich/bacio/internal/agentcards';
 // BACI-145: re-export the WaitingState / WaitingKind enums from the
@@ -42,7 +47,18 @@ import { ClaimDTO } from '../bindings/github.com/mrgeoffrich/bacio/internal/agen
 // scattered through the kanban code).
 import { WaitingState, WaitingKind } from '../bindings/github.com/mrgeoffrich/bacio/internal/boardcards';
 
-export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, BoardPreferencesDTO, WaitingState };
+export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, BoardPreferencesDTO, WaitingState, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO };
+
+// BACI-108: cross-transport aliases — components import from `./api`
+// and stay unaware of whether they're on the Wails or HTTP seam. The
+// web bundle's api.http.ts ships the same names with parallel TS-only
+// shapes (the bundle can't load the Wails-generated bindings — see the
+// note at the top of api.http.ts).
+export type SyncPreferences = SyncPreferencesDTO;
+export type SyncRegistry = SyncRegistryDTO;
+export type SyncRepoEntry = SyncRepoDTO;
+export type MemberProject = MemberProjectDTO;
+export type UnsyncedProject = UnsyncedProjectDTO;
 export { WaitingKind };
 
 function normalize(err: unknown): Error {
@@ -539,6 +555,42 @@ export async function setDisplayPreferences(
 ): Promise<DisplayPreferencesDTO> {
   try {
     return await SettingsService.SetDisplayPreferences(showArchived);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// BACI-89 / BACI-108: sync.background_enabled toggle. Same shape as
+// the board-preferences pair; lives behind a dedicated Wails endpoint
+// so the standalone Sync view can read / write it without coupling to
+// the board / display preference plumbing.
+
+export async function getSyncPreferences(): Promise<SyncPreferencesDTO> {
+  try {
+    return await SettingsService.GetSyncPreferences();
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+export async function setSyncPreferences(
+  backgroundEnabled: boolean,
+): Promise<SyncPreferencesDTO> {
+  try {
+    return await SettingsService.SetSyncPreferences(backgroundEnabled);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// getSyncRegistry returns the BACI-108 sync-repo registry payload —
+// one entry per `sync_remotes` row with the projects each carries,
+// plus the residual tracked project repos that don't yet have a
+// sync.remote in their .bacio/config.yaml. Backs the standalone Sync
+// view.
+export async function getSyncRegistry(): Promise<SyncRegistryDTO> {
+  try {
+    return await SettingsService.GetSyncRegistry();
   } catch (err) {
     throw normalize(err);
   }

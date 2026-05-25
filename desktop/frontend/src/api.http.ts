@@ -1643,6 +1643,29 @@ export async function setBoardPreferences(hideEmptyColumns: boolean): Promise<Bo
   return { hideEmptyColumns: res.hide_empty_columns };
 }
 
+// ---------- Sync preferences (BACI-89 / BACI-108) ----------
+//
+// The BACI-89 sync.background_enabled toggle, exposed for the
+// standalone Sync view (BACI-108). Same shape as the board / display
+// preferences pairs; lives behind /settings/sync-preferences.
+
+export interface SyncPreferences {
+  backgroundEnabled: boolean;
+}
+
+export async function getSyncPreferences(): Promise<SyncPreferences> {
+  const res = await call<{ background_enabled: boolean }>('/settings/sync-preferences');
+  return { backgroundEnabled: res.background_enabled };
+}
+
+export async function setSyncPreferences(backgroundEnabled: boolean): Promise<SyncPreferences> {
+  const res = await call<{ background_enabled: boolean }>('/settings/sync-preferences', {
+    method: 'PUT',
+    body: { background_enabled: backgroundEnabled },
+  });
+  return { backgroundEnabled: res.background_enabled };
+}
+
 // ---------- Display preferences (BACI-68) ----------
 //
 // display.show_archived global toggle — when on, default lists / board
