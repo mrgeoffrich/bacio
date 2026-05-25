@@ -193,6 +193,7 @@ func ArchiveSweepIfLeader(s *store.Store, el *leader.Elector, log *slog.Logger) 
 	loggerOrDefault(log).Info("bacio: archive sweep stamped rows",
 		"issues", res.IssuesArchived,
 		"features", res.FeaturesArchived,
+		"features_auto_stated", res.FeaturesAutoStated,
 		"documents", res.DocumentsArchived,
 	)
 	entry := model.HistoryEntry{
@@ -201,12 +202,29 @@ func ArchiveSweepIfLeader(s *store.Store, el *leader.Elector, log *slog.Logger) 
 		Kind:  "sweep",
 		// Compact, parseable details — mirrors detailsForSweep in
 		// internal/client/local_archive.go so a reader sees identical
-		// shape regardless of which surface kicked the sweep.
-		Details: fmt.Sprintf(`{"issues":%d,"features":%d,"documents":%d}`,
-			res.IssuesArchived, res.FeaturesArchived, res.DocumentsArchived),
+		// shape regardless of which surface kicked the sweep. BACI-199
+		// added the features_auto_stated field.
+		Details: fmt.Sprintf(`{"issues":%d,"features":%d,"features_auto_stated":%d,"documents":%d}`,
+			res.IssuesArchived, res.FeaturesArchived, res.FeaturesAutoStated, res.DocumentsArchived),
 	}
 	if err := s.RecordHistory(entry); err != nil {
 		loggerOrDefault(log).Warn("bacio: failed to record archive.sweep audit", "err", err)
+	}
+	// BACI-199: a sibling `feature.auto-state` summary row when at
+	// least one feature was promoted to a terminal state on this tick.
+	// Mirrors the manual `bacio archive sweep` verb's writer in
+	// internal/client/local_archive.go::ArchiveSweep.
+	if res.FeaturesAutoStated > 0 {
+		stateEntry := model.HistoryEntry{
+			Actor: model.ControllerActor,
+			Op:    "feature.auto-state",
+			Kind:  "sweep",
+			Details: fmt.Sprintf(`{"done":%d,"cancelled":%d}`,
+				res.FeaturesAutoStatedDone, res.FeaturesAutoStatedCancelled),
+		}
+		if err := s.RecordHistory(stateEntry); err != nil {
+			loggerOrDefault(log).Warn("bacio: failed to record feature.auto-state audit", "err", err)
+		}
 	}
 }
 

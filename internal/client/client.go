@@ -179,6 +179,15 @@ type Client interface {
 	// the feature row (BACI-68). Same semantics as ArchiveIssue.
 	ArchiveFeature(ctx context.Context, repo *model.Repo, slug string, dryRun bool) (*model.Feature, error)
 	UnarchiveFeature(ctx context.Context, repo *model.Repo, slug string, dryRun bool) (*model.Feature, error)
+	// SetFeatureState (BACI-199) writes the feature's three-state
+	// column (active|done|cancelled) AND sets the sticky bit
+	// `state_manual = 1` so the leader-elected archive-sweep's
+	// auto-completion pass leaves the row alone until the user pins a
+	// new value. Records an audit row (`feature.state`) under the
+	// resolved actor; sweep-driven writes never reach this method (the
+	// store-level Store.SetFeatureState carries the manual=false
+	// surface for the sweep, by design).
+	SetFeatureState(ctx context.Context, repo *model.Repo, slug string, state model.FeatureState, dryRun bool) (*model.Feature, error)
 	// IsFeatureHiddenOnBoard / SetFeatureHiddenOnBoard / ListHiddenFeatureSlugs
 	// (BACI-177) expose the per-feature "Show on board" toggle that
 	// drives the Features-screen affordance. The flag is per-repo

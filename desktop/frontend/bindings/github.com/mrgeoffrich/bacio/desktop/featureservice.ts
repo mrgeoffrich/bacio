@@ -71,6 +71,20 @@ export function SetFeatureEmoji(repoPrefix: string, slug: string, emoji: string)
 }
 
 /**
+ * SetFeatureState (BACI-199) flips the feature's three-state column
+ * and returns the refreshed FeatureDetail. Sets state_manual = true
+ * so the leader-elected archive-sweep's auto-completion pass leaves
+ * the row alone until the user pins a new value. Parses the state
+ * string at the boundary so a typo surfaces as a clear error from
+ * the client.
+ */
+export function SetFeatureState(repoPrefix: string, slug: string, state: string): $CancellablePromise<$models.FeatureDetail> {
+    return $Call.ByID(2810734914, repoPrefix, slug, state).then(($result: any) => {
+        return $$createType0($result);
+    });
+}
+
+/**
  * SetHiddenOnBoard (BACI-177) flips the per-feature "Show on board"
  * toggle and returns the refreshed FeatureDetail. true hides every
  * kanban card belonging to this feature on this machine; false makes

@@ -313,6 +313,129 @@ func TestArchiveSweepIfLeaderWritesAudit(t *testing.T) {
 	}
 }
 
+// TestArchiveSweepIfLeaderWritesFeatureAutoStateAudit (BACI-199)
+// seeds two features whose children's terminal states drive the
+// auto-completion pass: one with two `done` children (should promote
+// to `done`) and one with two `cancelled` children (should promote
+// to `cancelled`). The leader-driven sweep emits one
+// `feature.auto-state` row carrying `{"done":1,"cancelled":1}` in
+// Details, alongside the existing `archive.sweep` summary row whose
+// payload also carries `"features_auto_stated":2`.
+func TestArchiveSweepIfLeaderWritesFeatureAutoStateAudit(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.Open(filepath.Join(dir, "db.sqlite"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	repo, err := s.CreateRepo("AS", "as", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+	// Feature D: two done children → expect promotion to done.
+	featD, _ := s.CreateFeature(repo.ID, "feat-d", "Feat D", "", "")
+	if _, err := s.CreateIssue(repo.ID, &featD.ID, "d1", "", model.StateDone, nil); err != nil {
+		t.Fatalf("create d1: %v", err)
+	}
+	if _, err := s.CreateIssue(repo.ID, &featD.ID, "d2", "", model.StateDone, nil); err != nil {
+		t.Fatalf("create d2: %v", err)
+	}
+	// Feature C: two cancelled children → expect promotion to cancelled.
+	featC, _ := s.CreateFeature(repo.ID, "feat-c", "Feat C", "", "")
+	if _, err := s.CreateIssue(repo.ID, &featC.ID, "c1", "", model.StateCancelled, nil); err != nil {
+		t.Fatalf("create c1: %v", err)
+	}
+	if _, err := s.CreateIssue(repo.ID, &featC.ID, "c2", "", model.StateCancelled, nil); err != nil {
+		t.Fatalf("create c2: %v", err)
+	}
+
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	leaderEl, _ := newFakeElector(t, true)
+	ArchiveSweepIfLeader(s, leaderEl, log)
+
+	// One feature.auto-state row, Details = {"done":1,"cancelled":1}.
+	stateRows, err := s.ListHistory(store.HistoryFilter{Op: "feature.auto-state"})
+	if err != nil {
+		t.Fatalf("ListHistory feature.auto-state: %v", err)
+	}
+	if len(stateRows) != 1 {
+		t.Fatalf("feature.auto-state rows = %d, want 1", len(stateRows))
+	}
+	row := stateRows[0]
+	if row.Actor != model.ControllerActor {
+		t.Fatalf("feature.auto-state Actor = %q, want %q", row.Actor, model.ControllerActor)
+	}
+	if row.Kind != "sweep" {
+		t.Fatalf("feature.auto-state Kind = %q, want sweep", row.Kind)
+	}
+	if !strings.Contains(row.Details, `"done":1`) || !strings.Contains(row.Details, `"cancelled":1`) {
+		t.Fatalf("feature.auto-state Details = %q, want done:1 + cancelled:1", row.Details)
+	}
+
+	// archive.sweep summary row carries features_auto_stated:2.
+	sumRows, err := s.ListHistory(store.HistoryFilter{Op: "archive.sweep"})
+	if err != nil {
+		t.Fatalf("ListHistory archive.sweep: %v", err)
+	}
+	if len(sumRows) != 1 {
+		t.Fatalf("archive.sweep rows = %d, want 1", len(sumRows))
+	}
+	if !strings.Contains(sumRows[0].Details, `"features_auto_stated":2`) {
+		t.Fatalf("archive.sweep Details missing features_auto_stated:2: %q", sumRows[0].Details)
+	}
+
+	// And the actual feature rows landed at the expected states.
+	gotD, _ := s.GetFeatureByID(featD.ID)
+	if gotD.State != model.FeatureStateDone {
+		t.Fatalf("feat-d state = %q, want done", gotD.State)
+	}
+	gotC, _ := s.GetFeatureByID(featC.ID)
+	if gotC.State != model.FeatureStateCancelled {
+		t.Fatalf("feat-c state = %q, want cancelled", gotC.State)
+	}
+}
+
+// TestArchiveSweepIfLeaderSkipsFeatureAutoStateAuditWhenZero confirms
+// the silent-when-zero contract: a leader-driven sweep that didn't
+// promote any features writes ZERO `feature.auto-state` rows (no
+// noise on a quiet DB).
+func TestArchiveSweepIfLeaderSkipsFeatureAutoStateAuditWhenZero(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.Open(filepath.Join(dir, "db.sqlite"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	// Need at least one archivable issue so the sweep writes its
+	// summary row — otherwise it bails before the new sibling row
+	// could possibly fire either way and the test is vacuous.
+	repo, _ := s.CreateRepo("AS", "as", t.TempDir(), "")
+	iss, _ := s.CreateIssue(repo.ID, nil, "i", "", model.StateDone, nil)
+	if _, err := s.DB.Exec(
+		`UPDATE issues SET terminal_at = datetime('now','-30 days') WHERE id = ?`,
+		iss.ID,
+	); err != nil {
+		t.Fatalf("backdate: %v", err)
+	}
+
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	leaderEl, _ := newFakeElector(t, true)
+	ArchiveSweepIfLeader(s, leaderEl, log)
+
+	rows, err := s.ListHistory(store.HistoryFilter{Op: "feature.auto-state"})
+	if err != nil {
+		t.Fatalf("ListHistory: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("feature.auto-state rows = %d on a sweep that didn't promote any features, want 0", len(rows))
+	}
+}
+
 // TestControllerStartRunsArchiveSweepOnStartup (BACI-175) pins the
 // sweep-on-startup pass. A short-lived process that exits before the
 // ArchiveSweepInterval ticker fires must still archive overdue rows on

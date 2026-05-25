@@ -503,6 +503,11 @@ export interface FeatureSummary {
   // in that case. Mirrors FeatureDetail.emoji so both surfaces share
   // the same glyph BACI-172 paints on every kanban card.
   emoji: string;
+  // BACI-199: three-state column on the feature row — `active`
+  // (default), `done` (delivered) or `cancelled` (abandoned). The
+  // Features panel renders a state pill so a glance distinguishes
+  // work in flight from delivered / abandoned work.
+  state: string;
   updatedAt: string;
   // BACI-177: per-feature "Show on board" toggle state. When true,
   // every kanban card belonging to this feature is hidden from the
@@ -534,6 +539,12 @@ export interface FeatureDetail {
   // BACI-172: per-feature emoji rendered on every kanban card under
   // this feature. Empty when none is set.
   emoji: string;
+  // BACI-199: three-state column on the feature row + sticky bit.
+  // The drawer's segmented control reads `state` to highlight the
+  // active button and `stateManual` to flag rows pinned against the
+  // auto-completion sweep.
+  state: string;
+  stateManual: boolean;
   createdAt: string;
   updatedAt: string;
   issues: FeatureLinkedIssue[];
@@ -1446,6 +1457,12 @@ interface ApiFeature {
   // absent on pre-BACI-172 features (or features with no glyph
   // set); model.Feature serialises with omitempty.
   emoji?: string;
+  // BACI-199: three-state column + sticky bit. Always present
+  // in JSON (no omitempty on model.Feature). Pre-BACI-199 servers
+  // (no column wired yet) leave these absent — `state ?? 'active'`
+  // is the safe default.
+  state?: string;
+  state_manual?: boolean;
   created_at: string;
   updated_at: string;
   // BACI-177: per-feature "Show on board" toggle state. Always
@@ -1464,6 +1481,7 @@ export async function listFeatures(repoPrefix: string): Promise<FeatureSummary[]
     slug: f.slug,
     title: f.title,
     emoji: f.emoji ?? '',
+    state: f.state ?? 'active',
     updatedAt: f.updated_at,
     hiddenOnBoard: !!f.hidden_on_board,
   }));
@@ -1493,6 +1511,8 @@ export async function getFeature(repoPrefix: string, slug: string): Promise<Feat
     title: f.title,
     description: f.description ?? '',
     emoji: f.emoji ?? '',
+    state: f.state ?? 'active',
+    stateManual: !!f.state_manual,
     createdAt: f.created_at,
     updatedAt: f.updated_at,
     issues: (view.issues ?? []).map(iss => ({
@@ -1529,6 +1549,25 @@ export async function setFeatureEmoji(
     method: 'PATCH',
     body: { slug, emoji },
   });
+  return getFeature(repoPrefix, slug);
+}
+
+// setFeatureState (BACI-199) flips the feature's three-state column
+// and returns the refreshed FeatureDetail. The handler stamps the
+// sticky bit so the leader-elected archive-sweep's auto-completion
+// pass leaves the row alone until the user pins a new value.
+export async function setFeatureState(
+  repoPrefix: string,
+  slug: string,
+  state: string,
+): Promise<FeatureDetail> {
+  if (!repoPrefix || repoPrefix === 'all') {
+    throw new Error('select a repository to edit a feature');
+  }
+  await call<ApiFeature>(
+    `/repos/${repoPrefix}/features/${slug}/state`,
+    { method: 'PUT', body: { slug, state } },
+  );
   return getFeature(repoPrefix, slug);
 }
 

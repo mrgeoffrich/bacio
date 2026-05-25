@@ -13,13 +13,16 @@ import (
 )
 
 // ArchiveSweep runs the BACI-68 archive sweep on demand — the same
-// three SQL passes the leader-elected Controller runs. The dry-run
-// path runs the same UPDATEs inside a transaction and rolls back, so
-// the returned counts preview exactly what a real sweep would have
-// archived without modifying any rows or emitting an audit entry.
-// On a wet run, records an `archive.sweep` audit row with the
-// per-pass counts when at least one row was archived (a no-op sweep
-// produces no audit noise).
+// three SQL passes the leader-elected Controller runs, plus the
+// BACI-199 pass 1.5 (feature auto-completion). The dry-run path runs
+// the same UPDATEs inside a transaction and rolls back, so the
+// returned counts preview exactly what a real sweep would have
+// archived/auto-stated without modifying any rows or emitting an
+// audit entry. On a wet run, records an `archive.sweep` audit row
+// with the per-pass counts when at least one row was touched (a no-op
+// sweep produces no audit noise); when the BACI-199 pass auto-stated
+// at least one feature, a sibling `feature.auto-state` row is written
+// too — same shape as the leader-driven controller emits.
 func (c *localClient) ArchiveSweep(ctx context.Context, dryRun bool) (store.ArchiveSweepResult, error) {
 	res, err := c.store.ArchiveSweep(dryRun)
 	if err != nil {
@@ -32,14 +35,32 @@ func (c *localClient) ArchiveSweep(ctx context.Context, dryRun bool) (store.Arch
 			Details: detailsForSweep(res),
 		})
 	}
+	if !dryRun && res.FeaturesAutoStated > 0 {
+		c.recordOp(model.HistoryEntry{
+			Op:      "feature.auto-state",
+			Kind:    "sweep",
+			Details: detailsForFeatureAutoState(res),
+		})
+	}
 	return res, nil
 }
 
 func detailsForSweep(r store.ArchiveSweepResult) string {
 	// Compact, parseable details string — readable in `bacio history`
-	// without needing the JSON formatter.
-	return fmt.Sprintf(`{"issues":%d,"features":%d,"documents":%d}`,
-		r.IssuesArchived, r.FeaturesArchived, r.DocumentsArchived)
+	// without needing the JSON formatter. BACI-199 added the
+	// features_auto_stated field — the sibling `feature.auto-state`
+	// row carries the per-destination breakdown.
+	return fmt.Sprintf(`{"issues":%d,"features":%d,"features_auto_stated":%d,"documents":%d}`,
+		r.IssuesArchived, r.FeaturesArchived, r.FeaturesAutoStated, r.DocumentsArchived)
+}
+
+// detailsForFeatureAutoState (BACI-199) is the per-destination
+// breakdown the `feature.auto-state` audit row carries. Mirrors the
+// leader-driven controller's writer so a reader sees identical shape
+// regardless of which surface kicked the sweep.
+func detailsForFeatureAutoState(r store.ArchiveSweepResult) string {
+	return fmt.Sprintf(`{"done":%d,"cancelled":%d}`,
+		r.FeaturesAutoStatedDone, r.FeaturesAutoStatedCancelled)
 }
 
 // GetDisplayShowArchived reads the BACI-68 global toggle.

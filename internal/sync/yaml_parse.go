@@ -65,6 +65,18 @@ type ParsedFeature struct {
 	// when the feature is live; present (RFC3339 UTC) when archived.
 	// Pointer so omitempty actually omits the key on emit.
 	ArchivedAt *time.Time `yaml:"archived_at,omitempty" json:"archived_at,omitempty"`
+	// State (BACI-199) round-trips the three-state column on the
+	// feature row. Pointer-of-string with omitempty so live `active`
+	// features stay byte-identical on disk to the pre-BACI-199 shape
+	// — the LWW gate would otherwise churn on every existing
+	// feature.yaml after the schema bump. The importer treats a nil
+	// pointer as "active" so a hand-written feature.yaml without the
+	// key still imports cleanly.
+	State *string `yaml:"state,omitempty" json:"state,omitempty"`
+	// StateManual (BACI-199) round-trips the sticky-bit. Omitempty so
+	// the default (false) stays off-disk — same churn-avoidance
+	// rationale as State.
+	StateManual bool `yaml:"state_manual,omitempty" json:"state_manual,omitempty"`
 }
 
 // ParsedRef is a {label, uuid} cross-reference. Both fields are

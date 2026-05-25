@@ -361,6 +361,38 @@ func (c *localClient) ListHiddenFeatureSlugs(ctx context.Context, repo *model.Re
 	return out, nil
 }
 
+// SetFeatureState (BACI-199) flips the feature's three-state column
+// and stamps the sticky bit so the auto-completion sweep leaves the
+// row alone. Records a `feature.state` audit row with Details of the
+// form "old → new" — same shape as SetIssueState.
+func (c *localClient) SetFeatureState(ctx context.Context, repo *model.Repo, slug string, state model.FeatureState, dryRun bool) (*model.Feature, error) {
+	feat, err := c.store.GetFeatureBySlug(repo.ID, slug)
+	if err != nil {
+		return nil, err
+	}
+	if dryRun {
+		projected := *feat
+		projected.State = state
+		projected.StateManual = true
+		return &projected, nil
+	}
+	oldState := feat.State
+	if err := c.store.SetFeatureState(feat.ID, state, true); err != nil {
+		return nil, err
+	}
+	updated, err := c.store.GetFeatureByID(feat.ID)
+	if err != nil {
+		return nil, err
+	}
+	c.recordOp(model.HistoryEntry{
+		RepoID: &feat.RepoID, RepoPrefix: repo.Prefix,
+		Op: "feature.state", Kind: "feature",
+		TargetID: &updated.ID, TargetLabel: updated.Slug,
+		Details: fmt.Sprintf("%s → %s", oldState, state),
+	})
+	return updated, nil
+}
+
 func (c *localClient) setFeatureArchived(ctx context.Context, repo *model.Repo, slug string, archived, dryRun bool, op string) (*model.Feature, error) {
 	feat, err := c.store.GetFeatureBySlug(repo.ID, slug)
 	if err != nil {

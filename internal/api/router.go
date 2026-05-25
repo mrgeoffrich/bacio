@@ -48,6 +48,10 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("PATCH /repos/{prefix}/features/{slug}", d.handleFeatureEdit)
 	mux.HandleFunc("DELETE /repos/{prefix}/features/{slug}", d.handleFeatureDelete)
 	mux.HandleFunc("PUT /repos/{prefix}/features/{slug}/hide", d.handleFeatureHide)
+	// BACI-199: per-feature three-state column. PUT to align with the
+	// issue-side `/issues/{key}/state` shape; archive / unarchive
+	// remain orthogonal under /archive + /unarchive.
+	mux.HandleFunc("PUT /repos/{prefix}/features/{slug}/state", d.handleFeatureState)
 	mux.HandleFunc("GET /repos/{prefix}/features/{slug}/plan", d.handleFeaturePlan)
 	mux.HandleFunc("GET /repos/{prefix}/features/{slug}/next", d.handleFeatureNextPeek)
 	mux.HandleFunc("POST /repos/{prefix}/features/{slug}/next", d.handleFeatureNextClaim)

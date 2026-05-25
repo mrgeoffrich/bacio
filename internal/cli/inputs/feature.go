@@ -43,6 +43,13 @@ type FeatureUnarchiveInput struct {
 	Slug string `json:"slug"`
 }
 
+// FeatureStateInput is the payload for `bacio feature state --json`
+// (BACI-199). Both fields are required.
+type FeatureStateInput struct {
+	Slug  string `json:"slug"`
+	State string `json:"state"`
+}
+
 // FeatureCommentAddInput is the payload for `bacio feature comment add
 // --json` (BACI-124). The feature-scoped mirror of CommentAddInput —
 // feature_slug replaces issue_key because feature comments live under a

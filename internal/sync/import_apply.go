@@ -21,23 +21,41 @@ func (e *Engine) applyFeatures(tx *sql.Tx, sr *scannedRepo, repo *model.Repo, re
 	for _, uuid := range uuids {
 		sf := sr.Features[uuid]
 		hash := contentHashFeature(sf)
+		// BACI-199: state/state_manual round-trip. nil pointer on the
+		// parsed side decodes as the column default `active` / 0; an
+		// explicit value in feature.yaml overrides. ParseFeatureState
+		// runs at the apply boundary so a malformed value loudly fails
+		// the whole import rather than falling through to the schema
+		// CHECK and surfacing as a less-readable "constraint failed".
+		incomingState := model.FeatureStateActive
+		if sf.Parsed.State != nil && *sf.Parsed.State != "" {
+			parsed, perr := model.ParseFeatureState(*sf.Parsed.State)
+			if perr != nil {
+				return fmt.Errorf("feature %s state: %w", sf.Parsed.Slug, perr)
+			}
+			incomingState = parsed
+		}
+		incomingStateManual := sf.Parsed.StateManual
 		var existingID int64
-		var existingSlug, existingTitle, existingDescription, existingEmoji string
+		var existingSlug, existingTitle, existingDescription, existingEmoji, existingState string
+		var existingStateManual int64
 		var existingUpdatedAt time.Time
 		var existingArchivedAt sql.NullTime
 		err := tx.QueryRow(
-			`SELECT id, slug, title, description, emoji, updated_at, archived_at FROM features WHERE uuid = ?`,
+			`SELECT id, slug, title, description, emoji, state, state_manual, updated_at, archived_at FROM features WHERE uuid = ?`,
 			uuid,
-		).Scan(&existingID, &existingSlug, &existingTitle, &existingDescription, &existingEmoji, &existingUpdatedAt, &existingArchivedAt)
+		).Scan(&existingID, &existingSlug, &existingTitle, &existingDescription, &existingEmoji, &existingState, &existingStateManual, &existingUpdatedAt, &existingArchivedAt)
 		if errors.Is(err, sql.ErrNoRows) {
 			// Insert. archived_at round-trips per BACI-68; sync is the
 			// source of truth across machines so an archived row on one
 			// machine becomes archived on the other when first imported.
 			// emoji (BACI-172) round-trips the same way — sync owns the
-			// glyph across machines.
+			// glyph across machines. state + state_manual (BACI-199)
+			// likewise.
 			if _, err := tx.Exec(
-				`INSERT INTO features (uuid, repo_id, slug, title, description, emoji, created_at, updated_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				`INSERT INTO features (uuid, repo_id, slug, title, description, emoji, state, state_manual, created_at, updated_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				uuid, repo.ID, sf.Parsed.Slug, sf.Parsed.Title, sf.Description, sf.Parsed.Emoji,
+				string(incomingState), boolToInt(incomingStateManual),
 				sqliteTimestamp(sf.Parsed.CreatedAt), sqliteTimestamp(sf.Parsed.UpdatedAt),
 				nullableSqliteTimestamp(sf.Parsed.ArchivedAt),
 			); err != nil {
@@ -69,13 +87,18 @@ func (e *Engine) applyFeatures(tx *sql.Tx, sr *scannedRepo, repo *model.Repo, re
 		}
 		// Update if any field differs. archived_at is compared as a
 		// nullable timestamp so flipping the flag in either direction
-		// triggers a write.
+		// triggers a write. state + state_manual (BACI-199) join the
+		// same predicate.
+		incomingStateManualInt := boolToInt(incomingStateManual)
 		if existingSlug != sf.Parsed.Slug || existingTitle != sf.Parsed.Title || existingDescription != sf.Description ||
 			existingEmoji != sf.Parsed.Emoji ||
+			existingState != string(incomingState) ||
+			existingStateManual != incomingStateManualInt ||
 			!nullableTimeEqual(existingArchivedAt, sf.Parsed.ArchivedAt) {
 			if _, err := tx.Exec(
-				`UPDATE features SET slug = ?, title = ?, description = ?, emoji = ?, updated_at = ?, archived_at = ? WHERE id = ?`,
+				`UPDATE features SET slug = ?, title = ?, description = ?, emoji = ?, state = ?, state_manual = ?, updated_at = ?, archived_at = ? WHERE id = ?`,
 				sf.Parsed.Slug, sf.Parsed.Title, sf.Description, sf.Parsed.Emoji,
+				string(incomingState), incomingStateManualInt,
 				sqliteTimestamp(sf.Parsed.UpdatedAt),
 				nullableSqliteTimestamp(sf.Parsed.ArchivedAt), existingID,
 			); err != nil {
@@ -90,6 +113,16 @@ func (e *Engine) applyFeatures(tx *sql.Tx, sr *scannedRepo, repo *model.Repo, re
 		}
 	}
 	return nil
+}
+
+// boolToInt converts a Go bool to the int64 used by SQLite's
+// state_manual column (0|1). Local helper to keep the apply paths
+// readable.
+func boolToInt(b bool) int64 {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // applyIssues applies phase 3 to issues in two passes. Pass 1

@@ -22,9 +22,15 @@ import (
 // Lives in the per-repo board-hide KV (tui_settings), not on the
 // features row.
 type FeatureSummary struct {
-	Slug          string    `json:"slug"`
-	Title         string    `json:"title"`
-	Emoji         string    `json:"emoji"`
+	Slug  string `json:"slug"`
+	Title string `json:"title"`
+	Emoji string `json:"emoji"`
+	// State (BACI-199) is the three-state column on the feature row
+	// — `active` (default — work in flight), `done` (delivered) or
+	// `cancelled` (abandoned). The Features panel renders a state
+	// pill so a glance distinguishes work in flight from delivered /
+	// abandoned work.
+	State         string    `json:"state"`
 	UpdatedAt     time.Time `json:"updatedAt"`
 	HiddenOnBoard bool      `json:"hiddenOnBoard"`
 }
@@ -56,10 +62,17 @@ type FeatureDetail struct {
 	// top-left of every kanban card belonging to this feature.
 	// Empty when none has been set — the FeaturesView surfaces a
 	// "set emoji" affordance in that case.
-	Emoji     string               `json:"emoji"`
-	CreatedAt time.Time            `json:"createdAt"`
-	UpdatedAt time.Time            `json:"updatedAt"`
-	Issues    []FeatureLinkedIssue `json:"issues"`
+	Emoji string `json:"emoji"`
+	// State + StateManual (BACI-199) round-trip the per-feature state
+	// column and its sticky bit. The drawer's segmented control reads
+	// State to highlight the active button, and StateManual to render
+	// a "pinned" indicator next to it so the user knows the
+	// auto-completion sweep won't move it.
+	State       string               `json:"state"`
+	StateManual bool                 `json:"stateManual"`
+	CreatedAt   time.Time            `json:"createdAt"`
+	UpdatedAt   time.Time            `json:"updatedAt"`
+	Issues      []FeatureLinkedIssue `json:"issues"`
 	// Comments is the BACI-124 chronological-handoff timeline, oldest
 	// first. Drives the feature drawer's comment panel.
 	Comments []FeatureComment `json:"comments"`
@@ -110,6 +123,7 @@ func (f *FeatureService) ListFeatures(repoPrefix string) ([]FeatureSummary, erro
 			Slug:          feat.Slug,
 			Title:         feat.Title,
 			Emoji:         feat.Emoji,
+			State:         string(feat.State),
 			UpdatedAt:     feat.UpdatedAt,
 			HiddenOnBoard: feat.HiddenOnBoard,
 		})
@@ -153,12 +167,36 @@ func (f *FeatureService) GetFeature(repoPrefix, slug string) (FeatureDetail, err
 		Title:         feat.Title,
 		Description:   feat.Description,
 		Emoji:         feat.Emoji,
+		State:         string(feat.State),
+		StateManual:   feat.StateManual,
 		CreatedAt:     feat.CreatedAt,
 		UpdatedAt:     feat.UpdatedAt,
 		Issues:        issues,
 		Comments:      comments,
 		HiddenOnBoard: feat.HiddenOnBoard,
 	}, nil
+}
+
+// SetFeatureState (BACI-199) flips the feature's three-state column
+// and returns the refreshed FeatureDetail. Sets state_manual = true
+// so the leader-elected archive-sweep's auto-completion pass leaves
+// the row alone until the user pins a new value. Parses the state
+// string at the boundary so a typo surfaces as a clear error from
+// the client.
+func (f *FeatureService) SetFeatureState(repoPrefix, slug, state string) (FeatureDetail, error) {
+	ctx := context.Background()
+	repo, err := f.resolveRepo(ctx, repoPrefix)
+	if err != nil {
+		return FeatureDetail{}, err
+	}
+	st, err := model.ParseFeatureState(state)
+	if err != nil {
+		return FeatureDetail{}, err
+	}
+	if _, err := f.client.SetFeatureState(ctx, repo, slug, st, false); err != nil {
+		return FeatureDetail{}, err
+	}
+	return f.GetFeature(repoPrefix, slug)
 }
 
 // SetFeatureEmoji (BACI-172) updates the per-feature emoji glyph and

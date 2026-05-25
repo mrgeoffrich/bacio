@@ -54,7 +54,7 @@ func (s *Store) CreateFeature(repoID int64, slug, title, description, emoji stri
 	return s.GetFeatureByID(id)
 }
 
-const featureCols = `id, uuid, repo_id, slug, title, description, emoji, archived_at, created_at, updated_at`
+const featureCols = `id, uuid, repo_id, slug, title, description, emoji, archived_at, state, state_manual, created_at, updated_at`
 
 // FeatureFilter (BACI-68) is the filter struct for ListFeaturesFiltered.
 // The plain ListFeatures(repoID, includeDescription) signature predated
@@ -199,6 +199,33 @@ func (s *Store) GetFeatureBySlugWithHidden(repoID int64, slug string) (*model.Fe
 	}
 	feat.HiddenOnBoard = hidden
 	return feat, nil
+}
+
+// SetFeatureState writes the feature's `state` column and, when
+// `manual` is true, also stamps the sticky-bit `state_manual = 1` so
+// the leader-elected archive-sweep's auto-completion pass leaves the
+// row alone. The sweep itself calls SetFeatureState with manual=false
+// — the sticky bit only ever turns on via an explicit user call.
+//
+// Bumps updated_at so the BACI-5 LWW gate in sync sees the change as
+// newer than the YAML on disk (same rationale as SetIssueState).
+// Mirrors SetIssueState's shape; no internal validation of `state`
+// because the caller (client.SetFeatureState / handleFeatureState /
+// setFeatureState in the CLI) already runs ParseFeatureState — the
+// column's CHECK on fresh DBs is belt-and-braces.
+func (s *Store) SetFeatureState(featureID int64, state model.FeatureState, manual bool) error {
+	if manual {
+		_, err := s.DB.Exec(
+			`UPDATE features SET state = ?, state_manual = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+			string(state), featureID,
+		)
+		return err
+	}
+	_, err := s.DB.Exec(
+		`UPDATE features SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		string(state), featureID,
+	)
+	return err
 }
 
 // SetFeatureArchived stamps or clears the feature's archived_at column
@@ -427,10 +454,12 @@ func (s *Store) CreateFeatureFromSync(repoID int64, uuid, slug, title, descripti
 
 func scanFeature(row rowScanner) (*model.Feature, error) {
 	var (
-		f          model.Feature
-		archivedAt sql.NullTime
+		f           model.Feature
+		archivedAt  sql.NullTime
+		state       string
+		stateManual int64
 	)
-	err := row.Scan(&f.ID, &f.UUID, &f.RepoID, &f.Slug, &f.Title, &f.Description, &f.Emoji, &archivedAt, &f.CreatedAt, &f.UpdatedAt)
+	err := row.Scan(&f.ID, &f.UUID, &f.RepoID, &f.Slug, &f.Title, &f.Description, &f.Emoji, &archivedAt, &state, &stateManual, &f.CreatedAt, &f.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -441,5 +470,7 @@ func scanFeature(row rowScanner) (*model.Feature, error) {
 		t := archivedAt.Time
 		f.ArchivedAt = &t
 	}
+	f.State = model.FeatureState(state)
+	f.StateManual = stateManual != 0
 	return &f, nil
 }
