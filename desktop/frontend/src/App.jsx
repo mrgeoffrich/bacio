@@ -956,7 +956,7 @@ export default function App() {
         </ErrorBoundary>
       ) : activeView === 'docs' ? (
         <ErrorBoundary headline="Something went wrong in Docs" label="The Docs view crashed">
-          <DocsView activeBoard={activeBoard} />
+          <DocsView activeBoard={activeBoard} onOpenIssue={openIssueByKey} />
         </ErrorBoundary>
       ) : activeView === 'features' ? (
         <ErrorBoundary headline="Something went wrong in Features" label="The Features view crashed">

@@ -1,63 +1,109 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { NotionEditor } from './editor/NotionEditor';
-import TranscriptView from '../lib/transcript/TranscriptView';
 import { reportError } from '../errors';
-import { isJsonlTranscriptDoc, isSvgDoc } from '../lib/docFormat';
 import * as api from '../api';
+import DocsFacetRail from './DocsFacetRail.jsx';
+import DocsList from './DocsList.jsx';
+import DocsViewer from './DocsViewer.jsx';
+import { filterDocs, countFacets } from '../lib/docsFilter';
+import {
+  readHideTranscripts, persistHideTranscripts,
+  readSort, persistSort,
+  DEFAULT_HIDE_TRANSCRIPTS, DEFAULT_SORT,
+} from './DocsPersistence';
 
-// Human label for a bacio document-type enum value.
-function typeLabel(t) {
-  return t.replace(/_/g, ' ');
-}
-
-// DocsView is the desktop document browser + editor. Documents are per-repo.
-// Edits are buffered locally and persisted explicitly via the Save button.
+// DocsView (BACI-204) — desktop document browser + editor, redesigned
+// as a three-pane faceted library that scales to hundreds of docs
+// without forcing the user to scroll past auto-generated transcripts.
+// Layout:
+//   <DocsFacetRail>  — left rail with search + Type/Links/Status facets
+//   <DocsList>       — middle pane with toolbar + rich-row list
+//   <DocsViewer>     — right pane that wraps the existing Render/Source
+//                      editor triad (NotionEditor / TranscriptView / SVG)
 //
-// SVG docs render via a Render/Source toggle (BACI-56). The Render tab
-// shows an <img> backed by a Blob object URL — browsers don't execute
-// JavaScript in <img>-loaded SVGs, so embedded <script> and event
-// handlers are inert without needing DOMPurify. The Source tab is the
-// existing NotionEditor for raw text editing.
-//
-// Subagent JSONL transcripts (BACI-125) follow the same Render/Source
-// pattern — Render mounts <TranscriptView>, Source falls back to the
-// NotionEditor so the raw JSONL is one click away if rendering can't
-// cope with a malformed line.
-//
-// Non-SVG, non-transcript docs see no UI change.
-export default function DocsView({ activeBoard }) {
+// All existing surfaces (BACI-56 SVG, BACI-125 transcript) keep
+// working unchanged — DocsViewer lifts that block verbatim. The
+// per-repo `hideTranscripts` and `sort` preferences round-trip
+// through DocsPersistence so a reload preserves the user's setup.
+export default function DocsView({ activeBoard, onOpenIssue }) {
   const [docs, setDocs] = useState([]);
   const [selected, setSelected] = useState(null); // filename
-  const [content, setContent] = useState('');      // live editor buffer
-  const [savedContent, setSavedContent] = useState(''); // last persisted body
+  const [content, setContent] = useState('');
+  const [savedContent, setSavedContent] = useState('');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [view, setView] = useState('render');      // 'render' | 'source'
+  const [showArchived, setShowArchived] = useState(false);
+  // Reload counter — bumping it triggers the doc-list reload effect
+  // (e.g. after an archive toggle so the row's badge updates).
+  const [reloadTick, setReloadTick] = useState(0);
+
+  // Query bag — Type/Links/Status facets, search, sort, hide-transcripts.
+  // Mirrors the DocsQuery shape in lib/docsFilter.ts.
+  const [query, setQuery] = useState(() => ({
+    search: '',
+    type: '',
+    links: 'all',
+    status: 'active',
+    hideTranscripts: DEFAULT_HIDE_TRANSCRIPTS,
+    sort: DEFAULT_SORT,
+  }));
 
   const repoSelected = !!activeBoard;
   const dirty = content !== savedContent;
 
-  // Reload the document list whenever the selected repo changes.
+  // Hydrate per-repo persisted preferences when the repo changes.
   useEffect(() => {
-    setSelected(null);
-    setContent('');
-    setSavedContent('');
+    if (!repoSelected) return;
+    setQuery((q) => ({
+      ...q,
+      hideTranscripts: readHideTranscripts(activeBoard),
+      sort: readSort(activeBoard),
+    }));
+  }, [activeBoard, repoSelected]);
+
+  // Read the global display.show_archived setting once per repo flip
+  // so the rail's status=all facet defers to it (matches FeaturesView).
+  useEffect(() => {
+    if (!repoSelected) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const prefs = await api.getDisplayPreferences();
+        if (!cancelled) setShowArchived(!!prefs?.showArchived);
+      } catch (_) {
+        if (!cancelled) setShowArchived(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeBoard, repoSelected]);
+
+  // Reload the document list whenever the selected repo changes, or
+  // a reload tick fires. Selection / content state resets on repo
+  // change but is preserved across a reload tick (archive toggle is
+  // the only writer today and doesn't move the cursor).
+  useEffect(() => {
     if (!repoSelected) {
+      setSelected(null);
+      setContent('');
+      setSavedContent('');
       setDocs([]);
       return;
     }
     api.listDocs(activeBoard)
       .then(setDocs)
       .catch(err => reportError(err, { headline: "Couldn't list docs" }));
-  }, [activeBoard, repoSelected]);
+  }, [activeBoard, repoSelected, reloadTick]);
 
-  // Load the chosen document's body. Reset the Render/Source toggle to
-  // Render whenever a different doc is opened so the user sees the
-  // rendered surface first.
+  // Clear the open doc on repo change.
+  useEffect(() => {
+    setSelected(null);
+    setContent('');
+    setSavedContent('');
+  }, [activeBoard]);
+
+  // Load the chosen document's body.
   useEffect(() => {
     if (!selected || !repoSelected) return;
     setLoading(true);
-    setView('render');
     api.getDoc(activeBoard, selected)
       .then(doc => {
         setContent(doc.content);
@@ -77,6 +123,9 @@ export default function DocsView({ activeBoard }) {
       .then(doc => {
         setSavedContent(doc.content);
         setSaving(false);
+        // Refresh the list so the row's updatedAt + snippet reflect
+        // the new body without a manual reload.
+        setReloadTick((t) => t + 1);
       })
       .catch(err => {
         reportError(err, { headline: "Couldn't save document" });
@@ -84,49 +133,50 @@ export default function DocsView({ activeBoard }) {
       });
   }, [activeBoard, selected, content, dirty, saving]);
 
-  // Detect SVG from filename + current buffer content. Sniffs the live
-  // buffer (not just savedContent) so editing in Source tab and tabbing
-  // back to Render still keeps the toggle visible.
-  const isSvg = useMemo(
-    () => !!selected && isSvgDoc(selected, content),
-    [selected, content],
+  // updateQuery wraps the setter so persistence side-effects fire for
+  // the fields DocsPersistence covers, and the rest are pure state.
+  const updateQuery = useCallback((patch) => {
+    setQuery((q) => {
+      const next = { ...q, ...patch };
+      if ('hideTranscripts' in patch) persistHideTranscripts(activeBoard, next.hideTranscripts);
+      if ('sort' in patch) persistSort(activeBoard, next.sort);
+      return next;
+    });
+  }, [activeBoard]);
+
+  const onSelectDoc = useCallback((filename) => {
+    setSelected(filename);
+  }, []);
+
+  const selectedDoc = useMemo(
+    () => docs.find((d) => d.filename === selected) ?? null,
+    [docs, selected],
   );
 
-  // Transcript detection is filename-driven (predicate is conservative
-  // so a hand-uploaded `.jsonl` doesn't accidentally trigger this
-  // surface).
-  const isTranscript = useMemo(
-    () => !!selected && isJsonlTranscriptDoc(selected),
-    [selected],
+  // Run the rail + toolbar query through the pure filter helper to
+  // derive the visible list + transcript fold + per-bucket counts.
+  const { visible, transcripts, counts } = useMemo(
+    () => filterDocs(docs, query, showArchived),
+    [docs, query, showArchived],
   );
 
-  // A renderable doc has a Render/Source tab pair. Save still works
-  // from the Source tab — symmetric with the SVG flow.
-  const renderable = isSvg || isTranscript;
+  // The rail wants absolute per-bucket counts (so chips don't collapse
+  // to zero as the user narrows) — countFacets on the full doc set.
+  const railCounts = useMemo(() => countFacets(docs), [docs]);
 
-  // Object URL for the SVG Render tab. Created and revoked inside a
-  // single useEffect so each URL.createObjectURL is paired with exactly
-  // one URL.revokeObjectURL — important under React StrictMode, which
-  // mounts / unmounts / remounts effects in dev and would otherwise
-  // leave the first-mount URL revoked while the JSX kept rendering it.
-  // Refreshes on every content edit so a dirty Source-tab buffer
-  // renders live when the user tabs back.
-  const [svgUrl, setSvgUrl] = useState('');
-  useEffect(() => {
-    if (!isSvg) { setSvgUrl(''); return undefined; }
-    const url = URL.createObjectURL(new Blob([content], { type: 'image/svg+xml' }));
-    setSvgUrl(url);
-    return () => URL.revokeObjectURL(url);
-  }, [isSvg, content]);
-
-  const copySource = useCallback(() => {
-    if (!content) return;
+  const archiveToggle = useCallback(async () => {
+    if (!selected) return;
     try {
-      navigator.clipboard?.writeText(content);
-    } catch (_) {
-      /* clipboard access can be blocked in some web contexts; ignore */
+      if (selectedDoc?.archivedAt) {
+        await api.unarchiveDocument(activeBoard, selected);
+      } else {
+        await api.archiveDocument(activeBoard, selected);
+      }
+      setReloadTick((t) => t + 1);
+    } catch (err) {
+      reportError(err, { headline: "Couldn't update archive state" });
     }
-  }, [content]);
+  }, [activeBoard, selected, selectedDoc]);
 
   if (!repoSelected) {
     return (
@@ -136,91 +186,40 @@ export default function DocsView({ activeBoard }) {
     );
   }
 
+  // Silence the unused counts var (only `visible` + `transcripts` are
+  // forwarded to the list; counts powers the rail via railCounts).
+  void counts;
+
   return (
     <div className="mk-docs">
-      <aside className="mk-docs-list">
-        {docs.length === 0 ? (
-          <div className="mk-docs-list-empty">No documents in this repository.</div>
-        ) : (
-          docs.map(doc => (
-            <button
-              key={doc.filename}
-              className={`mk-docs-item ${selected === doc.filename ? 'is-active' : ''}`}
-              onClick={() => setSelected(doc.filename)}
-            >
-              <span className="mk-docs-item-name">{doc.filename}</span>
-              <span className="mk-docs-item-type">{typeLabel(doc.type)}</span>
-            </button>
-          ))
-        )}
-      </aside>
-
+      <DocsFacetRail
+        counts={railCounts}
+        query={query}
+        onQueryChange={updateQuery}
+      />
+      <DocsList
+        visible={visible}
+        transcripts={transcripts}
+        hasDocs={docs.length > 0}
+        query={query}
+        onQueryChange={updateQuery}
+        selected={selected}
+        onSelect={onSelectDoc}
+      />
       <div className="mk-docs-main">
-        {!selected ? (
-          <div className="mk-docs-empty">Pick a document to start editing.</div>
-        ) : loading ? (
-          <div className="mk-docs-empty">Loading…</div>
-        ) : (
-          <>
-            <header className="mk-docs-bar">
-              <span className="mk-docs-bar-name">{selected}</span>
-              {renderable && (
-                <div className="mk-docs-tabs" role="tablist" aria-label="View mode">
-                  <button
-                    role="tab"
-                    aria-selected={view === 'render'}
-                    className={`mk-docs-tab ${view === 'render' ? 'is-active' : ''}`}
-                    onClick={() => setView('render')}
-                  >
-                    Render
-                  </button>
-                  <button
-                    role="tab"
-                    aria-selected={view === 'source'}
-                    className={`mk-docs-tab ${view === 'source' ? 'is-active' : ''}`}
-                    onClick={() => setView('source')}
-                  >
-                    Source
-                  </button>
-                </div>
-              )}
-              <span className="mk-docs-bar-status">
-                {dirty ? 'Unsaved changes' : 'Saved'}
-              </span>
-              <div className="mk-docs-bar-actions">
-                {renderable && (
-                  <button
-                    className="mk-btn-secondary"
-                    onClick={copySource}
-                    title="Copy source to clipboard"
-                  >
-                    Copy source
-                  </button>
-                )}
-                <button
-                  className="mk-btn-primary"
-                  onClick={save}
-                  disabled={!dirty || saving}
-                >
-                  {saving ? 'Saving…' : 'Save'}
-                </button>
-              </div>
-            </header>
-            {isSvg && view === 'render' ? (
-              <div className="mk-docs-svg-pane">
-                <img className="mk-docs-svg-img" src={svgUrl} alt={selected} />
-              </div>
-            ) : isTranscript && view === 'render' ? (
-              <div className="mk-docs-transcript-pane">
-                <TranscriptView source={content} filename={selected} sizeBytes={content?.length} />
-              </div>
-            ) : (
-              <div className="mk-docs-editor">
-                <NotionEditor content={content} onChange={setContent} />
-              </div>
-            )}
-          </>
-        )}
+        <DocsViewer
+          activeBoard={activeBoard}
+          doc={selectedDoc}
+          filename={selected}
+          content={content}
+          loading={loading}
+          saving={saving}
+          dirty={dirty}
+          onContentChange={setContent}
+          onSave={save}
+          onArchiveToggle={selected ? archiveToggle : null}
+          onOpenIssue={onOpenIssue}
+        />
       </div>
     </div>
   );

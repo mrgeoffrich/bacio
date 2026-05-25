@@ -19,6 +19,18 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 import * as $models from "./models.js";
 
 /**
+ * ArchiveDoc / UnarchiveDoc are the Wails parity for the existing
+ * HTTP /repos/{prefix}/documents/{filename}/{archive,unarchive}
+ * routes — surfaced through the same client.SetDocumentArchived path
+ * the CLI uses (BACI-68). They power the redesigned Documents page's
+ * per-row archive toggle (BACI-204); the desktop binding had to grow
+ * these so the React surface stays transport-agnostic.
+ */
+export function ArchiveDoc(repoPrefix: string, filename: string): $CancellablePromise<void> {
+    return $Call.ByID(3188498255, repoPrefix, filename);
+}
+
+/**
  * GetDoc returns one document with its markdown content for editing.
  */
 export function GetDoc(repoPrefix: string, filename: string): $CancellablePromise<$models.DocContent> {
@@ -45,6 +57,10 @@ export function SaveDoc(repoPrefix: string, filename: string, content: string): 
     return $Call.ByID(2796954592, repoPrefix, filename, content).then(($result: any) => {
         return $$createType0($result);
     });
+}
+
+export function UnarchiveDoc(repoPrefix: string, filename: string): $CancellablePromise<void> {
+    return $Call.ByID(1672568564, repoPrefix, filename);
 }
 
 // Private type creation functions

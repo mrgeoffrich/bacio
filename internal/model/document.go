@@ -123,6 +123,19 @@ type Document struct {
 	ArchivedAt *time.Time `json:"archived_at,omitempty"`
 	CreatedAt  time.Time  `json:"created_at"`
 	UpdatedAt  time.Time  `json:"updated_at"`
+	// Links (BACI-204) is the document's link rows, optionally
+	// hydrated by ListDocuments so the Documents list surface can
+	// render linked-issue / linked-feature chips without an N+1
+	// per-row round trip. Single-row reads (GetDocumentByID,
+	// GetDocumentByFilename) and the sync export leave it nil so
+	// the schema-yaml round-trip stays untouched.
+	Links []*DocumentLink `json:"links,omitempty"`
+	// Snippet (BACI-204) is a ~200-char prefix of Content, trimmed
+	// at a word boundary, used by the Documents list rich-row
+	// snippet under the title. Empty for transcript-typed rows
+	// (their body is audit JSONL, not browsing material) and for
+	// any single-row read.
+	Snippet string `json:"snippet,omitempty"`
 }
 
 // DocumentLink describes one (document, issue|feature, description) edge.
