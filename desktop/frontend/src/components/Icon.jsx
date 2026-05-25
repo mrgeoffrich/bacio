@@ -1,5 +1,5 @@
 import React from 'react';
-import { Search, Plus, Columns3, GitBranch, Settings, X, Zap, Lock, MessageSquare, AlertTriangle, ChevronsLeft, ChevronsRight, SkipForward, Pin, Rows3 } from 'lucide-react';
+import { Search, Plus, Columns3, GitBranch, Settings, X, Zap, Lock, MessageSquare, AlertTriangle, Minimize2, Maximize2, SkipForward, Pin, Rows3 } from 'lucide-react';
 
 // ClaudeMark is a brand glyph — no icon library carries Claude's logo, so it
 // stays a hand-rolled SVG. It ignores any props passed by <Icon>.
@@ -29,11 +29,14 @@ const ICONS = {
   lock: Lock,
   comment: MessageSquare,
   'alert-triangle': AlertTriangle,
-  // BACI-188: per-column collapse / expand chevrons on the kanban
-  // board. ChevronsLeft sits in the populated-column header;
-  // ChevronsRight sits at the top of the collapsed strip.
-  'chevrons-left': ChevronsLeft,
-  'chevrons-right': ChevronsRight,
+  // BACI-188 / BACI-201: per-column collapse / expand glyphs on the
+  // kanban board. Minimize2 (converging diagonals) sits in the
+  // populated-column header; Maximize2 (diverging diagonals) sits at
+  // the top of the collapsed strip. The window-manager pair reads as
+  // shrink / grow regardless of which side the column lives on, where
+  // the prior chevron pair leaned on direction alone.
+  'minimize-2': Minimize2,
+  'maximize-2': Maximize2,
   // BACI-192: SkipForward is the kanban footer follow-on dispatch
   // button glyph — "after this, do …". Pin is the activity-tray
   // PINNED section header glyph (the corner button itself is a
