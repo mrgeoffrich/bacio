@@ -493,3 +493,48 @@ func TestMatcherTick_UnblocksPastStaleOrphan(t *testing.T) {
 		t.Fatalf("queued dispatch target agent = %v, want %d (live agent)", got.TargetAgentID, liveAgent.ID)
 	}
 }
+
+// TestMatcherTickDetailed_ReturnsBindDetail (BACI-160 gap 1) locks in
+// TickDetailed's contract: one Bind entry per successful queued→pending
+// transition with the bound agent's name + dispatch id surfaced so an
+// audit-writing caller (controller.MatchIfLeader) has enough context
+// to record the agent.bind row.
+func TestMatcherTickDetailed_ReturnsBindDetail(t *testing.T) {
+	b := newFakeBackend()
+	b.addRepo(1, "MINI")
+	b.addTemplate("plan", 0)
+	b.addFreeAgent(1, 10, "otter")
+	b.addQueued(1, model.DispatchMode("plan"), 42)
+
+	binds, err := New(b).TickDetailed()
+	if err != nil {
+		t.Fatalf("TickDetailed: %v", err)
+	}
+	if len(binds) != 1 {
+		t.Fatalf("binds = %d, want 1", len(binds))
+	}
+	if binds[0].AgentName != "otter" {
+		t.Fatalf("bind AgentName = %q, want otter", binds[0].AgentName)
+	}
+	if binds[0].Dispatch == nil || binds[0].Dispatch.ID != 42 {
+		t.Fatalf("bind Dispatch = %+v, want dispatch id 42", binds[0].Dispatch)
+	}
+}
+
+// TestMatcherTickDetailed_EmptyOnNoBind: a tick that doesn't bind
+// anything (no free agent) returns an empty slice and nil error —
+// the audit caller's loop must safely no-op on that shape.
+func TestMatcherTickDetailed_EmptyOnNoBind(t *testing.T) {
+	b := newFakeBackend()
+	b.addRepo(1, "MINI")
+	b.addTemplate("plan", 0)
+	b.addQueued(1, model.DispatchMode("plan"), 1) // no free agent
+
+	binds, err := New(b).TickDetailed()
+	if err != nil {
+		t.Fatalf("TickDetailed: %v", err)
+	}
+	if len(binds) != 0 {
+		t.Fatalf("binds = %+v, want empty slice", binds)
+	}
+}

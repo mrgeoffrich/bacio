@@ -341,6 +341,14 @@ func (c *localClient) DrainDispatches(ctx context.Context, sessionID string) ([]
 // markDrained flips any still-pending dispatches to delivered and returns
 // the list unchanged otherwise. Already-delivered rows are passed through
 // as-is (re-emitted by the caller until acked).
+//
+// BACI-160 gap 3: writes one `agent.deliver` history row per successful
+// pending→delivered transition. Without this the moment a dispatch
+// first reaches the worker is invisible in `bacio history` — readers
+// would have to JOIN agent_dispatches.delivered_at instead of filtering
+// the audit log by op. Only the in-loop pending check gates the audit
+// write (already-delivered rows fall to the unchanged-passthrough
+// branch above and never re-stamp).
 func (c *localClient) markDrained(open []*model.AgentDispatch) ([]*model.AgentDispatch, error) {
 	out := make([]*model.AgentDispatch, 0, len(open))
 	for _, d := range open {
@@ -349,6 +357,12 @@ func (c *localClient) markDrained(open []*model.AgentDispatch) ([]*model.AgentDi
 			if err != nil {
 				return nil, err
 			}
+			c.recordOp(model.HistoryEntry{
+				RepoID: &delivered.RepoID, RepoPrefix: delivered.RepoPrefix,
+				Op: "agent.deliver", Kind: "agent",
+				TargetID: &delivered.ID, TargetLabel: dispatchTargetLabel(delivered),
+				Details: dispatchDetails(delivered),
+			})
 			out = append(out, delivered)
 			continue
 		}

@@ -521,3 +521,165 @@ func TestEndAgentPresumedDeadWritesRequeueAudit(t *testing.T) {
 		})
 	}
 }
+
+// TestDrainDispatchesWritesDeliverAudit (BACI-160 gap 3) drives a
+// pending dispatch through DrainDispatches and asserts the resulting
+// pending→delivered transition writes an `agent.deliver` audit row.
+// A second drain of the now-delivered dispatch must NOT write a
+// second row — `agent.deliver` is the one-shot first-delivery
+// moment, not "every drain that re-pushes a still-un-acked dispatch".
+func TestDrainDispatchesWritesDeliverAudit(t *testing.T) {
+	p := newPair(t)
+	defer p.cleanup()
+	ctx := context.Background()
+
+	iss, err := p.store.CreateIssue(p.repo.ID, nil, "deliver me", "", model.StateTodo, nil)
+	if err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+	ag, _, err := p.store.UpsertAgent("delivery-otter@claude.test", true)
+	if err != nil {
+		t.Fatalf("UpsertAgent: %v", err)
+	}
+	const sid = "deeefeed-1111-4111-8111-111111111111"
+	sess, err := p.store.UpsertAgentSession(store.UpsertAgentSessionIn{
+		SessionID: sid, RepoID: p.repo.ID, AgentID: &ag.ID, Actor: "tester",
+	})
+	if err != nil {
+		t.Fatalf("UpsertAgentSession: %v", err)
+	}
+	d, err := p.local.CreateDispatch(ctx, p.repo, inputs.AgentDispatchInput{
+		TargetAgent: ag.Name,
+		IssueKey:    iss.Key,
+		Message:     "please pick this up",
+	}, false)
+	if err != nil {
+		t.Fatalf("CreateDispatch: %v", err)
+	}
+
+	drained, err := p.local.DrainDispatches(ctx, sess.SessionID)
+	if err != nil {
+		t.Fatalf("DrainDispatches: %v", err)
+	}
+	if len(drained) != 1 || drained[0].Status != model.DispatchDelivered {
+		t.Fatalf("drained = %+v, want one delivered row", drained)
+	}
+
+	rows, err := p.store.ListHistory(store.HistoryFilter{
+		RepoID: &p.repo.ID, Op: "agent.deliver",
+	})
+	if err != nil {
+		t.Fatalf("ListHistory: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("agent.deliver rows = %d, want 1", len(rows))
+	}
+	row := rows[0]
+	if row.Kind != "agent" {
+		t.Fatalf("deliver row Kind = %q, want agent", row.Kind)
+	}
+	if row.TargetID == nil || *row.TargetID != d.ID {
+		t.Fatalf("deliver row TargetID = %v, want %d", row.TargetID, d.ID)
+	}
+	if !strings.Contains(row.Details, "status=delivered") {
+		t.Fatalf("deliver row Details = %q, missing status=delivered", row.Details)
+	}
+
+	// Second drain: dispatch is already delivered, so the loop's
+	// pending-branch should not run and no new audit row should land.
+	if _, err := p.local.DrainDispatches(ctx, sess.SessionID); err != nil {
+		t.Fatalf("DrainDispatches second: %v", err)
+	}
+	rows2, err := p.store.ListHistory(store.HistoryFilter{
+		RepoID: &p.repo.ID, Op: "agent.deliver",
+	})
+	if err != nil {
+		t.Fatalf("ListHistory after second drain: %v", err)
+	}
+	if len(rows2) != 1 {
+		t.Fatalf("agent.deliver rows after second drain = %d, want 1 (one-shot)", len(rows2))
+	}
+}
+
+// TestAbandonOpenQuestionsWritesAudit (BACI-160 gap 4): a channel-
+// startup sweep that finds N>0 open questions writes one summary
+// `question.abandon` row carrying the session id and count; a sweep
+// that finds zero rows produces no row.
+func TestAbandonOpenQuestionsWritesAudit(t *testing.T) {
+	p := newPair(t)
+	defer p.cleanup()
+	ctx := context.Background()
+
+	iss, err := p.store.CreateIssue(p.repo.ID, nil, "parked work", "", model.StateInProgress, nil)
+	if err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+	ag, _, err := p.store.UpsertAgent("asking-otter@claude.test", true)
+	if err != nil {
+		t.Fatalf("UpsertAgent: %v", err)
+	}
+	const sid = "abadaba0-1111-4111-8111-111111111111"
+	if _, err := p.store.UpsertAgentSession(store.UpsertAgentSessionIn{
+		SessionID: sid, RepoID: p.repo.ID, AgentID: &ag.ID, Actor: "tester",
+	}); err != nil {
+		t.Fatalf("UpsertAgentSession: %v", err)
+	}
+	// Open a question through the client wrapper so the standard
+	// question.ask audit row is in place — keeps the assertions on
+	// the new row honest.
+	if _, err := p.local.AddSessionQuestion(ctx, client.AddSessionQuestionInput{
+		SessionID: sid,
+		IssueKey:  iss.Key,
+		AskedBy:   "asking-otter@claude.test",
+		Payload: model.QuestionPayload{
+			Questions: []model.QuestionItem{{
+				Question:    "should we proceed?",
+				Header:      "Approval",
+				MultiSelect: model.MultiSelectFlag(false),
+				Options: []model.QuestionOption{
+					{Label: "yes", Description: "proceed"},
+					{Label: "no", Description: "stop"},
+				},
+			}},
+		},
+	}); err != nil {
+		t.Fatalf("AddSessionQuestion: %v", err)
+	}
+
+	n, err := p.local.AbandonOpenQuestionsForSession(ctx, sid)
+	if err != nil {
+		t.Fatalf("AbandonOpenQuestionsForSession: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("abandoned = %d, want 1", n)
+	}
+
+	rows, err := p.store.ListHistory(store.HistoryFilter{Op: "question.abandon"})
+	if err != nil {
+		t.Fatalf("ListHistory: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("question.abandon rows = %d, want 1", len(rows))
+	}
+	row := rows[0]
+	if row.Kind != "question" {
+		t.Fatalf("abandon row Kind = %q, want question", row.Kind)
+	}
+	if row.TargetLabel != sid {
+		t.Fatalf("abandon row TargetLabel = %q, want %q", row.TargetLabel, sid)
+	}
+	if !strings.Contains(row.Details, "count=1") {
+		t.Fatalf("abandon row Details = %q, missing count=1", row.Details)
+	}
+
+	// A second sweep finds zero open questions and must NOT write
+	// another row — the no-op gate is the whole point of the N>0
+	// guard.
+	if _, err := p.local.AbandonOpenQuestionsForSession(ctx, sid); err != nil {
+		t.Fatalf("second AbandonOpenQuestionsForSession: %v", err)
+	}
+	rows2, _ := p.store.ListHistory(store.HistoryFilter{Op: "question.abandon"})
+	if len(rows2) != 1 {
+		t.Fatalf("question.abandon rows after no-op sweep = %d, want 1", len(rows2))
+	}
+}

@@ -196,6 +196,15 @@ type scannedDocument struct {
 // DryRun rolls back the outer transaction before commit so the user
 // sees what would happen without permanent effect; the result is
 // still populated.
+//
+// BACI-160 gap 7: deliberate audit silence per imported row.
+// The import emits one summary `sync.run` row (with per-kind counts)
+// at the manual / background runner boundary — see
+// internal/sync/background.go and internal/client/sync_status.go.
+// Per-row audit on import would double-count what the source repo's
+// own history already records and would drown `bacio history` after
+// a clone-import. A reader chasing the provenance of an imported row
+// should consult the source repo's history, not this DB's.
 func (e *Engine) Import(ctx context.Context, source string) (*ImportResult, error) {
 	if e.Store == nil {
 		return nil, fmt.Errorf("sync.Import: Store is nil")

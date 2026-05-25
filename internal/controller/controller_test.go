@@ -11,6 +11,7 @@ import (
 
 	"github.com/mrgeoffrich/bacio/internal/dispatcher"
 	"github.com/mrgeoffrich/bacio/internal/leader"
+	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
 	bsync "github.com/mrgeoffrich/bacio/internal/sync"
 )
@@ -104,13 +105,13 @@ func TestMatchIfLeaderRespectsLease(t *testing.T) {
 
 	m := dispatcher.New(s)
 	standby, _ := newFakeElector(t, false)
-	MatchIfLeader(m, standby, log)
+	MatchIfLeader(m, standby, s, log)
 	if buf.Len() != 0 {
 		t.Fatalf("standby match should be silent, got: %s", buf.String())
 	}
 
 	leaderEl, _ := newFakeElector(t, true)
-	MatchIfLeader(m, leaderEl, log)
+	MatchIfLeader(m, leaderEl, s, log)
 	if strings.Contains(buf.String(), "failed") {
 		t.Fatalf("leader match against empty store should not log a failure, got: %s", buf.String())
 	}
@@ -145,11 +146,172 @@ func TestSyncIfLeaderRespectsLease(t *testing.T) {
 	}
 }
 
+// TestMatchIfLeaderWritesBindAudit (BACI-160 gap 1) drives the
+// integrated path: a leader-state elector + a queued dispatch + a
+// free, channel-connected agent. After one MatchIfLeader call the
+// audit log must carry exactly one `agent.bind` row attributed to
+// MatcherActor, with the bound dispatch id surfaced in Details so
+// `bacio history --op agent.bind` is a useful matcher ledger.
+func TestMatchIfLeaderWritesBindAudit(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.Open(filepath.Join(dir, "db.sqlite"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	repo, err := s.CreateRepo("BIND", "bind-repo", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+	iss, err := s.CreateIssue(repo.ID, nil, "matcher target", "", model.StateTodo, nil)
+	if err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	ag, _, err := s.UpsertAgent("brave-otter@claude.test", true)
+	if err != nil {
+		t.Fatalf("upsert agent: %v", err)
+	}
+	if _, err := s.UpsertAgentSession(store.UpsertAgentSessionIn{
+		SessionID: "sess-bind-1", RepoID: repo.ID, AgentID: &ag.ID, Actor: "agent-claude",
+		MarkRegistered: true,
+	}); err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+	// Picker requires channel_seen_at; mark it so the agent is a
+	// real candidate.
+	if _, err := s.DB.Exec(
+		`UPDATE agent_sessions SET channel_seen_at = CURRENT_TIMESTAMP WHERE session_id = ?`,
+		"sess-bind-1",
+	); err != nil {
+		t.Fatalf("mark channel-connected: %v", err)
+	}
+	queued, err := s.AddDispatch(store.AddDispatchIn{
+		RepoID:        repo.ID,
+		IssueID:       &iss.ID,
+		Mode:          model.DispatchModeImplement,
+		Payload:       "do the work",
+		CreatedBy:     "supervisor",
+		InitialStatus: model.DispatchQueued,
+	})
+	if err != nil {
+		t.Fatalf("add queued dispatch: %v", err)
+	}
+
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	leaderEl, _ := newFakeElector(t, true)
+	m := dispatcher.New(s)
+
+	MatchIfLeader(m, leaderEl, s, log)
+
+	// The matcher should have flipped the queued dispatch to pending.
+	got, err := s.GetDispatch(queued.ID)
+	if err != nil {
+		t.Fatalf("get dispatch: %v", err)
+	}
+	if got.Status != model.DispatchPending {
+		t.Fatalf("dispatch status after MatchIfLeader = %q, want pending", got.Status)
+	}
+
+	rows, err := s.ListHistory(store.HistoryFilter{Op: "agent.bind"})
+	if err != nil {
+		t.Fatalf("ListHistory: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("agent.bind rows = %d, want 1", len(rows))
+	}
+	row := rows[0]
+	if row.Actor != model.MatcherActor {
+		t.Fatalf("bind row Actor = %q, want %q", row.Actor, model.MatcherActor)
+	}
+	if row.Kind != "agent" {
+		t.Fatalf("bind row Kind = %q, want agent", row.Kind)
+	}
+	if row.TargetID == nil || *row.TargetID != queued.ID {
+		t.Fatalf("bind row TargetID = %v, want %d", row.TargetID, queued.ID)
+	}
+	if !strings.Contains(row.Details, "agent=brave-otter@claude.test") {
+		t.Fatalf("bind row Details = %q, missing agent= clause", row.Details)
+	}
+	if !strings.Contains(row.Details, "issue="+iss.Key) {
+		t.Fatalf("bind row Details = %q, missing issue= clause", row.Details)
+	}
+}
+
+// TestArchiveSweepIfLeaderWritesAudit (BACI-160 gap 2) seeds an
+// archivable issue (terminal state + updated_at past the age window),
+// then asserts the leader-driven sweep emits one `archive.sweep`
+// audit row with the per-pass counts. A standby pass on a fresh
+// store stays silent so the test also confirms the no-op/no-audit
+// contract.
+func TestArchiveSweepIfLeaderWritesAudit(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.Open(filepath.Join(dir, "db.sqlite"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	repo, err := s.CreateRepo("SWEP", "sweep-repo", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+	iss, err := s.CreateIssue(repo.ID, nil, "done long ago", "", model.StateDone, nil)
+	if err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	// Back-date updated_at past the 4-day ArchiveAgeWindow so the
+	// terminal-issue pass picks the row up.
+	if _, err := s.DB.Exec(
+		`UPDATE issues SET updated_at = datetime('now','-30 days') WHERE id = ?`,
+		iss.ID,
+	); err != nil {
+		t.Fatalf("backdate issue: %v", err)
+	}
+
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	// Standby: no sweep, no audit row.
+	standby, _ := newFakeElector(t, false)
+	ArchiveSweepIfLeader(s, standby, log)
+	standbyRows, err := s.ListHistory(store.HistoryFilter{Op: "archive.sweep"})
+	if err != nil {
+		t.Fatalf("ListHistory standby: %v", err)
+	}
+	if len(standbyRows) != 0 {
+		t.Fatalf("standby ArchiveSweepIfLeader wrote %d archive.sweep rows, want 0", len(standbyRows))
+	}
+
+	// Leader: sweep runs, one summary audit row lands.
+	leaderEl, _ := newFakeElector(t, true)
+	ArchiveSweepIfLeader(s, leaderEl, log)
+
+	rows, err := s.ListHistory(store.HistoryFilter{Op: "archive.sweep"})
+	if err != nil {
+		t.Fatalf("ListHistory: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("archive.sweep rows = %d, want 1", len(rows))
+	}
+	row := rows[0]
+	if row.Actor != model.ControllerActor {
+		t.Fatalf("sweep row Actor = %q, want %q", row.Actor, model.ControllerActor)
+	}
+	if row.Kind != "sweep" {
+		t.Fatalf("sweep row Kind = %q, want sweep", row.Kind)
+	}
+	if !strings.Contains(row.Details, `"issues":1`) {
+		t.Fatalf("sweep row Details = %q, missing issues:1", row.Details)
+	}
+}
+
 // TestNilGuards: every helper tolerates nil inputs without panicking —
 // this matches the "background work must never crash the host" contract.
 func TestNilGuards(t *testing.T) {
 	PruneIfLeader(nil, nil, nil)
-	MatchIfLeader(nil, nil, nil)
+	MatchIfLeader(nil, nil, nil, nil)
 	PingIfLeader(nil, nil, nil)
 	ArchiveSweepIfLeader(nil, nil, nil)
 	SyncIfLeader(nil, nil, nil)

@@ -1399,6 +1399,14 @@ func (s *Store) OpenClaimsBySession(repoID int64) (map[int64][]*model.AgentClaim
 // pruned sessions are removed transitively by the FK's ON DELETE
 // CASCADE; `agent_dispatches.target_session_id` is a free-form text
 // column (not a FK), so dispatches survive — left to pruneDispatches.
+//
+// BACI-160 gap 6: deliberate audit silence. Every row this DELETE
+// touches already had its `agent.end` history entry written by the
+// path that ended the session (operator / hook / supersede / reaper);
+// re-recording the retention-window deletion would be noise about
+// the same forensic event, not new information. A reader curious
+// about a session's lifecycle should follow `bacio history --kind agent`
+// to the `agent.end` row, not the prune row that eventually retires it.
 func (s *Store) PruneEndedAgentSessions(retention time.Duration) (int64, error) {
 	cutoff := time.Now().Add(-retention).UTC().Format("2006-01-02 15:04:05")
 	res, err := s.DB.Exec(`DELETE FROM agent_sessions WHERE ended_at IS NOT NULL AND ended_at < ?`, cutoff)

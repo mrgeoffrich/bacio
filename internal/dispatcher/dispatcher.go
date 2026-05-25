@@ -33,6 +33,19 @@ type Matcher struct {
 	b Backend
 }
 
+// Bind records one successful queued→pending transition the matcher
+// committed during a tick. The audit-writing caller (controller.
+// MatchIfLeader) consumes this slice to emit one `agent.bind` history
+// row per entry, attributing it to the matcher subsystem (BACI-160).
+// Dispatch is the post-bind row (Status=pending, TargetAgentID set);
+// AgentName is the candidate name the picker chose, supplied alongside
+// the dispatch row because BindQueuedDispatch's returned row doesn't
+// always carry the agent's display name in scanDispatch.
+type Bind struct {
+	Dispatch  *model.AgentDispatch
+	AgentName string
+}
+
 // New returns a Matcher backed by b. The caller is responsible for
 // running Tick on a timer (and for gating on the ui_leader lease so only
 // one process matches at a time across the cluster).
@@ -46,13 +59,30 @@ func New(b Backend) *Matcher {
 // and the first matcher-side error (read failures stop the tick; per-
 // group failures from BindQueuedDispatch are logged into the count
 // only — a race with another binder is fine).
+//
+// Thin compatibility shim around TickDetailed for callers that only
+// need the count. New audit-emitting callers (controller.MatchIfLeader,
+// BACI-160) use TickDetailed to get the per-bind detail they need to
+// write `agent.bind` history rows.
 func (m *Matcher) Tick() (int, error) {
+	binds, err := m.TickDetailed()
+	return len(binds), err
+}
+
+// TickDetailed is Tick with the per-bind detail caller-visible. Returns
+// the slice of successful binds in the order they were committed; an
+// empty slice means nothing was bindable this tick (concurrency cap,
+// empty queue, or no free agent — none of which are errors). On the
+// first read failure the partially-built slice is returned alongside
+// the error so an audit-writing caller can still record the binds it
+// did see before bailing.
+func (m *Matcher) TickDetailed() ([]Bind, error) {
 	if m == nil || m.b == nil {
-		return 0, nil
+		return nil, nil
 	}
 	templates, err := m.b.ListPromptTemplates()
 	if err != nil {
-		return 0, fmt.Errorf("matcher: list templates: %w", err)
+		return nil, fmt.Errorf("matcher: list templates: %w", err)
 	}
 	limits := make(map[string]int, len(templates))
 	for _, t := range templates {
@@ -61,19 +91,19 @@ func (m *Matcher) Tick() (int, error) {
 
 	repos, err := m.b.ListRepos()
 	if err != nil {
-		return 0, fmt.Errorf("matcher: list repos: %w", err)
+		return nil, fmt.Errorf("matcher: list repos: %w", err)
 	}
 	now := time.Now()
-	binds := 0
+	var binds []Bind
 	for _, repo := range repos {
 		if repo == nil {
 			continue
 		}
-		n, err := m.tickRepo(repo.ID, limits, now)
+		repoBinds, err := m.tickRepo(repo.ID, limits, now)
 		if err != nil {
 			return binds, err
 		}
-		binds += n
+		binds = append(binds, repoBinds...)
 	}
 	return binds, nil
 }
@@ -88,13 +118,13 @@ func (m *Matcher) Tick() (int, error) {
 // the local candidate slice before the next mode runs, so a multi-mode
 // queue (e.g. 1 ship + 1 plan + 1 free agent) never over-assigns that
 // agent. The next tick re-reads fresh state from the backend.
-func (m *Matcher) tickRepo(repoID int64, limits map[string]int, now time.Time) (int, error) {
+func (m *Matcher) tickRepo(repoID int64, limits map[string]int, now time.Time) ([]Bind, error) {
 	modes, err := m.b.ListQueuedModesByRepo(repoID)
 	if err != nil {
-		return 0, fmt.Errorf("matcher: list queued modes for repo %d: %w", repoID, err)
+		return nil, fmt.Errorf("matcher: list queued modes for repo %d: %w", repoID, err)
 	}
 	if len(modes) == 0 {
-		return 0, nil
+		return nil, nil
 	}
 	// Build the candidate slice once per (repo, tick) — it's the same
 	// agent pool every mode draws from. After a successful bind we
@@ -104,17 +134,17 @@ func (m *Matcher) tickRepo(repoID int64, limits map[string]int, now time.Time) (
 	// within one tick, defeating the per-template concurrency cap.
 	cands, err := pickCandidatesForRepo(m.b, repoID, now)
 	if err != nil {
-		return 0, fmt.Errorf("matcher: build candidates for repo %d: %w", repoID, err)
+		return nil, fmt.Errorf("matcher: build candidates for repo %d: %w", repoID, err)
 	}
-	binds := 0
+	var binds []Bind
 	for _, mode := range modes {
-		boundAgent, err := m.tickMode(repoID, mode, limits, cands)
+		bind, err := m.tickMode(repoID, mode, limits, cands)
 		if err != nil {
 			return binds, err
 		}
-		if boundAgent != "" {
-			binds++
-			markCandidateBusy(cands, boundAgent)
+		if bind != nil {
+			binds = append(binds, *bind)
+			markCandidateBusy(cands, bind.AgentName)
 		}
 	}
 	return binds, nil
@@ -122,34 +152,34 @@ func (m *Matcher) tickRepo(repoID int64, limits map[string]int, now time.Time) (
 
 // tickMode processes one (repo, mode) group: enforce the concurrency
 // limit, take the oldest queued row, pick a free agent, bind. Returns
-// the bound agent's name on success (""/no-op on an empty queue,
-// concurrency cap hit, no free agent, or a swallowed bind race).
+// the populated Bind on success (nil on an empty queue, concurrency
+// cap hit, no free agent, or a swallowed bind race).
 func (m *Matcher) tickMode(
 	repoID int64,
 	mode model.DispatchMode,
 	limits map[string]int,
 	cands []AgentCandidate,
-) (string, error) {
+) (*Bind, error) {
 	limit := limits[string(mode)]
 	if limit > 0 {
 		inflight, err := m.b.CountInFlightByMode(repoID, mode)
 		if err != nil {
-			return "", fmt.Errorf("matcher: count in-flight (%d, %s): %w", repoID, mode, err)
+			return nil, fmt.Errorf("matcher: count in-flight (%d, %s): %w", repoID, mode, err)
 		}
 		if inflight >= limit {
-			return "", nil
+			return nil, nil
 		}
 	}
 	queue, err := m.b.ListQueuedByRepoMode(repoID, mode)
 	if err != nil {
-		return "", fmt.Errorf("matcher: list queued (%d, %s): %w", repoID, mode, err)
+		return nil, fmt.Errorf("matcher: list queued (%d, %s): %w", repoID, mode, err)
 	}
 	if len(queue) == 0 {
-		return "", nil
+		return nil, nil
 	}
 	agentName := AutoPickFreeAgent(cands)
 	if agentName == "" {
-		return "", nil
+		return nil, nil
 	}
 	ag, err := m.b.GetAgentByName(agentName)
 	if err != nil {
@@ -157,20 +187,21 @@ func (m *Matcher) tickMode(
 		// agents table is a defensive impossibility — bail this mode
 		// (skip the bind) and let the next tick re-read.
 		if errors.Is(err, store.ErrNotFound) {
-			return "", nil
+			return nil, nil
 		}
-		return "", fmt.Errorf("matcher: resolve agent %q: %w", agentName, err)
+		return nil, fmt.Errorf("matcher: resolve agent %q: %w", agentName, err)
 	}
 	oldest := queue[0]
-	if _, err := m.b.BindQueuedDispatch(oldest.ID, ag.ID); err != nil {
+	bound, err := m.b.BindQueuedDispatch(oldest.ID, ag.ID)
+	if err != nil {
 		// A concurrent process beat us to this row — fine, no-op and
 		// move on. The next tick will pick up whatever is still queued.
 		if errors.Is(err, store.ErrNotFound) {
-			return "", nil
+			return nil, nil
 		}
-		return "", fmt.Errorf("matcher: bind dispatch %d: %w", oldest.ID, err)
+		return nil, fmt.Errorf("matcher: bind dispatch %d: %w", oldest.ID, err)
 	}
-	return agentName, nil
+	return &Bind{Dispatch: bound, AgentName: agentName}, nil
 }
 
 // markCandidateBusy flips the HasOpenDispatch flag on the candidate

@@ -405,7 +405,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// agents. Leader-gating + error handling lives in
 		// controller.MatchIfLeader — same helper the desktop and api
 		// goroutines call, so all three UIs run the matcher identically.
-		controller.MatchIfLeader(m.matcher, m.elector, m.log)
+		controller.MatchIfLeader(m.matcher, m.elector, m.store, m.log)
 		if m.elector == nil {
 			return m, nil
 		}

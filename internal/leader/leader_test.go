@@ -2,6 +2,8 @@ package leader
 
 import (
 	"errors"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mrgeoffrich/bacio/internal/store"
@@ -122,5 +124,87 @@ func TestReleaseCallsBackend(t *testing.T) {
 	el.Release()
 	if !fb.released {
 		t.Fatal("Release should call backend.ReleaseLeader")
+	}
+}
+
+// TestTakeoverWritesAudit (BACI-160 gap 5) drives a real *store.Store
+// across two electors: the first holds the lease, then is force-staled
+// so the second can take it over. The second elector's takeover must
+// write one `leader.takeover` history row carrying the displaced
+// holder's label in Details.
+func TestTakeoverWritesAudit(t *testing.T) {
+	s, err := store.Open(filepath.Join(t.TempDir(), "leader.sqlite"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	// Process A acquires first — no previous holder, so this must NOT
+	// write a takeover row.
+	procA := New(s, "tui pid=1 host=alpha")
+	st := procA.Tick()
+	if !st.AmLeader {
+		t.Fatalf("procA should hold the lease after first tick")
+	}
+	rows, _ := s.ListHistory(store.HistoryFilter{Op: "leader.takeover"})
+	if len(rows) != 0 {
+		t.Fatalf("first-ever acquire wrote %d leader.takeover rows, want 0", len(rows))
+	}
+
+	// Force the lease stale so procB's ACQUIRE conditional UPDATE
+	// succeeds (mirrors the production "previous holder died" path).
+	if _, err := s.DB.Exec(`UPDATE ui_leader SET heartbeat_at = 0 WHERE id = 1`); err != nil {
+		t.Fatalf("force-stale lease: %v", err)
+	}
+
+	// Process B takes over. Must write exactly one row, Actor=its
+	// label, Details carries the displaced label.
+	procB := New(s, "desktop pid=99 host=beta")
+	stB := procB.Tick()
+	if !stB.AmLeader {
+		t.Fatalf("procB should have taken over after force-stale")
+	}
+	rows, err = s.ListHistory(store.HistoryFilter{Op: "leader.takeover"})
+	if err != nil {
+		t.Fatalf("ListHistory: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("leader.takeover rows = %d, want 1", len(rows))
+	}
+	row := rows[0]
+	if row.Actor != "desktop pid=99 host=beta" {
+		t.Fatalf("takeover Actor = %q, want acquiring label", row.Actor)
+	}
+	if row.Kind != "leader" {
+		t.Fatalf("takeover Kind = %q, want leader", row.Kind)
+	}
+	if !strings.Contains(row.Details, "from=tui pid=1 host=alpha") {
+		t.Fatalf("takeover Details = %q, missing from= clause", row.Details)
+	}
+	if !strings.Contains(row.Details, "to=desktop pid=99 host=beta") {
+		t.Fatalf("takeover Details = %q, missing to= clause", row.Details)
+	}
+
+	// Self-renewal on procB must NOT write a second row.
+	stB2 := procB.Tick()
+	if !stB2.AmLeader {
+		t.Fatalf("procB should still hold the lease after self-renew")
+	}
+	rows, _ = s.ListHistory(store.HistoryFilter{Op: "leader.takeover"})
+	if len(rows) != 1 {
+		t.Fatalf("leader.takeover rows after self-renew = %d, want 1 (no duplicate)", len(rows))
+	}
+}
+
+// TestTakeoverFakeBackendStaysSilent: the test fake doesn't satisfy
+// AuditRecorder, so a successful acquire MUST NOT panic and there is
+// no audit-row sink to assert against. Confirms the type-assertion
+// guard in maybeRecordTakeover (the production *store.Store DOES
+// satisfy AuditRecorder; only the test fake skips it).
+func TestTakeoverFakeBackendStaysSilent(t *testing.T) {
+	fb := &fakeBackend{acquireOK: true, current: store.LeaderInfo{Label: "someone else"}}
+	el := New(fb, "tui pid=1")
+	if st := el.Tick(); !st.AmLeader {
+		t.Fatalf("fake-backend acquire should still promote the elector")
 	}
 }
