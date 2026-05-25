@@ -61,6 +61,7 @@ drifting.`,
 		agentCancelCmd(),
 		agentQueueFollowOnCmd(),
 		agentCancelFollowOnCmd(),
+		agentDispatchChainCmd(),
 		agentListCmd(),
 		agentShowCmd(),
 		agentQuestionsCmd(),
@@ -831,6 +832,88 @@ func runAgentCancelFollowOn(in inputs.AgentCancelFollowOnInput) error {
 		return emitDryRun(d)
 	}
 	return emit(d)
+}
+
+// ---------- dispatch-chain (BACI-209) ----------
+
+func agentDispatchChainCmd() *cobra.Command {
+	var (
+		mode, then, rawInput string
+	)
+	cmd := &cobra.Command{
+		Use:   "dispatch-chain <issue-key>",
+		Short: "Queue a primary dispatch + a dormant follow-on on the same issue in one transaction (BACI-209)",
+		Long: `Compound dispatch: state-gated auto-pick primary dispatch (same shape
+as ` + "`bacio agent dispatch <key> --mode <stage>`" + `) **plus** a dormant
+follow-on against the brand-new parent — both rows written in one
+transaction so the caller never ends up in a half-queued state.
+
+--mode is the primary stage (the call is rejected if its state-gate
+doesn't admit the issue's current state). --then is the follow-on
+stage; its state-gate is **not** checked here — the follow-on's gate
+runs at fire time when the controller's promote sweep clears the
+dormant link (matches the ` + "`bacio agent queue-followon`" + ` posture).
+
+Use this for the desktop kanban's "Plan, then Implement" compound
+picker on a todo card: previously you had to dispatch the primary,
+wait for it to land in queued/pending/delivered, then attach a
+follow-on — now both rows are queued in a single action.
+
+Single-slot per issue (same as queue-followon): a chain call against
+an issue that already has a dormant follow-on is rejected.`,
+		Args: cobra.RangeArgs(0, 1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			raw, err := parseJSONInput(cmd, args, rawInput, "mode", "then")
+			if err != nil {
+				return err
+			}
+			if raw != nil {
+				in, _, err := inputio.DecodeStrict[inputs.AgentDispatchChainInput](raw)
+				if err != nil {
+					return err
+				}
+				return runAgentDispatchChain(*in)
+			}
+			if len(args) != 1 {
+				return fmt.Errorf("requires <issue-key> positional or --json")
+			}
+			return runAgentDispatchChain(inputs.AgentDispatchChainInput{
+				IssueKey:     args[0],
+				Mode:         mode,
+				FollowOnMode: then,
+			})
+		},
+	}
+	cmd.Flags().StringVar(&mode, "mode", "", "primary dispatch intent (plan, design, implement, review, ship, fix_review, or a template slug)")
+	cmd.Flags().StringVar(&then, "then", "", "follow-on dispatch intent — the next stage queued dormant against the brand-new parent")
+	addInputFlag(cmd, &rawInput)
+	return cmd
+}
+
+func runAgentDispatchChain(in inputs.AgentDispatchChainInput) error {
+	c, err := openClient()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	repo, err := repoForIssueKey(c, in.IssueKey)
+	if err != nil {
+		return err
+	}
+	parent, _, err := c.AutoDispatchIssueWithFollowOn(
+		context.Background(), repo, in.IssueKey, in.Mode, in.FollowOnMode, opts.dryRun,
+	)
+	if err != nil {
+		return err
+	}
+	// The parent is the primary affordance — same shape as
+	// `bacio agent dispatch <key> --mode`. The follow-on is observable
+	// via `bacio agent inbox` / the next BoardCard refresh, no need to
+	// round-trip a separate envelope here.
+	if opts.dryRun {
+		return emitDryRun(parent)
+	}
+	return emit(parent)
 }
 
 // ---------- list ----------

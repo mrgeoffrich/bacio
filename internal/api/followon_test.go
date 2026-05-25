@@ -239,6 +239,139 @@ func TestREST_CancelFollowOnIdempotent(t *testing.T) {
 	assertHistoryOps(t, s, nil)
 }
 
+// TestREST_DispatchChainHappyPath (BACI-209) — POST .../dispatch-chain
+// on a fresh todo card queues a primary plan dispatch AND a dormant
+// implement follow-on in one transaction. Both rows persist, the
+// follow-on links to the parent, and the audit log records both ops.
+func TestREST_DispatchChainHappyPath(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	iss := seedIssue(t, s, repo, "chain me")
+
+	resp, raw := apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/issues/"+iss.Key+"/dispatch-chain",
+		map[string]any{
+			"issue_key":      iss.Key,
+			"mode":           string(model.DispatchModePlan),
+			"follow_on_mode": string(model.DispatchModeImplement),
+		})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status %d, body %s", resp.StatusCode, raw)
+	}
+	var parent model.AgentDispatch
+	mustDecode(t, raw, &parent)
+	if parent.ID == 0 {
+		t.Fatalf("parent id = 0")
+	}
+	if parent.Status != model.DispatchQueued {
+		t.Errorf("parent status = %q, want queued", parent.Status)
+	}
+	if string(parent.Mode) != string(model.DispatchModePlan) {
+		t.Errorf("parent mode = %q, want %q", parent.Mode, model.DispatchModePlan)
+	}
+	if parent.QueuedAfterDispatchID != nil {
+		t.Errorf("parent has queued_after_dispatch_id = %v, want nil", parent.QueuedAfterDispatchID)
+	}
+	// Both rows visible on the store; follow-on links to the parent.
+	ds, _ := s.ListDispatches(store.DispatchFilter{RepoID: &repo.ID})
+	if len(ds) != 2 {
+		t.Fatalf("ListDispatches = %d, want 2 (parent + follow-on)", len(ds))
+	}
+	var follow *model.AgentDispatch
+	for _, d := range ds {
+		if d.QueuedAfterDispatchID != nil {
+			follow = d
+		}
+	}
+	if follow == nil {
+		t.Fatalf("no follow-on row landed")
+	}
+	if *follow.QueuedAfterDispatchID != parent.ID {
+		t.Errorf("follow.QueuedAfterDispatchID = %d, want %d", *follow.QueuedAfterDispatchID, parent.ID)
+	}
+	if string(follow.Mode) != string(model.DispatchModeImplement) {
+		t.Errorf("follow mode = %q, want %q", follow.Mode, model.DispatchModeImplement)
+	}
+	assertHistoryOps(t, s, []string{"agent.queue", "agent.followon.queue"})
+}
+
+// TestREST_DispatchChainStateGate (BACI-209) — a primary mode whose
+// state-gate doesn't admit the issue's current state returns 400 and
+// writes nothing.
+func TestREST_DispatchChainStateGate(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	iss := seedIssue(t, s, repo, "in-review card")
+	if err := s.SetIssueState(iss.ID, model.StateInReview); err != nil {
+		t.Fatalf("set in_review: %v", err)
+	}
+
+	resp, raw := apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/issues/"+iss.Key+"/dispatch-chain",
+		map[string]any{
+			"issue_key":      iss.Key,
+			"mode":           string(model.DispatchModePlan),
+			"follow_on_mode": string(model.DispatchModeImplement),
+		})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status %d, body %s", resp.StatusCode, raw)
+	}
+	if !strings.Contains(string(raw), "can't run from") {
+		t.Errorf("body missing gate-miss hint: %s", raw)
+	}
+	ds, _ := s.ListDispatches(store.DispatchFilter{RepoID: &repo.ID})
+	if len(ds) != 0 {
+		t.Fatalf("gate-miss landed %d row(s), want 0", len(ds))
+	}
+}
+
+// TestREST_DispatchChainMissingFollowOnMode (BACI-209) — empty
+// follow_on_mode returns 400 invalid_input (mirrors the regular
+// dispatch verb's missing-mode behaviour).
+func TestREST_DispatchChainMissingFollowOnMode(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	iss := seedIssue(t, s, repo, "missing follow-on")
+
+	resp, raw := apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/issues/"+iss.Key+"/dispatch-chain",
+		map[string]any{
+			"issue_key": iss.Key,
+			"mode":      string(model.DispatchModePlan),
+		})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status %d, body %s", resp.StatusCode, raw)
+	}
+}
+
+// TestREST_DispatchChainDryRun (BACI-209) — dry-run projects the
+// parent without writing.
+func TestREST_DispatchChainDryRun(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	iss := seedIssue(t, s, repo, "chain dryrun")
+
+	resp, raw := apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/issues/"+iss.Key+"/dispatch-chain?dry_run=1",
+		map[string]any{
+			"issue_key":      iss.Key,
+			"mode":           string(model.DispatchModePlan),
+			"follow_on_mode": string(model.DispatchModeImplement),
+		})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status %d, body %s", resp.StatusCode, raw)
+	}
+	if got := resp.Header.Get("X-Dry-Run"); got != "applied" {
+		t.Fatalf("X-Dry-Run = %q, want applied", got)
+	}
+	var proj model.AgentDispatch
+	mustDecode(t, raw, &proj)
+	if proj.ID != 0 {
+		t.Errorf("dry-run id = %d, want 0", proj.ID)
+	}
+	ds, _ := s.ListDispatches(store.DispatchFilter{RepoID: &repo.ID})
+	if len(ds) != 0 {
+		t.Fatalf("dry-run persisted %d row(s), want 0", len(ds))
+	}
+	assertHistoryOps(t, s, nil)
+}
+
 // TestREST_CancelFollowOnIssueInOtherRepo: DELETE against a key from a
 // different repo than the URL prefix returns 404 (no cross-repo leak).
 func TestREST_CancelFollowOnIssueInOtherRepo(t *testing.T) {

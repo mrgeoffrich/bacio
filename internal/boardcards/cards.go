@@ -795,6 +795,17 @@ func activeDispatchByIssueID(allDispatches []*model.AgentDispatch) map[int64]*mo
 		if _, ok := out[id]; ok {
 			continue
 		}
+		// BACI-209: a dormant follow-on (queued + queued_after_dispatch_id
+		// set) is NOT the active dispatch — it's chained behind the
+		// parent's still-open dispatch. Without this skip the dispatch-
+		// chain affordance would mis-label the spinner ("queued: Implement"
+		// while the user picked "Plan, then Implement"), because the
+		// follow-on is the newer row and would win the first-match
+		// walk. The parent dispatch a few rows back is the one driving
+		// waiting_for_claim.
+		if d.Status == model.DispatchQueued && d.QueuedAfterDispatchID != nil {
+			continue
+		}
 		switch d.Status {
 		case model.DispatchQueued, model.DispatchPending, model.DispatchDelivered:
 			out[id] = d

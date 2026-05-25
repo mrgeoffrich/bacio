@@ -501,6 +501,16 @@ body { margin: 0; }
 .mk-card-action-item.is-danger:hover {
   background: var(--status-blocked-bg, var(--coral-100, var(--bg-4)));
 }
+/* BACI-209: compound "Primary, then Follow-on" rows in the kanban
+   dispatch menu. Slightly inset and de-emphasised so the eye still
+   lands on the primary row as the default action; the follow-on
+   chain is the affordance you reach for when you specifically want
+   the chain. */
+.mk-card-action-item.is-compound {
+  padding-left: 16px;
+  color: var(--fg-2);
+  font-size: 11px;
+}
 
 /* BACI-192: activity-tray pin corner — a 16×16 triangular overlay in
    the top-right of the card that toggles the issue's membership in the

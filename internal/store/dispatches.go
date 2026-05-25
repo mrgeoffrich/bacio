@@ -778,6 +778,143 @@ func (s *Store) AddFollowOnDispatch(repoID, parentDispatchID int64, mode model.D
 	})
 }
 
+// AddDispatchWithFollowOnIn is the validated tuple AddDispatchWithFollowOn
+// consumes — the parent's fields plus the follow-on mode. The parent
+// is always inserted as a target-less queued row (the BACI-51 enqueue
+// path AutoDispatchIssue uses); the follow-on rides as a dormant
+// queued row linked to the just-inserted parent via
+// queued_after_dispatch_id. Both rows share the same RepoID, IssueID,
+// and CreatedBy actor — there's no scenario where the chain spans
+// repos or issues.
+type AddDispatchWithFollowOnIn struct {
+	RepoID       int64
+	IssueID      *int64
+	Mode         model.DispatchMode
+	Payload      string
+	CreatedBy    string
+	FollowOnMode model.DispatchMode
+}
+
+// AddDispatchWithFollowOn (BACI-209) inserts a queued parent dispatch
+// plus a dormant follow-on linked to it, both in one transaction. The
+// parent is target-less (matcher binds it later), the follow-on
+// carries queued_after_dispatch_id = parent.ID so the matcher's
+// dormant gate (NOT EXISTS … parent not settled) skips it until the
+// parent acks / cancels.
+//
+// Mirrors AddDispatch + AddFollowOnDispatch's individual contracts:
+//   - parent fields validated as for a queued AddDispatch call;
+//   - follow-on mode parsed + non-empty;
+//   - single-slot per issue (the parent's issue) — if a dormant
+//     follow-on already exists on the same issue the call errors
+//     before any INSERT runs.
+//
+// Sharing one transaction matters: if we wrote two sequential
+// AddDispatch + AddFollowOnDispatch calls and the second failed, the
+// parent would land queued but with no follow-on attached — a
+// half-queued state the UI would have to detect and clean up.
+//
+// Writes no audit row — the caller (typically
+// client.AutoDispatchIssueWithFollowOn) records agent.queue for the
+// parent + agent.followon.queue for the follow-on so the actor
+// attribution comes from the requesting caller rather than the store.
+func (s *Store) AddDispatchWithFollowOn(in AddDispatchWithFollowOnIn) (parent, followOn *model.AgentDispatch, err error) {
+	if in.RepoID == 0 {
+		return nil, nil, errors.New("dispatch requires a repo")
+	}
+	if in.IssueID == nil {
+		// Follow-ons are issue-scoped (the orphan-cancel sweep keys on
+		// issue state). A chain dispatch without an issue would land a
+		// queued parent + an undeletable orphan follow-on — refuse it
+		// here so the caller surfaces a clear error.
+		return nil, nil, errors.New("dispatch-with-follow-on requires an issue")
+	}
+	actor, err := ValidateActor(in.CreatedBy)
+	if err != nil {
+		return nil, nil, err
+	}
+	if _, err := model.ParseDispatchMode(string(in.Mode)); err != nil {
+		return nil, nil, err
+	}
+	if in.Mode == "" {
+		return nil, nil, errors.New("dispatch-with-follow-on requires a primary mode")
+	}
+	if _, err := model.ParseDispatchMode(string(in.FollowOnMode)); err != nil {
+		return nil, nil, err
+	}
+	if in.FollowOnMode == "" {
+		return nil, nil, errors.New("dispatch-with-follow-on requires a follow-on mode")
+	}
+	if len(in.Payload) > maxDispatchPayload {
+		return nil, nil, fmt.Errorf("dispatch payload too long (%d bytes; max %d)", len(in.Payload), maxDispatchPayload)
+	}
+	// Single-slot per issue — match AddFollowOnDispatch's invariant. A
+	// pre-existing dormant follow-on on the issue would mean the user
+	// is double-queueing two next-mode chains on the same ticket.
+	existing, err := s.FollowOnForIssue(in.RepoID, *in.IssueID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if existing != nil {
+		return nil, nil, fmt.Errorf("issue id=%d already has a follow-on dispatch (id=%d)", *in.IssueID, existing.ID)
+	}
+
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return nil, nil, err
+	}
+	defer tx.Rollback()
+	// Parent: target-less queued row, identical shape to the BACI-51
+	// AutoDispatchIssue enqueue path.
+	res, err := tx.Exec(`
+		INSERT INTO agent_dispatches
+		    (repo_id, target_agent_id, target_session_id, issue_id, mode, payload, status, created_by, queued_after_dispatch_id)
+		VALUES (?, NULL, '', ?, ?, ?, 'queued', ?, NULL)`,
+		in.RepoID, nullableInt(in.IssueID), string(in.Mode), in.Payload, actor,
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+	parentID, err := res.LastInsertId()
+	if err != nil {
+		return nil, nil, err
+	}
+	// Follow-on: dormant queued row, linked to the just-inserted parent.
+	if _, err := tx.Exec(`
+		INSERT INTO agent_dispatches
+		    (repo_id, target_agent_id, target_session_id, issue_id, mode, payload, status, created_by, queued_after_dispatch_id)
+		VALUES (?, NULL, '', ?, ?, '', 'queued', ?, ?)`,
+		in.RepoID, nullableInt(in.IssueID), string(in.FollowOnMode), actor, parentID,
+	); err != nil {
+		return nil, nil, err
+	}
+	// A dispatch against a concrete issue flips its waiting_for_claim
+	// flag — same as AddDispatch. One UPDATE covers both rows since
+	// both target the same issue.
+	if _, err := tx.Exec(
+		`UPDATE issues SET waiting_for_claim = 1 WHERE id = ?`, *in.IssueID,
+	); err != nil {
+		return nil, nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, nil, err
+	}
+	// Reload both rows with their joined columns populated.
+	parent, err = s.GetDispatch(parentID)
+	if err != nil {
+		return nil, nil, err
+	}
+	// The follow-on is the one row with QueuedAfterDispatchID == parent.ID;
+	// load it via FollowOnForIssue rather than tracking the second
+	// LastInsertId so the scan goes through the same dispatchSelect
+	// projection.
+	followOn, err = s.FollowOnForIssue(in.RepoID, *in.IssueID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return parent, followOn, nil
+}
+
 // CancelFollowOnDispatch cancels the current dormant follow-on for an
 // issue (BACI-179) — user-driven removal of a chip from the kanban.
 // Idempotent: returns (nil, nil) when there is no dormant row to

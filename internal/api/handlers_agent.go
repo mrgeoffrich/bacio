@@ -1524,6 +1524,77 @@ func (d deps) handleIssueCancelFollowOn(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, dsp)
 }
 
+// ---------- dispatch-chain (BACI-209) ----------
+
+// handleIssueDispatchChain is the REST entry point for the compound
+// dispatch verb (BACI-209): queue a primary dispatch + a dormant
+// follow-on against the same issue in one transaction. Mirrors
+// handleIssueDispatch in shape but routes through
+// client.AutoDispatchIssueWithFollowOn so the gate + payload + two
+// audit rows live in one place. State-gate misses on the primary and
+// the single-slot rejection on the follow-on both surface as 400s.
+func (d deps) handleIssueDispatchChain(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	iss, ok := resolveIssueOnRepo(w, r, d.store, repo)
+	if !ok {
+		return
+	}
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	in, _, err := inputio.DecodeStrict[inputs.AgentDispatchChainInput](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	if in.Mode == "" {
+		writeError(w, http.StatusBadRequest, "invalid_input",
+			"a primary dispatch mode is required", map[string]any{"field": "mode"})
+		return
+	}
+	if in.FollowOnMode == "" {
+		writeError(w, http.StatusBadRequest, "invalid_input",
+			"a follow-on dispatch mode is required", map[string]any{"field": "follow_on_mode"})
+		return
+	}
+
+	who := ActorFromContext(r.Context())
+	c := client.NewLocalFromStore(d.store, who)
+	defer c.Close()
+	parent, _, err := c.AutoDispatchIssueWithFollowOn(
+		r.Context(), repo, iss.Key, in.Mode, in.FollowOnMode, isDryRun(r),
+	)
+	if err != nil {
+		// Mirror handleIssueDispatch / handleIssueQueueFollowOn's
+		// error-class buckets: state-gate misses, same-mode rejections,
+		// and single-slot conflicts are 400s (caller's choice to retry
+		// with a different stage); everything else falls through.
+		msg := err.Error()
+		if strings.Contains(msg, "can't run from") ||
+			strings.Contains(msg, "matches the primary mode") ||
+			strings.Contains(msg, "already has a follow-on") {
+			writeError(w, http.StatusBadRequest, "invalid_input", msg, nil)
+			return
+		}
+		status, code := statusForError(err)
+		writeError(w, status, code, msg, nil)
+		return
+	}
+	// Return the parent dispatch — same envelope shape as
+	// handleIssueDispatch. The follow-on rides on the next BoardCard
+	// refresh via card.followOn (the BoardCard denorm is already wired
+	// from BACI-192).
+	if isDryRun(r) {
+		writeDryRun(w, http.StatusCreated, parent)
+		return
+	}
+	writeJSON(w, http.StatusCreated, parent)
+}
+
 // handleIssueWaitingDispatch is the BACI-51 read backing the spinner-
 // as-cancel UI: returns the active (queued / pending / delivered)
 // dispatch targeting an issue, or 404 when none. Read-only; no audit

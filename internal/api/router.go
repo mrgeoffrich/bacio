@@ -182,6 +182,10 @@ func newRouter(d deps) http.Handler {
 	// / CancelFollowOnDispatch.
 	mux.HandleFunc("POST /repos/{prefix}/issues/{key}/followon", d.handleIssueQueueFollowOn)
 	mux.HandleFunc("DELETE /repos/{prefix}/issues/{key}/followon", d.handleIssueCancelFollowOn)
+	// BACI-209 compound dispatch: queue a state-gated primary + a
+	// dormant follow-on against the same issue in one transaction.
+	// Mirrors the kanban's "Plan, then Implement" picker on todo cards.
+	mux.HandleFunc("POST /repos/{prefix}/issues/{key}/dispatch-chain", d.handleIssueDispatchChain)
 	// BACI-51 spinner-as-cancel UI read: returns the active queued /
 	// pending / delivered dispatch on an issue, or 404 when none. Used
 	// by the desktop + (future) web cancel button to resolve the

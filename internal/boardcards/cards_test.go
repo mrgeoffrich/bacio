@@ -771,6 +771,34 @@ func TestDeriveWaitingStateUnits(t *testing.T) {
 	}
 }
 
+// TestActiveDispatchByIssueID_SkipsDormantFollowOn (BACI-209) — the
+// compound dispatch-chain affordance inserts a dormant follow-on
+// (queued + queued_after_dispatch_id set) AFTER the parent. allDispatches
+// is newest-first, so without the dormant-skip the follow-on would win
+// the first-match walk and the spinner would mis-label as the follow-on
+// mode instead of the parent's. Pin the skip so the regression doesn't
+// silently come back.
+func TestActiveDispatchByIssueID_SkipsDormantFollowOn(t *testing.T) {
+	issueID := int64(7)
+	parentID := int64(1)
+	// Newest-first order — same shape RepoDispatches returns.
+	all := []*model.AgentDispatch{
+		{ID: 2, IssueID: &issueID, Mode: "implement", Status: model.DispatchQueued, QueuedAfterDispatchID: &parentID},
+		{ID: 1, IssueID: &issueID, Mode: "plan", Status: model.DispatchQueued},
+	}
+	got := activeDispatchByIssueID(all)
+	active, ok := got[issueID]
+	if !ok {
+		t.Fatalf("no active dispatch for issue %d", issueID)
+	}
+	if active.ID != parentID {
+		t.Fatalf("active.ID = %d, want %d (parent — dormant follow-on must be skipped)", active.ID, parentID)
+	}
+	if string(active.Mode) != "plan" {
+		t.Fatalf("active.Mode = %q, want plan (the parent's mode, not the follow-on's)", active.Mode)
+	}
+}
+
 // TestWaitingStateLabel pins the user-facing wording in lockstep with
 // the TS-side mirror in lib/waitingLabels.ts. The TS file MUST stay in
 // sync — changing one and not the other surfaces as a label mismatch
