@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"github.com/rivo/uniseg"
 )
 
 // Defensive validators that run at every mutation boundary so hallucinated
@@ -209,6 +210,44 @@ func ValidateSlug(s string) (string, error) {
 	}
 	if !slugRule.MatchString(s) {
 		return "", fmt.Errorf("slug %q must be kebab-case (lowercase letters, digits, hyphens; starting with a letter or digit)", s)
+	}
+	return s, nil
+}
+
+// maxEmojiBytes caps the byte length of the emoji field. A grapheme
+// cluster covering every emoji currently registered comfortably fits in
+// ~64 bytes (a long ZWJ flag sequence is on the order of 30); 128 bytes
+// is generous enough that any single cluster passes but a runaway paste
+// fails before uniseg even sees it.
+const maxEmojiBytes = 128
+
+// ValidateEmoji (BACI-172) enforces the per-feature emoji column's
+// shape: either empty (no glyph) or exactly one grapheme cluster as
+// counted by uniseg. ZWJ sequences (e.g. 👨‍👩‍👧) and country flags
+// (🇦🇺) read as one cluster and pass; multi-cluster input like
+// "FEATURE" (7 clusters) or "ab" (2 clusters) is rejected so the field
+// stays a glyph decoration, not a free-form label. C0 control characters
+// and DEL are rejected the same way as on single-line fields — an
+// embedded NUL in an "emoji" would corrupt the audit log render.
+func ValidateEmoji(s string) (string, error) {
+	if !utf8.ValidString(s) {
+		return "", fmt.Errorf("emoji is not valid UTF-8")
+	}
+	if len(s) > maxEmojiBytes {
+		return "", fmt.Errorf("emoji too long: %d bytes, max %d", len(s), maxEmojiBytes)
+	}
+	// Empty is the "no glyph" signal — the UI renders nothing.
+	if s == "" {
+		return "", nil
+	}
+	for _, r := range s {
+		if isDisallowedControlSingle(r) {
+			return "", fmt.Errorf("emoji contains a disallowed control character (U+%04X)", r)
+		}
+	}
+	n := uniseg.GraphemeClusterCount(s)
+	if n != 1 {
+		return "", fmt.Errorf("emoji %q must be empty or exactly one grapheme cluster (got %d)", s, n)
 	}
 	return s, nil
 }

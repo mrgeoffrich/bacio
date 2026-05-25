@@ -26,6 +26,14 @@ CREATE TABLE IF NOT EXISTS features (
     slug        TEXT    NOT NULL,
     title       TEXT    NOT NULL,
     description TEXT    NOT NULL DEFAULT '',
+    -- emoji (BACI-172) is a single-glyph "feature brand" used by the
+    -- kanban card UI to mark every card under this feature with a
+    -- visual identifier. Validated at the store boundary to be either
+    -- empty (no glyph) or exactly one grapheme cluster — multi-cluster
+    -- input like "FEATURE" is rejected so the field stays a glyph
+    -- decoration, not a free-form label. Empty string by default; the
+    -- card renderer skips the slot entirely when empty.
+    emoji       TEXT    NOT NULL DEFAULT '',
     -- archived_at (BACI-68) — same semantics as on issues. The auto-sweep
     -- archives a feature when every child issue is archived (and the
     -- feature had at least one child); manual `bacio feature archive` /
