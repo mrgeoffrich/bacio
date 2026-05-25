@@ -1,5 +1,5 @@
 import React from 'react';
-import { Search, Plus, Columns3, GitBranch, Settings, X, Zap, Lock, MessageSquare, AlertTriangle, Minimize2, Maximize2, SkipForward, Pin, Rows3, RefreshCw } from 'lucide-react';
+import { Search, Plus, Columns3, GitBranch, Settings, X, Zap, Lock, MessageSquare, AlertTriangle, Minimize2, Maximize2, SkipForward, Pin, ChevronsDownUp, ChevronsUpDown, RefreshCw } from 'lucide-react';
 
 // Glyphs come from lucide-react; the UI references them by short name
 // via <Icon name="..." />. The wrapper span (.mk-icon) sizes them, so the SVG's
@@ -29,9 +29,15 @@ const ICONS = {
   // CSS-only clip-path triangle, no glyph).
   forward: SkipForward,
   pin: Pin,
-  // BACI-191: per-column compact-cards toggle. Rows3 conveys the
-  // "densify rows" metaphor, distinct from the collapse chevrons.
-  'rows-3': Rows3,
+  // BACI-191 / BACI-207: per-column compact-cards toggle. The paired
+  // chevron glyphs mirror the Minimize2 / Maximize2 column-collapse
+  // pair landed in BACI-201 — converging chevrons (ChevronsDownUp)
+  // read as "squeeze the cards together", diverging chevrons
+  // (ChevronsUpDown) as "let them breathe again". Rows3 (the prior
+  // glyph) leaned on a "denser rows" metaphor that didn't land in
+  // context next to the count and the collapse glyph.
+  'chevrons-down-up': ChevronsDownUp,
+  'chevrons-up-down': ChevronsUpDown,
   refresh: RefreshCw,
 };
 

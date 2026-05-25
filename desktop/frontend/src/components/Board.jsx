@@ -229,10 +229,15 @@ export default function Board({ activeBoard, columns, cards, promptConfig, onMov
                 <header className="mk-col-head">
                   <span className={`mk-col-pill mk-status-${col.state}`}>{col.label}</span>
                   <span className="mk-col-count">{colCards.length}</span>
-                  {/* BACI-191: compact-cards toggle sits between the count
-                      and the collapse chevron. Active (is-active class)
-                      when the column is already compact so the user can
-                      read the current state at a glance. */}
+                  {/* BACI-191 / BACI-207: compact-cards toggle sits between
+                      the count and the collapse chevron. The glyph swaps
+                      with state — converging chevrons (down-up) when the
+                      column is expanded read as "squeeze together",
+                      diverging chevrons (up-down) when already compact
+                      read as "let breathe". Mirrors the BACI-201
+                      Minimize2 / Maximize2 pairing on the collapse
+                      strip. is-active still lights the icon when compact
+                      so the toggle state reads even mid-flick. */}
                   <button
                     type="button"
                     className={`mk-col-compact-btn${userCompact.has(col.state) ? ' is-active' : ''}`}
@@ -240,7 +245,7 @@ export default function Board({ activeBoard, columns, cards, promptConfig, onMov
                     aria-pressed={userCompact.has(col.state)}
                     onClick={() => userCompact.has(col.state) ? uncompactColumn(col.state) : compactColumn(col.state)}
                   >
-                    <Icon name="rows-3" />
+                    <Icon name={userCompact.has(col.state) ? 'chevrons-up-down' : 'chevrons-down-up'} />
                   </button>
                   {/* BACI-188: the collapse affordance only appears on
                       populated columns — an empty column already wears
