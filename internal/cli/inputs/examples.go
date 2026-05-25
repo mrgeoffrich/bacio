@@ -188,6 +188,13 @@ var (
 	ExampleIssueDispatch = IssueDispatchInput{
 		Mode: "implement",
 	}
+	ExampleAgentQueueFollowOn = AgentQueueFollowOnInput{
+		IssueKey: "MINI-42",
+		Mode:     "implement",
+	}
+	ExampleAgentCancelFollowOn = AgentCancelFollowOnInput{
+		IssueKey: "MINI-42",
+	}
 
 	ExampleAgentQuestionsList = AgentQuestionsListInput{
 		SessionID: "092d8907-a5ed-48cf-9fdd-22c3941f3710",
