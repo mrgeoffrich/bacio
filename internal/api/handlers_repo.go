@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
+	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/inputio"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
@@ -212,4 +213,75 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(body)
+}
+
+// handleRepoLink implements `POST /repos/{prefix}/link` (BACI-112) —
+// the HTTP equivalent of `bacio repo link`. Delegates to the shared
+// client.LinkPhantomRepo implementation so all four surfaces (CLI,
+// REST, desktop Wails, web fetch) execute the same validation +
+// audit-log sequence. The dry-run path mirrors the local CLI's
+// projection and writes nothing.
+func (d deps) handleRepoLink(w http.ResponseWriter, r *http.Request) {
+	prefix := strings.ToUpper(r.PathValue("prefix"))
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	in, _, err := inputio.DecodeStrict[inputs.RepoLinkInput](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	// Prefix in the body is optional — the path parameter wins. If
+	// both are set and disagree, reject so a caller can't smuggle a
+	// mismatch through.
+	if in.Prefix != "" && !strings.EqualFold(in.Prefix, prefix) {
+		writeError(w, http.StatusBadRequest, "invalid_input",
+			fmt.Sprintf("body prefix %q does not match URL prefix %q", in.Prefix, prefix), nil)
+		return
+	}
+	actor := ActorFromContext(r.Context())
+	result, err := client.NewLocalFromStore(d.store, actor).LinkPhantomRepo(r.Context(), prefix, in.Path, isDryRun(r))
+	if err != nil {
+		var linkErr *client.RepoLinkError
+		if errors.As(err, &linkErr) {
+			status, code := repoLinkErrorStatus(linkErr.Kind)
+			details := map[string]any{"kind": string(linkErr.Kind)}
+			if linkErr.ExistingPrefix != "" {
+				details["existing_prefix"] = linkErr.ExistingPrefix
+			}
+			if linkErr.Path != "" {
+				details["path"] = linkErr.Path
+			}
+			writeError(w, status, code, linkErr.Error(), details)
+			return
+		}
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if isDryRun(r) {
+		writeDryRun(w, http.StatusOK, result)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// repoLinkErrorStatus maps the typed precondition failures from
+// client.LinkPhantomRepo to their HTTP status + machine code. Kept
+// in one place so both this handler and any future caller (e.g. a
+// /repos batch verb) round-trip the same codes.
+func repoLinkErrorStatus(kind client.RepoLinkErrorKind) (int, string) {
+	switch kind {
+	case client.RepoLinkErrNotPhantom,
+		client.RepoLinkErrPathAlreadyBound,
+		client.RepoLinkErrNoOwningSyncRepo:
+		return http.StatusConflict, "conflict"
+	case client.RepoLinkErrPathNotAbsolute,
+		client.RepoLinkErrPathNotExists,
+		client.RepoLinkErrPathNotGit:
+		return http.StatusBadRequest, "invalid_input"
+	default:
+		return http.StatusBadRequest, "invalid_input"
+	}
 }

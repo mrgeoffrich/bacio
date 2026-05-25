@@ -3,6 +3,8 @@
 package tui
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -11,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
 	bsync "github.com/mrgeoffrich/bacio/internal/sync"
@@ -41,6 +44,33 @@ type syncView struct {
 	// indexes into this slice.
 	rows   []syncRow
 	cursor int
+
+	// link (BACI-112) is the phantom-link overlay state. Non-nil when
+	// the operator has hit `l` on a phantom syncRowRepoMember; nil
+	// otherwise. While non-nil the view CapturesInput() so the shell
+	// stops intercepting keystrokes and the user can type a path.
+	link *syncLinkOverlay
+}
+
+// syncLinkOverlay is the BACI-112 path-entry overlay rendered above the
+// sync row list. The operator presses `l` on a phantom row, types an
+// absolute path, and presses enter to submit (esc cancels). Submit
+// drives client.LinkPhantomRepo against the local store + actor.
+type syncLinkOverlay struct {
+	// Prefix of the phantom we're linking — captured at open time so
+	// the overlay keeps working if the row list re-orders under it.
+	prefix string
+	// Name (best-effort) of the phantom, surfaced in the prompt so the
+	// user can confirm they've picked the right row.
+	name string
+	// path is the in-progress text input.
+	path string
+	// err is the last submission error to render under the prompt.
+	// Cleared on every keystroke so the message doesn't outlive the
+	// user's correction.
+	err error
+	// submitting blocks repeat enters while a link call is in flight.
+	submitting bool
 }
 
 // syncRowKind discriminates the renderable shapes the flat row list
@@ -179,22 +209,33 @@ func (v *syncView) rebuildRows() {
 
 func (v *syncView) Init() tea.Cmd       { return syncTabRefreshTick() }
 func (v *syncView) Status() string      { return "" }
-func (v *syncView) HasOverlay() bool    { return false }
-func (v *syncView) CloseOverlay()       {}
-func (v *syncView) CapturesInput() bool { return false }
+func (v *syncView) HasOverlay() bool    { return v.link != nil }
+func (v *syncView) CloseOverlay()       { v.link = nil }
+func (v *syncView) CapturesInput() bool { return v.link != nil }
 func (v *syncView) Breadcrumb() string  { return "" }
 
 func (v *syncView) Help() string {
-	return "j/k move · g/G top/bottom · t toggle background sync · r reload · q quit"
+	if v.link != nil {
+		return "type path · enter link · esc cancel"
+	}
+	return "j/k move · g/G top/bottom · t toggle background sync · l link phantom · r reload · q quit"
 }
 
 func (v *syncView) Update(msg tea.Msg) tea.Cmd {
 	if _, ok := msg.(syncTabRefreshTickMsg); ok {
+		// While the overlay is open we still reload the underlying
+		// registry so the row list stays fresh, but don't touch the
+		// overlay state — that would clobber the user's in-progress
+		// typing.
 		v.reload()
 		return syncTabRefreshTick()
 	}
 	key, ok := msg.(tea.KeyMsg)
 	if !ok {
+		return nil
+	}
+	if v.link != nil {
+		v.updateLinkOverlay(key)
 		return nil
 	}
 	switch key.String() {
@@ -216,8 +257,111 @@ func (v *syncView) Update(msg tea.Msg) tea.Cmd {
 		v.reload()
 	case "t":
 		v.toggleBackgroundSync()
+	case "l":
+		v.openLinkOverlayAtCursor()
 	}
 	return nil
+}
+
+// openLinkOverlayAtCursor opens the phantom-link path-entry overlay
+// when the cursor sits on a phantom syncRowRepoMember. No-op on any
+// other row — the help line surfaces the key only when there's a
+// phantom under the cursor would be ideal but would noisily flap as
+// the cursor moves; the current "key is always announced, only acts
+// on phantoms" trade-off keeps the help line stable.
+func (v *syncView) openLinkOverlayAtCursor() {
+	if v.cursor < 0 || v.cursor >= len(v.rows) {
+		return
+	}
+	row := v.rows[v.cursor]
+	if row.Kind != syncRowRepoMember || row.Member == nil {
+		return
+	}
+	if row.Member.Status != bsync.StatusPhantom {
+		return
+	}
+	v.link = &syncLinkOverlay{
+		prefix: row.Member.Prefix,
+		name:   row.Member.Name,
+	}
+}
+
+// updateLinkOverlay handles key input while the overlay is open. The
+// shell's CapturesInput() gate redirects every key here — we own the
+// path-edit semantics until the user submits or cancels.
+func (v *syncView) updateLinkOverlay(key tea.KeyMsg) {
+	if v.link == nil {
+		return
+	}
+	if v.link.submitting {
+		// Block input while a submit is in flight. Esc still cancels
+		// at the shell level (CloseOverlay clears it via the global
+		// key path) — explicitly here so a stuck submit isn't a deadlock.
+		if key.Type == tea.KeyEsc {
+			v.link = nil
+		}
+		return
+	}
+	switch key.Type {
+	case tea.KeyEsc:
+		v.link = nil
+		return
+	case tea.KeyEnter:
+		v.submitLinkOverlay()
+		return
+	case tea.KeyBackspace, tea.KeyCtrlH:
+		if n := len(v.link.path); n > 0 {
+			// Trim one rune off the end so multi-byte paths step
+			// cleanly. The path is plain ASCII in practice but we
+			// pay no cost being correct here.
+			runes := []rune(v.link.path)
+			v.link.path = string(runes[:len(runes)-1])
+			v.link.err = nil
+		}
+		return
+	case tea.KeyCtrlU:
+		// Match readline: clear the line.
+		v.link.path = ""
+		v.link.err = nil
+		return
+	case tea.KeyRunes, tea.KeySpace:
+		v.link.path += string(key.Runes)
+		if key.Type == tea.KeySpace && len(key.Runes) == 0 {
+			v.link.path += " "
+		}
+		v.link.err = nil
+		return
+	}
+}
+
+// submitLinkOverlay runs the link call against the local client. The
+// overlay is dismissed on success (and reload() picks up the
+// upgraded row); errors stay rendered under the prompt so the user
+// can correct the path without re-opening the overlay.
+func (v *syncView) submitLinkOverlay() {
+	if v.link == nil {
+		return
+	}
+	path := strings.TrimSpace(v.link.path)
+	if path == "" {
+		v.link.err = errors.New("path is required")
+		return
+	}
+	v.link.submitting = true
+	c := client.NewLocalFromStore(v.store, v.actor)
+	res, err := c.LinkPhantomRepo(context.Background(), v.link.prefix, path, false)
+	v.link.submitting = false
+	if err != nil {
+		v.link.err = err
+		return
+	}
+	// Success: close overlay and reload the registry so the row
+	// transitions out of `phantom`. AlreadyLinked is folded into the
+	// same close path — the result is identical from the operator's
+	// point of view (the row is now linked).
+	_ = res
+	v.link = nil
+	v.reload()
 }
 
 // toggleBackgroundSync flips sync.background_enabled and writes the
@@ -273,8 +417,73 @@ func (v *syncView) View(width, height int) string {
 		bodyHeight = 1
 	}
 	body = scrollSyncBody(body, v.cursor, lines, bodyHeight)
+	if v.link != nil {
+		// Replace the bottom of the body with the overlay so the
+		// operator's typing is unmissable. We don't render a
+		// floating box (would complicate the renderer's scroll
+		// math); a fixed-height footer is enough — the overlay is
+		// transient and the row list is still visible above it.
+		overlay := renderSyncLinkOverlay(v.link, innerWidth)
+		// Trim the body's last few lines so the overlay fits without
+		// pushing the title off-screen.
+		bodyLines := strings.Split(body, "\n")
+		overlayHeight := strings.Count(overlay, "\n") + 1
+		if overlayHeight > bodyHeight-1 {
+			overlayHeight = bodyHeight - 1
+		}
+		keep := bodyHeight - overlayHeight
+		if keep < 0 {
+			keep = 0
+		}
+		if keep < len(bodyLines) {
+			bodyLines = bodyLines[:keep]
+		}
+		body = strings.Join(bodyLines, "\n")
+		body = lipgloss.JoinVertical(lipgloss.Left, body, overlay)
+	}
 	content := lipgloss.JoinVertical(lipgloss.Left, titleBar, "", body)
 	return box.Render(content)
+}
+
+// renderSyncLinkOverlay paints the phantom-link path-entry prompt as a
+// fixed-height footer block — three lines (prompt, input, help/err).
+// Wider terminals get more of the path visible; narrow ones truncate
+// from the left with a leading ellipsis so the cursor end of the
+// path is always in view (the user is typing at the end).
+func renderSyncLinkOverlay(o *syncLinkOverlay, innerWidth int) string {
+	if o == nil {
+		return ""
+	}
+	prefix := o.prefix
+	if o.name != "" {
+		prefix = fmt.Sprintf("%s · %s", o.prefix, o.name)
+	}
+	promptStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("231")).Background(colHeaderFocus).Width(innerWidth).Padding(0, 1)
+	prompt := promptStyle.Render(truncate("Link "+prefix+" → enter absolute path", innerWidth-2))
+	// Reserve "> " (2) + 1 padding pair = 4 chars chrome.
+	pathWidth := innerWidth - 4
+	if pathWidth < 8 {
+		pathWidth = 8
+	}
+	pathText := o.path + "█" // block cursor at the end
+	if lipgloss.Width(pathText) > pathWidth {
+		runes := []rune(pathText)
+		// Keep the trailing pathWidth-1 runes, prefix with an ellipsis.
+		if pathWidth-1 < len(runes) {
+			pathText = "…" + string(runes[len(runes)-(pathWidth-1):])
+		}
+	}
+	inputStyle := lipgloss.NewStyle().Width(innerWidth).Padding(0, 1)
+	input := inputStyle.Render("> " + pathText)
+	footer := mutedStyle.Render("enter submit · esc cancel · ctrl-u clear")
+	if o.submitting {
+		footer = mutedStyle.Render("linking…")
+	}
+	if o.err != nil {
+		footer = errorStyle.Render(truncate(o.err.Error(), innerWidth-4))
+	}
+	footerLine := inputStyle.Render(footer)
+	return lipgloss.JoinVertical(lipgloss.Left, prompt, input, footerLine)
 }
 
 func (v *syncView) titleText() string {

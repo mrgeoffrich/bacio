@@ -39,6 +39,7 @@ import {
   SyncRepoDTO,
   MemberProjectDTO,
   UnsyncedProjectDTO,
+  RepoLinkResultDTO,
 } from '../bindings/github.com/mrgeoffrich/bacio/desktop';
 import { ClaimDTO } from '../bindings/github.com/mrgeoffrich/bacio/internal/agentcards';
 // BACI-145: re-export the WaitingState / WaitingKind enums from the
@@ -47,7 +48,7 @@ import { ClaimDTO } from '../bindings/github.com/mrgeoffrich/bacio/internal/agen
 // scattered through the kanban code).
 import { WaitingState, WaitingKind } from '../bindings/github.com/mrgeoffrich/bacio/internal/boardcards';
 
-export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, BoardPreferencesDTO, WaitingState, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO };
+export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, BoardPreferencesDTO, WaitingState, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO, RepoLinkResultDTO };
 
 // BACI-108: cross-transport aliases — components import from `./api`
 // and stay unaware of whether they're on the Wails or HTTP seam. The
@@ -591,6 +592,23 @@ export async function setSyncPreferences(
 export async function getSyncRegistry(): Promise<SyncRegistryDTO> {
   try {
     return await SettingsService.GetSyncRegistry();
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// linkPhantomRepo (BACI-112) binds a phantom repo (synced-but-pathless)
+// to a local git working tree. Backs the Sync view's PhantomLinkModal.
+// On success the modal closes and the Sync view re-fetches the
+// registry so the row drops its "phantom" status. Errors surface
+// inline; the modal also routes them through reportError so they
+// flow into the global error tray.
+export async function linkPhantomRepo(
+  prefix: string,
+  path: string,
+): Promise<RepoLinkResultDTO> {
+  try {
+    return await SettingsService.LinkPhantomRepo(prefix, path);
   } catch (err) {
     throw normalize(err);
   }

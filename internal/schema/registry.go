@@ -68,6 +68,7 @@ var Registry = []Entry{
 	{"doc.export", "Write a document's content to disk.", typeOf[inputs.DocExportInput](), inputs.ExampleDocExport},
 
 	{"repo.rm", repoRmDescription, typeOf[inputs.RepoRmInput](), inputs.ExampleRepoRm},
+	{"repo.link", "Link a phantom repo (synced-but-pathless) to a local working tree (BACI-112). Resolves the owning sync repo by walking the sync_remotes registry, runs UpgradePhantomRepo, then writes .bacio/config.yaml with the sync remote URL. Idempotent: re-linking to the same path is a no-op (returns already_linked=true without writing an audit row).", typeOf[inputs.RepoLinkInput](), inputs.ExampleRepoLink},
 
 	{"agent.register", "Register (or refresh) an AI-agent session against the current repo.", typeOf[inputs.AgentRegisterInput](), inputs.ExampleAgentRegister},
 	{"agent.heartbeat", "Bump last_seen_at on an existing agent session (optional — register / claim / release already bump it).", typeOf[inputs.AgentHeartbeatInput](), inputs.ExampleAgentHeartbeat},

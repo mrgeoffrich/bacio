@@ -116,6 +116,24 @@ export interface UnsyncedProject {
   path: string;
 }
 
+// RepoLinkResultDTO mirrors the desktop Wails RepoLinkResultDTO so the
+// PhantomLinkModal can consume one shape regardless of transport. The
+// wire payload from POST /repos/{prefix}/link is snake_case; reshape
+// in linkPhantomRepo() below.
+export interface RepoLinkResultDTO {
+  repo: { prefix: string; name: string; path: string; uuid: string };
+  syncRemoteUrl: string;
+  alreadyLinked: boolean;
+}
+
+// RepoLinkResultApi is the snake_case wire shape returned by
+// POST /repos/{prefix}/link.
+interface RepoLinkResultApi {
+  repo: { prefix: string; name: string; path: string; uuid: string };
+  sync_remote_url: string;
+  already_linked: boolean;
+}
+
 export interface BoardColumn {
   state: string;
   label: string;
@@ -723,6 +741,26 @@ function reshapeMemberProject(m: MemberProjectApi): MemberProject {
 
 function reshapeUnsyncedProject(u: UnsyncedProjectApi): UnsyncedProject {
   return { prefix: u.prefix, name: u.name, uuid: u.uuid, path: u.path };
+}
+
+// linkPhantomRepo (BACI-112) POSTs to /repos/{prefix}/link with a
+// {path} body and reshapes the snake_case server payload to the
+// camelCase DTO consumed by the React PhantomLinkModal. Errors
+// (4xx/5xx) surface through call()'s usual error-envelope path —
+// the modal renders them inline + also routes through reportError.
+export async function linkPhantomRepo(
+  prefix: string,
+  path: string,
+): Promise<RepoLinkResultDTO> {
+  const wire = await call<RepoLinkResultApi>(`/repos/${prefix.toUpperCase()}/link`, {
+    method: 'POST',
+    body: { path },
+  });
+  return {
+    repo: wire.repo,
+    syncRemoteUrl: wire.sync_remote_url,
+    alreadyLinked: wire.already_linked,
+  };
 }
 
 export async function listColumns(): Promise<BoardColumn[]> {

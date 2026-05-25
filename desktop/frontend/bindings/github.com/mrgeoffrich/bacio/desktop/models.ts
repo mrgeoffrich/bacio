@@ -1288,6 +1288,84 @@ export class RelationsDTO {
 }
 
 /**
+ * RepoLinkResultDTO mirrors client.RepoLinkResult — the success payload
+ * returned to the desktop / web Sync view's Link-local modal after a
+ * phantom row is bound to a working tree.
+ */
+export class RepoLinkResultDTO {
+    "repo": RepoLinkResultRepoDTO;
+    "syncRemoteUrl": string;
+    "alreadyLinked": boolean;
+
+    /** Creates a new RepoLinkResultDTO instance. */
+    constructor($$source: Partial<RepoLinkResultDTO> = {}) {
+        if (!("repo" in $$source)) {
+            this["repo"] = (new RepoLinkResultRepoDTO());
+        }
+        if (!("syncRemoteUrl" in $$source)) {
+            this["syncRemoteUrl"] = "";
+        }
+        if (!("alreadyLinked" in $$source)) {
+            this["alreadyLinked"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new RepoLinkResultDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): RepoLinkResultDTO {
+        const $$createField0_0 = $$createType25;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("repo" in $$parsedSource) {
+            $$parsedSource["repo"] = $$createField0_0($$parsedSource["repo"]);
+        }
+        return new RepoLinkResultDTO($$parsedSource as Partial<RepoLinkResultDTO>);
+    }
+}
+
+/**
+ * RepoLinkResultRepoDTO is the subset of model.Repo the modal needs
+ * to render success — prefix + path are enough to confirm to the
+ * user which working tree it landed on. Keeping a separate DTO (rather
+ * than embedding model.Repo) keeps the camel-case JSON tag convention
+ * consistent with the rest of this file.
+ */
+export class RepoLinkResultRepoDTO {
+    "prefix": string;
+    "name": string;
+    "path": string;
+    "uuid": string;
+
+    /** Creates a new RepoLinkResultRepoDTO instance. */
+    constructor($$source: Partial<RepoLinkResultRepoDTO> = {}) {
+        if (!("prefix" in $$source)) {
+            this["prefix"] = "";
+        }
+        if (!("name" in $$source)) {
+            this["name"] = "";
+        }
+        if (!("path" in $$source)) {
+            this["path"] = "";
+        }
+        if (!("uuid" in $$source)) {
+            this["uuid"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new RepoLinkResultRepoDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): RepoLinkResultRepoDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new RepoLinkResultRepoDTO($$parsedSource as Partial<RepoLinkResultRepoDTO>);
+    }
+}
+
+/**
  * SyncPreferencesDTO is the BACI-89 background-sync toggle shaped for
  * the desktop Sync view. Mirrors BoardPreferencesDTO / DisplayPreferencesDTO.
  */
@@ -1339,8 +1417,8 @@ export class SyncRegistryDTO {
      * Creates a new SyncRegistryDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): SyncRegistryDTO {
-        const $$createField0_0 = $$createType26;
-        const $$createField1_0 = $$createType28;
+        const $$createField0_0 = $$createType27;
+        const $$createField1_0 = $$createType29;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("syncRepos" in $$parsedSource) {
             $$parsedSource["syncRepos"] = $$createField0_0($$parsedSource["syncRepos"]);
@@ -1393,7 +1471,7 @@ export class SyncRepoDTO {
      * Creates a new SyncRepoDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): SyncRepoDTO {
-        const $$createField7_0 = $$createType30;
+        const $$createField7_0 = $$createType31;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("projects" in $$parsedSource) {
             $$parsedSource["projects"] = $$createField7_0($$parsedSource["projects"]);
@@ -1464,9 +1542,10 @@ const $$createType21 = DocLinkDTO.createFrom;
 const $$createType22 = $Create.Array($$createType21);
 const $$createType23 = RelationDTO.createFrom;
 const $$createType24 = $Create.Array($$createType23);
-const $$createType25 = SyncRepoDTO.createFrom;
-const $$createType26 = $Create.Array($$createType25);
-const $$createType27 = UnsyncedProjectDTO.createFrom;
-const $$createType28 = $Create.Array($$createType27);
-const $$createType29 = MemberProjectDTO.createFrom;
-const $$createType30 = $Create.Array($$createType29);
+const $$createType25 = RepoLinkResultRepoDTO.createFrom;
+const $$createType26 = SyncRepoDTO.createFrom;
+const $$createType27 = $Create.Array($$createType26);
+const $$createType28 = UnsyncedProjectDTO.createFrom;
+const $$createType29 = $Create.Array($$createType28);
+const $$createType30 = MemberProjectDTO.createFrom;
+const $$createType31 = $Create.Array($$createType30);

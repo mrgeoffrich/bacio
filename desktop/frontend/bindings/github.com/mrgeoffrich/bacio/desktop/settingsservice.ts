@@ -95,6 +95,22 @@ export function GetSyncRegistry(): $CancellablePromise<$models.SyncRegistryDTO> 
 }
 
 /**
+ * LinkPhantomRepo (BACI-112) binds a phantom repo row to a local git
+ * working tree. Wired to the desktop SyncView's PhantomLinkModal and
+ * — via api.ts shim — to the web SyncView. The dry-run path is not
+ * exposed here; the modal asks for confirmation before submitting and
+ * the underlying write is sub-millisecond, so a separate rehearse
+ * surface would be more noise than signal. A future caller that
+ * needs it can pass `dryRun=true` to the underlying client method
+ * directly.
+ */
+export function LinkPhantomRepo(prefix: string, path: string): $CancellablePromise<$models.RepoLinkResultDTO> {
+    return $Call.ByID(3604398369, prefix, path).then(($result: any) => {
+        return $$createType5($result);
+    });
+}
+
+/**
  * ListPromptTemplates returns every registered template in store
  * iteration order — the desktop Settings panel renders them in this
  * order and the per-card action menu in the Board iterates the same
@@ -102,7 +118,7 @@ export function GetSyncRegistry(): $CancellablePromise<$models.SyncRegistryDTO> 
  */
 export function ListPromptTemplates(): $CancellablePromise<$models.PromptTemplateDTO[]> {
     return $Call.ByID(1001854565).then(($result: any) => {
-        return $$createType5($result);
+        return $$createType6($result);
     });
 }
 
@@ -113,7 +129,7 @@ export function ListPromptTemplates(): $CancellablePromise<$models.PromptTemplat
  */
 export function PromptPlaceholders(): $CancellablePromise<string[]> {
     return $Call.ByID(1135988516).then(($result: any) => {
-        return $$createType6($result);
+        return $$createType7($result);
     });
 }
 
@@ -135,7 +151,7 @@ export function RenamePromptTemplate(slug: string, newSlug: string, newName: str
  */
 export function RestoreBuiltinPromptTemplates(): $CancellablePromise<$models.PromptTemplateDTO[]> {
     return $Call.ByID(3843909418).then(($result: any) => {
-        return $$createType5($result);
+        return $$createType6($result);
     });
 }
 
@@ -218,5 +234,6 @@ const $$createType1 = $models.BoardPreferencesDTO.createFrom;
 const $$createType2 = $models.DisplayPreferencesDTO.createFrom;
 const $$createType3 = $models.SyncPreferencesDTO.createFrom;
 const $$createType4 = $models.SyncRegistryDTO.createFrom;
-const $$createType5 = $Create.Array($$createType0);
-const $$createType6 = $Create.Array($Create.Any);
+const $$createType5 = $models.RepoLinkResultDTO.createFrom;
+const $$createType6 = $Create.Array($$createType0);
+const $$createType7 = $Create.Array($Create.Any);

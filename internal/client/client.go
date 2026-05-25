@@ -61,6 +61,65 @@ func (e *RepoConfirmError) Error() string {
 	return "confirm value " + e.GotConfirm + " does not match repo prefix " + e.Prefix
 }
 
+// RepoLinkErrorKind enumerates the precondition failures LinkPhantomRepo
+// (BACI-112) reports as typed errors so the HTTP handler can map each
+// kind to the right status code (4xx vs 409) without string-matching.
+type RepoLinkErrorKind string
+
+const (
+	// RepoLinkErrNotPhantom — the repo row exists but already has a
+	// path set; refusing to silently overwrite. 409 conflict.
+	RepoLinkErrNotPhantom RepoLinkErrorKind = "not_phantom"
+	// RepoLinkErrPathNotAbsolute — caller supplied a relative path. 400.
+	RepoLinkErrPathNotAbsolute RepoLinkErrorKind = "path_not_absolute"
+	// RepoLinkErrPathNotExists — the supplied path doesn't exist on
+	// disk (or isn't a directory). 400.
+	RepoLinkErrPathNotExists RepoLinkErrorKind = "path_not_exists"
+	// RepoLinkErrPathNotGit — the supplied path exists but isn't a
+	// git working tree. 400.
+	RepoLinkErrPathNotGit RepoLinkErrorKind = "path_not_git"
+	// RepoLinkErrPathAlreadyBound — another repo row already owns
+	// the supplied path. 409 conflict — details carry the other prefix.
+	RepoLinkErrPathAlreadyBound RepoLinkErrorKind = "path_already_bound"
+	// RepoLinkErrNoOwningSyncRepo — no sync_remotes entry on this
+	// machine carries a `repos/<prefix>/` folder for the phantom.
+	// Means the user must `bacio sync clone` the owning sync repo
+	// (or attach via sync setup) before linking. 409 conflict.
+	RepoLinkErrNoOwningSyncRepo RepoLinkErrorKind = "no_owning_sync_repo"
+)
+
+// RepoLinkError is returned by LinkPhantomRepo for precondition failures
+// that the caller (CLI / HTTP handler / TUI / web modal) needs to map
+// to a distinct user-visible message and (for HTTP) a distinct status
+// code. Kind is the machine-readable tag; ExistingPrefix is populated
+// only for RepoLinkErrPathAlreadyBound.
+type RepoLinkError struct {
+	Kind           RepoLinkErrorKind
+	Prefix         string // the phantom we tried to link
+	Path           string // the path that was rejected (when relevant)
+	ExistingPrefix string // populated for RepoLinkErrPathAlreadyBound
+	Message        string // human-readable summary
+}
+
+func (e *RepoLinkError) Error() string {
+	if e.Message != "" {
+		return e.Message
+	}
+	return string(e.Kind)
+}
+
+// RepoLinkResult is the structured success payload from LinkPhantomRepo.
+// AlreadyLinked is true when the phantom row's path already matched the
+// supplied path (idempotent re-link — no store write, no audit row, no
+// config rewrite). SyncRemoteURL is the URL of the sync repo on this
+// machine that owns the phantom prefix — written to the project's
+// .bacio/config.yaml on the success (non-idempotent) path.
+type RepoLinkResult struct {
+	Repo          *model.Repo `json:"repo"`
+	SyncRemoteURL string      `json:"sync_remote_url"`
+	AlreadyLinked bool        `json:"already_linked"`
+}
+
 // Open constructs a Client based on opts. Remote backends do not open
 // the local DB; the DBPath is ignored when Remote is set.
 func Open(ctx context.Context, opts Options) (Client, error) {
@@ -101,6 +160,18 @@ type Client interface {
 	// callers / agents can show the impact and ask the user before
 	// retrying.
 	DeleteRepo(ctx context.Context, prefix, confirm string, dryRun bool) (deletedRepo *model.Repo, preview *RepoDeletePreview, err error)
+	// LinkPhantomRepo (BACI-112) binds a synced-but-pathless phantom
+	// repo row to a local git working tree at path. Resolves the owning
+	// sync repo by walking the sync_remotes registry, runs the existing
+	// Store.UpgradePhantomRepo, then writes .bacio/config.yaml at the
+	// new path with the owning sync remote URL. Precondition failures
+	// (not phantom, path not abs / not exists / not git, path already
+	// bound, no owning sync repo) surface as a typed *RepoLinkError the
+	// caller can errors.As against. Idempotent: re-linking the same
+	// (prefix, path) returns AlreadyLinked=true with no store / config
+	// / audit write. dryRun stops short of any mutation and returns the
+	// projected result.
+	LinkPhantomRepo(ctx context.Context, prefix, path string, dryRun bool) (*RepoLinkResult, error)
 
 	// ----- Features -----
 	// ListFeatures returns the features in repo. Archived features

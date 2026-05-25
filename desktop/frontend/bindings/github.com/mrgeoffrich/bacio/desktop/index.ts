@@ -46,6 +46,8 @@ export {
     PromptTemplateDTO,
     RelationDTO,
     RelationsDTO,
+    RepoLinkResultDTO,
+    RepoLinkResultRepoDTO,
     SyncPreferencesDTO,
     SyncRegistryDTO,
     SyncRepoDTO,

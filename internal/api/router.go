@@ -35,6 +35,11 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("POST /repos", d.handleReposCreate)
 	mux.HandleFunc("GET /repos/{prefix}", d.handleReposShow)
 	mux.HandleFunc("DELETE /repos/{prefix}", d.handleReposDelete)
+	// BACI-112 phantom-repo linking: bind a synced-but-pathless repo
+	// row to a local working tree. The literal "link" segment is more
+	// specific than the bare prefix routes so ServeMux disambiguates
+	// without an explicit ordering hint.
+	mux.HandleFunc("POST /repos/{prefix}/link", d.handleRepoLink)
 
 	mux.HandleFunc("GET /repos/{prefix}/features", d.handleFeaturesList)
 	mux.HandleFunc("POST /repos/{prefix}/features", d.handleFeatureCreate)

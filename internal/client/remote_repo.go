@@ -132,3 +132,36 @@ func decodePreviewFromDetails(details map[string]any) *RepoDeletePreview {
 	}
 	return &preview
 }
+
+// LinkPhantomRepo posts to /repos/{prefix}/link. The server's typed
+// precondition failures (409 / 400 carrying a `kind`) are rehydrated
+// into a *RepoLinkError so the caller sees the same shape as the
+// local backend. Other 4xx/5xx pass through as plain HTTPError.
+func (c *remoteClient) LinkPhantomRepo(ctx context.Context, prefix, path string, dryRun bool) (*RepoLinkResult, error) {
+	prefix = strings.ToUpper(strings.TrimSpace(prefix))
+	q := url.Values{}
+	if dryRun {
+		q.Set("dry_run", "true")
+	}
+	body := map[string]any{"path": path}
+	var result RepoLinkResult
+	if err := c.do(ctx, http.MethodPost, "/repos/"+prefix+"/link", q, body, &result); err != nil {
+		var he *HTTPError
+		if errors.As(err, &he) && he.Details != nil {
+			if kind, ok := he.Details["kind"].(string); ok && kind != "" {
+				linkErr := &RepoLinkError{
+					Kind:    RepoLinkErrorKind(kind),
+					Prefix:  prefix,
+					Path:    path,
+					Message: he.Message,
+				}
+				if ep, ok := he.Details["existing_prefix"].(string); ok {
+					linkErr.ExistingPrefix = ep
+				}
+				return nil, linkErr
+			}
+		}
+		return nil, err
+	}
+	return &result, nil
+}

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Icon from './Icon.jsx';
 import Tooltip from './Tooltip.jsx';
 import SyncRepoCard from './SyncRepoCard.jsx';
+import PhantomLinkModal from './PhantomLinkModal.jsx';
 import { reportError } from '../errors';
 import * as api from '../api';
 
@@ -28,18 +29,25 @@ export default function SyncView({ onClose }) {
   const [prefs, setPrefs] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [savingPrefs, setSavingPrefs] = useState(false);
+  // BACI-112: the phantom row whose Link-local button the operator
+  // clicked, or null when no modal is open. SyncRepoCard hoists the
+  // click target up here so the modal can mount once at the SyncView
+  // level (instead of per-card) and the page-Escape handler can be
+  // suspended while it's open.
+  const [phantomToLink, setPhantomToLink] = useState(null);
 
   // Page-level Escape closes the view, matching SettingsView's handler.
-  // No sub-modals open here today — BACI-111 / BACI-112 will add them
-  // and need their own state guards before this fires.
+  // While a sub-modal is open (PhantomLinkModal — BACI-112) the page
+  // handler steps aside so the modal owns its own Escape semantics.
   useEffect(() => {
     const onKey = (e) => {
       if (e.key !== 'Escape') return;
+      if (phantomToLink) return; // modal handles its own Escape
       onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, phantomToLink]);
 
   const refreshRegistry = useCallback((opts = {}) => {
     api.getSyncRegistry()
@@ -155,7 +163,11 @@ export default function SyncView({ onClose }) {
             </div>
           ) : (
             syncRepos.map(entry => (
-              <SyncRepoCard key={entry.remoteUrl} entry={entry} />
+              <SyncRepoCard
+                key={entry.remoteUrl}
+                entry={entry}
+                onLinkPhantom={setPhantomToLink}
+              />
             ))
           )}
         </section>
@@ -199,6 +211,17 @@ export default function SyncView({ onClose }) {
           )}
         </section>
       </div>
+
+      {phantomToLink && (
+        <PhantomLinkModal
+          phantom={phantomToLink}
+          onClose={() => setPhantomToLink(null)}
+          onSubmitted={() => {
+            setPhantomToLink(null);
+            refreshRegistry();
+          }}
+        />
+      )}
     </div>
   );
 }

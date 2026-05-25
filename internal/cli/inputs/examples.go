@@ -205,6 +205,10 @@ var (
 		Prefix:  "MINI",
 		Confirm: "MINI",
 	}
+	ExampleRepoLink = RepoLinkInput{
+		Prefix: "MINI",
+		Path:   "/Users/dev/code/mini",
+	}
 
 	ExampleSettingsTemplateSet = SettingsTemplateSetInput{
 		Slug: "review",

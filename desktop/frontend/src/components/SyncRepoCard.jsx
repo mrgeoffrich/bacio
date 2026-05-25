@@ -39,12 +39,15 @@ function pillTitleFor(entry) {
 // SyncRepoCard is a presentational sub-component used by SyncView to
 // render one `sync_remotes` registry entry: header (URL-derived label,
 // the remote URL in monospace, the status pill), the local clone path,
-// and a nested project list. Phantom rows surface a disabled `Link
-// local…` button — wired in BACI-112; today the button is muted with a
-// "Coming in BACI-112" tooltip.
+// and a nested project list. Phantom rows surface a `Link local…`
+// button that opens the BACI-112 PhantomLinkModal at the SyncView
+// level.
 //
-// onLinkPhantom is reserved for BACI-112: when undefined (the v1
-// default), the Link button stays disabled.
+// onLinkPhantom is the BACI-112 callback: invoked with the phantom
+// project row when the operator clicks the button. When undefined the
+// button falls back to its BACI-108 placeholder state (disabled, with
+// a tooltip explaining the affordance is not wired up) — useful for
+// future callers that want to render the card read-only.
 export default function SyncRepoCard({ entry, onLinkPhantom }) {
   const projects = entry.projects ?? [];
   return (
@@ -79,18 +82,27 @@ export default function SyncRepoCard({ entry, onLinkPhantom }) {
                 <span className="mk-sync-project-name">{p.name || '—'}</span>
                 <span className={stateClass}>{p.status}</span>
                 {isPhantom && (
-                  <Tooltip label="Coming in BACI-112">
-                    <span>
-                      <button
-                        className="mk-tmpl-reset"
-                        type="button"
-                        disabled
-                        onClick={onLinkPhantom ? () => onLinkPhantom(p) : undefined}
-                      >
-                        Link local…
-                      </button>
-                    </span>
-                  </Tooltip>
+                  onLinkPhantom ? (
+                    <button
+                      className="mk-tmpl-reset"
+                      type="button"
+                      onClick={() => onLinkPhantom(p)}
+                    >
+                      Link local…
+                    </button>
+                  ) : (
+                    <Tooltip label="Link affordance not available here">
+                      <span>
+                        <button
+                          className="mk-tmpl-reset"
+                          type="button"
+                          disabled
+                        >
+                          Link local…
+                        </button>
+                      </span>
+                    </Tooltip>
+                  )
                 )}
               </li>
             );

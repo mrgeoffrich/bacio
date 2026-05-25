@@ -19,3 +19,19 @@ type RepoRmInput struct {
 	Prefix  string `json:"prefix"`
 	Confirm string `json:"confirm,omitempty"`
 }
+
+// RepoLinkInput is the payload for `bacio repo link --json` (BACI-112):
+// bind a synced-but-pathless phantom repo to a local git working tree.
+// Prefix identifies the phantom row; Path is the absolute path to the
+// existing working tree on this machine. The backend resolves the
+// owning sync repo by walking the sync_remotes registry, runs
+// UpgradePhantomRepo, then writes .bacio/config.yaml with the sync
+// remote URL so subsequent bacio runs from inside the working tree
+// pick up the registered sync remote automatically.
+//
+// Idempotent: re-linking to the same Path is a no-op (the result
+// carries AlreadyLinked=true and no audit row is written).
+type RepoLinkInput struct {
+	Prefix string `json:"prefix"`
+	Path   string `json:"path"`
+}

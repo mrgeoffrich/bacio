@@ -20,7 +20,7 @@ import (
 
 func newRepoCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "repo", Short: "Inspect tracked repos"}
-	cmd.AddCommand(repoListCmd(), repoShowCmd(), repoRmCmd())
+	cmd.AddCommand(repoListCmd(), repoShowCmd(), repoRmCmd(), repoLinkCmd())
 	return cmd
 }
 
@@ -257,6 +257,125 @@ func formatRepoConfirmError(e *client.RepoConfirmError) error {
 	fmt.Fprintf(os.Stderr, "  bacio repo rm %s --confirm %s\n", repo.Prefix, repo.Prefix)
 	fmt.Fprintln(os.Stderr)
 	return fmt.Errorf("aborted: %s", e.Error())
+}
+
+// repoLinkLongHelp explains the BACI-112 surface in detail — read by
+// the user via `bacio repo link --help` and by the schema-driven
+// agent path via `bacio schema show repo.link`.
+const repoLinkLongHelp = `Link a phantom repo (synced-but-pathless) to a local git working tree.
+
+A phantom repo is a row inserted by 'bacio sync clone' for a sync repo
+that carries metadata for a project the local DB doesn't yet have a
+checkout for. This command binds the phantom to a path on disk:
+  - the supplied path must be absolute and point at an existing git
+    working tree;
+  - no other repo may already be bound to that path;
+  - some sync repo on this machine must carry repos/<PREFIX>/ — i.e.
+    'bacio sync clone' (or 'bacio sync setup' attach) has already
+    fetched the owning sync repo locally.
+
+After linking, .bacio/config.yaml is written at the working tree with
+the owning sync remote URL so subsequent 'bacio' invocations from
+inside the tree pick up the registered sync remote automatically.
+
+Idempotent: re-linking to the same path is a no-op (no audit row, no
+config rewrite). Use --dry-run to rehearse without writing.`
+
+func repoLinkCmd() *cobra.Command {
+	var rawInput string
+	cmd := &cobra.Command{
+		Use:   "link [PREFIX] [PATH]",
+		Short: "Bind a phantom repo (synced-but-pathless) to a local git working tree",
+		Long:  repoLinkLongHelp,
+		Args:  cobra.RangeArgs(0, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			raw, err := parseJSONInput(cmd, args, rawInput)
+			if err != nil {
+				return err
+			}
+			var (
+				prefix string
+				path   string
+			)
+			switch {
+			case raw != nil:
+				in, _, err := inputio.DecodeStrict[inputs.RepoLinkInput](raw)
+				if err != nil {
+					return err
+				}
+				prefix = in.Prefix
+				path = in.Path
+			case len(args) == 2:
+				prefix = args[0]
+				path = args[1]
+			default:
+				return fmt.Errorf("requires <PREFIX> <PATH> positional or --json")
+			}
+			if strings.TrimSpace(prefix) == "" {
+				return fmt.Errorf("prefix is required")
+			}
+			if strings.TrimSpace(path) == "" {
+				return fmt.Errorf("path is required")
+			}
+			// Expand a relative path (most often `.`) to absolute BEFORE
+			// openClient() — otherwise the implicit cwd-upgrade in
+			// resolveRepoC could fire first and beat the explicit
+			// link to the row. Doing this client-side keeps the
+			// LinkPhantomRepo backend code path-agnostic.
+			abs, err := filepath.Abs(path)
+			if err != nil {
+				return fmt.Errorf("resolve path: %w", err)
+			}
+			c, err := openClient()
+			if err != nil {
+				return err
+			}
+			defer c.Close()
+			result, err := c.LinkPhantomRepo(context.Background(), prefix, abs, opts.dryRun)
+			if err != nil {
+				var linkErr *client.RepoLinkError
+				if errors.As(err, &linkErr) {
+					return formatRepoLinkError(linkErr)
+				}
+				return err
+			}
+			if opts.dryRun {
+				return emitDryRun(result)
+			}
+			if result.AlreadyLinked {
+				return ok("repo %s already linked to %s — nothing to do", result.Repo.Prefix, result.Repo.Path)
+			}
+			return ok("repo %s linked to %s (sync remote: %s)",
+				result.Repo.Prefix, result.Repo.Path, result.SyncRemoteURL)
+		},
+	}
+	addInputFlag(cmd, &rawInput)
+	return cmd
+}
+
+// formatRepoLinkError surfaces a typed link error with a JSON envelope
+// in --output json mode (so an agent driver can recognise the kind
+// without parsing the message) and a plain message otherwise.
+func formatRepoLinkError(e *client.RepoLinkError) error {
+	if opts.output == outputJSON {
+		envelope := struct {
+			Error          string `json:"error"`
+			Kind           string `json:"kind"`
+			Message        string `json:"message"`
+			Prefix         string `json:"prefix,omitempty"`
+			Path           string `json:"path,omitempty"`
+			ExistingPrefix string `json:"existing_prefix,omitempty"`
+		}{
+			Error:          string(e.Kind),
+			Kind:           string(e.Kind),
+			Message:        e.Error(),
+			Prefix:         e.Prefix,
+			Path:           e.Path,
+			ExistingPrefix: e.ExistingPrefix,
+		}
+		_ = emit(envelope)
+	}
+	return e
 }
 
 // repoDeletePreview is the text/JSON shape emitted for `--dry-run`.

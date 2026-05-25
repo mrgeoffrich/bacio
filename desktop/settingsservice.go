@@ -430,3 +430,52 @@ func (s *SettingsService) GetSyncRegistry() (SyncRegistryDTO, error) {
 	}
 	return out, nil
 }
+
+// RepoLinkResultDTO mirrors client.RepoLinkResult — the success payload
+// returned to the desktop / web Sync view's Link-local modal after a
+// phantom row is bound to a working tree.
+type RepoLinkResultDTO struct {
+	Repo          RepoLinkResultRepoDTO `json:"repo"`
+	SyncRemoteURL string                `json:"syncRemoteUrl"`
+	AlreadyLinked bool                  `json:"alreadyLinked"`
+}
+
+// RepoLinkResultRepoDTO is the subset of model.Repo the modal needs
+// to render success — prefix + path are enough to confirm to the
+// user which working tree it landed on. Keeping a separate DTO (rather
+// than embedding model.Repo) keeps the camel-case JSON tag convention
+// consistent with the rest of this file.
+type RepoLinkResultRepoDTO struct {
+	Prefix string `json:"prefix"`
+	Name   string `json:"name"`
+	Path   string `json:"path"`
+	UUID   string `json:"uuid"`
+}
+
+// LinkPhantomRepo (BACI-112) binds a phantom repo row to a local git
+// working tree. Wired to the desktop SyncView's PhantomLinkModal and
+// — via api.ts shim — to the web SyncView. The dry-run path is not
+// exposed here; the modal asks for confirmation before submitting and
+// the underlying write is sub-millisecond, so a separate rehearse
+// surface would be more noise than signal. A future caller that
+// needs it can pass `dryRun=true` to the underlying client method
+// directly.
+func (s *SettingsService) LinkPhantomRepo(prefix, path string) (RepoLinkResultDTO, error) {
+	result, err := s.client.LinkPhantomRepo(context.Background(), prefix, path, false)
+	if err != nil {
+		return RepoLinkResultDTO{}, err
+	}
+	dto := RepoLinkResultDTO{
+		SyncRemoteURL: result.SyncRemoteURL,
+		AlreadyLinked: result.AlreadyLinked,
+	}
+	if result.Repo != nil {
+		dto.Repo = RepoLinkResultRepoDTO{
+			Prefix: result.Repo.Prefix,
+			Name:   result.Repo.Name,
+			Path:   result.Repo.Path,
+			UUID:   result.Repo.UUID,
+		}
+	}
+	return dto, nil
+}
