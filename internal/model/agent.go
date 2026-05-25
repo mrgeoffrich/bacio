@@ -905,7 +905,40 @@ const AgentLivenessThreshold = 10 * time.Minute
 // makes a delivered-but-unacknowledged dispatch on a quiet session
 // drop out of the per-mode concurrency cap sooner, so a fresh agent
 // can take the slot the moment the reaper re-queues (BACI-133 §B).
+//
+// BACI-159 layered a per-session graduated cutoff on top: a session
+// holding at least one open claim uses ClaimHolderIdlePingMultiplier ×
+// this value (currently 40 min) as its reap gate instead, so a long
+// subagent run does not get force-ended while its parent supervisor
+// is still doing real work. The base value here is still the gate for
+// sessions with no open claim.
 const AgentIdlePingThreshold = 20 * time.Minute
+
+// ClaimHolderIdlePingMultiplier scales AgentIdlePingThreshold for the
+// per-session reap gate when the session holds at least one open
+// (unreleased) claim (BACI-159). A claim-holder is by definition mid-
+// job, so its supervisor can legitimately go quiet for the duration
+// of a long Task-spawned subagent run — Claude Code routes the
+// subagent's hook events to the subagent's transcript, never back to
+// the supervisor, so the only signal the parent has of liveness is
+// its own tool calls. The multiplier gives a real worker double the
+// slack to finish before the reaper fires; a genuinely wedged claim-
+// holder is still eventually reaped, just on a 2× clock.
+const ClaimHolderIdlePingMultiplier = 2
+
+// AgentProactiveProbeThreshold is the gap after a session's last
+// heartbeat at which the idle-pinger sends a *proactive* probe
+// (BACI-159) — shorter than AgentIdlePingThreshold so a slightly
+// quiet session gets a friendly "still there?" prod well before the
+// reap gate. The probe is informational: it does not have its own
+// no-ack timeout — a claim-holder that doesn't respond is fine,
+// because the graduated AgentIdlePingThreshold (40 min for claim-
+// holders) is what eventually decides "presumed dead", not this
+// probe. The agent's eventual ack bumps LastSeenAt and clears the
+// staleness naturally. Uses the existing EnsurePingDispatch
+// idempotency so a repeat tick during the probe window doesn't
+// enqueue a second one.
+const AgentProactiveProbeThreshold = 10 * time.Minute
 
 // AgentPingNoAckTimeout is how long after a ping is enqueued the
 // reaper waits before declaring the session presumed-dead and

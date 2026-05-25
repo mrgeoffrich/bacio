@@ -37,6 +37,13 @@ type Backend interface {
 	ListAgentSessions(store.AgentSessionFilter) ([]*model.AgentSession, error)
 	ListDispatches(store.DispatchFilter) ([]*model.AgentDispatch, error)
 	GetRepoByID(int64) (*model.Repo, error)
+	// OpenClaimsForSession is the BACI-159 graduated-cutoff lookup: a
+	// session holding at least one open claim is "mid-job" and gets
+	// double the slack before the reaper fires. Single indexed
+	// session-keyed query; the pinger's session list is small enough
+	// that the per-tick cost is dwarfed by the existing ListDispatches
+	// calls.
+	OpenClaimsForSession(sessionID string) ([]*model.AgentClaim, error)
 }
 
 // Client is the audited mutation surface — both methods wrap a store
@@ -84,8 +91,18 @@ func (p *Pinger) withClock(clock func() time.Time) *Pinger {
 //     before the reaper would otherwise force-end the session.
 //   - If any pending|delivered ping older than AgentPingNoAckTimeout
 //     exists for the session → EndAgent(reason=presumed_dead).
-//   - Else if LastSeenAt is older than AgentIdlePingThreshold AND no
-//     pending|delivered ping exists → EnsurePingDispatch.
+//   - Else if LastSeenAt is older than the per-session effective idle
+//     cutoff AND no pending|delivered ping exists → EnsurePingDispatch.
+//     The effective cutoff is the BACI-159 graduated value: a session
+//     holding at least one open claim gets ClaimHolderIdlePingMultiplier
+//     × AgentIdlePingThreshold (40 min) instead of the base 20 min, so
+//     a long Task-spawned subagent run doesn't get force-ended while
+//     its parent supervisor is still doing real work.
+//   - Else if LastSeenAt is older than AgentProactiveProbeThreshold
+//     (BACI-159 proactive probe, 10 min) AND no pending|delivered ping
+//     exists → EnsurePingDispatch. Informational only: a claim-holder
+//     that doesn't respond is fine, the graduated reap gate above is
+//     what eventually decides "presumed dead", not this probe.
 //   - Otherwise no-op.
 //
 // Returns (pinged, ended, firstError). A transient error on one
@@ -106,8 +123,8 @@ func (p *Pinger) Tick(ctx context.Context) (pinged, ended int, err error) {
 		return 0, 0, err
 	}
 
-	idleCutoff := now.Add(-model.AgentIdlePingThreshold)
 	pingCutoff := now.Add(-model.AgentPingNoAckTimeout)
+	probeCutoff := now.Add(-model.AgentProactiveProbeThreshold)
 
 	var firstErr error
 	for _, sess := range sessions {
@@ -120,6 +137,21 @@ func (p *Pinger) Tick(ctx context.Context) (pinged, ended int, err error) {
 		if sess.RepoID == 0 {
 			continue
 		}
+
+		// BACI-159: resolve the per-session graduated idle cutoff up
+		// front — a claim-holder gets double the slack before the reap
+		// gate fires. Done before the inbound-dispatch gate because the
+		// gate's idleCutoff is itself derived from the effective cutoff
+		// (a claim-holder also gets the wider fresh-work window).
+		openClaims, err := p.b.OpenClaimsForSession(sess.SessionID)
+		if err != nil {
+			p.warn("list open claims", err, sess.SessionID)
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		idleCutoff := effectiveIdleCutoff(now, openClaims)
 
 		// BACI-148 gate: if the matcher has bound a real inbound
 		// dispatch to this session within the last idle window, leave
@@ -194,8 +226,14 @@ func (p *Pinger) Tick(ctx context.Context) (pinged, ended int, err error) {
 			continue
 		}
 
-		// No in-flight ping yet, and last_seen_at is stale — queue one.
-		if oldest == nil && sess.LastSeenAt.Before(idleCutoff) {
+		// No in-flight ping yet — the queue-ping branches share the same
+		// EnsurePingDispatch call and idempotency guard. Pick the
+		// branch whose cutoff the session has actually crossed: the
+		// per-session graduated reap cutoff (idleCutoff) takes
+		// precedence over the proactive probe cutoff (probeCutoff) for
+		// counting purposes, but both produce the same audited
+		// `bacio-channel-ping` row.
+		if oldest == nil && (sess.LastSeenAt.Before(idleCutoff) || sess.LastSeenAt.Before(probeCutoff)) {
 			if _, perr := p.c.EnsurePingDispatch(ctx, sess); perr != nil {
 				p.warn("queue idle-check ping", perr, sess.SessionID)
 				if firstErr == nil {
@@ -207,6 +245,24 @@ func (p *Pinger) Tick(ctx context.Context) (pinged, ended int, err error) {
 		}
 	}
 	return pinged, ended, firstErr
+}
+
+// effectiveIdleCutoff returns the per-session "stale enough to reap"
+// threshold: now - AgentIdlePingThreshold for a session with no open
+// claim, or now - (ClaimHolderIdlePingMultiplier × AgentIdlePingThreshold)
+// for a session holding at least one open claim (BACI-159 graduated
+// gate). A LastSeenAt before this cutoff is stale enough to trip the
+// reaper's queue-ping branch.
+func effectiveIdleCutoff(now time.Time, openClaims []*model.AgentClaim) time.Time {
+	mult := 1
+	for _, c := range openClaims {
+		if c == nil || c.ReleasedAt != nil {
+			continue
+		}
+		mult = model.ClaimHolderIdlePingMultiplier
+		break
+	}
+	return now.Add(-time.Duration(mult) * model.AgentIdlePingThreshold)
 }
 
 func (p *Pinger) clock() time.Time {

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/client"
@@ -487,6 +488,146 @@ func TestHookSetTitleSkipsWithoutSlug(t *testing.T) {
 	if buf.Len() != 0 {
 		t.Fatalf("expected no OSC write when slug is empty; got %q", buf.String())
 	}
+}
+
+// TestHookPostToolUseHeartbeatBumpsLastSeen is the BACI-159 positive
+// path. A registered session whose last_seen_at is comfortably stale
+// (set to ~30 min ago via a direct store reach-in) must have it
+// bumped to ~now by the heartbeat hook. The hook's RunE writes
+// nothing to stdout — that's enforced separately, the test here pins
+// the actual store mutation.
+func TestHookPostToolUseHeartbeatBumpsLastSeen(t *testing.T) {
+	// Reuses the post-tool-use happy-path scaffolding: temp DB, repo
+	// row, registered session, opts.dbPath patched, BACIO_AGENT_MODE
+	// on. The hook's loadHookContext will open a *second* client
+	// against the same DB and reach the same session row.
+	tmp := initGitRepo(t)
+	dbPath, c, sess, _ := setupHookTestEnv(t)
+
+	// Reach back into the DB to set last_seen_at = 30 min ago — the
+	// register call above stamped it to ~now. We don't need raw SQL:
+	// HeartbeatAgent itself updates last_seen_at to "now", and the
+	// pre/post comparison below catches any forward motion regardless
+	// of the starting value. But to make the test resilient against
+	// a clock that drifts mere microseconds (the register and the
+	// post-heartbeat call would otherwise sit inside the same
+	// millisecond on fast hardware), stamp a known-stale value first.
+	ctx := context.Background()
+	view, err := c.ShowAgentSession(ctx, sess.SessionID)
+	if err != nil {
+		t.Fatalf("show session: %v", err)
+	}
+	before := view.Session.LastSeenAt
+	// SQLite stamps last_seen_at via CURRENT_TIMESTAMP which is
+	// second-resolution. Sleep a full second so the post-heartbeat
+	// value is unambiguously after `before` — cheaper than reach-in
+	// clock injection for one assertion.
+	time.Sleep(1100 * time.Millisecond)
+
+	payload := `{"session_id": "` + sess.SessionID + `", "cwd": "` + tmp + `", "hook_event_name": "PostToolUse", "tool_name": "Bash"}`
+	stderr, stdout := runHookPostToolUseHeartbeatWith(t, payload)
+
+	if stdout != "" {
+		// Critical: Claude Code merges PostToolUse stdout into the
+		// supervisor's context. Any byte leaked here lands in the
+		// transcript — make the regression loud.
+		t.Fatalf("heartbeat hook must be stdout-silent, got %q", stdout)
+	}
+	// stderr is allowed to carry the env-resolver debug line (worktree
+	// manifest detection) and the no-claude-ancestor warning under
+	// `go test`. Just make sure no error from heartbeatOrRegister
+	// leaked through.
+	if strings.Contains(stderr, "register fallback") {
+		t.Fatalf("unexpected register-fallback error in stderr: %q", stderr)
+	}
+
+	view, err = c.ShowAgentSession(ctx, sess.SessionID)
+	if err != nil {
+		t.Fatalf("show session post-heartbeat: %v", err)
+	}
+	if !view.Session.LastSeenAt.After(before) {
+		t.Fatalf("last_seen_at = %v, want > %v (heartbeat did not bump)",
+			view.Session.LastSeenAt, before)
+	}
+	// Use dbPath so the unused-import linter stays happy on the helper
+	// return value.
+	_ = dbPath
+}
+
+// TestHookPostToolUseHeartbeatSkipsWhenAgentModeDisabled mirrors the
+// BACI-48 gate at the heartbeat-hook layer: BACIO_AGENT_MODE unset →
+// one stderr skip line, RunE returns nil, the store is never
+// touched. This is the canonical "human at the terminal" path and
+// must stay a no-op so a non-agent shell doesn't pay the per-tool
+// DB-write cost.
+func TestHookPostToolUseHeartbeatSkipsWhenAgentModeDisabled(t *testing.T) {
+	t.Setenv("BACIO_AGENT_MODE", "scratch")
+	if err := os.Unsetenv("BACIO_AGENT_MODE"); err != nil {
+		t.Fatalf("unset: %v", err)
+	}
+
+	cmd := hookPostToolUseHeartbeatCmd()
+	stderr := captureStderr(t, func() {
+		if err := cmd.RunE(cmd, nil); err != nil {
+			t.Fatalf("RunE: %v", err)
+		}
+	})
+	if !strings.Contains(stderr, "bacio hook post-tool-use-heartbeat") {
+		t.Fatalf("stderr missing subcommand name: %q", stderr)
+	}
+	if !strings.Contains(stderr, "BACIO_AGENT_MODE not set") {
+		t.Fatalf("stderr missing env-var name: %q", stderr)
+	}
+}
+
+// runHookPostToolUseHeartbeatWith feeds the given JSON payload to
+// hookPostToolUseHeartbeatCmd's RunE via os.Stdin and returns
+// whatever the hook writes to stderr AND stdout. Stdout discipline
+// is load-bearing for this hook (Claude Code merges PostToolUse
+// stdout into the supervisor's context), so the test surface
+// captures both streams.
+func runHookPostToolUseHeartbeatWith(t *testing.T, payload string) (string, string) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("stdin pipe: %v", err)
+	}
+	origStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = origStdin })
+	if _, err := w.WriteString(payload); err != nil {
+		t.Fatalf("write payload: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close payload writer: %v", err)
+	}
+	cmd := hookPostToolUseHeartbeatCmd()
+
+	// Capture stdout in parallel with stderr via a pipe pair, same
+	// shape as captureStderr.
+	outR, outW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("stdout pipe: %v", err)
+	}
+	origStdout := os.Stdout
+	os.Stdout = outW
+	done := make(chan string, 1)
+	go func() {
+		data, _ := io.ReadAll(outR)
+		done <- string(data)
+	}()
+
+	stderr := captureStderr(t, func() {
+		if err := cmd.RunE(cmd, nil); err != nil {
+			_ = outW.Close()
+			os.Stdout = origStdout
+			t.Fatalf("RunE: %v", err)
+		}
+	})
+	_ = outW.Close()
+	os.Stdout = origStdout
+	stdout := <-done
+	return stderr, stdout
 }
 
 // runHookSetTitleWith feeds the given JSON payload to hookSetTitleCmd's

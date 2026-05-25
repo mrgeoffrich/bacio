@@ -17,19 +17,22 @@ import (
 // command hook per event into the repo's .claude/settings.json.
 //
 // Matcher is non-empty for the tool-call hooks — the four event-typed
-// hooks don't support matchers. PostToolUse carries two rows: the
-// task-list mirror scoped to `TaskCreate|TaskUpdate` and the BACI-147
-// terminal-title hook scoped to `mcp__bacio__register`. PreToolUse
-// scopes the worktree- and sqlite3-confinement guards to
+// hooks don't support matchers. PostToolUse carries three rows: the
+// task-list mirror scoped to `TaskCreate|TaskUpdate`, the BACI-147
+// terminal-title hook scoped to `mcp__bacio__register`, and the
+// BACI-159 supervisor heartbeat with an empty matcher so it fires
+// on every supervisor tool call (the supervisor has no other
+// liveness signal during a long Task-spawned subagent run).
+// PreToolUse scopes the worktree- and sqlite3-confinement guards to
 // `Write|Edit|Bash`. All matchers use Claude Code's pipe-alternation
 // syntax (`Foo|Bar` for a literal multi-tool match). Source of truth
 // for each literal lives next to its hook handler so the two can't
 // drift — see internal/cli/hook.go.
 //
-// Two rows can share an Event (PostToolUse here). applyBacioHooks
-// groups by Event before rewriting the settings array so a second
-// iteration over an Event doesn't clobber the group the first one just
-// wrote.
+// Multiple rows can share an Event (PostToolUse has three since
+// BACI-159). applyBacioHooks groups by Event before rewriting the
+// settings array so subsequent iterations over an Event don't clobber
+// the group an earlier iteration just wrote.
 var bacioHookEvents = []struct{ Event, Subcommand, Matcher string }{
 	{"SessionStart", "session-start", ""},
 	{"UserPromptSubmit", "user-prompt-submit", ""},
@@ -37,6 +40,7 @@ var bacioHookEvents = []struct{ Event, Subcommand, Matcher string }{
 	{"SessionEnd", "session-end", ""},
 	{"PostToolUse", "post-tool-use", postToolUseMatcher},
 	{"PostToolUse", "set-title", setTitleMatcher},
+	{"PostToolUse", "post-tool-use-heartbeat", ""},
 	{"PreToolUse", "pre-tool-use", preToolUseMatcher},
 }
 

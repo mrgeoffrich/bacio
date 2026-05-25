@@ -613,6 +613,10 @@ Practical consequences:
   still works without changes: the parent's `Stop` hook fires when
   the parent's turn ends (after `Task` returns and the parent has
   written its summary), and that's the precise *agent parked* signal.
+- The parent's *own* tool calls (Task's return PostToolUse, every
+  `mcp__bacio__*` call, every Bash) heartbeat the supervisor while
+  the subagent runs (BACI-159 PostToolUse hook), so a long Task run
+  never starves the supervisor's `last_seen_at` of fresh ticks.
 - No new schema rows, no `parent_session_pk` column, no per-subagent
   registry entries.
 
@@ -970,7 +974,7 @@ hand-roll their payloads and never see the preamble. The parent
 agent reads a tag with no delegation wrapper attached and handles it
 inline.
 
-#### Reaper cadence + re-queue on `presumed_dead` (BACI-133)
+#### Reaper cadence + re-queue on `presumed_dead` (BACI-133, BACI-159)
 
 The BACI-57 idle-pinger runs on a tightened **20 minute** cadence
 (`model.AgentIdlePingThreshold`, was 1 h). With
@@ -981,6 +985,50 @@ manually. The same constant doubles as the BACI-58 staleness window
 in `store.CountInFlightByMode`, so a delivered-but-unacknowledged
 dispatch on a quiet session drops out of the per-(repo, mode)
 concurrency cap promptly.
+
+**Heartbeat sources.** `agent_sessions.last_seen_at` is the sole
+liveness signal the reaper consults. It is bumped from four places,
+each one a different "the agent is still here" signal:
+
+| source | when | where |
+|---|---|---|
+| `UserPromptSubmit` hook | turn boundary — the user just typed | `internal/cli/hook.go` |
+| `Stop` hook | turn boundary — the agent just stopped speaking | `internal/cli/hook.go` |
+| **`PostToolUse` hook** (BACI-159) | every supervisor tool call — empty matcher | `internal/cli/hook.go:hookPostToolUseHeartbeatCmd` |
+| `AckDispatch` | the agent (or a `Task`-spawned subagent under the same session id) acked a dispatch | `internal/store/dispatches.go` |
+
+The BACI-159 `PostToolUse` heartbeat closes the failure mode where a
+long `Task`-spawned subagent run has no parent-side turns until it
+returns: Claude Code fires the subagent's `PostToolUse` against the
+*subagent's* transcript, never the supervisor's, so without this
+heartbeat the supervisor's `last_seen_at` could fall past
+`AgentIdlePingThreshold` while the subagent was still doing real
+work, and the reaper would force-end the session and auto-requeue
+its in-flight dispatch. The new hook fires on the supervisor's own
+tool calls (every `Task` return, every `mcp__bacio__*`, every Bash,
+every Read/Edit/Write), keeping `last_seen_at` fresh as long as the
+parent is meaningfully active. The hook is stdout-silent by design
+— Claude Code merges PostToolUse stdout into the supervisor's
+context, so any byte leaked there would land in the transcript.
+
+**Graduated cutoff for claim-holders.** Per BACI-159 a session that
+holds at least one open claim gets `ClaimHolderIdlePingMultiplier ×
+AgentIdlePingThreshold = 40 min` as its effective reap cutoff
+instead of the base 20 min — a real worker mid-job gets double the
+slack before the reaper fires. The pinger calls
+`OpenClaimsForSession` per alive session per tick (single indexed
+session-keyed query) and picks the cutoff via the pure helper
+`effectiveIdleCutoff(now, openClaims)`. A genuinely wedged
+claim-holder is still eventually reaped — just on a 2× clock.
+
+**Proactive 10-min probe.** Per BACI-159 the pinger also runs a
+lighter probe at `AgentProactiveProbeThreshold = 10 min` — a "still
+there?" prod well before the reap gate. The probe enqueues the same
+`bacio-channel-ping` dispatch via `EnsurePingDispatch` (idempotent
+on a session-keyed already-pending row), so a claim-holder that
+doesn't respond is fine: the agent's eventual ack bumps
+`last_seen_at`, and the 40-min graduated reap gate is what
+eventually decides "presumed dead", not the probe itself.
 
 When the reaper force-ends a session with `reason=presumed_dead`,
 the dispatch cascade inside `EndAgentSession` no longer cancels the
