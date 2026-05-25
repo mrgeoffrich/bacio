@@ -1226,6 +1226,62 @@ export async function cancelWaitingDispatch(
   }
 }
 
+// queueFollowOnDispatch (BACI-180) attaches a dormant follow-on dispatch
+// to the issue's in-flight (parent) dispatch in web mode. Mirrors
+// dispatchIssue's POST shape — the server resolves the parent via
+// WaitingDispatchForIssue and re-runs the state-gate. Errors (no open
+// dispatch, state-gate mismatch, single-slot rejection) surface as the
+// usual error envelope through reportError() in App.jsx.
+export async function queueFollowOnDispatch(
+  repoPrefix: string,
+  issueKey: string,
+  mode: string,
+): Promise<DispatchDTO> {
+  if (!repoPrefix || repoPrefix === 'all') {
+    const i = issueKey.lastIndexOf('-');
+    if (i <= 0) throw new Error(`invalid issue key: ${issueKey}`);
+    repoPrefix = issueKey.slice(0, i);
+  }
+  const raw = await call<ApiDispatch>(
+    `/repos/${repoPrefix}/issues/${issueKey}/followon`,
+    { method: 'POST', body: { issue_key: issueKey, mode } },
+  );
+  return reshapeDispatch(raw);
+}
+
+// cancelFollowOnDispatch (BACI-180) removes the dormant follow-on
+// attached to an issue. Idempotent on the backend — a DELETE against
+// an issue with no dormant follow-on returns 200 with a JSON-null body,
+// which we surface as the zero DispatchDTO (no error). Mirrors the
+// Wails seam's CancelFollowOnDispatch behaviour.
+export async function cancelFollowOnDispatch(
+  repoPrefix: string,
+  issueKey: string,
+): Promise<DispatchDTO> {
+  if (!repoPrefix || repoPrefix === 'all') {
+    const i = issueKey.lastIndexOf('-');
+    if (i <= 0) throw new Error(`invalid issue key: ${issueKey}`);
+    repoPrefix = issueKey.slice(0, i);
+  }
+  const raw = await call<ApiDispatch | null>(
+    `/repos/${repoPrefix}/issues/${issueKey}/followon`,
+    { method: 'DELETE' },
+  );
+  if (!raw) {
+    return {
+      id: 0,
+      issueKey: '',
+      targetAgent: '',
+      mode: '',
+      status: '',
+      payload: '',
+      createdBy: '',
+      createdAt: '',
+    } as DispatchDTO;
+  }
+  return reshapeDispatch(raw);
+}
+
 interface ApiBoardCard {
   // setIssueState returns the model.Issue; same reshape as listCards.
   // waiting_for_claim is on the model.Issue wire shape but the

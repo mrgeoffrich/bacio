@@ -336,10 +336,17 @@ func (s *Store) SetWaitingForClaim(issueID int64, waiting bool) error {
 // CURRENT_TIMESTAMP if it's currently NULL — re-archiving a row that's
 // already archived is a no-op so the audit timestamp doesn't drift on
 // idempotent calls. When archived is false the column is unconditionally
-// cleared. Deliberately does NOT bump updated_at: archive is a lifecycle
-// boolean independent of content, and bumping updated_at would make
-// git-backed sync churn for every archive flip and confuse the
-// sweep's `updated_at < cutoff` predicate.
+// cleared.
+//
+// updated_at is bumped by the bump_issue_updated_on_archive_change
+// schema trigger (BACI-189), NOT here — the trigger fires only when
+// the caller did not also write updated_at, which is the case for
+// every archive verb but not for the sync importer's authoritative
+// `(archived_at, updated_at)` pair UPDATE. The trigger is what keeps
+// the next sync round-trip from clobbering the local archive stamp
+// via LWW. The sweep's eligibility predicate keys on terminal_at, not
+// updated_at (see archive.go), so bumping updated_at on archive does
+// not interfere with the retention window.
 func (s *Store) SetIssueArchived(issueID int64, archived bool) error {
 	if archived {
 		_, err := s.DB.Exec(`UPDATE issues SET archived_at = CURRENT_TIMESTAMP WHERE id = ? AND archived_at IS NULL`, issueID)

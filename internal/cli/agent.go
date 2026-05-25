@@ -59,6 +59,8 @@ drifting.`,
 		agentInboxCmd(),
 		agentAckCmd(),
 		agentCancelCmd(),
+		agentQueueFollowOnCmd(),
+		agentCancelFollowOnCmd(),
 		agentListCmd(),
 		agentShowCmd(),
 		agentQuestionsCmd(),
@@ -674,6 +676,156 @@ func runAgentCancel(in inputs.AgentCancelInput) error {
 	d, err := c.CancelDispatch(context.Background(), in, opts.dryRun)
 	if err != nil {
 		return err
+	}
+	if opts.dryRun {
+		return emitDryRun(d)
+	}
+	return emit(d)
+}
+
+// ---------- queue-followon (BACI-180) ----------
+
+func agentQueueFollowOnCmd() *cobra.Command {
+	var (
+		mode, rawInput string
+	)
+	cmd := &cobra.Command{
+		Use:   "queue-followon <issue-key>",
+		Short: "Queue a dormant follow-on dispatch against an issue's in-flight dispatch (BACI-180)",
+		Long: `Attach a dormant follow-on dispatch to the open dispatch an issue is
+currently wearing. The follow-on stays out of the BACI-51 matcher's
+binding pool until the parent dispatch settles (acked OR cancelled);
+the controller's BACI-179 promote sweep then clears the dormant link
+and the matcher binds the row on its next tick.
+
+--mode names the follow-on's intent (same set as ` + "`bacio agent dispatch --mode`" + `).
+The state-gate is re-checked against the issue's *current* state — the
+post-release state isn't known at queue time — so a mode that would
+not be valid to dispatch right now is rejected, matching the existing
+auto-dispatch contract.
+
+Single-slot per issue: a second call against the same issue while a
+dormant follow-on already exists is rejected at the store boundary.
+Cancel an existing follow-on with ` + "`bacio agent cancel-followon`" + ` (or
+let it auto-cancel when the issue lands in done/cancelled).`,
+		Args: cobra.RangeArgs(0, 1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			raw, err := parseJSONInput(cmd, args, rawInput, "mode")
+			if err != nil {
+				return err
+			}
+			if raw != nil {
+				in, _, err := inputio.DecodeStrict[inputs.AgentQueueFollowOnInput](raw)
+				if err != nil {
+					return err
+				}
+				return runAgentQueueFollowOn(*in)
+			}
+			if len(args) != 1 {
+				return fmt.Errorf("requires <issue-key> positional or --json")
+			}
+			return runAgentQueueFollowOn(inputs.AgentQueueFollowOnInput{
+				IssueKey: args[0],
+				Mode:     mode,
+			})
+		},
+	}
+	cmd.Flags().StringVar(&mode, "mode", "", "follow-on dispatch intent (plan, design, implement, review, ship, fix_review, or a template slug)")
+	addInputFlag(cmd, &rawInput)
+	return cmd
+}
+
+func runAgentQueueFollowOn(in inputs.AgentQueueFollowOnInput) error {
+	c, err := openClient()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	// Resolve the repo from the issue key when canonical (PREFIX-N); fall
+	// back to cwd for the bare-number positional path. Mirrors the
+	// pattern issue verbs use so a follow-on can be queued from anywhere
+	// once the user names a canonical key.
+	repo, err := repoForIssueKey(c, in.IssueKey)
+	if err != nil {
+		return err
+	}
+	d, err := c.QueueFollowOnDispatch(context.Background(), repo, in.IssueKey, in.Mode, opts.dryRun)
+	if err != nil {
+		return err
+	}
+	if opts.dryRun {
+		return emitDryRun(d)
+	}
+	return emit(d)
+}
+
+// ---------- cancel-followon (BACI-180) ----------
+
+func agentCancelFollowOnCmd() *cobra.Command {
+	var rawInput string
+	cmd := &cobra.Command{
+		Use:   "cancel-followon <issue-key>",
+		Short: "Cancel the dormant follow-on dispatch attached to an issue (BACI-180)",
+		Long: `Remove an issue's queued follow-on dispatch — the user-driven
+counterpart to the BACI-179 controller orphan-cancel sweep. Idempotent:
+running against an issue with no dormant follow-on is a no-op (the verb
+emits a null projection / null JSON) so a stale UI click doesn't error.
+
+A follow-on that has already been *promoted* (its parent settled and
+the BACI-179 promote sweep cleared the dormant link) is no longer a
+follow-on — it's a regular queued dispatch heading for the matcher.
+Cancel that one via ` + "`bacio agent cancel <dispatch-id>`" + ` instead.`,
+		Args: cobra.RangeArgs(0, 1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			raw, err := parseJSONInput(cmd, args, rawInput)
+			if err != nil {
+				return err
+			}
+			if raw != nil {
+				in, _, err := inputio.DecodeStrict[inputs.AgentCancelFollowOnInput](raw)
+				if err != nil {
+					return err
+				}
+				return runAgentCancelFollowOn(*in)
+			}
+			if len(args) != 1 {
+				return fmt.Errorf("requires <issue-key> positional or --json")
+			}
+			return runAgentCancelFollowOn(inputs.AgentCancelFollowOnInput{IssueKey: args[0]})
+		},
+	}
+	addInputFlag(cmd, &rawInput)
+	return cmd
+}
+
+func runAgentCancelFollowOn(in inputs.AgentCancelFollowOnInput) error {
+	c, err := openClient()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	repo, err := repoForIssueKey(c, in.IssueKey)
+	if err != nil {
+		return err
+	}
+	d, err := c.CancelFollowOnDispatch(context.Background(), repo, in.IssueKey, opts.dryRun)
+	if err != nil {
+		return err
+	}
+	// Idempotent path: client returns (nil, nil) when there was nothing
+	// to cancel. Emit a tiny "nothing to do" line on the human path and
+	// a literal `null` on the JSON path so downstream parsers see the
+	// same shape the REST surface uses.
+	if d == nil {
+		if opts.dryRun {
+			fmt.Fprintln(os.Stderr, "[dry-run] no changes were written")
+		}
+		if opts.output == outputJSON {
+			fmt.Println("null")
+			return nil
+		}
+		fmt.Println("no follow-on dispatch to cancel")
+		return nil
 	}
 	if opts.dryRun {
 		return emitDryRun(d)

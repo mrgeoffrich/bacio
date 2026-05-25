@@ -99,6 +99,18 @@ export function AttachPullRequest(repoPrefix: string, key: string, url: string):
 }
 
 /**
+ * CancelFollowOnDispatch (BACI-180) is the chip-remove handler: cancel
+ * the dormant follow-on attached to an issue. Idempotent — a no-op on
+ * an issue with no dormant follow-on (returns the zero DispatchDTO and
+ * nil error) so a stale UI click doesn't surface as an error.
+ */
+export function CancelFollowOnDispatch(repoPrefix: string, issueKey: string): $CancellablePromise<$models.DispatchDTO> {
+    return $Call.ByID(1725053965, repoPrefix, issueKey).then(($result: any) => {
+        return $$createType7($result);
+    });
+}
+
+/**
  * CancelSessionQuestion dismisses an open question — the agent
  * receives a tool error on the next channel poll tick.
  */
@@ -256,6 +268,22 @@ export function ListColumns(): $CancellablePromise<$models.BoardColumn[]> {
 export function ListShipped(repoPrefix: string, sinceDays: number, limit: number): $CancellablePromise<$models.ShippedIssueDTO[]> {
     return $Call.ByID(3138957880, repoPrefix, sinceDays, limit).then(($result: any) => {
         return $$createType17($result);
+    });
+}
+
+/**
+ * QueueFollowOnDispatch (BACI-180) attaches a dormant follow-on
+ * dispatch to the issue's in-flight (parent) dispatch. Mirrors
+ * DispatchIssue's shape — same DTO out, repo prefix derivable from
+ * the issue key — but routes through client.QueueFollowOnDispatch so
+ * the gate + parent-resolution path stays in one place. Errors when
+ * there is no open dispatch on the issue, when the state-gate
+ * rejects, or when a dormant follow-on already exists (single-slot
+ * per issue).
+ */
+export function QueueFollowOnDispatch(repoPrefix: string, issueKey: string, mode: string): $CancellablePromise<$models.DispatchDTO> {
+    return $Call.ByID(1591721554, repoPrefix, issueKey, mode).then(($result: any) => {
+        return $$createType7($result);
     });
 }
 

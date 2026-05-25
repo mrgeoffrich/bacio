@@ -1391,6 +1391,95 @@ func (d deps) handleIssueDispatch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, dsp)
 }
 
+// ---------- follow-on dispatch (BACI-180) ----------
+
+// handleIssueQueueFollowOn is the REST entry point for the follow-on
+// queue verb (BACI-180). Mirrors handleIssueDispatch in shape but
+// routes through client.QueueFollowOnDispatch so the gate + parent-
+// resolution path only lives in one place. State-gate misses, missing
+// open dispatch, and the single-slot rejection all surface as 400s.
+func (d deps) handleIssueQueueFollowOn(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	iss, ok := resolveIssueOnRepo(w, r, d.store, repo)
+	if !ok {
+		return
+	}
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	in, _, err := inputio.DecodeStrict[inputs.AgentQueueFollowOnInput](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	if in.Mode == "" {
+		writeError(w, http.StatusBadRequest, "invalid_input",
+			"a dispatch mode is required", map[string]any{"field": "mode"})
+		return
+	}
+
+	who := ActorFromContext(r.Context())
+	c := client.NewLocalFromStore(d.store, who)
+	defer c.Close()
+	dsp, err := c.QueueFollowOnDispatch(r.Context(), repo, iss.Key, in.Mode, isDryRun(r))
+	if err != nil {
+		// Pull the same error-class distinction handleIssueDispatch
+		// does: state-gate and "no active dispatch" / "already has a
+		// follow-on" misses are 400s (caller's choice to fix and
+		// retry); everything else falls through to statusForError.
+		msg := err.Error()
+		if strings.Contains(msg, "can't run from") ||
+			strings.Contains(msg, "no active dispatch") ||
+			strings.Contains(msg, "already has a follow-on") {
+			writeError(w, http.StatusBadRequest, "invalid_input", msg, nil)
+			return
+		}
+		status, code := statusForError(err)
+		writeError(w, status, code, msg, nil)
+		return
+	}
+	if isDryRun(r) {
+		writeDryRun(w, http.StatusCreated, dsp)
+		return
+	}
+	writeJSON(w, http.StatusCreated, dsp)
+}
+
+// handleIssueCancelFollowOn is the REST entry point for the follow-on
+// cancel verb (BACI-180). Idempotent: a call against an issue with no
+// dormant follow-on returns 200 with a JSON-null body — same shape as
+// the client's (nil, nil) idempotent return — so a stale UI click
+// doesn't error.
+func (d deps) handleIssueCancelFollowOn(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	iss, ok := resolveIssueOnRepo(w, r, d.store, repo)
+	if !ok {
+		return
+	}
+
+	who := ActorFromContext(r.Context())
+	c := client.NewLocalFromStore(d.store, who)
+	defer c.Close()
+	dsp, err := c.CancelFollowOnDispatch(r.Context(), repo, iss.Key, isDryRun(r))
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if isDryRun(r) {
+		writeDryRun(w, http.StatusOK, dsp)
+		return
+	}
+	writeJSON(w, http.StatusOK, dsp)
+}
+
 // handleIssueWaitingDispatch is the BACI-51 read backing the spinner-
 // as-cancel UI: returns the active (queued / pending / delivered)
 // dispatch targeting an issue, or 404 when none. Read-only; no audit
