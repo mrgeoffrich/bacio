@@ -20,7 +20,7 @@ function stateLabel(s) {
   return STATE_LABELS[s] ?? s;
 }
 
-function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, onDragEnd, onOpen, onDispatch, onCancelWaiting, onOpenQuestion, onOpenIssue, onQuickEval }) {
+function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDragStart, onDragEnd, onOpen, onDispatch, onCancelWaiting, onOpenQuestion, onOpenIssue, onQuickEval }) {
   // BACI-75: local-only expansion state for the Tasks pill. Resets on
   // unmount (board switch, repo switch, hard refresh) — that's
   // intentional, we don't want to persist a row-level UI toggle.
@@ -34,6 +34,18 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, o
   useEffect(() => {
     if (evalOpen) evalRef.current?.focus();
   }, [evalOpen]);
+  // BACI-191: when compact mode turns on, force-close an open eval
+  // composer so it doesn't re-appear (with half-typed text) when the
+  // user turns compact mode off. The composer is part of the eval
+  // surface that compact mode hides, so letting it survive is
+  // confusing — the trade-off (losing the typed text) is acceptable
+  // because the user toggled the whole column, not just this card.
+  useEffect(() => {
+    if (compact && evalOpen) {
+      setEvalOpen(false);
+      setEvalBody('');
+    }
+  }, [compact, evalOpen]);
   const submitEval = async () => {
     const body = evalBody.trim();
     if (!body || evalSending) return;
@@ -134,7 +146,7 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, o
 
   return (
     <article
-      className={`mk-card ${isDragging ? 'is-dragging' : ''} ${card.claude ? 'is-claude' : ''} ${taken ? 'is-taken' : ''} ${waiting ? 'is-waiting' : ''} ${card.archived ? 'is-archived' : ''}`}
+      className={`mk-card ${isDragging ? 'is-dragging' : ''} ${card.claude ? 'is-claude' : ''} ${taken ? 'is-taken' : ''} ${waiting ? 'is-waiting' : ''} ${card.archived ? 'is-archived' : ''} ${compact ? 'is-compact' : ''}`}
       draggable={!taken && !waiting}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
@@ -196,7 +208,8 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, o
         )}
       </div>
       <h3 className="mk-card-title">{card.title}</h3>
-      {card.tags && card.tags.length > 0 && (
+      {/* BACI-191: tag row hidden in compact mode to reduce card height. */}
+      {!compact && card.tags && card.tags.length > 0 && (
         <div className="mk-tag-row">
           {card.tags.map(t => <span key={t} className="mk-tag">{t}</span>)}
         </div>
@@ -281,7 +294,11 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, o
             // prompt (e.g. fix-review). When neither condition holds,
             // fall back to the zap-only menu.
             <>
-              {showEvalAffordance && (
+              {/* BACI-191: eval button hidden in compact mode — the
+                  quick-eval affordance is part of the eval surface
+                  that compact suppresses. The composer itself is
+                  force-closed by the useEffect above. */}
+              {!compact && showEvalAffordance && (
                 <Tooltip label="Add a quick eval note">
                   <button
                     type="button"
@@ -392,7 +409,12 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, o
           </div>
         </div>
       )}
-      {(hasMeta || hasEvalChip) && (
+      {/* BACI-191: meta line (active verb, tasks pill, eval chip) hidden
+          in compact mode. This is the whole meta surface — the eval chip
+          stays hidden even if the card has transcripts, because compact
+          mode is an intentional density preference. The eval content is
+          still accessible by toggling compact off or opening the card. */}
+      {!compact && (hasMeta || hasEvalChip) && (
         <>
           <div className="mk-card-meta-line">
             {activeVerb && <span className="mk-card-verb">{activeVerb}</span>}
