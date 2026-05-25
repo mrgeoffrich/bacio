@@ -136,6 +136,17 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, o
       onClick={onOpen}
     >
       <div className="mk-card-top">
+        {/*
+          BACI-172: per-feature glyph rendered top-left of the card,
+          before the issue key. aria-hidden because the glyph is a
+          visual marker only — the feature association is also
+          discoverable via the issue brief's `feature` field.
+        */}
+        {card.featureEmoji && (
+          <span className="mk-card-feature-emoji" aria-hidden="true">
+            {card.featureEmoji}
+          </span>
+        )}
         <span className="mk-card-id">{card.key}</span>
         {isBlocked && (
           <DropdownMenu.Root>
