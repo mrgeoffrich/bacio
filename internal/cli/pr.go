@@ -17,7 +17,7 @@ func newPRCmd() *cobra.Command {
 		Short:             "Attach pull requests to an issue",
 		PersistentPreRunE: requireClaimForGroup, // BACI-126b
 	}
-	cmd.AddCommand(prAttachCmd(), prDetachCmd(), prListCmd())
+	cmd.AddCommand(prCreateCmd(), prAttachCmd(), prDetachCmd(), prListCmd())
 	return cmd
 }
 

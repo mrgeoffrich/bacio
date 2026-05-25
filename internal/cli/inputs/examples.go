@@ -92,6 +92,13 @@ var (
 		IssueKey: "MINI-42",
 		URL:      "https://github.com/example/bacio/pull/123",
 	}
+	// BACI-163: GHArgs is the JSON-path equivalent of the shell
+	// passthrough after `--` on `bacio pr create`; `--label` is injected
+	// by the wrapper and must not appear here.
+	ExamplePRCreate = PRCreateInput{
+		IssueKey: "MINI-42",
+		GHArgs:   []string{"--title", "Pin tab strip", "--body", "Fixes the overflow drift; see MINI-42."},
+	}
 
 	ExampleTagAdd = TagAddInput{
 		IssueKey: "MINI-42",

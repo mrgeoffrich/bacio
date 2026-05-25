@@ -85,6 +85,27 @@ func renderText(w io.Writer, v any) error {
 		for _, pr := range x {
 			fmt.Fprintln(w, pr.URL)
 		}
+	case *prCreateResult:
+		// BACI-163: human path is the new PR URL + the injected label
+		// + any pre-flight warnings we surfaced above (e.g. a forced
+		// override or a CLOSED-only allow-with-warning).
+		for _, ws := range x.Warnings {
+			fmt.Fprintln(w, "warning:", ws)
+		}
+		if x.PullRequest != nil {
+			fmt.Fprintf(w, "opened %s\n", x.PullRequest.URL)
+			fmt.Fprintf(w, "  labelled: %s\n", x.Label)
+		}
+	case *prCreatePreview:
+		fmt.Fprintf(w, "issue:    %s\n", x.IssueKey)
+		fmt.Fprintf(w, "label:    %s\n", x.Label)
+		fmt.Fprintf(w, "would run: %s\n", strings.Join(x.ProjectedGHArgv, " "))
+		for _, r := range x.PreflightRefusals {
+			fmt.Fprintln(w, "refusal:", r)
+		}
+		for _, ws := range x.PreflightWarnings {
+			fmt.Fprintln(w, "warning:", ws)
+		}
 	case *model.Document:
 		printDocument(w, x)
 	case []*model.Document:

@@ -47,6 +47,7 @@ The global `--dry-run` flag short-circuits every mutation right after validators
 ## Implemented principles (post-#1–#6)
 
 - **#7 Multi-surface architecture.** REST API surface shipped (`bacio api` — see the "HTTP API" section of `SKILL.md`, and `docs/site/guides/run-the-api-server.md` for the end-to-end walk-through). Same `inputs.*Input` structs, same `schemaRegistry`, same validators, same audit log; only the transport differs. The MCP server surface also shipped, narrowly: `bacio channel` is an MCP-over-stdio server implementing Claude Code's "channel" contract — but it's a harness-integration shim (see below), not a general-purpose MCP surface over the whole CLI.
+- **External-CLI shellout (BACI-163).** `bacio pr create` is the first agent-CLI verb that shells out to a third-party CLI (`gh`) rather than only touching bacio's own store. The six rules still hold for the bacio mutation it triggers — `pr.create` has a schema entry, accepts `--json`, supports `--dry-run`, validates inputs at the store boundary, lands a `pr.create` history row on top of the inner `pr.attach`, and is documented in `SKILL.md`. The carve-out is that `--remote` mode is rejected (a remote API server can't drive a local `gh`), mirroring the same exemption applied to filesystem-touching verbs like `init` / `install-*` / `doc export --from-path`.
 
 ## Harness-integration shims are exempt from the six rules
 
