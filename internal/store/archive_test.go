@@ -13,9 +13,20 @@ package store
 
 import (
 	"testing"
+	"time"
 
 	"github.com/mrgeoffrich/bacio/internal/model"
 )
+
+// TestArchiveSweepIntervalPinned locks the BACI-175 cadence. The value
+// is load-bearing — see the leading doc comment in archive.go for why
+// 5m and not 1h. A future bump should fail this test loudly so the
+// change is deliberate, not a drive-by edit.
+func TestArchiveSweepIntervalPinned(t *testing.T) {
+	if ArchiveSweepInterval != 5*time.Minute {
+		t.Fatalf("ArchiveSweepInterval = %v, want 5m (see BACI-175 — change deliberately)", ArchiveSweepInterval)
+	}
+}
 
 func TestSetIssueArchivedIdempotentAndSticky(t *testing.T) {
 	s := newTestStore(t)

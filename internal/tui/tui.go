@@ -141,7 +141,7 @@ func idlePingTick() tea.Cmd {
 }
 
 // archiveSweepTickMsg fires on the BACI-68 archive-sweep cadence
-// (store.ArchiveSweepInterval, currently 1h). Same leader-gated
+// (store.ArchiveSweepInterval; 5m post-BACI-175). Same leader-gated
 // shell-level pattern as the other tickers so a TUI-only deployment
 // still gets the auto-archive sweep that desktop / api receive from
 // the controller goroutine.
@@ -353,10 +353,19 @@ func (m *Model) Init() tea.Cmd {
 		// nothing — any candidates were already candidates a moment ago).
 		// The first tick runs IdlePingTickInterval (~30s) after Init.
 		cmds = append(cmds, idlePingTick())
-		// Seed the BACI-68 archive-sweep cadence. Hourly; first tick
-		// runs ArchiveSweepInterval after Init. Same skip-the-immediate
+		// Seed the BACI-68 archive-sweep cadence (5m post-BACI-175). The
+		// next tick runs ArchiveSweepInterval after Init via the same
 		// pattern as the other ticks.
 		cmds = append(cmds, archiveSweepTick())
+		// BACI-175: fire one archive-sweep immediately on top of the
+		// cadence seed. The leaderTickMsg seed above runs synchronously
+		// before this Cmd is consumed (same Init batch, but the leader
+		// tick is the first cmd in the slice), so by the time the
+		// archiveSweepTickMsg handler runs the elector's cached
+		// AmLeader is real. The handler is leader-gated already, so a
+		// standby TUI is a no-op. A short-lived TUI session (the user's
+		// "few-second peek") still triggers a sweep before exiting.
+		cmds = append(cmds, func() tea.Msg { return archiveSweepTickMsg(time.Now()) })
 		// Seed the BACI-89 background git-sync cadence. First tick runs
 		// SyncTickInterval (~5m) after Init — never on startup, so a
 		// freshly-launched TUI isn't blocked on a slow `git pull`.

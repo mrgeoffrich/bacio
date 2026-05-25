@@ -17,10 +17,20 @@ import (
 )
 
 // ArchiveSweepInterval is the period the leader's Controller invokes
-// ArchiveSweep at. Hourly cadence is independent of the per-tick
+// ArchiveSweep at. The cadence is independent of the per-tick
 // retention window — the window decides which issues are eligible,
 // the cadence decides how often we re-check.
-const ArchiveSweepInterval = 1 * time.Hour
+//
+// BACI-175 tightened this from 1h to 5m: the original hourly cadence
+// meant most short-lived bacio processes (CLI one-shots, brief `bacio
+// tui` peeks, `bacio web --no-open` smoke tests, dispatch workers in
+// linked worktrees) never lived long enough for the leader-elected
+// ticker to fire, so on real users' DBs `bacio history --op
+// archive.sweep` could go weeks between rows. 5m matches the existing
+// UILeaderPruneInterval precedent on the same lease; the sweep is one
+// Begin → 3x Exec → Commit on a quiet DB and writes no audit row when
+// nothing was archived, so the per-tick cost is negligible.
+const ArchiveSweepInterval = 5 * time.Minute
 
 // DefaultArchiveRetentionDays is the fallback retention window the
 // BACI-162 settings layer falls back to when the configured value is
