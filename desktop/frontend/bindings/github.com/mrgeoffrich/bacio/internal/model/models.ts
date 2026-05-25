@@ -53,6 +53,15 @@ export class Issue {
     "key": string;
     "feature_id"?: number | null;
     "feature_slug"?: string;
+
+    /**
+     * FeatureEmoji (BACI-172) is the per-feature glyph denormalised
+     * onto the issue row via the feature join in issueSelect. Empty
+     * when the issue has no feature, or when the feature has no
+     * emoji set. The kanban / BoardCard render reads this directly
+     * so the card row can decorate without a second lookup.
+     */
+    "feature_emoji"?: string;
     "title": string;
     "description"?: string;
     "state": State;
@@ -153,10 +162,10 @@ export class Issue {
      * Creates a new Issue instance from a string or object.
      */
     static createFrom($$source: any = {}): Issue {
-        const $$createField13_0 = $$createType0;
+        const $$createField14_0 = $$createType0;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
-            $$parsedSource["tags"] = $$createField13_0($$parsedSource["tags"]);
+            $$parsedSource["tags"] = $$createField14_0($$parsedSource["tags"]);
         }
         return new Issue($$parsedSource as Partial<Issue>);
     }

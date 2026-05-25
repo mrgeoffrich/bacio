@@ -137,6 +137,12 @@ type BoardCard struct {
 	Assignees   []string `json:"assignees"`
 	Claude      bool     `json:"claude"`
 	Taken       bool     `json:"taken"`
+	// FeatureEmoji (BACI-172) is the per-feature glyph denormalised
+	// from the issue's joined feature row in store.issueSelect. Empty
+	// (and omitted from JSON) when the issue has no feature, or the
+	// feature has no emoji set — the kanban card renders the slot
+	// only when truthy.
+	FeatureEmoji string `json:"featureEmoji,omitempty"`
 	// WaitingState (BACI-145) carries the structured reason a card is
 	// rendering the spinner — queued without an agent, queued but
 	// blocked by the template's concurrency cap, or delivered to the
@@ -373,6 +379,7 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 			Assignees:          assigneeList(iss.Assignee),
 			Claude:             iss.Assignee == "claude",
 			Taken:              e.taken,
+			FeatureEmoji:       iss.FeatureEmoji,
 			WaitingState:       ws,
 			ActiveVerb:         e.verb,
 			TodosDone:          e.todosDone,

@@ -511,6 +511,14 @@ export class FeatureDetail {
     "slug": string;
     "title": string;
     "description": string;
+
+    /**
+     * Emoji (BACI-172) is the per-feature glyph rendered in the
+     * top-left of every kanban card belonging to this feature.
+     * Empty when none has been set — the FeaturesView surfaces a
+     * "set emoji" affordance in that case.
+     */
+    "emoji": string;
     "createdAt": time$0.Time;
     "updatedAt": time$0.Time;
     "issues": FeatureLinkedIssue[];
@@ -532,6 +540,9 @@ export class FeatureDetail {
         if (!("description" in $$source)) {
             this["description"] = "";
         }
+        if (!("emoji" in $$source)) {
+            this["emoji"] = "";
+        }
         if (!("createdAt" in $$source)) {
             this["createdAt"] = null;
         }
@@ -552,14 +563,14 @@ export class FeatureDetail {
      * Creates a new FeatureDetail instance from a string or object.
      */
     static createFrom($$source: any = {}): FeatureDetail {
-        const $$createField5_0 = $$createType5;
-        const $$createField6_0 = $$createType7;
+        const $$createField6_0 = $$createType5;
+        const $$createField7_0 = $$createType7;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("issues" in $$parsedSource) {
-            $$parsedSource["issues"] = $$createField5_0($$parsedSource["issues"]);
+            $$parsedSource["issues"] = $$createField6_0($$parsedSource["issues"]);
         }
         if ("comments" in $$parsedSource) {
-            $$parsedSource["comments"] = $$createField6_0($$parsedSource["comments"]);
+            $$parsedSource["comments"] = $$createField7_0($$parsedSource["comments"]);
         }
         return new FeatureDetail($$parsedSource as Partial<FeatureDetail>);
     }

@@ -37,12 +37,17 @@ type FeatureComment struct {
 // FeatureDetail is one feature with its description and linked issues — the
 // payload for the desktop feature detail pane.
 type FeatureDetail struct {
-	Slug        string               `json:"slug"`
-	Title       string               `json:"title"`
-	Description string               `json:"description"`
-	CreatedAt   time.Time            `json:"createdAt"`
-	UpdatedAt   time.Time            `json:"updatedAt"`
-	Issues      []FeatureLinkedIssue `json:"issues"`
+	Slug        string `json:"slug"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	// Emoji (BACI-172) is the per-feature glyph rendered in the
+	// top-left of every kanban card belonging to this feature.
+	// Empty when none has been set — the FeaturesView surfaces a
+	// "set emoji" affordance in that case.
+	Emoji     string               `json:"emoji"`
+	CreatedAt time.Time            `json:"createdAt"`
+	UpdatedAt time.Time            `json:"updatedAt"`
+	Issues    []FeatureLinkedIssue `json:"issues"`
 	// Comments is the BACI-124 chronological-handoff timeline, oldest
 	// first. Drives the feature drawer's comment panel.
 	Comments []FeatureComment `json:"comments"`
@@ -129,11 +134,28 @@ func (f *FeatureService) GetFeature(repoPrefix, slug string) (FeatureDetail, err
 		Slug:        feat.Slug,
 		Title:       feat.Title,
 		Description: feat.Description,
+		Emoji:       feat.Emoji,
 		CreatedAt:   feat.CreatedAt,
 		UpdatedAt:   feat.UpdatedAt,
 		Issues:      issues,
 		Comments:    comments,
 	}, nil
+}
+
+// SetFeatureEmoji (BACI-172) updates the per-feature emoji glyph and
+// returns the refreshed FeatureDetail. Empty string clears the
+// emoji. Validates at the store boundary so multi-cluster input
+// (e.g. "FEATURE") surfaces as an error from the client.
+func (f *FeatureService) SetFeatureEmoji(repoPrefix, slug, emoji string) (FeatureDetail, error) {
+	ctx := context.Background()
+	repo, err := f.resolveRepo(ctx, repoPrefix)
+	if err != nil {
+		return FeatureDetail{}, err
+	}
+	if _, err := f.client.UpdateFeature(ctx, repo, slug, nil, nil, &emoji, false); err != nil {
+		return FeatureDetail{}, err
+	}
+	return f.GetFeature(repoPrefix, slug)
 }
 
 // AddFeatureComment posts a chronological handoff comment to a feature
