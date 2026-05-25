@@ -1220,27 +1220,24 @@ func TestAssembleSurfacesFollowOnDispatch(t *testing.T) {
 		byKey[c.Key] = c
 	}
 	// TEST-1: dormant follow-on surfaces with the implement mode + label.
-	if fo := byKey["TEST-1"].FollowOnDispatch; fo == nil {
-		t.Errorf("TEST-1 FollowOnDispatch = nil, want non-nil (dormant row present)")
+	if fo := byKey["TEST-1"].FollowOn; fo == nil {
+		t.Errorf("TEST-1 FollowOn = nil, want non-nil (dormant row present)")
 	} else {
 		if fo.Mode != model.DispatchMode("implement") {
-			t.Errorf("TEST-1 FollowOnDispatch.Mode = %q, want implement", fo.Mode)
+			t.Errorf("TEST-1 FollowOn.Mode = %q, want implement", fo.Mode)
 		}
 		if fo.ActionLabel != "Implement" {
-			t.Errorf("TEST-1 FollowOnDispatch.ActionLabel = %q, want Implement", fo.ActionLabel)
-		}
-		if fo.DispatchID != 200 {
-			t.Errorf("TEST-1 FollowOnDispatch.DispatchID = %d, want 200", fo.DispatchID)
+			t.Errorf("TEST-1 FollowOn.ActionLabel = %q, want Implement", fo.ActionLabel)
 		}
 	}
 	// TEST-2: no dormant row — field must stay nil.
-	if fo := byKey["TEST-2"].FollowOnDispatch; fo != nil {
-		t.Errorf("TEST-2 FollowOnDispatch = %+v, want nil (no dormant row)", fo)
+	if fo := byKey["TEST-2"].FollowOn; fo != nil {
+		t.Errorf("TEST-2 FollowOn = %+v, want nil (no dormant row)", fo)
 	}
-	// TEST-3: two queued rows; only the dormant one (ID 203, ship) wins.
-	if fo := byKey["TEST-3"].FollowOnDispatch; fo == nil {
-		t.Errorf("TEST-3 FollowOnDispatch = nil, want the dormant row")
-	} else if fo.DispatchID != 203 || fo.Mode != model.DispatchMode("ship") {
-		t.Errorf("TEST-3 FollowOnDispatch = {ID=%d, Mode=%q}, want {ID=203, Mode=ship} — the non-dormant queued row leaked through", fo.DispatchID, fo.Mode)
+	// TEST-3: two queued rows; only the dormant one (ship) wins.
+	if fo := byKey["TEST-3"].FollowOn; fo == nil {
+		t.Errorf("TEST-3 FollowOn = nil, want the dormant row")
+	} else if fo.Mode != model.DispatchMode("ship") {
+		t.Errorf("TEST-3 FollowOn.Mode = %q, want ship — the non-dormant queued row leaked through", fo.Mode)
 	}
 }

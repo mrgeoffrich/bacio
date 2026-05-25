@@ -156,14 +156,15 @@ export class BoardCard {
     "terminalAt"?: time$0.Time | null;
 
     /**
-     * FollowOnDispatch (BACI-182) carries the dormant follow-on dispatch
-     * the user has queued behind the issue's currently-in-flight parent
-     * dispatch (BACI-179 storage, BACI-180 queue/cancel verbs). Nil (and
-     * omitted from JSON) when no follow-on is dormant — the kanban
-     * renderer's chevron-or-chip slot reads non-nil here as "render the
-     * chip, hide the chevron". Single-slot per issue (Phase 1 design).
+     * FollowOn (BACI-192) is the denormalised view of the dormant
+     * follow-on dispatch attached to this issue's currently in-flight
+     * (parent) dispatch — the single-slot row written by BACI-180's
+     * AddFollowOnDispatch. Drives the kanban card's footer follow-on
+     * button visual state. Nil (and omitted from JSON) when no
+     * dormant follow-on exists; the footer button stays in its
+     * outline state in that case.
      */
-    "followOnDispatch"?: FollowOnInfo | null;
+    "followOn"?: BoardCardFollowOn | null;
 
     /** Creates a new BoardCard instance. */
     constructor($$source: Partial<BoardCard> = {}) {
@@ -231,8 +232,8 @@ export class BoardCard {
         if ("blockedBy" in $$parsedSource) {
             $$parsedSource["blockedBy"] = $$createField17_0($$parsedSource["blockedBy"]);
         }
-        if ("followOnDispatch" in $$parsedSource) {
-            $$parsedSource["followOnDispatch"] = $$createField21_0($$parsedSource["followOnDispatch"]);
+        if ("followOn" in $$parsedSource) {
+            $$parsedSource["followOn"] = $$createField21_0($$parsedSource["followOn"]);
         }
         return new BoardCard($$parsedSource as Partial<BoardCard>);
     }
@@ -267,6 +268,46 @@ export class BoardCardBlocker {
     static createFrom($$source: any = {}): BoardCardBlocker {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new BoardCardBlocker($$parsedSource as Partial<BoardCardBlocker>);
+    }
+}
+
+/**
+ * BoardCardFollowOn (BACI-192) is the denormalised view of the dormant
+ * follow-on dispatch attached to this issue's currently in-flight
+ * (parent) dispatch — the single-slot row that BACI-180's
+ * WaitingDispatchForIssue + AddFollowOnDispatch wrote. Surfaced on
+ * every taken / waiting card so the kanban footer button can render
+ * the queued mode without a per-card REST call.
+ * 
+ * Mode is the prompt-template slug the BACI-180 backend stored on the
+ * dispatch row; ActionLabel is the imperative verb (resolved via the
+ * same prompt-template lookup as ActiveVerb / WaitingState) so the
+ * button label can read "▶| Plan" rather than the bare slug. Nil (and
+ * omitted from JSON) when the issue has no dormant follow-on — the
+ * renderer only paints the .is-attached state when truthy.
+ */
+export class BoardCardFollowOn {
+    "mode": model$0.DispatchMode;
+    "actionLabel": string;
+
+    /** Creates a new BoardCardFollowOn instance. */
+    constructor($$source: Partial<BoardCardFollowOn> = {}) {
+        if (!("mode" in $$source)) {
+            this["mode"] = model$0.DispatchMode.$zero;
+        }
+        if (!("actionLabel" in $$source)) {
+            this["actionLabel"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new BoardCardFollowOn instance from a string or object.
+     */
+    static createFrom($$source: any = {}): BoardCardFollowOn {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new BoardCardFollowOn($$parsedSource as Partial<BoardCardFollowOn>);
     }
 }
 
@@ -467,5 +508,5 @@ const $$createType5 = BoardCardTodo.createFrom;
 const $$createType6 = $Create.Array($$createType5);
 const $$createType7 = BoardCardBlocker.createFrom;
 const $$createType8 = $Create.Array($$createType7);
-const $$createType9 = FollowOnInfo.createFrom;
+const $$createType9 = BoardCardFollowOn.createFrom;
 const $$createType10 = $Create.Nullable($$createType9);

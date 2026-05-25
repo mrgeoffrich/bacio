@@ -4,6 +4,7 @@
 export {
     BoardCard,
     BoardCardBlocker,
+    BoardCardFollowOn,
     BoardCardQuestion,
     BoardCardTodo,
     FollowOnInfo,

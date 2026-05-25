@@ -232,27 +232,14 @@ type BoardCard struct {
 	// way to avoid a second poll loop. Omitempty keeps open cards
 	// lean on the wire — they outnumber done cards on a healthy board.
 	TerminalAt *time.Time `json:"terminalAt,omitempty"`
-	// FollowOnDispatch (BACI-182) carries the dormant follow-on dispatch
-	// the user has queued behind the issue's currently-in-flight parent
-	// dispatch (BACI-179 storage, BACI-180 queue/cancel verbs). Nil (and
-	// omitted from JSON) when no follow-on is dormant — the kanban
-	// renderer's chevron-or-chip slot reads non-nil here as "render the
-	// chip, hide the chevron". Single-slot per issue (Phase 1 design).
-	FollowOnDispatch *FollowOnInfo `json:"followOnDispatch,omitempty"`
-}
-
-// FollowOnInfo (BACI-182) is the per-issue dormant follow-on the kanban
-// card chip renders. Mode is the prompt template slug ("implement", a
-// custom slug, etc.); ActionLabel is the imperative phrase derived from
-// the template (e.g. "Implement") so the chip can read "→ Implement
-// queued" without re-resolving on the client; DispatchID is the
-// dormant agent_dispatches row's id, surfaced for parity with
-// activeByIssueID's pattern even though the cancel verb is issue-scoped
-// and doesn't actually need it.
-type FollowOnInfo struct {
-	Mode        model.DispatchMode `json:"mode"`
-	ActionLabel string             `json:"actionLabel"`
-	DispatchID  int64              `json:"dispatchID"`
+	// FollowOn (BACI-192) is the denormalised view of the dormant
+	// follow-on dispatch attached to this issue's currently in-flight
+	// (parent) dispatch — the single-slot row written by BACI-180's
+	// AddFollowOnDispatch. Drives the kanban card's footer follow-on
+	// button visual state. Nil (and omitted from JSON) when no
+	// dormant follow-on exists; the footer button stays in its
+	// outline state in that case.
+	FollowOn *BoardCardFollowOn `json:"followOn,omitempty"`
 }
 
 // BoardCardBlocker (BACI-114) is one open `blocks` edge pointing at
@@ -263,6 +250,24 @@ type FollowOnInfo struct {
 type BoardCardBlocker struct {
 	Key   string      `json:"key"`
 	State model.State `json:"state"`
+}
+
+// BoardCardFollowOn (BACI-192) is the denormalised view of the dormant
+// follow-on dispatch attached to this issue's currently in-flight
+// (parent) dispatch — the single-slot row that BACI-180's
+// WaitingDispatchForIssue + AddFollowOnDispatch wrote. Surfaced on
+// every taken / waiting card so the kanban footer button can render
+// the queued mode without a per-card REST call.
+//
+// Mode is the prompt-template slug the BACI-180 backend stored on the
+// dispatch row; ActionLabel is the imperative verb (resolved via the
+// same prompt-template lookup as ActiveVerb / WaitingState) so the
+// button label can read "▶| Plan" rather than the bare slug. Nil (and
+// omitted from JSON) when the issue has no dormant follow-on — the
+// renderer only paints the .is-attached state when truthy.
+type BoardCardFollowOn struct {
+	Mode        model.DispatchMode `json:"mode"`
+	ActionLabel string             `json:"actionLabel"`
 }
 
 // BoardCardQuestion is one open ask_user_question row surfaced on
@@ -350,11 +355,27 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 		allDispatches = append(allDispatches, ds...)
 	}
 	activeByIssueID := activeDispatchByIssueID(allDispatches)
-	// BACI-182: the dormant follow-on (if any) per issue. Walks the
-	// same allDispatches slice the active-dispatch derivation reads, so
-	// no new SQL — the BACI-179 column is already scanned on every
-	// agent_dispatches row.
-	followOnByIssueID := followOnByIssueID(allDispatches)
+	// BACI-192: per-issue dormant follow-on lookup. The dispatch slice
+	// is already newest-first; first match wins per issue. A row is a
+	// dormant follow-on when its status is queued AND its queued_after
+	// link is set (the same predicate store.FollowOnForIssue uses, but
+	// derived here client-side so we don't N+1 against the store).
+	followOnByIssueID := make(map[int64]*model.AgentDispatch, len(allDispatches))
+	for _, d := range allDispatches {
+		if d == nil || d.IssueID == nil {
+			continue
+		}
+		if d.Status != model.DispatchQueued {
+			continue
+		}
+		if d.QueuedAfterDispatchID == nil {
+			continue
+		}
+		if _, seen := followOnByIssueID[*d.IssueID]; seen {
+			continue
+		}
+		followOnByIssueID[*d.IssueID] = d
+	}
 
 	// BACI-145: bulked per-(repo, mode) in-flight count so the deriver
 	// can spot a concurrency-cap-blocked queued dispatch without an N+1
@@ -433,12 +454,15 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 		}
 		e := enrichByKey[iss.Key]
 		ws := DeriveWaitingState(iss, activeByIssueID[iss.ID], inflightByRepo[iss.RepoID], templates)
-		var followOn *FollowOnInfo
-		if d := followOnByIssueID[iss.ID]; d != nil {
-			followOn = &FollowOnInfo{
-				Mode:        d.Mode,
-				ActionLabel: actionLabelForMode(d.Mode, templates),
-				DispatchID:  d.ID,
+		// BACI-192: shape the dormant follow-on row (if any) into the
+		// wire DTO. The action label resolves via the same lookup the
+		// WaitingState path uses, so the button reads consistently
+		// with the spinner label.
+		var followOn *BoardCardFollowOn
+		if fo := followOnByIssueID[iss.ID]; fo != nil {
+			followOn = &BoardCardFollowOn{
+				Mode:        fo.Mode,
+				ActionLabel: actionLabelForMode(fo.Mode, templates),
 			}
 		}
 		cards = append(cards, BoardCard{
@@ -463,7 +487,7 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 			TranscriptDocCount: transcriptCountsByID[iss.ID],
 			EvalCommentCount:   evalCountsByID[iss.ID],
 			TerminalAt:         iss.TerminalAt,
-			FollowOnDispatch:   followOn,
+			FollowOn:           followOn,
 		})
 	}
 

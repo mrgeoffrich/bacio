@@ -158,6 +158,17 @@ export interface WaitingState {
   actionLabel?: string;
 }
 
+// BACI-192: BoardCardFollowOn is the denormalised view of the dormant
+// follow-on dispatch attached to this issue's currently in-flight
+// (parent) dispatch — single-slot per issue, drives the kanban
+// footer's follow-on button visual state. Mirror of the Go-side
+// boardcards.BoardCardFollowOn; api.ts re-exports the Wails-binding
+// equivalent under the same name.
+export interface BoardCardFollowOn {
+  mode: string;
+  actionLabel: string;
+}
+
 export interface BoardCard {
   key: string;
   column: string;
@@ -214,11 +225,14 @@ export interface BoardCard {
   // the already-polled cards array; the binding twin in api.ts mirrors
   // the same wire shape.
   terminalAt?: string;
-  // BACI-182: dormant follow-on dispatch (when the user queued one
-  // behind the issue's in-flight parent). Absent (omitempty server-side)
-  // when no follow-on is dormant — the kanban renderer reads
-  // followOnDispatch as the "render chip, hide chevron" gate.
-  followOnDispatch?: FollowOnInfo | null;
+  // BACI-192: dormant follow-on dispatch denormalised onto the card so
+  // the kanban footer can render its mode label without an extra
+  // per-card fetch. Absent (server-side omitempty) when the issue has
+  // no dormant follow-on — the footer button stays in its outline
+  // state in that case. Set optimistically by the App-level handlers
+  // on a successful queue / cancel; the next 10s poll re-asserts the
+  // authoritative shape.
+  followOn?: BoardCardFollowOn | null;
 }
 
 // ShippedIssueDTO (BACI-187) is one row in the topbar shipping-log
