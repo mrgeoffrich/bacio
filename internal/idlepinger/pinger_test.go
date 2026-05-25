@@ -93,6 +93,17 @@ func ping(targetSession string, ageFromNow time.Duration, now time.Time) *model.
 	}
 }
 
+// inboundWork builds a non-probe inbound dispatch — the BACI-148 gate
+// suppresses the reaper iff one of these is fresh on the session.
+func inboundWork(targetSession, createdBy string, ageFromNow time.Duration, now time.Time) *model.AgentDispatch {
+	return &model.AgentDispatch{
+		TargetSessionID: targetSession,
+		Status:          model.DispatchPending,
+		CreatedBy:       createdBy,
+		CreatedAt:       now.Add(-ageFromNow),
+	}
+}
+
 // TestTickFreshSession — a session that's seen recent activity must be
 // left alone. Picks 5 min, well inside the new 20 min idle threshold
 // (BACI-133 tightened it from 1 h).
@@ -264,5 +275,120 @@ func TestTickIdleSessionRecentlyAcked(t *testing.T) {
 	}
 	if pinged != 0 || ended != 0 {
 		t.Fatalf("counts = (%d,%d), want (0,0)", pinged, ended)
+	}
+}
+
+// TestTickFreshInboundDispatchSuppressesPing — BACI-148: a stale
+// session that has just been handed a real (non-probe) dispatch must
+// not be pinged. The matcher's bind is itself proof of liveness; the
+// agent's eventual AckDispatch will bump LastSeenAt. Mirrors the
+// 2026-05-25 BACI-141 incident before the auto-requeue would have
+// fired.
+func TestTickFreshInboundDispatchSuppressesPing(t *testing.T) {
+	now := time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC)
+	b := &fakeBackend{
+		sessions:   []*model.AgentSession{aliveSession("stale", 2*time.Hour, now)},
+		dispatches: []*model.AgentDispatch{inboundWork("stale", "supervisor", 2*time.Minute, now)},
+		repo:       &model.Repo{ID: 1, Prefix: "BACI"},
+	}
+	c := &recordedClient{}
+	p := New(b, c, nil).withClock(func() time.Time { return now })
+
+	pinged, ended, err := p.Tick(context.Background())
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if pinged != 0 || ended != 0 {
+		t.Fatalf("counts = (%d,%d), want (0,0)", pinged, ended)
+	}
+	if len(c.pings) != 0 || len(c.ends) != 0 {
+		t.Fatalf("expected no client calls, got pings=%v ends=%v", c.pings, c.ends)
+	}
+}
+
+// TestTickFreshInboundDispatchSuppressesForceEnd — BACI-148: the gate
+// must suppress the force-end branch too, not only the queue-ping
+// branch. Exact incident shape — an unacked ping is already past its
+// 2 min window AND a fresh real dispatch has just landed; the reaper
+// must defer to the matcher's vote of confidence.
+func TestTickFreshInboundDispatchSuppressesForceEnd(t *testing.T) {
+	now := time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC)
+	b := &fakeBackend{
+		sessions: []*model.AgentSession{aliveSession("stale", 2*time.Hour, now)},
+		dispatches: []*model.AgentDispatch{
+			ping("stale", 3*time.Minute, now),
+			inboundWork("stale", "supervisor", 1*time.Minute, now),
+		},
+		repo: &model.Repo{ID: 1, Prefix: "BACI"},
+	}
+	c := &recordedClient{}
+	p := New(b, c, nil).withClock(func() time.Time { return now })
+
+	pinged, ended, err := p.Tick(context.Background())
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if pinged != 0 || ended != 0 {
+		t.Fatalf("counts = (%d,%d), want (0,0)", pinged, ended)
+	}
+	if len(c.pings) != 0 || len(c.ends) != 0 {
+		t.Fatalf("expected no client calls, got pings=%v ends=%v", c.pings, c.ends)
+	}
+}
+
+// TestTickStaleInboundDispatchStillReaps — BACI-148: the gate only
+// covers dispatches fresh within AgentIdlePingThreshold. A non-probe
+// dispatch older than that no longer proves liveness, so the reaper
+// path resumes — confirming the genuine-wedge case is still handled,
+// just deferred by at most one threshold window.
+func TestTickStaleInboundDispatchStillReaps(t *testing.T) {
+	now := time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC)
+	b := &fakeBackend{
+		sessions:   []*model.AgentSession{aliveSession("stale", 2*time.Hour, now)},
+		dispatches: []*model.AgentDispatch{inboundWork("stale", "supervisor", 25*time.Minute, now)},
+		repo:       &model.Repo{ID: 1, Prefix: "BACI"},
+	}
+	c := &recordedClient{}
+	p := New(b, c, nil).withClock(func() time.Time { return now })
+
+	pinged, ended, err := p.Tick(context.Background())
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if pinged != 1 || ended != 0 {
+		t.Fatalf("counts = (%d,%d), want (1,0)", pinged, ended)
+	}
+	if len(c.pings) != 1 || c.pings[0] != "stale" {
+		t.Fatalf("pings = %v, want [stale]", c.pings)
+	}
+	if len(c.ends) != 0 {
+		t.Fatalf("expected no end calls, got %v", c.ends)
+	}
+}
+
+// TestTickSetupDispatchDoesNotCountAsWork — BACI-148: SetupDispatchCreator
+// rows are the channel's own register-yourself nudge, a liveness probe
+// just like IdlePingDispatchCreator. They must not gate the reaper —
+// otherwise a session wedged immediately after registration could
+// never be reaped.
+func TestTickSetupDispatchDoesNotCountAsWork(t *testing.T) {
+	now := time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC)
+	b := &fakeBackend{
+		sessions:   []*model.AgentSession{aliveSession("stale", 2*time.Hour, now)},
+		dispatches: []*model.AgentDispatch{inboundWork("stale", model.SetupDispatchCreator, 1*time.Minute, now)},
+		repo:       &model.Repo{ID: 1, Prefix: "BACI"},
+	}
+	c := &recordedClient{}
+	p := New(b, c, nil).withClock(func() time.Time { return now })
+
+	pinged, ended, err := p.Tick(context.Background())
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if pinged != 1 || ended != 0 {
+		t.Fatalf("counts = (%d,%d), want (1,0)", pinged, ended)
+	}
+	if len(c.pings) != 1 || c.pings[0] != "stale" {
+		t.Fatalf("pings = %v, want [stale]", c.pings)
 	}
 }
