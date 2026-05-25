@@ -16,6 +16,7 @@ import { Provider as TooltipProvider } from '@radix-ui/react-tooltip';
 import { reportError } from './errors';
 import { WEB_MODE } from './env';
 import * as api from './api';
+import { isTerminalState, stripBlockerFromCards, restoreBlockedByFromSnapshot } from './lib/issueState';
 
 const THEME_KEY = 'bacio-theme'; // persisted preference: 'system' | 'light' | 'dark'
 const REPO_KEY = 'bacio-active-repo'; // persisted preference: last-selected repo prefix
@@ -496,21 +497,58 @@ export default function App() {
   // Reads the previous column via the functional setCards form (and a
   // capture-and-noop trick) so the callback identity doesn't depend on
   // the cards array — keeps KanbanCard's React.memo effective.
+  //
+  // BACI-146: when the moved card lands in a terminal column
+  // (done/cancelled) we also strip its key from every sibling card's
+  // `blockedBy` array so the lock icon clears immediately rather than
+  // waiting up to POLL_INTERVAL_MS for `refreshCards` to refetch the
+  // server-filtered view. The server runs the same rule via
+  // `boardcards.isCardBlockerOpen`, so this is purely a convergence
+  // shortcut — the next refresh re-asserts the authoritative shape.
+  // The inverse edge (terminal → non-terminal, ie. blocker reopened)
+  // is covered by the targeted `refreshCards()` we fire after a
+  // successful state move so the icon re-arms within ~one round-trip.
   const moveCard = useCallback((key, toCol) => {
     let prevCol = null;
+    let prevBlockedBy = null;
     setCards(cs => {
       const prev = cs.find(c => c.key === key);
       if (!prev || prev.column === toCol) return cs;
       prevCol = prev.column;
-      return cs.map(c => c.key === key ? { ...c, column: toCol } : c);
+      const enteringTerminal = isTerminalState(toCol) && !isTerminalState(prevCol);
+      if (enteringTerminal) {
+        // Snapshot only the cards that actually list `key` as a
+        // blocker so rollback can put them back. Cards we didn't
+        // touch stay out of the snapshot map.
+        prevBlockedBy = new Map();
+        for (const c of cs) {
+          if ((c.blockedBy || []).some(b => b.key === key)) {
+            prevBlockedBy.set(c.key, c.blockedBy);
+          }
+        }
+      }
+      const moved = cs.map(c => c.key === key ? { ...c, column: toCol } : c);
+      return enteringTerminal ? stripBlockerFromCards(moved, key) : moved;
     });
     if (prevCol === null) return;
     api.setIssueState(activeBoard, key, toCol)
+      .then(() => {
+        // BACI-146: a non-silent refresh covers the reopen edge
+        // (terminal → non-terminal) where the server needs to put
+        // each affected sibling's `blockedBy` back. One HTTP call
+        // per move is cheap and surfaces stale-board errors loudly.
+        if (isTerminalState(prevCol) !== isTerminalState(toCol)) {
+          refreshCards();
+        }
+      })
       .catch(err => {
         reportError(err, { headline: "Couldn't move card" });
-        setCards(cs => cs.map(c => c.key === key ? { ...c, column: prevCol } : c));
+        setCards(cs => {
+          const reverted = cs.map(c => c.key === key ? { ...c, column: prevCol } : c);
+          return prevBlockedBy ? restoreBlockedByFromSnapshot(reverted, prevBlockedBy) : reverted;
+        });
       });
-  }, [activeBoard]);
+  }, [activeBoard, refreshCards]);
 
   // Dispatch a prompt from a card's action button: the backend gates the
   // mode on the issue's state and enqueues a target-less dispatch the
