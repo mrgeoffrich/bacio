@@ -126,6 +126,15 @@ export interface BoardCardTodo {
   status: string;
 }
 
+// FollowOnInfo (BACI-182) is the dormant follow-on dispatch the kanban
+// card chip renders. Mirrors internal/boardcards/cards.go::FollowOnInfo;
+// surfaced server-side via BoardCard.followOnDispatch.
+export interface FollowOnInfo {
+  mode: string;
+  actionLabel: string;
+  dispatchID: number;
+}
+
 // BoardCardBlocker (BACI-114) is one open `blocks` edge pointing AT
 // a card. Title is intentionally NOT on the wire — the kanban
 // popover joins it from the same `cards` array (Option A: thin

@@ -1170,3 +1170,74 @@ func stringSliceEqual(a, b []string) bool {
 	}
 	return true
 }
+
+// TestAssembleSurfacesFollowOnDispatch (BACI-182) pins the in-memory
+// follow-on deriver: dormant rows (status=queued AND
+// QueuedAfterDispatchID != nil) surface on the BoardCard.FollowOnDispatch
+// field with the right mode + action label; issues without a dormant
+// row leave the field nil; on an issue with multiple queued rows, only
+// the one carrying the dormant link wins.
+func TestAssembleSurfacesFollowOnDispatch(t *testing.T) {
+	repo := &model.Repo{ID: 1, Prefix: "TEST"}
+	t0 := time.Date(2026, 5, 25, 9, 0, 0, 0, time.UTC)
+	happyID := int64(101)
+	noneID := int64(102)
+	multiID := int64(103)
+	parentID := int64(900) // shared notional parent for the dormant rows
+	issues := []*model.Issue{
+		{ID: happyID, RepoID: repo.ID, Key: "TEST-1", State: model.StateInProgress, Title: "follow-on queued"},
+		{ID: noneID, RepoID: repo.ID, Key: "TEST-2", State: model.StateInProgress, Title: "no follow-on"},
+		{ID: multiID, RepoID: repo.ID, Key: "TEST-3", State: model.StateInProgress, Title: "two queued, one dormant"},
+	}
+	// RepoDispatches is newest-first; older entries get an older
+	// CreatedAt so the deriver's "first hit wins" loop walks newest
+	// first.
+	dispatches := []*model.AgentDispatch{
+		// TEST-1: pending parent + dormant follow-on (implement).
+		{ID: 200, IssueID: &happyID, IssueKey: "TEST-1", Mode: model.DispatchMode("implement"), Status: model.DispatchQueued, CreatedAt: t0, QueuedAfterDispatchID: &parentID},
+		{ID: 201, IssueID: &happyID, IssueKey: "TEST-1", Mode: model.DispatchMode("plan"), Status: model.DispatchPending, CreatedAt: t0.Add(-1 * time.Minute)},
+		// TEST-2: just a pending parent — no dormant row attached.
+		{ID: 202, IssueID: &noneID, IssueKey: "TEST-2", Mode: model.DispatchMode("plan"), Status: model.DispatchPending, CreatedAt: t0.Add(-2 * time.Minute)},
+		// TEST-3: two queued rows; only the newer one is dormant (has
+		// QueuedAfterDispatchID set). The older queued row is a plain
+		// queued dispatch waiting for the matcher — the deriver must
+		// skip it.
+		{ID: 203, IssueID: &multiID, IssueKey: "TEST-3", Mode: model.DispatchMode("ship"), Status: model.DispatchQueued, CreatedAt: t0.Add(-3 * time.Minute), QueuedAfterDispatchID: &parentID},
+		{ID: 204, IssueID: &multiID, IssueKey: "TEST-3", Mode: model.DispatchMode("plan"), Status: model.DispatchQueued, CreatedAt: t0.Add(-4 * time.Minute)},
+	}
+	templates := []*store.PromptTemplate{
+		{Slug: "plan", Name: "Planning", ActionLabel: "Plan"},
+		{Slug: "implement", Name: "Implementing", ActionLabel: "Implement"},
+		{Slug: "ship", Name: "Shipping", ActionLabel: "Ship it"},
+	}
+	f := &fakeClient{repo: repo, issues: issues, dispatches: dispatches, templates: templates}
+	cards, err := Assemble(context.Background(), f, repo, false, nil)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	byKey := map[string]BoardCard{}
+	for _, c := range cards {
+		byKey[c.Key] = c
+	}
+	// TEST-1: dormant follow-on surfaces with the implement mode + label.
+	if fo := byKey["TEST-1"].FollowOn; fo == nil {
+		t.Errorf("TEST-1 FollowOn = nil, want non-nil (dormant row present)")
+	} else {
+		if fo.Mode != model.DispatchMode("implement") {
+			t.Errorf("TEST-1 FollowOn.Mode = %q, want implement", fo.Mode)
+		}
+		if fo.ActionLabel != "Implement" {
+			t.Errorf("TEST-1 FollowOn.ActionLabel = %q, want Implement", fo.ActionLabel)
+		}
+	}
+	// TEST-2: no dormant row — field must stay nil.
+	if fo := byKey["TEST-2"].FollowOn; fo != nil {
+		t.Errorf("TEST-2 FollowOn = %+v, want nil (no dormant row)", fo)
+	}
+	// TEST-3: two queued rows; only the dormant one (ship) wins.
+	if fo := byKey["TEST-3"].FollowOn; fo == nil {
+		t.Errorf("TEST-3 FollowOn = nil, want the dormant row")
+	} else if fo.Mode != model.DispatchMode("ship") {
+		t.Errorf("TEST-3 FollowOn.Mode = %q, want ship — the non-dormant queued row leaked through", fo.Mode)
+	}
+}

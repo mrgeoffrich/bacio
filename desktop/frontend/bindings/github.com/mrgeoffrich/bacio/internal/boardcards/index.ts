@@ -7,6 +7,7 @@ export {
     BoardCardFollowOn,
     BoardCardQuestion,
     BoardCardTodo,
+    FollowOnInfo,
     WaitingKind,
     WaitingState
 } from "./models.js";

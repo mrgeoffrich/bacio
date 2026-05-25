@@ -1558,7 +1558,8 @@ export class ShippedIssueDTO {
 
 /**
  * SyncPreferencesDTO is the BACI-89 background-sync toggle shaped for
- * the desktop Sync view. Mirrors BoardPreferencesDTO / DisplayPreferencesDTO.
+ * the desktop Sync view. Mirrors DisplayPreferencesDTO — same single-
+ * boolean shape.
  */
 export class SyncPreferencesDTO {
     "backgroundEnabled": boolean;

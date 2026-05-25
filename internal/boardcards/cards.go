@@ -355,7 +355,6 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 		allDispatches = append(allDispatches, ds...)
 	}
 	activeByIssueID := activeDispatchByIssueID(allDispatches)
-
 	// BACI-192: per-issue dormant follow-on lookup. The dispatch slice
 	// is already newest-first; first match wins per issue. A row is a
 	// dormant follow-on when its status is queued AND its queued_after
@@ -802,6 +801,34 @@ func activeDispatchByIssueID(allDispatches []*model.AgentDispatch) map[int64]*mo
 		}
 		// Cancelled / acked rows don't establish the "active" dispatch
 		// — keep walking newer-to-older for the same issue.
+	}
+	return out
+}
+
+// followOnByIssueID (BACI-182) maps issue id → the issue's dormant
+// follow-on dispatch row (status=queued AND queued_after_dispatch_id IS
+// NOT NULL), or absent when no follow-on is queued. Walks the same
+// `allDispatches` slice (newest-first per RepoDispatches' contract) so
+// the first matching row per issue wins — mirrors activeDispatchByIssueID
+// in shape and per-issue uniqueness.
+//
+// Drives BACI-182's kanban chevron-or-chip slot: a non-nil entry tells
+// the renderer to paint the chip (replacing the chevron) and the chip
+// carries the dispatch's mode + action label.
+func followOnByIssueID(allDispatches []*model.AgentDispatch) map[int64]*model.AgentDispatch {
+	out := make(map[int64]*model.AgentDispatch)
+	for _, d := range allDispatches {
+		if d == nil || d.IssueID == nil {
+			continue
+		}
+		if d.Status != model.DispatchQueued || d.QueuedAfterDispatchID == nil {
+			continue
+		}
+		id := *d.IssueID
+		if _, ok := out[id]; ok {
+			continue
+		}
+		out[id] = d
 	}
 	return out
 }
