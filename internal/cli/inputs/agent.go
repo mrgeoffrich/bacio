@@ -128,6 +128,28 @@ type IssueDispatchInput struct {
 	Mode string `json:"mode"`
 }
 
+// AgentQueueFollowOnInput is the payload for `bacio agent queue-followon
+// --json` (BACI-180): queues a dormant follow-on dispatch against the
+// in-flight (parent) dispatch attached to the named issue. IssueKey must
+// be canonical (PREFIX-N). Mode is the dispatch intent for the follow-on
+// (same set the regular dispatch verbs accept). The server re-resolves
+// the parent via WaitingDispatchForIssue, re-checks the mode's
+// state-gate, and rejects the call when there is no open dispatch to
+// follow on from.
+type AgentQueueFollowOnInput struct {
+	IssueKey string `json:"issue_key"`
+	Mode     string `json:"mode"`
+}
+
+// AgentCancelFollowOnInput is the payload for `bacio agent cancel-followon
+// --json` (BACI-180): removes the dormant follow-on attached to the
+// named issue. IssueKey must be canonical (PREFIX-N). Idempotent — a
+// call against an issue with no dormant follow-on is a no-op (the verb
+// returns a null projection / 204) so a stale UI click doesn't error.
+type AgentCancelFollowOnInput struct {
+	IssueKey string `json:"issue_key"`
+}
+
 // AgentQuestionsListInput is the payload for
 // `bacio agent questions list --json`. SessionID scopes the list to
 // one session id (defaults to $CLAUDE_CODE_SESSION_ID on the CLI

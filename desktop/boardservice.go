@@ -816,6 +816,47 @@ func (b *BoardService) CancelSessionQuestion(id int64) (*model.SessionQuestion, 
 	return b.client.CancelSessionQuestion(context.Background(), id, false)
 }
 
+// QueueFollowOnDispatch (BACI-180) attaches a dormant follow-on
+// dispatch to the issue's in-flight (parent) dispatch. Mirrors
+// DispatchIssue's shape — same DTO out, repo prefix derivable from
+// the issue key — but routes through client.QueueFollowOnDispatch so
+// the gate + parent-resolution path stays in one place. Errors when
+// there is no open dispatch on the issue, when the state-gate
+// rejects, or when a dormant follow-on already exists (single-slot
+// per issue).
+func (b *BoardService) QueueFollowOnDispatch(repoPrefix, issueKey, mode string) (DispatchDTO, error) {
+	ctx := context.Background()
+	repo, err := b.resolveRepoForKey(ctx, repoPrefix, issueKey)
+	if err != nil {
+		return DispatchDTO{}, err
+	}
+	d, err := b.client.QueueFollowOnDispatch(ctx, repo, issueKey, mode, false)
+	if err != nil {
+		return DispatchDTO{}, err
+	}
+	return dispatchDTO(d), nil
+}
+
+// CancelFollowOnDispatch (BACI-180) is the chip-remove handler: cancel
+// the dormant follow-on attached to an issue. Idempotent — a no-op on
+// an issue with no dormant follow-on (returns the zero DispatchDTO and
+// nil error) so a stale UI click doesn't surface as an error.
+func (b *BoardService) CancelFollowOnDispatch(repoPrefix, issueKey string) (DispatchDTO, error) {
+	ctx := context.Background()
+	repo, err := b.resolveRepoForKey(ctx, repoPrefix, issueKey)
+	if err != nil {
+		return DispatchDTO{}, err
+	}
+	d, err := b.client.CancelFollowOnDispatch(ctx, repo, issueKey, false)
+	if err != nil {
+		return DispatchDTO{}, err
+	}
+	if d == nil {
+		return DispatchDTO{}, nil
+	}
+	return dispatchDTO(d), nil
+}
+
 // CancelWaitingDispatch (BACI-51) is the spinner-as-cancel-button
 // binding. Resolves the active (queued / pending / delivered) dispatch
 // for an issue and cancels it in a single Wails call so card DTOs
