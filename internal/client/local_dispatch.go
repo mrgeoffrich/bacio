@@ -880,35 +880,6 @@ func stringsToStates(states []string) []model.State {
 	return out
 }
 
-func (c *localClient) GetBoardPreferences(ctx context.Context) (BoardPreferences, error) {
-	hide, err := c.store.GetBoardHideEmptyColumns()
-	if err != nil {
-		return BoardPreferences{}, err
-	}
-	return BoardPreferences{HideEmptyColumns: hide}, nil
-}
-
-func (c *localClient) SetBoardPreferences(ctx context.Context, prefs BoardPreferences, dryRun bool) error {
-	if dryRun {
-		// A bool can't be malformed — there's nothing to validate, so a
-		// dry-run is a no-op: returns nil, writes nothing, same shape as
-		// every other --dry-run mutation.
-		return nil
-	}
-	if err := c.store.SetBoardHideEmptyColumns(prefs.HideEmptyColumns); err != nil {
-		return err
-	}
-	// Board preferences are global, not repo-scoped — the audit row
-	// carries no RepoID, same as the prompt-template rows. recordOp
-	// never fails the user-visible action.
-	c.recordOp(model.HistoryEntry{
-		Op: "board_prefs.update", Kind: "app_setting",
-		TargetLabel: "board.hide_empty_columns",
-		Details:     fmt.Sprintf("hide_empty_columns=%t", prefs.HideEmptyColumns),
-	})
-	return nil
-}
-
 // dispatchTargetLabel picks the most specific label for audit rows:
 // the agent identity slug if there is one, else the session id.
 func dispatchTargetLabel(d *model.AgentDispatch) string {

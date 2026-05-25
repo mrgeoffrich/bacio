@@ -33,7 +33,6 @@ import {
   HistoryEntryDTO,
   LeaderStatusDTO,
   PromptTemplateDTO,
-  BoardPreferencesDTO,
   ArchivePreferencesDTO,
   SyncPreferencesDTO,
   SyncRegistryDTO,
@@ -54,7 +53,7 @@ import { ClaimDTO } from '../bindings/github.com/mrgeoffrich/bacio/internal/agen
 // scattered through the kanban code).
 import { WaitingState, WaitingKind } from '../bindings/github.com/mrgeoffrich/bacio/internal/boardcards';
 
-export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, BoardPreferencesDTO, ArchivePreferencesDTO, WaitingState, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO, SyncSetupDTO, CollisionPreviewDTO, RenumberEntryDTO, RenameEntryDTO, RepoLinkResultDTO };
+export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, ArchivePreferencesDTO, WaitingState, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO, SyncSetupDTO, CollisionPreviewDTO, RenumberEntryDTO, RenameEntryDTO, RepoLinkResultDTO };
 
 // BACI-108: cross-transport aliases — components import from `./api`
 // and stay unaware of whether they're on the Wails or HTTP seam. The
@@ -584,32 +583,9 @@ export async function savePromptActionLabel(
   }
 }
 
-// getBoardPreferences returns the persisted desktop Board UI
-// preferences (or the built-in defaults when none are stored).
-export async function getBoardPreferences(): Promise<BoardPreferencesDTO> {
-  try {
-    return await SettingsService.GetBoardPreferences();
-  } catch (err) {
-    throw normalize(err);
-  }
-}
-
-// setBoardPreferences stores the Board's hide-empty-columns preference
-// and returns the refreshed DTO.
-export async function setBoardPreferences(
-  hideEmptyColumns: boolean,
-): Promise<BoardPreferencesDTO> {
-  try {
-    return await SettingsService.SetBoardPreferences(hideEmptyColumns);
-  } catch (err) {
-    throw normalize(err);
-  }
-}
-
-// BACI-68: display.show_archived global toggle. Same shape as the
-// board-preferences pair; lives behind a dedicated Wails endpoint so
-// the Settings panel can read / write it without coupling display
-// state to board state.
+// BACI-68: display.show_archived global toggle. Lives behind a
+// dedicated Wails endpoint so the Settings panel can read / write
+// it without coupling display state to other preferences.
 export type DisplayPreferencesDTO = { showArchived: boolean };
 
 export async function getDisplayPreferences(): Promise<DisplayPreferencesDTO> {

@@ -161,7 +161,8 @@ func (d deps) handleSyncStatusList(w http.ResponseWriter, r *http.Request) {
 // ---------- sync preferences (the background-sync toggle) ----------
 
 // SyncPreferencesOut is the response shape for GET/PUT
-// /settings/sync-preferences. Mirrors BoardPreferencesOut.
+// /settings/sync-preferences. Same single-boolean shape as the other
+// app_settings preference endpoints.
 type SyncPreferencesOut struct {
 	BackgroundEnabled bool `json:"background_enabled"`
 }

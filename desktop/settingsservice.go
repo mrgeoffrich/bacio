@@ -48,8 +48,9 @@ type PromptTemplateDTO struct {
 }
 
 // SettingsService is the Wails-bound API for the desktop Settings panel.
-// It owns the customisable dispatch prompt templates (now arbitrary in
-// count and shape — see BACI-31) and the Board UI preferences.
+// It owns the customisable dispatch prompt templates (arbitrary in
+// count and shape — see BACI-31) plus the display / archive / sync
+// preference pairs.
 type SettingsService struct {
 	client client.Client
 }
@@ -262,35 +263,6 @@ func (s *SettingsService) refreshedDTO(ctx context.Context, slug string) (Prompt
 	return dtoForTemplate(t), nil
 }
 
-// BoardPreferencesDTO is the desktop Board's UI preferences, shaped for
-// the Settings panel. HideEmptyColumns drops kanban columns with zero
-// cards from the Board.
-type BoardPreferencesDTO struct {
-	HideEmptyColumns bool `json:"hideEmptyColumns"`
-}
-
-// GetBoardPreferences returns the persisted desktop Board UI
-// preferences (or the built-in defaults when none are stored).
-func (s *SettingsService) GetBoardPreferences() (BoardPreferencesDTO, error) {
-	prefs, err := s.client.GetBoardPreferences(context.Background())
-	if err != nil {
-		return BoardPreferencesDTO{}, err
-	}
-	return BoardPreferencesDTO{HideEmptyColumns: prefs.HideEmptyColumns}, nil
-}
-
-// SetBoardPreferences stores the desktop Board's hide-empty-columns
-// preference and returns the refreshed DTO.
-func (s *SettingsService) SetBoardPreferences(hideEmptyColumns bool) (BoardPreferencesDTO, error) {
-	ctx := context.Background()
-	if err := s.client.SetBoardPreferences(ctx, client.BoardPreferences{
-		HideEmptyColumns: hideEmptyColumns,
-	}, false); err != nil {
-		return BoardPreferencesDTO{}, err
-	}
-	return s.GetBoardPreferences()
-}
-
 // DisplayPreferencesDTO is the BACI-68 display.show_archived global
 // toggle, shaped for the desktop Settings panel.
 type DisplayPreferencesDTO struct {
@@ -361,7 +333,8 @@ func (s *SettingsService) SetArchivePreferences(autoEnabled bool, retentionDays 
 }
 
 // SyncPreferencesDTO is the BACI-89 background-sync toggle shaped for
-// the desktop Sync view. Mirrors BoardPreferencesDTO / DisplayPreferencesDTO.
+// the desktop Sync view. Mirrors DisplayPreferencesDTO — same single-
+// boolean shape.
 type SyncPreferencesDTO struct {
 	BackgroundEnabled bool `json:"backgroundEnabled"`
 }

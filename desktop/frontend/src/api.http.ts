@@ -541,10 +541,6 @@ export interface PromptTemplateDTO {
   actionLabelIsDefault: boolean;
 }
 
-export interface BoardPreferencesDTO {
-  hideEmptyColumns: boolean;
-}
-
 // ---------- WebModeUnavailableError ----------
 
 // Thrown by stubs for surfaces the web build deliberately doesn't
@@ -1720,21 +1716,6 @@ export async function promptPlaceholders(): Promise<string[]> {
 export async function bacioVersion(): Promise<string> {
   const res = await call<{ version: string }>('/version');
   return res.version;
-}
-
-// ---------- Board preferences (BACI-47/D) ----------
-
-export async function getBoardPreferences(): Promise<BoardPreferencesDTO> {
-  const res = await call<{ hide_empty_columns: boolean }>('/settings/board-preferences');
-  return { hideEmptyColumns: res.hide_empty_columns };
-}
-
-export async function setBoardPreferences(hideEmptyColumns: boolean): Promise<BoardPreferencesDTO> {
-  const res = await call<{ hide_empty_columns: boolean }>('/settings/board-preferences', {
-    method: 'PUT',
-    body: { hide_empty_columns: hideEmptyColumns },
-  });
-  return { hideEmptyColumns: res.hide_empty_columns };
 }
 
 // ---------- Sync setup (BACI-111) ----------

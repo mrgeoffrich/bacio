@@ -10,7 +10,7 @@ import (
 )
 
 // Global (not per-repo) KV used by the desktop app. Keep keys namespaced
-// (e.g. "board.hide_empty_columns") so future global preferences can
+// (e.g. "display.show_archived") so future global preferences can
 // share this table — the same rationale as tui_settings, one scope up.
 //
 // The dispatch prompt templates and their state-gates used to live here
@@ -252,31 +252,6 @@ func isBuiltinSlug(s string) bool {
 	return false
 }
 
-const boardHideEmptyColumnsKey = "board.hide_empty_columns"
-
-// GetBoardHideEmptyColumns reports whether the desktop Board should hide
-// columns that have no cards. A missing/empty value — or any value that
-// isn't exactly "true" — reads as false (the default), the same
-// defensive read style as GetPromptStates: a read path never errors on
-// an unexpected stored value.
-func (s *Store) GetBoardHideEmptyColumns() (bool, error) {
-	v, err := s.GetAppSetting(boardHideEmptyColumnsKey)
-	if err != nil {
-		return false, err
-	}
-	return v == "true", nil
-}
-
-// SetBoardHideEmptyColumns stores the desktop Board's hide-empty-columns
-// preference.
-func (s *Store) SetBoardHideEmptyColumns(hide bool) error {
-	v := "false"
-	if hide {
-		v = "true"
-	}
-	return s.SetAppSetting(boardHideEmptyColumnsKey, v)
-}
-
 // displayShowArchivedKey is the BACI-68 global toggle controlling
 // whether archived issues / documents / features appear in default
 // lists (board, kanban, doc list, feature list) and on the API. The
@@ -286,8 +261,8 @@ const displayShowArchivedKey = "display.show_archived"
 
 // GetDisplayShowArchived reports whether archived rows should appear
 // in default lists (BACI-68). A missing/empty value — or any value
-// that isn't exactly "true" — reads as false (the default), matching
-// the defensive read style of GetBoardHideEmptyColumns.
+// that isn't exactly "true" — reads as false (the default); a read
+// path never errors on an unexpected stored value.
 func (s *Store) GetDisplayShowArchived() (bool, error) {
 	v, err := s.GetAppSetting(displayShowArchivedKey)
 	if err != nil {

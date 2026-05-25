@@ -441,14 +441,6 @@ func (c *remoteClient) SetPromptStates(ctx context.Context, mode string, states 
 	return c.do(ctx, http.MethodPut, path, q, in, nil)
 }
 
-func (c *remoteClient) GetBoardPreferences(ctx context.Context) (BoardPreferences, error) {
-	return BoardPreferences{}, remoteAgentNotSupported("board-preferences")
-}
-
-func (c *remoteClient) SetBoardPreferences(ctx context.Context, prefs BoardPreferences, dryRun bool) error {
-	return remoteAgentNotSupported("board-preferences")
-}
-
 // Agent questions (BACI-53). REST parity for the user-side verbs
 // (list / show / answer / cancel) ships in Phase 4 so the desktop
 // and web bundle work in remote mode. The channel-side helpers

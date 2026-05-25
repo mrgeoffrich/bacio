@@ -11,11 +11,6 @@ const THEME_OPTIONS = [
   { id: 'dark', label: 'Dark' },
 ];
 
-const HIDE_EMPTY_OPTIONS = [
-  { id: false, label: 'Off' },
-  { id: true, label: 'On' },
-];
-
 // BACI-68: the display.show_archived toggle uses the same two-button
 // shape as the other boolean preferences. "Off" hides archived rows
 // from default lists / boards (the default); "On" surfaces them
@@ -44,8 +39,6 @@ const EMPTY_NEW_TEMPLATE = { slug: '', name: '', body: '', states: ['todo'], act
 export default function SettingsView({
   theme,
   onChangeTheme,
-  hideEmptyColumns,
-  onChangeHideEmptyColumns,
   showArchived,
   onChangeShowArchived,
   archiveAutoEnabled,
@@ -279,25 +272,6 @@ export default function SettingsView({
                 className={`mk-segmented-btn ${theme === opt.id ? 'is-active' : ''}`}
                 aria-pressed={theme === opt.id}
                 onClick={() => onChangeTheme(opt.id)}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <section className="mk-settings-row">
-          <div className="mk-settings-row-text">
-            <div className="mk-settings-label">Hide empty board columns</div>
-            <div className="mk-settings-hint">Columns with no cards are hidden from the board.</div>
-          </div>
-          <div className="mk-segmented" role="group" aria-label="Hide empty board columns">
-            {HIDE_EMPTY_OPTIONS.map(opt => (
-              <button
-                key={String(opt.id)}
-                className={`mk-segmented-btn ${hideEmptyColumns === opt.id ? 'is-active' : ''}`}
-                aria-pressed={hideEmptyColumns === opt.id}
-                onClick={() => onChangeHideEmptyColumns(opt.id)}
               >
                 {opt.label}
               </button>

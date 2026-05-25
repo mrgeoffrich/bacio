@@ -199,13 +199,6 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("PUT /settings/templates/{mode}/action-label", d.handlePromptTemplateActionLabelSet)
 	mux.HandleFunc("DELETE /settings/templates/{mode}/action-label", d.handlePromptTemplateActionLabelDelete)
 
-	// Board preferences (BACI-47/D). One scalar global flag today —
-	// board.hide_empty_columns. Lives at /settings/... alongside the
-	// template surface to mirror the BACI-36 precedent for global
-	// app_settings over HTTP.
-	mux.HandleFunc("GET /settings/board-preferences", d.handleBoardPreferencesGet)
-	mux.HandleFunc("PUT /settings/board-preferences", d.handleBoardPreferencesSet)
-
 	// BACI-89 background sync. GET /sync (cross-repo) + GET
 	// /repos/{prefix}/sync (per-repo) report live sync status —
 	// last_sync_at, last_error, in_progress, configured — so the web
