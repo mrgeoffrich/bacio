@@ -191,23 +191,10 @@ export default function ShippedPopover({ activeBoard, shippedCount, onOpenIssue,
                 title={r.title}
               >
                 <span className="mk-shipped-row-top">
-                  {r.featureEmoji && (
-                    <span className="mk-shipped-row-emoji" aria-hidden="true">{r.featureEmoji}</span>
-                  )}
                   <span className="mk-shipped-row-key mk-card-id">{r.key}</span>
                   <span className="mk-shipped-row-title">{r.title}</span>
                   <span className="mk-shipped-row-when">{formatWhen(r.terminalAt)}</span>
                 </span>
-                {(r.tags?.length > 0 || r.prUrl) && (
-                  <span className="mk-shipped-row-meta">
-                    {r.tags?.map((t) => (
-                      <span key={t} className="mk-tag">{t}</span>
-                    ))}
-                    {r.prUrl && (
-                      <span className="mk-tag mk-shipped-row-pr">PR</span>
-                    )}
-                  </span>
-                )}
               </button>
             ))}
           </div>

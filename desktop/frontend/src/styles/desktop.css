@@ -1870,9 +1870,6 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   display: flex; align-items: baseline; gap: 8px;
   width: 100%; min-width: 0;
 }
-.mk-shipped-row-emoji {
-  font-size: 14px; line-height: 1; flex-shrink: 0;
-}
 .mk-shipped-row-key {
   font-family: var(--font-mono); font-size: 10px; letter-spacing: .04em;
   color: var(--fg-3); flex-shrink: 0;
@@ -1885,15 +1882,6 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
 }
 .mk-shipped-row-when {
   font-size: 11px; color: var(--fg-3); flex-shrink: 0;
-}
-.mk-shipped-row-meta {
-  display: flex; gap: 4px; flex-wrap: wrap;
-  /* Indent under the row title — emoji + key width approximation. */
-  padding-left: 0;
-}
-.mk-shipped-row-pr {
-  background: var(--status-review-bg);
-  color: var(--status-review);
 }
 
 /* Skeleton rows shown while the first fetch is in flight. */
