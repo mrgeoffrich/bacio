@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -1003,6 +1004,313 @@ func (c *localClient) EnsurePingDispatch(ctx context.Context, sess *model.AgentS
 		Details: dispatchDetails(d),
 	})
 	return d, nil
+}
+
+// CreateRescueDispatch (BACI-190) enqueues a `from="bacio-rescue"`
+// channel event asking an idle supervisor to handle a dead worker's
+// stranded worktree INLINE — no fresh Task spawn. Structural carve-
+// out mirrors EnsureSetupDispatch / EnsurePingDispatch: bypass
+// ComposeDispatchPayload (the per-mode brief preamble would tell the
+// supervisor to spawn a subagent, exactly the wrong thing here) and
+// write the whole rescue instruction inline.
+//
+// Eligibility (enforced here so the REST/Wails layers don't repeat
+// the check):
+//   - the original dispatch is pending or delivered (never acked /
+//     cancelled / queued)
+//   - its CreatedBy is a real per-mode creator (not bacio-channel /
+//     bacio-channel-ping / bacio-rescue)
+//   - its TargetSessionID is non-empty
+//   - that target session is ended (EndedAt != nil)
+//
+// Target picking: a live, channel-connected, non-busy, registered
+// session in the same repo, NOT the dead one. Freshest-last-seen
+// first. Returns an error when nothing eligible exists.
+//
+// agent_id / worktree resolution is best-effort: parsed from the
+// newest transcript document linked to the dispatch's issue. When no
+// transcript is attached the rescue payload falls back to instructing
+// the supervisor to `git worktree list` for candidates.
+//
+// Writes one `agent.rescue` audit row attributed to the calling
+// actor with TargetID = the new rescue dispatch's id, and Details
+// naming the original dispatch + agent + worktree.
+func (c *localClient) CreateRescueDispatch(ctx context.Context, dispatchID int64) (*model.AgentDispatch, error) {
+	orig, err := c.store.GetDispatch(dispatchID)
+	if err != nil {
+		return nil, err
+	}
+	if orig.Status != model.DispatchPending && orig.Status != model.DispatchDelivered {
+		return nil, fmt.Errorf("dispatch #%d is %s; only pending/delivered dispatches are rescuable", orig.ID, orig.Status)
+	}
+	if isRescueTrivialCreator(orig.CreatedBy) {
+		return nil, fmt.Errorf("dispatch #%d was created by %s and is not rescuable (only typed per-mode dispatches can be rescued)", orig.ID, orig.CreatedBy)
+	}
+	if orig.TargetSessionID == "" {
+		return nil, fmt.Errorf("dispatch #%d has no target session; nothing to rescue", orig.ID)
+	}
+	deadSess, err := c.store.GetAgentSession(orig.TargetSessionID)
+	if err != nil {
+		return nil, fmt.Errorf("rescue: load dead session %s: %w", orig.TargetSessionID, err)
+	}
+	if deadSess.EndedAt == nil {
+		return nil, fmt.Errorf("rescue: target session %s is still alive; nothing to rescue", deadSess.SessionID)
+	}
+
+	repo, err := c.store.GetRepoByID(orig.RepoID)
+	if err != nil {
+		return nil, fmt.Errorf("rescue: load repo %d: %w", orig.RepoID, err)
+	}
+
+	// Best-effort agent id resolution from a linked transcript doc.
+	// The dead worker's transcript was likely never attached by the
+	// supervisor (the worker died before its summary returned) — but
+	// the bacio-transcript-review skill often attaches them post-hoc,
+	// and either way the agent id resolves cleanly when present.
+	var agentID, transcriptName string
+	if orig.IssueID != nil {
+		if links, ferr := c.store.ListDocumentsLinkedToIssue(*orig.IssueID); ferr == nil {
+			agentID, transcriptName = newestTranscriptAgentID(links)
+		}
+	}
+
+	target, err := c.pickIdleRescueSupervisor(repo.ID, deadSess.SessionID)
+	if err != nil {
+		return nil, err
+	}
+	if target == nil {
+		return nil, fmt.Errorf("rescue: no idle supervisor available (need a live, channel-connected, non-busy session in %s; you can also start a fresh `claude` in this repo to receive the rescue)", repo.Prefix)
+	}
+
+	worktreePath := ""
+	if agentID != "" {
+		worktreePath = filepath.Join(repo.Path, ".claude", "worktrees", "agent-"+agentID)
+	}
+
+	payload := buildRescueDispatchPayload(orig, agentID, worktreePath, transcriptName, repo.Path)
+
+	d, err := c.store.AddDispatch(store.AddDispatchIn{
+		RepoID:          repo.ID,
+		TargetAgentID:   target.AgentID,
+		TargetSessionID: target.SessionID,
+		Payload:         payload,
+		CreatedBy:       model.RescueDispatchCreator,
+	})
+	if err != nil {
+		return nil, err
+	}
+	details := fmt.Sprintf("original_dispatch=%d,target_session=%s,agent=%s,worktree=%s",
+		orig.ID, target.SessionID, agentID, worktreePath)
+	c.recordOp(model.HistoryEntry{
+		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+		Op: "agent.rescue", Kind: "agent",
+		TargetID: &d.ID, TargetLabel: dispatchTargetLabel(d),
+		Details: details,
+	})
+	return d, nil
+}
+
+// isRescueTrivialCreator reports whether the CreatedBy value names
+// one of the structural carve-out creators (setup / ping / rescue).
+// Rescue dispatches themselves are excluded so a stale UI click can't
+// chain-rescue an in-flight rescue.
+func isRescueTrivialCreator(c string) bool {
+	switch c {
+	case model.SetupDispatchCreator, model.IdlePingDispatchCreator, model.RescueDispatchCreator:
+		return true
+	}
+	return false
+}
+
+// newestTranscriptAgentID returns (agentID, filename) parsed from
+// the newest bacio transcript document among links — by linkage
+// CreatedAt, since that's when the transcript was attached to the
+// issue. Returns ("", "") when no link points at a transcript.
+func newestTranscriptAgentID(links []*model.DocumentLink) (string, string) {
+	var newest *model.DocumentLink
+	for _, l := range links {
+		if l == nil {
+			continue
+		}
+		if l.DocumentType != model.DocTypeTranscript && !model.IsBacioTranscriptFilename(l.DocumentFilename) {
+			continue
+		}
+		if newest == nil || l.CreatedAt.After(newest.CreatedAt) {
+			newest = l
+		}
+	}
+	if newest == nil {
+		return "", ""
+	}
+	return parseAgentIDFromTranscriptFilename(newest.DocumentFilename), newest.DocumentFilename
+}
+
+// ParseAgentIDFromTranscriptFilenameForTest exposes the private
+// parser to external tests (package client_test). Production code
+// MUST NOT depend on this — the canonical caller is
+// newestTranscriptAgentID inside this package.
+func ParseAgentIDFromTranscriptFilenameForTest(name string) string {
+	return parseAgentIDFromTranscriptFilename(name)
+}
+
+// parseAgentIDFromTranscriptFilename extracts <id> from the
+// attach_transcript naming convention
+// `bacio-transcript-<KEY>-agent-<id>.jsonl`. Returns "" when the
+// filename doesn't match.
+func parseAgentIDFromTranscriptFilename(name string) string {
+	name = strings.TrimSuffix(name, ".jsonl")
+	i := strings.Index(name, "-agent-")
+	if i < 0 {
+		return ""
+	}
+	rest := name[i+len("-agent-"):]
+	// Defensive: stop at a path separator if the filename was passed in
+	// with a directory prefix.
+	if j := strings.IndexAny(rest, "/\\"); j >= 0 {
+		rest = rest[:j]
+	}
+	return rest
+}
+
+// pickIdleRescueSupervisor returns the freshest live, channel-
+// connected, non-busy, registered session in the repo that is NOT
+// the dead session. Returns (nil, nil) when nothing eligible exists.
+func (c *localClient) pickIdleRescueSupervisor(repoID int64, excludeSessionID string) (*model.AgentSession, error) {
+	sessions, err := c.store.ListAgentSessions(store.AgentSessionFilter{
+		RepoID:         &repoID,
+		OnlyAlive:      true,
+		RegisteredOnly: true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	openClaims, err := c.store.OpenClaimsBySession(repoID)
+	if err != nil {
+		return nil, err
+	}
+	for _, s := range sessions {
+		if s == nil || s.SessionID == excludeSessionID {
+			continue
+		}
+		if s.ChannelSeenAt == nil {
+			continue
+		}
+		busy, _ := model.SessionBusy(openClaims[s.ID])
+		if busy {
+			continue
+		}
+		return s, nil
+	}
+	return nil, nil
+}
+
+// buildRescueDispatchPayload renders the inline rescue brief the
+// supervisor reads from the `<channel from="bacio-rescue">` push.
+// Static, freeform text (no template tokens) — the supervisor's
+// per-mode brief is NOT involved. The payload tells the supervisor
+// to:
+//   - handle inline (NOT spawn a Task subagent)
+//   - cd into the worktree
+//   - read the transcript tail + git diff
+//   - classify as finalize or bail (resume deferred in v1)
+//   - run close-out via the bare `bacio` on PATH
+//   - reply against the rescue dispatch id (read from the <channel>
+//     tag's dispatch_id attribute)
+//
+// agentID and worktreePath may be empty when no transcript was
+// attached; the payload then instructs the supervisor to discover
+// the worktree via `git worktree list`.
+func buildRescueDispatchPayload(orig *model.AgentDispatch, agentID, worktreePath, transcriptName, repoPath string) string {
+	var b strings.Builder
+	b.WriteString("bacio rescue: a previously dispatched ")
+	if orig.Mode != "" {
+		b.WriteString(string(orig.Mode))
+		b.WriteString(" ")
+	}
+	b.WriteString("worker died mid-job, leaving its worktree edits unsalvaged. ")
+	b.WriteString("Handle this dispatch INLINE — do NOT spawn a per-mode subagent via Task; the work is already partly done and a fresh worker would discard it.\n\n")
+
+	b.WriteString("Context:\n")
+	fmt.Fprintf(&b, "  Original dispatch: #%d\n", orig.ID)
+	if orig.IssueKey != "" {
+		fmt.Fprintf(&b, "  Ticket: %s\n", orig.IssueKey)
+	}
+	if orig.Mode != "" {
+		fmt.Fprintf(&b, "  Mode: %s\n", orig.Mode)
+	}
+	if agentID != "" {
+		fmt.Fprintf(&b, "  Dead agent id: %s\n", agentID)
+	} else {
+		b.WriteString("  Dead agent id: unknown (no transcript attached) — discover the worktree via `git worktree list` below\n")
+	}
+	if worktreePath != "" {
+		fmt.Fprintf(&b, "  Worktree: %s\n", worktreePath)
+	}
+	if transcriptName != "" {
+		fmt.Fprintf(&b, "  Transcript document: %s (linked to %s)\n", transcriptName, orig.IssueKey)
+	}
+	fmt.Fprintf(&b, "  Repo: %s\n", repoPath)
+	b.WriteString("\n")
+
+	b.WriteString("Steps:\n\n")
+	if worktreePath != "" {
+		fmt.Fprintf(&b, "1. cd into the worktree:\n   cd %s\n\n", worktreePath)
+	} else {
+		fmt.Fprintf(&b, "1. Discover the dead worker's worktree, then cd into it:\n"+
+			"   git -C %s worktree list   # pick the locked one matching the work\n"+
+			"   cd <path>\n\n", repoPath)
+	}
+
+	b.WriteString("2. Inspect the worktree:\n")
+	b.WriteString("   git status --short\n")
+	b.WriteString("   git diff --stat HEAD\n")
+	b.WriteString("   git log HEAD~3..HEAD --oneline\n")
+	b.WriteString("   git branch --show-current\n\n")
+
+	if agentID != "" {
+		b.WriteString("3. Read the last ~80 lines of the dead worker's transcript to understand what it was doing when it died. The raw .jsonl is under\n")
+		fmt.Fprintf(&b, "   ~/.claude/projects/*/<parent-session>/subagents/agent-%s.jsonl\n", agentID)
+		b.WriteString("   (or `bacio doc show ")
+		if transcriptName != "" {
+			b.WriteString(transcriptName)
+		} else {
+			b.WriteString("<transcript-filename>")
+		}
+		b.WriteString("` for the attached copy).\n\n")
+	} else {
+		b.WriteString("3. Read the dead worker's transcript if you can locate one (no transcript was attached to this issue, so you may need to skip this step).\n\n")
+	}
+
+	b.WriteString("4. Classify the diff:\n\n")
+	b.WriteString("   FINALIZE (most common): edits look complete and on-task. Drive the close-out:\n")
+	b.WriteString("     - git add -A && git commit -m \"<concise message>\"\n")
+	b.WriteString("     - ./build.sh  (rebuild; surface real errors)\n")
+	b.WriteString("     - smoke test where applicable (UI changes: bacio web --no-open + playwright-cli)\n")
+	b.WriteString("     - gh pr create with a sensible title + body\n")
+	if orig.IssueKey != "" {
+		fmt.Fprintf(&b, "     - bacio pr attach %s <pr-url>\n", orig.IssueKey)
+		switch orig.Mode {
+		case "implement":
+			fmt.Fprintf(&b, "     - bacio tag add %s implemented\n", orig.IssueKey)
+		case "fix_review", "fix-review":
+			fmt.Fprintf(&b, "     - bacio tag add %s fix-review\n", orig.IssueKey)
+		}
+		fmt.Fprintf(&b, "     - bacio issue state %s in_review   (skip if the state is already in_review)\n", orig.IssueKey)
+	}
+	b.WriteString("\n")
+
+	b.WriteString("   BAIL: edits look incoherent / partial / dangerous, OR you would otherwise want to resume into the existing worktree (resume is not supported in v1):\n")
+	b.WriteString("     - mcp__bacio__ask_user_question with issue_id=" + orig.IssueKey + " describing what you saw and asking whether to discard the worktree or pick it up by hand.\n")
+	b.WriteString("     - Stop after answering. Do NOT commit or push speculative work.\n\n")
+
+	b.WriteString("5. Reply to THIS rescue dispatch:\n")
+	b.WriteString("   mcp__bacio__reply with dispatch_id from the <channel> tag attribute and a short one-line note ('finalised; PR #N' or 'bailed; <reason>').\n\n")
+
+	b.WriteString("Tripwires:\n")
+	b.WriteString("  - Use the bare `bacio` on PATH for every close-out call (NOT `.bin/bacio-agent-*`; that workspace binary belongs to its own in-progress implementation and may mismatch the live store schema).\n")
+	b.WriteString("  - Don't run `bacio worktree init` here — you're salvaging an existing worktree, not setting up a fresh isolated env.\n")
+	b.WriteString("  - Don't claim the ticket — the dead worker's claim was already released. Just commit, PR, tag, reply.\n")
+	return b.String()
 }
 
 // dispatchDetails builds the audit-log Details string for a dispatch op.

@@ -514,7 +514,26 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   letter-spacing: 0.04em; color: var(--fg-3); margin-top: 8px;
 }
 .mk-agent-detail-label:first-child { margin-top: 0; }
-.mk-agent-dispatch { display: flex; align-items: center; gap: 8px; }
+.mk-agent-dispatch { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* BACI-190 Rescue button — appears on dispatch rows whose target
+   session has ended without the dispatch being acked. Coral palette
+   to signal a destructive-ish "this is salvage work" affordance,
+   inline with the row chrome. */
+.mk-btn-rescue {
+  appearance: none;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--coral-500);
+  color: var(--paper);
+  border: 1px solid var(--coral-500);
+  cursor: pointer;
+}
+.mk-btn-rescue:hover { background: var(--coral-600); border-color: var(--coral-600); }
+.mk-btn-rescue:disabled { opacity: 0.5; cursor: not-allowed; }
+.mk-agent-dispatch-error {
+  font-size: 11px; color: var(--coral-600); margin-left: 4px;
+}
 .mk-agent-claim { display: flex; align-items: baseline; gap: 8px; }
 .mk-agent-claim-prompt {
   font-size: 12px; color: var(--fg-3);

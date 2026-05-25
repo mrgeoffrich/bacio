@@ -1222,6 +1222,19 @@ export async function cancelWaitingDispatch(
   }
 }
 
+// rescueDispatch (BACI-190) posts a `from="bacio-rescue"` channel event
+// to an idle supervisor session asking it to handle a dead worker's
+// stranded worktree INLINE. Backend re-checks eligibility (status,
+// creator, dead session, idle supervisor) and returns 409 when the
+// rescue can't be queued — surfaced via the usual error envelope.
+export async function rescueDispatch(dispatchID: number): Promise<DispatchDTO> {
+  const raw = await call<ApiDispatch>(
+    `/agents/dispatches/${dispatchID}/rescue`,
+    { method: 'POST' },
+  );
+  return reshapeDispatch(raw);
+}
+
 // queueFollowOnDispatch (BACI-180) attaches a dormant follow-on dispatch
 // to the issue's in-flight (parent) dispatch in web mode. Mirrors
 // dispatchIssue's POST shape — the server resolves the parent via

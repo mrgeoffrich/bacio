@@ -262,6 +262,22 @@ export async function cancelWaitingDispatch(
   }
 }
 
+// rescueDispatch (BACI-190) posts a `from="bacio-rescue"` channel event
+// to an idle supervisor session asking it to handle a dead worker's
+// stranded worktree INLINE. The AgentsView dispatch row renders a
+// "Rescue" button on dispatches whose target session has ended without
+// the dispatch being acked (the NeedsRescue flag on DispatchDTO).
+// Eligibility re-checks live on the backend so a stale UI click can't
+// queue an invalid rescue; errors surface as Error.message and bubble
+// through reportError() in App.jsx.
+export async function rescueDispatch(dispatchID: number): Promise<DispatchDTO> {
+  try {
+    return await BoardService.RescueDispatch(dispatchID);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
 // queueFollowOnDispatch (BACI-180) attaches a dormant follow-on dispatch
 // to the issue's in-flight (parent) dispatch — the kanban chip
 // click handler. The backend resolves the parent via WaitingDispatchForIssue

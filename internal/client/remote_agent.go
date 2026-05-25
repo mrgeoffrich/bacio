@@ -238,6 +238,14 @@ func (c *remoteClient) WaitingDispatchForIssue(ctx context.Context, repo *model.
 	return nil, remoteAgentNotSupported("waiting-dispatch-for-issue")
 }
 
+// CreateRescueDispatch (BACI-190) has no REST parity in this client
+// today — the Rescue button calls the REST endpoint directly from the
+// frontend via api.http.ts. A future remote-mode integration could
+// add a POST helper; until then this returns ErrLocalOnly cleanly.
+func (c *remoteClient) CreateRescueDispatch(ctx context.Context, dispatchID int64) (*model.AgentDispatch, error) {
+	return nil, remoteAgentNotSupported("create-rescue-dispatch")
+}
+
 // QueueFollowOnDispatch (BACI-180) targets the REST follow-on route,
 // sending only the mode in the body — the issue is in the URL and the
 // server resolves the parent dispatch + re-checks the state-gate.

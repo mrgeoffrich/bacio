@@ -1052,6 +1052,50 @@ func (d deps) handleAgentDispatchCancel(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, cancelled)
 }
 
+// ---------- rescue (BACI-190) ----------
+
+// handleAgentDispatchRescue posts a `from="bacio-rescue"` channel
+// event to an idle supervisor session, asking it to handle a dead
+// worker's stranded worktree INLINE. Eligibility (status, creator,
+// dead-session state, idle-supervisor availability) is enforced by
+// client.CreateRescueDispatch — the handler just translates the
+// returned errors into clean HTTP statuses (404 / 409 / 500) and
+// shapes the response.
+func (d deps) handleAgentDispatchRescue(w http.ResponseWriter, r *http.Request) {
+	rawID := r.PathValue("id")
+	id, err := strconv.ParseInt(rawID, 10, 64)
+	if err != nil || id <= 0 {
+		writeError(w, http.StatusBadRequest, "invalid_input",
+			fmt.Sprintf("invalid dispatch id %q", rawID), map[string]any{"field": "id"})
+		return
+	}
+	who := ActorFromContext(r.Context())
+	c := client.NewLocalFromStore(d.store, who)
+	defer c.Close()
+	dsp, err := c.CreateRescueDispatch(r.Context(), id)
+	if err != nil {
+		msg := err.Error()
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found",
+				fmt.Sprintf("no dispatch with id %d", id), nil)
+			return
+		}
+		// Eligibility misses are 409s (the caller can fix the state and
+		// retry, but the request itself isn't malformed).
+		if strings.Contains(msg, "rescuable") ||
+			strings.Contains(msg, "is still alive") ||
+			strings.Contains(msg, "no target session") ||
+			strings.Contains(msg, "no idle supervisor") {
+			writeError(w, http.StatusConflict, "conflict", msg, nil)
+			return
+		}
+		status, code := statusForError(err)
+		writeError(w, status, code, msg, nil)
+		return
+	}
+	writeJSON(w, http.StatusCreated, dsp)
+}
+
 // dispatchTargetLabel / dispatchDetails mirror their client-side twins so
 // the audit row reads identically across surfaces.
 func dispatchTargetLabel(d *model.AgentDispatch) string {

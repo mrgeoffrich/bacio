@@ -974,6 +974,17 @@ const SetupDispatchCreator = "bacio-channel"
 // pings from human dispatches.
 const IdlePingDispatchCreator = "bacio-channel-ping"
 
+// RescueDispatchCreator marks rescue dispatches (BACI-190) — a
+// `from="bacio-rescue"` channel event posted to an idle supervisor
+// asking it to handle a dead worker's stranded worktree INLINE rather
+// than spawning a fresh per-mode subagent. Like the setup/ping
+// creators, rescue dispatches bypass ComposeDispatchPayload (the
+// per-mode brief preamble would tell the supervisor to spawn a
+// Task — exactly the wrong thing for a rescue). The constant lives
+// in model so any package that filters dispatches by creator can
+// reference it without importing client.
+const RescueDispatchCreator = "bacio-rescue"
+
 // MatcherActor is the audit-log Actor stamped on the matcher's
 // `agent.bind` history rows (BACI-160). Mirrors the IdlePingDispatchCreator
 // convention so `bacio history --user-filter bacio-matcher` returns a

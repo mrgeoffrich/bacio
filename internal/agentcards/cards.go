@@ -81,6 +81,13 @@ type DispatchDTO struct {
 	Payload     string    `json:"payload"`
 	CreatedBy   string    `json:"createdBy"`
 	CreatedAt   time.Time `json:"createdAt"`
+	// NeedsRescue (BACI-190) is true when the dispatch's target
+	// session has ended without the dispatch ever being acked — its
+	// worker either died mid-job or shut down without replying. The
+	// AgentsView surfaces a "Rescue" button on rows with this flag.
+	// Only typed per-mode dispatches qualify; rescue / setup / ping
+	// dispatches are excluded.
+	NeedsRescue bool `json:"needsRescue"`
 }
 
 // AgentCard is one agent session shaped for the Agents screen, carrying
@@ -343,6 +350,7 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo) ([]AgentCa
 					Payload:     d.Payload,
 					CreatedBy:   d.CreatedBy,
 					CreatedAt:   d.CreatedAt,
+					NeedsRescue: dispatchNeedsRescue(d, s),
 				})
 			}
 		}
@@ -385,6 +393,32 @@ func dispatchTargetsSession(d *model.AgentDispatch, s *model.AgentSession) bool 
 		return true
 	}
 	return false
+}
+
+// dispatchNeedsRescue reports whether the dispatch's target session
+// has ended without the dispatch ever being acked — the BACI-190
+// signal the AgentsView uses to render a Rescue button. Three gates
+// fire here: (1) the session is ended; (2) the dispatch is still
+// unacked (pending or delivered) — a `queued` row has no target yet,
+// an `acked` row is done, a `cancelled` row was withdrawn; (3) the
+// creator is a real per-mode caller — setup / ping / rescue
+// dispatches are excluded so a stale ping on a dead session and a
+// running rescue itself don't sprout their own rescue buttons.
+func dispatchNeedsRescue(d *model.AgentDispatch, s *model.AgentSession) bool {
+	if d == nil || s == nil {
+		return false
+	}
+	if s.EndedAt == nil {
+		return false
+	}
+	if d.Status != model.DispatchPending && d.Status != model.DispatchDelivered {
+		return false
+	}
+	switch d.CreatedBy {
+	case model.SetupDispatchCreator, model.IdlePingDispatchCreator, model.RescueDispatchCreator:
+		return false
+	}
+	return true
 }
 
 // pickActiveDispatchID returns the id of the newest non-cancelled
