@@ -8,6 +8,7 @@ import AgentsView from './components/AgentsView.jsx';
 import HistoryView from './components/HistoryView.jsx';
 import IssueWorkspace from './components/IssueWorkspace.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
+import ActivityTray from './components/ActivityTray.jsx';
 import SettingsView from './components/SettingsView.jsx';
 import SyncView from './components/SyncView.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
@@ -810,6 +811,15 @@ export default function App() {
           onClose={() => setPaletteOpen(false)}
           onPick={openCard}
         />
+      </ErrorBoundary>
+      {/* BACI-171: bottom-right activity tray. Sibling of CommandPalette
+          / ErrorModal so it overlays whatever view is current — Board,
+          Agents, Features, Docs, History, Issue workspace, Settings,
+          Sync — without reflowing the column layout. The tray is a
+          pure-derived view over `cards`; the App's existing 10s
+          refreshCards poll already drives the diff. */}
+      <ErrorBoundary headline="Something went wrong in the activity tray" label="The activity tray crashed">
+        <ActivityTray cards={cards} />
       </ErrorBoundary>
       <ErrorModal />
     </div>

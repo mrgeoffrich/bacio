@@ -2,8 +2,10 @@ package boardcards
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/model"
@@ -899,6 +901,122 @@ func TestAssembleSortsCompletedColumnsByTerminalAt(t *testing.T) {
 		if done[i] != want[i] {
 			t.Fatalf("Done column = %v, want %v (TEST-3's stray edit must not jump it to the top)", done, want)
 		}
+	}
+}
+
+// TestDescriptionExcerpt (BACI-171) pins the per-card excerpt
+// truncation the ActivityTray feeds into its entry rows: empty
+// descriptions stay empty (so the BoardCard's omitempty drops the
+// field), short bodies pass through verbatim with internal whitespace
+// collapsed, long bodies cut on the nearest preceding word boundary
+// with a trailing "…", and a multi-byte unicode body counts runes
+// (not bytes) so the cap can't split a glyph.
+func TestDescriptionExcerpt(t *testing.T) {
+	// Build a body that comfortably exceeds the 140-rune cap and
+	// guarantees a word boundary near the end so the trim is exercised.
+	longWords := strings.Repeat("alpha beta gamma delta ", 20) // ~460 chars
+	gotLong := descriptionExcerpt(longWords)
+	if !strings.HasSuffix(gotLong, "…") {
+		t.Errorf("long body excerpt = %q, want trailing ellipsis", gotLong)
+	}
+	// The truncation result must be no longer than the cap + 1 (the
+	// appended ellipsis) and must end on a word, not mid-word.
+	runeLen := utf8.RuneCountInString(gotLong)
+	if runeLen > descriptionExcerptRunes+1 {
+		t.Errorf("long body excerpt is %d runes, want ≤ %d", runeLen, descriptionExcerptRunes+1)
+	}
+	withoutEllipsis := strings.TrimSuffix(gotLong, "…")
+	if strings.HasSuffix(withoutEllipsis, " ") {
+		t.Errorf("long body excerpt left a trailing space before the ellipsis: %q", gotLong)
+	}
+	// Cut should land on a complete word: the trimmed body must end
+	// with one of the input's known tokens, not a fragment.
+	knownTails := []string{"alpha", "beta", "gamma", "delta"}
+	matched := false
+	for _, tail := range knownTails {
+		if strings.HasSuffix(withoutEllipsis, tail) {
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		t.Errorf("long body excerpt %q didn't end on a known word boundary", gotLong)
+	}
+
+	// Short body — within the cap, passes through verbatim with
+	// internal whitespace collapsed and no trailing ellipsis.
+	short := "Login broken on Safari\nrepro inline."
+	gotShort := descriptionExcerpt(short)
+	want := "Login broken on Safari repro inline."
+	if gotShort != want {
+		t.Errorf("short body excerpt = %q, want %q", gotShort, want)
+	}
+
+	// Empty body — empty string out so omitempty drops the wire field.
+	if got := descriptionExcerpt(""); got != "" {
+		t.Errorf("empty body excerpt = %q, want empty string", got)
+	}
+	// Whitespace-only body — collapses to nothing, same as empty.
+	if got := descriptionExcerpt("   \n\t\n"); got != "" {
+		t.Errorf("whitespace-only body excerpt = %q, want empty string", got)
+	}
+
+	// Multi-byte runes — a body of 200 emoji is well over the cap.
+	// Each emoji is multiple bytes but exactly one rune, so the rune
+	// counter must trip the cap correctly without splitting a glyph.
+	emoji := strings.Repeat("🍕", 200)
+	gotEmoji := descriptionExcerpt(emoji)
+	emojiRunes := utf8.RuneCountInString(gotEmoji)
+	if emojiRunes > descriptionExcerptRunes+1 {
+		t.Errorf("emoji excerpt is %d runes, want ≤ %d", emojiRunes, descriptionExcerptRunes+1)
+	}
+	if !strings.HasSuffix(gotEmoji, "…") {
+		t.Errorf("emoji excerpt = %q, want trailing ellipsis", gotEmoji)
+	}
+	// Every rune (except the trailing "…") must still be a pizza —
+	// proves no mid-rune split happened.
+	for _, r := range strings.TrimSuffix(gotEmoji, "…") {
+		if r != '🍕' {
+			t.Errorf("emoji excerpt contained an unexpected rune %q in %q", r, gotEmoji)
+			break
+		}
+	}
+}
+
+// TestAssembleDescriptionExcerpt (BACI-171) covers the per-card
+// surfacing of DescriptionExcerpt through Assemble: a card with no
+// description gets an empty excerpt, a short description flows
+// through verbatim (with whitespace collapsed), and a long
+// description is truncated.
+func TestAssembleDescriptionExcerpt(t *testing.T) {
+	repo := &model.Repo{ID: 1, Prefix: "TEST"}
+	longBody := strings.Repeat("alpha beta gamma delta ", 20)
+	issues := []*model.Issue{
+		{ID: 1, Key: "TEST-1", State: model.StateTodo, Title: "no description"},
+		{ID: 2, Key: "TEST-2", State: model.StateTodo, Title: "short", Description: "One-liner repro."},
+		{ID: 3, Key: "TEST-3", State: model.StateTodo, Title: "long", Description: longBody},
+	}
+	f := &fakeClient{repo: repo, issues: issues}
+	cards, err := Assemble(context.Background(), f, repo, false)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	byKey := map[string]BoardCard{}
+	for _, c := range cards {
+		byKey[c.Key] = c
+	}
+	if got := byKey["TEST-1"].DescriptionExcerpt; got != "" {
+		t.Errorf("TEST-1 excerpt = %q, want empty string (omitempty wire elision)", got)
+	}
+	if got := byKey["TEST-2"].DescriptionExcerpt; got != "One-liner repro." {
+		t.Errorf("TEST-2 excerpt = %q, want verbatim short body", got)
+	}
+	gotLong := byKey["TEST-3"].DescriptionExcerpt
+	if !strings.HasSuffix(gotLong, "…") {
+		t.Errorf("TEST-3 excerpt = %q, want trailing ellipsis", gotLong)
+	}
+	if utf8.RuneCountInString(gotLong) > descriptionExcerptRunes+1 {
+		t.Errorf("TEST-3 excerpt is %d runes, want ≤ %d", utf8.RuneCountInString(gotLong), descriptionExcerptRunes+1)
 	}
 }
 

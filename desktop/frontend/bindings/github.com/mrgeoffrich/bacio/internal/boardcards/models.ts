@@ -26,6 +26,17 @@ export class BoardCard {
     "column": string;
     "columnLabel": string;
     "title": string;
+
+    /**
+     * DescriptionExcerpt (BACI-171) is a short (~140-rune) excerpt of
+     * the issue's description used by the bottom-right ActivityTray to
+     * render a one-or-two-line summary per entry without an extra
+     * per-card brief fetch on every change. Truncates on a word
+     * boundary with a trailing "…"; empty (and omitted from JSON) when
+     * the issue's description is empty. The kanban card itself ignores
+     * this field — the tray is the sole consumer.
+     */
+    "descriptionExcerpt"?: string;
     "tags": string[];
     "assignees": string[];
     "claude": boolean;
@@ -173,18 +184,18 @@ export class BoardCard {
      * Creates a new BoardCard instance from a string or object.
      */
     static createFrom($$source: any = {}): BoardCard {
-        const $$createField4_0 = $$createType0;
         const $$createField5_0 = $$createType0;
+        const $$createField6_0 = $$createType0;
         const $$createField9_0 = $$createType2;
         const $$createField13_0 = $$createType4;
         const $$createField14_0 = $$createType6;
         const $$createField16_0 = $$createType8;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
-            $$parsedSource["tags"] = $$createField4_0($$parsedSource["tags"]);
+            $$parsedSource["tags"] = $$createField5_0($$parsedSource["tags"]);
         }
         if ("assignees" in $$parsedSource) {
-            $$parsedSource["assignees"] = $$createField5_0($$parsedSource["assignees"]);
+            $$parsedSource["assignees"] = $$createField6_0($$parsedSource["assignees"]);
         }
         if ("waitingState" in $$parsedSource) {
             $$parsedSource["waitingState"] = $$createField9_0($$parsedSource["waitingState"]);
