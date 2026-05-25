@@ -1051,16 +1051,46 @@ body { margin: 0; }
   -webkit-line-clamp: 2;
   overflow: hidden;
 }
-.mk-tray-entry-tags { margin-top: 2px; }
-.mk-tray-entry-desc {
-  font-size: 12px; color: var(--fg-3); line-height: 1.4;
-  /* Clamp to two lines — the ticket: "truncate to one or two lines
-     so entries stay compact". The server already caps at ~140 runes;
-     this is the belt-and-braces visual clamp at narrow widths. */
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
+/* BACI-183: the per-entry status row replaces the old tags + description
+   excerpt body. One row per entry, picked by `entryStatus` in
+   ActivityTray.jsx — needs-action wins over an active claim's verb
+   wins over the pre-claim waiting label. Omitted entirely when none
+   of those apply, so an entry with no dispatch collapses to head +
+   title only.
+
+   Geometry mirrors the kanban card's meta line (mono, 11px) so the
+   tray and the kanban card narrate the same data in the same voice. */
+.mk-tray-entry-status {
+  display: flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono); font-size: 11px; color: var(--fg-3);
+  min-width: 0;
+}
+.mk-tray-entry-status > span {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* is-needs-action: raspberry pill with an AlertTriangle so the entry
+   pops in the feed. Same palette as desktop.css's .mk-status-needs_action
+   (--status-blocked / --status-blocked-bg). */
+.mk-tray-entry-status.is-needs-action {
+  padding: 2px 8px;
+  border-radius: var(--radius-sm, 4px);
+  background: var(--status-blocked-bg);
+  color: var(--status-blocked);
+  font-weight: 600;
+  letter-spacing: .02em;
+  align-self: flex-start;
+}
+.mk-tray-entry-status.is-needs-action .mk-icon {
+  width: 12px; height: 12px;
+}
+/* Active-verb row — italic mint, exact same treatment as
+   .mk-card-verb on the kanban card so the same dispatch reads
+   identically on both surfaces. The verb itself is title-cased
+   in JS (entryStatus) so "implementing" → "Implementing in
+   progress" without the CSS-capitalize-every-word side effect. */
+.mk-tray-entry-verb {
+  font-style: italic; color: var(--status-claude);
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .mk-tray-dismiss {
   /* The × button — quiet by default, opacity:0 like .mk-tl-delete so
