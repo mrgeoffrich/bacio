@@ -41,8 +41,13 @@ export {
     IssueMetaDTO,
     LeaderStatusDTO,
     LinkedDocDTO,
+    MemberProjectDTO,
     PRDTO,
     PromptTemplateDTO,
     RelationDTO,
-    RelationsDTO
+    RelationsDTO,
+    SyncPreferencesDTO,
+    SyncRegistryDTO,
+    SyncRepoDTO,
+    UnsyncedProjectDTO
 } from "./models.js";

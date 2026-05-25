@@ -9,6 +9,7 @@ import HistoryView from './components/HistoryView.jsx';
 import IssueWorkspace from './components/IssueWorkspace.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
 import SettingsView from './components/SettingsView.jsx';
+import SyncView from './components/SyncView.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import ErrorModal from './components/ErrorModal.jsx';
 import { Provider as TooltipProvider } from '@radix-ui/react-tooltip';
@@ -71,6 +72,10 @@ export default function App() {
   const [descEditing, setDescEditing] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // BACI-108: the standalone Sync view is a sibling boolean flag to
+  // settingsOpen — reached only via the topbar Sync pill, never the
+  // top-nav. Mirrors the Settings entry-point shape.
+  const [syncOpen, setSyncOpen] = useState(false);
   const [agents, setAgents] = useState([]);
   // promptConfig is the global (repo-independent) dispatch-prompt config:
   // one entry per stage with its label and the issue states it's valid
@@ -207,6 +212,13 @@ export default function App() {
   }, [settingsOpen, refreshPromptConfig]);
 
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
+  const closeSync = useCallback(() => setSyncOpen(false), []);
+  const openSync = useCallback(() => {
+    // Mutually exclusive with Settings — both are top-level overlays
+    // mounted in the same body slot, only one renders at a time.
+    setSettingsOpen(false);
+    setSyncOpen(true);
+  }, []);
 
   // Remember the selected repo so the app reopens on the same one.
   useEffect(() => {
@@ -423,14 +435,16 @@ export default function App() {
         e.preventDefault();
         setPaletteOpen(true);
       } else if (e.key === 'Escape') {
-        // Palette + Settings are still hand-rolled; the workspace closes
-        // here when nothing else is in front of it.
+        // Palette + Settings + Sync are still hand-rolled; the workspace
+        // closes here when nothing else is in front of it.
         if (paletteOpen) {
           setPaletteOpen(false);
         } else if (activeView === 'issue' && !isEditingTarget(e.target)) {
           closeIssue();
         } else if (settingsOpen) {
           setSettingsOpen(false);
+        } else if (syncOpen) {
+          setSyncOpen(false);
         }
       } else if (!e.metaKey && !e.ctrlKey && !e.altKey && e.key >= '1' && e.key <= '9') {
         // Digit keys jump between nav views, like the TUI's tab shortcuts —
@@ -451,7 +465,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [paletteOpen, settingsOpen, activeView, closeIssue]);
+  }, [paletteOpen, settingsOpen, syncOpen, activeView, closeIssue]);
 
   // Add a repository. Desktop pops a native folder picker (Wails);
   // web mode hands the path-input modal's submission through as a
@@ -632,6 +646,7 @@ export default function App() {
         activeView={activeView}
         onChangeView={(v) => {
           setSettingsOpen(false);
+          setSyncOpen(false);
           // Switching to a nav view from the workspace also clears the
           // open-issue state so the breadcrumb pill disappears.
           if (activeView === 'issue') {
@@ -642,7 +657,8 @@ export default function App() {
           setActiveView(v);
         }}
         onOpenPalette={() => setPaletteOpen(true)}
-        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenSettings={() => { setSyncOpen(false); setSettingsOpen(true); }}
+        onOpenSync={openSync}
         leaderState={leaderState}
         openIssueKey={openIssueKey}
         onCloseIssue={closeIssue}
@@ -663,6 +679,10 @@ export default function App() {
             onClose={closeSettings}
             onTemplatesChanged={refreshPromptConfig}
           />
+        </ErrorBoundary>
+      ) : syncOpen ? (
+        <ErrorBoundary headline="Something went wrong in Sync" label="The Sync view crashed">
+          <SyncView onClose={closeSync} />
         </ErrorBoundary>
       ) : activeView === 'docs' ? (
         <ErrorBoundary headline="Something went wrong in Docs" label="The Docs view crashed">

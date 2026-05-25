@@ -208,6 +208,14 @@ type Client interface {
 	// BACI-89 sync.background_enabled opt-out toggle.
 	GetSyncBackgroundEnabled(ctx context.Context) (bool, error)
 	SetSyncBackgroundEnabled(ctx context.Context, value, dryRun bool) (bool, error)
+	// SyncRegistry (BACI-108) returns the registry of sync repos this
+	// machine knows (one per sync_remotes row) with the project members
+	// each carries, plus the residual tracked project repos that don't
+	// yet have a sync.remote in their .bacio/config.yaml. Backs the
+	// standalone Sync view on desktop / web. The local backend composes
+	// the BACI-105 primitives (ListSyncRemotes + DiscoverMembership +
+	// ReadProjectConfig); the remote calls GET /sync/repos.
+	SyncRegistry(ctx context.Context) (*SyncRegistry, error)
 
 	// ----- History -----
 	// ListHistory queries the audit log. When repo is non-nil, results

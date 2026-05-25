@@ -72,6 +72,29 @@ export function GetDisplayPreferences(): $CancellablePromise<$models.DisplayPref
 }
 
 /**
+ * GetSyncPreferences returns the current sync.background_enabled
+ * value. Backed by the same client.GetSyncBackgroundEnabled path the
+ * CLI and HTTP surfaces use.
+ */
+export function GetSyncPreferences(): $CancellablePromise<$models.SyncPreferencesDTO> {
+    return $Call.ByID(3481112815).then(($result: any) => {
+        return $$createType3($result);
+    });
+}
+
+/**
+ * GetSyncRegistry returns the registry of sync repos this machine
+ * knows plus the tracked project repos that aren't yet attached. Backs
+ * the BACI-108 standalone Sync view on desktop. The same payload ships
+ * over the wire on `bacio web` via GET /sync/repos.
+ */
+export function GetSyncRegistry(): $CancellablePromise<$models.SyncRegistryDTO> {
+    return $Call.ByID(3389817124).then(($result: any) => {
+        return $$createType4($result);
+    });
+}
+
+/**
  * ListPromptTemplates returns every registered template in store
  * iteration order — the desktop Settings panel renders them in this
  * order and the per-card action menu in the Board iterates the same
@@ -79,7 +102,7 @@ export function GetDisplayPreferences(): $CancellablePromise<$models.DisplayPref
  */
 export function ListPromptTemplates(): $CancellablePromise<$models.PromptTemplateDTO[]> {
     return $Call.ByID(1001854565).then(($result: any) => {
-        return $$createType3($result);
+        return $$createType5($result);
     });
 }
 
@@ -90,7 +113,7 @@ export function ListPromptTemplates(): $CancellablePromise<$models.PromptTemplat
  */
 export function PromptPlaceholders(): $CancellablePromise<string[]> {
     return $Call.ByID(1135988516).then(($result: any) => {
-        return $$createType4($result);
+        return $$createType6($result);
     });
 }
 
@@ -112,7 +135,7 @@ export function RenamePromptTemplate(slug: string, newSlug: string, newName: str
  */
 export function RestoreBuiltinPromptTemplates(): $CancellablePromise<$models.PromptTemplateDTO[]> {
     return $Call.ByID(3843909418).then(($result: any) => {
-        return $$createType3($result);
+        return $$createType5($result);
     });
 }
 
@@ -179,9 +202,21 @@ export function SetDisplayPreferences(showArchived: boolean): $CancellablePromis
     });
 }
 
+/**
+ * SetSyncPreferences flips sync.background_enabled and returns the
+ * refreshed DTO. The client records the audit row.
+ */
+export function SetSyncPreferences(backgroundEnabled: boolean): $CancellablePromise<$models.SyncPreferencesDTO> {
+    return $Call.ByID(2076274475, backgroundEnabled).then(($result: any) => {
+        return $$createType3($result);
+    });
+}
+
 // Private type creation functions
 const $$createType0 = $models.PromptTemplateDTO.createFrom;
 const $$createType1 = $models.BoardPreferencesDTO.createFrom;
 const $$createType2 = $models.DisplayPreferencesDTO.createFrom;
-const $$createType3 = $Create.Array($$createType0);
-const $$createType4 = $Create.Array($Create.Any);
+const $$createType3 = $models.SyncPreferencesDTO.createFrom;
+const $$createType4 = $models.SyncRegistryDTO.createFrom;
+const $$createType5 = $Create.Array($$createType0);
+const $$createType6 = $Create.Array($Create.Any);

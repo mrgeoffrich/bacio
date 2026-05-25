@@ -316,3 +316,117 @@ func (s *SettingsService) SetDisplayPreferences(showArchived bool) (DisplayPrefe
 	}
 	return DisplayPreferencesDTO{ShowArchived: v}, nil
 }
+
+// SyncPreferencesDTO is the BACI-89 background-sync toggle shaped for
+// the desktop Sync view. Mirrors BoardPreferencesDTO / DisplayPreferencesDTO.
+type SyncPreferencesDTO struct {
+	BackgroundEnabled bool `json:"backgroundEnabled"`
+}
+
+// GetSyncPreferences returns the current sync.background_enabled
+// value. Backed by the same client.GetSyncBackgroundEnabled path the
+// CLI and HTTP surfaces use.
+func (s *SettingsService) GetSyncPreferences() (SyncPreferencesDTO, error) {
+	v, err := s.client.GetSyncBackgroundEnabled(context.Background())
+	if err != nil {
+		return SyncPreferencesDTO{}, err
+	}
+	return SyncPreferencesDTO{BackgroundEnabled: v}, nil
+}
+
+// SetSyncPreferences flips sync.background_enabled and returns the
+// refreshed DTO. The client records the audit row.
+func (s *SettingsService) SetSyncPreferences(backgroundEnabled bool) (SyncPreferencesDTO, error) {
+	v, err := s.client.SetSyncBackgroundEnabled(context.Background(), backgroundEnabled, false)
+	if err != nil {
+		return SyncPreferencesDTO{}, err
+	}
+	return SyncPreferencesDTO{BackgroundEnabled: v}, nil
+}
+
+// SyncRegistryDTO is the BACI-108 standalone Sync view payload —
+// camelCase mirror of client.SyncRegistry. Re-shaped here (rather
+// than carried verbatim) so the Wails seam follows the convention
+// every other DTO in this file uses (camelCase JSON tags for the
+// generated TS bindings).
+type SyncRegistryDTO struct {
+	SyncRepos        []SyncRepoDTO        `json:"syncRepos"`
+	UnsyncedProjects []UnsyncedProjectDTO `json:"unsyncedProjects"`
+}
+
+// SyncRepoDTO is one entry in the registry.
+type SyncRepoDTO struct {
+	RemoteURL  string             `json:"remoteUrl"`
+	Label      string             `json:"label"`
+	LocalPath  string             `json:"localPath"`
+	ClonedAt   string             `json:"clonedAt"`
+	LastSyncAt string             `json:"lastSyncAt,omitempty"`
+	LastError  string             `json:"lastError,omitempty"`
+	InProgress bool               `json:"inProgress"`
+	Projects   []MemberProjectDTO `json:"projects"`
+}
+
+// MemberProjectDTO mirrors client.MemberProject.
+type MemberProjectDTO struct {
+	Prefix string `json:"prefix"`
+	Name   string `json:"name"`
+	UUID   string `json:"uuid,omitempty"`
+	Status string `json:"status"`
+}
+
+// UnsyncedProjectDTO mirrors client.UnsyncedProject.
+type UnsyncedProjectDTO struct {
+	Prefix string `json:"prefix"`
+	Name   string `json:"name"`
+	UUID   string `json:"uuid"`
+	Path   string `json:"path"`
+}
+
+// GetSyncRegistry returns the registry of sync repos this machine
+// knows plus the tracked project repos that aren't yet attached. Backs
+// the BACI-108 standalone Sync view on desktop. The same payload ships
+// over the wire on `bacio web` via GET /sync/repos.
+func (s *SettingsService) GetSyncRegistry() (SyncRegistryDTO, error) {
+	reg, err := s.client.SyncRegistry(context.Background())
+	if err != nil {
+		return SyncRegistryDTO{}, err
+	}
+	out := SyncRegistryDTO{
+		SyncRepos:        make([]SyncRepoDTO, 0, len(reg.SyncRepos)),
+		UnsyncedProjects: make([]UnsyncedProjectDTO, 0, len(reg.UnsyncedProjects)),
+	}
+	for _, r := range reg.SyncRepos {
+		dto := SyncRepoDTO{
+			RemoteURL:  r.RemoteURL,
+			Label:      r.Label,
+			LocalPath:  r.LocalPath,
+			ClonedAt:   r.ClonedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
+			InProgress: r.InProgress,
+			Projects:   make([]MemberProjectDTO, 0, len(r.Projects)),
+		}
+		if r.LastSyncAt != nil {
+			dto.LastSyncAt = r.LastSyncAt.UTC().Format("2006-01-02T15:04:05Z07:00")
+		}
+		if r.LastError != nil {
+			dto.LastError = *r.LastError
+		}
+		for _, p := range r.Projects {
+			dto.Projects = append(dto.Projects, MemberProjectDTO{
+				Prefix: p.Prefix,
+				Name:   p.Name,
+				UUID:   p.UUID,
+				Status: p.Status,
+			})
+		}
+		out.SyncRepos = append(out.SyncRepos, dto)
+	}
+	for _, u := range reg.UnsyncedProjects {
+		out.UnsyncedProjects = append(out.UnsyncedProjects, UnsyncedProjectDTO{
+			Prefix: u.Prefix,
+			Name:   u.Name,
+			UUID:   u.UUID,
+			Path:   u.Path,
+		})
+	}
+	return out, nil
+}

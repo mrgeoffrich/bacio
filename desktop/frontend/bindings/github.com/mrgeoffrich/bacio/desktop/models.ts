@@ -1047,6 +1047,39 @@ export class LinkedDocDTO {
 }
 
 /**
+ * MemberProjectDTO mirrors client.MemberProject.
+ */
+export class MemberProjectDTO {
+    "prefix": string;
+    "name": string;
+    "uuid"?: string;
+    "status": string;
+
+    /** Creates a new MemberProjectDTO instance. */
+    constructor($$source: Partial<MemberProjectDTO> = {}) {
+        if (!("prefix" in $$source)) {
+            this["prefix"] = "";
+        }
+        if (!("name" in $$source)) {
+            this["name"] = "";
+        }
+        if (!("status" in $$source)) {
+            this["status"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new MemberProjectDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): MemberProjectDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new MemberProjectDTO($$parsedSource as Partial<MemberProjectDTO>);
+    }
+}
+
+/**
  * PRDTO is one attached pull request.
  */
 export class PRDTO {
@@ -1254,6 +1287,157 @@ export class RelationsDTO {
     }
 }
 
+/**
+ * SyncPreferencesDTO is the BACI-89 background-sync toggle shaped for
+ * the desktop Sync view. Mirrors BoardPreferencesDTO / DisplayPreferencesDTO.
+ */
+export class SyncPreferencesDTO {
+    "backgroundEnabled": boolean;
+
+    /** Creates a new SyncPreferencesDTO instance. */
+    constructor($$source: Partial<SyncPreferencesDTO> = {}) {
+        if (!("backgroundEnabled" in $$source)) {
+            this["backgroundEnabled"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new SyncPreferencesDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): SyncPreferencesDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new SyncPreferencesDTO($$parsedSource as Partial<SyncPreferencesDTO>);
+    }
+}
+
+/**
+ * SyncRegistryDTO is the BACI-108 standalone Sync view payload —
+ * camelCase mirror of client.SyncRegistry. Re-shaped here (rather
+ * than carried verbatim) so the Wails seam follows the convention
+ * every other DTO in this file uses (camelCase JSON tags for the
+ * generated TS bindings).
+ */
+export class SyncRegistryDTO {
+    "syncRepos": SyncRepoDTO[];
+    "unsyncedProjects": UnsyncedProjectDTO[];
+
+    /** Creates a new SyncRegistryDTO instance. */
+    constructor($$source: Partial<SyncRegistryDTO> = {}) {
+        if (!("syncRepos" in $$source)) {
+            this["syncRepos"] = [];
+        }
+        if (!("unsyncedProjects" in $$source)) {
+            this["unsyncedProjects"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new SyncRegistryDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): SyncRegistryDTO {
+        const $$createField0_0 = $$createType26;
+        const $$createField1_0 = $$createType28;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("syncRepos" in $$parsedSource) {
+            $$parsedSource["syncRepos"] = $$createField0_0($$parsedSource["syncRepos"]);
+        }
+        if ("unsyncedProjects" in $$parsedSource) {
+            $$parsedSource["unsyncedProjects"] = $$createField1_0($$parsedSource["unsyncedProjects"]);
+        }
+        return new SyncRegistryDTO($$parsedSource as Partial<SyncRegistryDTO>);
+    }
+}
+
+/**
+ * SyncRepoDTO is one entry in the registry.
+ */
+export class SyncRepoDTO {
+    "remoteUrl": string;
+    "label": string;
+    "localPath": string;
+    "clonedAt": string;
+    "lastSyncAt"?: string;
+    "lastError"?: string;
+    "inProgress": boolean;
+    "projects": MemberProjectDTO[];
+
+    /** Creates a new SyncRepoDTO instance. */
+    constructor($$source: Partial<SyncRepoDTO> = {}) {
+        if (!("remoteUrl" in $$source)) {
+            this["remoteUrl"] = "";
+        }
+        if (!("label" in $$source)) {
+            this["label"] = "";
+        }
+        if (!("localPath" in $$source)) {
+            this["localPath"] = "";
+        }
+        if (!("clonedAt" in $$source)) {
+            this["clonedAt"] = "";
+        }
+        if (!("inProgress" in $$source)) {
+            this["inProgress"] = false;
+        }
+        if (!("projects" in $$source)) {
+            this["projects"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new SyncRepoDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): SyncRepoDTO {
+        const $$createField7_0 = $$createType30;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("projects" in $$parsedSource) {
+            $$parsedSource["projects"] = $$createField7_0($$parsedSource["projects"]);
+        }
+        return new SyncRepoDTO($$parsedSource as Partial<SyncRepoDTO>);
+    }
+}
+
+/**
+ * UnsyncedProjectDTO mirrors client.UnsyncedProject.
+ */
+export class UnsyncedProjectDTO {
+    "prefix": string;
+    "name": string;
+    "uuid": string;
+    "path": string;
+
+    /** Creates a new UnsyncedProjectDTO instance. */
+    constructor($$source: Partial<UnsyncedProjectDTO> = {}) {
+        if (!("prefix" in $$source)) {
+            this["prefix"] = "";
+        }
+        if (!("name" in $$source)) {
+            this["name"] = "";
+        }
+        if (!("uuid" in $$source)) {
+            this["uuid"] = "";
+        }
+        if (!("path" in $$source)) {
+            this["path"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new UnsyncedProjectDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): UnsyncedProjectDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new UnsyncedProjectDTO($$parsedSource as Partial<UnsyncedProjectDTO>);
+    }
+}
+
 // Private type creation functions
 const $$createType0 = FeatureLinkedIssue.createFrom;
 const $$createType1 = $Create.Array($$createType0);
@@ -1280,3 +1464,9 @@ const $$createType21 = DocLinkDTO.createFrom;
 const $$createType22 = $Create.Array($$createType21);
 const $$createType23 = RelationDTO.createFrom;
 const $$createType24 = $Create.Array($$createType23);
+const $$createType25 = SyncRepoDTO.createFrom;
+const $$createType26 = $Create.Array($$createType25);
+const $$createType27 = UnsyncedProjectDTO.createFrom;
+const $$createType28 = $Create.Array($$createType27);
+const $$createType29 = MemberProjectDTO.createFrom;
+const $$createType30 = $Create.Array($$createType29);
