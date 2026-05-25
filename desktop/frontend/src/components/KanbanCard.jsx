@@ -21,7 +21,7 @@ function stateLabel(s) {
   return STATE_LABELS[s] ?? s;
 }
 
-function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDragStart, onDragEnd, onOpen, onDispatch, onCancelWaiting, onOpenQuestion, onOpenIssue, onQuickEval, isPinned, onTogglePin, onSetFollowOn, onCancelFollowOn }) {
+function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDragStart, onDragEnd, onOpen, onDispatch, onCancelWaiting, onOpenQuestion, onOpenIssue, onQuickEval, isPinned, onTogglePin, onSetFollowOn, onCancelFollowOn, isTrayHover, isJumping }) {
   // BACI-75: local-only expansion state for the Tasks pill. Resets on
   // unmount (board switch, repo switch, hard refresh) — that's
   // intentional, we don't want to persist a row-level UI toggle.
@@ -200,7 +200,7 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDra
         borderRadius: 12,
         boxShadow: '0 1px 0 rgba(27,35,54,0.04), 0 1px 2px rgba(27,35,54,0.05)',
       } : undefined}
-      className={`mk-card ${isDragging ? 'is-dragging' : ''} ${card.claude ? 'is-claude' : ''} ${taken ? 'is-taken' : ''} ${waiting ? 'is-waiting' : ''} ${card.archived ? 'is-archived' : ''} ${compact ? 'is-compact' : ''}`}
+      className={`mk-card ${isDragging ? 'is-dragging' : ''} ${card.claude ? 'is-claude' : ''} ${taken ? 'is-taken' : ''} ${waiting ? 'is-waiting' : ''} ${card.archived ? 'is-archived' : ''} ${compact ? 'is-compact' : ''} ${isTrayHover ? 'is-tray-hover' : ''} ${isJumping ? 'is-jumping' : ''}`}
       draggable={!taken && !waiting}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
