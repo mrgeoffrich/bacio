@@ -93,6 +93,11 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("GET /history", d.handleHistoryAll)
 	mux.HandleFunc("GET /repos/{prefix}/history", d.handleHistoryRepo)
 
+	// BACI-187: shipping-log popover — list of recently-done issues,
+	// newest-first, sibling of /history. Per-repo only; cross-repo is
+	// deliberately out of scope (matches the rest of the surface).
+	mux.HandleFunc("GET /repos/{prefix}/shipped", d.handleShippedList)
+
 	// Web UI bundle (BACI-30, gated by BACI-72): serve the browser-deployed
 	// React build at /ui/, with a 301 from the unslashed /ui to keep the
 	// SPA's base path consistent. The bundle is embedded at compile time

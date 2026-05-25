@@ -1,6 +1,7 @@
 import React from 'react';
 import Icon from './Icon.jsx';
 import RepoPicker from './RepoPicker.jsx';
+import ShippedPopover from './ShippedPopover.jsx';
 import Tooltip from './Tooltip.jsx';
 import { WEB_MODE } from '../env';
 
@@ -27,7 +28,7 @@ function formatSyncTime(iso) {
   return d.toLocaleString();
 }
 
-export default function Topbar({ boards, activeBoard, onPickBoard, onAddRepository, activeView, onChangeView, onOpenPalette, onOpenSettings, onOpenSync, leaderState, openIssueKey, onCloseIssue, agentCounts }) {
+export default function Topbar({ boards, activeBoard, onPickBoard, onAddRepository, activeView, onChangeView, onOpenPalette, onOpenSettings, onOpenSync, leaderState, openIssueKey, onCloseIssue, agentCounts, shippedCount, onOpenIssue }) {
   const board = boards.find(b => b.prefix === activeBoard);
   const syncEnabled = !!board?.syncEnabled;
   // BACI-89: the Sync badge is now a live status indicator, not just a
@@ -120,6 +121,11 @@ export default function Topbar({ boards, activeBoard, onPickBoard, onAddReposito
       </button>
 
       <div className="mk-topbar-right">
+        <ShippedPopover
+          activeBoard={activeBoard}
+          shippedCount={shippedCount ?? 0}
+          onOpenIssue={onOpenIssue}
+        />
         <button
           type="button"
           className={syncBadgeClass}

@@ -215,6 +215,17 @@ type Client interface {
 	// issue.unarchive) under the resolved actor.
 	ArchiveIssue(ctx context.Context, repo *model.Repo, key string, dryRun bool) (*model.Issue, error)
 	UnarchiveIssue(ctx context.Context, repo *model.Repo, key string, dryRun bool) (*model.Issue, error)
+	// ListShippedIssues (BACI-187) returns recently-shipped issues
+	// (state='done' AND terminal_at IS NOT NULL), newest-first by
+	// terminal_at. Per-repo only; the popover the call backs is a
+	// per-repo surface. f.RepoID is ignored here — the wrapper sets
+	// it from `repo.ID` so the call shape matches the other per-repo
+	// readers in this interface. The local backend delegates to
+	// store.ListShippedIssues; the remote backend hits
+	// GET /repos/{prefix}/shipped (DTOs decoded back into a sparse
+	// *model.Issue — pull request URLs and other DTO-side fields are
+	// not part of model.Issue and are dropped on the remote path).
+	ListShippedIssues(ctx context.Context, repo *model.Repo, f store.ShippedFilter) ([]*model.Issue, error)
 
 	// ----- Comments / relations / PRs / tags -----
 	ListComments(ctx context.Context, repo *model.Repo, key string) ([]*model.Comment, error)
