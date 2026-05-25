@@ -965,10 +965,27 @@ func (c *localClient) autoFlipIssueOnQuestionChange(ctx context.Context, q *mode
 	})
 }
 
+// AbandonOpenQuestionsForSession flips every open question owned by
+// sessionID to `abandoned` — janitor work the channel runs at startup
+// (BACI-160 gap 4). Writes ONE summary `question.abandon` history row
+// when N>0; a sweep that found no rows produces no audit noise. The
+// summary row matches the channel-restart cadence (rare, high-signal):
+// per-question rows would drown the audit log when a channel restarts
+// after a long parked-question backlog. Actor falls through to
+// recordOp's normal resolution (the channel's actor / "bacio-channel").
 func (c *localClient) AbandonOpenQuestionsForSession(ctx context.Context, sessionID string) (int, error) {
-	// No audit row — janitor work the channel runs at startup, see
-	// the comment on store.AbandonOpenQuestionsForSession.
-	return c.store.AbandonOpenQuestionsForSession(sessionID)
+	n, err := c.store.AbandonOpenQuestionsForSession(sessionID)
+	if err != nil {
+		return n, err
+	}
+	if n > 0 {
+		c.recordOp(model.HistoryEntry{
+			Op: "question.abandon", Kind: "question",
+			TargetLabel: sessionID,
+			Details:     fmt.Sprintf("session=%s,count=%d", sessionID, n),
+		})
+	}
+	return n, nil
 }
 
 func (c *localClient) DrainSettledQuestionsForSession(ctx context.Context, sessionID string) ([]*model.SessionQuestion, error) {

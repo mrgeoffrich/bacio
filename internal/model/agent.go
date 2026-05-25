@@ -965,6 +965,21 @@ const SetupDispatchCreator = "bacio-channel"
 // pings from human dispatches.
 const IdlePingDispatchCreator = "bacio-channel-ping"
 
+// MatcherActor is the audit-log Actor stamped on the matcher's
+// `agent.bind` history rows (BACI-160). Mirrors the IdlePingDispatchCreator
+// convention so `bacio history --user-filter bacio-matcher` returns a
+// coherent matcher ledger — every queued→pending transition the matcher
+// committed, with its target agent and dispatch id.
+const MatcherActor = "bacio-matcher"
+
+// ControllerActor is the audit-log Actor stamped on the leader-driven
+// controller helpers' history rows (BACI-160). Today: the hourly
+// `archive.sweep` row written by controller.ArchiveSweepIfLeader.
+// Mirrors the MatcherActor / IdlePingDispatchCreator convention so a
+// reader can isolate background-controller activity from human work
+// with `bacio history --user-filter bacio-controller`.
+const ControllerActor = "bacio-controller"
+
 // SessionLiveness classifies a session as "ended", "active", or "idle"
 // relative to now. Shared by the TUI agent cards and the desktop Agents
 // screen so both render the same status vocabulary.

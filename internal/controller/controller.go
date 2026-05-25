@@ -25,29 +25,113 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/mrgeoffrich/bacio/internal/dispatcher"
 	"github.com/mrgeoffrich/bacio/internal/idlepinger"
 	"github.com/mrgeoffrich/bacio/internal/leader"
+	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
 	bsync "github.com/mrgeoffrich/bacio/internal/sync"
 )
 
 // MatchIfLeader runs one [dispatcher.Matcher] tick if el holds the
-// lease. Errors are logged at warn level and never returned — the queue
-// matcher is mechanical janitor work (no audit row, no user-visible
-// surface), and a transient DB blip should never propagate up to the
-// caller's tick handler. A nil matcher or elector is a no-op.
-func MatchIfLeader(m *dispatcher.Matcher, el *leader.Elector, log *slog.Logger) {
+// lease, then writes one `agent.bind` audit row
+// (Actor=[model.MatcherActor], BACI-160) per successful queued→pending
+// transition the tick committed. Read errors from the matcher are
+// logged at warn level and never returned — a transient DB blip must
+// not propagate up to the caller's tick handler. A nil matcher or
+// elector is a no-op; a nil store skips the audit write but still runs
+// the tick (the caller is expected to pass the store the matcher's
+// Backend was built from so the audit row goes to the same DB the bind
+// committed against).
+func MatchIfLeader(m *dispatcher.Matcher, el *leader.Elector, s *store.Store, log *slog.Logger) {
 	if m == nil || el == nil || !el.CurrentState().AmLeader {
 		return
 	}
-	if _, err := m.Tick(); err != nil {
+	binds, err := m.TickDetailed()
+	if err != nil {
 		loggerOrDefault(log).Warn("bacio: queue match failed", "err", err)
+		// Fall through — TickDetailed returns the partial slice on
+		// error so the audit log still records the binds the tick
+		// did commit before bailing.
 	}
+	if s == nil {
+		return
+	}
+	for _, b := range binds {
+		recordBindAudit(s, b, log)
+	}
+}
+
+// recordBindAudit writes one `agent.bind` row per successful matcher
+// bind (BACI-160 gap 1). Failures are logged at warn level and never
+// propagate — losing one audit row is better than rolling back the
+// bind the matcher already committed.
+func recordBindAudit(s *store.Store, b dispatcher.Bind, log *slog.Logger) {
+	if s == nil || b.Dispatch == nil {
+		return
+	}
+	d := b.Dispatch
+	id := d.ID
+	repoID := d.RepoID
+	entry := model.HistoryEntry{
+		Actor:       model.MatcherActor,
+		Op:          "agent.bind",
+		Kind:        "agent",
+		RepoID:      &repoID,
+		RepoPrefix:  d.RepoPrefix,
+		TargetID:    &id,
+		TargetLabel: bindTargetLabel(b),
+		Details:     bindDetails(b),
+	}
+	if err := s.RecordHistory(entry); err != nil {
+		loggerOrDefault(log).Warn("bacio: failed to record agent.bind audit",
+			"dispatch_id", id, "agent", b.AgentName, "err", err)
+	}
+}
+
+// bindTargetLabel picks the most specific label for the bind audit
+// row: the bound agent's name (always present on a successful bind
+// because the matcher selected it from the candidate pool). Mirrors
+// dispatchTargetLabel's "agent first, session id fallback" rule, but
+// the matcher path always has an agent.
+func bindTargetLabel(b dispatcher.Bind) string {
+	if b.AgentName != "" {
+		return b.AgentName
+	}
+	if b.Dispatch != nil && b.Dispatch.TargetAgentName != "" {
+		return b.Dispatch.TargetAgentName
+	}
+	return ""
+}
+
+// bindDetails composes the audit-log Details string for an agent.bind
+// row. Mirrors the dispatch-audit Details convention — pick out the
+// high-signal fields (dispatch id, issue, mode, agent) without dumping
+// the full payload. A reader of `bacio history --op agent.bind` cares
+// most about "which dispatch got handed to which agent for which
+// issue".
+func bindDetails(b dispatcher.Bind) string {
+	d := b.Dispatch
+	if d == nil {
+		return ""
+	}
+	parts := []string{fmt.Sprintf("dispatch_id=%d", d.ID)}
+	if d.IssueKey != "" {
+		parts = append(parts, "issue="+d.IssueKey)
+	}
+	if d.Mode != "" {
+		parts = append(parts, "mode="+string(d.Mode))
+	}
+	if b.AgentName != "" {
+		parts = append(parts, "agent="+b.AgentName)
+	}
+	return strings.Join(parts, ",")
 }
 
 // PruneIfLeader runs one live-list prune of ended agent_sessions if el
@@ -84,8 +168,16 @@ func PingIfLeader(p *idlepinger.Pinger, el *leader.Elector, log *slog.Logger) {
 // the other …IfLeader helpers — auto-archive is mechanical janitor
 // work and a transient DB blip must not propagate up to the caller's
 // tick handler. A nil store or elector is a no-op. The post-sweep log
-// line only fires when at least one row was archived, so a quiet DB
-// doesn't generate hourly noise.
+// line and audit row only fire when at least one row was archived, so
+// a quiet DB doesn't generate hourly noise.
+//
+// BACI-160 gap 2: writes one `archive.sweep` history row per non-empty
+// sweep with Actor=[model.ControllerActor], mirroring the manual
+// `bacio archive sweep` verb's audit row. Without this the leader-
+// driven hourly tick was the dominant caller of `ArchiveSweep` (24x
+// more sweeps per day than the manual verb) but produced no audit
+// trail — `bacio history --op archive.sweep` only saw the rare manual
+// run.
 func ArchiveSweepIfLeader(s *store.Store, el *leader.Elector, log *slog.Logger) {
 	if s == nil || el == nil || !el.CurrentState().AmLeader {
 		return
@@ -103,6 +195,19 @@ func ArchiveSweepIfLeader(s *store.Store, el *leader.Elector, log *slog.Logger) 
 		"features", res.FeaturesArchived,
 		"documents", res.DocumentsArchived,
 	)
+	entry := model.HistoryEntry{
+		Actor: model.ControllerActor,
+		Op:    "archive.sweep",
+		Kind:  "sweep",
+		// Compact, parseable details — mirrors detailsForSweep in
+		// internal/client/local_archive.go so a reader sees identical
+		// shape regardless of which surface kicked the sweep.
+		Details: fmt.Sprintf(`{"issues":%d,"features":%d,"documents":%d}`,
+			res.IssuesArchived, res.FeaturesArchived, res.DocumentsArchived),
+	}
+	if err := s.RecordHistory(entry); err != nil {
+		loggerOrDefault(log).Warn("bacio: failed to record archive.sweep audit", "err", err)
+	}
 }
 
 // SyncIfLeader runs one [bsync.BackgroundRunner] tick if el holds the
@@ -222,7 +327,7 @@ func (c *Controller) Start(emit func(leader.State)) {
 		for {
 			select {
 			case <-ticker.C:
-				MatchIfLeader(c.matcher, c.el, c.log)
+				MatchIfLeader(c.matcher, c.el, c.st, c.log)
 			case <-done:
 				return
 			}

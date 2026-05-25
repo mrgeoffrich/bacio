@@ -60,12 +60,15 @@ func (r ArchiveSweepResult) Total() int64 {
 // clauses already exclude `archived_at IS NOT NULL`, and the per-row
 // updates are atomic).
 //
-// The sweep does NOT emit history audit rows on its own — auto-archive
-// is mechanical janitor work like the prune and matcher loops, so
-// flooding the audit log with per-row entries every hour would be
-// noise. The leader logs the totals via slog instead. Manual archive
-// verbs DO emit history entries (under the resolved actor), per the
-// agent-CLI principles.
+// The sweep itself does NOT emit per-row history audit rows — auto-
+// archive is mechanical janitor work like the prune and matcher loops,
+// so flooding the audit log with per-row entries every hour would be
+// noise. Manual archive verbs DO emit history entries (under the
+// resolved actor), per the agent-CLI principles. Since BACI-160 gap 2,
+// both surfaces (the manual `bacio archive sweep` verb and the
+// leader-driven controller.ArchiveSweepIfLeader tick) also emit ONE
+// `archive.sweep` summary row per non-empty sweep — distinct from the
+// "no per-row" guarantee.
 func (s *Store) ArchiveSweep() (ArchiveSweepResult, error) {
 	tx, err := s.DB.Begin()
 	if err != nil {
