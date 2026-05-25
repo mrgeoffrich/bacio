@@ -163,7 +163,7 @@ function stateClass(column) {
   }
 }
 
-export default function ActivityTray({ cards }) {
+export default function ActivityTray({ cards, pinnedKeys, onTogglePin, onOpenCard }) {
   const [entries, setEntries] = useState([]);
   // Seed from localStorage via the lazy initialiser so the first paint
   // already reflects the user's saved preference (BACI-186); writes go
@@ -361,10 +361,32 @@ export default function ActivityTray({ cards }) {
     return m;
   }, [cards]);
 
+  // BACI-192: derive the PINNED section's rows from the intersection
+  // of pinnedKeys ∩ cards. Unlike the transition list, the pinned
+  // rows are *derived* — pinning is a user opt-in held in App state,
+  // so the rows recompute on every poll without insert/remove timers.
+  // A pinned key whose card has dropped from `cards` (repo switch,
+  // deletion) is skipped here; the corner-button persistence keeps
+  // the key alive in storage so a re-fetched card resurfaces with
+  // its pin intact. No cap — pinning is explicit and the user opted
+  // in (the transitions list's MAX_ENTRIES stays for the auto-feed).
+  const pinnedEntries = useMemo(() => {
+    if (!pinnedKeys || pinnedKeys.size === 0) return [];
+    const out = [];
+    for (const key of pinnedKeys) {
+      const card = cardsByKey.get(key);
+      if (!card) continue;
+      out.push(card);
+    }
+    return out;
+  }, [pinnedKeys, cardsByKey]);
+
   // Empty tray — return null. An "no activity" placeholder would be
   // pure visual clutter for a feature whose whole point is being
   // ignorable when nothing's happening.
-  if (entries.length === 0) return null;
+  if (entries.length === 0 && pinnedEntries.length === 0) return null;
+
+  const totalCount = entries.length + pinnedEntries.length;
 
   if (collapsed) {
     return (
@@ -374,7 +396,7 @@ export default function ActivityTray({ cards }) {
         onClick={() => setCollapsedPersisted(false)}
         title="Show activity tray"
       >
-        Activity · {entries.length}
+        Activity · {totalCount}
       </button>
     );
   }
@@ -383,7 +405,7 @@ export default function ActivityTray({ cards }) {
     <aside className="mk-tray" aria-label="Recent board activity">
       <div className="mk-tray-head">
         <span className="mk-tray-title">Activity</span>
-        <span className="mk-tray-count">{entries.length}</span>
+        <span className="mk-tray-count">{totalCount}</span>
         <button
           type="button"
           className="mk-icbtn mk-tray-collapse"
@@ -394,6 +416,85 @@ export default function ActivityTray({ cards }) {
           –
         </button>
       </div>
+      {/*
+        BACI-192: PINNED section — rows the user has explicitly opted
+        into via the kanban card's top-right corner button. Sits above
+        the auto-driven transitions list so a noisy board can't push
+        pinned items off the bottom. The dismiss × on a pinned row
+        calls onTogglePin (the row vanishes because the key drops from
+        the pinned set), distinct from the transition list's
+        dismissedRef-add behaviour. Clicking the row body opens the
+        issue workspace via onOpenCard (mirrors the kanban card's
+        click semantics) so the user can drill in from the tray.
+      */}
+      {pinnedEntries.length > 0 && (
+        <>
+          <div className="mk-tray-section-head">
+            <Icon name="pin" />
+            <span>Pinned</span>
+          </div>
+          <ul className="mk-tray-list mk-tray-list-pinned">
+            {pinnedEntries.map(card => {
+              const status = entryStatus(card);
+              return (
+                <li
+                  key={`pin-${card.key}`}
+                  className="mk-tray-entry mk-tray-entry-pinned"
+                  onClick={() => onOpenCard && onOpenCard(card)}
+                  role={onOpenCard ? 'button' : undefined}
+                  tabIndex={onOpenCard ? 0 : undefined}
+                  onKeyDown={(e) => {
+                    if ((e.key === 'Enter' || e.key === ' ') && onOpenCard) {
+                      e.preventDefault();
+                      onOpenCard(card);
+                    }
+                  }}
+                >
+                  <div className="mk-tray-entry-head">
+                    <span className="mk-card-id">{card.key}</span>
+                    <span className={`mk-pill ${stateClass(card.column)}`}>{card.columnLabel || card.column}</span>
+                    <button
+                      type="button"
+                      className="mk-tray-dismiss"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (onTogglePin) onTogglePin(card.key);
+                      }}
+                      title="Unpin"
+                      aria-label={`Unpin ${card.key}`}
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <div className="mk-tray-entry-title">{card.title}</div>
+                  {status.kind === 'needs_action' && (
+                    <div className="mk-tray-entry-status is-needs-action">
+                      <Icon name="alert-triangle" />
+                      <span>{status.text}</span>
+                    </div>
+                  )}
+                  {status.kind === 'verb' && (
+                    <div className="mk-tray-entry-status">
+                      <span className="mk-tray-entry-verb">{status.text}</span>
+                    </div>
+                  )}
+                  {status.kind === 'waiting' && (
+                    <div className="mk-tray-entry-status is-waiting">
+                      <span>{status.text}</span>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+          {entries.length > 0 && (
+            <div className="mk-tray-section-head">
+              <span>Recent</span>
+            </div>
+          )}
+        </>
+      )}
+      {entries.length > 0 && (
       <ul className="mk-tray-list">
         {entries.map(e => {
           // BACI-183: read the live card for the status row. Falls
@@ -445,6 +546,7 @@ export default function ActivityTray({ cards }) {
           );
         })}
       </ul>
+      )}
     </aside>
   );
 }

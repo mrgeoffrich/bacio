@@ -9,6 +9,7 @@ import HistoryView from './components/HistoryView.jsx';
 import IssueWorkspace from './components/IssueWorkspace.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
 import ActivityTray from './components/ActivityTray.jsx';
+import { readPinnedKeys, persistPinnedKeys } from './components/activityTrayPinPersistence';
 import SettingsView from './components/SettingsView.jsx';
 import SyncView from './components/SyncView.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
@@ -107,6 +108,13 @@ export default function App() {
   // dispatch. Standby processes show a chip and disable the per-card button.
   const [leaderState, setLeaderState] = useState({ amLeader: false, holderLabel: '' });
   const [theme, setTheme] = useState(readTheme);
+  // BACI-192: the per-repo set of issue keys the user has pinned to the
+  // activity tray via the kanban card's top-right corner button. Lives
+  // in App state so both the board (corner state on each card) and the
+  // tray (PINNED section) re-render on toggle. Seeded from localStorage
+  // on mount + on every repo switch — the persisted shape is per-repo
+  // because an issue key is only meaningful inside its repo.
+  const [pinnedKeys, setPinnedKeys] = useState(() => readPinnedKeys(readActiveRepo()));
   const [loading, setLoading] = useState(true);
 
   // Resolve the System/Light/Dark preference to a concrete light|dark value
@@ -237,6 +245,29 @@ export default function App() {
   // Remember the selected repo so the app reopens on the same one.
   useEffect(() => {
     if (activeBoard) persistActiveRepo(activeBoard);
+  }, [activeBoard]);
+
+  // BACI-192: re-seed the pinned set on every repo switch (the storage
+  // shape is per-repo). The mount-time read in useState's lazy
+  // initialiser already covers the first paint; this covers subsequent
+  // active-board changes so the new repo's pins land immediately.
+  useEffect(() => {
+    setPinnedKeys(readPinnedKeys(activeBoard));
+  }, [activeBoard]);
+
+  // togglePinKey flips an issue key's membership in the per-repo
+  // pinned set and persists. Threaded to KanbanCard's corner button
+  // and to ActivityTray's dismiss-pinned-row path so both surfaces
+  // converge on the same setter. Pure-client mutation — no network.
+  const togglePinKey = useCallback((key) => {
+    if (!key) return;
+    setPinnedKeys(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      persistPinnedKeys(activeBoard, next);
+      return next;
+    });
   }, [activeBoard]);
 
   // ---- Web-mode hash routing ----
@@ -598,6 +629,58 @@ export default function App() {
       .catch(err => reportError(err, { headline: "Couldn't cancel queued dispatch" }));
   }, [activeBoard]);
 
+  // BACI-192: queue / change / cancel the dormant follow-on dispatch on
+  // a card from the kanban footer. The backend single-slot rule means a
+  // *change* of mode is a two-call round trip (cancel → queue). Both
+  // handlers optimistically update card.followOn so the footer button
+  // flips to its new visual state on click; the 10s refresh re-asserts
+  // the authoritative shape (and corrects a stale mode label when the
+  // controller has already promoted / cleared the follow-on).
+  const setFollowOnFromCard = useCallback(async (cardKey, mode) => {
+    // Snapshot the prior followOn so a failed change can revert. A
+    // missing-followon (queue) starts from no snapshot — the optimistic
+    // path just sets one.
+    let prev = null;
+    setCards(cs => cs.map(c => {
+      if (c.key !== cardKey) return c;
+      prev = c.followOn ?? null;
+      // The actionLabel comes from promptConfig — same source the
+      // dropdown menu items read so the optimistic label matches what
+      // the user just clicked.
+      const tpl = (promptConfig || []).find(p => p.mode === mode);
+      const actionLabel = tpl ? (tpl.actionLabel || tpl.label || mode) : mode;
+      return { ...c, followOn: { mode, actionLabel } };
+    }));
+    try {
+      if (prev) {
+        // Single-slot enforcement: must cancel before queuing the new
+        // mode. The cancel is idempotent — a missing dormant row
+        // returns the zero DTO with no error.
+        await api.cancelFollowOnDispatch(activeBoard, cardKey);
+      }
+      await api.queueFollowOnDispatch(activeBoard, cardKey, mode);
+    } catch (err) {
+      // Revert to the prior shape so the optimistic flip doesn't lie.
+      setCards(cs => cs.map(c => c.key === cardKey ? { ...c, followOn: prev } : c));
+      reportError(err, { headline: "Couldn't queue follow-on" });
+    }
+  }, [activeBoard, promptConfig]);
+
+  const cancelFollowOnFromCard = useCallback((cardKey) => {
+    let prev = null;
+    setCards(cs => cs.map(c => {
+      if (c.key !== cardKey) return c;
+      prev = c.followOn ?? null;
+      return { ...c, followOn: null };
+    }));
+    api.cancelFollowOnDispatch(activeBoard, cardKey)
+      .catch(err => {
+        // Revert on failure — same shape as setFollowOnFromCard above.
+        setCards(cs => cs.map(c => c.key === cardKey ? { ...c, followOn: prev } : c));
+        reportError(err, { headline: "Couldn't cancel follow-on" });
+      });
+  }, [activeBoard]);
+
   // Workspace write callbacks — each wraps the existing api.* call and
   // refreshes the brief so the inline view re-renders with the
   // persisted state. Failures surface through reportError; the
@@ -815,6 +898,10 @@ export default function App() {
             onDispatchFromCard={dispatchFromCard}
             onCancelWaitingCard={cancelWaitingFromCard}
             onQuickEval={quickEvalComment}
+            pinnedKeys={pinnedKeys}
+            onTogglePin={togglePinKey}
+            onSetFollowOn={setFollowOnFromCard}
+            onCancelFollowOn={cancelFollowOnFromCard}
           />
         </ErrorBoundary>
       )}
@@ -833,7 +920,12 @@ export default function App() {
           pure-derived view over `cards`; the App's existing 10s
           refreshCards poll already drives the diff. */}
       <ErrorBoundary headline="Something went wrong in the activity tray" label="The activity tray crashed">
-        <ActivityTray cards={cards} />
+        <ActivityTray
+          cards={cards}
+          pinnedKeys={pinnedKeys}
+          onTogglePin={togglePinKey}
+          onOpenCard={openCard}
+        />
       </ErrorBoundary>
       <ErrorModal />
     </div>
