@@ -189,7 +189,7 @@ func TestArchiveSweepFeatureCascade(t *testing.T) {
 	// excludes childless features explicitly).
 	featC, _ := s.CreateFeature(repo.ID, "c", "C", "", "")
 
-	res, err := s.ArchiveSweep()
+	res, err := s.ArchiveSweep(false)
 	if err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
@@ -252,7 +252,7 @@ func TestArchiveSweepDocumentCascade(t *testing.T) {
 	// hand.
 	doc4, _ := s.CreateDocument(repo.ID, "doc4.md", model.DocTypeArchitecture, "", "")
 
-	res, err := s.ArchiveSweep()
+	res, err := s.ArchiveSweep(false)
 	if err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
@@ -288,7 +288,7 @@ func TestArchiveSweepIdempotent(t *testing.T) {
 	_ = s.SetIssueArchived(iss.ID, true)
 
 	// First sweep archives the feature.
-	r1, err := s.ArchiveSweep()
+	r1, err := s.ArchiveSweep(false)
 	if err != nil {
 		t.Fatalf("sweep 1: %v", err)
 	}
@@ -297,7 +297,7 @@ func TestArchiveSweepIdempotent(t *testing.T) {
 	}
 
 	// Second sweep is a no-op.
-	r2, err := s.ArchiveSweep()
+	r2, err := s.ArchiveSweep(false)
 	if err != nil {
 		t.Fatalf("sweep 2: %v", err)
 	}
@@ -327,7 +327,7 @@ func TestArchiveSweepRespectsAutoEnabledFalse(t *testing.T) {
 	if err := s.SetArchiveAutoEnabled(false); err != nil {
 		t.Fatalf("disable: %v", err)
 	}
-	res, err := s.ArchiveSweep()
+	res, err := s.ArchiveSweep(false)
 	if err != nil {
 		t.Fatalf("sweep (disabled): %v", err)
 	}
@@ -343,7 +343,7 @@ func TestArchiveSweepRespectsAutoEnabledFalse(t *testing.T) {
 	if err := s.SetArchiveAutoEnabled(true); err != nil {
 		t.Fatalf("re-enable: %v", err)
 	}
-	res, err = s.ArchiveSweep()
+	res, err = s.ArchiveSweep(false)
 	if err != nil {
 		t.Fatalf("sweep (enabled): %v", err)
 	}
@@ -378,7 +378,7 @@ func TestArchiveSweepRespectsRetentionDays(t *testing.T) {
 	if err := s.SetArchiveRetentionDays(1); err != nil {
 		t.Fatalf("set retention: %v", err)
 	}
-	res, err := s.ArchiveSweep()
+	res, err := s.ArchiveSweep(false)
 	if err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
@@ -415,7 +415,7 @@ func TestArchiveSweepUsesTerminalAtNotUpdatedAt(t *testing.T) {
 	if err := s.SetArchiveRetentionDays(7); err != nil {
 		t.Fatalf("set retention: %v", err)
 	}
-	res, err := s.ArchiveSweep()
+	res, err := s.ArchiveSweep(false)
 	if err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
@@ -447,7 +447,7 @@ func TestArchiveSweepCascadeRunsEvenWhenAutoOff(t *testing.T) {
 	if err := s.SetArchiveAutoEnabled(false); err != nil {
 		t.Fatalf("disable: %v", err)
 	}
-	res, err := s.ArchiveSweep()
+	res, err := s.ArchiveSweep(false)
 	if err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
@@ -501,7 +501,7 @@ func TestArchiveSweepBumpsUpdatedAt(t *testing.T) {
 	}
 
 	sweepStart := time.Now().UTC().Add(-1 * time.Second)
-	res, err := s.ArchiveSweep()
+	res, err := s.ArchiveSweep(false)
 	if err != nil {
 		t.Fatalf("sweep: %v", err)
 	}
@@ -673,6 +673,62 @@ func TestArchiveTriggerNoOpsWhenCallerSetsUpdatedAt(t *testing.T) {
 	wantTS, _ := time.Parse("2006-01-02 15:04:05", authoritative)
 	if !got.UpdatedAt.UTC().Equal(wantTS) {
 		t.Errorf("updated_at = %v, want %v (trigger fired despite caller setting updated_at)", got.UpdatedAt.UTC(), wantTS)
+	}
+}
+
+// TestArchiveSweepDryRunPreviewsCounts pins the dry-run contract:
+// counts reflect what a real sweep would archive (issue age pass +
+// feature cascade + doc cascade), but no row is actually modified.
+// A subsequent wet sweep must archive the same rows the dry-run
+// previewed.
+func TestArchiveSweepDryRunPreviewsCounts(t *testing.T) {
+	s := newTestStore(t)
+	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
+
+	// One feature with one child issue past retention, plus a doc
+	// linked to that issue. A real sweep would archive all three; a
+	// dry-run must report 1/1/1 without touching the rows.
+	feat, _ := s.CreateFeature(repo.ID, "f", "F", "", "")
+	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "ancient", "", model.StateDone, nil)
+	if _, err := s.DB.Exec(
+		`UPDATE issues SET terminal_at = datetime('now','-30 days') WHERE id = ?`, iss.ID,
+	); err != nil {
+		t.Fatalf("backdate: %v", err)
+	}
+	doc, _ := s.CreateDocument(repo.ID, "d.md", model.DocTypeArchitecture, "", "")
+	if _, err := s.LinkDocument(doc.ID, LinkTarget{IssueID: &iss.ID}, ""); err != nil {
+		t.Fatalf("link doc: %v", err)
+	}
+
+	preview, err := s.ArchiveSweep(true)
+	if err != nil {
+		t.Fatalf("dry-run sweep: %v", err)
+	}
+	if preview.IssuesArchived != 1 || preview.FeaturesArchived != 1 || preview.DocumentsArchived != 1 {
+		t.Fatalf("dry-run preview = %+v, want 1/1/1", preview)
+	}
+
+	// Nothing should have actually been archived.
+	gotIss, _ := s.GetIssueByID(iss.ID)
+	if gotIss.ArchivedAt != nil {
+		t.Fatal("dry-run must leave issue.archived_at unset")
+	}
+	gotFeat, _ := s.GetFeatureByID(feat.ID)
+	if gotFeat.ArchivedAt != nil {
+		t.Fatal("dry-run must leave feature.archived_at unset")
+	}
+	gotDoc, _ := s.GetDocumentByID(doc.ID, false)
+	if gotDoc.ArchivedAt != nil {
+		t.Fatal("dry-run must leave document.archived_at unset")
+	}
+
+	// A wet sweep over the same state archives the same rows.
+	wet, err := s.ArchiveSweep(false)
+	if err != nil {
+		t.Fatalf("wet sweep: %v", err)
+	}
+	if wet != preview {
+		t.Fatalf("wet sweep counts %+v != dry-run preview %+v", wet, preview)
 	}
 }
 

@@ -13,23 +13,22 @@ import (
 )
 
 // ArchiveSweep runs the BACI-68 archive sweep on demand — the same
-// three SQL passes the leader-elected Controller runs hourly. The
-// dry-run path returns a zeroed result without writing.
-// Records an `archive.sweep` audit row with the per-pass counts when
-// at least one row was archived (a no-op sweep produces no audit
-// noise).
+// three SQL passes the leader-elected Controller runs. The dry-run
+// path runs the same UPDATEs inside a transaction and rolls back, so
+// the returned counts preview exactly what a real sweep would have
+// archived without modifying any rows or emitting an audit entry.
+// On a wet run, records an `archive.sweep` audit row with the
+// per-pass counts when at least one row was archived (a no-op sweep
+// produces no audit noise).
 func (c *localClient) ArchiveSweep(ctx context.Context, dryRun bool) (store.ArchiveSweepResult, error) {
-	if dryRun {
-		return store.ArchiveSweepResult{}, nil
-	}
-	res, err := c.store.ArchiveSweep()
+	res, err := c.store.ArchiveSweep(dryRun)
 	if err != nil {
 		return store.ArchiveSweepResult{}, err
 	}
-	if res.Total() > 0 {
+	if !dryRun && res.Total() > 0 {
 		c.recordOp(model.HistoryEntry{
-			Op:   "archive.sweep",
-			Kind: "sweep",
+			Op:      "archive.sweep",
+			Kind:    "sweep",
 			Details: detailsForSweep(res),
 		})
 	}
