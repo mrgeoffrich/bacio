@@ -454,24 +454,13 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   overflow-y: auto;
   padding: 20px 24px;
 }
-.mk-agents-bar {
-  display: flex;
-  align-items: center;
+/* Responsive grid: ~320px min, fills available width. Each card is
+   self-contained — no expand toggle, all useful info renders inline. */
+.mk-agents-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 12px;
-  margin-bottom: 14px;
-}
-.mk-agents-title {
-  font-family: var(--font-sans);
-  font-size: var(--text-xl);
-  font-weight: 700;
-  color: var(--fg-1);
-  margin: 0;
-}
-.mk-agents-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-width: 720px;
+  align-content: start;
 }
 
 /* Agent-status pills — reuse the kit's pill chrome (.mk-pill), just
@@ -490,31 +479,114 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
 .mk-status-waiting { background: var(--status-blocked-bg); color: var(--status-blocked); }
 
 .mk-agent-card {
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 14px;
   border: 1px solid var(--border-1); border-radius: var(--radius-md);
-  background: var(--bg-2); overflow: hidden;
-}
-.mk-agent-card.is-open { border-color: var(--border-2); }
-.mk-agent-head {
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-  width: 100%; padding: 10px 14px; border: 0; cursor: pointer;
-  background: transparent; text-align: left;
+  background: var(--bg-2);
   font-family: var(--font-sans); color: var(--fg-1);
+  min-width: 0;
 }
-.mk-agent-head:hover { background: var(--bg-4); }
-.mk-agent-name { font-size: 14px; font-weight: 600; }
-.mk-agent-meta { font-size: 12px; color: var(--fg-3); }
-.mk-agent-counts { font-size: 12px; color: var(--fg-3); margin-left: auto; }
-.mk-agent-detail {
-  padding: 10px 14px 14px; border-top: 1px solid var(--border-1);
-  display: flex; flex-direction: column; gap: 4px;
-  font-size: 13px; color: var(--fg-2);
+/* Active sessions get a coloured left edge so the eye lands on
+   in-flight work first when scanning the grid. */
+.mk-agent-card--active { box-shadow: inset 3px 0 0 var(--status-claude); }
+.mk-agent-card--idle   { box-shadow: inset 3px 0 0 var(--status-doing); }
+.mk-agent-card-head {
+  display: flex; align-items: center; gap: 8px;
+  min-width: 0;
 }
-.mk-agent-detail-label {
+.mk-agent-name {
+  font-size: 14px; font-weight: 600; color: var(--fg-1);
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mk-agent-card-sub {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--fg-3);
+  min-width: 0;
+}
+.mk-agent-card-sub .mk-mono {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mk-meta-sep { color: var(--fg-4); }
+.mk-agent-card-badges {
+  display: flex; flex-wrap: wrap; gap: 4px;
+}
+.mk-agent-card-badges:empty { display: none; }
+/* Stats strip: small definition list with column-arranged label/value
+   pairs so a glance picks up the four counts without parsing prose. */
+.mk-agent-stats {
+  margin: 0; padding: 8px 0;
+  display: flex; flex-wrap: wrap; gap: 16px;
+  border-top: 1px solid var(--border-1);
+  border-bottom: 1px solid var(--border-1);
+}
+.mk-agent-stat {
+  display: flex; flex-direction: column; gap: 2px;
+  margin: 0;
+}
+.mk-agent-stat dt {
+  font-size: 10px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.05em; color: var(--fg-4);
+  margin: 0;
+}
+.mk-agent-stat dd {
+  font-family: var(--font-mono); font-size: 13px; color: var(--fg-1);
+  margin: 0;
+}
+.mk-agent-section {
+  display: flex; flex-direction: column; gap: 6px;
+}
+.mk-agent-section-label {
   font-size: 11px; font-weight: 600; text-transform: uppercase;
-  letter-spacing: 0.04em; color: var(--fg-3); margin-top: 8px;
+  letter-spacing: 0.04em; color: var(--fg-3);
 }
-.mk-agent-detail-label:first-child { margin-top: 0; }
-.mk-agent-dispatch { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.mk-agent-section-extra { font-weight: 400; color: var(--fg-4); }
+.mk-agent-section--question .mk-agent-section-label {
+  color: var(--status-blocked);
+}
+.mk-agent-question-btn {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; padding: 6px 8px;
+  border: 1px solid var(--status-blocked-bg);
+  border-radius: var(--radius-sm);
+  background: var(--status-blocked-bg);
+  color: var(--fg-1); font-family: var(--font-sans);
+  font-size: 13px; text-align: left; cursor: pointer;
+}
+.mk-agent-question-btn:hover { border-color: var(--status-blocked); }
+.mk-agent-question-mark {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border-radius: 50%;
+  background: var(--status-blocked); color: var(--paper);
+  font-size: 11px; font-weight: 700;
+}
+.mk-agent-question-text { flex: 1; min-width: 0; }
+/* Inline horizontal todo-progress bar — visible at a glance even on
+   cards too tight to enumerate the individual todos. */
+.mk-agent-todo-bar {
+  height: 4px; border-radius: 2px;
+  background: var(--bg-4); overflow: hidden;
+}
+.mk-agent-todo-bar-fill {
+  height: 100%; background: var(--status-claude);
+  transition: width var(--dur-fast) var(--ease-out);
+}
+.mk-agent-todo-list {
+  display: flex; flex-direction: column; gap: 2px;
+}
+.mk-agent-todo-more {
+  font-size: 11px; color: var(--fg-4); padding-left: 22px;
+}
+.mk-agent-dispatch { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; }
+.mk-agent-dispatch-id { color: var(--fg-3); }
+.mk-agent-dispatch-issue { color: var(--fg-2); }
+/* Per-dispatch lifecycle pill palette. acked = done (delivered work),
+   queued/pending/delivered = in-flight (steadily warmer as they near
+   the agent), cancelled = withdrawn (neutral). */
+.mk-pill.mk-status-acked     { background: var(--status-done-bg);    color: var(--status-done); }
+.mk-pill.mk-status-queued    { background: var(--bg-4);              color: var(--fg-3); }
+.mk-pill.mk-status-pending   { background: var(--status-doing-bg);   color: var(--status-doing); }
+.mk-pill.mk-status-delivered { background: var(--status-claude-bg);  color: var(--status-claude); }
 /* BACI-190 Rescue button — appears on dispatch rows whose target
    session has ended without the dispatch being acked. Coral palette
    to signal a destructive-ish "this is salvage work" affordance,
@@ -548,13 +620,14 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   background: var(--bg-4); color: var(--fg-2);
 }
 .mk-agent-todo {
-  display: flex; align-items: baseline; gap: 8px;
+  display: flex; align-items: center; gap: 8px;
   font-size: 13px; color: var(--fg-2);
 }
 .mk-agent-todo-glyph {
-  font-family: var(--font-mono); font-size: 14px; line-height: 1;
-  color: var(--fg-3); min-width: 14px; text-align: center;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px; color: var(--fg-3); flex-shrink: 0;
 }
+.mk-agent-todo-glyph svg { width: 100%; height: 100%; display: block; }
 .mk-agent-todo-text { flex: 1; }
 /* Per-status emphasis: completed reads muted + struck-through, the
    in-progress row is bold so a glance at the list lands on what the
@@ -774,16 +847,117 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   min-height: 0;
   overflow: hidden;
 }
-.mk-features-list {
-  width: 260px;
+/* List pane wraps the filter strip + scrollable list. Widened from
+   the old 260 to 320 so titles fit on one line at common defaults. */
+.mk-features-list-pane {
+  width: 320px;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-3);
+  border-right: 1px solid var(--border-1);
+  min-height: 0;
+}
+/* Filter strip — single-row segmented toggle (all / active / done /
+   cancelled), each chip carrying the per-state count. No wrap; the
+   counts inherit the chip's foreground so they don't out-shout the
+   labels. */
+.mk-features-filter {
+  display: flex;
+  gap: 2px;
+  padding: 10px 10px 8px;
+  border-bottom: 1px solid var(--border-1);
+}
+.mk-features-filter-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-3);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+.mk-features-filter-chip:hover {
+  background: var(--bg-4);
+  color: var(--fg-1);
+}
+.mk-features-filter-chip.is-active {
+  background: var(--bg-2);
+  color: var(--fg-1);
+}
+.mk-features-filter-count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+  color: var(--fg-4);
+}
+.mk-features-filter-chip.is-active .mk-features-filter-count {
+  color: var(--fg-3);
+}
+/* Search input sits between the filter strip and the scrollable list.
+   Wraps a lucide Search icon, a borderless input, and a clear button
+   that appears only while the field has content. */
+.mk-features-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 10px;
+  padding: 4px 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+.mk-features-search:focus-within {
+  border-color: var(--border-2);
+}
+.mk-features-search-icon {
+  width: 14px;
+  height: 14px;
+  color: var(--fg-4);
+  flex-shrink: 0;
+}
+.mk-features-search-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg-1);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  padding: 2px 0;
+}
+.mk-features-search-input:focus { outline: none; }
+.mk-features-search-input::placeholder { color: var(--fg-4); }
+.mk-features-search-input::-webkit-search-cancel-button { display: none; }
+.mk-features-search-clear {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: var(--fg-4);
+  cursor: pointer;
+  padding: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.mk-features-search-clear:hover { color: var(--fg-1); }
+.mk-features-search-clear svg { width: 12px; height: 12px; }
+.mk-features-list {
+  flex: 1;
   overflow-y: auto;
-  padding: 12px;
+  padding: 8px;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  background: var(--bg-3);
-  border-right: 1px solid var(--border-1);
 }
 .mk-features-list-empty,
 .mk-features-empty {
@@ -801,13 +975,16 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   text-align: center;
   padding: 24px;
 }
+/* Single-row feature item: top line carries emoji + title + state pill;
+   meta line carries slug + relative updated stamp + hidden-on-board
+   icon. Title-row uses ellipsis so it never wraps. */
 .mk-features-item {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
   width: 100%;
   text-align: left;
-  padding: 8px 10px;
+  padding: 10px 12px;
   border: 1px solid transparent;
   border-radius: var(--radius-md);
   background: transparent;
@@ -818,7 +995,52 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
 .mk-features-item:hover { background: var(--bg-4); }
 .mk-features-item.is-active {
   background: var(--bg-2);
-  border-color: var(--border-1);
+  border-color: var(--border-2);
+}
+/* Cancelled rows read fainter than active/done so the in-flight set
+   still pops without needing a left-edge accent. */
+.mk-features-item--cancelled { opacity: 0.7; }
+.mk-features-item--cancelled.is-active { opacity: 1; }
+.mk-features-item-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.mk-features-item-emoji {
+  font-size: 16px;
+  line-height: 1;
+  flex: none;
+  width: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.mk-features-item-emoji-empty {
+  flex: none;
+  width: 18px;
+}
+.mk-features-item-title {
+  flex: 1;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--fg-1);
+  line-height: 1.35;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mk-features-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 26px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--fg-3);
+  min-width: 0;
 }
 .mk-features-item-slug {
   font-family: var(--font-mono);
@@ -826,30 +1048,25 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   letter-spacing: .06em;
   text-transform: uppercase;
   color: var(--fg-3);
-}
-/* BACI-184: row that wraps the per-feature emoji glyph and the
-   feature title so they sit side-by-side under the slug. min-width:0
-   on the title lets it ellipsize cleanly when the panel is narrow. */
-.mk-features-item-title-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 1;
   min-width: 0;
 }
-.mk-features-item-emoji {
-  font-size: 14px;
-  line-height: 1;
-  flex: none;
+.mk-features-item-meta-sep { color: var(--fg-4); }
+.mk-features-item-hidden {
+  margin-left: auto;
   display: inline-flex;
   align-items: center;
+  width: 12px;
+  height: 12px;
+  color: var(--fg-4);
 }
-.mk-features-item-title {
-  font-family: var(--font-sans);
-  font-size: var(--text-sm);
-  font-weight: 500;
-  color: var(--fg-1);
-  line-height: 1.35;
-  min-width: 0;
+.mk-features-item-hidden svg {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 .mk-features-main {
   flex: 1;
@@ -890,15 +1107,20 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
 }
 .mk-features-emoji-btn {
   appearance: none; -webkit-appearance: none;
-  background: var(--bg-3); border: 1px solid var(--border-1);
-  border-radius: 8px;
-  width: 44px; height: 44px;
+  background: transparent; border: 1px solid transparent;
+  border-radius: 6px;
+  width: 32px; height: 32px;
   display: inline-flex; align-items: center; justify-content: center;
-  font-size: 24px; line-height: 1;
+  font-size: 22px; line-height: 1;
   cursor: pointer; flex: none;
   color: var(--fg-1);
+  transition: background var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out);
 }
-.mk-features-emoji-btn:hover { background: var(--bg-4); }
+.mk-features-emoji-btn:hover {
+  background: var(--bg-3);
+  border-color: var(--border-1);
+}
 .mk-features-emoji-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .mk-features-emoji-placeholder {
   color: var(--fg-3); font-size: 22px; font-weight: 300;
@@ -953,8 +1175,9 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   font-family: var(--font-sans);
   font-size: var(--text-xs);
   color: var(--fg-3);
+  margin-top: 4px;
 }
-.mk-features-section { margin-top: 20px; }
+.mk-features-section { margin-top: 24px; }
 .mk-features-label {
   font-size: 11px;
   font-weight: 600;
@@ -963,23 +1186,39 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   color: var(--fg-3);
   margin-bottom: 8px;
 }
-/* BACI-177: "Show on board" toggle row — label on the left, segmented
-   buttons on the right, with a hint under the lot. Same spacing as
-   the SettingsView toggles so the affordance reads as native. */
-.mk-features-toggle-row {
+/* Compact properties block — replaces the two stacked toggle rows
+   each with verbose hints. Two columns at desktop widths, one column
+   when the pane is narrow. Each property is a label / control / hint
+   triple sitting in its own grid cell so the labels align vertically
+   and the controls sit hard against them. */
+.mk-features-properties {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px 24px;
+  margin-top: 20px;
+  padding: 16px;
+  background: var(--bg-3);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+}
+.mk-features-prop {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 6px;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
 }
-.mk-features-toggle-row .mk-features-label {
-  margin-bottom: 0;
-}
-.mk-features-hint {
-  font-family: var(--font-sans);
-  font-size: var(--text-xs);
+.mk-features-prop-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
   color: var(--fg-3);
+}
+.mk-features-prop-hint {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--fg-4);
   line-height: 1.4;
 }
 .mk-features-text {
@@ -996,17 +1235,36 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 .mk-features-issue {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+  transition: border-color var(--dur-fast) var(--ease-out),
+              background var(--dur-fast) var(--ease-out);
+}
+.mk-features-issue:hover {
+  border-color: var(--border-2);
+  background: var(--bg-3);
+}
+.mk-features-issue .mk-card-id {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-3);
+  flex: none;
+  letter-spacing: 0.04em;
 }
 .mk-features-issue-title {
   font-family: var(--font-sans);
   font-size: var(--text-sm);
   color: var(--fg-1);
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

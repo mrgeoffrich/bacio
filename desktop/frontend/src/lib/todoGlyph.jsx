@@ -1,3 +1,6 @@
+import React from 'react';
+import { Circle, CircleDot, CircleCheck } from 'lucide-react';
+
 // todoGlyph maps a TodoWrite status to the leading glyph rendered in
 // the per-agent drill-down and the per-card expanded Tasks list.
 // Mirrors the TUI's vocabulary so an operator can switch between
@@ -7,10 +10,10 @@
 export function todoGlyph(status) {
   switch (status) {
     case 'completed':
-      return '●';
+      return <CircleCheck strokeWidth={2} />;
     case 'in_progress':
-      return '◐';
+      return <CircleDot strokeWidth={2} />;
     default:
-      return '○';
+      return <Circle strokeWidth={2} />;
   }
 }

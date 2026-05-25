@@ -1,7 +1,6 @@
-import React, { useState } from 'react';
-import Icon from './Icon.jsx';
+import React, { useMemo, useState } from 'react';
 import QuestionModal from './QuestionModal.jsx';
-import { todoGlyph } from '../lib/todoGlyph.js';
+import { todoGlyph } from '../lib/todoGlyph.jsx';
 import * as api from '../api';
 
 // relTime renders a coarse "time since" for the last-seen line.
@@ -15,12 +14,185 @@ function relTime(iso) {
   return `${Math.floor(h / 24)}d ago`;
 }
 
-// AgentsView is the desktop Agents screen: a full-page list with a card per
-// agent session connected to the current repo, click-to-expand into its open
-// claims and dispatches. Read-only — agents are dispatched work from the issue
-// drawer, not from here.
+// TEMP demo data — appended to real agents when ?mock=1 is in the URL.
+// Covers the spectrum of card states so the grid redesign can be
+// reviewed against a realistic mix. Remove before merging.
+function mockAgents() {
+  const now = Date.now();
+  const ago = (m) => new Date(now - m * 60_000).toISOString();
+  return [
+    {
+      sessionId: 'mock-busy-todos',
+      agentName: 'brave-otter@claude.shiny',
+      actor: 'claude',
+      model: 'claude-opus-4-7',
+      branch: 'agents-grid-redesign',
+      repoPrefix: 'BACI',
+      status: 'active',
+      busy: true,
+      busyIssue: 'BACI-204',
+      waiting: false,
+      waitingIssue: '',
+      hasChannel: true,
+      bacioVersion: 'v0.42.0',
+      bacioVersionStale: false,
+      lastSeenAt: ago(0),
+      claims: [
+        {
+          issueKey: 'BACI-204',
+          state: 'in_progress',
+          prompt:
+            'Plan a redesign of the Agents view to fit cards on a responsive grid.',
+        },
+      ],
+      dispatches: [
+        { id: 901, issueKey: 'BACI-204', mode: 'plan', status: 'delivered' },
+        { id: 898, issueKey: 'BACI-201', mode: 'review', status: 'acked' },
+        { id: 895, issueKey: 'BACI-199', mode: 'ship', status: 'acked' },
+      ],
+      todos: [
+        { content: 'Read AgentsView and surrounding CSS', status: 'completed' },
+        { content: 'Sketch grid layout with self-contained cards', status: 'completed' },
+        { content: 'Wire ?mock=1 demo data for review', status: 'in_progress' },
+        { content: 'Update CSS for status accents and progress bar', status: 'pending' },
+        { content: 'Verify against multiple states (busy / waiting / questions)', status: 'pending' },
+      ],
+      todosDone: 2,
+      todosTotal: 5,
+      openQuestions: [],
+    },
+    {
+      sessionId: 'mock-waiting-question',
+      agentName: 'curious-quokka@claude.shiny',
+      actor: 'claude',
+      model: 'claude-sonnet-4-6',
+      branch: 'worktree-agent-7c41ab',
+      repoPrefix: 'BACI',
+      status: 'active',
+      busy: false,
+      busyIssue: '',
+      waiting: true,
+      waitingIssue: 'BACI-187',
+      hasChannel: true,
+      bacioVersion: 'v0.42.0',
+      bacioVersionStale: false,
+      lastSeenAt: ago(2),
+      claims: [
+        { issueKey: 'BACI-187', state: 'needs_action', prompt: 'Pick the auth strategy.' },
+      ],
+      dispatches: [
+        { id: 884, issueKey: 'BACI-187', mode: 'design', status: 'delivered' },
+      ],
+      todos: [],
+      todosDone: 0,
+      todosTotal: 0,
+      openQuestions: [
+        { id: 9991, header: 'Auth library', issueKey: 'BACI-187', askedAt: ago(2) },
+      ],
+    },
+    {
+      sessionId: 'mock-idle-clean',
+      agentName: 'mellow-marten@claude.shiny',
+      actor: 'claude',
+      model: 'claude-opus-4-7',
+      branch: 'main',
+      repoPrefix: 'BACI',
+      status: 'idle',
+      busy: false,
+      busyIssue: '',
+      waiting: false,
+      waitingIssue: '',
+      hasChannel: true,
+      bacioVersion: 'v0.42.0',
+      bacioVersionStale: false,
+      lastSeenAt: ago(8),
+      claims: [],
+      dispatches: [
+        { id: 870, issueKey: 'BACI-198', mode: 'fix_review', status: 'acked' },
+        { id: 866, issueKey: 'BACI-197', mode: 'implement', status: 'acked' },
+      ],
+      todos: [],
+      todosDone: 0,
+      todosTotal: 0,
+      openQuestions: [],
+    },
+    {
+      sessionId: 'mock-rescue-needed',
+      agentName: 'gentle-fox@claude.shiny',
+      actor: 'claude',
+      model: 'claude-opus-4-7',
+      branch: 'worktree-agent-19c2d4',
+      repoPrefix: 'BACI',
+      status: 'active',
+      busy: true,
+      busyIssue: 'BACI-156',
+      waiting: false,
+      waitingIssue: '',
+      hasChannel: false,
+      bacioVersion: 'v0.40.1',
+      bacioVersionStale: true,
+      lastSeenAt: ago(14),
+      claims: [
+        { issueKey: 'BACI-156', state: 'in_progress', prompt: 'Implement the sync diff renderer.' },
+      ],
+      dispatches: [
+        {
+          id: 842,
+          issueKey: 'BACI-156',
+          mode: 'implement',
+          status: 'delivered',
+          needsRescue: true,
+        },
+        { id: 838, issueKey: 'BACI-155', mode: 'design', status: 'acked' },
+      ],
+      todos: [
+        { content: 'Wire the new diff API', status: 'completed' },
+        { content: 'Render the deletion side', status: 'in_progress' },
+        { content: 'Snapshot tests', status: 'pending' },
+      ],
+      todosDone: 1,
+      todosTotal: 3,
+      openQuestions: [],
+    },
+    {
+      sessionId: 'mock-supervisor',
+      agentName: 'wise-puffin@claude.supervisor',
+      actor: 'claude',
+      model: 'claude-opus-4-7',
+      branch: 'main',
+      repoPrefix: 'BACI',
+      status: 'active',
+      busy: false,
+      busyIssue: '',
+      waiting: false,
+      waitingIssue: '',
+      hasChannel: true,
+      bacioVersion: 'v0.42.0',
+      bacioVersionStale: false,
+      lastSeenAt: ago(1),
+      claims: [],
+      dispatches: [
+        { id: 904, issueKey: 'BACI-205', mode: 'scope', status: 'queued' },
+        { id: 902, issueKey: 'BACI-203', mode: 'plan', status: 'pending' },
+        { id: 900, issueKey: 'BACI-202', mode: 'ship', status: 'acked' },
+        { id: 896, issueKey: 'BACI-200', mode: 'review', status: 'acked' },
+        { id: 893, issueKey: 'BACI-199', mode: 'implement', status: 'acked' },
+      ],
+      todos: [],
+      todosDone: 0,
+      todosTotal: 0,
+      openQuestions: [],
+    },
+  ];
+}
+
+// AgentsView is the desktop Agents screen: a responsive grid where each
+// live agent session is a self-contained card showing status, current
+// work, todos and recent dispatches at a glance. Ended sessions are
+// filtered out — once a session ends there's nothing actionable left on
+// it, and the history is visible via the History view if needed. Read-
+// only — agents are dispatched work from the issue drawer.
 export default function AgentsView({ agents, onRefresh }) {
-  const [expanded, setExpanded] = useState(null);
   // BACI-53 ask_user_question modal state. activeQuestionId is the
   // pending row's primary key (null when no modal is open); when set
   // the modal fetches the full payload + renders the answer form.
@@ -35,6 +207,23 @@ export default function AgentsView({ agents, onRefresh }) {
   // supervisor / already-acked race) is visible inline without a toast
   // surface. Map: dispatch id → error message.
   const [rescueError, setRescueError] = useState(() => ({}));
+
+  // TEMP demo toggle — ?mock=1 in the URL appends a varied set of fake
+  // agents so the grid redesign can be reviewed against a realistic
+  // mix of states. Remove together with mockAgents() before merging.
+  const showMock =
+    typeof window !== 'undefined' &&
+    new URLSearchParams(window.location.search).has('mock');
+  const allAgents = useMemo(
+    () => (showMock ? [...agents, ...mockAgents()] : agents),
+    [agents, showMock],
+  );
+
+  const liveAgents = useMemo(
+    () => allAgents.filter((a) => a.status !== 'ended'),
+    [allAgents],
+  );
+  const hiddenEnded = allAgents.length - liveAgents.length;
 
   const handleRescue = async (dispatchID) => {
     setRescuing((prev) => {
@@ -67,162 +256,24 @@ export default function AgentsView({ agents, onRefresh }) {
 
   return (
     <div className="mk-agents-view">
-      <header className="mk-agents-bar">
-        <h2 className="mk-agents-title">Agents</h2>
-        <button className="mk-icbtn" aria-label="Refresh" onClick={onRefresh}>
-          <Icon name="board" />
-        </button>
-      </header>
-
-      <div className="mk-agents-list">
-        {agents.length === 0 && (
-          <p className="mk-drawer-text mk-meta-empty">No agent sessions for this repo.</p>
-        )}
-
-        {agents.map((a) => {
-          const name = a.agentName || a.sessionId.slice(0, 12);
-          const isOpen = expanded === a.sessionId;
-          const openQuestions = a.openQuestions || [];
-          return (
-            <div key={a.sessionId} className={`mk-agent-card ${isOpen ? 'is-open' : ''}`}>
-              <button
-                className="mk-agent-head"
-                onClick={() => setExpanded(isOpen ? null : a.sessionId)}
-              >
-                <span className="mk-agent-name">{name}</span>
-                <span className={`mk-pill mk-status-${a.status}`}>{a.status}</span>
-                {a.waiting ? (
-                  <span className="mk-pill mk-status-waiting">
-                    waiting · {a.waitingIssue}
-                  </span>
-                ) : (
-                  a.busy && (
-                    <span className="mk-pill mk-status-busy">busy · {a.busyIssue}</span>
-                  )
-                )}
-                {a.todosTotal > 0 && (
-                  <span className="mk-pill mk-todos-badge">
-                    todos {a.todosDone}/{a.todosTotal}
-                  </span>
-                )}
-                {openQuestions.length > 0 && (
-                  <span
-                    className="mk-pill mk-question-badge"
-                    role="button"
-                    title="User input needed — click to answer"
-                    onClick={(ev) => {
-                      ev.stopPropagation();
-                      // Auto-pop the first open question. The modal's
-                      // "Next" path (when there are multiple) walks
-                      // through them in order.
-                      setActiveQuestionId(openQuestions[0].id);
-                    }}
-                  >
-                    ? {openQuestions.length}
-                  </span>
-                )}
-                <span className="mk-agent-meta">
-                  {a.model || '—'} · {a.branch || '—'} · seen {relTime(a.lastSeenAt)}
-                </span>
-                <span className="mk-agent-counts">
-                  {a.claims.length} claim{a.claims.length === 1 ? '' : 's'} ·{' '}
-                  {a.dispatches.length} dispatch{a.dispatches.length === 1 ? '' : 'es'}
-                </span>
-              </button>
-
-              {isOpen && (
-                <div className="mk-agent-detail">
-                  <div className="mk-agent-detail-label">Open claims</div>
-                  {a.claims.length === 0 ? (
-                    <div className="mk-meta-empty">none</div>
-                  ) : (
-                    a.claims.map((c) => (
-                      <div key={c.issueKey} className="mk-agent-claim">
-                        <span className="mk-mono">{c.issueKey}</span>
-                        {c.state === 'needs_action' && (
-                          <span className="mk-tag">needs action</span>
-                        )}
-                        {c.prompt && <span className="mk-agent-claim-prompt">{c.prompt}</span>}
-                      </div>
-                    ))
-                  )}
-
-                  {openQuestions.length > 0 && (
-                    <>
-                      <div className="mk-agent-detail-label">User input needed</div>
-                      {openQuestions.map((q) => (
-                        <div key={q.id} className="mk-agent-question-row">
-                          <button
-                            className="mk-btn mk-btn-small"
-                            onClick={() => setActiveQuestionId(q.id)}
-                          >
-                            Answer #{q.id} {q.header ? `(${q.header})` : ''}
-                          </button>
-                          {q.issueKey && (
-                            <span className="mk-mono mk-meta">{q.issueKey}</span>
-                          )}
-                          <span className="mk-meta">{relTime(q.askedAt)}</span>
-                        </div>
-                      ))}
-                    </>
-                  )}
-
-                  <div className="mk-agent-detail-label">
-                    Todos {a.todosTotal > 0 ? `(${a.todosDone}/${a.todosTotal})` : ''}
-                  </div>
-                  {!a.todos || a.todos.length === 0 ? (
-                    <div className="mk-meta-empty">none</div>
-                  ) : (
-                    a.todos.map((t, i) => (
-                      <div
-                        key={i}
-                        className={`mk-agent-todo mk-agent-todo--${t.status}`}
-                      >
-                        <span className="mk-agent-todo-glyph" aria-hidden>
-                          {todoGlyph(t.status)}
-                        </span>
-                        <span className="mk-agent-todo-text">{t.content}</span>
-                      </div>
-                    ))
-                  )}
-
-                  <div className="mk-agent-detail-label">Dispatches</div>
-                  {a.dispatches.length === 0 ? (
-                    <div className="mk-meta-empty">none</div>
-                  ) : (
-                    a.dispatches.map((d) => (
-                      <div key={d.id} className="mk-agent-dispatch">
-                        <span className="mk-mono">#{d.id}</span>
-                        <span className="mk-pill">{d.status}</span>
-                        {d.mode && <span className="mk-tag">{d.mode}</span>}
-                        <span className="mk-mono">{d.issueKey || '—'}</span>
-                        {d.needsRescue && (
-                          <>
-                            <button
-                              type="button"
-                              className="mk-btn mk-btn-rescue"
-                              onClick={() => handleRescue(d.id)}
-                              disabled={rescuing.has(d.id)}
-                              title="Post a rescue dispatch to an idle supervisor so it can finalise this worker's worktree edits"
-                            >
-                              {rescuing.has(d.id) ? 'Rescuing…' : 'Rescue'}
-                            </button>
-                            {rescueError[d.id] && (
-                              <span className="mk-agent-dispatch-error" title={rescueError[d.id]}>
-                                {rescueError[d.id]}
-                              </span>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
+      {liveAgents.length === 0 ? (
+        <p className="mk-drawer-text mk-meta-empty">
+          No live agent sessions for this repo.
+        </p>
+      ) : (
+        <div className="mk-agents-grid">
+          {liveAgents.map((a) => (
+            <AgentCard
+              key={a.sessionId}
+              agent={a}
+              rescuing={rescuing}
+              rescueError={rescueError}
+              onRescue={handleRescue}
+              onOpenQuestion={setActiveQuestionId}
+            />
+          ))}
+        </div>
+      )}
 
       <QuestionModal
         questionId={activeQuestionId}
@@ -232,5 +283,201 @@ export default function AgentsView({ agents, onRefresh }) {
         }}
       />
     </div>
+  );
+}
+
+// AgentCard renders one session as a self-contained grid tile.
+function AgentCard({ agent: a, rescuing, rescueError, onRescue, onOpenQuestion }) {
+  const name = a.agentName || a.sessionId.slice(0, 12);
+  const openQuestions = a.openQuestions || [];
+  const dispatches = a.dispatches || [];
+  const claims = a.claims || [];
+  const todos = a.todos || [];
+
+  // Surface the agent's most-recent few dispatches; the full audit log
+  // lives in History — the card is a snapshot, not an archive.
+  const recentDispatches = dispatches.slice(0, 4);
+
+  // Inline progress for the todo list — only when there are any todos.
+  const todoPct =
+    a.todosTotal > 0 ? Math.min(100, Math.round((a.todosDone / a.todosTotal) * 100)) : 0;
+
+  return (
+    <article className={`mk-agent-card mk-agent-card--${a.status}`}>
+      <header className="mk-agent-card-head">
+        <span className="mk-agent-name" title={a.sessionId}>
+          {name}
+        </span>
+        <span className={`mk-pill mk-status-${a.status}`}>{a.status}</span>
+      </header>
+
+      <div className="mk-agent-card-sub">
+        <span className="mk-mono">{a.model || '—'}</span>
+        <span className="mk-meta-sep">·</span>
+        <span className="mk-mono" title={a.branch}>
+          {a.branch || '—'}
+        </span>
+      </div>
+
+      <div className="mk-agent-card-badges">
+        {a.waiting ? (
+          <span className="mk-pill mk-status-waiting">
+            waiting · {a.waitingIssue}
+          </span>
+        ) : a.busy ? (
+          <span className="mk-pill mk-status-busy">busy · {a.busyIssue}</span>
+        ) : null}
+        {a.bacioVersionStale && (
+          <span className="mk-pill mk-status-ended" title={`bacio ${a.bacioVersion}`}>
+            stale build
+          </span>
+        )}
+        {!a.hasChannel && (
+          <span className="mk-pill mk-status-ended" title="No MCP channel attached">
+            no channel
+          </span>
+        )}
+      </div>
+
+      <dl className="mk-agent-stats">
+        <div className="mk-agent-stat">
+          <dt>seen</dt>
+          <dd>{relTime(a.lastSeenAt)}</dd>
+        </div>
+        <div className="mk-agent-stat">
+          <dt>claims</dt>
+          <dd>{claims.length}</dd>
+        </div>
+        <div className="mk-agent-stat">
+          <dt>dispatches</dt>
+          <dd>{dispatches.length}</dd>
+        </div>
+        {a.todosTotal > 0 && (
+          <div className="mk-agent-stat">
+            <dt>todos</dt>
+            <dd>
+              {a.todosDone}/{a.todosTotal}
+            </dd>
+          </div>
+        )}
+      </dl>
+
+      {openQuestions.length > 0 && (
+        <section className="mk-agent-section mk-agent-section--question">
+          <div className="mk-agent-section-label">User input needed</div>
+          {openQuestions.map((q) => (
+            <button
+              key={q.id}
+              type="button"
+              className="mk-agent-question-btn"
+              onClick={() => onOpenQuestion(q.id)}
+            >
+              <span className="mk-agent-question-mark">?</span>
+              <span className="mk-agent-question-text">
+                {q.header || `Question #${q.id}`}
+              </span>
+              {q.issueKey && <span className="mk-mono mk-meta">{q.issueKey}</span>}
+              <span className="mk-meta">{relTime(q.askedAt)}</span>
+            </button>
+          ))}
+        </section>
+      )}
+
+      {claims.length > 0 && (
+        <section className="mk-agent-section">
+          <div className="mk-agent-section-label">Open claims</div>
+          {claims.map((c) => (
+            <div key={c.issueKey} className="mk-agent-claim">
+              <span className="mk-mono">{c.issueKey}</span>
+              {c.state === 'needs_action' && (
+                <span className="mk-tag">needs action</span>
+              )}
+              {c.prompt && (
+                <span className="mk-agent-claim-prompt" title={c.prompt}>
+                  {c.prompt}
+                </span>
+              )}
+            </div>
+          ))}
+        </section>
+      )}
+
+      {a.todosTotal > 0 && (
+        <section className="mk-agent-section">
+          <div className="mk-agent-section-label">
+            Todos {a.todosDone}/{a.todosTotal}
+          </div>
+          <div
+            className="mk-agent-todo-bar"
+            role="progressbar"
+            aria-valuenow={a.todosDone}
+            aria-valuemin={0}
+            aria-valuemax={a.todosTotal}
+          >
+            <div className="mk-agent-todo-bar-fill" style={{ width: `${todoPct}%` }} />
+          </div>
+          {todos.length > 0 && (
+            <div className="mk-agent-todo-list">
+              {todos.slice(0, 6).map((t, i) => (
+                <div key={i} className={`mk-agent-todo mk-agent-todo--${t.status}`}>
+                  <span className="mk-agent-todo-glyph" aria-hidden>
+                    {todoGlyph(t.status)}
+                  </span>
+                  <span className="mk-agent-todo-text">{t.content}</span>
+                </div>
+              ))}
+              {todos.length > 6 && (
+                <div className="mk-agent-todo-more">+{todos.length - 6} more</div>
+              )}
+            </div>
+          )}
+        </section>
+      )}
+
+      {recentDispatches.length > 0 && (
+        <section className="mk-agent-section">
+          <div className="mk-agent-section-label">
+            Recent dispatches
+            {dispatches.length > recentDispatches.length && (
+              <span className="mk-agent-section-extra">
+                {' '}
+                · {dispatches.length - recentDispatches.length} older
+              </span>
+            )}
+          </div>
+          {recentDispatches.map((d) => (
+            <div key={d.id} className="mk-agent-dispatch">
+              <span className="mk-mono mk-agent-dispatch-id">#{d.id}</span>
+              <span className={`mk-pill mk-status-${d.status}`}>{d.status}</span>
+              {d.mode && <span className="mk-tag">{d.mode}</span>}
+              <span className="mk-mono mk-agent-dispatch-issue">
+                {d.issueKey || '—'}
+              </span>
+              {d.needsRescue && (
+                <>
+                  <button
+                    type="button"
+                    className="mk-btn-rescue"
+                    onClick={() => onRescue(d.id)}
+                    disabled={rescuing.has(d.id)}
+                    title="Post a rescue dispatch to an idle supervisor so it can finalise this worker's worktree edits"
+                  >
+                    {rescuing.has(d.id) ? 'Rescuing…' : 'Rescue'}
+                  </button>
+                  {rescueError[d.id] && (
+                    <span
+                      className="mk-agent-dispatch-error"
+                      title={rescueError[d.id]}
+                    >
+                      {rescueError[d.id]}
+                    </span>
+                  )}
+                </>
+              )}
+            </div>
+          ))}
+        </section>
+      )}
+    </article>
   );
 }
