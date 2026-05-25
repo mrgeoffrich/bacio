@@ -6,37 +6,9 @@ import (
 )
 
 // AgentFileModel is the default model pinned in a generated subagent
-// file's frontmatter — used for every mode that does not have a
-// per-mode override in agentFileModelOverrides.
+// file's frontmatter when the template body has no
+// `---\nmodel: ...\n---\n` frontmatter declaring otherwise (BACI-155).
 const AgentFileModel = "opus"
-
-// agentFileModelOverrides records per-mode model right-sizing (BACI-118):
-// a dispatch template slug whose generated `.claude/agents/` file should
-// carry a `model:` other than AgentFileModel. The review and ship
-// workers run on Sonnet — their jobs (reviewing a diff, merging a PR)
-// don't need the heavier default. Every other mode (plan, design,
-// implement, fix_review) is absent here and inherits AgentFileModel.
-//
-// Keyed by built-in template slug; a user-created template slug has no
-// entry and falls through to the default. Mirrors the
-// builtinTemplateActionLabels shape so the per-mode override sits next
-// to its peers and a future mode is a one-line addition.
-var agentFileModelOverrides = map[string]string{
-	BuiltinTemplateReview: "sonnet",
-	BuiltinTemplateShip:   "sonnet",
-}
-
-// AgentFileModelForSlug returns the model a generated subagent file
-// should pin for a template slug — the per-mode override from
-// agentFileModelOverrides when one exists, else the default
-// AgentFileModel. RenderAgentFile uses this to set the frontmatter
-// `model:` line.
-func AgentFileModelForSlug(slug string) string {
-	if m, ok := agentFileModelOverrides[slug]; ok {
-		return m
-	}
-	return AgentFileModel
-}
 
 // AgentFileSkills lists the skills preloaded into every generated
 // subagent via the frontmatter `skills:` field (BACI-97). Claude Code
@@ -63,15 +35,72 @@ var AgentFileSkills = []string{"bacio"}
 // briefs were rewritten to lean on this — see prompts/agents/*.md.
 const AgentFileIsolation = "worktree"
 
+// splitAgentFrontmatter peels a leading `---\n...\n---\n` block off a
+// template body and returns the parsed `model:` value (empty when the
+// frontmatter has no model key or the body has no frontmatter at all),
+// the remaining body after the closing fence, and any parse error.
+//
+// The grammar is deliberately minimal: only `model:` is recognised, and
+// every other key is rejected so a typo surfaces loud instead of being
+// silently ignored. CRLF line endings on the fences are tolerated so a
+// hand-edited body via `bacio settings template set` on Windows still
+// parses; the source files on disk are LF.
+func splitAgentFrontmatter(body string) (string, string, error) {
+	// No opening fence — body has no frontmatter; the caller falls
+	// through to AgentFileModel.
+	if !strings.HasPrefix(body, "---\n") && !strings.HasPrefix(body, "---\r\n") {
+		return "", body, nil
+	}
+	// Step past the opening fence line.
+	rest := body
+	if strings.HasPrefix(rest, "---\r\n") {
+		rest = rest[len("---\r\n"):]
+	} else {
+		rest = rest[len("---\n"):]
+	}
+	var model string
+	var modelSet bool
+	for {
+		nl := strings.IndexByte(rest, '\n')
+		if nl < 0 {
+			return "", "", fmt.Errorf("frontmatter is missing its closing `---` fence")
+		}
+		line := rest[:nl]
+		rest = rest[nl+1:]
+		// Tolerate CRLF.
+		line = strings.TrimRight(line, "\r")
+		if line == "---" {
+			// Closing fence consumed; rest is whatever follows.
+			return model, rest, nil
+		}
+		colon := strings.IndexByte(line, ':')
+		if colon < 0 {
+			return "", "", fmt.Errorf("frontmatter line %q is not a `key: value` pair", line)
+		}
+		key := strings.TrimSpace(line[:colon])
+		val := strings.TrimSpace(line[colon+1:])
+		if key != "model" {
+			return "", "", fmt.Errorf("frontmatter has unknown key %q (only `model` is recognised)", key)
+		}
+		if modelSet {
+			return "", "", fmt.Errorf("frontmatter has a duplicate `model` key")
+		}
+		model = val
+		modelSet = true
+	}
+}
+
 // RenderAgentFile produces the contents of a per-mode custom subagent
 // file (`.claude/agents/<SubagentTypeForTemplate(slug)>.md`) for a
 // dispatch template (BACI-76). The frontmatter carries the agent name
 // (== the file basename, == the subagent_type the supervisor spawns), a
-// generated description, the model (per-mode via AgentFileModelForSlug —
-// BACI-118), the preloaded `skills:` list
-// (BACI-97 — Claude Code injects each named skill's full content at
-// startup), and the worktree-isolation mode; the body is the template
-// body verbatim — that body is the subagent's durable system prompt.
+// generated description, the model (from the body's own
+// `---\nmodel: ...\n---\n` frontmatter when present, else
+// AgentFileModel — BACI-155), the preloaded `skills:` list (BACI-97 —
+// Claude Code injects each named skill's full content at startup), and
+// the worktree-isolation mode; the body is the template body verbatim
+// (minus the frontmatter the renderer peeled off) — that body is the
+// subagent's durable system prompt.
 //
 // Deliberately no `tools:` line: omitting the field makes Claude Code
 // give the subagent the parent session's full tool set. The earlier
@@ -95,6 +124,14 @@ func RenderAgentFile(slug, name, body string) (string, error) {
 	if strings.TrimSpace(body) == "" {
 		return "", fmt.Errorf("template %q has an empty body — nothing to render into an agent file", slug)
 	}
+	parsedModel, rest, err := splitAgentFrontmatter(body)
+	if err != nil {
+		return "", fmt.Errorf("template %q frontmatter: %w", slug, err)
+	}
+	body = strings.TrimRight(rest, "\r\n")
+	if strings.TrimSpace(body) == "" {
+		return "", fmt.Errorf("template %q has an empty body after frontmatter — nothing to render into an agent file", slug)
+	}
 	expanded, err := ExpandPromptIncludes(body)
 	if err != nil {
 		return "", fmt.Errorf("template %q: %w", slug, err)
@@ -108,11 +145,15 @@ func RenderAgentFile(slug, name, body string) (string, error) {
 	if strings.TrimSpace(label) == "" {
 		label = slug
 	}
+	modelLine := parsedModel
+	if modelLine == "" {
+		modelLine = AgentFileModel
+	}
 	var b strings.Builder
 	b.WriteString("---\n")
 	fmt.Fprintf(&b, "name: %s\n", agentName)
 	fmt.Fprintf(&b, "description: bacio dispatched-work subagent for the %q stage. Spawned by the supervisor session on a %s dispatch.\n", label, slug)
-	fmt.Fprintf(&b, "model: %s\n", AgentFileModelForSlug(slug))
+	fmt.Fprintf(&b, "model: %s\n", modelLine)
 	if len(AgentFileSkills) > 0 {
 		fmt.Fprintf(&b, "skills: [%s]\n", strings.Join(AgentFileSkills, ", "))
 	}
