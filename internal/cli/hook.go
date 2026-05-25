@@ -131,6 +131,14 @@ func loadHookContext() (*hookContext, error) {
 	in.SessionID = sid
 
 	if in.CWD != "" {
+		// Restore the original working directory on return so that
+		// the hookContext's lifetime doesn't bleed into the caller's
+		// process — only matters in tests (which share a process), but
+		// good hygiene in production too.
+		origCWD, cwdErr := os.Getwd()
+		if cwdErr == nil {
+			defer func() { _ = os.Chdir(origCWD) }()
+		}
 		if err := os.Chdir(in.CWD); err != nil {
 			return nil, fmt.Errorf("chdir %s: %w", in.CWD, err)
 		}
