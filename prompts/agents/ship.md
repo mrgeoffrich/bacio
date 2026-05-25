@@ -21,6 +21,20 @@ key (e.g. `BACI-42`), referred to below as `<issue_id>`.
 
 Ship `<issue_id>`: merge the PR and deal with any merge issues.
 
+If a PR for this issue doesn't exist yet, open one with `bacio pr create`
+rather than bare `gh pr create` — it labels the PR `bacio:<issue_id>` and
+pre-flights against duplicate PRs from a sibling worker (BACI-163):
+
+```bash
+bacio pr create <issue_id> -- --title "..." --body "..."
+```
+
+Bare `gh pr create` still works, but the wrapped form is the dispatched-worker
+default. On a clean repo it's a no-op extra label; when another worker has
+already opened a PR for the same ticket it refuses with a clear message naming
+the existing PR (pass `--force` to override). On success the URL is funnelled
+through `bacio pr attach` automatically — no separate attach call needed.
+
 ## Close out
 
 1. Drop the worktree's bacio environment with `bacio worktree rm <path> --confirm <slug>` (Claude Code removes the git worktree itself).

@@ -52,6 +52,7 @@ var Registry = []Entry{
 	{"link", "Create a relation (blocks, relates-to, duplicate-of) between two issues.", typeOf[inputs.LinkInput](), inputs.ExampleLink},
 	{"unlink", "Remove all relations between two issues.", typeOf[inputs.UnlinkInput](), inputs.ExampleUnlink},
 
+	{"pr.create", "Open a GitHub PR labelled bacio:<KEY> after pre-flighting for an existing labelled PR (refuses on OPEN/MERGED unless force=true, warns on CLOSED-only). On success the URL is funnelled through `bacio pr attach` so the local DB stays in sync. Shells out to the `gh` CLI — local-only; rejected under --remote.", typeOf[inputs.PRCreateInput](), inputs.ExamplePRCreate},
 	{"pr.attach", "Attach a pull-request URL to an issue.", typeOf[inputs.PRAttachInput](), inputs.ExamplePRAttach},
 	{"pr.detach", "Detach a pull-request URL from an issue.", typeOf[inputs.PRDetachInput](), inputs.ExamplePRDetach},
 
