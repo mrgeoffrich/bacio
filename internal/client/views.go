@@ -159,6 +159,23 @@ type RepoDeletePreview struct {
 	WouldDelete bool                    `json:"would_delete"`
 }
 
+// RepoLinkResult is the payload `bacio repo link` (BACI-112) returns on
+// success or `--dry-run`. The `Repo` field carries the upgraded repo row
+// (post-write on the success path; the projected post-write shape on the
+// dry-run path). `SyncRemoteURL` is the URL of the sync repo whose
+// `repos/<prefix>/` folder owns the phantom — discovered by walking
+// `sync_remotes` and `os.Stat`ing each candidate. `AlreadyLinked` is
+// true when the row's path already equalled the requested path at call
+// time — the call is a no-op in that case, no audit row, no config
+// rewrite. Mirrors the pattern of `RepoDeletePreview` for the dry-run
+// path (one struct shared across rehearsal + commit).
+type RepoLinkResult struct {
+	Repo          *model.Repo `json:"repo"`
+	SyncRemoteURL string      `json:"sync_remote_url"`
+	AlreadyLinked bool        `json:"already_linked"`
+	WouldLink     bool        `json:"would_link,omitempty"`
+}
+
 type DocumentUnlinkPreview struct {
 	Filename    string `json:"filename"`
 	Target      string `json:"target"`

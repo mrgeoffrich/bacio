@@ -1827,6 +1827,53 @@ export async function setupSync(
   throw new Error(msg);
 }
 
+// ---------- Phantom-repo linking (BACI-112) ----------
+//
+// The cross-transport shape — mirrors RepoLinkResultDTO in
+// desktop/settingsservice.go and api.ts's re-export. The HTTP handler
+// returns snake_case JSON; we reshape to camelCase on the way out so
+// the React modal consumes the same shape under both transports.
+
+export interface RepoLinkResult {
+  prefix: string;
+  path: string;
+  syncRemoteUrl: string;
+  alreadyLinked: boolean;
+}
+
+// RepoLinkResultDTO is the cross-transport alias used by SyncView /
+// PhantomLinkModal — matches the api.ts re-export. The HTTP wire shape
+// stays snake_case in line with the rest of api.http.ts.
+export type RepoLinkResultDTO = RepoLinkResult;
+
+interface RepoLinkResultApi {
+  repo: { prefix: string; path: string };
+  sync_remote_url: string;
+  already_linked?: boolean;
+  would_link?: boolean;
+}
+
+// linkPhantomRepo (BACI-112) — POST /repos/{prefix}/link with body
+// {path: ...}. Mirrors the Wails-bound seam in api.ts. Errors come
+// back as plain Error from call(); the caller renders the human
+// message inline.
+export async function linkPhantomRepo(
+  prefix: string,
+  path: string,
+): Promise<RepoLinkResult> {
+  if (!prefix) throw new Error('repo link: prefix is required');
+  const res = await call<RepoLinkResultApi>(
+    `/repos/${encodeURIComponent(prefix)}/link`,
+    { method: 'POST', body: { path } },
+  );
+  return {
+    prefix: res.repo?.prefix ?? prefix,
+    path: res.repo?.path ?? path,
+    syncRemoteUrl: res.sync_remote_url ?? '',
+    alreadyLinked: !!res.already_linked,
+  };
+}
+
 // ---------- Sync preferences (BACI-89 / BACI-108) ----------
 //
 // The BACI-89 sync.background_enabled toggle, exposed for the

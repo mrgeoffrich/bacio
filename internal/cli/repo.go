@@ -20,7 +20,7 @@ import (
 
 func newRepoCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "repo", Short: "Inspect tracked repos"}
-	cmd.AddCommand(repoListCmd(), repoShowCmd(), repoRmCmd())
+	cmd.AddCommand(repoListCmd(), repoShowCmd(), repoRmCmd(), repoLinkCmd())
 	return cmd
 }
 
@@ -277,4 +277,132 @@ func toRepoDeletePreview(p *client.RepoDeletePreview) *repoDeletePreview {
 		Cascade:     p.Cascade,
 		WouldDelete: p.WouldDelete,
 	}
+}
+
+const repoLinkLongHelp = `Bind a phantom repo (a sync_clone-imported row with no local path) to a
+local working tree.
+
+A phantom repo is created by ` + "`bacio sync clone`" + ` when it imports a
+` + "`repos/<prefix>/`" + ` folder for which this machine has no local DB row.
+This verb makes the link explicit — surfaces the same path that today
+fires implicitly when bacio happens to run from inside the matching
+checkout (cli/context.go).
+
+The path must be an absolute path to an existing git working tree.
+After linking, the project's ` + "`.bacio/config.yaml`" + ` is written
+pointing at the sync repo's remote URL — the path bacio sync uses on
+every subsequent run from this checkout.
+
+Idempotent: re-linking to the same path is a no-op (no audit row, no
+config rewrite). If the path is already bound to another repo, the call
+errors loudly.
+
+In remote mode (--remote), the path is on the server running ` + "`bacio api`" + `,
+NOT on this machine.`
+
+func repoLinkCmd() *cobra.Command {
+	var rawInput string
+	cmd := &cobra.Command{
+		Use:   "link [PREFIX] [PATH]",
+		Short: "Bind a phantom repo to a local working tree (writes .bacio/config.yaml)",
+		Long:  repoLinkLongHelp,
+		Args:  cobra.RangeArgs(0, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			raw, err := parseJSONInput(cmd, args, rawInput)
+			if err != nil {
+				return err
+			}
+			var prefix, path string
+			switch {
+			case raw != nil:
+				in, _, err := inputio.DecodeStrict[inputs.RepoLinkInput](raw)
+				if err != nil {
+					return err
+				}
+				if strings.TrimSpace(in.Prefix) == "" {
+					return fmt.Errorf("prefix is required")
+				}
+				if strings.TrimSpace(in.Path) == "" {
+					return fmt.Errorf("path is required")
+				}
+				prefix = in.Prefix
+				path = in.Path
+			case len(args) == 2:
+				prefix = args[0]
+				path = args[1]
+			default:
+				return fmt.Errorf("requires <PREFIX> <PATH> positionals or --json")
+			}
+			// Expand `.` (and relative paths in general) to an absolute
+			// path BEFORE openClient(). openClient() detects the current
+			// git repo and may trigger the implicit cwd-driven phantom
+			// upgrade in resolveRepo — if we passed `.` straight through,
+			// the explicit-link call would race with the implicit one and
+			// the row would already be upgraded by the time we look it
+			// up. Resolving here keeps the verb deterministic.
+			abs, err := filepath.Abs(path)
+			if err != nil {
+				return fmt.Errorf("resolve path %q: %w", path, err)
+			}
+			path = abs
+			return linkPhantomRepo(prefix, path)
+		},
+	}
+	addInputFlag(cmd, &rawInput)
+	return cmd
+}
+
+func linkPhantomRepo(prefix, path string) error {
+	c, err := openClient()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	result, err := c.LinkPhantomRepo(context.Background(), prefix, path, opts.dryRun)
+	if err != nil {
+		var linkErr *client.RepoLinkError
+		if errors.As(err, &linkErr) {
+			// Render a verb-tailored hint per kind so the user sees the
+			// concrete next step, not just the generic error string.
+			return formatRepoLinkError(linkErr)
+		}
+		return err
+	}
+	if opts.dryRun {
+		return emitDryRun(result)
+	}
+	if result.AlreadyLinked {
+		return ok("repo %s already linked to %s (no changes)", result.Repo.Prefix, result.Repo.Path)
+	}
+	return ok("repo %s linked to %s (sync remote: %s)",
+		result.Repo.Prefix, result.Repo.Path, result.SyncRemoteURL)
+}
+
+// formatRepoLinkError renders a per-kind text alert so the user / agent
+// sees the right next step. Mirrors the kind→hint mapping the HTTP
+// handler uses; the JSON-mode path emits the typed envelope so callers
+// can structurally branch.
+func formatRepoLinkError(e *client.RepoLinkError) error {
+	if opts.output == outputJSON {
+		envelope := struct {
+			Error          string `json:"error"`
+			Kind           string `json:"kind"`
+			Prefix         string `json:"prefix,omitempty"`
+			Path           string `json:"path,omitempty"`
+			CurrentPath    string `json:"current_path,omitempty"`
+			ExistingPrefix string `json:"existing_prefix,omitempty"`
+			Message        string `json:"message"`
+		}{
+			Error:          "repo_link_refused",
+			Kind:           e.Kind,
+			Prefix:         e.Prefix,
+			Path:           e.Path,
+			CurrentPath:    e.CurrentPath,
+			ExistingPrefix: e.ExistingPrefix,
+			Message:        e.Error(),
+		}
+		_ = emit(envelope)
+		return fmt.Errorf("aborted: %s", e.Error())
+	}
+	return fmt.Errorf("%s", e.Error())
 }

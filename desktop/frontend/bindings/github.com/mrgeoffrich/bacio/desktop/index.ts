@@ -49,6 +49,7 @@ export {
     RelationsDTO,
     RenameEntryDTO,
     RenumberEntryDTO,
+    RepoLinkResultDTO,
     SetupSyncIn,
     SyncPreferencesDTO,
     SyncRegistryDTO,

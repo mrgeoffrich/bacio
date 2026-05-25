@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Icon from './Icon.jsx';
 import SyncRepoCard from './SyncRepoCard.jsx';
 import SyncSetupModal from './SyncSetupModal.jsx';
+import PhantomLinkModal from './PhantomLinkModal.jsx';
 import { reportError } from '../errors';
 import * as api from '../api';
 
@@ -33,20 +34,29 @@ export default function SyncView({ onClose }) {
   // registry.unsyncedProjects happens at render time so the row stays
   // resolvable even as the registry refreshes underneath the modal.
   const [openSetupForPrefix, setOpenSetupForPrefix] = useState(null);
+  // BACI-112: phantom row whose Link local… button was clicked, or
+  // null when the modal is closed. We carry the row object verbatim
+  // (not just the prefix) because the row is a member of one sync
+  // repo's projects array; resolving "which sync repo it belonged to"
+  // after a registry refresh would be one extra lookup the modal
+  // doesn't need to do.
+  const [phantomToLink, setPhantomToLink] = useState(null);
 
   // Page-level Escape closes the view. When the BACI-111 setup modal
   // is open, Radix Dialog handles Escape for the modal itself and the
   // event still bubbles — guard against closing the underlying view so
-  // the user doesn't lose the whole Sync screen.
+  // the user doesn't lose the whole Sync screen. Same guard for the
+  // BACI-112 phantom-link modal.
   useEffect(() => {
     const onKey = (e) => {
       if (e.key !== 'Escape') return;
       if (openSetupForPrefix !== null) return;
+      if (phantomToLink !== null) return;
       onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose, openSetupForPrefix]);
+  }, [onClose, openSetupForPrefix, phantomToLink]);
 
   const refreshRegistry = useCallback((opts = {}) => {
     api.getSyncRegistry()
@@ -168,7 +178,11 @@ export default function SyncView({ onClose }) {
             </div>
           ) : (
             syncRepos.map(entry => (
-              <SyncRepoCard key={entry.remoteUrl} entry={entry} />
+              <SyncRepoCard
+                key={entry.remoteUrl}
+                entry={entry}
+                onLinkPhantom={setPhantomToLink}
+              />
             ))
           )}
         </section>
@@ -216,6 +230,19 @@ export default function SyncView({ onClose }) {
         onClose={() => setOpenSetupForPrefix(null)}
         onDone={() => {
           setOpenSetupForPrefix(null);
+          refreshRegistry();
+        }}
+      />
+
+      {/* BACI-112: phantom-repo link modal. Mounts when a phantom row's
+          "Link local…" button has been clicked; on success the row is
+          no longer a phantom and we refresh the registry so the card
+          re-renders with the linked status. */}
+      <PhantomLinkModal
+        phantom={phantomToLink}
+        onClose={() => setPhantomToLink(null)}
+        onSubmitted={() => {
+          setPhantomToLink(null);
           refreshRegistry();
         }}
       />

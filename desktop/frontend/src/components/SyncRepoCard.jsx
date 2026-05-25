@@ -39,12 +39,12 @@ function pillTitleFor(entry) {
 // SyncRepoCard is a presentational sub-component used by SyncView to
 // render one `sync_remotes` registry entry: header (URL-derived label,
 // the remote URL in monospace, the status pill), the local clone path,
-// and a nested project list. Phantom rows surface a disabled `Link
-// local…` button — wired in BACI-112; today the button is muted with a
-// "Coming in BACI-112" tooltip.
+// and a nested project list.
 //
-// onLinkPhantom is reserved for BACI-112: when undefined (the v1
-// default), the Link button stays disabled.
+// Phantom rows surface a `Link local…` button that opens
+// PhantomLinkModal via the onLinkPhantom callback (BACI-112). When
+// onLinkPhantom is undefined (a hypothetical read-only caller), the
+// button stays disabled with the legacy "Coming in BACI-112" tooltip.
 export default function SyncRepoCard({ entry, onLinkPhantom }) {
   const projects = entry.projects ?? [];
   return (
@@ -79,18 +79,27 @@ export default function SyncRepoCard({ entry, onLinkPhantom }) {
                 <span className="mk-sync-project-name">{p.name || '—'}</span>
                 <span className={stateClass}>{p.status}</span>
                 {isPhantom && (
-                  <Tooltip label="Coming in BACI-112">
-                    <span>
-                      <button
-                        className="mk-tmpl-reset"
-                        type="button"
-                        disabled
-                        onClick={onLinkPhantom ? () => onLinkPhantom(p) : undefined}
-                      >
-                        Link local…
-                      </button>
-                    </span>
-                  </Tooltip>
+                  onLinkPhantom ? (
+                    <button
+                      className="mk-tmpl-reset"
+                      type="button"
+                      onClick={() => onLinkPhantom(p)}
+                    >
+                      Link local…
+                    </button>
+                  ) : (
+                    <Tooltip label="Coming in BACI-112">
+                      <span>
+                        <button
+                          className="mk-tmpl-reset"
+                          type="button"
+                          disabled
+                        >
+                          Link local…
+                        </button>
+                      </span>
+                    </Tooltip>
+                  )
                 )}
               </li>
             );

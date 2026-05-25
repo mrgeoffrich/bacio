@@ -44,6 +44,7 @@ import {
   CollisionPreviewDTO,
   RenumberEntryDTO,
   RenameEntryDTO,
+  RepoLinkResultDTO,
 } from '../bindings/github.com/mrgeoffrich/bacio/desktop';
 import { ClaimDTO } from '../bindings/github.com/mrgeoffrich/bacio/internal/agentcards';
 // BACI-145: re-export the WaitingState / WaitingKind enums from the
@@ -52,7 +53,7 @@ import { ClaimDTO } from '../bindings/github.com/mrgeoffrich/bacio/internal/agen
 // scattered through the kanban code).
 import { WaitingState, WaitingKind } from '../bindings/github.com/mrgeoffrich/bacio/internal/boardcards';
 
-export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, BoardPreferencesDTO, WaitingState, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO, SyncSetupDTO, CollisionPreviewDTO, RenumberEntryDTO, RenameEntryDTO };
+export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, BoardPreferencesDTO, WaitingState, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO, SyncSetupDTO, CollisionPreviewDTO, RenumberEntryDTO, RenameEntryDTO, RepoLinkResultDTO };
 
 // BACI-108: cross-transport aliases — components import from `./api`
 // and stay unaware of whether they're on the Wails or HTTP seam. The
@@ -72,6 +73,11 @@ export type UnsyncedProject = UnsyncedProjectDTO;
 // modal `instanceof`-checks it to advance to the step-2 confirm.
 export type SyncSetupPayload = SetupSyncInDTO;
 export type SyncSetupResult = SyncSetupDTO;
+// BACI-112: cross-transport alias for the phantom-repo link result.
+// The web bundle's api.http.ts re-exports the same name from its own
+// TS-only shape so SyncView / PhantomLinkModal stays unaware of the
+// underlying transport.
+export type RepoLinkResult = RepoLinkResultDTO;
 export { WaitingKind };
 
 // SyncSetupCollisionError carries the typed CollisionPreviewDTO so the
@@ -650,6 +656,21 @@ export async function setupSync(
     throw new SyncSetupCollisionError(result);
   }
   return result;
+}
+
+// linkPhantomRepo (BACI-112) binds a phantom repo (a sync_clone-
+// imported row with no local path) to a local working tree. Drives
+// the PhantomLinkModal on the desktop / web SyncView. Errors come
+// back as plain Error here; the caller renders the message inline.
+export async function linkPhantomRepo(
+  prefix: string,
+  path: string,
+): Promise<RepoLinkResult> {
+  try {
+    return await SettingsService.LinkPhantomRepo(prefix, path);
+  } catch (err) {
+    throw normalize(err);
+  }
 }
 
 // getLeaderStatus returns the current UI leader-election state synchronously.

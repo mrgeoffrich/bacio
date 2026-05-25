@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
+	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/inputio"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
@@ -204,6 +205,72 @@ func (d deps) handleReposDelete(w http.ResponseWriter, r *http.Request) {
 func repoCascadeDetails(repo *model.Repo, c store.RepoCascadeCounts) string {
 	return fmt.Sprintf("%s (%d issues, %d comments, %d features, %d documents, %d history)",
 		repo.Name, c.Issues, c.Comments, c.Features, c.Documents, c.History)
+}
+
+// handleRepoLink (BACI-112) implements `POST /repos/{prefix}/link` —
+// the HTTP shim around client.LinkPhantomRepo. Body is the
+// `RepoLinkInput` payload (`{path: ...}`); `?dry_run=true` short-
+// circuits to the projection. Typed RepoLinkError refusals are mapped
+// to specific status codes so the JS / CLI sides can branch on `kind`
+// without string-matching the human message.
+//
+// Status mapping (matches the local client's typed errors 1:1):
+//
+//	200 OK            — happy path, RepoLinkResult JSON body
+//	200 OK + dry_run  — projection only, no DB write
+//	404 not_found     — no such prefix
+//	409 conflict      — not_phantom / path_already_bound / no_owning_sync_repo
+//	400 invalid_input — path_not_absolute / path_not_exists / path_not_git
+//
+// Every error envelope embeds the `kind` string in `details` so the
+// remote client can rehydrate a *RepoLinkError without string-matching.
+func (d deps) handleRepoLink(w http.ResponseWriter, r *http.Request) {
+	prefix := strings.ToUpper(r.PathValue("prefix"))
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	in, _, err := inputio.DecodeStrict[inputs.RepoLinkInput](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	actor := ActorFromContext(r.Context())
+	c := client.NewLocalFromStore(d.store, actor)
+	result, err := c.LinkPhantomRepo(r.Context(), prefix, in.Path, isDryRun(r))
+	if err != nil {
+		var linkErr *client.RepoLinkError
+		if errors.As(err, &linkErr) {
+			details := map[string]any{
+				"kind":   linkErr.Kind,
+				"prefix": linkErr.Prefix,
+				"path":   linkErr.Path,
+			}
+			if linkErr.CurrentPath != "" {
+				details["current_path"] = linkErr.CurrentPath
+			}
+			if linkErr.ExistingPrefix != "" {
+				details["existing_prefix"] = linkErr.ExistingPrefix
+			}
+			switch linkErr.Kind {
+			case "not_phantom", "path_already_bound", "no_owning_sync_repo":
+				writeError(w, http.StatusConflict, "conflict", linkErr.Error(), details)
+			case "path_not_absolute", "path_not_exists", "path_not_git":
+				writeError(w, http.StatusBadRequest, "invalid_input", linkErr.Error(), details)
+			default:
+				writeError(w, http.StatusInternalServerError, "internal", linkErr.Error(), details)
+			}
+			return
+		}
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if isDryRun(r) {
+		writeDryRun(w, http.StatusOK, result)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {

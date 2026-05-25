@@ -531,6 +531,41 @@ func buildSyncSetupDTO(res *client.SyncSetupResult) SyncSetupDTO {
 	return dto
 }
 
+// RepoLinkResultDTO is the camelCase Wails-side outcome of
+// LinkPhantomRepo (BACI-112). Mirrors client.RepoLinkResult — the
+// upgraded repo row plus the URL of the sync repo whose
+// repos/<prefix>/ folder owns the phantom, plus AlreadyLinked which
+// is true on an idempotent re-link.
+type RepoLinkResultDTO struct {
+	Prefix        string `json:"prefix"`
+	Path          string `json:"path"`
+	SyncRemoteURL string `json:"syncRemoteUrl"`
+	AlreadyLinked bool   `json:"alreadyLinked"`
+}
+
+// LinkPhantomRepo (BACI-112) is the Wails-side entry point for the
+// desktop / web PhantomLinkModal. Thin shim over
+// client.LinkPhantomRepo. dryRun is not exposed on the UI side; if a
+// future "rehearse" affordance is wanted it can pass the bool through.
+// On a typed-error refusal (client.RepoLinkError) the human message is
+// returned verbatim so the modal can render it inline — the kind
+// classification isn't exposed across the Wails bridge today; the modal
+// just renders the message.
+func (s *SettingsService) LinkPhantomRepo(prefix, path string) (RepoLinkResultDTO, error) {
+	ctx := context.Background()
+	result, err := s.client.LinkPhantomRepo(ctx, prefix, path, false)
+	if err != nil {
+		return RepoLinkResultDTO{}, err
+	}
+	dto := RepoLinkResultDTO{
+		Prefix:        result.Repo.Prefix,
+		Path:          result.Repo.Path,
+		SyncRemoteURL: result.SyncRemoteURL,
+		AlreadyLinked: result.AlreadyLinked,
+	}
+	return dto, nil
+}
+
 // GetSyncRegistry returns the registry of sync repos this machine
 // knows plus the tracked project repos that aren't yet attached. Backs
 // the BACI-108 standalone Sync view on desktop. The same payload ships
