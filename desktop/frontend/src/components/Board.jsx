@@ -46,7 +46,7 @@ function persistBoardScroll(repo, offset) {
   }
 }
 
-export default function Board({ activeBoard, columns, cards, promptConfig, onMoveCard, onOpenCard, onOpenIssue, onDispatchFromCard, onCancelWaitingCard, onAfterQuestionResolved, onQuickEval, pinnedKeys, onTogglePin, onSetFollowOn, onCancelFollowOn, hoveredKey, jumpKey }) {
+export default function Board({ activeBoard, columns, cards, promptConfig, onMoveCard, onOpenCard, onOpenIssue, onDispatchFromCard, onCancelWaitingCard, onAfterQuestionResolved, onQuickEval, pinnedKeys, onTogglePin, onSetFollowOn, onCancelFollowOn, hoveredKey, jumpKey, flyingShipKey }) {
   const [dragKey, setDragKey] = useState(null);
   const [overCol, setOverCol] = useState(null);
   // BACI-53: the kanban card "? N" pill opens the shared
@@ -164,7 +164,19 @@ export default function Board({ activeBoard, columns, cards, promptConfig, onMov
   return (
     <div className="mk-board" ref={boardRef} onScroll={onBoardScroll}>
       {columns.map(col => {
-        const colCards = cards.filter(c => c.column === col.state);
+        // BACI-198: filter the in-flight card out of the Done column
+        // while the BACI-193 ship-flourish is animating. The card has
+        // already polled in as `column: done`, so it would otherwise
+        // mount in this column with the same Motion `layoutId` as the
+        // ShippedPopover's destination slot — three live matches in
+        // total (exiting card in source column via popLayout, mounting
+        // Done card, popover slot) make the FLIP target unpredictable,
+        // so the card was just as likely to land in the Done column
+        // as in the pill. Hiding the Done instance during flight
+        // leaves the popover slot as the single destination. It pops
+        // back into Done when `flyingShipKey` clears (after
+        // `onFlightDone` in App / shipFlourish).
+        const colCards = cards.filter(c => c.column === col.state && c.key !== flyingShipKey);
         // BACI-77 + BACI-188: a column collapses to the narrow vertical-
         // title strip when it's empty (the original behaviour) OR when
         // the user has explicitly collapsed it via the header chevron.

@@ -241,18 +241,24 @@ body { margin: 0; }
 @media (prefers-reduced-motion: reduce) {
   .mk-shipped-pill.is-flash { animation: none; }
 }
-/* BACI-193: the invisible destination slot Motion uses to anchor the
-   shared-element flight. Sits absolutely positioned inside the pill;
-   the actual visual is the FLIPing card-shape Motion paints from the
-   leaving card's layoutId. 16×16 keeps the destination near the
-   pill's centre — Motion measures the slot to plan the path. */
+/* BACI-193 + BACI-198: the destination slot Motion uses to anchor the
+   shared-element flight. Sits absolutely positioned inside the pill.
+   Motion's `layoutId` bridging interpolates the source element's
+   position, size, AND visual properties toward this destination —
+   so the BACI-193 `opacity: 0` here was making the flying card fade
+   to invisible mid-flight (BACI-198), and a 16×16 box compressed the
+   ~280×100 card to a dot. The slot itself has no children / no
+   background so it stays visually invisible without an explicit
+   opacity; sizing it to the pill's own bounds keeps the FLIP path
+   readable rather than a dramatic shrink to a dot. pointer-events:
+   none so the slot doesn't steal clicks from the pill button it sits
+   inside. */
 .mk-shipped-flight-target {
   position: absolute;
   top: 50%; left: 50%;
-  width: 16px; height: 16px;
+  width: 100%; height: 100%;
   transform: translate(-50%, -50%);
   pointer-events: none;
-  opacity: 0;
 }
 /* A taken card is held by an agent — bolder accent border. Drag is
    disabled (see KanbanCard.jsx `draggable={!taken && !waiting}`), so the

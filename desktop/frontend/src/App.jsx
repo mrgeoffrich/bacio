@@ -1012,6 +1012,7 @@ export default function App() {
             onCancelFollowOn={cancelFollowOnFromCard}
             hoveredKey={hoveredKey}
             jumpKey={jumpKey}
+            flyingShipKey={flyingShipKey}
           />
         </ErrorBoundary>
       )}
