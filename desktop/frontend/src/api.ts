@@ -46,6 +46,7 @@ import {
   RenumberEntryDTO,
   RenameEntryDTO,
   RepoLinkResultDTO,
+  ShippedIssueDTO,
 } from '../bindings/github.com/mrgeoffrich/bacio/desktop';
 import { ClaimDTO } from '../bindings/github.com/mrgeoffrich/bacio/internal/agentcards';
 // BACI-145: re-export the WaitingState / WaitingKind enums from the
@@ -54,7 +55,7 @@ import { ClaimDTO } from '../bindings/github.com/mrgeoffrich/bacio/internal/agen
 // scattered through the kanban code).
 import { WaitingState, WaitingKind } from '../bindings/github.com/mrgeoffrich/bacio/internal/boardcards';
 
-export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, BoardPreferencesDTO, ArchivePreferencesDTO, WaitingState, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO, SyncSetupDTO, CollisionPreviewDTO, RenumberEntryDTO, RenameEntryDTO, RepoLinkResultDTO };
+export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, BoardPreferencesDTO, ArchivePreferencesDTO, WaitingState, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO, SyncSetupDTO, CollisionPreviewDTO, RenumberEntryDTO, RenameEntryDTO, RepoLinkResultDTO, ShippedIssueDTO };
 
 // BACI-108: cross-transport aliases — components import from `./api`
 // and stay unaware of whether they're on the Wails or HTTP seam. The
@@ -451,6 +452,23 @@ export async function listHistory(
 ): Promise<HistoryPage> {
   try {
     return await HistoryService.ListHistory(repoPrefix, page, pageSize);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// listShippedIssues (BACI-187) returns the topbar shipping-log popover
+// rows for one repo, newest-first. `sinceDays` clamps the window (0 =
+// the server's default ~30 days); `limit` caps the row count (0 = the
+// server's default 20, max 100). The HTTP twin in api.http.ts MUST
+// keep the same name + shape so callers stay transport-agnostic.
+export async function listShippedIssues(
+  repoPrefix: string,
+  sinceDays: number,
+  limit: number,
+): Promise<ShippedIssueDTO[]> {
+  try {
+    return await BoardService.ListShipped(repoPrefix, sinceDays, limit);
   } catch (err) {
     throw normalize(err);
   }

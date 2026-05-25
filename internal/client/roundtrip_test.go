@@ -645,3 +645,51 @@ func TestRoundTripPromptTemplates(t *testing.T) {
 		t.Fatalf("reset did not revert: got %v want %v", postReset, want)
 	}
 }
+
+// TestRoundTripListShippedIssues — BACI-187. Local + remote backends
+// observe the same shipped list (state='done' AND terminal_at IS NOT
+// NULL, newest-first). Cancelled and open rows are excluded; the
+// remote DTO decode preserves key + title + terminal_at on each row.
+func TestRoundTripListShippedIssues(t *testing.T) {
+	p := newPair(t)
+	defer p.cleanup()
+	ctx := context.Background()
+
+	// Seed: one done, one cancelled, one open.
+	done, err := p.local.CreateIssue(ctx, p.repo, inputs.IssueAddInput{Title: "done"}, false)
+	if err != nil {
+		t.Fatalf("create done: %v", err)
+	}
+	cancel, err := p.local.CreateIssue(ctx, p.repo, inputs.IssueAddInput{Title: "cancelled"}, false)
+	if err != nil {
+		t.Fatalf("create cancelled: %v", err)
+	}
+	if _, err := p.local.CreateIssue(ctx, p.repo, inputs.IssueAddInput{Title: "open"}, false); err != nil {
+		t.Fatalf("create open: %v", err)
+	}
+	if _, err := p.local.SetIssueState(ctx, p.repo, done.Key, model.StateDone, false); err != nil {
+		t.Fatalf("ship done: %v", err)
+	}
+	if _, err := p.local.SetIssueState(ctx, p.repo, cancel.Key, model.StateCancelled, false); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+
+	for label, c := range map[string]client.Client{"local": p.local, "remote": p.remote} {
+		got, err := c.ListShippedIssues(ctx, p.repo, store.ShippedFilter{})
+		if err != nil {
+			t.Fatalf("%s ListShippedIssues: %v", label, err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("%s rows: %d, want 1 (only the done row)", label, len(got))
+		}
+		if got[0].Key != done.Key {
+			t.Fatalf("%s key = %q, want %q", label, got[0].Key, done.Key)
+		}
+		if got[0].Title != "done" {
+			t.Fatalf("%s title = %q, want 'done'", label, got[0].Title)
+		}
+		if got[0].TerminalAt == nil {
+			t.Fatalf("%s row missing TerminalAt", label)
+		}
+	}
+}

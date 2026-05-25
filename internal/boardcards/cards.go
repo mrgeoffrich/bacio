@@ -224,6 +224,14 @@ type BoardCard struct {
 	// of `Taken` state, so eval notes posted on a previously-active
 	// card stay discoverable after the agent releases its claim.
 	EvalCommentCount int `json:"evalCommentCount,omitempty"`
+	// TerminalAt (BACI-187) is the BACI-138 "moved into a terminal
+	// state" timestamp — non-nil on Done / Cancelled cards, nil on
+	// open-state cards. The shipping-log topbar pill derives its
+	// "last 7 days of done" count client-side from the already-polled
+	// `cards` array; passing the timestamp through is the cheapest
+	// way to avoid a second poll loop. Omitempty keeps open cards
+	// lean on the wire — they outnumber done cards on a healthy board.
+	TerminalAt *time.Time `json:"terminalAt,omitempty"`
 }
 
 // BoardCardBlocker (BACI-114) is one open `blocks` edge pointing at
@@ -420,6 +428,7 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 			BlockedBy:          blockedByID[iss.ID],
 			TranscriptDocCount: transcriptCountsByID[iss.ID],
 			EvalCommentCount:   evalCountsByID[iss.ID],
+			TerminalAt:         iss.TerminalAt,
 		})
 	}
 

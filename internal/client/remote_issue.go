@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/model"
@@ -317,4 +318,65 @@ func (c *remoteClient) archiveIssue(ctx context.Context, repo *model.Repo, key s
 		return nil, err
 	}
 	return &out, nil
+}
+
+// ListShippedIssues (BACI-187) — GET /repos/{prefix}/shipped. Hits the
+// REST endpoint with the popover's typical (since, limit) shape and
+// decodes the lean DTO list into sparse *model.Issue rows. PR URLs,
+// feature emoji, etc. that ride the DTO but not the Issue struct are
+// dropped on this path — the remote consumer today is the CLI client,
+// which doesn't render a PR chip. The desktop / web consumers always
+// run against the local backend (or talk directly to the HTTP endpoint
+// from the browser via api.http.ts) so they keep the full DTO shape.
+func (c *remoteClient) ListShippedIssues(ctx context.Context, repo *model.Repo, f store.ShippedFilter) ([]*model.Issue, error) {
+	if repo == nil {
+		return nil, fmt.Errorf("ListShippedIssues requires a repo")
+	}
+	q := url.Values{}
+	if f.Limit > 0 {
+		q.Set("limit", fmt.Sprintf("%d", f.Limit))
+	}
+	if f.Since != nil {
+		// Format the duration as a Lookback-compatible string. The
+		// remote handler parses ?since= back through timeparse.Lookback
+		// — `h` is the lowest-common-denominator unit it accepts.
+		hours := int(time.Since(*f.Since).Hours())
+		if hours < 1 {
+			hours = 1
+		}
+		q.Set("since", fmt.Sprintf("%dh", hours))
+	}
+	type shippedDTO struct {
+		Key          string    `json:"key"`
+		Title        string    `json:"title"`
+		TerminalAt   time.Time `json:"terminalAt"`
+		Tags         []string  `json:"tags"`
+		FeatureSlug  string    `json:"featureSlug"`
+		FeatureEmoji string    `json:"featureEmoji"`
+	}
+	var raw []shippedDTO
+	if err := c.do(ctx, http.MethodGet, "/repos/"+repo.Prefix+"/shipped", q, nil, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]*model.Issue, 0, len(raw))
+	for _, d := range raw {
+		prefix, num, err := store.ParseIssueKey(d.Key)
+		if err != nil {
+			return nil, fmt.Errorf("ListShippedIssues: bad key %q from remote: %w", d.Key, err)
+		}
+		t := d.TerminalAt
+		iss := &model.Issue{
+			Key:          d.Key,
+			Number:       num,
+			Title:        d.Title,
+			State:        model.StateDone,
+			Tags:         d.Tags,
+			FeatureSlug:  d.FeatureSlug,
+			FeatureEmoji: d.FeatureEmoji,
+			TerminalAt:   &t,
+		}
+		_ = prefix // prefix is implicit in repo.Prefix; Issue.RepoID stays zero on the remote path.
+		out = append(out, iss)
+	}
+	return out, nil
 }

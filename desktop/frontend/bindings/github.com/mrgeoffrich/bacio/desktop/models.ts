@@ -1535,6 +1535,54 @@ export class SetupSyncIn {
 }
 
 /**
+ * ShippedIssueDTO is one row in the BACI-187 shipping-log popover.
+ * Lean by design — the popover renders key + title + a relative date
+ * chip + tags + an optional PR chip. The DTO shape mirrors the HTTP
+ * /repos/{prefix}/shipped response so the React side imports the
+ * same type from either api.ts (Wails) or api.http.ts (HTTP) without
+ * reshape.
+ */
+export class ShippedIssueDTO {
+    "key": string;
+    "title": string;
+    "terminalAt": time$0.Time;
+    "tags": string[];
+    "featureSlug"?: string;
+    "featureEmoji"?: string;
+    "prUrl"?: string;
+
+    /** Creates a new ShippedIssueDTO instance. */
+    constructor($$source: Partial<ShippedIssueDTO> = {}) {
+        if (!("key" in $$source)) {
+            this["key"] = "";
+        }
+        if (!("title" in $$source)) {
+            this["title"] = "";
+        }
+        if (!("terminalAt" in $$source)) {
+            this["terminalAt"] = null;
+        }
+        if (!("tags" in $$source)) {
+            this["tags"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ShippedIssueDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ShippedIssueDTO {
+        const $$createField3_0 = $$createType24;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("tags" in $$parsedSource) {
+            $$parsedSource["tags"] = $$createField3_0($$parsedSource["tags"]);
+        }
+        return new ShippedIssueDTO($$parsedSource as Partial<ShippedIssueDTO>);
+    }
+}
+
+/**
  * SyncPreferencesDTO is the BACI-89 background-sync toggle shaped for
  * the desktop Sync view. Mirrors BoardPreferencesDTO / DisplayPreferencesDTO.
  */

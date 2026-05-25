@@ -1723,3 +1723,142 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   text-transform: uppercase; font-size: 10px; letter-spacing: .04em;
   color: var(--fg-3);
 }
+
+/* ============================================================
+   Shipped popover (BACI-187) — topbar pill + anchored menu of
+   recently-done issues. Pill shape mirrors .mk-sync-badge above so
+   the topbar reads as a consistent strip of affordances; menu shape
+   mirrors the .mk-repo-picker-menu recipe for the same reason.
+   ============================================================ */
+.mk-shipped-popover-root { position: relative; flex-shrink: 0; }
+.mk-shipped-pill {
+  appearance: none; border: 0; font: inherit;
+  background: var(--status-done-bg);
+  color: var(--status-done);
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out),
+              filter var(--dur-fast) var(--ease-out);
+}
+.mk-shipped-pill:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-1);
+  filter: brightness(1.04);
+}
+.mk-shipped-pill:active:not(:disabled) { transform: translateY(0); box-shadow: none; }
+.mk-shipped-pill:focus-visible {
+  outline: 1px dotted var(--border-focus); outline-offset: 2px;
+}
+.mk-shipped-pill:disabled {
+  cursor: default; opacity: 0.45;
+}
+
+.mk-shipped-popover {
+  position: absolute; top: calc(100% + 6px); right: 0;
+  width: 360px; max-height: 440px;
+  background: var(--paper);
+  border: 1px solid var(--border-1);
+  border-radius: 10px;
+  box-shadow: var(--shadow-3);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  z-index: 20;
+  animation: mk-pop-y var(--dur-medium) var(--ease-out);
+}
+.mk-shipped-popover-header {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-1);
+  font-size: 12px; font-weight: 600;
+  color: var(--fg-2);
+}
+.mk-shipped-popover-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  display: flex; flex-direction: column;
+  /* Soft fade at the bottom edge so the operator can tell there's
+     more to scroll when the list overflows. */
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent);
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent);
+}
+.mk-shipped-popover-empty {
+  padding: 16px 12px;
+  font-size: 12px;
+  color: var(--fg-3);
+  text-align: center;
+}
+.mk-shipped-popover-error-detail {
+  margin-top: 6px;
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--status-blocked);
+  word-break: break-word;
+}
+
+.mk-shipped-row {
+  appearance: none; border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 4px;
+  border-bottom: 1px solid var(--border-1);
+  cursor: pointer;
+  font: inherit; color: var(--fg-1);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.mk-shipped-row:last-child { border-bottom: 0; }
+.mk-shipped-row:hover { background: var(--bg-2, var(--ink-50)); }
+.mk-shipped-row:focus-visible {
+  outline: 1px dotted var(--border-focus); outline-offset: -2px;
+}
+
+.mk-shipped-row-top {
+  display: flex; align-items: baseline; gap: 8px;
+  width: 100%; min-width: 0;
+}
+.mk-shipped-row-emoji {
+  font-size: 14px; line-height: 1; flex-shrink: 0;
+}
+.mk-shipped-row-key {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .04em;
+  color: var(--fg-3); flex-shrink: 0;
+}
+.mk-shipped-row-title {
+  flex: 1 1 auto;
+  font-size: 13px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  min-width: 0;
+}
+.mk-shipped-row-when {
+  font-size: 11px; color: var(--fg-3); flex-shrink: 0;
+}
+.mk-shipped-row-meta {
+  display: flex; gap: 4px; flex-wrap: wrap;
+  /* Indent under the row title — emoji + key width approximation. */
+  padding-left: 0;
+}
+.mk-shipped-row-pr {
+  background: var(--status-review-bg);
+  color: var(--status-review);
+}
+
+/* Skeleton rows shown while the first fetch is in flight. */
+.mk-shipped-row.is-skeleton {
+  pointer-events: none;
+  cursor: default;
+}
+.mk-shipped-row.is-skeleton .mk-shipped-row-key {
+  display: inline-block; width: 48px; height: 10px;
+  background: var(--border-1); border-radius: 4px;
+}
+.mk-shipped-row.is-skeleton .mk-shipped-row-title {
+  display: inline-block; height: 12px;
+  background: var(--border-1); border-radius: 4px;
+}
+
+.mk-link {
+  appearance: none; border: 0; background: transparent;
+  color: var(--accent, #3b82f6);
+  cursor: pointer; padding: 0; font: inherit;
+  text-decoration: underline;
+}
+.mk-link:hover { filter: brightness(0.9); }

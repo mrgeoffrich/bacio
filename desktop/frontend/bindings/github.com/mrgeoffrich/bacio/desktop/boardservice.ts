@@ -259,6 +259,19 @@ export function ListColumns(): $CancellablePromise<$models.BoardColumn[]> {
 }
 
 /**
+ * ListShipped (BACI-187) returns the recently-shipped issues for one
+ * repo, newest-first. sinceDays clamps the window (0 = the popover's
+ * default ~30 days); limit caps the row count (0 = the popover's
+ * default 20, max 100). Sibling of ListCards in shape — one repo, one
+ * trip, lean rows the popover renders without follow-up fetches.
+ */
+export function ListShipped(repoPrefix: string, sinceDays: number, limit: number): $CancellablePromise<$models.ShippedIssueDTO[]> {
+    return $Call.ByID(3138957880, repoPrefix, sinceDays, limit).then(($result: any) => {
+        return $$createType17($result);
+    });
+}
+
+/**
  * QueueFollowOnDispatch (BACI-180) attaches a dormant follow-on
  * dispatch to the issue's in-flight (parent) dispatch. Mirrors
  * DispatchIssue's shape — same DTO out, repo prefix derivable from
@@ -324,3 +337,5 @@ const $$createType12 = boardcards$0.BoardCard.createFrom;
 const $$createType13 = $Create.Array($$createType12);
 const $$createType14 = $models.BoardColumn.createFrom;
 const $$createType15 = $Create.Array($$createType14);
+const $$createType16 = $models.ShippedIssueDTO.createFrom;
+const $$createType17 = $Create.Array($$createType16);
