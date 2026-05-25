@@ -217,7 +217,7 @@ export default function Board({ activeBoard, columns, cards, promptConfig, onMov
                     aria-label={`Expand ${col.label} column`}
                     onClick={() => expandColumn(col.state)}
                   >
-                    <Icon name="chevrons-right" />
+                    <Icon name="maximize-2" />
                   </button>
                 )}
                 <div className={`mk-col-collapsed-title mk-status-${col.state}`}>
@@ -253,7 +253,7 @@ export default function Board({ activeBoard, columns, cards, promptConfig, onMov
                     aria-label={`Collapse ${col.label} column`}
                     onClick={() => collapseColumn(col.state)}
                   >
-                    <Icon name="chevrons-left" />
+                    <Icon name="minimize-2" />
                   </button>
                 </header>
                 <div className="mk-col-body">
