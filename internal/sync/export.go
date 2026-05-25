@@ -231,6 +231,12 @@ func (e *Engine) exportFeature(w *exportWriter, repo *model.Repo, f *model.Featu
 		{"updated_at", Time(f.UpdatedAt)},
 		{"uuid", Str(f.UUID)},
 	}
+	if f.Emoji != "" {
+		// Emit only when set so pre-BACI-172 features (no glyph) keep
+		// today's hash-stable YAML output — the sync LWW gate keys on
+		// updated_at AND a byte-identical YAML for no-op rows.
+		pairs = append(pairs, Pair{"emoji", Str(f.Emoji)})
+	}
 	if f.ArchivedAt != nil {
 		// Emit only when set so live features keep today's hash-stable
 		// YAML output (BACI-68 sync round-trip).

@@ -58,6 +58,18 @@ export function ListFeatures(repoPrefix: string): $CancellablePromise<$models.Fe
     });
 }
 
+/**
+ * SetFeatureEmoji (BACI-172) updates the per-feature emoji glyph and
+ * returns the refreshed FeatureDetail. Empty string clears the
+ * emoji. Validates at the store boundary so multi-cluster input
+ * (e.g. "FEATURE") surfaces as an error from the client.
+ */
+export function SetFeatureEmoji(repoPrefix: string, slug: string, emoji: string): $CancellablePromise<$models.FeatureDetail> {
+    return $Call.ByID(1872203865, repoPrefix, slug, emoji).then(($result: any) => {
+        return $$createType0($result);
+    });
+}
+
 // Private type creation functions
 const $$createType0 = $models.FeatureDetail.createFrom;
 const $$createType1 = $models.FeatureSummary.createFrom;

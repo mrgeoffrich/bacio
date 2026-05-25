@@ -5,16 +5,25 @@ type FeatureAddInput struct {
 	Title       string `json:"title"`
 	Slug        string `json:"slug,omitempty"`
 	Description string `json:"description,omitempty"`
+	// Emoji (BACI-172) is an optional single-glyph "feature brand" the
+	// kanban renders in the top-left of every card under this feature.
+	// Empty (the default) = no glyph. Validated at the store boundary
+	// to be either empty or exactly one grapheme cluster.
+	Emoji string `json:"emoji,omitempty"`
 }
 
 // FeatureEditInput is the payload for `bacio feature edit --json`.
 //
 //   - title       absent = no change; "" or null = invalid
 //   - description absent = no change; "" or null = clear
+//   - emoji       absent = no change; "" = clear; null = clear
 type FeatureEditInput struct {
 	Slug        string  `json:"slug"`
 	Title       *string `json:"title,omitempty"`
 	Description *string `json:"description,omitempty"`
+	// Emoji (BACI-172) — pointer + presence map distinguishes "absent"
+	// (leave unchanged) from "explicit empty" (clear the glyph).
+	Emoji *string `json:"emoji,omitempty"`
 }
 
 // FeatureRmInput is the payload for `bacio feature rm --json`.

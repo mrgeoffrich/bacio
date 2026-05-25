@@ -351,6 +351,20 @@ export async function getFeature(repoPrefix: string, slug: string): Promise<Feat
   }
 }
 
+// setFeatureEmoji (BACI-172) updates the per-feature emoji glyph
+// rendered on every kanban card under the feature. Empty clears.
+export async function setFeatureEmoji(
+  repoPrefix: string,
+  slug: string,
+  emoji: string,
+): Promise<FeatureDetail> {
+  try {
+    return await FeatureService.SetFeatureEmoji(repoPrefix, slug, emoji);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
 // addFeatureComment posts a chronological handoff comment to a feature
 // (BACI-124) and returns the refreshed feature detail.
 export async function addFeatureComment(

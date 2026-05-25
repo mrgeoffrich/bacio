@@ -43,6 +43,15 @@ export class BoardCard {
     "taken": boolean;
 
     /**
+     * FeatureEmoji (BACI-172) is the per-feature glyph denormalised
+     * from the issue's joined feature row in store.issueSelect. Empty
+     * (and omitted from JSON) when the issue has no feature, or the
+     * feature has no emoji set — the kanban card renders the slot
+     * only when truthy.
+     */
+    "featureEmoji"?: string;
+
+    /**
      * WaitingState (BACI-145) carries the structured reason a card is
      * rendering the spinner — queued without an agent, queued but
      * blocked by the template's concurrency cap, or delivered to the

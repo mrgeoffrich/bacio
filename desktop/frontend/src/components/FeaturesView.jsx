@@ -3,6 +3,7 @@ import { reportError } from '../errors';
 import * as api from '../api';
 import MarkdownView from '../lib/markdownView';
 import CommentComposer from './issue/CommentComposer';
+import FeatureEmojiPicker from './FeatureEmojiPicker.jsx';
 
 // Short date for the feature-list rows and detail metadata line.
 function shortDate(iso) {
@@ -19,10 +20,12 @@ function commentTimestamp(iso) {
   }
 }
 
-// FeaturesView is the desktop feature browser: a read-only two-pane mirror of
-// the TUI's Features tab. The left pane lists the repo's features; the right
-// pane shows the selected feature's description and the issues grouped under
-// it. Features are created/edited via the CLI — nothing here mutates.
+// FeaturesView is the desktop feature browser: a two-pane mirror of
+// the TUI's Features tab. The left pane lists the repo's features; the
+// right pane shows the selected feature's description and the issues
+// grouped under it. BACI-172 widened the right pane with an emoji
+// picker — the per-feature glyph rendered on every kanban card under
+// this feature. Everything else still flows through the CLI.
 export default function FeaturesView({ activeBoard }) {
   const [features, setFeatures] = useState([]);
   const [selected, setSelected] = useState(null); // slug
@@ -93,7 +96,23 @@ export default function FeaturesView({ activeBoard }) {
           <div className="mk-features-empty">Loading…</div>
         ) : detail ? (
           <div className="mk-features-detail">
-            <h2 className="mk-features-title">{detail.title}</h2>
+            <div className="mk-features-title-row">
+              {/* BACI-172: emoji picker sits beside the title.
+                  Clicking opens a Radix DropdownMenu with the curated
+                  grid + a free-form input + a Clear button. */}
+              <FeatureEmojiPicker
+                value={detail.emoji || ''}
+                onSelect={async (next) => {
+                  try {
+                    const updated = await api.setFeatureEmoji(activeBoard, detail.slug, next);
+                    setDetail(updated);
+                  } catch (err) {
+                    reportError(err, { headline: "Couldn't update emoji" });
+                  }
+                }}
+              />
+              <h2 className="mk-features-title">{detail.title}</h2>
+            </div>
             <div className="mk-features-meta">
               <span className="mk-mono">{detail.slug}</span>
               {' · '}created {shortDate(detail.createdAt)}

@@ -822,6 +822,76 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   color: var(--fg-1);
   margin: 0;
 }
+/* BACI-172: title row pairs the emoji picker with the feature title.
+   The picker sits to the left as a clickable swatch; the title
+   wraps to its right. align-items: center so the swatch and the
+   text baseline line up cleanly even at the largest title size. */
+.mk-features-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.mk-features-emoji-btn {
+  appearance: none; -webkit-appearance: none;
+  background: var(--bg-3); border: 1px solid var(--border-1);
+  border-radius: 8px;
+  width: 44px; height: 44px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 24px; line-height: 1;
+  cursor: pointer; flex: none;
+  color: var(--fg-1);
+}
+.mk-features-emoji-btn:hover { background: var(--bg-4); }
+.mk-features-emoji-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.mk-features-emoji-placeholder {
+  color: var(--fg-3); font-size: 22px; font-weight: 300;
+}
+.mk-features-emoji-menu {
+  background: var(--bg-2); border: 1px solid var(--border-1);
+  border-radius: 8px; padding: 8px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+  z-index: 50;
+}
+.mk-features-emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 2px;
+}
+.mk-features-emoji-cell {
+  appearance: none; -webkit-appearance: none;
+  background: transparent; border: 1px solid transparent;
+  border-radius: 6px;
+  width: 32px; height: 32px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 18px; line-height: 1;
+  cursor: pointer; padding: 0;
+}
+.mk-features-emoji-cell:hover { background: var(--bg-3); }
+.mk-features-emoji-cell.is-active {
+  border-color: var(--accent-1);
+  background: var(--bg-3);
+}
+.mk-features-emoji-custom {
+  display: flex; gap: 4px; margin-top: 8px;
+  padding-top: 8px; border-top: 1px solid var(--border-1);
+}
+.mk-features-emoji-input {
+  flex: 1; min-width: 0;
+  background: var(--bg-1); color: var(--fg-1);
+  border: 1px solid var(--border-1); border-radius: 6px;
+  padding: 4px 8px;
+  font-family: var(--font-sans); font-size: var(--text-sm);
+}
+.mk-features-emoji-input:focus { outline: 1px solid var(--accent-1); outline-offset: -1px; }
+.mk-features-emoji-clear {
+  appearance: none; -webkit-appearance: none;
+  background: transparent; color: var(--fg-2);
+  border: 1px solid var(--border-1); border-radius: 6px;
+  padding: 4px 10px;
+  font-family: var(--font-sans); font-size: var(--text-xs);
+  cursor: pointer;
+}
+.mk-features-emoji-clear:hover { background: var(--bg-3); }
 .mk-features-meta {
   font-family: var(--font-sans);
   font-size: var(--text-xs);

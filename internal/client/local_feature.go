@@ -49,9 +49,10 @@ func (c *localClient) CreateFeature(ctx context.Context, repo *model.Repo, in in
 			Slug:        slug,
 			Title:       in.Title,
 			Description: in.Description,
+			Emoji:       in.Emoji,
 		}, nil
 	}
-	f, err := c.store.CreateFeature(repo.ID, slug, in.Title, in.Description)
+	f, err := c.store.CreateFeature(repo.ID, slug, in.Title, in.Description, in.Emoji)
 	if err != nil {
 		return nil, err
 	}
@@ -64,9 +65,9 @@ func (c *localClient) CreateFeature(ctx context.Context, repo *model.Repo, in in
 	return f, nil
 }
 
-func (c *localClient) UpdateFeature(ctx context.Context, repo *model.Repo, slug string, title, description *string, dryRun bool) (*model.Feature, error) {
-	if title == nil && description == nil {
-		return nil, fmt.Errorf("nothing to update; pass title and/or description")
+func (c *localClient) UpdateFeature(ctx context.Context, repo *model.Repo, slug string, title, description, emoji *string, dryRun bool) (*model.Feature, error) {
+	if title == nil && description == nil && emoji == nil {
+		return nil, fmt.Errorf("nothing to update; pass title, description, and/or emoji")
 	}
 	f, err := c.store.GetFeatureBySlug(repo.ID, slug)
 	if err != nil {
@@ -80,9 +81,12 @@ func (c *localClient) UpdateFeature(ctx context.Context, repo *model.Repo, slug 
 		if description != nil {
 			projected.Description = *description
 		}
+		if emoji != nil {
+			projected.Emoji = *emoji
+		}
 		return &projected, nil
 	}
-	if err := c.store.UpdateFeature(f.ID, title, description); err != nil {
+	if err := c.store.UpdateFeature(f.ID, title, description, emoji); err != nil {
 		return nil, err
 	}
 	updated, err := c.store.GetFeatureByID(f.ID)
@@ -96,6 +100,7 @@ func (c *localClient) UpdateFeature(ctx context.Context, repo *model.Repo, slug 
 		Details: updatedFieldList(map[string]bool{
 			"title":       title != nil,
 			"description": description != nil,
+			"emoji":       emoji != nil,
 		}),
 	})
 	return updated, nil

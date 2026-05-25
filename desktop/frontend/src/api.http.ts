@@ -163,6 +163,12 @@ export interface BoardCard {
   assignees: string[];
   claude: boolean;
   taken: boolean;
+  // BACI-172: per-feature glyph denormalised onto the card by the
+  // server (via the issue → feature join in store.issueSelect). Empty
+  // (and absent on the wire) when the issue has no feature, or the
+  // feature has no emoji set. The kanban card renderer only paints
+  // the top-left slot when truthy.
+  featureEmoji?: string;
   // BACI-145: structured "why is this card waiting?" state. Replaces
   // the two booleans waitingForClaim + waitingDispatchDelivered that
   // the BoardCard used to carry — neither could carry the active
@@ -466,6 +472,9 @@ export interface FeatureDetail {
   slug: string;
   title: string;
   description: string;
+  // BACI-172: per-feature emoji rendered on every kanban card under
+  // this feature. Empty when none is set.
+  emoji: string;
   createdAt: string;
   updatedAt: string;
   issues: FeatureLinkedIssue[];
@@ -629,6 +638,10 @@ interface ApiIssue {
   tags?: string[];
   taken?: boolean;
   waiting_for_claim?: boolean;
+  // BACI-172: per-feature glyph denormalised from the join in
+  // store.issueSelect. Snake-case on the wire; the cardFromIssue
+  // reshape below copies it onto the camelCase BoardCard.featureEmoji.
+  feature_emoji?: string;
 }
 
 function assigneeList(a: string | undefined | null): string[] {
@@ -646,6 +659,10 @@ function cardFromIssue(iss: ApiIssue): BoardCard {
     assignees: assigneeList(assignee),
     claude: assignee === 'claude',
     taken: !!iss.taken,
+    // BACI-172: thread the joined feature emoji through so a card
+    // refreshed via setIssueState() (drag-to-move) keeps its glyph
+    // until the next listCards() rebuilds the array.
+    featureEmoji: iss.feature_emoji,
     // BACI-145: setIssueState (a drag-to-move) is blocked for waiting
     // cards by the UI, so the wire shape produced here can't be
     // observably waiting. Leave waitingState undefined; the next 10s
@@ -1274,6 +1291,10 @@ interface ApiFeature {
   slug: string;
   title: string;
   description?: string;
+  // BACI-172: per-feature emoji glyph from the wire. Optional /
+  // absent on pre-BACI-172 features (or features with no glyph
+  // set); model.Feature serialises with omitempty.
+  emoji?: string;
   created_at: string;
   updated_at: string;
 }
@@ -1309,6 +1330,7 @@ export async function getFeature(repoPrefix: string, slug: string): Promise<Feat
     slug: f.slug,
     title: f.title,
     description: f.description ?? '',
+    emoji: f.emoji ?? '',
     createdAt: f.created_at,
     updatedAt: f.updated_at,
     issues: (view.issues ?? []).map(iss => ({
@@ -1324,6 +1346,27 @@ export async function getFeature(repoPrefix: string, slug: string): Promise<Feat
       createdAt: c.created_at,
     })),
   };
+}
+
+// setFeatureEmoji (BACI-172) updates the per-feature emoji glyph
+// surfaced on every kanban card under this feature. Empty string
+// clears the emoji. The store-side validator enforces exactly one
+// grapheme cluster (or empty) so malformed input surfaces as a
+// {error} envelope. Returns the refreshed FeatureDetail so the
+// caller can drop it straight into its panel state.
+export async function setFeatureEmoji(
+  repoPrefix: string,
+  slug: string,
+  emoji: string,
+): Promise<FeatureDetail> {
+  if (!repoPrefix || repoPrefix === 'all') {
+    throw new Error('select a repository to edit a feature');
+  }
+  await call<ApiFeature>(`/repos/${repoPrefix}/features/${slug}`, {
+    method: 'PATCH',
+    body: { slug, emoji },
+  });
+  return getFeature(repoPrefix, slug);
 }
 
 // addFeatureComment posts a chronological handoff comment to a feature

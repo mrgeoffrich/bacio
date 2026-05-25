@@ -186,7 +186,7 @@ func TestRoundTripFeatureLifecycle(t *testing.T) {
 
 	// Edit through remote.
 	newTitle := "Feature One Updated"
-	if _, err := p.remote.UpdateFeature(ctx, p.repo, "feature-one", &newTitle, nil, false); err != nil {
+	if _, err := p.remote.UpdateFeature(ctx, p.repo, "feature-one", &newTitle, nil, nil, false); err != nil {
 		t.Fatalf("remote UpdateFeature: %v", err)
 	}
 	post, err := p.local.GetFeatureBySlug(ctx, p.repo, "feature-one")

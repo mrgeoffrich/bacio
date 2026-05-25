@@ -16,7 +16,7 @@ func TestFeatureCommentCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	feat, err := s.CreateFeature(repo.ID, "auth", "Auth", "")
+	feat, err := s.CreateFeature(repo.ID, "auth", "Auth", "", "")
 	if err != nil {
 		t.Fatalf("create feature: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestFeatureCommentValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	feat, err := s.CreateFeature(repo.ID, "auth", "Auth", "")
+	feat, err := s.CreateFeature(repo.ID, "auth", "Auth", "", "")
 	if err != nil {
 		t.Fatalf("create feature: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestFeatureCommentCascade(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	feat, err := s.CreateFeature(repo.ID, "auth", "Auth", "")
+	feat, err := s.CreateFeature(repo.ID, "auth", "Auth", "", "")
 	if err != nil {
 		t.Fatalf("create feature: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestCreateFeatureCommentFromSync(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	feat, err := s.CreateFeature(repo.ID, "auth", "Auth", "")
+	feat, err := s.CreateFeature(repo.ID, "auth", "Auth", "", "")
 	if err != nil {
 		t.Fatalf("create feature: %v", err)
 	}

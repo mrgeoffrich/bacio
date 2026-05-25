@@ -621,9 +621,15 @@ func contentHashRepo(p *ParsedRepo) string {
 }
 
 func contentHashFeature(sf *scannedFeature) string {
-	return ContentHash([]byte(fmt.Sprintf("feature|%s|%s|%s|%s|%s",
+	// BACI-172: fold emoji into the hash so a previously-imported
+	// feature that gains a glyph triggers an update rather than a
+	// silent no-op. Pre-BACI-172 features (Emoji == "") stringify
+	// with a trailing empty segment "feature|uuid|slug|title|bodyhash|archived|"
+	// — different from the old hash on the first re-sync, then stable
+	// thereafter. One cycle of migration churn is the price.
+	return ContentHash([]byte(fmt.Sprintf("feature|%s|%s|%s|%s|%s|%s",
 		sf.Parsed.UUID, sf.Parsed.Slug, sf.Parsed.Title, sf.BodyHash,
-		hashableArchived(sf.Parsed.ArchivedAt))))
+		hashableArchived(sf.Parsed.ArchivedAt), sf.Parsed.Emoji)))
 }
 
 func contentHashIssue(si *scannedIssue) string {

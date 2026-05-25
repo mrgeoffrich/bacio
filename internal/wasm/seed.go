@@ -685,7 +685,7 @@ func seedOnePass(s *store.Store, repo *model.Repo, copyIdx int) error {
 	for _, f := range gelatoFeatures {
 		slug := f.slug + slugSfx
 		title := f.title + titleSfx
-		feat, err := s.CreateFeature(repo.ID, slug, title, f.desc)
+		feat, err := s.CreateFeature(repo.ID, slug, title, f.desc, "")
 		if err != nil {
 			return fmt.Errorf("seed: create feature %q: %w", slug, err)
 		}

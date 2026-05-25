@@ -28,7 +28,7 @@ func TestDeleteRepoCascades(t *testing.T) {
 
 	// Target-side fixtures: feature → issue (with feature_id), comment,
 	// tag, relation between two issues, PR, document, document_link.
-	feat, err := s.CreateFeature(target.ID, "feat", "Feature", "")
+	feat, err := s.CreateFeature(target.ID, "feat", "Feature", "", "")
 	if err != nil {
 		t.Fatalf("create feature: %v", err)
 	}

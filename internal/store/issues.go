@@ -736,7 +736,7 @@ func (s *Store) CountFeatures(repoID int64) (int, error) {
 // show / brief responses all carry the signal inline without a second
 // round trip.
 const issueSelect = `
-SELECT i.id, i.uuid, i.repo_id, i.number, r.prefix, i.feature_id, COALESCE(f.slug, ''),
+SELECT i.id, i.uuid, i.repo_id, i.number, r.prefix, i.feature_id, COALESCE(f.slug, ''), COALESCE(f.emoji, ''),
        i.title, i.description, i.state, i.assignee, i.waiting_for_claim,
        EXISTS (
          SELECT 1 FROM agent_claims c
@@ -756,11 +756,12 @@ func scanIssue(row rowScanner) (*model.Issue, error) {
 		prefix     string
 		featureID  sql.NullInt64
 		featSlug   string
+		featEmoji  string
 		state      string
 		archivedAt sql.NullTime
 		terminalAt sql.NullTime
 	)
-	err := row.Scan(&i.ID, &i.UUID, &i.RepoID, &i.Number, &prefix, &featureID, &featSlug,
+	err := row.Scan(&i.ID, &i.UUID, &i.RepoID, &i.Number, &prefix, &featureID, &featSlug, &featEmoji,
 		&i.Title, &i.Description, &state, &i.Assignee, &i.WaitingForClaim, &i.Taken,
 		&archivedAt, &terminalAt, &i.CreatedAt, &i.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -775,6 +776,10 @@ func scanIssue(row rowScanner) (*model.Issue, error) {
 		v := featureID.Int64
 		i.FeatureID = &v
 		i.FeatureSlug = featSlug
+		// FeatureEmoji is only populated when there's a feature; the
+		// COALESCE protects against NULL when there's no join match
+		// (i.e. issue with no feature_id).
+		i.FeatureEmoji = featEmoji
 	}
 	if archivedAt.Valid {
 		t := archivedAt.Time

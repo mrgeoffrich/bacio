@@ -59,13 +59,19 @@ func (c *remoteClient) CreateFeature(ctx context.Context, repo *model.Repo, in i
 	return &out, nil
 }
 
-func (c *remoteClient) UpdateFeature(ctx context.Context, repo *model.Repo, slug string, title, description *string, dryRun bool) (*model.Feature, error) {
+func (c *remoteClient) UpdateFeature(ctx context.Context, repo *model.Repo, slug string, title, description, emoji *string, dryRun bool) (*model.Feature, error) {
 	body := map[string]any{"slug": slug}
 	if title != nil {
 		body["title"] = *title
 	}
 	if description != nil {
 		body["description"] = *description
+	}
+	// Emoji uses presence in the JSON map to round-trip the same
+	// "absent vs explicit clear" semantics the local path has — a nil
+	// pointer omits the key; a non-nil empty string sends "" to clear.
+	if emoji != nil {
+		body["emoji"] = *emoji
 	}
 	q := url.Values{}
 	if dryRun {

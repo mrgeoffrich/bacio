@@ -88,13 +88,24 @@ ticket. File them in this order so the linking calls succeed first time.
 bacio feature add --json '{
   "title": "<feature title — usually the umbrella issue title>",
   "slug": "<kebab-case slug, max ~6 words>",
-  "description": "<2-3 sentences naming the goal and pointing at the plan doc by name (e.g. \"See plan: docs/planning/<slug>.md (attached as docs-planning-<slug>.md).\")>"
+  "description": "<2-3 sentences naming the goal and pointing at the plan doc by name (e.g. \"See plan: docs/planning/<slug>.md (attached as docs-planning-<slug>.md).\")>",
+  "emoji": "<one emoji that captures the feature; see below>"
 }' -o json
 ```
 
 The slug is what every phase issue references via `feature_slug`. Pick
 something short and memorable — it appears in every phase-issue
 description and in the plan doc filename.
+
+Pick the emoji deliberately (BACI-172). It is the per-feature "brand
+glyph" the kanban card surfaces in the top-left of every issue card
+under this feature, so a board reader can group cards visually
+without scanning titles. One representative emoji — auth → 🔐,
+performance → ⚡, bugfix → 🪲, refactor → 🔧, schema/data → 🗂️,
+UI/UX → 🎨, infrastructure → 📦. Single glyph only; the store-side
+validator rejects multi-cluster strings like `"AUTH"`. If nothing
+obviously fits, omit the field — leaving it empty is preferable to
+a random emoji.
 
 ### b) File the per-phase issues
 

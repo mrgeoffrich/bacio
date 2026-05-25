@@ -150,6 +150,18 @@ func migrate(db *sql.DB) error {
 			return err
 		}
 	}
+	// features.emoji (BACI-172) — the per-feature single-glyph brand used
+	// by the kanban card render. Idempotent ALTER; default '' for older
+	// rows so existing features start with no glyph.
+	hasFeatureEmoji, err := columnExists(db, "features", "emoji")
+	if err != nil {
+		return err
+	}
+	if !hasFeatureEmoji {
+		if _, err := db.Exec(`ALTER TABLE features ADD COLUMN emoji TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add emoji to features: %w", err)
+		}
+	}
 	// The attachments feature was removed in favour of documents; drop the
 	// table from any pre-existing DB. Historical history.attachment.* rows
 	// stay put since the audit log is append-only.
