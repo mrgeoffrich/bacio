@@ -95,32 +95,45 @@ func TestREST_QueueFollowOnDryRun(t *testing.T) {
 	assertHistoryOps(t, s, nil)
 }
 
-// TestREST_QueueFollowOnState400: an issue in `done` rejects an
-// `implement` follow-on (state-gate mismatch — implement is gated on
-// todo). Locks in the BACI-180 plan's TestREST_QueueFollowOnState400.
-func TestREST_QueueFollowOnState400(t *testing.T) {
+// TestREST_QueueFollowOnInProgress_BACI195 (BACI-195 repro) —
+// supersedes the original TestREST_QueueFollowOnState400. Queueing
+// an implement follow-on while the parent dispatch is in flight and
+// the issue is `in_progress` must succeed. This is the exact failure
+// the brief reproduced today on BACI-193: POST /...//followon with
+// {mode:implement} returned 400 "the implement prompt can't run from
+// a in_progress issue". After dropping the queue-time gate the call
+// must 201 with a dormant row attached to the parent.
+//
+// The fire-time gate replaces the queue-time gate: covered by the
+// store-level tests in TestPromoteReadyFollowOns_GateFailCancels +
+// the controller-level audit test
+// TestFollowOnSweepIfLeader_GateFailWrites.
+func TestREST_QueueFollowOnInProgress_BACI195(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
-	iss := seedIssue(t, s, repo, "wrong state")
-	// A done issue: implement is not in the default state-gate.
-	if err := s.SetIssueState(iss.ID, model.StateDone); err != nil {
-		t.Fatalf("set state: %v", err)
+	iss := seedIssue(t, s, repo, "research running, queue implement next")
+	// in_progress is the state research-mode parents leave the ticket
+	// in while running; implement's default gate is `todo`, so the
+	// pre-BACI-195 queue-time check rejected the call here.
+	if err := s.SetIssueState(iss.ID, model.StateInProgress); err != nil {
+		t.Fatalf("set in_progress: %v", err)
 	}
-	// Parent still needs to exist for the verb to reach the gate check
-	// (the gate runs before WaitingDispatchForIssue lookup in
-	// QueueFollowOnDispatch — see local_dispatch.go).
-	_ = seedParentDispatch(t, s, repo, iss, model.DispatchModePlan)
+	parent := seedParentDispatch(t, s, repo, iss, model.DispatchModePlan)
 
 	resp, raw := apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/issues/"+iss.Key+"/followon",
 		map[string]any{"issue_key": iss.Key, "mode": string(model.DispatchModeImplement)})
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status %d, body %s", resp.StatusCode, raw)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status %d, body %s — BACI-195 expects this to succeed", resp.StatusCode, raw)
 	}
-	var env map[string]any
-	mustDecode(t, raw, &env)
-	if env["code"] != "invalid_input" {
-		t.Errorf("code = %v, want invalid_input", env["code"])
+	var got model.AgentDispatch
+	mustDecode(t, raw, &got)
+	if got.QueuedAfterDispatchID == nil || *got.QueuedAfterDispatchID != parent.ID {
+		t.Fatalf("QueuedAfterDispatchID = %v, want %d (dormant on parent)", got.QueuedAfterDispatchID, parent.ID)
 	}
+	if got.Status != model.DispatchQueued {
+		t.Fatalf("Status = %q, want queued (dormant)", got.Status)
+	}
+	assertHistoryOps(t, s, []string{"agent.followon.queue"})
 }
 
 // TestREST_QueueFollowOnNoParent: a follow-on on an issue with no

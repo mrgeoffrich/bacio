@@ -696,6 +696,11 @@ func TestSchemaInvariant_FollowOnRejectedOnNonQueued(t *testing.T) {
 // queued_after_dispatch_id so the next matcher tick can bind the
 // follow-on. A re-run of the sweep against the now-cleared row is a
 // no-op.
+//
+// Per BACI-195 the sweep also takes a per-mode state-gates map and
+// gate-checks at fire time; here the seeded issue is `todo` and
+// implement's default gate admits `todo`, so the row promotes
+// normally.
 func TestPromoteReadyFollowOns(t *testing.T) {
 	s, repo, iss, ag, _ := seedDispatchFixture(t)
 	parent, err := s.AddDispatch(AddDispatchIn{
@@ -712,24 +717,25 @@ func TestPromoteReadyFollowOns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add follow-on: %v", err)
 	}
+	gates := mustLoadGates(t, s)
 	// Predecessor still pending → sweep is a no-op.
-	promoted, err := s.PromoteReadyFollowOns()
+	promoted, gateFailed, err := s.PromoteReadyFollowOns(gates)
 	if err != nil {
 		t.Fatalf("promote (pre-ack): %v", err)
 	}
-	if len(promoted) != 0 {
-		t.Fatalf("promoted with open parent = %d, want 0", len(promoted))
+	if len(promoted) != 0 || len(gateFailed) != 0 {
+		t.Fatalf("with open parent: promoted=%d gateFailed=%d, want 0/0", len(promoted), len(gateFailed))
 	}
 	// Settle the predecessor.
 	if _, err := s.AckDispatch(parent.ID, ""); err != nil {
 		t.Fatalf("ack parent: %v", err)
 	}
-	promoted, err = s.PromoteReadyFollowOns()
+	promoted, gateFailed, err = s.PromoteReadyFollowOns(gates)
 	if err != nil {
 		t.Fatalf("promote: %v", err)
 	}
-	if len(promoted) != 1 {
-		t.Fatalf("promoted = %d, want 1", len(promoted))
+	if len(promoted) != 1 || len(gateFailed) != 0 {
+		t.Fatalf("promoted=%d gateFailed=%d, want 1/0", len(promoted), len(gateFailed))
 	}
 	if promoted[0].ID != follow.ID {
 		t.Fatalf("promoted id = %d, want %d", promoted[0].ID, follow.ID)
@@ -746,13 +752,26 @@ func TestPromoteReadyFollowOns(t *testing.T) {
 		t.Fatalf("post-promote modes = %v, want [implement]", modes)
 	}
 	// Re-run is a no-op.
-	promoted, err = s.PromoteReadyFollowOns()
+	promoted, gateFailed, err = s.PromoteReadyFollowOns(gates)
 	if err != nil {
 		t.Fatalf("promote rerun: %v", err)
 	}
-	if len(promoted) != 0 {
-		t.Fatalf("promote rerun = %d, want 0", len(promoted))
+	if len(promoted) != 0 || len(gateFailed) != 0 {
+		t.Fatalf("promote rerun: promoted=%d gateFailed=%d, want 0/0", len(promoted), len(gateFailed))
 	}
+}
+
+// mustLoadGates is a test helper that reads the per-mode state-gates
+// from the seeded store. The migration seeds built-in templates with
+// their default state-gates, so this returns the same gates the
+// controller loads in production via AllPromptStates.
+func mustLoadGates(t *testing.T, s *Store) map[model.DispatchMode][]model.State {
+	t.Helper()
+	gates, err := s.AllPromptStates()
+	if err != nil {
+		t.Fatalf("load prompt state-gates: %v", err)
+	}
+	return gates
 }
 
 // TestPromoteSweep_BlockedByOpenClaim (BACI-179 design §8) — the
@@ -775,27 +794,28 @@ func TestPromoteSweep_BlockedByOpenClaim(t *testing.T) {
 	if _, err := s.AckDispatch(parent.ID, ""); err != nil {
 		t.Fatalf("ack parent: %v", err)
 	}
+	gates := mustLoadGates(t, s)
 	// Add a fresh open claim on the issue. The sweep must skip the row.
 	if _, _, _, _, err := s.AddAgentClaim(sess.SessionID, iss.ID, "in-progress"); err != nil {
 		t.Fatalf("add claim: %v", err)
 	}
-	promoted, err := s.PromoteReadyFollowOns()
+	promoted, gateFailed, err := s.PromoteReadyFollowOns(gates)
 	if err != nil {
 		t.Fatalf("promote (claim open): %v", err)
 	}
-	if len(promoted) != 0 {
-		t.Fatalf("promote with open claim = %d, want 0", len(promoted))
+	if len(promoted) != 0 || len(gateFailed) != 0 {
+		t.Fatalf("with open claim: promoted=%d gateFailed=%d, want 0/0", len(promoted), len(gateFailed))
 	}
 	// Release the claim → sweep promotes.
 	if _, _, _, err := s.ReleaseAgentClaim(sess.SessionID, iss.ID, model.StateTodo); err != nil {
 		t.Fatalf("release claim: %v", err)
 	}
-	promoted, err = s.PromoteReadyFollowOns()
+	promoted, gateFailed, err = s.PromoteReadyFollowOns(gates)
 	if err != nil {
 		t.Fatalf("promote after release: %v", err)
 	}
-	if len(promoted) != 1 {
-		t.Fatalf("promote after release = %d, want 1", len(promoted))
+	if len(promoted) != 1 || len(gateFailed) != 0 {
+		t.Fatalf("after release: promoted=%d gateFailed=%d, want 1/0", len(promoted), len(gateFailed))
 	}
 }
 
@@ -830,12 +850,19 @@ func TestPromoteSweep_TolerantOfOrphanClaim(t *testing.T) {
 	); err != nil {
 		t.Fatalf("end session: %v", err)
 	}
-	promoted, err := s.PromoteReadyFollowOns()
+	// AddAgentClaim flipped the issue to in_progress (BACI-126a auto-
+	// transition); reset it to todo so the BACI-195 fire-time gate
+	// can be tested in isolation from the unrelated "orphan claim
+	// must not block" assertion this test exists for.
+	if err := s.SetIssueState(iss.ID, model.StateTodo); err != nil {
+		t.Fatalf("reset state to todo for gate: %v", err)
+	}
+	promoted, gateFailed, err := s.PromoteReadyFollowOns(mustLoadGates(t, s))
 	if err != nil {
 		t.Fatalf("promote tolerant: %v", err)
 	}
-	if len(promoted) != 1 {
-		t.Fatalf("promote with orphan claim = %d, want 1 (ended-session claim must not block)", len(promoted))
+	if len(promoted) != 1 || len(gateFailed) != 0 {
+		t.Fatalf("with orphan claim: promoted=%d gateFailed=%d, want 1/0 (ended-session claim must not block)", len(promoted), len(gateFailed))
 	}
 }
 
@@ -976,12 +1003,13 @@ func TestMatcherIgnoresDormant_ParentRequeued(t *testing.T) {
 	); err != nil {
 		t.Fatalf("requeue parent: %v", err)
 	}
-	promoted, err := s.PromoteReadyFollowOns()
+	gates := mustLoadGates(t, s)
+	promoted, gateFailed, err := s.PromoteReadyFollowOns(gates)
 	if err != nil {
 		t.Fatalf("promote: %v", err)
 	}
-	if len(promoted) != 0 {
-		t.Fatalf("promote with requeued parent = %d, want 0", len(promoted))
+	if len(promoted) != 0 || len(gateFailed) != 0 {
+		t.Fatalf("with requeued parent: promoted=%d gateFailed=%d, want 0/0", len(promoted), len(gateFailed))
 	}
 	// Move the parent through ack — the requeue cycle has resolved.
 	if _, err := s.DB.Exec(
@@ -989,12 +1017,12 @@ func TestMatcherIgnoresDormant_ParentRequeued(t *testing.T) {
 	); err != nil {
 		t.Fatalf("ack parent: %v", err)
 	}
-	promoted, err = s.PromoteReadyFollowOns()
+	promoted, gateFailed, err = s.PromoteReadyFollowOns(gates)
 	if err != nil {
 		t.Fatalf("promote post-cycle: %v", err)
 	}
-	if len(promoted) != 1 {
-		t.Fatalf("post-cycle promote = %d, want 1", len(promoted))
+	if len(promoted) != 1 || len(gateFailed) != 0 {
+		t.Fatalf("post-cycle: promoted=%d gateFailed=%d, want 1/0", len(promoted), len(gateFailed))
 	}
 }
 
@@ -1024,7 +1052,7 @@ func TestFollowOnForIssue_DormantOnly(t *testing.T) {
 	if _, err := s.AckDispatch(parent.ID, ""); err != nil {
 		t.Fatalf("ack parent: %v", err)
 	}
-	if _, err := s.PromoteReadyFollowOns(); err != nil {
+	if _, _, err := s.PromoteReadyFollowOns(mustLoadGates(t, s)); err != nil {
 		t.Fatalf("promote: %v", err)
 	}
 	got, err = s.FollowOnForIssue(repo.ID, iss.ID)
@@ -1080,5 +1108,252 @@ func TestCancelDeliveredRejected(t *testing.T) {
 	}
 	if !issAfter.WaitingForClaim {
 		t.Errorf("issue.waiting_for_claim = false, want true (rejected cancel must not clear)")
+	}
+}
+
+// TestFollowOnGatePasses_PureHelper (BACI-195) — locks in the
+// per-row gate-check semantics independently of the DB. A row with
+// no issue (state == "") always passes; otherwise the issue state
+// must be in gates[mode].
+func TestFollowOnGatePasses_PureHelper(t *testing.T) {
+	gates := map[model.DispatchMode][]model.State{
+		model.DispatchModeImplement: {model.StateTodo},
+		model.DispatchModeReview:    {model.StateInReview},
+	}
+	cases := []struct {
+		name  string
+		gates map[model.DispatchMode][]model.State
+		mode  model.DispatchMode
+		state model.State
+		want  bool
+	}{
+		{"no_issue_always_passes", gates, model.DispatchModeImplement, "", true},
+		{"implement_from_todo", gates, model.DispatchModeImplement, model.StateTodo, true},
+		{"implement_from_in_progress_blocked", gates, model.DispatchModeImplement, model.StateInProgress, false},
+		{"implement_from_done_blocked", gates, model.DispatchModeImplement, model.StateDone, false},
+		{"review_from_in_review", gates, model.DispatchModeReview, model.StateInReview, true},
+		{"unknown_mode_blocked", gates, model.DispatchMode("nosuchmode"), model.StateTodo, false},
+		{"nil_gates_blocks_typed_row", nil, model.DispatchModeImplement, model.StateTodo, false},
+		{"nil_gates_allows_issueless_row", nil, model.DispatchModeImplement, "", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := followOnGatePasses(c.gates, c.mode, c.state); got != c.want {
+				t.Fatalf("followOnGatePasses(%q, %q) = %v, want %v", c.mode, c.state, got, c.want)
+			}
+		})
+	}
+}
+
+// TestPromoteReadyFollowOns_GateFailCancels (BACI-195) — when the
+// issue's post-release state doesn't admit the follow-on's mode, the
+// sweep cancels the row instead of clearing the FK. The cancelled
+// row is returned in gateFailed; the promoted slice is empty.
+// queued_after_dispatch_id stays set on the cancelled row so the
+// audit Details still references the parent dispatch.
+func TestPromoteReadyFollowOns_GateFailCancels(t *testing.T) {
+	s, repo, iss, ag, _ := seedDispatchFixture(t)
+	parent, err := s.AddDispatch(AddDispatchIn{
+		RepoID: repo.ID, TargetAgentID: &ag.ID, IssueID: &iss.ID,
+		Mode: model.DispatchModePlan, CreatedBy: "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add parent: %v", err)
+	}
+	// Queue a ship follow-on. ship's default gate is `in_review`; the
+	// issue is `todo` after the parent settles — gate fails.
+	follow, err := s.AddFollowOnDispatch(repo.ID, parent.ID, model.DispatchModeShip, "supervisor")
+	if err != nil {
+		t.Fatalf("add follow-on: %v", err)
+	}
+	if _, err := s.AckDispatch(parent.ID, ""); err != nil {
+		t.Fatalf("ack parent: %v", err)
+	}
+	promoted, gateFailed, err := s.PromoteReadyFollowOns(mustLoadGates(t, s))
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if len(promoted) != 0 || len(gateFailed) != 1 {
+		t.Fatalf("promoted=%d gateFailed=%d, want 0/1", len(promoted), len(gateFailed))
+	}
+	if gateFailed[0].ID != follow.ID {
+		t.Fatalf("gateFailed id = %d, want %d", gateFailed[0].ID, follow.ID)
+	}
+	if gateFailed[0].Status != model.DispatchCancelled {
+		t.Fatalf("gateFailed status = %q, want cancelled", gateFailed[0].Status)
+	}
+	// queued_after_dispatch_id intact on the cancelled row — audit
+	// readers join through it back to the parent.
+	if gateFailed[0].QueuedAfterDispatchID == nil {
+		t.Fatal("gateFailed queued_after_dispatch_id = nil, want parent id (audit join surface)")
+	}
+	if *gateFailed[0].QueuedAfterDispatchID != parent.ID {
+		t.Fatalf("gateFailed queued_after_dispatch_id = %d, want %d", *gateFailed[0].QueuedAfterDispatchID, parent.ID)
+	}
+	// Re-run is a no-op — the cancelled row no longer matches the
+	// status='queued' predicate.
+	promoted, gateFailed, err = s.PromoteReadyFollowOns(mustLoadGates(t, s))
+	if err != nil {
+		t.Fatalf("sweep rerun: %v", err)
+	}
+	if len(promoted) != 0 || len(gateFailed) != 0 {
+		t.Fatalf("rerun: promoted=%d gateFailed=%d, want 0/0", len(promoted), len(gateFailed))
+	}
+}
+
+// TestPromoteReadyFollowOns_MixedBatch (BACI-195) — within one sweep
+// some ready rows promote (gate passes) and others cancel (gate
+// fails). The transaction commits both partitions atomically; the
+// returned slices reflect the split.
+func TestPromoteReadyFollowOns_MixedBatch(t *testing.T) {
+	s := newTestStore(t)
+	repo, err := s.CreateRepo("MIX", "mix", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+	// Issue A — stays in todo (implement gate passes).
+	issA, err := s.CreateIssue(repo.ID, nil, "todo-issue", "", model.StateTodo, nil)
+	if err != nil {
+		t.Fatalf("create issue A: %v", err)
+	}
+	// Issue B — in_review (implement gate fails; review gate would
+	// pass, but we queue implement deliberately to fail the gate).
+	issB, err := s.CreateIssue(repo.ID, nil, "in-review-issue", "", model.StateInReview, nil)
+	if err != nil {
+		t.Fatalf("create issue B: %v", err)
+	}
+	ag, _, err := s.UpsertAgent("brave-otter@claude.test", true)
+	if err != nil {
+		t.Fatalf("upsert agent: %v", err)
+	}
+	parentA, err := s.AddDispatch(AddDispatchIn{
+		RepoID: repo.ID, TargetAgentID: &ag.ID, IssueID: &issA.ID,
+		Mode: model.DispatchModePlan, CreatedBy: "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add parent A: %v", err)
+	}
+	parentB, err := s.AddDispatch(AddDispatchIn{
+		RepoID: repo.ID, TargetAgentID: &ag.ID, IssueID: &issB.ID,
+		Mode: model.DispatchModeReview, CreatedBy: "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add parent B: %v", err)
+	}
+	followA, err := s.AddFollowOnDispatch(repo.ID, parentA.ID, model.DispatchModeImplement, "supervisor")
+	if err != nil {
+		t.Fatalf("add follow-on A: %v", err)
+	}
+	followB, err := s.AddFollowOnDispatch(repo.ID, parentB.ID, model.DispatchModeImplement, "supervisor")
+	if err != nil {
+		t.Fatalf("add follow-on B: %v", err)
+	}
+	if _, err := s.AckDispatch(parentA.ID, ""); err != nil {
+		t.Fatalf("ack parent A: %v", err)
+	}
+	if _, err := s.AckDispatch(parentB.ID, ""); err != nil {
+		t.Fatalf("ack parent B: %v", err)
+	}
+	promoted, gateFailed, err := s.PromoteReadyFollowOns(mustLoadGates(t, s))
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if len(promoted) != 1 {
+		t.Fatalf("promoted = %d, want 1", len(promoted))
+	}
+	if promoted[0].ID != followA.ID {
+		t.Fatalf("promoted id = %d, want %d (the todo-issue follow-on)", promoted[0].ID, followA.ID)
+	}
+	if len(gateFailed) != 1 {
+		t.Fatalf("gateFailed = %d, want 1", len(gateFailed))
+	}
+	if gateFailed[0].ID != followB.ID {
+		t.Fatalf("gateFailed id = %d, want %d (the in_review-issue follow-on)", gateFailed[0].ID, followB.ID)
+	}
+}
+
+// TestPromoteReadyFollowOns_IssuelessRowPromotes (BACI-195 design)
+// — a dormant row whose issue_id was nulled by an FK cascade has no
+// state to gate against; the sweep promotes it regardless of gates,
+// matching the existing comment that the matcher's regular path
+// handles issue-less queued rows fine.
+func TestPromoteReadyFollowOns_IssuelessRowPromotes(t *testing.T) {
+	s, repo, iss, ag, _ := seedDispatchFixture(t)
+	parent, err := s.AddDispatch(AddDispatchIn{
+		RepoID: repo.ID, TargetAgentID: &ag.ID, IssueID: &iss.ID,
+		Mode: model.DispatchModePlan, CreatedBy: "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add parent: %v", err)
+	}
+	follow, err := s.AddFollowOnDispatch(repo.ID, parent.ID, model.DispatchModeShip, "supervisor")
+	if err != nil {
+		t.Fatalf("add follow-on: %v", err)
+	}
+	if _, err := s.AckDispatch(parent.ID, ""); err != nil {
+		t.Fatalf("ack parent: %v", err)
+	}
+	// Simulate the FK cascade — null the issue_id on the follow-on so
+	// the gate check skips it (no state to look up). Without this it
+	// would gate-fail (ship requires in_review, issue is todo).
+	if _, err := s.DB.Exec(
+		`UPDATE agent_dispatches SET issue_id = NULL WHERE id = ?`, follow.ID,
+	); err != nil {
+		t.Fatalf("null issue_id: %v", err)
+	}
+	// Empty gates intentionally — issueless rows must promote regardless.
+	promoted, gateFailed, err := s.PromoteReadyFollowOns(nil)
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if len(promoted) != 1 || len(gateFailed) != 0 {
+		t.Fatalf("issueless row: promoted=%d gateFailed=%d, want 1/0", len(promoted), len(gateFailed))
+	}
+}
+
+// TestPromoteReadyFollowOns_ImplementFromInProgressRepro (BACI-195
+// repro) — the specific bug from the brief. The user queues an
+// implement follow-on while the parent (research) is in_progress;
+// after the parent releases the issue back to `todo` (research
+// workflow shape) the follow-on must promote. Before the fix the
+// queue-time gate rejected the call; after the fix the queue
+// succeeds and fire-time gate passes.
+func TestPromoteReadyFollowOns_ImplementFromInProgressRepro(t *testing.T) {
+	s, repo, iss, ag, _ := seedDispatchFixture(t)
+	// Parent research dispatch — in_progress while the worker runs.
+	if err := s.SetIssueState(iss.ID, model.StateInProgress); err != nil {
+		t.Fatalf("set in_progress: %v", err)
+	}
+	parent, err := s.AddDispatch(AddDispatchIn{
+		RepoID: repo.ID, TargetAgentID: &ag.ID, IssueID: &iss.ID,
+		Mode: model.DispatchModePlan, CreatedBy: "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add parent: %v", err)
+	}
+	// User queues an implement follow-on while the issue is still
+	// in_progress — this is exactly the call that used to 400 with
+	// "the implement prompt can't run from a in_progress issue".
+	follow, err := s.AddFollowOnDispatch(repo.ID, parent.ID, model.DispatchModeImplement, "supervisor")
+	if err != nil {
+		t.Fatalf("add follow-on (the bug case): %v", err)
+	}
+	// Parent finishes and releases the issue back to `todo` (the
+	// post-release state the research-worker leaves behind).
+	if _, err := s.AckDispatch(parent.ID, ""); err != nil {
+		t.Fatalf("ack parent: %v", err)
+	}
+	if err := s.SetIssueState(iss.ID, model.StateTodo); err != nil {
+		t.Fatalf("set post-release state: %v", err)
+	}
+	promoted, gateFailed, err := s.PromoteReadyFollowOns(mustLoadGates(t, s))
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if len(promoted) != 1 || len(gateFailed) != 0 {
+		t.Fatalf("repro: promoted=%d gateFailed=%d, want 1/0 (gate passes from post-release todo)", len(promoted), len(gateFailed))
+	}
+	if promoted[0].ID != follow.ID {
+		t.Fatalf("promoted id = %d, want %d", promoted[0].ID, follow.ID)
 	}
 }
