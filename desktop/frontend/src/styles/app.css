@@ -170,22 +170,28 @@ body { margin: 0; }
 }
 
 /* ---------- Card ---------- */
+/* BACI-169: idle cursor is `pointer` — click opens the issue, which is the
+   primary affordance. The HTML5 drag API still fires on mousedown+move and
+   flips `.is-dragging` (cursor: grabbing) for the duration of the drag,
+   matching the secondary drag-to-move affordance. */
 .mk-card {
   background: var(--paper);
   border: 1px solid var(--border-1);
   border-radius: var(--radius-lg);
   padding: 12px;
   display: flex; flex-direction: column; gap: 8px;
-  cursor: grab;
+  cursor: pointer;
   transition: border-color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
 }
 .mk-card:hover { border-color: var(--border-2); transform: translateY(-1px); }
 .mk-card.is-dragging { box-shadow: var(--shadow-2); transform: rotate(-1.5deg); cursor: grabbing; opacity: .9; }
 .mk-card.is-claude { animation: mk-breathe 2.4s ease-in-out infinite; }
 @keyframes mk-breathe { 0%,100% { box-shadow: var(--shadow-1); } 50% { box-shadow: 0 0 0 2px var(--status-claude-bg), var(--shadow-1); } }
-/* A taken card is held by an agent — bolder accent border, and the grab
-   cursor is dropped since drag is disabled. Coexists with .is-claude (a
-   separate signal) and .is-dragging. */
+/* A taken card is held by an agent — bolder accent border. Drag is
+   disabled (see KanbanCard.jsx `draggable={!taken && !waiting}`), so the
+   .is-dragging override can't fire and the base `cursor: pointer` is
+   reasserted explicitly for intent. Coexists with .is-claude (a separate
+   signal) and .is-dragging. */
 .mk-card.is-taken {
   border-width: 2px; border-color: var(--status-claude);
   cursor: pointer;
