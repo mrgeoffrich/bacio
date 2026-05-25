@@ -118,9 +118,11 @@ function entryFromCard(card) {
 // is the common shape for a column-move with no dispatch in flight.
 //
 // The verb path title-cases the wire string for the user-visible
-// "{Verb} in progress" wording without mutating the wire format; the
-// waiting path reuses `waitingStateLabel` so the tray narrates the
-// same sentence the kanban card already shows.
+// "{Verb}" wording (BACI-197: the trailing " in progress" was dropped
+// because the italic mint treatment already reads as "in progress"
+// and the suffix added noise to a tight row); the waiting path reuses
+// `waitingStateLabel` so the tray narrates the same sentence the
+// kanban card already shows.
 //
 // Falls back to `{kind:'none'}` when `card` is null — entries whose
 // underlying card dropped from `cards` between polls still render
@@ -133,7 +135,7 @@ export function entryStatus(card) {
   if (card.taken && card.activeVerb) {
     const verb = card.activeVerb;
     const titled = verb.charAt(0).toUpperCase() + verb.slice(1);
-    return { kind: 'verb', text: `${titled} in progress` };
+    return { kind: 'verb', text: `${titled}` };
   }
   if (card.waitingState) {
     const label = waitingStateLabel(card.waitingState);
@@ -163,7 +165,7 @@ function stateClass(column) {
   }
 }
 
-export default function ActivityTray({ cards, pinnedKeys, onTogglePin, onOpenCard }) {
+export default function ActivityTray({ cards, pinnedKeys, onTogglePin, onOpenCard, onHoverCard, onCardClickFromTray }) {
   const [entries, setEntries] = useState([]);
   // Seed from localStorage via the lazy initialiser so the first paint
   // already reflects the user's saved preference (BACI-186); writes go
@@ -440,13 +442,19 @@ export default function ActivityTray({ cards, pinnedKeys, onTogglePin, onOpenCar
                 <li
                   key={`pin-${card.key}`}
                   className="mk-tray-entry mk-tray-entry-pinned"
-                  onClick={() => onOpenCard && onOpenCard(card)}
+                  onClick={() => {
+                    onOpenCard && onOpenCard(card);
+                    onCardClickFromTray?.(card.key);
+                  }}
+                  onMouseEnter={() => onHoverCard?.(card.key)}
+                  onMouseLeave={() => onHoverCard?.(null)}
                   role={onOpenCard ? 'button' : undefined}
                   tabIndex={onOpenCard ? 0 : undefined}
                   onKeyDown={(e) => {
                     if ((e.key === 'Enter' || e.key === ' ') && onOpenCard) {
                       e.preventDefault();
                       onOpenCard(card);
+                      onCardClickFromTray?.(card.key);
                     }
                   }}
                 >
@@ -507,10 +515,33 @@ export default function ActivityTray({ cards, pinnedKeys, onTogglePin, onOpenCar
           // not the column the card moved to afterwards).
           const liveCard = cardsByKey.get(e.key);
           const status = entryStatus(liveCard);
+          // BACI-197: Recent rows are now clickable — open the issue
+          // workspace AND jump the matching kanban card. The card we
+          // hand to onOpenCard is the live snapshot from cardsByKey
+          // when present (so the workspace gets the freshest taken /
+          // waitingState / column), falling back to a synthesised
+          // {key,title} shape if the card has dropped from `cards`
+          // between polls so the workspace still opens.
+          const openTarget = liveCard || { key: e.key, title: e.title };
           return (
             <li
               key={e.key}
               className={`mk-tray-entry${flashingKeys.has(e.key) ? ' is-flashing' : ''}`}
+              onClick={() => {
+                onOpenCard && onOpenCard(openTarget);
+                onCardClickFromTray?.(e.key);
+              }}
+              onMouseEnter={() => onHoverCard?.(e.key)}
+              onMouseLeave={() => onHoverCard?.(null)}
+              role={onOpenCard ? 'button' : undefined}
+              tabIndex={onOpenCard ? 0 : undefined}
+              onKeyDown={(evt) => {
+                if ((evt.key === 'Enter' || evt.key === ' ') && onOpenCard) {
+                  evt.preventDefault();
+                  onOpenCard(openTarget);
+                  onCardClickFromTray?.(e.key);
+                }
+              }}
             >
               <div className="mk-tray-entry-head">
                 <span className="mk-card-id">{e.key}</span>
@@ -518,7 +549,10 @@ export default function ActivityTray({ cards, pinnedKeys, onTogglePin, onOpenCar
                 <button
                   type="button"
                   className="mk-tray-dismiss"
-                  onClick={() => dismiss(e.key)}
+                  onClick={(evt) => {
+                    evt.stopPropagation();
+                    dismiss(e.key);
+                  }}
                   title="Dismiss"
                   aria-label={`Dismiss ${e.key}`}
                 >

@@ -222,6 +222,27 @@ body { margin: 0; }
   transition: border-color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
 }
 .mk-card:hover { border-color: var(--border-2); transform: translateY(-1px); }
+/* BACI-197: tray ↔ board cross-link cues. Hovering an Activity-tray
+   row (auto or pinned) sets is-tray-hover on the matching kanban
+   card; clicking a tray row briefly sets is-jumping. Both use
+   existing tokens so the visual vocabulary matches the rest of the
+   board (focus border + small lift mirror .mk-card:hover, the
+   keyframe is transform-only to avoid fighting Motion's FLIP /
+   layoutId machinery in m.article — see KanbanCard.jsx). */
+.mk-card.is-tray-hover {
+  border-color: var(--border-focus);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-2);
+}
+.mk-card.is-jumping {
+  animation: mk-card-jump var(--dur-slow) var(--ease-out);
+}
+@keyframes mk-card-jump {
+  0%   { transform: translateY(0)    scale(1); }
+  30%  { transform: translateY(-3px) scale(1.02); }
+  60%  { transform: translateY(1px)  scale(0.99); }
+  100% { transform: translateY(0)    scale(1); }
+}
 .mk-card.is-dragging { box-shadow: var(--shadow-2); transform: rotate(-1.5deg); cursor: grabbing; opacity: .9; }
 .mk-card.is-claude { animation: mk-breathe 2.4s ease-in-out infinite; }
 @keyframes mk-breathe { 0%,100% { box-shadow: var(--shadow-1); } 50% { box-shadow: 0 0 0 2px var(--status-claude-bg), var(--shadow-1); } }
@@ -240,6 +261,10 @@ body { margin: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
   .mk-shipped-pill.is-flash { animation: none; }
+  /* BACI-197: the tray-triggered card jump collapses to a no-op when
+     the user has asked for reduced motion. The click still opens the
+     issue workspace; only the transform keyframe is suppressed. */
+  .mk-card.is-jumping { animation: none; }
 }
 /* BACI-193: the invisible destination slot Motion uses to anchor the
    shared-element flight. Sits absolutely positioned inside the pill;
@@ -272,6 +297,10 @@ body { margin: 0; }
   cursor: pointer;
 }
 .mk-card.is-waiting:hover { border-color: var(--border-focus); transform: none; }
+/* BACI-197: parallel rule to the :hover override above — a waiting
+   card already lifts via its own border treatment, so the tray-hover
+   modifier shouldn't double-lift it. */
+.mk-card.is-waiting.is-tray-hover { border-color: var(--border-focus); transform: none; }
 /* .mk-card.is-archived (BACI-68) — surfaces when display.show_archived
    is on. Visibly muted so a buried-but-shown card is clearly distinct
    from a live one. Still clickable / draggable so the user can
@@ -1293,7 +1322,17 @@ body { margin: 0; }
   display: flex; align-items: center; gap: 6px;
 }
 .mk-tray-entry-head .mk-card-id { margin-left: 0; }
-.mk-tray-entry-head .mk-pill { margin-left: auto; }
+/* BACI-197: tray-scoped pill metrics. The global .mk-pill (10px /
+   2px 6px) reads heavy here next to the 11px card-id and 13px title;
+   this nudges the column-state pill smaller without touching the
+   global pill — the topbar agent counters and the question-header
+   chip keep the original metrics. */
+.mk-tray-entry-head .mk-pill {
+  margin-left: auto;
+  font-size: 9px;
+  padding: 1px 5px;
+  letter-spacing: 0.05em;
+}
 .mk-tray-entry-title {
   font-size: 13px; font-weight: 500; line-height: 1.3; color: var(--fg-1);
   /* Title can wrap to two lines — same compact-but-readable shape as
@@ -1338,8 +1377,11 @@ body { margin: 0; }
 /* Active-verb row — italic mint, exact same treatment as
    .mk-card-verb on the kanban card so the same dispatch reads
    identically on both surfaces. The verb itself is title-cased
-   in JS (entryStatus) so "implementing" → "Implementing in
-   progress" without the CSS-capitalize-every-word side effect. */
+   in JS (entryStatus) so "implementing" → "Implementing"
+   without the CSS-capitalize-every-word side effect. (BACI-197
+   dropped the trailing " in progress" — the italic mint already
+   conveys the active state, and the suffix added noise to the
+   already-tight tray row.) */
 .mk-tray-entry-verb {
   font-style: italic; color: var(--status-claude);
   min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;

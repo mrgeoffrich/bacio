@@ -117,6 +117,35 @@ export default function App() {
   // on mount + on every repo switch — the persisted shape is per-repo
   // because an issue key is only meaningful inside its repo.
   const [pinnedKeys, setPinnedKeys] = useState(() => readPinnedKeys(readActiveRepo()));
+  // BACI-197: cross-link state between the Activity tray and the
+  // kanban board. hoveredKey is set while the cursor is over a tray
+  // entry (auto or pinned list) so the matching .mk-card paints an
+  // is-tray-hover modifier; jumpKey is briefly set when the user
+  // clicks a tray entry so the matching card plays a short transform
+  // keyframe. Both are ephemeral interaction state — no persistence.
+  const [hoveredKey, setHoveredKey] = useState(null);
+  const [jumpKey, setJumpKey] = useState(null);
+  // Timer handle for the jump auto-clear. Held in a ref so a second
+  // click during the animation can clear the pending timeout and
+  // restart cleanly, and so unmount can drain it without a setState
+  // into a dead component.
+  const jumpTimerRef = useRef(null);
+  // JUMP_MS matches --dur-slow (the animation duration in app.css).
+  // Mirrors the keyframe length so the .is-jumping class is stripped
+  // right as the animation ends.
+  const JUMP_MS = 240;
+  const triggerJump = useCallback((key) => {
+    if (!key) return;
+    if (jumpTimerRef.current) clearTimeout(jumpTimerRef.current);
+    setJumpKey(key);
+    jumpTimerRef.current = setTimeout(() => {
+      setJumpKey(null);
+      jumpTimerRef.current = null;
+    }, JUMP_MS);
+  }, []);
+  useEffect(() => () => {
+    if (jumpTimerRef.current) clearTimeout(jumpTimerRef.current);
+  }, []);
   const [loading, setLoading] = useState(true);
 
   // Resolve the System/Light/Dark preference to a concrete light|dark value
@@ -921,6 +950,8 @@ export default function App() {
             onTogglePin={togglePinKey}
             onSetFollowOn={setFollowOnFromCard}
             onCancelFollowOn={cancelFollowOnFromCard}
+            hoveredKey={hoveredKey}
+            jumpKey={jumpKey}
           />
         </ErrorBoundary>
       )}
@@ -944,6 +975,8 @@ export default function App() {
           pinnedKeys={pinnedKeys}
           onTogglePin={togglePinKey}
           onOpenCard={openCard}
+          onHoverCard={setHoveredKey}
+          onCardClickFromTray={triggerJump}
         />
       </ErrorBoundary>
       <ErrorModal />
