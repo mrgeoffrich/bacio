@@ -21,6 +21,12 @@ type Feature struct {
 	Slug        string `json:"slug"`
 	Title       string `json:"title"`
 	Description string `json:"description,omitempty"`
+	// Emoji (BACI-172) is the per-feature single-glyph brand rendered
+	// in the top-left of every kanban card whose issue belongs to this
+	// feature. Empty when no glyph is set — the card just renders
+	// nothing in the slot. Validated at the store boundary to be either
+	// empty or exactly one grapheme cluster.
+	Emoji string `json:"emoji,omitempty"`
 	// ArchivedAt (BACI-68) is non-nil iff the feature is archived —
 	// hidden from default lists, but the row and its audit history
 	// remain. The auto-sweep stamps it when every child issue is
@@ -37,8 +43,14 @@ type Issue struct {
 	RepoID      int64     `json:"repo_id"`
 	Number      int64     `json:"number"`
 	Key         string    `json:"key"` // e.g. "MINI-42"
-	FeatureID   *int64    `json:"feature_id,omitempty"`
-	FeatureSlug string    `json:"feature_slug,omitempty"`
+	FeatureID    *int64 `json:"feature_id,omitempty"`
+	FeatureSlug  string `json:"feature_slug,omitempty"`
+	// FeatureEmoji (BACI-172) is the per-feature glyph denormalised
+	// onto the issue row via the feature join in issueSelect. Empty
+	// when the issue has no feature, or when the feature has no
+	// emoji set. The kanban / BoardCard render reads this directly
+	// so the card row can decorate without a second lookup.
+	FeatureEmoji string `json:"feature_emoji,omitempty"`
 	Title       string    `json:"title"`
 	Description string    `json:"description,omitempty"`
 	State       State     `json:"state"`

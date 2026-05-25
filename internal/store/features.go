@@ -26,7 +26,7 @@ func Slugify(s string) string {
 	return s
 }
 
-func (s *Store) CreateFeature(repoID int64, slug, title, description string) (*model.Feature, error) {
+func (s *Store) CreateFeature(repoID int64, slug, title, description, emoji string) (*model.Feature, error) {
 	slug, err := ValidateSlug(slug)
 	if err != nil {
 		return nil, err
@@ -39,9 +39,13 @@ func (s *Store) CreateFeature(repoID int64, slug, title, description string) (*m
 	if err != nil {
 		return nil, err
 	}
+	emoji, err = ValidateEmoji(emoji)
+	if err != nil {
+		return nil, err
+	}
 	res, err := s.DB.Exec(
-		`INSERT INTO features (uuid, repo_id, slug, title, description) VALUES (?, ?, ?, ?, ?)`,
-		identity.New(), repoID, slug, title, description,
+		`INSERT INTO features (uuid, repo_id, slug, title, description, emoji) VALUES (?, ?, ?, ?, ?, ?)`,
+		identity.New(), repoID, slug, title, description, emoji,
 	)
 	if err != nil {
 		return nil, err
@@ -50,7 +54,7 @@ func (s *Store) CreateFeature(repoID int64, slug, title, description string) (*m
 	return s.GetFeatureByID(id)
 }
 
-const featureCols = `id, uuid, repo_id, slug, title, description, archived_at, created_at, updated_at`
+const featureCols = `id, uuid, repo_id, slug, title, description, emoji, archived_at, created_at, updated_at`
 
 // FeatureFilter (BACI-68) is the filter struct for ListFeaturesFiltered.
 // The plain ListFeatures(repoID, includeDescription) signature predated
@@ -159,7 +163,7 @@ func (s *Store) SetFeatureArchived(featureID int64, archived bool) error {
 	return err
 }
 
-func (s *Store) UpdateFeature(id int64, title, description *string) error {
+func (s *Store) UpdateFeature(id int64, title, description, emoji *string) error {
 	sets := []string{}
 	args := []any{}
 	if title != nil {
@@ -176,6 +180,14 @@ func (s *Store) UpdateFeature(id int64, title, description *string) error {
 			return err
 		}
 		sets = append(sets, "description = ?")
+		args = append(args, clean)
+	}
+	if emoji != nil {
+		clean, err := ValidateEmoji(*emoji)
+		if err != nil {
+			return err
+		}
+		sets = append(sets, "emoji = ?")
 		args = append(args, clean)
 	}
 	if len(sets) == 0 {
@@ -259,6 +271,10 @@ func (s *Store) RenameFeatureSlug(uuid, newSlug string) error {
 type FeaturePatch struct {
 	Title       *string
 	Description *string
+	// Emoji (BACI-172) round-trips the per-feature glyph through sync;
+	// pointer so a nil patch leaves the field unchanged and an
+	// explicit-empty clears it.
+	Emoji *string
 }
 
 // UpdateFeatureByUUID applies a FeaturePatch to the feature
@@ -285,6 +301,14 @@ func (s *Store) UpdateFeatureByUUID(uuid string, p FeaturePatch) error {
 		sets = append(sets, "description = ?")
 		args = append(args, clean)
 	}
+	if p.Emoji != nil {
+		clean, err := ValidateEmoji(*p.Emoji)
+		if err != nil {
+			return err
+		}
+		sets = append(sets, "emoji = ?")
+		args = append(args, clean)
+	}
 	if len(sets) == 0 {
 		return nil
 	}
@@ -307,7 +331,7 @@ func (s *Store) UpdateFeatureByUUID(uuid string, p FeaturePatch) error {
 // CreateFeatureFromSync inserts a feature with a caller-supplied uuid,
 // for the sync import path. Mirrors CreateFeature but bypasses
 // auto-uuid generation and accepts createdAt/updatedAt.
-func (s *Store) CreateFeatureFromSync(repoID int64, uuid, slug, title, description string, createdAt, updatedAt sql.NullTime) (*model.Feature, error) {
+func (s *Store) CreateFeatureFromSync(repoID int64, uuid, slug, title, description, emoji string, createdAt, updatedAt sql.NullTime) (*model.Feature, error) {
 	if uuid == "" {
 		return nil, fmt.Errorf("CreateFeatureFromSync: uuid is required")
 	}
@@ -323,9 +347,13 @@ func (s *Store) CreateFeatureFromSync(repoID int64, uuid, slug, title, descripti
 	if err != nil {
 		return nil, err
 	}
-	q := `INSERT INTO features (uuid, repo_id, slug, title, description`
-	vals := `?, ?, ?, ?, ?`
-	args := []any{uuid, repoID, slug, title, description}
+	emoji, err = ValidateEmoji(emoji)
+	if err != nil {
+		return nil, err
+	}
+	q := `INSERT INTO features (uuid, repo_id, slug, title, description, emoji`
+	vals := `?, ?, ?, ?, ?, ?`
+	args := []any{uuid, repoID, slug, title, description, emoji}
 	if createdAt.Valid {
 		q += `, created_at`
 		vals += `, ?`
@@ -350,7 +378,7 @@ func scanFeature(row rowScanner) (*model.Feature, error) {
 		f          model.Feature
 		archivedAt sql.NullTime
 	)
-	err := row.Scan(&f.ID, &f.UUID, &f.RepoID, &f.Slug, &f.Title, &f.Description, &archivedAt, &f.CreatedAt, &f.UpdatedAt)
+	err := row.Scan(&f.ID, &f.UUID, &f.RepoID, &f.Slug, &f.Title, &f.Description, &f.Emoji, &archivedAt, &f.CreatedAt, &f.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
