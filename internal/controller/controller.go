@@ -210,6 +210,124 @@ func ArchiveSweepIfLeader(s *store.Store, el *leader.Elector, log *slog.Logger) 
 	}
 }
 
+// FollowOnSweepIfLeader (BACI-179) runs one combined follow-on
+// lifecycle pass if el holds the lease. Orphan-cancel first, then
+// promote — design §4 / §6 picks this single-helper / single-
+// goroutine shape over two parallel sweeps so an issue that's both
+// "terminal" and "predecessor settled" cancels before it can promote
+// (avoiding a wasted matcher bind one tick later). One audit row per
+// affected dispatch is written; same logged-and-swallowed contract as
+// the other …IfLeader helpers — sweeping is mechanical janitor work,
+// and a transient DB blip must not propagate up to the caller's tick
+// handler. A nil store or elector is a no-op.
+//
+// The cancel sweep is attributed to ControllerActor on the orphan
+// path; the user-driven cancel from CancelFollowOnDispatch writes its
+// own `agent.followon.cancel` row at client time stamped with the
+// requesting actor, so `bacio history --op agent.followon.cancel`
+// distinguishes the two paths by Actor (`bacio-controller` vs the
+// user / agent slug).
+func FollowOnSweepIfLeader(s *store.Store, el *leader.Elector, log *slog.Logger) {
+	if s == nil || el == nil || !el.CurrentState().AmLeader {
+		return
+	}
+	cancelled, err := s.CancelOrphanedFollowOns()
+	if err != nil {
+		loggerOrDefault(log).Warn("bacio: orphan-cancel follow-on sweep failed", "err", err)
+		// Fall through — a partial slice is still worth auditing, and the
+		// promote pass below is independent of the cancel pass.
+	}
+	for _, d := range cancelled {
+		recordFollowOnCancelAudit(s, d, log)
+	}
+	promoted, err := s.PromoteReadyFollowOns()
+	if err != nil {
+		loggerOrDefault(log).Warn("bacio: promote follow-on sweep failed", "err", err)
+	}
+	for _, d := range promoted {
+		recordFollowOnPromoteAudit(s, d, log)
+	}
+}
+
+// recordFollowOnPromoteAudit writes one `agent.followon.promote` row
+// per row the promote sweep cleared. Mirrors recordBindAudit's
+// per-row shape: TargetID = the cleared follow-on (not the parent),
+// TargetLabel = issue key. Failures are logged at warn level and
+// never propagate — losing one audit row is better than rolling back
+// the column-clear the sweep already committed.
+func recordFollowOnPromoteAudit(s *store.Store, d *model.AgentDispatch, log *slog.Logger) {
+	if s == nil || d == nil {
+		return
+	}
+	id := d.ID
+	repoID := d.RepoID
+	entry := model.HistoryEntry{
+		Actor:       model.ControllerActor,
+		Op:          "agent.followon.promote",
+		Kind:        "agent",
+		RepoID:      &repoID,
+		RepoPrefix:  d.RepoPrefix,
+		TargetID:    &id,
+		TargetLabel: d.IssueKey,
+		Details:     followOnDetails(d),
+	}
+	if err := s.RecordHistory(entry); err != nil {
+		loggerOrDefault(log).Warn("bacio: failed to record agent.followon.promote audit",
+			"dispatch_id", id, "err", err)
+	}
+}
+
+// recordFollowOnCancelAudit writes one `agent.followon.cancel` row
+// per row the orphan-cancel sweep cancelled. Same shape as the
+// promote helper; the Actor distinguishes the sweep
+// (`bacio-controller`) from the user-driven cancel path which lands
+// the same op with the requesting actor stamped instead.
+func recordFollowOnCancelAudit(s *store.Store, d *model.AgentDispatch, log *slog.Logger) {
+	if s == nil || d == nil {
+		return
+	}
+	id := d.ID
+	repoID := d.RepoID
+	entry := model.HistoryEntry{
+		Actor:       model.ControllerActor,
+		Op:          "agent.followon.cancel",
+		Kind:        "agent",
+		RepoID:      &repoID,
+		RepoPrefix:  d.RepoPrefix,
+		TargetID:    &id,
+		TargetLabel: d.IssueKey,
+		Details:     followOnDetails(d),
+	}
+	if err := s.RecordHistory(entry); err != nil {
+		loggerOrDefault(log).Warn("bacio: failed to record agent.followon.cancel audit",
+			"dispatch_id", id, "err", err)
+	}
+}
+
+// followOnDetails composes the audit-log Details string for the
+// follow-on ops (promote / cancel / queue). Mirrors bindDetails's
+// comma-separated k=v convention; carries dispatch id, issue key,
+// mode, and the parent dispatch id (when still set — a promote sweep
+// clears the parent FK before this is read on the post-sweep row, so
+// promote audit rows naturally omit the parent_dispatch_id field).
+// Empty fields are omitted, not stamped as `=`.
+func followOnDetails(d *model.AgentDispatch) string {
+	if d == nil {
+		return ""
+	}
+	parts := []string{fmt.Sprintf("dispatch_id=%d", d.ID)}
+	if d.IssueKey != "" {
+		parts = append(parts, "issue="+d.IssueKey)
+	}
+	if d.Mode != "" {
+		parts = append(parts, "mode="+string(d.Mode))
+	}
+	if d.QueuedAfterDispatchID != nil {
+		parts = append(parts, fmt.Sprintf("parent_dispatch_id=%d", *d.QueuedAfterDispatchID))
+	}
+	return strings.Join(parts, ",")
+}
+
 // SyncIfLeader runs one [bsync.BackgroundRunner] tick if el holds the
 // lease (BACI-89). Same logged-and-swallowed error contract as the
 // other …IfLeader helpers — continual git-sync is best-effort mirror
@@ -376,6 +494,29 @@ func (c *Controller) Start(emit func(leader.State)) {
 			select {
 			case <-ticker.C:
 				ArchiveSweepIfLeader(c.st, c.el, c.log)
+			case <-done:
+				return
+			}
+		}
+	}()
+
+	// BACI-179: follow-on dispatch lifecycle sweep. Rides
+	// QueueMatchInterval (5s) — same cadence as the matcher so a
+	// dormant row promotes on tick N and binds on tick N+1, keeping
+	// the end-to-end "release the claim → next worker picks up the
+	// follow-on" latency tight (~6s typical, ~10s worst-case). One
+	// helper, one goroutine — design §6 picks this over two parallel
+	// sweeps so an issue that's both terminal and "predecessor
+	// settled" cancels before it can promote.
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		ticker := time.NewTicker(store.QueueMatchInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				FollowOnSweepIfLeader(c.st, c.el, c.log)
 			case <-done:
 				return
 			}
