@@ -73,13 +73,18 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, o
   // — the cancel button would either no-op (next tick re-renders
   // without it) or surface a confusing error toast.
   const waitingDelivered = waiting && waitingState.kind === 'delivered';
-  const dispatchDisabled = taken || waiting;
   const waitingLabel = waiting ? waitingStateLabel(waitingState) : '';
 
   // BACI-131: the quick-eval composer is the right-edge affordance on
   // a taken card. A taken card disables the zap dropdown anyway, so
   // taking the slot replaces a dead affordance with a live one.
-  const hasFooter = validPrompts.length > 0 || card.assignees.length > 0 || waiting || taken;
+  // BACI-174: also surface the eval composer on cards with at least
+  // one attached .jsonl transcript, even after the agent releases its
+  // claim — without this gate, eval notes on a since-released card are
+  // invisible from the board (the BACI-141 chip is read-only).
+  const hasTranscript = (card.transcriptDocCount || 0) > 0;
+  const showEvalAffordance = taken || hasTranscript;
+  const hasFooter = validPrompts.length > 0 || card.assignees.length > 0 || waiting || showEvalAffordance;
 
   // BACI-60 meta line — only on taken cards, only when at least one of
   // verb or tasks is populated. Hidden entirely otherwise so cards that
@@ -249,74 +254,89 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, onDragStart, o
                 />
               )}
             </span>
-          ) : taken ? (
-            // BACI-131: replace the disabled zap dropdown with the
-            // quick-eval affordance — only on taken cards. Untaken
-            // cards keep the zap menu below; the eval composer is the
-            // "watching an agent work" surface.
-            <Tooltip label="Add a quick eval note">
-              <button
-                type="button"
-                className="mk-card-eval-btn"
-                aria-label="Add a quick eval comment"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setEvalOpen(true);
-                }}
-              >
-                <Icon name="comment" />
-              </button>
-            </Tooltip>
-          ) : validPrompts.length > 0 && (
-            <DropdownMenu.Root>
-              <DropdownMenu.Trigger asChild>
-                <button
-                  className="mk-card-action-btn"
-                  aria-label={taken ? 'An agent is working on this issue' : 'Dispatch a prompt'}
-                  disabled={dispatchDisabled}
-                  title={taken ? 'An agent is working on this issue' : undefined}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <Icon name="zap" />
-                </button>
-              </DropdownMenu.Trigger>
-              <DropdownMenu.Portal>
-                <DropdownMenu.Content
-                  className="mk-card-action-menu"
-                  align="end"
-                  side="top"
-                  sideOffset={4}
-                  collisionPadding={8}
-                >
-                  {validPrompts.map(p => (
-                    <DropdownMenu.Item
-                      key={p.mode}
-                      className="mk-card-action-item"
-                      onSelect={() => onDispatch(card.key, p.mode)}
+          ) : (
+            // BACI-131 introduced the eval button as a taken-only
+            // replacement for the disabled zap dropdown.
+            // BACI-174 extends it: any card with attached .jsonl
+            // transcripts also gets the eval composer, even after the
+            // agent releases — otherwise eval notes on a since-released
+            // card are invisible from the board.
+            //
+            // Precedence: on a taken card the zap is disabled, so we
+            // render the eval button alone (unchanged from BACI-131).
+            // On a non-taken card with transcripts, render eval AND
+            // zap side-by-side (option b in the brief) — having an
+            // historical transcript doesn't preclude dispatching a new
+            // prompt (e.g. fix-review). When neither condition holds,
+            // fall back to the zap-only menu.
+            <>
+              {showEvalAffordance && (
+                <Tooltip label="Add a quick eval note">
+                  <button
+                    type="button"
+                    className="mk-card-eval-btn"
+                    aria-label="Add a quick eval comment"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEvalOpen(true);
+                    }}
+                  >
+                    <Icon name="comment" />
+                  </button>
+                </Tooltip>
+              )}
+              {!taken && validPrompts.length > 0 && (
+                <DropdownMenu.Root>
+                  <DropdownMenu.Trigger asChild>
+                    <button
+                      className="mk-card-action-btn"
+                      aria-label="Dispatch a prompt"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      {/*
-                        BACI-67: render the imperative actionLabel
-                        ("Plan", "Design") so the dispatch button
-                        reads as a call to action. label (gerund —
-                        "Planning") is the fallback for templates
-                        that haven't set the override and aren't
-                        built-in (no derivation yet client-side; the
-                        store seed handles built-ins).
-                      */}
-                      {p.actionLabel || p.label}
-                    </DropdownMenu.Item>
-                  ))}
-                </DropdownMenu.Content>
-              </DropdownMenu.Portal>
-            </DropdownMenu.Root>
+                      <Icon name="zap" />
+                    </button>
+                  </DropdownMenu.Trigger>
+                  <DropdownMenu.Portal>
+                    <DropdownMenu.Content
+                      className="mk-card-action-menu"
+                      align="end"
+                      side="top"
+                      sideOffset={4}
+                      collisionPadding={8}
+                    >
+                      {validPrompts.map(p => (
+                        <DropdownMenu.Item
+                          key={p.mode}
+                          className="mk-card-action-item"
+                          onSelect={() => onDispatch(card.key, p.mode)}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {/*
+                            BACI-67: render the imperative actionLabel
+                            ("Plan", "Design") so the dispatch button
+                            reads as a call to action. label (gerund —
+                            "Planning") is the fallback for templates
+                            that haven't set the override and aren't
+                            built-in (no derivation yet client-side; the
+                            store seed handles built-ins).
+                          */}
+                          {p.actionLabel || p.label}
+                        </DropdownMenu.Item>
+                      ))}
+                    </DropdownMenu.Content>
+                  </DropdownMenu.Portal>
+                </DropdownMenu.Root>
+              )}
+            </>
           )}
         </footer>
       )}
-      {evalOpen && taken && (
+      {evalOpen && showEvalAffordance && (
         // BACI-131 quick-eval inline composer. Cmd/Ctrl+Enter submits,
         // Escape cancels. Wrapper stops propagation so clicks inside
         // the composer don't open the drawer.
+        // BACI-174: the same composer is now reachable on cards with
+        // attached transcripts (see showEvalAffordance derivation).
         <div className="mk-card-eval-composer" onClick={(e) => e.stopPropagation()}>
           <textarea
             ref={evalRef}
