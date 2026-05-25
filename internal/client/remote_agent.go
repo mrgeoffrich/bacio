@@ -238,6 +238,15 @@ func (c *remoteClient) WaitingDispatchForIssue(ctx context.Context, repo *model.
 	return nil, remoteAgentNotSupported("waiting-dispatch-for-issue")
 }
 
+// InflightByModeForRepo (BACI-145) is local-only — the kanban
+// surfaces that need this bulk count drive the local store directly.
+// A REST equivalent (e.g. GET /repos/{prefix}/agents/inflight-by-mode)
+// could land alongside the rest of the bulk dispatch reads if web
+// mode ever drives the kanban directly.
+func (c *remoteClient) InflightByModeForRepo(ctx context.Context, repo *model.Repo) (map[model.DispatchMode]int, error) {
+	return nil, remoteAgentNotSupported("inflight-by-mode")
+}
+
 // DrainDispatches is the side-effect-bearing "list pending+delivered
 // AND mark pending → delivered" call used by the bacio hook to feed an
 // agent's context. The hook talks to the local store directly (it

@@ -5,6 +5,7 @@
 package api
 
 import (
+	"github.com/mrgeoffrich/bacio/internal/boardcards"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
@@ -117,7 +118,11 @@ type IssueBrief struct {
 	// the derived "an agent is actively holding this" signal.
 	Claimants []*model.AgentClaim `json:"claimants"`
 	Taken     bool                `json:"taken"`
-	Warnings  []string            `json:"warnings"`
+	// WaitingState (BACI-145) explains why the issue is waiting on a
+	// queued / delivered dispatch — drives the IssueLockBanner copy.
+	// Absent when the issue isn't waiting (the common case).
+	WaitingState *boardcards.WaitingState `json:"waiting_state,omitempty"`
+	Warnings     []string                 `json:"warnings"`
 }
 
 // BriefDoc mirrors internal/cli/issue.go:briefDoc — one linked document

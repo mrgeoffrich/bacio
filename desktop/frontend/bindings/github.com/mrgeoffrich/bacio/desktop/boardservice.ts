@@ -112,11 +112,11 @@ export function CancelSessionQuestion(id: number): $CancellablePromise<model$0.S
  * not an error — the spinner may have cleared between the click and
  * the call landing — the cancel is a no-op and returns nil.
  * 
- * BACI-130: cancel-after-delivery is now rejected at the store
- * boundary. The desktop card hides the cancel affordance via the
- * new BoardCard.WaitingDispatchDelivered field, but a stale render
- * can still send the click in — swallow the recognisable error
- * fragment the same way the 404 race-clear path returns nil.
+ * BACI-130 / BACI-145: cancel-after-delivery is now rejected at the
+ * store boundary. The desktop card hides the cancel affordance when
+ * BoardCard.WaitingState.Kind == "delivered", but a stale render can
+ * still send the click in — swallow the recognisable error fragment
+ * the same way the 404 race-clear path returns nil.
  */
 export function CancelWaitingDispatch(repoPrefix: string, issueKey: string): $CancellablePromise<void> {
     return $Call.ByID(2200863224, repoPrefix, issueKey);

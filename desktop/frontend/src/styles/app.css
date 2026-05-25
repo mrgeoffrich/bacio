@@ -231,6 +231,21 @@ body { margin: 0; }
 .mk-card-spinner-btn:focus-visible {
   outline: 2px solid var(--border-focus); outline-offset: 2px;
 }
+/* BACI-145: the inline explanation that travels with the spinner.
+   Sits to the left of the spinner inside .mk-card-wait-group so the
+   user sees *why* the card is waiting at a glance. Single-line with
+   ellipsis so a long mode name truncates instead of blowing out the
+   card width; muted colour keeps the spinner the primary attention
+   draw. */
+.mk-card-wait-group {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-left: auto;
+  min-width: 0;
+}
+.mk-card-spinner-label {
+  font-family: var(--font-mono); font-size: 11px; color: var(--fg-3);
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .mk-card-top { display: flex; align-items: center; gap: 6px; }
 .mk-card-id { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); }
 .mk-card-title { margin: 0; font-size: 14px; font-weight: 500; line-height: 1.35; color: var(--fg-1); }

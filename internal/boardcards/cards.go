@@ -81,32 +81,70 @@ func IsCompletedColumn(s model.State) bool {
 	return s == model.StateDone || s == model.StateCancelled
 }
 
+// WaitingKind classifies WHY a card's queued / delivered dispatch
+// hasn't yet flowed into an open claim (BACI-145). The three values
+// map to the three distinct waiting reasons the kanban surfaces:
+//
+//   - WaitingNoAgent: dispatch is queued, no free agent in the
+//     candidate pool — the matcher hasn't bound it yet.
+//   - WaitingBlockedByMode: dispatch is queued, the matcher *could*
+//     bind it except the template's concurrency_limit is full for
+//     this (repo, mode).
+//   - WaitingDelivered: the worker has the Task in hand (BACI-130 sub-
+//     state). The spinner stays but the cancel affordance drops.
+//
+// Stable string values so the wire shape doesn't churn between
+// frontend re-deploys and so the TS helper can switch on the same
+// literals.
+type WaitingKind string
+
+const (
+	WaitingNoAgent       WaitingKind = "queued_no_agent"
+	WaitingBlockedByMode WaitingKind = "queued_blocked"
+	WaitingDelivered     WaitingKind = "delivered"
+)
+
+// WaitingState (BACI-145) carries the reason a card's queued or
+// delivered dispatch is waiting, plus — when applicable — the mode
+// the cap or worker job is on. Drives the explanatory label next to
+// the spinner on the kanban card, the issue workspace lock banner,
+// and the TUI board's per-card waiting label.
+//
+// Mode and ActionLabel are populated when WaitingKind is
+// WaitingBlockedByMode (the cap is on this mode) or WaitingDelivered
+// (the worker is running this mode). Empty for WaitingNoAgent — the
+// label doesn't name a mode in that case.
+type WaitingState struct {
+	Kind        WaitingKind        `json:"kind"`
+	Mode        model.DispatchMode `json:"mode,omitempty"`
+	ActionLabel string             `json:"actionLabel,omitempty"`
+}
+
 // BoardCard is one kanban card — one bacio issue, shaped for the
 // imported UI kit. Fields beyond the issue itself: Taken (an agent
-// holds an open claim on this issue), WaitingForClaim (a dispatch is
-// queued but no claim yet), ActiveVerb (the lower-cased
+// holds an open claim on this issue), WaitingState (a dispatch is
+// queued or delivered but no claim yet — the struct carries why and
+// the mode involved, BACI-145), ActiveVerb (the lower-cased
 // prompt-template label of the newest open claim's dispatch — e.g.
 // "designing", "planning"), and TodosDone / TodosTotal (the TodoWrite
 // progress of the claiming session).
 type BoardCard struct {
-	Key             string   `json:"key"`
-	Column          string   `json:"column"`
-	ColumnLabel     string   `json:"columnLabel"`
-	Title           string   `json:"title"`
-	Tags            []string `json:"tags"`
-	Assignees       []string `json:"assignees"`
-	Claude          bool     `json:"claude"`
-	Taken           bool     `json:"taken"`
-	WaitingForClaim bool     `json:"waitingForClaim"`
-	// WaitingDispatchDelivered (BACI-130) is true when the issue's
-	// active (queued / pending / delivered) dispatch is already in the
-	// `delivered` state — the worker has the Task in hand. Drives the
-	// spinner-cancel UI gate: cards with this flag set render the
-	// spinner glyph without the click affordance, because cancelling a
-	// delivered dispatch is now rejected at the store boundary.
-	// Omitted from JSON when false (common case) so the wire payload
-	// doesn't grow on untaken / queued / pending cards.
-	WaitingDispatchDelivered bool `json:"waitingDispatchDelivered,omitempty"`
+	Key         string   `json:"key"`
+	Column      string   `json:"column"`
+	ColumnLabel string   `json:"columnLabel"`
+	Title       string   `json:"title"`
+	Tags        []string `json:"tags"`
+	Assignees   []string `json:"assignees"`
+	Claude      bool     `json:"claude"`
+	Taken       bool     `json:"taken"`
+	// WaitingState (BACI-145) explains a card's pre-claim spinner.
+	// nil when the issue isn't waiting on a dispatch (the common case);
+	// non-nil when iss.WaitingForClaim is true, carrying the
+	// no-agent / blocked-by-cap / delivered distinction plus the mode
+	// the cap or worker job is on. Replaces the older
+	// `waitingForClaim` + `waitingDispatchDelivered` booleans on the
+	// wire so the React tree and TUI render the same label.
+	WaitingState *WaitingState `json:"waitingState,omitempty"`
 	// ActiveVerb is the lower-cased display label of the prompt template
 	// behind the newest open claim's most recent non-cancelled dispatch
 	// — e.g. "designing", "planning", or a custom template's lowered
@@ -222,24 +260,37 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 		return nil, err
 	}
 
-	// BACI-130: read every dispatch in scope once and reuse the slice
-	// for both the per-(session, issue) ActiveVerb derivation
-	// (`pickActiveMode`) and the new per-issue `WaitingDispatchDelivered`
-	// flag. The flag drives the kanban spinner-cancel UI: a card whose
-	// active dispatch has been delivered hides the cancel affordance,
-	// because cancelling a delivered dispatch is rejected at the store
-	// boundary now. RepoDispatches is already newest-first.
+	// BACI-130 / BACI-145: read every dispatch in scope once and reuse
+	// the slice for both the per-(session, issue) ActiveVerb derivation
+	// (`pickActiveMode`) and the per-issue WaitingState (the spinner
+	// label + cancel-gate). RepoDispatches is already newest-first; the
+	// per-repo inflight map (BACI-51's concurrency-cap predicate) feeds
+	// the "blocked by mode" WaitingKind below.
 	var allDispatches []*model.AgentDispatch
+	inflightByMode := make(map[int64]map[model.DispatchMode]int, len(repos))
 	for _, r := range repos {
 		ds, err := c.RepoDispatches(ctx, r)
 		if err != nil {
 			return nil, err
 		}
 		allDispatches = append(allDispatches, ds...)
+		counts, err := c.InflightByModeForRepo(ctx, r)
+		if err != nil {
+			return nil, err
+		}
+		inflightByMode[r.ID] = counts
 	}
-	deliveredByIssueID := waitingDeliveredByIssueID(allDispatches)
+	activeByIssueID := ActiveDispatchByIssueID(allDispatches)
 
-	enrichByKey, err := enrichmentByIssueKey(ctx, c, claims, allDispatches)
+	// Templates are needed twice: once for the verb derivation inside
+	// enrichmentByIssueKey, and once for WaitingState's ActionLabel.
+	// Read once and pass both consumers the same slice.
+	templates, err := c.ListPromptTemplates(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	enrichByKey, err := enrichmentByIssueKey(ctx, c, claims, allDispatches, templates)
 	if err != nil {
 		return nil, err
 	}
@@ -276,24 +327,24 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 			tags = []string{}
 		}
 		e := enrichByKey[iss.Key]
+		ws := DeriveWaitingState(iss, activeByIssueID[iss.ID], inflightByMode[iss.RepoID], templates)
 		cards = append(cards, BoardCard{
-			Key:                      iss.Key,
-			Column:                   string(iss.State),
-			ColumnLabel:              StateLabel(iss.State),
-			Title:                    iss.Title,
-			Tags:                     tags,
-			Assignees:                assigneeList(iss.Assignee),
-			Claude:                   iss.Assignee == "claude",
-			Taken:                    e.taken,
-			WaitingForClaim:          iss.WaitingForClaim,
-			WaitingDispatchDelivered: iss.WaitingForClaim && deliveredByIssueID[iss.ID],
-			ActiveVerb:               e.verb,
-			TodosDone:                e.todosDone,
-			TodosTotal:               e.todosTotal,
-			Todos:                    e.todos,
-			OpenQuestions:            e.questions,
-			Archived:                 iss.ArchivedAt != nil,
-			BlockedBy:                blockedByID[iss.ID],
+			Key:           iss.Key,
+			Column:        string(iss.State),
+			ColumnLabel:   StateLabel(iss.State),
+			Title:         iss.Title,
+			Tags:          tags,
+			Assignees:     assigneeList(iss.Assignee),
+			Claude:        iss.Assignee == "claude",
+			Taken:         e.taken,
+			WaitingState:  ws,
+			ActiveVerb:    e.verb,
+			TodosDone:     e.todosDone,
+			TodosTotal:    e.todosTotal,
+			Todos:         e.todos,
+			OpenQuestions: e.questions,
+			Archived:      iss.ArchivedAt != nil,
+			BlockedBy:     blockedByID[iss.ID],
 		})
 	}
 
@@ -362,11 +413,16 @@ type cardEnrichment struct {
 // the BACI-130 delivered-flag derivation can share the same query);
 // resolve the dispatch's mode slug to the prompt template's display
 // label, lower-cased; read the session's TodoWrite mirror counts.
+//
+// templates is the same slice Assemble passes the WaitingState
+// deriver — bulk-read once and shared so the assembler doesn't hit
+// the store twice for the same data.
 func enrichmentByIssueKey(
 	ctx context.Context,
 	c client.Client,
 	claims []*model.AgentClaim,
 	allDispatches []*model.AgentDispatch,
+	templates []*store.PromptTemplate,
 ) (map[string]cardEnrichment, error) {
 	enrich := make(map[string]cardEnrichment, len(claims))
 	if len(claims) == 0 {
@@ -463,11 +519,8 @@ func enrichmentByIssueKey(
 	// A template renamed after dispatch keeps the old slug on the
 	// dispatch row, so we tolerate "not found" and silently drop
 	// the verb in that case (per CLAUDE.md's "treat an unrecognised
-	// slug as removed, not error out").
-	templates, err := c.ListPromptTemplates(ctx)
-	if err != nil {
-		return nil, err
-	}
+	// slug as removed, not error out"). The templates slice is shared
+	// with WaitingState derivation upstream.
 	verbBySlug := make(map[string]string, len(templates))
 	for _, t := range templates {
 		if t == nil || t.Name == "" {
@@ -530,41 +583,160 @@ func enrichmentByIssueKey(
 	return enrich, nil
 }
 
-// waitingDeliveredByIssueID maps issue id → true when the issue's
-// active (queued / pending / delivered) dispatch is in the `delivered`
-// state. Drives BoardCard.WaitingDispatchDelivered, which gates the
-// kanban spinner-cancel UI (BACI-130): a card whose active dispatch
-// has been delivered hides the cancel affordance because the store
-// rejects cancel-after-delivery now.
+// ActiveDispatchByIssueID maps issue id → the issue's "active"
+// dispatch — the newest queued / pending / delivered row per issue.
+// Used by Assemble to derive each card's WaitingState (BACI-145):
+// queued/pending → either no-agent or blocked-by-cap (the deriver
+// disambiguates against the per-(repo, mode) inflight counts);
+// delivered → BACI-130's sub-state where the worker has the Task.
 //
-// "Active" is the newest non-cancelled / non-acked dispatch per issue
-// — same shape as Store.WaitingDispatchForIssue, computed in-memory
-// from the dispatches slice the caller already read. `allDispatches`
-// is newest-first (RepoDispatches' contract), so the first matching
-// row per issue wins.
-func waitingDeliveredByIssueID(allDispatches []*model.AgentDispatch) map[int64]bool {
-	out := make(map[int64]bool)
-	seen := make(map[int64]bool)
+// `allDispatches` is newest-first (RepoDispatches' contract), so the
+// first qualifying row per issue wins. Cancelled / acked rows don't
+// establish "active" — keep walking newer-to-older for the same
+// issue.
+//
+// Exported so the TUI board reload() can derive WaitingStates using
+// the same rules the React surface uses without reaching into the
+// assembler.
+func ActiveDispatchByIssueID(allDispatches []*model.AgentDispatch) map[int64]*model.AgentDispatch {
+	out := make(map[int64]*model.AgentDispatch)
 	for _, d := range allDispatches {
 		if d == nil || d.IssueID == nil {
 			continue
 		}
 		id := *d.IssueID
-		if seen[id] {
+		if _, seen := out[id]; seen {
 			continue
 		}
 		switch d.Status {
-		case model.DispatchQueued, model.DispatchPending:
-			seen[id] = true
-			out[id] = false
-		case model.DispatchDelivered:
-			seen[id] = true
-			out[id] = true
+		case model.DispatchQueued, model.DispatchPending, model.DispatchDelivered:
+			out[id] = d
 		}
-		// Cancelled / acked rows don't establish the "active" dispatch
-		// — keep walking newer-to-older for the same issue.
 	}
 	return out
+}
+
+// DeriveWaitingState (BACI-145) returns the per-issue WaitingState
+// that drives the spinner label on the kanban card and the lock
+// banner in the issue workspace. nil when the issue isn't waiting on
+// a dispatch (the common case for free or already-claimed cards).
+//
+// The three kinds:
+//   - WaitingDelivered: active dispatch is `delivered`. The worker
+//     has the Task; the card shows "Worker has the <verb> job".
+//   - WaitingBlockedByMode: active dispatch is queued, and the
+//     per-(repo, mode) in-flight count is at the template's
+//     concurrency_limit. The matcher would refuse to bind it on this
+//     tick — the cap is the bottleneck. Card shows "Waiting on
+//     <verb> job to finish".
+//   - WaitingNoAgent: active dispatch is queued and the cap isn't
+//     the bottleneck. The candidate pool is empty (no free agent).
+//     Card shows "Waiting for an available agent".
+//
+// Both Mode and ActionLabel are populated for Delivered and
+// BlockedByMode; empty for NoAgent (the label doesn't name a mode).
+// ActionLabel is the imperative form from the template
+// (template.ActionLabel override, else model.BuiltinTemplateActionLabel
+// for built-ins, else model.DeriveActionLabel(Name) for user
+// templates without an override). Mirrors the dispatch dropdown so
+// "Ship it" / "Plan" / "Fix review" wording stays in lockstep.
+//
+// Returns nil when iss is nil or iss.WaitingForClaim is false. A
+// WaitingForClaim flag without a matching active dispatch row (rare —
+// transitional state between cancel and the next poll) also returns
+// nil so the card stops rendering the spinner.
+func DeriveWaitingState(
+	iss *model.Issue,
+	active *model.AgentDispatch,
+	inflightByMode map[model.DispatchMode]int,
+	templates []*store.PromptTemplate,
+) *WaitingState {
+	if iss == nil || !iss.WaitingForClaim || active == nil {
+		return nil
+	}
+	switch active.Status {
+	case model.DispatchDelivered:
+		return &WaitingState{
+			Kind:        WaitingDelivered,
+			Mode:        active.Mode,
+			ActionLabel: actionLabelForMode(active.Mode, templates),
+		}
+	case model.DispatchQueued, model.DispatchPending:
+		// "Blocked by cap" if the per-(repo, mode) inflight count is
+		// at or above the template's concurrency_limit. The matcher
+		// gates the same way (`if limit > 0 && inflight >= limit`),
+		// so the label is accurate. limit == 0 means "no cap" — never
+		// blocked.
+		limit := concurrencyLimitFor(active.Mode, templates)
+		if limit > 0 && inflightByMode[active.Mode] >= limit {
+			return &WaitingState{
+				Kind:        WaitingBlockedByMode,
+				Mode:        active.Mode,
+				ActionLabel: actionLabelForMode(active.Mode, templates),
+			}
+		}
+		return &WaitingState{Kind: WaitingNoAgent}
+	}
+	// Cancelled / acked rows shouldn't appear (activeDispatchByIssueID
+	// filters them out), but if one does, treat it as "not waiting".
+	return nil
+}
+
+// actionLabelForMode resolves the imperative action label for a
+// dispatch mode by walking the template list. Mirrors the dropdown
+// resolution in the React tree:
+//
+//   - template.ActionLabel override (explicit user / seed value) wins.
+//   - else BuiltinTemplateActionLabel(slug) for built-in slugs
+//     (returns "" for the reserved _dispatch_preamble row).
+//   - else DeriveActionLabel(Name) for user templates without an
+//     override.
+//
+// Returns "" when the slug isn't represented in templates (e.g. the
+// template was renamed/deleted after dispatch). The UI then renders
+// the label without naming a mode — better than a stale or fabricated
+// verb.
+func actionLabelForMode(mode model.DispatchMode, templates []*store.PromptTemplate) string {
+	if mode == "" {
+		return ""
+	}
+	slug := string(mode)
+	for _, t := range templates {
+		if t == nil || t.Slug != slug {
+			continue
+		}
+		if t.ActionLabel != "" {
+			return t.ActionLabel
+		}
+		if t.IsBuiltin {
+			if l := model.BuiltinTemplateActionLabel(slug); l != "" {
+				return l
+			}
+		}
+		return model.DeriveActionLabel(t.Name)
+	}
+	// Unknown slug — fall back to the built-in lookup so a deleted
+	// user template that shadowed a built-in still gets a sensible
+	// label.
+	return model.BuiltinTemplateActionLabel(slug)
+}
+
+// concurrencyLimitFor returns the per-(repo, mode) concurrency cap
+// the matcher enforces. 0 = unlimited (the matcher never gates), so
+// DeriveWaitingState treats it as "never blocked by cap". An unknown
+// slug also returns 0 — no cap means no blocking-by-cap label.
+func concurrencyLimitFor(mode model.DispatchMode, templates []*store.PromptTemplate) int {
+	if mode == "" {
+		return 0
+	}
+	slug := string(mode)
+	for _, t := range templates {
+		if t == nil || t.Slug != slug {
+			continue
+		}
+		return t.ConcurrencyLimit
+	}
+	return 0
 }
 
 // pickActiveDispatch returns the most-recent non-cancelled dispatch

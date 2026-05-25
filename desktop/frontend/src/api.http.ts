@@ -135,6 +135,27 @@ export interface BoardCardBlocker {
   state: string; // todo | in_progress | needs_action | in_review — open-state set
 }
 
+// WaitingKind (BACI-145) classifies why a card's queued / delivered
+// dispatch hasn't yet flowed into an open claim. The three string
+// literals are the same values the Go side emits — switch on them
+// when picking the label.
+export type WaitingKind = 'queued_no_agent' | 'queued_blocked' | 'delivered';
+
+// WaitingState (BACI-145) carries the reason a card's queued or
+// delivered dispatch is waiting, plus — when applicable — the mode
+// the cap or worker job is on. Drives the inline label next to the
+// spinner on the kanban card and the issue workspace lock banner.
+//
+// mode + actionLabel are populated when kind is 'queued_blocked' (the
+// cap is on this mode) or 'delivered' (the worker is running this
+// mode). Empty for 'queued_no_agent' — the label doesn't name a mode
+// in that case.
+export interface WaitingState {
+  kind: WaitingKind;
+  mode?: string;
+  actionLabel?: string;
+}
+
 export interface BoardCard {
   key: string;
   column: string;
@@ -144,14 +165,12 @@ export interface BoardCard {
   assignees: string[];
   claude: boolean;
   taken: boolean;
-  waitingForClaim: boolean;
-  // BACI-130: true when the issue's active dispatch is already in the
-  // `delivered` state — the worker has the Task in hand and the store
-  // rejects cancel-after-delivery. The kanban renders the spinner
-  // glyph without the click affordance when this is true. Absent
-  // (omitempty server-side) when false, so older payloads that don't
-  // carry the field render as today.
-  waitingDispatchDelivered?: boolean;
+  // BACI-145: WaitingState explains a card's pre-claim spinner. Absent
+  // (omitempty server-side) when the card isn't waiting on a dispatch
+  // — the common case. Replaces the older `waitingForClaim` +
+  // `waitingDispatchDelivered` booleans so the React tree and the TUI
+  // render the same label.
+  waitingState?: WaitingState;
   // BACI-60 enrichment: lower-cased prompt-template label of the
   // newest open claim's most recent non-cancelled dispatch (empty
   // when no verb can be derived) and the claiming session's
@@ -282,6 +301,12 @@ export interface RelationsDTO {
 // emits the snake_case internal/client/views.go::IssueBrief shape;
 // reshapeApiBrief() collapses it into this shape so React reads the
 // same camelCase fields in both modes.
+//
+// BACI-145: waitingState carries the explanatory reason (no-agent /
+// blocked-by-cap / delivered) the IssueLockBanner renders next to the
+// spinner. waitingForClaim stays as the plain boolean the drag-guard
+// / banner-visibility gate already consumes — the new struct is
+// additive.
 export interface IssueBriefDTO {
   issue: IssueMetaDTO;
   feature: FeatureRefDTO | null;
@@ -292,6 +317,7 @@ export interface IssueBriefDTO {
   claimants: ClaimantDTO[];
   taken: boolean;
   waitingForClaim: boolean;
+  waitingState?: WaitingState;
   warnings: string[];
 }
 
@@ -625,7 +651,6 @@ function cardFromIssue(iss: ApiIssue): BoardCard {
     assignees: assigneeList(assignee),
     claude: assignee === 'claude',
     taken: !!iss.taken,
-    waitingForClaim: !!iss.waiting_for_claim,
   };
 }
 
@@ -886,6 +911,17 @@ interface ApiFeatureRef {
   title: string;
 }
 
+interface ApiWaitingState {
+  // BACI-145: wire shape from internal/boardcards.WaitingState. The
+  // inner fields keep their camelCase Go JSON tags (`kind`, `mode`,
+  // `actionLabel`) since boardcards is also emitted as-is from the
+  // /cards endpoint. The brief wraps it under snake_case `waiting_state`
+  // to match the rest of the REST surface.
+  kind: WaitingKind;
+  mode?: string;
+  actionLabel?: string;
+}
+
 interface ApiIssueBrief {
   issue: ApiIssue;
   feature?: ApiFeatureRef | null;
@@ -895,6 +931,7 @@ interface ApiIssueBrief {
   comments?: ApiCommentEnvelope[] | null;
   claimants?: ApiClaimant[] | null;
   taken?: boolean;
+  waiting_state?: ApiWaitingState | null;
   warnings?: string[] | null;
 }
 
@@ -924,6 +961,13 @@ function reshapeApiBrief(view: ApiIssueBrief): IssueBriefDTO {
     type: r.type,
     otherKey: r.from_issue,
   }));
+  const waitingState: WaitingState | undefined = view.waiting_state
+    ? {
+        kind: view.waiting_state.kind,
+        mode: view.waiting_state.mode,
+        actionLabel: view.waiting_state.actionLabel,
+      }
+    : undefined;
   return {
     issue: meta,
     feature: feat,
@@ -949,6 +993,7 @@ function reshapeApiBrief(view: ApiIssueBrief): IssueBriefDTO {
     })),
     taken: !!view.taken,
     waitingForClaim: !!iss.waiting_for_claim,
+    waitingState,
     warnings: view.warnings ?? [],
   };
 }

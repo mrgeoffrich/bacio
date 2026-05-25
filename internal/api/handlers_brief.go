@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/mrgeoffrich/bacio/internal/boardcards"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
@@ -84,6 +85,21 @@ func (d deps) handleIssueBrief(w http.ResponseWriter, r *http.Request) {
 		claimants = []*model.AgentClaim{}
 	}
 
+	// BACI-145: surface WaitingState so the IssueWorkspace lock banner
+	// can render the same explanatory copy ("Waiting for an available
+	// agent" / "Waiting on Ship it job to finish" / "Worker has the
+	// Ship it job") the kanban card shows. Best-effort: a failure here
+	// must not block the brief, so we drop the field on error and the
+	// banner falls back to the plain-spinner rendering.
+	var waitingState *boardcards.WaitingState
+	if iss.WaitingForClaim {
+		if active, err := d.store.WaitingDispatchForIssue(repo.ID, iss.ID); err == nil && active != nil {
+			inflight, _ := d.store.InflightByModeForRepo(repo.ID)
+			templates, _ := d.store.ListPromptTemplates()
+			waitingState = boardcards.DeriveWaitingState(iss, active, inflight, templates)
+		}
+	}
+
 	writeJSON(w, http.StatusOK, &IssueBrief{
 		Issue:        iss,
 		Feature:      feat,
@@ -93,6 +109,7 @@ func (d deps) handleIssueBrief(w http.ResponseWriter, r *http.Request) {
 		Comments:     comments,
 		Claimants:    claimants,
 		Taken:        model.AnyOpenClaim(claimants),
+		WaitingState: waitingState,
 		Warnings:     warnings,
 	})
 }

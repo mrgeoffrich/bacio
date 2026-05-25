@@ -430,6 +430,13 @@ type Client interface {
 	// card DTO. Local-only — the remote backend returns ErrLocalOnly
 	// today (REST parity is a follow-up).
 	WaitingDispatchForIssue(ctx context.Context, repo *model.Repo, issueKey string) (*model.AgentDispatch, error)
+	// InflightByModeForRepo (BACI-145) returns the per-mode in-flight
+	// dispatch counts for one repo in a single round-trip — the bulk
+	// form of CountInFlightByMode the boardcards assembler needs so
+	// it doesn't fan out N queries per repo when deriving each card's
+	// WaitingState. Same staleness gate / setup-dispatch exclusion as
+	// CountInFlightByMode. Local-only.
+	InflightByModeForRepo(ctx context.Context, repo *model.Repo) (map[model.DispatchMode]int, error)
 
 	// ----- Prompt templates (local-only; `bacio settings template`) -----
 	// ListPromptTemplates returns every registered template — slug,

@@ -36,6 +36,14 @@ import {
   BoardPreferencesDTO,
 } from '../bindings/github.com/mrgeoffrich/bacio/desktop';
 import { ClaimDTO } from '../bindings/github.com/mrgeoffrich/bacio/internal/agentcards';
+// BACI-145: WaitingState / WaitingKind are re-exported from
+// api.http.ts (the HTTP-mode shape) — structurally identical to the
+// Wails-generated types in /bindings/.../boardcards. Components import
+// the type from this api.ts seam so the same JSX works in both
+// transports.
+import type { WaitingState as HTTPWaitingState, WaitingKind as HTTPWaitingKind } from './api.http';
+export type WaitingState = HTTPWaitingState;
+export type WaitingKind = HTTPWaitingKind;
 
 export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, BoardPreferencesDTO };
 

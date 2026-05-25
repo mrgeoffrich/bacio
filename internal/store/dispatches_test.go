@@ -477,6 +477,51 @@ func TestCountInFlightByModeChannelCreatorStillExcluded(t *testing.T) {
 	}
 }
 
+// TestInflightByModeForRepo (BACI-145) locks in the bulk-form
+// equivalent of CountInFlightByMode — same staleness gate, same
+// setup-creator exclusion, but returned as a map[mode]int in one
+// round-trip so the boardcards assembler doesn't fan out N queries
+// per repo when deriving each card's WaitingState.
+func TestInflightByModeForRepo(t *testing.T) {
+	s, repo, _, ag, _ := seedDispatchFixture(t)
+
+	// Two ship dispatches + one plan dispatch + one setup nudge against
+	// the same identity. The setup row must NOT count; the rest do.
+	mk := func(mode model.DispatchMode, creator string) *model.AgentDispatch {
+		d, err := s.AddDispatch(AddDispatchIn{
+			RepoID: repo.ID, TargetAgentID: &ag.ID,
+			Mode: mode, CreatedBy: creator,
+		})
+		if err != nil {
+			t.Fatalf("add dispatch: %v", err)
+		}
+		if _, err := s.MarkDispatchDelivered(d.ID); err != nil {
+			t.Fatalf("deliver: %v", err)
+		}
+		return d
+	}
+	mk(model.DispatchModeShip, "supervisor")
+	mk(model.DispatchModeShip, "supervisor")
+	mk(model.DispatchModePlan, "supervisor")
+	mk(model.DispatchModeShip, model.SetupDispatchCreator)
+
+	got, err := s.InflightByModeForRepo(repo.ID)
+	if err != nil {
+		t.Fatalf("InflightByModeForRepo: %v", err)
+	}
+	if got[model.DispatchModeShip] != 2 {
+		t.Errorf("ship inflight = %d, want 2 (setup creator excluded)", got[model.DispatchModeShip])
+	}
+	if got[model.DispatchModePlan] != 1 {
+		t.Errorf("plan inflight = %d, want 1", got[model.DispatchModePlan])
+	}
+	// Modes with no in-flight rows are absent from the map (callers
+	// read m[mode] zero — the natural default — which is correct).
+	if _, present := got[model.DispatchModeImplement]; present {
+		t.Errorf("unexpected entry for implement (no in-flight): %d", got[model.DispatchModeImplement])
+	}
+}
+
 // TestCancelThenAckRejected locks in that a cancelled dispatch can't be
 // acked — the withdrawal is final.
 func TestCancelThenAckRejected(t *testing.T) {

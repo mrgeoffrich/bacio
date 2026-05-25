@@ -496,6 +496,61 @@ func (s *Store) CountInFlightByMode(repoID int64, mode model.DispatchMode) (int,
 	return n, err
 }
 
+// InflightByModeForRepo (BACI-145) returns the per-mode in-flight
+// counts for one repo in a single round-trip — the bulk form of
+// CountInFlightByMode the BoardCards assembler needs so it doesn't
+// fan out N queries per repo. Same staleness gate as
+// CountInFlightByMode (a `delivered` row only counts when the target
+// session / identity is still plausibly alive), same setup-dispatch
+// exclusion, GROUP BY mode.
+//
+// Modes with no in-flight rows are absent from the map (callers
+// treat `m[mode]` zero as "no in-flight" — that's correct because
+// integer zero is the natural default).
+func (s *Store) InflightByModeForRepo(repoID int64) (map[model.DispatchMode]int, error) {
+	staleWindow := fmt.Sprintf("-%d seconds", int(model.AgentIdlePingThreshold/time.Second))
+	rows, err := s.DB.Query(`
+		SELECT d.mode, COUNT(*)
+		  FROM agent_dispatches d
+		 WHERE d.repo_id = ?
+		   AND d.status IN ('pending','delivered')
+		   AND d.created_by != ?
+		   AND (
+		     (d.target_agent_id IS NOT NULL AND EXISTS (
+		       SELECT 1 FROM agent_sessions s
+		        WHERE s.agent_id = d.target_agent_id
+		          AND s.ended_at IS NULL
+		          AND s.last_seen_at > datetime('now', ?)
+		     ))
+		     OR
+		     (d.target_session_id != '' AND EXISTS (
+		       SELECT 1 FROM agent_sessions s
+		        WHERE s.session_id = d.target_session_id
+		          AND s.ended_at IS NULL
+		          AND s.last_seen_at > datetime('now', ?)
+		     ))
+		   )
+		 GROUP BY d.mode`,
+		repoID, model.SetupDispatchCreator, staleWindow, staleWindow,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[model.DispatchMode]int)
+	for rows.Next() {
+		var (
+			mode string
+			n    int
+		)
+		if err := rows.Scan(&mode, &n); err != nil {
+			return nil, err
+		}
+		out[model.DispatchMode(mode)] = n
+	}
+	return out, rows.Err()
+}
+
 // BindQueuedDispatch atomically binds a queued dispatch to a target
 // agent and flips it to pending — the matcher's commit step. The
 // WHERE status='queued' guard makes the bind a no-op if a concurrent

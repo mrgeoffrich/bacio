@@ -504,28 +504,30 @@ export default function App() {
   // Post-BACI-51 the call always succeeds (gate-aside); the waiting
   // spinner takes over until the matcher binds.
   //
-  // Set waitingForClaim *before* the request so the spinner and drag-
-  // disable kick in on the click, not when the request returns. The
-  // backend sets the same flag on the issue row inside AddDispatch, so
-  // the next refresh keeps it true until the matcher binds (then
-  // waiting clears and taken takes over). Revert on failure.
+  // BACI-145: set an optimistic waitingState={kind:'queued_no_agent'}
+  // *before* the request so the spinner + label kick in on the click,
+  // not when the request returns. The next refresh tick replaces it
+  // with the authoritative server-derived state — which may be
+  // queued_blocked (if the per-(repo, mode) concurrency cap is full)
+  // or delivered (if the matcher binds and a worker accepts before
+  // the next poll). Revert on failure.
   const dispatchFromCard = useCallback((cardKey, mode) => {
-    setCards(cs => cs.map(c => c.key === cardKey ? { ...c, waitingForClaim: true } : c));
+    setCards(cs => cs.map(c => c.key === cardKey ? { ...c, waitingState: { kind: 'queued_no_agent' } } : c));
     api.dispatchIssue(activeBoard, cardKey, mode)
       .catch(err => {
-        setCards(cs => cs.map(c => c.key === cardKey ? { ...c, waitingForClaim: false } : c));
+        setCards(cs => cs.map(c => c.key === cardKey ? { ...c, waitingState: undefined } : c));
         reportError(err, { headline: "Couldn't dispatch agent" });
       });
   }, [activeBoard]);
 
   // BACI-51 spinner-as-cancel-button handler: withdraw a card's queued
   // (or pending/delivered) dispatch. Optimistically clears the local
-  // waitingForClaim flag so the spinner disappears immediately; the
+  // waitingState so the spinner + label disappear immediately; the
   // refresh poll reads the authoritative state.
   const cancelWaitingFromCard = useCallback((cardKey) => {
     api.cancelWaitingDispatch(activeBoard, cardKey)
       .then(() => {
-        setCards(cs => cs.map(c => c.key === cardKey ? { ...c, waitingForClaim: false } : c));
+        setCards(cs => cs.map(c => c.key === cardKey ? { ...c, waitingState: undefined } : c));
       })
       .catch(err => reportError(err, { headline: "Couldn't cancel queued dispatch" }));
   }, [activeBoard]);

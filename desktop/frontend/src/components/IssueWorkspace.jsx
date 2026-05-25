@@ -153,6 +153,7 @@ export default function IssueWorkspace({
         <IssueLockBanner
           taken={taken}
           waiting={waiting}
+          waitingState={brief?.waitingState ?? null}
           claimant={openClaimant}
           onCancelWaiting={onCancelWaiting}
         />

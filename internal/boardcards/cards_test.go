@@ -25,6 +25,11 @@ type fakeClient struct {
 	// blockers (BACI-114) is keyed by blocked-issue id — the same
 	// shape store.BlockersFor returns.
 	blockers map[int64][]store.IssueBlocker
+	// inflightByMode (BACI-145) is keyed by repo id — the same shape
+	// the assembler builds from c.InflightByModeForRepo. Empty / nil
+	// means "no inflight on any mode", which is the steady state for
+	// most tests that don't exercise the blocked-by-cap branch.
+	inflightByMode map[int64]map[model.DispatchMode]int
 	// dispatchAware (BACI-132) opts the fake into filtering the
 	// returned todos by the pair's IssueKey and DispatchID — needed
 	// for the per-dispatch scope test. Existing tests that pass the
@@ -115,6 +120,15 @@ func (f *fakeClient) BlockersFor(context.Context, []int64) (map[int64][]store.Is
 		return map[int64][]store.IssueBlocker{}, nil
 	}
 	return f.blockers, nil
+}
+func (f *fakeClient) InflightByModeForRepo(_ context.Context, r *model.Repo) (map[model.DispatchMode]int, error) {
+	if f.inflightByMode == nil || r == nil {
+		return map[model.DispatchMode]int{}, nil
+	}
+	if m, ok := f.inflightByMode[r.ID]; ok {
+		return m, nil
+	}
+	return map[model.DispatchMode]int{}, nil
 }
 
 // TestAssembleVerbAndTodos covers the BACI-60 enrichment: an open
@@ -566,19 +580,22 @@ func TestAssembleBlockedBy(t *testing.T) {
 	}
 }
 
-// TestAssembleWaitingDispatchDelivered (BACI-130) locks in the
-// per-issue derivation that gates the kanban spinner-cancel UI:
-//   - Queued/pending dispatches keep WaitingDispatchDelivered=false
-//     (the spinner stays a cancel button — the row is cancellable).
-//   - Delivered dispatches set WaitingDispatchDelivered=true (the
-//     spinner glyph stays, but the click affordance disappears,
-//     because the store rejects cancel-after-delivery now).
-//   - Cancelled / acked rows are skipped — they're not the "active"
-//     dispatch for the issue.
-//   - The flag only surfaces on cards whose WaitingForClaim is true,
-//     so a card whose active dispatch was acked & is no longer
+// TestAssembleWaitingState (BACI-145; supersedes the BACI-130
+// "WaitingDispatchDelivered" test) locks in the per-issue WaitingState
+// derivation that drives the kanban spinner label:
+//
+//   - pending / queued dispatch with the per-(repo, mode) cap NOT hit
+//     → WaitingNoAgent ("Waiting for an available agent");
+//   - queued dispatch with the cap hit → WaitingBlockedByMode, naming
+//     the mode the cap is on;
+//   - delivered dispatch → WaitingDelivered ("Worker has the X job");
+//   - cancelled / acked rows are not "active" — the deriver returns
+//     nil (and the issue's WaitingForClaim is false anyway in steady
+//     state);
+//   - WaitingState only surfaces on cards whose WaitingForClaim is
+//     true, so a card whose active dispatch was acked & is no longer
 //     waiting doesn't accidentally light it up.
-func TestAssembleWaitingDispatchDelivered(t *testing.T) {
+func TestAssembleWaitingState(t *testing.T) {
 	repo := &model.Repo{ID: 1, Prefix: "TEST"}
 	t0 := time.Date(2026, 5, 24, 9, 0, 0, 0, time.UTC)
 	issueIDs := struct{ pending, delivered, cancelled, acked, none int64 }{
@@ -589,31 +606,32 @@ func TestAssembleWaitingDispatchDelivered(t *testing.T) {
 		none:      105,
 	}
 	issues := []*model.Issue{
-		{ID: issueIDs.pending, Key: "TEST-1", State: model.StateTodo, Title: "pending dispatch", WaitingForClaim: true},
-		{ID: issueIDs.delivered, Key: "TEST-2", State: model.StateTodo, Title: "delivered dispatch", WaitingForClaim: true},
-		{ID: issueIDs.cancelled, Key: "TEST-3", State: model.StateTodo, Title: "only cancelled dispatch", WaitingForClaim: false},
-		{ID: issueIDs.acked, Key: "TEST-4", State: model.StateTodo, Title: "only acked dispatch", WaitingForClaim: false},
-		{ID: issueIDs.none, Key: "TEST-5", State: model.StateTodo, Title: "no dispatch"},
+		{ID: issueIDs.pending, RepoID: repo.ID, Key: "TEST-1", State: model.StateTodo, Title: "pending dispatch", WaitingForClaim: true},
+		{ID: issueIDs.delivered, RepoID: repo.ID, Key: "TEST-2", State: model.StateTodo, Title: "delivered dispatch", WaitingForClaim: true},
+		{ID: issueIDs.cancelled, RepoID: repo.ID, Key: "TEST-3", State: model.StateTodo, Title: "only cancelled dispatch", WaitingForClaim: false},
+		{ID: issueIDs.acked, RepoID: repo.ID, Key: "TEST-4", State: model.StateTodo, Title: "only acked dispatch", WaitingForClaim: false},
+		{ID: issueIDs.none, RepoID: repo.ID, Key: "TEST-5", State: model.StateTodo, Title: "no dispatch"},
 	}
 	pendingID := issueIDs.pending
 	deliveredID := issueIDs.delivered
 	cancelledID := issueIDs.cancelled
 	ackedID := issueIDs.acked
-	// RepoDispatches is newest-first. Mimic that here: each fake
-	// dispatch row gets a CreatedAt that's older for older entries.
+	// RepoDispatches is newest-first. Mimic that here.
 	dispatches := []*model.AgentDispatch{
-		// TEST-2: the newest row is delivered — the flag should be true.
-		{ID: 200, IssueID: &deliveredID, IssueKey: "TEST-2", Status: model.DispatchDelivered, CreatedAt: t0},
-		// TEST-1: pending → flag false.
-		{ID: 201, IssueID: &pendingID, IssueKey: "TEST-1", Status: model.DispatchPending, CreatedAt: t0.Add(-1 * time.Minute)},
-		// TEST-3: a cancelled row is not "active" — the issue gets no entry
-		// in deliveredByIssueID, so the flag stays false (and WaitingForClaim
-		// is false anyway, gating it doubly).
-		{ID: 202, IssueID: &cancelledID, IssueKey: "TEST-3", Status: model.DispatchCancelled, CreatedAt: t0.Add(-2 * time.Minute)},
+		// TEST-2: newest row is delivered — Kind=delivered, names the mode.
+		{ID: 200, IssueID: &deliveredID, IssueKey: "TEST-2", Mode: model.DispatchMode("ship"), Status: model.DispatchDelivered, CreatedAt: t0},
+		// TEST-1: pending, mode has no cap → Kind=queued_no_agent.
+		{ID: 201, IssueID: &pendingID, IssueKey: "TEST-1", Mode: model.DispatchMode("plan"), Status: model.DispatchPending, CreatedAt: t0.Add(-1 * time.Minute)},
+		// TEST-3: a cancelled row is not "active" — no entry in activeByIssueID.
+		{ID: 202, IssueID: &cancelledID, IssueKey: "TEST-3", Mode: model.DispatchMode("ship"), Status: model.DispatchCancelled, CreatedAt: t0.Add(-2 * time.Minute)},
 		// TEST-4: an acked row is not "active" either.
-		{ID: 203, IssueID: &ackedID, IssueKey: "TEST-4", Status: model.DispatchAcked, CreatedAt: t0.Add(-3 * time.Minute)},
+		{ID: 203, IssueID: &ackedID, IssueKey: "TEST-4", Mode: model.DispatchMode("ship"), Status: model.DispatchAcked, CreatedAt: t0.Add(-3 * time.Minute)},
 	}
-	f := &fakeClient{repo: repo, issues: issues, dispatches: dispatches}
+	templates := []*store.PromptTemplate{
+		{Slug: "plan", Name: "Planning", IsBuiltin: true},
+		{Slug: "ship", Name: "Shipping", IsBuiltin: true, ConcurrencyLimit: 0},
+	}
+	f := &fakeClient{repo: repo, issues: issues, dispatches: dispatches, templates: templates}
 	cards, err := Assemble(context.Background(), f, repo, false)
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
@@ -622,20 +640,141 @@ func TestAssembleWaitingDispatchDelivered(t *testing.T) {
 	for _, c := range cards {
 		byKey[c.Key] = c
 	}
-	if got := byKey["TEST-1"].WaitingDispatchDelivered; got {
-		t.Errorf("TEST-1 (pending) WaitingDispatchDelivered = true, want false")
+	// TEST-1: pending, no cap on `plan` → no-agent label.
+	if ws := byKey["TEST-1"].WaitingState; ws == nil || ws.Kind != WaitingNoAgent {
+		t.Errorf("TEST-1 WaitingState = %+v, want kind=queued_no_agent", ws)
 	}
-	if got := byKey["TEST-2"].WaitingDispatchDelivered; !got {
-		t.Errorf("TEST-2 (delivered) WaitingDispatchDelivered = false, want true")
+	// TEST-2: delivered → Kind=delivered, mode=ship, ActionLabel=Ship.
+	if ws := byKey["TEST-2"].WaitingState; ws == nil || ws.Kind != WaitingDelivered || ws.Mode != "ship" || ws.ActionLabel != "Ship" {
+		t.Errorf("TEST-2 WaitingState = %+v, want {delivered ship Ship}", ws)
 	}
-	if got := byKey["TEST-3"].WaitingDispatchDelivered; got {
-		t.Errorf("TEST-3 (cancelled-only) WaitingDispatchDelivered = true, want false")
+	// TEST-3 / TEST-4 / TEST-5: no waiting state.
+	for _, k := range []string{"TEST-3", "TEST-4", "TEST-5"} {
+		if ws := byKey[k].WaitingState; ws != nil {
+			t.Errorf("%s WaitingState = %+v, want nil", k, ws)
+		}
 	}
-	if got := byKey["TEST-4"].WaitingDispatchDelivered; got {
-		t.Errorf("TEST-4 (acked-only) WaitingDispatchDelivered = true, want false")
+}
+
+// TestAssembleWaitingStateBlockedByCap (BACI-145) covers the
+// blocked-by-cap branch: a queued dispatch in a mode whose
+// per-(repo, mode) in-flight count is at the template's
+// concurrency_limit surfaces as WaitingBlockedByMode, carrying the
+// mode + its action label so the label can read "Waiting on Ship it
+// job to finish".
+func TestAssembleWaitingStateBlockedByCap(t *testing.T) {
+	repo := &model.Repo{ID: 1, Prefix: "TEST"}
+	t0 := time.Date(2026, 5, 24, 9, 0, 0, 0, time.UTC)
+	id1, id2 := int64(101), int64(102)
+	issues := []*model.Issue{
+		{ID: id1, RepoID: repo.ID, Key: "TEST-1", State: model.StateInProgress, Title: "in-flight ship", WaitingForClaim: false},
+		{ID: id2, RepoID: repo.ID, Key: "TEST-2", State: model.StateInReview, Title: "queued ship waiting on cap", WaitingForClaim: true},
 	}
-	if got := byKey["TEST-5"].WaitingDispatchDelivered; got {
-		t.Errorf("TEST-5 (no dispatch) WaitingDispatchDelivered = true, want false")
+	dispatches := []*model.AgentDispatch{
+		{ID: 300, IssueID: &id2, IssueKey: "TEST-2", Mode: model.DispatchMode("ship"), Status: model.DispatchQueued, CreatedAt: t0},
+	}
+	templates := []*store.PromptTemplate{
+		// concurrency_limit: 1, and the inflight map below says 1 row
+		// is already in flight on `ship` — TEST-2 surfaces as blocked.
+		{Slug: "ship", Name: "Shipping", IsBuiltin: true, ConcurrencyLimit: 1},
+	}
+	f := &fakeClient{
+		repo: repo, issues: issues, dispatches: dispatches, templates: templates,
+		inflightByMode: map[int64]map[model.DispatchMode]int{
+			repo.ID: {model.DispatchMode("ship"): 1},
+		},
+	}
+	cards, err := Assemble(context.Background(), f, repo, false)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	byKey := map[string]BoardCard{}
+	for _, c := range cards {
+		byKey[c.Key] = c
+	}
+	ws := byKey["TEST-2"].WaitingState
+	if ws == nil || ws.Kind != WaitingBlockedByMode {
+		t.Fatalf("TEST-2 WaitingState = %+v, want kind=queued_blocked", ws)
+	}
+	if ws.Mode != "ship" || ws.ActionLabel != "Ship" {
+		t.Errorf("TEST-2 WaitingState mode/label = %q/%q, want ship/Ship", ws.Mode, ws.ActionLabel)
+	}
+	// TEST-1 isn't waiting (no WaitingForClaim) — no state.
+	if ws := byKey["TEST-1"].WaitingState; ws != nil {
+		t.Errorf("TEST-1 WaitingState = %+v, want nil", ws)
+	}
+}
+
+// TestDeriveWaitingState covers the deriver as a pure function — the
+// three kinds plus the nil cases, without going through Assemble.
+func TestDeriveWaitingState(t *testing.T) {
+	templates := []*store.PromptTemplate{
+		{Slug: "plan", Name: "Planning", IsBuiltin: true},
+		{Slug: "ship", Name: "Shipping", IsBuiltin: true, ConcurrencyLimit: 2},
+		{Slug: "custom", Name: "Reviewing", IsBuiltin: false, ActionLabel: "Custom verb"},
+	}
+	mk := func(status model.DispatchStatus, mode string) *model.AgentDispatch {
+		return &model.AgentDispatch{Mode: model.DispatchMode(mode), Status: status}
+	}
+	tests := []struct {
+		name     string
+		iss      *model.Issue
+		active   *model.AgentDispatch
+		inflight map[model.DispatchMode]int
+		want     *WaitingState
+	}{
+		{"nil issue", nil, nil, nil, nil},
+		{"not waiting", &model.Issue{WaitingForClaim: false}, mk(model.DispatchQueued, "ship"), nil, nil},
+		{"no active dispatch", &model.Issue{WaitingForClaim: true}, nil, nil, nil},
+		{
+			"queued, no cap, free agents",
+			&model.Issue{WaitingForClaim: true},
+			mk(model.DispatchQueued, "plan"), nil,
+			&WaitingState{Kind: WaitingNoAgent},
+		},
+		{
+			"queued, cap hit",
+			&model.Issue{WaitingForClaim: true},
+			mk(model.DispatchQueued, "ship"),
+			map[model.DispatchMode]int{model.DispatchMode("ship"): 2},
+			&WaitingState{Kind: WaitingBlockedByMode, Mode: "ship", ActionLabel: "Ship"},
+		},
+		{
+			"queued, cap not hit",
+			&model.Issue{WaitingForClaim: true},
+			mk(model.DispatchQueued, "ship"),
+			map[model.DispatchMode]int{model.DispatchMode("ship"): 1},
+			&WaitingState{Kind: WaitingNoAgent},
+		},
+		{
+			"delivered, named verb",
+			&model.Issue{WaitingForClaim: true},
+			mk(model.DispatchDelivered, "ship"), nil,
+			&WaitingState{Kind: WaitingDelivered, Mode: "ship", ActionLabel: "Ship"},
+		},
+		{
+			"delivered, custom template with explicit ActionLabel",
+			&model.Issue{WaitingForClaim: true},
+			mk(model.DispatchDelivered, "custom"), nil,
+			&WaitingState{Kind: WaitingDelivered, Mode: "custom", ActionLabel: "Custom verb"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := DeriveWaitingState(tc.iss, tc.active, tc.inflight, templates)
+			if tc.want == nil {
+				if got != nil {
+					t.Fatalf("got %+v, want nil", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatalf("got nil, want %+v", tc.want)
+			}
+			if got.Kind != tc.want.Kind || got.Mode != tc.want.Mode || got.ActionLabel != tc.want.ActionLabel {
+				t.Errorf("got %+v, want %+v", got, tc.want)
+			}
+		})
 	}
 }
 

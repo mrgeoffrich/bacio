@@ -1,4 +1,5 @@
 import React from 'react';
+import { waitingStateLabel } from '../../lib/waitingLabels';
 
 // IssueLockBanner names the agent holding (or about to hold) the issue
 // and surfaces the BACI-51 "queued, no agent yet" affordance — the
@@ -9,7 +10,14 @@ import React from 'react';
 // `taken` takes render precedence: once an agent claims, waitingForClaim
 // is cleared, so the two shouldn't overlap; render defensively in case
 // they do.
-export default function IssueLockBanner({ taken, waiting, claimant, onCancelWaiting }) {
+//
+// BACI-145: when waitingState is passed, the banner shows the same
+// explanatory copy ("Waiting for an available agent" / "Waiting on
+// Ship it job to finish" / "Worker has the Ship it job") the kanban
+// card renders. Falls back to the legacy "queued · waiting for an
+// agent" string when the brief is from a pre-145 server (waitingState
+// undefined but waiting true).
+export default function IssueLockBanner({ taken, waiting, waitingState, claimant, onCancelWaiting }) {
   if (taken && claimant) {
     return (
       <div className="mk-workspace-lock-banner mk-pill mk-status-busy">
@@ -19,15 +27,28 @@ export default function IssueLockBanner({ taken, waiting, claimant, onCancelWait
     );
   }
   if (waiting) {
+    const delivered = waitingState?.kind === 'delivered';
+    const label = waitingState
+      ? waitingStateLabel(waitingState)
+      : 'queued · waiting for an agent';
     return (
       <div className="mk-workspace-lock-banner mk-pill mk-status-waiting">
-        <button
-          type="button"
-          className="mk-card-spinner mk-card-spinner-btn"
-          aria-label="Cancel queued dispatch"
-          onClick={onCancelWaiting}
-        />
-        <span>queued · waiting for an agent · click ↑ to cancel</span>
+        {delivered ? (
+          <span
+            className="mk-card-spinner"
+            role="status"
+            aria-label={label}
+          />
+        ) : (
+          <button
+            type="button"
+            className="mk-card-spinner mk-card-spinner-btn"
+            aria-label="Cancel queued dispatch"
+            title="Cancel queued dispatch"
+            onClick={onCancelWaiting}
+          />
+        )}
+        <span>{label}{!delivered && ' · click ↑ to cancel'}</span>
       </div>
     );
   }

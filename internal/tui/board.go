@@ -49,6 +49,32 @@ const spinnerInterval = 120 * time.Millisecond
 // card's key marker.
 var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
 
+// waitingStateLabelTUI mirrors desktop/frontend/src/lib/waitingLabels.ts
+// — the human-readable explanation rendered on the bottom row of a
+// waiting card (BACI-145). Keep the strings in lockstep with the TS
+// helper so the same dispatch reads identically on every surface.
+func waitingStateLabelTUI(ws *boardcards.WaitingState) string {
+	if ws == nil {
+		return ""
+	}
+	verb := strings.TrimSpace(ws.ActionLabel)
+	switch ws.Kind {
+	case boardcards.WaitingNoAgent:
+		return "Waiting for an available agent"
+	case boardcards.WaitingBlockedByMode:
+		if verb != "" {
+			return "Waiting on " + verb + " job to finish"
+		}
+		return "Waiting on prior job to finish"
+	case boardcards.WaitingDelivered:
+		if verb != "" {
+			return "Worker has the " + verb + " job"
+		}
+		return "Worker is on this job"
+	}
+	return "Waiting"
+}
+
 // spinnerTickMsg advances the waiting-for-claim spinner. The tick-chain
 // only re-arms while at least one visible issue is waiting, so the
 // animation costs nothing when nothing is waiting.
@@ -97,6 +123,16 @@ type boardView struct {
 	// and refuse the `x` dispatch, same guard as takenIssues. `taken`
 	// wins over `waiting` when (defensively) a card is somehow both.
 	waitingIssues map[int64]bool
+	// waitingStates (BACI-145) is the per-issue WaitingState — a richer
+	// surface than waitingIssues that carries the kind (no-agent /
+	// blocked-by-cap / delivered) and the action label of the dispatch
+	// the cap or worker job is on, so the bottom row of a waiting card
+	// can render "Waiting for an available agent" / "Waiting on Ship it
+	// job to finish" / "Worker has the Ship it job". Keys missing from
+	// the map (or with a nil value) read as "no extra context" — the
+	// renderer falls back to the boolean form. Refreshed alongside
+	// waitingIssues on every reload().
+	waitingStates map[int64]*boardcards.WaitingState
 	// spinnerFrame is the current spinner animation frame; spinnerRunning
 	// guards against stacking concurrent tick-chains.
 	spinnerFrame   int
@@ -339,6 +375,28 @@ func (b *boardView) reload() error {
 		}
 	}
 	b.waitingIssues = waiting
+	// BACI-145: derive a WaitingState per waiting issue so the renderer
+	// can name *why* the card is waiting on its third row. Same
+	// derivation the boardcards assembler runs for the React surfaces,
+	// so the wording stays in lockstep. Skipped entirely when no card
+	// is waiting (the common case keeps reload() cheap).
+	b.waitingStates = map[int64]*boardcards.WaitingState{}
+	if len(waiting) > 0 {
+		repoDispatches, derr := b.store.ListDispatches(store.DispatchFilter{RepoID: &b.repo.ID})
+		if derr == nil {
+			activeByID := boardcards.ActiveDispatchByIssueID(repoDispatches)
+			inflight, _ := b.store.InflightByModeForRepo(b.repo.ID)
+			templates, _ := b.store.ListPromptTemplates()
+			for _, iss := range issues {
+				if !waiting[iss.ID] {
+					continue
+				}
+				if ws := boardcards.DeriveWaitingState(iss, activeByID[iss.ID], inflight, templates); ws != nil {
+					b.waitingStates[iss.ID] = ws
+				}
+			}
+		}
+	}
 	for _, st := range b.states {
 		b.columns[st] = nil
 	}
@@ -1262,12 +1320,36 @@ func (b *boardView) renderColumn(st model.State, focused bool, width, height int
 		if len(b.openQuestions[iss.Key]) > 0 {
 			titleText = "? " + titleText
 		}
+		// BACI-145: on a waiting card the bottom (third) row carries
+		// the WaitingState label ("Waiting for an available agent" /
+		// "Waiting on Ship it job to finish" / "Worker has the Ship
+		// it job") so the user sees *why* the card is waiting without
+		// having to inspect it. The title's wrap budget shrinks from
+		// 3 → 2 lines to make room; titles that overflow lose their
+		// last continuation line, which is acceptable because a
+		// waiting card is short-lived (the matcher binds or the cap
+		// clears in seconds-to-minutes).
+		titleBudget := cardHeight
+		var waitLabel string
+		if isWaiting {
+			if ws := b.waitingStates[iss.ID]; ws != nil {
+				waitLabel = waitingStateLabelTUI(ws)
+			} else {
+				// No richer context — fall back to the generic label
+				// rather than dropping to no explanation.
+				waitLabel = "Waiting"
+			}
+			titleBudget = cardHeight - 1
+			if titleBudget < 1 {
+				titleBudget = 1
+			}
+		}
 		titleLines := wrapLinesAt(titleText, func(line int) int {
 			if line == 0 {
 				return firstW
 			}
 			return fullW
-		}, cardHeight)
+		}, titleBudget)
 
 		for j := 0; j < cardHeight; j++ {
 			var content string
@@ -1280,6 +1362,15 @@ func (b *boardView) renderColumn(st model.State, focused bool, width, height int
 				}
 			case j < len(titleLines):
 				content = titleLines[j]
+			case isWaiting && j == cardHeight-1:
+				// Bottom row: the waiting label, tinted in the same
+				// waitingColor as the spinner glyph so the visual link
+				// reads. Truncate (don't wrap) so the row stays exactly
+				// one line.
+				labelLines := wrapLines(waitLabel, fullW, 1)
+				if len(labelLines) > 0 {
+					content = lipgloss.NewStyle().Foreground(waitingColor).Render(labelLines[0])
+				}
 			default:
 				content = ""
 			}

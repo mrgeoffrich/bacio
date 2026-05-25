@@ -103,6 +103,16 @@ func (f *fakeBoardClient) BlockersFor(context.Context, []int64) (map[int64][]sto
 	return map[int64][]store.IssueBlocker{}, nil
 }
 
+// InflightByModeForRepo (BACI-145) is a fixed-empty stub — the
+// boardcards assembler reads the per-(repo, mode) inflight counts to
+// derive each card's WaitingState. The existing taken-flag tests
+// don't exercise the waiting branch (no dispatch rows have
+// WaitingForClaim set), so an empty map keeps the deriver returning
+// nil for every card.
+func (f *fakeBoardClient) InflightByModeForRepo(context.Context, *model.Repo) (map[model.DispatchMode]int, error) {
+	return map[model.DispatchMode]int{}, nil
+}
+
 func TestListCardsTaken(t *testing.T) {
 	issues := []*model.Issue{
 		{Key: "TEST-1", State: model.StateTodo, Title: "held by an agent"},

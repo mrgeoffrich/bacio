@@ -164,17 +164,24 @@ type IssueMetaDTO struct {
 // return value, mirroring internal/client/views.go::IssueBrief with desktop
 // camelCase JSON tags. New fields over IssueDetail: feature, relations,
 // waitingForClaim, warnings, and doc content (via LinkedDocDTO).
+//
+// BACI-145: WaitingState carries the explanatory reason ("no agent",
+// "blocked by mode", "delivered") that the IssueLockBanner renders
+// next to the spinner. waitingForClaim is kept as the plain boolean
+// the drag-guard / banner-visibility gate already consumes — the new
+// struct is additive.
 type IssueBriefDTO struct {
-	Issue           IssueMetaDTO   `json:"issue"`
-	Feature         *FeatureRefDTO `json:"feature,omitempty"`
-	Relations       RelationsDTO   `json:"relations"`
-	PullRequests    []PRDTO        `json:"pullRequests"`
-	Documents       []LinkedDocDTO `json:"documents"`
-	Comments        []CommentDTO   `json:"comments"`
-	Claimants       []ClaimantDTO  `json:"claimants"`
-	Taken           bool           `json:"taken"`
-	WaitingForClaim bool           `json:"waitingForClaim"`
-	Warnings        []string       `json:"warnings"`
+	Issue           IssueMetaDTO              `json:"issue"`
+	Feature         *FeatureRefDTO            `json:"feature,omitempty"`
+	Relations       RelationsDTO              `json:"relations"`
+	PullRequests    []PRDTO                   `json:"pullRequests"`
+	Documents       []LinkedDocDTO            `json:"documents"`
+	Comments        []CommentDTO              `json:"comments"`
+	Claimants       []ClaimantDTO             `json:"claimants"`
+	Taken           bool                      `json:"taken"`
+	WaitingForClaim bool                      `json:"waitingForClaim"`
+	WaitingState    *boardcards.WaitingState  `json:"waitingState,omitempty"`
+	Warnings        []string                  `json:"warnings"`
 }
 
 // IssueDetail is the issue-drawer payload for a single issue.
@@ -249,21 +256,25 @@ func assigneeList(a string) []string {
 // the single-issue refresh paths (SetIssueState after a drag) where
 // the active dispatch / todos can't change as part of the operation
 // — the next 10s poll re-runs ListCards and re-populates them.
+//
+// BACI-145: WaitingState stays nil here. Drag is blocked for waiting
+// cards (Board.jsx guards on it), so a drag-driven refresh can never
+// land on a card whose dispatch is queued; the next 10s ListCards
+// poll restores the field for any race-arrival.
 func cardFromIssue(iss *model.Issue, taken bool) BoardCard {
 	tags := iss.Tags
 	if tags == nil {
 		tags = []string{}
 	}
 	return BoardCard{
-		Key:             iss.Key,
-		Column:          string(iss.State),
-		ColumnLabel:     stateLabel(iss.State),
-		Title:           iss.Title,
-		Tags:            tags,
-		Assignees:       assigneeList(iss.Assignee),
-		Claude:          iss.Assignee == "claude",
-		Taken:           taken,
-		WaitingForClaim: iss.WaitingForClaim,
+		Key:         iss.Key,
+		Column:      string(iss.State),
+		ColumnLabel: stateLabel(iss.State),
+		Title:       iss.Title,
+		Tags:        tags,
+		Assignees:   assigneeList(iss.Assignee),
+		Claude:      iss.Assignee == "claude",
+		Taken:       taken,
 	}
 }
 
@@ -549,6 +560,28 @@ func (b *BoardService) GetIssueBrief(repoPrefix, key string) (IssueBriefDTO, err
 		warnings = []string{}
 	}
 
+	// BACI-145: derive WaitingState for the banner. Only the
+	// issue-scoped active dispatch + the per-(repo, mode) inflight
+	// map + the templates list are needed — the same inputs the
+	// boardcards assembler uses. WaitingDispatchForIssue is cheap
+	// (single-issue lookup); the inflight map and templates are
+	// shared with the next kanban poll.
+	var waitingState *boardcards.WaitingState
+	if iss.WaitingForClaim && repo != nil {
+		active, err := b.client.WaitingDispatchForIssue(ctx, repo, key)
+		if err == nil && active != nil {
+			inflight, err := b.client.InflightByModeForRepo(ctx, repo)
+			if err != nil {
+				inflight = nil
+			}
+			templates, err := b.client.ListPromptTemplates(ctx)
+			if err != nil {
+				templates = nil
+			}
+			waitingState = boardcards.DeriveWaitingState(iss, active, inflight, templates)
+		}
+	}
+
 	return IssueBriefDTO{
 		Issue:           meta,
 		Feature:         feat,
@@ -559,6 +592,7 @@ func (b *BoardService) GetIssueBrief(repoPrefix, key string) (IssueBriefDTO, err
 		Claimants:       agentcards.MapClaimants(brief.Claimants),
 		Taken:           brief.Taken,
 		WaitingForClaim: iss.WaitingForClaim,
+		WaitingState:    waitingState,
 		Warnings:        warnings,
 	}, nil
 }
@@ -760,11 +794,11 @@ func (b *BoardService) CancelSessionQuestion(id int64) (*model.SessionQuestion, 
 // not an error — the spinner may have cleared between the click and
 // the call landing — the cancel is a no-op and returns nil.
 //
-// BACI-130: cancel-after-delivery is now rejected at the store
-// boundary. The desktop card hides the cancel affordance via the
-// new BoardCard.WaitingDispatchDelivered field, but a stale render
-// can still send the click in — swallow the recognisable error
-// fragment the same way the 404 race-clear path returns nil.
+// BACI-130 / BACI-145: cancel-after-delivery is now rejected at the
+// store boundary. The desktop card hides the cancel affordance when
+// BoardCard.WaitingState.Kind == "delivered", but a stale render can
+// still send the click in — swallow the recognisable error fragment
+// the same way the 404 race-clear path returns nil.
 func (b *BoardService) CancelWaitingDispatch(repoPrefix, issueKey string) error {
 	ctx := context.Background()
 	prefix := repoPrefix
