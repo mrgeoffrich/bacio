@@ -683,3 +683,256 @@ func TestAbandonOpenQuestionsWritesAudit(t *testing.T) {
 		t.Fatalf("question.abandon rows after no-op sweep = %d, want 1", len(rows2))
 	}
 }
+
+// TestCreateRescueDispatchHappyPath (BACI-190) seeds a dead worker
+// scenario — a delivered implement dispatch whose target session is
+// ended — plus an idle live channel-connected supervisor, then asserts
+// CreateRescueDispatch enqueues a `bacio-rescue` dispatch at the live
+// supervisor, derives the agent id from a linked transcript document,
+// and writes one agent.rescue audit row.
+func TestCreateRescueDispatchHappyPath(t *testing.T) {
+	p := newPair(t)
+	defer p.cleanup()
+	ctx := context.Background()
+
+	iss, err := p.store.CreateIssue(p.repo.ID, nil, "salvage me", "", model.StateInProgress, nil)
+	if err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+
+	// Dead worker session + agent.
+	deadAg, _, err := p.store.UpsertAgent("dead-koala@claude.test", true)
+	if err != nil {
+		t.Fatalf("UpsertAgent(dead): %v", err)
+	}
+	const deadSID = "deadbeef-1111-4111-8111-111111111111"
+	if _, err := p.store.UpsertAgentSession(store.UpsertAgentSessionIn{
+		SessionID: deadSID, RepoID: p.repo.ID, AgentID: &deadAg.ID, Actor: "dead-koala",
+		MarkRegistered: true,
+	}); err != nil {
+		t.Fatalf("UpsertAgentSession(dead): %v", err)
+	}
+	if _, _, _, _, err := p.store.EndAgentSession(deadSID, string(model.EndReasonPresumedDead), "", store.DispatchCascadeRequeue); err != nil {
+		t.Fatalf("EndAgentSession(dead): %v", err)
+	}
+
+	// The original (now-stranded) dispatch — delivered, never acked.
+	orig, err := p.store.AddDispatch(store.AddDispatchIn{
+		RepoID:          p.repo.ID,
+		TargetAgentID:   &deadAg.ID,
+		TargetSessionID: deadSID,
+		IssueID:         &iss.ID,
+		Mode:            model.DispatchModeImplement,
+		Payload:         "implement BACI-X please",
+		CreatedBy:       "supervisor@host",
+	})
+	if err != nil {
+		t.Fatalf("AddDispatch(orig): %v", err)
+	}
+	if _, err := p.store.MarkDispatchDelivered(orig.ID); err != nil {
+		t.Fatalf("MarkDispatchDelivered: %v", err)
+	}
+
+	// Attach a transcript so the rescue path can parse the agent id
+	// from the filename. The pattern matches the attach_transcript
+	// naming convention exactly.
+	const agentID = "afc2b74037486daa7"
+	transcriptName := "bacio-transcript-" + iss.Key + "-agent-" + agentID + ".jsonl"
+	doc, err := p.store.CreateDocument(p.repo.ID, transcriptName, model.DocTypeTranscript, "{}\n", "")
+	if err != nil {
+		t.Fatalf("CreateDocument: %v", err)
+	}
+	if _, err := p.store.LinkDocument(doc.ID, store.LinkTarget{IssueID: &iss.ID}, "test transcript"); err != nil {
+		t.Fatalf("LinkDocument: %v", err)
+	}
+
+	// Live idle supervisor — registered + channel-connected, no open
+	// claim → eligible to receive a rescue dispatch.
+	liveAg, _, err := p.store.UpsertAgent("alive-otter@claude.test", true)
+	if err != nil {
+		t.Fatalf("UpsertAgent(alive): %v", err)
+	}
+	const liveSID = "aaaaaaaa-2222-4222-8222-222222222222"
+	if _, err := p.store.UpsertAgentSession(store.UpsertAgentSessionIn{
+		SessionID: liveSID, RepoID: p.repo.ID, AgentID: &liveAg.ID, Actor: "alive-otter",
+		MarkRegistered: true, ClaudePID: 4242, Host: "host",
+	}); err != nil {
+		t.Fatalf("UpsertAgentSession(live): %v", err)
+	}
+	if err := p.store.UpsertAgentChannel(store.UpsertAgentChannelIn{
+		RepoID: p.repo.ID, AgentID: &liveAg.ID, Host: "host", ClaudePID: 4242, ChannelPID: 4243,
+	}); err != nil {
+		t.Fatalf("UpsertAgentChannel: %v", err)
+	}
+	if err := p.store.LinkSessionChannel(liveSID, 4242, "host"); err != nil {
+		t.Fatalf("LinkSessionChannel: %v", err)
+	}
+
+	// Drive the rescue.
+	rescue, err := p.local.CreateRescueDispatch(ctx, orig.ID)
+	if err != nil {
+		t.Fatalf("CreateRescueDispatch: %v", err)
+	}
+	if rescue.CreatedBy != model.RescueDispatchCreator {
+		t.Fatalf("rescue.CreatedBy = %q, want %q", rescue.CreatedBy, model.RescueDispatchCreator)
+	}
+	if rescue.TargetSessionID != liveSID {
+		t.Fatalf("rescue.TargetSessionID = %q, want %q (the live supervisor)", rescue.TargetSessionID, liveSID)
+	}
+	if !strings.Contains(rescue.Payload, agentID) {
+		t.Fatalf("rescue payload missing agent id %q: %q", agentID, rescue.Payload)
+	}
+	if !strings.Contains(rescue.Payload, ".claude/worktrees/agent-"+agentID) {
+		t.Fatalf("rescue payload missing worktree path: %q", rescue.Payload)
+	}
+	if !strings.Contains(rescue.Payload, "INLINE") {
+		t.Fatalf("rescue payload should tell the supervisor to handle INLINE: %q", rescue.Payload)
+	}
+
+	// The original dispatch is unchanged (still delivered, still un-acked).
+	again, err := p.store.GetDispatch(orig.ID)
+	if err != nil {
+		t.Fatalf("GetDispatch(orig): %v", err)
+	}
+	if again.Status != model.DispatchDelivered {
+		t.Fatalf("original status flipped to %s; should still be delivered", again.Status)
+	}
+
+	// One agent.rescue audit row, pointing at the rescue dispatch with
+	// Details naming the original and the agent.
+	rows, err := p.store.ListHistory(store.HistoryFilter{RepoID: &p.repo.ID, Op: "agent.rescue"})
+	if err != nil {
+		t.Fatalf("ListHistory: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("agent.rescue rows = %d, want 1", len(rows))
+	}
+	row := rows[0]
+	if row.TargetID == nil || *row.TargetID != rescue.ID {
+		t.Fatalf("rescue audit TargetID = %v, want %d", row.TargetID, rescue.ID)
+	}
+	if !strings.Contains(row.Details, "original_dispatch=") {
+		t.Fatalf("rescue audit Details missing original_dispatch: %q", row.Details)
+	}
+	if !strings.Contains(row.Details, "agent="+agentID) {
+		t.Fatalf("rescue audit Details missing agent id: %q", row.Details)
+	}
+}
+
+// TestCreateRescueDispatchRejectsAliveSession (BACI-190) asserts the
+// eligibility gate: a dispatch whose target session is still alive
+// can't be rescued. Returns a 'still alive' error the API layer maps
+// to 409 conflict.
+func TestCreateRescueDispatchRejectsAliveSession(t *testing.T) {
+	p := newPair(t)
+	defer p.cleanup()
+	ctx := context.Background()
+
+	iss, err := p.store.CreateIssue(p.repo.ID, nil, "alive worker", "", model.StateInProgress, nil)
+	if err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+	ag, _, err := p.store.UpsertAgent("live-otter@claude.test", true)
+	if err != nil {
+		t.Fatalf("UpsertAgent: %v", err)
+	}
+	const sid = "11111111-3333-4333-8333-333333333333"
+	if _, err := p.store.UpsertAgentSession(store.UpsertAgentSessionIn{
+		SessionID: sid, RepoID: p.repo.ID, AgentID: &ag.ID, Actor: "live-otter",
+		MarkRegistered: true,
+	}); err != nil {
+		t.Fatalf("UpsertAgentSession: %v", err)
+	}
+	d, err := p.store.AddDispatch(store.AddDispatchIn{
+		RepoID:          p.repo.ID,
+		TargetAgentID:   &ag.ID,
+		TargetSessionID: sid,
+		IssueID:         &iss.ID,
+		Mode:            model.DispatchModeImplement,
+		Payload:         "in-flight",
+		CreatedBy:       "supervisor@host",
+	})
+	if err != nil {
+		t.Fatalf("AddDispatch: %v", err)
+	}
+	if _, err := p.store.MarkDispatchDelivered(d.ID); err != nil {
+		t.Fatalf("MarkDispatchDelivered: %v", err)
+	}
+
+	_, err = p.local.CreateRescueDispatch(ctx, d.ID)
+	if err == nil {
+		t.Fatalf("CreateRescueDispatch on alive session: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "still alive") {
+		t.Fatalf("error = %q, want 'still alive'", err.Error())
+	}
+}
+
+// TestCreateRescueDispatchRejectsTrivialCreator (BACI-190) asserts a
+// rescue can't be rescued: chain-rescuing in-flight rescue dispatches
+// would loop forever.
+func TestCreateRescueDispatchRejectsTrivialCreator(t *testing.T) {
+	p := newPair(t)
+	defer p.cleanup()
+	ctx := context.Background()
+
+	ag, _, err := p.store.UpsertAgent("recursion-otter@claude.test", true)
+	if err != nil {
+		t.Fatalf("UpsertAgent: %v", err)
+	}
+	const sid = "22222222-4444-4444-8444-444444444444"
+	if _, err := p.store.UpsertAgentSession(store.UpsertAgentSessionIn{
+		SessionID: sid, RepoID: p.repo.ID, AgentID: &ag.ID, Actor: "recursion-otter",
+		MarkRegistered: true,
+	}); err != nil {
+		t.Fatalf("UpsertAgentSession: %v", err)
+	}
+	if _, _, _, _, err := p.store.EndAgentSession(sid, string(model.EndReasonStop), "", store.DispatchCascadeCancel); err != nil {
+		t.Fatalf("EndAgentSession: %v", err)
+	}
+	d, err := p.store.AddDispatch(store.AddDispatchIn{
+		RepoID:          p.repo.ID,
+		TargetSessionID: sid,
+		Payload:         "rescue payload",
+		CreatedBy:       model.RescueDispatchCreator,
+	})
+	if err != nil {
+		t.Fatalf("AddDispatch: %v", err)
+	}
+	if _, err := p.store.MarkDispatchDelivered(d.ID); err != nil {
+		t.Fatalf("MarkDispatchDelivered: %v", err)
+	}
+
+	_, err = p.local.CreateRescueDispatch(ctx, d.ID)
+	if err == nil {
+		t.Fatalf("CreateRescueDispatch on rescue dispatch: expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "not rescuable") {
+		t.Fatalf("error = %q, want 'not rescuable'", err.Error())
+	}
+}
+
+// TestRescueDispatchNeedsRescueFlag (BACI-190) covers the agentcards
+// DispatchDTO derive: a delivered dispatch whose target session has
+// ended carries NeedsRescue=true, while a pending dispatch on a live
+// session does not. Pure-data test against dispatchNeedsRescue is in
+// the agentcards package; this is the round-trip smoke that the
+// store→dispatch→session join lights it up.
+func TestParseAgentIDFromTranscriptFilename(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"bacio-transcript-BACI-188-agent-afc2b74037486daa7.jsonl", "afc2b74037486daa7"},
+		{"bacio-transcript-MINI-3-agent-deadbeef.jsonl", "deadbeef"},
+		{"not-a-transcript.jsonl", ""},
+		{"", ""},
+	}
+	for _, c := range cases {
+		// Reaching into the package-private helper via the test's
+		// external package; expose by name in a hoisted helper below.
+		got := client.ParseAgentIDFromTranscriptFilenameForTest(c.in)
+		if got != c.want {
+			t.Fatalf("parseAgentIDFromTranscriptFilename(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

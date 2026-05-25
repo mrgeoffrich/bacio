@@ -271,6 +271,16 @@ export class DispatchDTO {
     "createdBy": string;
     "createdAt": time$0.Time;
 
+    /**
+     * NeedsRescue (BACI-190) is true when the dispatch's target
+     * session has ended without the dispatch ever being acked — its
+     * worker either died mid-job or shut down without replying. The
+     * AgentsView surfaces a "Rescue" button on rows with this flag.
+     * Only typed per-mode dispatches qualify; rescue / setup / ping
+     * dispatches are excluded.
+     */
+    "needsRescue": boolean;
+
     /** Creates a new DispatchDTO instance. */
     constructor($$source: Partial<DispatchDTO> = {}) {
         if (!("id" in $$source)) {
@@ -296,6 +306,9 @@ export class DispatchDTO {
         }
         if (!("createdAt" in $$source)) {
             this["createdAt"] = null;
+        }
+        if (!("needsRescue" in $$source)) {
+            this["needsRescue"] = false;
         }
 
         Object.assign(this, $$source);

@@ -564,6 +564,17 @@ type Client interface {
 	// today (REST parity is a follow-up).
 	WaitingDispatchForIssue(ctx context.Context, repo *model.Repo, issueKey string) (*model.AgentDispatch, error)
 
+	// CreateRescueDispatch (BACI-190) enqueues a `from="bacio-rescue"`
+	// channel event asking an idle supervisor to handle a dead
+	// worker's stranded worktree INLINE (no fresh Task spawn).
+	// Validates the original dispatch is rescuable (pending/delivered,
+	// per-mode creator, target session ended), picks an idle channel-
+	// connected supervisor in the same repo, and writes one
+	// `agent.rescue` audit row. Errors when the original isn't
+	// eligible or no idle supervisor is available. Local-only —
+	// remote returns ErrLocalOnly until REST parity lands as a follow-up.
+	CreateRescueDispatch(ctx context.Context, dispatchID int64) (*model.AgentDispatch, error)
+
 	// InflightByModeForRepo (BACI-145) returns mode → count of in-flight
 	// dispatches in this repo, gated by the same staleness predicate the
 	// matcher uses. Used by boardcards.Assemble to derive each card's

@@ -275,6 +275,22 @@ export function QueueFollowOnDispatch(repoPrefix: string, issueKey: string, mode
 }
 
 /**
+ * RescueDispatch (BACI-190) posts a `from="bacio-rescue"` channel
+ * event to an idle supervisor session, asking it to handle a dead
+ * worker's stranded worktree INLINE. Eligibility (status pending /
+ * delivered, real per-mode creator, target session ended, idle
+ * supervisor available) is enforced by client.CreateRescueDispatch
+ * — the binding just shapes the response. Returns an error string
+ * the frontend can surface in a toast when the rescue can't be
+ * queued (e.g. no idle supervisor in the repo).
+ */
+export function RescueDispatch(dispatchID: number): $CancellablePromise<$models.DispatchDTO> {
+    return $Call.ByID(233478750, dispatchID).then(($result: any) => {
+        return $$createType7($result);
+    });
+}
+
+/**
  * SetIssueState changes an issue's state and returns the refreshed card.
  * It backs the board's drag-to-move: dropping a card in a new column
  * persists the state change so it survives the next auto-refresh poll.

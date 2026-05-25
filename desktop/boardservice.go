@@ -857,6 +857,22 @@ func (b *BoardService) CancelFollowOnDispatch(repoPrefix, issueKey string) (Disp
 	return dispatchDTO(d), nil
 }
 
+// RescueDispatch (BACI-190) posts a `from="bacio-rescue"` channel
+// event to an idle supervisor session, asking it to handle a dead
+// worker's stranded worktree INLINE. Eligibility (status pending /
+// delivered, real per-mode creator, target session ended, idle
+// supervisor available) is enforced by client.CreateRescueDispatch
+// — the binding just shapes the response. Returns an error string
+// the frontend can surface in a toast when the rescue can't be
+// queued (e.g. no idle supervisor in the repo).
+func (b *BoardService) RescueDispatch(dispatchID int64) (DispatchDTO, error) {
+	d, err := b.client.CreateRescueDispatch(context.Background(), dispatchID)
+	if err != nil {
+		return DispatchDTO{}, err
+	}
+	return dispatchDTO(d), nil
+}
+
 // CancelWaitingDispatch (BACI-51) is the spinner-as-cancel-button
 // binding. Resolves the active (queued / pending / delivered) dispatch
 // for an issue and cancels it in a single Wails call so card DTOs

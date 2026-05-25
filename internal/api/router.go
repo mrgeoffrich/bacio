@@ -134,6 +134,12 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("POST /agents/questions/{id}/cancel", d.handleQuestionCancel)
 	mux.HandleFunc("POST /agents/dispatches/{id}/ack", d.handleAgentDispatchAck)
 	mux.HandleFunc("POST /agents/dispatches/{id}/cancel", d.handleAgentDispatchCancel)
+	// BACI-190 rescue: post a `from="bacio-rescue"` channel event to an
+	// idle supervisor session, asking it to handle a dead worker's
+	// stranded worktree inline. Eligibility (status pending/delivered,
+	// target session ended, real per-mode creator) is enforced by
+	// client.CreateRescueDispatch — the handler just shapes the response.
+	mux.HandleFunc("POST /agents/dispatches/{id}/rescue", d.handleAgentDispatchRescue)
 	mux.HandleFunc("GET /agents/claims/open", d.handleAgentClaimsOpen)
 	// BACI-50: composite Agents endpoint — one assembled AgentCard per
 	// session, with claims + dispatches + todos hydrated server-side

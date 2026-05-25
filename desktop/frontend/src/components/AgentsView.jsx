@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import Icon from './Icon.jsx';
 import QuestionModal from './QuestionModal.jsx';
 import { todoGlyph } from '../lib/todoGlyph.js';
+import * as api from '../api';
 
 // relTime renders a coarse "time since" for the last-seen line.
 function relTime(iso) {
@@ -24,6 +25,45 @@ export default function AgentsView({ agents, onRefresh }) {
   // pending row's primary key (null when no modal is open); when set
   // the modal fetches the full payload + renders the answer form.
   const [activeQuestionId, setActiveQuestionId] = useState(null);
+  // BACI-190 rescue: per-dispatch in-flight set so a double-click on
+  // the Rescue button doesn't fire twice. The rescued button stays
+  // disabled until the next onRefresh poll clears the NeedsRescue flag
+  // (a fresh rescue dispatch lands on a different session — the
+  // original dead-session dispatch keeps its flag until acked).
+  const [rescuing, setRescuing] = useState(() => new Set());
+  // BACI-190 rescue: most recent rescue error so a failure (no idle
+  // supervisor / already-acked race) is visible inline without a toast
+  // surface. Map: dispatch id → error message.
+  const [rescueError, setRescueError] = useState(() => ({}));
+
+  const handleRescue = async (dispatchID) => {
+    setRescuing((prev) => {
+      const next = new Set(prev);
+      next.add(dispatchID);
+      return next;
+    });
+    setRescueError((prev) => {
+      if (!(dispatchID in prev)) return prev;
+      const next = { ...prev };
+      delete next[dispatchID];
+      return next;
+    });
+    try {
+      await api.rescueDispatch(dispatchID);
+      onRefresh?.();
+    } catch (err) {
+      setRescueError((prev) => ({
+        ...prev,
+        [dispatchID]: err instanceof Error ? err.message : String(err),
+      }));
+    } finally {
+      setRescuing((prev) => {
+        const next = new Set(prev);
+        next.delete(dispatchID);
+        return next;
+      });
+    }
+  };
 
   return (
     <div className="mk-agents-view">
@@ -156,6 +196,24 @@ export default function AgentsView({ agents, onRefresh }) {
                         <span className="mk-pill">{d.status}</span>
                         {d.mode && <span className="mk-tag">{d.mode}</span>}
                         <span className="mk-mono">{d.issueKey || '—'}</span>
+                        {d.needsRescue && (
+                          <>
+                            <button
+                              type="button"
+                              className="mk-btn mk-btn-rescue"
+                              onClick={() => handleRescue(d.id)}
+                              disabled={rescuing.has(d.id)}
+                              title="Post a rescue dispatch to an idle supervisor so it can finalise this worker's worktree edits"
+                            >
+                              {rescuing.has(d.id) ? 'Rescuing…' : 'Rescue'}
+                            </button>
+                            {rescueError[d.id] && (
+                              <span className="mk-agent-dispatch-error" title={rescueError[d.id]}>
+                                {rescueError[d.id]}
+                              </span>
+                            )}
+                          </>
+                        )}
                       </div>
                     ))
                   )}
