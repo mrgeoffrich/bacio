@@ -272,6 +272,53 @@ export default function App() {
     });
   }, [activeBoard]);
 
+  // BACI-197: cross-link cues between the Activity tray and the kanban
+  // board. `hoveredKey` is the tray row the cursor is currently over —
+  // the matching board card lights up via the `is-tray-hover` class.
+  // `jumpKey` is the card that just got clicked in the tray — it plays
+  // a brief CSS keyframe ("jump") so the user can see which row they
+  // hit. Both are ephemeral interaction state; no persistence. The
+  // hover handler is just setHoveredKey; the jump handler runs through
+  // triggerJump so it can clear automatically after the animation.
+  const [hoveredKey, setHoveredKey] = useState(null);
+  const [jumpKey, setJumpKey] = useState(null);
+  // JUMP_MS mirrors --dur-slow (240ms) in app.css — kept in sync with
+  // the `mk-card-jump` keyframe duration. The timer ref lets us cancel
+  // a still-running jump if a second click lands so the next jump
+  // restarts cleanly rather than half-animating.
+  const jumpTimerRef = useRef(null);
+  const triggerJump = useCallback((key) => {
+    if (!key) return;
+    if (jumpTimerRef.current) {
+      clearTimeout(jumpTimerRef.current);
+      jumpTimerRef.current = null;
+    }
+    // Drop to null first so a second click on the same key restarts
+    // the CSS animation; React's diff would otherwise skip the class
+    // toggle when jumpKey is already that key.
+    setJumpKey(null);
+    // requestAnimationFrame lets the null land in the DOM before the
+    // new key flips back in — without it React can batch both setStates
+    // into one render and the animation is a no-op.
+    requestAnimationFrame(() => {
+      setJumpKey(key);
+      jumpTimerRef.current = setTimeout(() => {
+        setJumpKey(null);
+        jumpTimerRef.current = null;
+      }, 240);
+    });
+  }, []);
+  // Drain the jump timer on unmount so we don't setState into a dead
+  // component if the user navigates away mid-animation.
+  useEffect(() => {
+    return () => {
+      if (jumpTimerRef.current) {
+        clearTimeout(jumpTimerRef.current);
+        jumpTimerRef.current = null;
+      }
+    };
+  }, []);
+
   // ---- Web-mode hash routing ----
   //
   // Web bundles reflect the open issue into the URL hash
@@ -921,6 +968,8 @@ export default function App() {
             onTogglePin={togglePinKey}
             onSetFollowOn={setFollowOnFromCard}
             onCancelFollowOn={cancelFollowOnFromCard}
+            hoveredKey={hoveredKey}
+            jumpKey={jumpKey}
           />
         </ErrorBoundary>
       )}
@@ -944,6 +993,8 @@ export default function App() {
           pinnedKeys={pinnedKeys}
           onTogglePin={togglePinKey}
           onOpenCard={openCard}
+          onHoverCard={setHoveredKey}
+          onCardClickFromTray={triggerJump}
         />
       </ErrorBoundary>
       <ErrorModal />

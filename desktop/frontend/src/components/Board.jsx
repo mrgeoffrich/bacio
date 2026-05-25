@@ -46,7 +46,7 @@ function persistBoardScroll(repo, offset) {
   }
 }
 
-export default function Board({ activeBoard, columns, cards, promptConfig, onMoveCard, onOpenCard, onOpenIssue, onDispatchFromCard, onCancelWaitingCard, onAfterQuestionResolved, onQuickEval, pinnedKeys, onTogglePin, onSetFollowOn, onCancelFollowOn }) {
+export default function Board({ activeBoard, columns, cards, promptConfig, onMoveCard, onOpenCard, onOpenIssue, onDispatchFromCard, onCancelWaitingCard, onAfterQuestionResolved, onQuickEval, pinnedKeys, onTogglePin, onSetFollowOn, onCancelFollowOn, hoveredKey, jumpKey }) {
   const [dragKey, setDragKey] = useState(null);
   const [overCol, setOverCol] = useState(null);
   // BACI-53: the kanban card "? N" pill opens the shared
@@ -276,6 +276,8 @@ export default function Board({ activeBoard, columns, cards, promptConfig, onMov
                         onTogglePin={onTogglePin}
                         onSetFollowOn={onSetFollowOn}
                         onCancelFollowOn={onCancelFollowOn}
+                        isTrayHover={hoveredKey === card.key}
+                        isJumping={jumpKey === card.key}
                       />
                     ))}
                   </AnimatePresence>
