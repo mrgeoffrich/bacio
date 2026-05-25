@@ -154,6 +154,11 @@ export interface BoardCard {
   column: string;
   columnLabel: string;
   title: string;
+  // BACI-171: short (~140-char) excerpt of the issue description used
+  // by the bottom-right ActivityTray to render a one-or-two-line
+  // summary per entry. Absent (server-side omitempty) when the issue
+  // has no description; the kanban card itself ignores this field.
+  descriptionExcerpt?: string;
   tags: string[];
   assignees: string[];
   claude: boolean;
