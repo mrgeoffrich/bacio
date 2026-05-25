@@ -22,11 +22,18 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
+
+// descriptionExcerptRunes (BACI-171) caps the per-card description
+// excerpt at ~140 runes — wide enough for two lines at the tray's
+// 320px width, narrow enough not to bloat the kanban poll payload
+// (~30 cards × 140 chars is a few KB per refresh).
+const descriptionExcerptRunes = 140
 
 // stateLabels maps each bacio issue state to a human-friendly column label.
 // Duplicated from desktop/boardservice.go's stateLabels rather than imported
@@ -133,10 +140,18 @@ type BoardCard struct {
 	Column      string   `json:"column"`
 	ColumnLabel string   `json:"columnLabel"`
 	Title       string   `json:"title"`
-	Tags        []string `json:"tags"`
-	Assignees   []string `json:"assignees"`
-	Claude      bool     `json:"claude"`
-	Taken       bool     `json:"taken"`
+	// DescriptionExcerpt (BACI-171) is a short (~140-rune) excerpt of
+	// the issue's description used by the bottom-right ActivityTray to
+	// render a one-or-two-line summary per entry without an extra
+	// per-card brief fetch on every change. Truncates on a word
+	// boundary with a trailing "…"; empty (and omitted from JSON) when
+	// the issue's description is empty. The kanban card itself ignores
+	// this field — the tray is the sole consumer.
+	DescriptionExcerpt string   `json:"descriptionExcerpt,omitempty"`
+	Tags               []string `json:"tags"`
+	Assignees          []string `json:"assignees"`
+	Claude             bool     `json:"claude"`
+	Taken              bool     `json:"taken"`
 	// WaitingState (BACI-145) carries the structured reason a card is
 	// rendering the spinner — queued without an agent, queued but
 	// blocked by the template's concurrency cap, or delivered to the
@@ -249,7 +264,11 @@ type BoardCardTodo struct {
 // includeArchived=true to inflate — the HTTP handler reads
 // ?include_archived=1 OR the display.show_archived global setting.
 func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArchived bool) ([]BoardCard, error) {
-	filter := client.IssueFilter{IncludeArchived: includeArchived}
+	// BACI-171: request descriptions so the per-card DescriptionExcerpt
+	// can be computed below. ListIssues otherwise strips the description
+	// column to keep list responses lean; the excerpt is short (~140
+	// runes) so the bulk-read cost stays modest.
+	filter := client.IssueFilter{IncludeArchived: includeArchived, IncludeDescription: true}
 	var repos []*model.Repo
 	if repo == nil {
 		filter.AllRepos = true
@@ -369,6 +388,7 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 			Column:             string(iss.State),
 			ColumnLabel:        StateLabel(iss.State),
 			Title:              iss.Title,
+			DescriptionExcerpt: descriptionExcerpt(iss.Description),
 			Tags:               tags,
 			Assignees:          assigneeList(iss.Assignee),
 			Claude:             iss.Assignee == "claude",
@@ -419,6 +439,52 @@ func assigneeList(a string) []string {
 		return []string{}
 	}
 	return []string{a}
+}
+
+// descriptionExcerpt (BACI-171) returns a short summary of `body` for
+// the ActivityTray entry's two-line description. Whitespace runs
+// (including newlines, common in markdown bodies) collapse to single
+// spaces so the tray entry reads as flowing text rather than the raw
+// markdown's hard wraps. When the collapsed body exceeds the rune cap
+// the cut is moved back to the nearest preceding space so we don't
+// split a word, and a "…" is appended. Returns "" for an empty or
+// whitespace-only body so the BoardCard's omitempty drops the field
+// from the wire payload.
+func descriptionExcerpt(body string) string {
+	collapsed := strings.Join(strings.Fields(body), " ")
+	if collapsed == "" {
+		return ""
+	}
+	if utf8.RuneCountInString(collapsed) <= descriptionExcerptRunes {
+		return collapsed
+	}
+	// Walk the rune sequence up to the cap and remember the last index
+	// at a word boundary (a space). Cutting on that boundary keeps the
+	// excerpt readable; if we never see a space (a single very long
+	// token), fall back to the hard rune cap so we still truncate.
+	runes := 0
+	cut := 0
+	lastSpace := 0
+	for i, r := range collapsed {
+		if runes >= descriptionExcerptRunes {
+			cut = i
+			break
+		}
+		if r == ' ' {
+			lastSpace = i
+		}
+		runes++
+	}
+	if cut == 0 {
+		// Defensive — caller logic above means cut should always be set
+		// once we exceed the cap, but if the byte/rune accounting ever
+		// drifts return the full string rather than panic.
+		return collapsed
+	}
+	if lastSpace > 0 {
+		cut = lastSpace
+	}
+	return strings.TrimRight(collapsed[:cut], " ") + "…"
 }
 
 type cardEnrichment struct {

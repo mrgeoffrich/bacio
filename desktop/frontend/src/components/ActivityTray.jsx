@@ -1,0 +1,368 @@
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { isTerminalState } from '../lib/issueState';
+
+// ActivityTray (BACI-171) — a bottom-right floating panel that narrates
+// what's just happened on the board. Position-fixed, overlays the
+// board, never reflows the columns. Entries arrive when a card enters
+// a queued / taken state or changes column; existing entries flash
+// when their card transitions again; cards landing in done/cancelled
+// flash on the way out and then auto-leave; entries can be manually
+// dismissed.
+//
+// All state is local to the component: a `previousCardsRef` carries
+// the last `cards` snapshot for the diff, an `entries` state holds
+// the LIFO list, and a `dismissedRef` Set tracks keys the user has
+// dismissed (so a fresh transition on the same card after dismissal
+// re-enters). Nothing persists across reloads — a hard refresh starts
+// the tray empty, which matches "things that have happened recently".
+
+// FLASH_MS is how long the row's pulse animation runs before the
+// `.is-flashing` modifier is stripped — matches the keyframe
+// duration in app.css (`mk-tray-flash`).
+const FLASH_MS = 600;
+
+// MAX_ENTRIES caps the visible tray. Older entries drop off the
+// bottom when the cap is hit; the overflow within the cap is
+// scrollable. 10 is the ticket's default, with overflow scroll
+// inside the tray.
+const MAX_ENTRIES = 10;
+
+// isQueued captures the "queued for work — about to be acted on"
+// shape from the ticket: a card with an open claim OR an active
+// dispatch state. The diff treats either flip as the entry trigger
+// for the queued half of the rule (the column-change half is
+// handled separately).
+function isQueued(card) {
+  return !!card.taken || !!card.waitingState;
+}
+
+// queuedKey turns the waiting/taken shape into a comparable scalar so
+// the diff can spot a *change* in the queued state — a card going
+// taken → not-taken, or a dispatch flipping kind (queued → delivered).
+// The kind is the only label-affecting bit of waitingState; the rest
+// is metadata.
+function queuedKey(card) {
+  if (card.taken) return 'taken';
+  if (card.waitingState) return `waiting:${card.waitingState.kind || ''}`;
+  return '';
+}
+
+// computeTransitions diffs two `cards` arrays (keyed by card.key) and
+// returns the list of transitions that should land in the tray. Each
+// transition carries the card itself (so the renderer can pull
+// title/tags/excerpt straight off it) plus a `reason` enum for
+// debugging. Pure function — no React state — so it's testable in
+// isolation if a future refactor wants to lift it into lib/.
+//
+// Transition rules (any one of which produces an entry):
+//
+//   - column changed between snapshots (the kanban-state move)
+//   - queued shape changed (taken/dispatch flipped on or off, or the
+//     dispatch's kind changed in a way that affects the label)
+//
+// Cards that disappeared from the new snapshot (deleted server-side,
+// or a repo-switch removed them from scope) are skipped — they're not
+// transitions the tray should narrate. A card landing in a terminal
+// column (done/cancelled) still emits a transition so the tray can
+// flash it out before removing it.
+export function computeTransitions(prevCards, nextCards) {
+  const out = [];
+  if (!Array.isArray(prevCards) || !Array.isArray(nextCards)) return out;
+  const prevByKey = new Map();
+  for (const c of prevCards) prevByKey.set(c.key, c);
+  for (const next of nextCards) {
+    const prev = prevByKey.get(next.key);
+    if (!prev) continue; // first time we see this card — see seeding below
+    if (prev.column !== next.column) {
+      out.push({ card: next, reason: 'column' });
+      continue;
+    }
+    if (queuedKey(prev) !== queuedKey(next)) {
+      out.push({ card: next, reason: 'queued' });
+    }
+  }
+  return out;
+}
+
+// entryFromCard builds a tray Entry from a board card. The renderer
+// reads these directly; `addedAt` keeps the LIFO ordering stable when
+// two entries share the same poll tick.
+function entryFromCard(card) {
+  return {
+    key: card.key,
+    title: card.title || '',
+    tags: card.tags || [],
+    descriptionExcerpt: card.descriptionExcerpt || '',
+    column: card.column,
+    columnLabel: card.columnLabel || card.column,
+    addedAt: Date.now() + Math.random(), // unique even within one tick
+  };
+}
+
+// stateClass maps a card's column to the existing .mk-status-* token
+// vocabulary so the entry's right-edge pill picks up the column's
+// colour family (todo / doing / review / done / blocked) without a
+// new token set. Matches the per-status colours used by .mk-pill on
+// the topbar's agent counters and the question header chip.
+function stateClass(column) {
+  switch (column) {
+    case 'in_progress':
+    case 'needs_action':
+      return 'mk-status-doing';
+    case 'in_review':
+      return 'mk-status-review';
+    case 'done':
+      return 'mk-status-done';
+    case 'cancelled':
+      return 'mk-status-blocked';
+    default:
+      return 'mk-status-todo';
+  }
+}
+
+export default function ActivityTray({ cards }) {
+  const [entries, setEntries] = useState([]);
+  const [collapsed, setCollapsed] = useState(false);
+  // Track which entry keys are currently flashing — toggled per entry
+  // rather than re-rendering the whole list on every flash on/off.
+  const [flashingKeys, setFlashingKeys] = useState(() => new Set());
+
+  // previousCardsRef holds the last `cards` snapshot the diff ran
+  // against. On the very first poll there's no previous snapshot, so
+  // the diff returns empty — seeding behaviour: the tray starts empty
+  // and only narrates transitions, never the initial state.
+  const previousCardsRef = useRef(null);
+  // dismissedRef tracks keys the user has dismissed via the × button.
+  // Used to suppress *current* entries on the next diff so the row
+  // doesn't bounce back if a poll re-derives the same transition.
+  // Cleared per-key when a fresh transition arrives — see the diff
+  // loop below.
+  const dismissedRef = useRef(new Set());
+  // Track flash + removal timers so we can clear them on unmount and
+  // avoid setState calls on a dead component.
+  const timersRef = useRef(new Map());
+
+  // Run the diff every time `cards` changes (the App's 10s poll
+  // already passes a fresh array on every tick). Synchronous — no
+  // async path of its own.
+  useEffect(() => {
+    const prev = previousCardsRef.current;
+    previousCardsRef.current = cards;
+    if (!prev) return; // first mount: seed the snapshot, emit nothing
+    const transitions = computeTransitions(prev, cards);
+    if (transitions.length === 0) return;
+
+    // Build a key → entry map for fast in-place updates on rows
+    // that are already in the tray. We rebuild `entries` once per
+    // tick so multiple transitions in the same tick land atomically.
+    setEntries(current => {
+      const byKey = new Map();
+      for (const e of current) byKey.set(e.key, e);
+      const updatedKeys = new Set();
+      const newKeys = new Set();
+      for (const { card } of transitions) {
+        // Cards landing in terminal columns flash out then leave —
+        // we still need an entry for them to do that, so they go
+        // through the same insert/update path here; the post-flash
+        // cleanup further down removes them.
+        if (byKey.has(card.key)) {
+          // Update in place: refresh excerpt/title/column from the
+          // latest card snapshot but keep the original addedAt so
+          // the row doesn't jump back to the top. Mark for flash.
+          const existing = byKey.get(card.key);
+          byKey.set(card.key, {
+            ...entryFromCard(card),
+            addedAt: existing.addedAt,
+          });
+          updatedKeys.add(card.key);
+          // A fresh transition on a previously-dismissed card
+          // re-admits it — the user said "I've clocked *that*
+          // change", but this is a new one.
+          dismissedRef.current.delete(card.key);
+        } else {
+          // New entry — but only if the user hasn't dismissed this
+          // card's most recent transition. (dismissedRef is cleared
+          // per-key on every real transition, so a card the user
+          // dismissed and that then transitions again still lands.)
+          if (dismissedRef.current.has(card.key)) continue;
+          byKey.set(card.key, entryFromCard(card));
+          newKeys.add(card.key);
+        }
+      }
+      // Rebuild the list: newest entries on top (LIFO by addedAt
+      // descending), cap at MAX_ENTRIES, drop older entries off the
+      // tail when over.
+      const merged = Array.from(byKey.values())
+        .sort((a, b) => b.addedAt - a.addedAt)
+        .slice(0, MAX_ENTRIES);
+
+      // Schedule flash on every entry that updated (and on freshly
+      // added entries — the visual cue is the same: "this row
+      // changed"). Skipping flashes on rows that didn't transition.
+      const flashKeys = new Set([...updatedKeys, ...newKeys]);
+      if (flashKeys.size > 0) {
+        scheduleFlash(flashKeys);
+      }
+      // Terminal-state rows flash out then auto-leave. The flash
+      // timer above gives the visual cue; chain a second timer that
+      // strips the row after FLASH_MS so the user sees the close
+      // transition (ticket open-question: "brief flash on the way
+      // out so you see the closing transition").
+      for (const { card } of transitions) {
+        if (isTerminalState(card.column)) {
+          scheduleRemoval(card.key);
+        }
+      }
+      return merged;
+    });
+    // We intentionally only react to `cards`; the helpers above
+    // operate on refs / setState callbacks.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cards]);
+
+  // Strip entries whose underlying card no longer exists (e.g. a
+  // repo switch wiped the cards array) so the tray doesn't carry
+  // ghosts. The cheap shape: build a key set from `cards` and
+  // filter `entries` against it. Skips work when nothing dropped.
+  useEffect(() => {
+    if (!cards) return;
+    const liveKeys = new Set(cards.map(c => c.key));
+    setEntries(current => {
+      const filtered = current.filter(e => liveKeys.has(e.key));
+      return filtered.length === current.length ? current : filtered;
+    });
+  }, [cards]);
+
+  // scheduleFlash adds the flash class for FLASH_MS then strips it.
+  // Stable per-call: each call captures its own key set so a quick
+  // burst of transitions on the same row resets the animation
+  // cleanly. Uses the timersRef so unmount can drain pending timers.
+  function scheduleFlash(keys) {
+    setFlashingKeys(prev => {
+      const next = new Set(prev);
+      for (const k of keys) next.add(k);
+      return next;
+    });
+    for (const k of keys) {
+      // Clear any pending flash-off timer for this key — restart the
+      // animation rather than ending mid-pulse if a second transition
+      // lands before the first finishes.
+      const prevTimer = timersRef.current.get(`flash:${k}`);
+      if (prevTimer) clearTimeout(prevTimer);
+      const t = setTimeout(() => {
+        setFlashingKeys(prev => {
+          if (!prev.has(k)) return prev;
+          const next = new Set(prev);
+          next.delete(k);
+          return next;
+        });
+        timersRef.current.delete(`flash:${k}`);
+      }, FLASH_MS);
+      timersRef.current.set(`flash:${k}`, t);
+    }
+  }
+
+  // scheduleRemoval (for terminal-state landings) waits for the
+  // flash to finish before stripping the entry. A small grace beyond
+  // FLASH_MS lets the colour fade complete before the row vanishes.
+  function scheduleRemoval(key) {
+    const prevTimer = timersRef.current.get(`rm:${key}`);
+    if (prevTimer) clearTimeout(prevTimer);
+    const t = setTimeout(() => {
+      setEntries(current => current.filter(e => e.key !== key));
+      timersRef.current.delete(`rm:${key}`);
+    }, FLASH_MS + 50);
+    timersRef.current.set(`rm:${key}`, t);
+  }
+
+  // Drain timers on unmount so we don't setState into the void.
+  useEffect(() => {
+    return () => {
+      for (const t of timersRef.current.values()) clearTimeout(t);
+      timersRef.current.clear();
+    };
+  }, []);
+
+  // dismiss removes an entry on the × click. The key joins the
+  // dismissedRef set so the next diff doesn't re-emit the same
+  // already-clocked transition; a *new* transition on the same card
+  // re-admits it (see the diff loop above).
+  const dismiss = (key) => {
+    dismissedRef.current.add(key);
+    setEntries(current => current.filter(e => e.key !== key));
+  };
+
+  // Empty tray — return null. An "no activity" placeholder would be
+  // pure visual clutter for a feature whose whole point is being
+  // ignorable when nothing's happening.
+  if (entries.length === 0) return null;
+
+  if (collapsed) {
+    return (
+      <button
+        type="button"
+        className="mk-tray-badge mk-pill mk-status-doing"
+        onClick={() => setCollapsed(false)}
+        title="Show activity tray"
+      >
+        Activity · {entries.length}
+      </button>
+    );
+  }
+
+  return (
+    <aside className="mk-tray" aria-label="Recent board activity">
+      <div className="mk-tray-head">
+        <span className="mk-tray-title">Activity</span>
+        <span className="mk-tray-count">{entries.length}</span>
+        <button
+          type="button"
+          className="mk-icbtn mk-tray-collapse"
+          onClick={() => setCollapsed(true)}
+          title="Minimise activity tray"
+          aria-label="Minimise activity tray"
+        >
+          –
+        </button>
+      </div>
+      <ul className="mk-tray-list">
+        {entries.map(e => (
+          <li
+            key={e.key}
+            className={`mk-tray-entry${flashingKeys.has(e.key) ? ' is-flashing' : ''}`}
+          >
+            <div className="mk-tray-entry-head">
+              <span className="mk-card-id">{e.key}</span>
+              <span className={`mk-pill ${stateClass(e.column)}`}>{e.columnLabel}</span>
+              <button
+                type="button"
+                className="mk-tray-dismiss"
+                onClick={() => dismiss(e.key)}
+                title="Dismiss"
+                aria-label={`Dismiss ${e.key}`}
+              >
+                ×
+              </button>
+            </div>
+            <div className="mk-tray-entry-title">{e.title}</div>
+            {e.tags && e.tags.length > 0 ? (
+              <div className="mk-tag-row mk-tray-entry-tags">
+                {e.tags.map(t => (
+                  <span key={t} className="mk-tag">{t}</span>
+                ))}
+              </div>
+            ) : null}
+            {e.descriptionExcerpt ? (
+              <div className="mk-tray-entry-desc">{e.descriptionExcerpt}</div>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </aside>
+  );
+}
+
+// MemoEntries: not currently memoised — at ~10 visible entries the
+// render cost is negligible and a React.memo wrapper would add an
+// equality-check overhead that doesn't pay off. If the cap ever
+// grows to 50+, revisit.
