@@ -215,6 +215,11 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("GET /sync", d.handleSyncStatusList)
 	mux.HandleFunc("GET /sync/repos", d.handleSyncRegistryList)
 	mux.HandleFunc("GET /repos/{prefix}/sync", d.handleSyncStatusGet)
+	// BACI-110: HTTP equivalent of `bacio sync init` / `bacio sync clone`.
+	// Three modes (init / clone / attach) — see handleSyncSetup. Lives
+	// alongside the GET status route so the desktop / web setup form has
+	// a single per-repo sync URL surface to talk to.
+	mux.HandleFunc("POST /repos/{prefix}/sync/setup", d.handleSyncSetup)
 	mux.HandleFunc("GET /settings/sync-preferences", d.handleSyncPreferencesGet)
 	mux.HandleFunc("PUT /settings/sync-preferences", d.handleSyncPreferencesSet)
 
