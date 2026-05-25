@@ -46,16 +46,33 @@ const DefaultArchiveRetentionDays = 7
 // for logging and the optional `bacio archive sweep` CLI verb. Each
 // count is the number of rows whose archived_at was newly stamped on
 // this tick (already-archived rows aren't counted).
+//
+// FeaturesAutoStated (BACI-199) is the count of features the
+// auto-completion pass promoted from `active` to `done` or
+// `cancelled` this tick — counted separately from FeaturesArchived
+// because state and archive are orthogonal signals on the feature
+// surface and the leader-elected controller writes a sibling
+// `feature.auto-state` summary row keyed off this number.
+// FeaturesAutoStatedDone / FeaturesAutoStatedCancelled split that
+// total by destination state so the audit row Details can carry
+// `{"done":D,"cancelled":C}` without re-querying.
 type ArchiveSweepResult struct {
-	IssuesArchived    int64 `json:"issues_archived"`
-	FeaturesArchived  int64 `json:"features_archived"`
-	DocumentsArchived int64 `json:"documents_archived"`
+	IssuesArchived              int64 `json:"issues_archived"`
+	FeaturesArchived            int64 `json:"features_archived"`
+	FeaturesAutoStated          int64 `json:"features_auto_stated"`
+	FeaturesAutoStatedDone      int64 `json:"features_auto_stated_done"`
+	FeaturesAutoStatedCancelled int64 `json:"features_auto_stated_cancelled"`
+	DocumentsArchived           int64 `json:"documents_archived"`
 }
 
-// Total returns the sum of the three counts — useful for the leader
-// log line and `bacio archive sweep` text output.
+// Total returns the sum of the per-pass counts — useful for the leader
+// log line and `bacio archive sweep` text output. Includes the
+// BACI-199 auto-state promotions so a tick that only flipped a feature
+// state still reports a non-zero total. The Done / Cancelled split is
+// already counted in FeaturesAutoStated so it's not added a second
+// time here.
 func (r ArchiveSweepResult) Total() int64 {
-	return r.IssuesArchived + r.FeaturesArchived + r.DocumentsArchived
+	return r.IssuesArchived + r.FeaturesArchived + r.FeaturesAutoStated + r.DocumentsArchived
 }
 
 // ArchiveSweep runs the three SQL passes in one transaction:
@@ -141,6 +158,61 @@ func (s *Store) ArchiveSweep(dryRun bool) (ArchiveSweepResult, error) {
 		res.IssuesArchived, _ = r.RowsAffected()
 	}
 
+	// Pass 1.5 (BACI-199): feature auto-completion. Promote `active`
+	// features whose every child issue is in a terminal state, and
+	// whose user hasn't pinned the state manually (`state_manual = 0`).
+	// `done` wins when at least one child is `done`; if every child is
+	// `cancelled` the feature is `cancelled` too. Childless features
+	// never appear in the subquery's GROUP BY and so are deliberately
+	// untouched — matching the brief's "feature with no children
+	// stays active" criterion. The pass runs regardless of
+	// archive.auto_enabled — the toggle gates retention-driven
+	// archive, not the state derivation off children.
+	//
+	// Split into two UPDATEs (done first, cancelled second) so the
+	// per-destination counts feed the leader-driven `feature.auto-state`
+	// summary audit row directly — and so the `done` pass strictly
+	// precedes the `cancelled` pass even if a child issue's state
+	// changes mid-tx (the WAL serialisation guarantee makes that
+	// pathological case impossible inside a single tx, but the ordering
+	// is also the natural read for a future reviewer).
+	r, err := tx.Exec(`
+		UPDATE features
+		   SET state = 'done',
+		       updated_at = CURRENT_TIMESTAMP
+		 WHERE state = 'active'
+		   AND state_manual = 0
+		   AND id IN (
+		     SELECT feature_id FROM issues
+		      WHERE feature_id IS NOT NULL
+		      GROUP BY feature_id
+		     HAVING SUM(CASE WHEN state IN ('done','cancelled') THEN 0 ELSE 1 END) = 0
+		        AND SUM(CASE WHEN state = 'done' THEN 1 ELSE 0 END) > 0
+		   )`)
+	if err != nil {
+		return ArchiveSweepResult{}, fmt.Errorf("auto-state features (done): %w", err)
+	}
+	res.FeaturesAutoStatedDone, _ = r.RowsAffected()
+
+	r, err = tx.Exec(`
+		UPDATE features
+		   SET state = 'cancelled',
+		       updated_at = CURRENT_TIMESTAMP
+		 WHERE state = 'active'
+		   AND state_manual = 0
+		   AND id IN (
+		     SELECT feature_id FROM issues
+		      WHERE feature_id IS NOT NULL
+		      GROUP BY feature_id
+		     HAVING SUM(CASE WHEN state IN ('done','cancelled') THEN 0 ELSE 1 END) = 0
+		        AND SUM(CASE WHEN state = 'done' THEN 1 ELSE 0 END) = 0
+		   )`)
+	if err != nil {
+		return ArchiveSweepResult{}, fmt.Errorf("auto-state features (cancelled): %w", err)
+	}
+	res.FeaturesAutoStatedCancelled, _ = r.RowsAffected()
+	res.FeaturesAutoStated = res.FeaturesAutoStatedDone + res.FeaturesAutoStatedCancelled
+
 	// Pass 2: features whose every child issue is archived and that
 	// had at least one child. The inner SELECT groups by feature_id
 	// and SUMs `archived_at IS NULL` — if the sum is zero, every
@@ -149,7 +221,7 @@ func (s *Store) ArchiveSweep(dryRun bool) (ArchiveSweepResult, error) {
 	// children never appears in the inner result), but stated for
 	// clarity in the comment: the brief explicitly excludes
 	// childless features from the auto-archive path.
-	r, err := tx.Exec(`
+	r, err = tx.Exec(`
 		UPDATE features
 		   SET archived_at = CURRENT_TIMESTAMP
 		 WHERE archived_at IS NULL

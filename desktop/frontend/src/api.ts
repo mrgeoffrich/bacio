@@ -452,6 +452,22 @@ export async function setFeatureHiddenOnBoard(
   }
 }
 
+// setFeatureState (BACI-199) flips the feature's three-state column
+// and returns the refreshed FeatureDetail. Stamps the sticky bit so
+// the leader-elected archive-sweep's auto-completion pass leaves the
+// row alone until the user pins a new value.
+export async function setFeatureState(
+  repoPrefix: string,
+  slug: string,
+  state: string,
+): Promise<FeatureDetail> {
+  try {
+    return await FeatureService.SetFeatureState(repoPrefix, slug, state);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
 // addFeatureComment posts a chronological handoff comment to a feature
 // (BACI-124) and returns the refreshed feature detail.
 export async function addFeatureComment(

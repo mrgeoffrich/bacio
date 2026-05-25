@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"sort"
 
@@ -355,6 +356,72 @@ func (d deps) handleFeatureHide(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"slug": feat.Slug, "hidden": want})
+}
+
+// handleFeatureState (BACI-199) flips the feature's three-state
+// column to the value carried in the JSON body and stamps the
+// sticky bit so the leader-elected archive-sweep's auto-completion
+// pass leaves the row alone. Body shape is
+// `{"slug": "<slug>", "state": "active|done|cancelled"}` — the slug
+// in the body is required by the strict decoder but the path-resolved
+// feature is the authoritative target.
+func (d deps) handleFeatureState(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	in, _, err := inputio.DecodeStrict[inputs.FeatureStateInput](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	feat, ok := resolveFeatureOnRepo(w, r, d.store, repo)
+	if !ok {
+		return
+	}
+	if in.State == "" {
+		writeError(w, http.StatusBadRequest, "invalid_input", "state is required", map[string]any{"field": "state"})
+		return
+	}
+	st, err := model.ParseFeatureState(in.State)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), map[string]any{"field": "state"})
+		return
+	}
+	if isDryRun(r) {
+		projected := *feat
+		projected.State = st
+		projected.StateManual = true
+		writeDryRun(w, http.StatusOK, &projected)
+		return
+	}
+	oldState := feat.State
+	if err := d.store.SetFeatureState(feat.ID, st, true); err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	updated, err := d.store.GetFeatureByID(feat.ID)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	recordOp(d.store, d.logger, model.HistoryEntry{
+		RepoID:      &feat.RepoID,
+		RepoPrefix:  repo.Prefix,
+		Actor:       ActorFromContext(r.Context()),
+		Op:          "feature.state",
+		Kind:        "feature",
+		TargetID:    &updated.ID,
+		TargetLabel: updated.Slug,
+		Details:     fmt.Sprintf("%s → %s", oldState, st),
+	})
+	writeJSON(w, http.StatusOK, updated)
 }
 
 // buildFeatureDeletePreview is kept in sync with the local Client backend's

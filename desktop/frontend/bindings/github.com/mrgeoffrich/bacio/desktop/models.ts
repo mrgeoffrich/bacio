@@ -493,6 +493,16 @@ export class FeatureDetail {
      * "set emoji" affordance in that case.
      */
     "emoji": string;
+
+    /**
+     * State + StateManual (BACI-199) round-trip the per-feature state
+     * column and its sticky bit. The drawer's segmented control reads
+     * State to highlight the active button, and StateManual to render
+     * a "pinned" indicator next to it so the user knows the
+     * auto-completion sweep won't move it.
+     */
+    "state": string;
+    "stateManual": boolean;
     "createdAt": time$0.Time;
     "updatedAt": time$0.Time;
     "issues": FeatureLinkedIssue[];
@@ -524,6 +534,12 @@ export class FeatureDetail {
         if (!("emoji" in $$source)) {
             this["emoji"] = "";
         }
+        if (!("state" in $$source)) {
+            this["state"] = "";
+        }
+        if (!("stateManual" in $$source)) {
+            this["stateManual"] = false;
+        }
         if (!("createdAt" in $$source)) {
             this["createdAt"] = null;
         }
@@ -547,14 +563,14 @@ export class FeatureDetail {
      * Creates a new FeatureDetail instance from a string or object.
      */
     static createFrom($$source: any = {}): FeatureDetail {
-        const $$createField6_0 = $$createType5;
-        const $$createField7_0 = $$createType7;
+        const $$createField8_0 = $$createType5;
+        const $$createField9_0 = $$createType7;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("issues" in $$parsedSource) {
-            $$parsedSource["issues"] = $$createField6_0($$parsedSource["issues"]);
+            $$parsedSource["issues"] = $$createField8_0($$parsedSource["issues"]);
         }
         if ("comments" in $$parsedSource) {
-            $$parsedSource["comments"] = $$createField7_0($$parsedSource["comments"]);
+            $$parsedSource["comments"] = $$createField9_0($$parsedSource["comments"]);
         }
         return new FeatureDetail($$parsedSource as Partial<FeatureDetail>);
     }
@@ -643,6 +659,15 @@ export class FeatureSummary {
     "slug": string;
     "title": string;
     "emoji": string;
+
+    /**
+     * State (BACI-199) is the three-state column on the feature row
+     * — `active` (default — work in flight), `done` (delivered) or
+     * `cancelled` (abandoned). The Features panel renders a state
+     * pill so a glance distinguishes work in flight from delivered /
+     * abandoned work.
+     */
+    "state": string;
     "updatedAt": time$0.Time;
     "hiddenOnBoard": boolean;
 
@@ -656,6 +681,9 @@ export class FeatureSummary {
         }
         if (!("emoji" in $$source)) {
             this["emoji"] = "";
+        }
+        if (!("state" in $$source)) {
+            this["state"] = "";
         }
         if (!("updatedAt" in $$source)) {
             this["updatedAt"] = null;

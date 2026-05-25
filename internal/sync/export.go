@@ -242,6 +242,18 @@ func (e *Engine) exportFeature(w *exportWriter, repo *model.Repo, f *model.Featu
 		// YAML output (BACI-68 sync round-trip).
 		pairs = append(pairs, Pair{"archived_at", Time(*f.ArchivedAt)})
 	}
+	// BACI-199: round-trip the three-state column and its sticky bit.
+	// Both are emitted only when non-default so live `active`
+	// features stay byte-identical to the pre-BACI-199 shape — the
+	// LWW gate keys on updated_at AND a byte-identical YAML for no-op
+	// rows, and a global re-emit after the schema bump would otherwise
+	// churn every feature.yaml.
+	if f.State != "" && f.State != model.FeatureStateActive {
+		pairs = append(pairs, Pair{"state", Str(string(f.State))})
+	}
+	if f.StateManual {
+		pairs = append(pairs, Pair{"state_manual", Bool(true)})
+	}
 	yamlBytes, err := Emit(Map(pairs...))
 	if err != nil {
 		return 0, err

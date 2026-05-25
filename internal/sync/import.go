@@ -623,13 +623,19 @@ func contentHashRepo(p *ParsedRepo) string {
 func contentHashFeature(sf *scannedFeature) string {
 	// BACI-172: fold emoji into the hash so a previously-imported
 	// feature that gains a glyph triggers an update rather than a
-	// silent no-op. Pre-BACI-172 features (Emoji == "") stringify
-	// with a trailing empty segment "feature|uuid|slug|title|bodyhash|archived|"
-	// — different from the old hash on the first re-sync, then stable
-	// thereafter. One cycle of migration churn is the price.
-	return ContentHash([]byte(fmt.Sprintf("feature|%s|%s|%s|%s|%s|%s",
+	// silent no-op.
+	//
+	// BACI-199: fold state + state_manual into the hash for the same
+	// reason — a feature that gets manually flipped to `done` on side
+	// A should trigger an update on side B's import rather than a
+	// silent no-op. Pre-BACI-199 features (State == nil + StateManual
+	// == false) stringify with empty trailing segments, different
+	// from the old hash on the first re-sync, then stable thereafter
+	// — one cycle of migration churn is the price.
+	return ContentHash([]byte(fmt.Sprintf("feature|%s|%s|%s|%s|%s|%s|%s|%t",
 		sf.Parsed.UUID, sf.Parsed.Slug, sf.Parsed.Title, sf.BodyHash,
-		hashableArchived(sf.Parsed.ArchivedAt), sf.Parsed.Emoji)))
+		hashableArchived(sf.Parsed.ArchivedAt), sf.Parsed.Emoji,
+		hashableFeatureState(sf.Parsed.State), sf.Parsed.StateManual)))
 }
 
 func contentHashIssue(si *scannedIssue) string {
@@ -676,4 +682,15 @@ func hashableArchived(t *time.Time) string {
 		return ""
 	}
 	return t.UTC().Format(time.RFC3339)
+}
+
+// hashableFeatureState (BACI-199) dereferences the *string pointer
+// for content-hash inclusion. nil and *"active" both stringify as
+// "active" so a pre-BACI-199 feature.yaml that omits the key hashes
+// identically to a fresh feature whose state column is `active`.
+func hashableFeatureState(s *string) string {
+	if s == nil || *s == "" {
+		return "active"
+	}
+	return *s
 }

@@ -14,6 +14,24 @@ const SHOW_ON_BOARD_OPTIONS = [
   { id: false, label: 'Hide' },
 ];
 
+// BACI-199: per-feature state options. The id is the canonical
+// state string ParseFeatureState accepts; label is the visible button
+// caption. Stays in lockstep with model.FeatureState — adding a
+// fourth value would mean adding a row here.
+const FEATURE_STATE_OPTIONS = [
+  { id: 'active', label: 'Active' },
+  { id: 'done', label: 'Done' },
+  { id: 'cancelled', label: 'Cancelled' },
+];
+
+// stateLabelFor maps a feature state string to the visible label,
+// falling back to the raw value so a forward-compat new state still
+// renders something. Mirrors stateLabel() for issue states.
+function stateLabelFor(state) {
+  const opt = FEATURE_STATE_OPTIONS.find(o => o.id === state);
+  return opt ? opt.label : (state || 'Active');
+}
+
 // Short date for the feature-list rows and detail metadata line.
 function shortDate(iso) {
   return new Date(iso).toLocaleDateString();
@@ -112,6 +130,13 @@ export default function FeaturesView({ activeBoard, onChangeHidden }) {
                   </span>
                 )}
                 <span className="mk-features-item-title">{f.title}</span>
+                {/* BACI-199: state pill — `active` rows still render
+                    the pill so the column reads consistently. Reuses
+                    the existing mk-status-* classes (active/done/
+                    cancelled), all three already in desktop.css. */}
+                <span className={`mk-pill mk-status-${f.state || 'active'}`}>
+                  {stateLabelFor(f.state)}
+                </span>
               </span>
             </button>
           ))
@@ -141,12 +166,69 @@ export default function FeaturesView({ activeBoard, onChangeHidden }) {
                 }}
               />
               <h2 className="mk-features-title">{detail.title}</h2>
+              {/* BACI-199: state pill next to the title so the drawer
+                  echoes the list-row treatment. Reuses the same
+                  mk-status-* classes used on the kanban issue pills. */}
+              <span className={`mk-pill mk-status-${detail.state || 'active'}`}>
+                {stateLabelFor(detail.state)}
+              </span>
             </div>
             <div className="mk-features-meta">
               <span className="mk-mono">{detail.slug}</span>
               {' · '}created {shortDate(detail.createdAt)}
               {' · '}updated {shortDate(detail.updatedAt)}
             </div>
+
+            <section className="mk-features-section">
+              <div className="mk-features-toggle-row">
+                <div className="mk-features-label">State</div>
+                <div
+                  className="mk-segmented"
+                  role="group"
+                  aria-label="Feature state"
+                >
+                  {FEATURE_STATE_OPTIONS.map(opt => {
+                    const current = detail.state || 'active';
+                    return (
+                      <button
+                        key={opt.id}
+                        className={`mk-segmented-btn ${current === opt.id ? 'is-active' : ''}`}
+                        aria-pressed={current === opt.id}
+                        onClick={async () => {
+                          if (current === opt.id) return; // already
+                          try {
+                            const updated = await api.setFeatureState(
+                              activeBoard,
+                              detail.slug,
+                              opt.id,
+                            );
+                            setDetail(updated);
+                            // Refresh the list so the row pill stays
+                            // in lockstep with the detail pane.
+                            try {
+                              const feats = await api.listFeatures(activeBoard);
+                              setFeatures(feats);
+                            } catch {
+                              // non-fatal — the next selection refresh
+                              // will pick up the new state.
+                            }
+                          } catch (err) {
+                            reportError(err, { headline: "Couldn't update state" });
+                          }
+                        }}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="mk-features-hint">
+                Pinning a value here keeps the auto-completion sweep
+                from changing it. Archive is independent — a done or
+                cancelled feature stays visible until you archive it.
+              </div>
+            </section>
 
             <section className="mk-features-section">
               <div className="mk-features-toggle-row">

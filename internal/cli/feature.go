@@ -24,6 +24,7 @@ func newFeatureCmd() *cobra.Command {
 		featurePlanCmd(),
 		featureArchiveCmd(),
 		featureUnarchiveCmd(),
+		featureStateCmd(),
 		newFeatureCommentCmd(),
 	)
 	return cmd
@@ -365,6 +366,67 @@ func featureUnarchiveCmd() *cobra.Command {
 	}
 	addInputFlag(cmd, &rawInput)
 	return cmd
+}
+
+// featureStateCmd (BACI-199) — `bacio feature state <slug> <state>`
+// (or `--json '{"slug":"x","state":"done"}'`). Mirrors the shape of
+// issueStateCmd: positional or JSON, dry-run honoured, strict-decode
+// rejects unknown fields. Manual writes via this verb stamp the
+// sticky bit so the leader-elected archive-sweep's auto-completion
+// pass leaves the row alone.
+func featureStateCmd() *cobra.Command {
+	var rawInput string
+	cmd := &cobra.Command{
+		Use:   "state [SLUG] [state]",
+		Short: "Set a feature's state (active|done|cancelled). Pins the value against the auto-completion sweep (BACI-199).",
+		Args:  cobra.RangeArgs(0, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			raw, err := parseJSONInput(cmd, args, rawInput)
+			if err != nil {
+				return err
+			}
+			if raw != nil {
+				in, _, err := inputio.DecodeStrict[inputs.FeatureStateInput](raw)
+				if err != nil {
+					return err
+				}
+				if in.Slug == "" || in.State == "" {
+					return fmt.Errorf("slug and state are required")
+				}
+				return setFeatureState(in.Slug, in.State)
+			}
+			if len(args) != 2 {
+				return fmt.Errorf("requires <SLUG> <state> positionals or --json")
+			}
+			return setFeatureState(args[0], args[1])
+		},
+	}
+	addInputFlag(cmd, &rawInput)
+	return cmd
+}
+
+func setFeatureState(slug, stateStr string) error {
+	st, err := model.ParseFeatureState(stateStr)
+	if err != nil {
+		return err
+	}
+	c, err := openClient()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	repo, err := resolveRepoC(c)
+	if err != nil {
+		return err
+	}
+	updated, err := c.SetFeatureState(context.Background(), repo, slug, st, opts.dryRun)
+	if err != nil {
+		return err
+	}
+	if opts.dryRun {
+		return emitDryRun(updated)
+	}
+	return emit(updated)
 }
 
 func runFeatureArchiveVerb(cmd *cobra.Command, args []string, rawInput string, archive bool) error {

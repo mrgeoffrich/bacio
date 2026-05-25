@@ -43,6 +43,22 @@ func (f *featuresView) cachedMD(id int64, src string, width int) string {
 	return f.mdCache.get(id, src, width)
 }
 
+// featureStateLabel returns the human-readable label for a
+// model.FeatureState (BACI-199). Falls back to "Active" for the empty
+// string so a pre-BACI-199 row (or a forward-compat new state we
+// don't recognise) still renders something coherent.
+func featureStateLabel(s model.FeatureState) string {
+	switch s {
+	case model.FeatureStateDone:
+		return "Done"
+	case model.FeatureStateCancelled:
+		return "Cancelled"
+	case model.FeatureStateActive, "":
+		return "Active"
+	}
+	return string(s)
+}
+
 func newFeaturesView(s *store.Store, repo *model.Repo) *featuresView {
 	f := &featuresView{store: s, repo: repo}
 	f.reload()
@@ -302,11 +318,22 @@ func (f *featuresView) renderList(width, height int) string {
 			styler = styler.Faint(true)
 		}
 		titleLines := wrapLines(feat.Title, titleW, 2)
+		// BACI-199: append the state chip to the slug line so the column
+		// is scannable at a glance. The chip reads the same enum the
+		// CLI / API use; pre-BACI-199 features default to active.
+		stateChip := mutedStyle.Render(" · " + featureStateLabel(feat.State))
+		// BACI-199: non-active feature → faded so the visual treatment
+		// matches the archived rendering (already applied above). Done
+		// or cancelled rows still read as "background" relative to
+		// in-flight work.
+		if feat.State != "" && feat.State != model.FeatureStateActive {
+			styler = styler.Faint(true)
+		}
 		for j := 0; j < featureRows; j++ {
 			var content string
 			switch {
 			case j == 0:
-				content = slugRender
+				content = slugRender + stateChip
 			case j-1 < len(titleLines):
 				content = titleLines[j-1]
 			default:
@@ -368,7 +395,16 @@ func (f *featuresView) renderDetail(width, height int) string {
 	}
 
 	feat := f.selected
-	title := boldStyle.Render(truncate(feat.Title, innerWidth))
+	// BACI-199: prefix the title with the state chip so the detail
+	// header echoes the list row. Truncate the title separately to
+	// leave room for the chip.
+	stateChipPlain := featureStateLabel(feat.State)
+	stateChip := mutedStyle.Render(stateChipPlain + " · ")
+	titleBudget := innerWidth - len(stateChipPlain) - 3
+	if titleBudget < 4 {
+		titleBudget = 4
+	}
+	title := stateChip + boldStyle.Render(truncate(feat.Title, titleBudget))
 	meta := mutedStyle.Render(truncate(fmt.Sprintf("[%s] · created %s · updated %s",
 		feat.Slug,
 		feat.CreatedAt.Format("2006-01-02"),
@@ -446,7 +482,10 @@ func (f *featuresView) viewOverlay(width, height int) string {
 	}
 
 	feat := f.selected
-	title := boldStyle.Render(feat.Title)
+	// BACI-199: prefix the overlay title with the state chip, same
+	// rendering as the inline detail pane.
+	stateChip := mutedStyle.Render(featureStateLabel(feat.State) + " · ")
+	title := stateChip + boldStyle.Render(feat.Title)
 	meta := mutedStyle.Render(fmt.Sprintf("[%s] · created %s · updated %s",
 		feat.Slug,
 		feat.CreatedAt.Format("2006-01-02 15:04"),

@@ -33,8 +33,28 @@ type Feature struct {
 	// archived; manual `bacio feature archive` / `unarchive` writes or
 	// clears it on demand.
 	ArchivedAt *time.Time `json:"archived_at,omitempty"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
+	// State (BACI-199) is the three-state column on the feature row:
+	// `active` (default — work in flight), `done` (delivered) or
+	// `cancelled` (abandoned). Manual writes via `bacio feature state`
+	// flip this column and set StateManual = true; the leader-elected
+	// archive sweep's auto-completion pass promotes
+	// `active`-with-every-child-terminal features but only when
+	// StateManual is false, so a user-set value is never overwritten
+	// without explicit action. Archive (ArchivedAt) stays orthogonal:
+	// a `done` feature is visible by default until explicitly archived.
+	// No omitempty — the field is always visible in JSON (existing
+	// features default to `active`) so the React Features view reads
+	// the column directly.
+	State FeatureState `json:"state"`
+	// StateManual (BACI-199) is the sticky-bit set whenever a user
+	// explicitly flips State via `bacio feature state`. The sweep's
+	// auto-completion pass skips rows with StateManual = true so a
+	// manually-cancelled feature whose children later finish doesn't
+	// silently flip back to `done`. No omitempty — same reason as
+	// State.
+	StateManual bool      `json:"state_manual"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 	// HiddenOnBoard (BACI-177) reflects the per-feature "Show on
 	// board" toggle exposed on the Features screen — true iff every
 	// kanban card belonging to this feature is hidden from the board.

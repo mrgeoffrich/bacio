@@ -39,6 +39,20 @@ CREATE TABLE IF NOT EXISTS features (
     -- feature had at least one child); manual `bacio feature archive` /
     -- `unarchive` writes or clears it on demand.
     archived_at DATETIME,
+    -- state (BACI-199) is the three-state column on features:
+    -- `active` (the default — work in flight), `done` (delivered) or
+    -- `cancelled` (abandoned). Distinct from the issue-side state
+    -- enum: the feature surface deliberately uses a smaller set, and
+    -- a typo can't compile against model.FeatureState. Manual writes
+    -- via `bacio feature state` flip state and set state_manual = 1;
+    -- the auto-completion sweep promotes `active`-with-every-child-
+    -- terminal rows but only when state_manual = 0, so a manually-set
+    -- value is never overwritten without explicit user action. Archive
+    -- (archived_at) stays orthogonal — a `done` feature is still
+    -- visible by default until explicitly archived.
+    state        TEXT    NOT NULL DEFAULT 'active'
+                  CHECK (state IN ('active','done','cancelled')),
+    state_manual INTEGER NOT NULL DEFAULT 0 CHECK (state_manual IN (0,1)),
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(repo_id, slug)

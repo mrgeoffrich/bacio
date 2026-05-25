@@ -687,6 +687,35 @@ func migrate(db *sql.DB) error {
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_dispatches_queued_after ON agent_dispatches(queued_after_dispatch_id) WHERE queued_after_dispatch_id IS NOT NULL`); err != nil {
 		return fmt.Errorf("create idx_dispatches_queued_after: %w", err)
 	}
+	// BACI-199: add `state` + `state_manual` columns to `features` on
+	// older DBs. The CREATE TABLE declaration in schema.sql carries the
+	// columns (with their CHECK constraints) for fresh DBs; the ALTER
+	// pair brings older DBs up to date. SQLite ALTER TABLE ADD COLUMN
+	// cannot carry a CHECK constraint, but the Go-side parser
+	// (model.ParseFeatureState) + the store-boundary writer
+	// (SetFeatureState) reject anything outside the enum, so the
+	// invariant holds either way. The `NOT NULL DEFAULT` on the ALTER
+	// stamps `active` / `0` on every existing row, so an upgraded DB
+	// behaves identically to a freshly-seeded one with no manual
+	// backfill required.
+	hasFeatureState, err := columnExists(db, "features", "state")
+	if err != nil {
+		return err
+	}
+	if !hasFeatureState {
+		if _, err := db.Exec(`ALTER TABLE features ADD COLUMN state TEXT NOT NULL DEFAULT 'active'`); err != nil {
+			return fmt.Errorf("add state to features: %w", err)
+		}
+	}
+	hasFeatureStateManual, err := columnExists(db, "features", "state_manual")
+	if err != nil {
+		return err
+	}
+	if !hasFeatureStateManual {
+		if _, err := db.Exec(`ALTER TABLE features ADD COLUMN state_manual INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("add state_manual to features: %w", err)
+		}
+	}
 	// BACI-188: the global "Hide empty board columns" preference (Settings
 	// toggle, REST endpoint, store helpers, app_settings KV row) was
 	// removed in favour of per-column collapse persisted client-side. Drop

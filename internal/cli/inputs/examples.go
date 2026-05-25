@@ -283,6 +283,7 @@ var (
 	ExampleIssueUnarchive     = IssueUnarchiveInput{Key: "MINI-42"}
 	ExampleFeatureArchive     = FeatureArchiveInput{Slug: "auth-old"}
 	ExampleFeatureUnarchive   = FeatureUnarchiveInput{Slug: "auth-old"}
+	ExampleFeatureState       = FeatureStateInput{Slug: "auth-old", State: "done"}
 	ExampleDocArchive         = DocArchiveInput{Filename: "auth-old.md"}
 	ExampleDocUnarchive       = DocUnarchiveInput{Filename: "auth-old.md"}
 	ExampleArchiveSweep       = ArchiveSweepInput{}
