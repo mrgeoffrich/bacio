@@ -589,15 +589,28 @@ func (s *Store) InflightByModeForRepo(repoID int64) (map[model.DispatchMode]int,
 
 // BindQueuedDispatch atomically binds a queued dispatch to a target
 // agent and flips it to pending — the matcher's commit step. The
-// WHERE status='queued' guard makes the bind a no-op if a concurrent
-// process already matched the row (leader gating makes this near-
-// impossible, but the guard is defence in depth). Returns ErrNotFound
-// when 0 rows were updated.
+// WHERE guard makes the bind a no-op if a concurrent process already
+// matched the row, AND (BACI-200) if the row has ever been delivered
+// to a worker (`delivered_at IS NOT NULL`). The latter is the sticky
+// "this dispatch has been handed to an agent" gate: once a worker has
+// the dispatch in hand, no later matcher tick may rebind it to a
+// different agent — even if the BACI-133 reaper requeues the row
+// after presuming the worker dead. (That recovery still works: the
+// reaper's requeue branch resets `delivered_at = NULL` alongside
+// status='queued', so a genuinely-dead worker's dispatch is rebindable
+// while a live worker's is locked in.)
+//
+// Returns ErrNotFound when 0 rows were updated. A bare `status='queued'`
+// CAS miss and a `delivered_at IS NOT NULL` miss are not distinguished
+// at the API surface — both mean "this dispatch is no longer up for
+// grabs", which is the matcher's only decision point.
 func (s *Store) BindQueuedDispatch(id int64, agentID int64) (*model.AgentDispatch, error) {
 	res, err := s.DB.Exec(`
 		UPDATE agent_dispatches
 		   SET target_agent_id = ?, status = 'pending'
-		 WHERE id = ? AND status = 'queued'`,
+		 WHERE id = ?
+		   AND status = 'queued'
+		   AND delivered_at IS NULL`,
 		agentID, id)
 	if err != nil {
 		return nil, err

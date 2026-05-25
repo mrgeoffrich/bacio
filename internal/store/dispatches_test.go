@@ -1357,3 +1357,135 @@ func TestPromoteReadyFollowOns_ImplementFromInProgressRepro(t *testing.T) {
 		t.Fatalf("promoted id = %d, want %d", promoted[0].ID, follow.ID)
 	}
 }
+
+// TestBindQueuedDispatch_NoOpAfterDelivered (BACI-200, Bug 1) locks in
+// the matcher's stickiness gate. Once a dispatch has been delivered
+// (`delivered_at IS NOT NULL`), the matcher must refuse to rebind it
+// to a second agent — even if the row was re-stamped back to
+// status='queued' (the BACI-133 reaper requeue path used to do this
+// without resetting delivered_at, which produced the BACI-197
+// duplicate-implementation incident).
+func TestBindQueuedDispatch_NoOpAfterDelivered(t *testing.T) {
+	s, repo, _, _, _ := seedDispatchFixture(t)
+	first, _, err := s.UpsertAgent("first-otter@claude.test", true)
+	if err != nil {
+		t.Fatalf("upsert first agent: %v", err)
+	}
+	second, _, err := s.UpsertAgent("second-cobra@claude.test", true)
+	if err != nil {
+		t.Fatalf("upsert second agent: %v", err)
+	}
+	// Queue a dispatch (target-less, status='queued') — the BACI-51
+	// auto-dispatch path the matcher consumes.
+	d, err := s.AddDispatch(AddDispatchIn{
+		RepoID:        repo.ID,
+		Mode:          model.DispatchModeImplement,
+		Payload:       "work",
+		CreatedBy:     "supervisor",
+		InitialStatus: model.DispatchQueued,
+	})
+	if err != nil {
+		t.Fatalf("add queued dispatch: %v", err)
+	}
+	// First bind succeeds (status='queued' → 'pending').
+	bound, err := s.BindQueuedDispatch(d.ID, first.ID)
+	if err != nil {
+		t.Fatalf("first bind: %v", err)
+	}
+	if bound.Status != model.DispatchPending {
+		t.Fatalf("after first bind: status = %q, want pending", bound.Status)
+	}
+	// Worker takes the dispatch — delivered_at is stamped.
+	if _, err := s.MarkDispatchDelivered(d.ID); err != nil {
+		t.Fatalf("mark delivered: %v", err)
+	}
+	// Reaper presumes-dead requeue — but with the BACI-200 fix it also
+	// resets delivered_at, so reaching this state via Requeue is the
+	// "genuinely dead worker, retry" path. Instead emulate the older
+	// broken behaviour (status='queued' + target=NULL but delivered_at
+	// retained) directly, which is what the BACI-197 audit log
+	// surfaced.
+	if _, err := s.DB.Exec(
+		`UPDATE agent_dispatches
+		    SET status = 'queued', target_agent_id = NULL, target_session_id = ''
+		  WHERE id = ?`, d.ID,
+	); err != nil {
+		t.Fatalf("emulate broken requeue: %v", err)
+	}
+	// Second bind from the matcher MUST refuse — delivered_at is set,
+	// the dispatch is owned by the first worker.
+	if _, err := s.BindQueuedDispatch(d.ID, second.ID); err == nil {
+		t.Fatalf("second bind should have failed (delivered_at stickiness gate), got nil err")
+	} else if err.Error() != ErrNotFound.Error() {
+		t.Fatalf("second bind err = %v, want ErrNotFound", err)
+	}
+	// Row is unchanged from the post-emulated-requeue state — neither
+	// status nor target_agent_id flipped.
+	after, err := s.GetDispatch(d.ID)
+	if err != nil {
+		t.Fatalf("get after second bind: %v", err)
+	}
+	if after.Status != model.DispatchQueued {
+		t.Fatalf("after blocked rebind: status = %q, want queued", after.Status)
+	}
+	if after.TargetAgentID != nil {
+		t.Fatalf("after blocked rebind: target_agent_id = %v, want nil", after.TargetAgentID)
+	}
+}
+
+// TestBindQueuedDispatch_RequeueRecoversDeliveredDispatch (BACI-200,
+// Bug 1) is the symmetric coverage of the delivered_at gate: the
+// BACI-133 reaper recovery path MUST still work for a genuinely-dead
+// worker. The reaper's requeue branch resets delivered_at alongside
+// status/target so the matcher's gate admits the row again.
+func TestBindQueuedDispatch_RequeueRecoversDeliveredDispatch(t *testing.T) {
+	s, repo, _, _, sess := seedDispatchFixture(t)
+	second, _, err := s.UpsertAgent("recover-cobra@claude.test", true)
+	if err != nil {
+		t.Fatalf("upsert second agent: %v", err)
+	}
+	// Queue + bind + deliver to the first session.
+	d, err := s.AddDispatch(AddDispatchIn{
+		RepoID:          repo.ID,
+		TargetSessionID: sess.SessionID,
+		Mode:            model.DispatchModeImplement,
+		Payload:         "work",
+		CreatedBy:       "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add dispatch: %v", err)
+	}
+	if _, err := s.MarkDispatchDelivered(d.ID); err != nil {
+		t.Fatalf("mark delivered: %v", err)
+	}
+	// Reaper force-ends the session with presumed_dead + requeue cascade.
+	// This is the BACI-133 path that should successfully recycle the
+	// dispatch to a fresh agent.
+	if _, _, _, _, err := s.EndAgentSession(
+		sess.SessionID, string(model.EndReasonPresumedDead), model.StateInProgress, DispatchCascadeRequeue,
+	); err != nil {
+		t.Fatalf("end session (requeue): %v", err)
+	}
+	post, err := s.GetDispatch(d.ID)
+	if err != nil {
+		t.Fatalf("get post-requeue: %v", err)
+	}
+	if post.Status != model.DispatchQueued {
+		t.Fatalf("after requeue: status = %q, want queued", post.Status)
+	}
+	if post.DeliveredAt != nil {
+		t.Fatalf("after requeue: delivered_at = %v, want nil (BACI-200 reset for recovery)", post.DeliveredAt)
+	}
+	// Matcher rebind to a fresh agent succeeds — the delivered_at gate
+	// admits the row now that the reaper cleared it.
+	rebound, err := s.BindQueuedDispatch(d.ID, second.ID)
+	if err != nil {
+		t.Fatalf("rebind after requeue: %v", err)
+	}
+	if rebound.Status != model.DispatchPending {
+		t.Fatalf("after rebind: status = %q, want pending", rebound.Status)
+	}
+	if rebound.TargetAgentID == nil || *rebound.TargetAgentID != second.ID {
+		t.Fatalf("after rebind: target_agent_id = %v, want %d", rebound.TargetAgentID, second.ID)
+	}
+}
