@@ -110,6 +110,22 @@ func (f *fakeBoardClient) InflightByModeForRepo(context.Context, *model.Repo) (m
 	return map[model.DispatchMode]int{}, nil
 }
 
+// CountEvalCommentsByIssue (BACI-131 / BACI-141) — boardcards.Assemble
+// surfaces an eval-note glyph per card from this bulk count. The
+// taken-flag tests don't exercise eval-comment rows, so an empty map
+// matches the "no eval notes" production case. Mirrors the fakeClient
+// stub in internal/boardcards/cards_test.go.
+func (f *fakeBoardClient) CountEvalCommentsByIssue(context.Context, []int64) (map[int64]int, error) {
+	return map[int64]int{}, nil
+}
+
+// CountTranscriptDocsByIssue (BACI-141) — same shape: an empty bulk
+// count maps to "no transcript docs", which is the taken-flag test's
+// world.
+func (f *fakeBoardClient) CountTranscriptDocsByIssue(context.Context, []int64) (map[int64]int, error) {
+	return map[int64]int{}, nil
+}
+
 func TestListCardsTaken(t *testing.T) {
 	issues := []*model.Issue{
 		{Key: "TEST-1", State: model.StateTodo, Title: "held by an agent"},
