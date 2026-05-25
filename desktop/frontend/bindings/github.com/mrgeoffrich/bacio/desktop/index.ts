@@ -23,6 +23,7 @@ export {
     BoardColumn,
     BoardPreferencesDTO,
     ClaimantDTO,
+    CollisionPreviewDTO,
     CommentDTO,
     DispatchDTO,
     DisplayPreferencesDTO,
@@ -46,8 +47,12 @@ export {
     PromptTemplateDTO,
     RelationDTO,
     RelationsDTO,
+    RenameEntryDTO,
+    RenumberEntryDTO,
+    SetupSyncIn,
     SyncPreferencesDTO,
     SyncRegistryDTO,
     SyncRepoDTO,
+    SyncSetupDTO,
     UnsyncedProjectDTO
 } from "./models.js";

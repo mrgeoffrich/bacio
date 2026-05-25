@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/client"
@@ -380,6 +382,153 @@ type UnsyncedProjectDTO struct {
 	Name   string `json:"name"`
 	UUID   string `json:"uuid"`
 	Path   string `json:"path"`
+}
+
+// ---------- sync setup (BACI-111) ----------
+
+// SetupSyncIn is the camelCase Wails-side input for SetupSync — the
+// React tree builds it in SyncSetupModal. Mirrors the snake-case
+// inputs.SyncSetupInput the HTTP layer accepts; the field set is the
+// same. AllowRenumber gates the renumber-collision preview the engine
+// produces on a clone / attach that would renumber local rows.
+type SetupSyncIn struct {
+	Mode          string `json:"mode"`
+	Remote        string `json:"remote,omitempty"`
+	LocalPath     string `json:"localPath,omitempty"`
+	AllowRenumber bool   `json:"allowRenumber,omitempty"`
+}
+
+// SyncSetupDTO is the camelCase Wails-side outcome of SetupSync. Two
+// shapes share the struct:
+//
+//   - Success: `previewCollisions` is nil and the per-mode result
+//     fields (`commitSHA`, `pushed`, `attached` for init / `localPath`,
+//     `remote` for clone / attach) reflect the engine's structured
+//     return. The caller closes the modal and re-fetches the registry.
+//   - Renumber-collision refusal: `previewCollisions` is populated
+//     with the projected renumbers / renames, and the per-mode result
+//     fields stay empty (the engine wrote nothing). The caller switches
+//     to the modal's step-2 confirm and re-submits with
+//     `allowRenumber: true`.
+//
+// Using a single struct with a nil-vs-populated collision field (rather
+// than an error returned from SetupSync) keeps the typed payload intact
+// across the Wails boundary — Wails marshals errors as strings and
+// drops the DTO when an error is non-nil, so the typed collision shape
+// would round-trip as a plain string. The JS-side seam in api.ts maps
+// a populated `previewCollisions` into the typed SyncSetupCollisionError
+// the modal expects.
+type SyncSetupDTO struct {
+	Mode      string `json:"mode"`
+	LocalPath string `json:"localPath,omitempty"`
+	Remote    string `json:"remote,omitempty"`
+	// Init-only fields.
+	CommitSHA string `json:"commitSHA,omitempty"`
+	Pushed    bool   `json:"pushed,omitempty"`
+	Attached  bool   `json:"attached,omitempty"`
+	// PreviewCollisions is non-nil only on a renumber-collision refusal.
+	PreviewCollisions *CollisionPreviewDTO `json:"previewCollisions,omitempty"`
+}
+
+// CollisionPreviewDTO is the projected renumber / rename churn a clone
+// or attach would produce when local rows collide with imported ones.
+// Mirrors sync.CollisionPreview; the JS side iterates these to render
+// the step-2 banner.
+type CollisionPreviewDTO struct {
+	Renumbered []RenumberEntryDTO `json:"renumbered,omitempty"`
+	Renamed    []RenameEntryDTO   `json:"renamed,omitempty"`
+}
+
+// RenumberEntryDTO is one projected issue renumber.
+type RenumberEntryDTO struct {
+	Prefix    string `json:"prefix"`
+	OldNumber int64  `json:"oldNumber"`
+	NewNumber int64  `json:"newNumber"`
+	UUID      string `json:"uuid"`
+}
+
+// RenameEntryDTO is one projected slug/filename rename.
+type RenameEntryDTO struct {
+	Kind string `json:"kind"`
+	Old  string `json:"old"`
+	New  string `json:"new"`
+	UUID string `json:"uuid"`
+}
+
+// SetupSync sets up sync for the project repo identified by prefix.
+// Three modes — "init", "clone", "attach" — mirror the HTTP layer
+// (POST /repos/{prefix}/sync/setup). On a renumber-collision refusal
+// the returned DTO carries PreviewCollisions (non-nil) and the error
+// is nil; the JS-side seam maps that into a typed
+// SyncSetupCollisionError the modal branches on. Any other failure
+// (validation / engine error / lock timeout) surfaces as a non-nil
+// error and PreviewCollisions stays nil.
+func (s *SettingsService) SetupSync(prefix string, in SetupSyncIn) (SyncSetupDTO, error) {
+	ctx := context.Background()
+	repo, err := s.client.GetRepoByPrefix(ctx, prefix)
+	if err != nil {
+		return SyncSetupDTO{}, fmt.Errorf("resolve repo %s: %w", prefix, err)
+	}
+	res, err := s.client.SetupSync(ctx, repo, inputs.SyncSetupInput{
+		Mode:          in.Mode,
+		Remote:        in.Remote,
+		LocalPath:     in.LocalPath,
+		AllowRenumber: in.AllowRenumber,
+	})
+	if err != nil {
+		// Collision-refused: surface as a nil-error + populated
+		// PreviewCollisions so Wails marshals the typed shape across
+		// the bridge. The JS side recognises the populated preview and
+		// throws SyncSetupCollisionError.
+		if errors.Is(err, client.ErrSetupCollision) && res != nil && res.PreviewCollisions != nil {
+			return buildSyncSetupDTO(res), nil
+		}
+		return SyncSetupDTO{}, err
+	}
+	return buildSyncSetupDTO(res), nil
+}
+
+// buildSyncSetupDTO reshapes the engine's SyncSetupResult into the
+// camelCase DTO the Wails-generated bindings expose. Shared by the
+// success and collision-refusal paths so a populated PreviewCollisions
+// flows through the same code path as the per-mode result fields.
+func buildSyncSetupDTO(res *client.SyncSetupResult) SyncSetupDTO {
+	dto := SyncSetupDTO{Mode: res.Mode}
+	switch {
+	case res.Init != nil:
+		dto.LocalPath = res.Init.LocalPath
+		dto.Remote = res.Init.Remote
+		dto.CommitSHA = res.Init.CommitSHA
+		dto.Pushed = res.Init.Pushed
+		dto.Attached = res.Init.Attached
+	case res.Clone != nil:
+		dto.LocalPath = res.Clone.LocalPath
+		dto.Remote = res.Clone.Remote
+	}
+	if res.PreviewCollisions != nil {
+		preview := &CollisionPreviewDTO{
+			Renumbered: make([]RenumberEntryDTO, 0, len(res.PreviewCollisions.Renumbered)),
+			Renamed:    make([]RenameEntryDTO, 0, len(res.PreviewCollisions.Renamed)),
+		}
+		for _, r := range res.PreviewCollisions.Renumbered {
+			preview.Renumbered = append(preview.Renumbered, RenumberEntryDTO{
+				Prefix:    r.Prefix,
+				OldNumber: r.OldNumber,
+				NewNumber: r.NewNumber,
+				UUID:      r.UUID,
+			})
+		}
+		for _, r := range res.PreviewCollisions.Renamed {
+			preview.Renamed = append(preview.Renamed, RenameEntryDTO{
+				Kind: r.Kind,
+				Old:  r.Old,
+				New:  r.New,
+				UUID: r.UUID,
+			})
+		}
+		dto.PreviewCollisions = preview
+	}
+	return dto
 }
 
 // GetSyncRegistry returns the registry of sync repos this machine

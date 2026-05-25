@@ -1643,6 +1643,190 @@ export async function setBoardPreferences(hideEmptyColumns: boolean): Promise<Bo
   return { hideEmptyColumns: res.hide_empty_columns };
 }
 
+// ---------- Sync setup (BACI-111) ----------
+//
+// POST /repos/{prefix}/sync/setup over a direct fetch (not the shared
+// call() helper) so the 409 collision body decodes verbatim. Two wire
+// shapes:
+//   - 200 OK: SyncSetupApi with init/clone populated for the chosen mode,
+//     preview_collisions absent.
+//   - 409 Conflict: SyncSetupApi with preview_collisions populated and
+//     init/clone absent — the engine wrote nothing.
+//
+// The function maps both into the SyncSetupResult shape the modal
+// consumes (snake → camel), and on the 409 path throws the typed
+// SyncSetupCollisionError so the caller can `instanceof`-branch into
+// the step-2 confirm.
+
+export interface SyncSetupPayload {
+  mode: 'init' | 'clone' | 'attach';
+  remote?: string;
+  localPath?: string;
+  allowRenumber?: boolean;
+}
+
+export interface RenumberEntryDTO {
+  prefix: string;
+  oldNumber: number;
+  newNumber: number;
+  uuid: string;
+}
+
+export interface RenameEntryDTO {
+  kind: string;
+  old: string;
+  new: string;
+  uuid: string;
+}
+
+export interface CollisionPreviewDTO {
+  renumbered?: RenumberEntryDTO[];
+  renamed?: RenameEntryDTO[];
+}
+
+export interface SyncSetupDTO {
+  mode: string;
+  localPath?: string;
+  remote?: string;
+  commitSHA?: string;
+  pushed?: boolean;
+  attached?: boolean;
+  previewCollisions?: CollisionPreviewDTO;
+}
+
+// Re-exports for the cross-transport modal: SyncSetupResult is the
+// camelCase DTO the modal consumes; SyncSetupCollisionError is the
+// typed exception thrown on the 409 path. Same names as api.ts.
+export type SyncSetupResult = SyncSetupDTO;
+
+export class SyncSetupCollisionError extends Error {
+  previewCollisions: CollisionPreviewDTO;
+  result: SyncSetupDTO;
+  constructor(result: SyncSetupDTO) {
+    super('sync setup: renumber collision');
+    this.name = 'SyncSetupCollisionError';
+    this.result = result;
+    // Non-null assert: caller only constructs this on a 409 body
+    // that has preview_collisions populated.
+    this.previewCollisions = result.previewCollisions!;
+  }
+}
+
+// SyncSetupApi mirrors the snake-case api.SyncSetupOut wire shape.
+// Init/Clone are the engine result structs — only the per-mode field
+// for the chosen mode is populated. preview_collisions is set on the
+// 409 path only.
+interface SyncSetupApi {
+  mode: string;
+  init?: {
+    local_path?: string;
+    remote?: string;
+    commit_sha?: string;
+    pushed?: boolean;
+    attached?: boolean;
+  };
+  clone?: {
+    local_path?: string;
+    remote?: string;
+  };
+  preview_collisions?: {
+    renumbered?: Array<{
+      prefix: string;
+      uuid: string;
+      old_number: number;
+      new_number: number;
+    }>;
+    renamed?: Array<{
+      kind: string;
+      prefix?: string;
+      uuid: string;
+      old: string;
+      new: string;
+    }>;
+  };
+}
+
+function reshapeSyncSetup(wire: SyncSetupApi): SyncSetupDTO {
+  const out: SyncSetupDTO = { mode: wire.mode };
+  if (wire.init) {
+    out.localPath = wire.init.local_path;
+    out.remote = wire.init.remote;
+    out.commitSHA = wire.init.commit_sha;
+    out.pushed = wire.init.pushed;
+    out.attached = wire.init.attached;
+  } else if (wire.clone) {
+    out.localPath = wire.clone.local_path;
+    out.remote = wire.clone.remote;
+  }
+  if (wire.preview_collisions) {
+    out.previewCollisions = {
+      renumbered: (wire.preview_collisions.renumbered ?? []).map(r => ({
+        prefix: r.prefix,
+        oldNumber: r.old_number,
+        newNumber: r.new_number,
+        uuid: r.uuid,
+      })),
+      renamed: (wire.preview_collisions.renamed ?? []).map(r => ({
+        kind: r.kind,
+        old: r.old,
+        new: r.new,
+        uuid: r.uuid,
+      })),
+    };
+  }
+  return out;
+}
+
+export async function setupSync(
+  prefix: string,
+  payload: SyncSetupPayload,
+): Promise<SyncSetupResult> {
+  if (!prefix) throw new Error('sync setup: repo prefix is required');
+  // Snake-case the body inline rather than reuse call() — call() throws
+  // on every non-2xx and we need to decode the 409 body verbatim.
+  const body: Record<string, unknown> = { mode: payload.mode };
+  if (payload.remote !== undefined) body.remote = payload.remote;
+  if (payload.localPath !== undefined) body.local_path = payload.localPath;
+  if (payload.allowRenumber) body.allow_renumber = true;
+
+  const url = new URL(
+    `${API_BASE}/repos/${encodeURIComponent(prefix)}/sync/setup`,
+    window.location.origin,
+  );
+  const headers: Record<string, string> = {
+    'X-Actor': readActor(),
+    'Content-Type': 'application/json',
+  };
+  const token = readToken();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(url.toString(), {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  });
+  const text = await res.text();
+  if (res.status === 200) {
+    if (!text) throw new Error('sync setup: empty 200 body');
+    const wire = JSON.parse(text) as SyncSetupApi;
+    return reshapeSyncSetup(wire);
+  }
+  if (res.status === 409) {
+    if (!text) throw new Error('sync setup: empty 409 body');
+    const wire = JSON.parse(text) as SyncSetupApi;
+    throw new SyncSetupCollisionError(reshapeSyncSetup(wire));
+  }
+  // Any other non-2xx — fall through to the same envelope handling
+  // call() does, so the modal surfaces the server's human message.
+  let msg = `${res.status} ${res.statusText}`;
+  if (text) {
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed?.error) msg = parsed.error;
+    } catch { msg = text; }
+  }
+  throw new Error(msg);
+}
+
 // ---------- Sync preferences (BACI-89 / BACI-108) ----------
 //
 // The BACI-89 sync.background_enabled toggle, exposed for the

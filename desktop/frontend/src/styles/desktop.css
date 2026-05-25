@@ -1506,3 +1506,93 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
 .mk-pill.mk-status-linked  { background: var(--status-done-bg);   color: var(--status-done); }
 .mk-pill.mk-status-phantom { background: var(--status-blocked-bg); color: var(--status-blocked); }
 .mk-pill.mk-status-absent  { background: var(--ink-50);            color: var(--fg-4); }
+
+/* ----- BACI-111 sync-setup modal -----
+   Inside-modal layout for the two-step wizard. The default .mk-modal
+   width (420px) is too tight for the radio + sub-form combo, so the
+   wrapper widens to ~560px. Each radio row carries a sibling sub-form
+   that appears when its mode is picked; the sub-form indents under the
+   radio to keep the visual association. */
+.mk-sync-setup-modal {
+  display: flex; flex-direction: column; gap: 12px;
+  width: min(560px, 92vw);
+  /* min-width here so the modal centre-positioning respects the wider
+     content even when the surrounding .mk-modal frame would normally
+     constrain it to 420px. */
+  margin-left: -70px; margin-right: -70px; /* widen past .mk-modal padding */
+}
+@media (max-width: 600px) {
+  /* On narrow viewports drop the negative margin so we don't push the
+     modal off the side — let it inherit the .mk-modal width cap. */
+  .mk-sync-setup-modal { margin-left: 0; margin-right: 0; }
+}
+.mk-sync-setup-fields {
+  border: 1px solid var(--border-1); border-radius: var(--radius-sm);
+  padding: 8px 12px; margin: 0;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.mk-sync-setup-fields:disabled { opacity: 0.7; }
+.mk-sync-setup-legend {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--fg-3); padding: 0 4px;
+}
+.mk-sync-setup-radio {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 4px 0; cursor: pointer;
+}
+.mk-sync-setup-radio input[type="radio"] {
+  margin-top: 4px; /* line up with strong-label baseline */
+  cursor: pointer;
+}
+.mk-sync-setup-radio input[type="radio"]:disabled {
+  cursor: not-allowed;
+}
+.mk-sync-setup-radio-label {
+  display: flex; flex-direction: column; gap: 2px; flex: 1;
+}
+.mk-sync-setup-radio-label > strong { font-size: 13px; color: var(--fg-1); }
+.mk-sync-setup-radio-label .mk-settings-hint { margin: 0; }
+.mk-sync-setup-form-fields {
+  /* Sub-form indents under the radio so the visual association is
+     unambiguous; gap matches the .mk-tmpl-add-field stack. */
+  margin-left: 24px;
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 4px 0 8px 0;
+}
+.mk-sync-setup-form-fields select.mk-tmpl-input {
+  /* The attach picker is a native <select>; reuse the .mk-tmpl-input
+     chrome so it doesn't visually break from the text inputs below. */
+  appearance: auto;
+}
+
+/* Step 2 — the collision-preview banner. Uses the existing is-error
+   palette for the heading so it reads as "this is the consequential
+   step"; the list itself stays neutral. */
+.mk-sync-setup-collision-banner {
+  border: 1px solid var(--status-blocked); border-radius: var(--radius-sm);
+  background: var(--status-blocked-bg);
+  padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.mk-sync-setup-collision-title {
+  margin: 0; font-size: 14px; font-weight: 600;
+  color: var(--status-blocked);
+}
+.mk-sync-setup-collision-section { display: flex; flex-direction: column; gap: 4px; }
+.mk-sync-setup-collision-subtitle {
+  margin: 0; font-size: 12px; font-weight: 600;
+  color: var(--fg-2);
+}
+.mk-sync-setup-collision-list {
+  margin: 0; padding-left: 18px;
+  display: flex; flex-direction: column; gap: 2px;
+  font-size: 12px; color: var(--fg-2);
+  max-height: 240px; overflow-y: auto;
+}
+.mk-sync-setup-collision-list code {
+  font-family: var(--font-mono); font-size: 11px;
+}
+.mk-sync-setup-collision-kind {
+  text-transform: uppercase; font-size: 10px; letter-spacing: .04em;
+  color: var(--fg-3);
+}

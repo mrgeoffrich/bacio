@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import Icon from './Icon.jsx';
-import Tooltip from './Tooltip.jsx';
 import SyncRepoCard from './SyncRepoCard.jsx';
+import SyncSetupModal from './SyncSetupModal.jsx';
 import { reportError } from '../errors';
 import * as api from '../api';
 
@@ -28,18 +28,25 @@ export default function SyncView({ onClose }) {
   const [prefs, setPrefs] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [savingPrefs, setSavingPrefs] = useState(false);
+  // BACI-111: prefix of the unsynced project the setup modal is open
+  // for, or null when the modal is closed. The lookup against
+  // registry.unsyncedProjects happens at render time so the row stays
+  // resolvable even as the registry refreshes underneath the modal.
+  const [openSetupForPrefix, setOpenSetupForPrefix] = useState(null);
 
-  // Page-level Escape closes the view, matching SettingsView's handler.
-  // No sub-modals open here today — BACI-111 / BACI-112 will add them
-  // and need their own state guards before this fires.
+  // Page-level Escape closes the view. When the BACI-111 setup modal
+  // is open, Radix Dialog handles Escape for the modal itself and the
+  // event still bubbles — guard against closing the underlying view so
+  // the user doesn't lose the whole Sync screen.
   useEffect(() => {
     const onKey = (e) => {
       if (e.key !== 'Escape') return;
+      if (openSetupForPrefix !== null) return;
       onClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [onClose, openSetupForPrefix]);
 
   const refreshRegistry = useCallback((opts = {}) => {
     api.getSyncRegistry()
@@ -98,6 +105,12 @@ export default function SyncView({ onClose }) {
 
   const syncRepos = registry?.syncRepos ?? [];
   const unsynced = registry?.unsyncedProjects ?? [];
+  // Resolve the target project at render time so the setup modal
+  // remains anchored to the row even after a poll-driven registry
+  // refresh under it.
+  const setupTarget = openSetupForPrefix
+    ? unsynced.find(u => u.prefix === openSetupForPrefix) ?? null
+    : null;
 
   return (
     <div className="mk-settings-view">
@@ -182,23 +195,30 @@ export default function SyncView({ onClose }) {
                   <span className="mk-sync-project-prefix">{p.prefix}</span>
                   <span className="mk-sync-project-name">{p.name}</span>
                   <code className="mk-sync-project-path">{p.path}</code>
-                  <Tooltip label="Coming in BACI-111">
-                    <span>
-                      <button
-                        type="button"
-                        className="mk-segmented-btn"
-                        disabled
-                      >
-                        Set up sync…
-                      </button>
-                    </span>
-                  </Tooltip>
+                  <button
+                    type="button"
+                    className="mk-segmented-btn"
+                    onClick={() => setOpenSetupForPrefix(p.prefix)}
+                  >
+                    Set up sync…
+                  </button>
                 </li>
               ))}
             </ul>
           )}
         </section>
       </div>
+
+      <SyncSetupModal
+        open={!!setupTarget}
+        project={setupTarget}
+        syncRepos={syncRepos}
+        onClose={() => setOpenSetupForPrefix(null)}
+        onDone={() => {
+          setOpenSetupForPrefix(null);
+          refreshRegistry();
+        }}
+      />
     </div>
   );
 }

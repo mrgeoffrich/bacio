@@ -39,6 +39,11 @@ import {
   SyncRepoDTO,
   MemberProjectDTO,
   UnsyncedProjectDTO,
+  SyncSetupDTO,
+  SetupSyncIn as SetupSyncInDTO,
+  CollisionPreviewDTO,
+  RenumberEntryDTO,
+  RenameEntryDTO,
 } from '../bindings/github.com/mrgeoffrich/bacio/desktop';
 import { ClaimDTO } from '../bindings/github.com/mrgeoffrich/bacio/internal/agentcards';
 // BACI-145: re-export the WaitingState / WaitingKind enums from the
@@ -47,7 +52,7 @@ import { ClaimDTO } from '../bindings/github.com/mrgeoffrich/bacio/internal/agen
 // scattered through the kanban code).
 import { WaitingState, WaitingKind } from '../bindings/github.com/mrgeoffrich/bacio/internal/boardcards';
 
-export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, BoardPreferencesDTO, WaitingState, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO };
+export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, BoardPreferencesDTO, WaitingState, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO, SyncSetupDTO, CollisionPreviewDTO, RenumberEntryDTO, RenameEntryDTO };
 
 // BACI-108: cross-transport aliases — components import from `./api`
 // and stay unaware of whether they're on the Wails or HTTP seam. The
@@ -59,7 +64,34 @@ export type SyncRegistry = SyncRegistryDTO;
 export type SyncRepoEntry = SyncRepoDTO;
 export type MemberProject = MemberProjectDTO;
 export type UnsyncedProject = UnsyncedProjectDTO;
+// BACI-111: cross-transport sync-setup wire shape. SyncSetupPayload is
+// the camelCase input the SyncSetupModal builds; SyncSetupResult is the
+// returned outcome the modal consumes on success. SyncSetupCollisionError
+// is the typed exception thrown when the server (Wails or HTTP) refuses
+// the call because the import would renumber / rename local rows — the
+// modal `instanceof`-checks it to advance to the step-2 confirm.
+export type SyncSetupPayload = SetupSyncInDTO;
+export type SyncSetupResult = SyncSetupDTO;
 export { WaitingKind };
+
+// SyncSetupCollisionError carries the typed CollisionPreviewDTO so the
+// modal can render the renumber / rename preview verbatim. Throws are
+// the natural shape for the wire-level seam — a 409-equivalent
+// turns into one of these in both transports — but the underlying
+// SyncSetupResult is preserved on the .result property when the caller
+// wants to see the full structured shape (e.g. for tests).
+export class SyncSetupCollisionError extends Error {
+  previewCollisions: CollisionPreviewDTO;
+  result: SyncSetupDTO;
+  constructor(result: SyncSetupDTO) {
+    super('sync setup: renumber collision');
+    this.name = 'SyncSetupCollisionError';
+    this.result = result;
+    // Non-null assert: caller only constructs this when the server
+    // populated previewCollisions; the Go side guarantees it.
+    this.previewCollisions = result.previewCollisions!;
+  }
+}
 
 function normalize(err: unknown): Error {
   if (err instanceof Error) return err;
@@ -594,6 +626,30 @@ export async function getSyncRegistry(): Promise<SyncRegistryDTO> {
   } catch (err) {
     throw normalize(err);
   }
+}
+
+// setupSync (BACI-111) drives the SyncSetupModal — three modes
+// (init / clone / attach) map 1:1 onto the engine's bootstrap paths.
+// On a renumber-collision refusal the Wails service returns the
+// SyncSetupDTO with `previewCollisions` populated and a nil Go-side
+// error; the JS-side seam detects the populated preview and throws
+// SyncSetupCollisionError so the modal can `instanceof`-branch into
+// the step-2 confirm. Any other failure (validation / engine error /
+// lock timeout) surfaces as a plain Error via normalize().
+export async function setupSync(
+  prefix: string,
+  payload: SyncSetupPayload,
+): Promise<SyncSetupResult> {
+  let result: SyncSetupDTO;
+  try {
+    result = await SettingsService.SetupSync(prefix, payload);
+  } catch (err) {
+    throw normalize(err);
+  }
+  if (result.previewCollisions) {
+    throw new SyncSetupCollisionError(result);
+  }
+  return result;
 }
 
 // getLeaderStatus returns the current UI leader-election state synchronously.
