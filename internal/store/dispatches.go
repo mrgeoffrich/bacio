@@ -232,6 +232,42 @@ func (s *Store) GetDispatch(id int64) (*model.AgentDispatch, error) {
 	return d, err
 }
 
+// ClaimDispatchDelivery (BACI-202) inserts a (dispatch_id, session_id)
+// row in dispatch_deliveries and reports whether THIS call won the row.
+// Two sessions can share one agent identity (two Claude Code instances
+// registered under the same slug, different claude_pid) and both will
+// see the same agent-targeted dispatch through ListDispatches's
+// agent-id-OR-session-id filter; the drain path calls this before
+// emitting the <channel> event and only proceeds when claimed == true.
+// The losing session's drain falls through silently — no
+// MarkDispatchDelivered call, no agent.deliver audit row, no channel
+// emit. INSERT OR IGNORE is the storage-layer source of truth for the
+// uniqueness invariant; the FK to agent_sessions(session_id) keeps the
+// ledger from carrying rows for sessions that never existed.
+//
+// An empty session id is a caller bug (callers must thread a real
+// session id through from the drain entrypoint) and short-circuits to
+// (false, nil) without touching the table — better than a silent
+// "everyone wins" mode that would re-open the double-delivery race the
+// table exists to close.
+func (s *Store) ClaimDispatchDelivery(dispatchID int64, sessionID string) (bool, error) {
+	if sessionID == "" {
+		return false, nil
+	}
+	res, err := s.DB.Exec(
+		`INSERT OR IGNORE INTO dispatch_deliveries (dispatch_id, session_id) VALUES (?, ?)`,
+		dispatchID, sessionID,
+	)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
+}
+
 // MarkDispatchDelivered moves a pending dispatch to delivered and stamps
 // delivered_at. Idempotent: a dispatch that's already delivered or acked
 // is returned unchanged; a cancelled one is also returned as-is (a

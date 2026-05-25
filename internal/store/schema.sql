@@ -521,6 +521,33 @@ CREATE INDEX IF NOT EXISTS idx_dispatches_repo
 -- column doesn't exist until the ALTER in migrate() runs. The migrate()
 -- copy is IF NOT EXISTS so fresh DBs pick it up too.
 
+-- dispatch_deliveries (BACI-202) is the per-(dispatch, session) ledger
+-- that backs delivery uniqueness. Two sessions can share one agent
+-- identity (two Claude Code instances registered under the same slug,
+-- different claude_pid) and both will see a dispatch targeted at that
+-- identity through ListDispatches's agent-id-OR-session-id filter; the
+-- drain path's INSERT OR IGNORE on this table is the storage-layer
+-- guard that keeps only the first one to drain from emitting the
+-- <channel> event (and spawning the per-mode subagent). The losing
+-- session's drain falls through silently — no MarkDispatchDelivered,
+-- no agent.deliver audit row, no channel emit.
+--
+-- agent_dispatches.delivered_at stays untouched by this table — it
+-- remains the "first push at the dispatch level" timestamp the
+-- BACI-130 cancel gate and BACI-200 sticky-bind gate already read.
+-- The per-session ledger is a second source of truth that adds the
+-- uniqueness constraint a one-shot timestamp can't express.
+--
+-- Cascade on both sides: deleting a dispatch (60-day retention prune
+-- or a hard delete) drops its ledger rows; ending a session (or its
+-- retention prune) drops the ledger rows pinned to that session.
+CREATE TABLE IF NOT EXISTS dispatch_deliveries (
+    dispatch_id  INTEGER NOT NULL REFERENCES agent_dispatches(id) ON DELETE CASCADE,
+    session_id   TEXT    NOT NULL REFERENCES agent_sessions(session_id) ON DELETE CASCADE,
+    delivered_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (dispatch_id, session_id)
+);
+
 -- agent_channels records live `bacio channel` subprocesses. Claude Code
 -- never tells a channel its session id (only hooks get that), so a
 -- channel can't stamp an agent_sessions row directly. Instead it walks

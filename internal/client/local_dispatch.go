@@ -485,7 +485,7 @@ func (c *localClient) DrainDispatches(ctx context.Context, sessionID string) ([]
 	if err != nil {
 		return nil, err
 	}
-	return c.markDrained(open)
+	return c.markDrained(open, sess.SessionID)
 }
 
 // markDrained flips any still-pending dispatches to delivered and returns
@@ -499,10 +499,37 @@ func (c *localClient) DrainDispatches(ctx context.Context, sessionID string) ([]
 // the audit log by op. Only the in-loop pending check gates the audit
 // write (already-delivered rows fall to the unchanged-passthrough
 // branch above and never re-stamp).
-func (c *localClient) markDrained(open []*model.AgentDispatch) ([]*model.AgentDispatch, error) {
+//
+// BACI-202: every pending→delivered emission is gated on a per-
+// (dispatch, session) uniqueness claim against `dispatch_deliveries`.
+// Two sessions sharing one agent identity (different claude_pid, same
+// target_agent_id) would otherwise both surface the same dispatch
+// through ListDispatches's agent-id-OR-session-id filter and double-
+// deliver it. The losing session's drain falls through silently — no
+// MarkDispatchDelivered call, no agent.deliver audit row, no entry in
+// the returned slice — and the BACI-202 `dispatch_deliveries` row that
+// the WINNING session inserted is the storage-layer source of truth
+// for the uniqueness invariant. An empty sessionID short-circuits the
+// gate so the legacy `DrainAgentDispatches` shape (which has no live
+// callers but stays in the Client interface for symmetry) still
+// drains to delivered without uniqueness gating.
+func (c *localClient) markDrained(open []*model.AgentDispatch, sessionID string) ([]*model.AgentDispatch, error) {
 	out := make([]*model.AgentDispatch, 0, len(open))
 	for _, d := range open {
 		if d.Status == model.DispatchPending {
+			// BACI-202: claim the per-(dispatch, session) delivery slot
+			// BEFORE the status flip + audit write. The losing session
+			// of two concurrent drains gets claimed=false here and
+			// skips the rest of this branch entirely.
+			if sessionID != "" {
+				claimed, err := c.store.ClaimDispatchDelivery(d.ID, sessionID)
+				if err != nil {
+					return nil, err
+				}
+				if !claimed {
+					continue
+				}
+			}
 			delivered, err := c.store.MarkDispatchDelivered(d.ID)
 			if err != nil {
 				return nil, err
@@ -578,7 +605,12 @@ func (c *localClient) DrainAgentDispatches(ctx context.Context, repo *model.Repo
 	if err != nil {
 		return nil, err
 	}
-	return c.markDrained(open)
+	// BACI-202: no session id is in scope on this path (legacy agent-
+	// scoped drain). Pass "" so markDrained skips the per-(dispatch,
+	// session) uniqueness gate. DrainAgentDispatches has no live
+	// callers — the channel and the hook both call DrainDispatches with
+	// a concrete session id — so this passthrough is purely defensive.
+	return c.markDrained(open, "")
 }
 
 func (c *localClient) ListPromptTemplates(ctx context.Context) ([]*store.PromptTemplate, error) {
