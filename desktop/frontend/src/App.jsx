@@ -8,6 +8,7 @@ import AgentsView from './components/AgentsView.jsx';
 import HistoryView from './components/HistoryView.jsx';
 import IssueWorkspace from './components/IssueWorkspace.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
+import IssueComposer from './components/IssueComposer.jsx';
 import ActivityTray from './components/ActivityTray.jsx';
 import { readPinnedKeys, persistPinnedKeys } from './components/activityTrayPinPersistence';
 import SettingsView from './components/SettingsView.jsx';
@@ -81,6 +82,11 @@ export default function App() {
   // settingsOpen — reached only via the topbar Sync pill, never the
   // top-nav. Mirrors the Settings entry-point shape.
   const [syncOpen, setSyncOpen] = useState(false);
+  // BACI-166: the "+ from prompt" composer is a sibling modal flag —
+  // reached via the Topbar's `+` button or the ⌘N shortcut. The modal
+  // chains api.addIssue → api.dispatchIssue(_, _, 'scope') in one click
+  // so a rough one-liner becomes a triage-ready ticket in the background.
+  const [composerOpen, setComposerOpen] = useState(false);
   const [agents, setAgents] = useState([]);
   // promptConfig is the global (repo-independent) dispatch-prompt config:
   // one entry per stage with its label and the issue states it's valid
@@ -476,14 +482,49 @@ export default function App() {
     setActiveView(previousView || 'board');
   }, [previousView]);
 
+  // BACI-166: composer success handler — optimistically prepend the new
+  // card with a queued_no_agent waitingState in the 'scope' mode so the
+  // breathing waiting border + "Worker has the Scope job" pill render
+  // immediately, route to the new issue's workspace, and bump the
+  // cards-refresh poll so the authoritative row replaces the optimistic
+  // one as soon as the server has it. Mirrors dispatchFromCard's
+  // optimistic-waitingState shape exactly.
+  const onComposerCreated = useCallback((newCard) => {
+    if (!newCard || !newCard.key) return;
+    setCards(cs => [
+      { ...newCard, waitingState: { kind: 'queued_no_agent', mode: 'scope' } },
+      ...cs,
+    ]);
+    setSettingsOpen(false);
+    setSyncOpen(false);
+    setPreviousView(prev => activeView === 'issue' ? prev : activeView);
+    setOpenIssueKey(newCard.key);
+    setActiveView('issue');
+    // Don't fire refreshCards synchronously — the dispatch is queued
+    // *after* this callback returns (the composer awaits it post-route),
+    // so an immediate refetch could race past it. The standing 10s poll
+    // catches the authoritative shape on its next tick.
+  }, [activeView]);
+
   useEffect(() => {
     const onKey = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setPaletteOpen(true);
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n') {
+        // BACI-166: ⌘N opens the IssueComposer. Skip when the user is
+        // typing into a field (so the OS-level new-document shortcut
+        // muscle memory doesn't fight us inside an editor). Guard on a
+        // real repo prefix — the composer needs one to create against.
+        if (isEditingTarget(e.target)) return;
+        if (!activeBoard || activeBoard === 'all') return;
+        e.preventDefault();
+        setComposerOpen(true);
       } else if (e.key === 'Escape') {
         // Palette + Settings + Sync are still hand-rolled; the workspace
-        // closes here when nothing else is in front of it.
+        // closes here when nothing else is in front of it. The composer
+        // closes via Radix's built-in onOpenChange so we don't need to
+        // intercept Escape for it here.
         if (paletteOpen) {
           setPaletteOpen(false);
         } else if (activeView === 'issue' && !isEditingTarget(e.target)) {
@@ -512,7 +553,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [paletteOpen, settingsOpen, syncOpen, activeView, closeIssue]);
+  }, [paletteOpen, settingsOpen, syncOpen, activeView, activeBoard, closeIssue]);
 
   // Add a repository. Desktop pops a native folder picker (Wails);
   // web mode hands the path-input modal's submission through as a
@@ -834,6 +875,7 @@ export default function App() {
         onOpenPalette={() => setPaletteOpen(true)}
         onOpenSettings={() => { setSyncOpen(false); setSettingsOpen(true); }}
         onOpenSync={openSync}
+        onOpenComposer={() => setComposerOpen(true)}
         leaderState={leaderState}
         openIssueKey={openIssueKey}
         onCloseIssue={closeIssue}
@@ -930,6 +972,16 @@ export default function App() {
           cards={cards}
           onClose={() => setPaletteOpen(false)}
           onPick={openCard}
+        />
+      </ErrorBoundary>
+      {/* BACI-166: + from prompt composer. Sibling of CommandPalette /
+          ErrorModal so it overlays whatever view is current. */}
+      <ErrorBoundary headline="Something went wrong in the issue composer" label="The issue composer crashed">
+        <IssueComposer
+          open={composerOpen}
+          onClose={() => setComposerOpen(false)}
+          repoPrefix={activeBoard}
+          onCreated={onComposerCreated}
         />
       </ErrorBoundary>
       {/* BACI-171: bottom-right activity tray. Sibling of CommandPalette

@@ -1179,6 +1179,29 @@ function reshapeDispatch(d: ApiDispatch): DispatchDTO {
   };
 }
 
+// addIssue (BACI-166) creates a new issue via POST /repos/{prefix}/issues
+// and reshapes the returned model.Issue into a BoardCard so the React
+// composer can prepend it to the kanban without a second round-trip.
+// Cross-transport name parity with api.ts so the composer doesn't
+// branch on transport. Validation (empty title, invalid state, etc.)
+// lives at the store boundary; the server surfaces it as the standard
+// error envelope and call() throws an Error whose .message carries the
+// human-readable text the composer renders inline.
+export async function addIssue(
+  repoPrefix: string,
+  title: string,
+  description: string,
+): Promise<BoardCard> {
+  if (!repoPrefix || repoPrefix === 'all') {
+    throw new Error('addIssue: a repo prefix is required (cross-repo pseudo-board has no target)');
+  }
+  const iss = await call<ApiIssue>(
+    `/repos/${repoPrefix}/issues`,
+    { method: 'POST', body: { title, description } },
+  );
+  return cardFromIssue(iss);
+}
+
 // dispatchIssue queues a state-gated auto-pick dispatch (BACI-40). The
 // server re-checks the stage's state-gate against the issue's current
 // state and picks the most-recently-active free agent — the caller

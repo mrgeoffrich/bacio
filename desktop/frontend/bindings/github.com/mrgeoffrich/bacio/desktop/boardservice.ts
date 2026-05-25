@@ -50,6 +50,24 @@ export function AddComment(repoPrefix: string, key: string, author: string, body
 }
 
 /**
+ * AddIssue creates a new issue in the named repo and returns the
+ * freshly-shaped BoardCard so the React composer can prepend it to the
+ * kanban + open IssueWorkspace on the new key. Mirrors DispatchIssue's
+ * shape line-for-line: required repo prefix in hand (the "all"
+ * cross-repo pseudo-board has no concept of "which repo do I create
+ * in", so the caller must pass a real prefix), one client.CreateIssue
+ * call, then a single-row Assemble round-trip so the new card carries
+ * the same feature-emoji / waiting / blocker shape as the rest of the
+ * kanban. Validation (empty title, control chars, etc.) lives at the
+ * store boundary inside client.CreateIssue.
+ */
+export function AddIssue(repoPrefix: string, title: string, description: string): $CancellablePromise<$models.BoardCard> {
+    return $Call.ByID(2590773623, repoPrefix, title, description).then(($result: any) => {
+        return $$createType1($result);
+    });
+}
+
+/**
  * AddRepository opens a native folder picker and registers the chosen git
  * working tree as a bacio repo, returning it as a Board. A Board with an empty
  * Prefix means the user cancelled the dialog. The picked folder may sit
@@ -57,7 +75,7 @@ export function AddComment(repoPrefix: string, key: string, author: string, body
  */
 export function AddRepository(): $CancellablePromise<$models.Board> {
     return $Call.ByID(2129265032).then(($result: any) => {
-        return $$createType1($result);
+        return $$createType2($result);
     });
 }
 
@@ -69,7 +87,7 @@ export function AddRepository(): $CancellablePromise<$models.Board> {
  */
 export function AnswerSessionQuestion(id: number, answers: { [_ in string]?: any }): $CancellablePromise<model$0.SessionQuestion | null> {
     return $Call.ByID(3587423249, id, answers).then(($result: any) => {
-        return $$createType3($result);
+        return $$createType4($result);
     });
 }
 
@@ -82,7 +100,7 @@ export function AnswerSessionQuestion(id: number, answers: { [_ in string]?: any
  */
 export function ArchiveIssue(repoPrefix: string, issueKey: string): $CancellablePromise<model$0.Issue | null> {
     return $Call.ByID(543071120, repoPrefix, issueKey).then(($result: any) => {
-        return $$createType5($result);
+        return $$createType6($result);
     });
 }
 
@@ -94,7 +112,7 @@ export function ArchiveIssue(repoPrefix: string, issueKey: string): $Cancellable
  */
 export function AttachPullRequest(repoPrefix: string, key: string, url: string): $CancellablePromise<$models.PRDTO> {
     return $Call.ByID(1860090468, repoPrefix, key, url).then(($result: any) => {
-        return $$createType6($result);
+        return $$createType7($result);
     });
 }
 
@@ -106,7 +124,7 @@ export function AttachPullRequest(repoPrefix: string, key: string, url: string):
  */
 export function CancelFollowOnDispatch(repoPrefix: string, issueKey: string): $CancellablePromise<$models.DispatchDTO> {
     return $Call.ByID(1725053965, repoPrefix, issueKey).then(($result: any) => {
-        return $$createType7($result);
+        return $$createType8($result);
     });
 }
 
@@ -116,7 +134,7 @@ export function CancelFollowOnDispatch(repoPrefix: string, issueKey: string): $C
  */
 export function CancelSessionQuestion(id: number): $CancellablePromise<model$0.SessionQuestion | null> {
     return $Call.ByID(1557142517, id).then(($result: any) => {
-        return $$createType3($result);
+        return $$createType4($result);
     });
 }
 
@@ -160,7 +178,7 @@ export function DeleteComment(repoPrefix: string, key: string, commentUUID: stri
  */
 export function DispatchIssue(repoPrefix: string, issueKey: string, mode: string): $CancellablePromise<$models.DispatchDTO> {
     return $Call.ByID(715303058, repoPrefix, issueKey, mode).then(($result: any) => {
-        return $$createType7($result);
+        return $$createType8($result);
     });
 }
 
@@ -189,7 +207,7 @@ export function GetIssue(repoPrefix: string, key: string): $CancellablePromise<$
  */
 export function GetIssueBrief(repoPrefix: string, key: string): $CancellablePromise<$models.IssueBriefDTO> {
     return $Call.ByID(836296342, repoPrefix, key).then(($result: any) => {
-        return $$createType8($result);
+        return $$createType9($result);
     });
 }
 
@@ -202,7 +220,7 @@ export function GetIssueBrief(repoPrefix: string, key: string): $CancellableProm
  */
 export function GetSessionQuestion(id: number): $CancellablePromise<model$0.SessionQuestion | null> {
     return $Call.ByID(445804441, id).then(($result: any) => {
-        return $$createType3($result);
+        return $$createType4($result);
     });
 }
 
@@ -218,7 +236,7 @@ export function GetSessionQuestion(id: number): $CancellablePromise<model$0.Sess
  */
 export function ListAgents(repoPrefix: string): $CancellablePromise<$models.AgentCard[]> {
     return $Call.ByID(3979848123, repoPrefix).then(($result: any) => {
-        return $$createType10($result);
+        return $$createType11($result);
     });
 }
 
@@ -228,7 +246,7 @@ export function ListAgents(repoPrefix: string): $CancellablePromise<$models.Agen
  */
 export function ListBoards(): $CancellablePromise<$models.Board[]> {
     return $Call.ByID(3235630628).then(($result: any) => {
-        return $$createType11($result);
+        return $$createType12($result);
     });
 }
 
@@ -283,7 +301,7 @@ export function ListShipped(repoPrefix: string, sinceDays: number, limit: number
  */
 export function QueueFollowOnDispatch(repoPrefix: string, issueKey: string, mode: string): $CancellablePromise<$models.DispatchDTO> {
     return $Call.ByID(1591721554, repoPrefix, issueKey, mode).then(($result: any) => {
-        return $$createType7($result);
+        return $$createType8($result);
     });
 }
 
@@ -299,7 +317,7 @@ export function QueueFollowOnDispatch(repoPrefix: string, issueKey: string, mode
  */
 export function RescueDispatch(dispatchID: number): $CancellablePromise<$models.DispatchDTO> {
     return $Call.ByID(233478750, dispatchID).then(($result: any) => {
-        return $$createType7($result);
+        return $$createType8($result);
     });
 }
 
@@ -312,7 +330,7 @@ export function RescueDispatch(dispatchID: number): $CancellablePromise<$models.
  */
 export function SetIssueState(repoPrefix: string, key: string, state: string): $CancellablePromise<$models.BoardCard> {
     return $Call.ByID(2874048639, repoPrefix, key, state).then(($result: any) => {
-        return $$createType12($result);
+        return $$createType1($result);
     });
 }
 
@@ -321,7 +339,7 @@ export function SetIssueState(repoPrefix: string, key: string, state: string): $
  */
 export function UnarchiveIssue(repoPrefix: string, issueKey: string): $CancellablePromise<model$0.Issue | null> {
     return $Call.ByID(3350533803, repoPrefix, issueKey).then(($result: any) => {
-        return $$createType5($result);
+        return $$createType6($result);
     });
 }
 
@@ -338,19 +356,19 @@ export function UpdateIssueDescription(repoPrefix: string, key: string, descript
 
 // Private type creation functions
 const $$createType0 = $models.IssueDetail.createFrom;
-const $$createType1 = $models.Board.createFrom;
-const $$createType2 = model$0.SessionQuestion.createFrom;
-const $$createType3 = $Create.Nullable($$createType2);
-const $$createType4 = model$0.Issue.createFrom;
-const $$createType5 = $Create.Nullable($$createType4);
-const $$createType6 = $models.PRDTO.createFrom;
-const $$createType7 = agentcards$0.DispatchDTO.createFrom;
-const $$createType8 = $models.IssueBriefDTO.createFrom;
-const $$createType9 = agentcards$0.AgentCard.createFrom;
-const $$createType10 = $Create.Array($$createType9);
-const $$createType11 = $Create.Array($$createType1);
-const $$createType12 = boardcards$0.BoardCard.createFrom;
-const $$createType13 = $Create.Array($$createType12);
+const $$createType1 = boardcards$0.BoardCard.createFrom;
+const $$createType2 = $models.Board.createFrom;
+const $$createType3 = model$0.SessionQuestion.createFrom;
+const $$createType4 = $Create.Nullable($$createType3);
+const $$createType5 = model$0.Issue.createFrom;
+const $$createType6 = $Create.Nullable($$createType5);
+const $$createType7 = $models.PRDTO.createFrom;
+const $$createType8 = agentcards$0.DispatchDTO.createFrom;
+const $$createType9 = $models.IssueBriefDTO.createFrom;
+const $$createType10 = agentcards$0.AgentCard.createFrom;
+const $$createType11 = $Create.Array($$createType10);
+const $$createType12 = $Create.Array($$createType2);
+const $$createType13 = $Create.Array($$createType1);
 const $$createType14 = $models.BoardColumn.createFrom;
 const $$createType15 = $Create.Array($$createType14);
 const $$createType16 = $models.ShippedIssueDTO.createFrom;

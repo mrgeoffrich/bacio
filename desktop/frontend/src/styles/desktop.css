@@ -1743,6 +1743,39 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   color: var(--fg-3);
 }
 
+/* ----- BACI-166 issue composer (+ from prompt) -----
+   The Topbar's `+` button opens this Radix-modal composer; submit
+   chains addIssue → dispatchIssue(_, _, 'scope'). Form chrome rides on
+   .mk-settings-row + .mk-tmpl-input (same as SyncSetupModal); the only
+   bespoke piece is the description textarea — multi-line, monospace,
+   slightly taller than a default input so the user has room to flesh
+   out a one-liner into a couple of paragraphs. */
+.mk-issue-composer-form {
+  display: flex; flex-direction: column; gap: 12px;
+}
+.mk-issue-composer-textarea {
+  width: 100%;
+  min-height: 8rem;
+  padding: 8px 10px;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--fg-1);
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
+  resize: vertical;
+  box-sizing: border-box;
+}
+.mk-issue-composer-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.mk-issue-composer-textarea:disabled { opacity: 0.6; }
+.mk-issue-composer-error {
+  color: var(--status-blocked);
+}
+
 /* ============================================================
    Shipped popover (BACI-187) — topbar pill + anchored menu of
    recently-done issues. Pill shape mirrors .mk-sync-badge above so

@@ -234,6 +234,24 @@ export async function listDocs(repoPrefix: string, typeFilter = ''): Promise<Doc
   }
 }
 
+// addIssue (BACI-166) creates a new issue and returns the freshly-shaped
+// BoardCard. Backs the "+ from prompt" composer in the Topbar: the
+// composer calls addIssue then chains dispatchIssue(_, _, 'scope') to
+// queue the scope worker on the new issue. Mirrors dispatchIssue's
+// shape line-for-line; validation (empty title, control chars, etc.)
+// lives at the store boundary inside BoardService.AddIssue.
+export async function addIssue(
+  repoPrefix: string,
+  title: string,
+  description: string,
+): Promise<BoardCard> {
+  try {
+    return await BoardService.AddIssue(repoPrefix, title, description);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
 // dispatchIssue queues a dispatch against an issue for a job stage. The
 // agent is auto-picked by the backend (the most-recently-active free
 // agent) — the caller never names one. Post-BACI-51 this is the enqueue

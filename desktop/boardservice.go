@@ -842,6 +842,55 @@ func (b *BoardService) ListAgents(repoPrefix string) ([]AgentCard, error) {
 	return agentcards.Assemble(ctx, b.client, repo)
 }
 
+// AddIssue creates a new issue in the named repo and returns the
+// freshly-shaped BoardCard so the React composer can prepend it to the
+// kanban + open IssueWorkspace on the new key. Mirrors DispatchIssue's
+// shape line-for-line: required repo prefix in hand (the "all"
+// cross-repo pseudo-board has no concept of "which repo do I create
+// in", so the caller must pass a real prefix), one client.CreateIssue
+// call, then a single-row Assemble round-trip so the new card carries
+// the same feature-emoji / waiting / blocker shape as the rest of the
+// kanban. Validation (empty title, control chars, etc.) lives at the
+// store boundary inside client.CreateIssue.
+func (b *BoardService) AddIssue(repoPrefix, title, description string) (BoardCard, error) {
+	ctx := context.Background()
+	if repoPrefix == "" || repoPrefix == "all" {
+		return BoardCard{}, fmt.Errorf("AddIssue: a repo prefix is required (cross-repo pseudo-board has no target)")
+	}
+	repo, err := b.client.GetRepoByPrefix(ctx, repoPrefix)
+	if err != nil {
+		return BoardCard{}, err
+	}
+	iss, err := b.client.CreateIssue(ctx, repo, inputs.IssueAddInput{Title: title, Description: description}, false)
+	if err != nil {
+		return BoardCard{}, err
+	}
+	// Re-assemble the board for the repo so the new card inherits the
+	// same feature-emoji / waiting / blocker shape ListCards produces.
+	// A fresh issue has none of those yet, but going through the same
+	// assembler keeps the card payload identical to what the next
+	// listCards poll will draw — no flicker on the React side.
+	showArchived, _ := b.client.GetDisplayShowArchived(ctx)
+	var hiddenSlugs []string
+	if slugs, herr := b.client.ListHiddenFeatureSlugs(ctx, repo); herr == nil {
+		hiddenSlugs = slugs
+	}
+	cards, err := boardcards.Assemble(ctx, b.client, repo, showArchived, hiddenSlugs)
+	if err != nil {
+		return BoardCard{}, err
+	}
+	for _, c := range cards {
+		if c.Key == iss.Key {
+			return c, nil
+		}
+	}
+	// Fall back to the lightweight shape if the assembler didn't surface
+	// the row (e.g. the repo's per-feature hide-on-board filter caught it
+	// — possible if the issue was filed against a hidden feature). The
+	// composer still needs a real card to route to.
+	return cardFromIssue(iss, false), nil
+}
+
 // DispatchIssue queues a dispatch against an issue for a given job stage
 // (mode). The state-gate check and the free-agent auto-pick both live
 // on client.Client.AutoDispatchIssue (BACI-40), so the per-card button,
