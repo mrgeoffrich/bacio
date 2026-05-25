@@ -32,7 +32,7 @@ func TestFeaturesListRepoNotFound(t *testing.T) {
 func TestFeaturesListLeanByDefault(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
-	if _, err := s.CreateFeature(repo.ID, "auth", "Auth", "very long body"); err != nil {
+	if _, err := s.CreateFeature(repo.ID, "auth", "Auth", "very long body", ""); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	resp, body := apiGet(t, ts.URL+"/repos/MINI/features")
@@ -54,7 +54,7 @@ func TestFeaturesListLeanByDefault(t *testing.T) {
 func TestFeaturesListWithDescription1(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
-	if _, err := s.CreateFeature(repo.ID, "auth", "Auth", "the body"); err != nil {
+	if _, err := s.CreateFeature(repo.ID, "auth", "Auth", "the body", ""); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	resp, body := apiGet(t, ts.URL+"/repos/MINI/features?with_description=1")
@@ -238,7 +238,7 @@ func TestFeatureEditTitleOnly(t *testing.T) {
 func TestFeatureEditDescriptionOnly(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
-	if _, err := s.CreateFeature(repo.ID, "auth", "Auth", "had body"); err != nil {
+	if _, err := s.CreateFeature(repo.ID, "auth", "Auth", "had body", ""); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	resp, body := apiPatch(t, ts.URL+"/repos/MINI/features/auth",
@@ -269,7 +269,7 @@ func TestFeatureEditBoth(t *testing.T) {
 func TestFeatureEditNullDescriptionClears(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
-	if _, err := s.CreateFeature(repo.ID, "auth", "Auth", "had body"); err != nil {
+	if _, err := s.CreateFeature(repo.ID, "auth", "Auth", "had body", ""); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	resp, body := apiPatch(t, ts.URL+"/repos/MINI/features/auth",

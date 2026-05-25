@@ -167,7 +167,11 @@ type Client interface {
 	GetFeatureBySlug(ctx context.Context, repo *model.Repo, slug string) (*model.Feature, error)
 	GetFeatureByID(ctx context.Context, repo *model.Repo, id int64) (*model.Feature, error)
 	CreateFeature(ctx context.Context, repo *model.Repo, in inputs.FeatureAddInput, dryRun bool) (*model.Feature, error)
-	UpdateFeature(ctx context.Context, repo *model.Repo, slug string, title, description *string, dryRun bool) (*model.Feature, error)
+	// UpdateFeature accepts pointers + a presence-map decoded view of
+	// the input: nil = field absent (no change), non-nil = field
+	// present (apply). For emoji a non-nil empty string clears the
+	// glyph (BACI-172).
+	UpdateFeature(ctx context.Context, repo *model.Repo, slug string, title, description, emoji *string, dryRun bool) (*model.Feature, error)
 	DeleteFeature(ctx context.Context, repo *model.Repo, slug string, dryRun bool) (deletedFeature *model.Feature, preview *FeatureDeletePreview, err error)
 	ShowFeature(ctx context.Context, repo *model.Repo, slug string) (*FeatureView, error)
 	PlanFeature(ctx context.Context, repo *model.Repo, slug string) (*PlanView, error)

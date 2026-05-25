@@ -31,7 +31,7 @@ func newFeatureCmd() *cobra.Command {
 
 func featureAddCmd() *cobra.Command {
 	var (
-		slug, description, descriptionFile, rawInput string
+		slug, description, descriptionFile, emoji, rawInput string
 	)
 	cmd := &cobra.Command{
 		Use:   "add [title]",
@@ -39,7 +39,7 @@ func featureAddCmd() *cobra.Command {
 		Args:  cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			raw, err := parseJSONInput(cmd, args, rawInput,
-				"slug", "description", "description-file")
+				"slug", "description", "description-file", "emoji")
 			if err != nil {
 				return err
 			}
@@ -64,12 +64,14 @@ func featureAddCmd() *cobra.Command {
 				Title:       args[0],
 				Slug:        slug,
 				Description: desc,
+				Emoji:       emoji,
 			})
 		},
 	}
 	cmd.Flags().StringVar(&slug, "slug", "", "explicit slug (default: derived from title)")
 	cmd.Flags().StringVar(&description, "description", "", "description text or '-' for stdin")
 	cmd.Flags().StringVar(&descriptionFile, "description-file", "", "path to a markdown file")
+	cmd.Flags().StringVar(&emoji, "emoji", "", "single-glyph emoji for the feature (kanban card decoration; empty for none)")
 	addInputFlag(cmd, &rawInput)
 	return cmd
 }
@@ -166,15 +168,15 @@ func featureShowCmd() *cobra.Command {
 
 func featureEditCmd() *cobra.Command {
 	var (
-		title, description, descriptionFile, rawInput string
+		title, description, descriptionFile, emoji, rawInput string
 	)
 	cmd := &cobra.Command{
 		Use:   "edit [slug]",
-		Short: "Edit a feature's title or description",
+		Short: "Edit a feature's title, description, or emoji",
 		Args:  cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			raw, err := parseJSONInput(cmd, args, rawInput,
-				"title", "description", "description-file")
+				"title", "description", "description-file", "emoji")
 			if err != nil {
 				return err
 			}
@@ -186,7 +188,7 @@ func featureEditCmd() *cobra.Command {
 				if in.Slug == "" {
 					return fmt.Errorf("slug is required")
 				}
-				var tPtr, dPtr *string
+				var tPtr, dPtr, ePtr *string
 				if _, ok := present["title"]; ok {
 					if in.Title == nil || *in.Title == "" {
 						return fmt.Errorf("title cannot be empty or null; omit the field to leave it unchanged")
@@ -201,12 +203,20 @@ func featureEditCmd() *cobra.Command {
 						dPtr = in.Description
 					}
 				}
-				return applyFeatureEdit(in.Slug, tPtr, dPtr)
+				if _, ok := present["emoji"]; ok {
+					if in.Emoji == nil {
+						empty := ""
+						ePtr = &empty
+					} else {
+						ePtr = in.Emoji
+					}
+				}
+				return applyFeatureEdit(in.Slug, tPtr, dPtr, ePtr)
 			}
 			if len(args) != 1 {
 				return fmt.Errorf("requires <slug> positional or --json")
 			}
-			var tPtr, dPtr *string
+			var tPtr, dPtr, ePtr *string
 			if cmd.Flags().Changed("title") {
 				tPtr = &title
 			}
@@ -217,19 +227,23 @@ func featureEditCmd() *cobra.Command {
 				}
 				dPtr = &d
 			}
-			return applyFeatureEdit(args[0], tPtr, dPtr)
+			if cmd.Flags().Changed("emoji") {
+				ePtr = &emoji
+			}
+			return applyFeatureEdit(args[0], tPtr, dPtr, ePtr)
 		},
 	}
 	cmd.Flags().StringVar(&title, "title", "", "new title")
 	cmd.Flags().StringVar(&description, "description", "", "new description text or '-' for stdin")
 	cmd.Flags().StringVar(&descriptionFile, "description-file", "", "path to a markdown file")
+	cmd.Flags().StringVar(&emoji, "emoji", "", "new emoji (single glyph; pass --emoji '' to clear)")
 	addInputFlag(cmd, &rawInput)
 	return cmd
 }
 
-func applyFeatureEdit(slug string, tPtr, dPtr *string) error {
-	if tPtr == nil && dPtr == nil {
-		return fmt.Errorf("nothing to update; pass title and/or description")
+func applyFeatureEdit(slug string, tPtr, dPtr, ePtr *string) error {
+	if tPtr == nil && dPtr == nil && ePtr == nil {
+		return fmt.Errorf("nothing to update; pass title, description, and/or emoji")
 	}
 	c, err := openClient()
 	if err != nil {
@@ -240,7 +254,7 @@ func applyFeatureEdit(slug string, tPtr, dPtr *string) error {
 	if err != nil {
 		return err
 	}
-	updated, err := c.UpdateFeature(context.Background(), repo, slug, tPtr, dPtr, opts.dryRun)
+	updated, err := c.UpdateFeature(context.Background(), repo, slug, tPtr, dPtr, ePtr, opts.dryRun)
 	if err != nil {
 		return err
 	}

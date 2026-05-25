@@ -39,10 +39,14 @@ var (
 		Title:       "Auth rewrite",
 		Slug:        "auth",
 		Description: "Replace the legacy session-token middleware to meet new compliance rules.",
+		// BACI-172: optional per-feature glyph rendered in the top-left
+		// of every kanban card belonging to the feature.
+		Emoji: "🔐",
 	}
 	ExampleFeatureEdit = FeatureEditInput{
 		Slug:        "auth",
 		Description: strPtr("Compliance-driven session-token rewrite (legal flagged the old impl)."),
+		Emoji:       strPtr("🪲"),
 	}
 	ExampleFeatureRm = FeatureRmInput{
 		Slug: "auth-old",

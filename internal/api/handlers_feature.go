@@ -104,11 +104,12 @@ func (d deps) handleFeatureCreate(w http.ResponseWriter, r *http.Request) {
 			Slug:        slug,
 			Title:       in.Title,
 			Description: in.Description,
+			Emoji:       in.Emoji,
 		}
 		writeDryRun(w, http.StatusCreated, projected)
 		return
 	}
-	feat, err := d.store.CreateFeature(repo.ID, slug, in.Title, in.Description)
+	feat, err := d.store.CreateFeature(repo.ID, slug, in.Title, in.Description, in.Emoji)
 	if err != nil {
 		status, code := statusForError(err)
 		writeError(w, status, code, err.Error(), nil)
@@ -144,7 +145,7 @@ func (d deps) handleFeatureEdit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = in.Slug
-	var tPtr, dPtr *string
+	var tPtr, dPtr, ePtr *string
 	if _, ok := present["title"]; ok {
 		if in.Title == nil || *in.Title == "" {
 			writeError(w, http.StatusBadRequest, "invalid_input",
@@ -162,7 +163,17 @@ func (d deps) handleFeatureEdit(w http.ResponseWriter, r *http.Request) {
 			dPtr = in.Description
 		}
 	}
-	if tPtr == nil && dPtr == nil {
+	// BACI-172: emoji absent = no change; present (even null / "") = update
+	// (null and explicit empty both clear the glyph).
+	if _, ok := present["emoji"]; ok {
+		if in.Emoji == nil {
+			empty := ""
+			ePtr = &empty
+		} else {
+			ePtr = in.Emoji
+		}
+	}
+	if tPtr == nil && dPtr == nil && ePtr == nil {
 		writeError(w, http.StatusBadRequest, "invalid_input", "nothing to update", nil)
 		return
 	}
@@ -174,10 +185,13 @@ func (d deps) handleFeatureEdit(w http.ResponseWriter, r *http.Request) {
 		if dPtr != nil {
 			projected.Description = *dPtr
 		}
+		if ePtr != nil {
+			projected.Emoji = *ePtr
+		}
 		writeDryRun(w, http.StatusOK, &projected)
 		return
 	}
-	if err := d.store.UpdateFeature(feat.ID, tPtr, dPtr); err != nil {
+	if err := d.store.UpdateFeature(feat.ID, tPtr, dPtr, ePtr); err != nil {
 		status, code := statusForError(err)
 		writeError(w, status, code, err.Error(), nil)
 		return
@@ -197,6 +211,7 @@ func (d deps) handleFeatureEdit(w http.ResponseWriter, r *http.Request) {
 		Details: updatedFieldList(map[string]bool{
 			"title":       tPtr != nil,
 			"description": dPtr != nil,
+			"emoji":       ePtr != nil,
 		}),
 	})
 	writeJSON(w, http.StatusOK, updated)
