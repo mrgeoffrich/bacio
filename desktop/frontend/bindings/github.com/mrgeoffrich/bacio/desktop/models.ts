@@ -186,6 +186,39 @@ export const ClaimantDTO = agentcards$0.ClaimantDTO;
 export type ClaimantDTO = agentcards$0.ClaimantDTO;
 
 /**
+ * CollisionPreviewDTO is the projected renumber / rename churn a clone
+ * or attach would produce when local rows collide with imported ones.
+ * Mirrors sync.CollisionPreview; the JS side iterates these to render
+ * the step-2 banner.
+ */
+export class CollisionPreviewDTO {
+    "renumbered"?: RenumberEntryDTO[];
+    "renamed"?: RenameEntryDTO[];
+
+    /** Creates a new CollisionPreviewDTO instance. */
+    constructor($$source: Partial<CollisionPreviewDTO> = {}) {
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new CollisionPreviewDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): CollisionPreviewDTO {
+        const $$createField0_0 = $$createType1;
+        const $$createField1_0 = $$createType3;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("renumbered" in $$parsedSource) {
+            $$parsedSource["renumbered"] = $$createField0_0($$parsedSource["renumbered"]);
+        }
+        if ("renamed" in $$parsedSource) {
+            $$parsedSource["renamed"] = $$createField1_0($$parsedSource["renamed"]);
+        }
+        return new CollisionPreviewDTO($$parsedSource as Partial<CollisionPreviewDTO>);
+    }
+}
+
+/**
  * CommentDTO is one issue comment. UUID is the immutable identity the
  * React layer addresses a delete with.
  * 
@@ -487,8 +520,8 @@ export class FeatureDetail {
      * Creates a new FeatureDetail instance from a string or object.
      */
     static createFrom($$source: any = {}): FeatureDetail {
-        const $$createField5_0 = $$createType1;
-        const $$createField6_0 = $$createType3;
+        const $$createField5_0 = $$createType5;
+        const $$createField6_0 = $$createType7;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("issues" in $$parsedSource) {
             $$parsedSource["issues"] = $$createField5_0($$parsedSource["issues"]);
@@ -679,7 +712,7 @@ export class HistoryPage {
      * Creates a new HistoryPage instance from a string or object.
      */
     static createFrom($$source: any = {}): HistoryPage {
-        const $$createField0_0 = $$createType5;
+        const $$createField0_0 = $$createType9;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("entries" in $$parsedSource) {
             $$parsedSource["entries"] = $$createField0_0($$parsedSource["entries"]);
@@ -749,15 +782,15 @@ export class IssueBriefDTO {
      * Creates a new IssueBriefDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): IssueBriefDTO {
-        const $$createField0_0 = $$createType6;
-        const $$createField1_0 = $$createType8;
-        const $$createField2_0 = $$createType9;
-        const $$createField3_0 = $$createType11;
-        const $$createField4_0 = $$createType13;
-        const $$createField5_0 = $$createType15;
-        const $$createField6_0 = $$createType17;
-        const $$createField9_0 = $$createType19;
-        const $$createField10_0 = $$createType20;
+        const $$createField0_0 = $$createType10;
+        const $$createField1_0 = $$createType12;
+        const $$createField2_0 = $$createType13;
+        const $$createField3_0 = $$createType15;
+        const $$createField4_0 = $$createType17;
+        const $$createField5_0 = $$createType19;
+        const $$createField6_0 = $$createType21;
+        const $$createField9_0 = $$createType23;
+        const $$createField10_0 = $$createType24;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("issue" in $$parsedSource) {
             $$parsedSource["issue"] = $$createField0_0($$parsedSource["issue"]);
@@ -862,12 +895,12 @@ export class IssueDetail {
      * Creates a new IssueDetail instance from a string or object.
      */
     static createFrom($$source: any = {}): IssueDetail {
-        const $$createField5_0 = $$createType20;
-        const $$createField6_0 = $$createType20;
-        const $$createField8_0 = $$createType15;
-        const $$createField9_0 = $$createType11;
-        const $$createField10_0 = $$createType22;
-        const $$createField11_0 = $$createType17;
+        const $$createField5_0 = $$createType24;
+        const $$createField6_0 = $$createType24;
+        const $$createField8_0 = $$createType19;
+        const $$createField9_0 = $$createType15;
+        const $$createField10_0 = $$createType26;
+        const $$createField11_0 = $$createType21;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField5_0($$parsedSource["tags"]);
@@ -951,8 +984,8 @@ export class IssueMetaDTO {
      * Creates a new IssueMetaDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): IssueMetaDTO {
-        const $$createField5_0 = $$createType20;
-        const $$createField6_0 = $$createType20;
+        const $$createField5_0 = $$createType24;
+        const $$createField6_0 = $$createType24;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField5_0($$parsedSource["tags"]);
@@ -1037,7 +1070,7 @@ export class LinkedDocDTO {
      * Creates a new LinkedDocDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): LinkedDocDTO {
-        const $$createField4_0 = $$createType20;
+        const $$createField4_0 = $$createType24;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("linkedVia" in $$parsedSource) {
             $$parsedSource["linkedVia"] = $$createField4_0($$parsedSource["linkedVia"]);
@@ -1200,8 +1233,8 @@ export class PromptTemplateDTO {
      * Creates a new PromptTemplateDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): PromptTemplateDTO {
-        const $$createField7_0 = $$createType20;
-        const $$createField8_0 = $$createType20;
+        const $$createField7_0 = $$createType24;
+        const $$createField8_0 = $$createType24;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("allowedStates" in $$parsedSource) {
             $$parsedSource["allowedStates"] = $$createField7_0($$parsedSource["allowedStates"]);
@@ -1274,8 +1307,8 @@ export class RelationsDTO {
      * Creates a new RelationsDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): RelationsDTO {
-        const $$createField0_0 = $$createType24;
-        const $$createField1_0 = $$createType24;
+        const $$createField0_0 = $$createType28;
+        const $$createField1_0 = $$createType28;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("outgoing" in $$parsedSource) {
             $$parsedSource["outgoing"] = $$createField0_0($$parsedSource["outgoing"]);
@@ -1284,6 +1317,109 @@ export class RelationsDTO {
             $$parsedSource["incoming"] = $$createField1_0($$parsedSource["incoming"]);
         }
         return new RelationsDTO($$parsedSource as Partial<RelationsDTO>);
+    }
+}
+
+/**
+ * RenameEntryDTO is one projected slug/filename rename.
+ */
+export class RenameEntryDTO {
+    "kind": string;
+    "old": string;
+    "new": string;
+    "uuid": string;
+
+    /** Creates a new RenameEntryDTO instance. */
+    constructor($$source: Partial<RenameEntryDTO> = {}) {
+        if (!("kind" in $$source)) {
+            this["kind"] = "";
+        }
+        if (!("old" in $$source)) {
+            this["old"] = "";
+        }
+        if (!("new" in $$source)) {
+            this["new"] = "";
+        }
+        if (!("uuid" in $$source)) {
+            this["uuid"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new RenameEntryDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): RenameEntryDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new RenameEntryDTO($$parsedSource as Partial<RenameEntryDTO>);
+    }
+}
+
+/**
+ * RenumberEntryDTO is one projected issue renumber.
+ */
+export class RenumberEntryDTO {
+    "prefix": string;
+    "oldNumber": number;
+    "newNumber": number;
+    "uuid": string;
+
+    /** Creates a new RenumberEntryDTO instance. */
+    constructor($$source: Partial<RenumberEntryDTO> = {}) {
+        if (!("prefix" in $$source)) {
+            this["prefix"] = "";
+        }
+        if (!("oldNumber" in $$source)) {
+            this["oldNumber"] = 0;
+        }
+        if (!("newNumber" in $$source)) {
+            this["newNumber"] = 0;
+        }
+        if (!("uuid" in $$source)) {
+            this["uuid"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new RenumberEntryDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): RenumberEntryDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new RenumberEntryDTO($$parsedSource as Partial<RenumberEntryDTO>);
+    }
+}
+
+/**
+ * SetupSyncIn is the camelCase Wails-side input for SetupSync — the
+ * React tree builds it in SyncSetupModal. Mirrors the snake-case
+ * inputs.SyncSetupInput the HTTP layer accepts; the field set is the
+ * same. AllowRenumber gates the renumber-collision preview the engine
+ * produces on a clone / attach that would renumber local rows.
+ */
+export class SetupSyncIn {
+    "mode": string;
+    "remote"?: string;
+    "localPath"?: string;
+    "allowRenumber"?: boolean;
+
+    /** Creates a new SetupSyncIn instance. */
+    constructor($$source: Partial<SetupSyncIn> = {}) {
+        if (!("mode" in $$source)) {
+            this["mode"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new SetupSyncIn instance from a string or object.
+     */
+    static createFrom($$source: any = {}): SetupSyncIn {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new SetupSyncIn($$parsedSource as Partial<SetupSyncIn>);
     }
 }
 
@@ -1339,8 +1475,8 @@ export class SyncRegistryDTO {
      * Creates a new SyncRegistryDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): SyncRegistryDTO {
-        const $$createField0_0 = $$createType26;
-        const $$createField1_0 = $$createType28;
+        const $$createField0_0 = $$createType30;
+        const $$createField1_0 = $$createType32;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("syncRepos" in $$parsedSource) {
             $$parsedSource["syncRepos"] = $$createField0_0($$parsedSource["syncRepos"]);
@@ -1393,12 +1529,73 @@ export class SyncRepoDTO {
      * Creates a new SyncRepoDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): SyncRepoDTO {
-        const $$createField7_0 = $$createType30;
+        const $$createField7_0 = $$createType34;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("projects" in $$parsedSource) {
             $$parsedSource["projects"] = $$createField7_0($$parsedSource["projects"]);
         }
         return new SyncRepoDTO($$parsedSource as Partial<SyncRepoDTO>);
+    }
+}
+
+/**
+ * SyncSetupDTO is the camelCase Wails-side outcome of SetupSync. Two
+ * shapes share the struct:
+ * 
+ *   - Success: `previewCollisions` is nil and the per-mode result
+ *     fields (`commitSHA`, `pushed`, `attached` for init / `localPath`,
+ *     `remote` for clone / attach) reflect the engine's structured
+ *     return. The caller closes the modal and re-fetches the registry.
+ *   - Renumber-collision refusal: `previewCollisions` is populated
+ *     with the projected renumbers / renames, and the per-mode result
+ *     fields stay empty (the engine wrote nothing). The caller switches
+ *     to the modal's step-2 confirm and re-submits with
+ *     `allowRenumber: true`.
+ * 
+ * Using a single struct with a nil-vs-populated collision field (rather
+ * than an error returned from SetupSync) keeps the typed payload intact
+ * across the Wails boundary — Wails marshals errors as strings and
+ * drops the DTO when an error is non-nil, so the typed collision shape
+ * would round-trip as a plain string. The JS-side seam in api.ts maps
+ * a populated `previewCollisions` into the typed SyncSetupCollisionError
+ * the modal expects.
+ */
+export class SyncSetupDTO {
+    "mode": string;
+    "localPath"?: string;
+    "remote"?: string;
+
+    /**
+     * Init-only fields.
+     */
+    "commitSHA"?: string;
+    "pushed"?: boolean;
+    "attached"?: boolean;
+
+    /**
+     * PreviewCollisions is non-nil only on a renumber-collision refusal.
+     */
+    "previewCollisions"?: CollisionPreviewDTO | null;
+
+    /** Creates a new SyncSetupDTO instance. */
+    constructor($$source: Partial<SyncSetupDTO> = {}) {
+        if (!("mode" in $$source)) {
+            this["mode"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new SyncSetupDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): SyncSetupDTO {
+        const $$createField6_0 = $$createType36;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("previewCollisions" in $$parsedSource) {
+            $$parsedSource["previewCollisions"] = $$createField6_0($$parsedSource["previewCollisions"]);
+        }
+        return new SyncSetupDTO($$parsedSource as Partial<SyncSetupDTO>);
     }
 }
 
@@ -1439,34 +1636,40 @@ export class UnsyncedProjectDTO {
 }
 
 // Private type creation functions
-const $$createType0 = FeatureLinkedIssue.createFrom;
+const $$createType0 = RenumberEntryDTO.createFrom;
 const $$createType1 = $Create.Array($$createType0);
-const $$createType2 = FeatureComment.createFrom;
+const $$createType2 = RenameEntryDTO.createFrom;
 const $$createType3 = $Create.Array($$createType2);
-const $$createType4 = HistoryEntryDTO.createFrom;
+const $$createType4 = FeatureLinkedIssue.createFrom;
 const $$createType5 = $Create.Array($$createType4);
-const $$createType6 = IssueMetaDTO.createFrom;
-const $$createType7 = FeatureRefDTO.createFrom;
-const $$createType8 = $Create.Nullable($$createType7);
-const $$createType9 = RelationsDTO.createFrom;
-const $$createType10 = PRDTO.createFrom;
-const $$createType11 = $Create.Array($$createType10);
-const $$createType12 = LinkedDocDTO.createFrom;
-const $$createType13 = $Create.Array($$createType12);
-const $$createType14 = CommentDTO.createFrom;
+const $$createType6 = FeatureComment.createFrom;
+const $$createType7 = $Create.Array($$createType6);
+const $$createType8 = HistoryEntryDTO.createFrom;
+const $$createType9 = $Create.Array($$createType8);
+const $$createType10 = IssueMetaDTO.createFrom;
+const $$createType11 = FeatureRefDTO.createFrom;
+const $$createType12 = $Create.Nullable($$createType11);
+const $$createType13 = RelationsDTO.createFrom;
+const $$createType14 = PRDTO.createFrom;
 const $$createType15 = $Create.Array($$createType14);
-const $$createType16 = agentcards$0.ClaimantDTO.createFrom;
+const $$createType16 = LinkedDocDTO.createFrom;
 const $$createType17 = $Create.Array($$createType16);
-const $$createType18 = boardcards$0.WaitingState.createFrom;
-const $$createType19 = $Create.Nullable($$createType18);
-const $$createType20 = $Create.Array($Create.Any);
-const $$createType21 = DocLinkDTO.createFrom;
-const $$createType22 = $Create.Array($$createType21);
-const $$createType23 = RelationDTO.createFrom;
-const $$createType24 = $Create.Array($$createType23);
-const $$createType25 = SyncRepoDTO.createFrom;
+const $$createType18 = CommentDTO.createFrom;
+const $$createType19 = $Create.Array($$createType18);
+const $$createType20 = agentcards$0.ClaimantDTO.createFrom;
+const $$createType21 = $Create.Array($$createType20);
+const $$createType22 = boardcards$0.WaitingState.createFrom;
+const $$createType23 = $Create.Nullable($$createType22);
+const $$createType24 = $Create.Array($Create.Any);
+const $$createType25 = DocLinkDTO.createFrom;
 const $$createType26 = $Create.Array($$createType25);
-const $$createType27 = UnsyncedProjectDTO.createFrom;
+const $$createType27 = RelationDTO.createFrom;
 const $$createType28 = $Create.Array($$createType27);
-const $$createType29 = MemberProjectDTO.createFrom;
+const $$createType29 = SyncRepoDTO.createFrom;
 const $$createType30 = $Create.Array($$createType29);
+const $$createType31 = UnsyncedProjectDTO.createFrom;
+const $$createType32 = $Create.Array($$createType31);
+const $$createType33 = MemberProjectDTO.createFrom;
+const $$createType34 = $Create.Array($$createType33);
+const $$createType35 = CollisionPreviewDTO.createFrom;
+const $$createType36 = $Create.Nullable($$createType35);

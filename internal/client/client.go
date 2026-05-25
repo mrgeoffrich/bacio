@@ -216,6 +216,19 @@ type Client interface {
 	// the BACI-105 primitives (ListSyncRemotes + DiscoverMembership +
 	// ReadProjectConfig); the remote calls GET /sync/repos.
 	SyncRegistry(ctx context.Context) (*SyncRegistry, error)
+	// SetupSync (BACI-111) sets up sync for one project repo against an
+	// existing or new sync remote — the cross-transport entry point the
+	// desktop / web setup modal drives. Three modes mirror the HTTP
+	// surface: init (bootstrap a fresh sync repo), clone (clone an
+	// existing one), attach (re-attach to a registry entry already on
+	// this machine). On a renumber-collision refusal the returned
+	// *SyncSetupResult carries PreviewCollisions and the returned error
+	// is ErrSetupCollision; the caller re-runs with
+	// in.AllowRenumber=true to confirm. Local backend acquires the
+	// cross-process sync lock and dispatches into sync.Engine directly;
+	// remote backend POSTs /repos/{prefix}/sync/setup and decodes the
+	// 200 / 409 body.
+	SetupSync(ctx context.Context, repo *model.Repo, in inputs.SyncSetupInput) (*SyncSetupResult, error)
 
 	// ----- History -----
 	// ListHistory queries the audit log. When repo is non-nil, results

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 // ReleaseFunc releases an acquired sync lock. Idempotent — safe to
@@ -37,6 +38,11 @@ func AcquireSyncLock(dbPath string) (ReleaseFunc, error) {
 		return nil, fmt.Errorf("AcquireSyncLock: empty dbPath")
 	}
 	lockPath := dbPath + ".sync.lock"
+	// Ensure the parent directory exists — on a fresh machine (or a CI
+	// runner) ~/.bacio/ may not have been created yet.
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
+		return nil, fmt.Errorf("create sync lock dir %q: %w", filepath.Dir(lockPath), err)
+	}
 	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		return nil, fmt.Errorf("open sync lock %q: %w", lockPath, err)

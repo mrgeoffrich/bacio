@@ -212,6 +212,22 @@ export function SetSyncPreferences(backgroundEnabled: boolean): $CancellableProm
     });
 }
 
+/**
+ * SetupSync sets up sync for the project repo identified by prefix.
+ * Three modes — "init", "clone", "attach" — mirror the HTTP layer
+ * (POST /repos/{prefix}/sync/setup). On a renumber-collision refusal
+ * the returned DTO carries PreviewCollisions (non-nil) and the error
+ * is nil; the JS-side seam maps that into a typed
+ * SyncSetupCollisionError the modal branches on. Any other failure
+ * (validation / engine error / lock timeout) surfaces as a non-nil
+ * error and PreviewCollisions stays nil.
+ */
+export function SetupSync(prefix: string, $in: $models.SetupSyncIn): $CancellablePromise<$models.SyncSetupDTO> {
+    return $Call.ByID(3158355382, prefix, $in).then(($result: any) => {
+        return $$createType7($result);
+    });
+}
+
 // Private type creation functions
 const $$createType0 = $models.PromptTemplateDTO.createFrom;
 const $$createType1 = $models.BoardPreferencesDTO.createFrom;
@@ -220,3 +236,4 @@ const $$createType3 = $models.SyncPreferencesDTO.createFrom;
 const $$createType4 = $models.SyncRegistryDTO.createFrom;
 const $$createType5 = $Create.Array($$createType0);
 const $$createType6 = $Create.Array($Create.Any);
+const $$createType7 = $models.SyncSetupDTO.createFrom;
