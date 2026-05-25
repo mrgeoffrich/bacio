@@ -703,6 +703,12 @@ func migrate(db *sql.DB) error {
 	if err := backfillResearchTemplate(db); err != nil {
 		return fmt.Errorf("backfill research template: %w", err)
 	}
+	// BACI-164: backfill the `scope` template row for existing DBs.
+	// Same pattern as backfillResearchTemplate — INSERT OR IGNORE so a
+	// deliberate user delete is not resurrected on the next Open.
+	if err := backfillScopeTemplate(db); err != nil {
+		return fmt.Errorf("backfill scope template: %w", err)
+	}
 	return nil
 }
 
@@ -713,6 +719,34 @@ func migrate(db *sql.DB) error {
 // resurrected (the migration skips rows that never existed).
 func backfillResearchTemplate(db *sql.DB) error {
 	slug := model.BuiltinTemplateResearch
+	body := model.DefaultPromptBodyForBuiltinSlug(slug)
+	name := model.BuiltinTemplateLabel(slug)
+	if name == "" {
+		name = slug
+	}
+	states := model.DefaultPromptStatesForBuiltinSlug(slug)
+	encoded, err := encodeStates(states)
+	if err != nil {
+		return err
+	}
+	actionLabel := model.BuiltinTemplateActionLabel(slug)
+	if _, err := db.Exec(`
+		INSERT OR IGNORE INTO prompt_templates
+		  (slug, name, body, allowed_states_json, is_builtin, concurrency_limit, action_label, created_at, updated_at)
+		VALUES (?, ?, ?, ?, 1, 0, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+		slug, name, body, encoded, actionLabel); err != nil {
+		return err
+	}
+	return nil
+}
+
+// backfillScopeTemplate inserts the `scope` built-in template row for
+// existing DBs where the first-time seed step already ran before
+// BACI-164 added the template. Mirrors backfillResearchTemplate:
+// INSERT OR IGNORE is idempotent, and a deliberate user delete is not
+// resurrected (the migration skips rows that never existed).
+func backfillScopeTemplate(db *sql.DB) error {
+	slug := model.BuiltinTemplateScope
 	body := model.DefaultPromptBodyForBuiltinSlug(slug)
 	name := model.BuiltinTemplateLabel(slug)
 	if name == "" {

@@ -44,6 +44,7 @@ func TestRenderAgentFile(t *testing.T) {
 // `opus`; review / ship declare `sonnet`.
 func TestRenderAgentFileModelPerMode(t *testing.T) {
 	cases := map[string]string{
+		BuiltinTemplateScope:     "sonnet",
 		BuiltinTemplatePlan:      "opus",
 		BuiltinTemplatePlanLarge: "opus",
 		BuiltinTemplateDesign:    "opus",
@@ -158,7 +159,7 @@ func TestRenderAgentFile_FrontmatterDuplicateModel(t *testing.T) {
 // it would render literally in the worker's own system prompt.
 func TestRenderAgentFileBuiltinsHaveNoPlaceholder(t *testing.T) {
 	for _, slug := range []string{
-		BuiltinTemplatePlan, BuiltinTemplateDesign, BuiltinTemplateImplement,
+		BuiltinTemplateScope, BuiltinTemplatePlan, BuiltinTemplateDesign, BuiltinTemplateImplement,
 		BuiltinTemplateReview, BuiltinTemplateShip, BuiltinTemplateFixReview,
 	} {
 		body := DefaultPromptBodyForBuiltinSlug(slug)
