@@ -92,7 +92,13 @@ func (r ArchiveSweepResult) Total() int64 {
 // leader-driven controller.ArchiveSweepIfLeader tick) also emit ONE
 // `archive.sweep` summary row per non-empty sweep — distinct from the
 // "no per-row" guarantee.
-func (s *Store) ArchiveSweep() (ArchiveSweepResult, error) {
+//
+// When dryRun is true the three UPDATEs still run inside the tx (so
+// the cascade passes see pass 1's effects and the returned counts
+// reflect the same row set a real sweep would archive), but the tx
+// is rolled back instead of committed — no row is actually modified
+// and no audit row is written. The returned counts are the preview.
+func (s *Store) ArchiveSweep(dryRun bool) (ArchiveSweepResult, error) {
 	autoEnabled, err := s.GetArchiveAutoEnabled()
 	if err != nil {
 		return ArchiveSweepResult{}, fmt.Errorf("read archive.auto_enabled: %w", err)
@@ -187,6 +193,11 @@ func (s *Store) ArchiveSweep() (ArchiveSweepResult, error) {
 	}
 	res.DocumentsArchived, _ = r.RowsAffected()
 
+	if dryRun {
+		// Leave the deferred Rollback to fire — counts already capture
+		// what a real sweep would have archived, but nothing persists.
+		return res, nil
+	}
 	if err := tx.Commit(); err != nil {
 		return ArchiveSweepResult{}, err
 	}

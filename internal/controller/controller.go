@@ -182,7 +182,7 @@ func ArchiveSweepIfLeader(s *store.Store, el *leader.Elector, log *slog.Logger) 
 	if s == nil || el == nil || !el.CurrentState().AmLeader {
 		return
 	}
-	res, err := s.ArchiveSweep()
+	res, err := s.ArchiveSweep(false)
 	if err != nil {
 		loggerOrDefault(log).Warn("bacio: archive sweep failed", "err", err)
 		return

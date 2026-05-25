@@ -1095,7 +1095,7 @@ func TestImport_RoundTrip_SweepArchivedSurvivesNextImport(t *testing.T) {
 
 	// Run the sweep on A — this is the writer that pre-fix forgot to
 	// bump updated_at. Post-fix the schema trigger bumps it for us.
-	res, err := a.ArchiveSweep()
+	res, err := a.ArchiveSweep(false)
 	if err != nil {
 		t.Fatalf("sweep on A: %v", err)
 	}

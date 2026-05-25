@@ -171,6 +171,55 @@ func TestArchiveSweepHTTP(t *testing.T) {
 	}
 }
 
+// TestArchiveSweepHTTPDryRun pins the dry-run preview contract on the
+// HTTP surface: the response reports the counts a real sweep would
+// archive, but no row is actually modified, so a follow-up wet sweep
+// archives the same set.
+func TestArchiveSweepHTTPDryRun(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	feat := seedFeature(t, s, repo, "f", "F")
+	iss, err := s.CreateIssue(repo.ID, &feat.ID, "i", "", model.StateDone, nil)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := s.SetIssueArchived(iss.ID, true); err != nil {
+		t.Fatalf("archive child: %v", err)
+	}
+
+	resp, body := apiPost(t, ts.URL+"/archive/sweep?dry_run=1", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("dry-run sweep: status %d, body %s", resp.StatusCode, body)
+	}
+	type sweepResp struct {
+		IssuesArchived    int64 `json:"issues_archived"`
+		FeaturesArchived  int64 `json:"features_archived"`
+		DocumentsArchived int64 `json:"documents_archived"`
+	}
+	var preview sweepResp
+	mustJSON(t, body, &preview)
+	if preview.FeaturesArchived != 1 {
+		t.Fatalf("dry-run features_archived = %d, want 1 (must preview the cascade, not return zero)", preview.FeaturesArchived)
+	}
+
+	// Feature must still be live — dry-run promised not to write.
+	gotFeat, _ := s.GetFeatureByID(feat.ID)
+	if gotFeat.ArchivedAt != nil {
+		t.Fatal("dry-run sweep must NOT actually archive the feature")
+	}
+
+	// Wet sweep over the same state archives the same row.
+	resp, body = apiPost(t, ts.URL+"/archive/sweep", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("wet sweep: status %d, body %s", resp.StatusCode, body)
+	}
+	var wet sweepResp
+	mustJSON(t, body, &wet)
+	if wet != preview {
+		t.Fatalf("wet sweep %+v != dry-run preview %+v", wet, preview)
+	}
+}
+
 func TestDisplayPreferencesRoundtrip(t *testing.T) {
 	ts, _ := newTestAPI(t, api.Options{})
 

@@ -212,19 +212,17 @@ func (d deps) runDocumentArchive(w http.ResponseWriter, r *http.Request, archive
 // ------------ ad-hoc sweep trigger ------------
 
 func (d deps) handleArchiveSweep(w http.ResponseWriter, r *http.Request) {
-	if isDryRun(r) {
-		// Dry-run can't faithfully project sweep results without running
-		// the SQL passes (which is what dry-run is trying to avoid), so
-		// return a zeroed result with the dry-run marker. The CLI's
-		// `--dry-run` semantics already document zero values on
-		// server-time fields, so this is consistent.
-		writeDryRun(w, http.StatusOK, &store.ArchiveSweepResult{})
-		return
-	}
-	res, err := d.store.ArchiveSweep()
+	dryRun := isDryRun(r)
+	res, err := d.store.ArchiveSweep(dryRun)
 	if err != nil {
 		status, code := statusForError(err)
 		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if dryRun {
+		// Counts reflect what a real sweep would have archived; the tx
+		// was rolled back so no rows changed and no audit row fires.
+		writeDryRun(w, http.StatusOK, &res)
 		return
 	}
 	if res.Total() > 0 {
