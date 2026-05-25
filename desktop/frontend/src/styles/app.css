@@ -100,6 +100,23 @@ body { margin: 0; }
   letter-spacing: .06em; padding: 3px 8px; border-radius: 4px; text-transform: uppercase;
 }
 .mk-col-count { font-family: var(--font-mono); font-size: 12px; color: var(--fg-3); }
+/* BACI-191: per-column compact-cards toggle. Sits between the count
+   and the collapse chevron (reading order: pill → count → compact →
+   collapse). Same mute palette as `.mk-col-collapse-btn`; `is-active`
+   lights the icon when the column is already compact so the state reads
+   at a glance. margin-left: auto is on the collapse button so the two
+   buttons cluster at the right edge of the header together. */
+.mk-col-compact-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px;
+  background: transparent; border: 0; padding: 0;
+  border-radius: 4px; color: var(--fg-3); cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+.mk-col-compact-btn:hover { background: var(--bg-4); color: var(--fg-1); }
+.mk-col-compact-btn.is-active { color: var(--fg-1); }
+.mk-col-compact-btn .mk-icon { width: 14px; height: 14px; }
 /* BACI-188: per-column collapse chevron rendered on populated headers.
    margin-left: auto pushes it to the right edge of the row so the
    pill + count keep their natural left alignment. Same mute palette as
@@ -235,6 +252,14 @@ body { margin: 0; }
   border-style: dashed;
 }
 .mk-card.is-archived:hover { opacity: 0.85; }
+/* BACI-191: compact mode tightens a card's padding and gap so more
+   cards fit in the viewport. The tag row, meta line, and eval affordance
+   are hidden in JSX; this block covers the structural spacing. title
+   font-size shrinks one step (14px → 13px) to match the denser rhythm;
+   footer gap closes too so the remaining affordances sit flush. */
+.mk-card.is-compact { padding: 6px 8px; gap: 4px; }
+.mk-card.is-compact .mk-card-title { font-size: 13px; }
+.mk-card.is-compact .mk-card-foot { gap: 6px; }
 .mk-card-spinner {
   width: 13px; height: 13px; margin-left: auto; flex: none;
   border: 2px solid var(--border-2);

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Search, Plus, Columns3, GitBranch, Settings, X, Zap, Lock, MessageSquare, AlertTriangle, ChevronsLeft, ChevronsRight, SkipForward, Pin } from 'lucide-react';
+import { Search, Plus, Columns3, GitBranch, Settings, X, Zap, Lock, MessageSquare, AlertTriangle, ChevronsLeft, ChevronsRight, SkipForward, Pin, Rows3 } from 'lucide-react';
 
 // ClaudeMark is a brand glyph — no icon library carries Claude's logo, so it
 // stays a hand-rolled SVG. It ignores any props passed by <Icon>.
@@ -40,6 +40,9 @@ const ICONS = {
   // CSS-only clip-path triangle, no glyph).
   forward: SkipForward,
   pin: Pin,
+  // BACI-191: per-column compact-cards toggle. Rows3 conveys the
+  // "densify rows" metaphor, distinct from the collapse chevrons.
+  'rows-3': Rows3,
   claude: ClaudeMark,
 };
 

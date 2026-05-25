@@ -70,7 +70,7 @@ func TestSubagentTypeForTemplate(t *testing.T) {
 	// Claude Code agent name ([a-z0-9-] only).
 	valid := regexp.MustCompile(`^[a-z0-9-]+$`)
 	for _, slug := range []string{
-		BuiltinTemplatePlan, BuiltinTemplateDesign, BuiltinTemplateImplement,
+		BuiltinTemplateResearch, BuiltinTemplatePlan, BuiltinTemplateDesign, BuiltinTemplateImplement,
 		BuiltinTemplateReview, BuiltinTemplateShip, BuiltinTemplateFixReview,
 	} {
 		if name := SubagentTypeForTemplate(slug); !valid.MatchString(name) {
@@ -157,6 +157,7 @@ func TestRenderPromptTemplate(t *testing.T) {
 // override; non-built-in slugs fall back to the derivation rule.
 func TestBuiltinTemplateActionLabel(t *testing.T) {
 	cases := map[string]string{
+		BuiltinTemplateResearch:  "Research",
 		BuiltinTemplatePlan:      "Plan",
 		BuiltinTemplateDesign:    "Design",
 		BuiltinTemplateImplement: "Implement",
