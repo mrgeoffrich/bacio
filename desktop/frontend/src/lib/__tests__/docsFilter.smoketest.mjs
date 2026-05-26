@@ -86,7 +86,6 @@ const defaultQuery = {
   type: '',
   links: 'all',
   status: 'active',
-  hideTranscripts: false,
   sort: 'updated',
 };
 
@@ -155,7 +154,7 @@ test('filterDocs search hits filename, snippet, type, and link targets', () => {
   assert.equal(rd.visible[0].filename, 'something.md');
 });
 
-test('filterDocs hideTranscripts folds transcripts out of visible but keeps counts honest', () => {
+test('filterDocs default query keeps transcripts in the main list — the rail Type facet is the only transcript filter (BACI-219)', () => {
   const docs = [
     makeDoc({ i: 0, type: 'plan' }),
     makeDoc({
@@ -169,14 +168,14 @@ test('filterDocs hideTranscripts folds transcripts out of visible but keeps coun
       filename: 'bacio-transcript-Y-agent-def.jsonl',
     }),
   ];
-  const r = filterDocs(docs, { ...defaultQuery, hideTranscripts: true }, false);
-  assert.equal(r.visible.length, 1);
-  assert.equal(r.visible[0].type, 'plan');
-  assert.equal(r.transcripts.length, 2);
+  const r = filterDocs(docs, defaultQuery, false);
+  assert.equal(r.visible.length, 3);
+  // The rail's transcript count still reports the absolute bucket
+  // size so the Type chip stays honest.
   assert.equal(r.counts.transcript, 2);
 });
 
-test('filterDocs hideTranscripts=false keeps transcripts in the main list', () => {
+test('filterDocs type=plan narrows out the transcripts via the rail tablist', () => {
   const docs = [
     makeDoc({ i: 0, type: 'plan' }),
     makeDoc({
@@ -185,9 +184,9 @@ test('filterDocs hideTranscripts=false keeps transcripts in the main list', () =
       filename: 'bacio-transcript-X-agent-abc.jsonl',
     }),
   ];
-  const r = filterDocs(docs, defaultQuery, false);
-  assert.equal(r.visible.length, 2);
-  assert.equal(r.transcripts.length, 0);
+  const r = filterDocs(docs, { ...defaultQuery, type: 'plan' }, false);
+  assert.equal(r.visible.length, 1);
+  assert.equal(r.visible[0].type, 'plan');
 });
 
 // ---- sortDocs ----

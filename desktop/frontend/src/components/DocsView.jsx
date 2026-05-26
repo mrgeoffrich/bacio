@@ -7,9 +7,9 @@ import DocsList from './DocsList.jsx';
 import DocsViewer from './DocsViewer.jsx';
 import { filterDocs, countFacets } from '../lib/docsFilter';
 import {
-  readHideTranscripts, persistHideTranscripts,
   readSort, persistSort,
-  DEFAULT_HIDE_TRANSCRIPTS, DEFAULT_SORT,
+  readSidebarCollapsed, persistSidebarCollapsed,
+  DEFAULT_SORT,
 } from './DocsPersistence';
 import { documentPath } from '../lib/routes';
 
@@ -24,12 +24,19 @@ import { documentPath } from '../lib/routes';
 //
 // All existing surfaces (BACI-56 SVG, BACI-125 transcript) keep
 // working unchanged — DocsViewer lifts that block verbatim. The
-// per-repo `hideTranscripts` and `sort` preferences round-trip
-// through DocsPersistence so a reload preserves the user's setup.
+// per-repo `sort` preference and the global `sidebarCollapsed`
+// preference round-trip through DocsPersistence so a reload
+// preserves the user's setup.
 //
 // BACI-203: the selected filename is mirrored to/from the URL via
 // useParams + navigate. The decode pairs with documentPath's encode
 // so a filename with dots / unusual characters survives the round-trip.
+//
+// BACI-219: the toolbar's Hide-transcripts checkbox is gone (the
+// rail's Type tablist is the single transcript-filtering control),
+// and the left rail is collapsible — when collapsed, DocsList
+// renders a PanelLeftOpen affordance at the start of its toolbar to
+// re-open it, and the list pane flexes into the freed space.
 export default function DocsView({ activeBoard, onOpenIssue }) {
   const navigate = useNavigate();
   const { slug: slugParam } = useParams();
@@ -45,16 +52,26 @@ export default function DocsView({ activeBoard, onOpenIssue }) {
   // (e.g. after an archive toggle so the row's badge updates).
   const [reloadTick, setReloadTick] = useState(0);
 
-  // Query bag — Type/Links/Status facets, search, sort, hide-transcripts.
-  // Mirrors the DocsQuery shape in lib/docsFilter.ts.
+  // Query bag — Type/Links/Status facets, search, sort. Mirrors the
+  // DocsQuery shape in lib/docsFilter.ts.
   const [query, setQuery] = useState(() => ({
     search: '',
     type: '',
     links: 'all',
     status: 'active',
-    hideTranscripts: DEFAULT_HIDE_TRANSCRIPTS,
     sort: DEFAULT_SORT,
   }));
+
+  // BACI-219: sidebar collapsed/expanded preference is global (not
+  // per-repo) — matches the BACI-186 ActivityTray precedent the
+  // ticket explicitly cited. Seeded by a lazy useState initialiser so
+  // the first paint already reflects the user's saved preference;
+  // writes go through setSidebarCollapsedPersisted below.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
+  const setSidebarCollapsedPersisted = useCallback((v) => {
+    setSidebarCollapsed(v);
+    persistSidebarCollapsed(v);
+  }, []);
 
   const repoSelected = !!activeBoard;
   const dirty = content !== savedContent;
@@ -64,7 +81,6 @@ export default function DocsView({ activeBoard, onOpenIssue }) {
     if (!repoSelected) return;
     setQuery((q) => ({
       ...q,
-      hideTranscripts: readHideTranscripts(activeBoard),
       sort: readSort(activeBoard),
     }));
   }, [activeBoard, repoSelected]);
@@ -166,7 +182,6 @@ export default function DocsView({ activeBoard, onOpenIssue }) {
   const updateQuery = useCallback((patch) => {
     setQuery((q) => {
       const next = { ...q, ...patch };
-      if ('hideTranscripts' in patch) persistHideTranscripts(activeBoard, next.hideTranscripts);
       if ('sort' in patch) persistSort(activeBoard, next.sort);
       return next;
     });
@@ -185,8 +200,8 @@ export default function DocsView({ activeBoard, onOpenIssue }) {
   );
 
   // Run the rail + toolbar query through the pure filter helper to
-  // derive the visible list + transcript fold + per-bucket counts.
-  const { visible, transcripts, counts } = useMemo(
+  // derive the visible list + per-bucket counts.
+  const { visible, counts } = useMemo(
     () => filterDocs(docs, query, showArchived),
     [docs, query, showArchived],
   );
@@ -217,25 +232,29 @@ export default function DocsView({ activeBoard, onOpenIssue }) {
     );
   }
 
-  // Silence the unused counts var (only `visible` + `transcripts` are
-  // forwarded to the list; counts powers the rail via railCounts).
+  // Silence the unused counts var (only `visible` is forwarded to the
+  // list; counts powers the rail via railCounts).
   void counts;
 
   return (
     <div className="mk-docs">
-      <DocsFacetRail
-        counts={railCounts}
-        query={query}
-        onQueryChange={updateQuery}
-      />
+      {!sidebarCollapsed && (
+        <DocsFacetRail
+          counts={railCounts}
+          query={query}
+          onQueryChange={updateQuery}
+          onCollapse={() => setSidebarCollapsedPersisted(true)}
+        />
+      )}
       <DocsList
         visible={visible}
-        transcripts={transcripts}
         hasDocs={docs.length > 0}
         query={query}
         onQueryChange={updateQuery}
         selected={selected}
         onSelect={onSelectDoc}
+        sidebarCollapsed={sidebarCollapsed}
+        onExpandSidebar={() => setSidebarCollapsedPersisted(false)}
       />
       <div className="mk-docs-main">
         <DocsViewer

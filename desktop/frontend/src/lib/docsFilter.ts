@@ -6,7 +6,10 @@
 // Shapes are deliberately TS-loose — the only inputs are the
 // DocSummary rows from `api.listDocs` (Wails or HTTP), plus a small
 // query bag the rail + toolbar drive. Output is the lean
-// `{visible, transcripts, counts}` triple the list needs to render.
+// `{visible, counts}` pair the list needs to render. The Type facet
+// in the rail's tablist is the single transcript-filtering control
+// (BACI-219 retired the toolbar's Hide-transcripts checkbox so two
+// ways to hide the same bucket collapsed back to one).
 
 // Doc is the structural shape this module reads. Mirrors DocSummary
 // from api.ts / api.http.ts but only the fields the filter touches —
@@ -38,7 +41,6 @@ export interface DocsQuery {
   type: string; // '' = all types
   links: LinksFacet;
   status: StatusFacet;
-  hideTranscripts: boolean;
   sort: SortKey;
 }
 
@@ -59,7 +61,6 @@ export interface DocsCounts {
 
 export interface FilterResult {
   visible: Doc[];
-  transcripts: Doc[];
   counts: DocsCounts;
 }
 
@@ -183,14 +184,13 @@ export function countFacets(docs: Doc[]): DocsCounts {
 }
 
 // filterDocs runs the rail + toolbar query against the full doc set
-// and returns the lean visible/transcripts/counts triple the list
-// renders. showArchived is the global display.show_archived setting;
-// the status facet's `all` mode defers to it.
+// and returns the lean visible/counts pair the list renders.
+// showArchived is the global display.show_archived setting; the
+// status facet's `all` mode defers to it.
 //
-// The transcript fold splits transcripts out so the list can render
-// them as a collapsed group when `hideTranscripts` is on — even when
-// they pass the search/facet filter — because they're audit material,
-// not browsing material. The rail's transcript count stays honest.
+// BACI-219 retired the transcript fold — the rail's Type tablist is
+// now the only transcript-filtering control. The rail's transcript
+// count (in `counts.transcript`) stays honest for the chip render.
 export function filterDocs(
   docs: Doc[],
   q: DocsQuery,
@@ -205,15 +205,6 @@ export function filterDocs(
     if (!matchesSearch(d, q.search)) continue;
     matched.push(d);
   }
-  const sorted = sortDocs(matched, q.sort);
-  const visible: Doc[] = [];
-  const transcripts: Doc[] = [];
-  for (const d of sorted) {
-    if (q.hideTranscripts && isTranscriptDoc(d)) {
-      transcripts.push(d);
-    } else {
-      visible.push(d);
-    }
-  }
-  return { visible, transcripts, counts };
+  const visible = sortDocs(matched, q.sort);
+  return { visible, counts };
 }

@@ -12,7 +12,7 @@
 // styling stays consistent across desktop screens.
 
 import React from 'react';
-import { Search, X } from 'lucide-react';
+import { Search, X, PanelLeftClose } from 'lucide-react';
 
 const LINK_OPTIONS = [
   { id: 'all',      label: 'All',          countKey: 'total' },
@@ -32,8 +32,9 @@ function typeLabel(t) {
 
 export default function DocsFacetRail({
   counts,
-  query,            // { search, type, links, status, hideTranscripts, sort }
+  query,            // { search, type, links, status, sort }
   onQueryChange,    // (partial) => void  (merged into query)
+  onCollapse,       // () => void  (BACI-219: collapse the rail)
 }) {
   const setQuery = (patch) => onQueryChange(patch);
 
@@ -44,6 +45,19 @@ export default function DocsFacetRail({
 
   return (
     <aside className="mk-docs-rail">
+      {onCollapse && (
+        <div className="mk-docs-rail-head">
+          <button
+            type="button"
+            className="mk-icbtn mk-docs-rail-collapse"
+            onClick={onCollapse}
+            title="Hide filter sidebar"
+            aria-label="Hide filter sidebar"
+          >
+            <PanelLeftClose size={14} strokeWidth={2} aria-hidden="true" />
+          </button>
+        </div>
+      )}
       <label className="mk-features-search">
         <Search className="mk-features-search-icon" strokeWidth={2} aria-hidden="true" />
         <input
