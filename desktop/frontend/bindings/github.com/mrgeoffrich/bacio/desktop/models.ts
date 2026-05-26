@@ -1766,6 +1766,42 @@ export class ShippedIssueDTO {
 }
 
 /**
+ * ShippedListDTO (BACI-221) wraps the popover's per-fetch rows with
+ * the total count under the same scope so the popover header can
+ * render "showing N of TOTAL" without a second round trip. Mirrors
+ * api.ShippedListResponse on the HTTP side; both transports decode to
+ * the same shape on the React seam.
+ */
+export class ShippedListDTO {
+    "rows": ShippedIssueDTO[];
+    "total": number;
+
+    /** Creates a new ShippedListDTO instance. */
+    constructor($$source: Partial<ShippedListDTO> = {}) {
+        if (!("rows" in $$source)) {
+            this["rows"] = [];
+        }
+        if (!("total" in $$source)) {
+            this["total"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ShippedListDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ShippedListDTO {
+        const $$createField0_0 = $$createType36;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("rows" in $$parsedSource) {
+            $$parsedSource["rows"] = $$createField0_0($$parsedSource["rows"]);
+        }
+        return new ShippedListDTO($$parsedSource as Partial<ShippedListDTO>);
+    }
+}
+
+/**
  * SyncPreferencesDTO is the BACI-89 background-sync toggle shaped for
  * the desktop Sync view. Mirrors DisplayPreferencesDTO — same single-
  * boolean shape.
@@ -1818,8 +1854,8 @@ export class SyncRegistryDTO {
      * Creates a new SyncRegistryDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): SyncRegistryDTO {
-        const $$createField0_0 = $$createType36;
-        const $$createField1_0 = $$createType38;
+        const $$createField0_0 = $$createType38;
+        const $$createField1_0 = $$createType40;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("syncRepos" in $$parsedSource) {
             $$parsedSource["syncRepos"] = $$createField0_0($$parsedSource["syncRepos"]);
@@ -1872,7 +1908,7 @@ export class SyncRepoDTO {
      * Creates a new SyncRepoDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): SyncRepoDTO {
-        const $$createField7_0 = $$createType40;
+        const $$createField7_0 = $$createType42;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("projects" in $$parsedSource) {
             $$parsedSource["projects"] = $$createField7_0($$parsedSource["projects"]);
@@ -1933,7 +1969,7 @@ export class SyncSetupDTO {
      * Creates a new SyncSetupDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): SyncSetupDTO {
-        const $$createField6_0 = $$createType42;
+        const $$createField6_0 = $$createType44;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("previewCollisions" in $$parsedSource) {
             $$parsedSource["previewCollisions"] = $$createField6_0($$parsedSource["previewCollisions"]);
@@ -2014,11 +2050,13 @@ const $$createType31 = DocLinkDTO.createFrom;
 const $$createType32 = $Create.Array($$createType31);
 const $$createType33 = RelationDTO.createFrom;
 const $$createType34 = $Create.Array($$createType33);
-const $$createType35 = SyncRepoDTO.createFrom;
+const $$createType35 = ShippedIssueDTO.createFrom;
 const $$createType36 = $Create.Array($$createType35);
-const $$createType37 = UnsyncedProjectDTO.createFrom;
+const $$createType37 = SyncRepoDTO.createFrom;
 const $$createType38 = $Create.Array($$createType37);
-const $$createType39 = MemberProjectDTO.createFrom;
+const $$createType39 = UnsyncedProjectDTO.createFrom;
 const $$createType40 = $Create.Array($$createType39);
-const $$createType41 = CollisionPreviewDTO.createFrom;
-const $$createType42 = $Create.Nullable($$createType41);
+const $$createType41 = MemberProjectDTO.createFrom;
+const $$createType42 = $Create.Array($$createType41);
+const $$createType43 = CollisionPreviewDTO.createFrom;
+const $$createType44 = $Create.Nullable($$createType43);

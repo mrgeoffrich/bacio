@@ -47,6 +47,7 @@ import {
   RenameEntryDTO,
   RepoLinkResultDTO,
   ShippedIssueDTO,
+  ShippedListDTO,
   LatestPlanDTO,
 } from '../bindings/github.com/mrgeoffrich/bacio/desktop';
 import { ClaimDTO } from '../bindings/github.com/mrgeoffrich/bacio/internal/agentcards';
@@ -59,7 +60,7 @@ import { ClaimDTO } from '../bindings/github.com/mrgeoffrich/bacio/internal/agen
 // shape without learning a binding directory.
 import { WaitingState, WaitingKind, BoardCardFollowOn } from '../bindings/github.com/mrgeoffrich/bacio/internal/boardcards';
 
-export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureLinkedDoc, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, ArchivePreferencesDTO, WaitingState, BoardCardFollowOn, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO, SyncSetupDTO, CollisionPreviewDTO, RenumberEntryDTO, RenameEntryDTO, RepoLinkResultDTO, ShippedIssueDTO, LatestPlanDTO };
+export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureLinkedDoc, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, ArchivePreferencesDTO, WaitingState, BoardCardFollowOn, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO, SyncSetupDTO, CollisionPreviewDTO, RenumberEntryDTO, RenameEntryDTO, RepoLinkResultDTO, ShippedIssueDTO, ShippedListDTO, LatestPlanDTO };
 // BACI-216: cross-transport alias. The web bundle's api.http.ts ships
 // the same name from its own TS-only shape so KanbanCard / IssueWorkspace
 // stay transport-agnostic.
@@ -534,18 +535,36 @@ export async function listHistory(
   }
 }
 
-// listShippedIssues (BACI-187) returns the topbar shipping-log popover
-// rows for one repo, newest-first. `sinceDays` clamps the window (0 =
-// the server's default ~30 days); `limit` caps the row count (0 = the
-// server's default 20, max 100). The HTTP twin in api.http.ts MUST
-// keep the same name + shape so callers stay transport-agnostic.
+// listShippedIssues (BACI-187, reshaped for BACI-221) returns the
+// topbar shipping-log popover rows for one repo (newest-first) wrapped
+// with the total count under the same scope so the popover header can
+// render "showing N of TOTAL". `sinceDays` clamps the window
+// (0 = "Forever" — no lower bound on terminal_at); `limit` caps the
+// row count (0 = the server's default 20, max 100). The HTTP twin in
+// api.http.ts MUST keep the same name + shape so callers stay
+// transport-agnostic.
 export async function listShippedIssues(
   repoPrefix: string,
   sinceDays: number,
   limit: number,
-): Promise<ShippedIssueDTO[]> {
+): Promise<ShippedListDTO> {
   try {
     return await BoardService.ListShipped(repoPrefix, sinceDays, limit);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// countShippedIssues (BACI-221) is the lean count-only sibling polled
+// on the topbar pill's 10s cadence so the "Shipped · N" label reflects
+// the active Today / Last Week / Forever scope even when the popover
+// is closed. `sinceDays` mirrors listShippedIssues — 0 means "Forever".
+export async function countShippedIssues(
+  repoPrefix: string,
+  sinceDays: number,
+): Promise<number> {
+  try {
+    return await BoardService.CountShipped(repoPrefix, sinceDays);
   } catch (err) {
     throw normalize(err);
   }

@@ -55,6 +55,7 @@ export {
     RepoLinkResultDTO,
     SetupSyncIn,
     ShippedIssueDTO,
+    ShippedListDTO,
     SyncPreferencesDTO,
     SyncRegistryDTO,
     SyncRepoDTO,

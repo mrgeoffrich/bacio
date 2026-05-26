@@ -276,6 +276,16 @@ export interface ShippedIssueDTO {
   prUrl?: string;
 }
 
+// ShippedListDTO (BACI-221) wraps the popover's per-fetch rows with
+// the total count under the same scope so the popover header can
+// render "showing N of TOTAL" without an extra round trip. Mirrors
+// desktop/boardservice.go:ShippedListDTO and the {rows, total} HTTP
+// response shape.
+export interface ShippedListDTO {
+  rows: ShippedIssueDTO[];
+  total: number;
+}
+
 export interface CommentDTO {
   uuid: string;
   author: string;
@@ -1846,25 +1856,45 @@ export async function listHistory(
   return { entries, page, pageSize, hasMore };
 }
 
-// listShippedIssues (BACI-187) is the HTTP twin of api.ts's
-// listShippedIssues. Keep the parameter list and return type in
-// lockstep with the desktop binding — the React-side ShippedPopover
-// imports the same name from `./api` in both modes.
+// listShippedIssues (BACI-187, reshaped for BACI-221) is the HTTP
+// twin of api.ts's listShippedIssues. Keep the parameter list and
+// return type in lockstep with the desktop binding — the React-side
+// ShippedPopover imports the same name from `./api` in both modes.
+// `sinceDays === 0` means "Forever" (no ?since= parameter), so the
+// server returns the unbounded count.
 export async function listShippedIssues(
   repoPrefix: string,
   sinceDays: number,
   limit: number,
-): Promise<ShippedIssueDTO[]> {
+): Promise<ShippedListDTO> {
   if (!repoPrefix || repoPrefix === 'all') {
     throw new Error('select a repository to view its shipping log');
   }
   const query: Record<string, string | number> = {};
   if (sinceDays > 0) query.since = `${sinceDays}d`;
   if (limit > 0) query.limit = limit;
-  const rows = await call<ShippedIssueDTO[]>(`/repos/${repoPrefix}/shipped`, { query });
-  // The server returns `[]` on an empty repo (never null), but be
-  // defensive in case the call helper ever surfaces null on 204.
-  return rows ?? [];
+  const body = await call<ShippedListDTO>(`/repos/${repoPrefix}/shipped`, { query });
+  // Defensive defaults: the server always returns the wrapper, but on
+  // an oddball 204 the call helper hands us undefined. Treat it as an
+  // empty list with zero total so the popover's "showing N of TOTAL"
+  // header always has something to render.
+  return body ?? { rows: [], total: 0 };
+}
+
+// countShippedIssues (BACI-221) — HTTP twin of api.ts's
+// countShippedIssues, polled on the same 10s cadence as the other live
+// read endpoints so the topbar pill always reflects the active scope.
+export async function countShippedIssues(
+  repoPrefix: string,
+  sinceDays: number,
+): Promise<number> {
+  if (!repoPrefix || repoPrefix === 'all') {
+    throw new Error('select a repository to view its shipping count');
+  }
+  const query: Record<string, string | number> = {};
+  if (sinceDays > 0) query.since = `${sinceDays}d`;
+  const body = await call<{ total: number }>(`/repos/${repoPrefix}/shipped/count`, { query });
+  return body?.total ?? 0;
 }
 
 interface ApiDocView {

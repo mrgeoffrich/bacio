@@ -266,6 +266,16 @@ type ShippedIssueDTO struct {
 	PRURL        string    `json:"prUrl,omitempty"`
 }
 
+// ShippedListDTO (BACI-221) wraps the popover's per-fetch rows with
+// the total count under the same scope so the popover header can
+// render "showing N of TOTAL" without a second round trip. Mirrors
+// api.ShippedListResponse on the HTTP side; both transports decode to
+// the same shape on the React seam.
+type ShippedListDTO struct {
+	Rows  []ShippedIssueDTO `json:"rows"`
+	Total int               `json:"total"`
+}
+
 // ClaimantDTO, ClaimDTO, SessionTodoDTO, DispatchDTO, and AgentCard
 // live in internal/agentcards so the bacio api can serve the same wire
 // format (BACI-50) and the per-issue claimant mapper has one home
@@ -473,19 +483,21 @@ func (b *BoardService) ListCards(repoPrefix string) ([]BoardCard, error) {
 	return boardcards.Assemble(ctx, b.client, repo, showArchived, hiddenSlugs)
 }
 
-// ListShipped (BACI-187) returns the recently-shipped issues for one
-// repo, newest-first. sinceDays clamps the window (0 = the popover's
-// default ~30 days); limit caps the row count (0 = the popover's
-// default 20, max 100). Sibling of ListCards in shape — one repo, one
-// trip, lean rows the popover renders without follow-up fetches.
-func (b *BoardService) ListShipped(repoPrefix string, sinceDays, limit int) ([]ShippedIssueDTO, error) {
+// ListShipped (BACI-187, reshaped for BACI-221) returns the
+// recently-shipped issues for one repo (newest-first) wrapped with the
+// total count under the same scope. sinceDays clamps the window
+// (0 = no lower bound — "Forever"); limit caps the row count
+// (0 = the popover's default 20, max 100). Sibling of ListCards in
+// shape — one repo, one trip, lean rows the popover renders without
+// follow-up fetches.
+func (b *BoardService) ListShipped(repoPrefix string, sinceDays, limit int) (ShippedListDTO, error) {
 	ctx := context.Background()
 	if repoPrefix == "" || repoPrefix == "all" {
-		return nil, fmt.Errorf("ListShipped: a repo is required (cross-repo popover is out of scope)")
+		return ShippedListDTO{}, fmt.Errorf("ListShipped: a repo is required (cross-repo popover is out of scope)")
 	}
 	repo, err := b.client.GetRepoByPrefix(ctx, repoPrefix)
 	if err != nil {
-		return nil, err
+		return ShippedListDTO{}, err
 	}
 	f := store.ShippedFilter{}
 	if limit > 0 {
@@ -500,9 +512,9 @@ func (b *BoardService) ListShipped(repoPrefix string, sinceDays, limit int) ([]S
 	}
 	issues, err := b.client.ListShippedIssues(ctx, repo, f)
 	if err != nil {
-		return nil, err
+		return ShippedListDTO{}, err
 	}
-	out := make([]ShippedIssueDTO, 0, len(issues))
+	rows := make([]ShippedIssueDTO, 0, len(issues))
 	for _, iss := range issues {
 		tags := iss.Tags
 		if tags == nil {
@@ -525,9 +537,40 @@ func (b *BoardService) ListShipped(repoPrefix string, sinceDays, limit int) ([]S
 		if perr == nil && len(prs) > 0 {
 			row.PRURL = prs[0].URL
 		}
-		out = append(out, row)
+		rows = append(rows, row)
 	}
-	return out, nil
+	// BACI-221: count uses the same WHERE as the list, ignoring the
+	// per-fetch limit so the popover header can render "showing N of
+	// TOTAL". Total includes archived / board-hidden rows the kanban
+	// filters out — see CountShippedIssues.
+	total, err := b.client.CountShippedIssues(ctx, repo, f)
+	if err != nil {
+		return ShippedListDTO{}, err
+	}
+	return ShippedListDTO{Rows: rows, Total: total}, nil
+}
+
+// CountShipped (BACI-221) returns the total number of shipped issues
+// for one repo under the active Today / Last Week / Forever scope.
+// Polled on the same 10s cadence as the other live read endpoints so
+// the topbar pill reflects the current scope even when the popover
+// isn't open. sinceDays==0 means "Forever" (no lower bound on
+// terminal_at).
+func (b *BoardService) CountShipped(repoPrefix string, sinceDays int) (int, error) {
+	ctx := context.Background()
+	if repoPrefix == "" || repoPrefix == "all" {
+		return 0, fmt.Errorf("CountShipped: a repo is required (cross-repo pill is out of scope)")
+	}
+	repo, err := b.client.GetRepoByPrefix(ctx, repoPrefix)
+	if err != nil {
+		return 0, err
+	}
+	f := store.ShippedFilter{}
+	if sinceDays > 0 {
+		cutoff := time.Now().Add(-time.Duration(sinceDays) * 24 * time.Hour)
+		f.Since = &cutoff
+	}
+	return b.client.CountShippedIssues(ctx, repo, f)
 }
 
 // GetIssue returns the full issue-drawer payload for one issue. repoPrefix

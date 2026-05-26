@@ -182,6 +182,8 @@ shapes into the desktop's `BoardCard` / `IssueDetail` / `DocSummary` /
 | `setBoardPreferences(hide)` | `PUT /settings/board-preferences` (BACI-47/D) | Audits as `board_pref.update`. |
 | `promptPlaceholders()` | static | Returns `['issue_id', 'issue_title', 'repo_prefix']`. |
 | `bacioVersion()` | `GET /version` (BACI-47/A) | Returns the same `internal/version.String()` used by `bacio --version` and the per-session `bacio_version` in the Agents panel — cross-checking the readout against a session's version reliably surfaces stale channels. |
+| `listShippedIssues(p, sinceDays, limit)` | `GET /repos/{p}/shipped?since=&limit=` (BACI-187, BACI-221) | Topbar Shipped popover's list fetch. `sinceDays=0` is the "Forever" sentinel — the bundle omits `?since=` so the server returns the unbounded list. Response shape is `{rows, total}` so the popover header can render "showing N of TOTAL" without a second round trip. |
+| `countShippedIssues(p, sinceDays)` | `GET /repos/{p}/shipped/count?since=` (BACI-221) | Lean count-only sibling polled on the standard 10s `POLL_INTERVAL_MS` cadence so the topbar "Shipped · N" pill reflects the active Today / Last Week / Forever scope even when the popover is closed. No `?limit=` parameter — count is total under the scope. |
 
 ---
 

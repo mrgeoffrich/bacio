@@ -30,7 +30,7 @@ function formatSyncTime(iso) {
   return d.toLocaleString();
 }
 
-export default function Topbar({ boards, activeBoard, onPickBoard, onAddRepository, onBeforeNavigate, onOpenPalette, onOpenSettings, onOpenSync, onOpenComposer, leaderState, agentCounts, shippedCount, onOpenIssue, flyingShipKey, shipFlashing, onShipFlightDone }) {
+export default function Topbar({ boards, activeBoard, onPickBoard, onAddRepository, onBeforeNavigate, onOpenPalette, onOpenSettings, onOpenSync, onOpenComposer, leaderState, agentCounts, shippedCount, shippedScope, onShippedScopeChange, onOpenIssue, flyingShipKey, shipFlashing, onShipFlightDone }) {
   // BACI-203: the active view is derived from the URL, not a prop.
   // useLocation re-renders on every navigation so the segmented
   // button's `is-active` class stays in lockstep. The breadcrumb
@@ -141,6 +141,8 @@ export default function Topbar({ boards, activeBoard, onPickBoard, onAddReposito
         <ShippedPopover
           activeBoard={activeBoard}
           shippedCount={shippedCount ?? 0}
+          scope={shippedScope}
+          onScopeChange={onShippedScopeChange}
           onOpenIssue={onOpenIssue}
           flyingShipKey={flyingShipKey}
           shipFlashing={shipFlashing}

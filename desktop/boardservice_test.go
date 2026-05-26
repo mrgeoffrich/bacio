@@ -127,6 +127,16 @@ func (f *fakeBoardClient) CountTranscriptDocsByIssue(context.Context, []int64) (
 	return map[int64]int{}, nil
 }
 
+// LatestPlanByIssue (BACI-216) — boardcards.Assemble reads the
+// per-issue latest-plan doc to surface the kanban card's plan icon.
+// The taken-flag tests don't exercise that affordance, so an empty
+// map matches the "no plans linked" production case. Drive-by fix
+// for a pre-existing nil-pointer panic in the embedded-interface
+// stub — see the BACI-221 PR description.
+func (f *fakeBoardClient) LatestPlanByIssue(context.Context, []int64) (map[int64]*model.LatestPlan, error) {
+	return map[int64]*model.LatestPlan{}, nil
+}
+
 // ListHiddenFeatureSlugs (BACI-177) — empty slice means "no features
 // are hidden", which matches the production default and lets every
 // taken-flag / waiting-state test pass cards through unchanged.
@@ -269,20 +279,37 @@ func TestListAgentsWaiting(t *testing.T) {
 // internal/client; this file no longer needs to exercise it.
 
 // fakeShippedClient is a narrow stub for ListShipped — it serves the
-// GetRepoByPrefix + ListShippedIssues + ListPRs trio the popover hits
-// and nothing else.
+// GetRepoByPrefix + ListShippedIssues + CountShippedIssues + ListPRs
+// quartet the popover hits and nothing else.
 type fakeShippedClient struct {
 	client.Client
 	repo    *model.Repo
 	shipped []*model.Issue
 	prs     map[string][]*model.PullRequest
+	// total overrides the count returned by CountShippedIssues so a
+	// test can exercise the "20 of 47" path without seeding 47 rows.
+	// Zero falls back to len(shipped).
+	total int
+	// lastFilter / lastCountFilter capture the filter the production
+	// code passed in so tests can assert "Forever" came through as a
+	// nil Since rather than a 30-day cutoff (the pre-BACI-221 default).
+	lastFilter      store.ShippedFilter
+	lastCountFilter store.ShippedFilter
 }
 
 func (f *fakeShippedClient) GetRepoByPrefix(context.Context, string) (*model.Repo, error) {
 	return f.repo, nil
 }
-func (f *fakeShippedClient) ListShippedIssues(_ context.Context, _ *model.Repo, _ store.ShippedFilter) ([]*model.Issue, error) {
+func (f *fakeShippedClient) ListShippedIssues(_ context.Context, _ *model.Repo, sf store.ShippedFilter) ([]*model.Issue, error) {
+	f.lastFilter = sf
 	return f.shipped, nil
+}
+func (f *fakeShippedClient) CountShippedIssues(_ context.Context, _ *model.Repo, sf store.ShippedFilter) (int, error) {
+	f.lastCountFilter = sf
+	if f.total > 0 {
+		return f.total, nil
+	}
+	return len(f.shipped), nil
 }
 func (f *fakeShippedClient) ListPRs(_ context.Context, _ *model.Repo, key string) ([]*model.PullRequest, error) {
 	if f.prs == nil {
@@ -310,12 +337,14 @@ func TestListShipped(t *testing.T) {
 			{URL: "https://example.com/pr/2-second"},
 		},
 	}
-	svc := NewBoardService(&fakeShippedClient{repo: repo, shipped: shipped, prs: prs})
+	fake := &fakeShippedClient{repo: repo, shipped: shipped, prs: prs}
+	svc := NewBoardService(fake)
 
-	rows, err := svc.ListShipped("TEST", 30, 20)
+	out, err := svc.ListShipped("TEST", 30, 20)
 	if err != nil {
 		t.Fatalf("ListShipped: %v", err)
 	}
+	rows := out.Rows
 	if len(rows) != 2 {
 		t.Fatalf("got %d rows, want 2", len(rows))
 	}
@@ -334,6 +363,9 @@ func TestListShipped(t *testing.T) {
 	if rows[0].Tags == nil {
 		t.Errorf("row 0 Tags must not be nil — popover iterates unconditionally")
 	}
+	if out.Total != 2 {
+		t.Errorf("Total = %d, want 2 (fake fell back to len(shipped))", out.Total)
+	}
 }
 
 // TestListShippedRejectsAllRepos — the popover is per-repo by design;
@@ -345,6 +377,77 @@ func TestListShippedRejectsAllRepos(t *testing.T) {
 	}
 	if _, err := svc.ListShipped("all", 0, 0); err == nil {
 		t.Error("ListShipped(\"all\") = nil, want error (per-repo only)")
+	}
+}
+
+// TestListShippedReturnsTotal (BACI-221) — the wrapper exposes the
+// total count under the scope independently of the per-fetch row count,
+// so the popover can render "showing N of TOTAL".
+func TestListShippedReturnsTotal(t *testing.T) {
+	repo := &model.Repo{ID: 1, Prefix: "TEST"}
+	stamp := time.Date(2026, 5, 20, 9, 0, 0, 0, time.UTC)
+	shipped := []*model.Issue{
+		{Key: "TEST-1", Title: "row", State: model.StateDone, TerminalAt: &stamp},
+	}
+	fake := &fakeShippedClient{repo: repo, shipped: shipped, total: 47}
+	svc := NewBoardService(fake)
+
+	out, err := svc.ListShipped("TEST", 7, 20)
+	if err != nil {
+		t.Fatalf("ListShipped: %v", err)
+	}
+	if len(out.Rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(out.Rows))
+	}
+	if out.Total != 47 {
+		t.Fatalf("Total = %d, want 47 (count independent of fetched rows)", out.Total)
+	}
+}
+
+// TestListShippedForeverPassesNilSince (BACI-221) — sinceDays==0 means
+// "Forever", which must reach the store as a nil Since pointer (no
+// cutoff) rather than a same-instant cutoff that would still exclude
+// older rows on a slow clock.
+func TestListShippedForeverPassesNilSince(t *testing.T) {
+	fake := &fakeShippedClient{repo: &model.Repo{Prefix: "TEST"}}
+	svc := NewBoardService(fake)
+	if _, err := svc.ListShipped("TEST", 0, 0); err != nil {
+		t.Fatalf("ListShipped: %v", err)
+	}
+	if fake.lastFilter.Since != nil {
+		t.Fatalf("Since = %v, want nil for sinceDays=0 (Forever)", fake.lastFilter.Since)
+	}
+	if fake.lastCountFilter.Since != nil {
+		t.Fatalf("count Since = %v, want nil for sinceDays=0", fake.lastCountFilter.Since)
+	}
+}
+
+// TestCountShipped (BACI-221) — happy path: forwards the right filter
+// to the client and returns the count verbatim.
+func TestCountShipped(t *testing.T) {
+	fake := &fakeShippedClient{repo: &model.Repo{Prefix: "TEST"}, total: 17}
+	svc := NewBoardService(fake)
+
+	total, err := svc.CountShipped("TEST", 7)
+	if err != nil {
+		t.Fatalf("CountShipped: %v", err)
+	}
+	if total != 17 {
+		t.Fatalf("total = %d, want 17", total)
+	}
+	if fake.lastCountFilter.Since == nil {
+		t.Fatalf("Since = nil, want non-nil for sinceDays=7")
+	}
+}
+
+// TestCountShippedRejectsAllRepos — same per-repo gate as ListShipped.
+func TestCountShippedRejectsAllRepos(t *testing.T) {
+	svc := NewBoardService(&fakeShippedClient{repo: &model.Repo{Prefix: "TEST"}})
+	if _, err := svc.CountShipped("", 0); err == nil {
+		t.Error("CountShipped(\"\") = nil, want error (per-repo only)")
+	}
+	if _, err := svc.CountShipped("all", 0); err == nil {
+		t.Error("CountShipped(\"all\") = nil, want error (per-repo only)")
 	}
 }
 

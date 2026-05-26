@@ -235,6 +235,17 @@ type Client interface {
 	// *model.Issue — pull request URLs and other DTO-side fields are
 	// not part of model.Issue and are dropped on the remote path).
 	ListShippedIssues(ctx context.Context, repo *model.Repo, f store.ShippedFilter) ([]*model.Issue, error)
+	// CountShippedIssues (BACI-221) is the sibling count read for the
+	// topbar Shipped pill. Returns the total number of shipped issues
+	// matching the same WHERE that ListShippedIssues applies, ignoring
+	// f.Limit (the count is total under the scope, not per-fetch). The
+	// pre-BACI-221 pill derived its count client-side from the polled
+	// cards array, which undercounted (filtered by show_archived +
+	// per-feature board-hide) and couldn't represent "Forever"; moving
+	// the count server-side fixes both. The local backend delegates to
+	// store.CountShippedIssues; the remote backend hits
+	// GET /repos/{prefix}/shipped/count.
+	CountShippedIssues(ctx context.Context, repo *model.Repo, f store.ShippedFilter) (int, error)
 
 	// ----- Comments / relations / PRs / tags -----
 	ListComments(ctx context.Context, repo *model.Repo, key string) ([]*model.Comment, error)

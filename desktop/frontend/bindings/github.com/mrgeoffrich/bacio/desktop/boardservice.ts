@@ -157,6 +157,18 @@ export function CancelWaitingDispatch(repoPrefix: string, issueKey: string): $Ca
 }
 
 /**
+ * CountShipped (BACI-221) returns the total number of shipped issues
+ * for one repo under the active Today / Last Week / Forever scope.
+ * Polled on the same 10s cadence as the other live read endpoints so
+ * the topbar pill reflects the current scope even when the popover
+ * isn't open. sinceDays==0 means "Forever" (no lower bound on
+ * terminal_at).
+ */
+export function CountShipped(repoPrefix: string, sinceDays: number): $CancellablePromise<number> {
+    return $Call.ByID(1177825803, repoPrefix, sinceDays);
+}
+
+/**
  * DeleteComment removes a comment from an issue and returns the
  * refreshed issue-drawer payload. The comment is addressed by its
  * immutable uuid. repoPrefix may be empty or "all" — the prefix is then
@@ -295,15 +307,17 @@ export function ListColumns(): $CancellablePromise<$models.BoardColumn[]> {
 }
 
 /**
- * ListShipped (BACI-187) returns the recently-shipped issues for one
- * repo, newest-first. sinceDays clamps the window (0 = the popover's
- * default ~30 days); limit caps the row count (0 = the popover's
- * default 20, max 100). Sibling of ListCards in shape — one repo, one
- * trip, lean rows the popover renders without follow-up fetches.
+ * ListShipped (BACI-187, reshaped for BACI-221) returns the
+ * recently-shipped issues for one repo (newest-first) wrapped with the
+ * total count under the same scope. sinceDays clamps the window
+ * (0 = no lower bound — "Forever"); limit caps the row count
+ * (0 = the popover's default 20, max 100). Sibling of ListCards in
+ * shape — one repo, one trip, lean rows the popover renders without
+ * follow-up fetches.
  */
-export function ListShipped(repoPrefix: string, sinceDays: number, limit: number): $CancellablePromise<$models.ShippedIssueDTO[]> {
+export function ListShipped(repoPrefix: string, sinceDays: number, limit: number): $CancellablePromise<$models.ShippedListDTO> {
     return $Call.ByID(3138957880, repoPrefix, sinceDays, limit).then(($result: any) => {
-        return $$createType17($result);
+        return $$createType16($result);
     });
 }
 
@@ -389,5 +403,4 @@ const $$createType12 = $Create.Array($$createType2);
 const $$createType13 = $Create.Array($$createType1);
 const $$createType14 = $models.BoardColumn.createFrom;
 const $$createType15 = $Create.Array($$createType14);
-const $$createType16 = $models.ShippedIssueDTO.createFrom;
-const $$createType17 = $Create.Array($$createType16);
+const $$createType16 = $models.ShippedListDTO.createFrom;

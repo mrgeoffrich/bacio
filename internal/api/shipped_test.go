@@ -19,8 +19,8 @@ func shipIssue(t *testing.T, s *store.Store, repo *model.Repo, title string) *mo
 	return iss
 }
 
-// TestHandleShippedEmpty — empty repo returns 200 [], never null.
-// The JS side relies on iterating the array unconditionally.
+// TestHandleShippedEmpty — empty repo returns 200 {rows: [], total: 0},
+// never null. The JS side relies on iterating rows unconditionally.
 func TestHandleShippedEmpty(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
@@ -29,13 +29,20 @@ func TestHandleShippedEmpty(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("status: %d body=%s", resp.StatusCode, raw)
 	}
-	if string(raw) != "[]\n" && string(raw) != "[]" {
-		t.Fatalf("empty shipped list must be `[]`, got %q", raw)
+	var body api.ShippedListResponse
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatalf("decode: %v body=%s", err, raw)
+	}
+	if body.Rows == nil {
+		t.Fatalf("empty shipped list must be `[]`, got null")
+	}
+	if len(body.Rows) != 0 || body.Total != 0 {
+		t.Fatalf("rows=%d total=%d, want 0/0", len(body.Rows), body.Total)
 	}
 }
 
 // TestHandleShippedDefaultLimit — 25 done rows, default limit=20
-// returns exactly 20.
+// returns exactly 20 rows but total=25.
 func TestHandleShippedDefaultLimit(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
@@ -47,18 +54,21 @@ func TestHandleShippedDefaultLimit(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("status: %d body=%s", resp.StatusCode, raw)
 	}
-	var rows []api.ShippedIssue
-	if err := json.Unmarshal(raw, &rows); err != nil {
+	var body api.ShippedListResponse
+	if err := json.Unmarshal(raw, &body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(rows) != 20 {
-		t.Fatalf("rows: %d, want default 20", len(rows))
+	if len(body.Rows) != 20 {
+		t.Fatalf("rows: %d, want default 20", len(body.Rows))
+	}
+	if body.Total != 25 {
+		t.Fatalf("total: %d, want 25 (count is independent of limit)", body.Total)
 	}
 }
 
-// TestHandleShippedSinceWindow — ?since=7d clamps to the last 7 days.
-// One row inside the window, one back-dated past it; only the recent
-// row returns.
+// TestHandleShippedSinceWindow — ?since=7d clamps the rows AND the
+// total to the last 7 days. One row inside the window, one back-dated
+// past it; only the recent row returns and total=1.
 func TestHandleShippedSinceWindow(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
@@ -73,18 +83,19 @@ func TestHandleShippedSinceWindow(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("status: %d body=%s", resp.StatusCode, raw)
 	}
-	var rows []api.ShippedIssue
-	_ = json.Unmarshal(raw, &rows)
-	if len(rows) != 1 {
-		t.Fatalf("rows: %d, want 1 (old row outside window)", len(rows))
+	var body api.ShippedListResponse
+	_ = json.Unmarshal(raw, &body)
+	if len(body.Rows) != 1 || body.Total != 1 {
+		t.Fatalf("rows=%d total=%d, want 1/1 (old row outside window)", len(body.Rows), body.Total)
 	}
-	if rows[0].Title != "young" {
-		t.Fatalf("row title = %q, want 'young'", rows[0].Title)
+	if body.Rows[0].Title != "young" {
+		t.Fatalf("row title = %q, want 'young'", body.Rows[0].Title)
 	}
 }
 
-// TestHandleShippedLimitBound — ?limit=200 clamps to the API max
-// (100); ?limit=-1 returns 400.
+// TestHandleShippedLimitBound — ?limit=200 clamps rows to the API max
+// (100); ?limit=-1 returns 400. Total is independent of limit so it
+// reports the full 150 either way.
 func TestHandleShippedLimitBound(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
@@ -96,10 +107,13 @@ func TestHandleShippedLimitBound(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("status: %d body=%s", resp.StatusCode, raw)
 	}
-	var rows []api.ShippedIssue
-	_ = json.Unmarshal(raw, &rows)
-	if len(rows) != 100 {
-		t.Fatalf("rows: %d, want clamp to API max 100", len(rows))
+	var body api.ShippedListResponse
+	_ = json.Unmarshal(raw, &body)
+	if len(body.Rows) != 100 {
+		t.Fatalf("rows: %d, want clamp to API max 100", len(body.Rows))
+	}
+	if body.Total != 150 {
+		t.Fatalf("total: %d, want 150 (count must not be clamped by limit)", body.Total)
 	}
 
 	resp, raw = apiGet(t, ts.URL+"/repos/"+repo.Prefix+"/shipped?limit=-1")
@@ -126,24 +140,28 @@ func TestHandleShippedPRChip(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("status: %d body=%s", resp.StatusCode, raw)
 	}
-	var rows []api.ShippedIssue
-	_ = json.Unmarshal(raw, &rows)
-	if len(rows) != 1 {
-		t.Fatalf("rows: %d, want 1", len(rows))
+	var body api.ShippedListResponse
+	_ = json.Unmarshal(raw, &body)
+	if len(body.Rows) != 1 {
+		t.Fatalf("rows: %d, want 1", len(body.Rows))
 	}
-	if rows[0].PRURL != "https://example.com/pr/1" {
-		t.Fatalf("PR chip = %q, want first PR URL", rows[0].PRURL)
+	if body.Rows[0].PRURL != "https://example.com/pr/1" {
+		t.Fatalf("PR chip = %q, want first PR URL", body.Rows[0].PRURL)
 	}
 }
 
 // TestHandleShippedNonExistentRepo — /repos/ZZZZ/shipped returns 404
-// like every other per-repo route.
+// like every other per-repo route. The count sibling does too.
 func TestHandleShippedNonExistentRepo(t *testing.T) {
 	ts, _ := newTestAPI(t, api.Options{})
 
 	resp, _ := apiGet(t, ts.URL+"/repos/ZZZZ/shipped")
 	if resp.StatusCode != 404 {
 		t.Fatalf("status: %d, want 404 on unknown repo", resp.StatusCode)
+	}
+	resp, _ = apiGet(t, ts.URL+"/repos/ZZZZ/shipped/count")
+	if resp.StatusCode != 404 {
+		t.Fatalf("count status: %d, want 404 on unknown repo", resp.StatusCode)
 	}
 }
 
@@ -166,15 +184,92 @@ func TestHandleShippedNewestFirst(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("status: %d body=%s", resp.StatusCode, raw)
 	}
-	var rows []api.ShippedIssue
-	_ = json.Unmarshal(raw, &rows)
-	if len(rows) != 3 {
-		t.Fatalf("rows: %d, want 3", len(rows))
+	var body api.ShippedListResponse
+	_ = json.Unmarshal(raw, &body)
+	if len(body.Rows) != 3 || body.Total != 3 {
+		t.Fatalf("rows=%d total=%d, want 3/3", len(body.Rows), body.Total)
 	}
 	want := []string{"third", "second", "first"}
 	for i, w := range want {
-		if rows[i].Title != w {
-			t.Fatalf("rows[%d].Title = %q, want %q (newest-first)", i, rows[i].Title, w)
+		if body.Rows[i].Title != w {
+			t.Fatalf("rows[%d].Title = %q, want %q (newest-first)", i, body.Rows[i].Title, w)
 		}
+	}
+}
+
+// TestHandleShippedCountEmpty (BACI-221) — empty repo returns total=0
+// without erroring; the count endpoint never returns null.
+func TestHandleShippedCountEmpty(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+
+	resp, raw := apiGet(t, ts.URL+"/repos/"+repo.Prefix+"/shipped/count")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d body=%s", resp.StatusCode, raw)
+	}
+	var body api.ShippedCountResponse
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatalf("decode: %v body=%s", err, raw)
+	}
+	if body.Total != 0 {
+		t.Fatalf("total = %d, want 0 on empty repo", body.Total)
+	}
+}
+
+// TestHandleShippedCountForever (BACI-221) — count without a ?since=
+// scope returns every shipped row, archived rows included. The pre-
+// BACI-221 cards-derived count couldn't represent "Forever"; the
+// server-side count must.
+func TestHandleShippedCountForever(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	for i := 0; i < 12; i++ {
+		shipIssue(t, s, repo, "iss")
+	}
+
+	resp, raw := apiGet(t, ts.URL+"/repos/"+repo.Prefix+"/shipped/count")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d body=%s", resp.StatusCode, raw)
+	}
+	var body api.ShippedCountResponse
+	_ = json.Unmarshal(raw, &body)
+	if body.Total != 12 {
+		t.Fatalf("total = %d, want 12 (forever scope must count all)", body.Total)
+	}
+}
+
+// TestHandleShippedCountWithSince (BACI-221) — ?since=24h cuts the
+// count to the matching window. Pins the "Today" pill behaviour.
+func TestHandleShippedCountWithSince(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+
+	old := shipIssue(t, s, repo, "old")
+	_ = shipIssue(t, s, repo, "fresh")
+	if _, err := s.DB.Exec(`UPDATE issues SET terminal_at = datetime('now','-3 days') WHERE id = ?`, old.ID); err != nil {
+		t.Fatalf("back-date: %v", err)
+	}
+
+	resp, raw := apiGet(t, ts.URL+"/repos/"+repo.Prefix+"/shipped/count?since=24h")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d body=%s", resp.StatusCode, raw)
+	}
+	var body api.ShippedCountResponse
+	_ = json.Unmarshal(raw, &body)
+	if body.Total != 1 {
+		t.Fatalf("total = %d, want 1 (old row outside window)", body.Total)
+	}
+}
+
+// TestHandleShippedCountBadSince (BACI-221) — a malformed ?since=
+// surfaces as a 400 with the same envelope shape /history uses, so the
+// frontend can render the validation error inline.
+func TestHandleShippedCountBadSince(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+
+	resp, _ := apiGet(t, ts.URL+"/repos/"+repo.Prefix+"/shipped/count?since=notaduration")
+	if resp.StatusCode != 400 {
+		t.Fatalf("status: %d, want 400 on bad ?since=", resp.StatusCode)
 	}
 }

@@ -100,7 +100,12 @@ func newRouter(d deps) http.Handler {
 	// BACI-187: shipping-log popover — list of recently-done issues,
 	// newest-first, sibling of /history. Per-repo only; cross-repo is
 	// deliberately out of scope (matches the rest of the surface).
+	// BACI-221 reshapes the list response to {rows, total} and adds
+	// /shipped/count for the topbar pill's 10s scope-count poll. The
+	// literal "count" segment is more specific than the bare /shipped
+	// route, so ServeMux disambiguates without a conflicting pattern.
 	mux.HandleFunc("GET /repos/{prefix}/shipped", d.handleShippedList)
+	mux.HandleFunc("GET /repos/{prefix}/shipped/count", d.handleShippedCount)
 
 	// Web UI bundle (BACI-30, gated by BACI-72): serve the browser-deployed
 	// React build at /ui/, with a 301 from the unslashed /ui to keep the
