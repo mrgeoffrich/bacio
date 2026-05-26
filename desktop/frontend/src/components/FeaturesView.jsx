@@ -636,26 +636,37 @@ function FeatureCommentsSection({ repoPrefix, detail, onChange }) {
       {comments.length === 0 ? (
         <p className="mk-features-text mk-meta-empty">No comments yet.</p>
       ) : (
-        <ul className="mk-features-comments">
+        // BACI-213: reuse the issue drawer's Activity timeline shape so
+        // the per-comment delete affordance (hover-revealed mk-tl-delete
+        // + window.confirm) matches across surfaces. Feature comments
+        // don't carry eval / mode / agent metadata, so no eval pill or
+        // footer here — just author + timestamp + body + delete.
+        <ul className="mk-timeline">
           {comments.map((c) => (
-            <li key={c.uuid} className="mk-comment-row">
-              <div className="mk-comment-meta">
-                <span className="mk-comment-author">{c.author}</span>
-                <span className="mk-comment-time">
-                  {commentTimestamp(c.createdAt)}
-                </span>
+            <li key={c.uuid} className="mk-tl-item">
+              <span className="mk-tl-dot" />
+              <div className="mk-tl-text">
+                <b className="mk-tl-author">{c.author}</b>
+                <span>{commentTimestamp(c.createdAt)}</span>
+                <MarkdownView className="mk-markdown mk-tl-body">
+                  {c.body}
+                </MarkdownView>
+              </div>
+              {c.uuid && (
                 <button
                   type="button"
-                  className="mk-link-btn"
-                  onClick={() => onDelete(c.uuid)}
-                  title="Delete this comment"
+                  className="mk-tl-delete"
+                  title="Delete comment"
+                  aria-label="Delete comment"
+                  onClick={() => {
+                    if (window.confirm('Delete this comment? This cannot be undone.')) {
+                      onDelete(c.uuid);
+                    }
+                  }}
                 >
-                  delete
+                  ✕
                 </button>
-              </div>
-              <MarkdownView className="mk-comment-body mk-markdown">
-                {c.body}
-              </MarkdownView>
+              )}
             </li>
           ))}
         </ul>
