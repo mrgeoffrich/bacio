@@ -548,6 +548,21 @@ export interface FeatureCommentDTO {
   createdAt: string;
 }
 
+// FeatureLinkedDoc (BACI-214) is one document linked to the feature
+// via `bacio doc link <file> <feature-slug>`. Drives the "Documents"
+// section on FeaturesView's detail pane. Deliberately narrower than
+// the issue brief's LinkedDocDTO (no `linkedVia` / no `sizeBytes`):
+// on the feature pane the source is unambiguous (the feature itself),
+// and the size readout would cost an extra round-trip per doc.
+// `sourcePath` is reserved for parity with the desktop binding but
+// stays empty today.
+export interface FeatureLinkedDoc {
+  filename: string;
+  type: string;
+  description: string;
+  sourcePath?: string;
+}
+
 export interface FeatureDetail {
   slug: string;
   title: string;
@@ -565,6 +580,10 @@ export interface FeatureDetail {
   updatedAt: string;
   issues: FeatureLinkedIssue[];
   comments: FeatureCommentDTO[];
+  // BACI-214: documents linked to this feature via
+  // `bacio doc link <file> <feature-slug>`. Each row is a link into
+  // the canonical /documents/<filename> viewer.
+  documents: FeatureLinkedDoc[];
   // BACI-177: per-feature "Show on board" toggle state. When true,
   // every kanban card belonging to this feature is hidden from the
   // board on this machine.
@@ -1561,10 +1580,22 @@ interface ApiFeatureComment {
   created_at: string;
 }
 
+// ApiFeatureLink mirrors model.DocumentLink (BACI-214) — the snake_case
+// wire shape served by `GET /repos/{prefix}/features/{slug}` for each
+// linked document. Description is the link-time `--why`. Other
+// model.DocumentLink fields (ids, issue/feature foreign keys, created_at)
+// aren't surfaced on the feature pane.
+interface ApiFeatureLink {
+  document_filename: string;
+  document_type: string;
+  description?: string;
+}
+
 interface ApiFeatureView {
   feature: ApiFeature;
   issues: Array<{ key: string; title: string; state: string }>;
   comments?: ApiFeatureComment[];
+  documents?: ApiFeatureLink[];
 }
 
 export async function getFeature(repoPrefix: string, slug: string): Promise<FeatureDetail> {
@@ -1593,6 +1624,12 @@ export async function getFeature(repoPrefix: string, slug: string): Promise<Feat
       author: c.author,
       body: c.body,
       createdAt: c.created_at,
+    })),
+    documents: (view.documents ?? []).map(d => ({
+      filename: d.document_filename,
+      type: d.document_type,
+      description: d.description ?? '',
+      sourcePath: '',
     })),
     hiddenOnBoard: !!f.hidden_on_board,
   };

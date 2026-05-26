@@ -557,6 +557,14 @@ export class FeatureDetail {
     "comments": FeatureComment[];
 
     /**
+     * Documents (BACI-214) is the list of documents linked to this
+     * feature via `bacio doc link <file> <feature-slug>`. Drives the
+     * "Documents" section on the FeaturesView detail pane — each row
+     * links to the canonical /documents/<filename> viewer.
+     */
+    "documents": FeatureLinkedDoc[];
+
+    /**
      * HiddenOnBoard (BACI-177) mirrors the per-feature "Show on board"
      * toggle. When true, every kanban card belonging to this feature
      * is hidden from the board on this machine.
@@ -595,6 +603,9 @@ export class FeatureDetail {
         if (!("comments" in $$source)) {
             this["comments"] = [];
         }
+        if (!("documents" in $$source)) {
+            this["documents"] = [];
+        }
         if (!("hiddenOnBoard" in $$source)) {
             this["hiddenOnBoard"] = false;
         }
@@ -608,6 +619,7 @@ export class FeatureDetail {
     static createFrom($$source: any = {}): FeatureDetail {
         const $$createField8_0 = $$createType7;
         const $$createField9_0 = $$createType9;
+        const $$createField10_0 = $$createType11;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("issues" in $$parsedSource) {
             $$parsedSource["issues"] = $$createField8_0($$parsedSource["issues"]);
@@ -615,7 +627,58 @@ export class FeatureDetail {
         if ("comments" in $$parsedSource) {
             $$parsedSource["comments"] = $$createField9_0($$parsedSource["comments"]);
         }
+        if ("documents" in $$parsedSource) {
+            $$parsedSource["documents"] = $$createField10_0($$parsedSource["documents"]);
+        }
         return new FeatureDetail($$parsedSource as Partial<FeatureDetail>);
+    }
+}
+
+/**
+ * FeatureLinkedDoc is one document linked to this feature via
+ * `bacio doc link <file> <feature-slug>`, shaped for the desktop /
+ * web feature detail pane (BACI-214). Filename + Type drive the
+ * per-row chrome; Description carries the link-time `--why` (which is
+ * model.DocumentLink.Description, not the doc's own description).
+ * SourcePath is reserved for parity with the issue-workspace
+ * LinkedDocPanel shape but stays empty here — `view.Documents` is a
+ * link slice, not a doc slice, so resolving the source path would
+ * cost an extra round-trip per doc and isn't surfaced on the feature
+ * pane today. Deliberately narrower than the issue brief's LinkedDoc
+ * (no `linkedVia` / no `sizeBytes`): the feature pane is single-source
+ * of truth for "linked to this feature" so the disambiguating chips
+ * the issue panel renders don't apply.
+ */
+export class FeatureLinkedDoc {
+    "filename": string;
+    "type": string;
+    "description": string;
+    "sourcePath": string;
+
+    /** Creates a new FeatureLinkedDoc instance. */
+    constructor($$source: Partial<FeatureLinkedDoc> = {}) {
+        if (!("filename" in $$source)) {
+            this["filename"] = "";
+        }
+        if (!("type" in $$source)) {
+            this["type"] = "";
+        }
+        if (!("description" in $$source)) {
+            this["description"] = "";
+        }
+        if (!("sourcePath" in $$source)) {
+            this["sourcePath"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new FeatureLinkedDoc instance from a string or object.
+     */
+    static createFrom($$source: any = {}): FeatureLinkedDoc {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new FeatureLinkedDoc($$parsedSource as Partial<FeatureLinkedDoc>);
     }
 }
 
@@ -828,7 +891,7 @@ export class HistoryPage {
      * Creates a new HistoryPage instance from a string or object.
      */
     static createFrom($$source: any = {}): HistoryPage {
-        const $$createField0_0 = $$createType11;
+        const $$createField0_0 = $$createType13;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("entries" in $$parsedSource) {
             $$parsedSource["entries"] = $$createField0_0($$parsedSource["entries"]);
@@ -898,15 +961,15 @@ export class IssueBriefDTO {
      * Creates a new IssueBriefDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): IssueBriefDTO {
-        const $$createField0_0 = $$createType12;
-        const $$createField1_0 = $$createType14;
-        const $$createField2_0 = $$createType15;
-        const $$createField3_0 = $$createType17;
-        const $$createField4_0 = $$createType19;
-        const $$createField5_0 = $$createType21;
-        const $$createField6_0 = $$createType23;
-        const $$createField9_0 = $$createType25;
-        const $$createField10_0 = $$createType26;
+        const $$createField0_0 = $$createType14;
+        const $$createField1_0 = $$createType16;
+        const $$createField2_0 = $$createType17;
+        const $$createField3_0 = $$createType19;
+        const $$createField4_0 = $$createType21;
+        const $$createField5_0 = $$createType23;
+        const $$createField6_0 = $$createType25;
+        const $$createField9_0 = $$createType27;
+        const $$createField10_0 = $$createType28;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("issue" in $$parsedSource) {
             $$parsedSource["issue"] = $$createField0_0($$parsedSource["issue"]);
@@ -1011,12 +1074,12 @@ export class IssueDetail {
      * Creates a new IssueDetail instance from a string or object.
      */
     static createFrom($$source: any = {}): IssueDetail {
-        const $$createField5_0 = $$createType26;
-        const $$createField6_0 = $$createType26;
-        const $$createField8_0 = $$createType21;
-        const $$createField9_0 = $$createType17;
-        const $$createField10_0 = $$createType28;
-        const $$createField11_0 = $$createType23;
+        const $$createField5_0 = $$createType28;
+        const $$createField6_0 = $$createType28;
+        const $$createField8_0 = $$createType23;
+        const $$createField9_0 = $$createType19;
+        const $$createField10_0 = $$createType30;
+        const $$createField11_0 = $$createType25;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField5_0($$parsedSource["tags"]);
@@ -1100,8 +1163,8 @@ export class IssueMetaDTO {
      * Creates a new IssueMetaDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): IssueMetaDTO {
-        const $$createField5_0 = $$createType26;
-        const $$createField6_0 = $$createType26;
+        const $$createField5_0 = $$createType28;
+        const $$createField6_0 = $$createType28;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField5_0($$parsedSource["tags"]);
@@ -1186,7 +1249,7 @@ export class LinkedDocDTO {
      * Creates a new LinkedDocDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): LinkedDocDTO {
-        const $$createField4_0 = $$createType26;
+        const $$createField4_0 = $$createType28;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("linkedVia" in $$parsedSource) {
             $$parsedSource["linkedVia"] = $$createField4_0($$parsedSource["linkedVia"]);
@@ -1349,8 +1412,8 @@ export class PromptTemplateDTO {
      * Creates a new PromptTemplateDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): PromptTemplateDTO {
-        const $$createField7_0 = $$createType26;
-        const $$createField8_0 = $$createType26;
+        const $$createField7_0 = $$createType28;
+        const $$createField8_0 = $$createType28;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("allowedStates" in $$parsedSource) {
             $$parsedSource["allowedStates"] = $$createField7_0($$parsedSource["allowedStates"]);
@@ -1423,8 +1486,8 @@ export class RelationsDTO {
      * Creates a new RelationsDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): RelationsDTO {
-        const $$createField0_0 = $$createType30;
-        const $$createField1_0 = $$createType30;
+        const $$createField0_0 = $$createType32;
+        const $$createField1_0 = $$createType32;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("outgoing" in $$parsedSource) {
             $$parsedSource["outgoing"] = $$createField0_0($$parsedSource["outgoing"]);
@@ -1618,7 +1681,7 @@ export class ShippedIssueDTO {
      * Creates a new ShippedIssueDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): ShippedIssueDTO {
-        const $$createField3_0 = $$createType26;
+        const $$createField3_0 = $$createType28;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField3_0($$parsedSource["tags"]);
@@ -1680,8 +1743,8 @@ export class SyncRegistryDTO {
      * Creates a new SyncRegistryDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): SyncRegistryDTO {
-        const $$createField0_0 = $$createType32;
-        const $$createField1_0 = $$createType34;
+        const $$createField0_0 = $$createType34;
+        const $$createField1_0 = $$createType36;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("syncRepos" in $$parsedSource) {
             $$parsedSource["syncRepos"] = $$createField0_0($$parsedSource["syncRepos"]);
@@ -1734,7 +1797,7 @@ export class SyncRepoDTO {
      * Creates a new SyncRepoDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): SyncRepoDTO {
-        const $$createField7_0 = $$createType36;
+        const $$createField7_0 = $$createType38;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("projects" in $$parsedSource) {
             $$parsedSource["projects"] = $$createField7_0($$parsedSource["projects"]);
@@ -1795,7 +1858,7 @@ export class SyncSetupDTO {
      * Creates a new SyncSetupDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): SyncSetupDTO {
-        const $$createField6_0 = $$createType38;
+        const $$createField6_0 = $$createType40;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("previewCollisions" in $$parsedSource) {
             $$parsedSource["previewCollisions"] = $$createField6_0($$parsedSource["previewCollisions"]);
@@ -1851,32 +1914,34 @@ const $$createType6 = FeatureLinkedIssue.createFrom;
 const $$createType7 = $Create.Array($$createType6);
 const $$createType8 = FeatureComment.createFrom;
 const $$createType9 = $Create.Array($$createType8);
-const $$createType10 = HistoryEntryDTO.createFrom;
+const $$createType10 = FeatureLinkedDoc.createFrom;
 const $$createType11 = $Create.Array($$createType10);
-const $$createType12 = IssueMetaDTO.createFrom;
-const $$createType13 = FeatureRefDTO.createFrom;
-const $$createType14 = $Create.Nullable($$createType13);
-const $$createType15 = RelationsDTO.createFrom;
-const $$createType16 = PRDTO.createFrom;
-const $$createType17 = $Create.Array($$createType16);
-const $$createType18 = LinkedDocDTO.createFrom;
+const $$createType12 = HistoryEntryDTO.createFrom;
+const $$createType13 = $Create.Array($$createType12);
+const $$createType14 = IssueMetaDTO.createFrom;
+const $$createType15 = FeatureRefDTO.createFrom;
+const $$createType16 = $Create.Nullable($$createType15);
+const $$createType17 = RelationsDTO.createFrom;
+const $$createType18 = PRDTO.createFrom;
 const $$createType19 = $Create.Array($$createType18);
-const $$createType20 = CommentDTO.createFrom;
+const $$createType20 = LinkedDocDTO.createFrom;
 const $$createType21 = $Create.Array($$createType20);
-const $$createType22 = agentcards$0.ClaimantDTO.createFrom;
+const $$createType22 = CommentDTO.createFrom;
 const $$createType23 = $Create.Array($$createType22);
-const $$createType24 = boardcards$0.WaitingState.createFrom;
-const $$createType25 = $Create.Nullable($$createType24);
-const $$createType26 = $Create.Array($Create.Any);
-const $$createType27 = DocLinkDTO.createFrom;
-const $$createType28 = $Create.Array($$createType27);
-const $$createType29 = RelationDTO.createFrom;
+const $$createType24 = agentcards$0.ClaimantDTO.createFrom;
+const $$createType25 = $Create.Array($$createType24);
+const $$createType26 = boardcards$0.WaitingState.createFrom;
+const $$createType27 = $Create.Nullable($$createType26);
+const $$createType28 = $Create.Array($Create.Any);
+const $$createType29 = DocLinkDTO.createFrom;
 const $$createType30 = $Create.Array($$createType29);
-const $$createType31 = SyncRepoDTO.createFrom;
+const $$createType31 = RelationDTO.createFrom;
 const $$createType32 = $Create.Array($$createType31);
-const $$createType33 = UnsyncedProjectDTO.createFrom;
+const $$createType33 = SyncRepoDTO.createFrom;
 const $$createType34 = $Create.Array($$createType33);
-const $$createType35 = MemberProjectDTO.createFrom;
+const $$createType35 = UnsyncedProjectDTO.createFrom;
 const $$createType36 = $Create.Array($$createType35);
-const $$createType37 = CollisionPreviewDTO.createFrom;
-const $$createType38 = $Create.Nullable($$createType37);
+const $$createType37 = MemberProjectDTO.createFrom;
+const $$createType38 = $Create.Array($$createType37);
+const $$createType39 = CollisionPreviewDTO.createFrom;
+const $$createType40 = $Create.Nullable($$createType39);

@@ -84,6 +84,38 @@ func TestFeatureShowHappy(t *testing.T) {
 	}
 }
 
+// TestFeatureShowWithLinkedDocs (BACI-214) pins the documents array on
+// the feature show response: linking a doc to a feature via
+// store.LinkDocument(FeatureID:&feat.ID, "why") must surface in the
+// `documents` array with `document_filename`, `document_type` and the
+// link-time `description` exposed for the React FeaturesView pane.
+func TestFeatureShowWithLinkedDocs(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	feat := seedFeature(t, s, repo, "auth", "Auth")
+	doc, err := s.CreateDocument(repo.ID, "auth-plan.md", model.DocTypePlan, "plan body", "")
+	if err != nil {
+		t.Fatalf("CreateDocument: %v", err)
+	}
+	if _, err := s.LinkDocument(doc.ID, store.LinkTarget{FeatureID: &feat.ID}, "design notes"); err != nil {
+		t.Fatalf("LinkDocument: %v", err)
+	}
+	resp, body := apiGet(t, ts.URL+"/repos/MINI/features/auth")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d, body=%s", resp.StatusCode, body)
+	}
+	for _, want := range []string{
+		`"documents"`,
+		`"document_filename": "auth-plan.md"`,
+		`"document_type": "plan"`,
+		`"description": "design notes"`,
+	} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("missing %s in: %s", want, body)
+		}
+	}
+}
+
 func TestFeatureShowEmptyArrays(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
