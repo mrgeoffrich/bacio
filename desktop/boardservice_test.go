@@ -127,6 +127,14 @@ func (f *fakeBoardClient) CountTranscriptDocsByIssue(context.Context, []int64) (
 	return map[int64]int{}, nil
 }
 
+// LatestPlanByIssue (BACI-216) — empty map matches "no plan-typed docs
+// linked", which keeps the kanban per-card plan-link affordance dormant
+// for the taken-flag tests. Mirrors the fakeClient stub in
+// internal/boardcards/cards_test.go.
+func (f *fakeBoardClient) LatestPlanByIssue(context.Context, []int64) (map[int64]*model.LatestPlan, error) {
+	return map[int64]*model.LatestPlan{}, nil
+}
+
 // ListHiddenFeatureSlugs (BACI-177) — empty slice means "no features
 // are hidden", which matches the production default and lets every
 // taken-flag / waiting-state test pass cards through unchanged.
