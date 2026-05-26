@@ -1,6 +1,7 @@
-// Smoke tests for the BACI-204 Documents-page persistence helpers in
-// `components/DocsPersistence.ts`. Plain Node + assert, same shape as
-// boardCompactPersistence.smoketest.mjs.
+// Smoke tests for the BACI-204 / BACI-219 Documents-page persistence
+// helpers in `components/DocsPersistence.ts`. Plain Node + assert,
+// same shape as boardCompactPersistence.smoketest.mjs and
+// activityTrayPersistence.smoketest.mjs.
 //
 // Run from the worktree root:
 //   node desktop/frontend/src/components/__tests__/docsPersistence.smoketest.mjs
@@ -32,13 +33,12 @@ function makeStorageStub({ getThrows = false, setThrows = false } = {}) {
 globalThis.localStorage = makeStorageStub();
 
 const {
-  readHideTranscripts,
-  persistHideTranscripts,
   readSort,
   persistSort,
-  HIDE_TRANSCRIPTS_KEY,
+  readSidebarCollapsed,
+  persistSidebarCollapsed,
   SORT_KEY_KEY,
-  DEFAULT_HIDE_TRANSCRIPTS,
+  SIDEBAR_COLLAPSED_KEY,
   DEFAULT_SORT,
 } = await import(path.join(moduleRoot, 'DocsPersistence.ts'));
 
@@ -46,33 +46,11 @@ const tests = [];
 function test(name, fn) { tests.push({ name, fn }); }
 
 test('storage keys are kebab-cased bacio-prefixed', () => {
-  assert.equal(HIDE_TRANSCRIPTS_KEY, 'bacio-docs-hide-transcripts');
   assert.equal(SORT_KEY_KEY, 'bacio-docs-sort');
+  assert.equal(SIDEBAR_COLLAPSED_KEY, 'bacio-docs-sidebar-collapsed');
 });
 
-test('readHideTranscripts returns the documented default when unset', () => {
-  globalThis.localStorage = makeStorageStub();
-  assert.equal(readHideTranscripts('MINI'), DEFAULT_HIDE_TRANSCRIPTS);
-});
-
-test('persistHideTranscripts round-trips a non-default value per repo', () => {
-  globalThis.localStorage = makeStorageStub();
-  persistHideTranscripts('MINI', !DEFAULT_HIDE_TRANSCRIPTS);
-  assert.equal(readHideTranscripts('MINI'), !DEFAULT_HIDE_TRANSCRIPTS);
-  // Default value back trims the entry so the JSON stays compact.
-  persistHideTranscripts('MINI', DEFAULT_HIDE_TRANSCRIPTS);
-  const raw = globalThis.localStorage.store.get(HIDE_TRANSCRIPTS_KEY);
-  const parsed = raw ? JSON.parse(raw) : {};
-  assert.equal('MINI' in parsed, false);
-});
-
-test('persistHideTranscripts isolates state across repo prefixes', () => {
-  globalThis.localStorage = makeStorageStub();
-  persistHideTranscripts('MINI', false);
-  persistHideTranscripts('BACI', true);
-  assert.equal(readHideTranscripts('MINI'), false);
-  assert.equal(readHideTranscripts('BACI'), true);
-});
+// ---- sort (per-repo) ----
 
 test('readSort returns the documented default when unset', () => {
   globalThis.localStorage = makeStorageStub();
@@ -91,14 +69,57 @@ test('readSort rejects an unknown sort key on disk and falls back to default', (
   assert.equal(readSort('MINI'), DEFAULT_SORT);
 });
 
-test('readHideTranscripts falls back to default when getItem throws', () => {
-  globalThis.localStorage = makeStorageStub({ getThrows: true });
-  assert.equal(readHideTranscripts('MINI'), DEFAULT_HIDE_TRANSCRIPTS);
+test('persistSort isolates state across repo prefixes', () => {
+  globalThis.localStorage = makeStorageStub();
+  persistSort('MINI', 'name');
+  persistSort('BACI', 'size');
+  assert.equal(readSort('MINI'), 'name');
+  assert.equal(readSort('BACI'), 'size');
 });
 
-test('persistHideTranscripts swallows setItem throws without raising', () => {
+// ---- sidebarCollapsed (global) ----
+
+test('readSidebarCollapsed returns false when the key is missing', () => {
+  globalThis.localStorage = makeStorageStub();
+  assert.equal(readSidebarCollapsed(), false);
+});
+
+test('persistSidebarCollapsed(true) then readSidebarCollapsed returns true', () => {
+  globalThis.localStorage = makeStorageStub();
+  persistSidebarCollapsed(true);
+  assert.equal(globalThis.localStorage.store.get(SIDEBAR_COLLAPSED_KEY), '1');
+  assert.equal(readSidebarCollapsed(), true);
+});
+
+test('persistSidebarCollapsed(false) then readSidebarCollapsed returns false', () => {
+  globalThis.localStorage = makeStorageStub();
+  persistSidebarCollapsed(true);
+  persistSidebarCollapsed(false);
+  assert.equal(globalThis.localStorage.store.get(SIDEBAR_COLLAPSED_KEY), '0');
+  assert.equal(readSidebarCollapsed(), false);
+});
+
+test('readSidebarCollapsed returns false when getItem throws (hardened storage)', () => {
+  globalThis.localStorage = makeStorageStub({ getThrows: true });
+  assert.equal(readSidebarCollapsed(), false);
+});
+
+test('persistSidebarCollapsed swallows a setItem throw without raising', () => {
   globalThis.localStorage = makeStorageStub({ setThrows: true });
-  persistHideTranscripts('MINI', !DEFAULT_HIDE_TRANSCRIPTS); // must not throw
+  // Must not throw; the preference just won't survive the next reload.
+  persistSidebarCollapsed(true);
+});
+
+// ---- hardened storage on sort ----
+
+test('readSort falls back to default when getItem throws', () => {
+  globalThis.localStorage = makeStorageStub({ getThrows: true });
+  assert.equal(readSort('MINI'), DEFAULT_SORT);
+});
+
+test('persistSort swallows setItem throws without raising', () => {
+  globalThis.localStorage = makeStorageStub({ setThrows: true });
+  persistSort('MINI', 'name'); // must not throw
 });
 
 // ---- runner ----

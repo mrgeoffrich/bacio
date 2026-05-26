@@ -837,9 +837,12 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
 /* ============================================================
    BACI-204 Documents redesign — three-pane faceted library that
    replaces the flat alphabetical aside. Left rail = search +
-   Type / Links / Status facet chips with counts. Middle pane =
-   sticky toolbar (sort, hide-transcripts) over a scrolling
-   rich-row list. Right pane = the existing Render/Source viewer.
+   Type / Links / Status facet chips with counts (collapsible per
+   BACI-219). Middle pane = sticky toolbar (sort + a re-open
+   affordance when the rail is collapsed) over a scrolling
+   rich-row list; the list flex-grows when no doc is selected so
+   it fills the previously-blank gutter to its right. Right pane
+   = the existing Render/Source viewer.
    The original .mk-docs / .mk-docs-svg-* / .mk-docs-transcript-*
    rules above stay intact — DocsViewer emits the same classes
    for the editor block.
@@ -921,15 +924,42 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
 /* Middle pane — toolbar + scrolling list. Toolbar sticks at the
    top of the list pane so the sort dropdown stays in reach as
    the user scrolls. */
+/* BACI-219: list pane flex-grows so it fills the empty space to its
+   right when no doc is selected (DocsViewer's "Pick a document" empty
+   state is lightweight). The min-width floor keeps the list legible
+   on narrow viewports and matches the original 380px width when a doc
+   IS open and the viewer claims the rest of the row. */
 .mk-docs-list-pane {
-  width: 380px;
-  flex-shrink: 0;
+  min-width: 380px;
+  flex: 1;
   display: flex;
   flex-direction: column;
   background: var(--bg-3);
   border-right: 1px solid var(--border-1);
   min-height: 0;
 }
+/* BACI-219: re-open affordance in the toolbar (rendered when the rail
+   is collapsed). Sized down from the default 32px .mk-icbtn so it
+   tucks in next to the count without crowding the row. */
+.mk-docs-sidebar-expand {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+}
+.mk-docs-sidebar-expand svg { width: 14px; height: 14px; }
+/* BACI-219: collapse trigger inside the rail. Sits in the rail's head
+   strip with margin-left:auto so it pushes to the right edge. */
+.mk-docs-rail-head {
+  display: flex;
+  align-items: center;
+}
+.mk-docs-rail-collapse {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  margin-left: auto;
+}
+.mk-docs-rail-collapse svg { width: 14px; height: 14px; }
 .mk-docs-toolbar {
   display: flex;
   align-items: center;
@@ -966,16 +996,6 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   border-radius: var(--radius-sm);
   padding: 2px 6px;
   cursor: pointer;
-}
-.mk-docs-toolbar-checkbox {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-family: var(--font-sans);
-  font-size: 11px;
-  color: var(--fg-2);
-  cursor: pointer;
-  user-select: none;
 }
 .mk-docs-list {
   flex: 1;
@@ -1106,37 +1126,6 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   border-radius: 999px;
   border: 1px solid var(--border-1);
 }
-
-/* Transcript fold — collapses the transcript bucket at the bottom
-   of the list when `Hide transcripts` is on (the default). The
-   toggle row is purely informational; clicking it expands or
-   collapses the nested DocRows. */
-.mk-docs-transcript-fold {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px dashed var(--border-1);
-}
-.mk-docs-transcript-fold-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 6px 12px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--fg-3);
-  font-family: var(--font-sans);
-  font-size: 11px;
-  font-weight: 500;
-  cursor: pointer;
-  text-align: left;
-  transition: background var(--dur-fast) var(--ease-out);
-}
-.mk-docs-transcript-fold-toggle:hover { background: var(--bg-4); color: var(--fg-1); }
 
 /* Viewer header — wraps the lifted Render/Source toggle + Save
    bar in a horizontally-scrollable strip so the linked-issue

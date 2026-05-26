@@ -1,19 +1,24 @@
 // DocsList (BACI-204) — middle pane of the redesigned Documents view.
-// Sticky toolbar (sort dropdown, hide-transcripts checkbox, total
-// count) sits over a vanilla scrolling list of rich rows. Each row
-// renders the filename, type chip, linked-issue / linked-feature
-// chips, a relative date, the size, and a ~140-char snippet preview
-// from the body. Transcripts fold into a collapsed group at the
-// bottom when `hideTranscripts` is on (the default — audit material,
-// not browsing material).
+// Sticky toolbar (sidebar re-open affordance when collapsed, sort
+// dropdown, total count) sits over a vanilla scrolling list of rich
+// rows. Each row renders the filename, type chip, linked-issue /
+// linked-feature chips, a relative date, the size, and a ~140-char
+// snippet preview from the body.
+//
+// BACI-219 retired the Hide-transcripts checkbox and the transcript
+// fold beneath the list — the rail's Type tablist is the single
+// transcript-filtering control. When the rail is collapsed, this
+// toolbar grows a PanelLeftOpen icon button at its start that calls
+// back to re-open it (mirrors the BACI-186 ActivityTray collapse
+// affordance).
 //
 // 327 rows × ~80 px = ~26 000 px scroll height; native scrolling is
 // fine without react-window (no entry in desktop/frontend/package.json).
 // If a future repo hits the tens-of-thousands the rail's facets will
 // have narrowed the visible set first.
 
-import React, { useState } from 'react';
-import { ChevronDown, ChevronRight, FileText, Link2 } from 'lucide-react';
+import React from 'react';
+import { FileText, Link2, PanelLeftOpen } from 'lucide-react';
 import { formatWhen } from '../lib/formatWhen';
 
 const SORT_OPTIONS = [
@@ -46,19 +51,30 @@ function snippetForRow(s) {
 
 export default function DocsList({
   visible,
-  transcripts,
   hasDocs,
   query,
   onQueryChange,
   selected,
   onSelect,
+  sidebarCollapsed,
+  onExpandSidebar,
 }) {
-  const [transcriptsOpen, setTranscriptsOpen] = useState(false);
   const setQuery = (patch) => onQueryChange(patch);
 
   return (
     <div className="mk-docs-list-pane">
       <div className="mk-docs-toolbar">
+        {sidebarCollapsed && (
+          <button
+            type="button"
+            className="mk-icbtn mk-docs-sidebar-expand"
+            onClick={onExpandSidebar}
+            title="Show filter sidebar"
+            aria-label="Show filter sidebar"
+          >
+            <PanelLeftOpen size={14} strokeWidth={2} aria-hidden="true" />
+          </button>
+        )}
         <span className="mk-docs-toolbar-count">
           {visible.length} {visible.length === 1 ? 'document' : 'documents'}
         </span>
@@ -74,57 +90,22 @@ export default function DocsList({
             ))}
           </select>
         </label>
-        <label className="mk-docs-toolbar-checkbox">
-          <input
-            type="checkbox"
-            checked={query.hideTranscripts}
-            onChange={(e) => setQuery({ hideTranscripts: e.target.checked })}
-          />
-          <span>Hide transcripts</span>
-        </label>
       </div>
 
       <div className="mk-docs-list">
         {!hasDocs ? (
           <div className="mk-docs-list-empty">No documents in this repository.</div>
-        ) : visible.length === 0 && transcripts.length === 0 ? (
+        ) : visible.length === 0 ? (
           <div className="mk-docs-list-empty">No documents match the current filters.</div>
         ) : (
-          <>
-            {visible.map((d) => (
-              <DocRow
-                key={d.filename}
-                doc={d}
-                active={selected === d.filename}
-                onSelect={() => onSelect(d.filename)}
-              />
-            ))}
-            {transcripts.length > 0 && (
-              <div className="mk-docs-transcript-fold">
-                <button
-                  type="button"
-                  className="mk-docs-transcript-fold-toggle"
-                  onClick={() => setTranscriptsOpen((o) => !o)}
-                  aria-expanded={transcriptsOpen}
-                >
-                  {transcriptsOpen
-                    ? <ChevronDown size={14} strokeWidth={2} aria-hidden="true" />
-                    : <ChevronRight size={14} strokeWidth={2} aria-hidden="true" />}
-                  <span>
-                    {transcripts.length} transcript{transcripts.length === 1 ? '' : 's'}
-                  </span>
-                </button>
-                {transcriptsOpen && transcripts.map((d) => (
-                  <DocRow
-                    key={d.filename}
-                    doc={d}
-                    active={selected === d.filename}
-                    onSelect={() => onSelect(d.filename)}
-                  />
-                ))}
-              </div>
-            )}
-          </>
+          visible.map((d) => (
+            <DocRow
+              key={d.filename}
+              doc={d}
+              active={selected === d.filename}
+              onSelect={() => onSelect(d.filename)}
+            />
+          ))
         )}
       </div>
     </div>
