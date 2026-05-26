@@ -22,7 +22,7 @@ func printActivationBanner(w io.Writer) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  To launch this directory as a registered bacio agent:")
 	fmt.Fprintln(w)
-	fmt.Fprintf(w, "    %s=1 claude --dangerously-skip-permissions --dangerously-load-development-channels server:bacio\n", agentmode.EnvVar)
+	fmt.Fprintf(w, "    %s\n", agentmode.LaunchCommand)
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  --dangerously-skip-permissions waives the per-tool approval prompt")
 	fmt.Fprintln(w, "  for the agent session; --dangerously-load-development-channels")

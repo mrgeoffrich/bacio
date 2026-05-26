@@ -44,7 +44,10 @@ BACIO_AGENT_MODE=1 claude --dangerously-skip-permissions --dangerously-load-deve
 
 For normal interactive Claude sessions, launch without the env var — bacio's hooks and channel detect, log, and exit cleanly. `bacio status` reports the current value.
 
+To get the same one-liner from a script (without parsing the install banner), use [`bacio agent-run-command`](/reference/cli/agent-run-command) — it prints the launch string and nothing else, so `eval "$(bacio agent-run-command)"` and `alias bacio-agent="$(bacio agent-run-command)"` both work.
+
 ## See also
 
 - **[`bacio install-skill`](/reference/cli/install-skill)** — install the canonical `SKILL.md` (a separate concern; left untouched by `install-agent`).
+- **[`bacio agent-run-command`](/reference/cli/agent-run-command)** — print the launch one-liner for shell composition (eval / alias / scripts).
 - **[Work with Claude Code](/guides/work-with-claude-code)** — the agent-side experience.
