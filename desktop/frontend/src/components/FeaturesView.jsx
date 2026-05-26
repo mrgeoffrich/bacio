@@ -1,12 +1,12 @@
 import React, { useMemo, useState, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router';
+import { Link, useNavigate, useParams } from 'react-router';
 import { EyeOff, Search, X } from 'lucide-react';
 import { reportError } from '../errors';
 import * as api from '../api';
 import MarkdownView from '../lib/markdownView';
 import CommentComposer from './issue/CommentComposer';
 import FeatureEmojiPicker from './FeatureEmojiPicker.jsx';
-import { featurePath } from '../lib/routes';
+import { documentPath, featurePath } from '../lib/routes';
 
 // BACI-177: per-feature "Show on board" toggle. The id is the value
 // the toggle should set on the feature — true = show on board (the
@@ -590,12 +590,53 @@ function FeatureDetailPane({
         )}
       </section>
 
+      <FeatureLinkedDocsSection documents={detail.documents ?? []} />
+
       <FeatureCommentsSection
         repoPrefix={activeBoard}
         detail={detail}
         onChange={onDetailChange}
       />
     </div>
+  );
+}
+
+// FeatureLinkedDocsSection (BACI-214) lists documents linked to the
+// feature via `bacio doc link <file> <feature-slug>`. Each row carries a
+// type badge, a `<Link>` into the canonical `/documents/<filename>`
+// viewer (the same route the Documents screen uses), and an inline
+// `— description` when the link was attached with `--why`. Always-render
+// shape mirrors the Issues section's "No issues linked yet." idiom so
+// the section is present-as-empty and doesn't pop in when the first doc
+// lands. Uses .mk-linked-doc + .mk-attachment-* from app.css /
+// desktop.css so no new CSS is needed.
+function FeatureLinkedDocsSection({ documents }) {
+  return (
+    <section className="mk-features-section">
+      <div className="mk-features-label">Documents · {documents.length}</div>
+      {documents.length === 0 ? (
+        <p className="mk-features-text mk-meta-empty">No documents linked.</p>
+      ) : (
+        <div className="mk-linked-doc-list">
+          {documents.map((d) => (
+            <div key={d.filename} className="mk-linked-doc">
+              <div className="mk-linked-doc-head">
+                <span className="mk-attachment-badge">{d.type || 'doc'}</span>
+                <Link
+                  to={documentPath(d.filename)}
+                  className="mk-attachment-name mk-attachment-link"
+                >
+                  {d.filename}
+                </Link>
+                {d.description && (
+                  <span className="mk-attachment-why">— {d.description}</span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 

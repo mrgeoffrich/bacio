@@ -52,6 +52,26 @@ type FeatureComment struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+// FeatureLinkedDoc is one document linked to this feature via
+// `bacio doc link <file> <feature-slug>`, shaped for the desktop /
+// web feature detail pane (BACI-214). Filename + Type drive the
+// per-row chrome; Description carries the link-time `--why` (which is
+// model.DocumentLink.Description, not the doc's own description).
+// SourcePath is reserved for parity with the issue-workspace
+// LinkedDocPanel shape but stays empty here — `view.Documents` is a
+// link slice, not a doc slice, so resolving the source path would
+// cost an extra round-trip per doc and isn't surfaced on the feature
+// pane today. Deliberately narrower than the issue brief's LinkedDoc
+// (no `linkedVia` / no `sizeBytes`): the feature pane is single-source
+// of truth for "linked to this feature" so the disambiguating chips
+// the issue panel renders don't apply.
+type FeatureLinkedDoc struct {
+	Filename    string `json:"filename"`
+	Type        string `json:"type"`
+	Description string `json:"description"`
+	SourcePath  string `json:"sourcePath"`
+}
+
 // FeatureDetail is one feature with its description and linked issues — the
 // payload for the desktop feature detail pane.
 type FeatureDetail struct {
@@ -76,6 +96,11 @@ type FeatureDetail struct {
 	// Comments is the BACI-124 chronological-handoff timeline, oldest
 	// first. Drives the feature drawer's comment panel.
 	Comments []FeatureComment `json:"comments"`
+	// Documents (BACI-214) is the list of documents linked to this
+	// feature via `bacio doc link <file> <feature-slug>`. Drives the
+	// "Documents" section on the FeaturesView detail pane — each row
+	// links to the canonical /documents/<filename> viewer.
+	Documents []FeatureLinkedDoc `json:"documents"`
 	// HiddenOnBoard (BACI-177) mirrors the per-feature "Show on board"
 	// toggle. When true, every kanban card belonging to this feature
 	// is hidden from the board on this machine.
@@ -162,6 +187,16 @@ func (f *FeatureService) GetFeature(repoPrefix, slug string) (FeatureDetail, err
 			CreatedAt: c.CreatedAt,
 		})
 	}
+	docs := make([]FeatureLinkedDoc, 0, len(view.Documents))
+	for _, l := range view.Documents {
+		docs = append(docs, FeatureLinkedDoc{
+			Filename:    l.DocumentFilename,
+			Type:        string(l.DocumentType),
+			Description: l.Description,
+			// SourcePath stays empty — model.DocumentLink doesn't
+			// carry it and the feature pane doesn't surface it.
+		})
+	}
 	return FeatureDetail{
 		Slug:          feat.Slug,
 		Title:         feat.Title,
@@ -173,6 +208,7 @@ func (f *FeatureService) GetFeature(repoPrefix, slug string) (FeatureDetail, err
 		UpdatedAt:     feat.UpdatedAt,
 		Issues:        issues,
 		Comments:      comments,
+		Documents:     docs,
 		HiddenOnBoard: feat.HiddenOnBoard,
 	}, nil
 }
