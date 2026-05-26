@@ -1339,3 +1339,62 @@ func TestAssembleSurfacesFollowOnDispatch(t *testing.T) {
 		t.Errorf("TEST-3 FollowOn.Mode = %q, want ship — the non-dormant queued row leaked through", fo.Mode)
 	}
 }
+
+// TestAssembleBlockerFollowOnWaitingReason (BACI-217) pins the
+// per-card WaitingReason derivation: the parent-acks variant leaves
+// the field empty (today's BACI-179 default — the chip reads the mode
+// label without a qualifier); the blockers-clear variant surfaces a
+// "blocked by N" label derived from the same blockedByID map the
+// per-card BlockedBy field reads from.
+func TestAssembleBlockerFollowOnWaitingReason(t *testing.T) {
+	repo := &model.Repo{ID: 1, Prefix: "TEST"}
+	t0 := time.Date(2026, 5, 25, 9, 0, 0, 0, time.UTC)
+	parentID := int64(900)
+	parentVariantID := int64(101)
+	blockerVariantID := int64(102)
+	blockerSrcID1 := int64(201)
+	blockerSrcID2 := int64(202)
+	issues := []*model.Issue{
+		{ID: parentVariantID, RepoID: repo.ID, Key: "TEST-1", State: model.StateInProgress, Title: "parent-acks variant"},
+		{ID: blockerVariantID, RepoID: repo.ID, Key: "TEST-2", State: model.StateTodo, Title: "blockers-clear variant"},
+		{ID: blockerSrcID1, RepoID: repo.ID, Key: "TEST-3", State: model.StateTodo, Title: "blocker 1"},
+		{ID: blockerSrcID2, RepoID: repo.ID, Key: "TEST-4", State: model.StateTodo, Title: "blocker 2"},
+	}
+	// TEST-2 is blocked by TEST-3 and TEST-4 (both open).
+	blockers := map[int64][]store.IssueBlocker{
+		blockerVariantID: {
+			{BlockedID: blockerVariantID, BlockerID: blockerSrcID1, BlockerKey: "TEST-3", BlockerState: model.StateTodo},
+			{BlockedID: blockerVariantID, BlockerID: blockerSrcID2, BlockerKey: "TEST-4", BlockerState: model.StateTodo},
+		},
+	}
+	dispatches := []*model.AgentDispatch{
+		// TEST-1: parent-acks variant (status queued + queued_after).
+		{ID: 300, IssueID: &parentVariantID, IssueKey: "TEST-1", Mode: model.DispatchMode("implement"), Status: model.DispatchQueued, CreatedAt: t0, QueuedAfterDispatchID: &parentID},
+		// TEST-2: blockers-clear variant (status queued + the new flag).
+		{ID: 301, IssueID: &blockerVariantID, IssueKey: "TEST-2", Mode: model.DispatchMode("implement"), Status: model.DispatchQueued, CreatedAt: t0.Add(-1 * time.Minute), QueuedUntilBlockersClear: true},
+	}
+	templates := []*store.PromptTemplate{
+		{Slug: "implement", Name: "Implementing", ActionLabel: "Implement"},
+	}
+	f := &fakeClient{repo: repo, issues: issues, dispatches: dispatches, templates: templates, blockers: blockers}
+	cards, err := Assemble(context.Background(), f, repo, false, nil)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	byKey := map[string]BoardCard{}
+	for _, c := range cards {
+		byKey[c.Key] = c
+	}
+	// TEST-1 parent-acks: WaitingReason stays empty (the chip reads the mode label).
+	if fo := byKey["TEST-1"].FollowOn; fo == nil {
+		t.Errorf("TEST-1 FollowOn = nil, want non-nil")
+	} else if fo.WaitingReason != "" {
+		t.Errorf("TEST-1 FollowOn.WaitingReason = %q, want empty (parent-acks variant)", fo.WaitingReason)
+	}
+	// TEST-2 blockers-clear: "blocked by 2" derived from the 2 open blockers.
+	if fo := byKey["TEST-2"].FollowOn; fo == nil {
+		t.Errorf("TEST-2 FollowOn = nil, want non-nil")
+	} else if fo.WaitingReason != "blocked by 2" {
+		t.Errorf("TEST-2 FollowOn.WaitingReason = %q, want %q", fo.WaitingReason, "blocked by 2")
+	}
+}

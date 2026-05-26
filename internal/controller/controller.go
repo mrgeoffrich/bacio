@@ -374,6 +374,12 @@ func recordFollowOnGateFailAudit(s *store.Store, d *model.AgentDispatch, log *sl
 // mode, and the parent dispatch id (when still set — a promote sweep
 // clears the parent FK before this is read on the post-sweep row, so
 // promote audit rows naturally omit the parent_dispatch_id field).
+// BACI-217: also stamps the gate variant (`gate=parent` or
+// `gate=blockers`) when discernible — a reader of `bacio history`
+// can tell the two variants apart at the row level. A promoted row
+// has both flags cleared by the sweep so the gate= field is omitted
+// from promote audit rows; that's intentional (the row no longer is
+// a follow-on, just a regular queued dispatch).
 // Empty fields are omitted, not stamped as `=`.
 func followOnDetails(d *model.AgentDispatch) string {
 	if d == nil {
@@ -388,6 +394,9 @@ func followOnDetails(d *model.AgentDispatch) string {
 	}
 	if d.QueuedAfterDispatchID != nil {
 		parts = append(parts, fmt.Sprintf("parent_dispatch_id=%d", *d.QueuedAfterDispatchID))
+		parts = append(parts, "gate=parent")
+	} else if d.QueuedUntilBlockersClear {
+		parts = append(parts, "gate=blockers")
 	}
 	return strings.Join(parts, ",")
 }

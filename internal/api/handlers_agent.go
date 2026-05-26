@@ -1475,10 +1475,15 @@ func (d deps) handleIssueQueueFollowOn(w http.ResponseWriter, r *http.Request) {
 		// does: state-gate and "no active dispatch" / "already has a
 		// follow-on" misses are 400s (caller's choice to fix and
 		// retry); everything else falls through to statusForError.
+		// BACI-217: the "no open blockers" rejection (from the
+		// blockers-clear variant guard) and the "use the parent
+		// follow-on variant" rejection are also caller-fixable 400s.
 		msg := err.Error()
 		if strings.Contains(msg, "can't run from") ||
 			strings.Contains(msg, "no active dispatch") ||
-			strings.Contains(msg, "already has a follow-on") {
+			strings.Contains(msg, "already has a follow-on") ||
+			strings.Contains(msg, "no open blockers") ||
+			strings.Contains(msg, "use the parent follow-on variant") {
 			writeError(w, http.StatusBadRequest, "invalid_input", msg, nil)
 			return
 		}

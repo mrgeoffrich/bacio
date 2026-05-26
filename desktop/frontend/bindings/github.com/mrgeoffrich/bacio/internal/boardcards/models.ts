@@ -289,22 +289,27 @@ export class BoardCardBlocker {
 
 /**
  * BoardCardFollowOn (BACI-192) is the denormalised view of the dormant
- * follow-on dispatch attached to this issue's currently in-flight
- * (parent) dispatch — the single-slot row that BACI-180's
- * WaitingDispatchForIssue + AddFollowOnDispatch wrote. Surfaced on
- * every taken / waiting card so the kanban footer button can render
- * the queued mode without a per-card REST call.
+ * follow-on dispatch attached to this issue. Surfaced on every taken /
+ * waiting / blocked-and-idle card so the kanban footer button can
+ * render the queued mode without a per-card REST call.
  * 
- * Mode is the prompt-template slug the BACI-180 backend stored on the
- * dispatch row; ActionLabel is the imperative verb (resolved via the
- * same prompt-template lookup as ActiveVerb / WaitingState) so the
- * button label can read "▶| Plan" rather than the bare slug. Nil (and
+ * Mode is the prompt-template slug the backend stored on the dispatch
+ * row; ActionLabel is the imperative verb (resolved via the same
+ * prompt-template lookup as ActiveVerb / WaitingState) so the button
+ * label can read "▶| Plan" rather than the bare slug. Nil (and
  * omitted from JSON) when the issue has no dormant follow-on — the
  * renderer only paints the .is-attached state when truthy.
+ * 
+ * WaitingReason (BACI-217) is a short server-derived label
+ * describing what the dormant row is waiting on, when the variant is
+ * the blockers-clear gate ("blocked by N"). Empty (and omitted from
+ * JSON) for the parent-acks variant (today's BACI-179 default — the
+ * chip reads the mode label without a secondary qualifier).
  */
 export class BoardCardFollowOn {
     "mode": model$0.DispatchMode;
     "actionLabel": string;
+    "waitingReason"?: string;
 
     /** Creates a new BoardCardFollowOn instance. */
     constructor($$source: Partial<BoardCardFollowOn> = {}) {

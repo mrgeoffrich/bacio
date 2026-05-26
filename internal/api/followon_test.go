@@ -372,6 +372,68 @@ func TestREST_DispatchChainDryRun(t *testing.T) {
 	assertHistoryOps(t, s, nil)
 }
 
+// TestREST_QueueFollowOnBlockedIdleCard (BACI-217) — a blocked-and-idle
+// card (no in-flight parent, ≥1 open `blocks` edge pointing at it)
+// accepts a follow-on as the blockers-clear variant. The 201 response
+// carries the new flag, no parent-acks link, and the audit log records
+// agent.followon.queue with gate=blockers in Details.
+func TestREST_QueueFollowOnBlockedIdleCard(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	blocked := seedIssue(t, s, repo, "blocked-and-idle")
+	blocker := seedIssue(t, s, repo, "the blocker")
+	if err := s.CreateRelation(blocker.ID, blocked.ID, model.RelBlocks); err != nil {
+		t.Fatalf("create blocks edge: %v", err)
+	}
+
+	resp, raw := apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/issues/"+blocked.Key+"/followon",
+		map[string]any{"issue_key": blocked.Key, "mode": string(model.DispatchModeImplement)})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status %d, body %s", resp.StatusCode, raw)
+	}
+	var got model.AgentDispatch
+	mustDecode(t, raw, &got)
+	if !got.QueuedUntilBlockersClear {
+		t.Error("expected queued_until_blockers_clear = true on the blockers-clear variant")
+	}
+	if got.QueuedAfterDispatchID != nil {
+		t.Errorf("blockers-clear variant must not carry queued_after_dispatch_id, got %v", got.QueuedAfterDispatchID)
+	}
+	if got.Status != model.DispatchQueued {
+		t.Errorf("Status = %q, want queued (dormant)", got.Status)
+	}
+	// Audit row stamps gate=blockers so the variant is distinguishable
+	// in `bacio history --op agent.followon.queue`.
+	rows, err := s.ListHistory(store.HistoryFilter{Limit: 10, Op: "agent.followon.queue"})
+	if err != nil {
+		t.Fatalf("ListHistory: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("agent.followon.queue rows: got %d, want 1", len(rows))
+	}
+	if !strings.Contains(rows[0].Details, "gate=blockers") {
+		t.Errorf("audit Details = %q, want gate=blockers", rows[0].Details)
+	}
+}
+
+// TestREST_QueueFollowOnIdleUnblockedCard (BACI-217) — an issue with
+// neither an in-flight parent nor any open blockers still returns 400
+// with the "no active dispatch" hint (today's UX preserved).
+func TestREST_QueueFollowOnIdleUnblockedCard(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	iss := seedIssue(t, s, repo, "idle and unblocked")
+
+	resp, raw := apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/issues/"+iss.Key+"/followon",
+		map[string]any{"issue_key": iss.Key, "mode": string(model.DispatchModeImplement)})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status %d, body %s", resp.StatusCode, raw)
+	}
+	if !strings.Contains(string(raw), "no active dispatch") {
+		t.Errorf("body missing 'no active dispatch' hint: %s", raw)
+	}
+}
+
 // TestREST_CancelFollowOnIssueInOtherRepo: DELETE against a key from a
 // different repo than the URL prefix returns 404 (no cross-repo leak).
 func TestREST_CancelFollowOnIssueInOtherRepo(t *testing.T) {

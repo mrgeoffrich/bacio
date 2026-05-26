@@ -19,6 +19,7 @@ package boardcards
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"time"
@@ -287,21 +288,26 @@ type BoardCardBlocker struct {
 }
 
 // BoardCardFollowOn (BACI-192) is the denormalised view of the dormant
-// follow-on dispatch attached to this issue's currently in-flight
-// (parent) dispatch — the single-slot row that BACI-180's
-// WaitingDispatchForIssue + AddFollowOnDispatch wrote. Surfaced on
-// every taken / waiting card so the kanban footer button can render
-// the queued mode without a per-card REST call.
+// follow-on dispatch attached to this issue. Surfaced on every taken /
+// waiting / blocked-and-idle card so the kanban footer button can
+// render the queued mode without a per-card REST call.
 //
-// Mode is the prompt-template slug the BACI-180 backend stored on the
-// dispatch row; ActionLabel is the imperative verb (resolved via the
-// same prompt-template lookup as ActiveVerb / WaitingState) so the
-// button label can read "▶| Plan" rather than the bare slug. Nil (and
+// Mode is the prompt-template slug the backend stored on the dispatch
+// row; ActionLabel is the imperative verb (resolved via the same
+// prompt-template lookup as ActiveVerb / WaitingState) so the button
+// label can read "▶| Plan" rather than the bare slug. Nil (and
 // omitted from JSON) when the issue has no dormant follow-on — the
 // renderer only paints the .is-attached state when truthy.
+//
+// WaitingReason (BACI-217) is a short server-derived label
+// describing what the dormant row is waiting on, when the variant is
+// the blockers-clear gate ("blocked by N"). Empty (and omitted from
+// JSON) for the parent-acks variant (today's BACI-179 default — the
+// chip reads the mode label without a secondary qualifier).
 type BoardCardFollowOn struct {
-	Mode        model.DispatchMode `json:"mode"`
-	ActionLabel string             `json:"actionLabel"`
+	Mode          model.DispatchMode `json:"mode"`
+	ActionLabel   string             `json:"actionLabel"`
+	WaitingReason string             `json:"waitingReason,omitempty"`
 }
 
 // BoardCardQuestion is one open ask_user_question row surfaced on
@@ -389,11 +395,14 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 		allDispatches = append(allDispatches, ds...)
 	}
 	activeByIssueID := activeDispatchByIssueID(allDispatches)
-	// BACI-192: per-issue dormant follow-on lookup. The dispatch slice
-	// is already newest-first; first match wins per issue. A row is a
-	// dormant follow-on when its status is queued AND its queued_after
-	// link is set (the same predicate store.FollowOnForIssue uses, but
-	// derived here client-side so we don't N+1 against the store).
+	// BACI-192 / BACI-217: per-issue dormant follow-on lookup. The
+	// dispatch slice is already newest-first; first match wins per
+	// issue. A row is a dormant follow-on when its status is queued
+	// AND either the parent-acks gate (queued_after_dispatch_id IS
+	// NOT NULL — BACI-179) or the blockers-clear gate
+	// (queued_until_blockers_clear — BACI-217) is set. Same predicate
+	// store.FollowOnForIssue uses, but derived client-side so we
+	// don't N+1 against the store.
 	followOnByIssueID := make(map[int64]*model.AgentDispatch, len(allDispatches))
 	for _, d := range allDispatches {
 		if d == nil || d.IssueID == nil {
@@ -402,7 +411,7 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 		if d.Status != model.DispatchQueued {
 			continue
 		}
-		if d.QueuedAfterDispatchID == nil {
+		if d.QueuedAfterDispatchID == nil && !d.QueuedUntilBlockersClear {
 			continue
 		}
 		if _, seen := followOnByIssueID[*d.IssueID]; seen {
@@ -499,12 +508,22 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 		// BACI-192: shape the dormant follow-on row (if any) into the
 		// wire DTO. The action label resolves via the same lookup the
 		// WaitingState path uses, so the button reads consistently
-		// with the spinner label.
+		// with the spinner label. BACI-217: on a blockers-clear
+		// variant the chip carries a "blocked by N" waiting reason
+		// derived from the already-loaded blockedByID map; the
+		// parent-acks variant leaves WaitingReason empty (the chip
+		// reads the mode label as today).
 		var followOn *BoardCardFollowOn
 		if fo := followOnByIssueID[iss.ID]; fo != nil {
 			followOn = &BoardCardFollowOn{
 				Mode:        fo.Mode,
 				ActionLabel: actionLabelForMode(fo.Mode, templates),
+			}
+			if fo.QueuedUntilBlockersClear {
+				n := len(blockedByID[iss.ID])
+				if n > 0 {
+					followOn.WaitingReason = fmt.Sprintf("blocked by %d", n)
+				}
 			}
 		}
 		cards = append(cards, BoardCard{
@@ -838,15 +857,17 @@ func activeDispatchByIssueID(allDispatches []*model.AgentDispatch) map[int64]*mo
 		if _, ok := out[id]; ok {
 			continue
 		}
-		// BACI-209: a dormant follow-on (queued + queued_after_dispatch_id
-		// set) is NOT the active dispatch — it's chained behind the
-		// parent's still-open dispatch. Without this skip the dispatch-
-		// chain affordance would mis-label the spinner ("queued: Implement"
-		// while the user picked "Plan, then Implement"), because the
-		// follow-on is the newer row and would win the first-match
-		// walk. The parent dispatch a few rows back is the one driving
-		// waiting_for_claim.
-		if d.Status == model.DispatchQueued && d.QueuedAfterDispatchID != nil {
+		// BACI-209 / BACI-217: a dormant follow-on (queued + at least
+		// one dormant gate set — parent-acks via
+		// queued_after_dispatch_id, or blockers-clear via
+		// queued_until_blockers_clear) is NOT the active dispatch.
+		// It's the queued-behind-the-gate row; the spinner-label
+		// deriver should look at the *parent* (when the issue is
+		// already in flight) or render nothing (for a blocked-and-idle
+		// card). Without this skip a blockers-clear row leaks through
+		// as a `queued_no_agent` spinner on a card that is otherwise
+		// dormant — the chip is the right surface, not the spinner.
+		if d.Status == model.DispatchQueued && (d.QueuedAfterDispatchID != nil || d.QueuedUntilBlockersClear) {
 			continue
 		}
 		switch d.Status {
@@ -859,12 +880,14 @@ func activeDispatchByIssueID(allDispatches []*model.AgentDispatch) map[int64]*mo
 	return out
 }
 
-// followOnByIssueID (BACI-182) maps issue id → the issue's dormant
-// follow-on dispatch row (status=queued AND queued_after_dispatch_id IS
-// NOT NULL), or absent when no follow-on is queued. Walks the same
-// `allDispatches` slice (newest-first per RepoDispatches' contract) so
-// the first matching row per issue wins — mirrors activeDispatchByIssueID
-// in shape and per-issue uniqueness.
+// followOnByIssueID (BACI-182, BACI-217) maps issue id → the issue's
+// dormant follow-on dispatch row (status=queued AND at least one of
+// the two dormant flags set — parent-acks via
+// queued_after_dispatch_id, or blockers-clear via
+// queued_until_blockers_clear), or absent when no follow-on is queued.
+// Walks the same `allDispatches` slice (newest-first per
+// RepoDispatches' contract) so the first matching row per issue wins —
+// mirrors activeDispatchByIssueID in shape and per-issue uniqueness.
 //
 // Drives BACI-182's kanban chevron-or-chip slot: a non-nil entry tells
 // the renderer to paint the chip (replacing the chevron) and the chip
@@ -875,7 +898,10 @@ func followOnByIssueID(allDispatches []*model.AgentDispatch) map[int64]*model.Ag
 		if d == nil || d.IssueID == nil {
 			continue
 		}
-		if d.Status != model.DispatchQueued || d.QueuedAfterDispatchID == nil {
+		if d.Status != model.DispatchQueued {
+			continue
+		}
+		if d.QueuedAfterDispatchID == nil && !d.QueuedUntilBlockersClear {
 			continue
 		}
 		id := *d.IssueID

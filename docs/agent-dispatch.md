@@ -179,6 +179,21 @@ post-hoc `bacio agent queue-followon` uses. The primary row remains
 the default; the chain rows are indented under each primary's
 section header so the menu still groups by primary.
 
+**BACI-217 — blockers-clear follow-on variant.** `bacio agent
+queue-followon` (and `POST .../followon`) also accepts a blocked-but-
+idle card and queues a second variant that waits for every issue on
+the `to` side of an open `blocks` edge pointing at it to reach `done`
+or `cancelled` before firing. The dispatch row carries
+`queued_until_blockers_clear = 1` instead of `queued_after_dispatch_id`;
+the controller sweep re-reads live blockers on every tick (so a new
+`blocks` edge added after queueing extends the wait), and `bacio
+history --op agent.followon.queue` stamps `gate=blockers` in Details
+so the variant is distinguishable from the parent-acks default. The
+two variants are mutually exclusive on a single row, and the
+single-slot-per-issue invariant covers both — a card that is both
+blocked and has an in-flight parent dispatch falls through to the
+parent-acks variant.
+
 #### State-gated prompts
 
 Each dispatch stage (`plan`, `design`, `implement`, `review`, `ship`,

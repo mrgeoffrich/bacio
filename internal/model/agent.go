@@ -898,6 +898,16 @@ type AgentDispatch struct {
 	// Never set on rows in any state other than queued — the AddDispatch
 	// validator rejects the combination at the store boundary.
 	QueuedAfterDispatchID *int64 `json:"queued_after_dispatch_id,omitempty"`
+	// QueuedUntilBlockersClear (BACI-217) is the second optional "fire
+	// after" gate for follow-on dispatches: when true, the dormant
+	// queued row is excluded from the matcher's pool until every issue
+	// on the `to` side of an open `blocks` edge pointing at this
+	// dispatch's issue is done/cancelled. Mutually exclusive with
+	// QueuedAfterDispatchID on a single row (enforced at the store
+	// boundary). Cleared by the same promote sweep that handles
+	// BACI-179 rows once the blocker gate clears AND no open claim
+	// races in. Never set on rows in any state other than queued.
+	QueuedUntilBlockersClear bool `json:"queued_until_blockers_clear,omitempty"`
 }
 
 // AgentLivenessThreshold is the gap after a session's last heartbeat

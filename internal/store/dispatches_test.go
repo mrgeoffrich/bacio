@@ -1647,3 +1647,313 @@ func TestAddDispatchWithFollowOn_RequiresIssue(t *testing.T) {
 		t.Fatal("expected issue-less chain to be rejected, got nil")
 	}
 }
+
+// seedBlockerFixture (BACI-217) extends seedDispatchFixture with a
+// second issue inserted as an open blocker of the first: the returned
+// blocked-side issue (`iss`) has at least one open `blocks` edge from
+// the blocker. Used by every test of the blockers-clear follow-on
+// variant. Returns (store, repo, blocked-issue, blocker-issue).
+func seedBlockerFixture(t *testing.T) (*Store, *model.Repo, *model.Issue, *model.Issue) {
+	t.Helper()
+	s, repo, blocked, _, _ := seedDispatchFixture(t)
+	blocker, err := s.CreateIssue(repo.ID, nil, "the blocker", "", model.StateTodo, nil)
+	if err != nil {
+		t.Fatalf("create blocker issue: %v", err)
+	}
+	if err := s.CreateRelation(blocker.ID, blocked.ID, model.RelBlocks); err != nil {
+		t.Fatalf("create blocks edge: %v", err)
+	}
+	return s, repo, blocked, blocker
+}
+
+// TestAddBlockerFollowOnDispatch_HappyPath (BACI-217) locks in the
+// blockers-clear insert path. A blocked-and-idle issue with at least
+// one open blocker writes a queued row with the new flag set, no
+// parent-acks link, no target. The issue's waiting_for_claim flag is
+// DELIBERATELY left alone — the dormant row is not waiting for the
+// matcher (it's waiting for the blocker gate), and flipping
+// waiting_for_claim would render a misleading spinner on an
+// otherwise-idle ticket. The chip is the right surface for this
+// variant.
+func TestAddBlockerFollowOnDispatch_HappyPath(t *testing.T) {
+	s, repo, blocked, _ := seedBlockerFixture(t)
+	d, err := s.AddBlockerFollowOnDispatch(repo.ID, blocked.ID, model.DispatchModePlan, "supervisor")
+	if err != nil {
+		t.Fatalf("AddBlockerFollowOnDispatch: %v", err)
+	}
+	if !d.QueuedUntilBlockersClear {
+		t.Fatal("queued_until_blockers_clear flag not set on returned row")
+	}
+	if d.QueuedAfterDispatchID != nil {
+		t.Fatalf("queued_after_dispatch_id should be nil on a blockers-clear row, got %v", d.QueuedAfterDispatchID)
+	}
+	if d.Status != model.DispatchQueued {
+		t.Fatalf("status = %q, want queued", d.Status)
+	}
+	iss, err := s.GetIssueByID(blocked.ID)
+	if err != nil {
+		t.Fatalf("reload issue: %v", err)
+	}
+	if iss.WaitingForClaim {
+		t.Fatal("waiting_for_claim should NOT be set on a blockers-clear insert (the chip is the surface, not the spinner)")
+	}
+}
+
+// TestAddBlockerFollowOnDispatch_RefusesUnblockedIssue (BACI-217) — an
+// issue with zero open blockers is not eligible for the blockers-clear
+// variant; the matcher would bind it on its next tick, so writing a
+// dormant row would just shadow that bind for a sweep cycle.
+func TestAddBlockerFollowOnDispatch_RefusesUnblockedIssue(t *testing.T) {
+	s, repo, blocked, blocker := seedBlockerFixture(t)
+	// Close the only blocker so the blocked side now has zero open
+	// blockers — the AddBlockerFollowOnDispatch call must refuse.
+	if err := s.SetIssueState(blocker.ID, model.StateDone); err != nil {
+		t.Fatalf("close blocker: %v", err)
+	}
+	_, err := s.AddBlockerFollowOnDispatch(repo.ID, blocked.ID, model.DispatchModePlan, "supervisor")
+	if err == nil {
+		t.Fatal("expected unblocked-issue to be rejected, got nil")
+	}
+	if !strings.Contains(err.Error(), "no open blockers") {
+		t.Fatalf("error should name the unblocked case, got: %v", err)
+	}
+}
+
+// TestAddBlockerFollowOnDispatch_RefusesWhenInflightParent (BACI-217)
+// — when the issue is both blocked AND has an in-flight parent
+// dispatch, the parent-acks variant is the right fit. The client
+// wrapper's branch ordering enforces this; the boundary defence here
+// keeps the store from accepting a second variant on a single issue.
+func TestAddBlockerFollowOnDispatch_RefusesWhenInflightParent(t *testing.T) {
+	s, repo, blocked, _ := seedBlockerFixture(t)
+	_, ag, _ := bestEffortAgentSession(t, s, repo)
+	parent, err := s.AddDispatch(AddDispatchIn{
+		RepoID:        repo.ID,
+		TargetAgentID: &ag.ID,
+		IssueID:       &blocked.ID,
+		Mode:          model.DispatchModePlan,
+		CreatedBy:     "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("seed parent dispatch: %v", err)
+	}
+	_ = parent
+	if _, err := s.AddBlockerFollowOnDispatch(repo.ID, blocked.ID, model.DispatchModeImplement, "supervisor"); err == nil {
+		t.Fatal("expected in-flight parent to be rejected, got nil")
+	}
+}
+
+// bestEffortAgentSession re-resolves the seed fixture's agent + session
+// from the store (seedBlockerFixture inherits seedDispatchFixture's
+// agent+session pair). Returns (store, agent, session) — keeps the
+// test scaffolding minimal. requireNew is false so a returning lookup
+// against the pre-seeded slug is a no-op refresh rather than a clash.
+func bestEffortAgentSession(t *testing.T, s *Store, repo *model.Repo) (*Store, *model.Agent, *model.AgentSession) {
+	t.Helper()
+	ag, _, err := s.UpsertAgent("swift-otter@claude.test", false)
+	if err != nil {
+		t.Fatalf("upsert agent: %v", err)
+	}
+	// Reuse the seed's session id ("sess-dispatch-1") so we don't
+	// stand up a second session row. UpsertAgentSession is idempotent
+	// on session_id, so this resolves the existing row.
+	sess, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "sess-dispatch-1", RepoID: repo.ID, AgentID: &ag.ID, Actor: "agent-claude",
+	})
+	if err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+	return s, ag, sess
+}
+
+// TestAddBlockerFollowOnDispatch_SingleSlot (BACI-217) — the
+// single-slot invariant is across BOTH variants: a pre-existing
+// parent-acks follow-on blocks a blockers-clear queue on the same
+// issue, and vice versa.
+func TestAddBlockerFollowOnDispatch_SingleSlot(t *testing.T) {
+	s, repo, blocked, _ := seedBlockerFixture(t)
+	if _, err := s.AddBlockerFollowOnDispatch(repo.ID, blocked.ID, model.DispatchModePlan, "supervisor"); err != nil {
+		t.Fatalf("first blocker follow-on: %v", err)
+	}
+	if _, err := s.AddBlockerFollowOnDispatch(repo.ID, blocked.ID, model.DispatchModeImplement, "supervisor"); err == nil {
+		t.Fatal("expected second blockers-clear follow-on to be rejected, got nil")
+	}
+}
+
+// TestPromoteReadyFollowOns_BlockerVariantFires (BACI-217) — when every
+// blocker is `done` the promote sweep clears the blockers-clear flag
+// so the matcher binds the row on its next tick. The blocked issue's
+// waiting_for_claim is also flipped on promote — the insert left it
+// alone (the dormant row was waiting for the gate, not the matcher),
+// so the promote is the moment the card legitimately enters waiting
+// state.
+func TestPromoteReadyFollowOns_BlockerVariantFires(t *testing.T) {
+	s, repo, blocked, blocker := seedBlockerFixture(t)
+	follow, err := s.AddBlockerFollowOnDispatch(repo.ID, blocked.ID, model.DispatchModePlan, "supervisor")
+	if err != nil {
+		t.Fatalf("AddBlockerFollowOnDispatch: %v", err)
+	}
+	gates := mustLoadGates(t, s)
+	// Pre-clear sweep — blocker still open, row stays dormant.
+	promoted, gateFailed, err := s.PromoteReadyFollowOns(gates)
+	if err != nil {
+		t.Fatalf("promote (pre-clear): %v", err)
+	}
+	if len(promoted) != 0 || len(gateFailed) != 0 {
+		t.Fatalf("with open blocker: promoted=%d gateFailed=%d, want 0/0", len(promoted), len(gateFailed))
+	}
+	if err := s.SetIssueState(blocker.ID, model.StateDone); err != nil {
+		t.Fatalf("close blocker: %v", err)
+	}
+	promoted, gateFailed, err = s.PromoteReadyFollowOns(gates)
+	if err != nil {
+		t.Fatalf("promote: %v", err)
+	}
+	if len(promoted) != 1 || len(gateFailed) != 0 {
+		t.Fatalf("promoted=%d gateFailed=%d, want 1/0", len(promoted), len(gateFailed))
+	}
+	if promoted[0].ID != follow.ID {
+		t.Fatalf("promoted id = %d, want %d", promoted[0].ID, follow.ID)
+	}
+	if promoted[0].QueuedUntilBlockersClear {
+		t.Fatal("promoted row still carries queued_until_blockers_clear = 1")
+	}
+	if promoted[0].QueuedAfterDispatchID != nil {
+		t.Fatalf("promoted row still has queued_after_dispatch_id = %v", promoted[0].QueuedAfterDispatchID)
+	}
+	// Matcher predicate now sees the row.
+	modes, err := s.ListQueuedModesByRepo(repo.ID)
+	if err != nil {
+		t.Fatalf("list modes: %v", err)
+	}
+	if len(modes) != 1 || modes[0] != model.DispatchModePlan {
+		t.Fatalf("post-promote modes = %v, want [plan]", modes)
+	}
+	// The blocked issue's waiting_for_claim is set now — the spinner on
+	// the card lights up once the matcher is about to bind.
+	iss, err := s.GetIssueByID(blocked.ID)
+	if err != nil {
+		t.Fatalf("reload issue: %v", err)
+	}
+	if !iss.WaitingForClaim {
+		t.Fatal("waiting_for_claim should be set after promote (the row is now matcher-eligible)")
+	}
+}
+
+// TestPromoteReadyFollowOns_BlockerVariantCancelCountsAsClear (BACI-217)
+// — a `cancelled` blocker counts as cleared for the gate (the user has
+// explicitly said the work is no longer pending).
+func TestPromoteReadyFollowOns_BlockerVariantCancelCountsAsClear(t *testing.T) {
+	s, repo, blocked, blocker := seedBlockerFixture(t)
+	if _, err := s.AddBlockerFollowOnDispatch(repo.ID, blocked.ID, model.DispatchModePlan, "supervisor"); err != nil {
+		t.Fatalf("AddBlockerFollowOnDispatch: %v", err)
+	}
+	if err := s.SetIssueState(blocker.ID, model.StateCancelled); err != nil {
+		t.Fatalf("cancel blocker: %v", err)
+	}
+	gates := mustLoadGates(t, s)
+	promoted, gateFailed, err := s.PromoteReadyFollowOns(gates)
+	if err != nil {
+		t.Fatalf("promote: %v", err)
+	}
+	if len(promoted) != 1 || len(gateFailed) != 0 {
+		t.Fatalf("promoted=%d gateFailed=%d, want 1/0 (cancelled counts as cleared)", len(promoted), len(gateFailed))
+	}
+}
+
+// TestPromoteReadyFollowOns_BlockerVariantWaitsForNewBlocker (BACI-217)
+// — a `blocks` edge added after queue time must extend the wait. The
+// sweep re-reads live blockers every tick, so an INSERT of a second
+// open blocker mid-flight keeps the row dormant even after the first
+// blocker closes.
+func TestPromoteReadyFollowOns_BlockerVariantWaitsForNewBlocker(t *testing.T) {
+	s, repo, blocked, blocker1 := seedBlockerFixture(t)
+	if _, err := s.AddBlockerFollowOnDispatch(repo.ID, blocked.ID, model.DispatchModePlan, "supervisor"); err != nil {
+		t.Fatalf("AddBlockerFollowOnDispatch: %v", err)
+	}
+	// Add a second open blocker post-queue.
+	blocker2, err := s.CreateIssue(repo.ID, nil, "second blocker", "", model.StateTodo, nil)
+	if err != nil {
+		t.Fatalf("create second blocker: %v", err)
+	}
+	if err := s.CreateRelation(blocker2.ID, blocked.ID, model.RelBlocks); err != nil {
+		t.Fatalf("create second blocks edge: %v", err)
+	}
+	gates := mustLoadGates(t, s)
+	// Close blocker1 — blocker2 still open, the gate must stay.
+	if err := s.SetIssueState(blocker1.ID, model.StateDone); err != nil {
+		t.Fatalf("close blocker1: %v", err)
+	}
+	promoted, gateFailed, err := s.PromoteReadyFollowOns(gates)
+	if err != nil {
+		t.Fatalf("promote (one still open): %v", err)
+	}
+	if len(promoted) != 0 || len(gateFailed) != 0 {
+		t.Fatalf("with open blocker2: promoted=%d gateFailed=%d, want 0/0", len(promoted), len(gateFailed))
+	}
+	// Close blocker2 — gate clears.
+	if err := s.SetIssueState(blocker2.ID, model.StateDone); err != nil {
+		t.Fatalf("close blocker2: %v", err)
+	}
+	promoted, gateFailed, err = s.PromoteReadyFollowOns(gates)
+	if err != nil {
+		t.Fatalf("promote (all clear): %v", err)
+	}
+	if len(promoted) != 1 || len(gateFailed) != 0 {
+		t.Fatalf("promoted=%d gateFailed=%d, want 1/0", len(promoted), len(gateFailed))
+	}
+}
+
+// TestCancelOrphanedFollowOns_BlockerVariantOnTerminalIssue (BACI-217)
+// — when the blocked issue itself lands in a terminal state, the
+// orphan-cancel sweep drops the blockers-clear dormant row alongside
+// the existing parent-acks variant.
+func TestCancelOrphanedFollowOns_BlockerVariantOnTerminalIssue(t *testing.T) {
+	s, repo, blocked, _ := seedBlockerFixture(t)
+	follow, err := s.AddBlockerFollowOnDispatch(repo.ID, blocked.ID, model.DispatchModePlan, "supervisor")
+	if err != nil {
+		t.Fatalf("AddBlockerFollowOnDispatch: %v", err)
+	}
+	if err := s.SetIssueState(blocked.ID, model.StateDone); err != nil {
+		t.Fatalf("close blocked issue: %v", err)
+	}
+	cancelled, err := s.CancelOrphanedFollowOns()
+	if err != nil {
+		t.Fatalf("orphan-cancel: %v", err)
+	}
+	if len(cancelled) != 1 || cancelled[0].ID != follow.ID {
+		t.Fatalf("cancelled = %v, want [%d]", cancelled, follow.ID)
+	}
+	if cancelled[0].Status != model.DispatchCancelled {
+		t.Fatalf("status = %q, want cancelled", cancelled[0].Status)
+	}
+}
+
+// TestPromoteReadyFollowOns_BlockerVariantOpenClaimDefers (BACI-217) —
+// even when every blocker is cleared, an open claim held by a live
+// session on the blocked issue defers the promote: the existing
+// race-guard in PromoteReadyFollowOns excludes the row from both
+// variants' selection.
+func TestPromoteReadyFollowOns_BlockerVariantOpenClaimDefers(t *testing.T) {
+	s, repo, blocked, blocker := seedBlockerFixture(t)
+	if _, err := s.AddBlockerFollowOnDispatch(repo.ID, blocked.ID, model.DispatchModePlan, "supervisor"); err != nil {
+		t.Fatalf("AddBlockerFollowOnDispatch: %v", err)
+	}
+	if err := s.SetIssueState(blocker.ID, model.StateDone); err != nil {
+		t.Fatalf("close blocker: %v", err)
+	}
+	// Stand up a live session + an open claim on the blocked issue.
+	_, ag, sess := bestEffortAgentSession(t, s, repo)
+	_ = ag
+	if _, _, _, _, err := s.AddAgentClaim(sess.SessionID, blocked.ID, "review"); err != nil {
+		t.Fatalf("add agent claim: %v", err)
+	}
+	gates := mustLoadGates(t, s)
+	promoted, gateFailed, err := s.PromoteReadyFollowOns(gates)
+	if err != nil {
+		t.Fatalf("promote: %v", err)
+	}
+	if len(promoted) != 0 || len(gateFailed) != 0 {
+		t.Fatalf("with open claim: promoted=%d gateFailed=%d, want 0/0", len(promoted), len(gateFailed))
+	}
+}

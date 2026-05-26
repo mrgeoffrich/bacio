@@ -387,25 +387,72 @@ func (c *localClient) QueueFollowOnDispatch(ctx context.Context, repo *model.Rep
 	if err != nil {
 		return nil, err
 	}
-	if parent == nil {
+	if parent != nil {
+		// Parent-acks variant: an in-flight dispatch is already on the
+		// issue, queue the follow-on linked to it (BACI-179 path).
+		if dryRun {
+			// Project the would-be row — mirrors AutoDispatchIssue's dry-run
+			// shape so the caller sees the same fields as a real insert.
+			return &model.AgentDispatch{
+				RepoID:                repo.ID,
+				RepoPrefix:            repo.Prefix,
+				IssueID:               &iss.ID,
+				IssueKey:              iss.Key,
+				Mode:                  parsedMode,
+				Status:                model.DispatchQueued,
+				CreatedBy:             c.actor,
+				CreatedAt:             time.Now().UTC(),
+				QueuedAfterDispatchID: &parent.ID,
+			}, nil
+		}
+		d, err := c.store.AddFollowOnDispatch(repo.ID, parent.ID, parsedMode, c.actor)
+		if err != nil {
+			return nil, err
+		}
+		c.recordOp(model.HistoryEntry{
+			RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+			Op: "agent.followon.queue", Kind: "agent",
+			TargetID: &d.ID, TargetLabel: iss.Key,
+			Details: followOnDetailsForClient(d),
+		})
+		return d, nil
+	}
+	// BACI-217: no in-flight parent dispatch — fall through to the
+	// blockers-clear variant if the issue is blocked by at least one
+	// open issue. Either branch lands an `agent.followon.queue` audit
+	// row with the gate stamped in Details; an issue that is neither
+	// in-flight nor blocked keeps today's error message verbatim.
+	blockers, err := c.store.BlockersFor([]int64{iss.ID})
+	if err != nil {
+		return nil, err
+	}
+	openBlockers := 0
+	for _, b := range blockers[iss.ID] {
+		if b.BlockerState != model.StateDone && b.BlockerState != model.StateCancelled {
+			openBlockers++
+		}
+	}
+	if openBlockers == 0 {
 		return nil, fmt.Errorf("issue %s has no active dispatch to follow on from", iss.Key)
 	}
 	if dryRun {
-		// Project the would-be row — mirrors AutoDispatchIssue's dry-run
-		// shape so the caller sees the same fields as a real insert.
+		// Project the would-be blockers-clear row — same shape as the
+		// parent-acks dry-run, but with the blockers flag set and the
+		// parent-id absent. The chip's "blocked by N" label is derived
+		// server-side at next BoardCard refresh.
 		return &model.AgentDispatch{
-			RepoID:                repo.ID,
-			RepoPrefix:            repo.Prefix,
-			IssueID:               &iss.ID,
-			IssueKey:              iss.Key,
-			Mode:                  parsedMode,
-			Status:                model.DispatchQueued,
-			CreatedBy:             c.actor,
-			CreatedAt:             time.Now().UTC(),
-			QueuedAfterDispatchID: &parent.ID,
+			RepoID:                   repo.ID,
+			RepoPrefix:               repo.Prefix,
+			IssueID:                  &iss.ID,
+			IssueKey:                 iss.Key,
+			Mode:                     parsedMode,
+			Status:                   model.DispatchQueued,
+			CreatedBy:                c.actor,
+			CreatedAt:                time.Now().UTC(),
+			QueuedUntilBlockersClear: true,
 		}, nil
 	}
-	d, err := c.store.AddFollowOnDispatch(repo.ID, parent.ID, parsedMode, c.actor)
+	d, err := c.store.AddBlockerFollowOnDispatch(repo.ID, iss.ID, parsedMode, c.actor)
 	if err != nil {
 		return nil, err
 	}
@@ -470,7 +517,8 @@ func (c *localClient) CancelFollowOnDispatch(ctx context.Context, repo *model.Re
 // the client doesn't import the controller package just for the
 // helper. Same shape so a reader of `bacio history --op
 // agent.followon.queue` sees identical fields regardless of which
-// writer the row came from.
+// writer the row came from. BACI-217: also stamps `gate=parent` /
+// `gate=blockers` so the audit log distinguishes the two variants.
 func followOnDetailsForClient(d *model.AgentDispatch) string {
 	if d == nil {
 		return ""
@@ -484,6 +532,9 @@ func followOnDetailsForClient(d *model.AgentDispatch) string {
 	}
 	if d.QueuedAfterDispatchID != nil {
 		parts = append(parts, fmt.Sprintf("parent_dispatch_id=%d", *d.QueuedAfterDispatchID))
+		parts = append(parts, "gate=parent")
+	} else if d.QueuedUntilBlockersClear {
+		parts = append(parts, "gate=blockers")
 	}
 	return strings.Join(parts, ",")
 }
