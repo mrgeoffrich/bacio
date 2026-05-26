@@ -12,6 +12,15 @@ import (
 // hook subcommands and the channel poller should activate.
 const EnvVar = "BACIO_AGENT_MODE"
 
+// LaunchCommand is the canonical shell one-liner that spins up a
+// Claude Code session wired to bacio's agent-mode supervision: env var
+// set, per-tool approval prompt waived, and the native-channels
+// transport opted in so dispatches stream live. Kept here so the
+// post-install activation banner (printActivationBanner) and the
+// `bacio agent-run-command` verb emit the exact same string and never
+// drift apart.
+const LaunchCommand = EnvVar + "=1 claude --dangerously-skip-permissions --dangerously-load-development-channels server:bacio"
+
 // Enabled reports whether bacio's automatic agent-supervision surfaces
 // (the hook subcommands and the channel's setup-dispatch poller) should
 // activate for the current process. When false, hooks no-op early and

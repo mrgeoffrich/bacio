@@ -47,6 +47,22 @@ func TestEnabled(t *testing.T) {
 	}
 }
 
+// TestLaunchCommand pins the canonical one-liner. Two callers depend
+// on the exact string — the install-agent activation banner and the
+// `bacio agent-run-command` verb — and shells / aliases people write
+// against it (eval, alias=…) treat any byte change as a behaviour
+// change, so the bar for editing is higher than the rest of the file.
+// Belt-and-braces against an accidental refactor that drops a flag.
+func TestLaunchCommand(t *testing.T) {
+	const want = "BACIO_AGENT_MODE=1 claude --dangerously-skip-permissions --dangerously-load-development-channels server:bacio"
+	if LaunchCommand != want {
+		t.Fatalf("LaunchCommand drift:\n  got:  %q\n  want: %q", LaunchCommand, want)
+	}
+	if !strings.Contains(LaunchCommand, EnvVar+"=1") {
+		t.Fatalf("LaunchCommand %q must lead with %s=1", LaunchCommand, EnvVar)
+	}
+}
+
 // TestDenyIfEnabled covers the two states that matter: nil in normal
 // (non-agent) sessions so the command runs through, and a non-nil
 // error in agent sessions whose message names the blocked command and

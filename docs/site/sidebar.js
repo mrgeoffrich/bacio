@@ -75,6 +75,7 @@ const rawSidebar = [
       { text: 'bacio web', link: '/reference/cli/web' },
       { text: 'bacio install-skill', link: '/reference/cli/install-skill' },
       { text: 'bacio install-agent', link: '/reference/cli/install-agent' },
+      { text: 'bacio agent-run-command', link: '/reference/cli/agent-run-command' },
       { text: 'bacio tui', link: '/reference/cli/tui' },
     ],
   },
