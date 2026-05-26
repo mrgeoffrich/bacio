@@ -922,6 +922,14 @@ export class IssueBriefDTO {
     "taken": boolean;
     "waitingForClaim": boolean;
     "waitingState"?: boardcards$0.WaitingState | null;
+
+    /**
+     * LatestPlan (BACI-216) — duplicated alongside Issue.LatestPlan
+     * so consumers that read the brief envelope (REST/HTTP clients)
+     * can pick it up without descending into the meta block. The two
+     * are always in lockstep.
+     */
+    "latestPlan"?: LatestPlanDTO | null;
     "warnings": string[];
 
     /** Creates a new IssueBriefDTO instance. */
@@ -969,7 +977,8 @@ export class IssueBriefDTO {
         const $$createField5_0 = $$createType23;
         const $$createField6_0 = $$createType25;
         const $$createField9_0 = $$createType27;
-        const $$createField10_0 = $$createType28;
+        const $$createField10_0 = $$createType29;
+        const $$createField11_0 = $$createType30;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("issue" in $$parsedSource) {
             $$parsedSource["issue"] = $$createField0_0($$parsedSource["issue"]);
@@ -995,8 +1004,11 @@ export class IssueBriefDTO {
         if ("waitingState" in $$parsedSource) {
             $$parsedSource["waitingState"] = $$createField9_0($$parsedSource["waitingState"]);
         }
+        if ("latestPlan" in $$parsedSource) {
+            $$parsedSource["latestPlan"] = $$createField10_0($$parsedSource["latestPlan"]);
+        }
         if ("warnings" in $$parsedSource) {
-            $$parsedSource["warnings"] = $$createField10_0($$parsedSource["warnings"]);
+            $$parsedSource["warnings"] = $$createField11_0($$parsedSource["warnings"]);
         }
         return new IssueBriefDTO($$parsedSource as Partial<IssueBriefDTO>);
     }
@@ -1024,6 +1036,11 @@ export class IssueDetail {
      * true iff Claimants has an open (unreleased) claim.
      */
     "taken": boolean;
+
+    /**
+     * LatestPlan (BACI-216) — see IssueMetaDTO.LatestPlan.
+     */
+    "latestPlan"?: LatestPlanDTO | null;
 
     /** Creates a new IssueDetail instance. */
     constructor($$source: Partial<IssueDetail> = {}) {
@@ -1074,12 +1091,13 @@ export class IssueDetail {
      * Creates a new IssueDetail instance from a string or object.
      */
     static createFrom($$source: any = {}): IssueDetail {
-        const $$createField5_0 = $$createType28;
-        const $$createField6_0 = $$createType28;
+        const $$createField5_0 = $$createType30;
+        const $$createField6_0 = $$createType30;
         const $$createField8_0 = $$createType23;
         const $$createField9_0 = $$createType19;
-        const $$createField10_0 = $$createType30;
+        const $$createField10_0 = $$createType32;
         const $$createField11_0 = $$createType25;
+        const $$createField13_0 = $$createType29;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField5_0($$parsedSource["tags"]);
@@ -1098,6 +1116,9 @@ export class IssueDetail {
         }
         if ("claimants" in $$parsedSource) {
             $$parsedSource["claimants"] = $$createField11_0($$parsedSource["claimants"]);
+        }
+        if ("latestPlan" in $$parsedSource) {
+            $$parsedSource["latestPlan"] = $$createField13_0($$parsedSource["latestPlan"]);
         }
         return new IssueDetail($$parsedSource as Partial<IssueDetail>);
     }
@@ -1122,6 +1143,15 @@ export class IssueMetaDTO {
     "claude": boolean;
     "taken": boolean;
     "waitingForClaim": boolean;
+
+    /**
+     * LatestPlan (BACI-216) — the newest `plan`-typed doc linked
+     * directly to this issue, or nil when none. Drives the prominent
+     * "Open plan" link in IssueWorkspace's header. Mirrors the
+     * BoardCard.LatestPlan / IssueDetail.LatestPlan fields so every
+     * surface reads the same plan affordance.
+     */
+    "latestPlan"?: LatestPlanDTO | null;
 
     /** Creates a new IssueMetaDTO instance. */
     constructor($$source: Partial<IssueMetaDTO> = {}) {
@@ -1163,8 +1193,9 @@ export class IssueMetaDTO {
      * Creates a new IssueMetaDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): IssueMetaDTO {
-        const $$createField5_0 = $$createType28;
-        const $$createField6_0 = $$createType28;
+        const $$createField5_0 = $$createType30;
+        const $$createField6_0 = $$createType30;
+        const $$createField10_0 = $$createType29;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField5_0($$parsedSource["tags"]);
@@ -1172,7 +1203,51 @@ export class IssueMetaDTO {
         if ("assignees" in $$parsedSource) {
             $$parsedSource["assignees"] = $$createField6_0($$parsedSource["assignees"]);
         }
+        if ("latestPlan" in $$parsedSource) {
+            $$parsedSource["latestPlan"] = $$createField10_0($$parsedSource["latestPlan"]);
+        }
         return new IssueMetaDTO($$parsedSource as Partial<IssueMetaDTO>);
+    }
+}
+
+/**
+ * LatestPlanDTO (BACI-216) is the Wails-side mirror of
+ * model.LatestPlan — the newest `plan`-typed doc linked directly to
+ * an issue. Carries enough metadata (filename, uuid, updated_at) for
+ * the React surfaces to render the "Open plan" link without a
+ * follow-up fetch; the doc body itself is loaded on-demand via the
+ * existing /documents/<filename> route.
+ */
+export class LatestPlanDTO {
+    "documentId": number;
+    "uuid": string;
+    "filename": string;
+    "updatedAt": time$0.Time;
+
+    /** Creates a new LatestPlanDTO instance. */
+    constructor($$source: Partial<LatestPlanDTO> = {}) {
+        if (!("documentId" in $$source)) {
+            this["documentId"] = 0;
+        }
+        if (!("uuid" in $$source)) {
+            this["uuid"] = "";
+        }
+        if (!("filename" in $$source)) {
+            this["filename"] = "";
+        }
+        if (!("updatedAt" in $$source)) {
+            this["updatedAt"] = null;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new LatestPlanDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): LatestPlanDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new LatestPlanDTO($$parsedSource as Partial<LatestPlanDTO>);
     }
 }
 
@@ -1249,7 +1324,7 @@ export class LinkedDocDTO {
      * Creates a new LinkedDocDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): LinkedDocDTO {
-        const $$createField4_0 = $$createType28;
+        const $$createField4_0 = $$createType30;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("linkedVia" in $$parsedSource) {
             $$parsedSource["linkedVia"] = $$createField4_0($$parsedSource["linkedVia"]);
@@ -1412,8 +1487,8 @@ export class PromptTemplateDTO {
      * Creates a new PromptTemplateDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): PromptTemplateDTO {
-        const $$createField7_0 = $$createType28;
-        const $$createField8_0 = $$createType28;
+        const $$createField7_0 = $$createType30;
+        const $$createField8_0 = $$createType30;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("allowedStates" in $$parsedSource) {
             $$parsedSource["allowedStates"] = $$createField7_0($$parsedSource["allowedStates"]);
@@ -1486,8 +1561,8 @@ export class RelationsDTO {
      * Creates a new RelationsDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): RelationsDTO {
-        const $$createField0_0 = $$createType32;
-        const $$createField1_0 = $$createType32;
+        const $$createField0_0 = $$createType34;
+        const $$createField1_0 = $$createType34;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("outgoing" in $$parsedSource) {
             $$parsedSource["outgoing"] = $$createField0_0($$parsedSource["outgoing"]);
@@ -1681,7 +1756,7 @@ export class ShippedIssueDTO {
      * Creates a new ShippedIssueDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): ShippedIssueDTO {
-        const $$createField3_0 = $$createType28;
+        const $$createField3_0 = $$createType30;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField3_0($$parsedSource["tags"]);
@@ -1743,8 +1818,8 @@ export class SyncRegistryDTO {
      * Creates a new SyncRegistryDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): SyncRegistryDTO {
-        const $$createField0_0 = $$createType34;
-        const $$createField1_0 = $$createType36;
+        const $$createField0_0 = $$createType36;
+        const $$createField1_0 = $$createType38;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("syncRepos" in $$parsedSource) {
             $$parsedSource["syncRepos"] = $$createField0_0($$parsedSource["syncRepos"]);
@@ -1797,7 +1872,7 @@ export class SyncRepoDTO {
      * Creates a new SyncRepoDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): SyncRepoDTO {
-        const $$createField7_0 = $$createType38;
+        const $$createField7_0 = $$createType40;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("projects" in $$parsedSource) {
             $$parsedSource["projects"] = $$createField7_0($$parsedSource["projects"]);
@@ -1858,7 +1933,7 @@ export class SyncSetupDTO {
      * Creates a new SyncSetupDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): SyncSetupDTO {
-        const $$createField6_0 = $$createType40;
+        const $$createField6_0 = $$createType42;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("previewCollisions" in $$parsedSource) {
             $$parsedSource["previewCollisions"] = $$createField6_0($$parsedSource["previewCollisions"]);
@@ -1932,16 +2007,18 @@ const $$createType24 = agentcards$0.ClaimantDTO.createFrom;
 const $$createType25 = $Create.Array($$createType24);
 const $$createType26 = boardcards$0.WaitingState.createFrom;
 const $$createType27 = $Create.Nullable($$createType26);
-const $$createType28 = $Create.Array($Create.Any);
-const $$createType29 = DocLinkDTO.createFrom;
-const $$createType30 = $Create.Array($$createType29);
-const $$createType31 = RelationDTO.createFrom;
+const $$createType28 = LatestPlanDTO.createFrom;
+const $$createType29 = $Create.Nullable($$createType28);
+const $$createType30 = $Create.Array($Create.Any);
+const $$createType31 = DocLinkDTO.createFrom;
 const $$createType32 = $Create.Array($$createType31);
-const $$createType33 = SyncRepoDTO.createFrom;
+const $$createType33 = RelationDTO.createFrom;
 const $$createType34 = $Create.Array($$createType33);
-const $$createType35 = UnsyncedProjectDTO.createFrom;
+const $$createType35 = SyncRepoDTO.createFrom;
 const $$createType36 = $Create.Array($$createType35);
-const $$createType37 = MemberProjectDTO.createFrom;
+const $$createType37 = UnsyncedProjectDTO.createFrom;
 const $$createType38 = $Create.Array($$createType37);
-const $$createType39 = CollisionPreviewDTO.createFrom;
-const $$createType40 = $Create.Nullable($$createType39);
+const $$createType39 = MemberProjectDTO.createFrom;
+const $$createType40 = $Create.Array($$createType39);
+const $$createType41 = CollisionPreviewDTO.createFrom;
+const $$createType42 = $Create.Nullable($$createType41);

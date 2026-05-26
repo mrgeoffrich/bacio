@@ -169,6 +169,21 @@ export interface BoardCardFollowOn {
   actionLabel: string;
 }
 
+// LatestPlan (BACI-216) is the newest `plan`-typed doc linked
+// directly to an issue. Drives the per-card plan icon on the
+// kanban and the prominent "Open plan" link in the workspace
+// header. Mirror of model.LatestPlan; api.ts re-exports the
+// Wails-binding equivalent under the same name.
+export interface LatestPlan {
+  documentId: number;
+  uuid: string;
+  filename: string;
+  updatedAt: string;
+}
+// LatestPlanDTO is the Wails-shaped alias — kept as a parallel name
+// so a component importing either flavour gets the same shape.
+export type LatestPlanDTO = LatestPlan;
+
 export interface BoardCard {
   key: string;
   column: string;
@@ -233,6 +248,13 @@ export interface BoardCard {
   // on a successful queue / cancel; the next 10s poll re-asserts the
   // authoritative shape.
   followOn?: BoardCardFollowOn | null;
+  // BACI-216: the newest `plan`-typed doc linked directly to this
+  // issue, or absent when none. Drives the per-card plan icon that
+  // opens the doc viewer. Server-side omitempty drops the field
+  // when no plan is linked; the cards endpoint already serves
+  // camelCase via the Go json tag so no reshape is needed in
+  // listCards().
+  latestPlan?: LatestPlan | null;
 }
 
 // ShippedIssueDTO (BACI-187) is one row in the topbar shipping-log
@@ -303,6 +325,9 @@ export interface IssueDetail {
   documents: DocLinkDTO[];
   claimants: ClaimantDTO[];
   taken: boolean;
+  // BACI-216: newest `plan`-typed doc linked directly to this
+  // issue; null when none. See LatestPlan above.
+  latestPlan?: LatestPlan | null;
 }
 
 // IssueMetaDTO mirrors desktop/boardservice.go:IssueMetaDTO — the
@@ -319,6 +344,11 @@ export interface IssueMetaDTO {
   claude: boolean;
   taken: boolean;
   waitingForClaim: boolean;
+  // BACI-216: newest `plan`-typed doc linked directly to this
+  // issue, surfaced so IssueWorkspace's header can render the
+  // prominent "Open plan" link without descending into the brief's
+  // documents list.
+  latestPlan?: LatestPlan | null;
 }
 
 export interface LinkedDocDTO {
@@ -368,6 +398,10 @@ export interface IssueBriefDTO {
   // BACI-145: structured waiting state for the IssueLockBanner.
   // Absent (server-side omitempty) when the issue isn't waiting.
   waitingState?: WaitingState | null;
+  // BACI-216: duplicated alongside issue.latestPlan so envelope
+  // consumers don't have to descend into the meta block. The two
+  // are always in lockstep — same source-of-truth lookup.
+  latestPlan?: LatestPlan | null;
   warnings: string[];
 }
 
@@ -943,6 +977,8 @@ interface ApiIssueView {
   documents: ApiDocLink[];
   claimants: ApiClaimant[];
   taken: boolean;
+  // BACI-216: snake-cased wire shape — see ApiLatestPlan above.
+  latest_plan?: ApiLatestPlan | null;
 }
 
 export async function getIssue(repoPrefix: string, key: string): Promise<IssueDetail> {
@@ -981,6 +1017,7 @@ export async function getIssue(repoPrefix: string, key: string): Promise<IssueDe
       open: c.released_at == null,
     })),
     taken: !!view.taken,
+    latestPlan: mapApiLatestPlan(view.latest_plan),
   };
 }
 
@@ -1011,6 +1048,29 @@ interface ApiBriefDoc {
   linked_via?: string[];
   size_bytes?: number;
   content?: string;
+}
+
+// ApiLatestPlan is the snake_case wire shape of model.LatestPlan — the
+// per-issue plan projection BACI-216 attaches to the issue show / brief
+// payloads. Reshaped into the camelCase LatestPlan the UI consumes by
+// mapApiLatestPlan below. The cards endpoint already serves camelCase
+// via the Go json tag so the listCards() path doesn't go through this
+// reshape — only the snake-cased show / brief handlers do.
+interface ApiLatestPlan {
+  document_id: number;
+  uuid: string;
+  filename: string;
+  updated_at: string;
+}
+
+function mapApiLatestPlan(p: ApiLatestPlan | null | undefined): LatestPlan | null {
+  if (!p) return null;
+  return {
+    documentId: p.document_id,
+    uuid: p.uuid,
+    filename: p.filename,
+    updatedAt: p.updated_at,
+  };
 }
 
 interface ApiRelation {
@@ -1046,12 +1106,17 @@ interface ApiIssueBrief {
   // camelCase server-side (the boardcards JSON tags are camel) so no
   // per-field rename here — only the outer wrapper is snake.
   waiting_state?: WaitingState | null;
+  // BACI-216: snake-cased wire shape — see ApiLatestPlan above.
+  latest_plan?: ApiLatestPlan | null;
   warnings?: string[] | null;
 }
 
 function reshapeApiBrief(view: ApiIssueBrief): IssueBriefDTO {
   const iss = view.issue;
   const assignee = iss.assignee ?? '';
+  // BACI-216: resolve the latest plan once; both the meta and the
+  // envelope-level field carry the same shape.
+  const latestPlan = mapApiLatestPlan(view.latest_plan);
   const meta: IssueMetaDTO = {
     key: iss.key,
     column: iss.state,
@@ -1063,6 +1128,7 @@ function reshapeApiBrief(view: ApiIssueBrief): IssueBriefDTO {
     claude: assignee === 'claude',
     taken: !!view.taken,
     waitingForClaim: !!iss.waiting_for_claim,
+    latestPlan,
   };
   const feat: FeatureRefDTO | null = view.feature
     ? { slug: view.feature.slug, title: view.feature.title }
@@ -1101,6 +1167,7 @@ function reshapeApiBrief(view: ApiIssueBrief): IssueBriefDTO {
     taken: !!view.taken,
     waitingForClaim: !!iss.waiting_for_claim,
     waitingState: view.waiting_state ?? null,
+    latestPlan,
     warnings: view.warnings ?? [],
   };
 }

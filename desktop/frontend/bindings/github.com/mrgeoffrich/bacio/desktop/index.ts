@@ -42,6 +42,7 @@ export {
     IssueBriefDTO,
     IssueDetail,
     IssueMetaDTO,
+    LatestPlanDTO,
     LeaderStatusDTO,
     LinkedDocDTO,
     MemberProjectDTO,

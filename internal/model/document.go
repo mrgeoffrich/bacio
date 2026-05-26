@@ -138,6 +138,35 @@ type Document struct {
 	Snippet string `json:"snippet,omitempty"`
 }
 
+// LatestPlan (BACI-216) is the tiny per-issue projection of the
+// newest `plan`-typed document linked directly to an issue. Surfaced
+// as a dedicated `latest_plan` field on every issue-shaped payload
+// (CLI issue show / brief, REST issue + brief, BoardCard) so the
+// kanban can paint a one-click "open the plan" icon and the issue
+// workspace can show a prominent plan link in the header — without
+// each surface re-iterating the issue's full DocumentLink list to
+// find the matching plan.
+//
+// "Latest" is the doc's own recency (updated_at desc, then
+// created_at desc, then id desc as a deterministic tiebreaker) — NOT
+// the link row's created_at. A plan rewritten yesterday wins over
+// one linked yesterday but updated last week. `documents.updated_at`
+// is bumped by body edits AND by link insert / delete / description
+// update via the BACI-144 triggers, so the recency we read is the
+// recency we mean.
+//
+// Plans linked to the parent **feature** are intentionally NOT
+// surfaced here — the field is scoped to the canonical
+// `bacio doc link <plan> <ISSUE-KEY>` shape so the per-issue plan
+// affordance doesn't blur with feature-wide planning docs (the
+// Documents panel still lists both as before).
+type LatestPlan struct {
+	DocumentID int64     `json:"document_id"`
+	UUID       string    `json:"uuid"`
+	Filename   string    `json:"filename"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
 // DocumentLink describes one (document, issue|feature, description) edge.
 // The "Target" field renders the linked end as a human-readable label
 // (e.g. "MINI-42" or "feature/auth-rewrite") for text and JSON output.

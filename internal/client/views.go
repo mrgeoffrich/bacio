@@ -25,6 +25,12 @@ type IssueView struct {
 	// holding this" signal: true iff Claimants has an open claim.
 	Claimants []*model.AgentClaim `json:"claimants"`
 	Taken     bool                `json:"taken"`
+	// LatestPlan (BACI-216) is the newest `plan`-typed document
+	// linked directly to the issue, or nil when no plan is linked.
+	// Same field on every issue-shaped payload so the kanban card,
+	// the workspace header, and the brief consumer all read the
+	// same source of truth.
+	LatestPlan *model.LatestPlan `json:"latest_plan,omitempty"`
 }
 
 type FeatureView struct {
@@ -114,7 +120,12 @@ type IssueBrief struct {
 	// Claimants has an open claim.
 	Claimants []*model.AgentClaim `json:"claimants"`
 	Taken     bool                `json:"taken"`
-	Warnings  []string            `json:"warnings"`
+	// LatestPlan (BACI-216) is the newest `plan`-typed document
+	// linked directly to the issue, or nil when no plan is linked.
+	// Same field as on IssueView / BoardCard so every issue-shaped
+	// payload exposes the plan affordance consistently.
+	LatestPlan *model.LatestPlan `json:"latest_plan,omitempty"`
+	Warnings   []string          `json:"warnings"`
 }
 
 type BriefDoc struct {

@@ -362,6 +362,7 @@ func issueShowCmd() *cobra.Command {
 				Issue: view.Issue, Comments: view.Comments, Relations: view.Relations,
 				PullRequests: view.PullRequests, Documents: view.Documents,
 				Claimants: view.Claimants, Taken: view.Taken,
+				LatestPlan: view.LatestPlan,
 			})
 		},
 	}
@@ -593,7 +594,9 @@ type issueBrief struct {
 	Comments     []*model.Comment      `json:"comments"`
 	Claimants    []*model.AgentClaim   `json:"claimants"`
 	Taken        bool                  `json:"taken"`
-	Warnings     []string              `json:"warnings"`
+	// LatestPlan (BACI-216) — mirrors client.IssueBrief.LatestPlan.
+	LatestPlan *model.LatestPlan `json:"latest_plan,omitempty"`
+	Warnings   []string          `json:"warnings"`
 }
 
 // briefDoc is a single linked document with its full content inlined and
@@ -678,6 +681,7 @@ plan/review bodies too.`,
 				Comments:     view.Comments,
 				Claimants:    view.Claimants,
 				Taken:        view.Taken,
+				LatestPlan:   view.LatestPlan,
 				Warnings:     view.Warnings,
 			}
 			enc := json.NewEncoder(os.Stdout)

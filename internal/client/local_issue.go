@@ -157,10 +157,18 @@ func (c *localClient) ShowIssue(ctx context.Context, repo *model.Repo, key strin
 	if err != nil {
 		return nil, err
 	}
+	// BACI-216: surface the newest linked plan as a first-class field
+	// so the issue workspace can render a prominent "Open plan" link
+	// without iterating Documents for a `plan`-typed entry.
+	latestPlan, err := c.store.LatestPlanForIssue(iss.ID)
+	if err != nil {
+		return nil, err
+	}
 	return &IssueView{
 		Issue: iss, Comments: comments, Relations: rels,
 		PullRequests: prs, Documents: docs,
 		Claimants: claimants, Taken: taken,
+		LatestPlan: latestPlan,
 	}, nil
 }
 
@@ -225,6 +233,13 @@ func (c *localClient) BriefIssue(ctx context.Context, repo *model.Repo, key stri
 	if err != nil {
 		return nil, err
 	}
+	// BACI-216: same single-shot lookup as ShowIssue — the brief
+	// consumer (skill / LLM / workspace shelf) gets the per-issue
+	// plan affordance without re-iterating Documents.
+	latestPlan, err := c.store.LatestPlanForIssue(iss.ID)
+	if err != nil {
+		return nil, err
+	}
 	return &IssueBrief{
 		Issue:        iss,
 		Feature:      feat,
@@ -234,6 +249,7 @@ func (c *localClient) BriefIssue(ctx context.Context, repo *model.Repo, key stri
 		Comments:     comments,
 		Claimants:    claimants,
 		Taken:        taken,
+		LatestPlan:   latestPlan,
 		Warnings:     warnings,
 	}, nil
 }

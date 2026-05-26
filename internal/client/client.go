@@ -408,6 +408,14 @@ type Client interface {
 	// Used alongside CountEvalCommentsByIssue to drive the kanban card's
 	// combined transcript+eval indicator. Local-only.
 	CountTranscriptDocsByIssue(ctx context.Context, ids []int64) (map[int64]int, error)
+	// LatestPlanByIssue (BACI-216) returns issue_id → the newest
+	// `plan`-typed document linked directly to each issue (issues
+	// with no plan are absent from the map). Used by
+	// boardcards.Assemble to fan the per-card plan affordance on so
+	// the kanban doesn't need an extra fetch per card. Local-only —
+	// same precedent as BlockersFor / CountTranscriptDocsByIssue:
+	// the assembler runs server-side, never via `bacio --remote`.
+	LatestPlanByIssue(ctx context.Context, ids []int64) (map[int64]*model.LatestPlan, error)
 	// EnsureAgentIdentity mints a fresh persistent agent identity (a
 	// random slug, retried against the UNIQUE constraint until it
 	// sticks) and adopts it as this client's audit actor. It's the

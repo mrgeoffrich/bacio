@@ -240,6 +240,40 @@ type BoardCard struct {
 	// dormant follow-on exists; the footer button stays in its
 	// outline state in that case.
 	FollowOn *BoardCardFollowOn `json:"followOn,omitempty"`
+	// LatestPlan (BACI-216) is the newest `plan`-typed document
+	// linked directly to this issue, or nil when no plan is linked.
+	// Drives the per-card plan icon that opens the doc viewer —
+	// hidden when nil. The wider issue-shaped read paths (CLI brief
+	// / show, REST brief / show, Wails issue detail) carry the same
+	// projection (model.LatestPlan) with snake_case JSON tags; the
+	// kanban surface re-emits it under camelCase here so the BoardCard
+	// stays consistent with every other camelCase field on the wire.
+	LatestPlan *BoardCardLatestPlan `json:"latestPlan,omitempty"`
+}
+
+// BoardCardLatestPlan (BACI-216) is the camelCase mirror of
+// model.LatestPlan used on the BoardCard wire payload. Snake-case
+// works fine on the CLI / REST issue payloads (matches every other
+// model.* field on those surfaces); the BoardCard's contract is
+// camelCase across the board, so the kanban shape gets its own
+// projection of the same four fields.
+type BoardCardLatestPlan struct {
+	DocumentID int64     `json:"documentId"`
+	UUID       string    `json:"uuid"`
+	Filename   string    `json:"filename"`
+	UpdatedAt  time.Time `json:"updatedAt"`
+}
+
+func boardCardLatestPlan(p *model.LatestPlan) *BoardCardLatestPlan {
+	if p == nil {
+		return nil
+	}
+	return &BoardCardLatestPlan{
+		DocumentID: p.DocumentID,
+		UUID:       p.UUID,
+		Filename:   p.Filename,
+		UpdatedAt:  p.UpdatedAt,
+	}
 }
 
 // BoardCardBlocker (BACI-114) is one open `blocks` edge pointing at
@@ -445,6 +479,14 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 	if err != nil {
 		return nil, err
 	}
+	// BACI-216: per-card "newest linked plan" lookup. Same
+	// single-bulk-read-per-N-issues pattern as the counts above —
+	// fans onto every card regardless of `taken` state so the plan
+	// icon stays visible after the worker has released its claim.
+	latestPlanByID, err := c.LatestPlanByIssue(ctx, issueIDs)
+	if err != nil {
+		return nil, err
+	}
 
 	cards := make([]BoardCard, 0, len(issues))
 	for _, iss := range issues {
@@ -488,6 +530,7 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 			EvalCommentCount:   evalCountsByID[iss.ID],
 			TerminalAt:         iss.TerminalAt,
 			FollowOn:           followOn,
+			LatestPlan:         boardCardLatestPlan(latestPlanByID[iss.ID]),
 		})
 	}
 

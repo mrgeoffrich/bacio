@@ -182,6 +182,45 @@ func TestIssueBriefDocContentStripped(t *testing.T) {
 	}
 }
 
+// TestIssueBriefLatestPlan (BACI-216) covers the dedicated
+// `latest_plan` field on the brief: absent when no plan is linked,
+// populated with the doc's filename / uuid / updated_at when one
+// is. Mirrors the per-issue brief lookup added to handleIssueBrief.
+func TestIssueBriefLatestPlan(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	iss := seedIssue(t, s, repo, "x")
+
+	// Absent before any plan is linked.
+	respNone, bodyNone := apiGet(t, ts.URL+"/repos/MINI/issues/"+iss.Key+"/brief")
+	if respNone.StatusCode != 200 {
+		t.Fatalf("status: %d, body=%s", respNone.StatusCode, bodyNone)
+	}
+	if strings.Contains(string(bodyNone), `"latest_plan"`) {
+		t.Fatalf("latest_plan should be omitted when no plan is linked: %s", bodyNone)
+	}
+
+	// Link a plan-typed doc — brief must surface it.
+	planDoc, err := s.CreateDocument(repo.ID, "iss-plan.md", model.DocTypePlan, "the plan body", "")
+	if err != nil {
+		t.Fatalf("create plan doc: %v", err)
+	}
+	if _, err := s.LinkDocument(planDoc.ID, store.LinkTarget{IssueID: &iss.ID}, ""); err != nil {
+		t.Fatalf("link plan: %v", err)
+	}
+	respPlan, bodyPlan := apiGet(t, ts.URL+"/repos/MINI/issues/"+iss.Key+"/brief")
+	if respPlan.StatusCode != 200 {
+		t.Fatalf("status: %d, body=%s", respPlan.StatusCode, bodyPlan)
+	}
+	for _, want := range []string{
+		`"latest_plan"`, `"filename": "iss-plan.md"`, `"document_id"`,
+	} {
+		if !strings.Contains(string(bodyPlan), want) {
+			t.Fatalf("expected %q in brief with plan linked: %s", want, bodyPlan)
+		}
+	}
+}
+
 func TestIssueBriefUnknownIssue(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	seedRepo(t, s)

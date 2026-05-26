@@ -269,6 +269,8 @@ type issueView struct {
 	Documents    []*model.DocumentLink `json:"documents"`
 	Claimants    []*model.AgentClaim   `json:"claimants"`
 	Taken        bool                  `json:"taken"`
+	// LatestPlan (BACI-216) — mirrors client.IssueView.LatestPlan.
+	LatestPlan *model.LatestPlan `json:"latest_plan,omitempty"`
 }
 
 type featureView struct {
