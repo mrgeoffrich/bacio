@@ -282,11 +282,54 @@ func (s *Store) SetIssueState(id int64, state model.State) error {
 	// The terminalAtClause helper builds a CASE expression that
 	// inspects the NEW state (not the current row), which is the only
 	// state info we have without a SELECT-then-UPDATE round trip.
+	//
+	// BACI-220: user_action_reason_type lives in lockstep with
+	// `needs_action` — clear it on every move OUT (and re-stamp it via
+	// SetIssueUserActionReason on the auto-flip into `needs_action`).
+	// userActionReasonClauseForTransition emits a SQL literal that
+	// keeps the column on a needs_action→needs_action no-op move and
+	// NULLs it for every other target, matching the column comment.
 	_, err := s.DB.Exec(
-		`UPDATE issues SET state = ?, updated_at = CURRENT_TIMESTAMP, terminal_at = `+terminalAtClause(state)+` WHERE id = ?`,
+		`UPDATE issues SET state = ?, updated_at = CURRENT_TIMESTAMP, terminal_at = `+terminalAtClause(state)+`, user_action_reason_type = `+userActionReasonClauseForTransition(state)+` WHERE id = ?`,
 		string(state), id,
 	)
 	return err
+}
+
+// SetIssueUserActionReason stamps the typed reason an issue is parked
+// in `needs_action` (BACI-220). The clear path uses NULL via a
+// dedicated parameter rather than a magic empty string so the column
+// stays NULL on disk — consistent with archived_at / terminal_at /
+// the rest of the nullable issue columns.
+//
+// Deliberately does NOT bump updated_at: the reason is runtime
+// supervision metadata that tracks an in-flight question, not
+// user-edited content, and bumping updated_at would churn the
+// git-backed sync's last-writer-wins gate on every ask.
+func (s *Store) SetIssueUserActionReason(id int64, reason model.UserActionReasonType) error {
+	if reason == "" {
+		_, err := s.DB.Exec(`UPDATE issues SET user_action_reason_type = NULL WHERE id = ?`, id)
+		return err
+	}
+	_, err := s.DB.Exec(`UPDATE issues SET user_action_reason_type = ? WHERE id = ?`, string(reason), id)
+	return err
+}
+
+// userActionReasonClauseForTransition returns the SQL fragment the
+// state-move helpers splice into UPDATE statements that move the
+// issue's state column. Targets other than `needs_action` always
+// NULL the column — a stale reason can't outlive its state.
+// `needs_action` keeps whatever value the column already carries so
+// the auto-flip into needs_action's separate SetIssueUserActionReason
+// write survives the state UPDATE's own column write. Returned as a
+// SQL literal (not a bound `?`) for the same reason as
+// terminalAtClause — CURRENT_TIMESTAMP / NULL / column-identity all
+// only resolve from a parse-time literal.
+func userActionReasonClauseForTransition(target model.State) string {
+	if target == model.StateNeedsAction {
+		return "user_action_reason_type"
+	}
+	return "NULL"
 }
 
 // terminalAtClause returns the SQL expression to assign to terminal_at
@@ -613,6 +656,11 @@ func (s *Store) UpdateIssueByUUID(uuid string, p IssuePatch) error {
 		// (NULL / CURRENT_TIMESTAMP), not a bound value — see the
 		// SetIssueState comment for the rationale.
 		sets = append(sets, "terminal_at = "+terminalAtClause(*p.State))
+		// BACI-220: keep user_action_reason_type in lockstep too — the
+		// column is not synced (it's runtime supervision metadata, not
+		// authored content) so importing a state move past
+		// `needs_action` clears the typed reason locally.
+		sets = append(sets, "user_action_reason_type = "+userActionReasonClauseForTransition(*p.State))
 	}
 	if p.Assignee != nil {
 		clean := *p.Assignee
@@ -779,25 +827,26 @@ SELECT i.id, i.uuid, i.repo_id, i.number, r.prefix, i.feature_id, COALESCE(f.slu
            AND c.released_at IS NULL
            AND s.ended_at IS NULL
        ) AS taken,
-       i.archived_at, i.terminal_at, i.created_at, i.updated_at
+       i.archived_at, i.terminal_at, i.user_action_reason_type, i.created_at, i.updated_at
 FROM issues i
 JOIN repos r ON r.id = i.repo_id
 LEFT JOIN features f ON f.id = i.feature_id`
 
 func scanIssue(row rowScanner) (*model.Issue, error) {
 	var (
-		i          model.Issue
-		prefix     string
-		featureID  sql.NullInt64
-		featSlug   string
-		featEmoji  string
-		state      string
-		archivedAt sql.NullTime
-		terminalAt sql.NullTime
+		i              model.Issue
+		prefix         string
+		featureID      sql.NullInt64
+		featSlug       string
+		featEmoji      string
+		state          string
+		archivedAt     sql.NullTime
+		terminalAt     sql.NullTime
+		userActionRsn  sql.NullString
 	)
 	err := row.Scan(&i.ID, &i.UUID, &i.RepoID, &i.Number, &prefix, &featureID, &featSlug, &featEmoji,
 		&i.Title, &i.Description, &state, &i.Assignee, &i.WaitingForClaim, &i.Taken,
-		&archivedAt, &terminalAt, &i.CreatedAt, &i.UpdatedAt)
+		&archivedAt, &terminalAt, &userActionRsn, &i.CreatedAt, &i.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -822,6 +871,9 @@ func scanIssue(row rowScanner) (*model.Issue, error) {
 	if terminalAt.Valid {
 		t := terminalAt.Time
 		i.TerminalAt = &t
+	}
+	if userActionRsn.Valid {
+		i.UserActionReasonType = model.UserActionReasonType(userActionRsn.String)
 	}
 	return &i, nil
 }

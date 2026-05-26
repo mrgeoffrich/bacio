@@ -7,6 +7,9 @@ import { Create as $Create } from "@wailsio/runtime";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as model$0 from "../model/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as time$0 from "../../../../../time/models.js";
 
 /**
@@ -332,12 +335,19 @@ export class DispatchDTO {
  * the UI fetches it via /agents/questions/{id} only when the user
  * opens the modal. The bare ID + asked-at + a count of pending
  * questions is what the badge needs.
+ * 
+ * UserActionReasonType (BACI-220) carries the typed reason the linked
+ * issue is currently parked in `needs_action` — `user_question` when
+ * the question opened auto-flipped it, empty otherwise. Surfaced here
+ * so the React side can read it inline without a second fetch
+ * against the issue, matching the shape of model.Issue's field.
  */
 export class QuestionDTO {
     "id": number;
     "issueKey"?: string;
     "header": string;
     "askedAt": time$0.Time;
+    "user_action_reason_type"?: model$0.UserActionReasonType;
 
     /** Creates a new QuestionDTO instance. */
     constructor($$source: Partial<QuestionDTO> = {}) {

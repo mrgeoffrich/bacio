@@ -63,11 +63,18 @@ type SessionTodoDTO struct {
 // the UI fetches it via /agents/questions/{id} only when the user
 // opens the modal. The bare ID + asked-at + a count of pending
 // questions is what the badge needs.
+//
+// UserActionReasonType (BACI-220) carries the typed reason the linked
+// issue is currently parked in `needs_action` — `user_question` when
+// the question opened auto-flipped it, empty otherwise. Surfaced here
+// so the React side can read it inline without a second fetch
+// against the issue, matching the shape of model.Issue's field.
 type QuestionDTO struct {
-	ID       int64     `json:"id"`
-	IssueKey string    `json:"issueKey,omitempty"`
-	Header   string    `json:"header"`
-	AskedAt  time.Time `json:"askedAt"`
+	ID                   int64                      `json:"id"`
+	IssueKey             string                     `json:"issueKey,omitempty"`
+	Header               string                     `json:"header"`
+	AskedAt              time.Time                  `json:"askedAt"`
+	UserActionReasonType model.UserActionReasonType `json:"user_action_reason_type,omitempty"`
 }
 
 // DispatchDTO is one queued dispatch — included inside an AgentCard
@@ -242,7 +249,12 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo) ([]AgentCa
 	// The derived Waiting flag reads from this map; populating
 	// ClaimDTO.State from the same source means a card can render
 	// "BACI-12 (needs action)" in the drill-down for free.
+	//
+	// BACI-220: issueUserActionReason is the sibling lookup the
+	// QuestionDTO populates so the React side can read the typed
+	// `needs_action` reason inline. Same loop, same bulk read.
 	issueState := make(map[string]model.State)
+	issueUserActionReason := make(map[string]model.UserActionReasonType)
 	for _, r := range repos {
 		issues, err := c.ListIssues(ctx, client.IssueFilter{
 			Repo: r,
@@ -256,6 +268,9 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo) ([]AgentCa
 		}
 		for _, iss := range issues {
 			issueState[iss.Key] = iss.State
+			if iss.UserActionReasonType != "" {
+				issueUserActionReason[iss.Key] = iss.UserActionReasonType
+			}
 		}
 	}
 	needsAction := make(map[string]bool)
@@ -294,10 +309,11 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo) ([]AgentCa
 				header = q.Payload.Questions[0].Header
 			}
 			questionsDTO = append(questionsDTO, QuestionDTO{
-				ID:       q.ID,
-				IssueKey: q.IssueKey,
-				Header:   header,
-				AskedAt:  q.AskedAt,
+				ID:                   q.ID,
+				IssueKey:             q.IssueKey,
+				Header:               header,
+				AskedAt:              q.AskedAt,
+				UserActionReasonType: issueUserActionReason[q.IssueKey],
 			})
 		}
 		card := AgentCard{

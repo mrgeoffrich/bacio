@@ -104,6 +104,18 @@ CREATE TABLE IF NOT EXISTS issues (
     -- was wrong because tag / title / description edits bump it without
     -- changing state.
     terminal_at DATETIME,
+    -- user_action_reason_type (BACI-220) is the typed reason a row is
+    -- parked in `needs_action`. NULL whenever state != 'needs_action'
+    -- — the auto-flip path on a question opening stamps
+    -- 'user_question'; SetIssueState clears the column on every move
+    -- OUT of `needs_action` so a stale reason can't outlive its
+    -- state. The follow-up that wires `user_manual_review` lands the
+    -- second value's writers; both are accepted on read here so an
+    -- existing DB doesn't need a CHECK relax once the verb arrives.
+    -- No CHECK constraint: model.ParseUserActionReason gates writes
+    -- at the store boundary, and a CHECK would tax every state move
+    -- with no extra safety.
+    user_action_reason_type TEXT,
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(repo_id, number)
