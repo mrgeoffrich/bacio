@@ -996,6 +996,7 @@ export default function App() {
                 />
               </ErrorBoundary>
             }
+          />
           <Route path="/issues/:key" element={<WorkspaceRoute />} />
           <Route
             path="/features"
