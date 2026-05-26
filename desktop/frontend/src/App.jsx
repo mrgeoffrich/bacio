@@ -664,6 +664,37 @@ export default function App() {
       });
   }, [activeBoard]);
 
+  // BACI-209: compound dispatch — pick a primary mode AND a follow-on
+  // in one action on a todo card. Optimistic flips for BOTH affordances
+  // (the spinner for the primary, the follow-on chip for the follow-on)
+  // so the user sees the chain land immediately; revert both on failure
+  // so the visual doesn't lie about what got queued.
+  const dispatchChainFromCard = useCallback((cardKey, mode, followOnMode) => {
+    let prev = null;
+    setCards(cs => cs.map(c => {
+      if (c.key !== cardKey) return c;
+      prev = { waitingState: c.waitingState ?? null, followOn: c.followOn ?? null };
+      // actionLabel for the optimistic followOn comes from promptConfig
+      // — same source the chain dropdown reads so the optimistic label
+      // matches what the user just clicked.
+      const tpl = (promptConfig || []).find(p => p.mode === followOnMode);
+      const actionLabel = tpl ? (tpl.actionLabel || tpl.label || followOnMode) : followOnMode;
+      return {
+        ...c,
+        waitingState: { kind: 'queued_no_agent', mode },
+        followOn: { mode: followOnMode, actionLabel },
+      };
+    }));
+    api.dispatchIssueChain(activeBoard, cardKey, mode, followOnMode)
+      .catch(err => {
+        // Revert both affordances together — the chain is atomic on the
+        // backend, so the UI must mirror that: either both flips stick
+        // or neither does.
+        setCards(cs => cs.map(c => c.key === cardKey ? { ...c, waitingState: prev?.waitingState ?? null, followOn: prev?.followOn ?? null } : c));
+        reportError(err, { headline: "Couldn't queue dispatch chain" });
+      });
+  }, [activeBoard, promptConfig]);
+
   // BACI-51 spinner-as-cancel-button handler: withdraw a card's queued
   // (or pending/delivered) dispatch. Optimistically clears the local
   // waitingState so the spinner disappears immediately; the refresh
@@ -952,6 +983,7 @@ export default function App() {
                   onOpenCard={openCard}
                   onOpenIssue={navigateToIssue}
                   onDispatchFromCard={dispatchFromCard}
+                  onDispatchChainFromCard={dispatchChainFromCard}
                   onCancelWaitingCard={cancelWaitingFromCard}
                   onQuickEval={quickEvalComment}
                   pinnedKeys={pinnedKeys}

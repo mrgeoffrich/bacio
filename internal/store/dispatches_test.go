@@ -1489,3 +1489,161 @@ func TestBindQueuedDispatch_RequeueRecoversDeliveredDispatch(t *testing.T) {
 		t.Fatalf("after rebind: target_agent_id = %v, want %d", rebound.TargetAgentID, second.ID)
 	}
 }
+
+// TestAddDispatchWithFollowOn_HappyPath (BACI-209) — the canonical
+// shape: both rows land in one transaction, the follow-on links to the
+// just-inserted parent, the issue's waiting_for_claim is flipped, and
+// the matcher gate hides the follow-on while the parent is still
+// queued.
+func TestAddDispatchWithFollowOn_HappyPath(t *testing.T) {
+	s, repo, iss, _, _ := seedDispatchFixture(t)
+	parent, follow, err := s.AddDispatchWithFollowOn(AddDispatchWithFollowOnIn{
+		RepoID:       repo.ID,
+		IssueID:      &iss.ID,
+		Mode:         model.DispatchModePlan,
+		Payload:      "plan stub",
+		CreatedBy:    "supervisor",
+		FollowOnMode: model.DispatchModeImplement,
+	})
+	if err != nil {
+		t.Fatalf("AddDispatchWithFollowOn: %v", err)
+	}
+	if parent == nil || follow == nil {
+		t.Fatalf("nil rows: parent=%v follow=%v", parent, follow)
+	}
+	if parent.Status != model.DispatchQueued {
+		t.Errorf("parent status = %q, want queued", parent.Status)
+	}
+	if parent.QueuedAfterDispatchID != nil {
+		t.Errorf("parent.QueuedAfterDispatchID = %v, want nil", parent.QueuedAfterDispatchID)
+	}
+	if parent.TargetAgentID != nil {
+		t.Errorf("parent.TargetAgentID = %v, want nil (target-less queued)", parent.TargetAgentID)
+	}
+	if follow.Status != model.DispatchQueued {
+		t.Errorf("follow status = %q, want queued (dormant)", follow.Status)
+	}
+	if follow.QueuedAfterDispatchID == nil || *follow.QueuedAfterDispatchID != parent.ID {
+		t.Errorf("follow.QueuedAfterDispatchID = %v, want %d", follow.QueuedAfterDispatchID, parent.ID)
+	}
+	if string(follow.Mode) != string(model.DispatchModeImplement) {
+		t.Errorf("follow mode = %q, want %q", follow.Mode, model.DispatchModeImplement)
+	}
+	// Issue's waiting_for_claim flipped.
+	iss2, err := s.GetIssueByID(iss.ID)
+	if err != nil {
+		t.Fatalf("get issue: %v", err)
+	}
+	if !iss2.WaitingForClaim {
+		t.Errorf("issue.waiting_for_claim = false, want true")
+	}
+	// Matcher gates: with the parent still queued (not settled), neither
+	// the parent's mode nor the follow-on's mode is bindable — the parent
+	// is "queued" (the matcher binds it) but the follow-on stays dormant.
+	rows, err := s.ListQueuedByRepoMode(repo.ID, model.DispatchModeImplement)
+	if err != nil {
+		t.Fatalf("list queued implement: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("dormant follow-on visible to matcher: implement queued = %d, want 0", len(rows))
+	}
+	planRows, err := s.ListQueuedByRepoMode(repo.ID, model.DispatchModePlan)
+	if err != nil {
+		t.Fatalf("list queued plan: %v", err)
+	}
+	if len(planRows) != 1 {
+		t.Fatalf("parent invisible to matcher: plan queued = %d, want 1", len(planRows))
+	}
+}
+
+// TestAddDispatchWithFollowOn_BadFollowOnRollsBackParent (BACI-209) —
+// an unparseable follow-on mode must reject the call before any INSERT,
+// so neither row lands and waiting_for_claim stays untouched. Critical
+// for the single-transaction promise: callers must never end up in a
+// half-queued state.
+func TestAddDispatchWithFollowOn_BadFollowOnRollsBackParent(t *testing.T) {
+	s, repo, iss, _, _ := seedDispatchFixture(t)
+	_, _, err := s.AddDispatchWithFollowOn(AddDispatchWithFollowOnIn{
+		RepoID:       repo.ID,
+		IssueID:      &iss.ID,
+		Mode:         model.DispatchModePlan,
+		CreatedBy:    "supervisor",
+		FollowOnMode: model.DispatchMode("not\x00a\x00mode"),
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid follow-on mode, got nil")
+	}
+	ds, err := s.ListDispatches(DispatchFilter{RepoID: &repo.ID})
+	if err != nil {
+		t.Fatalf("list dispatches: %v", err)
+	}
+	if len(ds) != 0 {
+		t.Fatalf("rolled-back call left %d dispatch row(s), want 0", len(ds))
+	}
+	iss2, err := s.GetIssueByID(iss.ID)
+	if err != nil {
+		t.Fatalf("get issue: %v", err)
+	}
+	if iss2.WaitingForClaim {
+		t.Errorf("issue.waiting_for_claim = true after rejected call, want false")
+	}
+}
+
+// TestAddDispatchWithFollowOn_SingleSlotRejected (BACI-209) — an issue
+// with an existing dormant follow-on rejects the chain call before any
+// INSERT runs, mirroring AddFollowOnDispatch's single-slot invariant.
+func TestAddDispatchWithFollowOn_SingleSlotRejected(t *testing.T) {
+	s, repo, iss, ag, _ := seedDispatchFixture(t)
+	// Seed a parent + dormant follow-on the way the BACI-179 path would.
+	parent, err := s.AddDispatch(AddDispatchIn{
+		RepoID: repo.ID, TargetAgentID: &ag.ID, IssueID: &iss.ID,
+		Mode: model.DispatchModePlan, CreatedBy: "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add parent: %v", err)
+	}
+	if _, err := s.AddFollowOnDispatch(repo.ID, parent.ID, model.DispatchModeImplement, "supervisor"); err != nil {
+		t.Fatalf("seed follow-on: %v", err)
+	}
+	// Now the chain call against the same issue must be rejected.
+	_, _, err = s.AddDispatchWithFollowOn(AddDispatchWithFollowOnIn{
+		RepoID:       repo.ID,
+		IssueID:      &iss.ID,
+		Mode:         model.DispatchModePlan,
+		CreatedBy:    "supervisor",
+		FollowOnMode: model.DispatchModeImplement,
+	})
+	if err == nil {
+		t.Fatal("expected single-slot rejection, got nil")
+	}
+	if !strings.Contains(err.Error(), "already has a follow-on") {
+		t.Fatalf("error should name the single-slot case, got: %v", err)
+	}
+	ds, err := s.ListDispatches(DispatchFilter{RepoID: &repo.ID})
+	if err != nil {
+		t.Fatalf("list dispatches: %v", err)
+	}
+	// Pre-existing seed: one parent + one follow-on. The chain call
+	// must have written nothing.
+	if len(ds) != 2 {
+		t.Fatalf("rejected chain call left %d row(s), want 2 (the seeded pair)", len(ds))
+	}
+}
+
+// TestAddDispatchWithFollowOn_RequiresIssue (BACI-209) — a chain
+// dispatch without an issue is rejected at the boundary. Follow-ons
+// are issue-scoped (the orphan-cancel sweep keys on issue state), so
+// chaining without an issue would land a queued parent with no way to
+// orphan-clean its follow-on.
+func TestAddDispatchWithFollowOn_RequiresIssue(t *testing.T) {
+	s, repo, _, _, _ := seedDispatchFixture(t)
+	_, _, err := s.AddDispatchWithFollowOn(AddDispatchWithFollowOnIn{
+		RepoID:       repo.ID,
+		Mode:         model.DispatchModePlan,
+		CreatedBy:    "supervisor",
+		FollowOnMode: model.DispatchModeImplement,
+	})
+	if err == nil {
+		t.Fatal("expected issue-less chain to be rejected, got nil")
+	}
+}

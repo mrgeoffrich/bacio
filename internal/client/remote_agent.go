@@ -289,6 +289,36 @@ func (c *remoteClient) CancelFollowOnDispatch(ctx context.Context, repo *model.R
 	return out, nil
 }
 
+// AutoDispatchIssueWithFollowOn (BACI-209) targets the new REST route,
+// sending the primary mode + follow-on mode in the body. The server
+// resolves the issue from the URL, re-checks the primary's state-gate,
+// and writes both rows in one transaction. Returns the parent
+// dispatch on success (the follow-on is fetched via card.followOn on
+// the next BoardCard refresh — mirrors how QueueFollowOnDispatch
+// exposes the dormant row).
+func (c *remoteClient) AutoDispatchIssueWithFollowOn(ctx context.Context, repo *model.Repo, issueKey, mode, followOnMode string, dryRun bool) (parent, followOn *model.AgentDispatch, err error) {
+	if repo == nil {
+		return nil, nil, fmt.Errorf("AutoDispatchIssueWithFollowOn requires a repo")
+	}
+	q := url.Values{}
+	if dryRun {
+		q.Set("dry_run", "true")
+	}
+	body := inputs.AgentDispatchChainInput{
+		IssueKey:     issueKey,
+		Mode:         mode,
+		FollowOnMode: followOnMode,
+	}
+	// The server returns the parent dispatch in the response body; the
+	// follow-on is discoverable via the next BoardCard refresh so we
+	// don't need to round-trip both rows.
+	var out model.AgentDispatch
+	if err := c.do(ctx, http.MethodPost, "/repos/"+repo.Prefix+"/issues/"+issueKey+"/dispatch-chain", q, body, &out); err != nil {
+		return nil, nil, err
+	}
+	return &out, nil, nil
+}
+
 // InflightByModeForRepo (BACI-145) has no REST parity today — the
 // kanban / brief assembler runs in-process on the desktop or `bacio
 // web` server, both of which talk to the local store. A future

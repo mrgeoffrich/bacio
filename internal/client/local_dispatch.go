@@ -205,6 +205,140 @@ func (c *localClient) AutoDispatchIssue(ctx context.Context, repo *model.Repo, i
 	return d, nil
 }
 
+// AutoDispatchIssueWithFollowOn (BACI-209) is the compound enqueue verb
+// that writes a primary queued dispatch AND a dormant follow-on linked
+// to it, both in one store transaction. The desktop kanban's
+// "Plan, then Implement" picker is the first caller; the REST route
+// `POST /repos/{prefix}/issues/{key}/dispatch-chain` and
+// `bacio agent dispatch-chain` all route through here so the
+// gate + payload + audit-row shape stays in one place.
+//
+// Semantics:
+//   - The primary state-gate is re-checked against the issue's current
+//     state — same as AutoDispatchIssue. A gate-miss returns an error
+//     before any insert.
+//   - The follow-on's gate is NOT checked here. Same posture as
+//     QueueFollowOnDispatch (BACI-195): the gate runs at fire time
+//     when the controller's promote sweep clears the dormant link.
+//     Queueing `implement` while the parent is still planning is the
+//     canonical case the dropped queue-time gate enabled.
+//   - Two audit rows: `agent.queue` for the parent (same as
+//     AutoDispatchIssue's emit) plus `agent.followon.queue` for the
+//     dormant follow-on. Existing `bacio history --op` queries keep
+//     working unchanged.
+//   - dry-run projects both rows without touching the DB. The caller
+//     emits the parent's projection (the kanban primary affordance);
+//     the follow-on rides on the next BoardCard refresh via
+//     card.followOn.
+func (c *localClient) AutoDispatchIssueWithFollowOn(ctx context.Context, repo *model.Repo, issueKey, mode, followOnMode string, dryRun bool) (parent, followOn *model.AgentDispatch, err error) {
+	if repo == nil {
+		return nil, nil, fmt.Errorf("AutoDispatchIssueWithFollowOn requires a repo")
+	}
+	parsedMode, err := model.ParseDispatchMode(mode)
+	if err != nil {
+		return nil, nil, err
+	}
+	if parsedMode == "" {
+		return nil, nil, fmt.Errorf("a dispatch mode is required")
+	}
+	parsedFollow, err := model.ParseDispatchMode(followOnMode)
+	if err != nil {
+		return nil, nil, err
+	}
+	if parsedFollow == "" {
+		return nil, nil, fmt.Errorf("a follow-on dispatch mode is required")
+	}
+	if parsedFollow == parsedMode {
+		// Defence at the boundary — the UI's dropdown skips the same-mode
+		// pair, but a stale UI / CLI caller might still send one. Chaining
+		// the same mode is meaningless (the controller's gate sweep would
+		// either re-queue the same work or gate-fail-cancel it).
+		return nil, nil, fmt.Errorf("follow-on mode %q matches the primary mode; pick a different next stage", parsedFollow)
+	}
+
+	iss, err := c.GetIssueByKey(ctx, repo, issueKey)
+	if err != nil {
+		return nil, nil, err
+	}
+	if iss.ArchivedAt != nil {
+		return nil, nil, fmt.Errorf("issue %s is archived; unarchive it before dispatching", iss.Key)
+	}
+	gates, err := c.GetPromptStates(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !slices.Contains(gates[mode], string(iss.State)) {
+		return nil, nil, fmt.Errorf("the %s prompt can't run from a %s issue", mode, iss.State)
+	}
+
+	// Compose the parent's payload the same way AutoDispatchIssue does —
+	// preamble + a stub naming the ticket, mode, and subagent type.
+	preamble, err := c.store.GetDispatchPreamble()
+	if err != nil {
+		return nil, nil, err
+	}
+	payload := model.ComposeDispatchPayload(preamble, model.DispatchStub{
+		IssueKey:     iss.Key,
+		Mode:         string(parsedMode),
+		SubagentType: model.SubagentTypeForTemplate(string(parsedMode)),
+	}, "")
+
+	if dryRun {
+		now := time.Now().UTC()
+		projParent := &model.AgentDispatch{
+			RepoID:     repo.ID,
+			RepoPrefix: repo.Prefix,
+			IssueID:    &iss.ID,
+			IssueKey:   iss.Key,
+			Mode:       parsedMode,
+			Payload:    payload,
+			Status:     model.DispatchQueued,
+			CreatedBy:  c.actor,
+			CreatedAt:  now,
+		}
+		// The dry-run projection can't know the parent's id yet (no
+		// INSERT ran), so QueuedAfterDispatchID is left nil on the
+		// projected follow-on — same shape QueueFollowOnDispatch's
+		// dry-run would produce against a not-yet-inserted parent.
+		projFollow := &model.AgentDispatch{
+			RepoID:     repo.ID,
+			RepoPrefix: repo.Prefix,
+			IssueID:    &iss.ID,
+			IssueKey:   iss.Key,
+			Mode:       parsedFollow,
+			Status:     model.DispatchQueued,
+			CreatedBy:  c.actor,
+			CreatedAt:  now,
+		}
+		return projParent, projFollow, nil
+	}
+
+	parent, followOn, err = c.store.AddDispatchWithFollowOn(store.AddDispatchWithFollowOnIn{
+		RepoID:       repo.ID,
+		IssueID:      &iss.ID,
+		Mode:         parsedMode,
+		Payload:      payload,
+		CreatedBy:    c.actor,
+		FollowOnMode: parsedFollow,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	c.recordOp(model.HistoryEntry{
+		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+		Op: "agent.queue", Kind: "agent",
+		TargetID: &parent.ID, TargetLabel: iss.Key,
+		Details: dispatchDetails(parent),
+	})
+	c.recordOp(model.HistoryEntry{
+		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+		Op: "agent.followon.queue", Kind: "agent",
+		TargetID: &followOn.ID, TargetLabel: iss.Key,
+		Details: followOnDetailsForClient(followOn),
+	})
+	return parent, followOn, nil
+}
+
 // QueueFollowOnDispatch (BACI-179, BACI-195) queues a dormant follow-on
 // dispatch against an issue's currently-in-flight (parent) dispatch.
 // Resolves the parent via WaitingDispatchForIssue — the open dispatch

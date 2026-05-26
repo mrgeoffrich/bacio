@@ -916,6 +916,29 @@ func (b *BoardService) DispatchIssue(repoPrefix, issueKey, mode string) (Dispatc
 	return dispatchDTO(d), nil
 }
 
+// DispatchIssueChain (BACI-209) queues a state-gated primary dispatch
+// PLUS a dormant follow-on against the brand-new parent in one
+// transaction. Backs the kanban's "Plan, then Implement" compound
+// picker on todo cards. Mirrors DispatchIssue's shape (returns the
+// parent DispatchDTO; the follow-on rides on the next BoardCard
+// refresh via card.followOn).
+//
+// All three surfaces — Wails, REST, CLI — funnel through
+// client.AutoDispatchIssueWithFollowOn so the gate + payload + two
+// audit rows live in one place.
+func (b *BoardService) DispatchIssueChain(repoPrefix, issueKey, mode, followOnMode string) (DispatchDTO, error) {
+	ctx := context.Background()
+	repo, err := b.resolveRepoForKey(ctx, repoPrefix, issueKey)
+	if err != nil {
+		return DispatchDTO{}, err
+	}
+	parent, _, err := b.client.AutoDispatchIssueWithFollowOn(ctx, repo, issueKey, mode, followOnMode, false)
+	if err != nil {
+		return DispatchDTO{}, err
+	}
+	return dispatchDTO(parent), nil
+}
+
 // GetSessionQuestion fetches one BACI-53 ask_user_question row by id.
 // Backs the desktop Agents-view modal — the AgentCard composite ships
 // only the badge metadata, so the modal does one extra round trip

@@ -183,6 +183,24 @@ export function DispatchIssue(repoPrefix: string, issueKey: string, mode: string
 }
 
 /**
+ * DispatchIssueChain (BACI-209) queues a state-gated primary dispatch
+ * PLUS a dormant follow-on against the brand-new parent in one
+ * transaction. Backs the kanban's "Plan, then Implement" compound
+ * picker on todo cards. Mirrors DispatchIssue's shape (returns the
+ * parent DispatchDTO; the follow-on rides on the next BoardCard
+ * refresh via card.followOn).
+ * 
+ * All three surfaces — Wails, REST, CLI — funnel through
+ * client.AutoDispatchIssueWithFollowOn so the gate + payload + two
+ * audit rows live in one place.
+ */
+export function DispatchIssueChain(repoPrefix: string, issueKey: string, mode: string, followOnMode: string): $CancellablePromise<$models.DispatchDTO> {
+    return $Call.ByID(168125999, repoPrefix, issueKey, mode, followOnMode).then(($result: any) => {
+        return $$createType8($result);
+    });
+}
+
+/**
  * GetIssue returns the full issue-drawer payload for one issue. repoPrefix
  * may be empty or "all" — canonical issue keys (PREFIX-N) resolve without a
  * repo context.

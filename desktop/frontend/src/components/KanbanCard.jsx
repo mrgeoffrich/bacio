@@ -21,7 +21,7 @@ function stateLabel(s) {
   return STATE_LABELS[s] ?? s;
 }
 
-function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDragStart, onDragEnd, onOpen, onDispatch, onCancelWaiting, onOpenQuestion, onOpenIssue, onQuickEval, isPinned, onTogglePin, onSetFollowOn, onCancelFollowOn, isTrayHover, isJumping }) {
+function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDragStart, onDragEnd, onOpen, onDispatch, onDispatchChain, onCancelWaiting, onOpenQuestion, onOpenIssue, onQuickEval, isPinned, onTogglePin, onSetFollowOn, onCancelFollowOn, isTrayHover, isJumping }) {
   // BACI-75: local-only expansion state for the Tasks pill. Resets on
   // unmount (board switch, repo switch, hard refresh) — that's
   // intentional, we don't want to persist a row-level UI toggle.
@@ -111,7 +111,12 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDra
   // follow-on shape comes from the server-side denorm onto BoardCard
   // (BACI-192) — undefined on cards without a dormant follow-on row.
   const followOn = card.followOn || null;
-  const followOnEligible = taken || waiting;
+  // BACI-209: a pre-queued follow-on (attached by the compound
+  // dispatch-chain affordance below) lights up the chip on a still-todo
+  // card. Without this relaxation the chip would stay hidden until the
+  // primary's matcher binds the parent — exactly the visibility we
+  // wanted the compound action to enable.
+  const followOnEligible = taken || waiting || !!followOn;
   // showFollowOn also needs the footer to exist on taken / waiting
   // cards — those normally already render the footer (assignee +
   // spinner), but if the assignee slot is empty the showFollowOn
@@ -478,25 +483,57 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDra
                       sideOffset={4}
                       collisionPadding={8}
                     >
-                      {validPrompts.map(p => (
-                        <DropdownMenu.Item
-                          key={p.mode}
-                          className="mk-card-action-item"
-                          onSelect={() => onDispatch(card.key, p.mode)}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {/*
-                            BACI-67: render the imperative actionLabel
-                            ("Plan", "Design") so the dispatch button
-                            reads as a call to action. label (gerund —
-                            "Planning") is the fallback for templates
-                            that haven't set the override and aren't
-                            built-in (no derivation yet client-side; the
-                            store seed handles built-ins).
-                          */}
-                          {p.actionLabel || p.label}
-                        </DropdownMenu.Item>
-                      ))}
+                      {/*
+                        BACI-209: per-primary section. Each state-valid
+                        primary renders a header label, then one row
+                        firing the existing `onDispatch` (primary-only)
+                        plus one compound row per element of the full
+                        prompt-template set (skipping the same-mode
+                        pair). Compound rows fire `onDispatchChain`,
+                        which queues the parent + the dormant follow-on
+                        in a single round trip. The follow-on's gate is
+                        re-evaluated server-side at promote time
+                        (BACI-195), so we offer the full prompt set
+                        here rather than filtering by the issue's
+                        current state.
+
+                        BACI-67: render the imperative actionLabel
+                        ("Plan", "Design") so the dispatch button reads
+                        as a call to action. label (gerund —
+                        "Planning") is the fallback for templates that
+                        haven't set the override and aren't built-in.
+                      */}
+                      {validPrompts.map(p => {
+                        const primaryLabel = p.actionLabel || p.label;
+                        const compounds = (promptConfig || []).filter(q => q.mode !== p.mode);
+                        return (
+                          <React.Fragment key={p.mode}>
+                            <DropdownMenu.Label className="mk-card-action-menu-label">
+                              {primaryLabel}
+                            </DropdownMenu.Label>
+                            <DropdownMenu.Item
+                              className="mk-card-action-item"
+                              onSelect={() => onDispatch(card.key, p.mode)}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {primaryLabel}
+                            </DropdownMenu.Item>
+                            {onDispatchChain && compounds.map(q => {
+                              const followOnLabel = q.actionLabel || q.label;
+                              return (
+                                <DropdownMenu.Item
+                                  key={`${p.mode}-then-${q.mode}`}
+                                  className="mk-card-action-item is-compound"
+                                  onSelect={() => onDispatchChain(card.key, p.mode, q.mode)}
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  {primaryLabel}, then {followOnLabel}
+                                </DropdownMenu.Item>
+                              );
+                            })}
+                          </React.Fragment>
+                        );
+                      })}
                     </DropdownMenu.Content>
                   </DropdownMenu.Portal>
                 </DropdownMenu.Root>

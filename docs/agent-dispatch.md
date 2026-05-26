@@ -167,6 +167,18 @@ no open claim — a persistent-identity slug, since it routes by slug)
 and rejects with a clear error when none is free. The issue drawer no
 longer carries any agent-selection UI.
 
+The dispatch dropdown on a `todo` card also surfaces **compound
+"Primary, then Follow-on" rows** (BACI-209). Picking *Plan, then
+Implement* queues the primary plan dispatch AND a dormant implement
+follow-on against the brand-new parent in one transaction (via
+`AutoDispatchIssueWithFollowOn` / `POST .../dispatch-chain` /
+`bacio agent dispatch-chain`). The follow-on rides on the next
+BoardCard refresh as `card.followOn` and the controller's BACI-179
+promote sweep fires it once the parent settles — same path the
+post-hoc `bacio agent queue-followon` uses. The primary row remains
+the default; the chain rows are indented under each primary's
+section header so the menu still groups by primary.
+
 #### State-gated prompts
 
 Each dispatch stage (`plan`, `design`, `implement`, `review`, `ship`,

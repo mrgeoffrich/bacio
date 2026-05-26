@@ -150,6 +150,22 @@ type AgentCancelFollowOnInput struct {
 	IssueKey string `json:"issue_key"`
 }
 
+// AgentDispatchChainInput is the payload for `bacio agent dispatch-chain
+// --json` (BACI-209): queues a state-gated auto-pick parent dispatch
+// (same shape as `bacio agent dispatch <key> --mode <stage>`) and
+// immediately attaches a dormant follow-on against the brand-new
+// parent — both in one transaction. IssueKey must be canonical
+// (PREFIX-N). Mode is the primary dispatch intent; FollowOnMode is
+// the chained next stage. The state-gate is re-checked at queue time
+// against the primary; the follow-on's gate is the controller's
+// promote sweep's concern (matches the QueueFollowOnDispatch
+// posture).
+type AgentDispatchChainInput struct {
+	IssueKey     string `json:"issue_key"`
+	Mode         string `json:"mode"`
+	FollowOnMode string `json:"follow_on_mode"`
+}
+
 // AgentQuestionsListInput is the payload for
 // `bacio agent questions list --json`. SessionID scopes the list to
 // one session id (defaults to $CLAUDE_CODE_SESSION_ID on the CLI

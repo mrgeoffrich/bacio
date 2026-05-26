@@ -1278,6 +1278,31 @@ export async function dispatchIssue(
   return reshapeDispatch(raw);
 }
 
+// dispatchIssueChain (BACI-209) queues a primary dispatch + a dormant
+// follow-on against the same issue in one transaction over HTTP. Same
+// auto-pick + state-gate shape as dispatchIssue for the primary; the
+// follow-on rides on the next BoardCard refresh via card.followOn.
+export async function dispatchIssueChain(
+  repoPrefix: string,
+  issueKey: string,
+  mode: string,
+  followOnMode: string,
+): Promise<DispatchDTO> {
+  if (!repoPrefix || repoPrefix === 'all') {
+    const i = issueKey.lastIndexOf('-');
+    if (i <= 0) throw new Error(`invalid issue key: ${issueKey}`);
+    repoPrefix = issueKey.slice(0, i);
+  }
+  const raw = await call<ApiDispatch>(
+    `/repos/${repoPrefix}/issues/${issueKey}/dispatch-chain`,
+    {
+      method: 'POST',
+      body: { issue_key: issueKey, mode, follow_on_mode: followOnMode },
+    },
+  );
+  return reshapeDispatch(raw);
+}
+
 // cancelWaitingDispatch (BACI-51) is the spinner-as-cancel-button
 // handler in web mode: two round-trips — GET the active dispatch on
 // the issue, POST cancel against its id. A 404 from the GET means the

@@ -557,6 +557,17 @@ type Client interface {
 	// (repo, mode) FIFO until the matcher binds it.
 	AutoDispatchIssue(ctx context.Context, repo *model.Repo, issueKey, mode string, dryRun bool) (*model.AgentDispatch, error)
 
+	// AutoDispatchIssueWithFollowOn (BACI-209) is the compound enqueue
+	// verb: queues a state-gated auto-pick primary dispatch AND a dormant
+	// follow-on against the brand-new parent, both in one store
+	// transaction. Backs the kanban's "Plan, then Implement" picker on
+	// todo cards, the REST POST /repos/{prefix}/issues/{key}/dispatch-chain
+	// route, and the `bacio agent dispatch-chain` CLI verb so all three
+	// share the same gate + insert + audit-row shape. The primary's
+	// state-gate is re-checked; the follow-on's is the controller's
+	// promote sweep's concern at fire time.
+	AutoDispatchIssueWithFollowOn(ctx context.Context, repo *model.Repo, issueKey, mode, followOnMode string, dryRun bool) (parent, followOn *model.AgentDispatch, err error)
+
 	// QueueFollowOnDispatch (BACI-179 / BACI-180) queues a dormant
 	// follow-on dispatch against the in-flight (parent) dispatch on an
 	// issue: re-resolves the parent via WaitingDispatchForIssue, re-runs
