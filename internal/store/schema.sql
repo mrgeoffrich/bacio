@@ -517,7 +517,21 @@ CREATE TABLE IF NOT EXISTS agent_dispatches (
     -- on the next matcher tick. No CHECK constraint on the column: the
     -- Go-side validator in AddDispatch is the single guard (see design
     -- §5) and a SQL CHECK would tax every status-changing UPDATE.
-    queued_after_dispatch_id INTEGER REFERENCES agent_dispatches(id) ON DELETE SET NULL
+    queued_after_dispatch_id INTEGER REFERENCES agent_dispatches(id) ON DELETE SET NULL,
+    -- queued_until_blockers_clear (BACI-217) is the second optional
+    -- "fire after" gate for follow-on dispatches: when 1, the dormant
+    -- queued row is excluded from the matcher's pool until every issue
+    -- on the `to` side of an open `blocks` edge pointing at this
+    -- dispatch's issue is in state `done` or `cancelled`. Mutually
+    -- exclusive with queued_after_dispatch_id on a single row (enforced
+    -- at the store boundary; not as a SQL CHECK because the existing
+    -- column doesn't carry one either and a CHECK here would tax every
+    -- status-changing UPDATE). The same controller sweep that promotes
+    -- BACI-179 rows clears this flag once the blocker gate clears AND
+    -- no open claim races in on the issue; the orphan-cancel sweep
+    -- also covers blockers-clear rows. Re-evaluated on every tick so
+    -- new blocks edges added after queue time are respected.
+    queued_until_blockers_clear INTEGER NOT NULL DEFAULT 0
     -- Target CHECK is intentionally absent: queued (BACI-51) rows leave
     -- target_agent_id NULL and target_session_id '' until the matcher
     -- binds them; the Go-side validator in AddDispatch enforces "queued

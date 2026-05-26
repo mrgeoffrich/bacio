@@ -159,14 +159,18 @@ export interface WaitingState {
 }
 
 // BACI-192: BoardCardFollowOn is the denormalised view of the dormant
-// follow-on dispatch attached to this issue's currently in-flight
-// (parent) dispatch — single-slot per issue, drives the kanban
-// footer's follow-on button visual state. Mirror of the Go-side
-// boardcards.BoardCardFollowOn; api.ts re-exports the Wails-binding
-// equivalent under the same name.
+// follow-on dispatch attached to this issue — single-slot per issue,
+// drives the kanban footer's follow-on button visual state. Mirror of
+// the Go-side boardcards.BoardCardFollowOn; api.ts re-exports the
+// Wails-binding equivalent under the same name.
+// BACI-217: waitingReason carries a short server-derived label
+// describing what the dormant row is waiting on, when the variant is
+// the blockers-clear gate ("blocked by N"). Absent on the parent-acks
+// variant (the chip reads the mode label without a secondary qualifier).
 export interface BoardCardFollowOn {
   mode: string;
   actionLabel: string;
+  waitingReason?: string;
 }
 
 export interface BoardCard {

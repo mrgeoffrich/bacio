@@ -116,7 +116,13 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDra
   // card. Without this relaxation the chip would stay hidden until the
   // primary's matcher binds the parent — exactly the visibility we
   // wanted the compound action to enable.
-  const followOnEligible = taken || waiting || !!followOn;
+  // BACI-217: a blocked-and-idle card (at least one open `blocks` edge
+  // pointing at it) is also eligible — the user can queue a follow-on
+  // that waits for every blocker to clear before firing. card.blockedBy
+  // is the open-state list (server-filtered) so length > 0 is the
+  // server's "this card is currently blocked" signal.
+  const blockedForFollowOn = (card.blockedBy?.length ?? 0) > 0;
+  const followOnEligible = taken || waiting || !!followOn || blockedForFollowOn;
   // showFollowOn also needs the footer to exist on taken / waiting
   // cards — those normally already render the footer (assignee +
   // spinner), but if the assignee slot is empty the showFollowOn
@@ -337,24 +343,50 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDra
             firing). Cancel item appears at the bottom only when a
             follow-on is already attached.
           */}
-          {showFollowOn && (
+          {showFollowOn && (() => {
+            // BACI-217: the chip's secondary label and the dropdown's
+            // section header swap based on the dormant row's variant.
+            // followOn.waitingReason is set server-side ("blocked by N")
+            // for the blockers-clear variant; absent for the parent-acks
+            // variant (today's default — the chip reads the mode label
+            // without a qualifier). The dropdown header reads "When
+            // unblocked →" when the card is blocked-and-idle (variant
+            // we'd write on next queue) or already carries a
+            // blockers-clear follow-on; otherwise "After current →".
+            const waitingReason = followOn?.waitingReason || '';
+            const isBlockersVariant = waitingReason !== '';
+            const willQueueBlockersVariant = !followOn && blockedForFollowOn && !taken && !waiting;
+            const menuHeader = (isBlockersVariant || willQueueBlockersVariant)
+              ? 'When unblocked →'
+              : 'After current →';
+            const chipModeLabel = followOn ? (followOn.actionLabel || followOn.mode) : '';
+            const chipAria = followOn
+              ? (waitingReason
+                  ? `Follow-on: ${chipModeLabel} (${waitingReason}) — click to change or cancel`
+                  : `Follow-on: ${chipModeLabel} — click to change or cancel`)
+              : 'Queue a follow-on dispatch';
+            const chipTitle = followOn
+              ? (waitingReason
+                  ? `Follow-on queued: ${chipModeLabel} — ${waitingReason}`
+                  : `Follow-on queued: ${chipModeLabel}`)
+              : 'Queue follow-on';
+            return (
             <DropdownMenu.Root>
               <DropdownMenu.Trigger asChild>
                 <button
                   type="button"
                   className={`mk-card-followon-btn ${followOn ? 'is-attached' : ''}`}
-                  aria-label={followOn
-                    ? `Follow-on: ${followOn.actionLabel || followOn.mode} — click to change or cancel`
-                    : 'Queue a follow-on dispatch'}
-                  title={followOn
-                    ? `Follow-on queued: ${followOn.actionLabel || followOn.mode}`
-                    : 'Queue follow-on'}
+                  aria-label={chipAria}
+                  title={chipTitle}
                   onClick={(e) => e.stopPropagation()}
                 >
                   <Icon name="forward" />
                   {followOn && (
                     <span className="mk-card-followon-label">
-                      {followOn.actionLabel || followOn.mode}
+                      {chipModeLabel}
+                      {waitingReason && (
+                        <span className="mk-card-followon-reason"> · {waitingReason}</span>
+                      )}
                     </span>
                   )}
                 </button>
@@ -368,7 +400,7 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDra
                   collisionPadding={8}
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <div className="mk-card-action-menu-label">After current →</div>
+                  <div className="mk-card-action-menu-label">{menuHeader}</div>
                   {(promptConfig || []).map(p => (
                     <DropdownMenu.Item
                       key={p.mode}
@@ -394,7 +426,8 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDra
                 </DropdownMenu.Content>
               </DropdownMenu.Portal>
             </DropdownMenu.Root>
-          )}
+            );
+          })()}
           {waiting ? (
             // BACI-145: the spinner + the inline label render together
             // so the user can read "why is this card waiting?" at a

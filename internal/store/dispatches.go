@@ -51,6 +51,13 @@ type AddDispatchIn struct {
 	// the controller's promote sweep clears the column once the
 	// predecessor settles and no open claim races in on the issue.
 	QueuedAfterDispatchID *int64
+	// QueuedUntilBlockersClear (BACI-217) marks the row as the
+	// blockers-clear follow-on variant: a dormant queued row excluded
+	// from the matcher's pool until every issue on the `to` side of an
+	// open `blocks` edge pointing at this dispatch's issue is
+	// done/cancelled. Valid only on InitialStatus = DispatchQueued;
+	// mutually exclusive with QueuedAfterDispatchID on a single row.
+	QueuedUntilBlockersClear bool
 }
 
 // AddDispatch records a new dispatch. Defaults to status='pending'
@@ -94,6 +101,17 @@ func (s *Store) AddDispatch(in AddDispatchIn) (*model.AgentDispatch, error) {
 	if in.QueuedAfterDispatchID != nil && status != model.DispatchQueued {
 		return nil, errors.New("queued_after_dispatch_id is only valid on queued dispatches")
 	}
+	// BACI-217: the blockers-clear gate has the same dormant invariant,
+	// and is mutually exclusive with the parent-gate variant on a
+	// single row (a row can wait on a parent OR on its blockers, not
+	// both — the Go-side validator is the boundary guard since SQLite
+	// CHECKs aren't used on these columns).
+	if in.QueuedUntilBlockersClear && status != model.DispatchQueued {
+		return nil, errors.New("queued_until_blockers_clear is only valid on queued dispatches")
+	}
+	if in.QueuedUntilBlockersClear && in.QueuedAfterDispatchID != nil {
+		return nil, errors.New("queued_after_dispatch_id and queued_until_blockers_clear are mutually exclusive")
+	}
 	if in.TargetSessionID != "" {
 		if _, err := ValidateSessionID(in.TargetSessionID); err != nil {
 			return nil, err
@@ -112,13 +130,17 @@ func (s *Store) AddDispatch(in AddDispatchIn) (*model.AgentDispatch, error) {
 	}
 	defer tx.Rollback()
 
+	blockersClear := 0
+	if in.QueuedUntilBlockersClear {
+		blockersClear = 1
+	}
 	res, err := tx.Exec(`
 		INSERT INTO agent_dispatches
-		    (repo_id, target_agent_id, target_session_id, issue_id, mode, payload, status, created_by, queued_after_dispatch_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		    (repo_id, target_agent_id, target_session_id, issue_id, mode, payload, status, created_by, queued_after_dispatch_id, queued_until_blockers_clear)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		in.RepoID, nullableInt(in.TargetAgentID), in.TargetSessionID,
 		nullableInt(in.IssueID), string(in.Mode), in.Payload, string(status), actor,
-		nullableInt(in.QueuedAfterDispatchID),
+		nullableInt(in.QueuedAfterDispatchID), blockersClear,
 	)
 	if err != nil {
 		return nil, err
@@ -163,7 +185,8 @@ const dispatchSelect = `
 	       COALESCE(r2.prefix || '-' || i.number, ''),
 	       d.mode, d.payload, d.status, d.created_by, d.created_at,
 	       d.delivered_at, d.acked_at, d.ack_note,
-	       d.queued_after_dispatch_id
+	       d.queued_after_dispatch_id,
+	       d.queued_until_blockers_clear
 	FROM agent_dispatches d
 	LEFT JOIN repos  r  ON r.id  = d.repo_id
 	LEFT JOIN agents a  ON a.id  = d.target_agent_id
@@ -444,23 +467,18 @@ func (s *Store) WaitingDispatchForIssue(repoID, issueID int64) (*model.AgentDisp
 // already refuses to create such queued rows, but a row created before
 // the archive (or a hand-inserted one) still needs the guard.
 func (s *Store) ListQueuedModesByRepo(repoID int64) ([]model.DispatchMode, error) {
-	// BACI-179: skip dormant follow-on rows whose predecessor isn't yet
-	// settled (acked/cancelled). Correlated NOT EXISTS — design §1
-	// picked it over a LEFT JOIN because rows with
-	// queued_after_dispatch_id IS NULL short-circuit to constant-true
-	// (no probe), and the subquery is a PK-equality lookup on the
-	// referenced parent. No new index for this gate; the sweep index
-	// (idx_dispatches_queued_after) is for the opposite-direction walk.
+	// BACI-179 / BACI-217: skip dormant follow-on rows whose gate has
+	// not yet cleared. dormantFollowOnGateSQL() returns the OR'd
+	// fragment expressing "this row is dormant" for both variants
+	// (parent-acks and blockers-clear); a row not matching it is
+	// either a regular queued row or a previously-dormant row whose
+	// gate has just cleared, and the matcher should bind it.
 	rows, err := s.DB.Query(`
 		SELECT DISTINCT d.mode FROM agent_dispatches d
 		 LEFT JOIN issues i ON d.issue_id = i.id
 		 WHERE d.repo_id = ? AND d.status = 'queued'
 		   AND (d.issue_id IS NULL OR i.archived_at IS NULL)
-		   AND NOT EXISTS (
-		     SELECT 1 FROM agent_dispatches p
-		      WHERE p.id = d.queued_after_dispatch_id
-		        AND p.status NOT IN ('acked','cancelled')
-		   )
+		   AND NOT `+dormantFollowOnGateSQL()+`
 		 ORDER BY d.mode ASC`, repoID)
 	if err != nil {
 		return nil, err
@@ -487,16 +505,13 @@ func (s *Store) ListQueuedByRepoMode(repoID int64, mode model.DispatchMode) ([]*
 	// BACI-68: skip queued dispatches whose target issue has been
 	// archived. Same rationale as ListQueuedModesByRepo's guard. The
 	// `i` alias is already joined in dispatchSelect; reuse it.
-	// BACI-179: also skip dormant follow-ons whose predecessor isn't
-	// yet settled (see ListQueuedModesByRepo for the design choice).
+	// BACI-179 / BACI-217: also skip dormant follow-ons whose gate has
+	// not cleared yet — both variants (parent-acks, blockers-clear)
+	// are covered by dormantFollowOnGateSQL().
 	rows, err := s.DB.Query(dispatchSelect+`
 		WHERE d.repo_id = ? AND d.mode = ? AND d.status = 'queued'
 		  AND (d.issue_id IS NULL OR i.archived_at IS NULL)
-		  AND NOT EXISTS (
-		    SELECT 1 FROM agent_dispatches p
-		     WHERE p.id = d.queued_after_dispatch_id
-		       AND p.status NOT IN ('acked','cancelled')
-		  )
+		  AND NOT `+dormantFollowOnGateSQL()+`
 		ORDER BY d.created_at ASC, d.id ASC`, repoID, string(mode))
 	if err != nil {
 		return nil, err
@@ -663,21 +678,22 @@ func (s *Store) BindQueuedDispatch(id int64, agentID int64) (*model.AgentDispatc
 
 func scanDispatch(r rowScanner) (*model.AgentDispatch, error) {
 	var (
-		d            model.AgentDispatch
-		prefix       sql.NullString
-		agentID      sql.NullInt64
-		agentName    sql.NullString
-		issueID      sql.NullInt64
-		issueKey     string
-		delivered    sql.NullTime
-		acked        sql.NullTime
-		queuedAfter  sql.NullInt64
+		d              model.AgentDispatch
+		prefix         sql.NullString
+		agentID        sql.NullInt64
+		agentName      sql.NullString
+		issueID        sql.NullInt64
+		issueKey       string
+		delivered      sql.NullTime
+		acked          sql.NullTime
+		queuedAfter    sql.NullInt64
+		blockersClear  int
 	)
 	err := r.Scan(
 		&d.ID, &d.RepoID, &prefix, &agentID, &agentName,
 		&d.TargetSessionID, &issueID, &issueKey,
 		&d.Mode, &d.Payload, &d.Status, &d.CreatedBy, &d.CreatedAt,
-		&delivered, &acked, &d.AckNote, &queuedAfter,
+		&delivered, &acked, &d.AckNote, &queuedAfter, &blockersClear,
 	)
 	if err != nil {
 		return nil, err
@@ -707,6 +723,7 @@ func scanDispatch(r rowScanner) (*model.AgentDispatch, error) {
 		v := queuedAfter.Int64
 		d.QueuedAfterDispatchID = &v
 	}
+	d.QueuedUntilBlockersClear = blockersClear != 0
 	return &d, nil
 }
 
@@ -776,6 +793,151 @@ func (s *Store) AddFollowOnDispatch(repoID, parentDispatchID int64, mode model.D
 		InitialStatus:         model.DispatchQueued,
 		QueuedAfterDispatchID: &parent.ID,
 	})
+}
+
+// AddBlockerFollowOnDispatch (BACI-217) creates a dormant follow-on row
+// of the second variant: a queued dispatch whose dormant gate waits
+// until every issue on the `to` side of an open `blocks` edge pointing
+// at the named issue is in state `done` or `cancelled`. Mirrors
+// AddFollowOnDispatch's contract — issue-scoped, single-slot per issue
+// across both variants, no audit row (the caller stamps
+// `agent.followon.queue` with `gate=blockers` Details).
+//
+// Validates: actor / mode parseable + non-empty; repo + issue exist;
+// no in-flight dispatch is already on the issue (the parent-acks
+// variant is the right fit there — refuse silently so the caller's
+// client wrapper falls through to that path); the issue has at least
+// one open blocker (no point queueing if the gate is already clear —
+// the matcher would bind it on its next tick anyway). Returns the new
+// dormant row.
+func (s *Store) AddBlockerFollowOnDispatch(repoID, issueID int64, mode model.DispatchMode, createdBy string) (*model.AgentDispatch, error) {
+	if repoID == 0 {
+		return nil, errors.New("follow-on dispatch requires a repo")
+	}
+	if _, err := ValidateActor(createdBy); err != nil {
+		return nil, err
+	}
+	if _, err := model.ParseDispatchMode(string(mode)); err != nil {
+		return nil, err
+	}
+	if mode == "" {
+		return nil, errors.New("follow-on dispatch requires a mode")
+	}
+	// Resolve the issue so the error path returns a meaningful key
+	// rather than a bare id. issue must live in repoID.
+	iss, err := s.GetIssueByID(issueID)
+	if err != nil {
+		return nil, err
+	}
+	if iss.RepoID != repoID {
+		return nil, fmt.Errorf("blocker follow-on issue %s is in a different repo", iss.Key)
+	}
+	// The blockers-clear variant is intended for blocked-and-idle
+	// cards; an in-flight parent dispatch on the same issue means the
+	// parent-acks variant is the right pick. The client wrapper's
+	// branch ordering enforces this, but defend at the boundary too.
+	waiting, err := s.WaitingDispatchForIssue(repoID, issueID)
+	if err != nil {
+		return nil, err
+	}
+	if waiting != nil {
+		return nil, fmt.Errorf("issue %s already has an in-flight dispatch (id=%d); use the parent follow-on variant", iss.Key, waiting.ID)
+	}
+	// Must have at least one open blocker — otherwise the gate is
+	// already clear at queue time and the matcher would bind the row
+	// on its next tick. Refuse here so the client wrapper falls
+	// through to the existing "no active dispatch" error rather than
+	// silently writing a row that the very next sweep promotes.
+	blockers, err := s.BlockersFor([]int64{issueID})
+	if err != nil {
+		return nil, err
+	}
+	openBlockers := 0
+	for _, b := range blockers[issueID] {
+		if isOpenBlockerState(b.BlockerState) {
+			openBlockers++
+		}
+	}
+	if openBlockers == 0 {
+		return nil, fmt.Errorf("issue %s has no open blockers; the blockers-clear follow-on variant is not applicable", iss.Key)
+	}
+	// Single-slot per issue: only one dormant follow-on at a time,
+	// across both variants.
+	existing, err := s.FollowOnForIssue(repoID, issueID)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		return nil, fmt.Errorf("issue %s already has a follow-on dispatch (id=%d)", iss.Key, existing.ID)
+	}
+	// Direct insert rather than routing through AddDispatch: that path
+	// flips `waiting_for_claim = 1` on the issue (parity with a
+	// matcher-bound dispatch about to be picked up), but a dormant
+	// blockers-clear row is not waiting for an agent — it's waiting
+	// for the blocker gate. Surfacing the card as "waiting" before the
+	// gate clears would render a spinner on an otherwise idle ticket;
+	// the chip is the right surface here.
+	actor, err := ValidateActor(createdBy)
+	if err != nil {
+		return nil, err
+	}
+	res, err := s.DB.Exec(`
+		INSERT INTO agent_dispatches
+		    (repo_id, target_agent_id, target_session_id, issue_id, mode, payload, status, created_by, queued_after_dispatch_id, queued_until_blockers_clear)
+		VALUES (?, NULL, '', ?, ?, '', 'queued', ?, NULL, 1)`,
+		repoID, issueID, string(mode), actor,
+	)
+	if err != nil {
+		return nil, err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return nil, err
+	}
+	return s.GetDispatch(id)
+}
+
+// isOpenBlockerState mirrors the "is this blocker still pending" test
+// used by boardcards.cards.go's per-card `BlockedBy` filter and by the
+// orphan-cancel sweep: anything that isn't `done` or `cancelled` keeps
+// the blocked side waiting. Centralised here so the AddBlockerFollowOn
+// guard and the matcher's NOT EXISTS predicate (expressed in SQL) read
+// against the same definition of "open".
+func isOpenBlockerState(s model.State) bool {
+	return s != model.StateDone && s != model.StateCancelled
+}
+
+// dormantFollowOnGateSQL (BACI-217) returns the SQL fragment that
+// expresses "this dispatch row is dormant and its gate has not yet
+// cleared". Either the BACI-179 parent-acks gate (parent dispatch is
+// still open) or the BACI-217 blockers-clear gate (the issue has at
+// least one open blocker) keeps the row dormant. A row with neither
+// flag set is not dormant — the matcher binds it like any other queued
+// row.
+//
+// Centralising the fragment keeps the matcher's two query paths
+// (ListQueuedModesByRepo, ListQueuedByRepoMode) and the controller's
+// promote sweep (PromoteReadyFollowOns) reading from the same source —
+// previous variants of this code inlined two near-identical NOT EXISTS
+// snippets that drifted easily. The fragment uses `d` as the
+// agent_dispatches alias (matching the existing call sites) and `p`
+// and `ir`/`i2` for the correlated subqueries so the outer query's
+// joins are unaffected.
+func dormantFollowOnGateSQL() string {
+	return `(
+		(d.queued_after_dispatch_id IS NOT NULL AND EXISTS (
+		    SELECT 1 FROM agent_dispatches p
+		     WHERE p.id = d.queued_after_dispatch_id
+		       AND p.status NOT IN ('acked','cancelled')
+		))
+		OR (d.queued_until_blockers_clear = 1 AND EXISTS (
+		    SELECT 1 FROM issue_relations ir
+		     JOIN issues i2 ON i2.id = ir.from_issue_id
+		     WHERE ir.to_issue_id = d.issue_id
+		       AND ir.type = 'blocks'
+		       AND i2.state NOT IN ('done','cancelled')
+		))
+	)`
 }
 
 // AddDispatchWithFollowOnIn is the validated tuple AddDispatchWithFollowOn
@@ -935,18 +1097,19 @@ func (s *Store) CancelFollowOnDispatch(repoID, issueID int64) (*model.AgentDispa
 	return s.CancelDispatch(d.ID)
 }
 
-// FollowOnForIssue (BACI-179) returns the current dormant follow-on
-// for an issue, or (nil, nil) when none exists. Used by the kanban
-// board assembler to fill the chip data on a card (Phase 3) and by
-// AddFollowOnDispatch to enforce the single-slot invariant. NB: the
-// returned row is the dormant one (queued_after_dispatch_id IS NOT
-// NULL); a promoted row is no longer a "follow-on" — it's a regular
-// queued dispatch heading for the matcher.
+// FollowOnForIssue (BACI-179, BACI-217) returns the current dormant
+// follow-on for an issue, or (nil, nil) when none exists. Used by the
+// kanban board assembler to fill the chip data on a card and by
+// AddFollowOnDispatch / AddBlockerFollowOnDispatch to enforce the
+// single-slot invariant across both variants. NB: the returned row is
+// the dormant one (either queued_after_dispatch_id IS NOT NULL or
+// queued_until_blockers_clear = 1); a promoted row is no longer a
+// "follow-on" — it's a regular queued dispatch heading for the matcher.
 func (s *Store) FollowOnForIssue(repoID, issueID int64) (*model.AgentDispatch, error) {
 	row := s.DB.QueryRow(dispatchSelect+`
 		WHERE d.repo_id = ? AND d.issue_id = ?
 		  AND d.status = 'queued'
-		  AND d.queued_after_dispatch_id IS NOT NULL
+		  AND (d.queued_after_dispatch_id IS NOT NULL OR d.queued_until_blockers_clear = 1)
 		ORDER BY d.id DESC LIMIT 1`, repoID, issueID)
 	d, err := scanDispatch(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1020,17 +1183,19 @@ func (s *Store) PromoteReadyFollowOns(gates map[model.DispatchMode][]model.State
 	// so the per-row gate check below runs without a per-row second
 	// query. NULL issue_state (no issue_id) is fine — handled below
 	// by skipping the gate check for that row.
+	// BACI-217: widen the SELECT to cover both dormant variants
+	// (parent-acks and blockers-clear). A row is a candidate iff its
+	// status is queued, it carries at least one of the two dormant
+	// flags, the dormant gate has cleared, and no live claim is
+	// currently racing on the issue. The dormant-gate cleared
+	// condition is the inverse of dormantFollowOnGateSQL().
 	rows, err := tx.Query(`
 		SELECT d.id, d.mode, COALESCE(i.state, '')
 		  FROM agent_dispatches d
 		  LEFT JOIN issues i ON i.id = d.issue_id
 		 WHERE d.status = 'queued'
-		   AND d.queued_after_dispatch_id IS NOT NULL
-		   AND NOT EXISTS (
-		     SELECT 1 FROM agent_dispatches p
-		      WHERE p.id = d.queued_after_dispatch_id
-		        AND p.status NOT IN ('acked','cancelled')
-		   )
+		   AND (d.queued_after_dispatch_id IS NOT NULL OR d.queued_until_blockers_clear = 1)
+		   AND NOT ` + dormantFollowOnGateSQL() + `
 		   AND NOT EXISTS (
 		     SELECT 1 FROM agent_claims c
 		       JOIN agent_sessions s ON s.id = c.session_pk
@@ -1077,8 +1242,31 @@ func (s *Store) PromoteReadyFollowOns(gates map[model.DispatchMode][]model.State
 		}
 	}
 	for _, id := range promoteIDs {
+		// BACI-217: clear BOTH dormant flags so the promoted row is a
+		// clean regular queued dispatch regardless of which variant
+		// queued it. queued_after_dispatch_id may already be NULL on a
+		// blockers-clear row; the SET is idempotent in that case.
 		if _, err := tx.Exec(
-			`UPDATE agent_dispatches SET queued_after_dispatch_id = NULL WHERE id = ?`, id,
+			`UPDATE agent_dispatches
+			    SET queued_after_dispatch_id = NULL,
+			        queued_until_blockers_clear = 0
+			  WHERE id = ?`, id,
+		); err != nil {
+			return nil, nil, err
+		}
+		// BACI-217: flip the promoted row's issue into waiting_for_claim
+		// state. The blockers-clear insert deliberately left the flag
+		// alone (the dormant row isn't waiting for the matcher — it's
+		// waiting for the blocker gate), so the promote sweep is what
+		// surfaces the spinner on the card. The parent-acks variant
+		// already had the flag set by the parent's AddDispatch, so the
+		// UPDATE is harmless in that case. Skip when issue_id is NULL —
+		// the row will still promote into a regular queued state, but
+		// there's no issue row to flip.
+		if _, err := tx.Exec(
+			`UPDATE issues SET waiting_for_claim = 1
+			  WHERE id = (SELECT issue_id FROM agent_dispatches WHERE id = ?)
+			    AND id IS NOT NULL`, id,
 		); err != nil {
 			return nil, nil, err
 		}
@@ -1155,10 +1343,14 @@ func (s *Store) CancelOrphanedFollowOns() ([]*model.AgentDispatch, error) {
 		return nil, err
 	}
 	defer tx.Rollback()
+	// BACI-217: orphan-cancel covers both dormant variants. A dormant
+	// row whose own issue lands terminal is meaningless regardless of
+	// what gate kept it dormant — the user has explicitly said the
+	// work on that issue is over, so the follow-on should drop too.
 	rows, err := tx.Query(`
 		SELECT d.id FROM agent_dispatches d
 		 WHERE d.status = 'queued'
-		   AND d.queued_after_dispatch_id IS NOT NULL
+		   AND (d.queued_after_dispatch_id IS NOT NULL OR d.queued_until_blockers_clear = 1)
 		   AND d.issue_id IS NOT NULL
 		   AND EXISTS (
 		     SELECT 1 FROM issues i
