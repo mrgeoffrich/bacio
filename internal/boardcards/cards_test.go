@@ -2,6 +2,7 @@ package boardcards
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -32,6 +33,10 @@ type fakeClient struct {
 	// shape as the store helpers.
 	evalCounts       map[int64]int
 	transcriptCounts map[int64]int
+	// latestPlans (BACI-216) drives the per-card plan affordance.
+	// Keyed by issue id; absent entries surface as nil LatestPlan
+	// on the assembled card.
+	latestPlans map[int64]*model.LatestPlan
 	// inflightByMode (BACI-145) is mode → count of in-flight dispatches
 	// for the test's single repo. Nil leaves the map empty (no
 	// concurrency-cap blocking).
@@ -146,6 +151,12 @@ func (f *fakeClient) CountTranscriptDocsByIssue(context.Context, []int64) (map[i
 		return map[int64]int{}, nil
 	}
 	return f.transcriptCounts, nil
+}
+func (f *fakeClient) LatestPlanByIssue(context.Context, []int64) (map[int64]*model.LatestPlan, error) {
+	if f.latestPlans == nil {
+		return map[int64]*model.LatestPlan{}, nil
+	}
+	return f.latestPlans, nil
 }
 func (f *fakeClient) InflightByModeForRepo(context.Context, *model.Repo) (map[model.DispatchMode]int, error) {
 	if f.inflightByMode == nil {
@@ -1146,6 +1157,65 @@ func TestAssembleTranscriptAndEvalCounts(t *testing.T) {
 	if empty.EvalCommentCount != 0 || empty.TranscriptDocCount != 0 {
 		t.Errorf("TEST-102 counts = (eval=%d, transcript=%d), want (0, 0)",
 			empty.EvalCommentCount, empty.TranscriptDocCount)
+	}
+}
+
+// TestAssembleLatestPlan (BACI-216) covers the per-card plan
+// affordance — the client-returned LatestPlanByIssue map fans
+// onto each card by issue id, and issues without an entry leave
+// the BoardCard.LatestPlan slot nil (which the JSON tag's
+// omitempty drops from the wire payload).
+func TestAssembleLatestPlan(t *testing.T) {
+	repo := &model.Repo{ID: 1, Prefix: "TEST"}
+	issues := []*model.Issue{
+		{ID: 200, Key: "TEST-200", State: model.StateInProgress, Title: "has a plan"},
+		{ID: 201, Key: "TEST-201", State: model.StateTodo, Title: "no plan"},
+	}
+	planUpdated := time.Date(2026, 5, 25, 9, 0, 0, 0, time.UTC)
+	latestPlans := map[int64]*model.LatestPlan{
+		200: {DocumentID: 7, UUID: "doc-uuid-7", Filename: "test-200-plan.md", UpdatedAt: planUpdated},
+		// 201 absent — no plan linked.
+	}
+	f := &fakeClient{repo: repo, issues: issues, latestPlans: latestPlans}
+	cards, err := Assemble(context.Background(), f, repo, false, nil)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	byKey := map[string]BoardCard{}
+	for _, c := range cards {
+		byKey[c.Key] = c
+	}
+	withPlan := byKey["TEST-200"]
+	if withPlan.LatestPlan == nil {
+		t.Fatalf("TEST-200 LatestPlan = nil, want populated")
+	}
+	if withPlan.LatestPlan.Filename != "test-200-plan.md" {
+		t.Errorf("TEST-200 LatestPlan.Filename = %q, want %q",
+			withPlan.LatestPlan.Filename, "test-200-plan.md")
+	}
+	if withPlan.LatestPlan.DocumentID != 7 || withPlan.LatestPlan.UUID != "doc-uuid-7" {
+		t.Errorf("TEST-200 LatestPlan id/uuid mismatch: %+v", withPlan.LatestPlan)
+	}
+	if !withPlan.LatestPlan.UpdatedAt.Equal(planUpdated) {
+		t.Errorf("TEST-200 LatestPlan.UpdatedAt = %v, want %v",
+			withPlan.LatestPlan.UpdatedAt, planUpdated)
+	}
+	// Wire shape uses camelCase per the BoardCard contract — the JSON
+	// marshalling round-trip pins it so an accidental snake-case
+	// regression surfaces here, not on the kanban.
+	if b, err := json.Marshal(withPlan); err == nil {
+		if !strings.Contains(string(b), `"latestPlan"`) ||
+			!strings.Contains(string(b), `"documentId"`) ||
+			!strings.Contains(string(b), `"updatedAt"`) {
+			t.Errorf("LatestPlan JSON shape regressed: %s", b)
+		}
+	} else {
+		t.Fatalf("Marshal: %v", err)
+	}
+	noPlan := byKey["TEST-201"]
+	if noPlan.LatestPlan != nil {
+		t.Errorf("TEST-201 LatestPlan = %+v, want nil (no plan linked)",
+			noPlan.LatestPlan)
 	}
 }
 

@@ -165,6 +165,12 @@ type IssueMetaDTO struct {
 	Claude          bool     `json:"claude"`
 	Taken           bool     `json:"taken"`
 	WaitingForClaim bool     `json:"waitingForClaim"`
+	// LatestPlan (BACI-216) — the newest `plan`-typed doc linked
+	// directly to this issue, or nil when none. Drives the prominent
+	// "Open plan" link in IssueWorkspace's header. Mirrors the
+	// BoardCard.LatestPlan / IssueDetail.LatestPlan fields so every
+	// surface reads the same plan affordance.
+	LatestPlan *LatestPlanDTO `json:"latestPlan,omitempty"`
 }
 
 // IssueBriefDTO is the workspace-shaped payload — BoardService.GetIssueBrief's
@@ -177,17 +183,22 @@ type IssueMetaDTO struct {
 // as the kanban-card label. Nil when the issue isn't waiting; the
 // banner falls back to its "taken" branch when an agent has the claim.
 type IssueBriefDTO struct {
-	Issue           IssueMetaDTO              `json:"issue"`
-	Feature         *FeatureRefDTO            `json:"feature,omitempty"`
-	Relations       RelationsDTO              `json:"relations"`
-	PullRequests    []PRDTO                   `json:"pullRequests"`
-	Documents       []LinkedDocDTO            `json:"documents"`
-	Comments        []CommentDTO              `json:"comments"`
-	Claimants       []ClaimantDTO             `json:"claimants"`
-	Taken           bool                      `json:"taken"`
-	WaitingForClaim bool                      `json:"waitingForClaim"`
-	WaitingState    *boardcards.WaitingState  `json:"waitingState,omitempty"`
-	Warnings        []string                  `json:"warnings"`
+	Issue           IssueMetaDTO             `json:"issue"`
+	Feature         *FeatureRefDTO           `json:"feature,omitempty"`
+	Relations       RelationsDTO             `json:"relations"`
+	PullRequests    []PRDTO                  `json:"pullRequests"`
+	Documents       []LinkedDocDTO           `json:"documents"`
+	Comments        []CommentDTO             `json:"comments"`
+	Claimants       []ClaimantDTO            `json:"claimants"`
+	Taken           bool                     `json:"taken"`
+	WaitingForClaim bool                     `json:"waitingForClaim"`
+	WaitingState    *boardcards.WaitingState `json:"waitingState,omitempty"`
+	// LatestPlan (BACI-216) — duplicated alongside Issue.LatestPlan
+	// so consumers that read the brief envelope (REST/HTTP clients)
+	// can pick it up without descending into the meta block. The two
+	// are always in lockstep.
+	LatestPlan *LatestPlanDTO `json:"latestPlan,omitempty"`
+	Warnings   []string       `json:"warnings"`
 }
 
 // IssueDetail is the issue-drawer payload for a single issue.
@@ -207,6 +218,36 @@ type IssueDetail struct {
 	// Taken is the derived "an agent is actively holding this" signal —
 	// true iff Claimants has an open (unreleased) claim.
 	Taken bool `json:"taken"`
+	// LatestPlan (BACI-216) — see IssueMetaDTO.LatestPlan.
+	LatestPlan *LatestPlanDTO `json:"latestPlan,omitempty"`
+}
+
+// LatestPlanDTO (BACI-216) is the Wails-side mirror of
+// model.LatestPlan — the newest `plan`-typed doc linked directly to
+// an issue. Carries enough metadata (filename, uuid, updated_at) for
+// the React surfaces to render the "Open plan" link without a
+// follow-up fetch; the doc body itself is loaded on-demand via the
+// existing /documents/<filename> route.
+type LatestPlanDTO struct {
+	DocumentID int64     `json:"documentId"`
+	UUID       string    `json:"uuid"`
+	Filename   string    `json:"filename"`
+	UpdatedAt  time.Time `json:"updatedAt"`
+}
+
+// latestPlanDTO converts the shared model.LatestPlan into the
+// camelCase Wails-side shape. Returns nil when the input is nil so
+// the JSON omitempty drops the field for issues with no plan.
+func latestPlanDTO(p *model.LatestPlan) *LatestPlanDTO {
+	if p == nil {
+		return nil
+	}
+	return &LatestPlanDTO{
+		DocumentID: p.DocumentID,
+		UUID:       p.UUID,
+		Filename:   p.Filename,
+		UpdatedAt:  p.UpdatedAt,
+	}
 }
 
 // ShippedIssueDTO is one row in the BACI-187 shipping-log popover.
@@ -550,6 +591,7 @@ func (b *BoardService) GetIssue(repoPrefix, key string) (IssueDetail, error) {
 		Documents:    docs,
 		Claimants:    claimants,
 		Taken:        view.Taken,
+		LatestPlan:   latestPlanDTO(view.LatestPlan),
 	}, nil
 }
 
@@ -583,6 +625,7 @@ func (b *BoardService) GetIssueBrief(repoPrefix, key string) (IssueBriefDTO, err
 	if tags == nil {
 		tags = []string{}
 	}
+	latestPlan := latestPlanDTO(brief.LatestPlan)
 	meta := IssueMetaDTO{
 		Key:             iss.Key,
 		Column:          string(iss.State),
@@ -594,6 +637,7 @@ func (b *BoardService) GetIssueBrief(repoPrefix, key string) (IssueBriefDTO, err
 		Claude:          iss.Assignee == "claude",
 		Taken:           brief.Taken,
 		WaitingForClaim: iss.WaitingForClaim,
+		LatestPlan:      latestPlan,
 	}
 
 	var feat *FeatureRefDTO
@@ -691,6 +735,7 @@ func (b *BoardService) GetIssueBrief(repoPrefix, key string) (IssueBriefDTO, err
 		Taken:           brief.Taken,
 		WaitingForClaim: iss.WaitingForClaim,
 		WaitingState:    waitingState,
+		LatestPlan:      latestPlan,
 		Warnings:        warnings,
 	}, nil
 }
