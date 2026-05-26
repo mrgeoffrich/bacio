@@ -354,12 +354,18 @@ func (c *remoteClient) ListShippedIssues(ctx context.Context, repo *model.Repo, 
 		FeatureSlug  string    `json:"featureSlug"`
 		FeatureEmoji string    `json:"featureEmoji"`
 	}
-	var raw []shippedDTO
+	// BACI-221 reshaped the response from a bare list to {rows, total}.
+	// The remote client only needs the rows; total is the topbar pill's
+	// concern and the dedicated CountShippedIssues call covers it.
+	var raw struct {
+		Rows  []shippedDTO `json:"rows"`
+		Total int          `json:"total"`
+	}
 	if err := c.do(ctx, http.MethodGet, "/repos/"+repo.Prefix+"/shipped", q, nil, &raw); err != nil {
 		return nil, err
 	}
-	out := make([]*model.Issue, 0, len(raw))
-	for _, d := range raw {
+	out := make([]*model.Issue, 0, len(raw.Rows))
+	for _, d := range raw.Rows {
 		prefix, num, err := store.ParseIssueKey(d.Key)
 		if err != nil {
 			return nil, fmt.Errorf("ListShippedIssues: bad key %q from remote: %w", d.Key, err)
@@ -379,4 +385,30 @@ func (c *remoteClient) ListShippedIssues(ctx context.Context, repo *model.Repo, 
 		out = append(out, iss)
 	}
 	return out, nil
+}
+
+// CountShippedIssues (BACI-221) — GET /repos/{prefix}/shipped/count.
+// Mirrors ListShippedIssues' ?since= shape (Lookback-compatible
+// duration string built from f.Since); the count endpoint deliberately
+// has no ?limit= parameter — the count is total under the scope,
+// independent of any per-fetch row cap.
+func (c *remoteClient) CountShippedIssues(ctx context.Context, repo *model.Repo, f store.ShippedFilter) (int, error) {
+	if repo == nil {
+		return 0, fmt.Errorf("CountShippedIssues requires a repo")
+	}
+	q := url.Values{}
+	if f.Since != nil {
+		hours := int(time.Since(*f.Since).Hours())
+		if hours < 1 {
+			hours = 1
+		}
+		q.Set("since", fmt.Sprintf("%dh", hours))
+	}
+	var out struct {
+		Total int `json:"total"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/repos/"+repo.Prefix+"/shipped/count", q, nil, &out); err != nil {
+		return 0, err
+	}
+	return out.Total, nil
 }

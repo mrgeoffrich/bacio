@@ -42,6 +42,29 @@ const (
 // which is an acceptable quirk for a momentum-tracking surface
 // (documented in the design doc).
 //
+// shippedWhere builds the WHERE clause + args bag shared between
+// ListShippedIssues (the row read) and CountShippedIssues (the BACI-221
+// scope-count read). Keeping the two on one helper means the count and
+// the list can never silently drift on their state / repo / since
+// predicates — a regression on one side would surface immediately as a
+// count vs row-count mismatch in the popover.
+func shippedWhere(f ShippedFilter) (where []string, args []any) {
+	where = []string{
+		"i.state = ?",
+		"i.terminal_at IS NOT NULL",
+	}
+	args = []any{string(model.StateDone)}
+	if f.RepoID != nil {
+		where = append(where, "i.repo_id = ?")
+		args = append(args, *f.RepoID)
+	}
+	if f.Since != nil {
+		where = append(where, "i.terminal_at >= ?")
+		args = append(args, f.Since.UTC().Format("2006-01-02 15:04:05"))
+	}
+	return where, args
+}
+
 // Uses idx_issues_terminal_at; the EXPLAIN QUERY PLAN assertion in
 // the store test pins the index against a future regression.
 func (s *Store) ListShippedIssues(f ShippedFilter) ([]*model.Issue, error) {
@@ -52,21 +75,7 @@ func (s *Store) ListShippedIssues(f ShippedFilter) ([]*model.Issue, error) {
 	if limit > shippedMaxLimit {
 		limit = shippedMaxLimit
 	}
-	var (
-		where = []string{
-			"i.state = ?",
-			"i.terminal_at IS NOT NULL",
-		}
-		args = []any{string(model.StateDone)}
-	)
-	if f.RepoID != nil {
-		where = append(where, "i.repo_id = ?")
-		args = append(args, *f.RepoID)
-	}
-	if f.Since != nil {
-		where = append(where, "i.terminal_at >= ?")
-		args = append(args, f.Since.UTC().Format("2006-01-02 15:04:05"))
-	}
+	where, args := shippedWhere(f)
 	q := issueSelect + ` WHERE `
 	for i, w := range where {
 		if i > 0 {
@@ -109,4 +118,37 @@ func (s *Store) ListShippedIssues(f ShippedFilter) ([]*model.Issue, error) {
 		}
 	}
 	return out, nil
+}
+
+// CountShippedIssues returns the total number of shipped (done +
+// non-NULL terminal_at) issues matching the same WHERE that
+// ListShippedIssues applies. f.Limit is ignored — the count is the
+// total under the scope, independent of how many rows the popover
+// would inflate per fetch.
+//
+// BACI-221: backs the topbar "Shipped · N" pill so the count always
+// agrees with the popover's list under the active Today / Last Week /
+// Forever scope. The pre-BACI-221 pill derived its count client-side
+// from the polled cards array — that path undercounted because cards
+// are filtered by show_archived and the per-feature board-hide set,
+// and it couldn't represent "Forever" at all. Moving the count
+// server-side fixes both.
+//
+// Uses the same idx_issues_terminal_at-driven plan as
+// ListShippedIssues; a COUNT(*) over the existing predicates is an
+// index scan, not a table scan.
+func (s *Store) CountShippedIssues(f ShippedFilter) (int, error) {
+	where, args := shippedWhere(f)
+	q := `SELECT COUNT(*) FROM issues i WHERE `
+	for i, w := range where {
+		if i > 0 {
+			q += " AND "
+		}
+		q += w
+	}
+	var n int
+	if err := s.DB.QueryRow(q, args...).Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
 }

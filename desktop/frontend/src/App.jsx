@@ -12,6 +12,8 @@ import CommandPalette from './components/CommandPalette.jsx';
 import IssueComposer from './components/IssueComposer.jsx';
 import ActivityTray from './components/ActivityTray.jsx';
 import { readPinnedKeys, persistPinnedKeys } from './components/activityTrayPinPersistence';
+import { readShippedScope, persistShippedScope } from './components/shippedScopePersistence.ts';
+import { scopeSinceDays } from './components/shippedScope.ts';
 import SettingsView from './components/SettingsView.jsx';
 import SyncView from './components/SyncView.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
@@ -847,30 +849,47 @@ export default function App() {
     return { available, busy };
   }, [agents]);
 
-  // shippedCount (BACI-187) feeds the topbar "Shipped · N" pill —
-  // count of done cards whose terminal_at falls in the last 7 days,
-  // derived from the already-polled `cards` array so we avoid a
-  // separate poll loop. The popover itself fetches its rows on first
-  // open via the listShippedIssues endpoint.
+  // shippedScope (BACI-221) is the active Today / Last Week / Forever
+  // window for the topbar Shipped pill + its popover. Seeded from
+  // localStorage on mount so a relaunch lands on the last-picked
+  // scope; the picker lives inside ShippedPopover and re-writes on
+  // every click via the onScopeChange callback below.
+  const [shippedScope, setShippedScope] = useState(readShippedScope);
+  const changeShippedScope = useCallback((next) => {
+    setShippedScope(next);
+    persistShippedScope(next);
+  }, []);
+
+  // shippedCount (BACI-187, server-derived for BACI-221) feeds the
+  // topbar "Shipped · N" pill. Polled on the standard POLL_INTERVAL_MS
+  // cadence — mirrors the leader / agents polls so the chip number
+  // stays roughly in lockstep with the rest of the live readouts.
   //
-  // Caveat: cards are filtered server-side by the per-feature
-  // "Show on board" toggle (BACI-177), so this count undercounts when
-  // a hidden feature has done issues in the window. The popover's own
-  // fetch deliberately does NOT honour that toggle — "shipped" is
-  // about what landed, not what's on the board — so the popover may
-  // legitimately list rows the pill count didn't include. Documented
-  // and intentional; don't try to "fix" the mismatch.
-  const shippedCount = React.useMemo(() => {
-    const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
-    let n = 0;
-    for (const c of cards) {
-      if (c.column !== 'done') continue;
-      if (!c.terminalAt) continue;
-      const t = Date.parse(c.terminalAt);
-      if (!Number.isNaN(t) && t >= cutoff) n++;
+  // The pre-BACI-221 count derived this from the polled `cards` array
+  // client-side, which (a) undercounted because cards are filtered by
+  // show_archived + the per-feature board-hide set, and (b) couldn't
+  // represent "Forever" at all. Moving to server-side counting fixes
+  // both and lets the count change with the scope picker.
+  const [shippedCount, setShippedCount] = useState(0);
+  useEffect(() => {
+    if (!activeBoard || activeBoard === 'all') {
+      setShippedCount(0);
+      return;
     }
-    return n;
-  }, [cards]);
+    // Reset to 0 on scope / repo change so a stale count doesn't sit
+    // on the chip while the first fetch is in flight.
+    setShippedCount(0);
+    const sinceDays = scopeSinceDays(shippedScope);
+    let cancelled = false;
+    const refresh = () => {
+      api.countShippedIssues(activeBoard, sinceDays)
+        .then((n) => { if (!cancelled) setShippedCount(n); })
+        .catch(() => { /* pill is best-effort; the popover surfaces failures */ });
+    };
+    refresh();
+    const id = setInterval(refresh, POLL_INTERVAL_MS);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [activeBoard, shippedScope]);
 
   // BACI-193 ship flourish: detect cards that just transitioned into
   // `done` from a non-terminal column, expose the flying key + flash
@@ -911,6 +930,8 @@ export default function App() {
         leaderState={leaderState}
         agentCounts={agentCounts}
         shippedCount={shippedCount}
+        shippedScope={shippedScope}
+        onShippedScopeChange={changeShippedScope}
         onOpenIssue={navigateToIssue}
         flyingShipKey={flyingShipKey}
         shipFlashing={shipFlashing}

@@ -2463,6 +2463,44 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   font-size: 12px; font-weight: 600;
   color: var(--fg-2);
 }
+
+/* BACI-221 scope picker — segmented row of three buttons sitting
+   between the header and the body. Pill-shaped active state matches
+   the rest of the topbar's pill vocabulary; inactive buttons are
+   muted-but-clickable. The strip stays inside the popover frame so
+   the scope choice reads as scoped to this popover, not to a
+   per-repo or app-wide setting. */
+.mk-shipped-scope-strip {
+  display: flex; gap: 4px;
+  padding: 8px 8px;
+  border-bottom: 1px solid var(--border-1);
+  background: var(--bg-2, var(--ink-50));
+}
+.mk-shipped-scope-button {
+  appearance: none; border: 0; font: inherit;
+  flex: 1 1 0;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg-2);
+  font-size: 11px; font-weight: 500;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+.mk-shipped-scope-button:hover:not(.is-active) {
+  background: var(--paper);
+  color: var(--fg-1);
+}
+.mk-shipped-scope-button.is-active {
+  background: var(--status-done-bg);
+  color: var(--status-done);
+  font-weight: 600;
+}
+.mk-shipped-scope-button:focus-visible {
+  outline: 1px dotted var(--border-focus); outline-offset: 1px;
+}
+
 .mk-shipped-popover-body {
   flex: 1 1 auto;
   overflow-y: auto;
@@ -2484,12 +2522,28 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   color: var(--status-blocked);
   word-break: break-word;
 }
+/* BACI-221 footer: "showing N of TOTAL" — surfaces only when the
+   server-side list cap actually trimmed the rows, so the operator
+   knows there's more under the active scope than the popover paints. */
+.mk-shipped-popover-footer {
+  padding: 8px 12px;
+  border-top: 1px solid var(--border-1);
+  font-size: 11px;
+  color: var(--fg-3);
+  text-align: center;
+  background: var(--bg-2, var(--ink-50));
+}
 
 .mk-shipped-row {
   appearance: none; border: 0;
   background: transparent;
   text-align: left;
   padding: 10px 12px;
+  /* BACI-221 two-line layout: a top line carrying KEY + title and a
+     meta line beneath it for the feature glyph + slug + when + PR
+     chip. The vertical stack gives long titles room to wrap (capped
+     at two lines via the -webkit-line-clamp on the title itself)
+     instead of being ellipsised at one line. */
   display: flex; flex-direction: column; gap: 4px;
   border-bottom: 1px solid var(--border-1);
   cursor: pointer;
@@ -2513,14 +2567,45 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
 .mk-shipped-row-title {
   flex: 1 1 auto;
   font-size: 13px;
+  /* BACI-221: two-line clamp instead of single-line ellipsis so long
+     titles stay readable. The vendor-prefixed -webkit-line-clamp is
+     the cross-browser way to do this without a custom JS truncate
+     — every modern browser implements it. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-width: 0;
+  line-height: 1.3;
+}
+.mk-shipped-row-meta {
+  display: flex; align-items: baseline; gap: 8px;
+  width: 100%; min-width: 0;
+  font-size: 11px; color: var(--fg-3);
+}
+.mk-shipped-row-feature {
+  font-size: 12px; flex-shrink: 0;
+}
+.mk-shipped-row-feature-slug {
+  flex: 0 1 auto;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   min-width: 0;
 }
 .mk-shipped-row-when {
-  font-size: 11px; color: var(--fg-3); flex-shrink: 0;
+  flex-shrink: 0;
+}
+.mk-shipped-row-pr {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--border-1);
+  color: var(--fg-2);
+  font-size: 10px; font-weight: 600; letter-spacing: .04em;
+  margin-left: auto;
 }
 
-/* Skeleton rows shown while the first fetch is in flight. */
+/* Skeleton rows shown while the first fetch is in flight. Tuned for
+   the two-line layout — a title block and a thinner meta block. */
 .mk-shipped-row.is-skeleton {
   pointer-events: none;
   cursor: default;
@@ -2531,6 +2616,10 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
 }
 .mk-shipped-row.is-skeleton .mk-shipped-row-title {
   display: inline-block; height: 12px;
+  background: var(--border-1); border-radius: 4px;
+}
+.mk-shipped-row.is-skeleton .mk-shipped-row-when {
+  display: inline-block; width: 80px; height: 9px;
   background: var(--border-1); border-radius: 4px;
 }
 

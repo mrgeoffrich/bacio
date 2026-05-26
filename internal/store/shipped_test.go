@@ -202,6 +202,143 @@ func TestListShippedIssuesNullTerminalAtSkipped(t *testing.T) {
 	}
 }
 
+// TestCountShippedIssuesEmptyRepo — an empty repo returns 0, never errs.
+func TestCountShippedIssuesEmptyRepo(t *testing.T) {
+	s := newTestStore(t)
+	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
+
+	got, err := s.CountShippedIssues(ShippedFilter{RepoID: &repo.ID})
+	if err != nil {
+		t.Fatalf("count shipped: %v", err)
+	}
+	if got != 0 {
+		t.Fatalf("count = %d, want 0", got)
+	}
+}
+
+// TestCountShippedIssuesMixedStates — only state='done' with non-NULL
+// terminal_at counts; cancelled and open rows are excluded, same WHERE
+// as ListShippedIssues.
+func TestCountShippedIssuesMixedStates(t *testing.T) {
+	s := newTestStore(t)
+	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
+
+	done1, _ := s.CreateIssue(repo.ID, nil, "done-1", "", model.StateTodo, nil)
+	done2, _ := s.CreateIssue(repo.ID, nil, "done-2", "", model.StateTodo, nil)
+	cancelled, _ := s.CreateIssue(repo.ID, nil, "cancelled", "", model.StateTodo, nil)
+	_, _ = s.CreateIssue(repo.ID, nil, "todo", "", model.StateTodo, nil)
+	inprog, _ := s.CreateIssue(repo.ID, nil, "in-progress", "", model.StateTodo, nil)
+	if err := s.SetIssueState(done1.ID, model.StateDone); err != nil {
+		t.Fatalf("done1: %v", err)
+	}
+	if err := s.SetIssueState(done2.ID, model.StateDone); err != nil {
+		t.Fatalf("done2: %v", err)
+	}
+	if err := s.SetIssueState(cancelled.ID, model.StateCancelled); err != nil {
+		t.Fatalf("cancelled: %v", err)
+	}
+	if err := s.SetIssueState(inprog.ID, model.StateInProgress); err != nil {
+		t.Fatalf("inprog: %v", err)
+	}
+
+	got, err := s.CountShippedIssues(ShippedFilter{RepoID: &repo.ID})
+	if err != nil {
+		t.Fatalf("count shipped: %v", err)
+	}
+	if got != 2 {
+		t.Fatalf("count = %d, want 2 (only done rows)", got)
+	}
+}
+
+// TestCountShippedIssuesSinceWindow — Since clamps the count the same
+// way it clamps the list. One ancient row + one fresh row + a 24h
+// cutoff = count of 1.
+func TestCountShippedIssuesSinceWindow(t *testing.T) {
+	s := newTestStore(t)
+	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
+
+	old, _ := s.CreateIssue(repo.ID, nil, "old", "", model.StateTodo, nil)
+	young, _ := s.CreateIssue(repo.ID, nil, "young", "", model.StateTodo, nil)
+	if err := s.SetIssueState(old.ID, model.StateDone); err != nil {
+		t.Fatalf("done old: %v", err)
+	}
+	if err := s.SetIssueState(young.ID, model.StateDone); err != nil {
+		t.Fatalf("done young: %v", err)
+	}
+	if _, err := s.DB.Exec(`UPDATE issues SET terminal_at = datetime('now','-30 days') WHERE id = ?`, old.ID); err != nil {
+		t.Fatalf("back-date: %v", err)
+	}
+
+	// Forever: both rows count.
+	all, err := s.CountShippedIssues(ShippedFilter{RepoID: &repo.ID})
+	if err != nil {
+		t.Fatalf("count forever: %v", err)
+	}
+	if all != 2 {
+		t.Fatalf("forever count = %d, want 2", all)
+	}
+
+	// 24h window: only the fresh row counts.
+	cutoff := time.Now().Add(-24 * time.Hour)
+	windowed, err := s.CountShippedIssues(ShippedFilter{RepoID: &repo.ID, Since: &cutoff})
+	if err != nil {
+		t.Fatalf("count windowed: %v", err)
+	}
+	if windowed != 1 {
+		t.Fatalf("windowed count = %d, want 1 (old row outside window)", windowed)
+	}
+}
+
+// TestCountShippedIssuesIgnoresLimit — f.Limit doesn't clamp the count;
+// the BACI-221 popover shows "20 of 47" by reading the count
+// independently of the per-fetch row cap.
+func TestCountShippedIssuesIgnoresLimit(t *testing.T) {
+	s := newTestStore(t)
+	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
+	for i := 0; i < 25; i++ {
+		iss, _ := s.CreateIssue(repo.ID, nil, "iss", "", model.StateTodo, nil)
+		_ = s.SetIssueState(iss.ID, model.StateDone)
+	}
+
+	got, err := s.CountShippedIssues(ShippedFilter{RepoID: &repo.ID, Limit: 5})
+	if err != nil {
+		t.Fatalf("count shipped: %v", err)
+	}
+	if got != 25 {
+		t.Fatalf("count = %d, want 25 (Limit must not clamp count)", got)
+	}
+}
+
+// TestCountShippedIssuesIncludesArchived — archived done rows still
+// count, because the popover deliberately ignores show_archived
+// (see App.jsx's pre-BACI-221 "fix the mismatch" comment). The store
+// has no archived-vs-not filter on ShippedFilter; this test pins the
+// behaviour against a future "let's also filter archived" misread.
+func TestCountShippedIssuesIncludesArchived(t *testing.T) {
+	s := newTestStore(t)
+	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
+
+	live, _ := s.CreateIssue(repo.ID, nil, "live", "", model.StateTodo, nil)
+	archived, _ := s.CreateIssue(repo.ID, nil, "archived", "", model.StateTodo, nil)
+	if err := s.SetIssueState(live.ID, model.StateDone); err != nil {
+		t.Fatalf("done live: %v", err)
+	}
+	if err := s.SetIssueState(archived.ID, model.StateDone); err != nil {
+		t.Fatalf("done archived: %v", err)
+	}
+	if err := s.SetIssueArchived(archived.ID, true); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+
+	got, err := s.CountShippedIssues(ShippedFilter{RepoID: &repo.ID})
+	if err != nil {
+		t.Fatalf("count shipped: %v", err)
+	}
+	if got != 2 {
+		t.Fatalf("count = %d, want 2 (archived rows must still count)", got)
+	}
+}
+
 // TestListShippedIssuesUsesIndex — EXPLAIN QUERY PLAN must walk an
 // index rather than a SCAN of the issues table. The BACI-138
 // idx_issues_terminal_at index is the intended driver, but SQLite's

@@ -631,3 +631,15 @@ func (c *localClient) ListShippedIssues(ctx context.Context, repo *model.Repo, f
 	}
 	return rows, nil
 }
+
+// CountShippedIssues (BACI-221) is the local-backend count read for
+// the topbar Shipped pill. Thin wrapper over store.CountShippedIssues
+// — repo is required and overwrites f.RepoID for the same unambiguity
+// reason ListShippedIssues applies.
+func (c *localClient) CountShippedIssues(ctx context.Context, repo *model.Repo, f store.ShippedFilter) (int, error) {
+	if repo == nil {
+		return 0, fmt.Errorf("CountShippedIssues requires a repo")
+	}
+	f.RepoID = &repo.ID
+	return c.store.CountShippedIssues(f)
+}
