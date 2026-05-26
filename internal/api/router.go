@@ -276,6 +276,15 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("GET /settings/archive-preferences", d.handleArchivePreferencesGet)
 	mux.HandleFunc("PUT /settings/archive-preferences", d.handleArchivePreferencesSet)
 
+	// BACI-235 per-repo default_feature. GET reads the current
+	// setting ({feature: <Feature|null>}); PUT sets it ({slug:
+	// "<slug>"}); DELETE clears it. The FK on default_feature_id is
+	// ON DELETE SET NULL so the column auto-clears when the
+	// referenced feature is deleted.
+	mux.HandleFunc("GET /repos/{prefix}/settings/default-feature", d.handleDefaultFeatureGet)
+	mux.HandleFunc("PUT /repos/{prefix}/settings/default-feature", d.handleDefaultFeatureSet)
+	mux.HandleFunc("DELETE /repos/{prefix}/settings/default-feature", d.handleDefaultFeatureDelete)
+
 	// Outermost first: panic recovery wraps everything so a bug in any
 	// later layer still returns a 500 envelope. The CORS middleware
 	// sits *outside* auth so a cross-origin preflight (OPTIONS) is

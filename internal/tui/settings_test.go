@@ -274,3 +274,114 @@ func TestSettingsValidationErrorSurfaced(t *testing.T) {
 		t.Fatalf("expected no write on a rejected body, store has %q", got)
 	}
 }
+
+// TestSettings_DefaultFeatureRow_CyclesAndClears covers the BACI-235
+// per-repo default-feature affordance on the Settings tab: pressing D
+// cycles through the repo's features, wrapping to "unset" at the end;
+// pressing X clears the setting explicitly. Each set + clear records a
+// `repo_setting.update` audit row.
+func TestSettings_DefaultFeatureRow_CyclesAndClears(t *testing.T) {
+	s, repo := settingsTestRepo(t)
+	if _, err := s.CreateFeature(repo.ID, "alpha", "Alpha", "", "", ""); err != nil {
+		t.Fatalf("create alpha: %v", err)
+	}
+	if _, err := s.CreateFeature(repo.ID, "beta", "Beta", "", "", ""); err != nil {
+		t.Fatalf("create beta: %v", err)
+	}
+	sv := newSettingsView(s, repo)
+
+	// Initial: unset.
+	slug, _ := sv.currentDefaultFeature()
+	if slug != "" {
+		t.Fatalf("default (fresh): slug=%q, want empty", slug)
+	}
+
+	// D #1 → alpha.
+	sv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("D")})
+	slug, _ = sv.currentDefaultFeature()
+	if slug != "alpha" {
+		t.Fatalf("after D #1: slug=%q, want alpha", slug)
+	}
+
+	// D #2 → beta.
+	sv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("D")})
+	slug, _ = sv.currentDefaultFeature()
+	if slug != "beta" {
+		t.Fatalf("after D #2: slug=%q, want beta", slug)
+	}
+
+	// D #3 wraps → unset.
+	sv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("D")})
+	slug, _ = sv.currentDefaultFeature()
+	if slug != "" {
+		t.Fatalf("after D wrap: slug=%q, want empty", slug)
+	}
+
+	// D #4 → alpha again.
+	sv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("D")})
+	slug, _ = sv.currentDefaultFeature()
+	if slug != "alpha" {
+		t.Fatalf("after D #4: slug=%q, want alpha", slug)
+	}
+
+	// X clears.
+	sv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("X")})
+	slug, _ = sv.currentDefaultFeature()
+	if slug != "" {
+		t.Fatalf("after X: slug=%q, want empty", slug)
+	}
+
+	// Each non-idempotent flip recorded a repo_setting.update row.
+	// Count = 5 (D#1 set, D#2 set, D#3 clear, D#4 set, X clear).
+	rows, err := s.ListHistory(store.HistoryFilter{Op: "repo_setting.update", Limit: 100})
+	if err != nil {
+		t.Fatalf("list history: %v", err)
+	}
+	if len(rows) < 5 {
+		t.Fatalf("repo_setting.update rows: %d, want >= 5", len(rows))
+	}
+	if rows[0].TargetLabel != "default_feature" {
+		t.Fatalf("target_label = %q, want default_feature", rows[0].TargetLabel)
+	}
+
+	// Issue created without an explicit feature now picks up... nothing
+	// (since we just cleared). Smoke-check the resolver wires through.
+	_, feat, err := s.ResolveCreateIssueFeatureID(repo.ID, "")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if feat != nil {
+		t.Fatalf("after X: resolver returned feat=%+v, want nil", feat)
+	}
+
+	// Set default via D, then resolver should return that feature.
+	sv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("D")})
+	_, feat, err = s.ResolveCreateIssueFeatureID(repo.ID, "")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if feat == nil || feat.Slug != "alpha" {
+		t.Fatalf("resolver after D: feat=%+v, want slug=alpha", feat)
+	}
+}
+
+// TestSettings_DefaultFeatureRow_NoFeaturesIsNoop covers the
+// no-features-yet edge case: pressing D on a repo with zero features
+// is a quiet no-op (no error, no audit row).
+func TestSettings_DefaultFeatureRow_NoFeaturesIsNoop(t *testing.T) {
+	s, repo := settingsTestRepo(t)
+	sv := newSettingsView(s, repo)
+
+	sv.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("D")})
+	if sv.err != nil {
+		t.Fatalf("D on empty-features: err=%v, want nil", sv.err)
+	}
+	slug, _ := sv.currentDefaultFeature()
+	if slug != "" {
+		t.Fatalf("after D on empty: slug=%q, want empty", slug)
+	}
+	rows, _ := s.ListHistory(store.HistoryFilter{Op: "repo_setting.update", Limit: 10})
+	if len(rows) != 0 {
+		t.Fatalf("D on empty: recorded %d rows, want 0", len(rows))
+	}
+}

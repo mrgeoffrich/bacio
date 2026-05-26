@@ -2,6 +2,7 @@ package store
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/mrgeoffrich/bacio/internal/model"
@@ -339,5 +340,77 @@ func TestUserActionReasonRoundTrip(t *testing.T) {
 	if got.UserActionReasonType != "" {
 		t.Fatalf("after explicit clear UserActionReasonType = %q, want \"\"",
 			got.UserActionReasonType)
+	}
+}
+
+// TestResolveCreateIssueFeatureID covers the BACI-235 resolver: empty
+// slug with no default = nil; empty slug with default = default; explicit
+// slug always wins; explicit miss errors. The "default cleared on
+// feature delete" case is covered by TestRepoSettings_CascadesOnFeatureDelete.
+func TestResolveCreateIssueFeatureID(t *testing.T) {
+	s := newTestStore(t)
+	repo, err := s.CreateRepo("RX", "rx", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+	defFeat, err := s.CreateFeature(repo.ID, "catchall", "Catch-all", "", "", "")
+	if err != nil {
+		t.Fatalf("create catchall: %v", err)
+	}
+	authFeat, err := s.CreateFeature(repo.ID, "auth", "Auth", "", "", "")
+	if err != nil {
+		t.Fatalf("create auth: %v", err)
+	}
+
+	// No default set, empty slug => nil.
+	id, feat, err := s.ResolveCreateIssueFeatureID(repo.ID, "")
+	if err != nil {
+		t.Fatalf("no-default empty-slug: %v", err)
+	}
+	if id != nil || feat != nil {
+		t.Fatalf("no-default empty-slug: id=%v feat=%v, want both nil", id, feat)
+	}
+
+	// No default set, explicit slug => slug's feature.
+	id, feat, err = s.ResolveCreateIssueFeatureID(repo.ID, "auth")
+	if err != nil {
+		t.Fatalf("no-default explicit-slug: %v", err)
+	}
+	if id == nil || *id != authFeat.ID {
+		t.Fatalf("no-default explicit-slug: id=%v, want %d", id, authFeat.ID)
+	}
+	if feat == nil || feat.Slug != "auth" {
+		t.Fatalf("no-default explicit-slug: feat=%+v, want slug=auth", feat)
+	}
+
+	// Default set, empty slug => default.
+	if err := s.SetDefaultFeatureID(repo.ID, &defFeat.ID); err != nil {
+		t.Fatalf("set default: %v", err)
+	}
+	id, feat, err = s.ResolveCreateIssueFeatureID(repo.ID, "")
+	if err != nil {
+		t.Fatalf("default empty-slug: %v", err)
+	}
+	if id == nil || *id != defFeat.ID {
+		t.Fatalf("default empty-slug: id=%v, want %d", id, defFeat.ID)
+	}
+	if feat == nil || feat.Slug != "catchall" {
+		t.Fatalf("default empty-slug: feat=%+v, want slug=catchall", feat)
+	}
+
+	// Default set, explicit slug => explicit wins.
+	id, feat, err = s.ResolveCreateIssueFeatureID(repo.ID, "auth")
+	if err != nil {
+		t.Fatalf("default explicit-slug: %v", err)
+	}
+	if id == nil || *id != authFeat.ID {
+		t.Fatalf("default explicit-slug: id=%v, want %d (auth)", id, authFeat.ID)
+	}
+
+	// Explicit miss errors with the canonical wrapper.
+	if _, _, err := s.ResolveCreateIssueFeatureID(repo.ID, "no-such-feature"); err == nil {
+		t.Fatalf("explicit miss: want error, got nil")
+	} else if got := err.Error(); !strings.Contains(got, `feature "no-such-feature"`) {
+		t.Fatalf("explicit miss: error = %q, want wrap with feature %q", got, "no-such-feature")
 	}
 }

@@ -285,6 +285,36 @@ export class CommentDTO {
 }
 
 /**
+ * DefaultFeatureDTO (BACI-235) is the per-repo default_feature setting
+ * shaped for the desktop / web Settings panel. Slug is empty when the
+ * setting is unset; Title / Emoji are inflated when the setting is set
+ * so the dropdown can render the same glyph + label as the rest of the
+ * feature affordances. Mirrors FeatureSummary's slim shape.
+ */
+export class DefaultFeatureDTO {
+    "slug": string;
+    "title"?: string;
+    "emoji"?: string;
+
+    /** Creates a new DefaultFeatureDTO instance. */
+    constructor($$source: Partial<DefaultFeatureDTO> = {}) {
+        if (!("slug" in $$source)) {
+            this["slug"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new DefaultFeatureDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): DefaultFeatureDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new DefaultFeatureDTO($$parsedSource as Partial<DefaultFeatureDTO>);
+    }
+}
+
+/**
  * ClaimantDTO, ClaimDTO, SessionTodoDTO, DispatchDTO, and AgentCard
  * live in internal/agentcards so the bacio api can serve the same wire
  * format (BACI-50) and the per-issue claimant mapper has one home

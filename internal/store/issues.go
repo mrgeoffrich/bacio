@@ -27,6 +27,51 @@ func ParseIssueKey(key string) (prefix string, number int64, err error) {
 	return strings.ToUpper(m[1]), n, nil
 }
 
+// ResolveCreateIssueFeatureID is the shared "what feature does this
+// new issue belong to" resolver used by both `bacio issue add` and
+// POST /repos/{prefix}/issues at the store boundary (BACI-235). When
+// suppliedSlug is non-empty, it's resolved via GetFeatureBySlug — the
+// same path the call sites used to do inline. When suppliedSlug is
+// empty, the repo's per-repo `default_feature` setting is consulted:
+// if set, the resolver returns the default feature's id (auto-apply
+// semantic); if unset (NULL), the resolver returns nil (the legacy
+// featureless behaviour).
+//
+// The returned *model.Feature is non-nil iff a feature was resolved
+// (either explicit slug or default); the dry-run projection on both
+// call sites uses it to populate FeatureSlug so the rehearsal output
+// matches what the real call would produce. The returned *int64 is
+// the same pointer shape the existing CreateIssue takes — nil means
+// featureless.
+//
+// On an explicit-slug miss this wraps with the canonical
+// `feature %q: %w` shape every other call site uses. A dangling
+// default_feature_id is impossible at read time — the FK is
+// ON DELETE SET NULL — but a defensive lookup error on the default
+// path is surfaced verbatim (without slug context, since we resolved
+// by id, not slug).
+func (s *Store) ResolveCreateIssueFeatureID(repoID int64, suppliedSlug string) (*int64, *model.Feature, error) {
+	if suppliedSlug != "" {
+		feat, err := s.GetFeatureBySlug(repoID, suppliedSlug)
+		if err != nil {
+			return nil, nil, fmt.Errorf("feature %q: %w", suppliedSlug, err)
+		}
+		return &feat.ID, feat, nil
+	}
+	settings, err := s.GetRepoSettings(repoID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if settings.DefaultFeatureID == nil {
+		return nil, nil, nil
+	}
+	feat, err := s.GetFeatureByID(*settings.DefaultFeatureID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &feat.ID, feat, nil
+}
+
 // CreateIssue is fully atomic: the counter peek, INSERT, tag writes, and
 // counter bump all live in a single transaction. We deliberately bump the
 // counter LAST (right before Commit) so that any failure in the issue or

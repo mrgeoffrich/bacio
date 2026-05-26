@@ -276,3 +276,145 @@ func TestPromptStatesResetHappy(t *testing.T) {
 	}
 }
 
+// ---------- BACI-235 per-repo default_feature ----------
+
+func TestDefaultFeature_RoundTrip(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	feat := seedFeature(t, s, repo, "catchall", "Catch-all")
+
+	// GET on a fresh repo => {feature: null}.
+	resp, body := apiGet(t, ts.URL+"/repos/"+repo.Prefix+"/settings/default-feature")
+	if resp.StatusCode != 200 {
+		t.Fatalf("GET (fresh) status: %d body: %s", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), `"feature": null`) {
+		t.Fatalf("GET (fresh) body: %s, want feature:null", body)
+	}
+
+	// PUT sets the default.
+	resp, body = apiPut(t,
+		ts.URL+"/repos/"+repo.Prefix+"/settings/default-feature",
+		map[string]any{"slug": "catchall"})
+	if resp.StatusCode != 200 {
+		t.Fatalf("PUT status: %d body: %s", resp.StatusCode, body)
+	}
+	var out struct {
+		Feature *model.Feature `json:"feature"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatalf("PUT decode: %v", err)
+	}
+	if out.Feature == nil || out.Feature.Slug != "catchall" {
+		t.Fatalf("PUT body: %+v, want feature.slug=catchall", out.Feature)
+	}
+
+	// GET observes the set value.
+	resp, body = apiGet(t, ts.URL+"/repos/"+repo.Prefix+"/settings/default-feature")
+	if resp.StatusCode != 200 {
+		t.Fatalf("GET (after set) status: %d", resp.StatusCode)
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatalf("GET decode: %v", err)
+	}
+	if out.Feature == nil || out.Feature.Slug != "catchall" {
+		t.Fatalf("GET (after set) body: %+v", out.Feature)
+	}
+
+	// POST /repos/{prefix}/issues with no feature_slug picks up the
+	// default (the core acceptance bullet).
+	resp, body = apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/issues",
+		map[string]any{"title": "implicit default"})
+	if resp.StatusCode != 201 {
+		t.Fatalf("POST issue status: %d body: %s", resp.StatusCode, body)
+	}
+	var iss model.Issue
+	if err := json.Unmarshal(body, &iss); err != nil {
+		t.Fatalf("POST issue decode: %v", err)
+	}
+	if iss.FeatureSlug != "catchall" {
+		t.Fatalf("POST issue: FeatureSlug=%q, want catchall", iss.FeatureSlug)
+	}
+
+	// Explicit slug wins over the default.
+	resp, body = apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/issues",
+		map[string]any{"title": "explicit", "feature_slug": ""})
+	if resp.StatusCode != 201 {
+		t.Fatalf("POST explicit-empty status: %d body: %s", resp.StatusCode, body)
+	}
+	// (Empty explicit feature_slug is the same as "absent" — REST
+	// transport collapses the two; the default still applies.)
+	if err := json.Unmarshal(body, &iss); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if iss.FeatureSlug != "catchall" {
+		t.Fatalf("empty explicit: FeatureSlug=%q, want catchall", iss.FeatureSlug)
+	}
+
+	// DELETE clears the default.
+	resp, body = apiDelete(t, ts.URL+"/repos/"+repo.Prefix+"/settings/default-feature", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("DELETE status: %d body: %s", resp.StatusCode, body)
+	}
+	resp, body = apiGet(t, ts.URL+"/repos/"+repo.Prefix+"/settings/default-feature")
+	if resp.StatusCode != 200 || !strings.Contains(string(body), `"feature": null`) {
+		t.Fatalf("GET (after clear) status=%d body=%s", resp.StatusCode, body)
+	}
+
+	// Post-clear, a featureless POST stays featureless.
+	resp, body = apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/issues",
+		map[string]any{"title": "post-clear"})
+	if resp.StatusCode != 201 {
+		t.Fatalf("POST post-clear status: %d body: %s", resp.StatusCode, body)
+	}
+	var iss2 model.Issue
+	if err := json.Unmarshal(body, &iss2); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if iss2.FeatureSlug != "" {
+		t.Fatalf("post-clear: FeatureSlug=%q, want empty (body=%s)", iss2.FeatureSlug, body)
+	}
+
+	_ = feat
+}
+
+func TestDefaultFeature_SetUnknownFeature(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+
+	resp, body := apiPut(t,
+		ts.URL+"/repos/"+repo.Prefix+"/settings/default-feature",
+		map[string]any{"slug": "no-such-feature"})
+	if resp.StatusCode == 200 {
+		t.Fatalf("expected non-200 for unknown feature, got 200 body=%s", body)
+	}
+}
+
+func TestDefaultFeature_ClearsOnFeatureDelete(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	feat := seedFeature(t, s, repo, "catchall", "Catch-all")
+
+	// Set the default.
+	if _, body := apiPut(t,
+		ts.URL+"/repos/"+repo.Prefix+"/settings/default-feature",
+		map[string]any{"slug": "catchall"}); !strings.Contains(string(body), "catchall") {
+		t.Fatalf("set: body=%s", body)
+	}
+
+	// Delete the feature directly at the store boundary (mirrors
+	// `bacio feature rm` reaching the same SQL).
+	if err := s.DeleteFeature(feat.ID); err != nil {
+		t.Fatalf("delete feature: %v", err)
+	}
+
+	// GET sees the FK-cascaded NULL — {feature: null}, no error.
+	resp, body := apiGet(t, ts.URL+"/repos/"+repo.Prefix+"/settings/default-feature")
+	if resp.StatusCode != 200 {
+		t.Fatalf("GET status: %d body: %s", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), `"feature": null`) {
+		t.Fatalf("GET body: %s, want feature:null after FK cascade", body)
+	}
+}
+

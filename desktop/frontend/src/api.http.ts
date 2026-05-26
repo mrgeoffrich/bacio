@@ -2436,6 +2436,42 @@ export async function setArchivePreferences(
   return { autoEnabled: res.auto_enabled, retentionDays: res.retention_days };
 }
 
+// ---------- Default-feature preference (BACI-235) ----------
+//
+// Per-repo `default_feature` setting that auto-applies to issues
+// created without an explicit feature_slug. Empty slug = unset (the
+// legacy default). FK ON DELETE SET NULL clears the column when the
+// referenced feature is deleted.
+
+export type DefaultFeatureDTO = { slug: string; title?: string; emoji?: string };
+
+type defaultFeatureResp = { feature: { slug: string; title?: string; emoji?: string } | null };
+
+function dtoFromResp(res: defaultFeatureResp): DefaultFeatureDTO {
+  if (!res.feature) return { slug: '' };
+  return { slug: res.feature.slug, title: res.feature.title, emoji: res.feature.emoji };
+}
+
+export async function getDefaultFeature(repoPrefix: string): Promise<DefaultFeatureDTO> {
+  const res = await call<defaultFeatureResp>(`/repos/${encodeURIComponent(repoPrefix)}/settings/default-feature`);
+  return dtoFromResp(res);
+}
+
+export async function setDefaultFeature(repoPrefix: string, slug: string): Promise<DefaultFeatureDTO> {
+  const res = await call<defaultFeatureResp>(`/repos/${encodeURIComponent(repoPrefix)}/settings/default-feature`, {
+    method: 'PUT',
+    body: { slug },
+  });
+  return dtoFromResp(res);
+}
+
+export async function clearDefaultFeature(repoPrefix: string): Promise<DefaultFeatureDTO> {
+  await call<defaultFeatureResp>(`/repos/${encodeURIComponent(repoPrefix)}/settings/default-feature`, {
+    method: 'DELETE',
+  });
+  return { slug: '' };
+}
+
 // ---------- BACI-68 per-entity archive verbs ----------
 
 export async function archiveIssue(prefix: string, key: string): Promise<unknown> {

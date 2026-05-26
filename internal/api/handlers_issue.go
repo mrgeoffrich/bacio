@@ -178,15 +178,24 @@ func (d deps) handleIssueCreate(w http.ResponseWriter, r *http.Request) {
 		}
 		state = st
 	}
-	var featureID *int64
-	if in.FeatureSlug != "" {
-		feat, err := d.store.GetFeatureBySlug(repo.ID, in.FeatureSlug)
-		if err != nil {
-			status, code := statusForError(err)
-			writeError(w, status, code, fmt.Sprintf("feature %q: %v", in.FeatureSlug, err), map[string]any{"field": "feature_slug"})
-			return
+	// BACI-235: resolution happens at the store boundary so the REST
+	// surface and the CLI agree on default-feature semantics. An
+	// explicit slug always wins; an empty slug consults the per-repo
+	// `default_feature` setting and auto-applies it when set.
+	featureID, resolvedFeature, err := d.store.ResolveCreateIssueFeatureID(repo.ID, in.FeatureSlug)
+	if err != nil {
+		status, code := statusForError(err)
+		// Preserve the field hint the explicit-slug path used to
+		// surface; on the default-feature path the field hint would
+		// be misleading (the input had no feature_slug), but the
+		// error is internal / FK-shape anyway so the bare wrap is
+		// the right shape.
+		field := map[string]any{}
+		if in.FeatureSlug != "" {
+			field["field"] = "feature_slug"
 		}
-		featureID = &feat.ID
+		writeError(w, status, code, err.Error(), field)
+		return
 	}
 	cleanTags, err := store.NormalizeTags(in.Tags)
 	if err != nil {
@@ -194,12 +203,16 @@ func (d deps) handleIssueCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if isDryRun(r) {
+		projectedSlug := in.FeatureSlug
+		if projectedSlug == "" && resolvedFeature != nil {
+			projectedSlug = resolvedFeature.Slug
+		}
 		projected := &model.Issue{
 			RepoID:      repo.ID,
 			Number:      repo.NextIssueNumber,
 			Key:         fmt.Sprintf("%s-%d", repo.Prefix, repo.NextIssueNumber),
 			FeatureID:   featureID,
-			FeatureSlug: in.FeatureSlug,
+			FeatureSlug: projectedSlug,
 			Title:       in.Title,
 			Description: in.Description,
 			State:       state,

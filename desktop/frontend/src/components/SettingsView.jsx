@@ -47,6 +47,7 @@ export default function SettingsView({
   columns,
   onClose,
   onTemplatesChanged,
+  repoPrefix,
 }) {
   // BACI-162: local draft for the retention-days input. We commit to
   // the App-owned state via onChangeArchivePreferences on blur (rather
@@ -62,6 +63,15 @@ export default function SettingsView({
   const [drafts, setDrafts] = useState({});
   const [savingSlug, setSavingSlug] = useState(null);
   const [bacioVer, setBacioVer] = useState('');
+
+  // BACI-235: per-repo default-feature setting. defaultFeatureSlug is
+  // the empty-string sentinel when unset; featureChoices is the list
+  // backing the dropdown (refreshed once on view mount + on repo
+  // change). Local-only — the App owns repoPrefix, this view owns the
+  // setting state because it's a per-view affordance.
+  const [defaultFeatureSlug, setDefaultFeatureSlug] = useState('');
+  const [featureChoices, setFeatureChoices] = useState([]);
+  const [savingDefaultFeature, setSavingDefaultFeature] = useState(false);
 
   // Add-template inline form. `null` = collapsed; an object = open.
   const [adding, setAdding] = useState(null);
@@ -106,6 +116,48 @@ export default function SettingsView({
       .catch(err => { if (!cancelled) reportError(err, { headline: "Couldn't load templates" }); });
     return () => { cancelled = true; };
   }, [refreshTemplates]);
+
+  // BACI-235: load the current per-repo default-feature setting + the
+  // list of features for the dropdown. Re-runs when the active repo
+  // changes (the App-owned activeBoard).
+  useEffect(() => {
+    if (!repoPrefix) {
+      setDefaultFeatureSlug('');
+      setFeatureChoices([]);
+      return;
+    }
+    let cancelled = false;
+    Promise.all([api.getDefaultFeature(repoPrefix), api.listFeatures(repoPrefix)])
+      .then(([def, feats]) => {
+        if (cancelled) return;
+        setDefaultFeatureSlug(def?.slug ?? '');
+        setFeatureChoices(feats || []);
+      })
+      .catch(err => { if (!cancelled) reportError(err, { headline: "Couldn't load default feature" }); });
+    return () => { cancelled = true; };
+  }, [repoPrefix]);
+
+  // BACI-235: persist the per-repo default feature. Empty string is the
+  // "clear" sentinel — routed through the explicit clearDefaultFeature
+  // path so the audit log records it as a clear, not as a "set to no
+  // feature".
+  const changeDefaultFeature = useCallback(async (nextSlug) => {
+    if (!repoPrefix) return;
+    setSavingDefaultFeature(true);
+    try {
+      if (nextSlug === '') {
+        await api.clearDefaultFeature(repoPrefix);
+        setDefaultFeatureSlug('');
+      } else {
+        const out = await api.setDefaultFeature(repoPrefix, nextSlug);
+        setDefaultFeatureSlug(out?.slug ?? '');
+      }
+    } catch (err) {
+      reportError(err, { headline: "Couldn't save default feature" });
+    } finally {
+      setSavingDefaultFeature(false);
+    }
+  }, [repoPrefix]);
 
   // Each mutating path threads through these helpers so the promptConfig
   // up in App.jsx stays in sync without waiting for the Settings screen
@@ -278,6 +330,31 @@ export default function SettingsView({
             ))}
           </div>
         </section>
+
+        {repoPrefix && (
+          <section className="mk-settings-row">
+            <div className="mk-settings-row-text">
+              <div className="mk-settings-label">Default feature ({repoPrefix})</div>
+              <div className="mk-settings-hint">
+                BACI-235: when set, issues created without an explicit feature auto-apply to this feature. Per-repo (every other setting on this page is global). An explicit feature on the new-issue form always wins; deleting the referenced feature clears the setting automatically.
+              </div>
+            </div>
+            <select
+              className="mk-tmpl-input"
+              value={defaultFeatureSlug}
+              disabled={savingDefaultFeature}
+              aria-label="Default feature for new issues"
+              onChange={e => changeDefaultFeature(e.target.value)}
+            >
+              <option value="">(none)</option>
+              {featureChoices.map(f => (
+                <option key={f.slug} value={f.slug}>
+                  {f.emoji ? `${f.emoji} ` : ''}{f.title}
+                </option>
+              ))}
+            </select>
+          </section>
+        )}
 
         <section className="mk-settings-row">
           <div className="mk-settings-row-text">

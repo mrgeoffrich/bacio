@@ -497,3 +497,75 @@ func TestBoardService_AddIssueRejectsAllRepos(t *testing.T) {
 		t.Error("AddIssue(\"all\") = nil, want error (cross-repo not supported)")
 	}
 }
+
+// fakeDefaultFeatureClient stubs the per-repo default-feature path so
+// the BoardService methods can be exercised without spinning up a real
+// store. Embeds the BoardService fake so unused methods stay legal.
+type fakeDefaultFeatureClient struct {
+	fakeBoardClient
+	current *model.Feature
+}
+
+func (f *fakeDefaultFeatureClient) GetDefaultFeature(context.Context, *model.Repo) (*model.Feature, error) {
+	return f.current, nil
+}
+func (f *fakeDefaultFeatureClient) SetDefaultFeature(_ context.Context, _ *model.Repo, slug string, _ bool) (*model.Feature, error) {
+	feat := &model.Feature{Slug: slug, Title: "title:" + slug, Emoji: "🪲"}
+	f.current = feat
+	return feat, nil
+}
+func (f *fakeDefaultFeatureClient) ClearDefaultFeature(context.Context, *model.Repo, bool) error {
+	f.current = nil
+	return nil
+}
+
+// TestBoardService_DefaultFeature_RoundTrip pins the BACI-235 Wails
+// seam: empty when unset, populates on set, clears via the explicit
+// verb. Slim DTO shape carries slug + title + emoji for the dropdown.
+func TestBoardService_DefaultFeature_RoundTrip(t *testing.T) {
+	fake := &fakeDefaultFeatureClient{fakeBoardClient: fakeBoardClient{repo: &model.Repo{Prefix: "TEST"}}}
+	svc := NewBoardService(fake)
+
+	// Unset → empty DTO.
+	got, err := svc.GetDefaultFeature("TEST")
+	if err != nil {
+		t.Fatalf("Get (unset): %v", err)
+	}
+	if got.Slug != "" {
+		t.Fatalf("Get (unset): Slug=%q, want empty", got.Slug)
+	}
+
+	// Set → returns the populated DTO.
+	got, err = svc.SetDefaultFeature("TEST", "catchall")
+	if err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	if got.Slug != "catchall" {
+		t.Fatalf("Set: Slug=%q, want catchall", got.Slug)
+	}
+	if got.Title == "" || got.Emoji == "" {
+		t.Fatalf("Set: missing inflated fields (DTO=%+v)", got)
+	}
+
+	// Read it back via Get.
+	got, err = svc.GetDefaultFeature("TEST")
+	if err != nil {
+		t.Fatalf("Get (after set): %v", err)
+	}
+	if got.Slug != "catchall" {
+		t.Fatalf("Get (after set): Slug=%q, want catchall", got.Slug)
+	}
+
+	// Clear.
+	got, err = svc.ClearDefaultFeature("TEST")
+	if err != nil {
+		t.Fatalf("Clear: %v", err)
+	}
+	if got.Slug != "" {
+		t.Fatalf("Clear: Slug=%q, want empty", got.Slug)
+	}
+	got, _ = svc.GetDefaultFeature("TEST")
+	if got.Slug != "" {
+		t.Fatalf("post-clear Get: Slug=%q, want empty", got.Slug)
+	}
+}

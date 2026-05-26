@@ -706,3 +706,133 @@ func (d deps) handlePromptTemplateConcurrencySet(w http.ResponseWriter, r *http.
 		Mode: string(mode), ConcurrencyLimit: updated.ConcurrencyLimit,
 	})
 }
+
+// ------------ BACI-235 per-repo default_feature ------------
+
+// defaultFeatureOut is the response envelope for the per-repo
+// default-feature endpoints. Feature is nil when the setting is unset.
+type defaultFeatureOut struct {
+	Feature *model.Feature `json:"feature"`
+}
+
+// defaultFeatureIn is the strict-decoded body for PUT
+// /repos/{prefix}/settings/default-feature. Slug must be non-empty —
+// to clear, the client uses DELETE.
+type defaultFeatureIn struct {
+	Slug string `json:"slug"`
+}
+
+// handleDefaultFeatureGet returns the per-repo default_feature row, or
+// {feature: null} when the setting is unset. The FK ON DELETE SET NULL
+// means the stored column never points at a dead row.
+func (d deps) handleDefaultFeatureGet(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	settings, err := d.store.GetRepoSettings(repo.ID)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if settings.DefaultFeatureID == nil {
+		writeJSON(w, http.StatusOK, &defaultFeatureOut{Feature: nil})
+		return
+	}
+	feat, err := d.store.GetFeatureByID(*settings.DefaultFeatureID)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, &defaultFeatureOut{Feature: feat})
+}
+
+// handleDefaultFeatureSet resolves the body's slug against the same
+// repo, then writes its id into repo_settings.default_feature_id.
+// Records `repo_setting.update` audit row.
+func (d deps) handleDefaultFeatureSet(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	parsed, _, err := inputio.DecodeStrict[defaultFeatureIn](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	if parsed.Slug == "" {
+		writeError(w, http.StatusBadRequest, "invalid_input",
+			"slug is required (use DELETE to clear)", map[string]any{"field": "slug"})
+		return
+	}
+	feat, err := d.store.GetFeatureBySlug(repo.ID, parsed.Slug)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, fmt.Sprintf("feature %q: %v", parsed.Slug, err),
+			map[string]any{"field": "slug"})
+		return
+	}
+	if isDryRun(r) {
+		writeDryRun(w, http.StatusOK, &defaultFeatureOut{Feature: feat})
+		return
+	}
+	if err := d.store.SetDefaultFeatureID(repo.ID, &feat.ID); err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	recordOp(d.store, d.logger, model.HistoryEntry{
+		Actor:       ActorFromContext(r.Context()),
+		RepoID:      &repo.ID,
+		RepoPrefix:  repo.Prefix,
+		Op:          "repo_setting.update",
+		Kind:        "repo_setting",
+		TargetID:    &feat.ID,
+		TargetLabel: "default_feature",
+		Details:     fmt.Sprintf("slug=%s", feat.Slug),
+	})
+	writeJSON(w, http.StatusOK, &defaultFeatureOut{Feature: feat})
+}
+
+// handleDefaultFeatureDelete clears the per-repo default_feature
+// setting. Idempotent — clearing an already-unset value still
+// succeeds (no audit row when there was nothing to clear).
+func (d deps) handleDefaultFeatureDelete(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	if isDryRun(r) {
+		writeDryRun(w, http.StatusOK, &defaultFeatureOut{Feature: nil})
+		return
+	}
+	settings, err := d.store.GetRepoSettings(repo.ID)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if err := d.store.ClearDefaultFeature(repo.ID); err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if settings.DefaultFeatureID != nil {
+		recordOp(d.store, d.logger, model.HistoryEntry{
+			Actor:       ActorFromContext(r.Context()),
+			RepoID:      &repo.ID,
+			RepoPrefix:  repo.Prefix,
+			Op:          "repo_setting.update",
+			Kind:        "repo_setting",
+			TargetLabel: "default_feature",
+			Details:     "cleared",
+		})
+	}
+	writeJSON(w, http.StatusOK, &defaultFeatureOut{Feature: nil})
+}

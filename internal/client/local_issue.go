@@ -349,21 +349,27 @@ func (c *localClient) CreateIssue(ctx context.Context, repo *model.Repo, in inpu
 	if err != nil {
 		return nil, err
 	}
-	var featureID *int64
-	if in.FeatureSlug != "" {
-		feat, err := c.store.GetFeatureBySlug(repo.ID, in.FeatureSlug)
-		if err != nil {
-			return nil, fmt.Errorf("feature %q: %w", in.FeatureSlug, err)
-		}
-		featureID = &feat.ID
+	// BACI-235: resolution happens at the store boundary so both the
+	// explicit-slug path and the default-feature auto-apply path share
+	// one validator. The returned feature (if any) backs the dry-run
+	// projection below so the rehearsal output reflects what the real
+	// call would produce — including the resolved slug when a default
+	// was auto-applied.
+	featureID, resolvedFeature, err := c.store.ResolveCreateIssueFeatureID(repo.ID, in.FeatureSlug)
+	if err != nil {
+		return nil, err
 	}
 	if dryRun {
+		projectedSlug := in.FeatureSlug
+		if projectedSlug == "" && resolvedFeature != nil {
+			projectedSlug = resolvedFeature.Slug
+		}
 		projected := &model.Issue{
 			RepoID:      repo.ID,
 			Number:      repo.NextIssueNumber,
 			Key:         fmt.Sprintf("%s-%d", repo.Prefix, repo.NextIssueNumber),
 			FeatureID:   featureID,
-			FeatureSlug: in.FeatureSlug,
+			FeatureSlug: projectedSlug,
 			Title:       in.Title,
 			Description: in.Description,
 			State:       state,

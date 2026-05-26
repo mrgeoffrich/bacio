@@ -88,8 +88,10 @@ func placeholderTokens() string {
 // native and wasm Settings views. showArchived is the BACI-68 global
 // display toggle, surfaced as a one-line row above the templates so
 // the user can see — and (on the native build) toggle — it from the
-// same tab.
-func renderSettingsList(width, height int, stages []stageRow, cursor int, err error, showArchived bool) string {
+// same tab. defaultFeatureSlug is the BACI-235 per-repo default-feature
+// setting; empty = unset (the legacy default). Only rendered when the
+// view has a repo context (the wasm read-only stub passes "" + "").
+func renderSettingsList(width, height int, stages []stageRow, cursor int, err error, showArchived bool, defaultFeatureSlug, defaultFeatureTitle string) string {
 	innerWidth := width - 2
 	if innerWidth < 40 {
 		innerWidth = 40
@@ -121,6 +123,22 @@ func renderSettingsList(width, height int, stages []stageRow, cursor int, err er
 	displayRow := lipgloss.NewStyle().Width(innerWidth).Padding(0, 1).
 		Render(checkbox + " Show archived items  " +
 			mutedStyle.Render("(T to toggle — archived issues, docs, features remain hidden by default)"))
+
+	// BACI-235: one-line Default feature row, sibling of the show-archived
+	// row. Empty slug = unset (the legacy "featureless creates"
+	// behaviour). `D` on native cycles through the repo's features;
+	// `X` clears.
+	defaultLabel := "(none — featureless creates)"
+	if defaultFeatureSlug != "" {
+		if defaultFeatureTitle != "" {
+			defaultLabel = defaultFeatureTitle + "  " + mutedStyle.Render("("+defaultFeatureSlug+")")
+		} else {
+			defaultLabel = defaultFeatureSlug
+		}
+	}
+	defaultRow := lipgloss.NewStyle().Width(innerWidth).Padding(0, 1).
+		Render("Default feature: " + defaultLabel + "  " +
+			mutedStyle.Render("(D cycles · X clears — auto-applied to new issues without an explicit feature)"))
 
 	var rows []string
 	for i, st := range stages {
@@ -159,7 +177,7 @@ func renderSettingsList(width, height int, stages []stageRow, cursor int, err er
 	hint := mutedStyle.Padding(0, 1).Render("Placeholders: " + placeholderTokens())
 	versionLine := mutedStyle.Padding(0, 1).Render("Bacio version: " + version.String())
 	body := lipgloss.JoinVertical(lipgloss.Left, rows...)
-	content := lipgloss.JoinVertical(lipgloss.Left, titleBar, "", displayRow, "", body, "", hint, versionLine)
+	content := lipgloss.JoinVertical(lipgloss.Left, titleBar, "", displayRow, defaultRow, "", body, "", hint, versionLine)
 	return box.Render(content)
 }
 

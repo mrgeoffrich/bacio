@@ -157,6 +157,17 @@ export function CancelWaitingDispatch(repoPrefix: string, issueKey: string): $Ca
 }
 
 /**
+ * ClearDefaultFeature (BACI-235) clears the per-repo default_feature
+ * setting. Returns a zero-valued DTO so the caller can re-render
+ * without a separate read.
+ */
+export function ClearDefaultFeature(repoPrefix: string): $CancellablePromise<$models.DefaultFeatureDTO> {
+    return $Call.ByID(3288349059, repoPrefix).then(($result: any) => {
+        return $$createType9($result);
+    });
+}
+
+/**
  * CountShipped (BACI-221) returns the total number of shipped issues
  * for one repo under the active Today / Last Week / Forever scope.
  * Polled on the same 10s cadence as the other live read endpoints so
@@ -213,6 +224,16 @@ export function DispatchIssueChain(repoPrefix: string, issueKey: string, mode: s
 }
 
 /**
+ * GetDefaultFeature (BACI-235) returns the per-repo default_feature
+ * setting for repoPrefix. Empty Slug = unset (the legacy default).
+ */
+export function GetDefaultFeature(repoPrefix: string): $CancellablePromise<$models.DefaultFeatureDTO> {
+    return $Call.ByID(3752670238, repoPrefix).then(($result: any) => {
+        return $$createType9($result);
+    });
+}
+
+/**
  * GetIssue returns the full issue-drawer payload for one issue. repoPrefix
  * may be empty or "all" — canonical issue keys (PREFIX-N) resolve without a
  * repo context.
@@ -237,7 +258,7 @@ export function GetIssue(repoPrefix: string, key: string): $CancellablePromise<$
  */
 export function GetIssueBrief(repoPrefix: string, key: string): $CancellablePromise<$models.IssueBriefDTO> {
     return $Call.ByID(836296342, repoPrefix, key).then(($result: any) => {
-        return $$createType9($result);
+        return $$createType10($result);
     });
 }
 
@@ -266,7 +287,7 @@ export function GetSessionQuestion(id: number): $CancellablePromise<model$0.Sess
  */
 export function ListAgents(repoPrefix: string): $CancellablePromise<$models.AgentCard[]> {
     return $Call.ByID(3979848123, repoPrefix).then(($result: any) => {
-        return $$createType11($result);
+        return $$createType12($result);
     });
 }
 
@@ -276,7 +297,7 @@ export function ListAgents(repoPrefix: string): $CancellablePromise<$models.Agen
  */
 export function ListBoards(): $CancellablePromise<$models.Board[]> {
     return $Call.ByID(3235630628).then(($result: any) => {
-        return $$createType12($result);
+        return $$createType13($result);
     });
 }
 
@@ -293,7 +314,7 @@ export function ListBoards(): $CancellablePromise<$models.Board[]> {
  */
 export function ListCards(repoPrefix: string): $CancellablePromise<$models.BoardCard[]> {
     return $Call.ByID(4181487648, repoPrefix).then(($result: any) => {
-        return $$createType13($result);
+        return $$createType14($result);
     });
 }
 
@@ -302,7 +323,7 @@ export function ListCards(repoPrefix: string): $CancellablePromise<$models.Board
  */
 export function ListColumns(): $CancellablePromise<$models.BoardColumn[]> {
     return $Call.ByID(2117984856).then(($result: any) => {
-        return $$createType15($result);
+        return $$createType16($result);
     });
 }
 
@@ -317,7 +338,7 @@ export function ListColumns(): $CancellablePromise<$models.BoardColumn[]> {
  */
 export function ListShipped(repoPrefix: string, sinceDays: number, limit: number): $CancellablePromise<$models.ShippedListDTO> {
     return $Call.ByID(3138957880, repoPrefix, sinceDays, limit).then(($result: any) => {
-        return $$createType16($result);
+        return $$createType17($result);
     });
 }
 
@@ -350,6 +371,17 @@ export function QueueFollowOnDispatch(repoPrefix: string, issueKey: string, mode
 export function RescueDispatch(dispatchID: number): $CancellablePromise<$models.DispatchDTO> {
     return $Call.ByID(233478750, dispatchID).then(($result: any) => {
         return $$createType8($result);
+    });
+}
+
+/**
+ * SetDefaultFeature (BACI-235) writes the per-repo default_feature
+ * setting. slug must reference an existing feature in the same repo;
+ * the client records the audit row.
+ */
+export function SetDefaultFeature(repoPrefix: string, slug: string): $CancellablePromise<$models.DefaultFeatureDTO> {
+    return $Call.ByID(2719883970, repoPrefix, slug).then(($result: any) => {
+        return $$createType9($result);
     });
 }
 
@@ -396,11 +428,12 @@ const $$createType5 = model$0.Issue.createFrom;
 const $$createType6 = $Create.Nullable($$createType5);
 const $$createType7 = $models.PRDTO.createFrom;
 const $$createType8 = agentcards$0.DispatchDTO.createFrom;
-const $$createType9 = $models.IssueBriefDTO.createFrom;
-const $$createType10 = agentcards$0.AgentCard.createFrom;
-const $$createType11 = $Create.Array($$createType10);
-const $$createType12 = $Create.Array($$createType2);
-const $$createType13 = $Create.Array($$createType1);
-const $$createType14 = $models.BoardColumn.createFrom;
-const $$createType15 = $Create.Array($$createType14);
-const $$createType16 = $models.ShippedListDTO.createFrom;
+const $$createType9 = $models.DefaultFeatureDTO.createFrom;
+const $$createType10 = $models.IssueBriefDTO.createFrom;
+const $$createType11 = agentcards$0.AgentCard.createFrom;
+const $$createType12 = $Create.Array($$createType11);
+const $$createType13 = $Create.Array($$createType2);
+const $$createType14 = $Create.Array($$createType1);
+const $$createType15 = $models.BoardColumn.createFrom;
+const $$createType16 = $Create.Array($$createType15);
+const $$createType17 = $models.ShippedListDTO.createFrom;
