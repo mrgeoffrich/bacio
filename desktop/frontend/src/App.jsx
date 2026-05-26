@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Routes, Route, Navigate, useNavigate, useLocation, useParams } from 'react-router';
+import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router';
 import { Events } from '@wailsio/runtime';
 import Topbar, { NAV } from './components/Topbar.jsx';
 import Board from './components/Board.jsx';
@@ -888,35 +888,6 @@ export default function App() {
     navigate(issuePath(key));
   }, [navigate]);
 
-  // BACI-203: the workspace route reads :key from useParams via a
-  // tiny adapter — IssueWorkspace itself stays callable from a
-  // future test harness with an explicit openIssueKey prop. The
-  // wrapper just plumbs the URL param + the App-owned data and
-  // callbacks into one props bag.
-  const WorkspaceRoute = () => {
-    const { key } = useParams();
-    return (
-      <ErrorBoundary headline="Something went wrong in the issue view" label="The issue view crashed">
-        <IssueWorkspace
-          activeBoard={activeBoard}
-          openIssueKey={key}
-          brief={openIssueBrief}
-          promptConfig={promptConfig}
-          cards={cards}
-          onClose={closeIssue}
-          onSaveDescription={saveDescription}
-          onAddComment={addComment}
-          onDeleteComment={deleteComment}
-          onDispatch={(mode) => dispatchFromCard(key, mode)}
-          onCancelWaiting={() => cancelWaitingFromCard(key)}
-          onAttachPR={attachPR}
-          onNavigateIssue={navigateToIssue}
-          onDescEditingChange={setDescEditing}
-        />
-      </ErrorBoundary>
-    );
-  };
-
   return (
     <TooltipProvider delayDuration={250} skipDelayDuration={150}>
     <LazyMotion features={domMax} strict>
@@ -997,7 +968,37 @@ export default function App() {
               </ErrorBoundary>
             }
           />
-          <Route path="/issues/:key" element={<WorkspaceRoute />} />
+          {/* Inline the element rather than wrapping it in a component
+              declared inside App: a nested function component would have a
+              fresh identity on every App render, and react-router would
+              unmount → remount the entire workspace subtree on each render
+              (e.g. the 10s brief poll), wiping scroll position and any
+              transient IssueWorkspace state. openIssueKey is already
+              derived from location.pathname above, so the useParams
+              adapter is unnecessary. */}
+          <Route
+            path="/issues/:key"
+            element={
+              <ErrorBoundary headline="Something went wrong in the issue view" label="The issue view crashed">
+                <IssueWorkspace
+                  activeBoard={activeBoard}
+                  openIssueKey={openIssueKey}
+                  brief={openIssueBrief}
+                  promptConfig={promptConfig}
+                  cards={cards}
+                  onClose={closeIssue}
+                  onSaveDescription={saveDescription}
+                  onAddComment={addComment}
+                  onDeleteComment={deleteComment}
+                  onDispatch={(mode) => openIssueKey && dispatchFromCard(openIssueKey, mode)}
+                  onCancelWaiting={() => openIssueKey && cancelWaitingFromCard(openIssueKey)}
+                  onAttachPR={attachPR}
+                  onNavigateIssue={navigateToIssue}
+                  onDescEditingChange={setDescEditing}
+                />
+              </ErrorBoundary>
+            }
+          />
           <Route
             path="/features"
             element={
