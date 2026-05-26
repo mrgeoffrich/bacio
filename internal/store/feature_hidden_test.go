@@ -16,7 +16,7 @@ func TestStore_FeatureHiddenOnBoard_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	if _, err := s.CreateFeature(repo.ID, "auth", "Auth", "", ""); err != nil {
+	if _, err := s.CreateFeature(repo.ID, "auth", "Auth", "", "", ""); err != nil {
 		t.Fatalf("create feature: %v", err)
 	}
 
@@ -75,11 +75,11 @@ func TestStore_ListIssues_HiddenFeatureSlugsFilter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	authFeat, err := s.CreateFeature(repo.ID, "auth", "Auth", "", "")
+	authFeat, err := s.CreateFeature(repo.ID, "auth", "Auth", "", "", "")
 	if err != nil {
 		t.Fatalf("create feature auth: %v", err)
 	}
-	opsFeat, err := s.CreateFeature(repo.ID, "ops", "Ops", "", "")
+	opsFeat, err := s.CreateFeature(repo.ID, "ops", "Ops", "", "", "")
 	if err != nil {
 		t.Fatalf("create feature ops: %v", err)
 	}
@@ -153,10 +153,10 @@ func TestStore_ListFeaturesFiltered_WithHiddenOnBoard(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	if _, err := s.CreateFeature(repo.ID, "auth", "Auth", "", ""); err != nil {
+	if _, err := s.CreateFeature(repo.ID, "auth", "Auth", "", "", ""); err != nil {
 		t.Fatalf("create feature auth: %v", err)
 	}
-	if _, err := s.CreateFeature(repo.ID, "ops", "Ops", "", ""); err != nil {
+	if _, err := s.CreateFeature(repo.ID, "ops", "Ops", "", "", ""); err != nil {
 		t.Fatalf("create feature ops: %v", err)
 	}
 	if err := s.SetFeatureHiddenOnBoard(repo.ID, "auth", true); err != nil {

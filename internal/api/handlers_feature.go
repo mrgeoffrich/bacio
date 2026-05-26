@@ -125,10 +125,16 @@ func (d deps) handleFeatureCreate(w http.ResponseWriter, r *http.Request) {
 			Description: in.Description,
 			Emoji:       in.Emoji,
 		}
+		// BACI-225: surface branch_name on dry-run too so an agent can
+		// confirm the projected payload before committing.
+		if in.BranchName != "" {
+			b := in.BranchName
+			projected.BranchName = &b
+		}
 		writeDryRun(w, http.StatusCreated, projected)
 		return
 	}
-	feat, err := d.store.CreateFeature(repo.ID, slug, in.Title, in.Description, in.Emoji)
+	feat, err := d.store.CreateFeature(repo.ID, slug, in.Title, in.Description, in.Emoji, in.BranchName)
 	if err != nil {
 		status, code := statusForError(err)
 		writeError(w, status, code, err.Error(), nil)
@@ -164,7 +170,7 @@ func (d deps) handleFeatureEdit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = in.Slug
-	var tPtr, dPtr, ePtr *string
+	var tPtr, dPtr, ePtr, bPtr *string
 	if _, ok := present["title"]; ok {
 		if in.Title == nil || *in.Title == "" {
 			writeError(w, http.StatusBadRequest, "invalid_input",
@@ -192,7 +198,18 @@ func (d deps) handleFeatureEdit(w http.ResponseWriter, r *http.Request) {
 			ePtr = in.Emoji
 		}
 	}
-	if tPtr == nil && dPtr == nil && ePtr == nil {
+	// BACI-225: branch_name absent = no change; present (even null / "")
+	// = clear the column back to NULL (ship to main). Same shape as
+	// emoji above.
+	if _, ok := present["branch_name"]; ok {
+		if in.BranchName == nil {
+			empty := ""
+			bPtr = &empty
+		} else {
+			bPtr = in.BranchName
+		}
+	}
+	if tPtr == nil && dPtr == nil && ePtr == nil && bPtr == nil {
 		writeError(w, http.StatusBadRequest, "invalid_input", "nothing to update", nil)
 		return
 	}
@@ -207,10 +224,18 @@ func (d deps) handleFeatureEdit(w http.ResponseWriter, r *http.Request) {
 		if ePtr != nil {
 			projected.Emoji = *ePtr
 		}
+		if bPtr != nil {
+			if *bPtr == "" {
+				projected.BranchName = nil
+			} else {
+				b := *bPtr
+				projected.BranchName = &b
+			}
+		}
 		writeDryRun(w, http.StatusOK, &projected)
 		return
 	}
-	if err := d.store.UpdateFeature(feat.ID, tPtr, dPtr, ePtr); err != nil {
+	if err := d.store.UpdateFeature(feat.ID, tPtr, dPtr, ePtr, bPtr); err != nil {
 		status, code := statusForError(err)
 		writeError(w, status, code, err.Error(), nil)
 		return
@@ -231,6 +256,7 @@ func (d deps) handleFeatureEdit(w http.ResponseWriter, r *http.Request) {
 			"title":       tPtr != nil,
 			"description": dPtr != nil,
 			"emoji":       ePtr != nil,
+			"branch_name": bPtr != nil,
 		}),
 	})
 	writeJSON(w, http.StatusOK, updated)

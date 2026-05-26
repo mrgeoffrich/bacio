@@ -53,7 +53,7 @@ func seedIssue(t *testing.T, s *store.Store, repo *model.Repo, title string) *mo
 
 func seedFeature(t *testing.T, s *store.Store, repo *model.Repo, slug, title string) *model.Feature {
 	t.Helper()
-	feat, err := s.CreateFeature(repo.ID, slug, title, "", "")
+	feat, err := s.CreateFeature(repo.ID, slug, title, "", "", "")
 	if err != nil {
 		t.Fatalf("seed feature: %v", err)
 	}

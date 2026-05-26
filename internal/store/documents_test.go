@@ -14,7 +14,7 @@ import (
 // at a word boundary for any other type whose body exceeds the cap.
 func TestListDocuments_LinksAndSnippet(t *testing.T) {
 	s, repo, iss := seedRepoAndIssue(t)
-	feat, err := s.CreateFeature(repo.ID, "auth-rewrite", "Auth rewrite", "", "")
+	feat, err := s.CreateFeature(repo.ID, "auth-rewrite", "Auth rewrite", "", "", "")
 	if err != nil {
 		t.Fatalf("CreateFeature: %v", err)
 	}

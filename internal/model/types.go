@@ -27,6 +27,16 @@ type Feature struct {
 	// nothing in the slot. Validated at the store boundary to be either
 	// empty or exactly one grapheme cluster.
 	Emoji string `json:"emoji,omitempty"`
+	// BranchName (BACI-225) is the integration branch this feature
+	// ships against. nil = ship straight to main (the legacy default
+	// — single global ship-it concurrency slot). A non-nil value is
+	// the foundation for the BACI-226+ follow-ons that scope ship
+	// concurrency per-branch, base the worker on the right ref, and
+	// merge the branch back to main at feature-done. Validated at the
+	// store boundary by ValidateBranchName (git ref rules: no
+	// whitespace, no control chars, no `..`, `@{`, etc.). Pointer
+	// matches ArchivedAt's nullable shape.
+	BranchName *string `json:"branch_name,omitempty"`
 	// ArchivedAt (BACI-68) is non-nil iff the feature is archived —
 	// hidden from default lists, but the row and its audit history
 	// remain. The auto-sweep stamps it when every child issue is

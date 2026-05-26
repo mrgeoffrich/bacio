@@ -51,15 +51,22 @@ func (c *localClient) CreateFeature(ctx context.Context, repo *model.Repo, in in
 		slug = store.Slugify(in.Title)
 	}
 	if dryRun {
-		return &model.Feature{
+		projected := &model.Feature{
 			RepoID:      repo.ID,
 			Slug:        slug,
 			Title:       in.Title,
 			Description: in.Description,
 			Emoji:       in.Emoji,
-		}, nil
+		}
+		// BACI-225: surface branch_name on dry-run so an agent can
+		// confirm the projected payload before committing.
+		if in.BranchName != "" {
+			b := in.BranchName
+			projected.BranchName = &b
+		}
+		return projected, nil
 	}
-	f, err := c.store.CreateFeature(repo.ID, slug, in.Title, in.Description, in.Emoji)
+	f, err := c.store.CreateFeature(repo.ID, slug, in.Title, in.Description, in.Emoji, in.BranchName)
 	if err != nil {
 		return nil, err
 	}
@@ -72,9 +79,9 @@ func (c *localClient) CreateFeature(ctx context.Context, repo *model.Repo, in in
 	return f, nil
 }
 
-func (c *localClient) UpdateFeature(ctx context.Context, repo *model.Repo, slug string, title, description, emoji *string, dryRun bool) (*model.Feature, error) {
-	if title == nil && description == nil && emoji == nil {
-		return nil, fmt.Errorf("nothing to update; pass title, description, and/or emoji")
+func (c *localClient) UpdateFeature(ctx context.Context, repo *model.Repo, slug string, title, description, emoji, branchName *string, dryRun bool) (*model.Feature, error) {
+	if title == nil && description == nil && emoji == nil && branchName == nil {
+		return nil, fmt.Errorf("nothing to update; pass title, description, emoji, and/or branch_name")
 	}
 	f, err := c.store.GetFeatureBySlug(repo.ID, slug)
 	if err != nil {
@@ -91,9 +98,19 @@ func (c *localClient) UpdateFeature(ctx context.Context, repo *model.Repo, slug 
 		if emoji != nil {
 			projected.Emoji = *emoji
 		}
+		if branchName != nil {
+			// BACI-225: non-nil empty string clears the column back
+			// to NULL (the legacy "ship to main" default).
+			if *branchName == "" {
+				projected.BranchName = nil
+			} else {
+				b := *branchName
+				projected.BranchName = &b
+			}
+		}
 		return &projected, nil
 	}
-	if err := c.store.UpdateFeature(f.ID, title, description, emoji); err != nil {
+	if err := c.store.UpdateFeature(f.ID, title, description, emoji, branchName); err != nil {
 		return nil, err
 	}
 	updated, err := c.store.GetFeatureByID(f.ID)
@@ -108,6 +125,7 @@ func (c *localClient) UpdateFeature(ctx context.Context, repo *model.Repo, slug 
 			"title":       title != nil,
 			"description": description != nil,
 			"emoji":       emoji != nil,
+			"branch_name": branchName != nil,
 		}),
 	})
 	return updated, nil

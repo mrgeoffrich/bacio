@@ -59,7 +59,7 @@ func (c *remoteClient) CreateFeature(ctx context.Context, repo *model.Repo, in i
 	return &out, nil
 }
 
-func (c *remoteClient) UpdateFeature(ctx context.Context, repo *model.Repo, slug string, title, description, emoji *string, dryRun bool) (*model.Feature, error) {
+func (c *remoteClient) UpdateFeature(ctx context.Context, repo *model.Repo, slug string, title, description, emoji, branchName *string, dryRun bool) (*model.Feature, error) {
 	body := map[string]any{"slug": slug}
 	if title != nil {
 		body["title"] = *title
@@ -72,6 +72,12 @@ func (c *remoteClient) UpdateFeature(ctx context.Context, repo *model.Repo, slug
 	// pointer omits the key; a non-nil empty string sends "" to clear.
 	if emoji != nil {
 		body["emoji"] = *emoji
+	}
+	// BACI-225: branch_name follows the same shape as emoji — nil
+	// pointer omits the field; non-nil empty string clears the column
+	// back to NULL (ship to main).
+	if branchName != nil {
+		body["branch_name"] = *branchName
 	}
 	q := url.Values{}
 	if dryRun {

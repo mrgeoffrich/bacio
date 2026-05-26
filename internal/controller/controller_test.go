@@ -334,7 +334,7 @@ func TestArchiveSweepIfLeaderWritesFeatureAutoStateAudit(t *testing.T) {
 		t.Fatalf("create repo: %v", err)
 	}
 	// Feature D: two done children → expect promotion to done.
-	featD, _ := s.CreateFeature(repo.ID, "feat-d", "Feat D", "", "")
+	featD, _ := s.CreateFeature(repo.ID, "feat-d", "Feat D", "", "", "")
 	if _, err := s.CreateIssue(repo.ID, &featD.ID, "d1", "", model.StateDone, nil); err != nil {
 		t.Fatalf("create d1: %v", err)
 	}
@@ -342,7 +342,7 @@ func TestArchiveSweepIfLeaderWritesFeatureAutoStateAudit(t *testing.T) {
 		t.Fatalf("create d2: %v", err)
 	}
 	// Feature C: two cancelled children → expect promotion to cancelled.
-	featC, _ := s.CreateFeature(repo.ID, "feat-c", "Feat C", "", "")
+	featC, _ := s.CreateFeature(repo.ID, "feat-c", "Feat C", "", "", "")
 	if _, err := s.CreateIssue(repo.ID, &featC.ID, "c1", "", model.StateCancelled, nil); err != nil {
 		t.Fatalf("create c1: %v", err)
 	}

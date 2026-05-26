@@ -10,6 +10,13 @@ type FeatureAddInput struct {
 	// Empty (the default) = no glyph. Validated at the store boundary
 	// to be either empty or exactly one grapheme cluster.
 	Emoji string `json:"emoji,omitempty"`
+	// BranchName (BACI-225) is the per-feature integration branch.
+	// Empty (the default) keeps the legacy behaviour: every issue
+	// under the feature ships straight to main, single global ship-it
+	// concurrency slot. A non-empty value follows git refname rules
+	// (no whitespace, no `..`, no leading `-`, etc.) and is the
+	// foundation for the BACI-226+ follow-ons.
+	BranchName string `json:"branch_name,omitempty"`
 }
 
 // FeatureEditInput is the payload for `bacio feature edit --json`.
@@ -17,6 +24,7 @@ type FeatureAddInput struct {
 //   - title       absent = no change; "" or null = invalid
 //   - description absent = no change; "" or null = clear
 //   - emoji       absent = no change; "" = clear; null = clear
+//   - branch_name absent = no change; "" = clear; null = clear
 type FeatureEditInput struct {
 	Slug        string  `json:"slug"`
 	Title       *string `json:"title,omitempty"`
@@ -24,6 +32,10 @@ type FeatureEditInput struct {
 	// Emoji (BACI-172) — pointer + presence map distinguishes "absent"
 	// (leave unchanged) from "explicit empty" (clear the glyph).
 	Emoji *string `json:"emoji,omitempty"`
+	// BranchName (BACI-225) — same pointer-plus-presence dance as
+	// Emoji: nil = no change; non-nil empty = clear (back to NULL,
+	// "ship to main"); non-nil non-empty = set + validate.
+	BranchName *string `json:"branch_name,omitempty"`
 }
 
 // FeatureRmInput is the payload for `bacio feature rm --json`.

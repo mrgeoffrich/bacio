@@ -16,7 +16,7 @@ func TestCreateFeature_DefaultsToActive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	feat, err := s.CreateFeature(repo.ID, "demo", "Demo", "", "")
+	feat, err := s.CreateFeature(repo.ID, "demo", "Demo", "", "", "")
 	if err != nil {
 		t.Fatalf("create feature: %v", err)
 	}
@@ -40,7 +40,7 @@ func TestSetFeatureState_FlipsStateAndManualBit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	feat, err := s.CreateFeature(repo.ID, "demo", "Demo", "", "")
+	feat, err := s.CreateFeature(repo.ID, "demo", "Demo", "", "", "")
 	if err != nil {
 		t.Fatalf("create feature: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestSetFeatureState_SweepLeavesManualBitClear(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	feat, err := s.CreateFeature(repo.ID, "demo", "Demo", "", "")
+	feat, err := s.CreateFeature(repo.ID, "demo", "Demo", "", "", "")
 	if err != nil {
 		t.Fatalf("create feature: %v", err)
 	}

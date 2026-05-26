@@ -114,8 +114,8 @@ func TestListIssuesHidesArchivedByDefault(t *testing.T) {
 func TestListFeaturesHidesArchivedByDefault(t *testing.T) {
 	s := newTestStore(t)
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
-	live, _ := s.CreateFeature(repo.ID, "live", "Live", "", "")
-	hidden, _ := s.CreateFeature(repo.ID, "hidden", "Hidden", "", "")
+	live, _ := s.CreateFeature(repo.ID, "live", "Live", "", "", "")
+	hidden, _ := s.CreateFeature(repo.ID, "hidden", "Hidden", "", "", "")
 	if err := s.SetFeatureArchived(hidden.ID, true); err != nil {
 		t.Fatalf("archive: %v", err)
 	}
@@ -173,21 +173,21 @@ func TestArchiveSweepFeatureCascade(t *testing.T) {
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
 
 	// Feature A: every child issue is archived → feature gets archived.
-	featA, _ := s.CreateFeature(repo.ID, "a", "A", "", "")
+	featA, _ := s.CreateFeature(repo.ID, "a", "A", "", "", "")
 	a1, _ := s.CreateIssue(repo.ID, &featA.ID, "a1", "", model.StateDone, nil)
 	a2, _ := s.CreateIssue(repo.ID, &featA.ID, "a2", "", model.StateDone, nil)
 	_ = s.SetIssueArchived(a1.ID, true)
 	_ = s.SetIssueArchived(a2.ID, true)
 
 	// Feature B: one live child → feature stays live.
-	featB, _ := s.CreateFeature(repo.ID, "b", "B", "", "")
+	featB, _ := s.CreateFeature(repo.ID, "b", "B", "", "", "")
 	b1, _ := s.CreateIssue(repo.ID, &featB.ID, "b1", "", model.StateDone, nil)
 	_, _ = s.CreateIssue(repo.ID, &featB.ID, "b2", "", model.StateTodo, nil)
 	_ = s.SetIssueArchived(b1.ID, true)
 
 	// Feature C: zero children → never auto-archived (the brief
 	// excludes childless features explicitly).
-	featC, _ := s.CreateFeature(repo.ID, "c", "C", "", "")
+	featC, _ := s.CreateFeature(repo.ID, "c", "C", "", "", "")
 
 	res, err := s.ArchiveSweep(false)
 	if err != nil {
@@ -219,7 +219,7 @@ func TestArchiveSweepDocumentCascade(t *testing.T) {
 	s := newTestStore(t)
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
 
-	feat, _ := s.CreateFeature(repo.ID, "f", "F", "", "")
+	feat, _ := s.CreateFeature(repo.ID, "f", "F", "", "", "")
 	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "i", "", model.StateDone, nil)
 
 	// Doc 1: linked only to an archived issue → archived.
@@ -283,7 +283,7 @@ func TestArchiveSweepDocumentCascade(t *testing.T) {
 func TestArchiveSweepIdempotent(t *testing.T) {
 	s := newTestStore(t)
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
-	feat, _ := s.CreateFeature(repo.ID, "f", "F", "", "")
+	feat, _ := s.CreateFeature(repo.ID, "f", "F", "", "", "")
 	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "i", "", model.StateDone, nil)
 	_ = s.SetIssueArchived(iss.ID, true)
 
@@ -431,7 +431,7 @@ func TestArchiveSweepUsesTerminalAtNotUpdatedAt(t *testing.T) {
 func TestArchiveSweepCascadeRunsEvenWhenAutoOff(t *testing.T) {
 	s := newTestStore(t)
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
-	feat, _ := s.CreateFeature(repo.ID, "f", "F", "", "")
+	feat, _ := s.CreateFeature(repo.ID, "f", "F", "", "", "")
 	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "manual", "", model.StateDone, nil)
 	doc, _ := s.CreateDocument(repo.ID, "d.md", model.DocTypeArchitecture, "", "")
 	if _, err := s.LinkDocument(doc.ID, LinkTarget{IssueID: &iss.ID}, ""); err != nil {
@@ -473,7 +473,7 @@ func TestArchiveSweepBumpsUpdatedAt(t *testing.T) {
 	s := newTestStore(t)
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
 
-	feat, _ := s.CreateFeature(repo.ID, "f", "F", "", "")
+	feat, _ := s.CreateFeature(repo.ID, "f", "F", "", "", "")
 	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "old", "", model.StateDone, nil)
 	doc, _ := s.CreateDocument(repo.ID, "d.md", model.DocTypeArchitecture, "", "")
 	if _, err := s.LinkDocument(doc.ID, LinkTarget{IssueID: &iss.ID}, ""); err != nil {
@@ -574,7 +574,7 @@ func TestSetIssueArchivedBumpsUpdatedAtOnEveryFlip(t *testing.T) {
 func TestSetFeatureArchivedBumpsUpdatedAtOnEveryFlip(t *testing.T) {
 	s := newTestStore(t)
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
-	feat, _ := s.CreateFeature(repo.ID, "f", "F", "", "")
+	feat, _ := s.CreateFeature(repo.ID, "f", "F", "", "", "")
 
 	if _, err := s.DB.Exec(
 		`UPDATE features SET updated_at = '2026-01-01 00:00:00' WHERE id = ?`, feat.ID,
@@ -688,7 +688,7 @@ func TestArchiveSweepDryRunPreviewsCounts(t *testing.T) {
 	// One feature with one child issue past retention, plus a doc
 	// linked to that issue. A real sweep would archive all three; a
 	// dry-run must report 1/1/1 without touching the rows.
-	feat, _ := s.CreateFeature(repo.ID, "f", "F", "", "")
+	feat, _ := s.CreateFeature(repo.ID, "f", "F", "", "", "")
 	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "ancient", "", model.StateDone, nil)
 	if _, err := s.DB.Exec(
 		`UPDATE issues SET terminal_at = datetime('now','-30 days') WHERE id = ?`, iss.ID,

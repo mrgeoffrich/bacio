@@ -47,7 +47,7 @@ Run `bacio <group> --help` for the subcommands of each.
 
 - **`bacio init` / `bacio repo`** — bind a repo, list/show, `repo rm` (destructive — needs `--confirm <PREFIX>`).
 - **`bacio status`** — read-only probe: repo, DB path, env resolution, stats, and an `llm_recommendations` array of setup fixes to action.
-- **`bacio feature`** — add/list/show/edit/rm; `feature plan <slug>` prints open issues in dependency order.
+- **`bacio feature`** — add/list/show/edit/rm; `feature plan <slug>` prints open issues in dependency order. BACI-225 added an optional `--branch` flag (and `branch_name` JSON field) — the per-feature integration branch; empty / NULL keeps the legacy "ship to main" default.
 - **`bacio issue`** — add/list/show/edit/rm, `state`, `assign`/`unassign`, `archive`/`unarchive`; `brief <KEY>` is a one-shot bulk-context JSON read; `next`/`peek` atomically claim the next ready issue in a feature.
 - **`bacio comment`** — add/list/rm. Pass `--eval` (or `"eval": true` on the JSON path) on `bacio comment add` to mark the row as a BACI-131 quality-review note — the server pins the in-flight `(agent_session_id, dispatch_id, mode)` snapshot onto the comment at write time, and `bacio comment list -o json` surfaces the four fields on every row. BACI-141 added an optional `"transcript_event_ref"` field on `bacio comment add --json` (formats: `tool_use_id:<id>` or `line_index:<n>`) — used by the desktop / web transcript viewer's per-event composer to pin an eval note to a specific event inside a `.jsonl` transcript; omit on board-level eval notes.
 - **`bacio link` / `bacio unlink`** — issue relations: `blocks`, `relates-to`, `duplicate-of` (`blocked-by` is the inverse view of `blocks`).

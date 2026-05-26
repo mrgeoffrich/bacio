@@ -16,7 +16,7 @@ func TestCreateFeatureWithEmoji(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	feat, err := s.CreateFeature(repo.ID, "auth", "Auth", "", "🔐")
+	feat, err := s.CreateFeature(repo.ID, "auth", "Auth", "", "🔐", "")
 	if err != nil {
 		t.Fatalf("create feature: %v", err)
 	}
@@ -33,7 +33,7 @@ func TestCreateFeatureWithEmoji(t *testing.T) {
 
 	// Update via the pointer-and-presence path.
 	newEmoji := "🪲"
-	if err := s.UpdateFeature(feat.ID, nil, nil, &newEmoji); err != nil {
+	if err := s.UpdateFeature(feat.ID, nil, nil, &newEmoji, nil); err != nil {
 		t.Fatalf("update emoji: %v", err)
 	}
 	got, err = s.GetFeatureBySlug(repo.ID, "auth")
@@ -46,7 +46,7 @@ func TestCreateFeatureWithEmoji(t *testing.T) {
 
 	// Clear via explicit empty pointer.
 	empty := ""
-	if err := s.UpdateFeature(feat.ID, nil, nil, &empty); err != nil {
+	if err := s.UpdateFeature(feat.ID, nil, nil, &empty, nil); err != nil {
 		t.Fatalf("clear emoji: %v", err)
 	}
 	got, err = s.GetFeatureBySlug(repo.ID, "auth")
@@ -59,7 +59,7 @@ func TestCreateFeatureWithEmoji(t *testing.T) {
 
 	// Multi-cluster rejection at the store boundary.
 	bad := "FEATURE"
-	if err := s.UpdateFeature(feat.ID, nil, nil, &bad); err == nil {
+	if err := s.UpdateFeature(feat.ID, nil, nil, &bad, nil); err == nil {
 		t.Fatalf("expected ValidateEmoji rejection for %q, got nil", bad)
 	}
 }
@@ -75,11 +75,11 @@ func TestIssueFeatureEmojiJoin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	feat, err := s.CreateFeature(repo.ID, "auth", "Auth", "", "🔐")
+	feat, err := s.CreateFeature(repo.ID, "auth", "Auth", "", "🔐", "")
 	if err != nil {
 		t.Fatalf("create feature: %v", err)
 	}
-	featNoGlyph, err := s.CreateFeature(repo.ID, "ops", "Ops", "", "")
+	featNoGlyph, err := s.CreateFeature(repo.ID, "ops", "Ops", "", "", "")
 	if err != nil {
 		t.Fatalf("create feature ops: %v", err)
 	}

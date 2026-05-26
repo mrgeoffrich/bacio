@@ -42,11 +42,15 @@ var (
 		// BACI-172: optional per-feature glyph rendered in the top-left
 		// of every kanban card belonging to the feature.
 		Emoji: "🔐",
+		// BACI-225: optional integration branch the feature ships to.
+		// Omit (or pass "") to keep the legacy "ship to main" default.
+		BranchName: "feat/auth-rewrite",
 	}
 	ExampleFeatureEdit = FeatureEditInput{
 		Slug:        "auth",
 		Description: strPtr("Compliance-driven session-token rewrite (legal flagged the old impl)."),
 		Emoji:       strPtr("🪲"),
+		BranchName:  strPtr("feat/auth-rewrite-v2"),
 	}
 	ExampleFeatureRm = FeatureRmInput{
 		Slug: "auth-old",
