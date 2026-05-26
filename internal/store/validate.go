@@ -221,6 +221,70 @@ func ValidateSlug(s string) (string, error) {
 // fails before uniseg even sees it.
 const maxEmojiBytes = 128
 
+// maxBranchNameLen caps the BACI-225 features.branch_name column. Git
+// itself caps refnames at 255 bytes; we round to a friendlier 256.
+const maxBranchNameLen = 256
+
+// ValidateBranchName (BACI-225) enforces the per-feature integration
+// branch column's shape. Empty input returns ("", nil) — the caller
+// chooses what "absent" means (CreateFeature treats it as NULL; the
+// pointer-on-update path uses an explicit nil to mean "no change" and
+// a non-nil empty string to mean "clear"). Non-empty input is held to
+// git's refname rules so a future `git checkout <branch>` won't choke:
+//
+//   - UTF-8 valid; length <= maxBranchNameLen bytes.
+//   - No control characters (C0 + DEL) and no whitespace at all — refs
+//     never carry spaces, tabs, newlines.
+//   - No leading/trailing `/` or `.` — git rejects both.
+//   - No embedded `..`, `@{`, `\`, `~`, `^`, `:`, `?`, `*`, `[` — every
+//     one of these is forbidden by git-check-ref-format(1).
+//   - No leading `-` — leading hyphens read as a CLI flag downstream.
+//
+// Validation is in-process: we deliberately do NOT shell out to
+// `git check-ref-format`, so the validator works in tests without a
+// working git binary and stays consistent across hosts.
+func ValidateBranchName(s string) (string, error) {
+	if !utf8.ValidString(s) {
+		return "", fmt.Errorf("branch_name is not valid UTF-8")
+	}
+	if s == "" {
+		// Empty is the caller-controlled "no value" sentinel — see the
+		// doc-comment above. CreateFeature maps it to NULL on insert;
+		// UpdateFeature's pointer-on-string distinguishes "no change"
+		// (nil pointer) from "clear" (non-nil empty string).
+		return "", nil
+	}
+	if len(s) > maxBranchNameLen {
+		return "", fmt.Errorf("branch_name too long: %d bytes, max %d", len(s), maxBranchNameLen)
+	}
+	if strings.HasPrefix(s, "-") {
+		return "", fmt.Errorf("branch_name %q must not start with '-'", s)
+	}
+	if strings.HasPrefix(s, "/") || strings.HasSuffix(s, "/") {
+		return "", fmt.Errorf("branch_name %q must not start or end with '/'", s)
+	}
+	if strings.HasPrefix(s, ".") || strings.HasSuffix(s, ".") {
+		return "", fmt.Errorf("branch_name %q must not start or end with '.'", s)
+	}
+	if strings.Contains(s, "..") {
+		return "", fmt.Errorf("branch_name %q must not contain '..'", s)
+	}
+	if strings.Contains(s, "@{") {
+		return "", fmt.Errorf("branch_name %q must not contain '@{'", s)
+	}
+	for _, r := range s {
+		switch {
+		case isDisallowedControlSingle(r):
+			return "", fmt.Errorf("branch_name contains a disallowed control character (U+%04X)", r)
+		case r == ' ' || r == '\t' || r == '\n' || r == '\r':
+			return "", fmt.Errorf("branch_name %q must not contain whitespace", s)
+		case r == '~' || r == '^' || r == ':' || r == '?' || r == '*' || r == '[' || r == '\\':
+			return "", fmt.Errorf("branch_name %q must not contain %q", s, string(r))
+		}
+	}
+	return s, nil
+}
+
 // ValidateEmoji (BACI-172) enforces the per-feature emoji column's
 // shape: either empty (no glyph) or exactly one grapheme cluster as
 // counted by uniseg. ZWJ sequences (e.g. 👨‍👩‍👧) and country flags

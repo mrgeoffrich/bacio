@@ -41,7 +41,7 @@ func seedExportFixture(t *testing.T) (*store.Store, map[string]string) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	feat, err := s.CreateFeature(r.ID, "auth-rewrite", "Rewrite auth", "We need to rewrite the auth layer.\n", "")
+	feat, err := s.CreateFeature(r.ID, "auth-rewrite", "Rewrite auth", "We need to rewrite the auth layer.\n", "", "")
 	if err != nil {
 		t.Fatalf("create feature: %v", err)
 	}

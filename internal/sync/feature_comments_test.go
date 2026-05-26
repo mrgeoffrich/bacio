@@ -23,7 +23,7 @@ func TestExportFeatureComments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	feat, err := s.CreateFeature(r.ID, "auth", "Auth", "Notes.\n", "")
+	feat, err := s.CreateFeature(r.ID, "auth", "Auth", "Notes.\n", "", "")
 	if err != nil {
 		t.Fatalf("create feature: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestRoundTripFeatureComments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create src repo: %v", err)
 	}
-	feat, err := src.CreateFeature(r.ID, "auth", "Auth", "", "")
+	feat, err := src.CreateFeature(r.ID, "auth", "Auth", "", "", "")
 	if err != nil {
 		t.Fatalf("create feature: %v", err)
 	}

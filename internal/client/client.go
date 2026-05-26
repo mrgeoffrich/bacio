@@ -170,8 +170,9 @@ type Client interface {
 	// UpdateFeature accepts pointers + a presence-map decoded view of
 	// the input: nil = field absent (no change), non-nil = field
 	// present (apply). For emoji a non-nil empty string clears the
-	// glyph (BACI-172).
-	UpdateFeature(ctx context.Context, repo *model.Repo, slug string, title, description, emoji *string, dryRun bool) (*model.Feature, error)
+	// glyph (BACI-172); for branchName a non-nil empty string clears
+	// the column back to NULL (ship to main; BACI-225).
+	UpdateFeature(ctx context.Context, repo *model.Repo, slug string, title, description, emoji, branchName *string, dryRun bool) (*model.Feature, error)
 	DeleteFeature(ctx context.Context, repo *model.Repo, slug string, dryRun bool) (deletedFeature *model.Feature, preview *FeatureDeletePreview, err error)
 	ShowFeature(ctx context.Context, repo *model.Repo, slug string) (*FeatureView, error)
 	PlanFeature(ctx context.Context, repo *model.Repo, slug string) (*PlanView, error)

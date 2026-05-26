@@ -186,7 +186,7 @@ func TestRoundTripFeatureLifecycle(t *testing.T) {
 
 	// Edit through remote.
 	newTitle := "Feature One Updated"
-	if _, err := p.remote.UpdateFeature(ctx, p.repo, "feature-one", &newTitle, nil, nil, false); err != nil {
+	if _, err := p.remote.UpdateFeature(ctx, p.repo, "feature-one", &newTitle, nil, nil, nil, false); err != nil {
 		t.Fatalf("remote UpdateFeature: %v", err)
 	}
 	post, err := p.local.GetFeatureBySlug(ctx, p.repo, "feature-one")
@@ -195,6 +195,63 @@ func TestRoundTripFeatureLifecycle(t *testing.T) {
 	}
 	if post.Title != newTitle {
 		t.Fatalf("post-update title: got %q, want %q", post.Title, newTitle)
+	}
+}
+
+// TestRoundTripFeatureBranchName (BACI-225) confirms the new branch_name
+// field round-trips through the local and remote clients: set on create,
+// read via show, cleared via edit. Pinned because the remote path adds
+// the field to a hand-built JSON map and a future refactor could
+// silently drop it.
+func TestRoundTripFeatureBranchName(t *testing.T) {
+	p := newPair(t)
+	defer p.cleanup()
+	ctx := context.Background()
+
+	// Create via the remote client with a branch set; local must see it.
+	f, err := p.remote.CreateFeature(ctx, p.repo, inputs.FeatureAddInput{
+		Title:      "Branchy",
+		Slug:       "branchy",
+		BranchName: "feat/branchy",
+	}, false)
+	if err != nil {
+		t.Fatalf("remote CreateFeature: %v", err)
+	}
+	if f.BranchName == nil || *f.BranchName != "feat/branchy" {
+		t.Fatalf("create branch = %v, want feat/branchy", f.BranchName)
+	}
+	got, err := p.local.GetFeatureBySlug(ctx, p.repo, "branchy")
+	if err != nil {
+		t.Fatalf("local GetFeatureBySlug: %v", err)
+	}
+	if got.BranchName == nil || *got.BranchName != "feat/branchy" {
+		t.Fatalf("local sees branch = %v, want feat/branchy", got.BranchName)
+	}
+
+	// Edit via remote, non-empty new value.
+	newBranch := "feat/branchy-v2"
+	if _, err := p.remote.UpdateFeature(ctx, p.repo, "branchy", nil, nil, nil, &newBranch, false); err != nil {
+		t.Fatalf("remote UpdateFeature branch: %v", err)
+	}
+	got, err = p.local.GetFeatureBySlug(ctx, p.repo, "branchy")
+	if err != nil {
+		t.Fatalf("local GetFeatureBySlug post-update: %v", err)
+	}
+	if got.BranchName == nil || *got.BranchName != "feat/branchy-v2" {
+		t.Fatalf("post-update branch = %v, want feat/branchy-v2", got.BranchName)
+	}
+
+	// Clear via remote (non-nil empty pointer).
+	empty := ""
+	if _, err := p.remote.UpdateFeature(ctx, p.repo, "branchy", nil, nil, nil, &empty, false); err != nil {
+		t.Fatalf("remote UpdateFeature clear: %v", err)
+	}
+	got, err = p.local.GetFeatureBySlug(ctx, p.repo, "branchy")
+	if err != nil {
+		t.Fatalf("local GetFeatureBySlug post-clear: %v", err)
+	}
+	if got.BranchName != nil {
+		t.Fatalf("post-clear BranchName = %v, want nil", *got.BranchName)
 	}
 }
 

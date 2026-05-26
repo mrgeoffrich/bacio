@@ -26,7 +26,10 @@ func Slugify(s string) string {
 	return s
 }
 
-func (s *Store) CreateFeature(repoID int64, slug, title, description, emoji string) (*model.Feature, error) {
+// CreateFeature inserts a new feature row. branchName is the BACI-225
+// per-feature integration branch ("" → NULL: ship to main, the legacy
+// default).
+func (s *Store) CreateFeature(repoID int64, slug, title, description, emoji, branchName string) (*model.Feature, error) {
 	slug, err := ValidateSlug(slug)
 	if err != nil {
 		return nil, err
@@ -43,9 +46,14 @@ func (s *Store) CreateFeature(repoID int64, slug, title, description, emoji stri
 	if err != nil {
 		return nil, err
 	}
+	branchName, err = ValidateBranchName(branchName)
+	if err != nil {
+		return nil, err
+	}
 	res, err := s.DB.Exec(
-		`INSERT INTO features (uuid, repo_id, slug, title, description, emoji) VALUES (?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO features (uuid, repo_id, slug, title, description, emoji, branch_name) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		identity.New(), repoID, slug, title, description, emoji,
+		sql.NullString{String: branchName, Valid: branchName != ""},
 	)
 	if err != nil {
 		return nil, err
@@ -54,7 +62,7 @@ func (s *Store) CreateFeature(repoID int64, slug, title, description, emoji stri
 	return s.GetFeatureByID(id)
 }
 
-const featureCols = `id, uuid, repo_id, slug, title, description, emoji, archived_at, state, state_manual, created_at, updated_at`
+const featureCols = `id, uuid, repo_id, slug, title, description, emoji, branch_name, archived_at, state, state_manual, created_at, updated_at`
 
 // FeatureFilter (BACI-68) is the filter struct for ListFeaturesFiltered.
 // The plain ListFeatures(repoID, includeDescription) signature predated
@@ -242,7 +250,11 @@ func (s *Store) SetFeatureArchived(featureID int64, archived bool) error {
 	return err
 }
 
-func (s *Store) UpdateFeature(id int64, title, description, emoji *string) error {
+// UpdateFeature applies the non-nil patch fields to the feature row.
+// branchName (BACI-225) follows the same pointer-vs-presence dance as
+// emoji: nil pointer = no change; non-nil empty string = clear (write
+// NULL); non-nil non-empty = set + validate.
+func (s *Store) UpdateFeature(id int64, title, description, emoji, branchName *string) error {
 	sets := []string{}
 	args := []any{}
 	if title != nil {
@@ -268,6 +280,16 @@ func (s *Store) UpdateFeature(id int64, title, description, emoji *string) error
 		}
 		sets = append(sets, "emoji = ?")
 		args = append(args, clean)
+	}
+	if branchName != nil {
+		clean, err := ValidateBranchName(*branchName)
+		if err != nil {
+			return err
+		}
+		sets = append(sets, "branch_name = ?")
+		// Empty string clears the column to NULL — keeps the legacy
+		// "ship to main" behaviour reachable from an edit.
+		args = append(args, sql.NullString{String: clean, Valid: clean != ""})
 	}
 	if len(sets) == 0 {
 		return nil
@@ -455,16 +477,21 @@ func (s *Store) CreateFeatureFromSync(repoID int64, uuid, slug, title, descripti
 func scanFeature(row rowScanner) (*model.Feature, error) {
 	var (
 		f           model.Feature
+		branchName  sql.NullString
 		archivedAt  sql.NullTime
 		state       string
 		stateManual int64
 	)
-	err := row.Scan(&f.ID, &f.UUID, &f.RepoID, &f.Slug, &f.Title, &f.Description, &f.Emoji, &archivedAt, &state, &stateManual, &f.CreatedAt, &f.UpdatedAt)
+	err := row.Scan(&f.ID, &f.UUID, &f.RepoID, &f.Slug, &f.Title, &f.Description, &f.Emoji, &branchName, &archivedAt, &state, &stateManual, &f.CreatedAt, &f.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("scan feature: %w", err)
+	}
+	if branchName.Valid {
+		b := branchName.String
+		f.BranchName = &b
 	}
 	if archivedAt.Valid {
 		t := archivedAt.Time

@@ -126,7 +126,7 @@ func TestPeekClaimNextIssueSkipArchived(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	feat, err := s.CreateFeature(repo.ID, "f", "F", "", "")
+	feat, err := s.CreateFeature(repo.ID, "f", "F", "", "", "")
 	if err != nil {
 		t.Fatalf("create feature: %v", err)
 	}

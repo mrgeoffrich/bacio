@@ -162,6 +162,21 @@ func migrate(db *sql.DB) error {
 			return fmt.Errorf("add emoji to features: %w", err)
 		}
 	}
+	// features.branch_name (BACI-225) is the per-feature integration
+	// branch. NULL preserves the legacy ship-to-main behaviour on
+	// upgrade; the BACI-226+ follow-ons read non-NULL values to scope
+	// ship concurrency, base the worker on the right ref, and merge
+	// the branch back to main at feature-done. Idempotent ALTER; no
+	// DEFAULT so existing rows surface as NULL rather than ''.
+	hasFeatureBranchName, err := columnExists(db, "features", "branch_name")
+	if err != nil {
+		return err
+	}
+	if !hasFeatureBranchName {
+		if _, err := db.Exec(`ALTER TABLE features ADD COLUMN branch_name TEXT`); err != nil {
+			return fmt.Errorf("add branch_name to features: %w", err)
+		}
+	}
 	// The attachments feature was removed in favour of documents; drop the
 	// table from any pre-existing DB. Historical history.attachment.* rows
 	// stay put since the audit log is append-only.

@@ -34,6 +34,16 @@ CREATE TABLE IF NOT EXISTS features (
     -- decoration, not a free-form label. Empty string by default; the
     -- card renderer skips the slot entirely when empty.
     emoji       TEXT    NOT NULL DEFAULT '',
+    -- branch_name (BACI-225) is the integration branch this feature
+    -- ships against. NULL preserves the legacy behaviour: every issue
+    -- under the feature ships straight to main, single global ship-it
+    -- concurrency slot. A non-NULL value is the foundation for the
+    -- BACI-226+ follow-ons that scope ship concurrency per-branch,
+    -- land the worker on the right base, and merge the branch back to
+    -- main at feature-done. Git ref rules apply (kebab/slash, no
+    -- spaces, no control chars); the validator lives at the store
+    -- boundary in internal/store/validate.go::ValidateBranchName.
+    branch_name TEXT,
     -- archived_at (BACI-68) — same semantics as on issues. The auto-sweep
     -- archives a feature when every child issue is archived (and the
     -- feature had at least one child); manual `bacio feature archive` /
