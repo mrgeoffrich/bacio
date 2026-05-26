@@ -15,7 +15,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { NotionEditor } from './editor/NotionEditor';
 import TranscriptView from '../lib/transcript/TranscriptView';
 import { isJsonlTranscriptDoc, isSvgDoc } from '../lib/docFormat';
-import { Archive, ArchiveRestore, Link2 } from 'lucide-react';
+import { Archive, ArchiveRestore, Link2, PanelLeftOpen } from 'lucide-react';
 
 function typeLabel(t) {
   return t ? t.replace(/_/g, ' ') : '';
@@ -33,6 +33,8 @@ export default function DocsViewer({
   onSave,
   onArchiveToggle,
   onOpenIssue,    // (issueKey) => void — from App.jsx
+  panelsCollapsed, // BACI-234: rail + list are hidden; render expand button
+  onExpandPanels,  // () => void — re-open both side panels
 }) {
   const [view, setView] = useState('render');
 
@@ -68,11 +70,41 @@ export default function DocsViewer({
     try { navigator.clipboard?.writeText(content); } catch (_) { /* clipboard can be blocked */ }
   };
 
+  // BACI-234: while both side panels are collapsed, the viewer is the
+  // only host for the re-open affordance — render it as the first child
+  // of the header (and in the empty / loading states) so the user can
+  // always get back to the rail + list with one click.
+  const expandButton = panelsCollapsed && onExpandPanels ? (
+    <button
+      type="button"
+      className="mk-icbtn mk-docs-panels-expand"
+      onClick={onExpandPanels}
+      title="Show filter sidebar and document list"
+      aria-label="Show filter sidebar and document list"
+    >
+      <PanelLeftOpen size={14} strokeWidth={2} aria-hidden="true" />
+    </button>
+  ) : null;
+
   if (!filename) {
-    return <div className="mk-docs-empty">Pick a document to start editing.</div>;
+    return (
+      <div className="mk-docs-empty-wrap">
+        {expandButton && (
+          <div className="mk-docs-empty-toolbar">{expandButton}</div>
+        )}
+        <div className="mk-docs-empty">Pick a document to start editing.</div>
+      </div>
+    );
   }
   if (loading) {
-    return <div className="mk-docs-empty">Loading…</div>;
+    return (
+      <div className="mk-docs-empty-wrap">
+        {expandButton && (
+          <div className="mk-docs-empty-toolbar">{expandButton}</div>
+        )}
+        <div className="mk-docs-empty">Loading…</div>
+      </div>
+    );
   }
 
   const archived = !!doc?.archivedAt;
@@ -81,6 +113,7 @@ export default function DocsViewer({
   return (
     <>
       <header className="mk-docs-viewer-header">
+        {expandButton}
         <div className="mk-docs-viewer-header-meta">
           <span className="mk-docs-bar-name">{filename}</span>
           {doc?.type && (

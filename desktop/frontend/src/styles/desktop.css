@@ -934,15 +934,35 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   border-right: 1px solid var(--border-1);
   min-height: 0;
 }
-/* BACI-219: re-open affordance in the toolbar (rendered when the rail
-   is collapsed). Sized down from the default 32px .mk-icbtn so it
-   tucks in next to the count without crowding the row. */
-.mk-docs-sidebar-expand {
+/* BACI-234: re-open affordance for the side panels. Lives in the
+   viewer header (or the empty-state toolbar) while the rail + list are
+   collapsed. Same dimensions as the rail's collapse button so the
+   round-trip toggle feels symmetrical. */
+.mk-docs-panels-expand {
   width: 22px;
   height: 22px;
   padding: 0;
+  flex-shrink: 0;
 }
-.mk-docs-sidebar-expand svg { width: 14px; height: 14px; }
+.mk-docs-panels-expand svg { width: 14px; height: 14px; }
+/* BACI-234: when no document is selected (or the body is still
+   loading) and both side panels are collapsed, the expand button needs
+   a host strip above the centred placeholder text. The wrap is the
+   full-height column and the toolbar is the thin strip on top. */
+.mk-docs-empty-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.mk-docs-empty-toolbar {
+  display: flex;
+  align-items: center;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border-1);
+  background: var(--bg-2);
+  flex-shrink: 0;
+}
 /* BACI-219: collapse trigger inside the rail. Sits in the rail's head
    strip with margin-left:auto so it pushes to the right edge. */
 .mk-docs-rail-head {

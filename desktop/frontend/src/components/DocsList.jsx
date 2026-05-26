@@ -1,16 +1,17 @@
 // DocsList (BACI-204) — middle pane of the redesigned Documents view.
-// Sticky toolbar (sidebar re-open affordance when collapsed, sort
-// dropdown, total count) sits over a vanilla scrolling list of rich
-// rows. Each row renders the filename, type chip, linked-issue /
-// linked-feature chips, a relative date, the size, and a ~140-char
-// snippet preview from the body.
+// Sticky toolbar (sort dropdown, total count) sits over a vanilla
+// scrolling list of rich rows. Each row renders the filename, type
+// chip, linked-issue / linked-feature chips, a relative date, the
+// size, and a ~140-char snippet preview from the body.
 //
 // BACI-219 retired the Hide-transcripts checkbox and the transcript
 // fold beneath the list — the rail's Type tablist is the single
-// transcript-filtering control. When the rail is collapsed, this
-// toolbar grows a PanelLeftOpen icon button at its start that calls
-// back to re-open it (mirrors the BACI-186 ActivityTray collapse
-// affordance).
+// transcript-filtering control.
+//
+// BACI-234: a single collapse button on the rail now hides BOTH the
+// rail and this list pane together; the in-toolbar re-open affordance
+// retired with that change because the toolbar isn't mounted when
+// collapsed. The re-open lives in the viewer header (DocsViewer).
 //
 // 327 rows × ~80 px = ~26 000 px scroll height; native scrolling is
 // fine without react-window (no entry in desktop/frontend/package.json).
@@ -18,7 +19,7 @@
 // have narrowed the visible set first.
 
 import React from 'react';
-import { FileText, Link2, PanelLeftOpen } from 'lucide-react';
+import { FileText, Link2 } from 'lucide-react';
 import { formatWhen } from '../lib/formatWhen';
 
 const SORT_OPTIONS = [
@@ -56,25 +57,12 @@ export default function DocsList({
   onQueryChange,
   selected,
   onSelect,
-  sidebarCollapsed,
-  onExpandSidebar,
 }) {
   const setQuery = (patch) => onQueryChange(patch);
 
   return (
     <div className="mk-docs-list-pane">
       <div className="mk-docs-toolbar">
-        {sidebarCollapsed && (
-          <button
-            type="button"
-            className="mk-icbtn mk-docs-sidebar-expand"
-            onClick={onExpandSidebar}
-            title="Show filter sidebar"
-            aria-label="Show filter sidebar"
-          >
-            <PanelLeftOpen size={14} strokeWidth={2} aria-hidden="true" />
-          </button>
-        )}
         <span className="mk-docs-toolbar-count">
           {visible.length} {visible.length === 1 ? 'document' : 'documents'}
         </span>

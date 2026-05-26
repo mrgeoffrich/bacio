@@ -37,6 +37,13 @@ import { documentPath } from '../lib/routes';
 // and the left rail is collapsible — when collapsed, DocsList
 // renders a PanelLeftOpen affordance at the start of its toolbar to
 // re-open it, and the list pane flexes into the freed space.
+//
+// BACI-234: the rail's collapse button now collapses BOTH the filter
+// rail AND the document list in one click, leaving just the viewer
+// pane. The re-open affordance lives in the viewer header (DocsViewer)
+// while collapsed since the list toolbar is no longer mounted. The
+// persisted preference key (`sidebarCollapsed`) is unchanged for
+// back-compat — it now means "both side panels collapsed".
 export default function DocsView({ activeBoard, onOpenIssue }) {
   const navigate = useNavigate();
   const { slug: slugParam } = useParams();
@@ -236,26 +243,30 @@ export default function DocsView({ activeBoard, onOpenIssue }) {
   // list; counts powers the rail via railCounts).
   void counts;
 
+  // BACI-234: collapsing the rail also hides the document list — both
+  // side panels are gone, leaving just the viewer. The expand
+  // affordance moves into the viewer header so the user can re-open
+  // both panels with one click from whichever viewer state they're in.
   return (
     <div className="mk-docs">
       {!sidebarCollapsed && (
-        <DocsFacetRail
-          counts={railCounts}
-          query={query}
-          onQueryChange={updateQuery}
-          onCollapse={() => setSidebarCollapsedPersisted(true)}
-        />
+        <>
+          <DocsFacetRail
+            counts={railCounts}
+            query={query}
+            onQueryChange={updateQuery}
+            onCollapse={() => setSidebarCollapsedPersisted(true)}
+          />
+          <DocsList
+            visible={visible}
+            hasDocs={docs.length > 0}
+            query={query}
+            onQueryChange={updateQuery}
+            selected={selected}
+            onSelect={onSelectDoc}
+          />
+        </>
       )}
-      <DocsList
-        visible={visible}
-        hasDocs={docs.length > 0}
-        query={query}
-        onQueryChange={updateQuery}
-        selected={selected}
-        onSelect={onSelectDoc}
-        sidebarCollapsed={sidebarCollapsed}
-        onExpandSidebar={() => setSidebarCollapsedPersisted(false)}
-      />
       <div className="mk-docs-main">
         <DocsViewer
           activeBoard={activeBoard}
@@ -269,6 +280,8 @@ export default function DocsView({ activeBoard, onOpenIssue }) {
           onSave={save}
           onArchiveToggle={selected ? archiveToggle : null}
           onOpenIssue={onOpenIssue}
+          panelsCollapsed={sidebarCollapsed}
+          onExpandPanels={() => setSidebarCollapsedPersisted(false)}
         />
       </div>
     </div>
