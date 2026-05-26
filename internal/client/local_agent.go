@@ -956,6 +956,20 @@ func (c *localClient) autoFlipIssueOnQuestionChange(ctx context.Context, q *mode
 	if auditActor == "" {
 		auditActor = "bacio-channel"
 	}
+	// BACI-220: stamp the typed reason on the open path so the UI can
+	// tell "agent asked a question" apart from the upcoming
+	// `user_manual_review` case. SetIssueState's own SQL has already
+	// NULLed the column for the resolve path (any non-needs_action
+	// target clears it), so the explicit write below only fires on the
+	// open transition. Best-effort: a stamp failure logs and continues
+	// — the state move is the load-bearing change, the reason is UI
+	// metadata that the badge falls back on the existing styling
+	// without.
+	if opening {
+		if err := c.store.SetIssueUserActionReason(iss.ID, model.UserActionReasonQuestion); err != nil {
+			fmt.Fprintln(os.Stderr, "bacio: auto-flip: set user_action_reason_type", q.IssueKey+":", err)
+		}
+	}
 	c.recordOp(model.HistoryEntry{
 		Actor:  auditActor,
 		RepoID: &iss.RepoID, RepoPrefix: repo.Prefix,

@@ -9,7 +9,8 @@ export {
     QuestionPayload,
     QuestionState,
     SessionQuestion,
-    State
+    State,
+    UserActionReasonType
 } from "./models.js";
 
 export type {

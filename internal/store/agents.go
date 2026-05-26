@@ -999,8 +999,14 @@ func setIssueStateForClaim(tx *sql.Tx, issueID int64) (*StateChange, error) {
 	// terminal_at must be cleared if the issue was reopened from a
 	// terminal state via the claim path. The literal SQL clause (not a
 	// bound `?`) matches how SetIssueState writes it.
+	//
+	// BACI-220: a claim move out of `needs_action` clears the
+	// user_action_reason_type too — the reason is scoped to the
+	// `needs_action` lifetime. userActionReasonClauseForTransition
+	// returns NULL for any non-needs_action target, so this is a
+	// nominal no-op clear on every claim-driven flip.
 	if _, err := tx.Exec(
-		`UPDATE issues SET state = ?, updated_at = CURRENT_TIMESTAMP, terminal_at = `+terminalAtClause(model.StateInProgress)+` WHERE id = ? AND state != ?`,
+		`UPDATE issues SET state = ?, updated_at = CURRENT_TIMESTAMP, terminal_at = `+terminalAtClause(model.StateInProgress)+`, user_action_reason_type = `+userActionReasonClauseForTransition(model.StateInProgress)+` WHERE id = ? AND state != ?`,
 		string(model.StateInProgress), issueID, string(model.StateInProgress),
 	); err != nil {
 		return nil, err
@@ -1142,8 +1148,14 @@ func setIssueStateForRelease(tx *sql.Tx, issueID int64, target model.State) (*St
 	// `in_progress` after an EndAgentSession's `presumed_dead` cascade.
 	// terminalAtClause is a SQL literal (NULL / CURRENT_TIMESTAMP), not
 	// a bound `?` value — same rationale as SetIssueState.
+	//
+	// BACI-220: keep user_action_reason_type in lockstep too — a release
+	// past `needs_action` clears the typed reason. The clause emits NULL
+	// for any non-needs_action target so a `needs_action`-tagged
+	// question reason can't outlive the move into `in_review` / done /
+	// cancelled.
 	if _, err := tx.Exec(
-		`UPDATE issues SET state = ?, updated_at = CURRENT_TIMESTAMP, terminal_at = `+terminalAtClause(target)+` WHERE id = ? AND state != ?`,
+		`UPDATE issues SET state = ?, updated_at = CURRENT_TIMESTAMP, terminal_at = `+terminalAtClause(target)+`, user_action_reason_type = `+userActionReasonClauseForTransition(target)+` WHERE id = ? AND state != ?`,
 		string(target), issueID, string(target),
 	); err != nil {
 		return nil, err

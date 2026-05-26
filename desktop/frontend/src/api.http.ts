@@ -451,11 +451,20 @@ export interface SessionTodoDTO {
 // needed" badge. Header is the question's short tag; the full
 // payload is fetched via getSessionQuestion when the user opens
 // the modal.
+//
+// BACI-220: user_action_reason_type is the typed reason the
+// question's linked issue is parked in `needs_action` —
+// `user_question` here (the open-question auto-flip stamped it)
+// or empty when no reason is recorded. The UI ignores it for
+// now (no badge change yet); the field rides through so a
+// follow-up that renders the badge variant doesn't need a
+// migration.
 export interface QuestionDTO {
   id: number;
   issueKey?: string;
   header: string;
   askedAt: string;
+  user_action_reason_type?: string;
 }
 
 // SessionQuestion is the full row returned by the per-question

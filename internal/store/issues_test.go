@@ -263,3 +263,81 @@ func TestTerminalAtLifecycle(t *testing.T) {
 			firstClose, got.TerminalAt)
 	}
 }
+
+// TestUserActionReasonRoundTrip — BACI-220. The
+// user_action_reason_type column round-trips through
+// SetIssueUserActionReason / GetIssueByID, and SetIssueState clears it
+// on any move out of `needs_action` while leaving it untouched on a
+// needs_action→needs_action no-op move.
+func TestUserActionReasonRoundTrip(t *testing.T) {
+	s := newTestStore(t)
+	repo, err := s.CreateRepo("UAR", "user-action-reason", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+
+	// Fresh todo issue — no reason recorded.
+	iss, err := s.CreateIssue(repo.ID, nil, "round trip", "", model.StateTodo, nil)
+	if err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	if iss.UserActionReasonType != "" {
+		t.Fatalf("fresh issue UserActionReasonType = %q, want \"\"", iss.UserActionReasonType)
+	}
+
+	// Park it and stamp a reason — round-trips through GetIssueByID.
+	if err := s.SetIssueState(iss.ID, model.StateNeedsAction); err != nil {
+		t.Fatalf("set needs_action: %v", err)
+	}
+	if err := s.SetIssueUserActionReason(iss.ID, model.UserActionReasonQuestion); err != nil {
+		t.Fatalf("set reason: %v", err)
+	}
+	got, _ := s.GetIssueByID(iss.ID)
+	if got.UserActionReasonType != model.UserActionReasonQuestion {
+		t.Fatalf("after stamp UserActionReasonType = %q, want %q",
+			got.UserActionReasonType, model.UserActionReasonQuestion)
+	}
+
+	// needs_action → needs_action re-issue must preserve the reason —
+	// the SQL fragment in SetIssueState keeps the column on a same-state
+	// move so the auto-flip's separate reason write isn't overwritten.
+	if err := s.SetIssueState(iss.ID, model.StateNeedsAction); err != nil {
+		t.Fatalf("re-issue needs_action: %v", err)
+	}
+	got, _ = s.GetIssueByID(iss.ID)
+	if got.UserActionReasonType != model.UserActionReasonQuestion {
+		t.Fatalf("re-issued needs_action drifted reason: %q, want %q",
+			got.UserActionReasonType, model.UserActionReasonQuestion)
+	}
+
+	// Move out of needs_action — reason must clear.
+	if err := s.SetIssueState(iss.ID, model.StateInProgress); err != nil {
+		t.Fatalf("set in_progress: %v", err)
+	}
+	got, _ = s.GetIssueByID(iss.ID)
+	if got.UserActionReasonType != "" {
+		t.Fatalf("after in_progress UserActionReasonType = %q, want \"\"",
+			got.UserActionReasonType)
+	}
+
+	// Explicit clear via the empty-string sentinel.
+	if err := s.SetIssueState(iss.ID, model.StateNeedsAction); err != nil {
+		t.Fatalf("re-park: %v", err)
+	}
+	if err := s.SetIssueUserActionReason(iss.ID, model.UserActionReasonManualReview); err != nil {
+		t.Fatalf("set manual_review: %v", err)
+	}
+	got, _ = s.GetIssueByID(iss.ID)
+	if got.UserActionReasonType != model.UserActionReasonManualReview {
+		t.Fatalf("after stamp manual_review UserActionReasonType = %q, want %q",
+			got.UserActionReasonType, model.UserActionReasonManualReview)
+	}
+	if err := s.SetIssueUserActionReason(iss.ID, ""); err != nil {
+		t.Fatalf("explicit clear: %v", err)
+	}
+	got, _ = s.GetIssueByID(iss.ID)
+	if got.UserActionReasonType != "" {
+		t.Fatalf("after explicit clear UserActionReasonType = %q, want \"\"",
+			got.UserActionReasonType)
+	}
+}

@@ -755,6 +755,22 @@ func migrate(db *sql.DB) error {
 	if err := backfillScopeTemplate(db); err != nil {
 		return fmt.Errorf("backfill scope template: %w", err)
 	}
+	// BACI-220: add issues.user_action_reason_type on older DBs. The
+	// CREATE TABLE declaration in schema.sql carries the column for
+	// fresh DBs; this ALTER brings older ones up to date. The column
+	// is nullable with no default — set on auto-flip into
+	// `needs_action`, cleared on every move out — so existing rows
+	// stay NULL and the BACI-126c release path / SetIssueState clear
+	// keeps them that way without a backfill.
+	hasUserActionReason, err := columnExists(db, "issues", "user_action_reason_type")
+	if err != nil {
+		return err
+	}
+	if !hasUserActionReason {
+		if _, err := db.Exec(`ALTER TABLE issues ADD COLUMN user_action_reason_type TEXT`); err != nil {
+			return fmt.Errorf("add user_action_reason_type to issues: %w", err)
+		}
+	}
 	return nil
 }
 
