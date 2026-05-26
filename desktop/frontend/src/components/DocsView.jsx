@@ -115,12 +115,18 @@ export default function DocsView({ activeBoard, onOpenIssue }) {
       .catch(err => reportError(err, { headline: "Couldn't list docs" }));
   }, [activeBoard, repoSelected, reloadTick]);
 
-  // Clear the open doc on repo change.
-  useEffect(() => {
-    setSelected(null);
-    setContent('');
-    setSavedContent('');
-  }, [activeBoard]);
+  // BACI-215: do not blast `selected` on activeBoard change. The URL
+  // is the source of truth for the open document (decodedSlug above is
+  // mirrored into `selected`), so an unconditional null-out here would
+  // stomp the value the URL just put in place on mount — manifesting
+  // as a deep link to `/documents/<filename>` rendering the bare list.
+  // The doc-list reload effect above already clears the editor buffer
+  // (`content`/`savedContent`) on the repo change; the selection comes
+  // back from the next render of the URL-derived initial state.
+  //
+  // If the slug doesn't exist in the new repo, `api.getDoc` below will
+  // surface a 404 — that's a separate failure mode and the right place
+  // to handle it lives there, not in a blanket clear here.
 
   // Load the chosen document's body.
   useEffect(() => {
