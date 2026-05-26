@@ -4,6 +4,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { m } from 'motion/react';
 import Icon from './Icon.jsx';
 import Tooltip from './Tooltip.jsx';
+import DispatchMenuContent from './DispatchMenuContent.jsx';
 import { todoGlyph } from '../lib/todoGlyph.jsx';
 import { waitingStateLabel } from '../lib/waitingLabels.ts';
 import { documentPath } from '../lib/routes';
@@ -423,20 +424,18 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDra
                   collisionPadding={8}
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <div className="mk-card-action-menu-label">{menuHeader}</div>
-                  {(promptConfig || []).map(p => (
-                    <DropdownMenu.Item
-                      key={p.mode}
-                      className={`mk-card-action-item ${followOn?.mode === p.mode ? 'is-current' : ''}`}
-                      onSelect={() => onSetFollowOn && onSetFollowOn(card.key, p.mode)}
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      {p.actionLabel || p.label}
-                    </DropdownMenu.Item>
-                  ))}
-                  {followOn && (
-                    <>
-                      <DropdownMenu.Separator className="mk-card-action-sep" />
+                  {/* BACI-222: the scrollable+filterable shell lives in
+                      DispatchMenuContent; this call site provides the
+                      flat-list row markup (one prompt per row, current
+                      mode highlighted). The Radix DropdownMenu.Root /
+                      Trigger / Portal / Content wrappers stay so we
+                      keep click-outside-to-close + collision-aware
+                      placement out of the box. */}
+                  <DispatchMenuContent
+                    prompts={promptConfig || []}
+                    currentMode={followOn?.mode}
+                    menuLabel={menuHeader}
+                    footer={followOn ? (
                       <DropdownMenu.Item
                         className="mk-card-action-item is-danger"
                         onSelect={() => onCancelFollowOn && onCancelFollowOn(card.key)}
@@ -444,8 +443,23 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDra
                       >
                         Cancel follow-on
                       </DropdownMenu.Item>
-                    </>
-                  )}
+                    ) : null}
+                    renderRows={({ visible, currentMode }) => (
+                      <>
+                        {visible.map(p => (
+                          <DropdownMenu.Item
+                            key={p.mode}
+                            data-dispatch-row=""
+                            className={`mk-card-action-item ${currentMode === p.mode ? 'is-current' : ''}`}
+                            onSelect={() => onSetFollowOn && onSetFollowOn(card.key, p.mode)}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {p.actionLabel || p.label}
+                          </DropdownMenu.Item>
+                        ))}
+                      </>
+                    )}
+                  />
                 </DropdownMenu.Content>
               </DropdownMenu.Portal>
             </DropdownMenu.Root>
@@ -540,6 +554,16 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDra
                       collisionPadding={8}
                     >
                       {/*
+                        BACI-222: the search-+-scroll shell lives in
+                        DispatchMenuContent. The zap menu's row
+                        population (per-primary section header +
+                        primary row + compound "Plan, then Implement"
+                        rows) is unchanged from BACI-209; what's new
+                        is the filter input narrows the visible
+                        sections (intersecting validPrompts with the
+                        filter) and, within each visible section, the
+                        compound rows below.
+
                         BACI-209: per-primary section. Each state-valid
                         primary renders a header label, then one row
                         firing the existing `onDispatch` (primary-only)
@@ -559,37 +583,55 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDra
                         "Planning") is the fallback for templates that
                         haven't set the override and aren't built-in.
                       */}
-                      {validPrompts.map(p => {
-                        const primaryLabel = p.actionLabel || p.label;
-                        const compounds = (promptConfig || []).filter(q => q.mode !== p.mode);
-                        return (
-                          <React.Fragment key={p.mode}>
-                            <DropdownMenu.Label className="mk-card-action-menu-label">
-                              {primaryLabel}
-                            </DropdownMenu.Label>
-                            <DropdownMenu.Item
-                              className="mk-card-action-item"
-                              onSelect={() => onDispatch(card.key, p.mode)}
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              {primaryLabel}
-                            </DropdownMenu.Item>
-                            {onDispatchChain && compounds.map(q => {
-                              const followOnLabel = q.actionLabel || q.label;
-                              return (
+                      <DispatchMenuContent
+                        prompts={promptConfig || []}
+                        renderRows={({ visible }) => {
+                          const visibleModes = new Set(visible.map(p => p.mode));
+                          const visiblePrimaries = validPrompts.filter(p => visibleModes.has(p.mode));
+                          if (visiblePrimaries.length === 0) {
+                            return (
+                              <div className="mk-dispatch-menu-empty">
+                                No matching modes for this card&apos;s state.
+                              </div>
+                            );
+                          }
+                          return visiblePrimaries.map(p => {
+                            const primaryLabel = p.actionLabel || p.label;
+                            const compounds = (promptConfig || []).filter(
+                              q => q.mode !== p.mode && visibleModes.has(q.mode),
+                            );
+                            return (
+                              <React.Fragment key={p.mode}>
+                                <DropdownMenu.Label className="mk-card-action-menu-label">
+                                  {primaryLabel}
+                                </DropdownMenu.Label>
                                 <DropdownMenu.Item
-                                  key={`${p.mode}-then-${q.mode}`}
-                                  className="mk-card-action-item is-compound"
-                                  onSelect={() => onDispatchChain(card.key, p.mode, q.mode)}
+                                  data-dispatch-row=""
+                                  className="mk-card-action-item"
+                                  onSelect={() => onDispatch(card.key, p.mode)}
                                   onClick={(e) => e.stopPropagation()}
                                 >
-                                  {primaryLabel}, then {followOnLabel}
+                                  {primaryLabel}
                                 </DropdownMenu.Item>
-                              );
-                            })}
-                          </React.Fragment>
-                        );
-                      })}
+                                {onDispatchChain && compounds.map(q => {
+                                  const followOnLabel = q.actionLabel || q.label;
+                                  return (
+                                    <DropdownMenu.Item
+                                      key={`${p.mode}-then-${q.mode}`}
+                                      data-dispatch-row=""
+                                      className="mk-card-action-item is-compound"
+                                      onSelect={() => onDispatchChain(card.key, p.mode, q.mode)}
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      {primaryLabel}, then {followOnLabel}
+                                    </DropdownMenu.Item>
+                                  );
+                                })}
+                              </React.Fragment>
+                            );
+                          });
+                        }}
+                      />
                     </DropdownMenu.Content>
                   </DropdownMenu.Portal>
                 </DropdownMenu.Root>
