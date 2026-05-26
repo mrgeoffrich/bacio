@@ -448,6 +448,65 @@ body { margin: 0; }
   background: transparent; color: var(--fg-1);
 }
 .mk-card-action-item:hover { background: var(--bg-4); }
+/* BACI-222: the sized dispatch popover body (DispatchMenuContent).
+   Replaces the unbounded flat-list children of the kanban
+   DropdownMenu.Content with a search-input + scroll-region shell so
+   the per-card dispatch menu can no longer overflow the viewport.
+   The shell mirrors the RepoPicker idiom (sticky search at the top,
+   max-height scroll region in the middle, optional sticky footer)
+   so the dispatch popover joins the existing picker family rather
+   than inventing a new visual treatment.
+
+   Widened from .mk-card-action-menu's default 132px because the zap
+   menu's compound rows ("Plan, then Implement") need horizontal
+   room to render without truncation on a typical prompt set. */
+.mk-dispatch-menu {
+  display: flex; flex-direction: column;
+  min-width: 220px;
+}
+.mk-dispatch-menu-search-row {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--bg-2);
+  padding: 2px 2px 4px;
+}
+.mk-dispatch-menu-search {
+  font-family: var(--font-sans); font-size: 12px;
+  width: 100%; box-sizing: border-box;
+  padding: 6px 8px;
+  border: 1px solid var(--border-1); border-radius: 6px;
+  background: var(--bg-3); color: var(--fg-1);
+  outline: none;
+}
+.mk-dispatch-menu-search:focus { border-color: var(--border-2); }
+.mk-dispatch-menu-list {
+  max-height: 280px; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 2px 0;
+}
+.mk-dispatch-menu-empty {
+  padding: 8px; font-family: var(--font-sans); font-size: 12px;
+  color: var(--fg-4); text-align: center;
+}
+/* The footer (Cancel follow-on) sticks to the bottom edge inside the
+   popover so it remains reachable even when the filter / scroll
+   region pushes the user's eye away from it. */
+.mk-dispatch-menu-footer {
+  position: sticky; bottom: 0;
+  background: var(--bg-2);
+  border-top: 1px solid var(--border-1);
+  margin-top: 4px; padding-top: 4px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+/* Active-row highlight for the input-driven ↑↓ keyboard model. The
+   DispatchMenuContent input owns the active index and paints
+   data-active="true" on the active row each render (Radix
+   DropdownMenu.Item children sit underneath, so per-row React state
+   isn't possible without rewriting the menu shell). Style mirrors
+   the existing `:hover` so keyboard nav reads as the same visual
+   affordance as mouse hover. */
+[data-dispatch-row][data-active="true"] {
+  background: var(--bg-4);
+}
 
 /* BACI-192: follow-on dispatch button — a footer affordance that sits
    alongside the assignee / eval / spinner triad on a taken or waiting
