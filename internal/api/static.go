@@ -85,12 +85,20 @@ func (d deps) handleUI(w http.ResponseWriter, r *http.Request) {
 	f, err := webUIFS.Open(rel)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			// SPA fallback — every unknown path under /ui/ resolves
-			// to the bundled index.html so the React router can
-			// handle it. Asset-shaped paths (with a file extension)
-			// still 404 cleanly so missing JS/CSS doesn't return
-			// HTML and confuse the browser.
-			if path.Ext(rel) == "" {
+			// SPA fallback — every unknown non-asset path under /ui/
+			// resolves to the bundled index.html so the React router
+			// can handle it. BACI-215: an earlier guard checked for a
+			// missing file extension to gate the fallback, but doc
+			// filenames carry their own extension (`.md`, `.jsonl`,
+			// `.svg`) and the React route `/ui/documents/:slug`
+			// happily owns them — gating on extension turned every
+			// deep-link refresh into a 404. The right distinction is
+			// the `/assets/` prefix Vite emits hashed bundles under:
+			// a miss there is a build error (the SPA references the
+			// hashed name in index.html, so falling back to HTML
+			// would just confuse the browser); anywhere else, fall
+			// back so deep links and back/forward survive a refresh.
+			if !strings.HasPrefix(rel, "assets/") {
 				rel = "index.html"
 				f, err = webUIFS.Open(rel)
 			}
