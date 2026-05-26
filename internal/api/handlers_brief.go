@@ -106,6 +106,16 @@ func (d deps) handleIssueBrief(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// BACI-216: same per-issue plan lookup as the show handler so the
+	// brief consumer (skill / workspace shelf) sees the same plan
+	// affordance the kanban card surfaces.
+	latestPlan, err := d.store.LatestPlanForIssue(iss.ID)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+
 	writeJSON(w, http.StatusOK, &IssueBrief{
 		Issue:        iss,
 		Feature:      feat,
@@ -116,6 +126,7 @@ func (d deps) handleIssueBrief(w http.ResponseWriter, r *http.Request) {
 		Claimants:    claimants,
 		Taken:        model.AnyOpenClaim(claimants),
 		WaitingState: waitingState,
+		LatestPlan:   latestPlan,
 		Warnings:     warnings,
 	})
 }

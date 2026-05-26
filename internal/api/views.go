@@ -21,6 +21,10 @@ type IssueView struct {
 	// this" signal — true iff Claimants has an open claim.
 	Claimants []*model.AgentClaim `json:"claimants"`
 	Taken     bool                `json:"taken"`
+	// LatestPlan (BACI-216) is the newest `plan`-typed document
+	// linked directly to the issue — same shape and contract as
+	// client.IssueView.LatestPlan / boardcards.BoardCard.LatestPlan.
+	LatestPlan *model.LatestPlan `json:"latest_plan,omitempty"`
 }
 
 type CascadeCount struct {
@@ -125,7 +129,9 @@ type IssueBrief struct {
 	Claimants    []*model.AgentClaim      `json:"claimants"`
 	Taken        bool                     `json:"taken"`
 	WaitingState *boardcards.WaitingState `json:"waiting_state,omitempty"`
-	Warnings     []string                 `json:"warnings"`
+	// LatestPlan (BACI-216) — see client.IssueBrief.LatestPlan.
+	LatestPlan *model.LatestPlan `json:"latest_plan,omitempty"`
+	Warnings   []string          `json:"warnings"`
 }
 
 // BriefDoc mirrors internal/cli/issue.go:briefDoc — one linked document

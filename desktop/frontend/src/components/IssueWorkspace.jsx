@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import { Link } from 'react-router';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import MarkdownView from '../lib/markdownView';
 import Icon from './Icon.jsx';
@@ -7,6 +8,7 @@ import LinkedDocPanel from './issue/LinkedDocPanel.jsx';
 import InlineDescriptionEditor from './issue/InlineDescriptionEditor.jsx';
 import CommentComposer from './issue/CommentComposer.jsx';
 import RelationsPanel from './issue/RelationsPanel.jsx';
+import { documentPath } from '../lib/routes';
 import { reportError } from '../errors';
 
 // prLabel shortens a GitHub PR URL to "owner/repo#N" for the rail.
@@ -163,6 +165,24 @@ export default function IssueWorkspace({
         <span className="mk-card-id">{issueMeta.key}</span>
         <span className={`mk-pill mk-status-${issueMeta.column}`}>{issueMeta.columnLabel}</span>
         <h1 className="mk-workspace-title">{issueMeta.title}</h1>
+        {/*
+          BACI-216: prominent "Open plan" link in the workspace header
+          so the plan a worker just attached isn't buried alongside
+          review / transcript docs in the Documents list. Mirrors the
+          per-card affordance on the kanban; same documentPath() target
+          as LinkedDocPanel so BACI-215's deep-link route is the
+          landing page. Hidden when no plan-typed doc is linked.
+        */}
+        {issueMeta.latestPlan && (
+          <Link
+            to={documentPath(issueMeta.latestPlan.filename)}
+            className="mk-workspace-plan-link"
+            title={`Open plan: ${issueMeta.latestPlan.filename}`}
+          >
+            <Icon name="plan" />
+            <span className="mk-workspace-plan-link-text">Plan</span>
+          </Link>
+        )}
         <IssueLockBanner
           taken={taken}
           waiting={waiting}

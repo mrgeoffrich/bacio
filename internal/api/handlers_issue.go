@@ -130,6 +130,15 @@ func (d deps) handleIssueShow(w http.ResponseWriter, r *http.Request) {
 	if claimants == nil {
 		claimants = []*model.AgentClaim{}
 	}
+	// BACI-216: surface the newest linked plan as a dedicated field so
+	// the workspace can render a prominent "Open plan" link without
+	// re-scanning Documents for a `plan`-typed entry.
+	latestPlan, err := d.store.LatestPlanForIssue(iss.ID)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
 	writeJSON(w, http.StatusOK, &IssueView{
 		Issue:        iss,
 		Comments:     comments,
@@ -138,6 +147,7 @@ func (d deps) handleIssueShow(w http.ResponseWriter, r *http.Request) {
 		Documents:    docs,
 		Claimants:    claimants,
 		Taken:        model.AnyOpenClaim(claimants),
+		LatestPlan:   latestPlan,
 	})
 }
 

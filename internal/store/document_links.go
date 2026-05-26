@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/mrgeoffrich/bacio/internal/model"
 )
@@ -216,6 +217,136 @@ func (s *Store) CountTranscriptDocsByIssue(issueIDs []int64) (map[int64]int, err
 		}
 	}
 	return out, rows.Err()
+}
+
+// LatestPlanForIssue (BACI-216) returns the newest `plan`-typed
+// document linked directly to the given issue, or nil when no plan
+// is linked. "Newest" sorts on the document's own (updated_at,
+// created_at, id) DESC — link-row created_at is not the rule, so a
+// plan rewritten yesterday wins over one linked yesterday but
+// updated last week. See model.LatestPlan for the contract.
+//
+// Returns (nil, nil) when no matching plan exists — every caller
+// surfaces "no plan" as the omitted/null JSON field, so the
+// distinction between "no plan" and ErrNotFound isn't useful.
+func (s *Store) LatestPlanForIssue(issueID int64) (*model.LatestPlan, error) {
+	row := s.DB.QueryRow(`
+		SELECT d.id, d.uuid, d.filename, d.updated_at
+		  FROM documents d
+		  JOIN document_links dl ON dl.document_id = d.id
+		 WHERE dl.issue_id = ? AND d.type = ?
+		 ORDER BY d.updated_at DESC, d.created_at DESC, d.id DESC
+		 LIMIT 1
+	`, issueID, string(model.DocTypePlan))
+	var out model.LatestPlan
+	if err := row.Scan(&out.DocumentID, &out.UUID, &out.Filename, &out.UpdatedAt); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("scan latest plan: %w", err)
+	}
+	return &out, nil
+}
+
+// LatestPlanByIssue (BACI-216) is the bulk sibling of
+// LatestPlanForIssue — returns a map keyed by issue id of each
+// issue's newest linked plan. Issues with no plan are absent from
+// the map (mirrors CountTranscriptDocsByIssue / CountEvalCommentsByIssue).
+// Used by boardcards.Assemble to fan the plan affordance onto every
+// kanban card in one trip.
+//
+// Per-issue "latest" follows the same (updated_at, created_at, id) DESC
+// rule as the single-id helper — done client-side over a
+// `WHERE dl.issue_id IN (...)` scan filtered to plan-typed rows. The
+// candidate set per issue is tiny (most issues only ever have one
+// plan doc) so the post-filter cost is negligible.
+func (s *Store) LatestPlanByIssue(issueIDs []int64) (map[int64]*model.LatestPlan, error) {
+	out := make(map[int64]*model.LatestPlan, len(issueIDs))
+	if len(issueIDs) == 0 {
+		return out, nil
+	}
+	placeholders := make([]string, len(issueIDs))
+	args := make([]any, 0, len(issueIDs)+1)
+	for i, id := range issueIDs {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+	args = append(args, string(model.DocTypePlan))
+	q := `SELECT dl.issue_id, d.id, d.uuid, d.filename, d.updated_at, d.created_at
+	       FROM document_links dl
+	       JOIN documents d ON d.id = dl.document_id
+	       WHERE dl.issue_id IN (` + strings.Join(placeholders, ", ") + `)
+	         AND d.type = ?`
+	rows, err := s.DB.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	// Track each issue's "best so far" candidate by document recency.
+	// SQLite's ORDER BY can't pre-pick the per-group winner without a
+	// correlated subquery; the Go-side argmax keeps the SQL simple
+	// and the per-issue plan candidate count is tiny.
+	type candidate struct {
+		updated, created time.Time
+		id               int64
+		latest           *model.LatestPlan
+	}
+	best := make(map[int64]candidate, len(issueIDs))
+	for rows.Next() {
+		var (
+			issueID    int64
+			docID      int64
+			uuid       string
+			filename   string
+			updatedAt  time.Time
+			createdAt  time.Time
+		)
+		if err := rows.Scan(&issueID, &docID, &uuid, &filename, &updatedAt, &createdAt); err != nil {
+			return nil, err
+		}
+		cur := candidate{
+			updated: updatedAt,
+			created: createdAt,
+			id:      docID,
+			latest: &model.LatestPlan{
+				DocumentID: docID,
+				UUID:       uuid,
+				Filename:   filename,
+				UpdatedAt:  updatedAt,
+			},
+		}
+		prev, ok := best[issueID]
+		if !ok || candidateLess(prev, cur) {
+			best[issueID] = cur
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for issueID, c := range best {
+		out[issueID] = c.latest
+	}
+	return out, nil
+}
+
+// candidateLess reports whether `a` is strictly less recent than `b`
+// under the LatestPlan ordering — newer updated_at wins, then newer
+// created_at, then larger id as the deterministic tiebreaker. The
+// strict-less semantics mean "first seen at the same key wins" when
+// two rows are exactly equal, which is fine: we just need
+// determinism, and the candidate set per issue is tiny.
+func candidateLess(a, b struct {
+	updated, created time.Time
+	id               int64
+	latest           *model.LatestPlan
+}) bool {
+	if !a.updated.Equal(b.updated) {
+		return a.updated.Before(b.updated)
+	}
+	if !a.created.Equal(b.created) {
+		return a.created.Before(b.created)
+	}
+	return a.id < b.id
 }
 
 // ListDocumentsLinkedToFeature returns links from any document to a given feature.

@@ -166,6 +166,18 @@ export class BoardCard {
      */
     "followOn"?: BoardCardFollowOn | null;
 
+    /**
+     * LatestPlan (BACI-216) is the newest `plan`-typed document
+     * linked directly to this issue, or nil when no plan is linked.
+     * Drives the per-card plan icon that opens the doc viewer —
+     * hidden when nil. The wider issue-shaped read paths (CLI brief
+     * / show, REST brief / show, Wails issue detail) carry the same
+     * projection (model.LatestPlan) with snake_case JSON tags; the
+     * kanban surface re-emits it under camelCase here so the BoardCard
+     * stays consistent with every other camelCase field on the wire.
+     */
+    "latestPlan"?: BoardCardLatestPlan | null;
+
     /** Creates a new BoardCard instance. */
     constructor($$source: Partial<BoardCard> = {}) {
         if (!("key" in $$source)) {
@@ -213,6 +225,7 @@ export class BoardCard {
         const $$createField15_0 = $$createType6;
         const $$createField17_0 = $$createType8;
         const $$createField21_0 = $$createType10;
+        const $$createField22_0 = $$createType12;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField5_0($$parsedSource["tags"]);
@@ -234,6 +247,9 @@ export class BoardCard {
         }
         if ("followOn" in $$parsedSource) {
             $$parsedSource["followOn"] = $$createField21_0($$parsedSource["followOn"]);
+        }
+        if ("latestPlan" in $$parsedSource) {
+            $$parsedSource["latestPlan"] = $$createField22_0($$parsedSource["latestPlan"]);
         }
         return new BoardCard($$parsedSource as Partial<BoardCard>);
     }
@@ -308,6 +324,47 @@ export class BoardCardFollowOn {
     static createFrom($$source: any = {}): BoardCardFollowOn {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new BoardCardFollowOn($$parsedSource as Partial<BoardCardFollowOn>);
+    }
+}
+
+/**
+ * BoardCardLatestPlan (BACI-216) is the camelCase mirror of
+ * model.LatestPlan used on the BoardCard wire payload. Snake-case
+ * works fine on the CLI / REST issue payloads (matches every other
+ * model.* field on those surfaces); the BoardCard's contract is
+ * camelCase across the board, so the kanban shape gets its own
+ * projection of the same four fields.
+ */
+export class BoardCardLatestPlan {
+    "documentId": number;
+    "uuid": string;
+    "filename": string;
+    "updatedAt": time$0.Time;
+
+    /** Creates a new BoardCardLatestPlan instance. */
+    constructor($$source: Partial<BoardCardLatestPlan> = {}) {
+        if (!("documentId" in $$source)) {
+            this["documentId"] = 0;
+        }
+        if (!("uuid" in $$source)) {
+            this["uuid"] = "";
+        }
+        if (!("filename" in $$source)) {
+            this["filename"] = "";
+        }
+        if (!("updatedAt" in $$source)) {
+            this["updatedAt"] = null;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new BoardCardLatestPlan instance from a string or object.
+     */
+    static createFrom($$source: any = {}): BoardCardLatestPlan {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new BoardCardLatestPlan($$parsedSource as Partial<BoardCardLatestPlan>);
     }
 }
 
@@ -471,3 +528,5 @@ const $$createType7 = BoardCardBlocker.createFrom;
 const $$createType8 = $Create.Array($$createType7);
 const $$createType9 = BoardCardFollowOn.createFrom;
 const $$createType10 = $Create.Nullable($$createType9);
+const $$createType11 = BoardCardLatestPlan.createFrom;
+const $$createType12 = $Create.Nullable($$createType11);

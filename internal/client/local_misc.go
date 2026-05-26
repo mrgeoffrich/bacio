@@ -190,6 +190,12 @@ func (c *localClient) CountTranscriptDocsByIssue(ctx context.Context, ids []int6
 	return c.store.CountTranscriptDocsByIssue(ids)
 }
 
+// LatestPlanByIssue is a thin pass-through to the store (BACI-216).
+// Used by boardcards.Assemble for the per-card plan affordance.
+func (c *localClient) LatestPlanByIssue(ctx context.Context, ids []int64) (map[int64]*model.LatestPlan, error) {
+	return c.store.LatestPlanByIssue(ids)
+}
+
 func (c *localClient) UnlinkRelation(ctx context.Context, repo *model.Repo, in inputs.UnlinkInput, dryRun bool) (*RelationDeletePreview, int64, error) {
 	a, err := c.GetIssueByKey(ctx, repo, in.A)
 	if err != nil {

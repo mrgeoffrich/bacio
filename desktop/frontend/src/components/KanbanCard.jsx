@@ -1,10 +1,12 @@
 import React, { memo, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { m } from 'motion/react';
 import Icon from './Icon.jsx';
 import Tooltip from './Tooltip.jsx';
 import { todoGlyph } from '../lib/todoGlyph.jsx';
 import { waitingStateLabel } from '../lib/waitingLabels.ts';
+import { documentPath } from '../lib/routes';
 
 // stateLabel mirrors api.http.ts's STATE_LABELS — duplicated here so the
 // blocked popover can render a blocker's state pill ("In Progress")
@@ -147,6 +149,15 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDra
   const blockedBy = card.blockedBy || [];
   const isBlocked = blockedBy.length > 0;
 
+  // BACI-216: per-card "open the latest plan" affordance. card.latestPlan
+  // is populated by the boardcards assembler from the bulk store
+  // helper; null / undefined when no plan-typed doc is linked to the
+  // issue. The icon-button trigger sits in the .mk-card-top row next to
+  // the issue key (between the issue id and any blocked-icon popover);
+  // clicking it navigates to the doc viewer route (covered by BACI-215)
+  // and stops propagation so the card-level onOpen doesn't also fire.
+  const latestPlan = card.latestPlan || null;
+
   // BACI-141: combined transcript + eval chip. Visible on every card
   // regardless of `taken` state — the whole point of the ticket is
   // making eval notes / transcripts discoverable AFTER an agent
@@ -246,6 +257,18 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDra
           </span>
         )}
         <span className="mk-card-id">{card.key}</span>
+        {latestPlan && (
+          <Tooltip label={`Open plan: ${latestPlan.filename}`}>
+            <Link
+              to={documentPath(latestPlan.filename)}
+              className="mk-card-plan-btn"
+              aria-label={`Open plan: ${latestPlan.filename}`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Icon name="plan" />
+            </Link>
+          </Tooltip>
+        )}
         {isBlocked && (
           <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild>

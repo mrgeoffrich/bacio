@@ -627,6 +627,31 @@ body { margin: 0; }
   color: var(--paper, #fff);
 }
 .mk-card-blocked-btn .mk-icon { width: 11px; height: 11px; }
+
+/* BACI-216: per-card "open the latest plan" chip. Same 18px square
+   slot as .mk-card-blocked-btn so the .mk-card-top row's icons line
+   up; muted neutral by default (a plan isn't an alarm — it's a
+   reference), hover lifts it to the accent. Wrapped in a <Link>, so
+   the cursor/affordance comes from the anchor element. */
+.mk-card-plan-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; padding: 0;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-4);
+  color: var(--fg-2);
+  text-decoration: none;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out);
+}
+.mk-card-plan-btn:hover {
+  background: var(--accent-1, var(--fg-1));
+  color: var(--paper, #fff);
+  border-color: var(--accent-1, var(--fg-1));
+}
+.mk-card-plan-btn .mk-icon { width: 11px; height: 11px; }
 .mk-card-blocked-menu {
   z-index: 100;
   min-width: 220px; padding: 4px;

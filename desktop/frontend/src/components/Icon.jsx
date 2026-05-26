@@ -1,5 +1,5 @@
 import React from 'react';
-import { Search, Plus, Columns3, GitBranch, Settings, X, Zap, Lock, MessageSquare, AlertTriangle, Minimize2, Maximize2, SkipForward, Pin, ChevronsDownUp, ChevronsUpDown, RefreshCw } from 'lucide-react';
+import { Search, Plus, Columns3, GitBranch, Settings, X, Zap, Lock, MessageSquare, AlertTriangle, Minimize2, Maximize2, SkipForward, Pin, ChevronsDownUp, ChevronsUpDown, RefreshCw, FileText } from 'lucide-react';
 
 // Glyphs come from lucide-react; the UI references them by short name
 // via <Icon name="..." />. The wrapper span (.mk-icon) sizes them, so the SVG's
@@ -39,6 +39,10 @@ const ICONS = {
   'chevrons-down-up': ChevronsDownUp,
   'chevrons-up-down': ChevronsUpDown,
   refresh: RefreshCw,
+  // BACI-216: plan glyph for the per-card "Open plan" affordance on
+  // kanban cards with a `plan`-typed doc linked, and for the
+  // prominent header link on the issue workspace.
+  plan: FileText,
 };
 
 export default function Icon({ name }) {
