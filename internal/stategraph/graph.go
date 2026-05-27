@@ -9,13 +9,26 @@
 // today, board-card right-click menus and dispatch-mode pickers later)
 // can read one shared edge list instead of each hardcoding its own.
 //
+// The canonical edge table lives in graph.yaml next to this file — edit
+// that file to add or recategorise an edge. The YAML is embedded into
+// the binary via //go:embed; the graph_test.go invariants run on the
+// next build.
+//
 // The package sits atop internal/model — it imports model.State, never
 // the other way round — so adding a new state in internal/model/state.go
 // is forcing function: the unit tests below fail until the new state has
-// at least one outgoing edge in the table.
+// at least one outgoing edge in graph.yaml.
 package stategraph
 
-import "github.com/mrgeoffrich/bacio/internal/model"
+import (
+	"bytes"
+	_ "embed"
+	"fmt"
+
+	"go.yaml.in/yaml/v4"
+
+	"github.com/mrgeoffrich/bacio/internal/model"
+)
 
 // Category labels the prominence of an edge. The category is purely a
 // display hint — every (from, to) pair listed in Edges() is technically
@@ -52,46 +65,60 @@ type Edge struct {
 	Category Category    `json:"category"`
 }
 
-// edges is the canonical edge table. Reviewers diff this slice the same
-// way they diff the state-name constants in internal/model/state.go —
-// the table is the source of truth.
-//
-// The starting categorisation came from the BACI-241 ticket sketch,
-// refined during planning. Self-loops are excluded.
-var edges = []Edge{
-	// From todo: the happy path is to start work; cancelling unblocked
-	// scope is the only other sensible move at this point.
-	{From: model.StateTodo, To: model.StateInProgress, Category: Primary},
-	{From: model.StateTodo, To: model.StateCancelled, Category: Secondary},
+//go:embed graph.yaml
+var graphYAML []byte
 
-	// From in_progress: review is the happy path. The four secondary
-	// branches cover "blocked on the user", "shipped without review",
-	// "released back to the queue", and "abandoned mid-flight".
-	{From: model.StateInProgress, To: model.StateInReview, Category: Primary},
-	{From: model.StateInProgress, To: model.StateNeedsAction, Category: Secondary},
-	{From: model.StateInProgress, To: model.StateDone, Category: Secondary},
-	{From: model.StateInProgress, To: model.StateTodo, Category: Secondary},
-	{From: model.StateInProgress, To: model.StateCancelled, Category: Secondary},
+// edges is the canonical edge table, flattened at package init from
+// graph.yaml. The YAML shape is map[from]map[category][]to; we flatten
+// here by walking AllStates() × Categories() so the resulting slice has
+// a deterministic order (matching the display-priority order callers
+// already use for the wire shape and for NextStatesFrom).
+var edges = loadEdges()
 
-	// From needs_action: the user has responded, work resumes; or the
-	// ticket is abandoned because the answer was "drop it".
-	{From: model.StateNeedsAction, To: model.StateInProgress, Category: Primary},
-	{From: model.StateNeedsAction, To: model.StateCancelled, Category: Secondary},
+func loadEdges() []Edge {
+	var raw map[model.State]map[Category][]model.State
+	dec := yaml.NewDecoder(bytes.NewReader(graphYAML))
+	dec.KnownFields(true)
+	if err := dec.Decode(&raw); err != nil {
+		panic(fmt.Sprintf("stategraph: parse graph.yaml: %v", err))
+	}
 
-	// From in_review: ship is the happy path; review-failed sends it
-	// back to in_progress; the cancel escape hatch is the same as
-	// every other live state.
-	{From: model.StateInReview, To: model.StateDone, Category: Primary},
-	{From: model.StateInReview, To: model.StateInProgress, Category: Secondary},
-	{From: model.StateInReview, To: model.StateCancelled, Category: Secondary},
+	// Pre-validate top-level keys — unknown from-states or categories
+	// would otherwise be silently skipped by the AllStates/Categories
+	// walk below and never reach the graph_test.go invariants,
+	// defeating the typo-trap.
+	allStates := make(map[model.State]bool, len(model.AllStates()))
+	for _, s := range model.AllStates() {
+		allStates[s] = true
+	}
+	allCats := make(map[Category]bool, len(Categories()))
+	for _, c := range Categories() {
+		allCats[c] = true
+	}
+	for from, cats := range raw {
+		if !allStates[from] {
+			panic(fmt.Sprintf("stategraph: graph.yaml has unknown from-state %q", from))
+		}
+		for cat := range cats {
+			if !allCats[cat] {
+				panic(fmt.Sprintf("stategraph: graph.yaml has unknown category %q under %q", cat, from))
+			}
+		}
+	}
 
-	// From done / cancelled: re-opening is unusual. The two terminal
-	// states each carry two unusual edges so a future "re-open this
-	// ticket" affordance still has data to render from.
-	{From: model.StateDone, To: model.StateInProgress, Category: Unusual},
-	{From: model.StateDone, To: model.StateTodo, Category: Unusual},
-	{From: model.StateCancelled, To: model.StateTodo, Category: Unusual},
-	{From: model.StateCancelled, To: model.StateInProgress, Category: Unusual},
+	var out []Edge
+	for _, from := range model.AllStates() {
+		cats, ok := raw[from]
+		if !ok {
+			continue
+		}
+		for _, cat := range Categories() {
+			for _, to := range cats[cat] {
+				out = append(out, Edge{From: from, To: to, Category: cat})
+			}
+		}
+	}
+	return out
 }
 
 // Edges returns a copy of the canonical edge slice. Callers may sort or
@@ -107,8 +134,8 @@ func Edges() []Edge {
 // via an edge in the given category. The result is a slice (not a map)
 // for ergonomics on the call side — the per-state-graph result is tiny
 // (≤5 entries) and callers usually walk it linearly. Order matches the
-// declaration order in the edge table so callers that render UI from
-// the slice get a stable visual sequence.
+// declaration order in graph.yaml so callers that render UI from the
+// slice get a stable visual sequence.
 func NextStatesFrom(from model.State, category Category) []model.State {
 	var out []model.State
 	for _, e := range edges {
