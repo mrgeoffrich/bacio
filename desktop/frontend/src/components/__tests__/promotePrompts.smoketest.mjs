@@ -1,12 +1,17 @@
-// Smoke tests for the BACI-241 promotePrompts helper in
+// Smoke tests for the BACI-241 / BACI-245 promotePrompts helper in
 // `components/promotePrompts.ts`. Plain Node + assert — mirrors the
 // pattern in dispatchMenuFilter.smoketest.mjs. The DOM-heavy follow-on
 // menu that consumes this helper is exercised by the end-to-end
 // Playwright pass; the categorisation logic itself has subtle
-// "highest-priority bucket wins" semantics worth pinning here.
+// "valid-from-current-state" semantics worth pinning here.
 //
 // Run from the worktree root:
 //   node desktop/frontend/src/components/__tests__/promotePrompts.smoketest.mjs
+//
+// Source of truth for PROMPTS: `internal/model/agent.go`
+// `builtinPromptStates` map. Update the fixture when that map changes
+// — there is no auto-sync today. See BACI-245 plan ("Risks") for
+// follow-up options if the drift starts biting.
 
 import assert from 'node:assert/strict';
 import path from 'node:path';
@@ -17,10 +22,11 @@ const moduleRoot = path.resolve(__dirname, '..');
 
 const { promotePrompts } = await import(path.join(moduleRoot, 'promotePrompts.ts'));
 
-// GRAPH is the BACI-241 canonical edge table (subset spot-check). The
-// full table lives in internal/stategraph/graph.go and is unit-tested
-// there — we only need enough edges here to cover the buckets the
-// promotion logic walks.
+// GRAPH is kept for API stability — promotePrompts ignores it under
+// the BACI-245 semantic. We pass it through anyway so a future
+// repurpose (e.g. ordering primary by destination distance) lights up
+// the test surface, and so the tests stay close to how the caller
+// actually invokes the helper.
 const GRAPH = {
   states: ['todo', 'in_progress', 'needs_action', 'in_review', 'done', 'cancelled'],
   edges: [
@@ -42,73 +48,93 @@ const GRAPH = {
   ],
 };
 
-// PROMPTS mirrors the built-in prompt-template set, just the fields the
-// helper actually reads. The order here is the order App.jsx loads
-// them — preserved within each bucket.
+// PROMPTS mirrors `builtinPromptStates` in internal/model/agent.go —
+// the prep modes (scope / research / plan / plan_large / design /
+// implement) are valid from `todo`; review / ship / fix_review are
+// valid from `in_review`. The order here is the order App.jsx loads
+// them (alphabetical within each bucket) — preserved within each
+// bucket by the helper.
 const PROMPTS = [
   { mode: 'design',     allowedStates: ['todo'] },
+  { mode: 'implement',  allowedStates: ['todo'] },
   { mode: 'plan',       allowedStates: ['todo'] },
-  { mode: 'implement',  allowedStates: ['in_progress'] },
+  { mode: 'plan_large', allowedStates: ['todo'] },
+  { mode: 'research',   allowedStates: ['todo'] },
+  { mode: 'scope',      allowedStates: ['todo'] },
   { mode: 'review',     allowedStates: ['in_review'] },
   { mode: 'ship',       allowedStates: ['in_review'] },
-  { mode: 'scope',      allowedStates: ['todo'] },
-  { mode: 'fix_review', allowedStates: ['in_review', 'needs_action'] },
+  { mode: 'fix_review', allowedStates: ['in_review'] },
 ];
+
+const PREP_MODES = ['design', 'implement', 'plan', 'plan_large', 'research', 'scope'];
+const REVIEW_MODES = ['review', 'ship', 'fix_review'];
 
 const tests = [];
 function test(name, fn) { tests.push({ name, fn }); }
 
-test('card in todo: implement promoted (in_progress is the primary next-state)', () => {
+// ---- per-state buckets — one assertion per state in graph.yaml ----
+
+test('card in todo: every prep mode is in primary; review modes in unusual', () => {
   const got = promotePrompts(PROMPTS, 'todo', GRAPH);
-  assert.deepEqual(got.primary.map(p => p.mode), ['implement']);
+  assert.deepEqual(got.primary.map(p => p.mode), PREP_MODES);
+  assert.deepEqual(got.unusual.map(p => p.mode), REVIEW_MODES);
+  assert.equal(got.secondary.length, 0);
 });
 
-test('card in todo: plan tucked under unusual (todo→todo is a self-loop, excluded)', () => {
-  const got = promotePrompts(PROMPTS, 'todo', GRAPH);
-  // No edge "todo → todo" in the graph, so plan / design / scope all
-  // have no overlap with primary/secondary/unusual nexts → unusual.
-  assert.ok(got.unusual.some(p => p.mode === 'plan'));
-  assert.ok(got.unusual.some(p => p.mode === 'design'));
-  assert.ok(got.unusual.some(p => p.mode === 'scope'));
-});
-
-test('card in in_progress: review prompted under primary (in_review reachable)', () => {
+test('card in in_progress: primary empty; everything under unusual', () => {
+  // No built-in prompt admits `in_progress` in its allowedStates, so
+  // primary is empty and the whole prompt list lands in unusual.
   const got = promotePrompts(PROMPTS, 'in_progress', GRAPH);
-  // review.allowedStates = [in_review]; in_progress→in_review is
-  // primary, so review lands in the primary bucket.
-  assert.ok(got.primary.some(p => p.mode === 'review'));
-  assert.ok(got.primary.some(p => p.mode === 'ship'));
-  assert.ok(got.primary.some(p => p.mode === 'fix_review'));
-});
-
-test('card in in_progress: implement under unusual (self-loop)', () => {
-  // No in_progress → in_progress edge → implement has no overlap,
-  // falls into unusual.
-  const got = promotePrompts(PROMPTS, 'in_progress', GRAPH);
-  assert.ok(got.unusual.some(p => p.mode === 'implement'));
-});
-
-test('card in in_review: ship + review promoted; implement under unusual', () => {
-  const got = promotePrompts(PROMPTS, 'in_review', GRAPH);
-  // in_review's primary next is `done`; no prompt's allowedStates
-  // contain `done`, so primary is empty. ship + review + fix_review
-  // all have allowedStates containing in_review (self-loop, no edge),
-  // so they fall through to unusual.
-  //
-  // The interesting check is that `implement` (allowedStates=
-  // [in_progress]) DOES intersect the secondary nexts from in_review
-  // (in_progress) → implement promoted to secondary.
-  assert.ok(got.secondary.some(p => p.mode === 'implement'));
-});
-
-test('graph missing: every prompt falls into unusual (graceful fallback)', () => {
-  const got = promotePrompts(PROMPTS, 'todo', null);
   assert.equal(got.primary.length, 0);
   assert.equal(got.secondary.length, 0);
-  assert.equal(got.unusual.length, PROMPTS.length);
-  // Input order preserved.
   assert.deepEqual(got.unusual.map(p => p.mode), PROMPTS.map(p => p.mode));
 });
+
+test('card in needs_action: primary empty; everything under unusual', () => {
+  const got = promotePrompts(PROMPTS, 'needs_action', GRAPH);
+  assert.equal(got.primary.length, 0);
+  assert.equal(got.secondary.length, 0);
+  assert.deepEqual(got.unusual.map(p => p.mode), PROMPTS.map(p => p.mode));
+});
+
+test('card in in_review: review/ship/fix_review in primary; prep modes in unusual', () => {
+  const got = promotePrompts(PROMPTS, 'in_review', GRAPH);
+  assert.deepEqual(got.primary.map(p => p.mode), REVIEW_MODES);
+  assert.deepEqual(got.unusual.map(p => p.mode), PREP_MODES);
+  assert.equal(got.secondary.length, 0);
+});
+
+test('card in done: primary empty; everything under unusual', () => {
+  const got = promotePrompts(PROMPTS, 'done', GRAPH);
+  assert.equal(got.primary.length, 0);
+  assert.equal(got.secondary.length, 0);
+  assert.deepEqual(got.unusual.map(p => p.mode), PROMPTS.map(p => p.mode));
+});
+
+test('card in cancelled: primary empty; everything under unusual', () => {
+  const got = promotePrompts(PROMPTS, 'cancelled', GRAPH);
+  assert.equal(got.primary.length, 0);
+  assert.equal(got.secondary.length, 0);
+  assert.deepEqual(got.unusual.map(p => p.mode), PROMPTS.map(p => p.mode));
+});
+
+// ---- BACI-245 regression: prep modes never hide on todo ----
+
+test('BACI-245 regression: no prep mode is hidden under unusual on a todo card', () => {
+  const got = promotePrompts(PROMPTS, 'todo', GRAPH);
+  for (const mode of PREP_MODES) {
+    assert.ok(
+      got.primary.some(p => p.mode === mode),
+      `${mode} should be in primary on a todo card, not behind Show all`,
+    );
+    assert.ok(
+      !got.unusual.some(p => p.mode === mode),
+      `${mode} should NOT be in unusual on a todo card`,
+    );
+  }
+});
+
+// ---- defensive-input cases ----
 
 test('empty prompts list: every bucket is empty', () => {
   const got = promotePrompts([], 'todo', GRAPH);
@@ -117,7 +143,7 @@ test('empty prompts list: every bucket is empty', () => {
   assert.equal(got.unusual.length, 0);
 });
 
-test('null prompts list: every bucket is empty (defensive)', () => {
+test('null prompts list: every bucket is empty', () => {
   const got = promotePrompts(null, 'todo', GRAPH);
   assert.equal(got.primary.length, 0);
   assert.equal(got.secondary.length, 0);
@@ -126,7 +152,7 @@ test('null prompts list: every bucket is empty (defensive)', () => {
 
 test('prompt with no allowedStates falls under unusual', () => {
   const got = promotePrompts(
-    [{ mode: 'custom' }, { mode: 'implement', allowedStates: ['in_progress'] }],
+    [{ mode: 'custom' }, { mode: 'implement', allowedStates: ['todo'] }],
     'todo',
     GRAPH,
   );
@@ -135,29 +161,30 @@ test('prompt with no allowedStates falls under unusual', () => {
 });
 
 test('input order preserved within each bucket', () => {
-  // Two primaries — `implement` first, then a second prompt that also
-  // hits the primary bucket. They should appear in input order.
+  // Two primaries for the same state, in input order.
   const list = [
-    { mode: 'implement', allowedStates: ['in_progress'] },
-    { mode: 'implement_2', allowedStates: ['in_progress'] },
+    { mode: 'implement', allowedStates: ['todo'] },
+    { mode: 'implement_2', allowedStates: ['todo'] },
   ];
   const got = promotePrompts(list, 'todo', GRAPH);
   assert.deepEqual(got.primary.map(p => p.mode), ['implement', 'implement_2']);
 });
 
-test('highest-priority bucket wins for prompts with multi-state allowedStates', () => {
-  // fix_review.allowedStates = [in_review, needs_action]. From
-  // in_progress, in_review is primary and needs_action is secondary
-  // — the helper must pick primary, NOT secondary.
-  const got = promotePrompts(PROMPTS, 'in_progress', GRAPH);
-  assert.ok(
-    got.primary.some(p => p.mode === 'fix_review'),
-    'fix_review should land in primary bucket from in_progress',
-  );
-  assert.ok(
-    !got.secondary.some(p => p.mode === 'fix_review'),
-    'fix_review should NOT also appear in secondary',
-  );
+test('multi-state allowedStates: prompt promoted whenever currentState matches any', () => {
+  // fix_review with allowedStates [in_review, needs_action] — admits
+  // both. From either state it lands in primary.
+  const list = [{ mode: 'fix_review', allowedStates: ['in_review', 'needs_action'] }];
+  for (const state of ['in_review', 'needs_action']) {
+    const got = promotePrompts(list, state, GRAPH);
+    assert.deepEqual(
+      got.primary.map(p => p.mode), ['fix_review'],
+      `fix_review should land in primary from ${state}`,
+    );
+  }
+  // From an unrelated state, it falls to unusual.
+  const got = promotePrompts(list, 'todo', GRAPH);
+  assert.deepEqual(got.unusual.map(p => p.mode), ['fix_review']);
+  assert.equal(got.primary.length, 0);
 });
 
 test('currentState empty → fallback to unusual-only', () => {
@@ -167,6 +194,15 @@ test('currentState empty → fallback to unusual-only', () => {
   assert.equal(got.primary.length, 0);
   assert.equal(got.secondary.length, 0);
   assert.equal(got.unusual.length, PROMPTS.length);
+});
+
+test('graph absent: still buckets by currentState (graph param is unused)', () => {
+  // Under the BACI-245 semantic the graph is no longer consulted, so
+  // passing null doesn't degrade the categorisation — primary still
+  // contains the prep modes for a todo card.
+  const got = promotePrompts(PROMPTS, 'todo', null);
+  assert.deepEqual(got.primary.map(p => p.mode), PREP_MODES);
+  assert.deepEqual(got.unusual.map(p => p.mode), REVIEW_MODES);
 });
 
 // ---- runner ----

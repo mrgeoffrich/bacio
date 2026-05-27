@@ -461,17 +461,20 @@ function KanbanCard({ card, cardsByKey, promptConfig, stateGraph, isDragging, co
                       click-outside-to-close + collision-aware placement
                       out of the box.
 
-                      BACI-241: the previously-flat row list now
-                      categorises into primary / secondary / unusual
-                      buckets via the canonical state-transition graph.
-                      `promotePrompts` walks the filter-narrowed `visible`
-                      slice (so typing in the filter still narrows
-                      every section) and groups by the highest-priority
-                      bucket whose next-states from `card.column`
-                      intersect each prompt's allowedStates. The unusual
-                      bucket sits behind a `<details>` block — the user
-                      explicitly opens it to see escape hatches like
-                      "shipping straight from in_progress". */}
+                      BACI-241 / BACI-245: the previously-flat row
+                      list now splits into two visible tiers — primary
+                      modes whose `allowedStates` admits the card's
+                      current state (rendered as plain rows), and
+                      everything else tucked behind a `<details>Show
+                      all</details>` block as escape hatches (e.g.
+                      shipping straight from in_progress). The
+                      `secondary` bucket is always empty under the
+                      BACI-245 semantic; the divider between primary
+                      and secondary only renders when both are non-
+                      empty, so it stays out of the way. The
+                      `promotePrompts` helper walks the filter-narrowed
+                      `visible` slice so typing in the filter narrows
+                      every section. */}
                   <DispatchMenuContent
                     prompts={promptConfig || []}
                     currentMode={followOn?.mode}
