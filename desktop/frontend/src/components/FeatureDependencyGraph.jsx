@@ -4,7 +4,6 @@ import {
   ReactFlow,
   Background,
   Controls,
-  MiniMap,
   Handle,
   Position,
 } from '@xyflow/react';
@@ -15,11 +14,12 @@ import { reportError } from '../errors';
 import { issuePath } from '../lib/routes';
 import { computeLayout } from './featureGraphLayout';
 
-// FeatureDependencyGraph (BACI-236) renders the feature's open + closed
-// issues as a left-to-right layered graph, with directed edges along
-// `blocks` relations. Lives in its own module so the heavy
-// @xyflow/react import only lands when the user opens the Graph tab —
-// FeaturesView lazy-loads this file.
+// FeatureDependencyGraph (BACI-236, dagre layout under BACI-243)
+// renders the feature's open + closed issues as a left-to-right
+// layered graph, with directed edges along `blocks` relations.
+// Positions come from @dagrejs/dagre via `computeLayout`. Lives in
+// its own module so the heavy @xyflow/react import only lands when
+// the user opens the Graph tab — FeaturesView lazy-loads this file.
 //
 // The component fetches `getFeaturePlan(repo, slug, true)` on mount to
 // pull every issue (open + closed) plus every in-feature blocker
@@ -107,7 +107,6 @@ export default function FeatureDependencyGraph({ repoPrefix, slug }) {
       >
         <Background gap={24} />
         <Controls showInteractive={false} />
-        <MiniMap pannable zoomable />
       </ReactFlow>
     </div>
   );

@@ -1,21 +1,24 @@
-// featureGraphLayout (BACI-236) is the pure layered-layout helper the
-// FeatureDependencyGraph view consumes. The /features/{slug}/plan
-// endpoint already hands us issues in topological order; we walk that
-// order to assign a rank (max rank of its blockers + 1) so the graph
-// renders as columns of independent work.
+// featureGraphLayout (BACI-236, dagre rewrite under BACI-243) is the
+// pure layered-layout helper the FeatureDependencyGraph view consumes.
+// The /features/{slug}/plan endpoint already hands us issues in
+// topological order; we walk that order to assign a per-node `rank`
+// (max rank of its blockers + 1) so the smoke test has a stable
+// column index regardless of how dagre shuffles the layout for edge
+// crossings. Absolute positions come from @dagrejs/dagre.
 //
-// Kept dependency-free (no React, no @xyflow/react) so it can ship a
-// plain Node smoke test in __tests__/featureDependencyLayout.smoketest.mjs
-// — the layout maths is the bit worth pinning without jsdom.
+// Kept React-free (no @xyflow/react import) so it can ship a plain
+// Node smoke test in __tests__/featureDependencyLayout.smoketest.mjs
+// — the layout maths + rank/ready bits are the bit worth pinning
+// without jsdom.
 //
 // Coordinates are in raw pixels — Reactflow's fitView rescales to fit
-// the canvas at render time. COL_WIDTH and ROW_HEIGHT are conservative
-// defaults that keep the typical 3-30 node feature legible without
-// pan-zoom; the consumer can override either when building its
-// <ReactFlow> instance.
+// the canvas at render time. NODE_WIDTH and NODE_HEIGHT mirror the
+// `.mk-graph-node` CSS so dagre's edge routing avoids overlap.
 
-export const COL_WIDTH = 240;
-export const ROW_HEIGHT = 96;
+import dagre from '@dagrejs/dagre';
+
+export const NODE_WIDTH = 220;
+export const NODE_HEIGHT = 100;
 
 export interface PlanEntryInput {
   key: string;
@@ -57,22 +60,20 @@ export interface LayoutResult {
   edges: LayoutEdge[];
 }
 
-// computeLayout walks the topo-ordered plan entries and assigns each
-// a rank (column). Ranks start at 0 for entries with no in-feature
-// blockers; everything else gets max(rank(blocker)) + 1. Nodes within
-// the same rank stack vertically in plan-order, which is stable across
-// reloads.
+// computeLayout walks the topo-ordered plan entries to assign each
+// node a stable `rank` (column index — kept for the smoke test) and
+// then hands the graph to dagre for absolute positions. Ranks start
+// at 0 for entries with no in-feature blockers; everything else gets
+// max(rank(blocker)) + 1. Cross-feature blockers (keys in `blockedBy`
+// that don't appear in the plan) are tolerated silently — the plan
+// endpoint never emits them after the BACI-236 widening, but a
+// defensive check costs nothing.
 //
-// `closed` entries contribute their rank as normal — the graph view
-// wants delivered work to sit on the left so the live-work columns
-// flow rightward as expected. The renderer can mute closed nodes
-// separately via the per-node `closed` flag.
-//
-// Cross-feature blockers (keys in `blockedBy` that don't appear in the
-// plan) are tolerated silently — the plan endpoint never emits them
-// after the BACI-236 widening (the in-feature gate stays in place),
-// but a defensive check costs nothing and keeps the helper safe to
-// re-use from a fixture-driven test.
+// `closed` entries flow through the layout normally — the renderer
+// mutes them via the per-node `closed` flag. The `ready` bit reflects
+// "this is live AND none of its in-feature blockers are still open" —
+// a delivered blocker no longer gates the work but the edge is still
+// drawn for visual context.
 export function computeLayout(entries: PlanEntryInput[]): LayoutResult {
   if (!entries || entries.length === 0) {
     return { nodes: [], edges: [] };
@@ -95,28 +96,40 @@ export function computeLayout(entries: PlanEntryInput[]): LayoutResult {
     rank.set(e.key, r);
   }
 
-  // Bucket by rank for the y-coordinate within a column.
-  const byRank = new Map<number, string[]>();
+  // Build the dagre graph. rankdir LR places ranks left-to-right; the
+  // sep / margin values keep the typical 3-30 node feature legible
+  // without pan-zoom.
+  const g = new dagre.graphlib.Graph();
+  g.setGraph({
+    rankdir: 'LR',
+    ranksep: 64,
+    nodesep: 24,
+    marginx: 16,
+    marginy: 16,
+  });
+  g.setDefaultEdgeLabel(() => ({}));
+
   for (const e of entries) {
-    const r = rank.get(e.key) ?? 0;
-    let bucket = byRank.get(r);
-    if (!bucket) {
-      bucket = [];
-      byRank.set(r, bucket);
+    g.setNode(e.key, { width: NODE_WIDTH, height: NODE_HEIGHT });
+  }
+  for (const e of entries) {
+    for (const b of e.blockedBy ?? []) {
+      if (!inFeature.has(b)) continue;
+      g.setEdge(b, e.key);
     }
-    bucket.push(e.key);
   }
 
+  dagre.layout(g);
+
+  // Dagre returns center coords; ReactFlow expects top-left.
   const nodes: LayoutNode[] = [];
   for (const e of entries) {
     const r = rank.get(e.key) ?? 0;
-    const bucket = byRank.get(r) ?? [e.key];
-    const indexInRank = bucket.indexOf(e.key);
     const closed = !!e.closed;
     // A node is "ready" only when it's live AND has no in-feature
-    // blockers (open or closed — a delivered blocker no longer
-    // gates the work, but the BACI-236 graph still draws the edge
-    // for visual context, so we ignore closed blockers here).
+    // open blockers. A delivered blocker no longer gates the work,
+    // but the BACI-236 graph still draws the edge for visual context,
+    // so we ignore closed blockers here.
     let ready = !closed;
     if (ready) {
       for (const b of e.blockedBy ?? []) {
@@ -128,10 +141,14 @@ export function computeLayout(entries: PlanEntryInput[]): LayoutResult {
         }
       }
     }
+    const dn = g.node(e.key);
     nodes.push({
       id: e.key,
       type: 'blocker',
-      position: { x: r * COL_WIDTH, y: indexInRank * ROW_HEIGHT },
+      position: {
+        x: (dn?.x ?? 0) - NODE_WIDTH / 2,
+        y: (dn?.y ?? 0) - NODE_HEIGHT / 2,
+      },
       data: {
         issueKey: e.key,
         title: e.title,

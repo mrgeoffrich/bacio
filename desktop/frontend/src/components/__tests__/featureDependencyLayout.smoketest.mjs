@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const moduleRoot = path.resolve(__dirname, '..');
 
-const { computeLayout, COL_WIDTH, ROW_HEIGHT } = await import(
+const { computeLayout, NODE_WIDTH, NODE_HEIGHT } = await import(
   path.join(moduleRoot, 'featureGraphLayout.ts')
 );
 
@@ -24,11 +24,13 @@ const tests = [];
 function test(name, fn) { tests.push({ name, fn }); }
 
 // rankOf is a tiny convenience for asserting "node X is at column N".
-// Reads back from the position the layout assigned.
+// Reads the stable `data.rank` stamped by computeLayout — dagre owns
+// the absolute coords now (and returns floats), so the column index
+// can't be recovered from `position.x` after the BACI-243 rewrite.
 function rankOf(nodes, key) {
   const n = nodes.find(x => x.id === key);
   if (!n) throw new Error(`node ${key} not in layout`);
-  return n.position.x / COL_WIDTH;
+  return n.data.rank;
 }
 
 test('empty input yields empty nodes and edges', () => {
@@ -49,8 +51,7 @@ test('single root node sits at rank 0 and is marked ready', () => {
   ]);
   assert.equal(got.nodes.length, 1);
   assert.equal(got.edges.length, 0);
-  assert.equal(got.nodes[0].position.x, 0);
-  assert.equal(got.nodes[0].position.y, 0);
+  // Dagre owns the absolute coords now; only the data bits matter.
   assert.equal(got.nodes[0].data.rank, 0);
   assert.equal(got.nodes[0].data.ready, true);
   assert.equal(got.nodes[0].data.closed, false);
@@ -160,13 +161,12 @@ test('cross-feature blocker key (not in input) is dropped from edges', () => {
   assert.equal(got.nodes[0].data.ready, true);
 });
 
-test('row-height and col-width come from the exported constants', () => {
-  // Sanity that the spacing constants are reasonable defaults — keep
-  // them in step with the CSS .mk-graph-node width and the ReactFlow
-  // viewport. If either is dialled to 0 something has gone wrong
-  // upstream.
-  assert.ok(COL_WIDTH > 0);
-  assert.ok(ROW_HEIGHT > 0);
+test('node dimensions come from the exported constants', () => {
+  // Sanity that the dimensions handed to dagre are reasonable
+  // defaults — they need to stay in step with the CSS .mk-graph-node
+  // box so dagre's edge routing avoids overlap.
+  assert.ok(NODE_WIDTH > 0);
+  assert.ok(NODE_HEIGHT > 0);
 });
 
 // ---- runner ----
