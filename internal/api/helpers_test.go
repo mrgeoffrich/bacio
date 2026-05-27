@@ -44,7 +44,7 @@ func seedRepo2(t *testing.T, s *store.Store) *model.Repo {
 
 func seedIssue(t *testing.T, s *store.Store, repo *model.Repo, title string) *model.Issue {
 	t.Helper()
-	iss, err := s.CreateIssue(repo.ID, nil, title, "", model.StateTodo, nil)
+	iss, err := s.CreateIssue(repo.ID, nil, title, "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("seed issue: %v", err)
 	}

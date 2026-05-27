@@ -174,6 +174,11 @@ func (c *remoteClient) UpdateIssue(ctx context.Context, repo *model.Repo, key st
 			body["feature_slug"] = nil
 		}
 	}
+	// BACI-232: base_branch follows the same shape as feature_slug — non-nil
+	// empty string clears (sent as ""), non-nil non-empty sets, nil omits.
+	if edit.BaseBranch != nil {
+		body["base_branch"] = *edit.BaseBranch
+	}
 	q := url.Values{}
 	if dryRun {
 		q.Set("dry_run", "true")

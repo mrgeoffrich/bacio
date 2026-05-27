@@ -84,7 +84,7 @@ func setupPRCreateTest(t *testing.T, gh *fakeGH) string {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	iss, err := s.CreateIssue(repo.ID, nil, "Login broken on Safari", "", model.StateTodo, nil)
+	iss, err := s.CreateIssue(repo.ID, nil, "Login broken on Safari", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}

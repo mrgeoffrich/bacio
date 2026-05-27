@@ -20,7 +20,7 @@ func TestAutoDispatchIssueLocal(t *testing.T) {
 	defer p.cleanup()
 	ctx := context.Background()
 
-	iss, err := p.store.CreateIssue(p.repo.ID, nil, "auto-dispatch me", "", model.StateTodo, nil)
+	iss, err := p.store.CreateIssue(p.repo.ID, nil, "auto-dispatch me", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestAutoDispatchIssueStateGate(t *testing.T) {
 	defer p.cleanup()
 	ctx := context.Background()
 
-	iss, err := p.store.CreateIssue(p.repo.ID, nil, "wrong state", "", model.StateTodo, nil)
+	iss, err := p.store.CreateIssue(p.repo.ID, nil, "wrong state", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestAutoDispatchIssueArchivedRejected(t *testing.T) {
 	defer p.cleanup()
 	ctx := context.Background()
 
-	iss, err := p.store.CreateIssue(p.repo.ID, nil, "archived", "", model.StateTodo, nil)
+	iss, err := p.store.CreateIssue(p.repo.ID, nil, "archived", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestAutoDispatchIssueNoFreeAgentQueues(t *testing.T) {
 	defer p.cleanup()
 	ctx := context.Background()
 
-	iss, err := p.store.CreateIssue(p.repo.ID, nil, "no agent", "", model.StateTodo, nil)
+	iss, err := p.store.CreateIssue(p.repo.ID, nil, "no agent", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}

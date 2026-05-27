@@ -391,7 +391,7 @@ func TestMatcherTick_UnblocksPastStaleOrphan(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	iss, err := s.CreateIssue(repo.ID, nil, "stranded ship", "", model.StateInReview, nil)
+	iss, err := s.CreateIssue(repo.ID, nil, "stranded ship", "", model.StateInReview, nil, "")
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
@@ -459,7 +459,7 @@ func TestMatcherTick_UnblocksPastStaleOrphan(t *testing.T) {
 	); err != nil {
 		t.Fatalf("mark live session channel-connected: %v", err)
 	}
-	freshIss, err := s.CreateIssue(repo.ID, nil, "fresh ship", "", model.StateInReview, nil)
+	freshIss, err := s.CreateIssue(repo.ID, nil, "fresh ship", "", model.StateInReview, nil, "")
 	if err != nil {
 		t.Fatalf("create fresh issue: %v", err)
 	}

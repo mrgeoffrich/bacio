@@ -256,7 +256,7 @@ func TestBoardCompose_NDoesntOpenDuringArchiveConfirm(t *testing.T) {
 	s, repo, board := composeTestBoard(t)
 
 	// Create an in_progress issue (non-terminal — `a` arms the confirm).
-	iss, err := s.CreateIssue(repo.ID, nil, "active", "", model.StateInProgress, nil)
+	iss, err := s.CreateIssue(repo.ID, nil, "active", "", model.StateInProgress, nil, "")
 	if err != nil {
 		t.Fatalf("create iss: %v", err)
 	}

@@ -202,6 +202,13 @@ func (d deps) handleIssueCreate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), map[string]any{"field": "tags"})
 		return
 	}
+	// BACI-232: validate base_branch up front so a malformed override
+	// rejects with a field hint before we touch the store.
+	cleanBase, err := store.ValidateBranchName(in.BaseBranch)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), map[string]any{"field": "base_branch"})
+		return
+	}
 	if isDryRun(r) {
 		projectedSlug := in.FeatureSlug
 		if projectedSlug == "" && resolvedFeature != nil {
@@ -221,10 +228,16 @@ func (d deps) handleIssueCreate(w http.ResponseWriter, r *http.Request) {
 		if projected.Tags == nil {
 			projected.Tags = []string{}
 		}
+		// BACI-232: surface base_branch on dry-run so an agent
+		// rehearsing the call can confirm the override took.
+		if cleanBase != "" {
+			b := cleanBase
+			projected.BaseBranch = &b
+		}
 		writeDryRun(w, http.StatusCreated, projected)
 		return
 	}
-	iss, err := d.store.CreateIssue(repo.ID, featureID, in.Title, in.Description, state, cleanTags)
+	iss, err := d.store.CreateIssue(repo.ID, featureID, in.Title, in.Description, state, cleanTags, cleanBase)
 	if err != nil {
 		status, code := statusForError(err)
 		writeError(w, status, code, err.Error(), nil)
@@ -377,7 +390,7 @@ func (d deps) handleIssueEdit(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var tPtr, dPtr *string
+	var tPtr, dPtr, bPtr *string
 	var fPtr **int64
 	if _, ok := present["title"]; ok {
 		if in.Title == nil || *in.Title == "" {
@@ -411,7 +424,19 @@ func (d deps) handleIssueEdit(w http.ResponseWriter, r *http.Request) {
 			fPtr = &p
 		}
 	}
-	if tPtr == nil && dPtr == nil && fPtr == nil {
+	// BACI-232: base_branch follows the same pointer-plus-presence
+	// dance as the feature.branch_name edit handler — present (even
+	// null / "") clears the column to NULL (inherit from feature);
+	// non-empty validates and sets.
+	if _, ok := present["base_branch"]; ok {
+		if in.BaseBranch == nil {
+			empty := ""
+			bPtr = &empty
+		} else {
+			bPtr = in.BaseBranch
+		}
+	}
+	if tPtr == nil && dPtr == nil && fPtr == nil && bPtr == nil {
 		writeError(w, http.StatusBadRequest, "invalid_input", "nothing to update", nil)
 		return
 	}
@@ -437,10 +462,25 @@ func (d deps) handleIssueEdit(w http.ResponseWriter, r *http.Request) {
 				projected.FeatureSlug = feat.Slug
 			}
 		}
+		if bPtr != nil {
+			// Pre-validate so the dry-run rejects malformed ref names the
+			// same way the real call would.
+			clean, err := store.ValidateBranchName(*bPtr)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), map[string]any{"field": "base_branch"})
+				return
+			}
+			if clean == "" {
+				projected.BaseBranch = nil
+			} else {
+				b := clean
+				projected.BaseBranch = &b
+			}
+		}
 		writeDryRun(w, http.StatusOK, &projected)
 		return
 	}
-	if err := d.store.UpdateIssue(iss.ID, tPtr, dPtr, fPtr); err != nil {
+	if err := d.store.UpdateIssue(iss.ID, tPtr, dPtr, fPtr, bPtr); err != nil {
 		status, code := statusForError(err)
 		writeError(w, status, code, err.Error(), nil)
 		return
@@ -463,6 +503,7 @@ func (d deps) handleIssueEdit(w http.ResponseWriter, r *http.Request) {
 			"title":       tPtr != nil,
 			"description": dPtr != nil,
 			"feature":     fPtr != nil,
+			"base_branch": bPtr != nil,
 		}),
 	})
 	writeJSON(w, http.StatusOK, updated)

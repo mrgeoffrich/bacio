@@ -175,7 +175,7 @@ func seedSyncRemoteWithIssue(t *testing.T, tdir, bare string) string {
 	if err != nil {
 		t.Fatalf("seed repo: %v", err)
 	}
-	if _, err := s2.CreateIssue(r2.ID, nil, "remote first", "", model.StateTodo, nil); err != nil {
+	if _, err := s2.CreateIssue(r2.ID, nil, "remote first", "", model.StateTodo, nil, ""); err != nil {
 		t.Fatalf("seed issue: %v", err)
 	}
 	eng := &bsync.Engine{Store: s2, Actor: "seed"}
@@ -609,7 +609,7 @@ func TestSyncSetupCloneRenumberCollision(t *testing.T) {
 	if _, err := s.DB.Exec(`DELETE FROM sync_state WHERE kind = 'issue'`); err != nil {
 		t.Fatalf("clear issue sync_state: %v", err)
 	}
-	freshIssue, err := s.CreateIssue(miniRepo.ID, nil, "local replacement", "", model.StateTodo, nil)
+	freshIssue, err := s.CreateIssue(miniRepo.ID, nil, "local replacement", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("create fresh MINI-1: %v", err)
 	}

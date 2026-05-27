@@ -13,7 +13,7 @@ func TestIssueBriefHappy(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	feat := seedFeature(t, s, repo, "auth", "Auth")
-	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "x", "", model.StateTodo, nil)
+	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "x", "", model.StateTodo, nil, "")
 	if _, err := s.CreateComment(store.CreateCommentIn{IssueID: iss.ID, Author: "alice", Body: "first comment"}); err != nil {
 		t.Fatalf("comment: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestIssueBriefNoFeatureDocs(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	feat := seedFeature(t, s, repo, "auth", "Auth")
-	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "x", "", model.StateTodo, nil)
+	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "x", "", model.StateTodo, nil, "")
 	// BACI-203 strips every linked-doc body — the assertion below
 	// checks the entire entry vanishes when no_feature_docs=1, not
 	// just the body. DocTypePlan stays here so the seeded shape

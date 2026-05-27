@@ -33,7 +33,7 @@ func TestIssuesListRepoNotFound(t *testing.T) {
 func TestIssuesListPopulatedAndLeanByDefault(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
-	if _, err := s.CreateIssue(repo.ID, nil, "first", "long body", model.StateTodo, nil); err != nil {
+	if _, err := s.CreateIssue(repo.ID, nil, "first", "long body", model.StateTodo, nil, ""); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	resp, body := apiGet(t, ts.URL+"/repos/MINI/issues")
@@ -55,8 +55,8 @@ func TestIssuesListPopulatedAndLeanByDefault(t *testing.T) {
 func TestIssuesListFilterByState(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
-	a, _ := s.CreateIssue(repo.ID, nil, "a", "", model.StateTodo, nil)
-	b, _ := s.CreateIssue(repo.ID, nil, "b", "", model.StateTodo, nil)
+	a, _ := s.CreateIssue(repo.ID, nil, "a", "", model.StateTodo, nil, "")
+	b, _ := s.CreateIssue(repo.ID, nil, "b", "", model.StateTodo, nil, "")
 	_ = s.SetIssueState(b.ID, model.StateDone)
 	_ = a
 	resp, body := apiGet(t, ts.URL+"/repos/MINI/issues?state=done")
@@ -72,10 +72,10 @@ func TestIssuesListFilterByFeature(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	feat := seedFeature(t, s, repo, "auth", "Auth")
-	if _, err := s.CreateIssue(repo.ID, &feat.ID, "with feat", "", model.StateTodo, nil); err != nil {
+	if _, err := s.CreateIssue(repo.ID, &feat.ID, "with feat", "", model.StateTodo, nil, ""); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if _, err := s.CreateIssue(repo.ID, nil, "no feat", "", model.StateTodo, nil); err != nil {
+	if _, err := s.CreateIssue(repo.ID, nil, "no feat", "", model.StateTodo, nil, ""); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	resp, body := apiGet(t, ts.URL+"/repos/MINI/issues?feature=auth")
@@ -90,10 +90,10 @@ func TestIssuesListFilterByFeature(t *testing.T) {
 func TestIssuesListFilterByTag(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
-	if _, err := s.CreateIssue(repo.ID, nil, "tagged", "", model.StateTodo, []string{"ui"}); err != nil {
+	if _, err := s.CreateIssue(repo.ID, nil, "tagged", "", model.StateTodo, []string{"ui"}, ""); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if _, err := s.CreateIssue(repo.ID, nil, "untagged", "", model.StateTodo, nil); err != nil {
+	if _, err := s.CreateIssue(repo.ID, nil, "untagged", "", model.StateTodo, nil, ""); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	resp, body := apiGet(t, ts.URL+"/repos/MINI/issues?tag=ui")
@@ -408,7 +408,7 @@ func TestIssueEditTitleAndDescription(t *testing.T) {
 func TestIssueEditNullDescription(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
-	iss, _ := s.CreateIssue(repo.ID, nil, "x", "had body", model.StateTodo, nil)
+	iss, _ := s.CreateIssue(repo.ID, nil, "x", "had body", model.StateTodo, nil, "")
 	resp, body := apiPatch(t, ts.URL+"/repos/MINI/issues/"+iss.Key,
 		`{"description":null}`)
 	if resp.StatusCode != 200 {
@@ -423,7 +423,7 @@ func TestIssueEditFeatureClear(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	feat := seedFeature(t, s, repo, "feat", "F")
-	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "x", "", model.StateTodo, nil)
+	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "x", "", model.StateTodo, nil, "")
 	resp, body := apiPatch(t, ts.URL+"/repos/MINI/issues/"+iss.Key,
 		`{"feature_slug":null}`)
 	if resp.StatusCode != 200 {
@@ -439,7 +439,7 @@ func TestIssueEditFeatureChange(t *testing.T) {
 	repo := seedRepo(t, s)
 	feat := seedFeature(t, s, repo, "old-feat", "Old")
 	feat2 := seedFeature(t, s, repo, "new-feat", "New")
-	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "x", "", model.StateTodo, nil)
+	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "x", "", model.StateTodo, nil, "")
 	_ = feat2
 	resp, body := apiPatch(t, ts.URL+"/repos/MINI/issues/"+iss.Key,
 		`{"feature_slug":"new-feat"}`)

@@ -86,10 +86,10 @@ func seedTwoIssues(t *testing.T) (*store.Store, *model.Repo) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	if _, err := s.CreateIssue(r.ID, nil, "First issue", "first body", model.StateInProgress, []string{"p1"}); err != nil {
+	if _, err := s.CreateIssue(r.ID, nil, "First issue", "first body", model.StateInProgress, []string{"p1"}, ""); err != nil {
 		t.Fatalf("iss1: %v", err)
 	}
-	if _, err := s.CreateIssue(r.ID, nil, "Second issue", "second body", model.StateTodo, nil); err != nil {
+	if _, err := s.CreateIssue(r.ID, nil, "Second issue", "second body", model.StateTodo, nil, ""); err != nil {
 		t.Fatalf("iss2: %v", err)
 	}
 	return s, r
@@ -256,7 +256,7 @@ func TestRoundTrip_TwoUsers(t *testing.T) {
 	}
 
 	// B mutates: add a third issue.
-	if _, err := sB.CreateIssue(repoB.ID, nil, "Bob's issue", "from bob", model.StateTodo, nil); err != nil {
+	if _, err := sB.CreateIssue(repoB.ID, nil, "Bob's issue", "from bob", model.StateTodo, nil, ""); err != nil {
 		t.Fatalf("create iss: %v", err)
 	}
 	configureSyncRepoIdentity(t, syncB)
@@ -352,7 +352,7 @@ func TestPushRace(t *testing.T) {
 	}
 
 	// B: create issue and push first.
-	if _, err := sB.CreateIssue(repoB.ID, nil, "Bob's issue", "first to push", model.StateTodo, nil); err != nil {
+	if _, err := sB.CreateIssue(repoB.ID, nil, "Bob's issue", "first to push", model.StateTodo, nil, ""); err != nil {
 		t.Fatalf("B create iss: %v", err)
 	}
 	syncRepoB, err := git.Open(syncB)
@@ -364,7 +364,7 @@ func TestPushRace(t *testing.T) {
 	}
 
 	// A: create a different issue without pulling first.
-	if _, err := sA.CreateIssue(repoA.ID, nil, "Alice's issue", "trying to push behind bob", model.StateTodo, nil); err != nil {
+	if _, err := sA.CreateIssue(repoA.ID, nil, "Alice's issue", "trying to push behind bob", model.StateTodo, nil, ""); err != nil {
 		t.Fatalf("A create iss: %v", err)
 	}
 	syncRepoA, err := git.Open(syncA)
@@ -411,7 +411,7 @@ func seedStoreWithRepo(t *testing.T, prefix, name string) *store.Store {
 	if err != nil {
 		t.Fatalf("create repo %s: %v", prefix, err)
 	}
-	if _, err := s.CreateIssue(r.ID, nil, name+" issue", "body", model.StateInProgress, nil); err != nil {
+	if _, err := s.CreateIssue(r.ID, nil, name+" issue", "body", model.StateInProgress, nil, ""); err != nil {
 		t.Fatalf("create issue in %s: %v", prefix, err)
 	}
 	return s

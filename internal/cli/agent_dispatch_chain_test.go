@@ -35,7 +35,7 @@ func setupDispatchChainTest(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	iss, err := s.CreateIssue(repo.ID, nil, "Chain me", "", model.StateTodo, nil)
+	iss, err := s.CreateIssue(repo.ID, nil, "Chain me", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}

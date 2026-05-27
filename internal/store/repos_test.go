@@ -32,11 +32,11 @@ func TestDeleteRepoCascades(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create feature: %v", err)
 	}
-	iss1, err := s.CreateIssue(target.ID, &feat.ID, "first", "", model.StateTodo, []string{"bug"})
+	iss1, err := s.CreateIssue(target.ID, &feat.ID, "first", "", model.StateTodo, []string{"bug"}, "")
 	if err != nil {
 		t.Fatalf("create issue 1: %v", err)
 	}
-	iss2, err := s.CreateIssue(target.ID, nil, "second", "", model.StateTodo, nil)
+	iss2, err := s.CreateIssue(target.ID, nil, "second", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("create issue 2: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestDeleteRepoCascades(t *testing.T) {
 	}
 
 	// Keep-side: one issue + one history row, untouched by the delete.
-	keepIss, err := s.CreateIssue(keep.ID, nil, "keeper", "", model.StateTodo, nil)
+	keepIss, err := s.CreateIssue(keep.ID, nil, "keeper", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("create keep issue: %v", err)
 	}

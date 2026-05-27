@@ -28,11 +28,11 @@ func TestQueueFollowOnDispatch_FallbackToBlockerVariant(t *testing.T) {
 	defer p.cleanup()
 	ctx := context.Background()
 
-	blocked, err := p.store.CreateIssue(p.repo.ID, nil, "blocked", "", model.StateTodo, nil)
+	blocked, err := p.store.CreateIssue(p.repo.ID, nil, "blocked", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("create blocked: %v", err)
 	}
-	blocker, err := p.store.CreateIssue(p.repo.ID, nil, "blocker", "", model.StateTodo, nil)
+	blocker, err := p.store.CreateIssue(p.repo.ID, nil, "blocker", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("create blocker: %v", err)
 	}
@@ -81,11 +81,11 @@ func TestQueueFollowOnDispatch_PrefersParentVariantWhenInflight(t *testing.T) {
 	defer p.cleanup()
 	ctx := context.Background()
 
-	blocked, err := p.store.CreateIssue(p.repo.ID, nil, "blocked-but-active", "", model.StateTodo, nil)
+	blocked, err := p.store.CreateIssue(p.repo.ID, nil, "blocked-but-active", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
-	blocker, err := p.store.CreateIssue(p.repo.ID, nil, "open blocker", "", model.StateTodo, nil)
+	blocker, err := p.store.CreateIssue(p.repo.ID, nil, "open blocker", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("create blocker: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestQueueFollowOnDispatch_NeitherErrors(t *testing.T) {
 	defer p.cleanup()
 	ctx := context.Background()
 
-	iss, err := p.store.CreateIssue(p.repo.ID, nil, "neither", "", model.StateTodo, nil)
+	iss, err := p.store.CreateIssue(p.repo.ID, nil, "neither", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
@@ -137,11 +137,11 @@ func TestQueueFollowOnDispatch_BlockerVariantDryRun(t *testing.T) {
 	defer p.cleanup()
 	ctx := context.Background()
 
-	blocked, err := p.store.CreateIssue(p.repo.ID, nil, "blocked", "", model.StateTodo, nil)
+	blocked, err := p.store.CreateIssue(p.repo.ID, nil, "blocked", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("create blocked: %v", err)
 	}
-	blocker, err := p.store.CreateIssue(p.repo.ID, nil, "blocker", "", model.StateTodo, nil)
+	blocker, err := p.store.CreateIssue(p.repo.ID, nil, "blocker", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("create blocker: %v", err)
 	}

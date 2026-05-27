@@ -813,6 +813,10 @@ type IssueEdit struct {
 	Description *string
 	FeatureID   **int64
 	FeatureSlug *string // optional: when remote, the slug is sent in the JSON body
+	// BaseBranch (BACI-232) — pointer-vs-presence: nil = leave
+	// base_branch unchanged; non-nil empty string = clear (back to
+	// NULL, inherit from feature); non-nil non-empty = set + validate.
+	BaseBranch *string
 }
 
 // BriefOptions mirrors the `bacio issue brief` flag set.

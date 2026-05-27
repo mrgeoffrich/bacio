@@ -12,10 +12,16 @@ var (
 		Description: "Body height should clip the tab strip so it doesn't drift on overflow.",
 		State:       "todo",
 		Tags:        []string{"ui", "tui"},
+		// BACI-232: optional per-issue base-branch override. Empty (the
+		// default) inherits from the parent feature (and ultimately
+		// main). A non-empty value follows git refname rules and pins
+		// the PR base for one issue.
+		BaseBranch: "main",
 	}
 	ExampleIssueEdit = IssueEditInput{
-		Key:   "MINI-42",
-		Title: strPtr("Pin tab strip with body-height clipping"),
+		Key:        "MINI-42",
+		Title:      strPtr("Pin tab strip with body-height clipping"),
+		BaseBranch: strPtr("main"),
 	}
 	ExampleIssueState = IssueStateInput{
 		Key:   "MINI-42",

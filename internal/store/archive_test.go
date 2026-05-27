@@ -34,7 +34,7 @@ func TestSetIssueArchivedIdempotentAndSticky(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	iss, err := s.CreateIssue(repo.ID, nil, "issue", "", model.StateDone, nil)
+	iss, err := s.CreateIssue(repo.ID, nil, "issue", "", model.StateDone, nil, "")
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
@@ -88,8 +88,8 @@ func TestSetIssueArchivedIdempotentAndSticky(t *testing.T) {
 func TestListIssuesHidesArchivedByDefault(t *testing.T) {
 	s := newTestStore(t)
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
-	live, _ := s.CreateIssue(repo.ID, nil, "live", "", model.StateTodo, nil)
-	hidden, _ := s.CreateIssue(repo.ID, nil, "hidden", "", model.StateDone, nil)
+	live, _ := s.CreateIssue(repo.ID, nil, "live", "", model.StateTodo, nil, "")
+	hidden, _ := s.CreateIssue(repo.ID, nil, "hidden", "", model.StateDone, nil, "")
 	if err := s.SetIssueArchived(hidden.ID, true); err != nil {
 		t.Fatalf("archive: %v", err)
 	}
@@ -174,15 +174,15 @@ func TestArchiveSweepFeatureCascade(t *testing.T) {
 
 	// Feature A: every child issue is archived → feature gets archived.
 	featA, _ := s.CreateFeature(repo.ID, "a", "A", "", "", "")
-	a1, _ := s.CreateIssue(repo.ID, &featA.ID, "a1", "", model.StateDone, nil)
-	a2, _ := s.CreateIssue(repo.ID, &featA.ID, "a2", "", model.StateDone, nil)
+	a1, _ := s.CreateIssue(repo.ID, &featA.ID, "a1", "", model.StateDone, nil, "")
+	a2, _ := s.CreateIssue(repo.ID, &featA.ID, "a2", "", model.StateDone, nil, "")
 	_ = s.SetIssueArchived(a1.ID, true)
 	_ = s.SetIssueArchived(a2.ID, true)
 
 	// Feature B: one live child → feature stays live.
 	featB, _ := s.CreateFeature(repo.ID, "b", "B", "", "", "")
-	b1, _ := s.CreateIssue(repo.ID, &featB.ID, "b1", "", model.StateDone, nil)
-	_, _ = s.CreateIssue(repo.ID, &featB.ID, "b2", "", model.StateTodo, nil)
+	b1, _ := s.CreateIssue(repo.ID, &featB.ID, "b1", "", model.StateDone, nil, "")
+	_, _ = s.CreateIssue(repo.ID, &featB.ID, "b2", "", model.StateTodo, nil, "")
 	_ = s.SetIssueArchived(b1.ID, true)
 
 	// Feature C: zero children → never auto-archived (the brief
@@ -220,7 +220,7 @@ func TestArchiveSweepDocumentCascade(t *testing.T) {
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
 
 	feat, _ := s.CreateFeature(repo.ID, "f", "F", "", "", "")
-	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "i", "", model.StateDone, nil)
+	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "i", "", model.StateDone, nil, "")
 
 	// Doc 1: linked only to an archived issue → archived.
 	doc1, _ := s.CreateDocument(repo.ID, "doc1.md", model.DocTypeArchitecture, "", "")
@@ -241,7 +241,7 @@ func TestArchiveSweepDocumentCascade(t *testing.T) {
 	_ = s.SetFeatureArchived(feat.ID, true)
 
 	// Doc 3: linked to a separate live issue → stays live.
-	liveIss, _ := s.CreateIssue(repo.ID, nil, "live", "", model.StateTodo, nil)
+	liveIss, _ := s.CreateIssue(repo.ID, nil, "live", "", model.StateTodo, nil, "")
 	doc3, _ := s.CreateDocument(repo.ID, "doc3.md", model.DocTypeArchitecture, "", "")
 	if _, err := s.LinkDocument(doc3.ID, LinkTarget{IssueID: &liveIss.ID}, ""); err != nil {
 		t.Fatalf("link doc3: %v", err)
@@ -284,7 +284,7 @@ func TestArchiveSweepIdempotent(t *testing.T) {
 	s := newTestStore(t)
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
 	feat, _ := s.CreateFeature(repo.ID, "f", "F", "", "", "")
-	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "i", "", model.StateDone, nil)
+	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "i", "", model.StateDone, nil, "")
 	_ = s.SetIssueArchived(iss.ID, true)
 
 	// First sweep archives the feature.
@@ -314,7 +314,7 @@ func TestArchiveSweepIdempotent(t *testing.T) {
 func TestArchiveSweepRespectsAutoEnabledFalse(t *testing.T) {
 	s := newTestStore(t)
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
-	iss, _ := s.CreateIssue(repo.ID, nil, "ancient", "", model.StateDone, nil)
+	iss, _ := s.CreateIssue(repo.ID, nil, "ancient", "", model.StateDone, nil, "")
 	// Back-date terminal_at past any sane retention window.
 	if _, err := s.DB.Exec(
 		`UPDATE issues SET terminal_at = datetime('now','-365 days') WHERE id = ?`,
@@ -361,8 +361,8 @@ func TestArchiveSweepRespectsRetentionDays(t *testing.T) {
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
 
 	// Two terminal-state issues. One ancient, one fresh.
-	old, _ := s.CreateIssue(repo.ID, nil, "old", "", model.StateDone, nil)
-	young, _ := s.CreateIssue(repo.ID, nil, "young", "", model.StateDone, nil)
+	old, _ := s.CreateIssue(repo.ID, nil, "old", "", model.StateDone, nil, "")
+	young, _ := s.CreateIssue(repo.ID, nil, "young", "", model.StateDone, nil, "")
 	if _, err := s.DB.Exec(
 		`UPDATE issues SET terminal_at = datetime('now','-2 days') WHERE id = ?`, old.ID,
 	); err != nil {
@@ -403,7 +403,7 @@ func TestArchiveSweepRespectsRetentionDays(t *testing.T) {
 func TestArchiveSweepUsesTerminalAtNotUpdatedAt(t *testing.T) {
 	s := newTestStore(t)
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
-	iss, _ := s.CreateIssue(repo.ID, nil, "edited recently", "", model.StateDone, nil)
+	iss, _ := s.CreateIssue(repo.ID, nil, "edited recently", "", model.StateDone, nil, "")
 	// terminal_at well past the retention window; updated_at fresh
 	// (simulates a tag edit on a long-closed issue).
 	if _, err := s.DB.Exec(
@@ -432,7 +432,7 @@ func TestArchiveSweepCascadeRunsEvenWhenAutoOff(t *testing.T) {
 	s := newTestStore(t)
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
 	feat, _ := s.CreateFeature(repo.ID, "f", "F", "", "", "")
-	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "manual", "", model.StateDone, nil)
+	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "manual", "", model.StateDone, nil, "")
 	doc, _ := s.CreateDocument(repo.ID, "d.md", model.DocTypeArchitecture, "", "")
 	if _, err := s.LinkDocument(doc.ID, LinkTarget{IssueID: &iss.ID}, ""); err != nil {
 		t.Fatalf("link doc: %v", err)
@@ -474,7 +474,7 @@ func TestArchiveSweepBumpsUpdatedAt(t *testing.T) {
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
 
 	feat, _ := s.CreateFeature(repo.ID, "f", "F", "", "", "")
-	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "old", "", model.StateDone, nil)
+	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "old", "", model.StateDone, nil, "")
 	doc, _ := s.CreateDocument(repo.ID, "d.md", model.DocTypeArchitecture, "", "")
 	if _, err := s.LinkDocument(doc.ID, LinkTarget{IssueID: &iss.ID}, ""); err != nil {
 		t.Fatalf("link doc: %v", err)
@@ -532,7 +532,7 @@ func TestArchiveSweepBumpsUpdatedAt(t *testing.T) {
 func TestSetIssueArchivedBumpsUpdatedAtOnEveryFlip(t *testing.T) {
 	s := newTestStore(t)
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
-	iss, _ := s.CreateIssue(repo.ID, nil, "i", "", model.StateDone, nil)
+	iss, _ := s.CreateIssue(repo.ID, nil, "i", "", model.StateDone, nil, "")
 
 	// Back-date updated_at so the post-archive bump is observably
 	// later. CURRENT_TIMESTAMP is second-precision, so a same-second
@@ -655,7 +655,7 @@ func TestSetDocumentArchivedBumpsUpdatedAtOnEveryFlip(t *testing.T) {
 func TestArchiveTriggerNoOpsWhenCallerSetsUpdatedAt(t *testing.T) {
 	s := newTestStore(t)
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
-	iss, _ := s.CreateIssue(repo.ID, nil, "i", "", model.StateDone, nil)
+	iss, _ := s.CreateIssue(repo.ID, nil, "i", "", model.StateDone, nil, "")
 
 	// Mimic the importer: one UPDATE setting both columns to YAML's
 	// values. The trigger's WHEN clause should be false (NEW.updated_at
@@ -689,7 +689,7 @@ func TestArchiveSweepDryRunPreviewsCounts(t *testing.T) {
 	// linked to that issue. A real sweep would archive all three; a
 	// dry-run must report 1/1/1 without touching the rows.
 	feat, _ := s.CreateFeature(repo.ID, "f", "F", "", "", "")
-	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "ancient", "", model.StateDone, nil)
+	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "ancient", "", model.StateDone, nil, "")
 	if _, err := s.DB.Exec(
 		`UPDATE issues SET terminal_at = datetime('now','-30 days') WHERE id = ?`, iss.ID,
 	); err != nil {

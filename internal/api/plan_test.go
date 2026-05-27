@@ -27,8 +27,8 @@ func TestFeaturePlanOrdered(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	feat := seedFeature(t, s, repo, "auth", "Auth")
-	a, _ := s.CreateIssue(repo.ID, &feat.ID, "first", "", model.StateTodo, nil)
-	b, _ := s.CreateIssue(repo.ID, &feat.ID, "second", "", model.StateTodo, nil)
+	a, _ := s.CreateIssue(repo.ID, &feat.ID, "first", "", model.StateTodo, nil, "")
+	b, _ := s.CreateIssue(repo.ID, &feat.ID, "second", "", model.StateTodo, nil, "")
 	// b blocks a -> b must precede a in order. CreateRelation(from=b, to=a, blocks)
 	// means b.blocks.a, so a is blocked-by b.
 	if err := s.CreateRelation(b.ID, a.ID, model.RelBlocks); err != nil {
@@ -53,8 +53,8 @@ func TestFeaturePlanSkipsClosedIssues(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	feat := seedFeature(t, s, repo, "auth", "Auth")
-	open, _ := s.CreateIssue(repo.ID, &feat.ID, "open", "", model.StateTodo, nil)
-	closed, _ := s.CreateIssue(repo.ID, &feat.ID, "closed", "", model.StateDone, nil)
+	open, _ := s.CreateIssue(repo.ID, &feat.ID, "open", "", model.StateTodo, nil, "")
+	closed, _ := s.CreateIssue(repo.ID, &feat.ID, "closed", "", model.StateDone, nil, "")
 	resp, body := apiGet(t, ts.URL+"/repos/MINI/features/auth/plan")
 	if resp.StatusCode != 200 {
 		t.Fatalf("status: %d", resp.StatusCode)
@@ -75,8 +75,8 @@ func TestFeaturePlanIncludeClosed(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	feat := seedFeature(t, s, repo, "auth", "Auth")
-	open, _ := s.CreateIssue(repo.ID, &feat.ID, "open work", "", model.StateTodo, nil)
-	closed, _ := s.CreateIssue(repo.ID, &feat.ID, "delivered work", "", model.StateDone, nil)
+	open, _ := s.CreateIssue(repo.ID, &feat.ID, "open work", "", model.StateTodo, nil, "")
+	closed, _ := s.CreateIssue(repo.ID, &feat.ID, "delivered work", "", model.StateDone, nil, "")
 	// closed blocks open — wire the edge so the graph view's "this
 	// delivered work blocks that live work" arrow has something to
 	// draw.
@@ -132,7 +132,7 @@ func TestFeaturePlanIncludeClosedFlagAccepted(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	feat := seedFeature(t, s, repo, "auth", "Auth")
-	closed, _ := s.CreateIssue(repo.ID, &feat.ID, "delivered", "", model.StateDone, nil)
+	closed, _ := s.CreateIssue(repo.ID, &feat.ID, "delivered", "", model.StateDone, nil, "")
 
 	// "true" should widen the payload too.
 	resp, body := apiGet(t, ts.URL+"/repos/MINI/features/auth/plan?include_closed=true")

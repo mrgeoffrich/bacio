@@ -27,7 +27,7 @@ func TestEnterOnAttachmentOpensDoc(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	iss, err := s.CreateIssue(repo.ID, nil, "Issue with a doc", "", model.StateTodo, nil)
+	iss, err := s.CreateIssue(repo.ID, nil, "Issue with a doc", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}

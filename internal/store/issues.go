@@ -78,12 +78,19 @@ func (s *Store) ResolveCreateIssueFeatureID(repoID int64, suppliedSlug string) (
 // tag inserts means the counter never even gets touched on disk — that
 // way a phantom-number gap requires a Commit to actually succeed, which
 // only happens when every preceding step succeeded.
-func (s *Store) CreateIssue(repoID int64, featureID *int64, title, description string, state model.State, tags []string) (*model.Issue, error) {
+//
+// baseBranch (BACI-232) is the per-issue override for the PR base
+// branch — "" → NULL → inherit from the feature (and ultimately main).
+func (s *Store) CreateIssue(repoID int64, featureID *int64, title, description string, state model.State, tags []string, baseBranch string) (*model.Issue, error) {
 	title, err := ValidateTitle(title, "title")
 	if err != nil {
 		return nil, err
 	}
 	description, err = ValidateBody(description, "description", false)
+	if err != nil {
+		return nil, err
+	}
+	baseBranch, err = ValidateBranchName(baseBranch)
 	if err != nil {
 		return nil, err
 	}
@@ -104,8 +111,9 @@ func (s *Store) CreateIssue(repoID int64, featureID *int64, title, description s
 	// first read. terminalAtClause yields CURRENT_TIMESTAMP for
 	// done/cancelled and NULL otherwise.
 	res, err := tx.Exec(
-		`INSERT INTO issues (uuid, repo_id, number, feature_id, title, description, state, terminal_at) VALUES (?, ?, ?, ?, ?, ?, ?, `+terminalAtClause(state)+`)`,
+		`INSERT INTO issues (uuid, repo_id, number, feature_id, title, description, state, base_branch, terminal_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, `+terminalAtClause(state)+`)`,
 		identity.New(), repoID, num, nullableInt(featureID), title, description, string(state),
+		sql.NullString{String: baseBranch, Valid: baseBranch != ""},
 	)
 	if err != nil {
 		return nil, err
@@ -289,7 +297,13 @@ func (s *Store) ListIssues(f IssueFilter) ([]*model.Issue, error) {
 	return out, nil
 }
 
-func (s *Store) UpdateIssue(id int64, title, description *string, featureID **int64) error {
+// UpdateIssue applies the non-nil patch fields to the issue row.
+//
+// baseBranch (BACI-232) follows the same pointer-vs-presence dance as
+// Feature.UpdateFeature's branchName: nil pointer = no change; non-nil
+// empty string = clear (write NULL, inherit from feature); non-nil
+// non-empty = set + validate.
+func (s *Store) UpdateIssue(id int64, title, description *string, featureID **int64, baseBranch *string) error {
 	sets := []string{}
 	args := []any{}
 	if title != nil {
@@ -311,6 +325,16 @@ func (s *Store) UpdateIssue(id int64, title, description *string, featureID **in
 	if featureID != nil {
 		sets = append(sets, "feature_id = ?")
 		args = append(args, nullableInt(*featureID))
+	}
+	if baseBranch != nil {
+		clean, err := ValidateBranchName(*baseBranch)
+		if err != nil {
+			return err
+		}
+		sets = append(sets, "base_branch = ?")
+		// Empty string clears the column to NULL — keeps the legacy
+		// "inherit from feature" behaviour reachable from an edit.
+		args = append(args, sql.NullString{String: clean, Valid: clean != ""})
 	}
 	if len(sets) == 0 {
 		return nil
@@ -872,26 +896,27 @@ SELECT i.id, i.uuid, i.repo_id, i.number, r.prefix, i.feature_id, COALESCE(f.slu
            AND c.released_at IS NULL
            AND s.ended_at IS NULL
        ) AS taken,
-       i.archived_at, i.terminal_at, i.user_action_reason_type, i.created_at, i.updated_at
+       i.archived_at, i.terminal_at, i.user_action_reason_type, i.base_branch, i.created_at, i.updated_at
 FROM issues i
 JOIN repos r ON r.id = i.repo_id
 LEFT JOIN features f ON f.id = i.feature_id`
 
 func scanIssue(row rowScanner) (*model.Issue, error) {
 	var (
-		i              model.Issue
-		prefix         string
-		featureID      sql.NullInt64
-		featSlug       string
-		featEmoji      string
-		state          string
-		archivedAt     sql.NullTime
-		terminalAt     sql.NullTime
-		userActionRsn  sql.NullString
+		i             model.Issue
+		prefix        string
+		featureID     sql.NullInt64
+		featSlug      string
+		featEmoji     string
+		state         string
+		archivedAt    sql.NullTime
+		terminalAt    sql.NullTime
+		userActionRsn sql.NullString
+		baseBranch    sql.NullString
 	)
 	err := row.Scan(&i.ID, &i.UUID, &i.RepoID, &i.Number, &prefix, &featureID, &featSlug, &featEmoji,
 		&i.Title, &i.Description, &state, &i.Assignee, &i.WaitingForClaim, &i.Taken,
-		&archivedAt, &terminalAt, &userActionRsn, &i.CreatedAt, &i.UpdatedAt)
+		&archivedAt, &terminalAt, &userActionRsn, &baseBranch, &i.CreatedAt, &i.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -919,6 +944,10 @@ func scanIssue(row rowScanner) (*model.Issue, error) {
 	}
 	if userActionRsn.Valid {
 		i.UserActionReasonType = model.UserActionReasonType(userActionRsn.String)
+	}
+	if baseBranch.Valid {
+		b := baseBranch.String
+		i.BaseBranch = &b
 	}
 	return &i, nil
 }

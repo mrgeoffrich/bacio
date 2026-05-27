@@ -47,9 +47,9 @@ func newIssueCmd() *cobra.Command {
 
 func issueAddCmd() *cobra.Command {
 	var (
-		featureSlug, description, descriptionFile, stateStr string
-		tags                                                []string
-		rawInput                                            string
+		featureSlug, description, descriptionFile, stateStr, baseBranch string
+		tags                                                            []string
+		rawInput                                                        string
 	)
 	cmd := &cobra.Command{
 		Use:   "add [title]",
@@ -57,7 +57,7 @@ func issueAddCmd() *cobra.Command {
 		Args:  cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			raw, err := parseJSONInput(cmd, args, rawInput,
-				"feature", "description", "description-file", "state", "tag")
+				"feature", "description", "description-file", "state", "tag", "base-branch")
 			if err != nil {
 				return err
 			}
@@ -67,7 +67,7 @@ func issueAddCmd() *cobra.Command {
 			if len(args) != 1 {
 				return fmt.Errorf("requires <title> positional or --json")
 			}
-			return runIssueAdd(args[0], featureSlug, description, descriptionFile, stateStr, tags)
+			return runIssueAdd(args[0], featureSlug, description, descriptionFile, stateStr, tags, baseBranch)
 		},
 	}
 	cmd.Flags().StringVarP(&featureSlug, "feature", "f", "", "feature slug to attach to")
@@ -75,11 +75,12 @@ func issueAddCmd() *cobra.Command {
 	cmd.Flags().StringVar(&descriptionFile, "description-file", "", "path to a markdown file")
 	cmd.Flags().StringVar(&stateStr, "state", "", "initial state (default: todo)")
 	cmd.Flags().StringSliceVar(&tags, "tag", nil, "tag to attach (repeatable)")
+	cmd.Flags().StringVar(&baseBranch, "base-branch", "", "per-issue PR base-branch override (BACI-232; empty inherits from the feature, ultimately main)")
 	addInputFlag(cmd, &rawInput)
 	return cmd
 }
 
-func runIssueAdd(title, featureSlug, description, descriptionFile, stateStr string, tags []string) error {
+func runIssueAdd(title, featureSlug, description, descriptionFile, stateStr string, tags []string, baseBranch string) error {
 	desc, err := readLongText(description, descriptionFile, false, "description")
 	if err != nil {
 		return err
@@ -90,6 +91,7 @@ func runIssueAdd(title, featureSlug, description, descriptionFile, stateStr stri
 		Description: desc,
 		State:       stateStr,
 		Tags:        tags,
+		BaseBranch:  baseBranch,
 	})
 }
 
@@ -384,17 +386,17 @@ func repoForIssueKey(c client.Client, key string) (*model.Repo, error) {
 
 func issueEditCmd() *cobra.Command {
 	var (
-		title, description, descriptionFile, featureSlug string
-		clearFeature                                     bool
-		rawInput                                         string
+		title, description, descriptionFile, featureSlug, baseBranch string
+		clearFeature                                                 bool
+		rawInput                                                     string
 	)
 	cmd := &cobra.Command{
 		Use:   "edit [KEY]",
-		Short: "Edit an issue's title, description, or feature",
+		Short: "Edit an issue's title, description, feature, or base branch",
 		Args:  cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			raw, err := parseJSONInput(cmd, args, rawInput,
-				"title", "description", "description-file", "feature", "no-feature")
+				"title", "description", "description-file", "feature", "no-feature", "base-branch")
 			if err != nil {
 				return err
 			}
@@ -404,7 +406,7 @@ func issueEditCmd() *cobra.Command {
 			if len(args) != 1 {
 				return fmt.Errorf("requires <KEY> positional or --json")
 			}
-			return runIssueEdit(cmd, args[0], title, description, descriptionFile, featureSlug, clearFeature)
+			return runIssueEdit(cmd, args[0], title, description, descriptionFile, featureSlug, clearFeature, baseBranch)
 		},
 	}
 	cmd.Flags().StringVar(&title, "title", "", "new title")
@@ -412,11 +414,12 @@ func issueEditCmd() *cobra.Command {
 	cmd.Flags().StringVar(&descriptionFile, "description-file", "", "path to a markdown file")
 	cmd.Flags().StringVarP(&featureSlug, "feature", "f", "", "move to a feature slug")
 	cmd.Flags().BoolVar(&clearFeature, "no-feature", false, "detach from any feature")
+	cmd.Flags().StringVar(&baseBranch, "base-branch", "", "new per-issue PR base-branch override (BACI-232; pass --base-branch '' to clear back to inherit-from-feature)")
 	addInputFlag(cmd, &rawInput)
 	return cmd
 }
 
-func runIssueEdit(cmd *cobra.Command, key, title, description, descriptionFile, featureSlug string, clearFeature bool) error {
+func runIssueEdit(cmd *cobra.Command, key, title, description, descriptionFile, featureSlug string, clearFeature bool, baseBranch string) error {
 	c, err := openClient()
 	if err != nil {
 		return err
@@ -452,6 +455,9 @@ func runIssueEdit(cmd *cobra.Command, key, title, description, descriptionFile, 
 		edit.FeatureID = &p
 		fs := featureSlug
 		edit.FeatureSlug = &fs
+	}
+	if cmd.Flags().Changed("base-branch") {
+		edit.BaseBranch = &baseBranch
 	}
 	return applyIssueEditC(c, repo, key, edit)
 }
@@ -503,11 +509,21 @@ func runIssueEditJSON(raw []byte) error {
 			edit.FeatureSlug = &fs
 		}
 	}
+	// BACI-232: base_branch absent = no change; present (even null / "")
+	// = clear back to NULL (inherit from feature).
+	if _, ok := present["base_branch"]; ok {
+		if in.BaseBranch == nil {
+			empty := ""
+			edit.BaseBranch = &empty
+		} else {
+			edit.BaseBranch = in.BaseBranch
+		}
+	}
 	return applyIssueEditC(c, repo, in.Key, edit)
 }
 
 func applyIssueEditC(c client.Client, repo *model.Repo, key string, edit client.IssueEdit) error {
-	if edit.Title == nil && edit.Description == nil && edit.FeatureID == nil {
+	if edit.Title == nil && edit.Description == nil && edit.FeatureID == nil && edit.BaseBranch == nil {
 		return fmt.Errorf("nothing to update")
 	}
 	updated, err := c.UpdateIssue(context.Background(), repo, key, edit, opts.dryRun)

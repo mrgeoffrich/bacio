@@ -36,7 +36,7 @@ func setupFollowOnTest(t *testing.T, seedParent bool) (string, int64) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	iss, err := s.CreateIssue(repo.ID, nil, "Follow-on me", "", model.StateTodo, nil)
+	iss, err := s.CreateIssue(repo.ID, nil, "Follow-on me", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}

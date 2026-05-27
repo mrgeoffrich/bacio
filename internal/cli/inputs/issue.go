@@ -11,6 +11,12 @@ type IssueAddInput struct {
 	Description string   `json:"description,omitempty"`
 	State       string   `json:"state,omitempty"`
 	Tags        []string `json:"tags,omitempty"`
+	// BaseBranch (BACI-232) is the per-issue override for the branch a
+	// PR for this issue is opened against. Empty (the default) keeps
+	// the inherit-from-feature behaviour. A non-empty value follows the
+	// same git refname rules as features.branch_name (no whitespace, no
+	// `..`, no leading `-`, etc.).
+	BaseBranch string `json:"base_branch,omitempty"`
 }
 
 // IssueEditInput is the payload for `bacio issue edit --json`. Pointer fields
@@ -20,11 +26,17 @@ type IssueAddInput struct {
 //   - title       absent = no change; "" or null = invalid (titles are required)
 //   - description absent = no change; "" or null = clear
 //   - feature_slug absent = no change; "" or null = detach; non-empty = set
+//   - base_branch absent = no change; "" or null = clear (inherit); non-empty = set
 type IssueEditInput struct {
 	Key         string  `json:"key"`
 	Title       *string `json:"title,omitempty"`
 	Description *string `json:"description,omitempty"`
 	FeatureSlug *string `json:"feature_slug,omitempty"`
+	// BaseBranch (BACI-232) — same pointer-plus-presence dance as the
+	// other nullable fields: nil = no change; non-nil empty = clear
+	// (back to NULL, inherit from feature); non-nil non-empty = set
+	// + validate.
+	BaseBranch *string `json:"base_branch,omitempty"`
 }
 
 // IssueStateInput is the payload for `bacio issue state --json`.
