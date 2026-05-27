@@ -303,23 +303,86 @@ func (s *Store) CancelSessionQuestion(id int64, by string) (*model.SessionQuesti
 // abandoned rows are the audit-log breadcrumb that the question
 // was asked and never delivered. Returns the number of rows
 // flipped.
+//
+// Wraps the abandonOpenQuestionsTx helper (BACI-253) so the same
+// UPDATE drives both this public entry point and the in-tx flip
+// EndAgentSession runs as part of its session-end cascade.
 func (s *Store) AbandonOpenQuestionsForSession(sessionID string) (int, error) {
 	if _, err := ValidateSessionID(sessionID); err != nil {
 		return 0, err
 	}
-	res, err := s.DB.Exec(`
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	var sessPK int64
+	if err := tx.QueryRow(`SELECT id FROM agent_sessions WHERE session_id = ?`, sessionID).Scan(&sessPK); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			// No row to abandon — keep the existing "silent no-op" shape;
+			// the channel's startup janitor calls this against every
+			// session id it has seen, including ones the store no longer
+			// knows about.
+			return 0, nil
+		}
+		return 0, err
+	}
+	n, err := abandonOpenQuestionsTx(tx, sessPK)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+// abandonOpenQuestionsTx is the shared SQL the public
+// AbandonOpenQuestionsForSession wrapper and store.EndAgentSession
+// (BACI-253) both call to flip every still-open question for one
+// session to `abandoned` inside the caller's transaction. Returns
+// the number of rows flipped.
+func abandonOpenQuestionsTx(tx *sql.Tx, sessPK int64) (int, error) {
+	res, err := tx.Exec(`
 		UPDATE agent_session_questions
 		   SET state = 'abandoned',
 		       answered_at = CURRENT_TIMESTAMP
-		 WHERE state = 'open' AND session_pk IN (
-		     SELECT id FROM agent_sessions WHERE session_id = ?
-		 )`, sessionID,
+		 WHERE state = 'open' AND session_pk = ?`, sessPK,
 	)
 	if err != nil {
 		return 0, err
 	}
 	n, err := res.RowsAffected()
 	return int(n), err
+}
+
+// HasOpenQuestionsForSession reports whether sessionID owns any
+// open `ask_user_question` rows. The idlepinger uses it (BACI-253)
+// as a skip-the-session gate: a session blocked on a user answer is
+// correctly idle from a heartbeat perspective and must not be reaped,
+// regardless of how stale its LastSeenAt looks. An unknown session
+// id returns (false, nil) — the pinger only ever feeds in alive
+// registered session ids, and the gate's "skip when true" posture
+// means a missing row is the right negative-answer default.
+func (s *Store) HasOpenQuestionsForSession(sessionID string) (bool, error) {
+	if _, err := ValidateSessionID(sessionID); err != nil {
+		return false, err
+	}
+	var found int
+	err := s.DB.QueryRow(`
+		SELECT 1
+		  FROM agent_session_questions q
+		  JOIN agent_sessions s ON s.id = q.session_pk
+		 WHERE q.state = 'open' AND s.session_id = ?
+		 LIMIT 1`, sessionID,
+	).Scan(&found)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // DrainSettledQuestionsForSession returns the answered + cancelled

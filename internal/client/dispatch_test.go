@@ -827,6 +827,98 @@ func TestAbandonOpenQuestionsWritesAudit(t *testing.T) {
 	}
 }
 
+// TestEndAgentSessionAbandonsOpenQuestionsAudit (BACI-253) drives the
+// full client/HTTP path: register a session, open one ask_user_question
+// against it, end the session, and assert the abandon flip is recorded
+// as a single summary `question.abandon` audit row. Mirrors
+// TestAbandonOpenQuestionsWritesAudit's shape — `bacio history --op
+// question.abandon` is a coherent ledger across both the
+// channel-startup janitor path and the EndAgent cascade path.
+func TestEndAgentSessionAbandonsOpenQuestionsAudit(t *testing.T) {
+	for _, mode := range []string{"local", "remote"} {
+		t.Run(mode, func(t *testing.T) {
+			p := newPair(t)
+			defer p.cleanup()
+			ctx := context.Background()
+			c := p.local
+			if mode == "remote" {
+				c = p.remote
+			}
+
+			iss, err := p.store.CreateIssue(p.repo.ID, nil, "parked on a question", "", model.StateInProgress, nil, "")
+			if err != nil {
+				t.Fatalf("CreateIssue: %v", err)
+			}
+			ag, _, err := p.store.UpsertAgent("parked-quoll@claude.test-"+mode, true)
+			if err != nil {
+				t.Fatalf("UpsertAgent: %v", err)
+			}
+			// Distinct UUID suffix per mode so the local/remote variants
+			// don't collide on session id.
+			suffix := "1313"
+			if mode == "remote" {
+				suffix = "1414"
+			}
+			sid := "22222222-2222-4222-8222-2222222222" + suffix
+			if _, err := p.store.UpsertAgentSession(store.UpsertAgentSessionIn{
+				SessionID: sid, RepoID: p.repo.ID, AgentID: &ag.ID, Actor: "tester",
+			}); err != nil {
+				t.Fatalf("UpsertAgentSession: %v", err)
+			}
+
+			// Open one question via the client wrapper so the standard
+			// question.ask audit row exists too — the assertion below
+			// filters explicitly on `question.abandon` to keep honest.
+			if _, err := p.local.AddSessionQuestion(ctx, client.AddSessionQuestionInput{
+				SessionID: sid,
+				IssueKey:  iss.Key,
+				AskedBy:   "parked-quoll@claude.test-" + mode,
+				Payload: model.QuestionPayload{
+					Questions: []model.QuestionItem{{
+						Question:    "should we proceed?",
+						Header:      "Approval",
+						MultiSelect: model.MultiSelectFlag(false),
+						Options: []model.QuestionOption{
+							{Label: "yes", Description: "proceed"},
+							{Label: "no", Description: "stop"},
+						},
+					}},
+				},
+			}); err != nil {
+				t.Fatalf("AddSessionQuestion: %v", err)
+			}
+
+			if _, err := c.EndAgent(ctx, p.repo, inputs.AgentEndInput{
+				SessionID: sid,
+				Reason:    string(model.EndReasonStop),
+			}, false); err != nil {
+				t.Fatalf("EndAgent: %v", err)
+			}
+
+			rows, err := p.store.ListHistory(store.HistoryFilter{
+				RepoID: &p.repo.ID,
+				Op:     "question.abandon",
+			})
+			if err != nil {
+				t.Fatalf("ListHistory: %v", err)
+			}
+			if len(rows) != 1 {
+				t.Fatalf("question.abandon rows = %d, want 1", len(rows))
+			}
+			row := rows[0]
+			if row.Kind != "question" {
+				t.Fatalf("abandon row Kind = %q, want question", row.Kind)
+			}
+			if row.TargetLabel != sid {
+				t.Fatalf("abandon row TargetLabel = %q, want %q", row.TargetLabel, sid)
+			}
+			if !strings.Contains(row.Details, "count=1") {
+				t.Fatalf("abandon row Details = %q, missing count=1", row.Details)
+			}
+		})
+	}
+}
+
 // TestCreateRescueDispatchHappyPath (BACI-190) seeds a dead worker
 // scenario — a delivered implement dispatch whose target session is
 // ended — plus an idle live channel-connected supervisor, then asserts
@@ -855,7 +947,7 @@ func TestCreateRescueDispatchHappyPath(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertAgentSession(dead): %v", err)
 	}
-	if _, _, _, _, err := p.store.EndAgentSession(deadSID, string(model.EndReasonPresumedDead), "", store.DispatchCascadeRequeue); err != nil {
+	if _, _, _, _, _, err := p.store.EndAgentSession(deadSID, string(model.EndReasonPresumedDead), "", store.DispatchCascadeRequeue); err != nil {
 		t.Fatalf("EndAgentSession(dead): %v", err)
 	}
 
@@ -1030,7 +1122,7 @@ func TestCreateRescueDispatchRejectsTrivialCreator(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("UpsertAgentSession: %v", err)
 	}
-	if _, _, _, _, err := p.store.EndAgentSession(sid, string(model.EndReasonStop), "", store.DispatchCascadeCancel); err != nil {
+	if _, _, _, _, _, err := p.store.EndAgentSession(sid, string(model.EndReasonStop), "", store.DispatchCascadeCancel); err != nil {
 		t.Fatalf("EndAgentSession: %v", err)
 	}
 	d, err := p.store.AddDispatch(store.AddDispatchIn{

@@ -315,6 +315,111 @@ func TestAbandonOpenQuestionsForSession(t *testing.T) {
 	}
 }
 
+// TestHasOpenQuestionsForSession covers the BACI-253 pinger gate: a
+// session with at least one open question reports true; settled-only
+// (answered / cancelled / abandoned) rows report false; an unknown
+// session id reports false (the pinger only ever feeds in alive
+// session ids and the gate's "skip when true" posture means a
+// missing row is the right negative-answer default).
+func TestHasOpenQuestionsForSession(t *testing.T) {
+	s, _ := seedQuestionSession(t, "asq-has")
+
+	// No questions yet → false.
+	got, err := s.HasOpenQuestionsForSession("asq-has")
+	if err != nil {
+		t.Fatalf("has (no rows): %v", err)
+	}
+	if got {
+		t.Fatalf("has (no rows) = true, want false")
+	}
+
+	// Unknown session id → false (no error).
+	got, err = s.HasOpenQuestionsForSession("asq-unknown")
+	if err != nil {
+		t.Fatalf("has (unknown session): %v", err)
+	}
+	if got {
+		t.Fatalf("has (unknown session) = true, want false")
+	}
+
+	// Add an open question → true.
+	open, err := s.AddSessionQuestion(AddSessionQuestionIn{
+		SessionID: "asq-has", Payload: validSinglePayload(), AskedBy: "a",
+	})
+	if err != nil {
+		t.Fatalf("add open: %v", err)
+	}
+	got, err = s.HasOpenQuestionsForSession("asq-has")
+	if err != nil {
+		t.Fatalf("has (with open): %v", err)
+	}
+	if !got {
+		t.Fatalf("has (with open) = false, want true")
+	}
+
+	// Answer it → no more open rows → false.
+	if _, err := s.AnswerSessionQuestion(open.ID,
+		model.QuestionAnswers{"Which approach should I take?": "Option A"}, "geoff"); err != nil {
+		t.Fatalf("answer: %v", err)
+	}
+	got, err = s.HasOpenQuestionsForSession("asq-has")
+	if err != nil {
+		t.Fatalf("has (answered-only): %v", err)
+	}
+	if got {
+		t.Fatalf("has (answered-only) = true, want false (settled rows don't count)")
+	}
+
+	// Add another, cancel it → still no open rows → false.
+	cancelMe, err := s.AddSessionQuestion(AddSessionQuestionIn{
+		SessionID: "asq-has", Payload: validMultiPayload(), AskedBy: "a",
+	})
+	if err != nil {
+		t.Fatalf("add to cancel: %v", err)
+	}
+	if _, err := s.CancelSessionQuestion(cancelMe.ID, "geoff"); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	got, err = s.HasOpenQuestionsForSession("asq-has")
+	if err != nil {
+		t.Fatalf("has (cancelled-only): %v", err)
+	}
+	if got {
+		t.Fatalf("has (cancelled-only) = true, want false")
+	}
+
+	// Add another, abandon it → still false (abandoned is settled).
+	if _, err := s.AddSessionQuestion(AddSessionQuestionIn{
+		SessionID: "asq-has", Payload: validSinglePayload(), AskedBy: "a",
+	}); err != nil {
+		t.Fatalf("add to abandon: %v", err)
+	}
+	if _, err := s.AbandonOpenQuestionsForSession("asq-has"); err != nil {
+		t.Fatalf("abandon: %v", err)
+	}
+	got, err = s.HasOpenQuestionsForSession("asq-has")
+	if err != nil {
+		t.Fatalf("has (abandoned-only): %v", err)
+	}
+	if got {
+		t.Fatalf("has (abandoned-only) = true, want false")
+	}
+
+	// Add a fresh open → true again, proving the query isn't sticky.
+	if _, err := s.AddSessionQuestion(AddSessionQuestionIn{
+		SessionID: "asq-has", Payload: validSinglePayload(), AskedBy: "a",
+	}); err != nil {
+		t.Fatalf("add fresh open: %v", err)
+	}
+	got, err = s.HasOpenQuestionsForSession("asq-has")
+	if err != nil {
+		t.Fatalf("has (fresh open after settled): %v", err)
+	}
+	if !got {
+		t.Fatalf("has (fresh open after settled) = false, want true")
+	}
+}
+
 // TestSessionQuestionCascadeOnSessionDelete locks the FK cascade:
 // removing the parent session row removes every question, mirroring
 // the agent_session_todos contract.

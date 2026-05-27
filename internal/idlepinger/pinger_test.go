@@ -20,6 +20,11 @@ type fakeBackend struct {
 	// by session_id. Only the open-claim subset matters here — Tick's
 	// graduated cutoff branch ignores released entries.
 	claims map[string][]*model.AgentClaim
+	// questions is the BACI-253 HasOpenQuestionsForSession lookup
+	// table, keyed by session_id. Zero value (nil map) is fine — the
+	// gate's "skip when true" posture means a missing entry is the
+	// right negative-answer default.
+	questions map[string]bool
 }
 
 func (f *fakeBackend) ListAgentSessions(_ store.AgentSessionFilter) ([]*model.AgentSession, error) {
@@ -58,6 +63,10 @@ func (f *fakeBackend) GetRepoByID(int64) (*model.Repo, error) {
 
 func (f *fakeBackend) OpenClaimsForSession(sessionID string) ([]*model.AgentClaim, error) {
 	return f.claims[sessionID], nil
+}
+
+func (f *fakeBackend) HasOpenQuestionsForSession(sessionID string) (bool, error) {
+	return f.questions[sessionID], nil
 }
 
 // recordedClient counts the audited calls Tick makes. The real client
@@ -483,6 +492,64 @@ func TestTickClaimHolderStaleBeyond40mStillReaps(t *testing.T) {
 	}
 	if len(c2.ends) != 1 || c2.ends[0] != "wedged" {
 		t.Fatalf("ends = %v, want [wedged]", c2.ends)
+	}
+}
+
+// TestTickParkedQuestionSuppressesReap — BACI-253: a session past the
+// graduated 40-min cutoff with an open ask_user_question must NOT be
+// pinged. The user is the bottleneck, not a dead subagent, and the
+// original session is the only one that can deliver the eventual
+// answer through the channel's parked-reply map — reaping it would
+// strand the question with an undeliverable answer button.
+func TestTickParkedQuestionSuppressesReap(t *testing.T) {
+	now := time.Date(2026, 5, 27, 12, 0, 0, 0, time.UTC)
+	b := &fakeBackend{
+		sessions:  []*model.AgentSession{aliveSession("parked", 45*time.Minute, now)},
+		claims:    map[string][]*model.AgentClaim{"parked": {openClaim("parked")}},
+		questions: map[string]bool{"parked": true},
+		repo:      &model.Repo{ID: 1, Prefix: "BACI"},
+	}
+	c := &recordedClient{}
+	p := New(b, c, nil).withClock(func() time.Time { return now })
+
+	pinged, ended, err := p.Tick(context.Background())
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if pinged != 0 || ended != 0 {
+		t.Fatalf("counts = (%d,%d), want (0,0) — parked-question gate must suppress reap", pinged, ended)
+	}
+	if len(c.pings) != 0 || len(c.ends) != 0 {
+		t.Fatalf("expected no client calls, got pings=%v ends=%v", c.pings, c.ends)
+	}
+}
+
+// TestTickParkedQuestionSuppressesUnackedPing — BACI-253: the gate
+// must also beat the force-end branch. A 2 h-idle session with an
+// unacked 3 min-old ping in flight would normally be reaped on this
+// tick, but if it owns an open ask_user_question we leave it alone —
+// the parked question is the cause of the heartbeat gap and reaping
+// would discard the only channel that can deliver the answer.
+func TestTickParkedQuestionSuppressesUnackedPing(t *testing.T) {
+	now := time.Date(2026, 5, 27, 12, 0, 0, 0, time.UTC)
+	b := &fakeBackend{
+		sessions:   []*model.AgentSession{aliveSession("zombie-with-question", 2*time.Hour, now)},
+		dispatches: []*model.AgentDispatch{ping("zombie-with-question", 3*time.Minute, now)},
+		questions:  map[string]bool{"zombie-with-question": true},
+		repo:       &model.Repo{ID: 1, Prefix: "BACI"},
+	}
+	c := &recordedClient{}
+	p := New(b, c, nil).withClock(func() time.Time { return now })
+
+	pinged, ended, err := p.Tick(context.Background())
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if pinged != 0 || ended != 0 {
+		t.Fatalf("counts = (%d,%d), want (0,0) — parked-question gate must beat force-end", pinged, ended)
+	}
+	if len(c.pings) != 0 || len(c.ends) != 0 {
+		t.Fatalf("expected no client calls, got pings=%v ends=%v", c.pings, c.ends)
 	}
 }
 
