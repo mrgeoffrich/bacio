@@ -49,12 +49,25 @@ export function GetFeature(repoPrefix: string, slug: string): $CancellablePromis
 }
 
 /**
+ * GetFeaturePlan (BACI-236) returns the dependency-graph payload for
+ * the FeaturesView. includeClosed=false matches the historical open-
+ * only `bacio feature plan` shape; true widens to every issue in the
+ * feature plus every `blocks` edge whose endpoints are both in the
+ * feature, with Closed=true on terminal entries.
+ */
+export function GetFeaturePlan(repoPrefix: string, slug: string, includeClosed: boolean): $CancellablePromise<$models.FeaturePlan> {
+    return $Call.ByID(461398074, repoPrefix, slug, includeClosed).then(($result: any) => {
+        return $$createType1($result);
+    });
+}
+
+/**
  * ListFeatures returns every feature in one repo as a summary row.
  * Archived features (BACI-68) follow display.show_archived.
  */
 export function ListFeatures(repoPrefix: string): $CancellablePromise<$models.FeatureSummary[]> {
     return $Call.ByID(640296380, repoPrefix).then(($result: any) => {
-        return $$createType2($result);
+        return $$createType3($result);
     });
 }
 
@@ -101,5 +114,6 @@ export function SetHiddenOnBoard(repoPrefix: string, slug: string, hidden: boole
 
 // Private type creation functions
 const $$createType0 = $models.FeatureDetail.createFrom;
-const $$createType1 = $models.FeatureSummary.createFrom;
-const $$createType2 = $Create.Array($$createType1);
+const $$createType1 = $models.FeaturePlan.createFrom;
+const $$createType2 = $models.FeatureSummary.createFrom;
+const $$createType3 = $Create.Array($$createType2);

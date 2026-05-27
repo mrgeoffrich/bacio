@@ -1640,6 +1640,131 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   white-space: nowrap;
 }
 
+/* BACI-236: Overview / Graph segmented control above the title row.
+   Inline-flex so the strip hugs its content (the title row below
+   still spans the pane width). Compact margin so the strip doesn't
+   eat the title's breathing room. */
+.mk-features-viewmode {
+  align-self: flex-start;
+  margin-bottom: 12px;
+}
+
+/* BACI-236: dependency-graph canvas container. ReactFlow needs an
+   explicit height to lay out into — the default `height: 100%` would
+   collapse inside the column-flex parent. 540px is large enough for
+   the typical 3-30 node feature without forcing the user to scroll
+   the pane while panning the graph. */
+.mk-features-graph {
+  position: relative;
+  margin-top: 16px;
+  min-height: 540px;
+  height: 540px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  background: var(--bg-2);
+  overflow: hidden;
+}
+
+/* BlockerNode card. Three visual variants — ready (live work with no
+   open blockers), blocked (live work with at least one open blocker)
+   and closed (delivered / cancelled). ReactFlow handles the
+   positioning; this just paints the box. */
+.mk-graph-node {
+  width: 220px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-1);
+  background: var(--bg-2);
+  font-family: var(--font-sans);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out);
+}
+.mk-graph-node:hover {
+  border-color: var(--accent-1, var(--border-2));
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.16);
+}
+.mk-graph-node--ready {
+  border-color: var(--accent-1, var(--status-done));
+  background: var(--bg-2);
+}
+.mk-graph-node--blocked {
+  border-color: var(--status-blocked);
+  background: var(--bg-2);
+}
+.mk-graph-node--closed {
+  opacity: 0.55;
+  background: var(--bg-3);
+}
+.mk-graph-node--closed .mk-graph-node-title {
+  text-decoration: line-through;
+  text-decoration-color: var(--fg-4);
+}
+.mk-graph-node-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.mk-graph-node-key {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-3);
+  letter-spacing: 0.04em;
+}
+.mk-graph-node-badge {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--status-done-bg);
+  color: var(--status-done);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.mk-graph-node-title {
+  font-size: var(--text-sm);
+  color: var(--fg-1);
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-bottom: 6px;
+  word-break: break-word;
+}
+.mk-graph-node-state {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* BACI-236: tighten the default ReactFlow edge so it reads more like
+   the kanban's hairlines than its default 1.5px stroke. Reactflow's
+   .react-flow__edge-path is the canonical override target — using
+   that namespace keeps us out of @xyflow/react internals.  */
+.mk-features-graph .react-flow__edge-path {
+  stroke: var(--border-2, var(--fg-3));
+  stroke-width: 1.5px;
+}
+.mk-features-graph .react-flow__arrowhead {
+  fill: var(--border-2, var(--fg-3));
+}
+.mk-features-graph .react-flow__handle {
+  width: 6px;
+  height: 6px;
+  background: transparent;
+  border: none;
+}
+
 /* ============================================================
    History view — a desktop-app addition: the paged audit log,
    newest first. Mirrors the TUI's History tab but pages the data

@@ -29,6 +29,8 @@ import {
   FeatureDetail,
   FeatureLinkedIssue,
   FeatureLinkedDoc,
+  FeaturePlan,
+  FeaturePlanEntry,
   FeatureComment as FeatureCommentDTO,
   HistoryPage,
   HistoryEntryDTO,
@@ -60,7 +62,7 @@ import { ClaimDTO } from '../bindings/github.com/mrgeoffrich/bacio/internal/agen
 // shape without learning a binding directory.
 import { WaitingState, WaitingKind, BoardCardFollowOn } from '../bindings/github.com/mrgeoffrich/bacio/internal/boardcards';
 
-export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureLinkedDoc, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, ArchivePreferencesDTO, WaitingState, BoardCardFollowOn, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO, SyncSetupDTO, CollisionPreviewDTO, RenumberEntryDTO, RenameEntryDTO, RepoLinkResultDTO, ShippedIssueDTO, ShippedListDTO, LatestPlanDTO };
+export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureLinkedDoc, FeaturePlan, FeaturePlanEntry, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, ArchivePreferencesDTO, WaitingState, BoardCardFollowOn, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO, SyncSetupDTO, CollisionPreviewDTO, RenumberEntryDTO, RenameEntryDTO, RepoLinkResultDTO, ShippedIssueDTO, ShippedListDTO, LatestPlanDTO };
 // BACI-216: cross-transport alias. The web bundle's api.http.ts ships
 // the same name from its own TS-only shape so KanbanCard / IssueWorkspace
 // stay transport-agnostic.
@@ -442,6 +444,24 @@ export async function listFeatures(repoPrefix: string): Promise<FeatureSummary[]
 export async function getFeature(repoPrefix: string, slug: string): Promise<FeatureDetail> {
   try {
     return await FeatureService.GetFeature(repoPrefix, slug);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// getFeaturePlan (BACI-236) returns the topo-sorted dependency-graph
+// payload for a feature. includeClosed=false matches the historical
+// open-only `bacio feature plan` shape (used today by the CLI text
+// render); true widens to every issue in the feature plus every
+// `blocks` edge whose endpoints are both in the feature, with
+// closed=true on terminal entries so the graph view can mute them.
+export async function getFeaturePlan(
+  repoPrefix: string,
+  slug: string,
+  includeClosed: boolean,
+): Promise<FeaturePlan> {
+  try {
+    return await FeatureService.GetFeaturePlan(repoPrefix, slug, includeClosed);
   } catch (err) {
     throw normalize(err);
   }

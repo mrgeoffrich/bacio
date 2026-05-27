@@ -270,6 +270,64 @@ func (f *FeatureService) SetHiddenOnBoard(repoPrefix, slug string, hidden bool) 
 	return f.GetFeature(repoPrefix, slug)
 }
 
+// FeaturePlanEntry mirrors api.PlanEntry, reshaped to the camelCase
+// JSON tags the desktop / web bundle expects (BACI-236). One row per
+// issue in the feature; BlockedBy carries the keys of in-feature
+// blockers the dependency-graph view turns into directed edges.
+// Closed is true for done / cancelled issues so the renderer can mute
+// them while still drawing their connections to live work.
+type FeaturePlanEntry struct {
+	Key       string   `json:"key"`
+	Title     string   `json:"title"`
+	State     string   `json:"state"`
+	Assignee  string   `json:"assignee"`
+	BlockedBy []string `json:"blockedBy"`
+	Closed    bool     `json:"closed"`
+}
+
+// FeaturePlan is the dependency-graph payload for one feature
+// (BACI-236). Slug echoes the requested feature; Order is the
+// topo-sorted issue list driving the graph view's nodes + edges.
+type FeaturePlan struct {
+	Slug  string             `json:"slug"`
+	Order []FeaturePlanEntry `json:"order"`
+}
+
+// GetFeaturePlan (BACI-236) returns the dependency-graph payload for
+// the FeaturesView. includeClosed=false matches the historical open-
+// only `bacio feature plan` shape; true widens to every issue in the
+// feature plus every `blocks` edge whose endpoints are both in the
+// feature, with Closed=true on terminal entries.
+func (f *FeatureService) GetFeaturePlan(repoPrefix, slug string, includeClosed bool) (FeaturePlan, error) {
+	ctx := context.Background()
+	repo, err := f.resolveRepo(ctx, repoPrefix)
+	if err != nil {
+		return FeaturePlan{}, err
+	}
+	view, err := f.client.PlanFeature(ctx, repo, slug, includeClosed)
+	if err != nil {
+		return FeaturePlan{}, err
+	}
+	order := make([]FeaturePlanEntry, 0, len(view.Order))
+	for _, e := range view.Order {
+		// Defensive copy — view.Order entries are values, but the
+		// blocked-by slice is shared across calls; allocate a fresh
+		// slice so the binding payload doesn't carry an aliased
+		// reference into the client cache.
+		by := make([]string, len(e.BlockedBy))
+		copy(by, e.BlockedBy)
+		order = append(order, FeaturePlanEntry{
+			Key:       e.Key,
+			Title:     e.Title,
+			State:     string(e.State),
+			Assignee:  e.Assignee,
+			BlockedBy: by,
+			Closed:    e.Closed,
+		})
+	}
+	return FeaturePlan{Slug: view.Feature, Order: order}, nil
+}
+
 // AddFeatureComment posts a chronological handoff comment to a feature
 // (BACI-124) and returns the refreshed detail.
 func (f *FeatureService) AddFeatureComment(repoPrefix, slug, author, body string) (FeatureDetail, error) {

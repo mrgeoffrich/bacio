@@ -175,7 +175,17 @@ type Client interface {
 	UpdateFeature(ctx context.Context, repo *model.Repo, slug string, title, description, emoji, branchName *string, dryRun bool) (*model.Feature, error)
 	DeleteFeature(ctx context.Context, repo *model.Repo, slug string, dryRun bool) (deletedFeature *model.Feature, preview *FeatureDeletePreview, err error)
 	ShowFeature(ctx context.Context, repo *model.Repo, slug string) (*FeatureView, error)
-	PlanFeature(ctx context.Context, repo *model.Repo, slug string) (*PlanView, error)
+	// PlanFeature returns the feature's execution plan as a topo-sorted
+	// list of issues with their `blocks` dependencies. The default
+	// (includeClosed=false) emits only open issues and only edges
+	// between two open issues — the historical shape backing
+	// `bacio feature plan` and `bacio issue brief`. includeClosed=true
+	// (BACI-236) additionally emits done/cancelled issues plus every
+	// blocks edge whose endpoints are both in the feature, with
+	// Closed=true stamped on each terminal entry; the desktop / web
+	// dependency-graph view uses this path to mute closed nodes
+	// alongside the live work.
+	PlanFeature(ctx context.Context, repo *model.Repo, slug string, includeClosed bool) (*PlanView, error)
 	// ArchiveFeature / UnarchiveFeature stamp / clear archived_at on
 	// the feature row (BACI-68). Same semantics as ArchiveIssue.
 	ArchiveFeature(ctx context.Context, repo *model.Repo, slug string, dryRun bool) (*model.Feature, error)

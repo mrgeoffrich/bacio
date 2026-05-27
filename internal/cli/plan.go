@@ -31,7 +31,10 @@ position.`,
 			if err != nil {
 				return err
 			}
-			view, err := c.PlanFeature(context.Background(), repo, args[0])
+			// `bacio feature plan` is the open-only text rendering;
+			// BACI-236's include-closed widening is reserved for the
+			// dependency-graph view on the Features screen.
+			view, err := c.PlanFeature(context.Background(), repo, args[0], false)
 			if err != nil {
 				return err
 			}
