@@ -453,6 +453,12 @@ type Client interface {
 	// same precedent as BlockersFor / CountTranscriptDocsByIssue:
 	// the assembler runs server-side, never via `bacio --remote`.
 	LatestPlanByIssue(ctx context.Context, ids []int64) (map[int64]*model.LatestPlan, error)
+	// LatestPRByIssue (BACI-239) returns issue_id → the
+	// most-recently-attached PR for each issue (issues with no PR
+	// are absent from the map). Sibling of LatestPlanByIssue; used
+	// by boardcards.Assemble to fan the per-card PR chip on so the
+	// kanban doesn't need an extra fetch per card. Local-only.
+	LatestPRByIssue(ctx context.Context, ids []int64) (map[int64]*model.LatestPR, error)
 	// EnsureAgentIdentity mints a fresh persistent agent identity (a
 	// random slug, retried against the UNIQUE constraint until it
 	// sticks) and adopts it as this client's audit actor. It's the

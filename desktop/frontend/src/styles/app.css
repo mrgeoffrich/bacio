@@ -711,6 +711,30 @@ body { margin: 0; }
   border-color: var(--accent-1, var(--fg-1));
 }
 .mk-card-plan-btn .mk-icon { width: 11px; height: 11px; }
+/* BACI-239: sibling of .mk-card-plan-btn — per-card "open the latest
+   PR" chip. Identical 18px slot, muted-by-default → accent-on-hover
+   treatment so the two chips read as a matched pair in .mk-card-top.
+   Wrapped in an external <a> (target="_blank") rather than a <Link>
+   because the PR URL is remote http(s). */
+.mk-card-pr-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; padding: 0;
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-4);
+  color: var(--fg-2);
+  text-decoration: none;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out);
+}
+.mk-card-pr-btn:hover {
+  background: var(--accent-1, var(--fg-1));
+  color: var(--paper, #fff);
+  border-color: var(--accent-1, var(--fg-1));
+}
+.mk-card-pr-btn .mk-icon { width: 11px; height: 11px; }
 .mk-card-blocked-menu {
   z-index: 100;
   min-width: 220px; padding: 4px;

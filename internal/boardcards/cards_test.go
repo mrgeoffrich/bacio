@@ -37,6 +37,10 @@ type fakeClient struct {
 	// Keyed by issue id; absent entries surface as nil LatestPlan
 	// on the assembled card.
 	latestPlans map[int64]*model.LatestPlan
+	// latestPRs (BACI-239) drives the per-card PR chip. Same shape
+	// and semantics as latestPlans — absent entries surface as nil
+	// LatestPR on the assembled card.
+	latestPRs map[int64]*model.LatestPR
 	// inflightByMode (BACI-145) is mode → count of in-flight dispatches
 	// for the test's single repo. Nil leaves the map empty (no
 	// concurrency-cap blocking).
@@ -157,6 +161,12 @@ func (f *fakeClient) LatestPlanByIssue(context.Context, []int64) (map[int64]*mod
 		return map[int64]*model.LatestPlan{}, nil
 	}
 	return f.latestPlans, nil
+}
+func (f *fakeClient) LatestPRByIssue(context.Context, []int64) (map[int64]*model.LatestPR, error) {
+	if f.latestPRs == nil {
+		return map[int64]*model.LatestPR{}, nil
+	}
+	return f.latestPRs, nil
 }
 func (f *fakeClient) InflightByModeForRepo(context.Context, *model.Repo) (map[model.DispatchMode]int, error) {
 	if f.inflightByMode == nil {
@@ -1216,6 +1226,81 @@ func TestAssembleLatestPlan(t *testing.T) {
 	if noPlan.LatestPlan != nil {
 		t.Errorf("TEST-201 LatestPlan = %+v, want nil (no plan linked)",
 			noPlan.LatestPlan)
+	}
+}
+
+// TestAssembleLatestPR (BACI-239) covers the per-card PR chip —
+// sibling of TestAssembleLatestPlan. The client-returned
+// LatestPRByIssue map fans onto each card by issue id, populated
+// entries surface as a non-nil LatestPR with the right URL / count,
+// and missing entries leave the slot nil (omitempty drops the field
+// from the wire payload).
+func TestAssembleLatestPR(t *testing.T) {
+	repo := &model.Repo{ID: 1, Prefix: "TEST"}
+	issues := []*model.Issue{
+		{ID: 300, Key: "TEST-300", State: model.StateInReview, Title: "one PR"},
+		{ID: 301, Key: "TEST-301", State: model.StateInReview, Title: "two PRs"},
+		{ID: 302, Key: "TEST-302", State: model.StateTodo, Title: "no PR"},
+	}
+	prCreated := time.Date(2026, 5, 26, 9, 0, 0, 0, time.UTC)
+	latestPRs := map[int64]*model.LatestPR{
+		300: {URL: "https://example.com/owner/repo/pull/1", Count: 1, CreatedAt: prCreated},
+		301: {URL: "https://example.com/owner/repo/pull/9", Count: 2, CreatedAt: prCreated.Add(time.Hour)},
+		// 302 absent — no PR attached.
+	}
+	f := &fakeClient{repo: repo, issues: issues, latestPRs: latestPRs}
+	cards, err := Assemble(context.Background(), f, repo, false, nil)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	byKey := map[string]BoardCard{}
+	for _, c := range cards {
+		byKey[c.Key] = c
+	}
+
+	one := byKey["TEST-300"]
+	if one.LatestPR == nil {
+		t.Fatalf("TEST-300 LatestPR = nil, want populated")
+	}
+	if one.LatestPR.URL != "https://example.com/owner/repo/pull/1" {
+		t.Errorf("TEST-300 LatestPR.URL = %q, want %q",
+			one.LatestPR.URL, "https://example.com/owner/repo/pull/1")
+	}
+	if one.LatestPR.Count != 1 {
+		t.Errorf("TEST-300 LatestPR.Count = %d, want 1", one.LatestPR.Count)
+	}
+	if !one.LatestPR.CreatedAt.Equal(prCreated) {
+		t.Errorf("TEST-300 LatestPR.CreatedAt = %v, want %v",
+			one.LatestPR.CreatedAt, prCreated)
+	}
+
+	two := byKey["TEST-301"]
+	if two.LatestPR == nil {
+		t.Fatalf("TEST-301 LatestPR = nil, want populated")
+	}
+	if two.LatestPR.Count != 2 {
+		t.Errorf("TEST-301 LatestPR.Count = %d, want 2 (tooltip surfaces the count)",
+			two.LatestPR.Count)
+	}
+
+	// Wire shape uses camelCase per the BoardCard contract — pin the
+	// outer field name and the nested `url` / `count` / `createdAt`
+	// keys so an accidental snake-case regression surfaces here.
+	if b, err := json.Marshal(one); err == nil {
+		if !strings.Contains(string(b), `"latestPR"`) ||
+			!strings.Contains(string(b), `"url"`) ||
+			!strings.Contains(string(b), `"count"`) ||
+			!strings.Contains(string(b), `"createdAt"`) {
+			t.Errorf("LatestPR JSON shape regressed: %s", b)
+		}
+	} else {
+		t.Fatalf("Marshal: %v", err)
+	}
+
+	none := byKey["TEST-302"]
+	if none.LatestPR != nil {
+		t.Errorf("TEST-302 LatestPR = %+v, want nil (no PR attached)",
+			none.LatestPR)
 	}
 }
 

@@ -137,6 +137,15 @@ func (f *fakeBoardClient) LatestPlanByIssue(context.Context, []int64) (map[int64
 	return map[int64]*model.LatestPlan{}, nil
 }
 
+// LatestPRByIssue (BACI-239) — boardcards.Assemble reads the per-issue
+// latest-PR row to surface the kanban card's PR chip. Same
+// "empty-map = no PRs attached" semantics as the LatestPlanByIssue
+// stub above; the taken-flag tests don't exercise the affordance, so
+// the empty production case is the right default.
+func (f *fakeBoardClient) LatestPRByIssue(context.Context, []int64) (map[int64]*model.LatestPR, error) {
+	return map[int64]*model.LatestPR{}, nil
+}
+
 // ListHiddenFeatureSlugs (BACI-177) — empty slice means "no features
 // are hidden", which matches the production default and lets every
 // taken-flag / waiting-state test pass cards through unchanged.

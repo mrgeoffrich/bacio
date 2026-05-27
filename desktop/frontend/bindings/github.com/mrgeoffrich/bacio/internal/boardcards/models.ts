@@ -178,6 +178,17 @@ export class BoardCard {
      */
     "latestPlan"?: BoardCardLatestPlan | null;
 
+    /**
+     * LatestPR (BACI-239) is the most-recently-attached PR on this
+     * issue, or nil when no PR is attached. Drives the per-card PR
+     * chip that opens the PR URL in a new tab — sibling of LatestPlan
+     * in shape and render slot. Newest-attached wins (the link a user
+     * clicks after a review iteration is the freshly-opened PR); the
+     * `count` field on the value lets the card's tooltip surface
+     * "N attached" when more than one is linked.
+     */
+    "latestPR"?: BoardCardLatestPR | null;
+
     /** Creates a new BoardCard instance. */
     constructor($$source: Partial<BoardCard> = {}) {
         if (!("key" in $$source)) {
@@ -226,6 +237,7 @@ export class BoardCard {
         const $$createField17_0 = $$createType8;
         const $$createField21_0 = $$createType10;
         const $$createField22_0 = $$createType12;
+        const $$createField23_0 = $$createType14;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField5_0($$parsedSource["tags"]);
@@ -250,6 +262,9 @@ export class BoardCard {
         }
         if ("latestPlan" in $$parsedSource) {
             $$parsedSource["latestPlan"] = $$createField22_0($$parsedSource["latestPlan"]);
+        }
+        if ("latestPR" in $$parsedSource) {
+            $$parsedSource["latestPR"] = $$createField23_0($$parsedSource["latestPR"]);
         }
         return new BoardCard($$parsedSource as Partial<BoardCard>);
     }
@@ -329,6 +344,42 @@ export class BoardCardFollowOn {
     static createFrom($$source: any = {}): BoardCardFollowOn {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new BoardCardFollowOn($$parsedSource as Partial<BoardCardFollowOn>);
+    }
+}
+
+/**
+ * BoardCardLatestPR (BACI-239) is the camelCase mirror of
+ * model.LatestPR used on the BoardCard wire payload. Carries the URL
+ * of the most-recently-attached PR so the per-card chip can link
+ * straight to it, plus the total PR count so the tooltip can advertise
+ * "N attached" without a second round-trip.
+ */
+export class BoardCardLatestPR {
+    "url": string;
+    "count": number;
+    "createdAt": time$0.Time;
+
+    /** Creates a new BoardCardLatestPR instance. */
+    constructor($$source: Partial<BoardCardLatestPR> = {}) {
+        if (!("url" in $$source)) {
+            this["url"] = "";
+        }
+        if (!("count" in $$source)) {
+            this["count"] = 0;
+        }
+        if (!("createdAt" in $$source)) {
+            this["createdAt"] = null;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new BoardCardLatestPR instance from a string or object.
+     */
+    static createFrom($$source: any = {}): BoardCardLatestPR {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new BoardCardLatestPR($$parsedSource as Partial<BoardCardLatestPR>);
     }
 }
 
@@ -535,3 +586,5 @@ const $$createType9 = BoardCardFollowOn.createFrom;
 const $$createType10 = $Create.Nullable($$createType9);
 const $$createType11 = BoardCardLatestPlan.createFrom;
 const $$createType12 = $Create.Nullable($$createType11);
+const $$createType13 = BoardCardLatestPR.createFrom;
+const $$createType14 = $Create.Nullable($$createType13);
