@@ -1017,8 +1017,6 @@ export default function App() {
                   onDispatchChainFromCard={dispatchChainFromCard}
                   onCancelWaitingCard={cancelWaitingFromCard}
                   onQuickEval={quickEvalComment}
-                  pinnedKeys={pinnedKeys}
-                  onTogglePin={togglePinKey}
                   onSetFollowOn={setFollowOnFromCard}
                   onCancelFollowOn={cancelFollowOnFromCard}
                   hoveredKey={hoveredKey}
