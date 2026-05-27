@@ -220,6 +220,22 @@ type PullRequest struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// LatestPR is the per-issue PR denorm consumed by the kanban board
+// (BACI-239) — the most-recently-attached PR for a given issue, plus
+// the total PR count so the card chip can surface "N attached" in its
+// tooltip without a second round-trip. Sibling of LatestPlan: same
+// shape, same purpose (one optional field on BoardCard).
+//
+// "Most recently attached" follows `ORDER BY created_at DESC, id DESC`
+// — the freshly-attached PR after a review iteration is the link the
+// user clicks. If a future ticket disagrees, the rule lives in one
+// place (Store.LatestPRByIssue) and is cheap to flip.
+type LatestPR struct {
+	URL       string    `json:"url"`
+	Count     int       `json:"count"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // SyncState records that a record (issue/feature/document/comment/repo)
 // has participated in a git-backed sync pass. Presence-of-row is the
 // "previously synced" flag — absence means "local-only, never

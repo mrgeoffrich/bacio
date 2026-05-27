@@ -9,13 +9,8 @@ import InlineDescriptionEditor from './issue/InlineDescriptionEditor.jsx';
 import CommentComposer from './issue/CommentComposer.jsx';
 import RelationsPanel from './issue/RelationsPanel.jsx';
 import { documentPath } from '../lib/routes';
+import prLabel from '../lib/prLabel';
 import { reportError } from '../errors';
-
-// prLabel shortens a GitHub PR URL to "owner/repo#N" for the rail.
-function prLabel(url) {
-  const m = url.match(/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
-  return m ? `${m[1]}/${m[2]}#${m[3]}` : url;
-}
 
 // IssueWorkspace is the top-level per-issue screen — replaces the right-
 // side drawer + centred edit modal with one routed view. Primary column

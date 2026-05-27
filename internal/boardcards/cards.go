@@ -250,6 +250,14 @@ type BoardCard struct {
 	// kanban surface re-emits it under camelCase here so the BoardCard
 	// stays consistent with every other camelCase field on the wire.
 	LatestPlan *BoardCardLatestPlan `json:"latestPlan,omitempty"`
+	// LatestPR (BACI-239) is the most-recently-attached PR on this
+	// issue, or nil when no PR is attached. Drives the per-card PR
+	// chip that opens the PR URL in a new tab — sibling of LatestPlan
+	// in shape and render slot. Newest-attached wins (the link a user
+	// clicks after a review iteration is the freshly-opened PR); the
+	// `count` field on the value lets the card's tooltip surface
+	// "N attached" when more than one is linked.
+	LatestPR *BoardCardLatestPR `json:"latestPR,omitempty"`
 }
 
 // BoardCardLatestPlan (BACI-216) is the camelCase mirror of
@@ -274,6 +282,28 @@ func boardCardLatestPlan(p *model.LatestPlan) *BoardCardLatestPlan {
 		UUID:       p.UUID,
 		Filename:   p.Filename,
 		UpdatedAt:  p.UpdatedAt,
+	}
+}
+
+// BoardCardLatestPR (BACI-239) is the camelCase mirror of
+// model.LatestPR used on the BoardCard wire payload. Carries the URL
+// of the most-recently-attached PR so the per-card chip can link
+// straight to it, plus the total PR count so the tooltip can advertise
+// "N attached" without a second round-trip.
+type BoardCardLatestPR struct {
+	URL       string    `json:"url"`
+	Count     int       `json:"count"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+func boardCardLatestPR(p *model.LatestPR) *BoardCardLatestPR {
+	if p == nil {
+		return nil
+	}
+	return &BoardCardLatestPR{
+		URL:       p.URL,
+		Count:     p.Count,
+		CreatedAt: p.CreatedAt,
 	}
 }
 
@@ -496,6 +526,14 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 	if err != nil {
 		return nil, err
 	}
+	// BACI-239: per-card "newest attached PR" lookup. Same
+	// bulk-read-per-N-issues pattern as the plan lookup above; fans
+	// onto every card regardless of `taken` state so the PR chip
+	// stays visible after the worker has released its claim.
+	latestPRByID, err := c.LatestPRByIssue(ctx, issueIDs)
+	if err != nil {
+		return nil, err
+	}
 
 	cards := make([]BoardCard, 0, len(issues))
 	for _, iss := range issues {
@@ -550,6 +588,7 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 			TerminalAt:         iss.TerminalAt,
 			FollowOn:           followOn,
 			LatestPlan:         boardCardLatestPlan(latestPlanByID[iss.ID]),
+			LatestPR:           boardCardLatestPR(latestPRByID[iss.ID]),
 		})
 	}
 

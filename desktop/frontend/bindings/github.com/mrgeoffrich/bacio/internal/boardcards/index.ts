@@ -5,6 +5,7 @@ export {
     BoardCard,
     BoardCardBlocker,
     BoardCardFollowOn,
+    BoardCardLatestPR,
     BoardCardLatestPlan,
     BoardCardQuestion,
     BoardCardTodo,

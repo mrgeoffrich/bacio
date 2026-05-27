@@ -133,9 +133,10 @@ func (c *remoteClient) BlockersFor(ctx context.Context, ids []int64) (map[int64]
 	return nil, ErrLocalOnly
 }
 
-// CountEvalCommentsByIssue / CountTranscriptDocsByIssue / LatestPlanByIssue
-// stay local-only for the same reason as BlockersFor (BACI-141, BACI-216):
-// the board assembler is only invoked server-side.
+// CountEvalCommentsByIssue / CountTranscriptDocsByIssue / LatestPlanByIssue /
+// LatestPRByIssue stay local-only for the same reason as BlockersFor
+// (BACI-141, BACI-216, BACI-239): the board assembler is only invoked
+// server-side.
 func (c *remoteClient) CountEvalCommentsByIssue(ctx context.Context, ids []int64) (map[int64]int, error) {
 	return nil, ErrLocalOnly
 }
@@ -143,6 +144,9 @@ func (c *remoteClient) CountTranscriptDocsByIssue(ctx context.Context, ids []int
 	return nil, ErrLocalOnly
 }
 func (c *remoteClient) LatestPlanByIssue(ctx context.Context, ids []int64) (map[int64]*model.LatestPlan, error) {
+	return nil, ErrLocalOnly
+}
+func (c *remoteClient) LatestPRByIssue(ctx context.Context, ids []int64) (map[int64]*model.LatestPR, error) {
 	return nil, ErrLocalOnly
 }
 

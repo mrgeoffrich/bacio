@@ -8,6 +8,7 @@ import DispatchMenuContent from './DispatchMenuContent.jsx';
 import { todoGlyph } from '../lib/todoGlyph.jsx';
 import { waitingStateLabel } from '../lib/waitingLabels.ts';
 import { documentPath } from '../lib/routes';
+import prLabel from '../lib/prLabel';
 
 // stateLabel mirrors api.http.ts's STATE_LABELS — duplicated here so the
 // blocked popover can render a blocker's state pill ("In Progress")
@@ -164,6 +165,20 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDra
   // clicking it navigates to the doc viewer route (covered by BACI-215)
   // and stops propagation so the card-level onOpen doesn't also fire.
   const latestPlan = card.latestPlan || null;
+  // BACI-239: per-card "open the latest PR" affordance. Sibling of
+  // latestPlan above — populated by the boardcards assembler from the
+  // bulk LatestPRByIssue store helper, null when no PR is attached.
+  // The chip is an external `<a>` (not a `<Link>`) because PR URLs are
+  // remote http(s) — opens a new tab. Tooltip + aria-label use the
+  // shared prLabel helper to shorten the GitHub URL to "owner/repo#N";
+  // when more than one PR is attached the count gets surfaced in the
+  // tooltip so the user knows the chip links to the newest.
+  const latestPR = card.latestPR || null;
+  const prTooltip = latestPR
+    ? (latestPR.count > 1
+      ? `Open latest PR: ${prLabel(latestPR.url)} (${latestPR.count} attached)`
+      : `Open PR: ${prLabel(latestPR.url)}`)
+    : '';
 
   // BACI-141: combined transcript + eval chip. Visible on every card
   // regardless of `taken` state — the whole point of the ticket is
@@ -274,6 +289,20 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDra
             >
               <Icon name="plan" />
             </Link>
+          </Tooltip>
+        )}
+        {latestPR && (
+          <Tooltip label={prTooltip}>
+            <a
+              href={latestPR.url}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="mk-card-pr-btn"
+              aria-label={prTooltip}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Icon name="pull-request" />
+            </a>
           </Tooltip>
         )}
         {isBlocked && (

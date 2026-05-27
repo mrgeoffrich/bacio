@@ -196,6 +196,12 @@ func (c *localClient) LatestPlanByIssue(ctx context.Context, ids []int64) (map[i
 	return c.store.LatestPlanByIssue(ids)
 }
 
+// LatestPRByIssue is a thin pass-through to the store (BACI-239).
+// Used by boardcards.Assemble for the per-card PR affordance.
+func (c *localClient) LatestPRByIssue(ctx context.Context, ids []int64) (map[int64]*model.LatestPR, error) {
+	return c.store.LatestPRByIssue(ids)
+}
+
 func (c *localClient) UnlinkRelation(ctx context.Context, repo *model.Repo, in inputs.UnlinkInput, dryRun bool) (*RelationDeletePreview, int64, error) {
 	a, err := c.GetIssueByKey(ctx, repo, in.A)
 	if err != nil {
