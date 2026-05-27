@@ -115,10 +115,21 @@
 @keyframes mk-sync-spin {
   to { transform: rotate(360deg); }
 }
-.mk-leader-badge {
+/* BACI-249: leader-lease indicator. The earlier "Controlling" text
+   pill was swapped for an icon-only button so it lines up visually
+   with the sibling sync / settings / plus buttons in the topbar's
+   right-hand strip. Built on the .mk-icbtn shape — same 32×32 box —
+   then tinted with the pistachio (done) palette so the active leader
+   reads at a glance without drawing the eye like a coloured text pill
+   used to. Hover keeps the same tint rather than the neutral
+   .mk-icbtn:hover so the always-on lease colour stays consistent. */
+.mk-leader-btn {
   background: color-mix(in srgb, var(--status-done-bg) 60%, transparent);
   color: var(--status-done);
-  flex-shrink: 0;
+}
+.mk-leader-btn:hover {
+  background: var(--status-done-bg);
+  color: var(--status-done);
 }
 
 /* ============================================================
