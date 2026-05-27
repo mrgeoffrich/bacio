@@ -232,6 +232,12 @@ export interface BoardCard {
   // feature has no emoji set. The kanban card renderer only paints
   // the top-left slot when truthy.
   featureEmoji?: string;
+  // BACI-231: per-feature integration branch denormalised onto the
+  // card by the same join. Empty (and absent on the wire) when the
+  // card belongs to no feature or to a feature that ships straight
+  // to main — the kanban renders the branch chip only when truthy
+  // and the ActivityTray groups by this field.
+  featureBranchName?: string;
   // BACI-145: structured "why is this card waiting?" state. Replaces
   // the two booleans waitingForClaim + waitingDispatchDelivered that
   // the BoardCard used to carry — neither could carry the active
@@ -605,6 +611,10 @@ export interface FeatureSummary {
   // Features panel renders a state pill so a glance distinguishes
   // work in flight from delivered / abandoned work.
   state: string;
+  // BACI-231: per-feature integration branch. Empty string when the
+  // feature ships straight to main (the legacy default). The
+  // FeatureRow renders a branch chip on the meta line when truthy.
+  branchName: string;
   updatedAt: string;
   // BACI-177: per-feature "Show on board" toggle state. When true,
   // every kanban card belonging to this feature is hidden from the
@@ -673,6 +683,10 @@ export interface FeatureDetail {
   // BACI-172: per-feature emoji rendered on every kanban card under
   // this feature. Empty when none is set.
   emoji: string;
+  // BACI-231: per-feature integration branch the detail pane's
+  // "Integration branch" Properties row reads from / writes to.
+  // Empty string when the feature ships straight to main.
+  branchName: string;
   // BACI-199: three-state column on the feature row + sticky bit.
   // The drawer's segmented control reads `state` to highlight the
   // active button and `stateManual` to flag rows pinned against the
@@ -850,6 +864,12 @@ interface ApiIssue {
   // store.issueSelect. Snake-case on the wire; the cardFromIssue
   // reshape below copies it onto the camelCase BoardCard.featureEmoji.
   feature_emoji?: string;
+  // BACI-231: per-feature integration branch from the same join.
+  // Snake-case on the wire; cardFromIssue reshapes onto
+  // BoardCard.featureBranchName so per-issue endpoints (e.g.
+  // setIssueState's drag-refresh) keep the branch chip until the
+  // next listCards() rebuild.
+  feature_branch_name?: string;
 }
 
 function assigneeList(a: string | undefined | null): string[] {
@@ -871,6 +891,10 @@ function cardFromIssue(iss: ApiIssue): BoardCard {
     // refreshed via setIssueState() (drag-to-move) keeps its glyph
     // until the next listCards() rebuilds the array.
     featureEmoji: iss.feature_emoji,
+    // BACI-231: thread the joined feature branch through so the
+    // drag-refresh keeps the kanban branch chip until the next
+    // listCards() rebuild.
+    featureBranchName: iss.feature_branch_name,
     // BACI-145: setIssueState (a drag-to-move) is blocked for waiting
     // cards by the UI, so the wire shape produced here can't be
     // observably waiting. Leave waitingState undefined; the next 10s
@@ -1688,6 +1712,11 @@ interface ApiFeature {
   // absent on pre-BACI-172 features (or features with no glyph
   // set); model.Feature serialises with omitempty.
   emoji?: string;
+  // BACI-225: per-feature integration branch from the wire. Optional
+  // / absent when the feature ships straight to main (the legacy
+  // default); model.Feature serialises BranchName with omitempty
+  // when the column is NULL.
+  branch_name?: string;
   // BACI-199: three-state column + sticky bit. Always present
   // in JSON (no omitempty on model.Feature). Pre-BACI-199 servers
   // (no column wired yet) leave these absent — `state ?? 'active'`
@@ -1713,6 +1742,7 @@ export async function listFeatures(repoPrefix: string): Promise<FeatureSummary[]
     title: f.title,
     emoji: f.emoji ?? '',
     state: f.state ?? 'active',
+    branchName: f.branch_name ?? '',
     updatedAt: f.updated_at,
     hiddenOnBoard: !!f.hidden_on_board,
   }));
@@ -1754,6 +1784,7 @@ export async function getFeature(repoPrefix: string, slug: string): Promise<Feat
     title: f.title,
     description: f.description ?? '',
     emoji: f.emoji ?? '',
+    branchName: f.branch_name ?? '',
     state: f.state ?? 'active',
     stateManual: !!f.state_manual,
     createdAt: f.created_at,
@@ -1846,6 +1877,29 @@ export async function setFeatureEmoji(
   await call<ApiFeature>(`/repos/${repoPrefix}/features/${slug}`, {
     method: 'PATCH',
     body: { slug, emoji },
+  });
+  return getFeature(repoPrefix, slug);
+}
+
+// setFeatureBranchName (BACI-231) updates the per-feature integration
+// branch every kanban card under this feature is decorated with and
+// every dispatch is routed against. Empty string clears the branch
+// (the feature ships straight to main again). The store-side
+// ValidateBranchName enforces git's refname rules so a malformed
+// input surfaces as a {error} envelope. Returns the refreshed
+// FeatureDetail so the caller can drop it straight into its panel
+// state. Parallel to setFeatureEmoji.
+export async function setFeatureBranchName(
+  repoPrefix: string,
+  slug: string,
+  branchName: string,
+): Promise<FeatureDetail> {
+  if (!repoPrefix || repoPrefix === 'all') {
+    throw new Error('select a repository to edit a feature');
+  }
+  await call<ApiFeature>(`/repos/${repoPrefix}/features/${slug}`, {
+    method: 'PATCH',
+    body: { slug, branch_name: branchName },
   });
   return getFeature(repoPrefix, slug);
 }

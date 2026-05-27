@@ -445,6 +445,26 @@ body { margin: 0; }
   font-size: 16px; line-height: 1; flex: none;
   display: inline-flex; align-items: center;
 }
+/* BACI-231: per-feature integration-branch chip on the kanban card
+   top row. Sits after .mk-card-id with the icon-then-mono-text shape
+   used elsewhere on the card. flex-shrink: 1 lets the chip absorb
+   the width-pressure when a card carries every optional pill (emoji
+   + key + plan + PR + blocked + branch); the leading icon and other
+   chrome stay flex: none. The full ref is in the chip's Tooltip /
+   aria-label, so truncation never loses information. */
+.mk-card-branch-chip {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--fg-3);
+  min-width: 0; max-width: 14ch;
+  flex-shrink: 1;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.mk-card-branch-chip .mk-icon {
+  width: 11px; height: 11px;
+  flex: none;
+  color: var(--fg-3);
+}
 .mk-card-id { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--fg-3); }
 .mk-card-title { margin: 0; font-size: 14px; font-weight: 500; line-height: 1.35; color: var(--fg-1); }
 .mk-tag-row { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -1544,6 +1564,40 @@ body { margin: 0; }
   list-style: none; margin: 0; padding: 4px;
   max-height: 480px; overflow-y: auto;
   display: flex; flex-direction: column; gap: 4px;
+}
+/* BACI-231: per-branch group header rendered between entry groups
+   when the tray's in-flight transitions span ≥2 feature branches.
+   Sits inside the same <ul> as .mk-tray-entry; list-style suppressed,
+   row metrics minimal so the header is a quiet separator, not a
+   second-class title. Skipped entirely in the single-branch /
+   single-flat case so the tray geometry is byte-identical to today. */
+.mk-tray-branch-header {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 10px 2px;
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--fg-3);
+  letter-spacing: 0.04em;
+}
+.mk-tray-branch-header:not(:first-child) {
+  margin-top: 4px;
+  border-top: 1px solid var(--border-1);
+  padding-top: 8px;
+}
+.mk-tray-branch-header .mk-icon {
+  width: 11px; height: 11px;
+  color: var(--fg-3);
+  flex: none;
+}
+.mk-tray-branch-name {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mk-tray-branch-count {
+  margin-left: auto;
+  font-family: var(--font-mono); font-size: 9px;
+  color: var(--fg-4);
+  padding: 1px 5px;
+  border-radius: 9999px;
+  background: var(--bg-3);
 }
 .mk-tray-entry {
   display: flex; flex-direction: column; gap: 4px;

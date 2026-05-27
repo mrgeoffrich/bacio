@@ -92,6 +92,13 @@ type Issue struct {
 	// emoji set. The kanban / BoardCard render reads this directly
 	// so the card row can decorate without a second lookup.
 	FeatureEmoji string `json:"feature_emoji,omitempty"`
+	// FeatureBranchName (BACI-231) is the parent feature's integration
+	// branch denormalised onto the issue row via the same join. Empty
+	// when the issue has no feature or the feature ships straight to
+	// main (NULL branch_name). The BoardCard denorm reads this so the
+	// kanban card chip and the ActivityTray auto-grouping don't need a
+	// second feature lookup per card.
+	FeatureBranchName string `json:"feature_branch_name,omitempty"`
 	Title       string    `json:"title"`
 	Description string    `json:"description,omitempty"`
 	State       State     `json:"state"`

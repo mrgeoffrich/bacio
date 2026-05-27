@@ -1460,6 +1460,31 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   min-width: 0;
 }
 .mk-features-item-meta-sep { color: var(--fg-4); }
+/* BACI-231: feature-row integration-branch chip — sits on the meta
+   line between the slug and the updated-time. Mono + faint contrast,
+   leading branch icon. flex-shrink: 1 so the chip absorbs the width
+   pressure rather than shoving the relTime off the row; the full
+   ref reads in the title attribute. */
+.mk-features-item-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--fg-3);
+  letter-spacing: 0.02em;
+  min-width: 0;
+  max-width: 14ch;
+  flex-shrink: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mk-features-item-branch .mk-icon {
+  width: 11px; height: 11px;
+  color: var(--fg-3);
+  flex: none;
+}
 .mk-features-item-hidden {
   margin-left: auto;
   display: inline-flex;
@@ -1624,6 +1649,65 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   font-family: var(--font-sans);
   font-size: 11px;
   color: var(--fg-4);
+  line-height: 1.4;
+}
+.mk-features-prop-hint code {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  background: var(--bg-3);
+  padding: 0 4px;
+  border-radius: 4px;
+  color: var(--fg-3);
+}
+/* BACI-231: input wrapper for the Integration branch Properties row.
+   Mirrors the segmented-button shape used by sibling rows — same
+   height (28px), border, and focus ring — so the row reads as part
+   of the same control family. */
+.mk-features-prop-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  transition: border-color var(--dur-fast) var(--ease-out);
+}
+.mk-features-prop-input-wrap:focus-within {
+  border-color: var(--accent-1);
+}
+.mk-features-prop-input-wrap .mk-icon {
+  width: 14px; height: 14px;
+  color: var(--fg-3);
+  flex: none;
+}
+.mk-features-prop-input {
+  flex: 1; min-width: 0;
+  background: transparent;
+  color: var(--fg-1);
+  border: none; outline: none;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  padding: 0;
+}
+.mk-features-prop-input::placeholder { color: var(--fg-4); }
+.mk-features-prop-clear {
+  appearance: none; -webkit-appearance: none;
+  background: transparent; border: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px;
+  padding: 0; color: var(--fg-3);
+  cursor: pointer; border-radius: 4px;
+  flex: none;
+}
+.mk-features-prop-clear:hover { background: var(--bg-3); color: var(--fg-1); }
+.mk-features-prop-clear svg { width: 14px; height: 14px; }
+.mk-features-prop-error {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--status-blocked);
   line-height: 1.4;
 }
 .mk-features-text {

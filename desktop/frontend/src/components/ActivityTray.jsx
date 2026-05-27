@@ -3,6 +3,7 @@ import { isTerminalState } from '../lib/issueState';
 import { waitingStateLabel } from '../lib/waitingLabels.ts';
 import Icon from './Icon.jsx';
 import { readCollapsed, persistCollapsed } from './activityTrayPersistence';
+import { groupRowsByBranch } from './activityTrayGrouping';
 
 // ActivityTray (BACI-171) — a bottom-right floating panel that narrates
 // what's just happened on the board. Position-fixed, overlays the
@@ -88,6 +89,10 @@ export function computeTransitions(prevCards, nextCards) {
   }
   return out;
 }
+
+// groupRowsByBranch (BACI-231) lives in `./activityTrayGrouping.ts`
+// so it's loadable from a plain-Node smoketest. The renderer below
+// imports it back in.
 
 // entryFromCard builds a tray Entry from a board card. The renderer
 // reads these directly; `addedAt` keeps the LIFO ordering stable when
@@ -411,6 +416,155 @@ export default function ActivityTray({ cards, pinnedKeys, onTogglePin, onOpenCar
 
   const totalCount = rows.length;
 
+  // BACI-231: when the entry rows span ≥2 feature branches, group
+  // them under per-branch headers. Pinned rows render first in their
+  // own headerless block (branch === null) so they stay sticky at
+  // the top of the tray. Single-branch / single-flat runs return
+  // exactly one group with the legacy ordering — identical to today.
+  const groupedRender = groupRowsByBranch(rows, cardsByKey);
+
+  // renderRow is the per-row body shared by the flat path and the
+  // grouped path. Closes over the entry/pinned-row state from the
+  // component scope (cardsByKey for the live snapshot, dismiss /
+  // onTogglePin handlers, flash-tracking) so both render paths land
+  // an identical row.
+  function renderRow(row) {
+    if (row.kind === 'pinned') {
+      // Pinned row: read straight from the live card snapshot
+      // (the entry-form's frozen columnLabel doesn't apply —
+      // the user pinned the *card*, not a transition). No flash
+      // for pinned rows; they're sticky, not transitions.
+      const { card } = row;
+      const status = entryStatus(card);
+      return (
+        <li
+          key={`pin-${card.key}`}
+          className="mk-tray-entry"
+          onClick={() => {
+            if (onOpenCard) onOpenCard(card);
+            if (onCardClickFromTray) onCardClickFromTray(card.key);
+          }}
+          onMouseEnter={() => onHoverCard && onHoverCard(card.key)}
+          onMouseLeave={() => onHoverCard && onHoverCard(null)}
+          role={onOpenCard ? 'button' : undefined}
+          tabIndex={onOpenCard ? 0 : undefined}
+          onKeyDown={(e) => {
+            if ((e.key === 'Enter' || e.key === ' ') && onOpenCard) {
+              e.preventDefault();
+              onOpenCard(card);
+              if (onCardClickFromTray) onCardClickFromTray(card.key);
+            }
+          }}
+        >
+          <div className="mk-tray-entry-head">
+            <span className="mk-card-id">{card.key}</span>
+            <span className={`mk-pill ${stateClass(card.column)}`}>{card.columnLabel || card.column}</span>
+            <button
+              type="button"
+              className="mk-tray-dismiss"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (onTogglePin) onTogglePin(card.key);
+              }}
+              title="Unpin"
+              aria-label={`Unpin ${card.key}`}
+            >
+              ×
+            </button>
+          </div>
+          <div className="mk-tray-entry-title">{card.title}</div>
+          {status.kind === 'needs_action' && (
+            <div className="mk-tray-entry-status is-needs-action">
+              <Icon name="alert-triangle" />
+              <span>{status.text}</span>
+            </div>
+          )}
+          {status.kind === 'verb' && (
+            <div className="mk-tray-entry-status">
+              <span className="mk-tray-entry-verb">{status.text}</span>
+            </div>
+          )}
+          {status.kind === 'waiting' && (
+            <div className="mk-tray-entry-status is-waiting">
+              <span>{status.text}</span>
+            </div>
+          )}
+        </li>
+      );
+    }
+    // Entry row (auto-fed transition).
+    const e = row.entry;
+    // BACI-183: read the live card for the status row. Falls back to
+    // undefined when the card dropped from `cards` between polls —
+    // entryStatus handles that by returning `{kind:'none'}`, so the
+    // entry still renders its title. Column on the head pill stays on
+    // the Entry's immutable-at-insert-time snapshot (we want the head
+    // to reflect the *transition* that put this row in the tray, not
+    // the column the card moved to afterwards).
+    const liveCard = cardsByKey.get(e.key);
+    const status = entryStatus(liveCard);
+    // BACI-197: Recent rows now mirror the pinned-row affordances —
+    // hover lights up the matching board card, click opens the
+    // workspace and bounces the card. The card we hand to onOpenCard
+    // prefers the live snapshot from cardsByKey (so the workspace
+    // lands on the freshest column/state) and falls back to a
+    // synthesised {key, title} shape when the card dropped from the
+    // latest poll, so the workspace still opens.
+    const openTarget = liveCard || { key: e.key, title: e.title };
+    return (
+      <li
+        key={e.key}
+        className={`mk-tray-entry${flashingKeys.has(e.key) ? ' is-flashing' : ''}`}
+        onClick={() => {
+          if (onOpenCard) onOpenCard(openTarget);
+          if (onCardClickFromTray) onCardClickFromTray(e.key);
+        }}
+        onMouseEnter={() => onHoverCard && onHoverCard(e.key)}
+        onMouseLeave={() => onHoverCard && onHoverCard(null)}
+        role={onOpenCard ? 'button' : undefined}
+        tabIndex={onOpenCard ? 0 : undefined}
+        onKeyDown={(ev) => {
+          if ((ev.key === 'Enter' || ev.key === ' ') && onOpenCard) {
+            ev.preventDefault();
+            onOpenCard(openTarget);
+            if (onCardClickFromTray) onCardClickFromTray(e.key);
+          }
+        }}
+      >
+        <div className="mk-tray-entry-head">
+          <span className="mk-card-id">{e.key}</span>
+          <span className={`mk-pill ${stateClass(e.column)}`}>{e.columnLabel}</span>
+          <button
+            type="button"
+            className="mk-tray-dismiss"
+            onClick={(ev) => { ev.stopPropagation(); dismiss(e.key); }}
+            title="Dismiss"
+            aria-label={`Dismiss ${e.key}`}
+          >
+            ×
+          </button>
+        </div>
+        <div className="mk-tray-entry-title">{e.title}</div>
+        {status.kind === 'needs_action' && (
+          <div className="mk-tray-entry-status is-needs-action">
+            <Icon name="alert-triangle" />
+            <span>{status.text}</span>
+          </div>
+        )}
+        {status.kind === 'verb' && (
+          <div className="mk-tray-entry-status">
+            <span className="mk-tray-entry-verb">{status.text}</span>
+          </div>
+        )}
+        {status.kind === 'waiting' && (
+          <div className="mk-tray-entry-status is-waiting">
+            <span>{status.text}</span>
+          </div>
+        )}
+      </li>
+    );
+  }
+
   if (collapsed) {
     return (
       <button
@@ -447,145 +601,32 @@ export default function ActivityTray({ cards, pinnedKeys, onTogglePin, onOpenCar
         the live card snapshot and their × calls onTogglePin (unpin);
         entry rows show the immutable-at-insert-time fields with a
         live status row (BACI-183) and their × calls dismiss.
+
+        BACI-231: when the in-flight entries span ≥2 feature
+        branches, the entry rows are grouped under per-branch
+        headers (feature branches first, alphabetical; the
+        no-branch / main bucket last). Single-branch (or no-branch)
+        runs render flat — the legacy shape.
       */}
       <ul className="mk-tray-list">
-        {rows.map(row => {
-          if (row.kind === 'pinned') {
-            // Pinned row: read straight from the live card snapshot
-            // (the entry-form's frozen columnLabel doesn't apply —
-            // the user pinned the *card*, not a transition). No flash
-            // for pinned rows; they're sticky, not transitions.
-            const { card } = row;
-            const status = entryStatus(card);
-            return (
-              <li
-                key={`pin-${card.key}`}
-                className="mk-tray-entry"
-                onClick={() => {
-                  if (onOpenCard) onOpenCard(card);
-                  if (onCardClickFromTray) onCardClickFromTray(card.key);
-                }}
-                onMouseEnter={() => onHoverCard && onHoverCard(card.key)}
-                onMouseLeave={() => onHoverCard && onHoverCard(null)}
-                role={onOpenCard ? 'button' : undefined}
-                tabIndex={onOpenCard ? 0 : undefined}
-                onKeyDown={(e) => {
-                  if ((e.key === 'Enter' || e.key === ' ') && onOpenCard) {
-                    e.preventDefault();
-                    onOpenCard(card);
-                    if (onCardClickFromTray) onCardClickFromTray(card.key);
-                  }
-                }}
-              >
-                <div className="mk-tray-entry-head">
-                  <span className="mk-card-id">{card.key}</span>
-                  <span className={`mk-pill ${stateClass(card.column)}`}>{card.columnLabel || card.column}</span>
-                  <button
-                    type="button"
-                    className="mk-tray-dismiss"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      if (onTogglePin) onTogglePin(card.key);
-                    }}
-                    title="Unpin"
-                    aria-label={`Unpin ${card.key}`}
-                  >
-                    ×
-                  </button>
-                </div>
-                <div className="mk-tray-entry-title">{card.title}</div>
-                {status.kind === 'needs_action' && (
-                  <div className="mk-tray-entry-status is-needs-action">
-                    <Icon name="alert-triangle" />
-                    <span>{status.text}</span>
-                  </div>
-                )}
-                {status.kind === 'verb' && (
-                  <div className="mk-tray-entry-status">
-                    <span className="mk-tray-entry-verb">{status.text}</span>
-                  </div>
-                )}
-                {status.kind === 'waiting' && (
-                  <div className="mk-tray-entry-status is-waiting">
-                    <span>{status.text}</span>
-                  </div>
-                )}
-              </li>
-            );
-          }
-          // Entry row (auto-fed transition).
-          const e = row.entry;
-          // BACI-183: read the live card for the status row. Falls
-          // back to undefined when the card dropped from `cards`
-          // between polls — entryStatus handles that by returning
-          // `{kind:'none'}`, so the entry still renders its title.
-          // Column on the head pill stays on the Entry's
-          // immutable-at-insert-time snapshot (we want the head to
-          // reflect the *transition* that put this row in the tray,
-          // not the column the card moved to afterwards).
-          const liveCard = cardsByKey.get(e.key);
-          const status = entryStatus(liveCard);
-          // BACI-197: Recent rows now mirror the pinned-row affordances
-          // — hover lights up the matching board card, click opens the
-          // workspace and bounces the card. The card we hand to
-          // onOpenCard prefers the live snapshot from cardsByKey (so
-          // the workspace lands on the freshest column/state) and falls
-          // back to a synthesised {key, title} shape when the card
-          // dropped from the latest poll, so the workspace still opens.
-          const openTarget = liveCard || { key: e.key, title: e.title };
-          return (
-            <li
-              key={e.key}
-              className={`mk-tray-entry${flashingKeys.has(e.key) ? ' is-flashing' : ''}`}
-              onClick={() => {
-                if (onOpenCard) onOpenCard(openTarget);
-                if (onCardClickFromTray) onCardClickFromTray(e.key);
-              }}
-              onMouseEnter={() => onHoverCard && onHoverCard(e.key)}
-              onMouseLeave={() => onHoverCard && onHoverCard(null)}
-              role={onOpenCard ? 'button' : undefined}
-              tabIndex={onOpenCard ? 0 : undefined}
-              onKeyDown={(ev) => {
-                if ((ev.key === 'Enter' || ev.key === ' ') && onOpenCard) {
-                  ev.preventDefault();
-                  onOpenCard(openTarget);
-                  if (onCardClickFromTray) onCardClickFromTray(e.key);
-                }
-              }}
-            >
-              <div className="mk-tray-entry-head">
-                <span className="mk-card-id">{e.key}</span>
-                <span className={`mk-pill ${stateClass(e.column)}`}>{e.columnLabel}</span>
-                <button
-                  type="button"
-                  className="mk-tray-dismiss"
-                  onClick={(ev) => { ev.stopPropagation(); dismiss(e.key); }}
-                  title="Dismiss"
-                  aria-label={`Dismiss ${e.key}`}
+        {groupedRender.multiBranch
+          ? groupedRender.groups.flatMap((g) => {
+              // pinned-rows-only group keeps no header (branch === null).
+              const header = g.branch === null ? null : (
+                <li
+                  key={`branch-header-${g.branch || 'main'}`}
+                  className="mk-tray-branch-header"
+                  aria-hidden="true"
                 >
-                  ×
-                </button>
-              </div>
-              <div className="mk-tray-entry-title">{e.title}</div>
-              {status.kind === 'needs_action' && (
-                <div className="mk-tray-entry-status is-needs-action">
-                  <Icon name="alert-triangle" />
-                  <span>{status.text}</span>
-                </div>
-              )}
-              {status.kind === 'verb' && (
-                <div className="mk-tray-entry-status">
-                  <span className="mk-tray-entry-verb">{status.text}</span>
-                </div>
-              )}
-              {status.kind === 'waiting' && (
-                <div className="mk-tray-entry-status is-waiting">
-                  <span>{status.text}</span>
-                </div>
-              )}
-            </li>
-          );
-        })}
+                  <Icon name="branch" />
+                  <span className="mk-tray-branch-name">{g.branch || 'main'}</span>
+                  <span className="mk-tray-branch-count">{g.rows.length}</span>
+                </li>
+              );
+              const items = g.rows.map((row) => renderRow(row));
+              return header ? [header, ...items] : items;
+            })
+          : groupedRender.groups[0].rows.map((row) => renderRow(row))}
       </ul>
     </aside>
   );

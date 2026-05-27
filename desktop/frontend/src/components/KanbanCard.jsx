@@ -11,6 +11,7 @@ import { todoGlyph } from '../lib/todoGlyph.jsx';
 import { waitingStateLabel } from '../lib/waitingLabels.ts';
 import { documentPath } from '../lib/routes';
 import prLabel from '../lib/prLabel';
+import { shortBranchLabel } from '../lib/branchName';
 
 // stateLabel mirrors api.http.ts's STATE_LABELS — duplicated here so the
 // blocked popover can render a blocker's state pill ("In Progress")
@@ -292,6 +293,22 @@ function KanbanCard({ card, cardsByKey, promptConfig, stateGraph, isDragging, co
           </span>
         )}
         <span className="mk-card-id">{card.key}</span>
+        {/*
+          BACI-231: per-feature integration branch chip — visible on
+          every card under a feature whose branch_name is set. Empty
+          (and absent on the wire) for cards on `main` so the chip
+          stays out of the way for the legacy ship-to-main flow.
+          Truncated via shortBranchLabel; full ref reads in the
+          tooltip on hover.
+        */}
+        {card.featureBranchName && (
+          <Tooltip label={`Ships to ${card.featureBranchName}`}>
+            <span className="mk-card-branch-chip" aria-label={`Ships to ${card.featureBranchName}`}>
+              <Icon name="branch" />
+              {shortBranchLabel(card.featureBranchName)}
+            </span>
+          </Tooltip>
+        )}
         {latestPlan && (
           <Tooltip label={`Open plan: ${latestPlan.filename}`}>
             <Link

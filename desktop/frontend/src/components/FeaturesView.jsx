@@ -6,7 +6,9 @@ import * as api from '../api';
 import MarkdownView from '../lib/markdownView';
 import CommentComposer from './issue/CommentComposer';
 import FeatureEmojiPicker from './FeatureEmojiPicker.jsx';
+import Icon from './Icon.jsx';
 import { documentPath, featurePath } from '../lib/routes';
+import { isValidBranchName, shortBranchLabel } from '../lib/branchName';
 
 // BACI-236: the dependency-graph view is lazy-loaded so the
 // @xyflow/react chunk (~150 KB gzipped) only lands when the user
@@ -418,6 +420,18 @@ function FeatureRow({ feature, isActive, onSelect }) {
       </span>
       <span className="mk-features-item-meta">
         <span className="mk-features-item-slug">{feature.slug}</span>
+        {feature.branchName && (
+          <>
+            <span className="mk-features-item-meta-sep">·</span>
+            <span
+              className="mk-features-item-branch"
+              title={`Ships to ${feature.branchName}`}
+            >
+              <Icon name="branch" />
+              {shortBranchLabel(feature.branchName)}
+            </span>
+          </>
+        )}
         <span className="mk-features-item-meta-sep">·</span>
         <span>{relTime(feature.updatedAt)}</span>
         {feature.hiddenOnBoard && (
@@ -639,6 +653,13 @@ function FeatureOverviewSections({
             Hide this feature's cards from the kanban board.
           </p>
         </div>
+
+        <FeatureBranchEditor
+          activeBoard={activeBoard}
+          detail={detail}
+          onDetailChange={onDetailChange}
+          onFeaturesChange={onFeaturesChange}
+        />
       </section>
 
       <section className="mk-features-section">
@@ -688,6 +709,149 @@ function FeatureOverviewSections({
 
 // FeatureLinkedDocsSection (BACI-214) lists documents linked to the
 // feature via `bacio doc link <file> <feature-slug>`. Each row carries a
+// FeatureBranchEditor (BACI-231) is the third Properties row on the
+// feature detail pane — the editable integration branch the
+// feature ships against. Empty input clears the branch (the
+// feature ships straight to main again). Save fires on blur AND on
+// Enter; client-side validation via lib/branchName.isValidBranchName
+// blocks the round-trip when the input is malformed, so the user
+// sees an inline error before the server's identical rejection.
+// Parallel to the Show-on-board and State rows above it.
+function FeatureBranchEditor({
+  activeBoard,
+  detail,
+  onDetailChange,
+  onFeaturesChange,
+}) {
+  // Local edit buffer — the user can type without firing a save on
+  // every keystroke. Resets when the upstream detail.branchName
+  // changes (e.g. another tab switched away and back).
+  const [value, setValue] = useState(detail.branchName || '');
+  const [error, setError] = useState('');
+  useEffect(() => {
+    setValue(detail.branchName || '');
+    setError('');
+  }, [detail.branchName]);
+
+  const persisted = detail.branchName || '';
+  const trimmed = value;
+
+  const save = async () => {
+    // No-op if unchanged — avoid a round trip when the user just
+    // tabbed out without editing.
+    if (trimmed === persisted) {
+      setError('');
+      return;
+    }
+    const check = isValidBranchName(trimmed);
+    if (!check.ok) {
+      setError(check.reason);
+      return;
+    }
+    try {
+      const updated = await api.setFeatureBranchName(
+        activeBoard,
+        detail.slug,
+        trimmed,
+      );
+      setError('');
+      onDetailChange(updated);
+      try {
+        const feats = await api.listFeatures(activeBoard);
+        onFeaturesChange(feats);
+      } catch {
+        // non-fatal — next selection refresh picks it up.
+      }
+    } catch (err) {
+      const message = err?.message || String(err);
+      // Surface store-side validation messages inline; route the rest
+      // through the global error toast (network blip, etc).
+      if (/^branch_name/.test(message)) {
+        setError(message);
+      } else {
+        reportError(err, { headline: "Couldn't update branch" });
+      }
+    }
+  };
+
+  return (
+    <div className="mk-features-prop">
+      <label className="mk-features-prop-label" htmlFor="mk-features-branch-input">
+        Integration branch
+      </label>
+      <div className="mk-features-prop-input-wrap">
+        <Icon name="branch" />
+        <input
+          id="mk-features-branch-input"
+          type="text"
+          className="mk-features-prop-input"
+          placeholder="main (default)"
+          value={value}
+          spellCheck={false}
+          autoComplete="off"
+          onChange={(e) => {
+            setValue(e.target.value);
+            // Clear the inline error eagerly as the user types — the
+            // next blur / Enter re-runs validation.
+            if (error) setError('');
+          }}
+          onBlur={save}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              save();
+            } else if (e.key === 'Escape') {
+              e.preventDefault();
+              setValue(persisted);
+              setError('');
+            }
+          }}
+        />
+        {value && (
+          <button
+            type="button"
+            className="mk-features-prop-clear"
+            aria-label="Clear branch"
+            onClick={() => {
+              setValue('');
+              setError('');
+              // Immediately persist the clear — matches the chip's
+              // expectation that clicking × routes back to main.
+              (async () => {
+                try {
+                  const updated = await api.setFeatureBranchName(
+                    activeBoard,
+                    detail.slug,
+                    '',
+                  );
+                  onDetailChange(updated);
+                  try {
+                    const feats = await api.listFeatures(activeBoard);
+                    onFeaturesChange(feats);
+                  } catch {
+                    // non-fatal.
+                  }
+                } catch (err) {
+                  reportError(err, { headline: "Couldn't clear branch" });
+                }
+              })();
+            }}
+          >
+            <X strokeWidth={2} />
+          </button>
+        )}
+      </div>
+      {error && <p className="mk-features-prop-error">{error}</p>}
+      <p
+        className="mk-features-prop-hint"
+        title="Sets the per-feature integration branch. New dispatches under this feature target the named branch; in-flight work keeps its current base."
+      >
+        Issues under this feature ship to this branch instead of <code>main</code>.
+      </p>
+    </div>
+  );
+}
+
 // type badge, a `<Link>` into the canonical `/documents/<filename>`
 // viewer (the same route the Documents screen uses), and an inline
 // `— description` when the link was attached with `--why`. Always-render

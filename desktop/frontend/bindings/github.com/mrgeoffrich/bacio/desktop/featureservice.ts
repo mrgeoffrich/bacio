@@ -72,6 +72,20 @@ export function ListFeatures(repoPrefix: string): $CancellablePromise<$models.Fe
 }
 
 /**
+ * SetFeatureBranchName (BACI-231) updates the per-feature integration
+ * branch and returns the refreshed FeatureDetail. Empty string clears
+ * the branch (the feature ships straight to main again). Validates at
+ * the store boundary via ValidateBranchName so invalid refnames
+ * (whitespace, leading `-`, embedded `..`, etc.) surface as an error
+ * from the client. Parallel to SetFeatureEmoji.
+ */
+export function SetFeatureBranchName(repoPrefix: string, slug: string, branch: string): $CancellablePromise<$models.FeatureDetail> {
+    return $Call.ByID(521024498, repoPrefix, slug, branch).then(($result: any) => {
+        return $$createType0($result);
+    });
+}
+
+/**
  * SetFeatureEmoji (BACI-172) updates the per-feature emoji glyph and
  * returns the refreshed FeatureDetail. Empty string clears the
  * emoji. Validates at the store boundary so multi-cluster input

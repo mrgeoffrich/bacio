@@ -30,7 +30,14 @@ type FeatureSummary struct {
 	// `cancelled` (abandoned). The Features panel renders a state
 	// pill so a glance distinguishes work in flight from delivered /
 	// abandoned work.
-	State         string    `json:"state"`
+	State string `json:"state"`
+	// BranchName (BACI-231) is the per-feature integration branch
+	// (e.g. "feat/auth"). Empty string when the feature ships
+	// straight to main (the legacy default). The FeatureRow renders a
+	// branch chip when this is truthy; the detail pane carries the
+	// editable value. Always present in JSON (empty when null) to
+	// match the rest of the surfaced fields.
+	BranchName    string    `json:"branchName"`
 	UpdatedAt     time.Time `json:"updatedAt"`
 	HiddenOnBoard bool      `json:"hiddenOnBoard"`
 }
@@ -83,6 +90,11 @@ type FeatureDetail struct {
 	// Empty when none has been set — the FeaturesView surfaces a
 	// "set emoji" affordance in that case.
 	Emoji string `json:"emoji"`
+	// BranchName (BACI-231) is the per-feature integration branch
+	// the detail pane's "Integration branch" Properties row reads
+	// from / writes to. Empty string when the feature ships straight
+	// to main. Always present in JSON to match Emoji's shape.
+	BranchName string `json:"branchName"`
 	// State + StateManual (BACI-199) round-trip the per-feature state
 	// column and its sticky bit. The drawer's segmented control reads
 	// State to highlight the active button, and StateManual to render
@@ -144,11 +156,16 @@ func (f *FeatureService) ListFeatures(repoPrefix string) ([]FeatureSummary, erro
 	}
 	out := make([]FeatureSummary, 0, len(feats))
 	for _, feat := range feats {
+		branch := ""
+		if feat.BranchName != nil {
+			branch = *feat.BranchName
+		}
 		out = append(out, FeatureSummary{
 			Slug:          feat.Slug,
 			Title:         feat.Title,
 			Emoji:         feat.Emoji,
 			State:         string(feat.State),
+			BranchName:    branch,
 			UpdatedAt:     feat.UpdatedAt,
 			HiddenOnBoard: feat.HiddenOnBoard,
 		})
@@ -197,11 +214,16 @@ func (f *FeatureService) GetFeature(repoPrefix, slug string) (FeatureDetail, err
 			// carry it and the feature pane doesn't surface it.
 		})
 	}
+	branch := ""
+	if feat.BranchName != nil {
+		branch = *feat.BranchName
+	}
 	return FeatureDetail{
 		Slug:          feat.Slug,
 		Title:         feat.Title,
 		Description:   feat.Description,
 		Emoji:         feat.Emoji,
+		BranchName:    branch,
 		State:         string(feat.State),
 		StateManual:   feat.StateManual,
 		CreatedAt:     feat.CreatedAt,
@@ -246,6 +268,24 @@ func (f *FeatureService) SetFeatureEmoji(repoPrefix, slug, emoji string) (Featur
 		return FeatureDetail{}, err
 	}
 	if _, err := f.client.UpdateFeature(ctx, repo, slug, nil, nil, &emoji, nil, false); err != nil {
+		return FeatureDetail{}, err
+	}
+	return f.GetFeature(repoPrefix, slug)
+}
+
+// SetFeatureBranchName (BACI-231) updates the per-feature integration
+// branch and returns the refreshed FeatureDetail. Empty string clears
+// the branch (the feature ships straight to main again). Validates at
+// the store boundary via ValidateBranchName so invalid refnames
+// (whitespace, leading `-`, embedded `..`, etc.) surface as an error
+// from the client. Parallel to SetFeatureEmoji.
+func (f *FeatureService) SetFeatureBranchName(repoPrefix, slug, branch string) (FeatureDetail, error) {
+	ctx := context.Background()
+	repo, err := f.resolveRepo(ctx, repoPrefix)
+	if err != nil {
+		return FeatureDetail{}, err
+	}
+	if _, err := f.client.UpdateFeature(ctx, repo, slug, nil, nil, nil, &branch, false); err != nil {
 		return FeatureDetail{}, err
 	}
 	return f.GetFeature(repoPrefix, slug)

@@ -159,6 +159,13 @@ type BoardCard struct {
 	// feature has no emoji set — the kanban card renders the slot
 	// only when truthy.
 	FeatureEmoji string `json:"featureEmoji,omitempty"`
+	// FeatureBranchName (BACI-231) is the parent feature's integration
+	// branch (e.g. "feat/auth") denormalised from the issue's joined
+	// feature row. Empty (and omitted from JSON) when the card belongs
+	// to no feature or to a feature that ships straight to main — the
+	// kanban card renders the branch chip and the ActivityTray groups
+	// cards by branch only when this is truthy.
+	FeatureBranchName string `json:"featureBranchName,omitempty"`
 	// WaitingState (BACI-145) carries the structured reason a card is
 	// rendering the spinner — queued without an agent, queued but
 	// blocked by the template's concurrency cap, or delivered to the
@@ -578,6 +585,7 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 			Claude:             iss.Assignee == "claude",
 			Taken:              e.taken,
 			FeatureEmoji:       iss.FeatureEmoji,
+			FeatureBranchName:  iss.FeatureBranchName,
 			WaitingState:       ws,
 			ActiveVerb:         e.verb,
 			TodosDone:          e.todosDone,
