@@ -6,178 +6,60 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/model"
 )
 
-// TestTakenInlinedOnListAndShow locks in BACI-37: the derived `taken`
-// flag is populated on every issue read path (list, show, brief — all of
-// which go through scanIssue), driven by the same join the desktop's
-// ListOpenClaims runs. A fresh issue is not taken; an open claim flips
-// it; a release flips it back; an ended session does not count.
-func TestTakenInlinedOnListAndShow(t *testing.T) {
-	s, repo, iss := seedRepoAndIssue(t)
-
-	// Fresh issue: not taken.
-	got, err := s.GetIssueByID(iss.ID)
-	if err != nil {
-		t.Fatalf("get fresh: %v", err)
-	}
-	if got.Taken {
-		t.Fatal("fresh issue reports taken=true")
-	}
-	list, err := s.ListIssues(IssueFilter{RepoID: &repo.ID})
-	if err != nil {
-		t.Fatalf("list fresh: %v", err)
-	}
-	if len(list) != 1 || list[0].Taken {
-		t.Fatalf("ListIssues reported taken on a fresh issue: %+v", list)
-	}
-
-	// Open claim against an alive session flips taken to true on every
-	// read path.
-	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
-		SessionID: "taken-sess", RepoID: repo.ID, Actor: "agent-claude",
-	}); err != nil {
-		t.Fatalf("register: %v", err)
-	}
-	if _, _, _, _, err := s.AddAgentClaim("taken-sess", iss.ID, "claimed"); err != nil {
-		t.Fatalf("claim: %v", err)
-	}
-	got, err = s.GetIssueByID(iss.ID)
-	if err != nil {
-		t.Fatalf("get after claim: %v", err)
-	}
-	if !got.Taken {
-		t.Fatal("GetIssueByID reports taken=false after an open claim")
-	}
-	list, err = s.ListIssues(IssueFilter{RepoID: &repo.ID})
-	if err != nil {
-		t.Fatalf("list after claim: %v", err)
-	}
-	if len(list) != 1 || !list[0].Taken {
-		t.Fatalf("ListIssues did not surface taken: %+v", list)
-	}
-
-	// Releasing the claim flips taken back to false.
-	if _, _, _, err := s.ReleaseAgentClaim("taken-sess", iss.ID, model.StateInProgress); err != nil {
-		t.Fatalf("release: %v", err)
-	}
-	got, err = s.GetIssueByID(iss.ID)
-	if err != nil {
-		t.Fatalf("get after release: %v", err)
-	}
-	if got.Taken {
-		t.Fatal("released claim still reports taken=true")
-	}
-
-	// Claim again, then end the session — taken must drop back to false
-	// (an ended session isn't busy, matching OpenClaimsBySession's gate).
-	if _, _, _, _, err := s.AddAgentClaim("taken-sess", iss.ID, "again"); err != nil {
-		t.Fatalf("re-claim: %v", err)
-	}
-	if _, _, _, _, _, err := s.EndAgentSession("taken-sess", string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel); err != nil {
-		t.Fatalf("end: %v", err)
-	}
-	got, err = s.GetIssueByID(iss.ID)
-	if err != nil {
-		t.Fatalf("get after end: %v", err)
-	}
-	if got.Taken {
-		t.Fatal("issue still reports taken=true after the holding session ended")
-	}
-}
-
-// TestWaitingForClaimDefaultsFalse locks in that a freshly created issue
-// has waiting_for_claim = false and that the column round-trips through
-// the read paths.
-func TestWaitingForClaimDefaultsFalse(t *testing.T) {
-	s, _, iss := seedRepoAndIssue(t)
-	if iss.WaitingForClaim {
-		t.Fatal("freshly created issue has waiting_for_claim = true, want false")
-	}
-	got, err := s.GetIssueByID(iss.ID)
-	if err != nil {
-		t.Fatalf("get issue: %v", err)
-	}
-	if got.WaitingForClaim {
-		t.Fatal("read path reports waiting_for_claim = true on a fresh issue")
-	}
-}
-
-// TestSetWaitingForClaimRoundTrips checks the explicit setter flips the
-// flag both ways and that ListIssues reflects it.
-func TestSetWaitingForClaimRoundTrips(t *testing.T) {
-	s, repo, iss := seedRepoAndIssue(t)
-	if err := s.SetWaitingForClaim(iss.ID, true); err != nil {
-		t.Fatalf("set true: %v", err)
-	}
-	got, err := s.GetIssueByID(iss.ID)
-	if err != nil {
-		t.Fatalf("get issue: %v", err)
-	}
-	if !got.WaitingForClaim {
-		t.Fatal("waiting_for_claim = false after SetWaitingForClaim(true)")
-	}
-	list, err := s.ListIssues(IssueFilter{RepoID: &repo.ID})
-	if err != nil {
-		t.Fatalf("list issues: %v", err)
-	}
-	if len(list) != 1 || !list[0].WaitingForClaim {
-		t.Fatalf("ListIssues did not reflect waiting_for_claim: %+v", list)
-	}
-	if err := s.SetWaitingForClaim(iss.ID, false); err != nil {
-		t.Fatalf("set false: %v", err)
-	}
-	got, err = s.GetIssueByID(iss.ID)
-	if err != nil {
-		t.Fatalf("get issue: %v", err)
-	}
-	if got.WaitingForClaim {
-		t.Fatal("waiting_for_claim = true after SetWaitingForClaim(false)")
-	}
-}
-
-// TestAddDispatchSetsWaitingForClaim locks in that dispatching against a
-// concrete issue flips its waiting_for_claim flag — the dispatch→claim
-// gap this feature closes.
-func TestAddDispatchSetsWaitingForClaim(t *testing.T) {
+// TestWaitingDispatchVisibleImmediatelyAfterAddDispatch (BACI-255) pins
+// the visibility guarantee the dropped waiting_for_claim cache used to
+// provide implicitly: a queued dispatch against an issue is visible
+// through WaitingDispatchForIssue immediately after AddDispatch returns,
+// inside the same connection, with no intervening reload. Pre-BACI-255
+// the AddDispatch transaction also stamped issues.waiting_for_claim,
+// and that boolean was the gate every reader consulted; removing the
+// cache means readers go straight to agent_dispatches, and this test
+// keeps the round-trip honest.
+func TestWaitingDispatchVisibleImmediatelyAfterAddDispatch(t *testing.T) {
 	s, repo, iss, ag, _ := seedDispatchFixture(t)
-	if _, err := s.AddDispatch(AddDispatchIn{
+
+	pre, err := s.WaitingDispatchForIssue(repo.ID, iss.ID)
+	if err != nil {
+		t.Fatalf("WaitingDispatchForIssue (pre): %v", err)
+	}
+	if pre != nil {
+		t.Fatalf("pre-dispatch WaitingDispatchForIssue = %+v, want nil", pre)
+	}
+
+	d, err := s.AddDispatch(AddDispatchIn{
 		RepoID:        repo.ID,
 		TargetAgentID: &ag.ID,
 		IssueID:       &iss.ID,
 		Payload:       "pick this up",
 		CreatedBy:     "supervisor",
-	}); err != nil {
-		t.Fatalf("add dispatch: %v", err)
-	}
-	got, err := s.GetIssueByID(iss.ID)
+	})
 	if err != nil {
-		t.Fatalf("get issue: %v", err)
-	}
-	if !got.WaitingForClaim {
-		t.Fatal("waiting_for_claim = false after AddDispatch against the issue")
-	}
-}
-
-// TestAddDispatchNoIssueLeavesFlagAlone checks that a dispatch with no
-// issue target is a clean no-op for waiting_for_claim — no panic, no
-// stray update.
-func TestAddDispatchNoIssueLeavesFlagAlone(t *testing.T) {
-	s, repo, _, ag, _ := seedDispatchFixture(t)
-	if _, err := s.AddDispatch(AddDispatchIn{
-		RepoID:        repo.ID,
-		TargetAgentID: &ag.ID,
-		Payload:       "no issue attached",
-		CreatedBy:     "supervisor",
-	}); err != nil {
 		t.Fatalf("add dispatch: %v", err)
 	}
-	// Nothing to assert beyond "it didn't error / panic" — there is no
-	// issue to inspect. The test exists to exercise the in.IssueID == nil
-	// branch of AddDispatch.
+
+	got, err := s.WaitingDispatchForIssue(repo.ID, iss.ID)
+	if err != nil {
+		t.Fatalf("WaitingDispatchForIssue (post): %v", err)
+	}
+	if got == nil {
+		t.Fatal("WaitingDispatchForIssue = nil immediately after AddDispatch; spinner state must be visible without a reload")
+	}
+	if got.ID != d.ID {
+		t.Fatalf("WaitingDispatchForIssue.ID = %d, want %d", got.ID, d.ID)
+	}
 }
 
-// TestAddAgentClaimClearsWaitingForClaim locks in the core lifecycle:
-// dispatch sets the flag, a fresh open claim clears it.
-func TestAddAgentClaimClearsWaitingForClaim(t *testing.T) {
+// TestWaitingDispatchClearsAfterClaim (BACI-255) — the lifecycle from
+// the kanban's perspective: a queued dispatch is "waiting", a fresh
+// open claim ends the waiting state. Pre-BACI-255 the assertion was
+// against issues.waiting_for_claim transitioning 1→0 in the same
+// transaction as the claim; post-BACI-255 it's against the dispatch
+// row's status, since the row itself is the signal. AddAgentClaim
+// does NOT mutate the dispatch row directly (that happens at ack
+// time), but the kanban's `taken` derivation pre-empts the waiting
+// render once an open claim exists — the brief and the React
+// pipeline both surface this as taken-not-waiting.
+func TestWaitingDispatchClearsAfterClaim(t *testing.T) {
 	s, repo, iss, ag, sess := seedDispatchFixture(t)
 	if _, err := s.AddDispatch(AddDispatchIn{
 		RepoID:        repo.ID,
@@ -188,12 +70,12 @@ func TestAddAgentClaimClearsWaitingForClaim(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("add dispatch: %v", err)
 	}
-	got, err := s.GetIssueByID(iss.ID)
+	got, err := s.WaitingDispatchForIssue(repo.ID, iss.ID)
 	if err != nil {
-		t.Fatalf("get issue after dispatch: %v", err)
+		t.Fatalf("get waiting (post-dispatch): %v", err)
 	}
-	if !got.WaitingForClaim {
-		t.Fatal("waiting_for_claim = false after dispatch, want true")
+	if got == nil {
+		t.Fatal("WaitingDispatchForIssue = nil after queued AddDispatch")
 	}
 
 	if _, created, _, _, err := s.AddAgentClaim(sess.SessionID, iss.ID, "on it"); err != nil {
@@ -201,51 +83,28 @@ func TestAddAgentClaimClearsWaitingForClaim(t *testing.T) {
 	} else if !created {
 		t.Fatal("AddAgentClaim reported created = false for a fresh claim")
 	}
-	got, err = s.GetIssueByID(iss.ID)
+
+	// The claim establishes `taken` (via the EXISTS join in
+	// issueSelect); the dispatch row is still in flight (the claim
+	// path doesn't ack it), but the kanban gives `taken` precedence
+	// over `waiting` so the spinner clears. The dispatch is only
+	// considered "settled" when AckDispatch / CancelDispatch flips
+	// its status — verify the row is still queryable so the cancel
+	// path stays reachable from the spinner-as-cancel button.
+	gotIss, err := s.GetIssueByID(iss.ID)
 	if err != nil {
 		t.Fatalf("get issue after claim: %v", err)
 	}
-	if got.WaitingForClaim {
-		t.Fatal("waiting_for_claim = true after an agent claimed the issue")
+	if !gotIss.Taken {
+		t.Fatal("issue.Taken = false after AddAgentClaim, want true")
 	}
 }
 
-// TestNoopReclaimDoesNotTouchWaitingForClaim checks that a no-op
-// re-claim (same session, same issue, already open) does not clear the
-// flag — only the new-claim path does. Contrived but locks in the
-// branch boundary.
-func TestNoopReclaimDoesNotTouchWaitingForClaim(t *testing.T) {
-	s, _, iss, _, sess := seedDispatchFixture(t)
-	// First claim — the new-claim path; clears the flag (which is false
-	// here anyway).
-	if _, created, _, _, err := s.AddAgentClaim(sess.SessionID, iss.ID, "first"); err != nil {
-		t.Fatalf("first claim: %v", err)
-	} else if !created {
-		t.Fatal("first claim reported created = false")
-	}
-	// Re-set the flag behind the claim, then re-claim: the no-op branch
-	// must leave it alone.
-	if err := s.SetWaitingForClaim(iss.ID, true); err != nil {
-		t.Fatalf("set flag: %v", err)
-	}
-	if _, created, _, _, err := s.AddAgentClaim(sess.SessionID, iss.ID, "again"); err != nil {
-		t.Fatalf("re-claim: %v", err)
-	} else if created {
-		t.Fatal("re-claim reported created = true, want false (no-op)")
-	}
-	got, err := s.GetIssueByID(iss.ID)
-	if err != nil {
-		t.Fatalf("get issue: %v", err)
-	}
-	if !got.WaitingForClaim {
-		t.Fatal("no-op re-claim cleared waiting_for_claim; only the new-claim path should")
-	}
-}
-
-// TestCancelDispatchClearsWaitingForClaim locks in that cancelling a
-// dispatch clears the issue's flag — a cancelled dispatch is no longer
-// "waiting".
-func TestCancelDispatchClearsWaitingForClaim(t *testing.T) {
+// TestWaitingDispatchClearsAfterCancel (BACI-255) — CancelDispatch
+// flips the row's status to 'cancelled', so WaitingDispatchForIssue
+// (which filters status IN queued/pending/delivered) stops returning
+// it. This is the canonical "spinner clears" path.
+func TestWaitingDispatchClearsAfterCancel(t *testing.T) {
 	s, repo, iss, ag, _ := seedDispatchFixture(t)
 	d, err := s.AddDispatch(AddDispatchIn{
 		RepoID:        repo.ID,
@@ -260,14 +119,35 @@ func TestCancelDispatchClearsWaitingForClaim(t *testing.T) {
 	if _, err := s.CancelDispatch(d.ID); err != nil {
 		t.Fatalf("cancel dispatch: %v", err)
 	}
-	got, err := s.GetIssueByID(iss.ID)
+	got, err := s.WaitingDispatchForIssue(repo.ID, iss.ID)
+	if err != nil {
+		t.Fatalf("get waiting (post-cancel): %v", err)
+	}
+	if got != nil {
+		t.Fatalf("WaitingDispatchForIssue = %+v after cancel, want nil", got)
+	}
+	gotIss, err := s.GetIssueByID(iss.ID)
 	if err != nil {
 		t.Fatalf("get issue: %v", err)
 	}
-	if got.WaitingForClaim {
-		t.Fatal("waiting_for_claim = true after the dispatch was cancelled")
+	if gotIss.State != model.StateTodo {
+		t.Fatalf("issue state = %q after cancel, want todo (cancel must not touch state)", gotIss.State)
 	}
-	if got.State != model.StateTodo {
-		t.Fatalf("issue state = %q, want todo (cancel must not touch state)", got.State)
+}
+
+// TestWaitingDispatchHonoursNoIssue (BACI-255) — AddDispatch without
+// an issue target is a clean no-op for the waiting signal: nothing to
+// inspect because there's no issue to inspect against. The test exists
+// to exercise the in.IssueID == nil branch of AddDispatch and confirm
+// it doesn't error.
+func TestWaitingDispatchHonoursNoIssue(t *testing.T) {
+	s, repo, _, ag, _ := seedDispatchFixture(t)
+	if _, err := s.AddDispatch(AddDispatchIn{
+		RepoID:        repo.ID,
+		TargetAgentID: &ag.ID,
+		Payload:       "no issue attached",
+		CreatedBy:     "supervisor",
+	}); err != nil {
+		t.Fatalf("add dispatch: %v", err)
 	}
 }

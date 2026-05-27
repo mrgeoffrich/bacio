@@ -83,7 +83,6 @@ CREATE TABLE IF NOT EXISTS issues (
     state       TEXT    NOT NULL CHECK (state IN
                   ('todo','in_progress','needs_action','in_review','done','cancelled')),
     assignee    TEXT    NOT NULL DEFAULT '',
-    waiting_for_claim INTEGER NOT NULL DEFAULT 0,
     -- archived_at (BACI-68) doubles as the boolean "hidden from default
     -- views" flag and the audit timestamp of when the row was hidden.
     -- NULL = visible; non-NULL = archived. The auto-sweep stamps it

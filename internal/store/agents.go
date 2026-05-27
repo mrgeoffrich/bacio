@@ -698,17 +698,15 @@ func (s *Store) EndAgentSession(sessionID, reason string, orphanState model.Stat
 //
 // Cascade modes (see DispatchCascadeMode):
 //   - Cancel: rows land in `status='cancelled'`. NewStatus is
-//     DispatchCancelled. Also clears issues.waiting_for_claim for each
-//     dispatch that targets an issue — same logic CancelDispatch uses,
-//     so the desktop / web spinner clears on the next refresh.
+//     DispatchCancelled. Post-BACI-255 the cancelled status on the
+//     row itself is the spinner-off signal — no denormalised issue
+//     flag to clear.
 //   - Requeue (BACI-133, presumed_dead only): rows flip back to
 //     `status='queued'` with target_session_id='' and
 //     target_agent_id=NULL so the BACI-51 matcher rebinds them to a
-//     fresh agent on its next tick. NewStatus is DispatchQueued.
-//     issues.waiting_for_claim is intentionally LEFT SET — a queued
-//     row is exactly the case the flag exists for, and the matcher's
-//     next bind keeps it set; a subsequent claim clears it the usual
-//     way.
+//     fresh agent on its next tick. NewStatus is DispatchQueued. The
+//     queued row keeps the card in the spinner state via
+//     WaitingDispatchForIssue until a fresh bind/claim resolves it.
 //
 // Identity-scoped re-queue: when the dying session is the identity's
 // last live one, an identity-targeted dispatch loses its identity
@@ -835,30 +833,13 @@ func resolveOpenDispatchesForSession(tx *sql.Tx, sessPK int64, cascade DispatchC
 		return nil, nil
 	}
 
-	// Cancel branch only: clear issues.waiting_for_claim for every
-	// cancelled dispatch that targets an issue — same logic
-	// CancelDispatch uses. The cancelled dispatch row still carries its
-	// issue_id (the update only touched status), so the subquery
-	// resolves correctly. Harmless if another open dispatch still
-	// targets the same issue: the next AddDispatch / AddAgentClaim
-	// re-establishes the flag.
-	//
-	// Requeue branch deliberately leaves the flag set — a queued row is
-	// exactly the "waiting for claim" case.
-	if cascade == DispatchCascadeCancel {
-		for _, info := range out {
-			if info.IssueKey == "" {
-				continue
-			}
-			if _, err := tx.Exec(
-				`UPDATE issues SET waiting_for_claim = 0
-				  WHERE id = (SELECT issue_id FROM agent_dispatches WHERE id = ?)`,
-				info.ID,
-			); err != nil {
-				return nil, err
-			}
-		}
-	}
+	// BACI-255: no denormalised waiting_for_claim cache to clear. The
+	// dispatch status update above (cancel/requeue) is the canonical
+	// signal — readers check the dispatch row itself. The requeue
+	// branch leaves the row visible to the matcher as before (status =
+	// queued + no target), so the spinner stays on; the cancel branch
+	// flipped status to cancelled, so WaitingDispatchForIssue stops
+	// returning the row.
 
 	return out, nil
 }
@@ -969,14 +950,11 @@ func (s *Store) AddAgentClaim(sessionID string, issueID int64, prompt string) (*
 	if err != nil {
 		return nil, false, nil, nil, err
 	}
-	// A fresh open claim clears the issue's waiting_for_claim flag — an
-	// agent has picked the work up, so the dispatch→claim gap is closed.
-	// Only on this new-claim path, not the no-op re-claim above.
-	if _, err := tx.Exec(
-		`UPDATE issues SET waiting_for_claim = 0 WHERE id = ?`, issueID,
-	); err != nil {
-		return nil, false, nil, nil, err
-	}
+	// BACI-255: the claim itself is what stops the spinner — the
+	// kanban's `taken` derivation reads open agent_claims, and the
+	// claim row joined here pre-empts the waiting render in
+	// IssueLockBanner and the kanban card. No denormalised
+	// waiting_for_claim cache to clear.
 	if err := tx.Commit(); err != nil {
 		return nil, false, nil, nil, err
 	}

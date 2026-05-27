@@ -46,7 +46,13 @@ export default function IssueWorkspace({
 
   const issueMeta = brief?.issue;
   const taken = !!brief?.taken;
-  const waiting = !!brief?.waitingForClaim && !taken;
+  // BACI-255: the brief no longer carries a denormalised
+  // waitingForClaim boolean — the brief's structured `waitingState`
+  // (BACI-145) is the sole signal. A non-null waitingState means the
+  // card has an active queued/pending/delivered dispatch and should
+  // render as waiting; `taken` still wins so a card with both an open
+  // claim and a stale-but-not-yet-acked dispatch renders as taken.
+  const waiting = !!brief?.waitingState && !taken;
 
   // BACI-203: LinkedDocPanel no longer renders bodies inline (it's a
   // link to the canonical /documents/<filename> page now), so the

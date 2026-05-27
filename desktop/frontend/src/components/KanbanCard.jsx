@@ -91,8 +91,10 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDra
   // waiting?" projection. Non-null when a dispatch is in flight (any
   // of queued / pending / delivered); the label and the cancel-button
   // gate flow off its `kind`. `taken` wins — once an agent claims,
-  // waiting_for_claim is cleared in the same txn so the two shouldn't
-  // overlap, but render defensively if they do.
+  // the claim row pre-empts the waiting render. BACI-255: the
+  // server's waitingState IS the signal now (no denormalised boolean
+  // riding alongside), but render defensively if `taken` and
+  // `waiting` somehow overlap.
   const waitingState = card.waitingState || null;
   const waiting = !!waitingState && !taken;
   // delivered: the worker has taken the Task and cancel-after-delivery

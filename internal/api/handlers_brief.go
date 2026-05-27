@@ -85,28 +85,30 @@ func (d deps) handleIssueBrief(w http.ResponseWriter, r *http.Request) {
 		claimants = []*model.AgentClaim{}
 	}
 
-	// BACI-145: derive WaitingState for the IssueLockBanner. Best-
-	// effort — a failure in any of the three reads degrades to a nil
-	// WaitingState (the banner falls back to the unlabelled spinner
-	// rather than the inline label), so brief read latency isn't
-	// gated on the dispatch / templates tables being live.
+	// BACI-145 / BACI-255: derive WaitingState for the IssueLockBanner
+	// directly from the dispatch table. A non-nil
+	// WaitingDispatchForIssue result IS the "is this card waiting?"
+	// signal; the denormalised issues.waiting_for_claim cache that
+	// used to gate this branch was removed because it could drift.
+	// Best-effort — a failure in any of the three reads degrades to a
+	// nil WaitingState (the banner falls back to the unlabelled
+	// spinner rather than the inline label), so brief read latency
+	// isn't gated on the dispatch / templates tables being live.
 	var waitingState *boardcards.WaitingState
-	if iss.WaitingForClaim {
-		activeDispatch, derr := d.store.WaitingDispatchForIssue(repo.ID, iss.ID)
-		if derr == nil {
-			// BACI-227: per-(mode, branch) in-flight grouping so the
-			// IssueLockBanner's WaitingState tracks the matcher's
-			// per-branch concurrency gate exactly.
-			inflight, ierr := d.store.InflightByModeBaseForRepo(repo.ID)
-			if ierr != nil {
-				inflight = map[store.InflightKey]int{}
-			}
-			templates, terr := d.store.ListPromptTemplates()
-			if terr != nil {
-				templates = nil
-			}
-			waitingState = boardcards.DeriveWaitingState(iss, activeDispatch, inflight, templates)
+	activeDispatch, derr := d.store.WaitingDispatchForIssue(repo.ID, iss.ID)
+	if derr == nil && activeDispatch != nil {
+		// BACI-227: per-(mode, branch) in-flight grouping so the
+		// IssueLockBanner's WaitingState tracks the matcher's
+		// per-branch concurrency gate exactly.
+		inflight, ierr := d.store.InflightByModeBaseForRepo(repo.ID)
+		if ierr != nil {
+			inflight = map[store.InflightKey]int{}
 		}
+		templates, terr := d.store.ListPromptTemplates()
+		if terr != nil {
+			templates = nil
+		}
+		waitingState = boardcards.DeriveWaitingState(iss, activeDispatch, inflight, templates)
 	}
 
 	// BACI-216: same per-issue plan lookup as the show handler so the

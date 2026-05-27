@@ -1302,8 +1302,7 @@ func TestFollowOnForIssue_DormantOnly(t *testing.T) {
 // guard: once a dispatch is delivered (the worker has taken the Task
 // call) the row must not be cancellable, because doing so would just
 // drop the kanban activity pill while the work continues. The reject
-// happens before the transaction so neither the dispatch row nor the
-// issue's waiting_for_claim flag is mutated.
+// happens before the transaction so the dispatch row is not mutated.
 func TestCancelDeliveredRejected(t *testing.T) {
 	s, repo, iss, ag, _ := seedDispatchFixture(t)
 	d, err := s.AddDispatch(AddDispatchIn{
@@ -1334,14 +1333,15 @@ func TestCancelDeliveredRejected(t *testing.T) {
 	if got.Status != model.DispatchDelivered {
 		t.Errorf("status after rejected cancel = %q, want delivered", got.Status)
 	}
-	// The reject must not clear the issue's waiting_for_claim flag
-	// either — the claim path is what clears it, not a failed cancel.
-	issAfter, err := s.GetIssueByID(iss.ID)
+	// BACI-255: the row is the spinner signal. The rejected cancel
+	// must leave it in 'delivered', so WaitingDispatchForIssue keeps
+	// returning it — the kanban keeps rendering the spinner.
+	wd, err := s.WaitingDispatchForIssue(repo.ID, iss.ID)
 	if err != nil {
-		t.Fatalf("re-read issue: %v", err)
+		t.Fatalf("WaitingDispatchForIssue: %v", err)
 	}
-	if !issAfter.WaitingForClaim {
-		t.Errorf("issue.waiting_for_claim = false, want true (rejected cancel must not clear)")
+	if wd == nil || wd.ID != d.ID {
+		t.Errorf("WaitingDispatchForIssue = %+v, want the same delivered row (rejected cancel must not change visibility)", wd)
 	}
 }
 
@@ -1516,9 +1516,9 @@ func TestBindQueuedDispatch_RequeueRecoversDeliveredDispatch(t *testing.T) {
 
 // TestAddDispatchWithFollowOn_HappyPath (BACI-209) — the canonical
 // shape: both rows land in one transaction, the follow-on links to the
-// just-inserted parent, the issue's waiting_for_claim is flipped, and
-// the matcher gate hides the follow-on while the parent is still
-// queued.
+// just-inserted parent, the parent surfaces as the issue's "waiting"
+// dispatch (BACI-255: the row itself is the signal), and the matcher
+// gate hides the follow-on while the parent is still queued.
 func TestAddDispatchWithFollowOn_HappyPath(t *testing.T) {
 	s, repo, iss, _, _ := seedDispatchFixture(t)
 	parent, follow, err := s.AddDispatchWithFollowOn(AddDispatchWithFollowOnIn{
@@ -1553,13 +1553,15 @@ func TestAddDispatchWithFollowOn_HappyPath(t *testing.T) {
 	if string(follow.Mode) != string(model.DispatchModeImplement) {
 		t.Errorf("follow mode = %q, want %q", follow.Mode, model.DispatchModeImplement)
 	}
-	// Issue's waiting_for_claim flipped.
-	iss2, err := s.GetIssueByID(iss.ID)
+	// BACI-255: the parent is the active "waiting" dispatch — the
+	// row itself is the spinner signal. The follow-on is dormant (has
+	// queued_after_dispatch_id set), so it's not the active row.
+	wd, err := s.WaitingDispatchForIssue(repo.ID, iss.ID)
 	if err != nil {
-		t.Fatalf("get issue: %v", err)
+		t.Fatalf("WaitingDispatchForIssue: %v", err)
 	}
-	if !iss2.WaitingForClaim {
-		t.Errorf("issue.waiting_for_claim = false, want true")
+	if wd == nil || wd.ID != parent.ID {
+		t.Errorf("WaitingDispatchForIssue = %+v, want the parent (%d)", wd, parent.ID)
 	}
 	// Matcher gates: with the parent still queued (not settled), neither
 	// the parent's mode nor the follow-on's mode is bindable — the parent
@@ -1582,8 +1584,10 @@ func TestAddDispatchWithFollowOn_HappyPath(t *testing.T) {
 
 // TestAddDispatchWithFollowOn_BadFollowOnRollsBackParent (BACI-209) —
 // an unparseable follow-on mode must reject the call before any INSERT,
-// so neither row lands and waiting_for_claim stays untouched. Critical
-// for the single-transaction promise: callers must never end up in a
+// so neither row lands. BACI-255: the visibility check is now against
+// the dispatch table directly (no denormalised cache), so a "no row at
+// all" outcome implies the issue is not waiting. Critical for the
+// single-transaction promise: callers must never end up in a
 // half-queued state.
 func TestAddDispatchWithFollowOn_BadFollowOnRollsBackParent(t *testing.T) {
 	s, repo, iss, _, _ := seedDispatchFixture(t)
@@ -1604,12 +1608,12 @@ func TestAddDispatchWithFollowOn_BadFollowOnRollsBackParent(t *testing.T) {
 	if len(ds) != 0 {
 		t.Fatalf("rolled-back call left %d dispatch row(s), want 0", len(ds))
 	}
-	iss2, err := s.GetIssueByID(iss.ID)
+	wd, err := s.WaitingDispatchForIssue(repo.ID, iss.ID)
 	if err != nil {
-		t.Fatalf("get issue: %v", err)
+		t.Fatalf("WaitingDispatchForIssue: %v", err)
 	}
-	if iss2.WaitingForClaim {
-		t.Errorf("issue.waiting_for_claim = true after rejected call, want false")
+	if wd != nil {
+		t.Errorf("WaitingDispatchForIssue = %+v after rejected call, want nil", wd)
 	}
 }
 
@@ -1693,12 +1697,13 @@ func seedBlockerFixture(t *testing.T) (*Store, *model.Repo, *model.Issue, *model
 // TestAddBlockerFollowOnDispatch_HappyPath (BACI-217) locks in the
 // blockers-clear insert path. A blocked-and-idle issue with at least
 // one open blocker writes a queued row with the new flag set, no
-// parent-acks link, no target. The issue's waiting_for_claim flag is
-// DELIBERATELY left alone — the dormant row is not waiting for the
-// matcher (it's waiting for the blocker gate), and flipping
-// waiting_for_claim would render a misleading spinner on an
-// otherwise-idle ticket. The chip is the right surface for this
-// variant.
+// parent-acks link, no target. The dormant variant deliberately stays
+// invisible to the kanban's "waiting" derivation — the dormant row
+// isn't waiting for the matcher (it's waiting for the blocker gate),
+// and surfacing it as waiting would render a misleading spinner on
+// an otherwise-idle ticket. BACI-255: enforced by the
+// activeDispatchByIssueID / TUI waitingIssues filters skipping any
+// queued row with a dormant gate.
 func TestAddBlockerFollowOnDispatch_HappyPath(t *testing.T) {
 	s, repo, blocked, _ := seedBlockerFixture(t)
 	d, err := s.AddBlockerFollowOnDispatch(repo.ID, blocked.ID, model.DispatchModePlan, "supervisor")
@@ -1713,13 +1718,6 @@ func TestAddBlockerFollowOnDispatch_HappyPath(t *testing.T) {
 	}
 	if d.Status != model.DispatchQueued {
 		t.Fatalf("status = %q, want queued", d.Status)
-	}
-	iss, err := s.GetIssueByID(blocked.ID)
-	if err != nil {
-		t.Fatalf("reload issue: %v", err)
-	}
-	if iss.WaitingForClaim {
-		t.Fatal("waiting_for_claim should NOT be set on a blockers-clear insert (the chip is the surface, not the spinner)")
 	}
 }
 
@@ -1806,11 +1804,11 @@ func TestAddBlockerFollowOnDispatch_SingleSlot(t *testing.T) {
 
 // TestPromoteReadyFollowOns_BlockerVariantFires (BACI-217) — when every
 // blocker is `done` the promote sweep clears the blockers-clear flag
-// so the matcher binds the row on its next tick. The blocked issue's
-// waiting_for_claim is also flipped on promote — the insert left it
-// alone (the dormant row was waiting for the gate, not the matcher),
-// so the promote is the moment the card legitimately enters waiting
-// state.
+// so the matcher binds the row on its next tick. BACI-255: the row's
+// own status (queued, no dormant gate) is what surfaces it through
+// WaitingDispatchForIssue — the promoted row is now the card's
+// "waiting" dispatch, so the kanban spinner lights up on the next
+// reload.
 func TestPromoteReadyFollowOns_BlockerVariantFires(t *testing.T) {
 	s, repo, blocked, blocker := seedBlockerFixture(t)
 	follow, err := s.AddBlockerFollowOnDispatch(repo.ID, blocked.ID, model.DispatchModePlan, "supervisor")
@@ -1852,14 +1850,17 @@ func TestPromoteReadyFollowOns_BlockerVariantFires(t *testing.T) {
 	if len(modes) != 1 || modes[0] != model.DispatchModePlan {
 		t.Fatalf("post-promote modes = %v, want [plan]", modes)
 	}
-	// The blocked issue's waiting_for_claim is set now — the spinner on
-	// the card lights up once the matcher is about to bind.
-	iss, err := s.GetIssueByID(blocked.ID)
+	// BACI-255: the promoted row is the issue's active dispatch — the
+	// spinner on the card lights up once the matcher is about to bind.
+	wd, err := s.WaitingDispatchForIssue(repo.ID, blocked.ID)
 	if err != nil {
-		t.Fatalf("reload issue: %v", err)
+		t.Fatalf("WaitingDispatchForIssue: %v", err)
 	}
-	if !iss.WaitingForClaim {
-		t.Fatal("waiting_for_claim should be set after promote (the row is now matcher-eligible)")
+	if wd == nil {
+		t.Fatal("WaitingDispatchForIssue = nil after promote; the promoted row should now satisfy the predicate")
+	}
+	if wd.ID != follow.ID {
+		t.Fatalf("WaitingDispatchForIssue id = %d, want %d (the promoted follow-on)", wd.ID, follow.ID)
 	}
 }
 

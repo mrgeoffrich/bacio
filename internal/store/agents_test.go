@@ -1257,10 +1257,14 @@ func TestEndAgentSessionPreservesIdentityWhenSiblingAlive(t *testing.T) {
 	}
 }
 
-// TestEndAgentSessionClearsWaitingForClaim (BACI-58 §B) locks in that
-// an auto-cancelled session-targeted dispatch clears its issue's
-// waiting_for_claim flag, same as the standalone CancelDispatch does.
-func TestEndAgentSessionClearsWaitingForClaim(t *testing.T) {
+// TestEndAgentSessionClearsWaitingDispatch (BACI-58 §B / BACI-255) —
+// when EndAgentSession cancels a session-targeted dispatch as part of
+// the cascade, the row flips to status='cancelled', so
+// WaitingDispatchForIssue stops returning it and the kanban spinner
+// clears. Pre-BACI-255 this also tested a denormalised
+// issues.waiting_for_claim 1→0 transition; that cache is gone, so the
+// invariant is checked against the dispatch row directly.
+func TestEndAgentSessionClearsWaitingDispatch(t *testing.T) {
 	s, repo, iss := seedRepoAndIssue(t)
 	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
 		SessionID: "wait-sess", RepoID: repo.ID, Actor: "agent-claude",
@@ -1276,24 +1280,25 @@ func TestEndAgentSessionClearsWaitingForClaim(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("add dispatch: %v", err)
 	}
-	// AddDispatch sets waiting_for_claim = 1 transactionally — confirm
-	// the precondition before the end-session call.
-	var before int
-	if err := s.DB.QueryRow(`SELECT waiting_for_claim FROM issues WHERE id = ?`, iss.ID).Scan(&before); err != nil {
-		t.Fatalf("read waiting before: %v", err)
+	// AddDispatch lands a queued row immediately visible through
+	// WaitingDispatchForIssue — confirm the precondition before the
+	// end-session call.
+	pre, err := s.WaitingDispatchForIssue(repo.ID, iss.ID)
+	if err != nil {
+		t.Fatalf("WaitingDispatchForIssue before: %v", err)
 	}
-	if before != 1 {
-		t.Fatalf("waiting_for_claim before end = %d, want 1 (AddDispatch should have set it)", before)
+	if pre == nil {
+		t.Fatal("WaitingDispatchForIssue = nil before end; AddDispatch should have left the row queryable")
 	}
 	if _, _, _, _, _, err := s.EndAgentSession("wait-sess", string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel); err != nil {
 		t.Fatalf("end: %v", err)
 	}
-	var after int
-	if err := s.DB.QueryRow(`SELECT waiting_for_claim FROM issues WHERE id = ?`, iss.ID).Scan(&after); err != nil {
-		t.Fatalf("read waiting after: %v", err)
+	post, err := s.WaitingDispatchForIssue(repo.ID, iss.ID)
+	if err != nil {
+		t.Fatalf("WaitingDispatchForIssue after: %v", err)
 	}
-	if after != 0 {
-		t.Fatalf("waiting_for_claim after end = %d, want 0 (BACI-58 §B should clear)", after)
+	if post != nil {
+		t.Fatalf("WaitingDispatchForIssue after end = %+v, want nil (the cascade-cancelled row should no longer be 'waiting')", post)
 	}
 }
 
@@ -1559,8 +1564,9 @@ func TestEndAgentSessionAppliesOrphanState(t *testing.T) {
 // the reaper force-ends with reason=presumed_dead and cascade=Requeue
 // comes back out queued (not cancelled), with target_session_id=''
 // and target_agent_id=NULL so the BACI-51 matcher can rebind it. The
-// linked issue's waiting_for_claim flag stays set — a queued row is
-// exactly the case the flag exists for.
+// requeued row is still visible to WaitingDispatchForIssue (BACI-255
+// — the row IS the signal), so the kanban spinner keeps spinning
+// while the matcher rebinds.
 func TestEndAgentSession_PresumedDeadRequeuesDispatches(t *testing.T) {
 	s, repo, iss := seedRepoAndIssue(t)
 	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
@@ -1612,14 +1618,19 @@ func TestEndAgentSession_PresumedDeadRequeuesDispatches(t *testing.T) {
 		t.Fatalf("target_agent_id = %v, want nil", *got.TargetAgentID)
 	}
 
-	// waiting_for_claim must stay 1: a queued row is the case the flag
-	// exists for, and the next AddAgentClaim will clear it the usual way.
-	var waiting int
-	if err := s.DB.QueryRow(`SELECT waiting_for_claim FROM issues WHERE id = ?`, iss.ID).Scan(&waiting); err != nil {
-		t.Fatalf("read waiting: %v", err)
+	// BACI-255: the requeued row is still active (status=queued), so
+	// WaitingDispatchForIssue keeps returning it — the spinner stays
+	// lit while the matcher rebinds to a fresh agent. The next claim
+	// is what stops it from being "waiting".
+	wd, err := s.WaitingDispatchForIssue(repo.ID, iss.ID)
+	if err != nil {
+		t.Fatalf("WaitingDispatchForIssue: %v", err)
 	}
-	if waiting != 1 {
-		t.Fatalf("waiting_for_claim = %d, want 1 (queued row still waits for claim)", waiting)
+	if wd == nil {
+		t.Fatal("WaitingDispatchForIssue = nil after requeue; queued row should still satisfy the predicate")
+	}
+	if wd.ID != d.ID {
+		t.Fatalf("WaitingDispatchForIssue id = %d, want %d (the requeued row)", wd.ID, d.ID)
 	}
 }
 

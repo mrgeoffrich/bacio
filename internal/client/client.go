@@ -581,9 +581,10 @@ type Client interface {
 	AckDispatch(ctx context.Context, in inputs.AgentAckInput, dryRun bool) (*model.AgentDispatch, error)
 	// CancelDispatch withdraws a pending or delivered dispatch (the
 	// dispatcher's side of ack). Cancelling an acked dispatch is an
-	// error; cancelling an already-cancelled one is a no-op. If the
-	// dispatch targets an issue, its waiting_for_claim flag is cleared
-	// in the same transaction.
+	// error; cancelling an already-cancelled one is a no-op. The
+	// cancelled row stops satisfying WaitingDispatchForIssue, so the
+	// kanban spinner on the targeted issue clears on the next refresh
+	// (BACI-255).
 	CancelDispatch(ctx context.Context, in inputs.AgentCancelInput, dryRun bool) (*model.AgentDispatch, error)
 	// DrainDispatches returns a session's un-acked dispatches (pending
 	// AND delivered) and marks any still-pending ones delivered — the
