@@ -537,9 +537,9 @@ export async function setFeatureHiddenOnBoard(
 }
 
 // setFeatureState (BACI-199) flips the feature's three-state column
-// and returns the refreshed FeatureDetail. Stamps the sticky bit so
-// the leader-elected archive-sweep's auto-completion pass leaves the
-// row alone until the user pins a new value.
+// and returns the refreshed FeatureDetail. BACI-250 decoupled this from
+// the auto-close pin — call setFeatureAutoClose to flip
+// `state_manual` independently.
 export async function setFeatureState(
   repoPrefix: string,
   slug: string,
@@ -547,6 +547,24 @@ export async function setFeatureState(
 ): Promise<FeatureDetail> {
   try {
     return await FeatureService.SetFeatureState(repoPrefix, slug, state);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// setFeatureAutoClose (BACI-250) flips the per-feature auto-close
+// toggle — the sticky-bit `state_manual` column that gates the
+// BACI-199 archive-sweep's auto-completion pass — and returns the
+// refreshed FeatureDetail. enabled=true clears the bit (the sweep may
+// promote this feature once every child is terminal); enabled=false
+// sets the bit (long-lived catch-alls stay `active` indefinitely).
+export async function setFeatureAutoClose(
+  repoPrefix: string,
+  slug: string,
+  enabled: boolean,
+): Promise<FeatureDetail> {
+  try {
+    return await FeatureService.SetFeatureAutoClose(repoPrefix, slug, enabled);
   } catch (err) {
     throw normalize(err);
   }

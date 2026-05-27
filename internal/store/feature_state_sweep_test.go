@@ -84,17 +84,21 @@ func TestArchiveSweep_FeatureAutoStateMixedPicksDone(t *testing.T) {
 }
 
 // TestArchiveSweep_FeatureAutoStateRespectsStickyBit: a feature whose
-// user pinned `cancelled` via SetFeatureState(..., manual=true) is
-// left untouched even when every child is `done` — the sticky bit
-// blocks sweep-driven re-promotion.
+// user pinned auto-close OFF via SetFeatureAutoClose is left untouched
+// even when every child is `done` — the sticky bit blocks sweep-driven
+// re-promotion. (Pre-BACI-250 the bit was a side-effect of every
+// SetFeatureState call; post-BACI-250 it is its own first-class verb.)
 func TestArchiveSweep_FeatureAutoStateRespectsStickyBit(t *testing.T) {
 	s := newTestStore(t)
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
 	feat, _ := s.CreateFeature(repo.ID, "demo", "Demo", "", "", "")
 	_, _ = s.CreateIssue(repo.ID, &feat.ID, "a", "", model.StateDone, nil, "")
 	_, _ = s.CreateIssue(repo.ID, &feat.ID, "b", "", model.StateDone, nil, "")
-	if err := s.SetFeatureState(feat.ID, model.FeatureStateCancelled, true); err != nil {
-		t.Fatalf("manual flip: %v", err)
+	if err := s.SetFeatureState(feat.ID, model.FeatureStateCancelled); err != nil {
+		t.Fatalf("set state cancelled: %v", err)
+	}
+	if err := s.SetFeatureAutoClose(feat.ID, false); err != nil {
+		t.Fatalf("auto-close off: %v", err)
 	}
 
 	res, err := s.ArchiveSweep(false)

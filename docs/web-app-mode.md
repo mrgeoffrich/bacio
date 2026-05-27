@@ -163,6 +163,7 @@ shapes into the desktop's `BoardCard` / `IssueDetail` / `DocSummary` /
 | `addComment(p, k, a, b)` | `POST /repos/{p}/issues/{k}/comments` then re-`getIssue` | Author falls back to `X-Actor` (default `"web"`, override via `localStorage['bacio.actor']`). |
 | `listFeatures(p)` | `GET /repos/{p}/features` | |
 | `getFeature(p, slug)` | `GET /repos/{p}/features/{slug}` | |
+| `setFeatureAutoClose(p, slug, enabled)` | `PUT /repos/{p}/features/{slug}/auto-close` (BACI-250) | Body `{enabled: bool}`. Flips the per-feature auto-close pin (`state_manual`) decoupled from `setFeatureState` — `enabled=false` keeps long-lived catch-alls active even when every child is terminal. Refetches via `getFeature`. Audits as `feature.auto-close`. |
 | `listHistory(p, page, pageSize)` | `GET /repos/{p}/history?limit=&offset=` | Over-fetches by one so `hasMore` is derivable client-side. |
 | `getDoc(p, name)` | `GET /repos/{p}/documents/{name}` | |
 | `saveDoc(p, name, content)` | `PUT /repos/{p}/documents/{name}` then re-`getDoc` | |

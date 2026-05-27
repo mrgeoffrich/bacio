@@ -169,6 +169,10 @@ func (c *remoteClient) archiveFeature(ctx context.Context, repo *model.Repo, slu
 // SetFeatureState (BACI-199) — PUT /repos/{prefix}/features/{slug}/state.
 // Body shape mirrors the IssueState handler: {"state": "..."} only —
 // the slug is path-resolved, so the JSON path doesn't repeat it.
+//
+// BACI-250 decoupled this endpoint from the auto-close pin: a state
+// write no longer stamps `state_manual`. Use SetFeatureAutoClose to
+// flip the pin.
 func (c *remoteClient) SetFeatureState(ctx context.Context, repo *model.Repo, slug string, state model.FeatureState, dryRun bool) (*model.Feature, error) {
 	q := url.Values{}
 	if dryRun {
@@ -177,6 +181,23 @@ func (c *remoteClient) SetFeatureState(ctx context.Context, repo *model.Repo, sl
 	body := map[string]any{"slug": slug, "state": string(state)}
 	var out model.Feature
 	if err := c.do(ctx, http.MethodPut, "/repos/"+repo.Prefix+"/features/"+slug+"/state", q, body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// SetFeatureAutoClose (BACI-250) — PUT
+// /repos/{prefix}/features/{slug}/auto-close with body {enabled: bool}.
+// Returns the refreshed feature row. Server stamps a
+// `feature.auto-close` audit entry on every real flip.
+func (c *remoteClient) SetFeatureAutoClose(ctx context.Context, repo *model.Repo, slug string, enabled, dryRun bool) (*model.Feature, error) {
+	q := url.Values{}
+	if dryRun {
+		q.Set("dry_run", "true")
+	}
+	body := map[string]any{"enabled": enabled}
+	var out model.Feature
+	if err := c.do(ctx, http.MethodPut, "/repos/"+repo.Prefix+"/features/"+slug+"/auto-close", q, body, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

@@ -52,6 +52,9 @@ func newRouter(d deps) http.Handler {
 	// issue-side `/issues/{key}/state` shape; archive / unarchive
 	// remain orthogonal under /archive + /unarchive.
 	mux.HandleFunc("PUT /repos/{prefix}/features/{slug}/state", d.handleFeatureState)
+	// BACI-250: per-feature auto-close toggle — the sticky `state_manual`
+	// bit decoupled from the state-flip path. Body: {"enabled": bool}.
+	mux.HandleFunc("PUT /repos/{prefix}/features/{slug}/auto-close", d.handleFeatureAutoClose)
 	mux.HandleFunc("GET /repos/{prefix}/features/{slug}/plan", d.handleFeaturePlan)
 	mux.HandleFunc("GET /repos/{prefix}/features/{slug}/next", d.handleFeatureNextPeek)
 	mux.HandleFunc("POST /repos/{prefix}/features/{slug}/next", d.handleFeatureNextClaim)

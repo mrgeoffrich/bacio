@@ -62,6 +62,15 @@ type FeatureStateInput struct {
 	State string `json:"state"`
 }
 
+// FeatureAutoCloseInput is the payload for `bacio feature auto-close
+// --json` (BACI-250). Both fields are required — boolean uses an
+// explicit value (no pointer) because the JSON schema must reject an
+// absent `enabled` field rather than defaulting to false.
+type FeatureAutoCloseInput struct {
+	Slug    string `json:"slug"`
+	Enabled bool   `json:"enabled"`
+}
+
 // FeatureCommentAddInput is the payload for `bacio feature comment add
 // --json` (BACI-124). The feature-scoped mirror of CommentAddInput —
 // feature_slug replaces issue_key because feature comments live under a

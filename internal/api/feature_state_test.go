@@ -10,11 +10,11 @@ import (
 // TestAPI_PutFeatureState_FlipsState (BACI-199) round-trips the
 // feature.state endpoint:
 //   - PUT /repos/{p}/features/{slug}/state with {state:"done"} flips
-//     the column and stamps state_manual=true,
+//     the column,
+//   - state_manual is NOT touched (BACI-250 decoupling),
 //   - the audit log carries one feature.state row with "active → done"
 //     in Details,
-//   - a follow-up PUT with {state:"cancelled"} flips again (no error
-//     because the verb is unconditional — every successful call mutates).
+//   - a follow-up PUT with {state:"cancelled"} flips again.
 func TestAPI_PutFeatureState_FlipsState(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
@@ -27,10 +27,22 @@ func TestAPI_PutFeatureState_FlipsState(t *testing.T) {
 	if !strings.Contains(string(body), `"state": "done"`) && !strings.Contains(string(body), `"state":"done"`) {
 		t.Fatalf("PUT response missing state:done, got %s", body)
 	}
-	if !strings.Contains(string(body), `"state_manual": true`) && !strings.Contains(string(body), `"state_manual":true`) {
-		t.Fatalf("PUT response missing state_manual:true, got %s", body)
+	// BACI-250: state writes no longer stamp state_manual. The row was
+	// seeded with state_manual=0; it must still be 0 after a state write.
+	if !strings.Contains(string(body), `"state_manual": false`) && !strings.Contains(string(body), `"state_manual":false`) {
+		t.Fatalf("PUT response state_manual not false, got %s", body)
 	}
 	assertHistoryOps(t, s, []string{"feature.state"})
+
+	// Verify the DB row directly — state_manual must remain false even
+	// though the state column flipped.
+	feat, err := s.GetFeatureBySlug(repo.ID, "auth")
+	if err != nil {
+		t.Fatalf("get feature: %v", err)
+	}
+	if feat.StateManual {
+		t.Fatalf("state_manual=true after state write; BACI-250 decoupling violated")
+	}
 
 	resp, body = apiPut(t, ts.URL+"/repos/MINI/features/auth/state", map[string]any{"slug": "auth", "state": "cancelled"})
 	if resp.StatusCode != 200 {
@@ -70,7 +82,9 @@ func TestAPI_PutFeatureState_UnknownSlug(t *testing.T) {
 }
 
 // TestAPI_PutFeatureState_DryRun confirms the projection path returns
-// the modified state + sticky bit but writes nothing.
+// the modified state but writes nothing. BACI-250: the projection no
+// longer asserts state_manual — state writes are orthogonal to the
+// auto-close pin.
 func TestAPI_PutFeatureState_DryRun(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)

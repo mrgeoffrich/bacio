@@ -484,9 +484,13 @@ func boardHiddenStateSetsEqual(a, b map[model.State]bool) bool {
 }
 
 // SetFeatureState (BACI-199) flips the feature's three-state column
-// and stamps the sticky bit so the auto-completion sweep leaves the
-// row alone. Records a `feature.state` audit row with Details of the
-// form "old → new" — same shape as SetIssueState.
+// and records a `feature.state` audit row with Details of the form
+// "old → new" — same shape as SetIssueState.
+//
+// BACI-250 decoupled this from the auto-close pin: the sticky
+// `state_manual` bit is no longer stamped as a side-effect of state
+// writes. Use SetFeatureAutoClose to pin / unpin a feature against the
+// BACI-199 auto-completion sweep.
 func (c *localClient) SetFeatureState(ctx context.Context, repo *model.Repo, slug string, state model.FeatureState, dryRun bool) (*model.Feature, error) {
 	feat, err := c.store.GetFeatureBySlug(repo.ID, slug)
 	if err != nil {
@@ -495,11 +499,10 @@ func (c *localClient) SetFeatureState(ctx context.Context, repo *model.Repo, slu
 	if dryRun {
 		projected := *feat
 		projected.State = state
-		projected.StateManual = true
 		return &projected, nil
 	}
 	oldState := feat.State
-	if err := c.store.SetFeatureState(feat.ID, state, true); err != nil {
+	if err := c.store.SetFeatureState(feat.ID, state); err != nil {
 		return nil, err
 	}
 	updated, err := c.store.GetFeatureByID(feat.ID)
@@ -511,6 +514,52 @@ func (c *localClient) SetFeatureState(ctx context.Context, repo *model.Repo, slu
 		Op: "feature.state", Kind: "feature",
 		TargetID: &updated.ID, TargetLabel: updated.Slug,
 		Details: fmt.Sprintf("%s → %s", oldState, state),
+	})
+	return updated, nil
+}
+
+// SetFeatureAutoClose (BACI-250) flips the per-feature auto-close
+// toggle (the sticky-bit `state_manual` column). Auto-close ON clears
+// the bit — the BACI-199 sweep may promote this feature to
+// done/cancelled once every child issue is terminal. Auto-close OFF
+// sets the bit — long-lived catch-all features (`bugs`, `maintenance`)
+// stay `active` indefinitely.
+//
+// Records a `feature.auto-close` audit row on every real flip; an
+// idempotent no-op (auto-close already at the requested value) skips
+// the audit so the history surface doesn't churn. The Details string
+// follows the `feature.state` shape — "off → on" / "on → off".
+func (c *localClient) SetFeatureAutoClose(ctx context.Context, repo *model.Repo, slug string, enabled, dryRun bool) (*model.Feature, error) {
+	feat, err := c.store.GetFeatureBySlug(repo.ID, slug)
+	if err != nil {
+		return nil, err
+	}
+	current := !feat.StateManual // auto-close ON iff state_manual is false
+	if dryRun {
+		projected := *feat
+		projected.StateManual = !enabled
+		return &projected, nil
+	}
+	if current == enabled {
+		// Idempotent — return the row unchanged and skip the audit row.
+		return feat, nil
+	}
+	if err := c.store.SetFeatureAutoClose(feat.ID, enabled); err != nil {
+		return nil, err
+	}
+	updated, err := c.store.GetFeatureByID(feat.ID)
+	if err != nil {
+		return nil, err
+	}
+	from, to := "on", "off"
+	if enabled {
+		from, to = "off", "on"
+	}
+	c.recordOp(model.HistoryEntry{
+		RepoID: &feat.RepoID, RepoPrefix: repo.Prefix,
+		Op: "feature.auto-close", Kind: "feature",
+		TargetID: &updated.ID, TargetLabel: updated.Slug,
+		Details: fmt.Sprintf("%s → %s", from, to),
 	})
 	return updated, nil
 }

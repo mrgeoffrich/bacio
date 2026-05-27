@@ -236,11 +236,12 @@ func (f *FeatureService) GetFeature(repoPrefix, slug string) (FeatureDetail, err
 }
 
 // SetFeatureState (BACI-199) flips the feature's three-state column
-// and returns the refreshed FeatureDetail. Sets state_manual = true
-// so the leader-elected archive-sweep's auto-completion pass leaves
-// the row alone until the user pins a new value. Parses the state
-// string at the boundary so a typo surfaces as a clear error from
-// the client.
+// and returns the refreshed FeatureDetail. Parses the state string at
+// the boundary so a typo surfaces as a clear error from the client.
+//
+// BACI-250 decoupled this from the auto-close pin: this method no
+// longer touches state_manual. Use SetFeatureAutoClose to flip the
+// per-feature pin against the BACI-199 auto-completion sweep.
 func (f *FeatureService) SetFeatureState(repoPrefix, slug, state string) (FeatureDetail, error) {
 	ctx := context.Background()
 	repo, err := f.resolveRepo(ctx, repoPrefix)
@@ -252,6 +253,26 @@ func (f *FeatureService) SetFeatureState(repoPrefix, slug, state string) (Featur
 		return FeatureDetail{}, err
 	}
 	if _, err := f.client.SetFeatureState(ctx, repo, slug, st, false); err != nil {
+		return FeatureDetail{}, err
+	}
+	return f.GetFeature(repoPrefix, slug)
+}
+
+// SetFeatureAutoClose (BACI-250) flips the per-feature auto-close
+// toggle — the sticky-bit `state_manual` column that gates the
+// BACI-199 archive-sweep's auto-completion pass — and returns the
+// refreshed FeatureDetail. enabled=true clears the bit (the sweep may
+// promote this feature once every child is terminal); enabled=false
+// sets the bit (long-lived catch-alls stay `active` indefinitely).
+// Idempotent — flipping to the same state is a no-op write. Mirrors
+// SetHiddenOnBoard's shape.
+func (f *FeatureService) SetFeatureAutoClose(repoPrefix, slug string, enabled bool) (FeatureDetail, error) {
+	ctx := context.Background()
+	repo, err := f.resolveRepo(ctx, repoPrefix)
+	if err != nil {
+		return FeatureDetail{}, err
+	}
+	if _, err := f.client.SetFeatureAutoClose(ctx, repo, slug, enabled, false); err != nil {
 		return FeatureDetail{}, err
 	}
 	return f.GetFeature(repoPrefix, slug)

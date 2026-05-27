@@ -1905,9 +1905,9 @@ export async function setFeatureBranchName(
 }
 
 // setFeatureState (BACI-199) flips the feature's three-state column
-// and returns the refreshed FeatureDetail. The handler stamps the
-// sticky bit so the leader-elected archive-sweep's auto-completion
-// pass leaves the row alone until the user pins a new value.
+// and returns the refreshed FeatureDetail. BACI-250 decoupled this
+// from the auto-close pin — call setFeatureAutoClose to flip
+// `state_manual` independently.
 export async function setFeatureState(
   repoPrefix: string,
   slug: string,
@@ -1919,6 +1919,26 @@ export async function setFeatureState(
   await call<ApiFeature>(
     `/repos/${repoPrefix}/features/${slug}/state`,
     { method: 'PUT', body: { slug, state } },
+  );
+  return getFeature(repoPrefix, slug);
+}
+
+// setFeatureAutoClose (BACI-250) flips the per-feature auto-close
+// toggle — the sticky-bit `state_manual` column that gates the
+// BACI-199 archive-sweep's auto-completion pass — and returns the
+// refreshed FeatureDetail. enabled=true clears the bit; enabled=false
+// sets it (pin long-lived catch-alls so they stay `active`).
+export async function setFeatureAutoClose(
+  repoPrefix: string,
+  slug: string,
+  enabled: boolean,
+): Promise<FeatureDetail> {
+  if (!repoPrefix || repoPrefix === 'all') {
+    throw new Error('select a repository to edit a feature');
+  }
+  await call<ApiFeature>(
+    `/repos/${repoPrefix}/features/${slug}/auto-close`,
+    { method: 'PUT', body: { enabled } },
   );
   return getFeature(repoPrefix, slug);
 }

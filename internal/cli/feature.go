@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -25,6 +26,7 @@ func newFeatureCmd() *cobra.Command {
 		featureArchiveCmd(),
 		featureUnarchiveCmd(),
 		featureStateCmd(),
+		featureAutoCloseCmd(),
 		newFeatureCommentCmd(),
 	)
 	return cmd
@@ -387,14 +389,16 @@ func featureUnarchiveCmd() *cobra.Command {
 // featureStateCmd (BACI-199) — `bacio feature state <slug> <state>`
 // (or `--json '{"slug":"x","state":"done"}'`). Mirrors the shape of
 // issueStateCmd: positional or JSON, dry-run honoured, strict-decode
-// rejects unknown fields. Manual writes via this verb stamp the
-// sticky bit so the leader-elected archive-sweep's auto-completion
-// pass leaves the row alone.
+// rejects unknown fields.
+//
+// BACI-250 decoupled this verb from the auto-close pin. Writing a
+// state no longer stamps `state_manual`; flip the pin separately via
+// `bacio feature auto-close <slug> on|off`.
 func featureStateCmd() *cobra.Command {
 	var rawInput string
 	cmd := &cobra.Command{
 		Use:   "state [SLUG] [state]",
-		Short: "Set a feature's state (active|done|cancelled). Pins the value against the auto-completion sweep (BACI-199).",
+		Short: "Set a feature's state (active|done|cancelled). Use `bacio feature auto-close` to pin against the sweep (BACI-250).",
 		Args:  cobra.RangeArgs(0, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			raw, err := parseJSONInput(cmd, args, rawInput)
@@ -421,6 +425,63 @@ func featureStateCmd() *cobra.Command {
 	return cmd
 }
 
+// featureAutoCloseCmd (BACI-250) — `bacio feature auto-close <slug>
+// on|off` (or `--json '{"slug":"x","enabled":false}'`). Flips the
+// per-feature auto-close toggle: ON clears `state_manual` (the sweep
+// may promote the feature once every child is terminal); OFF sets it
+// (long-lived catch-alls stay `active` indefinitely).
+//
+// Mirrors featureStateCmd's shape — positional or JSON, dry-run
+// honoured, strict-decode rejects unknown fields.
+func featureAutoCloseCmd() *cobra.Command {
+	var rawInput string
+	cmd := &cobra.Command{
+		Use:   "auto-close [SLUG] [on|off]",
+		Short: "Toggle a feature's auto-close behaviour (BACI-250). OFF pins the feature against the sweep.",
+		Args:  cobra.RangeArgs(0, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			raw, err := parseJSONInput(cmd, args, rawInput)
+			if err != nil {
+				return err
+			}
+			if raw != nil {
+				in, _, err := inputio.DecodeStrict[inputs.FeatureAutoCloseInput](raw)
+				if err != nil {
+					return err
+				}
+				if in.Slug == "" {
+					return fmt.Errorf("slug is required")
+				}
+				return setFeatureAutoClose(in.Slug, in.Enabled)
+			}
+			if len(args) != 2 {
+				return fmt.Errorf("requires <SLUG> <on|off> positionals or --json")
+			}
+			enabled, err := parseOnOff(args[1])
+			if err != nil {
+				return err
+			}
+			return setFeatureAutoClose(args[0], enabled)
+		},
+	}
+	addInputFlag(cmd, &rawInput)
+	return cmd
+}
+
+// parseOnOff parses the on|off literal used by feature.auto-close.
+// Strict — only "on" and "off" (case-insensitive) are accepted; other
+// truthy strings (true, 1, yes) would creep the parser into another
+// shape so we reject them at the boundary.
+func parseOnOff(s string) (bool, error) {
+	switch strings.ToLower(s) {
+	case "on":
+		return true, nil
+	case "off":
+		return false, nil
+	}
+	return false, fmt.Errorf("expected `on` or `off`, got %q", s)
+}
+
 func setFeatureState(slug, stateStr string) error {
 	st, err := model.ParseFeatureState(stateStr)
 	if err != nil {
@@ -436,6 +497,26 @@ func setFeatureState(slug, stateStr string) error {
 		return err
 	}
 	updated, err := c.SetFeatureState(context.Background(), repo, slug, st, opts.dryRun)
+	if err != nil {
+		return err
+	}
+	if opts.dryRun {
+		return emitDryRun(updated)
+	}
+	return emit(updated)
+}
+
+func setFeatureAutoClose(slug string, enabled bool) error {
+	c, err := openClient()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	repo, err := resolveRepoC(c)
+	if err != nil {
+		return err
+	}
+	updated, err := c.SetFeatureAutoClose(context.Background(), repo, slug, enabled, opts.dryRun)
 	if err != nil {
 		return err
 	}
