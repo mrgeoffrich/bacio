@@ -67,6 +67,93 @@ func TestFeaturePlanSkipsClosedIssues(t *testing.T) {
 	}
 }
 
+// TestFeaturePlanIncludeClosed pins the BACI-236 widening — when the
+// handler is invoked with ?include_closed=1, every issue in the feature
+// shows up (closed ones with `closed:true`) and the `blocks` edges that
+// touch a closed endpoint are preserved.
+func TestFeaturePlanIncludeClosed(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	feat := seedFeature(t, s, repo, "auth", "Auth")
+	open, _ := s.CreateIssue(repo.ID, &feat.ID, "open work", "", model.StateTodo, nil)
+	closed, _ := s.CreateIssue(repo.ID, &feat.ID, "delivered work", "", model.StateDone, nil)
+	// closed blocks open — wire the edge so the graph view's "this
+	// delivered work blocks that live work" arrow has something to
+	// draw.
+	if err := s.CreateRelation(closed.ID, open.ID, model.RelBlocks); err != nil {
+		t.Fatalf("relation: %v", err)
+	}
+
+	// Default path: closed issue stays hidden, the edge is dropped.
+	resp, body := apiGet(t, ts.URL+"/repos/MINI/features/auth/plan")
+	if resp.StatusCode != 200 {
+		t.Fatalf("default status: %d, body=%s", resp.StatusCode, body)
+	}
+	if strings.Contains(string(body), closed.Key) {
+		t.Fatalf("default path leaked closed issue %s: %s", closed.Key, body)
+	}
+
+	// include_closed=1: closed issue surfaces with closed:true; the
+	// open entry's blocked_by lists the closed key.
+	resp, body = apiGet(t, ts.URL+"/repos/MINI/features/auth/plan?include_closed=1")
+	if resp.StatusCode != 200 {
+		t.Fatalf("included status: %d, body=%s", resp.StatusCode, body)
+	}
+	bodyS := string(body)
+	if !strings.Contains(bodyS, closed.Key) {
+		t.Fatalf("include_closed: expected closed key %s in: %s", closed.Key, bodyS)
+	}
+	if !strings.Contains(bodyS, open.Key) {
+		t.Fatalf("include_closed: expected open key %s in: %s", open.Key, bodyS)
+	}
+	if !strings.Contains(bodyS, `"closed": true`) {
+		t.Fatalf("include_closed: expected closed:true marker in: %s", bodyS)
+	}
+	// The blocker edge should survive — the open entry's blocked_by
+	// references the closed key.
+	posClosed := strings.Index(bodyS, `"key": "`+closed.Key+`"`)
+	posOpen := strings.Index(bodyS, `"key": "`+open.Key+`"`)
+	if posClosed < 0 || posOpen < 0 {
+		t.Fatalf("include_closed: expected both keys present: %s", bodyS)
+	}
+	// Closed precedes open in topo order — it's the blocker.
+	if posClosed >= posOpen {
+		t.Fatalf("include_closed: closed blocker %s should precede %s: %s", closed.Key, open.Key, bodyS)
+	}
+	// The open issue's blocked_by must reference the closed key.
+	openSlice := bodyS[posOpen:]
+	if !strings.Contains(openSlice, closed.Key) {
+		t.Fatalf("include_closed: open entry's blocked_by missing %s: %s", closed.Key, openSlice)
+	}
+}
+
+// TestFeaturePlanIncludeClosedAccepts permissive values.
+func TestFeaturePlanIncludeClosedFlagAccepted(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	feat := seedFeature(t, s, repo, "auth", "Auth")
+	closed, _ := s.CreateIssue(repo.ID, &feat.ID, "delivered", "", model.StateDone, nil)
+
+	// "true" should widen the payload too.
+	resp, body := apiGet(t, ts.URL+"/repos/MINI/features/auth/plan?include_closed=true")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d, body=%s", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), closed.Key) {
+		t.Fatalf("include_closed=true: expected %s in: %s", closed.Key, body)
+	}
+
+	// "0" / unknown should leave the default open-only shape in
+	// place — historical behaviour preserved.
+	resp, body = apiGet(t, ts.URL+"/repos/MINI/features/auth/plan?include_closed=0")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d, body=%s", resp.StatusCode, body)
+	}
+	if strings.Contains(string(body), closed.Key) {
+		t.Fatalf("include_closed=0 should preserve open-only path: %s", body)
+	}
+}
+
 func TestFeaturePlanSlugNotFound(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	seedRepo(t, s)

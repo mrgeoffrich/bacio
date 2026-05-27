@@ -36,6 +36,8 @@ export {
     FeatureDetail,
     FeatureLinkedDoc,
     FeatureLinkedIssue,
+    FeaturePlan,
+    FeaturePlanEntry,
     FeatureRefDTO,
     FeatureSummary,
     HistoryEntryDTO,

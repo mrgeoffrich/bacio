@@ -199,7 +199,15 @@ func (c *localClient) ShowFeature(ctx context.Context, repo *model.Repo, slug st
 }
 
 // PlanFeature is kept in sync with internal/api/handlers_plan.go:buildPlanView.
-func (c *localClient) PlanFeature(ctx context.Context, repo *model.Repo, slug string) (*PlanView, error) {
+// includeClosed (BACI-236) widens the input set and the blocker filter:
+//   - false (default) — only open issues and only edges between two open
+//     issues. Historical shape used by `bacio feature plan` and the
+//     `bacio issue brief` assembler.
+//   - true — every issue in the feature plus every `blocks` edge whose
+//     endpoints are both in the feature. Closed=true is stamped on
+//     done/cancelled entries so the desktop / web dependency-graph view
+//     can mute them alongside the live work.
+func (c *localClient) PlanFeature(ctx context.Context, repo *model.Repo, slug string, includeClosed bool) (*PlanView, error) {
 	f, err := c.store.GetFeatureBySlug(repo.ID, slug)
 	if err != nil {
 		return nil, err
@@ -208,21 +216,21 @@ func (c *localClient) PlanFeature(ctx context.Context, repo *model.Repo, slug st
 	if err != nil {
 		return nil, err
 	}
-	open := make([]*model.Issue, 0, len(all))
+	considered := make([]*model.Issue, 0, len(all))
 	for _, iss := range all {
-		if isOpenState(iss.State) {
-			open = append(open, iss)
+		if includeClosed || isOpenState(iss.State) {
+			considered = append(considered, iss)
 		}
 	}
-	sort.SliceStable(open, func(i, j int) bool {
-		if open[i].RepoID != open[j].RepoID {
-			return open[i].RepoID < open[j].RepoID
+	sort.SliceStable(considered, func(i, j int) bool {
+		if considered[i].RepoID != considered[j].RepoID {
+			return considered[i].RepoID < considered[j].RepoID
 		}
-		return open[i].Number < open[j].Number
+		return considered[i].Number < considered[j].Number
 	})
-	ids := make([]int64, len(open))
-	inSet := make(map[int64]bool, len(open))
-	for i, iss := range open {
+	ids := make([]int64, len(considered))
+	inSet := make(map[int64]bool, len(considered))
+	for i, iss := range considered {
 		ids[i] = iss.ID
 		inSet[iss.ID] = true
 	}
@@ -230,14 +238,20 @@ func (c *localClient) PlanFeature(ctx context.Context, repo *model.Repo, slug st
 	if err != nil {
 		return nil, err
 	}
-	inDeg := make(map[int64]int, len(open))
+	inDeg := make(map[int64]int, len(considered))
 	forward := make(map[int64][]int64)
-	for _, iss := range open {
+	for _, iss := range considered {
 		inDeg[iss.ID] = 0
 	}
 	for blockedID, bs := range blockers {
 		for _, b := range bs {
-			if !isOpenState(b.BlockerState) {
+			// BACI-236: when includeClosed is set, accept blocker edges
+			// regardless of either endpoint's state — the graph view
+			// wants to see "this open ticket was blocked by that
+			// delivered one". The in-feature gate stays untouched: a
+			// cross-feature blocker is not a node in this graph, so
+			// there's no destination to draw the edge to.
+			if !includeClosed && !isOpenState(b.BlockerState) {
 				continue
 			}
 			if !inSet[b.BlockerID] {
@@ -247,8 +261,8 @@ func (c *localClient) PlanFeature(ctx context.Context, repo *model.Repo, slug st
 			forward[b.BlockerID] = append(forward[b.BlockerID], blockedID)
 		}
 	}
-	order := make([]*model.Issue, 0, len(open))
-	remaining := open
+	order := make([]*model.Issue, 0, len(considered))
+	remaining := considered
 	for len(remaining) > 0 {
 		var next []*model.Issue
 		var processed []int64
@@ -278,7 +292,10 @@ func (c *localClient) PlanFeature(ctx context.Context, repo *model.Repo, slug st
 	for _, iss := range order {
 		var by []string
 		for _, b := range blockers[iss.ID] {
-			if !isOpenState(b.BlockerState) {
+			if !includeClosed && !isOpenState(b.BlockerState) {
+				continue
+			}
+			if !inSet[b.BlockerID] {
 				continue
 			}
 			by = append(by, b.BlockerKey)
@@ -290,6 +307,7 @@ func (c *localClient) PlanFeature(ctx context.Context, repo *model.Repo, slug st
 			State:     iss.State,
 			Assignee:  iss.Assignee,
 			BlockedBy: by,
+			Closed:    !isOpenState(iss.State),
 		})
 	}
 	return view, nil

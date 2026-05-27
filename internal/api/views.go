@@ -99,6 +99,12 @@ type PlanEntry struct {
 	State     model.State `json:"state"`
 	Assignee  string      `json:"assignee,omitempty"`
 	BlockedBy []string    `json:"blocked_by,omitempty"`
+	// Closed (BACI-236) is true when the entry's state is done /
+	// cancelled. Only ever populated when the plan handler is invoked
+	// with ?include_closed=1; the default open-only payload omits the
+	// field entirely (omitempty) so the historical wire shape stays
+	// byte-identical for existing consumers.
+	Closed bool `json:"closed,omitempty"`
 }
 
 // PlanView mirrors internal/cli/plan.go:planView.

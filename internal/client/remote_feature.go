@@ -120,9 +120,17 @@ func (c *remoteClient) ShowFeature(ctx context.Context, repo *model.Repo, slug s
 	return &out, nil
 }
 
-func (c *remoteClient) PlanFeature(ctx context.Context, repo *model.Repo, slug string) (*PlanView, error) {
+// PlanFeature (BACI-236) passes ?include_closed=1 when the caller wants
+// the wider graph payload. Default (false) omits the query param so the
+// server-side handler emits the historical open-only shape.
+func (c *remoteClient) PlanFeature(ctx context.Context, repo *model.Repo, slug string, includeClosed bool) (*PlanView, error) {
+	var q url.Values
+	if includeClosed {
+		q = url.Values{}
+		q.Set("include_closed", "1")
+	}
 	var out PlanView
-	if err := c.do(ctx, http.MethodGet, "/repos/"+repo.Prefix+"/features/"+slug+"/plan", nil, nil, &out); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/repos/"+repo.Prefix+"/features/"+slug+"/plan", q, nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

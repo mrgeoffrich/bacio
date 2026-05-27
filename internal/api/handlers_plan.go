@@ -25,13 +25,30 @@ func (d deps) handleFeaturePlan(w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, code, err.Error(), nil)
 		return
 	}
-	view, err := buildPlanView(d.store, feat, issues)
+	// BACI-236: ?include_closed=1 widens the payload to include
+	// done/cancelled issues and the blocker edges that touch them.
+	// Default-empty / "0" / "false" / unrecognised values preserve
+	// today's open-only shape — the FeaturesView graph tab is the only
+	// caller that flips this on.
+	includeClosed := planIncludeClosed(r)
+	view, err := buildPlanView(d.store, feat, issues, includeClosed)
 	if err != nil {
 		status, code := statusForError(err)
 		writeError(w, status, code, err.Error(), nil)
 		return
 	}
 	writeJSON(w, http.StatusOK, view)
+}
+
+// planIncludeClosed reads the include_closed query param permissively
+// (1 / true / yes — case-insensitive). Anything else is treated as
+// false so a fat-fingered URL never silently widens the payload.
+func planIncludeClosed(r *http.Request) bool {
+	switch strings.ToLower(strings.TrimSpace(r.URL.Query().Get("include_closed"))) {
+	case "1", "true", "yes":
+		return true
+	}
+	return false
 }
 
 // isOpenState is kept in sync with internal/client/local_feature.go:isOpenState.
@@ -45,23 +62,26 @@ func isOpenState(s model.State) bool {
 
 // buildPlanView is kept in sync with the local Client backend's PlanFeature
 // so JSON consumers see the identical execution-order shape from CLI and HTTP.
-func buildPlanView(s *store.Store, f *model.Feature, all []*model.Issue) (*PlanView, error) {
-	open := make([]*model.Issue, 0, len(all))
+// includeClosed (BACI-236) widens the issue set AND the blocker filter so the
+// dependency-graph view can render closed nodes muted while keeping the open
+// chain visible.
+func buildPlanView(s *store.Store, f *model.Feature, all []*model.Issue, includeClosed bool) (*PlanView, error) {
+	considered := make([]*model.Issue, 0, len(all))
 	for _, iss := range all {
-		if isOpenState(iss.State) {
-			open = append(open, iss)
+		if includeClosed || isOpenState(iss.State) {
+			considered = append(considered, iss)
 		}
 	}
-	sort.SliceStable(open, func(i, j int) bool {
-		if open[i].RepoID != open[j].RepoID {
-			return open[i].RepoID < open[j].RepoID
+	sort.SliceStable(considered, func(i, j int) bool {
+		if considered[i].RepoID != considered[j].RepoID {
+			return considered[i].RepoID < considered[j].RepoID
 		}
-		return open[i].Number < open[j].Number
+		return considered[i].Number < considered[j].Number
 	})
 
-	ids := make([]int64, len(open))
-	inSet := make(map[int64]bool, len(open))
-	for i, iss := range open {
+	ids := make([]int64, len(considered))
+	inSet := make(map[int64]bool, len(considered))
+	for i, iss := range considered {
 		ids[i] = iss.ID
 		inSet[iss.ID] = true
 	}
@@ -70,14 +90,20 @@ func buildPlanView(s *store.Store, f *model.Feature, all []*model.Issue) (*PlanV
 		return nil, err
 	}
 
-	inDeg := make(map[int64]int, len(open))
+	inDeg := make(map[int64]int, len(considered))
 	forward := make(map[int64][]int64)
-	for _, iss := range open {
+	for _, iss := range considered {
 		inDeg[iss.ID] = 0
 	}
 	for blockedID, bs := range blockers {
 		for _, b := range bs {
-			if !isOpenState(b.BlockerState) {
+			// BACI-236: skip closed blockers only on the default path
+			// — when includeClosed is set, every edge between two
+			// in-feature nodes is part of the graph regardless of
+			// either endpoint's state. The in-feature gate (inSet)
+			// stays untouched on both paths so a cross-feature
+			// blocker never sneaks in.
+			if !includeClosed && !isOpenState(b.BlockerState) {
 				continue
 			}
 			if !inSet[b.BlockerID] {
@@ -88,8 +114,8 @@ func buildPlanView(s *store.Store, f *model.Feature, all []*model.Issue) (*PlanV
 		}
 	}
 
-	order := make([]*model.Issue, 0, len(open))
-	remaining := open
+	order := make([]*model.Issue, 0, len(considered))
+	remaining := considered
 	for len(remaining) > 0 {
 		var next []*model.Issue
 		var processed []int64
@@ -120,7 +146,10 @@ func buildPlanView(s *store.Store, f *model.Feature, all []*model.Issue) (*PlanV
 	for _, iss := range order {
 		var by []string
 		for _, b := range blockers[iss.ID] {
-			if !isOpenState(b.BlockerState) {
+			if !includeClosed && !isOpenState(b.BlockerState) {
+				continue
+			}
+			if !inSet[b.BlockerID] {
 				continue
 			}
 			by = append(by, b.BlockerKey)
@@ -132,6 +161,7 @@ func buildPlanView(s *store.Store, f *model.Feature, all []*model.Issue) (*PlanV
 			State:     iss.State,
 			Assignee:  iss.Assignee,
 			BlockedBy: by,
+			Closed:    !isOpenState(iss.State),
 		})
 	}
 	return view, nil

@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, lazy, Suspense } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { EyeOff, Search, X } from 'lucide-react';
 import { reportError } from '../errors';
@@ -7,6 +7,21 @@ import MarkdownView from '../lib/markdownView';
 import CommentComposer from './issue/CommentComposer';
 import FeatureEmojiPicker from './FeatureEmojiPicker.jsx';
 import { documentPath, featurePath } from '../lib/routes';
+
+// BACI-236: the dependency-graph view is lazy-loaded so the
+// @xyflow/react chunk (~150 KB gzipped) only lands when the user
+// actually opens the Graph tab. The Overview tab — the historical
+// default — pays nothing for the new affordance.
+const FeatureDependencyGraph = lazy(() => import('./FeatureDependencyGraph.jsx'));
+
+// BACI-236: Overview vs Graph tab on the right pane. The id matches
+// the `viewMode` useState so the segmented control mirrors the active
+// tab. Overview is the historical default; switching tabs is a local
+// state flip (no refetch / no URL change in v1).
+const VIEW_MODE_OPTIONS = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'graph', label: 'Graph' },
+];
 
 // BACI-177: per-feature "Show on board" toggle. The id is the value
 // the toggle should set on the feature — true = show on board (the
@@ -415,6 +430,13 @@ function FeatureRow({ feature, isActive, onSelect }) {
 // FeatureDetailPane is the right-side drawer body. Extracted so the
 // state-toggle / hidden-toggle handlers don't clutter the parent and
 // the layout below stays readable.
+//
+// BACI-236: the pane now hosts two view modes — Overview (the
+// historical layout: properties / description / issues / docs /
+// comments) and Graph (a dependency-graph render of the same issues
+// with directed `blocks` edges). The segmented control above the
+// title row flips between them; the toggle is a local useState so
+// switching back to Overview is instant and never refetches.
 function FeatureDetailPane({
   activeBoard,
   detail,
@@ -422,8 +444,29 @@ function FeatureDetailPane({
   onDetailChange,
   onFeaturesChange,
 }) {
+  const [viewMode, setViewMode] = useState('overview');
   return (
     <div className="mk-features-detail">
+      <div
+        className="mk-features-viewmode mk-segmented"
+        role="tablist"
+        aria-label="Feature view mode"
+      >
+        {VIEW_MODE_OPTIONS.map((opt) => (
+          <button
+            key={opt.id}
+            type="button"
+            role="tab"
+            aria-selected={viewMode === opt.id}
+            className={`mk-segmented-btn ${
+              viewMode === opt.id ? 'is-active' : ''
+            }`}
+            onClick={() => setViewMode(opt.id)}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
       <div className="mk-features-title-row">
         <FeatureEmojiPicker
           value={detail.emoji || ''}
@@ -451,6 +494,42 @@ function FeatureDetailPane({
         {' · '}updated {shortDate(detail.updatedAt)}
       </div>
 
+      {viewMode === 'graph' ? (
+        <Suspense
+          fallback={<div className="mk-features-empty">Loading graph…</div>}
+        >
+          <FeatureDependencyGraph
+            repoPrefix={activeBoard}
+            slug={detail.slug}
+          />
+        </Suspense>
+      ) : (
+        <FeatureOverviewSections
+          activeBoard={activeBoard}
+          detail={detail}
+          onChangeHidden={onChangeHidden}
+          onDetailChange={onDetailChange}
+          onFeaturesChange={onFeaturesChange}
+        />
+      )}
+    </div>
+  );
+}
+
+// FeatureOverviewSections wraps the historical right-pane body —
+// properties / description / issues / docs / comments — so the new
+// Graph tab can swap it out without dragging this block around.
+// Extracted with no behaviour change; every onClick / onSubmit
+// handler is identical to the pre-BACI-236 inline form.
+function FeatureOverviewSections({
+  activeBoard,
+  detail,
+  onChangeHidden,
+  onDetailChange,
+  onFeaturesChange,
+}) {
+  return (
+    <>
       <section className="mk-features-properties">
         <div className="mk-features-prop">
           <label className="mk-features-prop-label">State</label>
@@ -597,7 +676,7 @@ function FeatureDetailPane({
         detail={detail}
         onChange={onDetailChange}
       />
-    </div>
+    </>
   );
 }
 

@@ -100,6 +100,12 @@ type PlanEntry struct {
 	State     model.State `json:"state"`
 	Assignee  string      `json:"assignee,omitempty"`
 	BlockedBy []string    `json:"blocked_by,omitempty"`
+	// Closed (BACI-236) is true when the entry's state is done /
+	// cancelled. Only ever populated when PlanFeature is called with
+	// includeClosed=true; the default open-only path never emits a
+	// closed entry, so omitempty keeps the byte shape of historical
+	// callers identical.
+	Closed bool `json:"closed,omitempty"`
 }
 
 type PlanView struct {

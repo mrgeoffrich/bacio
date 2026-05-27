@@ -620,6 +620,28 @@ export interface FeatureLinkedDoc {
   sourcePath?: string;
 }
 
+// FeaturePlanEntry mirrors desktop FeaturePlanEntry (BACI-236). One
+// row per issue in the feature; blockedBy carries the keys of
+// in-feature blockers the dependency-graph view draws as directed
+// edges. closed is true for done / cancelled issues so the renderer
+// can mute them while keeping their connections to live work visible.
+export interface FeaturePlanEntry {
+  key: string;
+  title: string;
+  state: string;
+  assignee: string;
+  blockedBy: string[];
+  closed: boolean;
+}
+
+// FeaturePlan is the dependency-graph payload for one feature
+// (BACI-236). slug echoes the requested feature; order is the
+// topo-sorted issue list driving the graph view's nodes + edges.
+export interface FeaturePlan {
+  slug: string;
+  order: FeaturePlanEntry[];
+}
+
 export interface FeatureDetail {
   slug: string;
   title: string;
@@ -1722,6 +1744,55 @@ export async function getFeature(repoPrefix: string, slug: string): Promise<Feat
       sourcePath: '',
     })),
     hiddenOnBoard: !!f.hidden_on_board,
+  };
+}
+
+// ApiPlanEntry is the snake_case wire shape served by GET
+// /repos/{prefix}/features/{slug}/plan — mirrors api.PlanEntry. We
+// reshape blocked_by → blockedBy on the client so the FeaturePlan
+// camelCase shape matches the Wails binding (BACI-236).
+interface ApiPlanEntry {
+  key: string;
+  title: string;
+  state: string;
+  assignee?: string;
+  blocked_by?: string[];
+  closed?: boolean;
+}
+
+interface ApiPlanView {
+  feature: string;
+  order?: ApiPlanEntry[];
+}
+
+// getFeaturePlan (BACI-236) returns the topo-sorted dependency-graph
+// payload for a feature. includeClosed=false matches today's open-only
+// shape; true widens to include done/cancelled issues plus every
+// `blocks` edge whose endpoints are both in the feature. The web
+// bundle reshapes blocked_by → blockedBy so callers can share a single
+// camelCase shape with the Wails binding.
+export async function getFeaturePlan(
+  repoPrefix: string,
+  slug: string,
+  includeClosed: boolean,
+): Promise<FeaturePlan> {
+  if (!repoPrefix || repoPrefix === 'all') {
+    throw new Error('select a repository to view its features');
+  }
+  const view = await call<ApiPlanView>(
+    `/repos/${repoPrefix}/features/${slug}/plan`,
+    { query: includeClosed ? { include_closed: '1' } : undefined },
+  );
+  return {
+    slug: view.feature,
+    order: (view.order ?? []).map(e => ({
+      key: e.key,
+      title: e.title,
+      state: e.state,
+      assignee: e.assignee ?? '',
+      blockedBy: e.blocked_by ?? [],
+      closed: !!e.closed,
+    })),
   };
 }
 
