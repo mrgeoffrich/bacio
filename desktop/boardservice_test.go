@@ -111,6 +111,15 @@ func (f *fakeBoardClient) InflightByModeForRepo(context.Context, *model.Repo) (m
 	return map[model.DispatchMode]int{}, nil
 }
 
+// InflightByModeBaseForRepo (BACI-227) is the per-(mode, branch)
+// sibling — the kanban / brief deriver reads this map to enforce the
+// per-branch concurrency gate. The taken-flag tests don't exercise
+// cap-blocked queued dispatches, so an empty map matches the
+// "no in-flight rows" production case.
+func (f *fakeBoardClient) InflightByModeBaseForRepo(context.Context, *model.Repo) (map[store.InflightKey]int, error) {
+	return map[store.InflightKey]int{}, nil
+}
+
 // CountEvalCommentsByIssue (BACI-131 / BACI-141) — boardcards.Assemble
 // surfaces an eval-note glyph per card from this bulk count. The
 // taken-flag tests don't exercise eval-comment rows, so an empty map

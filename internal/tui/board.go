@@ -376,9 +376,12 @@ func (b *boardView) reload() error {
 					activeByIssue[id] = d
 				}
 			}
-			inflight, ierr := b.store.InflightByModeForRepo(b.repo.ID)
+			// BACI-227: per-(mode, branch) in-flight grouping so the
+			// inline waiting label tracks the matcher's per-branch
+			// concurrency gate exactly.
+			inflight, ierr := b.store.InflightByModeBaseForRepo(b.repo.ID)
 			if ierr != nil {
-				inflight = map[model.DispatchMode]int{}
+				inflight = map[store.InflightKey]int{}
 			}
 			templates, terr := b.store.ListPromptTemplates()
 			if terr != nil {

@@ -798,9 +798,12 @@ func (b *BoardService) GetIssueBrief(repoPrefix, key string) (IssueBriefDTO, err
 		if dispatchRepo != nil {
 			activeDispatch, derr := b.client.WaitingDispatchForIssue(ctx, dispatchRepo, iss.Key)
 			if derr == nil {
-				inflight, ierr := b.client.InflightByModeForRepo(ctx, dispatchRepo)
+				// BACI-227: per-(mode, branch) in-flight grouping so
+				// the IssueLockBanner's WaitingState tracks the
+				// matcher's per-branch concurrency gate exactly.
+				inflight, ierr := b.client.InflightByModeBaseForRepo(ctx, dispatchRepo)
 				if ierr != nil {
-					inflight = map[model.DispatchMode]int{}
+					inflight = map[store.InflightKey]int{}
 				}
 				templates, terr := b.client.ListPromptTemplates(ctx)
 				if terr != nil {
