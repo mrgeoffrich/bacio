@@ -1,0 +1,50 @@
+# BACI-241 canonical state-transition graph. The single source of truth
+# for which next-states each issue state offers, and how prominently the
+# UI should render them. See internal/stategraph/graph.go for the
+# package doc — this file is the editable source of truth.
+#
+# Top-level keys are issue states (from internal/model/state.go). Under
+# each, the keys are categories — primary (happy path), secondary
+# (sensible escape hatch), unusual (rare, hidden behind a "more"
+# affordance). The values are slices of next-states; the slice order is
+# the visual order callers render.
+#
+# Edits land at compile time — //go:embed graph.yaml bakes this file
+# into the binary, and the graph_test.go invariants (no self-loops, no
+# duplicates, every state has an outgoing edge, every to-state is
+# valid) run on the next build.
+
+# From todo: the happy path is to start work; cancelling unblocked
+# scope is the only other sensible move at this point.
+todo:
+  primary: [in_progress]
+  secondary: [cancelled]
+
+# From in_progress: review is the happy path. The four secondary
+# branches cover "blocked on the user", "shipped without review",
+# "released back to the queue", and "abandoned mid-flight".
+in_progress:
+  primary: [in_review]
+  secondary: [needs_action, done, todo, cancelled]
+
+# From needs_action: the user has responded, work resumes; or the
+# ticket is abandoned because the answer was "drop it".
+needs_action:
+  primary: [in_progress]
+  secondary: [cancelled]
+
+# From in_review: ship is the happy path; review-failed sends it back
+# to in_progress; the cancel escape hatch is the same as every other
+# live state.
+in_review:
+  primary: [done]
+  secondary: [in_progress, cancelled]
+
+# From done / cancelled: re-opening is unusual. The two terminal
+# states each carry two unusual edges so a future "re-open this
+# ticket" affordance still has data to render from.
+done:
+  unusual: [in_progress, todo]
+
+cancelled:
+  unusual: [todo, in_progress]

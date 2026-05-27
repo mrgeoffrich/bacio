@@ -572,6 +572,32 @@ body { margin: 0; }
   background: var(--bg-4);
 }
 
+/* BACI-241: the follow-on popup splits the prompt list into
+   primary / secondary / unusual buckets. The divider sits between
+   the primary section (no header) and the secondary section so the
+   user reads the happy-path picks first; the unusual bucket hides
+   behind a `<details>` block (the user explicitly opens it to see
+   the escape hatches). The styling is intentionally quiet — same
+   hairline as .mk-card-action-sep, same fg-4 type as the "More" /
+   "Show all" controls elsewhere in the menu. */
+.mk-dispatch-menu-divider {
+  height: 1px; margin: 4px 2px;
+  background: var(--border-1);
+}
+.mk-dispatch-menu-unusual {
+  margin-top: 2px;
+}
+.mk-dispatch-menu-unusual-summary {
+  list-style: none;
+  cursor: pointer;
+  font-family: var(--font-mono); font-size: 10px;
+  letter-spacing: .06em; text-transform: uppercase;
+  color: var(--fg-4);
+  padding: 6px 8px 4px;
+}
+.mk-dispatch-menu-unusual-summary::-webkit-details-marker { display: none; }
+.mk-dispatch-menu-unusual-summary:hover { color: var(--fg-3); }
+
 /* BACI-192: follow-on dispatch button — a footer affordance that sits
    alongside the assignee / eval / spinner triad on a taken or waiting
    card. The button reuses the .mk-card-action-btn metrics so the row

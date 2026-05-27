@@ -96,6 +96,15 @@ export default function App() {
   // to run from. Board → KanbanCard reads it to gate the per-card action
   // button. Loaded on mount; reloaded when the Settings view closes.
   const [promptConfig, setPromptConfig] = useState([]);
+  // BACI-241: the canonical state-transition graph (display hint, not
+  // enforcement). Loaded once on mount alongside promptConfig — the
+  // graph is a server-side constant so we never refresh. Threaded down
+  // through Board to KanbanCard so the follow-on popup can promote /
+  // demote / tuck-away modes whose allowedStates overlap with the
+  // card's primary / secondary / unusual next-states. `null` until the
+  // mount-time Promise.all resolves; the helper handles that as a
+  // graceful fallback (every prompt under unusual).
+  const [stateGraph, setStateGraph] = useState(null);
   // BACI-188: per-column collapse state lives in Board.jsx now —
   // localStorage-backed, per-repo. The App-wide hide-empty-columns
   // preference was removed in BACI-188 (Settings toggle gone, REST /
@@ -182,8 +191,14 @@ export default function App() {
       api.getDisplayPreferences(),
       api.getArchivePreferences(),
       api.getAudioPreferences(),
+      // BACI-241: state-transition graph — constant on the server side,
+      // so we fetch once on mount and never refresh. Failure here is
+      // non-fatal: the promotePrompts helper falls back to "every prompt
+      // under unusual" when the graph is null, which renders identically
+      // to the pre-BACI-241 flat menu.
+      api.getStateGraph().catch(() => null),
     ])
-      .then(([bs, cols, tpls, displayPrefs, archivePrefs, audioPrefs]) => {
+      .then(([bs, cols, tpls, displayPrefs, archivePrefs, audioPrefs, graph]) => {
         setBoards(bs);
         setColumns(cols);
         setPromptConfig(tpls);
@@ -191,6 +206,7 @@ export default function App() {
         setArchiveAutoEnabled(archivePrefs.autoEnabled);
         setArchiveRetentionDays(archivePrefs.retentionDays);
         setAudioEnabled(audioPrefs.shippedSfx);
+        setStateGraph(graph);
         setActiveBoard(prev => bs.some(b => b.prefix === prev) ? prev : (bs[0]?.prefix ?? ''));
         setLoading(false);
       })
@@ -993,6 +1009,7 @@ export default function App() {
                   columns={columns}
                   cards={cards}
                   promptConfig={promptConfig}
+                  stateGraph={stateGraph}
                   onMoveCard={moveCard}
                   onOpenCard={openCard}
                   onOpenIssue={navigateToIssue}

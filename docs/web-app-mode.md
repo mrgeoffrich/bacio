@@ -154,6 +154,7 @@ shapes into the desktop's `BoardCard` / `IssueDetail` / `DocSummary` /
 |---|---|---|
 | `listBoards()` | `GET /repos` + per-repo `GET /repos/{p}/issues` | Issue count comes from a list-then-count; `syncEnabled` and the live sync fields come from `GET /sync` (BACI-89), not a hardcoded `false`. |
 | `listColumns()` | static | Inlined as a constant. |
+| `getStateGraph()` | `GET /settings/state-graph` (BACI-241) | Canonical state-transition graph as a display hint (not enforcement). `{states: [...], edges: [{from, to, category}]}`; categories are `primary` / `secondary` / `unusual`. The follow-on popup on `KanbanCard` reads it to promote / demote / tuck-away modes whose `allowedStates` overlap with the card's next-states from its current column. Server-side constant, no per-request cost; bundle fetches once on mount and never refreshes. |
 | `listCards(prefix)` | `GET /repos/{p}/issues` | `model.Issue` already inlines `tags`, `taken`, `waiting_for_claim` — no extra round-trip needed. |
 | `getIssue(prefix, key)` | `GET /repos/{p}/issues/{k}` | Reshape `IssueView` → `IssueDetail`. |
 | `listDocs(prefix, type)` | `GET /repos/{p}/documents?type=…` | |

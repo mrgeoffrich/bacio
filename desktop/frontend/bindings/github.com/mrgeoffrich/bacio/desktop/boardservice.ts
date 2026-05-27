@@ -343,6 +343,21 @@ export function ListShipped(repoPrefix: string, sinceDays: number, limit: number
 }
 
 /**
+ * ListStateGraph returns the BACI-241 canonical state-transition graph —
+ * the categorised edge table that surfaces (the kanban follow-on popup
+ * today, board-card menus and the dispatch composer later) read to
+ * promote / demote / tuck-away modes whose allowedStates overlap with
+ * the card's primary / secondary / unusual next-states. The graph is a
+ * Go constant; this call is a thin marshaller mirroring the REST
+ * /settings/state-graph endpoint.
+ */
+export function ListStateGraph(): $CancellablePromise<$models.StateGraphDTO> {
+    return $Call.ByID(2937613722).then(($result: any) => {
+        return $$createType18($result);
+    });
+}
+
+/**
  * QueueFollowOnDispatch (BACI-180) attaches a dormant follow-on
  * dispatch to the issue's in-flight (parent) dispatch. Mirrors
  * DispatchIssue's shape — same DTO out, repo prefix derivable from
@@ -437,3 +452,4 @@ const $$createType14 = $Create.Array($$createType1);
 const $$createType15 = $models.BoardColumn.createFrom;
 const $$createType16 = $Create.Array($$createType15);
 const $$createType17 = $models.ShippedListDTO.createFrom;
+const $$createType18 = $models.StateGraphDTO.createFrom;
