@@ -1800,6 +1800,36 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   border: none;
 }
 
+/* BACI-243: theme the ReactFlow Controls (bottom-left zoom / fit-view
+   panel) so it doesn't read as white-on-white over our --bg-2 graph
+   container. Override the panel chrome, button fill, hover, the
+   last-child border-bottom (default ReactFlow draws a divider beneath
+   every button including the bottom one), and the SVG glyph colour. */
+.mk-features-graph .react-flow__controls {
+  background: var(--bg-2);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+}
+.mk-features-graph .react-flow__controls-button {
+  background: var(--bg-2);
+  border: 0;
+  border-bottom: 1px solid var(--border-1);
+  color: var(--fg-2);
+  fill: currentColor;
+}
+.mk-features-graph .react-flow__controls-button:hover {
+  background: var(--bg-3);
+  color: var(--fg-1);
+}
+.mk-features-graph .react-flow__controls-button:last-child {
+  border-bottom: 0;
+}
+.mk-features-graph .react-flow__controls-button svg {
+  fill: currentColor;
+}
+
 /* ============================================================
    History view — a desktop-app addition: the paged audit log,
    newest first. Mirrors the TUI's History tab but pages the data
