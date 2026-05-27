@@ -76,7 +76,7 @@ func TestEndAgentSessionReleasesClaims(t *testing.T) {
 	if _, _, _, _, err := s.AddAgentClaim("sess-2", iss.ID, ""); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	if _, _, _, _, err := s.EndAgentSession("sess-2", string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel); err != nil {
+	if _, _, _, _, _, err := s.EndAgentSession("sess-2", string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel); err != nil {
 		t.Fatalf("end: %v", err)
 	}
 
@@ -107,7 +107,7 @@ func TestAddAgentClaimRejectsEndedSession(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	if _, _, _, _, err := s.EndAgentSession("sess-3", string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel); err != nil {
+	if _, _, _, _, _, err := s.EndAgentSession("sess-3", string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel); err != nil {
 		t.Fatalf("end: %v", err)
 	}
 	if _, _, _, _, err := s.AddAgentClaim("sess-3", iss.ID, ""); err == nil {
@@ -136,7 +136,7 @@ func TestPruneAgentSessionsKeepsActive(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("register stale: %v", err)
 	}
-	if _, _, _, _, err := s.EndAgentSession("stale", string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel); err != nil {
+	if _, _, _, _, _, err := s.EndAgentSession("stale", string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel); err != nil {
 		t.Fatalf("end stale: %v", err)
 	}
 	// Backdate to two retention windows ago.
@@ -171,7 +171,7 @@ func TestPruneEndedAgentSessionsCustomRetention(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("register %s: %v", id, err)
 		}
-		if _, _, _, _, err := s.EndAgentSession(id, string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel); err != nil {
+		if _, _, _, _, _, err := s.EndAgentSession(id, string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel); err != nil {
 			t.Fatalf("end %s: %v", id, err)
 		}
 	}
@@ -209,7 +209,7 @@ func TestPruneEndedAgentSessionsCascadesClaims(t *testing.T) {
 	if _, _, _, _, err := s.AddAgentClaim("cascade", iss.ID, ""); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	if _, _, _, _, err := s.EndAgentSession("cascade", string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel); err != nil {
+	if _, _, _, _, _, err := s.EndAgentSession("cascade", string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel); err != nil {
 		t.Fatalf("end: %v", err)
 	}
 	past := time.Now().Add(-5 * time.Hour).UTC().Format("2006-01-02 15:04:05")
@@ -249,7 +249,7 @@ func TestPruneEndedAgentSessionsLeavesDispatches(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("add dispatch: %v", err)
 	}
-	if _, _, _, _, err := s.EndAgentSession("dispatched", string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel); err != nil {
+	if _, _, _, _, _, err := s.EndAgentSession("dispatched", string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel); err != nil {
 		t.Fatalf("end: %v", err)
 	}
 	past := time.Now().Add(-5 * time.Hour).UTC().Format("2006-01-02 15:04:05")
@@ -480,7 +480,7 @@ func TestUpsertAgentSessionRejectsEndedSession(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("first register: %v", err)
 	}
-	if _, _, _, _, err := s.EndAgentSession("ended-then-reregister", string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel); err != nil {
+	if _, _, _, _, _, err := s.EndAgentSession("ended-then-reregister", string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel); err != nil {
 		t.Fatalf("end: %v", err)
 	}
 	_, err := s.UpsertAgentSession(UpsertAgentSessionIn{
@@ -719,7 +719,7 @@ func TestOpenClaimsBySession(t *testing.T) {
 	if _, _, _, _, err := s.AddAgentClaim("ended-sess", iss2.ID, "p3"); err != nil {
 		t.Fatalf("claim ended: %v", err)
 	}
-	if _, _, _, _, err := s.EndAgentSession("ended-sess", string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel); err != nil {
+	if _, _, _, _, _, err := s.EndAgentSession("ended-sess", string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel); err != nil {
 		t.Fatalf("end: %v", err)
 	}
 	bySession, err := s.OpenClaimsBySession(repo.ID)
@@ -978,7 +978,7 @@ func TestEndAgentSessionUnassignsReleasedIssues(t *testing.T) {
 	if _, _, _, _, err := s.AddAgentClaim("ending", iss2.ID, ""); err != nil {
 		t.Fatalf("claim 2: %v", err)
 	}
-	_, changes, _, _, err := s.EndAgentSession("ending", string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel)
+	_, changes, _, _, _, err := s.EndAgentSession("ending", string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel)
 	if err != nil {
 		t.Fatalf("end: %v", err)
 	}
@@ -995,6 +995,116 @@ func TestEndAgentSessionUnassignsReleasedIssues(t *testing.T) {
 	}
 	if got := assigneeOf(t, s, iss2.ID); got != "" {
 		t.Fatalf("issue 2 assignee = %q, want empty", got)
+	}
+}
+
+// TestEndAgentSessionAbandonsOpenQuestions (BACI-253) locks in the
+// in-tx flip: every still-open ask_user_question owned by the session
+// lands as `abandoned` inside the same transaction the session ends in.
+// Settled rows (answered / cancelled / abandoned) are untouched, and
+// the count surfaced as the fifth return value matches the number of
+// open rows the session owned at end time. Also covers the
+// presumed_dead requeue path — the abandon fires regardless of cascade
+// mode, because a session that's gone can't deliver to anyone.
+func TestEndAgentSessionAbandonsOpenQuestions(t *testing.T) {
+	s, repo, _ := seedRepoAndIssue(t)
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "parked", RepoID: repo.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register parked: %v", err)
+	}
+
+	// One open, one answered → only the open should flip.
+	open1, err := s.AddSessionQuestion(AddSessionQuestionIn{
+		SessionID: "parked", Payload: validSinglePayload(), AskedBy: "a",
+	})
+	if err != nil {
+		t.Fatalf("add open1: %v", err)
+	}
+	answered, err := s.AddSessionQuestion(AddSessionQuestionIn{
+		SessionID: "parked", Payload: validSinglePayload(), AskedBy: "a",
+	})
+	if err != nil {
+		t.Fatalf("add answered: %v", err)
+	}
+	if _, err := s.AnswerSessionQuestion(answered.ID,
+		model.QuestionAnswers{"Which approach should I take?": "Option A"}, "geoff"); err != nil {
+		t.Fatalf("answer: %v", err)
+	}
+	open2, err := s.AddSessionQuestion(AddSessionQuestionIn{
+		SessionID: "parked", Payload: validMultiPayload(), AskedBy: "a",
+	})
+	if err != nil {
+		t.Fatalf("add open2: %v", err)
+	}
+
+	_, _, _, _, abandoned, err := s.EndAgentSession("parked", string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel)
+	if err != nil {
+		t.Fatalf("end: %v", err)
+	}
+	if abandoned != 2 {
+		t.Fatalf("abandoned = %d, want 2 (open1 + open2)", abandoned)
+	}
+
+	// open1 + open2 are now abandoned; the answered row is untouched.
+	for _, q := range []*model.SessionQuestion{open1, open2} {
+		got, err := s.GetSessionQuestion(q.ID)
+		if err != nil {
+			t.Fatalf("get %d: %v", q.ID, err)
+		}
+		if got.State != model.QuestionAbandoned {
+			t.Fatalf("question %d state = %q, want abandoned", q.ID, got.State)
+		}
+	}
+	settled, err := s.GetSessionQuestion(answered.ID)
+	if err != nil {
+		t.Fatalf("get answered: %v", err)
+	}
+	if settled.State != model.QuestionAnswered {
+		t.Fatalf("answered state = %q, want answered (must not be touched)", settled.State)
+	}
+
+	// Second session with no open questions — abandoned count is 0 and
+	// the end-session cascade still runs cleanly.
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "no-questions", RepoID: repo.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register no-questions: %v", err)
+	}
+	_, _, _, _, abandoned, err = s.EndAgentSession("no-questions", string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel)
+	if err != nil {
+		t.Fatalf("end (no questions): %v", err)
+	}
+	if abandoned != 0 {
+		t.Fatalf("abandoned (no questions) = %d, want 0", abandoned)
+	}
+
+	// presumed_dead requeue path also abandons — the BACI-252 motivating
+	// scenario: a reaper-driven end on a session blocked on an answer.
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "going-dark", RepoID: repo.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register going-dark: %v", err)
+	}
+	openDark, err := s.AddSessionQuestion(AddSessionQuestionIn{
+		SessionID: "going-dark", Payload: validSinglePayload(), AskedBy: "a",
+	})
+	if err != nil {
+		t.Fatalf("add open dark: %v", err)
+	}
+	_, _, _, _, abandoned, err = s.EndAgentSession("going-dark", string(model.EndReasonPresumedDead), model.StateInProgress, DispatchCascadeRequeue)
+	if err != nil {
+		t.Fatalf("end (presumed_dead): %v", err)
+	}
+	if abandoned != 1 {
+		t.Fatalf("abandoned (presumed_dead) = %d, want 1", abandoned)
+	}
+	got, err := s.GetSessionQuestion(openDark.ID)
+	if err != nil {
+		t.Fatalf("get dark: %v", err)
+	}
+	if got.State != model.QuestionAbandoned {
+		t.Fatalf("presumed_dead question state = %q, want abandoned", got.State)
 	}
 }
 
@@ -1021,7 +1131,7 @@ func TestEndAgentSessionCancelsSessionTargetedDispatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add dispatch: %v", err)
 	}
-	_, _, _, cancelled, err := s.EndAgentSession("sess-tgt", string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel)
+	_, _, _, cancelled, _, err := s.EndAgentSession("sess-tgt", string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel)
 	if err != nil {
 		t.Fatalf("end: %v", err)
 	}
@@ -1080,7 +1190,7 @@ func TestEndAgentSessionCancelsIdentityTargetedWhenLastLive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add identity dispatch: %v", err)
 	}
-	_, _, _, cancelled, err := s.EndAgentSession("only-live", string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel)
+	_, _, _, cancelled, _, err := s.EndAgentSession("only-live", string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel)
 	if err != nil {
 		t.Fatalf("end: %v", err)
 	}
@@ -1119,7 +1229,7 @@ func TestEndAgentSessionPreservesIdentityWhenSiblingAlive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("add pair dispatch: %v", err)
 	}
-	_, _, _, cancelled, err := s.EndAgentSession("twin-a", string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel)
+	_, _, _, cancelled, _, err := s.EndAgentSession("twin-a", string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel)
 	if err != nil {
 		t.Fatalf("end twin-a: %v", err)
 	}
@@ -1138,7 +1248,7 @@ func TestEndAgentSessionPreservesIdentityWhenSiblingAlive(t *testing.T) {
 
 	// Now end the second sibling — last live session, identity dispatch
 	// should auto-cancel.
-	_, _, _, cancelled, err = s.EndAgentSession("twin-b", string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel)
+	_, _, _, cancelled, _, err = s.EndAgentSession("twin-b", string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel)
 	if err != nil {
 		t.Fatalf("end twin-b: %v", err)
 	}
@@ -1175,7 +1285,7 @@ func TestEndAgentSessionClearsWaitingForClaim(t *testing.T) {
 	if before != 1 {
 		t.Fatalf("waiting_for_claim before end = %d, want 1 (AddDispatch should have set it)", before)
 	}
-	if _, _, _, _, err := s.EndAgentSession("wait-sess", string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel); err != nil {
+	if _, _, _, _, _, err := s.EndAgentSession("wait-sess", string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel); err != nil {
 		t.Fatalf("end: %v", err)
 	}
 	var after int
@@ -1217,7 +1327,7 @@ func TestEndAgentSessionLeavesAckedAndCancelledAlone(t *testing.T) {
 	if _, err := s.CancelDispatch(cancelled.ID); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
-	_, _, _, info, err := s.EndAgentSession("settled", string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel)
+	_, _, _, info, _, err := s.EndAgentSession("settled", string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel)
 	if err != nil {
 		t.Fatalf("end: %v", err)
 	}
@@ -1421,7 +1531,7 @@ func TestEndAgentSessionAppliesOrphanState(t *testing.T) {
 	// End the session with state_on_orphan=needs_action; both issues
 	// should land at needs_action even though the claim auto-moved
 	// them to in_progress.
-	_, _, stateChanges, _, err := s.EndAgentSession(sid, string(model.EndReasonStop), model.StateNeedsAction, DispatchCascadeCancel)
+	_, _, stateChanges, _, _, err := s.EndAgentSession(sid, string(model.EndReasonStop), model.StateNeedsAction, DispatchCascadeCancel)
 	if err != nil {
 		t.Fatalf("end: %v", err)
 	}
@@ -1476,7 +1586,7 @@ func TestEndAgentSession_PresumedDeadRequeuesDispatches(t *testing.T) {
 		t.Fatalf("flip to delivered: %v", err)
 	}
 
-	_, _, _, cascade, err := s.EndAgentSession("going-dark",
+	_, _, _, cascade, _, err := s.EndAgentSession("going-dark",
 		string(model.EndReasonPresumedDead), model.StateInProgress, DispatchCascadeRequeue)
 	if err != nil {
 		t.Fatalf("end presumed_dead: %v", err)
@@ -1540,7 +1650,7 @@ func TestEndAgentSession_PresumedDeadRequeuesIdentityWhenLastLive(t *testing.T) 
 	if err != nil {
 		t.Fatalf("add identity dispatch: %v", err)
 	}
-	_, _, _, cascade, err := s.EndAgentSession("only-live-reap",
+	_, _, _, cascade, _, err := s.EndAgentSession("only-live-reap",
 		string(model.EndReasonPresumedDead), model.StateInProgress, DispatchCascadeRequeue)
 	if err != nil {
 		t.Fatalf("end: %v", err)
@@ -1594,7 +1704,7 @@ func TestEndAgentSession_PresumedDeadPreservesIdentityWhenSiblingAlive(t *testin
 	if err != nil {
 		t.Fatalf("add pair dispatch: %v", err)
 	}
-	_, _, _, cascade, err := s.EndAgentSession("pair-a",
+	_, _, _, cascade, _, err := s.EndAgentSession("pair-a",
 		string(model.EndReasonPresumedDead), model.StateInProgress, DispatchCascadeRequeue)
 	if err != nil {
 		t.Fatalf("end pair-a: %v", err)
@@ -1628,7 +1738,7 @@ func TestEndAgentSession_RequeueRejectsNonPresumedDeadReason(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	_, _, _, _, err := s.EndAgentSession("user-stop",
+	_, _, _, _, _, err := s.EndAgentSession("user-stop",
 		string(model.EndReasonStop), model.StateInProgress, DispatchCascadeRequeue)
 	if err == nil {
 		t.Fatalf("expected store-boundary error pairing Requeue with reason=stop, got nil")
@@ -1690,7 +1800,7 @@ func TestEndAgentSession_TolerantOfOrphanClaim(t *testing.T) {
 	// without firing the cascade. Mirrors the BACI-140 ticket repro.
 	seedOrphanIssueDelete(t, s, iss.ID)
 
-	sess, assigneeChanges, stateChanges, _, err := s.EndAgentSession(
+	sess, assigneeChanges, stateChanges, _, _, err := s.EndAgentSession(
 		"orphan-end", string(model.EndReasonPresumedDead),
 		model.StateInProgress, DispatchCascadeCancel,
 	)
@@ -1752,7 +1862,7 @@ func TestEndAgentSession_TolerantOfMixedOrphanAndLiveClaims(t *testing.T) {
 	// Vanish the first issue out from under its claim.
 	seedOrphanIssueDelete(t, s, iss.ID)
 
-	sess, changes, states, _, err := s.EndAgentSession(
+	sess, changes, states, _, _, err := s.EndAgentSession(
 		"mixed", string(model.EndReasonStop),
 		model.StateInProgress, DispatchCascadeCancel,
 	)

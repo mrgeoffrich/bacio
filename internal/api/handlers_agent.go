@@ -180,7 +180,7 @@ func (d deps) supersedeStaleSessions(repo *model.Repo, host string, claudePID in
 		// DispatchCascadeCancel because the phantom never owned the
 		// work (BACI-133's requeue is reserved for the reaper recovery
 		// path on a real session that went dark).
-		ended, _, _, _, err := d.store.EndAgentSession(s.SessionID, string(model.EndReasonSuperseded), "", store.DispatchCascadeCancel)
+		ended, _, _, _, abandonedQuestions, err := d.store.EndAgentSession(s.SessionID, string(model.EndReasonSuperseded), "", store.DispatchCascadeCancel)
 		if err != nil {
 			if d.logger != nil {
 				d.logger.Warn("superseding stale session", "session_id", s.SessionID, "err", err)
@@ -194,6 +194,15 @@ func (d deps) supersedeStaleSessions(repo *model.Repo, host string, claudePID in
 				TargetID: &ended.ID, TargetLabel: ended.SessionID,
 				Details: fmt.Sprintf("reason=superseded (claude_pid %d re-registered as %s)", claudePID, keepID),
 			})
+			// BACI-253: settle any parked questions the phantom owned.
+			if abandonedQuestions > 0 {
+				recordOp(d.store, d.logger, model.HistoryEntry{
+					RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+					Op: "question.abandon", Kind: "question",
+					TargetLabel: ended.SessionID,
+					Details:     fmt.Sprintf("session=%s,count=%d", ended.SessionID, abandonedQuestions),
+				})
+			}
 		}
 	}
 	return nil
@@ -384,7 +393,7 @@ func (d deps) handleAgentEnd(w http.ResponseWriter, r *http.Request) {
 	if model.EndReason(in.Reason) == model.EndReasonPresumedDead {
 		cascade = store.DispatchCascadeRequeue
 	}
-	sess, assigneeChanges, stateChanges, cascadeInfos, err := d.store.EndAgentSession(in.SessionID, in.Reason, orphanState, cascade)
+	sess, assigneeChanges, stateChanges, cascadeInfos, abandonedQuestions, err := d.store.EndAgentSession(in.SessionID, in.Reason, orphanState, cascade)
 	if err != nil {
 		status, code := statusForError(err)
 		writeError(w, status, code, err.Error(), nil)
@@ -398,6 +407,21 @@ func (d deps) handleAgentEnd(w http.ResponseWriter, r *http.Request) {
 		TargetID: &sess.ID, TargetLabel: sess.SessionID,
 		Details:  "reason=" + sess.EndReason,
 	})
+	// BACI-253: surface the summary `question.abandon` row when the
+	// end-session cascade settled at least one parked question — same
+	// shape as the client wrapper and the channel-startup janitor so
+	// `bacio history --op question.abandon` is a coherent ledger
+	// across every abandon path.
+	if abandonedQuestions > 0 {
+		recordOp(d.store, d.logger, model.HistoryEntry{
+			RepoID: &sess.RepoID, RepoPrefix: sess.RepoPrefix,
+			Actor:       actor,
+			Op:          "question.abandon",
+			Kind:        "question",
+			TargetLabel: sess.SessionID,
+			Details:     fmt.Sprintf("session=%s,count=%d", sess.SessionID, abandonedQuestions),
+		})
+	}
 	for _, ch := range assigneeChanges {
 		writeAssigneeChange(d.store, d.logger, actor, ch)
 	}

@@ -527,23 +527,31 @@ const (
 // return value carries one StateChange per claimed issue whose state
 // actually moved, so the caller can fold them into the per-issue audit
 // rows next to the cascaded `agent.release` entries.
-func (s *Store) EndAgentSession(sessionID, reason string, orphanState model.State, cascade DispatchCascadeMode) (*model.AgentSession, []AssigneeChange, []StateChange, []DispatchCascadeInfo, error) {
+//
+// BACI-253: the fifth return value carries the number of still-open
+// `ask_user_question` rows this transaction flipped to `abandoned`.
+// A parked question whose owning session ends can never be delivered —
+// the channel's in-memory parked-reply map is gone — so we settle the
+// rows atomically with the rest of the session-end cascade. The caller
+// writes one summary `question.abandon` audit row when the count is
+// non-zero, matching the channel-startup janitor's shape.
+func (s *Store) EndAgentSession(sessionID, reason string, orphanState model.State, cascade DispatchCascadeMode) (*model.AgentSession, []AssigneeChange, []StateChange, []DispatchCascadeInfo, int, error) {
 	if _, err := ValidateSessionID(sessionID); err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, 0, err
 	}
 	parsed, err := model.ParseEndReason(reason)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, 0, err
 	}
 	// BACI-133: re-queue is reserved for the reaper recovery path. Any
 	// other end reason paired with Requeue is a caller bug — reject at
 	// the boundary so we never silently re-queue a user-driven end.
 	if cascade == DispatchCascadeRequeue && parsed != model.EndReasonPresumedDead {
-		return nil, nil, nil, nil, fmt.Errorf("EndAgentSession: DispatchCascadeRequeue requires reason=%q, got %q", model.EndReasonPresumedDead, parsed)
+		return nil, nil, nil, nil, 0, fmt.Errorf("EndAgentSession: DispatchCascadeRequeue requires reason=%q, got %q", model.EndReasonPresumedDead, parsed)
 	}
 	tx, err := s.DB.Begin()
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, 0, err
 	}
 	defer tx.Rollback()
 
@@ -557,18 +565,18 @@ func (s *Store) EndAgentSession(sessionID, reason string, orphanState model.Stat
 		// obvious to future readers).
 		_ = tx.Rollback()
 		sess, err := s.GetAgentSession(sessionID)
-		return sess, nil, nil, nil, err
+		return sess, nil, nil, nil, 0, err
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, 0, err
 	}
 
 	var sessPK int64
 	if err := tx.QueryRow(`SELECT id FROM agent_sessions WHERE session_id = ?`, sessionID).Scan(&sessPK); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil, nil, nil, ErrNotFound
+			return nil, nil, nil, nil, 0, ErrNotFound
 		}
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, 0, err
 	}
 
 	// Capture the issues this session is about to auto-release *before*
@@ -578,20 +586,20 @@ func (s *Store) EndAgentSession(sessionID, reason string, orphanState model.Stat
 		`SELECT DISTINCT issue_id FROM agent_claims WHERE released_at IS NULL AND session_pk = ?`, sessPK,
 	)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, 0, err
 	}
 	var issueIDs []int64
 	for claimedRows.Next() {
 		var id int64
 		if err := claimedRows.Scan(&id); err != nil {
 			claimedRows.Close()
-			return nil, nil, nil, nil, err
+			return nil, nil, nil, nil, 0, err
 		}
 		issueIDs = append(issueIDs, id)
 	}
 	if err := claimedRows.Err(); err != nil {
 		claimedRows.Close()
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, 0, err
 	}
 	claimedRows.Close()
 
@@ -607,7 +615,7 @@ func (s *Store) EndAgentSession(sessionID, reason string, orphanState model.Stat
 	// (it doesn't read `issues` so it can't crash).
 	issueIDs, err = filterLiveIssueIDs(tx, issueIDs)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, 0, err
 	}
 
 	res, err := tx.Exec(
@@ -615,29 +623,29 @@ func (s *Store) EndAgentSession(sessionID, reason string, orphanState model.Stat
 		string(parsed), sessionID,
 	)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, 0, err
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return nil, nil, nil, nil, ErrNotFound
+		return nil, nil, nil, nil, 0, ErrNotFound
 	}
 	if _, err := tx.Exec(
 		`UPDATE agent_claims SET released_at = CURRENT_TIMESTAMP WHERE released_at IS NULL AND session_pk = ?`,
 		sessPK,
 	); err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, 0, err
 	}
 
 	identity, err := sessionIdentity(tx, sessPK)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, 0, err
 	}
 	var assigneeChanges []AssigneeChange
 	var stateChanges []StateChange
 	for _, issueID := range issueIDs {
 		ch, err := clearAssigneeIfOwned(tx, issueID, identity)
 		if err != nil {
-			return nil, nil, nil, nil, err
+			return nil, nil, nil, nil, 0, err
 		}
 		if ch.Changed() {
 			assigneeChanges = append(assigneeChanges, *ch)
@@ -648,7 +656,7 @@ func (s *Store) EndAgentSession(sessionID, reason string, orphanState model.Stat
 		if orphanState != "" {
 			sc, err := setIssueStateForRelease(tx, issueID, orphanState)
 			if err != nil {
-				return nil, nil, nil, nil, err
+				return nil, nil, nil, nil, 0, err
 			}
 			if sc.Changed() {
 				stateChanges = append(stateChanges, *sc)
@@ -658,14 +666,27 @@ func (s *Store) EndAgentSession(sessionID, reason string, orphanState model.Stat
 
 	cascadeInfos, err := resolveOpenDispatchesForSession(tx, sessPK, cascade)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, 0, err
+	}
+
+	// BACI-253: abandon every still-open `ask_user_question` row owned
+	// by the session inside the same tx. A parked question whose owning
+	// session ends can never be delivered (the channel's in-memory
+	// parked-reply map is gone), so the row must not stay in `open`
+	// state with an answer button the UI would still surface. Folding
+	// the UPDATE into this tx keeps the abandon atomic with the claim
+	// release / dispatch cascade and removes the chance of dying
+	// between two separate commits.
+	abandonedQuestions, err := abandonOpenQuestionsTx(tx, sessPK)
+	if err != nil {
+		return nil, nil, nil, nil, 0, err
 	}
 
 	if err := tx.Commit(); err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, 0, err
 	}
 	sess, err := s.GetAgentSession(sessionID)
-	return sess, assigneeChanges, stateChanges, cascadeInfos, err
+	return sess, assigneeChanges, stateChanges, cascadeInfos, abandonedQuestions, err
 }
 
 // resolveOpenDispatchesForSession applies the dispatch-cascade

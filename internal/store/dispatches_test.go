@@ -1719,7 +1719,7 @@ func TestBindQueuedDispatch_RequeueRecoversDeliveredDispatch(t *testing.T) {
 	// Reaper force-ends the session with presumed_dead + requeue cascade.
 	// This is the BACI-133 path that should successfully recycle the
 	// dispatch to a fresh agent.
-	if _, _, _, _, err := s.EndAgentSession(
+	if _, _, _, _, _, err := s.EndAgentSession(
 		sess.SessionID, string(model.EndReasonPresumedDead), model.StateInProgress, DispatchCascadeRequeue,
 	); err != nil {
 		t.Fatalf("end session (requeue): %v", err)

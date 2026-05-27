@@ -44,6 +44,14 @@ type Backend interface {
 	// that the per-tick cost is dwarfed by the existing ListDispatches
 	// calls.
 	OpenClaimsForSession(sessionID string) ([]*model.AgentClaim, error)
+	// HasOpenQuestionsForSession is the BACI-253 skip-the-session
+	// gate: a session blocked on a user-bound ask_user_question is
+	// correctly idle from a heartbeat perspective and must not be
+	// reaped — the original session is the only one that can deliver
+	// the eventual answer back through the channel's parked-reply
+	// map. A bool query, not a list call, because Tick only needs the
+	// existence answer.
+	HasOpenQuestionsForSession(sessionID string) (bool, error)
 }
 
 // Client is the audited mutation surface — both methods wrap a store
@@ -83,6 +91,11 @@ func (p *Pinger) withClock(clock func() time.Time) *Pinger {
 
 // Tick runs one sweep. For each alive registered session it walks:
 //
+//   - Skip if the session owns at least one open ask_user_question
+//     (BACI-253) — the subagent is correctly parked waiting on the
+//     user's answer, the original session is the only one that can
+//     deliver the answer back through the channel's parked-reply map,
+//     and reaping it would strand both the question and the dispatch.
 //   - Skip if any fresh non-probe inbound dispatch exists for the
 //     session — the matcher already vouches for liveness when it binds
 //     a real dispatch, and the agent's eventual AckDispatch will bump
@@ -152,6 +165,25 @@ func (p *Pinger) Tick(ctx context.Context) (pinged, ended int, err error) {
 			continue
 		}
 		idleCutoff := effectiveIdleCutoff(now, openClaims)
+
+		// BACI-253 gate: if the session owns at least one open
+		// ask_user_question, the subagent is parked waiting on the
+		// user — that's correct idleness, not evidence of death. The
+		// original session is the only one that can deliver the
+		// eventual answer through the channel's parked-reply map, so
+		// reaping it strands the question. Skip the rest of the
+		// per-session loop iteration; the next tick will re-check.
+		parked, err := p.b.HasOpenQuestionsForSession(sess.SessionID)
+		if err != nil {
+			p.warn("check open questions", err, sess.SessionID)
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		if parked {
+			continue
+		}
 
 		// BACI-148 gate: if the matcher has bound a real inbound
 		// dispatch to this session within the last idle window, leave

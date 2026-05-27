@@ -269,7 +269,7 @@ func (c *localClient) supersedeStaleSessions(host string, claudePID int64, keepI
 		// the dispatch cascade must NOT re-queue (BACI-133's requeue is
 		// reserved for the reaper on a real session that went dark — a
 		// phantom never owned the work).
-		ended, _, _, _, err := c.store.EndAgentSession(s.SessionID, string(model.EndReasonSuperseded), "", store.DispatchCascadeCancel)
+		ended, _, _, _, abandonedQuestions, err := c.store.EndAgentSession(s.SessionID, string(model.EndReasonSuperseded), "", store.DispatchCascadeCancel)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "bacio: superseding stale session %s: %v\n", s.SessionID, err)
 			continue
@@ -281,6 +281,17 @@ func (c *localClient) supersedeStaleSessions(host string, claudePID int64, keepI
 				TargetID: &ended.ID, TargetLabel: ended.SessionID,
 				Details: fmt.Sprintf("reason=superseded (claude_pid %d re-registered as %s)", claudePID, keepID),
 			})
+			// BACI-253: any open questions the phantom owned are now
+			// abandoned in the same tx — emit the matching summary row
+			// so the audit log mirrors the channel-startup janitor.
+			if abandonedQuestions > 0 {
+				c.recordOp(model.HistoryEntry{
+					RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+					Op: "question.abandon", Kind: "question",
+					TargetLabel: ended.SessionID,
+					Details:     fmt.Sprintf("session=%s,count=%d", ended.SessionID, abandonedQuestions),
+				})
+			}
 		}
 	}
 	return nil
@@ -384,7 +395,7 @@ func (c *localClient) EndAgent(ctx context.Context, repo *model.Repo, in inputs.
 	if model.EndReason(in.Reason) == model.EndReasonPresumedDead {
 		cascade = store.DispatchCascadeRequeue
 	}
-	sess, assigneeChanges, stateChanges, cascadeInfos, err := c.store.EndAgentSession(in.SessionID, in.Reason, orphanState, cascade)
+	sess, assigneeChanges, stateChanges, cascadeInfos, abandonedQuestions, err := c.store.EndAgentSession(in.SessionID, in.Reason, orphanState, cascade)
 	if err != nil {
 		return nil, err
 	}
@@ -394,6 +405,19 @@ func (c *localClient) EndAgent(ctx context.Context, repo *model.Repo, in inputs.
 		TargetID: &sess.ID, TargetLabel: sess.SessionID,
 		Details: "reason=" + sess.EndReason,
 	})
+	// BACI-253: emit the summary `question.abandon` row when the
+	// end-session cascade settled at least one parked question. The
+	// store flipped the rows inside its tx so there's no orphan-row
+	// window between the agent end and the abandon; here we just
+	// record the audit trail mirroring the channel-startup janitor.
+	if abandonedQuestions > 0 {
+		c.recordOp(model.HistoryEntry{
+			RepoID: &sess.RepoID, RepoPrefix: sess.RepoPrefix,
+			Op: "question.abandon", Kind: "question",
+			TargetLabel: sess.SessionID,
+			Details:     fmt.Sprintf("session=%s,count=%d", sess.SessionID, abandonedQuestions),
+		})
+	}
 	// Auto-releasing claims may have unassigned issues — audit each one.
 	for _, ch := range assigneeChanges {
 		c.recordAssigneeChange(ch)
