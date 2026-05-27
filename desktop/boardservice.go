@@ -13,6 +13,7 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/git"
 	"github.com/mrgeoffrich/bacio/internal/model"
+	"github.com/mrgeoffrich/bacio/internal/stategraph"
 	"github.com/mrgeoffrich/bacio/internal/store"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -54,6 +55,24 @@ type Board struct {
 type BoardColumn struct {
 	State string `json:"state"`
 	Label string `json:"label"`
+}
+
+// StateEdgeDTO is one (from, to, category) triple in the BACI-241
+// state-transition graph. Mirror of stategraph.Edge but shaped for the
+// Wails binding generator: the Go-side `model.State` alias surfaces as
+// `string` in TS bindings, which is what the React layer wants.
+type StateEdgeDTO struct {
+	From     string `json:"from"`
+	To       string `json:"to"`
+	Category string `json:"category"`
+}
+
+// StateGraphDTO is the wire shape for the BACI-241 graph endpoint —
+// the canonical state ordering plus the categorised edge table. Pure
+// display hint; the store still accepts any state-to-state move.
+type StateGraphDTO struct {
+	States []string       `json:"states"`
+	Edges  []StateEdgeDTO `json:"edges"`
 }
 
 // BoardCard is the kanban-card wire shape, hoisted into
@@ -446,6 +465,31 @@ func (b *BoardService) ListColumns() ([]BoardColumn, error) {
 		cols = append(cols, BoardColumn{State: string(s), Label: stateLabel(s)})
 	}
 	return cols, nil
+}
+
+// ListStateGraph returns the BACI-241 canonical state-transition graph —
+// the categorised edge table that surfaces (the kanban follow-on popup
+// today, board-card menus and the dispatch composer later) read to
+// promote / demote / tuck-away modes whose allowedStates overlap with
+// the card's primary / secondary / unusual next-states. The graph is a
+// Go constant; this call is a thin marshaller mirroring the REST
+// /settings/state-graph endpoint.
+func (b *BoardService) ListStateGraph() (StateGraphDTO, error) {
+	states := model.AllStates()
+	stateStrs := make([]string, 0, len(states))
+	for _, s := range states {
+		stateStrs = append(stateStrs, string(s))
+	}
+	src := stategraph.Edges()
+	edges := make([]StateEdgeDTO, 0, len(src))
+	for _, e := range src {
+		edges = append(edges, StateEdgeDTO{
+			From:     string(e.From),
+			To:       string(e.To),
+			Category: string(e.Category),
+		})
+	}
+	return StateGraphDTO{States: stateStrs, Edges: edges}, nil
 }
 
 // ListCards returns issues as kanban cards — for one repo, or across every

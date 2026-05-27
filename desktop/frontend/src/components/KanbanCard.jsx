@@ -5,6 +5,7 @@ import { m } from 'motion/react';
 import Icon from './Icon.jsx';
 import Tooltip from './Tooltip.jsx';
 import DispatchMenuContent from './DispatchMenuContent.jsx';
+import { promotePrompts } from './promotePrompts.ts';
 import { todoGlyph } from '../lib/todoGlyph.jsx';
 import { waitingStateLabel } from '../lib/waitingLabels.ts';
 import { documentPath } from '../lib/routes';
@@ -25,7 +26,7 @@ function stateLabel(s) {
   return STATE_LABELS[s] ?? s;
 }
 
-function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDragStart, onDragEnd, onOpen, onDispatch, onDispatchChain, onCancelWaiting, onOpenQuestion, onOpenIssue, onQuickEval, isPinned, onTogglePin, onSetFollowOn, onCancelFollowOn, isTrayHover, isJumping }) {
+function KanbanCard({ card, cardsByKey, promptConfig, stateGraph, isDragging, compact, onDragStart, onDragEnd, onOpen, onDispatch, onDispatchChain, onCancelWaiting, onOpenQuestion, onOpenIssue, onQuickEval, isPinned, onTogglePin, onSetFollowOn, onCancelFollowOn, isTrayHover, isJumping }) {
   // BACI-75: local-only expansion state for the Tasks pill. Resets on
   // unmount (board switch, repo switch, hard refresh) — that's
   // intentional, we don't want to persist a row-level UI toggle.
@@ -455,11 +456,22 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDra
                 >
                   {/* BACI-222: the scrollable+filterable shell lives in
                       DispatchMenuContent; this call site provides the
-                      flat-list row markup (one prompt per row, current
-                      mode highlighted). The Radix DropdownMenu.Root /
-                      Trigger / Portal / Content wrappers stay so we
-                      keep click-outside-to-close + collision-aware
-                      placement out of the box. */}
+                      row markup. The Radix DropdownMenu.Root / Trigger
+                      / Portal / Content wrappers stay so we keep
+                      click-outside-to-close + collision-aware placement
+                      out of the box.
+
+                      BACI-241: the previously-flat row list now
+                      categorises into primary / secondary / unusual
+                      buckets via the canonical state-transition graph.
+                      `promotePrompts` walks the filter-narrowed `visible`
+                      slice (so typing in the filter still narrows
+                      every section) and groups by the highest-priority
+                      bucket whose next-states from `card.column`
+                      intersect each prompt's allowedStates. The unusual
+                      bucket sits behind a `<details>` block — the user
+                      explicitly opens it to see escape hatches like
+                      "shipping straight from in_progress". */}
                   <DispatchMenuContent
                     prompts={promptConfig || []}
                     currentMode={followOn?.mode}
@@ -473,21 +485,41 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDra
                         Cancel follow-on
                       </DropdownMenu.Item>
                     ) : null}
-                    renderRows={({ visible, currentMode }) => (
-                      <>
-                        {visible.map(p => (
-                          <DropdownMenu.Item
-                            key={p.mode}
-                            data-dispatch-row=""
-                            className={`mk-card-action-item ${currentMode === p.mode ? 'is-current' : ''}`}
-                            onSelect={() => onSetFollowOn && onSetFollowOn(card.key, p.mode)}
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            {p.actionLabel || p.label}
-                          </DropdownMenu.Item>
-                        ))}
-                      </>
-                    )}
+                    renderRows={({ visible, currentMode }) => {
+                      const buckets = promotePrompts(visible, card.column, stateGraph);
+                      const renderRow = (p) => (
+                        <DropdownMenu.Item
+                          key={p.mode}
+                          data-dispatch-row=""
+                          className={`mk-card-action-item ${currentMode === p.mode ? 'is-current' : ''}`}
+                          onSelect={() => onSetFollowOn && onSetFollowOn(card.key, p.mode)}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {p.actionLabel || p.label}
+                        </DropdownMenu.Item>
+                      );
+                      return (
+                        <>
+                          {buckets.primary.map(renderRow)}
+                          {buckets.secondary.length > 0 && (
+                            <>
+                              {buckets.primary.length > 0 && (
+                                <div className="mk-dispatch-menu-divider" role="separator" aria-hidden />
+                              )}
+                              {buckets.secondary.map(renderRow)}
+                            </>
+                          )}
+                          {buckets.unusual.length > 0 && (
+                            <details className="mk-dispatch-menu-unusual">
+                              <summary className="mk-dispatch-menu-unusual-summary">
+                                Show all
+                              </summary>
+                              {buckets.unusual.map(renderRow)}
+                            </details>
+                          )}
+                        </>
+                      );
+                    }}
                   />
                 </DropdownMenu.Content>
               </DropdownMenu.Portal>

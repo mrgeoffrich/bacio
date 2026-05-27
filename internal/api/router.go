@@ -232,6 +232,14 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("PUT /settings/templates/{mode}/action-label", d.handlePromptTemplateActionLabelSet)
 	mux.HandleFunc("DELETE /settings/templates/{mode}/action-label", d.handlePromptTemplateActionLabelDelete)
 
+	// BACI-241: canonical state-transition graph as a display hint. The
+	// graph is a Go constant — no `--json` writes, no per-request cost.
+	// Surfaces (the kanban follow-on popup today, board-card menus and
+	// the dispatch composer later) read it to promote / demote /
+	// tuck-away modes whose allowedStates overlap with the card's
+	// primary / secondary / unusual next-states from its current column.
+	mux.HandleFunc("GET /settings/state-graph", d.handleStateGraph)
+
 	// BACI-89 background sync. GET /sync (cross-repo) + GET
 	// /repos/{prefix}/sync (per-repo) report live sync status —
 	// last_sync_at, last_error, in_progress, configured — so the web

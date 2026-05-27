@@ -121,6 +121,30 @@ export interface BoardColumn {
   label: string;
 }
 
+// StateEdge (BACI-241) is one (from, to, category) triple in the
+// canonical state-transition graph the kanban follow-on popup (and
+// future surfaces) reads to promote / demote / tuck-away modes. Mirror
+// of the Wails-side StateEdgeDTO; api.ts re-exports the same name from
+// its own binding-typed shape.
+export interface StateEdge {
+  from: string;
+  to: string;
+  category: string; // 'primary' | 'secondary' | 'unusual'
+}
+
+// StateGraph (BACI-241) is the wire shape of GET /settings/state-graph
+// — the canonical state ordering plus the categorised edge table.
+// Display hint only; the store accepts any state-to-state move.
+export interface StateGraph {
+  states: string[];
+  edges: StateEdge[];
+}
+
+// Cross-transport aliases for parity with api.ts (same pattern as
+// LatestPlanDTO / SyncSetupResult).
+export type StateGraphDTO = StateGraph;
+export type StateEdgeDTO = StateEdge;
+
 export interface BoardCardTodo {
   content: string;
   status: string;
@@ -934,6 +958,15 @@ function reshapeUnsyncedProject(u: UnsyncedProjectApi): UnsyncedProject {
 export async function listColumns(): Promise<BoardColumn[]> {
   // Static — every state, in canonical order. No fetch.
   return Object.entries(STATE_LABELS).map(([state, label]) => ({ state, label }));
+}
+
+// getStateGraph (BACI-241) returns the canonical state-transition graph.
+// The server response is already shaped as { states, edges } with the
+// fields below — no reshape needed (lowercase JSON tags match the TS
+// interface verbatim). App.jsx fetches once on mount; the graph is a
+// constant, so no per-render or per-poll cost.
+export async function getStateGraph(): Promise<StateGraph> {
+  return await call<StateGraph>('/settings/state-graph');
 }
 
 export async function listCards(repoPrefix: string): Promise<BoardCard[]> {
