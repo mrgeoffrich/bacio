@@ -598,6 +598,50 @@ body { margin: 0; }
 .mk-dispatch-menu-unusual-summary::-webkit-details-marker { display: none; }
 .mk-dispatch-menu-unusual-summary:hover { color: var(--fg-3); }
 
+/* BACI-247: per-primary `<details>` compound expander on the kanban
+   zap menu. Each primary mode renders a `<details>` whose `<summary>`
+   is the dispatch row + a small caret; opening reveals the BACI-209
+   compound "Primary, then Follow-on" rows. Default state is
+   collapsed so the menu stays at single-mode density. The Item
+   inside `<summary>` stops click propagation so clicking the label
+   fires onSelect (and Radix closes the menu) without also toggling
+   the details — the caret is the only `<summary>`-toggling target.
+   Same hairline / fg-4 vocabulary as `.mk-dispatch-menu-unusual*`
+   so the two collapsibles read as the same family. */
+.mk-dispatch-menu-compound {
+  margin: 0;
+}
+.mk-dispatch-menu-compound > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex; align-items: center;
+  gap: 4px;
+  padding: 0 4px 0 0;
+}
+.mk-dispatch-menu-compound > summary::-webkit-details-marker { display: none; }
+.mk-dispatch-menu-compound > summary > .mk-card-action-item {
+  flex: 1; min-width: 0;
+}
+.mk-dispatch-menu-compound-caret {
+  width: 10px; height: 10px; flex: 0 0 auto;
+  margin-right: 4px;
+  border-right: 1.5px solid var(--fg-4);
+  border-bottom: 1.5px solid var(--fg-4);
+  transform: translateY(-1px) rotate(-45deg);
+  transition: transform var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out);
+}
+.mk-dispatch-menu-compound > summary:hover .mk-dispatch-menu-compound-caret {
+  border-color: var(--fg-2);
+}
+.mk-dispatch-menu-compound[open] > summary .mk-dispatch-menu-compound-caret {
+  transform: translateY(-3px) rotate(45deg);
+}
+.mk-dispatch-menu-compound-list {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 2px 0;
+}
+
 /* BACI-192: follow-on dispatch button — a footer affordance that sits
    alongside the assignee / eval / spinner triad on a taken or waiting
    card. The button reuses the .mk-card-action-btn metrics so the row

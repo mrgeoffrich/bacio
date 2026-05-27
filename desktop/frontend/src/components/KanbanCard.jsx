@@ -1,4 +1,4 @@
-import React, { memo, useEffect, useRef, useState } from 'react';
+import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { m } from 'motion/react';
@@ -6,6 +6,7 @@ import Icon from './Icon.jsx';
 import Tooltip from './Tooltip.jsx';
 import DispatchMenuContent from './DispatchMenuContent.jsx';
 import { promotePrompts } from './promotePrompts.ts';
+import { renderZapMenuRows } from './dispatchMenuRows.jsx';
 import { todoGlyph } from '../lib/todoGlyph.jsx';
 import { waitingStateLabel } from '../lib/waitingLabels.ts';
 import { documentPath } from '../lib/routes';
@@ -77,6 +78,17 @@ function KanbanCard({ card, cardsByKey, promptConfig, stateGraph, isDragging, co
   // state-gate config is global (App-owned), filtered per-card here.
   const validPrompts = (promptConfig || []).filter(
     p => (p.allowedStates || []).includes(card.column),
+  );
+  // BACI-247: the zap menu's open-gate moved off `validPrompts.length`
+  // onto the `promotePrompts` primary bucket so the zap and follow-on
+  // menus share the same categorisation contract. Post-BACI-245 the
+  // two converge to the same set on a `todo` card (prep modes), but
+  // the explicit name keeps the call sites readable. Memoised because
+  // promotePrompts walks the full promptConfig and we don't want it
+  // running on every keystroke elsewhere in the card.
+  const zapPrimaryCount = useMemo(
+    () => promotePrompts(promptConfig || [], card.column, stateGraph).primary.length,
+    [promptConfig, card.column, stateGraph],
   );
 
   // A taken card is held by an agent — block the human from dragging it
@@ -598,7 +610,7 @@ function KanbanCard({ card, cardsByKey, promptConfig, stateGraph, isDragging, co
                   </button>
                 </Tooltip>
               )}
-              {!taken && validPrompts.length > 0 && (
+              {!taken && zapPrimaryCount > 0 && (
                 <DropdownMenu.Root>
                   <DropdownMenu.Trigger asChild>
                     <button
@@ -618,83 +630,40 @@ function KanbanCard({ card, cardsByKey, promptConfig, stateGraph, isDragging, co
                       collisionPadding={8}
                     >
                       {/*
-                        BACI-222: the search-+-scroll shell lives in
-                        DispatchMenuContent. The zap menu's row
-                        population (per-primary section header +
-                        primary row + compound "Plan, then Implement"
-                        rows) is unchanged from BACI-209; what's new
-                        is the filter input narrows the visible
-                        sections (intersecting validPrompts with the
-                        filter) and, within each visible section, the
-                        compound rows below.
+                        BACI-247: the zap menu shares the
+                        DispatchMenuContent shell with the follow-on
+                        chip (filter input + scroll region + keyboard
+                        model). The body bucketing also matches —
+                        promotePrompts feeds primary / unusual, so
+                        "Implement is in the same place in both
+                        menus" comes for free.
 
-                        BACI-209: per-primary section. Each state-valid
-                        primary renders a header label, then one row
-                        firing the existing `onDispatch` (primary-only)
-                        plus one compound row per element of the full
-                        prompt-template set (skipping the same-mode
-                        pair). Compound rows fire `onDispatchChain`,
-                        which queues the parent + the dormant follow-on
-                        in a single round trip. The follow-on's gate is
-                        re-evaluated server-side at promote time
-                        (BACI-195), so we offer the full prompt set
-                        here rather than filtering by the issue's
-                        current state.
+                        BACI-209 compound semantics are preserved as a
+                        per-primary-row `<details>` expander: clicking
+                        the primary label fires onDispatch (single
+                        mode); opening the caret reveals one "Primary,
+                        then Follow-on" row per other visible mode,
+                        each firing onDispatchChain (unchanged server-
+                        side behaviour). Default state is collapsed so
+                        the menu reads at single-mode density.
 
                         BACI-67: render the imperative actionLabel
-                        ("Plan", "Design") so the dispatch button reads
-                        as a call to action. label (gerund —
-                        "Planning") is the fallback for templates that
-                        haven't set the override and aren't built-in.
+                        ("Plan", "Design") via the helper. label
+                        (gerund — "Planning") is the fallback for
+                        templates that haven't set the override and
+                        aren't built-in.
                       */}
                       <DispatchMenuContent
                         prompts={promptConfig || []}
-                        renderRows={({ visible }) => {
-                          const visibleModes = new Set(visible.map(p => p.mode));
-                          const visiblePrimaries = validPrompts.filter(p => visibleModes.has(p.mode));
-                          if (visiblePrimaries.length === 0) {
-                            return (
-                              <div className="mk-dispatch-menu-empty">
-                                No matching modes for this card&apos;s state.
-                              </div>
-                            );
-                          }
-                          return visiblePrimaries.map(p => {
-                            const primaryLabel = p.actionLabel || p.label;
-                            const compounds = (promptConfig || []).filter(
-                              q => q.mode !== p.mode && visibleModes.has(q.mode),
-                            );
-                            return (
-                              <React.Fragment key={p.mode}>
-                                <DropdownMenu.Label className="mk-card-action-menu-label">
-                                  {primaryLabel}
-                                </DropdownMenu.Label>
-                                <DropdownMenu.Item
-                                  data-dispatch-row=""
-                                  className="mk-card-action-item"
-                                  onSelect={() => onDispatch(card.key, p.mode)}
-                                  onClick={(e) => e.stopPropagation()}
-                                >
-                                  {primaryLabel}
-                                </DropdownMenu.Item>
-                                {onDispatchChain && compounds.map(q => {
-                                  const followOnLabel = q.actionLabel || q.label;
-                                  return (
-                                    <DropdownMenu.Item
-                                      key={`${p.mode}-then-${q.mode}`}
-                                      data-dispatch-row=""
-                                      className="mk-card-action-item is-compound"
-                                      onSelect={() => onDispatchChain(card.key, p.mode, q.mode)}
-                                      onClick={(e) => e.stopPropagation()}
-                                    >
-                                      {primaryLabel}, then {followOnLabel}
-                                    </DropdownMenu.Item>
-                                  );
-                                })}
-                              </React.Fragment>
-                            );
-                          });
-                        }}
+                        renderRows={({ visible }) => renderZapMenuRows({
+                          visible,
+                          promptConfig,
+                          cardColumn: card.column,
+                          stateGraph,
+                          cardKey: card.key,
+                          onDispatch,
+                          onDispatchChain,
+                        })}
                       />
                     </DropdownMenu.Content>
                   </DropdownMenu.Portal>
