@@ -29,7 +29,7 @@ Read the relevant doc **before** you start planning a change — these shape the
 - `go build ./...` — main module only (does NOT cover `desktop/` — separate nested module; use `./build.sh` for that).
 - `go vet ./...` / `go test ./...` — vet and unit tests.
 - `bacio <subcommand>` — from inside any git working tree drives the CLI.
-- **Smoke-testing UI changes.** The same React tree drives desktop and web. The cheapest agent-driven path is `bacio web --no-open` + the `playwright-cli` skill. `--no-open` is the right flag when an agent is driving — pop the browser only for human iteration. `bacio api` is API-only after BACI-72 (404 on `/ui/`) — reach for `bacio web` whenever the UI is in the loop.
+- **Smoke-testing UI changes.** The same React tree drives desktop and web. The cheapest agent-driven path is `bacio web --no-open` + the `playwright-cli` skill. `--no-open` is the right flag when an agent is driving — pop the browser only for human iteration. `bacio api` is API-only after BACI-72 (404 on `/ui/`) — reach for `bacio web` whenever the UI is in the loop. For **human iteration on React/TS code** the fast inner loop is the Vite dev server with HMR: `bacio api --cors-origin http://localhost:5174` in one terminal, `cd desktop/frontend && VITE_BACIO_API=http://127.0.0.1:5320 npm run dev:web` in another, browse `http://localhost:5174` — edits hot-reload without a `./build.sh` round-trip. See [`docs/web-app-mode.md`](docs/web-app-mode.md) §5.1(a).
 
 ## Tripwires
 

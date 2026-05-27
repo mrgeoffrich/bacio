@@ -193,39 +193,66 @@ shapes into the desktop's `BoardCard` / `IssueDetail` / `DocSummary` /
 
 ### 5.1 Local development
 
-Two ways to iterate on the web bundle:
+Two ways to iterate on the web bundle: the **Vite dev server with HMR**
+(fast inner loop, recommended for any non-trivial UI change) and the
+**same-origin embedded bundle** (closest to the shipped deployment,
+useful as a final pre-PR smoke test).
 
-**a) Same-origin against a real `bacio web`.** Closest to the
-recommended deployment.
+#### 5.1(a) Vite dev server with HMR (fastest iteration)
+
+Vite serves the bundle on `http://localhost:5174`, watches the React
+source, and pushes hot updates to the open browser. A separately-running
+`bacio api` answers data calls. Edits to `.tsx` / `.ts` / `.jsx` /
+`.css` reflect in under a second — no `./build.sh`, no
+`go build -o ~/.local/bin/bacio`, no restart.
+
+Use `bacio api` (not `bacio web`) — the Vite dev server hosts the
+bundle on `:5174`, so a second `/ui/` mount on `:5320` would be
+confusing and `bacio web`'s browser-open behaviour would race the Vite
+dev server.
+
+```bash
+# Terminal 1 — JSON API on :5320 with a CORS allow-list for the Vite origin
+bacio api --cors-origin http://localhost:5174
+
+# Terminal 2 — Vite dev server on :5174, pointed at the API
+cd desktop/frontend
+VITE_BACIO_API=http://127.0.0.1:5320 npm run dev:web
+# open http://localhost:5174
+```
+
+How the two env vars stitch together:
+
+- `--cors-origin http://localhost:5174` opens the API's CORS allow-list
+  so the browser preflight from the Vite origin doesn't get blocked.
+  The flag is **required** — without it every fetch from the Vite-served
+  page gets a `CORS` error in the browser console.
+- `VITE_BACIO_API=http://127.0.0.1:5320` is read by `src/api.http.ts`
+  (the `API_BASE` constant) and prepended to every API path, so the
+  Vite bundle reaches the cross-origin API host instead of the (empty)
+  same-origin default.
+
+The Vite dev server is wired in `desktop/frontend/vite.config.ts` and
+pinned to `127.0.0.1:5174` (`strictPort: true`). The `--mode web` flag
+also swaps `./api` → `src/api.http.ts` (fetch-based, same exported
+surface as the Wails-mode `api.ts`) and stubs `@wailsio/runtime` to a
+no-op, so the React tree compiles cleanly in a plain browser.
+
+#### 5.1(b) Same-origin against a real `bacio web` (closest to deployment)
+
+The single-binary path. Build the bundle, embed it into the Go binary,
+serve it back from `/ui/`.
 
 ```bash
 ./build.sh --skip-desktop                 # builds bundle + embeds + installs (web bundle is default-on)
 bacio web                                 # serves /ui/ + /repos/... + opens browser
 ```
 
-Edits to React/TS require a rebuild + reinstall (no Vite HMR — the
-bundle is baked into the Go binary).
-
-**b) Cross-origin Vite dev server against a real `bacio api`.** Faster
-iteration: Vite HMR for the bundle, pointed at a separately-running
-API. `bacio api` (not `bacio web`) is the right backend here — the
-dev server hosts the bundle, so a second `/ui/` mount would be
-confusing and the browser-open behaviour would race the Vite dev
-server.
-
-```bash
-# Terminal 1
-bacio api --cors-origin http://localhost:5174
-
-# Terminal 2
-cd desktop/frontend
-VITE_BACIO_API=http://127.0.0.1:5320 npm run dev:web
-open http://localhost:5174
-```
-
-`VITE_BACIO_API` overrides the same-origin default to point cross-origin
-at the API host. The `--cors-origin` flag's allow-list answers preflight
-requests for that origin.
+Edits to React/TS require a rebuild + reinstall — no HMR, because the
+bundle is baked into the Go binary at compile time. Reach for this when
+you want to confirm the embedded surface still works end-to-end
+(BACI-72 SPA fallback, browser launcher, the `/ui/` base path) before
+opening a PR.
 
 ### 5.2 The bundle path
 
@@ -293,7 +320,7 @@ still that today. Two changes were strictly necessary for a web bundle:
    same as a CLI user on the host. Auth, CORS, and `X-Actor` rules
    apply identically to both commands; the only difference is the
    `/ui/` mount.
-3. **Cross-origin dev/test rigs.** As shown in §5.1(b).
+3. **Cross-origin dev/test rigs.** As shown in §5.1(a).
 
 ### What's NOT in scope for v1
 
