@@ -405,11 +405,19 @@ func (f *featuresView) renderDetail(width, height int) string {
 		titleBudget = 4
 	}
 	title := stateChip + boldStyle.Render(truncate(feat.Title, titleBudget))
-	meta := mutedStyle.Render(truncate(fmt.Sprintf("[%s] · created %s · updated %s",
-		feat.Slug,
-		feat.CreatedAt.Format("2006-01-02"),
-		feat.UpdatedAt.Format("2006-01-02")),
-		innerWidth))
+	// BACI-231: splice `branch=<ref>` between [slug] and created/updated
+	// when the feature has an integration branch set, so a glance at the
+	// detail pane shows where work ships. mutedStyle carries the colour;
+	// truncate clamps the whole meta string to innerWidth.
+	metaParts := []string{fmt.Sprintf("[%s]", feat.Slug)}
+	if feat.BranchName != nil && *feat.BranchName != "" {
+		metaParts = append(metaParts, fmt.Sprintf("branch=%s", *feat.BranchName))
+	}
+	metaParts = append(metaParts,
+		fmt.Sprintf("created %s", feat.CreatedAt.Format("2006-01-02")),
+		fmt.Sprintf("updated %s", feat.UpdatedAt.Format("2006-01-02")),
+	)
+	meta := mutedStyle.Render(truncate(strings.Join(metaParts, " · "), innerWidth))
 
 	// Split the right pane between description and the issues table.
 	descRows := innerHeight / 3
@@ -486,11 +494,18 @@ func (f *featuresView) viewOverlay(width, height int) string {
 	// rendering as the inline detail pane.
 	stateChip := mutedStyle.Render(featureStateLabel(feat.State) + " · ")
 	title := stateChip + boldStyle.Render(feat.Title)
-	meta := mutedStyle.Render(fmt.Sprintf("[%s] · created %s · updated %s",
-		feat.Slug,
-		feat.CreatedAt.Format("2006-01-02 15:04"),
-		feat.UpdatedAt.Format("2006-01-02 15:04"),
-	))
+	// BACI-231: same `branch=<ref>` splice as renderDetail above.
+	// viewOverlay skips the truncate wrap since the overlay is sized
+	// for the full meta string.
+	overlayMetaParts := []string{fmt.Sprintf("[%s]", feat.Slug)}
+	if feat.BranchName != nil && *feat.BranchName != "" {
+		overlayMetaParts = append(overlayMetaParts, fmt.Sprintf("branch=%s", *feat.BranchName))
+	}
+	overlayMetaParts = append(overlayMetaParts,
+		fmt.Sprintf("created %s", feat.CreatedAt.Format("2006-01-02 15:04")),
+		fmt.Sprintf("updated %s", feat.UpdatedAt.Format("2006-01-02 15:04")),
+	)
+	meta := mutedStyle.Render(strings.Join(overlayMetaParts, " · "))
 
 	descHeader := boldStyle.Render("Description")
 	var desc string

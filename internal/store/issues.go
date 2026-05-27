@@ -887,7 +887,7 @@ func (s *Store) CountFeatures(repoID int64) (int, error) {
 // show / brief responses all carry the signal inline without a second
 // round trip.
 const issueSelect = `
-SELECT i.id, i.uuid, i.repo_id, i.number, r.prefix, i.feature_id, COALESCE(f.slug, ''), COALESCE(f.emoji, ''),
+SELECT i.id, i.uuid, i.repo_id, i.number, r.prefix, i.feature_id, COALESCE(f.slug, ''), COALESCE(f.emoji, ''), COALESCE(f.branch_name, ''),
        i.title, i.description, i.state, i.assignee, i.waiting_for_claim,
        EXISTS (
          SELECT 1 FROM agent_claims c
@@ -903,18 +903,19 @@ LEFT JOIN features f ON f.id = i.feature_id`
 
 func scanIssue(row rowScanner) (*model.Issue, error) {
 	var (
-		i             model.Issue
-		prefix        string
-		featureID     sql.NullInt64
-		featSlug      string
-		featEmoji     string
-		state         string
-		archivedAt    sql.NullTime
-		terminalAt    sql.NullTime
-		userActionRsn sql.NullString
-		baseBranch    sql.NullString
+		i              model.Issue
+		prefix         string
+		featureID      sql.NullInt64
+		featSlug       string
+		featEmoji      string
+		featBranchName string
+		state          string
+		archivedAt     sql.NullTime
+		terminalAt     sql.NullTime
+		userActionRsn  sql.NullString
+		baseBranch     sql.NullString
 	)
-	err := row.Scan(&i.ID, &i.UUID, &i.RepoID, &i.Number, &prefix, &featureID, &featSlug, &featEmoji,
+	err := row.Scan(&i.ID, &i.UUID, &i.RepoID, &i.Number, &prefix, &featureID, &featSlug, &featEmoji, &featBranchName,
 		&i.Title, &i.Description, &state, &i.Assignee, &i.WaitingForClaim, &i.Taken,
 		&archivedAt, &terminalAt, &userActionRsn, &baseBranch, &i.CreatedAt, &i.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -933,6 +934,12 @@ func scanIssue(row rowScanner) (*model.Issue, error) {
 		// COALESCE protects against NULL when there's no join match
 		// (i.e. issue with no feature_id).
 		i.FeatureEmoji = featEmoji
+		// FeatureBranchName mirrors FeatureEmoji's join: COALESCE'd to
+		// '' for no-feature rows AND for feature rows whose
+		// branch_name is NULL (the default "ship to main" case). The
+		// BoardCard denorm reads this directly so the kanban chip and
+		// the ActivityTray grouping don't need a second lookup.
+		i.FeatureBranchName = featBranchName
 	}
 	if archivedAt.Valid {
 		t := archivedAt.Time

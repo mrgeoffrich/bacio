@@ -595,6 +595,14 @@ export class FeatureDetail {
     "emoji": string;
 
     /**
+     * BranchName (BACI-231) is the per-feature integration branch
+     * the detail pane's "Integration branch" Properties row reads
+     * from / writes to. Empty string when the feature ships straight
+     * to main. Always present in JSON to match Emoji's shape.
+     */
+    "branchName": string;
+
+    /**
      * State + StateManual (BACI-199) round-trip the per-feature state
      * column and its sticky bit. The drawer's segmented control reads
      * State to highlight the active button, and StateManual to render
@@ -642,6 +650,9 @@ export class FeatureDetail {
         if (!("emoji" in $$source)) {
             this["emoji"] = "";
         }
+        if (!("branchName" in $$source)) {
+            this["branchName"] = "";
+        }
         if (!("state" in $$source)) {
             this["state"] = "";
         }
@@ -674,18 +685,18 @@ export class FeatureDetail {
      * Creates a new FeatureDetail instance from a string or object.
      */
     static createFrom($$source: any = {}): FeatureDetail {
-        const $$createField8_0 = $$createType7;
-        const $$createField9_0 = $$createType9;
-        const $$createField10_0 = $$createType11;
+        const $$createField9_0 = $$createType7;
+        const $$createField10_0 = $$createType9;
+        const $$createField11_0 = $$createType11;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("issues" in $$parsedSource) {
-            $$parsedSource["issues"] = $$createField8_0($$parsedSource["issues"]);
+            $$parsedSource["issues"] = $$createField9_0($$parsedSource["issues"]);
         }
         if ("comments" in $$parsedSource) {
-            $$parsedSource["comments"] = $$createField9_0($$parsedSource["comments"]);
+            $$parsedSource["comments"] = $$createField10_0($$parsedSource["comments"]);
         }
         if ("documents" in $$parsedSource) {
-            $$parsedSource["documents"] = $$createField10_0($$parsedSource["documents"]);
+            $$parsedSource["documents"] = $$createField11_0($$parsedSource["documents"]);
         }
         return new FeatureDetail($$parsedSource as Partial<FeatureDetail>);
     }
@@ -918,6 +929,16 @@ export class FeatureSummary {
      * abandoned work.
      */
     "state": string;
+
+    /**
+     * BranchName (BACI-231) is the per-feature integration branch
+     * (e.g. "feat/auth"). Empty string when the feature ships
+     * straight to main (the legacy default). The FeatureRow renders a
+     * branch chip when this is truthy; the detail pane carries the
+     * editable value. Always present in JSON (empty when null) to
+     * match the rest of the surfaced fields.
+     */
+    "branchName": string;
     "updatedAt": time$0.Time;
     "hiddenOnBoard": boolean;
 
@@ -934,6 +955,9 @@ export class FeatureSummary {
         }
         if (!("state" in $$source)) {
             this["state"] = "";
+        }
+        if (!("branchName" in $$source)) {
+            this["branchName"] = "";
         }
         if (!("updatedAt" in $$source)) {
             this["updatedAt"] = null;

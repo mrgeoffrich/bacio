@@ -62,6 +62,16 @@ export class Issue {
      * so the card row can decorate without a second lookup.
      */
     "feature_emoji"?: string;
+
+    /**
+     * FeatureBranchName (BACI-231) is the parent feature's integration
+     * branch denormalised onto the issue row via the same join. Empty
+     * when the issue has no feature or the feature ships straight to
+     * main (NULL branch_name). The BoardCard denorm reads this so the
+     * kanban card chip and the ActivityTray auto-grouping don't need a
+     * second feature lookup per card.
+     */
+    "feature_branch_name"?: string;
     "title": string;
     "description"?: string;
     "state": State;
@@ -192,10 +202,10 @@ export class Issue {
      * Creates a new Issue instance from a string or object.
      */
     static createFrom($$source: any = {}): Issue {
-        const $$createField14_0 = $$createType0;
+        const $$createField15_0 = $$createType0;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
-            $$parsedSource["tags"] = $$createField14_0($$parsedSource["tags"]);
+            $$parsedSource["tags"] = $$createField15_0($$parsedSource["tags"]);
         }
         return new Issue($$parsedSource as Partial<Issue>);
     }

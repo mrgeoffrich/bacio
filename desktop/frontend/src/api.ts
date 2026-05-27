@@ -503,6 +503,22 @@ export async function setFeatureEmoji(
   }
 }
 
+// setFeatureBranchName (BACI-231) updates the per-feature integration
+// branch. Empty clears the branch (the feature ships straight to
+// main again). Validated by the store-side ValidateBranchName so
+// malformed input surfaces as an error string from the Wails binding.
+export async function setFeatureBranchName(
+  repoPrefix: string,
+  slug: string,
+  branchName: string,
+): Promise<FeatureDetail> {
+  try {
+    return await FeatureService.SetFeatureBranchName(repoPrefix, slug, branchName);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
 // setFeatureHiddenOnBoard (BACI-177) flips the per-feature "Show on
 // board" toggle and returns the refreshed FeatureDetail. true hides
 // every kanban card belonging to this feature on this machine; false

@@ -52,6 +52,16 @@ export class BoardCard {
     "featureEmoji"?: string;
 
     /**
+     * FeatureBranchName (BACI-231) is the parent feature's integration
+     * branch (e.g. "feat/auth") denormalised from the issue's joined
+     * feature row. Empty (and omitted from JSON) when the card belongs
+     * to no feature or to a feature that ships straight to main — the
+     * kanban card renders the branch chip and the ActivityTray groups
+     * cards by branch only when this is truthy.
+     */
+    "featureBranchName"?: string;
+
+    /**
      * WaitingState (BACI-145) carries the structured reason a card is
      * rendering the spinner — queued without an agent, queued but
      * blocked by the template's concurrency cap, or delivered to the
@@ -231,13 +241,13 @@ export class BoardCard {
     static createFrom($$source: any = {}): BoardCard {
         const $$createField5_0 = $$createType0;
         const $$createField6_0 = $$createType0;
-        const $$createField10_0 = $$createType2;
-        const $$createField14_0 = $$createType4;
-        const $$createField15_0 = $$createType6;
-        const $$createField17_0 = $$createType8;
-        const $$createField21_0 = $$createType10;
-        const $$createField22_0 = $$createType12;
-        const $$createField23_0 = $$createType14;
+        const $$createField11_0 = $$createType2;
+        const $$createField15_0 = $$createType4;
+        const $$createField16_0 = $$createType6;
+        const $$createField18_0 = $$createType8;
+        const $$createField22_0 = $$createType10;
+        const $$createField23_0 = $$createType12;
+        const $$createField24_0 = $$createType14;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField5_0($$parsedSource["tags"]);
@@ -246,25 +256,25 @@ export class BoardCard {
             $$parsedSource["assignees"] = $$createField6_0($$parsedSource["assignees"]);
         }
         if ("waitingState" in $$parsedSource) {
-            $$parsedSource["waitingState"] = $$createField10_0($$parsedSource["waitingState"]);
+            $$parsedSource["waitingState"] = $$createField11_0($$parsedSource["waitingState"]);
         }
         if ("openQuestions" in $$parsedSource) {
-            $$parsedSource["openQuestions"] = $$createField14_0($$parsedSource["openQuestions"]);
+            $$parsedSource["openQuestions"] = $$createField15_0($$parsedSource["openQuestions"]);
         }
         if ("todos" in $$parsedSource) {
-            $$parsedSource["todos"] = $$createField15_0($$parsedSource["todos"]);
+            $$parsedSource["todos"] = $$createField16_0($$parsedSource["todos"]);
         }
         if ("blockedBy" in $$parsedSource) {
-            $$parsedSource["blockedBy"] = $$createField17_0($$parsedSource["blockedBy"]);
+            $$parsedSource["blockedBy"] = $$createField18_0($$parsedSource["blockedBy"]);
         }
         if ("followOn" in $$parsedSource) {
-            $$parsedSource["followOn"] = $$createField21_0($$parsedSource["followOn"]);
+            $$parsedSource["followOn"] = $$createField22_0($$parsedSource["followOn"]);
         }
         if ("latestPlan" in $$parsedSource) {
-            $$parsedSource["latestPlan"] = $$createField22_0($$parsedSource["latestPlan"]);
+            $$parsedSource["latestPlan"] = $$createField23_0($$parsedSource["latestPlan"]);
         }
         if ("latestPR" in $$parsedSource) {
-            $$parsedSource["latestPR"] = $$createField23_0($$parsedSource["latestPR"]);
+            $$parsedSource["latestPR"] = $$createField24_0($$parsedSource["latestPR"]);
         }
         return new BoardCard($$parsedSource as Partial<BoardCard>);
     }
