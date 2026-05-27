@@ -24,6 +24,7 @@ import { WEB_MODE } from './env';
 import * as api from './api';
 import { isTerminalState, stripBlockerFromCards, restoreBlockedByFromSnapshot } from './lib/issueState';
 import { useShipFlourish } from './lib/shipFlourish';
+import { useShipSfx } from './lib/shipSfx';
 import { viewPath, issuePath, viewFromPath } from './lib/routes';
 
 const THEME_KEY = 'bacio-theme'; // persisted preference: 'system' | 'light' | 'dark'
@@ -262,10 +263,12 @@ export default function App() {
   }, []);
 
   // changeAudioEnabled persists the BACI-240 ui.shipped_sfx toggle.
-  // The ShippedPopover reads `audioEnabled` from props and gates its
-  // `play()` call accordingly, so a flip surfaces immediately without
-  // a re-fetch. Same optimistic-then-confirmed shape as the other
-  // preference handlers.
+  // The App mounts `useShipSfx({ enabled: audioEnabled })` and the
+  // hook reads the flag per-play via its internal ref, so a flip
+  // surfaces immediately without a re-fetch. Same optimistic-then-
+  // confirmed shape as the other preference handlers. Pre-BACI-254
+  // this was wired through ShippedPopover; the SFX is now a sibling
+  // of useShipFlourish in App.jsx so it fires regardless of view.
   const changeAudioEnabled = useCallback((next) => {
     api.setAudioPreferences(next)
       .then(prefs => setAudioEnabled(prefs.shippedSfx))
@@ -941,12 +944,31 @@ export default function App() {
     return () => { cancelled = true; clearInterval(id); };
   }, [activeBoard, shippedScope]);
 
+  // BACI-240 ka-ching SFX. Hoisted out of ShippedPopover so the
+  // audio fires regardless of the active view (BACI-254). The hook
+  // returns a stable `play` reference; the gating (enabled flag,
+  // reduced-motion, autoplay-policy lock) lives inside the hook so
+  // every caller stays oblivious to those branches.
+  const { play: playShipSfx } = useShipSfx({ enabled: audioEnabled });
+
+  // BACI-254: per-shipped-card callback. `useShipFlourish` fires
+  // `onShip(keys)` with every card that transitioned into done in
+  // this tick — possibly more than one. We play() once per key so a
+  // burst ship lands every audio cue rather than the single-pick the
+  // pre-BACI-254 wiring afforded. `playShipSfx` is stable from
+  // useShipSfx, so this callback identity is too — keeps the
+  // useShipFlourish detection effect's dep list quiet.
+  const onCardsShipped = useCallback((keys) => {
+    for (let i = 0; i < keys.length; i++) playShipSfx();
+  }, [playShipSfx]);
+
   // BACI-193 ship flourish: detect cards that just transitioned into
   // `done` from a non-terminal column, expose the flying key + flash
   // signal to Topbar / ShippedPopover. The hook diffs the `cards`
   // array against its own internal previous-columns snapshot so the
-  // poll-driven re-render is the only thing it needs.
-  const { flyingKey: flyingShipKey, flashing: shipFlashing, onFlightDone: onShipFlightDone } = useShipFlourish(cards);
+  // poll-driven re-render is the only thing it needs. The `onShip`
+  // callback fan-out is the BACI-254 SFX trigger — see comment above.
+  const { flyingKey: flyingShipKey, flashing: shipFlashing, onFlightDone: onShipFlightDone } = useShipFlourish(cards, { onShip: onCardsShipped });
 
   // BACI-203: navigate-by-key callback for prev/next sibling jumps and
   // the kanban blocked-popover link. Kept as a memoised callback so
@@ -986,7 +1008,6 @@ export default function App() {
         flyingShipKey={flyingShipKey}
         shipFlashing={shipFlashing}
         onShipFlightDone={onShipFlightDone}
-        audioEnabled={audioEnabled}
       />
       {loading ? (
         <div className="mk-app-state">Loading…</div>

@@ -5,7 +5,6 @@ import * as api from '../api';
 import { formatWhen } from '../lib/formatWhen';
 import { SHIPPED_SCOPES, scopeLabel, scopeSinceDays } from './shippedScope.ts';
 import OdometerNumber from './OdometerNumber.jsx';
-import { useShipSfx } from '../lib/shipSfx';
 
 // CACHE_TTL_MS: how long the popover holds onto its last successful
 // fetch before refetching on the next open. Thirty seconds is long
@@ -45,11 +44,16 @@ const LIMIT = 20;
 //                  Toggles `.is-flash` on the pill so it pulses.
 //   onShipFlightDone — BACI-193: invoked by the destination slot's
 //                  `onLayoutAnimationComplete`. Triggers the flash.
-//   audioEnabled  — BACI-240: when true, play a short ka-ching SFX
-//                  on the rising edge of shipFlashing (the same
-//                  trigger as the border flash). Default off — the
-//                  user opts in from Settings.
-export default function ShippedPopover({ activeBoard, shippedCount, scope, onScopeChange, onOpenIssue, flyingShipKey, shipFlashing, onShipFlightDone, audioEnabled }) {
+//
+// BACI-254: the ship SFX used to live here too, wired to the rising
+// edge of `shipFlashing`. That made the audio depend on Motion
+// actually completing the flight — which never happens when the
+// user is off the kanban (Features graph, Settings, …) because the
+// source `motion.article` isn't mounted. The SFX has moved up into
+// `App.jsx`, where it fires from `useShipFlourish`'s detection
+// effect regardless of the active view. The visual flash stays put
+// — it does genuinely depend on the flight landing.
+export default function ShippedPopover({ activeBoard, shippedCount, scope, onScopeChange, onOpenIssue, flyingShipKey, shipFlashing, onShipFlightDone }) {
   const [open, setOpen] = useState(false);
   // status: 'idle' | 'loading' | 'ready' | 'error'
   // rows is the last successful fetch (preserved across closes so the
@@ -157,20 +161,6 @@ export default function ShippedPopover({ activeBoard, shippedCount, scope, onSco
     ? `${safeCount} ${safeCount === 1 ? 'issue' : 'issues'} shipped · click for the full list`
     : 'Recently-shipped issues for this repository';
   const safeScope = scope ?? 'week';
-
-  // BACI-240: ka-ching SFX. Wired to the rising edge of `shipFlashing`
-  // so the audio fires in lockstep with the border flash — the
-  // existing "this is a genuine ship" signal. `useShipSfx` returns a
-  // stable play() reference; gating happens inside the hook.
-  const { play: playShipSfx } = useShipSfx({ enabled: !!audioEnabled });
-  const prevShipFlashingRef = useRef(false);
-  useEffect(() => {
-    if (shipFlashing && !prevShipFlashingRef.current) {
-      // Rising edge: false → true. The flight just landed.
-      playShipSfx();
-    }
-    prevShipFlashingRef.current = shipFlashing;
-  }, [shipFlashing, playShipSfx]);
 
   return (
     <div className="mk-shipped-popover-root" ref={rootRef}>

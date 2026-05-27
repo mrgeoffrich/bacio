@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const moduleRoot = path.resolve(__dirname, '..');
 
-const { computeShipFlight } = await import(path.join(moduleRoot, 'shipFlourish.ts'));
+const { computeShipFlight, computeShippedKeys } = await import(path.join(moduleRoot, 'shipFlourish.ts'));
 
 const tests = [];
 function test(name, fn) { tests.push({ name, fn }); }
@@ -122,6 +122,64 @@ test('a card moving between non-terminal columns does NOT fire', () => {
   const prev = new Map([['TEST-1', 'todo']]);
   const next = [{ key: 'TEST-1', column: 'in_progress' }];
   assert.equal(computeShipFlight(prev, next), null);
+});
+
+// ---- computeShippedKeys (BACI-254): the per-tick fan-out function
+// the SFX caller reads. Mirrors computeShipFlight's cases but returns
+// the full ordered list rather than the first key, so a burst ship
+// lands every audio cue.
+
+test('computeShippedKeys: first render returns []', () => {
+  const cards = [
+    { key: 'TEST-1', column: 'done' },
+    { key: 'TEST-2', column: 'in_progress' },
+  ];
+  assert.deepEqual(computeShippedKeys(null, cards), []);
+});
+
+test('computeShippedKeys: single transition returns one-element array', () => {
+  const prev = new Map([['TEST-1', 'in_progress']]);
+  const next = [{ key: 'TEST-1', column: 'done' }];
+  assert.deepEqual(computeShippedKeys(prev, next), ['TEST-1']);
+});
+
+test('computeShippedKeys: two transitions in the same tick returns both, in array order', () => {
+  // BACI-254 root cause #4: two cards shipping in the same poll tick.
+  // The old computeShipFlight only surfaced the first; the audio
+  // fan-out needs every key so both ka-chings fire.
+  const prev = new Map([
+    ['TEST-1', 'in_progress'],
+    ['TEST-2', 'in_review'],
+  ]);
+  const next = [
+    { key: 'TEST-1', column: 'done' },
+    { key: 'TEST-2', column: 'done' },
+  ];
+  assert.deepEqual(computeShippedKeys(prev, next), ['TEST-1', 'TEST-2']);
+});
+
+test('computeShippedKeys: cancelled / already-done / brand-new cards are still excluded', () => {
+  // The exclusion rules from computeShipFlight carry over: cancelled
+  // origin, terminal-to-terminal, and first-sighting are all NOT
+  // ships. Only the genuine non-terminal → done transition counts.
+  const prev = new Map([
+    ['TEST-1', 'cancelled'],
+    ['TEST-2', 'done'],
+    ['TEST-3', 'in_progress'],
+  ]);
+  const next = [
+    { key: 'TEST-1', column: 'done' },     // cancelled → done: no
+    { key: 'TEST-2', column: 'done' },     // done → done:      no
+    { key: 'TEST-3', column: 'done' },     // in_progress → done: YES
+    { key: 'TEST-NEW', column: 'done' },   // first sighting:  no
+  ];
+  assert.deepEqual(computeShippedKeys(prev, next), ['TEST-3']);
+});
+
+test('computeShippedKeys: no shipped cards returns []', () => {
+  const prev = new Map([['TEST-1', 'todo']]);
+  const next = [{ key: 'TEST-1', column: 'in_progress' }];
+  assert.deepEqual(computeShippedKeys(prev, next), []);
 });
 
 // ---- runner ----
