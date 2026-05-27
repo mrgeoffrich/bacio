@@ -178,8 +178,19 @@ export default function Topbar({ boards, activeBoard, onPickBoard, onAddReposito
           </button>
         </Tooltip>
         {isLeader && (
+          // BACI-249: leader-lease indicator is an icon-only button
+          // sized like the sibling sync / settings / plus buttons so
+          // the topbar's right-hand strip stays a uniform icon rhythm.
+          // Non-leader windows still render nothing (same gate as the
+          // earlier text pill).
           <Tooltip label="This window holds the UI leader lease">
-            <span className="mk-pill mk-leader-badge">Controlling</span>
+            <button
+              type="button"
+              className="mk-icbtn mk-leader-btn"
+              aria-label="Controlling window"
+            >
+              <Icon name="crown" />
+            </button>
           </Tooltip>
         )}
         <RepoPicker

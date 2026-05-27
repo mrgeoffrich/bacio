@@ -1,5 +1,5 @@
 import React from 'react';
-import { Search, Plus, Columns3, GitBranch, Settings, X, Zap, Lock, MessageSquare, AlertTriangle, Minimize2, Maximize2, SkipForward, Pin, ChevronsDownUp, ChevronsUpDown, RefreshCw, FileText, GitPullRequest } from 'lucide-react';
+import { Search, Plus, Columns3, GitBranch, Settings, X, Zap, Lock, MessageSquare, AlertTriangle, Minimize2, Maximize2, SkipForward, Pin, ChevronsDownUp, ChevronsUpDown, RefreshCw, FileText, GitPullRequest, Crown } from 'lucide-react';
 
 // Glyphs come from lucide-react; the UI references them by short name
 // via <Icon name="..." />. The wrapper span (.mk-icon) sizes them, so the SVG's
@@ -47,6 +47,10 @@ const ICONS = {
   // on kanban cards with at least one PR attached. Sibling of `plan`
   // — sits next to it on the card.
   'pull-request': GitPullRequest,
+  // BACI-249: leader-lease glyph on the topbar — "this window is in
+  // charge". Only rendered when the window holds the controller lease,
+  // tucked into the icon strip next to sync / settings.
+  crown: Crown,
 };
 
 export default function Icon({ name }) {
