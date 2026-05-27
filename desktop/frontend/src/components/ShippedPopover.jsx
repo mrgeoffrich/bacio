@@ -4,6 +4,8 @@ import { reportError } from '../errors';
 import * as api from '../api';
 import { formatWhen } from '../lib/formatWhen';
 import { SHIPPED_SCOPES, scopeLabel, scopeSinceDays } from './shippedScope.ts';
+import OdometerNumber from './OdometerNumber.jsx';
+import { useShipSfx } from '../lib/shipSfx';
 
 // CACHE_TTL_MS: how long the popover holds onto its last successful
 // fetch before refetching on the next open. Thirty seconds is long
@@ -43,7 +45,11 @@ const LIMIT = 20;
 //                  Toggles `.is-flash` on the pill so it pulses.
 //   onShipFlightDone — BACI-193: invoked by the destination slot's
 //                  `onLayoutAnimationComplete`. Triggers the flash.
-export default function ShippedPopover({ activeBoard, shippedCount, scope, onScopeChange, onOpenIssue, flyingShipKey, shipFlashing, onShipFlightDone }) {
+//   audioEnabled  — BACI-240: when true, play a short ka-ching SFX
+//                  on the rising edge of shipFlashing (the same
+//                  trigger as the border flash). Default off — the
+//                  user opts in from Settings.
+export default function ShippedPopover({ activeBoard, shippedCount, scope, onScopeChange, onOpenIssue, flyingShipKey, shipFlashing, onShipFlightDone, audioEnabled }) {
   const [open, setOpen] = useState(false);
   // status: 'idle' | 'loading' | 'ready' | 'error'
   // rows is the last successful fetch (preserved across closes so the
@@ -146,11 +152,25 @@ export default function ShippedPopover({ activeBoard, shippedCount, scope, onSco
   };
 
   const disabled = !activeBoard || activeBoard === 'all';
-  const pillLabel = shippedCount > 0 ? `Shipped · ${shippedCount}` : 'Shipped';
-  const tooltip = shippedCount > 0
-    ? `${shippedCount} ${shippedCount === 1 ? 'issue' : 'issues'} shipped · click for the full list`
+  const safeCount = Number.isFinite(shippedCount) && shippedCount > 0 ? shippedCount : 0;
+  const tooltip = safeCount > 0
+    ? `${safeCount} ${safeCount === 1 ? 'issue' : 'issues'} shipped · click for the full list`
     : 'Recently-shipped issues for this repository';
   const safeScope = scope ?? 'week';
+
+  // BACI-240: ka-ching SFX. Wired to the rising edge of `shipFlashing`
+  // so the audio fires in lockstep with the border flash — the
+  // existing "this is a genuine ship" signal. `useShipSfx` returns a
+  // stable play() reference; gating happens inside the hook.
+  const { play: playShipSfx } = useShipSfx({ enabled: !!audioEnabled });
+  const prevShipFlashingRef = useRef(false);
+  useEffect(() => {
+    if (shipFlashing && !prevShipFlashingRef.current) {
+      // Rising edge: false → true. The flight just landed.
+      playShipSfx();
+    }
+    prevShipFlashingRef.current = shipFlashing;
+  }, [shipFlashing, playShipSfx]);
 
   return (
     <div className="mk-shipped-popover-root" ref={rootRef}>
@@ -162,8 +182,15 @@ export default function ShippedPopover({ activeBoard, shippedCount, scope, onSco
         onClick={() => { if (!disabled) setOpen(o => !o); }}
         aria-haspopup="dialog"
         aria-expanded={open}
+        aria-label={`Shipped, ${safeCount}`}
       >
-        {pillLabel}
+        {/* BACI-240: the static "Shipped · N" label is now a fixed
+            "Shipped" word + a 3-digit OdometerNumber. The odometer
+            snaps on first mount / repo / scope changes and rolls on
+            genuine increments; the existing .is-flash border pulse
+            and the layout-id flying-target are unchanged. */}
+        <span className="mk-shipped-pill-label">Shipped</span>
+        <OdometerNumber value={safeCount} />
         {/* BACI-193 ship-flourish destination slot. Mounted only
             while a card is mid-flight (flyingShipKey set); the matching
             layoutId on the kanban card makes Motion animate the card-

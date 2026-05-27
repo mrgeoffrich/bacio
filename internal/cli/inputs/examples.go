@@ -298,6 +298,9 @@ var (
 	ExampleArchiveSweep       = ArchiveSweepInput{}
 	ExampleSettingsShowArchived = SettingsShowArchivedInput{Value: true}
 	ExampleSettingsSyncBackground = SettingsSyncBackgroundInput{Value: false}
+	// BACI-240: ship-flourish ka-ching SFX toggle. Defaults to false;
+	// flipping to true opts the user in.
+	ExampleSettingsShippedSfx = SettingsShippedSfxInput{Value: true}
 	ExampleSettingsArchive        = SettingsArchiveInput{
 		AutoEnabled:   true,
 		RetentionDays: 7,

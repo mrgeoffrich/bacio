@@ -63,6 +63,17 @@ export function GetArchivePreferences(): $CancellablePromise<$models.ArchivePref
 }
 
 /**
+ * GetAudioPreferences returns the current ui.shipped_sfx value
+ * (BACI-240). The desktop topbar's Shipped pill consults this to
+ * gate the ka-ching SFX on a genuine ship.
+ */
+export function GetAudioPreferences(): $CancellablePromise<$models.AudioPreferencesDTO> {
+    return $Call.ByID(1490774688).then(($result: any) => {
+        return $$createType2($result);
+    });
+}
+
+/**
  * GetDisplayPreferences returns the current display.show_archived
  * value (BACI-68). The desktop Board / Docs / Features views consult
  * this on every refresh — when on, archived rows surface as visibly-
@@ -70,7 +81,7 @@ export function GetArchivePreferences(): $CancellablePromise<$models.ArchivePref
  */
 export function GetDisplayPreferences(): $CancellablePromise<$models.DisplayPreferencesDTO> {
     return $Call.ByID(4223916732).then(($result: any) => {
-        return $$createType2($result);
+        return $$createType3($result);
     });
 }
 
@@ -81,7 +92,7 @@ export function GetDisplayPreferences(): $CancellablePromise<$models.DisplayPref
  */
 export function GetSyncPreferences(): $CancellablePromise<$models.SyncPreferencesDTO> {
     return $Call.ByID(3481112815).then(($result: any) => {
-        return $$createType3($result);
+        return $$createType4($result);
     });
 }
 
@@ -93,7 +104,7 @@ export function GetSyncPreferences(): $CancellablePromise<$models.SyncPreference
  */
 export function GetSyncRegistry(): $CancellablePromise<$models.SyncRegistryDTO> {
     return $Call.ByID(3389817124).then(($result: any) => {
-        return $$createType4($result);
+        return $$createType5($result);
     });
 }
 
@@ -109,7 +120,7 @@ export function GetSyncRegistry(): $CancellablePromise<$models.SyncRegistryDTO> 
  */
 export function LinkPhantomRepo(prefix: string, path: string): $CancellablePromise<$models.RepoLinkResultDTO> {
     return $Call.ByID(3604398369, prefix, path).then(($result: any) => {
-        return $$createType5($result);
+        return $$createType6($result);
     });
 }
 
@@ -121,7 +132,7 @@ export function LinkPhantomRepo(prefix: string, path: string): $CancellablePromi
  */
 export function ListPromptTemplates(): $CancellablePromise<$models.PromptTemplateDTO[]> {
     return $Call.ByID(1001854565).then(($result: any) => {
-        return $$createType6($result);
+        return $$createType7($result);
     });
 }
 
@@ -132,7 +143,7 @@ export function ListPromptTemplates(): $CancellablePromise<$models.PromptTemplat
  */
 export function PromptPlaceholders(): $CancellablePromise<string[]> {
     return $Call.ByID(1135988516).then(($result: any) => {
-        return $$createType7($result);
+        return $$createType8($result);
     });
 }
 
@@ -154,7 +165,7 @@ export function RenamePromptTemplate(slug: string, newSlug: string, newName: str
  */
 export function RestoreBuiltinPromptTemplates(): $CancellablePromise<$models.PromptTemplateDTO[]> {
     return $Call.ByID(3843909418).then(($result: any) => {
-        return $$createType6($result);
+        return $$createType7($result);
     });
 }
 
@@ -212,12 +223,22 @@ export function SetArchivePreferences(autoEnabled: boolean, retentionDays: numbe
 }
 
 /**
+ * SetAudioPreferences writes ui.shipped_sfx and returns the refreshed
+ * DTO (BACI-240). The client records the audit row.
+ */
+export function SetAudioPreferences(shippedSfx: boolean): $CancellablePromise<$models.AudioPreferencesDTO> {
+    return $Call.ByID(2147790516, shippedSfx).then(($result: any) => {
+        return $$createType2($result);
+    });
+}
+
+/**
  * SetDisplayPreferences writes display.show_archived and returns the
  * refreshed DTO (BACI-68).
  */
 export function SetDisplayPreferences(showArchived: boolean): $CancellablePromise<$models.DisplayPreferencesDTO> {
     return $Call.ByID(1804218376, showArchived).then(($result: any) => {
-        return $$createType2($result);
+        return $$createType3($result);
     });
 }
 
@@ -227,7 +248,7 @@ export function SetDisplayPreferences(showArchived: boolean): $CancellablePromis
  */
 export function SetSyncPreferences(backgroundEnabled: boolean): $CancellablePromise<$models.SyncPreferencesDTO> {
     return $Call.ByID(2076274475, backgroundEnabled).then(($result: any) => {
-        return $$createType3($result);
+        return $$createType4($result);
     });
 }
 
@@ -243,17 +264,18 @@ export function SetSyncPreferences(backgroundEnabled: boolean): $CancellableProm
  */
 export function SetupSync(prefix: string, $in: $models.SetupSyncIn): $CancellablePromise<$models.SyncSetupDTO> {
     return $Call.ByID(3158355382, prefix, $in).then(($result: any) => {
-        return $$createType8($result);
+        return $$createType9($result);
     });
 }
 
 // Private type creation functions
 const $$createType0 = $models.PromptTemplateDTO.createFrom;
 const $$createType1 = $models.ArchivePreferencesDTO.createFrom;
-const $$createType2 = $models.DisplayPreferencesDTO.createFrom;
-const $$createType3 = $models.SyncPreferencesDTO.createFrom;
-const $$createType4 = $models.SyncRegistryDTO.createFrom;
-const $$createType5 = $models.RepoLinkResultDTO.createFrom;
-const $$createType6 = $Create.Array($$createType0);
-const $$createType7 = $Create.Array($Create.Any);
-const $$createType8 = $models.SyncSetupDTO.createFrom;
+const $$createType2 = $models.AudioPreferencesDTO.createFrom;
+const $$createType3 = $models.DisplayPreferencesDTO.createFrom;
+const $$createType4 = $models.SyncPreferencesDTO.createFrom;
+const $$createType5 = $models.SyncRegistryDTO.createFrom;
+const $$createType6 = $models.RepoLinkResultDTO.createFrom;
+const $$createType7 = $Create.Array($$createType0);
+const $$createType8 = $Create.Array($Create.Any);
+const $$createType9 = $models.SyncSetupDTO.createFrom;

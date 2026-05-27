@@ -379,3 +379,30 @@ func (s *Store) SetSyncBackgroundEnabled(enabled bool) error {
 	}
 	return s.SetAppSetting(syncBackgroundEnabledKey, v)
 }
+
+// uiShippedSfxKey is the BACI-240 global toggle controlling whether
+// the topbar Shipped pill plays a short "ka-ching" SFX on every
+// genuine increment of the shipped count. Default OFF — audio is opt-
+// in in a desktop dev tool.
+const uiShippedSfxKey = "ui.shipped_sfx"
+
+// GetUIShippedSfx reports whether the BACI-240 Shipped-pill SFX is
+// enabled. Defaults to false; a missing/empty value — or any value
+// that isn't exactly "true" — reads as false. Defensive read shape
+// matching GetDisplayShowArchived.
+func (s *Store) GetUIShippedSfx() (bool, error) {
+	v, err := s.GetAppSetting(uiShippedSfxKey)
+	if err != nil {
+		return false, err
+	}
+	return v == "true", nil
+}
+
+// SetUIShippedSfx stores the BACI-240 Shipped-pill SFX toggle.
+func (s *Store) SetUIShippedSfx(enabled bool) error {
+	v := "false"
+	if enabled {
+		v = "true"
+	}
+	return s.SetAppSetting(uiShippedSfxKey, v)
+}

@@ -114,6 +114,11 @@ export default function App() {
   // screen via setArchivePreferences (atomic pair write).
   const [archiveAutoEnabled, setArchiveAutoEnabled] = useState(true);
   const [archiveRetentionDays, setArchiveRetentionDays] = useState(7);
+  // BACI-240: ui.shipped_sfx toggle — when true, the topbar Shipped
+  // pill plays a short ka-ching SFX on every genuine ship (the
+  // odometer rolling into a new value). Default false. Loaded on
+  // mount alongside the other display prefs; flipped from Settings.
+  const [audioEnabled, setAudioEnabled] = useState(false);
   // leaderState tracks the UI leader-election result from LeaderService.
   // amLeader = true means this desktop process holds the lease and may
   // dispatch. Standby processes show a chip and disable the per-card button.
@@ -176,14 +181,16 @@ export default function App() {
       api.listPromptTemplates(),
       api.getDisplayPreferences(),
       api.getArchivePreferences(),
+      api.getAudioPreferences(),
     ])
-      .then(([bs, cols, tpls, displayPrefs, archivePrefs]) => {
+      .then(([bs, cols, tpls, displayPrefs, archivePrefs, audioPrefs]) => {
         setBoards(bs);
         setColumns(cols);
         setPromptConfig(tpls);
         setShowArchived(displayPrefs.showArchived);
         setArchiveAutoEnabled(archivePrefs.autoEnabled);
         setArchiveRetentionDays(archivePrefs.retentionDays);
+        setAudioEnabled(audioPrefs.shippedSfx);
         setActiveBoard(prev => bs.some(b => b.prefix === prev) ? prev : (bs[0]?.prefix ?? ''));
         setLoading(false);
       })
@@ -233,6 +240,17 @@ export default function App() {
         setArchiveAutoEnabled(prefs.autoEnabled);
         setArchiveRetentionDays(prefs.retentionDays);
       })
+      .catch(err => reportError(err, { headline: "Couldn't save preference" }));
+  }, []);
+
+  // changeAudioEnabled persists the BACI-240 ui.shipped_sfx toggle.
+  // The ShippedPopover reads `audioEnabled` from props and gates its
+  // `play()` call accordingly, so a flip surfaces immediately without
+  // a re-fetch. Same optimistic-then-confirmed shape as the other
+  // preference handlers.
+  const changeAudioEnabled = useCallback((next) => {
+    api.setAudioPreferences(next)
+      .then(prefs => setAudioEnabled(prefs.shippedSfx))
       .catch(err => reportError(err, { headline: "Couldn't save preference" }));
   }, []);
 
@@ -936,6 +954,7 @@ export default function App() {
         flyingShipKey={flyingShipKey}
         shipFlashing={shipFlashing}
         onShipFlightDone={onShipFlightDone}
+        audioEnabled={audioEnabled}
       />
       {loading ? (
         <div className="mk-app-state">Loading…</div>
@@ -949,6 +968,8 @@ export default function App() {
             archiveAutoEnabled={archiveAutoEnabled}
             archiveRetentionDays={archiveRetentionDays}
             onChangeArchivePreferences={changeArchivePreferences}
+            audioEnabled={audioEnabled}
+            onChangeAudioEnabled={changeAudioEnabled}
             columns={columns}
             onClose={closeSettings}
             onTemplatesChanged={refreshPromptConfig}

@@ -2507,6 +2507,29 @@ export async function setArchivePreferences(
   return { autoEnabled: res.auto_enabled, retentionDays: res.retention_days };
 }
 
+// ---------- Audio preferences (BACI-240) ----------
+//
+// ui.shipped_sfx global toggle — when on, the topbar Shipped pill
+// plays a short ka-ching SFX on every genuine ship. Defaults to false
+// (audio is opt-in). The wire payload is {shipped_sfx: bool} rather
+// than a generic "value" to leave room for future audio toggles
+// without breaking the existing field name.
+
+export type AudioPreferencesDTO = { shippedSfx: boolean };
+
+export async function getAudioPreferences(): Promise<AudioPreferencesDTO> {
+  const res = await call<{ shipped_sfx: boolean }>('/settings/audio-preferences');
+  return { shippedSfx: res.shipped_sfx };
+}
+
+export async function setAudioPreferences(shippedSfx: boolean): Promise<AudioPreferencesDTO> {
+  const res = await call<{ shipped_sfx: boolean }>('/settings/audio-preferences', {
+    method: 'PUT',
+    body: { shipped_sfx: shippedSfx },
+  });
+  return { shippedSfx: res.shipped_sfx };
+}
+
 // ---------- Default-feature preference (BACI-235) ----------
 //
 // Per-repo `default_feature` setting that auto-applies to issues

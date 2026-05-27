@@ -81,7 +81,96 @@ for discoverability alongside the other settings toggles.`,
 	cmd.AddCommand(newSettingsShowArchivedCmd())
 	cmd.AddCommand(newSettingsSyncBackgroundCmd())
 	cmd.AddCommand(newSettingsArchiveCmd())
+	cmd.AddCommand(newSettingsShippedSfxCmd())
 	cmd.AddCommand(newSettingsDefaultFeatureCmd())
+	return cmd
+}
+
+// shippedSfxResult is the JSON + text shape `bacio settings
+// shipped-sfx` returns on both the get and set paths (BACI-240).
+type shippedSfxResult struct {
+	ShippedSfx bool `json:"shipped_sfx"`
+}
+
+// newSettingsShippedSfxCmd implements the BACI-240 ui.shipped_sfx
+// toggle. The verb doubles as get and set:
+//
+//   - `bacio settings shipped-sfx`             — read the current value
+//   - `bacio settings shipped-sfx true|false`  — write it
+//   - `bacio settings shipped-sfx --json '{"value":true}'` — same write
+//
+// Default is false — audio is opt-in in a desktop dev tool. The SFX
+// plays on every genuine ship (the topbar pill ticks up to a new
+// value); decrements / first-load snaps don't trigger it. Same gates
+// as the ship flourish: `prefers-reduced-motion` and the autoplay
+// policy silently no-op rather than error.
+func newSettingsShippedSfxCmd() *cobra.Command {
+	var rawInput string
+	cmd := &cobra.Command{
+		Use:   "shipped-sfx [true|false]",
+		Short: "Get or set the BACI-240 ui.shipped_sfx global toggle (default: false)",
+		Long: `Get or set the BACI-240 ui.shipped_sfx global toggle. When on, the
+topbar "Shipped · N" pill plays a short ka-ching SFX on every genuine
+ship (the pill's odometer rolls into a new value). Decrements (scope /
+repo / archive flips) and first-mount snaps don't trigger the sound.
+
+The play path is silently no-op'd by ` + "`prefers-reduced-motion`" + ` and by
+the browser's autoplay policy (the page needs at least one user
+gesture before audio is allowed), so this setting is safe to leave on
+even on accessibility profiles — it just stays quiet.
+
+Examples:
+
+  bacio settings shipped-sfx           # read current value
+  bacio settings shipped-sfx true      # enable
+  bacio settings shipped-sfx false     # disable (default)
+  bacio settings shipped-sfx --json '{"value":true}'`,
+		Args: cobra.RangeArgs(0, 1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			raw, err := parseJSONInput(cmd, args, rawInput)
+			if err != nil {
+				return err
+			}
+			c, err := openClient()
+			if err != nil {
+				return err
+			}
+			defer c.Close()
+			// Get path — no args, no --json.
+			if raw == nil && len(args) == 0 {
+				cur, err := c.GetUIShippedSfx(context.Background())
+				if err != nil {
+					return err
+				}
+				return emit(shippedSfxResult{ShippedSfx: cur})
+			}
+			// Set path — accept --json or a positional bool.
+			var value bool
+			if raw != nil {
+				in, _, err := inputio.DecodeStrict[inputs.SettingsShippedSfxInput](raw)
+				if err != nil {
+					return err
+				}
+				value = in.Value
+			} else {
+				v, err := parseBoolPositional(args[0])
+				if err != nil {
+					return err
+				}
+				value = v
+			}
+			out, err := c.SetUIShippedSfx(context.Background(), value, opts.dryRun)
+			if err != nil {
+				return err
+			}
+			payload := shippedSfxResult{ShippedSfx: out}
+			if opts.dryRun {
+				return emitDryRun(payload)
+			}
+			return emit(payload)
+		},
+	}
+	addInputFlag(cmd, &rawInput)
 	return cmd
 }
 

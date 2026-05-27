@@ -184,6 +184,39 @@ func TestMarkSyncFailedAndCompleted(t *testing.T) {
 	}
 }
 
+// TestUIShippedSfxRoundTrip — BACI-240. Defaults to false; the boolean
+// round-trips; an unexpected stored value reads back as false (the
+// defensive read shape matching GetDisplayShowArchived).
+func TestUIShippedSfxRoundTrip(t *testing.T) {
+	s := newTestStore(t)
+
+	// Never set → defaults to false.
+	if v, err := s.GetUIShippedSfx(); err != nil || v {
+		t.Fatalf("GetUIShippedSfx(unset) = %v, %v; want false, nil", v, err)
+	}
+	// Explicit true.
+	if err := s.SetUIShippedSfx(true); err != nil {
+		t.Fatalf("SetUIShippedSfx(true): %v", err)
+	}
+	if v, _ := s.GetUIShippedSfx(); !v {
+		t.Fatal("after Set(true), GetUIShippedSfx = false, want true")
+	}
+	// Back to false.
+	if err := s.SetUIShippedSfx(false); err != nil {
+		t.Fatalf("SetUIShippedSfx(false): %v", err)
+	}
+	if v, _ := s.GetUIShippedSfx(); v {
+		t.Fatal("after Set(false), GetUIShippedSfx = true, want false")
+	}
+	// A non-"true" stored value reads as false.
+	if err := s.SetAppSetting(uiShippedSfxKey, "garbage"); err != nil {
+		t.Fatalf("SetAppSetting: %v", err)
+	}
+	if v, _ := s.GetUIShippedSfx(); v {
+		t.Fatal("a non-\"true\" stored value should read as false")
+	}
+}
+
 // TestPromptTemplateSeedAndOverride checks that the migration seeds the
 // built-in templates on first run, that the legacy SetPromptTemplate /
 // GetPromptTemplate shims edit the prompt_templates rows in place, and
