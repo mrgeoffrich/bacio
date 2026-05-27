@@ -363,7 +363,6 @@ export interface IssueMetaDTO {
   assignees: string[];
   claude: boolean;
   taken: boolean;
-  waitingForClaim: boolean;
   // BACI-216: newest `plan`-typed doc linked directly to this
   // issue, surfaced so IssueWorkspace's header can render the
   // prominent "Open plan" link without descending into the brief's
@@ -414,9 +413,11 @@ export interface IssueBriefDTO {
   comments: CommentDTO[];
   claimants: ClaimantDTO[];
   taken: boolean;
-  waitingForClaim: boolean;
   // BACI-145: structured waiting state for the IssueLockBanner.
-  // Absent (server-side omitempty) when the issue isn't waiting.
+  // Absent (server-side omitempty) when the issue isn't waiting —
+  // post-BACI-255 this is also the sole "is this card waiting?"
+  // signal on the wire (the boolean waitingForClaim it used to live
+  // alongside was removed because it duplicated this richer field).
   waitingState?: WaitingState | null;
   // BACI-216: duplicated alongside issue.latestPlan so envelope
   // consumers don't have to descend into the meta block. The two
@@ -832,7 +833,6 @@ interface ApiIssue {
   assignee?: string;
   tags?: string[];
   taken?: boolean;
-  waiting_for_claim?: boolean;
   // BACI-172: per-feature glyph denormalised from the join in
   // store.issueSelect. Snake-case on the wire; the cardFromIssue
   // reshape below copies it onto the camelCase BoardCard.featureEmoji.
@@ -1193,7 +1193,6 @@ function reshapeApiBrief(view: ApiIssueBrief): IssueBriefDTO {
     assignees: assigneeList(assignee),
     claude: assignee === 'claude',
     taken: !!view.taken,
-    waitingForClaim: !!iss.waiting_for_claim,
     latestPlan,
   };
   const feat: FeatureRefDTO | null = view.feature
@@ -1231,7 +1230,6 @@ function reshapeApiBrief(view: ApiIssueBrief): IssueBriefDTO {
       open: c.released_at == null,
     })),
     taken: !!view.taken,
-    waitingForClaim: !!iss.waiting_for_claim,
     waitingState: view.waiting_state ?? null,
     latestPlan,
     warnings: view.warnings ?? [],
@@ -1574,16 +1572,15 @@ export async function cancelFollowOnDispatch(
 
 interface ApiBoardCard {
   // setIssueState returns the model.Issue; same reshape as listCards.
-  // waiting_for_claim is on the model.Issue wire shape but the
-  // cardFromIssue reshape ignores it — see the comment in
-  // cardFromIssue for the rationale (drag is blocked on waiting cards).
+  // Post-BACI-255 the wire model.Issue no longer carries a denormalised
+  // waiting_for_claim flag — drag-state for waiting cards is gated by
+  // the kanban's own waitingState lookup, not a per-row boolean.
   key: string;
   state: string;
   title: string;
   assignee?: string;
   tags?: string[];
   taken?: boolean;
-  waiting_for_claim?: boolean;
 }
 
 export async function setIssueState(

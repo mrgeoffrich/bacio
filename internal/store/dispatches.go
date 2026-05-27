@@ -162,17 +162,9 @@ func (s *Store) AddDispatch(in AddDispatchIn) (*model.AgentDispatch, error) {
 	if err != nil {
 		return nil, err
 	}
-	// A dispatch against a concrete issue flips its waiting_for_claim
-	// flag — transactional with the dispatch insert so a dispatch is
-	// never recorded without its issue being flagged. Cleared by
-	// AddAgentClaim when an agent claims, or by CancelDispatch.
-	if in.IssueID != nil {
-		if _, err := tx.Exec(
-			`UPDATE issues SET waiting_for_claim = 1 WHERE id = ?`, *in.IssueID,
-		); err != nil {
-			return nil, err
-		}
-	}
+	// BACI-255: the dispatch row itself is now the canonical "is this
+	// issue waiting?" signal — readers consult agent_dispatches via
+	// WaitingDispatchForIssue. No denormalised flag to flip here.
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -422,17 +414,9 @@ func (s *Store) CancelDispatch(id int64) (*model.AgentDispatch, error) {
 	); err != nil {
 		return nil, err
 	}
-	// A cancelled dispatch is no longer "waiting" — clear the issue's
-	// flag. Harmless if another open dispatch still targets the issue:
-	// the next dispatch/claim re-establishes the correct value, and the
-	// flag is only an "is anything happening" hint, not a counter.
-	if d.IssueID != nil {
-		if _, err := tx.Exec(
-			`UPDATE issues SET waiting_for_claim = 0 WHERE id = ?`, *d.IssueID,
-		); err != nil {
-			return nil, err
-		}
-	}
+	// BACI-255: the cancelled status on the dispatch row is the signal —
+	// readers check agent_dispatches directly via WaitingDispatchForIssue,
+	// no denormalised issue flag to clear.
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -455,13 +439,32 @@ func pruneDispatches(db *sql.DB, retention time.Duration) error {
 // delivered) dispatch targeting an issue, or (nil, nil) when none
 // exists. Used by the BACI-51 spinner-as-cancel button to resolve the
 // dispatch id without exposing dispatch internals through the card
-// DTO. ORDER BY id DESC LIMIT 1 picks the newest if multiple open
-// rows exist — defensive, since only one should be open while
-// `waiting_for_claim = 1`.
+// DTO. Post-BACI-255 this is also the canonical "is this issue
+// waiting?" predicate — the denormalised issues.waiting_for_claim
+// cache it used to mirror was removed because the cache could drift.
+//
+// BACI-209 / BACI-217 / BACI-255: dormant follow-ons are filtered out.
+// A queued row carrying a dormant gate (`queued_after_dispatch_id`
+// IS NOT NULL, or `queued_until_blockers_clear = 1`) is waiting for
+// the gate, not for an agent — its surface is the BACI-180 chip on
+// the card, not the spinner. Mirrors the skip in
+// boardcards.activeDispatchByIssueID so the per-issue gate matches
+// the kanban's per-card gate. The BACI-179 / BACI-180 follow-on
+// flows (QueueFollowOnDispatch, cancel-followon, queue-followon) also
+// want the parent here, not a sibling dormant row, so the filter is
+// the right semantic for every caller.
+//
+// ORDER BY id DESC LIMIT 1 picks the newest of the non-dormant
+// rows — defensive, since only one should be open at a time.
 func (s *Store) WaitingDispatchForIssue(repoID, issueID int64) (*model.AgentDispatch, error) {
 	row := s.DB.QueryRow(dispatchSelect+`
 		WHERE d.repo_id = ? AND d.issue_id = ?
 		  AND d.status IN ('queued','pending','delivered')
+		  AND NOT (
+		    d.status = 'queued'
+		    AND (d.queued_after_dispatch_id IS NOT NULL
+		         OR d.queued_until_blockers_clear = 1)
+		  )
 		ORDER BY d.id DESC LIMIT 1`, repoID, issueID)
 	d, err := scanDispatch(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1158,13 +1161,13 @@ func (s *Store) AddBlockerFollowOnDispatch(repoID, issueID int64, mode model.Dis
 	if existing != nil {
 		return nil, fmt.Errorf("issue %s already has a follow-on dispatch (id=%d)", iss.Key, existing.ID)
 	}
-	// Direct insert rather than routing through AddDispatch: that path
-	// flips `waiting_for_claim = 1` on the issue (parity with a
-	// matcher-bound dispatch about to be picked up), but a dormant
-	// blockers-clear row is not waiting for an agent — it's waiting
-	// for the blocker gate. Surfacing the card as "waiting" before the
-	// gate clears would render a spinner on an otherwise idle ticket;
-	// the chip is the right surface here.
+	// Direct insert rather than routing through AddDispatch — kept here
+	// even after BACI-255 dropped the denormalised waiting_for_claim
+	// cache because the dormant variant deliberately stays invisible to
+	// the matcher (the chip is the surface, not the spinner). The
+	// queued-with-queued_until_blockers_clear=1 row is filtered out of
+	// the "active" dispatch lookup in activeDispatchByIssueID (BACI-217),
+	// so the spinner stays off until the promote sweep clears the gate.
 	actor, err := ValidateActor(createdBy)
 	if err != nil {
 		return nil, err
@@ -1356,14 +1359,8 @@ func (s *Store) AddDispatchWithFollowOn(in AddDispatchWithFollowOnIn) (parent, f
 	); err != nil {
 		return nil, nil, err
 	}
-	// A dispatch against a concrete issue flips its waiting_for_claim
-	// flag — same as AddDispatch. One UPDATE covers both rows since
-	// both target the same issue.
-	if _, err := tx.Exec(
-		`UPDATE issues SET waiting_for_claim = 1 WHERE id = ?`, *in.IssueID,
-	); err != nil {
-		return nil, nil, err
-	}
+	// BACI-255: no denormalised waiting_for_claim flag to flip — the
+	// dispatch rows themselves are the source of truth.
 	if err := tx.Commit(); err != nil {
 		return nil, nil, err
 	}
@@ -1547,22 +1544,13 @@ func (s *Store) PromoteReadyFollowOns() (promoted []*model.AgentDispatch, err er
 		); err != nil {
 			return nil, err
 		}
-		// BACI-217: flip the promoted row's issue into waiting_for_claim
-		// state. The blockers-clear insert deliberately left the flag
-		// alone (the dormant row isn't waiting for the matcher — it's
-		// waiting for the blocker gate), so the promote sweep is what
-		// surfaces the spinner on the card. The parent-acks variant
-		// already had the flag set by the parent's AddDispatch, so the
-		// UPDATE is harmless in that case. Skip when issue_id is NULL —
-		// the row will still promote into a regular queued state, but
-		// there's no issue row to flip.
-		if _, err := tx.Exec(
-			`UPDATE issues SET waiting_for_claim = 1
-			  WHERE id = (SELECT issue_id FROM agent_dispatches WHERE id = ?)
-			    AND id IS NOT NULL`, id,
-		); err != nil {
-			return nil, err
-		}
+		// BACI-255: no denormalised waiting_for_claim cache to flip — the
+		// promoted dispatch row is now a regular queued dispatch (both
+		// dormant flags cleared above), so activeDispatchByIssueID picks
+		// it up on the next read and surfaces the spinner from the row's
+		// own status. The blockers-clear variant deliberately stayed off
+		// the spinner while dormant; the promote sweep above is what
+		// makes it eligible, and now the row's own status is the signal.
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err

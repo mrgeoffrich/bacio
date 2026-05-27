@@ -105,12 +105,6 @@ type Issue struct {
 	Description string    `json:"description,omitempty"`
 	State       State     `json:"state"`
 	Assignee    string    `json:"assignee,omitempty"`
-	// WaitingForClaim is true between a dispatch being queued against
-	// this issue and an agent recording an open claim on it. Ephemeral
-	// runtime state — set by store.AddDispatch, cleared by
-	// store.AddAgentClaim / store.CancelDispatch. No omitempty: the
-	// field must be visible (including when false) in JSON output.
-	WaitingForClaim bool `json:"waiting_for_claim"`
 	// Taken is true iff this issue currently has at least one open
 	// (unreleased) agent claim held by an alive session — the derived
 	// "an agent is actively holding this" signal also surfaced on the

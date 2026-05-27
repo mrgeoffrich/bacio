@@ -10,9 +10,9 @@ import { waitingStateLabel } from '../../lib/waitingLabels.ts';
 // unconditionally from the workspace head and let it noop on free
 // issues.
 //
-// `taken` takes render precedence: once an agent claims, waitingForClaim
-// is cleared, so the two shouldn't overlap; render defensively in case
-// they do.
+// `taken` takes render precedence: once an agent claims, the claim
+// row pre-empts the waiting derivation in the caller, so the two
+// shouldn't overlap; render defensively in case they do.
 //
 // BACI-145: the inline waiting label uses the same wording as the
 // kanban card via the shared `waitingStateLabel` helper, so the two

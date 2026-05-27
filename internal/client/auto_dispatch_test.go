@@ -121,14 +121,16 @@ func TestAutoDispatchIssueNoFreeAgentQueues(t *testing.T) {
 	if d.TargetAgentID != nil || d.TargetSessionID != "" {
 		t.Fatalf("queued dispatch should be target-less, got agent_id=%v session=%q", d.TargetAgentID, d.TargetSessionID)
 	}
-	// The matching issue should also flip waiting_for_claim so the UI
-	// shows the spinner — the same plumbing pending dispatches use.
-	got, err := p.store.GetIssueByID(iss.ID)
+	// BACI-255: the enqueued dispatch is the spinner signal — the
+	// kanban consults WaitingDispatchForIssue directly. Confirm the
+	// row is visible through that predicate so the UI shows the
+	// spinner without waiting for the next reload.
+	wd, err := p.store.WaitingDispatchForIssue(p.repo.ID, iss.ID)
 	if err != nil {
-		t.Fatalf("GetIssueByID: %v", err)
+		t.Fatalf("WaitingDispatchForIssue: %v", err)
 	}
-	if !got.WaitingForClaim {
-		t.Fatalf("issue.waiting_for_claim should be true after enqueue")
+	if wd == nil {
+		t.Fatalf("WaitingDispatchForIssue = nil after enqueue; queued row should be visible immediately")
 	}
 }
 

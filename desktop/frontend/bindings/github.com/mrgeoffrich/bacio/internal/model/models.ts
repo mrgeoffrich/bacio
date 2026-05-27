@@ -78,15 +78,6 @@ export class Issue {
     "assignee"?: string;
 
     /**
-     * WaitingForClaim is true between a dispatch being queued against
-     * this issue and an agent recording an open claim on it. Ephemeral
-     * runtime state — set by store.AddDispatch, cleared by
-     * store.AddAgentClaim / store.CancelDispatch. No omitempty: the
-     * field must be visible (including when false) in JSON output.
-     */
-    "waiting_for_claim": boolean;
-
-    /**
      * Taken is true iff this issue currently has at least one open
      * (unreleased) agent claim held by an alive session — the derived
      * "an agent is actively holding this" signal also surfaced on the
@@ -179,9 +170,6 @@ export class Issue {
         if (!("state" in $$source)) {
             this["state"] = State.$zero;
         }
-        if (!("waiting_for_claim" in $$source)) {
-            this["waiting_for_claim"] = false;
-        }
         if (!("taken" in $$source)) {
             this["taken"] = false;
         }
@@ -202,10 +190,10 @@ export class Issue {
      * Creates a new Issue instance from a string or object.
      */
     static createFrom($$source: any = {}): Issue {
-        const $$createField15_0 = $$createType0;
+        const $$createField14_0 = $$createType0;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
-            $$parsedSource["tags"] = $$createField15_0($$parsedSource["tags"]);
+            $$parsedSource["tags"] = $$createField14_0($$parsedSource["tags"]);
         }
         return new Issue($$parsedSource as Partial<Issue>);
     }

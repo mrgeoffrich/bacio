@@ -152,19 +152,19 @@ type RelationsDTO struct {
 // rail and primary column read repeatedly without going through the
 // rest of the brief. Mirrors the BoardCard shape (column + label +
 // title + tags + assignees), plus the description and the derived
-// taken / waitingForClaim flags so the IssueWorkspace doesn't have to
-// hop between brief.issue.{...} and brief.{taken,waitingForClaim}.
+// `taken` flag so the IssueWorkspace doesn't have to hop between
+// brief.issue.{...} and brief.taken. The waiting signal lives on the
+// brief envelope's WaitingState field (BACI-145/BACI-255), not here.
 type IssueMetaDTO struct {
-	Key             string   `json:"key"`
-	Column          string   `json:"column"`
-	ColumnLabel     string   `json:"columnLabel"`
-	Title           string   `json:"title"`
-	Description     string   `json:"description"`
-	Tags            []string `json:"tags"`
-	Assignees       []string `json:"assignees"`
-	Claude          bool     `json:"claude"`
-	Taken           bool     `json:"taken"`
-	WaitingForClaim bool     `json:"waitingForClaim"`
+	Key         string   `json:"key"`
+	Column      string   `json:"column"`
+	ColumnLabel string   `json:"columnLabel"`
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	Tags        []string `json:"tags"`
+	Assignees   []string `json:"assignees"`
+	Claude      bool     `json:"claude"`
+	Taken       bool     `json:"taken"`
 	// LatestPlan (BACI-216) — the newest `plan`-typed doc linked
 	// directly to this issue, or nil when none. Drives the prominent
 	// "Open plan" link in IssueWorkspace's header. Mirrors the
@@ -176,23 +176,26 @@ type IssueMetaDTO struct {
 // IssueBriefDTO is the workspace-shaped payload — BoardService.GetIssueBrief's
 // return value, mirroring internal/client/views.go::IssueBrief with desktop
 // camelCase JSON tags. New fields over IssueDetail: feature, relations,
-// waitingForClaim, warnings, and doc content (via LinkedDocDTO).
+// warnings, and doc content (via LinkedDocDTO).
 //
 // BACI-145: WaitingState is the structured "why is this card waiting?"
 // projection used by the IssueLockBanner — same shape and same wording
 // as the kanban-card label. Nil when the issue isn't waiting; the
 // banner falls back to its "taken" branch when an agent has the claim.
+// Post-BACI-255 this is also the canonical "is this card waiting?"
+// signal — the denormalised waitingForClaim boolean that used to ride
+// alongside was removed because it duplicated this richer field and
+// could drift out of sync with the underlying dispatch rows.
 type IssueBriefDTO struct {
-	Issue           IssueMetaDTO             `json:"issue"`
-	Feature         *FeatureRefDTO           `json:"feature,omitempty"`
-	Relations       RelationsDTO             `json:"relations"`
-	PullRequests    []PRDTO                  `json:"pullRequests"`
-	Documents       []LinkedDocDTO           `json:"documents"`
-	Comments        []CommentDTO             `json:"comments"`
-	Claimants       []ClaimantDTO            `json:"claimants"`
-	Taken           bool                     `json:"taken"`
-	WaitingForClaim bool                     `json:"waitingForClaim"`
-	WaitingState    *boardcards.WaitingState `json:"waitingState,omitempty"`
+	Issue        IssueMetaDTO             `json:"issue"`
+	Feature      *FeatureRefDTO           `json:"feature,omitempty"`
+	Relations    RelationsDTO             `json:"relations"`
+	PullRequests []PRDTO                  `json:"pullRequests"`
+	Documents    []LinkedDocDTO           `json:"documents"`
+	Comments     []CommentDTO             `json:"comments"`
+	Claimants    []ClaimantDTO            `json:"claimants"`
+	Taken        bool                     `json:"taken"`
+	WaitingState *boardcards.WaitingState `json:"waitingState,omitempty"`
 	// LatestPlan (BACI-216) — duplicated alongside Issue.LatestPlan
 	// so consumers that read the brief envelope (REST/HTTP clients)
 	// can pick it up without descending into the meta block. The two
@@ -670,17 +673,16 @@ func (b *BoardService) GetIssueBrief(repoPrefix, key string) (IssueBriefDTO, err
 	}
 	latestPlan := latestPlanDTO(brief.LatestPlan)
 	meta := IssueMetaDTO{
-		Key:             iss.Key,
-		Column:          string(iss.State),
-		ColumnLabel:     stateLabel(iss.State),
-		Title:           iss.Title,
-		Description:     iss.Description,
-		Tags:            tags,
-		Assignees:       assigneeList(iss.Assignee),
-		Claude:          iss.Assignee == "claude",
-		Taken:           brief.Taken,
-		WaitingForClaim: iss.WaitingForClaim,
-		LatestPlan:      latestPlan,
+		Key:         iss.Key,
+		Column:      string(iss.State),
+		ColumnLabel: stateLabel(iss.State),
+		Title:       iss.Title,
+		Description: iss.Description,
+		Tags:        tags,
+		Assignees:   assigneeList(iss.Assignee),
+		Claude:      iss.Assignee == "claude",
+		Taken:       brief.Taken,
+		LatestPlan:  latestPlan,
 	}
 
 	var feat *FeatureRefDTO
@@ -738,51 +740,50 @@ func (b *BoardService) GetIssueBrief(repoPrefix, key string) (IssueBriefDTO, err
 		warnings = []string{}
 	}
 
-	// BACI-145: derive WaitingState for the IssueLockBanner. Only worth
-	// the round-trips when the issue is actually flagged as waiting;
-	// otherwise the deriver returns nil regardless. The "all" pseudo-
-	// board doesn't have a *model.Repo handy, so resolve it from the
-	// issue's canonical key (PREFIX-N) for that case.
+	// BACI-145 / BACI-255: derive WaitingState for the IssueLockBanner
+	// directly from the dispatch table. WaitingDispatchForIssue returning
+	// non-nil IS the "is this card waiting?" predicate now — the
+	// denormalised issues.waiting_for_claim cache that used to gate this
+	// branch was removed because it could drift. The "all" pseudo-board
+	// doesn't have a *model.Repo handy, so resolve it from the issue's
+	// canonical key (PREFIX-N) for that case.
 	var waitingState *boardcards.WaitingState
-	if iss.WaitingForClaim {
-		dispatchRepo := repo
-		if dispatchRepo == nil {
-			if r, err := b.resolveRepoForKey(ctx, repoPrefix, iss.Key); err == nil {
-				dispatchRepo = r
-			}
+	dispatchRepo := repo
+	if dispatchRepo == nil {
+		if r, err := b.resolveRepoForKey(ctx, repoPrefix, iss.Key); err == nil {
+			dispatchRepo = r
 		}
-		if dispatchRepo != nil {
-			activeDispatch, derr := b.client.WaitingDispatchForIssue(ctx, dispatchRepo, iss.Key)
-			if derr == nil {
-				// BACI-227: per-(mode, branch) in-flight grouping so
-				// the IssueLockBanner's WaitingState tracks the
-				// matcher's per-branch concurrency gate exactly.
-				inflight, ierr := b.client.InflightByModeBaseForRepo(ctx, dispatchRepo)
-				if ierr != nil {
-					inflight = map[store.InflightKey]int{}
-				}
-				templates, terr := b.client.ListPromptTemplates(ctx)
-				if terr != nil {
-					templates = nil
-				}
-				waitingState = boardcards.DeriveWaitingState(iss, activeDispatch, inflight, templates)
+	}
+	if dispatchRepo != nil {
+		activeDispatch, derr := b.client.WaitingDispatchForIssue(ctx, dispatchRepo, iss.Key)
+		if derr == nil && activeDispatch != nil {
+			// BACI-227: per-(mode, branch) in-flight grouping so the
+			// IssueLockBanner's WaitingState tracks the matcher's
+			// per-branch concurrency gate exactly.
+			inflight, ierr := b.client.InflightByModeBaseForRepo(ctx, dispatchRepo)
+			if ierr != nil {
+				inflight = map[store.InflightKey]int{}
 			}
+			templates, terr := b.client.ListPromptTemplates(ctx)
+			if terr != nil {
+				templates = nil
+			}
+			waitingState = boardcards.DeriveWaitingState(iss, activeDispatch, inflight, templates)
 		}
 	}
 
 	return IssueBriefDTO{
-		Issue:           meta,
-		Feature:         feat,
-		Relations:       rels,
-		PullRequests:    prs,
-		Documents:       docs,
-		Comments:        comments,
-		Claimants:       agentcards.MapClaimants(brief.Claimants),
-		Taken:           brief.Taken,
-		WaitingForClaim: iss.WaitingForClaim,
-		WaitingState:    waitingState,
-		LatestPlan:      latestPlan,
-		Warnings:        warnings,
+		Issue:        meta,
+		Feature:      feat,
+		Relations:    rels,
+		PullRequests: prs,
+		Documents:    docs,
+		Comments:     comments,
+		Claimants:    agentcards.MapClaimants(brief.Claimants),
+		Taken:        brief.Taken,
+		WaitingState: waitingState,
+		LatestPlan:   latestPlan,
+		Warnings:     warnings,
 	}, nil
 }
 

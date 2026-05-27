@@ -432,17 +432,6 @@ func (s *Store) SetIssueAssignee(id int64, assignee string) error {
 	return err
 }
 
-// SetWaitingForClaim toggles the issue's waiting_for_claim flag — the
-// ephemeral "a dispatch is queued but no agent has claimed yet" signal.
-// Set by AddDispatch, cleared by AddAgentClaim / CancelDispatch.
-// Deliberately does NOT bump updated_at: this is runtime state, like the
-// derived `taken` flag, and bumping updated_at would make git-backed
-// sync churn on every dispatch/claim.
-func (s *Store) SetWaitingForClaim(issueID int64, waiting bool) error {
-	_, err := s.DB.Exec(`UPDATE issues SET waiting_for_claim = ? WHERE id = ?`, waiting, issueID)
-	return err
-}
-
 // SetIssueArchived stamps or clears the issue's archived_at column
 // (BACI-68). When archived is true the column is set to
 // CURRENT_TIMESTAMP if it's currently NULL — re-archiving a row that's
@@ -888,7 +877,7 @@ func (s *Store) CountFeatures(repoID int64) (int, error) {
 // round trip.
 const issueSelect = `
 SELECT i.id, i.uuid, i.repo_id, i.number, r.prefix, i.feature_id, COALESCE(f.slug, ''), COALESCE(f.emoji, ''), COALESCE(f.branch_name, ''),
-       i.title, i.description, i.state, i.assignee, i.waiting_for_claim,
+       i.title, i.description, i.state, i.assignee,
        EXISTS (
          SELECT 1 FROM agent_claims c
          JOIN agent_sessions s ON s.id = c.session_pk
@@ -916,7 +905,7 @@ func scanIssue(row rowScanner) (*model.Issue, error) {
 		baseBranch     sql.NullString
 	)
 	err := row.Scan(&i.ID, &i.UUID, &i.RepoID, &i.Number, &prefix, &featureID, &featSlug, &featEmoji, &featBranchName,
-		&i.Title, &i.Description, &state, &i.Assignee, &i.WaitingForClaim, &i.Taken,
+		&i.Title, &i.Description, &state, &i.Assignee, &i.Taken,
 		&archivedAt, &terminalAt, &userActionRsn, &baseBranch, &i.CreatedAt, &i.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound

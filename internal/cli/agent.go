@@ -627,14 +627,14 @@ func agentCancelCmd() *cobra.Command {
 	var rawInput string
 	cmd := &cobra.Command{
 		Use:   "cancel <dispatch-id>",
-		Short: "Cancel a queued or pending dispatch (clears the issue's waiting_for_claim flag)",
+		Short: "Cancel a queued or pending dispatch (the row stops appearing as 'waiting' on the issue's card)",
 		Long: `Withdraw a dispatch that hasn't been delivered to its worker yet —
 the dispatcher's side of ack.
 
 Use when a queued dispatch was orphaned (target session ended before
-acking, or the dispatch is simply no longer wanted). If the dispatch
-targets an issue, the issue's waiting_for_claim flag is cleared in the
-same transaction, unsticking the desktop/TUI spinner.
+acking, or the dispatch is simply no longer wanted). Cancelling flips
+the row to status='cancelled' so it no longer satisfies
+WaitingDispatchForIssue (BACI-255), unsticking the desktop/TUI spinner.
 
 Cancelling a dispatch that has already been delivered to the worker is
 an error (BACI-130): the worker is past the point where it can be

@@ -62,8 +62,8 @@ func spinnerTick() tea.Cmd {
 
 // maybeStartSpinnerCmd arms the spinner tick-chain when there is at
 // least one waiting issue and a chain isn't already running. Returns nil
-// otherwise. Safe to call after any action that may have set
-// waiting_for_claim (e.g. a TUI-initiated dispatch).
+// otherwise. Safe to call after any action that may have surfaced a
+// queued/pending/delivered dispatch (e.g. a TUI-initiated dispatch).
 func (b *boardView) maybeStartSpinnerCmd() tea.Cmd {
 	if len(b.waitingIssues) > 0 && !b.spinnerRunning {
 		b.spinnerRunning = true
@@ -91,11 +91,12 @@ type boardView struct {
 	// cards are marked in renderColumn and refuse the `x` dispatch.
 	takenIssues map[int64]bool
 
-	// waitingIssues is the repo-wide set of issues with waiting_for_claim
-	// set — a dispatch is queued but no agent has claimed yet. Refreshed
-	// on every reload(). Waiting cards show an animated spinner marker
-	// and refuse the `x` dispatch, same guard as takenIssues. `taken`
-	// wins over `waiting` when (defensively) a card is somehow both.
+	// waitingIssues is the repo-wide set of issues with an active
+	// queued/pending/delivered dispatch (BACI-255: read straight off the
+	// dispatch table, no more denormalised cache). Refreshed on every
+	// reload(). Waiting cards show an animated spinner marker and
+	// refuse the `x` dispatch, same guard as takenIssues. `taken` wins
+	// over `waiting` when (defensively) a card is somehow both.
 	waitingIssues map[int64]bool
 	// waitingStateByIssue (BACI-145) is the per-issue WaitingState
 	// projection — same derivation the React tree uses via
@@ -342,43 +343,46 @@ func (b *boardView) reload() error {
 			}
 		}
 	}
-	// Repo-wide set of issues with a queued-but-unclaimed dispatch — read
-	// straight off the issue rows (waiting_for_claim is a stored column,
-	// unlike the derived `taken` flag).
+	// BACI-255: derive the per-repo "waiting" set straight off the
+	// dispatch table — the same query the IssueLockBanner / kanban
+	// React surfaces use. Pre-BACI-255 this consulted a denormalised
+	// issues.waiting_for_claim column that could drift; reading the
+	// dispatch rows directly is the single source of truth. A failed
+	// ListDispatches degrades to "nothing is waiting" — same fallback
+	// as before, no worse than a freshly-loaded board.
 	waiting := map[int64]bool{}
-	for _, iss := range issues {
-		if iss.WaitingForClaim {
-			waiting[iss.ID] = true
-		}
-	}
-	b.waitingIssues = waiting
-	// BACI-145: per-issue WaitingState — same derivation the kanban
-	// uses, so the inline "why is this card waiting?" label stays in
-	// lockstep with the React surface. Best-effort: a failure in any
-	// of the three reads leaves waitingStateByIssue without entries
-	// for the affected issues, which degrades to the unlabeled
-	// spinner — no worse than the pre-BACI-145 baseline.
 	b.waitingStateByIssue = map[int64]*boardcards.WaitingState{}
-	if len(waiting) > 0 {
-		allDispatches, derr := b.store.ListDispatches(store.DispatchFilter{RepoID: &b.repo.ID})
-		if derr == nil {
-			activeByIssue := map[int64]*model.AgentDispatch{}
-			for _, d := range allDispatches {
-				if d == nil || d.IssueID == nil {
-					continue
-				}
-				id := *d.IssueID
-				if _, ok := activeByIssue[id]; ok {
-					continue
-				}
-				switch d.Status {
-				case model.DispatchQueued, model.DispatchPending, model.DispatchDelivered:
-					activeByIssue[id] = d
-				}
+	allDispatches, derr := b.store.ListDispatches(store.DispatchFilter{RepoID: &b.repo.ID})
+	if derr == nil {
+		activeByIssue := map[int64]*model.AgentDispatch{}
+		for _, d := range allDispatches {
+			if d == nil || d.IssueID == nil {
+				continue
 			}
-			// BACI-227: per-(mode, branch) in-flight grouping so the
-			// inline waiting label tracks the matcher's per-branch
-			// concurrency gate exactly.
+			id := *d.IssueID
+			if _, ok := activeByIssue[id]; ok {
+				continue
+			}
+			// BACI-209 / BACI-217: skip dormant follow-ons — same
+			// rule activeDispatchByIssueID applies in the React
+			// pipeline. A queued row with a dormant gate is waiting
+			// for the gate, not for the matcher; the chip is its
+			// surface, not the spinner.
+			if d.Status == model.DispatchQueued && (d.QueuedAfterDispatchID != nil || d.QueuedUntilBlockersClear) {
+				continue
+			}
+			switch d.Status {
+			case model.DispatchQueued, model.DispatchPending, model.DispatchDelivered:
+				activeByIssue[id] = d
+				waiting[id] = true
+			}
+		}
+		// BACI-145: per-issue WaitingState — same derivation the
+		// kanban uses, so the inline "why is this card waiting?"
+		// label stays in lockstep with the React surface. BACI-227:
+		// per-(mode, branch) in-flight grouping so the inline label
+		// tracks the matcher's per-branch concurrency gate exactly.
+		if len(activeByIssue) > 0 {
 			inflight, ierr := b.store.InflightByModeBaseForRepo(b.repo.ID)
 			if ierr != nil {
 				inflight = map[store.InflightKey]int{}
@@ -388,16 +392,18 @@ func (b *boardView) reload() error {
 				templates = nil
 			}
 			for _, iss := range issues {
-				if !iss.WaitingForClaim {
+				active := activeByIssue[iss.ID]
+				if active == nil {
 					continue
 				}
-				ws := boardcards.DeriveWaitingState(iss, activeByIssue[iss.ID], inflight, templates)
+				ws := boardcards.DeriveWaitingState(iss, active, inflight, templates)
 				if ws != nil {
 					b.waitingStateByIssue[iss.ID] = ws
 				}
 			}
 		}
 	}
+	b.waitingIssues = waiting
 	for _, st := range b.states {
 		b.columns[st] = nil
 	}
@@ -444,7 +450,7 @@ func (b *boardView) featureHidden(slug string) bool {
 // repaint without waiting for the next refresh tick.
 func (b *boardView) cancelWaitingOnSelection() error {
 	iss := b.currentIssue()
-	if iss == nil || !iss.WaitingForClaim {
+	if iss == nil || !b.waitingIssues[iss.ID] {
 		return nil
 	}
 	dsp, err := b.store.WaitingDispatchForIssue(b.repo.ID, iss.ID)
@@ -735,7 +741,7 @@ func (b *boardView) Update(msg tea.Msg) tea.Cmd {
 	}
 	if b.dispatchPicker {
 		b.updateDispatchPicker(key)
-		// A confirmed dispatch may have just set waiting_for_claim on an
+		// A confirmed dispatch may have just queued a row against an
 		// issue — arm the spinner tick-chain if it isn't already running.
 		return b.maybeStartSpinnerCmd()
 	}
@@ -1289,8 +1295,9 @@ func (b *boardView) renderColumn(st model.State, focused bool, width, height int
 		isArchived := iss.ArchivedAt != nil
 		// A waiting card (dispatch queued, not yet claimed) shows an
 		// animated spinner where the opening bracket would be. `taken`
-		// wins: once an agent claims, waiting_for_claim is cleared in the
-		// same transaction, but render defensively in case they overlap.
+		// wins: once an agent claims, the claim is established in the
+		// same transaction as the dispatch ack, but render defensively
+		// in case they overlap.
 		isWaiting := b.waitingIssues[iss.ID] && !isTaken
 		styler := cardStyle
 		if isTaken {

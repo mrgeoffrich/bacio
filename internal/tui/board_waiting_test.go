@@ -28,9 +28,10 @@ func TestBoardRendersWaitingLabel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create iss: %v", err)
 	}
-	// Mirror the dispatcher: a queued AddDispatch transactionally
-	// stamps waiting_for_claim on the linked issue, so reload() will
-	// surface the card as waiting without any extra setup.
+	// Mirror the dispatcher: a queued AddDispatch lands a queued row
+	// in agent_dispatches against the linked issue; reload() surfaces
+	// the card as waiting via WaitingDispatchForIssue (BACI-255 — the
+	// row IS the signal, there's no denormalised cache to set).
 	if _, err := s.AddDispatch(store.AddDispatchIn{
 		RepoID:        repo.ID,
 		IssueID:       &iss.ID,

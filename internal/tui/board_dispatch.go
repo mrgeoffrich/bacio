@@ -323,10 +323,12 @@ func (b *boardView) confirmDispatch() {
 		return
 	}
 	b.err = nil
-	// AddDispatch flipped waiting_for_claim on the issue row; reflect it
-	// in the board's local set immediately so the spinner shows without
-	// waiting for the next ~10s reload. The spinner tick-chain is armed
-	// by the caller (Update's dispatch-picker branch).
+	// BACI-255: AddDispatch wrote a queued row in the dispatch table;
+	// the next reload() will pick it up via ListDispatches and
+	// populate waitingIssues. Mirror it locally for the immediate
+	// repaint so the spinner shows without waiting for the next ~10s
+	// reload. The spinner tick-chain is armed by the caller (Update's
+	// dispatch-picker branch).
 	b.waitingIssues[issueID] = true
 	recordTUIOp(b.store, model.HistoryEntry{
 		RepoID:      &b.repo.ID,

@@ -112,8 +112,9 @@ type AgentAckInput struct {
 // AgentCancelInput is the payload for `bacio agent cancel --json`. ID
 // is the dispatch id. Cancelling an already-acked dispatch is an error
 // (the work was acknowledged); cancelling an already-cancelled
-// dispatch is a no-op. If the dispatch targets an issue, the issue's
-// waiting_for_claim flag is cleared in the same transaction.
+// dispatch is a no-op. BACI-255: the cancelled status on the dispatch
+// row is the spinner-off signal — no denormalised issue cache to
+// clear alongside.
 type AgentCancelInput struct {
 	ID int64 `json:"id"`
 }

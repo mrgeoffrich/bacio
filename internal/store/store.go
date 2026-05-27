@@ -218,12 +218,20 @@ func migrate(db *sql.DB) error {
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_issues_assignee ON issues(assignee)`); err != nil {
 		return err
 	}
+	// BACI-255: drop the denormalised waiting_for_claim cache column. The
+	// flag was always a stored mirror of "is there an open
+	// queued/pending/delivered dispatch on this issue?", and could drift
+	// — readers now consult agent_dispatches directly via
+	// WaitingDispatchForIssue, so the column is dead weight that can lie.
+	// SQLite 3.35+ supports DROP COLUMN, which every supported runtime
+	// has. Guarded by columnExists so the migration is idempotent on
+	// already-migrated DBs and on fresh schema.sql installs.
 	hasWaitingForClaim, err := columnExists(db, "issues", "waiting_for_claim")
 	if err != nil {
 		return err
 	}
-	if !hasWaitingForClaim {
-		if _, err := db.Exec(`ALTER TABLE issues ADD COLUMN waiting_for_claim INTEGER NOT NULL DEFAULT 0`); err != nil {
+	if hasWaitingForClaim {
+		if _, err := db.Exec(`ALTER TABLE issues DROP COLUMN waiting_for_claim`); err != nil {
 			return err
 		}
 	}

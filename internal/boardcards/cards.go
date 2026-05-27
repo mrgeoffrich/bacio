@@ -968,8 +968,8 @@ func followOnByIssueID(allDispatches []*model.AgentDispatch) map[int64]*model.Ag
 // templates) into the WaitingState the kanban / TUI surface inline
 // beside the spinner.
 //
-// Returns nil when the card isn't waiting (no WaitingForClaim flag, or
-// no active dispatch row). Otherwise:
+// Returns nil when the card isn't waiting (no active dispatch row).
+// Otherwise:
 //
 //   - `delivered`: kind=WaitingDelivered, mode + action label from the
 //     active dispatch's template.
@@ -1003,20 +1003,16 @@ func DeriveWaitingState(
 	if iss == nil {
 		return nil
 	}
-	// Issue-level WaitingForClaim is the gate: when the issue isn't
-	// flagged as waiting, the card renders no spinner regardless of
-	// what dispatch rows exist. (A `delivered` dispatch keeps
-	// WaitingForClaim=true until it acks — that's the BACI-130 invariant
-	// the assembler test pins.)
-	if !iss.WaitingForClaim {
-		return nil
-	}
+	// BACI-255: the active dispatch row is the gate. Pre-BACI-255 this
+	// branch consulted a denormalised issues.waiting_for_claim cache
+	// that mirrored exactly the predicate the caller resolves above
+	// (WaitingDispatchForIssue → status IN queued/pending/delivered).
+	// The cache could drift — the BACI-252 stuck-spinner bug surfaced
+	// when every dispatch row was settled but the flag was stuck on.
+	// Reading the dispatch row directly removes the divergence by
+	// construction.
 	if active == nil {
-		// WaitingForClaim is set but the active-dispatch lookup didn't
-		// find a row — likely a race between the issue update and the
-		// dispatch read. Surface the no-agent label as the safe
-		// fallback; the next poll will re-resolve.
-		return &WaitingState{Kind: WaitingQueuedNoAgent}
+		return nil
 	}
 	mode := active.Mode
 	actionLabel := actionLabelForMode(mode, templates)

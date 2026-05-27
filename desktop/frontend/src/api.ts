@@ -174,8 +174,8 @@ export async function getIssue(repoPrefix: string, key: string): Promise<IssueDe
 
 // getIssueBrief returns the workspace-shaped payload — issue meta +
 // feature + relations + inlined linked-doc bodies + comments +
-// claimants + derived taken / waitingForClaim flags. Backs the
-// top-level IssueWorkspace view.
+// claimants + the derived `taken` flag + the structured WaitingState
+// (BACI-145). Backs the top-level IssueWorkspace view.
 export async function getIssueBrief(repoPrefix: string, key: string): Promise<IssueBriefDTO> {
   try {
     return await BoardService.GetIssueBrief(repoPrefix, key);

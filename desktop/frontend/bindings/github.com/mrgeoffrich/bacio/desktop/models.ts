@@ -1105,12 +1105,16 @@ export class HistoryPage {
  * IssueBriefDTO is the workspace-shaped payload — BoardService.GetIssueBrief's
  * return value, mirroring internal/client/views.go::IssueBrief with desktop
  * camelCase JSON tags. New fields over IssueDetail: feature, relations,
- * waitingForClaim, warnings, and doc content (via LinkedDocDTO).
+ * warnings, and doc content (via LinkedDocDTO).
  * 
  * BACI-145: WaitingState is the structured "why is this card waiting?"
  * projection used by the IssueLockBanner — same shape and same wording
  * as the kanban-card label. Nil when the issue isn't waiting; the
  * banner falls back to its "taken" branch when an agent has the claim.
+ * Post-BACI-255 this is also the canonical "is this card waiting?"
+ * signal — the denormalised waitingForClaim boolean that used to ride
+ * alongside was removed because it duplicated this richer field and
+ * could drift out of sync with the underlying dispatch rows.
  */
 export class IssueBriefDTO {
     "issue": IssueMetaDTO;
@@ -1121,7 +1125,6 @@ export class IssueBriefDTO {
     "comments": CommentDTO[];
     "claimants": ClaimantDTO[];
     "taken": boolean;
-    "waitingForClaim": boolean;
     "waitingState"?: boardcards$0.WaitingState | null;
 
     /**
@@ -1156,9 +1159,6 @@ export class IssueBriefDTO {
         if (!("taken" in $$source)) {
             this["taken"] = false;
         }
-        if (!("waitingForClaim" in $$source)) {
-            this["waitingForClaim"] = false;
-        }
         if (!("warnings" in $$source)) {
             this["warnings"] = [];
         }
@@ -1177,9 +1177,9 @@ export class IssueBriefDTO {
         const $$createField4_0 = $$createType24;
         const $$createField5_0 = $$createType26;
         const $$createField6_0 = $$createType28;
-        const $$createField9_0 = $$createType30;
-        const $$createField10_0 = $$createType32;
-        const $$createField11_0 = $$createType0;
+        const $$createField8_0 = $$createType30;
+        const $$createField9_0 = $$createType32;
+        const $$createField10_0 = $$createType0;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("issue" in $$parsedSource) {
             $$parsedSource["issue"] = $$createField0_0($$parsedSource["issue"]);
@@ -1203,13 +1203,13 @@ export class IssueBriefDTO {
             $$parsedSource["claimants"] = $$createField6_0($$parsedSource["claimants"]);
         }
         if ("waitingState" in $$parsedSource) {
-            $$parsedSource["waitingState"] = $$createField9_0($$parsedSource["waitingState"]);
+            $$parsedSource["waitingState"] = $$createField8_0($$parsedSource["waitingState"]);
         }
         if ("latestPlan" in $$parsedSource) {
-            $$parsedSource["latestPlan"] = $$createField10_0($$parsedSource["latestPlan"]);
+            $$parsedSource["latestPlan"] = $$createField9_0($$parsedSource["latestPlan"]);
         }
         if ("warnings" in $$parsedSource) {
-            $$parsedSource["warnings"] = $$createField11_0($$parsedSource["warnings"]);
+            $$parsedSource["warnings"] = $$createField10_0($$parsedSource["warnings"]);
         }
         return new IssueBriefDTO($$parsedSource as Partial<IssueBriefDTO>);
     }
@@ -1330,8 +1330,9 @@ export class IssueDetail {
  * rail and primary column read repeatedly without going through the
  * rest of the brief. Mirrors the BoardCard shape (column + label +
  * title + tags + assignees), plus the description and the derived
- * taken / waitingForClaim flags so the IssueWorkspace doesn't have to
- * hop between brief.issue.{...} and brief.{taken,waitingForClaim}.
+ * `taken` flag so the IssueWorkspace doesn't have to hop between
+ * brief.issue.{...} and brief.taken. The waiting signal lives on the
+ * brief envelope's WaitingState field (BACI-145/BACI-255), not here.
  */
 export class IssueMetaDTO {
     "key": string;
@@ -1343,7 +1344,6 @@ export class IssueMetaDTO {
     "assignees": string[];
     "claude": boolean;
     "taken": boolean;
-    "waitingForClaim": boolean;
 
     /**
      * LatestPlan (BACI-216) — the newest `plan`-typed doc linked
@@ -1383,9 +1383,6 @@ export class IssueMetaDTO {
         if (!("taken" in $$source)) {
             this["taken"] = false;
         }
-        if (!("waitingForClaim" in $$source)) {
-            this["waitingForClaim"] = false;
-        }
 
         Object.assign(this, $$source);
     }
@@ -1396,7 +1393,7 @@ export class IssueMetaDTO {
     static createFrom($$source: any = {}): IssueMetaDTO {
         const $$createField5_0 = $$createType0;
         const $$createField6_0 = $$createType0;
-        const $$createField10_0 = $$createType32;
+        const $$createField9_0 = $$createType32;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField5_0($$parsedSource["tags"]);
@@ -1405,7 +1402,7 @@ export class IssueMetaDTO {
             $$parsedSource["assignees"] = $$createField6_0($$parsedSource["assignees"]);
         }
         if ("latestPlan" in $$parsedSource) {
-            $$parsedSource["latestPlan"] = $$createField10_0($$parsedSource["latestPlan"]);
+            $$parsedSource["latestPlan"] = $$createField9_0($$parsedSource["latestPlan"]);
         }
         return new IssueMetaDTO($$parsedSource as Partial<IssueMetaDTO>);
     }

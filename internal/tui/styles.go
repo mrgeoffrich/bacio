@@ -56,8 +56,9 @@ var (
 	// see at a glance the issue is held by an agent.
 	takenColor = lipgloss.Color("214") // amber
 	// waitingColor tints the spinner marker on a board card whose issue
-	// has a queued-but-unclaimed dispatch (waiting_for_claim). Distinct
-	// from takenColor so the two inter-agent signals don't blur.
+	// has an open queued/pending/delivered dispatch (BACI-255: derived
+	// directly from the dispatch table). Distinct from takenColor so the
+	// two inter-agent signals don't blur.
 	waitingColor = lipgloss.Color("39") // bright blue
 )
 
