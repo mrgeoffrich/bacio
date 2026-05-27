@@ -255,6 +255,63 @@ func TestRoundTripFeatureBranchName(t *testing.T) {
 	}
 }
 
+// TestRoundTripIssueBaseBranch (BACI-232) confirms the new
+// issues.base_branch field round-trips through the local and remote
+// clients: set on create, read via show, update + clear via edit.
+// Pinned because the remote path adds the field to a hand-built JSON
+// map and a future refactor could silently drop it (same shape /
+// rationale as TestRoundTripFeatureBranchName).
+func TestRoundTripIssueBaseBranch(t *testing.T) {
+	p := newPair(t)
+	defer p.cleanup()
+	ctx := context.Background()
+
+	// Create via the remote client with a base set; local must see it.
+	iss, err := p.remote.CreateIssue(ctx, p.repo, inputs.IssueAddInput{
+		Title:      "Override base",
+		BaseBranch: "main",
+	}, false)
+	if err != nil {
+		t.Fatalf("remote CreateIssue: %v", err)
+	}
+	if iss.BaseBranch == nil || *iss.BaseBranch != "main" {
+		t.Fatalf("create base = %v, want main", iss.BaseBranch)
+	}
+	got, err := p.local.GetIssueByKey(ctx, p.repo, iss.Key)
+	if err != nil {
+		t.Fatalf("local GetIssueByKey: %v", err)
+	}
+	if got.BaseBranch == nil || *got.BaseBranch != "main" {
+		t.Fatalf("local sees base = %v, want main", got.BaseBranch)
+	}
+
+	// Edit via remote, non-empty new value.
+	newBase := "release/2025.06"
+	if _, err := p.remote.UpdateIssue(ctx, p.repo, iss.Key, client.IssueEdit{BaseBranch: &newBase}, false); err != nil {
+		t.Fatalf("remote UpdateIssue base: %v", err)
+	}
+	got, err = p.local.GetIssueByKey(ctx, p.repo, iss.Key)
+	if err != nil {
+		t.Fatalf("local GetIssueByKey post-update: %v", err)
+	}
+	if got.BaseBranch == nil || *got.BaseBranch != "release/2025.06" {
+		t.Fatalf("post-update base = %v, want release/2025.06", got.BaseBranch)
+	}
+
+	// Clear via remote (non-nil empty pointer).
+	empty := ""
+	if _, err := p.remote.UpdateIssue(ctx, p.repo, iss.Key, client.IssueEdit{BaseBranch: &empty}, false); err != nil {
+		t.Fatalf("remote UpdateIssue clear: %v", err)
+	}
+	got, err = p.local.GetIssueByKey(ctx, p.repo, iss.Key)
+	if err != nil {
+		t.Fatalf("local GetIssueByKey post-clear: %v", err)
+	}
+	if got.BaseBranch != nil {
+		t.Fatalf("post-clear BaseBranch = %v, want nil", *got.BaseBranch)
+	}
+}
+
 func TestRoundTripCommentsAndDocs(t *testing.T) {
 	p := newPair(t)
 	defer p.cleanup()

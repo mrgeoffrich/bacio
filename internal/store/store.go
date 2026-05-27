@@ -177,6 +177,20 @@ func migrate(db *sql.DB) error {
 			return fmt.Errorf("add branch_name to features: %w", err)
 		}
 	}
+	// issues.base_branch (BACI-232) is the per-issue override for the
+	// branch a PR merges into. NULL preserves the legacy "inherit from
+	// the feature (or ship to main)" behaviour on upgrade; the resolver
+	// that combines this with features.branch_name lands in BACI-226.
+	// Idempotent ALTER; no DEFAULT so existing rows surface as NULL.
+	hasIssueBaseBranch, err := columnExists(db, "issues", "base_branch")
+	if err != nil {
+		return err
+	}
+	if !hasIssueBaseBranch {
+		if _, err := db.Exec(`ALTER TABLE issues ADD COLUMN base_branch TEXT`); err != nil {
+			return fmt.Errorf("add base_branch to issues: %w", err)
+		}
+	}
 	// The attachments feature was removed in favour of documents; drop the
 	// table from any pre-existing DB. Historical history.attachment.* rows
 	// stay put since the audit log is append-only.

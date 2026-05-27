@@ -21,7 +21,7 @@ func seedRepoAndIssue(t *testing.T) (*Store, *model.Repo, *model.Issue) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	iss, err := s.CreateIssue(repo.ID, nil, "stub", "", model.StateTodo, nil)
+	iss, err := s.CreateIssue(repo.ID, nil, "stub", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
@@ -690,7 +690,7 @@ func TestListClaimsForIssue(t *testing.T) {
 // claims held by ended sessions.
 func TestOpenClaimsBySession(t *testing.T) {
 	s, repo, iss := seedRepoAndIssue(t)
-	iss2, err := s.CreateIssue(repo.ID, nil, "stub 2", "", model.StateTodo, nil)
+	iss2, err := s.CreateIssue(repo.ID, nil, "stub 2", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("create issue 2: %v", err)
 	}
@@ -817,7 +817,7 @@ func TestAddAgentClaimAssignsIssue(t *testing.T) {
 	}
 
 	// A session with no linked identity falls back to its actor.
-	iss2, err := s.CreateIssue(repo.ID, nil, "stub 2", "", model.StateTodo, nil)
+	iss2, err := s.CreateIssue(repo.ID, nil, "stub 2", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("create issue 2: %v", err)
 	}
@@ -959,7 +959,7 @@ func TestReleaseAgentClaimKeepsForeignAssignee(t *testing.T) {
 // change for the audit log.
 func TestEndAgentSessionUnassignsReleasedIssues(t *testing.T) {
 	s, repo, iss := seedRepoAndIssue(t)
-	iss2, err := s.CreateIssue(repo.ID, nil, "stub 2", "", model.StateTodo, nil)
+	iss2, err := s.CreateIssue(repo.ID, nil, "stub 2", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("create issue 2: %v", err)
 	}
@@ -1253,7 +1253,7 @@ func TestAddAgentClaimAutoTransitionsToInProgress(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			s, repo, _ := seedRepoAndIssue(t)
-			iss, err := s.CreateIssue(repo.ID, nil, "auto-state", "", tc.fromState, nil)
+			iss, err := s.CreateIssue(repo.ID, nil, "auto-state", "", tc.fromState, nil, "")
 			if err != nil {
 				t.Fatalf("CreateIssue: %v", err)
 			}
@@ -1353,7 +1353,7 @@ func TestOpenClaimsForSession(t *testing.T) {
 	if _, _, _, _, err := s.AddAgentClaim("open-a", iss.ID, "p1"); err != nil {
 		t.Fatalf("claim a: %v", err)
 	}
-	iss2, err := s.CreateIssue(repo.ID, nil, "second", "", model.StateTodo, nil)
+	iss2, err := s.CreateIssue(repo.ID, nil, "second", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
@@ -1402,7 +1402,7 @@ func TestOpenClaimsForSession(t *testing.T) {
 // slice carries one entry per issue that actually moved.
 func TestEndAgentSessionAppliesOrphanState(t *testing.T) {
 	s, repo, iss := seedRepoAndIssue(t)
-	iss2, err := s.CreateIssue(repo.ID, nil, "second", "", model.StateTodo, nil)
+	iss2, err := s.CreateIssue(repo.ID, nil, "second", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
@@ -1730,7 +1730,7 @@ func TestEndAgentSession_TolerantOfOrphanClaim(t *testing.T) {
 // upfront filter and never reaches the per-issue helpers.
 func TestEndAgentSession_TolerantOfMixedOrphanAndLiveClaims(t *testing.T) {
 	s, repo, iss := seedRepoAndIssue(t)
-	live, err := s.CreateIssue(repo.ID, nil, "live", "", model.StateTodo, nil)
+	live, err := s.CreateIssue(repo.ID, nil, "live", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("create live issue: %v", err)
 	}
@@ -1840,7 +1840,7 @@ func TestOpenPrunesOrphanAgentClaims(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	iss, err := s.CreateIssue(repo.ID, nil, "stub", "", model.StateTodo, nil)
+	iss, err := s.CreateIssue(repo.ID, nil, "stub", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}

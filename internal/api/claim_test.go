@@ -27,7 +27,7 @@ func TestFeaturePeekClaimable(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	feat := seedFeature(t, s, repo, "auth", "Auth")
-	if _, err := s.CreateIssue(repo.ID, &feat.ID, "ready", "", model.StateTodo, nil); err != nil {
+	if _, err := s.CreateIssue(repo.ID, &feat.ID, "ready", "", model.StateTodo, nil, ""); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	resp, body := apiGet(t, ts.URL+"/repos/MINI/features/auth/next")
@@ -44,7 +44,7 @@ func TestFeaturePeekDoesNotMutate(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	feat := seedFeature(t, s, repo, "auth", "Auth")
-	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "ready", "", model.StateTodo, nil)
+	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "ready", "", model.StateTodo, nil, "")
 	apiGet(t, ts.URL+"/repos/MINI/features/auth/next")
 	roundtrip, _ := s.GetIssueByID(iss.ID)
 	if roundtrip.State != model.StateTodo || roundtrip.Assignee != "" {
@@ -56,7 +56,7 @@ func TestFeatureClaimRequiresActor(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	feat := seedFeature(t, s, repo, "auth", "Auth")
-	if _, err := s.CreateIssue(repo.ID, &feat.ID, "ready", "", model.StateTodo, nil); err != nil {
+	if _, err := s.CreateIssue(repo.ID, &feat.ID, "ready", "", model.StateTodo, nil, ""); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	resp, body := apiPost(t, ts.URL+"/repos/MINI/features/auth/next", nil)
@@ -73,7 +73,7 @@ func TestFeatureClaimHappy(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	feat := seedFeature(t, s, repo, "auth", "Auth")
-	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "ready", "", model.StateTodo, nil)
+	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "ready", "", model.StateTodo, nil, "")
 	resp, body := apiReq(t, "POST", ts.URL+"/repos/MINI/features/auth/next", nil,
 		map[string]string{"X-Actor": "agent-alice"})
 	if resp.StatusCode != 200 {
@@ -97,7 +97,7 @@ func TestFeatureClaimAuditDetails(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	feat := seedFeature(t, s, repo, "auth", "Auth")
-	if _, err := s.CreateIssue(repo.ID, &feat.ID, "ready", "", model.StateTodo, nil); err != nil {
+	if _, err := s.CreateIssue(repo.ID, &feat.ID, "ready", "", model.StateTodo, nil, ""); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	apiReq(t, "POST", ts.URL+"/repos/MINI/features/auth/next", nil,
@@ -133,7 +133,7 @@ func TestFeatureClaimDryRun(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	feat := seedFeature(t, s, repo, "auth", "Auth")
-	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "ready", "", model.StateTodo, nil)
+	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "ready", "", model.StateTodo, nil, "")
 	resp, body := apiReq(t, "POST", ts.URL+"/repos/MINI/features/auth/next?dry_run=true", nil,
 		map[string]string{"X-Actor": "agent-alice"})
 	if resp.StatusCode != 200 || resp.Header.Get("X-Dry-Run") != "applied" {

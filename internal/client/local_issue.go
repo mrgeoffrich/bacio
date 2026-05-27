@@ -349,6 +349,13 @@ func (c *localClient) CreateIssue(ctx context.Context, repo *model.Repo, in inpu
 	if err != nil {
 		return nil, err
 	}
+	// BACI-232: base_branch is validated by the store boundary;
+	// rehearse it here for the dry-run projection so the agent sees
+	// the same shape the real call would produce.
+	cleanBase, err := store.ValidateBranchName(in.BaseBranch)
+	if err != nil {
+		return nil, err
+	}
 	// BACI-235: resolution happens at the store boundary so both the
 	// explicit-slug path and the default-feature auto-apply path share
 	// one validator. The returned feature (if any) backs the dry-run
@@ -378,9 +385,15 @@ func (c *localClient) CreateIssue(ctx context.Context, repo *model.Repo, in inpu
 		if projected.Tags == nil {
 			projected.Tags = []string{}
 		}
+		// BACI-232: surface base_branch on dry-run so an agent
+		// rehearsing the call can confirm the override took.
+		if cleanBase != "" {
+			b := cleanBase
+			projected.BaseBranch = &b
+		}
 		return projected, nil
 	}
-	iss, err := c.store.CreateIssue(repo.ID, featureID, in.Title, in.Description, state, cleanTags)
+	iss, err := c.store.CreateIssue(repo.ID, featureID, in.Title, in.Description, state, cleanTags, cleanBase)
 	if err != nil {
 		return nil, err
 	}
@@ -398,7 +411,7 @@ func (c *localClient) UpdateIssue(ctx context.Context, repo *model.Repo, key str
 	if err != nil {
 		return nil, err
 	}
-	if edit.Title == nil && edit.Description == nil && edit.FeatureID == nil {
+	if edit.Title == nil && edit.Description == nil && edit.FeatureID == nil && edit.BaseBranch == nil {
 		return nil, fmt.Errorf("nothing to update")
 	}
 	if dryRun {
@@ -421,9 +434,24 @@ func (c *localClient) UpdateIssue(ctx context.Context, repo *model.Repo, key str
 				projected.FeatureSlug = feat.Slug
 			}
 		}
+		// BACI-232: pre-validate base_branch for the dry-run projection
+		// so an agent rehearsing an invalid ref name sees the same
+		// rejection the real call would produce.
+		if edit.BaseBranch != nil {
+			clean, err := store.ValidateBranchName(*edit.BaseBranch)
+			if err != nil {
+				return nil, err
+			}
+			if clean == "" {
+				projected.BaseBranch = nil
+			} else {
+				b := clean
+				projected.BaseBranch = &b
+			}
+		}
 		return &projected, nil
 	}
-	if err := c.store.UpdateIssue(iss.ID, edit.Title, edit.Description, edit.FeatureID); err != nil {
+	if err := c.store.UpdateIssue(iss.ID, edit.Title, edit.Description, edit.FeatureID, edit.BaseBranch); err != nil {
 		return nil, err
 	}
 	updated, err := c.store.GetIssueByID(iss.ID)
@@ -438,6 +466,7 @@ func (c *localClient) UpdateIssue(ctx context.Context, repo *model.Repo, key str
 			"title":       edit.Title != nil,
 			"description": edit.Description != nil,
 			"feature":     edit.FeatureID != nil,
+			"base_branch": edit.BaseBranch != nil,
 		}),
 	})
 	return updated, nil

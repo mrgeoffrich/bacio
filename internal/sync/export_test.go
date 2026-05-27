@@ -45,14 +45,14 @@ func seedExportFixture(t *testing.T) (*store.Store, map[string]string) {
 	if err != nil {
 		t.Fatalf("create feature: %v", err)
 	}
-	iss1, err := s.CreateIssue(r.ID, &feat.ID, "Add auth middleware 🔐", "First the middleware, then the rest.\n", model.StateInProgress, []string{"p1", "security"})
+	iss1, err := s.CreateIssue(r.ID, &feat.ID, "Add auth middleware 🔐", "First the middleware, then the rest.\n", model.StateInProgress, []string{"p1", "security"}, "")
 	if err != nil {
 		t.Fatalf("create iss1: %v", err)
 	}
 	if err := s.SetIssueAssignee(iss1.ID, "geoff"); err != nil {
 		t.Fatalf("set assignee: %v", err)
 	}
-	iss2, err := s.CreateIssue(r.ID, nil, `Refactor "config" loader`, "", model.StateTodo, nil)
+	iss2, err := s.CreateIssue(r.ID, nil, `Refactor "config" loader`, "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("create iss2: %v", err)
 	}

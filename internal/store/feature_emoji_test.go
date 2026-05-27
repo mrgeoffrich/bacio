@@ -83,15 +83,15 @@ func TestIssueFeatureEmojiJoin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create feature ops: %v", err)
 	}
-	issWithEmoji, err := s.CreateIssue(repo.ID, &feat.ID, "Has emoji", "", model.StateTodo, nil)
+	issWithEmoji, err := s.CreateIssue(repo.ID, &feat.ID, "Has emoji", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("create issue with emoji feature: %v", err)
 	}
-	issEmptyEmoji, err := s.CreateIssue(repo.ID, &featNoGlyph.ID, "Feature but no emoji", "", model.StateTodo, nil)
+	issEmptyEmoji, err := s.CreateIssue(repo.ID, &featNoGlyph.ID, "Feature but no emoji", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("create issue with empty emoji feature: %v", err)
 	}
-	issNoFeature, err := s.CreateIssue(repo.ID, nil, "No feature", "", model.StateTodo, nil)
+	issNoFeature, err := s.CreateIssue(repo.ID, nil, "No feature", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("create issue without feature: %v", err)
 	}

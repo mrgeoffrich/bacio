@@ -142,8 +142,21 @@ type Issue struct {
 	// on the wire — readers that care must check `state == needs_action`
 	// first.
 	UserActionReasonType UserActionReasonType `json:"user_action_reason_type,omitempty"`
-	CreatedAt            time.Time            `json:"created_at"`
-	UpdatedAt            time.Time            `json:"updated_at"`
+	// BaseBranch (BACI-232) is the per-issue override for the branch a
+	// PR for this issue is opened against. nil = inherit from the
+	// parent feature's BranchName (itself nil = ship to main, the
+	// legacy default). Lets a one-off urgent fix peel off the feature
+	// workflow and target main directly even when its parent feature
+	// lives on feat/X, and lets the terminal merge-feature issue target
+	// main from within a non-main feature. Validated at the store
+	// boundary by ValidateBranchName (same git-ref rules as
+	// features.branch_name). Pointer mirrors Feature.BranchName's
+	// nullable shape. The resolver that combines this with
+	// feature.branch_name is BACI-226; this field just records the
+	// override.
+	BaseBranch *string   `json:"base_branch,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 type Comment struct {

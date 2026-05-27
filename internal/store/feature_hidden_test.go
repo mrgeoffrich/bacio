@@ -83,13 +83,13 @@ func TestStore_ListIssues_HiddenFeatureSlugsFilter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create feature ops: %v", err)
 	}
-	if _, err := s.CreateIssue(repo.ID, &authFeat.ID, "auth-1", "", model.StateTodo, nil); err != nil {
+	if _, err := s.CreateIssue(repo.ID, &authFeat.ID, "auth-1", "", model.StateTodo, nil, ""); err != nil {
 		t.Fatalf("create auth issue: %v", err)
 	}
-	if _, err := s.CreateIssue(repo.ID, &opsFeat.ID, "ops-1", "", model.StateTodo, nil); err != nil {
+	if _, err := s.CreateIssue(repo.ID, &opsFeat.ID, "ops-1", "", model.StateTodo, nil, ""); err != nil {
 		t.Fatalf("create ops issue: %v", err)
 	}
-	if _, err := s.CreateIssue(repo.ID, nil, "no-feature-1", "", model.StateTodo, nil); err != nil {
+	if _, err := s.CreateIssue(repo.ID, nil, "no-feature-1", "", model.StateTodo, nil, ""); err != nil {
 		t.Fatalf("create no-feature issue: %v", err)
 	}
 

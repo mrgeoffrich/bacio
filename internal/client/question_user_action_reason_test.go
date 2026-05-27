@@ -116,7 +116,7 @@ func TestSetIssueStateClearsUserActionReason(t *testing.T) {
 	p := newPair(t)
 	defer p.cleanup()
 
-	iss, err := p.store.CreateIssue(p.repo.ID, nil, "reason clear", "", model.StateInProgress, nil)
+	iss, err := p.store.CreateIssue(p.repo.ID, nil, "reason clear", "", model.StateInProgress, nil, "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestSetIssueStateNeedsActionPreservesPreviousReason(t *testing.T) {
 	p := newPair(t)
 	defer p.cleanup()
 
-	iss, err := p.store.CreateIssue(p.repo.ID, nil, "preserve reason", "", model.StateInProgress, nil)
+	iss, err := p.store.CreateIssue(p.repo.ID, nil, "preserve reason", "", model.StateInProgress, nil, "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}

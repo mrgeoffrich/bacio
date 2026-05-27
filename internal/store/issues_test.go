@@ -30,7 +30,7 @@ func TestCreateIssueCounterAtomicity(t *testing.T) {
 	}
 
 	// First create — counter goes 1 → 2.
-	first, err := s.CreateIssue(repo.ID, nil, "first", "", model.StateTodo, nil)
+	first, err := s.CreateIssue(repo.ID, nil, "first", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("first create: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestCreateIssueCounterAtomicity(t *testing.T) {
 	// so this hits an error AFTER AllocateIssueNumber has run inside the
 	// tx — exactly the path the importer agent hit. The counter must roll
 	// back along with the failed insert.
-	if _, err := s.CreateIssue(repo.ID, nil, "bad", "", model.State("bogus_state"), nil); err == nil {
+	if _, err := s.CreateIssue(repo.ID, nil, "bad", "", model.State("bogus_state"), nil, ""); err == nil {
 		t.Fatal("expected CreateIssue to fail with invalid state")
 	}
 	r, err = s.GetRepoByID(repo.ID)
@@ -62,7 +62,7 @@ func TestCreateIssueCounterAtomicity(t *testing.T) {
 	}
 
 	// Next valid create must be number 2 — no gap.
-	second, err := s.CreateIssue(repo.ID, nil, "second", "", model.StateTodo, nil)
+	second, err := s.CreateIssue(repo.ID, nil, "second", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("second create: %v", err)
 	}
@@ -86,11 +86,11 @@ func TestIssueUUIDRoundTrip(t *testing.T) {
 		t.Fatalf("repo uuid is empty")
 	}
 
-	first, err := s.CreateIssue(repo.ID, nil, "first", "", model.StateTodo, nil)
+	first, err := s.CreateIssue(repo.ID, nil, "first", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("first create: %v", err)
 	}
-	second, err := s.CreateIssue(repo.ID, nil, "second", "", model.StateTodo, nil)
+	second, err := s.CreateIssue(repo.ID, nil, "second", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("second create: %v", err)
 	}
@@ -133,11 +133,11 @@ func TestPeekClaimNextIssueSkipArchived(t *testing.T) {
 	}
 	// Two todos in the same feature, both eligible. AR-1 is the
 	// lowest-numbered, so it would normally be picked first.
-	iss1, err := s.CreateIssue(repo.ID, &feat.ID, "first", "", model.StateTodo, nil)
+	iss1, err := s.CreateIssue(repo.ID, &feat.ID, "first", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("create iss1: %v", err)
 	}
-	iss2, err := s.CreateIssue(repo.ID, &feat.ID, "second", "", model.StateTodo, nil)
+	iss2, err := s.CreateIssue(repo.ID, &feat.ID, "second", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("create iss2: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestTerminalAtLifecycle(t *testing.T) {
 	}
 
 	// Non-terminal create — terminal_at must stay NULL.
-	open, err := s.CreateIssue(repo.ID, nil, "open issue", "", model.StateTodo, nil)
+	open, err := s.CreateIssue(repo.ID, nil, "open issue", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("create open: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestTerminalAtLifecycle(t *testing.T) {
 	}
 
 	// Direct-to-done create — terminal_at must be set.
-	closed, err := s.CreateIssue(repo.ID, nil, "born done", "", model.StateDone, nil)
+	closed, err := s.CreateIssue(repo.ID, nil, "born done", "", model.StateDone, nil, "")
 	if err != nil {
 		t.Fatalf("create closed: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestTerminalAtLifecycle(t *testing.T) {
 			firstClose, beforeEdit.TerminalAt)
 	}
 	newTitle := "renamed"
-	if err := s.UpdateIssue(closed.ID, &newTitle, nil, nil); err != nil {
+	if err := s.UpdateIssue(closed.ID, &newTitle, nil, nil, nil); err != nil {
 		t.Fatalf("rename title: %v", err)
 	}
 	if err := s.AddTagsToIssue(closed.ID, []string{"ui"}); err != nil {
@@ -278,7 +278,7 @@ func TestUserActionReasonRoundTrip(t *testing.T) {
 	}
 
 	// Fresh todo issue — no reason recorded.
-	iss, err := s.CreateIssue(repo.ID, nil, "round trip", "", model.StateTodo, nil)
+	iss, err := s.CreateIssue(repo.ID, nil, "round trip", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}

@@ -17,9 +17,9 @@ func TestListShippedIssuesNewestFirst(t *testing.T) {
 		t.Fatalf("create repo: %v", err)
 	}
 
-	first, _ := s.CreateIssue(repo.ID, nil, "first", "", model.StateTodo, nil)
-	second, _ := s.CreateIssue(repo.ID, nil, "second", "", model.StateTodo, nil)
-	third, _ := s.CreateIssue(repo.ID, nil, "third", "", model.StateTodo, nil)
+	first, _ := s.CreateIssue(repo.ID, nil, "first", "", model.StateTodo, nil, "")
+	second, _ := s.CreateIssue(repo.ID, nil, "second", "", model.StateTodo, nil, "")
+	third, _ := s.CreateIssue(repo.ID, nil, "third", "", model.StateTodo, nil, "")
 
 	// Land them in known order so terminal_at orders them deterministically.
 	if err := s.SetIssueState(first.ID, model.StateDone); err != nil {
@@ -55,8 +55,8 @@ func TestListShippedIssuesExcludesCancelled(t *testing.T) {
 	s := newTestStore(t)
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
 
-	done, _ := s.CreateIssue(repo.ID, nil, "done", "", model.StateTodo, nil)
-	cancelled, _ := s.CreateIssue(repo.ID, nil, "cancelled", "", model.StateTodo, nil)
+	done, _ := s.CreateIssue(repo.ID, nil, "done", "", model.StateTodo, nil, "")
+	cancelled, _ := s.CreateIssue(repo.ID, nil, "cancelled", "", model.StateTodo, nil, "")
 	if err := s.SetIssueState(done.ID, model.StateDone); err != nil {
 		t.Fatalf("done: %v", err)
 	}
@@ -82,9 +82,9 @@ func TestListShippedIssuesExcludesOpen(t *testing.T) {
 	s := newTestStore(t)
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
 
-	done, _ := s.CreateIssue(repo.ID, nil, "done", "", model.StateTodo, nil)
-	_, _ = s.CreateIssue(repo.ID, nil, "todo", "", model.StateTodo, nil)
-	inprog, _ := s.CreateIssue(repo.ID, nil, "in_progress", "", model.StateTodo, nil)
+	done, _ := s.CreateIssue(repo.ID, nil, "done", "", model.StateTodo, nil, "")
+	_, _ = s.CreateIssue(repo.ID, nil, "todo", "", model.StateTodo, nil, "")
+	inprog, _ := s.CreateIssue(repo.ID, nil, "in_progress", "", model.StateTodo, nil, "")
 	_ = s.SetIssueState(inprog.ID, model.StateInProgress)
 	if err := s.SetIssueState(done.ID, model.StateDone); err != nil {
 		t.Fatalf("done: %v", err)
@@ -109,7 +109,7 @@ func TestListShippedIssuesLimitClamp(t *testing.T) {
 	s := newTestStore(t)
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
 	for i := 0; i < 10; i++ {
-		iss, _ := s.CreateIssue(repo.ID, nil, "iss", "", model.StateTodo, nil)
+		iss, _ := s.CreateIssue(repo.ID, nil, "iss", "", model.StateTodo, nil, "")
 		_ = s.SetIssueState(iss.ID, model.StateDone)
 	}
 
@@ -152,8 +152,8 @@ func TestListShippedIssuesSinceWindow(t *testing.T) {
 	s := newTestStore(t)
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
 
-	old, _ := s.CreateIssue(repo.ID, nil, "old", "", model.StateTodo, nil)
-	young, _ := s.CreateIssue(repo.ID, nil, "young", "", model.StateTodo, nil)
+	old, _ := s.CreateIssue(repo.ID, nil, "old", "", model.StateTodo, nil, "")
+	young, _ := s.CreateIssue(repo.ID, nil, "young", "", model.StateTodo, nil, "")
 	if err := s.SetIssueState(old.ID, model.StateDone); err != nil {
 		t.Fatalf("done old: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestListShippedIssuesNullTerminalAtSkipped(t *testing.T) {
 	s := newTestStore(t)
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
 
-	done, _ := s.CreateIssue(repo.ID, nil, "done", "", model.StateTodo, nil)
+	done, _ := s.CreateIssue(repo.ID, nil, "done", "", model.StateTodo, nil, "")
 	if err := s.SetIssueState(done.ID, model.StateDone); err != nil {
 		t.Fatalf("done: %v", err)
 	}
@@ -223,11 +223,11 @@ func TestCountShippedIssuesMixedStates(t *testing.T) {
 	s := newTestStore(t)
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
 
-	done1, _ := s.CreateIssue(repo.ID, nil, "done-1", "", model.StateTodo, nil)
-	done2, _ := s.CreateIssue(repo.ID, nil, "done-2", "", model.StateTodo, nil)
-	cancelled, _ := s.CreateIssue(repo.ID, nil, "cancelled", "", model.StateTodo, nil)
-	_, _ = s.CreateIssue(repo.ID, nil, "todo", "", model.StateTodo, nil)
-	inprog, _ := s.CreateIssue(repo.ID, nil, "in-progress", "", model.StateTodo, nil)
+	done1, _ := s.CreateIssue(repo.ID, nil, "done-1", "", model.StateTodo, nil, "")
+	done2, _ := s.CreateIssue(repo.ID, nil, "done-2", "", model.StateTodo, nil, "")
+	cancelled, _ := s.CreateIssue(repo.ID, nil, "cancelled", "", model.StateTodo, nil, "")
+	_, _ = s.CreateIssue(repo.ID, nil, "todo", "", model.StateTodo, nil, "")
+	inprog, _ := s.CreateIssue(repo.ID, nil, "in-progress", "", model.StateTodo, nil, "")
 	if err := s.SetIssueState(done1.ID, model.StateDone); err != nil {
 		t.Fatalf("done1: %v", err)
 	}
@@ -257,8 +257,8 @@ func TestCountShippedIssuesSinceWindow(t *testing.T) {
 	s := newTestStore(t)
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
 
-	old, _ := s.CreateIssue(repo.ID, nil, "old", "", model.StateTodo, nil)
-	young, _ := s.CreateIssue(repo.ID, nil, "young", "", model.StateTodo, nil)
+	old, _ := s.CreateIssue(repo.ID, nil, "old", "", model.StateTodo, nil, "")
+	young, _ := s.CreateIssue(repo.ID, nil, "young", "", model.StateTodo, nil, "")
 	if err := s.SetIssueState(old.ID, model.StateDone); err != nil {
 		t.Fatalf("done old: %v", err)
 	}
@@ -296,7 +296,7 @@ func TestCountShippedIssuesIgnoresLimit(t *testing.T) {
 	s := newTestStore(t)
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
 	for i := 0; i < 25; i++ {
-		iss, _ := s.CreateIssue(repo.ID, nil, "iss", "", model.StateTodo, nil)
+		iss, _ := s.CreateIssue(repo.ID, nil, "iss", "", model.StateTodo, nil, "")
 		_ = s.SetIssueState(iss.ID, model.StateDone)
 	}
 
@@ -318,8 +318,8 @@ func TestCountShippedIssuesIncludesArchived(t *testing.T) {
 	s := newTestStore(t)
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
 
-	live, _ := s.CreateIssue(repo.ID, nil, "live", "", model.StateTodo, nil)
-	archived, _ := s.CreateIssue(repo.ID, nil, "archived", "", model.StateTodo, nil)
+	live, _ := s.CreateIssue(repo.ID, nil, "live", "", model.StateTodo, nil, "")
+	archived, _ := s.CreateIssue(repo.ID, nil, "archived", "", model.StateTodo, nil, "")
 	if err := s.SetIssueState(live.ID, model.StateDone); err != nil {
 		t.Fatalf("done live: %v", err)
 	}
@@ -350,7 +350,7 @@ func TestListShippedIssuesUsesIndex(t *testing.T) {
 	s := newTestStore(t)
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
 	for i := 0; i < 5; i++ {
-		iss, _ := s.CreateIssue(repo.ID, nil, "iss", "", model.StateTodo, nil)
+		iss, _ := s.CreateIssue(repo.ID, nil, "iss", "", model.StateTodo, nil, "")
 		_ = s.SetIssueState(iss.ID, model.StateDone)
 	}
 

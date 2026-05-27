@@ -24,7 +24,7 @@ func TestBoardRendersWaitingLabel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	iss, err := s.CreateIssue(repo.ID, nil, "first queued card", "", model.StateTodo, nil)
+	iss, err := s.CreateIssue(repo.ID, nil, "first queued card", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("create iss: %v", err)
 	}

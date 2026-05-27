@@ -1212,13 +1212,13 @@ func TestPromoteReadyFollowOns_MixedBatch(t *testing.T) {
 		t.Fatalf("create repo: %v", err)
 	}
 	// Issue A — stays in todo (implement gate passes).
-	issA, err := s.CreateIssue(repo.ID, nil, "todo-issue", "", model.StateTodo, nil)
+	issA, err := s.CreateIssue(repo.ID, nil, "todo-issue", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("create issue A: %v", err)
 	}
 	// Issue B — in_review (implement gate fails; review gate would
 	// pass, but we queue implement deliberately to fail the gate).
-	issB, err := s.CreateIssue(repo.ID, nil, "in-review-issue", "", model.StateInReview, nil)
+	issB, err := s.CreateIssue(repo.ID, nil, "in-review-issue", "", model.StateInReview, nil, "")
 	if err != nil {
 		t.Fatalf("create issue B: %v", err)
 	}
@@ -1656,7 +1656,7 @@ func TestAddDispatchWithFollowOn_RequiresIssue(t *testing.T) {
 func seedBlockerFixture(t *testing.T) (*Store, *model.Repo, *model.Issue, *model.Issue) {
 	t.Helper()
 	s, repo, blocked, _, _ := seedDispatchFixture(t)
-	blocker, err := s.CreateIssue(repo.ID, nil, "the blocker", "", model.StateTodo, nil)
+	blocker, err := s.CreateIssue(repo.ID, nil, "the blocker", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("create blocker issue: %v", err)
 	}
@@ -1872,7 +1872,7 @@ func TestPromoteReadyFollowOns_BlockerVariantWaitsForNewBlocker(t *testing.T) {
 		t.Fatalf("AddBlockerFollowOnDispatch: %v", err)
 	}
 	// Add a second open blocker post-queue.
-	blocker2, err := s.CreateIssue(repo.ID, nil, "second blocker", "", model.StateTodo, nil)
+	blocker2, err := s.CreateIssue(repo.ID, nil, "second blocker", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("create second blocker: %v", err)
 	}
