@@ -250,7 +250,12 @@ func (c *localClient) BriefIssue(ctx context.Context, repo *model.Repo, key stri
 		Claimants:    claimants,
 		Taken:        taken,
 		LatestPlan:   latestPlan,
-		Warnings:     warnings,
+		// BACI-226: surface the resolver-derived base branch so brief
+		// consumers (planners, humans, the dispatched workers'
+		// pre-flight reads) see the same value the dispatch envelope
+		// will carry. Always non-empty (resolver fallback to "main").
+		BaseBranch: model.ResolveBaseBranch(iss, feat),
+		Warnings:   warnings,
 	}, nil
 }
 

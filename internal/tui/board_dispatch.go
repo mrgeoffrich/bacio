@@ -295,7 +295,19 @@ func (b *boardView) confirmDispatch() {
 		b.err = err
 		return
 	}
-	stub := model.DispatchStub{IssueKey: b.dispatchIssue.Key, Mode: string(b.dispatchMode)}
+	// BACI-226: resolve <base_branch> for the stub so the worker sees
+	// the right PR target in its Task prompt. Mirrors the client's
+	// CreateDispatch path; same fallback to "main" via ResolveBaseBranch.
+	var feat *model.Feature
+	if b.dispatchIssue.FeatureID != nil {
+		feat, err = b.store.GetFeatureByID(*b.dispatchIssue.FeatureID)
+		if err != nil {
+			b.err = err
+			return
+		}
+	}
+	baseBranch := model.ResolveBaseBranch(b.dispatchIssue, feat)
+	stub := model.DispatchStub{IssueKey: b.dispatchIssue.Key, Mode: string(b.dispatchMode), BaseBranch: baseBranch}
 	if b.dispatchMode != "" {
 		stub.SubagentType = model.SubagentTypeForTemplate(string(b.dispatchMode))
 	}

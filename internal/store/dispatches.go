@@ -125,6 +125,19 @@ func (s *Store) AddDispatch(in AddDispatchIn) (*model.AgentDispatch, error) {
 		return nil, err
 	}
 
+	// BACI-226: resolve base_branch BEFORE opening the tx — the issue
+	// + feature rows we read are independent of the dispatch insert,
+	// so a stale read at this point would just mean the value matches
+	// the issue+feature state at insert-time-minus-epsilon, which is
+	// exactly what BACI-227's concurrency grouping wants. Resolved
+	// only when the dispatch carries an issue: setup nudges, idle
+	// pings, and other issue-less dispatches leave the column NULL
+	// (no PR to target, no concurrency group to participate in).
+	baseBranch, err := s.resolveBaseBranchForIssueID(in.IssueID)
+	if err != nil {
+		return nil, err
+	}
+
 	tx, err := s.DB.Begin()
 	if err != nil {
 		return nil, err
@@ -137,11 +150,11 @@ func (s *Store) AddDispatch(in AddDispatchIn) (*model.AgentDispatch, error) {
 	}
 	res, err := tx.Exec(`
 		INSERT INTO agent_dispatches
-		    (repo_id, target_agent_id, target_session_id, issue_id, mode, payload, status, created_by, queued_after_dispatch_id, queued_until_blockers_clear)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		    (repo_id, target_agent_id, target_session_id, issue_id, mode, payload, status, created_by, queued_after_dispatch_id, queued_until_blockers_clear, base_branch)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		in.RepoID, nullableInt(in.TargetAgentID), in.TargetSessionID,
 		nullableInt(in.IssueID), string(in.Mode), in.Payload, string(status), actor,
-		nullableInt(in.QueuedAfterDispatchID), blockersClear,
+		nullableInt(in.QueuedAfterDispatchID), blockersClear, nullableString(baseBranch),
 	)
 	if err != nil {
 		return nil, err
@@ -187,7 +200,8 @@ const dispatchSelect = `
 	       d.mode, d.payload, d.status, d.created_by, d.created_at,
 	       d.delivered_at, d.acked_at, d.ack_note,
 	       d.queued_after_dispatch_id,
-	       d.queued_until_blockers_clear
+	       d.queued_until_blockers_clear,
+	       d.base_branch
 	FROM agent_dispatches d
 	LEFT JOIN repos  r  ON r.id  = d.repo_id
 	LEFT JOIN agents a  ON a.id  = d.target_agent_id
@@ -668,6 +682,14 @@ func (s *Store) InflightByModeForRepo(repoID int64) (map[model.DispatchMode]int,
 // references without a second copy. SQLite's UPDATE supports the
 // aliased form natively.
 //
+// BACI-226: the bind also stamps `base_branch` with the resolved
+// per-(issue, feature) base branch — the single source of truth the
+// worker prompt envelope's <base_branch> tag and the BACI-227
+// per-(repo, mode, base_branch) concurrency grouping both read.
+// Computed via model.ResolveBaseBranch against the freshly-read
+// issue + feature; a dispatch without an issue leaves the column
+// NULL (no PR to target, no concurrency group to participate in).
+//
 // Returns ErrNotFound when 0 rows were updated. A bare `status='queued'`
 // CAS miss, a `delivered_at IS NOT NULL` miss, and a re-tightened
 // dormant gate miss are not distinguished at the API surface — they
@@ -676,14 +698,36 @@ func (s *Store) InflightByModeForRepo(repoID int64) (map[model.DispatchMode]int,
 // an Info-level log line to surface the (rare) gate-retighten case;
 // see internal/dispatcher/dispatcher.go tickMode.
 func (s *Store) BindQueuedDispatch(id int64, agentID int64) (*model.AgentDispatch, error) {
+	// Resolve base_branch out-of-band before the CAS — the issue row's
+	// shape is independent of the dispatch's status, so a race with a
+	// concurrent matcher tick doesn't corrupt the resolved value. If
+	// the dispatch is no longer queued we discard the work; if it is,
+	// stamping it inside the WHERE-guarded UPDATE keeps the matcher
+	// committed value atomic with the queued→pending transition.
+	baseBranch, err := s.resolveBaseBranchForDispatch(id)
+	if err != nil {
+		return nil, err
+	}
+	// BACI-226: re-render the payload so the freshly-resolved
+	// base_branch lands in the worker's Task prompt as the
+	// `<base_branch>` stub tag. The bind-time value supersedes the
+	// queue-time snapshot the stub was first rendered with, matching
+	// the brief's "value seen by the worker must be the value used
+	// by the matcher for concurrency grouping" invariant. A nil/empty
+	// payload (e.g. an untyped or setup dispatch with no template
+	// rendered) skips the rewrite — there's no stub to refresh.
+	newPayload, err := s.rerenderQueuedPayloadForBind(id, baseBranch)
+	if err != nil {
+		return nil, err
+	}
 	res, err := s.DB.Exec(`
 		UPDATE agent_dispatches AS d
-		   SET target_agent_id = ?, status = 'pending'
+		   SET target_agent_id = ?, status = 'pending', base_branch = ?, payload = COALESCE(?, payload)
 		 WHERE d.id = ?
 		   AND d.status = 'queued'
 		   AND d.delivered_at IS NULL
 		   AND NOT `+dormantFollowOnGateSQL(),
-		agentID, id)
+		agentID, nullableString(baseBranch), nullableString(newPayload), id)
 	if err != nil {
 		return nil, err
 	}
@@ -697,24 +741,119 @@ func (s *Store) BindQueuedDispatch(id int64, agentID int64) (*model.AgentDispatc
 	return s.GetDispatch(id)
 }
 
+// rerenderQueuedPayloadForBind rebuilds the dispatch's payload at
+// bind time so the freshly-resolved base_branch lands in the
+// worker's Task prompt as the `<base_branch>` stub tag (BACI-226).
+// Returns "" when no rewrite should happen — either the dispatch has
+// no template/mode/issue, or the source-of-truth ComposeDispatchPayload
+// can't be reconstructed without losing the original `note` (which
+// today is always "" on queued dispatches but defensively we still
+// pass it through). The caller then leaves `payload` untouched.
+func (s *Store) rerenderQueuedPayloadForBind(dispatchID int64, baseBranch string) (string, error) {
+	d, err := s.GetDispatch(dispatchID)
+	if err != nil {
+		return "", err
+	}
+	// Untyped dispatches carry no stub to refresh — payload is just
+	// the freeform note (or empty). Setup/ping dispatches with no
+	// mode fall here too. Leave them alone.
+	if d.Mode == "" || d.IssueKey == "" {
+		return "", nil
+	}
+	preamble, err := s.GetDispatchPreamble()
+	if err != nil {
+		return "", err
+	}
+	stub := model.DispatchStub{
+		IssueKey:     d.IssueKey,
+		Mode:         string(d.Mode),
+		BaseBranch:   baseBranch,
+		SubagentType: model.SubagentTypeForTemplate(string(d.Mode)),
+	}
+	// Queued dispatches today are always created with an empty note —
+	// `client.AutoDispatchIssue` and friends pass "" to
+	// ComposeDispatchPayload. If that ever changes we'd want to plumb
+	// the note through as a separate column; for now the empty-note
+	// invariant lets us re-render losslessly.
+	return model.ComposeDispatchPayload(preamble, stub, ""), nil
+}
+
+// resolveBaseBranchForDispatch is the BACI-226 resolver lookup the
+// matcher commit calls into: read the dispatch's issue + (optional)
+// feature and feed them to model.ResolveBaseBranch. Returns "" when
+// the dispatch has no issue (setup nudges, idle pings) so the
+// caller can write NULL into the column — the resolver's fallback
+// of "main" is for read sites, not for marking "no issue".
+func (s *Store) resolveBaseBranchForDispatch(dispatchID int64) (string, error) {
+	var issueID sql.NullInt64
+	if err := s.DB.QueryRow(
+		`SELECT issue_id FROM agent_dispatches WHERE id = ?`, dispatchID,
+	).Scan(&issueID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", ErrNotFound
+		}
+		return "", err
+	}
+	if !issueID.Valid {
+		return "", nil
+	}
+	v := issueID.Int64
+	return s.resolveBaseBranchForIssueID(&v)
+}
+
+// resolveBaseBranchForIssueID is the shared BACI-226 resolver entry
+// point: given an optional issue PK, read the issue + (optional)
+// feature and run them through model.ResolveBaseBranch. Returns ""
+// when issueID is nil (the caller is dispatching against no issue —
+// setup nudges, idle pings) so the caller writes NULL into the
+// column rather than synthesising "main" — the resolver's fallback
+// of "main" is the read-site default, not a column value.
+//
+// A racing hard-delete of the issue (cascade SET NULL on the
+// dispatch's foreign key, between this read and the dispatch insert)
+// falls through to "" via ErrNotFound — better to leave the column
+// NULL than to fail the dispatch over a vanished issue.
+func (s *Store) resolveBaseBranchForIssueID(issueID *int64) (string, error) {
+	if issueID == nil {
+		return "", nil
+	}
+	iss, err := s.GetIssueByID(*issueID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return "", nil
+		}
+		return "", err
+	}
+	var feat *model.Feature
+	if iss.FeatureID != nil {
+		feat, err = s.GetFeatureByID(*iss.FeatureID)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return "", err
+		}
+	}
+	return model.ResolveBaseBranch(iss, feat), nil
+}
+
 func scanDispatch(r rowScanner) (*model.AgentDispatch, error) {
 	var (
-		d              model.AgentDispatch
-		prefix         sql.NullString
-		agentID        sql.NullInt64
-		agentName      sql.NullString
-		issueID        sql.NullInt64
-		issueKey       string
-		delivered      sql.NullTime
-		acked          sql.NullTime
-		queuedAfter    sql.NullInt64
-		blockersClear  int
+		d             model.AgentDispatch
+		prefix        sql.NullString
+		agentID       sql.NullInt64
+		agentName     sql.NullString
+		issueID       sql.NullInt64
+		issueKey      string
+		delivered     sql.NullTime
+		acked         sql.NullTime
+		queuedAfter   sql.NullInt64
+		blockersClear int
+		baseBranch    sql.NullString
 	)
 	err := r.Scan(
 		&d.ID, &d.RepoID, &prefix, &agentID, &agentName,
 		&d.TargetSessionID, &issueID, &issueKey,
 		&d.Mode, &d.Payload, &d.Status, &d.CreatedBy, &d.CreatedAt,
 		&delivered, &acked, &d.AckNote, &queuedAfter, &blockersClear,
+		&baseBranch,
 	)
 	if err != nil {
 		return nil, err
@@ -745,6 +884,9 @@ func scanDispatch(r rowScanner) (*model.AgentDispatch, error) {
 		d.QueuedAfterDispatchID = &v
 	}
 	d.QueuedUntilBlockersClear = blockersClear != 0
+	if baseBranch.Valid {
+		d.BaseBranch = baseBranch.String
+	}
 	return &d, nil
 }
 

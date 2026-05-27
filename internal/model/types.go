@@ -261,6 +261,48 @@ type SyncState struct {
 	LastSyncedHash string    `json:"last_synced_hash"`
 }
 
+// DefaultBaseBranch is the universal fallback for ResolveBaseBranch
+// when neither the issue nor its parent feature pin a branch. The git
+// "main" convention is hard-coded — bacio doesn't carry a per-repo
+// default branch column today, and every consuming surface (worker
+// prompt envelope, `bacio pr create`, kanban concurrency grouping)
+// wants the same fallback in lockstep, so the constant is the single
+// source of truth.
+const DefaultBaseBranch = "main"
+
+// ResolveBaseBranch returns the effective base branch a PR for issue
+// should target, applying the BACI-226 three-step resolver:
+//
+//  1. issue.BaseBranch (the per-issue override added in BACI-232),
+//  2. feature.BranchName (the per-feature integration branch from
+//     BACI-225 — only consulted when the issue has a feature),
+//  3. DefaultBaseBranch ("main").
+//
+// The override always wins. Empty / nil at any level skips that level
+// and falls through to the next. The return value is always non-empty
+// because the fallback ensures that.
+//
+// Both arguments are tolerated as nil. A nil issue falls through to
+// feature (which may itself fall through to the default); a nil
+// feature simply skips step 2. This shape matches the call site in
+// internal/dispatcher (issue is always non-nil, feature may be nil
+// when the issue has no parent feature) and the brief surface (same
+// shape).
+//
+// The resolver is intentionally pure / side-effect-free so the worker
+// prompt envelope, the brief surface, and the (BACI-227) matcher
+// concurrency grouping all derive the same value from the same inputs
+// without coordinating through a shared cache.
+func ResolveBaseBranch(issue *Issue, feature *Feature) string {
+	if issue != nil && issue.BaseBranch != nil && *issue.BaseBranch != "" {
+		return *issue.BaseBranch
+	}
+	if feature != nil && feature.BranchName != nil && *feature.BranchName != "" {
+		return *feature.BranchName
+	}
+	return DefaultBaseBranch
+}
+
 // SyncRemote records, for one canonical remote URL, where this user
 // has the matching sync repo cloned locally. The remote URL is the
 // shared truth (it also appears in every project's .bacio/config.yaml);

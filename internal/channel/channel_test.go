@@ -441,7 +441,7 @@ func TestChannelRegisterRejectsMalformedUUID(t *testing.T) {
 // notifications/claude/channel frame with the dispatch metadata.
 func TestChannelPushesEvents(t *testing.T) {
 	src := &fakeSource{batches: [][]Event{{
-		{ID: 42, IssueKey: "MINI-9", From: "supervisor", Payload: "look at this"},
+		{ID: 42, IssueKey: "MINI-9", From: "supervisor", Payload: "look at this", BaseBranch: "feat/X"},
 	}}}
 	var out bytes.Buffer
 	srv := New(src, "bacio", "test", strings.NewReader(""), &out, nil)
@@ -463,6 +463,36 @@ func TestChannelPushesEvents(t *testing.T) {
 	meta, _ := params["meta"].(map[string]any)
 	if meta["dispatch_id"] != "42" || meta["issue"] != "MINI-9" || meta["from"] != "supervisor" {
 		t.Fatalf("meta = %+v", meta)
+	}
+	// BACI-226: <channel base_branch="..."> is the supervisor-side
+	// breadcrumb so a channel-log reader can spot the resolved value
+	// without parsing the payload's stub.
+	if meta["base_branch"] != "feat/X" {
+		t.Fatalf("meta base_branch = %v, want %q", meta["base_branch"], "feat/X")
+	}
+}
+
+// TestChannelPushesEventsOmitsBaseBranchWhenEmpty: an issue-less
+// dispatch (setup nudge, idle ping) carries an empty BaseBranch — the
+// meta tag must drop the attribute entirely rather than emit
+// `base_branch=""`, so legacy log parsers stay backwards-compatible.
+func TestChannelPushesEventsOmitsBaseBranchWhenEmpty(t *testing.T) {
+	src := &fakeSource{batches: [][]Event{{
+		{ID: 7, From: "bacio-channel", Payload: "register please"},
+	}}}
+	var out bytes.Buffer
+	srv := New(src, "bacio", "test", strings.NewReader(""), &out, nil)
+
+	srv.drainOnce(context.Background())
+
+	frames := decodeFrames(t, out.String())
+	if len(frames) != 1 {
+		t.Fatalf("got %d frames, want 1", len(frames))
+	}
+	params, _ := frames[0]["params"].(map[string]any)
+	meta, _ := params["meta"].(map[string]any)
+	if _, ok := meta["base_branch"]; ok {
+		t.Fatalf("meta unexpectedly carried base_branch: %+v", meta)
 	}
 }
 

@@ -131,7 +131,14 @@ type IssueBrief struct {
 	// Same field as on IssueView / BoardCard so every issue-shaped
 	// payload exposes the plan affordance consistently.
 	LatestPlan *model.LatestPlan `json:"latest_plan,omitempty"`
-	Warnings   []string          `json:"warnings"`
+	// BaseBranch (BACI-226) is the resolved base branch a PR for this
+	// issue should target — model.ResolveBaseBranch(issue, feature)
+	// with the per-issue override, the per-feature integration
+	// branch, and the "main" fallback applied in turn. Always
+	// non-empty (the resolver's fallback ensures it), no omitempty so
+	// brief consumers can read the field unconditionally.
+	BaseBranch string   `json:"base_branch"`
+	Warnings   []string `json:"warnings"`
 }
 
 type BriefDoc struct {

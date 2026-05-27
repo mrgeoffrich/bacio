@@ -127,7 +127,11 @@ func (d deps) handleIssueBrief(w http.ResponseWriter, r *http.Request) {
 		Taken:        model.AnyOpenClaim(claimants),
 		WaitingState: waitingState,
 		LatestPlan:   latestPlan,
-		Warnings:     warnings,
+		// BACI-226: the resolver-derived base branch. Always non-empty
+		// (fallback to "main") so brief consumers can read it without
+		// an extra resolver pass.
+		BaseBranch: model.ResolveBaseBranch(iss, feat),
+		Warnings:   warnings,
 	})
 }
 

@@ -14,6 +14,45 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
 
+// resolveBaseBranchForIssueKey is the BACI-226 resolver entry point
+// for the targeted-pending dispatch creation paths: given the
+// caller's issue_key (which may legitimately be empty for an
+// issue-less dispatch like a setup nudge), load the issue + its
+// optional feature and resolve via model.ResolveBaseBranch. Returns
+// "" when the issue_key is empty so the stub omits the
+// <base_branch> tag (no PR to target) — read sites use the
+// resolver's fallback to recover a usable value.
+func (c *localClient) resolveBaseBranchForIssueKey(ctx context.Context, repo *model.Repo, issueKey string) (string, error) {
+	if issueKey == "" {
+		return "", nil
+	}
+	iss, err := c.GetIssueByKey(ctx, repo, issueKey)
+	if err != nil {
+		return "", err
+	}
+	return c.resolveBaseBranchForIssue(iss), nil
+}
+
+// resolveBaseBranchForIssue is the BACI-226 resolver pass once an
+// issue is already in hand (the auto-dispatch path, the TUI picker,
+// etc.). Falls back to model.DefaultBaseBranch when the feature
+// lookup fails — the resolver's invariant is "never empty" and
+// blocking the dispatch on a vanished feature would be punitive for
+// what is purely a derived field.
+func (c *localClient) resolveBaseBranchForIssue(iss *model.Issue) string {
+	if iss == nil {
+		return model.DefaultBaseBranch
+	}
+	var feat *model.Feature
+	if iss.FeatureID != nil {
+		f, err := c.store.GetFeatureByID(*iss.FeatureID)
+		if err == nil {
+			feat = f
+		}
+	}
+	return model.ResolveBaseBranch(iss, feat)
+}
+
 func (c *localClient) CreateDispatch(ctx context.Context, repo *model.Repo, in inputs.AgentDispatchInput, dryRun bool) (*model.AgentDispatch, error) {
 	if in.TargetAgent == "" && in.TargetSession == "" {
 		return nil, fmt.Errorf("dispatch requires a target — pass --to <agent> and/or --session <id>")
@@ -65,7 +104,18 @@ func (c *localClient) CreateDispatch(ctx context.Context, repo *model.Repo, in i
 	if err != nil {
 		return nil, err
 	}
-	stub := model.DispatchStub{IssueKey: issueKey, Mode: string(mode)}
+	// BACI-226: stamp <base_branch> into the stub at creation time so
+	// targeted-pending dispatches (which never go through the matcher
+	// bind step) carry the correct value from the start. Queued
+	// dispatches re-render at BindQueuedDispatch with the bind-time
+	// resolved value, but seeding the initial render here keeps the
+	// pre-bind payload coherent for any consumer that reads it before
+	// the matcher fires.
+	baseBranch, err := c.resolveBaseBranchForIssueKey(ctx, repo, in.IssueKey)
+	if err != nil {
+		return nil, err
+	}
+	stub := model.DispatchStub{IssueKey: issueKey, Mode: string(mode), BaseBranch: baseBranch}
 	if mode != "" {
 		stub.SubagentType = model.SubagentTypeForTemplate(string(mode))
 	}
@@ -165,9 +215,17 @@ func (c *localClient) AutoDispatchIssue(ctx context.Context, repo *model.Repo, i
 	if err != nil {
 		return nil, err
 	}
+	// BACI-226: render <base_branch> into the queue-time stub using
+	// the resolver against the current issue + feature. The matcher
+	// re-renders the payload at BindQueuedDispatch using the freshly-
+	// resolved bind-time value (which is also the value the BACI-227
+	// concurrency cap groups by), so a per-issue / per-feature override
+	// added between queue and bind still reaches the worker.
+	baseBranch := c.resolveBaseBranchForIssue(iss)
 	payload := model.ComposeDispatchPayload(preamble, model.DispatchStub{
 		IssueKey:     iss.Key,
 		Mode:         string(parsedMode),
+		BaseBranch:   baseBranch,
 		SubagentType: model.SubagentTypeForTemplate(string(parsedMode)),
 	}, "")
 
@@ -179,6 +237,7 @@ func (c *localClient) AutoDispatchIssue(ctx context.Context, repo *model.Repo, i
 			IssueKey:   iss.Key,
 			Mode:       parsedMode,
 			Payload:    payload,
+			BaseBranch: baseBranch,
 			Status:     model.DispatchQueued,
 			CreatedBy:  c.actor,
 			CreatedAt:  time.Now().UTC(),
@@ -277,9 +336,15 @@ func (c *localClient) AutoDispatchIssueWithFollowOn(ctx context.Context, repo *m
 	if err != nil {
 		return nil, nil, err
 	}
+	// BACI-226: same base-branch handling as AutoDispatchIssue's
+	// single-row path. The chain's follow-on row is bound by the
+	// matcher later and re-rendered at bind time, so we only need to
+	// seed the parent's payload here.
+	baseBranch := c.resolveBaseBranchForIssue(iss)
 	payload := model.ComposeDispatchPayload(preamble, model.DispatchStub{
 		IssueKey:     iss.Key,
 		Mode:         string(parsedMode),
+		BaseBranch:   baseBranch,
 		SubagentType: model.SubagentTypeForTemplate(string(parsedMode)),
 	}, "")
 

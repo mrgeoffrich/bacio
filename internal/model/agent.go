@@ -800,10 +800,20 @@ func RenderPromptTemplate(tmpl string, vars map[string]string) string {
 // id is deliberately NOT carried here — the channel already emits it as
 // the `<channel dispatch_id="...">` tag attribute, so the rewritten
 // preamble instructs the supervisor to read it from there.
+//
+// BaseBranch (BACI-226) is the resolved base branch the worker's PR
+// will target — output of ResolveBaseBranch(issue, feature), stamped
+// onto the dispatch row at bind time and carried through to the stub
+// so the supervisor copies it verbatim into the worker's Task
+// prompt as a `<base_branch>` tag (same shape as `<issue_id>` /
+// `<mode>`). Empty when the dispatch carries no issue (setup nudges,
+// idle pings) — the tag is then omitted and the worker falls through
+// to model.DefaultBaseBranch.
 type DispatchStub struct {
 	IssueKey     string // canonical ticket key, e.g. "BACI-76"
 	Mode         string // template slug, e.g. "plan"
 	SubagentType string // SubagentTypeForTemplate(Mode), e.g. "bacio-plan-worker"
+	BaseBranch   string // resolved base branch (BACI-226), e.g. "main" / "feat/X"
 }
 
 // render formats the stub as the few-line block the supervisor reads.
@@ -819,6 +829,9 @@ func (s DispatchStub) render() string {
 	}
 	if s.Mode != "" {
 		lines = append(lines, "<mode>"+s.Mode+"</mode>")
+	}
+	if s.BaseBranch != "" {
+		lines = append(lines, "<base_branch>"+s.BaseBranch+"</base_branch>")
 	}
 	if s.SubagentType != "" {
 		lines = append(lines, "<subagent_type>"+s.SubagentType+"</subagent_type>")
@@ -920,6 +933,17 @@ type AgentDispatch struct {
 	// Pair of `[]struct{key,state}` rather than `[]store.BlockerObservation`
 	// to keep this package free of an internal/store import cycle.
 	BlockerSnapshot []DispatchBlockerObservation `json:"blocker_snapshot,omitempty"`
+	// BaseBranch (BACI-226) is the resolved base branch the worker
+	// targets for its PR — stamped at dispatch-bind time
+	// (BindQueuedDispatch) from ResolveBaseBranch(issue, feature) so
+	// the worker prompt envelope's <base_branch> tag and the
+	// (BACI-227) per-(repo, mode, base_branch) concurrency grouping
+	// agree on a single value. Empty for rows queued before BACI-226
+	// and for dispatches without an issue (the SetupDispatchCreator
+	// nudges, BACI-57 idle pings) — readers fall through to
+	// model.DefaultBaseBranch via ResolveBaseBranch's invariants.
+	// Omitempty so untyped / setup dispatches stay compact on the wire.
+	BaseBranch string `json:"base_branch,omitempty"`
 }
 
 // DispatchBlockerObservation (BACI-246) mirrors store.BlockerObservation

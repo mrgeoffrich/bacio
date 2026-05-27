@@ -137,6 +137,11 @@ func TestDispatchPromptTemplateRendering(t *testing.T) {
 	for _, want := range []string{
 		"<issue_id>" + iss.Key + "</issue_id>",
 		"<mode>implement</mode>",
+		// BACI-226: the resolver-derived <base_branch> rides alongside
+		// <issue_id> / <mode>; no override + no feature → fallback to
+		// "main", and the supervisor copies the tag verbatim into the
+		// worker's Task prompt.
+		"<base_branch>main</base_branch>",
 		"<subagent_type>" + model.SubagentTypeForTemplate(string(model.DispatchModeImplement)) + "</subagent_type>",
 	} {
 		if !strings.Contains(d.Payload, want) {
@@ -163,7 +168,7 @@ func TestDispatchPromptTemplateRendering(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateDispatch (custom): %v", err)
 	}
-	wantCustom := "<issue_id>" + iss.Key + "</issue_id>\n<mode>implement</mode>\n<subagent_type>" +
+	wantCustom := "<issue_id>" + iss.Key + "</issue_id>\n<mode>implement</mode>\n<base_branch>main</base_branch>\n<subagent_type>" +
 		model.SubagentTypeForTemplate(string(model.DispatchModeImplement)) + "</subagent_type>" +
 		"\n\nwatch the migration"
 	if d.Payload != wantCustom {

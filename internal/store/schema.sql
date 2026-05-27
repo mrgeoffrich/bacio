@@ -580,7 +580,21 @@ CREATE TABLE IF NOT EXISTS agent_dispatches (
     -- no open claim races in on the issue; the orphan-cancel sweep
     -- also covers blockers-clear rows. Re-evaluated on every tick so
     -- new blocks edges added after queue time are respected.
-    queued_until_blockers_clear INTEGER NOT NULL DEFAULT 0
+    queued_until_blockers_clear INTEGER NOT NULL DEFAULT 0,
+    -- base_branch (BACI-226) is the resolved base branch the worker
+    -- will target for its PR — output of ResolveBaseBranch(issue,
+    -- feature) stamped at dispatch-bind time (matcher commit, via
+    -- BindQueuedDispatch). The value is the single source of truth
+    -- the worker prompt envelope's <base_branch> tag and the BACI-227
+    -- per-(repo, mode, base_branch) concurrency grouping both read,
+    -- so they never disagree about which queue slot a dispatch
+    -- occupies. NULL is the legacy / setup-dispatch shape (no issue
+    -- to resolve against); read sites fall through to
+    -- model.DefaultBaseBranch. No CHECK / DEFAULT: the resolver's
+    -- non-empty invariant is enforced on the write path, and a
+    -- column-level default would mask the "this dispatch was queued
+    -- before BACI-226" / "this dispatch has no issue" cases.
+    base_branch TEXT
     -- Target CHECK is intentionally absent: queued (BACI-51) rows leave
     -- target_agent_id NULL and target_session_id '' until the matcher
     -- binds them; the Go-side validator in AddDispatch enforces "queued

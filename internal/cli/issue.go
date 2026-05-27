@@ -612,7 +612,10 @@ type issueBrief struct {
 	Taken        bool                  `json:"taken"`
 	// LatestPlan (BACI-216) — mirrors client.IssueBrief.LatestPlan.
 	LatestPlan *model.LatestPlan `json:"latest_plan,omitempty"`
-	Warnings   []string          `json:"warnings"`
+	// BaseBranch (BACI-226) — mirrors client.IssueBrief.BaseBranch.
+	// Always non-empty (resolver's fallback to "main" ensures it).
+	BaseBranch string   `json:"base_branch"`
+	Warnings   []string `json:"warnings"`
 }
 
 // briefDoc is a single linked document with its full content inlined and
@@ -698,6 +701,7 @@ plan/review bodies too.`,
 				Claimants:    view.Claimants,
 				Taken:        view.Taken,
 				LatestPlan:   view.LatestPlan,
+				BaseBranch:   view.BaseBranch,
 				Warnings:     view.Warnings,
 			}
 			enc := json.NewEncoder(os.Stdout)

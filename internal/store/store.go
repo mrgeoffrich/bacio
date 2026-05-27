@@ -733,6 +733,28 @@ func migrate(db *sql.DB) error {
 			return fmt.Errorf("add queued_until_blockers_clear to agent_dispatches: %w", err)
 		}
 	}
+	// agent_dispatches.base_branch (BACI-226) is the resolved base
+	// branch for the dispatched work — the output of ResolveBaseBranch
+	// against the dispatch's issue + its feature, stamped at
+	// dispatch-bind time so the worker prompt envelope and the
+	// (BACI-227) per-(repo, mode, base_branch) concurrency grouping
+	// agree on a single value. NULL on rows queued before BACI-226 and
+	// on dispatches without an issue (the SetupDispatchCreator nudges
+	// and BACI-57 idle pings); a NULL value falls through to
+	// model.DefaultBaseBranch in every read site. Idempotent ALTER; no
+	// DEFAULT so legacy rows surface as NULL rather than 'main' (the
+	// resolver's fallback is the single source of truth for what
+	// "absent" means, and writing 'main' onto every legacy row would
+	// lie about what the matcher actually used at the time).
+	hasDispatchBaseBranch, err := columnExists(db, "agent_dispatches", "base_branch")
+	if err != nil {
+		return err
+	}
+	if !hasDispatchBaseBranch {
+		if _, err := db.Exec(`ALTER TABLE agent_dispatches ADD COLUMN base_branch TEXT`); err != nil {
+			return fmt.Errorf("add base_branch to agent_dispatches: %w", err)
+		}
+	}
 	// BACI-199: add `state` + `state_manual` columns to `features` on
 	// older DBs. The CREATE TABLE declaration in schema.sql carries the
 	// columns (with their CHECK constraints) for fresh DBs; the ALTER
@@ -1137,6 +1159,7 @@ func migrateAgentDispatchesModeCheck(db *sql.DB) error {
 			ack_note          TEXT    NOT NULL DEFAULT '',
 			queued_after_dispatch_id INTEGER REFERENCES agent_dispatches(id) ON DELETE SET NULL,
 			queued_until_blockers_clear INTEGER NOT NULL DEFAULT 0,
+			base_branch       TEXT,
 			CHECK (target_agent_id IS NOT NULL OR target_session_id != '')
 		)
 	`); err != nil {
@@ -1145,7 +1168,8 @@ func migrateAgentDispatchesModeCheck(db *sql.DB) error {
 	// Discover whether the source table carries queued_after_dispatch_id
 	// already: a DB rebuilt by this migration after BACI-179 lands does,
 	// a pre-BACI-179 DB doesn't. The SELECT clause varies accordingly so
-	// the older shape doesn't error on the missing column.
+	// the older shape doesn't error on the missing column. BACI-226:
+	// same dance for base_branch.
 	hasQueuedAfter, err := txColumnExists(tx, "agent_dispatches", "queued_after_dispatch_id")
 	if err != nil {
 		return err
@@ -1154,7 +1178,11 @@ func migrateAgentDispatchesModeCheck(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	copyStmt := buildAgentDispatchesCopyStmt(hasQueuedAfter, hasBlockersClear)
+	hasBaseBranch, err := txColumnExists(tx, "agent_dispatches", "base_branch")
+	if err != nil {
+		return err
+	}
+	copyStmt := buildAgentDispatchesCopyStmt(hasQueuedAfter, hasBlockersClear, hasBaseBranch)
 	if _, err := tx.Exec(copyStmt); err != nil {
 		return fmt.Errorf("copy agent_dispatches rows: %w", err)
 	}
@@ -1181,12 +1209,12 @@ func migrateAgentDispatchesModeCheck(db *sql.DB) error {
 
 // buildAgentDispatchesCopyStmt assembles the INSERT…SELECT used by the
 // agent_dispatches table-rebuild migrations. The base column list is
-// always populated; queued_after_dispatch_id (BACI-179) and
-// queued_until_blockers_clear (BACI-217) are appended only when the
-// source table already carries them, so a pre-BACI-179 or pre-BACI-217
-// DB doesn't error on the missing column. Columns absent from SELECT
-// pick up their schema defaults (NULL / 0) on the destination.
-func buildAgentDispatchesCopyStmt(hasQueuedAfter, hasBlockersClear bool) string {
+// always populated; queued_after_dispatch_id (BACI-179),
+// queued_until_blockers_clear (BACI-217), and base_branch (BACI-226)
+// are appended only when the source table already carries them, so an
+// older DB doesn't error on a missing column. Columns absent from
+// SELECT pick up their schema defaults (NULL / 0) on the destination.
+func buildAgentDispatchesCopyStmt(hasQueuedAfter, hasBlockersClear, hasBaseBranch bool) string {
 	cols := []string{"id", "repo_id", "target_agent_id", "target_session_id", "issue_id", "mode",
 		"payload", "status", "created_by", "created_at", "delivered_at", "acked_at", "ack_note"}
 	if hasQueuedAfter {
@@ -1194,6 +1222,9 @@ func buildAgentDispatchesCopyStmt(hasQueuedAfter, hasBlockersClear bool) string 
 	}
 	if hasBlockersClear {
 		cols = append(cols, "queued_until_blockers_clear")
+	}
+	if hasBaseBranch {
+		cols = append(cols, "base_branch")
 	}
 	list := strings.Join(cols, ", ")
 	return `INSERT INTO agent_dispatches_new (` + list + `) SELECT ` + list + ` FROM agent_dispatches`
@@ -1246,7 +1277,8 @@ func migrateAgentDispatchesStatusCheck(db *sql.DB) error {
 			acked_at          DATETIME,
 			ack_note          TEXT    NOT NULL DEFAULT '',
 			queued_after_dispatch_id INTEGER REFERENCES agent_dispatches(id) ON DELETE SET NULL,
-			queued_until_blockers_clear INTEGER NOT NULL DEFAULT 0
+			queued_until_blockers_clear INTEGER NOT NULL DEFAULT 0,
+			base_branch       TEXT
 		)
 	`); err != nil {
 		return fmt.Errorf("create agent_dispatches_new: %w", err)
@@ -1259,7 +1291,11 @@ func migrateAgentDispatchesStatusCheck(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	copyStmt := buildAgentDispatchesCopyStmt(hasQueuedAfter, hasBlockersClear)
+	hasBaseBranch, err := txColumnExists(tx, "agent_dispatches", "base_branch")
+	if err != nil {
+		return err
+	}
+	copyStmt := buildAgentDispatchesCopyStmt(hasQueuedAfter, hasBlockersClear, hasBaseBranch)
 	if _, err := tx.Exec(copyStmt); err != nil {
 		return fmt.Errorf("copy agent_dispatches rows: %w", err)
 	}

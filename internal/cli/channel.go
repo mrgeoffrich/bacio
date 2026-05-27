@@ -272,11 +272,12 @@ func (s *channelSource) Drain(ctx context.Context) ([]channel.Event, error) {
 			}
 			s.pushed[d.ID] = true
 			out = append(out, channel.Event{
-				ID:       d.ID,
-				IssueKey: d.IssueKey,
-				From:     d.CreatedBy,
-				Mode:     string(d.Mode),
-				Payload:  d.Payload,
+				ID:         d.ID,
+				IssueKey:   d.IssueKey,
+				From:       d.CreatedBy,
+				Mode:       string(d.Mode),
+				Payload:    d.Payload,
+				BaseBranch: d.BaseBranch,
 			})
 		}
 	}
