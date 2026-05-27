@@ -66,6 +66,23 @@ func (f *fakeGH) CreatePR(_ context.Context, _ string, extra []string) (string, 
 // handles deregistration.
 func setupPRCreateTest(t *testing.T, gh *fakeGH) string {
 	t.Helper()
+	return setupPRCreateTestWith(t, gh, prCreateTestOpts{})
+}
+
+// prCreateTestOpts parametrises the BACI-228 base-branch resolver
+// inputs for setupPRCreateTestWith. Empty values use the equivalent of
+// the legacy setupPRCreateTest (no feature, no per-issue override).
+type prCreateTestOpts struct {
+	// FeatureBranch, if non-empty, seeds a parent feature with the
+	// given branch_name and attaches the issue to it.
+	FeatureBranch string
+	// IssueBaseBranch, if non-empty, is stamped as the per-issue
+	// base_branch override on the seeded issue.
+	IssueBaseBranch string
+}
+
+func setupPRCreateTestWith(t *testing.T, gh *fakeGH, o prCreateTestOpts) string {
+	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "db.sqlite")
 	prevDB := opts.dbPath
 	prevDry := opts.dryRun
@@ -84,7 +101,15 @@ func setupPRCreateTest(t *testing.T, gh *fakeGH) string {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	iss, err := s.CreateIssue(repo.ID, nil, "Login broken on Safari", "", model.StateTodo, nil, "")
+	var featureID *int64
+	if o.FeatureBranch != "" {
+		feat, ferr := s.CreateFeature(repo.ID, "auth-rewrite", "Auth rewrite", "", "", o.FeatureBranch)
+		if ferr != nil {
+			t.Fatalf("create feature: %v", ferr)
+		}
+		featureID = &feat.ID
+	}
+	iss, err := s.CreateIssue(repo.ID, featureID, "Login broken on Safari", "", model.StateTodo, nil, o.IssueBaseBranch)
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
@@ -158,10 +183,16 @@ func TestPRCreate_ClosedOnlyAllowsWithWarning(t *testing.T) {
 	if gh.labelCalls != 1 {
 		t.Fatalf("expected one CreateLabelIdempotent call, got %d", gh.labelCalls)
 	}
-	// The passthrough args reach gh untouched (label is injected by the wrapper).
-	want := []string{"--title", "x", "--body", "y"}
+	// The passthrough args reach gh with `--base main` injected at the
+	// head by the wrapper (BACI-228); the caller's tail is preserved.
+	want := []string{"--base", "main", "--title", "x", "--body", "y"}
 	if len(gh.lastExtra) != len(want) {
 		t.Fatalf("passthrough mismatch: got=%v want=%v", gh.lastExtra, want)
+	}
+	for i := range want {
+		if gh.lastExtra[i] != want[i] {
+			t.Fatalf("passthrough mismatch at %d: got=%v want=%v", i, gh.lastExtra, want)
+		}
 	}
 }
 
@@ -390,6 +421,157 @@ func TestClassifyPreflight(t *testing.T) {
 	refusals, warnings = classifyPreflight("bacio:MINI-1", nil, nil)
 	if len(refusals) != 0 || len(warnings) != 0 {
 		t.Fatalf("clean preflight should be silent, got refusals=%v warnings=%v", refusals, warnings)
+	}
+}
+
+// extraHasBase reports whether the recorded passthrough args contain
+// `--base <branch>` (the wrapper-injected pair). Helper for the
+// BACI-228 base-branch injection tests.
+func extraHasBase(extra []string, want string) bool {
+	for i, a := range extra {
+		if a == "--base" && i+1 < len(extra) && extra[i+1] == want {
+			return true
+		}
+	}
+	return false
+}
+
+// BACI-228: feature-branched issue with no per-issue override → the
+// wrapper injects `--base <feature.branch_name>` so the PR opens
+// against the feature integration branch, not gh's default.
+func TestPRCreate_InjectsBaseFromFeatureBranch(t *testing.T) {
+	gh := &fakeGH{
+		prsByLabel:  map[string][]ghcli.PRSummary{},
+		createPRURL: "https://github.com/example/mini/pull/300",
+	}
+	key := setupPRCreateTestWith(t, gh, prCreateTestOpts{FeatureBranch: "feat/auth-rewrite"})
+
+	if err := runPRCreate(inputs.PRCreateInput{
+		IssueKey: key,
+		GHArgs:   []string{"--title", "t", "--body", "b"},
+	}); err != nil {
+		t.Fatalf("runPRCreate: %v", err)
+	}
+	if !extraHasBase(gh.lastExtra, "feat/auth-rewrite") {
+		t.Fatalf("expected --base feat/auth-rewrite injected, got extra=%v", gh.lastExtra)
+	}
+}
+
+// BACI-228: issue with override=main, parent feature on feat/X → the
+// override wins (this is the terminal "merge feature → main" PR), so
+// the wrapper injects `--base main`.
+func TestPRCreate_IssueOverrideBeatsFeatureBranch(t *testing.T) {
+	gh := &fakeGH{
+		prsByLabel:  map[string][]ghcli.PRSummary{},
+		createPRURL: "https://github.com/example/mini/pull/301",
+	}
+	key := setupPRCreateTestWith(t, gh, prCreateTestOpts{
+		FeatureBranch:   "feat/auth-rewrite",
+		IssueBaseBranch: "main",
+	})
+
+	if err := runPRCreate(inputs.PRCreateInput{
+		IssueKey: key,
+		GHArgs:   []string{"--title", "t", "--body", "b"},
+	}); err != nil {
+		t.Fatalf("runPRCreate: %v", err)
+	}
+	if !extraHasBase(gh.lastExtra, "main") {
+		t.Fatalf("expected --base main (issue override wins), got extra=%v", gh.lastExtra)
+	}
+}
+
+// BACI-228: plain main-targeted issue (no feature, no override) — the
+// wrapper still injects `--base main` explicitly rather than relying
+// on gh's default-branch detection.
+func TestPRCreate_InjectsBaseMainForPlainIssue(t *testing.T) {
+	gh := &fakeGH{
+		prsByLabel:  map[string][]ghcli.PRSummary{},
+		createPRURL: "https://github.com/example/mini/pull/302",
+	}
+	key := setupPRCreateTest(t, gh)
+
+	if err := runPRCreate(inputs.PRCreateInput{
+		IssueKey: key,
+		GHArgs:   []string{"--title", "t", "--body", "b"},
+	}); err != nil {
+		t.Fatalf("runPRCreate: %v", err)
+	}
+	if !extraHasBase(gh.lastExtra, "main") {
+		t.Fatalf("expected --base main injected for plain issue, got extra=%v", gh.lastExtra)
+	}
+}
+
+// BACI-228: caller-passed `--base` on the verbatim tail wins — the
+// wrapper must not inject a second `--base`.
+func TestPRCreate_CallerBaseOverrideWins(t *testing.T) {
+	gh := &fakeGH{
+		prsByLabel:  map[string][]ghcli.PRSummary{},
+		createPRURL: "https://github.com/example/mini/pull/303",
+	}
+	key := setupPRCreateTestWith(t, gh, prCreateTestOpts{FeatureBranch: "feat/auth-rewrite"})
+
+	if err := runPRCreate(inputs.PRCreateInput{
+		IssueKey: key,
+		GHArgs:   []string{"--base", "other/branch", "--title", "t", "--body", "b"},
+	}); err != nil {
+		t.Fatalf("runPRCreate: %v", err)
+	}
+	// Count `--base` occurrences — must be exactly one, the caller's.
+	bases := 0
+	for _, a := range gh.lastExtra {
+		if a == "--base" {
+			bases++
+		}
+	}
+	if bases != 1 {
+		t.Fatalf("expected exactly one --base (caller-supplied) in passthrough, got %d in %v", bases, gh.lastExtra)
+	}
+	if !extraHasBase(gh.lastExtra, "other/branch") {
+		t.Fatalf("expected --base other/branch (caller override) preserved, got extra=%v", gh.lastExtra)
+	}
+}
+
+// BACI-228: the `--base=foo` shorthand also counts as a caller
+// override — the wrapper must not double up.
+func TestPRCreate_CallerBaseEqualsFormWins(t *testing.T) {
+	gh := &fakeGH{
+		prsByLabel:  map[string][]ghcli.PRSummary{},
+		createPRURL: "https://github.com/example/mini/pull/304",
+	}
+	key := setupPRCreateTestWith(t, gh, prCreateTestOpts{FeatureBranch: "feat/auth-rewrite"})
+
+	if err := runPRCreate(inputs.PRCreateInput{
+		IssueKey: key,
+		GHArgs:   []string{"--base=other/branch", "--title", "t", "--body", "b"},
+	}); err != nil {
+		t.Fatalf("runPRCreate: %v", err)
+	}
+	// Wrapper-injected `--base` is the two-token form, so its absence
+	// is enough to confirm no injection happened.
+	for _, a := range gh.lastExtra {
+		if a == "--base" {
+			t.Fatalf("expected no wrapper-injected --base when caller passed --base=... form, got extra=%v", gh.lastExtra)
+		}
+	}
+}
+
+func TestGHArgsHaveBase(t *testing.T) {
+	cases := []struct {
+		args []string
+		want bool
+	}{
+		{nil, false},
+		{[]string{"--title", "x"}, false},
+		{[]string{"--base", "main"}, true},
+		{[]string{"--title", "x", "--base", "feat/y"}, true},
+		{[]string{"--base=main"}, true},
+		{[]string{"--baseline", "x"}, false}, // prefix-collision guard
+	}
+	for i, c := range cases {
+		if got := ghArgsHaveBase(c.args); got != c.want {
+			t.Errorf("case %d (%v): want=%v got=%v", i, c.args, c.want, got)
+		}
 	}
 }
 

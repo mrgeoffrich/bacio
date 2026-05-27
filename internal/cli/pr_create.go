@@ -161,6 +161,31 @@ func runPRCreate(in inputs.PRCreateInput) error {
 	}
 	label := fmt.Sprintf("bacio:%s", canonical)
 
+	// BACI-228: resolve the effective base branch via the shared
+	// model.ResolveBaseBranch helper (issue override > feature branch
+	// > "main") and inject `--base <branch>` into the forwarded gh
+	// args. A caller-passed `--base` on the verbatim tail wins. The
+	// resolver's invariant is "never empty", so the injection always
+	// produces a concrete branch — explicit beats relying on gh's own
+	// default-branch detection, which can lag behind a feature-branch
+	// workflow.
+	iss, err := c.GetIssueByKey(ctx, repo, canonical)
+	if err != nil {
+		return fmt.Errorf("resolve issue %s: %w", canonical, err)
+	}
+	var feat *model.Feature
+	if iss.FeatureID != nil {
+		feat, err = c.GetFeatureByID(ctx, repo, *iss.FeatureID)
+		if err != nil {
+			return fmt.Errorf("resolve feature for %s: %w", canonical, err)
+		}
+	}
+	baseBranch := model.ResolveBaseBranch(iss, feat)
+	ghArgs := in.GHArgs
+	if !ghArgsHaveBase(ghArgs) {
+		ghArgs = append([]string{"--base", baseBranch}, ghArgs...)
+	}
+
 	gh := newGHCli()
 	ghPRs, err := gh.ListPRsByLabel(ctx, label)
 	if err != nil {
@@ -184,7 +209,7 @@ func runPRCreate(in inputs.PRCreateInput) error {
 	}
 
 	// Build the projected argv early so dry-run / errors can show it.
-	projected := append([]string{"gh", "pr", "create", "--label", label}, in.GHArgs...)
+	projected := append([]string{"gh", "pr", "create", "--label", label}, ghArgs...)
 
 	if opts.dryRun {
 		for _, w := range warnings {
@@ -209,7 +234,7 @@ func runPRCreate(in inputs.PRCreateInput) error {
 	if err := gh.CreateLabelIdempotent(ctx, label, labelColor); err != nil {
 		return fmt.Errorf("create label %s: %w", label, err)
 	}
-	url, err := gh.CreatePR(ctx, label, in.GHArgs)
+	url, err := gh.CreatePR(ctx, label, ghArgs)
 	if err != nil {
 		return fmt.Errorf("gh pr create: %w", err)
 	}
@@ -308,4 +333,18 @@ func validateGHArgs(args []string) error {
 		}
 	}
 	return nil
+}
+
+// ghArgsHaveBase reports whether the caller already passed `--base`
+// (either `--base feat/X` or `--base=feat/X`) on the verbatim
+// passthrough tail. When true the wrapper leaves the args alone so the
+// caller's override wins; when false the wrapper injects `--base <branch>`
+// from the resolved base branch (BACI-228).
+func ghArgsHaveBase(args []string) bool {
+	for _, a := range args {
+		if a == "--base" || strings.HasPrefix(a, "--base=") {
+			return true
+		}
+	}
+	return false
 }
