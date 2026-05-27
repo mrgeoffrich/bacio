@@ -13,6 +13,7 @@ package api
 import (
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
@@ -835,4 +836,142 @@ func (d deps) handleDefaultFeatureDelete(w http.ResponseWriter, r *http.Request)
 		})
 	}
 	writeJSON(w, http.StatusOK, &defaultFeatureOut{Feature: nil})
+}
+
+// ------------ BACI-248 per-repo board.hidden_states ------------
+
+// boardHiddenStatesOut is the response envelope for GET / PUT on
+// /repos/{prefix}/board/hidden-states. States is the sorted canonical
+// state names currently hidden from the kanban board for this repo.
+// Mirrors the BACI-177 features/hidden response shape (a single
+// slice-valued field) so the desktop / web seam reads the two
+// per-repo board-hide endpoints with the same pattern.
+type boardHiddenStatesOut struct {
+	States []string `json:"states"`
+}
+
+// boardHiddenStatesIn is the strict-decoded body for PUT
+// /repos/{prefix}/board/hidden-states. States is the new full set of
+// hidden state names — the server replaces the persisted set, it
+// doesn't merge. Empty array = "no states hidden".
+type boardHiddenStatesIn struct {
+	States []string `json:"states"`
+}
+
+// handleBoardHiddenStatesGet returns the per-repo set of board states
+// the user has hidden in this repo. Lives behind the same per-repo
+// scope as features/hidden so the desktop / web Settings panel reads
+// both per-key endpoints with one transport pattern (BACI-248).
+func (d deps) handleBoardHiddenStatesGet(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	hidden, err := d.store.LoadHiddenStates(repo.ID)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	states := make([]string, 0, len(hidden))
+	for st, on := range hidden {
+		if on {
+			states = append(states, string(st))
+		}
+	}
+	// Store-side SaveHiddenStates sorts on write, but we sort again
+	// here so the GET response is deterministic regardless of write path.
+	sort.Strings(states)
+	writeJSON(w, http.StatusOK, &boardHiddenStatesOut{States: states})
+}
+
+// handleBoardHiddenStatesSet replaces the per-repo board-hidden-states
+// set with the body's `states` array (BACI-248). Body is strict-decoded;
+// unknown state names are silently dropped at the store boundary —
+// LoadHiddenStates already filters them out so a future state rename
+// doesn't break old saved settings. Records `repo_setting.update`
+// audit row when the set actually changes (idempotent no-op writes
+// don't audit).
+func (d deps) handleBoardHiddenStatesSet(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	body, _, err := inputio.DecodeStrict[boardHiddenStatesIn](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	// Build the new hidden-set, dropping unknown state names so the
+	// store layer's validator stays the source of truth.
+	validStates := map[model.State]bool{}
+	for _, st := range model.AllStates() {
+		validStates[st] = true
+	}
+	next := map[model.State]bool{}
+	for _, name := range body.States {
+		st := model.State(name)
+		if validStates[st] {
+			next[st] = true
+		}
+	}
+	// Render the canonical (sorted) post-call value for the response /
+	// dry-run envelope — same shape as the GET reply.
+	out := make([]string, 0, len(next))
+	for st := range next {
+		out = append(out, string(st))
+	}
+	sort.Strings(out)
+	if isDryRun(r) {
+		writeDryRun(w, http.StatusOK, &boardHiddenStatesOut{States: out})
+		return
+	}
+	prev, err := d.store.LoadHiddenStates(repo.ID)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if err := d.store.SaveHiddenStates(repo.ID, next); err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	// Idempotent no-op writes skip the audit row — same precedent as
+	// feature.hide / feature.unhide.
+	if !hiddenStateSetsEqual(prev, next) {
+		recordOp(d.store, d.logger, model.HistoryEntry{
+			Actor:       ActorFromContext(r.Context()),
+			RepoID:      &repo.ID,
+			RepoPrefix:  repo.Prefix,
+			Op:          "repo_setting.update",
+			Kind:        "repo_setting",
+			TargetLabel: "board.hidden_states",
+			Details:     "states=" + strings.Join(out, ","),
+		})
+	}
+	writeJSON(w, http.StatusOK, &boardHiddenStatesOut{States: out})
+}
+
+// hiddenStateSetsEqual compares two state→bool maps for set equality
+// (true-valued entries only). The store-side LoadHiddenStates returns
+// a map where every present key is `true`, so this reduces to a key-
+// set comparison.
+func hiddenStateSetsEqual(a, b map[model.State]bool) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, on := range a {
+		if !on {
+			continue
+		}
+		if !b[k] {
+			return false
+		}
+	}
+	return true
 }

@@ -211,6 +211,21 @@ type Client interface {
 	SetFeatureHiddenOnBoard(ctx context.Context, repo *model.Repo, slug string, hidden, dryRun bool) (bool, error)
 	ListHiddenFeatureSlugs(ctx context.Context, repo *model.Repo) ([]string, error)
 
+	// ListBoardHiddenStates / SetBoardHiddenStates (BACI-248) expose
+	// the per-repo `tui_settings[board.hidden_states]` KV — the set of
+	// kanban-column state names hidden from the board on this machine.
+	// Same shape as ListHiddenFeatureSlugs: a sorted slice of canonical
+	// state names. Lives behind a per-repo board-hide endpoint pair
+	// (GET/PUT /repos/{prefix}/board/hidden-states) so the desktop / web
+	// Per-repository Settings pane can edit what was previously TUI-only
+	// state. SetBoardHiddenStates is replace-not-merge: pass the full new
+	// set. Unknown state names are silently dropped at the store boundary.
+	// Records an audit row under `repo_setting.update`, target_label
+	// `board.hidden_states` when the set actually changes; idempotent
+	// no-op writes skip the audit row.
+	ListBoardHiddenStates(ctx context.Context, repo *model.Repo) ([]string, error)
+	SetBoardHiddenStates(ctx context.Context, repo *model.Repo, states []string, dryRun bool) ([]string, error)
+
 	// GetDefaultFeature / SetDefaultFeature / ClearDefaultFeature (BACI-235)
 	// expose the per-repo `default_feature` setting. When set, issues
 	// created without an explicit `feature_slug` auto-apply to this

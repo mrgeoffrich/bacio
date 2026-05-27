@@ -2653,6 +2653,47 @@ export async function clearDefaultFeature(repoPrefix: string): Promise<DefaultFe
   return { slug: '' };
 }
 
+// ---------- Per-repo board-hidden-states (BACI-248) ----------
+//
+// The set of kanban-column states hidden from the board on this
+// machine. Lives in tui_settings[board.hidden_states] — surfaced now
+// on the desktop / web Per-repository Settings pane, previously
+// TUI-only. Mirrors the BACI-177 features/hidden shape (a single
+// slice-valued envelope) so the React seam reads both per-repo
+// board-hide endpoints with one transport pattern.
+
+export type BoardHiddenStatesDTO = { states: string[] };
+
+type boardHiddenStatesResp = { states: string[] | null };
+
+export async function getBoardHiddenStates(repoPrefix: string): Promise<BoardHiddenStatesDTO> {
+  if (!repoPrefix || repoPrefix === 'all') {
+    throw new Error('select a repository to view its board-hide settings');
+  }
+  const res = await call<boardHiddenStatesResp>(
+    `/repos/${encodeURIComponent(repoPrefix)}/board/hidden-states`,
+  );
+  return { states: res.states ?? [] };
+}
+
+// setBoardHiddenStates replaces the persisted set (replace-not-merge).
+// Pass the full new array — unknown state names are silently dropped
+// at the store boundary so a future state rename doesn't break old
+// saved settings.
+export async function setBoardHiddenStates(
+  repoPrefix: string,
+  states: string[],
+): Promise<BoardHiddenStatesDTO> {
+  if (!repoPrefix || repoPrefix === 'all') {
+    throw new Error('select a repository to edit its board-hide settings');
+  }
+  const res = await call<boardHiddenStatesResp>(
+    `/repos/${encodeURIComponent(repoPrefix)}/board/hidden-states`,
+    { method: 'PUT', body: { states } },
+  );
+  return { states: res.states ?? [] };
+}
+
 // ---------- BACI-68 per-entity archive verbs ----------
 
 export async function archiveIssue(prefix: string, key: string): Promise<unknown> {

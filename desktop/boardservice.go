@@ -1289,3 +1289,58 @@ func (b *BoardService) ClearDefaultFeature(repoPrefix string) (DefaultFeatureDTO
 	}
 	return DefaultFeatureDTO{}, nil
 }
+
+// BoardHiddenStatesDTO (BACI-248) is the per-repo board-hidden-states
+// envelope shaped for the desktop / web Per-repository Settings pane.
+// `States` is the canonical sorted slice of state names hidden from
+// the kanban board for this repo. Empty when nothing is hidden.
+// Mirrors the response shape on the BACI-177 features/hidden Wails
+// path; the React seam picks up the same field name for both.
+type BoardHiddenStatesDTO struct {
+	States []string `json:"states"`
+}
+
+// GetBoardHiddenStates (BACI-248) returns the per-repo set of
+// kanban-column states hidden on this machine. Threaded through the
+// client so the Wails binding and the HTTP API stay in lockstep on
+// the audit ledger and the canonical state-name validation.
+func (b *BoardService) GetBoardHiddenStates(repoPrefix string) (BoardHiddenStatesDTO, error) {
+	ctx := context.Background()
+	repo, err := b.client.GetRepoByPrefix(ctx, repoPrefix)
+	if err != nil {
+		return BoardHiddenStatesDTO{}, err
+	}
+	states, err := b.client.ListBoardHiddenStates(ctx, repo)
+	if err != nil {
+		return BoardHiddenStatesDTO{}, err
+	}
+	if states == nil {
+		states = []string{}
+	}
+	return BoardHiddenStatesDTO{States: states}, nil
+}
+
+// SetBoardHiddenStates (BACI-248) replaces the per-repo
+// board-hidden-states set with `states`. Replace-not-merge: the array
+// is the full new set. Unknown state names are silently dropped at the
+// store boundary so a future state rename doesn't break old saved
+// settings. Records a `repo_setting.update` audit row when the set
+// actually changes (idempotent no-op writes skip the audit).
+func (b *BoardService) SetBoardHiddenStates(repoPrefix string, states []string) (BoardHiddenStatesDTO, error) {
+	ctx := context.Background()
+	repo, err := b.client.GetRepoByPrefix(ctx, repoPrefix)
+	if err != nil {
+		return BoardHiddenStatesDTO{}, err
+	}
+	if states == nil {
+		states = []string{}
+	}
+	out, err := b.client.SetBoardHiddenStates(ctx, repo, states, false)
+	if err != nil {
+		return BoardHiddenStatesDTO{}, err
+	}
+	if out == nil {
+		out = []string{}
+	}
+	return BoardHiddenStatesDTO{States: out}, nil
+}

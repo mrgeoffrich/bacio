@@ -301,6 +301,16 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("PUT /repos/{prefix}/settings/default-feature", d.handleDefaultFeatureSet)
 	mux.HandleFunc("DELETE /repos/{prefix}/settings/default-feature", d.handleDefaultFeatureDelete)
 
+	// BACI-248: per-repo board-hidden-states KV (tui_settings
+	// `board.hidden_states`). Mirrors the BACI-177 features/hidden
+	// per-key shape so the desktop / web Per-repository Settings
+	// pane reads both board-hide endpoints with one transport
+	// pattern. GET returns the current sorted slice; PUT replaces
+	// the persisted set verbatim (the request body is the full new
+	// set, not a delta) and audits when the set actually changes.
+	mux.HandleFunc("GET /repos/{prefix}/board/hidden-states", d.handleBoardHiddenStatesGet)
+	mux.HandleFunc("PUT /repos/{prefix}/board/hidden-states", d.handleBoardHiddenStatesSet)
+
 	// Outermost first: panic recovery wraps everything so a bug in any
 	// later layer still returns a 500 envelope. The CORS middleware
 	// sits *outside* auth so a cross-origin preflight (OPTIONS) is
