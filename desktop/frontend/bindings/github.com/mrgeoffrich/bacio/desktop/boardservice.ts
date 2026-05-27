@@ -224,6 +224,18 @@ export function DispatchIssueChain(repoPrefix: string, issueKey: string, mode: s
 }
 
 /**
+ * GetBoardHiddenStates (BACI-248) returns the per-repo set of
+ * kanban-column states hidden on this machine. Threaded through the
+ * client so the Wails binding and the HTTP API stay in lockstep on
+ * the audit ledger and the canonical state-name validation.
+ */
+export function GetBoardHiddenStates(repoPrefix: string): $CancellablePromise<$models.BoardHiddenStatesDTO> {
+    return $Call.ByID(3854215019, repoPrefix).then(($result: any) => {
+        return $$createType10($result);
+    });
+}
+
+/**
  * GetDefaultFeature (BACI-235) returns the per-repo default_feature
  * setting for repoPrefix. Empty Slug = unset (the legacy default).
  */
@@ -258,7 +270,7 @@ export function GetIssue(repoPrefix: string, key: string): $CancellablePromise<$
  */
 export function GetIssueBrief(repoPrefix: string, key: string): $CancellablePromise<$models.IssueBriefDTO> {
     return $Call.ByID(836296342, repoPrefix, key).then(($result: any) => {
-        return $$createType10($result);
+        return $$createType11($result);
     });
 }
 
@@ -287,7 +299,7 @@ export function GetSessionQuestion(id: number): $CancellablePromise<model$0.Sess
  */
 export function ListAgents(repoPrefix: string): $CancellablePromise<$models.AgentCard[]> {
     return $Call.ByID(3979848123, repoPrefix).then(($result: any) => {
-        return $$createType12($result);
+        return $$createType13($result);
     });
 }
 
@@ -297,7 +309,7 @@ export function ListAgents(repoPrefix: string): $CancellablePromise<$models.Agen
  */
 export function ListBoards(): $CancellablePromise<$models.Board[]> {
     return $Call.ByID(3235630628).then(($result: any) => {
-        return $$createType13($result);
+        return $$createType14($result);
     });
 }
 
@@ -314,7 +326,7 @@ export function ListBoards(): $CancellablePromise<$models.Board[]> {
  */
 export function ListCards(repoPrefix: string): $CancellablePromise<$models.BoardCard[]> {
     return $Call.ByID(4181487648, repoPrefix).then(($result: any) => {
-        return $$createType14($result);
+        return $$createType15($result);
     });
 }
 
@@ -323,7 +335,7 @@ export function ListCards(repoPrefix: string): $CancellablePromise<$models.Board
  */
 export function ListColumns(): $CancellablePromise<$models.BoardColumn[]> {
     return $Call.ByID(2117984856).then(($result: any) => {
-        return $$createType16($result);
+        return $$createType17($result);
     });
 }
 
@@ -338,7 +350,7 @@ export function ListColumns(): $CancellablePromise<$models.BoardColumn[]> {
  */
 export function ListShipped(repoPrefix: string, sinceDays: number, limit: number): $CancellablePromise<$models.ShippedListDTO> {
     return $Call.ByID(3138957880, repoPrefix, sinceDays, limit).then(($result: any) => {
-        return $$createType17($result);
+        return $$createType18($result);
     });
 }
 
@@ -353,7 +365,7 @@ export function ListShipped(repoPrefix: string, sinceDays: number, limit: number
  */
 export function ListStateGraph(): $CancellablePromise<$models.StateGraphDTO> {
     return $Call.ByID(2937613722).then(($result: any) => {
-        return $$createType18($result);
+        return $$createType19($result);
     });
 }
 
@@ -386,6 +398,20 @@ export function QueueFollowOnDispatch(repoPrefix: string, issueKey: string, mode
 export function RescueDispatch(dispatchID: number): $CancellablePromise<$models.DispatchDTO> {
     return $Call.ByID(233478750, dispatchID).then(($result: any) => {
         return $$createType8($result);
+    });
+}
+
+/**
+ * SetBoardHiddenStates (BACI-248) replaces the per-repo
+ * board-hidden-states set with `states`. Replace-not-merge: the array
+ * is the full new set. Unknown state names are silently dropped at the
+ * store boundary so a future state rename doesn't break old saved
+ * settings. Records a `repo_setting.update` audit row when the set
+ * actually changes (idempotent no-op writes skip the audit).
+ */
+export function SetBoardHiddenStates(repoPrefix: string, states: string[]): $CancellablePromise<$models.BoardHiddenStatesDTO> {
+    return $Call.ByID(1989240775, repoPrefix, states).then(($result: any) => {
+        return $$createType10($result);
     });
 }
 
@@ -444,12 +470,13 @@ const $$createType6 = $Create.Nullable($$createType5);
 const $$createType7 = $models.PRDTO.createFrom;
 const $$createType8 = agentcards$0.DispatchDTO.createFrom;
 const $$createType9 = $models.DefaultFeatureDTO.createFrom;
-const $$createType10 = $models.IssueBriefDTO.createFrom;
-const $$createType11 = agentcards$0.AgentCard.createFrom;
-const $$createType12 = $Create.Array($$createType11);
-const $$createType13 = $Create.Array($$createType2);
-const $$createType14 = $Create.Array($$createType1);
-const $$createType15 = $models.BoardColumn.createFrom;
-const $$createType16 = $Create.Array($$createType15);
-const $$createType17 = $models.ShippedListDTO.createFrom;
-const $$createType18 = $models.StateGraphDTO.createFrom;
+const $$createType10 = $models.BoardHiddenStatesDTO.createFrom;
+const $$createType11 = $models.IssueBriefDTO.createFrom;
+const $$createType12 = agentcards$0.AgentCard.createFrom;
+const $$createType13 = $Create.Array($$createType12);
+const $$createType14 = $Create.Array($$createType2);
+const $$createType15 = $Create.Array($$createType1);
+const $$createType16 = $models.BoardColumn.createFrom;
+const $$createType17 = $Create.Array($$createType16);
+const $$createType18 = $models.ShippedListDTO.createFrom;
+const $$createType19 = $models.StateGraphDTO.createFrom;

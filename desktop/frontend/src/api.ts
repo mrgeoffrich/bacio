@@ -920,6 +920,37 @@ export async function clearDefaultFeature(
   }
 }
 
+// BACI-248: per-repo board-hidden-states (the set of kanban-column
+// states hidden from the board on this machine). Lives in
+// tui_settings[board.hidden_states] — surfaced now on the desktop /
+// web Per-repository Settings pane, previously TUI-only.
+export type BoardHiddenStatesDTO = { states: string[] };
+
+export async function getBoardHiddenStates(
+  repoPrefix: string,
+): Promise<BoardHiddenStatesDTO> {
+  try {
+    return await BoardService.GetBoardHiddenStates(repoPrefix);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// setBoardHiddenStates replaces the persisted set (replace-not-merge).
+// Pass the full new array — unknown state names are silently dropped
+// at the store boundary so a future state rename doesn't break old
+// saved settings.
+export async function setBoardHiddenStates(
+  repoPrefix: string,
+  states: string[],
+): Promise<BoardHiddenStatesDTO> {
+  try {
+    return await BoardService.SetBoardHiddenStates(repoPrefix, states);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
 // BACI-89 / BACI-108: sync.background_enabled toggle. Same shape as
 // the board-preferences pair; lives behind a dedicated Wails endpoint
 // so the standalone Sync view can read / write it without coupling to

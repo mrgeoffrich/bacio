@@ -15,7 +15,6 @@ import { readPinnedKeys, persistPinnedKeys } from './components/activityTrayPinP
 import { readShippedScope, persistShippedScope } from './components/shippedScopePersistence.ts';
 import { scopeSinceDays } from './components/shippedScope.ts';
 import SettingsView from './components/SettingsView.jsx';
-import SyncView from './components/SyncView.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import ErrorModal from './components/ErrorModal.jsx';
 import { Provider as TooltipProvider } from '@radix-ui/react-tooltip';
@@ -81,10 +80,13 @@ export default function App() {
   const [descEditing, setDescEditing] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // BACI-108: the standalone Sync view is a sibling boolean flag to
-  // settingsOpen — reached only via the topbar Sync pill, never the
-  // top-nav. Mirrors the Settings entry-point shape.
-  const [syncOpen, setSyncOpen] = useState(false);
+  // BACI-248: SettingsView now owns the Sync section internally. The
+  // topbar Sync pill opens Settings with `initialSection='sync'`
+  // preselected so the muscle memory of "click sync pill, see sync
+  // state" is preserved; settingsInitialSection rides alongside
+  // settingsOpen and gets reset to null whenever the view closes so
+  // the next plain "click the gear" open lands on System.
+  const [settingsInitialSection, setSettingsInitialSection] = useState(null);
   // BACI-166: the "+ from prompt" composer is a sibling modal flag —
   // reached via the Topbar's `+` button or the ⌘N shortcut. The modal
   // chains api.addIssue → api.dispatchIssue(_, _, 'scope') in one click
@@ -290,13 +292,18 @@ export default function App() {
     prevSettingsOpen.current = settingsOpen;
   }, [settingsOpen, refreshPromptConfig]);
 
-  const closeSettings = useCallback(() => setSettingsOpen(false), []);
-  const closeSync = useCallback(() => setSyncOpen(false), []);
-  const openSync = useCallback(() => {
-    // Mutually exclusive with Settings — both are top-level overlays
-    // mounted in the same body slot, only one renders at a time.
+  const closeSettings = useCallback(() => {
     setSettingsOpen(false);
-    setSyncOpen(true);
+    // Reset the preselect so the next plain "open Settings" lands on
+    // System, not whatever the previous open routed in with.
+    setSettingsInitialSection(null);
+  }, []);
+  // BACI-248: the topbar Sync pill opens Settings on its Sync section.
+  // The standalone SyncView is gone; this is now a one-line preselect
+  // through the existing Settings entry point.
+  const openSync = useCallback(() => {
+    setSettingsInitialSection('sync');
+    setSettingsOpen(true);
   }, []);
 
   // Remember the selected repo so the app reopens on the same one.
@@ -494,12 +501,13 @@ export default function App() {
   }, [activeBoard, openIssueKey, activeView, refreshBrief]);
 
   // BACI-203: open the issue workspace by routing to /issues/:key.
-  // SettingsView and SyncView are App-owned overlays, not routes —
-  // dismiss them so the workspace is what the user sees on arrival.
+  // BACI-248: SettingsView is an App-owned overlay (Sync is now folded
+  // into it as a section) — dismiss it so the workspace is what the
+  // user sees on arrival.
   const openCard = useCallback((card) => {
     if (!card?.key) return;
     setSettingsOpen(false);
-    setSyncOpen(false);
+    setSettingsInitialSection(null);
     navigate(issuePath(card.key));
   }, [navigate]);
 
@@ -511,7 +519,7 @@ export default function App() {
   const openIssueByKey = useCallback((key) => {
     if (!key) return;
     setSettingsOpen(false);
-    setSyncOpen(false);
+    setSettingsInitialSection(null);
     navigate(issuePath(key));
   }, [navigate]);
 
@@ -545,7 +553,7 @@ export default function App() {
       ...cs,
     ]);
     setSettingsOpen(false);
-    setSyncOpen(false);
+    setSettingsInitialSection(null);
     navigate(issuePath(newCard.key));
     // Don't fire refreshCards synchronously — the dispatch is queued
     // *after* this callback returns (the composer awaits it post-route),
@@ -568,18 +576,26 @@ export default function App() {
         e.preventDefault();
         setComposerOpen(true);
       } else if (e.key === 'Escape') {
-        // Palette + Settings + Sync are still hand-rolled; the workspace
+        // Palette + Settings are still hand-rolled; the workspace
         // closes here when nothing else is in front of it. The composer
         // closes via Radix's built-in onOpenChange so we don't need to
-        // intercept Escape for it here.
+        // intercept Escape for it here. SettingsView handles its own
+        // page-level Escape internally (BACI-248) so it can suppress
+        // the close while a sub-modal — rename template, sync setup,
+        // phantom link — is open; the App-level branch below only
+        // fires when SettingsView's listener doesn't (paletteOpen
+        // already short-circuited or the user pressed it again).
         if (paletteOpen) {
           setPaletteOpen(false);
         } else if (openIssueKey && !isEditingTarget(e.target)) {
           closeIssue();
         } else if (settingsOpen) {
+          // SettingsView already closed itself; this is the no-op
+          // safety net when its own listener didn't fire for some
+          // reason. Mirror its cleanup so the section preselect
+          // resets too.
           setSettingsOpen(false);
-        } else if (syncOpen) {
-          setSyncOpen(false);
+          setSettingsInitialSection(null);
         }
       } else if (!e.metaKey && !e.ctrlKey && !e.altKey && e.key >= '1' && e.key <= '9') {
         // Digit keys jump between nav views, like the TUI's tab shortcuts —
@@ -593,7 +609,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [paletteOpen, settingsOpen, syncOpen, openIssueKey, activeBoard, closeIssue, navigate]);
+  }, [paletteOpen, settingsOpen, openIssueKey, activeBoard, closeIssue, navigate]);
 
   // Add a repository. Desktop pops a native folder picker (Wails);
   // web mode hands the path-input modal's submission through as a
@@ -956,9 +972,9 @@ export default function App() {
         activeBoard={activeBoard}
         onPickBoard={setActiveBoard}
         onAddRepository={addRepository}
-        onBeforeNavigate={() => { setSettingsOpen(false); setSyncOpen(false); }}
+        onBeforeNavigate={() => { setSettingsOpen(false); setSettingsInitialSection(null); }}
         onOpenPalette={() => setPaletteOpen(true)}
-        onOpenSettings={() => { setSyncOpen(false); setSettingsOpen(true); }}
+        onOpenSettings={() => { setSettingsInitialSection(null); setSettingsOpen(true); }}
         onOpenSync={openSync}
         onOpenComposer={() => setComposerOpen(true)}
         leaderState={leaderState}
@@ -990,11 +1006,9 @@ export default function App() {
             onClose={closeSettings}
             onTemplatesChanged={refreshPromptConfig}
             repoPrefix={activeBoard}
+            boards={boards}
+            initialSection={settingsInitialSection}
           />
-        </ErrorBoundary>
-      ) : syncOpen ? (
-        <ErrorBoundary headline="Something went wrong in Sync" label="The Sync view crashed">
-          <SyncView onClose={closeSync} />
         </ErrorBoundary>
       ) : (
         <Routes>

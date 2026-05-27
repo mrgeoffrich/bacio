@@ -397,6 +397,92 @@ func (c *localClient) ListHiddenFeatureSlugs(ctx context.Context, repo *model.Re
 	return out, nil
 }
 
+// ListBoardHiddenStates (BACI-248) returns the canonical state names
+// the user has hidden from the kanban board for repo, sorted for
+// stable output. Mirrors ListHiddenFeatureSlugs in shape; the
+// underlying store helper already drops unknown state names so a
+// future state rename doesn't break old saved settings.
+func (c *localClient) ListBoardHiddenStates(ctx context.Context, repo *model.Repo) ([]string, error) {
+	hidden, err := c.store.LoadHiddenStates(repo.ID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(hidden))
+	for st, on := range hidden {
+		if on {
+			out = append(out, string(st))
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// SetBoardHiddenStates (BACI-248) replaces the per-repo set of
+// kanban-board states hidden from this machine and returns the
+// resulting sorted slice. Replace-not-merge — pass the full new set.
+// Unknown state names are silently dropped (the store-side validator
+// stays the source of truth on canonical state names). Records a
+// `repo_setting.update` audit row under target_label
+// `board.hidden_states` when the set actually changes; idempotent
+// no-op writes skip the audit row, same precedent as
+// feature.hide / feature.unhide.
+func (c *localClient) SetBoardHiddenStates(ctx context.Context, repo *model.Repo, states []string, dryRun bool) ([]string, error) {
+	// Build the next set, dropping unknown state names.
+	valid := map[model.State]bool{}
+	for _, st := range model.AllStates() {
+		valid[st] = true
+	}
+	next := map[model.State]bool{}
+	for _, name := range states {
+		st := model.State(name)
+		if valid[st] {
+			next[st] = true
+		}
+	}
+	canonical := make([]string, 0, len(next))
+	for st := range next {
+		canonical = append(canonical, string(st))
+	}
+	sort.Strings(canonical)
+	if dryRun {
+		return canonical, nil
+	}
+	prev, err := c.store.LoadHiddenStates(repo.ID)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.store.SaveHiddenStates(repo.ID, next); err != nil {
+		return nil, err
+	}
+	if !boardHiddenStateSetsEqual(prev, next) {
+		c.recordOp(model.HistoryEntry{
+			RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+			Op: "repo_setting.update", Kind: "repo_setting",
+			TargetLabel: "board.hidden_states",
+			Details:     "states=" + strings.Join(canonical, ","),
+		})
+	}
+	return canonical, nil
+}
+
+// boardHiddenStateSetsEqual compares two state→bool maps for set
+// equality on the true-valued entries. The store-side LoadHiddenStates
+// only sets keys to true; this reduces to a key-set comparison.
+func boardHiddenStateSetsEqual(a, b map[model.State]bool) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, on := range a {
+		if !on {
+			continue
+		}
+		if !b[k] {
+			return false
+		}
+	}
+	return true
+}
+
 // SetFeatureState (BACI-199) flips the feature's three-state column
 // and stamps the sticky bit so the auto-completion sweep leaves the
 // row alone. Records a `feature.state` audit row with Details of the

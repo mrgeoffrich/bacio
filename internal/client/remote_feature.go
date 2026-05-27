@@ -256,6 +256,47 @@ func (c *remoteClient) ListHiddenFeatureSlugs(ctx context.Context, repo *model.R
 	return out.Slugs, nil
 }
 
+// ListBoardHiddenStates (BACI-248) — GET
+// /repos/{prefix}/board/hidden-states. Mirrors ListHiddenFeatureSlugs
+// in shape; the server-side handler returns the canonical sorted slice.
+func (c *remoteClient) ListBoardHiddenStates(ctx context.Context, repo *model.Repo) ([]string, error) {
+	var out struct {
+		States []string `json:"states"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/repos/"+repo.Prefix+"/board/hidden-states", nil, nil, &out); err != nil {
+		return nil, err
+	}
+	if out.States == nil {
+		out.States = []string{}
+	}
+	return out.States, nil
+}
+
+// SetBoardHiddenStates (BACI-248) — PUT
+// /repos/{prefix}/board/hidden-states with body {states: [...]}. The
+// server replaces the persisted set verbatim (no merge) and audits
+// when the set actually changes.
+func (c *remoteClient) SetBoardHiddenStates(ctx context.Context, repo *model.Repo, states []string, dryRun bool) ([]string, error) {
+	q := url.Values{}
+	if dryRun {
+		q.Set("dry_run", "true")
+	}
+	if states == nil {
+		states = []string{}
+	}
+	body := map[string]any{"states": states}
+	var out struct {
+		States []string `json:"states"`
+	}
+	if err := c.do(ctx, http.MethodPut, "/repos/"+repo.Prefix+"/board/hidden-states", q, body, &out); err != nil {
+		return nil, err
+	}
+	if out.States == nil {
+		out.States = []string{}
+	}
+	return out.States, nil
+}
+
 // DeleteFeatureComment (BACI-124) — DELETE /repos/{prefix}/features/{slug}/comments/{uuid}.
 func (c *remoteClient) DeleteFeatureComment(ctx context.Context, repo *model.Repo, in inputs.FeatureCommentRmInput, dryRun bool) (*FeatureCommentDeletePreview, int64, error) {
 	if in.CommentUUID == "" {

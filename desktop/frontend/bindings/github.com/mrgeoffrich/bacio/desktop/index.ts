@@ -23,6 +23,7 @@ export {
     Board,
     BoardCard,
     BoardColumn,
+    BoardHiddenStatesDTO,
     ClaimantDTO,
     CollisionPreviewDTO,
     CommentDTO,
