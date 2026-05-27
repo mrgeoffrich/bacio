@@ -258,27 +258,17 @@ func FollowOnSweepIfLeader(s *store.Store, el *leader.Elector, log *slog.Logger)
 	for _, d := range cancelled {
 		recordFollowOnCancelAudit(s, d, log)
 	}
-	// BACI-195: load the per-mode state-gates so PromoteReadyFollowOns
-	// can re-evaluate them at fire time. A gate-failed dormant row is
-	// cancelled in the same transaction as a passing promotion, so the
-	// matcher never sees an out-of-state queued row.
-	gates, err := s.AllPromptStates()
-	if err != nil {
-		loggerOrDefault(log).Warn("bacio: load prompt state-gates for follow-on sweep failed", "err", err)
-		// Fall through with nil gates; PromoteReadyFollowOns will
-		// gate-fail every ready row. Marking them cancelled with a
-		// gate-fail audit beats silently re-trying every tick — the
-		// gate-load failure itself surfaces via the warn log above.
-	}
-	promoted, gateFailed, err := s.PromoteReadyFollowOns(gates)
+	// BACI-252: the BACI-195 fire-time state-gate is gone — the user
+	// gets to dispatch any mode from any state via the kanban popup
+	// (server-side dispatch gate also dropped). PromoteReadyFollowOns
+	// now returns just the promoted rows; orphan-cancel and
+	// blockers-clear gates above are unchanged.
+	promoted, err := s.PromoteReadyFollowOns()
 	if err != nil {
 		loggerOrDefault(log).Warn("bacio: promote follow-on sweep failed", "err", err)
 	}
 	for _, d := range promoted {
 		recordFollowOnPromoteAudit(s, d, log)
-	}
-	for _, d := range gateFailed {
-		recordFollowOnGateFailAudit(s, d, log)
 	}
 }
 
@@ -333,37 +323,6 @@ func recordFollowOnCancelAudit(s *store.Store, d *model.AgentDispatch, log *slog
 	}
 	if err := s.RecordHistory(entry); err != nil {
 		loggerOrDefault(log).Warn("bacio: failed to record agent.followon.cancel audit",
-			"dispatch_id", id, "err", err)
-	}
-}
-
-// recordFollowOnGateFailAudit (BACI-195) writes one
-// `agent.followon.gate_fail` row per dormant follow-on the promote
-// sweep cancelled because the issue's post-release state didn't admit
-// the follow-on's mode. Distinguished from the `agent.followon.cancel`
-// op so `bacio history --op agent.followon.gate_fail` surfaces a
-// coherent ledger of "follow-on the user queued, then the actual
-// post-release state didn't match" — distinct from orphan-cancel
-// (issue landed in done/cancelled) and user-cancel (chip removed).
-// Same per-row attribution pattern as the sibling helpers.
-func recordFollowOnGateFailAudit(s *store.Store, d *model.AgentDispatch, log *slog.Logger) {
-	if s == nil || d == nil {
-		return
-	}
-	id := d.ID
-	repoID := d.RepoID
-	entry := model.HistoryEntry{
-		Actor:       model.ControllerActor,
-		Op:          "agent.followon.gate_fail",
-		Kind:        "agent",
-		RepoID:      &repoID,
-		RepoPrefix:  d.RepoPrefix,
-		TargetID:    &id,
-		TargetLabel: d.IssueKey,
-		Details:     followOnDetails(d),
-	}
-	if err := s.RecordHistory(entry); err != nil {
-		loggerOrDefault(log).Warn("bacio: failed to record agent.followon.gate_fail audit",
 			"dispatch_id", id, "err", err)
 	}
 }

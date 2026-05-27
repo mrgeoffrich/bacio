@@ -16,7 +16,7 @@ import { reportError } from '../errors';
 // side drawer + centred edit modal with one routed view. Primary column
 // carries the description + linked-doc plan + activity timeline; the
 // secondary rail carries feature/assignee/tags metadata, PR attachments,
-// claimants, and the state-gated dispatch button.
+// claimants, and the dispatch button.
 //
 // All data is in `brief` (an IssueBriefDTO) which the parent App loads
 // via api.getIssueBrief and polls every 10s while this view is mounted.
@@ -67,13 +67,15 @@ export default function IssueWorkspace({
     return brief.claimants.find(c => c.open) ?? null;
   }, [brief]);
 
-  // validPrompts: same state-gate filter the per-card KanbanCard uses,
-  // so the rail action button never offers a stage the backend would
-  // reject. Empty list while loading — DropdownMenu hides the trigger.
-  const validPrompts = useMemo(() => {
+  // BACI-252: the rail dispatch list mirrors the kanban card popup —
+  // every non-reserved template is offered, no per-state filtering.
+  // Reserved/internal slugs (e.g. `_dispatch_preamble`) are filtered
+  // by leading-underscore prefix. Empty while loading — DropdownMenu
+  // hides the trigger.
+  const dispatchablePrompts = useMemo(() => {
     if (!issueMeta) return [];
     return (promptConfig || []).filter(
-      p => (p.allowedStates || []).includes(issueMeta.column),
+      p => !((p.mode || p.slug) || '').startsWith('_'),
     );
   }, [issueMeta, promptConfig]);
 
@@ -389,7 +391,7 @@ export default function IssueWorkspace({
             </section>
           )}
 
-          {validPrompts.length > 0 && (
+          {dispatchablePrompts.length > 0 && (
             <section className="mk-drawer-section">
               <div className="mk-drawer-label">Dispatch</div>
               <DropdownMenu.Root>
@@ -410,7 +412,7 @@ export default function IssueWorkspace({
                     sideOffset={4}
                     collisionPadding={8}
                   >
-                    {validPrompts.map(p => (
+                    {dispatchablePrompts.map(p => (
                       <DropdownMenu.Item
                         key={p.mode || p.slug}
                         className="mk-card-action-item"

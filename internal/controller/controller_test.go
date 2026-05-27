@@ -737,14 +737,13 @@ func TestFollowOnSweepIfLeader_OrphanCancelWrites(t *testing.T) {
 	}
 }
 
-// TestFollowOnSweepIfLeader_GateFailWrites (BACI-195) — fire-time
-// gate path: a dormant follow-on whose post-release issue state
-// doesn't admit its mode is cancelled by the sweep, with a
-// distinguished `agent.followon.gate_fail` audit row attributed to
-// ControllerActor (separate op from orphan-cancel so `bacio history`
-// can separate "user queued, state ended up wrong" from "issue
-// closed before fire").
-func TestFollowOnSweepIfLeader_GateFailWrites(t *testing.T) {
+// TestFollowOnSweepIfLeader_PromotesRegardlessOfState (BACI-252) —
+// the BACI-195 fire-time state-gate is gone. A dormant follow-on
+// whose post-release issue state would have failed the old gate now
+// promotes cleanly, with an `agent.followon.promote` audit row and
+// no `agent.followon.gate_fail` row in sight. Locks in that the
+// gate-fail path is fully retired (no audit op, no status flip).
+func TestFollowOnSweepIfLeader_PromotesRegardlessOfState(t *testing.T) {
 	dir := t.TempDir()
 	s, err := store.Open(filepath.Join(dir, "db.sqlite"))
 	if err != nil {
@@ -756,9 +755,10 @@ func TestFollowOnSweepIfLeader_GateFailWrites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	// in_review issue + an implement follow-on → implement's default
-	// gate is `todo`, so the gate fails at fire time.
-	iss, err := s.CreateIssue(repo.ID, nil, "wrong-state at fire", "", model.StateInReview, nil, "")
+	// in_review issue + an implement follow-on — pre-BACI-252 the
+	// implement default gate (`todo`) would have failed here. After
+	// BACI-252 the row promotes.
+	iss, err := s.CreateIssue(repo.ID, nil, "any-state at fire", "", model.StateInReview, nil, "")
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
@@ -791,44 +791,32 @@ func TestFollowOnSweepIfLeader_GateFailWrites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get follow: %v", err)
 	}
-	if got.Status != model.DispatchCancelled {
-		t.Fatalf("follow status post-sweep = %q, want cancelled", got.Status)
+	if got.Status != model.DispatchQueued {
+		t.Fatalf("follow status post-sweep = %q, want queued (BACI-252: no fire-time gate)", got.Status)
+	}
+	if got.QueuedAfterDispatchID != nil {
+		t.Fatalf("promoted row still carries queued_after_dispatch_id = %v", got.QueuedAfterDispatchID)
 	}
 
-	rows, err := s.ListHistory(store.HistoryFilter{Op: "agent.followon.gate_fail"})
+	// A promote audit row was written, attributed to the controller.
+	promoteRows, err := s.ListHistory(store.HistoryFilter{Op: "agent.followon.promote"})
 	if err != nil {
 		t.Fatalf("ListHistory: %v", err)
 	}
-	if len(rows) != 1 {
-		t.Fatalf("agent.followon.gate_fail rows = %d, want 1", len(rows))
+	if len(promoteRows) != 1 {
+		t.Fatalf("agent.followon.promote rows = %d, want 1", len(promoteRows))
 	}
-	row := rows[0]
-	if row.Actor != model.ControllerActor {
-		t.Fatalf("gate_fail row Actor = %q, want %q", row.Actor, model.ControllerActor)
+	if promoteRows[0].Actor != model.ControllerActor {
+		t.Fatalf("promote row Actor = %q, want %q", promoteRows[0].Actor, model.ControllerActor)
 	}
-	if row.Kind != "agent" {
-		t.Fatalf("gate_fail row Kind = %q, want agent", row.Kind)
+
+	// The retired gate-fail op writes nothing now — confirm zero rows.
+	gateRows, err := s.ListHistory(store.HistoryFilter{Op: "agent.followon.gate_fail"})
+	if err != nil {
+		t.Fatalf("ListHistory (gate_fail): %v", err)
 	}
-	if row.TargetID == nil || *row.TargetID != follow.ID {
-		t.Fatalf("gate_fail row TargetID = %v, want %d", row.TargetID, follow.ID)
-	}
-	if row.TargetLabel != iss.Key {
-		t.Fatalf("gate_fail row TargetLabel = %q, want %q", row.TargetLabel, iss.Key)
-	}
-	if !strings.Contains(row.Details, "mode=implement") {
-		t.Fatalf("gate_fail row Details = %q, missing mode=implement clause", row.Details)
-	}
-	// queued_after_dispatch_id stays set on a gate-fail cancel — so
-	// the audit reader can still chain back to the parent.
-	if !strings.Contains(row.Details, fmt.Sprintf("parent_dispatch_id=%d", parent.ID)) {
-		t.Fatalf("gate_fail row Details = %q, missing parent_dispatch_id=%d clause", row.Details, parent.ID)
-	}
-	// And no promote audit row for the same dispatch.
-	promoteRows, _ := s.ListHistory(store.HistoryFilter{Op: "agent.followon.promote"})
-	for _, r := range promoteRows {
-		if r.TargetID != nil && *r.TargetID == follow.ID {
-			t.Fatalf("gate-fail dispatch should NOT have an agent.followon.promote row; got %+v", r)
-		}
+	if len(gateRows) != 0 {
+		t.Fatalf("agent.followon.gate_fail rows = %d, want 0 (op is retired)", len(gateRows))
 	}
 }
 

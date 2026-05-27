@@ -161,42 +161,12 @@ func TestSettingsResetBody(t *testing.T) {
 	}
 }
 
-// TestSettingsToggleStateSaves: in the state-gate pane, space toggles
-// the focused state and writes a prompt_states.update audit row.
-func TestSettingsToggleStateSaves(t *testing.T) {
-	s, repo := settingsTestRepo(t)
-	sv := newSettingsView(s, repo)
-
-	sv.openEditor(0)
-	mode := model.DispatchMode(sv.stages[0].slug)
-	before, err := s.GetPromptStates(mode)
-	if err != nil {
-		t.Fatalf("get states: %v", err)
-	}
-
-	sv.updateEditor(tea.KeyMsg{Type: tea.KeyTab})
-	if sv.editPane != paneGate {
-		t.Fatal("expected the state-gate pane to be focused after tab")
-	}
-	sv.updateEditor(tea.KeyMsg{Type: tea.KeyRight})
-	sv.updateEditor(tea.KeyMsg{Type: tea.KeySpace})
-
-	after, err := s.GetPromptStates(mode)
-	if err != nil {
-		t.Fatalf("get states: %v", err)
-	}
-	if len(after) != len(before)+1 {
-		t.Fatalf("expected the state-gate to gain one state on toggle (before=%v after=%v)", before, after)
-	}
-	if !hasHistoryOp(t, s, "prompt_states.update") {
-		t.Fatal("expected a prompt_states.update history row")
-	}
-}
-
 // TestSettingsCapturesInput is the headline regression test: while the
 // body textarea is focused the shell must NOT treat `q` as quit — it
-// must reach the textarea as a literal keystroke. Once focus moves to
-// the state-gate pane, `q` quits again.
+// must reach the textarea as a literal keystroke. Closing the editor
+// (esc) returns the shell to "list" mode and `q` quits again. BACI-252
+// removed the per-template state-gate pane, so the editor is now
+// body-only — there's no second pane to swap focus to.
 func TestSettingsCapturesInput(t *testing.T) {
 	s, repo := settingsTestRepo(t)
 	m, err := NewModel(s, repo, nil, "", nil)
@@ -215,7 +185,7 @@ func TestSettingsCapturesInput(t *testing.T) {
 
 	sv := m.tabs[settingsIdx].v.(*settingsView)
 	if !sv.CapturesInput() {
-		t.Fatal("expected CapturesInput to be true with the body pane focused")
+		t.Fatal("expected CapturesInput to be true with the body editor focused")
 	}
 
 	// `q` through the shell must NOT quit — it must land in the textarea.
@@ -229,18 +199,18 @@ func TestSettingsCapturesInput(t *testing.T) {
 		t.Fatalf("expected `q` to be typed into the textarea, value=%q", sv.ta.Value())
 	}
 
-	// tab to the state-gate pane — CapturesInput should now be false, so
-	// `q` would quit again.
-	m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	// Esc closes the editor — CapturesInput should now be false, so
+	// `q` would quit again from the list view.
+	m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	if sv.CapturesInput() {
-		t.Fatal("expected CapturesInput to be false with the state-gate pane focused")
+		t.Fatal("expected CapturesInput to be false after the editor is closed")
 	}
 	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	if cmd == nil {
-		t.Fatal("expected `q` to quit once the state-gate pane is focused")
+		t.Fatal("expected `q` to quit once the editor is closed")
 	}
 	if _, isQuit := cmd().(tea.QuitMsg); !isQuit {
-		t.Fatal("expected a tea.QuitMsg from `q` with the state-gate pane focused")
+		t.Fatal("expected a tea.QuitMsg from `q` with the editor closed")
 	}
 }
 

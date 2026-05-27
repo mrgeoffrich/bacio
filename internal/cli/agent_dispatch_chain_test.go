@@ -111,14 +111,15 @@ func TestAgentDispatchChainHappyPath(t *testing.T) {
 	}
 }
 
-// TestAgentDispatchChainGateMissPrimary (BACI-209) — the primary's
-// state-gate is re-checked; calling with a primary mode whose gate
-// doesn't admit the issue's state rejects the call before any insert.
-func TestAgentDispatchChainGateMissPrimary(t *testing.T) {
+// TestAgentDispatchChainAcceptsAnyPrimaryState (BACI-252 regression)
+// — the per-template state-gate is gone, so the chain verb succeeds
+// even when the primary's old default gate wouldn't have admitted the
+// issue's current state. `plan` from an `in_review` issue was the
+// canonical refusal case the gate used to enforce; it now writes both
+// rows cleanly.
+func TestAgentDispatchChainAcceptsAnyPrimaryState(t *testing.T) {
 	key := setupDispatchChainTest(t)
-	// Move the issue out of todo so `plan`'s gate (which admits todo
-	// only by default) rejects. in_review is a stage no built-in mode's
-	// default gate admits.
+	// Move the issue to in_review — pre-BACI-252 this rejected `plan`.
 	s, err := store.Open(opts.dbPath)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -133,18 +134,14 @@ func TestAgentDispatchChainGateMissPrimary(t *testing.T) {
 	}
 	_ = s.Close()
 
-	err = runAgentDispatchChain(inputs.AgentDispatchChainInput{
+	if err := runAgentDispatchChain(inputs.AgentDispatchChainInput{
 		IssueKey:     key,
 		Mode:         string(model.DispatchModePlan),
 		FollowOnMode: string(model.DispatchModeImplement),
-	})
-	if err == nil {
-		t.Fatal("expected state-gate rejection on primary, got nil")
+	}); err != nil {
+		t.Fatalf("runAgentDispatchChain (plan from in_review) = %v, want nil (BACI-252: no state-gate)", err)
 	}
-	if !strings.Contains(err.Error(), "can't run from") {
-		t.Fatalf("error should name the gate-miss, got: %v", err)
-	}
-	// No rows landed.
+	// Two rows landed — the parent plus the dormant follow-on.
 	s, err = store.Open(opts.dbPath)
 	if err != nil {
 		t.Fatalf("reopen store: %v", err)
@@ -155,8 +152,8 @@ func TestAgentDispatchChainGateMissPrimary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if len(ds) != 0 {
-		t.Fatalf("rejected chain landed %d row(s), want 0", len(ds))
+	if len(ds) != 2 {
+		t.Fatalf("chain wrote %d row(s), want 2 (parent + dormant follow-on)", len(ds))
 	}
 }
 

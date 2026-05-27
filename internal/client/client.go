@@ -771,21 +771,6 @@ type Client interface {
 	// Deprecated: prefer AddPromptTemplate / RenamePromptTemplate /
 	// DeletePromptTemplate verbs for new agent-facing flows.
 	SetPromptTemplate(ctx context.Context, mode, body string, dryRun bool) error
-
-	// ----- Prompt state-gates (local-only; `bacio settings template states`) -----
-	// GetPromptStates is the legacy lookup shape for the dispatch
-	// gate-check paths that still expect a slug→[]state map. Local-only.
-	//
-	// Deprecated: prefer ListPromptTemplates for new code.
-	GetPromptStates(ctx context.Context) (map[string][]string, error)
-	// SetPromptStates stores a custom state-gate for one slug; an empty
-	// slice reverts a built-in slug to its embedded default gate.
-	// Local-only.
-	//
-	// Deprecated: prefer AddPromptTemplate / RenamePromptTemplate /
-	// DeletePromptTemplate verbs for new agent-facing flows.
-	SetPromptStates(ctx context.Context, mode string, states []string, dryRun bool) error
-
 }
 
 // ArchivePreferences holds the BACI-162 auto-archive settings,

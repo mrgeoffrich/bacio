@@ -14,11 +14,13 @@ import (
 // dispatchModeChoice is one row of the mode-picker step: the label
 // shown, the slug stored, and the body so the picker preview can show
 // what would be sent. Built today from the store's prompt_templates
-// table, filtered by the focused issue's state-gate. BACI-67: the
-// picker renders the imperative Action ("Plan", "Design", …) instead
-// of the gerund Label ("Planning", "Designing", …) on the dropdown
-// row — Label stays for backwards-compat / legacy consumers (none in
-// the TUI today, but keeps the struct shape stable for tests).
+// table; BACI-252 removed the per-state filter so every non-reserved
+// template appears regardless of the focused issue's state. BACI-67:
+// the picker renders the imperative Action ("Plan", "Design", …)
+// instead of the gerund Label ("Planning", "Designing", …) on the
+// dropdown row — Label stays for backwards-compat / legacy consumers
+// (none in the TUI today, but keeps the struct shape stable for
+// tests).
 type dispatchModeChoice struct {
 	Label  string
 	Action string
@@ -31,9 +33,8 @@ type dispatchModeChoice struct {
 const maxDispatchNote = 1000
 
 // openDispatchPicker starts the "send to agent" flow for the focused
-// card. The mode-picker list is filtered to templates whose
-// state-gate contains the focused issue's current state; if no template
-// qualifies the keybind is a no-op with a footer hint.
+// card. The mode-picker list lists every non-reserved template; if
+// none are configured the keybind is a no-op with a footer hint.
 func (b *boardView) openDispatchPicker() {
 	iss := b.currentIssue()
 	if iss == nil {
@@ -47,13 +48,13 @@ func (b *boardView) openDispatchPicker() {
 		b.err = fmt.Errorf("send to agent: %s is already waiting for an agent to claim it", iss.Key)
 		return
 	}
-	modes, err := availableDispatchModes(b.store, iss.State)
+	modes, err := allDispatchModes(b.store)
 	if err != nil {
 		b.err = err
 		return
 	}
 	if len(modes) == 0 {
-		b.err = fmt.Errorf("send to agent: no prompt template is valid for a %s issue (configure one in Settings)", iss.State)
+		b.err = fmt.Errorf("send to agent: no dispatch templates configured (add one in Settings)")
 		return
 	}
 	allSessions, err := b.store.ListAgentSessions(store.AgentSessionFilter{
@@ -99,25 +100,19 @@ func (b *boardView) openDispatchPicker() {
 	b.dispatchNote = ""
 }
 
-// availableDispatchModes returns the prompt templates whose state-gate
-// contains issueState — i.e. the ones the user could legitimately
-// dispatch the focused issue against. Templates with an empty gate
-// (CLI-only) are deliberately excluded.
-func availableDispatchModes(s *store.Store, issueState model.State) ([]dispatchModeChoice, error) {
+// allDispatchModes returns every non-reserved prompt template the
+// user can dispatch the focused issue against. BACI-252: no per-state
+// filtering — the user is offered every configured mode. Reserved
+// slugs (the leading-underscore convention; `_dispatch_preamble`
+// today) are filtered out so they don't appear in the picker.
+func allDispatchModes(s *store.Store) ([]dispatchModeChoice, error) {
 	tmpls, err := s.ListPromptTemplates()
 	if err != nil {
 		return nil, err
 	}
 	out := make([]dispatchModeChoice, 0, len(tmpls))
 	for _, t := range tmpls {
-		matches := false
-		for _, st := range t.AllowedStates {
-			if st == issueState {
-				matches = true
-				break
-			}
-		}
-		if !matches {
+		if strings.HasPrefix(t.Slug, "_") {
 			continue
 		}
 		label := t.Name
@@ -414,7 +409,7 @@ func (b *boardView) viewDispatchPicker(width, height int) string {
 		}
 		rows = append(rows, boldStyle.Render("Send "+issueKey+" to "+agent+" → pick a template"), "")
 		if len(b.dispatchModes) == 0 {
-			rows = append(rows, mutedStyle.Italic(true).Render("(no template is valid for this issue's state — esc to close)"))
+			rows = append(rows, mutedStyle.Italic(true).Render("(no dispatch templates configured — esc to close)"))
 		}
 		for i, c := range b.dispatchModes {
 			// BACI-67: render the imperative Action ("Plan", "Design")

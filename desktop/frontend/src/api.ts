@@ -52,8 +52,6 @@ import {
   ShippedIssueDTO,
   ShippedListDTO,
   LatestPlanDTO,
-  StateGraphDTO,
-  StateEdgeDTO,
 } from '../bindings/github.com/mrgeoffrich/bacio/desktop';
 import { ClaimDTO } from '../bindings/github.com/mrgeoffrich/bacio/internal/agentcards';
 // BACI-145: re-export the WaitingState / WaitingKind enums from the
@@ -65,12 +63,7 @@ import { ClaimDTO } from '../bindings/github.com/mrgeoffrich/bacio/internal/agen
 // shape without learning a binding directory.
 import { WaitingState, WaitingKind, BoardCardFollowOn } from '../bindings/github.com/mrgeoffrich/bacio/internal/boardcards';
 
-export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureLinkedDoc, FeaturePlan, FeaturePlanEntry, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, ArchivePreferencesDTO, AudioPreferencesDTO, WaitingState, BoardCardFollowOn, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO, SyncSetupDTO, CollisionPreviewDTO, RenumberEntryDTO, RenameEntryDTO, RepoLinkResultDTO, ShippedIssueDTO, ShippedListDTO, LatestPlanDTO, StateGraphDTO, StateEdgeDTO };
-// BACI-241: cross-transport aliases. The web bundle's api.http.ts ships
-// the same names from its own TS-only shape so components that consume
-// the state-transition graph stay unaware of which transport they're on.
-export type StateGraph = StateGraphDTO;
-export type StateEdge = StateEdgeDTO;
+export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureLinkedDoc, FeaturePlan, FeaturePlanEntry, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, ArchivePreferencesDTO, AudioPreferencesDTO, WaitingState, BoardCardFollowOn, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO, SyncSetupDTO, CollisionPreviewDTO, RenumberEntryDTO, RenameEntryDTO, RepoLinkResultDTO, ShippedIssueDTO, ShippedListDTO, LatestPlanDTO };
 // BACI-216: cross-transport alias. The web bundle's api.http.ts ships
 // the same name from its own TS-only shape so KanbanCard / IssueWorkspace
 // stay transport-agnostic.
@@ -137,20 +130,6 @@ export async function listBoards(): Promise<Board[]> {
 export async function listColumns(): Promise<BoardColumn[]> {
   try {
     return await BoardService.ListColumns();
-  } catch (err) {
-    throw normalize(err);
-  }
-}
-
-// getStateGraph (BACI-241) returns the canonical state-transition graph
-// — the categorised edge table the kanban follow-on popup (and future
-// surfaces) reads to promote / demote / tuck-away modes whose
-// allowedStates overlap with the card's primary / secondary / unusual
-// next-states. App.jsx fetches it once on mount alongside the prompt
-// config; the graph is a server-side constant, no per-render cost.
-export async function getStateGraph(): Promise<StateGraphDTO> {
-  try {
-    return await BoardService.ListStateGraph();
   } catch (err) {
     throw normalize(err);
   }
@@ -710,11 +689,10 @@ export async function addPromptTemplate(
   slug: string,
   name: string,
   body: string,
-  states: string[],
   actionLabel: string = '',
 ): Promise<PromptTemplateDTO> {
   try {
-    return await SettingsService.AddPromptTemplate(slug, name, body, states, actionLabel);
+    return await SettingsService.AddPromptTemplate(slug, name, body, actionLabel);
   } catch (err) {
     throw normalize(err);
   }
@@ -785,20 +763,6 @@ export async function savePromptTemplate(
 ): Promise<PromptTemplateDTO> {
   try {
     return await SettingsService.SavePromptTemplate(mode, body);
-  } catch (err) {
-    throw normalize(err);
-  }
-}
-
-// savePromptStates stores the set of issue states a dispatch stage's
-// prompt is valid to run from. Passing an empty array resets that
-// stage's state-gate to its built-in default.
-export async function savePromptStates(
-  mode: string,
-  states: string[],
-): Promise<PromptTemplateDTO> {
-  try {
-    return await SettingsService.SavePromptStates(mode, states);
   } catch (err) {
     throw normalize(err);
   }

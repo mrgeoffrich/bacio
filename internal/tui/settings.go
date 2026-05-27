@@ -16,22 +16,23 @@ import (
 )
 
 // settingsView is the Settings tab: the user's editable set of dispatch
-// prompt templates. Each row is one template (slug + name + body +
-// state-gate); the user can add, rename, delete, and restore the
-// built-in defaults.
+// prompt templates. Each row is one template (slug + name + body); the
+// user can add, rename, delete, and restore the built-in defaults.
 //
 // Layers:
 //   - Base list (stage list + chips).
-//   - Per-template editor overlay (body textarea + state-gate chips).
-//   - Add-template overlay (slug + name + body + state-gate).
+//   - Per-template editor overlay (body textarea).
+//   - Add-template overlay (slug + name + action label + body).
 //   - Rename overlay (slug + name).
 //   - Delete confirm + restore-defaults confirm overlays.
 //
 // The view is store-backed (like every other tab) and records its own
 // audit rows via recordTUIOp, mirroring the op names the localClient
 // writes (template.create / .delete / .rename / .restore_defaults plus
-// the existing prompt_template.update / .reset and
-// prompt_states.update / .reset).
+// the existing prompt_template.update / .reset).
+//
+// BACI-252 retired the per-template state-gate, so the editor is now
+// body-only — the previous body/gate pane toggle is gone.
 //
 // This is the native build. The wasm demo gets a read-only stub
 // (settings_wasm.go) because bubbles/textarea has no js/wasm build —
@@ -58,23 +59,13 @@ type settingsView struct {
 
 	// Per-overlay sub-state.
 	editIdx          int
-	editPane         settingsPane
 	ta               textarea.Model
 	slugInput        textinput.Model
 	nameInput        textinput.Model
 	actionLabelInput textinput.Model
-	gateStates       map[model.State]bool
-	gateCur          int
 	addFocus         addField
 	editErr          error
 }
-
-type settingsPane int
-
-const (
-	paneBody settingsPane = iota
-	paneGate
-)
 
 // addField labels which field has focus on the add-template overlay.
 type addField int
@@ -84,7 +75,6 @@ const (
 	addFieldName
 	addFieldActionLabel
 	addFieldBody
-	addFieldGate
 )
 
 func newSettingsView(s *store.Store, repo *model.Repo) *settingsView {
@@ -131,9 +121,7 @@ func (s *settingsView) refreshStage(idx int) {
 		label:           label,
 		body:            t.Body,
 		actionLabel:     t.ActionLabel,
-		states:          append([]model.State(nil), t.AllowedStates...),
 		bodyIsDefault:   t.IsBuiltin && t.Body == model.DefaultPromptBodyForBuiltinSlug(t.Slug),
-		statesDefault:   t.IsBuiltin && sameStates(t.AllowedStates, model.DefaultPromptStatesForBuiltinSlug(t.Slug)),
 		actionIsDefault: t.IsBuiltin && t.ActionLabel == defAction,
 		isBuiltin:       t.IsBuiltin,
 	}
@@ -165,7 +153,7 @@ func (s *settingsView) CloseOverlay() {
 // input (they only watch for y/n/esc).
 func (s *settingsView) CapturesInput() bool {
 	switch {
-	case s.editing && s.editPane == paneBody:
+	case s.editing:
 		return true
 	case s.adding:
 		return s.addFocus == addFieldSlug || s.addFocus == addFieldName ||
@@ -195,10 +183,8 @@ func (s *settingsView) Breadcrumb() string {
 
 func (s *settingsView) Help() string {
 	switch {
-	case s.editing && s.editPane == paneBody:
-		return "type to edit · ctrl+s save · ctrl+r reset built-in · tab → state-gate · esc close"
 	case s.editing:
-		return "h/l move · space toggle (saves) · ctrl+r reset built-in · tab → body · esc close"
+		return "type to edit · ctrl+s save · ctrl+r reset built-in · esc close"
 	case s.adding:
 		return "tab cycle fields · ctrl+s save · esc cancel"
 	case s.renaming:
@@ -378,16 +364,14 @@ func (s *settingsView) updateOverlay(msg tea.Msg) tea.Cmd {
 }
 
 // openEditor opens the per-template editor overlay, seeding the
-// textarea with the template's current body and focusing the body pane.
+// textarea with the template's current body.
 func (s *settingsView) openEditor(idx int) tea.Cmd {
 	if idx < 0 || idx >= len(s.stages) {
 		return nil
 	}
 	s.editing = true
 	s.editIdx = idx
-	s.editPane = paneBody
 	s.editErr = nil
-	s.gateCur = 0
 
 	ta := textarea.New()
 	ta.Prompt = ""
@@ -402,63 +386,25 @@ func (s *settingsView) openEditor(idx int) tea.Cmd {
 func (s *settingsView) updateEditor(msg tea.Msg) tea.Cmd {
 	key, isKey := msg.(tea.KeyMsg)
 	if !isKey {
-		if s.editPane == paneBody {
-			var cmd tea.Cmd
-			s.ta, cmd = s.ta.Update(msg)
-			return cmd
-		}
-		return nil
-	}
-
-	switch key.String() {
-	case "esc":
-		s.CloseOverlay()
-		return nil
-	case "tab", "shift+tab":
-		return s.togglePane()
-	}
-
-	if s.editPane == paneBody {
-		switch key.String() {
-		case "ctrl+s":
-			s.saveBody()
-			return nil
-		case "ctrl+r":
-			s.resetBody()
-			return nil
-		}
 		var cmd tea.Cmd
 		s.ta, cmd = s.ta.Update(msg)
 		return cmd
 	}
 
 	switch key.String() {
-	case "h", "left":
-		if s.gateCur > 0 {
-			s.gateCur--
-		}
-	case "l", "right":
-		if s.gateCur < len(model.AllStates())-1 {
-			s.gateCur++
-		}
-	case " ", "space":
-		s.toggleState()
+	case "esc":
+		s.CloseOverlay()
+		return nil
+	case "ctrl+s":
+		s.saveBody()
+		return nil
 	case "ctrl+r":
-		s.resetStates()
-	}
-	return nil
-}
-
-// togglePane flips focus between the body textarea and the state-gate
-// chips, managing textarea focus.
-func (s *settingsView) togglePane() tea.Cmd {
-	if s.editPane == paneBody {
-		s.editPane = paneGate
-		s.ta.Blur()
+		s.resetBody()
 		return nil
 	}
-	s.editPane = paneBody
-	return s.ta.Focus()
+	var cmd tea.Cmd
+	s.ta, cmd = s.ta.Update(msg)
+	return cmd
 }
 
 // saveBody persists the textarea's value as the template's body. An
@@ -484,9 +430,9 @@ func (s *settingsView) saveBody() {
 }
 
 // resetBody only makes sense for built-in templates — it restores the
-// embedded default body and state-gate via the store's SetPromptTemplate
-// "" semantic. For user templates the empty save would just clear the
-// body, which the editor's plain ctrl+s already does.
+// embedded default body via the store's SetPromptTemplate "" semantic.
+// For user templates the empty save would just clear the body, which
+// the editor's plain ctrl+s already does.
 func (s *settingsView) resetBody() {
 	idx := s.editIdx
 	if !s.stages[idx].isBuiltin {
@@ -504,60 +450,12 @@ func (s *settingsView) resetBody() {
 	s.ta.SetValue(s.stages[idx].body)
 }
 
-// toggleState flips the focused state in/out of the template's gate
-// and saves immediately, matching the desktop panel.
-func (s *settingsView) toggleState() {
-	idx := s.editIdx
-	mode := model.DispatchMode(s.stages[idx].slug)
-	all := model.AllStates()
-	if s.gateCur < 0 || s.gateCur >= len(all) {
-		return
-	}
-	target := all[s.gateCur]
-	have := make(map[model.State]bool, len(s.stages[idx].states))
-	for _, st := range s.stages[idx].states {
-		have[st] = true
-	}
-	have[target] = !have[target]
-	next := make([]model.State, 0, len(all))
-	for _, st := range all {
-		if have[st] {
-			next = append(next, st)
-		}
-	}
-	if err := s.store.SetPromptStates(mode, next); err != nil {
-		s.editErr = err
-		return
-	}
-	s.editErr = nil
-	s.recordSettingOp("prompt_states.update", "prompt_states:"+s.stages[idx].slug, "slug="+s.stages[idx].slug)
-	s.refreshStage(idx)
-}
-
-func (s *settingsView) resetStates() {
-	idx := s.editIdx
-	if !s.stages[idx].isBuiltin {
-		s.editErr = fmt.Errorf("reset is only for built-in templates; user templates have no embedded default")
-		return
-	}
-	mode := model.DispatchMode(s.stages[idx].slug)
-	if err := s.store.SetPromptStates(mode, nil); err != nil {
-		s.editErr = err
-		return
-	}
-	s.editErr = nil
-	s.recordSettingOp("prompt_states.reset", "prompt_states:"+s.stages[idx].slug, "slug="+s.stages[idx].slug)
-	s.refreshStage(idx)
-}
-
 // openAdd opens the new-template overlay with a fresh slug + name +
-// body editor. The state-gate defaults to "todo" (the most common
-// stage for a new template).
+// body editor.
 func (s *settingsView) openAdd() tea.Cmd {
 	s.adding = true
 	s.editErr = nil
 	s.addFocus = addFieldSlug
-	s.gateCur = 0
 
 	s.slugInput = textinput.New()
 	s.slugInput.Placeholder = "slug (kebab- or snake-case)"
@@ -583,7 +481,6 @@ func (s *settingsView) openAdd() tea.Cmd {
 	ta.CharLimit = 0
 	ta.MaxHeight = 0
 	s.ta = ta
-	s.gateStates = map[model.State]bool{model.StateTodo: true}
 	return s.slugInput.Focus()
 }
 
@@ -626,29 +523,12 @@ func (s *settingsView) updateAdd(msg tea.Msg) tea.Cmd {
 		var cmd tea.Cmd
 		s.ta, cmd = s.ta.Update(msg)
 		return cmd
-	case addFieldGate:
-		switch key.String() {
-		case "h", "left":
-			if s.gateCur > 0 {
-				s.gateCur--
-			}
-		case "l", "right":
-			if s.gateCur < len(model.AllStates())-1 {
-				s.gateCur++
-			}
-		case " ", "space":
-			all := model.AllStates()
-			if s.gateCur < len(all) {
-				target := all[s.gateCur]
-				s.gateStates[target] = !s.gateStates[target]
-			}
-		}
 	}
 	return nil
 }
 
 func (s *settingsView) cycleAddField(delta int) tea.Cmd {
-	fields := []addField{addFieldSlug, addFieldName, addFieldActionLabel, addFieldBody, addFieldGate}
+	fields := []addField{addFieldSlug, addFieldName, addFieldActionLabel, addFieldBody}
 	var idx int
 	for i, f := range fields {
 		if f == s.addFocus {
@@ -676,19 +556,11 @@ func (s *settingsView) cycleAddField(delta int) tea.Cmd {
 }
 
 func (s *settingsView) commitAdd() {
-	all := model.AllStates()
-	states := make([]model.State, 0, len(s.gateStates))
-	for _, st := range all {
-		if s.gateStates[st] {
-			states = append(states, st)
-		}
-	}
 	in := store.AddPromptTemplateIn{
-		Slug:          s.slugInput.Value(),
-		Name:          s.nameInput.Value(),
-		Body:          s.ta.Value(),
-		AllowedStates: states,
-		ActionLabel:   s.actionLabelInput.Value(),
+		Slug:        s.slugInput.Value(),
+		Name:        s.nameInput.Value(),
+		Body:        s.ta.Value(),
+		ActionLabel: s.actionLabelInput.Value(),
 	}
 	t, err := s.store.AddPromptTemplate(in)
 	if err != nil {
@@ -937,7 +809,7 @@ func (s *settingsView) viewEditor(width, height int) string {
 	}
 	headerBar := lipgloss.NewStyle().Width(innerWidth).Padding(0, 1).Render(header)
 
-	reserved := 7
+	reserved := 5
 	if s.editErr != nil {
 		reserved++
 	}
@@ -948,18 +820,10 @@ func (s *settingsView) viewEditor(width, height int) string {
 	s.ta.SetWidth(innerWidth - 2)
 	s.ta.SetHeight(taHeight)
 
-	bodyLabel := paneLabel("Template body", s.editPane == paneBody)
-	gateLabel := paneLabel("Valid from states", s.editPane == paneGate)
-
-	gateRow := renderStateChips(innerWidth, st.states, s.gateCur, s.editPane == paneGate)
-
 	parts := []string{
 		headerBar, "",
-		bodyLabel,
+		paneLabel("Template body", true),
 		lipgloss.NewStyle().Padding(0, 1).Render(s.ta.View()),
-		"",
-		gateLabel,
-		gateRow,
 	}
 	if s.editErr != nil {
 		parts = append(parts, errorStyle.Render(s.editErr.Error()))
@@ -977,7 +841,7 @@ func (s *settingsView) viewAdd(width, height int) string {
 	headerBar := lipgloss.NewStyle().Width(innerWidth).Padding(0, 1).
 		Render(boldStyle.Render("New template"))
 
-	reserved := 11
+	reserved := 9
 	if s.editErr != nil {
 		reserved++
 	}
@@ -991,14 +855,6 @@ func (s *settingsView) viewAdd(width, height int) string {
 	s.nameInput.Width = innerWidth - 6
 	s.actionLabelInput.Width = innerWidth - 6
 
-	on := make([]model.State, 0)
-	all := model.AllStates()
-	for _, st := range all {
-		if s.gateStates[st] {
-			on = append(on, st)
-		}
-	}
-
 	parts := []string{
 		headerBar, "",
 		paneLabel("Slug", s.addFocus == addFieldSlug),
@@ -1009,8 +865,6 @@ func (s *settingsView) viewAdd(width, height int) string {
 		lipgloss.NewStyle().Padding(0, 1).Render(s.actionLabelInput.View()),
 		paneLabel("Body", s.addFocus == addFieldBody),
 		lipgloss.NewStyle().Padding(0, 1).Render(s.ta.View()),
-		paneLabel("Valid from states", s.addFocus == addFieldGate),
-		renderStateChips(innerWidth, on, s.gateCur, s.addFocus == addFieldGate),
 	}
 	if s.editErr != nil {
 		parts = append(parts, errorStyle.Render(s.editErr.Error()))
@@ -1064,32 +918,6 @@ func settingsBox(width, height int) (int, int, lipgloss.Style) {
 		Border(colBorder).BorderForeground(colFocusBorder).
 		Width(innerWidth).Height(innerHeight)
 	return innerWidth, innerHeight, box
-}
-
-// renderStateChips renders the row of state chips, with the focused
-// chip underlined when the gate pane has focus.
-func renderStateChips(innerWidth int, on []model.State, cur int, focused bool) string {
-	onSet := make(map[model.State]bool, len(on))
-	for _, st := range on {
-		onSet[st] = true
-	}
-	var chips []string
-	for i, state := range model.AllStates() {
-		label := stateLabel(state)
-		cs := lipgloss.NewStyle().Padding(0, 1)
-		switch {
-		case onSet[state]:
-			cs = cs.Foreground(lipgloss.Color("231")).Background(lipgloss.Color("76"))
-		default:
-			cs = cs.Foreground(mutedColor)
-		}
-		if focused && i == cur {
-			cs = cs.Underline(true).Bold(true)
-		}
-		chips = append(chips, cs.Render(label))
-	}
-	return lipgloss.NewStyle().Width(innerWidth).Padding(0, 1).
-		Render(lipgloss.JoinHorizontal(lipgloss.Top, chips...))
 }
 
 // paneLabel renders an editor pane's heading, accented when focused.

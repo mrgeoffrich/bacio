@@ -365,17 +365,17 @@ type DispatchMode string
 
 // Built-in template slugs that ship with bacio. They have embedded
 // default bodies at prompts/agents/<slug>.md and entries in
-// builtinPromptStates / builtinTemplateLabels. Users can edit or delete
-// any of them; `bacio settings template restore-defaults` re-seeds the
-// missing ones. Order matches a job's lifecycle, which is also the
-// seed order so the built-ins lead the list on a fresh install.
+// builtinTemplateLabels. Users can edit or delete any of them;
+// `bacio settings template restore-defaults` re-seeds the missing
+// ones. Order matches a job's lifecycle, which is also the seed
+// order so the built-ins lead the list on a fresh install.
 //
 // BuiltinTemplatePreamble is a reserved slug (leading underscore) that
 // is NOT pickable as a dispatch mode — its body is the BACI-52
 // delegation wrapper, prepended to every other template's payload at
-// dispatch compose time. It has no state-gate, which is also why the
-// per-card mode picker (which filters by state-gate match) excludes
-// it naturally.
+// dispatch compose time. The per-card dispatch popup filters reserved
+// slugs by the leading-underscore prefix convention so the preamble
+// row never reaches a user-facing menu.
 const (
 	BuiltinTemplatePreamble  = "_dispatch_preamble"
 	BuiltinTemplateScope     = "scope"
@@ -724,41 +724,6 @@ func DefaultPromptBodyForBuiltinSlug(slug string) string {
 // Deprecated: use DefaultPromptBodyForBuiltinSlug with a slug string.
 func DefaultPromptTemplate(mode DispatchMode) string {
 	return DefaultPromptBodyForBuiltinSlug(string(mode))
-}
-
-// builtinPromptStates is the built-in "this prompt is valid to run from
-// these issue states" gate, per built-in slug. It mirrors a job's
-// lifecycle: planning/implementing start from a todo issue; reviewing,
-// shipping, and fixing-a-review happen once the work is in review.
-// Users override these per-template; the override lives in the
-// prompt_templates table.
-var builtinPromptStates = map[string][]State{
-	BuiltinTemplateScope:     {StateTodo},
-	BuiltinTemplateResearch:  {StateTodo},
-	BuiltinTemplatePlan:      {StateTodo},
-	BuiltinTemplatePlanLarge: {StateTodo},
-	BuiltinTemplateDesign:    {StateTodo},
-	BuiltinTemplateImplement: {StateTodo},
-	BuiltinTemplateReview:    {StateInReview},
-	BuiltinTemplateShip:      {StateInReview},
-	BuiltinTemplateFixReview: {StateInReview},
-}
-
-// DefaultPromptStatesForBuiltinSlug returns the built-in set of issue
-// states a built-in template's prompt is valid to run from. A non-
-// built-in slug has no entry (returns an empty slice). The returned
-// slice is a copy — callers may mutate it freely.
-func DefaultPromptStatesForBuiltinSlug(slug string) []State {
-	return append([]State(nil), builtinPromptStates[slug]...)
-}
-
-// DefaultPromptStates is a legacy alias for
-// DefaultPromptStatesForBuiltinSlug, kept so older typed-DispatchMode
-// callers keep compiling during the BACI-31 transition.
-//
-// Deprecated: use DefaultPromptStatesForBuiltinSlug with a slug string.
-func DefaultPromptStates(mode DispatchMode) []State {
-	return DefaultPromptStatesForBuiltinSlug(string(mode))
 }
 
 // RenderPromptTemplate substitutes {{token}} placeholders in tmpl from

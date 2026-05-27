@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
@@ -182,10 +181,9 @@ func (c *localClient) AutoDispatchIssue(ctx context.Context, repo *model.Repo, i
 		return nil, fmt.Errorf("a dispatch mode is required")
 	}
 
-	// State-gate: the prompt for this stage must be valid to run from
-	// the issue's current state. The desktop UI already gates the
-	// per-card action button on this; re-check here so a stale UI or
-	// a CLI/REST caller can't queue a prompt the state doesn't allow.
+	// BACI-252: the per-mode state-gate is gone — the user gets to
+	// dispatch any mode from any state via the kanban popup. The only
+	// remaining server-side guard is the archived check below.
 	iss, err := c.GetIssueByKey(ctx, repo, issueKey)
 	if err != nil {
 		return nil, err
@@ -197,13 +195,6 @@ func (c *localClient) AutoDispatchIssue(ctx context.Context, repo *model.Repo, i
 	// archive lever isn't quietly bypassed.
 	if iss.ArchivedAt != nil {
 		return nil, fmt.Errorf("issue %s is archived; unarchive it before dispatching", iss.Key)
-	}
-	gates, err := c.GetPromptStates(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if !slices.Contains(gates[mode], string(iss.State)) {
-		return nil, fmt.Errorf("the %s prompt can't run from a %s issue", mode, iss.State)
 	}
 
 	// BACI-76: the queued dispatch carries the rewritten preamble plus
@@ -273,14 +264,9 @@ func (c *localClient) AutoDispatchIssue(ctx context.Context, repo *model.Repo, i
 // gate + payload + audit-row shape stays in one place.
 //
 // Semantics:
-//   - The primary state-gate is re-checked against the issue's current
-//     state — same as AutoDispatchIssue. A gate-miss returns an error
-//     before any insert.
-//   - The follow-on's gate is NOT checked here. Same posture as
-//     QueueFollowOnDispatch (BACI-195): the gate runs at fire time
-//     when the controller's promote sweep clears the dormant link.
-//     Queueing `implement` while the parent is still planning is the
-//     canonical case the dropped queue-time gate enabled.
+//   - BACI-252: the per-mode state-gate is gone on both the primary
+//     and the follow-on rows. The only remaining boundary check is
+//     the archived guard (refuse to dispatch a hidden issue).
 //   - Two audit rows: `agent.queue` for the parent (same as
 //     AutoDispatchIssue's emit) plus `agent.followon.queue` for the
 //     dormant follow-on. Existing `bacio history --op` queries keep
@@ -321,13 +307,6 @@ func (c *localClient) AutoDispatchIssueWithFollowOn(ctx context.Context, repo *m
 	}
 	if iss.ArchivedAt != nil {
 		return nil, nil, fmt.Errorf("issue %s is archived; unarchive it before dispatching", iss.Key)
-	}
-	gates, err := c.GetPromptStates(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	if !slices.Contains(gates[mode], string(iss.State)) {
-		return nil, nil, fmt.Errorf("the %s prompt can't run from a %s issue", mode, iss.State)
 	}
 
 	// Compose the parent's payload the same way AutoDispatchIssue does —
@@ -887,14 +866,14 @@ func (c *localClient) GetPromptTemplate(ctx context.Context, slug string) (*stor
 
 func (c *localClient) AddPromptTemplate(ctx context.Context, in inputs.SettingsTemplateAddInput, dryRun bool) (*store.PromptTemplate, error) {
 	addIn := store.AddPromptTemplateIn{
-		Slug:          in.Slug,
-		Name:          in.Name,
-		Body:          in.Body,
-		AllowedStates: stringsToStates(in.States),
+		Slug: in.Slug,
+		Name: in.Name,
+		Body: in.Body,
 		// IsBuiltin is never set by an agent-facing add — only the
 		// migration's seed step and RestoreBuiltinPromptTemplates flip
 		// it on.
 		ConcurrencyLimit: in.ConcurrencyLimit,
+		ActionLabel:      in.ActionLabel,
 	}
 	if dryRun {
 		return c.store.ValidateAddPromptTemplate(addIn)
@@ -1115,65 +1094,6 @@ func (c *localClient) SetPromptTemplate(ctx context.Context, mode, body string, 
 		Details:     "slug=" + string(m),
 	})
 	return nil
-}
-
-func (c *localClient) GetPromptStates(ctx context.Context) (map[string][]string, error) {
-	all, err := c.store.AllPromptStates()
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[string][]string, len(all))
-	for m, states := range all {
-		ss := make([]string, len(states))
-		for i, st := range states {
-			ss[i] = string(st)
-		}
-		out[string(m)] = ss
-	}
-	return out, nil
-}
-
-func (c *localClient) SetPromptStates(ctx context.Context, mode string, states []string, dryRun bool) error {
-	m, err := model.ParseDispatchMode(mode)
-	if err != nil {
-		return err
-	}
-	if m == "" {
-		return fmt.Errorf("prompt state-gate requires a slug")
-	}
-	parsed := stringsToStates(states)
-	if dryRun {
-		// Validate the state set at the store boundary, then stop before
-		// the write — same shape as every other --dry-run mutation.
-		_, err := c.store.ValidatePromptStates(m, parsed)
-		return err
-	}
-	if err := c.store.SetPromptStates(m, parsed); err != nil {
-		return err
-	}
-	// Prompt state-gates are global, not repo-scoped — the audit row
-	// carries no RepoID. recordOp never fails the user-visible action.
-	op := "prompt_states.update"
-	if len(states) == 0 {
-		op = "prompt_states.reset"
-	}
-	c.recordOp(model.HistoryEntry{
-		Op: op, Kind: "app_setting",
-		TargetLabel: "prompt_states:" + string(m),
-		Details:     "slug=" + string(m),
-	})
-	return nil
-}
-
-// stringsToStates is the wire-to-model helper for state-gate inputs.
-// Each element is a model.State string cast directly; the validator on
-// the store boundary rejects unknown values.
-func stringsToStates(states []string) []model.State {
-	out := make([]model.State, len(states))
-	for i, s := range states {
-		out[i] = model.State(s)
-	}
-	return out
 }
 
 // dispatchTargetLabel picks the most specific label for audit rows:

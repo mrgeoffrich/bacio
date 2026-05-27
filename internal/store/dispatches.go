@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
@@ -1425,42 +1424,23 @@ func (s *Store) FollowOnForIssue(repoID, issueID int64) (*model.AgentDispatch, e
 	return d, err
 }
 
-// PromoteReadyFollowOns (BACI-179, BACI-195) is the controller's
-// promote-or-cancel sweep for dormant follow-ons whose predecessor has
-// settled AND whose issue has no open claim held by a live session.
+// PromoteReadyFollowOns (BACI-179, BACI-217) is the controller's
+// promote sweep for dormant follow-ons whose dormant gate has cleared
+// AND whose issue has no open claim held by a live session.
 //
-// For each ready row the per-mode state-gate is re-evaluated against
-// the issue's *current* state (BACI-195) — the gate at queue time was
-// dropped because the issue is almost always in a state the next-mode
-// gate doesn't admit while the parent is still running. Each row goes
-// to one of two outcomes:
+// Each ready row clears its dormant flags, leaving a regular queued
+// row the matcher will bind next tick. The BACI-195 fire-time
+// state-gate is gone (BACI-252): the user gets to dispatch any mode
+// from any state via the kanban popup, so the controller no longer
+// re-evaluates a per-mode state-gate at promote time. Orphan-cancel
+// (issue landed in done/cancelled) still runs in
+// CancelOrphanedFollowOns above; user-cancel (chip removed) still
+// runs in CancelFollowOnDispatch on the client.
 //
-//   - **Promote** — gate passes (or the row has no issue_id, so no
-//     gate to check): clears queued_after_dispatch_id, leaving a
-//     regular queued row the matcher will bind next tick. Returned in
-//     `promoted`.
-//   - **Gate-fail cancel** — gate doesn't admit the issue's current
-//     state: flips status to 'cancelled', leaving queued_after_dispatch_id
-//     intact for debugging. Returned in `gateFailed`. The caller writes
-//     a distinguishing audit op (agent.followon.gate_fail) for these so
-//     `bacio history` separates them from orphan-cancel / user-cancel.
-//
-// `gates` carries the loaded state-gates keyed by mode; nil/missing
-// entries fail the gate (matches the queue-time semantics that
-// AutoDispatchIssue still uses — a mode with no gate registered is
-// not runnable from any state). Pass `nil` only in tests that
-// pre-load every mode you care about; the controller always loads
-// from Store.AllPromptStates so production behaviour is consistent.
-//
-// Both partitions commit in a single transaction so a sweep is
-// atomic — concurrent matcher ticks see either the pre-sweep state
-// (every row still dormant) or the post-sweep state (every row
-// promoted or cancelled), never a half-applied mix.
-//
-// Leader-gated by the caller. Empty slices (no error) when no row was
+// Leader-gated by the caller. Empty slice (no error) when no row was
 // ready.
 //
-// The second NOT EXISTS guards against a re-claim racing in between
+// The NOT EXISTS guard prevents a re-claim from racing in between
 // predecessor-ack and the promote tick: if the same issue is already
 // being worked again, the new claim should service whatever the
 // holder needs and a follow-on bind would step on it. The
@@ -1472,12 +1452,11 @@ func (s *Store) FollowOnForIssue(repoID, issueID int64) (*model.AgentDispatch, e
 // false (no claim is keyed on a NULL issue), so a follow-on whose
 // issue was hard-deleted gets promoted on the next tick — which is
 // fine: the matcher's existing path handles issue-less queued rows
-// already, and there's nothing to gate on (the gate check is skipped
-// for rows with no issue_id).
-func (s *Store) PromoteReadyFollowOns(gates map[model.DispatchMode][]model.State) (promoted []*model.AgentDispatch, gateFailed []*model.AgentDispatch, err error) {
+// already.
+func (s *Store) PromoteReadyFollowOns() (promoted []*model.AgentDispatch, err error) {
 	tx, err := s.DB.Begin()
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	defer tx.Rollback()
 	// SELECT first (inside the tx) so we can return the post-update
@@ -1486,10 +1465,6 @@ func (s *Store) PromoteReadyFollowOns(gates map[model.DispatchMode][]model.State
 	// would still need a second query to hydrate the joined repo /
 	// agent / issue columns scanDispatch expects.
 	//
-	// BACI-195: pull mode + the issue's current state on the same row
-	// so the per-row gate check below runs without a per-row second
-	// query. NULL issue_state (no issue_id) is fine — handled below
-	// by skipping the gate check for that row.
 	// BACI-217: widen the SELECT to cover both dormant variants
 	// (parent-acks and blockers-clear). A row is a candidate iff its
 	// status is queued, it carries at least one of the two dormant
@@ -1497,9 +1472,8 @@ func (s *Store) PromoteReadyFollowOns(gates map[model.DispatchMode][]model.State
 	// currently racing on the issue. The dormant-gate cleared
 	// condition is the inverse of dormantFollowOnGateSQL().
 	rows, err := tx.Query(`
-		SELECT d.id, d.mode, COALESCE(i.state, '')
+		SELECT d.id
 		  FROM agent_dispatches d
-		  LEFT JOIN issues i ON i.id = d.issue_id
 		 WHERE d.status = 'queued'
 		   AND (d.queued_after_dispatch_id IS NOT NULL OR d.queued_until_blockers_clear = 1)
 		   AND NOT ` + dormantFollowOnGateSQL() + `
@@ -1511,42 +1485,26 @@ func (s *Store) PromoteReadyFollowOns(gates map[model.DispatchMode][]model.State
 		        AND s.ended_at IS NULL
 		   )`)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	type readyRow struct {
-		id    int64
-		mode  string
-		state string // empty when issue_id IS NULL
-	}
-	var ready []readyRow
+	var promoteIDs []int64
 	for rows.Next() {
-		var r readyRow
-		if err := rows.Scan(&r.id, &r.mode, &r.state); err != nil {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
 			rows.Close()
-			return nil, nil, err
+			return nil, err
 		}
-		ready = append(ready, r)
+		promoteIDs = append(promoteIDs, id)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	if len(ready) == 0 {
+	if len(promoteIDs) == 0 {
 		if err := tx.Commit(); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-		return nil, nil, nil
-	}
-	// Partition into promote vs cancel. Gate check uses pure helper
-	// followOnGatePasses so the same logic is unit-testable
-	// independently of the DB.
-	var promoteIDs, cancelIDs []int64
-	for _, r := range ready {
-		if followOnGatePasses(gates, model.DispatchMode(r.mode), model.State(r.state)) {
-			promoteIDs = append(promoteIDs, r.id)
-		} else {
-			cancelIDs = append(cancelIDs, r.id)
-		}
+		return nil, nil
 	}
 	// BACI-246: snapshot the blockers-clear rows' live `blocks`
 	// relations BEFORE the UPDATE clears queued_until_blockers_clear
@@ -1557,26 +1515,24 @@ func (s *Store) PromoteReadyFollowOns(gates map[model.DispatchMode][]model.State
 	// no map entry (their gate isn't blocker-based) and end up with a
 	// nil BlockerSnapshot on the returned struct.
 	var blockerSnapshots map[int64][]BlockerObservation
-	if len(promoteIDs) > 0 {
-		var blockerVariantIDs []int64
-		for _, id := range promoteIDs {
-			var blockersClear int
-			if err := tx.QueryRow(
-				`SELECT queued_until_blockers_clear FROM agent_dispatches WHERE id = ?`, id,
-			).Scan(&blockersClear); err != nil {
-				return nil, nil, err
-			}
-			if blockersClear != 0 {
-				blockerVariantIDs = append(blockerVariantIDs, id)
-			}
+	var blockerVariantIDs []int64
+	for _, id := range promoteIDs {
+		var blockersClear int
+		if err := tx.QueryRow(
+			`SELECT queued_until_blockers_clear FROM agent_dispatches WHERE id = ?`, id,
+		).Scan(&blockersClear); err != nil {
+			return nil, err
 		}
-		if len(blockerVariantIDs) > 0 {
-			snaps, err := s.blockerSnapshotsTx(tx, blockerVariantIDs)
-			if err != nil {
-				return nil, nil, err
-			}
-			blockerSnapshots = snaps
+		if blockersClear != 0 {
+			blockerVariantIDs = append(blockerVariantIDs, id)
 		}
+	}
+	if len(blockerVariantIDs) > 0 {
+		snaps, err := s.blockerSnapshotsTx(tx, blockerVariantIDs)
+		if err != nil {
+			return nil, err
+		}
+		blockerSnapshots = snaps
 	}
 	for _, id := range promoteIDs {
 		// BACI-217: clear BOTH dormant flags so the promoted row is a
@@ -1589,7 +1545,7 @@ func (s *Store) PromoteReadyFollowOns(gates map[model.DispatchMode][]model.State
 			        queued_until_blockers_clear = 0
 			  WHERE id = ?`, id,
 		); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		// BACI-217: flip the promoted row's issue into waiting_for_claim
 		// state. The blockers-clear insert deliberately left the flag
@@ -1605,43 +1561,24 @@ func (s *Store) PromoteReadyFollowOns(gates map[model.DispatchMode][]model.State
 			  WHERE id = (SELECT issue_id FROM agent_dispatches WHERE id = ?)
 			    AND id IS NOT NULL`, id,
 		); err != nil {
-			return nil, nil, err
-		}
-	}
-	for _, id := range cancelIDs {
-		// Leave queued_after_dispatch_id intact on a gate-fail cancel
-		// so the audit Details line can still reference the parent
-		// dispatch id (followOnDetails reads it). The row is settled
-		// — its dormant-ness is moot.
-		if _, err := tx.Exec(
-			`UPDATE agent_dispatches SET status = 'cancelled' WHERE id = ?`, id,
-		); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	promoted = make([]*model.AgentDispatch, 0, len(promoteIDs))
 	for _, id := range promoteIDs {
 		d, err := s.GetDispatch(id)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		if snap, ok := blockerSnapshots[id]; ok {
 			d.BlockerSnapshot = blockerObservationsToModel(snap)
 		}
 		promoted = append(promoted, d)
 	}
-	gateFailed = make([]*model.AgentDispatch, 0, len(cancelIDs))
-	for _, id := range cancelIDs {
-		d, err := s.GetDispatch(id)
-		if err != nil {
-			return nil, nil, err
-		}
-		gateFailed = append(gateFailed, d)
-	}
-	return promoted, gateFailed, nil
+	return promoted, nil
 }
 
 // blockerSnapshotsTx reads the live `blocks` relations targeting each
@@ -1720,20 +1657,6 @@ func blockerObservationsToModel(obs []BlockerObservation) []model.DispatchBlocke
 		})
 	}
 	return out
-}
-
-// followOnGatePasses (BACI-195) is the pure fire-time gate check
-// extracted so PromoteReadyFollowOns and its tests share the same
-// semantics. A row with no issue (state == "") always passes — the
-// matcher's existing path already handles issue-less queued rows and
-// there's nothing meaningful to gate on. Otherwise the issue state
-// must appear in gates[mode] (slices.Contains; nil gates[mode] is
-// false, matching the AutoDispatchIssue queue-time check semantics).
-func followOnGatePasses(gates map[model.DispatchMode][]model.State, mode model.DispatchMode, state model.State) bool {
-	if state == "" {
-		return true
-	}
-	return slices.Contains(gates[mode], state)
 }
 
 // CancelOrphanedFollowOns (BACI-179) is the controller's orphan-cancel

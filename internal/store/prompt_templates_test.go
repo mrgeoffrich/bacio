@@ -35,16 +35,6 @@ func TestPromptTemplatesSeededOnFirstOpen(t *testing.T) {
 		if tmpl.Body == "" {
 			t.Errorf("%s: empty body", tmpl.Slug)
 		}
-		// The reserved BACI-52 preamble row is deliberately stateless
-		// (no state-gate = excluded from the per-card mode picker). Every
-		// other built-in must declare at least one state.
-		if tmpl.Slug == model.BuiltinTemplatePreamble {
-			if len(tmpl.AllowedStates) != 0 {
-				t.Errorf("%s: AllowedStates = %v, want empty (preamble row is not dispatchable)", tmpl.Slug, tmpl.AllowedStates)
-			}
-		} else if len(tmpl.AllowedStates) == 0 {
-			t.Errorf("%s: empty allowed_states", tmpl.Slug)
-		}
 	}
 }
 
@@ -95,10 +85,9 @@ func TestPromptTemplatesAddRenameDelete(t *testing.T) {
 	s := newTestStore(t)
 
 	if _, err := s.AddPromptTemplate(AddPromptTemplateIn{
-		Slug:          "spike",
-		Name:          "Spike",
-		Body:          "Spike on {{issue_id}}.",
-		AllowedStates: []model.State{model.StateTodo},
+		Slug: "spike",
+		Name: "Spike",
+		Body: "Spike on {{issue_id}}.",
 	}); err != nil {
 		t.Fatalf("add: %v", err)
 	}
@@ -186,11 +175,10 @@ func TestPromptTemplatesActionLabelRoundtrip(t *testing.T) {
 
 	// Add with an explicit action_label.
 	added, err := s.AddPromptTemplate(AddPromptTemplateIn{
-		Slug:          "spike",
-		Name:          "Spike",
-		Body:          "Spike on {{issue_id}}.",
-		AllowedStates: []model.State{model.StateTodo},
-		ActionLabel:   "Spike",
+		Slug:        "spike",
+		Name:        "Spike",
+		Body:        "Spike on {{issue_id}}.",
+		ActionLabel: "Spike",
 	})
 	if err != nil {
 		t.Fatalf("add: %v", err)
@@ -253,8 +241,10 @@ func TestPromptTemplatesActionLabelRoundtrip(t *testing.T) {
 }
 
 // TestPromptTemplatesMigrationFromAppSettings checks the one-shot fold:
-// app_settings prompt_template.<slug> / prompt_states.<slug> rows from
-// a pre-BACI-31 DB land in the new table.
+// app_settings prompt_template.<slug> rows from a pre-BACI-31 DB land
+// in the new table. BACI-252 retired the per-template state-gate, so
+// the migration also discards any legacy `prompt_states.*` KV row it
+// finds rather than folding it through.
 func TestPromptTemplatesMigrationFromAppSettings(t *testing.T) {
 	s := newTestStore(t)
 
@@ -267,6 +257,8 @@ func TestPromptTemplatesMigrationFromAppSettings(t *testing.T) {
 	if err := s.SetAppSetting("prompt_template.plan", "Custom plan body for {{issue_id}}."); err != nil {
 		t.Fatalf("seed legacy template key: %v", err)
 	}
+	// BACI-252: a stale prompt_states.* KV row from a pre-BACI-252 DB
+	// must be silently dropped on migrate (no fold, no error).
 	if err := s.SetAppSetting("prompt_states.plan", "todo,in_progress"); err != nil {
 		t.Fatalf("seed legacy states key: %v", err)
 	}
@@ -282,11 +274,9 @@ func TestPromptTemplatesMigrationFromAppSettings(t *testing.T) {
 	if got.Body != "Custom plan body for {{issue_id}}." {
 		t.Errorf("body after fold = %q, want the custom body", got.Body)
 	}
-	if len(got.AllowedStates) != 2 || got.AllowedStates[0] != model.StateTodo || got.AllowedStates[1] != model.StateInProgress {
-		t.Errorf("states after fold = %v, want [todo in_progress]", got.AllowedStates)
-	}
 
-	// Legacy KV rows must be removed after the fold.
+	// Both legacy KV rows must be removed after the fold (the
+	// state-gate row is dropped rather than folded; BACI-252).
 	if v, _ := s.GetAppSetting("prompt_template.plan"); v != "" {
 		t.Errorf("legacy template key still present: %q", v)
 	}
@@ -297,5 +287,57 @@ func TestPromptTemplatesMigrationFromAppSettings(t *testing.T) {
 	// A subsequent migration call is a no-op (table non-empty).
 	if err := migratePromptTemplates(s.DB); err != nil {
 		t.Fatalf("second migrate: %v", err)
+	}
+}
+
+// TestMigrateDropAllowedStatesJSON_Idempotent (BACI-252) pins the
+// schema drop: running the migration on a pre-drop schema removes the
+// column, and a second run on the post-drop schema is a clean no-op.
+// Fresh DBs already have the column gone (schema.sql declares the
+// new shape), so the migration should still no-op them without an
+// error.
+func TestMigrateDropAllowedStatesJSON_Idempotent(t *testing.T) {
+	s := newTestStore(t)
+
+	// Fresh test DB starts in the post-drop shape — the column is gone.
+	gone, err := columnExists(s.DB, "prompt_templates", "allowed_states_json")
+	if err != nil {
+		t.Fatalf("columnExists (fresh): %v", err)
+	}
+	if gone {
+		t.Fatal("fresh test DB still has allowed_states_json column — schema.sql leaked")
+	}
+
+	// Run the migration on the post-drop schema: no-op, no error.
+	if err := migrateDropAllowedStatesJSON(s.DB); err != nil {
+		t.Fatalf("migrate (post-drop, no-op): %v", err)
+	}
+
+	// Now simulate a pre-drop DB by re-adding the legacy column with
+	// the old default — running the migration must drop it again.
+	if _, err := s.DB.Exec(`ALTER TABLE prompt_templates ADD COLUMN allowed_states_json TEXT NOT NULL DEFAULT '[]'`); err != nil {
+		t.Fatalf("simulate pre-drop schema: %v", err)
+	}
+	hasIt, err := columnExists(s.DB, "prompt_templates", "allowed_states_json")
+	if err != nil {
+		t.Fatalf("columnExists (pre-drop): %v", err)
+	}
+	if !hasIt {
+		t.Fatal("simulated pre-drop ALTER did not stick")
+	}
+	if err := migrateDropAllowedStatesJSON(s.DB); err != nil {
+		t.Fatalf("migrate (pre-drop): %v", err)
+	}
+	gone, err = columnExists(s.DB, "prompt_templates", "allowed_states_json")
+	if err != nil {
+		t.Fatalf("columnExists (post-migrate): %v", err)
+	}
+	if gone {
+		t.Fatal("allowed_states_json still present after migrate")
+	}
+
+	// One more re-run is still a clean no-op.
+	if err := migrateDropAllowedStatesJSON(s.DB); err != nil {
+		t.Fatalf("migrate (idempotent rerun): %v", err)
 	}
 }

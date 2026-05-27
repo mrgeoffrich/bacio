@@ -14,8 +14,7 @@ import * as api from '../../api';
 // browser vs the shared store.
 //
 // Props mirror what App.jsx already passes — no behaviour change
-// beyond the layout reshape. `columns` is the bacio state vocabulary
-// used to render the state-gate chip groups on each template.
+// beyond the layout reshape.
 
 const THEME_OPTIONS = [
   { id: 'system', label: 'System' },
@@ -35,7 +34,7 @@ const ON_OFF_OPTIONS = [
 // EMPTY_NEW_TEMPLATE is the seed state for the "Add template" inline form.
 // actionLabel (BACI-67) is optional — an empty string is the "no override,
 // derive from the gerund name" sentinel the backend honours.
-const EMPTY_NEW_TEMPLATE = { slug: '', name: '', body: '', states: ['todo'], actionLabel: '' };
+const EMPTY_NEW_TEMPLATE = { slug: '', name: '', body: '', actionLabel: '' };
 
 // ScopeChip renders the small "Client" / "Server" pill rendered next
 // to the row label inside System. Client = stored in browser
@@ -61,7 +60,6 @@ export default function SystemSettingsSection({
   onChangeArchivePreferences,
   audioEnabled,
   onChangeAudioEnabled,
-  columns,
   onTemplatesChanged,
 }) {
   // BACI-162: local draft for the retention-days input. We commit to
@@ -130,19 +128,6 @@ export default function SystemSettingsSection({
     }
   }, [notifyTemplatesChanged]);
 
-  const saveStates = useCallback(async (slug, states) => {
-    setSavingSlug(slug);
-    try {
-      const updated = await api.savePromptStates(slug, states);
-      setTemplates(prev => prev.map(t => (t.slug === slug ? updated : t)));
-      notifyTemplatesChanged();
-    } catch (err) {
-      reportError(err, { headline: "Couldn't save template states" });
-    } finally {
-      setSavingSlug(null);
-    }
-  }, [notifyTemplatesChanged]);
-
   // BACI-51: persist a template's per-(repo, slug) in-flight cap. The
   // matcher reads this column on every tick to decide whether to bind
   // another queued dispatch. 0 = unlimited; built-in ship seeds to 1
@@ -178,19 +163,11 @@ export default function SystemSettingsSection({
     }
   }, [notifyTemplatesChanged]);
 
-  const toggleState = useCallback((t, state) => {
-    const on = new Set(t.allowedStates || []);
-    if (on.has(state)) on.delete(state);
-    else on.add(state);
-    const next = columns.map(c => c.state).filter(s => on.has(s));
-    saveStates(t.slug, next);
-  }, [columns, saveStates]);
-
   const commitAdd = useCallback(async () => {
     if (!adding) return;
     setSavingSlug(adding.slug || '__new__');
     try {
-      await api.addPromptTemplate(adding.slug, adding.name, adding.body, adding.states, adding.actionLabel || '');
+      await api.addPromptTemplate(adding.slug, adding.name, adding.body, adding.actionLabel || '');
       setAdding(null);
       await refreshTemplates();
       notifyTemplatesChanged();
@@ -432,7 +409,7 @@ export default function SystemSettingsSection({
             <ScopeChip kind="server" />
           </div>
           <div className="mk-settings-hint">
-            The instruction sent to an agent when you dispatch a job at each template, and the issue states each template&apos;s prompt can be launched from. You can add, rename, and delete templates here — built-ins can be deleted too, and &quot;Restore built-ins&quot; re-seeds any that are missing.
+            The instruction sent to an agent when you dispatch a job at each template. You can add, rename, and delete templates here — built-ins can be deleted too, and &quot;Restore built-ins&quot; re-seeds any that are missing.
           </div>
           <div className="mk-settings-hint">
             A template body becomes a per-mode subagent&apos;s system prompt. After editing a body, run <code>bacio install-agents</code> in the repo to regenerate the <code>.claude/agents/</code> files — until then, dispatched workers still use the previous body.
@@ -516,34 +493,6 @@ export default function SystemSettingsSection({
               placeholder="Body — supports {{issue_id}}, {{issue_title}}, {{repo_prefix}}"
               onChange={e => setAdding({ ...adding, body: e.target.value })}
             />
-            <div className="mk-tmpl-states">
-              <div className="mk-tmpl-states-head">
-                <span className="mk-tmpl-states-label">Valid from</span>
-              </div>
-              <div className="mk-tmpl-states-chips">
-                {columns.map(col => {
-                  const on = new Set(adding.states).has(col.state);
-                  return (
-                    <button
-                      key={col.state}
-                      className={`mk-state-chip ${on ? 'is-on' : ''}`}
-                      aria-pressed={on}
-                      onClick={() => {
-                        const next = new Set(adding.states);
-                        if (next.has(col.state)) next.delete(col.state);
-                        else next.add(col.state);
-                        setAdding({
-                          ...adding,
-                          states: columns.map(c => c.state).filter(s => next.has(s)),
-                        });
-                      }}
-                    >
-                      {col.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
             <div className="mk-tmpl-toolbar">
               <button
                 className="mk-segmented-btn is-active"
@@ -560,7 +509,6 @@ export default function SystemSettingsSection({
           const draft = drafts[t.slug] ?? t.body;
           const dirty = draft !== t.body;
           const busy = savingSlug === t.slug;
-          const allowed = new Set(t.allowedStates || []);
           return (
             <div className="mk-tmpl" key={t.slug}>
               <div className="mk-tmpl-head">
@@ -643,33 +591,6 @@ export default function SystemSettingsSection({
                     if (v !== t.actionLabel) saveActionLabel(t.slug, v);
                   }}
                 />
-              </div>
-              <div className="mk-tmpl-states">
-                <div className="mk-tmpl-states-head">
-                  <span className="mk-tmpl-states-label">Valid from</span>
-                  {t.isBuiltin && (
-                    <button
-                      className="mk-tmpl-reset"
-                      disabled={busy || t.statesAreDefault}
-                      onClick={() => saveStates(t.slug, [])}
-                    >
-                      Reset gate
-                    </button>
-                  )}
-                </div>
-                <div className="mk-tmpl-states-chips">
-                  {columns.map(col => (
-                    <button
-                      key={col.state}
-                      className={`mk-state-chip ${allowed.has(col.state) ? 'is-on' : ''}`}
-                      aria-pressed={allowed.has(col.state)}
-                      disabled={busy}
-                      onClick={() => toggleState(t, col.state)}
-                    >
-                      {col.label}
-                    </button>
-                  ))}
-                </div>
               </div>
               <div className="mk-tmpl-states">
                 <div className="mk-tmpl-states-head">

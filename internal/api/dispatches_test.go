@@ -327,23 +327,22 @@ func TestIssueDispatchDryRun(t *testing.T) {
 	assertHistoryOps(t, s, nil)
 }
 
-func TestIssueDispatchStateGate(t *testing.T) {
+// TestIssueDispatchAcceptsAnyMode (BACI-252 regression) — the
+// per-template state-gate is gone, so a mode that used to be rejected
+// because the template's gate didn't admit the issue's current state
+// now succeeds end-to-end over REST. "review" from a todo issue was
+// the canonical refusal case.
+func TestIssueDispatchAcceptsAnyMode(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
-	iss := seedIssue(t, s, repo, "wrong state")
+	iss := seedIssue(t, s, repo, "any-state ok")
 	ag := seedAgentIdentity(t, s, "swift-otter@claude.test")
 	_ = seedChannelLiveSession(t, s, repo, "sess-auto-gate", ag, 9300)
 
-	// "review" is gated to in_review by default; a todo issue must 400.
 	resp, raw := apiPost(t, ts.URL+"/repos/"+repo.Prefix+"/issues/"+iss.Key+"/dispatch",
 		map[string]any{"mode": string(model.DispatchModeReview)})
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status %d, body %s", resp.StatusCode, raw)
-	}
-	var env map[string]any
-	mustDecode(t, raw, &env)
-	if env["code"] != "invalid_input" {
-		t.Errorf("code = %v, want invalid_input", env["code"])
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status %d, body %s, want 201 (BACI-252: no state-gate)", resp.StatusCode, raw)
 	}
 }
 

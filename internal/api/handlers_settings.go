@@ -1,14 +1,13 @@
 package api
 
-// HTTP parity for the prompt-template + state-gate verbs. Mirrors the
-// four schemas already registered (`settings.template.set`,
-// `settings.template.reset`, `settings.template.states.set`,
-// `settings.template.states.reset`). Same store calls + validators +
-// audit log as the CLI / local backend — only the transport differs.
+// HTTP parity for the prompt-template body verbs. Mirrors the two
+// schemas already registered (`settings.template.set`,
+// `settings.template.reset`). Same store calls + validators + audit
+// log as the CLI / local backend — only the transport differs.
 //
-// Audit ops match local: `prompt_template.update`/`prompt_template.reset`
-// and `prompt_states.update`/`prompt_states.reset`. These rows are
-// global (no RepoID), same as the local backend writes them.
+// Audit ops match local: `prompt_template.update` /
+// `prompt_template.reset`. These rows are global (no RepoID), same as
+// the local backend writes them.
 
 import (
 	"fmt"
@@ -38,26 +37,22 @@ type PromptTemplateBody struct {
 // the web bundle reshapes to camelCase in api.http.ts.
 //
 // Slug is the storage / CLI identifier; Mode is kept as an alias of
-// Slug so a frontend that still keys by "mode" keeps working. Body /
-// AllowedStates are the persisted values; Default / DefaultStates are
-// the embedded built-in defaults for the slug (empty for user-created
-// templates). IsDefault / StatesAreDefault report whether the persisted
-// value still matches the built-in default — used by the UI's "reset"
-// affordances.
+// Slug so a frontend that still keys by "mode" keeps working. Body is
+// the persisted value; Default is the embedded built-in default for
+// the slug (empty for user-created templates). IsDefault reports
+// whether the persisted body still matches the built-in default —
+// used by the UI's "reset" affordance.
 type PromptTemplateFullDTO struct {
-	Slug                    string   `json:"slug"`
-	Mode                    string   `json:"mode"`
-	Label                   string   `json:"label"`
-	Body                    string   `json:"body"`
-	Default                 string   `json:"default"`
-	IsBuiltin               bool     `json:"is_builtin"`
-	IsDefault               bool     `json:"is_default"`
-	AllowedStates           []string `json:"allowed_states"`
-	DefaultStates           []string `json:"default_states"`
-	StatesAreDefault        bool     `json:"states_are_default"`
-	ConcurrencyLimit        int      `json:"concurrency_limit"`
-	DefaultConcurrencyLimit int      `json:"default_concurrency_limit"`
-	ConcurrencyIsDefault    bool     `json:"concurrency_is_default"`
+	Slug                    string `json:"slug"`
+	Mode                    string `json:"mode"`
+	Label                   string `json:"label"`
+	Body                    string `json:"body"`
+	Default                 string `json:"default"`
+	IsBuiltin               bool   `json:"is_builtin"`
+	IsDefault               bool   `json:"is_default"`
+	ConcurrencyLimit        int    `json:"concurrency_limit"`
+	DefaultConcurrencyLimit int    `json:"default_concurrency_limit"`
+	ConcurrencyIsDefault    bool   `json:"concurrency_is_default"`
 	// BACI-67: imperative override rendered on the dispatch action
 	// menus. ActionLabel is the persisted value (empty = derive from
 	// Name); DefaultActionLabel is the built-in imperative seed for
@@ -69,25 +64,11 @@ type PromptTemplateFullDTO struct {
 	ActionLabelIsDefault bool   `json:"action_label_is_default"`
 }
 
-func sameStringSlice(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
 // templateDTO maps a store.PromptTemplate to the wire DTO. Mirrors
 // desktop/settingsservice.go::dtoForTemplate so both backends emit the
 // same shape.
 func templateDTO(t *store.PromptTemplate) PromptTemplateFullDTO {
 	def := model.DefaultPromptBodyForBuiltinSlug(t.Slug)
-	defStates := stateStrings(model.DefaultPromptStatesForBuiltinSlug(t.Slug))
-	allowed := stateStrings(t.AllowedStates)
 	label := t.Name
 	if label == "" {
 		label = model.BuiltinTemplateLabel(t.Slug)
@@ -105,9 +86,6 @@ func templateDTO(t *store.PromptTemplate) PromptTemplateFullDTO {
 		Default:                 def,
 		IsBuiltin:               t.IsBuiltin,
 		IsDefault:               t.IsBuiltin && t.Body == def,
-		AllowedStates:           allowed,
-		DefaultStates:           defStates,
-		StatesAreDefault:        t.IsBuiltin && sameStringSlice(allowed, defStates),
 		ConcurrencyLimit:        t.ConcurrencyLimit,
 		DefaultConcurrencyLimit: defConc,
 		ConcurrencyIsDefault:    t.IsBuiltin && t.ConcurrencyLimit == defConc,
@@ -115,14 +93,6 @@ func templateDTO(t *store.PromptTemplate) PromptTemplateFullDTO {
 		DefaultActionLabel:      defAction,
 		ActionLabelIsDefault:    t.IsBuiltin && t.ActionLabel == defAction,
 	}
-}
-
-// PromptTemplateStates is the per-mode response shape for PUT/DELETE on
-// /settings/templates/{mode}/states. States is the post-call resolved
-// value (the stored override, or the built-in default).
-type PromptTemplateStates struct {
-	Mode   string   `json:"mode"`
-	States []string `json:"states"`
 }
 
 // ---------- list (templates) ----------
@@ -142,10 +112,10 @@ func (d deps) handlePromptTemplatesList(w http.ResponseWriter, r *http.Request) 
 }
 
 // handlePromptTemplatesFullList returns every template's full DTO —
-// slug, label, body, allowed_states, is_builtin, plus the embedded
-// defaults so the UI can render its reset affordances. BACI-50: the
-// web bundle calls this instead of /settings/templates so it doesn't
-// have to derive labels client-side.
+// slug, label, body, is_builtin, plus the embedded defaults so the
+// UI can render its reset affordances. BACI-50: the web bundle calls
+// this instead of /settings/templates so it doesn't have to derive
+// labels client-side.
 func (d deps) handlePromptTemplatesFullList(w http.ResponseWriter, r *http.Request) {
 	tmpls, err := d.store.ListPromptTemplates()
 	if err != nil {
@@ -156,26 +126,6 @@ func (d deps) handlePromptTemplatesFullList(w http.ResponseWriter, r *http.Reque
 	out := make([]PromptTemplateFullDTO, 0, len(tmpls))
 	for _, t := range tmpls {
 		out = append(out, templateDTO(t))
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
-// ---------- list (states) ----------
-
-func (d deps) handlePromptStatesList(w http.ResponseWriter, r *http.Request) {
-	all, err := d.store.AllPromptStates()
-	if err != nil {
-		status, code := statusForError(err)
-		writeError(w, status, code, err.Error(), nil)
-		return
-	}
-	out := make(map[string][]string, len(all))
-	for m, states := range all {
-		ss := make([]string, len(states))
-		for i, st := range states {
-			ss[i] = string(st)
-		}
-		out[string(m)] = ss
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -272,103 +222,6 @@ func (d deps) handlePromptTemplateReset(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
-// ---------- set states ----------
-
-func (d deps) handlePromptStatesSet(w http.ResponseWriter, r *http.Request) {
-	mode, ok := parseModePath(w, r)
-	if !ok {
-		return
-	}
-	raw, ok := readBody(r, w)
-	if !ok {
-		return
-	}
-	parsed, _, err := inputio.DecodeStrict[inputs.SettingsTemplateStatesSetInput](raw)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
-		return
-	}
-	in := *parsed
-	if in.Slug != "" && in.Slug != string(mode) {
-		writeError(w, http.StatusBadRequest, "invalid_input",
-			"slug in body must match URL", map[string]any{"field": "slug"})
-		return
-	}
-	if len(in.States) == 0 {
-		writeError(w, http.StatusBadRequest, "invalid_input",
-			"states is required; use DELETE to revert a stage to its default",
-			map[string]any{"field": "states"})
-		return
-	}
-	states := make([]model.State, len(in.States))
-	for i, s := range in.States {
-		states[i] = model.State(s)
-	}
-	if isDryRun(r) {
-		clean, err := d.store.ValidatePromptStates(mode, states)
-		if err != nil {
-			status, code := statusForError(err)
-			writeError(w, status, code, err.Error(), nil)
-			return
-		}
-		writeDryRun(w, http.StatusOK, &PromptTemplateStates{
-			Mode: string(mode), States: stateStrings(clean),
-		})
-		return
-	}
-	if err := d.store.SetPromptStates(mode, states); err != nil {
-		status, code := statusForError(err)
-		writeError(w, status, code, err.Error(), nil)
-		return
-	}
-	recordOp(d.store, d.logger, model.HistoryEntry{
-		Actor:       ActorFromContext(r.Context()),
-		Op:          "prompt_states.update",
-		Kind:        "app_setting",
-		TargetLabel: "prompt_states." + string(mode),
-		Details:     "stage=" + string(mode),
-	})
-	resolved, err := d.store.GetPromptStates(mode)
-	if err != nil {
-		status, code := statusForError(err)
-		writeError(w, status, code, err.Error(), nil)
-		return
-	}
-	writeJSON(w, http.StatusOK, &PromptTemplateStates{
-		Mode: string(mode), States: stateStrings(resolved),
-	})
-}
-
-// ---------- reset states ----------
-
-func (d deps) handlePromptStatesReset(w http.ResponseWriter, r *http.Request) {
-	mode, ok := parseModePath(w, r)
-	if !ok {
-		return
-	}
-	if isDryRun(r) {
-		writeDryRun(w, http.StatusOK, &PromptTemplateStates{
-			Mode: string(mode), States: stateStrings(model.DefaultPromptStates(mode)),
-		})
-		return
-	}
-	if err := d.store.SetPromptStates(mode, nil); err != nil {
-		status, code := statusForError(err)
-		writeError(w, status, code, err.Error(), nil)
-		return
-	}
-	recordOp(d.store, d.logger, model.HistoryEntry{
-		Actor:       ActorFromContext(r.Context()),
-		Op:          "prompt_states.reset",
-		Kind:        "app_setting",
-		TargetLabel: "prompt_states." + string(mode),
-		Details:     "stage=" + string(mode),
-	})
-	writeJSON(w, http.StatusOK, &PromptTemplateStates{
-		Mode: string(mode), States: stateStrings(model.DefaultPromptStates(mode)),
-	})
-}
-
 // parseModePath pulls {mode} from the URL and validates it's a concrete
 // dispatch stage. Rejects the untyped mode ("") — every settings verb
 // names a stage. Returns ok=false after writing the error response.
@@ -387,18 +240,6 @@ func parseModePath(w http.ResponseWriter, r *http.Request) (model.DispatchMode, 
 		return "", false
 	}
 	return mode, true
-}
-
-// stateStrings renders a []model.State as a []string in order, never
-// nil — JSON consumers always see an array. Mirrors statesToStrings in
-// internal/cli/settings.go (kept here so the api package doesn't take a
-// CLI import).
-func stateStrings(states []model.State) []string {
-	out := make([]string, len(states))
-	for i, st := range states {
-		out[i] = string(st)
-	}
-	return out
 }
 
 // ---------- typed prompt-template CRUD (BACI-50) ----------

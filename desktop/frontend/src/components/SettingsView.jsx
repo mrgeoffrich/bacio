@@ -124,7 +124,6 @@ export default function SettingsView({
             onChangeArchivePreferences={onChangeArchivePreferences}
             audioEnabled={audioEnabled}
             onChangeAudioEnabled={onChangeAudioEnabled}
-            columns={columns}
             onTemplatesChanged={onTemplatesChanged}
           />
         );

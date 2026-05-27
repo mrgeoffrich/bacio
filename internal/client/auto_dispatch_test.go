@@ -53,29 +53,33 @@ func TestAutoDispatchIssueLocal(t *testing.T) {
 	}
 }
 
-// TestAutoDispatchIssueStateGate verifies that the state-gate guard
-// blocks a mode whose template doesn't accept the issue's current state.
-// "review" is gated to in_review by default; a todo issue should fail.
-func TestAutoDispatchIssueStateGate(t *testing.T) {
+// TestAutoDispatchIssueAcceptsAnyMode (BACI-252 regression) — the
+// per-template state-gate is gone, so a mode that used to be rejected
+// because the template's gate didn't admit the issue's current state
+// now succeeds. "review" from a todo issue is the canonical case the
+// old gate refused.
+func TestAutoDispatchIssueAcceptsAnyMode(t *testing.T) {
 	p := newPair(t)
 	defer p.cleanup()
 	ctx := context.Background()
 
-	iss, err := p.store.CreateIssue(p.repo.ID, nil, "wrong state", "", model.StateTodo, nil, "")
+	iss, err := p.store.CreateIssue(p.repo.ID, nil, "any-state ok", "", model.StateTodo, nil, "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
-	if _, err := p.local.AutoDispatchIssue(ctx, p.repo, iss.Key, "review", false); err == nil {
-		t.Fatalf("expected state-gate error for review on todo, got nil")
-	} else if !strings.Contains(err.Error(), "can't run") {
-		t.Fatalf("error = %v, want state-gate message", err)
+	d, err := p.local.AutoDispatchIssue(ctx, p.repo, iss.Key, "review", false)
+	if err != nil {
+		t.Fatalf("AutoDispatchIssue (review from todo) = %v, want nil (BACI-252: no state-gate)", err)
+	}
+	if d == nil || d.IssueKey != iss.Key {
+		t.Fatalf("dispatch shape after queue: %+v", d)
 	}
 }
 
 // TestAutoDispatchIssueArchivedRejected — BACI-68 dispatcher guard.
 // Archiving an issue removes it from the board; the dispatch entry
-// points must refuse to enqueue (or auto-pick) work for that issue
-// even when the state-gate would otherwise allow it.
+// points must refuse to enqueue (or auto-pick) work for that issue —
+// the only server-side guard that survived BACI-252.
 func TestAutoDispatchIssueArchivedRejected(t *testing.T) {
 	p := newPair(t)
 	defer p.cleanup()
