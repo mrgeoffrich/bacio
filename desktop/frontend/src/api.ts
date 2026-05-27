@@ -804,6 +804,42 @@ export async function setArchivePreferences(
   }
 }
 
+// BACI-235: per-repo default_feature setting. Empty slug = unset.
+// Slug + title + emoji are inflated when set so the dropdown can
+// render the same glyph + label as the rest of the feature affordances.
+export type DefaultFeatureDTO = { slug: string; title?: string; emoji?: string };
+
+export async function getDefaultFeature(
+  repoPrefix: string,
+): Promise<DefaultFeatureDTO> {
+  try {
+    return await BoardService.GetDefaultFeature(repoPrefix);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+export async function setDefaultFeature(
+  repoPrefix: string,
+  slug: string,
+): Promise<DefaultFeatureDTO> {
+  try {
+    return await BoardService.SetDefaultFeature(repoPrefix, slug);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+export async function clearDefaultFeature(
+  repoPrefix: string,
+): Promise<DefaultFeatureDTO> {
+  try {
+    return await BoardService.ClearDefaultFeature(repoPrefix);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
 // BACI-89 / BACI-108: sync.background_enabled toggle. Same shape as
 // the board-preferences pair; lives behind a dedicated Wails endpoint
 // so the standalone Sync view can read / write it without coupling to

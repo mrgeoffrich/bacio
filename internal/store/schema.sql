@@ -311,6 +311,22 @@ CREATE TABLE IF NOT EXISTS tui_settings (
     PRIMARY KEY (repo_id, key)
 );
 
+-- Per-repo typed behavioural settings (BACI-235). The typed sibling of
+-- the generic tui_settings KV — one row per repo, with one column per
+-- setting so the store layer can hang FK semantics off it instead of
+-- re-validating slug references on every read. Today the only column
+-- is default_feature_id (the per-repo `default_feature` setting that
+-- auto-applies to issues created without an explicit feature). The FK
+-- is ON DELETE SET NULL so deleting the referenced feature cascades
+-- the column back to NULL — a read never returns a dead reference,
+-- and no defensive shim is needed in the resolver. Repo cascade
+-- mirrors tui_settings.
+CREATE TABLE IF NOT EXISTS repo_settings (
+    repo_id            INTEGER NOT NULL PRIMARY KEY REFERENCES repos(id) ON DELETE CASCADE,
+    default_feature_id INTEGER REFERENCES features(id) ON DELETE SET NULL,
+    updated_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Global (not per-repo) KV store — the sibling of tui_settings for
 -- preferences that aren't tied to a single repo. Used today for scalar
 -- preferences (display.show_archived, archive.auto_enabled,

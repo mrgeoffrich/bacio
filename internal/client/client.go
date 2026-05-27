@@ -201,6 +201,21 @@ type Client interface {
 	SetFeatureHiddenOnBoard(ctx context.Context, repo *model.Repo, slug string, hidden, dryRun bool) (bool, error)
 	ListHiddenFeatureSlugs(ctx context.Context, repo *model.Repo) ([]string, error)
 
+	// GetDefaultFeature / SetDefaultFeature / ClearDefaultFeature (BACI-235)
+	// expose the per-repo `default_feature` setting. When set, issues
+	// created without an explicit `feature_slug` auto-apply to this
+	// feature; an explicit slug always wins. GetDefaultFeature returns
+	// nil when the setting is unset (or when the referenced feature has
+	// been deleted — the FK ON DELETE SET NULL cleared the column).
+	// SetDefaultFeature looks the slug up first (must exist in the same
+	// repo) and records an audit row under `repo_setting.update`,
+	// target_label `default_feature`. ClearDefaultFeature unsets the
+	// column. The remote backend hits the REST endpoints
+	// GET/PUT/DELETE /repos/{prefix}/settings/default-feature.
+	GetDefaultFeature(ctx context.Context, repo *model.Repo) (*model.Feature, error)
+	SetDefaultFeature(ctx context.Context, repo *model.Repo, slug string, dryRun bool) (*model.Feature, error)
+	ClearDefaultFeature(ctx context.Context, repo *model.Repo, dryRun bool) error
+
 	// ----- Issues -----
 	// ResolveIssueKey converts a possibly-bare key ("42" or "MINI-42")
 	// into the canonical PREFIX-N form, using repo as the implicit

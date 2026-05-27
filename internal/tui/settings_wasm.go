@@ -90,5 +90,7 @@ func (s *settingsView) View(width, height int) string {
 		return ""
 	}
 	showArchived, _ := s.store.GetDisplayShowArchived()
-	return renderSettingsList(width, height, s.stages, s.cursor, s.err, showArchived)
+	// BACI-235: wasm Settings is read-only — pass empty default-feature
+	// strings so the row renders as "(none)" without querying the store.
+	return renderSettingsList(width, height, s.stages, s.cursor, s.err, showArchived, "", "")
 }

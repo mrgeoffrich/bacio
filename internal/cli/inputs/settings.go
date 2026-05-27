@@ -144,3 +144,15 @@ type SettingsArchiveInput struct {
 	AutoEnabled   bool `json:"auto_enabled"`
 	RetentionDays int  `json:"retention_days"`
 }
+
+// SettingsDefaultFeatureInput is the payload for
+// `bacio settings default-feature --json` (BACI-235). Slug names the
+// per-repo default feature that auto-applies to issues created
+// without an explicit `feature_slug`. Empty Slug clears the setting
+// (the "no default" semantic — featureless creates again, the
+// pre-BACI-235 behaviour). The verb is per-repo despite living under
+// the otherwise-global `settings` group — see the verb's Long for
+// the carve-out note.
+type SettingsDefaultFeatureInput struct {
+	Slug string `json:"slug"`
+}

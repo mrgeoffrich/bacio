@@ -70,12 +70,18 @@ store. Today this covers the dispatch prompt templates — the
 instruction text bacio renders for each template when you dispatch
 work to an agent. The same templates are editable from the desktop
 app's Settings panel and the TUI Settings tab; this is the CLI
-surface for them.`,
+surface for them.
+
+One verb in this group is per-repo, not global: ` + "`bacio settings default-feature`" + `
+sets the auto-applied default feature for the current repo's
+` + "`bacio issue add`" + ` calls (BACI-235). The CLI verb is grouped here
+for discoverability alongside the other settings toggles.`,
 	}
 	cmd.AddCommand(newSettingsTemplateCmd())
 	cmd.AddCommand(newSettingsShowArchivedCmd())
 	cmd.AddCommand(newSettingsSyncBackgroundCmd())
 	cmd.AddCommand(newSettingsArchiveCmd())
+	cmd.AddCommand(newSettingsDefaultFeatureCmd())
 	return cmd
 }
 
@@ -344,6 +350,143 @@ Examples:
 	}
 	addInputFlag(cmd, &rawInput)
 	return cmd
+}
+
+// defaultFeatureResult is the JSON + text shape `bacio settings
+// default-feature` returns on both the get and set paths (BACI-235).
+// Slug is empty when the setting is unset. Title / emoji are inflated
+// for the text renderer (and don't hurt JSON consumers); Cleared
+// flags the "was-set-now-cleared" case so the renderer prints a
+// different line.
+type defaultFeatureResult struct {
+	Slug    string `json:"slug"`
+	Title   string `json:"title,omitempty"`
+	Emoji   string `json:"emoji,omitempty"`
+	Cleared bool   `json:"cleared,omitempty"`
+}
+
+// newSettingsDefaultFeatureCmd implements the BACI-235 per-repo
+// default_feature setting. The verb doubles as get and set:
+//
+//   - `bacio settings default-feature`             — read the current value
+//   - `bacio settings default-feature <slug>`      — set
+//   - `bacio settings default-feature --clear`     — clear
+//   - `bacio settings default-feature --json '{"slug":"maintenance"}'`
+//   - `bacio settings default-feature --json '{"slug":""}'` — clear
+//
+// Unlike the other verbs in this group, this one is per-repo: it
+// resolves the current repo from cwd and reads/writes the
+// `repo_settings.default_feature_id` column. Honours --dry-run.
+func newSettingsDefaultFeatureCmd() *cobra.Command {
+	var (
+		rawInput string
+		clear    bool
+	)
+	cmd := &cobra.Command{
+		Use:   "default-feature [SLUG]",
+		Short: "Get, set, or clear the BACI-235 per-repo default_feature setting (issue.add auto-applies it when feature_slug is empty)",
+		Long: `Get, set, or clear the BACI-235 per-repo ` + "`default_feature`" + ` setting.
+
+When set, ` + "`bacio issue add`" + ` (and every other surface — REST, TUI new-issue,
+web composer) auto-applies the feature when no explicit ` + "`feature_slug`" + ` is
+provided. An explicit slug always overrides the default; clearing the
+setting reverts to the pre-BACI-235 featureless-by-default behaviour.
+
+The setting is per-repo (despite living in the otherwise-global
+` + "`bacio settings`" + ` group). The FK on the stored column is
+ON DELETE SET NULL, so deleting the referenced feature auto-clears
+the setting.
+
+Examples:
+
+  bacio settings default-feature                       # read current value
+  bacio settings default-feature maintenance           # set to "maintenance"
+  bacio settings default-feature --clear               # unset
+  bacio settings default-feature --json '{"slug":"maintenance"}'   # set via JSON
+  bacio settings default-feature --json '{"slug":""}'              # clear via JSON`,
+		Args: cobra.RangeArgs(0, 1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			raw, err := parseJSONInput(cmd, args, rawInput, "--clear")
+			if err != nil {
+				return err
+			}
+			c, err := openClient()
+			if err != nil {
+				return err
+			}
+			defer c.Close()
+			ctx := context.Background()
+			repo, err := resolveRepoC(c)
+			if err != nil {
+				return err
+			}
+			// Get path — no args, no --clear, no --json.
+			if raw == nil && len(args) == 0 && !clear {
+				feat, err := c.GetDefaultFeature(ctx, repo)
+				if err != nil {
+					return err
+				}
+				return emit(defaultFeatureFromRow(feat, false))
+			}
+			// Set or clear path.
+			var slug string
+			if raw != nil {
+				if clear {
+					return fmt.Errorf("--clear and --json are mutually exclusive (pass an empty slug in --json to clear)")
+				}
+				in, _, err := inputio.DecodeStrict[inputs.SettingsDefaultFeatureInput](raw)
+				if err != nil {
+					return err
+				}
+				slug = in.Slug
+			} else if clear {
+				if len(args) > 0 {
+					return fmt.Errorf("--clear and a positional SLUG are mutually exclusive")
+				}
+				slug = ""
+			} else {
+				slug = strings.TrimSpace(args[0])
+			}
+			if slug == "" {
+				if err := c.ClearDefaultFeature(ctx, repo, opts.dryRun); err != nil {
+					return err
+				}
+				payload := defaultFeatureResult{Cleared: true}
+				if opts.dryRun {
+					return emitDryRun(payload)
+				}
+				return emit(payload)
+			}
+			feat, err := c.SetDefaultFeature(ctx, repo, slug, opts.dryRun)
+			if err != nil {
+				return err
+			}
+			payload := defaultFeatureFromRow(feat, false)
+			if opts.dryRun {
+				return emitDryRun(payload)
+			}
+			return emit(payload)
+		},
+	}
+	addInputFlag(cmd, &rawInput)
+	cmd.Flags().BoolVar(&clear, "clear", false, "clear the default_feature setting (equivalent to --json '{\"slug\":\"\"}')")
+	return cmd
+}
+
+// defaultFeatureFromRow builds the CLI result payload. A nil row is
+// the "unset" state — slug is empty, cleared is left false (the read
+// path distinguishes "no value" from "just-cleared" only on the set
+// path).
+func defaultFeatureFromRow(feat *model.Feature, cleared bool) defaultFeatureResult {
+	if feat == nil {
+		return defaultFeatureResult{Cleared: cleared}
+	}
+	return defaultFeatureResult{
+		Slug:    feat.Slug,
+		Title:   feat.Title,
+		Emoji:   feat.Emoji,
+		Cleared: cleared,
+	}
 }
 
 // parseBoolPositional accepts the same tokens as strconv.ParseBool plus

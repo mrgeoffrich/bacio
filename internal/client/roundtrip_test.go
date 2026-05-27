@@ -750,3 +750,98 @@ func TestRoundTripListShippedIssues(t *testing.T) {
 		}
 	}
 }
+
+// TestRoundTripDefaultFeature (BACI-235) covers the per-repo
+// default_feature setting auto-applying on issue create. Same default
+// is honoured by both transports (local + remote / REST). An explicit
+// feature_slug always wins; clearing the default reverts to featureless
+// creates.
+func TestRoundTripDefaultFeature(t *testing.T) {
+	p := newPair(t)
+	defer p.cleanup()
+	ctx := context.Background()
+
+	if _, err := p.local.CreateFeature(ctx, p.repo, inputs.FeatureAddInput{Title: "Catch-all", Slug: "catchall"}, false); err != nil {
+		t.Fatalf("create catchall: %v", err)
+	}
+	if _, err := p.local.CreateFeature(ctx, p.repo, inputs.FeatureAddInput{Title: "Auth", Slug: "auth"}, false); err != nil {
+		t.Fatalf("create auth: %v", err)
+	}
+
+	// Without a default, both transports leave a featureless issue
+	// featureless.
+	iss, err := p.local.CreateIssue(ctx, p.repo, inputs.IssueAddInput{Title: "pre-default"}, false)
+	if err != nil {
+		t.Fatalf("local create (no default): %v", err)
+	}
+	if iss.FeatureSlug != "" || iss.FeatureID != nil {
+		t.Fatalf("no-default local: FeatureSlug=%q FeatureID=%v, want empty", iss.FeatureSlug, iss.FeatureID)
+	}
+
+	// Set the default at the store boundary (the client wrapper lands
+	// in a later step; the store-level write is enough to exercise the
+	// resolver from both transports).
+	feat, err := p.store.GetFeatureBySlug(p.repo.ID, "catchall")
+	if err != nil {
+		t.Fatalf("lookup catchall: %v", err)
+	}
+	if err := p.store.SetDefaultFeatureID(p.repo.ID, &feat.ID); err != nil {
+		t.Fatalf("set default: %v", err)
+	}
+
+	// Featureless create via LOCAL transport now picks up the default.
+	iss, err = p.local.CreateIssue(ctx, p.repo, inputs.IssueAddInput{Title: "default-local"}, false)
+	if err != nil {
+		t.Fatalf("local create (with default): %v", err)
+	}
+	if iss.FeatureSlug != "catchall" {
+		t.Fatalf("default-local: FeatureSlug=%q, want catchall", iss.FeatureSlug)
+	}
+
+	// Same via REMOTE transport.
+	iss, err = p.remote.CreateIssue(ctx, p.repo, inputs.IssueAddInput{Title: "default-remote"}, false)
+	if err != nil {
+		t.Fatalf("remote create (with default): %v", err)
+	}
+	if iss.FeatureSlug != "catchall" {
+		t.Fatalf("default-remote: FeatureSlug=%q, want catchall", iss.FeatureSlug)
+	}
+
+	// Explicit feature wins over the default on both transports.
+	iss, err = p.local.CreateIssue(ctx, p.repo, inputs.IssueAddInput{Title: "explicit-local", FeatureSlug: "auth"}, false)
+	if err != nil {
+		t.Fatalf("local create (explicit): %v", err)
+	}
+	if iss.FeatureSlug != "auth" {
+		t.Fatalf("explicit-local: FeatureSlug=%q, want auth", iss.FeatureSlug)
+	}
+	iss, err = p.remote.CreateIssue(ctx, p.repo, inputs.IssueAddInput{Title: "explicit-remote", FeatureSlug: "auth"}, false)
+	if err != nil {
+		t.Fatalf("remote create (explicit): %v", err)
+	}
+	if iss.FeatureSlug != "auth" {
+		t.Fatalf("explicit-remote: FeatureSlug=%q, want auth", iss.FeatureSlug)
+	}
+
+	// Dry-run via REMOTE projects the resolved slug so the rehearsal
+	// output matches the real call.
+	projected, err := p.remote.CreateIssue(ctx, p.repo, inputs.IssueAddInput{Title: "dry-default"}, true)
+	if err != nil {
+		t.Fatalf("remote dry-run: %v", err)
+	}
+	if projected.FeatureSlug != "catchall" {
+		t.Fatalf("dry-run remote: FeatureSlug=%q, want catchall", projected.FeatureSlug)
+	}
+
+	// Clear the default; featureless creates go back to featureless.
+	if err := p.store.ClearDefaultFeature(p.repo.ID); err != nil {
+		t.Fatalf("clear default: %v", err)
+	}
+	iss, err = p.remote.CreateIssue(ctx, p.repo, inputs.IssueAddInput{Title: "post-clear"}, false)
+	if err != nil {
+		t.Fatalf("remote create (post-clear): %v", err)
+	}
+	if iss.FeatureSlug != "" {
+		t.Fatalf("post-clear: FeatureSlug=%q, want empty", iss.FeatureSlug)
+	}
+}

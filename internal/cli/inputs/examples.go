@@ -302,6 +302,9 @@ var (
 		AutoEnabled:   true,
 		RetentionDays: 7,
 	}
+	// BACI-235: per-repo default_feature setting. The verb doubles as
+	// get / set; an empty slug clears the setting.
+	ExampleSettingsDefaultFeature = SettingsDefaultFeatureInput{Slug: "maintenance"}
 
 	// SyncSetup (BACI-110) — three representative payloads, one per mode.
 	// The registry only attaches one example to the schema, but the

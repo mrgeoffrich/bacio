@@ -25,6 +25,7 @@ export {
     ClaimantDTO,
     CollisionPreviewDTO,
     CommentDTO,
+    DefaultFeatureDTO,
     DispatchDTO,
     DisplayPreferencesDTO,
     DocContent,

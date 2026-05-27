@@ -245,7 +245,7 @@ func (f *FeatureService) SetFeatureEmoji(repoPrefix, slug, emoji string) (Featur
 	if err != nil {
 		return FeatureDetail{}, err
 	}
-	if _, err := f.client.UpdateFeature(ctx, repo, slug, nil, nil, &emoji, false); err != nil {
+	if _, err := f.client.UpdateFeature(ctx, repo, slug, nil, nil, &emoji, nil, false); err != nil {
 		return FeatureDetail{}, err
 	}
 	return f.GetFeature(repoPrefix, slug)

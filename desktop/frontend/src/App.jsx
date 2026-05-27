@@ -952,6 +952,7 @@ export default function App() {
             columns={columns}
             onClose={closeSettings}
             onTemplatesChanged={refreshPromptConfig}
+            repoPrefix={activeBoard}
           />
         </ErrorBoundary>
       ) : syncOpen ? (

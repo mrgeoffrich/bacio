@@ -1182,3 +1182,63 @@ func (b *BoardService) UnarchiveIssue(repoPrefix, issueKey string) (*model.Issue
 	}
 	return b.client.UnarchiveIssue(ctx, repo, issueKey, false)
 }
+
+// DefaultFeatureDTO (BACI-235) is the per-repo default_feature setting
+// shaped for the desktop / web Settings panel. Slug is empty when the
+// setting is unset; Title / Emoji are inflated when the setting is set
+// so the dropdown can render the same glyph + label as the rest of the
+// feature affordances. Mirrors FeatureSummary's slim shape.
+type DefaultFeatureDTO struct {
+	Slug  string `json:"slug"`
+	Title string `json:"title,omitempty"`
+	Emoji string `json:"emoji,omitempty"`
+}
+
+// GetDefaultFeature (BACI-235) returns the per-repo default_feature
+// setting for repoPrefix. Empty Slug = unset (the legacy default).
+func (b *BoardService) GetDefaultFeature(repoPrefix string) (DefaultFeatureDTO, error) {
+	ctx := context.Background()
+	repo, err := b.client.GetRepoByPrefix(ctx, repoPrefix)
+	if err != nil {
+		return DefaultFeatureDTO{}, err
+	}
+	feat, err := b.client.GetDefaultFeature(ctx, repo)
+	if err != nil {
+		return DefaultFeatureDTO{}, err
+	}
+	if feat == nil {
+		return DefaultFeatureDTO{}, nil
+	}
+	return DefaultFeatureDTO{Slug: feat.Slug, Title: feat.Title, Emoji: feat.Emoji}, nil
+}
+
+// SetDefaultFeature (BACI-235) writes the per-repo default_feature
+// setting. slug must reference an existing feature in the same repo;
+// the client records the audit row.
+func (b *BoardService) SetDefaultFeature(repoPrefix, slug string) (DefaultFeatureDTO, error) {
+	ctx := context.Background()
+	repo, err := b.client.GetRepoByPrefix(ctx, repoPrefix)
+	if err != nil {
+		return DefaultFeatureDTO{}, err
+	}
+	feat, err := b.client.SetDefaultFeature(ctx, repo, slug, false)
+	if err != nil {
+		return DefaultFeatureDTO{}, err
+	}
+	return DefaultFeatureDTO{Slug: feat.Slug, Title: feat.Title, Emoji: feat.Emoji}, nil
+}
+
+// ClearDefaultFeature (BACI-235) clears the per-repo default_feature
+// setting. Returns a zero-valued DTO so the caller can re-render
+// without a separate read.
+func (b *BoardService) ClearDefaultFeature(repoPrefix string) (DefaultFeatureDTO, error) {
+	ctx := context.Background()
+	repo, err := b.client.GetRepoByPrefix(ctx, repoPrefix)
+	if err != nil {
+		return DefaultFeatureDTO{}, err
+	}
+	if err := b.client.ClearDefaultFeature(ctx, repo, false); err != nil {
+		return DefaultFeatureDTO{}, err
+	}
+	return DefaultFeatureDTO{}, nil
+}

@@ -260,8 +260,105 @@ func (s *settingsView) Update(msg tea.Msg) tea.Cmd {
 		}
 		s.recordSettingOp("display.update", "display.show_archived",
 			fmt.Sprintf("show_archived=%t", next))
+	case "D":
+		// BACI-235: cycle the per-repo default-feature setting through
+		// the repo's features. Hitting D on the last feature in the list
+		// wraps back to "no feature" (the unset state), so the user can
+		// reach every value with the same key. Skipped when the view
+		// has no repo context.
+		s.cycleDefaultFeature()
+	case "X":
+		// BACI-235: explicit clear, separate from D's cycle, so the
+		// user can drop straight to "no feature" without scrolling
+		// through the whole list. Idempotent.
+		s.clearDefaultFeature()
 	}
 	return nil
+}
+
+// cycleDefaultFeature advances the per-repo default-feature setting
+// to the next feature in the repo's ListFeatures order, wrapping
+// "last feature → unset" so the user can reach every state with
+// repeated D presses.
+func (s *settingsView) cycleDefaultFeature() {
+	if s.repo == nil {
+		return
+	}
+	feats, err := s.store.ListFeaturesFiltered(store.FeatureFilter{
+		RepoID:          s.repo.ID,
+		IncludeArchived: false,
+	})
+	if err != nil {
+		s.err = err
+		return
+	}
+	if len(feats) == 0 {
+		return
+	}
+	settings, err := s.store.GetRepoSettings(s.repo.ID)
+	if err != nil {
+		s.err = err
+		return
+	}
+	var nextID *int64
+	var nextSlug string
+	switch {
+	case settings.DefaultFeatureID == nil:
+		// Unset → first feature.
+		id := feats[0].ID
+		nextID = &id
+		nextSlug = feats[0].Slug
+	default:
+		// Find the current index, then advance. Wrap to unset (nil) at
+		// the end of the list.
+		cur := *settings.DefaultFeatureID
+		idx := -1
+		for i, f := range feats {
+			if f.ID == cur {
+				idx = i
+				break
+			}
+		}
+		if idx < 0 || idx >= len(feats)-1 {
+			nextID = nil
+		} else {
+			id := feats[idx+1].ID
+			nextID = &id
+			nextSlug = feats[idx+1].Slug
+		}
+	}
+	if err := s.store.SetDefaultFeatureID(s.repo.ID, nextID); err != nil {
+		s.err = err
+		return
+	}
+	if nextID == nil {
+		s.recordSettingOp("repo_setting.update", "default_feature", "cleared")
+	} else {
+		s.recordSettingOp("repo_setting.update", "default_feature", "slug="+nextSlug)
+	}
+}
+
+// clearDefaultFeature unsets the per-repo default_feature setting.
+// Idempotent — clearing an already-unset value still records the
+// audit row for symmetry with the cycle path.
+func (s *settingsView) clearDefaultFeature() {
+	if s.repo == nil {
+		return
+	}
+	settings, err := s.store.GetRepoSettings(s.repo.ID)
+	if err != nil {
+		s.err = err
+		return
+	}
+	if settings.DefaultFeatureID == nil {
+		// No-op — don't churn the audit log on idempotent clears.
+		return
+	}
+	if err := s.store.ClearDefaultFeature(s.repo.ID); err != nil {
+		s.err = err
+		return
+	}
+	s.recordSettingOp("repo_setting.update", "default_feature", "cleared")
 }
 
 func (s *settingsView) updateOverlay(msg tea.Msg) tea.Cmd {
@@ -801,7 +898,30 @@ func (s *settingsView) View(width, height int) string {
 			"y to restore · n to cancel · esc to cancel")
 	}
 	showArchived, _ := s.store.GetDisplayShowArchived()
-	return renderSettingsList(width, height, s.stages, s.cursor, s.err, showArchived)
+	// BACI-235: surface the per-repo default-feature setting on the
+	// Settings tab. Empty when unset or when the view has no repo
+	// context (the `bacio tui` global case — same shape as the
+	// templates list).
+	defaultSlug, defaultTitle := s.currentDefaultFeature()
+	return renderSettingsList(width, height, s.stages, s.cursor, s.err, showArchived, defaultSlug, defaultTitle)
+}
+
+// currentDefaultFeature reads the BACI-235 per-repo default_feature
+// setting. Returns empty strings when the view has no repo context or
+// the setting is unset.
+func (s *settingsView) currentDefaultFeature() (slug, title string) {
+	if s.repo == nil {
+		return "", ""
+	}
+	settings, err := s.store.GetRepoSettings(s.repo.ID)
+	if err != nil || settings.DefaultFeatureID == nil {
+		return "", ""
+	}
+	feat, err := s.store.GetFeatureByID(*settings.DefaultFeatureID)
+	if err != nil {
+		return "", ""
+	}
+	return feat.Slug, feat.Title
 }
 
 func (s *settingsView) viewEditor(width, height int) string {
