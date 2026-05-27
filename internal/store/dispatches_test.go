@@ -1957,3 +1957,201 @@ func TestPromoteReadyFollowOns_BlockerVariantOpenClaimDefers(t *testing.T) {
 		t.Fatalf("with open claim: promoted=%d gateFailed=%d, want 0/0", len(promoted), len(gateFailed))
 	}
 }
+
+// TestPromoteReadyFollowOns_BlockersInProgressStaysDormant (BACI-246)
+// — a blockers-clear follow-on whose only blocker is stuck at
+// `in_progress` must NOT promote, no matter how many times the sweep
+// runs. Locks in the gate's "non-terminal blocker = still dormant"
+// semantics against any future regression that broadens the gate.
+func TestPromoteReadyFollowOns_BlockersInProgressStaysDormant(t *testing.T) {
+	s, repo, blocked, blocker := seedBlockerFixture(t)
+	follow, err := s.AddBlockerFollowOnDispatch(repo.ID, blocked.ID, model.DispatchModePlan, "supervisor")
+	if err != nil {
+		t.Fatalf("AddBlockerFollowOnDispatch: %v", err)
+	}
+	// Move blocker to in_progress — definitively non-terminal.
+	if err := s.SetIssueState(blocker.ID, model.StateInProgress); err != nil {
+		t.Fatalf("set blocker in_progress: %v", err)
+	}
+	gates := mustLoadGates(t, s)
+	for i := 0; i < 10; i++ {
+		promoted, gateFailed, err := s.PromoteReadyFollowOns(gates)
+		if err != nil {
+			t.Fatalf("promote (iter %d): %v", i, err)
+		}
+		if len(promoted) != 0 || len(gateFailed) != 0 {
+			t.Fatalf("iter %d: promoted=%d gateFailed=%d, want 0/0 (blocker still in_progress)", i, len(promoted), len(gateFailed))
+		}
+	}
+	// Row is unchanged — still queued, still dormant.
+	d, err := s.GetDispatch(follow.ID)
+	if err != nil {
+		t.Fatalf("reload follow: %v", err)
+	}
+	if d.Status != model.DispatchQueued {
+		t.Fatalf("status = %q, want queued", d.Status)
+	}
+	if !d.QueuedUntilBlockersClear {
+		t.Fatal("queued_until_blockers_clear cleared while blocker still in_progress")
+	}
+}
+
+// TestPromoteReadyFollowOns_StampsBlockerSnapshot (BACI-246) — when a
+// blockers-clear follow-on promotes, the returned row carries a
+// BlockerSnapshot with one entry per blocker that the gate observed
+// at fire time. A diagnostic for "which blockers did the gate
+// consider cleared?" via `bacio history --op agent.followon.promote
+// -o json`.
+func TestPromoteReadyFollowOns_StampsBlockerSnapshot(t *testing.T) {
+	s, repo, blocked, blocker1 := seedBlockerFixture(t)
+	follow, err := s.AddBlockerFollowOnDispatch(repo.ID, blocked.ID, model.DispatchModePlan, "supervisor")
+	if err != nil {
+		t.Fatalf("AddBlockerFollowOnDispatch: %v", err)
+	}
+	// Add two more blockers (one done, one cancelled) so the gate
+	// sees three rows total at fire time.
+	blocker2, err := s.CreateIssue(repo.ID, nil, "second blocker", "", model.StateTodo, nil, "")
+	if err != nil {
+		t.Fatalf("create second blocker: %v", err)
+	}
+	if err := s.CreateRelation(blocker2.ID, blocked.ID, model.RelBlocks); err != nil {
+		t.Fatalf("create blocks edge 2: %v", err)
+	}
+	blocker3, err := s.CreateIssue(repo.ID, nil, "third blocker", "", model.StateTodo, nil, "")
+	if err != nil {
+		t.Fatalf("create third blocker: %v", err)
+	}
+	if err := s.CreateRelation(blocker3.ID, blocked.ID, model.RelBlocks); err != nil {
+		t.Fatalf("create blocks edge 3: %v", err)
+	}
+	// Close every blocker — gate clears.
+	if err := s.SetIssueState(blocker1.ID, model.StateDone); err != nil {
+		t.Fatalf("close blocker1: %v", err)
+	}
+	if err := s.SetIssueState(blocker2.ID, model.StateDone); err != nil {
+		t.Fatalf("close blocker2: %v", err)
+	}
+	if err := s.SetIssueState(blocker3.ID, model.StateCancelled); err != nil {
+		t.Fatalf("cancel blocker3: %v", err)
+	}
+	gates := mustLoadGates(t, s)
+	promoted, _, err := s.PromoteReadyFollowOns(gates)
+	if err != nil {
+		t.Fatalf("promote: %v", err)
+	}
+	if len(promoted) != 1 || promoted[0].ID != follow.ID {
+		t.Fatalf("promoted = %v, want one entry for %d", promoted, follow.ID)
+	}
+	snap := promoted[0].BlockerSnapshot
+	if len(snap) != 3 {
+		t.Fatalf("snapshot len = %d, want 3 — entries: %+v", len(snap), snap)
+	}
+	// Build a lookup of (key → state) for shape-independent assertions
+	// (the SELECT's row order is not guaranteed).
+	got := map[string]model.State{}
+	for _, o := range snap {
+		got[o.BlockerKey] = o.BlockerState
+	}
+	if got[blocker1.Key] != model.StateDone {
+		t.Errorf("blocker1 %q state = %q, want done", blocker1.Key, got[blocker1.Key])
+	}
+	if got[blocker2.Key] != model.StateDone {
+		t.Errorf("blocker2 %q state = %q, want done", blocker2.Key, got[blocker2.Key])
+	}
+	if got[blocker3.Key] != model.StateCancelled {
+		t.Errorf("blocker3 %q state = %q, want cancelled", blocker3.Key, got[blocker3.Key])
+	}
+}
+
+// TestPromoteReadyFollowOns_NoBlockerRowsRecorded (BACI-246) — a
+// blockers-clear follow-on whose `blocks` relation rows were
+// hard-deleted between queue and promote still gets promoted (the
+// EXISTS subquery returns empty, so the gate is "clear" by the
+// store's definition). The audit-row enrichment carries an EMPTY
+// BlockerSnapshot, not a nil — that's the forensic signal "the
+// relation rows were gone at fire time".
+func TestPromoteReadyFollowOns_NoBlockerRowsRecorded(t *testing.T) {
+	s, repo, blocked, blocker := seedBlockerFixture(t)
+	follow, err := s.AddBlockerFollowOnDispatch(repo.ID, blocked.ID, model.DispatchModePlan, "supervisor")
+	if err != nil {
+		t.Fatalf("AddBlockerFollowOnDispatch: %v", err)
+	}
+	// Drop the only `blocks` edge — leaves the dispatch's flag set
+	// but no rows for the EXISTS to find.
+	if _, err := s.DeleteRelation(blocker.ID, blocked.ID); err != nil {
+		t.Fatalf("delete relation: %v", err)
+	}
+	gates := mustLoadGates(t, s)
+	promoted, gateFailed, err := s.PromoteReadyFollowOns(gates)
+	if err != nil {
+		t.Fatalf("promote: %v", err)
+	}
+	if len(promoted) != 1 || len(gateFailed) != 0 {
+		t.Fatalf("promoted=%d gateFailed=%d, want 1/0", len(promoted), len(gateFailed))
+	}
+	if promoted[0].ID != follow.ID {
+		t.Fatalf("promoted id = %d, want %d", promoted[0].ID, follow.ID)
+	}
+	// The BlockerSnapshot is a non-nil empty slice — the "I checked
+	// and there were no blocker rows" forensic signal.
+	if promoted[0].BlockerSnapshot == nil {
+		t.Fatal("BlockerSnapshot is nil; want non-nil empty slice for blockers-clear variant with no rows")
+	}
+	if len(promoted[0].BlockerSnapshot) != 0 {
+		t.Fatalf("BlockerSnapshot len = %d, want 0 — entries: %+v", len(promoted[0].BlockerSnapshot), promoted[0].BlockerSnapshot)
+	}
+}
+
+// TestBindQueuedDispatch_RejectsReDormantRow (BACI-246) — the bind-time
+// belt-and-braces gate. If a dispatch row was promoted (queued, no
+// dormant flags) but a follow-on with a still-open blocker would also
+// match a naive `status='queued' AND delivered_at IS NULL` CAS, the
+// CAS must miss. Simulates the stale-matcher-snapshot race the
+// promote sweep alone can't close.
+func TestBindQueuedDispatch_RejectsReDormantRow(t *testing.T) {
+	s, repo, blocked, blocker := seedBlockerFixture(t)
+	// Insert a blockers-clear follow-on with the gate STILL OPEN
+	// (blocker is `todo`, the seed's default).
+	follow, err := s.AddBlockerFollowOnDispatch(repo.ID, blocked.ID, model.DispatchModePlan, "supervisor")
+	if err != nil {
+		t.Fatalf("AddBlockerFollowOnDispatch: %v", err)
+	}
+	// Need a target agent for the CAS — the row carries no target until
+	// the matcher binds it.
+	ag, _, err := s.UpsertAgent("vigilant-vole@claude.test", true)
+	if err != nil {
+		t.Fatalf("upsert agent: %v", err)
+	}
+	// First call: blocker is still open → CAS must miss with ErrNotFound,
+	// row stays queued + dormant.
+	if _, err := s.BindQueuedDispatch(follow.ID, ag.ID); !errIsNotFound(err) {
+		t.Fatalf("bind with open blocker: err = %v, want ErrNotFound", err)
+	}
+	d, err := s.GetDispatch(follow.ID)
+	if err != nil {
+		t.Fatalf("reload after first bind: %v", err)
+	}
+	if d.Status != model.DispatchQueued {
+		t.Fatalf("after rejected bind: status = %q, want queued", d.Status)
+	}
+	if !d.QueuedUntilBlockersClear {
+		t.Fatal("after rejected bind: queued_until_blockers_clear cleared")
+	}
+	// Close the blocker → gate clears → CAS now succeeds.
+	if err := s.SetIssueState(blocker.ID, model.StateDone); err != nil {
+		t.Fatalf("close blocker: %v", err)
+	}
+	bound, err := s.BindQueuedDispatch(follow.ID, ag.ID)
+	if err != nil {
+		t.Fatalf("bind with cleared gate: %v", err)
+	}
+	if bound.Status != model.DispatchPending {
+		t.Fatalf("post-bind status = %q, want pending", bound.Status)
+	}
+}
+
+// errIsNotFound is a small helper to keep the test's intent legible
+// (we don't import errors just for one Is() call).
+func errIsNotFound(err error) bool {
+	return err == ErrNotFound
+}

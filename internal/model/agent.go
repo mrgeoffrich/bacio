@@ -908,6 +908,28 @@ type AgentDispatch struct {
 	// BACI-179 rows once the blocker gate clears AND no open claim
 	// races in. Never set on rows in any state other than queued.
 	QueuedUntilBlockersClear bool `json:"queued_until_blockers_clear,omitempty"`
+	// BlockerSnapshot (BACI-246) is a transient, never-persisted slice
+	// of (key, state) pairs the promote sweep observed for this row's
+	// `blocks` predecessors at the moment its blockers-clear gate
+	// cleared. Populated only by Store.PromoteReadyFollowOns for
+	// blockers-clear variant rows and consumed by the controller's
+	// audit emitter; every other dispatch read path zeros the field
+	// (scanDispatch never sets it) so the stored row never carries a
+	// stale snapshot. Marshals to `blocker_snapshot` and is omitted
+	// when empty so wire payloads of normal dispatches stay clean.
+	// Pair of `[]struct{key,state}` rather than `[]store.BlockerObservation`
+	// to keep this package free of an internal/store import cycle.
+	BlockerSnapshot []DispatchBlockerObservation `json:"blocker_snapshot,omitempty"`
+}
+
+// DispatchBlockerObservation (BACI-246) mirrors store.BlockerObservation
+// — declared in package model so AgentDispatch can carry the snapshot
+// without dragging internal/store into the dependency graph. The store
+// layer converts its BlockerObservation rows into this shape when it
+// stamps PromoteReadyFollowOns's return slice.
+type DispatchBlockerObservation struct {
+	BlockerKey   string `json:"blocker_key"`
+	BlockerState State  `json:"blocker_state"`
 }
 
 // AgentLivenessThreshold is the gap after a session's last heartbeat

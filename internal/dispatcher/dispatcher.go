@@ -3,6 +3,7 @@ package dispatcher
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/mrgeoffrich/bacio/internal/model"
@@ -29,8 +30,15 @@ type Backend interface {
 // Matcher is the per-(repo, mode) FIFO queue matcher. Stateless — every
 // tick reads fresh state from the backend and writes binds back. Safe
 // to construct once per process and call Tick from a timer.
+//
+// The optional log surfaces rare race-loss notes (BACI-246) — today
+// only the gate-retighten CAS miss in tickMode, which is otherwise a
+// silent no-op. A nil log routes through slog.Default(). The matcher
+// has never been talkative on its hot path; only "the system
+// observably did something subtle" lines belong here.
 type Matcher struct {
-	b Backend
+	b   Backend
+	log *slog.Logger
 }
 
 // Bind records one successful queued→pending transition the matcher
@@ -51,6 +59,29 @@ type Bind struct {
 // one process matches at a time across the cluster).
 func New(b Backend) *Matcher {
 	return &Matcher{b: b}
+}
+
+// WithLogger returns m wired to log. Used by the leader service to
+// route rare BACI-246 gate-retighten notes through the same structured
+// logger as the rest of the controller's tick. Returning the same
+// receiver keeps the optional in "construct first, configure later"
+// shape rather than threading a logger through every dispatcher.New
+// call site.
+func (m *Matcher) WithLogger(log *slog.Logger) *Matcher {
+	if m == nil {
+		return nil
+	}
+	m.log = log
+	return m
+}
+
+// matcherLogger returns m.log, or slog.Default() if unset, so callers
+// don't need to nil-check on every line.
+func (m *Matcher) matcherLogger() *slog.Logger {
+	if m == nil || m.log == nil {
+		return slog.Default()
+	}
+	return m.log
 }
 
 // Tick walks every (repo, mode) group with queued dispatches and binds
@@ -196,7 +227,20 @@ func (m *Matcher) tickMode(
 	if err != nil {
 		// A concurrent process beat us to this row — fine, no-op and
 		// move on. The next tick will pick up whatever is still queued.
+		// BACI-246: the same ErrNotFound also covers the (rare) case
+		// where the row's dormant follow-on gate re-tightened between
+		// ListQueuedByRepoMode's snapshot and the bind — e.g. a blocker
+		// was flipped back to in_progress in that ~5 ms window. Surface
+		// it at Info level so the operator can correlate; the worker
+		// path (and the eventual re-promote sweep) recovers itself.
 		if errors.Is(err, store.ErrNotFound) {
+			m.matcherLogger().Info(
+				"bacio: matcher bind missed (row no longer bindable)",
+				"dispatch_id", oldest.ID,
+				"repo_id", repoID,
+				"mode", string(mode),
+				"agent", agentName,
+			)
 			return nil, nil
 		}
 		return nil, fmt.Errorf("matcher: bind dispatch %d: %w", oldest.ID, err)

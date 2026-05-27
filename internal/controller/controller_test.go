@@ -832,6 +832,75 @@ func TestFollowOnSweepIfLeader_GateFailWrites(t *testing.T) {
 	}
 }
 
+// TestFollowOnSweepIfLeader_BlockersClearPromoteCarriesSnapshot
+// (BACI-246) — when the promote sweep clears a blockers-clear
+// follow-on, the resulting `agent.followon.promote` audit row must
+// stamp `gate=blockers` plus a `blockers=[KEY:state,...]` clause
+// naming each blocker the gate observed. This is the diagnostic
+// surface that closes the "user saw a follow-on fire while the
+// blocker was non-terminal" gap — `bacio history --op
+// agent.followon.promote -o json` carries the answer.
+func TestFollowOnSweepIfLeader_BlockersClearPromoteCarriesSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.Open(filepath.Join(dir, "db.sqlite"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	repo, err := s.CreateRepo("BLOK", "blockers-clear-repo", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+	blocked, err := s.CreateIssue(repo.ID, nil, "blocked-side", "", model.StateTodo, nil, "")
+	if err != nil {
+		t.Fatalf("create blocked: %v", err)
+	}
+	blocker, err := s.CreateIssue(repo.ID, nil, "blocker-side", "", model.StateTodo, nil, "")
+	if err != nil {
+		t.Fatalf("create blocker: %v", err)
+	}
+	if err := s.CreateRelation(blocker.ID, blocked.ID, model.RelBlocks); err != nil {
+		t.Fatalf("create blocks edge: %v", err)
+	}
+	follow, err := s.AddBlockerFollowOnDispatch(repo.ID, blocked.ID, model.DispatchModePlan, "supervisor")
+	if err != nil {
+		t.Fatalf("AddBlockerFollowOnDispatch: %v", err)
+	}
+	// Close the blocker so the gate clears at promote time.
+	if err := s.SetIssueState(blocker.ID, model.StateDone); err != nil {
+		t.Fatalf("close blocker: %v", err)
+	}
+
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	leaderEl, _ := newFakeElector(t, true)
+
+	FollowOnSweepIfLeader(s, leaderEl, log)
+
+	rows, err := s.ListHistory(store.HistoryFilter{Op: "agent.followon.promote"})
+	if err != nil {
+		t.Fatalf("ListHistory: %v", err)
+	}
+	var row *model.HistoryEntry
+	for i := range rows {
+		if rows[i].TargetID != nil && *rows[i].TargetID == follow.ID {
+			row = rows[i]
+			break
+		}
+	}
+	if row == nil {
+		t.Fatalf("no agent.followon.promote row for dispatch %d", follow.ID)
+	}
+	if !strings.Contains(row.Details, "gate=blockers") {
+		t.Fatalf("promote row Details = %q, missing gate=blockers (the BACI-246 enrichment)", row.Details)
+	}
+	wantClause := fmt.Sprintf("blockers=[%s:done]", blocker.Key)
+	if !strings.Contains(row.Details, wantClause) {
+		t.Fatalf("promote row Details = %q, missing %q", row.Details, wantClause)
+	}
+}
+
 // TestNilGuards: every helper tolerates nil inputs without panicking —
 // this matches the "background work must never crash the host" contract.
 func TestNilGuards(t *testing.T) {

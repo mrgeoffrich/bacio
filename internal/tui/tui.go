@@ -268,7 +268,7 @@ func NewModel(s *store.Store, repo *model.Repo, el *leader.Elector, dbPath strin
 		store:      s,
 		elector:    el,
 		log:        log,
-		matcher:    dispatcher.New(s),
+		matcher:    dispatcher.New(s).WithLogger(log),
 		pinger:     idlepinger.New(s, pingerClient, log),
 		syncRunner: bsync.NewBackgroundRunner(s, dbPath, pingerActor, log),
 		tabs: []tab{
