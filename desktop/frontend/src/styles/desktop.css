@@ -2667,15 +2667,12 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   z-index: 20;
   animation: mk-pop-y var(--dur-medium) var(--ease-out);
 }
-.mk-shipped-popover-header {
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border-1);
-  font-size: 12px; font-weight: 600;
-  color: var(--fg-2);
-}
+/* BACI-244: the .mk-shipped-popover-header strip (and its CSS rule)
+   was removed — the topbar trigger pill already labels the popover,
+   so the inner header read as duplicate chrome. */
 
 /* BACI-221 scope picker — segmented row of three buttons sitting
-   between the header and the body. Pill-shaped active state matches
+   above the body. Pill-shaped active state matches
    the rest of the topbar's pill vocabulary; inactive buttons are
    muted-but-clickable. The strip stays inside the popover frame so
    the scope choice reads as scoped to this popover, not to a
@@ -2749,12 +2746,14 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   background: transparent;
   text-align: left;
   padding: 10px 12px;
-  /* BACI-221 two-line layout: a top line carrying KEY + title and a
-     meta line beneath it for the feature glyph + slug + when + PR
-     chip. The vertical stack gives long titles room to wrap (capped
-     at two lines via the -webkit-line-clamp on the title itself)
-     instead of being ellipsised at one line. */
-  display: flex; flex-direction: column; gap: 4px;
+  /* BACI-244 two-line layout: title-line carries [emoji] [title] with
+     the title as the dominant 13px line, sub-line carries
+     [KEY] · [when] in muted mono micro-type. Mirrors the
+     ActivityTray entry pattern (mk-tray-entry-head + mk-tray-entry-
+     title) — same row-typography vocabulary across the topbar's two
+     list surfaces. The vertical stack keeps the -webkit-line-clamp
+     two-line wrap on the title so long titles stay legible. */
+  display: flex; flex-direction: column; gap: 2px;
   border-bottom: 1px solid var(--border-1);
   cursor: pointer;
   font: inherit; color: var(--fg-1);
@@ -2766,17 +2765,20 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   outline: 1px dotted var(--border-focus); outline-offset: -2px;
 }
 
-.mk-shipped-row-top {
+/* Title line: dominant 13px ink, full row width minus the leading
+   feature glyph. The title flex-grows to fill the line and clamps
+   to two visual lines on overflow. */
+.mk-shipped-row-title-line {
   display: flex; align-items: baseline; gap: 8px;
   width: 100%; min-width: 0;
 }
-.mk-shipped-row-key {
-  font-family: var(--font-mono); font-size: 10px; letter-spacing: .04em;
-  color: var(--fg-3); flex-shrink: 0;
+.mk-shipped-row-feature {
+  font-size: 14px; line-height: 1; flex-shrink: 0;
 }
 .mk-shipped-row-title {
   flex: 1 1 auto;
-  font-size: 13px;
+  font-size: 13px; font-weight: 500;
+  color: var(--fg-1);
   /* BACI-221: two-line clamp instead of single-line ellipsis so long
      titles stay readable. The vendor-prefixed -webkit-line-clamp is
      the cross-browser way to do this without a custom JS truncate
@@ -2788,48 +2790,43 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   min-width: 0;
   line-height: 1.3;
 }
-.mk-shipped-row-meta {
-  display: flex; align-items: baseline; gap: 8px;
+
+/* Sub-line: muted micro-type carrying [KEY] · [when]. Override the
+   global .mk-card-id margin-left:auto so the KEY anchors to the
+   start of the row, same trick ActivityTray uses on its entry head
+   (app.css:1523). */
+.mk-shipped-row-sub-line {
+  display: flex; align-items: baseline; gap: 6px;
   width: 100%; min-width: 0;
   font-size: 11px; color: var(--fg-3);
 }
-.mk-shipped-row-feature {
-  font-size: 12px; flex-shrink: 0;
-}
-.mk-shipped-row-feature-slug {
-  flex: 0 1 auto;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  min-width: 0;
+.mk-shipped-row-sub-line .mk-card-id { margin-left: 0; }
+.mk-shipped-row-sub-sep {
+  color: var(--fg-3);
+  flex-shrink: 0;
 }
 .mk-shipped-row-when {
   flex-shrink: 0;
 }
-.mk-shipped-row-pr {
-  flex-shrink: 0;
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: var(--border-1);
-  color: var(--fg-2);
-  font-size: 10px; font-weight: 600; letter-spacing: .04em;
-  margin-left: auto;
-}
 
-/* Skeleton rows shown while the first fetch is in flight. Tuned for
-   the two-line layout — a title block and a thinner meta block. */
+/* Skeleton rows shown while the first fetch is in flight. BACI-244:
+   tuned to the new two-line shape — a wide title bar on the title-
+   line and a short KEY · when pair on the sub-line. Same heights as
+   the real rows so the body doesn't reflow when data lands. */
 .mk-shipped-row.is-skeleton {
   pointer-events: none;
   cursor: default;
 }
-.mk-shipped-row.is-skeleton .mk-shipped-row-key {
-  display: inline-block; width: 48px; height: 10px;
+.mk-shipped-row.is-skeleton .mk-shipped-row-title {
+  display: inline-block; height: 13px; width: 80%;
   background: var(--border-1); border-radius: 4px;
 }
-.mk-shipped-row.is-skeleton .mk-shipped-row-title {
-  display: inline-block; height: 12px;
+.mk-shipped-row.is-skeleton .mk-shipped-row-key {
+  display: inline-block; width: 56px; height: 10px;
   background: var(--border-1); border-radius: 4px;
 }
 .mk-shipped-row.is-skeleton .mk-shipped-row-when {
-  display: inline-block; width: 80px; height: 9px;
+  display: inline-block; width: 64px; height: 9px;
   background: var(--border-1); border-radius: 4px;
 }
 

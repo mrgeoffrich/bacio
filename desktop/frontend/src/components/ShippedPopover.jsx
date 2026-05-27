@@ -209,10 +209,10 @@ export default function ShippedPopover({ activeBoard, shippedCount, scope, onSco
       </button>
       {open && (
         <div className="mk-shipped-popover" role="dialog" aria-label="Recently shipped issues">
-          <div className="mk-shipped-popover-header">
-            Recently shipped
-          </div>
-          {/* BACI-221 scope picker: segmented strip of Today / Last
+          {/* BACI-244: the "Recently shipped" header strip was removed —
+              the topbar trigger pill ("Shipped · N") already labels the
+              popover, so the inner header was duplicative chrome.
+              BACI-221 scope picker: segmented strip of Today / Last
               Week / Forever buttons. Renders above the body so the
               picker is one tab-stop above the rows. */}
           <div className="mk-shipped-scope-strip" role="tablist" aria-label="Shipped time scope">
@@ -232,16 +232,19 @@ export default function ShippedPopover({ activeBoard, shippedCount, scope, onSco
           <div className="mk-shipped-popover-body">
             {status === 'loading' && (
               // Skeleton: three muted placeholder rows so the popover
-              // doesn't reflow when the real data arrives. The two-line
-              // layout means each skeleton is taller — the body height
-              // settles when the real rows land.
+              // doesn't reflow when the real data arrives. BACI-244
+              // mirrors the new two-line shape — a wide title bar on
+              // the title-line and a short KEY · when bar on the
+              // sub-line — so the placeholder heights match the real
+              // rows and the body height settles cleanly when data
+              // lands.
               [0, 1, 2].map((i) => (
                 <div key={i} className="mk-shipped-row is-skeleton">
-                  <span className="mk-shipped-row-top">
-                    <span className="mk-shipped-row-key" />
+                  <span className="mk-shipped-row-title-line">
                     <span className="mk-shipped-row-title" />
                   </span>
-                  <span className="mk-shipped-row-meta">
+                  <span className="mk-shipped-row-sub-line">
+                    <span className="mk-shipped-row-key" />
                     <span className="mk-shipped-row-when" />
                   </span>
                 </div>
@@ -260,6 +263,13 @@ export default function ShippedPopover({ activeBoard, shippedCount, scope, onSco
               </div>
             )}
             {status === 'ready' && rows.length > 0 && rows.map((r) => (
+              // BACI-244: row shape is now a two-line stack mirroring
+              // ActivityTray's entry pattern — title-line carries
+              // [feature emoji] [title] with the title getting the
+              // dominant 13px weight, sub-line carries [KEY] · [when]
+              // in muted mono micro-type. The PR pill and feature-slug
+              // text are dropped (the row click already opens the
+              // issue; the emoji alone signals the feature).
               <button
                 key={r.key}
                 type="button"
@@ -267,21 +277,16 @@ export default function ShippedPopover({ activeBoard, shippedCount, scope, onSco
                 onClick={() => pickRow(r.key)}
                 title={r.title}
               >
-                <span className="mk-shipped-row-top">
-                  <span className="mk-shipped-row-key mk-card-id">{r.key}</span>
-                  <span className="mk-shipped-row-title">{r.title}</span>
-                </span>
-                <span className="mk-shipped-row-meta">
+                <span className="mk-shipped-row-title-line">
                   {r.featureEmoji && (
                     <span className="mk-shipped-row-feature" aria-hidden="true">{r.featureEmoji}</span>
                   )}
-                  {r.featureSlug && (
-                    <span className="mk-shipped-row-feature-slug">{r.featureSlug}</span>
-                  )}
+                  <span className="mk-shipped-row-title">{r.title}</span>
+                </span>
+                <span className="mk-shipped-row-sub-line">
+                  <span className="mk-shipped-row-key mk-card-id">{r.key}</span>
+                  <span className="mk-shipped-row-sub-sep" aria-hidden="true">·</span>
                   <span className="mk-shipped-row-when">{formatWhen(r.terminalAt)}</span>
-                  {r.prUrl && (
-                    <span className="mk-shipped-row-pr" title={r.prUrl}>PR</span>
-                  )}
                 </span>
               </button>
             ))}
