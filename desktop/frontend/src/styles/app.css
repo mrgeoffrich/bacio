@@ -241,6 +241,70 @@ body { margin: 0; }
 @media (prefers-reduced-motion: reduce) {
   .mk-shipped-pill.is-flash { animation: none; }
 }
+/* BACI-240: the topbar Shipped pill's 3-digit odometer. Each digit
+   column clips a vertical 0-9 strip with `overflow:hidden`; the
+   visible digit is positioned by `transform: translateY(-d * 1em)`
+   interpolated by CSS transition. Scoped to `.mk-odometer` (rather
+   than added to the broad `.mk-pill`) so the topbar-wide tabular-
+   nums change is intentional, not a side effect.
+
+   The strip transition + reduced-motion override mirrors the
+   existing `.mk-shipped-pill.is-flash` pattern — `prefers-reduced-
+   motion` zeroes the transition so the odometer snaps to the new
+   digit without sliding. */
+.mk-odometer {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  line-height: 1;
+  vertical-align: baseline;
+  margin-left: 4px; /* visual breathing room from the "Shipped" word */
+}
+.mk-shipped-pill-label {
+  margin-right: 4px; /* matches the bullet gap pre-BACI-240 */
+}
+.mk-odometer-sr {
+  /* sr-only — the screen reader reads the integer; the visual
+     digit columns are aria-hidden. Same shape as the WCAG visually-
+     hidden recipe (no display:none, which screen readers honour). */
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0);
+  white-space: nowrap; border: 0;
+}
+.mk-odometer-col {
+  display: inline-block;
+  height: 1em;
+  width: 1ch; /* monospace digit width — keeps columns from jiggling */
+  overflow: hidden;
+  position: relative;
+  vertical-align: baseline;
+}
+.mk-odometer-strip {
+  display: block;
+  /* Transition the strip's translateY so the digit slides smoothly.
+     Duration matches the brief's ~600ms cap; cubic-out feels best for
+     a counter slide. The `transform-origin: top` keeps the slide
+     anchored so a re-paint mid-tween doesn't visually skip. */
+  transform-origin: top;
+  transition: transform 600ms cubic-bezier(0.215, 0.61, 0.355, 1);
+  will-change: transform;
+}
+.mk-odometer-digit {
+  display: block;
+  height: 1em;
+  line-height: 1em;
+  text-align: center;
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Snap, don't slide — the OdometerNumber RAF tween also short-
+     circuits to a snap under reduced motion, but zeroing the
+     CSS transition here is the belt-and-braces safeguard. */
+  .mk-odometer-strip { transition: none; }
+}
 /* BACI-193 + BACI-198: the destination slot Motion uses to anchor the
    shared-element flight. Sits absolutely positioned inside the pill.
    Motion's `layoutId` bridging interpolates the source element's

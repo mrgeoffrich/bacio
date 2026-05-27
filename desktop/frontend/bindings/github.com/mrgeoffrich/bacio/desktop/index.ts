@@ -19,6 +19,7 @@ export {
 export {
     AgentCard,
     ArchivePreferencesDTO,
+    AudioPreferencesDTO,
     Board,
     BoardCard,
     BoardColumn,

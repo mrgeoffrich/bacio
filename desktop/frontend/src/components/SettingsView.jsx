@@ -44,6 +44,8 @@ export default function SettingsView({
   archiveAutoEnabled,
   archiveRetentionDays,
   onChangeArchivePreferences,
+  audioEnabled,
+  onChangeAudioEnabled,
   columns,
   onClose,
   onTemplatesChanged,
@@ -370,6 +372,33 @@ export default function SettingsView({
                 className={`mk-segmented-btn ${showArchived === opt.id ? 'is-active' : ''}`}
                 aria-pressed={showArchived === opt.id}
                 onClick={() => onChangeShowArchived(opt.id)}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {/* BACI-240: ship-flourish ka-ching SFX toggle. Default off —
+            audio is opt-in. The play path is silently no-op'd by
+            prefers-reduced-motion and by the browser's autoplay
+            policy (the page needs at least one user gesture before
+            audio is allowed), so flipping this on is safe even on
+            accessibility profiles — it just stays quiet. */}
+        <section className="mk-settings-row">
+          <div className="mk-settings-row-text">
+            <div className="mk-settings-label">Ship sound</div>
+            <div className="mk-settings-hint">
+              When on, the topbar Shipped pill plays a short ka-ching whenever an issue lands in done (the same trigger as the existing card-fly animation). Off by default. Respects <code>prefers-reduced-motion</code> and the OS-level mute — the sound silently no-ops on those profiles rather than erroring.
+            </div>
+          </div>
+          <div className="mk-segmented" role="group" aria-label="Ship sound">
+            {SHOW_ARCHIVED_OPTIONS.map(opt => (
+              <button
+                key={String(opt.id)}
+                className={`mk-segmented-btn ${audioEnabled === opt.id ? 'is-active' : ''}`}
+                aria-pressed={audioEnabled === opt.id}
+                onClick={() => onChangeAudioEnabled(opt.id)}
               >
                 {opt.label}
               </button>

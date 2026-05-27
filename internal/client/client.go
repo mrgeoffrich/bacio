@@ -345,6 +345,12 @@ type Client interface {
 	// BACI-89 sync.background_enabled opt-out toggle.
 	GetSyncBackgroundEnabled(ctx context.Context) (bool, error)
 	SetSyncBackgroundEnabled(ctx context.Context, value, dryRun bool) (bool, error)
+	// GetUIShippedSfx / SetUIShippedSfx expose the BACI-240
+	// ui.shipped_sfx global toggle controlling whether the topbar
+	// Shipped pill plays a ka-ching SFX on genuine increments.
+	// Defaults to false (audio is opt-in).
+	GetUIShippedSfx(ctx context.Context) (bool, error)
+	SetUIShippedSfx(ctx context.Context, value, dryRun bool) (bool, error)
 	// SyncRegistry (BACI-108) returns the registry of sync repos this
 	// machine knows (one per sync_remotes row) with the project members
 	// each carries, plus the residual tracked project repos that don't

@@ -332,6 +332,35 @@ func (s *SettingsService) SetArchivePreferences(autoEnabled bool, retentionDays 
 	}, nil
 }
 
+// AudioPreferencesDTO is the BACI-240 ui.shipped_sfx toggle shaped
+// for the desktop Settings panel. Single boolean — same shape as
+// DisplayPreferencesDTO. Field name uses an underscore-free camelCase
+// for the wire (the Wails-generated TS binding uses this verbatim).
+type AudioPreferencesDTO struct {
+	ShippedSfx bool `json:"shippedSfx"`
+}
+
+// GetAudioPreferences returns the current ui.shipped_sfx value
+// (BACI-240). The desktop topbar's Shipped pill consults this to
+// gate the ka-ching SFX on a genuine ship.
+func (s *SettingsService) GetAudioPreferences() (AudioPreferencesDTO, error) {
+	v, err := s.client.GetUIShippedSfx(context.Background())
+	if err != nil {
+		return AudioPreferencesDTO{}, err
+	}
+	return AudioPreferencesDTO{ShippedSfx: v}, nil
+}
+
+// SetAudioPreferences writes ui.shipped_sfx and returns the refreshed
+// DTO (BACI-240). The client records the audit row.
+func (s *SettingsService) SetAudioPreferences(shippedSfx bool) (AudioPreferencesDTO, error) {
+	v, err := s.client.SetUIShippedSfx(context.Background(), shippedSfx, false)
+	if err != nil {
+		return AudioPreferencesDTO{}, err
+	}
+	return AudioPreferencesDTO{ShippedSfx: v}, nil
+}
+
 // SyncPreferencesDTO is the BACI-89 background-sync toggle shaped for
 // the desktop Sync view. Mirrors DisplayPreferencesDTO — same single-
 // boolean shape.

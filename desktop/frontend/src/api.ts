@@ -37,6 +37,7 @@ import {
   LeaderStatusDTO,
   PromptTemplateDTO,
   ArchivePreferencesDTO,
+  AudioPreferencesDTO,
   SyncPreferencesDTO,
   SyncRegistryDTO,
   SyncRepoDTO,
@@ -62,7 +63,7 @@ import { ClaimDTO } from '../bindings/github.com/mrgeoffrich/bacio/internal/agen
 // shape without learning a binding directory.
 import { WaitingState, WaitingKind, BoardCardFollowOn } from '../bindings/github.com/mrgeoffrich/bacio/internal/boardcards';
 
-export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureLinkedDoc, FeaturePlan, FeaturePlanEntry, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, ArchivePreferencesDTO, WaitingState, BoardCardFollowOn, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO, SyncSetupDTO, CollisionPreviewDTO, RenumberEntryDTO, RenameEntryDTO, RepoLinkResultDTO, ShippedIssueDTO, ShippedListDTO, LatestPlanDTO };
+export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureLinkedDoc, FeaturePlan, FeaturePlanEntry, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, ArchivePreferencesDTO, AudioPreferencesDTO, WaitingState, BoardCardFollowOn, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO, SyncSetupDTO, CollisionPreviewDTO, RenumberEntryDTO, RenameEntryDTO, RepoLinkResultDTO, ShippedIssueDTO, ShippedListDTO, LatestPlanDTO };
 // BACI-216: cross-transport alias. The web bundle's api.http.ts ships
 // the same name from its own TS-only shape so KanbanCard / IssueWorkspace
 // stay transport-agnostic.
@@ -819,6 +820,28 @@ export async function setArchivePreferences(
 ): Promise<ArchivePreferencesDTO> {
   try {
     return await SettingsService.SetArchivePreferences(autoEnabled, retentionDays);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// BACI-240: ui.shipped_sfx global toggle. When on, the topbar
+// Shipped pill plays a short ka-ching SFX on every genuine ship.
+// Defaults to false — audio is opt-in in a desktop dev tool.
+
+export async function getAudioPreferences(): Promise<AudioPreferencesDTO> {
+  try {
+    return await SettingsService.GetAudioPreferences();
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+export async function setAudioPreferences(
+  shippedSfx: boolean,
+): Promise<AudioPreferencesDTO> {
+  try {
+    return await SettingsService.SetAudioPreferences(shippedSfx);
   } catch (err) {
     throw normalize(err);
   }

@@ -1,0 +1,16 @@
+Assets in this directory are part of bacio (https://github.com/mrgeoffrich/bacio)
+and inherit the bacio repository's licence unless explicitly stated below.
+
+----------------------------------------------------------------------
+
+shipped-ka-ching.wav  (BACI-240)
+
+  Origin:     Generated procedurally in-process by scripts/gen_kaching.py
+              (a sum of two short envelope-shaped sine-partial bursts —
+              a "ka" thunk plus a "ching" bell). No third-party samples.
+  Licence:    CC0 1.0 Universal (Public Domain Dedication)
+              https://creativecommons.org/publicdomain/zero/1.0/
+  Maintained: Re-run `python3 scripts/gen_kaching.py
+              desktop/frontend/src/assets/shipped-ka-ching.wav` from the
+              repo root to regenerate the file. The script is committed
+              alongside as the auditable provenance record.

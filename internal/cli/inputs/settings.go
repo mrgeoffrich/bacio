@@ -145,6 +145,14 @@ type SettingsArchiveInput struct {
 	RetentionDays int  `json:"retention_days"`
 }
 
+// SettingsShippedSfxInput is the payload for `bacio settings
+// shipped-sfx --json` (BACI-240). The CLI verb doubles as get and
+// set: empty body reads the current value; non-empty `value` writes
+// it. Defaults to false — audio is opt-in in a desktop dev tool.
+type SettingsShippedSfxInput struct {
+	Value bool `json:"value"`
+}
+
 // SettingsDefaultFeatureInput is the payload for
 // `bacio settings default-feature --json` (BACI-235). Slug names the
 // per-repo default feature that auto-applies to issues created

@@ -73,6 +73,33 @@ export class ArchivePreferencesDTO {
 }
 
 /**
+ * AudioPreferencesDTO is the BACI-240 ui.shipped_sfx toggle shaped
+ * for the desktop Settings panel. Single boolean — same shape as
+ * DisplayPreferencesDTO. Field name uses an underscore-free camelCase
+ * for the wire (the Wails-generated TS binding uses this verbatim).
+ */
+export class AudioPreferencesDTO {
+    "shippedSfx": boolean;
+
+    /** Creates a new AudioPreferencesDTO instance. */
+    constructor($$source: Partial<AudioPreferencesDTO> = {}) {
+        if (!("shippedSfx" in $$source)) {
+            this["shippedSfx"] = false;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new AudioPreferencesDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): AudioPreferencesDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new AudioPreferencesDTO($$parsedSource as Partial<AudioPreferencesDTO>);
+    }
+}
+
+/**
  * Board is one bacio repo, offered in the top-nav repository selector.
  * 
  * The SyncEnabled / SyncInProgress / SyncLastAt / SyncLastError fields

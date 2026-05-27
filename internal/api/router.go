@@ -276,6 +276,14 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("GET /settings/archive-preferences", d.handleArchivePreferencesGet)
 	mux.HandleFunc("PUT /settings/archive-preferences", d.handleArchivePreferencesSet)
 
+	// BACI-240 ui.shipped_sfx global toggle — the topbar Shipped pill's
+	// ka-ching SFX gate. Sits alongside the display / archive routes,
+	// same single-boolean pattern (the wire payload is {shipped_sfx: bool}
+	// rather than a generic "value" to leave room for future audio toggles
+	// without breaking the existing field name).
+	mux.HandleFunc("GET /settings/audio-preferences", d.handleAudioPreferencesGet)
+	mux.HandleFunc("PUT /settings/audio-preferences", d.handleAudioPreferencesSet)
+
 	// BACI-235 per-repo default_feature. GET reads the current
 	// setting ({feature: <Feature|null>}); PUT sets it ({slug:
 	// "<slug>"}); DELETE clears it. The FK on default_feature_id is
