@@ -45,37 +45,40 @@ export default function Topbar({ boards, activeBoard, onPickBoard, onAddReposito
   const openIssueKey = issueMatch ? issueMatch[1] : null;
   const board = boards.find(b => b.prefix === activeBoard);
   const syncEnabled = !!board?.syncEnabled;
-  // BACI-89: the Sync badge is now a live status indicator, not just a
-  // static "enabled" pill. Spinner-ish pulse while a background sync
-  // runs; error variant when the last run failed; plain pill (with a
-  // last-synced hover) when idle.
-  //
-  // BACI-108: the pill is always rendered and is now a button — even
-  // unconfigured repos surface it so the operator has a one-click route
-  // into the standalone Sync view. The "Sync" label is the unconfigured
-  // default; the configured states keep their richer text.
+  // BACI-89: live status indicator with idle / in-progress / failed
+  // variants. BACI-108: always rendered (even unconfigured repos),
+  // always clickable — a one-click route into the standalone Sync
+  // view. BACI-238: the affordance is a compact icon button rather
+  // than a text pill — the Refresh glyph stays constant; the
+  // surrounding chrome carries the state (pistachio when
+  // idle-enabled, pulsing review while syncing, blocked-red on
+  // failure, muted when sync isn't configured yet), and the tooltip
+  // carries the per-state hover copy (last-synced time, in-progress
+  // hint, error detail).
   const syncInProgress = !!board?.syncInProgress;
   const syncLastError = board?.syncLastError || '';
   const syncLastAt = board?.syncLastAt || '';
-  let syncBadgeClass = 'mk-pill mk-sync-badge';
-  let syncBadgeLabel;
-  let syncBadgeTitle;
+  let syncBtnClass = 'mk-sync-btn';
+  let syncBtnLabel;
+  let syncBtnTooltip;
   if (syncInProgress) {
-    syncBadgeClass += ' is-syncing';
-    syncBadgeLabel = 'Syncing…';
-    syncBadgeTitle = 'Background sync in progress · click to open Sync settings';
+    syncBtnClass += ' is-syncing';
+    syncBtnLabel = 'Syncing…';
+    syncBtnTooltip = 'Background sync in progress · click to open Sync settings';
   } else if (syncLastError) {
-    syncBadgeClass += ' is-error';
-    syncBadgeLabel = 'Sync Failed';
-    syncBadgeTitle = `Last sync failed: ${syncLastError} · click to open Sync settings`;
+    syncBtnClass += ' is-error';
+    syncBtnLabel = 'Sync failed';
+    syncBtnTooltip = `Last sync failed: ${syncLastError} · click to open Sync settings`;
   } else if (syncEnabled) {
-    syncBadgeLabel = 'Sync Enabled';
-    syncBadgeTitle = syncLastAt
+    syncBtnClass += ' is-enabled';
+    syncBtnLabel = 'Sync enabled';
+    syncBtnTooltip = syncLastAt
       ? `Last synced ${formatSyncTime(syncLastAt)} · click to open Sync settings`
       : 'Background sync configured · click to open Sync settings';
   } else {
-    syncBadgeLabel = 'Sync';
-    syncBadgeTitle = 'Sync not configured for this repo · click to open Sync settings';
+    syncBtnClass += ' is-unconfigured';
+    syncBtnLabel = 'Sync';
+    syncBtnTooltip = 'Sync not configured for this repo · click to open Sync settings';
   }
   const isLeader = leaderState?.amLeader ?? false;
   // BACI-74: small pills tucked into the Agents button when the active
@@ -163,14 +166,16 @@ export default function Topbar({ boards, activeBoard, onPickBoard, onAddReposito
             </button>
           </Tooltip>
         )}
-        <button
-          type="button"
-          className={syncBadgeClass}
-          title={syncBadgeTitle}
-          onClick={onOpenSync}
-        >
-          {syncBadgeLabel}
-        </button>
+        <Tooltip label={syncBtnTooltip}>
+          <button
+            type="button"
+            className={syncBtnClass}
+            aria-label={syncBtnLabel}
+            onClick={onOpenSync}
+          >
+            <Icon name="refresh" />
+          </button>
+        </Tooltip>
         {isLeader && (
           <Tooltip label="This window holds the UI leader lease">
             <span className="mk-pill mk-leader-badge">Controlling</span>

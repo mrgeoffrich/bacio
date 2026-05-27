@@ -34,39 +34,20 @@
    lives in the right-hand cluster, so it aligns with .mk-icbtn instead. */
 .mk-search { transform: translateY(1px); }
 
-/* "Sync Enabled" badge — shown left of the repo selector when the repo
-   has git sync configured. Reuses .mk-pill chrome with the healthy
-   (pistachio) status colour.
-   BACI-108 made it a <button> (one-click route into the Sync view);
-   BACI-185 finishes the affordance by stripping the native button
-   chrome (so it visually matches the read-only pill it grew out of),
-   adding `cursor: pointer`, and giving it a subtle hover lift + a
-   focus ring so it reads as interactive on mouse and keyboard alike.
-   Matches the hover idiom used by .mk-card (translateY lift) and the
-   timing tokens used by every other topbar button. */
+/* "Sync Enabled" badge — the read-only pill rendered next to each
+   sync_remotes registry entry on the Sync settings view (SyncRepoCard).
+   The topbar used to render the same pill via a button wrapper, but
+   BACI-238 swapped that for the .mk-sync-btn icon button below; the
+   pill chrome stays here for the per-card status indicator, which is
+   a status display (not an entry point) and therefore reads as a
+   read-only label rather than an icon button.
+   .is-syncing / .is-error mirror the topbar variants so the two
+   surfaces stay visually consistent for the same underlying state. */
 .mk-sync-badge {
-  appearance: none; border: 0; font: inherit;
   background: var(--status-done-bg);
   color: var(--status-done);
   flex-shrink: 0;
-  cursor: pointer;
-  transition: transform var(--dur-fast) var(--ease-out),
-              box-shadow var(--dur-fast) var(--ease-out),
-              filter var(--dur-fast) var(--ease-out);
 }
-.mk-sync-badge:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-1);
-  filter: brightness(1.04);
-}
-.mk-sync-badge:active { transform: translateY(0); box-shadow: none; }
-.mk-sync-badge:focus-visible {
-  outline: 1px dotted var(--border-focus); outline-offset: 2px;
-}
-/* BACI-89: the Sync badge is a live status indicator. .is-syncing
-   pulses while a background sync runs; .is-error switches to the
-   blocked (red) status colour when the last run failed. The default
-   (idle, last run OK) keeps the pistachio "Sync Enabled" look above. */
 .mk-sync-badge.is-syncing {
   background: var(--status-review-bg);
   color: var(--status-review);
@@ -79,6 +60,60 @@
 @keyframes mk-sync-pulse {
   0%, 100% { opacity: 1; }
   50%      { opacity: 0.5; }
+}
+
+/* Sync entry point in the topbar — a compact 32×32 icon button left
+   of the repo selector that reads the repo's sync state at a glance.
+   BACI-108 first added the affordance as an always-clickable text
+   pill, BACI-89 turned it into a live status indicator (idle /
+   syncing / failed), and BACI-238 swapped the text pill for an icon
+   button to reclaim space in the right-hand cluster. The icon
+   (Refresh) stays constant; the surrounding chrome carries the state
+   colour and the spin animation, and the tooltip carries the
+   per-state hover copy (last-synced time, in-progress hint, or error
+   detail). Built on the .mk-icbtn shape — same 32×32 box, hover,
+   focus ring — so it lives in the same visual rhythm as the New
+   issue (`+`) and Settings buttons next to it. */
+.mk-sync-btn {
+  width: 32px; height: 32px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; background: transparent; border: 0;
+  flex-shrink: 0;
+  color: var(--fg-2);
+  transition: background var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+.mk-sync-btn .mk-icon { width: 16px; height: 16px; }
+.mk-sync-btn:hover { filter: brightness(1.04); }
+.mk-sync-btn:focus-visible {
+  outline: 1px dotted var(--border-focus); outline-offset: 2px;
+}
+/* State variants. Idle-enabled uses the healthy pistachio so an
+   operator catches at a glance that sync is live for this repo;
+   .is-syncing borrows the review (amber) palette and spins the
+   Refresh glyph; .is-error switches to the blocked (red) palette;
+   .is-unconfigured stays in the neutral .mk-icbtn key (no tinted
+   background) so the always-on affordance reads as quieter than the
+   three "live" states above. */
+.mk-sync-btn.is-enabled {
+  background: var(--status-done-bg);
+  color: var(--status-done);
+}
+.mk-sync-btn.is-enabled:hover { background: var(--status-done-bg); }
+.mk-sync-btn.is-syncing {
+  background: var(--status-review-bg);
+  color: var(--status-review);
+}
+.mk-sync-btn.is-syncing .mk-icon {
+  animation: mk-sync-spin 1.4s linear infinite;
+}
+.mk-sync-btn.is-error {
+  background: var(--status-blocked-bg);
+  color: var(--status-blocked);
+}
+.mk-sync-btn.is-unconfigured:hover { background: var(--bg-4); color: var(--fg-1); }
+@keyframes mk-sync-spin {
+  to { transform: rotate(360deg); }
 }
 .mk-leader-badge {
   background: color-mix(in srgb, var(--status-done-bg) 60%, transparent);
