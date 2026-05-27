@@ -67,9 +67,11 @@ git branch --show-current        # must not be main
 
 Abort if either check fails. Trust ONLY the `git rev-parse --show-toplevel` output for the current working folder.
 
-### 4. Fast-forward the worktree branch onto `origin/main`
+### 4. Position the worktree on the resolved base branch
 
-The harness branched this worktree from whatever the local `main` HEAD pointed at — that local main may be days stale on a machine that mostly dispatches and rarely pulls. Freshen the base before you edit anything so your PR lands on top of current `origin/main`, not on top of bugs that have already been fixed upstream:
+The harness branched this worktree from whatever the local `main` HEAD pointed at, regardless of which branch your PR actually wants to land on. Read the `<base_branch>` tag in your Task prompt — if absent (issue-less / pre-BACI-226 dispatches), treat it as `main`. Then move the worktree's HEAD onto the corresponding remote tip *before* you edit anything, so your PR lands on top of current `origin/<base_branch>` and not on top of bugs that have already been fixed upstream.
+
+**If `<base_branch>` is `main`**, fast-forward onto `origin/main`:
 
 ```bash
 git fetch origin main
@@ -77,6 +79,17 @@ git merge --ff-only origin/main
 ```
 
 Both commands MUST succeed. If `git fetch` fails (no network, no `origin` remote) or `git merge --ff-only` rejects (the worktree branch has diverged from `origin/main` somehow), surface the failure clearly and stop — don't fall back to working from a stale base, and don't try to resolve the divergence with a non-ff merge or rebase. The fast-forward is expected because Claude Code just created this branch from local main; a rejection is a real signal.
+
+**If `<base_branch>` is anything other than `main`** (a feature branch), reset hard onto its remote tip:
+
+```bash
+git fetch origin <base_branch>
+git reset --hard origin/<base_branch>
+```
+
+Substitute the literal branch name from the `<base_branch>` tag. `git reset --hard` is the right operation here, not `merge --ff-only`: the harness branched this worktree from local main, so a feature branch will correctly refuse to fast-forward. The throwaway `worktree-agent-<hash>` branch has no committed work yet, so the reset is safe — it's effectively a checkout of the feature tip onto the same branch name. The branch name itself stays `worktree-agent-<hash>`; bacio doesn't rename it, and the PR's source-branch name is cosmetic.
+
+A `git fetch` failure on a non-main base means `origin/<base_branch>` doesn't exist on the remote — either the feature's `branch_name` is a typo, or nobody has pushed the feature branch yet. Surface the message and stop. Do not fall back to `main`. Do not `git push -u origin <base_branch>` to create it. The user will fix the missing branch (push it, or correct the feature's `branch_name`) and re-dispatch.
 
 ### 5. Read the project conventions
 
