@@ -28,7 +28,7 @@ function stateLabel(s) {
   return STATE_LABELS[s] ?? s;
 }
 
-function KanbanCard({ card, cardsByKey, promptConfig, stateGraph, isDragging, compact, onDragStart, onDragEnd, onOpen, onDispatch, onDispatchChain, onCancelWaiting, onOpenQuestion, onOpenIssue, onQuickEval, isPinned, onTogglePin, onSetFollowOn, onCancelFollowOn, isTrayHover, isJumping }) {
+function KanbanCard({ card, cardsByKey, promptConfig, stateGraph, isDragging, compact, onDragStart, onDragEnd, onOpen, onDispatch, onDispatchChain, onCancelWaiting, onOpenQuestion, onOpenIssue, onQuickEval, onSetFollowOn, onCancelFollowOn, isTrayHover, isJumping }) {
   // BACI-75: local-only expansion state for the Tasks pill. Resets on
   // unmount (board switch, repo switch, hard refresh) — that's
   // intentional, we don't want to persist a row-level UI toggle.
@@ -258,28 +258,6 @@ function KanbanCard({ card, cardsByKey, promptConfig, stateGraph, isDragging, co
       onDragEnd={onDragEnd}
       onClick={onOpen}
     >
-      {/*
-        BACI-192: pin corner — a decorative triangular clip-path
-        overlay in the top-right of the card that toggles activity-tray
-        membership. Faint outline by default, hover brightens, pinned
-        renders solid accent. The element is a real <button> for a11y
-        (aria-pressed reflects state) but visually a corner shape; the
-        16×16 hit target is small by design (the canonical pin gesture
-        also lives in the tray's PINNED row dismiss). Sits before
-        .mk-card-top so the absolute positioning slides under the
-        existing top row content rather than displacing the issue key.
-      */}
-      <button
-        type="button"
-        className={`mk-card-pin-corner ${isPinned ? 'is-pinned' : ''}`}
-        aria-pressed={!!isPinned}
-        aria-label={isPinned ? 'Unpin from Activity' : 'Pin to Activity'}
-        title={isPinned ? 'Unpin from Activity' : 'Pin to Activity'}
-        onClick={(e) => {
-          e.stopPropagation();
-          if (onTogglePin) onTogglePin(card.key);
-        }}
-      />
       <div className="mk-card-top">
         {/*
           BACI-172: per-feature glyph rendered top-left of the card,
