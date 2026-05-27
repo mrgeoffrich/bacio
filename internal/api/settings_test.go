@@ -51,30 +51,6 @@ func TestPromptTemplatesListAfterSet(t *testing.T) {
 	}
 }
 
-// ---------- list (states) ----------
-
-func TestPromptStatesListAllDefaults(t *testing.T) {
-	ts, _ := newTestAPI(t, api.Options{})
-	resp, body := apiGet(t, ts.URL+"/settings/templates/states")
-	if resp.StatusCode != 200 {
-		t.Fatalf("status: %d body: %s", resp.StatusCode, body)
-	}
-	var out map[string][]string
-	if err := json.Unmarshal(body, &out); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	for _, slug := range model.BuiltinTemplateSlugs() {
-		got, ok := out[slug]
-		if !ok {
-			t.Fatalf("missing mode %q in list", slug)
-		}
-		want := model.DefaultPromptStates(model.DispatchMode(slug))
-		if len(got) != len(want) {
-			t.Fatalf("mode %q states len: got %d want %d", slug, len(got), len(want))
-		}
-	}
-}
-
 // ---------- set body ----------
 
 func TestPromptTemplateSetHappy(t *testing.T) {
@@ -203,76 +179,33 @@ func TestPromptTemplateResetDryRun(t *testing.T) {
 	}
 }
 
-// ---------- set states ----------
+// ---------- BACI-252 regression: deleted endpoints stay 404 ----------
 
-func TestPromptStatesSetHappy(t *testing.T) {
-	ts, s := newTestAPI(t, api.Options{})
-	resp, body := apiReq(t, "PUT",
-		ts.URL+"/settings/templates/review/states",
-		map[string]any{"slug": "review", "states": []string{"in_review", "needs_action"}},
-		map[string]string{"X-Actor": "agent-alice"})
-	if resp.StatusCode != 200 {
-		t.Fatalf("status: %d body: %s", resp.StatusCode, body)
-	}
-	stored, _ := s.GetPromptStates(model.DispatchModeReview)
-	got := make([]string, len(stored))
-	for i, st := range stored {
-		got[i] = string(st)
-	}
-	if strings.Join(got, ",") != "in_review,needs_action" {
-		t.Fatalf("states not persisted: %v", got)
-	}
-}
-
-func TestPromptStatesSetRejectsEmpty(t *testing.T) {
+// TestRetiredStatesEndpointsAreUnreachable guards against accidental
+// re-introduction of the BACI-241 / BACI-245 state-gate plumbing.
+// Each of the four routes was deleted in BACI-252; the router serves
+// no handler at any of these paths. The exact status code depends on
+// whether the deleted path collides with a surviving `{mode}` template
+// route — 404 (no route at all) and 405 (method-not-allowed because
+// the path matches a different verb's wildcard) are both acceptable
+// "this endpoint is gone" signals; 200/201 is the regression we are
+// guarding against.
+func TestRetiredStatesEndpointsAreUnreachable(t *testing.T) {
 	ts, _ := newTestAPI(t, api.Options{})
-	resp, _ := apiReq(t, "PUT", ts.URL+"/settings/templates/plan/states",
-		map[string]any{"states": []string{}}, nil)
-	if resp.StatusCode != 400 {
-		t.Fatalf("status: %d", resp.StatusCode)
+	gone := []struct {
+		method string
+		path   string
+	}{
+		{"GET", "/settings/state-graph"},
+		{"GET", "/settings/templates/states"},
+		{"PUT", "/settings/templates/plan/states"},
+		{"DELETE", "/settings/templates/plan/states"},
 	}
-}
-
-func TestPromptStatesSetRejectsInvalidState(t *testing.T) {
-	ts, _ := newTestAPI(t, api.Options{})
-	resp, _ := apiReq(t, "PUT", ts.URL+"/settings/templates/plan/states",
-		map[string]any{"states": []string{"todo", "bogus"}}, nil)
-	if resp.StatusCode != 400 {
-		t.Fatalf("status: %d", resp.StatusCode)
-	}
-}
-
-func TestPromptStatesSetDryRun(t *testing.T) {
-	ts, s := newTestAPI(t, api.Options{})
-	resp, _ := apiReq(t, "PUT",
-		ts.URL+"/settings/templates/plan/states?dry_run=true",
-		map[string]any{"states": []string{"todo", "in_progress"}}, nil)
-	if resp.StatusCode != 200 || resp.Header.Get("X-Dry-Run") != "applied" {
-		t.Fatalf("status: %d", resp.StatusCode)
-	}
-	stored, _ := s.GetPromptStates(model.DispatchModePlan)
-	want := model.DefaultPromptStates(model.DispatchModePlan)
-	if len(stored) != len(want) {
-		t.Fatalf("dry-run wrote states: got %v, want default %v", stored, want)
-	}
-}
-
-// ---------- reset states ----------
-
-func TestPromptStatesResetHappy(t *testing.T) {
-	ts, s := newTestAPI(t, api.Options{})
-	if err := s.SetPromptStates(model.DispatchModeReview, []model.State{model.StateDone}); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-	resp, _ := apiReq(t, "DELETE", ts.URL+"/settings/templates/review/states",
-		nil, map[string]string{"X-Actor": "agent-alice"})
-	if resp.StatusCode != 200 {
-		t.Fatalf("status: %d", resp.StatusCode)
-	}
-	stored, _ := s.GetPromptStates(model.DispatchModeReview)
-	want := model.DefaultPromptStates(model.DispatchModeReview)
-	if len(stored) != len(want) {
-		t.Fatalf("reset did not revert: got %v want %v", stored, want)
+	for _, g := range gone {
+		resp, body := apiReq(t, g.method, ts.URL+g.path, nil, nil)
+		if resp.StatusCode != 404 && resp.StatusCode != 405 {
+			t.Errorf("%s %s: status=%d body=%s, want 404 or 405", g.method, g.path, resp.StatusCode, body)
+		}
 	}
 }
 

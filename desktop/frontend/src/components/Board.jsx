@@ -46,7 +46,7 @@ function persistBoardScroll(repo, offset) {
   }
 }
 
-export default function Board({ activeBoard, columns, cards, promptConfig, stateGraph, onMoveCard, onOpenCard, onOpenIssue, onDispatchFromCard, onDispatchChainFromCard, onCancelWaitingCard, onAfterQuestionResolved, onQuickEval, onSetFollowOn, onCancelFollowOn, hoveredKey, jumpKey, flyingShipKey }) {
+export default function Board({ activeBoard, columns, cards, promptConfig, onMoveCard, onOpenCard, onOpenIssue, onDispatchFromCard, onDispatchChainFromCard, onCancelWaitingCard, onAfterQuestionResolved, onQuickEval, onSetFollowOn, onCancelFollowOn, hoveredKey, jumpKey, flyingShipKey }) {
   const [dragKey, setDragKey] = useState(null);
   const [overCol, setOverCol] = useState(null);
   // BACI-53: the kanban card "? N" pill opens the shared
@@ -279,7 +279,6 @@ export default function Board({ activeBoard, columns, cards, promptConfig, state
                         card={card}
                         cardsByKey={cardsByKey}
                         promptConfig={promptConfig}
-                        stateGraph={stateGraph}
                         isDragging={dragKey === card.key}
                         compact={userCompact.has(col.state)}
                         onDragStart={() => { if (!card.taken && !card.waitingState) setDragKey(card.key); }}

@@ -22,8 +22,8 @@ import * as $models from "./models.js";
  * BACI-67 imperative override rendered on the dispatch action menus;
  * pass "" to skip the override (the UI derives one from name).
  */
-export function AddPromptTemplate(slug: string, name: string, body: string, states: string[], actionLabel: string): $CancellablePromise<$models.PromptTemplateDTO> {
-    return $Call.ByID(2314996611, slug, name, body, states, actionLabel).then(($result: any) => {
+export function AddPromptTemplate(slug: string, name: string, body: string, actionLabel: string): $CancellablePromise<$models.PromptTemplateDTO> {
+    return $Call.ByID(2314996611, slug, name, body, actionLabel).then(($result: any) => {
         return $$createType0($result);
     });
 }
@@ -128,7 +128,7 @@ export function LinkPhantomRepo(prefix: string, path: string): $CancellablePromi
  * ListPromptTemplates returns every registered template in store
  * iteration order — the desktop Settings panel renders them in this
  * order and the per-card action menu in the Board iterates the same
- * list filtered by state-gate.
+ * list (with reserved-slug filtering applied on the React seam).
  */
 export function ListPromptTemplates(): $CancellablePromise<$models.PromptTemplateDTO[]> {
     return $Call.ByID(1001854565).then(($result: any) => {
@@ -187,16 +187,6 @@ export function SavePromptActionLabel(slug: string, actionLabel: string): $Cance
  */
 export function SavePromptConcurrency(slug: string, concurrencyLimit: number): $CancellablePromise<$models.PromptTemplateDTO> {
     return $Call.ByID(1315581830, slug, concurrencyLimit).then(($result: any) => {
-        return $$createType0($result);
-    });
-}
-
-/**
- * SavePromptStates stores a new state-gate for one template. An empty
- * slice reverts a built-in to its embedded default gate.
- */
-export function SavePromptStates(slug: string, states: string[]): $CancellablePromise<$models.PromptTemplateDTO> {
-    return $Call.ByID(1803653057, slug, states).then(($result: any) => {
         return $$createType0($result);
     });
 }

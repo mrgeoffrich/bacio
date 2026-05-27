@@ -61,8 +61,6 @@ export {
     SetupSyncIn,
     ShippedIssueDTO,
     ShippedListDTO,
-    StateEdgeDTO,
-    StateGraphDTO,
     SyncPreferencesDTO,
     SyncRegistryDTO,
     SyncRepoDTO,

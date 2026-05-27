@@ -97,10 +97,6 @@ func TestBuiltinTemplateScope(t *testing.T) {
 	if got := BuiltinTemplateActionLabel(BuiltinTemplateScope); got != "Scope" {
 		t.Errorf("BuiltinTemplateActionLabel(scope) = %q, want %q", got, "Scope")
 	}
-	states := DefaultPromptStatesForBuiltinSlug(BuiltinTemplateScope)
-	if len(states) != 1 || states[0] != StateTodo {
-		t.Errorf("DefaultPromptStatesForBuiltinSlug(scope) = %v, want [%q]", states, StateTodo)
-	}
 	body := DefaultPromptBodyForBuiltinSlug(BuiltinTemplateScope)
 	if strings.TrimSpace(body) == "" {
 		t.Fatal("DefaultPromptBodyForBuiltinSlug(scope) is empty — every built-in needs a shipped default")

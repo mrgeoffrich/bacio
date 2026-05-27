@@ -31,9 +31,7 @@ type stageRow struct {
 	label           string
 	body            string
 	actionLabel     string
-	states          []model.State
 	bodyIsDefault   bool
-	statesDefault   bool
 	actionIsDefault bool
 	isBuiltin       bool
 }
@@ -41,8 +39,8 @@ type stageRow struct {
 // loadStageRowsFromTemplates builds the per-template Settings list from
 // the canonical store iteration order. This is the new shape that
 // supports arbitrary templates; the older loadStageRows entry point
-// from a slug→body / slug→states pair of maps is gone — every caller
-// uses store.ListPromptTemplates directly.
+// from a slug→body pair of maps is gone — every caller uses
+// store.ListPromptTemplates directly.
 func loadStageRowsFromTemplates(templates []*store.PromptTemplate) []stageRow {
 	rows := make([]stageRow, 0, len(templates))
 	for _, t := range templates {
@@ -56,9 +54,7 @@ func loadStageRowsFromTemplates(templates []*store.PromptTemplate) []stageRow {
 			label:           label,
 			body:            t.Body,
 			actionLabel:     t.ActionLabel,
-			states:          append([]model.State(nil), t.AllowedStates...),
 			bodyIsDefault:   t.IsBuiltin && t.Body == model.DefaultPromptBodyForBuiltinSlug(t.Slug),
-			statesDefault:   t.IsBuiltin && sameStates(t.AllowedStates, model.DefaultPromptStatesForBuiltinSlug(t.Slug)),
 			actionIsDefault: t.IsBuiltin && t.ActionLabel == defAction,
 			isBuiltin:       t.IsBuiltin,
 		})
@@ -158,9 +154,9 @@ func renderSettingsList(width, height int, stages []stageRow, cursor int, err er
 		if action == "" {
 			action = st.label
 		}
-		line := fmt.Sprintf("%s%-18s %s  %s  %s · %s",
+		line := fmt.Sprintf("%s%-18s %s  %s · %s",
 			marker, st.label,
-			chip("body", st.bodyIsDefault), chip("states", st.statesDefault),
+			chip("body", st.bodyIsDefault),
 			chip("action", st.actionIsDefault || (st.actionLabel == "" && !st.isBuiltin)),
 			mutedStyle.Render(action))
 		styled := lipgloss.NewStyle().Width(innerWidth).Padding(0, 1)
@@ -181,20 +177,3 @@ func renderSettingsList(width, height int, stages []stageRow, cursor int, err er
 	return box.Render(content)
 }
 
-// sameStates reports whether two state slices hold the same set,
-// order-insensitive — used to derive the "still default" gate chip.
-func sameStates(a, b []model.State) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	seen := make(map[model.State]bool, len(a))
-	for _, s := range a {
-		seen[s] = true
-	}
-	for _, s := range b {
-		if !seen[s] {
-			return false
-		}
-	}
-	return true
-}

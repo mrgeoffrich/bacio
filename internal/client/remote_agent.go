@@ -428,14 +428,15 @@ func (c *remoteClient) ListTodosBySessionsAndIssue(ctx context.Context, pairs []
 // get HTTP parity (the channel is per-process; no external caller
 // should be enqueuing asks).
 
-// Prompt templates + state-gates landed HTTP parity in BACI-36 for the
-// legacy four verbs (Get/SetPromptTemplate(s), Get/SetPromptStates);
-// these thread through the same `c.do(...)` pattern as the BACI-34
-// agent verbs. An empty body on Set* is the reset signal: the helper
-// switches the HTTP verb from PUT to DELETE so the server's reset
-// handler runs. The cli/settings.go applyTemplate / applyTemplateStates
-// helpers send "" / nil to mean "revert to default" — this layer
-// transparently turns that into a DELETE.
+// Prompt templates landed HTTP parity in BACI-36 for the body verbs
+// (Get/SetPromptTemplate(s)); these thread through the same
+// `c.do(...)` pattern as the BACI-34 agent verbs. An empty body on
+// SetPromptTemplate is the reset signal: the helper switches the
+// HTTP verb from PUT to DELETE so the server's reset handler runs.
+// The cli/settings.go applyTemplate helper sends "" to mean "revert
+// to default" — this layer transparently turns that into a DELETE.
+// BACI-252 retired the per-template state-gate, so the SetPromptStates
+// remote shim is gone alongside the CLI verb.
 //
 // The newer typed CRUD methods (List/GetPromptTemplate, AddPromptTemplate,
 // RenamePromptTemplate, DeletePromptTemplate, RestoreBuiltinPromptTemplates)
@@ -502,30 +503,6 @@ func (c *remoteClient) SetPromptTemplate(ctx context.Context, mode, body string,
 		return c.do(ctx, http.MethodDelete, path, q, nil, nil)
 	}
 	in := map[string]string{"slug": mode, "body": body}
-	return c.do(ctx, http.MethodPut, path, q, in, nil)
-}
-
-func (c *remoteClient) GetPromptStates(ctx context.Context) (map[string][]string, error) {
-	var out map[string][]string
-	if err := c.do(ctx, http.MethodGet, "/settings/templates/states", nil, nil, &out); err != nil {
-		return nil, err
-	}
-	if out == nil {
-		out = map[string][]string{}
-	}
-	return out, nil
-}
-
-func (c *remoteClient) SetPromptStates(ctx context.Context, mode string, states []string, dryRun bool) error {
-	q := url.Values{}
-	if dryRun {
-		q.Set("dry_run", "true")
-	}
-	path := "/settings/templates/" + url.PathEscape(mode) + "/states"
-	if len(states) == 0 {
-		return c.do(ctx, http.MethodDelete, path, q, nil, nil)
-	}
-	in := map[string]any{"slug": mode, "states": states}
 	return c.do(ctx, http.MethodPut, path, q, in, nil)
 }
 

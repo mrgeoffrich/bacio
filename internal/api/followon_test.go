@@ -104,10 +104,10 @@ func TestREST_QueueFollowOnDryRun(t *testing.T) {
 // a in_progress issue". After dropping the queue-time gate the call
 // must 201 with a dormant row attached to the parent.
 //
-// The fire-time gate replaces the queue-time gate: covered by the
-// store-level tests in TestPromoteReadyFollowOns_GateFailCancels +
-// the controller-level audit test
-// TestFollowOnSweepIfLeader_GateFailWrites.
+// BACI-252 retired the BACI-195 fire-time gate too — the controller's
+// promote sweep now clears the dormant flag without re-checking a
+// per-template state-gate, so the follow-on always promotes when its
+// predecessor settles.
 func TestREST_QueueFollowOnInProgress_BACI195(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
@@ -294,10 +294,11 @@ func TestREST_DispatchChainHappyPath(t *testing.T) {
 	assertHistoryOps(t, s, []string{"agent.queue", "agent.followon.queue"})
 }
 
-// TestREST_DispatchChainStateGate (BACI-209) — a primary mode whose
-// state-gate doesn't admit the issue's current state returns 400 and
-// writes nothing.
-func TestREST_DispatchChainStateGate(t *testing.T) {
+// TestREST_DispatchChainAcceptsAnyPrimaryState (BACI-252 regression)
+// — the chain verb no longer rejects a primary mode whose old default
+// gate didn't admit the issue's state. `plan` from `in_review` was
+// the canonical refusal case; both rows now land.
+func TestREST_DispatchChainAcceptsAnyPrimaryState(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	iss := seedIssue(t, s, repo, "in-review card")
@@ -311,15 +312,12 @@ func TestREST_DispatchChainStateGate(t *testing.T) {
 			"mode":           string(model.DispatchModePlan),
 			"follow_on_mode": string(model.DispatchModeImplement),
 		})
-	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("status %d, body %s", resp.StatusCode, raw)
-	}
-	if !strings.Contains(string(raw), "can't run from") {
-		t.Errorf("body missing gate-miss hint: %s", raw)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status %d, body %s, want 201 (BACI-252: no state-gate)", resp.StatusCode, raw)
 	}
 	ds, _ := s.ListDispatches(store.DispatchFilter{RepoID: &repo.ID})
-	if len(ds) != 0 {
-		t.Fatalf("gate-miss landed %d row(s), want 0", len(ds))
+	if len(ds) != 2 {
+		t.Fatalf("chain wrote %d row(s), want 2 (parent + dormant follow-on)", len(ds))
 	}
 }
 

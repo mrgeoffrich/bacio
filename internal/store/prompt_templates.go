@@ -2,7 +2,6 @@ package store
 
 import (
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -15,11 +14,11 @@ import (
 // in the prompt_templates table. Slug is the stable storage/CLI
 // identifier; Name is the human-visible label. Body is the prompt text
 // (with the {{issue_id}} / {{issue_title}} / {{repo_prefix}} tokens
-// substituted at dispatch time). AllowedStates is the state-gate.
-// IsBuiltin is informational only — it does NOT gate deletion.
-// ConcurrencyLimit (BACI-51) caps the in-flight (pending+delivered,
-// excluding bacio-channel setup rows) dispatches per (repo, mode) the
-// background matcher will allow; 0 = unlimited.
+// substituted at dispatch time). IsBuiltin is informational only — it
+// does NOT gate deletion. ConcurrencyLimit (BACI-51) caps the
+// in-flight (pending+delivered, excluding bacio-channel setup rows)
+// dispatches per (repo, mode) the background matcher will allow;
+// 0 = unlimited.
 // ActionLabel (BACI-67) is the imperative form ("Plan", "Design", …)
 // rendered on the dispatch action menus on the kanban card and the
 // issue workspace shelf. The activity pill on a taken card still
@@ -27,25 +26,23 @@ import (
 // "derive from Name" — model.DeriveActionLabel runs on the stored
 // Name as a UI-side fallback.
 type PromptTemplate struct {
-	ID               int64         `json:"id"`
-	Slug             string        `json:"slug"`
-	Name             string        `json:"name"`
-	Body             string        `json:"body"`
-	AllowedStates    []model.State `json:"allowed_states"`
-	IsBuiltin        bool          `json:"is_builtin"`
-	ConcurrencyLimit int           `json:"concurrency_limit"`
-	ActionLabel      string        `json:"action_label"`
-	CreatedAt        time.Time     `json:"created_at"`
-	UpdatedAt        time.Time     `json:"updated_at"`
+	ID               int64     `json:"id"`
+	Slug             string    `json:"slug"`
+	Name             string    `json:"name"`
+	Body             string    `json:"body"`
+	IsBuiltin        bool      `json:"is_builtin"`
+	ConcurrencyLimit int       `json:"concurrency_limit"`
+	ActionLabel      string    `json:"action_label"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 // AddPromptTemplateIn is the input for AddPromptTemplate. Slug and Name
-// are required and validated; Body and AllowedStates default to empty.
+// are required and validated; Body defaults to empty.
 type AddPromptTemplateIn struct {
-	Slug          string
-	Name          string
-	Body          string
-	AllowedStates []model.State
+	Slug string
+	Name string
+	Body string
 	// IsBuiltin is only set by the seed step in migrate() — user-created
 	// templates always store IsBuiltin = false.
 	IsBuiltin bool
@@ -63,16 +60,14 @@ type AddPromptTemplateIn struct {
 // UpdatePromptTemplatePatch is the partial patch for UpdatePromptTemplate.
 // Pointer-of-string lets a caller distinguish "leave unchanged" (nil)
 // from "set to empty" (non-nil empty string), matching the convention
-// used elsewhere in the store layer. AllowedStates uses a sentinel:
-// nil = leave unchanged, non-nil (even empty) = replace.
-// ConcurrencyLimit follows the same pointer pattern; *int is nil when
-// the caller doesn't want to touch the limit. ActionLabel (BACI-67)
-// follows the same *string pattern — nil = leave alone, non-nil empty
-// = clear the override (the UI then derives from Name).
+// used elsewhere in the store layer. ConcurrencyLimit follows the same
+// pointer pattern; *int is nil when the caller doesn't want to touch
+// the limit. ActionLabel (BACI-67) follows the same *string pattern —
+// nil = leave alone, non-nil empty = clear the override (the UI then
+// derives from Name).
 type UpdatePromptTemplatePatch struct {
 	Name             *string
 	Body             *string
-	AllowedStates    *[]model.State
 	ConcurrencyLimit *int
 	ActionLabel      *string
 }
@@ -132,85 +127,21 @@ func ValidatePromptTemplateBody(s string) (string, error) {
 	return ValidateBody(s, "prompt template", false)
 }
 
-// ValidatePromptTemplateStates validates and canonicalises the state-
-// gate: every entry must parse as a known state; duplicates are
-// rejected. Order is preserved (so the stored value matches what the UI
-// rendered when the user toggled the chips).
-func ValidatePromptTemplateStates(states []model.State) ([]model.State, error) {
-	seen := make(map[model.State]bool, len(states))
-	out := make([]model.State, 0, len(states))
-	for _, raw := range states {
-		st, err := model.ParseState(string(raw))
-		if err != nil {
-			return nil, err
-		}
-		if seen[st] {
-			return nil, fmt.Errorf("duplicate state %q in prompt state-gate", st)
-		}
-		seen[st] = true
-		out = append(out, st)
-	}
-	return out, nil
-}
-
-// encodeStates renders []model.State as the JSON-array form stored in
-// prompt_templates.allowed_states_json. Always non-nil so the column
-// never holds NULL.
-func encodeStates(states []model.State) (string, error) {
-	if states == nil {
-		states = []model.State{}
-	}
-	strs := make([]string, len(states))
-	for i, s := range states {
-		strs[i] = string(s)
-	}
-	b, err := json.Marshal(strs)
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
-}
-
-// decodeStates parses the stored JSON array back into []model.State.
-// Malformed JSON or unknown state strings fall back to an empty slice
-// rather than erroring — read paths never surface a store-side encoding
-// mistake; the next write rewrites the cell cleanly.
-func decodeStates(raw string) []model.State {
-	if strings.TrimSpace(raw) == "" {
-		return nil
-	}
-	var strs []string
-	if err := json.Unmarshal([]byte(raw), &strs); err != nil {
-		return nil
-	}
-	out := make([]model.State, 0, len(strs))
-	for _, s := range strs {
-		st, err := model.ParseState(s)
-		if err != nil {
-			continue
-		}
-		out = append(out, st)
-	}
-	return out
-}
-
 // scanPromptTemplate is the row-scan helper shared by Get/List.
 // Selects must include columns in this order:
 //
-//	id, slug, name, body, allowed_states_json, is_builtin,
-//	concurrency_limit, action_label, created_at, updated_at.
+//	id, slug, name, body, is_builtin, concurrency_limit, action_label,
+//	created_at, updated_at.
 func scanPromptTemplate(row interface {
 	Scan(...any) error
 }) (*PromptTemplate, error) {
 	var (
-		t          PromptTemplate
-		statesJSON string
-		isBuiltin  int
+		t         PromptTemplate
+		isBuiltin int
 	)
-	if err := row.Scan(&t.ID, &t.Slug, &t.Name, &t.Body, &statesJSON, &isBuiltin, &t.ConcurrencyLimit, &t.ActionLabel, &t.CreatedAt, &t.UpdatedAt); err != nil {
+	if err := row.Scan(&t.ID, &t.Slug, &t.Name, &t.Body, &isBuiltin, &t.ConcurrencyLimit, &t.ActionLabel, &t.CreatedAt, &t.UpdatedAt); err != nil {
 		return nil, err
 	}
-	t.AllowedStates = decodeStates(statesJSON)
 	t.IsBuiltin = isBuiltin != 0
 	return &t, nil
 }
@@ -221,7 +152,7 @@ func scanPromptTemplate(row interface {
 // canonical iteration order surfaced to UIs.
 func (s *Store) ListPromptTemplates() ([]*PromptTemplate, error) {
 	rows, err := s.DB.Query(`
-		SELECT id, slug, name, body, allowed_states_json, is_builtin, concurrency_limit, action_label, created_at, updated_at
+		SELECT id, slug, name, body, is_builtin, concurrency_limit, action_label, created_at, updated_at
 		  FROM prompt_templates
 		 ORDER BY created_at ASC, id ASC`)
 	if err != nil {
@@ -243,7 +174,7 @@ func (s *Store) ListPromptTemplates() ([]*PromptTemplate, error) {
 // ErrNotFound when no such template exists.
 func (s *Store) GetPromptTemplateBySlug(slug string) (*PromptTemplate, error) {
 	row := s.DB.QueryRow(`
-		SELECT id, slug, name, body, allowed_states_json, is_builtin, concurrency_limit, action_label, created_at, updated_at
+		SELECT id, slug, name, body, is_builtin, concurrency_limit, action_label, created_at, updated_at
 		  FROM prompt_templates
 		 WHERE slug = ?`, slug)
 	t, err := scanPromptTemplate(row)
@@ -285,10 +216,6 @@ func (s *Store) ValidateAddPromptTemplate(in AddPromptTemplateIn) (*PromptTempla
 	if err != nil {
 		return nil, err
 	}
-	states, err := ValidatePromptTemplateStates(in.AllowedStates)
-	if err != nil {
-		return nil, err
-	}
 	limit, err := ValidateConcurrencyLimit(in.ConcurrencyLimit)
 	if err != nil {
 		return nil, err
@@ -301,7 +228,6 @@ func (s *Store) ValidateAddPromptTemplate(in AddPromptTemplateIn) (*PromptTempla
 		Slug:             slug,
 		Name:             name,
 		Body:             body,
-		AllowedStates:    states,
 		IsBuiltin:        in.IsBuiltin,
 		ConcurrencyLimit: limit,
 		ActionLabel:      actionLabel,
@@ -316,18 +242,14 @@ func (s *Store) AddPromptTemplate(in AddPromptTemplateIn) (*PromptTemplate, erro
 	if err != nil {
 		return nil, err
 	}
-	encoded, err := encodeStates(projected.AllowedStates)
-	if err != nil {
-		return nil, err
-	}
 	isBuiltin := 0
 	if in.IsBuiltin {
 		isBuiltin = 1
 	}
 	res, err := s.DB.Exec(`
-		INSERT INTO prompt_templates (slug, name, body, allowed_states_json, is_builtin, concurrency_limit, action_label, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-		projected.Slug, projected.Name, projected.Body, encoded, isBuiltin, projected.ConcurrencyLimit, projected.ActionLabel)
+		INSERT INTO prompt_templates (slug, name, body, is_builtin, concurrency_limit, action_label, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+		projected.Slug, projected.Name, projected.Body, isBuiltin, projected.ConcurrencyLimit, projected.ActionLabel)
 	if err != nil {
 		return nil, wrapTemplateConflict(err)
 	}
@@ -366,13 +288,6 @@ func (s *Store) ValidateUpdatePromptTemplate(slug string, patch UpdatePromptTemp
 		}
 		projected.Body = body
 	}
-	if patch.AllowedStates != nil {
-		states, err := ValidatePromptTemplateStates(*patch.AllowedStates)
-		if err != nil {
-			return nil, err
-		}
-		projected.AllowedStates = states
-	}
 	if patch.ConcurrencyLimit != nil {
 		limit, err := ValidateConcurrencyLimit(*patch.ConcurrencyLimit)
 		if err != nil {
@@ -397,15 +312,11 @@ func (s *Store) UpdatePromptTemplate(slug string, patch UpdatePromptTemplatePatc
 	if err != nil {
 		return nil, err
 	}
-	encoded, err := encodeStates(projected.AllowedStates)
-	if err != nil {
-		return nil, err
-	}
 	res, err := s.DB.Exec(`
 		UPDATE prompt_templates
-		   SET name = ?, body = ?, allowed_states_json = ?, concurrency_limit = ?, action_label = ?, updated_at = CURRENT_TIMESTAMP
+		   SET name = ?, body = ?, concurrency_limit = ?, action_label = ?, updated_at = CURRENT_TIMESTAMP
 		 WHERE slug = ?`,
-		projected.Name, projected.Body, encoded, projected.ConcurrencyLimit, projected.ActionLabel, slug)
+		projected.Name, projected.Body, projected.ConcurrencyLimit, projected.ActionLabel, slug)
 	if err != nil {
 		return nil, wrapTemplateConflict(err)
 	}
@@ -421,10 +332,9 @@ func (s *Store) UpdatePromptTemplate(slug string, patch UpdatePromptTemplatePatc
 
 // SetPromptTemplateActionLabel is the focused mutator for the BACI-67
 // action_label field — convenient for CLI/REST verbs that only want to
-// change the imperative override without round-tripping the body or
-// state-gate through a patch. An empty actionLabel clears the
-// override (the UI then derives from Name). Single-line, controls
-// rejected.
+// change the imperative override without round-tripping the body
+// through a patch. An empty actionLabel clears the override (the UI
+// then derives from Name). Single-line, controls rejected.
 func (s *Store) SetPromptTemplateActionLabel(slug, actionLabel string) (*PromptTemplate, error) {
 	cleaned, err := ValidatePromptTemplateActionLabel(actionLabel)
 	if err != nil {
@@ -449,8 +359,8 @@ func (s *Store) SetPromptTemplateActionLabel(slug, actionLabel string) (*PromptT
 
 // SetPromptTemplateConcurrencyLimit is the focused mutator for the
 // BACI-51 concurrency field — convenient for CLI/REST verbs that only
-// want to change the limit without round-tripping the body or
-// state-gate through a patch. Validated >= 0.
+// want to change the limit without round-tripping the body through a
+// patch. Validated >= 0.
 func (s *Store) SetPromptTemplateConcurrencyLimit(slug string, limit int) (*PromptTemplate, error) {
 	cleaned, err := ValidateConcurrencyLimit(limit)
 	if err != nil {
@@ -592,19 +502,14 @@ func (s *Store) RestoreBuiltinPromptTemplates() ([]string, error) {
 			continue
 		}
 		body := model.DefaultPromptBodyForBuiltinSlug(slug)
-		states := model.DefaultPromptStatesForBuiltinSlug(slug)
-		encoded, err := encodeStates(states)
-		if err != nil {
-			return nil, err
-		}
 		name := model.BuiltinTemplateLabel(slug)
 		if name == "" {
 			name = slug
 		}
 		if _, err := tx.Exec(`
-			INSERT INTO prompt_templates (slug, name, body, allowed_states_json, is_builtin, concurrency_limit, action_label, created_at, updated_at)
-			VALUES (?, ?, ?, ?, 1, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-			slug, name, body, encoded, model.DefaultConcurrencyLimit(slug), model.BuiltinTemplateActionLabel(slug)); err != nil {
+			INSERT INTO prompt_templates (slug, name, body, is_builtin, concurrency_limit, action_label, created_at, updated_at)
+			VALUES (?, ?, ?, 1, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+			slug, name, body, model.DefaultConcurrencyLimit(slug), model.BuiltinTemplateActionLabel(slug)); err != nil {
 			return nil, wrapTemplateConflict(err)
 		}
 		created = append(created, slug)

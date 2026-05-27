@@ -121,30 +121,6 @@ export interface BoardColumn {
   label: string;
 }
 
-// StateEdge (BACI-241) is one (from, to, category) triple in the
-// canonical state-transition graph the kanban follow-on popup (and
-// future surfaces) reads to promote / demote / tuck-away modes. Mirror
-// of the Wails-side StateEdgeDTO; api.ts re-exports the same name from
-// its own binding-typed shape.
-export interface StateEdge {
-  from: string;
-  to: string;
-  category: string; // 'primary' | 'secondary' | 'unusual'
-}
-
-// StateGraph (BACI-241) is the wire shape of GET /settings/state-graph
-// — the canonical state ordering plus the categorised edge table.
-// Display hint only; the store accepts any state-to-state move.
-export interface StateGraph {
-  states: string[];
-  edges: StateEdge[];
-}
-
-// Cross-transport aliases for parity with api.ts (same pattern as
-// LatestPlanDTO / SyncSetupResult).
-export type StateGraphDTO = StateGraph;
-export type StateEdgeDTO = StateEdge;
-
 export interface BoardCardTodo {
   content: string;
   status: string;
@@ -737,9 +713,6 @@ export interface PromptTemplateDTO {
   default: string;
   isBuiltin: boolean;
   isDefault: boolean;
-  allowedStates: string[];
-  defaultStates: string[];
-  statesAreDefault: boolean;
   concurrencyLimit: number;
   defaultConcurrencyLimit: number;
   concurrencyIsDefault: boolean;
@@ -982,15 +955,6 @@ function reshapeUnsyncedProject(u: UnsyncedProjectApi): UnsyncedProject {
 export async function listColumns(): Promise<BoardColumn[]> {
   // Static — every state, in canonical order. No fetch.
   return Object.entries(STATE_LABELS).map(([state, label]) => ({ state, label }));
-}
-
-// getStateGraph (BACI-241) returns the canonical state-transition graph.
-// The server response is already shaped as { states, edges } with the
-// fields below — no reshape needed (lowercase JSON tags match the TS
-// interface verbatim). App.jsx fetches once on mount; the graph is a
-// constant, so no per-render or per-poll cost.
-export async function getStateGraph(): Promise<StateGraph> {
-  return await call<StateGraph>('/settings/state-graph');
 }
 
 export async function listCards(repoPrefix: string): Promise<BoardCard[]> {
@@ -2129,9 +2093,6 @@ interface ApiPromptTemplate {
   default: string;
   is_builtin: boolean;
   is_default: boolean;
-  allowed_states: string[];
-  default_states: string[];
-  states_are_default: boolean;
   concurrency_limit?: number;
   default_concurrency_limit?: number;
   concurrency_is_default?: boolean;
@@ -2150,9 +2111,6 @@ function reshapeTemplate(t: ApiPromptTemplate): PromptTemplateDTO {
     default: t.default,
     isBuiltin: t.is_builtin,
     isDefault: t.is_default,
-    allowedStates: t.allowed_states ?? [],
-    defaultStates: t.default_states ?? [],
-    statesAreDefault: t.states_are_default,
     concurrencyLimit: t.concurrency_limit ?? 0,
     defaultConcurrencyLimit: t.default_concurrency_limit ?? 0,
     concurrencyIsDefault: t.concurrency_is_default ?? true,
@@ -2172,9 +2130,9 @@ export async function listPromptTemplates(): Promise<PromptTemplateDTO[]> {
 }
 
 // Refetch every template and return the one DTO the caller updated —
-// SavePromptTemplate / SavePromptStates only return the persisted
-// row's body or states, not the full DTO; fetching once after the
-// write keeps the caller's `templates` state consistent.
+// SavePromptTemplate only returns the persisted row's body, not the
+// full DTO; fetching once after the write keeps the caller's
+// `templates` state consistent.
 async function refreshOneTemplate(slug: string): Promise<PromptTemplateDTO> {
   const all = await listPromptTemplates();
   const found = all.find(t => t.slug === slug);
@@ -2194,21 +2152,6 @@ export async function savePromptTemplate(
     await call<unknown>(`/settings/templates/${mode}`, {
       method: 'PUT',
       body: { body },
-    });
-  }
-  return refreshOneTemplate(mode);
-}
-
-export async function savePromptStates(
-  mode: string,
-  states: string[],
-): Promise<PromptTemplateDTO> {
-  if (states.length === 0) {
-    await call<unknown>(`/settings/templates/${mode}/states`, { method: 'DELETE' });
-  } else {
-    await call<unknown>(`/settings/templates/${mode}/states`, {
-      method: 'PUT',
-      body: { states },
     });
   }
   return refreshOneTemplate(mode);
@@ -2252,14 +2195,13 @@ export async function addPromptTemplate(
   slug: string,
   name: string,
   body: string,
-  states: string[],
   actionLabel: string = '',
 ): Promise<PromptTemplateDTO> {
   // BACI-67: forward actionLabel verbatim — an empty string is the
   // "no override, derive from name" sentinel that the Go side honours.
   const raw = await call<ApiPromptTemplate>('/settings/templates', {
     method: 'POST',
-    body: { slug, name, body, states, action_label: actionLabel },
+    body: { slug, name, body, action_label: actionLabel },
   });
   return reshapeTemplate(raw);
 }

@@ -18,23 +18,17 @@ import (
 // code that still keys by `mode`. Body is the persisted body. Default
 // is the built-in embedded default for the slug (empty for user-created
 // templates); IsDefault reports whether Body still matches it.
-// AllowedStates is the state-gate; DefaultStates is the built-in
-// default for the slug (empty for user-created); StatesAreDefault
-// reports whether the gate still matches.
 type PromptTemplateDTO struct {
-	Slug                    string   `json:"slug"`
-	Mode                    string   `json:"mode"`
-	Label                   string   `json:"label"`
-	Body                    string   `json:"body"`
-	Default                 string   `json:"default"`
-	IsBuiltin               bool     `json:"isBuiltin"`
-	IsDefault               bool     `json:"isDefault"`
-	AllowedStates           []string `json:"allowedStates"`
-	DefaultStates           []string `json:"defaultStates"`
-	StatesAreDefault        bool     `json:"statesAreDefault"`
-	ConcurrencyLimit        int      `json:"concurrencyLimit"`
-	DefaultConcurrencyLimit int      `json:"defaultConcurrencyLimit"`
-	ConcurrencyIsDefault    bool     `json:"concurrencyIsDefault"`
+	Slug                    string `json:"slug"`
+	Mode                    string `json:"mode"`
+	Label                   string `json:"label"`
+	Body                    string `json:"body"`
+	Default                 string `json:"default"`
+	IsBuiltin               bool   `json:"isBuiltin"`
+	IsDefault               bool   `json:"isDefault"`
+	ConcurrencyLimit        int    `json:"concurrencyLimit"`
+	DefaultConcurrencyLimit int    `json:"defaultConcurrencyLimit"`
+	ConcurrencyIsDefault    bool   `json:"concurrencyIsDefault"`
 	// BACI-67: imperative override rendered on the dispatch action
 	// menus. ActionLabel is the persisted value (empty = derive from
 	// Name via the gerund→imperative rule); DefaultActionLabel is the
@@ -74,32 +68,10 @@ func (s *SettingsService) BacioVersion() string {
 	return version.String()
 }
 
-func sameStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
-func statesToStrings(states []model.State) []string {
-	out := make([]string, len(states))
-	for i, st := range states {
-		out[i] = string(st)
-	}
-	return out
-}
-
 // dtoForTemplate maps a store row into the DTO shape the desktop
 // consumes.
 func dtoForTemplate(t *store.PromptTemplate) PromptTemplateDTO {
 	def := model.DefaultPromptBodyForBuiltinSlug(t.Slug)
-	defStates := statesToStrings(model.DefaultPromptStatesForBuiltinSlug(t.Slug))
-	allowed := statesToStrings(t.AllowedStates)
 	label := t.Name
 	if label == "" {
 		label = model.BuiltinTemplateLabel(t.Slug)
@@ -117,9 +89,6 @@ func dtoForTemplate(t *store.PromptTemplate) PromptTemplateDTO {
 		Default:                 def,
 		IsBuiltin:               t.IsBuiltin,
 		IsDefault:               t.IsBuiltin && t.Body == def,
-		AllowedStates:           allowed,
-		DefaultStates:           defStates,
-		StatesAreDefault:        t.IsBuiltin && sameStrings(allowed, defStates),
 		ConcurrencyLimit:        t.ConcurrencyLimit,
 		DefaultConcurrencyLimit: defConc,
 		ConcurrencyIsDefault:    t.IsBuiltin && t.ConcurrencyLimit == defConc,
@@ -132,7 +101,7 @@ func dtoForTemplate(t *store.PromptTemplate) PromptTemplateDTO {
 // ListPromptTemplates returns every registered template in store
 // iteration order — the desktop Settings panel renders them in this
 // order and the per-card action menu in the Board iterates the same
-// list filtered by state-gate.
+// list (with reserved-slug filtering applied on the React seam).
 func (s *SettingsService) ListPromptTemplates() ([]PromptTemplateDTO, error) {
 	ctx := context.Background()
 	tmpls, err := s.client.ListPromptTemplates(ctx)
@@ -157,16 +126,6 @@ func (s *SettingsService) SavePromptTemplate(slug, body string) (PromptTemplateD
 	return s.refreshedDTO(ctx, slug)
 }
 
-// SavePromptStates stores a new state-gate for one template. An empty
-// slice reverts a built-in to its embedded default gate.
-func (s *SettingsService) SavePromptStates(slug string, states []string) (PromptTemplateDTO, error) {
-	ctx := context.Background()
-	if err := s.client.SetPromptStates(ctx, slug, states, false); err != nil {
-		return PromptTemplateDTO{}, err
-	}
-	return s.refreshedDTO(ctx, slug)
-}
-
 // SavePromptConcurrency (BACI-51) sets a template's per-(repo, slug)
 // in-flight dispatch cap the matcher enforces. 0 = unlimited.
 func (s *SettingsService) SavePromptConcurrency(slug string, concurrencyLimit int) (PromptTemplateDTO, error) {
@@ -183,13 +142,12 @@ func (s *SettingsService) SavePromptConcurrency(slug string, concurrencyLimit in
 // AddPromptTemplate creates a brand-new template. actionLabel is the
 // BACI-67 imperative override rendered on the dispatch action menus;
 // pass "" to skip the override (the UI derives one from name).
-func (s *SettingsService) AddPromptTemplate(slug, name, body string, states []string, actionLabel string) (PromptTemplateDTO, error) {
+func (s *SettingsService) AddPromptTemplate(slug, name, body, actionLabel string) (PromptTemplateDTO, error) {
 	ctx := context.Background()
 	t, err := s.client.AddPromptTemplate(ctx, inputs.SettingsTemplateAddInput{
 		Slug:        slug,
 		Name:        name,
 		Body:        body,
-		States:      states,
 		ActionLabel: actionLabel,
 	}, false)
 	if err != nil {
@@ -254,7 +212,8 @@ func (s *SettingsService) RestoreBuiltinPromptTemplates() ([]PromptTemplateDTO, 
 }
 
 // refreshedDTO re-reads one template by slug and builds its DTO — the
-// shared tail of SavePromptTemplate / SavePromptStates.
+// shared tail of the per-field mutators (body / concurrency / action
+// label).
 func (s *SettingsService) refreshedDTO(ctx context.Context, slug string) (PromptTemplateDTO, error) {
 	t, err := s.client.GetPromptTemplate(ctx, slug)
 	if err != nil {

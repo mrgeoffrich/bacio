@@ -354,10 +354,9 @@ CREATE TABLE IF NOT EXISTS app_settings (
 );
 
 -- prompt_templates is the user's set of dispatch prompt templates. Each
--- row is a named, deletable, renameable template with its own body and
--- state-gate (the set of issue states it's valid to run from). A small
--- bundled set of "built-in" templates (plan, implement, review, ship,
--- fix_review) is seeded on first run from the embedded
+-- row is a named, deletable, renameable template with its own body. A
+-- small bundled set of "built-in" templates (plan, implement, review,
+-- ship, fix_review) is seeded on first run from the embedded
 -- prompttemplates/<slug>.txt defaults; after that the user owns every
 -- row and can delete a built-in if they want. `is_builtin` is purely
 -- informational — it does NOT gate deletion. Use
@@ -366,20 +365,19 @@ CREATE TABLE IF NOT EXISTS app_settings (
 --
 -- This is a dedicated table rather than a JSON blob in app_settings
 -- because it needs atomic per-row updates, clean audit-log targets, and
--- room to grow (a future tag_predicate column for richer gating slots
--- in with one ALTER instead of a blob-shape migration).
+-- room to grow.
 --
--- The `allowed_states_json` column stores the state-gate as a JSON array
--- of canonical state strings. Order is preserved verbatim; an empty
--- array means "no state qualifies" — such a template never appears on a
--- per-card action menu and is only reachable via
--- `bacio agent dispatch --mode <slug>`.
+-- BACI-252 dropped the per-template `allowed_states_json` state-gate
+-- column. The kanban popup now offers every non-reserved template
+-- regardless of the card's state, and the controller's fire-time
+-- promote sweep no longer re-checks a gate. See
+-- internal/store/store.go::migrateDropAllowedStatesJSON for the
+-- idempotent in-place ALTER on older DBs.
 CREATE TABLE IF NOT EXISTS prompt_templates (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     slug                TEXT    NOT NULL UNIQUE,
     name                TEXT    NOT NULL,
     body                TEXT    NOT NULL DEFAULT '',
-    allowed_states_json TEXT    NOT NULL DEFAULT '[]',
     is_builtin          INTEGER NOT NULL DEFAULT 0,
     -- concurrency_limit caps the number of in-flight (pending+delivered,
     -- excluding bacio-channel setup rows) dispatches per (repo, mode)

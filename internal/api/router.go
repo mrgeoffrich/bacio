@@ -201,19 +201,11 @@ func newRouter(d deps) http.Handler {
 	// DTO.
 	mux.HandleFunc("GET /repos/{prefix}/issues/{key}/waiting-dispatch", d.handleIssueWaitingDispatch)
 
-	// Prompt templates + state-gates (BACI-36). Global app_settings —
-	// no /repos/{prefix} scope. Six routes: a GET-all for each of bodies
-	// and states, and PUT/DELETE per mode for both. The literal "states"
-	// segment takes precedence over the "{mode}" wildcard, so
-	// /settings/templates/states (collection-all) doesn't collide with
-	// /settings/templates/{mode} (per-mode body) — Go's ServeMux
-	// resolves the more-specific pattern first.
+	// Prompt templates (BACI-36). Global app_settings — no /repos/{prefix}
+	// scope. GET-all + PUT/DELETE per-mode body endpoints.
 	mux.HandleFunc("GET /settings/templates", d.handlePromptTemplatesList)
-	mux.HandleFunc("GET /settings/templates/states", d.handlePromptStatesList)
 	mux.HandleFunc("PUT /settings/templates/{mode}", d.handlePromptTemplateSet)
 	mux.HandleFunc("DELETE /settings/templates/{mode}", d.handlePromptTemplateReset)
-	mux.HandleFunc("PUT /settings/templates/{mode}/states", d.handlePromptStatesSet)
-	mux.HandleFunc("DELETE /settings/templates/{mode}/states", d.handlePromptStatesReset)
 	// Typed prompt-template CRUD over REST (BACI-50): the four `bacio
 	// settings template add/rename/rm/restore-defaults` verbs plus the
 	// /full list endpoint that returns the rich DTO the desktop renders
@@ -234,14 +226,6 @@ func newRouter(d deps) http.Handler {
 	// imperative; DELETE clears (the UI then derives from Name).
 	mux.HandleFunc("PUT /settings/templates/{mode}/action-label", d.handlePromptTemplateActionLabelSet)
 	mux.HandleFunc("DELETE /settings/templates/{mode}/action-label", d.handlePromptTemplateActionLabelDelete)
-
-	// BACI-241: canonical state-transition graph as a display hint. The
-	// graph is a Go constant — no `--json` writes, no per-request cost.
-	// Surfaces (the kanban follow-on popup today, board-card menus and
-	// the dispatch composer later) read it to promote / demote /
-	// tuck-away modes whose allowedStates overlap with the card's
-	// primary / secondary / unusual next-states from its current column.
-	mux.HandleFunc("GET /settings/state-graph", d.handleStateGraph)
 
 	// BACI-89 background sync. GET /sync (cross-repo) + GET
 	// /repos/{prefix}/sync (per-repo) report live sync status —

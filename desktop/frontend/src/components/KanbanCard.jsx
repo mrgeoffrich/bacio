@@ -1,11 +1,10 @@
-import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
+import React, { memo, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { m } from 'motion/react';
 import Icon from './Icon.jsx';
 import Tooltip from './Tooltip.jsx';
 import DispatchMenuContent from './DispatchMenuContent.jsx';
-import { promotePrompts } from './promotePrompts.ts';
 import { renderZapMenuRows } from './dispatchMenuRows.jsx';
 import { todoGlyph } from '../lib/todoGlyph.jsx';
 import { waitingStateLabel } from '../lib/waitingLabels.ts';
@@ -28,7 +27,7 @@ function stateLabel(s) {
   return STATE_LABELS[s] ?? s;
 }
 
-function KanbanCard({ card, cardsByKey, promptConfig, stateGraph, isDragging, compact, onDragStart, onDragEnd, onOpen, onDispatch, onDispatchChain, onCancelWaiting, onOpenQuestion, onOpenIssue, onQuickEval, onSetFollowOn, onCancelFollowOn, isTrayHover, isJumping }) {
+function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDragStart, onDragEnd, onOpen, onDispatch, onDispatchChain, onCancelWaiting, onOpenQuestion, onOpenIssue, onQuickEval, onSetFollowOn, onCancelFollowOn, isTrayHover, isJumping }) {
   // BACI-75: local-only expansion state for the Tasks pill. Resets on
   // unmount (board switch, repo switch, hard refresh) — that's
   // intentional, we don't want to persist a row-level UI toggle.
@@ -75,21 +74,13 @@ function KanbanCard({ card, cardsByKey, promptConfig, stateGraph, isDragging, co
       setEvalSending(false);
     }
   };
-  // The prompts valid to dispatch from this card's current state — the
-  // state-gate config is global (App-owned), filtered per-card here.
-  const validPrompts = (promptConfig || []).filter(
-    p => (p.allowedStates || []).includes(card.column),
-  );
-  // BACI-247: the zap menu's open-gate moved off `validPrompts.length`
-  // onto the `promotePrompts` primary bucket so the zap and follow-on
-  // menus share the same categorisation contract. Post-BACI-245 the
-  // two converge to the same set on a `todo` card (prep modes), but
-  // the explicit name keeps the call sites readable. Memoised because
-  // promotePrompts walks the full promptConfig and we don't want it
-  // running on every keystroke elsewhere in the card.
-  const zapPrimaryCount = useMemo(
-    () => promotePrompts(promptConfig || [], card.column, stateGraph).primary.length,
-    [promptConfig, card.column, stateGraph],
+  // BACI-252: the zap and follow-on popups no longer filter on issue
+  // state — every configured non-reserved template is offered in a
+  // single flat list. Reserved/internal slugs (the `_dispatch_preamble`
+  // body-only wrapper) are filtered by leading-underscore prefix; the
+  // convention is documented in model.BuiltinTemplatePreamble.
+  const nonReservedPrompts = (promptConfig || []).filter(
+    p => !(p.mode || '').startsWith('_'),
   );
 
   // A taken card is held by an agent — block the human from dragging it
@@ -146,7 +137,7 @@ function KanbanCard({ card, cardsByKey, promptConfig, stateGraph, isDragging, co
   // spinner), but if the assignee slot is empty the showFollowOn
   // condition keeps the footer alive so the button has a home.
   const showFollowOn = followOnEligible && !!onSetFollowOn;
-  const hasFooter = validPrompts.length > 0 || card.assignees.length > 0 || waiting || showEvalAffordance || showFollowOn;
+  const hasFooter = nonReservedPrompts.length > 0 || card.assignees.length > 0 || waiting || showEvalAffordance || showFollowOn;
 
   // BACI-60 meta line — only on taken cards, only when at least one of
   // verb or tasks is populated. Hidden entirely otherwise so cards that
@@ -396,13 +387,11 @@ function KanbanCard({ card, cardsByKey, promptConfig, stateGraph, isDragging, co
             BACI-192: follow-on dispatch button — gated on a taken /
             waiting card (BACI-180 needs an active parent dispatch to
             attach to). Outline glyph when no follow-on is queued; the
-            mode label sits inside the button when one is attached. The
-            DropdownMenu lists every prompt template (the state-gate is
-            re-evaluated server-side at *promote* time, so a mode that's
-            invalid from the issue's *current* column may still be the
-            right pick if the parent dispatch will move the card before
-            firing). Cancel item appears at the bottom only when a
-            follow-on is already attached.
+            mode label sits inside the button when one is attached.
+            BACI-252: the dropdown lists every non-reserved prompt
+            template in a flat list — no per-state filtering. Cancel
+            item appears at the bottom only when a follow-on is already
+            attached.
           */}
           {showFollowOn && (() => {
             // BACI-217: the chip's secondary label and the dropdown's
@@ -468,22 +457,16 @@ function KanbanCard({ card, cardsByKey, promptConfig, stateGraph, isDragging, co
                       click-outside-to-close + collision-aware placement
                       out of the box.
 
-                      BACI-241 / BACI-245: the previously-flat row
-                      list now splits into two visible tiers — primary
-                      modes whose `allowedStates` admits the card's
-                      current state (rendered as plain rows), and
-                      everything else tucked behind a `<details>Show
-                      all</details>` block as escape hatches (e.g.
-                      shipping straight from in_progress). The
-                      `secondary` bucket is always empty under the
-                      BACI-245 semantic; the divider between primary
-                      and secondary only renders when both are non-
-                      empty, so it stays out of the way. The
-                      `promotePrompts` helper walks the filter-narrowed
-                      `visible` slice so typing in the filter narrows
-                      every section. */}
+                      BACI-252: every non-reserved template renders in
+                      one flat list — no primary / secondary / unusual
+                      bucketing. Reserved slugs (`_dispatch_preamble`)
+                      are filtered out by the DispatchMenuContent shell
+                      via the leading-underscore convention. The
+                      filter-narrowed `visible` slice is what we map
+                      over so typing in the filter input narrows the
+                      list as expected. */}
                   <DispatchMenuContent
-                    prompts={promptConfig || []}
+                    prompts={nonReservedPrompts}
                     currentMode={followOn?.mode}
                     menuLabel={menuHeader}
                     footer={followOn ? (
@@ -495,41 +478,21 @@ function KanbanCard({ card, cardsByKey, promptConfig, stateGraph, isDragging, co
                         Cancel follow-on
                       </DropdownMenu.Item>
                     ) : null}
-                    renderRows={({ visible, currentMode }) => {
-                      const buckets = promotePrompts(visible, card.column, stateGraph);
-                      const renderRow = (p) => (
-                        <DropdownMenu.Item
-                          key={p.mode}
-                          data-dispatch-row=""
-                          className={`mk-card-action-item ${currentMode === p.mode ? 'is-current' : ''}`}
-                          onSelect={() => onSetFollowOn && onSetFollowOn(card.key, p.mode)}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {p.actionLabel || p.label}
-                        </DropdownMenu.Item>
-                      );
-                      return (
-                        <>
-                          {buckets.primary.map(renderRow)}
-                          {buckets.secondary.length > 0 && (
-                            <>
-                              {buckets.primary.length > 0 && (
-                                <div className="mk-dispatch-menu-divider" role="separator" aria-hidden />
-                              )}
-                              {buckets.secondary.map(renderRow)}
-                            </>
-                          )}
-                          {buckets.unusual.length > 0 && (
-                            <details className="mk-dispatch-menu-unusual">
-                              <summary className="mk-dispatch-menu-unusual-summary">
-                                Show all
-                              </summary>
-                              {buckets.unusual.map(renderRow)}
-                            </details>
-                          )}
-                        </>
-                      );
-                    }}
+                    renderRows={({ visible, currentMode }) => (
+                      <>
+                        {visible.map(p => (
+                          <DropdownMenu.Item
+                            key={p.mode}
+                            data-dispatch-row=""
+                            className={`mk-card-action-item ${currentMode === p.mode ? 'is-current' : ''}`}
+                            onSelect={() => onSetFollowOn && onSetFollowOn(card.key, p.mode)}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {p.actionLabel || p.label}
+                          </DropdownMenu.Item>
+                        ))}
+                      </>
+                    )}
                   />
                 </DropdownMenu.Content>
               </DropdownMenu.Portal>
@@ -605,7 +568,7 @@ function KanbanCard({ card, cardsByKey, promptConfig, stateGraph, isDragging, co
                   </button>
                 </Tooltip>
               )}
-              {!taken && zapPrimaryCount > 0 && (
+              {!taken && nonReservedPrompts.length > 0 && (
                 <DropdownMenu.Root>
                   <DropdownMenu.Trigger asChild>
                     <button
@@ -625,22 +588,17 @@ function KanbanCard({ card, cardsByKey, promptConfig, stateGraph, isDragging, co
                       collisionPadding={8}
                     >
                       {/*
-                        BACI-247: the zap menu shares the
-                        DispatchMenuContent shell with the follow-on
-                        chip (filter input + scroll region + keyboard
-                        model). The body bucketing also matches —
-                        promotePrompts feeds primary / unusual, so
-                        "Implement is in the same place in both
-                        menus" comes for free.
-
-                        BACI-209 compound semantics are preserved as a
-                        per-primary-row `<details>` expander: clicking
-                        the primary label fires onDispatch (single
-                        mode); opening the caret reveals one "Primary,
-                        then Follow-on" row per other visible mode,
-                        each firing onDispatchChain (unchanged server-
-                        side behaviour). Default state is collapsed so
-                        the menu reads at single-mode density.
+                        BACI-252: zap menu renders every non-reserved
+                        template in one flat list — no primary /
+                        secondary / unusual bucketing. BACI-209
+                        compound semantics are preserved as a
+                        per-row `<details>` expander: clicking the
+                        primary label fires onDispatch (single mode);
+                        opening the caret reveals one "Primary, then
+                        Follow-on" row per other visible mode, each
+                        firing onDispatchChain (unchanged server-side
+                        behaviour). Default state is collapsed so the
+                        menu reads at single-mode density.
 
                         BACI-67: render the imperative actionLabel
                         ("Plan", "Design") via the helper. label
@@ -649,12 +607,9 @@ function KanbanCard({ card, cardsByKey, promptConfig, stateGraph, isDragging, co
                         aren't built-in.
                       */}
                       <DispatchMenuContent
-                        prompts={promptConfig || []}
+                        prompts={nonReservedPrompts}
                         renderRows={({ visible }) => renderZapMenuRows({
                           visible,
-                          promptConfig,
-                          cardColumn: card.column,
-                          stateGraph,
                           cardKey: card.key,
                           onDispatch,
                           onDispatchChain,

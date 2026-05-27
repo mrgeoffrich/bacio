@@ -1598,9 +1598,6 @@ export class PRDTO {
  * code that still keys by `mode`. Body is the persisted body. Default
  * is the built-in embedded default for the slug (empty for user-created
  * templates); IsDefault reports whether Body still matches it.
- * AllowedStates is the state-gate; DefaultStates is the built-in
- * default for the slug (empty for user-created); StatesAreDefault
- * reports whether the gate still matches.
  */
 export class PromptTemplateDTO {
     "slug": string;
@@ -1610,9 +1607,6 @@ export class PromptTemplateDTO {
     "default": string;
     "isBuiltin": boolean;
     "isDefault": boolean;
-    "allowedStates": string[];
-    "defaultStates": string[];
-    "statesAreDefault": boolean;
     "concurrencyLimit": number;
     "defaultConcurrencyLimit": number;
     "concurrencyIsDefault": boolean;
@@ -1653,15 +1647,6 @@ export class PromptTemplateDTO {
         if (!("isDefault" in $$source)) {
             this["isDefault"] = false;
         }
-        if (!("allowedStates" in $$source)) {
-            this["allowedStates"] = [];
-        }
-        if (!("defaultStates" in $$source)) {
-            this["defaultStates"] = [];
-        }
-        if (!("statesAreDefault" in $$source)) {
-            this["statesAreDefault"] = false;
-        }
         if (!("concurrencyLimit" in $$source)) {
             this["concurrencyLimit"] = 0;
         }
@@ -1688,15 +1673,7 @@ export class PromptTemplateDTO {
      * Creates a new PromptTemplateDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): PromptTemplateDTO {
-        const $$createField7_0 = $$createType0;
-        const $$createField8_0 = $$createType0;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
-        if ("allowedStates" in $$parsedSource) {
-            $$parsedSource["allowedStates"] = $$createField7_0($$parsedSource["allowedStates"]);
-        }
-        if ("defaultStates" in $$parsedSource) {
-            $$parsedSource["defaultStates"] = $$createField8_0($$parsedSource["defaultStates"]);
-        }
         return new PromptTemplateDTO($$parsedSource as Partial<PromptTemplateDTO>);
     }
 }
@@ -2003,79 +1980,6 @@ export class ShippedListDTO {
 }
 
 /**
- * StateEdgeDTO is one (from, to, category) triple in the BACI-241
- * state-transition graph. Mirror of stategraph.Edge but shaped for the
- * Wails binding generator: the Go-side `model.State` alias surfaces as
- * `string` in TS bindings, which is what the React layer wants.
- */
-export class StateEdgeDTO {
-    "from": string;
-    "to": string;
-    "category": string;
-
-    /** Creates a new StateEdgeDTO instance. */
-    constructor($$source: Partial<StateEdgeDTO> = {}) {
-        if (!("from" in $$source)) {
-            this["from"] = "";
-        }
-        if (!("to" in $$source)) {
-            this["to"] = "";
-        }
-        if (!("category" in $$source)) {
-            this["category"] = "";
-        }
-
-        Object.assign(this, $$source);
-    }
-
-    /**
-     * Creates a new StateEdgeDTO instance from a string or object.
-     */
-    static createFrom($$source: any = {}): StateEdgeDTO {
-        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
-        return new StateEdgeDTO($$parsedSource as Partial<StateEdgeDTO>);
-    }
-}
-
-/**
- * StateGraphDTO is the wire shape for the BACI-241 graph endpoint —
- * the canonical state ordering plus the categorised edge table. Pure
- * display hint; the store still accepts any state-to-state move.
- */
-export class StateGraphDTO {
-    "states": string[];
-    "edges": StateEdgeDTO[];
-
-    /** Creates a new StateGraphDTO instance. */
-    constructor($$source: Partial<StateGraphDTO> = {}) {
-        if (!("states" in $$source)) {
-            this["states"] = [];
-        }
-        if (!("edges" in $$source)) {
-            this["edges"] = [];
-        }
-
-        Object.assign(this, $$source);
-    }
-
-    /**
-     * Creates a new StateGraphDTO instance from a string or object.
-     */
-    static createFrom($$source: any = {}): StateGraphDTO {
-        const $$createField0_0 = $$createType0;
-        const $$createField1_0 = $$createType40;
-        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
-        if ("states" in $$parsedSource) {
-            $$parsedSource["states"] = $$createField0_0($$parsedSource["states"]);
-        }
-        if ("edges" in $$parsedSource) {
-            $$parsedSource["edges"] = $$createField1_0($$parsedSource["edges"]);
-        }
-        return new StateGraphDTO($$parsedSource as Partial<StateGraphDTO>);
-    }
-}
-
-/**
  * SyncPreferencesDTO is the BACI-89 background-sync toggle shaped for
  * the desktop Sync view. Mirrors DisplayPreferencesDTO — same single-
  * boolean shape.
@@ -2128,8 +2032,8 @@ export class SyncRegistryDTO {
      * Creates a new SyncRegistryDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): SyncRegistryDTO {
-        const $$createField0_0 = $$createType42;
-        const $$createField1_0 = $$createType44;
+        const $$createField0_0 = $$createType40;
+        const $$createField1_0 = $$createType42;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("syncRepos" in $$parsedSource) {
             $$parsedSource["syncRepos"] = $$createField0_0($$parsedSource["syncRepos"]);
@@ -2182,7 +2086,7 @@ export class SyncRepoDTO {
      * Creates a new SyncRepoDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): SyncRepoDTO {
-        const $$createField7_0 = $$createType46;
+        const $$createField7_0 = $$createType44;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("projects" in $$parsedSource) {
             $$parsedSource["projects"] = $$createField7_0($$parsedSource["projects"]);
@@ -2243,7 +2147,7 @@ export class SyncSetupDTO {
      * Creates a new SyncSetupDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): SyncSetupDTO {
-        const $$createField6_0 = $$createType48;
+        const $$createField6_0 = $$createType46;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("previewCollisions" in $$parsedSource) {
             $$parsedSource["previewCollisions"] = $$createField6_0($$parsedSource["previewCollisions"]);
@@ -2328,13 +2232,11 @@ const $$createType35 = RelationDTO.createFrom;
 const $$createType36 = $Create.Array($$createType35);
 const $$createType37 = ShippedIssueDTO.createFrom;
 const $$createType38 = $Create.Array($$createType37);
-const $$createType39 = StateEdgeDTO.createFrom;
+const $$createType39 = SyncRepoDTO.createFrom;
 const $$createType40 = $Create.Array($$createType39);
-const $$createType41 = SyncRepoDTO.createFrom;
+const $$createType41 = UnsyncedProjectDTO.createFrom;
 const $$createType42 = $Create.Array($$createType41);
-const $$createType43 = UnsyncedProjectDTO.createFrom;
+const $$createType43 = MemberProjectDTO.createFrom;
 const $$createType44 = $Create.Array($$createType43);
-const $$createType45 = MemberProjectDTO.createFrom;
-const $$createType46 = $Create.Array($$createType45);
-const $$createType47 = CollisionPreviewDTO.createFrom;
-const $$createType48 = $Create.Nullable($$createType47);
+const $$createType45 = CollisionPreviewDTO.createFrom;
+const $$createType46 = $Create.Nullable($$createType45);

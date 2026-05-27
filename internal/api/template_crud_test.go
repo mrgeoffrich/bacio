@@ -23,7 +23,7 @@ func TestPromptTemplatesFullList(t *testing.T) {
 		t.Fatalf("expected >= 5 built-in templates, got %d", len(rows))
 	}
 	// Spot-check the rich DTO keys the web bundle reads.
-	for _, key := range []string{"slug", "mode", "label", "body", "default", "is_builtin", "is_default", "allowed_states", "default_states", "states_are_default"} {
+	for _, key := range []string{"slug", "mode", "label", "body", "default", "is_builtin", "is_default"} {
 		if _, ok := rows[0][key]; !ok {
 			t.Fatalf("missing key %q in DTO: %v", key, rows[0])
 		}
@@ -33,10 +33,9 @@ func TestPromptTemplatesFullList(t *testing.T) {
 func TestPromptTemplateAddHappy(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	resp, body := apiPost(t, ts.URL+"/settings/templates", map[string]any{
-		"slug":   "spike",
-		"name":   "Spike",
-		"body":   "Spike on {{issue_id}}.",
-		"states": []string{"todo"},
+		"slug": "spike",
+		"name": "Spike",
+		"body": "Spike on {{issue_id}}.",
 	})
 	if resp.StatusCode != 201 {
 		t.Fatalf("status: %d body: %s", resp.StatusCode, body)
@@ -55,10 +54,9 @@ func TestPromptTemplateAddHappy(t *testing.T) {
 func TestPromptTemplateAddDryRun(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	resp, body := apiPost(t, ts.URL+"/settings/templates?dry_run=true", map[string]any{
-		"slug":   "spike-dry",
-		"name":   "Spike Dry",
-		"body":   "Spike on {{issue_id}}.",
-		"states": []string{"todo"},
+		"slug": "spike-dry",
+		"name": "Spike Dry",
+		"body": "Spike on {{issue_id}}.",
 	})
 	if resp.StatusCode != 201 {
 		t.Fatalf("status: %d body: %s", resp.StatusCode, body)
@@ -86,10 +84,9 @@ func TestPromptTemplateRename(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	// Seed a user template first.
 	resp, _ := apiPost(t, ts.URL+"/settings/templates", map[string]any{
-		"slug":   "spike",
-		"name":   "Spike",
-		"body":   "Spike on {{issue_id}}.",
-		"states": []string{"todo"},
+		"slug": "spike",
+		"name": "Spike",
+		"body": "Spike on {{issue_id}}.",
 	})
 	if resp.StatusCode != 201 {
 		t.Fatalf("seed: %d", resp.StatusCode)

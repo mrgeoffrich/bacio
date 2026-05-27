@@ -22,43 +22,37 @@ import (
 // template, returned by `settings template show / set / reset / add /
 // rename`. Body is the persisted template; Default is the built-in
 // embedded default for the slug (empty for user-created templates);
-// IsDefault reports whether Body still matches Default. AllowedStates
-// is the state-gate; DefaultStates is the built-in default for the
-// slug; StatesAreDefault reports whether the gate still matches the
-// default. ActionLabel (BACI-67) is the persisted imperative override;
-// DefaultActionLabel is the built-in imperative seed for the slug (empty
-// for user-created templates); ActionLabelIsDefault reports whether the
+// IsDefault reports whether Body still matches Default. ActionLabel
+// (BACI-67) is the persisted imperative override; DefaultActionLabel
+// is the built-in imperative seed for the slug (empty for
+// user-created templates); ActionLabelIsDefault reports whether the
 // override still matches the built-in default.
 type promptTemplateView struct {
-	Slug                    string   `json:"slug"`
-	Label                   string   `json:"label"`
-	Body                    string   `json:"body"`
-	Default                 string   `json:"default"`
-	IsDefault               bool     `json:"is_default"`
-	IsBuiltin               bool     `json:"is_builtin"`
-	AllowedStates           []string `json:"allowed_states"`
-	DefaultStates           []string `json:"default_states"`
-	StatesAreDefault        bool     `json:"states_are_default"`
-	ConcurrencyLimit        int      `json:"concurrency_limit"`
-	DefaultConcurrencyLimit int      `json:"default_concurrency_limit"`
-	ConcurrencyIsDefault    bool     `json:"concurrency_is_default"`
-	ActionLabel             string   `json:"action_label"`
-	DefaultActionLabel      string   `json:"default_action_label"`
-	ActionLabelIsDefault    bool     `json:"action_label_is_default"`
+	Slug                    string `json:"slug"`
+	Label                   string `json:"label"`
+	Body                    string `json:"body"`
+	Default                 string `json:"default"`
+	IsDefault               bool   `json:"is_default"`
+	IsBuiltin               bool   `json:"is_builtin"`
+	ConcurrencyLimit        int    `json:"concurrency_limit"`
+	DefaultConcurrencyLimit int    `json:"default_concurrency_limit"`
+	ConcurrencyIsDefault    bool   `json:"concurrency_is_default"`
+	ActionLabel             string `json:"action_label"`
+	DefaultActionLabel      string `json:"default_action_label"`
+	ActionLabelIsDefault    bool   `json:"action_label_is_default"`
 }
 
 // promptTemplateSummary is the lean shape `settings template list`
 // returns — it drops the Default text so a bulk read stays small.
 // Fetch the default via `settings template show`.
 type promptTemplateSummary struct {
-	Slug             string   `json:"slug"`
-	Label            string   `json:"label"`
-	Body             string   `json:"body"`
-	IsBuiltin        bool     `json:"is_builtin"`
-	IsDefault        bool     `json:"is_default"`
-	AllowedStates    []string `json:"allowed_states"`
-	ConcurrencyLimit int      `json:"concurrency_limit"`
-	ActionLabel      string   `json:"action_label"`
+	Slug             string `json:"slug"`
+	Label            string `json:"label"`
+	Body             string `json:"body"`
+	IsBuiltin        bool   `json:"is_builtin"`
+	IsDefault        bool   `json:"is_default"`
+	ConcurrencyLimit int    `json:"concurrency_limit"`
+	ActionLabel      string `json:"action_label"`
 }
 
 func newSettingsCmd() *cobra.Command {
@@ -617,171 +611,10 @@ built-in slug that's been deleted (idempotent).`,
 		settingsTemplateRenameCmd(),
 		settingsTemplateRmCmd(),
 		settingsTemplateRestoreDefaultsCmd(),
-		settingsTemplateStatesCmd(),
 		settingsTemplateSetConcurrencyCmd(),
 		settingsTemplateSetActionLabelCmd(),
 	)
 	return cmd
-}
-
-// newSettingsTemplateStatesCmd is the `states` sub-group: the issue
-// states each template's dispatch prompt is valid to run from. The
-// desktop app + TUI gate the per-card action button on this.
-func settingsTemplateStatesCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "states",
-		Short: "Inspect and edit the issue states each template's prompt is valid from",
-		Long: `Each dispatch prompt template declares the set of issue states it is
-valid to run from — its "state-gate". The desktop app and TUI's
-per-card action button only offers a template when the card's current
-state is in that template's gate. State-gates are global, not per-repo.`,
-	}
-	cmd.AddCommand(
-		settingsTemplateStatesShowCmd(),
-		settingsTemplateStatesSetCmd(),
-		settingsTemplateStatesResetCmd(),
-	)
-	return cmd
-}
-
-func settingsTemplateStatesShowCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "show <slug>",
-		Short: "Show the valid-from issue states for one template's prompt",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := requireLocalForSettings("template states show"); err != nil {
-				return err
-			}
-			slug, err := templateSlugArg(args[0])
-			if err != nil {
-				return err
-			}
-			c, err := openClient()
-			if err != nil {
-				return err
-			}
-			defer c.Close()
-			t, err := c.GetPromptTemplate(context.Background(), slug)
-			if err != nil {
-				return wrapTemplateLookup(slug, err)
-			}
-			return emit(templateViewForRow(t))
-		},
-	}
-}
-
-func settingsTemplateStatesSetCmd() *cobra.Command {
-	var rawInput string
-	cmd := &cobra.Command{
-		Use:   "set [SLUG] [STATES]",
-		Short: "Set the issue states a template's prompt is valid to run from",
-		Long: `Override the state-gate for a template. STATES is a comma-separated
-list of canonical issue states (todo, in_progress, needs_action,
-in_review, done, cancelled). To revert a built-in template's gate to
-its embedded default, use ` + "`bacio settings template states reset`" + `.`,
-		Args: cobra.RangeArgs(0, 2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, err := parseJSONInput(cmd, args, rawInput)
-			if err != nil {
-				return err
-			}
-			if raw != nil {
-				in, _, err := inputio.DecodeStrict[inputs.SettingsTemplateStatesSetInput](raw)
-				if err != nil {
-					return err
-				}
-				if len(in.States) == 0 {
-					return fmt.Errorf("states is required; use `bacio settings template states reset` to revert a built-in to its default")
-				}
-				return applyTemplateStates(in.Slug, in.States)
-			}
-			if len(args) != 2 {
-				return fmt.Errorf("requires <SLUG> <STATES> positionals or --json")
-			}
-			states, err := parseStates(args[1])
-			if err != nil {
-				return err
-			}
-			if len(states) == 0 {
-				return fmt.Errorf("states is required; use `bacio settings template states reset` to revert a built-in to its default")
-			}
-			return applyTemplateStates(args[0], statesToStrings(states))
-		},
-	}
-	addInputFlag(cmd, &rawInput)
-	return cmd
-}
-
-func settingsTemplateStatesResetCmd() *cobra.Command {
-	var rawInput string
-	cmd := &cobra.Command{
-		Use:   "reset [SLUG]",
-		Short: "Reset a built-in template's state-gate to its embedded default",
-		Args:  cobra.RangeArgs(0, 1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, err := parseJSONInput(cmd, args, rawInput)
-			if err != nil {
-				return err
-			}
-			if raw != nil {
-				in, _, err := inputio.DecodeStrict[inputs.SettingsTemplateStatesResetInput](raw)
-				if err != nil {
-					return err
-				}
-				return applyTemplateStates(in.Slug, nil)
-			}
-			if len(args) != 1 {
-				return fmt.Errorf("requires <SLUG> positional or --json")
-			}
-			return applyTemplateStates(args[0], nil)
-		},
-	}
-	addInputFlag(cmd, &rawInput)
-	return cmd
-}
-
-// (non-empty list) and `states reset` (empty list = revert built-in
-// to its default). It honours --dry-run.
-func applyTemplateStates(slugArg string, states []string) error {
-	if err := requireLocalForSettings("template states set"); err != nil {
-		return err
-	}
-	slug, err := templateSlugArg(slugArg)
-	if err != nil {
-		return err
-	}
-	c, err := openClient()
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-	ctx := context.Background()
-	if err := c.SetPromptStates(ctx, slug, states, opts.dryRun); err != nil {
-		return err
-	}
-	if opts.dryRun {
-		t, err := c.GetPromptTemplate(ctx, slug)
-		if err != nil {
-			return wrapTemplateLookup(slug, err)
-		}
-		projected := *t
-		if len(states) > 0 {
-			parsed := make([]model.State, len(states))
-			for i, s := range states {
-				parsed[i] = model.State(s)
-			}
-			projected.AllowedStates = parsed
-		} else if t.IsBuiltin {
-			projected.AllowedStates = model.DefaultPromptStatesForBuiltinSlug(slug)
-		}
-		return emitDryRun(templateViewForRow(&projected))
-	}
-	t, err := c.GetPromptTemplate(ctx, slug)
-	if err != nil {
-		return wrapTemplateLookup(slug, err)
-	}
-	return emit(templateViewForRow(t))
 }
 
 // requireLocalForSettings short-circuits settings verbs in remote mode —
@@ -806,29 +639,8 @@ func templateSlugArg(s string) (string, error) {
 	return string(mode), nil
 }
 
-func statesToStrings(states []model.State) []string {
-	out := make([]string, len(states))
-	for i, st := range states {
-		out[i] = string(st)
-	}
-	return out
-}
-
-func sameStates(a, b []model.State) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
 func templateViewForRow(t *store.PromptTemplate) *promptTemplateView {
 	def := model.DefaultPromptBodyForBuiltinSlug(t.Slug)
-	defStates := model.DefaultPromptStatesForBuiltinSlug(t.Slug)
 	label := t.Name
 	if label == "" {
 		label = model.BuiltinTemplateLabel(t.Slug)
@@ -845,9 +657,6 @@ func templateViewForRow(t *store.PromptTemplate) *promptTemplateView {
 		Default:                 def,
 		IsDefault:               t.IsBuiltin && t.Body == def,
 		IsBuiltin:               t.IsBuiltin,
-		AllowedStates:           statesToStrings(t.AllowedStates),
-		DefaultStates:           statesToStrings(defStates),
-		StatesAreDefault:        t.IsBuiltin && sameStates(t.AllowedStates, defStates),
 		ConcurrencyLimit:        t.ConcurrencyLimit,
 		DefaultConcurrencyLimit: defConc,
 		ConcurrencyIsDefault:    t.IsBuiltin && t.ConcurrencyLimit == defConc,
@@ -873,7 +682,6 @@ func templateSummaryForRow(t *store.PromptTemplate) *promptTemplateSummary {
 		Body:             t.Body,
 		IsBuiltin:        t.IsBuiltin,
 		IsDefault:        t.IsBuiltin && t.Body == def,
-		AllowedStates:    statesToStrings(t.AllowedStates),
 		ConcurrencyLimit: t.ConcurrencyLimit,
 		ActionLabel:      t.ActionLabel,
 	}
@@ -893,25 +701,6 @@ func wrapTemplateLookup(slug string, err error) error {
 		return fmt.Errorf("no template named %q is registered (see `bacio settings template list`)", slug)
 	}
 	return err
-}
-
-// parseStates parses a comma-separated state list. Empty input yields
-// an empty slice — the "reset to default" signal.
-func parseStates(csv string) ([]model.State, error) {
-	csv = strings.TrimSpace(csv)
-	if csv == "" {
-		return nil, nil
-	}
-	parts := strings.Split(csv, ",")
-	out := make([]model.State, 0, len(parts))
-	for _, p := range parts {
-		st, err := model.ParseState(p)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, st)
-	}
-	return out, nil
 }
 
 func settingsTemplateListCmd() *cobra.Command {
@@ -1283,16 +1072,16 @@ func settingsTemplateAddCmd() *cobra.Command {
 		Use:   "add [SLUG] [NAME]",
 		Short: "Create a new dispatch prompt template",
 		Long: `Create a new dispatch prompt template. The richest path is --json,
-which supports body, state-gate, action_label and concurrency_limit as
-well as slug + name; the positional form is a quick "scaffold with
-empty body, no state-gate" shortcut you can then edit via the desktop
-/ TUI / `+"`set`/`states`"+`. ` + "`--action-label`" + ` is the imperative
-override (BACI-67) rendered on the dispatch action menus; when empty,
-the UI derives one from NAME via the gerund→imperative rule.
+which supports body, action_label and concurrency_limit as well as
+slug + name; the positional form is a quick "scaffold with empty
+body" shortcut you can then edit via the desktop / TUI / ` + "`set`" + `.
+` + "`--action-label`" + ` is the imperative override (BACI-67) rendered on
+the dispatch action menus; when empty, the UI derives one from NAME
+via the gerund→imperative rule.
 
 Examples:
 
-  bacio settings template add --json '{"slug":"spike","name":"Spike","body":"Spike on {{issue_id}}.","states":["todo"],"action_label":"Spike"}'
+  bacio settings template add --json '{"slug":"spike","name":"Spike","body":"Spike on {{issue_id}}.","action_label":"Spike"}'
   bacio settings template add spike Spike --action-label "Investigate"
   bacio settings template add spike Spike     # body empty, derives label from name`,
 		Args: cobra.RangeArgs(0, 2),

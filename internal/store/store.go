@@ -401,6 +401,14 @@ func migrate(db *sql.DB) error {
 			return fmt.Errorf("drop permission_mode from agent_sessions: %w", err)
 		}
 	}
+	// BACI-252: drop the legacy prompt_templates.allowed_states_json
+	// column on older DBs BEFORE any prompt_templates write below, so
+	// every subsequent seed / backfill INSERT matches the new schema.
+	// Idempotent via PRAGMA table_info — re-running Open on a
+	// post-drop DB is a no-op.
+	if err := migrateDropAllowedStatesJSON(db); err != nil {
+		return fmt.Errorf("drop allowed_states_json from prompt_templates: %w", err)
+	}
 	// BACI-31: dispatch prompt templates moved from app_settings (KV
 	// rows keyed prompt_template.<slug> / prompt_states.<slug>) into a
 	// dedicated prompt_templates table. The CREATE TABLE itself lives in
@@ -837,17 +845,12 @@ func backfillResearchTemplate(db *sql.DB) error {
 	if name == "" {
 		name = slug
 	}
-	states := model.DefaultPromptStatesForBuiltinSlug(slug)
-	encoded, err := encodeStates(states)
-	if err != nil {
-		return err
-	}
 	actionLabel := model.BuiltinTemplateActionLabel(slug)
 	if _, err := db.Exec(`
 		INSERT OR IGNORE INTO prompt_templates
-		  (slug, name, body, allowed_states_json, is_builtin, concurrency_limit, action_label, created_at, updated_at)
-		VALUES (?, ?, ?, ?, 1, 0, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-		slug, name, body, encoded, actionLabel); err != nil {
+		  (slug, name, body, is_builtin, concurrency_limit, action_label, created_at, updated_at)
+		VALUES (?, ?, ?, 1, 0, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+		slug, name, body, actionLabel); err != nil {
 		return err
 	}
 	return nil
@@ -865,17 +868,12 @@ func backfillScopeTemplate(db *sql.DB) error {
 	if name == "" {
 		name = slug
 	}
-	states := model.DefaultPromptStatesForBuiltinSlug(slug)
-	encoded, err := encodeStates(states)
-	if err != nil {
-		return err
-	}
 	actionLabel := model.BuiltinTemplateActionLabel(slug)
 	if _, err := db.Exec(`
 		INSERT OR IGNORE INTO prompt_templates
-		  (slug, name, body, allowed_states_json, is_builtin, concurrency_limit, action_label, created_at, updated_at)
-		VALUES (?, ?, ?, ?, 1, 0, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-		slug, name, body, encoded, actionLabel); err != nil {
+		  (slug, name, body, is_builtin, concurrency_limit, action_label, created_at, updated_at)
+		VALUES (?, ?, ?, 1, 0, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+		slug, name, body, actionLabel); err != nil {
 		return err
 	}
 	return nil
@@ -885,6 +883,12 @@ func backfillScopeTemplate(db *sql.DB) error {
 // not already present. Used by the migration to bring older DBs (where
 // the first-time seed step has already run with only the per-mode
 // built-ins) up to date with the BACI-52 wrapper.
+//
+// The leading-underscore slug keeps the row out of the per-card
+// dispatch picker via the reserved-slug filter (BACI-252 — see
+// nonReservedPrompts in KanbanCard / IssueWorkspace). action_label =
+// '' (preamble never reaches the dropdown either, so the imperative
+// form is irrelevant).
 func backfillDispatchPreamble(db *sql.DB) error {
 	slug := model.BuiltinTemplatePreamble
 	body := model.DefaultPromptBodyForBuiltinSlug(slug)
@@ -892,16 +896,32 @@ func backfillDispatchPreamble(db *sql.DB) error {
 	if name == "" {
 		name = slug
 	}
-	// allowed_states_json = '[]' (no state-gate) — keeps the row out of
-	// the per-card dispatch picker (availableDispatchModes filters by
-	// state-gate match). action_label = '' (preamble never reaches the
-	// dropdown either, so the imperative form is irrelevant).
 	if _, err := db.Exec(`
 		INSERT OR IGNORE INTO prompt_templates
-		  (slug, name, body, allowed_states_json, is_builtin, concurrency_limit, action_label, created_at, updated_at)
-		VALUES (?, ?, ?, '[]', 1, 0, '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+		  (slug, name, body, is_builtin, concurrency_limit, action_label, created_at, updated_at)
+		VALUES (?, ?, ?, 1, 0, '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
 		slug, name, body); err != nil {
 		return err
+	}
+	return nil
+}
+
+// migrateDropAllowedStatesJSON is the BACI-252 in-place column drop on
+// the prompt_templates table. PRAGMA table_info is the column-exists
+// probe; the ALTER TABLE ... DROP COLUMN is gated so re-Opens on a
+// post-drop DB are a no-op. SQLite 3.35+ (March 2021) supports DROP
+// COLUMN natively; the modernc/sqlite driver bundles a much newer
+// engine on every supported platform.
+func migrateDropAllowedStatesJSON(db *sql.DB) error {
+	has, err := columnExists(db, "prompt_templates", "allowed_states_json")
+	if err != nil {
+		return err
+	}
+	if !has {
+		return nil
+	}
+	if _, err := db.Exec(`ALTER TABLE prompt_templates DROP COLUMN allowed_states_json`); err != nil {
+		return fmt.Errorf("drop allowed_states_json: %w", err)
 	}
 	return nil
 }
@@ -943,65 +963,29 @@ func migratePromptTemplates(db *sql.DB) error {
 	// Seed every built-in from the embedded defaults.
 	for _, slug := range model.BuiltinTemplateSlugs() {
 		body := model.DefaultPromptBodyForBuiltinSlug(slug)
-		states := model.DefaultPromptStatesForBuiltinSlug(slug)
-		encoded, err := encodeStates(states)
-		if err != nil {
-			return err
-		}
 		name := model.BuiltinTemplateLabel(slug)
 		if name == "" {
 			name = slug
 		}
 		if _, err := tx.Exec(`
-			INSERT INTO prompt_templates (slug, name, body, allowed_states_json, is_builtin, concurrency_limit, action_label, created_at, updated_at)
-			VALUES (?, ?, ?, ?, 1, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-			slug, name, body, encoded, model.DefaultConcurrencyLimit(slug), model.BuiltinTemplateActionLabel(slug)); err != nil {
+			INSERT INTO prompt_templates (slug, name, body, is_builtin, concurrency_limit, action_label, created_at, updated_at)
+			VALUES (?, ?, ?, 1, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+			slug, name, body, model.DefaultConcurrencyLimit(slug), model.BuiltinTemplateActionLabel(slug)); err != nil {
 			return err
 		}
 	}
 
-	// Fold any pre-BACI-31 app_settings overrides into the freshly
-	// seeded rows, then drop the migrated KV rows.
+	// Fold any pre-BACI-31 app_settings body overrides into the freshly
+	// seeded rows, then drop the migrated KV rows. BACI-252 retired
+	// the per-template state-gate, so the matching `prompt_states.*`
+	// KV rows are now just discarded — the gate they encoded is gone.
 	for _, slug := range model.BuiltinTemplateSlugs() {
 		bodyKey := "prompt_template." + slug
 		statesKey := "prompt_states." + slug
 
-		var (
-			bodyVal   sql.NullString
-			statesVal sql.NullString
-		)
+		var bodyVal sql.NullString
 		if err := tx.QueryRow(`SELECT value FROM app_settings WHERE key = ?`, bodyKey).Scan(&bodyVal); err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return err
-		}
-		if err := tx.QueryRow(`SELECT value FROM app_settings WHERE key = ?`, statesKey).Scan(&statesVal); err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		if !bodyVal.Valid && !statesVal.Valid {
-			continue
-		}
-
-		// Translate the comma-separated state list (the old format) to
-		// the new JSON-array shape.
-		if statesVal.Valid && strings.TrimSpace(statesVal.String) != "" {
-			parts := strings.Split(statesVal.String, ",")
-			states := make([]model.State, 0, len(parts))
-			for _, p := range parts {
-				st, err := model.ParseState(p)
-				if err != nil {
-					continue
-				}
-				states = append(states, st)
-			}
-			encoded, err := encodeStates(states)
-			if err != nil {
-				return err
-			}
-			if _, err := tx.Exec(`
-				UPDATE prompt_templates
-				   SET allowed_states_json = ?, updated_at = CURRENT_TIMESTAMP
-				 WHERE slug = ?`, encoded, slug); err != nil {
-				return err
-			}
 		}
 		if bodyVal.Valid {
 			if _, err := tx.Exec(`
@@ -1011,6 +995,8 @@ func migratePromptTemplates(db *sql.DB) error {
 				return err
 			}
 		}
+		// Always drop both KV keys (body + retired state-gate) so a
+		// later Open never re-applies them.
 		if _, err := tx.Exec(`DELETE FROM app_settings WHERE key IN (?, ?)`, bodyKey, statesKey); err != nil {
 			return err
 		}

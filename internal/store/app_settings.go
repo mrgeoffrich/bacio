@@ -120,11 +120,10 @@ func (s *Store) SetPromptTemplate(mode model.DispatchMode, body string) error {
 			name = slug
 		}
 		_, err := s.AddPromptTemplate(AddPromptTemplateIn{
-			Slug:          slug,
-			Name:          name,
-			Body:          clean,
-			AllowedStates: model.DefaultPromptStatesForBuiltinSlug(slug),
-			IsBuiltin:     true,
+			Slug:      slug,
+			Name:      name,
+			Body:      clean,
+			IsBuiltin: true,
 		})
 		return err
 	}
@@ -145,99 +144,6 @@ func (s *Store) AllPromptTemplates() (map[model.DispatchMode]string, error) {
 	out := make(map[model.DispatchMode]string, len(tmpls))
 	for _, t := range tmpls {
 		out[model.DispatchMode(t.Slug)] = t.Body
-	}
-	return out, nil
-}
-
-// GetPromptStates returns the state-gate (set of issue states whose
-// prompt is valid to run from them) for a template by slug. Empty/
-// unknown slug returns nil — matching the old behaviour where a missing
-// override fell back to nothing.
-//
-// Deprecated: use Store.GetPromptTemplateBySlug for the typed shape.
-func (s *Store) GetPromptStates(mode model.DispatchMode) ([]model.State, error) {
-	if mode == "" {
-		return nil, nil
-	}
-	t, err := s.GetPromptTemplateBySlug(string(mode))
-	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return t.AllowedStates, nil
-}
-
-// ValidatePromptStates validates the state set against the canonical
-// vocabulary — same shape as ValidatePromptTemplateStates, kept under
-// the legacy name for the dry-run path of the original SetPromptStates.
-//
-// Deprecated: use Store.ValidatePromptTemplateStates.
-func (s *Store) ValidatePromptStates(mode model.DispatchMode, states []model.State) ([]model.State, error) {
-	if _, err := model.ParseDispatchMode(string(mode)); err != nil {
-		return nil, err
-	}
-	if mode == "" {
-		return nil, errors.New("prompt state-gate requires a dispatch mode")
-	}
-	return ValidatePromptTemplateStates(states)
-}
-
-// SetPromptStates stores a custom state-gate for a slug. Empty slice =
-// reset semantic: built-in slugs revert to the embedded default gate;
-// non-built-in slugs accept an empty gate (their template never appears
-// on a per-card menu but is still reachable via `bacio agent dispatch`).
-//
-// Deprecated: use Store.UpdatePromptTemplate directly.
-func (s *Store) SetPromptStates(mode model.DispatchMode, states []model.State) error {
-	clean, err := s.ValidatePromptStates(mode, states)
-	if err != nil {
-		return err
-	}
-	slug := string(mode)
-	if len(clean) == 0 {
-		if def := model.DefaultPromptStatesForBuiltinSlug(slug); def != nil {
-			clean = def
-		}
-	}
-	existing, err := s.GetPromptTemplateBySlug(slug)
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		return err
-	}
-	if existing != nil {
-		_, err := s.UpdatePromptTemplate(slug, UpdatePromptTemplatePatch{AllowedStates: &clean})
-		return err
-	}
-	if isBuiltinSlug(slug) {
-		name := model.BuiltinTemplateLabel(slug)
-		if name == "" {
-			name = slug
-		}
-		_, err := s.AddPromptTemplate(AddPromptTemplateIn{
-			Slug:          slug,
-			Name:          name,
-			Body:          model.DefaultPromptBodyForBuiltinSlug(slug),
-			AllowedStates: clean,
-			IsBuiltin:     true,
-		})
-		return err
-	}
-	return fmt.Errorf("no template %q is registered — use `bacio settings template add` to create one", slug)
-}
-
-// AllPromptStates returns the state-gate for every registered template,
-// keyed by slug.
-//
-// Deprecated: use Store.ListPromptTemplates for the typed shape.
-func (s *Store) AllPromptStates() (map[model.DispatchMode][]model.State, error) {
-	tmpls, err := s.ListPromptTemplates()
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[model.DispatchMode][]model.State, len(tmpls))
-	for _, t := range tmpls {
-		out[model.DispatchMode(t.Slug)] = append([]model.State(nil), t.AllowedStates...)
 	}
 	return out, nil
 }
