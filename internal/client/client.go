@@ -665,12 +665,23 @@ type Client interface {
 
 	// InflightByModeForRepo (BACI-145) returns mode → count of in-flight
 	// dispatches in this repo, gated by the same staleness predicate the
-	// matcher uses. Used by boardcards.Assemble to derive each card's
-	// WaitingState (queued vs queued_blocked-by-concurrency-cap) without
-	// fanning out a per-mode CountInFlightByMode call. Local-only —
-	// remote returns ErrLocalOnly until the kanban surface switches to a
-	// bulk REST endpoint.
+	// matcher uses. Local-only — remote returns ErrLocalOnly.
+	//
+	// BACI-227: superseded for the kanban / brief WaitingState deriver
+	// by InflightByModeBaseForRepo, which returns the same count
+	// grouped per (mode, base_branch). Kept on the interface for
+	// remote-parity bookkeeping and the chance that a future caller
+	// genuinely wants the per-mode count regardless of branch.
 	InflightByModeForRepo(ctx context.Context, repo *model.Repo) (map[model.DispatchMode]int, error)
+
+	// InflightByModeBaseForRepo (BACI-227) is the per-(mode, branch)
+	// sibling: returns store.InflightKey{Mode, BaseBranch} → count for
+	// every (mode, branch) pair with at least one in-flight row.
+	// Drives the kanban / brief assembler's WaitingState deriver so
+	// the per-card concurrency-cap label tracks the matcher's
+	// per-branch gate exactly. Local-only — remote returns
+	// ErrLocalOnly.
+	InflightByModeBaseForRepo(ctx context.Context, repo *model.Repo) (map[store.InflightKey]int, error)
 
 	// ----- Prompt templates (local-only; `bacio settings template`) -----
 	// ListPromptTemplates returns every registered template — slug,

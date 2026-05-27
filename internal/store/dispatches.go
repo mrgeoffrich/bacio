@@ -598,6 +598,126 @@ func (s *Store) CountInFlightByMode(repoID int64, mode model.DispatchMode) (int,
 	return n, err
 }
 
+// CountInFlightByModeBase (BACI-227) is the per-branch sibling of
+// CountInFlightByMode: same staleness gate, same creator-exclusion,
+// same in-flight statuses, plus an extra
+// `AND COALESCE(d.base_branch, '') = ?` clause grouping the count to
+// rows targeting a specific base branch. Used by the matcher's per-
+// tick walk so a `ship` cap of 1 only serialises within a single
+// branch — `feat/A`, `feat/B`, and `main` each get their own slot.
+//
+// The COALESCE collapses NULL (legacy / setup nudge / pre-BACI-226
+// rows) to the empty string. The matcher folds NULL →
+// model.DefaultBaseBranch ("main") at the call site before invoking
+// this helper, matching every read-site default; passing `""` here
+// counts only the legacy-shape rows. Note that the count groups by
+// the COALESCEd value, so a NULL row will only match a `baseBranch`
+// argument of `""`, not `"main"` — callers that want to compare
+// against a row's resolved branch should compute the COALESCE on
+// their side too.
+func (s *Store) CountInFlightByModeBase(repoID int64, mode model.DispatchMode, baseBranch string) (int, error) {
+	staleWindow := fmt.Sprintf("-%d seconds", int(model.AgentIdlePingThreshold/time.Second))
+	var n int
+	err := s.DB.QueryRow(`
+		SELECT COUNT(*)
+		  FROM agent_dispatches d
+		 WHERE d.repo_id = ? AND d.mode = ?
+		   AND COALESCE(d.base_branch, '') = ?
+		   AND d.status IN ('pending','delivered')
+		   AND d.created_by != ?
+		   AND (
+		     (d.target_agent_id IS NOT NULL AND EXISTS (
+		       SELECT 1 FROM agent_sessions s
+		        WHERE s.agent_id = d.target_agent_id
+		          AND s.ended_at IS NULL
+		          AND s.last_seen_at > datetime('now', ?)
+		     ))
+		     OR
+		     (d.target_session_id != '' AND EXISTS (
+		       SELECT 1 FROM agent_sessions s
+		        WHERE s.session_id = d.target_session_id
+		          AND s.ended_at IS NULL
+		          AND s.last_seen_at > datetime('now', ?)
+		     ))
+		   )`,
+		repoID, string(mode), baseBranch, model.SetupDispatchCreator, staleWindow, staleWindow,
+	).Scan(&n)
+	return n, err
+}
+
+// InflightKey (BACI-227) is the composite key for the bulked
+// InflightByModeBaseForRepo result. A small struct rather than a
+// stringly-concatenated key keeps the deriver readable and avoids
+// "what separator?" questions when a mode slug or branch name
+// contains an unexpected character.
+type InflightKey struct {
+	Mode       model.DispatchMode
+	BaseBranch string
+}
+
+// InflightByModeBaseForRepo (BACI-227) is the bulked sibling of
+// CountInFlightByModeBase — it returns the same per-(mode, branch)
+// count for every (mode, branch) pair that has at least one in-flight
+// row in `repoID`, in one query. Used by the kanban / IssueBrief
+// assembler's WaitingState deriver so the per-card concurrency-cap
+// label tracks the matcher's per-branch gate exactly.
+//
+// The BaseBranch in the returned key is COALESCE(d.base_branch, '')
+// — the same shape CountInFlightByModeBase keys on, so a legacy /
+// NULL row groups with the empty string. Read callers fold "" to
+// model.DefaultBaseBranch before looking up against the row's
+// resolved branch.
+//
+// Same staleness gate as the single-row form: a `delivered`
+// dispatch only counts when its target identity (or named session)
+// is plausibly alive (last_seen_at fresh within
+// model.AgentIdlePingThreshold) so stranded orphans don't
+// permanently mark a card as blocked.
+func (s *Store) InflightByModeBaseForRepo(repoID int64) (map[InflightKey]int, error) {
+	staleWindow := fmt.Sprintf("-%d seconds", int(model.AgentIdlePingThreshold/time.Second))
+	rows, err := s.DB.Query(`
+		SELECT d.mode, COALESCE(d.base_branch, ''), COUNT(*)
+		  FROM agent_dispatches d
+		 WHERE d.repo_id = ?
+		   AND d.status IN ('pending','delivered')
+		   AND d.created_by != ?
+		   AND (
+		     (d.target_agent_id IS NOT NULL AND EXISTS (
+		       SELECT 1 FROM agent_sessions s
+		        WHERE s.agent_id = d.target_agent_id
+		          AND s.ended_at IS NULL
+		          AND s.last_seen_at > datetime('now', ?)
+		     ))
+		     OR
+		     (d.target_session_id != '' AND EXISTS (
+		       SELECT 1 FROM agent_sessions s
+		        WHERE s.session_id = d.target_session_id
+		          AND s.ended_at IS NULL
+		          AND s.last_seen_at > datetime('now', ?)
+		     ))
+		   )
+		 GROUP BY d.mode, COALESCE(d.base_branch, '')`,
+		repoID, model.SetupDispatchCreator, staleWindow, staleWindow,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[InflightKey]int)
+	for rows.Next() {
+		var (
+			mode   string
+			branch string
+			n      int
+		)
+		if err := rows.Scan(&mode, &branch, &n); err != nil {
+			return nil, err
+		}
+		out[InflightKey{Mode: model.DispatchMode(mode), BaseBranch: branch}] = n
+	}
+	return out, rows.Err()
+}
+
 // InflightByModeForRepo is the bulked sibling of CountInFlightByMode —
 // it returns the same count for every mode that has at least one
 // in-flight row in `repoID`, in one query. Used by the kanban /
@@ -611,6 +731,12 @@ func (s *Store) CountInFlightByMode(repoID int64, mode model.DispatchMode) (int,
 // only counts when its target identity (or named session) is plausibly
 // alive (last_seen_at fresh within model.AgentIdlePingThreshold) so
 // stranded orphans don't permanently mark a card as blocked.
+//
+// BACI-227: superseded for the kanban/brief WaitingState deriver by
+// InflightByModeBaseForRepo — the per-(mode, branch) form. Kept for
+// callers that still want the per-mode count regardless of branch
+// (none in tree today after the BACI-227 cutover, but the symmetry
+// with CountInFlightByMode is cheap to keep).
 func (s *Store) InflightByModeForRepo(repoID int64) (map[model.DispatchMode]int, error) {
 	staleWindow := fmt.Sprintf("-%d seconds", int(model.AgentIdlePingThreshold/time.Second))
 	rows, err := s.DB.Query(`

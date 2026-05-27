@@ -94,9 +94,12 @@ func (d deps) handleIssueBrief(w http.ResponseWriter, r *http.Request) {
 	if iss.WaitingForClaim {
 		activeDispatch, derr := d.store.WaitingDispatchForIssue(repo.ID, iss.ID)
 		if derr == nil {
-			inflight, ierr := d.store.InflightByModeForRepo(repo.ID)
+			// BACI-227: per-(mode, branch) in-flight grouping so the
+			// IssueLockBanner's WaitingState tracks the matcher's
+			// per-branch concurrency gate exactly.
+			inflight, ierr := d.store.InflightByModeBaseForRepo(repo.ID)
 			if ierr != nil {
-				inflight = map[model.DispatchMode]int{}
+				inflight = map[store.InflightKey]int{}
 			}
 			templates, terr := d.store.ListPromptTemplates()
 			if terr != nil {

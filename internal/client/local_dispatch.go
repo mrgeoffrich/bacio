@@ -622,11 +622,25 @@ func (c *localClient) WaitingDispatchForIssue(ctx context.Context, repo *model.R
 // CountInFlightByMode — one read per repo for the kanban / brief
 // assembler's WaitingState derivation. Modes with zero in-flight rows
 // are omitted from the map.
+//
+// BACI-227: superseded for the kanban / brief deriver by
+// InflightByModeBaseForRepo. Retained for client-interface symmetry.
 func (c *localClient) InflightByModeForRepo(ctx context.Context, repo *model.Repo) (map[model.DispatchMode]int, error) {
 	if repo == nil {
 		return nil, fmt.Errorf("InflightByModeForRepo requires a repo")
 	}
 	return c.store.InflightByModeForRepo(repo.ID)
+}
+
+// InflightByModeBaseForRepo (BACI-227) is the per-(mode, branch)
+// sibling of InflightByModeForRepo. The kanban / brief WaitingState
+// deriver reads this map so the per-card concurrency-cap label tracks
+// the matcher's per-branch gate exactly.
+func (c *localClient) InflightByModeBaseForRepo(ctx context.Context, repo *model.Repo) (map[store.InflightKey]int, error) {
+	if repo == nil {
+		return nil, fmt.Errorf("InflightByModeBaseForRepo requires a repo")
+	}
+	return c.store.InflightByModeBaseForRepo(repo.ID)
 }
 
 func (c *localClient) InboxDispatches(ctx context.Context, sessionID string) ([]*model.AgentDispatch, error) {

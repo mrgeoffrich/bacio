@@ -530,6 +530,264 @@ func TestInflightByModeForRepo(t *testing.T) {
 	}
 }
 
+// seedShipDispatchForBranch (BACI-227 test helper) creates an issue
+// targeted at `branch` and queues a `ship` dispatch against it,
+// binding the dispatch to a freshly-created agent + session so it
+// surfaces in the per-(mode, branch) in-flight count. Returns the
+// bound dispatch row (Status=pending, BaseBranch=branch).
+func seedShipDispatchForBranch(t *testing.T, s *Store, repo *model.Repo, feat *model.Feature, title, agentName, branch string) *model.AgentDispatch {
+	t.Helper()
+	// Pin the issue with a base-branch override so ResolveBaseBranch
+	// returns exactly `branch` — independent of whether a feature was
+	// passed and what its branch_name is.
+	override := branch
+	var featID *int64
+	if feat != nil {
+		featID = &feat.ID
+	}
+	iss, err := s.CreateIssue(repo.ID, featID, title, "", model.StateInReview, nil, override)
+	if err != nil {
+		t.Fatalf("create issue %q: %v", title, err)
+	}
+	queued, err := s.AddDispatch(AddDispatchIn{
+		RepoID:        repo.ID,
+		IssueID:       &iss.ID,
+		Mode:          model.DispatchModeShip,
+		Payload:       "ship it",
+		CreatedBy:     "supervisor",
+		InitialStatus: model.DispatchQueued,
+	})
+	if err != nil {
+		t.Fatalf("queue %q: %v", title, err)
+	}
+	ag, _, err := s.UpsertAgent(agentName, true)
+	if err != nil {
+		t.Fatalf("upsert agent %q: %v", agentName, err)
+	}
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "sess-" + agentName, RepoID: repo.ID, AgentID: &ag.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("upsert session for %q: %v", agentName, err)
+	}
+	bound, err := s.BindQueuedDispatch(queued.ID, ag.ID)
+	if err != nil {
+		t.Fatalf("bind %q: %v", title, err)
+	}
+	if bound.BaseBranch != branch {
+		t.Fatalf("seed: bound base_branch = %q, want %q", bound.BaseBranch, branch)
+	}
+	return bound
+}
+
+// TestCountInFlightByModeBase_PerBranchIsolation (BACI-227) — three
+// delivered ship dispatches on two different branches must group
+// independently when grouped per branch. Without the per-branch
+// grouping a `ship` cap of 1 would over-serialise across branches.
+func TestCountInFlightByModeBase_PerBranchIsolation(t *testing.T) {
+	s, repo, _, _, _ := seedDispatchFixture(t)
+
+	// Two ship rows on feat/A, one on feat/B.
+	seedShipDispatchForBranch(t, s, repo, nil, "feat/A ship 1", "feat-a-1@claude.test", "feat/A")
+	seedShipDispatchForBranch(t, s, repo, nil, "feat/A ship 2", "feat-a-2@claude.test", "feat/A")
+	seedShipDispatchForBranch(t, s, repo, nil, "feat/B ship", "feat-b-1@claude.test", "feat/B")
+
+	cases := []struct {
+		branch string
+		want   int
+	}{
+		{branch: "feat/A", want: 2},
+		{branch: "feat/B", want: 1},
+		{branch: "main", want: 0},
+	}
+	for _, tc := range cases {
+		n, err := s.CountInFlightByModeBase(repo.ID, model.DispatchModeShip, tc.branch)
+		if err != nil {
+			t.Fatalf("CountInFlightByModeBase(%s): %v", tc.branch, err)
+		}
+		if n != tc.want {
+			t.Errorf("ship on %s = %d, want %d", tc.branch, n, tc.want)
+		}
+	}
+}
+
+// TestCountInFlightByModeBase_NullColumnCountsAsEmpty (BACI-227) — a
+// legacy / NULL base_branch row groups with the empty-string key.
+// Documents the COALESCE semantics so callers know to pass "" (not
+// "main") to count pre-BACI-226 rows.
+func TestCountInFlightByModeBase_NullColumnCountsAsEmpty(t *testing.T) {
+	s, repo, iss, ag, _ := seedDispatchFixture(t)
+	d, err := s.AddDispatch(AddDispatchIn{
+		RepoID: repo.ID, TargetAgentID: &ag.ID, IssueID: &iss.ID,
+		Mode: model.DispatchModeShip, CreatedBy: "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add dispatch: %v", err)
+	}
+	if _, err := s.MarkDispatchDelivered(d.ID); err != nil {
+		t.Fatalf("deliver: %v", err)
+	}
+	// Force-NULL the base_branch column to simulate a legacy row
+	// queued before BACI-226 stamped the value.
+	if _, err := s.DB.Exec(
+		`UPDATE agent_dispatches SET base_branch = NULL WHERE id = ?`, d.ID,
+	); err != nil {
+		t.Fatalf("force-null: %v", err)
+	}
+
+	// Sanity: the row's not counted under any concrete branch name.
+	n, err := s.CountInFlightByModeBase(repo.ID, model.DispatchModeShip, "main")
+	if err != nil {
+		t.Fatalf("count main: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("NULL row counted under main = %d, want 0 (COALESCE collapses NULL to '')", n)
+	}
+	// The empty string is the right key for the legacy row.
+	n, err = s.CountInFlightByModeBase(repo.ID, model.DispatchModeShip, "")
+	if err != nil {
+		t.Fatalf("count empty: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("NULL row counted under '' = %d, want 1", n)
+	}
+}
+
+// TestCountInFlightByModeBase_StalenessGateApplies (BACI-227) — same
+// staleness gate as the per-mode form: a delivered dispatch whose
+// target session is past AgentIdlePingThreshold drops out of the
+// per-branch count, freeing the slot for a live agent's bind.
+func TestCountInFlightByModeBase_StalenessGateApplies(t *testing.T) {
+	s, repo, _, _, _ := seedDispatchFixture(t)
+	// One ship on feat/A (will be aged), one on feat/B (stays live).
+	staleDispatch := seedShipDispatchForBranch(t, s, repo, nil, "stale feat/A", "stale-a@claude.test", "feat/A")
+	seedShipDispatchForBranch(t, s, repo, nil, "live feat/B", "live-b@claude.test", "feat/B")
+
+	// Force-stale the feat/A session so its dispatch drops out.
+	if _, err := s.DB.Exec(
+		`UPDATE agent_sessions SET last_seen_at = datetime('now','-3 hours') WHERE session_id = ?`,
+		"sess-stale-a@claude.test",
+	); err != nil {
+		t.Fatalf("force-stale: %v", err)
+	}
+
+	n, err := s.CountInFlightByModeBase(repo.ID, model.DispatchModeShip, "feat/A")
+	if err != nil {
+		t.Fatalf("count feat/A: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("stale feat/A count = %d, want 0 (BACI-58 staleness drops orphan)", n)
+	}
+	// feat/B is untouched.
+	n, err = s.CountInFlightByModeBase(repo.ID, model.DispatchModeShip, "feat/B")
+	if err != nil {
+		t.Fatalf("count feat/B: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("live feat/B count = %d, want 1 (sibling branch unaffected)", n)
+	}
+	// Suppress unused warning for the seeded dispatch — only used for shape.
+	_ = staleDispatch
+}
+
+// TestCountInFlightByModeBase_ChannelCreatorExcluded (BACI-227) —
+// SetupDispatchCreator rows stay excluded under the per-branch grouping
+// just as they are in the per-mode form. A setup nudge has no
+// base_branch (no issue), so the row groups under "" — and is still
+// excluded by the creator filter.
+func TestCountInFlightByModeBase_ChannelCreatorExcluded(t *testing.T) {
+	s, repo, _, _, sess := seedDispatchFixture(t)
+	d, err := s.AddDispatch(AddDispatchIn{
+		RepoID: repo.ID, TargetSessionID: sess.SessionID,
+		Mode: model.DispatchModeShip, Payload: "setup nudge",
+		CreatedBy: model.SetupDispatchCreator,
+	})
+	if err != nil {
+		t.Fatalf("add setup dispatch: %v", err)
+	}
+	if _, err := s.MarkDispatchDelivered(d.ID); err != nil {
+		t.Fatalf("deliver: %v", err)
+	}
+	n, err := s.CountInFlightByModeBase(repo.ID, model.DispatchModeShip, "")
+	if err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if n != 0 {
+		t.Errorf("setup-creator count = %d, want 0 (creator-exclusion still wins per-branch)", n)
+	}
+}
+
+// TestInflightByModeBaseForRepo (BACI-227) — the bulked form returns
+// one entry per (mode, branch) pair with non-zero count and omits
+// zero entries, matching the per-mode InflightByModeForRepo contract
+// extended to the (mode, branch) key.
+func TestInflightByModeBaseForRepo(t *testing.T) {
+	s, repo, _, _, _ := seedDispatchFixture(t)
+
+	seedShipDispatchForBranch(t, s, repo, nil, "feat/A ship", "bulk-a@claude.test", "feat/A")
+	seedShipDispatchForBranch(t, s, repo, nil, "feat/B ship", "bulk-b@claude.test", "feat/B")
+
+	// Plus a plan dispatch on main so we get a second mode too.
+	planIss, err := s.CreateIssue(repo.ID, nil, "main plan", "", model.StateTodo, nil, "main")
+	if err != nil {
+		t.Fatalf("create plan issue: %v", err)
+	}
+	planQueued, err := s.AddDispatch(AddDispatchIn{
+		RepoID:        repo.ID,
+		IssueID:       &planIss.ID,
+		Mode:          model.DispatchModePlan,
+		Payload:       "plan",
+		CreatedBy:     "supervisor",
+		InitialStatus: model.DispatchQueued,
+	})
+	if err != nil {
+		t.Fatalf("queue plan: %v", err)
+	}
+	planAg, _, err := s.UpsertAgent("bulk-plan@claude.test", true)
+	if err != nil {
+		t.Fatalf("upsert plan agent: %v", err)
+	}
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "sess-bulk-plan", RepoID: repo.ID, AgentID: &planAg.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("upsert plan session: %v", err)
+	}
+	if _, err := s.BindQueuedDispatch(planQueued.ID, planAg.ID); err != nil {
+		t.Fatalf("bind plan: %v", err)
+	}
+
+	got, err := s.InflightByModeBaseForRepo(repo.ID)
+	if err != nil {
+		t.Fatalf("bulk: %v", err)
+	}
+
+	want := map[InflightKey]int{
+		{Mode: model.DispatchModeShip, BaseBranch: "feat/A"}: 1,
+		{Mode: model.DispatchModeShip, BaseBranch: "feat/B"}: 1,
+		{Mode: model.DispatchModePlan, BaseBranch: "main"}:   1,
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("got[%+v] = %d, want %d", k, got[k], v)
+		}
+	}
+	// Cross-check: the per-(mode, branch) single-row form must agree
+	// with the bulked entry for every key.
+	for k, v := range got {
+		n, err := s.CountInFlightByModeBase(repo.ID, k.Mode, k.BaseBranch)
+		if err != nil {
+			t.Fatalf("CountInFlightByModeBase(%+v): %v", k, err)
+		}
+		if n != v {
+			t.Errorf("bulk vs single-row mismatch for %+v: bulk=%d, single=%d", k, v, n)
+		}
+	}
+	// A non-existent (mode, branch) pair is absent (not zero).
+	zeroKey := InflightKey{Mode: model.DispatchMode("review"), BaseBranch: "main"}
+	if _, ok := got[zeroKey]; ok {
+		t.Errorf("review/main present in map = true, want absent (no in-flight rows)")
+	}
+}
+
 // TestCancelThenAckRejected locks in that a cancelled dispatch can't be
 // acked — the withdrawal is final.
 func TestCancelThenAckRejected(t *testing.T) {

@@ -13,24 +13,35 @@ import (
 // Only the fields the matcher reads are populated; the rest of the
 // store surface is left out.
 type fakeBackend struct {
-	repos       []*model.Repo
-	templates   []*store.PromptTemplate
-	queuedByRM  map[queueKey][]*model.AgentDispatch
-	inFlightByM map[queueKey]int
-	sessions    map[int64][]*model.AgentSession
-	openClaims  map[int64]map[int64][]*model.AgentClaim
-	dispatches  map[int64][]*model.AgentDispatch
-	agents      map[string]*model.Agent
+	repos        []*model.Repo
+	templates    []*store.PromptTemplate
+	queuedByRM   map[queueKey][]*model.AgentDispatch
+	inFlightByM  map[queueKey]int
+	inFlightByMB map[branchKey]int // BACI-227 per-(repo, mode, branch) counts
+	sessions     map[int64][]*model.AgentSession
+	openClaims   map[int64]map[int64][]*model.AgentClaim
+	dispatches   map[int64][]*model.AgentDispatch
+	agents       map[string]*model.Agent
 
 	binds          []bindCall          // recorded in BindQueuedDispatch order
 	bindErr        map[int64]error     // per-dispatch-id override (e.g. ErrNotFound)
 	listQueuedHits map[queueKey]int    // call counts for ListQueuedByRepoMode
+	countBaseHits  map[branchKey]int   // BACI-227: CountInFlightByModeBase call counts
 	pickCalls      [][]AgentCandidate  // captures the slice passed to AutoPickFreeAgent
 }
 
 type queueKey struct {
 	repoID int64
 	mode   model.DispatchMode
+}
+
+// branchKey (BACI-227) is the composite key for the per-branch
+// in-flight cache the fake backend serves CountInFlightByModeBase
+// from. Mirrors store.InflightKey in shape, scoped to the fake.
+type branchKey struct {
+	repoID int64
+	mode   model.DispatchMode
+	branch string
 }
 
 type bindCall struct {
@@ -42,12 +53,14 @@ func newFakeBackend() *fakeBackend {
 	return &fakeBackend{
 		queuedByRM:     map[queueKey][]*model.AgentDispatch{},
 		inFlightByM:    map[queueKey]int{},
+		inFlightByMB:   map[branchKey]int{},
 		sessions:       map[int64][]*model.AgentSession{},
 		openClaims:     map[int64]map[int64][]*model.AgentClaim{},
 		dispatches:     map[int64][]*model.AgentDispatch{},
 		agents:         map[string]*model.Agent{},
 		bindErr:        map[int64]error{},
 		listQueuedHits: map[queueKey]int{},
+		countBaseHits:  map[branchKey]int{},
 	}
 }
 
@@ -89,6 +102,16 @@ func (f *fakeBackend) ListQueuedByRepoMode(repoID int64, mode model.DispatchMode
 
 func (f *fakeBackend) CountInFlightByMode(repoID int64, mode model.DispatchMode) (int, error) {
 	return f.inFlightByM[queueKey{repoID: repoID, mode: mode}], nil
+}
+
+// CountInFlightByModeBase (BACI-227) returns the per-branch count.
+// Records each call against countBaseHits so tests can pin the
+// matcher's per-tick caching invariant — one count per (repo, mode,
+// branch) per tick, no matter how many queued rows share the branch.
+func (f *fakeBackend) CountInFlightByModeBase(repoID int64, mode model.DispatchMode, branch string) (int, error) {
+	k := branchKey{repoID: repoID, mode: mode, branch: branch}
+	f.countBaseHits[k]++
+	return f.inFlightByMB[k], nil
 }
 
 func (f *fakeBackend) ListAgentSessions(filter store.AgentSessionFilter) ([]*model.AgentSession, error) {
@@ -159,6 +182,23 @@ func (f *fakeBackend) addQueued(repoID int64, mode model.DispatchMode, ids ...in
 	}
 }
 
+// addQueuedBranch (BACI-227) is addQueued's per-branch sibling: stamps
+// BaseBranch on each row so the matcher's branchOf folds to the same
+// key the per-(repo, mode, branch) inflight cache is seeded with.
+func (f *fakeBackend) addQueuedBranch(repoID int64, mode model.DispatchMode, branch string, ids ...int64) {
+	k := queueKey{repoID: repoID, mode: mode}
+	for _, id := range ids {
+		f.queuedByRM[k] = append(f.queuedByRM[k], &model.AgentDispatch{
+			ID:         id,
+			RepoID:     repoID,
+			Mode:       mode,
+			Status:     model.DispatchQueued,
+			CreatedAt:  time.Unix(id, 0), // FIFO order by id
+			BaseBranch: branch,
+		})
+	}
+}
+
 func (f *fakeBackend) addFreeAgent(repoID, agentID int64, name string) {
 	f.agents[name] = &model.Agent{ID: agentID, Name: name}
 	now := time.Now()
@@ -176,6 +216,13 @@ func (f *fakeBackend) addFreeAgent(repoID, agentID int64, name string) {
 
 func (f *fakeBackend) setInFlight(repoID int64, mode model.DispatchMode, n int) {
 	f.inFlightByM[queueKey{repoID: repoID, mode: mode}] = n
+}
+
+// setInFlightBranch (BACI-227) is setInFlight's per-branch sibling:
+// seeds the matcher's CountInFlightByModeBase return for one
+// (repo, mode, branch) triple.
+func (f *fakeBackend) setInFlightBranch(repoID int64, mode model.DispatchMode, branch string, n int) {
+	f.inFlightByMB[branchKey{repoID: repoID, mode: mode, branch: branch}] = n
 }
 
 // ---- tests ----
@@ -222,8 +269,11 @@ func TestMatcherTick_ConcurrencyCapHoldsBackSecondShip(t *testing.T) {
 	b.addTemplate("ship", 1)
 	b.addFreeAgent(1, 10, "otter")
 	b.addQueued(1, model.DispatchMode("ship"), 1)
-	// One ship-it already in flight: matcher should refuse to bind a second.
-	b.setInFlight(1, model.DispatchMode("ship"), 1)
+	// One ship-it already in flight on main: matcher should refuse to
+	// bind a second on the same branch. BACI-227: the queued row has
+	// no BaseBranch, so branchOf folds to "main" — seed the cap on
+	// that branch to reproduce today's per-mode-cap behaviour.
+	b.setInFlightBranch(1, model.DispatchMode("ship"), model.DefaultBaseBranch, 1)
 
 	n, err := New(b).Tick()
 	if err != nil {
@@ -536,5 +586,203 @@ func TestMatcherTickDetailed_EmptyOnNoBind(t *testing.T) {
 	}
 	if len(binds) != 0 {
 		t.Fatalf("binds = %+v, want empty slice", binds)
+	}
+}
+
+// TestMatcherTick_TwoBranchesShipConcurrently (BACI-227) — the
+// headline win: a `ship` cap of 1 used to serialise every branch
+// behind one slot; now feat/A and feat/B each get their own slot.
+// Two queued ships on two different feature branches with two free
+// agents must both bind within one tick.
+func TestMatcherTick_TwoBranchesShipConcurrently(t *testing.T) {
+	b := newFakeBackend()
+	b.addRepo(1, "MINI")
+	b.addTemplate("ship", 1)
+	b.addFreeAgent(1, 10, "otter")
+	b.addFreeAgent(1, 11, "lynx")
+	b.addQueuedBranch(1, model.DispatchMode("ship"), "feat/A", 1)
+	b.addQueuedBranch(1, model.DispatchMode("ship"), "feat/B", 2)
+
+	n, err := New(b).Tick()
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if n != 1 {
+		// Per the tickRepo contract one bind per (repo, mode) per
+		// tick is the invariant — a second eligible row for the same
+		// mode but a different branch waits for the next tick.
+		t.Fatalf("bind count = %d, want 1 (one bind per tickMode call; second branch picks up next tick)", n)
+	}
+	// Run a second tick — the other branch's row should bind now.
+	n2, err := New(b).Tick()
+	if err != nil {
+		t.Fatalf("Tick 2: %v", err)
+	}
+	if n2 != 1 {
+		t.Fatalf("second tick bind count = %d, want 1 (the other branch's queued row)", n2)
+	}
+	if len(b.binds) != 2 {
+		t.Fatalf("total binds = %+v, want 2 (one per branch across two ticks)", b.binds)
+	}
+	boundIDs := map[int64]bool{b.binds[0].dispatchID: true, b.binds[1].dispatchID: true}
+	if !boundIDs[1] || !boundIDs[2] {
+		t.Fatalf("expected both dispatch ids 1 and 2 bound, got %+v", b.binds)
+	}
+}
+
+// TestMatcherTick_FeatureAndMainShipConcurrently (BACI-227) — a
+// feature branch and main are independent slots too. A `ship` cap of
+// 1 with one row each on feat/A and main + two free agents must bind
+// both across consecutive ticks.
+func TestMatcherTick_FeatureAndMainShipConcurrently(t *testing.T) {
+	b := newFakeBackend()
+	b.addRepo(1, "MINI")
+	b.addTemplate("ship", 1)
+	b.addFreeAgent(1, 10, "otter")
+	b.addFreeAgent(1, 11, "lynx")
+	// Mix of explicit "main" and a feature branch — branchOf must
+	// fold both to distinct branch keys so they don't share a slot.
+	b.addQueuedBranch(1, model.DispatchMode("ship"), "feat/A", 1)
+	b.addQueuedBranch(1, model.DispatchMode("ship"), "main", 2)
+
+	matcher := New(b)
+	if _, err := matcher.Tick(); err != nil {
+		t.Fatalf("Tick 1: %v", err)
+	}
+	if _, err := matcher.Tick(); err != nil {
+		t.Fatalf("Tick 2: %v", err)
+	}
+	if len(b.binds) != 2 {
+		t.Fatalf("total binds = %+v, want 2 (one per branch across two ticks)", b.binds)
+	}
+}
+
+// TestMatcherTick_SameBranchTwoShipsStillSerialised (BACI-227) — the
+// per-tick branch cache must hold: two queued ships on the same
+// branch with two free agents bind exactly one in this tick. The
+// second row sees branchCounts["feat/A"]=1 after the bind bumps it
+// and stays queued for the next tick. Locks in that the cache is
+// updated post-bind so a second eligible row for the same branch is
+// correctly held.
+func TestMatcherTick_SameBranchTwoShipsStillSerialised(t *testing.T) {
+	b := newFakeBackend()
+	b.addRepo(1, "MINI")
+	b.addTemplate("ship", 1)
+	b.addFreeAgent(1, 10, "otter")
+	b.addFreeAgent(1, 11, "lynx")
+	b.addQueuedBranch(1, model.DispatchMode("ship"), "feat/A", 1, 2)
+
+	n, err := New(b).Tick()
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("bind count = %d, want 1 (same-branch second row must wait for next tick)", n)
+	}
+	if b.binds[0].dispatchID != 1 {
+		t.Fatalf("bound dispatch id = %d, want 1 (older first)", b.binds[0].dispatchID)
+	}
+	// Row 2 still queued for the next tick.
+	stillQueued := false
+	for _, list := range b.queuedByRM {
+		for _, d := range list {
+			if d.ID == 2 {
+				stillQueued = true
+			}
+		}
+	}
+	if !stillQueued {
+		t.Fatalf("expected dispatch 2 to remain queued (cap should hold inside one tick)")
+	}
+}
+
+// TestMatcherTick_PerIssueOverridePullsBackToMain (BACI-227) — a
+// per-issue base_branch override wins over the parent feature for
+// cap grouping. Issue A inherits feat/X from its feature; issue B
+// has its own "main" override. With one ship already in flight on
+// main, the matcher binds A (feat/X slot is free) but skips B
+// (main slot is taken). Proves the resolver value on the dispatch
+// row — not the feature's branch_name — drives the cap.
+func TestMatcherTick_PerIssueOverridePullsBackToMain(t *testing.T) {
+	b := newFakeBackend()
+	b.addRepo(1, "MINI")
+	b.addTemplate("ship", 1)
+	b.addFreeAgent(1, 10, "otter")
+	b.addFreeAgent(1, 11, "lynx")
+
+	// Queue (oldest first): A on feat/X, then B on main (override).
+	b.addQueuedBranch(1, model.DispatchMode("ship"), "feat/X", 1)
+	b.addQueuedBranch(1, model.DispatchMode("ship"), "main", 2)
+
+	// Inflight: one ship on main, holding the main slot.
+	b.setInFlightBranch(1, model.DispatchMode("ship"), "main", 1)
+
+	n, err := New(b).Tick()
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("bind count = %d, want 1 (only the feat/X row should bind)", n)
+	}
+	if b.binds[0].dispatchID != 1 {
+		t.Fatalf("bound dispatch id = %d, want 1 (feat/X row, main slot is taken)", b.binds[0].dispatchID)
+	}
+	// Row 2 (on main) stays queued — the main slot is full.
+	stillQueued := false
+	for _, list := range b.queuedByRM {
+		for _, d := range list {
+			if d.ID == 2 {
+				stillQueued = true
+			}
+		}
+	}
+	if !stillQueued {
+		t.Fatalf("expected dispatch 2 (main) to remain queued — main slot was taken")
+	}
+}
+
+// TestMatcherTick_CappedHeadDoesNotBlockUncappedTail (BACI-227) —
+// the queue-walk semantic: the FIFO head's branch must not lock out
+// younger rows for other branches. Inflight: one ship on feat/A
+// holding feat/A's slot. Queue (oldest first): feat/A (capped),
+// feat/B (free). The matcher must skip the head and bind the tail.
+func TestMatcherTick_CappedHeadDoesNotBlockUncappedTail(t *testing.T) {
+	b := newFakeBackend()
+	b.addRepo(1, "MINI")
+	b.addTemplate("ship", 1)
+	b.addFreeAgent(1, 10, "otter")
+
+	b.addQueuedBranch(1, model.DispatchMode("ship"), "feat/A", 1)
+	b.addQueuedBranch(1, model.DispatchMode("ship"), "feat/B", 2)
+	b.setInFlightBranch(1, model.DispatchMode("ship"), "feat/A", 1)
+
+	n, err := New(b).Tick()
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("bind count = %d, want 1 (feat/B should bind past capped feat/A head)", n)
+	}
+	if b.binds[0].dispatchID != 2 {
+		t.Fatalf("bound dispatch id = %d, want 2 (feat/B — head feat/A is capped)", b.binds[0].dispatchID)
+	}
+	// Head row stays queued for the next tick — feat/A is still at cap.
+	stillQueued := false
+	for _, list := range b.queuedByRM {
+		for _, d := range list {
+			if d.ID == 1 {
+				stillQueued = true
+			}
+		}
+	}
+	if !stillQueued {
+		t.Fatalf("expected dispatch 1 (capped feat/A head) to remain queued")
+	}
+
+	// Per-tick caching invariant — feat/A counted exactly once,
+	// regardless of how many feat/A rows are in the queue.
+	k := branchKey{repoID: 1, mode: model.DispatchMode("ship"), branch: "feat/A"}
+	if got := b.countBaseHits[k]; got != 1 {
+		t.Errorf("feat/A counted %d times in one tick, want 1 (per-tick cache must dedupe)", got)
 	}
 }

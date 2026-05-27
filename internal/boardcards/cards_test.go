@@ -45,6 +45,11 @@ type fakeClient struct {
 	// for the test's single repo. Nil leaves the map empty (no
 	// concurrency-cap blocking).
 	inflightByMode map[model.DispatchMode]int
+	// inflightByModeBase (BACI-227) is the per-(mode, branch) sibling
+	// — the kanban / brief deriver reads this map (via
+	// InflightByModeBaseForRepo) to enforce the per-branch concurrency
+	// gate. Nil leaves the map empty (no per-branch blocking).
+	inflightByModeBase map[store.InflightKey]int
 	// dispatchAware (BACI-132) opts the fake into filtering the
 	// returned todos by the pair's IssueKey and DispatchID — needed
 	// for the per-dispatch scope test. Existing tests that pass the
@@ -173,6 +178,12 @@ func (f *fakeClient) InflightByModeForRepo(context.Context, *model.Repo) (map[mo
 		return map[model.DispatchMode]int{}, nil
 	}
 	return f.inflightByMode, nil
+}
+func (f *fakeClient) InflightByModeBaseForRepo(context.Context, *model.Repo) (map[store.InflightKey]int, error) {
+	if f.inflightByModeBase == nil {
+		return map[store.InflightKey]int{}, nil
+	}
+	return f.inflightByModeBase, nil
 }
 
 // TestAssembleVerbAndTodos covers the BACI-60 enrichment: an open
@@ -724,14 +735,17 @@ func TestAssembleWaitingStateBlockedByCap(t *testing.T) {
 		{Slug: "plan", Name: "Planning", ActionLabel: "Plan"},
 		{Slug: "ship", Name: "Shipping", ActionLabel: "Ship it", ConcurrencyLimit: 1},
 	}
-	// Ship is at its cap (1 in flight); plan is uncapped (cap=0).
-	inflight := map[model.DispatchMode]int{
-		model.DispatchMode("ship"): 1,
-		model.DispatchMode("plan"): 3, // count is irrelevant when limit==0
+	// Ship is at its cap (1 in flight on main); plan is uncapped (cap=0).
+	// BACI-227: per-(mode, branch) grouping — the queued dispatches
+	// have no BaseBranch set, so the deriver folds to "main" for the
+	// cap lookup.
+	inflight := map[store.InflightKey]int{
+		{Mode: model.DispatchMode("ship"), BaseBranch: "main"}: 1,
+		{Mode: model.DispatchMode("plan"), BaseBranch: "main"}: 3, // count is irrelevant when limit==0
 	}
 	f := &fakeClient{
 		repo: repo, issues: issues, dispatches: dispatches, templates: templates,
-		inflightByMode: inflight,
+		inflightByModeBase: inflight,
 	}
 	cards, err := Assemble(context.Background(), f, repo, false, nil)
 	if err != nil {
@@ -761,6 +775,7 @@ func TestDeriveWaitingStateUnits(t *testing.T) {
 		{Slug: "plan", Name: "Planning", ActionLabel: "Plan"},
 		{Slug: "ship", Name: "Shipping", ActionLabel: "Ship it", ConcurrencyLimit: 1},
 	}
+	mainShip := store.InflightKey{Mode: model.DispatchMode("ship"), BaseBranch: "main"}
 	// Not waiting at all → nil.
 	if got := DeriveWaitingState(&model.Issue{}, &model.AgentDispatch{}, nil, templates); got != nil {
 		t.Errorf("not-waiting issue: got %+v, want nil", got)
@@ -776,19 +791,61 @@ func TestDeriveWaitingStateUnits(t *testing.T) {
 	if got == nil || got.Kind != WaitingDelivered || got.ActionLabel != "Ship it" {
 		t.Errorf("delivered ship: got %+v, want delivered/Ship it", got)
 	}
-	// Queued + cap hit.
+	// Queued + cap hit on the active row's branch (defaults to "main"
+	// when BaseBranch is empty, mirroring branchOf in the dispatcher).
 	got = DeriveWaitingState(&model.Issue{WaitingForClaim: true},
 		&model.AgentDispatch{Mode: "ship", Status: model.DispatchQueued, CreatedAt: t0},
-		map[model.DispatchMode]int{"ship": 1}, templates)
+		map[store.InflightKey]int{mainShip: 1}, templates)
 	if got == nil || got.Kind != WaitingQueuedBlocked {
 		t.Errorf("queued + cap hit: got %+v, want queued_blocked", got)
 	}
 	// Queued + cap not hit.
 	got = DeriveWaitingState(&model.Issue{WaitingForClaim: true},
 		&model.AgentDispatch{Mode: "ship", Status: model.DispatchQueued, CreatedAt: t0},
-		map[model.DispatchMode]int{"ship": 0}, templates)
+		map[store.InflightKey]int{mainShip: 0}, templates)
 	if got == nil || got.Kind != WaitingQueuedNoAgent {
 		t.Errorf("queued + cap clear: got %+v, want queued_no_agent", got)
+	}
+}
+
+// TestDeriveWaitingState_PerBranchCapBlocksOnlyOwnBranch (BACI-227) —
+// pin the per-branch grouping. Two queued ships at limit 1, one each
+// on feat/A and feat/B; neither chips as queued_blocked because each
+// branch has its own slot. Before BACI-227 a single in-flight ship
+// on feat/A would mark every queued ship across every branch as
+// blocked, which was the bug the ticket fixes.
+func TestDeriveWaitingState_PerBranchCapBlocksOnlyOwnBranch(t *testing.T) {
+	t0 := time.Date(2026, 5, 27, 9, 0, 0, 0, time.UTC)
+	templates := []*store.PromptTemplate{
+		{Slug: "ship", Name: "Shipping", ActionLabel: "Ship it", ConcurrencyLimit: 1},
+	}
+	// One ship per branch in flight on its own slot; the *other*
+	// branch's queued ship still has a slot of its own. Active rows
+	// are themselves queued on each branch — we exercise the gate by
+	// having a counterpart row inflight on the same branch.
+	inflight := map[store.InflightKey]int{
+		{Mode: model.DispatchMode("ship"), BaseBranch: "feat/A"}: 1,
+		{Mode: model.DispatchMode("ship"), BaseBranch: "feat/B"}: 1,
+	}
+	// Queued ship on feat/A → its own branch is at cap → blocked.
+	got := DeriveWaitingState(
+		&model.Issue{WaitingForClaim: true},
+		&model.AgentDispatch{Mode: "ship", Status: model.DispatchQueued, CreatedAt: t0, BaseBranch: "feat/A"},
+		inflight, templates,
+	)
+	if got == nil || got.Kind != WaitingQueuedBlocked {
+		t.Errorf("feat/A queued + feat/A in flight: got %+v, want queued_blocked", got)
+	}
+	// Queued ship on a third branch (feat/C) — its own slot is free
+	// even though feat/A and feat/B are each at cap. Pre-BACI-227 this
+	// would have been blocked because the per-mode count was 2.
+	got = DeriveWaitingState(
+		&model.Issue{WaitingForClaim: true},
+		&model.AgentDispatch{Mode: "ship", Status: model.DispatchQueued, CreatedAt: t0, BaseBranch: "feat/C"},
+		inflight, templates,
+	)
+	if got == nil || got.Kind != WaitingQueuedNoAgent {
+		t.Errorf("feat/C queued + feat/A,feat/B in flight: got %+v, want queued_no_agent (own branch unblocked)", got)
 	}
 }
 

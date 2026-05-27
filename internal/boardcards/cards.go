@@ -450,14 +450,17 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 		followOnByIssueID[*d.IssueID] = d
 	}
 
-	// BACI-145: bulked per-(repo, mode) in-flight count so the deriver
-	// can spot a concurrency-cap-blocked queued dispatch without an N+1
-	// scan per card. One read per repo. The matcher reads the same
-	// table via CountInFlightByMode so the label and the bind decision
-	// stay in lockstep.
-	inflightByRepo := make(map[int64]map[model.DispatchMode]int, len(repos))
+	// BACI-145 / BACI-227: bulked per-(repo, mode, base_branch)
+	// in-flight count so the deriver can spot a concurrency-cap-
+	// blocked queued dispatch without an N+1 scan per card. One read
+	// per repo. The matcher reads the same table via
+	// CountInFlightByModeBase so the per-card label and the matcher's
+	// per-branch bind decision stay in lockstep — a card on feat/A
+	// only chips as "blocked" when feat/A's slot is full, not when
+	// some other branch's ship is in flight.
+	inflightByRepo := make(map[int64]map[store.InflightKey]int, len(repos))
 	for _, r := range repos {
-		m, err := c.InflightByModeForRepo(ctx, r)
+		m, err := c.InflightByModeBaseForRepo(ctx, r)
 		if err != nil {
 			return nil, err
 		}
@@ -953,8 +956,9 @@ func followOnByIssueID(allDispatches []*model.AgentDispatch) map[int64]*model.Ag
 }
 
 // DeriveWaitingState (BACI-145) is the pure per-card deriver that turns
-// (issue, active dispatch, per-mode in-flight counts, templates) into
-// the WaitingState the kanban / TUI surface inline beside the spinner.
+// (issue, active dispatch, per-(mode, branch) in-flight counts,
+// templates) into the WaitingState the kanban / TUI surface inline
+// beside the spinner.
 //
 // Returns nil when the card isn't waiting (no WaitingForClaim flag, or
 // no active dispatch row). Otherwise:
@@ -962,21 +966,30 @@ func followOnByIssueID(allDispatches []*model.AgentDispatch) map[int64]*model.Ag
 //   - `delivered`: kind=WaitingDelivered, mode + action label from the
 //     active dispatch's template.
 //   - `queued` / `pending` with concurrency_limit > 0 AND
-//     inflightByMode[mode] >= limit: kind=WaitingQueuedBlocked.
+//     inflightByModeBase[(mode, branch)] >= limit: kind=WaitingQueuedBlocked.
 //   - everything else: kind=WaitingQueuedNoAgent (the matcher just
 //     hasn't bound it yet).
 //
-// The concurrency check matches the matcher's gate exactly
-// (Store.CountInFlightByMode > 0 && limit > 0). When concurrency_limit
-// is 0 (the default) the cap is "unlimited" and the deriver falls back
-// to queued_no_agent — otherwise every queued dispatch in a default
-// template would surface as blocked, which would be wrong.
+// BACI-227: the in-flight count is keyed per (mode, base_branch) so
+// the deriver tracks the matcher's per-branch cap exactly — a card on
+// feat/A is "blocked" only when feat/A's slot is full, not when some
+// other branch's ship is in flight. The lookup folds the active
+// dispatch's BaseBranch through model.DefaultBaseBranch ("main") when
+// empty, mirroring branchOf in the dispatcher. The store-side
+// InflightByModeBaseForRepo COALESCEs NULL → "" — so a row inserted
+// before BACI-226 (no stamped value) doesn't match the resolved-main
+// key. Read-after-BACI-226 rows always carry a stamped value, so this
+// is a strictly transitional gap.
+//
+// When concurrency_limit is 0 (the default) the cap is "unlimited"
+// and the deriver falls back to queued_no_agent — otherwise every
+// queued dispatch in a default template would surface as blocked.
 //
 // Pure / no I/O — call freely in tests.
 func DeriveWaitingState(
 	iss *model.Issue,
 	active *model.AgentDispatch,
-	inflightByMode map[model.DispatchMode]int,
+	inflightByModeBase map[store.InflightKey]int,
 	templates []*store.PromptTemplate,
 ) *WaitingState {
 	if iss == nil {
@@ -1004,11 +1017,16 @@ func DeriveWaitingState(
 		return &WaitingState{Kind: WaitingDelivered, Mode: mode, ActionLabel: actionLabel}
 	case model.DispatchQueued, model.DispatchPending:
 		// queued vs queued_blocked. The matcher gates a bind on the
-		// per-(repo, mode) inflight count; mirror that predicate so the
-		// label doesn't lie. limit == 0 means "no cap" — the deriver
-		// must not surface those as blocked.
+		// per-(repo, mode, base_branch) inflight count; mirror that
+		// predicate so the label doesn't lie. limit == 0 means "no cap"
+		// — the deriver must not surface those as blocked.
 		if limit := templateConcurrencyLimit(mode, templates); limit > 0 {
-			if inflightByMode[mode] >= limit {
+			branch := active.BaseBranch
+			if branch == "" {
+				branch = model.DefaultBaseBranch
+			}
+			key := store.InflightKey{Mode: mode, BaseBranch: branch}
+			if inflightByModeBase[key] >= limit {
 				return &WaitingState{Kind: WaitingQueuedBlocked, Mode: mode, ActionLabel: actionLabel}
 			}
 		}
