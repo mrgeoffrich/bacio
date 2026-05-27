@@ -812,6 +812,71 @@ own bacio environment. The worker tears the bacio environment down with
 itself. See [`docs/worktree-environments.md`](worktree-environments.md)
 for the bacio-side of that isolation.
 
+#### Worktree bootstrap onto the resolved base branch (BACI-229)
+
+Claude Code's `isolation: worktree` always branches the throwaway
+worktree from whatever the **local** `main` HEAD points at — it does
+not consult bacio, and exposes no `isolation.branch` config to
+override the source commit. That leaves two failure modes a worker
+inherits unless something rebases it onto the right tip before it
+starts editing:
+
+1. **Stale local main.** On a machine that mostly dispatches and
+   rarely pulls, local main can be days behind `origin/main` —
+   every worker then starts from an old base, propagating into PRs
+   that rebase noisily and can land on top of bugs already fixed
+   upstream. Closed by **BACI-237**.
+2. **Wrong base branch.** When an issue's feature has
+   `branch_name = feat/foo` (BACI-225) and the resolver picks that
+   as the dispatch base (BACI-226), the worker's worktree is still
+   branched from local main — three commits short of the feature
+   tip. Closed by **BACI-229**, this section.
+
+The fix is worker-side, in [`prompts/agents/_preamble.md`](../prompts/agents/_preamble.md)
+step 4 — a "Position the worktree on the resolved base branch"
+step that every dispatched worker runs before reading project
+conventions or making any edit. It reads the `<base_branch>` tag
+from the worker's Task prompt (forwarded verbatim from the
+dispatch envelope by **BACI-226**'s dispatch_preamble) and:
+
+- **`base_branch == "main"`** — `git fetch origin main` +
+  `git merge --ff-only origin/main`. The fast-forward is expected
+  because Claude Code just branched from local main; a rejection is
+  a real signal that something tampered with the worktree branch.
+- **`base_branch != "main"`** (a feature branch) —
+  `git fetch origin <base_branch>` +
+  `git reset --hard origin/<base_branch>`. The throwaway
+  `worktree-agent-<hash>` branch has no committed work yet, so the
+  reset is safe — functionally a checkout of the feature tip onto
+  the same branch name. The branch name itself stays
+  `worktree-agent-<hash>`; bacio does not rename it, and the PR's
+  source-branch name is cosmetic. `merge --ff-only` is not used
+  here because a feature branch will (correctly) refuse to
+  fast-forward off of local main.
+
+A `git fetch` failure on a non-main base means
+`origin/<base_branch>` does not exist on the remote — either the
+feature's `branch_name` is a typo, or nobody has pushed the feature
+branch yet. The worker surfaces the message and stops. It does not
+fall back to `main`, and it does not `git push -u origin
+<base_branch>` to create the branch — the user fixes the missing
+branch and re-dispatches. This matches BACI-237's "rejection is a
+real signal" precedent for the main case.
+
+An absent `<base_branch>` tag (issue-less dispatches, pre-BACI-226
+envelopes) is treated as `main` — same fallback the
+dispatch_preamble documents for the supervisor's Task-prompt
+forward.
+
+Post-run cleanup is unaffected: Claude Code removes the worktree
+when the subagent finishes regardless of which commit HEAD was at,
+and `bacio worktree rm` drops the bacio environment without
+inspecting git state. The preamble step is the only authoritative
+source of the bootstrap behaviour; every worker file inlines it
+through the `{{> _preamble}}` include, and
+`bacio install-agent --reset-templates` regenerates them all from
+the embedded default after a preamble edit.
+
 ### Worktree+branch safety guard (BACI-91)
 
 `isolation: worktree` is what Claude Code is *supposed* to honour — but

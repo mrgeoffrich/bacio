@@ -81,9 +81,11 @@ git branch --show-current        # must not be main
 
 Abort if either check fails. Trust ONLY the `git rev-parse --show-toplevel` output for the current working folder.
 
-### 4. Fast-forward the worktree branch onto `origin/main`
+### 4. Position the worktree on the resolved base branch
 
-The harness branched this worktree from whatever the local `main` HEAD pointed at — that local main may be days stale on a machine that mostly dispatches and rarely pulls. Freshen the base before you edit anything so your PR lands on top of current `origin/main`, not on top of bugs that have already been fixed upstream:
+The harness branched this worktree from whatever the local `main` HEAD pointed at, regardless of which branch your PR actually wants to land on. Read the `<base_branch>` tag in your Task prompt — if absent (issue-less / pre-BACI-226 dispatches), treat it as `main`. Then move the worktree's HEAD onto the corresponding remote tip *before* you edit anything, so your PR lands on top of current `origin/<base_branch>` and not on top of bugs that have already been fixed upstream.
+
+**If `<base_branch>` is `main`**, fast-forward onto `origin/main`:
 
 ```bash
 git fetch origin main
@@ -91,6 +93,17 @@ git merge --ff-only origin/main
 ```
 
 Both commands MUST succeed. If `git fetch` fails (no network, no `origin` remote) or `git merge --ff-only` rejects (the worktree branch has diverged from `origin/main` somehow), surface the failure clearly and stop — don't fall back to working from a stale base, and don't try to resolve the divergence with a non-ff merge or rebase. The fast-forward is expected because Claude Code just created this branch from local main; a rejection is a real signal.
+
+**If `<base_branch>` is anything other than `main`** (a feature branch), reset hard onto its remote tip:
+
+```bash
+git fetch origin <base_branch>
+git reset --hard origin/<base_branch>
+```
+
+Substitute the literal branch name from the `<base_branch>` tag. `git reset --hard` is the right operation here, not `merge --ff-only`: the harness branched this worktree from local main, so a feature branch will correctly refuse to fast-forward. The throwaway `worktree-agent-<hash>` branch has no committed work yet, so the reset is safe — it's effectively a checkout of the feature tip onto the same branch name. The branch name itself stays `worktree-agent-<hash>`; bacio doesn't rename it, and the PR's source-branch name is cosmetic.
+
+A `git fetch` failure on a non-main base means `origin/<base_branch>` doesn't exist on the remote — either the feature's `branch_name` is a typo, or nobody has pushed the feature branch yet. Surface the message and stop. Do not fall back to `main`. Do not `git push -u origin <base_branch>` to create it. The user will fix the missing branch (push it, or correct the feature's `branch_name`) and re-dispatch.
 
 ### 5. Read the project conventions
 
@@ -151,14 +164,41 @@ Your **first** `TaskCreate` task MUST be an explicit "Establish working director
    composes already-designed pieces. Be honest — every spurious
    design issue you file is one more dispatch the user has to babysit.
 
-5. If anything is ambiguous (overall scope, which axis to split
-   along, whether a particular phase needs design), come back to
-   the user with `mcp__bacio__ask_user_question`. Batch up to 4
-   questions in one call. Don't proceed on guesses for the phase
-   structure — getting it wrong is expensive because the issues
-   you file become commitments.
+5. **Decide: feature branch vs ship-to-main.** By default every
+   phase issue ships straight to `main` and intermediate states
+   have to be safe to live there (the phase-boundary rule of thumb
+   in the writing notes). For larger features that cost is too
+   high. Pick the **feature-branch workflow**
+   (BACI-225 / BACI-232 / BACI-226) when *all* of the following hold:
 
-6. Once the decomposition is solid, expand the scratch file into
+   - **Multi-issue scope.** Three or more phase issues are a
+     reasonable lower bar; a 2-phase plan rarely justifies the
+     extra branch + terminal-merge ceremony.
+   - **Multi-week wall time.** The phases will likely land over
+     days or weeks of dispatch traffic, not in a single afternoon.
+   - **Landing partial state on main would be visibly broken or
+     hard to revert.** Schema migrations that flip a column's
+     meaning, UI rewrites whose intermediate state is unusable,
+     anything where a half-shipped feature would either break the
+     app or require fiddly back-out PRs to undo.
+
+   Otherwise, stick with **ship-to-main** — every phase issue
+   targets `main` directly, no integration branch, no terminal
+   merge issue. The vast majority of `plan_large` runs land here.
+
+   This is a judgement call, not a checklist — when uncertain, ask
+   via `mcp__bacio__ask_user_question` rather than imposing a
+   branch the human didn't want. The shape of the feature you
+   file in the next section is what locks the choice in.
+
+6. If anything is ambiguous (overall scope, which axis to split
+   along, whether a particular phase needs design, branch vs main),
+   come back to the user with `mcp__bacio__ask_user_question`.
+   Batch up to 4 questions in one call. Don't proceed on guesses
+   for the phase structure — getting it wrong is expensive because
+   the issues you file become commitments.
+
+7. Once the decomposition is solid, expand the scratch file into
    the full plan document using the **Plan document template**
    below.
 
@@ -174,7 +214,8 @@ bacio feature add --json '{
   "title": "<feature title — usually the umbrella issue title>",
   "slug": "<kebab-case slug, max ~6 words>",
   "description": "<2-3 sentences naming the goal and pointing at the plan doc by name (e.g. \"See plan: docs/planning/<slug>.md (attached as docs-planning-<slug>.md).\")>",
-  "emoji": "<one emoji that captures the feature; see below>"
+  "emoji": "<one emoji that captures the feature; see below>",
+  "branch_name": "feat/<feature-slug>"
 }' -o json
 ```
 
@@ -191,6 +232,19 @@ UI/UX → 🎨, infrastructure → 📦. Single glyph only; the store-side
 validator rejects multi-cluster strings like `"AUTH"`. If nothing
 obviously fits, omit the field — leaving it empty is preferable to
 a random emoji.
+
+**`branch_name` is the feature-branch / ship-to-main switch** (BACI-225).
+Set it to a `feat/<…>` string ONLY if step 5 picked the feature-branch
+workflow — every phase issue under this feature then inherits the
+branch through BACI-226's resolver and ships to it. **Omit the
+field** (or pass `""`) for a ship-to-main feature, which keeps the
+legacy default and is what most plans want. The branch name itself
+is your call — `feat/<feature-slug>` is the obvious default; do not
+auto-generate something cleverer without a reason. Re-running this
+mode on a feature that already has `branch_name` set won't change
+it (the value is preserved through `feature edit`); if you need to
+flip a wrongly-set branch later, use `bacio feature edit --branch
+""` to clear or `--branch feat/<new>` to rename.
 
 ### b) File the per-phase issues
 
@@ -232,7 +286,62 @@ phase's Goal, its Done-when, its named files (mirroring the
 `Files & changes` table for that phase), and the tests that prove
 it. Don't restate the architecture; that's what the plan doc is for.
 
-### c) Wire the `blocks` graph
+### c) File the terminal merge issue (feature-branch workflow only)
+
+**Skip this section entirely for a ship-to-main feature** — every
+phase issue already lands on `main`, no terminal merge is needed.
+Only file it when step 5 picked the feature-branch workflow.
+
+When the feature has `branch_name = feat/X`, every phase issue
+inherits that branch and ships PRs to it. Something has to bring
+the branch back to `main` at the end. That something is **one
+regular ship-mode issue** with a per-issue `base_branch = main`
+override (BACI-232) — no dedicated `merge_feature` dispatch mode
+exists (and one isn't planned). The override flips just this one
+issue out of the feature's branch and onto `main`; the resolver
+returns `main` first because per-issue trumps per-feature.
+
+Title convention: `Merge <feature title> to main`. File it AFTER
+the per-phase issues are filed (so its blocks-by list references
+real keys), and have it blocked-by every per-phase impl issue so
+the dispatcher won't pick it up until the branch is actually
+ready to merge:
+
+```bash
+# 1) File the terminal merge issue with the per-issue base_branch
+#    override. base_branch only lives on the flag path of
+#    `bacio issue add` today (BACI-232); the JSON shape doesn't
+#    accept it, so use --base-branch here rather than --json:
+bacio issue add "Merge <feature title> to main" \
+  --feature <feature-slug> \
+  --base-branch main \
+  --state todo \
+  --tag terminal-merge \
+  --description-file /tmp/terminal-merge-brief.md \
+  -o json
+
+# 2) Wire blocks-by from every per-phase impl issue to it:
+bacio link --json '{"from": "<phase-1-impl-key>", "type": "blocks", "to": "<terminal-merge-key>"}'
+bacio link --json '{"from": "<phase-2-impl-key>", "type": "blocks", "to": "<terminal-merge-key>"}'
+# … one per phase.
+```
+
+The terminal-issue brief is short: name the feature branch, name
+the target (`main`), say "this is the integration merge — verify
+the branch is green, open the PR, ship". A regular ship-mode
+worker reads it; no special tooling.
+
+**Idempotency on re-runs.** Re-running `plan_large` on a feature
+that already has `branch_name` set should NOT double-file the
+terminal merge issue. Before filing, run
+`bacio issue list --feature <feature-slug> --tag terminal-merge -o json`
+and skip the file step if a row already exists — refresh the
+existing description with `bacio issue edit` instead, and skip the
+`bacio link` calls if the blocks edges already exist
+(`bacio link` errors loudly on duplicate edges; treat that error as
+a no-op and continue).
+
+### d) Wire the `blocks` graph
 
 The dependency rules:
 
@@ -243,6 +352,9 @@ The dependency rules:
    (if it exists). The design for phase N+1 can usually start as
    soon as phase N is done — earlier than that risks designing
    against a shape that's still moving.
+3. **Every impl blocks the terminal merge** (feature-branch
+   workflow only). Already filed in section (c) above — listed
+   here for completeness so you eyeball it in the next step.
 
 For each link:
 
@@ -253,8 +365,10 @@ bacio link --json '{"from": "<blocker-key>", "type": "blocks", "to": "<blocked-k
 After every link is filed, eyeball `bacio feature plan <feature-slug>`
 to confirm the order matches your intent — that command prints open
 issues in dependency order, so a malformed graph surfaces immediately.
+For a feature-branched plan the terminal merge issue should be the
+last entry (blocked by every impl phase).
 
-### d) Upsert and link the plan doc
+### e) Upsert and link the plan doc
 
 The plan doc lives at `docs/planning/<feature-slug>.md` in the
 worktree. Upsert it with `--type plan` and link it to the **feature**
@@ -290,6 +404,7 @@ apply (don't pad).
 
 **Umbrella issue:** <issue_id>
 **Feature:** <feature-slug>
+**Integration branch:** <`feat/<feature-slug>` for feature-branch workflow, OR `main (ship-to-main)` otherwise>
 **Goal:** <one-line — what the whole feature delivers>
 **Done when:** <one-line — what proves the feature is shipped end-to-end>
 
@@ -309,15 +424,25 @@ codebase from this section.
 
 ## Phase decomposition
 
-| # | Phase | Ships | Design needed? | Blocked by |
-|---|---|---|---|---|
-| 1 | <phase 1 name> | <one-line outcome> | No | — |
-| 2 | <phase 2 name> | <one-line outcome> | Yes — `<design-issue-key>` | Phase 1 |
-| 3 | <phase 3 name> | <one-line outcome> | No | Phase 2 |
+| # | Phase | Ships to | Outcome | Design needed? | Blocked by |
+|---|---|---|---|---|---|
+| 1 | <phase 1 name> | `feat/<feature-slug>` | <one-line outcome> | No | — |
+| 2 | <phase 2 name> | `feat/<feature-slug>` | <one-line outcome> | Yes — `<design-issue-key>` | Phase 1 |
+| 3 | <phase 3 name> | `feat/<feature-slug>` | <one-line outcome> | No | Phase 2 |
+| T | Merge to main | `main` | Brings `feat/<feature-slug>` back to main | No | Phases 1-3 |
 
-Fill in the issue keys (impl + design) once you've filed them. Update
-this table after the file pass — leaving placeholders is fine on the
-first write of the doc, then refresh and re-upsert.
+For a **ship-to-main feature**, the "Ships to" column is `main`
+across every row and the terminal "Merge to main" row is omitted —
+there is no integration branch to merge back. For a
+**feature-branch feature**, every per-phase row ships to the
+integration branch and the terminal merge row brings it back to
+`main` (it's a regular ship-mode issue with per-issue
+`base_branch = main` — no special dispatch mode).
+
+Fill in the issue keys (impl + design + terminal merge) once you've
+filed them. Update this table after the file pass — leaving
+placeholders is fine on the first write of the doc, then refresh
+and re-upsert.
 
 ## Reuse & placement
 
@@ -433,9 +558,13 @@ Things considered and consciously deferred to a later feature
   brittle: the plan is read from a different worktree (or surfaces
   in `bacio issue brief` output that lands anywhere).
 - **Phase boundary rule of thumb.** A phase should ship a working
-  intermediate state — main still builds and tests still pass after
+  intermediate state — the integration branch (or `main`, for
+  ship-to-main features) still builds and tests still pass after
   phase N merges, with phase N+1 not yet started. If a phase only
   makes sense once the next one lands, fold them into one phase.
+  Feature-branch features get a softer version of this rule
+  (intermediate state has to be safe on `feat/X`, not necessarily
+  on `main`), which is the whole point of choosing that workflow.
 
 ## Comment on the umbrella issue
 
@@ -447,12 +576,15 @@ to the feature and the phase issues:
 cat > /tmp/plan-large-comment.md <<'EOF'
 **Large-planning pass complete** — decomposed into feature `<feature-slug>` with N phases.
 
+Integration: `<feat/<feature-slug>` for feature-branch workflow, OR `main (ship-to-main)` otherwise>>
+
 Plan doc: `docs-planning-<feature-slug>.md` (linked to the feature, inlined into every phase issue's brief).
 
 Phases:
 - **Phase 1 — <name>** — impl `<issue-key>` (no design needed)
 - **Phase 2 — <name>** — design `<issue-key>` → impl `<issue-key>` (blocked by phase 1)
 - **Phase 3 — <name>** — impl `<issue-key>` (blocked by phase 2)
+- **Terminal merge** — `<issue-key>` — brings `feat/<feature-slug>` back to `main` (blocked by phases 1-3). _Omit this bullet for ship-to-main features._
 
 Pick the next ready phase issue with `bacio feature plan <feature-slug>`. The umbrella ticket is moving to **done** — work continues on the phase issues.
 EOF
@@ -492,6 +624,14 @@ bacio comment add <issue_id> --as <your-name> --body-file /tmp/plan-large-commen
   the regular `plan` mode's "never link to feature" rule, and it's
   by design — the feature link is what surfaces the plan in every
   phase issue's brief.
+- **Feature branch ↔ terminal merge is an all-or-nothing pair.**
+  If `features.branch_name` is set, file the terminal merge issue
+  with `--base-branch main` and block it on every per-phase impl.
+  If `branch_name` is empty, do not file a terminal merge issue —
+  it would just shadow the regular ship-to-main flow. Re-running
+  this mode on a feature that already has `branch_name` set must
+  not double-file the terminal merge issue (section c idempotency
+  check).
 - **Don't add follow-up tickets the user didn't ask for.** The
   filing-new-issues rule from the preamble still applies to
   *adjacent* work you spot during planning. The phase issues this
