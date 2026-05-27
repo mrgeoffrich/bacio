@@ -173,6 +173,36 @@ func TestRefreshDispatchPreambleUpgradesBACI103Default(t *testing.T) {
 	}
 }
 
+// TestRefreshDispatchPreambleUpgradesBACI225Default (BACI-226):
+// simulate a post-XML-stub / pre-BACI-226 DB by writing the BACI-225
+// default (which made no mention of the <base_branch> stub tag) into
+// the row, then re-run the refresh — it must replace the body with the
+// BACI-226 default that tells the supervisor to copy <base_branch>
+// verbatim into the worker's Task prompt.
+func TestRefreshDispatchPreambleUpgradesBACI225Default(t *testing.T) {
+	s := newTestStore(t)
+	old := strings.TrimRight(oldDispatchPreambleBACI225, "\r\n")
+	if _, err := s.DB.Exec(
+		`UPDATE prompt_templates SET body = ? WHERE slug = ?`,
+		old, model.BuiltinTemplatePreamble,
+	); err != nil {
+		t.Fatalf("seed BACI-225 preamble: %v", err)
+	}
+	if err := refreshDispatchPreamble(s.DB); err != nil {
+		t.Fatalf("refreshDispatchPreamble: %v", err)
+	}
+	body, err := s.GetDispatchPreamble()
+	if err != nil {
+		t.Fatalf("GetDispatchPreamble: %v", err)
+	}
+	if body != model.DefaultPromptBodyForBuiltinSlug(model.BuiltinTemplatePreamble) {
+		t.Fatalf("BACI-225 default was not refreshed to the BACI-226 default:\n%s", body)
+	}
+	if !strings.Contains(body, "<base_branch>") {
+		t.Fatalf("refreshed preamble does not reference the <base_branch> stub tag:\n%s", body)
+	}
+}
+
 // TestRefreshDispatchPreambleLeavesCustomBody: a user-customised
 // preamble body is left untouched by the refresh.
 func TestRefreshDispatchPreambleLeavesCustomBody(t *testing.T) {

@@ -68,6 +68,18 @@ var oldDispatchPreambleBACI85 string
 //go:embed migrationdata/old_dispatch_preamble_baci103.txt
 var oldDispatchPreambleBACI103 string
 
+// oldDispatchPreambleBACI225 is the verbatim _dispatch_preamble body
+// bacio shipped after the XML-stub change but before BACI-226 added
+// the `<base_branch>` stub tag — the supervisor was told to copy
+// `<issue_id>` and `<mode>` into the worker prompt and append
+// `<dispatch_id>`, with no mention of `<base_branch>`. Embedded
+// frozen so the BACI-226 refresh migration can byte-compare a stored
+// preamble against it and replace it in place when the user never
+// customised the row.
+//
+//go:embed migrationdata/old_dispatch_preamble_baci225.txt
+var oldDispatchPreambleBACI225 string
+
 // refreshDispatchPreamble is the BACI-76 one-time migration of the
 // stored _dispatch_preamble body. Before BACI-76 the preamble told the
 // supervisor to spawn `general-purpose` and paste the full brief; after
@@ -174,6 +186,22 @@ func refreshDispatchPreamble(db *sql.DB) error {
 			return err
 		}
 		slog.Info("bacio: refreshed the _dispatch_preamble body to the XML-stub default (Task-prompt stub uses <issue_id>/<mode>/<dispatch_id> tags)")
+		return nil
+	}
+	// BACI-226: the XML-stub default did not yet mention the
+	// `<base_branch>` stub tag. The new default tells the supervisor
+	// to copy that tag verbatim into the worker prompt alongside
+	// `<issue_id>` / `<mode>`. If the stored body matches the frozen
+	// pre-BACI-226 default, replace it in place.
+	oldBACI225Default := strings.TrimRight(oldDispatchPreambleBACI225, "\r\n")
+	if stored == oldBACI225Default {
+		if _, err := db.Exec(
+			`UPDATE prompt_templates SET body = ?, updated_at = CURRENT_TIMESTAMP WHERE slug = ?`,
+			newDefault, slug,
+		); err != nil {
+			return err
+		}
+		slog.Info("bacio: refreshed the _dispatch_preamble body to the BACI-226 default (<base_branch> stub tag in Task prompt)")
 		return nil
 	}
 	// Customised body — leave it, but warn: it may still say

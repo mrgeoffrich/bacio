@@ -162,6 +162,32 @@ func TestComposeDispatchPayload(t *testing.T) {
 			"",
 			"<issue_id>BACI-10</issue_id>\n<mode>plan</mode>\n<subagent_type>bacio-plan-worker</subagent_type>",
 		},
+		// BACI-226: <base_branch> rides between <mode> and
+		// <subagent_type> so the supervisor copies it verbatim into
+		// the worker's Task prompt alongside <issue_id> and <mode>.
+		{
+			"stub with base_branch=main (resolver fallback)",
+			"Delegate.",
+			DispatchStub{IssueKey: "BACI-10", Mode: "plan", BaseBranch: "main", SubagentType: "bacio-plan-worker"},
+			"",
+			"Delegate.\n\n<issue_id>BACI-10</issue_id>\n<mode>plan</mode>\n<base_branch>main</base_branch>\n<subagent_type>bacio-plan-worker</subagent_type>",
+		},
+		{
+			"stub with base_branch=feat/X (feature)",
+			"Delegate.",
+			DispatchStub{IssueKey: "BACI-10", Mode: "plan", BaseBranch: "feat/X", SubagentType: "bacio-plan-worker"},
+			"",
+			"Delegate.\n\n<issue_id>BACI-10</issue_id>\n<mode>plan</mode>\n<base_branch>feat/X</base_branch>\n<subagent_type>bacio-plan-worker</subagent_type>",
+		},
+		// An empty BaseBranch omits the tag entirely so the existing
+		// per-feature-branch-less invariant rides unchanged.
+		{
+			"stub with empty base_branch omits the tag",
+			"Delegate.",
+			DispatchStub{IssueKey: "BACI-10", Mode: "plan", SubagentType: "bacio-plan-worker"},
+			"",
+			"Delegate.\n\n<issue_id>BACI-10</issue_id>\n<mode>plan</mode>\n<subagent_type>bacio-plan-worker</subagent_type>",
+		},
 	}
 	for _, c := range cases {
 		if got := ComposeDispatchPayload(c.preamble, c.stub, c.note); got != c.want {

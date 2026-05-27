@@ -1324,7 +1324,31 @@ func (d deps) handleAgentDispatchCreate(w http.ResponseWriter, r *http.Request) 
 		writeError(w, status, code, err.Error(), nil)
 		return
 	}
-	stub := model.DispatchStub{IssueKey: issueKey, Mode: string(mode)}
+	// BACI-226: resolve the base branch up front so the stub carries
+	// the <base_branch> tag the worker reads from its Task prompt.
+	// Mirror local_dispatch.go's targeted-pending path — no bind step
+	// for a direct REST/API dispatch, so the value must be correct at
+	// creation time.
+	var baseBranch string
+	if issueID != nil {
+		iss, ierr := d.store.GetIssueByID(*issueID)
+		if ierr != nil {
+			status, code := statusForError(ierr)
+			writeError(w, status, code, ierr.Error(), nil)
+			return
+		}
+		var feat *model.Feature
+		if iss.FeatureID != nil {
+			feat, ierr = d.store.GetFeatureByID(*iss.FeatureID)
+			if ierr != nil {
+				status, code := statusForError(ierr)
+				writeError(w, status, code, ierr.Error(), nil)
+				return
+			}
+		}
+		baseBranch = model.ResolveBaseBranch(iss, feat)
+	}
+	stub := model.DispatchStub{IssueKey: issueKey, Mode: string(mode), BaseBranch: baseBranch}
 	if mode != "" {
 		stub.SubagentType = model.SubagentTypeForTemplate(string(mode))
 	}

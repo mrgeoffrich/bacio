@@ -35,6 +35,15 @@ type Event struct {
 	From     string // who created the dispatch
 	Mode     string // template slug ("plan", "design", "implement", etc.) or "" — the dispatch intent
 	Payload  string // the instruction body
+	// BaseBranch (BACI-226) is the resolved base branch the worker's
+	// PR will target — surfaced in the <channel base_branch="..."> meta
+	// tag attribute so a reader of the channel log can spot the value
+	// without parsing the payload. The same value is already embedded
+	// in the payload's <base_branch> stub tag (so the worker's Task
+	// prompt carries it without a second lookup); the meta attribute
+	// is the supervisor-side breadcrumb. Empty for issue-less
+	// dispatches (setup nudges, idle pings).
+	BaseBranch string
 }
 
 // Source is the bacio-side backing the channel drains and acks against.
@@ -870,6 +879,14 @@ func (s *Server) pushEvent(e Event) {
 	}
 	if e.Mode != "" {
 		meta["mode"] = e.Mode
+	}
+	// BACI-226: surface the resolved base branch on the meta tag so
+	// a reader of the channel log can spot it without parsing the
+	// payload. The worker's Task prompt carries the same value via
+	// the payload's <base_branch> stub tag — this meta attribute is
+	// the supervisor-side breadcrumb.
+	if e.BaseBranch != "" {
+		meta["base_branch"] = e.BaseBranch
 	}
 	s.write(rpcNotification{
 		JSONRPC: "2.0",

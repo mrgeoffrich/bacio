@@ -137,7 +137,17 @@ type IssueBrief struct {
 	WaitingState *boardcards.WaitingState `json:"waiting_state,omitempty"`
 	// LatestPlan (BACI-216) — see client.IssueBrief.LatestPlan.
 	LatestPlan *model.LatestPlan `json:"latest_plan,omitempty"`
-	Warnings   []string          `json:"warnings"`
+	// BaseBranch (BACI-226) is the resolved base branch a PR for this
+	// issue should target, computed via model.ResolveBaseBranch
+	// against the issue + (optional) feature. Always present (the
+	// resolver's fallback to "main" ensures non-empty), so a brief
+	// consumer can read the field unconditionally without a second
+	// resolver pass. No omitempty: the field is always visible in
+	// JSON output. The same value lands on every dispatch row at
+	// bind time (agent_dispatches.base_branch) and rides into the
+	// worker's Task prompt as the <base_branch> stub tag.
+	BaseBranch string   `json:"base_branch"`
+	Warnings   []string `json:"warnings"`
 }
 
 // BriefDoc mirrors internal/cli/issue.go:briefDoc — one linked document

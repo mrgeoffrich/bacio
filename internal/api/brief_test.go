@@ -25,10 +25,54 @@ func TestIssueBriefHappy(t *testing.T) {
 		`"issue"`, `"feature"`, `"relations"`, `"pull_requests"`,
 		`"documents"`, `"comments"`, `"warnings"`, `"slug": "auth"`,
 		`"first comment"`,
+		// BACI-226: every brief carries the resolver-derived base
+		// branch. Neither issue nor feature pin a value here, so the
+		// resolver's fallback to "main" must surface.
+		`"base_branch": "main"`,
 	} {
 		if !strings.Contains(string(body), want) {
 			t.Fatalf("missing %s in: %s", want, body)
 		}
+	}
+}
+
+// TestIssueBriefBaseBranchResolves (BACI-226): a feature-scoped issue
+// with no per-issue override surfaces the feature's branch_name; a
+// per-issue override beats it (the terminal merge-feature case from
+// the acceptance criteria).
+func TestIssueBriefBaseBranchResolves(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	feat, err := s.CreateFeature(repo.ID, "auth-rewrite", "Auth", "", "", "feat/X")
+	if err != nil {
+		t.Fatalf("create feature with branch_name: %v", err)
+	}
+
+	// Issue with feature branch but no override → brief carries feat/X.
+	iss, err := s.CreateIssue(repo.ID, &feat.ID, "inherit", "", model.StateTodo, nil, "")
+	if err != nil {
+		t.Fatalf("create inherit issue: %v", err)
+	}
+	resp, body := apiGet(t, ts.URL+"/repos/MINI/issues/"+iss.Key+"/brief")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d, body=%s", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), `"base_branch": "feat/X"`) {
+		t.Fatalf("brief did not surface feat/X: %s", body)
+	}
+
+	// Issue with override=main → brief carries main even when the
+	// feature is on feat/X (terminal merge-feature case).
+	override, err := s.CreateIssue(repo.ID, &feat.ID, "merge back", "", model.StateTodo, nil, "main")
+	if err != nil {
+		t.Fatalf("create override issue: %v", err)
+	}
+	resp, body = apiGet(t, ts.URL+"/repos/MINI/issues/"+override.Key+"/brief")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d, body=%s", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), `"base_branch": "main"`) {
+		t.Fatalf("brief did not honour the override: %s", body)
 	}
 }
 
