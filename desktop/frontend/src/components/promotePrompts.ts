@@ -1,16 +1,39 @@
-// BACI-241: categorise a prompt list against the canonical state-
-// transition graph so the kanban follow-on popup (and future surfaces)
-// can promote / demote / tuck-away modes by prominence.
+// BACI-241 / BACI-245: categorise a prompt list into buckets the
+// kanban follow-on popup (and future surfaces) can promote / tuck
+// away by prominence.
 //
-// The rule: for each prompt, walk the categories in display-priority
-// order (primary → secondary → unusual). The first bucket whose set of
-// next-states from the card's current column intersects the prompt's
-// `allowedStates` wins. A prompt with no overlap falls into `unusual` —
-// we never drop a prompt entirely, because the user might know better
-// than the graph (e.g. a custom mode whose intended use sits outside
-// the categorisation). Within each bucket, the prompt's original order
-// in the input list is preserved so the user's mental model of "where
-// Implement lives" stays stable across cards.
+// The rule: a prompt's `allowedStates` describes the issue states
+// the prompt is valid to run *from* (the Go source of truth lives
+// in `internal/model/agent.go` `builtinPromptStates` — e.g. plan /
+// implement / scope / design / research = [todo], review / ship /
+// fix_review = [in_review]). We bucket against that:
+//
+//   primary  — `allowedStates` includes the card's current state.
+//              These are the modes that make sense to dispatch (or
+//              queue) right now.
+//   unusual  — every other prompt. Kept reachable behind a
+//              `<details>Show all</details>` block so the user can
+//              still escape the categorisation (e.g. dispatch
+//              `implement` from a card in `in_review` if they know
+//              what they're doing).
+//   secondary — always empty under the new semantic. The field stays
+//              in `PromotedPrompts<T>` so consumers don't break; the
+//              caller's render path already handles
+//              `secondary.length === 0` gracefully (the divider only
+//              draws when both primary and secondary are non-empty).
+//
+// The previous BACI-241 implementation intersected `allowedStates`
+// against the state-graph's reachable next-states. That comparison
+// crossed domains: `allowedStates` is run-from, the graph's edges
+// are transition-to. For a card in `todo`, no built-in prompt's
+// `allowedStates` contained `in_progress` (the primary next-state),
+// so every prompt fell through to the unusual catch-all and got
+// hidden behind `Show all` — the BACI-245 bug.
+//
+// The `graph` parameter stays in the signature for API stability
+// (callers already pass `stateGraph` through), but is unused. A
+// follow-up can either drop the plumbing or repurpose it (e.g.
+// order within `primary` by destination distance).
 //
 // Pure helper, no React, no DOM. Tested by promotePrompts.smoketest.mjs
 // against the standard built-in prompt set.
@@ -40,72 +63,42 @@ export interface PromotedPrompts<T extends PromotePromptInput> {
   unusual: T[];
 }
 
-// Walk the graph edges from `currentState`, returning a `Set` of `to`
-// states for the given category. Cheap (≤16 edges, ≤3 callsites per
-// render); the resulting set is consumed by `intersects()` below.
-function nextStatesFrom(
-  graph: PromoteStateGraph | null | undefined,
-  from: string,
-  category: string,
-): Set<string> {
-  const out = new Set<string>();
-  if (!graph || !Array.isArray(graph.edges)) return out;
-  for (const e of graph.edges) {
-    if (e && e.from === from && e.category === category) {
-      out.add(e.to);
-    }
-  }
-  return out;
-}
-
-function intersects(allowed: string[] | undefined, nexts: Set<string>): boolean {
-  if (!Array.isArray(allowed) || allowed.length === 0) return false;
-  if (nexts.size === 0) return false;
-  for (const s of allowed) {
-    if (nexts.has(s)) return true;
-  }
-  return false;
-}
-
-// promotePrompts returns three buckets (primary / secondary / unusual)
-// of the input prompt list, with each prompt placed in the highest-
-// priority bucket whose state set intersects its `allowedStates`. A
-// prompt with no overlap lands in `unusual` so the user always has the
-// option to escape the graph's opinion. Returns empty buckets when the
-// graph is missing — caller renders the input as a flat unusual list,
-// which is the graceful-fallback shape.
+// promotePrompts buckets the input prompt list against the card's
+// current state. Primary gets the prompts whose `allowedStates`
+// admits `currentState`; everything else goes into `unusual` so the
+// user can still pick it from the `Show all` disclosure. Secondary
+// is always empty under the BACI-245 semantic — see the header
+// comment for why.
+//
+// Graceful fallback: missing `currentState` (brand-new repo, corrupt
+// state column) returns every prompt under `unusual` so nothing
+// disappears. The `graph` argument is unused; kept for plumbing
+// stability — see the header comment.
 export function promotePrompts<T extends PromotePromptInput>(
   prompts: readonly T[] | null | undefined,
   currentState: string,
-  graph: PromoteStateGraph | null | undefined,
+  // graph: kept for plumbing stability — currently unused, see header
+  // comment / BACI-245 plan.
+  _graph: PromoteStateGraph | null | undefined,
 ): PromotedPrompts<T> {
   const list = Array.isArray(prompts) ? prompts : [];
 
-  // Graph absent / unknown current state → every prompt falls under
-  // `unusual` so nothing is hidden. The wire scheme treats `unusual`
-  // as the "tucked away" bucket but the caller can render it flat in
-  // the fallback case.
-  if (!graph || !currentState) {
+  // No current state → fall back to "everything under unusual" so the
+  // caller can render the flat list without dropping prompts.
+  if (!currentState) {
     return { primary: [], secondary: [], unusual: list.slice() };
   }
-
-  const primaryNexts = nextStatesFrom(graph, currentState, 'primary');
-  const secondaryNexts = nextStatesFrom(graph, currentState, 'secondary');
-  const unusualNexts = nextStatesFrom(graph, currentState, 'unusual');
 
   const out: PromotedPrompts<T> = { primary: [], secondary: [], unusual: [] };
   for (const p of list) {
     if (!p) continue;
-    const allowed = p.allowedStates;
-    if (intersects(allowed, primaryNexts)) {
+    const allowed = Array.isArray(p.allowedStates) ? p.allowedStates : [];
+    if (allowed.includes(currentState)) {
       out.primary.push(p);
-    } else if (intersects(allowed, secondaryNexts)) {
-      out.secondary.push(p);
-    } else if (intersects(allowed, unusualNexts)) {
-      out.unusual.push(p);
     } else {
-      // No overlap with any bucket — still surface under unusual so
-      // the user can pick it; the graph is a hint, not enforcement.
+      // Not valid from this state — surface under unusual so the user
+      // can still escape the categorisation (e.g. shipping straight
+      // from in_progress). `allowedStates` is a hint, not enforcement.
       out.unusual.push(p);
     }
   }
