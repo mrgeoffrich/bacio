@@ -22,9 +22,9 @@
 
 import { useCallback, useEffect, useRef } from 'react';
 // Vite resolves binary asset imports to a URL string at build time.
-// The bundle ships the WAV under `/assets/shipped-ka-ching-<hash>.wav`
+// The bundle ships the MP3 under `/assets/kaching-<hash>.mp3`
 // and we get back the resolved URL synchronously.
-import shippedKaChingURL from '../assets/shipped-ka-ching.wav';
+import shippedKaChingURL from '../assets/kaching.mp3';
 import { shouldPlayShipSfx } from './shipSfxGate';
 
 export { shouldPlayShipSfx };
