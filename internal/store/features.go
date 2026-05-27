@@ -209,29 +209,47 @@ func (s *Store) GetFeatureBySlugWithHidden(repoID int64, slug string) (*model.Fe
 	return feat, nil
 }
 
-// SetFeatureState writes the feature's `state` column and, when
-// `manual` is true, also stamps the sticky-bit `state_manual = 1` so
-// the leader-elected archive-sweep's auto-completion pass leaves the
-// row alone. The sweep itself calls SetFeatureState with manual=false
-// — the sticky bit only ever turns on via an explicit user call.
+// SetFeatureState writes the feature's `state` column and bumps
+// updated_at so the BACI-5 LWW gate in sync sees the change as newer
+// than the YAML on disk (same rationale as SetIssueState). Mirrors
+// SetIssueState's shape; no internal validation of `state` because the
+// caller (client.SetFeatureState / handleFeatureState / setFeatureState
+// in the CLI) already runs ParseFeatureState — the column's CHECK on
+// fresh DBs is belt-and-braces.
 //
-// Bumps updated_at so the BACI-5 LWW gate in sync sees the change as
-// newer than the YAML on disk (same rationale as SetIssueState).
-// Mirrors SetIssueState's shape; no internal validation of `state`
-// because the caller (client.SetFeatureState / handleFeatureState /
-// setFeatureState in the CLI) already runs ParseFeatureState — the
-// column's CHECK on fresh DBs is belt-and-braces.
-func (s *Store) SetFeatureState(featureID int64, state model.FeatureState, manual bool) error {
-	if manual {
-		_, err := s.DB.Exec(
-			`UPDATE features SET state = ?, state_manual = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
-			string(state), featureID,
-		)
-		return err
-	}
+// Auto-close pinning is decoupled (BACI-250): this method no longer
+// writes `state_manual`. Callers that want to pin a feature against
+// the BACI-199 auto-completion sweep go through SetFeatureAutoClose.
+// The sweep itself reads `state_manual = 0` directly in archive.go.
+func (s *Store) SetFeatureState(featureID int64, state model.FeatureState) error {
 	_, err := s.DB.Exec(
 		`UPDATE features SET state = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
 		string(state), featureID,
+	)
+	return err
+}
+
+// SetFeatureAutoClose (BACI-250) flips the sticky `state_manual` bit
+// that gates the BACI-199 auto-completion sweep. `enabled = true`
+// clears the bit (auto-close on — the sweep may promote this feature
+// to done/cancelled once every child is terminal); `enabled = false`
+// sets the bit (auto-close off — long-lived catch-alls like `bugs`
+// and `maintenance` stay `active` indefinitely).
+//
+// Bumps updated_at so the LWW gate in sync sees the change. Writes
+// unconditionally (no idempotency short-circuit) so flipping to the
+// same value still nudges updated_at — matches SetFeatureArchived's
+// shape, where every flip touches the row.
+func (s *Store) SetFeatureAutoClose(featureID int64, enabled bool) error {
+	// `state_manual = NOT enabled` — auto-close ON means the bit is 0
+	// (let the sweep run), auto-close OFF means the bit is 1 (pin).
+	bit := 0
+	if !enabled {
+		bit = 1
+	}
+	_, err := s.DB.Exec(
+		`UPDATE features SET state_manual = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		bit, featureID,
 	)
 	return err
 }

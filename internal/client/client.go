@@ -191,14 +191,24 @@ type Client interface {
 	ArchiveFeature(ctx context.Context, repo *model.Repo, slug string, dryRun bool) (*model.Feature, error)
 	UnarchiveFeature(ctx context.Context, repo *model.Repo, slug string, dryRun bool) (*model.Feature, error)
 	// SetFeatureState (BACI-199) writes the feature's three-state
-	// column (active|done|cancelled) AND sets the sticky bit
-	// `state_manual = 1` so the leader-elected archive-sweep's
-	// auto-completion pass leaves the row alone until the user pins a
-	// new value. Records an audit row (`feature.state`) under the
-	// resolved actor; sweep-driven writes never reach this method (the
-	// store-level Store.SetFeatureState carries the manual=false
-	// surface for the sweep, by design).
+	// column (active|done|cancelled). Records an audit row
+	// (`feature.state`) under the resolved actor.
+	//
+	// BACI-250 decoupled this from auto-close pinning: this method no
+	// longer touches `state_manual`. Use SetFeatureAutoClose to flip
+	// the sticky bit that gates the archive-sweep's auto-completion
+	// pass.
 	SetFeatureState(ctx context.Context, repo *model.Repo, slug string, state model.FeatureState, dryRun bool) (*model.Feature, error)
+	// SetFeatureAutoClose (BACI-250) flips the per-feature auto-close
+	// toggle — the sticky-bit `state_manual` column that gates the
+	// BACI-199 auto-completion sweep. Auto-close ON clears the bit
+	// (the sweep may promote this feature once every child is
+	// terminal); auto-close OFF sets the bit (long-lived catch-alls
+	// stay `active` indefinitely). Records an audit row
+	// (`feature.auto-close`) on every real flip; idempotent no-ops
+	// skip the audit. The remote backend hits PUT
+	// /repos/{prefix}/features/{slug}/auto-close.
+	SetFeatureAutoClose(ctx context.Context, repo *model.Repo, slug string, enabled, dryRun bool) (*model.Feature, error)
 	// IsFeatureHiddenOnBoard / SetFeatureHiddenOnBoard / ListHiddenFeatureSlugs
 	// (BACI-177) expose the per-feature "Show on board" toggle that
 	// drives the Features-screen affordance. The flag is per-repo

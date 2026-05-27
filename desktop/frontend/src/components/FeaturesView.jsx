@@ -34,6 +34,16 @@ const SHOW_ON_BOARD_OPTIONS = [
   { id: false, label: 'Hide' },
 ];
 
+// BACI-250: per-feature auto-close toggle. The id is the `enabled`
+// value the API expects — true = auto-close ON (default; the sweep
+// may promote the feature once every child is terminal), false =
+// auto-close OFF (long-lived catch-all stays `active`). Same shape as
+// SHOW_ON_BOARD_OPTIONS.
+const AUTO_CLOSE_OPTIONS = [
+  { id: true, label: 'On' },
+  { id: false, label: 'Off' },
+];
+
 // BACI-199: per-feature state options. The id is the canonical
 // state string ParseFeatureState accepts; label is the visible button
 // caption. Stays in lockstep with model.FeatureState — adding a
@@ -592,11 +602,58 @@ function FeatureOverviewSections({
               );
             })}
           </div>
+        </div>
+
+        <div className="mk-features-prop">
+          <label className="mk-features-prop-label">Auto Close</label>
+          <div
+            className="mk-segmented"
+            role="group"
+            aria-label="Auto-close this feature when every child is terminal"
+          >
+            {AUTO_CLOSE_OPTIONS.map((opt) => {
+              const autoClose = !detail.stateManual;
+              return (
+                <button
+                  key={String(opt.id)}
+                  className={`mk-segmented-btn ${
+                    autoClose === opt.id ? 'is-active' : ''
+                  }`}
+                  aria-pressed={autoClose === opt.id}
+                  onClick={async () => {
+                    if (autoClose === opt.id) return;
+                    try {
+                      const updated = await api.setFeatureAutoClose(
+                        activeBoard,
+                        detail.slug,
+                        opt.id,
+                      );
+                      onDetailChange(updated);
+                      try {
+                        const feats = await api.listFeatures(activeBoard);
+                        onFeaturesChange(feats);
+                      } catch {
+                        // non-fatal — next selection refresh picks it up.
+                      }
+                    } catch (err) {
+                      reportError(err, {
+                        headline: "Couldn't update auto-close",
+                      });
+                    }
+                  }}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
           <p
             className="mk-features-prop-hint"
-            title="Pinning a value keeps the auto-completion sweep from changing it. Archive is independent."
+            title="When on, the auto-completion sweep can promote this feature to done/cancelled once every child issue is terminal. Turn off for long-lived catch-all features."
           >
-            Pinned values aren't touched by the auto-completion sweep.
+            When on, the auto-completion sweep can promote this feature to
+            done/cancelled once every child issue is terminal. Turn off for
+            long-lived catch-all features.
           </p>
         </div>
 

@@ -299,6 +299,9 @@ var (
 	ExampleFeatureArchive     = FeatureArchiveInput{Slug: "auth-old"}
 	ExampleFeatureUnarchive   = FeatureUnarchiveInput{Slug: "auth-old"}
 	ExampleFeatureState       = FeatureStateInput{Slug: "auth-old", State: "done"}
+	// BACI-250: auto-close OFF on a long-lived catch-all so the BACI-199
+	// sweep doesn't promote it to `done` once its current children land.
+	ExampleFeatureAutoClose   = FeatureAutoCloseInput{Slug: "maintenance", Enabled: false}
 	ExampleDocArchive         = DocArchiveInput{Filename: "auth-old.md"}
 	ExampleDocUnarchive       = DocUnarchiveInput{Filename: "auth-old.md"}
 	ExampleArchiveSweep       = ArchiveSweepInput{}

@@ -56,12 +56,14 @@ type Feature struct {
 	// features default to `active`) so the React Features view reads
 	// the column directly.
 	State FeatureState `json:"state"`
-	// StateManual (BACI-199) is the sticky-bit set whenever a user
-	// explicitly flips State via `bacio feature state`. The sweep's
-	// auto-completion pass skips rows with StateManual = true so a
-	// manually-cancelled feature whose children later finish doesn't
-	// silently flip back to `done`. No omitempty — same reason as
-	// State.
+	// StateManual (BACI-199) is the sticky-bit that gates the BACI-199
+	// auto-completion sweep. When true, the sweep skips this row so a
+	// long-lived catch-all feature whose children later finish doesn't
+	// silently flip to `done`. BACI-250 decoupled the bit from state
+	// writes: it is now flipped via the explicit `bacio feature
+	// auto-close` verb (auto-close OFF sets it to true, ON clears it),
+	// not as a side-effect of `bacio feature state`. No omitempty —
+	// same reason as State.
 	StateManual bool      `json:"state_manual"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`

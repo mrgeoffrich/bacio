@@ -72,6 +72,22 @@ export function ListFeatures(repoPrefix: string): $CancellablePromise<$models.Fe
 }
 
 /**
+ * SetFeatureAutoClose (BACI-250) flips the per-feature auto-close
+ * toggle — the sticky-bit `state_manual` column that gates the
+ * BACI-199 archive-sweep's auto-completion pass — and returns the
+ * refreshed FeatureDetail. enabled=true clears the bit (the sweep may
+ * promote this feature once every child is terminal); enabled=false
+ * sets the bit (long-lived catch-alls stay `active` indefinitely).
+ * Idempotent — flipping to the same state is a no-op write. Mirrors
+ * SetHiddenOnBoard's shape.
+ */
+export function SetFeatureAutoClose(repoPrefix: string, slug: string, enabled: boolean): $CancellablePromise<$models.FeatureDetail> {
+    return $Call.ByID(4056697990, repoPrefix, slug, enabled).then(($result: any) => {
+        return $$createType0($result);
+    });
+}
+
+/**
  * SetFeatureBranchName (BACI-231) updates the per-feature integration
  * branch and returns the refreshed FeatureDetail. Empty string clears
  * the branch (the feature ships straight to main again). Validates at
@@ -99,11 +115,12 @@ export function SetFeatureEmoji(repoPrefix: string, slug: string, emoji: string)
 
 /**
  * SetFeatureState (BACI-199) flips the feature's three-state column
- * and returns the refreshed FeatureDetail. Sets state_manual = true
- * so the leader-elected archive-sweep's auto-completion pass leaves
- * the row alone until the user pins a new value. Parses the state
- * string at the boundary so a typo surfaces as a clear error from
- * the client.
+ * and returns the refreshed FeatureDetail. Parses the state string at
+ * the boundary so a typo surfaces as a clear error from the client.
+ * 
+ * BACI-250 decoupled this from the auto-close pin: this method no
+ * longer touches state_manual. Use SetFeatureAutoClose to flip the
+ * per-feature pin against the BACI-199 auto-completion sweep.
  */
 export function SetFeatureState(repoPrefix: string, slug: string, state: string): $CancellablePromise<$models.FeatureDetail> {
     return $Call.ByID(2810734914, repoPrefix, slug, state).then(($result: any) => {

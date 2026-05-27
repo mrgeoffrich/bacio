@@ -18,6 +18,14 @@ type featureHideInput struct {
 	Hidden *bool `json:"hidden"`
 }
 
+// featureAutoCloseInput is the body shape for PUT
+// /repos/{prefix}/features/{slug}/auto-close (BACI-250). Same
+// pointer-of-bool shape as featureHideInput so a missing field is
+// distinguishable from `enabled: false`.
+type featureAutoCloseInput struct {
+	Enabled *bool `json:"enabled"`
+}
+
 func (d deps) handleFeaturesList(w http.ResponseWriter, r *http.Request) {
 	repo, ok := resolveRepoFromPath(w, r, d.store)
 	if !ok {
@@ -385,12 +393,14 @@ func (d deps) handleFeatureHide(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleFeatureState (BACI-199) flips the feature's three-state
-// column to the value carried in the JSON body and stamps the
-// sticky bit so the leader-elected archive-sweep's auto-completion
-// pass leaves the row alone. Body shape is
+// column to the value carried in the JSON body. Body shape is
 // `{"slug": "<slug>", "state": "active|done|cancelled"}` — the slug
 // in the body is required by the strict decoder but the path-resolved
 // feature is the authoritative target.
+//
+// BACI-250 decoupled this endpoint from the auto-close pin: a state
+// write no longer touches `state_manual`. Use
+// PUT /repos/{prefix}/features/{slug}/auto-close to flip the pin.
 func (d deps) handleFeatureState(w http.ResponseWriter, r *http.Request) {
 	repo, ok := resolveRepoFromPath(w, r, d.store)
 	if !ok {
@@ -421,12 +431,11 @@ func (d deps) handleFeatureState(w http.ResponseWriter, r *http.Request) {
 	if isDryRun(r) {
 		projected := *feat
 		projected.State = st
-		projected.StateManual = true
 		writeDryRun(w, http.StatusOK, &projected)
 		return
 	}
 	oldState := feat.State
-	if err := d.store.SetFeatureState(feat.ID, st, true); err != nil {
+	if err := d.store.SetFeatureState(feat.ID, st); err != nil {
 		status, code := statusForError(err)
 		writeError(w, status, code, err.Error(), nil)
 		return
@@ -446,6 +455,76 @@ func (d deps) handleFeatureState(w http.ResponseWriter, r *http.Request) {
 		TargetID:    &updated.ID,
 		TargetLabel: updated.Slug,
 		Details:     fmt.Sprintf("%s → %s", oldState, st),
+	})
+	writeJSON(w, http.StatusOK, updated)
+}
+
+// handleFeatureAutoClose (BACI-250) flips the per-feature auto-close
+// toggle — the sticky-bit `state_manual` column that gates the
+// BACI-199 auto-completion sweep. Body: `{"enabled": bool}`. Mirrors
+// handleFeatureHide's shape: pointer-of-bool to distinguish absent
+// from `false`, idempotent no-ops skip the audit row, audits as
+// `feature.auto-close` with Details `off → on` / `on → off`.
+func (d deps) handleFeatureAutoClose(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	feat, ok := resolveFeatureOnRepo(w, r, d.store, repo)
+	if !ok {
+		return
+	}
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	body, _, err := inputio.DecodeStrict[featureAutoCloseInput](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	if body.Enabled == nil {
+		writeError(w, http.StatusBadRequest, "invalid_input",
+			"enabled is required", map[string]any{"field": "enabled"})
+		return
+	}
+	want := *body.Enabled
+	if isDryRun(r) {
+		projected := *feat
+		projected.StateManual = !want
+		writeDryRun(w, http.StatusOK, &projected)
+		return
+	}
+	current := !feat.StateManual // auto-close ON iff state_manual is false
+	if current == want {
+		// Idempotent — return the row unchanged and skip the audit row.
+		writeJSON(w, http.StatusOK, feat)
+		return
+	}
+	if err := d.store.SetFeatureAutoClose(feat.ID, want); err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	updated, err := d.store.GetFeatureByID(feat.ID)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	from, to := "on", "off"
+	if want {
+		from, to = "off", "on"
+	}
+	recordOp(d.store, d.logger, model.HistoryEntry{
+		RepoID:      &feat.RepoID,
+		RepoPrefix:  repo.Prefix,
+		Actor:       ActorFromContext(r.Context()),
+		Op:          "feature.auto-close",
+		Kind:        "feature",
+		TargetID:    &updated.ID,
+		TargetLabel: updated.Slug,
+		Details:     fmt.Sprintf("%s → %s", from, to),
 	})
 	writeJSON(w, http.StatusOK, updated)
 }
