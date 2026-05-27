@@ -19,6 +19,16 @@
 // The companion CSS (`.mk-shipped-pill.is-flash`) and Motion
 // `layoutId` plumbing live in `KanbanCard.jsx` / `Topbar.jsx` /
 // `ShippedPopover.jsx`; this hook is the controller.
+//
+// BACI-254: the hook also fires an optional `onShip(keys)` callback
+// from the same detection effect. The callback receives every card
+// that transitioned in the tick (not just the first), so a burst
+// ship lands every audio cue even though only the first key drives
+// the visual flight. The SFX caller lives in `App.jsx` so the audio
+// fires regardless of which surface the user is on — previously the
+// SFX was tied to the Motion flight-completion callback inside
+// `ShippedPopover`, which never fires when the source `motion.article`
+// isn't mounted (Features graph, Settings, off-board cards, …).
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -71,7 +81,17 @@ export type ShipFlourishResult = {
 // The hook also installs a MAX_FLIGHT_MS safety timer so a flight
 // that never reports completion (caller unmounted, animation
 // suppressed by `prefers-reduced-motion`, etc.) eventually clears.
-export function useShipFlourish(cards: ShipCard[]): ShipFlourishResult {
+//
+// BACI-254: the optional `onShip(keys)` callback is fired from the
+// same detection effect with every card that transitioned in the
+// tick. The SFX caller in `App.jsx` uses it to play a sound per ship
+// independently of Motion / the kanban being mounted. Only the first
+// key still drives the visual flight (one Motion flight at a time);
+// the array carries the rest so a burst ship lands every audio cue.
+export function useShipFlourish(
+  cards: ShipCard[],
+  options?: { onShip?: (keys: string[]) => void },
+): ShipFlourishResult {
   const [flyingKey, setFlyingKey] = useState<string | null>(null);
   const [flashing, setFlashing] = useState(false);
 
@@ -81,6 +101,13 @@ export function useShipFlourish(cards: ShipCard[]): ShipFlourishResult {
 
   // Safety timer for runaway flights — see MAX_FLIGHT_MS docstring.
   const flightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Hold the latest onShip in a ref so the detection effect can read
+  // it without re-running when the callback identity flips on every
+  // App render. The `cards` array is the only dep that should
+  // re-fire detection.
+  const onShipRef = useRef<((keys: string[]) => void) | undefined>(options?.onShip);
+  useEffect(() => { onShipRef.current = options?.onShip; }, [options?.onShip]);
 
   useEffect(() => {
     const prev = prevColumns.current;
@@ -92,17 +119,16 @@ export function useShipFlourish(cards: ShipCard[]): ShipFlourishResult {
       return;
     }
 
-    // Look for the first card whose column flipped INTO `done` from
-    // a non-terminal column. Multiple in one tick is rare (each
-    // ship is typically a separate poll); if it happens, pick the
-    // first found and let subsequent re-renders surface the rest —
-    // good enough for v1.
-    let fly: string | null = null;
+    // Collect every card whose column flipped INTO `done` from a
+    // non-terminal column. The visual flight still uses the first
+    // key (Motion only supports one flight at a time inside the
+    // shared LayoutGroup); the full list is fanned to onShip so a
+    // burst ship lands every audio cue.
+    const shipped: string[] = [];
     for (const c of cards) {
       const wasIn = prev.get(c.key);
       if (c.column === 'done' && wasIn && wasIn !== 'done' && wasIn !== 'cancelled') {
-        fly = c.key;
-        break;
+        shipped.push(c.key);
       }
     }
 
@@ -112,9 +138,20 @@ export function useShipFlourish(cards: ShipCard[]): ShipFlourishResult {
     for (const c of cards) next.set(c.key, c.column);
     prevColumns.current = next;
 
-    if (!fly) return;
+    if (shipped.length === 0) return;
 
-    setFlyingKey(fly);
+    // Fire the audio fan-out first so SFX never depends on the
+    // visual flight starting (a card off the active board has no
+    // source `motion.article`; the flight never runs but the audio
+    // should still fire). Guard the callback so a thrown handler
+    // doesn't stop us setting the flying key.
+    const handler = onShipRef.current;
+    if (handler) {
+      try { handler(shipped); }
+      catch { /* SFX is best-effort; never let it stall the flourish */ }
+    }
+
+    setFlyingKey(shipped[0]);
     // Arm the safety timer. If onFlightDone fires first it clears
     // the timer; otherwise the timer drops the slot after the cap.
     if (flightTimer.current) clearTimeout(flightTimer.current);
@@ -143,22 +180,36 @@ export function useShipFlourish(cards: ShipCard[]): ShipFlourishResult {
   return { flyingKey, flashing, onFlightDone };
 }
 
-// computeShipFlight is the pure diff function the hook leans on,
-// exported for unit testing. Returns the key of a card that just
-// transitioned into `done` from a non-terminal column, or null when
-// no flight should fire. `prev` is null on the very first render
-// (no diff is meaningful — the board's existing `done` cards
-// shouldn't pretend to have just shipped).
+// computeShippedKeys is the pure diff function the hook leans on,
+// exported for unit testing. Returns the ordered list of card keys
+// that just transitioned into `done` from a non-terminal column in
+// this tick — possibly multiple when a poll bundles two ships, or
+// empty when nothing shipped. `prev` is null on the very first
+// render (no diff is meaningful — the board's existing `done`
+// cards shouldn't pretend to have just shipped).
+export function computeShippedKeys(
+  prev: Map<string, string> | null,
+  next: ShipCard[],
+): string[] {
+  if (prev === null) return [];
+  const out: string[] = [];
+  for (const c of next) {
+    const wasIn = prev.get(c.key);
+    if (c.column === 'done' && wasIn && wasIn !== 'done' && wasIn !== 'cancelled') {
+      out.push(c.key);
+    }
+  }
+  return out;
+}
+
+// computeShipFlight (kept for backwards compatibility with the
+// BACI-193 visual-flight contract) returns just the first shipped
+// key — what `flyingKey` gets stamped with. The audio fan-out reads
+// `computeShippedKeys` directly so every ship in the tick is heard.
 export function computeShipFlight(
   prev: Map<string, string> | null,
   next: ShipCard[],
 ): string | null {
-  if (prev === null) return null;
-  for (const c of next) {
-    const wasIn = prev.get(c.key);
-    if (c.column === 'done' && wasIn && wasIn !== 'done' && wasIn !== 'cancelled') {
-      return c.key;
-    }
-  }
-  return null;
+  const keys = computeShippedKeys(prev, next);
+  return keys.length > 0 ? keys[0] : null;
 }
