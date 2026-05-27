@@ -194,6 +194,27 @@ single-slot-per-issue invariant covers both — a card that is both
 blocked and has an in-flight parent dispatch falls through to the
 parent-acks variant.
 
+**BACI-246 — defense in depth + audit-snapshot enrichment.** The
+dormant gate is enforced at **two** points, not one: the controller's
+`PromoteReadyFollowOns` sweep AND `BindQueuedDispatch`'s CAS. The
+matcher's `ListQueuedByRepoMode` returns rows that passed the gate at
+the *snapshot read*; if a blocker transitions back to a non-terminal
+state in the tens of milliseconds between snapshot and bind, the
+bind's WHERE clause carries `AND NOT dormantFollowOnGateSQL()` and
+the CAS misses. The dispatcher logs the rare miss at Info
+("matcher bind missed (row no longer bindable)") and the next
+promote sweep re-evaluates the row. The blockers-clear promote audit
+row also carries a `blockers=[KEY:state,...]` clause snapshotted from
+the live `blocks` relation set at the moment the gate cleared —
+materialised on `model.AgentDispatch.BlockerSnapshot` (transient,
+never persisted) by the store's promote sweep and stamped into
+`followOnDetails` by the controller. `bacio history --op
+agent.followon.promote -o json` is therefore the diagnostic surface
+for "which blockers did the gate observe?". An empty
+`blockers=[]` clause means the `blocks` rows were hard-deleted
+between queue and promote — the gate cleared by virtue of the EXISTS
+subquery returning empty.
+
 #### State-gated prompts
 
 Each dispatch stage (`plan`, `design`, `implement`, `review`, `ship`,

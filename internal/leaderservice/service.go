@@ -80,7 +80,7 @@ func New(s *store.Store, label, dbPath string, logger *slog.Logger) *Service {
 	syncRunner := bsync.NewBackgroundRunner(s, dbPath, label, logger)
 	return &Service{
 		elector:    el,
-		ctrl:       controller.New(s, el, dispatcher.New(s), idlepinger.New(s, pingerClient, logger), syncRunner, logger),
+		ctrl:       controller.New(s, el, dispatcher.New(s).WithLogger(logger), idlepinger.New(s, pingerClient, logger), syncRunner, logger),
 		syncRunner: syncRunner,
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/mrgeoffrich/bacio/internal/model"
@@ -642,26 +643,46 @@ func (s *Store) InflightByModeForRepo(repoID int64) (map[model.DispatchMode]int,
 // agent and flips it to pending — the matcher's commit step. The
 // WHERE guard makes the bind a no-op if a concurrent process already
 // matched the row, AND (BACI-200) if the row has ever been delivered
-// to a worker (`delivered_at IS NOT NULL`). The latter is the sticky
-// "this dispatch has been handed to an agent" gate: once a worker has
-// the dispatch in hand, no later matcher tick may rebind it to a
-// different agent — even if the BACI-133 reaper requeues the row
-// after presuming the worker dead. (That recovery still works: the
-// reaper's requeue branch resets `delivered_at = NULL` alongside
-// status='queued', so a genuinely-dead worker's dispatch is rebindable
-// while a live worker's is locked in.)
+// to a worker (`delivered_at IS NOT NULL`), AND (BACI-246) if the
+// row's dormant gate has re-tightened between the matcher's
+// snapshot read and the bind. The latter belt-and-braces is the
+// defense-in-depth gate for the blockers-clear variant: a row that
+// was non-dormant in ListQueuedByRepoMode's tick-N snapshot may have
+// had a blocker flipped back to `in_progress` before the tick's
+// bind step runs, and a bind without this guard would fire while
+// the blocker is open again. The CAS misses (zero rows affected)
+// in that race, leaving the row dormant for the next promote sweep
+// to re-evaluate.
+//
+// `delivered_at IS NOT NULL` is the sticky "this dispatch has been
+// handed to an agent" gate: once a worker has the dispatch in hand,
+// no later matcher tick may rebind it to a different agent — even
+// if the BACI-133 reaper requeues the row after presuming the worker
+// dead. (That recovery still works: the reaper's requeue branch
+// resets `delivered_at = NULL` alongside status='queued', so a
+// genuinely-dead worker's dispatch is rebindable while a live
+// worker's is locked in.)
+//
+// The `d` alias on the UPDATE target lets the shared dormant-gate
+// fragment from dormantFollowOnGateSQL() reuse its `d.` column
+// references without a second copy. SQLite's UPDATE supports the
+// aliased form natively.
 //
 // Returns ErrNotFound when 0 rows were updated. A bare `status='queued'`
-// CAS miss and a `delivered_at IS NOT NULL` miss are not distinguished
-// at the API surface — both mean "this dispatch is no longer up for
-// grabs", which is the matcher's only decision point.
+// CAS miss, a `delivered_at IS NOT NULL` miss, and a re-tightened
+// dormant gate miss are not distinguished at the API surface — they
+// all mean "this dispatch is no longer up for grabs right now",
+// which is the matcher's only decision point. The caller may emit
+// an Info-level log line to surface the (rare) gate-retighten case;
+// see internal/dispatcher/dispatcher.go tickMode.
 func (s *Store) BindQueuedDispatch(id int64, agentID int64) (*model.AgentDispatch, error) {
 	res, err := s.DB.Exec(`
-		UPDATE agent_dispatches
+		UPDATE agent_dispatches AS d
 		   SET target_agent_id = ?, status = 'pending'
-		 WHERE id = ?
-		   AND status = 'queued'
-		   AND delivered_at IS NULL`,
+		 WHERE d.id = ?
+		   AND d.status = 'queued'
+		   AND d.delivered_at IS NULL
+		   AND NOT `+dormantFollowOnGateSQL(),
 		agentID, id)
 	if err != nil {
 		return nil, err
@@ -938,6 +959,24 @@ func dormantFollowOnGateSQL() string {
 		       AND i2.state NOT IN ('done','cancelled')
 		))
 	)`
+}
+
+// BlockerObservation (BACI-246) is one row the promote sweep observed
+// from a blockers-clear follow-on's `blocks` relation set at the
+// moment it cleared the gate. The controller stamps these into the
+// `agent.followon.promote` audit row's Details so a reader of
+// `bacio history` can answer "which blockers did the gate consider
+// cleared?" without rebuilding the world. A blockers-clear follow-on
+// whose blocker relation rows were hard-deleted between queue and
+// promote naturally produces an empty slice — that's the
+// "blockers=[]" case the operator reads as "the relation was gone at
+// fire time", distinct from the parent-acks variant (which simply
+// has no BlockerSnapshot at all). The read helper lives on Store as
+// `blockerSnapshotsTx`, scoped to PromoteReadyFollowOns's transaction
+// so the snapshot describes exactly the rows the gate saw.
+type BlockerObservation struct {
+	BlockerKey   string
+	BlockerState model.State
 }
 
 // AddDispatchWithFollowOnIn is the validated tuple AddDispatchWithFollowOn
@@ -1241,6 +1280,36 @@ func (s *Store) PromoteReadyFollowOns(gates map[model.DispatchMode][]model.State
 			cancelIDs = append(cancelIDs, r.id)
 		}
 	}
+	// BACI-246: snapshot the blockers-clear rows' live `blocks`
+	// relations BEFORE the UPDATE clears queued_until_blockers_clear
+	// — once that flag is cleared we lose the ability to tell which
+	// promotes were blockers-clear variants vs parent-acks. Reads the
+	// same source-of-truth as dormantFollowOnGateSQL so the audit row
+	// describes exactly what the gate saw. Parent-acks rows produce
+	// no map entry (their gate isn't blocker-based) and end up with a
+	// nil BlockerSnapshot on the returned struct.
+	var blockerSnapshots map[int64][]BlockerObservation
+	if len(promoteIDs) > 0 {
+		var blockerVariantIDs []int64
+		for _, id := range promoteIDs {
+			var blockersClear int
+			if err := tx.QueryRow(
+				`SELECT queued_until_blockers_clear FROM agent_dispatches WHERE id = ?`, id,
+			).Scan(&blockersClear); err != nil {
+				return nil, nil, err
+			}
+			if blockersClear != 0 {
+				blockerVariantIDs = append(blockerVariantIDs, id)
+			}
+		}
+		if len(blockerVariantIDs) > 0 {
+			snaps, err := s.blockerSnapshotsTx(tx, blockerVariantIDs)
+			if err != nil {
+				return nil, nil, err
+			}
+			blockerSnapshots = snaps
+		}
+	}
 	for _, id := range promoteIDs {
 		// BACI-217: clear BOTH dormant flags so the promoted row is a
 		// clean regular queued dispatch regardless of which variant
@@ -1291,6 +1360,9 @@ func (s *Store) PromoteReadyFollowOns(gates map[model.DispatchMode][]model.State
 		if err != nil {
 			return nil, nil, err
 		}
+		if snap, ok := blockerSnapshots[id]; ok {
+			d.BlockerSnapshot = blockerObservationsToModel(snap)
+		}
 		promoted = append(promoted, d)
 	}
 	gateFailed = make([]*model.AgentDispatch, 0, len(cancelIDs))
@@ -1302,6 +1374,84 @@ func (s *Store) PromoteReadyFollowOns(gates map[model.DispatchMode][]model.State
 		gateFailed = append(gateFailed, d)
 	}
 	return promoted, gateFailed, nil
+}
+
+// blockerSnapshotsTx reads the live `blocks` relations targeting each
+// blockers-clear follow-on's issue, keyed by dispatch id, inside the
+// caller's transaction so the snapshot describes exactly the rows the
+// gate considered. Mirrors the EXISTS subquery in
+// dormantFollowOnGateSQL but materialises every row instead of just
+// asserting presence. The returned map carries an entry for every
+// dispatch id passed in — non-nil empty slice when no `blocks` rows
+// existed (the operator's "the relations were hard-deleted" forensic
+// signal), populated slice otherwise.
+func (s *Store) blockerSnapshotsTx(tx *sql.Tx, dispatchIDs []int64) (map[int64][]BlockerObservation, error) {
+	out := map[int64][]BlockerObservation{}
+	if len(dispatchIDs) == 0 {
+		return out, nil
+	}
+	for _, id := range dispatchIDs {
+		out[id] = nil
+	}
+	ph := make([]string, len(dispatchIDs))
+	args := make([]any, len(dispatchIDs))
+	for i, id := range dispatchIDs {
+		ph[i] = "?"
+		args[i] = id
+	}
+	q := fmt.Sprintf(`
+		SELECT d.id,
+		       r.prefix || '-' || src.number AS blocker_key,
+		       src.state
+		  FROM agent_dispatches d
+		  JOIN issue_relations ir ON ir.to_issue_id = d.issue_id
+		  JOIN issues src ON src.id = ir.from_issue_id
+		  JOIN repos r ON r.id = src.repo_id
+		 WHERE d.id IN (%s)
+		   AND ir.type = 'blocks'`, strings.Join(ph, ","))
+	rows, err := tx.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var dispatchID int64
+		var key string
+		var state string
+		if err := rows.Scan(&dispatchID, &key, &state); err != nil {
+			return nil, fmt.Errorf("scan blocker snapshot: %w", err)
+		}
+		out[dispatchID] = append(out[dispatchID], BlockerObservation{
+			BlockerKey:   key,
+			BlockerState: model.State(state),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// blockerObservationsToModel converts store-layer BlockerObservations
+// (the type the SQL helpers return) into the model-layer
+// DispatchBlockerObservation tag attached to AgentDispatch. Two-shape
+// declaration keeps the model package independent of internal/store.
+func blockerObservationsToModel(obs []BlockerObservation) []model.DispatchBlockerObservation {
+	if len(obs) == 0 {
+		// Return a non-nil empty slice so the caller can distinguish
+		// "blockers-clear variant, all blocker rows hard-deleted" from
+		// "not a blockers-clear variant" (BlockerSnapshot is nil) — the
+		// audit emitter reads len()==0 as "stamp blockers=[]".
+		return []model.DispatchBlockerObservation{}
+	}
+	out := make([]model.DispatchBlockerObservation, 0, len(obs))
+	for _, o := range obs {
+		out = append(out, model.DispatchBlockerObservation{
+			BlockerKey:   o.BlockerKey,
+			BlockerState: o.BlockerState,
+		})
+	}
+	return out
 }
 
 // followOnGatePasses (BACI-195) is the pure fire-time gate check

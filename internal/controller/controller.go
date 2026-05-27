@@ -377,9 +377,12 @@ func recordFollowOnGateFailAudit(s *store.Store, d *model.AgentDispatch, log *sl
 // BACI-217: also stamps the gate variant (`gate=parent` or
 // `gate=blockers`) when discernible — a reader of `bacio history`
 // can tell the two variants apart at the row level. A promoted row
-// has both flags cleared by the sweep so the gate= field is omitted
-// from promote audit rows; that's intentional (the row no longer is
-// a follow-on, just a regular queued dispatch).
+// has both flags cleared by the sweep so the gate= field is normally
+// omitted from promote audit rows — except for blockers-clear
+// promotes, where the BACI-246 snapshot pinned on
+// AgentDispatch.BlockerSnapshot reinstates `gate=blockers` and adds
+// a `blockers=[KEY:state,...]` clause naming exactly which blocker
+// rows the gate considered cleared.
 // Empty fields are omitted, not stamped as `=`.
 func followOnDetails(d *model.AgentDispatch) string {
 	if d == nil {
@@ -397,6 +400,36 @@ func followOnDetails(d *model.AgentDispatch) string {
 		parts = append(parts, "gate=parent")
 	} else if d.QueuedUntilBlockersClear {
 		parts = append(parts, "gate=blockers")
+	}
+	// BACI-246: blockers-clear promote rows carry a transient
+	// BlockerSnapshot the store captured before the promote cleared the
+	// flag. Re-stamp `gate=blockers` (the post-promote row has the flag
+	// cleared, so the branch above missed it) and append the snapshot
+	// so a reader of `bacio history --op agent.followon.promote -o json`
+	// can answer "which blockers did the gate consider cleared at fire
+	// time?". A non-nil but empty slice still emits `blockers=[]` —
+	// that's the "the relation rows were hard-deleted between queue
+	// and promote" forensic signal.
+	if d.BlockerSnapshot != nil {
+		// Only re-add gate=blockers if not already present from the
+		// QueuedUntilBlockersClear branch (the flag is cleared on
+		// promote, so on the promote-audit path the branch above is
+		// silent and this re-stamp is what surfaces the gate variant).
+		hasGate := false
+		for _, p := range parts {
+			if strings.HasPrefix(p, "gate=") {
+				hasGate = true
+				break
+			}
+		}
+		if !hasGate {
+			parts = append(parts, "gate=blockers")
+		}
+		var blockers []string
+		for _, o := range d.BlockerSnapshot {
+			blockers = append(blockers, o.BlockerKey+":"+string(o.BlockerState))
+		}
+		parts = append(parts, "blockers=["+strings.Join(blockers, ",")+"]")
 	}
 	return strings.Join(parts, ",")
 }
