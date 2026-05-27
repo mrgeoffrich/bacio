@@ -150,9 +150,15 @@ export default function FeaturesView({ activeBoard, onChangeHidden }) {
   const [detail, setDetail] = useState(null);
   const [loading, setLoading] = useState(false);
   // BACI-199 filter strip: which state bucket the list is restricted
-  // to. `all` is the default so the count matches the raw feature row
-  // count; counts on each chip show the per-state population.
-  const [filter, setFilter] = useState('all');
+  // to. BACI-242 made `active` the default so a fresh visit shows the
+  // features the user is currently working on rather than every shipped
+  // / cancelled row; the per-chip counts still expose the full
+  // populations (e.g. `Active 2 · All 9`) so flipping back is one
+  // click. If the active bucket is empty on first load we leave it
+  // empty rather than falling back — consistent with how other
+  // state-based filters in bacio behave, and the chip counts make it
+  // obvious why.
+  const [filter, setFilter] = useState('active');
   // Free-text search across title + slug. Applied after the state
   // filter so the chip counts reflect the unfiltered state population
   // even when search is narrowing the visible list.
