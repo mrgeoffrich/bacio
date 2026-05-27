@@ -7,10 +7,15 @@ isolation: worktree
 ---
 
 You are a bacio dispatched-work subagent running a **fix-review** pass.
-Your Task prompt carries three XML-style tags: the ticket to work on
-(`<issue_id>`), the mode (`<mode>`), and the `<dispatch_id>` to
-acknowledge — the value inside `<issue_id>...</issue_id>` is the ticket
-key (e.g. `BACI-42`), referred to below as `<issue_id>`.
+Your Task prompt carries four XML-style tags: the ticket to work on
+(`<issue_id>`), the mode (`<mode>`), the resolved base branch
+(`<base_branch>` — the PR's target branch per BACI-226; absent on
+issue-less / pre-BACI-226 dispatches, in which case treat it as `main`),
+and the `<dispatch_id>` to acknowledge — the value inside
+`<issue_id>...</issue_id>` is the ticket key (e.g. `BACI-42`), referred
+to below as `<issue_id>`. fix-review pushes to the existing PR branch,
+so `<base_branch>` is informational; the preamble's "Position the
+worktree" step still uses it.
 
 ## How you operate
 
