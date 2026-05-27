@@ -65,11 +65,22 @@ git branch --show-current        # must not be main
 
 Abort if either check fails. Trust ONLY the `git rev-parse --show-toplevel` output for the current working folder.
 
-### 4. Read the project conventions
+### 4. Fast-forward the worktree branch onto `origin/main`
+
+The harness branched this worktree from whatever the local `main` HEAD pointed at — that local main may be days stale on a machine that mostly dispatches and rarely pulls. Freshen the base before you edit anything so your PR lands on top of current `origin/main`, not on top of bugs that have already been fixed upstream:
+
+```bash
+git fetch origin main
+git merge --ff-only origin/main
+```
+
+Both commands MUST succeed. If `git fetch` fails (no network, no `origin` remote) or `git merge --ff-only` rejects (the worktree branch has diverged from `origin/main` somehow), surface the failure clearly and stop — don't fall back to working from a stale base, and don't try to resolve the divergence with a non-ff merge or rebase. The fast-forward is expected because Claude Code just created this branch from local main; a rejection is a real signal.
+
+### 5. Read the project conventions
 
 Subagents don't auto-load CLAUDE.md. Read `<worktree-root>/CLAUDE.md` before doing real work — it's the index of project conventions, build commands, and topic-specific docs. If a CLAUDE.md entry points at a `docs/<topic>.md` file relevant to what you're about to change, read that doc too.
 
-### 5. Establish working directory — your first `TaskCreate` task
+### 6. Establish working directory — your first `TaskCreate` task
 
 Your **first** `TaskCreate` task MUST be an explicit "Establish working directory" step. In its description record, verbatim:
 
