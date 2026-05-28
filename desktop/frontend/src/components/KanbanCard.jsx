@@ -1,4 +1,4 @@
-import React, { memo, useEffect, useRef, useState } from 'react';
+import React, { memo, forwardRef, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { m } from 'motion/react';
@@ -27,7 +27,7 @@ function stateLabel(s) {
   return STATE_LABELS[s] ?? s;
 }
 
-function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDragStart, onDragEnd, onOpen, onDispatch, onDispatchChain, onCancelWaiting, onOpenQuestion, onOpenIssue, onQuickEval, onSetFollowOn, onCancelFollowOn, isTrayHover, isJumping }) {
+function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDragStart, onDragEnd, onOpen, onDispatch, onDispatchChain, onCancelWaiting, onOpenQuestion, onOpenIssue, onQuickEval, onSetFollowOn, onCancelFollowOn, isTrayHover, isJumping, layoutEase = [0.2, 0, 0, 1] }, ref) {
   // BACI-75: local-only expansion state for the Tasks pill. Resets on
   // unmount (board switch, repo switch, hard refresh) — that's
   // intentional, we don't want to persist a row-level UI toggle.
@@ -229,13 +229,14 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDra
     // because Motion's CSS-variable snapshotting distorts them during
     // the animation (see the research note in the plan).
     <m.article
+      ref={ref}
       layout
       layoutId={card.key}
       initial={{ opacity: 0, scale: 0.96 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.96 }}
       transition={{
-        layout: { duration: 0.28, ease: [0.2, 0, 0, 1] },
+        layout: { duration: 0.28, ease: layoutEase },
         opacity: { duration: 0.18 },
         scale: { duration: 0.18 },
       }}
@@ -747,4 +748,4 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDra
 // for every unchanged card, callback props are useCallback'd, so shallow
 // compare passes for the others. (Doesn't help the poll path — that
 // rebuilds the array from the server response, fresh refs all round.)
-export default memo(KanbanCard);
+export default memo(forwardRef(KanbanCard));
