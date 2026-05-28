@@ -120,12 +120,10 @@ Usually scope-creep or another ticket's territory.
 ## Close out
 
 1. Drop the worktree's bacio environment with `bacio worktree rm <path> --confirm <slug>` (Claude Code removes the git worktree itself). Throw away any code changes.
-2. Tag `<issue_id>` with `planned` (`bacio tag add <issue_id> planned`).
-3. Release the claim and put the issue back into **todo** in one
-   atomic step: `bacio agent release <issue_id> --state todo`
-   (BACI-126c — `--state` is required; this replaces the old
-   two-step "set state, then release" dance). The plan doc is now
-   attached to the ticket — it's ready for an implementation pass to
-   be picked up.
+2. Release the claim with `bacio agent release <issue_id>` — claim-drop
+   only, no `--state`. The pipeline engine owns this card's state and
+   advances the job chain once your dispatch is acked; a worker that
+   set a state would only fight the engine. The plan doc is now
+   attached to the ticket for the next job in the chain.
 
 {{> _postamble}}

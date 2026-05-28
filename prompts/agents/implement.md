@@ -104,7 +104,9 @@ The single carve-out: if a pre-existing failure is genuinely large (a multi-hour
    - **Deviations from the original plan** — where the implementation diverged, and why.
    - **Work not done** — anything scoped out, deferred, or punted to a follow-up, with the reason.
 3. `bacio worktree rm <path> --confirm <slug>` — drops the bacio environment (Claude Code removes the git worktree itself).
-4. `bacio tag add <issue_id> implemented` — idempotent.
-5. `bacio agent release <issue_id> --state in_review` — releases the claim and moves to **in review** in one step (BACI-126c).
+4. `bacio agent release <issue_id>` — claim-drop only, no `--state`. The
+   pipeline engine owns this card's state and advances the chain (e.g.
+   into review, or the Ship hand-off) once your dispatch is acked. Don't
+   set a state or add a done-tag — that's engine bookkeeping now.
 
 {{> _postamble}}

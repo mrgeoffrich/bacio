@@ -48,7 +48,8 @@ Read the brief, walk the diff, run the code yourself, and post findings — do n
 ## Close out
 
 1. Drop the worktree's bacio environment with `bacio worktree rm <path> --confirm <slug>` (Claude Code removes the git worktree itself).
-2. Tag `<issue_id>` with `reviewed` (`bacio tag add <issue_id> reviewed`).
-3. Release the claim and put the issue back into **in review** in one atomic step: `bacio agent release <issue_id> --state in_review`
+2. Release the claim with `bacio agent release <issue_id>` — claim-drop
+   only, no `--state` and no done-tag. The pipeline engine owns this
+   card's state and advances the chain once your dispatch is acked.
 
 {{> _postamble}}

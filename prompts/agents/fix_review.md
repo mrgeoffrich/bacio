@@ -44,10 +44,8 @@ If you have to stop for user input, the issue is automatically moved to **needs 
 
 1. Once smoke tests pass, push the changes to the PR branch and add a comment to the issue describing what was done.
 2. Drop the worktree's bacio environment with `bacio worktree rm <path> --confirm <slug>` (Claude Code removes the git worktree itself).
-3. Tag `<issue_id>` with `fixed` (`bacio tag add <issue_id> fixed`).
-4. Release the claim and put the issue back into **in review** in one
-   atomic step: `bacio agent release <issue_id> --state in_review`
-   (BACI-126c — `--state` is required; replaces the old two-step
-   "set state, then release" dance).
+3. Release the claim with `bacio agent release <issue_id>` — claim-drop
+   only, no `--state` and no done-tag. The pipeline engine owns this
+   card's state and advances the chain once your dispatch is acked.
 
 {{> _postamble}}

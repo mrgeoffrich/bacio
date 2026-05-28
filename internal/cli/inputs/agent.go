@@ -82,7 +82,7 @@ type AgentClaimInput struct {
 type AgentReleaseInput struct {
 	SessionID  string `json:"session_id"`
 	IssueKey   string `json:"issue_key"`
-	FinalState string `json:"final_state"`
+	FinalState string `json:"final_state,omitempty"`
 }
 
 // AgentDispatchInput is the payload for `bacio agent dispatch --json`.

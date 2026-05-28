@@ -417,13 +417,14 @@ bacio comment add <issue_id> --as <your-name> --body-file /tmp/design-comment.md
 ## Close out
 
 1. `bacio worktree rm <path> --confirm <slug>` — drops the bacio environment (Claude Code removes the git worktree itself). Throw away any code changes.
-2. `bacio tag add <issue_id> design` — idempotent.
-3. `bacio agent release <issue_id> --state todo` — releases the claim and moves the issue back to **todo** in one step (BACI-126c). The design doc is now attached to the ticket — ready for an implementation pass to be picked up.
+2. `bacio agent release <issue_id>` — claim-drop only, no `--state` and
+   no done-tag. The pipeline engine owns this card's state and advances
+   the chain once your dispatch is acked. The design doc is now attached
+   to the ticket for the next job in the chain.
 
 ## Hard rules
 
-- **State is owned by the claim/release pair.** The claim auto-moves the issue to **in-progress** (BACI-126a) and the release with `--state todo` moves it back at close-out (BACI-126c). Don't call `bacio issue state` mid-run — never set **done** or **in-review** directly. The only direct state call is the `needs_action → in_progress` hop after a user reply (covered by the shared postamble).
-- **Always add the `design` tag at close-out** (`bacio tag add <issue_id> design`). The tag marks that the ticket has a completed design pass attached, so the kanban surfaces and follow-up dispatches can spot it. Idempotent — safe on re-design re-runs.
+- **The pipeline engine owns issue state — you don't touch it.** Never call `bacio issue state` and never pass `--state` on release. The card stays `in_pipeline` throughout; the engine advances the job chain when your dispatch is acked, and an open question (not a state flip) is the "waiting on the user" signal. Release is claim-drop only.
 - **Never collapse two options into one.** If you genuinely can't think of two distinct approaches, surface that and ask the user whether to write a single recommendation with a "rejected alternatives" appendix instead.
 - **Never collapse a multi-artifact ticket into a single A/B at the ticket level.** If the ticket explicitly names N distinct surfaces (different pages, components, or visually disjoint sections that each carry their own design choices), produce one A/B pair *per artifact* under per-artifact H2 headings — not one "Option A bundle" vs. "Option B bundle". The reader has to be able to pick each surface independently.
 - **Never punt the recommendation back to the user.** The Recommendation section must commit to one option (per artifact, on multi-artifact tickets). "No strong preference" / "either works" / "user picks" are invalid outputs — pick one and name what would flip the call.

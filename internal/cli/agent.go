@@ -364,14 +364,17 @@ func agentReleaseCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "release [issue-key]",
-		Short: "Release this session's claim on an issue (BACI-126c: --state is required)",
-		Long: `Release this session's claim on an issue. The release also moves the
-issue to ` + "`--state`" + ` atomically (BACI-126c).
+		Short: "Release this session's claim on an issue (--state optional)",
+		Long: `Release this session's claim on an issue.
 
-` + "`--state`" + ` is required. Allowed values: todo, in_progress,
-needs_action, in_review, done, cancelled. ` + "`in_progress`" + ` is a
-legal release state — "I am stepping away, work is not finished" — but
-it has to be declared explicitly so the agent commits to intent.`,
+` + "`--state`" + ` is OPTIONAL. Omit it to drop the claim only and leave
+the issue's state untouched — this is the default for pipeline-stage
+workers, whose state is owned by the controller engine (the Pipeline
+cutover removed the worker's state authority). Pass ` + "`--state`" + `
+to also move the issue atomically — used by the pre-pipeline triage
+passes (scope / research) that hand a fresh ` + "`todo`" + ` ticket on.
+Allowed values: todo, in_progress, needs_action, in_review, done,
+cancelled.`,
 		Args: cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			raw, err := parseJSONInput(cmd, args, rawInput, "session", "state")
@@ -388,9 +391,6 @@ it has to be declared explicitly so the agent commits to intent.`,
 			if len(args) != 1 {
 				return fmt.Errorf("requires <issue-key> positional or --json")
 			}
-			if finalState == "" {
-				return fmt.Errorf("--state is required (one of: todo, in_progress, needs_action, in_review, done, cancelled)")
-			}
 			sid, err := resolveSessionID(sessionID)
 			if err != nil {
 				return err
@@ -403,7 +403,7 @@ it has to be declared explicitly so the agent commits to intent.`,
 		},
 	}
 	cmd.Flags().StringVar(&sessionID, "session", "", "session id (default: $CLAUDE_CODE_SESSION_ID)")
-	cmd.Flags().StringVar(&finalState, "state", "", "final issue state — required (todo|in_progress|needs_action|in_review|done|cancelled)")
+	cmd.Flags().StringVar(&finalState, "state", "", "final issue state — optional; omit to drop the claim only (todo|in_progress|needs_action|in_review|done|cancelled)")
 	addInputFlag(cmd, &rawInput)
 	return cmd
 }

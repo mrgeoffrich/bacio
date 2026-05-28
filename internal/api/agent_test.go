@@ -429,10 +429,12 @@ func TestAgentReleaseNoClaim(t *testing.T) {
 	}
 }
 
-// TestAgentReleaseRequiresFinalState locks in BACI-126c: a release
-// without final_state is a hard 400 — the protocol now demands the
-// agent declare what state the work is being left in.
-func TestAgentReleaseRequiresFinalState(t *testing.T) {
+// TestAgentReleaseWithoutFinalState locks in the Pipeline cutover:
+// final_state is now OPTIONAL. A release without it succeeds (claim
+// dropped) and leaves the issue's state untouched — the controller
+// engine owns pipeline-card state, so a pipeline-stage worker releases
+// the claim only. (The pre-pipeline triage passes still pass --state.)
+func TestAgentReleaseWithoutFinalState(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	iss := seedIssue(t, s, repo, "first")
@@ -444,11 +446,8 @@ func TestAgentReleaseRequiresFinalState(t *testing.T) {
 	resp, body := apiReq(t, "DELETE", ts.URL+"/agents/sessions/"+sid+"/claims",
 		map[string]any{"issue_key": iss.Key},
 		map[string]string{"X-Actor": "agent-alice"})
-	if resp.StatusCode != 400 {
-		t.Fatalf("status: %d body: %s", resp.StatusCode, body)
-	}
-	if !strings.Contains(string(body), "final_state") {
-		t.Fatalf("expected error to mention final_state, got: %s", body)
+	if resp.StatusCode != 200 {
+		t.Fatalf("expected 200 releasing without final_state, got %d body: %s", resp.StatusCode, body)
 	}
 }
 
