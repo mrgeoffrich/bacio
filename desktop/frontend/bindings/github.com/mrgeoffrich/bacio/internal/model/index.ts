@@ -3,7 +3,10 @@
 
 export {
     DispatchMode,
+    EngineMode,
     Issue,
+    JobStatus,
+    PipelineJob,
     QuestionItem,
     QuestionOption,
     QuestionPayload,

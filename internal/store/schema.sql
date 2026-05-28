@@ -836,8 +836,13 @@ CREATE INDEX IF NOT EXISTS idx_asq_session_state
     ON agent_session_questions(session_pk, state);
 CREATE INDEX IF NOT EXISTS idx_asq_state
     ON agent_session_questions(state);
-CREATE INDEX IF NOT EXISTS idx_asq_pipeline_job
-    ON agent_session_questions(pipeline_job_id);
+-- NB: idx_asq_pipeline_job is created in store.go::migrate, NOT here.
+-- schema.sql runs before migrate(), so on a DB that predates the
+-- pipeline_job_id column the CREATE TABLE above is a no-op (IF NOT
+-- EXISTS) and this index would reference a column that migrate() only
+-- adds afterwards — failing the whole schema apply. migrate() adds the
+-- column then the index (idempotent IF NOT EXISTS), covering fresh and
+-- upgrading DBs alike.
 -- The (session_pk, task_id) partial unique index lives in
 -- internal/store/store.go::migrate, not here. schema.sql runs before
 -- migrate(), so a DB upgrading from the pre-BACI-60 table doesn't have

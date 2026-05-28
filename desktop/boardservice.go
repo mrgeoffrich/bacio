@@ -1028,7 +1028,11 @@ func (b *BoardService) ListAgents(repoPrefix string) ([]AgentCard, error) {
 // the same feature-emoji / waiting / blocker shape as the rest of the
 // kanban. Validation (empty title, control chars, etc.) lives at the
 // store boundary inside client.CreateIssue.
-func (b *BoardService) AddIssue(repoPrefix, title, description string) (BoardCard, error) {
+// featureSlug (Phase 4) optionally associates the new issue with a
+// feature at creation time. Empty defers to the repo default feature
+// (store.ResolveCreateIssueFeatureID) — features are mandatory, so the
+// composer always supplies one, but an empty string stays valid.
+func (b *BoardService) AddIssue(repoPrefix, title, description, featureSlug string) (BoardCard, error) {
 	ctx := context.Background()
 	if repoPrefix == "" || repoPrefix == "all" {
 		return BoardCard{}, fmt.Errorf("AddIssue: a repo prefix is required (cross-repo pseudo-board has no target)")
@@ -1037,7 +1041,7 @@ func (b *BoardService) AddIssue(repoPrefix, title, description string) (BoardCar
 	if err != nil {
 		return BoardCard{}, err
 	}
-	iss, err := b.client.CreateIssue(ctx, repo, inputs.IssueAddInput{Title: title, Description: description}, false)
+	iss, err := b.client.CreateIssue(ctx, repo, inputs.IssueAddInput{Title: title, Description: description, FeatureSlug: featureSlug}, false)
 	if err != nil {
 		return BoardCard{}, err
 	}

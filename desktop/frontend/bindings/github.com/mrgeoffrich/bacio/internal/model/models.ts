@@ -41,6 +41,22 @@ export enum DispatchMode {
     DispatchModeFixReview = "fix_review",
 };
 
+/**
+ * EngineMode is the per-issue controller-engine drive mode while the
+ * card is in_pipeline. "off" = the user advances one job at a time via
+ * Start; "auto" = the engine runs the chain consecutively, halting on an
+ * open question and resuming when it is answered.
+ */
+export enum EngineMode {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    EngineOff = "off",
+    EngineAuto = "auto",
+};
+
 export class Issue {
     "id": number;
     "uuid": string;
@@ -144,8 +160,33 @@ export class Issue {
      * override.
      */
     "base_branch"?: string | null;
+
+    /**
+     * Priority is the manual ordering key within a (repo, state) band,
+     * used by the Pipeline page's Backlog (todo) and Shipping
+     * (to_be_shipped) columns. Lower sorts first — position 1 (next to
+     * go) carries the smallest value. 0 is the unordered default; the
+     * other columns ignore it. Reordering writes this via
+     * Store.ReorderIssue, so the queue order survives reloads rather
+     * than living in board-local display state. No omitempty: the field
+     * is always visible so the Pipeline reads it without a fallback.
+     */
+    "priority": number;
     "created_at": time$0.Time;
     "updated_at": time$0.Time;
+
+    /**
+     * EngineMode / EnginePauseReason are the per-issue controller-engine
+     * fields, meaningful only while the issue is in_pipeline. EngineMode
+     * is "off" (manual Start advances one job) or "auto" (the engine
+     * runs the chain consecutively, halting on an open question).
+     * EnginePauseReason is "" or "open_question". Both default to their
+     * zero value for non-pipeline issues. Populated by the boardcards
+     * denorm in a later phase; carried here so the engine and the read
+     * surfaces share one shape.
+     */
+    "engine_mode"?: EngineMode;
+    "engine_pause_reason"?: string;
 
     /** Creates a new Issue instance. */
     constructor($$source: Partial<Issue> = {}) {
@@ -176,6 +217,9 @@ export class Issue {
         if (!("tags" in $$source)) {
             this["tags"] = [];
         }
+        if (!("priority" in $$source)) {
+            this["priority"] = 0;
+        }
         if (!("created_at" in $$source)) {
             this["created_at"] = null;
         }
@@ -196,6 +240,78 @@ export class Issue {
             $$parsedSource["tags"] = $$createField14_0($$parsedSource["tags"]);
         }
         return new Issue($$parsedSource as Partial<Issue>);
+    }
+}
+
+/**
+ * JobStatus is the lifecycle of a single pipeline job — one stage in a
+ * card's process chain. The controller engine owns every transition:
+ * pending → running (the engine queued a dispatch for the stage) →
+ * complete (that dispatch acked) | cancelled (Stop/Cancel). Agents do
+ * not write this; it is the engine's source of truth for "where in the
+ * chain is this card".
+ */
+export enum JobStatus {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    JobPending = "pending",
+    JobRunning = "running",
+    JobComplete = "complete",
+    JobCancelled = "cancelled",
+};
+
+/**
+ * PipelineJob is one persisted stage of a card's process chain
+ * (pipeline_jobs row). Mode is a dispatch-template slug (plan,
+ * implement, …) or ShipJobMode for the hand-off. DispatchID points at
+ * the agent_dispatches row once the engine queues the stage (nil while
+ * pending; ON DELETE SET NULL so a retention prune of the dispatch
+ * leaves the job's history intact).
+ */
+export class PipelineJob {
+    "id": number;
+    "issue_id": number;
+    "sequence": number;
+    "mode": string;
+    "status": JobStatus;
+    "dispatch_id"?: number | null;
+    "created_at": time$0.Time;
+    "started_at"?: time$0.Time | null;
+    "completed_at"?: time$0.Time | null;
+
+    /** Creates a new PipelineJob instance. */
+    constructor($$source: Partial<PipelineJob> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = 0;
+        }
+        if (!("issue_id" in $$source)) {
+            this["issue_id"] = 0;
+        }
+        if (!("sequence" in $$source)) {
+            this["sequence"] = 0;
+        }
+        if (!("mode" in $$source)) {
+            this["mode"] = "";
+        }
+        if (!("status" in $$source)) {
+            this["status"] = JobStatus.$zero;
+        }
+        if (!("created_at" in $$source)) {
+            this["created_at"] = null;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new PipelineJob instance from a string or object.
+     */
+    static createFrom($$source: any = {}): PipelineJob {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new PipelineJob($$parsedSource as Partial<PipelineJob>);
     }
 }
 
@@ -366,6 +482,15 @@ export class SessionQuestion {
     "session_id"?: string;
     "request_uuid": string;
     "issue_key"?: string;
+
+    /**
+     * PipelineJobID (Pipeline) is the pipeline_jobs row this question is
+     * parented to — the running job of the asking session's in_pipeline
+     * card. An open question on the current job is the controller
+     * engine's "halt Auto, waiting on the user" signal (§6.1). Nil (and
+     * omitted) for legacy / non-pipeline questions.
+     */
+    "pipeline_job_id"?: number | null;
     "payload": QuestionPayload;
     "answers"?: QuestionAnswers;
     "state": QuestionState;
@@ -399,14 +524,14 @@ export class SessionQuestion {
      * Creates a new SessionQuestion instance from a string or object.
      */
     static createFrom($$source: any = {}): SessionQuestion {
-        const $$createField5_0 = $$createType5;
-        const $$createField6_0 = $$createType6;
+        const $$createField6_0 = $$createType5;
+        const $$createField7_0 = $$createType6;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("payload" in $$parsedSource) {
-            $$parsedSource["payload"] = $$createField5_0($$parsedSource["payload"]);
+            $$parsedSource["payload"] = $$createField6_0($$parsedSource["payload"]);
         }
         if ("answers" in $$parsedSource) {
-            $$parsedSource["answers"] = $$createField6_0($$parsedSource["answers"]);
+            $$parsedSource["answers"] = $$createField7_0($$parsedSource["answers"]);
         }
         return new SessionQuestion($$parsedSource as Partial<SessionQuestion>);
     }
@@ -430,6 +555,18 @@ export enum State {
     StateInReview = "in_review",
     StateDone = "done",
     StateCancelled = "cancelled",
+
+    /**
+     * StateInPipeline / StateToBeShipped are the Pipeline-page columns.
+     * A card's column is its issue state: In Pipeline = a chain of
+     * dispatch jobs is being run against it by the controller engine;
+     * To Be Shipped = the FIFO queue of finished cards waiting to ship.
+     * Both are non-terminal. They are appended after the legacy set so
+     * every surface that builds columns from AllStates() keeps its
+     * existing ordering; the Pipeline UI keys on these states directly.
+     */
+    StateInPipeline = "in_pipeline",
+    StateToBeShipped = "to_be_shipped",
 };
 
 /**

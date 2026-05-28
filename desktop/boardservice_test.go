@@ -481,7 +481,7 @@ func TestBoardService_AddIssue(t *testing.T) {
 		issues: nil,
 	})
 
-	card, err := svc.AddIssue("TEST", "Login broken on Safari", "500 on submit")
+	card, err := svc.AddIssue("TEST", "Login broken on Safari", "500 on submit", "")
 	if err != nil {
 		t.Fatalf("AddIssue: %v", err)
 	}
@@ -508,10 +508,10 @@ func TestBoardService_AddIssue(t *testing.T) {
 // and "all" prefixes with a clear error.
 func TestBoardService_AddIssueRejectsAllRepos(t *testing.T) {
 	svc := NewBoardService(&fakeBoardClient{repo: &model.Repo{Prefix: "TEST"}})
-	if _, err := svc.AddIssue("", "t", ""); err == nil {
+	if _, err := svc.AddIssue("", "t", "", ""); err == nil {
 		t.Error("AddIssue(\"\") = nil, want error (cross-repo not supported)")
 	}
-	if _, err := svc.AddIssue("all", "t", ""); err == nil {
+	if _, err := svc.AddIssue("all", "t", "", ""); err == nil {
 		t.Error("AddIssue(\"all\") = nil, want error (cross-repo not supported)")
 	}
 }

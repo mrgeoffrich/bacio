@@ -410,7 +410,7 @@ export default function App() {
   // self-owning components that re-fetch on their own remount.
   useEffect(() => {
     if (!activeBoard) return;
-    if (activeView === 'board') refreshCards();
+    if (activeView === 'board' || activeView === 'pipeline') refreshCards();
     else if (activeView === 'agents') refreshAgents();
   }, [activeView, refreshCards, refreshAgents]);
 
@@ -419,9 +419,9 @@ export default function App() {
   // or unmount — no leaks, no redundant fetches off-screen.
   useEffect(() => {
     if (!activeBoard) return;
-    if (activeView !== 'board' && activeView !== 'agents') return;
+    if (activeView !== 'board' && activeView !== 'agents' && activeView !== 'pipeline') return;
     const id = setInterval(() => {
-      if (activeView === 'board') refreshCards({ silent: true });
+      if (activeView === 'board' || activeView === 'pipeline') refreshCards({ silent: true });
       else refreshAgents({ silent: true });
     }, POLL_INTERVAL_MS);
     return () => clearInterval(id);
@@ -799,6 +799,88 @@ export default function App() {
       });
   }, [activeBoard]);
 
+  // ─── Pipeline (Phase 4) handlers ───────────────────────────────────
+  // Each wraps the api.* pipeline call and refreshes the cards array so
+  // the board re-renders with the server's authoritative shape (job
+  // chain, engine mode, column). Optimistic flips mirror the
+  // moveCard / dispatchFromCard patterns where the change is cheap to
+  // predict; everything else relies on the refresh. The engine owns job
+  // progression — these are the user-driven controls that nudge it.
+
+  // Assign a preset process to a card — the in-pipeline "pick a process"
+  // menu. Refreshes so the new pending job chain renders on the card.
+  const setCardProcess = useCallback((key, processSlug) => {
+    api.setCardProcess(activeBoard, key, processSlug)
+      .then(() => refreshCards({ silent: true }))
+      .catch(err => reportError(err, { headline: "Couldn't set the process" }));
+  }, [activeBoard, refreshCards]);
+
+  // Manual Start — advance one step (start the next pending job, or run
+  // the Ship hand-off when the chain ends in one).
+  const startCardJob = useCallback((key) => {
+    api.startCardJob(activeBoard, key)
+      .then(() => refreshCards({ silent: true }))
+      .catch(err => reportError(err, { headline: "Couldn't start the job" }));
+  }, [activeBoard, refreshCards]);
+
+  // Manual Stop — cancel the running job and halt Auto.
+  const stopCardJob = useCallback((key) => {
+    api.stopCardJob(activeBoard, key)
+      .then(() => refreshCards({ silent: true }))
+      .catch(err => reportError(err, { headline: "Couldn't stop the job" }));
+  }, [activeBoard, refreshCards]);
+
+  // Engine drive-mode toggle ("off" | "auto"). Optimistic flip on the
+  // card so the switch reacts on click; the refresh re-asserts.
+  const setCardEngineMode = useCallback((key, mode) => {
+    setCards(cs => cs.map(c => c.key === key ? { ...c, engineMode: mode } : c));
+    api.setEngineMode(activeBoard, key, mode)
+      .then(() => refreshCards({ silent: true }))
+      .catch(err => {
+        reportError(err, { headline: "Couldn't change the drive mode" });
+        refreshCards({ silent: true });
+      });
+  }, [activeBoard, refreshCards]);
+
+  // Ship hand-off — move an in_pipeline card to to_be_shipped (no agent
+  // dispatched here; the ship agent fires from the Shipping column).
+  // Optimistic column move mirrors moveCard.
+  const shipCardFromPipeline = useCallback((key) => {
+    let prevCol = null;
+    setCards(cs => cs.map(c => {
+      if (c.key !== key) return c;
+      prevCol = c.column;
+      return { ...c, column: 'to_be_shipped' };
+    }));
+    api.shipCard(activeBoard, key)
+      .then(() => refreshCards({ silent: true }))
+      .catch(err => {
+        reportError(err, { headline: "Couldn't ship the card" });
+        if (prevCol) setCards(cs => cs.map(c => c.key === key ? { ...c, column: prevCol } : c));
+      });
+  }, [activeBoard, refreshCards]);
+
+  // Backlog / Shipping drag-to-reorder. position is 1-based within the
+  // card's (repo, state) band. PipelineView handles the optimistic
+  // in-list move during the drag; this persists + reconciles.
+  const reorderPipelineCard = useCallback((key, position) => {
+    api.reorderCard(activeBoard, key, position)
+      .then(() => refreshCards({ silent: true }))
+      .catch(err => {
+        reportError(err, { headline: "Couldn't reorder" });
+        refreshCards({ silent: true });
+      });
+  }, [activeBoard, refreshCards]);
+
+  // Per-repo Shipping auto-ship toggle. PipelineView owns the display
+  // state (seeded from localStorage — the backend exposes no GET); this
+  // persists the change. Returns the promise so the view can revert its
+  // optimistic flip on failure.
+  const setRepoAutoShip = useCallback((enabled) => {
+    return api.setAutoShip(activeBoard, enabled)
+      .catch(err => { reportError(err, { headline: "Couldn't toggle auto-ship" }); throw err; });
+  }, [activeBoard]);
+
   // Workspace write callbacks — each wraps the existing api.* call and
   // refreshes the brief so the inline view re-renders with the
   // persisted state. Failures surface through reportError; the
@@ -1030,12 +1112,16 @@ export default function App() {
                   promptConfig={promptConfig}
                   onOpenCard={openCard}
                   onOpenIssue={navigateToIssue}
-                  onDispatch={dispatchFromCard}
-                  onDispatchChain={dispatchChainFromCard}
+                  onMoveCard={moveCard}
+                  onReorder={reorderPipelineCard}
+                  onSetProcess={setCardProcess}
+                  onStartJob={startCardJob}
+                  onStopJob={stopCardJob}
+                  onSetEngineMode={setCardEngineMode}
+                  onShip={shipCardFromPipeline}
+                  onSetAutoShip={setRepoAutoShip}
+                  onShipDispatch={dispatchFromCard}
                   onCancelWaiting={cancelWaitingFromCard}
-                  onQuickEval={quickEvalComment}
-                  onSetFollowOn={setFollowOnFromCard}
-                  onCancelFollowOn={cancelFollowOnFromCard}
                   shippedCount={shippedCount}
                   shippedScope={shippedScope}
                   onShippedScopeChange={changeShippedScope}

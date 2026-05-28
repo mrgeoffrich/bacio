@@ -31,6 +31,13 @@ export default function IssueComposer({ open, onClose, repoPrefix, onCreated }) 
   const [inFlight, setInFlight] = useState(false);
   const [error, setError] = useState('');
   const descriptionRef = useRef(null);
+  // Phase 4: features are mandatory, so the composer offers a feature
+  // picker. `features` is the repo's feature list; `featureSlug` is the
+  // current selection, pre-seeded to the repo default. An empty slug
+  // still defers to the store's default-feature resolution, so a repo
+  // with no features / no default stays creatable.
+  const [features, setFeatures] = useState([]);
+  const [featureSlug, setFeatureSlug] = useState('');
 
   // Autofocus the description on open — title is optional per the
   // design (the worker derives one from the description when empty),
@@ -48,6 +55,26 @@ export default function IssueComposer({ open, onClose, repoPrefix, onCreated }) 
       });
     }
   }, [open]);
+
+  // Phase 4: load the repo's features + default when the composer opens
+  // so the picker is populated and pre-selected. Both calls are
+  // best-effort — a failure leaves the picker on "Default feature" and
+  // the create still works (empty slug → store default).
+  useEffect(() => {
+    if (!open || !repoPrefix || repoPrefix === 'all') {
+      setFeatures([]);
+      setFeatureSlug('');
+      return;
+    }
+    let cancelled = false;
+    api.listFeatures(repoPrefix)
+      .then((fs) => { if (!cancelled) setFeatures(fs.filter(f => (f.state || 'active') === 'active')); })
+      .catch(() => { if (!cancelled) setFeatures([]); });
+    api.getDefaultFeature(repoPrefix)
+      .then((d) => { if (!cancelled && d?.slug) setFeatureSlug(d.slug); })
+      .catch(() => { /* no default — leave on "Default feature" */ });
+    return () => { cancelled = true; };
+  }, [open, repoPrefix]);
 
   const close = useCallback(() => {
     if (inFlight) return;
@@ -67,7 +94,7 @@ export default function IssueComposer({ open, onClose, repoPrefix, onCreated }) 
     setInFlight(true);
     let newCard;
     try {
-      newCard = await api.addIssue(repoPrefix, effectiveTitle, trimmedDesc);
+      newCard = await api.addIssue(repoPrefix, effectiveTitle, trimmedDesc, featureSlug);
     } catch (err) {
       // Leave the modal open with an inline error so the user can
       // retry without losing their content. addIssue throws an Error
@@ -88,7 +115,7 @@ export default function IssueComposer({ open, onClose, repoPrefix, onCreated }) 
         headline: "Scope dispatch couldn't be queued — issue was created and is in todo",
       });
     }
-  }, [description, title, repoPrefix, onCreated, onClose]);
+  }, [description, title, repoPrefix, featureSlug, onCreated, onClose]);
 
   const disabled = !description.trim() || inFlight;
 
@@ -118,6 +145,26 @@ export default function IssueComposer({ open, onClose, repoPrefix, onCreated }) 
             disabled={inFlight}
             rows={6}
           />
+        </label>
+        {/* Phase 4: feature picker. Features are mandatory; the select is
+            pre-seeded to the repo default. "Default feature" maps to an
+            empty slug, which the store resolves to the repo default at
+            the boundary — so a repo with no features still creates. */}
+        <label className="mk-settings-row">
+          <span className="mk-settings-label">Feature</span>
+          <select
+            className="mk-tmpl-input"
+            value={featureSlug}
+            onChange={(e) => setFeatureSlug(e.target.value)}
+            disabled={inFlight}
+          >
+            <option value="">Default feature</option>
+            {features.map((f) => (
+              <option key={f.slug} value={f.slug}>
+                {f.emoji ? `${f.emoji} ` : ''}{f.title}
+              </option>
+            ))}
+          </select>
         </label>
         {error && (
           <p className="mk-settings-hint mk-issue-composer-error" role="alert">
