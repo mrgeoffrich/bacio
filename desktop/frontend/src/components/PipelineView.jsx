@@ -8,6 +8,7 @@ import ShippedPopover from './ShippedPopover.jsx';
 import { documentPath } from '../lib/routes';
 import prLabel from '../lib/prLabel';
 import { PIPELINE_PROCESSES, stageLabel, isShipStage } from '../lib/pipelineProcesses';
+import * as api from '../api';
 
 // PipelineView (Phase 4) — the real three-column pipeline board, keyed on
 // the server-side issue states: Backlog (todo) → In Pipeline
@@ -27,34 +28,6 @@ import { PIPELINE_PROCESSES, stageLabel, isShipStage } from '../lib/pipelineProc
 // onto a card inside the same Backlog / Shipping column reorders it
 // (onReorder, 1-based position). The engine owns job progression — the
 // Start / Stop / Auto controls only nudge it.
-
-// AUTOSHIP_KEY: per-repo localStorage map for the Shipping auto-ship
-// toggle display state. The backend exposes only a PUT (no GET), so the
-// switch is seeded from here and the PUT keeps the DB — the real source
-// the controller's auto-ship ticker reads — in sync. Same localStorage
-// pattern as the board-scroll / pinned-keys / shipped-scope prefs.
-const AUTOSHIP_KEY = 'bacio-autoship';
-function readAutoShip(repo) {
-  if (!repo) return false;
-  try {
-    const raw = localStorage.getItem(AUTOSHIP_KEY);
-    const map = raw ? JSON.parse(raw) : {};
-    return !!(map && map[repo]);
-  } catch {
-    return false;
-  }
-}
-function persistAutoShip(repo, enabled) {
-  if (!repo) return;
-  try {
-    const raw = localStorage.getItem(AUTOSHIP_KEY);
-    const map = raw ? JSON.parse(raw) : {};
-    map[repo] = !!enabled;
-    localStorage.setItem(AUTOSHIP_KEY, JSON.stringify(map));
-  } catch {
-    /* non-fatal — toggle just won't survive a relaunch */
-  }
-}
 
 export default function PipelineView({
   cards,
@@ -79,10 +52,18 @@ export default function PipelineView({
   const [expanded, setExpanded] = useState(false);
   const [dragKey, setDragKey] = useState(null);
   const [dragOverCol, setDragOverCol] = useState(null);
-  const [autoShip, setAutoShip] = useState(() => readAutoShip(activeBoard));
+  // autoShip seeds from the backend (GET /auto-ship) — the DB value the
+  // controller's auto-ship ticker actually acts on — so the toggle
+  // reflects the source of truth across machines, not a local cache.
+  const [autoShip, setAutoShip] = useState(false);
 
   useEffect(() => {
-    setAutoShip(readAutoShip(activeBoard));
+    if (!activeBoard) { setAutoShip(false); return; }
+    let cancelled = false;
+    api.getAutoShip(activeBoard)
+      .then((v) => { if (!cancelled) setAutoShip(!!v); })
+      .catch(() => { if (!cancelled) setAutoShip(false); });
+    return () => { cancelled = true; };
   }, [activeBoard]);
 
   const list = cards || [];
@@ -93,14 +74,12 @@ export default function PipelineView({
 
   const toggleAutoShip = useCallback(() => {
     const next = !autoShip;
-    setAutoShip(next);
-    persistAutoShip(activeBoard, next);
+    setAutoShip(next); // optimistic
     Promise.resolve(onSetAutoShip?.(next)).catch(() => {
-      // Revert the optimistic flip if the persist failed.
+      // Revert the optimistic flip if the PUT failed.
       setAutoShip(!next);
-      persistAutoShip(activeBoard, !next);
     });
-  }, [autoShip, activeBoard, onSetAutoShip]);
+  }, [autoShip, onSetAutoShip]);
 
   // Cross-column drop: change the dragged card's column (= its state).
   // in_pipeline → Shipping goes through the Ship hand-off; everything

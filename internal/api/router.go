@@ -84,6 +84,7 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("POST /repos/{prefix}/issues/{key}/jobs/stop", d.handleIssueJobStop)
 	mux.HandleFunc("PUT /repos/{prefix}/issues/{key}/engine-mode", d.handleIssueEngineMode)
 	mux.HandleFunc("POST /repos/{prefix}/issues/{key}/ship", d.handleIssueShip)
+	mux.HandleFunc("GET /repos/{prefix}/auto-ship", d.handleRepoAutoShipGet)
 	mux.HandleFunc("PUT /repos/{prefix}/auto-ship", d.handleRepoAutoShip)
 
 	mux.HandleFunc("GET /repos/{prefix}/issues/{key}/comments", d.handleCommentsList)

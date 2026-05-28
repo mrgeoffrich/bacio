@@ -491,6 +491,17 @@ export async function setAutoShip(
   }
 }
 
+// getAutoShip reads the per-repo Shipping-column auto-ship setting — the
+// DB value the controller's auto-ship ticker acts on, so the Pipeline's
+// Shipping switch seeds from the source of truth.
+export async function getAutoShip(repoPrefix: string): Promise<boolean> {
+  try {
+    return await BoardService.GetAutoShip(repoPrefix);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
 // updateIssueDescription replaces an issue's description and returns the
 // refreshed issue-drawer payload.
 export async function updateIssueDescription(

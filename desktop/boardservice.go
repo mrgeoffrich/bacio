@@ -927,6 +927,18 @@ func (b *BoardService) SetAutoShip(repoPrefix string, enabled bool) (bool, error
 	return b.client.SetRepoAutoShip(ctx, repo, enabled, false)
 }
 
+// GetAutoShip reads the per-repo Shipping-column auto-ship toggle so the
+// Pipeline's Shipping switch seeds from the DB (the value the
+// controller's auto-ship ticker acts on), not a local cache.
+func (b *BoardService) GetAutoShip(repoPrefix string) (bool, error) {
+	ctx := context.Background()
+	repo, err := b.client.GetRepoByPrefix(ctx, repoPrefix)
+	if err != nil {
+		return false, err
+	}
+	return b.client.GetRepoAutoShip(ctx, repo)
+}
+
 // AddComment appends a comment to an issue and returns the refreshed
 // issue-drawer payload. An empty author falls back to the OS username,
 // the same default the CLI uses for human actors. repoPrefix may be empty

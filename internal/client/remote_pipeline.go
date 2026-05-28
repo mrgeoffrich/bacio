@@ -124,3 +124,13 @@ func (c *remoteClient) SetRepoAutoShip(ctx context.Context, repo *model.Repo, en
 	}
 	return out.AutoShip, nil
 }
+
+func (c *remoteClient) GetRepoAutoShip(ctx context.Context, repo *model.Repo) (bool, error) {
+	var out struct {
+		AutoShip bool `json:"auto_ship"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/repos/"+repo.Prefix+"/auto-ship", nil, nil, &out); err != nil {
+		return false, err
+	}
+	return out.AutoShip, nil
+}

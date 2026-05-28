@@ -272,6 +272,11 @@ type Client interface {
 	SetIssueProcess(ctx context.Context, repo *model.Repo, key, process string, dryRun bool) ([]*model.PipelineJob, error)
 	ShipIssue(ctx context.Context, repo *model.Repo, key string, dryRun bool) (*model.Issue, error)
 	SetRepoAutoShip(ctx context.Context, repo *model.Repo, enabled, dryRun bool) (bool, error)
+	// GetRepoAutoShip reads the per-repo Shipping auto-ship toggle — the
+	// DB value the controller's auto-ship ticker acts on, so the UI can
+	// seed the Shipping switch from the source of truth rather than a
+	// local cache.
+	GetRepoAutoShip(ctx context.Context, repo *model.Repo) (bool, error)
 	// StartPipelineJob / StopPipelineJob / SetEngineMode are the engine
 	// controls behind the in-process card's Start / Stop / Auto buttons.
 	// They have no CLI verb (engine/UI only) but ARE on the client so the

@@ -228,6 +228,15 @@ export function DispatchIssueChain(repoPrefix: string, issueKey: string, mode: s
 }
 
 /**
+ * GetAutoShip reads the per-repo Shipping-column auto-ship toggle so the
+ * Pipeline's Shipping switch seeds from the DB (the value the
+ * controller's auto-ship ticker acts on), not a local cache.
+ */
+export function GetAutoShip(repoPrefix: string): $CancellablePromise<boolean> {
+    return $Call.ByID(2288322126, repoPrefix);
+}
+
+/**
  * GetBoardHiddenStates (BACI-248) returns the per-repo set of
  * kanban-column states hidden on this machine. Threaded through the
  * client so the Wails binding and the HTTP API stay in lockstep on

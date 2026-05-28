@@ -170,3 +170,13 @@ func (c *localClient) SetRepoAutoShip(ctx context.Context, repo *model.Repo, ena
 	})
 	return enabled, nil
 }
+
+// GetRepoAutoShip reads the per-repo Shipping-column auto-ship toggle
+// straight off RepoSettings — a read-only path, no audit row.
+func (c *localClient) GetRepoAutoShip(ctx context.Context, repo *model.Repo) (bool, error) {
+	settings, err := c.store.GetRepoSettings(repo.ID)
+	if err != nil {
+		return false, err
+	}
+	return settings.AutoShip, nil
+}

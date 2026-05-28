@@ -2838,3 +2838,8 @@ export async function setAutoShip(
   });
   return !!out.auto_ship;
 }
+
+export async function getAutoShip(repoPrefix: string): Promise<boolean> {
+  const out = await call<{ auto_ship: boolean }>(`/repos/${repoPrefix}/auto-ship`);
+  return !!out.auto_ship;
+}

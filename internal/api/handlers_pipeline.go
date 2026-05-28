@@ -299,3 +299,21 @@ func (d deps) handleRepoAutoShip(w http.ResponseWriter, r *http.Request) {
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"auto_ship": in.Enabled})
 }
+
+// handleRepoAutoShipGet — GET /repos/{prefix}/auto-ship. Reads the
+// per-repo Shipping-column auto-ship setting (the DB value the
+// controller's auto-ship ticker acts on) so the UI can seed its toggle
+// from the source of truth.
+func (d deps) handleRepoAutoShipGet(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	settings, err := d.store.GetRepoSettings(repo.ID)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"auto_ship": settings.AutoShip})
+}
