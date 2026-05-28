@@ -217,3 +217,41 @@ func (s *Store) SetIssueEnginePauseReason(issueID int64, reason string) error {
 	_, err := s.DB.Exec(`UPDATE issues SET engine_pause_reason = ? WHERE id = ?`, reason, issueID)
 	return err
 }
+
+// cancelRunningPipelineJob abandons an issue's in-flight pipeline run:
+// it cancels the currently-running job and the dispatch it's running
+// against, turns engine Auto off, and clears the pause reason. A no-op on
+// the job/dispatch when nothing is running, but it always disarms Auto so
+// a card pulled out of the pipeline doesn't silently resume on re-entry.
+// Mirrors pipeline.Engine.StopRunning, but lives in the store so
+// SetIssueState can tear a card down as it leaves in_pipeline without an
+// import cycle (the pipeline package imports the store, not the reverse).
+//
+// A dispatch already delivered to a worker can't be cancelled (BACI-130);
+// that's tolerated — the job is still marked cancelled, so the worker's
+// eventual ack is ignored because the job is terminal. Write failures on
+// the job-status / engine-field updates are returned.
+func (s *Store) cancelRunningPipelineJob(issueID int64) error {
+	jobs, err := s.ListPipelineJobs(issueID)
+	if err != nil {
+		return err
+	}
+	for _, j := range jobs {
+		if j.Status != model.JobRunning {
+			continue
+		}
+		if j.DispatchID != nil {
+			// Best-effort: a delivered dispatch can't be cancelled, but the
+			// job is settled below regardless.
+			_, _ = s.CancelDispatch(*j.DispatchID)
+		}
+		if err := s.SetPipelineJobStatus(j.ID, model.JobCancelled); err != nil {
+			return err
+		}
+		break // at most one job is ever running
+	}
+	if err := s.SetIssueEngineMode(issueID, model.EngineOff); err != nil {
+		return err
+	}
+	return s.SetIssueEnginePauseReason(issueID, "")
+}

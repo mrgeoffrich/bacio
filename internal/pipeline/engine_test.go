@@ -208,6 +208,63 @@ func TestEngineAutoShip(t *testing.T) {
 	}
 }
 
+// TestEngineManualShip: with auto-ship OFF the tick never queues a ship
+// dispatch on its own, but once the user manually ships (a ship dispatch
+// exists) the tick still advances the card to done on ack. Guards the
+// "manual SHIP strands the card in to_be_shipped" regression — the
+// advance-on-ack arm must not be gated on the auto-ship toggle.
+func TestEngineManualShip(t *testing.T) {
+	s := newEngineStore(t)
+	repo, err := s.CreateRepo("MSHIP", "mship", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("repo: %v", err)
+	}
+	iss, err := s.CreateIssue(repo.ID, nil, "card", "", model.StateToBeShipped, nil, "")
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	eng := New(s)
+
+	// Auto-ship off → the tick does not dispatch a ship by itself.
+	if _, err := eng.AutoShipTick(); err != nil {
+		t.Fatalf("tick off: %v", err)
+	}
+	if d, _ := s.LatestDispatchForIssueMode(iss.ID, model.DispatchModeShip); d != nil {
+		t.Fatalf("auto-ship off dispatched a ship: %+v", d)
+	}
+
+	// User clicks SHIP → a ship dispatch is queued (the API path:
+	// dispatchIssue with mode=ship), auto-ship still off.
+	d, err := s.AddDispatch(store.AddDispatchIn{
+		RepoID:        repo.ID,
+		IssueID:       &iss.ID,
+		Mode:          model.DispatchModeShip,
+		CreatedBy:     model.ControllerActor,
+		InitialStatus: model.DispatchQueued,
+	})
+	if err != nil {
+		t.Fatalf("manual ship dispatch: %v", err)
+	}
+
+	// In flight → the tick neither dispatches again nor advances.
+	if _, err := eng.AutoShipTick(); err != nil {
+		t.Fatalf("tick in-flight: %v", err)
+	}
+	if got, _ := s.GetIssueByID(iss.ID); got.State != model.StateToBeShipped {
+		t.Fatalf("state = %s, want to_be_shipped while in flight", got.State)
+	}
+
+	// Ack → next tick advances to done even though auto-ship is off.
+	simulateWorkerAck(t, s, d.ID)
+	if _, err := eng.AutoShipTick(); err != nil {
+		t.Fatalf("tick done: %v", err)
+	}
+	got, _ := s.GetIssueByID(iss.ID)
+	if got.State != model.StateDone {
+		t.Fatalf("state = %s, want done after manual ship ack", got.State)
+	}
+}
+
 // TestEngineHaltsOnOpenQuestion: while the running job has an open
 // question the engine stamps engine_pause_reason; clearing the question
 // clears the pause on the next tick.

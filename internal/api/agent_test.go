@@ -431,9 +431,12 @@ func TestAgentReleaseNoClaim(t *testing.T) {
 
 // TestAgentReleaseWithoutFinalState locks in the Pipeline cutover:
 // final_state is now OPTIONAL. A release without it succeeds (claim
-// dropped) and leaves the issue's state untouched — the controller
-// engine owns pipeline-card state, so a pipeline-stage worker releases
-// the claim only. (The pre-pipeline triage passes still pass --state.)
+// dropped). For an OFF-pipeline issue the claim auto-moved it to
+// in_progress on claim, and the claim-only release lands it in in_review
+// (model.ReleaseFallbackState) rather than stranding it in in_progress —
+// nothing but the engine advances a released claim, and the engine
+// governs only pipeline cards. (The pre-pipeline triage passes still pass
+// --state; pipeline cards stay put via the engine-governed-state guard.)
 func TestAgentReleaseWithoutFinalState(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
@@ -448,6 +451,13 @@ func TestAgentReleaseWithoutFinalState(t *testing.T) {
 		map[string]string{"X-Actor": "agent-alice"})
 	if resp.StatusCode != 200 {
 		t.Fatalf("expected 200 releasing without final_state, got %d body: %s", resp.StatusCode, body)
+	}
+	got, err := s.GetIssueByID(iss.ID)
+	if err != nil {
+		t.Fatalf("reload issue: %v", err)
+	}
+	if got.State != model.StateInReview {
+		t.Fatalf("off-pipeline release without final_state: state = %s, want in_review", got.State)
 	}
 }
 

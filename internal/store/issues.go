@@ -387,6 +387,23 @@ func (s *Store) SetIssueState(id int64, state model.State) error {
 	if isEngineGovernedState(model.State(current)) && isProcessingState(state) {
 		return nil
 	}
+	// Pipeline teardown: a card actually leaving in_pipeline for a
+	// non-pipeline column (a user drag back to Backlog, or a move to
+	// done/cancelled) abandons its process run. The engine governs only
+	// in_pipeline cards, so once this card leaves it can never reconcile a
+	// still-running job — cancel the in-flight job + its dispatch here so a
+	// worker isn't orphaned and a stale `running` row can't confuse a later
+	// re-entry. Reaching this point means the move is real: a processing-
+	// state target on an in_pipeline card already returned at the guard
+	// above, so `state` here is todo/done/cancelled. The engine's own
+	// hand-off (in_pipeline → to_be_shipped) is excluded by the
+	// to_be_shipped check, and auto-ship (to_be_shipped → done) by the
+	// in_pipeline source check.
+	if model.State(current) == model.StateInPipeline && state != model.StateInPipeline && state != model.StateToBeShipped {
+		if err := s.cancelRunningPipelineJob(id); err != nil {
+			return err
+		}
+	}
 	// BACI-138: terminal_at follows the state column — stamped on a
 	// transition INTO done/cancelled, cleared on a transition OUT.
 	// The terminalAtClause helper builds a CASE expression that

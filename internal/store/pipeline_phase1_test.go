@@ -104,6 +104,71 @@ func TestPipelineJobsLifecycle(t *testing.T) {
 	}
 }
 
+// TestSetIssueStateTearsDownPipelineRunOnLeave: dragging a card out of
+// in_pipeline (back to Backlog) cancels its running job + dispatch and
+// disarms Auto, so a worker isn't orphaned and a stale running row can't
+// confuse a re-entry. The engine's own hand-off (→ to_be_shipped) and the
+// no-op processing-state guard must NOT trigger the teardown.
+func TestSetIssueStateTearsDownPipelineRunOnLeave(t *testing.T) {
+	s, repo, iss := seedRepoAndIssue(t)
+
+	// Enter the pipeline with an Auto chain and a running job + dispatch.
+	if err := s.SetIssueState(iss.ID, model.StateInPipeline); err != nil {
+		t.Fatalf("enter pipeline: %v", err)
+	}
+	if err := s.SetIssueEngineMode(iss.ID, model.EngineAuto); err != nil {
+		t.Fatalf("engine auto: %v", err)
+	}
+	proc, _ := model.ProcessBySlug("plan-implement")
+	jobs, err := s.SetIssueProcess(iss.ID, proc)
+	if err != nil {
+		t.Fatalf("SetIssueProcess: %v", err)
+	}
+	d, err := s.AddDispatch(AddDispatchIn{
+		RepoID:        repo.ID,
+		IssueID:       &iss.ID,
+		Mode:          model.DispatchModePlan,
+		CreatedBy:     "test",
+		InitialStatus: model.DispatchQueued,
+	})
+	if err != nil {
+		t.Fatalf("AddDispatch: %v", err)
+	}
+	if won, err := s.StartPipelineJobWithDispatch(jobs[0].ID, d.ID); err != nil || !won {
+		t.Fatalf("StartPipelineJobWithDispatch: won=%v err=%v", won, err)
+	}
+
+	// A processing-state target on an in_pipeline card is a no-op (guard) —
+	// it must NOT tear the run down.
+	if err := s.SetIssueState(iss.ID, model.StateInProgress); err != nil {
+		t.Fatalf("guarded no-op move: %v", err)
+	}
+	if got, _ := s.GetPipelineJob(jobs[0].ID); got.Status != model.JobRunning {
+		t.Fatalf("guarded move cancelled the job: status=%q", got.Status)
+	}
+	if got, _ := s.GetIssueByID(iss.ID); got.State != model.StateInPipeline {
+		t.Fatalf("guarded move changed column: %q", got.State)
+	}
+
+	// Drag back to Backlog: the run is torn down.
+	if err := s.SetIssueState(iss.ID, model.StateTodo); err != nil {
+		t.Fatalf("leave pipeline: %v", err)
+	}
+	gotIss, _ := s.GetIssueByID(iss.ID)
+	if gotIss.State != model.StateTodo {
+		t.Fatalf("state = %q, want todo", gotIss.State)
+	}
+	if gotIss.EngineMode != model.EngineOff {
+		t.Fatalf("engine mode = %q, want off after leaving pipeline", gotIss.EngineMode)
+	}
+	if gotJob, _ := s.GetPipelineJob(jobs[0].ID); gotJob.Status != model.JobCancelled {
+		t.Fatalf("running job status = %q, want cancelled", gotJob.Status)
+	}
+	if gotD, _ := s.GetDispatch(d.ID); gotD.Status != model.DispatchCancelled {
+		t.Fatalf("dispatch status = %q, want cancelled", gotD.Status)
+	}
+}
+
 // TestReorderIssue locks in dense (repo, state)-band renumbering: moving
 // a card to position 1 puts it at priority 0 and shifts the rest down.
 func TestReorderIssue(t *testing.T) {

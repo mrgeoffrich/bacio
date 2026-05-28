@@ -49,6 +49,35 @@ var boardColumnStates = []State{
 // excluding the Pipeline columns (in_pipeline / to_be_shipped).
 func BoardColumnStates() []State { return append([]State(nil), boardColumnStates...) }
 
+// ReleaseFallbackState is the state a claim-only `bacio agent release`
+// (no explicit --state) lands an issue in, given its current state. The
+// Pipeline cutover stripped per-mode state authority from the worker
+// prompts (plan / implement / review / ship / …), so a release with no
+// declared state is now the norm — this is the single place that decides
+// where such a release leaves the card.
+//
+//   - Engine-governed cards (in_pipeline / to_be_shipped) keep their
+//     state: the controller engine owns their progression, and the
+//     store's engine-governed-state guard would no-op a processing-state
+//     write regardless. Returning the current state keeps the dry-run
+//     projection honest (no phantom move).
+//   - Terminal cards (done / cancelled) keep their signed-off verdict
+//     (the BACI-200 release guard enforces this too).
+//   - Any other (off-pipeline) issue lands in in_review — the "an agent
+//     finished a pass, awaiting a human" resting state. Without this an
+//     off-pipeline dispatch (a direct `bacio agent dispatch`, or the
+//     retained dispatch-chain / queue-followon verbs) would strand the
+//     issue in in_progress: nothing but the engine advances a released
+//     claim, and the engine governs only pipeline cards.
+func ReleaseFallbackState(current State) State {
+	switch current {
+	case StateInPipeline, StateToBeShipped, StateDone, StateCancelled:
+		return current
+	default:
+		return StateInReview
+	}
+}
+
 // ParseState accepts "in-progress", "in progress", "in_progress", "InProgress", etc.
 func ParseState(s string) (State, error) {
 	norm := strings.ToLower(strings.NewReplacer(" ", "_", "-", "_").Replace(strings.TrimSpace(s)))

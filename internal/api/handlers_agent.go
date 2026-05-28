@@ -628,11 +628,12 @@ func (d deps) handleAgentRelease(w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, code, err.Error(), nil)
 		return
 	}
-	// Empty final_state means "drop the claim, leave state untouched" —
-	// the controller engine owns pipeline-card state. Default to the
-	// issue's current state: a no-op transition through the same store
-	// path. A non-empty state (validated above) still moves the issue.
-	finalState := iss.State
+	// Empty final_state defaults via model.ReleaseFallbackState: a no-op
+	// for engine-governed / terminal cards (the controller engine owns
+	// pipeline-card progression) but in_review for an off-pipeline issue,
+	// so a released claim doesn't strand the card in in_progress. A
+	// non-empty state (validated above) still moves the issue.
+	finalState := model.ReleaseFallbackState(iss.State)
 	if s := strings.TrimSpace(in.FinalState); s != "" {
 		finalState, _ = model.ParseState(s)
 	}
