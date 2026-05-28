@@ -1,8 +1,11 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { AnimatePresence, m } from 'motion/react';
 import KanbanCard from './KanbanCard.jsx';
 import QuestionModal from './QuestionModal.jsx';
 import ShippedPopover from './ShippedPopover.jsx';
+
+// Order the zap button walks a card through. to_be_shipped is terminal.
+const NEXT_STAGE = { todo: 'in_pipeline', in_pipeline: 'to_be_shipped' };
 
 export default function PipelineView({
   cards,
@@ -28,6 +31,18 @@ export default function PipelineView({
   const [placement, setPlacement] = useState(() => new Map());
   const [dragKey, setDragKey] = useState(null);
   const [dragOverZone, setDragOverZone] = useState(null);
+  // A manual drag should NOT animate — the card lands where you drop it.
+  // The flight is reserved for system-driven moves (a future backend
+  // state change). noAnimKey holds the key just placed by a drag so that
+  // single move renders with a zero-duration transition; we clear it on
+  // the next frame so any later (non-drag) move of the same card animates
+  // normally again.
+  const [noAnimKey, setNoAnimKey] = useState(null);
+  useEffect(() => {
+    if (noAnimKey == null) return undefined;
+    const id = requestAnimationFrame(() => setNoAnimKey(null));
+    return () => cancelAnimationFrame(id);
+  }, [noAnimKey]);
 
   const cardsByKey = useMemo(
     () => new Map((cards || []).map(c => [c.key, c])),
@@ -60,6 +75,8 @@ export default function PipelineView({
       isTrayHover={false}
       isJumping={false}
       layoutEase="easeInOut"
+      skipAnimation={card.key === noAnimKey}
+      onZap={advanceCard}
     />
   );
 
@@ -73,13 +90,12 @@ export default function PipelineView({
     return (
       <div className="mk-pipeline-cards">
         {/* AnimatePresence keeps a moved card's source instance mounted
-            until its exit finishes, so the layoutId shared transition can
-            measure the origin — without it the card flashes at the
-            destination then jumps back (Motion shared-layout requirement).
-            popLayout pops the exiting card out of flow so siblings reflow
-            immediately; it needs a ref on the child, which KanbanCard now
-            forwards. */}
-        <AnimatePresence mode="popLayout" initial={false}>
+            until its exit finishes, so the layoutId shared transition has an
+            origin to fly from. mode="sync" (not popLayout): popLayout pinned
+            the exiting twin in place and Motion animated the entering card
+            toward it (a backwards leg); sync keeps the twin in flow as it
+            fades and lets the entering card promote cleanly. */}
+        <AnimatePresence mode="sync" initial={false}>
           {list.map(card => renderCard(card))}
         </AnimatePresence>
       </div>
@@ -90,6 +106,9 @@ export default function PipelineView({
   // the drag state. dropZone wires the three sections as drop targets.
   const placeInto = (status) => {
     if (dragKey) {
+      // Mark this key so its move renders without animation — a drop is
+      // direct manipulation, not a system transition.
+      setNoAnimKey(dragKey);
       setPlacement(prev => {
         const next = new Map(prev);
         next.set(dragKey, status);
@@ -98,6 +117,20 @@ export default function PipelineView({
     }
     setDragKey(null);
     setDragOverZone(null);
+  };
+  // advanceCard is the zap-button action: walk the card one stage forward
+  // (todo → in_pipeline → to_be_shipped). Unlike a drag this does NOT set
+  // noAnimKey, so the move animates — the "system move" path.
+  const advanceCard = (key) => {
+    const card = cardsByKey.get(key);
+    if (!card) return;
+    const next = NEXT_STAGE[colOf(card)];
+    if (!next) return;
+    setPlacement(prev => {
+      const map = new Map(prev);
+      map.set(key, next);
+      return map;
+    });
   };
   const dropZone = (status) => ({
     onDragOver: (e) => { e.preventDefault(); setDragOverZone(status); },
@@ -127,35 +160,42 @@ export default function PipelineView({
         className={`mk-pipeline-stage${dragOverZone === 'in_pipeline' ? ' is-drop-target' : ''}`}
         {...dropZone('in_pipeline')}
       >
-        {inPipeline.length === 0 ? (
+        {/* Empty hint and the grid coexist: the grid (and its
+            AnimatePresence) stays mounted from first paint even when empty,
+            so the FIRST card dropped/zapped here is an *added* child (it
+            animates) rather than an initial child that initial={false}
+            would suppress. */}
+        {inPipeline.length === 0 && (
           <div className="mk-pipeline-stage-empty">
             Drag a card here to run it through the pipeline
           </div>
-        ) : (
-          <div className="mk-pipeline-stage-grid">
-            {/* The stage-card wrapper is a motion element so AnimatePresence
-                can keep it mounted through its exit — the inner KanbanCard's
-                layoutId still drives the cross-section travel. */}
-            <AnimatePresence mode="popLayout" initial={false}>
-              {inPipeline.map(card => (
-                <m.article
-                  key={card.key}
-                  layout
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.25 }}
-                  className="mk-pipeline-stage-card"
-                >
-                  <div className="mk-pipeline-stage-card-issue">
-                    {renderCard(card)}
-                  </div>
-                  <div className="mk-pipeline-stage-card-info">
-                    <span className="mk-pipeline-stage-card-info-label">Processing</span>
-                  </div>
-                </m.article>
-              ))}
-            </AnimatePresence>
-          </div>
         )}
+        <div className="mk-pipeline-stage-grid">
+          {/* The stage-card wrapper is a motion element so AnimatePresence
+              can keep it mounted through its exit. It fades in (initial/
+              animate opacity) so the big tile doesn't pop in at the
+              destination while the inner KanbanCard's layoutId flies in. */}
+          <AnimatePresence mode="sync" initial={false}>
+            {inPipeline.map(card => (
+              <m.article
+                key={card.key}
+                layout
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.25 }}
+                className="mk-pipeline-stage-card"
+              >
+                <div className="mk-pipeline-stage-card-issue">
+                  {renderCard(card)}
+                </div>
+                <div className="mk-pipeline-stage-card-info">
+                  <span className="mk-pipeline-stage-card-info-label">Processing</span>
+                </div>
+              </m.article>
+            ))}
+          </AnimatePresence>
+        </div>
       </section>
 
       <aside

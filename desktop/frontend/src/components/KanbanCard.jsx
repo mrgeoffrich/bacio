@@ -27,7 +27,7 @@ function stateLabel(s) {
   return STATE_LABELS[s] ?? s;
 }
 
-function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDragStart, onDragEnd, onOpen, onDispatch, onDispatchChain, onCancelWaiting, onOpenQuestion, onOpenIssue, onQuickEval, onSetFollowOn, onCancelFollowOn, isTrayHover, isJumping, layoutEase = [0.2, 0, 0, 1] }, ref) {
+function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDragStart, onDragEnd, onOpen, onDispatch, onDispatchChain, onCancelWaiting, onOpenQuestion, onOpenIssue, onQuickEval, onSetFollowOn, onCancelFollowOn, isTrayHover, isJumping, layoutEase = [0.2, 0, 0, 1], skipAnimation = false, onZap = null }, ref) {
   // BACI-75: local-only expansion state for the Tasks pill. Resets on
   // unmount (board switch, repo switch, hard refresh) — that's
   // intentional, we don't want to persist a row-level UI toggle.
@@ -235,7 +235,7 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDra
       initial={{ opacity: 0, scale: 0.96 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.96 }}
-      transition={{
+      transition={skipAnimation ? { duration: 0 } : {
         layout: { duration: 0.28, ease: layoutEase },
         opacity: { duration: 0.18 },
         scale: { duration: 0.18 },
@@ -571,7 +571,22 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDra
                   </button>
                 </Tooltip>
               )}
-              {!taken && nonReservedPrompts.length > 0 && (
+              {!taken && (onZap ? (
+                /* Pipeline: the zap button advances the card to the next
+                   stage instead of opening the dispatch menu. The move
+                   runs through the placement update WITHOUT the drag's
+                   skip-animation flag, so it animates (a system-style
+                   move) — unlike a manual drag, which lands instantly. */
+                <button
+                  type="button"
+                  className="mk-card-action-btn"
+                  aria-label="Advance to next stage"
+                  title="Advance to next stage"
+                  onClick={(e) => { e.stopPropagation(); onZap(card.key); }}
+                >
+                  <Icon name="zap" />
+                </button>
+              ) : nonReservedPrompts.length > 0 && (
                 <DropdownMenu.Root>
                   <DropdownMenu.Trigger asChild>
                     <button
@@ -621,7 +636,7 @@ function KanbanCard({ card, cardsByKey, promptConfig, isDragging, compact, onDra
                     </DropdownMenu.Content>
                   </DropdownMenu.Portal>
                 </DropdownMenu.Root>
-              )}
+              ))}
             </>
           )}
         </footer>
