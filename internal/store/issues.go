@@ -165,6 +165,23 @@ func (s *Store) GetIssueByUUID(uuid string) (*model.Issue, error) {
 	return s.attachTags(iss)
 }
 
+// TopShippingIssue returns the next-to-ship card in the repo — the
+// lowest-priority (position 1 = top of the FIFO) non-archived
+// to_be_shipped issue — or nil when the Shipping column is empty. Used
+// by the auto-ship ticker, which acts on one card at a time.
+func (s *Store) TopShippingIssue(repoID int64) (*model.Issue, error) {
+	iss, err := scanIssue(s.DB.QueryRow(issueSelect+
+		` WHERE i.repo_id = ? AND i.state = ? AND i.archived_at IS NULL ORDER BY i.priority ASC, i.number ASC LIMIT 1`,
+		repoID, string(model.StateToBeShipped)))
+	if errors.Is(err, ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return s.attachTags(iss)
+}
+
 func (s *Store) attachTags(iss *model.Issue) (*model.Issue, error) {
 	tagMap, err := s.loadTagsForIssues([]int64{iss.ID})
 	if err != nil {

@@ -35,6 +35,20 @@ var allStates = []State{
 
 func AllStates() []State { return append([]State(nil), allStates...) }
 
+// boardColumnStates are the columns the legacy state-kanban renders (the
+// TUI board and the pre-deprecation web issues board). The two Pipeline
+// states are deliberately excluded — those cards live on the Pipeline
+// page, not the kanban — but they remain in allStates so ParseState
+// still accepts the full enum.
+var boardColumnStates = []State{
+	StateTodo, StateInProgress, StateNeedsAction, StateInReview,
+	StateDone, StateCancelled,
+}
+
+// BoardColumnStates returns the states the legacy column-kanban renders,
+// excluding the Pipeline columns (in_pipeline / to_be_shipped).
+func BoardColumnStates() []State { return append([]State(nil), boardColumnStates...) }
+
 // ParseState accepts "in-progress", "in progress", "in_progress", "InProgress", etc.
 func ParseState(s string) (State, error) {
 	norm := strings.ToLower(strings.NewReplacer(" ", "_", "-", "_").Replace(strings.TrimSpace(s)))

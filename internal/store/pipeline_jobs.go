@@ -140,6 +140,30 @@ func (s *Store) SetPipelineJobDispatch(jobID int64, dispatchID *int64) error {
 	return err
 }
 
+// StartPipelineJobWithDispatch CAS-transitions a pending job to running
+// and stamps the dispatch it will run against, in one guarded UPDATE.
+// Returns true when this caller won the transition (one row affected);
+// false means the job was no longer pending (a concurrent start / cancel
+// raced it), so the caller should cancel the dispatch it queued to avoid
+// an orphan. started_at is stamped on the first transition. The CAS is
+// belt-and-suspenders over the leader gate — only one process runs the
+// engine, but the manual Start API and the engine could both target the
+// same job.
+func (s *Store) StartPipelineJobWithDispatch(jobID, dispatchID int64) (bool, error) {
+	res, err := s.DB.Exec(
+		`UPDATE pipeline_jobs SET status = 'running', dispatch_id = ?, started_at = COALESCE(started_at, CURRENT_TIMESTAMP) WHERE id = ? AND status = 'pending'`,
+		dispatchID, jobID,
+	)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n == 1, nil
+}
+
 // SetIssueEngineMode writes the per-issue controller-engine drive mode
 // (off | auto). Does not bump updated_at: this is runtime supervision
 // metadata, not user-edited content — same rationale as ReorderIssue /

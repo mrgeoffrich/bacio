@@ -353,6 +353,11 @@ CREATE TABLE IF NOT EXISTS tui_settings (
 CREATE TABLE IF NOT EXISTS repo_settings (
     repo_id            INTEGER NOT NULL PRIMARY KEY REFERENCES repos(id) ON DELETE CASCADE,
     default_feature_id INTEGER REFERENCES features(id) ON DELETE SET NULL,
+    -- auto_ship (Pipeline) is the per-repo Shipping-column toggle: when
+    -- 1, the controller auto-ship ticker dispatches a ship-mode agent
+    -- against the top (lowest-priority) to_be_shipped card. 0 = manual
+    -- SHIP only. Per-repo because the Shipping queue is per-repo.
+    auto_ship          INTEGER NOT NULL DEFAULT 0 CHECK (auto_ship IN (0,1)),
     updated_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

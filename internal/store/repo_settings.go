@@ -15,6 +15,10 @@ import (
 type RepoSettings struct {
 	RepoID           int64
 	DefaultFeatureID *int64
+	// AutoShip (Pipeline) is the per-repo Shipping-column auto-ship
+	// toggle. When true the controller auto-ship ticker dispatches a
+	// ship-mode agent against the top to_be_shipped card.
+	AutoShip bool
 }
 
 // GetRepoSettings reads the per-repo settings row for repoID. Returns
@@ -25,10 +29,11 @@ type RepoSettings struct {
 func (s *Store) GetRepoSettings(repoID int64) (RepoSettings, error) {
 	out := RepoSettings{RepoID: repoID}
 	var defaultFeatureID sql.NullInt64
+	var autoShip int
 	err := s.DB.QueryRow(
-		`SELECT default_feature_id FROM repo_settings WHERE repo_id = ?`,
+		`SELECT default_feature_id, auto_ship FROM repo_settings WHERE repo_id = ?`,
 		repoID,
-	).Scan(&defaultFeatureID)
+	).Scan(&defaultFeatureID, &autoShip)
 	if errors.Is(err, sql.ErrNoRows) {
 		return out, nil
 	}
@@ -39,7 +44,27 @@ func (s *Store) GetRepoSettings(repoID int64) (RepoSettings, error) {
 		v := defaultFeatureID.Int64
 		out.DefaultFeatureID = &v
 	}
+	out.AutoShip = autoShip != 0
 	return out, nil
+}
+
+// SetRepoAutoShip writes the per-repo Shipping-column auto-ship toggle.
+// Upsert so the first write doesn't need a separate INSERT path; mirrors
+// SetDefaultFeatureID's shape. Bumps updated_at on every write.
+func (s *Store) SetRepoAutoShip(repoID int64, enabled bool) error {
+	bit := 0
+	if enabled {
+		bit = 1
+	}
+	_, err := s.DB.Exec(
+		`INSERT INTO repo_settings (repo_id, auto_ship, updated_at)
+		 VALUES (?, ?, CURRENT_TIMESTAMP)
+		 ON CONFLICT(repo_id) DO UPDATE SET
+		   auto_ship  = excluded.auto_ship,
+		   updated_at = CURRENT_TIMESTAMP`,
+		repoID, bit,
+	)
+	return err
 }
 
 // SetDefaultFeatureID writes the per-repo default_feature_id column.

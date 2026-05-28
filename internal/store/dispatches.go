@@ -171,6 +171,26 @@ func (s *Store) AddDispatch(in AddDispatchIn) (*model.AgentDispatch, error) {
 	return s.GetDispatch(id)
 }
 
+// LatestDispatchForIssueMode returns the most recent dispatch of the
+// given mode for the issue (any status), or nil when none exists. Used
+// by the auto-ship ticker to decide whether to queue a ship dispatch,
+// wait on one in flight, advance the card to done on ack, or leave a
+// deliberately-cancelled ship alone.
+func (s *Store) LatestDispatchForIssueMode(issueID int64, mode model.DispatchMode) (*model.AgentDispatch, error) {
+	d, err := scanDispatch(s.DB.QueryRow(dispatchSelect+
+		` WHERE d.issue_id = ? AND d.mode = ? ORDER BY d.id DESC LIMIT 1`,
+		issueID, string(mode)))
+	// scanDispatch returns the raw sql.ErrNoRows (it doesn't map to
+	// ErrNotFound), so match that here.
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return d, nil
+}
+
 // DispatchFilter scopes ListDispatches. When both TargetAgentID and
 // TargetSessionID are set, rows matching EITHER target are returned —
 // that's the "everything aimed at me" drain/inbox query, since a

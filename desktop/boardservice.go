@@ -443,9 +443,11 @@ func (b *BoardService) AddRepository() (Board, error) {
 	return boardWithSync(repo, len(issues), st), nil
 }
 
-// ListColumns returns the kanban columns — bacio's issue states, in order.
+// ListColumns returns the kanban columns — the legacy state-board
+// columns, excluding the Pipeline states (those cards live on the
+// Pipeline page).
 func (b *BoardService) ListColumns() ([]BoardColumn, error) {
-	states := model.AllStates()
+	states := model.BoardColumnStates()
 	cols := make([]BoardColumn, 0, len(states))
 	for _, s := range states {
 		cols = append(cols, BoardColumn{State: string(s), Label: stateLabel(s)})

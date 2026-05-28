@@ -221,7 +221,7 @@ func newBoardView(s *store.Store, repo *model.Repo, actor string) (*boardView, e
 		store:          s,
 		repo:           repo,
 		actor:          actor,
-		states:         model.AllStates(),
+		states:         model.BoardColumnStates(),
 		hidden:         hidden,
 		hiddenFeatures: hiddenFeats,
 		columns:        map[model.State][]*model.Issue{},

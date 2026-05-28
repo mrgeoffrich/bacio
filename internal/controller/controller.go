@@ -35,6 +35,7 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/idlepinger"
 	"github.com/mrgeoffrich/bacio/internal/leader"
 	"github.com/mrgeoffrich/bacio/internal/model"
+	"github.com/mrgeoffrich/bacio/internal/pipeline"
 	"github.com/mrgeoffrich/bacio/internal/store"
 	bsync "github.com/mrgeoffrich/bacio/internal/sync"
 )
@@ -393,6 +394,61 @@ func followOnDetails(d *model.AgentDispatch) string {
 	return strings.Join(parts, ",")
 }
 
+// EngineTickIfLeader runs one Pipeline job-engine pass + one auto-ship
+// pass if el holds the lease, then writes one `engine.advance` audit row
+// per committed transition (Actor=[model.ControllerActor]). The engine
+// queues ordinary dispatches the matcher then binds, and advances issue
+// state for in_pipeline / to_be_shipped cards — the seam that replaces
+// worker-driven `release --state` progression. Read errors are logged at
+// warn level and never returned (a transient DB blip must not propagate
+// up to the caller's tick handler); a nil engine or elector is a no-op.
+// A nil store skips the audit write but still runs the tick.
+func EngineTickIfLeader(e *pipeline.Engine, el *leader.Elector, s *store.Store, log *slog.Logger) {
+	if e == nil || el == nil || !el.CurrentState().AmLeader {
+		return
+	}
+	advances, err := e.Tick()
+	if err != nil {
+		loggerOrDefault(log).Warn("bacio: pipeline engine tick failed", "err", err)
+	}
+	shipAdvances, err := e.AutoShipTick()
+	if err != nil {
+		loggerOrDefault(log).Warn("bacio: pipeline auto-ship tick failed", "err", err)
+	}
+	if s == nil {
+		return
+	}
+	for _, a := range append(advances, shipAdvances...) {
+		recordEngineAdvanceAudit(s, a, log)
+	}
+}
+
+// recordEngineAdvanceAudit writes one `engine.advance` row per engine
+// transition. Mirrors recordBindAudit's per-row shape: TargetLabel =
+// issue key, Details = "<kind> <detail>". Failures are logged and never
+// propagate — losing one audit row beats rolling back a committed
+// advance.
+func recordEngineAdvanceAudit(s *store.Store, a pipeline.Advance, log *slog.Logger) {
+	if s == nil {
+		return
+	}
+	repoID := a.RepoID
+	entry := model.HistoryEntry{
+		Actor:       model.ControllerActor,
+		Op:          "engine.advance",
+		Kind:        "engine",
+		RepoID:      &repoID,
+		RepoPrefix:  a.RepoPrefix,
+		TargetID:    &a.IssueID,
+		TargetLabel: a.IssueKey,
+		Details:     strings.TrimSpace(a.Kind + " " + a.Detail),
+	}
+	if err := s.RecordHistory(entry); err != nil {
+		loggerOrDefault(log).Warn("bacio: failed to record engine.advance audit",
+			"issue", a.IssueKey, "kind", a.Kind, "err", err)
+	}
+}
+
 // SyncIfLeader runs one [bsync.BackgroundRunner] tick if el holds the
 // lease (BACI-89). Same logged-and-swallowed error contract as the
 // other …IfLeader helpers — continual git-sync is best-effort mirror
@@ -421,6 +477,7 @@ type Controller struct {
 	matcher    *dispatcher.Matcher
 	pinger     *idlepinger.Pinger
 	syncRunner *bsync.BackgroundRunner
+	engine     *pipeline.Engine
 	log        *slog.Logger
 
 	done chan struct{}
@@ -437,7 +494,13 @@ type Controller struct {
 //
 // log may be nil; helpers fall back to slog.Default().
 func New(s *store.Store, el *leader.Elector, m *dispatcher.Matcher, p *idlepinger.Pinger, sr *bsync.BackgroundRunner, log *slog.Logger) *Controller {
-	return &Controller{st: s, el: el, matcher: m, pinger: p, syncRunner: sr, log: log}
+	// The Pipeline engine only needs the store; build it here so the New
+	// signature (and its many call sites) doesn't grow another param.
+	var eng *pipeline.Engine
+	if s != nil {
+		eng = pipeline.New(s).WithLogger(log)
+	}
+	return &Controller{st: s, el: el, matcher: m, pinger: p, syncRunner: sr, engine: eng, log: log}
 }
 
 // Start fires the heartbeat synchronously once (so the caller sees a
@@ -582,6 +645,26 @@ func (c *Controller) Start(emit func(leader.State)) {
 			select {
 			case <-ticker.C:
 				FollowOnSweepIfLeader(c.st, c.el, c.log)
+			case <-done:
+				return
+			}
+		}
+	}()
+
+	// Pipeline job-engine + auto-ship. Rides QueueMatchInterval (5s) —
+	// the engine queues ordinary dispatches the matcher binds on its own
+	// ticker, so a job started on tick N binds on tick N+1, the same
+	// tight latency the follow-on sweep enjoys. Leader-gated like the
+	// rest; a standby controller is a no-op.
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		ticker := time.NewTicker(store.QueueMatchInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				EngineTickIfLeader(c.engine, c.el, c.st, c.log)
 			case <-done:
 				return
 			}

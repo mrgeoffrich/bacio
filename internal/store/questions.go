@@ -385,6 +385,26 @@ func (s *Store) HasOpenQuestionsForSession(sessionID string) (bool, error) {
 	return true, nil
 }
 
+// HasOpenQuestionForJob reports whether the pipeline job has an open
+// question — the controller engine's "halt Auto, waiting on the user"
+// signal (§6.1). Questions are re-parented onto a job by the MCP
+// ask_user_question path (a later phase); until then this always reads
+// false, so the halt mechanism is wired but dormant.
+func (s *Store) HasOpenQuestionForJob(jobID int64) (bool, error) {
+	var found int
+	err := s.DB.QueryRow(
+		`SELECT 1 FROM agent_session_questions WHERE state = 'open' AND pipeline_job_id = ? LIMIT 1`,
+		jobID,
+	).Scan(&found)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // DrainSettledQuestionsForSession returns the answered + cancelled
 // rows for the session — the rows the channel's poll tick needs to
 // re-correlate with its in-memory parked-reply map and deliver

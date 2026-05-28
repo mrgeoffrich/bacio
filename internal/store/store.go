@@ -922,6 +922,18 @@ func migrate(db *sql.DB) error {
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_issues_state_priority ON issues(state, priority)`); err != nil {
 		return fmt.Errorf("create idx_issues_state_priority: %w", err)
 	}
+	// repo_settings.auto_ship (Pipeline) — the per-repo Shipping-column
+	// auto-ship toggle. Idempotent ALTER with a constant default for
+	// older DBs; schema.sql carries it for fresh ones.
+	hasAutoShip, err := columnExists(db, "repo_settings", "auto_ship")
+	if err != nil {
+		return err
+	}
+	if !hasAutoShip {
+		if _, err := db.Exec(`ALTER TABLE repo_settings ADD COLUMN auto_ship INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("add auto_ship to repo_settings: %w", err)
+		}
+	}
 	return nil
 }
 
