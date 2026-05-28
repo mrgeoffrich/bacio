@@ -14,6 +14,23 @@ current UI mock (drag placement lives in component state and is lost on
 unmount), this spec requires the pipeline state and the per-issue dispatch-job
 history to be **persisted** (see [§8 Data model](#8-data-model--persistence)).
 
+### Designs to use
+
+Flat HTML mockups (built on bacio's real design tokens) are the agreed visual
+reference for the build:
+
+- [`pipeline-card-mockups.html`](pipeline-card-mockups.html) — **authoritative
+  card design.** The compact Backlog / Shipping issue card (feature glyph,
+  number, conditional plan + PR icon buttons, title, labels) and the in-process
+  card that **grows to fill the stage** — issue header on top, processing detail
+  (job chain + active-job todos / question) in the body, and **all operation
+  buttons along the bottom**. Covers running / halted-on-question / complete /
+  just-dropped. _(Light theme; the same tokens drive dark.)_
+- [`pipeline-page-mockups.html`](pipeline-page-mockups.html) — page- and
+  column-level context: the three-column frame, backlog drawer numbering, and the
+  shipping controls. Where its in-pipeline card detail differs, the card mockup
+  above wins.
+
 ## 2. Layout
 
 Three columns, left to right:
