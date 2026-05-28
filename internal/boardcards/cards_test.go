@@ -41,6 +41,9 @@ type fakeClient struct {
 	// and semantics as latestPlans — absent entries surface as nil
 	// LatestPR on the assembled card.
 	latestPRs map[int64]*model.LatestPR
+	// jobs (Pipeline) drives the per-card job chain. Keyed by issue id;
+	// absent entries surface as an empty Jobs slice on the card.
+	jobs map[int64][]*model.PipelineJob
 	// inflightByMode (BACI-145) is mode → count of in-flight dispatches
 	// for the test's single repo. Nil leaves the map empty (no
 	// concurrency-cap blocking).
@@ -184,6 +187,12 @@ func (f *fakeClient) InflightByModeBaseForRepo(context.Context, *model.Repo) (ma
 		return map[store.InflightKey]int{}, nil
 	}
 	return f.inflightByModeBase, nil
+}
+func (f *fakeClient) PipelineJobsForIssues(context.Context, []int64) (map[int64][]*model.PipelineJob, error) {
+	if f.jobs == nil {
+		return map[int64][]*model.PipelineJob{}, nil
+	}
+	return f.jobs, nil
 }
 
 // TestAssembleVerbAndTodos covers the BACI-60 enrichment: an open
@@ -1543,5 +1552,59 @@ func TestAssembleBlockerFollowOnWaitingReason(t *testing.T) {
 		t.Errorf("TEST-2 FollowOn = nil, want non-nil")
 	} else if fo.WaitingReason != "blocked by 2" {
 		t.Errorf("TEST-2 FollowOn.WaitingReason = %q, want %q", fo.WaitingReason, "blocked by 2")
+	}
+}
+
+// TestAssemblePipelineJobs covers the Pipeline card shape: an
+// in_pipeline card carries its job chain, the current (running) job, and
+// the engine drive mode / pause reason; a non-pipeline card carries none.
+func TestAssemblePipelineJobs(t *testing.T) {
+	repo := &model.Repo{ID: 1, Prefix: "PIPE"}
+	issues := []*model.Issue{
+		{
+			ID: 7, Key: "PIPE-1", State: model.StateInPipeline, Title: "in pipeline",
+			EngineMode: model.EngineAuto, EnginePauseReason: model.EnginePauseReasonOpenQuestion,
+		},
+		{ID: 8, Key: "PIPE-2", State: model.StateTodo, Title: "backlog"},
+	}
+	jobs := map[int64][]*model.PipelineJob{
+		7: {
+			{ID: 1, IssueID: 7, Sequence: 1, Mode: "plan", Status: model.JobComplete},
+			{ID: 2, IssueID: 7, Sequence: 2, Mode: "implement", Status: model.JobRunning},
+			{ID: 3, IssueID: 7, Sequence: 3, Mode: model.ShipJobMode, Status: model.JobPending},
+		},
+	}
+	f := &fakeClient{repo: repo, issues: issues, jobs: jobs}
+
+	cards, err := Assemble(context.Background(), f, repo, false, nil)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	byKey := map[string]BoardCard{}
+	for _, c := range cards {
+		byKey[c.Key] = c
+	}
+
+	c := byKey["PIPE-1"]
+	if len(c.Jobs) != 3 {
+		t.Fatalf("PIPE-1 jobs = %d, want 3", len(c.Jobs))
+	}
+	if c.Jobs[1].Mode != "implement" || c.Jobs[1].Status != "running" {
+		t.Errorf("PIPE-1 job[1] = %+v, want implement/running", c.Jobs[1])
+	}
+	if c.CurrentJob == nil || c.CurrentJob.Sequence != 2 {
+		t.Fatalf("PIPE-1 currentJob = %+v, want the running seq-2 job", c.CurrentJob)
+	}
+	if c.EngineMode != "auto" {
+		t.Errorf("PIPE-1 engineMode = %q, want auto", c.EngineMode)
+	}
+	if c.EnginePauseReason != "open_question" {
+		t.Errorf("PIPE-1 enginePauseReason = %q, want open_question", c.EnginePauseReason)
+	}
+
+	bl := byKey["PIPE-2"]
+	if len(bl.Jobs) != 0 || bl.CurrentJob != nil || bl.EngineMode != "" || bl.EnginePauseReason != "" {
+		t.Errorf("PIPE-2 (non-pipeline) carried engine fields: jobs=%d current=%v mode=%q pause=%q",
+			len(bl.Jobs), bl.CurrentJob, bl.EngineMode, bl.EnginePauseReason)
 	}
 }

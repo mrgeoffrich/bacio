@@ -40,6 +40,10 @@ func newIssueCmd() *cobra.Command {
 		issueRmCmd(),
 		issueArchiveCmd(),
 		issueUnarchiveCmd(),
+		issueReorderCmd(),
+		issueProcessCmd(),
+		issueShipCmd(),
+		issueAutoShipCmd(),
 	)
 	return cmd
 }

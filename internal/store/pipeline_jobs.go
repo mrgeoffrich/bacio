@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/mrgeoffrich/bacio/internal/model"
 )
@@ -64,6 +65,39 @@ func (s *Store) ListPipelineJobs(issueID int64) ([]*model.PipelineJob, error) {
 // GetPipelineJob reads one job by id. ErrNotFound when absent.
 func (s *Store) GetPipelineJob(id int64) (*model.PipelineJob, error) {
 	return scanPipelineJob(s.DB.QueryRow(`SELECT `+pipelineJobCols+` FROM pipeline_jobs WHERE id = ?`, id))
+}
+
+// PipelineJobsForIssues bulk-reads the job chains for a set of issues,
+// keyed by issue_id and sequence-ordered within each issue — the board
+// assembler attaches the per-card chain in one query instead of N.
+// Issues with no chain are simply absent from the map.
+func (s *Store) PipelineJobsForIssues(issueIDs []int64) (map[int64][]*model.PipelineJob, error) {
+	out := map[int64][]*model.PipelineJob{}
+	if len(issueIDs) == 0 {
+		return out, nil
+	}
+	ph := make([]string, len(issueIDs))
+	args := make([]any, len(issueIDs))
+	for i, id := range issueIDs {
+		ph[i] = "?"
+		args[i] = id
+	}
+	rows, err := s.DB.Query(
+		`SELECT `+pipelineJobCols+` FROM pipeline_jobs WHERE issue_id IN (`+strings.Join(ph, ",")+`) ORDER BY issue_id, sequence ASC`,
+		args...,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		j, err := scanPipelineJob(rows)
+		if err != nil {
+			return nil, err
+		}
+		out[j.IssueID] = append(out[j.IssueID], j)
+	}
+	return out, rows.Err()
 }
 
 // SetIssueProcess materialises a preset process as the issue's pipeline

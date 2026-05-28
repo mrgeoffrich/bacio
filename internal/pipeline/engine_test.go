@@ -261,3 +261,88 @@ func TestEngineHaltsOnOpenQuestion(t *testing.T) {
 		t.Fatalf("pause reason = %q, want cleared", got.EnginePauseReason)
 	}
 }
+
+// TestEngineManualStartDrivesChain: with Auto off, repeated StartNext
+// (the manual Start control) drives the chain one job at a time, and the
+// final StartNext at the ship sentinel hands off to to_be_shipped.
+func TestEngineManualStartDrivesChain(t *testing.T) {
+	s := newEngineStore(t)
+	_, iss := seedPipelineCard(t, s, "MAN1", "plan-implement-ship", model.EngineOff)
+	eng := New(s)
+
+	// Start plan.
+	if _, err := eng.StartNext(iss.ID); err != nil {
+		t.Fatalf("StartNext plan: %v", err)
+	}
+	r := runningJob(t, s, iss.ID)
+	if r == nil || r.Mode != model.BuiltinTemplatePlan {
+		t.Fatalf("StartNext didn't start plan: %+v", r)
+	}
+	// A second StartNext is a no-op while a job runs.
+	if _, err := eng.StartNext(iss.ID); err != nil {
+		t.Fatalf("StartNext (no-op): %v", err)
+	}
+	if r2 := runningJob(t, s, iss.ID); r2 == nil || r2.ID != r.ID {
+		t.Fatalf("second StartNext changed the running job")
+	}
+
+	// Ack + Tick completes plan (manual completion detection).
+	simulateWorkerAck(t, s, *r.DispatchID)
+	if _, err := eng.Tick(); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	// Start implement.
+	if _, err := eng.StartNext(iss.ID); err != nil {
+		t.Fatalf("StartNext implement: %v", err)
+	}
+	r = runningJob(t, s, iss.ID)
+	if r == nil || r.Mode != model.BuiltinTemplateImplement {
+		t.Fatalf("StartNext didn't start implement: %+v", r)
+	}
+	simulateWorkerAck(t, s, *r.DispatchID)
+	if _, err := eng.Tick(); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+
+	// Next StartNext is at the ship sentinel → hand off.
+	if _, err := eng.StartNext(iss.ID); err != nil {
+		t.Fatalf("StartNext handoff: %v", err)
+	}
+	got, _ := s.GetIssueByID(iss.ID)
+	if got.State != model.StateToBeShipped {
+		t.Fatalf("state = %s, want to_be_shipped", got.State)
+	}
+}
+
+// TestEngineStopRunning: Stop cancels the running job and halts Auto.
+func TestEngineStopRunning(t *testing.T) {
+	s := newEngineStore(t)
+	_, iss := seedPipelineCard(t, s, "STOP", "plan-implement", model.EngineAuto)
+	eng := New(s)
+
+	// Auto starts the plan job.
+	if _, err := eng.Tick(); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if runningJob(t, s, iss.ID) == nil {
+		t.Fatal("no running job to stop")
+	}
+	if _, err := eng.StopRunning(iss.ID); err != nil {
+		t.Fatalf("StopRunning: %v", err)
+	}
+	jobs, _ := s.ListPipelineJobs(iss.ID)
+	if jobs[0].Status != model.JobCancelled {
+		t.Fatalf("job 1 status = %s, want cancelled", jobs[0].Status)
+	}
+	got, _ := s.GetIssueByID(iss.ID)
+	if got.EngineMode != model.EngineOff {
+		t.Fatalf("engine mode = %s, want off (Auto halted)", got.EngineMode)
+	}
+	// A follow-up Tick must NOT auto-advance (Auto is now off).
+	if _, err := eng.Tick(); err != nil {
+		t.Fatalf("post-stop tick: %v", err)
+	}
+	if runningJob(t, s, iss.ID) != nil {
+		t.Fatal("post-stop tick started a new job despite Auto off")
+	}
+}

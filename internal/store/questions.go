@@ -69,6 +69,12 @@ func (s *Store) AddSessionQuestion(in AddSessionQuestionIn) (*model.SessionQuest
 	if requestUUID == "" {
 		requestUUID = identity.New()
 	}
+	// Pipeline: parent the question onto the asking card's running job
+	// when the issue is in_pipeline. An open question on the current job
+	// is the engine's halt signal (§6.1). Resolved read-only before the
+	// tx; nil for non-pipeline / legacy questions. A resolution miss is
+	// non-fatal — the question is still recorded, just session-parented.
+	pipelineJobID := s.currentPipelineJobForIssueKey(in.IssueKey)
 
 	tx, err := s.DB.Begin()
 	if err != nil {
@@ -88,9 +94,9 @@ func (s *Store) AddSessionQuestion(in AddSessionQuestionIn) (*model.SessionQuest
 
 	res, err := tx.Exec(`
 		INSERT INTO agent_session_questions
-		    (session_pk, request_uuid, issue_key, payload_json, state, asked_by)
-		VALUES (?, ?, ?, ?, 'open', ?)`,
-		sessPK, requestUUID, in.IssueKey, payloadJSON, askedBy,
+		    (session_pk, request_uuid, issue_key, payload_json, state, asked_by, pipeline_job_id)
+		VALUES (?, ?, ?, ?, 'open', ?, ?)`,
+		sessPK, requestUUID, in.IssueKey, payloadJSON, askedBy, nullableInt(pipelineJobID),
 	)
 	if err != nil {
 		return nil, err
@@ -105,13 +111,46 @@ func (s *Store) AddSessionQuestion(in AddSessionQuestionIn) (*model.SessionQuest
 	return s.GetSessionQuestion(id)
 }
 
+// currentPipelineJobForIssueKey returns the id of the running pipeline
+// job for the given issue key, or nil — the question-parenting target.
+// The asking worker is the session running that job, so "the issue's
+// running job" is the worker's current job without needing the
+// session→dispatch chain. Read-only and best-effort: any miss (bad key,
+// non-pipeline issue, no running job) returns nil so the question still
+// records as session-parented.
+func (s *Store) currentPipelineJobForIssueKey(issueKey string) *int64 {
+	if issueKey == "" {
+		return nil
+	}
+	prefix, num, err := ParseIssueKey(issueKey)
+	if err != nil {
+		return nil
+	}
+	iss, err := s.GetIssueByKey(prefix, num)
+	if err != nil || iss.State != model.StateInPipeline {
+		return nil
+	}
+	jobs, err := s.ListPipelineJobs(iss.ID)
+	if err != nil {
+		return nil
+	}
+	for _, j := range jobs {
+		if j.Status == model.JobRunning {
+			id := j.ID
+			return &id
+		}
+	}
+	return nil
+}
+
 // questionSelect is the canonical column list — the join lifts
 // the external session_id alongside the row so the channel and
 // API surfaces don't need a second lookup.
 const questionSelect = `
 	SELECT q.id, q.session_pk, s.session_id, q.request_uuid, q.issue_key,
 	       q.payload_json, q.answers_json, q.state,
-	       q.asked_at, q.answered_at, q.asked_by, q.answered_by
+	       q.asked_at, q.answered_at, q.asked_by, q.answered_by,
+	       q.pipeline_job_id
 	FROM agent_session_questions q
 	JOIN agent_sessions s ON s.id = q.session_pk`
 
@@ -429,11 +468,13 @@ func scanSessionQuestion(r rowScanner) (*model.SessionQuestion, error) {
 		answeredAt  sql.NullTime
 		issueKey    sql.NullString
 		answeredBy  sql.NullString
+		pipelineJob sql.NullInt64
 	)
 	err := r.Scan(
 		&v.ID, &v.SessionPK, &v.SessionID, &v.RequestUUID, &issueKey,
 		&payloadStr, &answersStr, &stateStr,
 		&v.AskedAt, &answeredAt, &v.AskedBy, &answeredBy,
+		&pipelineJob,
 	)
 	if err != nil {
 		return nil, err
@@ -441,6 +482,10 @@ func scanSessionQuestion(r rowScanner) (*model.SessionQuestion, error) {
 	v.State = model.QuestionState(stateStr)
 	if issueKey.Valid {
 		v.IssueKey = issueKey.String
+	}
+	if pipelineJob.Valid {
+		id := pipelineJob.Int64
+		v.PipelineJobID = &id
 	}
 	if answeredBy.Valid {
 		v.AnsweredBy = answeredBy.String

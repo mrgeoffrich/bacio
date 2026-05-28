@@ -836,6 +836,10 @@ func (c *localClient) ListOpenQuestionsBySessions(ctx context.Context, sessionID
 	return c.store.ListOpenQuestionsBySessions(sessionIDs)
 }
 
+func (c *localClient) PipelineJobsForIssues(ctx context.Context, issueIDs []int64) (map[int64][]*model.PipelineJob, error) {
+	return c.store.PipelineJobsForIssues(issueIDs)
+}
+
 func (c *localClient) GetSessionQuestion(ctx context.Context, id int64) (*model.SessionQuestion, error) {
 	return c.store.GetSessionQuestion(id)
 }

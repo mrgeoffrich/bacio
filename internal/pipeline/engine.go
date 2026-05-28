@@ -204,23 +204,108 @@ func (e *Engine) tickIssue(iss *model.Issue) ([]Advance, error) {
 	}
 
 	// 2) Auto-advance only. In manual (off) mode the user drives the next
-	//    step via the Start / Ship controls (a later phase's API).
+	//    step via the Start / Ship controls (the API's manual verbs).
 	if iss.EngineMode != model.EngineAuto {
 		return advances, nil
 	}
-
-	next := firstByStatus(jobs, model.JobPending)
-	if next == nil {
-		// Chain exhausted with Auto on → hand off to Shipping (§6).
-		adv, err := e.handoff(iss)
-		return append(advances, adv...), err
-	}
-	if next.IsShipHandoff() {
-		adv, err := e.handoff(iss)
-		return append(advances, adv...), err
-	}
-	adv, err := e.startJob(iss, next)
+	adv, err := e.advanceChain(iss, jobs)
 	return append(advances, adv...), err
+}
+
+// advanceChain advances the card one step: start the next pending agent
+// job, or hand off to to_be_shipped when the next stage is the ship
+// sentinel or the chain is exhausted (§6). Assumes no job is currently
+// running — the caller guarantees that. Shared by the Auto tick and the
+// manual StartNext.
+func (e *Engine) advanceChain(iss *model.Issue, jobs []*model.PipelineJob) ([]Advance, error) {
+	next := firstByStatus(jobs, model.JobPending)
+	if next == nil || next.IsShipHandoff() {
+		return e.handoff(iss)
+	}
+	return e.startJob(iss, next)
+}
+
+// StartNext is the manual "Start" control: advance the card one step
+// regardless of engine mode — start the next pending agent job, or hand
+// off to Shipping at the ship sentinel / chain end. A no-op (nil advance)
+// when a job is already running, or when the card isn't in_pipeline.
+// Shares advanceChain with the Auto tick so manual and auto behave
+// identically.
+func (e *Engine) StartNext(issueID int64) ([]Advance, error) {
+	if e == nil || e.st == nil {
+		return nil, nil
+	}
+	iss, err := e.st.GetIssueByID(issueID)
+	if err != nil {
+		return nil, err
+	}
+	if iss.State != model.StateInPipeline {
+		return nil, nil
+	}
+	jobs, err := e.st.ListPipelineJobs(issueID)
+	if err != nil {
+		return nil, err
+	}
+	if firstByStatus(jobs, model.JobRunning) != nil {
+		return nil, nil // a job is in flight — can't start another
+	}
+	return e.advanceChain(iss, jobs)
+}
+
+// StopRunning is the manual "Stop / Cancel" control: cancel the card's
+// running job (and its dispatch) and halt Auto. A no-op when no job is
+// running. If the dispatch was already delivered to a worker, the row
+// can't be cancelled (BACI-130) — the job is still marked cancelled and
+// Auto halted; the worker's eventual ack is then ignored because the job
+// is already terminal.
+func (e *Engine) StopRunning(issueID int64) ([]Advance, error) {
+	if e == nil || e.st == nil {
+		return nil, nil
+	}
+	iss, err := e.st.GetIssueByID(issueID)
+	if err != nil {
+		return nil, err
+	}
+	jobs, err := e.st.ListPipelineJobs(issueID)
+	if err != nil {
+		return nil, err
+	}
+	running := firstByStatus(jobs, model.JobRunning)
+	if running == nil {
+		return nil, nil
+	}
+	if running.DispatchID != nil {
+		if _, err := e.st.CancelDispatch(*running.DispatchID); err != nil {
+			e.logger().Warn("bacio engine: stop could not cancel dispatch (likely already delivered)",
+				"issue", iss.Key, "dispatch", *running.DispatchID, "err", err)
+		}
+	}
+	if err := e.st.SetPipelineJobStatus(running.ID, model.JobCancelled); err != nil {
+		return nil, err
+	}
+	if err := e.st.SetIssueEngineMode(issueID, model.EngineOff); err != nil {
+		return nil, err
+	}
+	e.setPause(iss, false)
+	return []Advance{e.advance(iss, "job.cancelled", fmt.Sprintf("seq=%d mode=%s (stopped)", running.Sequence, running.Mode))}, nil
+}
+
+// Handoff is the manual "Ship" control (and the in-process Ship stage):
+// move an in_pipeline card to to_be_shipped. A no-op when the card isn't
+// in_pipeline. Same transition the Auto chain reaches at the ship
+// sentinel / chain end.
+func (e *Engine) Handoff(issueID int64) ([]Advance, error) {
+	if e == nil || e.st == nil {
+		return nil, nil
+	}
+	iss, err := e.st.GetIssueByID(issueID)
+	if err != nil {
+		return nil, err
+	}
+	if iss.State != model.StateInPipeline {
+		return nil, nil
+	}
+	return e.handoff(iss)
 }
 
 // reconcileRunning inspects the running job's dispatch. Returns

@@ -36,6 +36,12 @@ type SessionQuestion struct {
 	SessionID   string `json:"session_id,omitempty"`
 	RequestUUID string `json:"request_uuid"`
 	IssueKey    string `json:"issue_key,omitempty"`
+	// PipelineJobID (Pipeline) is the pipeline_jobs row this question is
+	// parented to — the running job of the asking session's in_pipeline
+	// card. An open question on the current job is the controller
+	// engine's "halt Auto, waiting on the user" signal (§6.1). Nil (and
+	// omitted) for legacy / non-pipeline questions.
+	PipelineJobID *int64 `json:"pipeline_job_id,omitempty"`
 
 	Payload QuestionPayload `json:"payload"`
 	Answers QuestionAnswers `json:"answers,omitempty"`

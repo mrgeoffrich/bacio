@@ -267,6 +267,63 @@ type BoardCard struct {
 	// `count` field on the value lets the card's tooltip surface
 	// "N attached" when more than one is linked.
 	LatestPR *BoardCardLatestPR `json:"latestPR,omitempty"`
+	// Jobs (Pipeline) is the card's process chain — one entry per stage,
+	// sequence-ordered. The Pipeline page's in-process card renders this
+	// as the job-chain list (which stage is running / done). Empty (and
+	// omitted) when no process has been chosen.
+	Jobs []BoardCardJob `json:"jobs,omitempty"`
+	// CurrentJob (Pipeline) is the job in focus — the running stage, or
+	// the next pending stage when none is running. Nil (and omitted) when
+	// there is no chain or every stage is terminal (e.g. a shipped card).
+	CurrentJob *BoardCardJob `json:"currentJob,omitempty"`
+	// EngineMode (Pipeline) is the controller engine's per-card drive
+	// mode ("off" | "auto"), surfaced only while the card is in_pipeline.
+	// Empty (and omitted) on every other column.
+	EngineMode string `json:"engineMode,omitempty"`
+	// EnginePauseReason (Pipeline) is "" or "open_question" — the latter
+	// while Auto is halted on an open question on the current job.
+	// Surfaced only while the card is in_pipeline.
+	EnginePauseReason string `json:"enginePauseReason,omitempty"`
+}
+
+// BoardCardJob is one stage of a card's Pipeline process chain. Mode is
+// a dispatch-template slug or the "ship" hand-off sentinel; Status is
+// pending / running / complete / cancelled.
+type BoardCardJob struct {
+	Sequence int    `json:"sequence"`
+	Mode     string `json:"mode"`
+	Status   string `json:"status"`
+}
+
+// boardCardJobs shapes a stored job chain into the wire DTO and picks the
+// current job — the running stage, else the first pending stage. Returns
+// (nil, nil) for an empty chain.
+func boardCardJobs(jobs []*model.PipelineJob) ([]BoardCardJob, *BoardCardJob) {
+	if len(jobs) == 0 {
+		return nil, nil
+	}
+	out := make([]BoardCardJob, 0, len(jobs))
+	var running, firstPending *BoardCardJob
+	for _, j := range jobs {
+		dto := BoardCardJob{Sequence: j.Sequence, Mode: j.Mode, Status: string(j.Status)}
+		out = append(out, dto)
+		switch j.Status {
+		case model.JobRunning:
+			if running == nil {
+				d := dto
+				running = &d
+			}
+		case model.JobPending:
+			if firstPending == nil {
+				d := dto
+				firstPending = &d
+			}
+		}
+	}
+	if running != nil {
+		return out, running
+	}
+	return out, firstPending
 }
 
 // BoardCardLatestPlan (BACI-216) is the camelCase mirror of
@@ -361,6 +418,10 @@ type BoardCardQuestion struct {
 	FirstQuestion string    `json:"firstQuestion"`
 	Count         int       `json:"count"`
 	AskedAt       time.Time `json:"askedAt"`
+	// PipelineJobID (Pipeline) is the job this question is parented to,
+	// or nil for a session-parented (legacy / non-pipeline) question.
+	// Lets the Pipeline card render the question against the right stage.
+	PipelineJobID *int64 `json:"pipelineJobId,omitempty"`
 }
 
 // BoardCardTodo is one TodoWrite row surfaced on a kanban card —
@@ -546,6 +607,13 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 	if err != nil {
 		return nil, err
 	}
+	// Pipeline: one bulk read for the per-card job chains. The processing
+	// area on an in_pipeline card renders this collection (job-chain rows,
+	// the current job, the engine's drive mode / pause reason).
+	jobsByIssueID, err := c.PipelineJobsForIssues(ctx, issueIDs)
+	if err != nil {
+		return nil, err
+	}
 
 	cards := make([]BoardCard, 0, len(issues))
 	for _, iss := range issues {
@@ -576,6 +644,16 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 				}
 			}
 		}
+		// Pipeline: shape the job chain + the current (running, else next
+		// pending) job. EngineMode / EnginePauseReason come straight off
+		// the issue row and are surfaced only while the card is
+		// in_pipeline (they're meaningless once it ships).
+		jobs, currentJob := boardCardJobs(jobsByIssueID[iss.ID])
+		engineMode, enginePause := "", ""
+		if iss.State == model.StateInPipeline {
+			engineMode = string(iss.EngineMode)
+			enginePause = iss.EnginePauseReason
+		}
 		cards = append(cards, BoardCard{
 			Key:                iss.Key,
 			Column:             string(iss.State),
@@ -602,6 +680,10 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 			FollowOn:           followOn,
 			LatestPlan:         boardCardLatestPlan(latestPlanByID[iss.ID]),
 			LatestPR:           boardCardLatestPR(latestPRByID[iss.ID]),
+			Jobs:               jobs,
+			CurrentJob:         currentJob,
+			EngineMode:         engineMode,
+			EnginePauseReason:  enginePause,
 		})
 	}
 
@@ -879,6 +961,7 @@ func enrichmentByIssueKey(
 					FirstQuestion: first,
 					Count:         len(q.Payload.Questions),
 					AskedAt:       q.AskedAt,
+					PipelineJobID: q.PipelineJobID,
 				})
 			}
 		}

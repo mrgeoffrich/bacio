@@ -847,6 +847,86 @@ func (b *BoardService) SetIssueState(repoPrefix, key, state string) (BoardCard, 
 	return cardFromIssue(iss, false), nil
 }
 
+// Pipeline (Wails seam): the desktop mirrors of the REST pipeline ops, so
+// the desktop and web Pipeline pages drive the same client methods. Card
+// mutations reshape to a BoardCard (carrying the issue's taken flag);
+// chain mutations return the refreshed job collection.
+
+func (b *BoardService) ReorderCard(repoPrefix, key string, position int) (BoardCard, error) {
+	ctx := context.Background()
+	repo, err := b.resolveRepoForKey(ctx, repoPrefix, key)
+	if err != nil {
+		return BoardCard{}, err
+	}
+	iss, err := b.client.ReorderIssue(ctx, repo, key, position, false)
+	if err != nil {
+		return BoardCard{}, err
+	}
+	return cardFromIssue(iss, iss.Taken), nil
+}
+
+func (b *BoardService) SetCardProcess(repoPrefix, key, process string) ([]*model.PipelineJob, error) {
+	ctx := context.Background()
+	repo, err := b.resolveRepoForKey(ctx, repoPrefix, key)
+	if err != nil {
+		return nil, err
+	}
+	return b.client.SetIssueProcess(ctx, repo, key, process, false)
+}
+
+func (b *BoardService) StartCardJob(repoPrefix, key string) ([]*model.PipelineJob, error) {
+	ctx := context.Background()
+	repo, err := b.resolveRepoForKey(ctx, repoPrefix, key)
+	if err != nil {
+		return nil, err
+	}
+	return b.client.StartPipelineJob(ctx, repo, key)
+}
+
+func (b *BoardService) StopCardJob(repoPrefix, key string) ([]*model.PipelineJob, error) {
+	ctx := context.Background()
+	repo, err := b.resolveRepoForKey(ctx, repoPrefix, key)
+	if err != nil {
+		return nil, err
+	}
+	return b.client.StopPipelineJob(ctx, repo, key)
+}
+
+func (b *BoardService) SetCardEngineMode(repoPrefix, key, mode string) (BoardCard, error) {
+	ctx := context.Background()
+	repo, err := b.resolveRepoForKey(ctx, repoPrefix, key)
+	if err != nil {
+		return BoardCard{}, err
+	}
+	iss, err := b.client.SetEngineMode(ctx, repo, key, mode)
+	if err != nil {
+		return BoardCard{}, err
+	}
+	return cardFromIssue(iss, iss.Taken), nil
+}
+
+func (b *BoardService) ShipCard(repoPrefix, key string) (BoardCard, error) {
+	ctx := context.Background()
+	repo, err := b.resolveRepoForKey(ctx, repoPrefix, key)
+	if err != nil {
+		return BoardCard{}, err
+	}
+	iss, err := b.client.ShipIssue(ctx, repo, key, false)
+	if err != nil {
+		return BoardCard{}, err
+	}
+	return cardFromIssue(iss, iss.Taken), nil
+}
+
+func (b *BoardService) SetAutoShip(repoPrefix string, enabled bool) (bool, error) {
+	ctx := context.Background()
+	repo, err := b.client.GetRepoByPrefix(ctx, repoPrefix)
+	if err != nil {
+		return false, err
+	}
+	return b.client.SetRepoAutoShip(ctx, repo, enabled, false)
+}
+
 // AddComment appends a comment to an issue and returns the refreshed
 // issue-drawer payload. An empty author falls back to the OS username,
 // the same default the CLI uses for human actors. repoPrefix may be empty

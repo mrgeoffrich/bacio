@@ -554,6 +554,10 @@ func (c *remoteClient) ListOpenQuestionsBySessions(ctx context.Context, sessionI
 	return nil, remoteAgentNotSupported("questions")
 }
 
+func (c *remoteClient) PipelineJobsForIssues(ctx context.Context, issueIDs []int64) (map[int64][]*model.PipelineJob, error) {
+	return nil, remoteAgentNotSupported("pipeline-jobs")
+}
+
 func (c *remoteClient) GetSessionQuestion(ctx context.Context, id int64) (*model.SessionQuestion, error) {
 	var out model.SessionQuestion
 	if err := c.do(ctx, http.MethodGet, "/agents/questions/"+strconv.FormatInt(id, 10), nil, nil, &out); err != nil {

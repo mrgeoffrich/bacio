@@ -263,6 +263,25 @@ type Client interface {
 	CreateIssue(ctx context.Context, repo *model.Repo, in inputs.IssueAddInput, dryRun bool) (*model.Issue, error)
 	UpdateIssue(ctx context.Context, repo *model.Repo, key string, edit IssueEdit, dryRun bool) (*model.Issue, error)
 	SetIssueState(ctx context.Context, repo *model.Repo, key string, state model.State, dryRun bool) (*model.Issue, error)
+	// Pipeline verbs (the CLI-facing subset — Start/Stop/engine-mode stay
+	// API/engine-only). ReorderIssue moves a card within its Backlog /
+	// Shipping ordering band; SetIssueProcess materialises a preset job
+	// chain; ShipIssue is the in_pipeline → to_be_shipped hand-off;
+	// SetRepoAutoShip toggles the per-repo Shipping auto-ship.
+	ReorderIssue(ctx context.Context, repo *model.Repo, key string, position int, dryRun bool) (*model.Issue, error)
+	SetIssueProcess(ctx context.Context, repo *model.Repo, key, process string, dryRun bool) ([]*model.PipelineJob, error)
+	ShipIssue(ctx context.Context, repo *model.Repo, key string, dryRun bool) (*model.Issue, error)
+	SetRepoAutoShip(ctx context.Context, repo *model.Repo, enabled, dryRun bool) (bool, error)
+	// StartPipelineJob / StopPipelineJob / SetEngineMode are the engine
+	// controls behind the in-process card's Start / Stop / Auto buttons.
+	// They have no CLI verb (engine/UI only) but ARE on the client so the
+	// desktop (Wails) and web (REST) surfaces drive the engine the same
+	// way. Start/Stop return the refreshed job chain; SetEngineMode the
+	// refreshed issue.
+	StartPipelineJob(ctx context.Context, repo *model.Repo, key string) ([]*model.PipelineJob, error)
+	StopPipelineJob(ctx context.Context, repo *model.Repo, key string) ([]*model.PipelineJob, error)
+	SetEngineMode(ctx context.Context, repo *model.Repo, key, mode string) (*model.Issue, error)
+	GetPipelineJobs(ctx context.Context, repo *model.Repo, key string) ([]*model.PipelineJob, error)
 	AssignIssue(ctx context.Context, repo *model.Repo, key, assignee string, dryRun bool) (*model.Issue, error)
 	UnassignIssue(ctx context.Context, repo *model.Repo, key string, dryRun bool) (*model.Issue, error)
 	DeleteIssue(ctx context.Context, repo *model.Repo, key string, dryRun bool) (deletedIssue *model.Issue, preview *IssueDeletePreview, err error)
@@ -552,6 +571,11 @@ type Client interface {
 	// and TUI agent views to hydrate open questions for every live
 	// session in one trip.
 	ListOpenQuestionsBySessions(ctx context.Context, sessionIDs []string) (map[int64][]*model.SessionQuestion, error)
+	// PipelineJobsForIssues bulk-reads the Pipeline job chains for a set
+	// of issue ids, keyed by issue_id — the board assembler attaches each
+	// in_pipeline card's chain in one query. Server-side only (the board
+	// is assembled local-side), so the remote client stubs it out.
+	PipelineJobsForIssues(ctx context.Context, issueIDs []int64) (map[int64][]*model.PipelineJob, error)
 	// GetSessionQuestion fetches one question by primary key.
 	GetSessionQuestion(ctx context.Context, id int64) (*model.SessionQuestion, error)
 	// AnswerSessionQuestion records the user's answer and flips the
