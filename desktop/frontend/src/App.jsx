@@ -7,6 +7,7 @@ import DocsView from './components/DocsView.jsx';
 import FeaturesView from './components/FeaturesView.jsx';
 import AgentsView from './components/AgentsView.jsx';
 import HistoryView from './components/HistoryView.jsx';
+import PipelineView from './components/PipelineView.jsx';
 import IssueWorkspace from './components/IssueWorkspace.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
 import IssueComposer from './components/IssueComposer.jsx';
@@ -1019,6 +1020,29 @@ export default function App() {
         <Routes>
           {/* Redirect / to /issues so a bare hit lands on the kanban. */}
           <Route path="/" element={<Navigate to={viewPath('board')} replace />} />
+          <Route
+            path="/pipeline"
+            element={
+              <ErrorBoundary headline="Something went wrong in Pipeline" label="The Pipeline view crashed">
+                <PipelineView
+                  cards={cards}
+                  activeBoard={activeBoard}
+                  promptConfig={promptConfig}
+                  onOpenCard={openCard}
+                  onOpenIssue={navigateToIssue}
+                  onDispatch={dispatchFromCard}
+                  onDispatchChain={dispatchChainFromCard}
+                  onCancelWaiting={cancelWaitingFromCard}
+                  onQuickEval={quickEvalComment}
+                  onSetFollowOn={setFollowOnFromCard}
+                  onCancelFollowOn={cancelFollowOnFromCard}
+                  shippedCount={shippedCount}
+                  shippedScope={shippedScope}
+                  onShippedScopeChange={changeShippedScope}
+                />
+              </ErrorBoundary>
+            }
+          />
           <Route
             path="/issues"
             element={
