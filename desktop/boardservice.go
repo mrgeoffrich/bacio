@@ -25,6 +25,8 @@ var stateLabels = map[model.State]string{
 	model.StateInReview:    "In Review",
 	model.StateDone:        "Done",
 	model.StateCancelled:   "Cancelled",
+	model.StateInPipeline:  "In Pipeline",
+	model.StateToBeShipped: "To Be Shipped",
 }
 
 func stateLabel(s model.State) string {

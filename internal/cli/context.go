@@ -214,6 +214,14 @@ func resolveRepo(s *store.Store) (*model.Repo, error) {
 		TargetID: &created.ID, TargetLabel: created.Prefix,
 		Details: "auto-registered (" + created.Name + ")",
 	})
+	// Features are mandatory (Pipeline): seed the catch-all features +
+	// repo default on first registration so issues created in this repo
+	// auto-assign a feature. Best-effort — a blip must not fail repo
+	// registration; the repo still works, just without a default until a
+	// later bootstrap. Idempotent.
+	if err := s.BootstrapRepoDefaults(created.ID); err != nil {
+		fmt.Fprintln(os.Stderr, "bacio: warning: bootstrap repo defaults:", err)
+	}
 	return created, nil
 }
 

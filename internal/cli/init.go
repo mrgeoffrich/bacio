@@ -71,6 +71,11 @@ func newInitCmd() *cobra.Command {
 				TargetID: &repo.ID, TargetLabel: repo.Prefix,
 				Details: "explicit init (" + repo.Name + ")",
 			})
+			// Features are mandatory (Pipeline): seed the catch-all
+			// features + repo default. Best-effort, idempotent.
+			if err := s.BootstrapRepoDefaults(repo.ID); err != nil {
+				fmt.Fprintln(os.Stderr, "bacio: warning: bootstrap repo defaults:", err)
+			}
 
 			// Best-effort: keep the machine-local .bacio/ directory
 			// (sync config, agent identity) out of git. Never fails

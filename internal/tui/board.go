@@ -1991,6 +1991,10 @@ func stateLabel(st model.State) string {
 		return "Done"
 	case model.StateCancelled:
 		return "Cancelled"
+	case model.StateInPipeline:
+		return "In Pipeline"
+	case model.StateToBeShipped:
+		return "To Be Shipped"
 	}
 	return string(st)
 }

@@ -155,6 +155,12 @@ func (c *localClient) EnsureRepo(ctx context.Context, info *git.Info) (*model.Re
 		TargetID: &created.ID, TargetLabel: created.Prefix,
 		Details: "auto-registered (" + created.Name + ")",
 	})
+	// Features are mandatory (Pipeline): seed the catch-all features +
+	// repo default on first registration. Best-effort — a blip must not
+	// fail repo registration. Idempotent.
+	if err := c.store.BootstrapRepoDefaults(created.ID); err != nil {
+		fmt.Fprintln(os.Stderr, "bacio: warning: bootstrap repo defaults:", err)
+	}
 	return created, true, nil
 }
 

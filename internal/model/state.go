@@ -17,11 +17,20 @@ const (
 	StateInReview    State = "in_review"
 	StateDone        State = "done"
 	StateCancelled   State = "cancelled"
+	// StateInPipeline / StateToBeShipped are the Pipeline-page columns.
+	// A card's column is its issue state: In Pipeline = a chain of
+	// dispatch jobs is being run against it by the controller engine;
+	// To Be Shipped = the FIFO queue of finished cards waiting to ship.
+	// Both are non-terminal. They are appended after the legacy set so
+	// every surface that builds columns from AllStates() keeps its
+	// existing ordering; the Pipeline UI keys on these states directly.
+	StateInPipeline  State = "in_pipeline"
+	StateToBeShipped State = "to_be_shipped"
 )
 
 var allStates = []State{
 	StateTodo, StateInProgress, StateNeedsAction, StateInReview,
-	StateDone, StateCancelled,
+	StateDone, StateCancelled, StateInPipeline, StateToBeShipped,
 }
 
 func AllStates() []State { return append([]State(nil), allStates...) }

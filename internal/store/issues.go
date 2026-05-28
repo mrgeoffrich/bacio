@@ -82,6 +82,12 @@ func (s *Store) ResolveCreateIssueFeatureID(repoID int64, suppliedSlug string) (
 // baseBranch (BACI-232) is the per-issue override for the PR base
 // branch — "" → NULL → inherit from the feature (and ultimately main).
 func (s *Store) CreateIssue(repoID int64, featureID *int64, title, description string, state model.State, tags []string, baseBranch string) (*model.Issue, error) {
+	// The issues.state CHECK was dropped (migrateIssuesStateCheck) so the
+	// growing Pipeline state set doesn't need a migration each time; the
+	// enum is now enforced here at the store boundary instead.
+	if _, err := model.ParseState(string(state)); err != nil {
+		return nil, err
+	}
 	title, err := ValidateTitle(title, "title")
 	if err != nil {
 		return nil, err
@@ -346,6 +352,24 @@ func (s *Store) UpdateIssue(id int64, title, description *string, featureID **in
 }
 
 func (s *Store) SetIssueState(id int64, state model.State) error {
+	// Engine-governed gate (Pipeline): a card in a Pipeline column
+	// (in_pipeline / to_be_shipped) has its state owned by the controller
+	// engine. A write that would flip it into a legacy processing state
+	// (in_progress / needs_action / in_review) is ignored — the engine
+	// signals "waiting on the user" via an open question on the job row,
+	// not a state change. Deliberate column moves (todo / in_pipeline /
+	// to_be_shipped / done / cancelled) still apply. A missing id is a
+	// no-op, preserving the pre-guard behaviour (UPDATE affecting 0 rows).
+	var current string
+	switch err := s.DB.QueryRow(`SELECT state FROM issues WHERE id = ?`, id).Scan(&current); {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil
+	case err != nil:
+		return err
+	}
+	if isEngineGovernedState(model.State(current)) && isProcessingState(state) {
+		return nil
+	}
 	// BACI-138: terminal_at follows the state column — stamped on a
 	// transition INTO done/cancelled, cleared on a transition OUT.
 	// The terminalAtClause helper builds a CASE expression that
@@ -455,6 +479,82 @@ func (s *Store) SetIssueArchived(issueID int64, archived bool) error {
 	}
 	_, err := s.DB.Exec(`UPDATE issues SET archived_at = NULL WHERE id = ?`, issueID)
 	return err
+}
+
+// ReorderIssue moves the issue to the given 1-based position within its
+// (repo, state) ordering band and renumbers the band's priorities to a
+// dense 0..n-1 sequence — position 1 → priority 0 → top of the column /
+// next to go. Backs the Pipeline Backlog (todo) and Shipping
+// (to_be_shipped) drag-to-reorder, whose order is persisted rather than
+// living in board-local display state. position is clamped to [1, n].
+//
+// Archived issues are excluded from the band (they are hidden from the
+// queue) and keep whatever priority they had. Renumbering does NOT bump
+// updated_at: priority is local queue-ordering metadata, not user-edited
+// content, so a reorder must not churn the sync last-writer-wins gate —
+// same rationale as SetIssueUserActionReason.
+func (s *Store) ReorderIssue(issueID int64, position int) error {
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var repoID int64
+	var state string
+	err = tx.QueryRow(`SELECT repo_id, state FROM issues WHERE id = ?`, issueID).Scan(&repoID, &state)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+
+	// Current order of the band: by stored priority, then number as a
+	// stable tiebreak (every row starts at priority 0, so number is the
+	// initial order until the first reorder writes dense values).
+	rows, err := tx.Query(
+		`SELECT id FROM issues WHERE repo_id = ? AND state = ? AND archived_at IS NULL ORDER BY priority ASC, number ASC`,
+		repoID, state,
+	)
+	if err != nil {
+		return err
+	}
+	var others []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		if id != issueID {
+			others = append(others, id)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+
+	idx := position - 1
+	if idx < 0 {
+		idx = 0
+	}
+	if idx > len(others) {
+		idx = len(others)
+	}
+	ordered := make([]int64, 0, len(others)+1)
+	ordered = append(ordered, others[:idx]...)
+	ordered = append(ordered, issueID)
+	ordered = append(ordered, others[idx:]...)
+
+	for i, id := range ordered {
+		if _, err := tx.Exec(`UPDATE issues SET priority = ? WHERE id = ?`, i, id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // nextCandidateQ picks the lowest-numbered ready issue in a feature: state='todo',
@@ -885,7 +985,8 @@ SELECT i.id, i.uuid, i.repo_id, i.number, r.prefix, i.feature_id, COALESCE(f.slu
            AND c.released_at IS NULL
            AND s.ended_at IS NULL
        ) AS taken,
-       i.archived_at, i.terminal_at, i.user_action_reason_type, i.base_branch, i.created_at, i.updated_at
+       i.archived_at, i.terminal_at, i.user_action_reason_type, i.base_branch,
+       i.priority, i.engine_mode, i.engine_pause_reason, i.created_at, i.updated_at
 FROM issues i
 JOIN repos r ON r.id = i.repo_id
 LEFT JOIN features f ON f.id = i.feature_id`
@@ -903,10 +1004,12 @@ func scanIssue(row rowScanner) (*model.Issue, error) {
 		terminalAt     sql.NullTime
 		userActionRsn  sql.NullString
 		baseBranch     sql.NullString
+		engineMode     string
 	)
 	err := row.Scan(&i.ID, &i.UUID, &i.RepoID, &i.Number, &prefix, &featureID, &featSlug, &featEmoji, &featBranchName,
 		&i.Title, &i.Description, &state, &i.Assignee, &i.Taken,
-		&archivedAt, &terminalAt, &userActionRsn, &baseBranch, &i.CreatedAt, &i.UpdatedAt)
+		&archivedAt, &terminalAt, &userActionRsn, &baseBranch,
+		&i.Priority, &engineMode, &i.EnginePauseReason, &i.CreatedAt, &i.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -945,6 +1048,7 @@ func scanIssue(row rowScanner) (*model.Issue, error) {
 		b := baseBranch.String
 		i.BaseBranch = &b
 	}
+	i.EngineMode = model.EngineMode(engineMode)
 	return &i, nil
 }
 
