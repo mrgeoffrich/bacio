@@ -1687,7 +1687,7 @@ body { margin: 0; }
   align-items: stretch;
   justify-content: space-between;
   gap: var(--space-4);
-  padding: var(--space-4);
+  padding: 0;
   min-height: 0;
 }
 .mk-pipeline-panel {
@@ -1703,6 +1703,17 @@ body { margin: 0; }
   min-height: 0;
   position: relative;
   transition: width var(--dur-medium) var(--ease-out);
+}
+/* The side panels sit flush to the page edges; square off the outer
+   corners so the border-radius doesn't leave a sliver of background in
+   the very corners. Inner corners (facing the center stage) stay rounded. */
+.mk-pipeline > aside:first-of-type {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.mk-pipeline > aside:last-of-type {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
 }
 .mk-pipeline-panel.is-expanded { width: 70%; }
 .mk-pipeline-panel.is-drop-target {
