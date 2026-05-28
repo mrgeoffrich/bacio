@@ -14,7 +14,6 @@ import { viewPath, viewFromPath } from '../lib/routes';
 // shape server-side.
 export const NAV = [
   { view: 'pipeline', label: 'Pipeline' },
-  { view: 'board', label: 'Issues' },
   { view: 'features', label: 'Features' },
   { view: 'docs', label: 'Documents' },
   { view: 'agents', label: 'Agents' },
