@@ -67,6 +67,10 @@ import { WaitingState, WaitingKind, BoardCardFollowOn } from '../bindings/github
 // below so the Pipeline page imports it from the same ./api seam as
 // everything else (parallels the BoardCardFollowOn import rationale).
 import { PipelineJob } from '../bindings/github.com/mrgeoffrich/bacio/internal/model';
+// ProcessSelection (BACI-283) is the picker's discriminated handback —
+// an explicit stage list or a preset slug. Re-exported below so callers
+// pull it from the ./api seam alongside PipelineJob.
+import type { ProcessSelection } from './lib/pipelineProcesses';
 
 export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureLinkedDoc, FeaturePlan, FeaturePlanEntry, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, ArchivePreferencesDTO, AudioPreferencesDTO, WaitingState, BoardCardFollowOn, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO, SyncSetupDTO, CollisionPreviewDTO, RenumberEntryDTO, RenameEntryDTO, RepoLinkResultDTO, ShippedIssueDTO, ShippedListDTO, LatestPlanDTO };
 // BACI-216: cross-transport alias. The web bundle's api.http.ts ships
@@ -76,6 +80,7 @@ export type LatestPlan = LatestPlanDTO;
 // Phase 4 (Pipeline): re-export PipelineJob so the Pipeline page and its
 // helpers import it from ./api like every other shape.
 export type { PipelineJob };
+export type { ProcessSelection };
 
 // BACI-108: cross-transport aliases — components import from `./api`
 // and stay unaware of whether they're on the Wails or HTTP seam. The
@@ -405,18 +410,23 @@ export async function reorderCard(
   }
 }
 
-// setCardProcess assigns a preset process (see lib/pipelineProcesses),
-// materialising the card's pending job chain. Returns the new chain.
+// setCardProcess assigns a process (see lib/pipelineProcesses),
+// materialising the card's pending job chain. The selection is either an
+// explicit ordered stage list (the cumulative-stepper picker) or a preset
+// slug (the kept skip-Plan buttons) — mutually exclusive. Returns the new
+// chain.
 export async function setCardProcess(
   repoPrefix: string,
   key: string,
-  process: string,
+  selection: ProcessSelection,
 ): Promise<PipelineJob[]> {
   try {
+    const process = 'process' in selection ? selection.process : '';
+    const stages = 'stages' in selection ? selection.stages : [];
     // Wails maps Go []*model.PipelineJob to (PipelineJob | null)[]; the
     // store never returns nil elements, so drop them to match the
     // non-null contract the HTTP twin already satisfies.
-    const jobs = await BoardService.SetCardProcess(repoPrefix, key, process);
+    const jobs = await BoardService.SetCardProcess(repoPrefix, key, process, stages);
     return (jobs ?? []).filter((j): j is PipelineJob => j != null);
   } catch (err) {
     throw normalize(err);

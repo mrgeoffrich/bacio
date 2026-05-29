@@ -431,8 +431,14 @@ export function SetCardEngineMode(repoPrefix: string, key: string, mode: string)
     });
 }
 
-export function SetCardProcess(repoPrefix: string, key: string, process: string): $CancellablePromise<(model$0.PipelineJob | null)[]> {
-    return $Call.ByID(3410649082, repoPrefix, key, process).then(($result: any) => {
+/**
+ * SetCardProcess materialises a card's job chain from either a preset
+ * slug (process) or an explicit ordered stage list (stages) — mutually
+ * exclusive. The cumulative-stepper picker sends stages; the kept
+ * skip-Plan preset buttons send a slug.
+ */
+export function SetCardProcess(repoPrefix: string, key: string, process: string, stages: string[]): $CancellablePromise<(model$0.PipelineJob | null)[]> {
+    return $Call.ByID(3410649082, repoPrefix, key, process, stages).then(($result: any) => {
         return $$createType21($result);
     });
 }
