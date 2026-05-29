@@ -166,17 +166,6 @@ export class BoardCard {
     "terminalAt"?: time$0.Time | null;
 
     /**
-     * FollowOn (BACI-192) is the denormalised view of the dormant
-     * follow-on dispatch attached to this issue's currently in-flight
-     * (parent) dispatch — the single-slot row written by BACI-180's
-     * AddFollowOnDispatch. Drives the kanban card's footer follow-on
-     * button visual state. Nil (and omitted from JSON) when no
-     * dormant follow-on exists; the footer button stays in its
-     * outline state in that case.
-     */
-    "followOn"?: BoardCardFollowOn | null;
-
-    /**
      * LatestPlan (BACI-216) is the newest `plan`-typed document
      * linked directly to this issue, or nil when no plan is linked.
      * Drives the per-card plan icon that opens the doc viewer —
@@ -277,8 +266,7 @@ export class BoardCard {
         const $$createField22_0 = $$createType10;
         const $$createField23_0 = $$createType12;
         const $$createField24_0 = $$createType14;
-        const $$createField25_0 = $$createType16;
-        const $$createField26_0 = $$createType17;
+        const $$createField25_0 = $$createType15;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField5_0($$parsedSource["tags"]);
@@ -298,20 +286,17 @@ export class BoardCard {
         if ("blockedBy" in $$parsedSource) {
             $$parsedSource["blockedBy"] = $$createField18_0($$parsedSource["blockedBy"]);
         }
-        if ("followOn" in $$parsedSource) {
-            $$parsedSource["followOn"] = $$createField22_0($$parsedSource["followOn"]);
-        }
         if ("latestPlan" in $$parsedSource) {
-            $$parsedSource["latestPlan"] = $$createField23_0($$parsedSource["latestPlan"]);
+            $$parsedSource["latestPlan"] = $$createField22_0($$parsedSource["latestPlan"]);
         }
         if ("latestPR" in $$parsedSource) {
-            $$parsedSource["latestPR"] = $$createField24_0($$parsedSource["latestPR"]);
+            $$parsedSource["latestPR"] = $$createField23_0($$parsedSource["latestPR"]);
         }
         if ("jobs" in $$parsedSource) {
-            $$parsedSource["jobs"] = $$createField25_0($$parsedSource["jobs"]);
+            $$parsedSource["jobs"] = $$createField24_0($$parsedSource["jobs"]);
         }
         if ("currentJob" in $$parsedSource) {
-            $$parsedSource["currentJob"] = $$createField26_0($$parsedSource["currentJob"]);
+            $$parsedSource["currentJob"] = $$createField25_0($$parsedSource["currentJob"]);
         }
         return new BoardCard($$parsedSource as Partial<BoardCard>);
     }
@@ -346,51 +331,6 @@ export class BoardCardBlocker {
     static createFrom($$source: any = {}): BoardCardBlocker {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new BoardCardBlocker($$parsedSource as Partial<BoardCardBlocker>);
-    }
-}
-
-/**
- * BoardCardFollowOn (BACI-192) is the denormalised view of the dormant
- * follow-on dispatch attached to this issue. Surfaced on every taken /
- * waiting / blocked-and-idle card so the kanban footer button can
- * render the queued mode without a per-card REST call.
- * 
- * Mode is the prompt-template slug the backend stored on the dispatch
- * row; ActionLabel is the imperative verb (resolved via the same
- * prompt-template lookup as ActiveVerb / WaitingState) so the button
- * label can read "▶| Plan" rather than the bare slug. Nil (and
- * omitted from JSON) when the issue has no dormant follow-on — the
- * renderer only paints the .is-attached state when truthy.
- * 
- * WaitingReason (BACI-217) is a short server-derived label
- * describing what the dormant row is waiting on, when the variant is
- * the blockers-clear gate ("blocked by N"). Empty (and omitted from
- * JSON) for the parent-acks variant (today's BACI-179 default — the
- * chip reads the mode label without a secondary qualifier).
- */
-export class BoardCardFollowOn {
-    "mode": model$0.DispatchMode;
-    "actionLabel": string;
-    "waitingReason"?: string;
-
-    /** Creates a new BoardCardFollowOn instance. */
-    constructor($$source: Partial<BoardCardFollowOn> = {}) {
-        if (!("mode" in $$source)) {
-            this["mode"] = model$0.DispatchMode.$zero;
-        }
-        if (!("actionLabel" in $$source)) {
-            this["actionLabel"] = "";
-        }
-
-        Object.assign(this, $$source);
-    }
-
-    /**
-     * Creates a new BoardCardFollowOn instance from a string or object.
-     */
-    static createFrom($$source: any = {}): BoardCardFollowOn {
-        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
-        return new BoardCardFollowOn($$parsedSource as Partial<BoardCardFollowOn>);
     }
 }
 
@@ -670,12 +610,10 @@ const $$createType5 = BoardCardTodo.createFrom;
 const $$createType6 = $Create.Array($$createType5);
 const $$createType7 = BoardCardBlocker.createFrom;
 const $$createType8 = $Create.Array($$createType7);
-const $$createType9 = BoardCardFollowOn.createFrom;
+const $$createType9 = BoardCardLatestPlan.createFrom;
 const $$createType10 = $Create.Nullable($$createType9);
-const $$createType11 = BoardCardLatestPlan.createFrom;
+const $$createType11 = BoardCardLatestPR.createFrom;
 const $$createType12 = $Create.Nullable($$createType11);
-const $$createType13 = BoardCardLatestPR.createFrom;
-const $$createType14 = $Create.Nullable($$createType13);
-const $$createType15 = BoardCardJob.createFrom;
-const $$createType16 = $Create.Array($$createType15);
-const $$createType17 = $Create.Nullable($$createType15);
+const $$createType13 = BoardCardJob.createFrom;
+const $$createType14 = $Create.Array($$createType13);
+const $$createType15 = $Create.Nullable($$createType13);

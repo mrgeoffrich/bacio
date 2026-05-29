@@ -4,7 +4,6 @@
 export {
     BoardCard,
     BoardCardBlocker,
-    BoardCardFollowOn,
     BoardCardJob,
     BoardCardLatestPR,
     BoardCardLatestPlan,

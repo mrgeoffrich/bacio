@@ -669,36 +669,6 @@ type Client interface {
 	// (repo, mode) FIFO until the matcher binds it.
 	AutoDispatchIssue(ctx context.Context, repo *model.Repo, issueKey, mode string, dryRun bool) (*model.AgentDispatch, error)
 
-	// AutoDispatchIssueWithFollowOn (BACI-209) is the compound enqueue
-	// verb: queues a state-gated auto-pick primary dispatch AND a dormant
-	// follow-on against the brand-new parent, both in one store
-	// transaction. Backs the kanban's "Plan, then Implement" picker on
-	// todo cards, the REST POST /repos/{prefix}/issues/{key}/dispatch-chain
-	// route, and the `bacio agent dispatch-chain` CLI verb so all three
-	// share the same gate + insert + audit-row shape. The primary's
-	// state-gate is re-checked; the follow-on's is the controller's
-	// promote sweep's concern at fire time.
-	AutoDispatchIssueWithFollowOn(ctx context.Context, repo *model.Repo, issueKey, mode, followOnMode string, dryRun bool) (parent, followOn *model.AgentDispatch, err error)
-
-	// QueueFollowOnDispatch (BACI-179 / BACI-180) queues a dormant
-	// follow-on dispatch against the in-flight (parent) dispatch on an
-	// issue: re-resolves the parent via WaitingDispatchForIssue, re-runs
-	// the mode's state-gate against the issue's current state (parity
-	// with AutoDispatchIssue), and rejects when there is no open
-	// dispatch to follow on from. Single-slot per issue — a second call
-	// against the same issue while a dormant follow-on already exists is
-	// rejected at the store boundary. Writes one `agent.followon.queue`
-	// audit row on success, attributed to the calling actor.
-	QueueFollowOnDispatch(ctx context.Context, repo *model.Repo, issueKey, mode string, dryRun bool) (*model.AgentDispatch, error)
-
-	// CancelFollowOnDispatch (BACI-179 / BACI-180) cancels the dormant
-	// follow-on attached to an issue. Idempotent: returns (nil, nil)
-	// when there is no dormant row to cancel (e.g. already promoted,
-	// already cancelled, never existed) so a stale UI click doesn't
-	// error. Writes one `agent.followon.cancel` audit row when a row
-	// actually flipped, attributed to the calling actor.
-	CancelFollowOnDispatch(ctx context.Context, repo *model.Repo, issueKey string, dryRun bool) (*model.AgentDispatch, error)
-
 	// WaitingDispatchForIssue returns the active (queued / pending /
 	// delivered) dispatch targeting an issue, or (nil, nil) when none
 	// exists. Used by the BACI-51 spinner-as-cancel UI to resolve the
