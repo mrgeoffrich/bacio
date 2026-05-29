@@ -192,11 +192,13 @@ export default function PipelineView({
                 card={card}
                 index={i}
                 showBadge={expanded}
+                backlog
                 isDragging={dragKey === card.key}
                 onOpen={() => onOpenCard?.(card)}
                 onDragStart={() => setDragKey(card.key)}
                 onDragEnd={() => { setDragKey(null); setDragOverCol(null); }}
                 onDropCard={() => dropOnCard(card, i)}
+                onMoveCard={onMoveCard}
               />
             ))
           )}
@@ -332,6 +334,7 @@ function PipelineCard({
   index,
   showBadge,
   shipping,
+  backlog,
   isNextToShip,
   autoShip,
   isDragging,
@@ -339,6 +342,7 @@ function PipelineCard({
   onDragStart,
   onDragEnd,
   onDropCard,
+  onMoveCard,
   onShipDispatch,
   onCancelWaiting,
 }) {
@@ -368,6 +372,20 @@ function PipelineCard({
       <CardHead card={card} />
       <h3 className="mk-pl-card-title">{card.title}</h3>
       <CardLabels tags={card.tags} />
+      {backlog && (
+        <div className="mk-pl-card-foot">
+          <span className="mk-pl-spacer" />
+          <button
+            type="button"
+            className="mk-pl-btn is-ghost is-sm"
+            title="Move into the pipeline"
+            aria-label="Move into the pipeline"
+            onClick={(e) => { e.stopPropagation(); onMoveCard?.(card.key, 'in_pipeline'); }}
+          >
+            <Icon name="forward" /> To pipeline
+          </button>
+        </div>
+      )}
       {shipping && (
         <div className="mk-pl-ship-row">
           {shippingInFlight ? (
