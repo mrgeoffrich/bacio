@@ -65,7 +65,8 @@ type Advance struct {
 // Tick runs one pass over every in_pipeline card across all repos:
 // reconcile the running job (complete on ack; halt on an open question),
 // then — only in Auto mode — advance the chain (queue the next job, or
-// hand the card off to to_be_shipped at the ship sentinel / chain end).
+// hand the card off to to_be_shipped at the ship sentinel; a no-Ship
+// process finishes in place once its last stage completes).
 // Read failures stop the tick; a single card's per-card failure is
 // logged and skipped so one bad row doesn't stall the rest. Returns the
 // committed transitions in commit order.
@@ -231,12 +232,22 @@ func (e *Engine) tickIssue(iss *model.Issue) ([]Advance, error) {
 
 // advanceChain advances the card one step: start the next pending agent
 // job, or hand off to to_be_shipped when the next stage is the ship
-// sentinel or the chain is exhausted (§6). Assumes no job is currently
-// running — the caller guarantees that. Shared by the Auto tick and the
-// manual StartNext.
+// sentinel (§6). When the chain is exhausted with no ship sentinel left
+// the card finishes in place — it stays in_pipeline with every job
+// complete and the engine goes idle. A no-Ship process (plan-implement,
+// plan, implement) therefore never auto-hands-off to Shipping; only an
+// explicit ship sentinel triggers the hand-off (BACI-277). Assumes no job
+// is currently running — the caller guarantees that. Shared by the Auto
+// tick and the manual StartNext.
 func (e *Engine) advanceChain(iss *model.Issue, jobs []*model.PipelineJob) ([]Advance, error) {
 	next := firstByStatus(jobs, model.JobPending)
-	if next == nil || next.IsShipHandoff() {
+	if next == nil {
+		// Chain exhausted with no Ship stage left — the card finishes in
+		// place (stays in_pipeline, every job complete). A no-Ship process
+		// never hands off to Shipping automatically (BACI-277).
+		return nil, nil
+	}
+	if next.IsShipHandoff() {
 		return e.handoff(iss)
 	}
 	return e.startJob(iss, next)
@@ -244,8 +255,9 @@ func (e *Engine) advanceChain(iss *model.Issue, jobs []*model.PipelineJob) ([]Ad
 
 // StartNext is the manual "Start" control: advance the card one step
 // regardless of engine mode — start the next pending agent job, or hand
-// off to Shipping at the ship sentinel / chain end. A no-op (nil advance)
-// when a job is already running, or when the card isn't in_pipeline.
+// off to Shipping at the ship sentinel. A no-op (nil advance) when a job
+// is already running, when the card isn't in_pipeline, or when a no-Ship
+// chain is exhausted (the card finishes in place — same as Auto).
 // Shares advanceChain with the Auto tick so manual and auto behave
 // identically.
 func (e *Engine) StartNext(issueID int64) ([]Advance, error) {
@@ -310,7 +322,8 @@ func (e *Engine) StopRunning(issueID int64) ([]Advance, error) {
 // Handoff is the manual "Ship" control (and the in-process Ship stage):
 // move an in_pipeline card to to_be_shipped. A no-op when the card isn't
 // in_pipeline. Same transition the Auto chain reaches at the ship
-// sentinel / chain end.
+// sentinel. A no-Ship-process card never reaches this automatically, but
+// a user may still consciously ship one through this control.
 func (e *Engine) Handoff(issueID int64) ([]Advance, error) {
 	if e == nil || e.st == nil {
 		return nil, nil
