@@ -1,8 +1,10 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/inputio"
@@ -147,6 +149,68 @@ func (d deps) handleIssueJobStop(w http.ResponseWriter, r *http.Request) {
 		_, err := eng.StopRunning(issueID)
 		return err
 	})
+}
+
+// handleIssueJobRerun — POST /repos/{prefix}/issues/{key}/jobs/{seq}/rerun.
+// The per-job Re-run control on an aborted step (BACI-291): reset the
+// cancelled job at {seq} back to pending and re-dispatch it. Returns the
+// refreshed chain. A non-cancelled job yields 409; an unknown seq, 404.
+// Body-less like Start/Stop, but {seq}-scoped because re-run targets a
+// specific aborted job, not "the next pending one".
+func (d deps) handleIssueJobRerun(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	iss, ok := resolveIssueOnRepo(w, r, d.store, repo)
+	if !ok {
+		return
+	}
+	seq, err := strconv.Atoi(r.PathValue("seq"))
+	if err != nil || seq < 1 {
+		writeError(w, http.StatusBadRequest, "invalid_input", "seq must be a positive integer", map[string]any{"field": "seq"})
+		return
+	}
+	jobs, err := d.store.ListPipelineJobs(iss.ID)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	var target *model.PipelineJob
+	for _, j := range jobs {
+		if j.Sequence == seq {
+			target = j
+			break
+		}
+	}
+	if target == nil {
+		writeError(w, http.StatusNotFound, "not_found", fmt.Sprintf("no job at sequence %d", seq), nil)
+		return
+	}
+	if _, err := pipeline.New(d.store).WithLogger(d.logger).RerunJob(iss.ID, target.ID); err != nil {
+		if errors.Is(err, pipeline.ErrJobNotCancelled) {
+			writeError(w, http.StatusConflict, "conflict", err.Error(), map[string]any{"field": "seq"})
+			return
+		}
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	recordOp(d.store, d.logger, model.HistoryEntry{
+		RepoID: &iss.RepoID, RepoPrefix: repo.Prefix,
+		Actor: ActorFromContext(r.Context()),
+		Op:    "issue.job.rerun", Kind: "issue",
+		TargetID: &iss.ID, TargetLabel: iss.Key,
+		Details: fmt.Sprintf("seq=%d mode=%s", target.Sequence, target.Mode),
+	})
+	jobs, err = d.store.ListPipelineJobs(iss.ID)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, jobs)
 }
 
 // handleIssueShip — POST /repos/{prefix}/issues/{key}/ship. The hand-off:

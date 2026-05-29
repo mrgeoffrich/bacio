@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -648,6 +649,184 @@ func TestEngineStopRunning(t *testing.T) {
 	}
 	if runningJob(t, s, iss.ID) != nil {
 		t.Fatal("post-stop tick started a new job despite Auto off")
+	}
+}
+
+// claimRunningJob stands in for "a worker opened its claim on the card and
+// is running the in-flight job": register a session and open a claim on
+// the issue, returning the external session id the steer message targets.
+func claimRunningJob(t *testing.T, s *store.Store, iss *model.Issue, sessionID string) string {
+	t.Helper()
+	if _, err := s.UpsertAgentSession(store.UpsertAgentSessionIn{
+		SessionID: sessionID, RepoID: iss.RepoID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register session: %v", err)
+	}
+	if _, _, _, _, err := s.AddAgentClaim(sessionID, iss.ID, "implement"); err != nil {
+		t.Fatalf("add claim: %v", err)
+	}
+	return sessionID
+}
+
+// TestStopRunningSteersWorker: when a worker holds an open claim on the
+// stopped card, Stop enqueues the canned wind-down steer message at that
+// session (alongside the existing cancel + Auto-halt bookkeeping).
+func TestStopRunningSteersWorker(t *testing.T) {
+	s := newEngineStore(t)
+	_, iss := seedPipelineCard(t, s, "STR", "plan-implement", model.EngineAuto)
+	eng := New(s)
+
+	if _, err := eng.Tick(); err != nil { // Auto starts the plan job
+		t.Fatalf("tick: %v", err)
+	}
+	if runningJob(t, s, iss.ID) == nil {
+		t.Fatal("no running job to stop")
+	}
+	sessionID := claimRunningJob(t, s, iss, "11111111-1111-1111-1111-111111111111")
+
+	if _, err := eng.StopRunning(iss.ID); err != nil {
+		t.Fatalf("StopRunning: %v", err)
+	}
+
+	// Bookkeeping still happened.
+	jobs, _ := s.ListPipelineJobs(iss.ID)
+	if jobs[0].Status != model.JobCancelled {
+		t.Fatalf("job 1 status = %s, want cancelled", jobs[0].Status)
+	}
+	if got, _ := s.GetIssueByID(iss.ID); got.EngineMode != model.EngineOff {
+		t.Fatalf("engine mode = %s, want off", got.EngineMode)
+	}
+
+	// AND the worker got the steer message.
+	msgs, err := s.DrainUserMessagesForSession(sessionID)
+	if err != nil {
+		t.Fatalf("drain messages: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("steer messages = %d, want 1", len(msgs))
+	}
+	if msgs[0].Body != stopWorkerSteerBody {
+		t.Fatalf("steer body = %q, want the canned stop body", msgs[0].Body)
+	}
+}
+
+// TestStopRunningNoClaimNoMessage: a running job with no open claim/session
+// (dispatch never delivered, or worker already released) is still cancelled
+// and Auto halted, but no steer message is written and Stop doesn't error.
+func TestStopRunningNoClaimNoMessage(t *testing.T) {
+	s := newEngineStore(t)
+	_, iss := seedPipelineCard(t, s, "NCM", "plan-implement", model.EngineAuto)
+	eng := New(s)
+
+	if _, err := eng.Tick(); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if runningJob(t, s, iss.ID) == nil {
+		t.Fatal("no running job to stop")
+	}
+	// Register a session but DON'T claim the issue — no open claim to steer.
+	otherSession := "22222222-2222-2222-2222-222222222222"
+	if _, err := s.UpsertAgentSession(store.UpsertAgentSessionIn{
+		SessionID: otherSession, RepoID: iss.RepoID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("register session: %v", err)
+	}
+
+	if _, err := eng.StopRunning(iss.ID); err != nil {
+		t.Fatalf("StopRunning: %v", err)
+	}
+	jobs, _ := s.ListPipelineJobs(iss.ID)
+	if jobs[0].Status != model.JobCancelled {
+		t.Fatalf("job 1 status = %s, want cancelled", jobs[0].Status)
+	}
+	msgs, err := s.DrainUserMessagesForSession(otherSession)
+	if err != nil {
+		t.Fatalf("drain messages: %v", err)
+	}
+	if len(msgs) != 0 {
+		t.Fatalf("steer messages = %d, want 0 (no open claim)", len(msgs))
+	}
+}
+
+// TestRerunJobRedispatches: Stop a running job (now cancelled), then
+// RerunJob on it → the job is running again with a fresh dispatch, and the
+// reset cleared then re-stamped started_at.
+func TestRerunJobRedispatches(t *testing.T) {
+	s := newEngineStore(t)
+	_, iss := seedPipelineCard(t, s, "RRN", "plan-implement", model.EngineAuto)
+	eng := New(s)
+
+	if _, err := eng.Tick(); err != nil { // Auto starts plan
+		t.Fatalf("tick: %v", err)
+	}
+	job := runningJob(t, s, iss.ID)
+	if job == nil {
+		t.Fatal("no running job")
+	}
+	firstDispatch := *job.DispatchID
+
+	if _, err := eng.StopRunning(iss.ID); err != nil {
+		t.Fatalf("StopRunning: %v", err)
+	}
+
+	adv, err := eng.RerunJob(iss.ID, job.ID)
+	if err != nil {
+		t.Fatalf("RerunJob: %v", err)
+	}
+	if len(adv) != 1 || adv[0].Kind != "job.start" {
+		t.Fatalf("advances = %+v, want one job.start", adv)
+	}
+	got, _ := s.GetPipelineJob(job.ID)
+	if got.Status != model.JobRunning {
+		t.Fatalf("re-run job status = %s, want running", got.Status)
+	}
+	if got.DispatchID == nil || *got.DispatchID == firstDispatch {
+		t.Fatalf("re-run dispatch = %v, want a fresh one (not %d)", got.DispatchID, firstDispatch)
+	}
+	if got.StartedAt == nil {
+		t.Fatal("re-run job started_at not re-stamped")
+	}
+	if got.CompletedAt != nil {
+		t.Fatalf("re-run job completed_at = %v, want nil (reset cleared it)", got.CompletedAt)
+	}
+}
+
+// TestRerunJobRejectsNonCancelled: RerunJob on a complete job returns
+// ErrJobNotCancelled; on a running job (one already in flight) it's a
+// no-op (nil) so it never double-dispatches.
+func TestRerunJobRejectsNonCancelled(t *testing.T) {
+	s := newEngineStore(t)
+	_, iss := seedPipelineCard(t, s, "RRJ", "plan-implement", model.EngineAuto)
+	eng := New(s)
+
+	if _, err := eng.Tick(); err != nil { // Auto starts plan
+		t.Fatalf("tick: %v", err)
+	}
+	job := runningJob(t, s, iss.ID)
+	if job == nil {
+		t.Fatal("no running job")
+	}
+
+	// A running job → no-op (a job is in flight), not an error.
+	adv, err := eng.RerunJob(iss.ID, job.ID)
+	if err != nil {
+		t.Fatalf("RerunJob on running: unexpected err %v", err)
+	}
+	if adv != nil {
+		t.Fatalf("RerunJob on running returned %+v, want nil (no-op)", adv)
+	}
+
+	// Complete the plan job (ack), then re-run it → ErrJobNotCancelled.
+	simulateWorkerAck(t, s, *job.DispatchID)
+	if _, err := eng.Tick(); err != nil { // reconcile → complete, advance starts implement
+		t.Fatalf("tick: %v", err)
+	}
+	// Stop the now-running implement so no job is in flight for the guard test.
+	if _, err := eng.StopRunning(iss.ID); err != nil {
+		t.Fatalf("StopRunning: %v", err)
+	}
+	if _, err := eng.RerunJob(iss.ID, job.ID); !errors.Is(err, ErrJobNotCancelled) {
+		t.Fatalf("RerunJob on complete job err = %v, want ErrJobNotCancelled", err)
 	}
 }
 

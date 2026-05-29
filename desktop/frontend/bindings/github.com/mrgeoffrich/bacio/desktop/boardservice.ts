@@ -402,6 +402,17 @@ export function ReorderCard(repoPrefix: string, key: string, position: number): 
 }
 
 /**
+ * RerunCardJob re-runs an aborted (cancelled) job at the given 1-based
+ * sequence — the BACI-291 per-job Re-run control. Returns the refreshed
+ * chain.
+ */
+export function RerunCardJob(repoPrefix: string, key: string, seq: number): $CancellablePromise<(model$0.PipelineJob | null)[]> {
+    return $Call.ByID(1469568566, repoPrefix, key, seq).then(($result: any) => {
+        return $$createType24($result);
+    });
+}
+
+/**
  * RescueDispatch (BACI-190) posts a `from="bacio-rescue"` channel
  * event to an idle supervisor session, asking it to handle a dead
  * worker's stranded worktree INLINE. Eligibility (status pending /
@@ -427,7 +438,7 @@ export function RescueDispatch(dispatchID: number): $CancellablePromise<$models.
  */
 export function SendSessionMessage(sessionID: string, body: string): $CancellablePromise<model$0.UserMessage | null> {
     return $Call.ByID(23283136, sessionID, body).then(($result: any) => {
-        return $$createType23($result);
+        return $$createType26($result);
     });
 }
 
@@ -471,7 +482,7 @@ export function SetCardEngineMode(repoPrefix: string, key: string, mode: string)
  */
 export function SetCardProcess(repoPrefix: string, key: string, process: string, stages: string[]): $CancellablePromise<(model$0.PipelineJob | null)[]> {
     return $Call.ByID(3410649082, repoPrefix, key, process, stages).then(($result: any) => {
-        return $$createType26($result);
+        return $$createType24($result);
     });
 }
 
@@ -507,13 +518,13 @@ export function ShipCard(repoPrefix: string, key: string): $CancellablePromise<$
 
 export function StartCardJob(repoPrefix: string, key: string): $CancellablePromise<(model$0.PipelineJob | null)[]> {
     return $Call.ByID(2998495872, repoPrefix, key).then(($result: any) => {
-        return $$createType26($result);
+        return $$createType24($result);
     });
 }
 
 export function StopCardJob(repoPrefix: string, key: string): $CancellablePromise<(model$0.PipelineJob | null)[]> {
     return $Call.ByID(39478934, repoPrefix, key).then(($result: any) => {
-        return $$createType26($result);
+        return $$createType24($result);
     });
 }
 
@@ -573,8 +584,8 @@ const $$createType18 = $models.BoardColumn.createFrom;
 const $$createType19 = $Create.Array($$createType18);
 const $$createType20 = $Create.Array($$createType13);
 const $$createType21 = $models.ShippedListDTO.createFrom;
-const $$createType22 = model$0.UserMessage.createFrom;
+const $$createType22 = model$0.PipelineJob.createFrom;
 const $$createType23 = $Create.Nullable($$createType22);
-const $$createType24 = model$0.PipelineJob.createFrom;
-const $$createType25 = $Create.Nullable($$createType24);
-const $$createType26 = $Create.Array($$createType25);
+const $$createType24 = $Create.Array($$createType23);
+const $$createType25 = model$0.UserMessage.createFrom;
+const $$createType26 = $Create.Nullable($$createType25);

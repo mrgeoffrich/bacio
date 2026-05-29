@@ -42,6 +42,7 @@ export default function PipelineView({
   onSetProcess,
   onStartJob,
   onStopJob,
+  onRerunJob,
   onSetEngineMode,
   onShip,
   onSetAutoShip,
@@ -320,6 +321,7 @@ export default function PipelineView({
                   onSetProcess={onSetProcess}
                   onStartJob={onStartJob}
                   onStopJob={onStopJob}
+                  onRerunJob={onRerunJob}
                   onSetEngineMode={onSetEngineMode}
                   onShip={onShip}
                   onOpenQuestion={(id) => setActiveQuestionId(id)}
@@ -579,6 +581,7 @@ function StageCard({
   onSetProcess,
   onStartJob,
   onStopJob,
+  onRerunJob,
   onSetEngineMode,
   onShip,
   onOpenQuestion,
@@ -589,9 +592,17 @@ function StageCard({
   const hasProcess = jobs.length > 0;
   const running = jobs.find(j => j.status === 'running') || null;
   const nonShip = jobs.filter(j => !isShipStage(j.mode));
-  const allDone = nonShip.length > 0 && !running &&
-    nonShip.every(j => j.status === 'complete' || j.status === 'cancelled');
   const nextPending = jobs.find(j => j.status === 'pending');
+  // allDone = every non-ship job is complete (cancelled deliberately does
+  // NOT count — a Stopped job is Aborted, not "ready to hand off"; Ship
+  // stays disabled on it).
+  const allDone = nonShip.length > 0 && !running &&
+    nonShip.every(j => j.status === 'complete');
+  // aborted = the chain is wedged on a cancelled job — nothing running, no
+  // pending step left to auto-run, and at least one non-ship job cancelled.
+  // The user re-runs the aborted step (or Edits the process) to proceed.
+  const aborted = !running && !nextPending &&
+    nonShip.some(j => j.status === 'cancelled');
   const engineAuto = card.engineMode === 'auto';
   const question = (card.openQuestions || [])[0] || null;
   // BACI-296: a worker that died on a transient Anthropic API error halts
@@ -631,6 +642,11 @@ function StageCard({
               <QuestionPanel question={question} onOpenQuestion={onOpenQuestion} />
             ) : allDone ? (
               <DoneBox jobs={nonShip} />
+            ) : aborted ? (
+              <AbortedBox
+                jobs={nonShip}
+                onRerunJob={(seq) => onRerunJob?.(card.key, seq)}
+              />
             ) : running ? (
               <ActiveJob card={card} job={running} />
             ) : (
@@ -782,6 +798,38 @@ function DoneBox({ jobs }) {
         <span className="mk-pl-jmode is-done">Done</span>
         <span className="mk-pl-jmeta">{total} of {total} jobs complete · ready to hand off</span>
       </div>
+    </div>
+  );
+}
+
+// AbortedBox — the chain is wedged on one or more Stopped (cancelled)
+// jobs. Each aborted job gets a Re-run control that resets it to pending
+// and re-dispatches it. Ship stays disabled until every job is complete.
+function AbortedBox({ jobs, onRerunJob }) {
+  const cancelled = jobs.filter(j => j.status === 'cancelled');
+  return (
+    <div className="mk-pl-job is-aborted">
+      <div className="mk-pl-job-head">
+        <span className="mk-pl-jmode is-aborted">Aborted</span>
+        <span className="mk-pl-jmeta">
+          {cancelled.length === 1 ? 'Stopped before it finished' : `${cancelled.length} stopped jobs`}
+          {' · re-run to continue'}
+        </span>
+      </div>
+      <ul className="mk-pl-aborted-list">
+        {cancelled.map(j => (
+          <li key={j.sequence} className="mk-pl-aborted-item">
+            <span className="mk-pl-aborted-lbl">{stageLabel(j.mode)}</span>
+            <button
+              type="button"
+              className="mk-pl-btn is-sm mk-pl-rerun"
+              onClick={() => onRerunJob?.(j.sequence)}
+            >
+              ↻ Re-run
+            </button>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

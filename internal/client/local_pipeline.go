@@ -106,8 +106,10 @@ func (c *localClient) StartPipelineJob(ctx context.Context, repo *model.Repo, ke
 	return c.store.ListPipelineJobs(iss.ID)
 }
 
-// StopPipelineJob is the manual Stop control: cancel the running job and
-// halt Auto. Returns the refreshed chain.
+// StopPipelineJob is the manual Stop control: cancel the running job, halt
+// Auto, and signal the running worker to wind down (the engine enqueues a
+// BACI-291 steer message at the worker's open claim session). Returns the
+// refreshed chain.
 func (c *localClient) StopPipelineJob(ctx context.Context, repo *model.Repo, key string) ([]*model.PipelineJob, error) {
 	iss, err := c.GetIssueByKey(ctx, repo, key)
 	if err != nil {
@@ -119,6 +121,39 @@ func (c *localClient) StopPipelineJob(ctx context.Context, repo *model.Repo, key
 	c.recordOp(model.HistoryEntry{
 		RepoID: &iss.RepoID, RepoPrefix: repo.Prefix,
 		Op: "issue.job.stop", Kind: "issue", TargetID: &iss.ID, TargetLabel: iss.Key,
+	})
+	return c.store.ListPipelineJobs(iss.ID)
+}
+
+// RerunPipelineJob is the per-job Re-run control on an aborted step
+// (BACI-291): resolve the cancelled job at the 1-based seq, reset it to
+// pending, and re-dispatch it. Returns the refreshed chain.
+func (c *localClient) RerunPipelineJob(ctx context.Context, repo *model.Repo, key string, seq int) ([]*model.PipelineJob, error) {
+	iss, err := c.GetIssueByKey(ctx, repo, key)
+	if err != nil {
+		return nil, err
+	}
+	jobs, err := c.store.ListPipelineJobs(iss.ID)
+	if err != nil {
+		return nil, err
+	}
+	var target *model.PipelineJob
+	for _, j := range jobs {
+		if j.Sequence == seq {
+			target = j
+			break
+		}
+	}
+	if target == nil {
+		return nil, fmt.Errorf("no job at sequence %d", seq)
+	}
+	if _, err := pipeline.New(c.store).RerunJob(iss.ID, target.ID); err != nil {
+		return nil, err
+	}
+	c.recordOp(model.HistoryEntry{
+		RepoID: &iss.RepoID, RepoPrefix: repo.Prefix,
+		Op: "issue.job.rerun", Kind: "issue", TargetID: &iss.ID, TargetLabel: iss.Key,
+		Details: fmt.Sprintf("seq=%d mode=%s", target.Sequence, target.Mode),
 	})
 	return c.store.ListPipelineJobs(iss.ID)
 }

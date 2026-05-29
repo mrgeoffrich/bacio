@@ -2800,6 +2800,16 @@ export async function stopCardJob(
   });
 }
 
+export async function rerunCardJob(
+  repoPrefix: string,
+  key: string,
+  seq: number,
+): Promise<PipelineJob[]> {
+  return await call<PipelineJob[]>(`/repos/${repoPrefix}/issues/${key}/jobs/${seq}/rerun`, {
+    method: 'POST',
+  });
+}
+
 export async function setEngineMode(
   repoPrefix: string,
   key: string,

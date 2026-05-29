@@ -743,6 +743,14 @@ export default function App() {
       .catch(err => reportError(err, { headline: "Couldn't stop the job" }));
   }, [activeBoard, refreshCards]);
 
+  // Per-job Re-run — reset an aborted (stopped) step to pending and
+  // re-dispatch it (BACI-291). seq is the job's 1-based sequence.
+  const rerunCardJob = useCallback((key, seq) => {
+    api.rerunCardJob(activeBoard, key, seq)
+      .then(() => refreshCards({ silent: true }))
+      .catch(err => reportError(err, { headline: "Couldn't re-run the job" }));
+  }, [activeBoard, refreshCards]);
+
   // Engine drive-mode toggle ("off" | "auto"). Optimistic flip on the
   // card so the switch reacts on click; the refresh re-asserts.
   const setCardEngineMode = useCallback((key, mode) => {
@@ -1151,6 +1159,7 @@ export default function App() {
                   onSetProcess={setCardProcess}
                   onStartJob={startCardJob}
                   onStopJob={stopCardJob}
+                  onRerunJob={rerunCardJob}
                   onSetEngineMode={setCardEngineMode}
                   onShip={shipCardFromPipeline}
                   onSetAutoShip={setRepoAutoShip}

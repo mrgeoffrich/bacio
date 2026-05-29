@@ -104,6 +104,60 @@ func TestPipelineJobsLifecycle(t *testing.T) {
 	}
 }
 
+// TestResetPipelineJobToPending: a terminal job carrying started_at,
+// completed_at, and a dispatch_id is rewound to pending with all three
+// cleared — the inverse of SetPipelineJobStatus's COALESCE stamping, which
+// the BACI-291 re-run path relies on so a re-dispatch stamps fresh.
+func TestResetPipelineJobToPending(t *testing.T) {
+	s, _, iss := seedRepoAndIssue(t)
+
+	proc, err := model.ProcessBySlug("plan-implement")
+	if err != nil {
+		t.Fatalf("ProcessBySlug: %v", err)
+	}
+	jobs, err := s.SetIssueProcess(iss.ID, proc)
+	if err != nil {
+		t.Fatalf("SetIssueProcess: %v", err)
+	}
+
+	// Run then complete the first job, pinning a real dispatch row.
+	if err := s.SetPipelineJobStatus(jobs[0].ID, model.JobRunning); err != nil {
+		t.Fatalf("SetPipelineJobStatus running: %v", err)
+	}
+	res, err := s.DB.Exec(`INSERT INTO agent_dispatches (repo_id, created_by, status) VALUES (?, 'test', 'queued')`, iss.RepoID)
+	if err != nil {
+		t.Fatalf("seed dispatch: %v", err)
+	}
+	dispatchID, _ := res.LastInsertId()
+	if err := s.SetPipelineJobDispatch(jobs[0].ID, &dispatchID); err != nil {
+		t.Fatalf("SetPipelineJobDispatch: %v", err)
+	}
+	if err := s.SetPipelineJobStatus(jobs[0].ID, model.JobComplete); err != nil {
+		t.Fatalf("SetPipelineJobStatus complete: %v", err)
+	}
+	got, _ := s.GetPipelineJob(jobs[0].ID)
+	if got.StartedAt == nil || got.CompletedAt == nil || got.DispatchID == nil {
+		t.Fatalf("precondition: expected stamps set, got %+v", got)
+	}
+
+	if err := s.ResetPipelineJobToPending(jobs[0].ID); err != nil {
+		t.Fatalf("ResetPipelineJobToPending: %v", err)
+	}
+	got, _ = s.GetPipelineJob(jobs[0].ID)
+	if got.Status != model.JobPending {
+		t.Fatalf("status = %q, want pending", got.Status)
+	}
+	if got.StartedAt != nil {
+		t.Fatalf("started_at = %v, want nil", got.StartedAt)
+	}
+	if got.CompletedAt != nil {
+		t.Fatalf("completed_at = %v, want nil", got.CompletedAt)
+	}
+	if got.DispatchID != nil {
+		t.Fatalf("dispatch_id = %v, want nil", got.DispatchID)
+	}
+}
+
 // TestSetIssueStateTearsDownPipelineRunOnLeave: dragging a card out of
 // in_pipeline (back to Backlog) cancels its running job + dispatch and
 // disarms Auto, so a worker isn't orphaned and a stale running row can't
