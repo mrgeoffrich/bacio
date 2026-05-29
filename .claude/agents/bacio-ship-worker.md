@@ -148,16 +148,14 @@ the same blocker the review pass would flag.
 ## Close out
 
 1. Drop the worktree's bacio environment with `bacio worktree rm <path> --confirm <slug>` (Claude Code removes the git worktree itself).
-2. Release the claim and mark the issue **done** in one atomic step:
-   `bacio agent release <issue_id> --state done` (BACI-126c —
-   `--state` is required; replaces the old two-step "set state, then
-   release" dance).
+2. Release the claim with `bacio agent release <issue_id>` — claim-drop
+   only, no `--state`. The ship agent runs from the Shipping column
+   (`to_be_shipped`); the controller's auto-ship tick advances the card
+   to **done** once your dispatch is acked. Don't set the state yourself.
 
 ## Questions
 
-If anything in this brief is ambiguous, batch up to 4 clarifications into ONE `mcp__bacio__ask_user_question` call BEFORE doing speculative work — rework costs more than answering. Prefer it over the built-in AskUserQuestion: it surfaces in your supervisor's TUI/desktop/web with the issue context. Pass `issue_id: <issue_id>` in the call so the question surfaces on the right kanban card.
-
-Once you get a reply from the user please run `bacio issue state <issue_id> in_progress`
+If anything in this brief is ambiguous, batch up to 4 clarifications into ONE `mcp__bacio__ask_user_question` call BEFORE doing speculative work — rework costs more than answering. Prefer it over the built-in AskUserQuestion: it surfaces in your supervisor's TUI/desktop/web with the issue context. Pass `issue_id: <issue_id>` in the call so the question surfaces on the right kanban card. An open question is itself the "waiting on the user" signal — the pipeline engine halts the chain while it's open and resumes once you answer it. Do **not** change the issue state yourself.
 
 ## Reply when done
 
