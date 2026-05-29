@@ -10,11 +10,16 @@ type IssueReorderInput struct {
 }
 
 // IssueProcessInput is the payload for `bacio issue process set --json`
-// and POST …/issues/{key}/process. Process is a preset slug
-// (model.PipelineProcesses) — e.g. "plan-implement-ship".
+// and POST …/issues/{key}/process. Exactly one of Process or Stages is
+// required (they are mutually exclusive). Process is a preset slug
+// (model.PipelineProcesses) — e.g. "plan-implement-ship". Stages is an
+// explicit ordered list of job modes (e.g. ["design","plan_large",
+// "implement","ship"]) for an arbitrary chain the named presets don't
+// enumerate — validated via model.ProcessFromStages.
 type IssueProcessInput struct {
-	Key     string `json:"key"`
-	Process string `json:"process"`
+	Key     string   `json:"key"`
+	Process string   `json:"process,omitempty"`
+	Stages  []string `json:"stages,omitempty"`
 }
 
 // IssueEngineModeInput is the payload for the engine drive-mode toggle

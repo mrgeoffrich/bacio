@@ -44,6 +44,9 @@ var (
 		Key:      "MINI-42",
 		Position: 1,
 	}
+	// Worked example uses the preset-slug path; an explicit ordered
+	// stage list (Stages: []string{"design","plan_large","implement",
+	// "ship"}) is the mutually-exclusive alternative for arbitrary chains.
 	ExampleIssueProcess = IssueProcessInput{
 		Key:     "MINI-42",
 		Process: "plan-implement-ship",

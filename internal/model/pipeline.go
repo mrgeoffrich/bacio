@@ -206,3 +206,23 @@ func ProcessFromStages(stages []string) (Process, error) {
 		Stages: norm,
 	}, nil
 }
+
+// ResolveProcess picks the right constructor for the `issue process set`
+// payload: exactly one of slug / stages must be set (mutually
+// exclusive), and the resulting Process is the materialisation source.
+// Centralised here so the API handler and the local client share one
+// both/neither guard rather than each re-deriving it.
+func ResolveProcess(slug string, stages []string) (Process, error) {
+	hasSlug := strings.TrimSpace(slug) != ""
+	hasStages := len(stages) > 0
+	switch {
+	case hasSlug && hasStages:
+		return Process{}, fmt.Errorf("process and stages are mutually exclusive")
+	case hasStages:
+		return ProcessFromStages(stages)
+	case hasSlug:
+		return ProcessBySlug(slug)
+	default:
+		return Process{}, fmt.Errorf("either process (preset slug) or stages (ordered list) is required")
+	}
+}
