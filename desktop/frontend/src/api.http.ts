@@ -2015,12 +2015,13 @@ export async function saveDoc(
   if (!repoPrefix || repoPrefix === 'all') {
     throw new Error('select a repository to save documents');
   }
-  // PUT (upsert) mirrors the desktop's SaveDoc / CLI's `doc upsert` —
-  // the document already exists from the list, and PATCH would be a
-  // body-only edit. Keep the existing type by re-fetching after the
-  // write; the upsert handler only returns the persisted row.
+  // PATCH (body-only edit) mirrors the desktop's SaveDoc → EditDocument:
+  // the document already exists, so we only push the new content and leave
+  // its type untouched. PUT is the upsert handler and requires `type`, so
+  // saving body-only against it 400s. The edit handler returns the
+  // refreshed row without its body, so re-fetch to get the content back.
   await call<unknown>(`/repos/${repoPrefix}/documents/${filename}`, {
-    method: 'PUT',
+    method: 'PATCH',
     body: { content },
   });
   return getDoc(repoPrefix, filename);
