@@ -10,8 +10,6 @@ import PipelineView from './components/PipelineView.jsx';
 import IssueWorkspace from './components/IssueWorkspace.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
 import IssueComposer from './components/IssueComposer.jsx';
-import ActivityTray from './components/ActivityTray.jsx';
-import { readPinnedKeys, persistPinnedKeys } from './components/activityTrayPinPersistence';
 import { readShippedScope, persistShippedScope } from './components/shippedScopePersistence.ts';
 import { scopeSinceDays } from './components/shippedScope.ts';
 import SettingsView from './components/SettingsView.jsx';
@@ -127,13 +125,6 @@ export default function App() {
   // dispatch. Standby processes show a chip and disable the per-card button.
   const [leaderState, setLeaderState] = useState({ amLeader: false, holderLabel: '' });
   const [theme, setTheme] = useState(readTheme);
-  // BACI-192: the per-repo set of issue keys the user has pinned to the
-  // activity tray via the kanban card's top-right corner button. Lives
-  // in App state so both the board (corner state on each card) and the
-  // tray (PINNED section) re-render on toggle. Seeded from localStorage
-  // on mount + on every repo switch — the persisted shape is per-repo
-  // because an issue key is only meaningful inside its repo.
-  const [pinnedKeys, setPinnedKeys] = useState(() => readPinnedKeys(readActiveRepo()));
   const [loading, setLoading] = useState(true);
 
   // BACI-203: derive the active view from the URL path. The Topbar
@@ -297,76 +288,6 @@ export default function App() {
   useEffect(() => {
     if (activeBoard) persistActiveRepo(activeBoard);
   }, [activeBoard]);
-
-  // BACI-192: re-seed the pinned set on every repo switch (the storage
-  // shape is per-repo). The mount-time read in useState's lazy
-  // initialiser already covers the first paint; this covers subsequent
-  // active-board changes so the new repo's pins land immediately.
-  useEffect(() => {
-    setPinnedKeys(readPinnedKeys(activeBoard));
-  }, [activeBoard]);
-
-  // togglePinKey flips an issue key's membership in the per-repo
-  // pinned set and persists. Threaded to KanbanCard's corner button
-  // and to ActivityTray's dismiss-pinned-row path so both surfaces
-  // converge on the same setter. Pure-client mutation — no network.
-  const togglePinKey = useCallback((key) => {
-    if (!key) return;
-    setPinnedKeys(prev => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      persistPinnedKeys(activeBoard, next);
-      return next;
-    });
-  }, [activeBoard]);
-
-  // BACI-197: cross-link cues between the Activity tray and the kanban
-  // board. `hoveredKey` is the tray row the cursor is currently over —
-  // the matching board card lights up via the `is-tray-hover` class.
-  // `jumpKey` is the card that just got clicked in the tray — it plays
-  // a brief CSS keyframe ("jump") so the user can see which row they
-  // hit. Both are ephemeral interaction state; no persistence. The
-  // hover handler is just setHoveredKey; the jump handler runs through
-  // triggerJump so it can clear automatically after the animation.
-  const [hoveredKey, setHoveredKey] = useState(null);
-  const [jumpKey, setJumpKey] = useState(null);
-  // JUMP_MS mirrors --dur-slow (240ms) in app.css — kept in sync with
-  // the `mk-card-jump` keyframe duration. The timer ref lets us cancel
-  // a still-running jump if a second click lands so the next jump
-  // restarts cleanly rather than half-animating.
-  const jumpTimerRef = useRef(null);
-  const triggerJump = useCallback((key) => {
-    if (!key) return;
-    if (jumpTimerRef.current) {
-      clearTimeout(jumpTimerRef.current);
-      jumpTimerRef.current = null;
-    }
-    // Drop to null first so a second click on the same key restarts
-    // the CSS animation; React's diff would otherwise skip the class
-    // toggle when jumpKey is already that key.
-    setJumpKey(null);
-    // requestAnimationFrame lets the null land in the DOM before the
-    // new key flips back in — without it React can batch both setStates
-    // into one render and the animation is a no-op.
-    requestAnimationFrame(() => {
-      setJumpKey(key);
-      jumpTimerRef.current = setTimeout(() => {
-        setJumpKey(null);
-        jumpTimerRef.current = null;
-      }, 240);
-    });
-  }, []);
-  // Drain the jump timer on unmount so we don't setState into a dead
-  // component if the user navigates away mid-animation.
-  useEffect(() => {
-    return () => {
-      if (jumpTimerRef.current) {
-        clearTimeout(jumpTimerRef.current);
-        jumpTimerRef.current = null;
-      }
-    };
-  }, []);
 
   // refreshCards / refreshAgents reload the App-owned card and agent lists
   // for the active repo. Used by the repo-change effect, the screen-switch
@@ -1157,22 +1078,6 @@ export default function App() {
           onClose={() => setComposerOpen(false)}
           repoPrefix={activeBoard}
           onCreated={onComposerCreated}
-        />
-      </ErrorBoundary>
-      {/* BACI-171: bottom-right activity tray. Sibling of CommandPalette
-          / ErrorModal so it overlays whatever view is current — Board,
-          Agents, Features, Docs, History, Issue workspace, Settings,
-          Sync — without reflowing the column layout. The tray is a
-          pure-derived view over `cards`; the App's existing 10s
-          refreshCards poll already drives the diff. */}
-      <ErrorBoundary headline="Something went wrong in the activity tray" label="The activity tray crashed">
-        <ActivityTray
-          cards={cards}
-          pinnedKeys={pinnedKeys}
-          onTogglePin={togglePinKey}
-          onOpenCard={openCard}
-          onHoverCard={setHoveredKey}
-          onCardClickFromTray={triggerJump}
         />
       </ErrorBoundary>
       <ErrorModal />
