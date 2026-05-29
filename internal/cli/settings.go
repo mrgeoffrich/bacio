@@ -93,31 +93,32 @@ type shippedSfxResult struct {
 //   - `bacio settings shipped-sfx true|false`  — write it
 //   - `bacio settings shipped-sfx --json '{"value":true}'` — same write
 //
-// Default is false — audio is opt-in in a desktop dev tool. The SFX
-// plays on every genuine ship (the topbar pill ticks up to a new
-// value); decrements / first-load snaps don't trigger it. Same gates
-// as the ship flourish: `prefers-reduced-motion` and the autoplay
-// policy silently no-op rather than error.
+// Default is true (BACI-295 flipped it on). The SFX plays on every
+// genuine ship (the topbar pill ticks up to a new value); decrements /
+// first-load snaps don't trigger it. The play path silently no-ops
+// under the browser's autoplay policy (a page needs at least one user
+// gesture before audio is allowed) rather than erroring.
 func newSettingsShippedSfxCmd() *cobra.Command {
 	var rawInput string
 	cmd := &cobra.Command{
 		Use:   "shipped-sfx [true|false]",
-		Short: "Get or set the BACI-240 ui.shipped_sfx global toggle (default: false)",
+		Short: "Get or set the BACI-240 ui.shipped_sfx global toggle (default: true)",
 		Long: `Get or set the BACI-240 ui.shipped_sfx global toggle. When on, the
 topbar "Shipped · N" pill plays a short ka-ching SFX on every genuine
 ship (the pill's odometer rolls into a new value). Decrements (scope /
 repo / archive flips) and first-mount snaps don't trigger the sound.
 
-The play path is silently no-op'd by ` + "`prefers-reduced-motion`" + ` and by
-the browser's autoplay policy (the page needs at least one user
-gesture before audio is allowed), so this setting is safe to leave on
-even on accessibility profiles — it just stays quiet.
+On by default (BACI-295). The play path is silently no-op'd by the
+browser's autoplay policy (the page needs at least one user gesture
+before audio is allowed), so it just stays quiet until you interact
+with the page. prefers-reduced-motion no longer mutes it — that
+preference governs animation, not audio.
 
 Examples:
 
   bacio settings shipped-sfx           # read current value
-  bacio settings shipped-sfx true      # enable
-  bacio settings shipped-sfx false     # disable (default)
+  bacio settings shipped-sfx true      # enable (default)
+  bacio settings shipped-sfx false     # disable
   bacio settings shipped-sfx --json '{"value":true}'`,
 		Args: cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
