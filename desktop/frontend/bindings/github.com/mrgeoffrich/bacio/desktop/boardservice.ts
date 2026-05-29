@@ -370,6 +370,20 @@ export function RescueDispatch(dispatchID: number): $CancellablePromise<$models.
     });
 }
 
+/**
+ * SendSessionMessage (BACI-286) enqueues a user→agent steer message at a
+ * busy session — the Pipeline running-job card / Agents-page session
+ * card "message" button. The channel serving that session pushes it as a
+ * `<channel kind="message">` tag at the worker's next turn boundary.
+ * NOT a dispatch — no matcher, no ack lifecycle. An unknown session id
+ * or empty/over-cap body surfaces as an error the frontend toasts.
+ */
+export function SendSessionMessage(sessionID: string, body: string): $CancellablePromise<model$0.UserMessage | null> {
+    return $Call.ByID(23283136, sessionID, body).then(($result: any) => {
+        return $$createType20($result);
+    });
+}
+
 export function SetAutoShip(repoPrefix: string, enabled: boolean): $CancellablePromise<boolean> {
     return $Call.ByID(1219303746, repoPrefix, enabled);
 }
@@ -410,7 +424,7 @@ export function SetCardEngineMode(repoPrefix: string, key: string, mode: string)
  */
 export function SetCardProcess(repoPrefix: string, key: string, process: string, stages: string[]): $CancellablePromise<(model$0.PipelineJob | null)[]> {
     return $Call.ByID(3410649082, repoPrefix, key, process, stages).then(($result: any) => {
-        return $$createType21($result);
+        return $$createType23($result);
     });
 }
 
@@ -446,13 +460,13 @@ export function ShipCard(repoPrefix: string, key: string): $CancellablePromise<$
 
 export function StartCardJob(repoPrefix: string, key: string): $CancellablePromise<(model$0.PipelineJob | null)[]> {
     return $Call.ByID(2998495872, repoPrefix, key).then(($result: any) => {
-        return $$createType21($result);
+        return $$createType23($result);
     });
 }
 
 export function StopCardJob(repoPrefix: string, key: string): $CancellablePromise<(model$0.PipelineJob | null)[]> {
     return $Call.ByID(39478934, repoPrefix, key).then(($result: any) => {
-        return $$createType21($result);
+        return $$createType23($result);
     });
 }
 
@@ -496,6 +510,8 @@ const $$createType15 = $Create.Array($$createType1);
 const $$createType16 = $models.BoardColumn.createFrom;
 const $$createType17 = $Create.Array($$createType16);
 const $$createType18 = $models.ShippedListDTO.createFrom;
-const $$createType19 = model$0.PipelineJob.createFrom;
+const $$createType19 = model$0.UserMessage.createFrom;
 const $$createType20 = $Create.Nullable($$createType19);
-const $$createType21 = $Create.Array($$createType20);
+const $$createType21 = model$0.PipelineJob.createFrom;
+const $$createType22 = $Create.Nullable($$createType21);
+const $$createType23 = $Create.Array($$createType22);

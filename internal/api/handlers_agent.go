@@ -100,7 +100,7 @@ func (d deps) handleAgentRegister(w http.ResponseWriter, r *http.Request) {
 		Op:       "agent.register",
 		Kind:     "agent",
 		TargetID: &sess.ID, TargetLabel: sess.SessionID,
-		Details:  agentRegisterDetails(sess),
+		Details: agentRegisterDetails(sess),
 	})
 	writeJSON(w, http.StatusCreated, sess)
 }
@@ -405,7 +405,7 @@ func (d deps) handleAgentEnd(w http.ResponseWriter, r *http.Request) {
 		Op:       "agent.end",
 		Kind:     "agent",
 		TargetID: &sess.ID, TargetLabel: sess.SessionID,
-		Details:  "reason=" + sess.EndReason,
+		Details: "reason=" + sess.EndReason,
 	})
 	// BACI-253: surface the summary `question.abandon` row when the
 	// end-session cascade settled at least one parked question — same
@@ -445,7 +445,7 @@ func (d deps) handleAgentEnd(w http.ResponseWriter, r *http.Request) {
 				Op:       "agent.cancel",
 				Kind:     "agent",
 				TargetID: &info.ID, TargetLabel: cancelledDispatchTargetLabel(info),
-				Details:  cancelledDispatchDetails(info, "auto-cancel: target session ended"),
+				Details: cancelledDispatchDetails(info, "auto-cancel: target session ended"),
 			})
 		case model.DispatchQueued:
 			recordOp(d.store, d.logger, model.HistoryEntry{
@@ -454,7 +454,7 @@ func (d deps) handleAgentEnd(w http.ResponseWriter, r *http.Request) {
 				Op:       "agent.dispatch.requeue",
 				Kind:     "agent",
 				TargetID: &info.ID, TargetLabel: cancelledDispatchTargetLabel(info),
-				Details:  cancelledDispatchDetails(info, "auto-requeue: target session reaped (presumed_dead)"),
+				Details: cancelledDispatchDetails(info, "auto-requeue: target session reaped (presumed_dead)"),
 			})
 		}
 	}
@@ -541,7 +541,7 @@ func (d deps) handleAgentClaim(w http.ResponseWriter, r *http.Request) {
 			Op:       "agent.claim",
 			Kind:     "agent",
 			TargetID: &claim.ID, TargetLabel: sid,
-			Details:  claimAuditDetails(iss.Key, stateChange),
+			Details: claimAuditDetails(iss.Key, stateChange),
 		})
 		if assigneeChange != nil {
 			writeAssigneeChange(d.store, d.logger, actor, *assigneeChange)
@@ -668,7 +668,7 @@ func (d deps) handleAgentRelease(w http.ResponseWriter, r *http.Request) {
 		Op:       "agent.release",
 		Kind:     "agent",
 		TargetID: &claim.ID, TargetLabel: sid,
-		Details:  releaseAuditDetails(iss.Key, stateChange),
+		Details: releaseAuditDetails(iss.Key, stateChange),
 	})
 	if assigneeChange != nil {
 		writeAssigneeChange(d.store, d.logger, actor, *assigneeChange)
@@ -998,7 +998,7 @@ func (d deps) handleAgentDispatchAck(w http.ResponseWriter, r *http.Request) {
 		Op:       "agent.ack",
 		Kind:     "agent",
 		TargetID: &acked.ID, TargetLabel: dispatchTargetLabel(acked),
-		Details:  dispatchDetails(acked),
+		Details: dispatchDetails(acked),
 	})
 	writeJSON(w, http.StatusOK, acked)
 }
@@ -1078,7 +1078,7 @@ func (d deps) handleAgentDispatchCancel(w http.ResponseWriter, r *http.Request) 
 		Op:       "agent.cancel",
 		Kind:     "agent",
 		TargetID: &cancelled.ID, TargetLabel: dispatchTargetLabel(cancelled),
-		Details:  dispatchDetails(cancelled),
+		Details: dispatchDetails(cancelled),
 	})
 	writeJSON(w, http.StatusOK, cancelled)
 }
@@ -1125,6 +1125,55 @@ func (d deps) handleAgentDispatchRescue(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusCreated, dsp)
+}
+
+// sessionMessageInput is the request body for the BACI-286 steer-message
+// endpoint. The session id always comes from the URL, so it isn't part
+// of the body (same "no URL/body mismatch trap" reasoning as
+// questionAnswerInput).
+type sessionMessageInput struct {
+	Body string `json:"body"`
+}
+
+// handleSessionMessageSend enqueues a BACI-286 user→agent steer message
+// at a session — the web/desktop "message" button POSTs here. The
+// channel serving that session pushes it as a `<channel kind="message">`
+// tag at the worker's next turn boundary. Unknown session → 404; empty /
+// over-cap body → 400. The created UserMessage is returned (201).
+func (d deps) handleSessionMessageSend(w http.ResponseWriter, r *http.Request) {
+	sid := r.PathValue("session_id")
+	body, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	in := sessionMessageInput{}
+	if len(body) > 0 {
+		got, _, err := inputio.DecodeStrict[sessionMessageInput](body)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+			return
+		}
+		in = *got
+	}
+	actor := ActorFromContext(r.Context())
+	c := client.NewLocalFromStore(d.store, actor)
+	defer c.Close()
+	m, err := c.AddUserMessage(r.Context(), client.AddUserMessageInput{
+		SessionID: sid,
+		Body:      in.Body,
+		CreatedBy: actor,
+	})
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found",
+				fmt.Sprintf("session %q not found", sid), nil)
+			return
+		}
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusCreated, m)
 }
 
 // dispatchTargetLabel / dispatchDetails mirror their client-side twins so

@@ -156,15 +156,16 @@ to stderr.`,
 			host, _ := os.Hostname()
 
 			src := &channelSource{
-				c:          c,
-				repo:       repo,
-				repoRoot:   repoRoot,
-				projectDir: projectDir,
-				host:       host,
-				claudePID:  int64(claudePID),
-				channelPID: int64(os.Getpid()),
-				pushed:     map[int64]bool{},
-				logger:     logger,
+				c:              c,
+				repo:           repo,
+				repoRoot:       repoRoot,
+				projectDir:     projectDir,
+				host:           host,
+				claudePID:      int64(claudePID),
+				channelPID:     int64(os.Getpid()),
+				pushed:         map[int64]bool{},
+				pushedMessages: map[int64]bool{},
+				logger:         logger,
 			}
 			srv := channel.New(src, "bacio", version.String(), os.Stdin, os.Stdout, logf)
 
@@ -213,6 +214,16 @@ type channelSource struct {
 	// set, so a restart still re-pushes work the previous process's push
 	// may not have landed. Only touched from the single poller goroutine.
 	pushed map[int64]bool
+
+	// pushedMessages is the per-process dedup set for BACI-286 steer
+	// messages, mirroring `pushed`. DrainUserMessagesForSession stamps
+	// consumed_at in the same transaction it returns rows, so a row is
+	// already terminal after one drain — this set is belt-and-braces
+	// against the same row surfacing twice within a process (and keeps
+	// parity with the dispatch dedup). Only touched from the poller
+	// goroutine. Nil-safe init in DrainUserMessages for the test path
+	// that constructs channelSource directly.
+	pushedMessages map[int64]bool
 
 	// logger is the BACI-73 slog logger the glue-layer methods on
 	// channelSource use for their error paths (drain / register /
@@ -425,6 +436,46 @@ func (s *channelSource) DrainAnsweredQuestions(ctx context.Context) ([]model.Ses
 		}
 		for _, r := range rows {
 			out = append(out, *r)
+		}
+	}
+	return out, nil
+}
+
+// DrainUserMessages returns the un-consumed BACI-286 steer messages for
+// whichever session(s) this channel is currently serving — the same
+// (host, claudePID) walk the dispatch + question drains use. Each
+// session's drain marks its returned rows consumed, so a row is emitted
+// once; the per-process pushedMessages set is belt-and-braces against a
+// row resurfacing within a process. Idle channel (no resolved repo /
+// claude_pid) returns nil so the tick step is a no-op.
+func (s *channelSource) DrainUserMessages(ctx context.Context) ([]channel.UserMessageEvent, error) {
+	if s.repo == nil || s.claudePID == 0 {
+		return nil, nil
+	}
+	if s.pushedMessages == nil {
+		s.pushedMessages = map[int64]bool{}
+	}
+	sessions, err := s.c.SessionsByClaudePID(ctx, s.host, s.claudePID)
+	if err != nil {
+		return nil, err
+	}
+	var out []channel.UserMessageEvent
+	for _, sess := range sessions {
+		msgs, derr := s.c.DrainUserMessagesForSession(ctx, sess.SessionID)
+		if derr != nil {
+			s.errlog("drain user messages", "session_id", sess.SessionID, "err", derr)
+			continue
+		}
+		for _, m := range msgs {
+			if s.pushedMessages[m.ID] {
+				continue
+			}
+			s.pushedMessages[m.ID] = true
+			out = append(out, channel.UserMessageEvent{
+				ID:   m.ID,
+				Body: m.Body,
+				From: m.CreatedBy,
+			})
 		}
 	}
 	return out, nil

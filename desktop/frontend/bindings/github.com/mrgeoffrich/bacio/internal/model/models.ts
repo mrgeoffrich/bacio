@@ -604,6 +604,67 @@ export enum UserActionReasonType {
     UserActionReasonManualReview = "user_manual_review",
 };
 
+/**
+ * UserMessage is one BACI-286 user→agent steer message: a free-form
+ * note the user pushes at a specific busy session, delivered by the
+ * bacio channel at the worker's next turn boundary as a
+ * `<channel kind="message">` tag. Unlike an AgentDispatch it is NOT
+ * matched/bound and carries no ack — it is fire-and-forget, scoped to a
+ * single session.
+ * 
+ * SessionPK is the agent_sessions PK; SessionID is the external session
+ * id lifted alongside it by the store's join so callers (the channel,
+ * the REST surface) don't need a second lookup. ConsumedAt is the only
+ * delivery signal: nil = un-consumed (not yet pushed), non-nil = the
+ * channel drained + pushed it. Like a dispatch's `delivered`, that is
+ * not proof the agent acted on the message.
+ */
+export class UserMessage {
+    "id": number;
+    "session_pk": number;
+    "session_id": string;
+    "repo_id": number;
+    "body": string;
+    "created_by": string;
+    "created_at": time$0.Time;
+    "consumed_at"?: time$0.Time | null;
+
+    /** Creates a new UserMessage instance. */
+    constructor($$source: Partial<UserMessage> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = 0;
+        }
+        if (!("session_pk" in $$source)) {
+            this["session_pk"] = 0;
+        }
+        if (!("session_id" in $$source)) {
+            this["session_id"] = "";
+        }
+        if (!("repo_id" in $$source)) {
+            this["repo_id"] = 0;
+        }
+        if (!("body" in $$source)) {
+            this["body"] = "";
+        }
+        if (!("created_by" in $$source)) {
+            this["created_by"] = "";
+        }
+        if (!("created_at" in $$source)) {
+            this["created_at"] = null;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new UserMessage instance from a string or object.
+     */
+    static createFrom($$source: any = {}): UserMessage {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new UserMessage($$parsedSource as Partial<UserMessage>);
+    }
+}
+
 // Private type creation functions
 const $$createType0 = $Create.Array($Create.Any);
 const $$createType1 = QuestionOption.createFrom;

@@ -46,6 +46,18 @@ type Event struct {
 	BaseBranch string
 }
 
+// UserMessageEvent is one BACI-286 user→agent steer message to push at
+// a running worker. Unlike an Event (a dispatch) it carries no
+// dispatch_id, issue, or mode — it is fire-and-forget context the
+// channel injects at the worker's next turn boundary. ID is the
+// user_messages row id, used only for the channel's per-process dedup;
+// it is NOT echoed back (there is no reply/ack).
+type UserMessageEvent struct {
+	ID   int64  // user_messages id — per-process dedup key only
+	Body string // the free-form steer note
+	From string // who sent it (the actor) — surfaced in the meta tag
+}
+
 // Source is the bacio-side backing the channel drains and acks against.
 // internal/cli wires this to the agent dispatch queue for one session.
 type Source interface {
@@ -112,6 +124,15 @@ type Source interface {
 	// so there's no path to recover. Returns the number of rows
 	// abandoned (for logging) and any error.
 	AbandonOpenQuestions(ctx context.Context) (int, error)
+
+	// DrainUserMessages returns the un-consumed BACI-286 steer messages
+	// for the channel's session(s), oldest-first, marking them consumed
+	// as a side effect. The channel pushes each as a `kind="message"`
+	// notification. Per-process dedup against the message id covers the
+	// edge where a drain returns a row twice; a fresh channel process
+	// re-pushes nothing (consumed is terminal). Best effort: errors are
+	// logged, not fatal.
+	DrainUserMessages(ctx context.Context) ([]UserMessageEvent, error)
 
 	// AttachTranscript locates the transcript of a completed
 	// subagent (identified by agentID — the `agentId` from a Task
@@ -786,11 +807,12 @@ func (s *Server) poll(ctx context.Context) {
 
 // tick is one poll cycle: heartbeat (record liveness), ensure-setup
 // (idempotently queue the call-register dispatch), drain (push
-// queued work), then drain-answered-questions (deliver any settled
-// ask_user_question replies). EnsureSetup runs every tick — the
-// source is responsible for being a no-op once register has fired.
-// Heartbeat runs every tick regardless of whether there's anything
-// to drain — it's how the channel stays correlatable.
+// queued work), drain-answered-questions (deliver any settled
+// ask_user_question replies), then drain-user-messages (push any
+// BACI-286 steer messages). EnsureSetup runs every tick — the source
+// is responsible for being a no-op once register has fired. Heartbeat
+// runs every tick regardless of whether there's anything to drain —
+// it's how the channel stays correlatable.
 func (s *Server) tick(ctx context.Context) {
 	if err := s.src.Heartbeat(ctx); err != nil {
 		s.logf("bacio channel: heartbeat: %v", err)
@@ -800,6 +822,23 @@ func (s *Server) tick(ctx context.Context) {
 	}
 	s.drainOnce(ctx)
 	s.drainAnsweredQuestions(ctx)
+	s.drainUserMessages(ctx)
+}
+
+// drainUserMessages pulls every un-consumed BACI-286 steer message for
+// this channel's session(s) and pushes each as a `kind="message"`
+// notification. The source marks them consumed and dedups per-process,
+// so a row is emitted once per channel lifetime. Best effort — a drain
+// error is logged, not fatal.
+func (s *Server) drainUserMessages(ctx context.Context) {
+	msgs, err := s.src.DrainUserMessages(ctx)
+	if err != nil {
+		s.logf("bacio channel: drain user messages: %v", err)
+		return
+	}
+	for _, m := range msgs {
+		s.pushMessage(m)
+	}
 }
 
 // drainAnsweredQuestions pulls every answered or cancelled
@@ -893,6 +932,28 @@ func (s *Server) pushEvent(e Event) {
 		Method:  "notifications/claude/channel",
 		Params: map[string]any{
 			"content": e.Payload,
+			"meta":    meta,
+		},
+	})
+}
+
+// pushMessage emits one BACI-286 user→agent steer message as a
+// notifications/claude/channel event with meta.kind="message". It rides
+// the same notification a dispatch uses but carries NO dispatch_id (it
+// is fire-and-forget — nothing to reply/ack), so the worker and a reader
+// of the channel log can tell a steer message apart from a dispatch by
+// the kind attribute alone. meta keys must be bare identifiers — Claude
+// Code silently drops keys with hyphens or other characters.
+func (s *Server) pushMessage(m UserMessageEvent) {
+	meta := map[string]string{
+		"kind": "message",
+		"from": m.From,
+	}
+	s.write(rpcNotification{
+		JSONRPC: "2.0",
+		Method:  "notifications/claude/channel",
+		Params: map[string]any{
+			"content": m.Body,
 			"meta":    meta,
 		},
 	})

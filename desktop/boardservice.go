@@ -1158,6 +1158,19 @@ func (b *BoardService) CancelSessionQuestion(id int64) (*model.SessionQuestion, 
 	return b.client.CancelSessionQuestion(context.Background(), id, false)
 }
 
+// SendSessionMessage (BACI-286) enqueues a user→agent steer message at a
+// busy session — the Pipeline running-job card / Agents-page session
+// card "message" button. The channel serving that session pushes it as a
+// `<channel kind="message">` tag at the worker's next turn boundary.
+// NOT a dispatch — no matcher, no ack lifecycle. An unknown session id
+// or empty/over-cap body surfaces as an error the frontend toasts.
+func (b *BoardService) SendSessionMessage(sessionID, body string) (*model.UserMessage, error) {
+	return b.client.AddUserMessage(context.Background(), client.AddUserMessageInput{
+		SessionID: sessionID,
+		Body:      body,
+	})
+}
+
 // RescueDispatch (BACI-190) posts a `from="bacio-rescue"` channel
 // event to an idle supervisor session, asking it to handle a dead
 // worker's stranded worktree INLINE. Eligibility (status pending /
