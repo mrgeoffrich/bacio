@@ -38,6 +38,16 @@ func TestAutoPickFreeAgent(t *testing.T) {
 			want: "viper",
 		},
 		{
+			// BACI-296: an errored (not-yet-recovered) session isn't handed
+			// fresh work even though it's live and unclaimed.
+			name: "skip errored",
+			cands: []AgentCandidate{
+				{AgentName: "otter", Errored: true, HasChannel: true},
+				{AgentName: "viper", HasChannel: true},
+			},
+			want: "viper",
+		},
+		{
 			name: "skip no identity slug",
 			cands: []AgentCandidate{
 				{AgentName: "", HasChannel: true},

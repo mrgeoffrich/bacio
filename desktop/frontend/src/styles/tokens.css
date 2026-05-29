@@ -80,6 +80,8 @@
   --status-blocked-bg:  #F8DDE3;
   --status-claude:      #5DB3A6;  /* mint stracciatella — claude's flavor */
   --status-claude-bg:   #D5ECE5;
+  --status-error:       #C0392B;  /* alarm-red — agent died on an API error (BACI-296) */
+  --status-error-bg:    #F8D7D3;
 
   /* ---------- Type ---------- */
   --font-sans: "Nunito", ui-rounded, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -215,6 +217,8 @@
   --status-blocked-bg:  rgba(210, 113, 135, 0.22);
   --status-claude:      #7FCBBF;
   --status-claude-bg:   rgba(93, 179, 166, 0.22);
+  --status-error:       #E8635A;  /* alarm-red — agent died on an API error (BACI-296) */
+  --status-error-bg:    rgba(192, 57, 43, 0.24);
 
   /* Shadows — near-black and heavier; the warm-tinted light-theme
      shadows are invisible on a dark canvas. */

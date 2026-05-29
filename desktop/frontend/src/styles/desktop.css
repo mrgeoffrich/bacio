@@ -607,6 +607,9 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
 .mk-status-active { background: var(--status-claude-bg); color: var(--status-claude); }
 .mk-status-idle   { background: var(--status-doing-bg);  color: var(--status-doing); }
 .mk-status-ended  { background: var(--bg-4);             color: var(--fg-4); }
+/* errored = the session died on an Anthropic API error (BACI-296) —
+   alarm-red so a stuck worker is the first thing the eye lands on. */
+.mk-status-errored { background: var(--status-error-bg); color: var(--status-error); }
 /* busy = the session is holding an open claim; orthogonal to the
    active/idle/ended liveness pill, so it renders as a second chip. */
 .mk-status-busy   { background: var(--status-todo-bg);   color: var(--status-todo); }
@@ -626,8 +629,9 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
 }
 /* Active sessions get a coloured left edge so the eye lands on
    in-flight work first when scanning the grid. */
-.mk-agent-card--active { box-shadow: inset 3px 0 0 var(--status-claude); }
-.mk-agent-card--idle   { box-shadow: inset 3px 0 0 var(--status-doing); }
+.mk-agent-card--active  { box-shadow: inset 3px 0 0 var(--status-claude); }
+.mk-agent-card--idle    { box-shadow: inset 3px 0 0 var(--status-doing); }
+.mk-agent-card--errored { box-shadow: inset 3px 0 0 var(--status-error); }
 .mk-agent-card-head {
   display: flex; align-items: center; gap: 8px;
   min-width: 0;

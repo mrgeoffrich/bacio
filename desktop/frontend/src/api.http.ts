@@ -576,6 +576,10 @@ export interface AgentCard {
   branch: string;
   repoPrefix: string;
   status: string;
+  // BACI-296: the Anthropic API failure behind an "errored" status.
+  // Empty for every other status.
+  errorType?: string;
+  errorMessage?: string;
   busy: boolean;
   busyIssue: string;
   waiting: boolean;

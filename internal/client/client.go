@@ -458,6 +458,15 @@ type Client interface {
 	ReleaseAgent(ctx context.Context, repo *model.Repo, in inputs.AgentReleaseInput, dryRun bool) (*model.AgentClaim, error)
 	ListAgentSessions(ctx context.Context, f AgentSessionFilter) ([]*model.AgentSession, error)
 	ShowAgentSession(ctx context.Context, sessionID string) (*AgentSessionView, error)
+	// MarkAgentErrored records an Anthropic API failure on the session
+	// (BACI-296), driven by the StopFailure hook; ClearAgentError wipes it
+	// on the next successful heartbeat (recovery). FailPipelineForSession
+	// reconciles the session's in-flight Pipeline job per the error class
+	// (transient → pause the chain; terminal → move the card to
+	// needs_action). All three are local-only — remote returns ErrLocalOnly.
+	MarkAgentErrored(ctx context.Context, sessionID, errType, errMsg string) error
+	ClearAgentError(ctx context.Context, sessionID string) error
+	FailPipelineForSession(ctx context.Context, sessionID, errType, errMsg string) error
 	// ListOpenClaims returns every open (unreleased) agent claim for repo,
 	// or across all repos when repo is nil. Local-only; remote returns
 	// ErrLocalOnly. Used by the desktop Board to derive each card's `taken`.

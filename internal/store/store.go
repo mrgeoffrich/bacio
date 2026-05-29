@@ -395,6 +395,39 @@ func migrate(db *sql.DB) error {
 			return fmt.Errorf("add channel_version to agent_sessions: %w", err)
 		}
 	}
+	// agent_sessions.errored_at / error_type / error_message capture an
+	// Anthropic API failure that aborted the session's turn (BACI-296),
+	// written by the StopFailure hook and cleared on the next successful
+	// heartbeat. All three are added the same way registered_at /
+	// channel_version were — guarded by columnExists so the migration is
+	// idempotent on existing DBs.
+	hasErroredAt, err := columnExists(db, "agent_sessions", "errored_at")
+	if err != nil {
+		return err
+	}
+	if !hasErroredAt {
+		if _, err := db.Exec(`ALTER TABLE agent_sessions ADD COLUMN errored_at DATETIME`); err != nil {
+			return fmt.Errorf("add errored_at to agent_sessions: %w", err)
+		}
+	}
+	hasErrorType, err := columnExists(db, "agent_sessions", "error_type")
+	if err != nil {
+		return err
+	}
+	if !hasErrorType {
+		if _, err := db.Exec(`ALTER TABLE agent_sessions ADD COLUMN error_type TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add error_type to agent_sessions: %w", err)
+		}
+	}
+	hasErrorMessage, err := columnExists(db, "agent_sessions", "error_message")
+	if err != nil {
+		return err
+	}
+	if !hasErrorMessage {
+		if _, err := db.Exec(`ALTER TABLE agent_sessions ADD COLUMN error_message TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add error_message to agent_sessions: %w", err)
+		}
+	}
 	// agent_sessions.permission_mode was a hangover from when we mirrored
 	// Claude Code's permission mode on the session row — bacio never did
 	// anything useful with the value, so it's noise. Drop the column on

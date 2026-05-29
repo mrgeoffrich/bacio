@@ -132,6 +132,21 @@ func (c *remoteClient) OpenClaimsForSession(ctx context.Context, sessionID strin
 	return nil, ErrLocalOnly
 }
 
+// MarkAgentErrored / ClearAgentError / FailPipelineForSession (BACI-296)
+// are driven by the local-only StopFailure hook; there's no HTTP analogue
+// (the hook always talks to the local store, never --remote).
+func (c *remoteClient) MarkAgentErrored(ctx context.Context, sessionID, errType, errMsg string) error {
+	return remoteAgentNotSupported("errored")
+}
+
+func (c *remoteClient) ClearAgentError(ctx context.Context, sessionID string) error {
+	return remoteAgentNotSupported("clear-error")
+}
+
+func (c *remoteClient) FailPipelineForSession(ctx context.Context, sessionID, errType, errMsg string) error {
+	return remoteAgentNotSupported("fail-pipeline")
+}
+
 func (c *remoteClient) ListOpenClaims(ctx context.Context, repo *model.Repo) ([]*model.AgentClaim, error) {
 	path := "/agents/claims/open"
 	if repo != nil {

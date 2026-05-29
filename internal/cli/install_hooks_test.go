@@ -188,6 +188,46 @@ func TestApplyBacioHooksKeepsAllPostToolUseGroups(t *testing.T) {
 	}
 }
 
+// TestInstallHooks_StopFailureRow pins the BACI-296 wiring: after apply,
+// .claude/settings.json carries a matcher-less `bacio hook stop-failure`
+// group under the StopFailure event, and a second apply is idempotent
+// (exactly one such group, not stacked).
+func TestInstallHooks_StopFailureRow(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/settings.json"
+	for pass := 1; pass <= 2; pass++ {
+		top, _, err := planBacioHooks(path)
+		if err != nil {
+			t.Fatalf("pass %d plan: %v", pass, err)
+		}
+		if err := applyBacioHooks(path, top); err != nil {
+			t.Fatalf("pass %d apply: %v", pass, err)
+		}
+
+		var settings struct {
+			Hooks struct {
+				StopFailure []map[string]any `json:"StopFailure"`
+			} `json:"hooks"`
+		}
+		if err := readJSON(t, path, &settings); err != nil {
+			t.Fatalf("pass %d read: %v", pass, err)
+		}
+		var bacioGroups []map[string]any
+		for _, g := range settings.Hooks.StopFailure {
+			if strings.Contains(string(mustJSON(t, g)), "bacio hook stop-failure") {
+				bacioGroups = append(bacioGroups, g)
+			}
+		}
+		if len(bacioGroups) != 1 {
+			t.Fatalf("pass %d: StopFailure stop-failure groups = %d, want 1 (idempotent)", pass, len(bacioGroups))
+		}
+		// Event-typed: must not carry a matcher.
+		if _, hasMatcher := bacioGroups[0]["matcher"]; hasMatcher {
+			t.Fatalf("pass %d: stop-failure must not carry a matcher (got %v)", pass, bacioGroups[0]["matcher"])
+		}
+	}
+}
+
 func mustJSON(t *testing.T, v any) []byte {
 	t.Helper()
 	b, err := json.Marshal(v)

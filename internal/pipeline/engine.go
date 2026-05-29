@@ -465,6 +465,75 @@ func (e *Engine) steerWorkerToStop(iss *model.Issue) {
 	}
 }
 
+// FailRunning reconciles an in_pipeline card whose worker died on an
+// Anthropic API error (BACI-296). It's the dual of StopRunning — same
+// "cancel the in-flight job" teardown — but it branches on the error
+// class and never auto-retries:
+//
+//   - Transient (server_error / rate_limit): cancel the running job + its
+//     dispatch, halt Auto, and set engine_pause_reason = "agent_error"
+//     so the Pipeline card shows a paused-on-error state. The user re-arms
+//     with Start/Auto once the outage passes — we deliberately don't
+//     re-queue, which would risk a tight rebind/die loop during a
+//     sustained outage.
+//
+//   - Terminal (auth / billing / org-not-allowed / unknown / …): tear the
+//     chain down and pull the card out of the pipeline to needs_action via
+//     the store's guard-bypassing FailPipelineChainToNeedsAction, stamped
+//     user_action_reason_type = "agent_error". A billing/auth failure is
+//     not something a retry fixes — the user has to act.
+//
+// A no-op (nil, nil) when the card isn't in_pipeline or has no running
+// job: a worker that died before its job started running (or after it
+// already settled) has nothing to reconcile, and the agent-errored state
+// recorded separately by the hook is enough.
+func (e *Engine) FailRunning(issueID int64, errType, errMsg string) ([]Advance, error) {
+	if e == nil || e.st == nil {
+		return nil, nil
+	}
+	iss, err := e.st.GetIssueByID(issueID)
+	if err != nil {
+		return nil, err
+	}
+	if iss.State != model.StateInPipeline {
+		return nil, nil
+	}
+	jobs, err := e.st.ListPipelineJobs(issueID)
+	if err != nil {
+		return nil, err
+	}
+	running := firstByStatus(jobs, model.JobRunning)
+	if running == nil {
+		return nil, nil
+	}
+
+	if model.IsTransientAPIError(errType) {
+		if running.DispatchID != nil {
+			if _, err := e.st.CancelDispatch(*running.DispatchID); err != nil {
+				e.logger().Warn("bacio engine: fail (transient) could not cancel dispatch (likely already delivered)",
+					"issue", iss.Key, "dispatch", *running.DispatchID, "err", err)
+			}
+		}
+		if err := e.st.SetPipelineJobStatus(running.ID, model.JobCancelled); err != nil {
+			return nil, err
+		}
+		if err := e.st.SetIssueEngineMode(issueID, model.EngineOff); err != nil {
+			return nil, err
+		}
+		if err := e.st.SetIssueEnginePauseReason(issueID, model.EnginePauseReasonAgentError); err != nil {
+			return nil, err
+		}
+		return []Advance{e.advance(iss, "job.failed", fmt.Sprintf("seq=%d mode=%s error=%s (transient; paused)", running.Sequence, running.Mode, errType))}, nil
+	}
+
+	// Terminal: hand off to the store teardown that moves the card to
+	// needs_action (bypassing the engine-governed SetIssueState guard).
+	if err := e.st.FailPipelineChainToNeedsAction(issueID); err != nil {
+		return nil, err
+	}
+	return []Advance{e.advance(iss, "job.failed", fmt.Sprintf("seq=%d mode=%s error=%s (terminal; -> needs_action)", running.Sequence, running.Mode, errType))}, nil
+}
+
 // Handoff is the manual "Ship" control (and the in-process Ship stage):
 // move an in_pipeline card to to_be_shipped. A no-op when the card isn't
 // in_pipeline. Same transition the Auto chain reaches at the ship

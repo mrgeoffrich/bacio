@@ -103,11 +103,12 @@ The render frontmatter sets `isolation: worktree`, so Claude Code spawns each di
 
 ### `.claude/settings.json` — hooks
 
-`bacio install-agent` merges six event hooks into `.claude/settings.json`:
+`bacio install-agent` merges its event hooks into `.claude/settings.json`:
 
 - `SessionStart` — records the agent identity from `.bacio/agents.json`.
 - `PostToolUse` (TaskCreate, Write/Edit) — mirrors the agent's TaskCreate rows into bacio and updates issue activity.
 - `PreToolUse` (Write/Edit matcher) — confines dispatched workers and agent-mode sessions to the linked worktree (BACI-116, hardened in BACI-129): denies any Write/Edit in the primary checkout; restricts paths inside a linked worktree to that worktree's root.
+- `StopFailure` — fires when a turn ends on an Anthropic API error (529 overloaded, 5xx, 429 rate_limit, auth/billing failures). Records the errored state on the agent session (`error_type` / `error_message` / `errored_at`, surfaced as a red "errored" liveness) and reconciles the worker's in-flight Pipeline job: transient errors pause the chain in place (`engine_pause_reason = agent_error`, Auto off), terminal errors pull the card out to `needs_action`. Observe-only — Claude Code ignores its stdout/exit code, so recovery (re-arm) is a user/controller concern (BACI-296).
 - `Notification` / `Stop` / `SubagentStop` — agent lifecycle plumbing.
 
 ### `.mcp.json` — the bacio channel MCP server
