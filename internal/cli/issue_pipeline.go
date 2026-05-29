@@ -84,22 +84,27 @@ func issueProcessSetCmd() *cobra.Command {
 	var rawInput string
 	cmd := &cobra.Command{
 		Use:   "set [KEY] [preset]",
-		Short: "Assign a preset process (job chain) to an in_pipeline card",
-		Args:  cobra.RangeArgs(0, 2),
+		Short: "Assign a process (job chain) to an in_pipeline card",
+		Long: "Assign a process (job chain) to an in_pipeline card. The flag/positional path takes a preset slug; the --json path additionally accepts an explicit ordered stage list via \"stages\" (mutually exclusive with \"process\").",
+		Args: cobra.RangeArgs(0, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			raw, err := parseJSONInput(cmd, args, rawInput)
 			if err != nil {
 				return err
 			}
 			var key, process string
+			var stages []string
 			if raw != nil {
 				in, _, err := inputio.DecodeStrict[inputs.IssueProcessInput](raw)
 				if err != nil {
 					return err
 				}
-				key, process = in.Key, in.Process
-				if key == "" || process == "" {
-					return fmt.Errorf("key and process are required")
+				key, process, stages = in.Key, in.Process, in.Stages
+				if key == "" {
+					return fmt.Errorf("key is required")
+				}
+				if (process == "") == (len(stages) == 0) {
+					return fmt.Errorf("exactly one of process or stages is required")
 				}
 			} else {
 				if len(args) != 2 {
@@ -116,7 +121,7 @@ func issueProcessSetCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			jobs, err := c.SetIssueProcess(context.Background(), repo, key, process, opts.dryRun)
+			jobs, err := c.SetIssueProcess(context.Background(), repo, key, process, stages, opts.dryRun)
 			if err != nil {
 				return err
 			}

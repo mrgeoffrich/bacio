@@ -265,11 +265,13 @@ type Client interface {
 	SetIssueState(ctx context.Context, repo *model.Repo, key string, state model.State, dryRun bool) (*model.Issue, error)
 	// Pipeline verbs (the CLI-facing subset — Start/Stop/engine-mode stay
 	// API/engine-only). ReorderIssue moves a card within its Backlog /
-	// Shipping ordering band; SetIssueProcess materialises a preset job
-	// chain; ShipIssue is the in_pipeline → to_be_shipped hand-off;
-	// SetRepoAutoShip toggles the per-repo Shipping auto-ship.
+	// Shipping ordering band; SetIssueProcess materialises a job chain from
+	// either a preset slug (process) or an explicit ordered stage list
+	// (stages) — mutually exclusive, resolved via model.ResolveProcess;
+	// ShipIssue is the in_pipeline → to_be_shipped hand-off; SetRepoAutoShip
+	// toggles the per-repo Shipping auto-ship.
 	ReorderIssue(ctx context.Context, repo *model.Repo, key string, position int, dryRun bool) (*model.Issue, error)
-	SetIssueProcess(ctx context.Context, repo *model.Repo, key, process string, dryRun bool) ([]*model.PipelineJob, error)
+	SetIssueProcess(ctx context.Context, repo *model.Repo, key, process string, stages []string, dryRun bool) ([]*model.PipelineJob, error)
 	ShipIssue(ctx context.Context, repo *model.Repo, key string, dryRun bool) (*model.Issue, error)
 	SetRepoAutoShip(ctx context.Context, repo *model.Repo, enabled, dryRun bool) (bool, error)
 	// GetRepoAutoShip reads the per-repo Shipping auto-ship toggle — the
