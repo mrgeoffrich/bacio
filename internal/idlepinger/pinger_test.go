@@ -619,30 +619,60 @@ func TestTickProactiveProbeDoesNotReapOnNoAck(t *testing.T) {
 	c := &recordedClient{}
 	p := New(b, c, nil).withClock(func() time.Time { return now })
 
-	// Pre-condition: the probe is past AgentPingNoAckTimeout (2 min).
-	// The reap branch's `oldest.CreatedAt.Before(pingCutoff)` check
-	// is true, so today's implementation DOES reap. This matches the
-	// plan's documented behaviour: a probe that goes unanswered for
-	// 2+ minutes is treated like any other unacked ping. The earlier
-	// plan-time comment about "the proactive probe is informational"
-	// applies to the *graduated* gate (a claim-holder gets the wider
-	// 40-min window) rather than the no-ack check itself.
-	//
-	// What this test pins down is the orthogonal property: the probe
-	// branch and the reap branch must share the same in-flight ping
-	// row (one EnsurePingDispatch call, one audit trail) so the no-ack
-	// reap fires off the same row that the probe enqueued, with no
-	// duplicate `bacio-channel-ping` entries.
+	// BACI-271: the probe is past AgentPingNoAckTimeout (2 min), so the
+	// reap branch's `oldest.CreatedAt.Before(pingCutoff)` check is true —
+	// but the reap branch is now ALSO gated on
+	// `sess.LastSeenAt.Before(idleCutoff)`, and at 13 min idle this
+	// session has not crossed the 20-min base cutoff. The probe is
+	// therefore informational: an unacked probe does not reap a session
+	// until LastSeenAt actually crosses the graduated idle cutoff. This
+	// is what the test name has always promised.
 	pinged, ended, err := p.Tick(context.Background())
 	if err != nil {
 		t.Fatalf("Tick: %v", err)
 	}
-	// Session is past the no-ack gate, so EndAgent fires.
-	if pinged != 0 || ended != 1 {
-		t.Fatalf("counts = (%d,%d), want (0,1)", pinged, ended)
+	// 13 min < 20 min base cutoff: no reap, and the probe is already
+	// in flight so no fresh ping is queued either.
+	if pinged != 0 || ended != 0 {
+		t.Fatalf("counts = (%d,%d), want (0,0) — probe is informational inside the base cutoff", pinged, ended)
 	}
-	if len(c.ends) != 1 || c.ends[0] != "quiet" {
-		t.Fatalf("ends = %v, want [quiet]", c.ends)
+	if len(c.ends) != 0 {
+		t.Fatalf("ends = %v, want [] — must not reap a 13-min-idle session", c.ends)
+	}
+}
+
+// TestTickClaimHolderInFlightProbeInsideGraduatedDoesNotReap — BACI-271:
+// the graduated cutoff gates the reap branch for claim-holders too. A
+// session holding one open claim, idle 25 min, with an unacked 3-min-old
+// probe in flight must NOT be reaped — 25 min is past the no-ack window
+// but inside the 40-min graduated cutoff, so the probe stays
+// informational. This is the BACI-269 incident: a supervisor blocked in
+// a long Task call can't ack the probe mid-flight, and the graduated
+// window is what protects it. Mirrors
+// TestTickClaimHolderHonorsGraduatedThreshold but seeds an in-flight
+// probe so the reap branch is reached and verified NOT to fire.
+func TestTickClaimHolderInFlightProbeInsideGraduatedDoesNotReap(t *testing.T) {
+	now := time.Date(2026, 5, 29, 12, 0, 0, 0, time.UTC)
+	b := &fakeBackend{
+		sessions:   []*model.AgentSession{aliveSession("busy-holder", 25*time.Minute, now)},
+		dispatches: []*model.AgentDispatch{ping("busy-holder", 3*time.Minute, now)},
+		claims:     map[string][]*model.AgentClaim{"busy-holder": {openClaim("busy-holder")}},
+		repo:       &model.Repo{ID: 1, Prefix: "BACI"},
+	}
+	c := &recordedClient{}
+	p := New(b, c, nil).withClock(func() time.Time { return now })
+
+	pinged, ended, err := p.Tick(context.Background())
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	// 25 min < 40 min graduated cutoff: the unacked probe does not reap,
+	// and the existing in-flight probe suppresses a fresh ping.
+	if pinged != 0 || ended != 0 {
+		t.Fatalf("counts = (%d,%d), want (0,0) — claim-holder inside graduated cutoff must not be reaped", pinged, ended)
+	}
+	if len(c.ends) != 0 {
+		t.Fatalf("ends = %v, want [] — must not reap a 25-min-idle claim-holder", c.ends)
 	}
 }
 

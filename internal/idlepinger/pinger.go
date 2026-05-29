@@ -103,7 +103,12 @@ func (p *Pinger) withClock(clock func() time.Time) *Pinger {
 //     race where the matcher delivers an implement dispatch ~seconds
 //     before the reaper would otherwise force-end the session.
 //   - If any pending|delivered ping older than AgentPingNoAckTimeout
-//     exists for the session → EndAgent(reason=presumed_dead).
+//     exists for the session AND LastSeenAt is older than the
+//     per-session graduated idle cutoff (20 min base / 40 min for a
+//     claim-holder) → EndAgent(reason=presumed_dead). BACI-271: the
+//     no-ack window alone does not reap — the proactive probe (queued
+//     at 10 min) shares this dispatch row, so the graduated cutoff is
+//     what decides death, keeping the probe informational.
 //   - Else if LastSeenAt is older than the per-session effective idle
 //     cutoff AND no pending|delivered ping exists → EnsurePingDispatch.
 //     The effective cutoff is the BACI-159 graduated value: a session
@@ -221,8 +226,17 @@ func (p *Pinger) Tick(ctx context.Context) (pinged, ended int, err error) {
 			continue
 		}
 
-		// Find the oldest in-flight ping; if it's past the no-ack
-		// window the session is presumed dead.
+		// Find the oldest in-flight ping; the session is presumed dead
+		// only when that ping is past the no-ack window AND LastSeenAt has
+		// crossed the per-session graduated idle cutoff (idleCutoff,
+		// computed above: 20 min base / 40 min for a claim-holder).
+		// BACI-271: the no-ack window alone is not sufficient — the
+		// proactive probe (queued at 10 min) shares this same dispatch
+		// row, so gating only on pingCutoff would reap every session at
+		// ~12 min and defeat both the base and graduated windows. The
+		// probe stays informational until LastSeenAt actually crosses
+		// idleCutoff; because the probe has been outstanding since 10 min,
+		// the reap fires promptly on the tick that crosses the cutoff.
 		var oldest *model.AgentDispatch
 		for _, d := range inflight {
 			if oldest == nil || d.CreatedAt.Before(oldest.CreatedAt) {
@@ -230,7 +244,7 @@ func (p *Pinger) Tick(ctx context.Context) (pinged, ended int, err error) {
 			}
 		}
 
-		if oldest != nil && oldest.CreatedAt.Before(pingCutoff) {
+		if oldest != nil && oldest.CreatedAt.Before(pingCutoff) && sess.LastSeenAt.Before(idleCutoff) {
 			repo, rerr := p.b.GetRepoByID(sess.RepoID)
 			if rerr != nil {
 				p.warn("resolve session repo", rerr, sess.SessionID)

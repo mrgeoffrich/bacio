@@ -972,8 +972,12 @@ const ClaimHolderIdlePingMultiplier = 2
 // no-ack timeout — a claim-holder that doesn't respond is fine,
 // because the graduated AgentIdlePingThreshold (40 min for claim-
 // holders) is what eventually decides "presumed dead", not this
-// probe. The agent's eventual ack bumps LastSeenAt and clears the
-// staleness naturally. Uses the existing EnsurePingDispatch
+// probe. BACI-271: this guarantee is enforced by the
+// `sess.LastSeenAt.Before(idleCutoff)` clause in Pinger.Tick's reap
+// branch — an unacked probe only reaps once LastSeenAt crosses the
+// graduated cutoff, never on the no-ack window alone. The agent's
+// eventual ack bumps LastSeenAt and clears the staleness naturally.
+// Uses the existing EnsurePingDispatch
 // idempotency so a repeat tick during the probe window doesn't
 // enqueue a second one.
 const AgentProactiveProbeThreshold = 10 * time.Minute
