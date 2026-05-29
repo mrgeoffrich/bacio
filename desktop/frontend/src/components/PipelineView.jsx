@@ -81,9 +81,18 @@ export default function PipelineView({
     });
   }, [autoShip, onSetAutoShip]);
 
-  // Cross-column drop: change the dragged card's column (= its state).
-  // in_pipeline → Shipping goes through the Ship hand-off; everything
-  // else is a plain state move.
+  // Move a card into `col` (= its new state). in_pipeline → Shipping goes
+  // through the Ship hand-off; everything else is a plain state move. Shared
+  // by the column drop zone and the cross-column case of dropOnCard.
+  const moveCardToColumn = (card, col) => {
+    if (col === 'to_be_shipped' && card.column === 'in_pipeline') {
+      onShip?.(card.key);
+    } else {
+      onMoveCard?.(card.key, col);
+    }
+  };
+
+  // Cross-column drop onto a column's empty area.
   const dropToColumn = (col) => {
     setDragOverCol(null);
     const key = dragKey;
@@ -91,22 +100,26 @@ export default function PipelineView({
     if (!key) return;
     const card = cardByKey.get(key);
     if (!card || card.column === col) return;
-    if (col === 'to_be_shipped' && card.column === 'in_pipeline') {
-      onShip?.(key);
-    } else {
-      onMoveCard?.(key, col);
-    }
+    moveCardToColumn(card, col);
   };
 
-  // Within-column reorder: dropping onto a card in the same Backlog /
-  // Shipping list moves the dragged card to that card's 1-based slot.
+  // Dropping onto a card. Within the same Backlog / Shipping list it's a
+  // reorder to that card's 1-based slot; dropping a card from another column
+  // onto one of these cards is a cross-column move into the target's column.
+  // The card's own onDrop stops propagation, so the column drop zone never
+  // sees the event — without the cross-column branch here the move silently
+  // no-ops, which is BACI-269 (drag In Pipeline card onto a Backlog card).
   const dropOnCard = (targetCard, index) => {
     const key = dragKey;
     setDragKey(null);
     setDragOverCol(null);
     if (!key || key === targetCard.key) return;
     const dragged = cardByKey.get(key);
-    if (!dragged || dragged.column !== targetCard.column) return;
+    if (!dragged) return;
+    if (dragged.column !== targetCard.column) {
+      moveCardToColumn(dragged, targetCard.column);
+      return;
+    }
     onReorder?.(key, index + 1);
   };
 
