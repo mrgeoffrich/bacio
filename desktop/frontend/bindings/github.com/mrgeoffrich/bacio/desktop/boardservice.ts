@@ -121,18 +121,6 @@ export function AttachPullRequest(repoPrefix: string, key: string, url: string):
 }
 
 /**
- * CancelFollowOnDispatch (BACI-180) is the chip-remove handler: cancel
- * the dormant follow-on attached to an issue. Idempotent — a no-op on
- * an issue with no dormant follow-on (returns the zero DispatchDTO and
- * nil error) so a stale UI click doesn't surface as an error.
- */
-export function CancelFollowOnDispatch(repoPrefix: string, issueKey: string): $CancellablePromise<$models.DispatchDTO> {
-    return $Call.ByID(1725053965, repoPrefix, issueKey).then(($result: any) => {
-        return $$createType8($result);
-    });
-}
-
-/**
  * CancelSessionQuestion dismisses an open question — the agent
  * receives a tool error on the next channel poll tick.
  */
@@ -167,7 +155,7 @@ export function CancelWaitingDispatch(repoPrefix: string, issueKey: string): $Ca
  */
 export function ClearDefaultFeature(repoPrefix: string): $CancellablePromise<$models.DefaultFeatureDTO> {
     return $Call.ByID(3288349059, repoPrefix).then(($result: any) => {
-        return $$createType9($result);
+        return $$createType8($result);
     });
 }
 
@@ -205,25 +193,7 @@ export function DeleteComment(repoPrefix: string, key: string, commentUUID: stri
  */
 export function DispatchIssue(repoPrefix: string, issueKey: string, mode: string): $CancellablePromise<$models.DispatchDTO> {
     return $Call.ByID(715303058, repoPrefix, issueKey, mode).then(($result: any) => {
-        return $$createType8($result);
-    });
-}
-
-/**
- * DispatchIssueChain (BACI-209) queues a state-gated primary dispatch
- * PLUS a dormant follow-on against the brand-new parent in one
- * transaction. Backs the kanban's "Plan, then Implement" compound
- * picker on todo cards. Mirrors DispatchIssue's shape (returns the
- * parent DispatchDTO; the follow-on rides on the next BoardCard
- * refresh via card.followOn).
- * 
- * All three surfaces — Wails, REST, CLI — funnel through
- * client.AutoDispatchIssueWithFollowOn so the gate + payload + two
- * audit rows live in one place.
- */
-export function DispatchIssueChain(repoPrefix: string, issueKey: string, mode: string, followOnMode: string): $CancellablePromise<$models.DispatchDTO> {
-    return $Call.ByID(168125999, repoPrefix, issueKey, mode, followOnMode).then(($result: any) => {
-        return $$createType8($result);
+        return $$createType9($result);
     });
 }
 
@@ -254,7 +224,7 @@ export function GetBoardHiddenStates(repoPrefix: string): $CancellablePromise<$m
  */
 export function GetDefaultFeature(repoPrefix: string): $CancellablePromise<$models.DefaultFeatureDTO> {
     return $Call.ByID(3752670238, repoPrefix).then(($result: any) => {
-        return $$createType9($result);
+        return $$createType8($result);
     });
 }
 
@@ -369,22 +339,6 @@ export function ListShipped(repoPrefix: string, sinceDays: number, limit: number
     });
 }
 
-/**
- * QueueFollowOnDispatch (BACI-180) attaches a dormant follow-on
- * dispatch to the issue's in-flight (parent) dispatch. Mirrors
- * DispatchIssue's shape — same DTO out, repo prefix derivable from
- * the issue key — but routes through client.QueueFollowOnDispatch so
- * the gate + parent-resolution path stays in one place. Errors when
- * there is no open dispatch on the issue, when the state-gate
- * rejects, or when a dormant follow-on already exists (single-slot
- * per issue).
- */
-export function QueueFollowOnDispatch(repoPrefix: string, issueKey: string, mode: string): $CancellablePromise<$models.DispatchDTO> {
-    return $Call.ByID(1591721554, repoPrefix, issueKey, mode).then(($result: any) => {
-        return $$createType8($result);
-    });
-}
-
 export function ReorderCard(repoPrefix: string, key: string, position: number): $CancellablePromise<$models.BoardCard> {
     return $Call.ByID(4119956470, repoPrefix, key, position).then(($result: any) => {
         return $$createType1($result);
@@ -403,7 +357,7 @@ export function ReorderCard(repoPrefix: string, key: string, position: number): 
  */
 export function RescueDispatch(dispatchID: number): $CancellablePromise<$models.DispatchDTO> {
     return $Call.ByID(233478750, dispatchID).then(($result: any) => {
-        return $$createType8($result);
+        return $$createType9($result);
     });
 }
 
@@ -444,7 +398,7 @@ export function SetCardProcess(repoPrefix: string, key: string, process: string)
  */
 export function SetDefaultFeature(repoPrefix: string, slug: string): $CancellablePromise<$models.DefaultFeatureDTO> {
     return $Call.ByID(2719883970, repoPrefix, slug).then(($result: any) => {
-        return $$createType9($result);
+        return $$createType8($result);
     });
 }
 
@@ -508,8 +462,8 @@ const $$createType4 = $Create.Nullable($$createType3);
 const $$createType5 = model$0.Issue.createFrom;
 const $$createType6 = $Create.Nullable($$createType5);
 const $$createType7 = $models.PRDTO.createFrom;
-const $$createType8 = agentcards$0.DispatchDTO.createFrom;
-const $$createType9 = $models.DefaultFeatureDTO.createFrom;
+const $$createType8 = $models.DefaultFeatureDTO.createFrom;
+const $$createType9 = agentcards$0.DispatchDTO.createFrom;
 const $$createType10 = $models.BoardHiddenStatesDTO.createFrom;
 const $$createType11 = $models.IssueBriefDTO.createFrom;
 const $$createType12 = agentcards$0.AgentCard.createFrom;

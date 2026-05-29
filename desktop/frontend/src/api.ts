@@ -58,17 +58,14 @@ import { ClaimDTO } from '../bindings/github.com/mrgeoffrich/bacio/internal/agen
 // boardcards binding so the React components import them from the
 // same api.ts seam as everything else (avoids one-off binding paths
 // scattered through the kanban code).
-// BACI-192: BoardCardFollowOn rides the same import path — same
-// rationale: components that already import from `./api` get the
-// shape without learning a binding directory.
-import { WaitingState, WaitingKind, BoardCardFollowOn } from '../bindings/github.com/mrgeoffrich/bacio/internal/boardcards';
+import { WaitingState, WaitingKind } from '../bindings/github.com/mrgeoffrich/bacio/internal/boardcards';
 // Phase 4 (Pipeline): PipelineJob is the per-stage process-chain row the
 // controller engine advances. Lives in the model bindings; re-exported
 // below so the Pipeline page imports it from the same ./api seam as
-// everything else (parallels the BoardCardFollowOn import rationale).
+// everything else (parallels the WaitingState import rationale).
 import { PipelineJob } from '../bindings/github.com/mrgeoffrich/bacio/internal/model';
 
-export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureLinkedDoc, FeaturePlan, FeaturePlanEntry, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, ArchivePreferencesDTO, AudioPreferencesDTO, WaitingState, BoardCardFollowOn, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO, SyncSetupDTO, CollisionPreviewDTO, RenumberEntryDTO, RenameEntryDTO, RepoLinkResultDTO, ShippedIssueDTO, ShippedListDTO, LatestPlanDTO };
+export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureLinkedDoc, FeaturePlan, FeaturePlanEntry, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, ArchivePreferencesDTO, AudioPreferencesDTO, WaitingState, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO, SyncSetupDTO, CollisionPreviewDTO, RenumberEntryDTO, RenameEntryDTO, RepoLinkResultDTO, ShippedIssueDTO, ShippedListDTO, LatestPlanDTO };
 // BACI-216: cross-transport alias. The web bundle's api.http.ts ships
 // the same name from its own TS-only shape so KanbanCard / IssueWorkspace
 // stay transport-agnostic.
@@ -287,25 +284,6 @@ export async function dispatchIssue(
   }
 }
 
-// dispatchIssueChain (BACI-209) queues a primary dispatch + a dormant
-// follow-on against the same issue in one transaction — the compound
-// kanban affordance ("Plan, then Implement") on todo cards. Mirrors
-// dispatchIssue's shape; the follow-on rides on the next BoardCard
-// refresh via card.followOn (the BACI-192 denorm already surfaces
-// dormant rows regardless of card state).
-export async function dispatchIssueChain(
-  repoPrefix: string,
-  issueKey: string,
-  mode: string,
-  followOnMode: string,
-): Promise<DispatchDTO> {
-  try {
-    return await BoardService.DispatchIssueChain(repoPrefix, issueKey, mode, followOnMode);
-  } catch (err) {
-    throw normalize(err);
-  }
-}
-
 // cancelWaitingDispatch (BACI-51) withdraws an issue's queued / pending /
 // delivered dispatch — the spinner-as-cancel-button click handler. The
 // backend resolves the dispatch id from the issue + cancels in one call
@@ -332,39 +310,6 @@ export async function cancelWaitingDispatch(
 export async function rescueDispatch(dispatchID: number): Promise<DispatchDTO> {
   try {
     return await BoardService.RescueDispatch(dispatchID);
-  } catch (err) {
-    throw normalize(err);
-  }
-}
-
-// queueFollowOnDispatch (BACI-180) attaches a dormant follow-on dispatch
-// to the issue's in-flight (parent) dispatch — the kanban chip
-// click handler. The backend resolves the parent via WaitingDispatchForIssue
-// and re-runs the state-gate so the UI can't queue something the matcher
-// would reject. Errors (no open dispatch, state-gate, single-slot) surface
-// as Error.message and bubble through reportError() in App.jsx.
-export async function queueFollowOnDispatch(
-  repoPrefix: string,
-  issueKey: string,
-  mode: string,
-): Promise<DispatchDTO> {
-  try {
-    return await BoardService.QueueFollowOnDispatch(repoPrefix, issueKey, mode);
-  } catch (err) {
-    throw normalize(err);
-  }
-}
-
-// cancelFollowOnDispatch (BACI-180) removes the dormant follow-on attached
-// to an issue — the chip-remove click handler. Idempotent on the backend:
-// an issue with no dormant follow-on returns a zero DispatchDTO and no
-// error, so a stale click doesn't surface as a failure.
-export async function cancelFollowOnDispatch(
-  repoPrefix: string,
-  issueKey: string,
-): Promise<DispatchDTO> {
-  try {
-    return await BoardService.CancelFollowOnDispatch(repoPrefix, issueKey);
   } catch (err) {
     throw normalize(err);
   }

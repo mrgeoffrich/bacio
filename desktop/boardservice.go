@@ -1108,29 +1108,6 @@ func (b *BoardService) DispatchIssue(repoPrefix, issueKey, mode string) (Dispatc
 	return dispatchDTO(d), nil
 }
 
-// DispatchIssueChain (BACI-209) queues a state-gated primary dispatch
-// PLUS a dormant follow-on against the brand-new parent in one
-// transaction. Backs the kanban's "Plan, then Implement" compound
-// picker on todo cards. Mirrors DispatchIssue's shape (returns the
-// parent DispatchDTO; the follow-on rides on the next BoardCard
-// refresh via card.followOn).
-//
-// All three surfaces — Wails, REST, CLI — funnel through
-// client.AutoDispatchIssueWithFollowOn so the gate + payload + two
-// audit rows live in one place.
-func (b *BoardService) DispatchIssueChain(repoPrefix, issueKey, mode, followOnMode string) (DispatchDTO, error) {
-	ctx := context.Background()
-	repo, err := b.resolveRepoForKey(ctx, repoPrefix, issueKey)
-	if err != nil {
-		return DispatchDTO{}, err
-	}
-	parent, _, err := b.client.AutoDispatchIssueWithFollowOn(ctx, repo, issueKey, mode, followOnMode, false)
-	if err != nil {
-		return DispatchDTO{}, err
-	}
-	return dispatchDTO(parent), nil
-}
-
 // GetSessionQuestion fetches one BACI-53 ask_user_question row by id.
 // Backs the desktop Agents-view modal — the AgentCard composite ships
 // only the badge metadata, so the modal does one extra round trip
@@ -1152,47 +1129,6 @@ func (b *BoardService) AnswerSessionQuestion(id int64, answers map[string]any) (
 // receives a tool error on the next channel poll tick.
 func (b *BoardService) CancelSessionQuestion(id int64) (*model.SessionQuestion, error) {
 	return b.client.CancelSessionQuestion(context.Background(), id, false)
-}
-
-// QueueFollowOnDispatch (BACI-180) attaches a dormant follow-on
-// dispatch to the issue's in-flight (parent) dispatch. Mirrors
-// DispatchIssue's shape — same DTO out, repo prefix derivable from
-// the issue key — but routes through client.QueueFollowOnDispatch so
-// the gate + parent-resolution path stays in one place. Errors when
-// there is no open dispatch on the issue, when the state-gate
-// rejects, or when a dormant follow-on already exists (single-slot
-// per issue).
-func (b *BoardService) QueueFollowOnDispatch(repoPrefix, issueKey, mode string) (DispatchDTO, error) {
-	ctx := context.Background()
-	repo, err := b.resolveRepoForKey(ctx, repoPrefix, issueKey)
-	if err != nil {
-		return DispatchDTO{}, err
-	}
-	d, err := b.client.QueueFollowOnDispatch(ctx, repo, issueKey, mode, false)
-	if err != nil {
-		return DispatchDTO{}, err
-	}
-	return dispatchDTO(d), nil
-}
-
-// CancelFollowOnDispatch (BACI-180) is the chip-remove handler: cancel
-// the dormant follow-on attached to an issue. Idempotent — a no-op on
-// an issue with no dormant follow-on (returns the zero DispatchDTO and
-// nil error) so a stale UI click doesn't surface as an error.
-func (b *BoardService) CancelFollowOnDispatch(repoPrefix, issueKey string) (DispatchDTO, error) {
-	ctx := context.Background()
-	repo, err := b.resolveRepoForKey(ctx, repoPrefix, issueKey)
-	if err != nil {
-		return DispatchDTO{}, err
-	}
-	d, err := b.client.CancelFollowOnDispatch(ctx, repo, issueKey, false)
-	if err != nil {
-		return DispatchDTO{}, err
-	}
-	if d == nil {
-		return DispatchDTO{}, nil
-	}
-	return dispatchDTO(d), nil
 }
 
 // RescueDispatch (BACI-190) posts a `from="bacio-rescue"` channel

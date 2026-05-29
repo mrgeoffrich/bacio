@@ -630,9 +630,9 @@ export default function App() {
   // (the kanban card's compound-dispatch, follow-on chip, and quick-eval
   // composer). The Pipeline drives work through the engine's job chain
   // instead, so they lost their only caller when the board was removed and
-  // are gone. The underlying api.* verbs (dispatchIssueChain,
-  // queue/cancelFollowOnDispatch) stay for now — Phase 6 decides retire vs
-  // keep.
+  // are gone. BACI-279 (Phase 6 decision) retired the underlying
+  // compound-dispatch / follow-on api.* verbs too — quick-eval stays (eval
+  // comments still render in the Activity timeline).
 
   // BACI-51 spinner-as-cancel-button handler: withdraw a card's queued
   // (or pending/delivered) dispatch. Optimistically clears the local

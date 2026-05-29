@@ -196,19 +196,6 @@ func newRouter(d deps) http.Handler {
 	// desktop per-card action button and the CLI's target-less
 	// `bacio agent dispatch <key> --mode <stage>`.
 	mux.HandleFunc("POST /repos/{prefix}/issues/{key}/dispatch", d.handleIssueDispatch)
-	// BACI-180 follow-on dispatch (issue-scoped): attach a dormant
-	// follow-on to the issue's in-flight (parent) dispatch (POST),
-	// remove it again (DELETE). Mirrors the CLI verbs `bacio agent
-	// queue-followon` / `bacio agent cancel-followon` and the Wails
-	// `BoardService.QueueFollowOnDispatch` / `CancelFollowOnDispatch`
-	// methods — all three routes funnel through client.QueueFollowOnDispatch
-	// / CancelFollowOnDispatch.
-	mux.HandleFunc("POST /repos/{prefix}/issues/{key}/followon", d.handleIssueQueueFollowOn)
-	mux.HandleFunc("DELETE /repos/{prefix}/issues/{key}/followon", d.handleIssueCancelFollowOn)
-	// BACI-209 compound dispatch: queue a state-gated primary + a
-	// dormant follow-on against the same issue in one transaction.
-	// Mirrors the kanban's "Plan, then Implement" picker on todo cards.
-	mux.HandleFunc("POST /repos/{prefix}/issues/{key}/dispatch-chain", d.handleIssueDispatchChain)
 	// BACI-51 spinner-as-cancel UI read: returns the active queued /
 	// pending / delivered dispatch on an issue, or 404 when none. Used
 	// by the desktop + (future) web cancel button to resolve the

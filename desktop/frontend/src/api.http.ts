@@ -126,15 +126,6 @@ export interface BoardCardTodo {
   status: string;
 }
 
-// FollowOnInfo (BACI-182) is the dormant follow-on dispatch the kanban
-// card chip renders. Mirrors internal/boardcards/cards.go::FollowOnInfo;
-// surfaced server-side via BoardCard.followOnDispatch.
-export interface FollowOnInfo {
-  mode: string;
-  actionLabel: string;
-  dispatchID: number;
-}
-
 // BoardCardBlocker (BACI-114) is one open `blocks` edge pointing AT
 // a card. Title is intentionally NOT on the wire — the kanban
 // popover joins it from the same `cards` array (Option A: thin
@@ -156,21 +147,6 @@ export interface WaitingState {
   kind: WaitingKind;
   mode?: string;
   actionLabel?: string;
-}
-
-// BACI-192: BoardCardFollowOn is the denormalised view of the dormant
-// follow-on dispatch attached to this issue — single-slot per issue,
-// drives the kanban footer's follow-on button visual state. Mirror of
-// the Go-side boardcards.BoardCardFollowOn; api.ts re-exports the
-// Wails-binding equivalent under the same name.
-// BACI-217: waitingReason carries a short server-derived label
-// describing what the dormant row is waiting on, when the variant is
-// the blockers-clear gate ("blocked by N"). Absent on the parent-acks
-// variant (the chip reads the mode label without a secondary qualifier).
-export interface BoardCardFollowOn {
-  mode: string;
-  actionLabel: string;
-  waitingReason?: string;
 }
 
 // LatestPlan (BACI-216) is the newest `plan`-typed doc linked
@@ -250,14 +226,6 @@ export interface BoardCard {
   // the already-polled cards array; the binding twin in api.ts mirrors
   // the same wire shape.
   terminalAt?: string;
-  // BACI-192: dormant follow-on dispatch denormalised onto the card so
-  // the kanban footer can render its mode label without an extra
-  // per-card fetch. Absent (server-side omitempty) when the issue has
-  // no dormant follow-on — the footer button stays in its outline
-  // state in that case. Set optimistically by the App-level handlers
-  // on a successful queue / cancel; the next 10s poll re-asserts the
-  // authoritative shape.
-  followOn?: BoardCardFollowOn | null;
   // BACI-216: the newest `plan`-typed doc linked directly to this
   // issue, or absent when none. Drives the per-card plan icon that
   // opens the doc viewer. Server-side omitempty drops the field
@@ -1493,31 +1461,6 @@ export async function dispatchIssue(
   return reshapeDispatch(raw);
 }
 
-// dispatchIssueChain (BACI-209) queues a primary dispatch + a dormant
-// follow-on against the same issue in one transaction over HTTP. Same
-// auto-pick + state-gate shape as dispatchIssue for the primary; the
-// follow-on rides on the next BoardCard refresh via card.followOn.
-export async function dispatchIssueChain(
-  repoPrefix: string,
-  issueKey: string,
-  mode: string,
-  followOnMode: string,
-): Promise<DispatchDTO> {
-  if (!repoPrefix || repoPrefix === 'all') {
-    const i = issueKey.lastIndexOf('-');
-    if (i <= 0) throw new Error(`invalid issue key: ${issueKey}`);
-    repoPrefix = issueKey.slice(0, i);
-  }
-  const raw = await call<ApiDispatch>(
-    `/repos/${repoPrefix}/issues/${issueKey}/dispatch-chain`,
-    {
-      method: 'POST',
-      body: { issue_key: issueKey, mode, follow_on_mode: followOnMode },
-    },
-  );
-  return reshapeDispatch(raw);
-}
-
 // cancelWaitingDispatch (BACI-51) is the spinner-as-cancel-button
 // handler in web mode: two round-trips — GET the active dispatch on
 // the issue, POST cancel against its id. A 404 from the GET means the
@@ -1576,62 +1519,6 @@ export async function rescueDispatch(dispatchID: number): Promise<DispatchDTO> {
     `/agents/dispatches/${dispatchID}/rescue`,
     { method: 'POST' },
   );
-  return reshapeDispatch(raw);
-}
-
-// queueFollowOnDispatch (BACI-180) attaches a dormant follow-on dispatch
-// to the issue's in-flight (parent) dispatch in web mode. Mirrors
-// dispatchIssue's POST shape — the server resolves the parent via
-// WaitingDispatchForIssue and re-runs the state-gate. Errors (no open
-// dispatch, state-gate mismatch, single-slot rejection) surface as the
-// usual error envelope through reportError() in App.jsx.
-export async function queueFollowOnDispatch(
-  repoPrefix: string,
-  issueKey: string,
-  mode: string,
-): Promise<DispatchDTO> {
-  if (!repoPrefix || repoPrefix === 'all') {
-    const i = issueKey.lastIndexOf('-');
-    if (i <= 0) throw new Error(`invalid issue key: ${issueKey}`);
-    repoPrefix = issueKey.slice(0, i);
-  }
-  const raw = await call<ApiDispatch>(
-    `/repos/${repoPrefix}/issues/${issueKey}/followon`,
-    { method: 'POST', body: { issue_key: issueKey, mode } },
-  );
-  return reshapeDispatch(raw);
-}
-
-// cancelFollowOnDispatch (BACI-180) removes the dormant follow-on
-// attached to an issue. Idempotent on the backend — a DELETE against
-// an issue with no dormant follow-on returns 200 with a JSON-null body,
-// which we surface as the zero DispatchDTO (no error). Mirrors the
-// Wails seam's CancelFollowOnDispatch behaviour.
-export async function cancelFollowOnDispatch(
-  repoPrefix: string,
-  issueKey: string,
-): Promise<DispatchDTO> {
-  if (!repoPrefix || repoPrefix === 'all') {
-    const i = issueKey.lastIndexOf('-');
-    if (i <= 0) throw new Error(`invalid issue key: ${issueKey}`);
-    repoPrefix = issueKey.slice(0, i);
-  }
-  const raw = await call<ApiDispatch | null>(
-    `/repos/${repoPrefix}/issues/${issueKey}/followon`,
-    { method: 'DELETE' },
-  );
-  if (!raw) {
-    return {
-      id: 0,
-      issueKey: '',
-      targetAgent: '',
-      mode: '',
-      status: '',
-      payload: '',
-      createdBy: '',
-      createdAt: '',
-    } as DispatchDTO;
-  }
   return reshapeDispatch(raw);
 }
 
