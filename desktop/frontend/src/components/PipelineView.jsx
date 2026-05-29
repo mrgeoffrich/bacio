@@ -35,6 +35,7 @@ export default function PipelineView({
   onOpenCard,
   onOpenIssue,
   onMoveCard,
+  onCancelCard,
   onReorder,
   onSetProcess,
   onStartJob,
@@ -51,6 +52,10 @@ export default function PipelineView({
   const [activeQuestionId, setActiveQuestionId] = useState(null);
   const [expanded, setExpanded] = useState(false);
   const [dragKey, setDragKey] = useState(null);
+  // Holds the column the dragged card is currently over, driving the
+  // `is-drop` highlight. BACI-268 widens the value space with a non-column
+  // 'trash' sentinel for the drag-to-cancel bin — it only feeds the
+  // `=== 'trash'` highlight check, never a column lookup.
   const [dragOverCol, setDragOverCol] = useState(null);
   // autoShip seeds from the backend (GET /auto-ship) — the DB value the
   // controller's auto-ship ticker actually acts on — so the toggle
@@ -127,6 +132,26 @@ export default function PipelineView({
     onDragOver: (e) => { e.preventDefault(); setDragOverCol(col); },
     onDragLeave: (e) => { if (e.currentTarget === e.target) setDragOverCol(null); },
     onDrop: (e) => { e.preventDefault(); dropToColumn(col); },
+  });
+
+  // BACI-268: drop onto the trash bin cancels the dragged issue. Mirrors
+  // dropToColumn but routes to onCancelCard instead of a column move; the
+  // bin accepts a card from any column (no column guard) since `cancelled`
+  // is a plain terminal transition.
+  const cancelToTrash = () => {
+    const key = dragKey;
+    setDragKey(null);
+    setDragOverCol(null);
+    if (!key) return;
+    const card = cardByKey.get(key);
+    if (!card) return;
+    onCancelCard?.(card.key);
+  };
+
+  const trashDropProps = () => ({
+    onDragOver: (e) => { e.preventDefault(); setDragOverCol('trash'); },
+    onDragLeave: (e) => { if (e.currentTarget === e.target) setDragOverCol(null); },
+    onDrop: (e) => { e.preventDefault(); cancelToTrash(); },
   });
 
   if (!activeBoard) {
@@ -276,6 +301,18 @@ export default function PipelineView({
           )}
         </div>
       </section>
+
+      {/* ── Trash bin (BACI-268) — drop a card here to cancel its issue.
+          Pinned bottom-right of the pipeline area; lights up with the
+          shared `is-drop` highlight on drag-over. ── */}
+      <div
+        className={`mk-pl-trash${dragOverCol === 'trash' ? ' is-drop' : ''}`}
+        aria-label="Cancel issue (drop here)"
+        {...trashDropProps()}
+      >
+        <Icon name="trash" />
+        <span className="mk-pl-trash-lbl">Cancel</span>
+      </div>
 
       <QuestionModal
         questionId={activeQuestionId}

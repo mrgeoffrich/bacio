@@ -786,6 +786,14 @@ export default function App() {
       });
   }, [activeBoard, refreshCards]);
 
+  // BACI-268: trash-bin drag-to-cancel. Routes a card dropped onto the
+  // Pipeline's trash bin through the terminal-move path — moveCard already
+  // handles the optimistic column flip (the card leaves its column),
+  // `cancelled`-as-terminal blocker-strip, persistence, and rollback.
+  const cancelCardFromPipeline = useCallback((key) => {
+    moveCard(key, 'cancelled');
+  }, [moveCard]);
+
   // Backlog / Shipping drag-to-reorder. position is 1-based within the
   // card's (repo, state) band. PipelineView handles the optimistic
   // in-list move during the drag; this persists + reconciles.
@@ -955,7 +963,10 @@ export default function App() {
   return (
     <TooltipProvider delayDuration={250} skipDelayDuration={150}>
     <LazyMotion features={domMax} strict>
-    <div className="mk-app">
+    {/* BACI-268: tag the shell on the Pipeline route so the bottom-right
+        Activity tray lifts above the drag-to-cancel bin (which only renders
+        on this route); other routes keep the tray in the corner. */}
+    <div className={`mk-app${activeView === 'pipeline' ? ' is-pipeline' : ''}`}>
       {/* BACI-193: wrap Topbar + main view in one LayoutGroup so the
           ship-flourish layoutId match can cross from the kanban card
           to the Shipped pill destination inside Topbar. Without the
@@ -1021,6 +1032,7 @@ export default function App() {
                   onOpenCard={openCard}
                   onOpenIssue={navigateToIssue}
                   onMoveCard={moveCard}
+                  onCancelCard={cancelCardFromPipeline}
                   onReorder={reorderPipelineCard}
                   onSetProcess={setCardProcess}
                   onStartJob={startCardJob}
