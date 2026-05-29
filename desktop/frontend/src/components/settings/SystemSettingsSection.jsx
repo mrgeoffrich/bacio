@@ -321,7 +321,7 @@ export default function SystemSettingsSection({
             <ScopeChip kind="server" />
           </div>
           <div className="mk-settings-hint">
-            When on, the topbar Shipped pill plays a short ka-ching whenever the Shipped count rolls up. On by default. Honours the OS-level mute and the browser autoplay policy — the sound silently no-ops (it needs at least one click on the page before audio is allowed) rather than erroring.
+            When on, the Pipeline's Shipped pill plays a short ka-ching whenever the Shipped count rolls up. On by default. Honours the OS-level mute and the browser autoplay policy — the sound silently no-ops (it needs at least one click on the page before audio is allowed) rather than erroring.
           </div>
         </div>
         <div className="mk-segmented" role="group" aria-label="Ship sound">

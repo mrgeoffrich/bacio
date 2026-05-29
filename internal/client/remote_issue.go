@@ -360,8 +360,9 @@ func (c *remoteClient) ListShippedIssues(ctx context.Context, repo *model.Repo, 
 		FeatureEmoji string    `json:"featureEmoji"`
 	}
 	// BACI-221 reshaped the response from a bare list to {rows, total}.
-	// The remote client only needs the rows; total is the topbar pill's
-	// concern and the dedicated CountShippedIssues call covers it.
+	// The remote client only needs the rows; total is the Pipeline
+	// Shipping-column pill's concern and the dedicated
+	// CountShippedIssues call covers it.
 	var raw struct {
 		Rows  []shippedDTO `json:"rows"`
 		Total int          `json:"total"`

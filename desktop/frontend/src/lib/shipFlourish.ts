@@ -1,6 +1,6 @@
 // useShipFlourish detects card transitions into `done` from a
-// non-terminal column and triggers the topbar "ship flourish" — a
-// shared-element flight from the kanban card position to the
+// non-terminal column and triggers the Pipeline "ship flourish" — a
+// shared-element flight from the pipeline card position to the
 // `Shipped · N` pill, followed by a short pulse on the pill. Wired
 // into the App alongside the existing 10s `cards` poll / push pipeline;
 // the hook is pure-client and reads no network.
@@ -17,8 +17,9 @@
 // `bacio-193-plan.md` (Out of scope).
 //
 // The companion CSS (`.mk-shipped-pill.is-flash`) and Motion
-// `layoutId` plumbing live in `KanbanCard.jsx` / `Topbar.jsx` /
-// `ShippedPopover.jsx`; this hook is the controller.
+// `layoutId` plumbing live in `PipelineView.jsx` (the PipelineCard
+// flight source) and `ShippedPopover.jsx` (the destination slot);
+// this hook is the controller.
 //
 // BACI-254: the hook also fires an optional `onShip(keys)` callback
 // from the same detection effect. The callback receives every card
@@ -57,12 +58,12 @@ type ShipCard = {
 
 export type ShipFlourishResult = {
   // The key of the card currently flying to the Shipped pill, or
-  // null when no flight is in progress. The KanbanCard wrapper
+  // null when no flight is in progress. The PipelineCard wrapper
   // uses this to render its `motion.article` with a matching
   // `layoutId`; the ShippedPopover renders the destination slot
   // with the same `layoutId` so Motion bridges the two trees.
   flyingKey: string | null;
-  // True for ~520ms after the flying card lands. Topbar threads
+  // True for ~520ms after the flying card lands. PipelineView threads
   // this through to the pill so it can toggle `.is-flash`.
   flashing: boolean;
   // Called by the destination slot once Motion fires
@@ -85,7 +86,7 @@ export type ShipFlourishResult = {
 // BACI-254: the optional `onShip(keys)` callback is fired from the
 // same detection effect with every card that transitioned in the
 // tick. The SFX caller in `App.jsx` uses it to play a sound per ship
-// independently of Motion / the kanban being mounted. Only the first
+// independently of Motion / the Pipeline being mounted. Only the first
 // key still drives the visual flight (one Motion flight at a time);
 // the array carries the rest so a burst ship lands every audio cue.
 export function useShipFlourish(

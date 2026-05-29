@@ -1071,7 +1071,7 @@ func TestAssembleSortsCompletedColumnsByTerminalAt(t *testing.T) {
 	}
 }
 
-// TestAssembleTerminalAtThreaded — BACI-187. The shipping-log topbar
+// TestAssembleTerminalAtThreaded — BACI-187. The shipping-log Shipped
 // pill derives its "last 7 days of done" count client-side from the
 // already-polled `cards` array, so BoardCard must carry the issue's
 // terminal_at through. A done card with terminal_at set surfaces it on

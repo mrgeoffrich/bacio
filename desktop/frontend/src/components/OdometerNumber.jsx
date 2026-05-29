@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { decideOdometerAction, digitAt } from '../lib/odometer';
 
-// OdometerNumber (BACI-240) is the topbar Shipped pill's 3-digit
-// odometer. Renders three zero-padded digit columns each clipped
+// OdometerNumber (BACI-240) is the Pipeline Shipping-column Shipped
+// pill's 3-digit odometer. Renders three zero-padded digit columns each clipped
 // via `overflow:hidden`; the visible digit is positioned by
 // `transform: translateY(-d * 1em)` interpolated by CSS transition.
 //

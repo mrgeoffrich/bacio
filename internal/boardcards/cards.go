@@ -243,11 +243,10 @@ type BoardCard struct {
 	EvalCommentCount int `json:"evalCommentCount,omitempty"`
 	// TerminalAt (BACI-187) is the BACI-138 "moved into a terminal
 	// state" timestamp — non-nil on Done / Cancelled cards, nil on
-	// open-state cards. The shipping-log topbar pill derives its
-	// "last 7 days of done" count client-side from the already-polled
-	// `cards` array; passing the timestamp through is the cheapest
-	// way to avoid a second poll loop. Omitempty keeps open cards
-	// lean on the wire — they outnumber done cards on a healthy board.
+	// open-state cards (the moment a card reached a terminal column).
+	// Carried on the already-polled `cards` array so the client has it
+	// without a second fetch. Omitempty keeps open cards lean on the
+	// wire — they outnumber done cards on a healthy board.
 	TerminalAt *time.Time `json:"terminalAt,omitempty"`
 	// LatestPlan (BACI-216) is the newest `plan`-typed document
 	// linked directly to this issue, or nil when no plan is linked.

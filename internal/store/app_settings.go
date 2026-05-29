@@ -287,9 +287,9 @@ func (s *Store) SetSyncBackgroundEnabled(enabled bool) error {
 }
 
 // uiShippedSfxKey is the BACI-240 global toggle controlling whether
-// the topbar Shipped pill plays a short "ka-ching" SFX on every
-// genuine increment of the shipped count. BACI-295 flipped the default
-// ON now that the feature has shipped.
+// the Pipeline Shipping-column Shipped pill plays a short "ka-ching"
+// SFX on every genuine increment of the shipped count. BACI-295 flipped
+// the default ON now that the feature has shipped.
 const uiShippedSfxKey = "ui.shipped_sfx"
 
 // GetUIShippedSfx reports whether the BACI-240 Shipped-pill SFX is

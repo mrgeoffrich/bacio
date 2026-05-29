@@ -15,8 +15,8 @@ const CACHE_TTL_MS = 30_000;
 // — see scopeSinceDays — so this file no longer hard-codes a window.
 const LIMIT = 20;
 
-// ShippedPopover (BACI-187, BACI-221) is the topbar's "Shipped · N"
-// pill plus its anchored menu of recently-done issues. Hand-rolled
+// ShippedPopover (BACI-187, BACI-221) is the Pipeline Shipping column's
+// "Shipped · N" pill plus its anchored menu of recently-done issues. Hand-rolled
 // rather than pulling Radix Popover — matches the lightweight ref +
 // mousedown + Escape recipe RepoPicker already uses in this codebase,
 // and keeps the dep footprint flat.
@@ -31,7 +31,7 @@ const LIMIT = 20;
 //                  App.jsx so the pill count and the list scope stay
 //                  in lockstep.
 //   onScopeChange — App-level setter that also persists the choice to
-//                  localStorage. Wired through Topbar.
+//                  localStorage. Wired through PipelineView.
 //   onOpenIssue  — invoked with the row's canonical key on click;
 //                  the popover closes itself afterwards.
 //   flyingShipKey — BACI-193: when set, the popover renders an
@@ -47,11 +47,12 @@ const LIMIT = 20;
 // BACI-254: the ship SFX used to live here too, wired to the rising
 // edge of `shipFlashing`. That made the audio depend on Motion
 // actually completing the flight — which never happens when the
-// user is off the kanban (Features graph, Settings, …) because the
+// user is off the Pipeline (Features graph, Settings, …) because the
 // source `motion.article` isn't mounted. The SFX has moved up into
-// `App.jsx`, where it fires from `useShipFlourish`'s detection
-// effect regardless of the active view. The visual flash stays put
-// — it does genuinely depend on the flight landing.
+// `App.jsx`, where BACI-295 ties it to the server-derived shippedCount
+// rising (the count-rise effect) so it fires regardless of the active
+// view. The visual flash stays put — it does genuinely depend on the
+// flight landing.
 export default function ShippedPopover({ activeBoard, shippedCount, scope, onScopeChange, onOpenIssue, flyingShipKey, shipFlashing, onShipFlightDone }) {
   const [open, setOpen] = useState(false);
   // status: 'idle' | 'loading' | 'ready' | 'error'
@@ -121,7 +122,7 @@ export default function ShippedPopover({ activeBoard, shippedCount, scope, onSco
         // Route through reportError so the unified failure log records
         // the headline, then surface inline too so the popover stays
         // self-contained — an interrupting global modal would feel
-        // out of proportion for a topbar affordance.
+        // out of proportion for this pill affordance.
         reportError(err, { headline: "Couldn't load shipped issues" });
         setError(err?.message || String(err));
         setStatus('error');
@@ -177,7 +178,7 @@ export default function ShippedPopover({ activeBoard, shippedCount, scope, onSco
       {open && (
         <div className="mk-shipped-popover" role="dialog" aria-label="Recently shipped issues">
           {/* BACI-244: the "Recently shipped" header strip was removed —
-              the topbar trigger pill ("Shipped · N") already labels the
+              the trigger pill ("Shipped · N") already labels the
               popover, so the inner header was duplicative chrome.
               BACI-221 scope picker: segmented strip of Today / Last
               Week / Forever buttons. Renders above the body so the

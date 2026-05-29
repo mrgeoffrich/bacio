@@ -323,12 +323,13 @@ type Client interface {
 	// not part of model.Issue and are dropped on the remote path).
 	ListShippedIssues(ctx context.Context, repo *model.Repo, f store.ShippedFilter) ([]*model.Issue, error)
 	// CountShippedIssues (BACI-221) is the sibling count read for the
-	// topbar Shipped pill. Returns the total number of shipped issues
-	// matching the same WHERE that ListShippedIssues applies, ignoring
-	// f.Limit (the count is total under the scope, not per-fetch). The
-	// pre-BACI-221 pill derived its count client-side from the polled
-	// cards array, which undercounted (filtered by show_archived +
-	// per-feature board-hide) and couldn't represent "Forever"; moving
+	// Pipeline Shipping-column Shipped pill. Returns the total number of
+	// shipped issues matching the same WHERE that ListShippedIssues
+	// applies, ignoring f.Limit (the count is total under the scope, not
+	// per-fetch). The pre-BACI-221 pill derived its count client-side
+	// from the polled cards array, which undercounted (filtered by
+	// show_archived + per-feature board-hide) and couldn't represent
+	// "Forever"; moving
 	// the count server-side fixes both. The local backend delegates to
 	// store.CountShippedIssues; the remote backend hits
 	// GET /repos/{prefix}/shipped/count.
@@ -407,9 +408,9 @@ type Client interface {
 	GetSyncBackgroundEnabled(ctx context.Context) (bool, error)
 	SetSyncBackgroundEnabled(ctx context.Context, value, dryRun bool) (bool, error)
 	// GetUIShippedSfx / SetUIShippedSfx expose the BACI-240
-	// ui.shipped_sfx global toggle controlling whether the topbar
-	// Shipped pill plays a ka-ching SFX on genuine increments.
-	// Defaults to false (audio is opt-in).
+	// ui.shipped_sfx global toggle controlling whether the Pipeline
+	// Shipping-column Shipped pill plays a ka-ching SFX on genuine
+	// increments. Defaults to false (audio is opt-in).
 	GetUIShippedSfx(ctx context.Context) (bool, error)
 	SetUIShippedSfx(ctx context.Context, value, dryRun bool) (bool, error)
 	// SyncRegistry (BACI-108) returns the registry of sync repos this

@@ -54,7 +54,19 @@ export default function PipelineView({
   flyingShipKey,
   shipFlashing,
   onShipFlightDone,
+  onTestIncrementShipped,
 }) {
+  // Dev/test affordance (BACI-295 follow-up): show a button that bumps
+  // the Shipped count by one so the count-rise → ka-ching path can be
+  // exercised with a real user gesture. Off for normal users — opt in
+  // with `?sfxtest` in the URL or `localStorage.bacioShipSfxTest = '1'`.
+  const showSfxTest = useMemo(() => {
+    try {
+      if (typeof window === 'undefined') return false;
+      if (new URLSearchParams(window.location.search).has('sfxtest')) return true;
+      return window.localStorage?.getItem('bacioShipSfxTest') === '1';
+    } catch { return false; }
+  }, []);
   const [activeQuestionId, setActiveQuestionId] = useState(null);
   const [expanded, setExpanded] = useState(false);
   // collapsed (BACI-288) shrinks the Backlog column to a thin rail so the
@@ -361,6 +373,16 @@ export default function PipelineView({
             shipFlashing={shipFlashing}
             onShipFlightDone={onShipFlightDone}
           />
+          {showSfxTest && (
+            <button
+              type="button"
+              className="mk-pill"
+              onClick={onTestIncrementShipped}
+              title="Test: bump the Shipped count by 1 to fire the ka-ching (dev only; the next poll re-syncs the real count)"
+            >
+              🔔 Test +1
+            </button>
+          )}
         </div>
         <div className="mk-pl-col-body">
           {shipping.length === 0 ? (

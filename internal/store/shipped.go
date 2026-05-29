@@ -126,11 +126,12 @@ func (s *Store) ListShippedIssues(f ShippedFilter) ([]*model.Issue, error) {
 // total under the scope, independent of how many rows the popover
 // would inflate per fetch.
 //
-// BACI-221: backs the topbar "Shipped · N" pill so the count always
-// agrees with the popover's list under the active Today / Last Week /
-// Forever scope. The pre-BACI-221 pill derived its count client-side
-// from the polled cards array — that path undercounted because cards
-// are filtered by show_archived and the per-feature board-hide set,
+// BACI-221: backs the Pipeline Shipping-column "Shipped · N" pill so
+// the count always agrees with the popover's list under the active
+// Today / Last Week / Forever scope. The pre-BACI-221 pill derived its
+// count client-side from the polled cards array — that path
+// undercounted because cards are filtered by show_archived and the
+// per-feature board-hide set,
 // and it couldn't represent "Forever" at all. Moving the count
 // server-side fixes both.
 //

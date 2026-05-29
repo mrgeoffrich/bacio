@@ -1,4 +1,4 @@
-// Persistence helper for the BACI-221 topbar Shipped scope picker.
+// Persistence helper for the BACI-221 Pipeline Shipping-column Shipped scope picker.
 // Mirrors `activityTrayPersistence.ts` (single global string on a
 // kebab-cased `bacio-` key) — *not* the per-repo nested-object shape
 // `boardCompactPersistence.ts` uses, because the scope is a personal
