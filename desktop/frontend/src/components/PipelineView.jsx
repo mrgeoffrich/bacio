@@ -387,7 +387,7 @@ function PipelineCard({
             aria-label="Move into the pipeline"
             onClick={(e) => { e.stopPropagation(); onMoveCard?.(card.key, 'in_pipeline'); }}
           >
-            <Icon name="forward" /> To pipeline
+            <Icon name="forward" />
           </button>
         </div>
       )}
@@ -591,7 +591,7 @@ function StageCard({
               onClick={() => setPicking(true)}
               title="Edit / replace the process"
             >
-              ✎ Edit
+              ✎ Edit Process
             </button>
             <span className="mk-pl-spacer" />
             {paused && <span className="mk-pl-halt">⏸ Auto halted</span>}
@@ -643,12 +643,18 @@ function JobChain({ jobs }) {
 function ActiveJob({ card, job }) {
   const todos = card.todos || [];
   const verb = card.activeVerb || '';
+  // A queued/delivered dispatch reads as "running" on the job long before a
+  // worker actually starts. card.taken flips true only once the worker opens
+  // its claim, so gate the live word on it: "waiting for an agent" until then.
+  const taken = !!card.taken;
   return (
     <div className="mk-pl-job">
       <div className="mk-pl-job-head">
         <span className="mk-pl-jmode">{stageLabel(job.mode)}</span>
         <span className="mk-pl-jmeta">
-          <span className="mk-pl-live">running</span>
+          {taken
+            ? <span className="mk-pl-live">running</span>
+            : <span className="mk-pl-live is-waiting">waiting for an agent</span>}
           {verb ? ` · ${verb}` : ''}
           {card.todosTotal ? ` · ${card.todosDone}/${card.todosTotal}` : ''}
         </span>
