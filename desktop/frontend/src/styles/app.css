@@ -1718,8 +1718,7 @@ body { margin: 0; }
 .mk-pl-drawer-toggle:hover { color: var(--fg-1); border-color: var(--border-2); }
 
 .mk-pl-col-body,
-.mk-pl-backlog-body,
-.mk-pl-stage-body {
+.mk-pl-backlog-body {
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -1744,6 +1743,22 @@ body { margin: 0; }
   align-content: start;
 }
 .mk-pl-backlog-body.is-grid > * { direction: ltr; }
+/* In Pipeline (middle) column: flow stage cards into a responsive grid
+   (BACI-282). auto-fill + minmax gives two-plus columns when the track is
+   wide, collapses to one when it can't fit two at the 320px floor, and never
+   squeezes a card below that floor. Unlike the fixed .is-grid backlog above,
+   this is width-driven with a minimum. align-items: start keeps a short idle
+   card from stretching to a tall active-job card's height in the same row. */
+.mk-pl-stage-body {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 10px;
+  align-content: start;
+  align-items: start;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+}
 .mk-pl-col-empty {
   color: var(--fg-4);
   font-size: 13px;
@@ -1751,6 +1766,7 @@ body { margin: 0; }
   padding: 24px 12px;
 }
 .mk-pl-stage-empty {
+  grid-column: 1 / -1;       /* span the full stage grid, not just col 1 */
   border: 1px dashed var(--border-2);
   border-radius: var(--radius-md);
   margin: 4px 0;
