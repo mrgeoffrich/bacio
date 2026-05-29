@@ -363,6 +363,7 @@ func TestSessionWaiting(t *testing.T) {
 func TestSessionLiveness(t *testing.T) {
 	now := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
 	ended := now.Add(-time.Hour)
+	errored := now.Add(-time.Minute)
 
 	cases := []struct {
 		name string
@@ -374,10 +375,38 @@ func TestSessionLiveness(t *testing.T) {
 		{"fresh", &AgentSession{LastSeenAt: now.Add(-time.Minute)}, "active"},
 		{"on threshold", &AgentSession{LastSeenAt: now.Add(-AgentLivenessThreshold)}, "active"},
 		{"past threshold", &AgentSession{LastSeenAt: now.Add(-AgentLivenessThreshold - time.Second)}, "idle"},
+		// BACI-296: errored supersedes active/idle but never ended.
+		{"errored over active", &AgentSession{LastSeenAt: now.Add(-time.Minute), ErroredAt: &errored}, "errored"},
+		{"errored over idle", &AgentSession{LastSeenAt: now.Add(-AgentLivenessThreshold - time.Hour), ErroredAt: &errored}, "errored"},
+		{"ended beats errored", &AgentSession{LastSeenAt: now, EndedAt: &ended, ErroredAt: &errored}, "ended"},
 	}
 	for _, c := range cases {
 		if got := SessionLiveness(c.sess, now); got != c.want {
 			t.Errorf("SessionLiveness(%s) = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+func TestIsTransientAPIError(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"server_error", true},
+		{"rate_limit", true},
+		{" server_error ", true}, // trimmed
+		{"authentication_failed", false},
+		{"billing_error", false},
+		{"oauth_org_not_allowed", false},
+		{"invalid_request", false},
+		{"model_not_found", false},
+		{"max_output_tokens", false},
+		{"unknown", false}, // conservative default — surface to user
+		{"", false},
+	}
+	for _, c := range cases {
+		if got := IsTransientAPIError(c.in); got != c.want {
+			t.Errorf("IsTransientAPIError(%q) = %v, want %v", c.in, got, c.want)
 		}
 	}
 }

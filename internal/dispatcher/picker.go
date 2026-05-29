@@ -24,17 +24,22 @@ type AgentCandidate struct {
 	Busy            bool
 	HasChannel      bool
 	HasOpenDispatch bool
+	// Errored marks a session that took an Anthropic API failure and has
+	// not yet recovered (BACI-296). Such a session is skipped by the
+	// auto-pick so we don't immediately hand fresh work to a worker that
+	// just died mid-turn; the next successful heartbeat clears the flag.
+	Errored bool
 }
 
 // AutoPickFreeAgent returns the first candidate eligible to take auto-
-// dispatched work: live, not busy, has a channel, no un-acked dispatch
-// already queued against it, and a persistent identity slug
+// dispatched work: live, not errored, not busy, has a channel, no un-acked
+// dispatch already queued against it, and a persistent identity slug
 // (CreateDispatch routes by slug). Candidates are expected in
 // last-seen-DESC order; the first match wins so the freshest free
 // agent gets the work.
 func AutoPickFreeAgent(cands []AgentCandidate) string {
 	for _, c := range cands {
-		if c.Ended || c.Busy || c.AgentName == "" || !c.HasChannel || c.HasOpenDispatch {
+		if c.Ended || c.Errored || c.Busy || c.AgentName == "" || !c.HasChannel || c.HasOpenDispatch {
 			continue
 		}
 		return c.AgentName
@@ -72,9 +77,11 @@ func BuildCandidates(
 	}
 	out := make([]AgentCandidate, 0, len(sessions))
 	for _, s := range sessions {
+		liveness := model.SessionLiveness(s, now)
 		cand := AgentCandidate{
 			AgentName:  s.AgentName,
-			Ended:      model.SessionLiveness(s, now) == "ended",
+			Ended:      liveness == "ended",
+			Errored:    liveness == "errored",
 			HasChannel: s.ChannelSeenAt != nil,
 		}
 		if !cand.Ended {

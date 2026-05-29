@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/mrgeoffrich/bacio/internal/model"
 )
@@ -844,6 +845,78 @@ func resolveOpenDispatchesForSession(tx *sql.Tx, sessPK int64, cascade DispatchC
 	return out, nil
 }
 
+// maxErrorMessageLen caps the StopFailure error_message stored on a
+// session row (BACI-296). Claude Code's blurbs are short, but a stray
+// stack-trace-sized message has no business bloating the agent row — the
+// classification lives in error_type, not the prose.
+const maxErrorMessageLen = 2000
+
+// clipRunes returns s truncated to at most maxBytes bytes, cut on a rune
+// boundary so the result stays valid UTF-8. Used to bound the StopFailure
+// error_message before it lands on the session row.
+func clipRunes(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	cut := maxBytes
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
+}
+
+// SetAgentSessionErrored records an Anthropic API failure (BACI-296) on
+// the session row: stamps errored_at = now and writes the error class +
+// message. Idempotent — a repeat call refreshes errored_at and the
+// fields. A missing session is a no-op (UPDATE affecting 0 rows), matching
+// the fail-open contract of the StopFailure hook that drives this. The
+// error_type / error_message are validated at the boundary (no control
+// characters; message length-capped) so a malformed payload can't smuggle
+// junk onto the row.
+func (s *Store) SetAgentSessionErrored(sessionID, errType, errMsg string) error {
+	if _, err := ValidateSessionID(sessionID); err != nil {
+		return err
+	}
+	cleanType, err := validateSingleLine(errType, "error_type", maxNameLen, false)
+	if err != nil {
+		return err
+	}
+	// error_message is best-effort prose (it can carry newlines), so it
+	// goes through the multi-line validator (control chars rejected, tab /
+	// newline / CR allowed) after being clipped to maxErrorMessageLen so a
+	// runaway blurb can't bloat the row. Clip on a rune boundary to keep
+	// the UTF-8 check happy.
+	if len(errMsg) > maxErrorMessageLen {
+		errMsg = clipRunes(errMsg, maxErrorMessageLen)
+	}
+	cleanMsg, err := ValidateBody(errMsg, "error_message", false)
+	if err != nil {
+		return err
+	}
+	_, err = s.DB.Exec(
+		`UPDATE agent_sessions SET errored_at = CURRENT_TIMESTAMP, error_type = ?, error_message = ? WHERE session_id = ?`,
+		cleanType, cleanMsg, sessionID,
+	)
+	return err
+}
+
+// ClearAgentSessionError clears the errored-state columns (BACI-296) —
+// called on the next successful heartbeat after a session recovers
+// (took a fresh turn). NULLs errored_at and blanks the two text columns
+// so SessionLiveness drops back to active/idle. A missing session is a
+// no-op. Cheap and idempotent; the hook calls it edge-only (only when the
+// row was actually errored) to avoid churning the row on every heartbeat.
+func (s *Store) ClearAgentSessionError(sessionID string) error {
+	if _, err := ValidateSessionID(sessionID); err != nil {
+		return err
+	}
+	_, err := s.DB.Exec(
+		`UPDATE agent_sessions SET errored_at = NULL, error_type = '', error_message = '' WHERE session_id = ?`,
+		sessionID,
+	)
+	return err
+}
+
 // AddAgentClaim records a new claim. Rejects if the session is already
 // ended (an ended agent has no business claiming new work). Allows
 // multiple concurrent open claims by different sessions on the same
@@ -1583,7 +1656,8 @@ func scanAgentClaim(r rowScanner) (*model.AgentClaim, error) {
 // one place; scanAgentSession's column order mirrors it 1:1.
 const agentSessionSelect = `s.id, s.session_id, s.repo_id, r.prefix, s.agent_id, a.name, s.actor, s.model,
 	s.host, s.branch, s.started_at, s.last_seen_at, s.ended_at, s.end_reason,
-	s.claude_pid, s.channel_seen_at, s.registered_at, s.channel_version`
+	s.claude_pid, s.channel_seen_at, s.registered_at, s.channel_version,
+	s.errored_at, s.error_type, s.error_message`
 
 func scanAgentSession(r rowScanner) (*model.AgentSession, error) {
 	var ag model.AgentSession
@@ -1593,10 +1667,12 @@ func scanAgentSession(r rowScanner) (*model.AgentSession, error) {
 	var ended sql.NullTime
 	var channelSeen sql.NullTime
 	var registered sql.NullTime
+	var errored sql.NullTime
 	err := r.Scan(&ag.ID, &ag.SessionID, &ag.RepoID, &prefix, &agentID, &agentName,
 		&ag.Actor, &ag.Model,
 		&ag.Host, &ag.Branch, &ag.StartedAt, &ag.LastSeenAt, &ended, &ag.EndReason,
-		&ag.ClaudePID, &channelSeen, &registered, &ag.ChannelVersion)
+		&ag.ClaudePID, &channelSeen, &registered, &ag.ChannelVersion,
+		&errored, &ag.ErrorType, &ag.ErrorMessage)
 	if err != nil {
 		return nil, err
 	}
@@ -1618,6 +1694,9 @@ func scanAgentSession(r rowScanner) (*model.AgentSession, error) {
 	}
 	if registered.Valid {
 		ag.RegisteredAt = &registered.Time
+	}
+	if errored.Valid {
+		ag.ErroredAt = &errored.Time
 	}
 	return &ag, nil
 }

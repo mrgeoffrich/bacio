@@ -61,6 +61,7 @@ func newHookCmd() *cobra.Command {
 		hookSessionStartCmd(),
 		hookUserPromptSubmitCmd(),
 		hookStopCmd(),
+		hookStopFailureCmd(),
 		hookSessionEndCmd(),
 		hookPostToolUseCmd(),
 		hookPostToolUseHeartbeatCmd(),
@@ -76,8 +77,10 @@ type hookInput struct {
 	SessionID     string `json:"session_id"`
 	CWD           string `json:"cwd"`
 	HookEventName string `json:"hook_event_name"`
-	Source        string `json:"source"` // SessionStart: startup|resume|clear|compact
-	Reason        string `json:"reason"` // SessionEnd: clear|logout|...
+	Source        string `json:"source"`        // SessionStart: startup|resume|clear|compact
+	Reason        string `json:"reason"`        // SessionEnd: clear|logout|...
+	ErrorType     string `json:"error_type"`    // StopFailure: rate_limit|server_error|...
+	ErrorMessage  string `json:"error_message"` // StopFailure: human blurb
 }
 
 func readHookInput() (*hookInput, error) {
@@ -331,6 +334,7 @@ func hookUserPromptSubmitCmd() *cobra.Command {
 				return nil
 			}
 			h.linkChannel(sess.SessionID)
+			h.clearErrorOnRecovery(sess)
 			h.syncClaimedIssueStates(sess.SessionID, false)
 			emitClaimNudge(h, sess)
 			emitDrainedDispatches(h, sess.SessionID)
@@ -453,7 +457,77 @@ func hookStopCmd() *cobra.Command {
 			defer h.close()
 			if sess := h.heartbeatOrRegister(); sess != nil {
 				h.linkChannel(sess.SessionID)
+				h.clearErrorOnRecovery(sess)
 				h.syncClaimedIssueStates(sess.SessionID, true)
+			}
+			return nil
+		},
+	}
+}
+
+// ---------- stop-failure ----------
+
+// hookStopFailureCmd services the Claude Code StopFailure hook — fired
+// when a turn ends because of an Anthropic API error (529 overloaded,
+// 5xx, 429 rate_limit, auth/billing failures, …) rather than a normal
+// stop (BACI-296). StopFailure is observe-only: Claude Code ignores the
+// hook's stdout and exit code, so this can only RECORD state, never retry
+// in place — recovery (re-arm / re-dispatch) is a supervisor/controller
+// concern.
+//
+// Two best-effort halves, both fail-open:
+//
+//  1. Mark the agent errored. Stamp error_type / error_message / errored_at
+//     on the session row so the kanban / Agents view shows the failure and
+//     the dispatch picker stops handing it fresh work until it recovers.
+//
+//  2. Reconcile the in-flight Pipeline job. If the session held an open
+//     claim on an in_pipeline card with a running job, drive the engine's
+//     FailRunning branch — transient errors pause the chain in place;
+//     terminal errors move the card out to needs_action.
+//
+// Unlike the Stop hook this path deliberately does NOT clear the errored
+// state — this turn *is* the failure. Recovery clearing happens on the
+// next Stop / UserPromptSubmit, when the session takes a fresh turn.
+func hookStopFailureCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:    "stop-failure",
+		Short:  "StopFailure hook: record the API error on the agent + fail its in-flight pipeline job",
+		Args:   cobra.NoArgs,
+		Hidden: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if skipUnlessAgentMode("stop-failure") {
+				return nil
+			}
+			h, err := loadHookContext()
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "bacio hook stop-failure:", err)
+				return nil
+			}
+			if h == nil {
+				return nil
+			}
+			defer h.close()
+
+			// Resolve the session (registering a stub if SessionStart never
+			// ran), but do NOT clear the error — see the doc comment.
+			sess := h.heartbeatOrRegister()
+			if sess == nil {
+				return nil
+			}
+			h.linkChannel(sess.SessionID)
+
+			// Half 1: always record the agent-errored state, regardless of
+			// whether a pipeline job is in flight.
+			if err := h.c.MarkAgentErrored(context.Background(), sess.SessionID, h.in.ErrorType, h.in.ErrorMessage); err != nil {
+				fmt.Fprintln(os.Stderr, "bacio hook stop-failure: mark errored:", err)
+			}
+
+			// Half 2: reconcile the session's in-flight pipeline job per the
+			// error class. A session with no in-flight pipeline claim is a
+			// clean no-op inside FailPipelineForSession.
+			if err := h.c.FailPipelineForSession(context.Background(), sess.SessionID, h.in.ErrorType, h.in.ErrorMessage); err != nil {
+				fmt.Fprintln(os.Stderr, "bacio hook stop-failure: fail pipeline job:", err)
 			}
 			return nil
 		},
@@ -1375,6 +1449,20 @@ func (h *hookContext) heartbeatOrRegister() *model.AgentSession {
 		return nil
 	}
 	return sess
+}
+
+// clearErrorOnRecovery wipes the errored-state columns when a session
+// that previously took an Anthropic API failure (BACI-296) takes a fresh
+// turn — the recovery signal. Edge-only: a session that isn't errored
+// writes nothing, so a normal heartbeat doesn't churn the row. Best-
+// effort — a clear failure goes to stderr and never fails the hook.
+func (h *hookContext) clearErrorOnRecovery(sess *model.AgentSession) {
+	if sess == nil || sess.ErroredAt == nil {
+		return
+	}
+	if err := h.c.ClearAgentError(context.Background(), sess.SessionID); err != nil {
+		fmt.Fprintln(os.Stderr, "bacio hook: clear errored state:", err)
+	}
 }
 
 // assignedIssues returns the non-terminal issues in this repo assigned

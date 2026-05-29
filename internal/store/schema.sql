@@ -494,7 +494,19 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
     -- useful when multiple bacio processes coexist (TUI + desktop +
     -- per-session channels) and one is running an outdated binary. NULL
     -- until register fires; populated from mcp_version on the tool call.
-    channel_version TEXT    NOT NULL DEFAULT ''
+    channel_version TEXT    NOT NULL DEFAULT '',
+    -- errored_at / error_type / error_message capture an Anthropic API
+    -- failure that aborted the session's turn (BACI-296). Set by the
+    -- StopFailure hook (`bacio hook stop-failure`) and surfaced as the
+    -- derived "errored" liveness; cleared on the next successful
+    -- heartbeat (the session took a fresh turn = recovered). This is
+    -- transient supervision metadata, NOT a terminal state — a session
+    -- can be both errored and live. error_type is the Claude Code class
+    -- (server_error / rate_limit / authentication_failed / …);
+    -- error_message is the human blurb (length-capped at the boundary).
+    errored_at      DATETIME,
+    error_type      TEXT    NOT NULL DEFAULT '',
+    error_message   TEXT    NOT NULL DEFAULT ''
 );
 
 -- idx_agent_sessions_agent is created in migrate() so it works on databases

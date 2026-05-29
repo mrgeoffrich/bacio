@@ -280,11 +280,22 @@ you dispatch work *to* agents, you don't act on them here.
 
 **Status** comes from `model.SessionLiveness(session, now)`:
 
-| status   | meaning                                                         |
-| -------- | --------------------------------------------------------------- |
-| `active` | alive and seen within `AgentLivenessThreshold` (10 minutes)     |
-| `idle`   | alive but quiet longer than that — between turns, or harness shut |
-| `ended`  | the session called `bacio agent end` (or a hook ended it)       |
+| status    | meaning                                                         |
+| --------- | --------------------------------------------------------------- |
+| `active`  | alive and seen within `AgentLivenessThreshold` (10 minutes)     |
+| `idle`    | alive but quiet longer than that — between turns, or harness shut |
+| `errored` | the session's turn aborted on an Anthropic API error (see below) |
+| `ended`   | the session called `bacio agent end` (or a hook ended it)       |
+
+`errored` (BACI-296) supersedes `active`/`idle` but never `ended`: the
+`StopFailure` hook stamps `errored_at` / `error_type` / `error_message`
+on the session row when a turn dies on a transport error, and the Agents
+view renders a red `errored:<type>` pill. The flag is **transient
+supervision metadata, not terminal** — the next successful heartbeat
+(the session takes a fresh turn = recovered) clears it. An errored
+session is skipped by the dispatch picker (`AutoPickFreeAgent`) until it
+recovers, so a worker that just died mid-turn isn't immediately handed
+more work. See [StopFailure — recording API failures](#stopfailure--recording-api-failures).
 
 Heartbeats fire on every prompt and on the Stop hook, so a working
 session stays `active` comfortably inside the 10-minute window.
@@ -395,6 +406,60 @@ bites, a quieter audit path (a non-recording store call, or recording
 only the `in_progress → needs_action` edge) is the noted follow-up. A
 `Notification`/`idle_prompt` hook tier is also possible as a future
 stronger "idle for a while" signal layered on top.
+
+## StopFailure — recording API failures
+
+Anthropic occasionally returns transient transport errors (529
+overloaded, 5xx, 429 rate_limit) and a dispatched worker that dies on one
+just goes quiet: the session keeps its last liveness and the Pipeline job
+it was running stays `running` forever (the engine only completes a job
+on a dispatch `acked` and only halts on `cancelled`). The Claude Code
+`StopFailure` hook fires *"when the turn ends due to an API error"* —
+bacio wires it as `bacio hook stop-failure` (BACI-296) to record the
+failure so it can't strand a card silently.
+
+The hook is **observe-only**: Claude Code ignores its stdout and exit
+code, so it can only record state, never retry in place. Recovery
+(re-arming a paused chain, or the user fixing an auth/billing problem) is
+a user/controller concern. The handler is fail-open like every other
+`bacio hook` — a problem goes to stderr, never fails the turn.
+
+Two best-effort halves run on every fire (`internal/cli/hook.go`,
+`hookStopFailureCmd`):
+
+1. **Mark the agent errored** — `MarkAgentErrored` stamps `error_type` /
+   `error_message` / `errored_at` on the session row (always, regardless
+   of whether a job was in flight). Surfaced as the `errored` liveness and
+   the dispatch-picker exclusion above.
+2. **Reconcile the in-flight Pipeline job** — `FailPipelineForSession`
+   walks the session's open claims and, for each whose issue is
+   `in_pipeline` with a running job, drives `pipeline.Engine.FailRunning`,
+   which branches on the error class:
+
+| error class | `error_type` values | what happens |
+| --- | --- | --- |
+| **transient** | `server_error`, `rate_limit` | cancel the running job + dispatch, halt Auto, set `engine_pause_reason = agent_error` — the card stays `in_pipeline`, paused in place. **No auto-retry** (avoids a tight rebind/die loop during a sustained outage); the user re-arms with Start/Auto. |
+| **terminal** | everything else, incl. `unknown` (conservative default) | tear the chain down and move the card out of the pipeline to `needs_action` stamped `user_action_reason_type = agent_error`, so the user is pulled in to fix the auth/billing/config problem. |
+
+`model.IsTransientAPIError` is the single source of truth for the branch.
+The terminal path can't reuse a plain `SetIssueState` — the
+engine-governed-state guard (`internal/store/issues.go`) treats
+`in_pipeline → needs_action` as a no-op — so it goes through the dedicated
+`Store.FailPipelineChainToNeedsAction`, which cancels the job and writes
+the state directly.
+
+**Recovery clear.** The errored flag is cleared edge-only on the next
+`Stop` / `UserPromptSubmit` heartbeat (`hookContext.clearErrorOnRecovery`)
+— a session that takes a fresh turn has recovered. A session that errors
+and never takes another turn is still reaped by the BACI-57 idle-pinger
+(`presumed_dead`), so the flag can't strand a card indefinitely.
+
+**Correlation.** The `StopFailure` `session_id` is the supervisor's; the
+in-flight Pipeline job is found via the session's *open claim* (the
+subagent claims under the same session id). A worker that died before
+claiming has no job to reconcile — the handler records the agent-errored
+state and returns. Older Claude Code builds that don't emit `StopFailure`
+simply never fire it; nothing else changes (no version gate needed).
 
 ---
 
