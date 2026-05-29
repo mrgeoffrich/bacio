@@ -288,20 +288,26 @@ func (s *Store) SetSyncBackgroundEnabled(enabled bool) error {
 
 // uiShippedSfxKey is the BACI-240 global toggle controlling whether
 // the topbar Shipped pill plays a short "ka-ching" SFX on every
-// genuine increment of the shipped count. Default OFF — audio is opt-
-// in in a desktop dev tool.
+// genuine increment of the shipped count. BACI-295 flipped the default
+// ON now that the feature has shipped.
 const uiShippedSfxKey = "ui.shipped_sfx"
 
 // GetUIShippedSfx reports whether the BACI-240 Shipped-pill SFX is
-// enabled. Defaults to false; a missing/empty value — or any value
-// that isn't exactly "true" — reads as false. Defensive read shape
-// matching GetDisplayShowArchived.
+// enabled.
+//
+// IMPORTANT: like GetSyncBackgroundEnabled (and unlike
+// GetDisplayShowArchived), this getter DEFAULTS TO TRUE (BACI-295). A
+// missing/empty value reads as true; only the exact string "false"
+// disables it. The inverted default is deliberate — do not "fix" it to
+// match the opt-in getters. Existing users who explicitly toggled the
+// sound off keep their stored "false" and stay silent; only DBs that
+// never set the key inherit the new on-by-default.
 func (s *Store) GetUIShippedSfx() (bool, error) {
 	v, err := s.GetAppSetting(uiShippedSfxKey)
 	if err != nil {
-		return false, err
+		return true, err
 	}
-	return v == "true", nil
+	return v != "false", nil
 }
 
 // SetUIShippedSfx stores the BACI-240 Shipped-pill SFX toggle.

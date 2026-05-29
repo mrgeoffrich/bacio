@@ -127,7 +127,7 @@ type SettingsArchiveInput struct {
 // SettingsShippedSfxInput is the payload for `bacio settings
 // shipped-sfx --json` (BACI-240). The CLI verb doubles as get and
 // set: empty body reads the current value; non-empty `value` writes
-// it. Defaults to false — audio is opt-in in a desktop dev tool.
+// it. Defaults to true (BACI-295 flipped the default on).
 type SettingsShippedSfxInput struct {
 	Value bool `json:"value"`
 }

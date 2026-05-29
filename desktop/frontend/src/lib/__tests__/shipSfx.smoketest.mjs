@@ -24,32 +24,28 @@ function test(name, fn) { tests.push({ name, fn }); }
 // Fake Audio constructor used to represent "Audio is reachable".
 class FakeAudio {}
 
-test('disabled returns false even when every other gate is open', () => {
-  assert.equal(shouldPlayShipSfx(false, false, FakeAudio), false);
+test('disabled returns false even when Audio is reachable', () => {
+  assert.equal(shouldPlayShipSfx(false, FakeAudio), false);
 });
 
-test('enabled + prefers-reduced-motion returns false (accessibility gate)', () => {
-  // Reduced motion = user has asked the OS to dial back animation;
-  // we extend that to "no surprise SFX either".
-  assert.equal(shouldPlayShipSfx(true, true, FakeAudio), false);
+test('enabled + Audio present returns true regardless of reduced motion', () => {
+  // BACI-295: prefers-reduced-motion is no longer a gate. The gate
+  // signature dropped the param entirely — a user who opted into the
+  // ship sound hears it even on a reduced-motion profile (that
+  // preference governs animation, not audio).
+  assert.equal(shouldPlayShipSfx(true, FakeAudio), true);
 });
 
 test('enabled + no Audio constructor returns false (SSR / hardened browser)', () => {
   // The fetch-only desktop launch path or a Node smoketest sees no
   // global Audio. The gate has to refuse cleanly rather than crash.
-  assert.equal(shouldPlayShipSfx(true, false, undefined), false);
-});
-
-test('every gate open returns true', () => {
-  // The happy path: user has opted in, no reduced motion, browser
-  // provides Audio. The hook proceeds to lazy-load and play.
-  assert.equal(shouldPlayShipSfx(true, false, FakeAudio), true);
+  assert.equal(shouldPlayShipSfx(true, undefined), false);
 });
 
 test('null Audio constructor is treated like undefined', () => {
   // Defensive: a polyfill that explicitly nulls Audio shouldn't
   // wedge the play path.
-  assert.equal(shouldPlayShipSfx(true, false, null), false);
+  assert.equal(shouldPlayShipSfx(true, null), false);
 });
 
 // ---- runner ----

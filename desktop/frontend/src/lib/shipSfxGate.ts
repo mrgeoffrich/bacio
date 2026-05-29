@@ -8,16 +8,20 @@
 
 // shouldPlayShipSfx returns true only when every gate passes:
 //   - the user enabled the toggle;
-//   - the OS-level `prefers-reduced-motion` is off;
 //   - the Audio constructor is reachable (a non-browser env / locked
 //     down profile fails here).
+//
+// BACI-295: `prefers-reduced-motion` is deliberately NOT a gate. That
+// preference governs animation, not audio — the visual ship flight +
+// odometer roll still honour it, but a user who opted into the ship
+// sound hears it regardless of their motion preference. (The browser's
+// autoplay policy is still the real silencer when no gesture has
+// landed; that's handled downstream in shipSfx.ts, not here.)
 export function shouldPlayShipSfx(
   enabled: boolean,
-  prefersReducedMotion: boolean,
   audioCtor: unknown,
 ): boolean {
   if (!enabled) return false;
-  if (prefersReducedMotion) return false;
   if (!audioCtor) return false;
   return true;
 }

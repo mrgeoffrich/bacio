@@ -184,36 +184,36 @@ func TestMarkSyncFailedAndCompleted(t *testing.T) {
 	}
 }
 
-// TestUIShippedSfxRoundTrip — BACI-240. Defaults to false; the boolean
-// round-trips; an unexpected stored value reads back as false (the
-// defensive read shape matching GetDisplayShowArchived).
+// TestUIShippedSfxRoundTrip — BACI-240 / BACI-295. Defaults to TRUE now
+// (BACI-295 flipped the default on); the boolean round-trips; only the
+// exact string "false" disables it, mirroring GetSyncBackgroundEnabled.
 func TestUIShippedSfxRoundTrip(t *testing.T) {
 	s := newTestStore(t)
 
-	// Never set → defaults to false.
-	if v, err := s.GetUIShippedSfx(); err != nil || v {
-		t.Fatalf("GetUIShippedSfx(unset) = %v, %v; want false, nil", v, err)
+	// Never set → defaults to true (BACI-295).
+	if v, err := s.GetUIShippedSfx(); err != nil || !v {
+		t.Fatalf("GetUIShippedSfx(unset) = %v, %v; want true, nil", v, err)
 	}
-	// Explicit true.
-	if err := s.SetUIShippedSfx(true); err != nil {
-		t.Fatalf("SetUIShippedSfx(true): %v", err)
-	}
-	if v, _ := s.GetUIShippedSfx(); !v {
-		t.Fatal("after Set(true), GetUIShippedSfx = false, want true")
-	}
-	// Back to false.
+	// Explicit false.
 	if err := s.SetUIShippedSfx(false); err != nil {
 		t.Fatalf("SetUIShippedSfx(false): %v", err)
 	}
 	if v, _ := s.GetUIShippedSfx(); v {
 		t.Fatal("after Set(false), GetUIShippedSfx = true, want false")
 	}
-	// A non-"true" stored value reads as false.
+	// Back to true.
+	if err := s.SetUIShippedSfx(true); err != nil {
+		t.Fatalf("SetUIShippedSfx(true): %v", err)
+	}
+	if v, _ := s.GetUIShippedSfx(); !v {
+		t.Fatal("after Set(true), GetUIShippedSfx = false, want true")
+	}
+	// Any value that isn't exactly "false" reads as true (inverted default).
 	if err := s.SetAppSetting(uiShippedSfxKey, "garbage"); err != nil {
 		t.Fatalf("SetAppSetting: %v", err)
 	}
-	if v, _ := s.GetUIShippedSfx(); v {
-		t.Fatal("a non-\"true\" stored value should read as false")
+	if v, _ := s.GetUIShippedSfx(); !v {
+		t.Fatal("a non-\"false\" stored value should read as true")
 	}
 }
 

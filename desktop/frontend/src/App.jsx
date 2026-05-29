@@ -24,6 +24,7 @@ import * as api from './api';
 import { isTerminalState, stripBlockerFromCards, restoreBlockedByFromSnapshot } from './lib/issueState';
 import { useShipFlourish } from './lib/shipFlourish';
 import { useShipSfx } from './lib/shipSfx';
+import { decideOdometerAction } from './lib/odometer';
 import { viewPath, issuePath, viewFromPath, prefixFromPath } from './lib/routes';
 
 const THEME_KEY = 'bacio-theme'; // persisted preference: 'system' | 'light' | 'dark'
@@ -129,9 +130,12 @@ export default function App() {
   const [archiveRetentionDays, setArchiveRetentionDays] = useState(7);
   // BACI-240: ui.shipped_sfx toggle — when true, the topbar Shipped
   // pill plays a short ka-ching SFX on every genuine ship (the
-  // odometer rolling into a new value). Default false. Loaded on
-  // mount alongside the other display prefs; flipped from Settings.
-  const [audioEnabled, setAudioEnabled] = useState(false);
+  // odometer rolling into a new value). BACI-295 flipped the default
+  // ON now that the feature has shipped. This seed only governs the
+  // brief window before getAudioPreferences() resolves on mount and
+  // overwrites it with the server value; it still mirrors the new
+  // default. Flipped from Settings.
+  const [audioEnabled, setAudioEnabled] = useState(true);
   // leaderState tracks the UI leader-election result from LeaderService.
   // amLeader = true means this desktop process holds the lease and may
   // dispatch. Standby processes show a chip and disable the per-card button.
@@ -912,6 +916,11 @@ export default function App() {
   // represent "Forever" at all. Moving to server-side counting fixes
   // both and lets the count change with the scope picker.
   const [shippedCount, setShippedCount] = useState(0);
+  // BACI-295: previous-count ref the count-rise SFX watch (below) diffs
+  // against. Declared up here so the scope/repo-change effect can reset
+  // it to null alongside `setShippedCount(0)` — a navigation refill is
+  // a fresh first-load snap, not a genuine ship, so it must not ding.
+  const prevShippedCountRef = useRef(null);
   // refreshShippedCount (BACI-276): the single fetch the poll effect and
   // the on-ship trigger both invoke. Stable across renders so the
   // ship-flourish callback can call it without re-running its own
@@ -932,8 +941,11 @@ export default function App() {
       return;
     }
     // Reset to 0 on scope / repo change so a stale count doesn't sit
-    // on the chip while the first fetch is in flight.
+    // on the chip while the first fetch is in flight. BACI-295: also
+    // null the SFX watch's previous-count ref so the refill that
+    // follows reads as a first-load snap (no ka-ching on navigation).
     setShippedCount(0);
+    prevShippedCountRef.current = null;
     refreshShippedCount();
     const id = setInterval(refreshShippedCount, POLL_INTERVAL_MS);
     return () => { clearInterval(id); };
@@ -968,32 +980,59 @@ export default function App() {
   // BACI-240 ka-ching SFX. Hoisted out of ShippedPopover so the
   // audio fires regardless of the active view (BACI-254). The hook
   // returns a stable `play` reference; the gating (enabled flag,
-  // reduced-motion, autoplay-policy lock) lives inside the hook so
-  // every caller stays oblivious to those branches.
+  // autoplay-policy lock) lives inside the hook so every caller stays
+  // oblivious to those branches.
   const { play: playShipSfx } = useShipSfx({ enabled: audioEnabled });
 
-  // BACI-254: per-shipped-card callback. `useShipFlourish` fires
-  // `onShip(keys)` with every card that transitioned into done in
-  // this tick — possibly more than one. We play() once per key so a
-  // burst ship lands every audio cue rather than the single-pick the
-  // pre-BACI-254 wiring afforded. `playShipSfx` is stable from
-  // useShipSfx, so this callback identity is too — keeps the
-  // useShipFlourish detection effect's dep list quiet.
-  const onCardsShipped = useCallback((keys) => {
-    for (let i = 0; i < keys.length; i++) playShipSfx();
-    // BACI-276: bump the Pipeline odometer the moment a card lands in
-    // done rather than waiting for the next 10s poll, so the count rolls
-    // in lockstep with the glow. One refresh per tick is enough — the
-    // count is a server total, not a per-key delta.
+  // BACI-295: tie the ka-ching to the same signal that rolls the
+  // odometer — the server-derived `shippedCount` rising — rather than
+  // the local `cards`-array → done diff it used to ride. The count is a
+  // COUNT(*) over every done issue in scope, so it catches ships the
+  // cards diff never observes (already done at first poll, filtered out
+  // by show-archived / per-feature board-hide, shipped by a background
+  // agent or another machine, or gone from the loaded set on ship).
+  // Reuse the odometer's pure "did the count genuinely rise" decision
+  // so the sound observes exactly what the user sees roll up.
+  //
+  // A ref (not state) holds the previous count so the watch doesn't
+  // itself trigger a render. First mount snaps (prev null → no sound)
+  // the same way the odometer does, so an initial non-zero count on
+  // load doesn't ding. A +N burst rolls the odometer once to the new
+  // value and so plays a single ka-ching — intentionally one-per-roll,
+  // not one-per-card (the pre-BACI-295 wiring played N times); the
+  // sound matches the number rolling once, not each card.
+  //
+  // The scope/repo-change effect above resets `prevShippedCountRef` to
+  // null (declared next to the `shippedCount` state) so the count
+  // refilling after a navigation is treated as a fresh first-load snap
+  // rather than a genuine ship — no false ding when you just switched
+  // repo or scope.
+  useEffect(() => {
+    const action = decideOdometerAction(prevShippedCountRef.current, shippedCount);
+    if (action.kind === 'roll') playShipSfx();
+    prevShippedCountRef.current = shippedCount;
+  }, [shippedCount, playShipSfx]);
+
+  // BACI-254 / BACI-276 callback for locally-observed ships.
+  // `useShipFlourish` fires `onShip(keys)` for every card that
+  // transitioned into done in this tick. The audio no longer rides
+  // this path (BACI-295 moved it onto the count-rise effect above);
+  // the callback's remaining job is to bump the Pipeline odometer the
+  // moment a card lands in done rather than waiting for the next 10s
+  // poll, so the count rolls — and the sound fires — in lockstep with
+  // the glow. One refresh per tick is enough: the count is a server
+  // total, not a per-key delta.
+  const onCardsShipped = useCallback(() => {
     refreshShippedCount();
-  }, [playShipSfx, refreshShippedCount]);
+  }, [refreshShippedCount]);
 
   // BACI-193 ship flourish: detect cards that just transitioned into
   // `done` from a non-terminal column, expose the flying key + flash
   // signal to Topbar / ShippedPopover. The hook diffs the `cards`
   // array against its own internal previous-columns snapshot so the
   // poll-driven re-render is the only thing it needs. The `onShip`
-  // callback fan-out is the BACI-254 SFX trigger — see comment above.
+  // callback now only drives the prompt count refresh (BACI-295 moved
+  // the SFX onto the count-rise effect) — see onCardsShipped above.
   const { flyingKey: flyingShipKey, flashing: shipFlashing, onFlightDone: onShipFlightDone } = useShipFlourish(cards, { onShip: onCardsShipped });
 
   // BACI-203: navigate-by-key callback for prev/next sibling jumps and

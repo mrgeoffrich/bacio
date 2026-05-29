@@ -308,12 +308,12 @@ export default function SystemSettingsSection({
         </div>
       </section>
 
-      {/* BACI-240: ship-flourish ka-ching SFX toggle. Default off —
-          audio is opt-in. The play path is silently no-op'd by
-          prefers-reduced-motion and by the browser's autoplay
-          policy (the page needs at least one user gesture before
-          audio is allowed), so flipping this on is safe even on
-          accessibility profiles — it just stays quiet. */}
+      {/* BACI-240 / BACI-295: ship-flourish ka-ching SFX toggle. On by
+          default now. The play path is silently no-op'd by the browser's
+          autoplay policy (the page needs at least one user gesture before
+          audio is allowed), so it just stays quiet until you interact
+          with the page. prefers-reduced-motion no longer mutes it —
+          that preference governs animation, not audio. */}
       <section className="mk-settings-row">
         <div className="mk-settings-row-text">
           <div className="mk-settings-label">
@@ -321,7 +321,7 @@ export default function SystemSettingsSection({
             <ScopeChip kind="server" />
           </div>
           <div className="mk-settings-hint">
-            When on, the topbar Shipped pill plays a short ka-ching whenever an issue lands in done (the same trigger as the existing card-fly animation). Off by default. Respects <code>prefers-reduced-motion</code> and the OS-level mute — the sound silently no-ops on those profiles rather than erroring.
+            When on, the topbar Shipped pill plays a short ka-ching whenever the Shipped count rolls up. On by default. Honours the OS-level mute and the browser autoplay policy — the sound silently no-ops (it needs at least one click on the page before audio is allowed) rather than erroring.
           </div>
         </div>
         <div className="mk-segmented" role="group" aria-label="Ship sound">

@@ -3,12 +3,16 @@
 // `play()` method gated on:
 //
 //   - the caller's `enabled` arg (the ui.shipped_sfx user setting);
-//   - the OS-level `prefers-reduced-motion` media query;
 //   - the browser's autoplay policy — Audio.play() returns a Promise
 //     that rejects when the page has not yet had a user gesture, and
 //     we swallow that case silently. We never call console.error here
 //     because the chip is not a critical path — a silent SFX failure
 //     is the right shape.
+//
+// BACI-295: `prefers-reduced-motion` is no longer a gate — that
+// preference is about animation, not audio. The ship sound fires
+// whenever the toggle is on (autoplay policy permitting); the visual
+// flight + odometer roll still honour reduced-motion separately.
 //
 // The Audio element is created lazily on the first enabled play() so
 // disabled-by-default sessions never spend the decode cost. Back-to-
@@ -31,8 +35,8 @@ export { shouldPlayShipSfx };
 
 export type UseShipSfxResult = {
   // play attempts a single ka-ching playback. No-op on every failure
-  // mode (disabled / reduced-motion / autoplay-denied / unavailable
-  // Audio constructor). Always returns synchronously; never throws.
+  // mode (disabled / autoplay-denied / unavailable Audio constructor).
+  // Always returns synchronously; never throws.
   play: () => void;
 };
 
@@ -59,11 +63,8 @@ export function useShipSfx({ enabled }: { enabled: boolean }): UseShipSfxResult 
     // SSR / Node test guard: window is undefined in non-browser envs.
     if (typeof window === 'undefined') return;
 
-    const prefersReducedMotion = !!(
-      window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    );
     const audioCtor = (typeof Audio !== 'undefined') ? Audio : undefined;
-    if (!shouldPlayShipSfx(enabledRef.current, prefersReducedMotion, audioCtor)) return;
+    if (!shouldPlayShipSfx(enabledRef.current, audioCtor)) return;
 
     // Lazy-load the Audio element on first play. `new Audio(url)`
     // throws synchronously if the URL is bogus; swallow that case

@@ -1022,7 +1022,7 @@ export async function setArchivePreferences(
 
 // BACI-240: ui.shipped_sfx global toggle. When on, the topbar
 // Shipped pill plays a short ka-ching SFX on every genuine ship.
-// Defaults to false — audio is opt-in in a desktop dev tool.
+// BACI-295 flipped the default ON.
 
 export async function getAudioPreferences(): Promise<AudioPreferencesDTO> {
   try {
