@@ -287,25 +287,6 @@ export async function dispatchIssue(
   }
 }
 
-// dispatchIssueChain (BACI-209) queues a primary dispatch + a dormant
-// follow-on against the same issue in one transaction — the compound
-// kanban affordance ("Plan, then Implement") on todo cards. Mirrors
-// dispatchIssue's shape; the follow-on rides on the next BoardCard
-// refresh via card.followOn (the BACI-192 denorm already surfaces
-// dormant rows regardless of card state).
-export async function dispatchIssueChain(
-  repoPrefix: string,
-  issueKey: string,
-  mode: string,
-  followOnMode: string,
-): Promise<DispatchDTO> {
-  try {
-    return await BoardService.DispatchIssueChain(repoPrefix, issueKey, mode, followOnMode);
-  } catch (err) {
-    throw normalize(err);
-  }
-}
-
 // cancelWaitingDispatch (BACI-51) withdraws an issue's queued / pending /
 // delivered dispatch — the spinner-as-cancel-button click handler. The
 // backend resolves the dispatch id from the issue + cancels in one call
@@ -332,39 +313,6 @@ export async function cancelWaitingDispatch(
 export async function rescueDispatch(dispatchID: number): Promise<DispatchDTO> {
   try {
     return await BoardService.RescueDispatch(dispatchID);
-  } catch (err) {
-    throw normalize(err);
-  }
-}
-
-// queueFollowOnDispatch (BACI-180) attaches a dormant follow-on dispatch
-// to the issue's in-flight (parent) dispatch — the kanban chip
-// click handler. The backend resolves the parent via WaitingDispatchForIssue
-// and re-runs the state-gate so the UI can't queue something the matcher
-// would reject. Errors (no open dispatch, state-gate, single-slot) surface
-// as Error.message and bubble through reportError() in App.jsx.
-export async function queueFollowOnDispatch(
-  repoPrefix: string,
-  issueKey: string,
-  mode: string,
-): Promise<DispatchDTO> {
-  try {
-    return await BoardService.QueueFollowOnDispatch(repoPrefix, issueKey, mode);
-  } catch (err) {
-    throw normalize(err);
-  }
-}
-
-// cancelFollowOnDispatch (BACI-180) removes the dormant follow-on attached
-// to an issue — the chip-remove click handler. Idempotent on the backend:
-// an issue with no dormant follow-on returns a zero DispatchDTO and no
-// error, so a stale click doesn't surface as a failure.
-export async function cancelFollowOnDispatch(
-  repoPrefix: string,
-  issueKey: string,
-): Promise<DispatchDTO> {
-  try {
-    return await BoardService.CancelFollowOnDispatch(repoPrefix, issueKey);
   } catch (err) {
     throw normalize(err);
   }
