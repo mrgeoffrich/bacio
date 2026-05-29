@@ -265,6 +265,85 @@ func TestEngineManualShip(t *testing.T) {
 	}
 }
 
+// TestEngineShipAdvancesBehindWedgedTop: with auto-ship OFF, an acked
+// ship on a card sitting BEHIND a wedged head card still advances to
+// done. The head card (first to arrive, so TopShippingIssue) has its
+// ship dispatch left in cancelled — modelling BACI-295, whose worker
+// session died before merging. The advance pass must sweep the whole
+// Shipping column, not just the top, so the acked card behind it isn't
+// stranded. Regression for the BACI-297 head-of-line bug.
+func TestEngineShipAdvancesBehindWedgedTop(t *testing.T) {
+	s := newEngineStore(t)
+	repo, err := s.CreateRepo("WEDGE", "wedge", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("repo: %v", err)
+	}
+	// Two cards enter Shipping in order: the first becomes the top
+	// (TopShippingIssue), the second sits strictly behind it (BACI-275
+	// appends to the back of the FIFO with MAX(priority)+1).
+	top, err := s.CreateIssue(repo.ID, nil, "wedged top", "", model.StateInPipeline, nil, "")
+	if err != nil {
+		t.Fatalf("create top: %v", err)
+	}
+	if err := s.SetIssueState(top.ID, model.StateToBeShipped); err != nil {
+		t.Fatalf("ship top: %v", err)
+	}
+	behind, err := s.CreateIssue(repo.ID, nil, "behind", "", model.StateInPipeline, nil, "")
+	if err != nil {
+		t.Fatalf("create behind: %v", err)
+	}
+	if err := s.SetIssueState(behind.ID, model.StateToBeShipped); err != nil {
+		t.Fatalf("ship behind: %v", err)
+	}
+	if got, _ := s.TopShippingIssue(repo.ID); got == nil || got.ID != top.ID {
+		t.Fatalf("top shipping = %v, want top (%d)", got, top.ID)
+	}
+	eng := New(s)
+
+	// The top card's ship dispatch dies (worker session ended) → cancelled.
+	topShip, err := s.AddDispatch(store.AddDispatchIn{
+		RepoID:        repo.ID,
+		IssueID:       &top.ID,
+		Mode:          model.DispatchModeShip,
+		CreatedBy:     model.ControllerActor,
+		InitialStatus: model.DispatchQueued,
+	})
+	if err != nil {
+		t.Fatalf("top ship dispatch: %v", err)
+	}
+	if _, err := s.CancelDispatch(topShip.ID); err != nil {
+		t.Fatalf("cancel top ship: %v", err)
+	}
+
+	// The card behind it was manually shipped and the ship acked.
+	behindShip, err := s.AddDispatch(store.AddDispatchIn{
+		RepoID:        repo.ID,
+		IssueID:       &behind.ID,
+		Mode:          model.DispatchModeShip,
+		CreatedBy:     model.ControllerActor,
+		InitialStatus: model.DispatchQueued,
+	})
+	if err != nil {
+		t.Fatalf("behind ship dispatch: %v", err)
+	}
+	simulateWorkerAck(t, s, behindShip.ID)
+
+	// One tick (auto-ship off): the advance pass sweeps the whole column,
+	// so the acked card behind the wedged top advances to done while the
+	// wedged top stays put.
+	if _, err := eng.AutoShipTick(); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	gotBehind, _ := s.GetIssueByID(behind.ID)
+	if gotBehind.State != model.StateDone {
+		t.Fatalf("behind card state = %s, want done (acked ship behind a wedged top must advance)", gotBehind.State)
+	}
+	gotTop, _ := s.GetIssueByID(top.ID)
+	if gotTop.State != model.StateToBeShipped {
+		t.Fatalf("wedged top state = %s, want to_be_shipped (a cancelled ship stays parked)", gotTop.State)
+	}
+}
+
 // TestEngineHaltsOnOpenQuestion: while the running job has an open
 // question the engine stamps engine_pause_reason; clearing the question
 // clears the pause on the next tick.
