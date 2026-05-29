@@ -93,19 +93,25 @@ func (e *Engine) Tick() ([]Advance, error) {
 	return advances, nil
 }
 
-// AutoShipTick runs one pass over the Shipping column for every repo,
-// acting on the single top (next-to-ship) card. Two responsibilities,
-// deliberately split by the per-repo auto-ship toggle:
+// AutoShipTick runs one pass over the Shipping column for every repo.
+// Two responsibilities, deliberately split by the per-repo auto-ship
+// toggle — and by how wide a slice of the column each one touches:
 //
-//   - Advance-on-ack runs ALWAYS, toggle or not: once the top card's
-//     ship dispatch has acked, the card moves to done. This is the only
-//     path that completes a ship — whether the dispatch was queued by
-//     auto-ship or by a manual SHIP click — so it must not be gated on
-//     the toggle (a manual ship with auto-ship off would otherwise
-//     strand the card in to_be_shipped forever).
-//   - Auto-dispatch runs only when auto-ship is on: if no ship has run
-//     for the top card yet, queue one. With auto-ship off the user
-//     initiates the ship themselves via the SHIP button (§4).
+//   - Advance-on-ack runs ALWAYS (toggle or not) and sweeps ALL
+//     to_be_shipped cards, not just the top: any card whose ship
+//     dispatch has acked moves to done. This is the only path that
+//     completes a ship — whether the dispatch was queued by auto-ship or
+//     by a manual SHIP click — so it must not be gated on the toggle (a
+//     manual ship with auto-ship off would otherwise strand the card in
+//     to_be_shipped forever). Sweeping the whole column matters because
+//     advancing an already-merged + acked card has no merge-serialisation
+//     constraint, so a wedged head card (its ship cancelled / in-flight)
+//     must not strand acked cards queued behind it (BACI-297).
+//   - Auto-dispatch runs only when auto-ship is on and stays top-card-
+//     only: if no ship has run for the top card yet, queue one. Keeping
+//     it top-only preserves merge serialisation — we only ever auto-fire
+//     the next-to-ship card, never two ships at once. With auto-ship off
+//     the user initiates the ship themselves via the SHIP button (§4).
 //
 // A deliberately-cancelled ship is left alone (no retry loop); the next
 // card becomes top once the current one ships. Leader-gated like Tick.
@@ -127,9 +133,18 @@ func (e *Engine) AutoShipTick() ([]Advance, error) {
 			e.logger().Warn("bacio engine: auto-ship repo settings failed", "repo", repo.Prefix, "err", err)
 			continue
 		}
-		adv, err := e.shipTickRepo(repo.ID, settings.AutoShip)
+		// Advance pass runs unconditionally; only the dispatch pass sees the
+		// auto-ship toggle. Warn-and-continue per repo so one bad repo
+		// doesn't stall the rest.
+		adv, err := e.advanceShippedRepo(repo.ID)
 		if err != nil {
-			e.logger().Warn("bacio engine: ship tick failed", "repo", repo.Prefix, "err", err)
+			e.logger().Warn("bacio engine: ship advance failed", "repo", repo.Prefix, "err", err)
+			continue
+		}
+		advances = append(advances, adv...)
+		adv, err = e.autoDispatchShipRepo(repo.ID, settings.AutoShip)
+		if err != nil {
+			e.logger().Warn("bacio engine: auto-ship dispatch failed", "repo", repo.Prefix, "err", err)
 			continue
 		}
 		advances = append(advances, adv...)
@@ -137,11 +152,55 @@ func (e *Engine) AutoShipTick() ([]Advance, error) {
 	return advances, nil
 }
 
-// shipTickRepo reconciles the Shipping column's top card for one repo.
-// autoShip gates only the auto-dispatch arm — the advance-on-ack arm
-// always runs so a manual SHIP (auto-ship off) still completes. See
-// AutoShipTick for the split rationale.
-func (e *Engine) shipTickRepo(repoID int64, autoShip bool) ([]Advance, error) {
+// advanceShippedRepo sweeps EVERY to_be_shipped card in the repo and
+// advances any whose latest ship dispatch has acked to done. Runs always
+// (no auto-ship gate) — a manual SHIP and an auto-ship both complete
+// here. Unlike the dispatch pass it is not top-card-only: advancing an
+// already-merged + acked card carries no merge-serialisation constraint,
+// so a wedged head card (ship cancelled / in-flight) must not strand
+// acked cards behind it (BACI-297). Cards whose ship is in-flight /
+// cancelled / never-run are skipped (no advance). Idempotent: once the
+// ship worker (or a prior tick) moves a card to done it drops out of the
+// to_be_shipped list.
+func (e *Engine) advanceShippedRepo(repoID int64) ([]Advance, error) {
+	cards, err := e.st.ListIssues(store.IssueFilter{
+		RepoID: &repoID,
+		States: []model.State{model.StateToBeShipped},
+	})
+	if err != nil {
+		return nil, err
+	}
+	var advances []Advance
+	for _, card := range cards {
+		latest, err := e.st.LatestDispatchForIssueMode(card.ID, model.DispatchModeShip)
+		if err != nil {
+			return advances, err
+		}
+		if latest == nil || latest.Status != model.DispatchAcked {
+			continue
+		}
+		// SetIssueState permits to_be_shipped → done (done is not a
+		// processing state).
+		if err := e.st.SetIssueState(card.ID, model.StateDone); err != nil {
+			return advances, err
+		}
+		advances = append(advances, e.advance(card, "ship.done", "ship complete"))
+	}
+	return advances, nil
+}
+
+// autoDispatchShipRepo queues a ship for the Shipping column's top card
+// when auto-ship is on and no ship has run for it yet. Stays top-card-
+// only to preserve merge serialisation (the ship template's
+// concurrency_limit plus FIFO position): we only ever auto-fire the
+// next-to-ship card, never two ships at once. A no-op when auto-ship is
+// off, when there is no top card, or when the top card's ship is already
+// in flight / cancelled (a deliberately-cancelled ship parks — re-arming
+// it is deferred per BACI-297; the advance pass handles the acked case).
+func (e *Engine) autoDispatchShipRepo(repoID int64, autoShip bool) ([]Advance, error) {
+	if !autoShip {
+		return nil, nil
+	}
 	top, err := e.st.TopShippingIssue(repoID)
 	if err != nil {
 		return nil, err
@@ -153,42 +212,24 @@ func (e *Engine) shipTickRepo(repoID int64, autoShip bool) ([]Advance, error) {
 	if err != nil {
 		return nil, err
 	}
-	switch {
-	case latest == nil:
-		// No ship has run yet. Auto-ship queues one (the matcher binds it;
-		// the ship template's concurrency_limit serialises merges); in
-		// manual mode the card waits for the user's SHIP click.
-		if !autoShip {
-			return nil, nil
-		}
-		if _, err := e.st.AddDispatch(store.AddDispatchIn{
-			RepoID:        repoID,
-			IssueID:       &top.ID,
-			Mode:          model.DispatchModeShip,
-			CreatedBy:     model.ControllerActor,
-			InitialStatus: model.DispatchQueued,
-		}); err != nil {
-			return nil, err
-		}
-		return []Advance{e.advance(top, "ship.dispatch", "auto-ship queued")}, nil
-	case latest.Status == model.DispatchAcked:
-		// Ship done → terminal, regardless of the auto-ship toggle: a
-		// manual SHIP and an auto-ship both land here once the dispatch
-		// acks. SetIssueState permits to_be_shipped → done (done is not a
-		// processing state). Idempotent if the ship worker already moved
-		// it (then it's no longer the top to_be_shipped card).
-		if err := e.st.SetIssueState(top.ID, model.StateDone); err != nil {
-			return nil, err
-		}
-		return []Advance{e.advance(top, "ship.done", "ship complete")}, nil
-	case latest.Status == model.DispatchCancelled:
-		// A deliberately-cancelled ship — leave it so the tick doesn't
-		// loop. A fresh SHIP (manual or auto) re-arms it.
-		return nil, nil
-	default:
-		// queued / pending / delivered — ship in flight, wait.
+	if latest != nil {
+		// A ship dispatch already exists (in flight, acked, or cancelled) —
+		// don't double-dispatch. The advance pass completes an acked one; a
+		// cancelled one parks until a fresh SHIP re-arms it.
 		return nil, nil
 	}
+	// No ship has run yet. Queue one (the matcher binds it; the ship
+	// template's concurrency_limit serialises merges).
+	if _, err := e.st.AddDispatch(store.AddDispatchIn{
+		RepoID:        repoID,
+		IssueID:       &top.ID,
+		Mode:          model.DispatchModeShip,
+		CreatedBy:     model.ControllerActor,
+		InitialStatus: model.DispatchQueued,
+	}); err != nil {
+		return nil, err
+	}
+	return []Advance{e.advance(top, "ship.dispatch", "auto-ship queued")}, nil
 }
 
 func (e *Engine) tickIssue(iss *model.Issue) ([]Advance, error) {
