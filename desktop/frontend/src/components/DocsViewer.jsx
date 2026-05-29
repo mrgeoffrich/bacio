@@ -35,15 +35,38 @@ export default function DocsViewer({
   onOpenIssue,    // (issueKey) => void — from App.jsx
   panelsCollapsed, // BACI-234: rail + list are hidden; render expand button
   onExpandPanels,  // () => void — re-open both side panels
+  onCancelEdit,    // BACI-293: () => void — parent resets the lifted buffer to the loaded doc
 }) {
   const [view, setView] = useState('render');
+  // BACI-293: a markdown doc lands read-only; Edit flips this true so the
+  // editor becomes editable (toolbar/bubble menu appear) and the action
+  // bar swaps Save → Cancel + Save.
+  const [editMode, setEditMode] = useState(false);
 
-  // Reset the Render/Source toggle whenever a different doc is opened
-  // so the user lands on the rendered surface first — same precedent
-  // as the pre-refactor DocsView.
+  // Reset the Render/Source toggle and the edit-mode flag whenever a
+  // different doc is opened so the user lands on the rendered, read-only
+  // surface first — same precedent as the pre-refactor DocsView.
   useEffect(() => {
     setView('render');
+    setEditMode(false);
   }, [filename]);
+
+  const startEdit = () => setEditMode(true);
+  // Cancel discards the live buffer (parent resets it back to the loaded
+  // doc) and returns to read-only without persisting.
+  const cancelEdit = () => {
+    onCancelEdit?.();
+    setEditMode(false);
+  };
+  // Save is fire-and-forget from here (parent owns the saving flag and
+  // surfaces errors). Returning to read-only is correct in both the
+  // happy path (content === savedContent after the save resolves) and
+  // the no-op path (!dirty); a failed save leaves the buffer dirty so the
+  // user can click Edit again to retry — no data is lost.
+  const handleSave = () => {
+    onSave?.();
+    setEditMode(false);
+  };
 
   const isSvg = useMemo(
     () => !!filename && isSvgDoc(filename, content || ''),
@@ -186,14 +209,36 @@ export default function DocsViewer({
               )}
             </button>
           )}
-          <button
-            type="button"
-            className="mk-btn-primary"
-            onClick={onSave}
-            disabled={!dirty || saving}
-          >
-            {saving ? 'Saving…' : 'Save'}
-          </button>
+          {!renderable && (
+            editMode ? (
+              <>
+                <button
+                  type="button"
+                  className="mk-btn-secondary"
+                  onClick={cancelEdit}
+                  disabled={saving}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="mk-btn-primary"
+                  onClick={handleSave}
+                  disabled={!dirty || saving}
+                >
+                  {saving ? 'Saving…' : 'Save'}
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="mk-btn-primary"
+                onClick={startEdit}
+              >
+                Edit
+              </button>
+            )
+          )}
         </div>
       </header>
       {isSvg && view === 'render' ? (
@@ -206,7 +251,7 @@ export default function DocsViewer({
         </div>
       ) : (
         <div className="mk-docs-editor">
-          <NotionEditor content={content || ''} onChange={onContentChange} />
+          <NotionEditor content={content || ''} onChange={onContentChange} readOnly={!editMode} />
         </div>
       )}
     </>
