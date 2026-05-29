@@ -378,7 +378,8 @@ func (s *Store) SetIssueState(id int64, state model.State) error {
 	// to_be_shipped / done / cancelled) still apply. A missing id is a
 	// no-op, preserving the pre-guard behaviour (UPDATE affecting 0 rows).
 	var current string
-	switch err := s.DB.QueryRow(`SELECT state FROM issues WHERE id = ?`, id).Scan(&current); {
+	var repoID int64
+	switch err := s.DB.QueryRow(`SELECT state, repo_id FROM issues WHERE id = ?`, id).Scan(&current, &repoID); {
 	case errors.Is(err, sql.ErrNoRows):
 		return nil
 	case err != nil:
@@ -416,6 +417,31 @@ func (s *Store) SetIssueState(id int64, state model.State) error {
 	// userActionReasonClauseForTransition emits a SQL literal that
 	// keeps the column on a needs_action→needs_action no-op move and
 	// NULLs it for every other target, matching the column comment.
+	//
+	// BACI-275: a card *entering* to_be_shipped (current state differs)
+	// is appended to the back of the Shipping FIFO — it gets
+	// MAX(priority)+1 across the repo's non-archived to_be_shipped band
+	// so it sorts strictly behind every card already queued, rather than
+	// keeping its default priority 0 and tie-breaking by number ahead of
+	// older arrivals. Re-asserting to_be_shipped (the engine's idempotent
+	// no-op hand-off, or a same-state write) leaves priority untouched so
+	// an already-queued card never re-shuffles. The band query matches
+	// the WHERE shape TopShippingIssue / ReorderIssue use, and excludes
+	// the card itself (not yet written to to_be_shipped at this point).
+	if model.State(current) != model.StateToBeShipped && state == model.StateToBeShipped {
+		var priority int64
+		if err := s.DB.QueryRow(
+			`SELECT COALESCE(MAX(priority), -1) + 1 FROM issues WHERE repo_id = ? AND state = ? AND archived_at IS NULL`,
+			repoID, string(model.StateToBeShipped),
+		).Scan(&priority); err != nil {
+			return err
+		}
+		_, err := s.DB.Exec(
+			`UPDATE issues SET state = ?, priority = ?, updated_at = CURRENT_TIMESTAMP, terminal_at = `+terminalAtClause(state)+`, user_action_reason_type = `+userActionReasonClauseForTransition(state)+` WHERE id = ?`,
+			string(state), priority, id,
+		)
+		return err
+	}
 	_, err := s.DB.Exec(
 		`UPDATE issues SET state = ?, updated_at = CURRENT_TIMESTAMP, terminal_at = `+terminalAtClause(state)+`, user_action_reason_type = `+userActionReasonClauseForTransition(state)+` WHERE id = ?`,
 		string(state), id,

@@ -478,6 +478,68 @@ func TestEngineManualStartNoShip(t *testing.T) {
 }
 
 // TestEngineStopRunning: Stop cancels the running job and halts Auto.
+// TestEngineHandoffAppendsToShippingBack — BACI-275: two cards handed
+// off through the engine into to_be_shipped must preserve arrival order.
+// The first card to reach to_be_shipped is the TopShippingIssue; the
+// second sits strictly behind it, never jumping the queue.
+func TestEngineHandoffAppendsToShippingBack(t *testing.T) {
+	s := newEngineStore(t)
+	repo, first := seedPipelineCard(t, s, "SHIP", "implement-ship", model.EngineAuto)
+	eng := New(s)
+
+	// drive runs a single implement-ship card from in_pipeline to
+	// to_be_shipped: tick starts implement, the worker acks, the next
+	// tick completes implement and hands off to the ship sentinel.
+	drive := func(iss *model.Issue) {
+		t.Helper()
+		if _, err := eng.Tick(); err != nil {
+			t.Fatalf("tick (start implement) for %d: %v", iss.ID, err)
+		}
+		r := runningJob(t, s, iss.ID)
+		if r == nil || r.Mode != model.BuiltinTemplateImplement {
+			t.Fatalf("running job for %d = %+v, want implement", iss.ID, r)
+		}
+		simulateWorkerAck(t, s, *r.DispatchID)
+		if _, err := eng.Tick(); err != nil {
+			t.Fatalf("tick (handoff) for %d: %v", iss.ID, err)
+		}
+		got, _ := s.GetIssueByID(iss.ID)
+		if got.State != model.StateToBeShipped {
+			t.Fatalf("issue %d state = %s, want to_be_shipped", iss.ID, got.State)
+		}
+	}
+
+	drive(first)
+
+	// Second card arrives in the same repo and is handed off after the
+	// first is already queued.
+	second, err := s.CreateIssue(repo.ID, nil, "second", "", model.StateInPipeline, nil, "")
+	if err != nil {
+		t.Fatalf("create second issue: %v", err)
+	}
+	proc, _ := model.ProcessBySlug("implement-ship")
+	if _, err := s.SetIssueProcess(second.ID, proc); err != nil {
+		t.Fatalf("set process: %v", err)
+	}
+	if err := s.SetIssueEngineMode(second.ID, model.EngineAuto); err != nil {
+		t.Fatalf("set engine mode: %v", err)
+	}
+	drive(second)
+
+	top, err := s.TopShippingIssue(repo.ID)
+	if err != nil {
+		t.Fatalf("top shipping: %v", err)
+	}
+	if top == nil || top.ID != first.ID {
+		t.Fatalf("top shipping = %v, want first (%d)", top, first.ID)
+	}
+	gotFirst, _ := s.GetIssueByID(first.ID)
+	gotSecond, _ := s.GetIssueByID(second.ID)
+	if gotFirst.Priority >= gotSecond.Priority {
+		t.Fatalf("first priority %d must be < second priority %d (second sits behind)", gotFirst.Priority, gotSecond.Priority)
+	}
+}
+
 func TestEngineStopRunning(t *testing.T) {
 	s := newEngineStore(t)
 	_, iss := seedPipelineCard(t, s, "STOP", "plan-implement", model.EngineAuto)
