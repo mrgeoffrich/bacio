@@ -880,6 +880,41 @@ CREATE TABLE IF NOT EXISTS user_messages (
 CREATE INDEX IF NOT EXISTS idx_user_messages_session_consumed
     ON user_messages(session_pk, consumed_at);
 
+-- notifications backs the BACI-287 agent→user notification path: a
+-- non-blocking, fire-and-forget message a running agent sends the user
+-- via the bacio channel's `send_user_notification` MCP tool. Unlike a
+-- BACI-53 question it carries no answer and never blocks the agent —
+-- the channel inserts the row and returns immediately, so there is no
+-- parked reply, no lifecycle beyond unread→read. Surfaced by a global
+-- (cross-repo) notification bell on the desktop / web topbar and a TUI
+-- Notifications tab. Local-only — never synced.
+--
+-- repo_id scopes the row so a future per-repo filter is cheap, but the
+-- bell reads cross-repo by default (each row labelled with its repo,
+-- mirroring the /history all-repos view). issue_id is optional: a
+-- present issue makes the row deep-link to that ticket; issue_key is a
+-- denormalised snapshot of the key so the UI need not re-join. session_pk
+-- is nullable — a notification fired before the channel session
+-- registered has no session FK but still records source_agent.
+-- read_at is the only lifecycle signal: NULL = unread (counts toward the
+-- bell badge), non-NULL = read.
+CREATE TABLE IF NOT EXISTS notifications (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    repo_id      INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+    issue_id     INTEGER REFERENCES issues(id) ON DELETE SET NULL,
+    issue_key    TEXT    NOT NULL DEFAULT '',
+    body         TEXT    NOT NULL,
+    source_agent TEXT    NOT NULL,
+    session_pk   INTEGER REFERENCES agent_sessions(id) ON DELETE SET NULL,
+    created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    read_at      DATETIME
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_repo_read
+    ON notifications(repo_id, read_at);
+CREATE INDEX IF NOT EXISTS idx_notifications_read
+    ON notifications(read_at);
+
 -- ui_leader is a single-row lease table. Only one UI process (TUI or desktop
 -- app) holds the lease at a time; all others stand by. The CHECK (id = 1)
 -- constraint + INSERT OR IGNORE seed guarantee exactly one row forever.

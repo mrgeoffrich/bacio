@@ -131,6 +131,18 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("GET /repos/{prefix}/shipped", d.handleShippedList)
 	mux.HandleFunc("GET /repos/{prefix}/shipped/count", d.handleShippedCount)
 
+	// BACI-287: agent→user notification bell — the read + mark-read side
+	// of the global (cross-repo) notification bell. The write side is
+	// channel-only (the send_user_notification MCP tool), so there is no
+	// POST-create route. Cross-repo like /history; the literal "count" /
+	// "read-all" segments are more specific than {id}, so ServeMux
+	// disambiguates without a conflicting pattern.
+	mux.HandleFunc("GET /notifications", d.handleNotificationsList)
+	mux.HandleFunc("GET /notifications/count", d.handleNotificationsCount)
+	mux.HandleFunc("GET /notifications/{id}", d.handleNotificationShow)
+	mux.HandleFunc("POST /notifications/{id}/read", d.handleNotificationRead)
+	mux.HandleFunc("POST /notifications/read-all", d.handleNotificationsReadAll)
+
 	// Web UI bundle (BACI-30, gated by BACI-72): serve the browser-deployed
 	// React build at /ui/, with a 301 from the unslashed /ui to keep the
 	// SPA's base path consistent. The bundle is embedded at compile time

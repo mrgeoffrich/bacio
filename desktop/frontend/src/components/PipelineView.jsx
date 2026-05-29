@@ -33,6 +33,7 @@ import * as api from '../api';
 export default function PipelineView({
   cards,
   activeBoard,
+  onOpenComposer,
   onOpenCard,
   onOpenIssue,
   onMoveCard,
@@ -222,6 +223,22 @@ export default function PipelineView({
               <span className="mk-pl-pill is-todo">Backlog</span>
               <span className="mk-pl-count">{backlog.length}</span>
               <span className="mk-pl-spacer" />
+              {/* BACI-287: the + (new issue) button moved here from the
+                  topbar (which now holds the notification bell). Gated on a
+                  real prefix — the composer needs one to create against —
+                  same gate the topbar used. */}
+              {onOpenComposer && activeBoard && activeBoard !== 'all' && (
+                <Tooltip label="New issue (⌘N)">
+                  <button
+                    type="button"
+                    className="mk-pl-new-issue"
+                    aria-label="New issue"
+                    onClick={onOpenComposer}
+                  >
+                    <Icon name="plus" />
+                  </button>
+                </Tooltip>
+              )}
               <button
                 type="button"
                 className="mk-pl-drawer-toggle"

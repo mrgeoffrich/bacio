@@ -281,6 +281,10 @@ func NewModel(s *store.Store, repo *model.Repo, el *leader.Elector, dbPath strin
 			{"History", newHistoryView(s, repo)},
 			{"Sync", newSyncView(s, repo, tuiActor())},
 			{"Settings", newSettingsView(s, repo)},
+			// BACI-287: the global agent→user notification list. Last so the
+			// existing tab indices (Sync=5, Settings=6) the snapshot tool
+			// pins stay stable.
+			{"Notifications", newNotificationsView(s, tuiActor())},
 		},
 		returnTab: -1,
 	}, nil

@@ -57,6 +57,19 @@ type fakeSource struct {
 	// batches), and userMsgErr lets a test inject a drain error.
 	userMsgBatches [][]UserMessageEvent
 	userMsgErr     error
+
+	// BACI-287 notification state. notified records every
+	// SendNotification call; notifyErr lets a test inject an insert error
+	// and assert the channel surfaces it as a tool-error.
+	notified  []notifyRec
+	notifyErr error
+}
+
+// notifyRec records one SendNotification call with the issue id the channel
+// threaded through (empty for a ticket-less notification) and the body.
+type notifyRec struct {
+	issueID string
+	body    string
 }
 
 type attachRec struct {
@@ -202,6 +215,16 @@ func (f *fakeSource) AttachTranscript(ctx context.Context, issueKey, agentID, no
 	return fmt.Sprintf("attached transcript agent-%s to %s", agentID, issueKey), nil
 }
 
+func (f *fakeSource) SendNotification(ctx context.Context, issueID, body string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.notifyErr != nil {
+		return f.notifyErr
+	}
+	f.notified = append(f.notified, notifyRec{issueID: issueID, body: body})
+	return nil
+}
+
 // decodeFrames splits the newline-delimited JSON-RPC output into
 // generic maps for assertion.
 func decodeFrames(t *testing.T, out string) []map[string]any {
@@ -259,17 +282,17 @@ func TestChannelHandshakeAndReply(t *testing.T) {
 	list := byID[2]
 	tools, _ := list["result"].(map[string]any)["tools"].([]any)
 	// Run() turns the poller on, so ask_user_question (BACI-53)
-	// joins reply + register + attach_transcript (BACI-85) on the
-	// advertised list.
-	if len(tools) != 4 {
-		t.Fatalf("tools/list returned %d tools, want 4", len(tools))
+	// joins reply + register + attach_transcript (BACI-85) +
+	// send_user_notification (BACI-287) on the advertised list.
+	if len(tools) != 5 {
+		t.Fatalf("tools/list returned %d tools, want 5", len(tools))
 	}
 	seen := map[string]bool{}
 	for _, tool := range tools {
 		name, _ := tool.(map[string]any)["name"].(string)
 		seen[name] = true
 	}
-	if !seen["reply"] || !seen["register"] || !seen["ask_user_question"] || !seen["attach_transcript"] {
+	if !seen["reply"] || !seen["register"] || !seen["ask_user_question"] || !seen["attach_transcript"] || !seen["send_user_notification"] {
 		t.Fatalf("tools/list missing entries: %+v", seen)
 	}
 
@@ -859,6 +882,98 @@ func TestChannelAttachTranscriptAdvertisedWithoutPoller(t *testing.T) {
 	}
 	if seen["ask_user_question"] {
 		t.Fatalf("ask_user_question must NOT advertise without the poller: %+v", seen)
+	}
+}
+
+// TestChannelSendUserNotificationAdvertisedWithoutPoller locks in the
+// BACI-287 decision that send_user_notification advertises unconditionally
+// — like attach_transcript it parks no JSON-RPC reply, so the poller-gate
+// that applies to ask_user_question does not apply to it.
+func TestChannelSendUserNotificationAdvertisedWithoutPoller(t *testing.T) {
+	src := &fakeSource{}
+	requests := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`,
+		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`,
+	}, "\n") + "\n"
+
+	var out bytes.Buffer
+	srv := New(src, "bacio", "test", strings.NewReader(requests), &out, nil)
+	if err := srv.ServeMCP(context.Background()); err != nil {
+		t.Fatalf("ServeMCP: %v", err)
+	}
+	frames := decodeFrames(t, out.String())
+	var list map[string]any
+	for _, f := range frames {
+		if id, ok := f["id"].(float64); ok && id == 2 {
+			list = f
+		}
+	}
+	tools, _ := list["result"].(map[string]any)["tools"].([]any)
+	seen := map[string]bool{}
+	for _, tool := range tools {
+		name, _ := tool.(map[string]any)["name"].(string)
+		seen[name] = true
+	}
+	if !seen["send_user_notification"] {
+		t.Fatalf("send_user_notification must advertise even without the poller: %+v", seen)
+	}
+}
+
+// TestChannelSendUserNotificationTool drives tools/call(send_user_notification)
+// and checks the body + optional issue id reach Source.SendNotification, the
+// response is a non-error tool result (no parked reply), and a missing body
+// is rejected without reaching the source.
+func TestChannelSendUserNotificationTool(t *testing.T) {
+	src := &fakeSource{}
+	requests := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`,
+		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"send_user_notification","arguments":{"body":"shipped BACI-42","issue_id":"BACI-42"}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"send_user_notification","arguments":{"body":"ticket-less heads up"}}}`,
+		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"send_user_notification","arguments":{}}}`,
+	}, "\n") + "\n"
+
+	var out bytes.Buffer
+	srv := New(src, "bacio", "test", strings.NewReader(requests), &out, nil)
+	if err := srv.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	frames := decodeFrames(t, out.String())
+	byID := map[float64]map[string]any{}
+	for _, f := range frames {
+		if id, ok := f["id"].(float64); ok {
+			byID[id] = f
+		}
+	}
+
+	// id=2: issue-linked notification — non-error tool result, reached source.
+	ok := byID[2]
+	if isErr, _ := ok["result"].(map[string]any)["isError"].(bool); isErr {
+		t.Fatalf("send_user_notification reported an error: %+v", ok)
+	}
+	// id=3: ticket-less notification — also a non-error result.
+	bare := byID[3]
+	if isErr, _ := bare["result"].(map[string]any)["isError"].(bool); isErr {
+		t.Fatalf("ticket-less send_user_notification reported an error: %+v", bare)
+	}
+	// id=4: missing body — rejected before reaching the source.
+	bad := byID[4]
+	if isErr, _ := bad["result"].(map[string]any)["isError"].(bool); !isErr {
+		t.Fatalf("send_user_notification without body should report isError=true: %+v", bad)
+	}
+
+	src.mu.Lock()
+	defer src.mu.Unlock()
+	if len(src.notified) != 2 {
+		t.Fatalf("SendNotification reached %d times, want 2 (missing-body call must not reach source): %+v", len(src.notified), src.notified)
+	}
+	if src.notified[0] != (notifyRec{issueID: "BACI-42", body: "shipped BACI-42"}) {
+		t.Fatalf("notified[0] = %+v, want {BACI-42 shipped BACI-42}", src.notified[0])
+	}
+	if src.notified[1] != (notifyRec{issueID: "", body: "ticket-less heads up"}) {
+		t.Fatalf("notified[1] = %+v, want ticket-less", src.notified[1])
 	}
 }
 

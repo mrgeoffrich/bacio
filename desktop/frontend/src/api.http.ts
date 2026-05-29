@@ -551,6 +551,23 @@ export interface SessionQuestionRow {
   answered_by?: string;
 }
 
+// Notification (BACI-287) is the wire shape of one agent→user
+// notification — the cross-transport twin of the desktop binding's
+// model.Notification. Field naming follows the Go snake_case JSON tags so
+// the React-side <NotificationBell> reads the same shape in both modes.
+export interface Notification {
+  id: number;
+  repo_id: number;
+  repo_prefix?: string;
+  issue_id?: number;
+  issue_key?: string;
+  body: string;
+  source_agent: string;
+  session_pk?: number;
+  created_at: string;
+  read_at?: string;
+}
+
 export interface AgentCard {
   sessionId: string;
   agentName: string;
@@ -1339,6 +1356,31 @@ export async function cancelSessionQuestion(id: number): Promise<SessionQuestion
   return await call<SessionQuestionRow>(`/agents/questions/${id}/cancel`, {
     method: 'POST',
   });
+}
+
+// BACI-287 notification bell endpoints — HTTP twins of api.ts's wrappers.
+// Keep the names + return types in lockstep so <NotificationBell> imports
+// the same names from `./api` in both modes. The list/count/read-all are
+// cross-repo (the global bell); limit <= 0 omits the ?limit= parameter.
+export async function listNotifications(unreadOnly = true, limit = 0): Promise<Notification[]> {
+  const query: Record<string, string | number> = { state: unreadOnly ? 'unread' : 'all' };
+  if (limit > 0) query.limit = limit;
+  const body = await call<Notification[]>(`/notifications`, { query });
+  return body ?? [];
+}
+
+export async function countUnreadNotifications(): Promise<number> {
+  const body = await call<{ count: number }>(`/notifications/count`);
+  return body?.count ?? 0;
+}
+
+export async function markNotificationRead(id: number): Promise<Notification | null> {
+  return await call<Notification>(`/notifications/${id}/read`, { method: 'POST' });
+}
+
+export async function markAllNotificationsRead(): Promise<number> {
+  const body = await call<{ count: number }>(`/notifications/read-all`, { method: 'POST' });
+  return body?.count ?? 0;
 }
 
 // ApiDocumentLink is the raw wire shape for one document_link row

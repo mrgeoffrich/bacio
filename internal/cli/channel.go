@@ -415,6 +415,39 @@ func (s *channelSource) AskQuestion(ctx context.Context, issueID string, payload
 	return q.RequestUUID, nil
 }
 
+// SendNotification records a BACI-287 agent→user notification on behalf of
+// the channel. Unlike AskQuestion it is fire-and-forget — no parked reply,
+// no blocking. The repo comes from the channel's resolved repo; the
+// session is resolved best-effort (a notification fired before register
+// still records, with a nil session_pk); source_agent comes from the
+// channel's hintedAgentName() helper (empty falls back to "bacio-channel").
+// issueID is the optional canonical issue key the channel parsed +
+// validated (empty for a ticket-less notification).
+func (s *channelSource) SendNotification(ctx context.Context, issueID, body string) error {
+	if s.repo == nil {
+		return fmt.Errorf("bacio channel: no resolved repo — cannot record notification")
+	}
+	// Best-effort session resolution: a notification can fire before the
+	// session registered, so a miss is tolerated (the row's session_pk
+	// stays NULL).
+	sessionID := ""
+	if sess, err := s.pickLiveSession(ctx); err == nil && sess != nil {
+		sessionID = sess.SessionID
+	}
+	sourceAgent := s.hintedAgentName()
+	if sourceAgent == "" {
+		sourceAgent = "bacio-channel"
+	}
+	_, err := s.c.AddNotification(ctx, client.AddNotificationInput{
+		RepoPrefix:  s.repo.Prefix,
+		SessionID:   sessionID,
+		IssueKey:    issueID,
+		Body:        body,
+		SourceAgent: sourceAgent,
+	})
+	return err
+}
+
 // DrainAnsweredQuestions returns the answered + cancelled questions
 // for whichever session this channel is currently serving. If the
 // channel is idle (no resolved repo / claude_pid) it returns nil so

@@ -631,6 +631,37 @@ type Client interface {
 	// remote backend returns ErrLocalOnly. No audit row.
 	DrainUserMessagesForSession(ctx context.Context, sessionID string) ([]*model.UserMessage, error)
 
+	// ----- Agent→user notifications (BACI-287) -----
+	// A notification is the agent→user counterpart to a steer message: a
+	// non-blocking, fire-and-forget note a running agent sends the user via
+	// the channel's `send_user_notification` MCP tool. Surfaced by a global
+	// notification bell (desktop / web topbar) + a TUI Notifications tab.
+	// NOT a dispatch and NOT a question — no matcher, no answer, no
+	// lifecycle beyond unread→read.
+	//
+	// AddNotification inserts one against a repo (and optional session /
+	// issue). The channel is the only write surface (the tool has no CLI /
+	// REST mutate-equivalent, like the other channel tools). Emits a
+	// notification.send audit row. Local-only — the channel always talks to
+	// the local store, so the remote backend returns ErrLocalOnly.
+	AddNotification(ctx context.Context, in AddNotificationInput) (*model.Notification, error)
+	// ListNotifications returns notifications matching the filter,
+	// newest-first — a nil RepoID lists cross-repo (the global bell). The
+	// remote backend supports it over REST so a remote-mode UI's bell works.
+	ListNotifications(ctx context.Context, filter NotificationListFilter) ([]*model.Notification, error)
+	// CountUnreadNotifications returns the unread badge count — a nil repoID
+	// counts cross-repo. REST parity for the remote-mode bell poll.
+	CountUnreadNotifications(ctx context.Context, repoID *int64) (int, error)
+	// GetNotification fetches one notification by id. REST parity.
+	GetNotification(ctx context.Context, id int64) (*model.Notification, error)
+	// MarkNotificationRead stamps read_at on one notification (idempotent).
+	// Emits a notification.read audit row. REST parity.
+	MarkNotificationRead(ctx context.Context, id int64, dryRun bool) (*model.Notification, error)
+	// MarkAllNotificationsRead stamps read_at on every unread row (nil
+	// repoID = cross-repo) and returns the count flipped. Emits a
+	// notification.read-all audit row. REST parity.
+	MarkAllNotificationsRead(ctx context.Context, repoID *int64, dryRun bool) (int, error)
+
 	// ----- Agent dispatch queue (local-only in v1) -----
 	// Dispatches are supervisor->agent work items. CreateDispatch
 	// enqueues one; InboxDispatches drains everything aimed at a
@@ -911,4 +942,28 @@ type AddUserMessageInput struct {
 	SessionID string
 	Body      string
 	CreatedBy string
+}
+
+// AddNotificationInput is the validated tuple AddNotification consumes
+// (BACI-287). RepoPrefix names the repo the notification is scoped to.
+// SessionID is the external session id of the sending channel session when
+// one had registered (optional — resolves the nullable session_pk FK).
+// IssueKey is optional; a present key deep-links the row to that ticket.
+// Body is the message; SourceAgent is the persistent agent identity that
+// sent it (or the "bacio-channel" fallback).
+type AddNotificationInput struct {
+	RepoPrefix  string
+	SessionID   string
+	IssueKey    string
+	Body        string
+	SourceAgent string
+}
+
+// NotificationListFilter scopes a ListNotifications query. RepoID nil lists
+// cross-repo (the global bell default). UnreadOnly drops read rows. Limit
+// caps the result set; <= 0 uses the store's default cap.
+type NotificationListFilter struct {
+	RepoID     *int64
+	UnreadOnly bool
+	Limit      int
 }

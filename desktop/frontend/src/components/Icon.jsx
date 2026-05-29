@@ -1,5 +1,5 @@
 import React from 'react';
-import { Search, Plus, Columns3, GitBranch, Settings, X, Zap, Lock, MessageSquare, AlertTriangle, Minimize2, Maximize2, SkipForward, Pin, ChevronsDownUp, ChevronsUpDown, RefreshCw, FileText, GitPullRequest, Crown, Trash2 } from 'lucide-react';
+import { Search, Plus, Columns3, GitBranch, Settings, X, Zap, Lock, MessageSquare, AlertTriangle, Minimize2, Maximize2, SkipForward, Pin, ChevronsDownUp, ChevronsUpDown, RefreshCw, FileText, GitPullRequest, Crown, Trash2, Bell } from 'lucide-react';
 
 // Glyphs come from lucide-react; the UI references them by short name
 // via <Icon name="..." />. The wrapper span (.mk-icon) sizes them, so the SVG's
@@ -54,6 +54,9 @@ const ICONS = {
   // charge". Only rendered when the window holds the controller lease,
   // tucked into the icon strip next to sync / settings.
   crown: Crown,
+  // BACI-287: notification-bell glyph on the topbar — opens the global
+  // agent→user notification list, with an unread-count badge.
+  bell: Bell,
 };
 
 export default function Icon({ name }) {

@@ -3103,3 +3103,159 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   text-decoration: underline;
 }
 .mk-link:hover { filter: brightness(0.9); }
+
+/* ---------- BACI-287: notification bell ---------- */
+/* The bell sits in the topbar's right-hand strip where the + (new issue)
+   button used to live. Built on the .mk-icbtn shape (same 32×32 box,
+   hover) plus a positioned unread-count badge. The dropdown reuses the
+   ShippedPopover's anchored-menu vocabulary so the two topbar list
+   surfaces read alike. */
+.mk-notif-root { position: relative; flex-shrink: 0; }
+.mk-notif-btn { position: relative; }
+.mk-notif-badge {
+  position: absolute; top: 1px; right: 1px;
+  min-width: 15px; height: 15px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: var(--status-blocked, #e5484d);
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 9px; font-weight: 700; line-height: 15px;
+  text-align: center;
+  box-shadow: 0 0 0 1.5px var(--bg-1, var(--paper));
+  pointer-events: none;
+}
+
+.mk-notif-popover {
+  position: absolute; top: calc(100% + 6px); right: 0;
+  width: 360px; max-height: 460px;
+  background: var(--paper);
+  border: 1px solid var(--border-1);
+  border-radius: 10px;
+  box-shadow: var(--shadow-3);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  z-index: 20;
+  animation: mk-pop-y var(--dur-medium) var(--ease-out);
+}
+.mk-notif-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-1);
+  background: var(--bg-2, var(--ink-50));
+}
+.mk-notif-title {
+  font-size: 12px; font-weight: 600; color: var(--fg-1);
+  margin-right: auto;
+}
+.mk-notif-filter { display: flex; gap: 4px; }
+.mk-notif-filter-btn {
+  appearance: none; border: 0; font: inherit;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg-2);
+  font-size: 11px; font-weight: 500;
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+.mk-notif-filter-btn:hover:not(.is-active) { background: var(--paper); color: var(--fg-1); }
+.mk-notif-filter-btn.is-active {
+  background: var(--status-doing-bg);
+  color: var(--status-doing);
+  font-weight: 600;
+}
+.mk-notif-filter-btn:focus-visible { outline: 1px dotted var(--border-focus); outline-offset: 1px; }
+
+.mk-notif-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  display: flex; flex-direction: column;
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent);
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent);
+}
+.mk-notif-empty {
+  padding: 16px 12px;
+  font-size: 12px; color: var(--fg-3);
+  text-align: center;
+}
+.mk-notif-error-detail {
+  margin-top: 6px;
+  font-family: var(--font-mono); font-size: 10px;
+  color: var(--status-blocked);
+  word-break: break-word;
+}
+
+.mk-notif-row {
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border-1);
+  font: inherit; color: var(--fg-1);
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.mk-notif-row:last-child { border-bottom: 0; }
+.mk-notif-row.is-linked { cursor: pointer; }
+.mk-notif-row.is-linked:hover { background: var(--bg-2, var(--ink-50)); }
+.mk-notif-row.is-linked:focus-visible { outline: 1px dotted var(--border-focus); outline-offset: -2px; }
+/* Unread rows carry a left accent rail so the read/unread split reads at
+   a glance even in the "show all" view. */
+.mk-notif-row.is-unread { box-shadow: inset 2px 0 0 var(--status-doing, #3b82f6); }
+.mk-notif-row-body {
+  font-size: 13px; line-height: 1.35; color: var(--fg-1);
+  white-space: pre-wrap; word-break: break-word;
+}
+.mk-notif-row-meta {
+  display: flex; align-items: baseline; gap: 6px;
+  font-size: 11px; color: var(--fg-3);
+}
+.mk-notif-row-meta .mk-card-id { margin-left: 0; }
+.mk-notif-row-sep { color: var(--fg-3); flex-shrink: 0; }
+.mk-notif-row-when { flex-shrink: 0; }
+/* "Mark read" floats to the right edge of the meta line. */
+.mk-notif-row-read {
+  appearance: none; border: 0; background: transparent;
+  margin-left: auto;
+  color: var(--accent, #3b82f6);
+  cursor: pointer; padding: 0; font: inherit; font-size: 11px;
+  text-decoration: underline;
+}
+.mk-notif-row-read:hover { filter: brightness(0.9); }
+
+.mk-notif-row.is-skeleton { pointer-events: none; }
+.mk-notif-row.is-skeleton .mk-notif-row-body {
+  height: 13px; width: 85%;
+  background: var(--border-1); border-radius: 4px;
+}
+.mk-notif-row.is-skeleton .mk-notif-row-meta {
+  display: inline-block; height: 10px; width: 50%;
+  background: var(--border-1); border-radius: 4px;
+}
+
+.mk-notif-footer {
+  padding: 8px 12px;
+  border-top: 1px solid var(--border-1);
+  text-align: center;
+  background: var(--bg-2, var(--ink-50));
+}
+
+/* BACI-287: the relocated + (new issue) button in the Pipeline Backlog
+   column header. Sized to match the sibling drawer toggles so the header
+   button rhythm stays uniform; the spacer before it already anchors the
+   group to the right edge, so this button drops the toggles'
+   margin-left:auto to sit flush beside them. */
+.mk-pl-new-issue {
+  width: 26px; height: 26px;
+  border-radius: 6px;
+  border: 1px solid var(--border-1);
+  background: var(--paper);
+  color: var(--fg-3);
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.mk-pl-new-issue:hover { color: var(--fg-1); border-color: var(--border-2); }
+.mk-pl-new-issue .mk-icon { width: 15px; height: 15px; }
+/* With the + button present, the first drawer toggle's own
+   margin-left:auto would split the group; the spacer handles the push, so
+   keep the right-hand buttons flush. */
+.mk-pl-col-head .mk-pl-new-issue + .mk-pl-drawer-toggle { margin-left: 0; }

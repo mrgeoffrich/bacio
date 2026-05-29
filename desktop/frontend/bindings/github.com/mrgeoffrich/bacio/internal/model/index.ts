@@ -6,6 +6,7 @@ export {
     EngineMode,
     Issue,
     JobStatus,
+    Notification,
     PipelineJob,
     QuestionItem,
     QuestionOption,
