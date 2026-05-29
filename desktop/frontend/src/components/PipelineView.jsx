@@ -569,7 +569,7 @@ function StageCard({
               <button
                 type="button"
                 className="mk-pl-btn is-primary is-sm"
-                disabled={!nextPending || allDone}
+                disabled={!nextPending || allDone || engineAuto}
                 onClick={() => onStartJob?.(card.key)}
               >
                 ▶ Start
