@@ -56,9 +56,11 @@ regardless of mode:
 ### `design` — extra contract
 
 - Produces a design doc at `docs/designs/<issue-id>-<slug>.md` containing
-  **two** distinct options and a committed recommendation. "No strong
+  up to **four** distinct options (target four, may collapse to three or
+  two with a stated reason) and a committed recommendation. "No strong
   preference" is invalid output.
-- Optional sibling `.svg` wireframes.
+- Sibling `.html` wireframes for every UI option; backend-only options
+  skip them.
 - `bacio doc upsert --type designs` then `bacio doc link ... <issue_id>`
   for each artefact. Always link to the issue, never the feature.
 - Posts one summary comment on the issue.
