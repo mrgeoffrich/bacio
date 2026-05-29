@@ -48,6 +48,9 @@ export default function PipelineView({
   shippedCount,
   shippedScope,
   onShippedScopeChange,
+  flyingShipKey,
+  shipFlashing,
+  onShipFlightDone,
 }) {
   const [activeQuestionId, setActiveQuestionId] = useState(null);
   const [expanded, setExpanded] = useState(false);
@@ -276,6 +279,9 @@ export default function PipelineView({
             scope={shippedScope}
             onScopeChange={onShippedScopeChange}
             onOpenIssue={onOpenIssue}
+            flyingShipKey={flyingShipKey}
+            shipFlashing={shipFlashing}
+            onShipFlightDone={onShipFlightDone}
           />
         </div>
         <div className="mk-pl-col-body">

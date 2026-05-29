@@ -2,7 +2,6 @@ import React from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import Icon from './Icon.jsx';
 import RepoPicker from './RepoPicker.jsx';
-import ShippedPopover from './ShippedPopover.jsx';
 import Tooltip from './Tooltip.jsx';
 import { WEB_MODE } from '../env';
 import { viewPath, viewFromPath } from '../lib/routes';
@@ -30,7 +29,7 @@ function formatSyncTime(iso) {
   return d.toLocaleString();
 }
 
-export default function Topbar({ boards, activeBoard, onPickBoard, onAddRepository, onBeforeNavigate, onOpenPalette, onOpenSettings, onOpenSync, onOpenComposer, leaderState, agentCounts, shippedCount, shippedScope, onShippedScopeChange, onOpenIssue, flyingShipKey, shipFlashing, onShipFlightDone }) {
+export default function Topbar({ boards, activeBoard, onPickBoard, onAddRepository, onBeforeNavigate, onOpenPalette, onOpenSettings, onOpenSync, onOpenComposer, leaderState, agentCounts }) {
   // BACI-203: the active view is derived from the URL, not a prop.
   // useLocation re-renders on every navigation so the segmented
   // button's `is-active` class stays in lockstep. The breadcrumb
@@ -141,16 +140,6 @@ export default function Topbar({ boards, activeBoard, onPickBoard, onAddReposito
       </button>
 
       <div className="mk-topbar-right">
-        <ShippedPopover
-          activeBoard={activeBoard}
-          shippedCount={shippedCount ?? 0}
-          scope={shippedScope}
-          onScopeChange={onShippedScopeChange}
-          onOpenIssue={onOpenIssue}
-          flyingShipKey={flyingShipKey}
-          shipFlashing={shipFlashing}
-          onShipFlightDone={onShipFlightDone}
-        />
         {/* BACI-166: + opens the IssueComposer modal. Hidden on the
             cross-repo "all" pseudo-board — the composer needs a real
             prefix to create against. */}

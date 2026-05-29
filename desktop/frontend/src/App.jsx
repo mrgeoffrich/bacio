@@ -826,6 +826,20 @@ export default function App() {
   // represent "Forever" at all. Moving to server-side counting fixes
   // both and lets the count change with the scope picker.
   const [shippedCount, setShippedCount] = useState(0);
+  // refreshShippedCount (BACI-276): the single fetch the poll effect and
+  // the on-ship trigger both invoke. Stable across renders so the
+  // ship-flourish callback can call it without re-running its own
+  // detection effect. Re-derived only when the board or scope changes.
+  const refreshShippedCount = useCallback(() => {
+    if (!activeBoard || activeBoard === 'all') {
+      setShippedCount(0);
+      return;
+    }
+    const sinceDays = scopeSinceDays(shippedScope);
+    api.countShippedIssues(activeBoard, sinceDays)
+      .then((n) => setShippedCount(n))
+      .catch(() => { /* pill is best-effort; the popover surfaces failures */ });
+  }, [activeBoard, shippedScope]);
   useEffect(() => {
     if (!activeBoard || activeBoard === 'all') {
       setShippedCount(0);
@@ -834,17 +848,10 @@ export default function App() {
     // Reset to 0 on scope / repo change so a stale count doesn't sit
     // on the chip while the first fetch is in flight.
     setShippedCount(0);
-    const sinceDays = scopeSinceDays(shippedScope);
-    let cancelled = false;
-    const refresh = () => {
-      api.countShippedIssues(activeBoard, sinceDays)
-        .then((n) => { if (!cancelled) setShippedCount(n); })
-        .catch(() => { /* pill is best-effort; the popover surfaces failures */ });
-    };
-    refresh();
-    const id = setInterval(refresh, POLL_INTERVAL_MS);
-    return () => { cancelled = true; clearInterval(id); };
-  }, [activeBoard, shippedScope]);
+    refreshShippedCount();
+    const id = setInterval(refreshShippedCount, POLL_INTERVAL_MS);
+    return () => { clearInterval(id); };
+  }, [activeBoard, shippedScope, refreshShippedCount]);
 
   // BACI-240 ka-ching SFX. Hoisted out of ShippedPopover so the
   // audio fires regardless of the active view (BACI-254). The hook
@@ -862,7 +869,12 @@ export default function App() {
   // useShipFlourish detection effect's dep list quiet.
   const onCardsShipped = useCallback((keys) => {
     for (let i = 0; i < keys.length; i++) playShipSfx();
-  }, [playShipSfx]);
+    // BACI-276: bump the Pipeline odometer the moment a card lands in
+    // done rather than waiting for the next 10s poll, so the count rolls
+    // in lockstep with the glow. One refresh per tick is enough — the
+    // count is a server total, not a per-key delta.
+    refreshShippedCount();
+  }, [playShipSfx, refreshShippedCount]);
 
   // BACI-193 ship flourish: detect cards that just transitioned into
   // `done` from a non-terminal column, expose the flying key + flash
@@ -906,13 +918,6 @@ export default function App() {
         onOpenComposer={() => setComposerOpen(true)}
         leaderState={leaderState}
         agentCounts={agentCounts}
-        shippedCount={shippedCount}
-        shippedScope={shippedScope}
-        onShippedScopeChange={changeShippedScope}
-        onOpenIssue={navigateToIssue}
-        flyingShipKey={flyingShipKey}
-        shipFlashing={shipFlashing}
-        onShipFlightDone={onShipFlightDone}
       />
       {loading ? (
         <div className="mk-app-state">Loading…</div>
@@ -966,6 +971,9 @@ export default function App() {
                   shippedCount={shippedCount}
                   shippedScope={shippedScope}
                   onShippedScopeChange={changeShippedScope}
+                  flyingShipKey={flyingShipKey}
+                  shipFlashing={shipFlashing}
+                  onShipFlightDone={onShipFlightDone}
                 />
               </ErrorBoundary>
             }
