@@ -2204,6 +2204,58 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   font-size: 20px; font-weight: 600; line-height: 1.3;
   letter-spacing: -0.01em; color: var(--fg-1); margin: 0;
 }
+/* BACI-292: the title is click-to-edit in the workspace header. Read mode
+   shows the plain <h1>; the editable variant gets a subtle hover/focus
+   affordance so it reads as actionable without a permanent input chrome. */
+.mk-workspace-title[role="button"] {
+  cursor: text; border-radius: var(--radius-sm);
+  padding: 2px 4px; margin: -2px -4px;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.mk-workspace-title[role="button"]:hover { background: var(--bg-4); }
+/* The inline title <input> matches the <h1> typography so committing/
+   reverting doesn't visibly reflow the header. Reuses .mk-edit-input for
+   the field chrome (border/background/focus). */
+.mk-workspace-title-input {
+  flex: 1; min-width: 200px;
+  font-size: 20px; font-weight: 600; line-height: 1.3;
+  letter-spacing: -0.01em; color: var(--fg-1);
+}
+
+/* BACI-292: bounded wrapper for the embedded NotionEditor in the issue
+   description (the editor is also DocsView's full-pane editor, whose
+   wrapper is height:100% + a sticky toolbar tuned for that pane). Inside
+   the flowing .mk-drawer-section we need an explicit min/max height and
+   scroll so it renders as a contained editor rather than collapsing or
+   overflowing. The border frames it as an edit surface. */
+.mk-issue-notion-editor {
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  overflow: auto;
+  min-height: 200px;
+  max-height: 520px;
+  background: var(--bg-2);
+}
+/* Tame the full-pane content padding (48px 72px) for the compact inline
+   surface, and let the content flow to the wrapper's edges. */
+.mk-issue-notion-editor .notion-editor-content {
+  padding: 16px 20px;
+  max-width: none;
+  min-height: 0;
+  font-size: 14px;
+}
+/* Read-only variant (taken/waiting): no toolbar, no border chrome — it
+   reads like the rendered body, just via the same engine. */
+.mk-issue-notion-editor.is-readonly {
+  border: none;
+  background: transparent;
+  min-height: 0;
+  max-height: none;
+  overflow: visible;
+}
+.mk-issue-notion-editor.is-readonly .notion-editor-content {
+  padding: 0;
+}
 /* BACI-216: prominent "Open plan" link in the IssueWorkspace header.
    Sits between the title and the IssueLockBanner — small accent pill
    so the affordance reads as a primary jump-off without competing

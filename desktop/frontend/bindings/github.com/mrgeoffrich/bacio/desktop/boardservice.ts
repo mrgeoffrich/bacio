@@ -490,6 +490,19 @@ export function UpdateIssueDescription(repoPrefix: string, key: string, descript
     });
 }
 
+/**
+ * UpdateIssueTitle replaces an issue's title and returns the refreshed
+ * issue-drawer payload. Mirrors UpdateIssueDescription — the store rejects
+ * an empty title (invalid_input) so callers gate the value first.
+ * repoPrefix may be empty or "all" — the prefix is then derived from the
+ * canonical issue key.
+ */
+export function UpdateIssueTitle(repoPrefix: string, key: string, title: string): $CancellablePromise<$models.IssueDetail> {
+    return $Call.ByID(3596251263, repoPrefix, key, title).then(($result: any) => {
+        return $$createType0($result);
+    });
+}
+
 // Private type creation functions
 const $$createType0 = $models.IssueDetail.createFrom;
 const $$createType1 = boardcards$0.BoardCard.createFrom;

@@ -826,6 +826,21 @@ export default function App() {
     }
   }, [activeBoard, openIssueKey, refreshBrief, refreshCards]);
 
+  // BACI-292: title editing from the workspace header. The card list does
+  // carry the title, so the cards refresh matters here — the kanban card
+  // re-renders with the new title without waiting for the 10s poll.
+  const saveTitle = useCallback(async (title) => {
+    if (!openIssueKey) return;
+    try {
+      await api.updateIssueTitle(activeBoard, openIssueKey, title);
+      refreshBrief();
+      refreshCards({ silent: true });
+    } catch (err) {
+      reportError(err, { headline: "Couldn't save title" });
+      throw err;
+    }
+  }, [activeBoard, openIssueKey, refreshBrief, refreshCards]);
+
   // BACI-141: opts is an optional third arg carrying the eval flag and
   // the transcript_event_ref the per-event composer in the transcript
   // viewer fills in. The existing CommentComposer path keeps passing
@@ -1106,6 +1121,7 @@ export default function App() {
                   brief={openIssueBrief}
                   cards={cards}
                   onClose={closeIssue}
+                  onSaveTitle={saveTitle}
                   onSaveDescription={saveDescription}
                   onAddComment={addComment}
                   onDeleteComment={deleteComment}
