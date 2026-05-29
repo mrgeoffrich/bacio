@@ -138,10 +138,10 @@ type WaitingState struct {
 // "designing", "planning"), and TodosDone / TodosTotal (the TodoWrite
 // progress of the claiming session).
 type BoardCard struct {
-	Key         string   `json:"key"`
-	Column      string   `json:"column"`
-	ColumnLabel string   `json:"columnLabel"`
-	Title       string   `json:"title"`
+	Key         string `json:"key"`
+	Column      string `json:"column"`
+	ColumnLabel string `json:"columnLabel"`
+	Title       string `json:"title"`
 	// DescriptionExcerpt (BACI-171) is a short (~140-rune) excerpt of
 	// the issue's description used by the bottom-right ActivityTray to
 	// render a one-or-two-line summary per entry without an extra
@@ -181,6 +181,14 @@ type BoardCard struct {
 	// Name. Empty when the issue isn't taken, when no dispatch matches,
 	// or when the template was deleted.
 	ActiveVerb string `json:"activeVerb,omitempty"`
+	// RunningSessionID (BACI-286) is the external session id of the
+	// winning open claim's session — the worker running this card's job
+	// right now. The Pipeline running-job card's "message" button targets
+	// it to push a user→agent steer message at that busy session. Empty
+	// (and omitted from JSON) when the card isn't taken or the winning
+	// claim carries no session id. Same winning-claim session that
+	// ActiveVerb / Todos / OpenQuestions are derived from.
+	RunningSessionID string `json:"runningSessionId,omitempty"`
 	// TodosDone and TodosTotal mirror the TodoWrite progress of the
 	// session that holds the newest open claim on this issue. Both
 	// zero when the issue isn't taken or the session never wrote a
@@ -591,6 +599,7 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 			FeatureBranchName:  iss.FeatureBranchName,
 			WaitingState:       ws,
 			ActiveVerb:         e.verb,
+			RunningSessionID:   e.runningSessionID,
 			TodosDone:          e.todosDone,
 			TodosTotal:         e.todosTotal,
 			Todos:              e.todos,
@@ -691,10 +700,14 @@ func descriptionExcerpt(body string) string {
 }
 
 type cardEnrichment struct {
-	taken      bool
-	verb       string
-	todosDone  int
-	todosTotal int
+	taken bool
+	verb  string
+	// runningSessionID is the external session id of the winning open
+	// claim — the worker running this card's job, the BACI-286 steer
+	// target. Empty when the winning claim carries no session id.
+	runningSessionID string
+	todosDone        int
+	todosTotal       int
 	// todos are the winning-claim session's TodoWrite rows whose
 	// issue_key matches this card's issue, in storage order
 	// (Position ascending). Same per-(session, issue) scoping as the
@@ -840,6 +853,11 @@ func enrichmentByIssueKey(
 	for issueKey, claim := range newestByIssue {
 		sess := sessionByID[claim.SessionID]
 		e := enrich[issueKey]
+		// BACI-286 steer target: the winning claim's session id. Taken
+		// straight from the claim row (not the resolved session) since
+		// the claim is the single source of truth for "who's on this
+		// card" and the steer endpoint keys on the external session id.
+		e.runningSessionID = claim.SessionID
 		if sess != nil {
 			// todosByPK carries rows for every (session, issue) pair the
 			// bulk reader was asked about — filter by this card's

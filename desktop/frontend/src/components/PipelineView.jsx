@@ -5,6 +5,7 @@ import Icon from './Icon.jsx';
 import Tooltip from './Tooltip.jsx';
 import QuestionModal from './QuestionModal.jsx';
 import ShippedPopover from './ShippedPopover.jsx';
+import SessionMessageButton from './SessionMessageButton.jsx';
 import { documentPath } from '../lib/routes';
 import prLabel from '../lib/prLabel';
 import { PRESET_BY_SLUG, stageLabel, stageGlyph, isShipStage } from '../lib/pipelineProcesses';
@@ -621,13 +622,20 @@ function StageCard({
           </div>
           <footer className="mk-pl-stage-foot">
             {running ? (
-              <button
-                type="button"
-                className="mk-pl-btn is-ghost is-danger is-sm"
-                onClick={() => onStopJob?.(card.key)}
-              >
-                ■ Stop
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="mk-pl-btn is-ghost is-danger is-sm"
+                  onClick={() => onStopJob?.(card.key)}
+                >
+                  ■ Stop
+                </button>
+                {/* BACI-286: steer the running worker. Only when the
+                    running job's bound session is known. */}
+                {card.runningSessionId && (
+                  <SessionMessageButton sessionId={card.runningSessionId} compact />
+                )}
+              </>
             ) : (
               <button
                 type="button"

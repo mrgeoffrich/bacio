@@ -612,6 +612,25 @@ type Client interface {
 	// in-memory parked-reply map. No audit row.
 	DrainSettledQuestionsForSession(ctx context.Context, sessionID string) ([]*model.SessionQuestion, error)
 
+	// ----- User→agent steer messages (BACI-286) -----
+	// A steer message is the user→agent counterpart to a question: a
+	// free-form note the user pushes at a specific busy session, delivered
+	// by the channel at the worker's next turn boundary as a
+	// `<channel kind="message">` tag. NOT a dispatch — no matcher, no ack
+	// lifecycle, fire-and-forget.
+	//
+	// AddUserMessage enqueues one against a session id; the REST endpoint
+	// is the only write surface (a steer-message is a harness affordance,
+	// not a `bacio` mutation verb). Emits an agent.message audit row. The
+	// remote backend supports it over REST; the drain stays local-only
+	// (channel-internal, like the question drains).
+	AddUserMessage(ctx context.Context, in AddUserMessageInput) (*model.UserMessage, error)
+	// DrainUserMessagesForSession returns a session's un-consumed steer
+	// messages oldest-first and marks them consumed — the channel's push
+	// path. Local-only (the channel talks to the local store), so the
+	// remote backend returns ErrLocalOnly. No audit row.
+	DrainUserMessagesForSession(ctx context.Context, sessionID string) ([]*model.UserMessage, error)
+
 	// ----- Agent dispatch queue (local-only in v1) -----
 	// Dispatches are supervisor->agent work items. CreateDispatch
 	// enqueues one; InboxDispatches drains everything aimed at a
@@ -881,4 +900,15 @@ type AddSessionQuestionInput struct {
 	IssueKey  string
 	Payload   model.QuestionPayload
 	AskedBy   string
+}
+
+// AddUserMessageInput is the validated tuple AddUserMessage consumes
+// (BACI-286). SessionID is the external session id of the busy worker
+// to steer; the store resolves the agent_sessions FK + repo from it.
+// Body is the free-form steer note. CreatedBy is the actor that sent it
+// (a user at the desktop, typically "user").
+type AddUserMessageInput struct {
+	SessionID string
+	Body      string
+	CreatedBy string
 }

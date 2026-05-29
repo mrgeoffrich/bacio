@@ -158,6 +158,11 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("POST /agents/sessions/{session_id}/claims", d.handleAgentClaim)
 	mux.HandleFunc("DELETE /agents/sessions/{session_id}/claims", d.handleAgentRelease)
 	mux.HandleFunc("GET /agents/sessions/{session_id}/inbox", d.handleAgentInbox)
+	// BACI-286: push a user→agent steer message at a busy session. The
+	// channel serving that session drains + pushes it as a
+	// `<channel kind="message">` tag at the worker's next turn boundary.
+	// NOT a dispatch — no matcher, no ack lifecycle.
+	mux.HandleFunc("POST /agents/sessions/{session_id}/messages", d.handleSessionMessageSend)
 	// BACI-45: read the session's TodoWrite mirror. Writes happen via the
 	// post-tool-use hook only — no POST surface here.
 	mux.HandleFunc("GET /agents/sessions/{session_id}/todos", d.handleAgentSessionTodos)

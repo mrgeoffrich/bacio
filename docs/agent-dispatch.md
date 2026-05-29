@@ -608,6 +608,73 @@ The tool errors clearly (an MCP tool error) when the issue or
 transcript cannot be found — e.g. an older harness that does not
 persist per-subagent transcripts.
 
+### User→agent steer messages — `kind="message"` (BACI-286)
+
+A **steer message** is the inverse of a dispatch: a free-form note the
+*user* pushes at a *specific busy session* — the worker running a job
+right now — so they can nudge it mid-flight without queuing fresh work.
+It rides the **same** `notifications/claude/channel` notification a
+dispatch uses, but carries `meta.kind = "message"` and **no
+`dispatch_id`** — so the worker (and a channel-log reader) tell a steer
+message apart from a dispatch by the kind attribute alone.
+
+It is emphatically **not a dispatch**: no `agent_dispatches` row, no
+matcher, no job-engine, no target binding, no ack lifecycle. Those would
+all try to bind it to a *free* agent; a steer message is scoped to one
+*busy* `session_id` by construction. It is **fire-and-forget** — there is
+nothing to `reply`/ack, and `consumed_at` (the channel drained + pushed
+it) is the only delivery signal, the same "delivered ≠ acted on" caveat a
+dispatch's `delivered` carries.
+
+**Delivery is turn-boundary only.** The channel injects context into the
+worker's loop at its next turn boundary; it cannot interrupt a running
+tool call (no abort, no mid-tool interrupt). A message fired while the
+worker is mid-`Bash`/`Task` lands once that call returns. This is
+acceptable by design — the affordance is for steering, not stopping.
+
+**The data path.** A new `user_messages` table (keyed by `session_pk`,
+cascaded out by the `agent_sessions` ON DELETE chain — never synced)
+holds the queue. The REST endpoint `POST
+/agents/sessions/{session_id}/messages` (body `{"body": "..."}`) is the
+only write surface — a steer message is a harness affordance, not a
+`bacio` mutation verb, so it gets **no `bacio agent message` CLI verb and
+no `bacio schema` entry** (same six-rule split as the BACI-190 rescue
+endpoint). It writes one `agent.message` audit row. The channel drains it
+on its own tick step — `Source.DrainUserMessages`, a sibling of
+`DrainAnsweredQuestions`, walking the same `SessionsByClaudePID` set —
+marks the returned rows `consumed`, and pushes each via `pushMessage`. A
+per-process dedup set mirrors the dispatch drain's `pushed`; because
+`consumed_at` is stamped in the same transaction the rows are returned, a
+fresh channel process never re-pushes a consumed row (consumed is
+terminal, unlike a dispatch's re-drainable `delivered`).
+
+**The two surfaces.** Both the desktop/web **Agents-page session card**
+(targets `a.sessionId`, gated on `a.hasChannel`) and the **Pipeline
+running-job card** (targets `card.runningSessionId`, only while a job is
+`running`) carry a **Message** button that opens an inline compose box and
+POSTs to the endpoint. The Pipeline card needs the bound session
+surfaced, so `boardcards.BoardCard` gained a `RunningSessionID` field
+populated from the winning open claim's session — the same claim whose
+`ActiveVerb` / `Todos` / `OpenQuestions` the card already projects.
+
+**Spike note (the harness-routing unknown).** The channel-owning session
+is the *supervisor*, which blocks inside `Task(...)` while the per-mode
+worker subagent runs (see [Subagent delegation](#subagent-delegation-baci-52)
+below). The open question BACI-286 set out to answer is *where* a pushed
+`kind="message"` notification lands when the channel owner is suspended in
+a subagent: only in the supervisor's queued context (useless — it arrives
+after `Task` returns, work already done), or in the *active subagent's*
+loop at its next turn boundary (the goal). Per
+"[Subagents share the parent's session id](#subagents-share-the-parents-session-id)",
+a `Task`-spawned subagent shares the parent's MCP connections, so the
+notification reaches the same channel — but Claude Code's routing of that
+notification into the active subagent loop is harness behaviour bacio
+doesn't control. The channel-level wire shape is locked by
+`TestChannelPushesUserMessage`; confirming the *worker hears it* requires
+a live end-to-end (dispatch a long job, fire a steer message, grep the
+worker's transcript for the `<channel kind="message">` tag) against an
+installed binary with the supervisor's channel restarted on it.
+
 ---
 
 ## Subagent delegation (BACI-52)

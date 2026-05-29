@@ -202,6 +202,11 @@ export interface BoardCard {
   // when no verb can be derived) and the claiming session's
   // TodoWrite progress (zeroes when no todos / not taken).
   activeVerb?: string;
+  // BACI-286: external session id of the winning open claim — the worker
+  // running this card's job. The Pipeline running-job card's "message"
+  // button targets it to push a user→agent steer message. Absent
+  // (omitempty server-side) on untaken cards.
+  runningSessionId?: string;
   todosDone?: number;
   todosTotal?: number;
   // BACI-75: the per-task rows underlying todosDone/todosTotal,
@@ -1520,6 +1525,33 @@ export async function rescueDispatch(dispatchID: number): Promise<DispatchDTO> {
     { method: 'POST' },
   );
   return reshapeDispatch(raw);
+}
+
+// ApiUserMessage is the wire shape of a BACI-286 steer message returned
+// by the POST endpoint. The callers are fire-and-forget (success vs
+// toasted error), so only id is consumed — the rest mirrors the Go
+// model.UserMessage for completeness.
+interface ApiUserMessage {
+  id: number;
+  session_id: string;
+  body: string;
+  created_by: string;
+  created_at: string;
+}
+
+// sendSessionMessage (BACI-286) POSTs a user→agent steer message at a
+// busy session. The channel serving that session pushes it as a
+// `<channel kind="message">` tag at the worker's next turn boundary —
+// NOT a dispatch. Unknown session → 404, empty/over-cap body → 400, both
+// surfaced via the usual error envelope.
+export async function sendSessionMessage(
+  sessionID: string,
+  body: string,
+): Promise<ApiUserMessage> {
+  return await call<ApiUserMessage>(
+    `/agents/sessions/${encodeURIComponent(sessionID)}/messages`,
+    { method: 'POST', body: { body } },
+  );
 }
 
 interface ApiBoardCard {

@@ -744,6 +744,63 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
 .mk-agent-dispatch-error {
   font-size: 11px; color: var(--coral-600); margin-left: 4px;
 }
+
+/* BACI-286 steer-message affordance — the "Message" button + inline
+   compose box shared by the Agents-page session card and the Pipeline
+   running-job card. Neutral chrome (this is context-injection, not a
+   destructive action like Rescue); the compact variant trims it to sit
+   in the Pipeline footer's button row. */
+.mk-btn-message {
+  appearance: none;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-4);
+  color: var(--fg-1);
+  border: 1px solid var(--border-1);
+  cursor: pointer;
+  font-family: var(--font-sans);
+}
+.mk-btn-message:hover { border-color: var(--status-claude); color: var(--status-claude); }
+.mk-btn-message--compact { padding: 2px 8px; }
+.mk-message-composer {
+  display: flex; flex-direction: column; gap: 6px;
+  width: 100%;
+}
+.mk-message-composer-input {
+  width: 100%; box-sizing: border-box;
+  padding: 6px 8px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+  color: var(--fg-1);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  resize: vertical;
+}
+.mk-message-composer-input:focus { outline: none; border-color: var(--status-claude); }
+.mk-message-composer-error { font-size: 11px; color: var(--coral-600); }
+.mk-message-composer-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.mk-btn-message-cancel,
+.mk-btn-message-send {
+  appearance: none;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-family: var(--font-sans);
+}
+.mk-btn-message-cancel {
+  background: transparent; color: var(--fg-3);
+  border: 1px solid var(--border-1);
+}
+.mk-btn-message-cancel:hover { color: var(--fg-1); }
+.mk-btn-message-send {
+  background: var(--status-claude); color: var(--paper);
+  border: 1px solid var(--status-claude);
+}
+.mk-btn-message-send:disabled { opacity: 0.5; cursor: not-allowed; }
+
 .mk-agent-claim { display: flex; align-items: baseline; gap: 8px; }
 .mk-agent-claim-prompt {
   font-size: 12px; color: var(--fg-3);

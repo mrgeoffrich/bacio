@@ -82,6 +82,17 @@ export class BoardCard {
     "activeVerb"?: string;
 
     /**
+     * RunningSessionID (BACI-286) is the external session id of the
+     * winning open claim's session — the worker running this card's job
+     * right now. The Pipeline running-job card's "message" button targets
+     * it to push a user→agent steer message at that busy session. Empty
+     * (and omitted from JSON) when the card isn't taken or the winning
+     * claim carries no session id. Same winning-claim session that
+     * ActiveVerb / Todos / OpenQuestions are derived from.
+     */
+    "runningSessionId"?: string;
+
+    /**
      * TodosDone and TodosTotal mirror the TodoWrite progress of the
      * session that holds the newest open claim on this issue. Both
      * zero when the issue isn't taken or the session never wrote a
@@ -260,13 +271,13 @@ export class BoardCard {
         const $$createField5_0 = $$createType0;
         const $$createField6_0 = $$createType0;
         const $$createField11_0 = $$createType2;
-        const $$createField15_0 = $$createType4;
-        const $$createField16_0 = $$createType6;
-        const $$createField18_0 = $$createType8;
-        const $$createField22_0 = $$createType10;
-        const $$createField23_0 = $$createType12;
-        const $$createField24_0 = $$createType14;
-        const $$createField25_0 = $$createType15;
+        const $$createField16_0 = $$createType4;
+        const $$createField17_0 = $$createType6;
+        const $$createField19_0 = $$createType8;
+        const $$createField23_0 = $$createType10;
+        const $$createField24_0 = $$createType12;
+        const $$createField25_0 = $$createType14;
+        const $$createField26_0 = $$createType15;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField5_0($$parsedSource["tags"]);
@@ -278,25 +289,25 @@ export class BoardCard {
             $$parsedSource["waitingState"] = $$createField11_0($$parsedSource["waitingState"]);
         }
         if ("openQuestions" in $$parsedSource) {
-            $$parsedSource["openQuestions"] = $$createField15_0($$parsedSource["openQuestions"]);
+            $$parsedSource["openQuestions"] = $$createField16_0($$parsedSource["openQuestions"]);
         }
         if ("todos" in $$parsedSource) {
-            $$parsedSource["todos"] = $$createField16_0($$parsedSource["todos"]);
+            $$parsedSource["todos"] = $$createField17_0($$parsedSource["todos"]);
         }
         if ("blockedBy" in $$parsedSource) {
-            $$parsedSource["blockedBy"] = $$createField18_0($$parsedSource["blockedBy"]);
+            $$parsedSource["blockedBy"] = $$createField19_0($$parsedSource["blockedBy"]);
         }
         if ("latestPlan" in $$parsedSource) {
-            $$parsedSource["latestPlan"] = $$createField22_0($$parsedSource["latestPlan"]);
+            $$parsedSource["latestPlan"] = $$createField23_0($$parsedSource["latestPlan"]);
         }
         if ("latestPR" in $$parsedSource) {
-            $$parsedSource["latestPR"] = $$createField23_0($$parsedSource["latestPR"]);
+            $$parsedSource["latestPR"] = $$createField24_0($$parsedSource["latestPR"]);
         }
         if ("jobs" in $$parsedSource) {
-            $$parsedSource["jobs"] = $$createField24_0($$parsedSource["jobs"]);
+            $$parsedSource["jobs"] = $$createField25_0($$parsedSource["jobs"]);
         }
         if ("currentJob" in $$parsedSource) {
-            $$parsedSource["currentJob"] = $$createField25_0($$parsedSource["currentJob"]);
+            $$parsedSource["currentJob"] = $$createField26_0($$parsedSource["currentJob"]);
         }
         return new BoardCard($$parsedSource as Partial<BoardCard>);
     }

@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import QuestionModal from './QuestionModal.jsx';
+import SessionMessageButton from './SessionMessageButton.jsx';
 import { todoGlyph } from '../lib/todoGlyph.jsx';
 import * as api from '../api';
 
@@ -361,6 +362,14 @@ function AgentCard({ agent: a, rescuing, rescueError, onRescue, onOpenQuestion }
           </div>
         )}
       </dl>
+
+      {/* BACI-286: steer the running worker. Gated on a live channel —
+          without one there's nothing to push the message through. */}
+      {a.hasChannel && (
+        <section className="mk-agent-section mk-agent-section--message">
+          <SessionMessageButton sessionId={a.sessionId} />
+        </section>
+      )}
 
       {openQuestions.length > 0 && (
         <section className="mk-agent-section mk-agent-section--question">

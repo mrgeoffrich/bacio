@@ -755,3 +755,67 @@ func TestAgentOpenClaimsCrossRepo(t *testing.T) {
 		}
 	}
 }
+
+// ---------- user→agent steer messages (BACI-286) ----------
+
+func TestSessionMessageSendHappy(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	seedRepo(t, s)
+	sid := uuidFor("sess-msg")
+	registerSession(t, ts.URL, "MINI", sid, nil)
+	resp, body := apiReq(t, "POST", ts.URL+"/agents/sessions/"+sid+"/messages",
+		map[string]any{"body": "please write ACKSTEER"},
+		map[string]string{"X-Actor": "user"})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("status: %d body: %s", resp.StatusCode, body)
+	}
+	var m model.UserMessage
+	if err := json.Unmarshal(body, &m); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if m.ID == 0 || m.SessionID != sid || m.Body != "please write ACKSTEER" {
+		t.Fatalf("unexpected message: %+v", m)
+	}
+	if m.ConsumedAt != nil {
+		t.Fatalf("fresh message should be un-consumed: %+v", m)
+	}
+	// Register writes one agent.register row; the message adds agent.message.
+	assertHistoryOps(t, s, []string{"agent.register", "agent.message"})
+}
+
+func TestSessionMessageSendUnknownSession(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	seedRepo(t, s)
+	resp, body := apiReq(t, "POST", ts.URL+"/agents/sessions/"+uuidFor("ghost")+"/messages",
+		map[string]any{"body": "hello?"},
+		map[string]string{"X-Actor": "user"})
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status: %d body: %s", resp.StatusCode, body)
+	}
+}
+
+func TestSessionMessageSendEmptyBody(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	seedRepo(t, s)
+	sid := uuidFor("sess-empty")
+	registerSession(t, ts.URL, "MINI", sid, nil)
+	resp, body := apiReq(t, "POST", ts.URL+"/agents/sessions/"+sid+"/messages",
+		map[string]any{"body": "   "},
+		map[string]string{"X-Actor": "user"})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status: %d body: %s", resp.StatusCode, body)
+	}
+}
+
+func TestSessionMessageSendOverCapBody(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	seedRepo(t, s)
+	sid := uuidFor("sess-big")
+	registerSession(t, ts.URL, "MINI", sid, nil)
+	resp, body := apiReq(t, "POST", ts.URL+"/agents/sessions/"+sid+"/messages",
+		map[string]any{"body": strings.Repeat("x", model.MaxUserMessageLen+1)},
+		map[string]string{"X-Actor": "user"})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status: %d body: %s", resp.StatusCode, body)
+	}
+}

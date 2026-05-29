@@ -51,6 +51,12 @@ type fakeSource struct {
 	attached     []attachRec
 	attachResult string
 	attachErr    error
+
+	// BACI-286 user-message state. userMsgBatches hands back successive
+	// pre-canned batches from DrainUserMessages (same shape as
+	// batches), and userMsgErr lets a test inject a drain error.
+	userMsgBatches [][]UserMessageEvent
+	userMsgErr     error
 }
 
 type attachRec struct {
@@ -167,6 +173,20 @@ func (f *fakeSource) AbandonOpenQuestions(ctx context.Context) (int, error) {
 	defer f.mu.Unlock()
 	f.abandonOpenCalls++
 	return f.abandonedOpenN, nil
+}
+
+func (f *fakeSource) DrainUserMessages(ctx context.Context) ([]UserMessageEvent, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.userMsgErr != nil {
+		return nil, f.userMsgErr
+	}
+	if len(f.userMsgBatches) == 0 {
+		return nil, nil
+	}
+	b := f.userMsgBatches[0]
+	f.userMsgBatches = f.userMsgBatches[1:]
+	return b, nil
 }
 
 func (f *fakeSource) AttachTranscript(ctx context.Context, issueKey, agentID, note string) (string, error) {
@@ -493,6 +513,76 @@ func TestChannelPushesEventsOmitsBaseBranchWhenEmpty(t *testing.T) {
 	meta, _ := params["meta"].(map[string]any)
 	if _, ok := meta["base_branch"]; ok {
 		t.Fatalf("meta unexpectedly carried base_branch: %+v", meta)
+	}
+}
+
+// TestChannelPushesUserMessage (BACI-286) locks in the steer-message
+// wire shape: drainUserMessages turns a Source batch into a
+// notifications/claude/channel frame with meta.kind="message",
+// meta.from, the body as content, and crucially NO dispatch_id / issue /
+// mode keys — that's what lets the worker (and a channel-log reader)
+// tell a steer message apart from a dispatch.
+func TestChannelPushesUserMessage(t *testing.T) {
+	src := &fakeSource{userMsgBatches: [][]UserMessageEvent{{
+		{ID: 5, From: "user", Body: "please write ACKSTEER"},
+	}}}
+	var out bytes.Buffer
+	srv := New(src, "bacio", "test", strings.NewReader(""), &out, nil)
+
+	srv.drainUserMessages(context.Background())
+
+	frames := decodeFrames(t, out.String())
+	if len(frames) != 1 {
+		t.Fatalf("got %d frames, want 1", len(frames))
+	}
+	f := frames[0]
+	if f["method"] != "notifications/claude/channel" {
+		t.Fatalf("method = %v, want notifications/claude/channel", f["method"])
+	}
+	params, _ := f["params"].(map[string]any)
+	if params["content"] != "please write ACKSTEER" {
+		t.Fatalf("content = %v", params["content"])
+	}
+	meta, _ := params["meta"].(map[string]any)
+	if meta["kind"] != "message" {
+		t.Fatalf("meta kind = %v, want message", meta["kind"])
+	}
+	if meta["from"] != "user" {
+		t.Fatalf("meta from = %v, want user", meta["from"])
+	}
+	// A steer message is NOT a dispatch — none of the dispatch-only
+	// keys may appear, or a worker keyed on dispatch_id would mistake
+	// it for work to ack.
+	for _, k := range []string{"dispatch_id", "issue", "mode", "base_branch"} {
+		if _, ok := meta[k]; ok {
+			t.Fatalf("meta unexpectedly carried %q: %+v", k, meta)
+		}
+	}
+}
+
+// TestChannelTickDrainsUserMessages checks tick runs the user-message
+// drain alongside the dispatch + question drains, so a steer message
+// queued between turns rides out on the next poll tick.
+func TestChannelTickDrainsUserMessages(t *testing.T) {
+	src := &fakeSource{userMsgBatches: [][]UserMessageEvent{{
+		{ID: 9, From: "user", Body: "steer"},
+	}}}
+	var out bytes.Buffer
+	srv := New(src, "bacio", "test", strings.NewReader(""), &out, nil)
+
+	srv.tick(context.Background())
+
+	frames := decodeFrames(t, out.String())
+	found := false
+	for _, f := range frames {
+		params, _ := f["params"].(map[string]any)
+		meta, _ := params["meta"].(map[string]any)
+		if meta != nil && meta["kind"] == "message" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("tick did not emit a kind=message frame; frames=%+v", frames)
 	}
 }
 

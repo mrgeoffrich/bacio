@@ -320,6 +320,21 @@ export async function rescueDispatch(dispatchID: number): Promise<DispatchDTO> {
   }
 }
 
+// sendSessionMessage (BACI-286) pushes a user→agent steer message at a
+// busy session. The channel serving that session injects it as a
+// `<channel kind="message">` tag at the worker's next turn boundary —
+// NOT a dispatch. Backs the "message" button on the Pipeline running-job
+// card (targets card.runningSessionId) and the Agents-page session card
+// (targets a.sessionId). Errors (unknown session, empty/over-cap body)
+// surface as Error.message for a toast.
+export async function sendSessionMessage(sessionID: string, body: string) {
+  try {
+    return await BoardService.SendSessionMessage(sessionID, body);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
 // setIssueState changes an issue's state — backs the board's drag-to-move,
 // persisting the column change so it survives the next refresh poll.
 export async function setIssueState(

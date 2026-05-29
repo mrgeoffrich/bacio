@@ -851,6 +851,35 @@ CREATE INDEX IF NOT EXISTS idx_asq_state
 -- migrate() still runs (the index ddl is idempotent) so coverage is
 -- the same.
 
+-- user_messages backs the BACI-286 user→agent "steer message" path: a
+-- free-form note the user pushes at a specific busy session, delivered
+-- by the bacio channel at the worker's next turn boundary as a distinct
+-- `<channel kind="message">` tag. Unlike a dispatch it is NOT bound by
+-- the matcher and has no ack lifecycle — it is fire-and-forget, scoped
+-- to one session_id. Written by the REST endpoint, drained + pushed by
+-- the channel. Local-only — never synced. Cascaded out by the
+-- agent_sessions ON DELETE chain (no separate retention pass), same as
+-- agent_session_questions / agent_session_todos.
+--
+-- consumed_at is the only delivery signal: NULL = un-consumed (not yet
+-- pushed), non-NULL = the channel drained + pushed it. Like a dispatch's
+-- `delivered`, "consumed" is not proof the agent acted on it — the
+-- message carries no ack — but a fresh channel process re-pushes any
+-- still-un-consumed row (the same crash-recovery story dispatches have).
+-- The (session_pk, consumed_at) index backs the drain query.
+CREATE TABLE IF NOT EXISTS user_messages (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_pk  INTEGER NOT NULL REFERENCES agent_sessions(id) ON DELETE CASCADE,
+    repo_id     INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+    body        TEXT    NOT NULL,
+    created_by  TEXT    NOT NULL,
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    consumed_at DATETIME
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_messages_session_consumed
+    ON user_messages(session_pk, consumed_at);
+
 -- ui_leader is a single-row lease table. Only one UI process (TUI or desktop
 -- app) holds the lease at a time; all others stand by. The CHECK (id = 1)
 -- constraint + INSERT OR IGNORE seed guarantee exactly one row forever.

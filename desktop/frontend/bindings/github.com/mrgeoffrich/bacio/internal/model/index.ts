@@ -13,7 +13,8 @@ export {
     QuestionState,
     SessionQuestion,
     State,
-    UserActionReasonType
+    UserActionReasonType,
+    UserMessage
 } from "./models.js";
 
 export type {

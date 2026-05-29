@@ -319,6 +319,45 @@ func TestAssembleAgentIdentityDispatch(t *testing.T) {
 	}
 }
 
+// TestAssembleSurfacesRunningSessionID (BACI-286) covers that a taken
+// in_pipeline card carries the winning open claim's session id as
+// RunningSessionID — the Pipeline running-job card's steer-message
+// target. A free card carries an empty RunningSessionID.
+func TestAssembleSurfacesRunningSessionID(t *testing.T) {
+	repo := &model.Repo{ID: 1, Prefix: "TEST"}
+	t0 := time.Date(2026, 5, 17, 9, 0, 0, 0, time.UTC)
+	sess := &model.AgentSession{ID: 30, SessionID: "sess-run", RepoID: repo.ID, RepoPrefix: repo.Prefix}
+	issues := []*model.Issue{
+		{Key: "TEST-20", State: model.StateInPipeline, Title: "running a job"},
+		{Key: "TEST-21", State: model.StateTodo, Title: "nobody's on it"},
+	}
+	claims := []*model.AgentClaim{
+		{SessionID: "sess-run", SessionPK: 30, IssueKey: "TEST-20", ClaimedAt: t0},
+	}
+	f := &fakeClient{
+		repo: repo, issues: issues, claims: claims,
+		sessions: []*model.AgentSession{sess},
+	}
+	cards, err := Assemble(context.Background(), f, repo, false, nil)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	byKey := map[string]BoardCard{}
+	for _, c := range cards {
+		byKey[c.Key] = c
+	}
+	taken := byKey["TEST-20"]
+	if !taken.Taken {
+		t.Fatalf("TEST-20 should be taken")
+	}
+	if taken.RunningSessionID != "sess-run" {
+		t.Errorf("TEST-20 RunningSessionID = %q, want %q", taken.RunningSessionID, "sess-run")
+	}
+	if free := byKey["TEST-21"]; free.RunningSessionID != "" {
+		t.Errorf("TEST-21 RunningSessionID = %q, want empty (untaken card)", free.RunningSessionID)
+	}
+}
+
 // TestAssembleSurfacesOpenQuestions covers BACI-53 follow-up: the
 // winning claim's open ask_user_question rows whose issue_key matches
 // THIS card's issue surface as OpenQuestions entries. Rows tied to a
