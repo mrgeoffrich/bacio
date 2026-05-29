@@ -181,3 +181,36 @@ func (c *localClient) GetRepoAutoShip(ctx context.Context, repo *model.Repo) (bo
 	}
 	return settings.AutoShip, nil
 }
+
+// GetRepoBacklogCollapsed reads the per-repo Pipeline Backlog-column
+// collapse preference from the tui_settings KV — read-only, no audit row.
+func (c *localClient) GetRepoBacklogCollapsed(ctx context.Context, repo *model.Repo) (bool, error) {
+	return c.store.IsBacklogCollapsed(repo.ID)
+}
+
+// SetRepoBacklogCollapsed persists the per-repo Pipeline Backlog-column
+// collapse preference and returns the resulting value. Records a
+// `repo_setting.update` audit row only when the value actually changes —
+// the idempotent-no-op precedent shared with feature.hide and
+// board.hidden_states.
+func (c *localClient) SetRepoBacklogCollapsed(ctx context.Context, repo *model.Repo, collapsed, dryRun bool) (bool, error) {
+	if dryRun {
+		return collapsed, nil
+	}
+	prev, err := c.store.IsBacklogCollapsed(repo.ID)
+	if err != nil {
+		return false, err
+	}
+	if err := c.store.SetBacklogCollapsed(repo.ID, collapsed); err != nil {
+		return false, err
+	}
+	if prev != collapsed {
+		c.recordOp(model.HistoryEntry{
+			RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+			Op: "repo_setting.update", Kind: "repo_setting",
+			TargetID: &repo.ID, TargetLabel: "pipeline.backlog_collapsed",
+			Details: fmt.Sprintf("collapsed=%v", collapsed),
+		})
+	}
+	return collapsed, nil
+}

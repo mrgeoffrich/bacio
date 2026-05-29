@@ -167,3 +167,30 @@ func (s *Store) SetFeatureHiddenOnBoard(repoID int64, slug string, hidden bool) 
 	}
 	return s.SaveHiddenFeatures(repoID, current)
 }
+
+// backlogCollapsedKey is the per-repo KV key (BACI-288) for the Pipeline
+// page's "collapse the Backlog column to a thin rail" display preference.
+// Purely client-side chrome the backend never acts on, so it lives in
+// tui_settings (like board.hidden_states) rather than repo_settings
+// (where auto-ship lives because the controller's ticker reads it).
+const backlogCollapsedKey = "pipeline.backlog_collapsed"
+
+// IsBacklogCollapsed (BACI-288) reports whether the Pipeline page's
+// Backlog column is collapsed for repo. Defaults to false (expanded).
+func (s *Store) IsBacklogCollapsed(repoID int64) (bool, error) {
+	raw, err := s.GetTUISetting(repoID, backlogCollapsedKey)
+	if err != nil {
+		return false, err
+	}
+	return raw == "1", nil
+}
+
+// SetBacklogCollapsed (BACI-288) persists the Pipeline Backlog-column
+// collapse preference for repo. Stored as "1" (collapsed) / "" (expanded).
+func (s *Store) SetBacklogCollapsed(repoID int64, collapsed bool) error {
+	value := ""
+	if collapsed {
+		value = "1"
+	}
+	return s.SetTUISetting(repoID, backlogCollapsedKey, value)
+}

@@ -457,6 +457,30 @@ export async function getAutoShip(repoPrefix: string): Promise<boolean> {
   }
 }
 
+// setBacklogCollapsed (BACI-288) persists the per-repo Pipeline
+// Backlog-column collapse preference. Returns the persisted value.
+export async function setBacklogCollapsed(
+  repoPrefix: string,
+  collapsed: boolean,
+): Promise<boolean> {
+  try {
+    return await BoardService.SetBacklogCollapsed(repoPrefix, collapsed);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// getBacklogCollapsed (BACI-288) reads the per-repo Pipeline
+// Backlog-column collapse preference so the rail state seeds from the
+// persisted KV.
+export async function getBacklogCollapsed(repoPrefix: string): Promise<boolean> {
+  try {
+    return await BoardService.GetBacklogCollapsed(repoPrefix);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
 // updateIssueDescription replaces an issue's description and returns the
 // refreshed issue-drawer payload.
 export async function updateIssueDescription(

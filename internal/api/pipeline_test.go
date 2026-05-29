@@ -76,6 +76,44 @@ func TestPipelineEndpoints(t *testing.T) {
 		t.Fatal("auto-ship not persisted")
 	}
 
+	// Backlog-collapsed toggle (per-repo, BACI-288). GET defaults false.
+	bcURL := ts.URL + "/repos/" + repo.Prefix + "/backlog-collapsed"
+	resp = do(t, http.MethodGet, bcURL, nil, nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("backlog-collapsed GET status %d", resp.StatusCode)
+	}
+	bc := decode[map[string]any](t, resp.Body)
+	resp.Body.Close()
+	if got, _ := bc["backlog_collapsed"].(bool); got {
+		t.Fatalf("backlog-collapsed default = true, want false")
+	}
+
+	// PUT {collapsed:true} persists; GET then reads true.
+	resp = do(t, http.MethodPut, bcURL, strings.NewReader(`{"collapsed":true}`), nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("backlog-collapsed PUT status %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	if collapsed, _ := s.IsBacklogCollapsed(repo.ID); !collapsed {
+		t.Fatal("backlog-collapsed not persisted")
+	}
+	resp = do(t, http.MethodGet, bcURL, nil, nil)
+	bc = decode[map[string]any](t, resp.Body)
+	resp.Body.Close()
+	if got, _ := bc["backlog_collapsed"].(bool); !got {
+		t.Fatalf("backlog-collapsed GET after PUT = false, want true")
+	}
+
+	// dry_run leaves the persisted value untouched.
+	resp = do(t, http.MethodPut, bcURL+"?dry_run=true", strings.NewReader(`{"collapsed":false}`), nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("backlog-collapsed dry-run status %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	if collapsed, _ := s.IsBacklogCollapsed(repo.ID); !collapsed {
+		t.Fatal("backlog-collapsed dry-run mutated the store")
+	}
+
 	// Reorder a Shipping card to the top (position 1 → priority 0).
 	iss2, err := s.CreateIssue(repo.ID, nil, "card2", "", model.StateToBeShipped, nil, "")
 	if err != nil {

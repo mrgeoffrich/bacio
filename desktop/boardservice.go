@@ -943,6 +943,29 @@ func (b *BoardService) GetAutoShip(repoPrefix string) (bool, error) {
 	return b.client.GetRepoAutoShip(ctx, repo)
 }
 
+// SetBacklogCollapsed (BACI-288) persists the per-repo Pipeline
+// Backlog-column collapse preference and returns the resulting value.
+func (b *BoardService) SetBacklogCollapsed(repoPrefix string, collapsed bool) (bool, error) {
+	ctx := context.Background()
+	repo, err := b.client.GetRepoByPrefix(ctx, repoPrefix)
+	if err != nil {
+		return false, err
+	}
+	return b.client.SetRepoBacklogCollapsed(ctx, repo, collapsed, false)
+}
+
+// GetBacklogCollapsed (BACI-288) reads the per-repo Pipeline
+// Backlog-column collapse preference so the Pipeline page seeds its rail
+// state from the persisted KV, not a local cache.
+func (b *BoardService) GetBacklogCollapsed(repoPrefix string) (bool, error) {
+	ctx := context.Background()
+	repo, err := b.client.GetRepoByPrefix(ctx, repoPrefix)
+	if err != nil {
+		return false, err
+	}
+	return b.client.GetRepoBacklogCollapsed(ctx, repo)
+}
+
 // AddComment appends a comment to an issue and returns the refreshed
 // issue-drawer payload. An empty author falls back to the OS username,
 // the same default the CLI uses for human actors. repoPrefix may be empty

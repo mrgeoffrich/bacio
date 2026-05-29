@@ -43,6 +43,7 @@ export default function PipelineView({
   onSetEngineMode,
   onShip,
   onSetAutoShip,
+  onSetBacklogCollapsed,
   onShipDispatch,
   onCancelWaiting,
   shippedCount,
@@ -54,6 +55,11 @@ export default function PipelineView({
 }) {
   const [activeQuestionId, setActiveQuestionId] = useState(null);
   const [expanded, setExpanded] = useState(false);
+  // collapsed (BACI-288) shrinks the Backlog column to a thin rail so the
+  // In Pipeline + Shipping columns get the full width. Persisted per-repo
+  // in the tui_settings KV — seeded from the backend GET, same pattern as
+  // autoShip below. It overrides the transient `expanded` grid toggle.
+  const [collapsed, setCollapsed] = useState(false);
   const [dragKey, setDragKey] = useState(null);
   // Holds the column the dragged card is currently over, driving the
   // `is-drop` highlight. BACI-268 widens the value space with a non-column
@@ -74,6 +80,15 @@ export default function PipelineView({
     return () => { cancelled = true; };
   }, [activeBoard]);
 
+  useEffect(() => {
+    if (!activeBoard) { setCollapsed(false); return; }
+    let cancelled = false;
+    api.getBacklogCollapsed(activeBoard)
+      .then((v) => { if (!cancelled) setCollapsed(!!v); })
+      .catch(() => { if (!cancelled) setCollapsed(false); });
+    return () => { cancelled = true; };
+  }, [activeBoard]);
+
   const list = cards || [];
   const backlog = useMemo(() => list.filter(c => c.column === 'todo'), [list]);
   const inPipeline = useMemo(() => list.filter(c => c.column === 'in_pipeline'), [list]);
@@ -88,6 +103,15 @@ export default function PipelineView({
       setAutoShip(!next);
     });
   }, [autoShip, onSetAutoShip]);
+
+  const toggleCollapsed = useCallback(() => {
+    const next = !collapsed;
+    setCollapsed(next); // optimistic
+    Promise.resolve(onSetBacklogCollapsed?.(next)).catch(() => {
+      // Revert the optimistic flip if the PUT failed.
+      setCollapsed(!next);
+    });
+  }, [collapsed, onSetBacklogCollapsed]);
 
   // Move a card into `col` (= its new state). in_pipeline → Shipping goes
   // through the Ship hand-off; everything else is a plain state move. Shared
@@ -165,48 +189,82 @@ export default function PipelineView({
     );
   }
 
+  // Collapse wins over the transient expand-to-grid toggle: a collapsed
+  // column never renders in expanded-grid mode.
+  const gridExpanded = expanded && !collapsed;
+
   return (
-    <div className={`mk-pl${expanded ? ' is-backlog-expanded' : ''}`}>
+    <div className={`mk-pl${gridExpanded ? ' is-backlog-expanded' : ''}${collapsed ? ' is-backlog-collapsed' : ''}`}>
       {/* ── Backlog ── */}
       <section
-        className={`mk-pl-col mk-pl-backlog${dragOverCol === 'todo' ? ' is-drop' : ''}`}
+        className={`mk-pl-col mk-pl-backlog${collapsed ? ' is-collapsed' : ''}${dragOverCol === 'todo' ? ' is-drop' : ''}`}
         {...colDropProps('todo')}
       >
-        <header className="mk-pl-col-head">
-          <span className="mk-pl-pill is-todo">Backlog</span>
-          <span className="mk-pl-count">{backlog.length}</span>
+        {collapsed ? (
+          // Thin rail: an expand button, the vertical "Backlog" label, and
+          // the backlog count — enough to know what's hidden and reopen it.
           <button
             type="button"
-            className="mk-pl-drawer-toggle"
-            onClick={() => setExpanded(e => !e)}
-            aria-label={expanded ? 'Collapse backlog' : 'Expand backlog'}
-            aria-expanded={expanded}
+            className="mk-pl-rail"
+            onClick={toggleCollapsed}
+            aria-label="Expand backlog"
+            aria-expanded={false}
+            title="Expand backlog"
           >
-            {expanded ? '«' : '»'}
+            <span className="mk-pl-rail-icon">»</span>
+            <span className="mk-pl-rail-lbl">Backlog</span>
+            <span className="mk-pl-rail-count">{backlog.length}</span>
           </button>
-        </header>
-        <div className={`mk-pl-backlog-body${expanded ? ' is-grid' : ''}`}>
-          {backlog.length === 0 ? (
-            <div className="mk-pl-col-empty">No backlog items</div>
-          ) : (
-            backlog.map((card, i) => (
-              <PipelineCard
-                key={card.key}
-                card={card}
-                activeBoard={activeBoard}
-                index={i}
-                showBadge={expanded}
-                backlog
-                isDragging={dragKey === card.key}
-                onOpen={() => onOpenCard?.(card)}
-                onDragStart={() => setDragKey(card.key)}
-                onDragEnd={() => { setDragKey(null); setDragOverCol(null); }}
-                onDropCard={() => dropOnCard(card, i)}
-                onMoveCard={onMoveCard}
-              />
-            ))
-          )}
-        </div>
+        ) : (
+          <>
+            <header className="mk-pl-col-head">
+              <span className="mk-pl-pill is-todo">Backlog</span>
+              <span className="mk-pl-count">{backlog.length}</span>
+              <span className="mk-pl-spacer" />
+              <button
+                type="button"
+                className="mk-pl-drawer-toggle"
+                onClick={() => setExpanded(e => !e)}
+                aria-label={expanded ? 'Shrink backlog' : 'Widen backlog'}
+                aria-expanded={expanded}
+                title={expanded ? 'Shrink backlog' : 'Widen backlog'}
+              >
+                {expanded ? '«' : '»'}
+              </button>
+              <button
+                type="button"
+                className="mk-pl-drawer-toggle"
+                onClick={toggleCollapsed}
+                aria-label="Collapse backlog"
+                aria-expanded
+                title="Collapse backlog to a rail"
+              >
+                ⟨
+              </button>
+            </header>
+            <div className={`mk-pl-backlog-body${expanded ? ' is-grid' : ''}`}>
+              {backlog.length === 0 ? (
+                <div className="mk-pl-col-empty">No backlog items</div>
+              ) : (
+                backlog.map((card, i) => (
+                  <PipelineCard
+                    key={card.key}
+                    card={card}
+                    index={i}
+                    showBadge={expanded}
+                    backlog
+                    isDragging={dragKey === card.key}
+                    onOpen={() => onOpenCard?.(card)}
+                    onDragStart={() => setDragKey(card.key)}
+                    onDragEnd={() => { setDragKey(null); setDragOverCol(null); }}
+                    onDropCard={() => dropOnCard(card, i)}
+                    onMoveCard={onMoveCard}
+                  />
+                ))
+              )}
+            </div>
+          </>
+        )}
       </section>
 
       {/* ── In Pipeline ── */}

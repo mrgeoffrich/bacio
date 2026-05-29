@@ -323,3 +323,75 @@ func (d deps) handleRepoAutoShipGet(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"auto_ship": settings.AutoShip})
 }
+
+// backlogCollapsedIn is the strict-decoded body for PUT
+// /repos/{prefix}/backlog-collapsed (BACI-288). A local request struct —
+// there's no CLI verb for this per-repo display preference, so it isn't a
+// bacio schema-registered inputs.* type (same precedent as
+// board.hidden_states's boardHiddenStatesIn).
+type backlogCollapsedIn struct {
+	Collapsed bool `json:"collapsed"`
+}
+
+// handleRepoBacklogCollapsed — PUT /repos/{prefix}/backlog-collapsed.
+// Persists the per-repo Pipeline Backlog-column collapse preference in
+// the tui_settings KV (BACI-288). Honours ?dry_run=true and audits a
+// repo_setting.update row only when the value actually changes.
+func (d deps) handleRepoBacklogCollapsed(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	in, _, err := inputio.DecodeStrict[backlogCollapsedIn](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	if isDryRun(r) {
+		writeDryRun(w, http.StatusOK, map[string]any{"backlog_collapsed": in.Collapsed})
+		return
+	}
+	prev, err := d.store.IsBacklogCollapsed(repo.ID)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if err := d.store.SetBacklogCollapsed(repo.ID, in.Collapsed); err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if prev != in.Collapsed {
+		recordOp(d.store, d.logger, model.HistoryEntry{
+			RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+			Actor:       ActorFromContext(r.Context()),
+			Op:          "repo_setting.update",
+			Kind:        "repo_setting",
+			TargetLabel: "pipeline.backlog_collapsed",
+			Details:     fmt.Sprintf("collapsed=%v", in.Collapsed),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"backlog_collapsed": in.Collapsed})
+}
+
+// handleRepoBacklogCollapsedGet — GET /repos/{prefix}/backlog-collapsed.
+// Reads the per-repo Pipeline Backlog-column collapse preference so the
+// Pipeline page seeds its rail state from the persisted KV (BACI-288).
+func (d deps) handleRepoBacklogCollapsedGet(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	collapsed, err := d.store.IsBacklogCollapsed(repo.ID)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"backlog_collapsed": collapsed})
+}

@@ -2741,3 +2741,19 @@ export async function getAutoShip(repoPrefix: string): Promise<boolean> {
   const out = await call<{ auto_ship: boolean }>(`/repos/${repoPrefix}/auto-ship`);
   return !!out.auto_ship;
 }
+
+export async function setBacklogCollapsed(
+  repoPrefix: string,
+  collapsed: boolean,
+): Promise<boolean> {
+  const out = await call<{ backlog_collapsed: boolean }>(`/repos/${repoPrefix}/backlog-collapsed`, {
+    method: 'PUT',
+    body: { collapsed },
+  });
+  return !!out.backlog_collapsed;
+}
+
+export async function getBacklogCollapsed(repoPrefix: string): Promise<boolean> {
+  const out = await call<{ backlog_collapsed: boolean }>(`/repos/${repoPrefix}/backlog-collapsed`);
+  return !!out.backlog_collapsed;
+}

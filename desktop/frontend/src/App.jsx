@@ -798,6 +798,15 @@ export default function App() {
       .catch(err => { reportError(err, { headline: "Couldn't toggle auto-ship" }); throw err; });
   }, [activeBoard]);
 
+  // Per-repo Pipeline Backlog-column collapse preference (BACI-288).
+  // PipelineView owns the display state (seeded from the backend GET);
+  // this persists the change. Returns the promise so the view can revert
+  // its optimistic flip on failure.
+  const setBacklogCollapsed = useCallback((collapsed) => {
+    return api.setBacklogCollapsed(activeBoard, collapsed)
+      .catch(err => { reportError(err, { headline: "Couldn't collapse backlog" }); throw err; });
+  }, [activeBoard]);
+
   // Workspace write callbacks — each wraps the existing api.* call and
   // refreshes the brief so the inline view re-renders with the
   // persisted state. Failures surface through reportError; the
@@ -1062,6 +1071,7 @@ export default function App() {
                   onSetEngineMode={setCardEngineMode}
                   onShip={shipCardFromPipeline}
                   onSetAutoShip={setRepoAutoShip}
+                  onSetBacklogCollapsed={setBacklogCollapsed}
                   onShipDispatch={dispatchFromCard}
                   onCancelWaiting={cancelWaitingFromCard}
                   shippedCount={shippedCount}

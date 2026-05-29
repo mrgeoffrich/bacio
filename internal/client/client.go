@@ -279,6 +279,16 @@ type Client interface {
 	// seed the Shipping switch from the source of truth rather than a
 	// local cache.
 	GetRepoAutoShip(ctx context.Context, repo *model.Repo) (bool, error)
+	// GetRepoBacklogCollapsed / SetRepoBacklogCollapsed (BACI-288) front
+	// the per-repo Pipeline-page "collapse the Backlog column to a rail"
+	// display preference, persisted in the `tui_settings` KV (purely
+	// client-side chrome the backend never reads — unlike auto-ship).
+	// Threaded through both transports so desktop (Wails) and web (REST,
+	// GET/PUT /repos/{prefix}/backlog-collapsed) seed and persist the
+	// toggle the same way. Set records a `repo_setting.update` audit row
+	// when the value changes; get is read-only.
+	GetRepoBacklogCollapsed(ctx context.Context, repo *model.Repo) (bool, error)
+	SetRepoBacklogCollapsed(ctx context.Context, repo *model.Repo, collapsed, dryRun bool) (bool, error)
 	// StartPipelineJob / StopPipelineJob / SetEngineMode are the engine
 	// controls behind the in-process card's Start / Stop / Auto buttons.
 	// They have no CLI verb (engine/UI only) but ARE on the client so the

@@ -141,3 +141,28 @@ func (c *remoteClient) GetRepoAutoShip(ctx context.Context, repo *model.Repo) (b
 	}
 	return out.AutoShip, nil
 }
+
+func (c *remoteClient) GetRepoBacklogCollapsed(ctx context.Context, repo *model.Repo) (bool, error) {
+	var out struct {
+		Collapsed bool `json:"backlog_collapsed"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/repos/"+repo.Prefix+"/backlog-collapsed", nil, nil, &out); err != nil {
+		return false, err
+	}
+	return out.Collapsed, nil
+}
+
+func (c *remoteClient) SetRepoBacklogCollapsed(ctx context.Context, repo *model.Repo, collapsed, dryRun bool) (bool, error) {
+	q := url.Values{}
+	if dryRun {
+		q.Set("dry_run", "true")
+	}
+	body := map[string]any{"collapsed": collapsed}
+	var out struct {
+		Collapsed bool `json:"backlog_collapsed"`
+	}
+	if err := c.do(ctx, http.MethodPut, "/repos/"+repo.Prefix+"/backlog-collapsed", q, body, &out); err != nil {
+		return false, err
+	}
+	return out.Collapsed, nil
+}

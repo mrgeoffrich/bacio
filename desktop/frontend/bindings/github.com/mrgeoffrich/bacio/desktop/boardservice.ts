@@ -207,6 +207,15 @@ export function GetAutoShip(repoPrefix: string): $CancellablePromise<boolean> {
 }
 
 /**
+ * GetBacklogCollapsed (BACI-288) reads the per-repo Pipeline
+ * Backlog-column collapse preference so the Pipeline page seeds its rail
+ * state from the persisted KV, not a local cache.
+ */
+export function GetBacklogCollapsed(repoPrefix: string): $CancellablePromise<boolean> {
+    return $Call.ByID(396104259, repoPrefix);
+}
+
+/**
  * GetBoardHiddenStates (BACI-248) returns the per-repo set of
  * kanban-column states hidden on this machine. Threaded through the
  * client so the Wails binding and the HTTP API stay in lockstep on
@@ -363,6 +372,14 @@ export function RescueDispatch(dispatchID: number): $CancellablePromise<$models.
 
 export function SetAutoShip(repoPrefix: string, enabled: boolean): $CancellablePromise<boolean> {
     return $Call.ByID(1219303746, repoPrefix, enabled);
+}
+
+/**
+ * SetBacklogCollapsed (BACI-288) persists the per-repo Pipeline
+ * Backlog-column collapse preference and returns the resulting value.
+ */
+export function SetBacklogCollapsed(repoPrefix: string, collapsed: boolean): $CancellablePromise<boolean> {
+    return $Call.ByID(1820060943, repoPrefix, collapsed);
 }
 
 /**
