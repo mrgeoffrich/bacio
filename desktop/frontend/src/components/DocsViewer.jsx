@@ -14,7 +14,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { NotionEditor } from './editor/NotionEditor';
 import TranscriptView from '../lib/transcript/TranscriptView';
-import { isJsonlTranscriptDoc, isSvgDoc } from '../lib/docFormat';
+import { isHtmlDoc, isJsonlTranscriptDoc, isSvgDoc } from '../lib/docFormat';
 import { Archive, ArchiveRestore, Link2, PanelLeftOpen } from 'lucide-react';
 
 function typeLabel(t) {
@@ -72,11 +72,15 @@ export default function DocsViewer({
     () => !!filename && isSvgDoc(filename, content || ''),
     [filename, content],
   );
+  const isHtml = useMemo(
+    () => !!filename && isHtmlDoc(filename, content || ''),
+    [filename, content],
+  );
   const isTranscript = useMemo(
     () => !!filename && isJsonlTranscriptDoc(filename),
     [filename],
   );
-  const renderable = isSvg || isTranscript;
+  const renderable = isSvg || isHtml || isTranscript;
 
   // SVG Render tab — Blob URL paired with one revoke per create, same
   // shape as the pre-refactor effect (React StrictMode safety).
@@ -87,6 +91,17 @@ export default function DocsViewer({
     setSvgUrl(url);
     return () => URL.revokeObjectURL(url);
   }, [isSvg, content]);
+
+  // HTML Render tab (BACI-298) — same Blob-URL create/revoke lifecycle as
+  // the SVG path, but a `text/html` Blob fed to a sandboxed <iframe>
+  // (an <img> can't render an HTML document).
+  const [htmlUrl, setHtmlUrl] = useState('');
+  useEffect(() => {
+    if (!isHtml) { setHtmlUrl(''); return undefined; }
+    const url = URL.createObjectURL(new Blob([content || ''], { type: 'text/html' }));
+    setHtmlUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [isHtml, content]);
 
   const copySource = () => {
     if (!content) return;
@@ -241,7 +256,14 @@ export default function DocsViewer({
           )}
         </div>
       </header>
-      {isSvg && view === 'render' ? (
+      {isHtml && view === 'render' ? (
+        <div className="mk-docs-svg-pane">
+          {/* sandbox="" — no allow-scripts / allow-same-origin: static
+              HTML+CSS wireframes render but no script runs and the frame
+              can't reach bacio's origin/cookies/storage (BACI-298). */}
+          <iframe className="mk-docs-html-frame" src={htmlUrl} sandbox="" title={filename} />
+        </div>
+      ) : isSvg && view === 'render' ? (
         <div className="mk-docs-svg-pane">
           <img className="mk-docs-svg-img" src={svgUrl} alt={filename} />
         </div>

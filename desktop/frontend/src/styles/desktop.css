@@ -1028,6 +1028,15 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   max-height: 100%;
   object-fit: contain;
 }
+/* BACI-298: HTML wireframe iframe fills the shared .mk-docs-svg-pane
+   container. White background so wireframes that assume a light page
+   render as the author intended inside the sandboxed frame. */
+.mk-docs-html-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
 
 /* ============================================================
    BACI-204 Documents redesign — three-pane faceted library that
