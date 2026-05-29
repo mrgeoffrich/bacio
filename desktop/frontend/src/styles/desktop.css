@@ -2691,14 +2691,36 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
    width (420px) is too tight for the radio + sub-form combo, so the
    wrapper widens to ~560px. Each radio row carries a sibling sub-form
    that appears when its mode is picked; the sub-form indents under the
-   radio to keep the visual association. */
+   radio to keep the visual association.
+
+   BACI-265: cap the centred frame to the viewport so a field-expanding
+   mode (clone/init) can't push the title off the top or the action
+   buttons off the bottom. The frame is already display:flex/column from
+   base .mk-modal; capping its height turns it into a header (title) +
+   body (scroll) + footer (.mk-modal-actions) stack. The scroll lives on
+   the inner .mk-sync-setup-body, not the negative-margin wrapper, so the
+   horizontal side-bleed doesn't trip a scrollbar. */
+.mk-modal:has(.mk-sync-setup-modal) {
+  max-height: calc(100vh - 80px);
+}
 .mk-sync-setup-modal {
-  display: flex; flex-direction: column; gap: 12px;
+  display: flex; flex-direction: column;
+  flex: 1; min-height: 0; /* fill the capped frame so the body can scroll */
   width: min(560px, 92vw);
   /* min-width here so the modal centre-positioning respects the wider
      content even when the surrounding .mk-modal frame would normally
      constrain it to 420px. */
   margin-left: -70px; margin-right: -70px; /* widen past .mk-modal padding */
+}
+/* The body is the scroll region; the .mk-modal-actions footer stays
+   pinned. gap lives here (moved off .mk-sync-setup-modal) so the inner
+   spacing between sections is unchanged. */
+.mk-sync-setup-body {
+  display: flex; flex-direction: column; gap: 12px;
+  overflow-y: auto; min-height: 0; flex: 1;
+}
+.mk-sync-setup-modal .mk-modal-actions {
+  flex-shrink: 0; /* keep Cancel / Set up sync pinned at the frame bottom */
 }
 @media (max-width: 600px) {
   /* On narrow viewports drop the negative margin so we don't push the
