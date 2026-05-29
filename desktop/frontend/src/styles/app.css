@@ -1729,9 +1729,9 @@ body { margin: 0; }
 }
 /* Reserve room for the .mk-pl-badge's -7px overhang so the scroll
    container's overflow: auto doesn't clip it at the top/right edges
-   (BACI-273). Scoped to the badged bodies only — .mk-pl-stage-body has
-   no badge and must keep its current alignment. */
-.mk-pl-col-body,
+   (BACI-273). Scoped to the expanded backlog grid — the only badged
+   body left (BACI-278 dropped the Shipping badge); the Shipping and
+   pipeline bodies have no badge and must keep their current alignment. */
 .mk-pl-backlog-body {
   padding-top: 8px;
   padding-right: 8px;
@@ -1790,7 +1790,6 @@ body { margin: 0; }
   justify-content: center;
   box-shadow: var(--shadow-2);
 }
-.mk-pl-badge.is-next { background: var(--status-review); }
 
 .mk-pl-card-top { display: flex; align-items: center; gap: 7px; }
 .mk-pl-card-emoji { font-size: 15px; line-height: 1; }
