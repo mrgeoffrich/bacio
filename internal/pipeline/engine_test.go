@@ -371,6 +371,112 @@ func TestEngineManualStartDrivesChain(t *testing.T) {
 	}
 }
 
+// TestEngineAutoChainNoShip drives a no-Ship process (plan→implement)
+// under Auto: once implement acks, the card must finish in place — it
+// stays in_pipeline with every job complete and is NOT handed off to
+// to_be_shipped. Regression for BACI-277.
+func TestEngineAutoChainNoShip(t *testing.T) {
+	s := newEngineStore(t)
+	_, iss := seedPipelineCard(t, s, "ENGN", "plan-implement", model.EngineAuto)
+	eng := New(s)
+
+	// Tick 1: starts the plan job.
+	if _, err := eng.Tick(); err != nil {
+		t.Fatalf("tick 1: %v", err)
+	}
+	r := runningJob(t, s, iss.ID)
+	if r == nil || r.Mode != model.BuiltinTemplatePlan {
+		t.Fatalf("after tick 1 running = %+v, want plan", r)
+	}
+	simulateWorkerAck(t, s, *r.DispatchID)
+
+	// Tick 2: plan completes, implement starts.
+	if _, err := eng.Tick(); err != nil {
+		t.Fatalf("tick 2: %v", err)
+	}
+	r = runningJob(t, s, iss.ID)
+	if r == nil || r.Mode != model.BuiltinTemplateImplement {
+		t.Fatalf("after tick 2 running = %+v, want implement", r)
+	}
+	simulateWorkerAck(t, s, *r.DispatchID)
+
+	// Tick 3: implement completes, chain is exhausted with no ship
+	// sentinel → the card finishes in place, NOT to_be_shipped.
+	if _, err := eng.Tick(); err != nil {
+		t.Fatalf("tick 3: %v", err)
+	}
+	got, _ := s.GetIssueByID(iss.ID)
+	if got.State != model.StateInPipeline {
+		t.Fatalf("state = %s, want in_pipeline (no-Ship process must not auto-ship)", got.State)
+	}
+	jobs, _ := s.ListPipelineJobs(iss.ID)
+	for _, j := range jobs {
+		if j.Status != model.JobComplete {
+			t.Errorf("job seq=%d mode=%s status=%s, want complete", j.Sequence, j.Mode, j.Status)
+		}
+	}
+
+	// A further Tick must stay a no-op (idle): still in_pipeline, no job
+	// started.
+	if _, err := eng.Tick(); err != nil {
+		t.Fatalf("tick 4: %v", err)
+	}
+	if r := runningJob(t, s, iss.ID); r != nil {
+		t.Fatalf("exhausted no-Ship chain started a job: %+v", r)
+	}
+	got, _ = s.GetIssueByID(iss.ID)
+	if got.State != model.StateInPipeline {
+		t.Fatalf("state = %s after extra tick, want in_pipeline", got.State)
+	}
+}
+
+// TestEngineManualStartNoShip: a manual Start at the end of a no-Ship
+// chain is a no-op — the card finishes in place rather than handing off
+// to Shipping. Regression for BACI-277 on the shared manual-Start path.
+func TestEngineManualStartNoShip(t *testing.T) {
+	s := newEngineStore(t)
+	_, iss := seedPipelineCard(t, s, "MANN", "plan-implement", model.EngineOff)
+	eng := New(s)
+
+	// Start plan, ack, Tick to complete it.
+	if _, err := eng.StartNext(iss.ID); err != nil {
+		t.Fatalf("StartNext plan: %v", err)
+	}
+	r := runningJob(t, s, iss.ID)
+	if r == nil || r.Mode != model.BuiltinTemplatePlan {
+		t.Fatalf("StartNext didn't start plan: %+v", r)
+	}
+	simulateWorkerAck(t, s, *r.DispatchID)
+	if _, err := eng.Tick(); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+
+	// Start implement, ack, Tick to complete it.
+	if _, err := eng.StartNext(iss.ID); err != nil {
+		t.Fatalf("StartNext implement: %v", err)
+	}
+	r = runningJob(t, s, iss.ID)
+	if r == nil || r.Mode != model.BuiltinTemplateImplement {
+		t.Fatalf("StartNext didn't start implement: %+v", r)
+	}
+	simulateWorkerAck(t, s, *r.DispatchID)
+	if _, err := eng.Tick(); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+
+	// Chain exhausted (no ship sentinel) → a final StartNext is a no-op.
+	if _, err := eng.StartNext(iss.ID); err != nil {
+		t.Fatalf("StartNext at chain end: %v", err)
+	}
+	got, _ := s.GetIssueByID(iss.ID)
+	if got.State != model.StateInPipeline {
+		t.Fatalf("state = %s, want in_pipeline (manual Start must not ship a no-Ship card)", got.State)
+	}
+	if r := runningJob(t, s, iss.ID); r != nil {
+		t.Fatalf("StartNext at chain end started a job: %+v", r)
+	}
+}
+
 // TestEngineStopRunning: Stop cancels the running job and halts Auto.
 func TestEngineStopRunning(t *testing.T) {
 	s := newEngineStore(t)
