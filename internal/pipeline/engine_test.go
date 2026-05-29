@@ -650,3 +650,144 @@ func TestEngineStopRunning(t *testing.T) {
 		t.Fatal("post-stop tick started a new job despite Auto off")
 	}
 }
+
+// TestFailRunning_Transient locks in the BACI-296 transient branch: a
+// server_error cancels the running job, halts Auto, sets the agent_error
+// pause reason, and leaves the card in_pipeline (no auto-retry, user
+// re-arms).
+func TestFailRunning_Transient(t *testing.T) {
+	s := newEngineStore(t)
+	_, iss := seedPipelineCard(t, s, "FAIL", "plan-implement", model.EngineAuto)
+	eng := New(s)
+
+	if _, err := eng.Tick(); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if runningJob(t, s, iss.ID) == nil {
+		t.Fatal("no running job to fail")
+	}
+
+	advances, err := eng.FailRunning(iss.ID, "server_error", "529 overloaded")
+	if err != nil {
+		t.Fatalf("FailRunning: %v", err)
+	}
+	if len(advances) != 1 || advances[0].Kind != "job.failed" {
+		t.Fatalf("advances = %+v, want one job.failed", advances)
+	}
+	jobs, _ := s.ListPipelineJobs(iss.ID)
+	if jobs[0].Status != model.JobCancelled {
+		t.Fatalf("job 1 status = %s, want cancelled", jobs[0].Status)
+	}
+	got, _ := s.GetIssueByID(iss.ID)
+	if got.State != model.StateInPipeline {
+		t.Fatalf("state = %s, want in_pipeline (transient pauses in place)", got.State)
+	}
+	if got.EngineMode != model.EngineOff {
+		t.Fatalf("engine mode = %s, want off", got.EngineMode)
+	}
+	if got.EnginePauseReason != model.EnginePauseReasonAgentError {
+		t.Fatalf("pause reason = %q, want %q", got.EnginePauseReason, model.EnginePauseReasonAgentError)
+	}
+	// A follow-up Tick must NOT auto-advance (Auto is off).
+	if _, err := eng.Tick(); err != nil {
+		t.Fatalf("post-fail tick: %v", err)
+	}
+	if runningJob(t, s, iss.ID) != nil {
+		t.Fatal("post-fail tick started a new job despite Auto off")
+	}
+}
+
+// TestFailRunning_Terminal locks in the BACI-296 terminal branch: an
+// authentication_failed tears the chain down and moves the card out of
+// the pipeline to needs_action stamped with the agent_error reason.
+func TestFailRunning_Terminal(t *testing.T) {
+	s := newEngineStore(t)
+	_, iss := seedPipelineCard(t, s, "TERM", "plan-implement", model.EngineAuto)
+	eng := New(s)
+
+	if _, err := eng.Tick(); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if runningJob(t, s, iss.ID) == nil {
+		t.Fatal("no running job to fail")
+	}
+
+	advances, err := eng.FailRunning(iss.ID, "authentication_failed", "401")
+	if err != nil {
+		t.Fatalf("FailRunning: %v", err)
+	}
+	if len(advances) != 1 || advances[0].Kind != "job.failed" {
+		t.Fatalf("advances = %+v, want one job.failed", advances)
+	}
+	got, _ := s.GetIssueByID(iss.ID)
+	if got.State != model.StateNeedsAction {
+		t.Fatalf("state = %s, want needs_action (terminal pulls out of pipeline)", got.State)
+	}
+	if got.UserActionReasonType != model.UserActionReasonAgentError {
+		t.Fatalf("user_action_reason_type = %q, want %q", got.UserActionReasonType, model.UserActionReasonAgentError)
+	}
+	if got.EngineMode != model.EngineOff {
+		t.Fatalf("engine mode = %s, want off", got.EngineMode)
+	}
+	jobs, _ := s.ListPipelineJobs(iss.ID)
+	if jobs[0].Status != model.JobCancelled {
+		t.Fatalf("job 1 status = %s, want cancelled", jobs[0].Status)
+	}
+}
+
+// TestFailRunning_NoRunningJobIsNoop locks in that a card with no running
+// job (and a card not in_pipeline) is a clean no-op — a worker that died
+// before claiming has nothing to reconcile.
+func TestFailRunning_NoRunningJobIsNoop(t *testing.T) {
+	s := newEngineStore(t)
+	_, iss := seedPipelineCard(t, s, "NOOP", "plan-implement", model.EngineAuto)
+	eng := New(s)
+	// No Tick — no job is running yet.
+	advances, err := eng.FailRunning(iss.ID, "server_error", "x")
+	if err != nil {
+		t.Fatalf("FailRunning: %v", err)
+	}
+	if len(advances) != 0 {
+		t.Fatalf("advances = %+v, want none", advances)
+	}
+	got, _ := s.GetIssueByID(iss.ID)
+	if got.State != model.StateInPipeline {
+		t.Fatalf("state = %s, want unchanged in_pipeline", got.State)
+	}
+}
+
+// TestFailPipelineChainToNeedsAction confirms the store teardown actually
+// moves an in_pipeline card to needs_action — the very move a plain
+// SetIssueState no-ops under the engine-governed guard (BACI-296).
+func TestFailPipelineChainToNeedsAction(t *testing.T) {
+	s := newEngineStore(t)
+	_, iss := seedPipelineCard(t, s, "GARD", "plan-implement", model.EngineAuto)
+
+	// Baseline: a plain SetIssueState in_pipeline → needs_action is a
+	// no-op under the guard. This is the bug the dedicated method exists
+	// to route around.
+	if err := s.SetIssueState(iss.ID, model.StateNeedsAction); err != nil {
+		t.Fatalf("SetIssueState: %v", err)
+	}
+	guarded, _ := s.GetIssueByID(iss.ID)
+	if guarded.State != model.StateInPipeline {
+		t.Fatalf("guard precondition failed: SetIssueState moved the card to %s (expected no-op staying in_pipeline)", guarded.State)
+	}
+
+	// The dedicated teardown bypasses the guard.
+	if err := s.FailPipelineChainToNeedsAction(iss.ID); err != nil {
+		t.Fatalf("FailPipelineChainToNeedsAction: %v", err)
+	}
+	got, _ := s.GetIssueByID(iss.ID)
+	if got.State != model.StateNeedsAction {
+		t.Fatalf("state = %s, want needs_action", got.State)
+	}
+	if got.UserActionReasonType != model.UserActionReasonAgentError {
+		t.Fatalf("user_action_reason_type = %q, want %q", got.UserActionReasonType, model.UserActionReasonAgentError)
+	}
+
+	// A second call on a now-non-pipeline card is a clean no-op.
+	if err := s.FailPipelineChainToNeedsAction(iss.ID); err != nil {
+		t.Fatalf("second FailPipelineChainToNeedsAction should be no-op, got %v", err)
+	}
+}

@@ -15,6 +15,9 @@ func TestParseUserActionReason(t *testing.T) {
 		{"user_manual_review", UserActionReasonManualReview},
 		{"user-manual-review", UserActionReasonManualReview},
 		{"User Manual Review", UserActionReasonManualReview},
+		{"agent_error", UserActionReasonAgentError},
+		{"agent-error", UserActionReasonAgentError},
+		{"Agent Error", UserActionReasonAgentError},
 	}
 	for _, c := range cases {
 		got, err := ParseUserActionReason(c.in)
@@ -47,8 +50,8 @@ func TestParseUserActionReasonRejectsUnknown(t *testing.T) {
 
 func TestAllUserActionReasonsReturnsCopy(t *testing.T) {
 	a := AllUserActionReasons()
-	if len(a) != 2 {
-		t.Fatalf("AllUserActionReasons() len = %d, want 2", len(a))
+	if len(a) != 3 {
+		t.Fatalf("AllUserActionReasons() len = %d, want 3", len(a))
 	}
 	a[0] = "tampered"
 	b := AllUserActionReasons()

@@ -594,7 +594,10 @@ function StageCard({
   const nextPending = jobs.find(j => j.status === 'pending');
   const engineAuto = card.engineMode === 'auto';
   const question = (card.openQuestions || [])[0] || null;
-  const paused = card.enginePauseReason === 'open_question' || !!question;
+  // BACI-296: a worker that died on a transient Anthropic API error halts
+  // the chain with engine_pause_reason = "agent_error" (no open question).
+  const agentErrored = card.enginePauseReason === 'agent_error';
+  const paused = card.enginePauseReason === 'open_question' || agentErrored || !!question;
 
   const showProcessMenu = picking || !hasProcess;
 
@@ -682,7 +685,11 @@ function StageCard({
               ✎ Edit Process
             </button>
             <span className="mk-pl-spacer" />
-            {paused && <span className="mk-pl-halt">⏸ Auto halted</span>}
+            {paused && (
+              <span className={`mk-pl-halt${agentErrored ? ' is-error' : ''}`}>
+                {agentErrored ? '⚠ Agent API error' : '⏸ Auto halted'}
+              </span>
+            )}
             <button
               type="button"
               className={`mk-pl-btn is-sm${allDone ? ' is-primary' : ' is-ghost'}`}

@@ -16,6 +16,7 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/git"
 	"github.com/mrgeoffrich/bacio/internal/model"
+	"github.com/mrgeoffrich/bacio/internal/store"
 )
 
 // TestSkipUnlessAgentMode pins the BACI-48 gate at the helper level:
@@ -657,3 +658,168 @@ func runHookSetTitleWith(t *testing.T, payload string) string {
 	})
 }
 
+// ---------- stop-failure (BACI-296) ----------
+
+// runHookStopFailureWith feeds a StopFailure JSON payload to
+// hookStopFailureCmd's RunE via os.Stdin and returns its stderr.
+func runHookStopFailureWith(t *testing.T, payload string) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("stdin pipe: %v", err)
+	}
+	origStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = origStdin })
+	if _, err := w.WriteString(payload); err != nil {
+		t.Fatalf("write payload: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close payload writer: %v", err)
+	}
+	cmd := hookStopFailureCmd()
+	return captureStderr(t, func() {
+		if err := cmd.RunE(cmd, nil); err != nil {
+			t.Fatalf("RunE: %v", err)
+		}
+	})
+}
+
+// setupStopFailureEnv wires a git repo + temp DB so the StopFailure hook
+// runs end-to-end against a repo it resolves from cwd. Returns the repo
+// dir, a store open against the same DB (for setup + assertions), the
+// repo row, and the session id the test seeds.
+func setupStopFailureEnv(t *testing.T) (string, *store.Store, *model.Repo, string) {
+	t.Helper()
+	tmp := initGitRepo(t)
+	t.Setenv("BACIO_AGENT_MODE", "1")
+	t.Setenv("HOME", t.TempDir())
+
+	dbPath := filepath.Join(t.TempDir(), "db.sqlite")
+	prev := opts.dbPath
+	opts.dbPath = dbPath
+	t.Cleanup(func() { opts.dbPath = prev })
+
+	ctx := context.Background()
+	c, err := client.Open(ctx, client.Options{DBPath: dbPath, Actor: "tester"})
+	if err != nil {
+		t.Fatalf("open client: %v", err)
+	}
+	info, err := git.Detect(tmp)
+	if err != nil {
+		t.Fatalf("git detect: %v", err)
+	}
+	repo, _, err := c.EnsureRepo(ctx, info)
+	if err != nil {
+		t.Fatalf("ensure repo: %v", err)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatalf("close client: %v", err)
+	}
+
+	s, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = s.DB.Close() })
+	return tmp, s, repo, "f4cef4ce-f4ce-f4ce-f4ce-f4cef4cef4ce"
+}
+
+// seedRunningPipelineClaim seeds an in_pipeline card with a process, a
+// registered session holding an open claim, and the first job running
+// against a dispatch — the in-flight state the StopFailure hook reconciles.
+func seedRunningPipelineClaim(t *testing.T, s *store.Store, repo *model.Repo, sessID string) *model.Issue {
+	t.Helper()
+	iss, err := s.CreateIssue(repo.ID, nil, "card", "", model.StateInPipeline, nil, "")
+	if err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	proc, _ := model.ProcessBySlug("plan-implement")
+	if _, err := s.SetIssueProcess(iss.ID, proc); err != nil {
+		t.Fatalf("set process: %v", err)
+	}
+	if err := s.SetIssueEngineMode(iss.ID, model.EngineAuto); err != nil {
+		t.Fatalf("engine mode: %v", err)
+	}
+	if _, err := s.UpsertAgentSession(store.UpsertAgentSessionIn{
+		SessionID: sessID, RepoID: repo.ID, Actor: "tester",
+	}); err != nil {
+		t.Fatalf("register session: %v", err)
+	}
+	if _, _, _, _, err := s.AddAgentClaim(sessID, iss.ID, "implement"); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	jobs, _ := s.ListPipelineJobs(iss.ID)
+	d, err := s.AddDispatch(store.AddDispatchIn{
+		RepoID: repo.ID, IssueID: &iss.ID, Mode: model.DispatchMode(jobs[0].Mode),
+		CreatedBy: model.ControllerActor, InitialStatus: model.DispatchQueued,
+	})
+	if err != nil {
+		t.Fatalf("add dispatch: %v", err)
+	}
+	if won, err := s.StartPipelineJobWithDispatch(jobs[0].ID, d.ID); err != nil || !won {
+		t.Fatalf("start job: won=%v err=%v", won, err)
+	}
+	return iss
+}
+
+// TestHookStopFailure_FailOpenOnEmptyStdin pins the fail-open invariant:
+// an empty stdin (no session to correlate) returns nil and never fails
+// the agent's turn.
+func TestHookStopFailure_FailOpenOnEmptyStdin(t *testing.T) {
+	t.Setenv("BACIO_AGENT_MODE", "1")
+	t.Setenv("HOME", t.TempDir())
+	prev := opts.dbPath
+	opts.dbPath = filepath.Join(t.TempDir(), "db.sqlite")
+	t.Cleanup(func() { opts.dbPath = prev })
+
+	_ = runHookStopFailureWith(t, "") // must not panic / fail RunE
+}
+
+// TestHookStopFailure_MarksAgentErroredTerminal drives the full hook with
+// a terminal error_type: the session is marked errored AND the card is
+// pulled out of the pipeline to needs_action.
+func TestHookStopFailure_MarksAgentErroredTerminal(t *testing.T) {
+	tmp, s, repo, sessID := setupStopFailureEnv(t)
+	iss := seedRunningPipelineClaim(t, s, repo, sessID)
+
+	payload := `{"session_id": "` + sessID + `", "cwd": "` + tmp + `", "hook_event_name": "StopFailure", "error_type": "authentication_failed", "error_message": "401 unauthorized"}`
+	_ = runHookStopFailureWith(t, payload)
+
+	sess, err := s.GetAgentSession(sessID)
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if sess.ErroredAt == nil || sess.ErrorType != "authentication_failed" {
+		t.Fatalf("session not marked errored: erroredAt=%v type=%q", sess.ErroredAt, sess.ErrorType)
+	}
+	got, _ := s.GetIssueByID(iss.ID)
+	if got.State != model.StateNeedsAction {
+		t.Fatalf("issue state = %s, want needs_action", got.State)
+	}
+	if got.UserActionReasonType != model.UserActionReasonAgentError {
+		t.Fatalf("reason = %q, want %q", got.UserActionReasonType, model.UserActionReasonAgentError)
+	}
+}
+
+// TestHookStopFailure_TransientPausesChain drives the hook with a
+// transient error_type: the chain is paused in place (in_pipeline, Auto
+// off, agent_error pause reason) rather than moved out.
+func TestHookStopFailure_TransientPausesChain(t *testing.T) {
+	tmp, s, repo, sessID := setupStopFailureEnv(t)
+	iss := seedRunningPipelineClaim(t, s, repo, sessID)
+
+	payload := `{"session_id": "` + sessID + `", "cwd": "` + tmp + `", "hook_event_name": "StopFailure", "error_type": "server_error", "error_message": "529 overloaded"}`
+	_ = runHookStopFailureWith(t, payload)
+
+	got, _ := s.GetIssueByID(iss.ID)
+	if got.State != model.StateInPipeline {
+		t.Fatalf("issue state = %s, want in_pipeline (transient pauses in place)", got.State)
+	}
+	if got.EnginePauseReason != model.EnginePauseReasonAgentError {
+		t.Fatalf("pause reason = %q, want %q", got.EnginePauseReason, model.EnginePauseReasonAgentError)
+	}
+	if got.EngineMode != model.EngineOff {
+		t.Fatalf("engine mode = %s, want off", got.EngineMode)
+	}
+}

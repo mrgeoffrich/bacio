@@ -16,10 +16,13 @@ import (
 // `bacio hook` subcommand that services it. install-hooks writes one
 // command hook per event into the repo's .claude/settings.json.
 //
-// Matcher is non-empty for the tool-call hooks — the four event-typed
-// hooks don't support matchers. PostToolUse carries three rows: the
-// task-list mirror scoped to `TaskCreate|TaskUpdate`, the BACI-147
-// terminal-title hook scoped to `mcp__bacio__register`, and the
+// Matcher is non-empty for the tool-call hooks — the five event-typed
+// hooks (SessionStart, UserPromptSubmit, Stop, StopFailure, SessionEnd)
+// don't support matchers. StopFailure (BACI-296) fires when a turn ends
+// on an Anthropic API error; its handler records the errored agent state
+// and reconciles the in-flight pipeline job. PostToolUse carries three
+// rows: the task-list mirror scoped to `TaskCreate|TaskUpdate`, the
+// BACI-147 terminal-title hook scoped to `mcp__bacio__register`, and the
 // BACI-159 supervisor heartbeat with an empty matcher so it fires
 // on every supervisor tool call (the supervisor has no other
 // liveness signal during a long Task-spawned subagent run).
@@ -37,6 +40,7 @@ var bacioHookEvents = []struct{ Event, Subcommand, Matcher string }{
 	{"SessionStart", "session-start", ""},
 	{"UserPromptSubmit", "user-prompt-submit", ""},
 	{"Stop", "stop", ""},
+	{"StopFailure", "stop-failure", ""},
 	{"SessionEnd", "session-end", ""},
 	{"PostToolUse", "post-tool-use", postToolUseMatcher},
 	{"PostToolUse", "set-title", setTitleMatcher},

@@ -28,10 +28,18 @@ const (
 	// value only at this stage; no wiring lands until the follow-up
 	// ticket adds the CLI / MCP verb that sets it.
 	UserActionReasonManualReview UserActionReasonType = "user_manual_review"
+	// UserActionReasonAgentError — the worker running a Pipeline job died
+	// on a terminal Anthropic API error (auth / billing / org-not-allowed,
+	// or an unclassified failure). The StopFailure hook (BACI-296) tears
+	// the chain down and moves the card out of the pipeline to
+	// `needs_action` stamped with this reason, so the user is pulled in to
+	// fix the underlying account/config problem — there's no point
+	// auto-retrying a billing error.
+	UserActionReasonAgentError UserActionReasonType = "agent_error"
 )
 
 var allUserActionReasons = []UserActionReasonType{
-	UserActionReasonQuestion, UserActionReasonManualReview,
+	UserActionReasonQuestion, UserActionReasonManualReview, UserActionReasonAgentError,
 }
 
 // AllUserActionReasons returns the full enum slice; the returned slice

@@ -617,6 +617,16 @@ func agentStatusPill(s *model.AgentSession, now time.Time) (string, lipgloss.Sty
 	case "idle":
 		return "idle", lipgloss.NewStyle().
 			Background(lipgloss.Color("220")).Foreground(lipgloss.Color("232")).Padding(0, 1)
+	case "errored":
+		// Red — the session took an Anthropic API failure (BACI-296).
+		// Surface the error class on the pill so the failure mode is
+		// readable at a glance.
+		label := "errored"
+		if s != nil && s.ErrorType != "" {
+			label = "errored:" + s.ErrorType
+		}
+		return label, lipgloss.NewStyle().
+			Background(lipgloss.Color("196")).Foreground(lipgloss.Color("231")).Padding(0, 1)
 	default:
 		label := "ended"
 		if s != nil && s.EndReason != "" {

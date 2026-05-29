@@ -10,6 +10,7 @@ import (
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/model"
+	"github.com/mrgeoffrich/bacio/internal/pipeline"
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
 
@@ -355,6 +356,59 @@ func (c *localClient) HeartbeatAgent(ctx context.Context, repo *model.Repo, in i
 	// No recordOp — heartbeats run hundreds of times per session and
 	// would flood the audit log.
 	return sess, nil
+}
+
+// MarkAgentErrored stamps the StopFailure error class + message on the
+// session row (BACI-296). No recordOp — the StopFailure hook is a
+// fail-open observe-only path and the errored state is transient
+// supervision metadata, not an audit-worthy mutation; the engine's
+// job.failed advance (FailPipelineForSession below) is what lands in the
+// history log.
+func (c *localClient) MarkAgentErrored(ctx context.Context, sessionID, errType, errMsg string) error {
+	return c.store.SetAgentSessionErrored(sessionID, errType, errMsg)
+}
+
+// ClearAgentError wipes the errored-state columns on the next successful
+// heartbeat (recovery). No recordOp for the same reason as the heartbeat
+// path it rides on.
+func (c *localClient) ClearAgentError(ctx context.Context, sessionID string) error {
+	return c.store.ClearAgentSessionError(sessionID)
+}
+
+// FailPipelineForSession reconciles the in-flight Pipeline job of the
+// session that just took an Anthropic API failure (BACI-296). It walks
+// the session's open claims, and for each whose issue is in_pipeline with
+// a running job, drives the engine's FailRunning branch (transient →
+// pause the chain in place; terminal → move the card to needs_action).
+// Each committed engine transition is mirrored into the audit log as an
+// `engine.advance` row, matching the controller's own advance-writing
+// shape. Best-effort and bounded: a session normally holds exactly one
+// open pipeline claim, but the loop tolerates the rare multi-claim case.
+func (c *localClient) FailPipelineForSession(ctx context.Context, sessionID, errType, errMsg string) error {
+	claims, err := c.store.OpenClaimsForSession(sessionID)
+	if err != nil {
+		return err
+	}
+	eng := pipeline.New(c.store)
+	for _, cl := range claims {
+		if cl == nil {
+			continue
+		}
+		advances, err := eng.FailRunning(cl.IssueID, errType, errMsg)
+		if err != nil {
+			return err
+		}
+		for _, adv := range advances {
+			repoID := adv.RepoID
+			c.recordOp(model.HistoryEntry{
+				RepoID: &repoID, RepoPrefix: adv.RepoPrefix,
+				Op: "engine.advance", Kind: "engine",
+				TargetID: &adv.IssueID, TargetLabel: adv.IssueKey,
+				Details: strings.TrimSpace(adv.Kind + " " + adv.Detail),
+			})
+		}
+	}
+	return nil
 }
 
 func (c *localClient) EndAgent(ctx context.Context, repo *model.Repo, in inputs.AgentEndInput, dryRun bool) (*model.AgentSession, error) {

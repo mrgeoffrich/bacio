@@ -112,6 +112,11 @@ type AgentCard struct {
 	Branch     string `json:"branch"`
 	RepoPrefix string `json:"repoPrefix"`
 	Status     string `json:"status"`
+	// ErrorType / ErrorMessage carry the Anthropic API failure that put a
+	// session into the "errored" Status (BACI-296). Empty for every other
+	// status; surfaced as the errored pill's tooltip in the Agents view.
+	ErrorType    string `json:"errorType,omitempty"`
+	ErrorMessage string `json:"errorMessage,omitempty"`
 	// Busy is true while the session holds an open claim — orthogonal to
 	// Status (a session can be active+busy or idle+busy). BusyIssue is
 	// the issue key it's working, for a "busy (BACI-12)" label. A busy
@@ -324,6 +329,8 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo) ([]AgentCa
 			Branch:            s.Branch,
 			RepoPrefix:        s.RepoPrefix,
 			Status:            model.SessionLiveness(s, now),
+			ErrorType:         s.ErrorType,
+			ErrorMessage:      s.ErrorMessage,
 			HasChannel:        s.ChannelSeenAt != nil,
 			BacioVersion:      s.ChannelVersion,
 			BacioVersionStale: stale,

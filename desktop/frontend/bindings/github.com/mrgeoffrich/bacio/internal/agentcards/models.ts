@@ -31,6 +31,14 @@ export class AgentCard {
     "status": string;
 
     /**
+     * ErrorType / ErrorMessage carry the Anthropic API failure that put a
+     * session into the "errored" Status (BACI-296). Empty for every other
+     * status; surfaced as the errored pill's tooltip in the Agents view.
+     */
+    "errorType"?: string;
+    "errorMessage"?: string;
+
+    /**
      * Busy is true while the session holds an open claim — orthogonal to
      * Status (a session can be active+busy or idle+busy). BusyIssue is
      * the issue key it's working, for a "busy (BACI-12)" label. A busy
@@ -152,22 +160,22 @@ export class AgentCard {
      * Creates a new AgentCard instance from a string or object.
      */
     static createFrom($$source: any = {}): AgentCard {
-        const $$createField15_0 = $$createType1;
-        const $$createField16_0 = $$createType3;
-        const $$createField17_0 = $$createType5;
-        const $$createField20_0 = $$createType7;
+        const $$createField17_0 = $$createType1;
+        const $$createField18_0 = $$createType3;
+        const $$createField19_0 = $$createType5;
+        const $$createField22_0 = $$createType7;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("claims" in $$parsedSource) {
-            $$parsedSource["claims"] = $$createField15_0($$parsedSource["claims"]);
+            $$parsedSource["claims"] = $$createField17_0($$parsedSource["claims"]);
         }
         if ("dispatches" in $$parsedSource) {
-            $$parsedSource["dispatches"] = $$createField16_0($$parsedSource["dispatches"]);
+            $$parsedSource["dispatches"] = $$createField18_0($$parsedSource["dispatches"]);
         }
         if ("todos" in $$parsedSource) {
-            $$parsedSource["todos"] = $$createField17_0($$parsedSource["todos"]);
+            $$parsedSource["todos"] = $$createField19_0($$parsedSource["todos"]);
         }
         if ("openQuestions" in $$parsedSource) {
-            $$parsedSource["openQuestions"] = $$createField20_0($$parsedSource["openQuestions"]);
+            $$parsedSource["openQuestions"] = $$createField22_0($$parsedSource["openQuestions"]);
         }
         return new AgentCard($$parsedSource as Partial<AgentCard>);
     }

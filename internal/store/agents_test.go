@@ -63,6 +63,91 @@ func TestUpsertAgentSessionIdempotent(t *testing.T) {
 	}
 }
 
+// TestSetAndClearAgentSessionErrored locks in the BACI-296 errored-state
+// write/clear pair: SetAgentSessionErrored stamps the three columns and
+// surfaces an "errored" liveness, ClearAgentSessionError wipes them, and
+// both are no-ops on a missing session.
+func TestSetAndClearAgentSessionErrored(t *testing.T) {
+	s, repo, _ := seedRepoAndIssue(t)
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "sess-err", RepoID: repo.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	// Write the errored state.
+	if err := s.SetAgentSessionErrored("sess-err", "server_error", "529 overloaded"); err != nil {
+		t.Fatalf("set errored: %v", err)
+	}
+	got, err := s.GetAgentSession("sess-err")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.ErroredAt == nil {
+		t.Fatalf("errored_at not set")
+	}
+	if got.ErrorType != "server_error" || got.ErrorMessage != "529 overloaded" {
+		t.Fatalf("errored fields = (%q, %q), want (server_error, 529 overloaded)", got.ErrorType, got.ErrorMessage)
+	}
+	if live := model.SessionLiveness(got, time.Now().UTC()); live != "errored" {
+		t.Fatalf("liveness = %q, want errored", live)
+	}
+
+	// Idempotent re-write refreshes the fields.
+	if err := s.SetAgentSessionErrored("sess-err", "rate_limit", "429"); err != nil {
+		t.Fatalf("re-set errored: %v", err)
+	}
+	got, _ = s.GetAgentSession("sess-err")
+	if got.ErrorType != "rate_limit" {
+		t.Fatalf("error_type after re-set = %q, want rate_limit", got.ErrorType)
+	}
+
+	// Clear wipes the columns.
+	if err := s.ClearAgentSessionError("sess-err"); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	got, _ = s.GetAgentSession("sess-err")
+	if got.ErroredAt != nil || got.ErrorType != "" || got.ErrorMessage != "" {
+		t.Fatalf("clear left residue: erroredAt=%v type=%q msg=%q", got.ErroredAt, got.ErrorType, got.ErrorMessage)
+	}
+
+	// Missing-session calls are no-ops, not errors.
+	if err := s.SetAgentSessionErrored("nope", "server_error", "x"); err != nil {
+		t.Fatalf("set on missing session should be no-op, got %v", err)
+	}
+	if err := s.ClearAgentSessionError("nope"); err != nil {
+		t.Fatalf("clear on missing session should be no-op, got %v", err)
+	}
+}
+
+// TestMigrateAddsErroredColumns simulates a pre-BACI-296 DB by dropping
+// the three errored-state columns from a fresh store and re-running
+// migrate(): the columns must come back (idempotently) so an upgrading DB
+// gains them without error.
+func TestMigrateAddsErroredColumns(t *testing.T) {
+	s := newTestStore(t)
+	for _, col := range []string{"errored_at", "error_type", "error_message"} {
+		if _, err := s.DB.Exec(`ALTER TABLE agent_sessions DROP COLUMN ` + col); err != nil {
+			t.Fatalf("drop %s: %v", col, err)
+		}
+	}
+	// Two passes — migrate must be idempotent.
+	for pass := 1; pass <= 2; pass++ {
+		if err := migrate(s.DB); err != nil {
+			t.Fatalf("pass %d migrate: %v", pass, err)
+		}
+		for _, col := range []string{"errored_at", "error_type", "error_message"} {
+			has, err := columnExists(s.DB, "agent_sessions", col)
+			if err != nil {
+				t.Fatalf("pass %d columnExists %s: %v", pass, col, err)
+			}
+			if !has {
+				t.Fatalf("pass %d: agent_sessions.%s missing after migrate", pass, col)
+			}
+		}
+	}
+}
+
 // TestEndAgentSessionReleasesClaims locks in that ending a session
 // auto-releases every open claim it holds (so a /clear at the wrong
 // moment doesn't leave dangling "this agent is working on X" rows).

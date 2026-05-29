@@ -70,10 +70,17 @@ func ParseEngineMode(s string) (EngineMode, error) {
 	return "", fmt.Errorf("unknown engine mode %q", s)
 }
 
-// EnginePauseReasonOpenQuestion is the only pause reason today: the
-// current job has an open question, so Auto will not advance until it is
-// answered (§6.1 of the requirements).
+// EnginePauseReasonOpenQuestion: the current job has an open question, so
+// Auto will not advance until it is answered (§6.1 of the requirements).
 const EnginePauseReasonOpenQuestion = "open_question"
+
+// EnginePauseReasonAgentError: the worker running the current job died on
+// a transient Anthropic API error (BACI-296). The engine cancels the
+// in-flight job and halts Auto in place rather than re-queuing — the user
+// re-arms with Start/Auto once the outage passes. Terminal API errors
+// take the issue out of the pipeline to needs_action instead, so this
+// pause reason is only ever set for the transient class.
+const EnginePauseReasonAgentError = "agent_error"
 
 // ShipJobMode is the sentinel "mode" for the Ship hand-off stage inside
 // a process chain. It is deliberately the same slug as the ship dispatch

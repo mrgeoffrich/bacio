@@ -309,7 +309,12 @@ function AgentCard({ agent: a, rescuing, rescueError, onRescue, onOpenQuestion }
         <span className="mk-agent-name" title={a.sessionId}>
           {name}
         </span>
-        <span className={`mk-pill mk-status-${a.status}`}>{a.status}</span>
+        <span
+          className={`mk-pill mk-status-${a.status}`}
+          title={a.status === 'errored' ? (a.errorMessage || a.errorType || 'Anthropic API error') : undefined}
+        >
+          {a.status === 'errored' && a.errorType ? `errored · ${a.errorType}` : a.status}
+        </span>
       </header>
 
       <div className="mk-agent-card-sub">

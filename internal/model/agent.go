@@ -65,6 +65,17 @@ type AgentSession struct {
 	// agent registers (or for sessions older than the version-reporting
 	// change).
 	ChannelVersion string `json:"channel_version,omitempty"`
+	// ErroredAt / ErrorType / ErrorMessage record an Anthropic API failure
+	// that aborted the session's turn (BACI-296), written by the
+	// StopFailure hook and cleared on the next successful heartbeat. When
+	// ErroredAt is non-nil (and EndedAt is nil) SessionLiveness reports
+	// "errored". ErrorType is the Claude Code class (server_error /
+	// rate_limit / authentication_failed / …); ErrorMessage is the human
+	// blurb. Transient supervision metadata — a session can be both
+	// errored and live.
+	ErroredAt    *time.Time `json:"errored_at,omitempty"`
+	ErrorType    string     `json:"error_type,omitempty"`
+	ErrorMessage string     `json:"error_message,omitempty"`
 }
 
 // AgentChannel is one live `bacio channel` subprocess. Claude Code never
@@ -1033,17 +1044,48 @@ const MatcherActor = "bacio-matcher"
 // with `bacio history --user-filter bacio-controller`.
 const ControllerActor = "bacio-controller"
 
-// SessionLiveness classifies a session as "ended", "active", or "idle"
-// relative to now. Shared by the TUI agent cards and the desktop Agents
-// screen so both render the same status vocabulary.
+// SessionLiveness classifies a session as "ended", "errored", "active",
+// or "idle" relative to now. Shared by the TUI agent cards and the
+// desktop Agents screen so both render the same status vocabulary.
+//
+// "ended" wins over everything (a dead session can't be in any other
+// state). "errored" supersedes active/idle: a session that took an
+// Anthropic API failure but is still alive reads as errored until its
+// next successful heartbeat clears ErroredAt (BACI-296).
 func SessionLiveness(s *AgentSession, now time.Time) string {
 	if s == nil || s.EndedAt != nil {
 		return "ended"
+	}
+	if s.ErroredAt != nil {
+		return "errored"
 	}
 	if now.Sub(s.LastSeenAt) <= AgentLivenessThreshold {
 		return "active"
 	}
 	return "idle"
+}
+
+// transientAPIErrorTypes is the set of Claude Code StopFailure
+// error_type values bacio treats as transient (BACI-296) — a worker that
+// dies on one of these hit a passing outage (Anthropic overloaded /
+// rate-limited), so the chain is paused in place for the user to re-arm
+// rather than torn down. Everything else (authentication_failed,
+// billing_error, oauth_org_not_allowed, invalid_request, model_not_found,
+// max_output_tokens, and the catch-all "unknown") is treated terminal:
+// the issue is pulled out of the pipeline to needs_action so the user is
+// brought in. "unknown" defaults conservatively to terminal — surfacing
+// to the user is safer than silently pausing on an unclassified failure.
+var transientAPIErrorTypes = map[string]bool{
+	"server_error": true, // 5xx incl. 529 overloaded
+	"rate_limit":   true, // 429
+}
+
+// IsTransientAPIError reports whether a StopFailure error_type is a
+// transient transport failure (pause-and-wait) rather than a terminal
+// one (surface to the user). The single source of truth for the
+// hook/engine branch.
+func IsTransientAPIError(errorType string) bool {
+	return transientAPIErrorTypes[strings.TrimSpace(errorType)]
 }
 
 // slug word pools for GenerateAgentSlug. Kept deliberately generic and
