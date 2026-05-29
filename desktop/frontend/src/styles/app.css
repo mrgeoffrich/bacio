@@ -1623,6 +1623,11 @@ body { margin: 0; }
 .mk-pl.is-backlog-expanded {
   grid-template-columns: minmax(0, 1.8fr) minmax(0, 1fr) 300px;
 }
+/* BACI-288: collapse the Backlog column to a thin rail, handing the freed
+   width to In Pipeline + Shipping. */
+.mk-pl.is-backlog-collapsed {
+  grid-template-columns: 44px minmax(0, 1fr) 300px;
+}
 .mk-pl-empty {
   grid-column: 1 / -1;
   color: var(--fg-3);
@@ -1716,6 +1721,49 @@ body { margin: 0; }
   line-height: 1;
 }
 .mk-pl-drawer-toggle:hover { color: var(--fg-1); border-color: var(--border-2); }
+
+/* BACI-288: collapsed Backlog rail. The whole column becomes one tall,
+   tappable button — an expand glyph up top, the rotated "Backlog" label,
+   and the count at the foot — so the user always knows what's hidden and
+   can reopen it in one click. */
+.mk-pl-col.mk-pl-backlog.is-collapsed {
+  padding: 8px 4px;
+  align-items: stretch;
+}
+.mk-pl-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 10px 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg-3);
+  cursor: pointer;
+  font-family: var(--font-mono);
+}
+.mk-pl-rail:hover { color: var(--fg-1); }
+.mk-pl-rail-icon {
+  font-size: 16px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.mk-pl-rail-lbl {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--status-todo);
+}
+.mk-pl-rail-count {
+  font-size: 12px;
+  margin-top: auto;
+  flex-shrink: 0;
+}
 
 .mk-pl-col-body,
 .mk-pl-backlog-body {

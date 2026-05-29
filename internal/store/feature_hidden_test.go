@@ -65,6 +65,47 @@ func TestStore_FeatureHiddenOnBoard_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestStore_BacklogCollapsed_RoundTrip exercises the BACI-288 Pipeline
+// Backlog-column collapse preference: defaults to false (expanded),
+// flips on, flips off.
+func TestStore_BacklogCollapsed_RoundTrip(t *testing.T) {
+	s := newTestStore(t)
+	repo, err := s.CreateRepo("BC", "bc", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+
+	// Default: not collapsed.
+	collapsed, err := s.IsBacklogCollapsed(repo.ID)
+	if err != nil {
+		t.Fatalf("is collapsed (default): %v", err)
+	}
+	if collapsed {
+		t.Fatalf("default IsBacklogCollapsed = true, want false")
+	}
+
+	// Flip on.
+	if err := s.SetBacklogCollapsed(repo.ID, true); err != nil {
+		t.Fatalf("set collapsed=true: %v", err)
+	}
+	collapsed, err = s.IsBacklogCollapsed(repo.ID)
+	if err != nil {
+		t.Fatalf("is collapsed (after set true): %v", err)
+	}
+	if !collapsed {
+		t.Fatalf("after set true: IsBacklogCollapsed = false, want true")
+	}
+
+	// Flip off.
+	if err := s.SetBacklogCollapsed(repo.ID, false); err != nil {
+		t.Fatalf("set collapsed=false: %v", err)
+	}
+	collapsed, _ = s.IsBacklogCollapsed(repo.ID)
+	if collapsed {
+		t.Fatalf("after set false: still collapsed")
+	}
+}
+
 // TestStore_ListIssues_HiddenFeatureSlugsFilter pins the SQL filter
 // behaviour: issues whose feature has a slug in the hidden set are
 // excluded; issues with no feature pass through; unknown slugs are a

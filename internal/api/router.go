@@ -86,6 +86,12 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("POST /repos/{prefix}/issues/{key}/ship", d.handleIssueShip)
 	mux.HandleFunc("GET /repos/{prefix}/auto-ship", d.handleRepoAutoShipGet)
 	mux.HandleFunc("PUT /repos/{prefix}/auto-ship", d.handleRepoAutoShip)
+	// BACI-288: per-repo Pipeline Backlog-column collapse preference
+	// (tui_settings `pipeline.backlog_collapsed`). Purely client-side
+	// chrome — GET seeds the rail state, PUT persists it (honouring
+	// ?dry_run) and audits a repo_setting.update row on change.
+	mux.HandleFunc("GET /repos/{prefix}/backlog-collapsed", d.handleRepoBacklogCollapsedGet)
+	mux.HandleFunc("PUT /repos/{prefix}/backlog-collapsed", d.handleRepoBacklogCollapsed)
 
 	mux.HandleFunc("GET /repos/{prefix}/issues/{key}/comments", d.handleCommentsList)
 	mux.HandleFunc("POST /repos/{prefix}/issues/{key}/comments", d.handleCommentAdd)
