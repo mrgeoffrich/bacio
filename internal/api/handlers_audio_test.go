@@ -1,6 +1,6 @@
-// BACI-240 audio-preferences API test. Mirrors
+// BACI-240 / BACI-295 audio-preferences API test. Mirrors
 // TestDisplayPreferencesRoundtrip on a single boolean — defaults to
-// false, PUT round-trips, GET reflects the write.
+// true (BACI-295 flipped it on), PUT round-trips, GET reflects the write.
 package api_test
 
 import (
@@ -17,32 +17,42 @@ func TestAudioPreferencesRoundtrip(t *testing.T) {
 		ShippedSfx bool `json:"shipped_sfx"`
 	}
 
-	// Default — false (audio is opt-in).
+	// Default — true (BACI-295: on by default).
 	resp, body := apiGet(t, ts.URL+"/settings/audio-preferences")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("get: status %d, body %s", resp.StatusCode, body)
 	}
 	var got out
 	mustJSON(t, body, &got)
-	if got.ShippedSfx {
-		t.Fatal("default shipped_sfx must be false")
+	if !got.ShippedSfx {
+		t.Fatal("default shipped_sfx must be true")
 	}
 
-	// Set true.
-	resp, body = apiPut(t, ts.URL+"/settings/audio-preferences", map[string]any{"shipped_sfx": true})
+	// Set false — a meaningful flip off the default.
+	resp, body = apiPut(t, ts.URL+"/settings/audio-preferences", map[string]any{"shipped_sfx": false})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("set: status %d, body %s", resp.StatusCode, body)
 	}
 	mustJSON(t, body, &got)
-	if !got.ShippedSfx {
-		t.Fatal("after PUT true, response must reflect true")
+	if got.ShippedSfx {
+		t.Fatal("after PUT false, response must reflect false")
 	}
 
 	// Re-read — persists.
 	_, body = apiGet(t, ts.URL+"/settings/audio-preferences")
 	mustJSON(t, body, &got)
+	if got.ShippedSfx {
+		t.Fatal("after PUT false, GET must still return false")
+	}
+
+	// Set true again.
+	resp, body = apiPut(t, ts.URL+"/settings/audio-preferences", map[string]any{"shipped_sfx": true})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("set true: status %d, body %s", resp.StatusCode, body)
+	}
+	mustJSON(t, body, &got)
 	if !got.ShippedSfx {
-		t.Fatal("after PUT true, GET must still return true")
+		t.Fatal("after PUT true, response must reflect true")
 	}
 
 	// Dry-run reports the projected value without persisting.

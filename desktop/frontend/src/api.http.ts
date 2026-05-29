@@ -2541,10 +2541,10 @@ export async function setArchivePreferences(
 // ---------- Audio preferences (BACI-240) ----------
 //
 // ui.shipped_sfx global toggle — when on, the topbar Shipped pill
-// plays a short ka-ching SFX on every genuine ship. Defaults to false
-// (audio is opt-in). The wire payload is {shipped_sfx: bool} rather
-// than a generic "value" to leave room for future audio toggles
-// without breaking the existing field name.
+// plays a short ka-ching SFX on every genuine ship. Defaults to true
+// (BACI-295 flipped the default on). The wire payload is
+// {shipped_sfx: bool} rather than a generic "value" to leave room for
+// future audio toggles without breaking the existing field name.
 
 export type AudioPreferencesDTO = { shippedSfx: boolean };
 
