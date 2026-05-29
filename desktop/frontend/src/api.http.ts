@@ -126,15 +126,6 @@ export interface BoardCardTodo {
   status: string;
 }
 
-// FollowOnInfo (BACI-182) is the dormant follow-on dispatch the kanban
-// card chip renders. Mirrors internal/boardcards/cards.go::FollowOnInfo;
-// surfaced server-side via BoardCard.followOnDispatch.
-export interface FollowOnInfo {
-  mode: string;
-  actionLabel: string;
-  dispatchID: number;
-}
-
 // BoardCardBlocker (BACI-114) is one open `blocks` edge pointing AT
 // a card. Title is intentionally NOT on the wire — the kanban
 // popover joins it from the same `cards` array (Option A: thin
@@ -156,21 +147,6 @@ export interface WaitingState {
   kind: WaitingKind;
   mode?: string;
   actionLabel?: string;
-}
-
-// BACI-192: BoardCardFollowOn is the denormalised view of the dormant
-// follow-on dispatch attached to this issue — single-slot per issue,
-// drives the kanban footer's follow-on button visual state. Mirror of
-// the Go-side boardcards.BoardCardFollowOn; api.ts re-exports the
-// Wails-binding equivalent under the same name.
-// BACI-217: waitingReason carries a short server-derived label
-// describing what the dormant row is waiting on, when the variant is
-// the blockers-clear gate ("blocked by N"). Absent on the parent-acks
-// variant (the chip reads the mode label without a secondary qualifier).
-export interface BoardCardFollowOn {
-  mode: string;
-  actionLabel: string;
-  waitingReason?: string;
 }
 
 // LatestPlan (BACI-216) is the newest `plan`-typed doc linked
@@ -250,14 +226,6 @@ export interface BoardCard {
   // the already-polled cards array; the binding twin in api.ts mirrors
   // the same wire shape.
   terminalAt?: string;
-  // BACI-192: dormant follow-on dispatch denormalised onto the card so
-  // the kanban footer can render its mode label without an extra
-  // per-card fetch. Absent (server-side omitempty) when the issue has
-  // no dormant follow-on — the footer button stays in its outline
-  // state in that case. Set optimistically by the App-level handlers
-  // on a successful queue / cancel; the next 10s poll re-asserts the
-  // authoritative shape.
-  followOn?: BoardCardFollowOn | null;
   // BACI-216: the newest `plan`-typed doc linked directly to this
   // issue, or absent when none. Drives the per-card plan icon that
   // opens the doc viewer. Server-side omitempty drops the field
