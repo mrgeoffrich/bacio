@@ -104,6 +104,17 @@ func (f *fakeBoardClient) BlockersFor(context.Context, []int64) (map[int64][]sto
 	return map[int64][]store.IssueBlocker{}, nil
 }
 
+// PipelineJobsForIssues (Phase 4) is a fixed-empty stub — boardcards.Assemble
+// bulk-reads the per-card Pipeline job chains. The taken-flag tests don't
+// exercise in_pipeline cards, so an empty map matches the "no jobs"
+// production case. Mirrors the fakeClient stub in
+// internal/boardcards/cards_test.go; wiring it through (rather than
+// relying on the embedded-interface panic) is the same pattern as the
+// other Assemble bulk-read stubs above.
+func (f *fakeBoardClient) PipelineJobsForIssues(context.Context, []int64) (map[int64][]*model.PipelineJob, error) {
+	return map[int64][]*model.PipelineJob{}, nil
+}
+
 // InflightByModeForRepo (BACI-145) — empty map is the "no in-flight
 // dispatches" case, which keeps every WaitingState derivation off the
 // queued_blocked branch in these tests.
