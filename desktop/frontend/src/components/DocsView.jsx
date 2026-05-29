@@ -184,6 +184,13 @@ export default function DocsView({ activeBoard, onOpenIssue }) {
       });
   }, [activeBoard, selected, content, dirty, saving]);
 
+  // BACI-293: Cancel from the viewer's edit mode discards the live buffer
+  // by resetting it back to the last persisted body. The viewer owns the
+  // edit-mode flag but can't see savedContent — only the parent holds it.
+  const cancelEdit = useCallback(() => {
+    setContent(savedContent);
+  }, [savedContent]);
+
   // updateQuery wraps the setter so persistence side-effects fire for
   // the fields DocsPersistence covers, and the rest are pure state.
   const updateQuery = useCallback((patch) => {
@@ -279,6 +286,7 @@ export default function DocsView({ activeBoard, onOpenIssue }) {
           dirty={dirty}
           onContentChange={setContent}
           onSave={save}
+          onCancelEdit={cancelEdit}
           onArchiveToggle={selected ? archiveToggle : null}
           onOpenIssue={onOpenIssue}
           panelsCollapsed={sidebarCollapsed}
