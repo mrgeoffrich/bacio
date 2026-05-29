@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/mrgeoffrich/bacio/internal/model"
@@ -75,6 +76,19 @@ func (c *remoteClient) StartPipelineJob(ctx context.Context, repo *model.Repo, k
 
 func (c *remoteClient) StopPipelineJob(ctx context.Context, repo *model.Repo, key string) ([]*model.PipelineJob, error) {
 	return c.jobControl(ctx, repo, key, "stop")
+}
+
+func (c *remoteClient) RerunPipelineJob(ctx context.Context, repo *model.Repo, key string, seq int) ([]*model.PipelineJob, error) {
+	canonical, err := c.ResolveIssueKey(ctx, repo, key)
+	if err != nil {
+		return nil, err
+	}
+	prefix := strings.SplitN(canonical, "-", 2)[0]
+	var out []*model.PipelineJob
+	if err := c.do(ctx, http.MethodPost, "/repos/"+prefix+"/issues/"+canonical+"/jobs/"+strconv.Itoa(seq)+"/rerun", nil, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *remoteClient) jobControl(ctx context.Context, repo *model.Repo, key, action string) ([]*model.PipelineJob, error) {

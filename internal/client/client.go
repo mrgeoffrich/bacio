@@ -297,6 +297,11 @@ type Client interface {
 	// refreshed issue.
 	StartPipelineJob(ctx context.Context, repo *model.Repo, key string) ([]*model.PipelineJob, error)
 	StopPipelineJob(ctx context.Context, repo *model.Repo, key string) ([]*model.PipelineJob, error)
+	// RerunPipelineJob re-runs an aborted (cancelled) job at the given
+	// 1-based sequence — the BACI-291 per-job Re-run control. Engine/UI
+	// only (no CLI verb), same class as Start/Stop. Returns the refreshed
+	// chain.
+	RerunPipelineJob(ctx context.Context, repo *model.Repo, key string, seq int) ([]*model.PipelineJob, error)
 	SetEngineMode(ctx context.Context, repo *model.Repo, key, mode string) (*model.Issue, error)
 	GetPipelineJobs(ctx context.Context, repo *model.Repo, key string) ([]*model.PipelineJob, error)
 	AssignIssue(ctx context.Context, repo *model.Repo, key, assignee string, dryRun bool) (*model.Issue, error)

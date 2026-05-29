@@ -462,6 +462,22 @@ export async function stopCardJob(
   }
 }
 
+// rerunCardJob is the per-job Re-run control on an aborted step — reset the
+// cancelled job at `seq` to pending and re-dispatch it. Returns the
+// refreshed chain.
+export async function rerunCardJob(
+  repoPrefix: string,
+  key: string,
+  seq: number,
+): Promise<PipelineJob[]> {
+  try {
+    const jobs = await BoardService.RerunCardJob(repoPrefix, key, seq);
+    return (jobs ?? []).filter((j): j is PipelineJob => j != null);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
 // setEngineMode sets the controller engine's per-card drive mode
 // ("off" | "auto") while the card is in_pipeline. Returns the updated card.
 export async function setEngineMode(

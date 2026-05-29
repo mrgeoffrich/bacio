@@ -23,6 +23,19 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
 
+// ErrJobNotCancelled is returned by RerunJob when the targeted job isn't
+// in the cancelled (aborted) state — re-run is an abort-recovery
+// affordance only, never a way to re-run a complete or running job.
+var ErrJobNotCancelled = errors.New("job is not cancelled; only an aborted job can be re-run")
+
+// stopWorkerSteerBody is the canned wind-down note StopRunning enqueues as
+// a BACI-286 steer message at the running worker's session. Delivery is
+// turn-boundary only (the channel can't interrupt a live tool call), so
+// the wording asks the worker to stop at its next turn rather than
+// promising a hard kill — see docs/agent-dispatch.md "User→agent steer
+// messages".
+const stopWorkerSteerBody = "Stop requested: the user pressed Stop on this pipeline job. Please wind down now — finish the in-flight tool call if one is running, then stop work on this issue. The engine has already cancelled the job, so there's nothing to hand off; do not open a PR or continue."
+
 // Engine advances in_pipeline job chains. Stateless across ticks — every
 // Tick reads fresh state from the store. Safe to construct once and call
 // Tick from a timer.
@@ -322,12 +335,71 @@ func (e *Engine) StartNext(issueID int64) ([]Advance, error) {
 	return e.advanceChain(iss, jobs)
 }
 
+// RerunJob is the per-job "Re-run" control on an aborted step (BACI-291):
+// reset a specific cancelled job back to pending and immediately
+// re-dispatch it, so a Stopped step can be retried in one click. A no-op
+// (nil advance, no error) when the card isn't in_pipeline or another job
+// is already running (can't run two at once). The target job must be
+// cancelled — a complete or running job returns ErrJobNotCancelled, since
+// re-run is an abort-recovery affordance, not a re-run of arbitrary
+// stages. Re-run targets one job by id; an unrelated complete job earlier
+// or later in the chain is left untouched.
+func (e *Engine) RerunJob(issueID, jobID int64) ([]Advance, error) {
+	if e == nil || e.st == nil {
+		return nil, nil
+	}
+	iss, err := e.st.GetIssueByID(issueID)
+	if err != nil {
+		return nil, err
+	}
+	if iss.State != model.StateInPipeline {
+		return nil, nil
+	}
+	jobs, err := e.st.ListPipelineJobs(issueID)
+	if err != nil {
+		return nil, err
+	}
+	if firstByStatus(jobs, model.JobRunning) != nil {
+		return nil, nil // a job is in flight — can't re-run another
+	}
+	var target *model.PipelineJob
+	for _, j := range jobs {
+		if j.ID == jobID {
+			target = j
+			break
+		}
+	}
+	if target == nil {
+		return nil, store.ErrNotFound
+	}
+	if target.Status != model.JobCancelled {
+		return nil, ErrJobNotCancelled
+	}
+	if err := e.st.ResetPipelineJobToPending(target.ID); err != nil {
+		return nil, err
+	}
+	target.Status = model.JobPending
+	target.DispatchID = nil
+	target.StartedAt = nil
+	target.CompletedAt = nil
+	return e.startJob(iss, target)
+}
+
 // StopRunning is the manual "Stop / Cancel" control: cancel the card's
-// running job (and its dispatch) and halt Auto. A no-op when no job is
-// running. If the dispatch was already delivered to a worker, the row
-// can't be cancelled (BACI-130) — the job is still marked cancelled and
-// Auto halted; the worker's eventual ack is then ignored because the job
-// is already terminal.
+// running job (and its dispatch), signal the running worker to wind down,
+// and halt Auto. A no-op when no job is running. If the dispatch was
+// already delivered to a worker, the row can't be cancelled (BACI-130) —
+// the job is still marked cancelled and Auto halted; the worker's eventual
+// ack is then ignored because the job is already terminal.
+//
+// Because a delivered worker keeps running its Task subagent in the
+// background, engine bookkeeping alone doesn't actually stop the work. So
+// Stop also enqueues a canned BACI-286 steer message at the worker's open
+// claim session, asking it to wind down at its next turn boundary (the
+// only signal an MCP server can deliver — there is no hard interrupt). The
+// steer is best-effort and never fails the Stop: a missing session (the
+// dispatch was never delivered, or the worker already released) just skips
+// the message.
 func (e *Engine) StopRunning(issueID int64) ([]Advance, error) {
 	if e == nil || e.st == nil {
 		return nil, nil
@@ -357,7 +429,40 @@ func (e *Engine) StopRunning(issueID int64) ([]Advance, error) {
 		return nil, err
 	}
 	e.setPause(iss, false)
+	e.steerWorkerToStop(iss)
 	return []Advance{e.advance(iss, "job.cancelled", fmt.Sprintf("seq=%d mode=%s (stopped)", running.Sequence, running.Mode))}, nil
+}
+
+// steerWorkerToStop pushes the canned wind-down note at the newest open
+// claim session for the issue (the worker running the job). Best-effort:
+// no open claim (never delivered, or already released) is a silent skip,
+// and a write error is logged-and-continued — the engine never fails a
+// Stop on the steer signal. The claim list is claimed_at DESC, so the
+// first un-released claim is the newest, mirroring how boardcards derives
+// the card's RunningSessionID.
+func (e *Engine) steerWorkerToStop(iss *model.Issue) {
+	claims, err := e.st.ListClaimsForIssue(iss.ID)
+	if err != nil {
+		e.logger().Warn("bacio engine: stop steer could not list claims", "issue", iss.Key, "err", err)
+		return
+	}
+	var sessionID string
+	for _, c := range claims {
+		if c != nil && c.ReleasedAt == nil && c.SessionID != "" {
+			sessionID = c.SessionID
+			break
+		}
+	}
+	if sessionID == "" {
+		return // no worker to steer (dispatch never delivered, or already released)
+	}
+	if _, err := e.st.AddUserMessage(store.AddUserMessageIn{
+		SessionID: sessionID,
+		Body:      stopWorkerSteerBody,
+		CreatedBy: model.ControllerActor,
+	}); err != nil {
+		e.logger().Warn("bacio engine: stop steer message failed", "issue", iss.Key, "session", sessionID, "err", err)
+	}
 }
 
 // Handoff is the manual "Ship" control (and the in-process Ship stage):

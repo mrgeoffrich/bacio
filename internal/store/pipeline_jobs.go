@@ -167,6 +167,20 @@ func (s *Store) SetPipelineJobStatus(jobID int64, status model.JobStatus) error 
 	return err
 }
 
+// ResetPipelineJobToPending rewinds a terminal job to pending, clearing
+// the started_at / completed_at / dispatch_id stamps so a re-dispatch can
+// stamp them fresh. It is the deliberate inverse of SetPipelineJobStatus's
+// COALESCE-stamping (which never clears those columns) — used only by the
+// re-run-an-aborted-step path (BACI-291). Nulling dispatch_id detaches the
+// cancelled dispatch so the re-dispatch isn't conflated with the old run.
+func (s *Store) ResetPipelineJobToPending(jobID int64) error {
+	_, err := s.DB.Exec(
+		`UPDATE pipeline_jobs SET status = 'pending', started_at = NULL, completed_at = NULL, dispatch_id = NULL WHERE id = ?`,
+		jobID,
+	)
+	return err
+}
+
 // SetPipelineJobDispatch pins (or clears, with nil) the agent_dispatches
 // row a job is running against.
 func (s *Store) SetPipelineJobDispatch(jobID int64, dispatchID *int64) error {

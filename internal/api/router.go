@@ -76,12 +76,15 @@ func newRouter(d deps) http.Handler {
 	// controls (manual Start / Stop, auto drive-mode, ship hand-off) plus
 	// the per-repo auto-ship toggle. Job control verbs sit under
 	// .../jobs/{start,stop} (more specific literals than any {…} segment,
-	// so ServeMux disambiguates cleanly).
+	// so ServeMux disambiguates cleanly). The per-job re-run sits a level
+	// deeper at .../jobs/{seq}/rerun (BACI-291) — the trailing `rerun`
+	// literal keeps it distinct from the literal start/stop verbs.
 	mux.HandleFunc("PUT /repos/{prefix}/issues/{key}/reorder", d.handleIssueReorder)
 	mux.HandleFunc("POST /repos/{prefix}/issues/{key}/process", d.handleIssueProcess)
 	mux.HandleFunc("GET /repos/{prefix}/issues/{key}/jobs", d.handleIssueJobs)
 	mux.HandleFunc("POST /repos/{prefix}/issues/{key}/jobs/start", d.handleIssueJobStart)
 	mux.HandleFunc("POST /repos/{prefix}/issues/{key}/jobs/stop", d.handleIssueJobStop)
+	mux.HandleFunc("POST /repos/{prefix}/issues/{key}/jobs/{seq}/rerun", d.handleIssueJobRerun)
 	mux.HandleFunc("PUT /repos/{prefix}/issues/{key}/engine-mode", d.handleIssueEngineMode)
 	mux.HandleFunc("POST /repos/{prefix}/issues/{key}/ship", d.handleIssueShip)
 	mux.HandleFunc("GET /repos/{prefix}/auto-ship", d.handleRepoAutoShipGet)

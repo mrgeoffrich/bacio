@@ -129,6 +129,66 @@ func TestPipelineEndpoints(t *testing.T) {
 	}
 }
 
+// TestJobRerunEndpoint covers the BACI-291 per-job re-run REST surface:
+// re-running an aborted (cancelled) job returns 200 + the chain with that
+// job back to running; an unknown seq is 404; a non-cancelled job is 409.
+func TestJobRerunEndpoint(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo, err := s.CreateRepo("RERN", "http-rerun", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("repo: %v", err)
+	}
+	iss, err := s.CreateIssue(repo.ID, nil, "card", "", model.StateInPipeline, nil, "")
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	proc, err := model.ProcessBySlug("plan-implement")
+	if err != nil {
+		t.Fatalf("ProcessBySlug: %v", err)
+	}
+	jobs, err := s.SetIssueProcess(iss.ID, proc)
+	if err != nil {
+		t.Fatalf("SetIssueProcess: %v", err)
+	}
+	base := ts.URL + "/repos/" + repo.Prefix + "/issues/" + iss.Key
+
+	// Re-run on a pending (non-cancelled) job → 409.
+	resp := do(t, http.MethodPost, base+"/jobs/1/rerun", nil, nil)
+	if resp.StatusCode != 409 {
+		t.Fatalf("rerun pending status %d, want 409", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// Unknown seq → 404.
+	resp = do(t, http.MethodPost, base+"/jobs/99/rerun", nil, nil)
+	if resp.StatusCode != 404 {
+		t.Fatalf("rerun unknown seq status %d, want 404", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// Abort the first job (run → cancel) so it's re-runnable.
+	if err := s.SetPipelineJobStatus(jobs[0].ID, model.JobRunning); err != nil {
+		t.Fatalf("set running: %v", err)
+	}
+	if err := s.SetPipelineJobStatus(jobs[0].ID, model.JobCancelled); err != nil {
+		t.Fatalf("set cancelled: %v", err)
+	}
+
+	// Re-run the aborted job → 200, job 1 back to running.
+	resp = do(t, http.MethodPost, base+"/jobs/1/rerun", nil, nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("rerun aborted status %d, want 200", resp.StatusCode)
+	}
+	chain := decode[[]map[string]any](t, resp.Body)
+	resp.Body.Close()
+	if len(chain) == 0 {
+		t.Fatal("rerun returned an empty chain")
+	}
+	if got, _ := chain[0]["status"].(string); got != "running" {
+		t.Fatalf("re-run job 1 status = %q, want running", got)
+	}
+}
+
 // TestProcessFromStagesEndpoint covers the BACI-283 explicit-stage-list
 // path on POST /process: a free-form chain materialises, and the
 // mutually-exclusive guard rejects both / neither.

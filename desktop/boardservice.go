@@ -913,6 +913,18 @@ func (b *BoardService) StopCardJob(repoPrefix, key string) ([]*model.PipelineJob
 	return b.client.StopPipelineJob(ctx, repo, key)
 }
 
+// RerunCardJob re-runs an aborted (cancelled) job at the given 1-based
+// sequence — the BACI-291 per-job Re-run control. Returns the refreshed
+// chain.
+func (b *BoardService) RerunCardJob(repoPrefix, key string, seq int) ([]*model.PipelineJob, error) {
+	ctx := context.Background()
+	repo, err := b.resolveRepoForKey(ctx, repoPrefix, key)
+	if err != nil {
+		return nil, err
+	}
+	return b.client.RerunPipelineJob(ctx, repo, key, seq)
+}
+
 func (b *BoardService) SetCardEngineMode(repoPrefix, key, mode string) (BoardCard, error) {
 	ctx := context.Background()
 	repo, err := b.resolveRepoForKey(ctx, repoPrefix, key)

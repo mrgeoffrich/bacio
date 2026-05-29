@@ -670,6 +670,19 @@ surfaced, so `boardcards.BoardCard` gained a `RunningSessionID` field
 populated from the winning open claim's session — the same claim whose
 `ActiveVerb` / `Todos` / `OpenQuestions` the card already projects.
 
+**Stop reuses this path (BACI-291).** The Pipeline **Stop** control isn't
+just engine bookkeeping: because a delivered worker keeps running its
+`Task` subagent in the background (BACI-130 — a delivered dispatch can't be
+cancelled), cancelling the job alone doesn't stop the work. So
+`pipeline.Engine.StopRunning` *also* enqueues a canned wind-down note
+(`stopWorkerSteerBody`) as a steer message at the running worker's newest
+open claim session — the same `AddUserMessage` write the Message button
+uses. It's best-effort: no open claim (the dispatch was never delivered, or
+the worker already released) is a silent skip, and a write error is
+logged-and-continued so Stop never fails on the steer. Delivery is the same
+turn-boundary mechanism above — Stop *asks* the worker to wind down at its
+next turn, it can't hard-kill the subagent.
+
 **Spike note (the harness-routing unknown).** The channel-owning session
 is the *supervisor*, which blocks inside `Task(...)` while the per-mode
 worker subagent runs (see [Subagent delegation](#subagent-delegation-baci-52)
