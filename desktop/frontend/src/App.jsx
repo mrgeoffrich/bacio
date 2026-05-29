@@ -654,10 +654,12 @@ export default function App() {
   // predict; everything else relies on the refresh. The engine owns job
   // progression — these are the user-driven controls that nudge it.
 
-  // Assign a preset process to a card — the in-pipeline "pick a process"
-  // menu. Refreshes so the new pending job chain renders on the card.
-  const setCardProcess = useCallback((key, processSlug) => {
-    api.setCardProcess(activeBoard, key, processSlug)
+  // Assign a process to a card — the in-pipeline "pick a process" picker.
+  // selection is a discriminated shape ({ stages } from the cumulative
+  // stepper, or { process } from the kept skip-Plan preset buttons).
+  // Refreshes so the new pending job chain renders on the card.
+  const setCardProcess = useCallback((key, selection) => {
+    api.setCardProcess(activeBoard, key, selection)
       .then(() => refreshCards({ silent: true }))
       .catch(err => reportError(err, { headline: "Couldn't set the process" }));
   }, [activeBoard, refreshCards]);

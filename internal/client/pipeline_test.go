@@ -21,8 +21,8 @@ func TestPipelineClientOps(t *testing.T) {
 		t.Fatalf("issue: %v", err)
 	}
 
-	// SetIssueProcess materialises a 3-job chain.
-	jobs, err := c.SetIssueProcess(ctx, repo, iss.Key, "plan-implement-ship", false)
+	// SetIssueProcess (slug path) materialises a 3-job chain.
+	jobs, err := c.SetIssueProcess(ctx, repo, iss.Key, "plan-implement-ship", nil, false)
 	if err != nil {
 		t.Fatalf("SetIssueProcess: %v", err)
 	}
@@ -30,14 +30,32 @@ func TestPipelineClientOps(t *testing.T) {
 		t.Fatalf("jobs = %d, want 3", len(jobs))
 	}
 
-	// Dry-run process projects without writing.
+	// SetIssueProcess (explicit stage-list path) round-trips an arbitrary
+	// chain the named presets don't enumerate.
+	issS, _ := c.store.CreateIssue(repo.ID, nil, "card-stages", "", model.StateInPipeline, nil, "")
+	sj, err := c.SetIssueProcess(ctx, repo, issS.Key, "", []string{"design", "plan_large", "implement", "ship"}, false)
+	if err != nil {
+		t.Fatalf("SetIssueProcess stages: %v", err)
+	}
+	wantModes := []string{"design", "plan_large", "implement", "ship"}
+	if len(sj) != len(wantModes) {
+		t.Fatalf("stage-list jobs = %d, want %d", len(sj), len(wantModes))
+	}
+	for i, m := range wantModes {
+		if sj[i].Mode != m {
+			t.Fatalf("stage-list job[%d].Mode = %q, want %q", i, sj[i].Mode, m)
+		}
+	}
+
+	// Dry-run process projects without writing — including the stage-list
+	// projection path.
 	iss2, _ := c.store.CreateIssue(repo.ID, nil, "card2", "", model.StateInPipeline, nil, "")
-	dj, err := c.SetIssueProcess(ctx, repo, iss2.Key, "plan", true)
+	dj, err := c.SetIssueProcess(ctx, repo, iss2.Key, "", []string{"design", "implement"}, true)
 	if err != nil {
 		t.Fatalf("SetIssueProcess dry-run: %v", err)
 	}
-	if len(dj) != 1 {
-		t.Fatalf("dry-run jobs = %d, want 1", len(dj))
+	if len(dj) != 2 {
+		t.Fatalf("dry-run jobs = %d, want 2", len(dj))
 	}
 	if got, _ := c.store.ListPipelineJobs(iss2.ID); len(got) != 0 {
 		t.Fatalf("dry-run wrote %d jobs, want 0", len(got))

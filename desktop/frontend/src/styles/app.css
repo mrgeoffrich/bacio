@@ -2009,8 +2009,69 @@ body { margin: 0; }
   border-radius: var(--radius-sm); background: var(--ink-50); color: var(--fg-3);
 }
 .mk-pl-chip.is-plan { background: var(--status-todo-bg); color: var(--status-todo); }
+.mk-pl-chip.is-plan_large { background: var(--status-todo-bg); color: var(--status-todo); }
+.mk-pl-chip.is-design { background: var(--status-claude-bg); color: var(--status-claude); }
 .mk-pl-chip.is-implement { background: var(--status-doing-bg); color: var(--status-doing); }
 .mk-pl-chip.is-ship { background: var(--status-review-bg); color: var(--status-review); }
+
+/* ── cumulative-stepper picker (BACI-283) ── */
+.mk-pl-procmenu-sub {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--fg-3); padding: 12px 8px 4px;
+}
+.mk-pl-stepper {
+  display: flex; align-items: flex-start; justify-content: center;
+  gap: 0; padding: 10px 8px 4px; flex-wrap: wrap;
+}
+.mk-pl-stepnode-wrap {
+  display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0;
+}
+.mk-pl-stepnode {
+  display: inline-flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 7px 10px; border-radius: var(--radius-md); cursor: pointer;
+  border: 1px solid var(--border-1); background: var(--bg-1);
+}
+.mk-pl-stepnode:hover { border-color: var(--border-2); }
+.mk-pl-stepnode.is-optional { border-style: dashed; }
+.mk-pl-stepglyph {
+  font-family: var(--font-mono); font-size: 13px; font-weight: 700;
+  width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-full); background: var(--ink-50); color: var(--fg-3);
+}
+.mk-pl-steplbl { font-size: 11px; font-weight: 600; color: var(--fg-3); }
+/* filled (selected-up-to or design-on) nodes carry the stage colour */
+.mk-pl-stepnode.is-active .mk-pl-steplbl { color: var(--fg-1); }
+.mk-pl-stepnode.is-active.is-plan .mk-pl-stepglyph { background: var(--status-todo-bg); color: var(--status-todo); }
+.mk-pl-stepnode.is-active.is-plan_large .mk-pl-stepglyph { background: var(--status-todo-bg); color: var(--status-todo); }
+.mk-pl-stepnode.is-active.is-design .mk-pl-stepglyph { background: var(--status-claude-bg); color: var(--status-claude); }
+.mk-pl-stepnode.is-active.is-implement .mk-pl-stepglyph { background: var(--status-doing-bg); color: var(--status-doing); }
+.mk-pl-stepnode.is-active.is-ship .mk-pl-stepglyph { background: var(--status-review-bg); color: var(--status-review); }
+.mk-pl-step-conn {
+  flex: 0 0 auto; width: 20px; height: 2px; background: var(--border-1);
+  align-self: flex-start; margin: 20px 2px 0;
+}
+.mk-pl-step-conn.is-active { background: var(--status-doing); }
+.mk-pl-stepswap {
+  font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+  padding: 2px 6px; border-radius: var(--radius-full); cursor: pointer;
+  border: 1px solid var(--border-1); background: var(--bg-1); color: var(--fg-2);
+}
+.mk-pl-stepswap:hover { border-color: var(--border-2); color: var(--fg-1); }
+.mk-pl-stepopt { font-size: 10px; color: var(--fg-4); }
+.mk-pl-steppreview {
+  display: flex; align-items: center; gap: 8px; justify-content: center;
+  padding: 8px; font-size: 12.5px;
+}
+.mk-pl-steppreview-lbl {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--fg-3);
+}
+.mk-pl-steppreview-val { font-weight: 600; color: var(--fg-1); }
+.mk-pl-procopt.is-confirm {
+  justify-content: center; background: var(--status-doing-bg); color: var(--status-doing);
+  font-weight: 700;
+}
+.mk-pl-procopt.is-confirm:hover { background: var(--status-doing-bg); filter: brightness(0.97); }
 
 .mk-pl-shipping-tools { flex-shrink: 0; }
 

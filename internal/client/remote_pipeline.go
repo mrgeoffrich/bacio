@@ -27,7 +27,7 @@ func (c *remoteClient) ReorderIssue(ctx context.Context, repo *model.Repo, key s
 	return &out, nil
 }
 
-func (c *remoteClient) SetIssueProcess(ctx context.Context, repo *model.Repo, key, process string, dryRun bool) ([]*model.PipelineJob, error) {
+func (c *remoteClient) SetIssueProcess(ctx context.Context, repo *model.Repo, key, process string, stages []string, dryRun bool) ([]*model.PipelineJob, error) {
 	canonical, err := c.ResolveIssueKey(ctx, repo, key)
 	if err != nil {
 		return nil, err
@@ -37,7 +37,14 @@ func (c *remoteClient) SetIssueProcess(ctx context.Context, repo *model.Repo, ke
 	if dryRun {
 		q.Set("dry_run", "true")
 	}
-	body := map[string]any{"key": canonical, "process": process}
+	// Send exactly one of process / stages so the server's mutual-exclusion
+	// guard sees the same shape the local client resolves.
+	body := map[string]any{"key": canonical}
+	if len(stages) > 0 {
+		body["stages"] = stages
+	} else {
+		body["process"] = process
+	}
 	var out []*model.PipelineJob
 	if err := c.do(ctx, http.MethodPost, "/repos/"+prefix+"/issues/"+canonical+"/process", q, body, &out); err != nil {
 		return nil, err

@@ -7,7 +7,7 @@ import QuestionModal from './QuestionModal.jsx';
 import ShippedPopover from './ShippedPopover.jsx';
 import { documentPath } from '../lib/routes';
 import prLabel from '../lib/prLabel';
-import { PIPELINE_PROCESSES, stageLabel, isShipStage } from '../lib/pipelineProcesses';
+import { PRESET_BY_SLUG, stageLabel, stageGlyph, isShipStage } from '../lib/pipelineProcesses';
 import * as api from '../api';
 
 // PipelineView (Phase 4) — the real three-column pipeline board, keyed on
@@ -533,7 +533,7 @@ function StageCard({
       {showProcessMenu ? (
         <ProcessMenu
           dimmedHasProcess={hasProcess}
-          onPick={(slug) => { setPicking(false); onSetProcess?.(card.key, slug); }}
+          onPick={(selection) => { setPicking(false); onSetProcess?.(card.key, selection); }}
           onCancel={hasProcess ? () => setPicking(false) : null}
         />
       ) : (
@@ -708,32 +708,140 @@ function QuestionPanel({ question, onOpenQuestion }) {
   );
 }
 
+// PROCESS_SPINE describes the cumulative-stepper picker: an optional
+// leading Design node, a Plan ⇄ Large-Plan swap node, then Implement, then
+// the Ship hand-off. Clicking a spine node fills the prefix up to it
+// (selectedUpTo); the Design toggle and Plan-variant swap mutate their own
+// bits without moving the boundary. The spine starts at index 1 so the
+// optional Design node can sit ahead of the cumulative spine.
+const PROCESS_SPINE = [
+  { key: 'design', optional: true },              // index 0 — optional leading node
+  { key: 'plan', swap: 'plan_large' },            // index 1 — Plan / Large Plan swap
+  { key: 'implement' },                           // index 2
+  { key: 'ship' },                                // index 3 — hand-off sentinel
+];
+const SPINE_PLAN_IDX = 1;
+
 // ProcessMenu — the "pick a process" overlay shown over a freshly-entered
-// card (no chain yet) or when editing. The issue card sits dimmed under
-// the scrim.
+// card (no chain yet) or when editing. A single cumulative stepper line
+// covers the prefix combinations; the two skip-Plan presets keep their own
+// buttons below (a strict prefix can't express "Implement without Plan").
+// The issue card sits dimmed under the scrim.
 function ProcessMenu({ dimmedHasProcess, onPick, onCancel }) {
+  // selectedUpTo defaults to Implement so the common chain is a single
+  // Confirm; designOn off and Plan (not Large) by default.
+  const [selectedUpTo, setSelectedUpTo] = useState(2);
+  const [designOn, setDesignOn] = useState(false);
+  const [planVariant, setPlanVariant] = useState('plan');
+  const [hovered, setHovered] = useState(null);
+
+  // resolveStages computes the ordered chain for a given boundary: the
+  // optional Design node (if on) ahead of the spine, then every spine node
+  // from Plan up to `upTo`, mapping the Plan node to the chosen variant.
+  const resolveStages = useCallback((upTo) => {
+    const out = [];
+    if (designOn) out.push('design');
+    for (let i = SPINE_PLAN_IDX; i <= upTo; i++) {
+      const node = PROCESS_SPINE[i];
+      out.push(node.key === 'plan' ? planVariant : node.key);
+    }
+    return out;
+  }, [designOn, planVariant]);
+
+  const preview = resolveStages(hovered != null ? hovered : selectedUpTo);
+  const previewLabel = preview.map(stageLabel).join(' → ');
+
   return (
     <div className="mk-pl-procmenu">
       <div className="mk-pl-procmenu-title">
         {dimmedHasProcess ? 'Replace the process' : 'Pick a process'}
       </div>
-      {PIPELINE_PROCESSES.map(p => (
-        <button
-          key={p.slug}
-          type="button"
-          className="mk-pl-procopt"
-          onClick={() => onPick(p.slug)}
-        >
-          <span>{p.name}</span>
-          <span className="mk-pl-procopt-seq">
-            {p.stages.map((s, i) => (
-              <span key={i} className={`mk-pl-chip is-${isShipStage(s) ? 'ship' : s}`}>
-                {stageLabel(s).charAt(0)}
-              </span>
-            ))}
-          </span>
-        </button>
-      ))}
+
+      <div className="mk-pl-stepper" onMouseLeave={() => setHovered(null)}>
+        {PROCESS_SPINE.map((node, i) => {
+          const isDesign = node.optional;
+          const active = isDesign
+            ? designOn
+            : i <= selectedUpTo && i >= SPINE_PLAN_IDX;
+          const mode = node.key === 'plan' ? planVariant : node.key;
+          // The Design node is a standalone toggle; the spine nodes are
+          // click-to-here boundary setters.
+          const onClick = isDesign
+            ? () => setDesignOn(v => !v)
+            : () => setSelectedUpTo(i);
+          return (
+            <React.Fragment key={node.key}>
+              {i > 0 && (
+                <span className={`mk-pl-step-conn${active ? ' is-active' : ''}`} />
+              )}
+              <div className="mk-pl-stepnode-wrap">
+                <button
+                  type="button"
+                  className={`mk-pl-stepnode is-${mode}${active ? ' is-active' : ''}${isDesign ? ' is-optional' : ''}`}
+                  onClick={onClick}
+                  onMouseEnter={() => !isDesign && setHovered(i)}
+                  title={isDesign
+                    ? (designOn ? 'Design on — click to drop it' : 'Add an optional Design stage up front')
+                    : `Run up to ${stageLabel(mode)}`}
+                >
+                  <span className="mk-pl-stepglyph">{stageGlyph(mode)}</span>
+                  <span className="mk-pl-steplbl">{stageLabel(mode)}</span>
+                </button>
+                {node.swap && (
+                  <button
+                    type="button"
+                    className="mk-pl-stepswap"
+                    onClick={() => setPlanVariant(v => v === 'plan' ? 'plan_large' : 'plan')}
+                    title={planVariant === 'plan' ? 'Swap to Large Plan' : 'Swap to Plan'}
+                  >
+                    ⇄ {planVariant === 'plan' ? 'Large' : 'Plan'}
+                  </button>
+                )}
+                {isDesign && (
+                  <span className="mk-pl-stepopt">{designOn ? 'on' : 'optional'}</span>
+                )}
+              </div>
+            </React.Fragment>
+          );
+        })}
+      </div>
+
+      <div className="mk-pl-steppreview">
+        <span className="mk-pl-steppreview-lbl">Will run</span>
+        <span className="mk-pl-steppreview-val">{previewLabel}</span>
+      </div>
+
+      <button
+        type="button"
+        className="mk-pl-procopt is-confirm"
+        onClick={() => onPick({ stages: resolveStages(selectedUpTo) })}
+      >
+        Confirm
+      </button>
+
+      <div className="mk-pl-procmenu-sub">Skip Plan</div>
+      {['implement', 'implement-ship'].map(slug => {
+        const p = PRESET_BY_SLUG[slug];
+        if (!p) return null;
+        return (
+          <button
+            key={slug}
+            type="button"
+            className="mk-pl-procopt"
+            onClick={() => onPick({ process: slug })}
+          >
+            <span>{p.name}</span>
+            <span className="mk-pl-procopt-seq">
+              {p.stages.map((s, i) => (
+                <span key={i} className={`mk-pl-chip is-${isShipStage(s) ? 'ship' : s}`}>
+                  {stageGlyph(s)}
+                </span>
+              ))}
+            </span>
+          </button>
+        );
+      })}
+
       {onCancel && (
         <button type="button" className="mk-pl-procopt is-cancel" onClick={onCancel}>
           Cancel

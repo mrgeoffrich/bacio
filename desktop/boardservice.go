@@ -865,13 +865,17 @@ func (b *BoardService) ReorderCard(repoPrefix, key string, position int) (BoardC
 	return cardFromIssue(iss, iss.Taken), nil
 }
 
-func (b *BoardService) SetCardProcess(repoPrefix, key, process string) ([]*model.PipelineJob, error) {
+// SetCardProcess materialises a card's job chain from either a preset
+// slug (process) or an explicit ordered stage list (stages) — mutually
+// exclusive. The cumulative-stepper picker sends stages; the kept
+// skip-Plan preset buttons send a slug.
+func (b *BoardService) SetCardProcess(repoPrefix, key, process string, stages []string) ([]*model.PipelineJob, error) {
 	ctx := context.Background()
 	repo, err := b.resolveRepoForKey(ctx, repoPrefix, key)
 	if err != nil {
 		return nil, err
 	}
-	return b.client.SetIssueProcess(ctx, repo, key, process, false)
+	return b.client.SetIssueProcess(ctx, repo, key, process, stages, false)
 }
 
 func (b *BoardService) StartCardJob(repoPrefix, key string) ([]*model.PipelineJob, error) {

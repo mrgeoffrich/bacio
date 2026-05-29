@@ -33,15 +33,16 @@ func (c *localClient) ReorderIssue(ctx context.Context, repo *model.Repo, key st
 	return c.store.GetIssueByID(iss.ID)
 }
 
-// SetIssueProcess assigns a preset process and returns the materialised
-// job chain. The dry-run projection mirrors the rows that would be
-// created without writing them.
-func (c *localClient) SetIssueProcess(ctx context.Context, repo *model.Repo, key, process string, dryRun bool) ([]*model.PipelineJob, error) {
+// SetIssueProcess assigns a process — from either a preset slug or an
+// explicit ordered stage list — and returns the materialised job chain.
+// The dry-run projection mirrors the rows that would be created without
+// writing them.
+func (c *localClient) SetIssueProcess(ctx context.Context, repo *model.Repo, key, process string, stages []string, dryRun bool) ([]*model.PipelineJob, error) {
 	iss, err := c.GetIssueByKey(ctx, repo, key)
 	if err != nil {
 		return nil, err
 	}
-	proc, err := model.ProcessBySlug(process)
+	proc, err := model.ResolveProcess(process, stages)
 	if err != nil {
 		return nil, err
 	}

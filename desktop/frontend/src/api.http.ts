@@ -2664,14 +2664,25 @@ export async function reorderCard(
   return cardFromIssue(iss);
 }
 
+// ProcessSelection mirrors the lib/pipelineProcesses discriminated type
+// (parallel shape — see the header note on why api.http.ts doesn't
+// import). The cumulative-stepper picker sends an explicit stage list;
+// the kept skip-Plan buttons send a preset slug.
+type ProcessSelection = { stages: string[] } | { process: string };
+
 export async function setCardProcess(
   repoPrefix: string,
   key: string,
-  process: string,
+  selection: ProcessSelection,
 ): Promise<PipelineJob[]> {
+  // Send exactly one of stages / process so the server's mutual-exclusion
+  // guard sees the same shape the desktop seam does.
+  const body: Record<string, unknown> = { key };
+  if ('stages' in selection) body.stages = selection.stages;
+  else body.process = selection.process;
   return await call<PipelineJob[]>(`/repos/${repoPrefix}/issues/${key}/process`, {
     method: 'POST',
-    body: { key, process },
+    body,
   });
 }
 

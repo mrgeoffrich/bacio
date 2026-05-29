@@ -61,7 +61,9 @@ func (d deps) handleIssueReorder(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleIssueProcess — POST /repos/{prefix}/issues/{key}/process. Assigns
-// a preset process, materialising the card's pending job chain.
+// a process, materialising the card's pending job chain. Accepts either a
+// preset slug (process) or an explicit ordered stage list (stages) —
+// mutually exclusive (model.ResolveProcess).
 func (d deps) handleIssueProcess(w http.ResponseWriter, r *http.Request) {
 	repo, ok := resolveRepoFromPath(w, r, d.store)
 	if !ok {
@@ -76,9 +78,13 @@ func (d deps) handleIssueProcess(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
 		return
 	}
-	proc, err := model.ProcessBySlug(in.Process)
+	proc, err := model.ResolveProcess(in.Process, in.Stages)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), map[string]any{"field": "process"})
+		field := "process"
+		if len(in.Stages) > 0 {
+			field = "stages"
+		}
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), map[string]any{"field": field})
 		return
 	}
 	iss, ok := resolveIssueOnRepo(w, r, d.store, repo)
