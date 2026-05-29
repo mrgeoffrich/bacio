@@ -1,5 +1,5 @@
 import React from 'react';
-import { Search, Plus, Columns3, GitBranch, Settings, X, Zap, Lock, MessageSquare, AlertTriangle, Minimize2, Maximize2, SkipForward, Pin, ChevronsDownUp, ChevronsUpDown, RefreshCw, FileText, GitPullRequest, Crown } from 'lucide-react';
+import { Search, Plus, Columns3, GitBranch, Settings, X, Zap, Lock, MessageSquare, AlertTriangle, Minimize2, Maximize2, SkipForward, Pin, ChevronsDownUp, ChevronsUpDown, RefreshCw, FileText, GitPullRequest, Crown, Trash2 } from 'lucide-react';
 
 // Glyphs come from lucide-react; the UI references them by short name
 // via <Icon name="..." />. The wrapper span (.mk-icon) sizes them, so the SVG's
@@ -43,6 +43,9 @@ const ICONS = {
   // kanban cards with a `plan`-typed doc linked, and for the
   // prominent header link on the issue workspace.
   plan: FileText,
+  // BACI-268: trash glyph for the Pipeline drag-to-cancel bin — drop a
+  // card onto it to transition the issue to `cancelled`.
+  trash: Trash2,
   // BACI-239: pull-request glyph for the per-card "Open PR" affordance
   // on kanban cards with at least one PR attached. Sibling of `plan`
   // — sits next to it on the card.

@@ -1887,6 +1887,47 @@ body { margin: 0; }
   background: var(--sky-50);
 }
 
+/* BACI-268: drag-to-cancel trash bin, pinned to the viewport's bottom-right
+   corner — the same corner the Activity tray anchors to. The tray is lifted
+   above the bin (see --mk-trash-clearance, applied to .mk-tray /
+   .mk-tray-badge) so the two stack rather than overlap: bin in the corner,
+   tray directly above it. A dashed chip in the muted palette that lights up
+   in the danger tone on drag-over — semantically a cancel, so it borrows
+   --status-blocked rather than the columns' sky tone. Not draggable;
+   pointer-events stay default so it receives the drop. */
+.mk-pl-trash {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 41; /* above the tray's z-index 40 so the bin always receives the drop */
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border: 1px dashed var(--border-2);
+  border-radius: var(--radius-lg);
+  background: var(--bg-3);
+  color: var(--fg-3);
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: var(--shadow-2);
+  transition: border-color .12s, background .12s, color .12s;
+}
+.mk-pl-trash svg { width: 16px; height: 16px; }
+.mk-pl-trash.is-drop {
+  border-color: var(--status-blocked);
+  background: var(--status-blocked-bg);
+  color: var(--status-blocked);
+}
+/* BACI-268: on the Pipeline route the trash bin owns the bottom-right
+   corner (bottom: 20px, ~36px tall), so lift the bottom-right Activity tray
+   — and its collapsed badge — to stack above it. Scoped to .is-pipeline so
+   every other route keeps the tray in the corner where no bin renders. */
+.mk-app.is-pipeline .mk-tray,
+.mk-app.is-pipeline .mk-tray-badge {
+  bottom: 68px;
+}
+
 .mk-pl-col-head {
   display: flex;
   align-items: center;
