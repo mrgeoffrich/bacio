@@ -11,7 +11,7 @@ import {
   readSidebarCollapsed, persistSidebarCollapsed,
   DEFAULT_SORT,
 } from './DocsPersistence';
-import { documentPath } from '../lib/routes';
+import { documentPath, viewPath } from '../lib/routes';
 
 // DocsView (BACI-204) — desktop document browser + editor, redesigned
 // as a three-pane faceted library that scales to hundreds of docs
@@ -196,10 +196,11 @@ export default function DocsView({ activeBoard, onOpenIssue }) {
 
   // BACI-203: navigate to the document URL so reload/deep-link work.
   // The URL change also feeds back into the decodedSlug effect to keep
-  // selected in sync without a double-setState.
+  // selected in sync without a double-setState. BACI-285: the doc routes
+  // are scoped to the active repo prefix.
   const onSelectDoc = useCallback((filename) => {
-    navigate(filename ? documentPath(filename) : '/documents');
-  }, [navigate]);
+    navigate(filename ? documentPath(activeBoard, filename) : viewPath(activeBoard, 'docs'));
+  }, [navigate, activeBoard]);
 
   const selectedDoc = useMemo(
     () => docs.find((d) => d.filename === selected) ?? null,

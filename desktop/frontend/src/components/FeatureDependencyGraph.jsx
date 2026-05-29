@@ -63,9 +63,9 @@ export default function FeatureDependencyGraph({ repoPrefix, slug }) {
     (_evt, node) => {
       const key = node?.data?.issueKey;
       if (!key) return;
-      navigate(issuePath(key));
+      navigate(issuePath(repoPrefix, key));
     },
-    [navigate],
+    [navigate, repoPrefix],
   );
 
   // BACI-236: keep the custom node type stable across renders so

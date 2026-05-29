@@ -34,13 +34,15 @@ export default function Topbar({ boards, activeBoard, onPickBoard, onAddReposito
   // useLocation re-renders on every navigation so the segmented
   // button's `is-active` class stays in lockstep. The breadcrumb
   // pill is derived from the same pathname — when the workspace
-  // route is mounted, the path matches `/issues/:key` and the key is
-  // pulled directly off the path so the breadcrumb doesn't need a
+  // route is mounted, the path matches `/<prefix>/issues/:key` and the
+  // key is pulled directly off the path so the breadcrumb doesn't need a
   // separate prop.
   const location = useLocation();
   const navigate = useNavigate();
   const activeView = viewFromPath(location.pathname) || 'board';
-  const issueMatch = location.pathname.match(/^\/issues\/([^/]+)$/);
+  // BACI-285: the workspace path now carries the repo prefix as its
+  // first segment (`/<prefix>/issues/:key`).
+  const issueMatch = location.pathname.match(/^\/[^/]+\/issues\/([^/]+)$/);
   const openIssueKey = issueMatch ? issueMatch[1] : null;
   const board = boards.find(b => b.prefix === activeBoard);
   const syncEnabled = !!board?.syncEnabled;
@@ -102,8 +104,12 @@ export default function Topbar({ boards, activeBoard, onPickBoard, onAddReposito
             <button
               className={`mk-segmented-btn ${activeView === view ? 'is-active' : ''}`}
               onClick={() => {
+                // BACI-285: no-op when no real repo is active (the
+                // repo-not-found / no-repos screen) so we don't navigate
+                // to a prefix-less `//<view>` path.
+                if (!activeBoard) return;
                 if (onBeforeNavigate) onBeforeNavigate();
-                navigate(viewPath(view));
+                navigate(viewPath(activeBoard, view));
               }}
             >
               {label}

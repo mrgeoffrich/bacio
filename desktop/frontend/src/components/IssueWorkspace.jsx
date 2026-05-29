@@ -163,7 +163,7 @@ export default function IssueWorkspace({
         */}
         {issueMeta.latestPlan && (
           <Link
-            to={documentPath(issueMeta.latestPlan.filename)}
+            to={documentPath(activeBoard, issueMeta.latestPlan.filename)}
             className="mk-workspace-plan-link"
             title={`Open plan: ${issueMeta.latestPlan.filename}`}
           >
@@ -228,6 +228,7 @@ export default function IssueWorkspace({
                   <LinkedDocPanel
                     key={`${d.filename}:${(d.linkedVia || []).join('+')}`}
                     doc={d}
+                    activeBoard={activeBoard}
                   />
                 ))}
               </div>

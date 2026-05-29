@@ -32,7 +32,7 @@ function formatBytes(n) {
 // as the issue's plan (the BACI-87 confusion). So: surface "(issue +
 // feature)" when both, "(via feature/<slug>)" when feature-only, and
 // nothing when it's the issue's own link.
-export default function LinkedDocPanel({ doc }) {
+export default function LinkedDocPanel({ doc, activeBoard }) {
   const via = doc.linkedVia || [];
   const featureVia = via.find(v => v.startsWith('feature/'));
   const viaLabel = via.includes('issue')
@@ -44,7 +44,7 @@ export default function LinkedDocPanel({ doc }) {
       <div className="mk-linked-doc-head">
         <span className="mk-attachment-badge">{doc.type || 'doc'}</span>
         <Link
-          to={documentPath(doc.filename)}
+          to={documentPath(activeBoard, doc.filename)}
           className="mk-attachment-name mk-attachment-link"
         >
           {doc.filename}

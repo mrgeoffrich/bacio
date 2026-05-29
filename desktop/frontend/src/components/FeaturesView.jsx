@@ -296,8 +296,8 @@ export default function FeaturesView({ activeBoard, onChangeHidden }) {
   useEffect(() => {
     if (!repoSelected || visible.length === 0) return;
     const currentInView = visible.some((f) => f.slug === selected);
-    if (!currentInView) navigate(featurePath(visible[0].slug), { replace: true });
-  }, [visible, selected, repoSelected, navigate]);
+    if (!currentInView) navigate(featurePath(activeBoard, visible[0].slug), { replace: true });
+  }, [visible, selected, repoSelected, navigate, activeBoard]);
 
   if (!repoSelected) {
     return (
@@ -370,7 +370,7 @@ export default function FeaturesView({ activeBoard, onChangeHidden }) {
                 key={f.slug}
                 feature={f}
                 isActive={selected === f.slug}
-                onSelect={() => navigate(featurePath(f.slug))}
+                onSelect={() => navigate(featurePath(activeBoard, f.slug))}
               />
             ))
           )}
@@ -753,7 +753,7 @@ function FeatureOverviewSections({
         )}
       </section>
 
-      <FeatureLinkedDocsSection documents={detail.documents ?? []} />
+      <FeatureLinkedDocsSection activeBoard={activeBoard} documents={detail.documents ?? []} />
 
       <FeatureCommentsSection
         repoPrefix={activeBoard}
@@ -916,7 +916,7 @@ function FeatureBranchEditor({
 // the section is present-as-empty and doesn't pop in when the first doc
 // lands. Uses .mk-linked-doc + .mk-attachment-* from app.css /
 // desktop.css so no new CSS is needed.
-function FeatureLinkedDocsSection({ documents }) {
+function FeatureLinkedDocsSection({ activeBoard, documents }) {
   return (
     <section className="mk-features-section">
       <div className="mk-features-label">Documents · {documents.length}</div>
@@ -929,7 +929,7 @@ function FeatureLinkedDocsSection({ documents }) {
               <div className="mk-linked-doc-head">
                 <span className="mk-attachment-badge">{d.type || 'doc'}</span>
                 <Link
-                  to={documentPath(d.filename)}
+                  to={documentPath(activeBoard, d.filename)}
                   className="mk-attachment-name mk-attachment-link"
                 >
                   {d.filename}

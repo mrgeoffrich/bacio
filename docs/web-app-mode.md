@@ -376,7 +376,7 @@ deferred:
 
 ---
 
-## 7a. Routing — BrowserRouter on both surfaces (BACI-203)
+## 7a. Routing — BrowserRouter on both surfaces (BACI-203, BACI-285)
 
 Every top-level screen and per-entity detail has a real URL. The same
 `react-router` v7 `<BrowserRouter>` drives both `bacio web` and the
@@ -384,24 +384,56 @@ Wails desktop app — refresh / back-forward / deep-link / shareable
 URLs all work without surface-specific code. Retired the BACI-54
 hash route — `<BrowserRouter>` is its strict superset.
 
-- **The route map.**
-  - `/issues` → kanban (the `Board` view).
-  - `/issues/:key` → `IssueWorkspace` for that key.
-  - `/features`, `/features/:slug` → `FeaturesView` with the slug
-    pre-selected when present.
-  - `/docs`, `/docs/:slug` → `DocsView` with the filename pre-selected.
-    The `:slug` segment carries a `documentPath`-encoded filename, so
-    dots / unusual characters survive the round-trip.
-  - `/agents` → `AgentsView`.
-  - `/history` → `HistoryView`.
-  - `/` redirects to `/issues`; unknown paths fall back to the same
-    redirect so refreshes / stray links don't strand the user.
+BACI-285 scoped every page route to the active repo's four-letter
+prefix as its first segment (`/<PREFIX>/<page>`), so a link is
+self-contained: opening `/ui/BACI/pipeline` selects the BACI repo and
+the Pipeline page in one go. The **prefix segment is the source of
+truth for the active repo** — `App` derives the active repo from
+`location.pathname` rather than from `localStorage`.
+
+- **The route map** (every page nested under the `/:prefix` segment):
+  - `/:prefix/pipeline` → the Pipeline view (the driving surface).
+  - `/:prefix/issues/:key` → `IssueWorkspace` for that key.
+  - `/:prefix/features`, `/:prefix/features/:slug` → `FeaturesView`
+    with the slug pre-selected when present.
+  - `/:prefix/documents`, `/:prefix/documents/:slug` → `DocsView` with
+    the filename pre-selected. The `:slug` segment carries a
+    `documentPath`-encoded filename, so dots / unusual characters
+    survive the round-trip.
+  - `/:prefix/agents` → `AgentsView`.
+  - `/:prefix/history` → `HistoryView`.
+  - **Active-repo resolution.** App matches the URL's first segment to a
+    known board *case-insensitively* (a lowercased shared link still
+    resolves) but always emits the canonical uppercase prefix in
+    generated URLs. The matched board becomes the active repo; the
+    decision is deferred while the boards list is still loading so a
+    valid prefix doesn't 404 itself on a cold load.
+  - **Unknown prefix → hard 404.** A non-empty first segment that
+    matches no board (and isn't a recognised legacy page word) renders
+    the `RepoNotFound` screen — a "Repository &lt;prefix&gt; not found"
+    empty state with the board list to jump back into the app.
+  - **Prefix-less / bare paths → soft redirect.** Bare `/` and stale
+    prefix-less legacy links (`/pipeline`, `/issues/BACI-1`, …)
+    redirect to the fallback repo (the validated `localStorage` pick if
+    it still exists, else the first board), preserving the page path so
+    the recipient lands on the same screen. An unknown page *under a
+    valid prefix* falls back to that repo's Pipeline.
+- **Repo switch re-routes.** Picking a repo from the topbar `RepoPicker`
+  (or the `RepoNotFound` board list) swaps the prefix segment and keeps
+  the current page — `/BACI/features` → pick MINI → `/MINI/features`. On
+  a detail route the trailing entity segment is dropped because the path
+  builder emits the list/page root only (`/BACI/issues/BACI-100` → pick
+  MINI → `/MINI/pipeline`). `localStorage['bacio-active-repo']` is still
+  written (so a fresh prefix-less `/ui/` knows where to redirect) but is
+  no longer the runtime source of truth.
 - **Basename derivation.** `main.tsx` reads
   `import.meta.env.BASE_URL.replace(/\/$/, '')` into `<BrowserRouter
   basename={...}>`. This evaluates to `/ui` in web mode (matches the
   `bacio web` mount under `/ui/`) and the empty string in desktop
   mode (Wails serves the bundle at `/`). One source tree drives both
-  targets — Vite's `base` and the router's `basename` stay coupled.
+  targets — Vite's `base` and the router's `basename` stay coupled. The
+  repo prefix sits *inside* the basename, so `/ui/BACI/pipeline` (web)
+  and `/BACI/pipeline` (desktop) share one `<Routes>` block.
 - **SPA-fallback contract.** The router needs an asset server that
   returns `index.html` for every unknown non-asset path under the
   root. `internal/api/static.go::handleUI` does this for `bacio web`
@@ -410,37 +442,47 @@ hash route — `<BrowserRouter>` is its strict superset.
   `application.AssetFileServerFS` in `desktop/main.go`, which
   implements the same SPA fallback. If a future Wails v3 release
   breaks that, the fallback is `<HashRouter>` everywhere with the
-  same path shapes (`#/issues/BACI-100`) — a one-line change in
-  `main.tsx`, no other code touched.
-- **Keys-only URLs.** Issue keys (`/issues/BACI-100`) encode their
-  repo in the prefix already, so the URL doesn't repeat it. The
-  active repo lives in `localStorage` (`bacio-active-repo`); a deep
-  link to a key that belongs to a different repo lands on the
-  workspace skeleton until the user picks the matching repo from the
-  picker — same behaviour the BACI-54 hash route had for an unloaded
-  repo. Cross-repo sharing via `?repo=BACI` is a deferred follow-up.
+  same path shapes (`#/BACI/issues/BACI-100`) — a one-line change in
+  `main.tsx`, no other code touched. The fallback is *prefix-agnostic*
+  on the Go side: both asset servers serve `index.html` for any
+  non-asset path under the root, so `/ui/BACI/pipeline` already serves
+  the bundle and the client decides (after boards load) whether the
+  prefix is real — there is no server-side per-prefix 404.
+- **Prefixed URLs.** A deep link now carries its repo in the path
+  (`/ui/BACI/issues/BACI-100`), so opening it selects the BACI repo and
+  loads the issue without a manual pick. An *unknown* prefix renders the
+  `RepoNotFound` screen rather than a blank workspace; a prefix-less
+  legacy link soft-redirects to the active repo (see the route map
+  above). This supersedes the BACI-203 "keys-only URLs" trade-off where
+  the active repo lived only in `localStorage` and a foreign key landed
+  on the workspace skeleton until the recipient picked the matching repo.
 - **Path helpers.** `desktop/frontend/src/lib/routes.ts` is the single
   source of truth for path shapes — `viewPath`, `issuePath`,
-  `featurePath`, `documentPath`. Every callsite that needs a path
-  imports from here rather than template-stringing inline. The
-  smoke test in `lib/__tests__/routes.smoketest.mjs` (plain Node +
-  assert, the existing pattern) covers the helpers.
+  `featurePath`, `documentPath` (each takes the active repo `prefix` as
+  its first argument under BACI-285), plus `prefixFromPath` (read the
+  active prefix off a pathname) and `viewFromPath` (skip the prefix
+  segment, classify the page). Every callsite that needs a path imports
+  from here rather than template-stringing inline. The smoke test in
+  `lib/__tests__/routes.smoketest.mjs` (plain Node + assert, the
+  existing pattern) covers the helpers.
 - **localStorage keeps its job.** Per-view UI state (board horizontal
   scroll, column collapse / compact, pinned-keys, theme, active
   repo) stays in `localStorage`. These are per-user preferences, not
   addressable state, and don't belong on a shareable URL. The URL
   carries only the path.
 - **Topbar derives the active view from `useLocation`.** The
-  segmented `Issues / Features / Documents / Agents / History`
-  buttons highlight the matching segment via `viewFromPath`
-  (`/issues/...` → `board`, `/features/...` → `features`, ...). The
-  breadcrumb pill that surfaces while the workspace route is mounted
-  reads the key off the path directly, then calls `navigate(-1)` on
-  click — the browser back stack handles the prior view.
+  segmented `Pipeline / Features / Documents / Agents / History`
+  buttons highlight the matching segment via `viewFromPath`, which
+  skips the leading prefix segment before classifying
+  (`/BACI/issues/...` → `board`, `/BACI/features/...` → `features`, ...).
+  The breadcrumb pill that surfaces while the workspace route is mounted
+  reads the key off the path directly (`/<prefix>/issues/:key`), then
+  calls `navigate(-1)` on click — the browser back stack handles the
+  prior view.
 - **Linked-doc panels are links.** `LinkedDocPanel` no longer renders
   markdown / SVG / transcript bodies inline; it surfaces metadata + a
-  `<Link to={documentPath(filename)}>` to the canonical document
-  page. The brief assemblers (`internal/api/handlers_brief.go::briefDocContent`
+  `<Link to={documentPath(prefix, filename)}>` to the canonical
+  document page. The brief assemblers (`internal/api/handlers_brief.go::briefDocContent`
   and `internal/client/local_issue.go::briefDocContent`) strip every
   linked-doc body before serving the brief, narrowing the BACI-115
   plan/review carve-out to "never". This saves a chunk of bytes on
