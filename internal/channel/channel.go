@@ -144,6 +144,18 @@ type Source interface {
 	// (issue/agent not found, harness too old to persist subagent
 	// transcripts, etc.).
 	AttachTranscript(ctx context.Context, issueKey, agentID, note string) (string, error)
+
+	// SendNotification records a BACI-287 agent→user notification — a
+	// non-blocking, fire-and-forget message the agent fires at the user
+	// via the `send_user_notification` MCP tool. Unlike AskQuestion it
+	// parks no reply and never blocks: the source inserts the row and the
+	// channel returns a tool result immediately. issueID is the optional
+	// canonical issue key the channel parsed + validated (empty when the
+	// agent fires a ticket-less notification); body is the message. The
+	// source resolves the session / agent identity / repo on its side. An
+	// error here means the row couldn't be inserted; the channel surfaces
+	// it as an MCP tool error.
+	SendNotification(ctx context.Context, issueID, body string) error
 }
 
 // Server speaks the channel protocol over a reader/writer pair (stdin
@@ -363,14 +375,14 @@ func (s *Server) handle(ctx context.Context, msg *rpcMessage) {
 	case "ping":
 		s.reply(msg.ID, map[string]any{})
 	case "tools/list":
-		// reply / register / attach_transcript advertise
-		// unconditionally — none of them park a JSON-RPC reply, so
-		// the poller-gate reasoning that applies to ask_user_question
+		// reply / register / attach_transcript / send_user_notification
+		// advertise unconditionally — none of them park a JSON-RPC reply,
+		// so the poller-gate reasoning that applies to ask_user_question
 		// (a parked reply would never be delivered without the drain
 		// step) does not apply to them. ask_user_question only
 		// advertises when the poller is on. See ServeMCP / Run split
 		// + the BACIO_AGENT_MODE gate in internal/cli/channel.go.
-		tools := []any{replyToolSchema(), registerToolSchema(), attachTranscriptToolSchema()}
+		tools := []any{replyToolSchema(), registerToolSchema(), attachTranscriptToolSchema(), sendUserNotificationToolSchema()}
 		if s.poller {
 			tools = append(tools, askUserQuestionToolSchema())
 		}
@@ -581,6 +593,41 @@ func askUserQuestionToolSchema() map[string]any {
 	}
 }
 
+// sendUserNotificationToolSchema describes the bacio MCP
+// `send_user_notification` tool (BACI-287). Unlike ask_user_question this
+// is non-blocking and fire-and-forget — the agent tells the user something
+// and carries on immediately; nothing is returned beyond a delivery ack.
+// The description stresses that distinction so an agent reaches for
+// ask_user_question when it actually needs an answer.
+func sendUserNotificationToolSchema() map[string]any {
+	return map[string]any{
+		"name": "send_user_notification",
+		"description": "Send the user a non-blocking notification through the bacio UI — it appears in the " +
+			"notification bell (top-right, desktop / web) and the TUI Notifications tab. " +
+			"This is fire-and-forget: the call returns immediately and does NOT wait for the user. Use it to " +
+			"surface a status update, a heads-up, or a result the user should see but that doesn't need a reply " +
+			"(e.g. \"finished implementing BACI-42, PR opened\"). " +
+			"If you actually need the user to choose or answer something, use ask_user_question instead — that " +
+			"blocks until they respond. " +
+			"Pass the optional `issue_id` (e.g. \"BACI-42\") to deep-link the notification to a ticket; omit it " +
+			"for a notification that isn't about a specific issue.",
+		"inputSchema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"body": map[string]any{
+					"type":        "string",
+					"description": "The notification message. Required. Multi-line is allowed; keep it short — this is a heads-up, not a document.",
+				},
+				"issue_id": map[string]any{
+					"type":        "string",
+					"description": "Optional canonical issue key (e.g. \"BACI-42\") to deep-link the notification to a ticket. Omit for a notification not tied to a specific issue.",
+				},
+			},
+			"required": []string{"body"},
+		},
+	}
+}
+
 func (s *Server) handleToolCall(ctx context.Context, msg *rpcMessage) {
 	var head struct {
 		Name      string          `json:"name"`
@@ -599,6 +646,8 @@ func (s *Server) handleToolCall(ctx context.Context, msg *rpcMessage) {
 		s.handleAskUserQuestionCall(ctx, msg.ID, head.Arguments)
 	case "attach_transcript":
 		s.handleAttachTranscriptCall(ctx, msg.ID, head.Arguments)
+	case "send_user_notification":
+		s.handleSendUserNotificationCall(ctx, msg.ID, head.Arguments)
 	default:
 		s.replyError(msg.ID, -32602, "unknown tool: "+head.Name)
 	}
@@ -696,6 +745,48 @@ func (s *Server) handleAttachTranscriptCall(ctx context.Context, id json.RawMess
 		return
 	}
 	s.toolResult(id, false, confirmation)
+}
+
+// handleSendUserNotificationCall validates the body + optional issue key,
+// asks the source to record a notification, and returns a tool result
+// immediately. Unlike ask_user_question this is fire-and-forget — there is
+// no parked reply, no pending-map entry, and no poller gate (the tool
+// advertises unconditionally, like reply / register / attach_transcript).
+// Any failure surfaces as an MCP tool error rather than dropping the
+// JSON-RPC connection.
+func (s *Server) handleSendUserNotificationCall(ctx context.Context, id json.RawMessage, rawArgs json.RawMessage) {
+	var args struct {
+		Body    string `json:"body"`
+		IssueID string `json:"issue_id"`
+	}
+	if len(rawArgs) > 0 {
+		if err := json.Unmarshal(rawArgs, &args); err != nil {
+			s.toolResult(id, true, "invalid send_user_notification arguments: "+err.Error())
+			return
+		}
+	}
+	body := strings.TrimSpace(args.Body)
+	if body == "" {
+		s.toolResult(id, true, "send_user_notification requires a body (the message to show the user)")
+		return
+	}
+	// issue_id is optional — canonicalise it only when present so a
+	// ticket-less notification fires cleanly.
+	var issueID string
+	if raw := strings.TrimSpace(args.IssueID); raw != "" {
+		prefix, number, err := store.ParseIssueKey(raw)
+		if err != nil {
+			s.toolResult(id, true, "send_user_notification issue_id rejected: "+err.Error())
+			return
+		}
+		issueID = fmt.Sprintf("%s-%d", prefix, number)
+	}
+	if err := s.src.SendNotification(ctx, issueID, body); err != nil {
+		s.logf("bacio channel: send_user_notification: %v", err)
+		s.toolResult(id, true, "could not send notification: "+err.Error())
+		return
+	}
+	s.toolResult(id, false, "notification sent")
 }
 
 // handleAskUserQuestionCall validates the payload, asks the source

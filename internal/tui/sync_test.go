@@ -200,23 +200,26 @@ func TestSyncViewCursorBounded(t *testing.T) {
 }
 
 // TestSyncViewTabPosition: the shell inserts Sync at index 5 — between
-// History and Settings — without disturbing the Settings tab's
-// last-position invariant the existing TestSettingsCapturesInput relies
-// on.
+// History and Settings. BACI-287 appended a Notifications tab after
+// Settings (kept last so the snapshot tool's pinned Sync=5 / Settings=6
+// indices stay stable), bringing the total to 8.
 func TestSyncViewTabPosition(t *testing.T) {
 	s, repo := syncTestRepo(t)
 	m, err := NewModel(s, repo, nil, "", nil)
 	if err != nil {
 		t.Fatalf("NewModel: %v", err)
 	}
-	if len(m.tabs) != 7 {
-		t.Fatalf("expected 7 tabs, got %d", len(m.tabs))
+	if len(m.tabs) != 8 {
+		t.Fatalf("expected 8 tabs, got %d", len(m.tabs))
 	}
 	if m.tabs[5].name != "Sync" {
 		t.Errorf("tabs[5].name = %q, want Sync", m.tabs[5].name)
 	}
 	if m.tabs[6].name != "Settings" {
-		t.Errorf("tabs[6].name = %q, want Settings (last tab)", m.tabs[6].name)
+		t.Errorf("tabs[6].name = %q, want Settings", m.tabs[6].name)
+	}
+	if m.tabs[7].name != "Notifications" {
+		t.Errorf("tabs[7].name = %q, want Notifications (last tab)", m.tabs[7].name)
 	}
 }
 

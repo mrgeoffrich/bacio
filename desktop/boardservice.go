@@ -1188,6 +1188,47 @@ func (b *BoardService) SendSessionMessage(sessionID, body string) (*model.UserMe
 	})
 }
 
+// ListNotifications (BACI-287) returns the global (cross-repo) agent→user
+// notification list, newest-first — the notification bell's dropdown.
+// unreadOnly drops read rows (the bell's default); pass false for the
+// "show all" filter. limit <= 0 falls back to the store default cap.
+func (b *BoardService) ListNotifications(unreadOnly bool, limit int) ([]*model.Notification, error) {
+	rows, err := b.client.ListNotifications(context.Background(), client.NotificationListFilter{
+		UnreadOnly: unreadOnly,
+		Limit:      limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if rows == nil {
+		rows = []*model.Notification{}
+	}
+	return rows, nil
+}
+
+// CountUnreadNotifications (BACI-287) returns the cross-repo unread badge
+// count the bell polls.
+func (b *BoardService) CountUnreadNotifications() (int, error) {
+	return b.client.CountUnreadNotifications(context.Background(), nil)
+}
+
+// GetNotification (BACI-287) fetches one notification by id.
+func (b *BoardService) GetNotification(id int64) (*model.Notification, error) {
+	return b.client.GetNotification(context.Background(), id)
+}
+
+// MarkNotificationRead (BACI-287) stamps read_at on one notification —
+// the bell's per-row "mark read". Idempotent.
+func (b *BoardService) MarkNotificationRead(id int64) (*model.Notification, error) {
+	return b.client.MarkNotificationRead(context.Background(), id, false)
+}
+
+// MarkAllNotificationsRead (BACI-287) marks every unread row read,
+// cross-repo — the bell's "mark all read" footer. Returns the count flipped.
+func (b *BoardService) MarkAllNotificationsRead() (int, error) {
+	return b.client.MarkAllNotificationsRead(context.Background(), nil, false)
+}
+
 // RescueDispatch (BACI-190) posts a `from="bacio-rescue"` channel
 // event to an idle supervisor session, asking it to handle a dead
 // worker's stranded worktree INLINE. Eligibility (status pending /

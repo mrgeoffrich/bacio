@@ -939,6 +939,32 @@ export default function App() {
     return () => { clearInterval(id); };
   }, [activeBoard, shippedScope, refreshShippedCount]);
 
+  // BACI-287: notification-bell unread count. Global / cross-repo (the
+  // bell lists notifications from every repo), polled on the standard
+  // POLL_INTERVAL_MS cadence like the shipped count / leader / agents
+  // readouts so the badge stays roughly live without the dropdown being
+  // open. The bell also calls setNotifUnreadCount directly after a
+  // mark-read / mark-all so the badge updates instantly.
+  const [notifUnreadCount, setNotifUnreadCount] = useState(0);
+  const refreshNotifCount = useCallback(() => {
+    api.countUnreadNotifications()
+      .then((n) => setNotifUnreadCount(n))
+      .catch(() => { /* badge is best-effort; the dropdown surfaces failures */ });
+  }, []);
+  useEffect(() => {
+    refreshNotifCount();
+    const id = setInterval(refreshNotifCount, POLL_INTERVAL_MS);
+    return () => { clearInterval(id); };
+  }, [refreshNotifCount]);
+
+  // BACI-287: deep-link a notification row to its issue. Cross-repo — the
+  // row carries its own prefix, which may differ from the active board, so
+  // navigate to that prefix's workspace route directly.
+  const openNotificationIssue = useCallback((prefix, key) => {
+    if (!prefix || !key) return;
+    navigate(issuePath(prefix, key));
+  }, [navigate]);
+
   // BACI-240 ka-ching SFX. Hoisted out of ShippedPopover so the
   // audio fires regardless of the active view (BACI-254). The hook
   // returns a stable `play` reference; the gating (enabled flag,
@@ -1015,9 +1041,11 @@ export default function App() {
         onOpenPalette={() => setPaletteOpen(true)}
         onOpenSettings={() => { setSettingsInitialSection(null); setSettingsOpen(true); }}
         onOpenSync={openSync}
-        onOpenComposer={() => setComposerOpen(true)}
         leaderState={leaderState}
         agentCounts={agentCounts}
+        notifUnreadCount={notifUnreadCount}
+        onNotifCountChange={setNotifUnreadCount}
+        onOpenNotificationIssue={openNotificationIssue}
       />
       {loading ? (
         <div className="mk-app-state">Loading…</div>
@@ -1075,6 +1103,7 @@ export default function App() {
                   cards={cards}
                   activeBoard={activeBoard}
                   promptConfig={promptConfig}
+                  onOpenComposer={() => setComposerOpen(true)}
                   onOpenCard={openCard}
                   onOpenIssue={navigateToIssue}
                   onMoveCard={moveCard}

@@ -530,20 +530,33 @@ the mode, and the composed payload.
 
 ### Channel MCP tools
 
-The `bacio channel` MCP server exposes four tools:
+The `bacio channel` MCP server exposes five tools:
 
-| Tool                | Purpose                                                                 |
-| ------------------- | ----------------------------------------------------------------------- |
-| `reply`             | Acknowledge a dispatch (the channel-native form of `bacio agent ack`).  |
-| `register`          | Complete the session's registration (links the channel to a session id).|
-| `ask_user_question` | Surface a multi-choice clarification question to the user (BACI-53).    |
-| `attach_transcript` | Attach a completed subagent's transcript to an issue (BACI-85).         |
+| Tool                     | Purpose                                                                 |
+| ------------------------ | ----------------------------------------------------------------------- |
+| `reply`                  | Acknowledge a dispatch (the channel-native form of `bacio agent ack`).  |
+| `register`               | Complete the session's registration (links the channel to a session id).|
+| `ask_user_question`      | Surface a **blocking** multi-choice clarification question to the user (BACI-53). |
+| `attach_transcript`      | Attach a completed subagent's transcript to an issue (BACI-85).         |
+| `send_user_notification` | Fire a **non-blocking** agent→user notification into the bell (BACI-287). |
 
-`reply`, `register`, and `attach_transcript` advertise unconditionally —
-none of them park a JSON-RPC reply, so the poller-gate that defers
-`ask_user_question` (a parked reply would never be delivered without
-the drain step) does not apply to them. None of the four has a REST or
-CLI equivalent — they are channel-only.
+`reply`, `register`, `attach_transcript`, and `send_user_notification`
+advertise unconditionally — none of them park a JSON-RPC reply, so the
+poller-gate that defers `ask_user_question` (a parked reply would never
+be delivered without the drain step) does not apply to them. None of the
+five has a REST or CLI mutate-equivalent — they are channel-only (the
+notification read side — list / mark-read — is REST, but the *write* is
+channel-only).
+
+`send_user_notification` is the deliberate non-blocking sibling of
+`ask_user_question`: the agent tells the user something and carries on
+immediately (no parked reply, no `pending` entry). The user sees it in
+the notification bell (desktop / web topbar) and the TUI Notifications
+tab, with an unread badge and per-item / mark-all read. Its `issue_id`
+arg is **optional** — present, the notification deep-links to that
+ticket; absent, it's a ticket-less heads-up. Reach for it when the user
+should *see* something; reach for `ask_user_question` when you need them
+to *answer* something.
 
 ### `attach_transcript` — subagent transcript traceability (BACI-85)
 

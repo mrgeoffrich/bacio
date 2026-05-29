@@ -38,6 +38,7 @@ func Snapshot(s *store.Store, repo *model.Repo, opts SnapshotOpts) error {
 	hist := newHistoryView(s, repo)
 	sync := newSyncView(s, repo, "snapshot")
 	settings := newSettingsView(s, repo)
+	notifications := newNotificationsView(s, "snapshot")
 
 	m := &Model{
 		repo: repo,
@@ -49,6 +50,7 @@ func Snapshot(s *store.Store, repo *model.Repo, opts SnapshotOpts) error {
 			{"History", hist},
 			{"Sync", sync},
 			{"Settings", settings},
+			{"Notifications", notifications},
 		},
 		width:  opts.Width,
 		height: opts.Height,
@@ -83,6 +85,8 @@ func Snapshot(s *store.Store, repo *model.Repo, opts SnapshotOpts) error {
 		if len(settings.stages) > 0 {
 			settings.openEditor(0)
 		}
+	case "notifications":
+		m.active = 7
 	case "card-overlay", "card":
 		m.active = 0
 		if err := focusIssue(board, opts.Issue); err != nil {

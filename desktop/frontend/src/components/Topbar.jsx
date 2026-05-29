@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router';
 import Icon from './Icon.jsx';
 import RepoPicker from './RepoPicker.jsx';
 import Tooltip from './Tooltip.jsx';
+import NotificationBell from './NotificationBell.jsx';
 import { WEB_MODE } from '../env';
 import { viewPath, viewFromPath } from '../lib/routes';
 
@@ -29,7 +30,7 @@ function formatSyncTime(iso) {
   return d.toLocaleString();
 }
 
-export default function Topbar({ boards, activeBoard, onPickBoard, onAddRepository, onBeforeNavigate, onOpenPalette, onOpenSettings, onOpenSync, onOpenComposer, leaderState, agentCounts }) {
+export default function Topbar({ boards, activeBoard, onPickBoard, onAddRepository, onBeforeNavigate, onOpenPalette, onOpenSettings, onOpenSync, leaderState, agentCounts, notifUnreadCount, onNotifCountChange, onOpenNotificationIssue }) {
   // BACI-203: the active view is derived from the URL, not a prop.
   // useLocation re-renders on every navigation so the segmented
   // button's `is-active` class stays in lockstep. The breadcrumb
@@ -146,21 +147,16 @@ export default function Topbar({ boards, activeBoard, onPickBoard, onAddReposito
       </button>
 
       <div className="mk-topbar-right">
-        {/* BACI-166: + opens the IssueComposer modal. Hidden on the
-            cross-repo "all" pseudo-board — the composer needs a real
-            prefix to create against. */}
-        {onOpenComposer && activeBoard && activeBoard !== 'all' && (
-          <Tooltip label="New issue (⌘N)">
-            <button
-              type="button"
-              className="mk-icbtn"
-              aria-label="New issue"
-              onClick={onOpenComposer}
-            >
-              <Icon name="plus" />
-            </button>
-          </Tooltip>
-        )}
+        {/* BACI-287: the notification bell takes the top-right corner the
+            `+` (new issue) button used to hold — the `+` moved into the
+            Pipeline Backlog column header. The bell is global / cross-repo
+            (it lists notifications from every repo), so it isn't gated on
+            the active board. */}
+        <NotificationBell
+          unreadCount={notifUnreadCount}
+          onCountChange={onNotifCountChange}
+          onOpenIssue={onOpenNotificationIssue}
+        />
         <Tooltip label={syncBtnTooltip}>
           <button
             type="button"

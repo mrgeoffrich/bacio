@@ -63,13 +63,13 @@ import { WaitingState, WaitingKind } from '../bindings/github.com/mrgeoffrich/ba
 // controller engine advances. Lives in the model bindings; re-exported
 // below so the Pipeline page imports it from the same ./api seam as
 // everything else (parallels the WaitingState import rationale).
-import { PipelineJob } from '../bindings/github.com/mrgeoffrich/bacio/internal/model';
+import { PipelineJob, Notification } from '../bindings/github.com/mrgeoffrich/bacio/internal/model';
 // ProcessSelection (BACI-283) is the picker's discriminated handback —
 // an explicit stage list or a preset slug. Re-exported below so callers
 // pull it from the ./api seam alongside PipelineJob.
 import type { ProcessSelection } from './lib/pipelineProcesses';
 
-export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureLinkedDoc, FeaturePlan, FeaturePlanEntry, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, ArchivePreferencesDTO, AudioPreferencesDTO, WaitingState, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO, SyncSetupDTO, CollisionPreviewDTO, RenumberEntryDTO, RenameEntryDTO, RepoLinkResultDTO, ShippedIssueDTO, ShippedListDTO, LatestPlanDTO };
+export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureLinkedDoc, FeaturePlan, FeaturePlanEntry, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, ArchivePreferencesDTO, AudioPreferencesDTO, WaitingState, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO, SyncSetupDTO, CollisionPreviewDTO, RenumberEntryDTO, RenameEntryDTO, RepoLinkResultDTO, ShippedIssueDTO, ShippedListDTO, LatestPlanDTO, Notification };
 // BACI-216: cross-transport alias. The web bundle's api.http.ts ships
 // the same name from its own TS-only shape so KanbanCard / IssueWorkspace
 // stay transport-agnostic.
@@ -241,6 +241,47 @@ export async function answerSessionQuestion(id: number, answers: Record<string, 
 export async function cancelSessionQuestion(id: number) {
   try {
     return await BoardService.CancelSessionQuestion(id);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// BACI-287 notification bell. The list/count/mark wrappers back the global
+// (cross-repo) <NotificationBell> in the topbar — agent→user notifications
+// sent via the send_user_notification channel tool. listNotifications
+// defaults to unread (the bell's default view); pass unreadOnly=false for
+// "show all". markAllNotificationsRead returns the count flipped.
+export async function listNotifications(unreadOnly = true, limit = 0): Promise<Notification[]> {
+  try {
+    // The Wails binding types the slice as (Notification | null)[] because
+    // the Go element is a pointer; the store never returns nil rows, so
+    // filter defensively to land the non-null shape the bell consumes.
+    const rows = await BoardService.ListNotifications(unreadOnly, limit);
+    return (rows ?? []).filter((n): n is Notification => n != null);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+export async function countUnreadNotifications(): Promise<number> {
+  try {
+    return await BoardService.CountUnreadNotifications();
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+export async function markNotificationRead(id: number): Promise<Notification | null> {
+  try {
+    return await BoardService.MarkNotificationRead(id);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+export async function markAllNotificationsRead(): Promise<number> {
+  try {
+    return await BoardService.MarkAllNotificationsRead();
   } catch (err) {
     throw normalize(err);
   }

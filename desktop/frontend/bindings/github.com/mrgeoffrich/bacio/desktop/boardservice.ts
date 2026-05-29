@@ -172,6 +172,14 @@ export function CountShipped(repoPrefix: string, sinceDays: number): $Cancellabl
 }
 
 /**
+ * CountUnreadNotifications (BACI-287) returns the cross-repo unread badge
+ * count the bell polls.
+ */
+export function CountUnreadNotifications(): $CancellablePromise<number> {
+    return $Call.ByID(438446293);
+}
+
+/**
  * DeleteComment removes a comment from an issue and returns the
  * refreshed issue-drawer payload. The comment is addressed by its
  * immutable uuid. repoPrefix may be empty or "all" — the prefix is then
@@ -267,6 +275,15 @@ export function GetIssueBrief(repoPrefix: string, key: string): $CancellableProm
 }
 
 /**
+ * GetNotification (BACI-287) fetches one notification by id.
+ */
+export function GetNotification(id: number): $CancellablePromise<model$0.Notification | null> {
+    return $Call.ByID(2425668760, id).then(($result: any) => {
+        return $$createType13($result);
+    });
+}
+
+/**
  * GetSessionQuestion fetches one BACI-53 ask_user_question row by id.
  * Backs the desktop Agents-view modal — the AgentCard composite ships
  * only the badge metadata, so the modal does one extra round trip
@@ -291,7 +308,7 @@ export function GetSessionQuestion(id: number): $CancellablePromise<model$0.Sess
  */
 export function ListAgents(repoPrefix: string): $CancellablePromise<$models.AgentCard[]> {
     return $Call.ByID(3979848123, repoPrefix).then(($result: any) => {
-        return $$createType13($result);
+        return $$createType15($result);
     });
 }
 
@@ -301,7 +318,7 @@ export function ListAgents(repoPrefix: string): $CancellablePromise<$models.Agen
  */
 export function ListBoards(): $CancellablePromise<$models.Board[]> {
     return $Call.ByID(3235630628).then(($result: any) => {
-        return $$createType14($result);
+        return $$createType16($result);
     });
 }
 
@@ -318,7 +335,7 @@ export function ListBoards(): $CancellablePromise<$models.Board[]> {
  */
 export function ListCards(repoPrefix: string): $CancellablePromise<$models.BoardCard[]> {
     return $Call.ByID(4181487648, repoPrefix).then(($result: any) => {
-        return $$createType15($result);
+        return $$createType17($result);
     });
 }
 
@@ -329,7 +346,19 @@ export function ListCards(repoPrefix: string): $CancellablePromise<$models.Board
  */
 export function ListColumns(): $CancellablePromise<$models.BoardColumn[]> {
     return $Call.ByID(2117984856).then(($result: any) => {
-        return $$createType17($result);
+        return $$createType19($result);
+    });
+}
+
+/**
+ * ListNotifications (BACI-287) returns the global (cross-repo) agent→user
+ * notification list, newest-first — the notification bell's dropdown.
+ * unreadOnly drops read rows (the bell's default); pass false for the
+ * "show all" filter. limit <= 0 falls back to the store default cap.
+ */
+export function ListNotifications(unreadOnly: boolean, limit: number): $CancellablePromise<(model$0.Notification | null)[]> {
+    return $Call.ByID(648588779, unreadOnly, limit).then(($result: any) => {
+        return $$createType20($result);
     });
 }
 
@@ -344,7 +373,25 @@ export function ListColumns(): $CancellablePromise<$models.BoardColumn[]> {
  */
 export function ListShipped(repoPrefix: string, sinceDays: number, limit: number): $CancellablePromise<$models.ShippedListDTO> {
     return $Call.ByID(3138957880, repoPrefix, sinceDays, limit).then(($result: any) => {
-        return $$createType18($result);
+        return $$createType21($result);
+    });
+}
+
+/**
+ * MarkAllNotificationsRead (BACI-287) marks every unread row read,
+ * cross-repo — the bell's "mark all read" footer. Returns the count flipped.
+ */
+export function MarkAllNotificationsRead(): $CancellablePromise<number> {
+    return $Call.ByID(916348189);
+}
+
+/**
+ * MarkNotificationRead (BACI-287) stamps read_at on one notification —
+ * the bell's per-row "mark read". Idempotent.
+ */
+export function MarkNotificationRead(id: number): $CancellablePromise<model$0.Notification | null> {
+    return $Call.ByID(3369062611, id).then(($result: any) => {
+        return $$createType13($result);
     });
 }
 
@@ -380,7 +427,7 @@ export function RescueDispatch(dispatchID: number): $CancellablePromise<$models.
  */
 export function SendSessionMessage(sessionID: string, body: string): $CancellablePromise<model$0.UserMessage | null> {
     return $Call.ByID(23283136, sessionID, body).then(($result: any) => {
-        return $$createType20($result);
+        return $$createType23($result);
     });
 }
 
@@ -424,7 +471,7 @@ export function SetCardEngineMode(repoPrefix: string, key: string, mode: string)
  */
 export function SetCardProcess(repoPrefix: string, key: string, process: string, stages: string[]): $CancellablePromise<(model$0.PipelineJob | null)[]> {
     return $Call.ByID(3410649082, repoPrefix, key, process, stages).then(($result: any) => {
-        return $$createType23($result);
+        return $$createType26($result);
     });
 }
 
@@ -460,13 +507,13 @@ export function ShipCard(repoPrefix: string, key: string): $CancellablePromise<$
 
 export function StartCardJob(repoPrefix: string, key: string): $CancellablePromise<(model$0.PipelineJob | null)[]> {
     return $Call.ByID(2998495872, repoPrefix, key).then(($result: any) => {
-        return $$createType23($result);
+        return $$createType26($result);
     });
 }
 
 export function StopCardJob(repoPrefix: string, key: string): $CancellablePromise<(model$0.PipelineJob | null)[]> {
     return $Call.ByID(39478934, repoPrefix, key).then(($result: any) => {
-        return $$createType23($result);
+        return $$createType26($result);
     });
 }
 
@@ -516,15 +563,18 @@ const $$createType8 = $models.DefaultFeatureDTO.createFrom;
 const $$createType9 = agentcards$0.DispatchDTO.createFrom;
 const $$createType10 = $models.BoardHiddenStatesDTO.createFrom;
 const $$createType11 = $models.IssueBriefDTO.createFrom;
-const $$createType12 = agentcards$0.AgentCard.createFrom;
-const $$createType13 = $Create.Array($$createType12);
-const $$createType14 = $Create.Array($$createType2);
-const $$createType15 = $Create.Array($$createType1);
-const $$createType16 = $models.BoardColumn.createFrom;
-const $$createType17 = $Create.Array($$createType16);
-const $$createType18 = $models.ShippedListDTO.createFrom;
-const $$createType19 = model$0.UserMessage.createFrom;
-const $$createType20 = $Create.Nullable($$createType19);
-const $$createType21 = model$0.PipelineJob.createFrom;
-const $$createType22 = $Create.Nullable($$createType21);
-const $$createType23 = $Create.Array($$createType22);
+const $$createType12 = model$0.Notification.createFrom;
+const $$createType13 = $Create.Nullable($$createType12);
+const $$createType14 = agentcards$0.AgentCard.createFrom;
+const $$createType15 = $Create.Array($$createType14);
+const $$createType16 = $Create.Array($$createType2);
+const $$createType17 = $Create.Array($$createType1);
+const $$createType18 = $models.BoardColumn.createFrom;
+const $$createType19 = $Create.Array($$createType18);
+const $$createType20 = $Create.Array($$createType13);
+const $$createType21 = $models.ShippedListDTO.createFrom;
+const $$createType22 = model$0.UserMessage.createFrom;
+const $$createType23 = $Create.Nullable($$createType22);
+const $$createType24 = model$0.PipelineJob.createFrom;
+const $$createType25 = $Create.Nullable($$createType24);
+const $$createType26 = $Create.Array($$createType25);

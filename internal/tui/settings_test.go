@@ -175,10 +175,18 @@ func TestSettingsCapturesInput(t *testing.T) {
 	}
 	m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 
-	// Switch to the Settings tab (index 5) and open the editor.
-	settingsIdx := len(m.tabs) - 1
-	if m.tabs[settingsIdx].name != "Settings" {
-		t.Fatalf("expected the last tab to be Settings, got %q", m.tabs[settingsIdx].name)
+	// Switch to the Settings tab and open the editor. BACI-287 appended a
+	// Notifications tab after Settings, so the tab is no longer last —
+	// locate it by name rather than by the last-index shortcut.
+	settingsIdx := -1
+	for i, tb := range m.tabs {
+		if tb.name == "Settings" {
+			settingsIdx = i
+			break
+		}
+	}
+	if settingsIdx < 0 {
+		t.Fatalf("Settings tab not found in %d tabs", len(m.tabs))
 	}
 	m.active = settingsIdx
 	m.Update(tea.KeyMsg{Type: tea.KeyEnter}) // open the editor on stage 0

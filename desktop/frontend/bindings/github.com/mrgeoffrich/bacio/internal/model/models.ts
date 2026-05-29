@@ -264,6 +264,67 @@ export enum JobStatus {
 };
 
 /**
+ * Notification is one BACI-287 agent→user notification: a non-blocking,
+ * fire-and-forget message a running agent sends the user via the bacio
+ * channel's `send_user_notification` MCP tool. Unlike a SessionQuestion
+ * (BACI-53) it carries no answer and never blocks the agent — the channel
+ * inserts the row and returns immediately, so there is no lifecycle beyond
+ * unread→read. Local-only — never synced.
+ * 
+ * RepoID scopes the row; RepoPrefix is the repo's 4-char key, lifted by the
+ * store's join so the cross-repo bell can label each row without a second
+ * lookup. IssueID/IssueKey are optional — a present issue makes the row
+ * deep-link to that ticket. SessionPK is the agent_sessions PK of the
+ * sending session when one was registered; nil for a notification fired
+ * before the channel session registered. SourceAgent is the persistent
+ * agent identity that sent it (or the "bacio-channel" fallback).
+ * 
+ * ReadAt is the only lifecycle signal: nil = unread (counts toward the
+ * bell badge), non-nil = read.
+ */
+export class Notification {
+    "id": number;
+    "repo_id": number;
+    "repo_prefix"?: string;
+    "issue_id"?: number | null;
+    "issue_key"?: string;
+    "body": string;
+    "source_agent": string;
+    "session_pk"?: number | null;
+    "created_at": time$0.Time;
+    "read_at"?: time$0.Time | null;
+
+    /** Creates a new Notification instance. */
+    constructor($$source: Partial<Notification> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = 0;
+        }
+        if (!("repo_id" in $$source)) {
+            this["repo_id"] = 0;
+        }
+        if (!("body" in $$source)) {
+            this["body"] = "";
+        }
+        if (!("source_agent" in $$source)) {
+            this["source_agent"] = "";
+        }
+        if (!("created_at" in $$source)) {
+            this["created_at"] = null;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new Notification instance from a string or object.
+     */
+    static createFrom($$source: any = {}): Notification {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new Notification($$parsedSource as Partial<Notification>);
+    }
+}
+
+/**
  * PipelineJob is one persisted stage of a card's process chain
  * (pipeline_jobs row). Mode is a dispatch-template slug (plan,
  * implement, …) or ShipJobMode for the hand-off. DispatchID points at
