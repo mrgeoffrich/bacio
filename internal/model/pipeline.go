@@ -116,12 +116,20 @@ type Process struct {
 }
 
 // pipelineProcesses is the starter set of processes (§5.1), in menu
-// order. New presets are added here; nothing else changes.
+// order. New presets are added here; nothing else changes. The slug
+// path is retained for CLI ergonomics / back-compat — the desktop
+// picker now builds an explicit ordered stage list via ProcessFromStages
+// for arbitrary combinations, but the named presets still name the common
+// chains for `bacio issue process set <KEY> <preset>`. KEEP IN LOCKSTEP
+// with desktop/frontend/src/lib/pipelineProcesses.ts (PIPELINE_PROCESSES)
+// — same slugs, stages, order.
 var pipelineProcesses = []Process{
 	{Slug: "plan-implement-ship", Name: "Plan → Implement → Ship", Stages: []string{BuiltinTemplatePlan, BuiltinTemplateImplement, ShipJobMode}},
 	{Slug: "implement-ship", Name: "Implement → Ship", Stages: []string{BuiltinTemplateImplement, ShipJobMode}},
 	{Slug: "plan-implement", Name: "Plan → Implement", Stages: []string{BuiltinTemplatePlan, BuiltinTemplateImplement}},
 	{Slug: "plan", Name: "Plan", Stages: []string{BuiltinTemplatePlan}},
+	{Slug: "plan_large", Name: "Large Plan", Stages: []string{BuiltinTemplatePlanLarge}},
+	{Slug: "design", Name: "Design", Stages: []string{BuiltinTemplateDesign}},
 	{Slug: "implement", Name: "Implement", Stages: []string{BuiltinTemplateImplement}},
 }
 
@@ -141,4 +149,60 @@ func ProcessBySlug(slug string) (Process, error) {
 		}
 	}
 	return Process{}, fmt.Errorf("unknown pipeline process %q", slug)
+}
+
+// ProcessFromStages builds a Process from an explicit ordered stage list
+// — the construction path behind the desktop cumulative-stepper picker,
+// which can express arbitrary chains the named presets don't enumerate
+// (e.g. design → plan_large → implement → ship). It is the single
+// validation gate for a free-form chain, mirroring ProcessBySlug's role
+// for the named ones: every stage must be a known builtin template slug
+// or the Ship hand-off sentinel; Ship may appear only as the trailing
+// stage; no duplicate non-ship modes; the list must be non-empty. The
+// synthesised Slug (modes joined with "-") and Name (action labels joined
+// with " → ") are for audit / display only — nothing keys off them.
+func ProcessFromStages(stages []string) (Process, error) {
+	norm := make([]string, 0, len(stages))
+	for _, s := range stages {
+		m := strings.ToLower(strings.TrimSpace(s))
+		if m != "" {
+			norm = append(norm, m)
+		}
+	}
+	if len(norm) == 0 {
+		return Process{}, fmt.Errorf("stages must list at least one job mode")
+	}
+	allowed := make(map[string]bool, len(builtinTemplateSlugs))
+	for _, s := range BuiltinTemplateSlugs() {
+		allowed[s] = true
+	}
+	seen := make(map[string]bool, len(norm))
+	for i, m := range norm {
+		if m == ShipJobMode {
+			if i != len(norm)-1 {
+				return Process{}, fmt.Errorf("ship may only be the final stage")
+			}
+			continue
+		}
+		if !allowed[m] {
+			return Process{}, fmt.Errorf("unknown job mode %q", m)
+		}
+		if seen[m] {
+			return Process{}, fmt.Errorf("duplicate job mode %q", m)
+		}
+		seen[m] = true
+	}
+	labels := make([]string, len(norm))
+	for i, m := range norm {
+		if lbl := BuiltinTemplateActionLabel(m); lbl != "" {
+			labels[i] = lbl
+		} else {
+			labels[i] = m
+		}
+	}
+	return Process{
+		Slug:   strings.Join(norm, "-"),
+		Name:   strings.Join(labels, " → "),
+		Stages: norm,
+	}, nil
 }
