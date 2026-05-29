@@ -186,6 +186,7 @@ function renderStep1({
   const hasRepos = syncRepos && syncRepos.length > 0;
   return (
     <>
+      <div className="mk-sync-setup-body">
       <p className="mk-settings-hint">
         Project <code>{project.prefix}</code> is at{' '}
         <code>{project.path}</code>. Setup writes the project's{' '}
@@ -330,6 +331,7 @@ function renderStep1({
           {error}
         </p>
       )}
+      </div>
 
       <div className="mk-modal-actions">
         <button
@@ -361,6 +363,7 @@ function renderStep2({ previewCollisions, inFlight, error, onBack, onConfirm }) 
   const total = renumbered.length + renamed.length;
   return (
     <>
+      <div className="mk-sync-setup-body">
       <div className="mk-sync-setup-collision-banner">
         <h3 className="mk-sync-setup-collision-title">
           Cloning would renumber existing issues
@@ -409,6 +412,7 @@ function renderStep2({ previewCollisions, inFlight, error, onBack, onConfirm }) 
           {error}
         </p>
       )}
+      </div>
 
       <div className="mk-modal-actions">
         <button
