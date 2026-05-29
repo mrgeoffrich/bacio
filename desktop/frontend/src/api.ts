@@ -62,12 +62,20 @@ import { ClaimDTO } from '../bindings/github.com/mrgeoffrich/bacio/internal/agen
 // rationale: components that already import from `./api` get the
 // shape without learning a binding directory.
 import { WaitingState, WaitingKind, BoardCardFollowOn } from '../bindings/github.com/mrgeoffrich/bacio/internal/boardcards';
+// Phase 4 (Pipeline): PipelineJob is the per-stage process-chain row the
+// controller engine advances. Lives in the model bindings; re-exported
+// below so the Pipeline page imports it from the same ./api seam as
+// everything else (parallels the BoardCardFollowOn import rationale).
+import { PipelineJob } from '../bindings/github.com/mrgeoffrich/bacio/internal/model';
 
 export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureLinkedDoc, FeaturePlan, FeaturePlanEntry, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, ArchivePreferencesDTO, AudioPreferencesDTO, WaitingState, BoardCardFollowOn, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO, SyncSetupDTO, CollisionPreviewDTO, RenumberEntryDTO, RenameEntryDTO, RepoLinkResultDTO, ShippedIssueDTO, ShippedListDTO, LatestPlanDTO };
 // BACI-216: cross-transport alias. The web bundle's api.http.ts ships
 // the same name from its own TS-only shape so KanbanCard / IssueWorkspace
 // stay transport-agnostic.
 export type LatestPlan = LatestPlanDTO;
+// Phase 4 (Pipeline): re-export PipelineJob so the Pipeline page and its
+// helpers import it from ./api like every other shape.
+export type { PipelineJob };
 
 // BACI-108: cross-transport aliases — components import from `./api`
 // and stay unaware of whether they're on the Wails or HTTP seam. The
@@ -254,9 +262,10 @@ export async function addIssue(
   repoPrefix: string,
   title: string,
   description: string,
+  featureSlug = '',
 ): Promise<BoardCard> {
   try {
-    return await BoardService.AddIssue(repoPrefix, title, description);
+    return await BoardService.AddIssue(repoPrefix, title, description, featureSlug);
   } catch (err) {
     throw normalize(err);
   }
@@ -370,6 +379,124 @@ export async function setIssueState(
 ): Promise<BoardCard> {
   try {
     return await BoardService.SetIssueState(repoPrefix, key, state);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// ─── Pipeline (Phase 4) ──────────────────────────────────────────────
+// The Pipeline page's card-ordering, process-assignment, and engine
+// controls. Mirrored one-for-one in api.http.ts so PipelineView stays
+// transport-agnostic. The job-control verbs return the refreshed chain;
+// the column-changing verbs (reorder / engine-mode / ship) return the
+// updated BoardCard so the optimistic UI can reconcile.
+
+// reorderCard moves a card to a 1-based position within its (repo, state)
+// ordering band — the Backlog / Shipping drag-to-reorder.
+export async function reorderCard(
+  repoPrefix: string,
+  key: string,
+  position: number,
+): Promise<BoardCard> {
+  try {
+    return await BoardService.ReorderCard(repoPrefix, key, position);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// setCardProcess assigns a preset process (see lib/pipelineProcesses),
+// materialising the card's pending job chain. Returns the new chain.
+export async function setCardProcess(
+  repoPrefix: string,
+  key: string,
+  process: string,
+): Promise<PipelineJob[]> {
+  try {
+    // Wails maps Go []*model.PipelineJob to (PipelineJob | null)[]; the
+    // store never returns nil elements, so drop them to match the
+    // non-null contract the HTTP twin already satisfies.
+    const jobs = await BoardService.SetCardProcess(repoPrefix, key, process);
+    return (jobs ?? []).filter((j): j is PipelineJob => j != null);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// startCardJob is the manual Start control — advance one step (start the
+// next pending job, or run the Ship hand-off). Returns the refreshed chain.
+export async function startCardJob(
+  repoPrefix: string,
+  key: string,
+): Promise<PipelineJob[]> {
+  try {
+    const jobs = await BoardService.StartCardJob(repoPrefix, key);
+    return (jobs ?? []).filter((j): j is PipelineJob => j != null);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// stopCardJob is the manual Stop control — cancel the running job and
+// halt Auto. Returns the refreshed chain.
+export async function stopCardJob(
+  repoPrefix: string,
+  key: string,
+): Promise<PipelineJob[]> {
+  try {
+    const jobs = await BoardService.StopCardJob(repoPrefix, key);
+    return (jobs ?? []).filter((j): j is PipelineJob => j != null);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// setEngineMode sets the controller engine's per-card drive mode
+// ("off" | "auto") while the card is in_pipeline. Returns the updated card.
+export async function setEngineMode(
+  repoPrefix: string,
+  key: string,
+  mode: string,
+): Promise<BoardCard> {
+  try {
+    return await BoardService.SetCardEngineMode(repoPrefix, key, mode);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// shipCard is the in_pipeline → to_be_shipped hand-off (no agent — the
+// ship agent fires from the Shipping column). Returns the updated card.
+export async function shipCard(
+  repoPrefix: string,
+  key: string,
+): Promise<BoardCard> {
+  try {
+    return await BoardService.ShipCard(repoPrefix, key);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// setAutoShip toggles the per-repo Shipping-column auto-ship setting.
+// Returns the persisted value.
+export async function setAutoShip(
+  repoPrefix: string,
+  enabled: boolean,
+): Promise<boolean> {
+  try {
+    return await BoardService.SetAutoShip(repoPrefix, enabled);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// getAutoShip reads the per-repo Shipping-column auto-ship setting — the
+// DB value the controller's auto-ship ticker acts on, so the Pipeline's
+// Shipping switch seeds from the source of truth.
+export async function getAutoShip(repoPrefix: string): Promise<boolean> {
+  try {
+    return await BoardService.GetAutoShip(repoPrefix);
   } catch (err) {
     throw normalize(err);
   }

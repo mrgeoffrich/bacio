@@ -1680,3 +1680,508 @@ body { margin: 0; }
   box-shadow: var(--shadow-3);
 }
 
+/* ---------- Pipeline view ---------- */
+.mk-pipeline {
+  flex: 1;
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: 0;
+  min-height: 0;
+}
+.mk-pipeline-panel {
+  width: 304px;
+  flex-shrink: 0;
+  background: var(--paper);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  gap: 8px;
+  min-height: 0;
+  position: relative;
+  transition: width var(--dur-medium) var(--ease-out);
+}
+/* The side panels sit flush to the page edges; square off the outer
+   corners so the border-radius doesn't leave a sliver of background in
+   the very corners. Inner corners (facing the center stage) stay rounded. */
+.mk-pipeline > aside:first-of-type {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+.mk-pipeline > aside:last-of-type {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.mk-pipeline-panel.is-expanded { width: 70%; }
+.mk-pipeline-panel.is-drop-target {
+  border-color: var(--coral-300);
+  background: var(--coral-50);
+}
+.mk-pipeline-panel.is-expanded .mk-pipeline-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-auto-rows: min-content;
+}
+.mk-pipeline-col-head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-bottom: 2px;
+  flex-shrink: 0;
+}
+.mk-pipeline-empty {
+  padding: var(--space-6) var(--space-4);
+  color: var(--fg-3);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+.mk-pipeline-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  /* overflow stays visible so a card's layoutId magic-move isn't clipped
+     while it travels between sections. Trades scroll for the animation —
+     fine for the current handful of cards. */
+  overflow: visible;
+  padding: 2px;
+  min-height: 0;
+}
+
+/* Center in_pipeline stage: grid of large processing cards, fed by
+   dragging issue cards in from the left column. */
+.mk-pipeline-stage {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px dashed transparent;
+  border-radius: var(--radius-lg);
+  overflow: visible;
+  transition: background var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out);
+}
+.mk-pipeline-stage.is-drop-target {
+  border-color: var(--coral-300);
+  background: var(--coral-50);
+}
+.mk-pipeline-stage-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: var(--space-6);
+  color: var(--fg-4);
+  font-size: var(--text-sm);
+}
+/* Two-column grid: 4 cards land as a 2x2. Each card fills its column
+   but is capped at ~150% of an issue card's width so it never stretches
+   the full row. The issue card floats top-left; the processing area
+   flows around it (right strip + below). */
+.mk-pipeline-stage-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-content: start;
+  justify-items: start;
+  gap: var(--space-4);
+  padding: var(--space-2);
+}
+.mk-pipeline-stage-card {
+  display: flow-root;
+  width: 100%;
+  max-width: 420px;
+  min-height: 280px;
+  padding: var(--space-3);
+  background: var(--bg-3);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-lg);
+}
+.mk-pipeline-stage-card-issue {
+  float: left;
+  width: 240px;
+  max-width: 100%;
+  margin: 0 var(--space-3) var(--space-2) 0;
+}
+.mk-pipeline-stage-card-info {
+  min-width: 0;
+}
+.mk-pipeline-stage-card-info-label {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--fg-3);
+}
+.mk-pipeline-toggle {
+  position: absolute;
+  top: 50%;
+  right: -28px;
+  transform: translateY(-50%);
+  width: 28px;
+  height: 56px;
+  background: var(--paper);
+  border: 1px solid var(--border-1);
+  border-left: 0;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  color: var(--fg-2);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-sm);
+  padding: 0;
+  transition: border-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
+}
+.mk-pipeline-toggle:hover { border-color: var(--border-2); color: var(--fg-1); }
+
+/* ─── Pipeline page (Phase 4) ─────────────────────────────────────────
+   Three-column board: Backlog (todo) · In Pipeline (in_pipeline) ·
+   Shipping (to_be_shipped). Built on the shared design tokens; matches
+   pipeline-card-mockups.html (authoritative card design) and
+   pipeline-page-mockups.html (column frame). */
+
+.mk-pl {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr) 300px;
+  gap: 16px;
+  align-items: start;
+  padding: 16px 18px 32px;
+  height: calc(100vh - 56px);
+  overflow: hidden;
+  box-sizing: border-box;
+}
+.mk-pl.is-backlog-expanded {
+  grid-template-columns: minmax(0, 1.8fr) minmax(0, 1fr) 300px;
+}
+.mk-pl-empty {
+  grid-column: 1 / -1;
+  color: var(--fg-3);
+  font-size: 14px;
+  padding: 40px;
+  text-align: center;
+}
+
+.mk-pl-col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  max-height: 100%;
+  background: var(--bg-3);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-lg);
+  padding: 12px;
+  box-sizing: border-box;
+  transition: border-color .12s, background .12s;
+}
+.mk-pl-stage-col {
+  background: transparent;
+  border-style: dashed;
+  border-color: var(--border-2);
+}
+.mk-pl-col.is-drop {
+  border-color: var(--sky-500);
+  background: var(--sky-50);
+}
+
+.mk-pl-col-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 2px;
+  flex-shrink: 0;
+}
+.mk-pl-pill {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+}
+.mk-pl-pill.is-todo { color: var(--status-todo); background: var(--status-todo-bg); }
+.mk-pl-pill.is-pipe { color: var(--status-doing); background: var(--status-doing-bg); }
+.mk-pl-pill.is-ship { color: var(--status-review); background: var(--status-review-bg); }
+.mk-pl-count { font-family: var(--font-mono); font-size: 12px; color: var(--fg-3); }
+.mk-pl-spacer { margin-left: auto; }
+.mk-pl-drawer-toggle {
+  margin-left: auto;
+  width: 26px; height: 26px;
+  border-radius: 6px;
+  border: 1px solid var(--border-1);
+  background: var(--paper);
+  color: var(--fg-3);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.mk-pl-drawer-toggle:hover { color: var(--fg-1); border-color: var(--border-2); }
+
+.mk-pl-col-body,
+.mk-pl-backlog-body,
+.mk-pl-stage-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+}
+.mk-pl-backlog-body.is-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  direction: rtl;            /* fill right-to-left; #1 lands top-right */
+  align-content: start;
+}
+.mk-pl-backlog-body.is-grid > * { direction: ltr; }
+.mk-pl-col-empty {
+  color: var(--fg-4);
+  font-size: 13px;
+  text-align: center;
+  padding: 24px 12px;
+}
+.mk-pl-stage-empty {
+  border: 1px dashed var(--border-2);
+  border-radius: var(--radius-md);
+  margin: 4px 0;
+}
+
+/* ── compact issue card (Backlog / Shipping) ── */
+.mk-pl-card {
+  position: relative;
+  background: var(--paper);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+  padding: 12px 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  cursor: grab;
+  transition: border-color .12s, transform .12s, box-shadow .12s;
+}
+.mk-pl-card:hover { border-color: var(--border-2); transform: translateY(-1px); }
+.mk-pl-card.is-dragging { opacity: .5; }
+.mk-pl-card.is-drop-before { border-top: 2px solid var(--sky-500); }
+.mk-pl-card.is-shipping { border-color: var(--status-doing); }
+
+.mk-pl-badge {
+  position: absolute;
+  top: -7px; right: -7px;
+  width: 22px; height: 22px;
+  border-radius: var(--radius-full);
+  background: var(--ink-300);
+  color: #fff;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-2);
+}
+.mk-pl-badge.is-next { background: var(--status-review); }
+
+.mk-pl-card-top { display: flex; align-items: center; gap: 7px; }
+.mk-pl-card-emoji { font-size: 15px; line-height: 1; }
+.mk-pl-card-id { font-family: var(--font-mono); font-size: 12px; color: var(--fg-3); }
+.mk-pl-card-icons { display: inline-flex; gap: 6px; margin-left: auto; }
+.mk-pl-icobtn {
+  width: 24px; height: 24px;
+  border-radius: 6px;
+  border: 1px solid var(--border-1);
+  background: transparent;
+  color: var(--fg-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.mk-pl-icobtn:hover { color: var(--fg-1); border-color: var(--border-2); background: var(--bg-4); }
+.mk-pl-icobtn svg { width: 14px; height: 14px; }
+.mk-pl-card-title { font-size: 14px; font-weight: 600; line-height: 1.35; color: var(--fg-1); margin: 0; }
+.mk-pl-card-labels { display: flex; flex-wrap: wrap; gap: 5px; }
+.mk-pl-label {
+  font-size: 11px; font-weight: 500; color: var(--fg-2);
+  background: var(--ink-50); padding: 2px 8px; border-radius: var(--radius-full);
+}
+
+.mk-pl-ship-row {
+  display: flex; align-items: center; gap: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-1);
+}
+.mk-pl-next {
+  font-size: 11px; font-weight: 700; color: var(--status-review);
+  background: var(--status-review-bg); padding: 3px 8px; border-radius: var(--radius-full);
+}
+.mk-pl-queued { font-size: 12px; color: var(--fg-3); }
+.mk-pl-ship-status { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; color: var(--status-doing); }
+.mk-pl-spin {
+  width: 13px; height: 13px; border-radius: var(--radius-full);
+  border: 2px solid var(--status-doing-bg); border-top-color: var(--status-doing);
+  animation: mk-pl-spin .7s linear infinite;
+}
+@keyframes mk-pl-spin { to { transform: rotate(360deg); } }
+
+/* ── toggles ── */
+.mk-pl-toggle { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; color: var(--fg-2); }
+.mk-pl-switch {
+  width: 34px; height: 19px; border-radius: var(--radius-full);
+  background: var(--ink-200); position: relative; flex-shrink: 0;
+  border: 0; cursor: pointer; padding: 0;
+  transition: background .12s;
+}
+.mk-pl-switch::after {
+  content: ""; position: absolute; top: 2px; left: 2px;
+  width: 15px; height: 15px; border-radius: var(--radius-full);
+  background: #fff; box-shadow: var(--shadow-1); transition: left .12s;
+}
+.mk-pl-switch.is-on { background: var(--sky-500); }
+.mk-pl-switch.is-on::after { left: 17px; }
+
+/* ── buttons ── */
+.mk-pl-btn {
+  font-family: inherit; font-size: 13px; font-weight: 600;
+  height: 30px; padding: 0 12px; border-radius: var(--radius-md);
+  border: 1px solid transparent; display: inline-flex; align-items: center; gap: 6px;
+  cursor: pointer; white-space: nowrap;
+}
+.mk-pl-btn.is-sm { height: 28px; font-size: 12.5px; padding: 0 10px; }
+.mk-pl-btn.is-primary { background: var(--sky-500); color: #fff; }
+.mk-pl-btn.is-primary:hover { background: var(--sky-600); }
+.mk-pl-btn.is-ghost { background: transparent; border-color: var(--border-2); color: var(--fg-1); }
+.mk-pl-btn.is-ghost:hover { background: var(--bg-4); }
+.mk-pl-btn.is-danger { color: var(--status-blocked); border-color: var(--status-blocked); }
+.mk-pl-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+/* ── in-pipeline stage card ── */
+.mk-pl-stage {
+  background: var(--paper);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+.mk-pl-stage.is-attn { border-color: var(--status-review); }
+.mk-pl-stage.is-dragging { opacity: .5; }
+.mk-pl-stage-head { padding: 16px 18px 12px; display: flex; flex-direction: column; gap: 9px; cursor: pointer; }
+.mk-pl-stage-title { font-size: 18px; font-weight: 700; line-height: 1.3; color: var(--fg-1); margin: 0; }
+
+.mk-pl-stage-proc { padding: 12px 18px; border-top: 1px solid var(--border-1); display: flex; flex-direction: column; gap: 10px; }
+.mk-pl-proclabel {
+  font-family: var(--font-mono); font-size: 10px; font-weight: 500;
+  letter-spacing: .08em; text-transform: uppercase; color: var(--fg-4);
+}
+.mk-pl-chain { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.mk-pl-step { display: inline-flex; align-items: center; gap: 7px; }
+.mk-pl-dot {
+  width: 22px; height: 22px; border-radius: var(--radius-full);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+  flex-shrink: 0; border: 1.5px solid transparent;
+}
+.mk-pl-step-lbl { font-size: 12.5px; font-weight: 600; }
+.mk-pl-step.is-complete .mk-pl-dot { background: var(--status-done-bg); color: var(--status-done); }
+.mk-pl-step.is-complete .mk-pl-step-lbl { color: var(--status-done); }
+.mk-pl-step.is-running .mk-pl-dot { background: var(--status-doing-bg); color: var(--status-doing); border-color: var(--status-doing); }
+.mk-pl-step.is-running .mk-pl-step-lbl { color: var(--status-doing); }
+.mk-pl-step.is-pending .mk-pl-dot { background: var(--ink-50); color: var(--fg-4); }
+.mk-pl-step.is-pending .mk-pl-step-lbl { color: var(--fg-4); }
+.mk-pl-step.is-cancelled .mk-pl-dot { background: var(--status-blocked-bg); color: var(--status-blocked); }
+.mk-pl-step.is-cancelled .mk-pl-step-lbl { color: var(--status-blocked); text-decoration: line-through; }
+.mk-pl-step.is-handoff .mk-pl-dot { background: var(--status-review-bg); color: var(--status-review); }
+.mk-pl-step.is-handoff .mk-pl-step-lbl { color: var(--status-review); }
+.mk-pl-connector { width: 24px; height: 2px; background: var(--border-1); margin: 0 4px; }
+
+.mk-pl-stage-detail { padding: 0 18px 14px; }
+.mk-pl-job {
+  background: var(--bg-1); border: 1px solid var(--border-1);
+  border-radius: var(--radius-md); padding: 12px 13px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.mk-pl-job.is-done { background: var(--status-done-bg); border-color: var(--status-done); }
+.mk-pl-job-head { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+.mk-pl-jmode {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+  letter-spacing: .06em; text-transform: uppercase;
+  color: var(--status-doing); background: var(--status-doing-bg);
+  padding: 3px 8px; border-radius: var(--radius-sm);
+}
+.mk-pl-jmode.is-done { color: var(--status-done); background: var(--paper); }
+.mk-pl-jmeta { font-size: 12.5px; color: var(--fg-3); }
+.mk-pl-live { color: var(--status-doing); font-weight: 600; }
+.mk-pl-todos { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.mk-pl-todo { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--fg-2); }
+.mk-pl-todo-box {
+  width: 15px; height: 15px; border-radius: 4px; border: 1.5px solid var(--border-2);
+  flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 10px;
+}
+.mk-pl-todo.is-completed { color: var(--fg-3); text-decoration: line-through; }
+.mk-pl-todo.is-completed .mk-pl-todo-box { background: var(--status-done); border-color: var(--status-done); color: #fff; }
+.mk-pl-todo.is-in_progress { color: var(--fg-1); font-weight: 600; }
+.mk-pl-todo.is-in_progress .mk-pl-todo-box { border-color: var(--status-doing); color: var(--status-doing); }
+.mk-pl-proc-empty {
+  border: 1px dashed var(--border-2); border-radius: var(--radius-md);
+  padding: 18px; text-align: center; color: var(--fg-3); font-size: 13px;
+}
+
+.mk-pl-qpanel {
+  width: 100%; text-align: left; cursor: pointer;
+  background: var(--status-review-bg); border: 1px solid var(--status-review);
+  border-radius: var(--radius-md); padding: 12px 13px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.mk-pl-qhead { font-size: 12.5px; font-weight: 700; color: var(--status-review); }
+.mk-pl-qq { font-size: 14px; font-weight: 600; color: var(--fg-1); }
+
+.mk-pl-stage-foot {
+  border-top: 1px solid var(--border-1); background: var(--bg-1);
+  padding: 11px 16px; display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+}
+.mk-pl-halt {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 700; color: var(--status-review);
+  background: var(--status-review-bg); padding: 4px 9px; border-radius: var(--radius-full);
+}
+
+/* ── process-pick overlay ── */
+.mk-pl-procmenu {
+  margin: 12px 18px 18px;
+  background: var(--paper); border: 1px solid var(--border-1);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-2); padding: 8px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.mk-pl-procmenu-title {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--fg-3); padding: 6px 8px 8px;
+}
+.mk-pl-procopt {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 10px; border-radius: var(--radius-md); cursor: pointer;
+  font-size: 13px; font-weight: 600; color: var(--fg-1);
+  background: transparent; border: 0; text-align: left;
+}
+.mk-pl-procopt:hover { background: var(--bg-4); }
+.mk-pl-procopt.is-cancel { color: var(--fg-3); justify-content: center; }
+.mk-pl-procopt-seq { display: inline-flex; gap: 4px; margin-left: auto; }
+.mk-pl-chip {
+  font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+  width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-sm); background: var(--ink-50); color: var(--fg-3);
+}
+.mk-pl-chip.is-plan { background: var(--status-todo-bg); color: var(--status-todo); }
+.mk-pl-chip.is-implement { background: var(--status-doing-bg); color: var(--status-doing); }
+.mk-pl-chip.is-ship { background: var(--status-review-bg); color: var(--status-review); }
+
+.mk-pl-shipping-tools { flex-shrink: 0; }
+

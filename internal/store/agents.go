@@ -991,6 +991,15 @@ func setIssueStateForClaim(tx *sql.Tx, issueID int64) (*StateChange, error) {
 		RepoID: repoID, RepoPrefix: prefix,
 		Old: model.State(oldState), New: model.StateInProgress,
 	}
+	// Engine-governed gate (Pipeline): a claim must NOT auto-flip a card
+	// that's in_pipeline / to_be_shipped to in_progress — the engine
+	// dispatches its job agents against the card while it stays in its
+	// Pipeline column. Return Old == New (== the current Pipeline state)
+	// so the claim completes without a state move.
+	if isEngineGovernedState(model.State(oldState)) {
+		ch.New = model.State(oldState)
+		return ch, nil
+	}
 	if model.State(oldState) == model.StateInProgress {
 		return ch, nil // already in_progress — SQL no-op too
 	}
@@ -1121,6 +1130,22 @@ func setIssueStateForRelease(tx *sql.Tx, issueID int64, target model.State) (*St
 		return nil, err
 	}
 	old := model.State(oldState)
+	// Engine-governed gate (Pipeline): a card in in_pipeline /
+	// to_be_shipped has its state owned by the controller engine. A
+	// worker's `release --state <processing>` is ignored — the claim
+	// still drops (the caller already stamped released_at), but the card
+	// stays in its Pipeline column. Returning Old == New keeps the
+	// release on its no-op path (no state audit row, no terminal_at
+	// churn). Deliberate column moves (e.g. the engine's in_pipeline →
+	// to_be_shipped hand-off, or to_be_shipped → done) target
+	// non-processing states and fall through.
+	if isEngineGovernedState(old) && isProcessingState(target) {
+		return &StateChange{
+			IssueID: issueID, IssueKey: fmt.Sprintf("%s-%d", prefix, number),
+			RepoID: repoID, RepoPrefix: prefix,
+			Old: old, New: old,
+		}, nil
+	}
 	// BACI-200: terminal-state gate. A `done` / `cancelled` issue is the
 	// product of a previous release (or a manual `bacio issue state`);
 	// the work has been signed off. Leaving the state unchanged here
@@ -1168,6 +1193,26 @@ func setIssueStateForRelease(tx *sql.Tx, issueID int64, target model.State) (*St
 // scoped to issue state.
 func isTerminalState(s model.State) bool {
 	return s == model.StateDone || s == model.StateCancelled
+}
+
+// isEngineGovernedState reports whether the issue sits in a Pipeline
+// column (in_pipeline / to_be_shipped). While it does, the controller
+// engine — not a worker's release / state write — owns its state. This
+// is the keystone that lets the legacy state-setting prompts coexist
+// with the engine: a worker can release with --state or run `bacio issue
+// state`, and for a pipeline card the processing-state move is ignored
+// (see isProcessingState) so it doesn't fight the engine.
+func isEngineGovernedState(s model.State) bool {
+	return s == model.StateInPipeline || s == model.StateToBeShipped
+}
+
+// isProcessingState reports whether the state is one of the legacy
+// agent-processing states the Pipeline engine deliberately does not use.
+// A worker trying to flip an engine-governed card into one of these is
+// no-op'd; deliberate column moves (todo / in_pipeline / to_be_shipped /
+// done / cancelled) are not blocked.
+func isProcessingState(s model.State) bool {
+	return s == model.StateInProgress || s == model.StateNeedsAction || s == model.StateInReview
 }
 
 // AgentSessionFilter scopes ListAgentSessions. Zero value = all

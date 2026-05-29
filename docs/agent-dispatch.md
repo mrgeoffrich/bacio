@@ -217,10 +217,27 @@ subquery returning empty.
 
 #### State-gated prompts
 
+> **Pipeline cutover (Phases 4–6).** The state-gate mechanism below drove
+> the per-card dispatch button on the **issues board, which is now
+> removed** (the Pipeline is the only driving surface). On a pipeline
+> card the controller engine queues each job's dispatch from the chosen
+> process chain — it does not consult the per-card state-gate, and the
+> card stays `in_pipeline` throughout. Crucially, **pipeline-stage
+> workers no longer manage state or tags**: `bacio agent release` is
+> claim-drop only (no `--state`), there is no `bacio tag add
+> <planned|implemented|…>` done-tag step, and a paused job is signalled
+> by an open question on the job row, not a `needs_action` flip. The
+> engine advances the chain when the dispatch is acked. The pre-pipeline
+> triage passes (`scope`, `research`, `plan_large`) still operate on bare
+> `todo` cards and keep declaring `--state` on release. The state-gate
+> table below is retained for that triage flow and for any user-added
+> templates.
+
 Each dispatch stage (`plan`, `design`, `implement`, `review`, `ship`,
 `fix_review`) declares the set of issue states its prompt is valid to
-run from — its **state-gate**. The per-card action button only offers a
-prompt when the card's state is in that stage's gate. Built-in defaults
+run from — its **state-gate**. (Historically the per-card action button
+only offered a prompt when the card's state was in that stage's gate —
+see the cutover note above.) Built-in defaults
 (`model.DefaultPromptStates`):
 
 | stage        | valid-from states |

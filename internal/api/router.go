@@ -72,6 +72,21 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("PUT /repos/{prefix}/issues/{key}/assignee", d.handleIssueAssign)
 	mux.HandleFunc("DELETE /repos/{prefix}/issues/{key}/assignee", d.handleIssueUnassign)
 
+	// Pipeline page: card ordering, process assignment, and the engine
+	// controls (manual Start / Stop, auto drive-mode, ship hand-off) plus
+	// the per-repo auto-ship toggle. Job control verbs sit under
+	// .../jobs/{start,stop} (more specific literals than any {…} segment,
+	// so ServeMux disambiguates cleanly).
+	mux.HandleFunc("PUT /repos/{prefix}/issues/{key}/reorder", d.handleIssueReorder)
+	mux.HandleFunc("POST /repos/{prefix}/issues/{key}/process", d.handleIssueProcess)
+	mux.HandleFunc("GET /repos/{prefix}/issues/{key}/jobs", d.handleIssueJobs)
+	mux.HandleFunc("POST /repos/{prefix}/issues/{key}/jobs/start", d.handleIssueJobStart)
+	mux.HandleFunc("POST /repos/{prefix}/issues/{key}/jobs/stop", d.handleIssueJobStop)
+	mux.HandleFunc("PUT /repos/{prefix}/issues/{key}/engine-mode", d.handleIssueEngineMode)
+	mux.HandleFunc("POST /repos/{prefix}/issues/{key}/ship", d.handleIssueShip)
+	mux.HandleFunc("GET /repos/{prefix}/auto-ship", d.handleRepoAutoShipGet)
+	mux.HandleFunc("PUT /repos/{prefix}/auto-ship", d.handleRepoAutoShip)
+
 	mux.HandleFunc("GET /repos/{prefix}/issues/{key}/comments", d.handleCommentsList)
 	mux.HandleFunc("POST /repos/{prefix}/issues/{key}/comments", d.handleCommentAdd)
 	mux.HandleFunc("DELETE /repos/{prefix}/issues/{key}/comments/{uuid}", d.handleCommentDelete)

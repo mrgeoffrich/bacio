@@ -158,8 +158,27 @@ type Issue struct {
 	// feature.branch_name is BACI-226; this field just records the
 	// override.
 	BaseBranch *string   `json:"base_branch,omitempty"`
+	// Priority is the manual ordering key within a (repo, state) band,
+	// used by the Pipeline page's Backlog (todo) and Shipping
+	// (to_be_shipped) columns. Lower sorts first — position 1 (next to
+	// go) carries the smallest value. 0 is the unordered default; the
+	// other columns ignore it. Reordering writes this via
+	// Store.ReorderIssue, so the queue order survives reloads rather
+	// than living in board-local display state. No omitempty: the field
+	// is always visible so the Pipeline reads it without a fallback.
+	Priority   int       `json:"priority"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
+	// EngineMode / EnginePauseReason are the per-issue controller-engine
+	// fields, meaningful only while the issue is in_pipeline. EngineMode
+	// is "off" (manual Start advances one job) or "auto" (the engine
+	// runs the chain consecutively, halting on an open question).
+	// EnginePauseReason is "" or "open_question". Both default to their
+	// zero value for non-pipeline issues. Populated by the boardcards
+	// denorm in a later phase; carried here so the engine and the read
+	// surfaces share one shape.
+	EngineMode        EngineMode `json:"engine_mode,omitempty"`
+	EnginePauseReason string     `json:"engine_pause_reason,omitempty"`
 }
 
 type Comment struct {

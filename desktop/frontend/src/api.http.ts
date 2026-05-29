@@ -265,6 +265,65 @@ export interface BoardCard {
   // camelCase via the Go json tag so no reshape is needed in
   // listCards().
   latestPlan?: LatestPlan | null;
+  // LatestPR (BACI-239) is the most-recently-attached PR on this issue,
+  // or absent when none. Drives the per-card PR chip.
+  latestPR?: BoardCardLatestPR | null;
+  // Pipeline (Phase 4) — the card's process chain + engine drive state,
+  // populated by the cards endpoint only while the card is in_pipeline.
+  // Mirror of the Go-side boardcards.BoardCard pipeline fields. `jobs`
+  // is the sequence-ordered chain; `currentJob` is the running stage (or
+  // the next pending one); `engineMode` is "off" | "auto"; and
+  // `enginePauseReason` is "" | "open_question" (Auto halted on a
+  // question on the current job).
+  jobs?: BoardCardJob[];
+  currentJob?: BoardCardJob | null;
+  engineMode?: string;
+  enginePauseReason?: string;
+  // BACI-53: open ask_user_question rows for this card. On a pipeline
+  // card the first open question is the "waiting on you" signal that
+  // trips the engine halt. Mirror of the wire shape served by /cards.
+  openQuestions?: BoardCardQuestion[];
+}
+
+// BoardCardLatestPR (BACI-239) is the newest PR attached to a card.
+// Hand-mirrored here (the web bundle can't import the Wails binding).
+export interface BoardCardLatestPR {
+  url: string;
+  count: number;
+}
+
+// BoardCardQuestion (BACI-53) is one open ask_user_question row carried
+// on a BoardCard. pipelineJobId (Phase 4) is the job the question is
+// parented to, when the card is in_pipeline.
+export interface BoardCardQuestion {
+  id: number;
+  header?: string;
+  firstQuestion?: string;
+  pipelineJobId?: number | null;
+}
+
+// BoardCardJob (Phase 4) is one stage of a card's process chain — the
+// camelCase projection the /cards endpoint serves on BoardCard.jobs.
+// Mirror of internal/boardcards/cards.go::BoardCardJob.
+export interface BoardCardJob {
+  sequence: number;
+  mode: string;
+  status: string; // pending | running | complete | cancelled
+}
+
+// PipelineJob (Phase 4) mirrors model.PipelineJob (snake_case wire
+// shape). The job-control endpoints (process / start / stop / jobs)
+// return the refreshed chain in this shape.
+export interface PipelineJob {
+  id: number;
+  issue_id: number;
+  sequence: number;
+  mode: string;
+  status: string;
+  dispatch_id?: number;
+  created_at: string;
+  started_at?: string;
+  completed_at?: string;
 }
 
 // ShippedIssueDTO (BACI-187) is one row in the topbar shipping-log
@@ -1394,13 +1453,19 @@ export async function addIssue(
   repoPrefix: string,
   title: string,
   description: string,
+  featureSlug = '',
 ): Promise<BoardCard> {
   if (!repoPrefix || repoPrefix === 'all') {
     throw new Error('addIssue: a repo prefix is required (cross-repo pseudo-board has no target)');
   }
+  // feature_slug (Phase 4): empty defers to the repo default feature at
+  // the store boundary (ResolveCreateIssueFeatureID). The handler decodes
+  // the full IssueAddInput, so the field rides straight through.
+  const body: { title: string; description: string; feature_slug?: string } = { title, description };
+  if (featureSlug) body.feature_slug = featureSlug;
   const iss = await call<ApiIssue>(
     `/repos/${repoPrefix}/issues`,
-    { method: 'POST', body: { title, description } },
+    { method: 'POST', body },
   );
   return cardFromIssue(iss);
 }
@@ -2689,4 +2754,92 @@ export async function unarchiveDocument(prefix: string, filename: string): Promi
 export async function getLeaderStatus(): Promise<LeaderStatusDTO> {
   const res = await call<{ amLeader: boolean; holderLabel: string }>('/leader');
   return { amLeader: !!res.amLeader, holderLabel: res.holderLabel ?? '' };
+}
+
+// ─── Pipeline (Phase 4) ──────────────────────────────────────────────
+// HTTP twins of the api.ts pipeline methods — same names + shapes so
+// PipelineView stays transport-agnostic. See internal/api/handlers_pipeline.go.
+// The column-changing verbs (reorder / engine-mode / ship) return the
+// updated issue, reshaped into a BoardCard (the glyph/branch joins are
+// dropped on the bare model.Issue payload — the next listCards() poll
+// re-populates them, same as setIssueState). The job-control verbs
+// (process / start / stop) return the refreshed PipelineJob chain.
+
+export async function reorderCard(
+  repoPrefix: string,
+  key: string,
+  position: number,
+): Promise<BoardCard> {
+  const iss = await call<ApiIssue>(`/repos/${repoPrefix}/issues/${key}/reorder`, {
+    method: 'PUT',
+    body: { key, position },
+  });
+  return cardFromIssue(iss);
+}
+
+export async function setCardProcess(
+  repoPrefix: string,
+  key: string,
+  process: string,
+): Promise<PipelineJob[]> {
+  return await call<PipelineJob[]>(`/repos/${repoPrefix}/issues/${key}/process`, {
+    method: 'POST',
+    body: { key, process },
+  });
+}
+
+export async function startCardJob(
+  repoPrefix: string,
+  key: string,
+): Promise<PipelineJob[]> {
+  return await call<PipelineJob[]>(`/repos/${repoPrefix}/issues/${key}/jobs/start`, {
+    method: 'POST',
+  });
+}
+
+export async function stopCardJob(
+  repoPrefix: string,
+  key: string,
+): Promise<PipelineJob[]> {
+  return await call<PipelineJob[]>(`/repos/${repoPrefix}/issues/${key}/jobs/stop`, {
+    method: 'POST',
+  });
+}
+
+export async function setEngineMode(
+  repoPrefix: string,
+  key: string,
+  mode: string,
+): Promise<BoardCard> {
+  const iss = await call<ApiIssue>(`/repos/${repoPrefix}/issues/${key}/engine-mode`, {
+    method: 'PUT',
+    body: { key, mode },
+  });
+  return cardFromIssue(iss);
+}
+
+export async function shipCard(
+  repoPrefix: string,
+  key: string,
+): Promise<BoardCard> {
+  const iss = await call<ApiIssue>(`/repos/${repoPrefix}/issues/${key}/ship`, {
+    method: 'POST',
+  });
+  return cardFromIssue(iss);
+}
+
+export async function setAutoShip(
+  repoPrefix: string,
+  enabled: boolean,
+): Promise<boolean> {
+  const out = await call<{ auto_ship: boolean }>(`/repos/${repoPrefix}/auto-ship`, {
+    method: 'PUT',
+    body: { enabled },
+  });
+  return !!out.auto_ship;
+}
+
+export async function getAutoShip(repoPrefix: string): Promise<boolean> {
+  const out = await call<{ auto_ship: boolean }>(`/repos/${repoPrefix}/auto-ship`);
+  return !!out.auto_ship;
 }

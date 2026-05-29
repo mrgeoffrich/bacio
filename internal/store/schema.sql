@@ -80,8 +80,12 @@ CREATE TABLE IF NOT EXISTS issues (
     feature_id  INTEGER REFERENCES features(id) ON DELETE SET NULL,
     title       TEXT    NOT NULL,
     description TEXT    NOT NULL DEFAULT '',
-    state       TEXT    NOT NULL CHECK (state IN
-                  ('todo','in_progress','needs_action','in_review','done','cancelled')),
+    -- No CHECK on state: model.ParseState guards the enum at the store
+    -- boundary, and the set grows (the Pipeline added in_pipeline /
+    -- to_be_shipped). A SQL CHECK can't be extended in place, so it
+    -- would just be a migration tax on every future state — see
+    -- migrateIssuesStateCheck for the in-place CHECK drop on older DBs.
+    state       TEXT    NOT NULL,
     assignee    TEXT    NOT NULL DEFAULT '',
     -- archived_at (BACI-68) doubles as the boolean "hidden from default
     -- views" flag and the audit timestamp of when the row was hidden.
@@ -136,6 +140,21 @@ CREATE TABLE IF NOT EXISTS issues (
     -- The resolver that combines this column with feature.branch_name is
     -- BACI-226; this column just records the override.
     base_branch TEXT,
+    -- priority (Pipeline) is the manual ordering key within a
+    -- (repo, state) band — the Backlog (todo) and Shipping
+    -- (to_be_shipped) columns sort by it ascending (position 1 = next
+    -- to go = lowest value). 0 is the unordered default; the other
+    -- columns ignore it. Reordering writes it via Store.ReorderIssue.
+    priority    INTEGER NOT NULL DEFAULT 0,
+    -- engine_mode / engine_pause_reason are the per-issue controller
+    -- engine fields, meaningful only while the issue is in_pipeline.
+    -- engine_mode is 'off' (manual Start advances one job) or 'auto'
+    -- (the engine runs the chain, halting on an open question);
+    -- engine_pause_reason is '' or 'open_question'. model.ParseEngineMode
+    -- guards the enum at the boundary (no SQL CHECK, same rationale as
+    -- state above).
+    engine_mode TEXT    NOT NULL DEFAULT 'off',
+    engine_pause_reason TEXT NOT NULL DEFAULT '',
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(repo_id, number)
@@ -334,6 +353,11 @@ CREATE TABLE IF NOT EXISTS tui_settings (
 CREATE TABLE IF NOT EXISTS repo_settings (
     repo_id            INTEGER NOT NULL PRIMARY KEY REFERENCES repos(id) ON DELETE CASCADE,
     default_feature_id INTEGER REFERENCES features(id) ON DELETE SET NULL,
+    -- auto_ship (Pipeline) is the per-repo Shipping-column toggle: when
+    -- 1, the controller auto-ship ticker dispatches a ship-mode agent
+    -- against the top (lowest-priority) to_be_shipped card. 0 = manual
+    -- SHIP only. Per-repo because the Shipping queue is per-repo.
+    auto_ship          INTEGER NOT NULL DEFAULT 0 CHECK (auto_ship IN (0,1)),
     updated_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -609,6 +633,34 @@ CREATE INDEX IF NOT EXISTS idx_dispatches_repo
 -- column doesn't exist until the ALTER in migrate() runs. The migrate()
 -- copy is IF NOT EXISTS so fresh DBs pick it up too.
 
+-- pipeline_jobs (Pipeline) is a card's persisted process chain — one
+-- row per stage selected from a preset (Plan→Implement→Ship, …) when
+-- the card enters in_pipeline. The controller engine owns every status
+-- transition: pending → running (a dispatch was queued for the stage) →
+-- complete (that dispatch acked) | cancelled. `mode` is a dispatch
+-- template slug (plan, implement, …) or the 'ship' sentinel — a 'ship'
+-- job is a HAND-OFF (move the card to to_be_shipped), never dispatched
+-- (the ship *agent* fires from the Shipping column). dispatch_id points
+-- at the agent_dispatches row while running (NULL until then;
+-- ON DELETE SET NULL so a dispatch retention prune leaves the job's
+-- history intact). No CHECK on status: model.ParseJobStatus guards the
+-- set at the store boundary (same rationale as agent_dispatches.mode).
+-- ON DELETE CASCADE on issue_id: a deleted issue takes its chain with it.
+CREATE TABLE IF NOT EXISTS pipeline_jobs (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    issue_id     INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+    sequence     INTEGER NOT NULL,
+    mode         TEXT    NOT NULL,
+    status       TEXT    NOT NULL DEFAULT 'pending',
+    dispatch_id  INTEGER REFERENCES agent_dispatches(id) ON DELETE SET NULL,
+    created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    started_at   DATETIME,
+    completed_at DATETIME,
+    UNIQUE(issue_id, sequence)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pipeline_jobs_issue ON pipeline_jobs(issue_id);
+
 -- dispatch_deliveries (BACI-202) is the per-(dispatch, session) ledger
 -- that backs delivery uniqueness. Two sessions can share one agent
 -- identity (two Claude Code instances registered under the same slug,
@@ -769,13 +821,28 @@ CREATE TABLE IF NOT EXISTS agent_session_questions (
     asked_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     answered_at   DATETIME,
     asked_by      TEXT    NOT NULL,
-    answered_by   TEXT    NOT NULL DEFAULT ''
+    answered_by   TEXT    NOT NULL DEFAULT '',
+    -- pipeline_job_id (Pipeline) re-parents the question onto a
+    -- pipeline_jobs row: an open question on the current job is the
+    -- engine's "halt Auto, waiting on the user" signal (§6.1). Nullable
+    -- — legacy session-parented rows keep it NULL, and the channel
+    -- stamps it only when the asking session has a current pipeline job.
+    -- ON DELETE SET NULL so a job's deletion leaves the question
+    -- reachable.
+    pipeline_job_id INTEGER REFERENCES pipeline_jobs(id) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_asq_session_state
     ON agent_session_questions(session_pk, state);
 CREATE INDEX IF NOT EXISTS idx_asq_state
     ON agent_session_questions(state);
+-- NB: idx_asq_pipeline_job is created in store.go::migrate, NOT here.
+-- schema.sql runs before migrate(), so on a DB that predates the
+-- pipeline_job_id column the CREATE TABLE above is a no-op (IF NOT
+-- EXISTS) and this index would reference a column that migrate() only
+-- adds afterwards — failing the whole schema apply. migrate() adds the
+-- column then the index (idempotent IF NOT EXISTS), covering fresh and
+-- upgrading DBs alike.
 -- The (session_pk, task_id) partial unique index lives in
 -- internal/store/store.go::migrate, not here. schema.sql runs before
 -- migrate(), so a DB upgrading from the pre-BACI-60 table doesn't have

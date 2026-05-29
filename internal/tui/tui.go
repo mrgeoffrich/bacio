@@ -30,6 +30,7 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/idlepinger"
 	"github.com/mrgeoffrich/bacio/internal/leader"
 	"github.com/mrgeoffrich/bacio/internal/model"
+	"github.com/mrgeoffrich/bacio/internal/pipeline"
 	"github.com/mrgeoffrich/bacio/internal/store"
 	bsync "github.com/mrgeoffrich/bacio/internal/sync"
 )
@@ -271,6 +272,7 @@ func NewModel(s *store.Store, repo *model.Repo, el *leader.Elector, dbPath strin
 		matcher:    dispatcher.New(s).WithLogger(log),
 		pinger:     idlepinger.New(s, pingerClient, log),
 		syncRunner: bsync.NewBackgroundRunner(s, dbPath, pingerActor, log),
+		engine:     pipeline.New(s).WithLogger(log),
 		tabs: []tab{
 			{"Board", board},
 			{"Features", newFeaturesView(s, repo)},
@@ -321,6 +323,11 @@ type Model struct {
 	// the leader lease via controller.SyncIfLeader on the syncTick
 	// cadence. nil disables (e.g. WASM demo).
 	syncRunner *bsync.BackgroundRunner
+	// engine is the Pipeline job-engine. Runs under the leader lease via
+	// controller.EngineTickIfLeader on the queueMatchTick cadence so a
+	// TUI-only session still advances in_pipeline chains. nil disables
+	// (e.g. WASM demo).
+	engine *pipeline.Engine
 }
 
 func (m *Model) Init() tea.Cmd {
@@ -415,6 +422,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// controller.MatchIfLeader — same helper the desktop and api
 		// goroutines call, so all three UIs run the matcher identically.
 		controller.MatchIfLeader(m.matcher, m.elector, m.store, m.log)
+		// Pipeline job-engine + auto-ship ride the same cadence (see
+		// controller.Start) so a TUI-only leader still advances chains.
+		controller.EngineTickIfLeader(m.engine, m.elector, m.store, m.log)
 		if m.elector == nil {
 			return m, nil
 		}

@@ -589,19 +589,17 @@ func (d deps) handleAgentRelease(w http.ResponseWriter, r *http.Request) {
 			"issue_key is required", map[string]any{"field": "issue_key"})
 		return
 	}
-	// BACI-126c: final_state is required.
-	if strings.TrimSpace(in.FinalState) == "" {
-		writeError(w, http.StatusBadRequest, "invalid_input",
-			"final_state is required — pass a valid issue state (todo, in_progress, needs_action, in_review, done, cancelled)",
-			map[string]any{"field": "final_state"})
-		return
-	}
-	finalState, err := model.ParseState(in.FinalState)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_input",
-			"final_state: "+err.Error(),
-			map[string]any{"field": "final_state"})
-		return
+	// Pipeline cutover: final_state is OPTIONAL — validate only when
+	// present (a malformed state still 400s before any read); the
+	// empty-state default to the issue's current state happens after we
+	// resolve the issue below.
+	if s := strings.TrimSpace(in.FinalState); s != "" {
+		if _, perr := model.ParseState(s); perr != nil {
+			writeError(w, http.StatusBadRequest, "invalid_input",
+				"final_state: "+perr.Error(),
+				map[string]any{"field": "final_state"})
+			return
+		}
 	}
 	prefix, num, err := store.ParseIssueKey(in.IssueKey)
 	if err != nil {
@@ -630,9 +628,18 @@ func (d deps) handleAgentRelease(w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, code, err.Error(), nil)
 		return
 	}
+	// Empty final_state defaults via model.ReleaseFallbackState: a no-op
+	// for engine-governed / terminal cards (the controller engine owns
+	// pipeline-card progression) but in_review for an off-pipeline issue,
+	// so a released claim doesn't strand the card in in_progress. A
+	// non-empty state (validated above) still moves the issue.
+	finalState := model.ReleaseFallbackState(iss.State)
+	if s := strings.TrimSpace(in.FinalState); s != "" {
+		finalState, _ = model.ParseState(s)
+	}
 	if isDryRun(r) {
 		now := time.Now().UTC()
-		// BACI-126c: project the post-release state on the dry-run.
+		// project the post-release state on the dry-run.
 		writeDryRun(w, http.StatusOK, &model.AgentClaim{
 			SessionID:        sid,
 			IssueID:          iss.ID,

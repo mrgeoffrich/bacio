@@ -39,6 +39,10 @@ var Registry = []Entry{
 	{"issue.unassign", "Clear an issue's assignee.", typeOf[inputs.IssueUnassignInput](), inputs.ExampleIssueUnassign},
 	{"issue.next", "Atomically claim the next ready issue in a feature.", typeOf[inputs.IssueNextInput](), inputs.ExampleIssueNext},
 	{"issue.rm", "Delete an issue (and its comments).", typeOf[inputs.IssueRmInput](), inputs.ExampleIssueRm},
+	{"issue.reorder", "Move a card within its Backlog/Shipping ordering band (Pipeline). Position is 1-based; 1 is the top of the column (next to go).", typeOf[inputs.IssueReorderInput](), inputs.ExampleIssueReorder},
+	{"issue.process.set", "Assign a preset process (job chain) to an in_pipeline card (Pipeline). Process is a preset slug, e.g. plan-implement-ship.", typeOf[inputs.IssueProcessInput](), inputs.ExampleIssueProcess},
+	{"issue.ship", "Hand off an in_pipeline card to the Shipping column (to_be_shipped). Dispatches no agent — the ship agent fires from Shipping / auto-ship.", typeOf[inputs.IssueShipInput](), inputs.ExampleIssueShip},
+	{"issue.auto-ship", "Toggle the per-repo Shipping-column auto-ship (Pipeline). When on, the controller dispatches a ship agent against the top to_be_shipped card.", typeOf[inputs.RepoAutoShipInput](), inputs.ExampleRepoAutoShip},
 
 	{"feature.add", "Create a feature in the current repo.", typeOf[inputs.FeatureAddInput](), inputs.ExampleFeatureAdd},
 	{"feature.edit", "Update a feature's title or description.", typeOf[inputs.FeatureEditInput](), inputs.ExampleFeatureEdit},

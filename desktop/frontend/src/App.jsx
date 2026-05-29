@@ -2,11 +2,11 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router';
 import { Events } from '@wailsio/runtime';
 import Topbar, { NAV } from './components/Topbar.jsx';
-import Board from './components/Board.jsx';
 import DocsView from './components/DocsView.jsx';
 import FeaturesView from './components/FeaturesView.jsx';
 import AgentsView from './components/AgentsView.jsx';
 import HistoryView from './components/HistoryView.jsx';
+import PipelineView from './components/PipelineView.jsx';
 import IssueWorkspace from './components/IssueWorkspace.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
 import IssueComposer from './components/IssueComposer.jsx';
@@ -409,7 +409,7 @@ export default function App() {
   // self-owning components that re-fetch on their own remount.
   useEffect(() => {
     if (!activeBoard) return;
-    if (activeView === 'board') refreshCards();
+    if (activeView === 'board' || activeView === 'pipeline') refreshCards();
     else if (activeView === 'agents') refreshAgents();
   }, [activeView, refreshCards, refreshAgents]);
 
@@ -418,9 +418,9 @@ export default function App() {
   // or unmount — no leaks, no redundant fetches off-screen.
   useEffect(() => {
     if (!activeBoard) return;
-    if (activeView !== 'board' && activeView !== 'agents') return;
+    if (activeView !== 'board' && activeView !== 'agents' && activeView !== 'pipeline') return;
     const id = setInterval(() => {
-      if (activeView === 'board') refreshCards({ silent: true });
+      if (activeView === 'board' || activeView === 'pipeline') refreshCards({ silent: true });
       else refreshAgents({ silent: true });
     }, POLL_INTERVAL_MS);
     return () => clearInterval(id);
@@ -512,17 +512,18 @@ export default function App() {
 
   // Close the workspace: navigate back. With BrowserRouter the browser's
   // back stack handles "back to the previous view"; navigate(-1) goes
-  // one step back, falling through to /issues if there's nothing on the
+  // one step back, falling through to /pipeline if there's nothing on the
   // back stack (e.g. the user landed directly via a deep link).
   const closeIssue = useCallback(() => {
     setOpenIssueBrief(null);
     setDescEditing(false);
     // history.state is null on the very first entry — fall back to the
-    // board route so a deep-link refresh doesn't strand the user.
+    // Pipeline (the board surface post-cutover) so a deep-link refresh
+    // doesn't strand the user.
     if (window.history.state && window.history.length > 1) {
       navigate(-1);
     } else {
-      navigate(viewPath('board'));
+      navigate(viewPath('pipeline'));
     }
   }, [navigate]);
 
@@ -703,36 +704,14 @@ export default function App() {
       });
   }, [activeBoard]);
 
-  // BACI-209: compound dispatch — pick a primary mode AND a follow-on
-  // in one action on a todo card. Optimistic flips for BOTH affordances
-  // (the spinner for the primary, the follow-on chip for the follow-on)
-  // so the user sees the chain land immediately; revert both on failure
-  // so the visual doesn't lie about what got queued.
-  const dispatchChainFromCard = useCallback((cardKey, mode, followOnMode) => {
-    let prev = null;
-    setCards(cs => cs.map(c => {
-      if (c.key !== cardKey) return c;
-      prev = { waitingState: c.waitingState ?? null, followOn: c.followOn ?? null };
-      // actionLabel for the optimistic followOn comes from promptConfig
-      // — same source the chain dropdown reads so the optimistic label
-      // matches what the user just clicked.
-      const tpl = (promptConfig || []).find(p => p.mode === followOnMode);
-      const actionLabel = tpl ? (tpl.actionLabel || tpl.label || followOnMode) : followOnMode;
-      return {
-        ...c,
-        waitingState: { kind: 'queued_no_agent', mode },
-        followOn: { mode: followOnMode, actionLabel },
-      };
-    }));
-    api.dispatchIssueChain(activeBoard, cardKey, mode, followOnMode)
-      .catch(err => {
-        // Revert both affordances together — the chain is atomic on the
-        // backend, so the UI must mirror that: either both flips stick
-        // or neither does.
-        setCards(cs => cs.map(c => c.key === cardKey ? { ...c, waitingState: prev?.waitingState ?? null, followOn: prev?.followOn ?? null } : c));
-        reportError(err, { headline: "Couldn't queue dispatch chain" });
-      });
-  }, [activeBoard, promptConfig]);
+  // Phase 5 cutover: dispatchChainFromCard / setFollowOnFromCard /
+  // cancelFollowOnFromCard / quickEvalComment were board-only affordances
+  // (the kanban card's compound-dispatch, follow-on chip, and quick-eval
+  // composer). The Pipeline drives work through the engine's job chain
+  // instead, so they lost their only caller when the board was removed and
+  // are gone. The underlying api.* verbs (dispatchIssueChain,
+  // queue/cancelFollowOnDispatch) stay for now — Phase 6 decides retire vs
+  // keep.
 
   // BACI-51 spinner-as-cancel-button handler: withdraw a card's queued
   // (or pending/delivered) dispatch. Optimistically clears the local
@@ -746,56 +725,86 @@ export default function App() {
       .catch(err => reportError(err, { headline: "Couldn't cancel queued dispatch" }));
   }, [activeBoard]);
 
-  // BACI-192: queue / change / cancel the dormant follow-on dispatch on
-  // a card from the kanban footer. The backend single-slot rule means a
-  // *change* of mode is a two-call round trip (cancel → queue). Both
-  // handlers optimistically update card.followOn so the footer button
-  // flips to its new visual state on click; the 10s refresh re-asserts
-  // the authoritative shape (and corrects a stale mode label when the
-  // controller has already promoted / cleared the follow-on).
-  const setFollowOnFromCard = useCallback(async (cardKey, mode) => {
-    // Snapshot the prior followOn so a failed change can revert. A
-    // missing-followon (queue) starts from no snapshot — the optimistic
-    // path just sets one.
-    let prev = null;
-    setCards(cs => cs.map(c => {
-      if (c.key !== cardKey) return c;
-      prev = c.followOn ?? null;
-      // The actionLabel comes from promptConfig — same source the
-      // dropdown menu items read so the optimistic label matches what
-      // the user just clicked.
-      const tpl = (promptConfig || []).find(p => p.mode === mode);
-      const actionLabel = tpl ? (tpl.actionLabel || tpl.label || mode) : mode;
-      return { ...c, followOn: { mode, actionLabel } };
-    }));
-    try {
-      if (prev) {
-        // Single-slot enforcement: must cancel before queuing the new
-        // mode. The cancel is idempotent — a missing dormant row
-        // returns the zero DTO with no error.
-        await api.cancelFollowOnDispatch(activeBoard, cardKey);
-      }
-      await api.queueFollowOnDispatch(activeBoard, cardKey, mode);
-    } catch (err) {
-      // Revert to the prior shape so the optimistic flip doesn't lie.
-      setCards(cs => cs.map(c => c.key === cardKey ? { ...c, followOn: prev } : c));
-      reportError(err, { headline: "Couldn't queue follow-on" });
-    }
-  }, [activeBoard, promptConfig]);
+  // ─── Pipeline (Phase 4) handlers ───────────────────────────────────
+  // Each wraps the api.* pipeline call and refreshes the cards array so
+  // the board re-renders with the server's authoritative shape (job
+  // chain, engine mode, column). Optimistic flips mirror the
+  // moveCard / dispatchFromCard patterns where the change is cheap to
+  // predict; everything else relies on the refresh. The engine owns job
+  // progression — these are the user-driven controls that nudge it.
 
-  const cancelFollowOnFromCard = useCallback((cardKey) => {
-    let prev = null;
-    setCards(cs => cs.map(c => {
-      if (c.key !== cardKey) return c;
-      prev = c.followOn ?? null;
-      return { ...c, followOn: null };
-    }));
-    api.cancelFollowOnDispatch(activeBoard, cardKey)
+  // Assign a preset process to a card — the in-pipeline "pick a process"
+  // menu. Refreshes so the new pending job chain renders on the card.
+  const setCardProcess = useCallback((key, processSlug) => {
+    api.setCardProcess(activeBoard, key, processSlug)
+      .then(() => refreshCards({ silent: true }))
+      .catch(err => reportError(err, { headline: "Couldn't set the process" }));
+  }, [activeBoard, refreshCards]);
+
+  // Manual Start — advance one step (start the next pending job, or run
+  // the Ship hand-off when the chain ends in one).
+  const startCardJob = useCallback((key) => {
+    api.startCardJob(activeBoard, key)
+      .then(() => refreshCards({ silent: true }))
+      .catch(err => reportError(err, { headline: "Couldn't start the job" }));
+  }, [activeBoard, refreshCards]);
+
+  // Manual Stop — cancel the running job and halt Auto.
+  const stopCardJob = useCallback((key) => {
+    api.stopCardJob(activeBoard, key)
+      .then(() => refreshCards({ silent: true }))
+      .catch(err => reportError(err, { headline: "Couldn't stop the job" }));
+  }, [activeBoard, refreshCards]);
+
+  // Engine drive-mode toggle ("off" | "auto"). Optimistic flip on the
+  // card so the switch reacts on click; the refresh re-asserts.
+  const setCardEngineMode = useCallback((key, mode) => {
+    setCards(cs => cs.map(c => c.key === key ? { ...c, engineMode: mode } : c));
+    api.setEngineMode(activeBoard, key, mode)
+      .then(() => refreshCards({ silent: true }))
       .catch(err => {
-        // Revert on failure — same shape as setFollowOnFromCard above.
-        setCards(cs => cs.map(c => c.key === cardKey ? { ...c, followOn: prev } : c));
-        reportError(err, { headline: "Couldn't cancel follow-on" });
+        reportError(err, { headline: "Couldn't change the drive mode" });
+        refreshCards({ silent: true });
       });
+  }, [activeBoard, refreshCards]);
+
+  // Ship hand-off — move an in_pipeline card to to_be_shipped (no agent
+  // dispatched here; the ship agent fires from the Shipping column).
+  // Optimistic column move mirrors moveCard.
+  const shipCardFromPipeline = useCallback((key) => {
+    let prevCol = null;
+    setCards(cs => cs.map(c => {
+      if (c.key !== key) return c;
+      prevCol = c.column;
+      return { ...c, column: 'to_be_shipped' };
+    }));
+    api.shipCard(activeBoard, key)
+      .then(() => refreshCards({ silent: true }))
+      .catch(err => {
+        reportError(err, { headline: "Couldn't ship the card" });
+        if (prevCol) setCards(cs => cs.map(c => c.key === key ? { ...c, column: prevCol } : c));
+      });
+  }, [activeBoard, refreshCards]);
+
+  // Backlog / Shipping drag-to-reorder. position is 1-based within the
+  // card's (repo, state) band. PipelineView handles the optimistic
+  // in-list move during the drag; this persists + reconciles.
+  const reorderPipelineCard = useCallback((key, position) => {
+    api.reorderCard(activeBoard, key, position)
+      .then(() => refreshCards({ silent: true }))
+      .catch(err => {
+        reportError(err, { headline: "Couldn't reorder" });
+        refreshCards({ silent: true });
+      });
+  }, [activeBoard, refreshCards]);
+
+  // Per-repo Shipping auto-ship toggle. PipelineView owns the display
+  // state (seeded from localStorage — the backend exposes no GET); this
+  // persists the change. Returns the promise so the view can revert its
+  // optimistic flip on failure.
+  const setRepoAutoShip = useCallback((enabled) => {
+    return api.setAutoShip(activeBoard, enabled)
+      .catch(err => { reportError(err, { headline: "Couldn't toggle auto-ship" }); throw err; });
   }, [activeBoard]);
 
   // Workspace write callbacks — each wraps the existing api.* call and
@@ -831,26 +840,6 @@ export default function App() {
       throw err;
     }
   }, [activeBoard, openIssueKey, refreshBrief]);
-
-  // BACI-131: kanban quick-eval handler. Posts an eval-tagged comment
-  // for the targeted card (which is "taken" by an agent — the only
-  // surface that exposes the affordance) without leaving the board.
-  // The author falls back through api.addComment's existing OS-user /
-  // 'web' fallback — no per-card author input. We refresh the card
-  // list silently so the spinner / claim badges stay current, and
-  // re-pull the brief only when the eval was posted on the
-  // currently-open issue (otherwise the brief belongs to a different
-  // ticket and would do an unnecessary fetch).
-  const quickEvalComment = useCallback(async (cardKey, body) => {
-    try {
-      await api.addComment(activeBoard, cardKey, '', body, { eval: true });
-      refreshCards({ silent: true });
-      if (openIssueKey === cardKey) refreshBrief({ silent: true });
-    } catch (err) {
-      reportError(err, { headline: "Couldn't add eval comment" });
-      throw err;
-    }
-  }, [activeBoard, openIssueKey, refreshBrief, refreshCards]);
 
   const deleteComment = useCallback(async (commentUUID) => {
     if (!openIssueKey || !commentUUID) return;
@@ -1017,33 +1006,41 @@ export default function App() {
         </ErrorBoundary>
       ) : (
         <Routes>
-          {/* Redirect / to /issues so a bare hit lands on the kanban. */}
-          <Route path="/" element={<Navigate to={viewPath('board')} replace />} />
+          {/* Redirect / to /pipeline — the Pipeline is the only driving
+              surface now (the issues board was removed in the Phase 5
+              cutover). The /issues/:key workspace route stays. */}
+          <Route path="/" element={<Navigate to={viewPath('pipeline')} replace />} />
           <Route
-            path="/issues"
+            path="/pipeline"
             element={
-              <ErrorBoundary headline="Something went wrong on the board" label="The Board view crashed">
-                <Board
-                  activeBoard={activeBoard}
-                  columns={columns}
+              <ErrorBoundary headline="Something went wrong in Pipeline" label="The Pipeline view crashed">
+                <PipelineView
                   cards={cards}
+                  activeBoard={activeBoard}
                   promptConfig={promptConfig}
-                  onMoveCard={moveCard}
                   onOpenCard={openCard}
                   onOpenIssue={navigateToIssue}
-                  onDispatchFromCard={dispatchFromCard}
-                  onDispatchChainFromCard={dispatchChainFromCard}
-                  onCancelWaitingCard={cancelWaitingFromCard}
-                  onQuickEval={quickEvalComment}
-                  onSetFollowOn={setFollowOnFromCard}
-                  onCancelFollowOn={cancelFollowOnFromCard}
-                  hoveredKey={hoveredKey}
-                  jumpKey={jumpKey}
-                  flyingShipKey={flyingShipKey}
+                  onMoveCard={moveCard}
+                  onReorder={reorderPipelineCard}
+                  onSetProcess={setCardProcess}
+                  onStartJob={startCardJob}
+                  onStopJob={stopCardJob}
+                  onSetEngineMode={setCardEngineMode}
+                  onShip={shipCardFromPipeline}
+                  onSetAutoShip={setRepoAutoShip}
+                  onShipDispatch={dispatchFromCard}
+                  onCancelWaiting={cancelWaitingFromCard}
+                  shippedCount={shippedCount}
+                  shippedScope={shippedScope}
+                  onShippedScopeChange={changeShippedScope}
                 />
               </ErrorBoundary>
             }
           />
+          {/* Phase 5 cutover: the /issues board LIST route is removed —
+              the Pipeline (/pipeline) is the only board surface now. The
+              /issues/:key workspace route below stays as the view/edit
+              home for a single issue. */}
           {/* Inline the element rather than wrapping it in a component
               declared inside App: a nested function component would have a
               fresh identity on every App render, and react-router would
@@ -1127,9 +1124,9 @@ export default function App() {
               </ErrorBoundary>
             }
           />
-          {/* Unknown route lands on the board so refreshes / stray links
-              don't strand the user on a 404 we don't render. */}
-          <Route path="*" element={<Navigate to={viewPath('board')} replace />} />
+          {/* Unknown route lands on the Pipeline so refreshes / stray
+              links don't strand the user on a 404 we don't render. */}
+          <Route path="*" element={<Navigate to={viewPath('pipeline')} replace />} />
         </Routes>
       )}
       <ErrorBoundary headline="Something went wrong in the command palette" label="The command palette crashed">

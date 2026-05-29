@@ -611,21 +611,31 @@ func claimAuditDetails(issueKey string, ch *store.StateChange) string {
 }
 
 func (c *localClient) ReleaseAgent(ctx context.Context, repo *model.Repo, in inputs.AgentReleaseInput, dryRun bool) (*model.AgentClaim, error) {
-	// BACI-126c: final_state is required — parse and reject at the
-	// boundary so a missing or malformed state errors before any read.
-	if strings.TrimSpace(in.FinalState) == "" {
-		return nil, fmt.Errorf("final_state is required — pass --state <name> (one of: todo, in_progress, needs_action, in_review, done, cancelled)")
-	}
-	finalState, err := model.ParseState(in.FinalState)
-	if err != nil {
-		return nil, fmt.Errorf("final_state: %w", err)
-	}
+	// Pipeline cutover: final_state is OPTIONAL. The controller engine
+	// owns the state of pipeline cards, so a pipeline-stage worker
+	// releases the claim only — it no longer declares a final state. We
+	// resolve the issue first, then default an empty final_state via
+	// model.ReleaseFallbackState: a no-op for engine-governed / terminal
+	// cards (pipeline progression stays the engine's job) but in_review
+	// for an off-pipeline issue, so a direct dispatch / dispatch-chain /
+	// queue-followon run lands the card on "awaiting a human" rather than
+	// stranding it in in_progress. A non-empty final_state still moves the
+	// issue — the pre-pipeline triage passes (scope / research) that hand a
+	// fresh `todo` ticket on keep declaring it.
 	iss, err := c.GetIssueByKey(ctx, repo, in.IssueKey)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return nil, fmt.Errorf("issue %s does not exist in repo %s", in.IssueKey, repo.Prefix)
 		}
 		return nil, err
+	}
+	finalState := model.ReleaseFallbackState(iss.State)
+	if s := strings.TrimSpace(in.FinalState); s != "" {
+		parsed, perr := model.ParseState(s)
+		if perr != nil {
+			return nil, fmt.Errorf("final_state: %w", perr)
+		}
+		finalState = parsed
 	}
 	if _, err := c.store.GetAgentSession(in.SessionID); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -834,6 +844,10 @@ func (c *localClient) ListSessionQuestions(ctx context.Context, sessionID string
 
 func (c *localClient) ListOpenQuestionsBySessions(ctx context.Context, sessionIDs []string) (map[int64][]*model.SessionQuestion, error) {
 	return c.store.ListOpenQuestionsBySessions(sessionIDs)
+}
+
+func (c *localClient) PipelineJobsForIssues(ctx context.Context, issueIDs []int64) (map[int64][]*model.PipelineJob, error) {
+	return c.store.PipelineJobsForIssues(issueIDs)
 }
 
 func (c *localClient) GetSessionQuestion(ctx context.Context, id int64) (*model.SessionQuestion, error) {

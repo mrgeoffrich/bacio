@@ -1,10 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { m } from 'motion/react';
 import { reportError } from '../errors';
 import * as api from '../api';
 import { formatWhen } from '../lib/formatWhen';
 import { SHIPPED_SCOPES, scopeLabel, scopeSinceDays } from './shippedScope.ts';
-import OdometerNumber from './OdometerNumber.jsx';
+import ShippedPill from './ShippedPill.jsx';
 
 // CACHE_TTL_MS: how long the popover holds onto its last successful
 // fetch before refetching on the next open. Thirty seconds is long
@@ -164,39 +163,17 @@ export default function ShippedPopover({ activeBoard, shippedCount, scope, onSco
 
   return (
     <div className="mk-shipped-popover-root" ref={rootRef}>
-      <button
-        type="button"
-        className={`mk-pill mk-shipped-pill${shipFlashing ? ' is-flash' : ''}`}
-        title={tooltip}
+      <ShippedPill
+        count={safeCount}
         disabled={disabled}
         onClick={() => { if (!disabled) setOpen(o => !o); }}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        aria-label={`Shipped, ${safeCount}`}
-      >
-        {/* BACI-240: the static "Shipped · N" label is now a fixed
-            "Shipped" word + a 3-digit OdometerNumber. The odometer
-            snaps on first mount / repo / scope changes and rolls on
-            genuine increments; the existing .is-flash border pulse
-            and the layout-id flying-target are unchanged. */}
-        <span className="mk-shipped-pill-label">Shipped</span>
-        <OdometerNumber value={safeCount} />
-        {/* BACI-193 ship-flourish destination slot. Mounted only
-            while a card is mid-flight (flyingShipKey set); the matching
-            layoutId on the kanban card makes Motion animate the card-
-            shape from its column position to this slot inside the
-            pill. After completion, onShipFlightDone clears the slot
-            and triggers .is-flash on the parent pill. */}
-        {flyingShipKey && (
-          <m.div
-            key={flyingShipKey}
-            layoutId={flyingShipKey}
-            className="mk-shipped-flight-target"
-            aria-hidden="true"
-            onLayoutAnimationComplete={onShipFlightDone}
-          />
-        )}
-      </button>
+        flashing={shipFlashing}
+        flyingKey={flyingShipKey}
+        onFlightDone={onShipFlightDone}
+        title={tooltip}
+        ariaHasPopup="dialog"
+        ariaExpanded={open}
+      />
       {open && (
         <div className="mk-shipped-popover" role="dialog" aria-label="Recently shipped issues">
           {/* BACI-244: the "Recently shipped" header strip was removed —

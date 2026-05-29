@@ -221,7 +221,7 @@ func newBoardView(s *store.Store, repo *model.Repo, actor string) (*boardView, e
 		store:          s,
 		repo:           repo,
 		actor:          actor,
-		states:         model.AllStates(),
+		states:         model.BoardColumnStates(),
 		hidden:         hidden,
 		hiddenFeatures: hiddenFeats,
 		columns:        map[model.State][]*model.Issue{},
@@ -1991,6 +1991,10 @@ func stateLabel(st model.State) string {
 		return "Done"
 	case model.StateCancelled:
 		return "Cancelled"
+	case model.StateInPipeline:
+		return "In Pipeline"
+	case model.StateToBeShipped:
+		return "To Be Shipped"
 	}
 	return string(st)
 }

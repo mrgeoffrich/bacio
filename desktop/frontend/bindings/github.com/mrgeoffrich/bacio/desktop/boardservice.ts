@@ -60,9 +60,13 @@ export function AddComment(repoPrefix: string, key: string, author: string, body
  * the same feature-emoji / waiting / blocker shape as the rest of the
  * kanban. Validation (empty title, control chars, etc.) lives at the
  * store boundary inside client.CreateIssue.
+ * featureSlug (Phase 4) optionally associates the new issue with a
+ * feature at creation time. Empty defers to the repo default feature
+ * (store.ResolveCreateIssueFeatureID) — features are mandatory, so the
+ * composer always supplies one, but an empty string stays valid.
  */
-export function AddIssue(repoPrefix: string, title: string, description: string): $CancellablePromise<$models.BoardCard> {
-    return $Call.ByID(2590773623, repoPrefix, title, description).then(($result: any) => {
+export function AddIssue(repoPrefix: string, title: string, description: string, featureSlug: string): $CancellablePromise<$models.BoardCard> {
+    return $Call.ByID(2590773623, repoPrefix, title, description, featureSlug).then(($result: any) => {
         return $$createType1($result);
     });
 }
@@ -224,6 +228,15 @@ export function DispatchIssueChain(repoPrefix: string, issueKey: string, mode: s
 }
 
 /**
+ * GetAutoShip reads the per-repo Shipping-column auto-ship toggle so the
+ * Pipeline's Shipping switch seeds from the DB (the value the
+ * controller's auto-ship ticker acts on), not a local cache.
+ */
+export function GetAutoShip(repoPrefix: string): $CancellablePromise<boolean> {
+    return $Call.ByID(2288322126, repoPrefix);
+}
+
+/**
  * GetBoardHiddenStates (BACI-248) returns the per-repo set of
  * kanban-column states hidden on this machine. Threaded through the
  * client so the Wails binding and the HTTP API stay in lockstep on
@@ -331,7 +344,9 @@ export function ListCards(repoPrefix: string): $CancellablePromise<$models.Board
 }
 
 /**
- * ListColumns returns the kanban columns — bacio's issue states, in order.
+ * ListColumns returns the kanban columns — the legacy state-board
+ * columns, excluding the Pipeline states (those cards live on the
+ * Pipeline page).
  */
 export function ListColumns(): $CancellablePromise<$models.BoardColumn[]> {
     return $Call.ByID(2117984856).then(($result: any) => {
@@ -370,6 +385,12 @@ export function QueueFollowOnDispatch(repoPrefix: string, issueKey: string, mode
     });
 }
 
+export function ReorderCard(repoPrefix: string, key: string, position: number): $CancellablePromise<$models.BoardCard> {
+    return $Call.ByID(4119956470, repoPrefix, key, position).then(($result: any) => {
+        return $$createType1($result);
+    });
+}
+
 /**
  * RescueDispatch (BACI-190) posts a `from="bacio-rescue"` channel
  * event to an idle supervisor session, asking it to handle a dead
@@ -386,6 +407,10 @@ export function RescueDispatch(dispatchID: number): $CancellablePromise<$models.
     });
 }
 
+export function SetAutoShip(repoPrefix: string, enabled: boolean): $CancellablePromise<boolean> {
+    return $Call.ByID(1219303746, repoPrefix, enabled);
+}
+
 /**
  * SetBoardHiddenStates (BACI-248) replaces the per-repo
  * board-hidden-states set with `states`. Replace-not-merge: the array
@@ -397,6 +422,18 @@ export function RescueDispatch(dispatchID: number): $CancellablePromise<$models.
 export function SetBoardHiddenStates(repoPrefix: string, states: string[]): $CancellablePromise<$models.BoardHiddenStatesDTO> {
     return $Call.ByID(1989240775, repoPrefix, states).then(($result: any) => {
         return $$createType10($result);
+    });
+}
+
+export function SetCardEngineMode(repoPrefix: string, key: string, mode: string): $CancellablePromise<$models.BoardCard> {
+    return $Call.ByID(3389668292, repoPrefix, key, mode).then(($result: any) => {
+        return $$createType1($result);
+    });
+}
+
+export function SetCardProcess(repoPrefix: string, key: string, process: string): $CancellablePromise<(model$0.PipelineJob | null)[]> {
+    return $Call.ByID(3410649082, repoPrefix, key, process).then(($result: any) => {
+        return $$createType21($result);
     });
 }
 
@@ -421,6 +458,24 @@ export function SetDefaultFeature(repoPrefix: string, slug: string): $Cancellabl
 export function SetIssueState(repoPrefix: string, key: string, state: string): $CancellablePromise<$models.BoardCard> {
     return $Call.ByID(2874048639, repoPrefix, key, state).then(($result: any) => {
         return $$createType1($result);
+    });
+}
+
+export function ShipCard(repoPrefix: string, key: string): $CancellablePromise<$models.BoardCard> {
+    return $Call.ByID(3461643849, repoPrefix, key).then(($result: any) => {
+        return $$createType1($result);
+    });
+}
+
+export function StartCardJob(repoPrefix: string, key: string): $CancellablePromise<(model$0.PipelineJob | null)[]> {
+    return $Call.ByID(2998495872, repoPrefix, key).then(($result: any) => {
+        return $$createType21($result);
+    });
+}
+
+export function StopCardJob(repoPrefix: string, key: string): $CancellablePromise<(model$0.PipelineJob | null)[]> {
+    return $Call.ByID(39478934, repoPrefix, key).then(($result: any) => {
+        return $$createType21($result);
     });
 }
 
@@ -464,3 +519,6 @@ const $$createType15 = $Create.Array($$createType1);
 const $$createType16 = $models.BoardColumn.createFrom;
 const $$createType17 = $Create.Array($$createType16);
 const $$createType18 = $models.ShippedListDTO.createFrom;
+const $$createType19 = model$0.PipelineJob.createFrom;
+const $$createType20 = $Create.Nullable($$createType19);
+const $$createType21 = $Create.Array($$createType20);

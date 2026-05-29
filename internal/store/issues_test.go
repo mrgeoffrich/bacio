@@ -45,11 +45,11 @@ func TestCreateIssueCounterAtomicity(t *testing.T) {
 		t.Fatalf("counter after first = %d, want 2", r.NextIssueNumber)
 	}
 
-	// Force a failure inside the CreateIssue transaction. The schema's
-	// state CHECK constraint rejects anything outside the canonical set,
-	// so this hits an error AFTER AllocateIssueNumber has run inside the
-	// tx — exactly the path the importer agent hit. The counter must roll
-	// back along with the failed insert.
+	// An invalid state is rejected by the store-boundary model.ParseState
+	// guard (the schema's state CHECK was dropped — migrateIssuesStateCheck
+	// — so the validation now lives in Go). The rejection happens before
+	// the transaction opens, so the counter is never touched and the next
+	// create must still be number 2 (no gap).
 	if _, err := s.CreateIssue(repo.ID, nil, "bad", "", model.State("bogus_state"), nil, ""); err == nil {
 		t.Fatal("expected CreateIssue to fail with invalid state")
 	}

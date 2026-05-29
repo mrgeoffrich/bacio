@@ -40,6 +40,20 @@ var (
 	ExampleIssueRm = IssueRmInput{
 		Key: "MINI-99",
 	}
+	ExampleIssueReorder = IssueReorderInput{
+		Key:      "MINI-42",
+		Position: 1,
+	}
+	ExampleIssueProcess = IssueProcessInput{
+		Key:     "MINI-42",
+		Process: "plan-implement-ship",
+	}
+	ExampleIssueShip = IssueShipInput{
+		Key: "MINI-42",
+	}
+	ExampleRepoAutoShip = RepoAutoShipInput{
+		Enabled: true,
+	}
 
 	ExampleFeatureAdd = FeatureAddInput{
 		Title:       "Auth rewrite",

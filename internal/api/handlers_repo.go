@@ -123,6 +123,11 @@ func (d deps) handleReposCreate(w http.ResponseWriter, r *http.Request) {
 		TargetID: &repo.ID, TargetLabel: repo.Prefix,
 		Details: "api init (" + repo.Name + ")",
 	})
+	// Features are mandatory (Pipeline): seed the catch-all features +
+	// repo default on first registration. Best-effort, idempotent.
+	if err := d.store.BootstrapRepoDefaults(repo.ID); err != nil {
+		d.logger.Warn("bacio: bootstrap repo defaults", "repo", repo.Prefix, "err", err)
+	}
 	writeJSON(w, http.StatusCreated, repo)
 }
 

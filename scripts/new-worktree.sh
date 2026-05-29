@@ -202,6 +202,14 @@ Rules:
 [[ -n $db_caveat ]] && prompt+="
 $db_caveat"
 
+prompt+="
+
+Web UI dev loop (Vite HMR against this worktree's API):
+- API:   bacio api --cors-origin http://127.0.0.1:5174 --cors-origin http://localhost:5174
+- Deps:  cd desktop/frontend && npm install   (first run in this worktree)
+- Vite:  cd desktop/frontend && VITE_BACIO_API=http://$api_addr npm run dev:web
+- Open:  http://127.0.0.1:5174/ui/"
+
 err ""
 err "─── paste into Claude after starting it in the worktree ────────────────"
 printf '%s\n' "$prompt" >&2

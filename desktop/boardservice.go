@@ -25,6 +25,8 @@ var stateLabels = map[model.State]string{
 	model.StateInReview:    "In Review",
 	model.StateDone:        "Done",
 	model.StateCancelled:   "Cancelled",
+	model.StateInPipeline:  "In Pipeline",
+	model.StateToBeShipped: "To Be Shipped",
 }
 
 func stateLabel(s model.State) string {
@@ -441,9 +443,11 @@ func (b *BoardService) AddRepository() (Board, error) {
 	return boardWithSync(repo, len(issues), st), nil
 }
 
-// ListColumns returns the kanban columns — bacio's issue states, in order.
+// ListColumns returns the kanban columns — the legacy state-board
+// columns, excluding the Pipeline states (those cards live on the
+// Pipeline page).
 func (b *BoardService) ListColumns() ([]BoardColumn, error) {
-	states := model.AllStates()
+	states := model.BoardColumnStates()
 	cols := make([]BoardColumn, 0, len(states))
 	for _, s := range states {
 		cols = append(cols, BoardColumn{State: string(s), Label: stateLabel(s)})
@@ -843,6 +847,98 @@ func (b *BoardService) SetIssueState(repoPrefix, key, state string) (BoardCard, 
 	return cardFromIssue(iss, false), nil
 }
 
+// Pipeline (Wails seam): the desktop mirrors of the REST pipeline ops, so
+// the desktop and web Pipeline pages drive the same client methods. Card
+// mutations reshape to a BoardCard (carrying the issue's taken flag);
+// chain mutations return the refreshed job collection.
+
+func (b *BoardService) ReorderCard(repoPrefix, key string, position int) (BoardCard, error) {
+	ctx := context.Background()
+	repo, err := b.resolveRepoForKey(ctx, repoPrefix, key)
+	if err != nil {
+		return BoardCard{}, err
+	}
+	iss, err := b.client.ReorderIssue(ctx, repo, key, position, false)
+	if err != nil {
+		return BoardCard{}, err
+	}
+	return cardFromIssue(iss, iss.Taken), nil
+}
+
+func (b *BoardService) SetCardProcess(repoPrefix, key, process string) ([]*model.PipelineJob, error) {
+	ctx := context.Background()
+	repo, err := b.resolveRepoForKey(ctx, repoPrefix, key)
+	if err != nil {
+		return nil, err
+	}
+	return b.client.SetIssueProcess(ctx, repo, key, process, false)
+}
+
+func (b *BoardService) StartCardJob(repoPrefix, key string) ([]*model.PipelineJob, error) {
+	ctx := context.Background()
+	repo, err := b.resolveRepoForKey(ctx, repoPrefix, key)
+	if err != nil {
+		return nil, err
+	}
+	return b.client.StartPipelineJob(ctx, repo, key)
+}
+
+func (b *BoardService) StopCardJob(repoPrefix, key string) ([]*model.PipelineJob, error) {
+	ctx := context.Background()
+	repo, err := b.resolveRepoForKey(ctx, repoPrefix, key)
+	if err != nil {
+		return nil, err
+	}
+	return b.client.StopPipelineJob(ctx, repo, key)
+}
+
+func (b *BoardService) SetCardEngineMode(repoPrefix, key, mode string) (BoardCard, error) {
+	ctx := context.Background()
+	repo, err := b.resolveRepoForKey(ctx, repoPrefix, key)
+	if err != nil {
+		return BoardCard{}, err
+	}
+	iss, err := b.client.SetEngineMode(ctx, repo, key, mode)
+	if err != nil {
+		return BoardCard{}, err
+	}
+	return cardFromIssue(iss, iss.Taken), nil
+}
+
+func (b *BoardService) ShipCard(repoPrefix, key string) (BoardCard, error) {
+	ctx := context.Background()
+	repo, err := b.resolveRepoForKey(ctx, repoPrefix, key)
+	if err != nil {
+		return BoardCard{}, err
+	}
+	iss, err := b.client.ShipIssue(ctx, repo, key, false)
+	if err != nil {
+		return BoardCard{}, err
+	}
+	return cardFromIssue(iss, iss.Taken), nil
+}
+
+func (b *BoardService) SetAutoShip(repoPrefix string, enabled bool) (bool, error) {
+	ctx := context.Background()
+	repo, err := b.client.GetRepoByPrefix(ctx, repoPrefix)
+	if err != nil {
+		return false, err
+	}
+	return b.client.SetRepoAutoShip(ctx, repo, enabled, false)
+}
+
+// GetAutoShip reads the per-repo Shipping-column auto-ship toggle so the
+// Pipeline's Shipping switch seeds from the DB (the value the
+// controller's auto-ship ticker acts on), not a local cache.
+func (b *BoardService) GetAutoShip(repoPrefix string) (bool, error) {
+	ctx := context.Background()
+	repo, err := b.client.GetRepoByPrefix(ctx, repoPrefix)
+	if err != nil {
+		return false, err
+	}
+	return b.client.GetRepoAutoShip(ctx, repo)
+}
+
 // AddComment appends a comment to an issue and returns the refreshed
 // issue-drawer payload. An empty author falls back to the OS username,
 // the same default the CLI uses for human actors. repoPrefix may be empty
@@ -944,7 +1040,11 @@ func (b *BoardService) ListAgents(repoPrefix string) ([]AgentCard, error) {
 // the same feature-emoji / waiting / blocker shape as the rest of the
 // kanban. Validation (empty title, control chars, etc.) lives at the
 // store boundary inside client.CreateIssue.
-func (b *BoardService) AddIssue(repoPrefix, title, description string) (BoardCard, error) {
+// featureSlug (Phase 4) optionally associates the new issue with a
+// feature at creation time. Empty defers to the repo default feature
+// (store.ResolveCreateIssueFeatureID) — features are mandatory, so the
+// composer always supplies one, but an empty string stays valid.
+func (b *BoardService) AddIssue(repoPrefix, title, description, featureSlug string) (BoardCard, error) {
 	ctx := context.Background()
 	if repoPrefix == "" || repoPrefix == "all" {
 		return BoardCard{}, fmt.Errorf("AddIssue: a repo prefix is required (cross-repo pseudo-board has no target)")
@@ -953,7 +1053,7 @@ func (b *BoardService) AddIssue(repoPrefix, title, description string) (BoardCar
 	if err != nil {
 		return BoardCard{}, err
 	}
-	iss, err := b.client.CreateIssue(ctx, repo, inputs.IssueAddInput{Title: title, Description: description}, false)
+	iss, err := b.client.CreateIssue(ctx, repo, inputs.IssueAddInput{Title: title, Description: description, FeatureSlug: featureSlug}, false)
 	if err != nil {
 		return BoardCard{}, err
 	}

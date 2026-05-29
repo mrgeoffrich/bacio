@@ -199,6 +199,35 @@ export class BoardCard {
      */
     "latestPR"?: BoardCardLatestPR | null;
 
+    /**
+     * Jobs (Pipeline) is the card's process chain — one entry per stage,
+     * sequence-ordered. The Pipeline page's in-process card renders this
+     * as the job-chain list (which stage is running / done). Empty (and
+     * omitted) when no process has been chosen.
+     */
+    "jobs"?: BoardCardJob[];
+
+    /**
+     * CurrentJob (Pipeline) is the job in focus — the running stage, or
+     * the next pending stage when none is running. Nil (and omitted) when
+     * there is no chain or every stage is terminal (e.g. a shipped card).
+     */
+    "currentJob"?: BoardCardJob | null;
+
+    /**
+     * EngineMode (Pipeline) is the controller engine's per-card drive
+     * mode ("off" | "auto"), surfaced only while the card is in_pipeline.
+     * Empty (and omitted) on every other column.
+     */
+    "engineMode"?: string;
+
+    /**
+     * EnginePauseReason (Pipeline) is "" or "open_question" — the latter
+     * while Auto is halted on an open question on the current job.
+     * Surfaced only while the card is in_pipeline.
+     */
+    "enginePauseReason"?: string;
+
     /** Creates a new BoardCard instance. */
     constructor($$source: Partial<BoardCard> = {}) {
         if (!("key" in $$source)) {
@@ -248,6 +277,8 @@ export class BoardCard {
         const $$createField22_0 = $$createType10;
         const $$createField23_0 = $$createType12;
         const $$createField24_0 = $$createType14;
+        const $$createField25_0 = $$createType16;
+        const $$createField26_0 = $$createType17;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField5_0($$parsedSource["tags"]);
@@ -275,6 +306,12 @@ export class BoardCard {
         }
         if ("latestPR" in $$parsedSource) {
             $$parsedSource["latestPR"] = $$createField24_0($$parsedSource["latestPR"]);
+        }
+        if ("jobs" in $$parsedSource) {
+            $$parsedSource["jobs"] = $$createField25_0($$parsedSource["jobs"]);
+        }
+        if ("currentJob" in $$parsedSource) {
+            $$parsedSource["currentJob"] = $$createField26_0($$parsedSource["currentJob"]);
         }
         return new BoardCard($$parsedSource as Partial<BoardCard>);
     }
@@ -354,6 +391,40 @@ export class BoardCardFollowOn {
     static createFrom($$source: any = {}): BoardCardFollowOn {
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         return new BoardCardFollowOn($$parsedSource as Partial<BoardCardFollowOn>);
+    }
+}
+
+/**
+ * BoardCardJob is one stage of a card's Pipeline process chain. Mode is
+ * a dispatch-template slug or the "ship" hand-off sentinel; Status is
+ * pending / running / complete / cancelled.
+ */
+export class BoardCardJob {
+    "sequence": number;
+    "mode": string;
+    "status": string;
+
+    /** Creates a new BoardCardJob instance. */
+    constructor($$source: Partial<BoardCardJob> = {}) {
+        if (!("sequence" in $$source)) {
+            this["sequence"] = 0;
+        }
+        if (!("mode" in $$source)) {
+            this["mode"] = "";
+        }
+        if (!("status" in $$source)) {
+            this["status"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new BoardCardJob instance from a string or object.
+     */
+    static createFrom($$source: any = {}): BoardCardJob {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new BoardCardJob($$parsedSource as Partial<BoardCardJob>);
     }
 }
 
@@ -448,6 +519,13 @@ export class BoardCardQuestion {
     "firstQuestion": string;
     "count": number;
     "askedAt": time$0.Time;
+
+    /**
+     * PipelineJobID (Pipeline) is the job this question is parented to,
+     * or nil for a session-parented (legacy / non-pipeline) question.
+     * Lets the Pipeline card render the question against the right stage.
+     */
+    "pipelineJobId"?: number | null;
 
     /** Creates a new BoardCardQuestion instance. */
     constructor($$source: Partial<BoardCardQuestion> = {}) {
@@ -598,3 +676,6 @@ const $$createType11 = BoardCardLatestPlan.createFrom;
 const $$createType12 = $Create.Nullable($$createType11);
 const $$createType13 = BoardCardLatestPR.createFrom;
 const $$createType14 = $Create.Nullable($$createType13);
+const $$createType15 = BoardCardJob.createFrom;
+const $$createType16 = $Create.Array($$createType15);
+const $$createType17 = $Create.Nullable($$createType15);

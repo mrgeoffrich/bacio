@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	_ "embed"
 	"errors"
@@ -838,6 +839,101 @@ func migrate(db *sql.DB) error {
 			return fmt.Errorf("add user_action_reason_type to issues: %w", err)
 		}
 	}
+	// Pipeline page (BACI Pipeline phase 1). The following columns +
+	// tables back the three-column board. All ALTERs carry constant
+	// defaults so they are legal SQLite ALTER ADD COLUMNs and existing
+	// rows take the sane zero value (priority 0, engine off, no pause).
+	// schema.sql carries the same shapes for fresh DBs; these idempotent
+	// ALTERs / CREATEs bring older DBs up to date.
+	hasPriority, err := columnExists(db, "issues", "priority")
+	if err != nil {
+		return err
+	}
+	if !hasPriority {
+		if _, err := db.Exec(`ALTER TABLE issues ADD COLUMN priority INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("add priority to issues: %w", err)
+		}
+	}
+	hasEngineMode, err := columnExists(db, "issues", "engine_mode")
+	if err != nil {
+		return err
+	}
+	if !hasEngineMode {
+		if _, err := db.Exec(`ALTER TABLE issues ADD COLUMN engine_mode TEXT NOT NULL DEFAULT 'off'`); err != nil {
+			return fmt.Errorf("add engine_mode to issues: %w", err)
+		}
+	}
+	hasEnginePause, err := columnExists(db, "issues", "engine_pause_reason")
+	if err != nil {
+		return err
+	}
+	if !hasEnginePause {
+		if _, err := db.Exec(`ALTER TABLE issues ADD COLUMN engine_pause_reason TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add engine_pause_reason to issues: %w", err)
+		}
+	}
+	// pipeline_jobs is the per-issue process chain. CREATE TABLE IF NOT
+	// EXISTS is idempotent — fresh DBs get it from schema.sql, older DBs
+	// here. No CHECK on `status`: model.ParseJobStatus guards the set at
+	// the store boundary (same rationale as agent_dispatches.mode).
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS pipeline_jobs (
+			id           INTEGER PRIMARY KEY AUTOINCREMENT,
+			issue_id     INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+			sequence     INTEGER NOT NULL,
+			mode         TEXT    NOT NULL,
+			status       TEXT    NOT NULL DEFAULT 'pending',
+			dispatch_id  INTEGER REFERENCES agent_dispatches(id) ON DELETE SET NULL,
+			created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			started_at   DATETIME,
+			completed_at DATETIME,
+			UNIQUE(issue_id, sequence)
+		)`); err != nil {
+		return fmt.Errorf("create pipeline_jobs: %w", err)
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_pipeline_jobs_issue ON pipeline_jobs(issue_id)`); err != nil {
+		return fmt.Errorf("create idx_pipeline_jobs_issue: %w", err)
+	}
+	// Re-parent questions onto a pipeline job (nullable; legacy
+	// session-parented rows keep it NULL). ON DELETE SET NULL so a job
+	// row's deletion leaves the question reachable. ALTER ADD COLUMN
+	// with a REFERENCES clause is legal in SQLite for a nullable column.
+	hasQuestionJob, err := columnExists(db, "agent_session_questions", "pipeline_job_id")
+	if err != nil {
+		return err
+	}
+	if !hasQuestionJob {
+		if _, err := db.Exec(`ALTER TABLE agent_session_questions ADD COLUMN pipeline_job_id INTEGER REFERENCES pipeline_jobs(id) ON DELETE SET NULL`); err != nil {
+			return fmt.Errorf("add pipeline_job_id to agent_session_questions: %w", err)
+		}
+	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_asq_pipeline_job ON agent_session_questions(pipeline_job_id)`); err != nil {
+		return fmt.Errorf("create idx_asq_pipeline_job: %w", err)
+	}
+	// Drop the issues.state CHECK on older DBs so the two new Pipeline
+	// states (in_pipeline / to_be_shipped) are writable — model.ParseState
+	// guards the set at the boundary. Runs AFTER the column ALTERs above
+	// so the rebuilt table mirrors the full current column set.
+	if err := migrateIssuesStateCheck(db); err != nil {
+		return err
+	}
+	// (state, priority) index backs the Backlog / Shipping ordered reads.
+	// Created after the rebuild so it lands on the final issues table.
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_issues_state_priority ON issues(state, priority)`); err != nil {
+		return fmt.Errorf("create idx_issues_state_priority: %w", err)
+	}
+	// repo_settings.auto_ship (Pipeline) — the per-repo Shipping-column
+	// auto-ship toggle. Idempotent ALTER with a constant default for
+	// older DBs; schema.sql carries it for fresh ones.
+	hasAutoShip, err := columnExists(db, "repo_settings", "auto_ship")
+	if err != nil {
+		return err
+	}
+	if !hasAutoShip {
+		if _, err := db.Exec(`ALTER TABLE repo_settings ADD COLUMN auto_ship INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("add auto_ship to repo_settings: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -1354,6 +1450,193 @@ func agentDispatchesModeCheckPresent(db *sql.DB) (bool, error) {
 	}
 	collapsed := strings.Join(strings.Fields(sqlText.String), " ")
 	return strings.Contains(collapsed, "CHECK (mode IN"), nil
+}
+
+// issuesStateCheckPresent reports whether the issues table still carries
+// a column-level CHECK on `state` — every DB created from a pre-Pipeline
+// schema.sql has CHECK (state IN (...)), which would reject the two new
+// Pipeline states. Whitespace-collapsed lookup on the stored CREATE
+// TABLE SQL so reformatting doesn't fool it.
+func issuesStateCheckPresent(db *sql.DB) (bool, error) {
+	var sqlText sql.NullString
+	err := db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'issues'`).Scan(&sqlText)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !sqlText.Valid {
+		return false, nil
+	}
+	collapsed := strings.Join(strings.Fields(sqlText.String), " ")
+	return strings.Contains(collapsed, "CHECK (state IN"), nil
+}
+
+// migrateIssuesStateCheck rebuilds the issues table to drop the
+// column-level CHECK on `state`, so the two new Pipeline states
+// (in_pipeline / to_be_shipped) are writable. model.ParseState guards
+// the set at the store boundary, so the CHECK is redundant safety that
+// SQLite can't extend in place.
+//
+// issues is the parent of many cascade children (comments, tags,
+// relations, PRs, claims, document_links, pipeline_jobs all REFERENCE
+// issues with ON DELETE CASCADE / SET NULL). DROP TABLE performs an
+// implicit row-delete that fires those cascades when foreign-key
+// enforcement is ON — and unlike the `repos` rebuild's transaction-scoped
+// defer_foreign_keys (which does NOT suppress the cascade in this
+// driver), the only thing that reliably stops the wipe is fully
+// disabling foreign_keys. That PRAGMA is per-connection and a no-op
+// inside a transaction, so the whole rebuild runs on one dedicated
+// connection with enforcement OFF; the copy preserves every id, so child
+// FKs still resolve once enforcement is switched back ON.
+//
+// Keyed off the stored CREATE TABLE SQL: fresh DBs (schema.sql no longer
+// declares the CHECK) and already-migrated DBs skip the rebuild. Runs
+// AFTER the Pipeline column ALTERs in migrate(), so the source table is
+// guaranteed to carry priority / engine_mode / engine_pause_reason and
+// the copy column list is fixed.
+func migrateIssuesStateCheck(db *sql.DB) error {
+	present, err := issuesStateCheckPresent(db)
+	if err != nil || !present {
+		return err
+	}
+	ctx := context.Background()
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+		return fmt.Errorf("disable fk: %w", err)
+	}
+	rebuildErr := rebuildIssuesDropStateCheck(ctx, conn)
+	// Restore the connection's pragmas before it returns to the pool —
+	// even if the rebuild failed — so no pooled connection is left with
+	// FK enforcement off or in legacy rename mode.
+	if _, err := conn.ExecContext(ctx, `PRAGMA legacy_alter_table = OFF`); err != nil && rebuildErr == nil {
+		rebuildErr = fmt.Errorf("reset legacy alter table: %w", err)
+	}
+	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = ON`); err != nil && rebuildErr == nil {
+		rebuildErr = fmt.Errorf("re-enable fk: %w", err)
+	}
+	return rebuildErr
+}
+
+// rebuildIssuesDropStateCheck runs the create/copy/drop/rename dance on
+// the supplied dedicated connection (foreign_keys already OFF). It also
+// recreates the indexes and the one trigger defined ON issues — both are
+// dropped with the table; the next Open() re-applies schema.sql's
+// IF NOT EXISTS forms, but recreating them in-tx keeps the table correct
+// for the rest of this process. A foreign_key_check before commit guards
+// against a botched copy leaving dangling child references.
+func rebuildIssuesDropStateCheck(ctx context.Context, conn *sql.Conn) error {
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// legacy_alter_table makes the RENAME below a pure rename instead of
+	// trying to rewrite references to "issues" inside other objects.
+	// issues is referenced by the side-data bump triggers (on
+	// issue_pull_requests / issue_relations / issue_tags); once the old
+	// issues table is dropped the modern RENAME walks those trigger
+	// bodies and fails with "no such table: issues" before the rename
+	// lands. (migrateRepoPathUnique doesn't need this — nothing
+	// references repos in a trigger body.)
+	if _, err := tx.ExecContext(ctx, `PRAGMA legacy_alter_table = ON`); err != nil {
+		return fmt.Errorf("legacy alter table on: %w", err)
+	}
+	// Mirror schema.sql's issues shape exactly, minus the state CHECK.
+	if _, err := tx.ExecContext(ctx, `
+		CREATE TABLE issues_new (
+			id          INTEGER PRIMARY KEY AUTOINCREMENT,
+			uuid        TEXT    NOT NULL,
+			repo_id     INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+			number      INTEGER NOT NULL,
+			feature_id  INTEGER REFERENCES features(id) ON DELETE SET NULL,
+			title       TEXT    NOT NULL,
+			description TEXT    NOT NULL DEFAULT '',
+			state       TEXT    NOT NULL,
+			assignee    TEXT    NOT NULL DEFAULT '',
+			archived_at DATETIME,
+			terminal_at DATETIME,
+			user_action_reason_type TEXT,
+			base_branch TEXT,
+			priority    INTEGER NOT NULL DEFAULT 0,
+			engine_mode TEXT    NOT NULL DEFAULT 'off',
+			engine_pause_reason TEXT NOT NULL DEFAULT '',
+			created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(repo_id, number)
+		)
+	`); err != nil {
+		return fmt.Errorf("create issues_new: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO issues_new
+			(id, uuid, repo_id, number, feature_id, title, description, state, assignee,
+			 archived_at, terminal_at, user_action_reason_type, base_branch,
+			 priority, engine_mode, engine_pause_reason, created_at, updated_at)
+		SELECT
+			id, uuid, repo_id, number, feature_id, title, description, state, assignee,
+			archived_at, terminal_at, user_action_reason_type, base_branch,
+			priority, engine_mode, engine_pause_reason, created_at, updated_at
+		FROM issues
+	`); err != nil {
+		return fmt.Errorf("copy issues rows: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DROP TABLE issues`); err != nil {
+		return fmt.Errorf("drop old issues: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `ALTER TABLE issues_new RENAME TO issues`); err != nil {
+		return fmt.Errorf("rename issues_new: %w", err)
+	}
+	for _, stmt := range []string{
+		`CREATE INDEX IF NOT EXISTS idx_issues_state ON issues(state)`,
+		`CREATE INDEX IF NOT EXISTS idx_issues_feature ON issues(feature_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_issues_assignee ON issues(assignee)`,
+		`CREATE INDEX IF NOT EXISTS idx_issues_archived_at ON issues(archived_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_issues_terminal_at ON issues(terminal_at)`,
+		`CREATE TRIGGER IF NOT EXISTS bump_issue_updated_on_archive_change
+		 AFTER UPDATE OF archived_at ON issues
+		 WHEN NEW.archived_at IS NOT OLD.archived_at
+		   AND NEW.updated_at = OLD.updated_at
+		 BEGIN
+		     UPDATE issues SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+		 END`,
+	} {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("recreate issues index/trigger: %w", err)
+		}
+	}
+	// Integrity net: with every id preserved there must be zero dangling
+	// child references. Catch a botched copy before commit rather than
+	// leaving the store inconsistent.
+	bad, err := txHasForeignKeyViolation(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if bad {
+		return errors.New("issues rebuild left dangling foreign keys")
+	}
+	return tx.Commit()
+}
+
+// txHasForeignKeyViolation reports whether PRAGMA foreign_key_check finds
+// any violating row in tx. The pragma runs regardless of the connection's
+// enforcement setting, so it works mid-rebuild with foreign_keys OFF.
+func txHasForeignKeyViolation(ctx context.Context, tx *sql.Tx) (bool, error) {
+	rows, err := tx.QueryContext(ctx, `PRAGMA foreign_key_check`)
+	if err != nil {
+		return false, fmt.Errorf("foreign_key_check: %w", err)
+	}
+	defer rows.Close()
+	bad := rows.Next()
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	return bad, nil
 }
 
 // migrateDocumentsTypeCheck rebuilds documents to widen the column

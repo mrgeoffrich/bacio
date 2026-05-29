@@ -13,7 +13,7 @@ import { viewPath, viewFromPath } from '../lib/routes';
 // composite GET /agents/cards endpoint that assembles the AgentCard
 // shape server-side.
 export const NAV = [
-  { view: 'board', label: 'Issues' },
+  { view: 'pipeline', label: 'Pipeline' },
   { view: 'features', label: 'Features' },
   { view: 'docs', label: 'Documents' },
   { view: 'agents', label: 'Agents' },
