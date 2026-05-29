@@ -990,13 +990,11 @@ export default function App() {
                   activeBoard={activeBoard}
                   openIssueKey={openIssueKey}
                   brief={openIssueBrief}
-                  promptConfig={promptConfig}
                   cards={cards}
                   onClose={closeIssue}
                   onSaveDescription={saveDescription}
                   onAddComment={addComment}
                   onDeleteComment={deleteComment}
-                  onDispatch={(mode) => openIssueKey && dispatchFromCard(openIssueKey, mode)}
                   onCancelWaiting={() => openIssueKey && cancelWaitingFromCard(openIssueKey)}
                   onAttachPR={attachPR}
                   onNavigateIssue={navigateToIssue}

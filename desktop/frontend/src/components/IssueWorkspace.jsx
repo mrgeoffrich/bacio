@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { Link } from 'react-router';
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import MarkdownView from '../lib/markdownView';
 import Icon from './Icon.jsx';
 import IssueLockBanner from './issue/IssueLockBanner.jsx';
@@ -16,7 +15,7 @@ import { reportError } from '../errors';
 // side drawer + centred edit modal with one routed view. Primary column
 // carries the description + linked-doc plan + activity timeline; the
 // secondary rail carries feature/assignee/tags metadata, PR attachments,
-// claimants, and the dispatch button.
+// and claimants.
 //
 // All data is in `brief` (an IssueBriefDTO) which the parent App loads
 // via api.getIssueBrief and polls every 10s while this view is mounted.
@@ -27,13 +26,11 @@ export default function IssueWorkspace({
   activeBoard,
   openIssueKey,
   brief,
-  promptConfig,
   cards,
   onClose,
   onSaveDescription,
   onAddComment,
   onDeleteComment,
-  onDispatch,
   onCancelWaiting,
   onAttachPR,
   onNavigateIssue,
@@ -72,18 +69,6 @@ export default function IssueWorkspace({
     if (!brief?.claimants) return null;
     return brief.claimants.find(c => c.open) ?? null;
   }, [brief]);
-
-  // BACI-252: the rail dispatch list mirrors the kanban card popup —
-  // every non-reserved template is offered, no per-state filtering.
-  // Reserved/internal slugs (e.g. `_dispatch_preamble`) are filtered
-  // by leading-underscore prefix. Empty while loading — DropdownMenu
-  // hides the trigger.
-  const dispatchablePrompts = useMemo(() => {
-    if (!issueMeta) return [];
-    return (promptConfig || []).filter(
-      p => !((p.mode || p.slug) || '').startsWith('_'),
-    );
-  }, [issueMeta, promptConfig]);
 
   // Column-scoped prev/next siblings — same column, sorted by key.
   const siblings = useMemo(() => {
@@ -394,49 +379,6 @@ export default function IssueWorkspace({
                   </li>
                 ))}
               </ul>
-            </section>
-          )}
-
-          {dispatchablePrompts.length > 0 && (
-            <section className="mk-drawer-section">
-              <div className="mk-drawer-label">Dispatch</div>
-              <DropdownMenu.Root>
-                <DropdownMenu.Trigger asChild>
-                  <button
-                    type="button"
-                    className="mk-btn-primary mk-workspace-action-btn"
-                    disabled={taken || waiting}
-                    title={taken ? 'An agent is working on this issue' : undefined}
-                  >
-                    <Icon name="zap" /> Dispatch…
-                  </button>
-                </DropdownMenu.Trigger>
-                <DropdownMenu.Portal>
-                  <DropdownMenu.Content
-                    className="mk-card-action-menu"
-                    align="end"
-                    sideOffset={4}
-                    collisionPadding={8}
-                  >
-                    {dispatchablePrompts.map(p => (
-                      <DropdownMenu.Item
-                        key={p.mode || p.slug}
-                        className="mk-card-action-item"
-                        onSelect={() => onDispatch(p.mode || p.slug)}
-                      >
-                        {/*
-                          BACI-67: prefer the imperative actionLabel
-                          override so the dispatch dropdown reads as
-                          a call to action ("Plan", "Design") instead
-                          of a status description ("Planning"). label
-                          remains the fallback for older payloads.
-                        */}
-                        {p.actionLabel || p.label}
-                      </DropdownMenu.Item>
-                    ))}
-                  </DropdownMenu.Content>
-                </DropdownMenu.Portal>
-              </DropdownMenu.Root>
             </section>
           )}
         </aside>
