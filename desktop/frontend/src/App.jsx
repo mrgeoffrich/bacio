@@ -10,6 +10,7 @@ import PipelineView from './components/PipelineView.jsx';
 import IssueWorkspace from './components/IssueWorkspace.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
 import IssueComposer from './components/IssueComposer.jsx';
+import RepoNotFound from './components/RepoNotFound.jsx';
 import { readShippedScope, persistShippedScope } from './components/shippedScopePersistence.ts';
 import { scopeSinceDays } from './components/shippedScope.ts';
 import SettingsView from './components/SettingsView.jsx';
@@ -23,7 +24,7 @@ import * as api from './api';
 import { isTerminalState, stripBlockerFromCards, restoreBlockedByFromSnapshot } from './lib/issueState';
 import { useShipFlourish } from './lib/shipFlourish';
 import { useShipSfx } from './lib/shipSfx';
-import { viewPath, issuePath, viewFromPath } from './lib/routes';
+import { viewPath, issuePath, viewFromPath, prefixFromPath } from './lib/routes';
 
 const THEME_KEY = 'bacio-theme'; // persisted preference: 'system' | 'light' | 'dark'
 const REPO_KEY = 'bacio-active-repo'; // persisted preference: last-selected repo prefix
@@ -49,6 +50,21 @@ function persistActiveRepo(prefix) {
   catch { /* non-fatal — the preference just won't survive a relaunch */ }
 }
 
+// BACI-285: the prefix-less page words a stale legacy link
+// (`/ui/pipeline`, `/ui/issues/BACI-1`, ...) can lead with. The first
+// path segment landing on one of these — instead of a known repo
+// prefix — is treated as a soft-redirect (rebase the path under the
+// active repo's prefix) rather than a hard 404 (RepoNotFound).
+const LEGACY_PAGE_WORDS = new Set(['pipeline', 'issues', 'features', 'documents', 'agents', 'history']);
+
+// legacyPageWord reports whether the URL's first segment is one of the
+// recognised prefix-less page words — the signal that an unmatched
+// prefix is a stale legacy link to soft-redirect rather than a
+// genuinely-unknown repo to hard-404.
+function legacyPageWord(first) {
+  return LEGACY_PAGE_WORDS.has(first);
+}
+
 // isEditingTarget reports whether a keystroke landed in something the user is
 // typing into — a form field or the contenteditable doc editor — so global
 // hotkeys can stand down rather than hijack the keypress.
@@ -64,10 +80,6 @@ export default function App() {
 
   const [boards, setBoards] = useState([]);
   const [columns, setColumns] = useState([]);
-  // The selected repo prefix. Starts from the persisted preference (or "" on
-  // first run / before the repo list resolves); the mount effect lands it on
-  // a real repo once boards load.
-  const [activeBoard, setActiveBoard] = useState(readActiveRepo);
   const [cards, setCards] = useState([]);
   // BACI-203: openIssueKey is now derived from the URL — the
   // `/issues/:key` workspace route owns the source of truth. The App
@@ -127,15 +139,58 @@ export default function App() {
   const [theme, setTheme] = useState(readTheme);
   const [loading, setLoading] = useState(true);
 
+  // BACI-285: the URL's first segment is the active repo prefix — the
+  // single source of truth for the active repo. `urlPrefix` is the raw
+  // segment (may be empty on bare `/`, or an unknown repo on a stale /
+  // mistyped link); `activeBoard` below is the validated repo the rest
+  // of the App keys off, or "" until boards load / when the prefix is
+  // unknown. App sits above <Routes> so it can't own a `:prefix` route
+  // param — it parses the prefix off location.pathname the same way it
+  // already parses openIssueKey.
+  const urlPrefix = prefixFromPath(location.pathname);
+  // Match the URL prefix to a known board case-insensitively so a
+  // lowercased shared link still resolves; emit the canonical
+  // (board.prefix) casing so generated URLs and the localStorage seed
+  // stay canonical. "" until boards load or when the prefix is unknown.
+  const matchedBoard = boards.find(b => b.prefix.toLowerCase() === urlPrefix.toLowerCase());
+  const activeBoard = matchedBoard?.prefix ?? '';
+  // BACI-285: a non-empty URL prefix that doesn't match any known board
+  // — and isn't a recognised prefix-less legacy page word (those soft-
+  // redirect through the <Routes> `*` branch) — is a hard 404 once
+  // boards have loaded; RepoNotFound renders instead of the page routes.
+  // While loading we defer the decision (boards aren't in yet, so a
+  // valid prefix would otherwise 404 itself).
+  const prefixUnknown =
+    !loading && !!urlPrefix && !matchedBoard && !legacyPageWord(urlPrefix);
+  // The repo a prefix-less / bare path should redirect to: the last
+  // validated localStorage pick if it still exists, else the first board.
+  const fallbackPrefix = (() => {
+    const remembered = readActiveRepo();
+    if (boards.some(b => b.prefix === remembered)) return remembered;
+    return boards[0]?.prefix ?? '';
+  })();
+  // BACI-285: where a bare `/` or prefix-less legacy path redirects.
+  // Bare `/` → the fallback repo's Pipeline. A legacy page link
+  // (`/pipeline`, `/issues/BACI-1`, ...) keeps its page path, just
+  // rebased under the fallback prefix so the recipient lands on the
+  // same screen. An empty fallback (no repos at all) lands on bare `/`
+  // so the empty-state renders rather than a `//` path.
+  const legacyRedirectTarget = (() => {
+    if (!fallbackPrefix) return '/';
+    const rest = location.pathname.replace(/^\/+/, '');
+    if (rest && legacyPageWord(urlPrefix)) return `/${fallbackPrefix}/${rest}`;
+    return viewPath(fallbackPrefix, 'pipeline');
+  })();
+
   // BACI-203: derive the active view from the URL path. The Topbar
   // reads the same value (via useLocation()), so the App and the
   // Topbar stay in lockstep without a prop ping-pong.
   const activeView = viewFromPath(location.pathname) || 'board';
-  // BACI-203: derive the open issue key from the route. Matches the
-  // `/issues/:key` URL shape; null when we're on a list or detail
-  // route that isn't an issue workspace.
+  // BACI-203 / BACI-285: derive the open issue key from the route.
+  // Matches the `/<prefix>/issues/:key` URL shape; null when we're on a
+  // list or detail route that isn't an issue workspace.
   const openIssueKey = (() => {
-    const m = location.pathname.match(/^\/issues\/([^/]+)$/);
+    const m = location.pathname.match(/^\/[^/]+\/issues\/([^/]+)$/);
     return m ? m[1] : null;
   })();
 
@@ -161,9 +216,10 @@ export default function App() {
   }, [theme]);
 
   // Load the repository list + columns + prompt config once on mount.
-  // Once boards resolve, land activeBoard on the persisted repo if it
-  // still exists, otherwise the first repo — every screen needs a
-  // concrete repo, there's no "all" option. The prompt config is global
+  // BACI-285: activeBoard is now derived from the URL prefix (see the
+  // urlPrefix block above), so the mount effect no longer seeds it —
+  // the redirect routing below lands a prefix-less / bare path on a
+  // concrete repo once boards resolve. The prompt config is global
   // (repo-independent), so it loads here too. A mount-time failure
   // no longer blanks the renderer (BACI-43): the modal surfaces the
   // error, the Topbar stays usable, and the views render their own
@@ -185,7 +241,6 @@ export default function App() {
         setArchiveAutoEnabled(archivePrefs.autoEnabled);
         setArchiveRetentionDays(archivePrefs.retentionDays);
         setAudioEnabled(audioPrefs.shippedSfx);
-        setActiveBoard(prev => bs.some(b => b.prefix === prev) ? prev : (bs[0]?.prefix ?? ''));
         setLoading(false);
       })
       .catch(err => {
@@ -416,8 +471,8 @@ export default function App() {
     if (!card?.key) return;
     setSettingsOpen(false);
     setSettingsInitialSection(null);
-    navigate(issuePath(card.key));
-  }, [navigate]);
+    navigate(issuePath(activeBoard, card.key));
+  }, [navigate, activeBoard]);
 
   // BACI-114: the kanban blocked popover navigates by key — the
   // target may not be the card the popover is rendered on (it's the
@@ -428,8 +483,8 @@ export default function App() {
     if (!key) return;
     setSettingsOpen(false);
     setSettingsInitialSection(null);
-    navigate(issuePath(key));
-  }, [navigate]);
+    navigate(issuePath(activeBoard, key));
+  }, [navigate, activeBoard]);
 
   // Close the workspace: navigate back. With BrowserRouter the browser's
   // back stack handles "back to the previous view"; navigate(-1) goes
@@ -444,9 +499,9 @@ export default function App() {
     if (window.history.state && window.history.length > 1) {
       navigate(-1);
     } else {
-      navigate(viewPath('pipeline'));
+      navigate(viewPath(activeBoard, 'pipeline'));
     }
-  }, [navigate]);
+  }, [navigate, activeBoard]);
 
   // BACI-166: composer success handler — optimistically prepend the new
   // card with a queued_no_agent waitingState in the 'scope' mode so the
@@ -463,12 +518,12 @@ export default function App() {
     ]);
     setSettingsOpen(false);
     setSettingsInitialSection(null);
-    navigate(issuePath(newCard.key));
+    navigate(issuePath(activeBoard, newCard.key));
     // Don't fire refreshCards synchronously — the dispatch is queued
     // *after* this callback returns (the composer awaits it post-route),
     // so an immediate refetch could race past it. The standing 10s poll
     // catches the authoritative shape on its next tick.
-  }, [navigate]);
+  }, [navigate, activeBoard]);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -508,11 +563,14 @@ export default function App() {
         }
       } else if (!e.metaKey && !e.ctrlKey && !e.altKey && e.key >= '1' && e.key <= '9') {
         // Digit keys jump between nav views, like the TUI's tab shortcuts —
-        // unless the user is typing into a field or the doc editor.
+        // unless the user is typing into a field or the doc editor. Skip
+        // when no real repo is active (loading / not-found screen) so we
+        // don't navigate to a prefix-less `//<view>` path.
         if (isEditingTarget(e.target)) return;
+        if (!activeBoard) return;
         const idx = Number(e.key) - 1;
         if (idx < NAV.length) {
-          navigate(viewPath(NAV[idx].view));
+          navigate(viewPath(activeBoard, NAV[idx].view));
         }
       }
     };
@@ -531,7 +589,9 @@ export default function App() {
         if (!board.prefix) return undefined;
         return api.listBoards().then(bs => {
           setBoards(bs);
-          setActiveBoard(board.prefix);
+          // BACI-285: the active repo is URL-derived now — route to the
+          // new repo's pipeline so it becomes active.
+          navigate(viewPath(board.prefix, 'pipeline'));
           return board;
         });
       })
@@ -892,8 +952,22 @@ export default function App() {
   // effect-dep arrays without thrashing.
   const navigateToIssue = useCallback((key) => {
     if (!key) return;
-    navigate(issuePath(key));
-  }, [navigate]);
+    navigate(issuePath(activeBoard, key));
+  }, [navigate, activeBoard]);
+
+  // BACI-285: repo switch — the active repo is URL-derived now, so
+  // picking a repo routes to it. Land on the same page in the new repo
+  // (the current view from viewFromPath); the trailing entity segment
+  // on a detail route (`/BACI/issues/BACI-100`) is naturally dropped
+  // because viewPath emits the list/page root only. Used by the Topbar
+  // RepoPicker and the RepoNotFound screen. Falls back to the board
+  // view ('board' → /issues) when the current path isn't a known nav
+  // view (e.g. the repo-not-found screen itself).
+  const pickBoard = useCallback((prefix) => {
+    if (!prefix) return;
+    const currentView = viewFromPath(location.pathname) || 'pipeline';
+    navigate(viewPath(prefix, currentView));
+  }, [navigate, location.pathname]);
 
   return (
     <TooltipProvider delayDuration={250} skipDelayDuration={150}>
@@ -911,7 +985,7 @@ export default function App() {
       <Topbar
         boards={boards}
         activeBoard={activeBoard}
-        onPickBoard={setActiveBoard}
+        onPickBoard={pickBoard}
         onAddRepository={addRepository}
         onBeforeNavigate={() => { setSettingsOpen(false); setSettingsInitialSection(null); }}
         onOpenPalette={() => setPaletteOpen(true)}
@@ -923,6 +997,12 @@ export default function App() {
       />
       {loading ? (
         <div className="mk-app-state">Loading…</div>
+      ) : boards.length === 0 ? (
+        // BACI-285: no repos registered yet — there's no prefix to route
+        // to, so render an empty state (and skip the <Routes> block,
+        // whose `/` redirect would otherwise loop on an empty fallback).
+        // Add one via the topbar RepoPicker's "Add Repository" action.
+        <div className="mk-app-state">No repositories yet — add one from the repo picker above.</div>
       ) : settingsOpen ? (
         <ErrorBoundary headline="Something went wrong in Settings" label="The Settings view crashed">
           <SettingsView
@@ -943,14 +1023,28 @@ export default function App() {
             initialSection={settingsInitialSection}
           />
         </ErrorBoundary>
+      ) : prefixUnknown ? (
+        // BACI-285: the URL's first segment is a genuinely-unknown repo
+        // prefix (not a known board, not a recognised legacy page word).
+        // Render the hard-404 screen rather than stranding the user on a
+        // blank board keyed off an empty repo. Legacy page links
+        // (`/ui/pipeline`, ...) flow into the <Routes> branch below and
+        // soft-redirect through its `*` route instead.
+        <RepoNotFound prefix={urlPrefix} boards={boards} onPickBoard={pickBoard} />
       ) : (
         <Routes>
-          {/* Redirect / to /pipeline — the Pipeline is the only driving
-              surface now (the issues board was removed in the Phase 5
-              cutover). The /issues/:key workspace route stays. */}
-          <Route path="/" element={<Navigate to={viewPath('pipeline')} replace />} />
+          {/* BACI-285: every page route is scoped to the active repo's
+              prefix (`/<PREFIX>/<page>`). App reads the prefix off
+              location.pathname (activeBoard) rather than useParams, so
+              the page elements below don't need the route param — the
+              `:prefix` segment exists only to anchor the route tree. */}
+          {/* Bare `/` and any prefix-less / stale path redirect to the
+              fallback repo's Pipeline so refreshes / legacy links don't
+              strand the user. The Pipeline is the only driving surface
+              (the issues board was removed in the Phase 5 cutover). */}
+          <Route path="/" element={<Navigate to={legacyRedirectTarget} replace />} />
           <Route
-            path="/pipeline"
+            path="/:prefix/pipeline"
             element={
               <ErrorBoundary headline="Something went wrong in Pipeline" label="The Pipeline view crashed">
                 <PipelineView
@@ -981,9 +1075,9 @@ export default function App() {
             }
           />
           {/* Phase 5 cutover: the /issues board LIST route is removed —
-              the Pipeline (/pipeline) is the only board surface now. The
-              /issues/:key workspace route below stays as the view/edit
-              home for a single issue. */}
+              the Pipeline is the only board surface now. The
+              /:prefix/issues/:key workspace route below stays as the
+              view/edit home for a single issue. */}
           {/* Inline the element rather than wrapping it in a component
               declared inside App: a nested function component would have a
               fresh identity on every App render, and react-router would
@@ -993,7 +1087,7 @@ export default function App() {
               derived from location.pathname above, so the useParams
               adapter is unnecessary. */}
           <Route
-            path="/issues/:key"
+            path="/:prefix/issues/:key"
             element={
               <ErrorBoundary headline="Something went wrong in the issue view" label="The issue view crashed">
                 <IssueWorkspace
@@ -1014,7 +1108,7 @@ export default function App() {
             }
           />
           <Route
-            path="/features"
+            path="/:prefix/features"
             element={
               <ErrorBoundary headline="Something went wrong in Features" label="The Features view crashed">
                 {/* BACI-177: refresh the cached board cards when the user
@@ -1026,7 +1120,7 @@ export default function App() {
             }
           />
           <Route
-            path="/features/:slug"
+            path="/:prefix/features/:slug"
             element={
               <ErrorBoundary headline="Something went wrong in Features" label="The Features view crashed">
                 <FeaturesView activeBoard={activeBoard} onChangeHidden={refreshCards} />
@@ -1034,7 +1128,7 @@ export default function App() {
             }
           />
           <Route
-            path="/documents"
+            path="/:prefix/documents"
             element={
               <ErrorBoundary headline="Something went wrong in Docs" label="The Docs view crashed">
                 <DocsView activeBoard={activeBoard} onOpenIssue={navigateToIssue} />
@@ -1042,7 +1136,7 @@ export default function App() {
             }
           />
           <Route
-            path="/documents/:slug"
+            path="/:prefix/documents/:slug"
             element={
               <ErrorBoundary headline="Something went wrong in Docs" label="The Docs view crashed">
                 <DocsView activeBoard={activeBoard} onOpenIssue={navigateToIssue} />
@@ -1050,7 +1144,7 @@ export default function App() {
             }
           />
           <Route
-            path="/agents"
+            path="/:prefix/agents"
             element={
               <ErrorBoundary headline="Something went wrong in Agents" label="The Agents view crashed">
                 <AgentsView agents={agents} onRefresh={refreshAgents} />
@@ -1058,16 +1152,32 @@ export default function App() {
             }
           />
           <Route
-            path="/history"
+            path="/:prefix/history"
             element={
               <ErrorBoundary headline="Something went wrong in History" label="The History view crashed">
                 <HistoryView activeBoard={activeBoard} />
               </ErrorBoundary>
             }
           />
-          {/* Unknown route lands on the Pipeline so refreshes / stray
-              links don't strand the user on a 404 we don't render. */}
-          <Route path="*" element={<Navigate to={viewPath('pipeline')} replace />} />
+          {/* Catch-all: an unknown page under a *valid* prefix lands on
+              that repo's Pipeline; a prefix-less / stale single-segment
+              legacy path (e.g. `/pipeline`, which react-router matches
+              here as `:prefix=pipeline` with an empty splat) has an
+              empty activeBoard, so it falls through to the legacy
+              redirect instead of building a `//pipeline` path. Both
+              shapes resolve here because `/:prefix/*` outranks a bare
+              `*` in react-router and would otherwise swallow the legacy
+              case. */}
+          <Route
+            path="/:prefix/*"
+            element={
+              <Navigate
+                to={activeBoard ? viewPath(activeBoard, 'pipeline') : legacyRedirectTarget}
+                replace
+              />
+            }
+          />
+          <Route path="*" element={<Navigate to={legacyRedirectTarget} replace />} />
         </Routes>
       )}
       <ErrorBoundary headline="Something went wrong in the command palette" label="The command palette crashed">

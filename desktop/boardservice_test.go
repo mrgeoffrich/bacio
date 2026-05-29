@@ -166,16 +166,6 @@ func (f *fakeBoardClient) LatestPRByIssue(context.Context, []int64) (map[int64]*
 	return map[int64]*model.LatestPR{}, nil
 }
 
-// PipelineJobsForIssues — boardcards.Assemble bulk-reads the per-card
-// Pipeline job chains to render the in_pipeline card's processing area.
-// Same "empty-map = no jobs" semantics as the lookups above; the
-// taken-flag tests don't exercise pipeline jobs, so the empty production
-// case is the right default. Drive-by fix for a pre-existing nil-pointer
-// panic in the embedded-interface stub — see the BACI-282 PR description.
-func (f *fakeBoardClient) PipelineJobsForIssues(context.Context, []int64) (map[int64][]*model.PipelineJob, error) {
-	return map[int64][]*model.PipelineJob{}, nil
-}
-
 // ListHiddenFeatureSlugs (BACI-177) — empty slice means "no features
 // are hidden", which matches the production default and lets every
 // taken-flag / waiting-state test pass cards through unchanged.

@@ -193,6 +193,7 @@ export default function PipelineView({
               <PipelineCard
                 key={card.key}
                 card={card}
+                activeBoard={activeBoard}
                 index={i}
                 showBadge={expanded}
                 backlog
@@ -235,6 +236,7 @@ export default function PipelineView({
               >
                 <StageCard
                   card={card}
+                  activeBoard={activeBoard}
                   isDragging={dragKey === card.key}
                   onOpen={() => onOpenCard?.(card)}
                   onDragStart={() => setDragKey(card.key)}
@@ -292,6 +294,7 @@ export default function PipelineView({
               <PipelineCard
                 key={card.key}
                 card={card}
+                activeBoard={activeBoard}
                 index={i}
                 shipping
                 isNextToShip={i === 0}
@@ -336,6 +339,7 @@ export default function PipelineView({
 // waiting status.
 function PipelineCard({
   card,
+  activeBoard,
   index,
   showBadge,
   shipping,
@@ -374,7 +378,7 @@ function PipelineCard({
           {index + 1}
         </span>
       )}
-      <CardHead card={card} />
+      <CardHead card={card} activeBoard={activeBoard} />
       <h3 className="mk-pl-card-title">{card.title}</h3>
       <CardLabels tags={card.tags} />
       {backlog && (
@@ -435,7 +439,7 @@ function PipelineCard({
 // CardHead — feature glyph · issue key · plan / PR icon buttons (each
 // only when it exists). Shared by the compact card and the stage card's
 // header so the anatomy stays identical.
-function CardHead({ card }) {
+function CardHead({ card, activeBoard }) {
   const latestPlan = card.latestPlan || null;
   const latestPR = card.latestPR || null;
   return (
@@ -448,7 +452,7 @@ function CardHead({ card }) {
         {latestPlan && (
           <Tooltip label={`Open plan: ${latestPlan.filename}`}>
             <Link
-              to={documentPath(latestPlan.filename)}
+              to={documentPath(activeBoard, latestPlan.filename)}
               className="mk-pl-icobtn"
               aria-label={`Open plan: ${latestPlan.filename}`}
               onClick={(e) => e.stopPropagation()}
@@ -491,6 +495,7 @@ function CardLabels({ tags }) {
 // chosen yet, a process-pick menu sits over the card.
 function StageCard({
   card,
+  activeBoard,
   isDragging,
   onOpen,
   onDragStart,
@@ -525,7 +530,7 @@ function StageCard({
       onDragEnd={onDragEnd}
     >
       <header className="mk-pl-stage-head" onClick={onOpen}>
-        <CardHead card={card} />
+        <CardHead card={card} activeBoard={activeBoard} />
         <h3 className="mk-pl-stage-title">{card.title}</h3>
         <CardLabels tags={card.tags} />
       </header>
