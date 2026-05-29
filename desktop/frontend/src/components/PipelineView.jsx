@@ -551,7 +551,7 @@ function StageCard({
               <ActiveJob card={card} job={running} />
             ) : (
               <div className="mk-pl-proc-empty">
-                Process selected. Press <b>Start</b> to run the first job, or flip
+                Process selected. Press <b>Start</b> to run the next job, or flip
                 {' '}<b>Auto</b> to run them through.
               </div>
             )}
