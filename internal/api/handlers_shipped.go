@@ -3,8 +3,8 @@ package api
 // BACI-187: shipping-log read endpoint. Per-repo list of recently-done
 // issues, newest-first, scoped to issues.state='done' AND
 // terminal_at IS NOT NULL (cancelled excluded by design; see the
-// design doc's "Out of scope" block). Drives the topbar Shipped pill's
-// popover on the desktop / web frontend.
+// design doc's "Out of scope" block). Drives the Pipeline Shipping
+// column's Shipped pill's popover on the desktop / web frontend.
 
 import (
 	"net/http"
@@ -31,8 +31,8 @@ type ShippedIssue struct {
 
 // ShippedListResponse (BACI-221) wraps the popover's per-fetch rows
 // alongside the total count under the same scope. The popover renders
-// "N rows of TOTAL" and uses Total to seed the topbar pill without an
-// extra round trip on first open. The pre-BACI-221 response shape was
+// "N rows of TOTAL" and uses Total to seed the Pipeline Shipping-column
+// pill without an extra round trip on first open. The pre-BACI-221 response shape was
 // a bare []ShippedIssue; the wrapper is a breaking change, but the
 // only consumers are the desktop / web ShippedPopover (which lands
 // in lockstep with this) and the cross-transport remote client
@@ -44,8 +44,9 @@ type ShippedListResponse struct {
 
 // ShippedCountResponse is the body of GET /repos/{prefix}/shipped/count
 // — total shipped under the current ?since= scope, polled on the same
-// 10s cadence as the leader / agents endpoints so the topbar pill
-// reflects "Forever" and includes archived / board-hidden rows. No
+// 10s cadence as the leader / agents endpoints so the Pipeline
+// Shipping-column pill reflects "Forever" and includes archived /
+// board-hidden rows. No
 // limit parameter — the count is total under the scope.
 type ShippedCountResponse struct {
 	Total int `json:"total"`
@@ -61,9 +62,9 @@ const (
 	shippedAPIMaxLimit = 100
 	// shippedAPIDefaultSinceDays is the window the popover's first-open
 	// fetch asks for when ?since= is omitted. Thirty days is wider than
-	// the topbar pill's seven-day count window — the popover happily
-	// shows older rows so the operator can scroll back through
-	// "what shipped last month".
+	// the Pipeline Shipping-column pill's seven-day count window — the
+	// popover happily shows older rows so the operator can scroll back
+	// through "what shipped last month".
 	shippedAPIDefaultSinceDays = 30
 )
 
@@ -157,10 +158,10 @@ func (d deps) handleShippedList(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// BACI-221: count the same scope server-side so the popover's
-	// header can render "showing N of TOTAL" and the topbar pill can
-	// seed off the same number without an extra round trip on first
-	// open. Count ignores filter.Limit by design — total under the
-	// scope, not per-fetch.
+	// header can render "showing N of TOTAL" and the Pipeline
+	// Shipping-column pill can seed off the same number without an extra
+	// round trip on first open. Count ignores filter.Limit by design —
+	// total under the scope, not per-fetch.
 	total, err := d.store.CountShippedIssues(filter)
 	if err != nil {
 		status, code := statusForError(err)
@@ -171,10 +172,11 @@ func (d deps) handleShippedList(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleShippedCount (BACI-221) is the lean count-only sibling of
-// handleShippedList — the topbar Shipped pill polls this on the same
-// 10s cadence as the other live read endpoints so its number reflects
-// the active Today / Last Week / Forever scope even when the popover
-// isn't open. No ?limit= parameter: count is total under the scope.
+// handleShippedList — the Pipeline Shipping-column Shipped pill polls
+// this on the same 10s cadence as the other live read endpoints so its
+// number reflects the active Today / Last Week / Forever scope even
+// when the popover isn't open. No ?limit= parameter: count is total
+// under the scope.
 func (d deps) handleShippedCount(w http.ResponseWriter, r *http.Request) {
 	repo, ok := resolveRepoFromPath(w, r, d.store)
 	if !ok {

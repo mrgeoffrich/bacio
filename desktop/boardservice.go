@@ -560,9 +560,9 @@ func (b *BoardService) ListShipped(repoPrefix string, sinceDays, limit int) (Shi
 // CountShipped (BACI-221) returns the total number of shipped issues
 // for one repo under the active Today / Last Week / Forever scope.
 // Polled on the same 10s cadence as the other live read endpoints so
-// the topbar pill reflects the current scope even when the popover
-// isn't open. sinceDays==0 means "Forever" (no lower bound on
-// terminal_at).
+// the Pipeline Shipping-column pill reflects the current scope even
+// when the popover isn't open. sinceDays==0 means "Forever" (no lower
+// bound on terminal_at).
 func (b *BoardService) CountShipped(repoPrefix string, sinceDays int) (int, error) {
 	ctx := context.Background()
 	if repoPrefix == "" || repoPrefix == "all" {

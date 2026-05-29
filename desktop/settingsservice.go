@@ -300,8 +300,8 @@ type AudioPreferencesDTO struct {
 }
 
 // GetAudioPreferences returns the current ui.shipped_sfx value
-// (BACI-240). The desktop topbar's Shipped pill consults this to
-// gate the ka-ching SFX on a genuine ship.
+// (BACI-240). The Pipeline Shipping column's Shipped pill consults this
+// to gate the ka-ching SFX on a genuine ship.
 func (s *SettingsService) GetAudioPreferences() (AudioPreferencesDTO, error) {
 	v, err := s.client.GetUIShippedSfx(context.Background())
 	if err != nil {

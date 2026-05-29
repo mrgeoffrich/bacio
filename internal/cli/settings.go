@@ -94,8 +94,9 @@ type shippedSfxResult struct {
 //   - `bacio settings shipped-sfx --json '{"value":true}'` — same write
 //
 // Default is true (BACI-295 flipped it on). The SFX plays on every
-// genuine ship (the topbar pill ticks up to a new value); decrements /
-// first-load snaps don't trigger it. The play path silently no-ops
+// genuine ship (the Pipeline Shipping-column pill ticks up to a new
+// value); decrements / first-load snaps don't trigger it. The play
+// path silently no-ops
 // under the browser's autoplay policy (a page needs at least one user
 // gesture before audio is allowed) rather than erroring.
 func newSettingsShippedSfxCmd() *cobra.Command {
@@ -104,9 +105,10 @@ func newSettingsShippedSfxCmd() *cobra.Command {
 		Use:   "shipped-sfx [true|false]",
 		Short: "Get or set the BACI-240 ui.shipped_sfx global toggle (default: true)",
 		Long: `Get or set the BACI-240 ui.shipped_sfx global toggle. When on, the
-topbar "Shipped · N" pill plays a short ka-ching SFX on every genuine
-ship (the pill's odometer rolls into a new value). Decrements (scope /
-repo / archive flips) and first-mount snaps don't trigger the sound.
+Pipeline Shipping-column "Shipped · N" pill plays a short ka-ching SFX
+on every genuine ship (the pill's odometer rolls into a new value).
+Decrements (scope / repo / archive flips) and first-mount snaps don't
+trigger the sound.
 
 On by default (BACI-295). The play path is silently no-op'd by the
 browser's autoplay policy (the page needs at least one user gesture

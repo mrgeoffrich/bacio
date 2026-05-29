@@ -226,9 +226,8 @@ export interface BoardCard {
   // check (`card.blockedBy?.length ?? 0`).
   blockedBy?: BoardCardBlocker[];
   // BACI-187: the BACI-138 terminal_at stamp — non-null on done /
-  // cancelled cards, absent on open cards. The topbar Shipped pill
-  // derives its "last 7 days" count client-side from this field on
-  // the already-polled cards array; the binding twin in api.ts mirrors
+  // cancelled cards, absent on open cards — the timestamp a card
+  // reached a terminal column. The binding twin in api.ts mirrors
   // the same wire shape.
   terminalAt?: string;
   // BACI-216: the newest `plan`-typed doc linked directly to this
@@ -299,7 +298,7 @@ export interface PipelineJob {
   completed_at?: string;
 }
 
-// ShippedIssueDTO (BACI-187) is one row in the topbar shipping-log
+// ShippedIssueDTO (BACI-187) is one row in the Pipeline Shipping-column shipping-log
 // popover. Mirrors desktop/boardservice.go:ShippedIssueDTO and the
 // /repos/{prefix}/shipped wire shape exactly — the React-side
 // ShippedPopover imports the type from `./api` (this file in web
@@ -2069,7 +2068,7 @@ export async function listShippedIssues(
 
 // countShippedIssues (BACI-221) — HTTP twin of api.ts's
 // countShippedIssues, polled on the same 10s cadence as the other live
-// read endpoints so the topbar pill always reflects the active scope.
+// read endpoints so the Pipeline Shipping-column pill always reflects the active scope.
 export async function countShippedIssues(
   repoPrefix: string,
   sinceDays: number,
@@ -2603,7 +2602,7 @@ export async function setArchivePreferences(
 
 // ---------- Audio preferences (BACI-240) ----------
 //
-// ui.shipped_sfx global toggle — when on, the topbar Shipped pill
+// ui.shipped_sfx global toggle — when on, the Pipeline Shipping-column Shipped pill
 // plays a short ka-ching SFX on every genuine ship. Defaults to true
 // (BACI-295 flipped the default on). The wire payload is
 // {shipped_sfx: bool} rather than a generic "value" to leave room for

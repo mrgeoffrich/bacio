@@ -128,9 +128,9 @@ export default function App() {
   // screen via setArchivePreferences (atomic pair write).
   const [archiveAutoEnabled, setArchiveAutoEnabled] = useState(true);
   const [archiveRetentionDays, setArchiveRetentionDays] = useState(7);
-  // BACI-240: ui.shipped_sfx toggle — when true, the topbar Shipped
-  // pill plays a short ka-ching SFX on every genuine ship (the
-  // odometer rolling into a new value). BACI-295 flipped the default
+  // BACI-240: ui.shipped_sfx toggle — when true, a short ka-ching SFX
+  // plays on every genuine ship (the Pipeline Shipping-column Shipped
+  // pill's odometer rolling into a new value). BACI-295 flipped the default
   // ON now that the feature has shipped. This seed only governs the
   // brief window before getAudioPreferences() resolves on mount and
   // overwrites it with the server value; it still mirrors the new
@@ -301,8 +301,9 @@ export default function App() {
   // hook reads the flag per-play via its internal ref, so a flip
   // surfaces immediately without a re-fetch. Same optimistic-then-
   // confirmed shape as the other preference handlers. Pre-BACI-254
-  // this was wired through ShippedPopover; the SFX is now a sibling
-  // of useShipFlourish in App.jsx so it fires regardless of view.
+  // this was wired through ShippedPopover; the SFX now rides the
+  // shippedCount-rise effect in App.jsx (BACI-295) so it fires
+  // regardless of the active view.
   const changeAudioEnabled = useCallback((next) => {
     api.setAudioPreferences(next)
       .then(prefs => setAudioEnabled(prefs.shippedSfx))
@@ -903,7 +904,7 @@ export default function App() {
   }, [agents]);
 
   // shippedScope (BACI-221) is the active Today / Last Week / Forever
-  // window for the topbar Shipped pill + its popover. Seeded from
+  // window for the Pipeline Shipping-column Shipped pill + its popover. Seeded from
   // localStorage on mount so a relaunch lands on the last-picked
   // scope; the picker lives inside ShippedPopover and re-writes on
   // every click via the onScopeChange callback below.
@@ -914,7 +915,7 @@ export default function App() {
   }, []);
 
   // shippedCount (BACI-187, server-derived for BACI-221) feeds the
-  // topbar "Shipped · N" pill. Polled on the standard POLL_INTERVAL_MS
+  // Pipeline Shipping-column "Shipped · N" pill. Polled on the standard POLL_INTERVAL_MS
   // cadence — mirrors the leader / agents polls so the chip number
   // stays roughly in lockstep with the rest of the live readouts.
   //
@@ -925,9 +926,10 @@ export default function App() {
   // both and lets the count change with the scope picker.
   const [shippedCount, setShippedCount] = useState(0);
   // BACI-295: previous-count ref the count-rise SFX watch (below) diffs
-  // against. Declared up here so the scope/repo-change effect can reset
-  // it to null alongside `setShippedCount(0)` — a navigation refill is
-  // a fresh first-load snap, not a genuine ship, so it must not ding.
+  // against, so a genuine rise can be told apart from a first-load /
+  // navigation refill. The scope/repo-change effect blanks `shippedCount`
+  // to the `null` loading sentinel rather than poking this ref directly —
+  // that null is what makes the watch snap (not ding) on the refill.
   const prevShippedCountRef = useRef(null);
   // refreshShippedCount (BACI-276): the single fetch the poll effect and
   // the on-ship trigger both invoke. Stable across renders so the
@@ -948,12 +950,18 @@ export default function App() {
       setShippedCount(0);
       return;
     }
-    // Reset to 0 on scope / repo change so a stale count doesn't sit
-    // on the chip while the first fetch is in flight. BACI-295: also
-    // null the SFX watch's previous-count ref so the refill that
-    // follows reads as a first-load snap (no ka-ching on navigation).
-    setShippedCount(0);
-    prevShippedCountRef.current = null;
+    // Blank the count to `null` (not 0) on scope / repo change so a
+    // stale number doesn't sit on the pill while the first fetch is in
+    // flight, AND so the post-navigation refill never dings. `null` is
+    // the loading sentinel the SFX watch below treats as a snap on both
+    // sides: decideOdometerAction(prev, null) snaps, then
+    // decideOdometerAction(null, fetched) snaps, so the refill reads as
+    // a fresh first-load — not a 0 -> N rise. (BACI-295 tried to do this
+    // with `setShippedCount(0); prevShippedCountRef.current = null`, but
+    // the intermediate 0 commit consumed the prev=null snap, leaving the
+    // real value to read as a rise from 0 — so it actually rang on every
+    // first-load / scope / repo change. The null sentinel fixes that.)
+    setShippedCount(null);
     refreshShippedCount();
     const id = setInterval(refreshShippedCount, POLL_INTERVAL_MS);
     return () => { clearInterval(id); };
@@ -1010,11 +1018,12 @@ export default function App() {
   // not one-per-card (the pre-BACI-295 wiring played N times); the
   // sound matches the number rolling once, not each card.
   //
-  // The scope/repo-change effect above resets `prevShippedCountRef` to
-  // null (declared next to the `shippedCount` state) so the count
-  // refilling after a navigation is treated as a fresh first-load snap
-  // rather than a genuine ship — no false ding when you just switched
-  // repo or scope.
+  // No false ding on navigation: the scope/repo-change effect above
+  // blanks `shippedCount` to the `null` loading sentinel before the
+  // refetch. decideOdometerAction snaps on a null — both as `next` (the
+  // blanked value) and, once stored here, as `prev` (the fetched value) —
+  // so the refill after a repo/scope switch reads as a fresh first-load
+  // snap, not a rise. No false ding when you just switched repo or scope.
   useEffect(() => {
     const action = decideOdometerAction(prevShippedCountRef.current, shippedCount);
     if (action.kind === 'roll') playShipSfx();
@@ -1034,9 +1043,20 @@ export default function App() {
     refreshShippedCount();
   }, [refreshShippedCount]);
 
+  // BACI-295 follow-up dev/test affordance: optimistically bump the
+  // displayed Shipped count by one to exercise the count-rise → ka-ching
+  // path (and its autoplay unlock) with a real user gesture. Purely
+  // client-side — the next POLL_INTERVAL_MS refresh re-syncs the real
+  // server count (a drop snaps the odometer, no ding). PipelineView gates
+  // the button that calls this behind ?sfxtest / localStorage, so normal
+  // users never see it.
+  const testIncrementShipped = useCallback(() => {
+    setShippedCount((c) => (Number.isFinite(c) ? c : 0) + 1);
+  }, []);
+
   // BACI-193 ship flourish: detect cards that just transitioned into
   // `done` from a non-terminal column, expose the flying key + flash
-  // signal to Topbar / ShippedPopover. The hook diffs the `cards`
+  // signal to PipelineView / ShippedPopover. The hook diffs the `cards`
   // array against its own internal previous-columns snapshot so the
   // poll-driven re-render is the only thing it needs. The `onShip`
   // callback now only drives the prompt count refresh (BACI-295 moved
@@ -1074,10 +1094,10 @@ export default function App() {
         on this route); other routes keep the tray in the corner. */}
     <div className={`mk-app${activeView === 'pipeline' ? ' is-pipeline' : ''}`}>
       {/* BACI-193: wrap Topbar + main view in one LayoutGroup so the
-          ship-flourish layoutId match can cross from the kanban card
-          to the Shipped pill destination inside Topbar. Without the
-          group, Motion namespaces layoutIds per subtree and the two
-          ends never see each other. */}
+          ship-flourish layoutId match can cross from the pipeline card
+          to the Shipped pill destination in the Pipeline's Shipping
+          column. Without the group, Motion namespaces layoutIds per
+          subtree and the two ends never see each other. */}
       <LayoutGroup id="kanban">
       <Topbar
         boards={boards}
@@ -1172,6 +1192,7 @@ export default function App() {
                   flyingShipKey={flyingShipKey}
                   shipFlashing={shipFlashing}
                   onShipFlightDone={onShipFlightDone}
+                  onTestIncrementShipped={testIncrementShipped}
                 />
               </ErrorBoundary>
             }

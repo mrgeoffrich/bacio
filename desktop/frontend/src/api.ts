@@ -783,7 +783,7 @@ export async function listHistory(
 }
 
 // listShippedIssues (BACI-187, reshaped for BACI-221) returns the
-// topbar shipping-log popover rows for one repo (newest-first) wrapped
+// Pipeline Shipping-column shipping-log popover rows for one repo (newest-first) wrapped
 // with the total count under the same scope so the popover header can
 // render "showing N of TOTAL". `sinceDays` clamps the window
 // (0 = "Forever" — no lower bound on terminal_at); `limit` caps the
@@ -803,7 +803,7 @@ export async function listShippedIssues(
 }
 
 // countShippedIssues (BACI-221) is the lean count-only sibling polled
-// on the topbar pill's 10s cadence so the "Shipped · N" label reflects
+// on the Pipeline Shipping-column pill's 10s cadence so the "Shipped · N" label reflects
 // the active Today / Last Week / Forever scope even when the popover
 // is closed. `sinceDays` mirrors listShippedIssues — 0 means "Forever".
 export async function countShippedIssues(
@@ -1036,8 +1036,8 @@ export async function setArchivePreferences(
   }
 }
 
-// BACI-240: ui.shipped_sfx global toggle. When on, the topbar
-// Shipped pill plays a short ka-ching SFX on every genuine ship.
+// BACI-240: ui.shipped_sfx global toggle. When on, the Pipeline
+// Shipping-column Shipped pill plays a short ka-ching SFX on every genuine ship.
 // BACI-295 flipped the default ON.
 
 export async function getAudioPreferences(): Promise<AudioPreferencesDTO> {

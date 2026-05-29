@@ -1,28 +1,42 @@
-// useShipSfx (BACI-240) owns the lazy-loaded HTMLAudioElement that the
-// topbar Shipped pill plays on a genuine ship. Exposes a single
+// useShipSfx (BACI-240) owns the lazy-loaded HTMLAudioElement that
+// sounds the ka-ching on a genuine ship (the Pipeline Shipping-column
+// Shipped pill's count rolling up). Exposes a single
 // `play()` method gated on:
 //
 //   - the caller's `enabled` arg (the ui.shipped_sfx user setting);
 //   - the browser's autoplay policy — Audio.play() returns a Promise
-//     that rejects when the page has not yet had a user gesture, and
-//     we swallow that case silently. We never call console.error here
-//     because the chip is not a critical path — a silent SFX failure
-//     is the right shape.
+//     that rejects when the element hasn't been activated by a user
+//     gesture. We don't let that rejection escape, but (unlike the
+//     original "stay silent" design) we now console.warn it: a
+//     swallowed NotAllowedError is otherwise indistinguishable from
+//     "the SFX never fired", which made a missing ka-ching undebuggable.
+//     The chip is still non-critical — the warn is a breadcrumb, not an
+//     error.
+//
+// Autoplay unlock: a genuine ship frequently has NO gesture of its own
+// (an agent or another machine moves a card to `done`; the count rolls
+// on a poll). The autoplay policy would swallow exactly those. So we
+// prime the element on the first user pointerdown / keydown — a
+// volume-0 play→pause inside that gesture marks it as user-activated and
+// grants it permission for later gesture-less plays. This is what WebKit
+// / the desktop webview needs; Chrome's sticky activation already covers
+// most web cases.
 //
 // BACI-295: `prefers-reduced-motion` is no longer a gate — that
 // preference is about animation, not audio. The ship sound fires
 // whenever the toggle is on (autoplay policy permitting); the visual
 // flight + odometer roll still honour reduced-motion separately.
 //
-// The Audio element is created lazily on the first enabled play() so
-// disabled-by-default sessions never spend the decode cost. Back-to-
-// back plays reset currentTime to 0 so the previous play stops cleanly
-// rather than overlapping (the brief says "single shared instance,
-// either overlap or skip — we skip").
+// The Audio element is created lazily (the first enabled play() OR the
+// first-gesture unlock, whichever comes first) so opted-out sessions
+// never spend the decode cost. Back-to-back plays reset currentTime to
+// 0 so the previous play stops cleanly rather than overlapping.
 //
-// Companion: shipFlourish.ts owns the "did a card just transition into
-// done" diff. ShippedPopover wires the flash-edge → useShipSfx.play()
-// so the audio is in lockstep with the existing border flash.
+// Trigger: App.jsx's shippedCount-rise effect (BACI-295) calls `play()`
+// whenever the server-derived Shipped count genuinely rises — the same
+// signal that rolls the Pipeline pill's odometer. (Pre-BACI-295 this
+// rode shipFlourish.ts's card→done diff via ShippedPopover's flash-edge;
+// that's no longer how it's wired.)
 
 import { useCallback, useEffect, useRef } from 'react';
 // Vite resolves binary asset imports to a URL string at build time.
@@ -32,6 +46,12 @@ import shippedKaChingURL from '../assets/kaching.mp3';
 import { shouldPlayShipSfx } from './shipSfxGate';
 
 export { shouldPlayShipSfx };
+
+// Playback volume. Halved — UI dings are easy to misjudge at full level.
+// play() re-asserts this on every fire so a real ka-ching is never left
+// at the volume-0 the first-gesture unlock momentarily sets (the unlock
+// and a ship can land on the same gesture — e.g. the dev Test +1 button).
+const SHIP_SFX_VOLUME = 0.5;
 
 export type UseShipSfxResult = {
   // play attempts a single ka-ching playback. No-op on every failure
@@ -43,11 +63,8 @@ export type UseShipSfxResult = {
 // useShipSfx returns a `{ play }` shape that's safe to call from any
 // effect. Caller passes the live `enabled` flag from props/state; the
 // hook re-reads it on every play() so a flip lands without remounting.
-//
-// We deliberately do NOT create the Audio element until the first
-// enabled play() — `new Audio(url)` performs the decode synchronously
-// in some engines, so deferring it keeps the disabled-by-default user
-// from paying for an asset they don't want.
+// A first-gesture listener (mounted once) unlocks the element so a later
+// gesture-less ship still dings — see the file header.
 export function useShipSfx({ enabled }: { enabled: boolean }): UseShipSfxResult {
   // Track the enabled flag in a ref so the play() callback can read
   // the latest value without becoming a fresh function reference on
@@ -55,9 +72,62 @@ export function useShipSfx({ enabled }: { enabled: boolean }): UseShipSfxResult 
   const enabledRef = useRef(enabled);
   useEffect(() => { enabledRef.current = enabled; }, [enabled]);
 
-  // The lazy-loaded HTMLAudioElement. Null until the first play()
-  // that actually fires (passes all gates).
+  // The lazy-loaded HTMLAudioElement. Null until something first needs
+  // it — the first enabled play(), or the first-gesture unlock.
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  // Set once the element has been primed by a user gesture (below).
+  const unlockedRef = useRef(false);
+
+  // ensureAudio lazily constructs the shared element. Returns null when
+  // the Audio constructor is unreachable (non-browser env) or the
+  // constructor throws (bogus URL / asset-load race — the next call
+  // retries). `new Audio(url)` decodes synchronously in some engines, so
+  // we defer it until something actually needs the sound.
+  const ensureAudio = useCallback((): HTMLAudioElement | null => {
+    if (audioRef.current) return audioRef.current;
+    const audioCtor = (typeof Audio !== 'undefined') ? Audio : undefined;
+    if (!audioCtor) return null;
+    try {
+      const el = new audioCtor(shippedKaChingURL);
+      el.volume = SHIP_SFX_VOLUME;
+      audioRef.current = el;
+    } catch {
+      audioRef.current = null;
+    }
+    return audioRef.current;
+  }, []);
+
+  // First-gesture autoplay unlock — see the file header. A volume-0
+  // play→pause inside the first pointerdown / keydown marks the element
+  // as user-activated so a later gesture-less ship still dings.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const removeListeners = () => {
+      window.removeEventListener('pointerdown', unlock, true);
+      window.removeEventListener('keydown', unlock, true);
+    };
+    function unlock() {
+      if (unlockedRef.current) return;
+      if (!enabledRef.current) return; // don't decode for opted-out users
+      const el = ensureAudio();
+      if (!el) return;
+      unlockedRef.current = true;
+      removeListeners();
+      const prevVolume = el.volume;
+      el.volume = 0; // inaudible, but NOT muted → still counts as audio.
+      const restore = () => {
+        try { el.pause(); el.currentTime = 0; el.volume = prevVolume; }
+        catch { /* fine */ }
+      };
+      let p: Promise<void> | undefined;
+      try { p = el.play(); } catch { restore(); return; }
+      if (p && typeof p.then === 'function') p.then(restore, restore);
+      else restore();
+    }
+    window.addEventListener('pointerdown', unlock, true);
+    window.addEventListener('keydown', unlock, true);
+    return removeListeners;
+  }, [ensureAudio]);
 
   const play = useCallback(() => {
     // SSR / Node test guard: window is undefined in non-browser envs.
@@ -66,33 +136,28 @@ export function useShipSfx({ enabled }: { enabled: boolean }): UseShipSfxResult 
     const audioCtor = (typeof Audio !== 'undefined') ? Audio : undefined;
     if (!shouldPlayShipSfx(enabledRef.current, audioCtor)) return;
 
-    // Lazy-load the Audio element on first play. `new Audio(url)`
-    // throws synchronously if the URL is bogus; swallow that case
-    // for the same reason we swallow autoplay rejections.
-    if (audioRef.current === null) {
-      try {
-        audioRef.current = new audioCtor!(shippedKaChingURL);
-        // Volume halved — UI dings are easy to misjudge at full level.
-        audioRef.current.volume = 0.5;
-      } catch {
-        // Constructor failure: leave audioRef null so the next play
-        // tries again (an asset-load race is plausible; permanent
-        // failure stays harmlessly silent).
-        return;
-      }
-    }
+    const el = ensureAudio();
+    if (!el) return;
 
-    const el = audioRef.current!;
-    // currentTime reset → restart cleanly on back-to-back ships.
+    // Re-assert volume (the unlock may have left it at 0 — see the
+    // constant) and reset currentTime so back-to-back ships restart
+    // cleanly rather than overlapping.
+    el.volume = SHIP_SFX_VOLUME;
     try { el.currentTime = 0; } catch { /* some engines refuse pre-load — fine */ }
     const result = el.play();
     if (result && typeof result.then === 'function') {
-      // Autoplay-denied / NotAllowedError / NotSupportedError —
-      // all swallowed. We never await the promise; an unhandled
-      // rejection is the only thing to dodge here.
-      result.catch(() => { /* silent */ });
+      result.catch((err: unknown) => {
+        // Non-fatal: the pill still rolled. But we warn rather than
+        // swallow silently so a missing ka-ching is diagnosable — a
+        // blocked NotAllowedError looks identical to "play() never fired".
+        const e = err as { name?: string; message?: string } | undefined;
+        console.warn(
+          '[ship-sfx] ka-ching play() was blocked (likely the browser autoplay policy — no user gesture yet):',
+          e?.name ?? err, e?.message ?? '',
+        );
+      });
     }
-  }, []);
+  }, [ensureAudio]);
 
   return { play };
 }

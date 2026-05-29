@@ -64,8 +64,8 @@ export function GetArchivePreferences(): $CancellablePromise<$models.ArchivePref
 
 /**
  * GetAudioPreferences returns the current ui.shipped_sfx value
- * (BACI-240). The desktop topbar's Shipped pill consults this to
- * gate the ka-ching SFX on a genuine ship.
+ * (BACI-240). The Pipeline Shipping column's Shipped pill consults this
+ * to gate the ka-ching SFX on a genuine ship.
  */
 export function GetAudioPreferences(): $CancellablePromise<$models.AudioPreferencesDTO> {
     return $Call.ByID(1490774688).then(($result: any) => {

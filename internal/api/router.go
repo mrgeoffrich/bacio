@@ -128,9 +128,10 @@ func newRouter(d deps) http.Handler {
 	// newest-first, sibling of /history. Per-repo only; cross-repo is
 	// deliberately out of scope (matches the rest of the surface).
 	// BACI-221 reshapes the list response to {rows, total} and adds
-	// /shipped/count for the topbar pill's 10s scope-count poll. The
-	// literal "count" segment is more specific than the bare /shipped
-	// route, so ServeMux disambiguates without a conflicting pattern.
+	// /shipped/count for the Pipeline Shipping-column pill's 10s
+	// scope-count poll. The literal "count" segment is more specific
+	// than the bare /shipped route, so ServeMux disambiguates without a
+	// conflicting pattern.
 	mux.HandleFunc("GET /repos/{prefix}/shipped", d.handleShippedList)
 	mux.HandleFunc("GET /repos/{prefix}/shipped/count", d.handleShippedCount)
 
@@ -299,8 +300,9 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("GET /settings/archive-preferences", d.handleArchivePreferencesGet)
 	mux.HandleFunc("PUT /settings/archive-preferences", d.handleArchivePreferencesSet)
 
-	// BACI-240 ui.shipped_sfx global toggle — the topbar Shipped pill's
-	// ka-ching SFX gate. Sits alongside the display / archive routes,
+	// BACI-240 ui.shipped_sfx global toggle — the Pipeline Shipping
+	// column's Shipped pill's ka-ching SFX gate. Sits alongside the
+	// display / archive routes,
 	// same single-boolean pattern (the wire payload is {shipped_sfx: bool}
 	// rather than a generic "value" to leave room for future audio toggles
 	// without breaking the existing field name).

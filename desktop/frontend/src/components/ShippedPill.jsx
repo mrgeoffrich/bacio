@@ -2,14 +2,14 @@ import React from 'react';
 import { m } from 'motion/react';
 import OdometerNumber from './OdometerNumber.jsx';
 
-// ShippedPill is the reusable "Shipped · N" badge: the kit pill chrome
+// ShippedPill is the "Shipped · N" badge: the kit pill chrome
 // (.mk-pill) tinted with the done-state palette (.mk-shipped-pill) plus
-// a 3-digit OdometerNumber. Used by the topbar's ShippedPopover trigger
-// and the Pipeline view's to_be_shipped column header so both render at
-// exactly the same size. Pure presentational + click — owns no data.
+// a 3-digit OdometerNumber. Rendered by ShippedPopover as its trigger,
+// which lives in the Pipeline's Shipping column. Pure presentational +
+// click — owns no data.
 //
 // The optional Motion flight-target slot (`flyingKey`) is only mounted by
-// the topbar's BACI-193 ship-flourish; consumers that don't fly cards
+// the Pipeline's BACI-193 ship-flourish; consumers that don't fly cards
 // into the pill leave it null and no slot renders.
 export default function ShippedPill({
   count,
