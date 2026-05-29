@@ -293,7 +293,6 @@ export default function PipelineView({
                 key={card.key}
                 card={card}
                 index={i}
-                showBadge
                 shipping
                 isNextToShip={i === 0}
                 autoShip={autoShip}
