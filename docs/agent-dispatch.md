@@ -680,8 +680,16 @@ Practical consequences:
   written its summary), and that's the precise *agent parked* signal.
 - The parent's *own* tool calls (Task's return PostToolUse, every
   `mcp__bacio__*` call, every Bash) heartbeat the supervisor while
-  the subagent runs (BACI-159 PostToolUse hook), so a long Task run
-  never starves the supervisor's `last_seen_at` of fresh ticks.
+  the subagent runs (BACI-159 PostToolUse hook). This heartbeats the
+  supervisor *between* its tool calls, but a single long-running
+  `Task`/`Bash` call (e.g. a `./build.sh` + Playwright smoke phase)
+  can still starve `last_seen_at` for the duration of that one call —
+  the parent's PostToolUse hook only fires when the call returns. The
+  BACI-159 graduated 40-min claim-holder cutoff is the backstop here
+  (BACI-271): the idle-pinger's reap branch waits for `last_seen_at`
+  to cross that cutoff rather than reaping on the proactive probe's
+  no-ack window, so a claim-holding supervisor blocked in one long
+  call is not force-ended at ~12 min.
 - No new schema rows, no `parent_session_pk` column, no per-subagent
   registry entries.
 
