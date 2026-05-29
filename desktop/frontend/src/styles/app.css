@@ -1727,6 +1727,15 @@ body { margin: 0; }
   min-height: 0;
   flex: 1;
 }
+/* Reserve room for the .mk-pl-badge's -7px overhang so the scroll
+   container's overflow: auto doesn't clip it at the top/right edges
+   (BACI-273). Scoped to the badged bodies only — .mk-pl-stage-body has
+   no badge and must keep its current alignment. */
+.mk-pl-col-body,
+.mk-pl-backlog-body {
+  padding-top: 8px;
+  padding-right: 8px;
+}
 .mk-pl-backlog-body.is-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
