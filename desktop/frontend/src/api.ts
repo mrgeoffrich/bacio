@@ -510,6 +510,20 @@ export async function updateIssueDescription(
   }
 }
 
+// updateIssueTitle replaces an issue's title and returns the refreshed
+// issue-drawer payload.
+export async function updateIssueTitle(
+  repoPrefix: string,
+  key: string,
+  title: string,
+): Promise<IssueDetail> {
+  try {
+    return await BoardService.UpdateIssueTitle(repoPrefix, key, title);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
 // addComment appends a comment to an issue and returns the refreshed
 // issue-drawer payload. An empty author falls back to the OS username.
 // opts.eval (BACI-131) flags the row as a quality-review note posted

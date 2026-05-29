@@ -823,6 +823,23 @@ func (b *BoardService) UpdateIssueDescription(repoPrefix, key, description strin
 	return b.GetIssue(repoPrefix, key)
 }
 
+// UpdateIssueTitle replaces an issue's title and returns the refreshed
+// issue-drawer payload. Mirrors UpdateIssueDescription — the store rejects
+// an empty title (invalid_input) so callers gate the value first.
+// repoPrefix may be empty or "all" — the prefix is then derived from the
+// canonical issue key.
+func (b *BoardService) UpdateIssueTitle(repoPrefix, key, title string) (IssueDetail, error) {
+	ctx := context.Background()
+	repo, err := b.resolveRepoForKey(ctx, repoPrefix, key)
+	if err != nil {
+		return IssueDetail{}, err
+	}
+	if _, err := b.client.UpdateIssue(ctx, repo, key, client.IssueEdit{Title: &title}, false); err != nil {
+		return IssueDetail{}, err
+	}
+	return b.GetIssue(repoPrefix, key)
+}
+
 // SetIssueState changes an issue's state and returns the refreshed card.
 // It backs the board's drag-to-move: dropping a card in a new column
 // persists the state change so it survives the next auto-refresh poll.

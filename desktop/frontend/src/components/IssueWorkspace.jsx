@@ -5,6 +5,7 @@ import Icon from './Icon.jsx';
 import IssueLockBanner from './issue/IssueLockBanner.jsx';
 import LinkedDocPanel from './issue/LinkedDocPanel.jsx';
 import InlineDescriptionEditor from './issue/InlineDescriptionEditor.jsx';
+import InlineTitleEditor from './issue/InlineTitleEditor.jsx';
 import CommentComposer from './issue/CommentComposer.jsx';
 import RelationsPanel from './issue/RelationsPanel.jsx';
 import { documentPath } from '../lib/routes';
@@ -28,6 +29,7 @@ export default function IssueWorkspace({
   brief,
   cards,
   onClose,
+  onSaveTitle,
   onSaveDescription,
   onAddComment,
   onDeleteComment,
@@ -152,7 +154,11 @@ export default function IssueWorkspace({
       <header className="mk-workspace-head">
         <span className="mk-card-id">{issueMeta.key}</span>
         <span className={`mk-pill mk-status-${issueMeta.column}`}>{issueMeta.columnLabel}</span>
-        <h1 className="mk-workspace-title">{issueMeta.title}</h1>
+        <InlineTitleEditor
+          title={issueMeta.title}
+          readOnly={taken || waiting}
+          onSave={onSaveTitle}
+        />
         {/*
           BACI-216: prominent "Open plan" link in the workspace header
           so the plan a worker just attached isn't buried alongside

@@ -1601,6 +1601,23 @@ export async function updateIssueDescription(
   return getIssue(repoPrefix, key);
 }
 
+export async function updateIssueTitle(
+  repoPrefix: string,
+  key: string,
+  title: string,
+): Promise<IssueDetail> {
+  if (!repoPrefix || repoPrefix === 'all') {
+    const i = key.lastIndexOf('-');
+    if (i <= 0) throw new Error(`invalid issue key: ${key}`);
+    repoPrefix = key.slice(0, i);
+  }
+  await call<unknown>(`/repos/${repoPrefix}/issues/${key}`, {
+    method: 'PATCH',
+    body: { title },
+  });
+  return getIssue(repoPrefix, key);
+}
+
 export async function addComment(
   repoPrefix: string,
   key: string,
