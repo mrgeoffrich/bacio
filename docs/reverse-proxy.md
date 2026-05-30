@@ -160,7 +160,7 @@ off the windowed rows (no portable SQLite percentile under
 `modernc.org/sqlite`); a `--since` lookback plus a row cap keep that pass
 cheap. The returned `model.ProxyFQDNStat` DTO is snake_case-tagged so the
 Monitor web screen (BACI-304) drops it straight onto the page. BACI-304
-still owns the React `api.ts` / `api.http.ts` seam and the screen itself.
+shipped that screen — see the Monitor screen note below.
 
 ---
 
@@ -234,6 +234,40 @@ later mechanism.
 
 ---
 
+## Monitor web screen (BACI-304)
+
+BACI-304 puts the BACI-303 per-FQDN rollup on a top-level **Monitor**
+screen in the shared React tree, so the same surface renders on both
+`bacio web` and the Wails desktop. It is the first read surface over the
+capture in the UI — read-only stats only; deep per-request / per-message
+inspection is a later issue.
+
+- **Route + nav.** `/:prefix/monitor` (a `monitor` entry in the Topbar
+  `NAV`, after History). The route lives under the BACI-285 `/:prefix`
+  segment like every other page for nav uniformity, but the
+  `proxy_requests` table is cross-cutting (no `repo_id`), so the data is
+  **global** — the screen ignores the active repo for its fetch.
+- **The dual-transport seam.** `listProxyStats(sinceDays)` is added to
+  both `api.ts` (Wails: a new `MonitorService.ProxyStats` binding in
+  [`desktop/monitorservice.go`](../desktop/monitorservice.go)) and
+  `api.http.ts` (web: `GET /proxy/stats?since=Nd` + snake→camel reshape).
+  The cross-transport `ProxyFQDNStat` type alias (BACI-108 pattern) lets
+  `MonitorView` import one name regardless of build mode; the web-side
+  shape + the formatters live in
+  [`desktop/frontend/src/lib/proxyStats.ts`](../desktop/frontend/src/lib/proxyStats.ts).
+- **The screen.**
+  [`MonitorView.jsx`](../desktop/frontend/src/components/MonitorView.jsx)
+  is a sortable table (Host / Reqs / In / Out / Err % / P50 / P95 / Last
+  Seen), busiest-first by default (the order the store already returns),
+  with a window selector and a silent 10s refresh while mounted.
+- **Window selector.** Three buckets — **Last 24h** (`?since=1d`), **Last
+  7d** (`7d`), **All-time** (the `0` = no-lower-bound sentinel). They map
+  onto the endpoint's rolling-duration `since` lookback; a calendar-Today
+  (local-midnight) bucket would need the BACI-312 cutoff the proxy
+  endpoint doesn't have, so it's deferred.
+
+---
+
 ## What's deliberately out of scope
 
 - **Forward proxy / `HTTPS_PROXY` all-FQDN MITM** — the other side of
@@ -244,8 +278,9 @@ later mechanism.
   above.
 - **Anthropic request/response body parsing** (model, token usage,
   turn/tool counts) — BACI-305, BACI-306.
-- **The Monitor web screen** (and the React `api.ts` seam method that
-  consumes `GET /proxy/stats`) — BACI-304.
+- ~~**The Monitor web screen** (and the React `api.ts` seam method that
+  consumes `GET /proxy/stats`)~~ — **shipped in BACI-304** (see the
+  Monitor screen section above).
 - **Raw-log-file retention / cleanup** — the index prune is BACI-302; the
   on-disk raw files have no auto-prune yet.
 - **Retiring the `.jsonl` transcript attachments** — BACI-307.

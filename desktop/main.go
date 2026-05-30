@@ -173,6 +173,7 @@ func main() {
 			application.NewService(NewDocService(c)),
 			application.NewService(NewFeatureService(c)),
 			application.NewService(NewHistoryService(c)),
+			application.NewService(NewMonitorService(c)),
 			application.NewService(NewSettingsService(c)),
 			application.NewService(NewLeaderService(resolved.DBPath, resolved.ManifestSlug(), logger)),
 		},

@@ -2185,6 +2185,116 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   white-space: nowrap;
 }
 
+/* BACI-304 Monitor screen — the per-FQDN reverse-proxy traffic table.
+   Cloned from the .mk-history* table styling; the head row is a grid of
+   sortable <button> headers and the Host column flexes while the numeric
+   columns are fixed-width and right-aligned. */
+.mk-monitor {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding: 20px 24px;
+}
+.mk-monitor-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 24px;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  color: var(--fg-4);
+}
+.mk-monitor-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  flex-shrink: 0;
+}
+.mk-monitor-title {
+  font-family: var(--font-sans);
+  font-size: var(--text-xl);
+  font-weight: 700;
+  color: var(--fg-1);
+  margin: 0;
+}
+.mk-monitor-scope {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  color: var(--fg-3);
+}
+.mk-monitor-scope-label {
+  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+.mk-monitor-table {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  background: var(--bg-2);
+}
+.mk-monitor-head,
+.mk-monitor-row {
+  display: grid;
+  grid-template-columns: 1fr 80px 90px 90px 70px 80px 80px 110px;
+  gap: 12px;
+  padding: 8px 14px;
+  align-items: baseline;
+}
+.mk-monitor-head {
+  position: sticky;
+  top: 0;
+  background: var(--bg-3);
+  border-bottom: 1px solid var(--border-1);
+}
+.mk-monitor-th {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-3);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.mk-monitor-th.is-numeric { justify-content: flex-end; text-align: right; }
+.mk-monitor-th:hover { color: var(--fg-1); }
+.mk-monitor-th.is-sorted { color: var(--fg-1); }
+.mk-monitor-caret { font-size: 8px; }
+.mk-monitor-row {
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  color: var(--fg-2);
+  border-bottom: 1px solid var(--border-1);
+}
+.mk-monitor-row:last-child { border-bottom: 0; }
+.mk-monitor-cell {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mk-monitor-cell.is-numeric { text-align: right; color: var(--fg-1); }
+
 /* ============================================================
    Issue workspace (BACI-54) — full-screen routed per-issue view
    that replaced the right-side drawer + edit modal. A primary

@@ -6,6 +6,7 @@ import {
   DocService,
   FeatureService,
   HistoryService,
+  MonitorService,
   LeaderService,
   SettingsService,
   Board,
@@ -52,6 +53,7 @@ import {
   ShippedIssueDTO,
   ShippedListDTO,
   LatestPlanDTO,
+  ProxyFQDNStatDTO,
 } from '../bindings/github.com/mrgeoffrich/bacio/desktop';
 import { ClaimDTO } from '../bindings/github.com/mrgeoffrich/bacio/internal/agentcards';
 // BACI-145: re-export the WaitingState / WaitingKind enums from the
@@ -74,6 +76,11 @@ export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMe
 // the same name from its own TS-only shape so KanbanCard / IssueWorkspace
 // stay transport-agnostic.
 export type LatestPlan = LatestPlanDTO;
+// BACI-304: cross-transport alias for the Monitor screen's per-FQDN
+// proxy-stats row. The web bundle's api.http.ts ships the same name from
+// its own TS-only shape (src/lib/proxyStats.ts) so MonitorView imports one
+// name regardless of build mode.
+export type ProxyFQDNStat = ProxyFQDNStatDTO;
 // Phase 4 (Pipeline): re-export PipelineJob so the Pipeline page and its
 // helpers import it from ./api like every other shape.
 export type { PipelineJob };
@@ -829,6 +836,22 @@ export async function countShippedIssues(
 ): Promise<number> {
   try {
     return await BoardService.CountShipped(repoPrefix, sinceDays);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// listProxyStats (BACI-304) returns the Monitor screen's per-FQDN
+// reverse-proxy traffic rollup, busiest host first. The proxy_requests
+// table is cross-cutting (no repo_id), so unlike the per-repo reads above
+// this takes no repo prefix — the stats are global. `sinceDays` windows
+// the rollup to a rolling lookback of that many days; `0` (the default)
+// is the "All-time" sentinel — no lower bound. The HTTP twin in
+// api.http.ts MUST keep the same name + shape so MonitorView stays
+// transport-agnostic.
+export async function listProxyStats(sinceDays = 0): Promise<ProxyFQDNStat[]> {
+  try {
+    return await MonitorService.ProxyStats(sinceDays);
   } catch (err) {
     throw normalize(err);
   }

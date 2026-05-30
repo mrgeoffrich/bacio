@@ -747,6 +747,15 @@ export interface LeaderStatusDTO {
   holderLabel: string;
 }
 
+// BACI-304: re-export the Monitor screen's per-FQDN stats shape from the
+// shared (browser-safe, runtime-free) lib so MonitorView imports the same
+// `ProxyFQDNStat` name from `./api` in both transports. api.ts re-exports
+// the Wails-binding equivalent under the same name (the BACI-108 split).
+// Imported (not just re-exported) so listProxyStats below can annotate
+// its reshape return with the type.
+import type { ProxyFQDNStat } from './lib/proxyStats';
+export type { ProxyFQDNStat };
+
 export interface PromptTemplateDTO {
   slug: string;
   mode: string;
@@ -2004,6 +2013,22 @@ interface ApiHistoryEntry {
   created_at: string;
 }
 
+// ApiProxyFQDNStat is the snake_case wire shape GET /proxy/stats returns
+// (model.ProxyFQDNStat's JSON tags). listProxyStats reshapes it into the
+// camelCase ProxyFQDNStat the Monitor screen consumes.
+interface ApiProxyFQDNStat {
+  host: string;
+  request_count: number;
+  bytes_in: number;
+  bytes_out: number;
+  error_count: number;
+  error_rate: number;
+  p50_ms: number;
+  p95_ms: number;
+  first_seen: string;
+  last_seen: string;
+}
+
 export async function listHistory(
   repoPrefix: string,
   page: number,
@@ -2069,6 +2094,31 @@ export async function countShippedIssues(
   if (sinceDays > 0) query.since = `${sinceDays}d`;
   const body = await call<{ total: number }>(`/repos/${repoPrefix}/shipped/count`, { query });
   return body?.total ?? 0;
+}
+
+// listProxyStats (BACI-304) is the HTTP twin of api.ts's listProxyStats —
+// the Monitor screen's per-FQDN reverse-proxy rollup. GET /proxy/stats is
+// cross-cutting (no repo_id), so it takes no repo prefix. `sinceDays === 0`
+// is the "All-time" sentinel (no ?since= parameter); a positive value maps
+// onto the server's rolling-duration `?since=Nd` lookback, mirroring the
+// Shipped pill's convention. Reshapes the snake_case wire rows into the
+// camelCase ProxyFQDNStat shape api.ts re-exports.
+export async function listProxyStats(sinceDays = 0): Promise<ProxyFQDNStat[]> {
+  const query: Record<string, string | number> = {};
+  if (sinceDays > 0) query.since = `${sinceDays}d`;
+  const rows = await call<ApiProxyFQDNStat[]>('/proxy/stats', { query });
+  return (rows ?? []).map(r => ({
+    host: r.host,
+    requestCount: r.request_count,
+    bytesIn: r.bytes_in,
+    bytesOut: r.bytes_out,
+    errorCount: r.error_count,
+    errorRate: r.error_rate,
+    p50Ms: r.p50_ms,
+    p95Ms: r.p95_ms,
+    firstSeen: r.first_seen,
+    lastSeen: r.last_seen,
+  }));
 }
 
 interface ApiDocView {
