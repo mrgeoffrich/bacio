@@ -2,6 +2,8 @@ package proxy
 
 import (
 	"bufio"
+	"bytes"
+	"compress/gzip"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -328,4 +330,137 @@ func TestProxy_CaptureDoesNotBufferSSE(t *testing.T) {
 	if elapsed >= delay {
 		t.Fatalf("first chunk took %v (>= upstream's %v delay) — capture buffered the stream", elapsed, delay)
 	}
+}
+
+// TestProxy_CapturesResponseEncoding asserts a gzip-Content-Encoding upstream
+// reply records ResponseContentEncoding == "gzip" on the observation (so the
+// recorder can decode the on-disk copy), and that the RAW captured response is
+// the compressed gzip bytes — the proxy tees the wire bytes verbatim; decoding
+// happens later in the recorder, never on the forwarded stream (BACI-305).
+func TestProxy_CapturesResponseEncoding(t *testing.T) {
+	rec := newFakeRecorder()
+	gzipped := gzipBytes(t, []byte(`{"ok":true}`))
+	h := newProxyWithRecorder(t, rec, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Encoding", "gzip")
+		_, _ = w.Write(gzipped)
+	})
+	front := httptest.NewServer(h)
+	t.Cleanup(front.Close)
+
+	// Set Accept-Encoding explicitly so the round-trip mirrors production: the
+	// Claude client sets its own Accept-Encoding, which the proxy forwards, so
+	// Go's transport sees a pre-set header and does NOT transparently decode
+	// the reply (it only auto-decodes the gzip it added itself). That keeps the
+	// upstream's Content-Encoding header — and the compressed body — intact
+	// through the proxy. DisableCompression on the client transport stops the
+	// outer client from also auto-decoding what it receives.
+	req, _ := http.NewRequest(http.MethodGet, front.URL+"/anthropic/v1/messages", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	client := &http.Client{Transport: &http.Transport{DisableCompression: true}}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	_, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	obs := rec.waitOne(t)
+	if obs.ResponseContentEncoding != "gzip" {
+		t.Errorf("ResponseContentEncoding = %q, want %q", obs.ResponseContentEncoding, "gzip")
+	}
+	if obs.ResponseContentType != "application/json" {
+		t.Errorf("ResponseContentType = %q, want %q", obs.ResponseContentType, "application/json")
+	}
+	// The tee captured the wire (compressed) bytes verbatim — the recorder is
+	// what inflates them for the on-disk copy.
+	if !bytes.Equal(obs.RawResponse, gzipped) {
+		t.Errorf("RawResponse should be the raw gzip bytes (%d), got %d bytes", len(gzipped), len(obs.RawResponse))
+	}
+}
+
+// TestProxy_CapturesCorrelationHeader asserts an inbound X-Bacio-Corr header
+// lands on the observation's CorrelationKey, is NOT forwarded upstream, and is
+// redacted from the captured request header block (BACI-305).
+func TestProxy_CapturesCorrelationHeader(t *testing.T) {
+	rec := newFakeRecorder()
+	var upstreamSawCorr string
+	h := newProxyWithRecorder(t, rec, func(w http.ResponseWriter, r *http.Request) {
+		upstreamSawCorr = r.Header.Get("X-Bacio-Corr")
+		_, _ = io.ReadAll(r.Body)
+		_, _ = w.Write([]byte("ok"))
+	})
+	front := httptest.NewServer(h)
+	t.Cleanup(front.Close)
+
+	req, _ := http.NewRequest(http.MethodPost, front.URL+"/anthropic/v1/messages", strings.NewReader("body"))
+	req.Header.Set("X-Bacio-Corr", "agent-deadbeef1234")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	_, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+
+	obs := rec.waitOne(t)
+	if obs.CorrelationKey != "agent-deadbeef1234" {
+		t.Errorf("CorrelationKey = %q, want %q", obs.CorrelationKey, "agent-deadbeef1234")
+	}
+	if upstreamSawCorr != "" {
+		t.Errorf("X-Bacio-Corr leaked to upstream: %q", upstreamSawCorr)
+	}
+	if strings.Contains(obs.RequestHeaderBlock, "agent-deadbeef1234") {
+		t.Errorf("correlation key leaked into the captured request headers:\n%s", obs.RequestHeaderBlock)
+	}
+}
+
+// TestProxy_ClassifiesContentType asserts the response Content-Type surfaces
+// on the observation for both an SSE stream and a JSON reply, so the recorder
+// can classify is_stream without re-deriving it (BACI-305).
+func TestProxy_ClassifiesContentType(t *testing.T) {
+	cases := []struct {
+		name        string
+		contentType string
+	}{
+		{name: "sse", contentType: "text/event-stream"},
+		{name: "json", contentType: "application/json"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rec := newFakeRecorder()
+			h := newProxyWithRecorder(t, rec, func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", c.contentType)
+				_, _ = w.Write([]byte("x"))
+			})
+			front := httptest.NewServer(h)
+			t.Cleanup(front.Close)
+
+			resp, err := http.Get(front.URL + "/anthropic/v1/messages")
+			if err != nil {
+				t.Fatalf("get: %v", err)
+			}
+			_, _ = io.ReadAll(resp.Body)
+			resp.Body.Close()
+
+			obs := rec.waitOne(t)
+			if obs.ResponseContentType != c.contentType {
+				t.Errorf("ResponseContentType = %q, want %q", obs.ResponseContentType, c.contentType)
+			}
+		})
+	}
+}
+
+// gzipBytes returns the gzip-compressed form of in — a test fixture for the
+// gzip-encoding capture/decode coverage.
+func gzipBytes(t *testing.T, in []byte) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	if _, err := zw.Write(in); err != nil {
+		t.Fatalf("gzip write: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("gzip close: %v", err)
+	}
+	return buf.Bytes()
 }

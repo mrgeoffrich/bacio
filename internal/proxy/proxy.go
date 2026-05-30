@@ -35,6 +35,14 @@ const DefaultUpstream = "https://api.anthropic.com"
 // is stripped before forwarding so the upstream sees /v1/messages.
 const PathPrefix = "/anthropic"
 
+// correlationHeaderName is the bacio correlation header the agent launch
+// one-liner stamps on each Anthropic request via ANTHROPIC_CUSTOM_HEADERS
+// (BACI-305). Its value is the worktree slug; the capture transport lifts
+// it onto the observation (CorrelationKey) and then STRIPS it from the
+// outbound request so it never reaches Anthropic and never lands in the
+// raw .http capture (isSensitiveHeader redacts it too, belt-and-braces).
+const correlationHeaderName = "X-Bacio-Corr"
+
 // New returns an http.Handler that reverse-proxies every request to
 // upstream. It strips the PathPrefix, rewrites the Host header to the
 // upstream host (load-bearing for SNI/vhost — SetURL only sets
@@ -104,6 +112,15 @@ type captureTransport struct {
 func (t *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	started := time.Now()
 
+	// Lift the bacio correlation key (BACI-305) off the inbound request,
+	// then STRIP it so it never reaches Anthropic. Read-before-delete: the
+	// value goes onto the observation while the header is dropped from both
+	// the upstream request and the rendered header block below (which is
+	// built from req.Header after this Del). isSensitiveHeader redacts it
+	// too, belt-and-braces, in case a future code path renders pre-strip.
+	correlationKey := req.Header.Get(correlationHeaderName)
+	req.Header.Del(correlationHeaderName)
+
 	// Tee the request body as it's read by the transport: the captured copy
 	// accumulates into reqBuf (capped) while every byte still reaches the
 	// upstream. Requests with no body (GET) skip the tee.
@@ -127,6 +144,7 @@ func (t *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 			Ended:              time.Now(),
 			Duration:           time.Since(started),
 			RequestHeaderBlock: headerBlock(req.Method+" "+req.URL.RequestURI()+" "+req.Proto, req.Header),
+			CorrelationKey:     correlationKey,
 		}
 		if reqBuf != nil {
 			obs.BytesIn = reqBuf.total
@@ -143,19 +161,22 @@ func (t *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 	respBuf := newCappedBuffer(MaxCapturedBody)
 	statusLine := resp.Proto + " " + resp.Status
 	resp.Body = &captureBody{
-		rc:          resp.Body,
-		tee:         respBuf,
-		onClose:     t.rec.Record,
-		started:     started,
-		method:      req.Method,
-		host:        req.URL.Host,
-		path:        req.URL.Path,
-		status:      resp.StatusCode,
-		bytesIn:     reqBufTotal(reqBuf),
-		rawRequest:  reqBufBytes(reqBuf),
-		reqTrunc:    reqBufTruncated(reqBuf),
-		reqHeaders:  headerBlock(req.Method+" "+req.URL.RequestURI()+" "+req.Proto, req.Header),
-		respHeaders: headerBlock(statusLine, resp.Header),
+		rc:              resp.Body,
+		tee:             respBuf,
+		onClose:         t.rec.Record,
+		started:         started,
+		method:          req.Method,
+		host:            req.URL.Host,
+		path:            req.URL.Path,
+		status:          resp.StatusCode,
+		bytesIn:         reqBufTotal(reqBuf),
+		rawRequest:      reqBufBytes(reqBuf),
+		reqTrunc:        reqBufTruncated(reqBuf),
+		reqHeaders:      headerBlock(req.Method+" "+req.URL.RequestURI()+" "+req.Proto, req.Header),
+		respHeaders:     headerBlock(statusLine, resp.Header),
+		respContentType: resp.Header.Get("Content-Type"),
+		respEncoding:    resp.Header.Get("Content-Encoding"),
+		correlationKey:  correlationKey,
 	}
 	return resp, nil
 }
@@ -205,7 +226,10 @@ type captureBody struct {
 	reqTrunc   bool
 	reqHeaders string
 
-	respHeaders string
+	respHeaders     string
+	respContentType string
+	respEncoding    string
+	correlationKey  string
 
 	bytesOut int64
 	fired    bool
@@ -228,21 +252,24 @@ func (b *captureBody) Close() error {
 		b.fired = true
 		ended := time.Now()
 		b.onClose(RequestObservation{
-			Method:              b.method,
-			Host:                b.host,
-			Path:                b.path,
-			Status:              b.status,
-			BytesIn:             b.bytesIn,
-			BytesOut:            b.bytesOut,
-			Started:             b.started,
-			Ended:               ended,
-			Duration:            ended.Sub(b.started),
-			RawRequest:          b.rawRequest,
-			RawResponse:         b.tee.bytes(),
-			RequestTruncated:    b.reqTrunc,
-			ResponseTruncated:   b.tee.truncated,
-			RequestHeaderBlock:  b.reqHeaders,
-			ResponseHeaderBlock: b.respHeaders,
+			Method:                  b.method,
+			Host:                    b.host,
+			Path:                    b.path,
+			Status:                  b.status,
+			BytesIn:                 b.bytesIn,
+			BytesOut:                b.bytesOut,
+			Started:                 b.started,
+			Ended:                   ended,
+			Duration:                ended.Sub(b.started),
+			RawRequest:              b.rawRequest,
+			RawResponse:             b.tee.bytes(),
+			RequestTruncated:        b.reqTrunc,
+			ResponseTruncated:       b.tee.truncated,
+			RequestHeaderBlock:      b.reqHeaders,
+			ResponseHeaderBlock:     b.respHeaders,
+			ResponseContentType:     b.respContentType,
+			ResponseContentEncoding: b.respEncoding,
+			CorrelationKey:          b.correlationKey,
 		})
 	}
 	return err
@@ -328,6 +355,13 @@ func headerBlock(startLine string, h http.Header) string {
 func isSensitiveHeader(k string) bool {
 	switch strings.ToLower(k) {
 	case "authorization", "x-api-key", "proxy-authorization", "cookie", "set-cookie":
+		return true
+	case "x-bacio-corr":
+		// BACI-305: the bacio correlation key is an internal routing
+		// signal, not Anthropic content — never persist it in the raw
+		// capture (the transport also strips it from the request, so this
+		// is belt-and-braces for any pre-strip render path). Kept in sync
+		// with correlationHeaderName.
 		return true
 	}
 	return false
