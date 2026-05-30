@@ -12,10 +12,8 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
 
-// composeTestBoard sets up an in-memory store + repo + board, registers
-// a dummy agent so the BACI-168 compose flow's scope dispatch lands in
-// the agent_dispatches table without immediately being bound off the
-// queue. Returns the store, repo, and a focused board.
+// composeTestBoard sets up an in-memory store + repo + board. Returns
+// the store, repo, and a focused board.
 func composeTestBoard(t *testing.T) (*store.Store, *model.Repo, *boardView) {
 	t.Helper()
 	s, err := store.OpenMemory()
@@ -46,8 +44,8 @@ func typeRunes(b *boardView, s string) {
 
 // TestBoardCompose_HappyPath is the headline regression: N opens the
 // composer, the typed text is captured in the textarea, ctrl+s creates
-// a new issue + queues a scope dispatch, the overlay closes, and the
-// cursor lands on the new card.
+// a new issue (no auto-scope dispatch since BACI-300), the overlay
+// closes, and the cursor lands on the new card.
 func TestBoardCompose_HappyPath(t *testing.T) {
 	s, repo, board := composeTestBoard(t)
 
@@ -101,19 +99,14 @@ func TestBoardCompose_HappyPath(t *testing.T) {
 		t.Errorf("state = %s, want %s", full.State, model.StateTodo)
 	}
 
-	// One scope dispatch should be queued against the new issue.
+	// BACI-300: the composer no longer queues a scope dispatch — triage
+	// is a Pipeline stage now, so no dispatch row is written.
 	disps, err := s.ListDispatches(store.DispatchFilter{RepoID: &repo.ID})
 	if err != nil {
 		t.Fatalf("list dispatches: %v", err)
 	}
-	if len(disps) != 1 {
-		t.Fatalf("expected 1 dispatch, got %d", len(disps))
-	}
-	if string(disps[0].Mode) != "scope" {
-		t.Errorf("dispatch mode = %q, want scope", disps[0].Mode)
-	}
-	if disps[0].IssueID == nil || *disps[0].IssueID != full.ID {
-		t.Errorf("dispatch issue_id mismatch")
+	if len(disps) != 0 {
+		t.Fatalf("expected 0 dispatches (no auto-scope), got %d", len(disps))
 	}
 
 	// Cursor should land on the new card after the reload.
@@ -255,8 +248,8 @@ func TestBoardCompose_CapturesInput(t *testing.T) {
 func TestBoardCompose_NDoesntOpenDuringArchiveConfirm(t *testing.T) {
 	s, repo, board := composeTestBoard(t)
 
-	// Create an in_progress issue (non-terminal — `a` arms the confirm).
-	iss, err := s.CreateIssue(repo.ID, nil, "active", "", model.StateInProgress, nil, "")
+	// Create a non-terminal issue (`a` arms the confirm).
+	iss, err := s.CreateIssue(repo.ID, nil, "active", "", model.StateInReview, nil, "")
 	if err != nil {
 		t.Fatalf("create iss: %v", err)
 	}

@@ -268,8 +268,8 @@ func (a AssigneeChange) Changed() bool { return a.Old != a.New }
 
 // StateChange describes an issues.state mutation a claim/release made
 // as a side effect of keeping the worker protocol honest (BACI-126):
-// claim auto-moves the issue to in_progress, release moves it to the
-// caller-supplied final state. The client / API layers fold a *changed*
+// a claim is state-neutral (BACI-300 — Old == New), release moves it to
+// the caller-supplied final state. The client / API layers fold a *changed*
 // StateChange into the `agent.claim` / `agent.release` audit row's
 // Details string rather than emitting a separate `issue.state` row, so
 // a reader of `bacio history` sees one combined entry per operation.
@@ -522,12 +522,13 @@ const (
 // Each cascade entry's NewStatus carries which path took it, so a
 // caller serving both can branch on it without re-fetching.
 //
-// BACI-126c: orphanState is the state every auto-released claim's
-// issue lands in (typically `in_progress` — the "work abandoned" default
-// the agent end flow picks when it doesn't know better). The third
-// return value carries one StateChange per claimed issue whose state
-// actually moved, so the caller can fold them into the per-issue audit
-// rows next to the cascaded `agent.release` entries.
+// BACI-126c: orphanState is the state every auto-released claim's issue
+// lands in. BACI-300 retired the legacy `in_progress` "work abandoned"
+// default — callers now pass "" so every orphan release leaves the
+// issue's state untouched (a claim is a focus marker, not a state move).
+// The third return value carries one StateChange per claimed issue whose
+// state actually moved, so the caller can fold them into the per-issue
+// audit rows next to the cascaded `agent.release` entries.
 //
 // BACI-253: the fifth return value carries the number of still-open
 // `ask_user_question` rows this transaction flipped to `abandoned`.
@@ -935,12 +936,10 @@ func (s *Store) ClearAgentSessionError(sessionID string) error {
 // returned *AssigneeChange describes that mutation for the audit log; it
 // is nil on the no-op re-claim path.
 //
-// BACI-126a: a freshly-created claim also auto-transitions the issue to
-// `in_progress` inside the same transaction, regardless of its current
-// state. The returned *StateChange describes that move for the audit
-// log — Old == New when the issue was already in_progress (no SQL
-// write happened either, thanks to the predicate). nil on the no-op
-// re-claim path.
+// BACI-300: a claim no longer moves the issue's state — it is a focus
+// marker only. The returned *StateChange always reads Old == New (no SQL
+// write happens) so the audit log records the claim without an
+// `issue.state` row. nil on the no-op re-claim path.
 func (s *Store) AddAgentClaim(sessionID string, issueID int64, prompt string) (*model.AgentClaim, bool, *AssigneeChange, *StateChange, error) {
 	if _, err := ValidateSessionID(sessionID); err != nil {
 		return nil, false, nil, nil, err
@@ -1015,10 +1014,11 @@ func (s *Store) AddAgentClaim(sessionID string, issueID int64, prompt string) (*
 	if err != nil {
 		return nil, false, nil, nil, err
 	}
-	// BACI-126a: auto-transition the issue to in_progress, regardless of
-	// its current state. The predicate makes the UPDATE a no-op when the
-	// row is already in_progress, so the audit row reads cleanly in that
-	// case (Old == New, client skips the state clause).
+	// A claim is a focus marker only (BACI-300 retired the in_progress
+	// auto-flip): it never moves the issue's state. The returned
+	// StateChange always reads Old == New so the caller's Changed() gate
+	// skips the state clause; it still carries the IssueKey / repo prefix
+	// the caller needs without a second read.
 	stateChange, err := setIssueStateForClaim(tx, issueID)
 	if err != nil {
 		return nil, false, nil, nil, err
@@ -1035,12 +1035,11 @@ func (s *Store) AddAgentClaim(sessionID string, issueID int64, prompt string) (*
 	return c, true, change, stateChange, err
 }
 
-// setIssueStateForClaim moves the issue to in_progress inside the
-// caller's tx and returns the before/after for the audit row. The SQL
-// predicate `state != 'in_progress'` makes the UPDATE a no-op when the
-// row is already in_progress — the returned StateChange still
-// describes the (unchanged) state so the caller has the IssueKey and
-// repo prefix it needs without a second read.
+// setIssueStateForClaim reads the issue's current state and returns a
+// no-move StateChange (Old == New) for the audit row. BACI-300 retired
+// the legacy in_progress auto-flip: a claim is now a focus marker, not a
+// state transition, so this writes no SQL — it only resolves the
+// IssueKey / repo prefix the caller needs without a second read.
 func setIssueStateForClaim(tx *sql.Tx, issueID int64) (*StateChange, error) {
 	var oldState string
 	var repoID int64
@@ -1059,40 +1058,11 @@ func setIssueStateForClaim(tx *sql.Tx, issueID int64) (*StateChange, error) {
 		}
 		return nil, err
 	}
-	ch := &StateChange{
+	return &StateChange{
 		IssueID: issueID, IssueKey: fmt.Sprintf("%s-%d", prefix, number),
 		RepoID: repoID, RepoPrefix: prefix,
-		Old: model.State(oldState), New: model.StateInProgress,
-	}
-	// Engine-governed gate (Pipeline): a claim must NOT auto-flip a card
-	// that's in_pipeline / to_be_shipped to in_progress — the engine
-	// dispatches its job agents against the card while it stays in its
-	// Pipeline column. Return Old == New (== the current Pipeline state)
-	// so the claim completes without a state move.
-	if isEngineGovernedState(model.State(oldState)) {
-		ch.New = model.State(oldState)
-		return ch, nil
-	}
-	if model.State(oldState) == model.StateInProgress {
-		return ch, nil // already in_progress — SQL no-op too
-	}
-	// BACI-138: a claim auto-transitions the issue to in_progress, so
-	// terminal_at must be cleared if the issue was reopened from a
-	// terminal state via the claim path. The literal SQL clause (not a
-	// bound `?`) matches how SetIssueState writes it.
-	//
-	// BACI-220: a claim move out of `needs_action` clears the
-	// user_action_reason_type too — the reason is scoped to the
-	// `needs_action` lifetime. userActionReasonClauseForTransition
-	// returns NULL for any non-needs_action target, so this is a
-	// nominal no-op clear on every claim-driven flip.
-	if _, err := tx.Exec(
-		`UPDATE issues SET state = ?, updated_at = CURRENT_TIMESTAMP, terminal_at = `+terminalAtClause(model.StateInProgress)+`, user_action_reason_type = `+userActionReasonClauseForTransition(model.StateInProgress)+` WHERE id = ? AND state != ?`,
-		string(model.StateInProgress), issueID, string(model.StateInProgress),
-	); err != nil {
-		return nil, err
-	}
-	return ch, nil
+		Old: model.State(oldState), New: model.State(oldState),
+	}, nil
 }
 
 // ReleaseAgentClaim stamps released_at on the latest open claim for
@@ -1241,18 +1211,11 @@ func setIssueStateForRelease(tx *sql.Tx, issueID int64, target model.State) (*St
 	}
 	// BACI-138: keep terminal_at in lockstep with state — the release
 	// path is the primary way an issue lands in `done`/`cancelled`
-	// (BACI-126c handoff) and the primary way it's reopened to
-	// `in_progress` after an EndAgentSession's `presumed_dead` cascade.
-	// terminalAtClause is a SQL literal (NULL / CURRENT_TIMESTAMP), not
-	// a bound `?` value — same rationale as SetIssueState.
-	//
-	// BACI-220: keep user_action_reason_type in lockstep too — a release
-	// past `needs_action` clears the typed reason. The clause emits NULL
-	// for any non-needs_action target so a `needs_action`-tagged
-	// question reason can't outlive the move into `in_review` / done /
-	// cancelled.
+	// (BACI-126c handoff). terminalAtClause is a SQL literal (NULL /
+	// CURRENT_TIMESTAMP), not a bound `?` value — same rationale as
+	// SetIssueState.
 	if _, err := tx.Exec(
-		`UPDATE issues SET state = ?, updated_at = CURRENT_TIMESTAMP, terminal_at = `+terminalAtClause(target)+`, user_action_reason_type = `+userActionReasonClauseForTransition(target)+` WHERE id = ? AND state != ?`,
+		`UPDATE issues SET state = ?, updated_at = CURRENT_TIMESTAMP, terminal_at = `+terminalAtClause(target)+` WHERE id = ? AND state != ?`,
 		string(target), issueID, string(target),
 	); err != nil {
 		return nil, err
@@ -1279,13 +1242,14 @@ func isEngineGovernedState(s model.State) bool {
 	return s == model.StateInPipeline || s == model.StateToBeShipped
 }
 
-// isProcessingState reports whether the state is one of the legacy
+// isProcessingState reports whether the state is one of the off-pipeline
 // agent-processing states the Pipeline engine deliberately does not use.
 // A worker trying to flip an engine-governed card into one of these is
 // no-op'd; deliberate column moves (todo / in_pipeline / to_be_shipped /
-// done / cancelled) are not blocked.
+// done / cancelled) are not blocked. Since BACI-300 retired in_progress /
+// needs_action, in_review is the only remaining member.
 func isProcessingState(s model.State) bool {
-	return s == model.StateInProgress || s == model.StateNeedsAction || s == model.StateInReview
+	return s == model.StateInReview
 }
 
 // AgentSessionFilter scopes ListAgentSessions. Zero value = all

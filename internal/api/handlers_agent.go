@@ -371,8 +371,9 @@ func (d deps) handleAgentEnd(w http.ResponseWriter, r *http.Request) {
 		writeDryRun(w, http.StatusOK, &projected)
 		return
 	}
-	// BACI-126c: state_on_orphan defaults to in_progress when unset.
-	orphanState := model.StateInProgress
+	// BACI-300: state_on_orphan defaults to "" (leave the state alone) —
+	// a claim is a focus marker, so an abandoned claim's issue stays put.
+	var orphanState model.State
 	if strings.TrimSpace(in.StateOnOrphan) != "" {
 		parsed, perr := model.ParseState(in.StateOnOrphan)
 		if perr != nil {
@@ -513,9 +514,8 @@ func (d deps) handleAgentClaim(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if isDryRun(r) {
-		// BACI-126a: surface the post-claim state on the dry-run so the
-		// rehearsal output mirrors the live call. Auto-transition is
-		// unconditional — IssueStateAfter is always in_progress.
+		// BACI-300: a claim is state-neutral — project before == after ==
+		// the issue's current state so the rehearsal mirrors the live call.
 		writeDryRun(w, http.StatusCreated, &model.AgentClaim{
 			SessionID:        sid,
 			IssueID:          iss.ID,
@@ -523,7 +523,7 @@ func (d deps) handleAgentClaim(w http.ResponseWriter, r *http.Request) {
 			Prompt:           in.Prompt,
 			ClaimedAt:        time.Now().UTC(),
 			IssueStateBefore: iss.State,
-			IssueStateAfter:  model.StateInProgress,
+			IssueStateAfter:  iss.State,
 		})
 		return
 	}
@@ -628,11 +628,11 @@ func (d deps) handleAgentRelease(w http.ResponseWriter, r *http.Request) {
 		writeError(w, status, code, err.Error(), nil)
 		return
 	}
-	// Empty final_state defaults via model.ReleaseFallbackState: a no-op
-	// for engine-governed / terminal cards (the controller engine owns
-	// pipeline-card progression) but in_review for an off-pipeline issue,
-	// so a released claim doesn't strand the card in in_progress. A
-	// non-empty state (validated above) still moves the issue.
+	// Empty final_state defaults via model.ReleaseFallbackState, which
+	// since BACI-300 is a no-op for every card — a release leaves the
+	// state exactly where it was (the controller engine owns pipeline-card
+	// progression; an off-pipeline card simply stays put). A non-empty
+	// state (validated above) still moves the issue.
 	finalState := model.ReleaseFallbackState(iss.State)
 	if s := strings.TrimSpace(in.FinalState); s != "" {
 		finalState, _ = model.ParseState(s)

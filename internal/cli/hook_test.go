@@ -778,7 +778,8 @@ func TestHookStopFailure_FailOpenOnEmptyStdin(t *testing.T) {
 
 // TestHookStopFailure_MarksAgentErroredTerminal drives the full hook with
 // a terminal error_type: the session is marked errored AND the card is
-// pulled out of the pipeline to needs_action.
+// paused IN PLACE (BACI-300) — in_pipeline, Auto off, terminal pause
+// reason — rather than yanked out to the retired needs_action state.
 func TestHookStopFailure_MarksAgentErroredTerminal(t *testing.T) {
 	tmp, s, repo, sessID := setupStopFailureEnv(t)
 	iss := seedRunningPipelineClaim(t, s, repo, sessID)
@@ -794,17 +795,20 @@ func TestHookStopFailure_MarksAgentErroredTerminal(t *testing.T) {
 		t.Fatalf("session not marked errored: erroredAt=%v type=%q", sess.ErroredAt, sess.ErrorType)
 	}
 	got, _ := s.GetIssueByID(iss.ID)
-	if got.State != model.StateNeedsAction {
-		t.Fatalf("issue state = %s, want needs_action", got.State)
+	if got.State != model.StateInPipeline {
+		t.Fatalf("issue state = %s, want in_pipeline (terminal pauses in place)", got.State)
 	}
-	if got.UserActionReasonType != model.UserActionReasonAgentError {
-		t.Fatalf("reason = %q, want %q", got.UserActionReasonType, model.UserActionReasonAgentError)
+	if got.EnginePauseReason != model.EnginePauseReasonAgentErrorTerminal {
+		t.Fatalf("pause reason = %q, want %q", got.EnginePauseReason, model.EnginePauseReasonAgentErrorTerminal)
+	}
+	if got.EngineMode != model.EngineOff {
+		t.Fatalf("engine mode = %s, want off", got.EngineMode)
 	}
 }
 
 // TestHookStopFailure_TransientPausesChain drives the hook with a
 // transient error_type: the chain is paused in place (in_pipeline, Auto
-// off, agent_error pause reason) rather than moved out.
+// off, transient pause reason) rather than moved out.
 func TestHookStopFailure_TransientPausesChain(t *testing.T) {
 	tmp, s, repo, sessID := setupStopFailureEnv(t)
 	iss := seedRunningPipelineClaim(t, s, repo, sessID)
@@ -816,8 +820,8 @@ func TestHookStopFailure_TransientPausesChain(t *testing.T) {
 	if got.State != model.StateInPipeline {
 		t.Fatalf("issue state = %s, want in_pipeline (transient pauses in place)", got.State)
 	}
-	if got.EnginePauseReason != model.EnginePauseReasonAgentError {
-		t.Fatalf("pause reason = %q, want %q", got.EnginePauseReason, model.EnginePauseReasonAgentError)
+	if got.EnginePauseReason != model.EnginePauseReasonAgentErrorTransient {
+		t.Fatalf("pause reason = %q, want %q", got.EnginePauseReason, model.EnginePauseReasonAgentErrorTransient)
 	}
 	if got.EngineMode != model.EngineOff {
 		t.Fatalf("engine mode = %s, want off", got.EngineMode)

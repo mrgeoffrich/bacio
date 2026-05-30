@@ -74,13 +74,24 @@ func ParseEngineMode(s string) (EngineMode, error) {
 // Auto will not advance until it is answered (§6.1 of the requirements).
 const EnginePauseReasonOpenQuestion = "open_question"
 
-// EnginePauseReasonAgentError: the worker running the current job died on
-// a transient Anthropic API error (BACI-296). The engine cancels the
-// in-flight job and halts Auto in place rather than re-queuing — the user
-// re-arms with Start/Auto once the outage passes. Terminal API errors
-// take the issue out of the pipeline to needs_action instead, so this
-// pause reason is only ever set for the transient class.
-const EnginePauseReasonAgentError = "agent_error"
+// EnginePauseReasonAgentErrorTransient / ...Terminal: the worker running
+// the current job died on an Anthropic API error (BACI-296). Either way
+// the engine cancels the in-flight job and halts Auto in place rather
+// than re-queuing — the user re-arms with Start/Auto. The card stays
+// in_pipeline for both classes (BACI-300 retired the old needs_action
+// hand-off); the two values exist only so the Pipeline UI can word the
+// halt differently:
+//
+//   - Transient (server_error / rate_limit) — an outage. "Start to
+//     retry once it clears."
+//   - Terminal (auth / billing / org-not-allowed / unknown) — the user
+//     must fix an account/config problem before a retry can succeed.
+//
+// model.IsTransientAPIError is the single source of truth for the branch.
+const (
+	EnginePauseReasonAgentErrorTransient = "agent_error_transient"
+	EnginePauseReasonAgentErrorTerminal  = "agent_error_terminal"
+)
 
 // ShipJobMode is the sentinel "mode" for the Ship hand-off stage inside
 // a process chain. It is deliberately the same slug as the ship dispatch
@@ -138,6 +149,12 @@ var pipelineProcesses = []Process{
 	{Slug: "plan_large", Name: "Large Plan", Stages: []string{BuiltinTemplatePlanLarge}},
 	{Slug: "design", Name: "Design", Stages: []string{BuiltinTemplateDesign}},
 	{Slug: "implement", Name: "Implement", Stages: []string{BuiltinTemplateImplement}},
+	// Triage stages (BACI-300): standalone, no-chain passes that run a
+	// single agent and finish in place. Reachable from the Pipeline
+	// picker as standalone rows, replacing the retired manual-triage
+	// dispatch path.
+	{Slug: "scope", Name: "Scope", Stages: []string{BuiltinTemplateScope}},
+	{Slug: "research", Name: "Research", Stages: []string{BuiltinTemplateResearch}},
 }
 
 // PipelineProcesses returns a copy of the preset process list.

@@ -10,15 +10,18 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
 
-// TestQuestionAutoFlipOpensThenAnswers covers the happy path: an
-// in_progress issue auto-flips to needs_action on AddSessionQuestion,
-// then back to in_progress on AnswerSessionQuestion.
-func TestQuestionAutoFlipOpensThenAnswers(t *testing.T) {
+// TestQuestionDoesNotMoveIssueState locks in the BACI-300 retirement of
+// the legacy in_progress→needs_action auto-flip: opening, answering, and
+// cancelling a question leave the claimed issue's state exactly where it
+// was. The "agent is blocked on a question" signal now lives on the
+// kanban-card question pill (and, for a pipeline card, the engine's
+// open_question pause), not in a state move.
+func TestQuestionDoesNotMoveIssueState(t *testing.T) {
 	p := newPair(t)
 	defer p.cleanup()
 	ctx := context.Background()
 
-	iss, sess := setupClaimedIssue(t, p, "sess-aflip-1", model.StateInProgress)
+	iss, sess := setupClaimedIssue(t, p, "sess-aflip-1", model.StateTodo)
 
 	q, err := p.local.AddSessionQuestion(ctx, client.AddSessionQuestionInput{
 		SessionID: sess.SessionID,
@@ -29,24 +32,24 @@ func TestQuestionAutoFlipOpensThenAnswers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddSessionQuestion: %v", err)
 	}
-	mustState(t, p, iss.Key, model.StateNeedsAction, "after ask")
+	mustState(t, p, iss.Key, model.StateTodo, "after ask")
 
 	if _, err := p.local.AnswerSessionQuestion(ctx, q.ID, model.QuestionAnswers{
 		"Pick one?": "A",
 	}, false); err != nil {
 		t.Fatalf("AnswerSessionQuestion: %v", err)
 	}
-	mustState(t, p, iss.Key, model.StateInProgress, "after answer")
+	mustState(t, p, iss.Key, model.StateTodo, "after answer")
 }
 
-// TestQuestionAutoFlipCancel covers the same path but with cancel
-// instead of answer.
-func TestQuestionAutoFlipCancel(t *testing.T) {
+// TestQuestionCancelDoesNotMoveIssueState covers the same no-move
+// guarantee on the cancel path.
+func TestQuestionCancelDoesNotMoveIssueState(t *testing.T) {
 	p := newPair(t)
 	defer p.cleanup()
 	ctx := context.Background()
 
-	iss, sess := setupClaimedIssue(t, p, "sess-aflip-2", model.StateInProgress)
+	iss, sess := setupClaimedIssue(t, p, "sess-aflip-2", model.StateInReview)
 
 	q, err := p.local.AddSessionQuestion(ctx, client.AddSessionQuestionInput{
 		SessionID: sess.SessionID,
@@ -57,77 +60,19 @@ func TestQuestionAutoFlipCancel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddSessionQuestion: %v", err)
 	}
-	mustState(t, p, iss.Key, model.StateNeedsAction, "after ask")
+	mustState(t, p, iss.Key, model.StateInReview, "after ask")
 
 	if _, err := p.local.CancelSessionQuestion(ctx, q.ID, false); err != nil {
 		t.Fatalf("CancelSessionQuestion: %v", err)
 	}
-	mustState(t, p, iss.Key, model.StateInProgress, "after cancel")
-}
-
-// TestQuestionAutoFlipMultipleOpenDoesNotFlipBackEarly verifies that
-// answering one question while another is still open leaves the
-// issue in needs_action. Only the last resolution flips back.
-func TestQuestionAutoFlipMultipleOpenDoesNotFlipBackEarly(t *testing.T) {
-	p := newPair(t)
-	defer p.cleanup()
-	ctx := context.Background()
-
-	iss, sess := setupClaimedIssue(t, p, "sess-aflip-3", model.StateInProgress)
-
-	q1, err := p.local.AddSessionQuestion(ctx, client.AddSessionQuestionInput{
-		SessionID: sess.SessionID, IssueKey: iss.Key,
-		Payload: simplePayload(), AskedBy: "agent-x@claude.test",
-	})
-	if err != nil {
-		t.Fatalf("AddSessionQuestion 1: %v", err)
-	}
-	q2, err := p.local.AddSessionQuestion(ctx, client.AddSessionQuestionInput{
-		SessionID: sess.SessionID, IssueKey: iss.Key,
-		Payload: simplePayload(), AskedBy: "agent-x@claude.test",
-	})
-	if err != nil {
-		t.Fatalf("AddSessionQuestion 2: %v", err)
-	}
-	mustState(t, p, iss.Key, model.StateNeedsAction, "after two asks")
-
-	if _, err := p.local.AnswerSessionQuestion(ctx, q1.ID, model.QuestionAnswers{"Pick one?": "A"}, false); err != nil {
-		t.Fatalf("AnswerSessionQuestion 1: %v", err)
-	}
-	mustState(t, p, iss.Key, model.StateNeedsAction, "after resolving 1 of 2")
-
-	if _, err := p.local.AnswerSessionQuestion(ctx, q2.ID, model.QuestionAnswers{"Pick one?": "B"}, false); err != nil {
-		t.Fatalf("AnswerSessionQuestion 2: %v", err)
-	}
-	mustState(t, p, iss.Key, model.StateInProgress, "after resolving last open")
-}
-
-// TestQuestionAutoFlipSkipsWhenIssueNotInProgress asserts the open
-// flip is a no-op when the issue is in any state other than
-// in_progress — we don't yank a `todo` or `done` row into needs_action.
-func TestQuestionAutoFlipSkipsWhenIssueNotInProgress(t *testing.T) {
-	p := newPair(t)
-	defer p.cleanup()
-	ctx := context.Background()
-
-	iss, sess := setupClaimedIssue(t, p, "sess-aflip-4", model.StateTodo)
-
-	if _, err := p.local.AddSessionQuestion(ctx, client.AddSessionQuestionInput{
-		SessionID: sess.SessionID, IssueKey: iss.Key,
-		Payload: simplePayload(), AskedBy: "agent-x@claude.test",
-	}); err != nil {
-		t.Fatalf("AddSessionQuestion: %v", err)
-	}
-	mustState(t, p, iss.Key, model.StateTodo, "todo issue should not flip")
+	mustState(t, p, iss.Key, model.StateInReview, "after cancel")
 }
 
 // TestAddSessionQuestionRejectsEmptyIssueKey locks in BACI-128:
 // the client-side guard rejects an empty issue_key at the
 // boundary, so a buggy future caller (or a regressed channel)
 // cannot insert an orphan row that the kanban-card surface would
-// never light up on. Replaces the pre-BACI-128
-// TestQuestionAutoFlipWithoutIssueKey, which exercised the
-// dropped open-claim-best-effort path.
+// never light up on.
 func TestAddSessionQuestionRejectsEmptyIssueKey(t *testing.T) {
 	p := newPair(t)
 	defer p.cleanup()
@@ -167,9 +112,8 @@ func TestAddSessionQuestionRejectsEmptyIssueKey(t *testing.T) {
 }
 
 // setupClaimedIssue creates one issue + a session that has claimed it,
-// returning both. The issue starts in the requested state — pass
-// StateInProgress to mimic the post-claim+state-flip steady state, or
-// StateTodo to test the "not-eligible-for-autoflip" branch.
+// returning both. The issue starts (and, since BACI-300's state-neutral
+// claim, stays) in the requested state.
 func setupClaimedIssue(t *testing.T, p *pair, sessionID string, state model.State) (*model.Issue, *model.AgentSession) {
 	t.Helper()
 	iss, err := p.store.CreateIssue(p.repo.ID, nil, "auto-flip target", "", state, nil, "")
@@ -186,19 +130,10 @@ func setupClaimedIssue(t *testing.T, p *pair, sessionID string, state model.Stat
 	if err != nil {
 		t.Fatalf("UpsertAgentSession: %v", err)
 	}
+	// BACI-300: AddAgentClaim is state-neutral, so the issue stays in the
+	// requested state after the claim — no need to stamp it back.
 	if _, _, _, _, err := p.store.AddAgentClaim(sess.SessionID, iss.ID, ""); err != nil {
 		t.Fatalf("AddAgentClaim: %v", err)
-	}
-	// BACI-126a: AddAgentClaim auto-moves the issue to in_progress, but
-	// these tests need to verify auto-flip behaviour across the full
-	// state space. Stamp the requested state back after the claim so the
-	// fixture starts in the state the test asks for, regardless of the
-	// claim's implicit transition.
-	if state != model.StateInProgress {
-		if err := p.store.SetIssueState(iss.ID, state); err != nil {
-			t.Fatalf("SetIssueState: %v", err)
-		}
-		iss.State = state
 	}
 	return iss, sess
 }

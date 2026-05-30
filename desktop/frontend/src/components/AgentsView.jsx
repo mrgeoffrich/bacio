@@ -32,8 +32,6 @@ function mockAgents() {
       status: 'active',
       busy: true,
       busyIssue: 'BACI-204',
-      waiting: false,
-      waitingIssue: '',
       hasChannel: true,
       bacioVersion: 'v0.42.0',
       bacioVersionStale: false,
@@ -41,7 +39,7 @@ function mockAgents() {
       claims: [
         {
           issueKey: 'BACI-204',
-          state: 'in_progress',
+          state: 'in_pipeline',
           prompt:
             'Plan a redesign of the Agents view to fit cards on a responsive grid.',
         },
@@ -63,23 +61,21 @@ function mockAgents() {
       openQuestions: [],
     },
     {
-      sessionId: 'mock-waiting-question',
+      sessionId: 'mock-busy-question',
       agentName: 'curious-quokka@claude.shiny',
       actor: 'claude',
       model: 'claude-sonnet-4-6',
       branch: 'worktree-agent-7c41ab',
       repoPrefix: 'BACI',
       status: 'active',
-      busy: false,
-      busyIssue: '',
-      waiting: true,
-      waitingIssue: 'BACI-187',
+      busy: true,
+      busyIssue: 'BACI-187',
       hasChannel: true,
       bacioVersion: 'v0.42.0',
       bacioVersionStale: false,
       lastSeenAt: ago(2),
       claims: [
-        { issueKey: 'BACI-187', state: 'needs_action', prompt: 'Pick the auth strategy.' },
+        { issueKey: 'BACI-187', state: 'in_pipeline', prompt: 'Pick the auth strategy.' },
       ],
       dispatches: [
         { id: 884, issueKey: 'BACI-187', mode: 'design', status: 'delivered' },
@@ -101,8 +97,6 @@ function mockAgents() {
       status: 'idle',
       busy: false,
       busyIssue: '',
-      waiting: false,
-      waitingIssue: '',
       hasChannel: true,
       bacioVersion: 'v0.42.0',
       bacioVersionStale: false,
@@ -127,14 +121,12 @@ function mockAgents() {
       status: 'active',
       busy: true,
       busyIssue: 'BACI-156',
-      waiting: false,
-      waitingIssue: '',
       hasChannel: false,
       bacioVersion: 'v0.40.1',
       bacioVersionStale: true,
       lastSeenAt: ago(14),
       claims: [
-        { issueKey: 'BACI-156', state: 'in_progress', prompt: 'Implement the sync diff renderer.' },
+        { issueKey: 'BACI-156', state: 'in_pipeline', prompt: 'Implement the sync diff renderer.' },
       ],
       dispatches: [
         {
@@ -165,8 +157,6 @@ function mockAgents() {
       status: 'active',
       busy: false,
       busyIssue: '',
-      waiting: false,
-      waitingIssue: '',
       hasChannel: true,
       bacioVersion: 'v0.42.0',
       bacioVersionStale: false,
@@ -326,11 +316,7 @@ function AgentCard({ agent: a, rescuing, rescueError, onRescue, onOpenQuestion }
       </div>
 
       <div className="mk-agent-card-badges">
-        {a.waiting ? (
-          <span className="mk-pill mk-status-waiting">
-            waiting · {a.waitingIssue}
-          </span>
-        ) : a.busy ? (
+        {a.busy ? (
           <span className="mk-pill mk-status-busy">busy · {a.busyIssue}</span>
         ) : null}
         {a.bacioVersionStale && (
@@ -403,9 +389,6 @@ function AgentCard({ agent: a, rescuing, rescueError, onRescue, onOpenQuestion }
           {claims.map((c) => (
             <div key={c.issueKey} className="mk-agent-claim">
               <span className="mk-mono">{c.issueKey}</span>
-              {c.state === 'needs_action' && (
-                <span className="mk-tag">needs action</span>
-              )}
               {c.prompt && (
                 <span className="mk-agent-claim-prompt" title={c.prompt}>
                   {c.prompt}

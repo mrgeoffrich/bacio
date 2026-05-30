@@ -335,46 +335,10 @@ func hookUserPromptSubmitCmd() *cobra.Command {
 			}
 			h.linkChannel(sess.SessionID)
 			h.clearErrorOnRecovery(sess)
-			h.syncClaimedIssueStates(sess.SessionID, false)
 			emitClaimNudge(h, sess)
 			emitDrainedDispatches(h, sess.SessionID)
 			return nil
 		},
-	}
-}
-
-// syncClaimedIssueStates keeps every issue this session holds an open
-// claim on in lock-step with whether the agent is currently working it.
-// When idle is true (Stop hook — the agent's turn ended), in_progress
-// claims flip to needs_action; when idle is false (UserPromptSubmit
-// hook — a new prompt arrived), the inverse fires. Only issues already
-// in the matching "from" state are touched, so a no-op turn writes
-// nothing — no SetIssueState call, no audit row, no updated_at bump.
-// Best-effort: every error goes to stderr, never fails the hook.
-func (h *hookContext) syncClaimedIssueStates(sessionID string, idle bool) {
-	view, err := h.c.ShowAgentSession(context.Background(), sessionID)
-	if err != nil {
-		return
-	}
-	from, to := model.StateNeedsAction, model.StateInProgress
-	if idle {
-		from, to = model.StateInProgress, model.StateNeedsAction
-	}
-	for _, cl := range view.Claims {
-		if cl.ReleasedAt != nil {
-			continue
-		}
-		iss, err := h.c.GetIssueByKey(context.Background(), h.repo, cl.IssueKey)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "bacio hook: lookup", cl.IssueKey+":", err)
-			continue
-		}
-		if iss.State != from {
-			continue
-		}
-		if _, err := h.c.SetIssueState(context.Background(), h.repo, cl.IssueKey, to, false); err != nil {
-			fmt.Fprintln(os.Stderr, "bacio hook: flip", cl.IssueKey+":", err)
-		}
 	}
 }
 
@@ -397,7 +361,7 @@ func emitClaimNudge(h *hookContext, sess *model.AgentSession) {
 		return
 	}
 	fmt.Fprintf(os.Stdout,
-		"[bacio] You still hold open claims on %s — when that work is done, move the issue to in_review/done and run `bacio agent release` on the claim.\n",
+		"[bacio] You still hold open claims on %s — when that work is done, run `bacio agent release` on the claim.\n",
 		strings.Join(open, ", "))
 }
 
@@ -458,7 +422,6 @@ func hookStopCmd() *cobra.Command {
 			if sess := h.heartbeatOrRegister(); sess != nil {
 				h.linkChannel(sess.SessionID)
 				h.clearErrorOnRecovery(sess)
-				h.syncClaimedIssueStates(sess.SessionID, true)
 			}
 			return nil
 		},
@@ -483,8 +446,8 @@ func hookStopCmd() *cobra.Command {
 //
 //  2. Reconcile the in-flight Pipeline job. If the session held an open
 //     claim on an in_pipeline card with a running job, drive the engine's
-//     FailRunning branch — transient errors pause the chain in place;
-//     terminal errors move the card out to needs_action.
+//     FailRunning branch — the card stays in_pipeline, paused with a
+//     transient/terminal engine_pause_reason so the user can re-arm.
 //
 // Unlike the Stop hook this path deliberately does NOT clear the errored
 // state — this turn *is* the failure. Recovery clearing happens on the
@@ -1476,8 +1439,8 @@ func (h *hookContext) assignedIssues() []*model.Issue {
 	issues, err := h.c.ListIssues(context.Background(), client.IssueFilter{
 		Repo: h.repo,
 		States: []model.State{
-			model.StateTodo, model.StateInProgress,
-			model.StateNeedsAction, model.StateInReview,
+			model.StateTodo, model.StateInReview,
+			model.StateInPipeline, model.StateToBeShipped,
 		},
 	})
 	if err != nil {

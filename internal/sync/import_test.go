@@ -451,7 +451,7 @@ func TestImport_LWW_Issue_PreservesNewerLocal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read iss1 yaml: %v", err)
 	}
-	tampered := strings.Replace(string(body), `state: "in_progress"`, `state: "todo"`, 1)
+	tampered := strings.Replace(string(body), `state: "in_review"`, `state: "todo"`, 1)
 	if tampered == string(body) {
 		t.Fatalf("expected to flip state in yaml, body:\n%s", body)
 	}
@@ -490,14 +490,14 @@ func TestImport_LWW_Issue_PreservesNewerLocal(t *testing.T) {
 		t.Errorf("SkippedStale.Label: got %q, want MINI-1", hit.Label)
 	}
 
-	// Local body preserved — state must still be in_progress, not the
+	// Local body preserved — state must still be in_review, not the
 	// "todo" we wrote into the YAML.
 	iss, err := b.GetIssueByKey("MINI", 1)
 	if err != nil {
 		t.Fatalf("get issue: %v", err)
 	}
-	if iss.State != model.StateInProgress {
-		t.Errorf("local state was overwritten to %v; expected in_progress (LWW skip should have preserved it)", iss.State)
+	if iss.State != model.StateInReview {
+		t.Errorf("local state was overwritten to %v; expected in_review (LWW skip should have preserved it)", iss.State)
 	}
 	// Tags on local must also be preserved (side-data skip).
 	tagSet := map[string]bool{}
@@ -621,7 +621,7 @@ func TestImport_LWW_NewerRemote_Updates(t *testing.T) {
 	// '2026-05-09 14:22:00'), and flip state. The YAML uses RFC3339 in
 	// UTC, e.g. "2026-05-09T14:22:00Z".
 	tampered := strings.Replace(string(body), "2026-05-09T14:22:00Z", "2026-06-01T10:00:00Z", 1)
-	tampered = strings.Replace(tampered, `state: "in_progress"`, `state: "done"`, 1)
+	tampered = strings.Replace(tampered, `state: "in_review"`, `state: "done"`, 1)
 	if tampered == string(body) {
 		t.Fatalf("expected to bump remote ts + flip state; body:\n%s", body)
 	}

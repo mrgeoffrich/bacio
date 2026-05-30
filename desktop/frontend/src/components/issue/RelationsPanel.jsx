@@ -27,11 +27,11 @@ const TYPE_LABEL = {
 // degraded chip doesn't need an extra prop drill). Keep in sync.
 const STATE_LABELS = {
   todo: 'Todo',
-  in_progress: 'In Progress',
-  needs_action: 'Needs Action',
   in_review: 'In Review',
   done: 'Done',
   cancelled: 'Cancelled',
+  in_pipeline: 'In Pipeline',
+  to_be_shipped: 'To Be Shipped',
 };
 function stateLabel(s) {
   return STATE_LABELS[s] ?? s;

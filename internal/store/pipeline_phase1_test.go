@@ -192,9 +192,9 @@ func TestSetIssueStateTearsDownPipelineRunOnLeave(t *testing.T) {
 		t.Fatalf("StartPipelineJobWithDispatch: won=%v err=%v", won, err)
 	}
 
-	// A processing-state target on an in_pipeline card is a no-op (guard) —
-	// it must NOT tear the run down.
-	if err := s.SetIssueState(iss.ID, model.StateInProgress); err != nil {
+	// A processing-state target (in_review) on an in_pipeline card is a
+	// no-op (guard) — it must NOT tear the run down.
+	if err := s.SetIssueState(iss.ID, model.StateInReview); err != nil {
 		t.Fatalf("guarded no-op move: %v", err)
 	}
 	if got, _ := s.GetPipelineJob(jobs[0].ID); got.Status != model.JobRunning {
@@ -345,8 +345,9 @@ func TestEngineGovernedStateGuard(t *testing.T) {
 	if err := s.SetIssueState(iss.ID, model.StateInPipeline); err != nil {
 		t.Fatalf("SetIssueState in_pipeline: %v", err)
 	}
-	// Guard: processing-state writes are ignored.
-	for _, target := range []model.State{model.StateInProgress, model.StateNeedsAction, model.StateInReview} {
+	// Guard: processing-state writes are ignored. Since BACI-300 retired
+	// in_progress / needs_action, in_review is the only remaining one.
+	for _, target := range []model.State{model.StateInReview} {
 		if err := s.SetIssueState(iss.ID, target); err != nil {
 			t.Fatalf("SetIssueState %s: %v", target, err)
 		}
@@ -355,7 +356,7 @@ func TestEngineGovernedStateGuard(t *testing.T) {
 		}
 	}
 
-	// A claim must not auto-flip an in_pipeline card to in_progress.
+	// A claim must not move an in_pipeline card.
 	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{SessionID: "g1", RepoID: repo.ID, Actor: "agent-g"}); err != nil {
 		t.Fatalf("session: %v", err)
 	}

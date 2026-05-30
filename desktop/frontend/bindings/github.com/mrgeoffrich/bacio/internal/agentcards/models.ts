@@ -7,9 +7,6 @@ import { Create as $Create } from "@wailsio/runtime";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
-import * as model$0 from "../model/models.js";
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore: Unused imports
 import * as time$0 from "../../../../../time/models.js";
 
 /**
@@ -46,17 +43,6 @@ export class AgentCard {
      */
     "busy": boolean;
     "busyIssue": string;
-
-    /**
-     * Waiting is true while the session holds an open claim on an issue
-     * in needs_action — the derived "parked, waiting on the user"
-     * signal. The Stop hook auto-flips a claimed in_progress issue to
-     * needs_action on idle, so this lights up automatically. A waiting
-     * session is also busy; the UI renders the waiting badge in place
-     * of busy because it's the actionable state.
-     */
-    "waiting": boolean;
-    "waitingIssue": string;
 
     /**
      * HasChannel is true when the bacio channel MCP server has been seen
@@ -116,12 +102,6 @@ export class AgentCard {
         if (!("busyIssue" in $$source)) {
             this["busyIssue"] = "";
         }
-        if (!("waiting" in $$source)) {
-            this["waiting"] = false;
-        }
-        if (!("waitingIssue" in $$source)) {
-            this["waitingIssue"] = "";
-        }
         if (!("hasChannel" in $$source)) {
             this["hasChannel"] = false;
         }
@@ -160,22 +140,22 @@ export class AgentCard {
      * Creates a new AgentCard instance from a string or object.
      */
     static createFrom($$source: any = {}): AgentCard {
-        const $$createField17_0 = $$createType1;
-        const $$createField18_0 = $$createType3;
-        const $$createField19_0 = $$createType5;
-        const $$createField22_0 = $$createType7;
+        const $$createField15_0 = $$createType1;
+        const $$createField16_0 = $$createType3;
+        const $$createField17_0 = $$createType5;
+        const $$createField20_0 = $$createType7;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("claims" in $$parsedSource) {
-            $$parsedSource["claims"] = $$createField17_0($$parsedSource["claims"]);
+            $$parsedSource["claims"] = $$createField15_0($$parsedSource["claims"]);
         }
         if ("dispatches" in $$parsedSource) {
-            $$parsedSource["dispatches"] = $$createField18_0($$parsedSource["dispatches"]);
+            $$parsedSource["dispatches"] = $$createField16_0($$parsedSource["dispatches"]);
         }
         if ("todos" in $$parsedSource) {
-            $$parsedSource["todos"] = $$createField19_0($$parsedSource["todos"]);
+            $$parsedSource["todos"] = $$createField17_0($$parsedSource["todos"]);
         }
         if ("openQuestions" in $$parsedSource) {
-            $$parsedSource["openQuestions"] = $$createField22_0($$parsedSource["openQuestions"]);
+            $$parsedSource["openQuestions"] = $$createField20_0($$parsedSource["openQuestions"]);
         }
         return new AgentCard($$parsedSource as Partial<AgentCard>);
     }
@@ -183,9 +163,8 @@ export class AgentCard {
 
 /**
  * ClaimDTO is one open agent claim, shaped for the Agents screen.
- * State is the claimed issue's current state — needed to derive the
- * session's Waiting flag and to annotate each claim in the drill-down
- * (e.g. "BACI-12 (needs action)").
+ * State is the claimed issue's current state — annotates each claim in
+ * the drill-down (e.g. "BACI-12 (in review)").
  */
 export class ClaimDTO {
     "issueKey": string;
@@ -343,19 +322,12 @@ export class DispatchDTO {
  * the UI fetches it via /agents/questions/{id} only when the user
  * opens the modal. The bare ID + asked-at + a count of pending
  * questions is what the badge needs.
- * 
- * UserActionReasonType (BACI-220) carries the typed reason the linked
- * issue is currently parked in `needs_action` — `user_question` when
- * the question opened auto-flipped it, empty otherwise. Surfaced here
- * so the React side can read it inline without a second fetch
- * against the issue, matching the shape of model.Issue's field.
  */
 export class QuestionDTO {
     "id": number;
     "issueKey"?: string;
     "header": string;
     "askedAt": time$0.Time;
-    "user_action_reason_type"?: model$0.UserActionReasonType;
 
     /** Creates a new QuestionDTO instance. */
     constructor($$source: Partial<QuestionDTO> = {}) {

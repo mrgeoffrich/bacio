@@ -208,7 +208,7 @@ func TestAssembleVerbAndTodos(t *testing.T) {
 		AgentID: &agentID, AgentName: "witty-bison",
 	}
 	issues := []*model.Issue{
-		{Key: "TEST-1", State: model.StateInProgress, Title: "taken with verb + todos"},
+		{Key: "TEST-1", State: model.StateInReview, Title: "taken with verb + todos"},
 		{Key: "TEST-2", State: model.StateTodo, Title: "free"},
 	}
 	claims := []*model.AgentClaim{
@@ -299,7 +299,7 @@ func TestAssembleAgentIdentityDispatch(t *testing.T) {
 		ID: 11, SessionID: "sess-b", RepoID: repo.ID, RepoPrefix: repo.Prefix,
 		AgentID: &agentID,
 	}
-	issues := []*model.Issue{{Key: "TEST-3", State: model.StateInProgress}}
+	issues := []*model.Issue{{Key: "TEST-3", State: model.StateInReview}}
 	claims := []*model.AgentClaim{{SessionID: "sess-b", SessionPK: 11, IssueKey: "TEST-3", ClaimedAt: t0}}
 	dispatches := []*model.AgentDispatch{
 		{ID: 5, TargetAgentID: &agentID, IssueKey: "TEST-3", Mode: model.DispatchMode("implement"), Status: model.DispatchAcked, CreatedAt: t0.Add(-10 * time.Minute)},
@@ -368,8 +368,8 @@ func TestAssembleSurfacesOpenQuestions(t *testing.T) {
 	t0 := time.Date(2026, 5, 17, 9, 0, 0, 0, time.UTC)
 	sess := &model.AgentSession{ID: 20, SessionID: "sess-q", RepoID: repo.ID, RepoPrefix: repo.Prefix}
 	issues := []*model.Issue{
-		{Key: "TEST-10", State: model.StateNeedsAction, Title: "blocked on a question"},
-		{Key: "TEST-11", State: model.StateInProgress, Title: "free, sibling claim"},
+		{Key: "TEST-10", State: model.StateInReview, Title: "blocked on a question"},
+		{Key: "TEST-11", State: model.StateInReview, Title: "free, sibling claim"},
 	}
 	claims := []*model.AgentClaim{
 		{SessionID: "sess-q", SessionPK: 20, IssueKey: "TEST-10", ClaimedAt: t0},
@@ -429,8 +429,8 @@ func TestAssembleTodosScopedPerIssue(t *testing.T) {
 	t0 := time.Date(2026, 5, 17, 9, 0, 0, 0, time.UTC)
 	sess := &model.AgentSession{ID: 30, SessionID: "sess-juggle", RepoID: repo.ID, RepoPrefix: repo.Prefix}
 	issues := []*model.Issue{
-		{Key: "TEST-1", State: model.StateInProgress, Title: "first job"},
-		{Key: "TEST-2", State: model.StateInProgress, Title: "second job"},
+		{Key: "TEST-1", State: model.StateInReview, Title: "first job"},
+		{Key: "TEST-2", State: model.StateInReview, Title: "second job"},
 	}
 	claims := []*model.AgentClaim{
 		{SessionID: "sess-juggle", SessionPK: 30, IssueKey: "TEST-1", ClaimedAt: t0.Add(-1 * time.Hour)},
@@ -509,7 +509,7 @@ func TestAssembleTodosScopedPerDispatch(t *testing.T) {
 	t0 := time.Date(2026, 5, 24, 10, 0, 0, 0, time.UTC)
 	sess := &model.AgentSession{ID: 30, SessionID: "sess-plan-impl", RepoID: repo.ID, RepoPrefix: repo.Prefix}
 	issues := []*model.Issue{
-		{Key: "TEST-1", State: model.StateInProgress, Title: "plan-then-implement"},
+		{Key: "TEST-1", State: model.StateInReview, Title: "plan-then-implement"},
 	}
 	claims := []*model.AgentClaim{
 		{SessionID: "sess-plan-impl", SessionPK: 30, IssueKey: "TEST-1", ClaimedAt: t0.Add(-1 * time.Hour)},
@@ -566,7 +566,7 @@ func TestAssembleNoDispatchNoVerb(t *testing.T) {
 	repo := &model.Repo{ID: 1, Prefix: "TEST"}
 	t0 := time.Date(2026, 5, 17, 9, 0, 0, 0, time.UTC)
 	sess := &model.AgentSession{ID: 12, SessionID: "sess-c", RepoID: repo.ID}
-	issues := []*model.Issue{{Key: "TEST-4", State: model.StateInProgress}}
+	issues := []*model.Issue{{Key: "TEST-4", State: model.StateInReview}}
 	claims := []*model.AgentClaim{{SessionID: "sess-c", SessionPK: 12, IssueKey: "TEST-4", ClaimedAt: t0}}
 	f := &fakeClient{
 		repo: repo, issues: issues, claims: claims,
@@ -622,8 +622,8 @@ func TestIsCompletedColumn(t *testing.T) {
 		}
 	}
 	for _, st := range []model.State{
-		model.StateTodo, model.StateInProgress,
-		model.StateNeedsAction, model.StateInReview,
+		model.StateTodo, model.StateInReview,
+		model.StateInPipeline, model.StateToBeShipped,
 	} {
 		if IsCompletedColumn(st) {
 			t.Errorf("IsCompletedColumn(%q) = true, want false", st)
@@ -1232,7 +1232,7 @@ func TestAssembleTranscriptAndEvalCounts(t *testing.T) {
 	t0 := time.Date(2026, 5, 25, 9, 0, 0, 0, time.UTC)
 	sess := &model.AgentSession{ID: 30, SessionID: "sess-e", RepoID: repo.ID, RepoPrefix: repo.Prefix}
 	issues := []*model.Issue{
-		{ID: 100, Key: "TEST-100", State: model.StateInProgress, Title: "taken with both indicators"},
+		{ID: 100, Key: "TEST-100", State: model.StateInReview, Title: "taken with both indicators"},
 		{ID: 101, Key: "TEST-101", State: model.StateTodo, Title: "untaken but still has eval / transcript"},
 		{ID: 102, Key: "TEST-102", State: model.StateTodo, Title: "no indicators"},
 	}
@@ -1288,7 +1288,7 @@ func TestAssembleTranscriptAndEvalCounts(t *testing.T) {
 func TestAssembleLatestPlan(t *testing.T) {
 	repo := &model.Repo{ID: 1, Prefix: "TEST"}
 	issues := []*model.Issue{
-		{ID: 200, Key: "TEST-200", State: model.StateInProgress, Title: "has a plan"},
+		{ID: 200, Key: "TEST-200", State: model.StateInReview, Title: "has a plan"},
 		{ID: 201, Key: "TEST-201", State: model.StateTodo, Title: "no plan"},
 	}
 	planUpdated := time.Date(2026, 5, 25, 9, 0, 0, 0, time.UTC)

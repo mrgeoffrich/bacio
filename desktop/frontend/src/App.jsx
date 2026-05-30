@@ -102,8 +102,8 @@ export default function App() {
   const [settingsInitialSection, setSettingsInitialSection] = useState(null);
   // BACI-166: the "+ from prompt" composer is a sibling modal flag —
   // reached via the Topbar's `+` button or the ⌘N shortcut. The modal
-  // chains api.addIssue → api.dispatchIssue(_, _, 'scope') in one click
-  // so a rough one-liner becomes a triage-ready ticket in the background.
+  // creates a fresh todo card from a rough one-liner (BACI-300 retired
+  // the auto-scope dispatch — triage is a Pipeline stage now).
   const [composerOpen, setComposerOpen] = useState(false);
   const [agents, setAgents] = useState([]);
   // promptConfig is the global (repo-independent) dispatch-prompt config:
@@ -510,25 +510,16 @@ export default function App() {
   }, [navigate, activeBoard]);
 
   // BACI-166: composer success handler — optimistically prepend the new
-  // card with a queued_no_agent waitingState in the 'scope' mode so the
-  // breathing waiting border + "Worker has the Scope job" pill render
-  // immediately, route to the new issue's workspace, and bump the
-  // cards-refresh poll so the authoritative row replaces the optimistic
-  // one as soon as the server has it. Mirrors dispatchFromCard's
-  // optimistic-waitingState shape exactly.
+  // card and route to its workspace. BACI-300 retired the auto-scope
+  // dispatch, so there's no longer a waitingState to pre-render; the
+  // standing 10s poll replaces the optimistic row with the authoritative
+  // one on its next tick.
   const onComposerCreated = useCallback((newCard) => {
     if (!newCard || !newCard.key) return;
-    setCards(cs => [
-      { ...newCard, waitingState: { kind: 'queued_no_agent', mode: 'scope' } },
-      ...cs,
-    ]);
+    setCards(cs => [{ ...newCard }, ...cs]);
     setSettingsOpen(false);
     setSettingsInitialSection(null);
     navigate(issuePath(activeBoard, newCard.key));
-    // Don't fire refreshCards synchronously — the dispatch is queued
-    // *after* this callback returns (the composer awaits it post-route),
-    // so an immediate refetch could race past it. The standing 10s poll
-    // catches the authoritative shape on its next tick.
   }, [navigate, activeBoard]);
 
   useEffect(() => {

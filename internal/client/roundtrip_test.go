@@ -121,15 +121,15 @@ func TestRoundTripIssueLifecycle(t *testing.T) {
 	}
 
 	// State change via remote, observe via local.
-	if _, err := p.remote.SetIssueState(ctx, p.repo, iss2.Key, model.StateInProgress, false); err != nil {
+	if _, err := p.remote.SetIssueState(ctx, p.repo, iss2.Key, model.StateInReview, false); err != nil {
 		t.Fatalf("remote SetIssueState: %v", err)
 	}
 	post, err := p.local.GetIssueByKey(ctx, p.repo, iss2.Key)
 	if err != nil {
 		t.Fatalf("local GetIssueByKey post-state: %v", err)
 	}
-	if post.State != model.StateInProgress {
-		t.Fatalf("post-state: got %q, want in_progress", post.State)
+	if post.State != model.StateInReview {
+		t.Fatalf("post-state: got %q, want in_review", post.State)
 	}
 
 	// Audit-log parity: both creates + state change must show up.

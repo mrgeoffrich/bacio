@@ -415,10 +415,12 @@ func (c *localClient) EndAgent(ctx context.Context, repo *model.Repo, in inputs.
 	if _, err := model.ParseEndReason(in.Reason); err != nil {
 		return nil, err
 	}
-	// BACI-126c: state_on_orphan defaults to in_progress when unset — the
-	// "work abandoned, not finished" default for a Stop/clear-driven
-	// agent end. Validated via ParseState so dash/space variants work.
-	orphanState := model.StateInProgress
+	// BACI-300: state_on_orphan defaults to "" (leave the state alone) —
+	// a claim is a focus marker now, so an abandoned claim's issue stays
+	// exactly where it was rather than being flipped to the retired
+	// in_progress. A caller can still pass an explicit override (validated
+	// via ParseState so dash/space variants work).
+	var orphanState model.State
 	if strings.TrimSpace(in.StateOnOrphan) != "" {
 		parsed, err := model.ParseState(in.StateOnOrphan)
 		if err != nil {
@@ -603,19 +605,17 @@ func (c *localClient) ClaimAgent(ctx context.Context, repo *model.Repo, in input
 	}
 	if dryRun {
 		now := time.Now().UTC()
-		// BACI-126a: project the post-claim state on the dry-run so the
-		// rehearsal output makes the implicit in_progress move visible
-		// without polluting the persisted row. IssueStateBefore is the
-		// issue's current state; IssueStateAfter is always in_progress
-		// (the claim auto-transitions regardless of source state).
+		// BACI-300: a claim is state-neutral — it no longer moves the
+		// issue. Project before == after == the issue's current state so
+		// the rehearsal mirrors the live no-move claim.
 		return &model.AgentClaim{
-			SessionID:         in.SessionID,
-			IssueID:           iss.ID,
-			IssueKey:          iss.Key,
-			Prompt:            in.Prompt,
-			ClaimedAt:         now,
-			IssueStateBefore:  iss.State,
-			IssueStateAfter:   model.StateInProgress,
+			SessionID:        in.SessionID,
+			IssueID:          iss.ID,
+			IssueKey:         iss.Key,
+			Prompt:           in.Prompt,
+			ClaimedAt:        now,
+			IssueStateBefore: iss.State,
+			IssueStateAfter:  iss.State,
 		}, nil
 	}
 	claim, created, assigneeChange, stateChange, err := c.store.AddAgentClaim(in.SessionID, iss.ID, in.Prompt)
@@ -644,8 +644,9 @@ func (c *localClient) ClaimAgent(ctx context.Context, repo *model.Repo, in input
 		c.recordAssigneeChange(*assigneeChange)
 	}
 	// BACI-126a: surface the post-claim state on the returned object so
-	// callers can render `claim BACI-42 (todo → in_progress)` without a
-	// second read. JSON-only — not a column on the claim row.
+	// callers have it without a second read. JSON-only — not a column on
+	// the claim row. Since BACI-300 a claim never moves the state, so
+	// before == after here.
 	if stateChange != nil {
 		claim.IssueStateBefore = stateChange.Old
 		claim.IssueStateAfter = stateChange.New
@@ -654,9 +655,9 @@ func (c *localClient) ClaimAgent(ctx context.Context, repo *model.Repo, in input
 }
 
 // claimAuditDetails formats the agent.claim audit row's Details column
-// (BACI-126a). When the claim moved the issue's state, the line is
-// `issue=<KEY>, state: <old> → <new>`; when the issue was already
-// in_progress, the state clause is omitted so the audit reads cleanly.
+// (BACI-126a). Since BACI-300 a claim is state-neutral, so ch.Changed()
+// is always false and the line is just `issue=<KEY>`; the state-move
+// branch is retained for any caller that still passes a moving change.
 func claimAuditDetails(issueKey string, ch *store.StateChange) string {
 	if ch == nil || !ch.Changed() {
 		return "issue=" + issueKey
@@ -669,13 +670,11 @@ func (c *localClient) ReleaseAgent(ctx context.Context, repo *model.Repo, in inp
 	// owns the state of pipeline cards, so a pipeline-stage worker
 	// releases the claim only — it no longer declares a final state. We
 	// resolve the issue first, then default an empty final_state via
-	// model.ReleaseFallbackState: a no-op for engine-governed / terminal
-	// cards (pipeline progression stays the engine's job) but in_review
-	// for an off-pipeline issue, so a direct dispatch / dispatch-chain /
-	// queue-followon run lands the card on "awaiting a human" rather than
-	// stranding it in in_progress. A non-empty final_state still moves the
-	// issue — the pre-pipeline triage passes (scope / research) that hand a
-	// fresh `todo` ticket on keep declaring it.
+	// model.ReleaseFallbackState, which since BACI-300 is a no-op for
+	// every card (a release never moves the state — the card stays exactly
+	// where it was). A non-empty final_state still moves the issue — a
+	// caller that genuinely wants to land the card somewhere (e.g. a
+	// triage pass marking a card done) keeps declaring it.
 	iss, err := c.GetIssueByKey(ctx, repo, in.IssueKey)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -729,8 +728,8 @@ func (c *localClient) ReleaseAgent(ctx context.Context, repo *model.Repo, in inp
 		c.recordAssigneeChange(*assigneeChange)
 	}
 	// BACI-126c: surface the post-release state on the returned object so
-	// callers can render `release BACI-42 (in_progress → in_review)` without
-	// a second read.
+	// callers can render `release BACI-42 (todo → todo)` without a second
+	// read. Since BACI-300 an undeclared release leaves the state put.
 	if stateChange != nil {
 		claim.IssueStateBefore = stateChange.Old
 		claim.IssueStateAfter = stateChange.New
@@ -859,9 +858,10 @@ func (c *localClient) ListTodosBySessionsAndIssue(ctx context.Context, pairs []s
 // agent identity / issue id on its side (BACI-128 — issue_id is a
 // required, validated MCP tool arg), then hands the validated
 // payload to the store. Writes a question.ask audit row so `bacio
-// history --op question.ask` surfaces every ask, and auto-flips
-// the linked issue from in_progress to needs_action so the
-// supervisor sees "agent is blocked on a question right now".
+// history --op question.ask` surfaces every ask. BACI-300 retired the
+// off-pipeline in_progress→needs_action auto-flip — the kanban-card
+// question pill (and, for a pipeline card, the engine's open_question
+// pause) surfaces "agent is blocked" without a state move.
 func (c *localClient) AddSessionQuestion(ctx context.Context, in AddSessionQuestionInput) (*model.SessionQuestion, error) {
 	// BACI-128 boundary guard: every legitimate caller now threads a
 	// validated canonical key through from the channel. Reject empty
@@ -888,7 +888,6 @@ func (c *localClient) AddSessionQuestion(ctx context.Context, in AddSessionQuest
 		TargetID: &q.ID, TargetLabel: q.RequestUUID,
 		Details: questionAuditDetails(q),
 	})
-	c.autoFlipIssueOnQuestionChange(ctx, q, true, in.AskedBy)
 	return q, nil
 }
 
@@ -942,7 +941,6 @@ func (c *localClient) AnswerSessionQuestion(ctx context.Context, id int64, answe
 		TargetID: &updated.ID, TargetLabel: updated.RequestUUID,
 		Details: questionAuditDetails(updated),
 	})
-	c.autoFlipIssueOnQuestionChange(ctx, updated, false, c.actor)
 	return updated, nil
 }
 
@@ -973,102 +971,7 @@ func (c *localClient) CancelSessionQuestion(ctx context.Context, id int64, dryRu
 		TargetID: &updated.ID, TargetLabel: updated.RequestUUID,
 		Details: questionAuditDetails(updated),
 	})
-	c.autoFlipIssueOnQuestionChange(ctx, updated, false, c.actor)
 	return updated, nil
-}
-
-// autoFlipIssueOnQuestionChange mirrors the linked issue's state
-// against whether the agent is currently blocked on a question. When
-// `opening` is true, an open row was just inserted: if the issue is
-// in_progress, flip it to needs_action so the supervisor sees the
-// agent is parked. When `opening` is false, a row was just resolved
-// (answered or cancelled): if the issue is needs_action AND no other
-// open questions remain for the same (session, issue), flip back to
-// in_progress so it leaves the "needs action" column once the agent
-// is free to resume.
-//
-// Best-effort: every error is logged to stderr and swallowed —
-// failing the question write/update because the secondary state flip
-// failed would be worse than the temporary state mismatch (the Stop
-// hook's syncClaimedIssueStates will eventually reconcile it).
-func (c *localClient) autoFlipIssueOnQuestionChange(ctx context.Context, q *model.SessionQuestion, opening bool, actor string) {
-	if q == nil || q.IssueKey == "" {
-		return
-	}
-	sess, err := c.store.GetAgentSession(q.SessionID)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "bacio: auto-flip: lookup session", q.SessionID+":", err)
-		return
-	}
-	repo, err := c.store.GetRepoByID(sess.RepoID)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "bacio: auto-flip: lookup repo for session", q.SessionID+":", err)
-		return
-	}
-	iss, err := c.GetIssueByKey(ctx, repo, q.IssueKey)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "bacio: auto-flip: lookup issue", q.IssueKey+":", err)
-		return
-	}
-	var (
-		want   model.State
-		reason string
-	)
-	if opening {
-		if iss.State != model.StateInProgress {
-			return
-		}
-		want = model.StateNeedsAction
-		reason = "auto: question opened"
-	} else {
-		if iss.State != model.StateNeedsAction {
-			return
-		}
-		// Only flip back if THIS was the last blocker — count any
-		// other open question rows for the same session that share
-		// the issue key.
-		opens, err := c.store.ListOpenQuestionsBySessions([]string{q.SessionID})
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "bacio: auto-flip: list open questions:", err)
-			return
-		}
-		for _, row := range opens[sess.ID] {
-			if row.IssueKey == q.IssueKey {
-				return // still blocked on another question
-			}
-		}
-		want = model.StateInProgress
-		reason = "auto: question resolved"
-	}
-	if err := c.store.SetIssueState(iss.ID, want); err != nil {
-		fmt.Fprintln(os.Stderr, "bacio: auto-flip: set state", q.IssueKey+":", err)
-		return
-	}
-	auditActor := actor
-	if auditActor == "" {
-		auditActor = "bacio-channel"
-	}
-	// BACI-220: stamp the typed reason on the open path so the UI can
-	// tell "agent asked a question" apart from the upcoming
-	// `user_manual_review` case. SetIssueState's own SQL has already
-	// NULLed the column for the resolve path (any non-needs_action
-	// target clears it), so the explicit write below only fires on the
-	// open transition. Best-effort: a stamp failure logs and continues
-	// — the state move is the load-bearing change, the reason is UI
-	// metadata that the badge falls back on the existing styling
-	// without.
-	if opening {
-		if err := c.store.SetIssueUserActionReason(iss.ID, model.UserActionReasonQuestion); err != nil {
-			fmt.Fprintln(os.Stderr, "bacio: auto-flip: set user_action_reason_type", q.IssueKey+":", err)
-		}
-	}
-	c.recordOp(model.HistoryEntry{
-		Actor:  auditActor,
-		RepoID: &iss.RepoID, RepoPrefix: repo.Prefix,
-		Op: "issue.state", Kind: "issue",
-		TargetID: &iss.ID, TargetLabel: iss.Key,
-		Details:  fmt.Sprintf("%s → %s (%s)", iss.State, want, reason),
-	})
 }
 
 // AbandonOpenQuestionsForSession flips every open question owned by

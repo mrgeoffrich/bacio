@@ -20,8 +20,6 @@ import (
 // stateLabels maps each bacio issue state to a human-friendly column label.
 var stateLabels = map[model.State]string{
 	model.StateTodo:        "Todo",
-	model.StateInProgress:  "In Progress",
-	model.StateNeedsAction: "Needs Action",
 	model.StateInReview:    "In Review",
 	model.StateDone:        "Done",
 	model.StateCancelled:   "Cancelled",

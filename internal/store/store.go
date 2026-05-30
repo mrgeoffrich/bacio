@@ -856,22 +856,6 @@ func migrate(db *sql.DB) error {
 	if err := backfillScopeTemplate(db); err != nil {
 		return fmt.Errorf("backfill scope template: %w", err)
 	}
-	// BACI-220: add issues.user_action_reason_type on older DBs. The
-	// CREATE TABLE declaration in schema.sql carries the column for
-	// fresh DBs; this ALTER brings older ones up to date. The column
-	// is nullable with no default — set on auto-flip into
-	// `needs_action`, cleared on every move out — so existing rows
-	// stay NULL and the BACI-126c release path / SetIssueState clear
-	// keeps them that way without a backfill.
-	hasUserActionReason, err := columnExists(db, "issues", "user_action_reason_type")
-	if err != nil {
-		return err
-	}
-	if !hasUserActionReason {
-		if _, err := db.Exec(`ALTER TABLE issues ADD COLUMN user_action_reason_type TEXT`); err != nil {
-			return fmt.Errorf("add user_action_reason_type to issues: %w", err)
-		}
-	}
 	// Pipeline page (BACI Pipeline phase 1). The following columns +
 	// tables back the three-column board. All ALTERs carry constant
 	// defaults so they are legal SQLite ALTER ADD COLUMNs and existing
@@ -948,6 +932,18 @@ func migrate(db *sql.DB) error {
 	// guards the set at the boundary. Runs AFTER the column ALTERs above
 	// so the rebuilt table mirrors the full current column set.
 	if err := migrateIssuesStateCheck(db); err != nil {
+		return err
+	}
+	// BACI-300: rewrite any rows still parked in the retired in_progress /
+	// needs_action states to in_review (the only off-pipeline resting
+	// column left), then rebuild the table to drop the now-unused
+	// user_action_reason_type column. The rewrite runs before the rebuild
+	// so the dropped column carries no live data, and both run after the
+	// state-check rebuild above so they see the full current column set.
+	if err := migrateIssuesStateRewrite(db); err != nil {
+		return err
+	}
+	if err := migrateIssuesDropUserActionReason(db); err != nil {
 		return err
 	}
 	// (state, priority) index backs the Backlog / Shipping ordered reads.
@@ -1670,6 +1666,151 @@ func txHasForeignKeyViolation(ctx context.Context, tx *sql.Tx) (bool, error) {
 		return false, err
 	}
 	return bad, nil
+}
+
+// migrateIssuesStateRewrite (BACI-300) rewrites any rows still parked in
+// the retired in_progress / needs_action states to in_review — the only
+// off-pipeline non-terminal resting column left after the retirement. A
+// card that was mid-flight on an old DB lands in the "awaiting a human"
+// column rather than being lost; done / cancelled / the Pipeline states
+// are untouched. Idempotent: a DB with no legacy-state rows updates zero
+// rows. This is a plain UPDATE rather than a table rebuild, so it carries
+// no FK / trigger risk; it runs before migrateIssuesDropUserActionReason
+// so the column being dropped carries no live data.
+func migrateIssuesStateRewrite(db *sql.DB) error {
+	if _, err := db.Exec(
+		`UPDATE issues SET state = 'in_review', updated_at = CURRENT_TIMESTAMP WHERE state IN ('in_progress', 'needs_action')`,
+	); err != nil {
+		return fmt.Errorf("rewrite legacy issue states: %w", err)
+	}
+	return nil
+}
+
+// migrateIssuesDropUserActionReason (BACI-300) rebuilds the issues table
+// to drop the user_action_reason_type column, whose last writer (the
+// terminal-error needs_action stamp) was retired alongside the
+// needs_action state. Modelled verbatim on migrateIssuesStateCheck's
+// rebuild dance — guarded on columnExists so fresh / already-migrated
+// DBs skip it, runs on a dedicated connection with foreign_keys OFF so
+// the DROP TABLE doesn't cascade through the issues children, preserves
+// every id, and FK-checks before commit.
+func migrateIssuesDropUserActionReason(db *sql.DB) error {
+	has, err := columnExists(db, "issues", "user_action_reason_type")
+	if err != nil || !has {
+		return err
+	}
+	ctx := context.Background()
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = OFF`); err != nil {
+		return fmt.Errorf("disable fk: %w", err)
+	}
+	rebuildErr := rebuildIssuesDropUserActionReason(ctx, conn)
+	// Restore the connection's pragmas before it returns to the pool —
+	// even if the rebuild failed — so no pooled connection is left with
+	// FK enforcement off or in legacy rename mode.
+	if _, err := conn.ExecContext(ctx, `PRAGMA legacy_alter_table = OFF`); err != nil && rebuildErr == nil {
+		rebuildErr = fmt.Errorf("reset legacy alter table: %w", err)
+	}
+	if _, err := conn.ExecContext(ctx, `PRAGMA foreign_keys = ON`); err != nil && rebuildErr == nil {
+		rebuildErr = fmt.Errorf("re-enable fk: %w", err)
+	}
+	return rebuildErr
+}
+
+// rebuildIssuesDropUserActionReason runs the create/copy/drop/rename
+// dance on the supplied dedicated connection (foreign_keys already OFF),
+// producing an issues table without the user_action_reason_type column.
+// It mirrors rebuildIssuesDropStateCheck exactly — same index/trigger
+// recreation and pre-commit foreign_key_check — minus the dropped column
+// from the CREATE / INSERT column lists.
+func rebuildIssuesDropUserActionReason(ctx context.Context, conn *sql.Conn) error {
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	// legacy_alter_table makes the RENAME below a pure rename instead of
+	// trying to rewrite references to "issues" inside the side-data bump
+	// triggers — same rationale as rebuildIssuesDropStateCheck.
+	if _, err := tx.ExecContext(ctx, `PRAGMA legacy_alter_table = ON`); err != nil {
+		return fmt.Errorf("legacy alter table on: %w", err)
+	}
+	// Mirror schema.sql's issues shape exactly, minus user_action_reason_type.
+	if _, err := tx.ExecContext(ctx, `
+		CREATE TABLE issues_new (
+			id          INTEGER PRIMARY KEY AUTOINCREMENT,
+			uuid        TEXT    NOT NULL,
+			repo_id     INTEGER NOT NULL REFERENCES repos(id) ON DELETE CASCADE,
+			number      INTEGER NOT NULL,
+			feature_id  INTEGER REFERENCES features(id) ON DELETE SET NULL,
+			title       TEXT    NOT NULL,
+			description TEXT    NOT NULL DEFAULT '',
+			state       TEXT    NOT NULL,
+			assignee    TEXT    NOT NULL DEFAULT '',
+			archived_at DATETIME,
+			terminal_at DATETIME,
+			base_branch TEXT,
+			priority    INTEGER NOT NULL DEFAULT 0,
+			engine_mode TEXT    NOT NULL DEFAULT 'off',
+			engine_pause_reason TEXT NOT NULL DEFAULT '',
+			created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			UNIQUE(repo_id, number)
+		)
+	`); err != nil {
+		return fmt.Errorf("create issues_new: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO issues_new
+			(id, uuid, repo_id, number, feature_id, title, description, state, assignee,
+			 archived_at, terminal_at, base_branch,
+			 priority, engine_mode, engine_pause_reason, created_at, updated_at)
+		SELECT
+			id, uuid, repo_id, number, feature_id, title, description, state, assignee,
+			archived_at, terminal_at, base_branch,
+			priority, engine_mode, engine_pause_reason, created_at, updated_at
+		FROM issues
+	`); err != nil {
+		return fmt.Errorf("copy issues rows: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DROP TABLE issues`); err != nil {
+		return fmt.Errorf("drop old issues: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `ALTER TABLE issues_new RENAME TO issues`); err != nil {
+		return fmt.Errorf("rename issues_new: %w", err)
+	}
+	for _, stmt := range []string{
+		`CREATE INDEX IF NOT EXISTS idx_issues_state ON issues(state)`,
+		`CREATE INDEX IF NOT EXISTS idx_issues_feature ON issues(feature_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_issues_assignee ON issues(assignee)`,
+		`CREATE INDEX IF NOT EXISTS idx_issues_archived_at ON issues(archived_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_issues_terminal_at ON issues(terminal_at)`,
+		`CREATE TRIGGER IF NOT EXISTS bump_issue_updated_on_archive_change
+		 AFTER UPDATE OF archived_at ON issues
+		 WHEN NEW.archived_at IS NOT OLD.archived_at
+		   AND NEW.updated_at = OLD.updated_at
+		 BEGIN
+		     UPDATE issues SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+		 END`,
+	} {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("recreate issues index/trigger: %w", err)
+		}
+	}
+	// Integrity net: with every id preserved there must be zero dangling
+	// child references. Catch a botched copy before commit.
+	bad, err := txHasForeignKeyViolation(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if bad {
+		return errors.New("issues rebuild left dangling foreign keys")
+	}
+	return tx.Commit()
 }
 
 // migrateDocumentsTypeCheck rebuilds documents to widen the column

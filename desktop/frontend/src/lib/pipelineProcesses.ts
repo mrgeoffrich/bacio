@@ -21,6 +21,10 @@ export const PIPELINE_PROCESSES: PipelineProcess[] = [
   { slug: 'plan_large', name: 'Large Plan', stages: ['plan_large'] },
   { slug: 'design', name: 'Design', stages: ['design'] },
   { slug: 'implement', name: 'Implement', stages: ['implement'] },
+  // Triage stages (BACI-300): standalone no-chain passes — keep in
+  // lockstep with internal/model/pipeline.go.
+  { slug: 'scope', name: 'Scope', stages: ['scope'] },
+  { slug: 'research', name: 'Research', stages: ['research'] },
 ];
 
 // PRESET_BY_SLUG indexes PIPELINE_PROCESSES by slug so any caller that has

@@ -14,7 +14,6 @@ export {
     QuestionState,
     SessionQuestion,
     State,
-    UserActionReasonType,
     UserMessage
 } from "./models.js";
 

@@ -134,17 +134,6 @@ type Issue struct {
 	// proxied via UpdatedAt — that proxy was wrong because tag /
 	// title / description edits bump UpdatedAt without changing state.
 	TerminalAt *time.Time `json:"terminal_at,omitempty"`
-	// UserActionReasonType (BACI-220) carries the typed reason an issue
-	// is parked in `needs_action`. The bucket today screams "agent is
-	// waiting on you" uniformly; this column lets the UI tell the two
-	// cases apart — `user_question` (the agent asked a clarifying
-	// question via `mcp__bacio__ask_user_question`) vs.
-	// `user_manual_review` (the agent finished and wants a sanity
-	// check, wired in a follow-up). Empty / NULL whenever the issue is
-	// not in `needs_action`. Omitempty so non-parked rows stay compact
-	// on the wire — readers that care must check `state == needs_action`
-	// first.
-	UserActionReasonType UserActionReasonType `json:"user_action_reason_type,omitempty"`
 	// BaseBranch (BACI-232) is the per-issue override for the branch a
 	// PR for this issue is opened against. nil = inherit from the
 	// parent feature's BranchName (itself nil = ship to main, the
