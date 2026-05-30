@@ -1,17 +1,27 @@
 package api
 
 import (
+	"bytes"
+	"compress/gzip"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/mrgeoffrich/bacio/internal/proxy"
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
+
+// anthropicHost is the upstream host a capture must target to count as an
+// Anthropic message-API request (BACI-305 classification). The observation's
+// Host is the post-rewrite upstream host, so it's api.anthropic.com for
+// traffic that flowed through the /anthropic/* proxy to the real API.
+const anthropicHost = "api.anthropic.com"
 
 // proxyCaptureQueueDepth bounds the recorder's hand-off channel. Capture is
 // off the request path, so the worker draining the channel can fall behind a
@@ -115,21 +125,81 @@ func (r *captureRecorder) persist(obs proxy.RequestObservation) {
 	if r.store == nil {
 		return
 	}
+	// BACI-305 classification (transport-level, no body parsing): the base
+	// Content-Type, whether the response was an SSE stream, and whether this
+	// is an Anthropic message-API capture. These let BACI-306's per-job
+	// parser select exactly the parseable substrate.
+	contentType := baseContentType(obs.ResponseContentType)
+	sessionID, dispatchID := r.resolveCorrelation(obs.CorrelationKey)
 	if _, err := r.store.AddProxyRequest(store.AddProxyRequestIn{
-		Method:     obs.Method,
-		Host:       obs.Host,
-		Path:       obs.Path,
-		Status:     obs.Status,
-		BytesIn:    obs.BytesIn,
-		BytesOut:   obs.BytesOut,
-		Duration:   obs.Duration,
-		RawLogPath: rawPath,
-		StartedAt:  obs.Started,
-		EndedAt:    obs.Ended,
+		Method:      obs.Method,
+		Host:        obs.Host,
+		Path:        obs.Path,
+		Status:      obs.Status,
+		BytesIn:     obs.BytesIn,
+		BytesOut:    obs.BytesOut,
+		Duration:    obs.Duration,
+		RawLogPath:  rawPath,
+		StartedAt:   obs.Started,
+		EndedAt:     obs.Ended,
+		ContentType: contentType,
+		IsStream:    contentType == "text/event-stream",
+		IsAnthropic: isAnthropicCapture(obs.Host, obs.Path),
+		SessionID:   sessionID,
+		DispatchID:  dispatchID,
 	}); err != nil {
 		r.logger.Error("proxy capture: index insert failed",
 			"err", err, "method", obs.Method, "host", obs.Host, "path", obs.Path)
 	}
+}
+
+// baseContentType lowercases a Content-Type header value and drops any
+// parameters (e.g. "text/event-stream; charset=utf-8" → "text/event-stream"),
+// so classification compares the bare media type. Empty in → empty out.
+func baseContentType(ct string) string {
+	if i := strings.IndexByte(ct, ';'); i >= 0 {
+		ct = ct[:i]
+	}
+	return strings.ToLower(strings.TrimSpace(ct))
+}
+
+// isAnthropicCapture reports whether a capture targets the Anthropic message
+// API: the post-rewrite upstream host is api.anthropic.com and the path is
+// under /v1/. This is the predicate BACI-306's parser keys off to find its
+// substrate — host+path only, no body inspection.
+func isAnthropicCapture(host, path string) bool {
+	return host == anthropicHost && strings.HasPrefix(path, "/v1/")
+}
+
+// resolveCorrelation maps the BACI-305 correlation key (the worktree slug
+// stamped on the request via X-Bacio-Corr) back to the worktree's active
+// session and dispatch. Best-effort: an empty key, an unknown slug, or a
+// slug with no active dispatch yields ("", nil) — the capture + classification
+// still land, the correlation columns just stay empty. Any store error is
+// swallowed (logged at debug) so a lookup hiccup never breaks the capture.
+func (r *captureRecorder) resolveCorrelation(key string) (string, *int64) {
+	if key == "" || r.store == nil {
+		return "", nil
+	}
+	sess, err := r.store.LatestActiveSessionBySlug(key)
+	if err != nil {
+		r.logger.Debug("proxy capture: session lookup by slug failed", "slug", key, "err", err)
+		return "", nil
+	}
+	if sess == nil {
+		return "", nil
+	}
+	disp, err := r.store.ActiveDispatchForSession(sess.SessionID)
+	if err != nil {
+		r.logger.Debug("proxy capture: active dispatch lookup failed", "session", sess.SessionID, "err", err)
+		// Still attribute to the session even without a dispatch.
+		return sess.SessionID, nil
+	}
+	if disp == nil {
+		return sess.SessionID, nil
+	}
+	id := disp.ID
+	return sess.SessionID, &id
 }
 
 // writeRaw writes the raw request + response capture for one observation to a
@@ -164,6 +234,15 @@ func (r *captureRecorder) writeRaw(obs proxy.RequestObservation, started time.Ti
 // request header block + body, a separator, then the response header block +
 // body. Truncated bodies carry an explicit marker so a reader knows the
 // capture is partial.
+//
+// BACI-305: a gzip-encoded response body is DECODED before it's written to
+// disk, so the on-disk raw copy is the readable JSON the BACI-306 parser
+// consumes (Anthropic non-stream replies arrive gzipped because the Claude
+// client sets its own Accept-Encoding, which the proxy forwards verbatim —
+// Go's transport only auto-decompresses the gzip it requested itself). The
+// bytes forwarded to the agent are untouched; only this captured copy is
+// inflated. A truncated gzip body can't be inflated, so it's written verbatim
+// with a marker.
 func renderRawCapture(obs proxy.RequestObservation) []byte {
 	var b []byte
 	b = append(b, "==== REQUEST ====\r\n"...)
@@ -176,9 +255,53 @@ func renderRawCapture(obs proxy.RequestObservation) []byte {
 	b = append(b, "\r\n==== RESPONSE ====\r\n"...)
 	b = append(b, obs.ResponseHeaderBlock...)
 	b = append(b, "\r\n"...)
-	b = append(b, obs.RawResponse...)
+	respBody, gzipNote := responseCaptureBody(obs)
+	b = append(b, respBody...)
+	if gzipNote != "" {
+		b = append(b, gzipNote...)
+	}
 	if obs.ResponseTruncated {
 		b = append(b, fmt.Sprintf("\r\n[... response body truncated at %d bytes ...]\r\n", proxy.MaxCapturedBody)...)
 	}
 	return b
+}
+
+// responseCaptureBody returns the response bytes to write to the .http file
+// plus an optional trailing note. For a gzip-encoded, non-truncated body it
+// returns the inflated bytes; for a truncated gzip body (which can't be
+// inflated — the gzip stream is incomplete) it returns the raw bytes plus a
+// marker so a reader knows the capture is compressed-and-partial. A non-gzip
+// (or unencoded) body is returned verbatim with no note.
+func responseCaptureBody(obs proxy.RequestObservation) (body []byte, note string) {
+	if !strings.EqualFold(obs.ResponseContentEncoding, "gzip") {
+		return obs.RawResponse, ""
+	}
+	if obs.ResponseTruncated {
+		return obs.RawResponse, "\r\n[gzip body truncated — not decoded]\r\n"
+	}
+	decoded, ok := gunzipCapture(obs.RawResponse)
+	if !ok {
+		// Corrupt / unexpected gzip stream — fall back to verbatim rather
+		// than drop the body, and flag it so a reader isn't surprised by
+		// compressed bytes.
+		return obs.RawResponse, "\r\n[gzip body could not be decoded — written verbatim]\r\n"
+	}
+	return decoded, ""
+}
+
+// gunzipCapture inflates a complete gzip stream, returning (decoded, true) on
+// success or (nil, false) when the bytes aren't a valid/complete gzip stream.
+// Used only for the on-disk raw copy — the streamed bytes the agent received
+// were never touched.
+func gunzipCapture(raw []byte) ([]byte, bool) {
+	zr, err := gzip.NewReader(bytes.NewReader(raw))
+	if err != nil {
+		return nil, false
+	}
+	defer zr.Close()
+	decoded, err := io.ReadAll(zr)
+	if err != nil {
+		return nil, false
+	}
+	return decoded, true
 }

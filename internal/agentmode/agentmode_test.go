@@ -53,11 +53,12 @@ func TestEnabled(t *testing.T) {
 // aliases people write against it (eval, alias=…) treat any byte change
 // as a behaviour change, so the bar for editing is higher than the rest
 // of the file. Belt-and-braces against an accidental refactor that drops
-// a flag or the injected proxy env (BACI-301).
+// a flag or the injected proxy env (BACI-301). An empty correlation key
+// (BACI-305) must leave the string byte-identical to the BACI-301 form.
 func TestLaunchCommand(t *testing.T) {
 	const endpoint = "http://127.0.0.1:5320/anthropic"
 	const want = "BACIO_AGENT_MODE=1 ANTHROPIC_BASE_URL=http://127.0.0.1:5320/anthropic ENABLE_TOOL_SEARCH=true claude --dangerously-skip-permissions --dangerously-load-development-channels server:bacio"
-	got := LaunchCommand(endpoint)
+	got := LaunchCommand(endpoint, "")
 	if got != want {
 		t.Fatalf("LaunchCommand drift:\n  got:  %q\n  want: %q", got, want)
 	}
@@ -68,6 +69,29 @@ func TestLaunchCommand(t *testing.T) {
 		if !strings.Contains(got, must) {
 			t.Fatalf("LaunchCommand %q missing %q", got, must)
 		}
+	}
+	if strings.Contains(got, "ANTHROPIC_CUSTOM_HEADERS") {
+		t.Fatalf("empty correlation key must omit ANTHROPIC_CUSTOM_HEADERS; got %q", got)
+	}
+}
+
+// TestLaunchCommandWithCorrelationKey pins the BACI-305 header injection:
+// a non-empty key prepends ANTHROPIC_CUSTOM_HEADERS='X-Bacio-Corr: <key>'
+// before the `claude …` invocation, after the BACI-301 env. The
+// single-quoting keeps the space in the header value intact when the shell
+// splits the line.
+func TestLaunchCommandWithCorrelationKey(t *testing.T) {
+	const endpoint = "http://127.0.0.1:5320/anthropic"
+	const slug = "agent-deadbeef1234"
+	const want = "BACIO_AGENT_MODE=1 ANTHROPIC_BASE_URL=http://127.0.0.1:5320/anthropic ENABLE_TOOL_SEARCH=true ANTHROPIC_CUSTOM_HEADERS='X-Bacio-Corr: agent-deadbeef1234' claude --dangerously-skip-permissions --dangerously-load-development-channels server:bacio"
+	got := LaunchCommand(endpoint, slug)
+	if got != want {
+		t.Fatalf("LaunchCommand with key drift:\n  got:  %q\n  want: %q", got, want)
+	}
+	// The header must sit before the `claude` invocation so the env
+	// assignment applies to the launched process.
+	if i, j := strings.Index(got, "ANTHROPIC_CUSTOM_HEADERS"), strings.Index(got, "claude "); i < 0 || i >= j {
+		t.Fatalf("ANTHROPIC_CUSTOM_HEADERS must precede the claude invocation; got %q", got)
 	}
 }
 

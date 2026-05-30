@@ -17,8 +17,11 @@ import (
 //
 // endpoint is the resolved ANTHROPIC_BASE_URL the launch one-liner
 // injects (BACI-301) — passed in so the banner stays byte-identical to
-// the `bacio agent-run-command` verb's output.
-func printActivationBanner(w io.Writer, endpoint string) {
+// the `bacio agent-run-command` verb's output. correlationKey is the
+// resolved worktree slug (BACI-305) the launch one-liner stamps as the
+// X-Bacio-Corr header value; empty outside a worktree env (the header is
+// then omitted).
+func printActivationBanner(w io.Writer, endpoint, correlationKey string) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Activation:")
 	fmt.Fprintf(w, "  bacio's hooks + channel are inert unless %s=1 is set in the\n", agentmode.EnvVar)
@@ -26,7 +29,7 @@ func printActivationBanner(w io.Writer, endpoint string) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  To launch this directory as a registered bacio agent:")
 	fmt.Fprintln(w)
-	fmt.Fprintf(w, "    %s\n", agentmode.LaunchCommand(endpoint))
+	fmt.Fprintf(w, "    %s\n", agentmode.LaunchCommand(endpoint, correlationKey))
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  --dangerously-skip-permissions waives the per-tool approval prompt")
 	fmt.Fprintln(w, "  for the agent session; --dangerously-load-development-channels")

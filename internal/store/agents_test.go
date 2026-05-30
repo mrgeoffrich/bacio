@@ -28,6 +28,81 @@ func seedRepoAndIssue(t *testing.T) (*Store, *model.Repo, *model.Issue) {
 	return s, repo, iss
 }
 
+// TestUpsertAgentSessionWorktreeSlug round-trips worktree_slug (BACI-305)
+// and locks in the first-write-wins update: a later heartbeat that doesn't
+// resolve a slug (empty) must not clobber an established one.
+func TestUpsertAgentSessionWorktreeSlug(t *testing.T) {
+	s, repo, _ := seedRepoAndIssue(t)
+	first, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "sess-slug-1", RepoID: repo.ID, Actor: "agent-claude",
+		WorktreeSlug: "agent-deadbeef1234",
+	})
+	if err != nil {
+		t.Fatalf("first upsert: %v", err)
+	}
+	if first.WorktreeSlug != "agent-deadbeef1234" {
+		t.Fatalf("worktree_slug = %q, want agent-deadbeef1234", first.WorktreeSlug)
+	}
+	// A heartbeat with no slug must preserve the established one.
+	second, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "sess-slug-1", RepoID: repo.ID, Actor: "agent-claude",
+	})
+	if err != nil {
+		t.Fatalf("second upsert: %v", err)
+	}
+	if second.WorktreeSlug != "agent-deadbeef1234" {
+		t.Fatalf("worktree_slug clobbered by empty heartbeat: got %q", second.WorktreeSlug)
+	}
+}
+
+// TestLatestActiveSessionBySlug returns the newest live session for a
+// slug, skips ended sessions, and is a no-op for an empty/unknown slug
+// (BACI-305 correlation lookup).
+func TestLatestActiveSessionBySlug(t *testing.T) {
+	s, repo, _ := seedRepoAndIssue(t)
+
+	// Unknown / empty slug → nil, no error.
+	if sess, err := s.LatestActiveSessionBySlug("nope"); err != nil || sess != nil {
+		t.Fatalf("unknown slug: got (%v, %v), want (nil, nil)", sess, err)
+	}
+	if sess, err := s.LatestActiveSessionBySlug(""); err != nil || sess != nil {
+		t.Fatalf("empty slug: got (%v, %v), want (nil, nil)", sess, err)
+	}
+
+	const slug = "agent-shared-slug"
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "sess-older", RepoID: repo.ID, Actor: "agent-claude", WorktreeSlug: slug,
+	}); err != nil {
+		t.Fatalf("older session: %v", err)
+	}
+	newer, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: "sess-newer", RepoID: repo.ID, Actor: "agent-claude", WorktreeSlug: slug,
+	})
+	if err != nil {
+		t.Fatalf("newer session: %v", err)
+	}
+
+	got, err := s.LatestActiveSessionBySlug(slug)
+	if err != nil {
+		t.Fatalf("lookup: %v", err)
+	}
+	if got == nil || got.SessionID != newer.SessionID {
+		t.Fatalf("latest = %v, want newest live session %q", got, newer.SessionID)
+	}
+
+	// End the newer one — the older live session becomes the pick.
+	if _, _, _, _, _, err := s.EndAgentSession("sess-newer", string(model.EndReasonStop), model.StateTodo, DispatchCascadeCancel); err != nil {
+		t.Fatalf("end newer: %v", err)
+	}
+	got, err = s.LatestActiveSessionBySlug(slug)
+	if err != nil {
+		t.Fatalf("lookup after end: %v", err)
+	}
+	if got == nil || got.SessionID != "sess-older" {
+		t.Fatalf("latest after end = %v, want sess-older (ended skipped)", got)
+	}
+}
+
 // TestUpsertAgentSessionIdempotent locks in that a repeat register on
 // the same session id refreshes mutable fields and bumps last_seen_at
 // rather than inserting a second row.

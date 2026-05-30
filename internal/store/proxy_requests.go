@@ -30,6 +30,17 @@ type AddProxyRequestIn struct {
 	RawLogPath string
 	StartedAt  time.Time
 	EndedAt    time.Time
+	// BACI-305 classification (transport-level, set by the recorder):
+	// ContentType is the response Content-Type (clamped), IsStream marks an
+	// SSE response, IsAnthropic marks an Anthropic message-API capture.
+	ContentType string
+	IsStream    bool
+	IsAnthropic bool
+	// BACI-305 correlation (best-effort, resolved from the X-Bacio-Corr
+	// launch header): SessionID is the worktree's active session, DispatchID
+	// its active dispatch. Both empty/nil when no correlation resolved.
+	SessionID  string
+	DispatchID *int64
 }
 
 // defaultProxyRequestLimit caps an unbounded ListProxyRequests query so a
@@ -46,6 +57,8 @@ func (s *Store) AddProxyRequest(in AddProxyRequestIn) (*model.ProxyRequest, erro
 	host := clampProxyField(in.Host, model.MaxProxyHostLen)
 	path := clampProxyField(in.Path, model.MaxProxyPathLen)
 	rawLogPath := clampProxyField(in.RawLogPath, model.MaxProxyRawLogPathLen)
+	contentType := clampProxyField(in.ContentType, model.MaxProxyContentTypeLen)
+	sessionID := clampProxyField(in.SessionID, model.MaxProxySessionIDLen)
 
 	started := in.StartedAt
 	if started.IsZero() {
@@ -63,10 +76,13 @@ func (s *Store) AddProxyRequest(in AddProxyRequestIn) (*model.ProxyRequest, erro
 	res, err := s.DB.Exec(`
 		INSERT INTO proxy_requests
 		    (method, host, path, status, bytes_in, bytes_out,
-		     duration_ms, raw_log_path, started_at, ended_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		     duration_ms, raw_log_path, started_at, ended_at,
+		     content_type, is_stream, is_anthropic, session_id, dispatch_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		method, host, path, in.Status, in.BytesIn, in.BytesOut,
 		durationMS, rawLogPath, started.UTC(), ended.UTC(),
+		contentType, proxyBit(in.IsStream), proxyBit(in.IsAnthropic),
+		sessionID, in.DispatchID,
 	)
 	if err != nil {
 		return nil, err
@@ -94,9 +110,20 @@ func clampProxyField(s string, max int) string {
 	return s
 }
 
+// proxyBit renders a Go bool as the 0/1 INTEGER the proxy_requests
+// classification columns store — matching the store-wide convention
+// (e.g. features.state_manual) of int columns scanned back with `!= 0`.
+func proxyBit(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
 const proxyRequestSelect = `
 	SELECT id, method, host, path, status, bytes_in, bytes_out,
-	       duration_ms, raw_log_path, started_at, ended_at
+	       duration_ms, raw_log_path, started_at, ended_at,
+	       content_type, is_stream, is_anthropic, session_id, dispatch_id
 	FROM proxy_requests`
 
 // GetProxyRequest fetches one row by primary key, or ErrNotFound.
@@ -135,12 +162,21 @@ func (s *Store) ListProxyRequests(limit int) ([]*model.ProxyRequest, error) {
 
 func scanProxyRequest(r rowScanner) (*model.ProxyRequest, error) {
 	var v model.ProxyRequest
+	var isStream, isAnthropic int
+	var dispatchID sql.NullInt64
 	if err := r.Scan(
 		&v.ID, &v.Method, &v.Host, &v.Path, &v.Status,
 		&v.BytesIn, &v.BytesOut, &v.DurationMS, &v.RawLogPath,
 		&v.StartedAt, &v.EndedAt,
+		&v.ContentType, &isStream, &isAnthropic, &v.SessionID, &dispatchID,
 	); err != nil {
 		return nil, err
+	}
+	v.IsStream = isStream != 0
+	v.IsAnthropic = isAnthropic != 0
+	if dispatchID.Valid {
+		id := dispatchID.Int64
+		v.DispatchID = &id
 	}
 	return &v, nil
 }

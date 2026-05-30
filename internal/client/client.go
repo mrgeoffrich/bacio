@@ -582,14 +582,18 @@ type Client interface {
 	// slug there. Does NOT create a session row. Local-only.
 	EnsureAgentIdentity(ctx context.Context, repo *model.Repo) (string, error)
 	// CreateSessionStub inserts a minimal agent_sessions row at SessionStart
-	// — just session_id + repo + claude_pid + host + an "(unregistered)"
-	// placeholder actor. agent identity, model, branch, permission_mode are
-	// all left unset; registered_at stays NULL. The session is invisible to
-	// the default-filtered agent list until the bacio channel's `register`
-	// tool completes the registration via CompleteRegistration. Idempotent
-	// on session_id (a /clear that fires a fresh SessionStart with a new
-	// session_id is a separate stub). Local-only.
-	CreateSessionStub(ctx context.Context, repo *model.Repo, sessionID, host string, claudePID int64) (*model.AgentSession, error)
+	// — just session_id + repo + claude_pid + host + worktreeSlug + an
+	// "(unregistered)" placeholder actor. agent identity, model, branch,
+	// permission_mode are all left unset; registered_at stays NULL. The
+	// session is invisible to the default-filtered agent list until the
+	// bacio channel's `register` tool completes the registration via
+	// CompleteRegistration. worktreeSlug (BACI-305) is the resolved wtenv
+	// manifest slug — the launch-time-stable correlation key the
+	// reverse-proxy capture maps each agent Anthropic request back to;
+	// empty for sessions outside a worktree env. Idempotent on session_id
+	// (a /clear that fires a fresh SessionStart with a new session_id is a
+	// separate stub). Local-only.
+	CreateSessionStub(ctx context.Context, repo *model.Repo, sessionID, host, worktreeSlug string, claudePID int64) (*model.AgentSession, error)
 	// SessionsByClaudePID returns the open sessions matching (host,
 	// claudePID) — the channel's coordinates. Used by the bacio channel
 	// MCP server to find which sessions it's serving so it can queue a

@@ -76,6 +76,12 @@ type AgentSession struct {
 	ErroredAt    *time.Time `json:"errored_at,omitempty"`
 	ErrorType    string     `json:"error_type,omitempty"`
 	ErrorMessage string     `json:"error_message,omitempty"`
+	// WorktreeSlug is the resolved wtenv manifest slug for the worktree this
+	// session drives (BACI-305), stamped at session open by the session-start
+	// hook. It is the launch-time-stable correlation key the reverse-proxy
+	// capture maps each agent Anthropic request back to. Empty for sessions
+	// outside a worktree env (the legacy shared default).
+	WorktreeSlug string `json:"worktree_slug,omitempty"`
 }
 
 // AgentChannel is one live `bacio channel` subprocess. Claude Code never
