@@ -915,6 +915,37 @@ CREATE INDEX IF NOT EXISTS idx_notifications_repo_read
 CREATE INDEX IF NOT EXISTS idx_notifications_read
     ON notifications(read_at);
 
+-- proxy_requests is the BACI-302 transport-level capture index: one row per
+-- request that flowed through the reverse-proxy forwarding listener
+-- (/anthropic/*). It records method/host/path, the response status, byte
+-- counts each way, the round-trip duration, and the path to the raw req/resp
+-- capture written to the per-worktree log dir. No Anthropic body parsing here
+-- (that is BACI-305/306).
+--
+-- Like the audit log it is cross-cutting: there is no mechanism today to
+-- attribute a proxied request to an agent session / worktree / repo, so the
+-- table carries no repo_id FK and survives at machine level. Growth is
+-- bounded by the BACI-302 retention prune (pruneProxyRequests) that mirrors
+-- the 60-day history window. status is 0 when the upstream round-trip failed
+-- before any response (the proxy then surfaces a 502); raw_log_path is '' when
+-- the capture file couldn't be written (capture never blocks the request).
+CREATE TABLE IF NOT EXISTS proxy_requests (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    method       TEXT    NOT NULL,
+    host         TEXT    NOT NULL,
+    path         TEXT    NOT NULL,
+    status       INTEGER NOT NULL DEFAULT 0,
+    bytes_in     INTEGER NOT NULL DEFAULT 0,
+    bytes_out    INTEGER NOT NULL DEFAULT 0,
+    duration_ms  INTEGER NOT NULL DEFAULT 0,
+    raw_log_path TEXT    NOT NULL DEFAULT '',
+    started_at   DATETIME NOT NULL,
+    ended_at     DATETIME NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_proxy_requests_started
+    ON proxy_requests(started_at);
+
 -- ui_leader is a single-row lease table. Only one UI process (TUI or desktop
 -- app) holds the lease at a time; all others stand by. The CHECK (id = 1)
 -- constraint + INSERT OR IGNORE seed guarantee exactly one row forever.
