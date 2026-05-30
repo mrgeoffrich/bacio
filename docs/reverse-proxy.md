@@ -64,8 +64,16 @@ BACIO_AGENT_MODE=1 ANTHROPIC_BASE_URL=http://127.0.0.1:5320/anthropic ENABLE_TOO
 The endpoint's host:port is the worktree's resolved `env.APIAddr`
 (`agentmode.ProxyEndpoint`), so a sibling worktree with its own
 allocated port gets a one-liner pointing at *its* server. Both call
-sites build the string through `agentmode.LaunchCommand(endpoint)` so
-they can never drift.
+sites build the string through
+`agentmode.LaunchCommand(endpoint, correlationKey)` so they can never
+drift.
+
+When the launch happens inside a worktree env, the one-liner also
+injects `ANTHROPIC_CUSTOM_HEADERS='X-Bacio-Corr: <slug>'` — the
+worktree slug, the BACI-305 correlation key the capture maps each
+Anthropic request back to (see the Anthropic-capture section below).
+Outside a worktree env the slug is empty and the header is omitted, so
+the string stays byte-identical to the BACI-301 form.
 
 ### Consequence: a running bacio server is a hard dependency
 
@@ -153,6 +161,76 @@ off the windowed rows (no portable SQLite percentile under
 cheap. The returned `model.ProxyFQDNStat` DTO is snake_case-tagged so the
 Monitor web screen (BACI-304) drops it straight onto the page. BACI-304
 still owns the React `api.ts` / `api.http.ts` seam and the screen itself.
+
+---
+
+## Anthropic capture (BACI-305)
+
+BACI-305 extends the BACI-302 capture so the on-disk raw file and the
+`proxy_requests` index row are the **parseable substrate** the per-job
+message parser (BACI-306) reads. It adds three things on top of the
+transport-level observation — no Anthropic body/SSE parsing here, that
+stays BACI-306.
+
+### gzip decode on the captured copy
+
+Anthropic non-stream replies (errors, `count_tokens`, non-streaming
+`/v1/messages`) come back `Content-Encoding: gzip`: the Claude client
+sets its own `Accept-Encoding`, the proxy forwards it verbatim, and
+Go's transport only transparently decompresses the gzip *it* requested
+— so the proxy tees the **compressed** wire bytes. The recorder
+(`renderRawCapture` → `responseCaptureBody` / `gunzipCapture` in
+[`internal/api/proxy_recorder.go`](../internal/api/proxy_recorder.go))
+inflates the captured copy when `ResponseContentEncoding == "gzip"` and
+the body wasn't truncated, so the `.http` file holds readable JSON. The
+bytes forwarded downstream to the agent are **never** touched — only the
+on-disk copy is decoded. A truncated gzip body (capped at
+`proxy.MaxCapturedBody`) can't be inflated, so it's written verbatim
+with a `[gzip body truncated — not decoded]` marker. SSE
+(`text/event-stream`) streams aren't gzipped and are captured as before.
+
+### Classification columns
+
+Three columns on `proxy_requests` let BACI-306 select exactly the
+parseable Anthropic captures without re-deriving them:
+
+- `content_type` — the response `Content-Type`, base media type only
+  (lowercased, params dropped).
+- `is_stream` — the response was `text/event-stream` (an SSE turn).
+- `is_anthropic` — the post-rewrite upstream host is `api.anthropic.com`
+  and the path is under `/v1/` (`isAnthropicCapture`). Host+path only,
+  no body inspection.
+
+### Per-dispatch correlation (Mechanism B)
+
+The agent launch one-liner stamps `X-Bacio-Corr: <worktree-slug>` on
+every Anthropic request via `ANTHROPIC_CUSTOM_HEADERS`. The capture
+transport lifts the header onto the observation (`CorrelationKey`),
+**strips it from the upstream request** so it never reaches Anthropic,
+and redacts it from the raw header block (`isSensitiveHeader`). The
+recorder resolves it back to an attribution:
+
+```
+slug → LatestActiveSessionBySlug → ActiveDispatchForSession → session_id + dispatch_id
+```
+
+written onto the index row. The slug is the launch-time-stable key
+(Claude Code mints the session id later, so it isn't known at launch);
+the `session-start` hook stamps `agent_sessions.worktree_slug` from the
+resolved wtenv so the lookup has something to match. `dispatch_id` is a
+nullable INTEGER with **no FK** — like the audit log, a capture row is
+cross-cutting and must survive a deleted dispatch.
+
+**Caveats.** Attribution is *per-worktree*, best-effort: a worktree
+interleaving a supervisor + subagent session attributes to the
+worktree's currently-active dispatch — the header eliminates
+cross-worktree confusion, which is the failure mode the ticket's
+correlation caveat names. Per-request (session-id-level) precision is a
+future refinement. And Mechanism B assumes Claude Code forwards
+`ANTHROPIC_CUSTOM_HEADERS` onto its model-API requests; if it doesn't,
+`session_id`/`dispatch_id` stay empty and the decode/classify half still
+works (graceful degradation) — the columns are correlation-ready for a
+later mechanism.
 
 ---
 
