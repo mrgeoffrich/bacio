@@ -7,6 +7,7 @@ import FeaturesView from './components/FeaturesView.jsx';
 import AgentsView from './components/AgentsView.jsx';
 import HistoryView from './components/HistoryView.jsx';
 import PipelineView from './components/PipelineView.jsx';
+import ProcessEditor from './components/ProcessEditor.jsx';
 import IssueWorkspace from './components/IssueWorkspace.jsx';
 import CommandPalette from './components/CommandPalette.jsx';
 import IssueComposer from './components/IssueComposer.jsx';
@@ -25,7 +26,7 @@ import { isTerminalState, stripBlockerFromCards, restoreBlockedByFromSnapshot } 
 import { useShipFlourish } from './lib/shipFlourish';
 import { useShipSfx } from './lib/shipSfx';
 import { decideOdometerAction } from './lib/odometer';
-import { viewPath, issuePath, viewFromPath, prefixFromPath } from './lib/routes';
+import { viewPath, issuePath, processEditPath, viewFromPath, prefixFromPath } from './lib/routes';
 
 const THEME_KEY = 'bacio-theme'; // persisted preference: 'system' | 'light' | 'dark'
 const REPO_KEY = 'bacio-active-repo'; // persisted preference: last-selected repo prefix
@@ -729,6 +730,17 @@ export default function App() {
       .catch(err => reportError(err, { headline: "Couldn't set the process" }));
   }, [activeBoard, refreshCards]);
 
+  // Edit the pending tail of a card's chain — the BACI-294 Edit Process
+  // screen's Save. stages is the re-ordered pending tail only; the server
+  // keeps the completed/running/cancelled jobs as a locked prefix. Returns
+  // the promise so ProcessEditor can navigate back on success / show its
+  // own error banner on failure (no reportError here — the editor owns the
+  // surface). Refreshes so the new chain renders on the card on return.
+  const editCardProcessTail = useCallback((key, stages) => {
+    return api.editCardProcessTail(activeBoard, key, stages)
+      .then(() => refreshCards({ silent: true }));
+  }, [activeBoard, refreshCards]);
+
   // Manual Start — advance one step (start the next pending job, or run
   // the Ship hand-off when the chain ends in one).
   const startCardJob = useCallback((key) => {
@@ -1177,6 +1189,7 @@ export default function App() {
                   onCancelCard={cancelCardFromPipeline}
                   onReorder={reorderPipelineCard}
                   onSetProcess={setCardProcess}
+                  onEditProcess={(key) => navigate(processEditPath(activeBoard, key))}
                   onStartJob={startCardJob}
                   onStopJob={stopCardJob}
                   onRerunJob={rerunCardJob}
@@ -1193,6 +1206,23 @@ export default function App() {
                   shipFlashing={shipFlashing}
                   onShipFlightDone={onShipFlightDone}
                   onTestIncrementShipped={testIncrementShipped}
+                />
+              </ErrorBoundary>
+            }
+          />
+          {/* BACI-294: the full-screen Edit Process editor for an
+              in_pipeline card's job chain. Reads the card's live chain off
+              the cached `cards`; Save persists the re-ordered pending tail
+              (locked prefix preserved server-side) and returns to the
+              Pipeline. */}
+          <Route
+            path="/:prefix/pipeline/:key/process"
+            element={
+              <ErrorBoundary headline="Something went wrong in Edit Process" label="The Edit Process view crashed">
+                <ProcessEditor
+                  cards={cards}
+                  activeBoard={activeBoard}
+                  onSave={editCardProcessTail}
                 />
               </ErrorBoundary>
             }
