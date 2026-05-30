@@ -652,6 +652,78 @@ func TestEngineStopRunning(t *testing.T) {
 	}
 }
 
+// TestResetProcessClearsAndDisarms: Reset on a card whose chain has started
+// (a completed prefix + pending tail, nothing running) wipes every job and
+// disarms Auto so the freshly-emptied card can't silently resume.
+func TestResetProcessClearsAndDisarms(t *testing.T) {
+	s := newEngineStore(t)
+	_, iss := seedPipelineCard(t, s, "RST", "plan-implement", model.EngineAuto)
+	eng := New(s)
+
+	// Auto starts the plan job; ack it so plan completes and implement runs.
+	if _, err := eng.Tick(); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	job := runningJob(t, s, iss.ID)
+	if job == nil {
+		t.Fatal("no running job after first tick")
+	}
+	simulateWorkerAck(t, s, *job.DispatchID)
+	if _, err := eng.Tick(); err != nil { // plan completes, implement starts
+		t.Fatalf("tick: %v", err)
+	}
+	// Stop the now-running implement job so the chain has a started prefix
+	// but nothing running (Reset requires no running job).
+	if _, err := eng.StopRunning(iss.ID); err != nil {
+		t.Fatalf("StopRunning: %v", err)
+	}
+	if jobs, _ := s.ListPipelineJobs(iss.ID); len(jobs) == 0 {
+		t.Fatal("expected a started chain to reset")
+	}
+
+	if err := eng.ResetProcess(iss.ID); err != nil {
+		t.Fatalf("ResetProcess: %v", err)
+	}
+	after, err := s.ListPipelineJobs(iss.ID)
+	if err != nil {
+		t.Fatalf("list jobs: %v", err)
+	}
+	if len(after) != 0 {
+		t.Fatalf("chain after reset has %d jobs, want empty", len(after))
+	}
+	got, _ := s.GetIssueByID(iss.ID)
+	if got.EngineMode != model.EngineOff {
+		t.Fatalf("engine mode = %s, want off (Auto disarmed)", got.EngineMode)
+	}
+	if got.EnginePauseReason != "" {
+		t.Fatalf("pause reason = %q, want cleared", got.EnginePauseReason)
+	}
+}
+
+// TestResetProcessRejectsRunning: Reset refuses with ErrJobRunning while a
+// job is running and leaves the chain intact — the user must Stop first.
+func TestResetProcessRejectsRunning(t *testing.T) {
+	s := newEngineStore(t)
+	_, iss := seedPipelineCard(t, s, "RSR", "plan-implement", model.EngineAuto)
+	eng := New(s)
+
+	if _, err := eng.Tick(); err != nil { // Auto starts the plan job
+		t.Fatalf("tick: %v", err)
+	}
+	if runningJob(t, s, iss.ID) == nil {
+		t.Fatal("no running job to guard against")
+	}
+	before, _ := s.ListPipelineJobs(iss.ID)
+
+	if err := eng.ResetProcess(iss.ID); !errors.Is(err, ErrJobRunning) {
+		t.Fatalf("ResetProcess err = %v, want ErrJobRunning", err)
+	}
+	after, _ := s.ListPipelineJobs(iss.ID)
+	if len(after) != len(before) {
+		t.Fatalf("chain length after rejected reset = %d, want %d (no rows deleted)", len(after), len(before))
+	}
+}
+
 // claimRunningJob stands in for "a worker opened its claim on the card and
 // is running the in-flight job": register a session and open a claim on
 // the issue, returning the external session id the steer message targets.

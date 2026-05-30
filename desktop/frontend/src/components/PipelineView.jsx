@@ -138,6 +138,7 @@ export default function PipelineView({
   onCancelCard,
   onReorder,
   onSetProcess,
+  onResetProcess,
   onEditProcess,
   onStartJob,
   onStopJob,
@@ -444,6 +445,7 @@ export default function PipelineView({
                   onDragStart={() => setDragKey(card.key)}
                   onDragEnd={() => { setDragKey(null); setDragOverCol(null); }}
                   onSetProcess={onSetProcess}
+                  onResetProcess={onResetProcess}
                   onEditProcess={onEditProcess}
                   onStartJob={onStartJob}
                   onStopJob={onStopJob}
@@ -743,6 +745,7 @@ function StageCard({
   onDragStart,
   onDragEnd,
   onSetProcess,
+  onResetProcess,
   onEditProcess,
   onStartJob,
   onStopJob,
@@ -752,10 +755,22 @@ function StageCard({
   onOpenQuestion,
 }) {
   const [picking, setPicking] = useState(false);
+  // BACI-314 Reset is a two-step in-card confirm: unarmed → armed (Confirm /
+  // Cancel) → fires. Inline in the footer, not a modal, because Reset is
+  // destructive (drops completed-job history) and must match the in-card
+  // interaction pattern.
+  const [confirmingReset, setConfirmingReset] = useState(false);
 
   const jobs = card.jobs || [];
   const hasProcess = jobs.length > 0;
   const running = jobs.find(j => j.status === 'running') || null;
+  // Reset is hidden while a job is running (the Stop-first rule — the engine
+  // refuses ErrJobRunning anyway). If the card transitions to running while
+  // the confirm is armed, drop the armed state so a stale Confirm can't
+  // linger after the affordance disappears.
+  useEffect(() => {
+    if (running && confirmingReset) setConfirmingReset(false);
+  }, [running, confirmingReset]);
   const nonShip = jobs.filter(j => !isShipStage(j.mode));
   const nextPending = jobs.find(j => j.status === 'pending');
   // allDone = every non-ship job is complete (cancelled deliberately does
@@ -871,6 +886,41 @@ function StageCard({
             >
               ✎ Edit Process
             </button>
+            {/* BACI-314 Reset: in-card two-step confirm. Hidden while a job
+                is running (Stop first) and on a card with no process (the
+                fresh picker is already showing). Unarmed → "✕ Reset"; armed
+                swaps to an inline "Reset process? Confirm / Cancel" row.
+                Wipes the whole chain → the card drops back to the picker. */}
+            {!running && hasProcess && (
+              confirmingReset ? (
+                <span className="mk-pl-reset-confirm">
+                  Reset process?
+                  <button
+                    type="button"
+                    className="mk-pl-btn is-danger is-sm"
+                    onClick={() => { setConfirmingReset(false); onResetProcess?.(card.key); }}
+                  >
+                    Confirm
+                  </button>
+                  <button
+                    type="button"
+                    className="mk-pl-btn is-ghost is-sm"
+                    onClick={() => setConfirmingReset(false)}
+                  >
+                    Cancel
+                  </button>
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  className="mk-pl-btn is-ghost is-danger is-sm"
+                  onClick={() => setConfirmingReset(true)}
+                  title="Wipe the process and pick again from scratch"
+                >
+                  ✕ Reset
+                </button>
+              )
+            )}
             <span className="mk-pl-spacer" />
             {paused && (
               <span
@@ -890,14 +940,17 @@ function StageCard({
                     : '⏸ Auto halted'}
               </span>
             )}
-            <button
-              type="button"
-              className={`mk-pl-btn is-sm${allDone ? ' is-primary' : ' is-ghost'}`}
-              disabled={!allDone}
-              onClick={() => onShip?.(card.key)}
-            >
-              ⏏ Ship
-            </button>
+            {/* BACI-314: render Ship ONLY when shippable — an un-shippable
+                card shows no Ship control at all (was present-but-disabled). */}
+            {allDone && (
+              <button
+                type="button"
+                className="mk-pl-btn is-sm is-primary"
+                onClick={() => onShip?.(card.key)}
+              >
+                ⏏ Ship
+              </button>
+            )}
           </footer>
         </>
       )}

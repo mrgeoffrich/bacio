@@ -931,6 +931,20 @@ func (b *BoardService) EditCardProcessTail(repoPrefix, key string, stages []stri
 	return b.client.EditIssueProcessTail(ctx, repo, key, stages, false)
 }
 
+// ResetCardProcess wipes an in_pipeline card's ENTIRE job chain (BACI-314)
+// so it drops back to the from-scratch "Pick a process" picker. The UI
+// never dry-runs, so dryRun is always false. Refused by the engine while a
+// job is running (the UI hides Reset in that state; the client surfaces the
+// error otherwise). Returns the refreshed (empty) chain.
+func (b *BoardService) ResetCardProcess(repoPrefix, key string) ([]*model.PipelineJob, error) {
+	ctx := context.Background()
+	repo, err := b.resolveRepoForKey(ctx, repoPrefix, key)
+	if err != nil {
+		return nil, err
+	}
+	return b.client.ResetIssueProcess(ctx, repo, key, false)
+}
+
 func (b *BoardService) StartCardJob(repoPrefix, key string) ([]*model.PipelineJob, error) {
 	ctx := context.Background()
 	repo, err := b.resolveRepoForKey(ctx, repoPrefix, key)

@@ -119,6 +119,29 @@ func (c *localClient) EditIssueProcessTail(ctx context.Context, repo *model.Repo
 	return jobs, nil
 }
 
+// ResetIssueProcess wipes the card's entire job chain (BACI-314) and
+// returns the refreshed (empty) chain. The engine guards against a running
+// job (pipeline.ErrJobRunning — Stop first); the dry-run projection is just
+// the empty chain since nothing is written.
+func (c *localClient) ResetIssueProcess(ctx context.Context, repo *model.Repo, key string, dryRun bool) ([]*model.PipelineJob, error) {
+	iss, err := c.GetIssueByKey(ctx, repo, key)
+	if err != nil {
+		return nil, err
+	}
+	if dryRun {
+		return []*model.PipelineJob{}, nil
+	}
+	if err := pipeline.New(c.store).ResetProcess(iss.ID); err != nil {
+		return nil, err
+	}
+	c.recordOp(model.HistoryEntry{
+		RepoID: &iss.RepoID, RepoPrefix: repo.Prefix,
+		Op: "issue.process.reset", Kind: "issue",
+		TargetID: &iss.ID, TargetLabel: iss.Key,
+	})
+	return c.store.ListPipelineJobs(iss.ID)
+}
+
 // ShipIssue is the in_pipeline → to_be_shipped hand-off (the manual Ship
 // control / in-process Ship stage). Returns the refreshed issue.
 func (c *localClient) ShipIssue(ctx context.Context, repo *model.Repo, key string, dryRun bool) (*model.Issue, error) {

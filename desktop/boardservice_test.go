@@ -622,3 +622,39 @@ func TestBoardService_DefaultFeature_RoundTrip(t *testing.T) {
 		t.Fatalf("post-clear Get: Slug=%q, want empty", got.Slug)
 	}
 }
+
+// fakeResetClient records the ResetIssueProcess delegation so the
+// BACI-314 Wails seam can be pinned without a real store.
+type fakeResetClient struct {
+	fakeBoardClient
+	gotKey    string
+	gotDryRun bool
+}
+
+func (f *fakeResetClient) ResetIssueProcess(_ context.Context, _ *model.Repo, key string, dryRun bool) ([]*model.PipelineJob, error) {
+	f.gotKey = key
+	f.gotDryRun = dryRun
+	return []*model.PipelineJob{}, nil
+}
+
+// TestBoardService_ResetCardProcess_Delegates pins that the Wails binding
+// resolves the repo and forwards to client.ResetIssueProcess with dryRun
+// false (the UI never dry-runs), returning the refreshed empty chain.
+func TestBoardService_ResetCardProcess_Delegates(t *testing.T) {
+	fake := &fakeResetClient{fakeBoardClient: fakeBoardClient{repo: &model.Repo{Prefix: "TEST"}}}
+	svc := NewBoardService(fake)
+
+	jobs, err := svc.ResetCardProcess("TEST", "TEST-1")
+	if err != nil {
+		t.Fatalf("ResetCardProcess: %v", err)
+	}
+	if fake.gotKey != "TEST-1" {
+		t.Fatalf("delegated key = %q, want TEST-1", fake.gotKey)
+	}
+	if fake.gotDryRun {
+		t.Fatal("delegated dryRun = true, want false (UI never dry-runs)")
+	}
+	if len(jobs) != 0 {
+		t.Fatalf("chain = %d jobs, want empty", len(jobs))
+	}
+}

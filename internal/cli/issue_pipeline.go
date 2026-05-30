@@ -78,6 +78,7 @@ func issueProcessCmd() *cobra.Command {
 	}
 	cmd.AddCommand(issueProcessSetCmd())
 	cmd.AddCommand(issueProcessEditCmd())
+	cmd.AddCommand(issueProcessResetCmd())
 	return cmd
 }
 
@@ -184,6 +185,63 @@ func issueProcessEditCmd() *cobra.Command {
 				return err
 			}
 			jobs, err := c.EditIssueProcessTail(context.Background(), repo, key, stages, opts.dryRun)
+			if err != nil {
+				return err
+			}
+			if opts.dryRun {
+				return emitDryRun(jobs)
+			}
+			return emit(jobs)
+		},
+	}
+	addInputFlag(cmd, &rawInput)
+	return cmd
+}
+
+// issueProcessResetCmd — `bacio issue process reset <KEY>`. Wipes the
+// card's ENTIRE job chain (BACI-314) — including completed / cancelled
+// history — so the card drops back to the from-scratch process picker. The
+// deliberate counterpart to `process set`, which refuses once a job has
+// started. Refused while a job is running (stop it first). Returns the
+// refreshed (empty) chain.
+func issueProcessResetCmd() *cobra.Command {
+	var rawInput string
+	cmd := &cobra.Command{
+		Use:   "reset [KEY]",
+		Short: "Wipe an in_pipeline card's job chain back to the picker (Pipeline)",
+		Long:  "Wipe an in_pipeline card's ENTIRE job chain (Pipeline). Discards completed/cancelled history so the card drops back to the from-scratch process picker — the deliberate counterpart to `process set`, which refuses once a job has started. Refused while a job is running (stop it first).",
+		Args:  cobra.RangeArgs(0, 1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			raw, err := parseJSONInput(cmd, args, rawInput)
+			if err != nil {
+				return err
+			}
+			var key string
+			if raw != nil {
+				in, _, err := inputio.DecodeStrict[inputs.IssueProcessResetInput](raw)
+				if err != nil {
+					return err
+				}
+				if in.Key == "" {
+					return fmt.Errorf("key is required")
+				}
+				key = in.Key
+			} else {
+				if len(args) != 1 {
+					return fmt.Errorf("requires <KEY> positional or --json")
+				}
+				key = args[0]
+			}
+			c, err := openClient()
+			if err != nil {
+				return err
+			}
+			defer c.Close()
+			repo, err := repoForIssueKey(c, key)
+			if err != nil {
+				return err
+			}
+			jobs, err := c.ResetIssueProcess(context.Background(), repo, key, opts.dryRun)
 			if err != nil {
 				return err
 			}

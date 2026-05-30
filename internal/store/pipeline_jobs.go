@@ -224,6 +224,19 @@ func (s *Store) EditIssueProcessTail(issueID int64, tailModes []string) ([]*mode
 	return s.ListPipelineJobs(issueID)
 }
 
+// ClearIssueProcess deletes ALL pipeline jobs for the issue regardless of
+// status — the deliberate counterpart to SetIssueProcess that bypasses its
+// `started > 0` guard. SetIssueProcess refuses once any job has advanced
+// past pending so a completed stage is never clobbered (§7 immutability);
+// the Reset control (BACI-314) needs the opposite — wipe the whole chain so
+// the card drops back to the from-scratch picker. The running-job guard
+// (Stop first) lives one layer up in pipeline.Engine.ResetProcess; this op
+// is the unconditional write. A no-op (zero rows) on a card with no chain.
+func (s *Store) ClearIssueProcess(issueID int64) error {
+	_, err := s.DB.Exec(`DELETE FROM pipeline_jobs WHERE issue_id = ?`, issueID)
+	return err
+}
+
 // SetPipelineJobStatus transitions a job's status, stamping started_at on
 // the first move to running and completed_at on the first move to a
 // terminal status (complete / cancelled). Leaves dispatch_id untouched —

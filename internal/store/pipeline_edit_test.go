@@ -124,6 +124,46 @@ func TestEditIssueProcessTail(t *testing.T) {
 	})
 }
 
+// TestClearIssueProcess covers the BACI-314 Reset write: ClearIssueProcess
+// deletes EVERY job regardless of status — the deliberate bypass of
+// SetIssueProcess's started>0 guard that Reset needs to wipe a chain that
+// has already run.
+func TestClearIssueProcess(t *testing.T) {
+	s, _, iss := seedRepoAndIssue(t)
+	proc, err := model.ProcessFromStages([]string{model.BuiltinTemplatePlan, model.BuiltinTemplateImplement, model.ShipJobMode})
+	if err != nil {
+		t.Fatalf("ProcessFromStages: %v", err)
+	}
+	jobs, err := s.SetIssueProcess(iss.ID, proc)
+	if err != nil {
+		t.Fatalf("SetIssueProcess: %v", err)
+	}
+	// Mixed statuses: complete + cancelled + pending — exactly the chain
+	// SetIssueProcess would refuse to clobber. ClearIssueProcess must not.
+	if err := s.SetPipelineJobStatus(jobs[0].ID, model.JobComplete); err != nil {
+		t.Fatalf("complete job 1: %v", err)
+	}
+	if err := s.SetPipelineJobStatus(jobs[1].ID, model.JobCancelled); err != nil {
+		t.Fatalf("cancel job 2: %v", err)
+	}
+
+	if err := s.ClearIssueProcess(iss.ID); err != nil {
+		t.Fatalf("ClearIssueProcess: %v", err)
+	}
+	after, err := s.ListPipelineJobs(iss.ID)
+	if err != nil {
+		t.Fatalf("ListPipelineJobs: %v", err)
+	}
+	if len(after) != 0 {
+		t.Fatalf("chain after clear = %v, want empty", modesOf(after))
+	}
+
+	// Idempotent: clearing a card with no chain is a no-op.
+	if err := s.ClearIssueProcess(iss.ID); err != nil {
+		t.Fatalf("ClearIssueProcess on empty chain: %v", err)
+	}
+}
+
 func modesOf(jobs []*model.PipelineJob) []string {
 	out := make([]string, len(jobs))
 	for i, j := range jobs {

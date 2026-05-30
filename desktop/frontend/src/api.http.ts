@@ -2816,6 +2816,19 @@ export async function editCardProcessTail(
   });
 }
 
+// resetCardProcess wipes an in_pipeline card's ENTIRE job chain (BACI-314)
+// — including completed / cancelled history — so the card drops back to the
+// from-scratch picker. Refused (409) by the server while a job is running.
+// Returns the refreshed (empty) chain.
+export async function resetCardProcess(
+  repoPrefix: string,
+  key: string,
+): Promise<PipelineJob[]> {
+  return await call<PipelineJob[]>(`/repos/${repoPrefix}/issues/${key}/process/reset`, {
+    method: 'POST',
+  });
+}
+
 export async function startCardJob(
   repoPrefix: string,
   key: string,

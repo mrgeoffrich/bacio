@@ -192,6 +192,50 @@ func (d deps) handleIssueProcessEdit(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, jobs)
 }
 
+// handleIssueProcessReset — POST /repos/{prefix}/issues/{key}/process/reset.
+// Wipes the card's ENTIRE job chain (BACI-314) — the deliberate counterpart
+// to handleIssueProcess that bypasses the started>0 guard so a started /
+// finished / aborted chain can be cleared, dropping the card back to the
+// from-scratch picker. A running job is refused (Stop first): the engine
+// returns pipeline.ErrJobRunning, mapped to 409 conflict. Returns the
+// refreshed (empty) chain.
+func (d deps) handleIssueProcessReset(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	iss, ok := resolveIssueOnRepo(w, r, d.store, repo)
+	if !ok {
+		return
+	}
+	if isDryRun(r) {
+		writeDryRun(w, http.StatusOK, []*model.PipelineJob{})
+		return
+	}
+	if err := pipeline.New(d.store).WithLogger(d.logger).ResetProcess(iss.ID); err != nil {
+		if errors.Is(err, pipeline.ErrJobRunning) {
+			writeError(w, http.StatusConflict, "conflict", err.Error(), nil)
+			return
+		}
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	recordOp(d.store, d.logger, model.HistoryEntry{
+		RepoID: &iss.RepoID, RepoPrefix: repo.Prefix,
+		Actor: ActorFromContext(r.Context()),
+		Op:    "issue.process.reset", Kind: "issue",
+		TargetID: &iss.ID, TargetLabel: iss.Key,
+	})
+	jobs, err := d.store.ListPipelineJobs(iss.ID)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, jobs)
+}
+
 // handleIssueJobs — GET /repos/{prefix}/issues/{key}/jobs. Returns the
 // card's process chain (sequence-ordered).
 func (d deps) handleIssueJobs(w http.ResponseWriter, r *http.Request) {
