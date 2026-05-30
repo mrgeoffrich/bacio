@@ -69,15 +69,17 @@ func TestReportInstallAgentJSONShape(t *testing.T) {
 // to opt in; if the env-var name or the launch incantation drift the
 // user will be left wondering why the supervision they just installed
 // isn't firing. BACI-49 added two dangerously-* flags to the launch
-// line — they're pinned here so the one-line copy-paste hint can't
-// silently regress to the bare 'BACIO_AGENT_MODE=1 claude' form again.
+// line; BACI-301 injected the reverse-proxy env (ANTHROPIC_BASE_URL +
+// ENABLE_TOOL_SEARCH) — they're all pinned here so the one-line
+// copy-paste hint can't silently regress to a bare form again.
 func TestPrintActivationBannerMentionsEnvVar(t *testing.T) {
+	const endpoint = "http://127.0.0.1:5320/anthropic"
 	var buf bytes.Buffer
-	printActivationBanner(&buf)
+	printActivationBanner(&buf, endpoint)
 	got := buf.String()
 	for _, want := range []string{
 		"BACIO_AGENT_MODE",
-		"BACIO_AGENT_MODE=1 claude --dangerously-skip-permissions --dangerously-load-development-channels server:bacio",
+		"BACIO_AGENT_MODE=1 ANTHROPIC_BASE_URL=http://127.0.0.1:5320/anthropic ENABLE_TOOL_SEARCH=true claude --dangerously-skip-permissions --dangerously-load-development-channels server:bacio",
 		"bacio status",
 	} {
 		if !strings.Contains(got, want) {
