@@ -49,6 +49,59 @@ func TestAddProxyRequest_HappyPath(t *testing.T) {
 	}
 }
 
+// TestAddProxyRequest_ClassificationColumns round-trips the BACI-305
+// classification + correlation columns through AddProxyRequest →
+// GetProxyRequest, and confirms an unset dispatch_id reads back as nil.
+func TestAddProxyRequest_ClassificationColumns(t *testing.T) {
+	s := newTestStore(t)
+	dispatchID := int64(4242)
+	pr, err := s.AddProxyRequest(AddProxyRequestIn{
+		Method:      "POST",
+		Host:        "api.anthropic.com",
+		Path:        "/v1/messages",
+		Status:      200,
+		ContentType: "text/event-stream",
+		IsStream:    true,
+		IsAnthropic: true,
+		SessionID:   "sess-corr-1",
+		DispatchID:  &dispatchID,
+	})
+	if err != nil {
+		t.Fatalf("add: %v", err)
+	}
+	got, err := s.GetProxyRequest(pr.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.ContentType != "text/event-stream" {
+		t.Errorf("content_type = %q, want text/event-stream", got.ContentType)
+	}
+	if !got.IsStream || !got.IsAnthropic {
+		t.Errorf("is_stream/is_anthropic = %v/%v, want true/true", got.IsStream, got.IsAnthropic)
+	}
+	if got.SessionID != "sess-corr-1" {
+		t.Errorf("session_id = %q, want sess-corr-1", got.SessionID)
+	}
+	if got.DispatchID == nil || *got.DispatchID != 4242 {
+		t.Errorf("dispatch_id = %v, want 4242", got.DispatchID)
+	}
+
+	// A capture with no correlation reads back with empty/nil columns.
+	bare, err := s.AddProxyRequest(AddProxyRequestIn{
+		Method: "GET", Host: "api.anthropic.com", Path: "/v1/messages", Status: 200,
+	})
+	if err != nil {
+		t.Fatalf("add bare: %v", err)
+	}
+	bareGot, err := s.GetProxyRequest(bare.ID)
+	if err != nil {
+		t.Fatalf("get bare: %v", err)
+	}
+	if bareGot.IsStream || bareGot.IsAnthropic || bareGot.SessionID != "" || bareGot.DispatchID != nil {
+		t.Errorf("bare row should have empty classification/correlation: %+v", bareGot)
+	}
+}
+
 // TestAddProxyRequest_UpstreamError records a status-0 observation — the
 // shape the proxy hands the recorder when the round-trip fails before any
 // response (the proxy then surfaces a 502 to the client).

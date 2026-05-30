@@ -10,10 +10,12 @@ import "time"
 // best-effort observation, not user input, so it should land truncated
 // rather than drop the request from the index entirely.
 const (
-	MaxProxyMethodLen     = 16
-	MaxProxyHostLen       = 255
-	MaxProxyPathLen       = 2 << 10 // 2 KiB — a long path-plus-query still fits.
-	MaxProxyRawLogPathLen = 4 << 10 // 4 KiB — an absolute log-dir path.
+	MaxProxyMethodLen      = 16
+	MaxProxyHostLen        = 255
+	MaxProxyPathLen        = 2 << 10 // 2 KiB — a long path-plus-query still fits.
+	MaxProxyRawLogPathLen  = 4 << 10 // 4 KiB — an absolute log-dir path.
+	MaxProxyContentTypeLen = 255     // BACI-305 — a response Content-Type header value.
+	MaxProxySessionIDLen   = 64      // BACI-305 — a session_id (UUID-shaped) correlation key.
 )
 
 // ProxyRequest is one BACI-302 transport-level observation of a request
@@ -45,6 +47,19 @@ type ProxyRequest struct {
 	RawLogPath string    `json:"raw_log_path,omitempty"`
 	StartedAt  time.Time `json:"started_at"`
 	EndedAt    time.Time `json:"ended_at"`
+	// BACI-305 classification: ContentType is the response Content-Type
+	// (base type, lowercased); IsStream marks an SSE response; IsAnthropic
+	// marks a capture of the Anthropic message API. These let BACI-306's
+	// per-job parser select exactly the parseable Anthropic substrate.
+	ContentType  string `json:"content_type,omitempty"`
+	IsStream     bool   `json:"is_stream,omitempty"`
+	IsAnthropic  bool   `json:"is_anthropic,omitempty"`
+	// BACI-305 correlation: the worktree's active SessionID / DispatchID
+	// the capture was attributed to (resolved from the X-Bacio-Corr launch
+	// header). Both are best-effort: empty/nil when no correlation could be
+	// resolved. DispatchID has no FK — a capture row survives the dispatch.
+	SessionID  string `json:"session_id,omitempty"`
+	DispatchID *int64 `json:"dispatch_id,omitempty"`
 }
 
 // ProxyFQDNStat is the BACI-303 per-FQDN rollup of proxy_requests rows:

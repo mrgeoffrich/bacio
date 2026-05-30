@@ -984,6 +984,47 @@ func migrate(db *sql.DB) error {
 			return fmt.Errorf("add auto_ship to repo_settings: %w", err)
 		}
 	}
+	// BACI-305: classification + correlation columns on proxy_requests so
+	// BACI-306's per-job message parser can select exactly the Anthropic
+	// message captures and attribute them to a worktree's active dispatch.
+	// content_type / is_stream / is_anthropic are transport-level
+	// classification; session_id / dispatch_id are best-effort correlation
+	// resolved from the X-Bacio-Corr launch header. dispatch_id is a
+	// nullable INTEGER with no FK — a capture row is cross-cutting like the
+	// audit log, so a deleted dispatch must not cascade-delete it. Each
+	// ALTER is columnExists-guarded and idempotent; schema.sql carries the
+	// columns for fresh DBs.
+	for _, col := range []struct{ name, ddl string }{
+		{"content_type", `ALTER TABLE proxy_requests ADD COLUMN content_type TEXT NOT NULL DEFAULT ''`},
+		{"is_stream", `ALTER TABLE proxy_requests ADD COLUMN is_stream INTEGER NOT NULL DEFAULT 0`},
+		{"is_anthropic", `ALTER TABLE proxy_requests ADD COLUMN is_anthropic INTEGER NOT NULL DEFAULT 0`},
+		{"session_id", `ALTER TABLE proxy_requests ADD COLUMN session_id TEXT NOT NULL DEFAULT ''`},
+		{"dispatch_id", `ALTER TABLE proxy_requests ADD COLUMN dispatch_id INTEGER`},
+	} {
+		has, err := columnExists(db, "proxy_requests", col.name)
+		if err != nil {
+			return err
+		}
+		if !has {
+			if _, err := db.Exec(col.ddl); err != nil {
+				return fmt.Errorf("add %s to proxy_requests: %w", col.name, err)
+			}
+		}
+	}
+	// BACI-305: agent_sessions.worktree_slug carries the resolved wtenv
+	// manifest slug the session is driving, stamped at session open by the
+	// session-start hook. It is the launch-time-stable key the reverse-proxy
+	// capture resolves back to a session/dispatch. Idempotent ALTER for
+	// older DBs; schema.sql carries it for fresh ones.
+	hasWorktreeSlug, err := columnExists(db, "agent_sessions", "worktree_slug")
+	if err != nil {
+		return err
+	}
+	if !hasWorktreeSlug {
+		if _, err := db.Exec(`ALTER TABLE agent_sessions ADD COLUMN worktree_slug TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add worktree_slug to agent_sessions: %w", err)
+		}
+	}
 	return nil
 }
 

@@ -27,6 +27,59 @@ func seedDispatchFixture(t *testing.T) (*Store, *model.Repo, *model.Issue, *mode
 	return s, repo, iss, ag, sess
 }
 
+// TestActiveDispatchForSession returns the newest non-cancelled dispatch
+// targeting a session, skips cancelled rows, and is a no-op for an empty
+// or unknown session (BACI-305 correlation helper).
+func TestActiveDispatchForSession(t *testing.T) {
+	s, repo, iss, _, sess := seedDispatchFixture(t)
+
+	// No dispatches yet — nil, no error.
+	if d, err := s.ActiveDispatchForSession(sess.SessionID); err != nil || d != nil {
+		t.Fatalf("empty session: got (%v, %v), want (nil, nil)", d, err)
+	}
+
+	older, err := s.AddDispatch(AddDispatchIn{
+		RepoID: repo.ID, TargetSessionID: sess.SessionID, IssueID: &iss.ID,
+		Payload: "older", CreatedBy: "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add older: %v", err)
+	}
+	newer, err := s.AddDispatch(AddDispatchIn{
+		RepoID: repo.ID, TargetSessionID: sess.SessionID, IssueID: &iss.ID,
+		Payload: "newer", CreatedBy: "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("add newer: %v", err)
+	}
+
+	// Newest non-cancelled wins.
+	got, err := s.ActiveDispatchForSession(sess.SessionID)
+	if err != nil {
+		t.Fatalf("active: %v", err)
+	}
+	if got == nil || got.ID != newer.ID {
+		t.Fatalf("active = %v, want newest dispatch %d", got, newer.ID)
+	}
+
+	// Cancel the newest — the older one becomes the active pick.
+	if _, err := s.CancelDispatch(newer.ID); err != nil {
+		t.Fatalf("cancel newer: %v", err)
+	}
+	got, err = s.ActiveDispatchForSession(sess.SessionID)
+	if err != nil {
+		t.Fatalf("active after cancel: %v", err)
+	}
+	if got == nil || got.ID != older.ID {
+		t.Fatalf("active after cancel = %v, want older dispatch %d (cancelled skipped)", got, older.ID)
+	}
+
+	// Empty session id is a no-op.
+	if d, err := s.ActiveDispatchForSession(""); err != nil || d != nil {
+		t.Fatalf("empty session id: got (%v, %v), want (nil, nil)", d, err)
+	}
+}
+
 // TestAddDispatchRequiresTarget locks in that a dispatch with neither an
 // agent identity nor a session target is rejected at the store boundary.
 func TestAddDispatchRequiresTarget(t *testing.T) {

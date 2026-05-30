@@ -494,7 +494,14 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
     -- error_message is the human blurb (length-capped at the boundary).
     errored_at      DATETIME,
     error_type      TEXT    NOT NULL DEFAULT '',
-    error_message   TEXT    NOT NULL DEFAULT ''
+    error_message   TEXT    NOT NULL DEFAULT '',
+    -- worktree_slug is the resolved wtenv manifest slug for the worktree
+    -- this session is driving (BACI-305). It is the launch-time-stable
+    -- correlation key the reverse-proxy capture stamps onto each agent
+    -- Anthropic request (via ANTHROPIC_CUSTOM_HEADERS): the recorder maps
+    -- the inbound header back to the worktree's active session/dispatch.
+    -- Empty for sessions outside a worktree env (legacy shared default).
+    worktree_slug   TEXT    NOT NULL DEFAULT ''
 );
 
 -- idx_agent_sessions_agent is created in migrate() so it works on databases
@@ -940,7 +947,25 @@ CREATE TABLE IF NOT EXISTS proxy_requests (
     duration_ms  INTEGER NOT NULL DEFAULT 0,
     raw_log_path TEXT    NOT NULL DEFAULT '',
     started_at   DATETIME NOT NULL,
-    ended_at     DATETIME NOT NULL
+    ended_at     DATETIME NOT NULL,
+    -- BACI-305 classification: content_type is the response Content-Type
+    -- (lowercased, base type only — no params); is_stream marks an SSE
+    -- (text/event-stream) response; is_anthropic marks a capture of the
+    -- Anthropic message API (host api.anthropic.com under /v1/). They let
+    -- BACI-306's per-job message parser select exactly the parseable
+    -- substrate without re-deriving it from method/host/path.
+    content_type TEXT    NOT NULL DEFAULT '',
+    is_stream    INTEGER NOT NULL DEFAULT 0,
+    is_anthropic INTEGER NOT NULL DEFAULT 0,
+    -- BACI-305 correlation: the worktree's active session_id / dispatch_id
+    -- the capture is attributed to, resolved from the X-Bacio-Corr header
+    -- the launch one-liner stamps. session_id mirrors agent_sessions.session_id
+    -- (TEXT); dispatch_id is a nullable INTEGER with NO FK — like the audit
+    -- log, a capture row is cross-cutting and must not cascade-delete when a
+    -- dispatch is removed. Empty/NULL when no correlation could be resolved
+    -- (best-effort attribution).
+    session_id   TEXT    NOT NULL DEFAULT '',
+    dispatch_id  INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_proxy_requests_started
