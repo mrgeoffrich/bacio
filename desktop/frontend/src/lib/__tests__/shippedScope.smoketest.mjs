@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const componentsRoot = path.resolve(__dirname, '..', '..', 'components');
 
-const { SHIPPED_SCOPES, scopeSinceDays, scopeLabel, isShippedScope } =
+const { SHIPPED_SCOPES, scopeSinceDays, scopeSinceParams, scopeLabel, isShippedScope } =
   await import(path.join(componentsRoot, 'shippedScope.ts'));
 
 // localStorage shim — Node doesn't have one. The persistence helper
@@ -41,6 +41,44 @@ test('scopeSinceDays maps to the API sinceDays parameter', () => {
   // 0 is the "Forever" sentinel both the Wails binding and the HTTP
   // twin honour as "no lower bound".
   assert.equal(scopeSinceDays('forever'), 0);
+});
+
+test('scopeSinceParams: week/forever keep the relative-window path', () => {
+  // BACI-312: only `today` graduated to an absolute cutoff; week/forever
+  // still carry sinceDays and an empty sinceTs.
+  assert.deepEqual(scopeSinceParams('week', 'Australia/Sydney'), { sinceDays: 7, sinceTs: '' });
+  assert.deepEqual(scopeSinceParams('forever', 'Australia/Sydney'), { sinceDays: 0, sinceTs: '' });
+});
+
+test('scopeSinceParams: today returns local-midnight-in-tz as an absolute RFC3339 cutoff', () => {
+  const { sinceDays, sinceTs } = scopeSinceParams('today', 'Australia/Sydney');
+  assert.equal(sinceDays, 0, 'today must not carry a relative window');
+  assert.ok(sinceTs, 'today must carry an absolute sinceTs');
+  // The cutoff, rendered back in the same zone, must read as 00:00:00 on
+  // the zone's current calendar day — i.e. it IS local midnight.
+  const wall = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Australia/Sydney',
+    hourCycle: 'h23',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(new Date(sinceTs));
+  assert.equal(wall, '00:00:00', `sinceTs should be local midnight in Sydney, got ${wall}`);
+});
+
+test('scopeSinceParams: UTC midnight round-trips to 00:00:00Z', () => {
+  const { sinceTs } = scopeSinceParams('today', 'UTC');
+  assert.ok(sinceTs.endsWith('T00:00:00.000Z') || sinceTs.endsWith('T00:00:00Z'),
+    `UTC midnight should end the day at 00:00:00Z, got ${sinceTs}`);
+});
+
+test('scopeSinceParams: empty tz falls back to the host zone without throwing', () => {
+  // The setting is unset before auto-detect fills it — "Today" must still
+  // resolve to *a* midnight rather than crashing.
+  const { sinceDays, sinceTs } = scopeSinceParams('today', '');
+  assert.equal(sinceDays, 0);
+  assert.ok(sinceTs, 'empty tz must still yield an absolute cutoff');
+  assert.doesNotThrow(() => new Date(sinceTs).toISOString());
 });
 
 test('scopeLabel surfaces the picker button text', () => {
