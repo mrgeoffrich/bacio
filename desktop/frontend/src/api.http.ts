@@ -2781,6 +2781,21 @@ export async function setCardProcess(
   });
 }
 
+// editCardProcessTail edits the pending tail of an in_pipeline card's job
+// chain (BACI-294). stages is the re-ordered pending tail only; the server
+// reads the locked prefix (completed/running/cancelled jobs) from the
+// store. Returns the refreshed chain.
+export async function editCardProcessTail(
+  repoPrefix: string,
+  key: string,
+  stages: string[],
+): Promise<PipelineJob[]> {
+  return await call<PipelineJob[]>(`/repos/${repoPrefix}/issues/${key}/process/tail`, {
+    method: 'PUT',
+    body: { key, stages },
+  });
+}
+
 export async function startCardJob(
   repoPrefix: string,
   key: string,

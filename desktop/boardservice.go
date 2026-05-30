@@ -895,6 +895,19 @@ func (b *BoardService) SetCardProcess(repoPrefix, key, process string, stages []
 	return b.client.SetIssueProcess(ctx, repo, key, process, stages, false)
 }
 
+// EditCardProcessTail edits the pending tail of an in_pipeline card's job
+// chain (BACI-294): the completed / running / cancelled jobs stay as a
+// locked prefix; stages is the re-ordered pending tail that replaces the
+// card's pending jobs, re-sequenced after the prefix.
+func (b *BoardService) EditCardProcessTail(repoPrefix, key string, stages []string) ([]*model.PipelineJob, error) {
+	ctx := context.Background()
+	repo, err := b.resolveRepoForKey(ctx, repoPrefix, key)
+	if err != nil {
+		return nil, err
+	}
+	return b.client.EditIssueProcessTail(ctx, repo, key, stages, false)
+}
+
 func (b *BoardService) StartCardJob(repoPrefix, key string) ([]*model.PipelineJob, error) {
 	ctx := context.Background()
 	repo, err := b.resolveRepoForKey(ctx, repoPrefix, key)

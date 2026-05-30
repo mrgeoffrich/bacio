@@ -434,6 +434,23 @@ export async function setCardProcess(
   }
 }
 
+// editCardProcessTail edits the pending tail of an in_pipeline card's job
+// chain (BACI-294): the completed / running / cancelled jobs stay as a
+// locked prefix; `stages` is the re-ordered pending tail that replaces the
+// card's pending jobs. Returns the refreshed chain.
+export async function editCardProcessTail(
+  repoPrefix: string,
+  key: string,
+  stages: string[],
+): Promise<PipelineJob[]> {
+  try {
+    const jobs = await BoardService.EditCardProcessTail(repoPrefix, key, stages);
+    return (jobs ?? []).filter((j): j is PipelineJob => j != null);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
 // startCardJob is the manual Start control — advance one step (start the
 // next pending job, or run the Ship hand-off). Returns the refreshed chain.
 export async function startCardJob(
