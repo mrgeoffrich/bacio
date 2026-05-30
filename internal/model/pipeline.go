@@ -158,17 +158,25 @@ func ProcessBySlug(slug string) (Process, error) {
 	return Process{}, fmt.Errorf("unknown pipeline process %q", slug)
 }
 
-// ProcessFromStages builds a Process from an explicit ordered stage list
-// — the construction path behind the desktop cumulative-stepper picker,
-// which can express arbitrary chains the named presets don't enumerate
-// (e.g. design → plan_large → implement → ship). It is the single
-// validation gate for a free-form chain, mirroring ProcessBySlug's role
-// for the named ones: every stage must be a known builtin template slug
-// or the Ship hand-off sentinel; Ship may appear only as the trailing
-// stage; no duplicate non-ship modes; the list must be non-empty. The
-// synthesised Slug (modes joined with "-") and Name (action labels joined
-// with " → ") are for audit / display only — nothing keys off them.
-func ProcessFromStages(stages []string) (Process, error) {
+// stageModeAllowed reports whether a (lowercased, trimmed) stage mode is a
+// valid non-ship chain stage: a dispatchable built-in template slug. The
+// reserved _dispatch_preamble (and any other leading-underscore reserved
+// slug) is excluded — it is the wrapper prepended to every dispatch, never
+// a stage a user can put in a chain. BuiltinTemplateSlugs() leads with it,
+// so building the allowed set off the slug list alone would (wrongly)
+// accept it; gating on a non-empty action label is the same predicate the
+// dispatch dropdown uses (BuiltinTemplateActionLabel returns "" only for
+// _dispatch_preamble).
+func stageModeAllowed(mode string) bool {
+	if mode == ShipJobMode {
+		return true
+	}
+	return BuiltinTemplateActionLabel(mode) != ""
+}
+
+// normaliseStages lowercases, trims, and drops blank entries from a raw
+// stage list — the shared front-half of both stage-list constructors.
+func normaliseStages(stages []string) []string {
 	norm := make([]string, 0, len(stages))
 	for _, s := range stages {
 		m := strings.ToLower(strings.TrimSpace(s))
@@ -176,12 +184,38 @@ func ProcessFromStages(stages []string) (Process, error) {
 			norm = append(norm, m)
 		}
 	}
+	return norm
+}
+
+// stageDisplay synthesises the audit/display Slug (modes joined with "-")
+// and Name (action labels joined with " → ") for a normalised mode list.
+// Display-only — nothing keys off them.
+func stageDisplay(modes []string) (slug, name string) {
+	labels := make([]string, len(modes))
+	for i, m := range modes {
+		if lbl := BuiltinTemplateActionLabel(m); lbl != "" {
+			labels[i] = lbl
+		} else {
+			labels[i] = m
+		}
+	}
+	return strings.Join(modes, "-"), strings.Join(labels, " → ")
+}
+
+// ProcessFromStages builds a Process from an explicit ordered stage list
+// — the construction path behind the desktop cumulative-stepper picker,
+// which can express arbitrary chains the named presets don't enumerate
+// (e.g. design → plan_large → implement → ship). It is the single
+// validation gate for a free-form chain, mirroring ProcessBySlug's role
+// for the named ones: every stage must be a dispatchable builtin template
+// slug or the Ship hand-off sentinel; Ship may appear only as the trailing
+// stage; no duplicate non-ship modes; the list must be non-empty. The
+// synthesised Slug (modes joined with "-") and Name (action labels joined
+// with " → ") are for audit / display only — nothing keys off them.
+func ProcessFromStages(stages []string) (Process, error) {
+	norm := normaliseStages(stages)
 	if len(norm) == 0 {
 		return Process{}, fmt.Errorf("stages must list at least one job mode")
-	}
-	allowed := make(map[string]bool, len(builtinTemplateSlugs))
-	for _, s := range BuiltinTemplateSlugs() {
-		allowed[s] = true
 	}
 	seen := make(map[string]bool, len(norm))
 	for i, m := range norm {
@@ -191,7 +225,7 @@ func ProcessFromStages(stages []string) (Process, error) {
 			}
 			continue
 		}
-		if !allowed[m] {
+		if !stageModeAllowed(m) {
 			return Process{}, fmt.Errorf("unknown job mode %q", m)
 		}
 		if seen[m] {
@@ -199,19 +233,44 @@ func ProcessFromStages(stages []string) (Process, error) {
 		}
 		seen[m] = true
 	}
-	labels := make([]string, len(norm))
-	for i, m := range norm {
-		if lbl := BuiltinTemplateActionLabel(m); lbl != "" {
-			labels[i] = lbl
-		} else {
-			labels[i] = m
+	slug, name := stageDisplay(norm)
+	return Process{Slug: slug, Name: name, Stages: norm}, nil
+}
+
+// ProcessFromStagesWithPrefix validates an edited chain that keeps an
+// immutable locked prefix (the completed / running / cancelled jobs the
+// engine has already advanced past) and replaces the editable pending tail
+// — the construction path behind the BACI-294 Edit Process screen. It
+// validates the *combined* prefix+tail chain: every non-ship mode must be
+// a dispatchable builtin (ship excepted), and Ship may appear only as the
+// final stage of the whole chain. Unlike ProcessFromStages it does NOT
+// reject duplicate modes — a re-loop (Implement → Review → Implement) is a
+// deliberately expressible chain on the edit path. At least one of prefix
+// or tail must be non-empty.
+//
+// The returned Process.Stages is the validated TAIL ONLY (re-sequenced
+// after the prefix by the store, which is the source of truth for the
+// locked rows); Slug/Name describe the whole chain for audit/display.
+func ProcessFromStagesWithPrefix(prefixModes, tailModes []string) (Process, error) {
+	prefix := normaliseStages(prefixModes)
+	tail := normaliseStages(tailModes)
+	combined := append(append([]string(nil), prefix...), tail...)
+	if len(combined) == 0 {
+		return Process{}, fmt.Errorf("stages must list at least one job mode")
+	}
+	for i, m := range combined {
+		if m == ShipJobMode {
+			if i != len(combined)-1 {
+				return Process{}, fmt.Errorf("ship may only be the final stage")
+			}
+			continue
+		}
+		if !stageModeAllowed(m) {
+			return Process{}, fmt.Errorf("unknown job mode %q", m)
 		}
 	}
-	return Process{
-		Slug:   strings.Join(norm, "-"),
-		Name:   strings.Join(labels, " → "),
-		Stages: norm,
-	}, nil
+	slug, name := stageDisplay(combined)
+	return Process{Slug: slug, Name: name, Stages: tail}, nil
 }
 
 // ResolveProcess picks the right constructor for the `issue process set`
