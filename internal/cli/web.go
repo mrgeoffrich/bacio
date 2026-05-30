@@ -151,12 +151,21 @@ Incoming requests carry their own actor via the X-Actor header
 					"  Skipping the browser launch — /ui/ would 404.")
 			}
 
+			// Resolve the log dir for the BACI-302 proxy capture sink. A
+			// resolution failure isn't fatal — the recorder simply skips the
+			// raw-to-disk write (index rows still land) — so swallow the
+			// error and pass an empty dir.
+			var logDir string
+			if logRes, err := resolveLogging(env); err == nil {
+				logDir = logRes.Dir
+			}
 			srv := api.New(s, api.Options{
 				Addr:        addr,
 				Token:       token,
 				CORSOrigins: corsOrigins,
 				MountUI:     true,
 				DBPath:      env.DBPath,
+				LogDir:      logDir,
 			}, logger)
 
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/mrgeoffrich/bacio/internal/api"
+	"github.com/mrgeoffrich/bacio/internal/model"
+	"github.com/mrgeoffrich/bacio/internal/store"
 )
 
 // fakeUpstream spins an httptest server that records the inbound request
@@ -119,4 +121,60 @@ func TestProxyRoute_DefaultUpstream(t *testing.T) {
 	if resp.StatusCode == http.StatusNotFound && string(body) == string(missingBody) {
 		t.Fatalf("/anthropic/* returned the ServeMux 404 envelope — the route wasn't mounted for an empty ProxyUpstream")
 	}
+}
+
+// TestProxyRoute_CapturesIndexRow drives a request through the api server to
+// a fake upstream and asserts (after the async capture worker drains) that a
+// proxy_requests index row landed with the transport-level fields filled in.
+// This is the BACI-302 capture pipeline end-to-end through newTestAPI.
+func TestProxyRoute_CapturesIndexRow(t *testing.T) {
+	up := fakeUpstream(t, nil)
+	logDir := t.TempDir()
+	ts, s := newTestAPI(t, api.Options{ProxyUpstream: up.URL, LogDir: logDir})
+
+	resp := do(t, http.MethodPost, ts.URL+"/anthropic/v1/messages",
+		strings.NewReader(`{"hi":1}`), nil)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d (body %q), want 200", resp.StatusCode, body)
+	}
+
+	// Capture is async (off the request path), so poll the index until the
+	// row lands or the deadline passes.
+	row := waitForProxyRow(t, s)
+	if row.Method != http.MethodPost {
+		t.Errorf("method = %q, want POST", row.Method)
+	}
+	if row.Path != "/v1/messages" {
+		t.Errorf("path = %q, want /v1/messages (prefix stripped)", row.Path)
+	}
+	if row.Status != http.StatusOK {
+		t.Errorf("status = %d, want 200", row.Status)
+	}
+	if row.BytesOut != int64(len("upstream-ok")) {
+		t.Errorf("bytes_out = %d, want %d", row.BytesOut, len("upstream-ok"))
+	}
+	if row.RawLogPath == "" {
+		t.Errorf("raw_log_path is empty — the capture file should have been written under %q", logDir)
+	}
+}
+
+// waitForProxyRow polls the proxy_requests index until at least one row
+// appears, returning the newest, or fails the test on timeout.
+func waitForProxyRow(t *testing.T, s *store.Store) *model.ProxyRequest {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		rows, err := s.ListProxyRequests(1)
+		if err != nil {
+			t.Fatalf("list proxy requests: %v", err)
+		}
+		if len(rows) > 0 {
+			return rows[0]
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for a proxy_requests index row to land")
+	return nil
 }
