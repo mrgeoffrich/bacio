@@ -1676,6 +1676,72 @@ export class PromptTemplateDTO {
 }
 
 /**
+ * ProxyFQDNStatDTO is one per-FQDN proxy-traffic rollup, shaped for the
+ * desktop Monitor table (BACI-304). It mirrors model.ProxyFQDNStat field
+ * for field but carries camelCase JSON tags so the Wails-generated TS
+ * binding matches the React shape the web twin re-exports. ErrorRate is a
+ * fraction in [0,1]; the component formats it as a percentage. P50Ms /
+ * P95Ms are round-trip latency percentiles in milliseconds; FirstSeen /
+ * LastSeen bracket the host's activity window.
+ */
+export class ProxyFQDNStatDTO {
+    "host": string;
+    "requestCount": number;
+    "bytesIn": number;
+    "bytesOut": number;
+    "errorCount": number;
+    "errorRate": number;
+    "p50Ms": number;
+    "p95Ms": number;
+    "firstSeen": time$0.Time;
+    "lastSeen": time$0.Time;
+
+    /** Creates a new ProxyFQDNStatDTO instance. */
+    constructor($$source: Partial<ProxyFQDNStatDTO> = {}) {
+        if (!("host" in $$source)) {
+            this["host"] = "";
+        }
+        if (!("requestCount" in $$source)) {
+            this["requestCount"] = 0;
+        }
+        if (!("bytesIn" in $$source)) {
+            this["bytesIn"] = 0;
+        }
+        if (!("bytesOut" in $$source)) {
+            this["bytesOut"] = 0;
+        }
+        if (!("errorCount" in $$source)) {
+            this["errorCount"] = 0;
+        }
+        if (!("errorRate" in $$source)) {
+            this["errorRate"] = 0;
+        }
+        if (!("p50Ms" in $$source)) {
+            this["p50Ms"] = 0;
+        }
+        if (!("p95Ms" in $$source)) {
+            this["p95Ms"] = 0;
+        }
+        if (!("firstSeen" in $$source)) {
+            this["firstSeen"] = null;
+        }
+        if (!("lastSeen" in $$source)) {
+            this["lastSeen"] = null;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ProxyFQDNStatDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ProxyFQDNStatDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ProxyFQDNStatDTO($$parsedSource as Partial<ProxyFQDNStatDTO>);
+    }
+}
+
+/**
  * RelationDTO is one outgoing/incoming relation, resolved to the other
  * end's issue key.
  */

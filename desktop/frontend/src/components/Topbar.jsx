@@ -18,6 +18,7 @@ export const NAV = [
   { view: 'docs', label: 'Documents' },
   { view: 'agents', label: 'Agents' },
   { view: 'history', label: 'History' },
+  { view: 'monitor', label: 'Monitor' },
 ];
 
 // formatSyncTime renders an ISO timestamp as a short local string for

@@ -186,6 +186,7 @@ shapes into the desktop's `BoardCard` / `IssueDetail` / `DocSummary` /
 | `bacioVersion()` | `GET /version` (BACI-47/A) | Returns the same `internal/version.String()` used by `bacio --version` and the per-session `bacio_version` in the Agents panel — cross-checking the readout against a session's version reliably surfaces stale channels. |
 | `listShippedIssues(p, sinceDays, limit)` | `GET /repos/{p}/shipped?since=&limit=` (BACI-187, BACI-221) | Topbar Shipped popover's list fetch. `sinceDays=0` is the "Forever" sentinel — the bundle omits `?since=` so the server returns the unbounded list. Response shape is `{rows, total}` so the popover header can render "showing N of TOTAL" without a second round trip. |
 | `countShippedIssues(p, sinceDays)` | `GET /repos/{p}/shipped/count?since=` (BACI-221) | Lean count-only sibling polled on the standard 10s `POLL_INTERVAL_MS` cadence so the topbar "Shipped · N" pill reflects the active Today / Last Week / Forever scope even when the popover is closed. No `?limit=` parameter — count is total under the scope. |
+| `listProxyStats(sinceDays)` | `GET /proxy/stats?since=` (BACI-304) | The Monitor screen's per-FQDN reverse-proxy rollup. **Cross-cutting** — `proxy_requests` has no `repo_id`, so this is the rare seam method that takes no repo prefix; the endpoint is the cross-cutting sibling of `/history`, behind the bearer-token auth (outside the `/anthropic/` exemption). `sinceDays=0` is the "All-time" sentinel (omit `?since=`); a positive value maps to the rolling `?since=Nd` lookback. Reshapes the server's snake_case `ProxyFQDNStat` rows into the camelCase shape `MonitorView` consumes. Wails twin is `MonitorService.ProxyStats`. |
 
 ---
 
@@ -402,6 +403,10 @@ truth for the active repo** — `App` derives the active repo from
     survive the round-trip.
   - `/:prefix/agents` → `AgentsView`.
   - `/:prefix/history` → `HistoryView`.
+  - `/:prefix/monitor` → `MonitorView` (BACI-304). The route nests under
+    `/:prefix` for nav uniformity, but the per-FQDN proxy stats are
+    global (the `proxy_requests` table is cross-cutting, no `repo_id`),
+    so the screen ignores the active repo for its data.
   - **Active-repo resolution.** App matches the URL's first segment to a
     known board *case-insensitively* (a lowercased shared link still
     resolves) but always emits the canonical uppercase prefix in
@@ -471,7 +476,7 @@ truth for the active repo** — `App` derives the active repo from
   addressable state, and don't belong on a shareable URL. The URL
   carries only the path.
 - **Topbar derives the active view from `useLocation`.** The
-  segmented `Pipeline / Features / Documents / Agents / History`
+  segmented `Pipeline / Features / Documents / Agents / History / Monitor`
   buttons highlight the matching segment via `viewFromPath`, which
   skips the leading prefix segment before classifying
   (`/BACI/issues/...` → `board`, `/BACI/features/...` → `features`, ...).

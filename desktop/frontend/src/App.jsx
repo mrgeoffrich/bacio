@@ -6,6 +6,7 @@ import DocsView from './components/DocsView.jsx';
 import FeaturesView from './components/FeaturesView.jsx';
 import AgentsView from './components/AgentsView.jsx';
 import HistoryView from './components/HistoryView.jsx';
+import MonitorView from './components/MonitorView.jsx';
 import PipelineView from './components/PipelineView.jsx';
 import ProcessEditor from './components/ProcessEditor.jsx';
 import IssueWorkspace from './components/IssueWorkspace.jsx';
@@ -57,7 +58,7 @@ function persistActiveRepo(prefix) {
 // path segment landing on one of these — instead of a known repo
 // prefix — is treated as a soft-redirect (rebase the path under the
 // active repo's prefix) rather than a hard 404 (RepoNotFound).
-const LEGACY_PAGE_WORDS = new Set(['pipeline', 'issues', 'features', 'documents', 'agents', 'history']);
+const LEGACY_PAGE_WORDS = new Set(['pipeline', 'issues', 'features', 'documents', 'agents', 'history', 'monitor']);
 
 // legacyPageWord reports whether the URL's first segment is one of the
 // recognised prefix-less page words — the signal that an unmatched
@@ -1380,6 +1381,14 @@ export default function App() {
             element={
               <ErrorBoundary headline="Something went wrong in History" label="The History view crashed">
                 <HistoryView activeBoard={activeBoard} />
+              </ErrorBoundary>
+            }
+          />
+          <Route
+            path="/:prefix/monitor"
+            element={
+              <ErrorBoundary headline="Something went wrong in Monitor" label="The Monitor view crashed">
+                <MonitorView activeBoard={activeBoard} />
               </ErrorBoundary>
             }
           />
