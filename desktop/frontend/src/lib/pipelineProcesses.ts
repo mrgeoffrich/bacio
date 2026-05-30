@@ -23,16 +23,20 @@ export const PIPELINE_PROCESSES: PipelineProcess[] = [
   { slug: 'implement', name: 'Implement', stages: ['implement'] },
 ];
 
-// PRESET_BY_SLUG indexes PIPELINE_PROCESSES so the kept skip-Plan preset
-// buttons (Implement / Implement → Ship) can still resolve a slug for
-// rendering their chip rows.
+// PRESET_BY_SLUG indexes PIPELINE_PROCESSES by slug so any caller that has
+// a preset slug (e.g. the CLI `bacio issue process set <KEY> <preset>`
+// mirror) can resolve its name + stages. The in-pipeline picker no longer
+// consumes it — BACI-299 replaced the skip-Plan preset buttons with free
+// stage toggles that always send an explicit `{ stages }` list.
 export const PRESET_BY_SLUG: Record<string, PipelineProcess> =
   Object.fromEntries(PIPELINE_PROCESSES.map(p => [p.slug, p]));
 
 // ProcessSelection is what the picker hands back to setCardProcess: an
-// explicit ordered stage list from the cumulative stepper, or a preset
-// slug from the kept skip-Plan buttons. Mutually exclusive — the api
-// seam sends exactly one, mirroring the server's ResolveProcess guard.
+// explicit ordered stage list from the toggles, or a preset slug. The
+// BACI-299 picker only ever emits the `{ stages }` arm; the `{ process }`
+// arm stays for other call sites threading a preset slug. Mutually
+// exclusive — the api seam sends exactly one, mirroring the server's
+// ResolveProcess guard.
 export type ProcessSelection = { stages: string[] } | { process: string };
 
 // stageLabel renders a job/stage mode as a short title-cased label for

@@ -2074,64 +2074,92 @@ body { margin: 0; }
 .mk-pl-chip.is-implement { background: var(--status-doing-bg); color: var(--status-doing); }
 .mk-pl-chip.is-ship { background: var(--status-review-bg); color: var(--status-review); }
 
-/* ── cumulative-stepper picker (BACI-283) ── */
-.mk-pl-procmenu-sub {
-  font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em;
-  text-transform: uppercase; color: var(--fg-3); padding: 12px 8px 4px;
+/* ── segmented-checklist picker (BACI-299, Option C) ──
+   Four independent stage toggles in fixed canonical order; the lit
+   segments are the chain, with a connector that fills only when both
+   flanking segments are on. Below an "or" divider, a standalone Large
+   Plan row is mutually exclusive with the segbar. */
+.mk-pl-segbar {
+  display: flex; align-items: stretch; justify-content: center;
+  gap: 0; padding: 10px 6px 4px; flex-wrap: wrap;
 }
-.mk-pl-stepper {
-  display: flex; align-items: flex-start; justify-content: center;
-  gap: 0; padding: 10px 8px 4px; flex-wrap: wrap;
-}
-.mk-pl-stepnode-wrap {
-  display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0;
-}
-.mk-pl-stepnode {
+.mk-pl-segbar.is-dim { opacity: .4; }
+.mk-pl-seg {
   display: inline-flex; flex-direction: column; align-items: center; gap: 4px;
+  position: relative; min-width: 48px;
   padding: 7px 10px; border-radius: var(--radius-md); cursor: pointer;
   border: 1px solid var(--border-1); background: var(--bg-1);
 }
-.mk-pl-stepnode:hover { border-color: var(--border-2); }
-.mk-pl-stepnode.is-optional { border-style: dashed; }
-.mk-pl-stepglyph {
+.mk-pl-seg:hover:not(:disabled) { border-color: var(--border-2); }
+.mk-pl-seg:disabled { cursor: default; }
+.mk-pl-seg-glyph {
   font-family: var(--font-mono); font-size: 13px; font-weight: 700;
   width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center;
   border-radius: var(--radius-full); background: var(--ink-50); color: var(--fg-3);
 }
-.mk-pl-steplbl { font-size: 11px; font-weight: 600; color: var(--fg-3); }
-/* filled (selected-up-to or design-on) nodes carry the stage colour */
-.mk-pl-stepnode.is-active .mk-pl-steplbl { color: var(--fg-1); }
-.mk-pl-stepnode.is-active.is-plan .mk-pl-stepglyph { background: var(--status-todo-bg); color: var(--status-todo); }
-.mk-pl-stepnode.is-active.is-plan_large .mk-pl-stepglyph { background: var(--status-todo-bg); color: var(--status-todo); }
-.mk-pl-stepnode.is-active.is-design .mk-pl-stepglyph { background: var(--status-claude-bg); color: var(--status-claude); }
-.mk-pl-stepnode.is-active.is-implement .mk-pl-stepglyph { background: var(--status-doing-bg); color: var(--status-doing); }
-.mk-pl-stepnode.is-active.is-ship .mk-pl-stepglyph { background: var(--status-review-bg); color: var(--status-review); }
+.mk-pl-seg-lbl { font-size: 11px; font-weight: 600; color: var(--fg-3); }
+.mk-pl-seg-tick {
+  position: absolute; top: -6px; right: -6px;
+  width: 16px; height: 16px; border-radius: var(--radius-full);
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 9px; font-weight: 700; color: var(--paper); background: var(--status-doing);
+}
+/* lit segments carry the stage colour, mirroring .mk-pl-chip.is-<mode> */
+.mk-pl-seg.is-on { border-color: var(--status-doing); }
+.mk-pl-seg.is-on .mk-pl-seg-lbl { color: var(--fg-1); }
+.mk-pl-seg.is-on.is-plan .mk-pl-seg-glyph { background: var(--status-todo-bg); color: var(--status-todo); }
+.mk-pl-seg.is-on.is-design .mk-pl-seg-glyph { background: var(--status-claude-bg); color: var(--status-claude); }
+.mk-pl-seg.is-on.is-implement .mk-pl-seg-glyph { background: var(--status-doing-bg); color: var(--status-doing); }
+.mk-pl-seg.is-on.is-ship .mk-pl-seg-glyph { background: var(--status-review-bg); color: var(--status-review); }
 .mk-pl-step-conn {
   flex: 0 0 auto; width: 20px; height: 2px; background: var(--border-1);
   align-self: flex-start; margin: 20px 2px 0;
 }
 .mk-pl-step-conn.is-active { background: var(--status-doing); }
-.mk-pl-stepswap {
-  font-family: var(--font-mono); font-size: 10px; font-weight: 600;
-  padding: 2px 6px; border-radius: var(--radius-full); cursor: pointer;
-  border: 1px solid var(--border-1); background: var(--bg-1); color: var(--fg-2);
+/* the lit segments ARE the preview; this caption echoes the canonical
+   chain (or the empty-state hint when nothing is selected). */
+.mk-pl-segcap {
+  text-align: center; font-size: 12px; font-weight: 600; color: var(--fg-3);
+  min-height: 16px; padding: 2px 8px 6px;
 }
-.mk-pl-stepswap:hover { border-color: var(--border-2); color: var(--fg-1); }
-.mk-pl-stepopt { font-size: 10px; color: var(--fg-4); }
-.mk-pl-steppreview {
-  display: flex; align-items: center; gap: 8px; justify-content: center;
-  padding: 8px; font-size: 12.5px;
+.mk-pl-segcap.is-empty { color: var(--status-error); }
+.mk-pl-or {
+  display: flex; align-items: center; gap: 8px; padding: 4px 10px;
 }
-.mk-pl-steppreview-lbl {
+.mk-pl-or::before, .mk-pl-or::after {
+  content: ""; flex: 1; height: 1px; background: var(--border-1);
+}
+.mk-pl-or span {
   font-family: var(--font-mono); font-size: 10px; letter-spacing: .08em;
   text-transform: uppercase; color: var(--fg-3);
 }
-.mk-pl-steppreview-val { font-weight: 600; color: var(--fg-1); }
+.mk-pl-largeplan {
+  display: flex; align-items: center; gap: 8px; margin: 2px 2px 0;
+  padding: 9px 10px; border-radius: var(--radius-md); cursor: pointer;
+  font-size: 13px; font-weight: 600; color: var(--fg-1); text-align: left;
+  border: 1px dashed var(--border-1); background: transparent;
+}
+.mk-pl-largeplan:hover { border-color: var(--border-2); }
+.mk-pl-largeplan.is-selected {
+  border-style: solid; border-color: var(--status-todo);
+  background: var(--status-todo-bg);
+}
+.mk-pl-largeplan-glyph {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 700;
+  width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-sm); background: var(--status-todo-bg); color: var(--status-todo);
+}
+.mk-pl-largeplan-note {
+  font-size: 10px; font-weight: 400; color: var(--fg-4); margin-left: auto;
+}
 .mk-pl-procopt.is-confirm {
   justify-content: center; background: var(--status-doing-bg); color: var(--status-doing);
   font-weight: 700;
 }
-.mk-pl-procopt.is-confirm:hover { background: var(--status-doing-bg); filter: brightness(0.97); }
+.mk-pl-procopt.is-confirm:hover:not(:disabled) { background: var(--status-doing-bg); filter: brightness(0.97); }
+.mk-pl-procopt.is-confirm:disabled {
+  background: var(--bg-4); color: var(--fg-4); cursor: default;
+}
 
 .mk-pl-shipping-tools { flex-shrink: 0; }
 
