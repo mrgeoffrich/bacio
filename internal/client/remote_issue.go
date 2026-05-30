@@ -342,14 +342,13 @@ func (c *remoteClient) ListShippedIssues(ctx context.Context, repo *model.Repo, 
 		q.Set("limit", fmt.Sprintf("%d", f.Limit))
 	}
 	if f.Since != nil {
-		// Format the duration as a Lookback-compatible string. The
-		// remote handler parses ?since= back through timeparse.Lookback
-		// — `h` is the lowest-common-denominator unit it accepts.
-		hours := int(time.Since(*f.Since).Hours())
-		if hours < 1 {
-			hours = 1
-		}
-		q.Set("since", fmt.Sprintf("%dh", hours))
+		// BACI-312: send the cutoff as an absolute ?since_ts= RFC3339
+		// timestamp rather than the pre-BACI-312 lossy `%dh` (whole-hour)
+		// ?since= rounding. f.Since is already an absolute lower bound, so
+		// passing it verbatim is both simpler and exact — it preserves a
+		// midnight cutoff to the second instead of drifting it by up to an
+		// hour.
+		q.Set("since_ts", f.Since.UTC().Format(time.RFC3339))
 	}
 	type shippedDTO struct {
 		Key          string    `json:"key"`
@@ -394,21 +393,16 @@ func (c *remoteClient) ListShippedIssues(ctx context.Context, repo *model.Repo, 
 }
 
 // CountShippedIssues (BACI-221) — GET /repos/{prefix}/shipped/count.
-// Mirrors ListShippedIssues' ?since= shape (Lookback-compatible
-// duration string built from f.Since); the count endpoint deliberately
-// has no ?limit= parameter — the count is total under the scope,
-// independent of any per-fetch row cap.
+// Mirrors ListShippedIssues' absolute ?since_ts= shape (BACI-312); the
+// count endpoint deliberately has no ?limit= parameter — the count is
+// total under the scope, independent of any per-fetch row cap.
 func (c *remoteClient) CountShippedIssues(ctx context.Context, repo *model.Repo, f store.ShippedFilter) (int, error) {
 	if repo == nil {
 		return 0, fmt.Errorf("CountShippedIssues requires a repo")
 	}
 	q := url.Values{}
 	if f.Since != nil {
-		hours := int(time.Since(*f.Since).Hours())
-		if hours < 1 {
-			hours = 1
-		}
-		q.Set("since", fmt.Sprintf("%dh", hours))
+		q.Set("since_ts", f.Since.UTC().Format(time.RFC3339))
 	}
 	var out struct {
 		Total int `json:"total"`

@@ -13,7 +13,7 @@ import CommandPalette from './components/CommandPalette.jsx';
 import IssueComposer from './components/IssueComposer.jsx';
 import RepoNotFound from './components/RepoNotFound.jsx';
 import { readShippedScope, persistShippedScope } from './components/shippedScopePersistence.ts';
-import { scopeSinceDays } from './components/shippedScope.ts';
+import { scopeSinceParams } from './components/shippedScope.ts';
 import SettingsView from './components/SettingsView.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 import ErrorModal from './components/ErrorModal.jsx';
@@ -137,6 +137,14 @@ export default function App() {
   // overwrites it with the server value; it still mirrors the new
   // default. Flipped from Settings.
   const [audioEnabled, setAudioEnabled] = useState(true);
+  // BACI-312: ui.timezone — the user's IANA zone name driving the
+  // Pipeline Shipping-column Shipped pill's local-midnight "Today" cutoff.
+  // Empty until getTimezonePreferences() resolves on mount; an empty value
+  // also triggers the first-run auto-detect-then-persist below. The
+  // scopeSinceParams cutoff helper falls back to the browser's own zone
+  // when this is still empty, so "Today" never breaks in the gap before
+  // the value lands. Flipped from Settings.
+  const [timezone, setTimezone] = useState('');
   // leaderState tracks the UI leader-election result from LeaderService.
   // amLeader = true means this desktop process holds the lease and may
   // dispatch. Standby processes show a chip and disable the per-card button.
@@ -237,8 +245,9 @@ export default function App() {
       api.getDisplayPreferences(),
       api.getArchivePreferences(),
       api.getAudioPreferences(),
+      api.getTimezonePreferences(),
     ])
-      .then(([bs, cols, tpls, displayPrefs, archivePrefs, audioPrefs]) => {
+      .then(([bs, cols, tpls, displayPrefs, archivePrefs, audioPrefs, tzPrefs]) => {
         setBoards(bs);
         setColumns(cols);
         setPromptConfig(tpls);
@@ -246,6 +255,26 @@ export default function App() {
         setArchiveAutoEnabled(archivePrefs.autoEnabled);
         setArchiveRetentionDays(archivePrefs.retentionDays);
         setAudioEnabled(audioPrefs.shippedSfx);
+        // BACI-312: seed the timezone from the server. On first run the
+        // value is empty — auto-detect the browser's zone and persist it
+        // so the setting is pre-filled and the "Today" cutoff is correct
+        // from the very first poll. The persist is best-effort: a failure
+        // leaves `timezone` empty and scopeSinceParams falls back to the
+        // browser zone anyway, so "Today" still works.
+        if (tzPrefs.timezone) {
+          setTimezone(tzPrefs.timezone);
+        } else {
+          let detected = '';
+          try {
+            detected = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+          } catch { /* Intl unavailable — leave empty, fall back to browser zone at use */ }
+          if (detected) {
+            setTimezone(detected);
+            api.setTimezonePreferences(detected)
+              .then(prefs => setTimezone(prefs.timezone))
+              .catch(() => { /* best-effort first-run persist; cutoff still works via fallback */ });
+          }
+        }
         setLoading(false);
       })
       .catch(err => {
@@ -308,6 +337,17 @@ export default function App() {
   const changeAudioEnabled = useCallback((next) => {
     api.setAudioPreferences(next)
       .then(prefs => setAudioEnabled(prefs.shippedSfx))
+      .catch(err => reportError(err, { headline: "Couldn't save preference" }));
+  }, []);
+
+  // changeTimezone persists the BACI-312 ui.timezone setting, then
+  // updates the App-owned state on success so the Shipped pill's "Today"
+  // cutoff recomputes against the new zone on the next poll. Same
+  // optimistic-then-confirmed shape as the other preference handlers. A
+  // malformed IANA name is rejected with a 400, surfaced via reportError.
+  const changeTimezone = useCallback((next) => {
+    api.setTimezonePreferences(next)
+      .then(prefs => setTimezone(prefs.timezone))
       .catch(err => reportError(err, { headline: "Couldn't save preference" }));
   }, []);
 
@@ -943,11 +983,14 @@ export default function App() {
       setShippedCount(0);
       return;
     }
-    const sinceDays = scopeSinceDays(shippedScope);
-    api.countShippedIssues(activeBoard, sinceDays)
+    // BACI-312: 'today' now resolves to an absolute local-midnight cutoff
+    // in the user's timezone (sinceTs); week/forever keep the relative
+    // sinceDays window.
+    const { sinceDays, sinceTs } = scopeSinceParams(shippedScope, timezone);
+    api.countShippedIssues(activeBoard, sinceDays, sinceTs)
       .then((n) => setShippedCount(n))
       .catch(() => { /* pill is best-effort; the popover surfaces failures */ });
-  }, [activeBoard, shippedScope]);
+  }, [activeBoard, shippedScope, timezone]);
   useEffect(() => {
     if (!activeBoard || activeBoard === 'all') {
       setShippedCount(0);
@@ -1137,6 +1180,8 @@ export default function App() {
             onChangeArchivePreferences={changeArchivePreferences}
             audioEnabled={audioEnabled}
             onChangeAudioEnabled={changeAudioEnabled}
+            timezone={timezone}
+            onChangeTimezone={changeTimezone}
             columns={columns}
             onClose={closeSettings}
             onTemplatesChanged={refreshPromptConfig}
@@ -1193,6 +1238,7 @@ export default function App() {
                   shippedCount={shippedCount}
                   shippedScope={shippedScope}
                   onShippedScopeChange={changeShippedScope}
+                  timezone={timezone}
                   flyingShipKey={flyingShipKey}
                   shipFlashing={shipFlashing}
                   onShipFlightDone={onShipFlightDone}

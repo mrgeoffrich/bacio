@@ -150,6 +150,7 @@ export default function PipelineView({
   shippedCount,
   shippedScope,
   onShippedScopeChange,
+  timezone,
   flyingShipKey,
   shipFlashing,
   onShipFlightDone,
@@ -481,6 +482,7 @@ export default function PipelineView({
             shippedCount={shippedCount}
             scope={shippedScope}
             onScopeChange={onShippedScopeChange}
+            timezone={timezone}
             onOpenIssue={onOpenIssue}
             flyingShipKey={flyingShipKey}
             shipFlashing={shipFlashing}

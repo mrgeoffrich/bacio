@@ -2035,17 +2035,21 @@ export async function listHistory(
 // return type in lockstep with the desktop binding — the React-side
 // ShippedPopover imports the same name from `./api` in both modes.
 // `sinceDays === 0` means "Forever" (no ?since= parameter), so the
-// server returns the unbounded count.
+// server returns the unbounded count; a non-empty `sinceTs` (BACI-312) is
+// the absolute local-midnight "Today" cutoff and wins over sinceDays,
+// emitted as ?since_ts= (the two are mutually exclusive server-side).
 export async function listShippedIssues(
   repoPrefix: string,
   sinceDays: number,
+  sinceTs: string,
   limit: number,
 ): Promise<ShippedListDTO> {
   if (!repoPrefix || repoPrefix === 'all') {
     throw new Error('select a repository to view its shipping log');
   }
   const query: Record<string, string | number> = {};
-  if (sinceDays > 0) query.since = `${sinceDays}d`;
+  if (sinceTs) query.since_ts = sinceTs;
+  else if (sinceDays > 0) query.since = `${sinceDays}d`;
   if (limit > 0) query.limit = limit;
   const body = await call<ShippedListDTO>(`/repos/${repoPrefix}/shipped`, { query });
   // Defensive defaults: the server always returns the wrapper, but on
@@ -2058,15 +2062,19 @@ export async function listShippedIssues(
 // countShippedIssues (BACI-221) — HTTP twin of api.ts's
 // countShippedIssues, polled on the same 10s cadence as the other live
 // read endpoints so the Pipeline Shipping-column pill always reflects the active scope.
+// `sinceTs` (BACI-312) is the absolute "Today" cutoff; it wins over the
+// relative `sinceDays` window when present (mutually exclusive server-side).
 export async function countShippedIssues(
   repoPrefix: string,
   sinceDays: number,
+  sinceTs: string,
 ): Promise<number> {
   if (!repoPrefix || repoPrefix === 'all') {
     throw new Error('select a repository to view its shipping count');
   }
   const query: Record<string, string | number> = {};
-  if (sinceDays > 0) query.since = `${sinceDays}d`;
+  if (sinceTs) query.since_ts = sinceTs;
+  else if (sinceDays > 0) query.since = `${sinceDays}d`;
   const body = await call<{ total: number }>(`/repos/${repoPrefix}/shipped/count`, { query });
   return body?.total ?? 0;
 }

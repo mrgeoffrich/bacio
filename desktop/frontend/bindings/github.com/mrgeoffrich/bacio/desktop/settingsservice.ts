@@ -109,6 +109,17 @@ export function GetSyncRegistry(): $CancellablePromise<$models.SyncRegistryDTO> 
 }
 
 /**
+ * GetTimezonePreferences returns the current ui.timezone value
+ * (BACI-312). The Pipeline Shipping column's Shipped pill consults this
+ * to compute the local-midnight cutoff for its "Today" scope.
+ */
+export function GetTimezonePreferences(): $CancellablePromise<$models.TimezonePreferencesDTO> {
+    return $Call.ByID(2487791415).then(($result: any) => {
+        return $$createType6($result);
+    });
+}
+
+/**
  * LinkPhantomRepo (BACI-112) is the Wails-side entry point for the
  * desktop / web PhantomLinkModal. Thin shim over
  * client.LinkPhantomRepo. dryRun is not exposed on the UI side; if a
@@ -120,7 +131,7 @@ export function GetSyncRegistry(): $CancellablePromise<$models.SyncRegistryDTO> 
  */
 export function LinkPhantomRepo(prefix: string, path: string): $CancellablePromise<$models.RepoLinkResultDTO> {
     return $Call.ByID(3604398369, prefix, path).then(($result: any) => {
-        return $$createType6($result);
+        return $$createType7($result);
     });
 }
 
@@ -132,7 +143,7 @@ export function LinkPhantomRepo(prefix: string, path: string): $CancellablePromi
  */
 export function ListPromptTemplates(): $CancellablePromise<$models.PromptTemplateDTO[]> {
     return $Call.ByID(1001854565).then(($result: any) => {
-        return $$createType7($result);
+        return $$createType8($result);
     });
 }
 
@@ -143,7 +154,7 @@ export function ListPromptTemplates(): $CancellablePromise<$models.PromptTemplat
  */
 export function PromptPlaceholders(): $CancellablePromise<string[]> {
     return $Call.ByID(1135988516).then(($result: any) => {
-        return $$createType8($result);
+        return $$createType9($result);
     });
 }
 
@@ -165,7 +176,7 @@ export function RenamePromptTemplate(slug: string, newSlug: string, newName: str
  */
 export function RestoreBuiltinPromptTemplates(): $CancellablePromise<$models.PromptTemplateDTO[]> {
     return $Call.ByID(3843909418).then(($result: any) => {
-        return $$createType7($result);
+        return $$createType8($result);
     });
 }
 
@@ -243,6 +254,16 @@ export function SetSyncPreferences(backgroundEnabled: boolean): $CancellableProm
 }
 
 /**
+ * SetTimezonePreferences validates + writes ui.timezone and returns the
+ * refreshed DTO (BACI-312). The client records the audit row.
+ */
+export function SetTimezonePreferences(timezone: string): $CancellablePromise<$models.TimezonePreferencesDTO> {
+    return $Call.ByID(3083970795, timezone).then(($result: any) => {
+        return $$createType6($result);
+    });
+}
+
+/**
  * SetupSync sets up sync for the project repo identified by prefix.
  * Three modes — "init", "clone", "attach" — mirror the HTTP layer
  * (POST /repos/{prefix}/sync/setup). On a renumber-collision refusal
@@ -254,7 +275,7 @@ export function SetSyncPreferences(backgroundEnabled: boolean): $CancellableProm
  */
 export function SetupSync(prefix: string, $in: $models.SetupSyncIn): $CancellablePromise<$models.SyncSetupDTO> {
     return $Call.ByID(3158355382, prefix, $in).then(($result: any) => {
-        return $$createType9($result);
+        return $$createType10($result);
     });
 }
 
@@ -265,7 +286,8 @@ const $$createType2 = $models.AudioPreferencesDTO.createFrom;
 const $$createType3 = $models.DisplayPreferencesDTO.createFrom;
 const $$createType4 = $models.SyncPreferencesDTO.createFrom;
 const $$createType5 = $models.SyncRegistryDTO.createFrom;
-const $$createType6 = $models.RepoLinkResultDTO.createFrom;
-const $$createType7 = $Create.Array($$createType0);
-const $$createType8 = $Create.Array($Create.Any);
-const $$createType9 = $models.SyncSetupDTO.createFrom;
+const $$createType6 = $models.TimezonePreferencesDTO.createFrom;
+const $$createType7 = $models.RepoLinkResultDTO.createFrom;
+const $$createType8 = $Create.Array($$createType0);
+const $$createType9 = $Create.Array($Create.Any);
+const $$createType10 = $models.SyncSetupDTO.createFrom;

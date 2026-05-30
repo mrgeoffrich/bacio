@@ -65,5 +65,6 @@ export {
     SyncRegistryDTO,
     SyncRepoDTO,
     SyncSetupDTO,
+    TimezonePreferencesDTO,
     UnsyncedProjectDTO
 } from "./models.js";
