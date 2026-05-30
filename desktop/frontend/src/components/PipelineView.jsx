@@ -137,6 +137,7 @@ export default function PipelineView({
   onCancelCard,
   onReorder,
   onSetProcess,
+  onEditProcess,
   onStartJob,
   onStopJob,
   onRerunJob,
@@ -440,6 +441,7 @@ export default function PipelineView({
                   onDragStart={() => setDragKey(card.key)}
                   onDragEnd={() => { setDragKey(null); setDragOverCol(null); }}
                   onSetProcess={onSetProcess}
+                  onEditProcess={onEditProcess}
                   onStartJob={onStartJob}
                   onStopJob={onStopJob}
                   onRerunJob={onRerunJob}
@@ -725,6 +727,7 @@ function StageCard({
   onDragStart,
   onDragEnd,
   onSetProcess,
+  onEditProcess,
   onStartJob,
   onStopJob,
   onRerunJob,
@@ -847,8 +850,8 @@ function StageCard({
             <button
               type="button"
               className="mk-pl-btn is-ghost is-sm"
-              onClick={() => setPicking(true)}
-              title="Edit / replace the process"
+              onClick={() => onEditProcess?.(card.key)}
+              title="Edit the process"
             >
               ✎ Edit Process
             </button>

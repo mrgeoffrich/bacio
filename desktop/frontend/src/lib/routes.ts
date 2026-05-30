@@ -37,6 +37,13 @@ export function issuePath(prefix: string, key: string): string {
   return `/${prefix}/issues/${key}`;
 }
 
+// processEditPath maps an issue key onto the BACI-294 full-screen Edit
+// Process route under the active repo prefix — the editor for an
+// in_pipeline card's job chain (`/<prefix>/pipeline/<key>/process`).
+export function processEditPath(prefix: string, key: string): string {
+  return `/${prefix}/pipeline/${key}/process`;
+}
+
 // featurePath maps a feature slug onto its detail route under the
 // active repo prefix.
 export function featurePath(prefix: string, slug: string): string {

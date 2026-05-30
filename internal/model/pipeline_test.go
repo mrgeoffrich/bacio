@@ -75,6 +75,120 @@ func TestProcessFromStages(t *testing.T) {
 			t.Fatalf("Stages = %v, want [ship]", p.Stages)
 		}
 	})
+
+	t.Run("rejects_dispatch_preamble", func(t *testing.T) {
+		// BACI-294 decision 5: the reserved _dispatch_preamble slug leads
+		// BuiltinTemplateSlugs() and was wrongly accepted as a stage mode.
+		// It is the wrapper prepended to every dispatch, never a chain stage.
+		if _, err := ProcessFromStages([]string{BuiltinTemplatePreamble}); err == nil {
+			t.Error("expected error for _dispatch_preamble as a stage mode")
+		}
+		if _, err := ProcessFromStages([]string{BuiltinTemplatePlan, BuiltinTemplatePreamble}); err == nil {
+			t.Error("expected error for _dispatch_preamble in a chain")
+		}
+	})
+}
+
+// TestProcessFromStagesWithPrefix covers the BACI-294 edit-path
+// constructor: it validates the combined locked-prefix + edited-tail
+// chain (no duplicate rule, ship-last across the whole chain) and returns
+// the tail only.
+func TestProcessFromStagesWithPrefix(t *testing.T) {
+	t.Run("happy_combined", func(t *testing.T) {
+		// Locked prefix [plan complete, implement running]; new tail
+		// [review, ship]. The returned Stages is the tail only.
+		p, err := ProcessFromStagesWithPrefix(
+			[]string{BuiltinTemplatePlan, BuiltinTemplateImplement},
+			[]string{BuiltinTemplateReview, ShipJobMode},
+		)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		want := []string{BuiltinTemplateReview, ShipJobMode}
+		if len(p.Stages) != len(want) {
+			t.Fatalf("Stages = %v, want %v (tail only)", p.Stages, want)
+		}
+		for i, s := range want {
+			if p.Stages[i] != s {
+				t.Fatalf("Stages[%d] = %q, want %q", i, p.Stages[i], s)
+			}
+		}
+		// Slug/Name describe the whole chain.
+		if p.Slug != "plan-implement-review-ship" {
+			t.Errorf("Slug = %q, want whole-chain slug", p.Slug)
+		}
+	})
+
+	t.Run("duplicate_mode_allowed", func(t *testing.T) {
+		// Decision 1: a re-loop (Implement → Review → Implement) is
+		// expressible — duplicates are NOT rejected on the edit path.
+		p, err := ProcessFromStagesWithPrefix(
+			[]string{BuiltinTemplateImplement},
+			[]string{BuiltinTemplateReview, BuiltinTemplateImplement},
+		)
+		if err != nil {
+			t.Fatalf("unexpected error for a re-loop chain: %v", err)
+		}
+		if len(p.Stages) != 2 {
+			t.Fatalf("Stages = %v, want the 2-stage tail", p.Stages)
+		}
+	})
+
+	t.Run("empty_prefix_replaces_all", func(t *testing.T) {
+		// Every job pending → the whole chain is the tail; an empty prefix
+		// is fine as long as the tail is non-empty.
+		p, err := ProcessFromStagesWithPrefix(nil, []string{BuiltinTemplatePlan, BuiltinTemplateImplement})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(p.Stages) != 2 {
+			t.Fatalf("Stages = %v, want [plan implement]", p.Stages)
+		}
+	})
+
+	t.Run("both_empty", func(t *testing.T) {
+		if _, err := ProcessFromStagesWithPrefix(nil, nil); err == nil {
+			t.Error("expected error when prefix and tail are both empty")
+		}
+	})
+
+	t.Run("ship_in_tail_not_last", func(t *testing.T) {
+		if _, err := ProcessFromStagesWithPrefix(
+			[]string{BuiltinTemplatePlan},
+			[]string{ShipJobMode, BuiltinTemplateImplement},
+		); err == nil {
+			t.Error("expected error for ship before the final stage of the tail")
+		}
+	})
+
+	t.Run("ship_in_prefix_with_tail", func(t *testing.T) {
+		// Ship must be the last stage of the WHOLE chain — a ship in the
+		// locked prefix followed by a non-ship tail is rejected.
+		if _, err := ProcessFromStagesWithPrefix(
+			[]string{BuiltinTemplatePlan, ShipJobMode},
+			[]string{BuiltinTemplateImplement},
+		); err == nil {
+			t.Error("expected error for ship in the prefix with a non-empty tail")
+		}
+	})
+
+	t.Run("unknown_tail_mode", func(t *testing.T) {
+		if _, err := ProcessFromStagesWithPrefix(
+			[]string{BuiltinTemplatePlan},
+			[]string{"frobnicate"},
+		); err == nil {
+			t.Error("expected error for unknown tail mode")
+		}
+	})
+
+	t.Run("rejects_dispatch_preamble", func(t *testing.T) {
+		if _, err := ProcessFromStagesWithPrefix(
+			[]string{BuiltinTemplatePlan},
+			[]string{BuiltinTemplatePreamble},
+		); err == nil {
+			t.Error("expected error for _dispatch_preamble in the tail")
+		}
+	})
 }
 
 // TestPipelineProcessesLockstep guards the preset table: every stage of

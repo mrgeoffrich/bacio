@@ -61,6 +61,43 @@ func TestPipelineClientOps(t *testing.T) {
 		t.Fatalf("dry-run wrote %d jobs, want 0", len(got))
 	}
 
+	// EditIssueProcessTail keeps the locked prefix and replaces the
+	// pending tail. Seed a card with a started chain (job 1 complete),
+	// then edit the tail.
+	issE, _ := c.store.CreateIssue(repo.ID, nil, "card-edit", "", model.StateInPipeline, nil, "")
+	ej, err := c.SetIssueProcess(ctx, repo, issE.Key, "plan-implement-ship", nil, false)
+	if err != nil {
+		t.Fatalf("SetIssueProcess for edit: %v", err)
+	}
+	if err := c.store.SetPipelineJobStatus(ej[0].ID, model.JobComplete); err != nil {
+		t.Fatalf("complete job 1: %v", err)
+	}
+	// Dry-run projects the locked prefix + the re-sequenced tail without writing.
+	proj, err := c.EditIssueProcessTail(ctx, repo, issE.Key, []string{"review", "implement", "ship"}, true)
+	if err != nil {
+		t.Fatalf("EditIssueProcessTail dry-run: %v", err)
+	}
+	wantProj := []string{"plan", "review", "implement", "ship"}
+	if len(proj) != len(wantProj) {
+		t.Fatalf("dry-run chain = %d, want %d", len(proj), len(wantProj))
+	}
+	for i, m := range wantProj {
+		if proj[i].Mode != m || proj[i].Sequence != i+1 {
+			t.Fatalf("dry-run job[%d] = {%s,%d}, want {%s,%d}", i, proj[i].Mode, proj[i].Sequence, m, i+1)
+		}
+	}
+	if got, _ := c.store.ListPipelineJobs(issE.ID); len(got) != 3 {
+		t.Fatalf("dry-run mutated the chain to %d jobs, want 3", len(got))
+	}
+	// Real write.
+	edited, err := c.EditIssueProcessTail(ctx, repo, issE.Key, []string{"review", "implement", "ship"}, false)
+	if err != nil {
+		t.Fatalf("EditIssueProcessTail: %v", err)
+	}
+	if len(edited) != 4 || edited[0].Mode != "plan" || edited[0].Status != model.JobComplete {
+		t.Fatalf("edited chain = %v, locked prefix not preserved", edited)
+	}
+
 	// Ship hand-off → to_be_shipped.
 	shipped, err := c.ShipIssue(ctx, repo, iss.Key, false)
 	if err != nil {

@@ -77,6 +77,7 @@ func issueProcessCmd() *cobra.Command {
 		Short: "Manage a card's Pipeline process chain",
 	}
 	cmd.AddCommand(issueProcessSetCmd())
+	cmd.AddCommand(issueProcessEditCmd())
 	return cmd
 }
 
@@ -122,6 +123,67 @@ func issueProcessSetCmd() *cobra.Command {
 				return err
 			}
 			jobs, err := c.SetIssueProcess(context.Background(), repo, key, process, stages, opts.dryRun)
+			if err != nil {
+				return err
+			}
+			if opts.dryRun {
+				return emitDryRun(jobs)
+			}
+			return emit(jobs)
+		},
+	}
+	addInputFlag(cmd, &rawInput)
+	return cmd
+}
+
+// issueProcessEditCmd — `bacio issue process edit <KEY> <mode…>`. Edits
+// the pending tail of an in_pipeline card's chain (BACI-294): the
+// completed / running / cancelled jobs stay as a locked prefix; the
+// positional modes (or --json "stages") become the new re-ordered pending
+// tail, re-sequenced after the prefix. Ship may only be the final stage;
+// duplicate modes are allowed (re-loops).
+func issueProcessEditCmd() *cobra.Command {
+	var rawInput string
+	cmd := &cobra.Command{
+		Use:   "edit [KEY] [mode...]",
+		Short: "Edit the pending tail of an in_pipeline card's job chain",
+		Long:  "Edit the pending tail of an in_pipeline card's job chain (Pipeline). The completed/running/cancelled jobs stay as a locked prefix; the positional modes (or --json \"stages\") replace the pending jobs, re-sequenced after the prefix. Ship may only be the final stage; duplicate modes are allowed.",
+		Args:  cobra.MinimumNArgs(0),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			raw, err := parseJSONInput(cmd, args, rawInput)
+			if err != nil {
+				return err
+			}
+			var key string
+			var stages []string
+			if raw != nil {
+				in, _, err := inputio.DecodeStrict[inputs.IssueProcessEditInput](raw)
+				if err != nil {
+					return err
+				}
+				key, stages = in.Key, in.Stages
+				if key == "" {
+					return fmt.Errorf("key is required")
+				}
+				if len(stages) == 0 {
+					return fmt.Errorf("stages must list at least one job mode")
+				}
+			} else {
+				if len(args) < 2 {
+					return fmt.Errorf("requires <KEY> <mode...> positionals or --json")
+				}
+				key, stages = args[0], args[1:]
+			}
+			c, err := openClient()
+			if err != nil {
+				return err
+			}
+			defer c.Close()
+			repo, err := repoForIssueKey(c, key)
+			if err != nil {
+				return err
+			}
+			jobs, err := c.EditIssueProcessTail(context.Background(), repo, key, stages, opts.dryRun)
 			if err != nil {
 				return err
 			}

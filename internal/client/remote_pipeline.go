@@ -53,6 +53,24 @@ func (c *remoteClient) SetIssueProcess(ctx context.Context, repo *model.Repo, ke
 	return out, nil
 }
 
+func (c *remoteClient) EditIssueProcessTail(ctx context.Context, repo *model.Repo, key string, stages []string, dryRun bool) ([]*model.PipelineJob, error) {
+	canonical, err := c.ResolveIssueKey(ctx, repo, key)
+	if err != nil {
+		return nil, err
+	}
+	prefix := strings.SplitN(canonical, "-", 2)[0]
+	q := url.Values{}
+	if dryRun {
+		q.Set("dry_run", "true")
+	}
+	body := map[string]any{"key": canonical, "stages": stages}
+	var out []*model.PipelineJob
+	if err := c.do(ctx, http.MethodPut, "/repos/"+prefix+"/issues/"+canonical+"/process/tail", q, body, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *remoteClient) ShipIssue(ctx context.Context, repo *model.Repo, key string, dryRun bool) (*model.Issue, error) {
 	canonical, err := c.ResolveIssueKey(ctx, repo, key)
 	if err != nil {

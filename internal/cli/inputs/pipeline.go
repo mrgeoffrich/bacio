@@ -22,6 +22,19 @@ type IssueProcessInput struct {
 	Stages  []string `json:"stages,omitempty"`
 }
 
+// IssueProcessEditInput is the payload for `bacio issue process edit
+// --json` and PUT …/issues/{key}/process/tail (BACI-294). Stages is the
+// re-ordered PENDING TAIL ONLY — the new ordered list of job modes that
+// replace the card's pending jobs. The completed / running / cancelled
+// jobs are kept as a locked prefix the server reads from the store (the
+// source of truth), so a stale client can never corrupt or drop history.
+// Validated via model.ProcessFromStagesWithPrefix (ship-last across the
+// whole chain; duplicates allowed for re-loops).
+type IssueProcessEditInput struct {
+	Key    string   `json:"key"`
+	Stages []string `json:"stages"`
+}
+
 // IssueEngineModeInput is the payload for the engine drive-mode toggle
 // (PUT …/issues/{key}/engine-mode). Mode is "off" or "auto".
 type IssueEngineModeInput struct {

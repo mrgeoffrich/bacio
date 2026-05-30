@@ -77,7 +77,7 @@ const STAGE_GLYPHS: Record<string, string> = {
   review: 'R',
   fix_review: 'F',
   scope: 'S',
-  research: '?',
+  research: 'Ⓡ',
 };
 
 export function stageGlyph(mode: string): string {
@@ -91,3 +91,21 @@ export function stageGlyph(mode: string): string {
 export function isShipStage(mode: string): boolean {
   return mode === 'ship';
 }
+
+// EDITABLE_JOB_MODES is the palette the BACI-294 Edit Process screen offers
+// under "+ Add job" — every dispatchable builtin template mode in canonical
+// order plus the Ship hand-off sentinel. The reserved `_dispatch_preamble`
+// (the wrapper prepended to every dispatch) is deliberately excluded; it is
+// never a chain stage, mirroring the backend's stageModeAllowed gate. Keep
+// in lockstep with model.BuiltinTemplate* — same dispatchable slugs.
+export const EDITABLE_JOB_MODES: string[] = [
+  'scope',
+  'research',
+  'plan',
+  'plan_large',
+  'design',
+  'implement',
+  'review',
+  'fix_review',
+  'ship',
+];

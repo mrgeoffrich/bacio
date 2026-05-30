@@ -272,6 +272,12 @@ type Client interface {
 	// toggles the per-repo Shipping auto-ship.
 	ReorderIssue(ctx context.Context, repo *model.Repo, key string, position int, dryRun bool) (*model.Issue, error)
 	SetIssueProcess(ctx context.Context, repo *model.Repo, key, process string, stages []string, dryRun bool) ([]*model.PipelineJob, error)
+	// EditIssueProcessTail (BACI-294) rewrites the editable pending tail of
+	// an in_pipeline card's chain — stages is the re-ordered pending tail
+	// only; the completed/running/cancelled jobs are kept as a locked
+	// prefix the store reads as the source of truth. Returns the refreshed
+	// chain.
+	EditIssueProcessTail(ctx context.Context, repo *model.Repo, key string, stages []string, dryRun bool) ([]*model.PipelineJob, error)
 	ShipIssue(ctx context.Context, repo *model.Repo, key string, dryRun bool) (*model.Issue, error)
 	SetRepoAutoShip(ctx context.Context, repo *model.Repo, enabled, dryRun bool) (bool, error)
 	// GetRepoAutoShip reads the per-repo Shipping auto-ship toggle — the

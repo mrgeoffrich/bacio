@@ -143,6 +143,87 @@ func (s *Store) SetIssueProcess(issueID int64, process model.Process) ([]*model.
 	return s.ListPipelineJobs(issueID)
 }
 
+// EditIssueProcessTail rewrites the editable pending tail of an issue's
+// process chain while preserving the locked prefix — the BACI-294 Edit
+// Process write. The locked prefix is every job that has advanced past
+// pending (running / complete / cancelled); the engine has already acted
+// on those and the immutability invariant (§7) keeps them verbatim. The
+// pending jobs form the editable tail: they are deleted and re-inserted
+// from tailModes, re-sequenced after the prefix at len(prefix)+1..n.
+//
+// Because the engine advances off the first pending job in sequence order
+// (firstByStatus), keeping the locked rows at their sequences 1..k and
+// re-sequencing the new tail at k+1..n means the next stage the engine
+// runs is the head of the edited tail — exactly the intended behaviour
+// while a job is still running (it stays locked, the tail re-sequences
+// after it).
+//
+// The combined prefix+tail chain is validated via
+// model.ProcessFromStagesWithPrefix (ship-last across the whole chain,
+// duplicates allowed). A chain with no existing jobs is rejected — the
+// edit route is only reached for a card that already has a chain (a
+// brand-new card keeps the inline picker → SetIssueProcess). Returns the
+// refreshed full chain.
+func (s *Store) EditIssueProcessTail(issueID int64, tailModes []string) ([]*model.PipelineJob, error) {
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	rows, err := tx.Query(`SELECT `+pipelineJobCols+` FROM pipeline_jobs WHERE issue_id = ? ORDER BY sequence ASC`, issueID)
+	if err != nil {
+		return nil, err
+	}
+	var existing []*model.PipelineJob
+	for rows.Next() {
+		j, err := scanPipelineJob(rows)
+		if err != nil {
+			rows.Close()
+			return nil, err
+		}
+		existing = append(existing, j)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+
+	if len(existing) == 0 {
+		return nil, fmt.Errorf("cannot edit process: issue %d has no job chain", issueID)
+	}
+
+	var lockedModes []string
+	for _, j := range existing {
+		if j.Status != model.JobPending {
+			lockedModes = append(lockedModes, j.Mode)
+		}
+	}
+	proc, err := model.ProcessFromStagesWithPrefix(lockedModes, tailModes)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := tx.Exec(`DELETE FROM pipeline_jobs WHERE issue_id = ? AND status = 'pending'`, issueID); err != nil {
+		return nil, err
+	}
+	// proc.Stages is the validated tail, re-sequenced after the locked
+	// prefix (len(lockedModes) rows kept their sequences 1..k).
+	for i, mode := range proc.Stages {
+		if _, err := tx.Exec(
+			`INSERT INTO pipeline_jobs (issue_id, sequence, mode, status) VALUES (?, ?, ?, 'pending')`,
+			issueID, len(lockedModes)+i+1, mode,
+		); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return s.ListPipelineJobs(issueID)
+}
+
 // SetPipelineJobStatus transitions a job's status, stamping started_at on
 // the first move to running and completed_at on the first move to a
 // terminal status (complete / cancelled). Leaves dispatch_id untouched —

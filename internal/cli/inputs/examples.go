@@ -51,6 +51,13 @@ var (
 		Key:     "MINI-42",
 		Process: "plan-implement-ship",
 	}
+	// Worked example edits the pending tail of a card whose chain has
+	// already started — Stages is the re-ordered pending tail only (the
+	// completed/running/cancelled jobs are kept as a locked prefix).
+	ExampleIssueProcessEdit = IssueProcessEditInput{
+		Key:    "MINI-42",
+		Stages: []string{"review", "implement", "ship"},
+	}
 	ExampleIssueShip = IssueShipInput{
 		Key: "MINI-42",
 	}

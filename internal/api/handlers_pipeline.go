@@ -113,6 +113,85 @@ func (d deps) handleIssueProcess(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, jobs)
 }
 
+// handleIssueProcessEdit — PUT /repos/{prefix}/issues/{key}/process/tail.
+// Edits the pending tail of an in_pipeline card's chain (BACI-294): keeps
+// the completed / running / cancelled jobs as a locked prefix and replaces
+// the pending tail with the validated, re-sequenced `stages` list. The
+// client sends only the tail; the server reads the locked prefix from the
+// store as the source of truth, so a stale client can never corrupt
+// history. Validation errors return 400 with field=stages.
+func (d deps) handleIssueProcessEdit(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	in, _, err := inputio.DecodeStrict[inputs.IssueProcessEditInput](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	iss, ok := resolveIssueOnRepo(w, r, d.store, repo)
+	if !ok {
+		return
+	}
+	// Read the live chain to partition the locked prefix and validate the
+	// combined chain before any write — the same source of truth the store
+	// op uses, so the dry-run projection and the 400-on-bad-tail check
+	// agree with the eventual write.
+	existing, err := d.store.ListPipelineJobs(iss.ID)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if len(existing) == 0 {
+		writeError(w, http.StatusBadRequest, "invalid_input", "issue has no job chain to edit", map[string]any{"field": "stages"})
+		return
+	}
+	var lockedModes []string
+	var locked []*model.PipelineJob
+	for _, j := range existing {
+		if j.Status != model.JobPending {
+			lockedModes = append(lockedModes, j.Mode)
+			locked = append(locked, j)
+		}
+	}
+	proc, err := model.ProcessFromStagesWithPrefix(lockedModes, in.Stages)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), map[string]any{"field": "stages"})
+		return
+	}
+	if isDryRun(r) {
+		// Project the locked prefix + re-sequenced tail without writing.
+		out := append([]*model.PipelineJob(nil), locked...)
+		for i, mode := range proc.Stages {
+			out = append(out, &model.PipelineJob{
+				IssueID: iss.ID, Sequence: len(locked) + i + 1, Mode: mode, Status: model.JobPending,
+			})
+		}
+		writeDryRun(w, http.StatusOK, out)
+		return
+	}
+	jobs, err := d.store.EditIssueProcessTail(iss.ID, in.Stages)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	recordOp(d.store, d.logger, model.HistoryEntry{
+		RepoID: &iss.RepoID, RepoPrefix: repo.Prefix,
+		Actor: ActorFromContext(r.Context()),
+		Op:    "issue.process.edit", Kind: "issue",
+		TargetID: &iss.ID, TargetLabel: iss.Key,
+		Details: proc.Slug,
+	})
+	writeJSON(w, http.StatusOK, jobs)
+}
+
 // handleIssueJobs — GET /repos/{prefix}/issues/{key}/jobs. Returns the
 // card's process chain (sequence-ordered).
 func (d deps) handleIssueJobs(w http.ResponseWriter, r *http.Request) {

@@ -206,6 +206,18 @@ export function DispatchIssue(repoPrefix: string, issueKey: string, mode: string
 }
 
 /**
+ * EditCardProcessTail edits the pending tail of an in_pipeline card's job
+ * chain (BACI-294): the completed / running / cancelled jobs stay as a
+ * locked prefix; stages is the re-ordered pending tail that replaces the
+ * card's pending jobs, re-sequenced after the prefix.
+ */
+export function EditCardProcessTail(repoPrefix: string, key: string, stages: string[]): $CancellablePromise<(model$0.PipelineJob | null)[]> {
+    return $Call.ByID(3819875786, repoPrefix, key, stages).then(($result: any) => {
+        return $$createType12($result);
+    });
+}
+
+/**
  * GetAutoShip reads the per-repo Shipping-column auto-ship toggle so the
  * Pipeline's Shipping switch seeds from the DB (the value the
  * controller's auto-ship ticker acts on), not a local cache.
@@ -231,7 +243,7 @@ export function GetBacklogCollapsed(repoPrefix: string): $CancellablePromise<boo
  */
 export function GetBoardHiddenStates(repoPrefix: string): $CancellablePromise<$models.BoardHiddenStatesDTO> {
     return $Call.ByID(3854215019, repoPrefix).then(($result: any) => {
-        return $$createType10($result);
+        return $$createType13($result);
     });
 }
 
@@ -270,7 +282,7 @@ export function GetIssue(repoPrefix: string, key: string): $CancellablePromise<$
  */
 export function GetIssueBrief(repoPrefix: string, key: string): $CancellablePromise<$models.IssueBriefDTO> {
     return $Call.ByID(836296342, repoPrefix, key).then(($result: any) => {
-        return $$createType11($result);
+        return $$createType14($result);
     });
 }
 
@@ -279,7 +291,7 @@ export function GetIssueBrief(repoPrefix: string, key: string): $CancellableProm
  */
 export function GetNotification(id: number): $CancellablePromise<model$0.Notification | null> {
     return $Call.ByID(2425668760, id).then(($result: any) => {
-        return $$createType13($result);
+        return $$createType16($result);
     });
 }
 
@@ -308,7 +320,7 @@ export function GetSessionQuestion(id: number): $CancellablePromise<model$0.Sess
  */
 export function ListAgents(repoPrefix: string): $CancellablePromise<$models.AgentCard[]> {
     return $Call.ByID(3979848123, repoPrefix).then(($result: any) => {
-        return $$createType15($result);
+        return $$createType18($result);
     });
 }
 
@@ -318,7 +330,7 @@ export function ListAgents(repoPrefix: string): $CancellablePromise<$models.Agen
  */
 export function ListBoards(): $CancellablePromise<$models.Board[]> {
     return $Call.ByID(3235630628).then(($result: any) => {
-        return $$createType16($result);
+        return $$createType19($result);
     });
 }
 
@@ -335,7 +347,7 @@ export function ListBoards(): $CancellablePromise<$models.Board[]> {
  */
 export function ListCards(repoPrefix: string): $CancellablePromise<$models.BoardCard[]> {
     return $Call.ByID(4181487648, repoPrefix).then(($result: any) => {
-        return $$createType17($result);
+        return $$createType20($result);
     });
 }
 
@@ -346,7 +358,7 @@ export function ListCards(repoPrefix: string): $CancellablePromise<$models.Board
  */
 export function ListColumns(): $CancellablePromise<$models.BoardColumn[]> {
     return $Call.ByID(2117984856).then(($result: any) => {
-        return $$createType19($result);
+        return $$createType22($result);
     });
 }
 
@@ -358,7 +370,7 @@ export function ListColumns(): $CancellablePromise<$models.BoardColumn[]> {
  */
 export function ListNotifications(unreadOnly: boolean, limit: number): $CancellablePromise<(model$0.Notification | null)[]> {
     return $Call.ByID(648588779, unreadOnly, limit).then(($result: any) => {
-        return $$createType20($result);
+        return $$createType23($result);
     });
 }
 
@@ -373,7 +385,7 @@ export function ListNotifications(unreadOnly: boolean, limit: number): $Cancella
  */
 export function ListShipped(repoPrefix: string, sinceDays: number, limit: number): $CancellablePromise<$models.ShippedListDTO> {
     return $Call.ByID(3138957880, repoPrefix, sinceDays, limit).then(($result: any) => {
-        return $$createType21($result);
+        return $$createType24($result);
     });
 }
 
@@ -391,7 +403,7 @@ export function MarkAllNotificationsRead(): $CancellablePromise<number> {
  */
 export function MarkNotificationRead(id: number): $CancellablePromise<model$0.Notification | null> {
     return $Call.ByID(3369062611, id).then(($result: any) => {
-        return $$createType13($result);
+        return $$createType16($result);
     });
 }
 
@@ -408,7 +420,7 @@ export function ReorderCard(repoPrefix: string, key: string, position: number): 
  */
 export function RerunCardJob(repoPrefix: string, key: string, seq: number): $CancellablePromise<(model$0.PipelineJob | null)[]> {
     return $Call.ByID(1469568566, repoPrefix, key, seq).then(($result: any) => {
-        return $$createType24($result);
+        return $$createType12($result);
     });
 }
 
@@ -464,7 +476,7 @@ export function SetBacklogCollapsed(repoPrefix: string, collapsed: boolean): $Ca
  */
 export function SetBoardHiddenStates(repoPrefix: string, states: string[]): $CancellablePromise<$models.BoardHiddenStatesDTO> {
     return $Call.ByID(1989240775, repoPrefix, states).then(($result: any) => {
-        return $$createType10($result);
+        return $$createType13($result);
     });
 }
 
@@ -482,7 +494,7 @@ export function SetCardEngineMode(repoPrefix: string, key: string, mode: string)
  */
 export function SetCardProcess(repoPrefix: string, key: string, process: string, stages: string[]): $CancellablePromise<(model$0.PipelineJob | null)[]> {
     return $Call.ByID(3410649082, repoPrefix, key, process, stages).then(($result: any) => {
-        return $$createType24($result);
+        return $$createType12($result);
     });
 }
 
@@ -518,13 +530,13 @@ export function ShipCard(repoPrefix: string, key: string): $CancellablePromise<$
 
 export function StartCardJob(repoPrefix: string, key: string): $CancellablePromise<(model$0.PipelineJob | null)[]> {
     return $Call.ByID(2998495872, repoPrefix, key).then(($result: any) => {
-        return $$createType24($result);
+        return $$createType12($result);
     });
 }
 
 export function StopCardJob(repoPrefix: string, key: string): $CancellablePromise<(model$0.PipelineJob | null)[]> {
     return $Call.ByID(39478934, repoPrefix, key).then(($result: any) => {
-        return $$createType24($result);
+        return $$createType12($result);
     });
 }
 
@@ -572,20 +584,20 @@ const $$createType6 = $Create.Nullable($$createType5);
 const $$createType7 = $models.PRDTO.createFrom;
 const $$createType8 = $models.DefaultFeatureDTO.createFrom;
 const $$createType9 = agentcards$0.DispatchDTO.createFrom;
-const $$createType10 = $models.BoardHiddenStatesDTO.createFrom;
-const $$createType11 = $models.IssueBriefDTO.createFrom;
-const $$createType12 = model$0.Notification.createFrom;
-const $$createType13 = $Create.Nullable($$createType12);
-const $$createType14 = agentcards$0.AgentCard.createFrom;
-const $$createType15 = $Create.Array($$createType14);
-const $$createType16 = $Create.Array($$createType2);
-const $$createType17 = $Create.Array($$createType1);
-const $$createType18 = $models.BoardColumn.createFrom;
-const $$createType19 = $Create.Array($$createType18);
-const $$createType20 = $Create.Array($$createType13);
-const $$createType21 = $models.ShippedListDTO.createFrom;
-const $$createType22 = model$0.PipelineJob.createFrom;
-const $$createType23 = $Create.Nullable($$createType22);
-const $$createType24 = $Create.Array($$createType23);
+const $$createType10 = model$0.PipelineJob.createFrom;
+const $$createType11 = $Create.Nullable($$createType10);
+const $$createType12 = $Create.Array($$createType11);
+const $$createType13 = $models.BoardHiddenStatesDTO.createFrom;
+const $$createType14 = $models.IssueBriefDTO.createFrom;
+const $$createType15 = model$0.Notification.createFrom;
+const $$createType16 = $Create.Nullable($$createType15);
+const $$createType17 = agentcards$0.AgentCard.createFrom;
+const $$createType18 = $Create.Array($$createType17);
+const $$createType19 = $Create.Array($$createType2);
+const $$createType20 = $Create.Array($$createType1);
+const $$createType21 = $models.BoardColumn.createFrom;
+const $$createType22 = $Create.Array($$createType21);
+const $$createType23 = $Create.Array($$createType16);
+const $$createType24 = $models.ShippedListDTO.createFrom;
 const $$createType25 = model$0.UserMessage.createFrom;
 const $$createType26 = $Create.Nullable($$createType25);
