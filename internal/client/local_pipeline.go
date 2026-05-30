@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/pipeline"
@@ -62,6 +63,58 @@ func (c *localClient) SetIssueProcess(ctx context.Context, repo *model.Repo, key
 		Op: "issue.process", Kind: "issue",
 		TargetID: &iss.ID, TargetLabel: iss.Key,
 		Details: proc.Slug,
+	})
+	return jobs, nil
+}
+
+// EditIssueProcessTail rewrites the pending tail of an in_pipeline card's
+// chain (BACI-294), keeping the completed/running/cancelled jobs as a
+// locked prefix. stages is the re-ordered pending tail only. The dry-run
+// projection reads the live locked prefix and appends the validated,
+// re-sequenced tail so the operator sees the whole projected chain — not
+// just the tail they sent.
+func (c *localClient) EditIssueProcessTail(ctx context.Context, repo *model.Repo, key string, stages []string, dryRun bool) ([]*model.PipelineJob, error) {
+	iss, err := c.GetIssueByKey(ctx, repo, key)
+	if err != nil {
+		return nil, err
+	}
+	if dryRun {
+		existing, err := c.store.ListPipelineJobs(iss.ID)
+		if err != nil {
+			return nil, err
+		}
+		if len(existing) == 0 {
+			return nil, fmt.Errorf("cannot edit process: issue %s has no job chain", iss.Key)
+		}
+		var locked []*model.PipelineJob
+		var lockedModes []string
+		for _, j := range existing {
+			if j.Status != model.JobPending {
+				locked = append(locked, j)
+				lockedModes = append(lockedModes, j.Mode)
+			}
+		}
+		proc, err := model.ProcessFromStagesWithPrefix(lockedModes, stages)
+		if err != nil {
+			return nil, err
+		}
+		out := append([]*model.PipelineJob(nil), locked...)
+		for i, mode := range proc.Stages {
+			out = append(out, &model.PipelineJob{
+				IssueID: iss.ID, Sequence: len(locked) + i + 1, Mode: mode, Status: model.JobPending,
+			})
+		}
+		return out, nil
+	}
+	jobs, err := c.store.EditIssueProcessTail(iss.ID, stages)
+	if err != nil {
+		return nil, err
+	}
+	c.recordOp(model.HistoryEntry{
+		RepoID: &iss.RepoID, RepoPrefix: repo.Prefix,
+		Op: "issue.process.edit", Kind: "issue",
+		TargetID: &iss.ID, TargetLabel: iss.Key,
+		Details: strings.Join(stages, "-"),
 	})
 	return jobs, nil
 }
