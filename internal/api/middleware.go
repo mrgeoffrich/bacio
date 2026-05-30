@@ -49,6 +49,17 @@ func recoverPanic(next http.Handler, logger *slog.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if rec := recover(); rec != nil {
+				// http.ErrAbortHandler is the stdlib sentinel a handler
+				// panics with to abort a request silently — ReverseProxy
+				// raises it when it can't finish streaming the response,
+				// almost always because the client (the agent) hung up
+				// mid-stream. net/http's own conn.serve recovers it
+				// without logging and just drops the connection; re-panic
+				// so that path runs. Logging it as an ERROR with a stack
+				// and trying to writeError to a dead connection is noise.
+				if err, ok := rec.(error); ok && errors.Is(err, http.ErrAbortHandler) {
+					panic(rec)
+				}
 				logger.Error("panic in handler",
 					"err", rec,
 					"path", r.URL.Path,
