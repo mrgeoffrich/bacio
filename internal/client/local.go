@@ -177,3 +177,14 @@ func (c *localClient) ListHistory(ctx context.Context, repo *model.Repo, f store
 	}
 	return rows, nil
 }
+
+func (c *localClient) ProxyStats(ctx context.Context, f store.ProxyStatsFilter) ([]*model.ProxyFQDNStat, error) {
+	stats, err := c.store.ProxyStatsByFQDN(f)
+	if err != nil {
+		return nil, err
+	}
+	if stats == nil {
+		stats = []*model.ProxyFQDNStat{}
+	}
+	return stats, nil
+}
