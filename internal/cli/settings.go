@@ -76,7 +76,94 @@ for discoverability alongside the other settings toggles.`,
 	cmd.AddCommand(newSettingsSyncBackgroundCmd())
 	cmd.AddCommand(newSettingsArchiveCmd())
 	cmd.AddCommand(newSettingsShippedSfxCmd())
+	cmd.AddCommand(newSettingsTimezoneCmd())
 	cmd.AddCommand(newSettingsDefaultFeatureCmd())
+	return cmd
+}
+
+// timezoneResult is the JSON + text shape `bacio settings timezone`
+// returns on both the get and set paths (BACI-312). Timezone is empty
+// when unset.
+type timezoneResult struct {
+	Timezone string `json:"timezone"`
+}
+
+// newSettingsTimezoneCmd implements the BACI-312 ui.timezone global
+// setting. The verb doubles as get and set:
+//
+//   - `bacio settings timezone`                  — read the current value
+//   - `bacio settings timezone Australia/Sydney` — write it
+//   - `bacio settings timezone --json '{"timezone":"UTC"}'` — same write
+//
+// The value is an IANA zone name; it drives the browser-side
+// local-midnight cutoff for the Pipeline Shipping-column Shipped pill's
+// "Today" scope (the server stays timezone-agnostic — no time/tzdata
+// embed). Unset by default — the desktop / web UI auto-detects the
+// browser zone and persists it on first run, so a read on a fresh DB
+// returns an empty string.
+func newSettingsTimezoneCmd() *cobra.Command {
+	var rawInput string
+	cmd := &cobra.Command{
+		Use:   "timezone [IANA-ZONE]",
+		Short: "Get or set the BACI-312 ui.timezone global setting (e.g. Australia/Sydney)",
+		Long: `Get or set the BACI-312 ui.timezone global setting. The value is an
+IANA zone name (e.g. Australia/Sydney, UTC, Etc/GMT+10) that drives the
+browser-side local-midnight cutoff for the Pipeline Shipping-column
+"Shipped · N" pill's "Today" scope.
+
+Unset by default — the desktop / web UI auto-detects the browser zone
+and persists it on first run, so a read on a fresh DB returns an empty
+string. The server never resolves the zone (no time/tzdata embed); the
+browser's Intl is the source of truth for the midnight math.
+
+Examples:
+
+  bacio settings timezone                       # read current value
+  bacio settings timezone Australia/Sydney      # set
+  bacio settings timezone UTC                   # set to UTC
+  bacio settings timezone --json '{"timezone":"Australia/Sydney"}'`,
+		Args: cobra.RangeArgs(0, 1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			raw, err := parseJSONInput(cmd, args, rawInput)
+			if err != nil {
+				return err
+			}
+			c, err := openClient()
+			if err != nil {
+				return err
+			}
+			defer c.Close()
+			// Get path — no args, no --json.
+			if raw == nil && len(args) == 0 {
+				cur, err := c.GetUITimezone(context.Background())
+				if err != nil {
+					return err
+				}
+				return emit(timezoneResult{Timezone: cur})
+			}
+			// Set path — accept --json or a positional IANA name.
+			var value string
+			if raw != nil {
+				in, _, err := inputio.DecodeStrict[inputs.SettingsTimezoneInput](raw)
+				if err != nil {
+					return err
+				}
+				value = in.Timezone
+			} else {
+				value = args[0]
+			}
+			out, err := c.SetUITimezone(context.Background(), value, opts.dryRun)
+			if err != nil {
+				return err
+			}
+			payload := timezoneResult{Timezone: out}
+			if opts.dryRun {
+				return emitDryRun(payload)
+			}
+			return emit(payload)
+		},
+	}
+	addInputFlag(cmd, &rawInput)
 	return cmd
 }
 

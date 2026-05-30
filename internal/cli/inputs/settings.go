@@ -132,6 +132,17 @@ type SettingsShippedSfxInput struct {
 	Value bool `json:"value"`
 }
 
+// SettingsTimezoneInput is the payload for `bacio settings timezone
+// --json` (BACI-312). The CLI verb doubles as get and set: empty body
+// reads the current value; a non-empty `timezone` writes it. The value
+// is an IANA zone name (e.g. "Australia/Sydney"); it drives the
+// browser-side local-midnight cutoff for the Pipeline Shipping-column
+// Shipped pill's "Today" scope. Unset by default — the desktop / web UI
+// auto-detects the browser zone and persists it on first run.
+type SettingsTimezoneInput struct {
+	Timezone string `json:"timezone"`
+}
+
 // SettingsDefaultFeatureInput is the payload for
 // `bacio settings default-feature --json` (BACI-235). Slug names the
 // per-repo default feature that auto-applies to issues created

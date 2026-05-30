@@ -320,6 +320,10 @@ var (
 	// BACI-235: per-repo default_feature setting. The verb doubles as
 	// get / set; an empty slug clears the setting.
 	ExampleSettingsDefaultFeature = SettingsDefaultFeatureInput{Slug: "maintenance"}
+	// BACI-312: global ui.timezone setting (IANA zone name). The verb
+	// doubles as get / set; drives the Shipped pill's local-midnight
+	// "Today" cutoff.
+	ExampleSettingsTimezone = SettingsTimezoneInput{Timezone: "Australia/Sydney"}
 
 	// SyncSetup (BACI-110) — three representative payloads, one per mode.
 	// The registry only attaches one example to the schema, but the
