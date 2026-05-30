@@ -310,6 +310,14 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("GET /settings/audio-preferences", d.handleAudioPreferencesGet)
 	mux.HandleFunc("PUT /settings/audio-preferences", d.handleAudioPreferencesSet)
 
+	// BACI-312 global ui.timezone setting — the user's IANA zone name.
+	// GET reads ({timezone: "<name>"|""}); PUT validates the IANA-name
+	// shape and persists it ({timezone: "Australia/Sydney"}). The browser
+	// uses the stored zone to compute local-midnight for the Shipped
+	// pill's "Today" cutoff (the server stays tz-agnostic).
+	mux.HandleFunc("GET /settings/timezone-preferences", d.handleTimezonePreferencesGet)
+	mux.HandleFunc("PUT /settings/timezone-preferences", d.handleTimezonePreferencesSet)
+
 	// BACI-235 per-repo default_feature. GET reads the current
 	// setting ({feature: <Feature|null>}); PUT sets it ({slug:
 	// "<slug>"}); DELETE clears it. The FK on default_feature_id is

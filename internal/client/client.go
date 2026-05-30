@@ -424,6 +424,15 @@ type Client interface {
 	// increments. Defaults to false (audio is opt-in).
 	GetUIShippedSfx(ctx context.Context) (bool, error)
 	SetUIShippedSfx(ctx context.Context, value, dryRun bool) (bool, error)
+	// GetUITimezone / SetUITimezone expose the BACI-312 ui.timezone
+	// global setting — the user's IANA zone name (e.g.
+	// "Australia/Sydney") that drives the browser-side local-midnight
+	// cutoff for the Shipped pill's "Today" scope. GetUITimezone
+	// returns "" when unset (the React layer auto-detects + persists the
+	// browser zone on first run); SetUITimezone validates the IANA-name
+	// shape at the store boundary.
+	GetUITimezone(ctx context.Context) (string, error)
+	SetUITimezone(ctx context.Context, value string, dryRun bool) (string, error)
 	// SyncRegistry (BACI-108) returns the registry of sync repos this
 	// machine knows (one per sync_remotes row) with the project members
 	// each carries, plus the residual tracked project repos that don't
