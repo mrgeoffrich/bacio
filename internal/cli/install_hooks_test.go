@@ -256,7 +256,7 @@ func readJSON(t *testing.T, path string, out any) error {
 func TestInstallAgentActivationBannerIncludesEnvVar(t *testing.T) {
 	const endpoint = "http://127.0.0.1:5320/anthropic"
 	var buf strings.Builder
-	printActivationBanner(&buf, endpoint)
+	printActivationBanner(&buf, endpoint, "")
 	got := buf.String()
 	for _, want := range []string{
 		"BACIO_AGENT_MODE",

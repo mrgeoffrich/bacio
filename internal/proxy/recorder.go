@@ -43,6 +43,23 @@ type RequestObservation struct {
 	ResponseTruncated   bool
 	RequestHeaderBlock  string
 	ResponseHeaderBlock string
+
+	// ResponseContentType / ResponseContentEncoding are lifted off the
+	// upstream response headers (BACI-305) so the recorder can classify the
+	// capture (is_stream / content_type) and decide whether to gunzip the
+	// on-disk raw copy (gzip non-stream Anthropic replies arrive compressed
+	// because the Claude client sets its own Accept-Encoding, which the
+	// proxy forwards verbatim — Go's transport only auto-decompresses the
+	// gzip it requested itself). Both are the base header value, untouched.
+	ResponseContentType     string
+	ResponseContentEncoding string
+
+	// CorrelationKey is the bacio correlation key the agent launch one-liner
+	// stamps on each Anthropic request via ANTHROPIC_CUSTOM_HEADERS
+	// (X-Bacio-Corr — the worktree slug). The recorder resolves it back to
+	// the worktree's active session/dispatch. Empty when the header is
+	// absent (graceful degradation — capture + classification still work).
+	CorrelationKey string
 }
 
 // Recorder observes every request that flows through the proxy. The proxy

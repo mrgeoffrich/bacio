@@ -102,12 +102,13 @@ func readHookInput() (*hookInput, error) {
 // the parsed payload, an open local client, the current repo, the agent
 // identity slug, and the claude pid this hook descends from.
 type hookContext struct {
-	in        *hookInput
-	c         client.Client
-	repo      *model.Repo
-	slug      string // identity slug for this claude process, "" if none
-	actor     string // slug if set, else OS-user fallback
-	claudePID int    // nearest `claude` ancestor pid, 0 if not found
+	in           *hookInput
+	c            client.Client
+	repo         *model.Repo
+	slug         string // identity slug for this claude process, "" if none
+	worktreeSlug string // resolved wtenv manifest slug (BACI-305), "" outside a worktree env
+	actor        string // slug if set, else OS-user fallback
+	claudePID    int    // nearest `claude` ancestor pid, 0 if not found
 }
 
 func (h *hookContext) close() {
@@ -202,7 +203,7 @@ func loadHookContext() (*hookContext, error) {
 		_ = c.Close()
 		return nil, err
 	}
-	return &hookContext{in: in, c: c, repo: repo, slug: slug, actor: act, claudePID: claudePID}, nil
+	return &hookContext{in: in, c: c, repo: repo, slug: slug, worktreeSlug: res.ManifestSlug(), actor: act, claudePID: claudePID}, nil
 }
 
 // linkChannel stamps the session's claude_pid and lights up
@@ -250,7 +251,7 @@ func hookSessionStartCmd() *cobra.Command {
 			// write-contention race that lost identity mints under the
 			// old "do everything at SessionStart" path.
 			host, _ := os.Hostname()
-			sess, err := h.c.CreateSessionStub(context.Background(), h.repo, h.in.SessionID, host, int64(h.claudePID))
+			sess, err := h.c.CreateSessionStub(context.Background(), h.repo, h.in.SessionID, host, h.worktreeSlug, int64(h.claudePID))
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "bacio hook session-start: create stub:", err)
 				return nil
