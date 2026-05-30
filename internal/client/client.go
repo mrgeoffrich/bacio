@@ -278,6 +278,14 @@ type Client interface {
 	// prefix the store reads as the source of truth. Returns the refreshed
 	// chain.
 	EditIssueProcessTail(ctx context.Context, repo *model.Repo, key string, stages []string, dryRun bool) ([]*model.PipelineJob, error)
+	// ResetIssueProcess (BACI-314) wipes an in_pipeline card's ENTIRE job
+	// chain — including completed / cancelled history — so the card drops
+	// back to the from-scratch "Pick a process" picker. The deliberate
+	// counterpart to SetIssueProcess (which refuses once a job has started,
+	// to keep history immutable). Refuses while a job is running — the
+	// engine returns pipeline.ErrJobRunning (the HTTP twin maps it to 409),
+	// so the user must Stop first. Returns the refreshed (empty) chain.
+	ResetIssueProcess(ctx context.Context, repo *model.Repo, key string, dryRun bool) ([]*model.PipelineJob, error)
 	ShipIssue(ctx context.Context, repo *model.Repo, key string, dryRun bool) (*model.Issue, error)
 	SetRepoAutoShip(ctx context.Context, repo *model.Repo, enabled, dryRun bool) (bool, error)
 	// GetRepoAutoShip reads the per-repo Shipping auto-ship toggle — the

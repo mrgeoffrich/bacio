@@ -189,6 +189,79 @@ func TestJobRerunEndpoint(t *testing.T) {
 	}
 }
 
+// TestProcessResetEndpoint covers the BACI-314 POST /process/reset surface:
+// a dry_run projects an empty chain without deleting, a reset on a started
+// chain clears it (200 + empty array), and a reset while a job is running
+// is refused with 409.
+func TestProcessResetEndpoint(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo, err := s.CreateRepo("RSET", "http-reset", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("repo: %v", err)
+	}
+	iss, err := s.CreateIssue(repo.ID, nil, "card", "", model.StateInPipeline, nil, "")
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	proc, err := model.ProcessBySlug("plan-implement")
+	if err != nil {
+		t.Fatalf("ProcessBySlug: %v", err)
+	}
+	jobs, err := s.SetIssueProcess(iss.ID, proc)
+	if err != nil {
+		t.Fatalf("SetIssueProcess: %v", err)
+	}
+	base := ts.URL + "/repos/" + repo.Prefix + "/issues/" + iss.Key
+
+	// dry_run returns an empty chain but leaves the rows in place.
+	resp := do(t, http.MethodPost, base+"/process/reset?dry_run=true", nil, nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("reset dry-run status %d", resp.StatusCode)
+	}
+	projected := decode[[]map[string]any](t, resp.Body)
+	resp.Body.Close()
+	if len(projected) != 0 {
+		t.Fatalf("reset dry-run chain = %d, want 0", len(projected))
+	}
+	if after, _ := s.ListPipelineJobs(iss.ID); len(after) != 2 {
+		t.Fatalf("reset dry-run deleted rows: %d remain, want 2", len(after))
+	}
+
+	// Mark the first job complete (a started chain) and reset → 200 + empty.
+	if err := s.SetPipelineJobStatus(jobs[0].ID, model.JobComplete); err != nil {
+		t.Fatalf("set complete: %v", err)
+	}
+	resp = do(t, http.MethodPost, base+"/process/reset", nil, nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("reset status %d, want 200", resp.StatusCode)
+	}
+	chain := decode[[]map[string]any](t, resp.Body)
+	resp.Body.Close()
+	if len(chain) != 0 {
+		t.Fatalf("reset returned %d jobs, want empty", len(chain))
+	}
+	if after, _ := s.ListPipelineJobs(iss.ID); len(after) != 0 {
+		t.Fatalf("reset left %d rows, want 0", len(after))
+	}
+
+	// A reset while a job is running is refused with 409.
+	if _, err := s.SetIssueProcess(iss.ID, proc); err != nil {
+		t.Fatalf("re-set process: %v", err)
+	}
+	running, _ := s.ListPipelineJobs(iss.ID)
+	if err := s.SetPipelineJobStatus(running[0].ID, model.JobRunning); err != nil {
+		t.Fatalf("set running: %v", err)
+	}
+	resp = do(t, http.MethodPost, base+"/process/reset", nil, nil)
+	if resp.StatusCode != 409 {
+		t.Fatalf("reset-while-running status %d, want 409", resp.StatusCode)
+	}
+	resp.Body.Close()
+	if after, _ := s.ListPipelineJobs(iss.ID); len(after) != 2 {
+		t.Fatalf("refused reset deleted rows: %d remain, want 2", len(after))
+	}
+}
+
 // TestProcessEditTailEndpoint covers the BACI-294 PUT /process/tail
 // surface: editing the pending tail keeps the locked prefix, a dry_run
 // projects without writing, a ship-not-last tail is 400 with field=stages,

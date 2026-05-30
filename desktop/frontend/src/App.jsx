@@ -747,6 +747,17 @@ export default function App() {
       .catch(err => reportError(err, { headline: "Couldn't stop the job" }));
   }, [activeBoard, refreshCards]);
 
+  // Reset the process (BACI-314) — wipe the card's whole job chain so it
+  // drops back to the from-scratch "Pick a process" picker. The card's
+  // in-card confirm gates this; the engine refuses while a job is running
+  // (the card hides Reset in that state). Refreshes so the emptied chain
+  // re-renders as the fresh picker.
+  const resetCardProcess = useCallback((key) => {
+    api.resetCardProcess(activeBoard, key)
+      .then(() => refreshCards({ silent: true }))
+      .catch(err => reportError(err, { headline: "Couldn't reset the process" }));
+  }, [activeBoard, refreshCards]);
+
   // Per-job Re-run — reset an aborted (stopped) step to pending and
   // re-dispatch it (BACI-291). seq is the job's 1-based sequence.
   const rerunCardJob = useCallback((key, seq) => {
@@ -1201,6 +1212,7 @@ export default function App() {
                   onCancelCard={cancelCardFromPipeline}
                   onReorder={reorderPipelineCard}
                   onSetProcess={setCardProcess}
+                  onResetProcess={resetCardProcess}
                   onEditProcess={(key) => navigate(processEditPath(activeBoard, key))}
                   onStartJob={startCardJob}
                   onStopJob={stopCardJob}

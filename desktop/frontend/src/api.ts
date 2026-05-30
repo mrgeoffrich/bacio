@@ -451,6 +451,23 @@ export async function editCardProcessTail(
   }
 }
 
+// resetCardProcess wipes an in_pipeline card's ENTIRE job chain (BACI-314)
+// — including completed / cancelled history — so the card drops back to the
+// from-scratch "Pick a process" picker. Refused by the engine while a job
+// is running (the card hides Reset in that state). Returns the refreshed
+// (empty) chain.
+export async function resetCardProcess(
+  repoPrefix: string,
+  key: string,
+): Promise<PipelineJob[]> {
+  try {
+    const jobs = await BoardService.ResetCardProcess(repoPrefix, key);
+    return (jobs ?? []).filter((j): j is PipelineJob => j != null);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
 // startCardJob is the manual Start control — advance one step (start the
 // next pending job, or run the Ship hand-off). Returns the refreshed chain.
 export async function startCardJob(

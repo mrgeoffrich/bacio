@@ -58,6 +58,9 @@ var (
 		Key:    "MINI-42",
 		Stages: []string{"review", "implement", "ship"},
 	}
+	ExampleIssueProcessReset = IssueProcessResetInput{
+		Key: "MINI-42",
+	}
 	ExampleIssueShip = IssueShipInput{
 		Key: "MINI-42",
 	}

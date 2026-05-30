@@ -441,6 +441,19 @@ export function RescueDispatch(dispatchID: number): $CancellablePromise<$models.
 }
 
 /**
+ * ResetCardProcess wipes an in_pipeline card's ENTIRE job chain (BACI-314)
+ * so it drops back to the from-scratch "Pick a process" picker. The UI
+ * never dry-runs, so dryRun is always false. Refused by the engine while a
+ * job is running (the UI hides Reset in that state; the client surfaces the
+ * error otherwise). Returns the refreshed (empty) chain.
+ */
+export function ResetCardProcess(repoPrefix: string, key: string): $CancellablePromise<(model$0.PipelineJob | null)[]> {
+    return $Call.ByID(2278414531, repoPrefix, key).then(($result: any) => {
+        return $$createType12($result);
+    });
+}
+
+/**
  * SendSessionMessage (BACI-286) enqueues a user→agent steer message at a
  * busy session — the Pipeline running-job card / Agents-page session
  * card "message" button. The channel serving that session pushes it as a

@@ -28,6 +28,14 @@ import (
 // affordance only, never a way to re-run a complete or running job.
 var ErrJobNotCancelled = errors.New("job is not cancelled; only an aborted job can be re-run")
 
+// ErrJobRunning is returned by ResetProcess when a job is currently running
+// — Reset wipes the whole chain (including the running job's history),
+// which would orphan the live worker + dispatch. The user must Stop the
+// running job first (Stop cancels the job/dispatch and steers the worker).
+// The HTTP twin maps this to 409 so the CLI/remote report a clean
+// "stop the running job first" rather than a generic 500.
+var ErrJobRunning = errors.New("a job is running; stop it before resetting the process")
+
 // stopWorkerSteerBody is the canned wind-down note StopRunning enqueues as
 // a BACI-286 steer message at the running worker's session. Delivery is
 // turn-boundary only (the channel can't interrupt a live tool call), so
@@ -431,6 +439,44 @@ func (e *Engine) StopRunning(issueID int64) ([]Advance, error) {
 	e.setPause(iss, false)
 	e.steerWorkerToStop(iss)
 	return []Advance{e.advance(iss, "job.cancelled", fmt.Sprintf("seq=%d mode=%s (stopped)", running.Sequence, running.Mode))}, nil
+}
+
+// ResetProcess is the manual "Reset" control (BACI-314): wipe the card's
+// ENTIRE job chain — including completed / cancelled history — so the card
+// drops back to the from-scratch "Pick a process" picker. Unlike
+// SetIssueProcess (which refuses once a job has started, to keep history
+// immutable) Reset deliberately discards that history. It refuses with
+// ErrJobRunning while a job is running — Reset would orphan the live worker
+// + dispatch, so the user must Stop first (StopRunning cancels the job and
+// steers the worker). After clearing the rows it disarms Auto and clears
+// any pause reason so a freshly-emptied card can't silently resume on the
+// next tick — the same teardown StopRunning applies. A no-op (nil, nil)
+// when the card isn't in_pipeline.
+func (e *Engine) ResetProcess(issueID int64) error {
+	if e == nil || e.st == nil {
+		return nil
+	}
+	iss, err := e.st.GetIssueByID(issueID)
+	if err != nil {
+		return err
+	}
+	if iss.State != model.StateInPipeline {
+		return nil
+	}
+	jobs, err := e.st.ListPipelineJobs(issueID)
+	if err != nil {
+		return err
+	}
+	if firstByStatus(jobs, model.JobRunning) != nil {
+		return ErrJobRunning
+	}
+	if err := e.st.ClearIssueProcess(issueID); err != nil {
+		return err
+	}
+	if err := e.st.SetIssueEngineMode(issueID, model.EngineOff); err != nil {
+		return err
+	}
+	return e.st.SetIssueEnginePauseReason(issueID, "")
 }
 
 // steerWorkerToStop pushes the canned wind-down note at the newest open

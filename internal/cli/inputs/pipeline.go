@@ -35,6 +35,14 @@ type IssueProcessEditInput struct {
 	Stages []string `json:"stages"`
 }
 
+// IssueProcessResetInput is the payload for `bacio issue process reset
+// --json` and POST …/issues/{key}/process/reset (BACI-314) — wipe the
+// card's entire job chain so it drops back to the from-scratch picker.
+// Key-only; refused while a job is running (Stop first).
+type IssueProcessResetInput struct {
+	Key string `json:"key"`
+}
+
 // IssueEngineModeInput is the payload for the engine drive-mode toggle
 // (PUT …/issues/{key}/engine-mode). Mode is "off" or "auto".
 type IssueEngineModeInput struct {

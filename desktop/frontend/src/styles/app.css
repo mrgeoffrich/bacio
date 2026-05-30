@@ -2077,6 +2077,14 @@ body { margin: 0; }
   color: var(--status-error); background: var(--status-error-bg);
 }
 
+/* BACI-314: the armed Reset confirm — an inline footer row ("Reset
+   process? Confirm / Cancel"), not a modal. The leading prompt reads in the
+   blocked-red of the Reset button so the destructive intent is obvious. */
+.mk-pl-reset-confirm {
+  display: inline-flex; align-items: center; gap: 9px;
+  font-size: 12.5px; font-weight: 600; color: var(--status-blocked);
+}
+
 /* ── process-pick overlay ── */
 .mk-pl-procmenu {
   margin: 12px 18px 18px;
