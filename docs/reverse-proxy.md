@@ -77,13 +77,85 @@ feature's scoping decisions; the activation banner calls it out.
 
 ---
 
-## What's deliberately out of scope (BACI-301)
+---
+
+## Traffic capture (BACI-302)
+
+BACI-302 adds an **observation layer** over the forwarding pipe: every
+request that flows through `/anthropic/*` is recorded — transport-level
+fields only, no Anthropic body parsing (that is BACI-305/306). Two
+artefacts land per request:
+
+- a **raw req/resp file** under the per-worktree log dir
+  (`<LogDir>/proxy/<YYYY-MM-DD>/<unix-nanos>.http`), holding the request
+  header block + body, then the response header block + body;
+- a **lightweight index row** in the `proxy_requests` SQLite table:
+  method, host, path, status, bytes in/out, round-trip duration, the
+  timestamps, and the raw-file path.
+
+### Where the capture hooks in
+
+The capture lives in a custom `http.RoundTripper`
+([`captureTransport`](../internal/proxy/proxy.go)) installed on the
+`httputil.ReverseProxy`. It tees the outbound request body and wraps the
+response body in a counting + teeing `io.ReadCloser` whose `Close`
+finalises the observation. This is the **load-bearing correctness
+constraint**: capture must NEVER buffer or delay the streamed bytes — the
+tee forwards every byte downstream immediately and accumulates the raw
+copy alongside, so SSE token streams still arrive incrementally
+(`FlushInterval=-1` is untouched). An upstream round-trip failure records
+a status-0 observation so a failed request still shows up in the index;
+the `ErrorHandler` surfaces the 502 to the client as before.
+
+### Recorder seam — proxy stays store-free
+
+The `proxy` package must not import `store` or know the log dir, so a
+narrow [`Recorder`](../internal/proxy/recorder.go) interface inverts the
+dependency: `proxy.New(upstream, logger, rec)` calls `rec.Record(obs)`
+once per round-trip, and the `api` package supplies the concrete
+[`captureRecorder`](../internal/api/proxy_recorder.go). A nil recorder is
+replaced with an inert `nopRecorder`.
+
+### Off the request path
+
+`captureRecorder` is **fully asynchronous**: `Record` enqueues onto a
+buffered channel (non-blocking — a full queue drops the observation with a
+single warning rather than stalling the proxy) and a single worker
+goroutine does the disk write + DB insert. So the proxy's streaming hot
+path is never gated on a flush or a write. Failures are swallowed (logged
+once, never panicked); a failed file write still inserts the index row
+with an empty `raw_log_path`. Auth-bearing headers (`authorization`,
+`x-api-key`, …) are redacted before the header block is written, so the
+raw capture never persists an Anthropic API key. Raw bodies are buffered
+up to `proxy.MaxCapturedBody` (8 MiB) per direction — past that the
+streamed bytes are uncapped but the raw copy is truncated and the index
+row's truncation is implicit in the `.http` file's marker.
+
+### Retention
+
+The `proxy_requests` index is pruned on every `store.Open` by
+`pruneProxyRequests` against a 60-day `ProxyRequestRetention` window —
+the same best-effort housekeeping pass that prunes the audit log. **Known
+gap:** the raw capture files on disk have **no** auto-prune in BACI-302
+(same as today's logs / transcripts); only the SQLite index is bounded.
+Raw-log-file cleanup is a deliberate follow-on, not yet ticketed.
+
+The write side is all BACI-302 adds — there is no `bacio` read verb or
+REST read endpoint for the capture yet. The read surfaces belong to
+BACI-303 (per-FQDN aggregation) and BACI-304 (the Monitor web screen).
+
+---
+
+## What's deliberately out of scope
 
 - **Forward proxy / `HTTPS_PROXY` all-FQDN MITM** — the other side of
   the reverse-vs-forward fork. Reserved for the aggregate-by-FQDN work
   (BACI-303/304) once multi-upstream routing earns its keep.
-- **Traffic monitoring / per-FQDN stats** — BACI-302, BACI-303.
-- **Anthropic request/response capture to disk + a SQLite index** —
-  BACI-305, BACI-306.
-- **The Monitor web screen** — BACI-304.
+- **Per-FQDN aggregation / stats read surfaces** — BACI-303.
+- **Anthropic request/response body parsing** (model, token usage,
+  turn/tool counts) — BACI-305, BACI-306.
+- **The Monitor web screen** and any capture read endpoint/verb —
+  BACI-304.
+- **Raw-log-file retention / cleanup** — the index prune is BACI-302; the
+  on-disk raw files have no auto-prune yet.
 - **Retiring the `.jsonl` transcript attachments** — BACI-307.

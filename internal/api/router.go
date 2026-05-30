@@ -171,7 +171,13 @@ func newRouter(d deps) http.Handler {
 			"upstream", upstreamRaw, "err", err)
 		upstreamURL, _ = url.Parse(proxy.DefaultUpstream)
 	}
-	mux.Handle(proxy.PathPrefix+"/", proxy.New(upstreamURL, proxyLogger))
+	// BACI-302: the capture recorder observes every proxied request — raw
+	// req/resp to <LogDir>/proxy/, a lightweight index row in proxy_requests
+	// — off the request path so the proxy's streaming hot path is never
+	// gated on a disk/DB write. Constructed here so the proxy package stays
+	// free of the store and the log dir.
+	proxyRecorder := newCaptureRecorder(d.store, d.opts.LogDir, proxyLogger)
+	mux.Handle(proxy.PathPrefix+"/", proxy.New(upstreamURL, proxyLogger, proxyRecorder))
 
 	// Web UI bundle (BACI-30, gated by BACI-72): serve the browser-deployed
 	// React build at /ui/, with a 301 from the unslashed /ui to keep the
