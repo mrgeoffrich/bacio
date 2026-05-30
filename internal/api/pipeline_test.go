@@ -189,6 +189,83 @@ func TestJobRerunEndpoint(t *testing.T) {
 	}
 }
 
+// TestProcessEditTailEndpoint covers the BACI-294 PUT /process/tail
+// surface: editing the pending tail keeps the locked prefix, a dry_run
+// projects without writing, a ship-not-last tail is 400 with field=stages,
+// and a card with no chain is 400.
+func TestProcessEditTailEndpoint(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo, err := s.CreateRepo("EDIT", "http-edit", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("repo: %v", err)
+	}
+	iss, err := s.CreateIssue(repo.ID, nil, "card", "", model.StateInPipeline, nil, "")
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	base := ts.URL + "/repos/" + repo.Prefix + "/issues/" + iss.Key
+
+	// No chain yet → 400.
+	resp := do(t, http.MethodPut, base+"/process/tail", strings.NewReader(`{"stages":["plan"]}`), nil)
+	if resp.StatusCode != 400 {
+		t.Fatalf("edit no-chain status %d, want 400", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// Seed a plan→implement→ship chain and lock job 1 (complete).
+	proc, _ := model.ProcessBySlug("plan-implement-ship")
+	jobs, err := s.SetIssueProcess(iss.ID, proc)
+	if err != nil {
+		t.Fatalf("SetIssueProcess: %v", err)
+	}
+	if err := s.SetPipelineJobStatus(jobs[0].ID, model.JobComplete); err != nil {
+		t.Fatalf("complete job 1: %v", err)
+	}
+
+	// Ship-not-last tail → 400 with field=stages.
+	resp = do(t, http.MethodPut, base+"/process/tail", strings.NewReader(`{"stages":["ship","implement"]}`), nil)
+	if resp.StatusCode != 400 {
+		t.Fatalf("edit ship-not-last status %d, want 400", resp.StatusCode)
+	}
+	eb := decode[map[string]any](t, resp.Body)
+	resp.Body.Close()
+	if det, _ := eb["details"].(map[string]any); det == nil || det["field"] != "stages" {
+		t.Fatalf("error details = %v, want field=stages", eb["details"])
+	}
+
+	// dry_run projects the locked prefix + re-sequenced tail without writing.
+	resp = do(t, http.MethodPut, base+"/process/tail?dry_run=true",
+		strings.NewReader(`{"stages":["review","implement","ship"]}`), nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("edit dry-run status %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	if got, _ := s.ListPipelineJobs(iss.ID); len(got) != 3 {
+		t.Fatalf("dry-run mutated the chain to %d jobs, want 3", len(got))
+	}
+
+	// Real edit → 200, the locked prefix preserved and the tail re-sequenced.
+	resp = do(t, http.MethodPut, base+"/process/tail",
+		strings.NewReader(`{"stages":["review","implement","ship"]}`), nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("edit status %d", resp.StatusCode)
+	}
+	chain := decode[[]map[string]any](t, resp.Body)
+	resp.Body.Close()
+	wantModes := []string{"plan", "review", "implement", "ship"}
+	if len(chain) != len(wantModes) {
+		t.Fatalf("edited chain = %d, want %d", len(chain), len(wantModes))
+	}
+	for i, wm := range wantModes {
+		if got, _ := chain[i]["mode"].(string); got != wm {
+			t.Fatalf("edited job[%d].mode = %q, want %q", i, got, wm)
+		}
+	}
+	if got, _ := chain[0]["status"].(string); got != "complete" {
+		t.Fatalf("locked job 1 status = %q, want complete", got)
+	}
+}
+
 // TestProcessFromStagesEndpoint covers the BACI-283 explicit-stage-list
 // path on POST /process: a free-form chain materialises, and the
 // mutually-exclusive guard rejects both / neither.
