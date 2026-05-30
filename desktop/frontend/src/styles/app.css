@@ -1838,6 +1838,14 @@ body { margin: 0; }
 .mk-pl-card.is-dragging { opacity: .5; }
 .mk-pl-card.is-drop-before { border-top: 2px solid var(--sky-500); }
 .mk-pl-card.is-shipping { border-color: var(--status-doing); }
+/* BACI-310: cross-highlight — a card flashes red while its key is hovered
+   in some other card's blocked-by badge, so the user can spot the blocker
+   on screen. Scoped to .mk-pl-card.is-blocker-hl so it wins over the
+   neutral border without clobbering is-dragging / is-shipping opacity. */
+.mk-pl-card.is-blocker-hl {
+  border-color: var(--status-blocked);
+  background: var(--status-blocked-bg);
+}
 
 .mk-pl-badge {
   position: absolute;
@@ -1872,6 +1880,28 @@ body { margin: 0; }
 }
 .mk-pl-icobtn:hover { color: var(--fg-1); border-color: var(--border-2); background: var(--bg-4); }
 .mk-pl-icobtn svg { width: 14px; height: 14px; }
+/* BACI-310: the per-card blocked-by chip in .mk-pl-card-top — a 🔒 +
+   blocker key (single) or "blocked by N" (multi, opens the
+   .mk-card-blocked-menu popover). Coral metadata tone borrowed from the
+   kanban's .mk-card-blocked-btn; informational only, never gates Start.
+   Sits just after .mk-pl-card-id, before the right-aligned icon group. */
+.mk-pl-blocked-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 1px 7px 1px 5px; height: 20px;
+  border: 1px solid var(--status-blocked, var(--border-2));
+  border-radius: var(--radius-full);
+  background: var(--status-blocked-bg, var(--bg-4));
+  color: var(--status-blocked, var(--fg-2));
+  font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+  line-height: 1; cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+.mk-pl-blocked-btn:hover {
+  background: var(--status-blocked, var(--fg-2));
+  color: var(--paper, #fff);
+}
+.mk-pl-blocked-btn .mk-icon { width: 11px; height: 11px; }
 .mk-pl-card-title { font-size: 14px; font-weight: 600; line-height: 1.35; color: var(--fg-1); margin: 0; }
 .mk-pl-card-labels { display: flex; flex-wrap: wrap; gap: 5px; }
 .mk-pl-label {
@@ -1946,9 +1976,13 @@ body { margin: 0; }
   flex-direction: column;
   overflow: hidden;
   position: relative;
+  transition: border-color .12s;
 }
 .mk-pl-stage.is-attn { border-color: var(--status-review); }
 .mk-pl-stage.is-dragging { opacity: .5; }
+/* BACI-310: same cross-highlight as .mk-pl-card.is-blocker-hl, for the
+   in_pipeline stage card. */
+.mk-pl-stage.is-blocker-hl { border-color: var(--status-blocked); }
 .mk-pl-stage-head { padding: 16px 18px 12px; display: flex; flex-direction: column; gap: 9px; cursor: pointer; }
 .mk-pl-stage-title { font-size: 18px; font-weight: 700; line-height: 1.3; color: var(--fg-1); margin: 0; }
 

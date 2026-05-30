@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { AnimatePresence, m } from 'motion/react';
 import { Link } from 'react-router';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import Icon from './Icon.jsx';
 import Tooltip from './Tooltip.jsx';
 import QuestionModal from './QuestionModal.jsx';
@@ -9,6 +10,7 @@ import SessionMessageButton from './SessionMessageButton.jsx';
 import { documentPath } from '../lib/routes';
 import prLabel from '../lib/prLabel';
 import { stageLabel, stageGlyph, isShipStage } from '../lib/pipelineProcesses';
+import { blockedByMode } from '../lib/blockedByBadge';
 import * as api from '../api';
 
 // PipelineView (Phase 4) — the real three-column pipeline board, keyed on
@@ -18,11 +20,106 @@ import * as api from '../api';
 // issue state, ordering is server-side, and the per-card job chain +
 // engine drive-mode come straight off the BoardCard.
 //
-// Card design follows pipeline-card-mockups.html (authoritative): a
-// compact issue card in Backlog / Shipping, and a stage card that grows
-// to fill the column when in pipeline — issue header on top, the
-// processing detail (job chain + active-job todos / question) in the
-// body, all operation controls along the bottom.
+// Card design intent: a compact issue card in Backlog / Shipping, and a
+// stage card that grows to fill the column when in pipeline — issue
+// header on top, the processing detail (job chain + active-job todos /
+// question) in the body, all operation controls along the bottom.
+
+// BLOCKER_STATE_LABEL maps the open-state set carried by a blocker
+// (BoardCardBlocker.state, always one of todo | in_progress |
+// needs_action | in_review) to the human label shown on the multi-blocker
+// popover's state pill. Mirrors STATE_LABELS in api.http.ts (module-
+// private there); kept tiny and local since only the popover needs it.
+const BLOCKER_STATE_LABEL = {
+  todo: 'Todo',
+  in_progress: 'In Progress',
+  needs_action: 'Needs Action',
+  in_review: 'In Review',
+};
+
+// BlockedByBadge — the per-card blocked-by indicator (BACI-310). Purely
+// informational: it never disables Start. card.blockedBy is the open
+// `blocks` edges pointing AT this card (the server filters out
+// done/cancelled blockers, so the badge clears automatically when a
+// blocker finishes).
+//
+//   single blocker → a 🔒 chip showing the blocker's key directly;
+//   multiple        → a 🔒 "blocked by N" chip opening a Radix popover
+//                      (re-uses the .mk-card-blocked-menu* CSS) listing
+//                      each blocker key + state pill.
+//
+// Hovering a blocker reference calls onHighlight(key) so PipelineView can
+// red-highlight that blocker's card if it is currently on screen, and
+// onHighlight(null) on leave. Clicking navigates to the blocker via
+// onOpenIssue. All click/select handlers stopPropagation so opening the
+// popover or following a link never starts a drag or trips the card's
+// onOpen.
+function BlockedByBadge({ blockedBy, onOpenIssue, onHighlight }) {
+  const mode = blockedByMode(blockedBy);
+  if (mode === 'none') return null;
+
+  if (mode === 'single') {
+    const { key } = blockedBy[0];
+    return (
+      <button
+        type="button"
+        className="mk-pl-blocked-btn"
+        aria-label={`Blocked by ${key}`}
+        title={`Blocked by ${key}`}
+        onClick={(e) => { e.stopPropagation(); onOpenIssue?.(key); }}
+        onMouseEnter={() => onHighlight?.(key)}
+        onMouseLeave={() => onHighlight?.(null)}
+      >
+        <Icon name="lock" />
+        <span className="mk-pl-blocked-lbl">{key}</span>
+      </button>
+    );
+  }
+
+  // multi
+  return (
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger asChild>
+        <button
+          type="button"
+          className="mk-pl-blocked-btn"
+          aria-label={`Blocked by ${blockedBy.length} issues`}
+          title={`Blocked by ${blockedBy.length} issues`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Icon name="lock" />
+          <span className="mk-pl-blocked-lbl">blocked by {blockedBy.length}</span>
+        </button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content
+          className="mk-card-blocked-menu"
+          align="start"
+          side="bottom"
+          sideOffset={4}
+          collisionPadding={8}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="mk-card-blocked-menu-label">Blocked by</div>
+          {blockedBy.map(b => (
+            <DropdownMenu.Item
+              key={b.key}
+              className="mk-card-blocked-item"
+              onSelect={() => onOpenIssue?.(b.key)}
+              onMouseEnter={() => onHighlight?.(b.key)}
+              onMouseLeave={() => onHighlight?.(null)}
+            >
+              <span className="mk-card-id">{b.key}</span>
+              <span className={`mk-pill mk-status-${b.state}`}>
+                {BLOCKER_STATE_LABEL[b.state] ?? b.state}
+              </span>
+            </DropdownMenu.Item>
+          ))}
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  );
+}
 //
 // Drag model: dragging a card to another column changes its state
 // (onMoveCard, or the Ship hand-off for in_pipeline → Shipping); dropping
@@ -85,6 +182,12 @@ export default function PipelineView({
   // controller's auto-ship ticker actually acts on — so the toggle
   // reflects the source of truth across machines, not a local cache.
   const [autoShip, setAutoShip] = useState(false);
+  // highlightKey (BACI-310): the issue key of the blocker currently being
+  // hovered in some card's blocked-by badge. The card whose key matches
+  // paints itself red (.is-blocker-hl). A no-op when the hovered blocker
+  // isn't rendered on the pipeline — no card matches, nothing highlights.
+  const [highlightKey, setHighlightKey] = useState(null);
+  const onHighlight = useCallback((k) => setHighlightKey(k), []);
 
   useEffect(() => {
     if (!activeBoard) { setAutoShip(false); return; }
@@ -285,7 +388,10 @@ export default function PipelineView({
                     showBadge={expanded}
                     backlog
                     isDragging={dragKey === card.key}
+                    isHighlighted={card.key === highlightKey}
                     onOpen={() => onOpenCard?.(card)}
+                    onOpenIssue={onOpenIssue}
+                    onHighlight={onHighlight}
                     onDragStart={() => setDragKey(card.key)}
                     onDragEnd={() => { setDragKey(null); setDragOverCol(null); }}
                     onDropCard={() => dropOnCard(card, i)}
@@ -327,7 +433,10 @@ export default function PipelineView({
                   card={card}
                   activeBoard={activeBoard}
                   isDragging={dragKey === card.key}
+                  isHighlighted={card.key === highlightKey}
                   onOpen={() => onOpenCard?.(card)}
+                  onOpenIssue={onOpenIssue}
+                  onHighlight={onHighlight}
                   onDragStart={() => setDragKey(card.key)}
                   onDragEnd={() => { setDragKey(null); setDragOverCol(null); }}
                   onSetProcess={onSetProcess}
@@ -400,7 +509,10 @@ export default function PipelineView({
                 isNextToShip={i === 0}
                 autoShip={autoShip}
                 isDragging={dragKey === card.key}
+                isHighlighted={card.key === highlightKey}
                 onOpen={() => onOpenCard?.(card)}
+                onOpenIssue={onOpenIssue}
+                onHighlight={onHighlight}
                 onDragStart={() => setDragKey(card.key)}
                 onDragEnd={() => { setDragKey(null); setDragOverCol(null); }}
                 onDropCard={() => dropOnCard(card, i)}
@@ -433,10 +545,10 @@ export default function PipelineView({
 }
 
 // PipelineCard — the compact issue card for Backlog and Shipping. Issue
-// info only (feature glyph, key, plan/PR icon buttons, title, labels),
-// per the mockup's "the issue card only ever shows the issue itself"
-// rule. Shipping adds a position badge + the Next-to-ship SHIP row /
-// waiting status.
+// info only (feature glyph, key, plan/PR icon buttons, blocked-by badge,
+// title, labels) — the issue card only ever shows the issue itself.
+// Shipping adds a position badge + the Next-to-ship SHIP row / waiting
+// status.
 function PipelineCard({
   card,
   activeBoard,
@@ -447,7 +559,10 @@ function PipelineCard({
   isNextToShip,
   autoShip,
   isDragging,
+  isHighlighted,
   onOpen,
+  onOpenIssue,
+  onHighlight,
   onDragStart,
   onDragEnd,
   onDropCard,
@@ -461,7 +576,7 @@ function PipelineCard({
 
   return (
     <article
-      className={`mk-pl-card${isDragging ? ' is-dragging' : ''}${over ? ' is-drop-before' : ''}${shippingInFlight ? ' is-shipping' : ''}`}
+      className={`mk-pl-card${isDragging ? ' is-dragging' : ''}${over ? ' is-drop-before' : ''}${shippingInFlight ? ' is-shipping' : ''}${isHighlighted ? ' is-blocker-hl' : ''}`}
       draggable
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
@@ -478,7 +593,7 @@ function PipelineCard({
           {index + 1}
         </span>
       )}
-      <CardHead card={card} activeBoard={activeBoard} />
+      <CardHead card={card} activeBoard={activeBoard} onOpenIssue={onOpenIssue} onHighlight={onHighlight} />
       <h3 className="mk-pl-card-title">{card.title}</h3>
       <CardLabels tags={card.tags} />
       {backlog && (
@@ -536,10 +651,11 @@ function PipelineCard({
   );
 }
 
-// CardHead — feature glyph · issue key · plan / PR icon buttons (each
-// only when it exists). Shared by the compact card and the stage card's
-// header so the anatomy stays identical.
-function CardHead({ card, activeBoard }) {
+// CardHead — feature glyph · issue key · plan / PR icon buttons · blocked-by
+// badge (each only when it applies). Shared by the compact card and the
+// stage card's header so the anatomy stays identical, which is how the
+// blocked-by badge lands on all three card types at once.
+function CardHead({ card, activeBoard, onOpenIssue, onHighlight }) {
   const latestPlan = card.latestPlan || null;
   const latestPR = card.latestPR || null;
   return (
@@ -548,6 +664,11 @@ function CardHead({ card, activeBoard }) {
         <span className="mk-pl-card-emoji" aria-hidden="true">{card.featureEmoji}</span>
       )}
       <span className="mk-pl-card-id">{card.key}</span>
+      <BlockedByBadge
+        blockedBy={card.blockedBy}
+        onOpenIssue={onOpenIssue}
+        onHighlight={onHighlight}
+      />
       <span className="mk-pl-card-icons">
         {latestPlan && (
           <Tooltip label={`Open plan: ${latestPlan.filename}`}>
@@ -597,7 +718,10 @@ function StageCard({
   card,
   activeBoard,
   isDragging,
+  isHighlighted,
   onOpen,
+  onOpenIssue,
+  onHighlight,
   onDragStart,
   onDragEnd,
   onSetProcess,
@@ -636,13 +760,13 @@ function StageCard({
 
   return (
     <article
-      className={`mk-pl-stage${isDragging ? ' is-dragging' : ''}${paused ? ' is-attn' : ''}`}
+      className={`mk-pl-stage${isDragging ? ' is-dragging' : ''}${paused ? ' is-attn' : ''}${isHighlighted ? ' is-blocker-hl' : ''}`}
       draggable
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
     >
       <header className="mk-pl-stage-head" onClick={onOpen}>
-        <CardHead card={card} activeBoard={activeBoard} />
+        <CardHead card={card} activeBoard={activeBoard} onOpenIssue={onOpenIssue} onHighlight={onHighlight} />
         <h3 className="mk-pl-stage-title">{card.title}</h3>
         <CardLabels tags={card.tags} />
       </header>
