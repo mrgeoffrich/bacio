@@ -49,7 +49,7 @@ func TestCompleteRegistrationRejectsPlaceholder(t *testing.T) {
 	// Seed a stub for a *real* session_id first so we can prove the
 	// placeholder reject is what blocks the bogus write — not some
 	// upstream missing-row error.
-	if _, err := p.local.CreateSessionStub(context.Background(), p.repo, "real-uuid-3ab2c4d6", "smoke-host", 7777); err != nil {
+	if _, err := p.local.CreateSessionStub(context.Background(), p.repo, "real-uuid-3ab2c4d6", "smoke-host", "", 7777); err != nil {
 		t.Fatalf("CreateSessionStub: %v", err)
 	}
 

@@ -325,7 +325,7 @@ func (c *remoteClient) EnsureAgentIdentity(ctx context.Context, repo *model.Repo
 	return "", remoteAgentNotSupported("register")
 }
 
-func (c *remoteClient) CreateSessionStub(ctx context.Context, repo *model.Repo, sessionID, host string, claudePID int64) (*model.AgentSession, error) {
+func (c *remoteClient) CreateSessionStub(ctx context.Context, repo *model.Repo, sessionID, host, worktreeSlug string, claudePID int64) (*model.AgentSession, error) {
 	return nil, remoteAgentNotSupported("session-stub")
 }
 
