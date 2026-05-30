@@ -134,6 +134,7 @@ export default function PipelineView({
   onOpenCard,
   onOpenIssue,
   onMoveCard,
+  onFastTrack,
   onCancelCard,
   onReorder,
   onSetProcess,
@@ -397,6 +398,7 @@ export default function PipelineView({
                     onDragEnd={() => { setDragKey(null); setDragOverCol(null); }}
                     onDropCard={() => dropOnCard(card, i)}
                     onMoveCard={onMoveCard}
+                    onFastTrack={onFastTrack}
                   />
                 ))
               )}
@@ -569,6 +571,7 @@ function PipelineCard({
   onDragEnd,
   onDropCard,
   onMoveCard,
+  onFastTrack,
   onShipDispatch,
   onCancelWaiting,
 }) {
@@ -601,6 +604,17 @@ function PipelineCard({
       {backlog && (
         <div className="mk-pl-card-foot">
           <span className="mk-pl-spacer" />
+          {/* Fast-track (BACI-311): one click moves the card into the
+              pipeline, assigns Plan → Implement → Ship, and turns Auto on. */}
+          <button
+            type="button"
+            className="mk-pl-btn is-primary is-sm"
+            title="Fast-track: into pipeline, Plan → Implement → Ship, Auto on"
+            aria-label="Fast-track: into pipeline, Plan → Implement → Ship, Auto on"
+            onClick={(e) => { e.stopPropagation(); onFastTrack?.(card.key); }}
+          >
+            <Icon name="zap" />
+          </button>
           <button
             type="button"
             className="mk-pl-btn is-ghost is-sm"
