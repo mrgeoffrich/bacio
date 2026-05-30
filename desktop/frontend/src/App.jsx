@@ -767,6 +767,26 @@ export default function App() {
       });
   }, [activeBoard, refreshCards]);
 
+  // Fast-track (BACI-311) — collapse the manual drag → pick-process →
+  // toggle-Auto flow into one click on a Backlog card. Runs the three
+  // existing api.* calls strictly in order, awaiting each: move must land
+  // before process (process applies to the in_pipeline card), process
+  // before Auto (Auto on a chain-less card would drive nothing). On a
+  // mid-chain failure the steps before it already persisted and the ones
+  // after never ran, so the `finally` refresh leaves the board in a
+  // coherent partial state the user can complete by hand.
+  const fastTrackCard = useCallback(async (key) => {
+    try {
+      await api.setIssueState(activeBoard, key, 'in_pipeline');
+      await api.setCardProcess(activeBoard, key, { process: 'plan-implement-ship' });
+      await api.setEngineMode(activeBoard, key, 'auto');
+    } catch (err) {
+      reportError(err, { headline: "Couldn't fast-track the card" });
+    } finally {
+      refreshCards({ silent: true });
+    }
+  }, [activeBoard, refreshCards]);
+
   // Ship hand-off — move an in_pipeline card to to_be_shipped (no agent
   // dispatched here; the ship agent fires from the Shipping column).
   // Optimistic column move mirrors moveCard.
@@ -1177,6 +1197,7 @@ export default function App() {
                   onOpenCard={openCard}
                   onOpenIssue={navigateToIssue}
                   onMoveCard={moveCard}
+                  onFastTrack={fastTrackCard}
                   onCancelCard={cancelCardFromPipeline}
                   onReorder={reorderPipelineCard}
                   onSetProcess={setCardProcess}
