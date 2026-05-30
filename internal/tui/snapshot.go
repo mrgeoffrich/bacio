@@ -99,12 +99,6 @@ func Snapshot(s *store.Store, repo *model.Repo, opts SnapshotOpts) error {
 	case "feature-picker":
 		m.active = 0
 		board.openFeaturePicker()
-	case "dispatch-picker":
-		m.active = 0
-		if err := focusIssue(board, opts.Issue); err != nil {
-			return err
-		}
-		board.openDispatchPicker()
 	case "composer":
 		// BACI-168 "+ from prompt" overlay. The wasm build's
 		// openComposeOverlay is a no-op (no textarea), so this target
@@ -123,7 +117,7 @@ func Snapshot(s *store.Store, repo *model.Repo, opts SnapshotOpts) error {
 			features.overlay = true
 		}
 	default:
-		return fmt.Errorf("unknown snapshot target %q (try board, features, docs, agents, agent-detail, history, sync, settings, settings-editor, card-overlay, doc-overlay, feature-overlay, picker, feature-picker, dispatch-picker, composer)", opts.Target)
+		return fmt.Errorf("unknown snapshot target %q (try board, features, docs, agents, agent-detail, history, sync, settings, settings-editor, card-overlay, doc-overlay, feature-overlay, picker, feature-picker, composer)", opts.Target)
 	}
 
 	out := m.View()

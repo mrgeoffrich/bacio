@@ -132,7 +132,7 @@ export interface BoardCardTodo {
 // renderer over data the brief already has).
 export interface BoardCardBlocker {
   key: string;
-  state: string; // todo | in_progress | needs_action | in_review — open-state set
+  state: string; // todo | in_review | in_pipeline | to_be_shipped — open-state set
 }
 
 // BACI-145: WaitingKind / WaitingState mirror the Go-side types in
@@ -499,20 +499,11 @@ export interface SessionTodoDTO {
 // needed" badge. Header is the question's short tag; the full
 // payload is fetched via getSessionQuestion when the user opens
 // the modal.
-//
-// BACI-220: user_action_reason_type is the typed reason the
-// question's linked issue is parked in `needs_action` —
-// `user_question` here (the open-question auto-flip stamped it)
-// or empty when no reason is recorded. The UI ignores it for
-// now (no badge change yet); the field rides through so a
-// follow-up that renders the badge variant doesn't need a
-// migration.
 export interface QuestionDTO {
   id: number;
   issueKey?: string;
   header: string;
   askedAt: string;
-  user_action_reason_type?: string;
 }
 
 // SessionQuestion is the full row returned by the per-question
@@ -581,8 +572,6 @@ export interface AgentCard {
   errorMessage?: string;
   busy: boolean;
   busyIssue: string;
-  waiting: boolean;
-  waitingIssue: string;
   hasChannel: boolean;
   bacioVersion: string;
   bacioVersionStale: boolean;
@@ -866,11 +855,11 @@ async function call<T>(path: string, opts: FetchOpts = {}): Promise<T> {
 // sync.
 const STATE_LABELS: Record<string, string> = {
   todo: 'Todo',
-  in_progress: 'In Progress',
-  needs_action: 'Needs Action',
   in_review: 'In Review',
   done: 'Done',
   cancelled: 'Cancelled',
+  in_pipeline: 'In Pipeline',
+  to_be_shipped: 'To Be Shipped',
 };
 
 function stateLabel(s: string): string {

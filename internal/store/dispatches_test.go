@@ -1162,7 +1162,7 @@ func TestOrphanCancelSweep_ArchivedNotTerminalIsNoop(t *testing.T) {
 		t.Fatalf("add follow-on: %v", err)
 	}
 	// Issue is still in_progress when archived (not a terminal state).
-	if err := s.SetIssueState(iss.ID, model.StateInProgress); err != nil {
+	if err := s.SetIssueState(iss.ID, model.StateInReview); err != nil {
 		t.Fatalf("set in_progress: %v", err)
 	}
 	if err := s.SetIssueArchived(iss.ID, true); err != nil {
@@ -1486,7 +1486,7 @@ func TestBindQueuedDispatch_RequeueRecoversDeliveredDispatch(t *testing.T) {
 	// This is the BACI-133 path that should successfully recycle the
 	// dispatch to a fresh agent.
 	if _, _, _, _, _, err := s.EndAgentSession(
-		sess.SessionID, string(model.EndReasonPresumedDead), model.StateInProgress, DispatchCascadeRequeue,
+		sess.SessionID, string(model.EndReasonPresumedDead), model.StateInReview, DispatchCascadeRequeue,
 	); err != nil {
 		t.Fatalf("end session (requeue): %v", err)
 	}
@@ -1829,7 +1829,7 @@ func TestPromoteReadyFollowOns_BlockersInProgressStaysDormant(t *testing.T) {
 		t.Fatalf("AddBlockerFollowOnDispatch: %v", err)
 	}
 	// Move blocker to in_progress — definitively non-terminal.
-	if err := s.SetIssueState(blocker.ID, model.StateInProgress); err != nil {
+	if err := s.SetIssueState(blocker.ID, model.StateInReview); err != nil {
 		t.Fatalf("set blocker in_progress: %v", err)
 	}
 	for i := 0; i < 10; i++ {

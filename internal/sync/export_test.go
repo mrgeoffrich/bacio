@@ -45,7 +45,7 @@ func seedExportFixture(t *testing.T) (*store.Store, map[string]string) {
 	if err != nil {
 		t.Fatalf("create feature: %v", err)
 	}
-	iss1, err := s.CreateIssue(r.ID, &feat.ID, "Add auth middleware 🔐", "First the middleware, then the rest.\n", model.StateInProgress, []string{"p1", "security"}, "")
+	iss1, err := s.CreateIssue(r.ID, &feat.ID, "Add auth middleware 🔐", "First the middleware, then the rest.\n", model.StateInReview, []string{"p1", "security"}, "")
 	if err != nil {
 		t.Fatalf("create iss1: %v", err)
 	}
@@ -305,7 +305,7 @@ func TestExport_IssueYAMLContent(t *testing.T) {
 	checks := []string{
 		// quoted user strings
 		`assignee: "geoff"`,
-		`state: "in_progress"`,
+		`state: "in_review"`,
 		`title: "Add auth middleware 🔐"`,
 		// uuid present
 		`uuid: "` + uuids["iss1"] + `"`,

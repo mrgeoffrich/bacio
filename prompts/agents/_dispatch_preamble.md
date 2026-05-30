@@ -50,9 +50,9 @@ the subagent does.
 When Task returns, forward the subagent's one-line summary as your
 visible response. If the subagent returns `needs_input: <what is
 missing>` rather than completing the work, surface that line and
-stop — your `Stop` hook will flip the still-claimed issue from
-`in_progress` to `needs_action` automatically so the supervisor
-can answer.
+stop so the supervisor can answer. (The worker signals "waiting on
+the user" by leaving an open `ask_user_question` on the ticket, not
+by a state flip — there is no longer a `needs_action` state.)
 
 After Task returns, attach the subagent's transcript to the ticket
 for traceability — call:

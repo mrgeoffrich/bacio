@@ -110,7 +110,7 @@ var gelatoIssues = []seedIssue{
 	},
 	{
 		title: "Yogurt", desc: "Italian yogurt cultures. **agent-claude is waiting on a call**: Jersey vs Holstein ratio for the fat content — dairy supplier offered both but needs the spec before they'll quote. Marco, can you weigh in?",
-		state: model.StateNeedsAction, assignee: authorAgentClaude,
+		state: model.StateInPipeline, assignee: authorAgentClaude,
 		tags: []string{"blocked", "supplier"},
 		comments: []seedComment{
 			{authorAgentClaude, "Reached the limit of what I can decide on my own — fat content affects mouthfeel which is a Marco-flavour call, not an agent call. Parked here until we get a steer."},
@@ -159,7 +159,7 @@ var gelatoIssues = []seedIssue{
 
 	{
 		title: "Cioccolato", desc: "Milk chocolate from Torino. Batch QA from Mon: tested at 11.2% fat (target 12) — redo with 8% bump in cocoa butter.",
-		state: model.StateInProgress, featureSlug: "winter-2026-flavours", assignee: authorMarco,
+		state: model.StateInReview, featureSlug: "winter-2026-flavours", assignee: authorMarco,
 		tags: []string{"qa"},
 		comments: []seedComment{
 			{authorAgentClaude, "Scheduled a re-batch for Thu 09:00. Set a calendar reminder for QA panel at 14:00."},
@@ -167,11 +167,11 @@ var gelatoIssues = []seedIssue{
 	},
 	{
 		title: "Fondente", desc: "70% dark chocolate from Torino. Tempering protocol agreed with Marco — needs the slow cool curve.",
-		state: model.StateInProgress, featureSlug: "winter-2026-flavours", assignee: authorMarco,
+		state: model.StateInReview, featureSlug: "winter-2026-flavours", assignee: authorMarco,
 	},
 	{
 		title: "Pistacchio", desc: "Imported pistacchio di Bronte. Supplier call notes in `docs/pistacchio-bronte-call.md` — they want a 6-month commitment.",
-		state: model.StateInProgress, assignee: authorGeoff,
+		state: model.StateInReview, assignee: authorGeoff,
 		tags: []string{"supplier", "rush"},
 		comments: []seedComment{
 			{authorGeoff, "If Bronte falls through, fallback is Spanish (Almería). Slightly less perfumed but cheaper."},
@@ -179,7 +179,7 @@ var gelatoIssues = []seedIssue{
 	},
 	{
 		title: "Bacio", desc: "Milk & dark chocolate from Torino, imported Piedmont hazelnut. **The signature flavour.** Launches Feb 14 as part of the Valentine's promo (duo cup with Valentino).",
-		state: model.StateInProgress, featureSlug: "winter-2026-flavours", assignee: authorMarco,
+		state: model.StateInReview, featureSlug: "winter-2026-flavours", assignee: authorMarco,
 		tags: []string{"rush"},
 		comments: []seedComment{
 			{authorMarco, "Tempering curve finalised. Hazelnut paste arriving Wed."},
@@ -188,11 +188,11 @@ var gelatoIssues = []seedIssue{
 	},
 	{
 		title: "Nutella", desc: "Rich hazelnut & chocolate variant — distinct from Bacio (less dark chocolate, more cream).",
-		state: model.StateInProgress, assignee: authorMarco,
+		state: model.StateInReview, assignee: authorMarco,
 	},
 	{
 		title: "Valentino", desc: "Chocolate-covered strawberry. Paired with Bacio for the Feb 14 duo cup.",
-		state: model.StateInProgress, featureSlug: "valentines-2026-promo", assignee: authorMarco,
+		state: model.StateInReview, featureSlug: "valentines-2026-promo", assignee: authorMarco,
 		tags: []string{"rush"},
 	},
 
@@ -258,7 +258,7 @@ var gelatoIssues = []seedIssue{
 	},
 	{
 		title: "Sleeve print run — 2000 units", desc: "Print supplier in Rivalta. Quote in `docs/valentines-promo-plan.md`. Need design locked Mon to hit Feb 5 delivery.",
-		state: model.StateInProgress, featureSlug: "valentines-2026-promo", assignee: authorAnna,
+		state: model.StateInReview, featureSlug: "valentines-2026-promo", assignee: authorAnna,
 		tags: []string{"rush", "supplier"},
 		prs:  []string{"https://github.com/gelateria-bacio/promo-assets/pull/12"},
 	},
@@ -294,12 +294,12 @@ var gelatoIssues = []seedIssue{
 	},
 	{
 		title: "Migration plan from Vend", desc: "Three-week cutover plan: data export → staff training → soft launch. Pencilled in for Mar 1.",
-		state: model.StateInProgress, featureSlug: "new-pos-system", assignee: authorGeoff,
+		state: model.StateInReview, featureSlug: "new-pos-system", assignee: authorGeoff,
 		tags: []string{"rush"},
 	},
 	{
 		title: "Stock count import script", desc: "Convert Vend CSV to Lightspeed JSON. SKU mapping is the gnarly bit — Vend's are alphanumeric, Lightspeed wants numeric.",
-		state: model.StateInProgress, featureSlug: "new-pos-system", assignee: authorAgentClaude,
+		state: model.StateInPipeline, featureSlug: "new-pos-system", assignee: authorAgentClaude,
 		prs:   []string{"https://github.com/gelateria-bacio/pos-migrate/pull/3"},
 	},
 	{
@@ -319,7 +319,7 @@ var gelatoIssues = []seedIssue{
 
 	{
 		title: "Source compostable spoons", desc: "Wood is too splintery (customer complaints), bamboo is too soft. PLA might work — sample request out to three suppliers.",
-		state: model.StateInProgress, featureSlug: "sustainability-q1", assignee: authorMatteo,
+		state: model.StateInReview, featureSlug: "sustainability-q1", assignee: authorMatteo,
 		tags: []string{"blocked", "supplier"},
 	},
 	{
@@ -793,9 +793,9 @@ func seedHistoryEvents(s *store.Store, repo *model.Repo) {
 	recordEvent(authorAgentClaude, "feature.add", "feature", "winter-2026-flavours", "")
 	recordEvent(authorAgentClaude, "issue.add", "issue", repo.Prefix+"-13 Cioccolato", "feature=winter-2026-flavours")
 	recordEvent(authorAgentClaude, "issue.add", "issue", repo.Prefix+"-19 Bacio", "feature=winter-2026-flavours")
-	recordEvent(authorMarco, "issue.state", "issue", repo.Prefix+"-19 Bacio", "todo → in_progress")
+	recordEvent(authorMarco, "issue.state", "issue", repo.Prefix+"-19 Bacio", "todo → in_review")
 	recordEvent(authorMarco, "issue.assign", "issue", repo.Prefix+"-19 Bacio", "→ @marco")
-	recordEvent(authorAgentClaude, "issue.state", "issue", "Yogurt", "in_progress → needs_action")
+	recordEvent(authorAgentClaude, "issue.state", "issue", "Yogurt", "todo → in_pipeline")
 	recordEvent(authorAgentClaude, "feature.add", "feature", "valentines-2026-promo", "")
 	recordEvent(authorAnna, "issue.add", "issue", "Duo cup sleeve design", "feature=valentines-2026-promo")
 	recordEvent(authorAnna, "pr.attach", "issue", "Sleeve print run — 2000 units", "https://github.com/gelateria-bacio/promo-assets/pull/12")
@@ -806,10 +806,10 @@ func seedHistoryEvents(s *store.Store, repo *model.Repo) {
 	recordEvent(authorGeoff, "comment.add", "issue", "Vendor comparison: Lightspeed vs Toast vs Square", "approval — going with Lightspeed")
 	recordEvent(authorAgentClaude, "pr.attach", "issue", "Stock count import script", "https://github.com/gelateria-bacio/pos-migrate/pull/3")
 	recordEvent(authorAnna, "pr.attach", "issue", "Receipt printer compat test", "https://github.com/gelateria-bacio/pos-migrate/pull/7")
-	recordEvent(authorAnna, "issue.state", "issue", "Receipt printer compat test", "in_progress → in_review")
+	recordEvent(authorAnna, "issue.state", "issue", "Receipt printer compat test", "in_pipeline → in_review")
 	recordEvent(authorMatteo, "feature.add", "feature", "sustainability-q1", "")
 	recordEvent(authorAgentClaude, "doc.add", "document", "packaging-waste-audit.md", "type=project_complete")
-	recordEvent(authorGeoff, "issue.state", "issue", "Audit current packaging waste", "in_progress → done")
+	recordEvent(authorGeoff, "issue.state", "issue", "Audit current packaging waste", "in_review → done")
 	recordEvent(authorAnna, "issue.state", "issue", `Customer survey: "do you actually compost?"`, "todo → cancelled")
 	recordEvent(authorMarco, "comment.add", "issue", "Nocciola", "review approval — 9.1/10")
 	recordEvent(authorAnna, "comment.add", "issue", "Bacio di Noce", "customer feedback — 'Christmas in a cup'")

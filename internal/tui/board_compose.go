@@ -4,7 +4,6 @@ package tui
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textarea"
@@ -17,9 +16,9 @@ import (
 
 // composeOverlay is the BACI-168 "+ from prompt" composer: a single
 // focused bubbles/textarea on the board view. Submit (ctrl+s) creates
-// an issue with a synthesised title + the typed description, then
-// queues a `scope` dispatch so the worker rewrites it into a
-// triage-ready ticket. esc cancels with no writes.
+// an issue with a synthesised title + the typed description. (BACI-300
+// retired the auto-scope dispatch this used to chain — triage now runs
+// as a Pipeline stage.) esc cancels with no writes.
 //
 // Lives on boardView as a pointer field next to questionOlay; the
 // shell's CapturesInput / HasOverlay / CloseOverlay each grow a
@@ -37,7 +36,7 @@ type composeOverlay struct {
 
 // composeTitleMaxCells is the cap on the synthesised title, measured in
 // terminal cells (not runes). 60 keeps the title legible in a kanban
-// card while leaving the scope worker freedom to rewrite to something
+// card while leaving a later triage pass freedom to rewrite to something
 // cleaner downstream.
 const composeTitleMaxCells = 60
 
@@ -58,7 +57,7 @@ const composeOverlayInnerWidth = 60
 // description doesn't need to be polished.
 func (b *boardView) openComposeOverlay() tea.Cmd {
 	ta := textarea.New()
-	ta.Placeholder = "Describe the issue you want scoped (one line is fine — the worker will flesh it out)"
+	ta.Placeholder = "Describe the issue (one line is fine — flesh it out later)"
 	ta.Prompt = ""
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 0
@@ -101,14 +100,13 @@ func (o *composeOverlay) Update(b *boardView, msg tea.Msg) tea.Cmd {
 	return cmd
 }
 
-// submit drives the BACI-168 create + scope-dispatch chain. Empty
-// descriptions are a quiet no-op (the placeholder is the affordance,
-// no error message needed). Create-errors keep the overlay open with
-// the typed text intact so the user can correct and retry. A
-// dispatch-error after a successful create is the orphan-issue case
-// the Phase 3 design committed to: close the overlay, jump the cursor
-// to the new card, and stash a "created but couldn't queue scope"
-// message in b.err so the footer surfaces it.
+// submit creates a fresh issue from the typed description. Empty
+// descriptions are a quiet no-op (the placeholder is the affordance, no
+// error message needed). Create-errors keep the overlay open with the
+// typed text intact so the user can correct and retry. BACI-300 retired
+// the auto-scope dispatch that used to fire here — triage now runs as a
+// Pipeline stage (drag the card into the Pipeline and pick Scope), so
+// the composer just creates the card and focuses it.
 func (o *composeOverlay) submit(b *boardView) {
 	desc := strings.TrimSpace(o.ta.Value())
 	if desc == "" {
@@ -129,10 +127,8 @@ func (o *composeOverlay) submit(b *boardView) {
 		o.err = err
 		return
 	}
-	// Create succeeded — the overlay closes regardless of what the
-	// dispatch step does so the user sees the new card on the board.
+	// Create succeeded — close the overlay so the user sees the new card.
 	b.composeOverlay = nil
-	_, derr := c.AutoDispatchIssue(context.Background(), b.repo, iss.Key, "scope", false)
 	// Refresh the board so the new card appears, then jump the cursor
 	// onto it. Both failures are non-fatal: the worst case is the new
 	// card lives on the board with the cursor in its previous slot.
@@ -146,9 +142,6 @@ func (o *composeOverlay) submit(b *boardView) {
 		// filter is hiding it). Leave the cursor alone — the new card is
 		// in the store, just not in view.
 		_ = ferr
-	}
-	if derr != nil {
-		b.err = fmt.Errorf("issue %s created, scope dispatch couldn't be queued: %w", iss.Key, derr)
 	}
 }
 
@@ -171,13 +164,13 @@ func (o *composeOverlay) View(innerWidth int) string {
 	// consistent regardless of terminal width.
 	o.ta.SetWidth(contentWidth)
 
-	header := boldStyle.Render("New issue → scope")
-	hint := mutedStyle.Render("  (ctrl+s creates the issue + queues a scope dispatch)")
+	header := boldStyle.Render("New issue")
+	hint := mutedStyle.Render("  (ctrl+s creates the issue)")
 	lines := []string{header + hint, "", o.ta.View()}
 	if o.err != nil {
 		lines = append(lines, "", errorStyle.Render(truncate(o.err.Error(), contentWidth)))
 	}
-	footer := "ctrl+s create & scope · esc cancel"
+	footer := "ctrl+s create · esc cancel"
 	if o.submitting {
 		footer = "working…"
 	}

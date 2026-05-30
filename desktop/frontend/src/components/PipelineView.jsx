@@ -751,9 +751,14 @@ function StageCard({
     nonShip.some(j => j.status === 'cancelled');
   const engineAuto = card.engineMode === 'auto';
   const question = (card.openQuestions || [])[0] || null;
-  // BACI-296: a worker that died on a transient Anthropic API error halts
-  // the chain with engine_pause_reason = "agent_error" (no open question).
-  const agentErrored = card.enginePauseReason === 'agent_error';
+  // BACI-296 / BACI-300: a worker that died on an Anthropic API error
+  // halts the chain in place with engine_pause_reason set (no open
+  // question). The reason carries the error class so the halt copy can
+  // distinguish a passing outage from an account/config problem the user
+  // must fix.
+  const agentErrorTransient = card.enginePauseReason === 'agent_error_transient';
+  const agentErrorTerminal = card.enginePauseReason === 'agent_error_terminal';
+  const agentErrored = agentErrorTransient || agentErrorTerminal;
   const paused = card.enginePauseReason === 'open_question' || agentErrored || !!question;
 
   const showProcessMenu = picking || !hasProcess;
@@ -849,8 +854,21 @@ function StageCard({
             </button>
             <span className="mk-pl-spacer" />
             {paused && (
-              <span className={`mk-pl-halt${agentErrored ? ' is-error' : ''}`}>
-                {agentErrored ? '⚠ Agent API error' : '⏸ Auto halted'}
+              <span
+                className={`mk-pl-halt${agentErrored ? ' is-error' : ''}`}
+                title={
+                  agentErrorTransient
+                    ? 'API outage — Start to retry once it clears'
+                    : agentErrorTerminal
+                      ? 'Account / billing / auth error — fix it, then Start'
+                      : undefined
+                }
+              >
+                {agentErrorTransient
+                  ? '⚠ API outage'
+                  : agentErrorTerminal
+                    ? '⚠ Account error'
+                    : '⏸ Auto halted'}
               </span>
             )}
             <button
@@ -1002,20 +1020,30 @@ function QuestionPanel({ question, onOpenQuestion }) {
 // assemble in, regardless of click order (Design → Plan → Implement → Ship).
 const SEG_ORDER = ['design', 'plan', 'implement', 'ship'];
 
+// STANDALONE_OPTIONS are the no-chain single-agent rows offered below the
+// segmented stage toggles — each is a distinct agent that runs one pass
+// and finishes in place, mutually exclusive with the four toggles and
+// with each other. Large Plan is a big planning pass; Scope and Research
+// are the BACI-300 triage stages that replaced the retired manual-triage
+// dispatch path.
+const STANDALONE_OPTIONS = ['plan_large', 'scope', 'research'];
+
 // ProcessMenu — the "pick a process" overlay shown over a freshly-entered
 // card (no chain yet) or when editing (BACI-299, Option C: the segmented
 // checklist). Four independent stage toggles (Design / Plan / Implement /
 // Ship) light up when on and assemble into a chain in canonical order; the
 // lit segments ARE the preview, with a muted caption beneath. Below an "or"
-// divider, a standalone Large Plan row is mutually exclusive with the four
-// toggles — plan_large is a distinct agent that can't be chained. The issue
+// divider, a set of standalone rows (Large Plan / Scope / Research) are each
+// mutually exclusive with the four toggles and with each other. The issue
 // card sits dimmed under the scrim.
 function ProcessMenu({ dimmedHasProcess, jobs, onPick, onCancel }) {
   // Lazy initialiser: on Edit Process pre-fill from the card's existing job
-  // modes (Large Plan wins if present); on a fresh card default to
+  // modes (a standalone option wins if present); on a fresh card default to
   // Plan + Implement on (preserving the old stepper's selectedUpTo = 2).
+  const existingStandalone = () =>
+    STANDALONE_OPTIONS.find(slug => (jobs || []).some(j => j.mode === slug)) || null;
   const [stages, setStages] = useState(() => {
-    if (dimmedHasProcess && (jobs || []).some(j => j.mode === 'plan_large')) {
+    if (dimmedHasProcess && existingStandalone()) {
       return { design: false, plan: false, implement: false, ship: false };
     }
     if (dimmedHasProcess) {
@@ -1029,32 +1057,35 @@ function ProcessMenu({ dimmedHasProcess, jobs, onPick, onCancel }) {
     }
     return { design: false, plan: true, implement: true, ship: false };
   });
-  const [largePlan, setLargePlan] = useState(
-    () => dimmedHasProcess && (jobs || []).some(j => j.mode === 'plan_large')
+  // `standalone` is the selected standalone slug (or null when the
+  // segmented chain is active).
+  const [standalone, setStandalone] = useState(() =>
+    dimmedHasProcess ? existingStandalone() : null
   );
 
-  // toggleStage flips one segment and clears the standalone Large Plan
+  // toggleStage flips one segment and clears any standalone selection
   // (the two are mutually exclusive).
   const toggleStage = (mode) => {
-    setLargePlan(false);
+    setStandalone(null);
     setStages(s => ({ ...s, [mode]: !s[mode] }));
   };
-  // selectLargePlan toggles the standalone Large Plan; turning it on clears
-  // all four segments, turning it off leaves the segbar empty.
-  const selectLargePlan = () => {
-    setLargePlan(v => {
-      const next = !v;
+  // selectStandalone toggles a standalone row; turning one on clears all
+  // four segments and supersedes any other standalone, turning the active
+  // one off leaves the segbar empty.
+  const selectStandalone = (slug) => {
+    setStandalone(cur => {
+      const next = cur === slug ? null : slug;
       if (next) setStages({ design: false, plan: false, implement: false, ship: false });
       return next;
     });
   };
 
   // `selected` is the canonical-order chain assembled from the toggles (or
-  // the standalone Large Plan) — the single source of truth for both the
+  // the chosen standalone) — the single source of truth for both the
   // caption and the Confirm payload, so the lit bar and the sent list never
   // drift.
-  const selected = largePlan
-    ? ['plan_large']
+  const selected = standalone
+    ? [standalone]
     : SEG_ORDER.filter(mode => stages[mode]);
   const canConfirm = selected.length > 0;
 
@@ -1068,7 +1099,7 @@ function ProcessMenu({ dimmedHasProcess, jobs, onPick, onCancel }) {
         {dimmedHasProcess ? 'Replace the process' : 'Pick a process'}
       </div>
 
-      <div className={`mk-pl-segbar${largePlan ? ' is-dim' : ''}`}>
+      <div className={`mk-pl-segbar${standalone ? ' is-dim' : ''}`}>
         {SEG_ORDER.map((mode, i) => {
           const on = stages[mode];
           return (
@@ -1079,7 +1110,7 @@ function ProcessMenu({ dimmedHasProcess, jobs, onPick, onCancel }) {
               <button
                 type="button"
                 className={`mk-pl-seg is-${mode}${on ? ' is-on' : ''}`}
-                disabled={largePlan}
+                disabled={!!standalone}
                 onClick={() => toggleStage(mode)}
                 title={on ? `${stageLabel(mode)} on — click to drop it` : `Add ${stageLabel(mode)}`}
               >
@@ -1092,8 +1123,8 @@ function ProcessMenu({ dimmedHasProcess, jobs, onPick, onCancel }) {
         })}
       </div>
 
-      <div className={`mk-pl-segcap${!largePlan && !canConfirm ? ' is-empty' : ''}`}>
-        {largePlan
+      <div className={`mk-pl-segcap${!standalone && !canConfirm ? ' is-empty' : ''}`}>
+        {standalone
           ? ' '
           : canConfirm
             ? selected.map(stageLabel).join(' → ')
@@ -1102,16 +1133,22 @@ function ProcessMenu({ dimmedHasProcess, jobs, onPick, onCancel }) {
 
       <div className="mk-pl-or"><span>or</span></div>
 
-      <button
-        type="button"
-        className={`mk-pl-largeplan${largePlan ? ' is-selected' : ''}`}
-        onClick={selectLargePlan}
-        title="Run the standalone Large Plan agent (can't be chained)"
-      >
-        <span className="mk-pl-largeplan-glyph">{stageGlyph('plan_large')}</span>
-        <span className="mk-pl-largeplan-lbl">{stageLabel('plan_large')}</span>
-        <span className="mk-pl-largeplan-note">{largePlan ? 'selected' : 'standalone'}</span>
-      </button>
+      {STANDALONE_OPTIONS.map((slug) => {
+        const on = standalone === slug;
+        return (
+          <button
+            key={slug}
+            type="button"
+            className={`mk-pl-largeplan${on ? ' is-selected' : ''}`}
+            onClick={() => selectStandalone(slug)}
+            title={`Run the standalone ${stageLabel(slug)} agent (can't be chained)`}
+          >
+            <span className="mk-pl-largeplan-glyph">{stageGlyph(slug)}</span>
+            <span className="mk-pl-largeplan-lbl">{stageLabel(slug)}</span>
+            <span className="mk-pl-largeplan-note">{on ? 'selected' : 'standalone'}</span>
+          </button>
+        );
+      })}
 
       <button
         type="button"

@@ -188,7 +188,7 @@ func issueListCmd() *cobra.Command {
 			return emit(issues)
 		},
 	}
-	cmd.Flags().StringVar(&stateCSV, "state", "", "comma-separated states to filter (e.g. todo,in_progress)")
+	cmd.Flags().StringVar(&stateCSV, "state", "", "comma-separated states to filter (e.g. todo,in_review)")
 	cmd.Flags().StringVarP(&featureSlug, "feature", "f", "", "limit to a feature")
 	cmd.Flags().StringSliceVar(&tags, "tag", nil, "require this tag (repeatable; AND semantics)")
 	cmd.Flags().StringVar(&repoPrefix, "repo", "", "limit to a specific repo prefix; required when run inside a sync repo (or pass --all-repos)")
@@ -850,8 +850,9 @@ func issueNextCmd() *cobra.Command {
 		Use:   "next",
 		Short: "Atomically claim the next ready issue in a feature",
 		Long: `Picks the lowest-numbered todo issue in --feature whose blockers are all
-done/cancelled and whose assignee is empty, flips it to in_progress,
-and stamps the assignee with the calling agent's identity.
+done/cancelled and whose assignee is empty, and stamps the assignee with
+the calling agent's identity. The issue stays in todo — claiming is a
+focus marker, not a state move (BACI-300).
 
 Designed for agent loops: call repeatedly to walk through a feature in
 dependency order. When nothing is currently claimable (everything is

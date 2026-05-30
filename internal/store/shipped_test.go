@@ -85,7 +85,7 @@ func TestListShippedIssuesExcludesOpen(t *testing.T) {
 	done, _ := s.CreateIssue(repo.ID, nil, "done", "", model.StateTodo, nil, "")
 	_, _ = s.CreateIssue(repo.ID, nil, "todo", "", model.StateTodo, nil, "")
 	inprog, _ := s.CreateIssue(repo.ID, nil, "in_progress", "", model.StateTodo, nil, "")
-	_ = s.SetIssueState(inprog.ID, model.StateInProgress)
+	_ = s.SetIssueState(inprog.ID, model.StateInReview)
 	if err := s.SetIssueState(done.ID, model.StateDone); err != nil {
 		t.Fatalf("done: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestCountShippedIssuesMixedStates(t *testing.T) {
 	if err := s.SetIssueState(cancelled.ID, model.StateCancelled); err != nil {
 		t.Fatalf("cancelled: %v", err)
 	}
-	if err := s.SetIssueState(inprog.ID, model.StateInProgress); err != nil {
+	if err := s.SetIssueState(inprog.ID, model.StateInReview); err != nil {
 		t.Fatalf("inprog: %v", err)
 	}
 

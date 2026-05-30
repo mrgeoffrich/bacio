@@ -132,20 +132,6 @@ export class Issue {
     "terminal_at"?: time$0.Time | null;
 
     /**
-     * UserActionReasonType (BACI-220) carries the typed reason an issue
-     * is parked in `needs_action`. The bucket today screams "agent is
-     * waiting on you" uniformly; this column lets the UI tell the two
-     * cases apart — `user_question` (the agent asked a clarifying
-     * question via `mcp__bacio__ask_user_question`) vs.
-     * `user_manual_review` (the agent finished and wants a sanity
-     * check, wired in a follow-up). Empty / NULL whenever the issue is
-     * not in `needs_action`. Omitempty so non-parked rows stay compact
-     * on the wire — readers that care must check `state == needs_action`
-     * first.
-     */
-    "user_action_reason_type"?: UserActionReasonType;
-
-    /**
      * BaseBranch (BACI-232) is the per-issue override for the branch a
      * PR for this issue is opened against. nil = inherit from the
      * parent feature's BranchName (itself nil = ship to main, the
@@ -605,14 +591,6 @@ export enum State {
     $zero = "",
 
     StateTodo = "todo",
-    StateInProgress = "in_progress",
-
-    /**
-     * StateNeedsAction parks an issue while an LLM agent is waiting on
-     * the user for input — the assignee stays, but the column signals
-     * that human attention (not more agent work) is the next step.
-     */
-    StateNeedsAction = "needs_action",
     StateInReview = "in_review",
     StateDone = "done",
     StateCancelled = "cancelled",
@@ -628,52 +606,6 @@ export enum State {
      */
     StateInPipeline = "in_pipeline",
     StateToBeShipped = "to_be_shipped",
-};
-
-/**
- * UserActionReasonType is the typed reason an issue is parked in
- * `needs_action` — the bucket today screams "the agent is waiting on
- * you" uniformly, so the UI can't differentiate "answer a clarifying
- * question" from "give the work a once-over". BACI-220 wires the
- * `user_question` value so a `mcp__bacio__ask_user_question` call
- * stamps the issue with the typed reason; the `user_manual_review`
- * value is defined for the follow-up that lets a finished worker ask
- * the user to sanity-check the change. The column is NULL whenever the
- * issue is not in `needs_action`.
- */
-export enum UserActionReasonType {
-    /**
-     * The Go zero value for the underlying type of the enum.
-     */
-    $zero = "",
-
-    /**
-     * UserActionReasonQuestion — the agent asked a clarifying question
-     * via `mcp__bacio__ask_user_question` and is parked waiting for the
-     * answer. Set on the auto-flip path that already moves the linked
-     * issue to `needs_action`; cleared when the question is answered or
-     * cancelled and the auto-flip walks the issue back to `in_progress`.
-     */
-    UserActionReasonQuestion = "user_question",
-
-    /**
-     * UserActionReasonManualReview — the agent has finished its work
-     * and wants the user to eyeball the result before moving on. Enum
-     * value only at this stage; no wiring lands until the follow-up
-     * ticket adds the CLI / MCP verb that sets it.
-     */
-    UserActionReasonManualReview = "user_manual_review",
-
-    /**
-     * UserActionReasonAgentError — the worker running a Pipeline job died
-     * on a terminal Anthropic API error (auth / billing / org-not-allowed,
-     * or an unclassified failure). The StopFailure hook (BACI-296) tears
-     * the chain down and moves the card out of the pipeline to
-     * `needs_action` stamped with this reason, so the user is pulled in to
-     * fix the underlying account/config problem — there's no point
-     * auto-retrying a billing error.
-     */
-    UserActionReasonAgentError = "agent_error",
 };
 
 /**

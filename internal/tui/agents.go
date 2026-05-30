@@ -27,12 +27,11 @@ type agentsView struct {
 	repo   *model.Repo
 	client client.Client
 
-	sessions    []*model.AgentSession
-	claims      map[int64][]*model.AgentClaim // session PK -> open claims
-	dispatches  []*model.AgentDispatch        // every dispatch in the repo
-	pending     map[int64]int                 // session PK -> open dispatch count
-	needsAction map[string]bool               // issue key set in state needs_action
-	todos       map[int64][]model.SessionTodo // session PK -> latest TodoWrite snapshot
+	sessions   []*model.AgentSession
+	claims     map[int64][]*model.AgentClaim // session PK -> open claims
+	dispatches []*model.AgentDispatch        // every dispatch in the repo
+	pending    map[int64]int                 // session PK -> open dispatch count
+	todos      map[int64][]model.SessionTodo // session PK -> latest TodoWrite snapshot
 	// BACI-53: open ask_user_question rows per session. Surfaced as a
 	// `?N` badge on the card so the user knows an agent is waiting on
 	// them, and (BACI-53 follow-up) answerable via the in-TUI
@@ -82,22 +81,6 @@ func (a *agentsView) reload() {
 	if err != nil {
 		a.err = err
 		return
-	}
-	// Issue keys currently in state needs_action — the Stop hook
-	// auto-flips a claimed in_progress issue here on idle, so an open
-	// claim landing in this set is the "agent parked, waiting on the
-	// user" signal driving the waiting badge on each card.
-	needs, err := a.store.ListIssues(store.IssueFilter{
-		RepoID: &a.repo.ID,
-		States: []model.State{model.StateNeedsAction},
-	})
-	if err != nil {
-		a.err = err
-		return
-	}
-	a.needsAction = make(map[string]bool, len(needs))
-	for _, iss := range needs {
-		a.needsAction[iss.Key] = true
 	}
 	// Bulk-read each live session's TodoWrite mirror in one query,
 	// scoped to the (session, newest-open-claim-issue, active-dispatch)
@@ -388,15 +371,10 @@ func (a *agentsView) renderCard(s *model.AgentSession, selected bool, width int,
 
 	statusLabel, pill := agentStatusPill(s, now)
 	pillStr := pill.Render(statusLabel)
-	// A session holding an open claim on a needs_action issue is parked
-	// — render "waiting · BACI-12" in amber instead of the blue busy
-	// pill, because waiting is the actionable state and showing both
-	// for the same issue is noise. Otherwise fall back to "busy" when
-	// the session just holds an open claim.
+	// A session holding an open claim renders a blue "busy · BACI-12"
+	// badge beside its liveness pill.
 	var badgeStr string
-	if isWaiting, waitKey := model.SessionWaiting(a.claims[s.ID], a.needsAction); isWaiting {
-		badgeStr = agentWaitingBadge.Render("waiting · "+waitKey) + " "
-	} else if isBusy, issueKey := model.SessionBusy(a.claims[s.ID]); isBusy {
+	if isBusy, issueKey := model.SessionBusy(a.claims[s.ID]); isBusy {
 		badgeStr = agentBusyBadge.Render("busy · "+issueKey) + " "
 	}
 	rightW := lipgloss.Width(badgeStr) + lipgloss.Width(pillStr)
@@ -457,9 +435,7 @@ func (a *agentsView) viewDetail(width, height int) string {
 	statusLabel, pill := agentStatusPill(s, now)
 	var lines []string
 	header := boldStyle.Render(truncate(agentLabel(s), innerW)) + " " + pill.Render(statusLabel)
-	if isWaiting, waitKey := model.SessionWaiting(a.claims[s.ID], a.needsAction); isWaiting {
-		header += " " + agentWaitingBadge.Render("waiting · "+waitKey)
-	} else if isBusy, issueKey := model.SessionBusy(a.claims[s.ID]); isBusy {
+	if isBusy, issueKey := model.SessionBusy(a.claims[s.ID]); isBusy {
 		header += " " + agentBusyBadge.Render("busy · "+issueKey)
 	}
 	lines = append(lines, header)
@@ -483,9 +459,6 @@ func (a *agentsView) viewDetail(width, height int) string {
 	}
 	for _, c := range claims {
 		line := "  " + c.IssueKey
-		if a.needsAction[c.IssueKey] {
-			line += " (needs action)"
-		}
 		if c.Prompt != "" {
 			line += " — " + oneLine(c.Prompt)
 		}
@@ -600,13 +573,6 @@ func todoGlyphAndStyle(st model.TodoStatus) (string, *lipgloss.Style) {
 // cards when a session is holding an open claim.
 var agentBusyBadge = lipgloss.NewStyle().
 	Background(lipgloss.Color("33")).Foreground(lipgloss.Color("231")).Padding(0, 1)
-
-// agentWaitingBadge styles the "waiting · ISSUE-KEY" badge shown when
-// the session holds an open claim on a needs_action issue (auto-flipped
-// by the Stop hook on idle). Amber matches the needs_action column on
-// the kanban board so the badge and the column read as the same thing.
-var agentWaitingBadge = lipgloss.NewStyle().
-	Background(lipgloss.Color("220")).Foreground(lipgloss.Color("232")).Padding(0, 1)
 
 // agentStatusPill maps a session's liveness to a label + pill style.
 func agentStatusPill(s *model.AgentSession, now time.Time) (string, lipgloss.Style) {

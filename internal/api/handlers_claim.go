@@ -63,7 +63,7 @@ func (d deps) handleFeatureNextClaim(w http.ResponseWriter, r *http.Request) {
 			Op:       "issue.claim",
 			Kind:     "issue",
 			TargetID: &iss.ID, TargetLabel: iss.Key,
-			Details: fmt.Sprintf("claimed by %s (todo → in_progress)", who),
+			Details: fmt.Sprintf("claimed by %s", who),
 		})
 	}
 	writeJSON(w, http.StatusOK, &ClaimResult{Issue: iss})

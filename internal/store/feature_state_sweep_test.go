@@ -167,7 +167,7 @@ func TestArchiveSweep_FeatureAutoStatePartialChildrenLeavesActive(t *testing.T) 
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
 	feat, _ := s.CreateFeature(repo.ID, "demo", "Demo", "", "", "")
 	_, _ = s.CreateIssue(repo.ID, &feat.ID, "a", "", model.StateDone, nil, "")
-	_, _ = s.CreateIssue(repo.ID, &feat.ID, "b", "", model.StateInProgress, nil, "")
+	_, _ = s.CreateIssue(repo.ID, &feat.ID, "b", "", model.StateInReview, nil, "")
 
 	res, err := s.ArchiveSweep(false)
 	if err != nil {
