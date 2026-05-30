@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mrgeoffrich/bacio/internal/proxy"
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
 
@@ -79,7 +80,11 @@ func requestLog(next http.Handler, logger *slog.Logger) http.Handler {
 
 func auth(next http.Handler, token string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if token == "" || r.URL.Path == "/healthz" {
+		// /healthz is unauthenticated, and the BACI-301 reverse-proxy
+		// route (/anthropic/*) is auth-exempt by prefix: agent traffic
+		// carries its own Anthropic auth, not bacio's bearer token, so a
+		// configured token must never block it.
+		if token == "" || r.URL.Path == "/healthz" || strings.HasPrefix(r.URL.Path, proxy.PathPrefix+"/") {
 			next.ServeHTTP(w, r)
 			return
 		}

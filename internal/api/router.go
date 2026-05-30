@@ -3,7 +3,9 @@ package api
 import (
 	"log/slog"
 	"net/http"
+	"net/url"
 
+	"github.com/mrgeoffrich/bacio/internal/proxy"
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
 
@@ -147,6 +149,29 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("GET /notifications/{id}", d.handleNotificationShow)
 	mux.HandleFunc("POST /notifications/{id}/read", d.handleNotificationRead)
 	mux.HandleFunc("POST /notifications/read-all", d.handleNotificationsReadAll)
+
+	// BACI-301: the reverse-proxy forwarding listener. Mounted
+	// unconditionally (the agent needs the pipe whether it launched
+	// `bacio api` or `bacio web`) and auth-exempt (see auth() in
+	// middleware.go) — agent traffic carries its own Anthropic auth, not
+	// bacio's bearer token. Empty ProxyUpstream selects the Anthropic
+	// default; a malformed explicit value is logged and falls back to the
+	// default rather than panicking (the value is internal config).
+	proxyLogger := d.logger
+	if proxyLogger == nil {
+		proxyLogger = slog.Default()
+	}
+	upstreamRaw := d.opts.ProxyUpstream
+	if upstreamRaw == "" {
+		upstreamRaw = proxy.DefaultUpstream
+	}
+	upstreamURL, err := url.Parse(upstreamRaw)
+	if err != nil || upstreamURL.Host == "" {
+		proxyLogger.Error("invalid proxy upstream — falling back to default",
+			"upstream", upstreamRaw, "err", err)
+		upstreamURL, _ = url.Parse(proxy.DefaultUpstream)
+	}
+	mux.Handle(proxy.PathPrefix+"/", proxy.New(upstreamURL, proxyLogger))
 
 	// Web UI bundle (BACI-30, gated by BACI-72): serve the browser-deployed
 	// React build at /ui/, with a 301 from the unslashed /ui to keep the

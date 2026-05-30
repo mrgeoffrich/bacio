@@ -39,6 +39,11 @@ type Options struct {
 	// BACI-89 background sync runner so its cross-process lock file
 	// lands beside the right DB. Empty falls back to store.DefaultPath.
 	DBPath string
+	// ProxyUpstream is the upstream the BACI-301 reverse proxy forwards
+	// the auth-exempt /anthropic/* route to. Empty (the default for both
+	// `bacio api` and `bacio web`) selects proxy.DefaultUpstream
+	// (https://api.anthropic.com); tests point it at a fake upstream.
+	ProxyUpstream string
 }
 
 // Server is the wired-up HTTP server. The caller (cmd/bacio) owns the store
