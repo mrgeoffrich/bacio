@@ -130,6 +130,8 @@ func renderText(w io.Writer, v any) error {
 		for _, e := range x {
 			printHistoryLine(w, e)
 		}
+	case []*model.ProxyFQDNStat:
+		printProxyStats(w, x)
 	case exportResult:
 		printExportResult(w, x)
 	case importResult:
@@ -493,6 +495,23 @@ func printHistoryLine(w io.Writer, e *model.HistoryEntry) {
 		line += "  " + e.Details
 	}
 	fmt.Fprintln(w, line)
+}
+
+// printProxyStats renders the BACI-303 per-FQDN rollup as an aligned
+// table, busiest host first. JSON output (the parse contract) is
+// untouched — this is the human read.
+func printProxyStats(w io.Writer, stats []*model.ProxyFQDNStat) {
+	if len(stats) == 0 {
+		fmt.Fprintln(w, "no proxy traffic captured")
+		return
+	}
+	fmt.Fprintf(w, "%-32s %8s %7s %8s %8s %10s %s\n",
+		"HOST", "REQUESTS", "ERR%", "P50ms", "P95ms", "BYTES↑↓", "LAST SEEN")
+	for _, s := range stats {
+		fmt.Fprintf(w, "%-32s %8d %6.0f%% %8d %8d %10s %s\n",
+			s.Host, s.RequestCount, s.ErrorRate*100, s.P50MS, s.P95MS,
+			fmt.Sprintf("%d/%d", s.BytesIn, s.BytesOut), localTime(s.LastSeen))
+	}
 }
 
 type message struct {

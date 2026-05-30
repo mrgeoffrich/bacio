@@ -46,3 +46,27 @@ type ProxyRequest struct {
 	StartedAt  time.Time `json:"started_at"`
 	EndedAt    time.Time `json:"ended_at"`
 }
+
+// ProxyFQDNStat is the BACI-303 per-FQDN rollup of proxy_requests rows:
+// one entry per distinct upstream host, summarising how much an agent
+// session talked to it. RequestCount / BytesIn / BytesOut are simple
+// sums; ErrorRate is ErrorCount / RequestCount, where an error is a row
+// with Status >= 400 || Status == 0 (0 = the upstream round-trip failed
+// before any response, per the BACI-302 convention — status-0 rows count
+// in both the numerator and the denominator, they are not dropped).
+// P50MS / P95MS are the round-trip latency percentiles in milliseconds;
+// FirstSeen / LastSeen bracket the host's activity window. The JSON tags
+// are snake_case and stable so BACI-304's Monitor screen can declare a
+// matching DTO against them without a server round-trip change.
+type ProxyFQDNStat struct {
+	Host         string    `json:"host"`
+	RequestCount int64     `json:"request_count"`
+	BytesIn      int64     `json:"bytes_in"`
+	BytesOut     int64     `json:"bytes_out"`
+	ErrorCount   int64     `json:"error_count"`
+	ErrorRate    float64   `json:"error_rate"`
+	P50MS        int64     `json:"p50_ms"`
+	P95MS        int64     `json:"p95_ms"`
+	FirstSeen    time.Time `json:"first_seen"`
+	LastSeen     time.Time `json:"last_seen"`
+}

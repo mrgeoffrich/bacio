@@ -469,6 +469,16 @@ type Client interface {
 	// prefix in the URL). repo == nil means "across all repos".
 	ListHistory(ctx context.Context, repo *model.Repo, f store.HistoryFilter) ([]*model.HistoryEntry, error)
 
+	// ----- Proxy capture (BACI-303) -----
+	// ProxyStats rolls the BACI-302 proxy_requests index up into one
+	// per-FQDN entry — request count, byte sums, error rate, p50/p95
+	// latency, first/last seen — for the Monitor screen (BACI-304) and
+	// the `bacio proxy stats` CLI verb. Cross-cutting like ListHistory's
+	// all-repos mode: the proxy_requests table has no repo_id, so there
+	// is no per-repo scoping. The remote backend GETs /proxy/stats. The
+	// returned slice is always non-nil (empty for an empty table).
+	ProxyStats(ctx context.Context, f store.ProxyStatsFilter) ([]*model.ProxyFQDNStat, error)
+
 	// ----- Agent registry (local-only in v1; remote returns ErrLocalOnly) -----
 	// The agent registry records which AI agent sessions are alive
 	// against which repos, and which issues they're focused on.
