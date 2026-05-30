@@ -47,19 +47,52 @@ func TestEnabled(t *testing.T) {
 	}
 }
 
-// TestLaunchCommand pins the canonical one-liner. Two callers depend
-// on the exact string — the install-agent activation banner and the
-// `bacio agent-run-command` verb — and shells / aliases people write
-// against it (eval, alias=…) treat any byte change as a behaviour
-// change, so the bar for editing is higher than the rest of the file.
-// Belt-and-braces against an accidental refactor that drops a flag.
+// TestLaunchCommand pins the canonical one-liner for a sample proxy
+// endpoint. Two callers depend on the exact string — the install-agent
+// activation banner and the `bacio agent-run-command` verb — and shells /
+// aliases people write against it (eval, alias=…) treat any byte change
+// as a behaviour change, so the bar for editing is higher than the rest
+// of the file. Belt-and-braces against an accidental refactor that drops
+// a flag or the injected proxy env (BACI-301).
 func TestLaunchCommand(t *testing.T) {
-	const want = "BACIO_AGENT_MODE=1 claude --dangerously-skip-permissions --dangerously-load-development-channels server:bacio"
-	if LaunchCommand != want {
-		t.Fatalf("LaunchCommand drift:\n  got:  %q\n  want: %q", LaunchCommand, want)
+	const endpoint = "http://127.0.0.1:5320/anthropic"
+	const want = "BACIO_AGENT_MODE=1 ANTHROPIC_BASE_URL=http://127.0.0.1:5320/anthropic ENABLE_TOOL_SEARCH=true claude --dangerously-skip-permissions --dangerously-load-development-channels server:bacio"
+	got := LaunchCommand(endpoint)
+	if got != want {
+		t.Fatalf("LaunchCommand drift:\n  got:  %q\n  want: %q", got, want)
 	}
-	if !strings.Contains(LaunchCommand, EnvVar+"=1") {
-		t.Fatalf("LaunchCommand %q must lead with %s=1", LaunchCommand, EnvVar)
+	if !strings.HasPrefix(got, EnvVar+"=1 ") {
+		t.Fatalf("LaunchCommand %q must lead with %s=1", got, EnvVar)
+	}
+	for _, must := range []string{"ANTHROPIC_BASE_URL=" + endpoint, "ENABLE_TOOL_SEARCH=true"} {
+		if !strings.Contains(got, must) {
+			t.Fatalf("LaunchCommand %q missing %q", got, must)
+		}
+	}
+}
+
+// TestProxyEndpoint covers the host:port → ANTHROPIC_BASE_URL mapping,
+// including the fallback to the default 127.0.0.1:5320 host when the bind
+// address doesn't parse as host:port.
+func TestProxyEndpoint(t *testing.T) {
+	cases := []struct {
+		name    string
+		apiAddr string
+		want    string
+	}{
+		{name: "default_addr", apiAddr: "127.0.0.1:5320", want: "http://127.0.0.1:5320/anthropic"},
+		{name: "worktree_port", apiAddr: "127.0.0.1:5350", want: "http://127.0.0.1:5350/anthropic"},
+		{name: "non_loopback_host", apiAddr: "0.0.0.0:8080", want: "http://0.0.0.0:8080/anthropic"},
+		{name: "empty_falls_back", apiAddr: "", want: "http://127.0.0.1:5320/anthropic"},
+		{name: "no_port_falls_back", apiAddr: "127.0.0.1", want: "http://127.0.0.1:5320/anthropic"},
+		{name: "empty_port_falls_back", apiAddr: "127.0.0.1:", want: "http://127.0.0.1:5320/anthropic"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := ProxyEndpoint(c.apiAddr); got != c.want {
+				t.Fatalf("ProxyEndpoint(%q) = %q, want %q", c.apiAddr, got, c.want)
+			}
+		})
 	}
 }
 
