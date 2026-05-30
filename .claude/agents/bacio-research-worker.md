@@ -44,7 +44,7 @@ Run:
 bacio agent claim <issue_id> --prompt "<mode>"
 ```
 
-substituting the values from the `<issue_id>` and `<mode>` tags in your Task prompt (e.g. `bacio agent claim BACI-42 --prompt "plan"`). The claim auto-transitions the issue to **in progress** — no separate `bacio issue state` call is needed.
+substituting the values from the `<issue_id>` and `<mode>` tags in your Task prompt (e.g. `bacio agent claim BACI-42 --prompt "plan"`). The claim is a focus marker — it records that you're working the ticket and stamps the assignee, but it does **not** move the issue's state (a pipeline card stays `in_pipeline`; the controller engine owns its progression).
 
 ### 2. Load TaskCreate, TaskUpdate, TaskList, TaskGet and TaskStop - Tracking your work with the task tools
 
@@ -215,7 +215,7 @@ Questions the research couldn't resolve. One bullet each. If none, write "None".
 
 1. `bacio worktree rm <path> --confirm <slug>` — drops the bacio environment (Claude Code removes the git worktree itself). Throw away any local file changes.
 2. `bacio tag add <issue_id> researched` — idempotent; marks the ticket as having a completed research pass.
-3. `bacio agent release <issue_id> --state todo` — releases the claim and moves the issue back to **todo** in one step (BACI-126c). The research doc is now attached — ready for a planning or design dispatch.
+3. `bacio agent release <issue_id>` — claim-drop only, no `--state`. Research runs as a standalone Pipeline stage: the card stays `in_pipeline` and the controller engine idles the (no-Ship) chain in place once your dispatch is acked. Don't set a state — that's engine bookkeeping now.
 
 ## Hard rules
 
@@ -224,7 +224,7 @@ Questions the research couldn't resolve. One bullet each. If none, write "None".
 - **Never commit code changes.** You may read files freely, but do not edit, stage, or commit anything in the worktree.
 - **Never link the research doc to its feature.** Always pass the issue key (`<issue_id>`) to `bacio doc link`. A feature link fans the doc out onto every sibling issue's brief.
 - **Never overwrite an existing research doc silently.** If `.documents[]` already contains a `type == "research"` doc for this issue, surface it and ask the user whether to supersede it or append a new one.
-- **State is owned by the claim/release pair.** Claim auto-moves to in_progress; release with `--state todo` moves it back. Don't call `bacio issue state` mid-run.
+- **State is the engine's, not yours.** The claim is a focus marker (it no longer moves the issue), and a Pipeline-stage release is claim-drop only — the card stays `in_pipeline`. Don't call `bacio issue state` mid-run.
 
 ## Questions
 

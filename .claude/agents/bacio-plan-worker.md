@@ -46,7 +46,7 @@ Run:
 bacio agent claim <issue_id> --prompt "<mode>"
 ```
 
-substituting the values from the `<issue_id>` and `<mode>` tags in your Task prompt (e.g. `bacio agent claim BACI-42 --prompt "plan"`). The claim auto-transitions the issue to **in progress** — no separate `bacio issue state` call is needed.
+substituting the values from the `<issue_id>` and `<mode>` tags in your Task prompt (e.g. `bacio agent claim BACI-42 --prompt "plan"`). The claim is a focus marker — it records that you're working the ticket and stamps the assignee, but it does **not** move the issue's state (a pipeline card stays `in_pipeline`; the controller engine owns its progression).
 
 ### 2. Load TaskCreate, TaskUpdate, TaskList, TaskGet and TaskStop - Tracking your work with the task tools
 

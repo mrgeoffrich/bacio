@@ -44,7 +44,7 @@ Run:
 bacio agent claim <issue_id> --prompt "<mode>"
 ```
 
-substituting the values from the `<issue_id>` and `<mode>` tags in your Task prompt (e.g. `bacio agent claim BACI-42 --prompt "plan"`). The claim auto-transitions the issue to **in progress** — no separate `bacio issue state` call is needed.
+substituting the values from the `<issue_id>` and `<mode>` tags in your Task prompt (e.g. `bacio agent claim BACI-42 --prompt "plan"`). The claim is a focus marker — it records that you're working the ticket and stamps the assignee, but it does **not** move the issue's state (a pipeline card stays `in_pipeline`; the controller engine owns its progression).
 
 ### 2. Load TaskCreate, TaskUpdate, TaskList, TaskGet and TaskStop - Tracking your work with the task tools
 
@@ -203,7 +203,7 @@ Re-read what you just wrote via `bacio issue show <issue_id>` — if any section
 
 1. `bacio worktree rm <path> --confirm <slug>` — drops the bacio environment (Claude Code removes the git worktree itself). Throw away any local file changes.
 2. `bacio tag add <issue_id> scoped` — idempotent; marks the ticket as having a completed scoping pass.
-3. `bacio agent release <issue_id> --state todo` — releases the claim and moves the issue back to **todo** in one step (BACI-126c). The ticket is now triage-ready — the next pass (plan / design / implement) can pick it up.
+3. `bacio agent release <issue_id>` — claim-drop only, no `--state`. Scope runs as a standalone Pipeline stage: the card stays `in_pipeline` and the controller engine idles the (no-Ship) chain in place once your dispatch is acked. Don't set a state — that's engine bookkeeping now.
 
 ## Hard rules
 
@@ -212,7 +212,7 @@ Re-read what you just wrote via `bacio issue show <issue_id>` — if any section
 - **No invented acceptance criteria.** Every bullet under Acceptance criteria must be implied by the seed (or by the user's reply to a clarifying question). If you're not sure whether the user wants X, ask — don't bake X in.
 - **No PR, no code edits.** This pass produces a ticket rewrite, not a code change. You may `Read` files freely for recon; do not `Edit`, `Write`, stage, or commit anything in the worktree.
 - **Never create or modify unrelated tickets.** No `bacio issue add`, no re-tagging sibling issues, no cancellation of duplicates without asking first.
-- **State is owned by the claim/release pair.** Claim auto-moves to in_progress; release with `--state todo` moves it back. Don't call `bacio issue state` mid-run.
+- **State is the engine's, not yours.** The claim is a focus marker (it no longer moves the issue), and a Pipeline-stage release is claim-drop only — the card stays `in_pipeline`. Don't call `bacio issue state` mid-run.
 
 ## Questions
 
