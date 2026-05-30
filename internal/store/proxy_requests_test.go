@@ -162,3 +162,152 @@ func TestListProxyRequests(t *testing.T) {
 		}
 	}
 }
+
+// addProxyRow is a tiny helper for the aggregation tests — a fixed
+// method/path with the host, status, and duration the test cares about.
+func addProxyRow(t *testing.T, s *Store, host string, status int, dur time.Duration) {
+	t.Helper()
+	if _, err := s.AddProxyRequest(AddProxyRequestIn{
+		Method: "POST", Host: host, Path: "/v1/messages",
+		Status: status, BytesIn: 100, BytesOut: 200, Duration: dur,
+	}); err != nil {
+		t.Fatalf("add proxy row (%s): %v", host, err)
+	}
+}
+
+// statByHost finds the rollup entry for host, or fails the test.
+func statByHost(t *testing.T, stats []*model.ProxyFQDNStat, host string) *model.ProxyFQDNStat {
+	t.Helper()
+	for _, s := range stats {
+		if s.Host == host {
+			return s
+		}
+	}
+	t.Fatalf("no rollup entry for host %q in %+v", host, stats)
+	return nil
+}
+
+// TestProxyStatsByFQDN_GroupsByHost: two hosts with differing volumes
+// roll up independently, and the result is ordered busiest-first.
+func TestProxyStatsByFQDN_GroupsByHost(t *testing.T) {
+	s := newTestStore(t)
+	for i := 0; i < 3; i++ {
+		addProxyRow(t, s, "api.anthropic.com", 200, 100*time.Millisecond)
+	}
+	addProxyRow(t, s, "example.com", 200, 50*time.Millisecond)
+
+	stats, err := s.ProxyStatsByFQDN(ProxyStatsFilter{})
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if len(stats) != 2 {
+		t.Fatalf("got %d hosts, want 2: %+v", len(stats), stats)
+	}
+	// Busiest-first ordering.
+	if stats[0].Host != "api.anthropic.com" {
+		t.Fatalf("busiest host first: got %q", stats[0].Host)
+	}
+	anthropic := statByHost(t, stats, "api.anthropic.com")
+	if anthropic.RequestCount != 3 {
+		t.Fatalf("anthropic request_count = %d, want 3", anthropic.RequestCount)
+	}
+	if anthropic.BytesIn != 300 || anthropic.BytesOut != 600 {
+		t.Fatalf("anthropic byte sums wrong: in=%d out=%d", anthropic.BytesIn, anthropic.BytesOut)
+	}
+	example := statByHost(t, stats, "example.com")
+	if example.RequestCount != 1 {
+		t.Fatalf("example request_count = %d, want 1", example.RequestCount)
+	}
+}
+
+// TestProxyStatsByFQDN_ErrorRate: status==0 (upstream round-trip
+// failure) and status>=400 both count as errors, in numerator AND
+// denominator.
+func TestProxyStatsByFQDN_ErrorRate(t *testing.T) {
+	s := newTestStore(t)
+	addProxyRow(t, s, "api.anthropic.com", 200, 10*time.Millisecond) // ok
+	addProxyRow(t, s, "api.anthropic.com", 200, 10*time.Millisecond) // ok
+	addProxyRow(t, s, "api.anthropic.com", 429, 10*time.Millisecond) // 4xx error
+	addProxyRow(t, s, "api.anthropic.com", 0, 10*time.Millisecond)   // round-trip failure
+
+	stats, err := s.ProxyStatsByFQDN(ProxyStatsFilter{})
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	st := statByHost(t, stats, "api.anthropic.com")
+	if st.RequestCount != 4 {
+		t.Fatalf("request_count = %d, want 4 (status-0 not dropped from denominator)", st.RequestCount)
+	}
+	if st.ErrorCount != 2 {
+		t.Fatalf("error_count = %d, want 2 (429 + status-0)", st.ErrorCount)
+	}
+	if st.ErrorRate != 0.5 {
+		t.Fatalf("error_rate = %v, want 0.5", st.ErrorRate)
+	}
+}
+
+// TestProxyStatsByFQDN_Percentiles: nearest-rank p50/p95 on a fixed set
+// of durations 10..100ms (n=10). p50 = 5th = 50, p95 = 10th = 100.
+func TestProxyStatsByFQDN_Percentiles(t *testing.T) {
+	s := newTestStore(t)
+	// Insert out of duration order to prove the ORDER BY sorts the bucket.
+	for _, ms := range []int64{30, 100, 10, 70, 50, 20, 90, 40, 80, 60} {
+		addProxyRow(t, s, "api.anthropic.com", 200, time.Duration(ms)*time.Millisecond)
+	}
+	stats, err := s.ProxyStatsByFQDN(ProxyStatsFilter{})
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	st := statByHost(t, stats, "api.anthropic.com")
+	if st.P50MS != 50 {
+		t.Fatalf("p50_ms = %d, want 50", st.P50MS)
+	}
+	if st.P95MS != 100 {
+		t.Fatalf("p95_ms = %d, want 100", st.P95MS)
+	}
+}
+
+// TestProxyStatsByFQDN_SinceWindow: backdated rows fall outside an
+// explicit Since lower bound and don't count toward the rollup.
+func TestProxyStatsByFQDN_SinceWindow(t *testing.T) {
+	s := newTestStore(t)
+	// Fresh row — inside the window.
+	addProxyRow(t, s, "api.anthropic.com", 200, 10*time.Millisecond)
+	// Stale row — backdate started_at well before the cutoff.
+	stale, err := s.AddProxyRequest(AddProxyRequestIn{
+		Method: "POST", Host: "api.anthropic.com", Path: "/v1/old", Status: 200,
+	})
+	if err != nil {
+		t.Fatalf("add stale: %v", err)
+	}
+	old := time.Now().Add(-48 * time.Hour).UTC().Format("2006-01-02 15:04:05")
+	if _, err := s.DB.Exec(`UPDATE proxy_requests SET started_at = ? WHERE id = ?`, old, stale.ID); err != nil {
+		t.Fatalf("backdate: %v", err)
+	}
+
+	cutoff := time.Now().Add(-1 * time.Hour)
+	stats, err := s.ProxyStatsByFQDN(ProxyStatsFilter{Since: &cutoff})
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	st := statByHost(t, stats, "api.anthropic.com")
+	if st.RequestCount != 1 {
+		t.Fatalf("request_count = %d, want 1 (backdated row excluded by Since)", st.RequestCount)
+	}
+}
+
+// TestProxyStatsByFQDN_Empty: an empty table returns a non-nil empty
+// slice, not nil (so the JSON read surface emits [] not null).
+func TestProxyStatsByFQDN_Empty(t *testing.T) {
+	s := newTestStore(t)
+	stats, err := s.ProxyStatsByFQDN(ProxyStatsFilter{})
+	if err != nil {
+		t.Fatalf("stats: %v", err)
+	}
+	if stats == nil {
+		t.Fatalf("expected non-nil empty slice, got nil")
+	}
+	if len(stats) != 0 {
+		t.Fatalf("expected empty slice, got %+v", stats)
+	}
+}

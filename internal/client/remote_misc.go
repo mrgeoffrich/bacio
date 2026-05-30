@@ -126,6 +126,26 @@ func (c *remoteClient) UnlinkRelation(ctx context.Context, repo *model.Repo, in 
 	return nil, resp.Removed, nil
 }
 
+// ----- Proxy capture (BACI-303) -----
+
+func (c *remoteClient) ProxyStats(ctx context.Context, f store.ProxyStatsFilter) ([]*model.ProxyFQDNStat, error) {
+	q := url.Values{}
+	if f.Limit > 0 {
+		q.Set("limit", strInt(int64(f.Limit)))
+	}
+	if f.Since != nil {
+		q.Set("from", f.Since.UTC().Format("2006-01-02T15:04:05Z"))
+	}
+	var out []*model.ProxyFQDNStat
+	if err := c.do(ctx, http.MethodGet, "/proxy/stats", q, nil, &out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = []*model.ProxyFQDNStat{}
+	}
+	return out, nil
+}
+
 // BlockersFor stays local-only (BACI-114). The kanban surface always
 // runs against the local DB / Wails / `bacio web`, never via `bacio
 // --remote`, so the bulk read has no HTTP analogue today.

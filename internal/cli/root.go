@@ -77,6 +77,7 @@ func NewRoot() (*cobra.Command, func()) {
 		newDocCmd(),
 		newStatusCmd(),
 		newHistoryCmd(),
+		newProxyCmd(),
 		newSchemaCmd(),
 		newAPICmd(),
 		newWebCmd(),

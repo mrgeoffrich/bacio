@@ -127,6 +127,14 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("GET /history", d.handleHistoryAll)
 	mux.HandleFunc("GET /repos/{prefix}/history", d.handleHistoryRepo)
 
+	// BACI-303: per-FQDN proxy-capture rollup — the read surface the
+	// Monitor screen (BACI-304) and `bacio proxy stats` consume.
+	// Cross-cutting like /history (the proxy_requests table has no
+	// repo_id, so no per-repo variant) and behind the bearer-token auth
+	// (it sits outside the /anthropic/ exemption — a UI/CLI read, not
+	// agent passthrough).
+	mux.HandleFunc("GET /proxy/stats", d.handleProxyStats)
+
 	// BACI-187: shipping-log popover — list of recently-done issues,
 	// newest-first, sibling of /history. Per-repo only; cross-repo is
 	// deliberately out of scope (matches the rest of the surface).

@@ -140,9 +140,19 @@ gap:** the raw capture files on disk have **no** auto-prune in BACI-302
 (same as today's logs / transcripts); only the SQLite index is bounded.
 Raw-log-file cleanup is a deliberate follow-on, not yet ticketed.
 
-The write side is all BACI-302 adds — there is no `bacio` read verb or
-REST read endpoint for the capture yet. The read surfaces belong to
-BACI-303 (per-FQDN aggregation) and BACI-304 (the Monitor web screen).
+The write side is all BACI-302 adds. BACI-303 shipped the first read
+surface over the capture: a per-FQDN aggregation (`Store.ProxyStatsByFQDN`)
+exposed through both `GET /proxy/stats` (cross-cutting, sibling of
+`/history`, behind the bearer-token auth — outside the `/anthropic/`
+exemption) and the `bacio proxy stats` CLI verb. The rollup reports, per
+upstream host: request count, bytes in/out, error rate (rows with
+`status >= 400 || status == 0`), p50/p95 round-trip latency, and
+first/last seen, busiest host first. The percentiles are computed in Go
+off the windowed rows (no portable SQLite percentile under
+`modernc.org/sqlite`); a `--since` lookback plus a row cap keep that pass
+cheap. The returned `model.ProxyFQDNStat` DTO is snake_case-tagged so the
+Monitor web screen (BACI-304) drops it straight onto the page. BACI-304
+still owns the React `api.ts` / `api.http.ts` seam and the screen itself.
 
 ---
 
@@ -151,11 +161,13 @@ BACI-303 (per-FQDN aggregation) and BACI-304 (the Monitor web screen).
 - **Forward proxy / `HTTPS_PROXY` all-FQDN MITM** — the other side of
   the reverse-vs-forward fork. Reserved for the aggregate-by-FQDN work
   (BACI-303/304) once multi-upstream routing earns its keep.
-- **Per-FQDN aggregation / stats read surfaces** — BACI-303.
+- **Per-FQDN aggregation / stats read surfaces** — shipped in BACI-303
+  (`GET /proxy/stats` + `bacio proxy stats`); see the read-surface note
+  above.
 - **Anthropic request/response body parsing** (model, token usage,
   turn/tool counts) — BACI-305, BACI-306.
-- **The Monitor web screen** and any capture read endpoint/verb —
-  BACI-304.
+- **The Monitor web screen** (and the React `api.ts` seam method that
+  consumes `GET /proxy/stats`) — BACI-304.
 - **Raw-log-file retention / cleanup** — the index prune is BACI-302; the
   on-disk raw files have no auto-prune yet.
 - **Retiring the `.jsonl` transcript attachments** — BACI-307.
