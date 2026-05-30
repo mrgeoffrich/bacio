@@ -273,3 +273,76 @@ func TestHandleShippedCountBadSince(t *testing.T) {
 		t.Fatalf("status: %d, want 400 on bad ?since=", resp.StatusCode)
 	}
 }
+
+// TestHandleShippedSinceTS (BACI-312) — ?since_ts=<RFC3339> is the
+// absolute-cutoff path the local-midnight "Today" scope uses. An issue
+// shipped before the absolute cutoff is excluded, one shipped after it
+// is included, on both the list and the count endpoint. Pins that the
+// cutoff is the supplied timestamp, not a rolling duration.
+func TestHandleShippedSinceTS(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+
+	old := shipIssue(t, s, repo, "old")
+	_ = shipIssue(t, s, repo, "young")
+	// Back-date the old row well before the cutoff; the young row keeps
+	// its just-now terminal_at.
+	if _, err := s.DB.Exec(`UPDATE issues SET terminal_at = datetime('now','-2 days') WHERE id = ?`, old.ID); err != nil {
+		t.Fatalf("back-date: %v", err)
+	}
+	// Cutoff: one day ago, in RFC3339 / UTC. Excludes the 2-day-old row,
+	// includes the fresh one.
+	cutoff := time.Now().UTC().Add(-24 * time.Hour).Format(time.RFC3339)
+
+	resp, raw := apiGet(t, ts.URL+"/repos/"+repo.Prefix+"/shipped?since_ts="+cutoff)
+	if resp.StatusCode != 200 {
+		t.Fatalf("list status: %d body=%s", resp.StatusCode, raw)
+	}
+	var list api.ShippedListResponse
+	_ = json.Unmarshal(raw, &list)
+	if len(list.Rows) != 1 || list.Total != 1 {
+		t.Fatalf("list rows=%d total=%d, want 1/1 (old row before cutoff)", len(list.Rows), list.Total)
+	}
+	if list.Rows[0].Title != "young" {
+		t.Fatalf("list row title = %q, want 'young'", list.Rows[0].Title)
+	}
+
+	resp, raw = apiGet(t, ts.URL+"/repos/"+repo.Prefix+"/shipped/count?since_ts="+cutoff)
+	if resp.StatusCode != 200 {
+		t.Fatalf("count status: %d body=%s", resp.StatusCode, raw)
+	}
+	var count api.ShippedCountResponse
+	_ = json.Unmarshal(raw, &count)
+	if count.Total != 1 {
+		t.Fatalf("count total = %d, want 1 (old row before cutoff)", count.Total)
+	}
+}
+
+// TestHandleShippedSinceTSBoth (BACI-312) — supplying both ?since= and
+// ?since_ts= is a 400; a request carries at most one cutoff.
+func TestHandleShippedSinceTSBoth(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+
+	cutoff := time.Now().UTC().Format(time.RFC3339)
+	resp, _ := apiGet(t, ts.URL+"/repos/"+repo.Prefix+"/shipped?since=7d&since_ts="+cutoff)
+	if resp.StatusCode != 400 {
+		t.Fatalf("list status: %d, want 400 when both since and since_ts present", resp.StatusCode)
+	}
+	resp, _ = apiGet(t, ts.URL+"/repos/"+repo.Prefix+"/shipped/count?since=7d&since_ts="+cutoff)
+	if resp.StatusCode != 400 {
+		t.Fatalf("count status: %d, want 400 when both since and since_ts present", resp.StatusCode)
+	}
+}
+
+// TestHandleShippedSinceTSBad (BACI-312) — a malformed ?since_ts=
+// surfaces as a 400, same envelope shape as ?since=.
+func TestHandleShippedSinceTSBad(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+
+	resp, _ := apiGet(t, ts.URL+"/repos/"+repo.Prefix+"/shipped/count?since_ts=notatimestamp")
+	if resp.StatusCode != 400 {
+		t.Fatalf("status: %d, want 400 on bad ?since_ts=", resp.StatusCode)
+	}
+}

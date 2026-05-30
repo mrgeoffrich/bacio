@@ -320,6 +320,35 @@ func (s *SettingsService) SetAudioPreferences(shippedSfx bool) (AudioPreferences
 	return AudioPreferencesDTO{ShippedSfx: v}, nil
 }
 
+// TimezonePreferencesDTO is the BACI-312 ui.timezone setting shaped for
+// the desktop Settings panel. Single string — the IANA zone name (empty
+// when unset, so the React layer auto-detects + persists the browser zone
+// on first run).
+type TimezonePreferencesDTO struct {
+	Timezone string `json:"timezone"`
+}
+
+// GetTimezonePreferences returns the current ui.timezone value
+// (BACI-312). The Pipeline Shipping column's Shipped pill consults this
+// to compute the local-midnight cutoff for its "Today" scope.
+func (s *SettingsService) GetTimezonePreferences() (TimezonePreferencesDTO, error) {
+	v, err := s.client.GetUITimezone(context.Background())
+	if err != nil {
+		return TimezonePreferencesDTO{}, err
+	}
+	return TimezonePreferencesDTO{Timezone: v}, nil
+}
+
+// SetTimezonePreferences validates + writes ui.timezone and returns the
+// refreshed DTO (BACI-312). The client records the audit row.
+func (s *SettingsService) SetTimezonePreferences(timezone string) (TimezonePreferencesDTO, error) {
+	v, err := s.client.SetUITimezone(context.Background(), timezone, false)
+	if err != nil {
+		return TimezonePreferencesDTO{}, err
+	}
+	return TimezonePreferencesDTO{Timezone: v}, nil
+}
+
 // SyncPreferencesDTO is the BACI-89 background-sync toggle shaped for
 // the desktop Sync view. Mirrors DisplayPreferencesDTO — same single-
 // boolean shape.

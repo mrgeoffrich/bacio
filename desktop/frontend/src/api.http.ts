@@ -2612,6 +2612,29 @@ export async function setAudioPreferences(shippedSfx: boolean): Promise<AudioPre
   return { shippedSfx: res.shipped_sfx };
 }
 
+// ---------- Timezone preference (BACI-312) ----------
+//
+// Global ui.timezone setting — the user's IANA zone name. Drives the
+// browser-side local-midnight cutoff for the Pipeline Shipping-column
+// Shipped pill's "Today" scope. Empty when unset (App.jsx auto-detects
+// the browser zone and persists it on first run). HTTP twin of api.ts's
+// get/setTimezonePreferences — keep names + shape in lockstep.
+
+export type TimezonePreferencesDTO = { timezone: string };
+
+export async function getTimezonePreferences(): Promise<TimezonePreferencesDTO> {
+  const res = await call<{ timezone: string }>('/settings/timezone-preferences');
+  return { timezone: res.timezone };
+}
+
+export async function setTimezonePreferences(timezone: string): Promise<TimezonePreferencesDTO> {
+  const res = await call<{ timezone: string }>('/settings/timezone-preferences', {
+    method: 'PUT',
+    body: { timezone },
+  });
+  return { timezone: res.timezone };
+}
+
 // ---------- Default-feature preference (BACI-235) ----------
 //
 // Per-repo `default_feature` setting that auto-applies to issues

@@ -38,6 +38,7 @@ import {
   PromptTemplateDTO,
   ArchivePreferencesDTO,
   AudioPreferencesDTO,
+  TimezonePreferencesDTO,
   SyncPreferencesDTO,
   SyncRegistryDTO,
   SyncRepoDTO,
@@ -69,7 +70,7 @@ import { PipelineJob, Notification } from '../bindings/github.com/mrgeoffrich/ba
 // pull it from the ./api seam alongside PipelineJob.
 import type { ProcessSelection } from './lib/pipelineProcesses';
 
-export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureLinkedDoc, FeaturePlan, FeaturePlanEntry, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, ArchivePreferencesDTO, AudioPreferencesDTO, WaitingState, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO, SyncSetupDTO, CollisionPreviewDTO, RenumberEntryDTO, RenameEntryDTO, RepoLinkResultDTO, ShippedIssueDTO, ShippedListDTO, LatestPlanDTO, Notification };
+export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureLinkedDoc, FeaturePlan, FeaturePlanEntry, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, ArchivePreferencesDTO, AudioPreferencesDTO, TimezonePreferencesDTO, WaitingState, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO, SyncSetupDTO, CollisionPreviewDTO, RenumberEntryDTO, RenameEntryDTO, RepoLinkResultDTO, ShippedIssueDTO, ShippedListDTO, LatestPlanDTO, Notification };
 // BACI-216: cross-transport alias. The web bundle's api.http.ts ships
 // the same name from its own TS-only shape so KanbanCard / IssueWorkspace
 // stay transport-agnostic.
@@ -1070,6 +1071,29 @@ export async function setAudioPreferences(
 ): Promise<AudioPreferencesDTO> {
   try {
     return await SettingsService.SetAudioPreferences(shippedSfx);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// BACI-312: ui.timezone global setting (IANA zone name). Drives the
+// browser-side local-midnight cutoff for the Pipeline Shipping-column
+// Shipped pill's "Today" scope. Empty when unset — App.jsx auto-detects
+// the browser zone and persists it on first run.
+
+export async function getTimezonePreferences(): Promise<TimezonePreferencesDTO> {
+  try {
+    return await SettingsService.GetTimezonePreferences();
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+export async function setTimezonePreferences(
+  timezone: string,
+): Promise<TimezonePreferencesDTO> {
+  try {
+    return await SettingsService.SetTimezonePreferences(timezone);
   } catch (err) {
     throw normalize(err);
   }
