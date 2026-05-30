@@ -143,27 +143,6 @@ type boardView struct {
 	featurePickerRow   int
 	featurePickerSlugs []string
 
-	// Dispatch picker — opened with `x` on an issue. Three steps:
-	// pick a live agent, pick a template (filtered by the issue's
-	// state-gate), type an optional note. dispatchSessions /
-	// dispatchModes / dispatchIssue are snapshotted at open so the
-	// lists don't shift while the user is navigating.
-	dispatchPicker   bool
-	dispatchStep     int // 0 agent · 1 mode · 2 note
-	dispatchRow      int // cursor within the current step's list
-	dispatchSessions []*model.AgentSession
-	// dispatchBusy is parallel to dispatchSessions: "" means the session
-	// is a valid target, a non-empty string is the issue key it's busy
-	// working — busy sessions are non-selectable in the picker.
-	dispatchBusy []string
-	// dispatchModes is the list of templates whose state-gate matches
-	// the focused issue's state — rebuilt every time the picker opens.
-	dispatchModes    []dispatchModeChoice
-	dispatchAgentRow int // remembered agent choice across steps
-	dispatchMode     model.DispatchMode
-	dispatchNote     string
-	dispatchIssue    *model.Issue
-
 	lastRefresh time.Time
 
 	// BACI-53: per-issue-key open ask_user_question rows, populated in
@@ -595,7 +574,7 @@ func (b *boardView) Status() string {
 }
 
 func (b *boardView) HasOverlay() bool {
-	return b.overlay || b.picker || b.featurePicker || b.dispatchPicker ||
+	return b.overlay || b.picker || b.featurePicker ||
 		(b.questionOlay != nil && b.questionOlay.open) ||
 		b.composeOverlay != nil
 }
@@ -605,7 +584,6 @@ func (b *boardView) CloseOverlay() {
 	b.picker = false
 	b.featurePicker = false
 	b.commentOverlay = false
-	b.dispatchPicker = false
 	if b.questionOlay != nil {
 		b.questionOlay.close()
 	}
@@ -624,8 +602,6 @@ func (b *boardView) Breadcrumb() string {
 		return "Columns"
 	case b.featurePicker:
 		return "Features"
-	case b.dispatchPicker && b.dispatchIssue != nil:
-		return "Send [" + b.dispatchIssue.Key + "]"
 	}
 	return ""
 }
@@ -633,23 +609,21 @@ func (b *boardView) Breadcrumb() string {
 // CapturesInput returns true while the BACI-168 compose overlay is
 // open so the shell yields `q` and the digit keys 1-9 to the textarea
 // instead of treating them as quit / tab-switch. The other overlays
-// (dispatch picker's note step, picker, etc.) are bounded captures
-// handled in-view; only the composer is a free-text editor that needs
-// the shell-level CapturesInput contract.
+// (picker, etc.) are bounded captures handled in-view; only the
+// composer is a free-text editor that needs the shell-level
+// CapturesInput contract.
 func (b *boardView) CapturesInput() bool { return b.composeOverlay != nil }
 
 func (b *boardView) Help() string {
 	switch {
 	case b.composeOverlay != nil:
-		return "type to describe · ctrl+s create & scope · esc cancel"
+		return "type to describe · ctrl+s create · esc cancel"
 	case b.questionOlay != nil && b.questionOlay.open:
 		return "j/k move · space toggle · tab next q · enter submit · d dismiss · esc close"
 	case b.picker:
 		return "j/k move · space toggle · a all · n none · esc close"
 	case b.featurePicker:
 		return "j/k move · space toggle · a all · n none · esc close"
-	case b.dispatchPicker:
-		return b.dispatchPickerHelp()
 	case b.commentOverlay:
 		return "j/k scroll · g/G top/bottom · esc back"
 	case b.overlay:
@@ -739,12 +713,6 @@ func (b *boardView) Update(msg tea.Msg) tea.Cmd {
 		b.updateFeaturePicker(key)
 		return nil
 	}
-	if b.dispatchPicker {
-		b.updateDispatchPicker(key)
-		// A confirmed dispatch may have just queued a row against an
-		// issue — arm the spinner tick-chain if it isn't already running.
-		return b.maybeStartSpinnerCmd()
-	}
 	if b.commentOverlay {
 		b.updateCommentOverlay(key)
 		return nil
@@ -813,13 +781,11 @@ func (b *boardView) Update(msg tea.Msg) tea.Cmd {
 		b.openPicker()
 	case "f":
 		b.openFeaturePicker()
-	case "x":
-		b.openDispatchPicker()
 	case "X":
 		// BACI-51: cancel a queued / pending / delivered dispatch on
 		// the selected waiting card. No-op on cards that aren't
 		// waiting — the spinner is the affordance, capital X is the
-		// keystroke (lowercase x already dispatches).
+		// keystroke.
 		if err := b.cancelWaitingOnSelection(); err != nil {
 			b.err = err
 		}
@@ -1109,9 +1075,6 @@ func (b *boardView) View(width, height int) string {
 	}
 	if b.featurePicker {
 		return b.viewFeaturePicker(width, height)
-	}
-	if b.dispatchPicker {
-		return b.viewDispatchPicker(width, height)
 	}
 	if b.overlay {
 		return b.viewOverlay(width, height)
@@ -1981,10 +1944,6 @@ func stateLabel(st model.State) string {
 	switch st {
 	case model.StateTodo:
 		return "Todo"
-	case model.StateInProgress:
-		return "In Progress"
-	case model.StateNeedsAction:
-		return "Needs Action"
 	case model.StateInReview:
 		return "In Review"
 	case model.StateDone:

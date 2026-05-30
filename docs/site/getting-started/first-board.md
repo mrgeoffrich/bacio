@@ -51,14 +51,14 @@ Created:  2026-05-12 14:35 AEST
 Updated:  2026-05-12 14:35 AEST
 ```
 
-(New issues land in `todo` by default. Move to `in_progress` once you start working on it, or `needs_action` if you're paused waiting on a human.)
+(New issues land in `todo` by default. Move to `in_review` once it's ready for a once-over, or `done` / `cancelled` to close it out. Work that flows through the Pipeline uses the `in_pipeline` / `to_be_shipped` columns.)
 
 You can list, show, and move it from the CLI:
 
 ```bash
 bacio issue list                              # see all issues
 bacio issue show MYPR-1                       # detail
-bacio issue state MYPR-1 in_progress          # move state
+bacio issue state MYPR-1 in_review            # move state
 ```
 
 For the full surface, [`bacio issue`](/reference/cli/issue) covers `add`, `list`, `show`, `edit`, `state`, `brief`, `assign`, `unassign`, `next`, and `peek`.
@@ -123,9 +123,9 @@ Try this:
 
 Back in Claude Code:
 
-> What's in progress, and what's blocking what?
+> What's awaiting review, and what's blocking what?
 
-Claude calls `bacio issue list -o json --state in_progress` and `bacio issue brief MYPR-…` for anything interesting, then summarises. You read the summary, not the JSON.
+Claude calls `bacio issue list -o json --state in_review` and `bacio issue brief MYPR-…` for anything interesting, then summarises. You read the summary, not the JSON.
 
 ## What next
 

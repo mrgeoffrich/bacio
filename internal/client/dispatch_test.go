@@ -753,7 +753,7 @@ func TestAbandonOpenQuestionsWritesAudit(t *testing.T) {
 	defer p.cleanup()
 	ctx := context.Background()
 
-	iss, err := p.store.CreateIssue(p.repo.ID, nil, "parked work", "", model.StateInProgress, nil, "")
+	iss, err := p.store.CreateIssue(p.repo.ID, nil, "parked work", "", model.StateInReview, nil, "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
@@ -845,7 +845,7 @@ func TestEndAgentSessionAbandonsOpenQuestionsAudit(t *testing.T) {
 				c = p.remote
 			}
 
-			iss, err := p.store.CreateIssue(p.repo.ID, nil, "parked on a question", "", model.StateInProgress, nil, "")
+			iss, err := p.store.CreateIssue(p.repo.ID, nil, "parked on a question", "", model.StateInReview, nil, "")
 			if err != nil {
 				t.Fatalf("CreateIssue: %v", err)
 			}
@@ -930,7 +930,7 @@ func TestCreateRescueDispatchHappyPath(t *testing.T) {
 	defer p.cleanup()
 	ctx := context.Background()
 
-	iss, err := p.store.CreateIssue(p.repo.ID, nil, "salvage me", "", model.StateInProgress, nil, "")
+	iss, err := p.store.CreateIssue(p.repo.ID, nil, "salvage me", "", model.StateInReview, nil, "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
@@ -1063,7 +1063,7 @@ func TestCreateRescueDispatchRejectsAliveSession(t *testing.T) {
 	defer p.cleanup()
 	ctx := context.Background()
 
-	iss, err := p.store.CreateIssue(p.repo.ID, nil, "alive worker", "", model.StateInProgress, nil, "")
+	iss, err := p.store.CreateIssue(p.repo.ID, nil, "alive worker", "", model.StateInReview, nil, "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}

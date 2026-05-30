@@ -411,13 +411,6 @@ func (s *Store) SetIssueState(id int64, state model.State) error {
 	// inspects the NEW state (not the current row), which is the only
 	// state info we have without a SELECT-then-UPDATE round trip.
 	//
-	// BACI-220: user_action_reason_type lives in lockstep with
-	// `needs_action` — clear it on every move OUT (and re-stamp it via
-	// SetIssueUserActionReason on the auto-flip into `needs_action`).
-	// userActionReasonClauseForTransition emits a SQL literal that
-	// keeps the column on a needs_action→needs_action no-op move and
-	// NULLs it for every other target, matching the column comment.
-	//
 	// BACI-275: a card *entering* to_be_shipped (current state differs)
 	// is appended to the back of the Shipping FIFO — it gets
 	// MAX(priority)+1 across the repo's non-archived to_be_shipped band
@@ -437,52 +430,16 @@ func (s *Store) SetIssueState(id int64, state model.State) error {
 			return err
 		}
 		_, err := s.DB.Exec(
-			`UPDATE issues SET state = ?, priority = ?, updated_at = CURRENT_TIMESTAMP, terminal_at = `+terminalAtClause(state)+`, user_action_reason_type = `+userActionReasonClauseForTransition(state)+` WHERE id = ?`,
+			`UPDATE issues SET state = ?, priority = ?, updated_at = CURRENT_TIMESTAMP, terminal_at = `+terminalAtClause(state)+` WHERE id = ?`,
 			string(state), priority, id,
 		)
 		return err
 	}
 	_, err := s.DB.Exec(
-		`UPDATE issues SET state = ?, updated_at = CURRENT_TIMESTAMP, terminal_at = `+terminalAtClause(state)+`, user_action_reason_type = `+userActionReasonClauseForTransition(state)+` WHERE id = ?`,
+		`UPDATE issues SET state = ?, updated_at = CURRENT_TIMESTAMP, terminal_at = `+terminalAtClause(state)+` WHERE id = ?`,
 		string(state), id,
 	)
 	return err
-}
-
-// SetIssueUserActionReason stamps the typed reason an issue is parked
-// in `needs_action` (BACI-220). The clear path uses NULL via a
-// dedicated parameter rather than a magic empty string so the column
-// stays NULL on disk — consistent with archived_at / terminal_at /
-// the rest of the nullable issue columns.
-//
-// Deliberately does NOT bump updated_at: the reason is runtime
-// supervision metadata that tracks an in-flight question, not
-// user-edited content, and bumping updated_at would churn the
-// git-backed sync's last-writer-wins gate on every ask.
-func (s *Store) SetIssueUserActionReason(id int64, reason model.UserActionReasonType) error {
-	if reason == "" {
-		_, err := s.DB.Exec(`UPDATE issues SET user_action_reason_type = NULL WHERE id = ?`, id)
-		return err
-	}
-	_, err := s.DB.Exec(`UPDATE issues SET user_action_reason_type = ? WHERE id = ?`, string(reason), id)
-	return err
-}
-
-// userActionReasonClauseForTransition returns the SQL fragment the
-// state-move helpers splice into UPDATE statements that move the
-// issue's state column. Targets other than `needs_action` always
-// NULL the column — a stale reason can't outlive its state.
-// `needs_action` keeps whatever value the column already carries so
-// the auto-flip into needs_action's separate SetIssueUserActionReason
-// write survives the state UPDATE's own column write. Returned as a
-// SQL literal (not a bound `?`) for the same reason as
-// terminalAtClause — CURRENT_TIMESTAMP / NULL / column-identity all
-// only resolve from a parse-time literal.
-func userActionReasonClauseForTransition(target model.State) string {
-	if target == model.StateNeedsAction {
-		return "user_action_reason_type"
-	}
-	return "NULL"
 }
 
 // terminalAtClause returns the SQL expression to assign to terminal_at
@@ -551,8 +508,7 @@ func (s *Store) SetIssueArchived(issueID int64, archived bool) error {
 // Archived issues are excluded from the band (they are hidden from the
 // queue) and keep whatever priority they had. Renumbering does NOT bump
 // updated_at: priority is local queue-ordering metadata, not user-edited
-// content, so a reorder must not churn the sync last-writer-wins gate —
-// same rationale as SetIssueUserActionReason.
+// content, so a reorder must not churn the sync last-writer-wins gate.
 func (s *Store) ReorderIssue(issueID int64, position int) error {
 	tx, err := s.DB.Begin()
 	if err != nil {
@@ -655,10 +611,11 @@ func (s *Store) PeekNextIssue(repoID int64, featureID int64) (*model.Issue, erro
 	return s.GetIssueByID(id)
 }
 
-// ClaimNextIssue atomically picks the next ready issue in a feature and flips
-// it to in_progress with the given assignee. "Ready" means: state='todo',
-// assignee='', and every `blocks`-blocker is in a terminal state
-// (done/cancelled). Returns nil, nil when nothing is currently claimable
+// ClaimNextIssue atomically picks the next ready issue in a feature and
+// stamps it with the given assignee (leaving it in todo — claiming is a
+// focus marker since BACI-300, not a state move). "Ready" means:
+// state='todo', assignee='', and every `blocks`-blocker is in a terminal
+// state (done/cancelled). Returns nil, nil when nothing is currently claimable
 // (the caller should treat this as "wait and retry"). The picked row is
 // the lowest-numbered candidate, matching the order produced by
 // `feature plan`.
@@ -683,13 +640,14 @@ func (s *Store) ClaimNextIssue(repoID int64, featureID int64, assignee string) (
 		return nil, err
 	}
 
-	// BACI-138: terminal_at stays NULL — ClaimNextIssue's predicate
-	// only matches `state = 'todo'`, where terminal_at is already NULL.
-	// Listing it explicitly is belt-and-braces in case the predicate
-	// ever loosens.
+	// BACI-300: claiming the next ready issue is a focus marker, not a
+	// state move — it stamps the assignee and leaves the card in `todo`
+	// (the legacy in_progress flip was retired alongside the state). The
+	// predicate still only matches an unassigned `todo` row, so this is
+	// an atomic "grab the next ready issue" without churning its column.
 	res, err := tx.Exec(`
 		UPDATE issues
-		SET state = 'in_progress', assignee = ?, updated_at = CURRENT_TIMESTAMP, terminal_at = NULL
+		SET assignee = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ? AND state = 'todo' AND assignee = ''`, assignee, id)
 	if err != nil {
 		return nil, err
@@ -874,11 +832,6 @@ func (s *Store) UpdateIssueByUUID(uuid string, p IssuePatch) error {
 		// (NULL / CURRENT_TIMESTAMP), not a bound value — see the
 		// SetIssueState comment for the rationale.
 		sets = append(sets, "terminal_at = "+terminalAtClause(*p.State))
-		// BACI-220: keep user_action_reason_type in lockstep too — the
-		// column is not synced (it's runtime supervision metadata, not
-		// authored content) so importing a state move past
-		// `needs_action` clears the typed reason locally.
-		sets = append(sets, "user_action_reason_type = "+userActionReasonClauseForTransition(*p.State))
 	}
 	if p.Assignee != nil {
 		clean := *p.Assignee
@@ -1045,7 +998,7 @@ SELECT i.id, i.uuid, i.repo_id, i.number, r.prefix, i.feature_id, COALESCE(f.slu
            AND c.released_at IS NULL
            AND s.ended_at IS NULL
        ) AS taken,
-       i.archived_at, i.terminal_at, i.user_action_reason_type, i.base_branch,
+       i.archived_at, i.terminal_at, i.base_branch,
        i.priority, i.engine_mode, i.engine_pause_reason, i.created_at, i.updated_at
 FROM issues i
 JOIN repos r ON r.id = i.repo_id
@@ -1062,13 +1015,12 @@ func scanIssue(row rowScanner) (*model.Issue, error) {
 		state          string
 		archivedAt     sql.NullTime
 		terminalAt     sql.NullTime
-		userActionRsn  sql.NullString
 		baseBranch     sql.NullString
 		engineMode     string
 	)
 	err := row.Scan(&i.ID, &i.UUID, &i.RepoID, &i.Number, &prefix, &featureID, &featSlug, &featEmoji, &featBranchName,
 		&i.Title, &i.Description, &state, &i.Assignee, &i.Taken,
-		&archivedAt, &terminalAt, &userActionRsn, &baseBranch,
+		&archivedAt, &terminalAt, &baseBranch,
 		&i.Priority, &engineMode, &i.EnginePauseReason, &i.CreatedAt, &i.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -1100,9 +1052,6 @@ func scanIssue(row rowScanner) (*model.Issue, error) {
 	if terminalAt.Valid {
 		t := terminalAt.Time
 		i.TerminalAt = &t
-	}
-	if userActionRsn.Valid {
-		i.UserActionReasonType = model.UserActionReasonType(userActionRsn.String)
 	}
 	if baseBranch.Valid {
 		b := baseBranch.String

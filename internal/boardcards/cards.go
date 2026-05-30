@@ -40,8 +40,6 @@ const descriptionExcerptRunes = 140
 // (the desktop is a separate Go module) — keep in sync.
 var stateLabels = map[model.State]string{
 	model.StateTodo:        "Todo",
-	model.StateInProgress:  "In Progress",
-	model.StateNeedsAction: "Needs Action",
 	model.StateInReview:    "In Review",
 	model.StateDone:        "Done",
 	model.StateCancelled:   "Cancelled",

@@ -55,7 +55,6 @@ drifting.`,
 		agentEndCmd(),
 		agentClaimCmd(),
 		agentReleaseCmd(),
-		agentDispatchCmd(),
 		agentInboxCmd(),
 		agentAckCmd(),
 		agentCancelCmd(),
@@ -425,110 +424,12 @@ func runAgentRelease(in inputs.AgentReleaseInput) error {
 	return emit(claim)
 }
 
-// ---------- dispatch ----------
-
-func agentDispatchCmd() *cobra.Command {
-	var (
-		toAgent, toSession, mode, message, rawInput string
-	)
-	cmd := &cobra.Command{
-		Use:   "dispatch [issue-key]",
-		Short: "Queue a unit of work for an agent identity and/or a session",
-		Long: `Enqueue a dispatch — a supervisor->agent work item. A dispatch must
-name a target: --to <agent-slug>, --session <id>, or both. The optional
-[issue-key] positional ties the dispatch to an issue.
-
---mode marks the intent — one per stage of working a job: "plan"
-(produce an implementation plan, don't write code), "design" (explore
-two design options and commit to a recommendation), "implement" (build
-it end-to-end), "review" (assess finished work), "ship" (final checks +
-PR), or "fix_review" (address review feedback). The agent's instruction
-body is the stage's prompt template (customisable in the desktop app's
-Settings panel) rendered with the issue's id/title, plus any --message
-note. Both are optional.
-
-Auto-pick + queue (BACI-40 + BACI-51): when [issue-key] and --mode are
-set but both --to and --session are omitted, dispatch re-checks the
-stage's state-gate against the issue's current state and then
-*enqueues* the dispatch — it never errors with "no free agent". A
-background matcher (running in the controlling TUI/desktop process)
-binds the queued dispatch to a free agent automatically when one
-frees up. Cancel a still-queued dispatch with
-` + "`bacio agent cancel <id>`" + ` (the same command that withdraws
-pending dispatches).
-
-The target agent picks the dispatch up automatically on its next prompt
-(via the bacio UserPromptSubmit hook) or at session start, and can list
-its queue with ` + "`bacio agent inbox`" + `.`,
-		Args: cobra.RangeArgs(0, 1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, err := parseJSONInput(cmd, args, rawInput, "to", "session", "mode", "message")
-			if err != nil {
-				return err
-			}
-			if raw != nil {
-				in, _, err := inputio.DecodeStrict[inputs.AgentDispatchInput](raw)
-				if err != nil {
-					return err
-				}
-				return runAgentDispatch(*in)
-			}
-			in := inputs.AgentDispatchInput{
-				TargetAgent:   toAgent,
-				TargetSession: toSession,
-				Mode:          mode,
-				Message:       message,
-			}
-			if len(args) == 1 {
-				in.IssueKey = args[0]
-			}
-			return runAgentDispatch(in)
-		},
-	}
-	cmd.Flags().StringVar(&toAgent, "to", "", "target agent identity slug (e.g. swift-otter@claude.shiny)")
-	cmd.Flags().StringVar(&toSession, "session", "", "target session id")
-	cmd.Flags().StringVar(&mode, "mode", "", "dispatch intent: plan, design, implement, review, ship, or fix_review (default: untyped)")
-	cmd.Flags().StringVar(&message, "message", "", "optional free-form note appended to the instruction body")
-	addInputFlag(cmd, &rawInput)
-	return cmd
-}
-
-// isAutoDispatch reports whether an AgentDispatchInput is the
-// BACI-40 auto-pick shape: an issue key plus a mode, with neither
-// target field set. Message is incompatible with auto-pick (the
-// state-gated server-side path renders only the template), so its
-// presence flips the call back to the explicit-target path so the
-// CLI raises the existing "needs a target" error rather than silently
-// dropping the note.
-func isAutoDispatch(in inputs.AgentDispatchInput) bool {
-	return in.TargetAgent == "" && in.TargetSession == "" &&
-		in.IssueKey != "" && in.Mode != "" && in.Message == ""
-}
-
-func runAgentDispatch(in inputs.AgentDispatchInput) error {
-	c, err := openClient()
-	if err != nil {
-		return err
-	}
-	defer c.Close()
-	repo, err := resolveRepoC(c)
-	if err != nil {
-		return err
-	}
-	var d *model.AgentDispatch
-	if isAutoDispatch(in) {
-		d, err = c.AutoDispatchIssue(context.Background(), repo, in.IssueKey, in.Mode, opts.dryRun)
-	} else {
-		d, err = c.CreateDispatch(context.Background(), repo, in, opts.dryRun)
-	}
-	if err != nil {
-		return err
-	}
-	if opts.dryRun {
-		return emitDryRun(d)
-	}
-	return emit(d)
-}
+// The legacy `bacio agent dispatch` CLI verb was retired in BACI-300
+// alongside the manual state-driven workflow — work now flows through
+// the Pipeline, whose controller engine queues each stage's dispatch.
+// The shared dispatch machinery it used (client.CreateDispatch /
+// AutoDispatchIssue, the agent_dispatches table, the matcher + channel)
+// stays load-bearing for the Pipeline and the REST dispatch route.
 
 // ---------- inbox ----------
 

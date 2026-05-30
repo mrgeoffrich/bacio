@@ -245,19 +245,21 @@ func TestListCardsTaken(t *testing.T) {
 	}
 }
 
-// TestListAgentsWaiting covers the Stop-hook side of BACI-14: an open
-// claim on a needs_action issue must surface as Waiting/WaitingIssue on
-// the AgentCard, with the ClaimDTO.State propagated for the drill-down.
-func TestListAgentsWaiting(t *testing.T) {
+// TestListAgentsBusy (BACI-300, absorbing the retired waiting-badge test)
+// — an open claim surfaces as Busy/BusyIssue on the AgentCard, with the
+// ClaimDTO.State propagated for the drill-down. There is no separate
+// "waiting" concept anymore (the needs_action state and its auto-flip are
+// gone); a session with an open claim is simply busy.
+func TestListAgentsBusy(t *testing.T) {
 	repo := &model.Repo{ID: 1, Prefix: "TEST"}
 	t0 := time.Date(2026, 5, 16, 9, 0, 0, 0, time.UTC)
 	sess := &model.AgentSession{
 		ID: 10, SessionID: "sess-a", RepoID: repo.ID, RepoPrefix: repo.Prefix,
 		AgentName: "witty-bison@claude.shiny", LastSeenAt: t0,
 	}
-	parkedClaim := &model.AgentClaim{IssueKey: "TEST-1", ClaimedAt: t0}
+	claim := &model.AgentClaim{IssueKey: "TEST-1", ClaimedAt: t0}
 	issues := []*model.Issue{
-		{Key: "TEST-1", State: model.StateNeedsAction, Title: "parked"},
+		{Key: "TEST-1", State: model.StateInPipeline, Title: "working"},
 	}
 
 	svc := NewBoardService(&fakeBoardClient{
@@ -265,7 +267,7 @@ func TestListAgentsWaiting(t *testing.T) {
 		issues:     issues,
 		sessions:   []*model.AgentSession{sess},
 		dispatches: nil,
-		sessClaims: map[string][]*model.AgentClaim{"sess-a": {parkedClaim}},
+		sessClaims: map[string][]*model.AgentClaim{"sess-a": {claim}},
 	})
 	cards, err := svc.ListAgents("TEST")
 	if err != nil {
@@ -275,31 +277,25 @@ func TestListAgentsWaiting(t *testing.T) {
 		t.Fatalf("got %d cards, want 1", len(cards))
 	}
 	card := cards[0]
-	if !card.Waiting || card.WaitingIssue != "TEST-1" {
-		t.Errorf("Waiting=%v WaitingIssue=%q, want (true, TEST-1)", card.Waiting, card.WaitingIssue)
-	}
 	if !card.Busy || card.BusyIssue != "TEST-1" {
 		t.Errorf("Busy=%v BusyIssue=%q, want (true, TEST-1)", card.Busy, card.BusyIssue)
 	}
-	if len(card.Claims) != 1 || card.Claims[0].State != string(model.StateNeedsAction) {
-		t.Errorf("Claims[0].State = %q, want %q", card.Claims[0].State, model.StateNeedsAction)
+	if len(card.Claims) != 1 || card.Claims[0].State != string(model.StateInPipeline) {
+		t.Errorf("Claims[0].State = %q, want %q", card.Claims[0].State, model.StateInPipeline)
 	}
 
-	// Now flip the same issue to in_progress: Waiting should clear,
-	// Busy stays on, and the drill-down state moves with it.
-	issues[0].State = model.StateInProgress
+	// Move the issue to in_review: still busy (the claim is open), and the
+	// drill-down state moves with it.
+	issues[0].State = model.StateInReview
 	cards, err = svc.ListAgents("TEST")
 	if err != nil {
-		t.Fatalf("ListAgents (in_progress): %v", err)
-	}
-	if cards[0].Waiting {
-		t.Errorf("Waiting = true after issue flipped to in_progress, want false")
+		t.Fatalf("ListAgents (in_review): %v", err)
 	}
 	if !cards[0].Busy {
 		t.Errorf("Busy = false, want true (claim is still open)")
 	}
-	if cards[0].Claims[0].State != string(model.StateInProgress) {
-		t.Errorf("Claims[0].State = %q, want in_progress", cards[0].Claims[0].State)
+	if cards[0].Claims[0].State != string(model.StateInReview) {
+		t.Errorf("Claims[0].State = %q, want in_review", cards[0].Claims[0].State)
 	}
 }
 

@@ -210,13 +210,11 @@
 .mk-repo-picker-add:hover { background: var(--bg-4); }
 .mk-repo-picker-add .mk-icon { width: 14px; height: 14px; }
 
-/* Status pill colours for bacio's six real issue states. The imported
-   app.css only covers the kit's placeholder column ids; these map each
+/* Status pill colours for bacio's issue states. The imported app.css
+   only covers the kit's placeholder column ids; these map each
    model.State to the existing gelato tokens. (todo/done already match
    app.css — redefined here for a complete, single-source set.) */
 .mk-status-todo         { background: var(--status-todo-bg);    color: var(--status-todo); }
-.mk-status-in_progress  { background: var(--status-doing-bg);   color: var(--status-doing); }
-.mk-status-needs_action { background: var(--status-blocked-bg); color: var(--status-blocked); }
 .mk-status-in_review    { background: var(--status-review-bg);  color: var(--status-review); }
 .mk-status-done         { background: var(--status-done-bg);    color: var(--status-done); }
 .mk-status-cancelled    { background: var(--ink-50);            color: var(--fg-4); }
@@ -613,11 +611,6 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
 /* busy = the session is holding an open claim; orthogonal to the
    active/idle/ended liveness pill, so it renders as a second chip. */
 .mk-status-busy   { background: var(--status-todo-bg);   color: var(--status-todo); }
-/* waiting = the session holds an open claim on a needs_action issue,
-   set by the Stop hook auto-flip. Takes the badge slot from busy
-   because it's the actionable state — borrows the needs_action column
-   palette so the badge and the kanban column read as the same thing. */
-.mk-status-waiting { background: var(--status-blocked-bg); color: var(--status-blocked); }
 
 .mk-agent-card {
   display: flex; flex-direction: column; gap: 10px;

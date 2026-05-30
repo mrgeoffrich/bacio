@@ -429,14 +429,13 @@ func TestAgentReleaseNoClaim(t *testing.T) {
 	}
 }
 
-// TestAgentReleaseWithoutFinalState locks in the Pipeline cutover:
-// final_state is now OPTIONAL. A release without it succeeds (claim
-// dropped). For an OFF-pipeline issue the claim auto-moved it to
-// in_progress on claim, and the claim-only release lands it in in_review
-// (model.ReleaseFallbackState) rather than stranding it in in_progress —
-// nothing but the engine advances a released claim, and the engine
-// governs only pipeline cards. (The pre-pipeline triage passes still pass
-// --state; pipeline cards stay put via the engine-governed-state guard.)
+// TestAgentReleaseWithoutFinalState locks in the BACI-300 state-neutral
+// claim/release model: final_state is OPTIONAL, and both the claim and a
+// claim-only release leave the issue's state exactly where it was. A
+// fresh todo issue claimed then released without --state stays todo —
+// the engine (for pipeline cards) or a human is the only thing that
+// advances it. (A caller that genuinely wants to move the card still
+// passes final_state.)
 func TestAgentReleaseWithoutFinalState(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
@@ -456,8 +455,8 @@ func TestAgentReleaseWithoutFinalState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload issue: %v", err)
 	}
-	if got.State != model.StateInReview {
-		t.Fatalf("off-pipeline release without final_state: state = %s, want in_review", got.State)
+	if got.State != model.StateTodo {
+		t.Fatalf("off-pipeline release without final_state: state = %s, want todo (state-neutral)", got.State)
 	}
 }
 

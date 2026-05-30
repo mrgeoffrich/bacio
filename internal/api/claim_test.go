@@ -80,14 +80,14 @@ func TestFeatureClaimHappy(t *testing.T) {
 		t.Fatalf("status: %d, body=%s", resp.StatusCode, body)
 	}
 	for _, want := range []string{
-		`"key": "MINI-1"`, `"state": "in_progress"`, `"assignee": "agent-alice"`,
+		`"key": "MINI-1"`, `"state": "todo"`, `"assignee": "agent-alice"`,
 	} {
 		if !strings.Contains(string(body), want) {
 			t.Fatalf("missing %s in: %s", want, body)
 		}
 	}
 	roundtrip, _ := s.GetIssueByID(iss.ID)
-	if roundtrip.State != model.StateInProgress || roundtrip.Assignee != "agent-alice" {
+	if roundtrip.State != model.StateTodo || roundtrip.Assignee != "agent-alice" {
 		t.Fatalf("claim did not persist: state=%s assignee=%s", roundtrip.State, roundtrip.Assignee)
 	}
 	assertHistoryOps(t, s, []string{"issue.claim"})

@@ -217,21 +217,24 @@ subquery returning empty.
 
 #### State-gated prompts
 
-> **Pipeline cutover (Phases 4–6).** The state-gate mechanism below drove
+> **Pipeline cutover + BACI-300.** The state-gate mechanism below drove
 > the per-card dispatch button on the **issues board, which is now
-> removed** (the Pipeline is the only driving surface). On a pipeline
-> card the controller engine queues each job's dispatch from the chosen
-> process chain — it does not consult the per-card state-gate, and the
-> card stays `in_pipeline` throughout. Crucially, **pipeline-stage
-> workers no longer manage state or tags**: `bacio agent release` is
-> claim-drop only (no `--state`), there is no `bacio tag add
-> <planned|implemented|…>` done-tag step, and a paused job is signalled
-> by an open question on the job row, not a `needs_action` flip. The
-> engine advances the chain when the dispatch is acked. The pre-pipeline
-> triage passes (`scope`, `research`, `plan_large`) still operate on bare
-> `todo` cards and keep declaring `--state` on release. The state-gate
-> table below is retained for that triage flow and for any user-added
-> templates.
+> removed** (the Pipeline is the only driving surface). The legacy manual
+> dispatch surfaces that fed it are also gone: the `bacio agent dispatch`
+> CLI verb, the TUI `x` dispatch picker, and the new-issue auto-scope
+> chain were retired in BACI-300, along with the `in_progress` /
+> `needs_action` states themselves. **Every** dispatch — including the
+> triage passes (`scope`, `research`, `plan_large`) — now flows through
+> the Pipeline: the controller engine queues each job's dispatch from the
+> chosen process chain, the card stays `in_pipeline` throughout, and the
+> engine advances the chain when the dispatch is acked. **Pipeline-stage
+> workers don't manage state or tags**: `bacio agent release` is
+> claim-drop only (no `--state`), and a paused job is signalled by an open
+> question (or the engine's `engine_pause_reason`), not a state flip. The
+> shared dispatch machinery the state-gate built on (`AddDispatch`, the
+> matcher, the channel) is untouched — it is the path the engine uses too.
+> The state-gate table below is retained for any user-added templates that
+> still consult it.
 
 Each dispatch stage (`plan`, `design`, `implement`, `review`, `ship`,
 `fix_review`) declares the set of issue states its prompt is valid to
@@ -355,57 +358,31 @@ data viewed session-first instead of issue-first.
 
 ---
 
-## Claimed-issue state tracks agent idle/active
+## Claims are state-neutral (BACI-300)
 
-A claimed issue stays in lock-step with whether the agent is currently
-working it. The signal is precise: the Claude Code `Stop` hook fires
-exactly when the agent's turn ends and it parks waiting on the user — a
-word-for-word match for `model.StateNeedsAction`. So:
+A claim is a **focus marker**, not a state move. `bacio agent claim`
+records that a session is working a ticket and stamps the assignee, but
+it does not change the issue's state, and `bacio agent release` (with no
+`--state`) drops the claim without moving it either. The `taken` signal
+(an open `agent_claims` row) is what the kanban / Pipeline read to show
+"someone's on this".
 
-- **`Stop` hook** → for each open claim the session holds, if the
-  claimed issue is `in_progress`, flip it to `needs_action`.
-- **`UserPromptSubmit` hook** → symmetric inverse: a fresh prompt
-  arrived, so flip every `needs_action` claimed issue back to
-  `in_progress`.
+This retired the pre-pipeline lock-step machinery that used to drive a
+claimed card through `in_progress → needs_action → in_progress` via the
+`Stop` / `UserPromptSubmit` hooks. Those two states are **gone**: work
+flows through the Pipeline now, and "the agent is parked waiting on the
+user" is signalled by an open `ask_user_question` row on the ticket
+(surfaced as the kanban-card question pill) — or, for an `in_pipeline`
+card, by the engine's `engine_pause_reason` (`open_question` for a
+worker question, `agent_error_transient` / `agent_error_terminal` for an
+API failure). The `Stop` hook still heartbeats the session and clears a
+stale errored flag; it no longer touches any issue's state.
 
-The flip is **edge-only** — only issues already in the matching "from"
-state are touched, so a no-op turn writes nothing (no `SetIssueState`
-call, no `issue.state` audit row, no `updated_at` bump). The shared
-helper is `hookContext.syncClaimedIssueStates(sessionID, idle bool)` in
-`internal/cli/hook.go`; every error path logs to stderr and never fails
-the hook.
-
-The kanban side-effect is free: the claimed issue naturally appears in
-the `needs_action` column whenever its agent is parked, so the board
-shows at a glance which jobs are waiting on you.
-
-The Agents screens surface the same signal as a `waiting · <ISSUE-KEY>`
-badge in place of the `busy` badge — waiting supersedes busy because it
-points at the same issue and is the actionable state. The derive is
-`model.SessionWaiting(openClaims, needsActionKeys)` — same shape as
-`SessionBusy`, plus the key-set of issues currently in `needs_action`:
-
-- **TUI** (`internal/tui/agents.go`) — `agentsView.needsAction` is
-  populated by a per-reload `ListIssues(states=needs_action)` against
-  the repo; `renderCard`/`viewDetail` render the amber `agentWaitingBadge`
-  in preference to the blue `agentBusyBadge`, and the drill-down
-  annotates each `(needs action)` claim line.
-- **Desktop** (`desktop/boardservice.go`) — `BoardService.ListAgents`
-  bulk-fetches every non-terminal issue per in-scope repo into a
-  `key → state` map, so each `ClaimDTO` carries its `State` and the
-  card carries `Waiting`/`WaitingIssue`. The frontend pill is
-  `.mk-status-waiting` (`AgentsView.jsx` + `desktop.css`), painted with
-  the needs_action column palette so the badge and the column read as
-  the same thing.
-
-Cost is purely cosmetic — every agent turn on a claimed issue toggles
-its state, writing two `issue.state` audit rows + two `updated_at`
-bumps. The audit rows are bounded by `HistoryRetention` (60 days). The
-`updated_at` churn feeds git-backed sync's last-writer-wins; if it ever
-bites, a quieter audit path (a non-recording store call, or recording
-only the `in_progress → needs_action` edge) is the noted follow-up. A
-`Notification`/`idle_prompt` hook tier is also possible as a future
-stronger "idle for a while" signal layered on top.
+The Agents screens render a single blue `busy · <ISSUE-KEY>` badge when a
+session holds an open claim (`model.SessionBusy`) — there is no separate
+"waiting" badge, because nothing flips a claimed card into a "waiting"
+state anymore. A session blocked on a question still surfaces it through
+the per-card `?N` question count.
 
 ## StopFailure — recording API failures
 
@@ -436,17 +413,23 @@ Two best-effort halves run on every fire (`internal/cli/hook.go`,
    `in_pipeline` with a running job, drives `pipeline.Engine.FailRunning`,
    which branches on the error class:
 
-| error class | `error_type` values | what happens |
-| --- | --- | --- |
-| **transient** | `server_error`, `rate_limit` | cancel the running job + dispatch, halt Auto, set `engine_pause_reason = agent_error` — the card stays `in_pipeline`, paused in place. **No auto-retry** (avoids a tight rebind/die loop during a sustained outage); the user re-arms with Start/Auto. |
-| **terminal** | everything else, incl. `unknown` (conservative default) | tear the chain down and move the card out of the pipeline to `needs_action` stamped `user_action_reason_type = agent_error`, so the user is pulled in to fix the auth/billing/config problem. |
+Both error classes pause the chain **in place** (BACI-300): cancel the
+running job + dispatch, halt Auto, and stamp a distinct
+`engine_pause_reason` — the card stays `in_pipeline` either way. The class
+only selects the pause reason so the Pipeline UI can word the halt
+differently:
 
+| error class | `error_type` values | `engine_pause_reason` | what the user sees |
+| --- | --- | --- | --- |
+| **transient** | `server_error`, `rate_limit` | `agent_error_transient` | "API outage — Start to retry once it clears". |
+| **terminal** | everything else, incl. `unknown` (conservative default) | `agent_error_terminal` | "Account / billing / auth error — fix it, then Start". |
+
+Neither auto-retries (re-binding into a sustained outage or a billing
+failure just tight-loops); the user re-arms with Start/Auto.
 `model.IsTransientAPIError` is the single source of truth for the branch.
-The terminal path can't reuse a plain `SetIssueState` — the
-engine-governed-state guard (`internal/store/issues.go`) treats
-`in_pipeline → needs_action` as a no-op — so it goes through the dedicated
-`Store.FailPipelineChainToNeedsAction`, which cancels the job and writes
-the state directly.
+(Pre-BACI-300 the terminal class yanked the card out of the pipeline to
+`needs_action` via a dedicated guard-bypassing store method; that state —
+and the method — are gone.)
 
 **Recovery clear.** The errored flag is cleared edge-only on the next
 `Stop` / `UserPromptSubmit` heartbeat (`hookContext.clearErrorOnRecovery`)
@@ -832,10 +815,12 @@ Practical consequences:
 - `bacio agent claim` / `release` / `reply` from inside the subagent
   attribute to the parent's session, which is what the registry
   expects.
-- BACI-14's `Stop`-hook-flips-`in_progress`-to-`needs_action` path
-  still works without changes: the parent's `Stop` hook fires when
-  the parent's turn ends (after `Task` returns and the parent has
-  written its summary), and that's the precise *agent parked* signal.
+- The parent's `Stop` / `UserPromptSubmit` hooks heartbeat the
+  parent's session (the subagent shares it), keeping the supervisor
+  live across the `Task` call. (Pre-BACI-300 the `Stop` hook also
+  flipped a claimed `in_progress` card to `needs_action`; that flip
+  and both states are retired — the hooks no longer touch issue
+  state.)
 - The parent's *own* tool calls (Task's return PostToolUse, every
   `mcp__bacio__*` call, every Bash) heartbeat the supervisor while
   the subagent runs (BACI-159 PostToolUse hook). This heartbeats the

@@ -1,21 +1,17 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import Modal from './Modal.jsx';
 import * as api from '../api';
-import { reportError } from '../errors';
 
 // IssueComposer (BACI-166) — the "+ from prompt" modal launched from the
 // Topbar's `+` button. The user types a one-line idea (and optionally a
-// title); submit chains api.addIssue → api.dispatchIssue(_, _, 'scope')
-// in one click so the scope worker fills in the structured ticket in the
-// background while the user lands in the new issue's workspace.
+// title); submit creates the issue and routes the operator into its
+// workspace. BACI-300 retired the auto-scope dispatch this used to chain
+// — triage now runs as a Pipeline stage (drag the card into the Pipeline
+// and pick Scope), so the composer just creates the card.
 //
-// Failure modes (design pass committed to these in BACI-165):
+// Failure mode:
 //   - create fails: the modal stays open with an inline error so the
 //     user can retry without losing their typed content.
-//   - create succeeds, dispatch fails: surface reportError so the
-//     orphan-issue case is visible, but still close the modal and call
-//     onCreated(newCard) so the operator lands on the freshly-created
-//     todo card and can re-dispatch from the card's existing dropdown.
 //
 // Props:
 //   - open: boolean controlling Modal open state.
@@ -88,7 +84,7 @@ export default function IssueComposer({ open, onClose, repoPrefix, onCreated }) 
     // The store rejects empty titles; derive one from the first ~60
     // chars of the description when the user didn't supply one, so the
     // server-side `title is required` guard never trips on a real
-    // submit. The worker rewrites the title in the scoping pass anyway.
+    // submit. A later triage pass can rewrite the title.
     const effectiveTitle = title.trim() || trimmedDesc.split('\n')[0].slice(0, 60);
     setError('');
     setInFlight(true);
@@ -103,18 +99,9 @@ export default function IssueComposer({ open, onClose, repoPrefix, onCreated }) 
       setInFlight(false);
       return;
     }
-    // Create succeeded — close + route, then fire-and-forget the
-    // scope dispatch. The design pass committed to surfacing the
-    // orphan-issue case via reportError without blocking navigation.
+    // Create succeeded — close + route into the new card's workspace.
     onCreated?.(newCard);
     onClose?.();
-    try {
-      await api.dispatchIssue(repoPrefix, newCard.key, 'scope');
-    } catch (err) {
-      reportError(err, {
-        headline: "Scope dispatch couldn't be queued — issue was created and is in todo",
-      });
-    }
   }, [description, title, repoPrefix, featureSlug, onCreated, onClose]);
 
   const disabled = !description.trim() || inFlight;
@@ -141,7 +128,7 @@ export default function IssueComposer({ open, onClose, repoPrefix, onCreated }) 
             className="mk-issue-composer-textarea"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="A rough one-liner — the scope worker will turn it into a triage-ready ticket."
+            placeholder="A rough one-liner — flesh it out later or scope it from the Pipeline."
             disabled={inFlight}
             rows={6}
           />
@@ -178,7 +165,7 @@ export default function IssueComposer({ open, onClose, repoPrefix, onCreated }) 
             </button>
           </Modal.Close>
           <button type="submit" className="mk-btn mk-btn-primary" disabled={disabled}>
-            {inFlight ? 'Creating…' : 'Create & scope'}
+            {inFlight ? 'Creating…' : 'Create'}
           </button>
         </div>
       </form>

@@ -214,8 +214,8 @@ func (s *Store) StartPipelineJobWithDispatch(jobID, dispatchID int64) (bool, err
 
 // SetIssueEngineMode writes the per-issue controller-engine drive mode
 // (off | auto). Does not bump updated_at: this is runtime supervision
-// metadata, not user-edited content — same rationale as ReorderIssue /
-// SetIssueUserActionReason (a write must not churn the sync LWW gate).
+// metadata, not user-edited content — same rationale as ReorderIssue
+// (a write must not churn the sync LWW gate).
 func (s *Store) SetIssueEngineMode(issueID int64, mode model.EngineMode) error {
 	if _, err := model.ParseEngineMode(string(mode)); err != nil {
 		return err
@@ -225,8 +225,10 @@ func (s *Store) SetIssueEngineMode(issueID int64, mode model.EngineMode) error {
 }
 
 // SetIssueEnginePauseReason writes the engine pause reason ("" when not
-// paused, "open_question" while halted on a question). Does not bump
-// updated_at — same rationale as SetIssueEngineMode.
+// paused; "open_question" while halted on a question;
+// "agent_error_transient" / "agent_error_terminal" while halted on a
+// worker API failure). Does not bump updated_at — same rationale as
+// SetIssueEngineMode.
 func (s *Store) SetIssueEnginePauseReason(issueID int64, reason string) error {
 	_, err := s.DB.Exec(`UPDATE issues SET engine_pause_reason = ? WHERE id = ?`, reason, issueID)
 	return err
@@ -270,43 +272,3 @@ func (s *Store) cancelRunningPipelineJob(issueID int64) error {
 	return s.SetIssueEnginePauseReason(issueID, "")
 }
 
-// FailPipelineChainToNeedsAction tears down an in_pipeline card whose
-// worker died on a *terminal* Anthropic API error (BACI-296) and pulls
-// the card out of the pipeline to needs_action so the user is brought in
-// to fix the underlying account/config problem.
-//
-// It first reuses cancelRunningPipelineJob to cancel the running job + its
-// dispatch and disarm Auto, then moves the issue state directly with an
-// UPDATE — deliberately bypassing SetIssueState, whose engine-governed
-// guard (internal/store/issues.go) treats in_pipeline → needs_action as a
-// no-op (needs_action is a processing state the engine owns). The same
-// UPDATE stamps user_action_reason_type = 'agent_error' so the UI can tell
-// this apart from a worker-asked question, and clears terminal_at /
-// engine_pause_reason. A no-op when the issue isn't in_pipeline (a card
-// that already left the pipeline has nothing to tear down).
-func (s *Store) FailPipelineChainToNeedsAction(issueID int64) error {
-	var current string
-	switch err := s.DB.QueryRow(`SELECT state FROM issues WHERE id = ?`, issueID).Scan(&current); {
-	case errors.Is(err, sql.ErrNoRows):
-		return nil
-	case err != nil:
-		return err
-	}
-	if model.State(current) != model.StateInPipeline {
-		return nil
-	}
-	if err := s.cancelRunningPipelineJob(issueID); err != nil {
-		return err
-	}
-	_, err := s.DB.Exec(
-		`UPDATE issues
-		   SET state = ?,
-		       user_action_reason_type = ?,
-		       terminal_at = NULL,
-		       engine_pause_reason = '',
-		       updated_at = CURRENT_TIMESTAMP
-		 WHERE id = ?`,
-		string(model.StateNeedsAction), string(model.UserActionReasonAgentError), issueID,
-	)
-	return err
-}

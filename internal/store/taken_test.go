@@ -56,7 +56,7 @@ func TestTakenInlinedOnListAndShow(t *testing.T) {
 	}
 
 	// Releasing the claim flips taken back to false.
-	if _, _, _, err := s.ReleaseAgentClaim("taken-sess", iss.ID, model.StateInProgress); err != nil {
+	if _, _, _, err := s.ReleaseAgentClaim("taken-sess", iss.ID, model.StateInReview); err != nil {
 		t.Fatalf("release: %v", err)
 	}
 	got, err = s.GetIssueByID(iss.ID)
@@ -72,7 +72,7 @@ func TestTakenInlinedOnListAndShow(t *testing.T) {
 	if _, _, _, _, err := s.AddAgentClaim("taken-sess", iss.ID, "again"); err != nil {
 		t.Fatalf("re-claim: %v", err)
 	}
-	if _, _, _, _, _, err := s.EndAgentSession("taken-sess", string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel); err != nil {
+	if _, _, _, _, _, err := s.EndAgentSession("taken-sess", string(model.EndReasonStop), model.StateInReview, DispatchCascadeCancel); err != nil {
 		t.Fatalf("end: %v", err)
 	}
 	got, err = s.GetIssueByID(iss.ID)

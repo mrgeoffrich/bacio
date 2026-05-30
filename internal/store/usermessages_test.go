@@ -144,7 +144,7 @@ func TestUserMessageCascadeOnSessionDelete(t *testing.T) {
 		t.Fatalf("add: %v", err)
 	}
 	// End + backdate so the session prune deletes the row.
-	if _, _, _, _, _, err := s.EndAgentSession("um-cascade", string(model.EndReasonStop), model.StateInProgress, DispatchCascadeCancel); err != nil {
+	if _, _, _, _, _, err := s.EndAgentSession("um-cascade", string(model.EndReasonStop), model.StateInReview, DispatchCascadeCancel); err != nil {
 		t.Fatalf("end: %v", err)
 	}
 	old := time.Now().Add(-2 * AgentSessionRetention).UTC().Format("2006-01-02 15:04:05")

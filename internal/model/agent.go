@@ -243,33 +243,6 @@ func SessionBusy(openClaims []*AgentClaim) (busy bool, issueKey string) {
 	return true, newest.IssueKey
 }
 
-// SessionWaiting reports whether a session is parked waiting on the
-// user — true iff it holds an open claim on an issue whose state is in
-// needsActionKeys. The Stop hook auto-flips claimed in_progress issues
-// to needs_action, so this is the derived "parked" signal for the
-// Agents UI. issueKey is the most-recently-claimed waiting issue, for a
-// "waiting · BACI-12" badge. openClaims must already be filtered to
-// open claims for one session; needsActionKeys is a set of issue keys
-// (PREFIX-N) currently in state needs_action.
-func SessionWaiting(openClaims []*AgentClaim, needsActionKeys map[string]bool) (waiting bool, issueKey string) {
-	var newest *AgentClaim
-	for _, c := range openClaims {
-		if c == nil || c.ReleasedAt != nil {
-			continue
-		}
-		if !needsActionKeys[c.IssueKey] {
-			continue
-		}
-		if newest == nil || c.ClaimedAt.After(newest.ClaimedAt) {
-			newest = c
-		}
-	}
-	if newest == nil {
-		return false, ""
-	}
-	return true, newest.IssueKey
-}
-
 // EndReason values reported by `bacio agent end --reason`. Mirrors the
 // Claude Code SessionEnd.end_reason set, plus "stop" for explicit
 // shutdowns, "crash" for inferred ones (`agent list` flags stale
@@ -1068,13 +1041,15 @@ func SessionLiveness(s *AgentSession, now time.Time) string {
 // transientAPIErrorTypes is the set of Claude Code StopFailure
 // error_type values bacio treats as transient (BACI-296) — a worker that
 // dies on one of these hit a passing outage (Anthropic overloaded /
-// rate-limited), so the chain is paused in place for the user to re-arm
-// rather than torn down. Everything else (authentication_failed,
-// billing_error, oauth_org_not_allowed, invalid_request, model_not_found,
-// max_output_tokens, and the catch-all "unknown") is treated terminal:
-// the issue is pulled out of the pipeline to needs_action so the user is
-// brought in. "unknown" defaults conservatively to terminal — surfacing
-// to the user is safer than silently pausing on an unclassified failure.
+// rate-limited). Everything else (authentication_failed, billing_error,
+// oauth_org_not_allowed, invalid_request, model_not_found,
+// max_output_tokens, and the catch-all "unknown") is treated terminal.
+// "unknown" defaults conservatively to terminal — surfacing to the user
+// is safer than silently pausing on an unclassified failure. Both
+// classes now pause the chain in place (BACI-300): the card stays
+// in_pipeline with engine_pause_reason set, and the class only changes
+// the UI copy (outage-retry vs fix-your-account) — see
+// EnginePauseReasonAgentError{Transient,Terminal}.
 var transientAPIErrorTypes = map[string]bool{
 	"server_error": true, // 5xx incl. 529 overloaded
 	"rate_limit":   true, // 429

@@ -86,7 +86,7 @@ func seedTwoIssues(t *testing.T) (*store.Store, *model.Repo) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	if _, err := s.CreateIssue(r.ID, nil, "First issue", "first body", model.StateInProgress, []string{"p1"}, ""); err != nil {
+	if _, err := s.CreateIssue(r.ID, nil, "First issue", "first body", model.StateInReview, []string{"p1"}, ""); err != nil {
 		t.Fatalf("iss1: %v", err)
 	}
 	if _, err := s.CreateIssue(r.ID, nil, "Second issue", "second body", model.StateTodo, nil, ""); err != nil {
@@ -411,7 +411,7 @@ func seedStoreWithRepo(t *testing.T, prefix, name string) *store.Store {
 	if err != nil {
 		t.Fatalf("create repo %s: %v", prefix, err)
 	}
-	if _, err := s.CreateIssue(r.ID, nil, name+" issue", "body", model.StateInProgress, nil, ""); err != nil {
+	if _, err := s.CreateIssue(r.ID, nil, name+" issue", "body", model.StateInReview, nil, ""); err != nil {
 		t.Fatalf("create issue in %s: %v", prefix, err)
 	}
 	return s
