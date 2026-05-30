@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Modal from '../Modal.jsx';
 import Tooltip from '../Tooltip.jsx';
 import { reportError } from '../../errors';
@@ -60,8 +60,34 @@ export default function SystemSettingsSection({
   onChangeArchivePreferences,
   audioEnabled,
   onChangeAudioEnabled,
+  timezone,
+  onChangeTimezone,
   onTemplatesChanged,
 }) {
+  // BACI-312: the IANA zone list for the timezone picker, sourced from
+  // the browser's own tz database via Intl.supportedValuesOf. Memoised —
+  // the list is large (~400 zones) and never changes for a session. The
+  // try/catch covers older engines that lack supportedValuesOf: we fall
+  // back to a tiny seed plus whatever's currently stored / detected so
+  // the picker still renders something selectable.
+  const timezoneOptions = useMemo(() => {
+    let zones = [];
+    try {
+      zones = Intl.supportedValuesOf('timeZone');
+    } catch {
+      zones = ['UTC'];
+    }
+    const set = new Set(zones);
+    // Always include the currently-stored value + the browser's own zone
+    // so neither can ever be unselectable (e.g. a stored zone the engine
+    // doesn't list, or a fresh DB before the auto-detect write lands).
+    if (timezone) set.add(timezone);
+    try {
+      const browser = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      if (browser) set.add(browser);
+    } catch { /* Intl unavailable — the seed list still renders */ }
+    return Array.from(set).sort();
+  }, [timezone]);
   // BACI-162: local draft for the retention-days input. We commit to
   // the App-owned state via onChangeArchivePreferences on blur (rather
   // than every keystroke) so a half-typed value doesn't round-trip
@@ -336,6 +362,34 @@ export default function SystemSettingsSection({
             </button>
           ))}
         </div>
+      </section>
+
+      {/* BACI-312: timezone — server-side setting driving the Pipeline
+          Shipped pill's local-midnight "Today" cutoff. A native <select>
+          over the browser's IANA zone list (type-ahead searchable); the
+          server stays timezone-agnostic — the browser does the midnight
+          math. Auto-detected + persisted on first run by App.jsx. */}
+      <section className="mk-settings-row">
+        <div className="mk-settings-row-text">
+          <div className="mk-settings-label">
+            Timezone
+            <ScopeChip kind="server" />
+          </div>
+          <div className="mk-settings-hint">
+            Your IANA timezone. The Pipeline's Shipped pill counts "Today" from local midnight in this zone (rather than a rolling 24 hours). Auto-detected from your browser on first run — change it here if it's wrong.
+          </div>
+        </div>
+        <select
+          className="mk-tmpl-input"
+          aria-label="Timezone"
+          value={timezone || ''}
+          onChange={(e) => onChangeTimezone(e.target.value)}
+        >
+          {!timezone && <option value="" disabled>Detecting…</option>}
+          {timezoneOptions.map(z => (
+            <option key={z} value={z}>{z}</option>
+          ))}
+        </select>
       </section>
 
       {/* Auto-archive — pair of server-side settings. */}

@@ -14,6 +14,7 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/git"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
+	"github.com/mrgeoffrich/bacio/internal/timeparse"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -488,14 +489,37 @@ func (b *BoardService) ListCards(repoPrefix string) ([]BoardCard, error) {
 	return boardcards.Assemble(ctx, b.client, repo, showArchived, hiddenSlugs)
 }
 
+// shippedSince derives the BACI-187 ShippedFilter.Since lower bound from
+// the two mutually-exclusive frontend inputs. sinceTs (BACI-312) is an
+// absolute RFC3339 cutoff — the local-midnight "Today" scope — and wins
+// when non-empty; otherwise sinceDays drives the legacy relative window
+// (0 = "Forever", no lower bound). The browser computes local-midnight in
+// the user's timezone and passes it absolute, so this side stays
+// timezone-agnostic.
+func shippedSince(sinceDays int, sinceTs string) (*time.Time, error) {
+	if strings.TrimSpace(sinceTs) != "" {
+		ts, err := timeparse.Timestamp(sinceTs)
+		if err != nil {
+			return nil, err
+		}
+		return &ts, nil
+	}
+	if sinceDays > 0 {
+		cutoff := time.Now().Add(-time.Duration(sinceDays) * 24 * time.Hour)
+		return &cutoff, nil
+	}
+	return nil, nil
+}
+
 // ListShipped (BACI-187, reshaped for BACI-221) returns the
 // recently-shipped issues for one repo (newest-first) wrapped with the
-// total count under the same scope. sinceDays clamps the window
-// (0 = no lower bound — "Forever"); limit caps the row count
-// (0 = the popover's default 20, max 100). Sibling of ListCards in
-// shape — one repo, one trip, lean rows the popover renders without
-// follow-up fetches.
-func (b *BoardService) ListShipped(repoPrefix string, sinceDays, limit int) (ShippedListDTO, error) {
+// total count under the same scope. sinceDays clamps the relative window
+// (0 = no lower bound — "Forever"); sinceTs (BACI-312) is the absolute
+// local-midnight "Today" cutoff and wins over sinceDays when non-empty;
+// limit caps the row count (0 = the popover's default 20, max 100).
+// Sibling of ListCards in shape — one repo, one trip, lean rows the
+// popover renders without follow-up fetches.
+func (b *BoardService) ListShipped(repoPrefix string, sinceDays int, sinceTs string, limit int) (ShippedListDTO, error) {
 	ctx := context.Background()
 	if repoPrefix == "" || repoPrefix == "all" {
 		return ShippedListDTO{}, fmt.Errorf("ListShipped: a repo is required (cross-repo popover is out of scope)")
@@ -511,10 +535,11 @@ func (b *BoardService) ListShipped(repoPrefix string, sinceDays, limit int) (Shi
 		}
 		f.Limit = limit
 	}
-	if sinceDays > 0 {
-		cutoff := time.Now().Add(-time.Duration(sinceDays) * 24 * time.Hour)
-		f.Since = &cutoff
+	since, err := shippedSince(sinceDays, sinceTs)
+	if err != nil {
+		return ShippedListDTO{}, err
 	}
+	f.Since = since
 	issues, err := b.client.ListShippedIssues(ctx, repo, f)
 	if err != nil {
 		return ShippedListDTO{}, err
@@ -560,8 +585,9 @@ func (b *BoardService) ListShipped(repoPrefix string, sinceDays, limit int) (Shi
 // Polled on the same 10s cadence as the other live read endpoints so
 // the Pipeline Shipping-column pill reflects the current scope even
 // when the popover isn't open. sinceDays==0 means "Forever" (no lower
-// bound on terminal_at).
-func (b *BoardService) CountShipped(repoPrefix string, sinceDays int) (int, error) {
+// bound on terminal_at); sinceTs (BACI-312) is the absolute
+// local-midnight "Today" cutoff and wins over sinceDays when non-empty.
+func (b *BoardService) CountShipped(repoPrefix string, sinceDays int, sinceTs string) (int, error) {
 	ctx := context.Background()
 	if repoPrefix == "" || repoPrefix == "all" {
 		return 0, fmt.Errorf("CountShipped: a repo is required (cross-repo pill is out of scope)")
@@ -570,12 +596,11 @@ func (b *BoardService) CountShipped(repoPrefix string, sinceDays int) (int, erro
 	if err != nil {
 		return 0, err
 	}
-	f := store.ShippedFilter{}
-	if sinceDays > 0 {
-		cutoff := time.Now().Add(-time.Duration(sinceDays) * 24 * time.Hour)
-		f.Since = &cutoff
+	since, err := shippedSince(sinceDays, sinceTs)
+	if err != nil {
+		return 0, err
 	}
-	return b.client.CountShippedIssues(ctx, repo, f)
+	return b.client.CountShippedIssues(ctx, repo, store.ShippedFilter{Since: since})
 }
 
 // GetIssue returns the full issue-drawer payload for one issue. repoPrefix

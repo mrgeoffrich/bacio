@@ -68,17 +68,43 @@ const (
 	shippedAPIDefaultSinceDays = 30
 )
 
-// parseShippedSince reads the shared ?since= parsing for both the list
+// parseShippedSince reads the shared cutoff parsing for both the list
 // and count handlers. Returns (cutoff, ok) — ok=false means the handler
-// already wrote a 400 envelope and the caller should bail. When
-// useDefault is true, an absent ?since= falls back to the
-// shippedAPIDefaultSinceDays cutoff (the list handler's behaviour);
-// when false, an absent ?since= returns a nil pointer = no window
-// (the count handler's behaviour, so a caller asking for "Forever"
-// can omit the parameter entirely).
+// already wrote a 400 envelope and the caller should bail.
+//
+// Two mutually-exclusive query parameters drive the lower bound:
+//
+//   - ?since=<duration> (1h, 7d, 2w, …) is the canonical relative window
+//     — the "Last Week" / "Forever" path, parsed via timeparse.Lookback.
+//   - ?since_ts=<timestamp> (BACI-312) is an absolute RFC3339 cutoff —
+//     the "Today" path, where the browser computes local-midnight in the
+//     user's stored timezone and sends it absolute, so the Go side stays
+//     timezone-agnostic (no time/tzdata embed). Parsed via
+//     timeparse.Timestamp.
+//
+// Supplying both is a 400 — a request carries at most one. When useDefault
+// is true, an absent cutoff falls back to the shippedAPIDefaultSinceDays
+// window (the list handler's behaviour); when false, an absent cutoff
+// returns a nil pointer = no window (the count handler's behaviour, so a
+// caller asking for "Forever" can omit the parameter entirely).
 func parseShippedSince(w http.ResponseWriter, r *http.Request, useDefault bool) (*time.Time, bool) {
-	if v := r.URL.Query().Get("since"); v != "" {
-		dur, err := timeparse.Lookback(v)
+	q := r.URL.Query()
+	since := q.Get("since")
+	sinceTS := q.Get("since_ts")
+	if since != "" && sinceTS != "" {
+		writeError(w, http.StatusBadRequest, "invalid_input", "since and since_ts are mutually exclusive", map[string]any{"field": "since_ts"})
+		return nil, false
+	}
+	if sinceTS != "" {
+		ts, err := timeparse.Timestamp(sinceTS)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), map[string]any{"field": "since_ts"})
+			return nil, false
+		}
+		return &ts, true
+	}
+	if since != "" {
+		dur, err := timeparse.Lookback(since)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), map[string]any{"field": "since"})
 			return nil, false

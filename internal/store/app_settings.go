@@ -318,3 +318,32 @@ func (s *Store) SetUIShippedSfx(enabled bool) error {
 	}
 	return s.SetAppSetting(uiShippedSfxKey, v)
 }
+
+// uiTimezoneKey is the BACI-312 global setting holding the user's IANA
+// timezone name (e.g. "Australia/Sydney"). It drives the browser-side
+// local-midnight cutoff for the Pipeline Shipping-column Shipped pill's
+// "Today" scope; the Go binary never resolves it (no time/tzdata embed),
+// so the value is opaque to the store beyond shape validation.
+const uiTimezoneKey = "ui.timezone"
+
+// GetUITimezone reads the BACI-312 ui.timezone setting. Unlike the
+// boolean toggles in this file there is no meaningful default: an
+// unset key returns "" and the React layer auto-detects the browser's
+// zone and persists it on first run. Defensive read — a malformed
+// stored value (which the validator should have prevented on write)
+// still reads back as whatever was stored; the browser's Intl is the
+// final arbiter of whether the name resolves.
+func (s *Store) GetUITimezone() (string, error) {
+	return s.GetAppSetting(uiTimezoneKey)
+}
+
+// SetUITimezone stores the BACI-312 ui.timezone setting after running
+// ValidateTimezone, so a malformed IANA name is rejected at the store
+// boundary rather than silently poisoning the cutoff math.
+func (s *Store) SetUITimezone(tz string) error {
+	clean, err := ValidateTimezone(tz)
+	if err != nil {
+		return err
+	}
+	return s.SetAppSetting(uiTimezoneKey, clean)
+}

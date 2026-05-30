@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { reportError } from '../errors';
 import * as api from '../api';
 import { formatWhen } from '../lib/formatWhen';
-import { SHIPPED_SCOPES, scopeLabel, scopeSinceDays } from './shippedScope.ts';
+import { SHIPPED_SCOPES, scopeLabel, scopeSinceParams } from './shippedScope.ts';
 import ShippedPill from './ShippedPill.jsx';
 
 // CACHE_TTL_MS: how long the popover holds onto its last successful
@@ -32,6 +32,9 @@ const LIMIT = 20;
 //                  in lockstep.
 //   onScopeChange — App-level setter that also persists the choice to
 //                  localStorage. Wired through PipelineView.
+//   timezone     — BACI-312: the user's IANA zone (or "" before
+//                  auto-detect fills it). Drives the 'today' scope's
+//                  local-midnight cutoff via scopeSinceParams.
 //   onOpenIssue  — invoked with the row's canonical key on click;
 //                  the popover closes itself afterwards.
 //   flyingShipKey — BACI-193: when set, the popover renders an
@@ -53,7 +56,7 @@ const LIMIT = 20;
 // rising (the count-rise effect) so it fires regardless of the active
 // view. The visual flash stays put — it does genuinely depend on the
 // flight landing.
-export default function ShippedPopover({ activeBoard, shippedCount, scope, onScopeChange, onOpenIssue, flyingShipKey, shipFlashing, onShipFlightDone }) {
+export default function ShippedPopover({ activeBoard, shippedCount, scope, onScopeChange, timezone, onOpenIssue, flyingShipKey, shipFlashing, onShipFlightDone }) {
   const [open, setOpen] = useState(false);
   // status: 'idle' | 'loading' | 'ready' | 'error'
   // rows is the last successful fetch (preserved across closes so the
@@ -85,17 +88,18 @@ export default function ShippedPopover({ activeBoard, shippedCount, scope, onSco
     };
   }, [open]);
 
-  // Switching repos OR switching scopes invalidates the cache — the
+  // Switching repos OR switching scopes OR changing the timezone (which
+  // moves the 'today' midnight cutoff) invalidates the cache — the
   // popover must refetch under the new conditions rather than show
   // stale rows. Same shape as the existing activeBoard invalidation
-  // effect; scope is just a second axis the cache depends on.
+  // effect; scope + timezone are just further axes the cache depends on.
   useEffect(() => {
     setStatus('idle');
     setRows([]);
     setTotal(0);
     setError('');
     setFetchedAt(0);
-  }, [activeBoard, scope]);
+  }, [activeBoard, scope, timezone]);
 
   // First-open (or cache-expired) fetch. Runs only when we just
   // opened — closing the popover preserves the rows so a fast
@@ -108,8 +112,10 @@ export default function ShippedPopover({ activeBoard, shippedCount, scope, onSco
     let cancelled = false;
     setStatus('loading');
     setError('');
-    const sinceDays = scopeSinceDays(scope);
-    api.listShippedIssues(activeBoard, sinceDays, LIMIT)
+    // BACI-312: 'today' resolves to an absolute local-midnight cutoff in
+    // the user's timezone; week/forever keep the relative sinceDays window.
+    const { sinceDays, sinceTs } = scopeSinceParams(scope, timezone);
+    api.listShippedIssues(activeBoard, sinceDays, sinceTs, LIMIT)
       .then((next) => {
         if (cancelled) return;
         setRows(next?.rows ?? []);
@@ -128,7 +134,7 @@ export default function ShippedPopover({ activeBoard, shippedCount, scope, onSco
         setStatus('error');
       });
     return () => { cancelled = true; };
-  }, [open, activeBoard, scope, status, fetchedAt]);
+  }, [open, activeBoard, scope, timezone, status, fetchedAt]);
 
   // Click a row → open the issue workspace + close the popover.
   const pickRow = (key) => {

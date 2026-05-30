@@ -365,7 +365,7 @@ func TestListShipped(t *testing.T) {
 	fake := &fakeShippedClient{repo: repo, shipped: shipped, prs: prs}
 	svc := NewBoardService(fake)
 
-	out, err := svc.ListShipped("TEST", 30, 20)
+	out, err := svc.ListShipped("TEST", 30, "", 20)
 	if err != nil {
 		t.Fatalf("ListShipped: %v", err)
 	}
@@ -397,10 +397,10 @@ func TestListShipped(t *testing.T) {
 // calling ListShipped with "" or "all" must surface a clear error.
 func TestListShippedRejectsAllRepos(t *testing.T) {
 	svc := NewBoardService(&fakeShippedClient{repo: &model.Repo{Prefix: "TEST"}})
-	if _, err := svc.ListShipped("", 0, 0); err == nil {
+	if _, err := svc.ListShipped("", 0, "", 0); err == nil {
 		t.Error("ListShipped(\"\") = nil, want error (per-repo only)")
 	}
-	if _, err := svc.ListShipped("all", 0, 0); err == nil {
+	if _, err := svc.ListShipped("all", 0, "", 0); err == nil {
 		t.Error("ListShipped(\"all\") = nil, want error (per-repo only)")
 	}
 }
@@ -417,7 +417,7 @@ func TestListShippedReturnsTotal(t *testing.T) {
 	fake := &fakeShippedClient{repo: repo, shipped: shipped, total: 47}
 	svc := NewBoardService(fake)
 
-	out, err := svc.ListShipped("TEST", 7, 20)
+	out, err := svc.ListShipped("TEST", 7, "", 20)
 	if err != nil {
 		t.Fatalf("ListShipped: %v", err)
 	}
@@ -436,7 +436,7 @@ func TestListShippedReturnsTotal(t *testing.T) {
 func TestListShippedForeverPassesNilSince(t *testing.T) {
 	fake := &fakeShippedClient{repo: &model.Repo{Prefix: "TEST"}}
 	svc := NewBoardService(fake)
-	if _, err := svc.ListShipped("TEST", 0, 0); err != nil {
+	if _, err := svc.ListShipped("TEST", 0, "", 0); err != nil {
 		t.Fatalf("ListShipped: %v", err)
 	}
 	if fake.lastFilter.Since != nil {
@@ -453,7 +453,7 @@ func TestCountShipped(t *testing.T) {
 	fake := &fakeShippedClient{repo: &model.Repo{Prefix: "TEST"}, total: 17}
 	svc := NewBoardService(fake)
 
-	total, err := svc.CountShipped("TEST", 7)
+	total, err := svc.CountShipped("TEST", 7, "")
 	if err != nil {
 		t.Fatalf("CountShipped: %v", err)
 	}
@@ -468,11 +468,39 @@ func TestCountShipped(t *testing.T) {
 // TestCountShippedRejectsAllRepos — same per-repo gate as ListShipped.
 func TestCountShippedRejectsAllRepos(t *testing.T) {
 	svc := NewBoardService(&fakeShippedClient{repo: &model.Repo{Prefix: "TEST"}})
-	if _, err := svc.CountShipped("", 0); err == nil {
+	if _, err := svc.CountShipped("", 0, ""); err == nil {
 		t.Error("CountShipped(\"\") = nil, want error (per-repo only)")
 	}
-	if _, err := svc.CountShipped("all", 0); err == nil {
+	if _, err := svc.CountShipped("all", 0, ""); err == nil {
 		t.Error("CountShipped(\"all\") = nil, want error (per-repo only)")
+	}
+}
+
+// TestShippedSinceTSWinsOverSinceDays (BACI-312) — when an absolute
+// sinceTs is supplied it reaches the store as that exact instant,
+// overriding the relative sinceDays window. The local-midnight "Today"
+// scope rides this path; the browser computes midnight and passes it
+// absolute, so the desktop transport must forward it verbatim.
+func TestShippedSinceTSWinsOverSinceDays(t *testing.T) {
+	fake := &fakeShippedClient{repo: &model.Repo{Prefix: "TEST"}}
+	svc := NewBoardService(fake)
+
+	want := time.Date(2026, 5, 30, 0, 0, 0, 0, time.UTC)
+	sinceTs := want.Format(time.RFC3339)
+
+	// Pass a non-zero sinceDays alongside sinceTs to prove sinceTs wins.
+	if _, err := svc.ListShipped("TEST", 7, sinceTs, 20); err != nil {
+		t.Fatalf("ListShipped: %v", err)
+	}
+	if fake.lastFilter.Since == nil || !fake.lastFilter.Since.Equal(want) {
+		t.Fatalf("list Since = %v, want %v (absolute sinceTs)", fake.lastFilter.Since, want)
+	}
+
+	if _, err := svc.CountShipped("TEST", 7, sinceTs); err != nil {
+		t.Fatalf("CountShipped: %v", err)
+	}
+	if fake.lastCountFilter.Since == nil || !fake.lastCountFilter.Since.Equal(want) {
+		t.Fatalf("count Since = %v, want %v (absolute sinceTs)", fake.lastCountFilter.Since, want)
 	}
 }
 

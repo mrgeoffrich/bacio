@@ -39,6 +39,8 @@ export default function SettingsView({
   onChangeArchivePreferences,
   audioEnabled,
   onChangeAudioEnabled,
+  timezone,
+  onChangeTimezone,
   columns,
   onClose,
   onTemplatesChanged,
@@ -124,6 +126,8 @@ export default function SettingsView({
             onChangeArchivePreferences={onChangeArchivePreferences}
             audioEnabled={audioEnabled}
             onChangeAudioEnabled={onChangeAudioEnabled}
+            timezone={timezone}
+            onChangeTimezone={onChangeTimezone}
             onTemplatesChanged={onTemplatesChanged}
           />
         );
@@ -134,6 +138,7 @@ export default function SettingsView({
     showArchived, onChangeShowArchived,
     archiveAutoEnabled, archiveRetentionDays, onChangeArchivePreferences,
     audioEnabled, onChangeAudioEnabled,
+    timezone, onChangeTimezone,
     columns, onTemplatesChanged,
     repoPrefix, boards,
   ]);

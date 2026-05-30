@@ -38,6 +38,7 @@ import {
   PromptTemplateDTO,
   ArchivePreferencesDTO,
   AudioPreferencesDTO,
+  TimezonePreferencesDTO,
   SyncPreferencesDTO,
   SyncRegistryDTO,
   SyncRepoDTO,
@@ -69,7 +70,7 @@ import { PipelineJob, Notification } from '../bindings/github.com/mrgeoffrich/ba
 // pull it from the ./api seam alongside PipelineJob.
 import type { ProcessSelection } from './lib/pipelineProcesses';
 
-export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureLinkedDoc, FeaturePlan, FeaturePlanEntry, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, ArchivePreferencesDTO, AudioPreferencesDTO, WaitingState, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO, SyncSetupDTO, CollisionPreviewDTO, RenumberEntryDTO, RenameEntryDTO, RepoLinkResultDTO, ShippedIssueDTO, ShippedListDTO, LatestPlanDTO, Notification };
+export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureLinkedDoc, FeaturePlan, FeaturePlanEntry, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, ArchivePreferencesDTO, AudioPreferencesDTO, TimezonePreferencesDTO, WaitingState, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO, SyncSetupDTO, CollisionPreviewDTO, RenumberEntryDTO, RenameEntryDTO, RepoLinkResultDTO, ShippedIssueDTO, ShippedListDTO, LatestPlanDTO, Notification };
 // BACI-216: cross-transport alias. The web bundle's api.http.ts ships
 // the same name from its own TS-only shape so KanbanCard / IssueWorkspace
 // stay transport-agnostic.
@@ -802,18 +803,20 @@ export async function listHistory(
 // listShippedIssues (BACI-187, reshaped for BACI-221) returns the
 // Pipeline Shipping-column shipping-log popover rows for one repo (newest-first) wrapped
 // with the total count under the same scope so the popover header can
-// render "showing N of TOTAL". `sinceDays` clamps the window
-// (0 = "Forever" — no lower bound on terminal_at); `limit` caps the
-// row count (0 = the server's default 20, max 100). The HTTP twin in
-// api.http.ts MUST keep the same name + shape so callers stay
-// transport-agnostic.
+// render "showing N of TOTAL". `sinceDays` clamps the relative window
+// (0 = "Forever" — no lower bound on terminal_at); `sinceTs` (BACI-312)
+// is the absolute local-midnight "Today" cutoff (RFC3339) and wins over
+// sinceDays when non-empty; `limit` caps the row count (0 = the server's
+// default 20, max 100). The HTTP twin in api.http.ts MUST keep the same
+// name + shape so callers stay transport-agnostic.
 export async function listShippedIssues(
   repoPrefix: string,
   sinceDays: number,
+  sinceTs: string,
   limit: number,
 ): Promise<ShippedListDTO> {
   try {
-    return await BoardService.ListShipped(repoPrefix, sinceDays, limit);
+    return await BoardService.ListShipped(repoPrefix, sinceDays, sinceTs, limit);
   } catch (err) {
     throw normalize(err);
   }
@@ -822,13 +825,15 @@ export async function listShippedIssues(
 // countShippedIssues (BACI-221) is the lean count-only sibling polled
 // on the Pipeline Shipping-column pill's 10s cadence so the "Shipped · N" label reflects
 // the active Today / Last Week / Forever scope even when the popover
-// is closed. `sinceDays` mirrors listShippedIssues — 0 means "Forever".
+// is closed. `sinceDays` / `sinceTs` mirror listShippedIssues — sinceDays
+// 0 means "Forever"; a non-empty sinceTs is the absolute "Today" cutoff.
 export async function countShippedIssues(
   repoPrefix: string,
   sinceDays: number,
+  sinceTs: string,
 ): Promise<number> {
   try {
-    return await BoardService.CountShipped(repoPrefix, sinceDays);
+    return await BoardService.CountShipped(repoPrefix, sinceDays, sinceTs);
   } catch (err) {
     throw normalize(err);
   }
@@ -1070,6 +1075,29 @@ export async function setAudioPreferences(
 ): Promise<AudioPreferencesDTO> {
   try {
     return await SettingsService.SetAudioPreferences(shippedSfx);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// BACI-312: ui.timezone global setting (IANA zone name). Drives the
+// browser-side local-midnight cutoff for the Pipeline Shipping-column
+// Shipped pill's "Today" scope. Empty when unset — App.jsx auto-detects
+// the browser zone and persists it on first run.
+
+export async function getTimezonePreferences(): Promise<TimezonePreferencesDTO> {
+  try {
+    return await SettingsService.GetTimezonePreferences();
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+export async function setTimezonePreferences(
+  timezone: string,
+): Promise<TimezonePreferencesDTO> {
+  try {
+    return await SettingsService.SetTimezonePreferences(timezone);
   } catch (err) {
     throw normalize(err);
   }

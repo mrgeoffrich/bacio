@@ -165,10 +165,11 @@ export function ClearDefaultFeature(repoPrefix: string): $CancellablePromise<$mo
  * Polled on the same 10s cadence as the other live read endpoints so
  * the Pipeline Shipping-column pill reflects the current scope even
  * when the popover isn't open. sinceDays==0 means "Forever" (no lower
- * bound on terminal_at).
+ * bound on terminal_at); sinceTs (BACI-312) is the absolute
+ * local-midnight "Today" cutoff and wins over sinceDays when non-empty.
  */
-export function CountShipped(repoPrefix: string, sinceDays: number): $CancellablePromise<number> {
-    return $Call.ByID(1177825803, repoPrefix, sinceDays);
+export function CountShipped(repoPrefix: string, sinceDays: number, sinceTs: string): $CancellablePromise<number> {
+    return $Call.ByID(1177825803, repoPrefix, sinceDays, sinceTs);
 }
 
 /**
@@ -377,14 +378,15 @@ export function ListNotifications(unreadOnly: boolean, limit: number): $Cancella
 /**
  * ListShipped (BACI-187, reshaped for BACI-221) returns the
  * recently-shipped issues for one repo (newest-first) wrapped with the
- * total count under the same scope. sinceDays clamps the window
- * (0 = no lower bound — "Forever"); limit caps the row count
- * (0 = the popover's default 20, max 100). Sibling of ListCards in
- * shape — one repo, one trip, lean rows the popover renders without
- * follow-up fetches.
+ * total count under the same scope. sinceDays clamps the relative window
+ * (0 = no lower bound — "Forever"); sinceTs (BACI-312) is the absolute
+ * local-midnight "Today" cutoff and wins over sinceDays when non-empty;
+ * limit caps the row count (0 = the popover's default 20, max 100).
+ * Sibling of ListCards in shape — one repo, one trip, lean rows the
+ * popover renders without follow-up fetches.
  */
-export function ListShipped(repoPrefix: string, sinceDays: number, limit: number): $CancellablePromise<$models.ShippedListDTO> {
-    return $Call.ByID(3138957880, repoPrefix, sinceDays, limit).then(($result: any) => {
+export function ListShipped(repoPrefix: string, sinceDays: number, sinceTs: string, limit: number): $CancellablePromise<$models.ShippedListDTO> {
+    return $Call.ByID(3138957880, repoPrefix, sinceDays, sinceTs, limit).then(($result: any) => {
         return $$createType24($result);
     });
 }

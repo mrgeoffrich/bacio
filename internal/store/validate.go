@@ -285,6 +285,43 @@ func ValidateBranchName(s string) (string, error) {
 	return s, nil
 }
 
+// maxTimezoneLen caps the BACI-312 ui.timezone setting. IANA zone names
+// top out well under this — the longest registered name
+// ("America/Argentina/Buenos_Aires") is 31 chars — but 80 leaves room
+// for any future addition without rejecting a legitimate zone.
+const maxTimezoneLen = 80
+
+// timezoneRule matches the shape of an IANA tz database name: one or
+// more slash-separated components, each starting with a letter and
+// otherwise made of letters, digits, '_', '-', '+'. Covers area/location
+// (Australia/Sydney), three-part names (America/Argentina/Buenos_Aires),
+// the fixed-offset Etc zones (Etc/GMT+10), and the single-word "UTC".
+// Deliberately a shape check, not a database lookup: the Go binary stays
+// tz-agnostic (BACI-312 computes local midnight browser-side), so we
+// can't call time.LoadLocation to confirm the name resolves without
+// embedding time/tzdata. The browser's Intl validates the real zone.
+var timezoneRule = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9+_-]*(/[A-Za-z][A-Za-z0-9+_-]*)*$`)
+
+// ValidateTimezone (BACI-312) enforces the ui.timezone global setting's
+// shape: a non-empty, length-capped, control-char-free IANA zone name
+// like "Australia/Sydney", "UTC", or "Etc/GMT+10". Trimmed; rejects
+// embedded whitespace and anything that doesn't match the slash-
+// separated component shape. It is deliberately a shape check rather
+// than a time.LoadLocation lookup — see timezoneRule's doc.
+func ValidateTimezone(s string) (string, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return "", fmt.Errorf("timezone is required")
+	}
+	if len(s) > maxTimezoneLen {
+		return "", fmt.Errorf("timezone too long: %d chars, max %d", len(s), maxTimezoneLen)
+	}
+	if !timezoneRule.MatchString(s) {
+		return "", fmt.Errorf("timezone %q must be an IANA zone name (e.g. Australia/Sydney, UTC, Etc/GMT+10)", s)
+	}
+	return s, nil
+}
+
 // ValidateEmoji (BACI-172) enforces the per-feature emoji column's
 // shape: either empty (no glyph) or exactly one grapheme cluster as
 // counted by uniseg. ZWJ sequences (e.g. 👨‍👩‍👧) and country flags

@@ -217,6 +217,41 @@ func TestUIShippedSfxRoundTrip(t *testing.T) {
 	}
 }
 
+// TestUITimezoneRoundTrip — BACI-312. An unset ui.timezone reads back as
+// "" (no meaningful default — the React layer auto-detects on first run),
+// a valid IANA name round-trips, and SetUITimezone rejects a malformed
+// name at the store boundary.
+func TestUITimezoneRoundTrip(t *testing.T) {
+	s := newTestStore(t)
+
+	// Never set → empty (the auto-detect sentinel).
+	if v, err := s.GetUITimezone(); err != nil || v != "" {
+		t.Fatalf("GetUITimezone(unset) = %q, %v; want \"\", nil", v, err)
+	}
+	// Valid zone round-trips.
+	if err := s.SetUITimezone("Australia/Sydney"); err != nil {
+		t.Fatalf("SetUITimezone(Australia/Sydney): %v", err)
+	}
+	if v, _ := s.GetUITimezone(); v != "Australia/Sydney" {
+		t.Fatalf("GetUITimezone after set = %q, want Australia/Sydney", v)
+	}
+	// Re-set upserts (UTC).
+	if err := s.SetUITimezone("UTC"); err != nil {
+		t.Fatalf("SetUITimezone(UTC): %v", err)
+	}
+	if v, _ := s.GetUITimezone(); v != "UTC" {
+		t.Fatalf("GetUITimezone after update = %q, want UTC", v)
+	}
+	// A malformed name is rejected at the store boundary and leaves the
+	// stored value untouched.
+	if err := s.SetUITimezone("not a zone!"); err == nil {
+		t.Fatal("SetUITimezone(\"not a zone!\") = nil, want error")
+	}
+	if v, _ := s.GetUITimezone(); v != "UTC" {
+		t.Fatalf("after rejected set, GetUITimezone = %q, want UTC unchanged", v)
+	}
+}
+
 // TestPromptTemplateSeedAndOverride checks that the migration seeds the
 // built-in templates on first run, that the legacy SetPromptTemplate /
 // GetPromptTemplate shims edit the prompt_templates rows in place, and

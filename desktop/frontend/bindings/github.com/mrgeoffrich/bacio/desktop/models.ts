@@ -2154,6 +2154,33 @@ export class SyncSetupDTO {
 }
 
 /**
+ * TimezonePreferencesDTO is the BACI-312 ui.timezone setting shaped for
+ * the desktop Settings panel. Single string — the IANA zone name (empty
+ * when unset, so the React layer auto-detects + persists the browser zone
+ * on first run).
+ */
+export class TimezonePreferencesDTO {
+    "timezone": string;
+
+    /** Creates a new TimezonePreferencesDTO instance. */
+    constructor($$source: Partial<TimezonePreferencesDTO> = {}) {
+        if (!("timezone" in $$source)) {
+            this["timezone"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new TimezonePreferencesDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): TimezonePreferencesDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new TimezonePreferencesDTO($$parsedSource as Partial<TimezonePreferencesDTO>);
+    }
+}
+
+/**
  * UnsyncedProjectDTO mirrors client.UnsyncedProject.
  */
 export class UnsyncedProjectDTO {
