@@ -461,8 +461,10 @@ def classify_worktree_root(path: str) -> str | None:
 
 
 # Tool-result inspection: did Claude Code's PreToolUse hook (or any source) deny
-# the call? Hooks emit a deny payload that lands either as is_error=True with a
-# deny phrase, or as text containing the canonical permission-decision string.
+# the call? A real deny always lands as an ERROR tool_result carrying a deny
+# phrase. The is_error gate is load-bearing: without it, a *successful* Read of a
+# file that merely quotes a deny phrase (this skill's own source, a hook doc)
+# trips the detector — exactly the false positive that motivated the gate.
 DENY_HINTS = (
     "permissionDecision",
     "permission_denied",
@@ -471,8 +473,8 @@ DENY_HINTS = (
 )
 
 
-def is_hook_deny(text: str) -> bool:
-    return any(h in text for h in DENY_HINTS)
+def is_hook_deny(text: str, is_error: bool) -> bool:
+    return is_error and any(h in text for h in DENY_HINTS)
 
 
 # ---------------------------------------------------------------------------
@@ -627,7 +629,7 @@ def analyse_transcript(transcript: dict, mode: str | None, dispatch_id: str | No
                 txt = tool_result_text(block)
                 is_err = bool(block.get("is_error"))
 
-                if is_hook_deny(txt):
+                if is_hook_deny(txt, is_err):
                     hook_denies.append({
                         "msg_index": mi,
                         "tool": tu[0] if tu else None,
