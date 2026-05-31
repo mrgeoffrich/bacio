@@ -129,7 +129,7 @@ const proxyRequestSelect = `
 	SELECT id, method, host, path, status, bytes_in, bytes_out,
 	       duration_ms, raw_log_path, started_at, ended_at,
 	       content_type, is_stream, is_anthropic, session_id,
-	       claude_agent_id, dispatch_id
+	       claude_agent_id, dispatch_id, parse_failed_at
 	FROM proxy_requests`
 
 // GetProxyRequest fetches one row by primary key, or ErrNotFound.
@@ -284,12 +284,13 @@ func scanProxyRequest(r rowScanner) (*model.ProxyRequest, error) {
 	var v model.ProxyRequest
 	var isStream, isAnthropic int
 	var dispatchID sql.NullInt64
+	var parseFailedAt sql.NullTime
 	if err := r.Scan(
 		&v.ID, &v.Method, &v.Host, &v.Path, &v.Status,
 		&v.BytesIn, &v.BytesOut, &v.DurationMS, &v.RawLogPath,
 		&v.StartedAt, &v.EndedAt,
 		&v.ContentType, &isStream, &isAnthropic, &v.SessionID,
-		&v.ClaudeAgentID, &dispatchID,
+		&v.ClaudeAgentID, &dispatchID, &parseFailedAt,
 	); err != nil {
 		return nil, err
 	}
@@ -298,6 +299,10 @@ func scanProxyRequest(r rowScanner) (*model.ProxyRequest, error) {
 	if dispatchID.Valid {
 		id := dispatchID.Int64
 		v.DispatchID = &id
+	}
+	if parseFailedAt.Valid {
+		t := parseFailedAt.Time
+		v.ParseFailedAt = &t
 	}
 	return &v, nil
 }

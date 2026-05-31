@@ -8,14 +8,19 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/mrgeoffrich/bacio/internal/client"
+	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
+	"github.com/mrgeoffrich/bacio/internal/inputio"
 	"github.com/mrgeoffrich/bacio/internal/store"
 	"github.com/mrgeoffrich/bacio/internal/timeparse"
 )
 
-// newProxyCmd is the `bacio proxy` parent for read-only inspection of the
-// BACI-302 reverse-proxy capture. Read-only (like `bacio history` /
-// `bacio status`), so the subcommands carry no --json / --dry-run / schema
-// surface.
+// newProxyCmd is the `bacio proxy` parent for inspecting the BACI-302 reverse-proxy
+// capture. The read verbs (stats / captures / capture / raw / job / grep) are
+// read-only like `bacio history` / `bacio status` and carry no --json / --dry-run
+// / schema surface. The one mutating verb — `proxy reparse` (BACI-321, the
+// proxy_messages backfill) — follows the six agent-CLI rules: --json in, a
+// `proxy.reparse` schema entry, --dry-run, store-boundary validation.
 func newProxyCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "proxy",
@@ -27,6 +32,90 @@ func newProxyCmd() *cobra.Command {
 	cmd.AddCommand(newProxyRawCmd())
 	cmd.AddCommand(newProxyJobCmd())
 	cmd.AddCommand(newProxyGrepCmd())
+	cmd.AddCommand(newProxyReparseCmd())
+	return cmd
+}
+
+// newProxyReparseCmd is `bacio proxy reparse` (BACI-321) — the manual escape hatch
+// over the leader-gated controller sweep that backfills proxy_messages from
+// captured Anthropic traffic the live recorder path missed (a full hand-off queue,
+// a transient parse error, a window where parsing was off). With no flags it
+// sweeps every eligible dispatch; `--dispatch <id>` scopes to one job's captures.
+// The first MUTATING proxy verb, so it follows the six agent-CLI rules: --json in,
+// a `proxy.reparse` schema entry, --dry-run. The destructive partial-gap rebuild
+// (`--rebuild`) is reserved on the surface but not implemented in v1.
+func newProxyReparseCmd() *cobra.Command {
+	var (
+		dispatch int64
+		rebuild  bool
+		rawInput string
+	)
+	cmd := &cobra.Command{
+		Use:   "reparse",
+		Short: "Backfill proxy_messages from captured Anthropic traffic the live path missed (BACI-321)",
+		Long: `Reparse dispatch-correlated Anthropic captures the live recorder
+path missed into proxy_messages, so their turns appear in the per-job transcript
+('bacio proxy job' / the Monitor capture sheet). The raw .http file already on
+disk is the parseable substrate — nothing new is captured.
+
+With no flags it sweeps every eligible dispatch (the same backfill the leader-gated
+controller runs once a minute). Scope to one job with --dispatch <id>. v1 only
+backfills fully-unparsed dispatches (non-destructive — it never deletes an existing
+row); a capture that can't parse (truncated / malformed) is marked once and not
+retried.
+
+The --rebuild flag (the destructive partial-gap rebuild: delete-from-gap-onward +
+replay) is reserved but not implemented in v1.
+
+  --dry-run reports how many dispatches / captures a real run would reparse,
+  touching nothing.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			in := client.ReparseProxyOpts{}
+
+			raw, err := parseJSONInput(cmd, args, rawInput, "dispatch", "rebuild")
+			if err != nil {
+				return err
+			}
+			if raw != nil {
+				// Flags and --json are mutually exclusive (the six rules);
+				// parseJSONInput already rejects mixing them.
+				decoded, _, err := inputio.DecodeStrict[inputs.ProxyReparseInput](raw)
+				if err != nil {
+					return err
+				}
+				in.Dispatch = decoded.Dispatch
+				in.Rebuild = decoded.Rebuild
+			} else {
+				if cmd.Flags().Changed("dispatch") {
+					if dispatch <= 0 {
+						return fmt.Errorf("invalid --dispatch %d (want a positive dispatch id)", dispatch)
+					}
+					d := dispatch
+					in.Dispatch = &d
+				}
+				in.Rebuild = rebuild
+			}
+
+			c, err := openClient()
+			if err != nil {
+				return err
+			}
+			defer c.Close()
+
+			res, err := c.ReparseProxyMessages(context.Background(), in, opts.dryRun)
+			if err != nil {
+				return err
+			}
+			if opts.dryRun {
+				return emitDryRun(res)
+			}
+			return emit(res)
+		},
+	}
+	cmd.Flags().Int64Var(&dispatch, "dispatch", 0, "scope the backfill to one dispatch's captures (default: sweep all eligible)")
+	cmd.Flags().BoolVar(&rebuild, "rebuild", false, "destructive partial-gap rebuild (reserved; not implemented in v1)")
+	addInputFlag(cmd, &rawInput)
 	return cmd
 }
 

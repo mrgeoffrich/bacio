@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mrgeoffrich/bacio/internal/client"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
@@ -232,6 +233,85 @@ func TestRoundTripProxySearch(t *testing.T) {
 	}
 	if local[1].ProxyRequestID != 1 || local[1].Role != "assistant" {
 		t.Fatalf("match[1] = %+v, want capture 1 / assistant", local[1])
+	}
+}
+
+// TestRoundTripProxyReparse seeds an unparsed dispatch-correlated Anthropic
+// capture with its .http file on disk, then drives the BACI-321 backfill on both
+// backends: dry-run projects the count without writing (no proxy_messages row, no
+// audit), the wet run backfills the row and records a `proxy.reparse` audit, and
+// --rebuild is refused on both backends as not-implemented-in-v1.
+func TestRoundTripProxyReparse(t *testing.T) {
+	p := newPair(t)
+	defer p.cleanup()
+	ctx := context.Background()
+
+	dispatchID := int64(321)
+	rawPath := filepath.Join(t.TempDir(), "turn.http")
+	raw := "==== REQUEST ====\r\nPOST /v1/messages HTTP/1.1\r\nContent-Type: application/json\r\n\r\n" +
+		`{"model":"claude-opus-4-8","system":"sys","messages":[{"role":"user","content":[{"type":"text","text":"hi"}]}]}` +
+		"\r\n==== RESPONSE ====\r\nHTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n" +
+		"data: {\"type\":\"message_start\",\"message\":{\"model\":\"claude-opus-4-8\",\"usage\":{\"input_tokens\":12}}}\n\n" +
+		"data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n" +
+		"data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\n\n" +
+		"data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":4}}"
+	if err := os.WriteFile(rawPath, []byte(raw), 0o644); err != nil {
+		t.Fatalf("write raw: %v", err)
+	}
+	t0 := time.Now().Add(-1 * time.Hour)
+	if _, err := p.store.AddProxyRequest(store.AddProxyRequestIn{
+		Method: "POST", Host: "api.anthropic.com", Path: "/v1/messages", Status: 200,
+		RawLogPath: rawPath, StartedAt: t0, EndedAt: t0,
+		ContentType: "text/event-stream", IsStream: true, IsAnthropic: true,
+		DispatchID: &dispatchID,
+	}); err != nil {
+		t.Fatalf("seed capture: %v", err)
+	}
+
+	in := client.ReparseProxyOpts{Dispatch: &dispatchID}
+
+	// Dry-run on both backends: projects 1 capture, writes nothing.
+	for name, c := range map[string]client.Client{"local": p.local, "remote": p.remote} {
+		res, err := c.ReparseProxyMessages(ctx, in, true)
+		if err != nil {
+			t.Fatalf("%s dry-run: %v", name, err)
+		}
+		if res.CapturesReparsed != 1 || res.DispatchesScanned != 1 {
+			t.Fatalf("%s dry-run result = %+v, want 1 scanned / 1 reparsed", name, res)
+		}
+		if _, err := p.store.JobTranscript(dispatchID); err != store.ErrNotFound {
+			t.Fatalf("%s dry-run wrote a row (JobTranscript err = %v, want ErrNotFound)", name, err)
+		}
+	}
+
+	// --rebuild is refused on both backends without touching anything.
+	for name, c := range map[string]client.Client{"local": p.local, "remote": p.remote} {
+		if _, err := c.ReparseProxyMessages(ctx, client.ReparseProxyOpts{Rebuild: true}, false); err == nil {
+			t.Fatalf("%s --rebuild should be refused, got nil error", name)
+		}
+	}
+
+	// Wet run on the local backend: backfills the row + records the audit.
+	res, err := p.local.ReparseProxyMessages(ctx, in, false)
+	if err != nil {
+		t.Fatalf("local wet reparse: %v", err)
+	}
+	if res.CapturesReparsed != 1 {
+		t.Fatalf("wet reparse result = %+v, want 1 reparsed", res)
+	}
+	tr, err := p.store.JobTranscript(dispatchID)
+	if err != nil {
+		t.Fatalf("JobTranscript after reparse: %v", err)
+	}
+	if tr.Usage.InputTokens != 12 || tr.Usage.OutputTokens != 4 {
+		t.Errorf("reparsed usage = %+v, want input 12 output 4", tr.Usage)
+	}
+	hist, err := p.store.ListHistory(store.HistoryFilter{Op: "proxy.reparse"})
+	if err != nil {
+		t.Fatalf("ListHistory: %v", err)
+	}
+	if len(hist) != 1 {
+		t.Fatalf("audit rows for proxy.reparse = %d, want 1", len(hist))
 	}
 }
 

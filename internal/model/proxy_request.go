@@ -67,6 +67,12 @@ type ProxyRequest struct {
 	SessionID     string `json:"session_id,omitempty"`
 	ClaudeAgentID string `json:"claude_agent_id,omitempty"`
 	DispatchID    *int64 `json:"dispatch_id,omitempty"`
+	// BACI-321 terminal-failure marker: when a reparse attempt yielded no
+	// proxy_messages row (a truncated / malformed capture that can never
+	// parse), this is stamped so the leader-gated backfill sweep skips the
+	// row instead of re-reading its file every minute. Nil until a parse
+	// attempt has given up.
+	ParseFailedAt *time.Time `json:"parse_failed_at,omitempty"`
 }
 
 // ProxyCaptureRow is one row of the BACI-308 filtered capture list — a

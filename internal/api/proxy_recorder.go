@@ -175,24 +175,29 @@ func (r *captureRecorder) persist(obs proxy.RequestObservation) {
 
 // parseMessage reconstructs one capture's assistant turn, classifies it against
 // the job's last thread state (primary thread vs auxiliary probe), and persists
-// it. Best-effort: a parse failure or a store hiccup is logged and swallowed so
-// a malformed capture never breaks the capture path.
+// it. It shares the pure parse+classify glue (anthropic.ParseAndClassify) with the
+// BACI-321 backfill sweep so the live and backfill paths can't drift. Best-effort:
+// a parse failure or a store hiccup is logged and swallowed so a malformed capture
+// never breaks the capture path. On a parse miss it stamps proxy_requests.parse_failed_at
+// — the same terminal-failure marker the backfill writes — so the sweep doesn't
+// re-read an unparseable capture's file every minute.
 func (r *captureRecorder) parseMessage(pr *model.ProxyRequest, rendered []byte, dispatchID *int64, started time.Time) {
-	pc, err := anthropic.ParseCapture(rendered)
-	if err != nil {
-		// ErrNotStream is an expected defensive miss; a real decode error is
-		// worth a debug line but never fatal.
-		r.logger.Debug("proxy capture: parse failed — skipping message detail",
-			"proxy_request_id", pr.ID, "err", err)
-		return
-	}
 	prev, err := r.store.LatestThreadState(dispatchID)
 	if err != nil {
 		r.logger.Debug("proxy capture: thread-state lookup failed — assuming fresh thread",
 			"proxy_request_id", pr.ID, "err", err)
 		prev = anthropic.ThreadState{}
 	}
-	isPrimary, delta, _ := anthropic.Classify(pc, prev)
+	pc, isPrimary, delta, err := anthropic.ParseAndClassify(rendered, prev)
+	if err != nil {
+		// ErrNotStream is an expected defensive miss; a real decode error is
+		// worth a debug line but never fatal. Either way this capture can't yield
+		// a row, so stamp the terminal-failure marker the backfill keys off.
+		r.logger.Debug("proxy capture: parse failed — skipping message detail",
+			"proxy_request_id", pr.ID, "err", err)
+		r.markParseFailed(pr.ID)
+		return
+	}
 	if _, err := r.store.AddProxyMessage(store.AddProxyMessageIn{
 		ProxyRequestID: pr.ID,
 		DispatchID:     dispatchID,
@@ -205,6 +210,17 @@ func (r *captureRecorder) parseMessage(pr *model.ProxyRequest, rendered []byte, 
 	}); err != nil {
 		r.logger.Error("proxy capture: message insert failed",
 			"err", err, "proxy_request_id", pr.ID)
+	}
+}
+
+// markParseFailed stamps proxy_requests.parse_failed_at on a capture the live
+// parse couldn't turn into a message row (BACI-321). Best-effort like the rest of
+// capture: a store hiccup is logged at debug and swallowed — the worst case is the
+// backfill sweep re-attempts the same unparseable capture once.
+func (r *captureRecorder) markParseFailed(proxyRequestID int64) {
+	if err := r.store.MarkProxyRequestParseFailed(proxyRequestID); err != nil {
+		r.logger.Debug("proxy capture: mark parse-failed failed",
+			"proxy_request_id", proxyRequestID, "err", err)
 	}
 }
 

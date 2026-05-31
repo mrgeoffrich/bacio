@@ -511,6 +511,19 @@ type Client interface {
 	// for no match).
 	SearchProxyMessages(ctx context.Context, f store.ProxyMessageFilter) ([]*model.ProxyMessageMatch, error)
 
+	// ----- Backfill (BACI-321) -----
+	// ReparseProxyMessages is the manual escape hatch over the leader-gated
+	// backfill sweep: it reparses dispatch-correlated Anthropic captures the
+	// live recorder path missed into proxy_messages so their turns appear in
+	// the per-job transcript. With Dispatch nil it sweeps every eligible
+	// dispatch; with Dispatch set it scopes to one job. Rebuild (the
+	// destructive partial-gap rebuild) is reserved but not implemented in v1 —
+	// the local backend errors cleanly. On a non-empty wet run the local
+	// backend records a `proxy.reparse` audit row. Cross-cutting like
+	// ProxyStats; the remote backend POSTs /proxy/reparse. Returns the per-run
+	// counts (dry-run projects them without writing).
+	ReparseProxyMessages(ctx context.Context, in ReparseProxyOpts, dryRun bool) (store.ReparseResult, error)
+
 	// ----- Agent registry (local-only in v1; remote returns ErrLocalOnly) -----
 	// The agent registry records which AI agent sessions are alive
 	// against which repos, and which issues they're focused on.

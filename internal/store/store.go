@@ -1014,6 +1014,10 @@ func migrate(db *sql.DB) error {
 		{"session_id", `ALTER TABLE proxy_requests ADD COLUMN session_id TEXT NOT NULL DEFAULT ''`},
 		{"claude_agent_id", `ALTER TABLE proxy_requests ADD COLUMN claude_agent_id TEXT NOT NULL DEFAULT ''`},
 		{"dispatch_id", `ALTER TABLE proxy_requests ADD COLUMN dispatch_id INTEGER`},
+		// BACI-321: terminal-failure marker for the reparse backfill — stamped
+		// when a reparse attempt yields no proxy_messages row so an unparseable
+		// capture is attempted once and not re-read every sweep.
+		{"parse_failed_at", `ALTER TABLE proxy_requests ADD COLUMN parse_failed_at DATETIME`},
 	} {
 		has, err := columnExists(db, "proxy_requests", col.name)
 		if err != nil {

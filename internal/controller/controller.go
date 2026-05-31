@@ -465,6 +465,56 @@ func SyncIfLeader(r *bsync.BackgroundRunner, el *leader.Elector, log *slog.Logge
 	}
 }
 
+// ReparseProxyMessagesIfLeader runs one BACI-321 proxy_messages backfill sweep
+// if el holds the lease. It reparses dispatch-correlated Anthropic captures the
+// live recorder path missed (a full hand-off queue, a transient parse/store
+// error, a window where parsing was off) into proxy_messages so their turns
+// appear in the per-job transcript. Same nil/leader guard and logged-and-swallowed
+// error contract as the other …IfLeader helpers — backfill is best-effort
+// catch-up work and a transient DB / disk blip must not propagate up to the
+// caller's tick handler. A nil store or elector is a no-op.
+//
+// Leader-gating is mandatory, not optional: proxy_requests / proxy_messages live
+// in the shared ~/.bacio/db.sqlite and every bacio web/api/worktree server runs a
+// recorder, so an ungated sweep would have every process racing the same global
+// unparsed set and double-inserting rows. The …IfLeader guard makes exactly one
+// process sweep, like every other background mutation.
+//
+// On a non-empty run it writes one `proxy.reparse` history row (Actor=ControllerActor)
+// with the per-run counts — mirroring archive.sweep's no-noise-on-empty contract,
+// so a quiet DB doesn't generate per-minute audit noise.
+func ReparseProxyMessagesIfLeader(s *store.Store, el *leader.Elector, log *slog.Logger) {
+	if s == nil || el == nil || !el.CurrentState().AmLeader {
+		return
+	}
+	res, err := s.ReparseUnparsedDispatches(store.ReparseOpts{})
+	if err != nil {
+		loggerOrDefault(log).Warn("bacio: proxy reparse sweep failed", "err", err)
+		return
+	}
+	if res.Total() == 0 {
+		return
+	}
+	loggerOrDefault(log).Info("bacio: proxy reparse sweep backfilled rows",
+		"dispatches", res.DispatchesScanned,
+		"reparsed", res.CapturesReparsed,
+		"failed", res.CapturesFailed,
+	)
+	entry := model.HistoryEntry{
+		Actor: model.ControllerActor,
+		Op:    "proxy.reparse",
+		Kind:  "sweep",
+		// Compact, parseable details — mirrors detailsForReparse in
+		// internal/client/local_proxy.go so a reader sees identical shape
+		// regardless of which surface kicked the sweep.
+		Details: fmt.Sprintf(`{"dispatches_scanned":%d,"captures_reparsed":%d,"captures_failed":%d}`,
+			res.DispatchesScanned, res.CapturesReparsed, res.CapturesFailed),
+	}
+	if err := s.RecordHistory(entry); err != nil {
+		loggerOrDefault(log).Warn("bacio: failed to record proxy.reparse audit", "err", err)
+	}
+}
+
 // Controller owns the background goroutines (heartbeat, prune,
 // matcher, idle-pinger, archive sweep, background sync) for desktop +
 // api. The TUI does not use it —
@@ -532,6 +582,13 @@ func (c *Controller) Start(emit func(leader.State)) {
 	// helper, so a standby controller is a no-op; idempotent on a
 	// quiet DB so an over-fire across surfaces is harmless.
 	ArchiveSweepIfLeader(c.st, c.el, c.log)
+	// BACI-321: same sweep-on-startup rationale as the archive sweep above —
+	// a short-lived process (a 30s `bacio web --no-open` smoke run, a dispatch
+	// worker's controller spin-up) never lives long enough for the
+	// ProxyReparseInterval ticker to fire, so run one backfill after the
+	// synchronous initial heartbeat to catch any captures the live path missed.
+	// Leader-gated via the helper; idempotent on a quiet DB.
+	ReparseProxyMessagesIfLeader(c.st, c.el, c.log)
 	// Capture done into each goroutine's local before the for-loop —
 	// Stop sets c.done = nil after closing it, and re-reading c.done
 	// after a ticker wake would turn <-c.done into <-nil and park the
@@ -686,6 +743,29 @@ func (c *Controller) Start(emit func(leader.State)) {
 			select {
 			case <-ticker.C:
 				SyncIfLeader(c.syncRunner, c.el, c.log)
+			case <-done:
+				return
+			}
+		}
+	}()
+
+	// BACI-321: proxy_messages backfill sweep. store.ProxyReparseInterval (1m),
+	// leader-gated. Reparses dispatch-correlated Anthropic captures the live
+	// recorder path missed into proxy_messages so their turns show up in the
+	// per-job transcript. The overlap guard is free, like the other tickers:
+	// the helper runs inline in this goroutine's for/select, and time.Ticker
+	// drops ticks when the receiver is busy, so a long sweep just skips the
+	// next tick(s) — "don't start a second one while one is still running"
+	// holds by construction, off the HTTP server thread.
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		ticker := time.NewTicker(store.ProxyReparseInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				ReparseProxyMessagesIfLeader(c.st, c.el, c.log)
 			case <-done:
 				return
 			}

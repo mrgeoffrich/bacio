@@ -2,6 +2,8 @@ package inputs
 
 func strPtr(s string) *string { return &s }
 
+func int64Ptr(n int64) *int64 { return &n }
+
 // Examples are realistic, hand-curated payloads attached to each input
 // schema's `examples` field, so an LLM consumer can adapt a working call
 // rather than improvise from the type signature alone.
@@ -311,6 +313,9 @@ var (
 	ExampleDocArchive         = DocArchiveInput{Filename: "auth-old.md"}
 	ExampleDocUnarchive       = DocUnarchiveInput{Filename: "auth-old.md"}
 	ExampleArchiveSweep       = ArchiveSweepInput{}
+	// BACI-321: scope the proxy_messages backfill to one job's captures.
+	// Omit `dispatch` to sweep every eligible dispatch.
+	ExampleProxyReparse       = ProxyReparseInput{Dispatch: int64Ptr(412)}
 	ExampleSettingsShowArchived = SettingsShowArchivedInput{Value: true}
 	ExampleSettingsSyncBackground = SettingsSyncBackgroundInput{Value: false}
 	// BACI-240: ship-flourish ka-ching SFX toggle. Defaults to true

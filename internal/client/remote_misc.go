@@ -238,6 +238,28 @@ func (c *remoteClient) SearchProxyMessages(ctx context.Context, f store.ProxyMes
 	return out, nil
 }
 
+// ----- Backfill (BACI-321) -----
+
+func (c *remoteClient) ReparseProxyMessages(ctx context.Context, in ReparseProxyOpts, dryRun bool) (store.ReparseResult, error) {
+	if in.Rebuild {
+		// Refuse before the round-trip — the server returns the same error, but
+		// failing fast keeps the contract identical to the local backend.
+		return store.ReparseResult{}, ErrRebuildNotImplemented
+	}
+	q := url.Values{}
+	if dryRun {
+		q.Set("dry_run", "true")
+	}
+	if in.Dispatch != nil {
+		q.Set("dispatch", strInt(*in.Dispatch))
+	}
+	var out store.ReparseResult
+	if err := c.do(ctx, http.MethodPost, "/proxy/reparse", q, nil, &out); err != nil {
+		return store.ReparseResult{}, err
+	}
+	return out, nil
+}
+
 // BlockersFor stays local-only (BACI-114). The kanban surface always
 // runs against the local DB / Wails / `bacio web`, never via `bacio
 // --remote`, so the bulk read has no HTTP analogue today.
