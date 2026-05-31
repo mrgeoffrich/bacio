@@ -75,8 +75,8 @@ At dispatch time the payload is assembled by
 template (custom override, else built-in default) is rendered against
 the issue's context, then a non-empty note is appended after a blank
 line. Template resolution happens in the Go dispatch path
-(`client.CreateDispatch`, and `tui/board_dispatch.go` for the TUI
-picker) — it needs DB access, so `localStorage` isn't an option.
+(`client.CreateDispatch`, and `internal/tui/board_compose.go` for the
+TUI picker) — it needs DB access, so `localStorage` isn't an option.
 
 So a dispatch carries both the machine-readable `Mode` **and** a
 self-contained `Payload` — tooling can filter on the former; the agent
@@ -127,7 +127,7 @@ show agent.dispatch`, `--dry-run`. Code: `internal/cli/agent.go`
 ### From the TUI
 
 On the board, select an issue and press **`x`**. A three-step picker
-opens (`internal/tui/board_dispatch.go`):
+opens (`internal/tui/board_compose.go`):
 
 1. **pick an agent** — the repo's live sessions. Busy sessions (see
    [Busy agents](#busy-agents--dispatch-target-eligibility)) render
@@ -158,7 +158,7 @@ that card's current state (see [State-gated
 prompts](#state-gated-prompts) below); picking one queues the dispatch.
 The card gets the breathing "claude" treatment optimistically and the
 Agents panel counts refresh. Code:
-`desktop/frontend/src/components/KanbanCard.jsx` →
+`desktop/frontend/src/components/PipelineView.jsx` →
 `desktop/boardservice.go` (`DispatchIssue`) → `client.CreateDispatch`.
 
 There is **no manual agent picker** and no free-form note: `DispatchIssue`
@@ -324,8 +324,8 @@ reloads.
 
 ### In the desktop app
 
-The topbar's agents button opens **`AgentsPanel`**
-(`desktop/frontend/src/components/AgentsPanel.jsx`) — the same card per
+The topbar's agents button opens **`AgentsView`**
+(`desktop/frontend/src/components/AgentsView.jsx`) — the same card per
 session, with a `busy · <ISSUE-KEY>` chip when applicable, click a card
 to expand its claims (with prompts) + dispatches inline. Backed by
 `BoardService.ListAgents`, which bundles the claims and dispatches into
@@ -788,9 +788,11 @@ call → short summary line*, not *all the work*.
 
 The per-mode brief is **not** in the dispatch payload (BACI-76). It is
 the system prompt of a per-mode custom subagent — one of
-`bacio-design-worker`, `bacio-plan-worker`, `bacio-implement-worker`,
-`bacio-review-worker`, `bacio-ship-worker`, `bacio-fix-review-worker`
-— generated into `.claude/agents/` by `bacio install-agent`. The
+`bacio-scope-worker`, `bacio-research-worker`, `bacio-plan-worker`,
+`bacio-plan-large-worker`, `bacio-design-worker`,
+`bacio-implement-worker`, `bacio-review-worker`, `bacio-ship-worker`,
+`bacio-fix-review-worker` — generated into `.claude/agents/` by
+`bacio install-agent`. The
 payload the parent receives is just the rewritten preamble plus a
 short stub naming the ticket, the mode, and the subagent type to
 spawn. See "Worker contract" below.
@@ -1418,8 +1420,8 @@ inbox` lists a session's still-open dispatches at any time.
 | Identity + `claude_pid`     | `internal/cli/agentsfile.go`, `internal/cli/proctree.go`              |
 | Pull delivery (hooks)       | `internal/cli/hook.go`, `internal/cli/install_hooks.go`               |
 | Push delivery (channel)     | `internal/channel/channel.go`, `internal/cli/channel.go`, `internal/cli/install_channel.go` |
-| TUI Agents tab + picker     | `internal/tui/agents.go`, `internal/tui/board_dispatch.go`, `internal/tui/audit.go` |
-| Desktop                     | `desktop/boardservice.go`, `desktop/frontend/src/components/AgentsPanel.jsx`, `desktop/frontend/src/components/IssueDrawer.jsx` |
+| TUI Agents tab + picker     | `internal/tui/agents.go`, `internal/tui/board_compose.go`, `internal/tui/audit.go` |
+| Desktop                     | `desktop/boardservice.go`, `desktop/frontend/src/components/AgentsView.jsx`, `desktop/frontend/src/components/IssueWorkspace.jsx` |
 
 See also: `docs/agent-cli-principles.md` (why `bacio hook` / `bacio
 channel` are exempt from the six rules) and `SKILL.md` (the agent-facing
