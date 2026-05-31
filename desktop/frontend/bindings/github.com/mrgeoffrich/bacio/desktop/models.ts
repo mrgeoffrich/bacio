@@ -1676,6 +1676,149 @@ export class PromptTemplateDTO {
 }
 
 /**
+ * ProxyCaptureRowDTO is one row of the BACI-308 capture drill-down list,
+ * shaped for the desktop Monitor sheet. It carries the proxy_requests fields
+ * the capture list renders plus the IssueKey / Mode enrichment, with camelCase
+ * JSON tags so the Wails binding matches the web twin's TS-only shape (the
+ * same cross-transport split as ProxyFQDNStatDTO). IssueKey / Mode are empty
+ * when the capture has no dispatch. IsAnthropic gates the "parsed transcript"
+ * affordance; HasRaw whether the raw .http file is available.
+ */
+export class ProxyCaptureRowDTO {
+    "id": number;
+    "method": string;
+    "host": string;
+    "path": string;
+    "status": number;
+    "bytesIn": number;
+    "bytesOut": number;
+    "durationMs": number;
+    "isStream": boolean;
+    "isAnthropic": boolean;
+    "hasRaw": boolean;
+    "dispatchId"?: number | null;
+    "issueKey"?: string;
+    "mode"?: string;
+    "startedAt": time$0.Time;
+
+    /** Creates a new ProxyCaptureRowDTO instance. */
+    constructor($$source: Partial<ProxyCaptureRowDTO> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = 0;
+        }
+        if (!("method" in $$source)) {
+            this["method"] = "";
+        }
+        if (!("host" in $$source)) {
+            this["host"] = "";
+        }
+        if (!("path" in $$source)) {
+            this["path"] = "";
+        }
+        if (!("status" in $$source)) {
+            this["status"] = 0;
+        }
+        if (!("bytesIn" in $$source)) {
+            this["bytesIn"] = 0;
+        }
+        if (!("bytesOut" in $$source)) {
+            this["bytesOut"] = 0;
+        }
+        if (!("durationMs" in $$source)) {
+            this["durationMs"] = 0;
+        }
+        if (!("isStream" in $$source)) {
+            this["isStream"] = false;
+        }
+        if (!("isAnthropic" in $$source)) {
+            this["isAnthropic"] = false;
+        }
+        if (!("hasRaw" in $$source)) {
+            this["hasRaw"] = false;
+        }
+        if (!("startedAt" in $$source)) {
+            this["startedAt"] = null;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ProxyCaptureRowDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ProxyCaptureRowDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ProxyCaptureRowDTO($$parsedSource as Partial<ProxyCaptureRowDTO>);
+    }
+}
+
+/**
+ * ProxyFQDNStatDTO is one per-FQDN proxy-traffic rollup, shaped for the
+ * desktop Monitor table (BACI-304). It mirrors model.ProxyFQDNStat field
+ * for field but carries camelCase JSON tags so the Wails-generated TS
+ * binding matches the React shape the web twin re-exports. ErrorRate is a
+ * fraction in [0,1]; the component formats it as a percentage. P50Ms /
+ * P95Ms are round-trip latency percentiles in milliseconds; FirstSeen /
+ * LastSeen bracket the host's activity window.
+ */
+export class ProxyFQDNStatDTO {
+    "host": string;
+    "requestCount": number;
+    "bytesIn": number;
+    "bytesOut": number;
+    "errorCount": number;
+    "errorRate": number;
+    "p50Ms": number;
+    "p95Ms": number;
+    "firstSeen": time$0.Time;
+    "lastSeen": time$0.Time;
+
+    /** Creates a new ProxyFQDNStatDTO instance. */
+    constructor($$source: Partial<ProxyFQDNStatDTO> = {}) {
+        if (!("host" in $$source)) {
+            this["host"] = "";
+        }
+        if (!("requestCount" in $$source)) {
+            this["requestCount"] = 0;
+        }
+        if (!("bytesIn" in $$source)) {
+            this["bytesIn"] = 0;
+        }
+        if (!("bytesOut" in $$source)) {
+            this["bytesOut"] = 0;
+        }
+        if (!("errorCount" in $$source)) {
+            this["errorCount"] = 0;
+        }
+        if (!("errorRate" in $$source)) {
+            this["errorRate"] = 0;
+        }
+        if (!("p50Ms" in $$source)) {
+            this["p50Ms"] = 0;
+        }
+        if (!("p95Ms" in $$source)) {
+            this["p95Ms"] = 0;
+        }
+        if (!("firstSeen" in $$source)) {
+            this["firstSeen"] = null;
+        }
+        if (!("lastSeen" in $$source)) {
+            this["lastSeen"] = null;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ProxyFQDNStatDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ProxyFQDNStatDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ProxyFQDNStatDTO($$parsedSource as Partial<ProxyFQDNStatDTO>);
+    }
+}
+
+/**
  * RelationDTO is one outgoing/incoming relation, resolved to the other
  * end's issue key.
  */

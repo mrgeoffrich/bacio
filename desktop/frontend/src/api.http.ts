@@ -747,6 +747,21 @@ export interface LeaderStatusDTO {
   holderLabel: string;
 }
 
+// BACI-304: re-export the Monitor screen's per-FQDN stats shape from the
+// shared (browser-safe, runtime-free) lib so MonitorView imports the same
+// `ProxyFQDNStat` name from `./api` in both transports. api.ts re-exports
+// the Wails-binding equivalent under the same name (the BACI-108 split).
+// Imported (not just re-exported) so listProxyStats below can annotate
+// its reshape return with the type.
+import type { ProxyFQDNStat } from './lib/proxyStats';
+export type { ProxyFQDNStat };
+
+// BACI-308: the same cross-transport split for the Monitor capture drill-down
+// shapes — the list row, the parsed capture detail, and the job transcript.
+// api.ts re-exports the Wails-binding equivalents under the same names.
+import type { ProxyCaptureRow, ProxyMessage, AnthropicTranscript } from './lib/proxyCaptures';
+export type { ProxyCaptureRow, ProxyMessage, AnthropicTranscript };
+
 export interface PromptTemplateDTO {
   slug: string;
   mode: string;
@@ -846,6 +861,37 @@ async function call<T>(path: string, opts: FetchOpts = {}): Promise<T> {
   }
   if (!text) return undefined as T;
   return JSON.parse(text) as T;
+}
+
+// callText is the text/plain twin of call<T> for endpoints that return a
+// non-JSON body (BACI-308's raw .http capture passthrough). Same auth /
+// error-envelope handling, but the 2xx body is returned verbatim rather than
+// JSON-parsed.
+async function callText(path: string, opts: FetchOpts = {}): Promise<string> {
+  const method = opts.method ?? 'GET';
+  const url = new URL(API_BASE + path, window.location.origin);
+  if (opts.query) {
+    for (const [k, v] of Object.entries(opts.query)) {
+      if (v === undefined || v === '') continue;
+      url.searchParams.set(k, String(v));
+    }
+  }
+  const headers: Record<string, string> = { 'X-Actor': readActor() };
+  const token = readToken();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(url.toString(), { method, headers });
+  const text = await res.text();
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    if (text) {
+      try {
+        const parsed = JSON.parse(text);
+        if (parsed?.error) msg = parsed.error;
+      } catch { msg = text; }
+    }
+    throw new Error(msg);
+  }
+  return text;
 }
 
 // ---------- Reshape helpers (API JSON → desktop DTOs) ----------
@@ -2004,6 +2050,22 @@ interface ApiHistoryEntry {
   created_at: string;
 }
 
+// ApiProxyFQDNStat is the snake_case wire shape GET /proxy/stats returns
+// (model.ProxyFQDNStat's JSON tags). listProxyStats reshapes it into the
+// camelCase ProxyFQDNStat the Monitor screen consumes.
+interface ApiProxyFQDNStat {
+  host: string;
+  request_count: number;
+  bytes_in: number;
+  bytes_out: number;
+  error_count: number;
+  error_rate: number;
+  p50_ms: number;
+  p95_ms: number;
+  first_seen: string;
+  last_seen: string;
+}
+
 export async function listHistory(
   repoPrefix: string,
   page: number,
@@ -2077,6 +2139,109 @@ export async function countShippedIssues(
   else if (sinceDays > 0) query.since = `${sinceDays}d`;
   const body = await call<{ total: number }>(`/repos/${repoPrefix}/shipped/count`, { query });
   return body?.total ?? 0;
+}
+
+// listProxyStats (BACI-304) is the HTTP twin of api.ts's listProxyStats —
+// the Monitor screen's per-FQDN reverse-proxy rollup. GET /proxy/stats is
+// cross-cutting (no repo_id), so it takes no repo prefix. `sinceDays === 0`
+// is the "All-time" sentinel (no ?since= parameter); a positive value maps
+// onto the server's rolling-duration `?since=Nd` lookback, mirroring the
+// Shipped pill's convention. Reshapes the snake_case wire rows into the
+// camelCase ProxyFQDNStat shape api.ts re-exports.
+export async function listProxyStats(sinceDays = 0): Promise<ProxyFQDNStat[]> {
+  const query: Record<string, string | number> = {};
+  if (sinceDays > 0) query.since = `${sinceDays}d`;
+  const rows = await call<ApiProxyFQDNStat[]>('/proxy/stats', { query });
+  return (rows ?? []).map(r => ({
+    host: r.host,
+    requestCount: r.request_count,
+    bytesIn: r.bytes_in,
+    bytesOut: r.bytes_out,
+    errorCount: r.error_count,
+    errorRate: r.error_rate,
+    p50Ms: r.p50_ms,
+    p95Ms: r.p95_ms,
+    firstSeen: r.first_seen,
+    lastSeen: r.last_seen,
+  }));
+}
+
+// ApiProxyCaptureRow is the snake_case wire shape GET /proxy/captures returns
+// (model.ProxyCaptureRow — the embedded ProxyRequest fields plus the issue_key
+// / mode enrichment). listProxyCaptures reshapes it into the camelCase
+// ProxyCaptureRow the sheet consumes. raw_log_path is omitempty on the wire;
+// its presence becomes hasRaw.
+interface ApiProxyCaptureRow {
+  id: number;
+  method: string;
+  host: string;
+  path: string;
+  status: number;
+  bytes_in: number;
+  bytes_out: number;
+  duration_ms: number;
+  raw_log_path?: string;
+  is_stream?: boolean;
+  is_anthropic?: boolean;
+  dispatch_id?: number | null;
+  issue_key?: string;
+  mode?: string;
+  started_at: string;
+}
+
+// listProxyCaptures (BACI-308) is the HTTP twin of api.ts's listProxyCaptures —
+// the Monitor drill-down's filtered capture list. GET /proxy/captures is
+// cross-cutting (no repo prefix). Reshapes the snake_case wire rows into the
+// camelCase ProxyCaptureRow shape api.ts re-exports.
+export async function listProxyCaptures(
+  host: string,
+  dispatchId = 0,
+  anthropicOnly = false,
+  sinceDays = 0,
+): Promise<ProxyCaptureRow[]> {
+  const query: Record<string, string | number | boolean> = {};
+  if (host) query.host = host;
+  if (dispatchId > 0) query.dispatch_id = dispatchId;
+  if (anthropicOnly) query.is_anthropic = true;
+  if (sinceDays > 0) query.since = `${sinceDays}d`;
+  const rows = await call<ApiProxyCaptureRow[]>('/proxy/captures', { query });
+  return (rows ?? []).map(r => ({
+    id: r.id,
+    method: r.method,
+    host: r.host,
+    path: r.path,
+    status: r.status,
+    bytesIn: r.bytes_in,
+    bytesOut: r.bytes_out,
+    durationMs: r.duration_ms,
+    isStream: !!r.is_stream,
+    isAnthropic: !!r.is_anthropic,
+    hasRaw: !!r.raw_log_path,
+    dispatchId: r.dispatch_id,
+    issueKey: r.issue_key,
+    mode: r.mode,
+    startedAt: r.started_at,
+  }));
+}
+
+// getProxyCaptureRaw (BACI-308) is the HTTP twin of api.ts's getProxyCaptureRaw —
+// the raw .http capture text for one proxy_requests id, served as text/plain.
+export async function getProxyCaptureRaw(id: number): Promise<string> {
+  return callText(`/proxy/captures/${id}/raw`);
+}
+
+// anthropicCapture (BACI-308) is the HTTP twin — the parsed detail of one
+// captured Anthropic SSE turn. The wire shape is already the snake_case
+// ProxyMessage the sheet consumes, so no reshape is needed.
+export async function anthropicCapture(id: number): Promise<ProxyMessage> {
+  return call<ProxyMessage>(`/proxy/captures/${id}`);
+}
+
+// jobTranscript (BACI-308) is the HTTP twin — a dispatch's assembled per-job
+// transcript. The wire shape is the snake_case AnthropicTranscript the adapter
+// feeds the viewer, so no reshape is needed.
+export async function jobTranscript(dispatchId: number): Promise<AnthropicTranscript> {
+  return call<AnthropicTranscript>(`/proxy/jobs/${dispatchId}/transcript`);
 }
 
 interface ApiDocView {

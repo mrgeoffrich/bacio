@@ -3,7 +3,9 @@ package api
 import (
 	"log/slog"
 	"net/http"
+	"net/url"
 
+	"github.com/mrgeoffrich/bacio/internal/proxy"
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
 
@@ -126,6 +128,43 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("GET /history", d.handleHistoryAll)
 	mux.HandleFunc("GET /repos/{prefix}/history", d.handleHistoryRepo)
 
+	// BACI-303: per-FQDN proxy-capture rollup — the read surface the
+	// Monitor screen (BACI-304) and `bacio proxy stats` consume.
+	// Cross-cutting like /history (the proxy_requests table has no
+	// repo_id, so no per-repo variant) and behind the bearer-token auth
+	// (it sits outside the /anthropic/ exemption — a UI/CLI read, not
+	// agent passthrough).
+	mux.HandleFunc("GET /proxy/stats", d.handleProxyStats)
+
+	// BACI-306: per-job message detail over the parsed proxy captures —
+	// one captured Anthropic SSE turn (/proxy/captures/{id}, keyed on the
+	// proxy_requests id) and a dispatch's assembled ordered transcript
+	// (/proxy/jobs/{dispatch_id}/transcript). Same cross-cutting,
+	// bearer-token-protected posture as /proxy/stats; BACI-308's Monitor
+	// drill-down and BACI-307's review-skill source consume these.
+	mux.HandleFunc("GET /proxy/captures/{id}", d.handleProxyCapture)
+	mux.HandleFunc("GET /proxy/jobs/{dispatch_id}/transcript", d.handleJobTranscript)
+
+	// BACI-308: the Monitor drill-down reads — a filtered, newest-first
+	// capture LIST (/proxy/captures?host=&dispatch_id=&is_anthropic=&since=&limit=,
+	// each row enriched with its dispatch's issue-key + mode) and the raw
+	// .http passthrough for one capture (/proxy/captures/{id}/raw, the
+	// inflated auth-redacted bytes the recorder wrote). The bare
+	// /proxy/captures pattern is distinct from /proxy/captures/{id}, and the
+	// literal "raw" segment is more specific than {id}, so ServeMux
+	// disambiguates all three without a conflict. Same cross-cutting,
+	// bearer-token-protected posture as the BACI-306 reads.
+	mux.HandleFunc("GET /proxy/captures", d.handleProxyCaptures)
+	mux.HandleFunc("GET /proxy/captures/{id}/raw", d.handleProxyRaw)
+
+	// BACI-320: content grep over the parsed message bodies —
+	// /proxy/search?q=&role=&block=&dispatch_id=&session=&agent=&since=&from=&limit=
+	// returns one match line per matching content block (capture id + dispatch +
+	// role + block + snippet) so a reader can drill into /proxy/captures/{id}. A
+	// distinct path segment from /proxy/captures, same cross-cutting,
+	// bearer-token-protected posture as the BACI-306/308 reads.
+	mux.HandleFunc("GET /proxy/search", d.handleProxySearch)
+
 	// BACI-187: shipping-log popover — list of recently-done issues,
 	// newest-first, sibling of /history. Per-repo only; cross-repo is
 	// deliberately out of scope (matches the rest of the surface).
@@ -148,6 +187,39 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("GET /notifications/{id}", d.handleNotificationShow)
 	mux.HandleFunc("POST /notifications/{id}/read", d.handleNotificationRead)
 	mux.HandleFunc("POST /notifications/read-all", d.handleNotificationsReadAll)
+
+	// BACI-301: the reverse-proxy forwarding listener. Mounted
+	// unconditionally (the agent needs the pipe whether it launched
+	// `bacio api` or `bacio web`) and auth-exempt (see auth() in
+	// middleware.go) — agent traffic carries its own Anthropic auth, not
+	// bacio's bearer token. Empty ProxyUpstream selects the Anthropic
+	// default; a malformed explicit value is logged and falls back to the
+	// default rather than panicking (the value is internal config).
+	proxyLogger := d.logger
+	if proxyLogger == nil {
+		proxyLogger = slog.Default()
+	}
+	upstreamRaw := d.opts.ProxyUpstream
+	if upstreamRaw == "" {
+		upstreamRaw = proxy.DefaultUpstream
+	}
+	upstreamURL, err := url.Parse(upstreamRaw)
+	if err != nil || upstreamURL.Host == "" {
+		proxyLogger.Error("invalid proxy upstream — falling back to default",
+			"upstream", upstreamRaw, "err", err)
+		upstreamURL, _ = url.Parse(proxy.DefaultUpstream)
+	}
+	// BACI-302: the capture recorder observes every proxied request — raw
+	// req/resp to <LogDir>/proxy/, a lightweight index row in proxy_requests
+	// — off the request path so the proxy's streaming hot path is never
+	// gated on a disk/DB write. Constructed here so the proxy package stays
+	// free of the store and the log dir.
+	proxyRecorder := newCaptureRecorder(d.store, d.opts.LogDir, proxyLogger)
+	// clearStreamDeadline lifts the API server's 30s WriteTimeout / 15s
+	// ReadTimeout for this route only — a streaming Anthropic turn routinely
+	// outlives them, and the server-level deadline would otherwise cut the
+	// response mid-stream. See clearStreamDeadline in middleware.go.
+	mux.Handle(proxy.PathPrefix+"/", clearStreamDeadline(proxy.New(upstreamURL, proxyLogger, proxyRecorder)))
 
 	// Web UI bundle (BACI-30, gated by BACI-72): serve the browser-deployed
 	// React build at /ui/, with a 301 from the unslashed /ui to keep the

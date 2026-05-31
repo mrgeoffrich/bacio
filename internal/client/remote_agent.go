@@ -329,6 +329,10 @@ func (c *remoteClient) CreateSessionStub(ctx context.Context, repo *model.Repo, 
 	return nil, remoteAgentNotSupported("session-stub")
 }
 
+func (c *remoteClient) BindSubagentDispatch(ctx context.Context, claudeAgentID string, dispatchID int64, sessionID string) error {
+	return remoteAgentNotSupported("bind-subagent-dispatch")
+}
+
 func (c *remoteClient) SessionsByClaudePID(ctx context.Context, host string, claudePID int64) ([]*model.AgentSession, error) {
 	return nil, remoteAgentNotSupported("sessions-by-claude-pid")
 }

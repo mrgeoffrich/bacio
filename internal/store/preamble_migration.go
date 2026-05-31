@@ -80,6 +80,17 @@ var oldDispatchPreambleBACI103 string
 //go:embed migrationdata/old_dispatch_preamble_baci225.txt
 var oldDispatchPreambleBACI225 string
 
+// oldDispatchPreambleBACI306 is the verbatim _dispatch_preamble body
+// bacio shipped after BACI-226 (the `<base_branch>` stub tag) but
+// before BACI-307 retired the `attach_transcript` step — the
+// supervisor was told to call `mcp__bacio__attach_transcript` after
+// `Task` returned. Embedded frozen so the BACI-307 refresh migration
+// can byte-compare a stored preamble against it and replace it in
+// place when the user never customised the row.
+//
+//go:embed migrationdata/old_dispatch_preamble_baci306.txt
+var oldDispatchPreambleBACI306 string
+
 // refreshDispatchPreamble is the BACI-76 one-time migration of the
 // stored _dispatch_preamble body. Before BACI-76 the preamble told the
 // supervisor to spawn `general-purpose` and paste the full brief; after
@@ -202,6 +213,22 @@ func refreshDispatchPreamble(db *sql.DB) error {
 			return err
 		}
 		slog.Info("bacio: refreshed the _dispatch_preamble body to the BACI-226 default (<base_branch> stub tag in Task prompt)")
+		return nil
+	}
+	// BACI-307: the BACI-226 default still told the supervisor to call
+	// `mcp__bacio__attach_transcript` after `Task` returned. That tool
+	// is gone (captured Anthropic traffic now lives in `proxy_messages`),
+	// so the new default drops the step. If the stored body matches the
+	// frozen pre-BACI-307 default, replace it in place.
+	oldBACI306Default := strings.TrimRight(oldDispatchPreambleBACI306, "\r\n")
+	if stored == oldBACI306Default {
+		if _, err := db.Exec(
+			`UPDATE prompt_templates SET body = ?, updated_at = CURRENT_TIMESTAMP WHERE slug = ?`,
+			newDefault, slug,
+		); err != nil {
+			return err
+		}
+		slog.Info("bacio: refreshed the _dispatch_preamble body to the BACI-307 default (attach_transcript step removed)")
 		return nil
 	}
 	// Customised body — leave it, but warn: it may still say

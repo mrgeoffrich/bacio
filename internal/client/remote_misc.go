@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
@@ -124,6 +125,117 @@ func (c *remoteClient) UnlinkRelation(ctx context.Context, repo *model.Repo, in 
 		return nil, 0, err
 	}
 	return nil, resp.Removed, nil
+}
+
+// ----- Proxy capture (BACI-303) -----
+
+func (c *remoteClient) ProxyStats(ctx context.Context, f store.ProxyStatsFilter) ([]*model.ProxyFQDNStat, error) {
+	q := url.Values{}
+	if f.Limit > 0 {
+		q.Set("limit", strInt(int64(f.Limit)))
+	}
+	if f.Since != nil {
+		q.Set("from", f.Since.UTC().Format("2006-01-02T15:04:05Z"))
+	}
+	var out []*model.ProxyFQDNStat
+	if err := c.do(ctx, http.MethodGet, "/proxy/stats", q, nil, &out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = []*model.ProxyFQDNStat{}
+	}
+	return out, nil
+}
+
+// ----- Per-job message detail (BACI-306) -----
+
+func (c *remoteClient) AnthropicCapture(ctx context.Context, id int64) (*model.ProxyMessage, error) {
+	var out model.ProxyMessage
+	if err := c.do(ctx, http.MethodGet, "/proxy/captures/"+strInt(id), nil, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *remoteClient) JobTranscript(ctx context.Context, dispatchID int64) (*model.AnthropicTranscript, error) {
+	var out model.AnthropicTranscript
+	if err := c.do(ctx, http.MethodGet, "/proxy/jobs/"+strInt(dispatchID)+"/transcript", nil, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// ----- Capture drill-down (BACI-308) -----
+
+func (c *remoteClient) ListProxyCaptures(ctx context.Context, f store.ProxyRequestFilter) ([]*model.ProxyCaptureRow, error) {
+	q := url.Values{}
+	if f.Host != "" {
+		q.Set("host", f.Host)
+	}
+	if f.DispatchID != nil {
+		q.Set("dispatch_id", strInt(*f.DispatchID))
+	}
+	if f.IsAnthropic != nil {
+		q.Set("is_anthropic", strconv.FormatBool(*f.IsAnthropic))
+	}
+	if f.Limit > 0 {
+		q.Set("limit", strInt(int64(f.Limit)))
+	}
+	if f.Since != nil {
+		q.Set("from", f.Since.UTC().Format("2006-01-02T15:04:05Z"))
+	}
+	var out []*model.ProxyCaptureRow
+	if err := c.do(ctx, http.MethodGet, "/proxy/captures", q, nil, &out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = []*model.ProxyCaptureRow{}
+	}
+	return out, nil
+}
+
+func (c *remoteClient) ProxyCaptureRaw(ctx context.Context, id int64) ([]byte, error) {
+	var out []byte
+	if err := c.do(ctx, http.MethodGet, "/proxy/captures/"+strInt(id)+"/raw", nil, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// ----- Content search (BACI-320) -----
+
+func (c *remoteClient) SearchProxyMessages(ctx context.Context, f store.ProxyMessageFilter) ([]*model.ProxyMessageMatch, error) {
+	q := url.Values{}
+	q.Set("q", f.Query)
+	if f.Role != "" {
+		q.Set("role", f.Role)
+	}
+	if f.Block != "" {
+		q.Set("block", f.Block)
+	}
+	if f.DispatchID != nil {
+		q.Set("dispatch_id", strInt(*f.DispatchID))
+	}
+	if f.SessionID != "" {
+		q.Set("session", f.SessionID)
+	}
+	if f.ClaudeAgentID != "" {
+		q.Set("agent", f.ClaudeAgentID)
+	}
+	if f.Limit > 0 {
+		q.Set("limit", strInt(int64(f.Limit)))
+	}
+	if f.Since != nil {
+		q.Set("from", f.Since.UTC().Format("2006-01-02T15:04:05Z"))
+	}
+	var out []*model.ProxyMessageMatch
+	if err := c.do(ctx, http.MethodGet, "/proxy/search", q, nil, &out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = []*model.ProxyMessageMatch{}
+	}
+	return out, nil
 }
 
 // BlockersFor stays local-only (BACI-114). The kanban surface always

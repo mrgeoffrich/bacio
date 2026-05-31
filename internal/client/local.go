@@ -177,3 +177,60 @@ func (c *localClient) ListHistory(ctx context.Context, repo *model.Repo, f store
 	}
 	return rows, nil
 }
+
+func (c *localClient) ProxyStats(ctx context.Context, f store.ProxyStatsFilter) ([]*model.ProxyFQDNStat, error) {
+	stats, err := c.store.ProxyStatsByFQDN(f)
+	if err != nil {
+		return nil, err
+	}
+	if stats == nil {
+		stats = []*model.ProxyFQDNStat{}
+	}
+	return stats, nil
+}
+
+func (c *localClient) AnthropicCapture(ctx context.Context, id int64) (*model.ProxyMessage, error) {
+	return c.store.CaptureMessage(id)
+}
+
+func (c *localClient) JobTranscript(ctx context.Context, dispatchID int64) (*model.AnthropicTranscript, error) {
+	return c.store.JobTranscript(dispatchID)
+}
+
+func (c *localClient) ListProxyCaptures(ctx context.Context, f store.ProxyRequestFilter) ([]*model.ProxyCaptureRow, error) {
+	rows, err := c.store.ListProxyCapturesEnriched(f)
+	if err != nil {
+		return nil, err
+	}
+	if rows == nil {
+		rows = []*model.ProxyCaptureRow{}
+	}
+	return rows, nil
+}
+
+func (c *localClient) ProxyCaptureRaw(ctx context.Context, id int64) ([]byte, error) {
+	pr, err := c.store.GetProxyRequest(id)
+	if err != nil {
+		return nil, err
+	}
+	if pr.RawLogPath == "" {
+		return nil, store.ErrNotFound
+	}
+	body, err := os.ReadFile(pr.RawLogPath)
+	if err != nil {
+		// Pruned / log dir wiped — a clean miss, matching the REST 404.
+		return nil, store.ErrNotFound
+	}
+	return body, nil
+}
+
+func (c *localClient) SearchProxyMessages(ctx context.Context, f store.ProxyMessageFilter) ([]*model.ProxyMessageMatch, error) {
+	matches, err := c.store.SearchProxyMessages(f)
+	if err != nil {
+		return nil, err
+	}
+	if matches == nil {
+		matches = []*model.ProxyMessageMatch{}
+	}
+	return matches, nil
+}

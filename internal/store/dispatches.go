@@ -281,6 +281,31 @@ func (s *Store) GetDispatch(id int64) (*model.AgentDispatch, error) {
 	return d, err
 }
 
+// ActiveDispatchForSession returns the most-recent non-cancelled dispatch
+// targeting sessionID, or (nil, nil) when the session has none. It is the
+// shared "active dispatch for a session" pick used by both the BACI-132
+// SessionTodo scope (resolveActiveDispatchID in the hook, which additionally
+// filters by issue) and the BACI-305 proxy-capture correlation (the recorder,
+// which attributes a worktree's capture to its active dispatch). Newest by
+// created_at; cancelled rows are skipped so a re-dispatch after a cancel picks
+// the live one. An empty session id is a no-op.
+func (s *Store) ActiveDispatchForSession(sessionID string) (*model.AgentDispatch, error) {
+	if sessionID == "" {
+		return nil, nil
+	}
+	row := s.DB.QueryRow(dispatchSelect+`
+		WHERE d.target_session_id = ? AND d.status != ?
+		ORDER BY d.created_at DESC, d.id DESC
+		LIMIT 1`,
+		sessionID, string(model.DispatchCancelled),
+	)
+	d, err := scanDispatch(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return d, err
+}
+
 // ClaimDispatchDelivery (BACI-202) inserts a (dispatch_id, session_id)
 // row in dispatch_deliveries and reports whether THIS call won the row.
 // Two sessions can share one agent identity (two Claude Code instances

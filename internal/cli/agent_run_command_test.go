@@ -14,6 +14,11 @@ import (
 // against this verb (eval "$(bacio agent-run-command)", alias=…) treat
 // any byte change as a behaviour change, so the bar for editing is the
 // agentmode.LaunchCommand pin in agentmode_test.go, not this test.
+//
+// BACI-301: the one-liner now injects ANTHROPIC_BASE_URL pointed at the
+// reverse proxy on this worktree's resolved API port. The expected
+// endpoint is derived from the same resolveEnv chain the verb uses so
+// the test stays deterministic wherever it runs.
 func TestAgentRunCommandPrintsCanonicalOneLiner(t *testing.T) {
 	cmd := newAgentRunCommandCmd()
 	var stdout, stderr bytes.Buffer
@@ -29,7 +34,11 @@ func TestAgentRunCommandPrintsCanonicalOneLiner(t *testing.T) {
 			t.Fatalf("agent-run-command: %v", err)
 		}
 	})
-	want := agentmode.LaunchCommand + "\n"
+	env, err := resolveEnv()
+	if err != nil {
+		t.Fatalf("resolveEnv: %v", err)
+	}
+	want := agentmode.LaunchCommand(agentmode.ProxyEndpoint(env.APIAddr)) + "\n"
 	if got != want {
 		t.Fatalf("stdout mismatch:\n  got:  %q\n  want: %q", got, want)
 	}
@@ -64,11 +73,13 @@ func TestAgentRunCommandRejectsArgs(t *testing.T) {
 // must emit the identical launch string so a user who runs install-agent
 // and then copies the one-liner sees the same command the verb prints.
 // Both call sites resolve through agentmode.LaunchCommand; this test
-// verifies the banner actually contains it.
+// verifies the banner — built from the same endpoint — contains it.
 func TestAgentRunCommandMatchesActivationBanner(t *testing.T) {
+	const endpoint = "http://127.0.0.1:5320/anthropic"
 	var buf bytes.Buffer
-	printActivationBanner(&buf)
-	if !strings.Contains(buf.String(), agentmode.LaunchCommand) {
-		t.Fatalf("activation banner missing agentmode.LaunchCommand %q; got:\n%s", agentmode.LaunchCommand, buf.String())
+	printActivationBanner(&buf, endpoint)
+	want := agentmode.LaunchCommand(endpoint)
+	if !strings.Contains(buf.String(), want) {
+		t.Fatalf("activation banner missing launch command %q; got:\n%s", want, buf.String())
 	}
 }

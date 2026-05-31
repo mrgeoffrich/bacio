@@ -39,6 +39,17 @@ type Options struct {
 	// BACI-89 background sync runner so its cross-process lock file
 	// lands beside the right DB. Empty falls back to store.DefaultPath.
 	DBPath string
+	// ProxyUpstream is the upstream the BACI-301 reverse proxy forwards
+	// the auth-exempt /anthropic/* route to. Empty (the default for both
+	// `bacio api` and `bacio web`) selects proxy.DefaultUpstream
+	// (https://api.anthropic.com); tests point it at a fake upstream.
+	ProxyUpstream string
+	// LogDir is the resolved per-worktree log directory (BACI-73
+	// logging.Resolved.Dir). BACI-302 writes the raw proxy req/resp
+	// capture files under <LogDir>/proxy/. Empty disables the raw-to-disk
+	// write (index rows still land); `bacio api` / `bacio web` thread the
+	// resolved dir, tests leave it empty or point it at a temp dir.
+	LogDir string
 }
 
 // Server is the wired-up HTTP server. The caller (cmd/bacio) owns the store

@@ -578,23 +578,33 @@ the mode, and the composed payload.
 
 ### Channel MCP tools
 
-The `bacio channel` MCP server exposes five tools:
+The `bacio channel` MCP server exposes four tools:
 
 | Tool                     | Purpose                                                                 |
 | ------------------------ | ----------------------------------------------------------------------- |
 | `reply`                  | Acknowledge a dispatch (the channel-native form of `bacio agent ack`).  |
 | `register`               | Complete the session's registration (links the channel to a session id).|
 | `ask_user_question`      | Surface a **blocking** multi-choice clarification question to the user (BACI-53). |
-| `attach_transcript`      | Attach a completed subagent's transcript to an issue (BACI-85).         |
 | `send_user_notification` | Fire a **non-blocking** agent→user notification into the bell (BACI-287). |
 
-`reply`, `register`, `attach_transcript`, and `send_user_notification`
-advertise unconditionally — none of them park a JSON-RPC reply, so the
+`reply`, `register`, and `send_user_notification` advertise
+unconditionally — none of them park a JSON-RPC reply, so the
 poller-gate that defers `ask_user_question` (a parked reply would never
 be delivered without the drain step) does not apply to them. None of the
-five has a REST or CLI mutate-equivalent — they are channel-only (the
+four has a REST or CLI mutate-equivalent — they are channel-only (the
 notification read side — list / mark-read — is REST, but the *write* is
 channel-only).
+
+> **Retired tool — `attach_transcript` (BACI-85, removed in BACI-307).**
+> The channel used to expose a fifth tool, `attach_transcript`, that the
+> supervisor called after each `Task` returned to link the subagent's
+> raw `.jsonl` transcript to the issue as a document. The
+> `reverse-proxy-monitor` feature replaced it: BACI-305/306 capture and
+> parse every agent-mode session's Anthropic traffic into `proxy_messages`,
+> read per-job via `bacio proxy job <dispatch_id>` (REST:
+> `GET /proxy/jobs/{dispatch_id}/transcript`). BACI-307 removed the tool,
+> the dispatch-preamble step that invoked it, and the per-issue `.jsonl`
+> transcript-doc plumbing.
 
 `send_user_notification` is the deliberate non-blocking sibling of
 `ask_user_question`: the agent tells the user something and carries on
@@ -606,68 +616,13 @@ ticket; absent, it's a ticket-less heads-up. Reach for it when the user
 should *see* something; reach for `ask_user_question` when you need them
 to *answer* something.
 
-### `attach_transcript` — subagent transcript traceability (BACI-85)
-
-Once a dispatched per-mode subagent finishes, the supervisor attaches
-that subagent's transcript to the issue so a later reviewer can open
-the ticket and read exactly what the worker did. The dispatch preamble
-instructs the supervisor to call `mcp__bacio__attach_transcript` after
-`Task` returns (with the `issue_id` and the `agent_id` from the `Task`
-result), then `mcp__bacio__reply` to ack the dispatch.
-
-**MCP arg naming — `issue_id` (BACI-128).** Both `attach_transcript`
-and `ask_user_question` take the canonical issue key as an `issue_id`
-arg. The `issue_id` is required on both tools — `ask_user_question`
-without one parks an orphan row that the kanban-card pill surface
-filters out, so the channel hard-rejects a missing or malformed value
-with an MCP tool error before any row is inserted. Internally bacio
-still calls the column `issue_key`; the MCP tool surface alone uses
-`issue_id` for consistency.
-
-**Transcript location contract.** Claude Code 2.1.x persists every
-`Task`-spawned subagent's conversation at
-`~/.claude/projects/<project-slug>/<parent-session-id>/subagents/agent-<agentId>.jsonl`,
-with a sibling `agent-<agentId>.meta.json` carrying `agentType` /
-`description`. The channel knows the project dir (from
-`CLAUDE_PROJECT_DIR`) but not the parent session id, so the resolver
-globs every session dir under the project slug for the matching
-`agent-<id>.jsonl`.
-
-**Storage decision — the raw `.jsonl` verbatim (BACI-90).**
-`attach_transcript` stores the raw subagent transcript bytes
-verbatim, capped at ~2.5 MB (`channel.TranscriptCap`,
-`internal/channel/transcript.go`). An over-cap transcript is
-truncated with a one-line footer naming the omitted byte count and
-the source path; an under-cap transcript is stored byte-identical.
-The result is a `transcript`-typed document (BACI-115 — was
-`project_complete` pre-BACI-115) named
-`bacio-transcript-<ISSUE-KEY>-agent-<id>.jsonl` (the `.jsonl`
-extension flags it as a raw transcript, not rendered markdown),
-linked to the issue. The doc's `source_path` records the absolute
-path to the raw `.jsonl`, and the supervisor's optional `note` lands
-on the link description. `UpsertDocument` makes re-attaching the same
-(issue, agent) pair idempotent. The store's generic doc-body cap was
-raised to 10 MiB (`maxBodyBytes`, `internal/store/validate.go`) so a
-2.5 MB transcript is accepted rather than rejected. The UIs render
-transcript docs through the markdown reader, so the raw `.jsonl`
-displays as an unformatted blob — a proper transcript viewer is a
-deliberate deferred follow-up. (BACI-85 originally rendered a
-markdown digest capped at 256 KB; BACI-90 replaced that with the raw
-file because the digest lossily dropped tool I/O a reviewer often
-needs.)
-
-`bacio issue brief` (BACI-115) does **not** inline transcript bodies
-— only `plan` and `review` docs are inlined; transcripts surface as
-metadata (`filename`, `type: "transcript"`, `size_bytes`,
-`source_path`, `linked_via`, `description`) with an empty
-`content` string. The filename pattern
-(`bacio-transcript-*-agent-*.jsonl`) is also a read-side fallback:
-even a legacy `project_complete`-typed transcript attached before
-BACI-115 is excluded from inlining.
-
-The tool errors clearly (an MCP tool error) when the issue or
-transcript cannot be found — e.g. an older harness that does not
-persist per-subagent transcripts.
+**MCP arg naming — `issue_id` (BACI-128).** `ask_user_question` takes
+the canonical issue key as a required `issue_id` arg — without one it
+parks an orphan row that the kanban-card pill surface filters out, so
+the channel hard-rejects a missing or malformed value with an MCP tool
+error before any row is inserted. Internally bacio still calls the
+column `issue_key`; the MCP tool surface alone uses `issue_id` for
+consistency.
 
 ### User→agent steer messages — `kind="message"` (BACI-286)
 

@@ -47,7 +47,17 @@ post-install activation banner — the two strings share a single source
 of truth (agentmode.LaunchCommand) so they cannot drift.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			_, err := fmt.Fprintln(os.Stdout, agentmode.LaunchCommand)
+			// Resolve the worktree env so ANTHROPIC_BASE_URL points at the
+			// reverse proxy on *this* worktree's API port (BACI-301). The
+			// resolution is silent — any chatter would leak into a composed
+			// eval "$(bacio agent-run-command)"; only the error path writes
+			// (to stderr, via cobra), never the success path.
+			env, err := resolveEnv()
+			if err != nil {
+				return err
+			}
+			endpoint := agentmode.ProxyEndpoint(env.APIAddr)
+			_, err = fmt.Fprintln(os.Stdout, agentmode.LaunchCommand(endpoint))
 			return err
 		},
 	}

@@ -19,6 +19,7 @@ Read the relevant doc **before** you start planning a change — these shape the
 | [`docs/motion-layout-animations.md`](docs/motion-layout-animations.md) | Touching card-movement animations on the React surfaces — the Pipeline cards or the ship flourish (Motion, pinned at v11.18.2). |
 | [`docs/worktree-environments.md`](docs/worktree-environments.md) | Touching `internal/wtenv/` or anything that resolves a DB / port / log dir. |
 | [`docs/web-app-mode.md`](docs/web-app-mode.md) | Changing the seam between Wails and HTTP transports (`desktop/frontend/src/api.ts` and friends). |
+| [`docs/reverse-proxy.md`](docs/reverse-proxy.md) | Touching `internal/proxy/` or the `/anthropic/*` reverse-proxy route, its auth-exemption, or the `agentmode.LaunchCommand` launch-env injection. |
 | [`docs/background-sync.md`](docs/background-sync.md) | Touching `internal/sync/` or the sync UI. |
 | [`docs/logging.md`](docs/logging.md) | Debugging a long-running process or adding a new structured log emitter. |
 | [`docs/profiling.md`](docs/profiling.md) | Diagnosing a TUI freeze or memory issue. |

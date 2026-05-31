@@ -5,6 +5,7 @@ package agentmode
 
 import (
 	"fmt"
+	"net"
 	"os"
 )
 
@@ -12,14 +13,44 @@ import (
 // hook subcommands and the channel poller should activate.
 const EnvVar = "BACIO_AGENT_MODE"
 
-// LaunchCommand is the canonical shell one-liner that spins up a
-// Claude Code session wired to bacio's agent-mode supervision: env var
-// set, per-tool approval prompt waived, and the native-channels
-// transport opted in so dispatches stream live. Kept here so the
-// post-install activation banner (printActivationBanner) and the
-// `bacio agent-run-command` verb emit the exact same string and never
-// drift apart.
-const LaunchCommand = EnvVar + "=1 claude --dangerously-skip-permissions --dangerously-load-development-channels server:bacio"
+// claudeInvocation is the fixed `claude …` half of the launch one-liner:
+// per-tool approval prompt waived, native-channels transport opted in so
+// dispatches stream live. LaunchCommand prepends the env-var assignments.
+const claudeInvocation = "claude --dangerously-skip-permissions --dangerously-load-development-channels server:bacio"
+
+// LaunchCommand returns the canonical shell one-liner that spins up a
+// Claude Code session wired to bacio's agent-mode supervision. It sets
+// BACIO_AGENT_MODE=1, points ANTHROPIC_BASE_URL at the BACI-301 reverse
+// proxy (proxyEndpoint, e.g. http://127.0.0.1:5320/anthropic) so all
+// Anthropic traffic routes through the local bacio web/api server, and
+// flips ENABLE_TOOL_SEARCH=true. No bacio correlation header is injected:
+// the reverse-proxy capture correlates off Claude Code's own request
+// headers (X-Claude-Code-Session-Id / -Agent-Id), so the launch one-liner
+// needs nothing extra. Kept here so the post-install activation banner
+// (printActivationBanner) and the `bacio agent-run-command` verb emit the
+// exact same string and never drift apart.
+//
+// Consequence (intended, per the reverse-proxy-monitor feature): a
+// running `bacio web`/`bacio api` is a hard dependency of an agent
+// session — without it the worker gets connection-refused on
+// ANTHROPIC_BASE_URL.
+func LaunchCommand(proxyEndpoint string) string {
+	return fmt.Sprintf("%s=1 ANTHROPIC_BASE_URL=%s ENABLE_TOOL_SEARCH=true %s",
+		EnvVar, proxyEndpoint, claudeInvocation)
+}
+
+// ProxyEndpoint builds the ANTHROPIC_BASE_URL value from a resolved
+// host:port bind address (env.APIAddr), e.g. "127.0.0.1:5320" →
+// "http://127.0.0.1:5320/anthropic". A bind address that doesn't parse
+// as host:port falls back to the default 127.0.0.1 host so the launch
+// one-liner always emits a usable URL rather than a malformed one.
+func ProxyEndpoint(apiAddr string) string {
+	host, port, err := net.SplitHostPort(apiAddr)
+	if err != nil || host == "" || port == "" {
+		host, port = "127.0.0.1", "5320"
+	}
+	return fmt.Sprintf("http://%s/anthropic", net.JoinHostPort(host, port))
+}
 
 // Enabled reports whether bacio's automatic agent-supervision surfaces
 // (the hook subcommands and the channel's setup-dispatch poller) should

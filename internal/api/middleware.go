@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mrgeoffrich/bacio/internal/proxy"
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
 
@@ -44,10 +45,28 @@ func (r *statusRecorder) Write(b []byte) (int, error) {
 	return n, err
 }
 
+// Unwrap exposes the wrapped ResponseWriter so http.ResponseController can
+// reach the underlying connection's Flush / SetWriteDeadline / SetReadDeadline
+// through this wrapper (Go 1.20+ unwraps via this method). Without it, the
+// streaming reverse proxy can neither flush SSE incrementally nor lift the
+// server's WriteTimeout for a long Anthropic turn — see clearStreamDeadline.
+func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
+
 func recoverPanic(next http.Handler, logger *slog.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if rec := recover(); rec != nil {
+				// http.ErrAbortHandler is the stdlib sentinel a handler
+				// panics with to abort a request silently — ReverseProxy
+				// raises it when it can't finish streaming the response,
+				// almost always because the client (the agent) hung up
+				// mid-stream. net/http's own conn.serve recovers it
+				// without logging and just drops the connection; re-panic
+				// so that path runs. Logging it as an ERROR with a stack
+				// and trying to writeError to a dead connection is noise.
+				if err, ok := rec.(error); ok && errors.Is(err, http.ErrAbortHandler) {
+					panic(rec)
+				}
 				logger.Error("panic in handler",
 					"err", rec,
 					"path", r.URL.Path,
@@ -77,9 +96,46 @@ func requestLog(next http.Handler, logger *slog.Logger) http.Handler {
 	})
 }
 
+// proxyStreamTimeout is the per-connection read/write deadline
+// clearStreamDeadline installs for the /anthropic/* reverse-proxy route. It
+// is deliberately well above the Claude client's own 600s request cap
+// (X-Stainless-Timeout) so the client's timeout — never the bacio server's —
+// is what bounds a turn, while still backstopping a wedged/half-open
+// connection rather than pinning it forever.
+const proxyStreamTimeout = 15 * time.Minute
+
+// clearStreamDeadline lifts the API server's short Read/WriteTimeout
+// (server.go: ReadTimeout 15s, WriteTimeout 30s) for the streaming
+// reverse-proxy route. Those timeouts are right for the JSON API but fatal to
+// the proxy: the connection's write deadline is set when the request is read,
+// so a slow or rate-limited Anthropic turn whose time-to-first-byte (or total
+// stream) crosses 30s has its downstream write deadline expire before the
+// proxy can relay the response — the agent then receives a truncated SSE
+// stream (no message_stop) and retries, which is the "responses take forever /
+// keep failing" symptom. We push the deadline out to proxyStreamTimeout for
+// this exchange only; the rest of the API keeps the protective 30s.
+//
+// Best-effort: a ResponseWriter that doesn't support deadline control leaves
+// the server default in place (no worse than before). statusRecorder.Unwrap
+// is what lets the controller reach the real connection through the log
+// wrapper.
+func clearStreamDeadline(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rc := http.NewResponseController(w)
+		deadline := time.Now().Add(proxyStreamTimeout)
+		_ = rc.SetWriteDeadline(deadline)
+		_ = rc.SetReadDeadline(deadline)
+		next.ServeHTTP(w, r)
+	})
+}
+
 func auth(next http.Handler, token string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if token == "" || r.URL.Path == "/healthz" {
+		// /healthz is unauthenticated, and the BACI-301 reverse-proxy
+		// route (/anthropic/*) is auth-exempt by prefix: agent traffic
+		// carries its own Anthropic auth, not bacio's bearer token, so a
+		// configured token must never block it.
+		if token == "" || r.URL.Path == "/healthz" || strings.HasPrefix(r.URL.Path, proxy.PathPrefix+"/") {
 			next.ServeHTTP(w, r)
 			return
 		}

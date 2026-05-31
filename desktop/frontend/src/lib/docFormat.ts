@@ -27,20 +27,3 @@ export function isHtmlDoc(filename: string, content: string): boolean {
   if (head.startsWith('<html')) return true;
   return false;
 }
-
-// isJsonlTranscriptDoc detects a bacio-attached subagent transcript
-// (BACI-125). Conservative-by-filename: requires the
-// `bacio-transcript-…-agent-….jsonl` shape that `attach_transcript`
-// produces, so a hand-uploaded `.jsonl` doc doesn't accidentally
-// trigger the transcript renderer (it'd parse but the dispatch-prompt
-// card UX wouldn't match anything sensible). Mirrors
-// model.IsBacioTranscriptFilename in Go so the predicate stays in
-// lockstep with the read-side fallback the brief route uses.
-export function isJsonlTranscriptDoc(filename: string): boolean {
-  const f = filename.trim().toLowerCase();
-  return (
-    f.startsWith('bacio-transcript-') &&
-    f.endsWith('.jsonl') &&
-    f.includes('-agent-')
-  );
-}

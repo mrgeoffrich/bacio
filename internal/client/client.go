@@ -469,6 +469,48 @@ type Client interface {
 	// prefix in the URL). repo == nil means "across all repos".
 	ListHistory(ctx context.Context, repo *model.Repo, f store.HistoryFilter) ([]*model.HistoryEntry, error)
 
+	// ----- Proxy capture (BACI-303) -----
+	// ProxyStats rolls the BACI-302 proxy_requests index up into one
+	// per-FQDN entry — request count, byte sums, error rate, p50/p95
+	// latency, first/last seen — for the Monitor screen (BACI-304) and
+	// the `bacio proxy stats` CLI verb. Cross-cutting like ListHistory's
+	// all-repos mode: the proxy_requests table has no repo_id, so there
+	// is no per-repo scoping. The remote backend GETs /proxy/stats. The
+	// returned slice is always non-nil (empty for an empty table).
+	ProxyStats(ctx context.Context, f store.ProxyStatsFilter) ([]*model.ProxyFQDNStat, error)
+
+	// ----- Per-job message detail (BACI-306) -----
+	// AnthropicCapture returns the parsed detail of one captured Anthropic
+	// SSE turn, keyed on the proxy_requests id; ErrNotFound when that capture
+	// wasn't parseable. JobTranscript returns a dispatch's assembled ordered
+	// transcript (primary thread + summed usage + auxiliary turns); ErrNotFound
+	// when the dispatch has no parsed captures. Both are cross-cutting reads
+	// like ProxyStats; the remote backend GETs /proxy/captures/{id} and
+	// /proxy/jobs/{dispatch_id}/transcript.
+	AnthropicCapture(ctx context.Context, id int64) (*model.ProxyMessage, error)
+	JobTranscript(ctx context.Context, dispatchID int64) (*model.AnthropicTranscript, error)
+
+	// ----- Capture drill-down (BACI-308) -----
+	// ListProxyCaptures returns the filtered, newest-first, capped capture
+	// list the Monitor drill-down walks an FQDN stat row down into — each
+	// row enriched with its dispatch's issue-key + mode. Cross-cutting like
+	// ProxyStats; the remote backend GETs /proxy/captures. The returned
+	// slice is always non-nil (empty for no match). ProxyCaptureRaw returns
+	// the inflated, auth-redacted .http bytes for one capture; ErrNotFound
+	// when the row has no raw file or the file is gone from disk. The remote
+	// backend GETs /proxy/captures/{id}/raw.
+	ListProxyCaptures(ctx context.Context, f store.ProxyRequestFilter) ([]*model.ProxyCaptureRow, error)
+	ProxyCaptureRaw(ctx context.Context, id int64) ([]byte, error)
+
+	// ----- Content search (BACI-320) -----
+	// SearchProxyMessages greps the parsed proxy_messages bodies for a
+	// case-insensitive substring, returning one match line per matching content
+	// block (capture id + dispatch + role + block + snippet) so the reader can
+	// drill into `proxy capture <id>`. Cross-cutting like ProxyStats; the remote
+	// backend GETs /proxy/search. The returned slice is always non-nil (empty
+	// for no match).
+	SearchProxyMessages(ctx context.Context, f store.ProxyMessageFilter) ([]*model.ProxyMessageMatch, error)
+
 	// ----- Agent registry (local-only in v1; remote returns ErrLocalOnly) -----
 	// The agent registry records which AI agent sessions are alive
 	// against which repos, and which issues they're focused on.
@@ -576,10 +618,18 @@ type Client interface {
 	// placeholder actor. agent identity, model, branch, permission_mode are
 	// all left unset; registered_at stays NULL. The session is invisible to
 	// the default-filtered agent list until the bacio channel's `register`
-	// tool completes the registration via CompleteRegistration. Idempotent
-	// on session_id (a /clear that fires a fresh SessionStart with a new
+	// tool completes the registration via CompleteRegistration. Idempotent on
+	// session_id (a /clear that fires a fresh SessionStart with a new
 	// session_id is a separate stub). Local-only.
 	CreateSessionStub(ctx context.Context, repo *model.Repo, sessionID, host string, claudePID int64) (*model.AgentSession, error)
+	// BindSubagentDispatch records that the Claude Code subagent identified by
+	// claudeAgentID (X-Claude-Code-Agent-Id) is working dispatchID under
+	// sessionID. Written by the PreToolUse hook when a dispatched worker runs
+	// its claim — it's the key the reverse-proxy capture joins on to attribute
+	// the worker's Anthropic traffic to a specific dispatch (subagents share
+	// the supervisor session id, so the agent id is the only per-dispatch
+	// discriminator). Idempotent on the normalized agent id. Local-only.
+	BindSubagentDispatch(ctx context.Context, claudeAgentID string, dispatchID int64, sessionID string) error
 	// SessionsByClaudePID returns the open sessions matching (host,
 	// claudePID) — the channel's coordinates. Used by the bacio channel
 	// MCP server to find which sessions it's serving so it can queue a

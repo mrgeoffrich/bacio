@@ -64,12 +64,14 @@ export interface FilterResult {
   counts: DocsCounts;
 }
 
-// Conservative-by-filename transcript predicate — mirrors
-// `isJsonlTranscriptDoc` in lib/docFormat.ts so a hand-uploaded
+// Conservative-by-filename transcript predicate so a hand-uploaded
 // `.jsonl` doc doesn't accidentally collapse into the transcript
-// bucket. Kept local so this module stays import-free (the
-// smoketest doesn't have a TS loader for `docFormat.ts`'s caller
-// chain).
+// bucket. Kept local so this module stays import-free (the smoketest
+// doesn't have a TS loader for `docFormat.ts`'s caller chain). Still
+// used by the facet rail to count legacy `bacio-transcript-*.jsonl`
+// docs (BACI-307 retired the .jsonl-attach path but left existing rows
+// in place; BACI-308 re-points per-job transcript viewing at the
+// captured-message source).
 export function isTranscriptDoc(d: Doc): boolean {
   if (d.type === 'transcript') return true;
   const f = d.filename.trim().toLowerCase();

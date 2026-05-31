@@ -6,6 +6,7 @@ import * as DocService from "./docservice.js";
 import * as FeatureService from "./featureservice.js";
 import * as HistoryService from "./historyservice.js";
 import * as LeaderService from "./leaderservice.js";
+import * as MonitorService from "./monitorservice.js";
 import * as SettingsService from "./settingsservice.js";
 export {
     BoardService,
@@ -13,6 +14,7 @@ export {
     FeatureService,
     HistoryService,
     LeaderService,
+    MonitorService,
     SettingsService
 };
 
@@ -53,6 +55,8 @@ export {
     MemberProjectDTO,
     PRDTO,
     PromptTemplateDTO,
+    ProxyCaptureRowDTO,
+    ProxyFQDNStatDTO,
     RelationDTO,
     RelationsDTO,
     RenameEntryDTO,

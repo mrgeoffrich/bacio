@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -102,12 +103,12 @@ func readHookInput() (*hookInput, error) {
 // the parsed payload, an open local client, the current repo, the agent
 // identity slug, and the claude pid this hook descends from.
 type hookContext struct {
-	in        *hookInput
-	c         client.Client
-	repo      *model.Repo
-	slug      string // identity slug for this claude process, "" if none
-	actor     string // slug if set, else OS-user fallback
-	claudePID int    // nearest `claude` ancestor pid, 0 if not found
+	in           *hookInput
+	c            client.Client
+	repo         *model.Repo
+	slug         string // identity slug for this claude process, "" if none
+	actor        string // slug if set, else OS-user fallback
+	claudePID    int    // nearest `claude` ancestor pid, 0 if not found
 }
 
 func (h *hookContext) close() {
@@ -921,6 +922,12 @@ type preToolUseInput struct {
 		FilePath string `json:"file_path"` // Write / Edit
 		Command  string `json:"command"`   // Bash (BACI-134)
 	} `json:"tool_input"`
+	// AgentID is Claude Code's per-subagent id (X-Claude-Code-Agent-Id),
+	// present only when this hook fires inside a Task-spawned subagent. When a
+	// dispatched worker runs its `bacio agent claim`, it's the key the
+	// reverse-proxy capture joins on to attribute the worker's Anthropic
+	// traffic to a specific dispatch (subagents share the session id).
+	AgentID string `json:"agent_id"`
 }
 
 func readPreToolUseInput() (*preToolUseInput, error) {
@@ -1343,8 +1350,94 @@ func hookPreToolUseCmd() *cobra.Command {
 				emitPreToolUseDeny(d.reason)
 				return nil
 			}
+			// Side effect (allowed calls only): when a dispatched worker
+			// subagent runs its claim, record the agent_id→dispatch binding the
+			// reverse-proxy capture joins on. Best-effort and gated on the
+			// agent_id being present, so it costs nothing on a normal Bash call.
+			maybeBindSubagentDispatch(in)
 			return nil
 		},
+	}
+}
+
+// claimIssueRe matches a bacio issue key (PREFIX-N) — the positional argument
+// of a `bacio agent claim <ISSUE>`.
+var claimIssueRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]*-[0-9]+$`)
+
+// parseClaimIssue returns the issue key of a `bacio agent claim <ISSUE>` Bash
+// command, or ok=false for anything else. It tokenises on whitespace, finds the
+// `agent claim` subcommand sequence (regardless of the leading binary token —
+// `bacio`, an absolute path, or a workspace `.bin/bacio-agent-<slug>`), and
+// takes the first following non-flag token as the issue key. Fail-closed: a
+// shell construct that could hide the real command, the `--json` form, or a
+// first positional that isn't an issue key all return false, so we never bind
+// to the wrong dispatch.
+func parseClaimIssue(toolName, command string) (string, bool) {
+	if toolName != "Bash" {
+		return "", false
+	}
+	cmd := strings.TrimSpace(command)
+	if cmd == "" || strings.ContainsAny(cmd, "|`") || strings.Contains(cmd, "$(") {
+		return "", false
+	}
+	tokens := strings.Fields(cmd)
+	for i := 0; i+1 < len(tokens); i++ {
+		if tokens[i] != "agent" || tokens[i+1] != "claim" {
+			continue
+		}
+		for _, tok := range tokens[i+2:] {
+			if strings.HasPrefix(tok, "-") {
+				continue // skip flags (--prompt, --env, …)
+			}
+			tok = strings.Trim(tok, `"'`)
+			if claimIssueRe.MatchString(tok) {
+				return tok, true
+			}
+			return "", false // first positional isn't an issue key
+		}
+	}
+	return "", false
+}
+
+// maybeBindSubagentDispatch records the agent_id→dispatch binding when a
+// dispatched worker subagent runs its `bacio agent claim`. The agent_id is
+// present only inside a subagent call; the claim names the issue, which with
+// the session pins the exact dispatch (resolveActiveDispatchID). The binding is
+// what lets the reverse-proxy capture attribute the worker's Anthropic traffic
+// to that dispatch — subagents share the supervisor session id, so the agent_id
+// is the only per-dispatch discriminator. Best-effort: every failure is logged
+// to stderr and swallowed so the guard never wedges a tool call.
+func maybeBindSubagentDispatch(in *preToolUseInput) {
+	if in.AgentID == "" {
+		return // not a subagent call — nothing to bind
+	}
+	issueKey, ok := parseClaimIssue(in.ToolName, in.ToolInput.Command)
+	if !ok {
+		return
+	}
+	// Resolve from the worker's cwd so wtenv picks the right DB; restore on
+	// return so this never bleeds into the caller (matters in tests).
+	if in.CWD != "" {
+		if orig, err := os.Getwd(); err == nil {
+			defer func() { _ = os.Chdir(orig) }()
+		}
+		if err := os.Chdir(in.CWD); err != nil {
+			return
+		}
+	}
+	c, err := openClient()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "bacio hook pre-tool-use: bind open client:", err)
+		return
+	}
+	defer c.Close()
+	ctx := context.Background()
+	dispatchID := resolveActiveDispatchID(ctx, c, in.SessionID, issueKey)
+	if dispatchID == nil {
+		return // no matching dispatch — the recorder falls back to the session
+	}
+	if err := c.BindSubagentDispatch(ctx, in.AgentID, *dispatchID, in.SessionID); err != nil {
+		fmt.Fprintln(os.Stderr, "bacio hook pre-tool-use: bind subagent dispatch:", err)
 	}
 }
 

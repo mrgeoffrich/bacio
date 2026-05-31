@@ -247,18 +247,20 @@ func readJSON(t *testing.T, path string, out any) error {
 }
 
 // TestInstallAgentActivationBannerIncludesEnvVar pins the BACI-48 +
-// BACI-49 contract: the post-install activation banner mentions
-// BACIO_AGENT_MODE, the recommended launch command, and the two
-// dangerously-* flags BACI-49 added so a user who just ran
-// install-agent sees one copy-paste line that wires up the env var,
-// the per-tool approval waiver, and the native-channels transport.
+// BACI-49 + BACI-301 contract: the post-install activation banner
+// mentions BACIO_AGENT_MODE, the recommended launch command (with the
+// two dangerously-* flags and the injected reverse-proxy env), and the
+// "inert" reminder so a user who just ran install-agent sees one
+// copy-paste line that wires up the env var, the per-tool approval
+// waiver, the native-channels transport, and the proxy endpoint.
 func TestInstallAgentActivationBannerIncludesEnvVar(t *testing.T) {
+	const endpoint = "http://127.0.0.1:5320/anthropic"
 	var buf strings.Builder
-	printActivationBanner(&buf)
+	printActivationBanner(&buf, endpoint)
 	got := buf.String()
 	for _, want := range []string{
 		"BACIO_AGENT_MODE",
-		"BACIO_AGENT_MODE=1 claude --dangerously-skip-permissions --dangerously-load-development-channels server:bacio",
+		"BACIO_AGENT_MODE=1 ANTHROPIC_BASE_URL=http://127.0.0.1:5320/anthropic ENABLE_TOOL_SEARCH=true claude --dangerously-skip-permissions --dangerously-load-development-channels server:bacio",
 		"inert",
 	} {
 		if !strings.Contains(got, want) {

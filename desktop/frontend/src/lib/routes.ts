@@ -17,7 +17,7 @@
 // NAV view ids — kept in lockstep with Topbar.jsx's NAV array. The
 // `board` view is special-cased: the path is `/issues` (matches the
 // "Issues" tab label) rather than `/board`.
-type NavView = 'pipeline' | 'board' | 'features' | 'docs' | 'agents' | 'history';
+type NavView = 'pipeline' | 'board' | 'features' | 'docs' | 'agents' | 'history' | 'monitor';
 
 // viewPath maps a top-nav view id onto its base route under the active
 // repo prefix. Two view ids have URL aliases that match the top-nav

@@ -14,7 +14,11 @@ import (
 // body) because it is human guidance — folding a paragraph of prose
 // into the JSON success payload would clutter machine consumers' parse
 // path.
-func printActivationBanner(w io.Writer) {
+//
+// endpoint is the resolved ANTHROPIC_BASE_URL the launch one-liner
+// injects (BACI-301) — passed in so the banner stays byte-identical to
+// the `bacio agent-run-command` verb's output.
+func printActivationBanner(w io.Writer, endpoint string) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Activation:")
 	fmt.Fprintf(w, "  bacio's hooks + channel are inert unless %s=1 is set in the\n", agentmode.EnvVar)
@@ -22,13 +26,17 @@ func printActivationBanner(w io.Writer) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  To launch this directory as a registered bacio agent:")
 	fmt.Fprintln(w)
-	fmt.Fprintf(w, "    %s\n", agentmode.LaunchCommand)
+	fmt.Fprintf(w, "    %s\n", agentmode.LaunchCommand(endpoint))
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  --dangerously-skip-permissions waives the per-tool approval prompt")
 	fmt.Fprintln(w, "  for the agent session; --dangerously-load-development-channels")
 	fmt.Fprintln(w, "  server:bacio opts in to the experimental native-channels transport")
 	fmt.Fprintln(w, "  so dispatches stream live (the regular .mcp.json transport also")
 	fmt.Fprintln(w, "  works without that flag — see 'bacio channel --help').")
+	fmt.Fprintln(w)
+	fmt.Fprintln(w, "  ANTHROPIC_BASE_URL routes the session's Anthropic traffic through")
+	fmt.Fprintln(w, "  bacio's local reverse proxy, so a `bacio web` (or `bacio api`)")
+	fmt.Fprintln(w, "  must be running on that port for the agent to reach the API.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "  For normal interactive Claude sessions, launch without the env")
 	fmt.Fprintln(w, "  var: bacio's hooks and channel detect, log, and exit cleanly, and")

@@ -24,6 +24,14 @@ import (
 // bound. Tweak here if a longer or shorter retention window is wanted.
 const HistoryRetention = 60 * 24 * time.Hour
 
+// ProxyRequestRetention bounds how long BACI-302 proxy-capture index rows
+// are kept. Mirrors HistoryRetention's 60-day window — the proxy_requests
+// table is cross-cutting like the audit log, so it gets the same on-Open
+// prune. Note: this prunes the SQLite index only; the raw req/resp capture
+// files on disk have no auto-prune in BACI-302 (same as today's logs /
+// transcripts) — see docs/reverse-proxy.md.
+const ProxyRequestRetention = 60 * 24 * time.Hour
+
 //go:embed schema.sql
 var schemaSQL string
 
@@ -92,6 +100,12 @@ func Open(path string) (*Store, error) {
 	if err := pruneAgentChannels(db); err != nil {
 		fmt.Fprintln(os.Stderr, "bacio: warning: agent-channel prune failed:", err)
 	}
+	if err := pruneProxyRequests(db, ProxyRequestRetention); err != nil {
+		fmt.Fprintln(os.Stderr, "bacio: warning: proxy-request prune failed:", err)
+	}
+	if err := pruneProxyMessages(db, ProxyRequestRetention); err != nil {
+		fmt.Fprintln(os.Stderr, "bacio: warning: proxy-message prune failed:", err)
+	}
 	return &Store{DB: db}, nil
 }
 
@@ -130,6 +144,26 @@ func OpenMemory() (*Store, error) {
 func pruneHistory(db *sql.DB, retention time.Duration) error {
 	cutoff := time.Now().Add(-retention).UTC().Format("2006-01-02 15:04:05")
 	_, err := db.Exec(`DELETE FROM history WHERE created_at < ?`, cutoff)
+	return err
+}
+
+// pruneProxyRequests deletes BACI-302 proxy-capture index rows whose
+// started_at is older than retention. Mirrors pruneHistory — best-effort
+// housekeeping run on every Open, never fatal. The raw capture files on disk
+// are not touched here (no auto-prune in BACI-302).
+func pruneProxyRequests(db *sql.DB, retention time.Duration) error {
+	cutoff := time.Now().Add(-retention).UTC().Format("2006-01-02 15:04:05")
+	_, err := db.Exec(`DELETE FROM proxy_requests WHERE started_at < ?`, cutoff)
+	return err
+}
+
+// pruneProxyMessages deletes BACI-306 parsed-message rows whose started_at is
+// older than retention. Bounds the per-job transcript table on the same 60-day
+// window as the proxy_requests index it parses from — best-effort housekeeping
+// run on every Open, never fatal.
+func pruneProxyMessages(db *sql.DB, retention time.Duration) error {
+	cutoff := time.Now().Add(-retention).UTC().Format("2006-01-02 15:04:05")
+	_, err := db.Exec(`DELETE FROM proxy_messages WHERE started_at < ?`, cutoff)
 	return err
 }
 
@@ -963,6 +997,36 @@ func migrate(db *sql.DB) error {
 			return fmt.Errorf("add auto_ship to repo_settings: %w", err)
 		}
 	}
+	// BACI-305: classification + correlation columns on proxy_requests so
+	// BACI-306's per-job message parser can select exactly the Anthropic
+	// message captures and attribute them to a dispatch. content_type /
+	// is_stream / is_anthropic are transport-level classification; session_id /
+	// claude_agent_id are lifted from Claude Code's own request headers
+	// (X-Claude-Code-Session-Id / -Agent-Id) and dispatch_id is resolved from
+	// the agent-id→dispatch binding. dispatch_id is a nullable INTEGER with no
+	// FK — a capture row is cross-cutting like the audit log, so a deleted
+	// dispatch must not cascade-delete it. Each ALTER is columnExists-guarded
+	// and idempotent; schema.sql carries the columns for fresh DBs.
+	for _, col := range []struct{ name, ddl string }{
+		{"content_type", `ALTER TABLE proxy_requests ADD COLUMN content_type TEXT NOT NULL DEFAULT ''`},
+		{"is_stream", `ALTER TABLE proxy_requests ADD COLUMN is_stream INTEGER NOT NULL DEFAULT 0`},
+		{"is_anthropic", `ALTER TABLE proxy_requests ADD COLUMN is_anthropic INTEGER NOT NULL DEFAULT 0`},
+		{"session_id", `ALTER TABLE proxy_requests ADD COLUMN session_id TEXT NOT NULL DEFAULT ''`},
+		{"claude_agent_id", `ALTER TABLE proxy_requests ADD COLUMN claude_agent_id TEXT NOT NULL DEFAULT ''`},
+		{"dispatch_id", `ALTER TABLE proxy_requests ADD COLUMN dispatch_id INTEGER`},
+	} {
+		has, err := columnExists(db, "proxy_requests", col.name)
+		if err != nil {
+			return err
+		}
+		if !has {
+			if _, err := db.Exec(col.ddl); err != nil {
+				return fmt.Errorf("add %s to proxy_requests: %w", col.name, err)
+			}
+		}
+	}
+	// BACI-316 retired agent_sessions.worktree_slug (the X-Bacio-Corr
+	// correlation key); a leftover column on an already-migrated DB is inert.
 	return nil
 }
 
@@ -1020,7 +1084,7 @@ func backfillScopeTemplate(db *sql.DB) error {
 // The leading-underscore slug keeps the row out of the per-card
 // dispatch picker via the reserved-slug filter (BACI-252 — see
 // nonReservedPrompts in KanbanCard / IssueWorkspace). action_label =
-// '' (preamble never reaches the dropdown either, so the imperative
+// ” (preamble never reaches the dropdown either, so the imperative
 // form is irrelevant).
 func backfillDispatchPreamble(db *sql.DB) error {
 	slug := model.BuiltinTemplatePreamble
@@ -1141,7 +1205,7 @@ func migratePromptTemplates(db *sql.DB) error {
 // migrateRepoPathUnique relaxes the column-level UNIQUE on repos.path
 // (a hangover from before phantom repos were a thing) and replaces it
 // with a partial unique index that ignores empty paths. Phantom repos
-// (rows with `path = ''`) represent prefixes that exist in the sync
+// (rows with `path = ”`) represent prefixes that exist in the sync
 // repo but have no local working tree on this machine; multiple of
 // them must be allowed to coexist.
 //
@@ -1225,7 +1289,7 @@ func migrateRepoPathUnique(db *sql.DB) error {
 
 // migrateAgentDispatchesModeCheck rebuilds agent_dispatches to drop the
 // column-level CHECK on `mode`. Early-generation DBs created in the
-// plan/implement era carry CHECK (mode IN ('','plan','implement')),
+// plan/implement era carry CHECK (mode IN (”,'plan','implement')),
 // which now rejects the review/ship/fix_review stages. SQLite can't
 // drop a column CHECK in place, so this is the table-rebuild dance —
 // the same pattern as migrateRepoPathUnique. Keyed off the stored
