@@ -132,6 +132,10 @@ func renderText(w io.Writer, v any) error {
 		}
 	case []*model.ProxyFQDNStat:
 		printProxyStats(w, x)
+	case *model.ProxyMessage:
+		printProxyMessage(w, x)
+	case *model.AnthropicTranscript:
+		printAnthropicTranscript(w, x)
 	case exportResult:
 		printExportResult(w, x)
 	case importResult:
@@ -514,6 +518,87 @@ func printProxyStats(w io.Writer, stats []*model.ProxyFQDNStat) {
 	}
 }
 
+// printProxyMessage renders one parsed Anthropic capture (BACI-306): the model,
+// classification, usage, and the reconstructed assistant turn's blocks. JSON
+// output (the parse contract) carries the full shape; this is the human read.
+func printProxyMessage(w io.Writer, m *model.ProxyMessage) {
+	kind := "auxiliary"
+	if m.IsPrimary {
+		kind = "primary"
+	}
+	fmt.Fprintf(w, "Capture:  %d (proxy_request %d, %s)\n", m.ID, m.ProxyRequestID, kind)
+	fmt.Fprintf(w, "Model:    %s\n", m.Model)
+	if m.DispatchID != nil {
+		fmt.Fprintf(w, "Dispatch: %d\n", *m.DispatchID)
+	}
+	if m.StopReason != "" {
+		fmt.Fprintf(w, "Stop:     %s\n", m.StopReason)
+	}
+	fmt.Fprintf(w, "Usage:    in=%d out=%d cache_read=%d thinking=%d\n",
+		m.Usage.InputTokens, m.Usage.OutputTokens, m.Usage.CacheReadInputTokens, m.Usage.ThinkingTokens)
+	printTurnBlocks(w, m.TurnJSON)
+}
+
+// printAnthropicTranscript renders an assembled per-job transcript (BACI-306):
+// the summed usage and the ordered messages, one line per content block. JSON
+// output carries the full nested shape.
+func printAnthropicTranscript(w io.Writer, tr *model.AnthropicTranscript) {
+	if tr.DispatchID != nil {
+		fmt.Fprintf(w, "Dispatch:   %d\n", *tr.DispatchID)
+	}
+	fmt.Fprintf(w, "Model:      %s\n", tr.Model)
+	fmt.Fprintf(w, "Usage:      in=%d out=%d cache_read=%d thinking=%d\n",
+		tr.Usage.InputTokens, tr.Usage.OutputTokens, tr.Usage.CacheReadInputTokens, tr.Usage.ThinkingTokens)
+	fmt.Fprintf(w, "Messages:   %d  (auxiliary turns: %d)\n", len(tr.Messages), len(tr.Auxiliary))
+	for _, msg := range tr.Messages {
+		fmt.Fprintln(w, strings.Repeat("-", 40))
+		fmt.Fprintf(w, "[%s]\n", msg.Role)
+		for _, b := range msg.Content {
+			printAnthropicBlock(w, b)
+		}
+	}
+}
+
+// printTurnBlocks renders the assistant turn stored as turn_json. A truncated
+// (non-JSON) body is shown verbatim so the marker is visible.
+func printTurnBlocks(w io.Writer, turnJSON string) {
+	var turn model.AnthropicTurn
+	if err := json.Unmarshal([]byte(turnJSON), &turn); err != nil {
+		fmt.Fprintf(w, "\n%s\n", turnJSON)
+		return
+	}
+	fmt.Fprintln(w)
+	for _, b := range turn.Blocks {
+		printAnthropicBlock(w, b)
+	}
+}
+
+// printAnthropicBlock renders one content block as a single labelled line,
+// truncating long bodies for the human read (JSON output keeps the full text).
+func printAnthropicBlock(w io.Writer, b model.AnthropicBlock) {
+	switch b.Type {
+	case "text":
+		fmt.Fprintf(w, "  text: %s\n", oneLine(b.Text))
+	case "thinking":
+		fmt.Fprintf(w, "  thinking: %s\n", oneLine(b.Thinking))
+	case "tool_use":
+		fmt.Fprintf(w, "  tool_use %s(%s): %s\n", b.Name, b.ID, oneLine(string(b.Input)))
+	case "tool_result":
+		fmt.Fprintf(w, "  tool_result (%s): %s\n", b.ToolUseID, oneLine(string(b.Content)))
+	default:
+		fmt.Fprintf(w, "  %s\n", b.Type)
+	}
+}
+
+// oneLine collapses whitespace and caps a block body for the human read.
+func oneLine(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) > 160 {
+		s = s[:157] + "..."
+	}
+	return s
+}
+
 type message struct {
 	Text string `json:"message"`
 }
@@ -591,7 +676,6 @@ func printImportResult(w io.Writer, r importResult) {
 		}
 	}
 }
-
 
 func printAgentSession(w io.Writer, s *model.AgentSession) {
 	fmt.Fprintf(w, "Session:  %s\n", s.SessionID)

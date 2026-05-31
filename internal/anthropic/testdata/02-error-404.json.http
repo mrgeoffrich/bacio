@@ -1,0 +1,42 @@
+==== REQUEST ====
+POST /v1/messages?beta=true HTTP/1.1
+User-Agent: claude-cli/2.1.158 (external, cli)
+Accept: application/json
+Content-Length: 317
+X-Stainless-Os: MacOS
+Anthropic-Version: 2023-06-01
+X-Stainless-Retry-Count: 0
+X-Stainless-Runtime-Version: v24.3.0
+X-Stainless-Timeout: 600
+X-Claude-Code-Session-Id: 00000000-0000-0000-0000-0000000000aa
+Authorization: [redacted]
+X-Stainless-Arch: arm64
+X-Stainless-Lang: js
+Anthropic-Beta: claude-code-20250219,oauth-2025-04-20,context-1m-2025-08-07,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,mid-conversation-system-2026-04-07
+Anthropic-Dangerous-Direct-Browser-Access: true
+X-App: cli
+X-Stainless-Package-Version: 0.94.0
+X-Stainless-Runtime: node
+Accept-Encoding: gzip, deflate, br, zstd
+Content-Type: application/json
+
+{"model":"claude-opus-4-8[1m]","max_tokens":1,"messages":[{"role":"user","content":"quota"}],"metadata":{"user_id":"[scrubbed for fixture — see BACI-306]"}}
+==== RESPONSE ====
+HTTP/2.0 404 Not Found
+Date: Sat, 30 May 2026 09:39:21 GMT
+Cf-Ray: a03cc565db1bd729-BNE
+Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+Server: cloudflare
+Set-Cookie: [redacted]
+Content-Security-Policy: default-src 'none'; frame-ancestors 'none'
+X-Robots-Tag: none
+Request-Id: req_011CbYXkwqpcip4Wr3vWyTKa
+Anthropic-Organization-Id: 0ccee7f2-23cd-412d-b5a1-963485317535
+Vary: Accept-Encoding
+Cf-Cache-Status: DYNAMIC
+Content-Type: application/json
+X-Should-Retry: false
+Traceresponse: 00-2504ec0f77bb3bd62e95317dfbecbfcb-e66bcbc47e33e278-01
+Content-Encoding: gzip
+
+{"type":"error","error":{"type":"not_found_error","message":"model: claude-opus-4-8[1m]"},"request_id":"req_011CbYXkwqpcip4Wr3vWyTKa"}

@@ -136,6 +136,15 @@ func newRouter(d deps) http.Handler {
 	// agent passthrough).
 	mux.HandleFunc("GET /proxy/stats", d.handleProxyStats)
 
+	// BACI-306: per-job message detail over the parsed proxy captures —
+	// one captured Anthropic SSE turn (/proxy/captures/{id}, keyed on the
+	// proxy_requests id) and a dispatch's assembled ordered transcript
+	// (/proxy/jobs/{dispatch_id}/transcript). Same cross-cutting,
+	// bearer-token-protected posture as /proxy/stats; BACI-308's Monitor
+	// drill-down and BACI-307's review-skill source consume these.
+	mux.HandleFunc("GET /proxy/captures/{id}", d.handleProxyCapture)
+	mux.HandleFunc("GET /proxy/jobs/{dispatch_id}/transcript", d.handleJobTranscript)
+
 	// BACI-187: shipping-log popover — list of recently-done issues,
 	// newest-first, sibling of /history. Per-repo only; cross-repo is
 	// deliberately out of scope (matches the rest of the surface).

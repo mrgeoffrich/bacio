@@ -262,6 +262,87 @@ correlation columns empty; the decode + classify half still works.
 
 ---
 
+## Per-job message detail (BACI-306)
+
+BACI-306 is the **parsing layer** on top of the BACI-305 substrate. It
+turns the captured `/v1/messages` SSE turns into a structured, durable
+per-job message transcript that BACI-307 (jsonl removal + review skill),
+BACI-308 (Monitor inspection drill-down), and the review skill consume —
+the proxy capture, not a `.jsonl` doc, becomes the canonical transcript.
+
+### The pure parser — `internal/anthropic`
+
+[`internal/anthropic`](../internal/anthropic/parse.go) is a pure package
+(imports only `internal/model` + the stdlib) so the recorder (write), the
+store read API, the CLI, and the tests share one parser:
+
+- `ParseCapture(raw)` is the inverse of `renderRawCapture` — it splits the
+  `==== REQUEST ==== / ==== RESPONSE ====` layout, reads the request JSON
+  (model, system, `messages[]`, `output_config` presence — **never**
+  `metadata.user_id`, which carries `device_id`/`account_uuid` PII), and
+  decodes the response SSE into one assistant turn: ordered text /
+  thinking / tool_use blocks (the `input_json_delta` fragments stitched),
+  merged usage (input/cache off `message_start`, output + thinking off
+  `message_delta`), and the stop reason. The `data:` JSON carries trailing
+  whitespace inside the object, so each event is decoded leniently — a
+  malformed event is skipped, never sinks the turn.
+- `Classify(pc, prev)` decides whether a capture extends the job's
+  **primary thread** (same `(model, system-fingerprint)`, growing message
+  count, no `output_config`) or is **auxiliary** (a title-gen /
+  structured-output probe, a different model). It returns the
+  request-message **delta** — the messages appended since the prior primary
+  capture, with the echoed prior-assistant turn dropped (it's already
+  represented by that capture's reconstructed turn). Storing the delta, not
+  the whole growing request body, keeps per-job storage O(n).
+- `AssembleTranscript` concatenates the ordered primary deltas + turns into
+  one `model.AnthropicTranscript`, sums usage across the job, and keeps the
+  auxiliary turns separate.
+
+The decoder doc (`proxy-capture-decoder.md`, validated against 220 real
+SSE turns) is the executable spec for the parse rules.
+
+### Where it hooks in — the recorder, off the request path
+
+The recorder's async `persist` worker (the same one that writes the raw
+file + index row) parses a capture when it's `is_anthropic && is_stream &&
+!ResponseTruncated` — the selection predicate. A **truncated** response
+can't be parsed (every SSE response is gzipped, so a truncated body is an
+incomplete, un-inflatable gzip stream written verbatim with a marker), and
+the non-stream `count_tokens` / error JSON shapes aren't message
+transcripts. The parse reuses the same rendered (inflated, redacted)
+`.http` bytes written to disk, classifies against the job's last thread
+state (`LatestThreadState`), and inserts a `proxy_messages` row. Best-effort
+like the rest of capture: a parse failure or store hiccup is logged and
+swallowed, never breaks the agent's traffic.
+
+### Durable storage — `proxy_messages`
+
+One row per parseable capture (`internal/store/proxy_messages.go`),
+cross-cutting like `proxy_requests`: `dispatch_id` is the per-job grouping
+key (nullable, no FK — a row survives a deleted dispatch); `is_primary` is
+the re-derivable classification flag; `delta_json` / `turn_json` hold the
+parsed shape (capped at `model.MaxProxyMessageBody` per direction, replaced
+with a marker past the cap — the raw `.http` stays ground truth). The
+`usage_*` columns let a job-level sum run without re-parsing. Growth is
+bounded by `pruneProxyMessages` on the same 60-day window as the index.
+
+### Read surfaces
+
+- `bacio proxy capture <id>` / `GET /proxy/captures/{id}` — the parsed
+  detail of one captured turn, keyed on the `proxy_requests` id.
+- `bacio proxy job <dispatch_id>` / `GET /proxy/jobs/{dispatch_id}/transcript`
+  — a dispatch's assembled ordered transcript. Both sit behind the
+  bearer-token auth like `/proxy/stats` (UI/CLI reads, not agent
+  passthrough), and the `model` types are snake_case-aligned to the React
+  viewer's `transcript/types.ts` so BACI-307/308 can re-point
+  `TranscriptView` at this source with a thin seam.
+
+Pre-306 captures are **not** retroactively parsed (no backfill); new
+traffic populates `proxy_messages` going forward. A `bacio proxy reparse`
+backfill is a clean follow-on if 307/308 want history.
+
+---
+
 ## What's deliberately out of scope
 
 - **Forward proxy / `HTTPS_PROXY` all-FQDN MITM** — the other side of
@@ -271,9 +352,13 @@ correlation columns empty; the decode + classify half still works.
   (`GET /proxy/stats` + `bacio proxy stats`); see the read-surface note
   above.
 - **Anthropic request/response body parsing** (model, token usage,
-  turn/tool counts) — BACI-305, BACI-306.
+  turn/tool counts) — shipped in BACI-305 (classification) + BACI-306
+  (per-job message detail); see the message-detail section above.
 - **The Monitor web screen** (and the React `api.ts` seam method that
-  consumes `GET /proxy/stats`) — BACI-304.
+  consumes `GET /proxy/stats`) — BACI-304; the per-job drill-down on the
+  BACI-306 transcript is BACI-308.
+- **`bacio proxy reparse` backfill** of pre-306 raw `.http` into
+  `proxy_messages` — deferred; 306 parses new traffic only.
 - **Raw-log-file retention / cleanup** — the index prune is BACI-302; the
   on-disk raw files have no auto-prune yet.
 - **Retiring the `.jsonl` transcript attachments** — BACI-307.

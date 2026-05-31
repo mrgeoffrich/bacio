@@ -968,6 +968,58 @@ CREATE TABLE IF NOT EXISTS proxy_requests (
 CREATE INDEX IF NOT EXISTS idx_proxy_requests_started
     ON proxy_requests(started_at);
 
+-- proxy_messages is the BACI-306 per-job message detail: one row per parseable
+-- Anthropic SSE capture (is_anthropic AND is_stream AND NOT truncated), holding
+-- the reconstructed assistant turn plus the request-message delta the assembler
+-- concatenates into a job's ordered transcript. It is the durable, synced
+-- artefact that lets BACI-307 retire the .jsonl transcript attachments — the
+-- proxy capture, not a doc, becomes the canonical transcript.
+--
+-- Storage is kept O(n) per job by persisting only each capture's delta (the
+-- messages appended since the prior primary capture) rather than the whole
+-- growing request body. The parser drops metadata.user_id (PII) before anything
+-- lands here, but the surviving prompts / tool_result content are still
+-- sensitive — same redaction posture as the raw .http files.
+--
+-- Cross-cutting like proxy_requests: dispatch_id is the per-job grouping key,
+-- nullable with NO FK (a capture row survives a deleted dispatch); session_id /
+-- claude_agent_id mirror the index-row correlation so a read can still group
+-- when dispatch_id is unresolved. proxy_request_id points back at the index row
+-- (no FK — proxy_requests prunes on the same window, so the parent can vanish
+-- first). is_primary is the re-derivable classification flag (primary thread vs
+-- auxiliary probe). delta_json / turn_json are the parsed shape (internal/model
+-- AnthropicMessage[] / AnthropicTurn). The usage_* columns let a job-level sum
+-- run without re-parsing turn_json. started_at mirrors the capture's start so
+-- the retention prune (pruneProxyMessages) bounds growth on the same 60-day
+-- window as proxy_requests.
+CREATE TABLE IF NOT EXISTS proxy_messages (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    proxy_request_id   INTEGER NOT NULL,
+    dispatch_id        INTEGER,
+    session_id         TEXT    NOT NULL DEFAULT '',
+    claude_agent_id    TEXT    NOT NULL DEFAULT '',
+    model              TEXT    NOT NULL DEFAULT '',
+    system_fingerprint TEXT    NOT NULL DEFAULT '',
+    message_count      INTEGER NOT NULL DEFAULT 0,
+    is_primary         INTEGER NOT NULL DEFAULT 0,
+    stop_reason        TEXT    NOT NULL DEFAULT '',
+    delta_json         TEXT    NOT NULL DEFAULT '',
+    turn_json          TEXT    NOT NULL DEFAULT '',
+    input_tokens          INTEGER NOT NULL DEFAULT 0,
+    output_tokens         INTEGER NOT NULL DEFAULT 0,
+    cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_read_tokens     INTEGER NOT NULL DEFAULT 0,
+    thinking_tokens       INTEGER NOT NULL DEFAULT 0,
+    started_at         DATETIME NOT NULL
+);
+
+-- The job transcript read selects by dispatch_id ORDER BY id; the recorder's
+-- latestThreadState selects the newest primary row for a dispatch.
+CREATE INDEX IF NOT EXISTS idx_proxy_messages_dispatch
+    ON proxy_messages(dispatch_id, id);
+CREATE INDEX IF NOT EXISTS idx_proxy_messages_started
+    ON proxy_messages(started_at);
+
 -- subagent_dispatches binds a Claude Code per-subagent id
 -- (X-Claude-Code-Agent-Id, normalized) to the dispatch that subagent is
 -- working. The reverse-proxy capture reads it to attribute a request to a

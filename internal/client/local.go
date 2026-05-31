@@ -188,3 +188,11 @@ func (c *localClient) ProxyStats(ctx context.Context, f store.ProxyStatsFilter) 
 	}
 	return stats, nil
 }
+
+func (c *localClient) AnthropicCapture(ctx context.Context, id int64) (*model.ProxyMessage, error) {
+	return c.store.CaptureMessage(id)
+}
+
+func (c *localClient) JobTranscript(ctx context.Context, dispatchID int64) (*model.AnthropicTranscript, error) {
+	return c.store.JobTranscript(dispatchID)
+}

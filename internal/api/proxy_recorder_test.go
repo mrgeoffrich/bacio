@@ -269,6 +269,84 @@ func TestCaptureRecorder_ClassifiesAnthropic(t *testing.T) {
 	}
 }
 
+// TestCaptureRecorder_ParsesAnthropicMessage asserts a parseable Anthropic SSE
+// capture (is_anthropic + is_stream + not-truncated) is parsed into a
+// proxy_messages row, while a non-stream JSON capture and a truncated SSE
+// capture both leave proxy_messages empty (BACI-306). The SSE response is
+// gzipped on the wire — exercising the recorder's inflate-then-parse path the
+// way real Anthropic streams arrive.
+func TestCaptureRecorder_ParsesAnthropicMessage(t *testing.T) {
+	s := recorderTestStore(t)
+	rec := newCaptureRecorder(s, t.TempDir(), slog.New(slog.NewTextHandler(os.Stderr, nil)))
+
+	const reqBody = `{"model":"claude-opus-4-8","system":[{"type":"text","text":"sys"}],` +
+		`"messages":[{"role":"user","content":[{"type":"text","text":"hi"}]}],"stream":true}`
+	const sse = "event: message_start\n" +
+		`data: {"type":"message_start","message":{"model":"claude-opus-4-8","usage":{"input_tokens":50}}}` + "\n\n" +
+		"event: content_block_start\n" +
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}` + "\n\n" +
+		"event: content_block_delta\n" +
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello there"}}` + "\n\n" +
+		"event: message_delta\n" +
+		`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":9}}` + "\n\n" +
+		"event: message_stop\n" +
+		`data: {"type":"message_stop"}` + "\n"
+
+	// (1) Parseable SSE turn.
+	rec.Record(proxy.RequestObservation{
+		Method: "POST", Host: "api.anthropic.com", Path: "/v1/messages", Status: 200,
+		Started: time.Now(), Ended: time.Now(),
+		RawRequest:              []byte(reqBody),
+		RequestHeaderBlock:      "POST /v1/messages HTTP/1.1\r\nContent-Type: application/json\r\n",
+		RawResponse:             gzipFixture(t, []byte(sse)),
+		ResponseHeaderBlock:     "HTTP/2.0 200 OK\r\nContent-Type: text/event-stream; charset=utf-8\r\nContent-Encoding: gzip\r\n",
+		ResponseContentType:     "text/event-stream; charset=utf-8",
+		ResponseContentEncoding: "gzip",
+	})
+	// (2) Non-stream JSON (count_tokens) — no message row.
+	rec.Record(proxy.RequestObservation{
+		Method: "POST", Host: "api.anthropic.com", Path: "/v1/messages/count_tokens", Status: 200,
+		Started: time.Now(), Ended: time.Now(),
+		RawResponse:         []byte(`{"input_tokens":5}`),
+		ResponseHeaderBlock: "HTTP/2.0 200 OK\r\nContent-Type: application/json\r\n",
+		ResponseContentType: "application/json",
+	})
+	// (3) Truncated SSE — un-inflatable, must be skipped.
+	rec.Record(proxy.RequestObservation{
+		Method: "POST", Host: "api.anthropic.com", Path: "/v1/messages", Status: 200,
+		Started: time.Now(), Ended: time.Now(),
+		RawRequest:              []byte(reqBody),
+		RawResponse:             gzipFixture(t, []byte(sse))[:10],
+		ResponseTruncated:       true,
+		ResponseHeaderBlock:     "HTTP/2.0 200 OK\r\nContent-Type: text/event-stream\r\nContent-Encoding: gzip\r\n",
+		ResponseContentType:     "text/event-stream",
+		ResponseContentEncoding: "gzip",
+	})
+	rec.Close()
+
+	// Exactly one proxy_messages row: the parseable SSE turn.
+	pm, err := s.CaptureMessage(1) // proxy_request_id 1 = the first capture.
+	if err != nil {
+		t.Fatalf("CaptureMessage(1): %v (the parseable SSE turn should have a row)", err)
+	}
+	if !pm.IsPrimary {
+		t.Errorf("first capture should classify primary (establishes the thread)")
+	}
+	if pm.Usage.InputTokens != 50 || pm.Usage.OutputTokens != 9 {
+		t.Errorf("merged usage = %+v, want input 50 / output 9", pm.Usage)
+	}
+	if pm.StopReason != "end_turn" {
+		t.Errorf("stop_reason = %q, want end_turn", pm.StopReason)
+	}
+	// The non-stream and truncated captures (proxy_request_id 2, 3) have no row.
+	if _, err := s.CaptureMessage(2); err != store.ErrNotFound {
+		t.Errorf("non-stream JSON capture should have no message row, err = %v", err)
+	}
+	if _, err := s.CaptureMessage(3); err != store.ErrNotFound {
+		t.Errorf("truncated SSE capture should have no message row, err = %v", err)
+	}
+}
+
 // TestCaptureRecorder_ResolvesDispatch asserts the recorder attributes a
 // capture from Claude Code's own request ids: the per-subagent
 // X-Claude-Code-Agent-Id resolves through the agent-id→dispatch binding
