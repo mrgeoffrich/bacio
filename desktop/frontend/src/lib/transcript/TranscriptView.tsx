@@ -34,10 +34,18 @@ import { parse } from './parse';
 import { pair } from './pair';
 import { formatKilo, summariseTokens } from './tokenSummary';
 import { rendererFor } from './tools/index';
-import type { EvalComment, RenderItem } from './types';
+import type { EvalComment, ParseResult, RenderItem } from './types';
 
 type TranscriptViewProps = {
-  source: string;
+  // The raw .jsonl body to parse. The default source for a Claude Code
+  // subagent transcript. Mutually exclusive with `parsed`: pass exactly one.
+  source?: string;
+  // A pre-built ParseResult, for callers whose transcript was parsed
+  // elsewhere (BACI-308: the proxy-captured AnthropicTranscript adapted via
+  // anthropicTranscriptToParseResult). When present, `source` is ignored and
+  // no .jsonl parsing happens — the rest of the view (minimap, filters, cards,
+  // token totals) is identical.
+  parsed?: ParseResult;
   filename?: string;
   sizeBytes?: number;
   // BACI-141: eval comments to render inline with the matching
@@ -68,6 +76,7 @@ function copyToClipboard(text: string) {
 
 export default function TranscriptView({
   source,
+  parsed: parsedProp,
   filename,
   sizeBytes,
   evalComments,
@@ -75,8 +84,13 @@ export default function TranscriptView({
 }: TranscriptViewProps): React.ReactElement {
   // Parse + pair is a useMemo on `source` so a no-op refetch (the
   // 10s brief poll handing us the same body string back) re-uses the
-  // same arrays and React skips the per-card re-render.
-  const parsed = useMemo(() => parse(source), [source]);
+  // same arrays and React skips the per-card re-render. A caller that
+  // already has a ParseResult (BACI-308's adapted proxy transcript) passes
+  // it directly and the .jsonl parse is skipped entirely.
+  const parsed = useMemo(
+    () => parsedProp ?? parse(source ?? ''),
+    [parsedProp, source],
+  );
   const items = useMemo<RenderItem[]>(() => pair(parsed.events), [parsed.events]);
   const tokens = useMemo(() => summariseTokens(parsed.events), [parsed.events]);
 

@@ -16,7 +16,60 @@ import { Call as $Call, CancellablePromise as $CancellablePromise, Create as $Cr
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as model$0 from "../internal/model/models.js";
+
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as $models from "./models.js";
+
+/**
+ * Capture returns the BACI-306 parsed detail of one captured Anthropic SSE
+ * turn (proxy_messages row), keyed on the proxy_requests id. Errors when the
+ * capture wasn't parseable. The snake_case model.ProxyMessage shape is aligned
+ * to the React transcript types, so the binding returns it directly.
+ */
+export function Capture(id: number): $CancellablePromise<model$0.ProxyMessage | null> {
+    return $Call.ByID(2490313523, id).then(($result: any) => {
+        return $$createType1($result);
+    });
+}
+
+/**
+ * CaptureRaw returns the raw, auth-redacted .http capture text for one
+ * proxy_requests id — the escape hatch the sheet falls back to for a capture
+ * that isn't a parseable Anthropic turn. Errors (surfaced to the frontend)
+ * when the row has no raw file or it's been pruned.
+ */
+export function CaptureRaw(id: number): $CancellablePromise<string> {
+    return $Call.ByID(2488914227, id);
+}
+
+/**
+ * JobTranscript returns the BACI-306 assembled per-job transcript for a
+ * dispatch — the ordered primary-thread messages, summed usage, and auxiliary
+ * turns. Errors when the dispatch has no parsed captures. The snake_case
+ * model.AnthropicTranscript shape is aligned to the React transcript types, so
+ * the adapter consumes it directly.
+ */
+export function JobTranscript(dispatchID: number): $CancellablePromise<model$0.AnthropicTranscript | null> {
+    return $Call.ByID(611803632, dispatchID).then(($result: any) => {
+        return $$createType3($result);
+    });
+}
+
+/**
+ * ListCaptures returns the BACI-308 filtered capture list the Monitor sheet
+ * walks an FQDN row down into — newest-first, capped, each row enriched with
+ * its dispatch's issue-key + mode. host scopes to one upstream; dispatchID > 0
+ * scopes to one job; anthropicOnly keeps only the parseable message-API
+ * captures; sinceDays > 0 windows to a rolling lookback (0 = all-time, the same
+ * sentinel ProxyStats uses). The returned slice is always non-nil.
+ */
+export function ListCaptures(host: string, dispatchID: number, anthropicOnly: boolean, sinceDays: number): $CancellablePromise<$models.ProxyCaptureRowDTO[]> {
+    return $Call.ByID(3129455208, host, dispatchID, anthropicOnly, sinceDays).then(($result: any) => {
+        return $$createType5($result);
+    });
+}
 
 /**
  * ProxyStats returns the per-FQDN proxy-traffic rollup, busiest host
@@ -28,10 +81,16 @@ import * as $models from "./models.js";
  */
 export function ProxyStats(sinceDays: number): $CancellablePromise<$models.ProxyFQDNStatDTO[]> {
     return $Call.ByID(56970572, sinceDays).then(($result: any) => {
-        return $$createType1($result);
+        return $$createType7($result);
     });
 }
 
 // Private type creation functions
-const $$createType0 = $models.ProxyFQDNStatDTO.createFrom;
-const $$createType1 = $Create.Array($$createType0);
+const $$createType0 = model$0.ProxyMessage.createFrom;
+const $$createType1 = $Create.Nullable($$createType0);
+const $$createType2 = model$0.AnthropicTranscript.createFrom;
+const $$createType3 = $Create.Nullable($$createType2);
+const $$createType4 = $models.ProxyCaptureRowDTO.createFrom;
+const $$createType5 = $Create.Array($$createType4);
+const $$createType6 = $models.ProxyFQDNStatDTO.createFrom;
+const $$createType7 = $Create.Array($$createType6);
