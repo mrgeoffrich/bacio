@@ -227,6 +227,7 @@ The docs in this table are **contributor-facing** — they describe how the code
 | Dispatched-work pipeline (data model, matcher, channel, subagent delegation) | [`docs/agent-dispatch.md`](docs/agent-dispatch.md) | Before touching `internal/dispatcher` / `internal/channel` / `prompts/agents/`. |
 | TUI patterns | [`docs/tui-cookbook.md`](docs/tui-cookbook.md) | Before any non-trivial work in `internal/tui/` — bubbletea v1, not v2. |
 | Markdown rendering | [`docs/markdown-rendering.md`](docs/markdown-rendering.md) | Before touching markdown rendering on any surface. |
+| Motion layout animations | [`docs/motion-layout-animations.md`](docs/motion-layout-animations.md) | Before touching card-movement animations on the React surfaces — the Pipeline cards or the ship flourish. |
 | Per-worktree environments | [`docs/worktree-environments.md`](docs/worktree-environments.md) | Before touching `internal/wtenv/` or anything that resolves a DB / port / log dir. |
 | File logging | [`docs/logging.md`](docs/logging.md) | When debugging a long-running process or adding a new structured log emitter. |
 | Background sync | [`docs/background-sync.md`](docs/background-sync.md) | Before touching `internal/sync/` or the sync UI. |

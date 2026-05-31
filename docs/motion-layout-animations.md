@@ -35,7 +35,9 @@ Two consequences that bite if you forget them:
 1. **`strict` mode forbids the full `motion.*` component.** You must use the short
    form **`m.article`, `m.div`, …** imported as `import { m } from 'motion/react'`.
    Writing `motion.div` inside the `strict` provider throws at runtime. This is why
-   `KanbanCard` and `PipelineView` use `<m.article>` everywhere.
+   `PipelineView` wraps each pipeline card in a plain `<m.div layout>`
+   (`PipelineView.jsx:429`) and `ShippedPill` uses an `<m.div>` for its flight slot
+   (`ShippedPill.jsx:40`).
 2. **`domMax` is the feature bundle that includes layout animations + drag.** The
    smaller `domAnimation` bundle does *not* include layout projection, so `layout` /
    `layoutId` would silently no-op. We use `domMax`, so layout animations are live.
@@ -68,8 +70,9 @@ Variants:
   produces a squash/stretch distortion.
 - **`layout="size"`** — animate size only.
 
-In this repo `KanbanCard` uses bare `layout` (position + size) — see
-`src/components/KanbanCard.jsx`.
+In this repo the Pipeline's in-pipeline stage cards use bare `layout` (position +
+size) on the `<m.div>` wrapper that holds each card — see
+`src/components/PipelineView.jsx:429`.
 
 ---
 
@@ -85,17 +88,32 @@ animates the transition from one to the other when one unmounts and the other mo
 > In a shared (`layoutId`) transition, **the transition of the element being animated
 > *to* is the one that's used** — not the source's. Tune timing on the destination.
 
-This is exactly the kanban → Shipped-pill "ship flourish": `KanbanCard` sets
-`layoutId={card.key}`; when the card transitions to `done`, the destination slot
-inside `ShippedPopover`/`ShippedPill` renders with the **same** `layoutId`, and Motion
-flies the card between the two subtrees. See the comment block at
-`src/components/KanbanCard.jsx:217`.
+This is the mechanism behind the Pipeline → Shipped-pill "ship flourish" (BACI-193):
+`useShipFlourish` (`src/lib/shipFlourish.ts`) watches the `cards` array and stamps the
+key of a card that just transitioned into `done` as `flyingKey`; the destination slot
+inside `ShippedPill` then renders an `<m.div layoutId={flyingKey}>`
+(`src/components/ShippedPill.jsx:40`), threaded down via
+`App.jsx` → `PipelineView` → `ShippedPopover`. The `<LayoutGroup id="kanban">` at
+`App.jsx:1178` wraps both ends so a shared transition can cross subtrees.
 
-> **`LazyMotion` + `layoutId` namespacing gotcha.** There's a note at
-> `src/App.jsx:972` — Motion namespaces `layoutId`s per subtree/group; a stray
-> `LayoutGroup` boundary or duplicate id can stop the match. If a shared transition
-> "teleports" instead of flying, check both ends share the *exact* id and aren't
-> split across two `LayoutGroup`s.
+> **Known gap — the flight currently has no source.** As documented this should be a
+> card→pill flight: the leaving pipeline card supplies the *source* `layoutId` and
+> Motion bridges it to the destination slot. But the source `layoutId` lived on the old
+> `KanbanCard.jsx`, which was removed in BACI-279 — the Pipeline card is now a plain
+> `<article>` wrapped in `<m.div layout>` (`PipelineView.jsx:429`) with **no
+> `layoutId`**, and it has not been re-added. The only surviving `layoutId=` assignment
+> in the whole frontend is the *destination* slot at `ShippedPill.jsx:42`. So today the
+> destination just mounts in place (there's nothing to fly *from*) and the visible
+> "flourish" is the pill's `.is-flash` pulse, not an actual flight. Re-adding the source
+> `layoutId` to restore the flight is a code change, out of scope for this doc — flagged
+> here so the gap is honest. The conceptual explanation of `layoutId` transitions below
+> is still correct vendor reference.
+
+> **`LazyMotion` + `layoutId` namespacing gotcha.** See the `<LayoutGroup id="kanban">`
+> block at `src/App.jsx:1173-1178` — Motion namespaces `layoutId`s per subtree/group; a
+> stray `LayoutGroup` boundary or duplicate id can stop the match. If a shared
+> transition "teleports" instead of flying, check both ends share the *exact* id and
+> aren't split across two `LayoutGroup`s.
 
 For `layoutId` elements that should animate **out**, wrap in `AnimatePresence` (§4):
 
@@ -109,12 +127,28 @@ For `layoutId` elements that should animate **out**, wrap in `AnimatePresence` (
 
 ## 3. Configuring the movement animation (`transition.layout`)
 
-This is the knob for "how the card moves." A `transition` applies to *all* animating
-values; give layout its **own** sub-key so the move timing is independent of
-opacity/scale:
+This is the knob for "how the card moves." **What `PipelineView` does today** is the
+minimal form — one plain `transition` covering layout *and* the opacity enter/exit, no
+per-key split:
 
 ```jsx
-<m.article
+<m.div
+  layout
+  initial={{ opacity: 0 }}
+  animate={{ opacity: 1 }}
+  exit={{ opacity: 0 }}
+  transition={{ duration: 0.2 }}
+/>
+```
+
+(`src/components/PipelineView.jsx:429-435`.)
+
+**Recommended pattern when you want independent timings.** A `transition` applies to
+*all* animating values; give layout its **own** sub-key so the move timing is
+independent of opacity/scale:
+
+```jsx
+<m.div
   layout
   animate={{ opacity: 1, scale: 1 }}
   transition={{
@@ -125,8 +159,8 @@ opacity/scale:
 />
 ```
 
-That is verbatim what `KanbanCard` does. `PipelineView` passes `layoutEase` down so
-the easing curve is consistent across surfaces.
+This is the recommended form, **not** what the Pipeline card does today — reach for it
+if you need the move and the fade to run at different speeds.
 
 ### 3a. Tween (duration + easing curve) — what we use now
 
@@ -186,13 +220,22 @@ Cards leaving a column (or moving between Pipeline sections) need to animate **o
 A component removed from the React tree normally vanishes instantly; `AnimatePresence`
 keeps it mounted long enough to play its `exit` prop.
 
+What `PipelineView` does today (the in-pipeline stage list,
+`src/components/PipelineView.jsx:427-459`):
+
 ```jsx
-<AnimatePresence mode="popLayout" initial={false}>
-  {list.map(card => <KanbanCard key={card.key} card={card} … />)}
+<AnimatePresence mode="sync" initial={false}>
+  {inPipeline.map(card => (
+    <m.div key={card.key} layout
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      transition={{ duration: 0.2 }}>
+      <StageCard card={card} … />
+    </m.div>
+  ))}
 </AnimatePresence>
 ```
 
-Rules that matter (all of these are load-bearing in `PipelineView`/`Board`):
+Rules that matter (load-bearing in `PipelineView`):
 
 - **Stable, unique `key` per child.** Use `card.key`, never the array index —
   reordering with index keys breaks the key↔component association and the animation
@@ -214,9 +257,10 @@ Rules that matter (all of these are load-bearing in `PipelineView`/`Board`):
 ### `popLayout` requires a forwarded ref
 
 When `mode="popLayout"`, a **custom component child must forward a ref to its DOM
-node** (`React.forwardRef`), or Motion can't pop it out of flow. This is why
-`KanbanCard` takes a `ref` and forwards it to `<m.article ref={ref}>`. If you wrap
-cards in a new custom component, forward the ref or popLayout breaks.
+node** (`React.forwardRef`), or Motion can't pop it out of flow. The Pipeline list
+uses `mode="sync"` today (its direct child is a `<m.div>`, which already owns its DOM
+node), so this doesn't bite — but if you switch a card list to `popLayout` and wrap the
+cards in a *custom* component, forward the ref or popLayout breaks.
 
 Also, with `popLayout`, the **animating parent must have `position` other than
 `static`** (e.g. `relative`) so popped children keep their position.
@@ -235,8 +279,9 @@ import { LayoutGroup } from 'motion/react';
 </LayoutGroup>
 ```
 
-`App.jsx` already imports `LayoutGroup`. Note it also **namespaces `layoutId`s** — see
-the §2 gotcha.
+`App.jsx` wraps the Topbar + main view in one `<LayoutGroup id="kanban">`
+(`src/App.jsx:1178`) so the ship-flourish's two ends share a namespace. Note that
+`LayoutGroup` also **namespaces `layoutId`s** — see the §2 gotcha.
 
 Related advanced props (rarely needed here):
 
@@ -260,11 +305,13 @@ These are the usual suspects when "the cards don't move smoothly":
    the child too, so Motion counter-scales it.
 3. **`borderRadius` and `boxShadow` distort mid-flight** unless they're set via
    `style` / `animate` (not a CSS class or CSS variable). Motion can only scale-correct
-   them when it owns the value. `KanbanCard` works around this by applying an **inline**
-   `borderRadius`/`boxShadow` *only while animating* (gated on
-   `onLayoutAnimationStart`/`onLayoutAnimationComplete`) — see
-   `src/components/KanbanCard.jsx`. If a moving card's corners or shadow flicker, this
-   is why.
+   them when it owns the value. The old `KanbanCard` worked around this by applying an
+   **inline** `borderRadius`/`boxShadow` *only while animating* (gated on
+   `onLayoutAnimationStart`/`onLayoutAnimationComplete`); that card was removed in
+   BACI-279 and the current Pipeline card (`PipelineView.jsx:429`) does **not** carry the
+   workaround — it animates opacity/position only, not size, so corners/shadow don't
+   flicker. If you re-introduce a size-changing card and its corners or shadow flicker,
+   this is the technique to reach for.
 4. **Aspect-ratio changes squash content** → use `layout="position"` so size snaps and
    only position animates.
 5. **Shared (`layoutId`) transition uses the *destination's* transition**, not the
@@ -287,9 +334,7 @@ These are the usual suspects when "the cards don't move smoothly":
 
 | File | What it does with Motion |
 |------|--------------------------|
-| `src/App.jsx` | `LazyMotion features={domMax} strict` provider; `LayoutGroup`; ship-flourish `layoutId` namespacing note. |
-| `src/components/KanbanCard.jsx` | The card itself: `m.article` with `layout`, `layoutId={card.key}`, `transition.layout`, enter/exit, and the borderRadius/boxShadow mid-flight workaround. Forwards `ref` for `popLayout`. |
-| `src/components/PipelineView.jsx` | Pipeline page: three drop zones, `AnimatePresence mode="popLayout"` per section, `m.article` stage wrapper, passes `layoutEase` to cards. |
-| `src/components/Board.jsx` | Kanban columns: per-column `AnimatePresence`; cards reorder/move via shared `layoutId`. |
-| `src/components/ShippedPopover.jsx`, `ShippedPill.jsx` | Destination ends of the ship-flourish `layoutId` flight. |
-| `src/lib/shipFlourish.ts` | Helpers for the ship animation. |
+| `src/App.jsx` | `LazyMotion features={domMax} strict` provider (line 1168); `<LayoutGroup id="kanban">` wrapping Topbar + main view (line 1178) so the ship-flourish ends share a `layoutId` namespace. |
+| `src/components/PipelineView.jsx` | Pipeline page: the in-pipeline stage list runs `AnimatePresence mode="sync"`, each card wrapped in `<m.div layout>` with opacity enter/exit and `transition={{ duration: 0.2 }}` (line 429). Threads `flyingShipKey`/`shipFlashing` down to the Shipped pill. |
+| `src/components/ShippedPopover.jsx`, `ShippedPill.jsx` | The ship-flourish *destination* slot: `ShippedPill` renders `<m.div layoutId={flyingKey}>` (line 42) when a flight is in progress. (The matching *source* `layoutId` on the pipeline card was removed with `KanbanCard.jsx` and not re-added — see the §2 known-gap note.) |
+| `src/lib/shipFlourish.ts` | `useShipFlourish` hook: watches the `cards` array, stamps the `flyingKey` for a card transitioning into `done`, and fans the ship out to the SFX callback. |

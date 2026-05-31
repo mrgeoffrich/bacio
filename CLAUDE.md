@@ -16,6 +16,7 @@ Read the relevant doc **before** you start planning a change — these shape the
 | [`docs/agent-dispatch.md`](docs/agent-dispatch.md) | Touching `internal/dispatcher` / `internal/channel` / `prompts/agents/` or anything in the dispatch pipeline. |
 | [`docs/tui-cookbook.md`](docs/tui-cookbook.md) | Non-trivial work in `internal/tui/`. **bubbletea v1.3.10**, not v2 — upstream READMEs have moved to v2 and will mislead you. |
 | [`docs/markdown-rendering.md`](docs/markdown-rendering.md) | Touching markdown rendering on any surface. Rule: every React read surface goes through `<MarkdownView>` (never `react-markdown` directly); TUI goes through `renderMarkdown`. |
+| [`docs/motion-layout-animations.md`](docs/motion-layout-animations.md) | Touching card-movement animations on the React surfaces — the Pipeline cards or the ship flourish (Motion, pinned at v11.18.2). |
 | [`docs/worktree-environments.md`](docs/worktree-environments.md) | Touching `internal/wtenv/` or anything that resolves a DB / port / log dir. |
 | [`docs/web-app-mode.md`](docs/web-app-mode.md) | Changing the seam between Wails and HTTP transports (`desktop/frontend/src/api.ts` and friends). |
 | [`docs/background-sync.md`](docs/background-sync.md) | Touching `internal/sync/` or the sync UI. |
