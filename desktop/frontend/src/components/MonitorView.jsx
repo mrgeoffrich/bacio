@@ -9,6 +9,7 @@ import {
   formatErrorRate,
   formatMs,
 } from '../lib/proxyStats';
+import MonitorCaptureSheet from './MonitorCaptureSheet';
 
 // Silent-refresh cadence — matches the 10s POLL_INTERVAL_MS the rest of
 // the web/desktop surfaces poll on (App.jsx defines its own per-file; the
@@ -44,6 +45,8 @@ export default function MonitorView() {
   // the server already returns, so the initial render is a no-op sort.
   const [sortKey, setSortKey] = useState('requestCount');
   const [sortDir, setSortDir] = useState('desc'); // 'asc' | 'desc'
+  // BACI-308 drill-down: the FQDN the capture sheet is open on (null = closed).
+  const [selectedHost, setSelectedHost] = useState(null);
 
   // Fetch on scope change (with a loading flicker) and on a 10s interval
   // (silent — keeps the table fresh without a flash). The interval is
@@ -118,41 +121,56 @@ export default function MonitorView() {
         </label>
       </header>
 
-      <div className="mk-monitor-table">
-        <div className="mk-monitor-head">
-          {COLUMNS.map(col => {
-            const active = sortKey === col.key;
-            return (
-              <button
-                key={col.key}
-                type="button"
-                className={`mk-monitor-th${col.numeric ? ' is-numeric' : ''}${active ? ' is-sorted' : ''}`}
-                onClick={() => onSort(col)}
-                aria-sort={active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
-              >
-                {col.label}
-                {active && <span className="mk-monitor-caret">{sortDir === 'asc' ? '▲' : '▼'}</span>}
-              </button>
-            );
-          })}
-        </div>
-        {loading ? (
-          <div className="mk-monitor-empty">Loading…</div>
-        ) : sorted.length === 0 ? (
-          <div className="mk-monitor-empty">No proxy traffic captured.</div>
-        ) : (
-          sorted.map(s => (
-            <div key={s.host} className="mk-monitor-row">
-              {COLUMNS.map(col => (
-                <span
+      <div className={`mk-monitor-split${selectedHost ? ' is-open' : ''}`}>
+        <div className="mk-monitor-table">
+          <div className="mk-monitor-head">
+            {COLUMNS.map(col => {
+              const active = sortKey === col.key;
+              return (
+                <button
                   key={col.key}
-                  className={`mk-monitor-cell${col.numeric ? ' is-numeric' : ''}${col.key === 'host' ? ' mk-mono' : ''}`}
+                  type="button"
+                  className={`mk-monitor-th${col.numeric ? ' is-numeric' : ''}${active ? ' is-sorted' : ''}`}
+                  onClick={() => onSort(col)}
+                  aria-sort={active ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
                 >
-                  {col.render(s)}
-                </span>
-              ))}
-            </div>
-          ))
+                  {col.label}
+                  {active && <span className="mk-monitor-caret">{sortDir === 'asc' ? '▲' : '▼'}</span>}
+                </button>
+              );
+            })}
+          </div>
+          {loading ? (
+            <div className="mk-monitor-empty">Loading…</div>
+          ) : sorted.length === 0 ? (
+            <div className="mk-monitor-empty">No proxy traffic captured.</div>
+          ) : (
+            sorted.map(s => (
+              <button
+                key={s.host}
+                type="button"
+                className={`mk-monitor-row${selectedHost === s.host ? ' is-selected' : ''}`}
+                onClick={() => setSelectedHost(s.host)}
+                aria-pressed={selectedHost === s.host}
+              >
+                {COLUMNS.map(col => (
+                  <span
+                    key={col.key}
+                    className={`mk-monitor-cell${col.numeric ? ' is-numeric' : ''}${col.key === 'host' ? ' mk-mono' : ''}`}
+                  >
+                    {col.render(s)}
+                  </span>
+                ))}
+              </button>
+            ))
+          )}
+        </div>
+
+        {selectedHost && (
+          <MonitorCaptureSheet
+            host={selectedHost}
+            onClose={() => setSelectedHost(null)}
+          />
         )}
       </div>
     </div>

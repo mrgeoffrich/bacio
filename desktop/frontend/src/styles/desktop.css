@@ -1743,7 +1743,7 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
 }
 .mk-features-emoji-cell:hover { background: var(--bg-3); }
 .mk-features-emoji-cell.is-active {
-  border-color: var(--accent-1);
+  border-color: var(--status-claude);
   background: var(--bg-3);
 }
 .mk-features-emoji-custom {
@@ -1757,7 +1757,7 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   padding: 4px 8px;
   font-family: var(--font-sans); font-size: var(--text-sm);
 }
-.mk-features-emoji-input:focus { outline: 1px solid var(--accent-1); outline-offset: -1px; }
+.mk-features-emoji-input:focus { outline: 1px solid var(--status-claude); outline-offset: -1px; }
 .mk-features-emoji-clear {
   appearance: none; -webkit-appearance: none;
   background: transparent; color: var(--fg-2);
@@ -1841,7 +1841,7 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   transition: border-color var(--dur-fast) var(--ease-out);
 }
 .mk-features-prop-input-wrap:focus-within {
-  border-color: var(--accent-1);
+  border-color: var(--status-claude);
 }
 .mk-features-prop-input-wrap .mk-icon {
   width: 14px; height: 14px;
@@ -2282,18 +2282,214 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
 .mk-monitor-th.is-sorted { color: var(--fg-1); }
 .mk-monitor-caret { font-size: 8px; }
 .mk-monitor-row {
+  /* BACI-308: the row is now a button (clickable drill-down), so reset the
+     native button chrome and keep the grid layout from the shared rule above. */
+  appearance: none;
+  width: 100%;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--border-1);
+  cursor: pointer;
+  text-align: left;
   font-family: var(--font-sans);
   font-size: var(--text-sm);
   color: var(--fg-2);
-  border-bottom: 1px solid var(--border-1);
 }
 .mk-monitor-row:last-child { border-bottom: 0; }
+.mk-monitor-row:hover { background: var(--bg-3); }
+.mk-monitor-row.is-selected { background: var(--bg-3); box-shadow: inset 2px 0 0 var(--status-claude); }
 .mk-monitor-cell {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .mk-monitor-cell.is-numeric { text-align: right; color: var(--fg-1); }
+
+/* BACI-308: capture drill-down — the FQDN table shrinks left and the
+   right-docked sheet (flex sibling, not a modal) walks captures → one
+   capture → the job transcript. Same docked-panel idiom as the rest of
+   the app. */
+.mk-monitor-split {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 12px;
+}
+.mk-monitor-split .mk-monitor-table { flex: 1; }
+.mk-monitor-split.is-open .mk-monitor-table { flex: 0 0 38%; }
+.mk-monitor-sheet {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  background: var(--bg-2);
+  overflow: hidden;
+}
+.mk-monitor-sheet-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--bg-3);
+  border-bottom: 1px solid var(--border-1);
+  flex-shrink: 0;
+}
+.mk-monitor-sheet-crumbs {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  color: var(--fg-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mk-monitor-crumb {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  color: var(--status-claude);
+}
+.mk-monitor-crumb.is-current { color: var(--fg-2); cursor: default; }
+.mk-monitor-sheet-close {
+  appearance: none;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  color: var(--fg-3);
+  font-size: var(--text-md);
+  line-height: 1;
+  padding: 2px 6px;
+}
+.mk-monitor-sheet-close:hover { color: var(--fg-1); }
+.mk-monitor-sheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Capture list inside the sheet */
+.mk-capture-list-note {
+  padding: 6px 12px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-4);
+}
+.mk-capture-row {
+  appearance: none;
+  width: 100%;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--border-1);
+  cursor: pointer;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+}
+.mk-capture-row:hover { background: var(--bg-3); }
+.mk-capture-row-main {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.mk-capture-status {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--fg-3);
+  flex-shrink: 0;
+}
+.mk-capture-status.is-error { color: var(--status-error); }
+.mk-capture-path {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--fg-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mk-capture-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--fg-4);
+}
+.mk-capture-chip {
+  font-weight: 600;
+  color: var(--fg-2);
+  background: var(--bg-3);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
+  padding: 1px 6px;
+}
+.mk-capture-tag {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--status-claude);
+}
+
+/* Capture detail (raw + parsed summary) */
+.mk-capture-detail { padding: 12px; }
+.mk-capture-detail-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.mk-capture-detail-facts {
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  color: var(--fg-3);
+}
+.mk-capture-summary {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  background: var(--bg-3);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  color: var(--fg-2);
+}
+.mk-capture-banner {
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  color: var(--fg-4);
+  background: var(--bg-3);
+  border-radius: var(--radius-sm);
+}
+.mk-capture-raw {
+  margin: 0;
+  padding: 12px;
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  color: var(--fg-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-x: auto;
+}
 
 /* ============================================================
    Issue workspace (BACI-54) — full-screen routed per-issue view
