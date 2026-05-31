@@ -103,6 +103,9 @@ func Open(path string) (*Store, error) {
 	if err := pruneProxyRequests(db, ProxyRequestRetention); err != nil {
 		fmt.Fprintln(os.Stderr, "bacio: warning: proxy-request prune failed:", err)
 	}
+	if err := pruneProxyMessages(db, ProxyRequestRetention); err != nil {
+		fmt.Fprintln(os.Stderr, "bacio: warning: proxy-message prune failed:", err)
+	}
 	return &Store{DB: db}, nil
 }
 
@@ -151,6 +154,16 @@ func pruneHistory(db *sql.DB, retention time.Duration) error {
 func pruneProxyRequests(db *sql.DB, retention time.Duration) error {
 	cutoff := time.Now().Add(-retention).UTC().Format("2006-01-02 15:04:05")
 	_, err := db.Exec(`DELETE FROM proxy_requests WHERE started_at < ?`, cutoff)
+	return err
+}
+
+// pruneProxyMessages deletes BACI-306 parsed-message rows whose started_at is
+// older than retention. Bounds the per-job transcript table on the same 60-day
+// window as the proxy_requests index it parses from — best-effort housekeeping
+// run on every Open, never fatal.
+func pruneProxyMessages(db *sql.DB, retention time.Duration) error {
+	cutoff := time.Now().Add(-retention).UTC().Format("2006-01-02 15:04:05")
+	_, err := db.Exec(`DELETE FROM proxy_messages WHERE started_at < ?`, cutoff)
 	return err
 }
 

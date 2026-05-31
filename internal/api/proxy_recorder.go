@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mrgeoffrich/bacio/internal/anthropic"
+	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/proxy"
 	"github.com/mrgeoffrich/bacio/internal/store"
 )
@@ -111,16 +113,21 @@ func (r *captureRecorder) Close() {
 	}
 }
 
-// persist does the off-path work for one observation: write the raw req/resp
-// file (best-effort) then insert the index row. Both failures are logged, not
-// returned — capture must never break the proxy.
+// persist does the off-path work for one observation: render the raw req/resp
+// capture, write it to disk (best-effort), insert the index row, then — for a
+// parseable Anthropic SSE capture — parse it into per-job message detail. Every
+// failure is logged, not returned — capture must never break the proxy.
 func (r *captureRecorder) persist(obs proxy.RequestObservation) {
 	started := obs.Started
 	if started.IsZero() {
 		started = time.Now()
 	}
 
-	rawPath := r.writeRaw(obs, started)
+	// Render once and reuse: the on-disk file and the BACI-306 parser both read
+	// the same inflated, redacted .http bytes, so the parser sees exactly what a
+	// reader of the file would.
+	rendered := renderRawCapture(obs)
+	rawPath := r.writeRaw(rendered, started)
 
 	if r.store == nil {
 		return
@@ -130,8 +137,10 @@ func (r *captureRecorder) persist(obs proxy.RequestObservation) {
 	// is an Anthropic message-API capture. These let BACI-306's per-job
 	// parser select exactly the parseable substrate.
 	contentType := baseContentType(obs.ResponseContentType)
+	isStream := contentType == "text/event-stream"
+	isAnthropic := isAnthropicCapture(obs.Host, obs.Path)
 	dispatchID := r.resolveDispatch(obs.ClaudeSessionID, obs.ClaudeAgentID)
-	if _, err := r.store.AddProxyRequest(store.AddProxyRequestIn{
+	pr, err := r.store.AddProxyRequest(store.AddProxyRequestIn{
 		Method:        obs.Method,
 		Host:          obs.Host,
 		Path:          obs.Path,
@@ -143,14 +152,59 @@ func (r *captureRecorder) persist(obs proxy.RequestObservation) {
 		StartedAt:     obs.Started,
 		EndedAt:       obs.Ended,
 		ContentType:   contentType,
-		IsStream:      contentType == "text/event-stream",
-		IsAnthropic:   isAnthropicCapture(obs.Host, obs.Path),
+		IsStream:      isStream,
+		IsAnthropic:   isAnthropic,
 		SessionID:     obs.ClaudeSessionID,
 		ClaudeAgentID: obs.ClaudeAgentID,
 		DispatchID:    dispatchID,
-	}); err != nil {
+	})
+	if err != nil {
 		r.logger.Error("proxy capture: index insert failed",
 			"err", err, "method", obs.Method, "host", obs.Host, "path", obs.Path)
+		return
+	}
+
+	// BACI-306: parse the parseable Anthropic SSE captures into per-job message
+	// detail. A truncated response can't be parsed (its gzip stream — every SSE
+	// response is gzipped — is incomplete and was written verbatim), so skip it;
+	// the non-stream count_tokens / error JSON shapes aren't message transcripts.
+	if isAnthropic && isStream && !obs.ResponseTruncated {
+		r.parseMessage(pr, rendered, dispatchID, started)
+	}
+}
+
+// parseMessage reconstructs one capture's assistant turn, classifies it against
+// the job's last thread state (primary thread vs auxiliary probe), and persists
+// it. Best-effort: a parse failure or a store hiccup is logged and swallowed so
+// a malformed capture never breaks the capture path.
+func (r *captureRecorder) parseMessage(pr *model.ProxyRequest, rendered []byte, dispatchID *int64, started time.Time) {
+	pc, err := anthropic.ParseCapture(rendered)
+	if err != nil {
+		// ErrNotStream is an expected defensive miss; a real decode error is
+		// worth a debug line but never fatal.
+		r.logger.Debug("proxy capture: parse failed — skipping message detail",
+			"proxy_request_id", pr.ID, "err", err)
+		return
+	}
+	prev, err := r.store.LatestThreadState(dispatchID)
+	if err != nil {
+		r.logger.Debug("proxy capture: thread-state lookup failed — assuming fresh thread",
+			"proxy_request_id", pr.ID, "err", err)
+		prev = anthropic.ThreadState{}
+	}
+	isPrimary, delta, _ := anthropic.Classify(pc, prev)
+	if _, err := r.store.AddProxyMessage(store.AddProxyMessageIn{
+		ProxyRequestID: pr.ID,
+		DispatchID:     dispatchID,
+		SessionID:      pr.SessionID,
+		ClaudeAgentID:  pr.ClaudeAgentID,
+		Capture:        pc,
+		Delta:          delta,
+		IsPrimary:      isPrimary,
+		StartedAt:      started,
+	}); err != nil {
+		r.logger.Error("proxy capture: message insert failed",
+			"err", err, "proxy_request_id", pr.ID)
 	}
 }
 
@@ -210,12 +264,13 @@ func (r *captureRecorder) resolveDispatch(sessionID, claudeAgentID string) *int6
 	return &id
 }
 
-// writeRaw writes the raw request + response capture for one observation to a
-// file under <logDir>/proxy/<date>/, returning the absolute path written (or
-// "" on any failure / when no log dir is configured). The directory is
-// created on demand (mkdir -p); a write failure is logged once and swallowed
-// so the index row still lands without a file reference.
-func (r *captureRecorder) writeRaw(obs proxy.RequestObservation, started time.Time) string {
+// writeRaw writes the pre-rendered raw request + response capture to a file
+// under <logDir>/proxy/<date>/, returning the absolute path written (or "" on
+// any failure / when no log dir is configured). The bytes are rendered by the
+// caller (renderRawCapture) so the on-disk file and the BACI-306 parser share
+// one render. The directory is created on demand (mkdir -p); a write failure is
+// logged once and swallowed so the index row still lands without a file reference.
+func (r *captureRecorder) writeRaw(rendered []byte, started time.Time) string {
 	if r.logDir == "" {
 		return ""
 	}
@@ -230,7 +285,7 @@ func (r *captureRecorder) writeRaw(obs proxy.RequestObservation, started time.Ti
 	// pre-assigned id (the index row's id isn't known until after the insert).
 	name := strconv.FormatInt(started.UnixNano(), 10) + ".http"
 	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, renderRawCapture(obs), 0o644); err != nil {
+	if err := os.WriteFile(path, rendered, 0o644); err != nil {
 		r.logger.Warn("proxy capture: write raw file failed — index row without raw file",
 			"path", path, "err", err)
 		return ""
