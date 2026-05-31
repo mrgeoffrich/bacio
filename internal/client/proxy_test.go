@@ -171,6 +171,70 @@ func TestRoundTripProxyCaptureRaw(t *testing.T) {
 	}
 }
 
+// TestRoundTripProxySearch seeds parsed proxy_messages rows once and asserts the
+// local and remote backends grep them identically — same match lines, same
+// newest-first order, same capture id / role / block / snippet — for BACI-320.
+// The roundtrip suite doesn't reflect-enumerate the interface, so this is
+// explicit, like TestRoundTripProxyCaptures.
+func TestRoundTripProxySearch(t *testing.T) {
+	p := newPair(t)
+	defer p.cleanup()
+	ctx := context.Background()
+
+	dispatchID := int64(99)
+	// Capture 1: needle in the assistant turn.
+	cap1 := &model.ParsedCapture{
+		Model: "claude-opus-4-8", SystemFP: "fp", MessageCount: 1,
+		Turn: model.AnthropicTurn{Blocks: []model.AnthropicBlock{{Type: "text", Text: "a stray token court appears"}}},
+	}
+	if _, err := p.store.AddProxyMessage(store.AddProxyMessageIn{
+		ProxyRequestID: 1, DispatchID: &dispatchID, SessionID: "sess",
+		Capture: cap1, IsPrimary: true, StartedAt: time.Now().Add(-2 * time.Minute),
+	}); err != nil {
+		t.Fatalf("seed cap1: %v", err)
+	}
+	// Capture 2: needle in the user delta.
+	cap2 := &model.ParsedCapture{
+		Model: "claude-opus-4-8", SystemFP: "fp", MessageCount: 3,
+		Turn: model.AnthropicTurn{Blocks: []model.AnthropicBlock{{Type: "text", Text: "ok"}}},
+	}
+	if _, err := p.store.AddProxyMessage(store.AddProxyMessageIn{
+		ProxyRequestID: 2, DispatchID: &dispatchID, SessionID: "sess",
+		Capture: cap2,
+		Delta:   []model.AnthropicMessage{{Role: "user", Content: []model.AnthropicBlock{{Type: "text", Text: "go to court now"}}}},
+		IsPrimary: true, StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("seed cap2: %v", err)
+	}
+
+	f := store.ProxyMessageFilter{Query: "court"}
+	local, err := p.local.SearchProxyMessages(ctx, f)
+	if err != nil {
+		t.Fatalf("local SearchProxyMessages: %v", err)
+	}
+	remote, err := p.remote.SearchProxyMessages(ctx, f)
+	if err != nil {
+		t.Fatalf("remote SearchProxyMessages: %v", err)
+	}
+	if len(local) != 2 || len(remote) != 2 {
+		t.Fatalf("match count mismatch: local=%d remote=%d", len(local), len(remote))
+	}
+	for i := range local {
+		x, y := local[i], remote[i]
+		if x.ProxyRequestID != y.ProxyRequestID || x.Role != y.Role ||
+			x.Block != y.Block || x.Snippet != y.Snippet {
+			t.Fatalf("match[%d] mismatch:\n local=%+v\n remote=%+v", i, x, y)
+		}
+	}
+	// Newest-first: capture 2 (user delta) leads, capture 1 (assistant) trails.
+	if local[0].ProxyRequestID != 2 || local[0].Role != "user" {
+		t.Fatalf("match[0] = %+v, want capture 2 / user (newest)", local[0])
+	}
+	if local[1].ProxyRequestID != 1 || local[1].Role != "assistant" {
+		t.Fatalf("match[1] = %+v, want capture 1 / assistant", local[1])
+	}
+}
+
 // assertSameRollup compares two rollups element-wise on the
 // JSON-transported fields (timestamps cross the wire as RFC 3339, so
 // compare with Equal rather than ==).

@@ -502,6 +502,15 @@ type Client interface {
 	ListProxyCaptures(ctx context.Context, f store.ProxyRequestFilter) ([]*model.ProxyCaptureRow, error)
 	ProxyCaptureRaw(ctx context.Context, id int64) ([]byte, error)
 
+	// ----- Content search (BACI-320) -----
+	// SearchProxyMessages greps the parsed proxy_messages bodies for a
+	// case-insensitive substring, returning one match line per matching content
+	// block (capture id + dispatch + role + block + snippet) so the reader can
+	// drill into `proxy capture <id>`. Cross-cutting like ProxyStats; the remote
+	// backend GETs /proxy/search. The returned slice is always non-nil (empty
+	// for no match).
+	SearchProxyMessages(ctx context.Context, f store.ProxyMessageFilter) ([]*model.ProxyMessageMatch, error)
+
 	// ----- Agent registry (local-only in v1; remote returns ErrLocalOnly) -----
 	// The agent registry records which AI agent sessions are alive
 	// against which repos, and which issues they're focused on.

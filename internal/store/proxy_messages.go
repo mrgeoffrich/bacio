@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/mrgeoffrich/bacio/internal/anthropic"
@@ -225,4 +226,228 @@ func scanProxyMessage(r rowScanner) (*model.ProxyMessage, error) {
 		v.DispatchID = &id
 	}
 	return &v, nil
+}
+
+// ProxyMessageFilter parameterises the BACI-320 content search over the parsed
+// proxy_messages bodies (`bacio proxy grep` / GET /proxy/search). Query is the
+// case-insensitive substring to find; Role ("assistant" | "user", optional)
+// scopes which column is scanned — assistant → the reconstructed turn (turn_json),
+// user → the request delta turns (delta_json), unset → both; Block (one of
+// "text"|"thinking"|"tool_use"|"tool_result", optional) keeps only matches found
+// in that block type. DispatchID / SessionID / ClaudeAgentID are the same
+// correlation filters ProxyRequestFilter carries (proxy_messages mirrors those
+// columns), Since is an inclusive lower bound on started_at (nil = no bound), and
+// Limit caps the match lines returned newest-first — <= 0 falls back to
+// defaultProxyListLimit, hard-capped at defaultProxyRequestLimit.
+type ProxyMessageFilter struct {
+	Query         string
+	Role          string
+	Block         string
+	DispatchID    *int64
+	SessionID     string
+	ClaudeAgentID string
+	Since         *time.Time
+	Limit         int
+}
+
+// SearchProxyMessages runs the BACI-320 content grep over the parsed message
+// bodies: a case-insensitive substring match keyed on Role (delta_json for the
+// user side, turn_json for the assistant side, or both), narrowed by the same
+// correlation/since filters the capture list uses. The SQL LIKE finds candidate
+// rows; the snippet is rendered in Go — each matched row's JSON is re-parsed into
+// AnthropicMessage[] / AnthropicTurn and its blocks are walked, so we match real
+// block content (never a raw JSON field name or an input_json_delta key) and emit
+// one ProxyMessageMatch per matching block. A truncated body (replaced with the
+// marker past MaxProxyMessageBody) won't parse into blocks, so such a row simply
+// yields no match line — the raw .http stays ground truth. Always returns
+// non-nil. Limit bounds the emitted match lines (the unit a reader counts), not
+// the rows scanned.
+func (s *Store) SearchProxyMessages(f ProxyMessageFilter) ([]*model.ProxyMessageMatch, error) {
+	limit := f.Limit
+	if limit <= 0 {
+		limit = defaultProxyListLimit
+	}
+	if limit > defaultProxyRequestLimit {
+		limit = defaultProxyRequestLimit
+	}
+
+	// Escape the LIKE wildcards in the needle so a literal % / _ in the search
+	// text matches literally (ESCAPE '\' below). SQLite LIKE is ASCII
+	// case-insensitive by default, so the needle isn't lowercased for the SQL;
+	// the Go block walk lowercases both sides for its own match.
+	pattern := "%" + likeEscape(f.Query) + "%"
+
+	q := `
+		SELECT proxy_request_id, dispatch_id, session_id, claude_agent_id,
+		       delta_json, turn_json
+		FROM proxy_messages`
+	var (
+		args   []any
+		wheres []string
+	)
+	switch f.Role {
+	case "user":
+		wheres = append(wheres, `delta_json LIKE ? ESCAPE '\'`)
+		args = append(args, pattern)
+	case "assistant":
+		wheres = append(wheres, `turn_json LIKE ? ESCAPE '\'`)
+		args = append(args, pattern)
+	default:
+		wheres = append(wheres, `(delta_json LIKE ? ESCAPE '\' OR turn_json LIKE ? ESCAPE '\')`)
+		args = append(args, pattern, pattern)
+	}
+	if f.DispatchID != nil {
+		wheres = append(wheres, "dispatch_id = ?")
+		args = append(args, *f.DispatchID)
+	}
+	if f.SessionID != "" {
+		wheres = append(wheres, "session_id = ?")
+		args = append(args, f.SessionID)
+	}
+	if f.ClaudeAgentID != "" {
+		wheres = append(wheres, "claude_agent_id = ?")
+		args = append(args, f.ClaudeAgentID)
+	}
+	if f.Since != nil {
+		wheres = append(wheres, "started_at >= ?")
+		args = append(args, f.Since.UTC().Format("2006-01-02 15:04:05"))
+	}
+	q += " WHERE " + strings.Join(wheres, " AND ")
+	// Newest-first, and cap the candidate rows scanned at the same hard ceiling
+	// the match-line limit uses — a row matching in many blocks could otherwise
+	// fan out, but the candidate scan stays bounded regardless.
+	q += " ORDER BY id DESC LIMIT ?"
+	args = append(args, defaultProxyRequestLimit)
+
+	rows, err := s.DB.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	needle := strings.ToLower(f.Query)
+	out := make([]*model.ProxyMessageMatch, 0)
+	for rows.Next() {
+		var (
+			proxyRequestID int64
+			dispatchID     sql.NullInt64
+			sessionID      string
+			claudeAgentID  string
+			deltaJSON      string
+			turnJSON       string
+		)
+		if err := rows.Scan(&proxyRequestID, &dispatchID, &sessionID, &claudeAgentID, &deltaJSON, &turnJSON); err != nil {
+			return nil, err
+		}
+		var dispPtr *int64
+		if dispatchID.Valid {
+			id := dispatchID.Int64
+			dispPtr = &id
+		}
+		base := func(role, block, snippet string) *model.ProxyMessageMatch {
+			return &model.ProxyMessageMatch{
+				ProxyRequestID: proxyRequestID,
+				DispatchID:     dispPtr,
+				Role:           role,
+				Block:          block,
+				Snippet:        snippet,
+				SessionID:      sessionID,
+				ClaudeAgentID:  claudeAgentID,
+			}
+		}
+
+		// User side — the request delta turns (a slice of messages). Walked only
+		// when Role isn't pinned to assistant.
+		if f.Role != "assistant" {
+			var delta []model.AnthropicMessage
+			if json.Unmarshal([]byte(deltaJSON), &delta) == nil {
+				for _, msg := range delta {
+					for _, b := range msg.Content {
+						if !blockAdmitted(f.Block, b.Type) {
+							continue
+						}
+						if snippet, ok := matchBlock(b, needle); ok {
+							out = append(out, base("user", b.Type, snippet))
+							if len(out) >= limit {
+								return out, rows.Err()
+							}
+						}
+					}
+				}
+			}
+		}
+
+		// Assistant side — the reconstructed turn. Walked only when Role isn't
+		// pinned to user.
+		if f.Role != "user" {
+			var turn model.AnthropicTurn
+			if json.Unmarshal([]byte(turnJSON), &turn) == nil {
+				for _, b := range turn.Blocks {
+					if !blockAdmitted(f.Block, b.Type) {
+						continue
+					}
+					if snippet, ok := matchBlock(b, needle); ok {
+						out = append(out, base("assistant", b.Type, snippet))
+						if len(out) >= limit {
+							return out, rows.Err()
+						}
+					}
+				}
+			}
+		}
+	}
+	return out, rows.Err()
+}
+
+// blockAdmitted reports whether a block of the given type passes the optional
+// --block scope (empty = every type admitted).
+func blockAdmitted(want, blockType string) bool {
+	return want == "" || want == blockType
+}
+
+// matchBlock extracts a block's searchable text by type and reports whether it
+// contains the (already-lowercased) needle, returning the collapsed snippet. The
+// extraction mirrors printAnthropicBlock's per-type fields so the matched snippet
+// reads the same way `proxy capture` renders that block:
+//   - text         → Text
+//   - thinking     → Thinking
+//   - tool_use     → Name + " " + Input
+//   - tool_result  → Content
+func matchBlock(b model.AnthropicBlock, needle string) (string, bool) {
+	var text string
+	switch b.Type {
+	case "text":
+		text = b.Text
+	case "thinking":
+		text = b.Thinking
+	case "tool_use":
+		text = strings.TrimSpace(b.Name + " " + string(b.Input))
+	case "tool_result":
+		text = string(b.Content)
+	default:
+		return "", false
+	}
+	if !strings.Contains(strings.ToLower(text), needle) {
+		return "", false
+	}
+	return collapseSnippet(text), true
+}
+
+// collapseSnippet collapses whitespace and caps a matched block body for the
+// match-line snippet. It mirrors the cli oneLine helper so the rendered snippet
+// matches how `proxy capture` shows a block; done in the store so both transports
+// emit an identical snippet.
+func collapseSnippet(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) > 160 {
+		s = s[:157] + "..."
+	}
+	return s
+}
+
+// likeEscape escapes the LIKE wildcard metacharacters (% _ \) in a search needle
+// so a literal occurrence matches literally under an `ESCAPE '\'` clause.
+func likeEscape(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return r.Replace(s)
 }

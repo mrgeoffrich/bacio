@@ -350,6 +350,23 @@ bounded by `pruneProxyMessages` on the same 60-day window as the index.
   as `text/plain`. The escape hatch for a capture that isn't a parseable
   Anthropic turn. 404 (not 500) when the row has no raw file or it's been
   pruned, so the UI treats "raw unavailable" as a clean miss.
+- `bacio proxy grep <text>` (alias `search`) / `GET /proxy/search?q=&role=&block=&dispatch_id=&session=&agent=&since=&from=&limit=`
+  (BACI-320) — the *content* filter complementing the BACI-308 *index* filter:
+  a case-insensitive substring search over the parsed message bodies
+  (`Store.SearchProxyMessages`). The SQL `LIKE` over `delta_json` / `turn_json`
+  finds candidate rows (with an `ESCAPE '\'` clause so a literal `%` in the
+  needle matches literally), then each matched row's JSON is re-parsed in Go and
+  its blocks walked, so the result is a clean per-block **snippet** (real block
+  text, never a raw JSON field name) rather than a raw-bytes hit. One match line
+  per matching block, each carrying the `proxy_requests` id so a reader can drill
+  into `proxy capture <id>` / `proxy raw <id>` — closing the search→drill-in
+  loop. `--role assistant|user` narrows which column is scanned, `--block` to one
+  block type, and the dispatch/session/agent/since filters mirror `captures`;
+  `--limit` caps the match lines (default 200, ceilinged at 500). `LIKE` over a
+  60-day single-dev table is sufficient — FTS5 is out of scope. A needle
+  containing characters JSON escapes (a literal quote, a newline) won't match the
+  JSON-escaped stored bytes; this is a plain-word forensic search, and the raw
+  `.http` stays ground truth via `proxy raw <id>`.
 
 Pre-306 captures are **not** retroactively parsed (no backfill); new
 traffic populates `proxy_messages` going forward. A `bacio proxy reparse`

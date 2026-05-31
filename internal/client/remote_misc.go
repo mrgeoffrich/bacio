@@ -202,6 +202,42 @@ func (c *remoteClient) ProxyCaptureRaw(ctx context.Context, id int64) ([]byte, e
 	return out, nil
 }
 
+// ----- Content search (BACI-320) -----
+
+func (c *remoteClient) SearchProxyMessages(ctx context.Context, f store.ProxyMessageFilter) ([]*model.ProxyMessageMatch, error) {
+	q := url.Values{}
+	q.Set("q", f.Query)
+	if f.Role != "" {
+		q.Set("role", f.Role)
+	}
+	if f.Block != "" {
+		q.Set("block", f.Block)
+	}
+	if f.DispatchID != nil {
+		q.Set("dispatch_id", strInt(*f.DispatchID))
+	}
+	if f.SessionID != "" {
+		q.Set("session", f.SessionID)
+	}
+	if f.ClaudeAgentID != "" {
+		q.Set("agent", f.ClaudeAgentID)
+	}
+	if f.Limit > 0 {
+		q.Set("limit", strInt(int64(f.Limit)))
+	}
+	if f.Since != nil {
+		q.Set("from", f.Since.UTC().Format("2006-01-02T15:04:05Z"))
+	}
+	var out []*model.ProxyMessageMatch
+	if err := c.do(ctx, http.MethodGet, "/proxy/search", q, nil, &out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = []*model.ProxyMessageMatch{}
+	}
+	return out, nil
+}
+
 // BlockersFor stays local-only (BACI-114). The kanban surface always
 // runs against the local DB / Wails / `bacio web`, never via `bacio
 // --remote`, so the bulk read has no HTTP analogue today.

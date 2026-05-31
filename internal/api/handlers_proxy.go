@@ -144,6 +144,101 @@ func (d deps) handleProxyCaptures(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// handleProxySearch serves the BACI-320 content grep over the parsed
+// proxy_messages bodies — the search→drill-in read `bacio proxy grep` consumes
+// (and the web Monitor could reuse). It greps delta_json / turn_json for the
+// required `q` substring (case-insensitive), optionally narrowed by `role`
+// (assistant | user), `block` (text | thinking | tool_use | tool_result), the
+// dispatch_id / session / agent correlation, and a `since` lookback (or `from`
+// absolute cutoff, mutually exclusive, mirroring /proxy/captures). `limit` caps
+// the match lines. Each match carries the proxy_requests id so the caller can
+// drill into /proxy/captures/{id}. Behind the bearer-token auth like
+// /proxy/stats (a UI/CLI read, not agent passthrough).
+func (d deps) handleProxySearch(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	var f store.ProxyMessageFilter
+
+	f.Query = q.Get("q")
+	if f.Query == "" {
+		writeError(w, http.StatusBadRequest, "invalid_input", "q is required", map[string]any{"field": "q"})
+		return
+	}
+
+	if v := q.Get("role"); v != "" {
+		if v != "assistant" && v != "user" {
+			writeError(w, http.StatusBadRequest, "invalid_input", "role must be assistant or user", map[string]any{"field": "role"})
+			return
+		}
+		f.Role = v
+	}
+
+	if v := q.Get("block"); v != "" {
+		switch v {
+		case "text", "thinking", "tool_use", "tool_result":
+			f.Block = v
+		default:
+			writeError(w, http.StatusBadRequest, "invalid_input", "block must be one of text, thinking, tool_use, tool_result", map[string]any{"field": "block"})
+			return
+		}
+	}
+
+	if v := q.Get("dispatch_id"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n <= 0 {
+			writeError(w, http.StatusBadRequest, "invalid_input", "dispatch_id must be a positive integer", map[string]any{"field": "dispatch_id"})
+			return
+		}
+		f.DispatchID = &n
+	}
+
+	f.SessionID = q.Get("session")
+	f.ClaudeAgentID = q.Get("agent")
+
+	if v := q.Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			writeError(w, http.StatusBadRequest, "invalid_input", "limit must be a non-negative integer", map[string]any{"field": "limit"})
+			return
+		}
+		f.Limit = n
+	}
+
+	since := q.Get("since")
+	from := q.Get("from")
+	if since != "" && from != "" {
+		writeError(w, http.StatusBadRequest, "invalid_input", "since and from are mutually exclusive", nil)
+		return
+	}
+	if since != "" {
+		dur, err := timeparse.Lookback(since)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), map[string]any{"field": "since"})
+			return
+		}
+		cutoff := time.Now().Add(-dur)
+		f.Since = &cutoff
+	}
+	if from != "" {
+		t, err := timeparse.Timestamp(from)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_input", "from: "+err.Error(), map[string]any{"field": "from"})
+			return
+		}
+		f.Since = &t
+	}
+
+	out, err := d.store.SearchProxyMessages(f)
+	if err != nil {
+		s, c := statusForError(err)
+		writeError(w, s, c, err.Error(), nil)
+		return
+	}
+	if out == nil {
+		out = []*model.ProxyMessageMatch{}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 // handleProxyCapture serves the BACI-306 parsed detail of one captured
 // Anthropic SSE turn, keyed on the proxy_requests id (the id the raw .http file
 // and `proxy stats` reference). 404 when that capture wasn't parseable
