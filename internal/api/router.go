@@ -186,7 +186,11 @@ func newRouter(d deps) http.Handler {
 	// gated on a disk/DB write. Constructed here so the proxy package stays
 	// free of the store and the log dir.
 	proxyRecorder := newCaptureRecorder(d.store, d.opts.LogDir, proxyLogger)
-	mux.Handle(proxy.PathPrefix+"/", proxy.New(upstreamURL, proxyLogger, proxyRecorder))
+	// clearStreamDeadline lifts the API server's 30s WriteTimeout / 15s
+	// ReadTimeout for this route only — a streaming Anthropic turn routinely
+	// outlives them, and the server-level deadline would otherwise cut the
+	// response mid-stream. See clearStreamDeadline in middleware.go.
+	mux.Handle(proxy.PathPrefix+"/", clearStreamDeadline(proxy.New(upstreamURL, proxyLogger, proxyRecorder)))
 
 	// Web UI bundle (BACI-30, gated by BACI-72): serve the browser-deployed
 	// React build at /ui/, with a 301 from the unslashed /ui to keep the

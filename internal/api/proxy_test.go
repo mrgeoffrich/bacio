@@ -2,8 +2,10 @@ package api_test
 
 import (
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -157,6 +159,60 @@ func TestProxyRoute_CapturesIndexRow(t *testing.T) {
 	}
 	if row.RawLogPath == "" {
 		t.Errorf("raw_log_path is empty — the capture file should have been written under %q", logDir)
+	}
+}
+
+// TestProxyRoute_StreamOutlivesWriteTimeout reproduces the bug where the API
+// server's WriteTimeout (server.go) cut a slow Anthropic turn mid-stream: the
+// connection's write deadline is set when the request is read, so an upstream
+// that responds after the timeout has its downstream relay fail on arrival,
+// and the agent receives a truncated SSE stream (no message_stop) and retries.
+// The fake upstream deliberately delays past a short front-server WriteTimeout
+// before replying; the assertion is that the /anthropic route's deadline-lift
+// (clearStreamDeadline + statusRecorder.Unwrap) lets the full stream through.
+func TestProxyRoute_StreamOutlivesWriteTimeout(t *testing.T) {
+	const (
+		writeTimeout  = 60 * time.Millisecond
+		upstreamDelay = 300 * time.Millisecond // > writeTimeout: the bug's trigger
+	)
+	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(upstreamDelay)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "event: message_stop\ndata: {}\n\n")
+	}))
+	defer up.Close()
+
+	dbPath := filepath.Join(t.TempDir(), "test.sqlite")
+	s, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := api.New(s, api.Options{ProxyUpstream: up.URL, DBPath: dbPath}, logger)
+
+	// A real server whose WriteTimeout is SHORTER than the upstream delay —
+	// httptest.NewServer doesn't apply http.Server timeouts, so build it here.
+	front := httptest.NewUnstartedServer(srv.Handler())
+	front.Config.WriteTimeout = writeTimeout
+	front.Start()
+	defer front.Close()
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Post(front.URL+"/anthropic/v1/messages",
+		"application/json", strings.NewReader(`{"hi":1}`))
+	if err != nil {
+		t.Fatalf("post through proxy: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read proxied body (stream cut by the %v server WriteTimeout?): %v", writeTimeout, err)
+	}
+	if !strings.Contains(string(body), "message_stop") {
+		t.Fatalf("proxied stream was truncated by the %v server WriteTimeout — got %q; "+
+			"clearStreamDeadline / statusRecorder.Unwrap did not lift the deadline", writeTimeout, body)
 	}
 }
 

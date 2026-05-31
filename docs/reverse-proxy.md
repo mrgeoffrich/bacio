@@ -36,6 +36,16 @@ this listener.
 - **SSE-safe:** `FlushInterval=-1` flushes after every write, so the
   streaming token responses (`text/event-stream`) arrive at the agent
   incrementally rather than buffering to EOF.
+- **No server write/read deadline on this route:** the API server sets a
+  protective `WriteTimeout: 30s` / `ReadTimeout: 15s` for the JSON handlers,
+  but those would be fatal here — the connection's write deadline is set when
+  the request is read, so a slow or rate-limited Anthropic turn that crosses
+  30s (time-to-first-byte *or* total stream) has its downstream relay fail on
+  arrival and the agent gets a truncated SSE stream (no `message_stop`) and
+  retries. `clearStreamDeadline` (in [`internal/api/middleware.go`](../internal/api/middleware.go))
+  lifts the deadline to a generous bound for the `/anthropic/*` route only,
+  reachable through the `requestLog` wrapper because `statusRecorder`
+  implements `Unwrap()` for `http.ResponseController`.
 - **Clean gateway errors:** an upstream dial/transport failure surfaces
   as a `502` (logged), not a panic.
 
