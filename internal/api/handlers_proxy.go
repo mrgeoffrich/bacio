@@ -135,37 +135,11 @@ func (d deps) handleProxyCaptures(w http.ResponseWriter, r *http.Request) {
 		f.Since = &t
 	}
 
-	rows, err := d.store.ListProxyRequestsFiltered(f)
+	out, err := d.store.ListProxyCapturesEnriched(f)
 	if err != nil {
 		s, c := statusForError(err)
 		writeError(w, s, c, err.Error(), nil)
 		return
-	}
-
-	// Enrich each correlated row with its dispatch's issue key + mode. The
-	// lookup is cached so a job's many captures cost one GetDispatch, and is
-	// best-effort: a deleted dispatch (ErrNotFound) just leaves the chip empty.
-	type chip struct {
-		key  string
-		mode string
-	}
-	chips := map[int64]chip{}
-	out := make([]*model.ProxyCaptureRow, 0, len(rows))
-	for _, pr := range rows {
-		row := &model.ProxyCaptureRow{ProxyRequest: *pr}
-		if pr.DispatchID != nil {
-			id := *pr.DispatchID
-			c, ok := chips[id]
-			if !ok {
-				if disp, derr := d.store.GetDispatch(id); derr == nil && disp != nil {
-					c = chip{key: disp.IssueKey, mode: string(disp.Mode)}
-				}
-				chips[id] = c
-			}
-			row.IssueKey = c.key
-			row.Mode = c.mode
-		}
-		out = append(out, row)
 	}
 	writeJSON(w, http.StatusOK, out)
 }

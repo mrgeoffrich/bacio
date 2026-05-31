@@ -22,9 +22,113 @@ func newProxyCmd() *cobra.Command {
 		Short: "Inspect reverse-proxy capture",
 	}
 	cmd.AddCommand(newProxyStatsCmd())
+	cmd.AddCommand(newProxyCapturesCmd())
 	cmd.AddCommand(newProxyCaptureCmd())
+	cmd.AddCommand(newProxyRawCmd())
 	cmd.AddCommand(newProxyJobCmd())
 	return cmd
+}
+
+// newProxyCapturesCmd is `bacio proxy captures` — the BACI-308 filtered
+// capture list the Monitor drill-down walks an FQDN stat row down into. It
+// scopes to a host (and optionally a dispatch / anthropic-only / lookback
+// window), newest-first and capped, each row enriched with its dispatch's
+// issue-key + mode. Read-only, so prefer `-o json` for the full rows.
+func newProxyCapturesCmd() *cobra.Command {
+	var (
+		host         string
+		dispatch     int64
+		anthropic    bool
+		anthropicSet bool
+		sinceStr     string
+		limit        int
+	)
+	cmd := &cobra.Command{
+		Use:   "captures",
+		Short: "List captured requests for a host (or a job)",
+		Long: `List the individual proxy captures behind a 'bacio proxy stats'
+host — the per-request rows the Monitor drill-down walks into (BACI-308). Scope
+with --host (the FQDN the rollup pivots on) and optionally --dispatch (one job's
+captures), --anthropic (only the parseable message-API captures), and --since (a
+lookback window). Rows are newest-first and capped; each carries its dispatch's
+issue key + mode where the capture correlates.
+
+  --since accepts a duration lookback: 30m, 1h, 1d, 2w`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := openClient()
+			if err != nil {
+				return err
+			}
+			defer c.Close()
+
+			f := store.ProxyRequestFilter{Host: host, Limit: limit}
+			if dispatch > 0 {
+				f.DispatchID = &dispatch
+			}
+			if anthropicSet {
+				f.IsAnthropic = &anthropic
+			}
+			if sinceStr != "" {
+				d, err := timeparse.Lookback(sinceStr)
+				if err != nil {
+					return err
+				}
+				cutoff := time.Now().Add(-d)
+				f.Since = &cutoff
+			}
+			rows, err := c.ListProxyCaptures(context.Background(), f)
+			if err != nil {
+				return err
+			}
+			return emit(rows)
+		},
+	}
+	cmd.Flags().StringVar(&host, "host", "", "scope to one upstream FQDN (e.g. api.anthropic.com)")
+	cmd.Flags().Int64Var(&dispatch, "dispatch", 0, "scope to one dispatch's captures")
+	cmd.Flags().BoolVar(&anthropic, "anthropic", false, "only the parseable Anthropic message-API captures")
+	cmd.Flags().StringVar(&sinceStr, "since", "", "look back this far (e.g. 30m, 1h, 1d, 2w)")
+	cmd.Flags().IntVar(&limit, "limit", 0, "max rows (0 for the default cap)")
+	cmd.PreRunE = func(cmd *cobra.Command, args []string) error {
+		anthropicSet = cmd.Flags().Changed("anthropic")
+		return nil
+	}
+	return cmd
+}
+
+// newProxyRawCmd is `bacio proxy raw <id>` — the BACI-308 raw .http capture
+// for one proxy_requests id: the inflated, auth-redacted req/resp bytes the
+// recorder wrote to disk. The escape hatch for a capture that isn't a
+// parseable Anthropic turn (a count_tokens probe, an error, a non-Anthropic
+// host). Returns not-found when the row has no raw file or it's been pruned.
+func newProxyRawCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "raw <id>",
+		Short: "Print the raw .http capture for one request",
+		Long: `Print the raw req/resp capture for one proxied request — the
+inflated, auth-redacted .http bytes the recorder wrote to disk (BACI-302/308).
+The id is the proxy_requests id (the id 'bacio proxy stats' / 'captures'
+reference). Use it to inspect a capture that isn't a parseable Anthropic turn
+(a count_tokens probe, an error reply, a non-Anthropic host). Returns not-found
+when the row has no raw file or the file has been pruned.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			id, err := strconv.ParseInt(args[0], 10, 64)
+			if err != nil || id <= 0 {
+				return fmt.Errorf("invalid capture id %q", args[0])
+			}
+			c, err := openClient()
+			if err != nil {
+				return err
+			}
+			defer c.Close()
+			raw, err := c.ProxyCaptureRaw(context.Background(), id)
+			if err != nil {
+				return err
+			}
+			cmd.OutOrStdout().Write(raw)
+			return nil
+		},
+	}
 }
 
 // newProxyCaptureCmd is `bacio proxy capture <id>` — the BACI-306 parsed detail

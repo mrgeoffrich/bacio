@@ -490,6 +490,18 @@ type Client interface {
 	AnthropicCapture(ctx context.Context, id int64) (*model.ProxyMessage, error)
 	JobTranscript(ctx context.Context, dispatchID int64) (*model.AnthropicTranscript, error)
 
+	// ----- Capture drill-down (BACI-308) -----
+	// ListProxyCaptures returns the filtered, newest-first, capped capture
+	// list the Monitor drill-down walks an FQDN stat row down into — each
+	// row enriched with its dispatch's issue-key + mode. Cross-cutting like
+	// ProxyStats; the remote backend GETs /proxy/captures. The returned
+	// slice is always non-nil (empty for no match). ProxyCaptureRaw returns
+	// the inflated, auth-redacted .http bytes for one capture; ErrNotFound
+	// when the row has no raw file or the file is gone from disk. The remote
+	// backend GETs /proxy/captures/{id}/raw.
+	ListProxyCaptures(ctx context.Context, f store.ProxyRequestFilter) ([]*model.ProxyCaptureRow, error)
+	ProxyCaptureRaw(ctx context.Context, id int64) ([]byte, error)
+
 	// ----- Agent registry (local-only in v1; remote returns ErrLocalOnly) -----
 	// The agent registry records which AI agent sessions are alive
 	// against which repos, and which issues they're focused on.

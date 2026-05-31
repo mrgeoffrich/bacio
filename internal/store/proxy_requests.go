@@ -246,6 +246,40 @@ func (s *Store) ListProxyRequestsFiltered(f ProxyRequestFilter) ([]*model.ProxyR
 	return out, rows.Err()
 }
 
+// ListProxyCapturesEnriched is ListProxyRequestsFiltered plus the BACI-308
+// per-row enrichment: each capture that correlates to a dispatch carries that
+// dispatch's issue key + mode so the Monitor sheet can show the job chip
+// without a per-row fetch. The GetDispatch lookup is cached so a job's many
+// captures cost one read, and is best-effort — a deleted dispatch (ErrNotFound)
+// just leaves the chip empty. Shared by the REST handler and the local client
+// so both transports produce an identical list. Always non-nil.
+func (s *Store) ListProxyCapturesEnriched(f ProxyRequestFilter) ([]*model.ProxyCaptureRow, error) {
+	rows, err := s.ListProxyRequestsFiltered(f)
+	if err != nil {
+		return nil, err
+	}
+	type chip struct{ key, mode string }
+	chips := map[int64]chip{}
+	out := make([]*model.ProxyCaptureRow, 0, len(rows))
+	for _, pr := range rows {
+		row := &model.ProxyCaptureRow{ProxyRequest: *pr}
+		if pr.DispatchID != nil {
+			id := *pr.DispatchID
+			c, ok := chips[id]
+			if !ok {
+				if disp, derr := s.GetDispatch(id); derr == nil && disp != nil {
+					c = chip{key: disp.IssueKey, mode: string(disp.Mode)}
+				}
+				chips[id] = c
+			}
+			row.IssueKey = c.key
+			row.Mode = c.mode
+		}
+		out = append(out, row)
+	}
+	return out, nil
+}
+
 func scanProxyRequest(r rowScanner) (*model.ProxyRequest, error) {
 	var v model.ProxyRequest
 	var isStream, isAnthropic int
