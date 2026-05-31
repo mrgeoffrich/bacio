@@ -67,10 +67,11 @@ prompt and accept automatically -- needed when running
 non-interactively.
 
 Pass --reset-templates to also revert every built-in prompt template
-body (plan, design, implement, review, ship, fix_review, and the
-_dispatch_preamble) to its embedded default before regenerating the
-subagent files. Use this after a bacio upgrade that changed the
-embedded defaults — without it, local customisations and pre-upgrade
+body (scope, research, plan, plan_large, design, implement, review,
+ship, fix_review, and the _dispatch_preamble) to its embedded default
+before regenerating the subagent files. Use this after a bacio
+upgrade that changed the embedded defaults — without it, local
+customisations and pre-upgrade
 bodies persist in the DB and the regenerated subagent files keep the
 old contents. Any custom edits to those built-ins are wiped (run
 'bacio settings template show <slug>' first if you want to preserve
