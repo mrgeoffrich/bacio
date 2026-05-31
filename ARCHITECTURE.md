@@ -34,7 +34,7 @@ There is no `bacio-server`, no `bacio-daemon`, no `bacio-sync-worker`. Every lon
 | `bacio tui` | Long-running (user-bound) | Interactive kanban; also runs leader-gated tickers when it holds the lease. |
 | `bacio api` | Long-running | HTTP API only. No `/ui/` mount; serves 404 there (BACI-72). |
 | `bacio web` | Long-running | HTTP API **plus** the embedded React bundle at `/ui/`, **plus** opens the OS default browser. The one-liner humans want. |
-| `bacio channel` | Long-running (Claude Code-spawned) | MCP-over-stdio server. One per Claude Code session, started by `.mcp.json`. Bridges agent ↔ bacio (dispatch delivery, reply, ask_user_question, attach_transcript). |
+| `bacio channel` | Long-running (Claude Code-spawned) | MCP-over-stdio server. One per Claude Code session, started by `.mcp.json`. Bridges agent ↔ bacio (dispatch delivery, reply, ask_user_question, send_user_notification). |
 | `bacio hook <event>` | One-shot (Claude Code-spawned) | Claude Code event hooks (SessionStart, PreToolUse, PostToolUse, …). Writes to the store and exits. |
 | `bacio-desktop` | Long-running (user-bound) | Wails window; runs the same leader-gated tickers as `bacio api` / `bacio tui` via `leaderservice`. |
 
@@ -113,7 +113,7 @@ The render frontmatter sets `isolation: worktree`, so Claude Code spawns each di
 
 ### `.mcp.json` — the bacio channel MCP server
 
-The channel surfaces four MCP tools to the agent: `register` (called by the SessionStart hook), `reply` (acks a dispatch), `ask_user_question` (parks a clarification for the supervisor to answer), `attach_transcript` (links a subagent's transcript to an issue).
+The channel surfaces four MCP tools to the agent: `register` (called by the SessionStart hook), `reply` (acks a dispatch), `ask_user_question` (parks a clarification for the supervisor to answer), `send_user_notification` (fires a non-blocking agent→user notification). (BACI-307 retired a fifth, `attach_transcript`; captured Anthropic traffic now lives in `proxy_messages`.)
 
 The channel and `bacio hook` subprocesses **inherit cwd from Claude Code**, so `bacio install-agent` deliberately does NOT bake `BACIO_ENV` into `.mcp.json` / `.claude/settings.json` (regression-tested in `internal/cli/install_channel_test.go`). The per-worktree resolver picks up the right environment from cwd.
 
@@ -153,11 +153,8 @@ bacio agent dispatch ──►  agent_dispatches
                                                                                   one-line summary
                                                                                   returns from Task
                                                                                       │
-                                                                            mcp__bacio__attach_transcript
-                                                                                  (issue_key, agentId)
-                                                                                      ▼
-                                                                            transcript-typed doc
-                                                                            linked to issue
+                                                                                  supervisor forwards
+                                                                                  the summary + replies
 ```
 
 The supervisor stays a **thin scheduler** — its context budget across dozens of jobs is "dispatch arrived → Task call → summary → reply". All file reads, edits, and bash calls happen inside the subagent's context, which Claude Code discards on return. Per-mode briefs being the subagent's system prompt (rather than per-dispatch payload — the BACI-76 reversal) keeps them prompt-cache-eligible across back-to-back same-mode spawns.

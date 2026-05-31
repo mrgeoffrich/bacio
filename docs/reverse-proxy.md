@@ -266,9 +266,11 @@ correlation columns empty; the decode + classify half still works.
 
 BACI-306 is the **parsing layer** on top of the BACI-305 substrate. It
 turns the captured `/v1/messages` SSE turns into a structured, durable
-per-job message transcript that BACI-307 (jsonl removal + review skill),
-BACI-308 (Monitor inspection drill-down), and the review skill consume —
-the proxy capture, not a `.jsonl` doc, becomes the canonical transcript.
+per-job message transcript that BACI-308 (Monitor inspection drill-down)
+and the re-platformed review skill (BACI-309) consume — the proxy
+capture, not a `.jsonl` doc, is now the canonical transcript. BACI-307
+removed the old `.jsonl`-attachment path (`attach_transcript` + the
+per-issue transcript docs) on the strength of this source.
 
 ### The pure parser — `internal/anthropic`
 
@@ -361,4 +363,9 @@ backfill is a clean follow-on if 307/308 want history.
   `proxy_messages` — deferred; 306 parses new traffic only.
 - **Raw-log-file retention / cleanup** — the index prune is BACI-302; the
   on-disk raw files have no auto-prune yet.
-- **Retiring the `.jsonl` transcript attachments** — BACI-307.
+- **Retiring the `.jsonl` transcript attachments** — shipped in BACI-307:
+  the `attach_transcript` MCP tool, its dispatch-preamble step, and the
+  per-issue transcript-doc plumbing are gone; `proxy_messages` is the
+  canonical source. Existing legacy transcript docs are left in place
+  (no destructive migration) and still open as plain source. The review
+  skill is stubbed pending its BACI-309 re-platform.
