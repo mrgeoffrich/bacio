@@ -1012,20 +1012,8 @@ func migrate(db *sql.DB) error {
 			}
 		}
 	}
-	// BACI-305: agent_sessions.worktree_slug carries the resolved wtenv
-	// manifest slug the session is driving, stamped at session open by the
-	// session-start hook. It is the launch-time-stable key the reverse-proxy
-	// capture resolves back to a session/dispatch. Idempotent ALTER for
-	// older DBs; schema.sql carries it for fresh ones.
-	hasWorktreeSlug, err := columnExists(db, "agent_sessions", "worktree_slug")
-	if err != nil {
-		return err
-	}
-	if !hasWorktreeSlug {
-		if _, err := db.Exec(`ALTER TABLE agent_sessions ADD COLUMN worktree_slug TEXT NOT NULL DEFAULT ''`); err != nil {
-			return fmt.Errorf("add worktree_slug to agent_sessions: %w", err)
-		}
-	}
+	// BACI-316 retired agent_sessions.worktree_slug (the X-Bacio-Corr
+	// correlation key); a leftover column on an already-migrated DB is inert.
 	return nil
 }
 

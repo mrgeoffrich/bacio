@@ -494,14 +494,7 @@ CREATE TABLE IF NOT EXISTS agent_sessions (
     -- error_message is the human blurb (length-capped at the boundary).
     errored_at      DATETIME,
     error_type      TEXT    NOT NULL DEFAULT '',
-    error_message   TEXT    NOT NULL DEFAULT '',
-    -- worktree_slug is the resolved wtenv manifest slug for the worktree
-    -- this session is driving (BACI-305). It is the launch-time-stable
-    -- correlation key the reverse-proxy capture stamps onto each agent
-    -- Anthropic request (via ANTHROPIC_CUSTOM_HEADERS): the recorder maps
-    -- the inbound header back to the worktree's active session/dispatch.
-    -- Empty for sessions outside a worktree env (legacy shared default).
-    worktree_slug   TEXT    NOT NULL DEFAULT ''
+    error_message   TEXT    NOT NULL DEFAULT ''
 );
 
 -- idx_agent_sessions_agent is created in migrate() so it works on databases

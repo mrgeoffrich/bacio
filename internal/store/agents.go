@@ -147,13 +147,6 @@ type UpsertAgentSessionIn struct {
 	// (heartbeat, dispatch-side writers) leave it false; default-false
 	// keeps ValidateSessionID's behaviour for every existing caller.
 	RequireUUID bool
-	// WorktreeSlug is the resolved wtenv manifest slug for the worktree
-	// this session drives (BACI-305). Only written when non-empty — a
-	// heartbeat from a caller that doesn't resolve the slug (or a session
-	// outside a worktree env) leaves whatever's already there. The
-	// session-start hook resolves it from the wtenv chain and threads it
-	// through CreateSessionStub.
-	WorktreeSlug string
 }
 
 // UpsertAgentSession inserts a new row or refreshes an existing one
@@ -233,8 +226,8 @@ func (s *Store) UpsertAgentSession(in UpsertAgentSessionIn) (*model.AgentSession
 	}
 	if _, err := tx.Exec(`
 		INSERT INTO agent_sessions
-		    (session_id, repo_id, agent_id, actor, model, host, branch, claude_pid, channel_version, worktree_slug, last_seen_at, registered_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, `+registeredAtInsert+`)
+		    (session_id, repo_id, agent_id, actor, model, host, branch, claude_pid, channel_version, last_seen_at, registered_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, `+registeredAtInsert+`)
 		ON CONFLICT(session_id) DO UPDATE SET
 		    actor           = excluded.actor,
 		    agent_id        = COALESCE(excluded.agent_id, agent_sessions.agent_id),
@@ -243,10 +236,9 @@ func (s *Store) UpsertAgentSession(in UpsertAgentSessionIn) (*model.AgentSession
 		    branch          = excluded.branch,
 		    claude_pid      = CASE WHEN excluded.claude_pid != 0 THEN excluded.claude_pid ELSE agent_sessions.claude_pid END,
 		    channel_version = CASE WHEN excluded.channel_version != '' THEN excluded.channel_version ELSE agent_sessions.channel_version END,
-		    worktree_slug   = CASE WHEN excluded.worktree_slug != '' THEN excluded.worktree_slug ELSE agent_sessions.worktree_slug END,
 		    registered_at   = `+registeredAtUpdate+`,
 		    last_seen_at    = CURRENT_TIMESTAMP`,
-		in.SessionID, in.RepoID, agentID, in.Actor, in.Model, in.Host, in.Branch, in.ClaudePID, in.ChannelVersion, in.WorktreeSlug,
+		in.SessionID, in.RepoID, agentID, in.Actor, in.Model, in.Host, in.Branch, in.ClaudePID, in.ChannelVersion,
 	); err != nil {
 		return nil, err
 	}
@@ -1345,34 +1337,6 @@ func (s *Store) SessionsByClaudePID(host string, claudePID int64) ([]*model.Agen
 	return out, rows.Err()
 }
 
-// LatestActiveSessionBySlug returns the most-recently-started live
-// (ended_at IS NULL) session whose worktree_slug matches, or (nil, nil)
-// when none. It is the BACI-305 correlation lookup: the reverse-proxy
-// capture resolves the X-Bacio-Corr launch header (the worktree slug) to
-// the worktree's currently-active session, then to that session's active
-// dispatch. A worktree interleaving multiple sessions (supervisor +
-// subagent) attributes to the newest live one — best-effort, per the
-// ticket's per-worktree correlation caveat. An empty slug is a no-op.
-func (s *Store) LatestActiveSessionBySlug(slug string) (*model.AgentSession, error) {
-	if slug == "" {
-		return nil, nil
-	}
-	row := s.DB.QueryRow(
-		`SELECT `+agentSessionSelect+`
-		FROM agent_sessions s
-		LEFT JOIN repos r  ON r.id = s.repo_id
-		LEFT JOIN agents a ON a.id = s.agent_id
-		WHERE s.worktree_slug = ? AND s.ended_at IS NULL
-		ORDER BY s.started_at DESC, s.id DESC
-		LIMIT 1`, slug,
-	)
-	ag, err := scanAgentSession(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	return ag, err
-}
-
 // GetAgentSession fetches one session by its external id.
 func (s *Store) GetAgentSession(sessionID string) (*model.AgentSession, error) {
 	row := s.DB.QueryRow(
@@ -1657,7 +1621,7 @@ func scanAgentClaim(r rowScanner) (*model.AgentClaim, error) {
 const agentSessionSelect = `s.id, s.session_id, s.repo_id, r.prefix, s.agent_id, a.name, s.actor, s.model,
 	s.host, s.branch, s.started_at, s.last_seen_at, s.ended_at, s.end_reason,
 	s.claude_pid, s.channel_seen_at, s.registered_at, s.channel_version,
-	s.errored_at, s.error_type, s.error_message, s.worktree_slug`
+	s.errored_at, s.error_type, s.error_message`
 
 func scanAgentSession(r rowScanner) (*model.AgentSession, error) {
 	var ag model.AgentSession
@@ -1672,7 +1636,7 @@ func scanAgentSession(r rowScanner) (*model.AgentSession, error) {
 		&ag.Actor, &ag.Model,
 		&ag.Host, &ag.Branch, &ag.StartedAt, &ag.LastSeenAt, &ended, &ag.EndReason,
 		&ag.ClaudePID, &channelSeen, &registered, &ag.ChannelVersion,
-		&errored, &ag.ErrorType, &ag.ErrorMessage, &ag.WorktreeSlug)
+		&errored, &ag.ErrorType, &ag.ErrorMessage)
 	if err != nil {
 		return nil, err
 	}

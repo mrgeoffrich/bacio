@@ -64,16 +64,15 @@ BACIO_AGENT_MODE=1 ANTHROPIC_BASE_URL=http://127.0.0.1:5320/anthropic ENABLE_TOO
 The endpoint's host:port is the worktree's resolved `env.APIAddr`
 (`agentmode.ProxyEndpoint`), so a sibling worktree with its own
 allocated port gets a one-liner pointing at *its* server. Both call
-sites build the string through
-`agentmode.LaunchCommand(endpoint, correlationKey)` so they can never
-drift.
+sites build the string through `agentmode.LaunchCommand(endpoint)` so
+they can never drift.
 
-When the launch happens inside a worktree env, the one-liner also
-injects `ANTHROPIC_CUSTOM_HEADERS='X-Bacio-Corr: <slug>'` — the
-worktree slug, the BACI-305 correlation key the capture maps each
-Anthropic request back to (see the Anthropic-capture section below).
-Outside a worktree env the slug is empty and the header is omitted, so
-the string stays byte-identical to the BACI-301 form.
+The one-liner injects **no** bacio correlation header. BACI-305
+originally stamped `ANTHROPIC_CUSTOM_HEADERS='X-Bacio-Corr: <slug>'`;
+BACI-316 retired that — the capture correlates off Claude Code's own
+`X-Claude-Code-Session-Id` / `X-Claude-Code-Agent-Id` request headers
+instead (see the Anthropic-capture section below), so nothing extra is
+needed at launch.
 
 ### Consequence: a running bacio server is a hard dependency
 
@@ -186,8 +185,11 @@ the body wasn't truncated, so the `.http` file holds readable JSON. The
 bytes forwarded downstream to the agent are **never** touched — only the
 on-disk copy is decoded. A truncated gzip body (capped at
 `proxy.MaxCapturedBody`) can't be inflated, so it's written verbatim
-with a `[gzip body truncated — not decoded]` marker. SSE
-(`text/event-stream`) streams aren't gzipped and are captured as before.
+with a `[gzip body truncated — not decoded]` marker. The decode keys off
+`Content-Encoding`, not the content type — and in practice the SSE
+(`text/event-stream`) responses arrive gzipped too (the Claude client
+advertises `Accept-Encoding: gzip`, which the proxy forwards verbatim),
+so the same inflate path makes their on-disk capture readable.
 
 ### Classification columns
 
@@ -201,36 +203,52 @@ parseable Anthropic captures without re-deriving them:
   and the path is under `/v1/` (`isAnthropicCapture`). Host+path only,
   no body inspection.
 
-### Per-dispatch correlation (Mechanism B)
+### Per-dispatch correlation (Claude Code headers, BACI-316)
 
-The agent launch one-liner stamps `X-Bacio-Corr: <worktree-slug>` on
-every Anthropic request via `ANTHROPIC_CUSTOM_HEADERS`. The capture
-transport lifts the header onto the observation (`CorrelationKey`),
-**strips it from the upstream request** so it never reaches Anthropic,
-and redacts it from the raw header block (`isSensitiveHeader`). The
-recorder resolves it back to an attribution:
+Claude Code stamps its own ids on every model-API request, so the
+capture correlates off them directly — no bacio header, no worktree slug
+(BACI-316 retired the BACI-305 `X-Bacio-Corr` mechanism):
 
-```
-slug → LatestActiveSessionBySlug → ActiveDispatchForSession → session_id + dispatch_id
-```
+- `X-Claude-Code-Session-Id` — the supervisor session id. Stored verbatim
+  as `proxy_requests.session_id`; it maps 1:1 to
+  `agent_sessions.session_id` (the same id the `session-start` hook keys
+  on).
+- `X-Claude-Code-Agent-Id` — the per-subagent id, present only on a
+  Task-spawned subagent's requests. Stored as
+  `proxy_requests.claude_agent_id`.
 
-written onto the index row. The slug is the launch-time-stable key
-(Claude Code mints the session id later, so it isn't known at launch);
-the `session-start` hook stamps `agent_sessions.worktree_slug` from the
-resolved wtenv so the lookup has something to match. `dispatch_id` is a
-nullable INTEGER with **no FK** — like the audit log, a capture row is
-cross-cutting and must survive a deleted dispatch.
+Both are Claude's own headers already bound for Anthropic, so the
+capture transport reads but does **not** strip them (unlike
+`X-Bacio-Corr`), and they stay visible in the raw `.http` block.
 
-**Caveats.** Attribution is *per-worktree*, best-effort: a worktree
-interleaving a supervisor + subagent session attributes to the
-worktree's currently-active dispatch — the header eliminates
-cross-worktree confusion, which is the failure mode the ticket's
-correlation caveat names. Per-request (session-id-level) precision is a
-future refinement. And Mechanism B assumes Claude Code forwards
-`ANTHROPIC_CUSTOM_HEADERS` onto its model-API requests; if it doesn't,
-`session_id`/`dispatch_id` stay empty and the decode/classify half still
-works (graceful degradation) — the columns are correlation-ready for a
-later mechanism.
+**Why the agent id matters.** A Task subagent shares the supervisor's
+session id — there is exactly one `agent_sessions` row per `claude`
+process (see [`agent-dispatch.md`](agent-dispatch.md), "Subagents share
+the parent's session id"). So the session id alone can't say *which*
+dispatch a request belongs to when one supervisor works several jobs;
+the per-subagent agent id is the only discriminator.
+
+**The binding.** `subagent_dispatches` maps
+`NormalizeClaudeAgentID(agent_id) → dispatch_id` (one row per subagent;
+`dispatch_id` carries **no FK** so a capture row survives a deleted
+dispatch, like the audit log). It is written at the **start** of a
+dispatched run: the `PreToolUse` hook fires on the worker's `bacio agent
+claim <ISSUE>` with the subagent's `agent_id` in its payload — the id
+lives **only** in the hook payload and the parent's `Task` result, never
+an env var — resolves the dispatch by `(session, issue)`
+(`resolveActiveDispatchID`), and records the binding. The recorder then
+resolves a capture's `dispatch_id` by `X-Claude-Code-Agent-Id →
+subagent_dispatches`, falling back to the session's active dispatch
+(`ActiveDispatchForSession`) when there's no binding (an early request,
+or a non-subagent call).
+
+The `agent_id` ↔ `X-Claude-Code-Agent-Id` equality is funnelled through
+the single `NormalizeClaudeAgentID` seam (lowercase, trim, strip an
+`agent-` prefix) so the write and read sides can't drift; the exact
+transform is to be pinned once verified on a live dispatched run.
+
+**Graceful degradation.** A missing or unresolved header leaves the
+correlation columns empty; the decode + classify half still works.
 
 ---
 

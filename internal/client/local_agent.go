@@ -140,14 +140,13 @@ func (c *localClient) EnsureAgentIdentity(ctx context.Context, repo *model.Repo)
 // register replaces it with the real agent identity slug.
 const UnregisteredActor = "unregistered"
 
-func (c *localClient) CreateSessionStub(ctx context.Context, repo *model.Repo, sessionID, host, worktreeSlug string, claudePID int64) (*model.AgentSession, error) {
+func (c *localClient) CreateSessionStub(ctx context.Context, repo *model.Repo, sessionID, host string, claudePID int64) (*model.AgentSession, error) {
 	sess, err := c.store.UpsertAgentSession(store.UpsertAgentSessionIn{
-		SessionID:    sessionID,
-		RepoID:       repo.ID,
-		Actor:        UnregisteredActor,
-		Host:         host,
-		ClaudePID:    claudePID,
-		WorktreeSlug: worktreeSlug,
+		SessionID: sessionID,
+		RepoID:    repo.ID,
+		Actor:     UnregisteredActor,
+		Host:      host,
+		ClaudePID: claudePID,
 		// No agent_id, model, permission_mode, branch, channel_version.
 		// MarkRegistered=false: registered_at stays NULL.
 	})
