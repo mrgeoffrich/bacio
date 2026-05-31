@@ -43,6 +43,20 @@ regardless of mode:
 
 (Source of truth: each `prompts/agents/<mode>.md` — `Close out` section.)
 
+Other modes exist under `prompts/agents/` and may show up in a dispatch
+chain — `plan_large` (the bulk-planning variant of `plan`), `research`,
+and `scope`. This table doesn't enumerate their close-out contracts; for
+any mode the table doesn't list, **read `prompts/agents/<mode>.md`
+directly** — the brief is the authority. The digest's `dispatch.mode`
+(off the capture row) tells you which brief to open.
+
+Note on pipeline-engine cards: a card driven by the controller job-engine
+may have the *engine* add the close-out tag (and advance the issue state)
+rather than the worker. So an absent `tag_calls` entry or an unchanged
+state in the digest is not automatically a finding for an engine-driven
+run — cross-check whether the mode's brief still tells the worker to tag,
+or whether that's the engine's job now.
+
 ### `plan` — extra contract
 
 - Produces one markdown plan document and links it to the issue as
@@ -108,15 +122,17 @@ When scoring a transcript, raise findings against:
   tag, skipped claim, no `mcp__bacio__reply`, no `worktree init`/`rm`,
   direct `issue state` mid-run.
 - **Worktree confinement violations** — `Edit`/`Write` with a `file_path`
-  that doesn't begin with the worker's worktree root (or hook denies
-  visible in tool results). Note: a worker that *tried* the wrong path
-  and got denied by the PreToolUse hook, then retried inside the
-  worktree, is healthier than one that never tried — but the deny is
-  still worth recording.
-- **Wrong DB / wrong env** — any `bacio` call from outside the worktree
-  without `--env` (the digest flags these as
-  `bacio_calls_outside_worktree_no_env`); any `--db` override pointing
-  at someone else's DB.
+  that doesn't begin with the worker's worktree root (the digest flags
+  these as `edits.outside_worktree`), or hook denies visible in tool
+  results (`hook_denies`). Note: a worker that *tried* the wrong path and
+  got denied by the PreToolUse hook, then retried inside the worktree, is
+  healthier than one that never tried — but the deny is still worth
+  recording.
+- **Wrong DB / wrong env** — any `--db` override pointing at someone
+  else's DB (`db_overrides`). The proxy source has no per-call `cwd`, so
+  the old "bacio call from outside the worktree without `--env`" check
+  can't be reconstructed; a `--env`/`--db` override is still visible in
+  the command string and is the signal to grade on.
 - **Inefficiency that should have been mechanical** — repeated identical
   bash commands (retry loop on a stale assumption), long sequences of
   failed bash calls before a fix, exploratory reads when the path was
@@ -129,13 +145,17 @@ When scoring a transcript, raise findings against:
 
 Skip these even if they look suspicious:
 
-- **`gitBranch: main` in the JSONL line metadata.** This is Claude
-  Code's own metadata about the parent session — it does not reflect
-  the worktree's actual current branch. Only the worker's own
-  `git branch --show-current` Bash output is authoritative.
-- **No edits in a `ship` or `review` transcript.** Both modes are
-  deliberately edit-free.
-- **No PR in a `plan` or `design` transcript.** Both produce docs, not
-  code.
+- **A `worktree.root` of `null` in the digest.** The proxy transcript has
+  no per-message `cwd` envelope, so the worktree root is *inferred* from
+  the first `Edit`/`Write` `file_path` or `worktree init`/`rm` arg. A run
+  that did no edits and whose `worktree rm` arg didn't match the heuristic
+  may show `null` — that is missing signal, not a confinement violation.
+  Only an entry in `edits.outside_worktree` is an actual breach.
+- **No edits in a `ship` or `review` run.** Both modes are deliberately
+  edit-free.
+- **No PR in a `plan` or `design` run.** Both produce docs, not code.
 - **A clean review.** "No findings, ready to merge" is a valid review
   outcome — the absence of findings isn't itself a finding.
+- **A `truncated: true` digest with a missing tail.** A capture whose
+  response body exceeded the recorder cap is partial; absent
+  late-conversation content reflects the cap, not the worker's behaviour.
