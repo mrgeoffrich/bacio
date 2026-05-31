@@ -594,6 +594,14 @@ type Client interface {
 	// (a /clear that fires a fresh SessionStart with a new session_id is a
 	// separate stub). Local-only.
 	CreateSessionStub(ctx context.Context, repo *model.Repo, sessionID, host, worktreeSlug string, claudePID int64) (*model.AgentSession, error)
+	// BindSubagentDispatch records that the Claude Code subagent identified by
+	// claudeAgentID (X-Claude-Code-Agent-Id) is working dispatchID under
+	// sessionID. Written by the PreToolUse hook when a dispatched worker runs
+	// its claim — it's the key the reverse-proxy capture joins on to attribute
+	// the worker's Anthropic traffic to a specific dispatch (subagents share
+	// the supervisor session id, so the agent id is the only per-dispatch
+	// discriminator). Idempotent on the normalized agent id. Local-only.
+	BindSubagentDispatch(ctx context.Context, claudeAgentID string, dispatchID int64, sessionID string) error
 	// SessionsByClaudePID returns the open sessions matching (host,
 	// claudePID) — the channel's coordinates. Used by the bacio channel
 	// MCP server to find which sessions it's serving so it can queue a

@@ -162,6 +162,10 @@ func (c *localClient) CreateSessionStub(ctx context.Context, repo *model.Repo, s
 	return sess, nil
 }
 
+func (c *localClient) BindSubagentDispatch(ctx context.Context, claudeAgentID string, dispatchID int64, sessionID string) error {
+	return c.store.BindSubagentDispatch(claudeAgentID, dispatchID, sessionID, time.Now())
+}
+
 func (c *localClient) SessionsByClaudePID(ctx context.Context, host string, claudePID int64) ([]*model.AgentSession, error) {
 	return c.store.SessionsByClaudePID(host, claudePID)
 }

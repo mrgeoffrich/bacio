@@ -130,23 +130,24 @@ func (r *captureRecorder) persist(obs proxy.RequestObservation) {
 	// is an Anthropic message-API capture. These let BACI-306's per-job
 	// parser select exactly the parseable substrate.
 	contentType := baseContentType(obs.ResponseContentType)
-	sessionID, dispatchID := r.resolveCorrelation(obs.CorrelationKey)
+	dispatchID := r.resolveDispatch(obs.ClaudeSessionID, obs.ClaudeAgentID)
 	if _, err := r.store.AddProxyRequest(store.AddProxyRequestIn{
-		Method:      obs.Method,
-		Host:        obs.Host,
-		Path:        obs.Path,
-		Status:      obs.Status,
-		BytesIn:     obs.BytesIn,
-		BytesOut:    obs.BytesOut,
-		Duration:    obs.Duration,
-		RawLogPath:  rawPath,
-		StartedAt:   obs.Started,
-		EndedAt:     obs.Ended,
-		ContentType: contentType,
-		IsStream:    contentType == "text/event-stream",
-		IsAnthropic: isAnthropicCapture(obs.Host, obs.Path),
-		SessionID:   sessionID,
-		DispatchID:  dispatchID,
+		Method:        obs.Method,
+		Host:          obs.Host,
+		Path:          obs.Path,
+		Status:        obs.Status,
+		BytesIn:       obs.BytesIn,
+		BytesOut:      obs.BytesOut,
+		Duration:      obs.Duration,
+		RawLogPath:    rawPath,
+		StartedAt:     obs.Started,
+		EndedAt:       obs.Ended,
+		ContentType:   contentType,
+		IsStream:      contentType == "text/event-stream",
+		IsAnthropic:   isAnthropicCapture(obs.Host, obs.Path),
+		SessionID:     obs.ClaudeSessionID,
+		ClaudeAgentID: obs.ClaudeAgentID,
+		DispatchID:    dispatchID,
 	}); err != nil {
 		r.logger.Error("proxy capture: index insert failed",
 			"err", err, "method", obs.Method, "host", obs.Host, "path", obs.Path)
@@ -171,35 +172,42 @@ func isAnthropicCapture(host, path string) bool {
 	return host == anthropicHost && strings.HasPrefix(path, "/v1/")
 }
 
-// resolveCorrelation maps the BACI-305 correlation key (the worktree slug
-// stamped on the request via X-Bacio-Corr) back to the worktree's active
-// session and dispatch. Best-effort: an empty key, an unknown slug, or a
-// slug with no active dispatch yields ("", nil) — the capture + classification
-// still land, the correlation columns just stay empty. Any store error is
-// swallowed (logged at debug) so a lookup hiccup never breaks the capture.
-func (r *captureRecorder) resolveCorrelation(key string) (string, *int64) {
-	if key == "" || r.store == nil {
-		return "", nil
+// resolveDispatch attributes a capture to a dispatch from Claude Code's own
+// request ids. The per-subagent claudeAgentID is the precise key — subagents
+// share the supervisor session id, so only the agent id can pin a request to
+// one dispatch; it resolves through the agent-id→dispatch binding written when
+// the worker starts. Failing that (no binding yet, or a non-subagent request)
+// it falls back to the session's active dispatch. Best-effort: a miss yields
+// nil — the capture still lands with session_id + claude_agent_id stored raw,
+// so a later read can still join. Store errors are swallowed (logged at debug)
+// so a lookup hiccup never breaks the capture.
+func (r *captureRecorder) resolveDispatch(sessionID, claudeAgentID string) *int64 {
+	if r.store == nil {
+		return nil
 	}
-	sess, err := r.store.LatestActiveSessionBySlug(key)
+	if claudeAgentID != "" {
+		id, err := r.store.DispatchIDByClaudeAgentID(claudeAgentID)
+		if err != nil {
+			r.logger.Debug("proxy capture: agent-id dispatch lookup failed",
+				"agent_id", claudeAgentID, "err", err)
+		} else if id != nil {
+			return id
+		}
+	}
+	if sessionID == "" {
+		return nil
+	}
+	disp, err := r.store.ActiveDispatchForSession(sessionID)
 	if err != nil {
-		r.logger.Debug("proxy capture: session lookup by slug failed", "slug", key, "err", err)
-		return "", nil
-	}
-	if sess == nil {
-		return "", nil
-	}
-	disp, err := r.store.ActiveDispatchForSession(sess.SessionID)
-	if err != nil {
-		r.logger.Debug("proxy capture: active dispatch lookup failed", "session", sess.SessionID, "err", err)
-		// Still attribute to the session even without a dispatch.
-		return sess.SessionID, nil
+		r.logger.Debug("proxy capture: active dispatch lookup failed",
+			"session", sessionID, "err", err)
+		return nil
 	}
 	if disp == nil {
-		return sess.SessionID, nil
+		return nil
 	}
 	id := disp.ID
-	return sess.SessionID, &id
+	return &id
 }
 
 // writeRaw writes the raw request + response capture for one observation to a

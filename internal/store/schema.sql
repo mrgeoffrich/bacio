@@ -957,19 +957,38 @@ CREATE TABLE IF NOT EXISTS proxy_requests (
     content_type TEXT    NOT NULL DEFAULT '',
     is_stream    INTEGER NOT NULL DEFAULT 0,
     is_anthropic INTEGER NOT NULL DEFAULT 0,
-    -- BACI-305 correlation: the worktree's active session_id / dispatch_id
-    -- the capture is attributed to, resolved from the X-Bacio-Corr header
-    -- the launch one-liner stamps. session_id mirrors agent_sessions.session_id
-    -- (TEXT); dispatch_id is a nullable INTEGER with NO FK — like the audit
-    -- log, a capture row is cross-cutting and must not cascade-delete when a
-    -- dispatch is removed. Empty/NULL when no correlation could be resolved
-    -- (best-effort attribution).
-    session_id   TEXT    NOT NULL DEFAULT '',
-    dispatch_id  INTEGER
+    -- Correlation, lifted from Claude Code's own request headers (no bacio
+    -- header injection). session_id is X-Claude-Code-Session-Id — the
+    -- supervisor session, mirroring agent_sessions.session_id (TEXT).
+    -- claude_agent_id is X-Claude-Code-Agent-Id — the per-subagent id (present
+    -- only on a Task-spawned subagent's traffic), what pins a request to a
+    -- specific dispatch since subagents share the session id. dispatch_id is
+    -- resolved from the agent-id→dispatch binding (else the session's active
+    -- dispatch); a nullable INTEGER with NO FK — like the audit log, a capture
+    -- row is cross-cutting and must not cascade-delete when a dispatch is
+    -- removed. Empty/NULL when the header is absent or unresolved (best-effort).
+    session_id      TEXT    NOT NULL DEFAULT '',
+    claude_agent_id TEXT    NOT NULL DEFAULT '',
+    dispatch_id     INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_proxy_requests_started
     ON proxy_requests(started_at);
+
+-- subagent_dispatches binds a Claude Code per-subagent id
+-- (X-Claude-Code-Agent-Id, normalized) to the dispatch that subagent is
+-- working. The reverse-proxy capture reads it to attribute a request to a
+-- specific dispatch: subagents share the supervisor session id, so the agent
+-- id is the only per-dispatch discriminator. Written when a dispatched worker
+-- starts (its agent_id arrives in the worker's hook payload). claude_agent_id
+-- is the normalized key — one binding per subagent; dispatch_id carries NO FK
+-- (cross-cutting like the capture index, it must survive a deleted dispatch).
+CREATE TABLE IF NOT EXISTS subagent_dispatches (
+    claude_agent_id TEXT    PRIMARY KEY,
+    dispatch_id     INTEGER NOT NULL,
+    session_id      TEXT    NOT NULL DEFAULT '',
+    created_at      DATETIME NOT NULL
+);
 
 -- ui_leader is a single-row lease table. Only one UI process (TUI or desktop
 -- app) holds the lease at a time; all others stand by. The CHECK (id = 1)

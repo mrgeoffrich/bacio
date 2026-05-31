@@ -169,12 +169,11 @@ unchanged.`,
 			// launch one-liner (BACI-301). Best-effort: a resolution miss
 			// falls back to the default host:port via ProxyEndpoint rather
 			// than failing the install over a cosmetic banner.
-			var bannerAddr, bannerSlug string
+			var bannerAddr string
 			if env, err := resolveEnv(); err == nil {
 				bannerAddr = env.APIAddr
-				bannerSlug = env.ManifestSlug()
 			}
-			printActivationBanner(os.Stderr, agentmode.ProxyEndpoint(bannerAddr), bannerSlug)
+			printActivationBanner(os.Stderr, agentmode.ProxyEndpoint(bannerAddr))
 			return nil
 		},
 	}

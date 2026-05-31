@@ -986,19 +986,20 @@ func migrate(db *sql.DB) error {
 	}
 	// BACI-305: classification + correlation columns on proxy_requests so
 	// BACI-306's per-job message parser can select exactly the Anthropic
-	// message captures and attribute them to a worktree's active dispatch.
-	// content_type / is_stream / is_anthropic are transport-level
-	// classification; session_id / dispatch_id are best-effort correlation
-	// resolved from the X-Bacio-Corr launch header. dispatch_id is a
-	// nullable INTEGER with no FK — a capture row is cross-cutting like the
-	// audit log, so a deleted dispatch must not cascade-delete it. Each
-	// ALTER is columnExists-guarded and idempotent; schema.sql carries the
-	// columns for fresh DBs.
+	// message captures and attribute them to a dispatch. content_type /
+	// is_stream / is_anthropic are transport-level classification; session_id /
+	// claude_agent_id are lifted from Claude Code's own request headers
+	// (X-Claude-Code-Session-Id / -Agent-Id) and dispatch_id is resolved from
+	// the agent-id→dispatch binding. dispatch_id is a nullable INTEGER with no
+	// FK — a capture row is cross-cutting like the audit log, so a deleted
+	// dispatch must not cascade-delete it. Each ALTER is columnExists-guarded
+	// and idempotent; schema.sql carries the columns for fresh DBs.
 	for _, col := range []struct{ name, ddl string }{
 		{"content_type", `ALTER TABLE proxy_requests ADD COLUMN content_type TEXT NOT NULL DEFAULT ''`},
 		{"is_stream", `ALTER TABLE proxy_requests ADD COLUMN is_stream INTEGER NOT NULL DEFAULT 0`},
 		{"is_anthropic", `ALTER TABLE proxy_requests ADD COLUMN is_anthropic INTEGER NOT NULL DEFAULT 0`},
 		{"session_id", `ALTER TABLE proxy_requests ADD COLUMN session_id TEXT NOT NULL DEFAULT ''`},
+		{"claude_agent_id", `ALTER TABLE proxy_requests ADD COLUMN claude_agent_id TEXT NOT NULL DEFAULT ''`},
 		{"dispatch_id", `ALTER TABLE proxy_requests ADD COLUMN dispatch_id INTEGER`},
 	} {
 		has, err := columnExists(db, "proxy_requests", col.name)

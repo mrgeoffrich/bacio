@@ -269,39 +269,63 @@ func TestCaptureRecorder_ClassifiesAnthropic(t *testing.T) {
 	}
 }
 
-// TestCaptureRecorder_ResolvesDispatch asserts the recorder maps a correlation
-// key (worktree slug) → active session → active dispatch and stamps session_id
-// + dispatch_id; an unknown/empty key leaves them empty/NULL (BACI-305).
+// TestCaptureRecorder_ResolvesDispatch asserts the recorder attributes a
+// capture from Claude Code's own request ids: the per-subagent
+// X-Claude-Code-Agent-Id resolves through the agent-id→dispatch binding
+// (precise — and wins over the session's newer active dispatch), and absent a
+// binding it falls back to the session's active dispatch. session_id is stored
+// raw from the header; an unknown session leaves dispatch_id NULL.
 func TestCaptureRecorder_ResolvesDispatch(t *testing.T) {
 	s := recorderTestStore(t)
 	repo, err := s.CreateRepo("PROX", "proxy-test", t.TempDir(), "")
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	const slug = "agent-corr-slug"
+	const sessionID = "sess-corr-resolve"
 	sess, err := s.UpsertAgentSession(store.UpsertAgentSessionIn{
-		SessionID: "sess-corr-resolve", RepoID: repo.ID, Actor: "agent-claude", WorktreeSlug: slug,
+		SessionID: sessionID, RepoID: repo.ID, Actor: "agent-claude",
 	})
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}
-	disp, err := s.AddDispatch(store.AddDispatchIn{
-		RepoID: repo.ID, TargetSessionID: sess.SessionID, Payload: "work", CreatedBy: "supervisor",
+	// Two dispatches on the same session. dispB is created later, so it is the
+	// session's "active" dispatch (ActiveDispatchForSession orders newest-first).
+	dispA, err := s.AddDispatch(store.AddDispatchIn{
+		RepoID: repo.ID, TargetSessionID: sess.SessionID, Payload: "older", CreatedBy: "supervisor",
 	})
 	if err != nil {
-		t.Fatalf("dispatch: %v", err)
+		t.Fatalf("dispatch A: %v", err)
+	}
+	dispB, err := s.AddDispatch(store.AddDispatchIn{
+		RepoID: repo.ID, TargetSessionID: sess.SessionID, Payload: "newer", CreatedBy: "supervisor",
+	})
+	if err != nil {
+		t.Fatalf("dispatch B: %v", err)
+	}
+	// Bind the subagent agent-id to the OLDER dispatch, so a hit proves the
+	// binding wins over the session's newer active dispatch (the fallback).
+	if err := s.BindSubagentDispatch("a79b9dc411ab02ff6", dispA.ID, sessionID, time.Now()); err != nil {
+		t.Fatalf("bind: %v", err)
 	}
 
 	rec := newCaptureRecorder(s, t.TempDir(), slog.New(slog.NewTextHandler(os.Stderr, nil)))
-	// Resolved capture: the slug maps back to the session + active dispatch.
+	// (1) Precise: the agent id resolves through the binding to dispA.
 	rec.Record(proxy.RequestObservation{
 		Method: "POST", Host: "api.anthropic.com", Path: "/v1/messages", Status: 200,
-		Started: time.Now(), Ended: time.Now(), CorrelationKey: slug,
+		Started: time.Now(), Ended: time.Now(),
+		ClaudeSessionID: sessionID, ClaudeAgentID: "a79b9dc411ab02ff6",
 	})
-	// Unknown key: correlation columns stay empty.
+	// (2) Fallback: no agent id, so the session's active dispatch (dispB) wins.
 	rec.Record(proxy.RequestObservation{
 		Method: "POST", Host: "api.anthropic.com", Path: "/v1/messages", Status: 200,
-		Started: time.Now(), Ended: time.Now(), CorrelationKey: "agent-does-not-exist",
+		Started: time.Now(), Ended: time.Now(),
+		ClaudeSessionID: sessionID,
+	})
+	// (3) Unknown session: stored raw, no dispatch resolved.
+	rec.Record(proxy.RequestObservation{
+		Method: "POST", Host: "api.anthropic.com", Path: "/v1/messages", Status: 200,
+		Started: time.Now(), Ended: time.Now(),
+		ClaudeSessionID: "sess-unknown",
 	})
 	rec.Close()
 
@@ -309,21 +333,32 @@ func TestCaptureRecorder_ResolvesDispatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	var resolved, unresolved *model.ProxyRequest
+	var bound, fallback, unknown int
 	for _, r := range rows {
-		if r.SessionID == sess.SessionID {
-			resolved = r
-		} else {
-			unresolved = r
+		switch {
+		case r.ClaudeAgentID == "a79b9dc411ab02ff6":
+			bound++
+			if r.SessionID != sessionID {
+				t.Errorf("bound row session_id = %q, want %q", r.SessionID, sessionID)
+			}
+			if r.DispatchID == nil || *r.DispatchID != dispA.ID {
+				t.Errorf("bound row dispatch_id = %v, want dispA %d", r.DispatchID, dispA.ID)
+			}
+		case r.SessionID == sessionID:
+			fallback++
+			if r.DispatchID == nil || *r.DispatchID != dispB.ID {
+				t.Errorf("fallback row dispatch_id = %v, want dispB %d", r.DispatchID, dispB.ID)
+			}
+		case r.SessionID == "sess-unknown":
+			unknown++
+			if r.DispatchID != nil {
+				t.Errorf("unknown session should leave dispatch_id NULL: %+v", r)
+			}
+		default:
+			t.Errorf("unexpected row: %+v", r)
 		}
 	}
-	if resolved == nil {
-		t.Fatalf("no row carried the resolved session_id; rows=%+v", rows)
-	}
-	if resolved.DispatchID == nil || *resolved.DispatchID != disp.ID {
-		t.Errorf("resolved dispatch_id = %v, want %d", resolved.DispatchID, disp.ID)
-	}
-	if unresolved == nil || unresolved.SessionID != "" || unresolved.DispatchID != nil {
-		t.Errorf("unknown key should leave correlation empty: %+v", unresolved)
+	if bound != 1 || fallback != 1 || unknown != 1 {
+		t.Errorf("row counts bound=%d fallback=%d unknown=%d, want 1/1/1", bound, fallback, unknown)
 	}
 }

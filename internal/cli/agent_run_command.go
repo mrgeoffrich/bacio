@@ -57,10 +57,7 @@ of truth (agentmode.LaunchCommand) so they cannot drift.`,
 				return err
 			}
 			endpoint := agentmode.ProxyEndpoint(env.APIAddr)
-			// The correlation key (BACI-305) is the worktree slug — empty
-			// outside a worktree env, which omits the header and leaves the
-			// one-liner byte-identical to the BACI-301 string.
-			_, err = fmt.Fprintln(os.Stdout, agentmode.LaunchCommand(endpoint, env.ManifestSlug()))
+			_, err = fmt.Fprintln(os.Stdout, agentmode.LaunchCommand(endpoint))
 			return err
 		},
 	}

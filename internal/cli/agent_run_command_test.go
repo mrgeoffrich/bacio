@@ -38,7 +38,7 @@ func TestAgentRunCommandPrintsCanonicalOneLiner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveEnv: %v", err)
 	}
-	want := agentmode.LaunchCommand(agentmode.ProxyEndpoint(env.APIAddr), env.ManifestSlug()) + "\n"
+	want := agentmode.LaunchCommand(agentmode.ProxyEndpoint(env.APIAddr)) + "\n"
 	if got != want {
 		t.Fatalf("stdout mismatch:\n  got:  %q\n  want: %q", got, want)
 	}
@@ -77,8 +77,8 @@ func TestAgentRunCommandRejectsArgs(t *testing.T) {
 func TestAgentRunCommandMatchesActivationBanner(t *testing.T) {
 	const endpoint = "http://127.0.0.1:5320/anthropic"
 	var buf bytes.Buffer
-	printActivationBanner(&buf, endpoint, "")
-	want := agentmode.LaunchCommand(endpoint, "")
+	printActivationBanner(&buf, endpoint)
+	want := agentmode.LaunchCommand(endpoint)
 	if !strings.Contains(buf.String(), want) {
 		t.Fatalf("activation banner missing launch command %q; got:\n%s", want, buf.String())
 	}

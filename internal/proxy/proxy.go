@@ -35,13 +35,19 @@ const DefaultUpstream = "https://api.anthropic.com"
 // is stripped before forwarding so the upstream sees /v1/messages.
 const PathPrefix = "/anthropic"
 
-// correlationHeaderName is the bacio correlation header the agent launch
-// one-liner stamps on each Anthropic request via ANTHROPIC_CUSTOM_HEADERS
-// (BACI-305). Its value is the worktree slug; the capture transport lifts
-// it onto the observation (CorrelationKey) and then STRIPS it from the
-// outbound request so it never reaches Anthropic and never lands in the
-// raw .http capture (isSensitiveHeader redacts it too, belt-and-braces).
-const correlationHeaderName = "X-Bacio-Corr"
+// Claude Code stamps its own correlation ids on every Anthropic request, so
+// the capture lifts them straight off the wire — no bacio header injection,
+// no worktree slug. claudeSessionHeader is the supervisor session id (maps to
+// agent_sessions.session_id); claudeAgentHeader is the per-subagent id, present
+// only on a Task-spawned subagent's requests (subagents share the session id,
+// so this is what pins a request to a specific dispatch). Both are Claude's own
+// headers already bound for Anthropic — the capture reads them but does NOT
+// strip them (unlike the retired X-Bacio-Corr), so the upstream request is
+// untouched.
+const (
+	claudeSessionHeader = "X-Claude-Code-Session-Id"
+	claudeAgentHeader   = "X-Claude-Code-Agent-Id"
+)
 
 // New returns an http.Handler that reverse-proxies every request to
 // upstream. It strips the PathPrefix, rewrites the Host header to the
@@ -112,14 +118,12 @@ type captureTransport struct {
 func (t *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	started := time.Now()
 
-	// Lift the bacio correlation key (BACI-305) off the inbound request,
-	// then STRIP it so it never reaches Anthropic. Read-before-delete: the
-	// value goes onto the observation while the header is dropped from both
-	// the upstream request and the rendered header block below (which is
-	// built from req.Header after this Del). isSensitiveHeader redacts it
-	// too, belt-and-braces, in case a future code path renders pre-strip.
-	correlationKey := req.Header.Get(correlationHeaderName)
-	req.Header.Del(correlationHeaderName)
+	// Lift Claude Code's own correlation ids off the inbound request. Unlike
+	// the retired X-Bacio-Corr these are Claude's own headers already bound
+	// for Anthropic, so we read but never strip them — the upstream request is
+	// untouched and they stay visible in the raw .http capture.
+	claudeSessionID := req.Header.Get(claudeSessionHeader)
+	claudeAgentID := req.Header.Get(claudeAgentHeader)
 
 	// Tee the request body as it's read by the transport: the captured copy
 	// accumulates into reqBuf (capped) while every byte still reaches the
@@ -144,7 +148,8 @@ func (t *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 			Ended:              time.Now(),
 			Duration:           time.Since(started),
 			RequestHeaderBlock: headerBlock(req.Method+" "+req.URL.RequestURI()+" "+req.Proto, req.Header),
-			CorrelationKey:     correlationKey,
+			ClaudeSessionID:    claudeSessionID,
+			ClaudeAgentID:      claudeAgentID,
 		}
 		if reqBuf != nil {
 			obs.BytesIn = reqBuf.total
@@ -176,7 +181,8 @@ func (t *captureTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 		respHeaders:     headerBlock(statusLine, resp.Header),
 		respContentType: resp.Header.Get("Content-Type"),
 		respEncoding:    resp.Header.Get("Content-Encoding"),
-		correlationKey:  correlationKey,
+		claudeSessionID: claudeSessionID,
+		claudeAgentID:   claudeAgentID,
 	}
 	return resp, nil
 }
@@ -229,7 +235,8 @@ type captureBody struct {
 	respHeaders     string
 	respContentType string
 	respEncoding    string
-	correlationKey  string
+	claudeSessionID string
+	claudeAgentID   string
 
 	bytesOut int64
 	fired    bool
@@ -269,7 +276,8 @@ func (b *captureBody) Close() error {
 			ResponseHeaderBlock:     b.respHeaders,
 			ResponseContentType:     b.respContentType,
 			ResponseContentEncoding: b.respEncoding,
-			CorrelationKey:          b.correlationKey,
+			ClaudeSessionID:         b.claudeSessionID,
+			ClaudeAgentID:           b.claudeAgentID,
 		})
 	}
 	return err
@@ -356,13 +364,10 @@ func isSensitiveHeader(k string) bool {
 	switch strings.ToLower(k) {
 	case "authorization", "x-api-key", "proxy-authorization", "cookie", "set-cookie":
 		return true
-	case "x-bacio-corr":
-		// BACI-305: the bacio correlation key is an internal routing
-		// signal, not Anthropic content — never persist it in the raw
-		// capture (the transport also strips it from the request, so this
-		// is belt-and-braces for any pre-strip render path). Kept in sync
-		// with correlationHeaderName.
-		return true
 	}
+	// Claude Code's own correlation headers (X-Claude-Code-Session-Id /
+	// -Agent-Id) are NOT secrets — they're the substrate the recorder reads
+	// to attribute a capture, and they're already sent to Anthropic — so they
+	// stay visible in the raw .http block.
 	return false
 }

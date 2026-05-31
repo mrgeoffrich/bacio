@@ -75,7 +75,7 @@ func TestReportInstallAgentJSONShape(t *testing.T) {
 func TestPrintActivationBannerMentionsEnvVar(t *testing.T) {
 	const endpoint = "http://127.0.0.1:5320/anthropic"
 	var buf bytes.Buffer
-	printActivationBanner(&buf, endpoint, "")
+	printActivationBanner(&buf, endpoint)
 	got := buf.String()
 	for _, want := range []string{
 		"BACIO_AGENT_MODE",

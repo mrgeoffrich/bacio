@@ -36,11 +36,14 @@ type AddProxyRequestIn struct {
 	ContentType string
 	IsStream    bool
 	IsAnthropic bool
-	// BACI-305 correlation (best-effort, resolved from the X-Bacio-Corr
-	// launch header): SessionID is the worktree's active session, DispatchID
-	// its active dispatch. Both empty/nil when no correlation resolved.
-	SessionID  string
-	DispatchID *int64
+	// Correlation, lifted from Claude Code's own request headers: SessionID is
+	// X-Claude-Code-Session-Id (the supervisor session), ClaudeAgentID is
+	// X-Claude-Code-Agent-Id (the per-subagent id). DispatchID is resolved from
+	// the agent-id→dispatch binding (else the session's active dispatch). All
+	// empty/nil when the header is absent or unresolved.
+	SessionID     string
+	ClaudeAgentID string
+	DispatchID    *int64
 }
 
 // defaultProxyRequestLimit caps an unbounded ListProxyRequests query so a
@@ -59,6 +62,7 @@ func (s *Store) AddProxyRequest(in AddProxyRequestIn) (*model.ProxyRequest, erro
 	rawLogPath := clampProxyField(in.RawLogPath, model.MaxProxyRawLogPathLen)
 	contentType := clampProxyField(in.ContentType, model.MaxProxyContentTypeLen)
 	sessionID := clampProxyField(in.SessionID, model.MaxProxySessionIDLen)
+	claudeAgentID := clampProxyField(in.ClaudeAgentID, model.MaxProxyAgentIDLen)
 
 	started := in.StartedAt
 	if started.IsZero() {
@@ -77,12 +81,13 @@ func (s *Store) AddProxyRequest(in AddProxyRequestIn) (*model.ProxyRequest, erro
 		INSERT INTO proxy_requests
 		    (method, host, path, status, bytes_in, bytes_out,
 		     duration_ms, raw_log_path, started_at, ended_at,
-		     content_type, is_stream, is_anthropic, session_id, dispatch_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		     content_type, is_stream, is_anthropic, session_id,
+		     claude_agent_id, dispatch_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		method, host, path, in.Status, in.BytesIn, in.BytesOut,
 		durationMS, rawLogPath, started.UTC(), ended.UTC(),
 		contentType, proxyBit(in.IsStream), proxyBit(in.IsAnthropic),
-		sessionID, in.DispatchID,
+		sessionID, claudeAgentID, in.DispatchID,
 	)
 	if err != nil {
 		return nil, err
@@ -123,7 +128,8 @@ func proxyBit(b bool) int {
 const proxyRequestSelect = `
 	SELECT id, method, host, path, status, bytes_in, bytes_out,
 	       duration_ms, raw_log_path, started_at, ended_at,
-	       content_type, is_stream, is_anthropic, session_id, dispatch_id
+	       content_type, is_stream, is_anthropic, session_id,
+	       claude_agent_id, dispatch_id
 	FROM proxy_requests`
 
 // GetProxyRequest fetches one row by primary key, or ErrNotFound.
@@ -168,7 +174,8 @@ func scanProxyRequest(r rowScanner) (*model.ProxyRequest, error) {
 		&v.ID, &v.Method, &v.Host, &v.Path, &v.Status,
 		&v.BytesIn, &v.BytesOut, &v.DurationMS, &v.RawLogPath,
 		&v.StartedAt, &v.EndedAt,
-		&v.ContentType, &isStream, &isAnthropic, &v.SessionID, &dispatchID,
+		&v.ContentType, &isStream, &isAnthropic, &v.SessionID,
+		&v.ClaudeAgentID, &dispatchID,
 	); err != nil {
 		return nil, err
 	}

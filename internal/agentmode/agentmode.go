@@ -23,28 +23,20 @@ const claudeInvocation = "claude --dangerously-skip-permissions --dangerously-lo
 // BACIO_AGENT_MODE=1, points ANTHROPIC_BASE_URL at the BACI-301 reverse
 // proxy (proxyEndpoint, e.g. http://127.0.0.1:5320/anthropic) so all
 // Anthropic traffic routes through the local bacio web/api server, and
-// flips ENABLE_TOOL_SEARCH=true. When correlationKey is non-empty it also
-// injects ANTHROPIC_CUSTOM_HEADERS='X-Bacio-Corr: <key>' (BACI-305) — the
-// launch-time-stable worktree slug the reverse-proxy capture maps each
-// Anthropic request back to a worktree's active session/dispatch. An empty
-// key omits the header entirely, leaving the BACI-301 string unchanged.
-// Kept here so the post-install activation banner (printActivationBanner)
-// and the `bacio agent-run-command` verb emit the exact same string and
-// never drift apart.
+// flips ENABLE_TOOL_SEARCH=true. No bacio correlation header is injected:
+// the reverse-proxy capture correlates off Claude Code's own request
+// headers (X-Claude-Code-Session-Id / -Agent-Id), so the launch one-liner
+// needs nothing extra. Kept here so the post-install activation banner
+// (printActivationBanner) and the `bacio agent-run-command` verb emit the
+// exact same string and never drift apart.
 //
 // Consequence (intended, per the reverse-proxy-monitor feature): a
 // running `bacio web`/`bacio api` is a hard dependency of an agent
 // session — without it the worker gets connection-refused on
 // ANTHROPIC_BASE_URL.
-func LaunchCommand(proxyEndpoint, correlationKey string) string {
-	corrHeader := ""
-	if correlationKey != "" {
-		// Single-quoted so the space in the header value survives the shell
-		// split; the slug itself is kebab-case so it never contains a quote.
-		corrHeader = fmt.Sprintf("ANTHROPIC_CUSTOM_HEADERS='X-Bacio-Corr: %s' ", correlationKey)
-	}
-	return fmt.Sprintf("%s=1 ANTHROPIC_BASE_URL=%s ENABLE_TOOL_SEARCH=true %s%s",
-		EnvVar, proxyEndpoint, corrHeader, claudeInvocation)
+func LaunchCommand(proxyEndpoint string) string {
+	return fmt.Sprintf("%s=1 ANTHROPIC_BASE_URL=%s ENABLE_TOOL_SEARCH=true %s",
+		EnvVar, proxyEndpoint, claudeInvocation)
 }
 
 // ProxyEndpoint builds the ANTHROPIC_BASE_URL value from a resolved

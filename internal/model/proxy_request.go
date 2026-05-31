@@ -15,7 +15,8 @@ const (
 	MaxProxyPathLen        = 2 << 10 // 2 KiB — a long path-plus-query still fits.
 	MaxProxyRawLogPathLen  = 4 << 10 // 4 KiB — an absolute log-dir path.
 	MaxProxyContentTypeLen = 255     // BACI-305 — a response Content-Type header value.
-	MaxProxySessionIDLen   = 64      // BACI-305 — a session_id (UUID-shaped) correlation key.
+	MaxProxySessionIDLen   = 64      // a session_id (UUID-shaped) correlation key.
+	MaxProxyAgentIDLen     = 64      // a Claude Code per-subagent id (hex-shaped).
 )
 
 // ProxyRequest is one BACI-302 transport-level observation of a request
@@ -54,12 +55,18 @@ type ProxyRequest struct {
 	ContentType  string `json:"content_type,omitempty"`
 	IsStream     bool   `json:"is_stream,omitempty"`
 	IsAnthropic  bool   `json:"is_anthropic,omitempty"`
-	// BACI-305 correlation: the worktree's active SessionID / DispatchID
-	// the capture was attributed to (resolved from the X-Bacio-Corr launch
-	// header). Both are best-effort: empty/nil when no correlation could be
-	// resolved. DispatchID has no FK — a capture row survives the dispatch.
-	SessionID  string `json:"session_id,omitempty"`
-	DispatchID *int64 `json:"dispatch_id,omitempty"`
+	// Correlation, lifted from Claude Code's own request headers (no bacio
+	// header injection). SessionID is X-Claude-Code-Session-Id — the supervisor
+	// session, mapping directly to agent_sessions.session_id. ClaudeAgentID is
+	// X-Claude-Code-Agent-Id — the per-subagent id (present only on a
+	// Task-spawned subagent's traffic), what pins a request to a specific
+	// dispatch since subagents share the session id. DispatchID is resolved
+	// from the agent-id→dispatch binding (else the session's active dispatch).
+	// All best-effort: empty/nil when the header is absent or unresolved.
+	// DispatchID has no FK — a capture row survives the dispatch.
+	SessionID     string `json:"session_id,omitempty"`
+	ClaudeAgentID string `json:"claude_agent_id,omitempty"`
+	DispatchID    *int64 `json:"dispatch_id,omitempty"`
 }
 
 // ProxyFQDNStat is the BACI-303 per-FQDN rollup of proxy_requests rows:

@@ -379,14 +379,17 @@ func TestProxy_CapturesResponseEncoding(t *testing.T) {
 	}
 }
 
-// TestProxy_CapturesCorrelationHeader asserts an inbound X-Bacio-Corr header
-// lands on the observation's CorrelationKey, is NOT forwarded upstream, and is
-// redacted from the captured request header block (BACI-305).
-func TestProxy_CapturesCorrelationHeader(t *testing.T) {
+// TestProxy_CapturesClaudeCorrelationHeaders asserts the inbound Claude Code
+// correlation headers (X-Claude-Code-Session-Id / -Agent-Id) land on the
+// observation and are forwarded upstream UNCHANGED — unlike the retired
+// X-Bacio-Corr, these are Claude's own headers already bound for Anthropic, so
+// the proxy reads but never strips them.
+func TestProxy_CapturesClaudeCorrelationHeaders(t *testing.T) {
 	rec := newFakeRecorder()
-	var upstreamSawCorr string
+	var upstreamSession, upstreamAgent string
 	h := newProxyWithRecorder(t, rec, func(w http.ResponseWriter, r *http.Request) {
-		upstreamSawCorr = r.Header.Get("X-Bacio-Corr")
+		upstreamSession = r.Header.Get("X-Claude-Code-Session-Id")
+		upstreamAgent = r.Header.Get("X-Claude-Code-Agent-Id")
 		_, _ = io.ReadAll(r.Body)
 		_, _ = w.Write([]byte("ok"))
 	})
@@ -394,7 +397,8 @@ func TestProxy_CapturesCorrelationHeader(t *testing.T) {
 	t.Cleanup(front.Close)
 
 	req, _ := http.NewRequest(http.MethodPost, front.URL+"/anthropic/v1/messages", strings.NewReader("body"))
-	req.Header.Set("X-Bacio-Corr", "agent-deadbeef1234")
+	req.Header.Set("X-Claude-Code-Session-Id", "02bbd299-2f51-4d95-983d-e269461e1e0f")
+	req.Header.Set("X-Claude-Code-Agent-Id", "a79b9dc411ab02ff6")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("post: %v", err)
@@ -403,14 +407,18 @@ func TestProxy_CapturesCorrelationHeader(t *testing.T) {
 	resp.Body.Close()
 
 	obs := rec.waitOne(t)
-	if obs.CorrelationKey != "agent-deadbeef1234" {
-		t.Errorf("CorrelationKey = %q, want %q", obs.CorrelationKey, "agent-deadbeef1234")
+	if obs.ClaudeSessionID != "02bbd299-2f51-4d95-983d-e269461e1e0f" {
+		t.Errorf("ClaudeSessionID = %q, want the inbound session id", obs.ClaudeSessionID)
 	}
-	if upstreamSawCorr != "" {
-		t.Errorf("X-Bacio-Corr leaked to upstream: %q", upstreamSawCorr)
+	if obs.ClaudeAgentID != "a79b9dc411ab02ff6" {
+		t.Errorf("ClaudeAgentID = %q, want the inbound agent id", obs.ClaudeAgentID)
 	}
-	if strings.Contains(obs.RequestHeaderBlock, "agent-deadbeef1234") {
-		t.Errorf("correlation key leaked into the captured request headers:\n%s", obs.RequestHeaderBlock)
+	// Forwarded, NOT stripped — Claude's own headers reach Anthropic as before.
+	if upstreamSession != "02bbd299-2f51-4d95-983d-e269461e1e0f" {
+		t.Errorf("session header not forwarded upstream: got %q", upstreamSession)
+	}
+	if upstreamAgent != "a79b9dc411ab02ff6" {
+		t.Errorf("agent header not forwarded upstream: got %q", upstreamAgent)
 	}
 }
 

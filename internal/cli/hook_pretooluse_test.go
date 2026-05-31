@@ -7,6 +7,43 @@ import (
 	"testing"
 )
 
+// TestParseClaimIssue pins the worker-claim parser the agent-id→dispatch
+// binding keys off: it extracts the issue from a `bacio agent claim <ISSUE>`
+// Bash command and fail-closes on everything else.
+func TestParseClaimIssue(t *testing.T) {
+	cases := []struct {
+		name    string
+		tool    string
+		command string
+		wantKey string
+		wantOK  bool
+	}{
+		{"plain claim", "Bash", "bacio agent claim BACI-12 --prompt implement", "BACI-12", true},
+		{"absolute binary", "Bash", "/usr/local/bin/bacio agent claim ZZZZ-9", "ZZZZ-9", true},
+		{"workspace binary", "Bash", ".bin/bacio-agent-slug agent claim PROX-3 --env x", "PROX-3", true},
+		// The brief writes `claim <ISSUE> --prompt <mode>` (issue first). A flag
+		// value before the issue can't be told from a positional, so fail-close.
+		{"flag value before issue fails closed", "Bash", "bacio agent claim --prompt p MINI-7", "", false},
+		{"not a claim verb", "Bash", "bacio agent release BACI-1", "", false},
+		{"not a claim at all", "Bash", "bacio worktree init", "", false},
+		{"json form fails closed", "Bash", `bacio agent claim --json '{"issue":"BACI-1"}'`, "", false},
+		{"pipe fails closed", "Bash", "echo x | bacio agent claim BACI-1", "", false},
+		{"subshell fails closed", "Bash", "bacio agent claim $(echo BACI-1)", "", false},
+		{"non-issue positional", "Bash", "bacio agent claim notakey --prompt p", "", false},
+		{"wrong tool", "Write", "bacio agent claim BACI-12", "", false},
+		{"empty", "Bash", "   ", "", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			key, ok := parseClaimIssue(c.tool, c.command)
+			if ok != c.wantOK || key != c.wantKey {
+				t.Errorf("parseClaimIssue(%q, %q) = (%q, %v), want (%q, %v)",
+					c.tool, c.command, key, ok, c.wantKey, c.wantOK)
+			}
+		})
+	}
+}
+
 // TestPathWithin pins the boundary-safe containment check. The
 // sibling-prefix case is the one a plain strings.HasPrefix gets wrong —
 // `…/agent-abc-evil` is NOT within `…/agent-abc`.

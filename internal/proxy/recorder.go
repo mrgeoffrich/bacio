@@ -54,12 +54,17 @@ type RequestObservation struct {
 	ResponseContentType     string
 	ResponseContentEncoding string
 
-	// CorrelationKey is the bacio correlation key the agent launch one-liner
-	// stamps on each Anthropic request via ANTHROPIC_CUSTOM_HEADERS
-	// (X-Bacio-Corr — the worktree slug). The recorder resolves it back to
-	// the worktree's active session/dispatch. Empty when the header is
-	// absent (graceful degradation — capture + classification still work).
-	CorrelationKey string
+	// ClaudeSessionID / ClaudeAgentID are Claude Code's own correlation ids,
+	// lifted off the request headers the agent already sends (no bacio header
+	// injection needed). ClaudeSessionID (X-Claude-Code-Session-Id) is the
+	// supervisor session — it maps directly to agent_sessions.session_id.
+	// ClaudeAgentID (X-Claude-Code-Agent-Id) is the per-subagent id, present
+	// only on a Task-spawned subagent's requests — it's what pins a request to
+	// a specific dispatch (subagents share the session id). Both empty when the
+	// header is absent (graceful degradation — capture + classification still
+	// work). The recorder resolves them to a session/dispatch.
+	ClaudeSessionID string
+	ClaudeAgentID   string
 }
 
 // Recorder observes every request that flows through the proxy. The proxy
