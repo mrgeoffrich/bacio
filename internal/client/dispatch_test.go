@@ -923,8 +923,9 @@ func TestEndAgentSessionAbandonsOpenQuestionsAudit(t *testing.T) {
 // scenario — a delivered implement dispatch whose target session is
 // ended — plus an idle live channel-connected supervisor, then asserts
 // CreateRescueDispatch enqueues a `bacio-rescue` dispatch at the live
-// supervisor, derives the agent id from a linked transcript document,
-// and writes one agent.rescue audit row.
+// supervisor and writes one agent.rescue audit row. BACI-307 dropped
+// the transcript-doc agent-id enrichment, so the payload tells the
+// supervisor to discover the worktree via `git worktree list`.
 func TestCreateRescueDispatchHappyPath(t *testing.T) {
 	p := newPair(t)
 	defer p.cleanup()
@@ -968,19 +969,6 @@ func TestCreateRescueDispatchHappyPath(t *testing.T) {
 		t.Fatalf("MarkDispatchDelivered: %v", err)
 	}
 
-	// Attach a transcript so the rescue path can parse the agent id
-	// from the filename. The pattern matches the attach_transcript
-	// naming convention exactly.
-	const agentID = "afc2b74037486daa7"
-	transcriptName := "bacio-transcript-" + iss.Key + "-agent-" + agentID + ".jsonl"
-	doc, err := p.store.CreateDocument(p.repo.ID, transcriptName, model.DocTypeTranscript, "{}\n", "")
-	if err != nil {
-		t.Fatalf("CreateDocument: %v", err)
-	}
-	if _, err := p.store.LinkDocument(doc.ID, store.LinkTarget{IssueID: &iss.ID}, "test transcript"); err != nil {
-		t.Fatalf("LinkDocument: %v", err)
-	}
-
 	// Live idle supervisor — registered + channel-connected, no open
 	// claim → eligible to receive a rescue dispatch.
 	liveAg, _, err := p.store.UpsertAgent("alive-otter@claude.test", true)
@@ -1014,11 +1002,8 @@ func TestCreateRescueDispatchHappyPath(t *testing.T) {
 	if rescue.TargetSessionID != liveSID {
 		t.Fatalf("rescue.TargetSessionID = %q, want %q (the live supervisor)", rescue.TargetSessionID, liveSID)
 	}
-	if !strings.Contains(rescue.Payload, agentID) {
-		t.Fatalf("rescue payload missing agent id %q: %q", agentID, rescue.Payload)
-	}
-	if !strings.Contains(rescue.Payload, ".claude/worktrees/agent-"+agentID) {
-		t.Fatalf("rescue payload missing worktree path: %q", rescue.Payload)
+	if !strings.Contains(rescue.Payload, "worktree list") {
+		t.Fatalf("rescue payload should tell the supervisor to discover the worktree: %q", rescue.Payload)
 	}
 	if !strings.Contains(rescue.Payload, "INLINE") {
 		t.Fatalf("rescue payload should tell the supervisor to handle INLINE: %q", rescue.Payload)
@@ -1048,9 +1033,6 @@ func TestCreateRescueDispatchHappyPath(t *testing.T) {
 	}
 	if !strings.Contains(row.Details, "original_dispatch=") {
 		t.Fatalf("rescue audit Details missing original_dispatch: %q", row.Details)
-	}
-	if !strings.Contains(row.Details, "agent="+agentID) {
-		t.Fatalf("rescue audit Details missing agent id: %q", row.Details)
 	}
 }
 
@@ -1147,27 +1129,3 @@ func TestCreateRescueDispatchRejectsTrivialCreator(t *testing.T) {
 	}
 }
 
-// TestRescueDispatchNeedsRescueFlag (BACI-190) covers the agentcards
-// DispatchDTO derive: a delivered dispatch whose target session has
-// ended carries NeedsRescue=true, while a pending dispatch on a live
-// session does not. Pure-data test against dispatchNeedsRescue is in
-// the agentcards package; this is the round-trip smoke that the
-// store→dispatch→session join lights it up.
-func TestParseAgentIDFromTranscriptFilename(t *testing.T) {
-	cases := []struct {
-		in, want string
-	}{
-		{"bacio-transcript-BACI-188-agent-afc2b74037486daa7.jsonl", "afc2b74037486daa7"},
-		{"bacio-transcript-MINI-3-agent-deadbeef.jsonl", "deadbeef"},
-		{"not-a-transcript.jsonl", ""},
-		{"", ""},
-	}
-	for _, c := range cases {
-		// Reaching into the package-private helper via the test's
-		// external package; expose by name in a hoisted helper below.
-		got := client.ParseAgentIDFromTranscriptFilenameForTest(c.in)
-		if got != c.want {
-			t.Fatalf("parseAgentIDFromTranscriptFilename(%q) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
