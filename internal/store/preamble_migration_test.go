@@ -80,10 +80,11 @@ func TestRefreshDispatchPreambleUpgradesBACI76TypoDefault(t *testing.T) {
 }
 
 // TestRefreshDispatchPreambleUpgradesBACI80Default: simulate a
-// post-BACI-80 / pre-BACI-85 DB by writing the BACI-80 default (which
-// did not yet mention attach_transcript) into the row, then re-run the
-// refresh — it must replace the body with the BACI-85 default that
-// tells the supervisor to call mcp__bacio__attach_transcript.
+// post-BACI-80 / pre-BACI-85 DB by writing the BACI-80 default into the
+// row, then re-run the refresh — it must replace the body with the
+// current default in place (the user never customised it). BACI-307
+// retired the attach_transcript step the BACI-85 default added, so the
+// refresh now lands the post-307 default rather than the BACI-85 one.
 func TestRefreshDispatchPreambleUpgradesBACI80Default(t *testing.T) {
 	s := newTestStore(t)
 	old := strings.TrimRight(oldDispatchPreambleBACI80, "\r\n")
@@ -102,9 +103,6 @@ func TestRefreshDispatchPreambleUpgradesBACI80Default(t *testing.T) {
 	}
 	if body != model.DefaultPromptBodyForBuiltinSlug(model.BuiltinTemplatePreamble) {
 		t.Fatalf("BACI-80 default was not refreshed to the new default:\n%s", body)
-	}
-	if !strings.Contains(body, "attach_transcript") {
-		t.Fatalf("refreshed preamble does not mention attach_transcript:\n%s", body)
 	}
 }
 
