@@ -7,7 +7,229 @@ import { Create as $Create } from "@wailsio/runtime";
 
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore: Unused imports
+import * as json$0 from "../../../../../encoding/json/models.js";
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore: Unused imports
 import * as time$0 from "../../../../../time/models.js";
+
+/**
+ * AnthropicBlock is one content block in a message — the union the viewer's
+ * AssistantBlock encodes (text | thinking | tool_use), plus the tool_result
+ * shape that appears in the request messages[] (a user turn replying to a prior
+ * tool_use). Type is the discriminator; the other fields are populated per type:
+ *   - "text":        Text
+ *   - "thinking":    Thinking
+ *   - "tool_use":    ID, Name, Input
+ *   - "tool_result": ToolUseID, Content, IsError
+ */
+export class AnthropicBlock {
+    "type": string;
+
+    /**
+     * text / thinking
+     */
+    "text"?: string;
+    "thinking"?: string;
+
+    /**
+     * tool_use — Input is the accumulated input JSON (parsed from the streamed
+     * input_json_delta fragments on the response side, or carried verbatim from
+     * the request side). RawMessage so the original JSON survives round-tripping.
+     */
+    "id"?: string;
+    "name"?: string;
+    "input"?: json$0.RawMessage;
+
+    /**
+     * tool_result — replies to a prior tool_use by id. Content is polymorphic
+     * (string or block list) so it's kept as raw JSON, mirroring the viewer's
+     * ToolResultContent union.
+     */
+    "tool_use_id"?: string;
+    "content"?: json$0.RawMessage;
+    "is_error"?: boolean;
+
+    /** Creates a new AnthropicBlock instance. */
+    constructor($$source: Partial<AnthropicBlock> = {}) {
+        if (!("type" in $$source)) {
+            this["type"] = "";
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new AnthropicBlock instance from a string or object.
+     */
+    static createFrom($$source: any = {}): AnthropicBlock {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new AnthropicBlock($$parsedSource as Partial<AnthropicBlock>);
+    }
+}
+
+/**
+ * AnthropicMessage is one entry in the request messages[] array: a role
+ * ("user" | "assistant") and its content blocks. The request body carries the
+ * whole conversation-so-far as these; the per-capture delta is the slice of
+ * messages appended since the previous primary capture.
+ */
+export class AnthropicMessage {
+    "role": string;
+    "content": AnthropicBlock[];
+
+    /** Creates a new AnthropicMessage instance. */
+    constructor($$source: Partial<AnthropicMessage> = {}) {
+        if (!("role" in $$source)) {
+            this["role"] = "";
+        }
+        if (!("content" in $$source)) {
+            this["content"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new AnthropicMessage instance from a string or object.
+     */
+    static createFrom($$source: any = {}): AnthropicMessage {
+        const $$createField1_0 = $$createType1;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("content" in $$parsedSource) {
+            $$parsedSource["content"] = $$createField1_0($$parsedSource["content"]);
+        }
+        return new AnthropicMessage($$parsedSource as Partial<AnthropicMessage>);
+    }
+}
+
+/**
+ * AnthropicTranscript is the assembled per-job conversation: the ordered
+ * messages (user/tool_result turns interleaved with the assistant turns) of the
+ * primary thread, the summed token usage across the job, and the auxiliary turns
+ * (title-gen, structured-output probes) that share the dispatch but aren't part
+ * of the main conversation. Model is the primary thread's model.
+ */
+export class AnthropicTranscript {
+    "dispatch_id"?: number | null;
+    "model"?: string;
+    "messages": AnthropicMessage[];
+    "usage": AnthropicUsage;
+
+    /**
+     * Auxiliary turns (one per non-primary capture) — kept so the full picture
+     * is visible without polluting the primary thread. Each is one assistant
+     * turn with its own usage; ordered by capture sequence.
+     */
+    "auxiliary"?: AnthropicTurn[];
+
+    /** Creates a new AnthropicTranscript instance. */
+    constructor($$source: Partial<AnthropicTranscript> = {}) {
+        if (!("messages" in $$source)) {
+            this["messages"] = [];
+        }
+        if (!("usage" in $$source)) {
+            this["usage"] = (new AnthropicUsage());
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new AnthropicTranscript instance from a string or object.
+     */
+    static createFrom($$source: any = {}): AnthropicTranscript {
+        const $$createField2_0 = $$createType3;
+        const $$createField3_0 = $$createType4;
+        const $$createField4_0 = $$createType6;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("messages" in $$parsedSource) {
+            $$parsedSource["messages"] = $$createField2_0($$parsedSource["messages"]);
+        }
+        if ("usage" in $$parsedSource) {
+            $$parsedSource["usage"] = $$createField3_0($$parsedSource["usage"]);
+        }
+        if ("auxiliary" in $$parsedSource) {
+            $$parsedSource["auxiliary"] = $$createField4_0($$parsedSource["auxiliary"]);
+        }
+        return new AnthropicTranscript($$parsedSource as Partial<AnthropicTranscript>);
+    }
+}
+
+/**
+ * AnthropicTurn is the single assistant turn reconstructed from one capture's
+ * response SSE stream: the ordered content blocks the model emitted, the merged
+ * token usage, the stop reason, and the model name. This is the response half
+ * of a capture; the request half is the messages[] / delta.
+ */
+export class AnthropicTurn {
+    "model"?: string;
+    "blocks": AnthropicBlock[];
+    "usage": AnthropicUsage;
+    "stop_reason"?: string;
+
+    /** Creates a new AnthropicTurn instance. */
+    constructor($$source: Partial<AnthropicTurn> = {}) {
+        if (!("blocks" in $$source)) {
+            this["blocks"] = [];
+        }
+        if (!("usage" in $$source)) {
+            this["usage"] = (new AnthropicUsage());
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new AnthropicTurn instance from a string or object.
+     */
+    static createFrom($$source: any = {}): AnthropicTurn {
+        const $$createField1_0 = $$createType1;
+        const $$createField2_0 = $$createType4;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("blocks" in $$parsedSource) {
+            $$parsedSource["blocks"] = $$createField1_0($$parsedSource["blocks"]);
+        }
+        if ("usage" in $$parsedSource) {
+            $$parsedSource["usage"] = $$createField2_0($$parsedSource["usage"]);
+        }
+        return new AnthropicTurn($$parsedSource as Partial<AnthropicTurn>);
+    }
+}
+
+/**
+ * AnthropicUsage is the merged token usage for one assistant turn. Anthropic
+ * splits usage across two SSE events — input/cache tokens arrive on
+ * message_start.message.usage and the final output_tokens (+ the thinking-token
+ * breakdown) on message_delta.usage — so the parser merges both into one struct.
+ * The viewer's TokenUsage carries input/output/cache fields with the same names.
+ */
+export class AnthropicUsage {
+    "input_tokens"?: number;
+    "output_tokens"?: number;
+    "cache_creation_input_tokens"?: number;
+    "cache_read_input_tokens"?: number;
+
+    /**
+     * ThinkingTokens is output_tokens_details.thinking_tokens off message_delta —
+     * the slice of OutputTokens that was extended thinking, surfaced separately so
+     * a reader can see the thinking cost without re-deriving it.
+     */
+    "thinking_tokens"?: number;
+
+    /** Creates a new AnthropicUsage instance. */
+    constructor($$source: Partial<AnthropicUsage> = {}) {
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new AnthropicUsage instance from a string or object.
+     */
+    static createFrom($$source: any = {}): AnthropicUsage {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new AnthropicUsage($$parsedSource as Partial<AnthropicUsage>);
+    }
+}
 
 /**
  * DispatchMode is the slug of the prompt template a dispatch was queued
@@ -220,7 +442,7 @@ export class Issue {
      * Creates a new Issue instance from a string or object.
      */
     static createFrom($$source: any = {}): Issue {
-        const $$createField14_0 = $$createType0;
+        const $$createField14_0 = $$createType7;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
             $$parsedSource["tags"] = $$createField14_0($$parsedSource["tags"]);
@@ -363,6 +585,66 @@ export class PipelineJob {
 }
 
 /**
+ * ProxyMessage is one persisted proxy_messages row: the parsed detail of one
+ * captured Anthropic SSE turn, durable so a job's transcript can be assembled
+ * without re-reading the raw .http file. It mirrors the columns in schema.sql.
+ * DeltaJSON / TurnJSON are the serialised AnthropicMessage[] / AnthropicTurn
+ * (a truncation marker string when the body exceeded MaxProxyMessageBody).
+ */
+export class ProxyMessage {
+    "id": number;
+    "proxy_request_id": number;
+    "dispatch_id"?: number | null;
+    "session_id"?: string;
+    "claude_agent_id"?: string;
+    "model"?: string;
+    "system_fingerprint"?: string;
+    "message_count": number;
+    "is_primary": boolean;
+    "stop_reason"?: string;
+    "delta_json"?: string;
+    "turn_json"?: string;
+    "usage": AnthropicUsage;
+    "started_at": time$0.Time;
+
+    /** Creates a new ProxyMessage instance. */
+    constructor($$source: Partial<ProxyMessage> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = 0;
+        }
+        if (!("proxy_request_id" in $$source)) {
+            this["proxy_request_id"] = 0;
+        }
+        if (!("message_count" in $$source)) {
+            this["message_count"] = 0;
+        }
+        if (!("is_primary" in $$source)) {
+            this["is_primary"] = false;
+        }
+        if (!("usage" in $$source)) {
+            this["usage"] = (new AnthropicUsage());
+        }
+        if (!("started_at" in $$source)) {
+            this["started_at"] = null;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ProxyMessage instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ProxyMessage {
+        const $$createField12_0 = $$createType4;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("usage" in $$parsedSource) {
+            $$parsedSource["usage"] = $$createField12_0($$parsedSource["usage"]);
+        }
+        return new ProxyMessage($$parsedSource as Partial<ProxyMessage>);
+    }
+}
+
+/**
  * QuestionAnswers maps question text -> answer. For a single-select
  * question the value is a string (an option label, or free-text
  * "Other"); for a multi-select question the value is []string. The
@@ -410,7 +692,7 @@ export class QuestionItem {
      * Creates a new QuestionItem instance from a string or object.
      */
     static createFrom($$source: any = {}): QuestionItem {
-        const $$createField3_0 = $$createType2;
+        const $$createField3_0 = $$createType9;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("options" in $$parsedSource) {
             $$parsedSource["options"] = $$createField3_0($$parsedSource["options"]);
@@ -472,7 +754,7 @@ export class QuestionPayload {
      * Creates a new QuestionPayload instance from a string or object.
      */
     static createFrom($$source: any = {}): QuestionPayload {
-        const $$createField0_0 = $$createType4;
+        const $$createField0_0 = $$createType11;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("questions" in $$parsedSource) {
             $$parsedSource["questions"] = $$createField0_0($$parsedSource["questions"]);
@@ -571,8 +853,8 @@ export class SessionQuestion {
      * Creates a new SessionQuestion instance from a string or object.
      */
     static createFrom($$source: any = {}): SessionQuestion {
-        const $$createField6_0 = $$createType5;
-        const $$createField7_0 = $$createType6;
+        const $$createField6_0 = $$createType12;
+        const $$createField7_0 = $$createType13;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("payload" in $$parsedSource) {
             $$parsedSource["payload"] = $$createField6_0($$parsedSource["payload"]);
@@ -670,16 +952,23 @@ export class UserMessage {
 }
 
 // Private type creation functions
-const $$createType0 = $Create.Array($Create.Any);
-const $$createType1 = QuestionOption.createFrom;
-const $$createType2 = $Create.Array($$createType1);
-const $$createType3 = QuestionItem.createFrom;
-const $$createType4 = $Create.Array($$createType3);
-const $$createType5 = QuestionPayload.createFrom;
-var $$createType6 = (function $$initCreateType6(...args: any[]): any {
-    if ($$createType6 === $$initCreateType6) {
-        $$createType6 = $$createType7;
+const $$createType0 = AnthropicBlock.createFrom;
+const $$createType1 = $Create.Array($$createType0);
+const $$createType2 = AnthropicMessage.createFrom;
+const $$createType3 = $Create.Array($$createType2);
+const $$createType4 = AnthropicUsage.createFrom;
+const $$createType5 = AnthropicTurn.createFrom;
+const $$createType6 = $Create.Array($$createType5);
+const $$createType7 = $Create.Array($Create.Any);
+const $$createType8 = QuestionOption.createFrom;
+const $$createType9 = $Create.Array($$createType8);
+const $$createType10 = QuestionItem.createFrom;
+const $$createType11 = $Create.Array($$createType10);
+const $$createType12 = QuestionPayload.createFrom;
+var $$createType13 = (function $$initCreateType13(...args: any[]): any {
+    if ($$createType13 === $$initCreateType13) {
+        $$createType13 = $$createType14;
     }
-    return $$createType6(...args);
+    return $$createType13(...args);
 });
-const $$createType7 = $Create.Map($Create.Any, $Create.Any);
+const $$createType14 = $Create.Map($Create.Any, $Create.Any);

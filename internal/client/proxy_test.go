@@ -2,6 +2,8 @@ package client_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -58,6 +60,114 @@ func TestRoundTripProxyStats(t *testing.T) {
 	}
 	if anthropic.P50MS == 0 || anthropic.P95MS == 0 {
 		t.Fatalf("percentiles unpopulated: p50=%d p95=%d", anthropic.P50MS, anthropic.P95MS)
+	}
+}
+
+// TestRoundTripProxyCaptures seeds a correlated + an uncorrelated capture and
+// asserts local and remote agree on the filtered list — same rows, same
+// newest-first order, same issue-key/mode enrichment — for BACI-308.
+func TestRoundTripProxyCaptures(t *testing.T) {
+	p := newPair(t)
+	defer p.cleanup()
+	ctx := context.Background()
+
+	iss, err := p.store.CreateIssue(p.repo.ID, nil, "drill", "", model.StateTodo, nil, "")
+	if err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+	disp, err := p.store.AddDispatch(store.AddDispatchIn{
+		RepoID: p.repo.ID, IssueID: &iss.ID, Mode: model.DispatchModeImplement,
+		TargetSessionID: "00000000-0000-0000-0000-0000000000aa", CreatedBy: "user",
+	})
+	if err != nil {
+		t.Fatalf("AddDispatch: %v", err)
+	}
+
+	t0 := time.Now().Add(-3 * time.Minute)
+	if _, err := p.store.AddProxyRequest(store.AddProxyRequestIn{
+		Method: "POST", Host: "api.anthropic.com", Path: "/v1/messages",
+		Status: 200, IsAnthropic: true, DispatchID: &disp.ID,
+		StartedAt: t0, EndedAt: t0,
+	}); err != nil {
+		t.Fatalf("seed correlated: %v", err)
+	}
+	if _, err := p.store.AddProxyRequest(store.AddProxyRequestIn{
+		Method: "POST", Host: "api.anthropic.com", Path: "/v1/messages?count_tokens",
+		Status: 200, StartedAt: t0.Add(time.Minute), EndedAt: t0.Add(time.Minute),
+	}); err != nil {
+		t.Fatalf("seed uncorrelated: %v", err)
+	}
+
+	f := store.ProxyRequestFilter{Host: "api.anthropic.com"}
+	local, err := p.local.ListProxyCaptures(ctx, f)
+	if err != nil {
+		t.Fatalf("local ListProxyCaptures: %v", err)
+	}
+	remote, err := p.remote.ListProxyCaptures(ctx, f)
+	if err != nil {
+		t.Fatalf("remote ListProxyCaptures: %v", err)
+	}
+	if len(local) != 2 || len(remote) != 2 {
+		t.Fatalf("row count mismatch: local=%d remote=%d", len(local), len(remote))
+	}
+	for i := range local {
+		x, y := local[i], remote[i]
+		if x.ID != y.ID || x.Host != y.Host || x.IssueKey != y.IssueKey || x.Mode != y.Mode {
+			t.Fatalf("row[%d] mismatch:\n local=%+v\n remote=%+v", i, x, y)
+		}
+	}
+	// The correlated row (older, so index 1 newest-first) carries the chip.
+	if local[1].IssueKey != iss.Key || local[1].Mode != string(model.DispatchModeImplement) {
+		t.Fatalf("correlated chip wrong: key=%q mode=%q", local[1].IssueKey, local[1].Mode)
+	}
+}
+
+// TestRoundTripProxyCaptureRaw asserts local and remote return identical raw
+// .http bytes for a capture whose file is on disk, and both surface ErrNotFound
+// (HTTP 404) when the file is missing — for BACI-308.
+func TestRoundTripProxyCaptureRaw(t *testing.T) {
+	p := newPair(t)
+	defer p.cleanup()
+	ctx := context.Background()
+
+	rawPath := filepath.Join(t.TempDir(), "cap.http")
+	want := "==== REQUEST ====\r\nPOST /v1/messages HTTP/1.1\r\n\r\n{}\r\n"
+	if err := os.WriteFile(rawPath, []byte(want), 0o644); err != nil {
+		t.Fatalf("write raw: %v", err)
+	}
+	withFile, err := p.store.AddProxyRequest(store.AddProxyRequestIn{
+		Method: "POST", Host: "api.anthropic.com", Path: "/v1/messages",
+		Status: 200, RawLogPath: rawPath,
+	})
+	if err != nil {
+		t.Fatalf("add with-file: %v", err)
+	}
+
+	localRaw, err := p.local.ProxyCaptureRaw(ctx, withFile.ID)
+	if err != nil {
+		t.Fatalf("local raw: %v", err)
+	}
+	remoteRaw, err := p.remote.ProxyCaptureRaw(ctx, withFile.ID)
+	if err != nil {
+		t.Fatalf("remote raw: %v", err)
+	}
+	if string(localRaw) != want || string(remoteRaw) != want {
+		t.Fatalf("raw mismatch:\n local=%q\n remote=%q\n want=%q", localRaw, remoteRaw, want)
+	}
+
+	// A row with no raw file: both backends miss (local ErrNotFound, remote
+	// HTTP 404 surfaced as an error).
+	noFile, err := p.store.AddProxyRequest(store.AddProxyRequestIn{
+		Method: "POST", Host: "api.anthropic.com", Path: "/v1/messages", Status: 200,
+	})
+	if err != nil {
+		t.Fatalf("add no-file: %v", err)
+	}
+	if _, err := p.local.ProxyCaptureRaw(ctx, noFile.ID); err == nil {
+		t.Fatalf("local raw on no-file row: expected error, got nil")
+	}
+	if _, err := p.remote.ProxyCaptureRaw(ctx, noFile.ID); err == nil {
+		t.Fatalf("remote raw on no-file row: expected error, got nil")
 	}
 }
 

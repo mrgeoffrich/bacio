@@ -69,6 +69,19 @@ type ProxyRequest struct {
 	DispatchID    *int64 `json:"dispatch_id,omitempty"`
 }
 
+// ProxyCaptureRow is one row of the BACI-308 filtered capture list — a
+// ProxyRequest index row enriched, when the capture correlates to a dispatch,
+// with that dispatch's issue key and mode so the Monitor drill-down sheet can
+// show the job context (the issue-key + mode chip) at a glance without a second
+// fetch per row. It is the wire shape of GET /proxy/captures; the embedded
+// ProxyRequest flattens its snake_case fields inline, and IssueKey / Mode are
+// empty when the row has no dispatch_id or the dispatch has since been deleted.
+type ProxyCaptureRow struct {
+	ProxyRequest
+	IssueKey string `json:"issue_key,omitempty"`
+	Mode     string `json:"mode,omitempty"`
+}
+
 // ProxyFQDNStat is the BACI-303 per-FQDN rollup of proxy_requests rows:
 // one entry per distinct upstream host, summarising how much an agent
 // session talked to it. RequestCount / BytesIn / BytesOut are simple

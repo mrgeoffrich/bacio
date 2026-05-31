@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
@@ -162,6 +163,43 @@ func (c *remoteClient) JobTranscript(ctx context.Context, dispatchID int64) (*mo
 		return nil, err
 	}
 	return &out, nil
+}
+
+// ----- Capture drill-down (BACI-308) -----
+
+func (c *remoteClient) ListProxyCaptures(ctx context.Context, f store.ProxyRequestFilter) ([]*model.ProxyCaptureRow, error) {
+	q := url.Values{}
+	if f.Host != "" {
+		q.Set("host", f.Host)
+	}
+	if f.DispatchID != nil {
+		q.Set("dispatch_id", strInt(*f.DispatchID))
+	}
+	if f.IsAnthropic != nil {
+		q.Set("is_anthropic", strconv.FormatBool(*f.IsAnthropic))
+	}
+	if f.Limit > 0 {
+		q.Set("limit", strInt(int64(f.Limit)))
+	}
+	if f.Since != nil {
+		q.Set("from", f.Since.UTC().Format("2006-01-02T15:04:05Z"))
+	}
+	var out []*model.ProxyCaptureRow
+	if err := c.do(ctx, http.MethodGet, "/proxy/captures", q, nil, &out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = []*model.ProxyCaptureRow{}
+	}
+	return out, nil
+}
+
+func (c *remoteClient) ProxyCaptureRaw(ctx context.Context, id int64) ([]byte, error) {
+	var out []byte
+	if err := c.do(ctx, http.MethodGet, "/proxy/captures/"+strInt(id)+"/raw", nil, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // BlockersFor stays local-only (BACI-114). The kanban surface always

@@ -1676,6 +1676,83 @@ export class PromptTemplateDTO {
 }
 
 /**
+ * ProxyCaptureRowDTO is one row of the BACI-308 capture drill-down list,
+ * shaped for the desktop Monitor sheet. It carries the proxy_requests fields
+ * the capture list renders plus the IssueKey / Mode enrichment, with camelCase
+ * JSON tags so the Wails binding matches the web twin's TS-only shape (the
+ * same cross-transport split as ProxyFQDNStatDTO). IssueKey / Mode are empty
+ * when the capture has no dispatch. IsAnthropic gates the "parsed transcript"
+ * affordance; HasRaw whether the raw .http file is available.
+ */
+export class ProxyCaptureRowDTO {
+    "id": number;
+    "method": string;
+    "host": string;
+    "path": string;
+    "status": number;
+    "bytesIn": number;
+    "bytesOut": number;
+    "durationMs": number;
+    "isStream": boolean;
+    "isAnthropic": boolean;
+    "hasRaw": boolean;
+    "dispatchId"?: number | null;
+    "issueKey"?: string;
+    "mode"?: string;
+    "startedAt": time$0.Time;
+
+    /** Creates a new ProxyCaptureRowDTO instance. */
+    constructor($$source: Partial<ProxyCaptureRowDTO> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = 0;
+        }
+        if (!("method" in $$source)) {
+            this["method"] = "";
+        }
+        if (!("host" in $$source)) {
+            this["host"] = "";
+        }
+        if (!("path" in $$source)) {
+            this["path"] = "";
+        }
+        if (!("status" in $$source)) {
+            this["status"] = 0;
+        }
+        if (!("bytesIn" in $$source)) {
+            this["bytesIn"] = 0;
+        }
+        if (!("bytesOut" in $$source)) {
+            this["bytesOut"] = 0;
+        }
+        if (!("durationMs" in $$source)) {
+            this["durationMs"] = 0;
+        }
+        if (!("isStream" in $$source)) {
+            this["isStream"] = false;
+        }
+        if (!("isAnthropic" in $$source)) {
+            this["isAnthropic"] = false;
+        }
+        if (!("hasRaw" in $$source)) {
+            this["hasRaw"] = false;
+        }
+        if (!("startedAt" in $$source)) {
+            this["startedAt"] = null;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new ProxyCaptureRowDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): ProxyCaptureRowDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new ProxyCaptureRowDTO($$parsedSource as Partial<ProxyCaptureRowDTO>);
+    }
+}
+
+/**
  * ProxyFQDNStatDTO is one per-FQDN proxy-traffic rollup, shaped for the
  * desktop Monitor table (BACI-304). It mirrors model.ProxyFQDNStat field
  * for field but carries camelCase JSON tags so the Wails-generated TS

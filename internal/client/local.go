@@ -196,3 +196,30 @@ func (c *localClient) AnthropicCapture(ctx context.Context, id int64) (*model.Pr
 func (c *localClient) JobTranscript(ctx context.Context, dispatchID int64) (*model.AnthropicTranscript, error) {
 	return c.store.JobTranscript(dispatchID)
 }
+
+func (c *localClient) ListProxyCaptures(ctx context.Context, f store.ProxyRequestFilter) ([]*model.ProxyCaptureRow, error) {
+	rows, err := c.store.ListProxyCapturesEnriched(f)
+	if err != nil {
+		return nil, err
+	}
+	if rows == nil {
+		rows = []*model.ProxyCaptureRow{}
+	}
+	return rows, nil
+}
+
+func (c *localClient) ProxyCaptureRaw(ctx context.Context, id int64) ([]byte, error) {
+	pr, err := c.store.GetProxyRequest(id)
+	if err != nil {
+		return nil, err
+	}
+	if pr.RawLogPath == "" {
+		return nil, store.ErrNotFound
+	}
+	body, err := os.ReadFile(pr.RawLogPath)
+	if err != nil {
+		// Pruned / log dir wiped — a clean miss, matching the REST 404.
+		return nil, store.ErrNotFound
+	}
+	return body, nil
+}

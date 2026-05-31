@@ -338,6 +338,18 @@ bounded by `pruneProxyMessages` on the same 60-day window as the index.
   passthrough), and the `model` types are snake_case-aligned to the React
   viewer's `transcript/types.ts` so BACI-307/308 can re-point
   `TranscriptView` at this source with a thin seam.
+- `bacio proxy captures --host <h> [--dispatch <id>] [--anthropic] [--since <d>]`
+  / `GET /proxy/captures?host=&dispatch_id=&is_anthropic=&since=&limit=`
+  (BACI-308) — the filtered, newest-first, capped capture **list** the
+  Monitor drill-down walks an FQDN stat row down into. Backed by
+  `Store.ListProxyCapturesEnriched`, each row is best-effort enriched with
+  its dispatch's issue key + mode (one cached `GetDispatch` per dispatch).
+  Default cap 200, ceilinged at the 500 `defaultProxyRequestLimit`.
+- `bacio proxy raw <id>` / `GET /proxy/captures/{id}/raw` (BACI-308) — the
+  inflated, auth-redacted `.http` bytes the recorder wrote to disk, served
+  as `text/plain`. The escape hatch for a capture that isn't a parseable
+  Anthropic turn. 404 (not 500) when the row has no raw file or it's been
+  pruned, so the UI treats "raw unavailable" as a clean miss.
 
 Pre-306 captures are **not** retroactively parsed (no backfill); new
 traffic populates `proxy_messages` going forward. A `bacio proxy reparse`
@@ -375,6 +387,45 @@ inspection is a later issue.
   (local-midnight) bucket would need the BACI-312 cutoff the proxy
   endpoint doesn't have, so it's deferred.
 
+## Monitor capture drill-down (BACI-308)
+
+BACI-308 extends the Monitor screen with a right-docked **capture sheet**
+(`MonitorCaptureSheet.jsx`) beside the FQDN table — Option A (master-detail
+side sheet) from the design exploration. Clicking an FQDN row shrinks the
+table left and opens the sheet, which walks three body states for that host:
+
+- **Capture list** — the host's captures newest-first
+  (`api.listProxyCaptures(host)` → `GET /proxy/captures`), each row carrying
+  its dispatch's issue-key + mode chip (borrowed from the design's Option D)
+  so the job context is one glance in. Simple "showing latest N" cap — no
+  Prev/Next paging.
+- **Capture detail** — one capture's parsed summary (model / stop reason /
+  token usage from `api.anthropicCapture`) plus the raw `.http` body
+  (`api.getProxyCaptureRaw`). A capture that isn't a parseable Anthropic turn
+  (a `count_tokens` probe, an error, a non-Anthropic host — the parsed read
+  404s by design) shows the raw body alone behind a banner, not an error
+  toast.
+- **Job transcript** — the whole dispatch's assembled transcript
+  (`api.jobTranscript`), adapted into the **reused** `<TranscriptView>`.
+
+The one piece of genuinely new render code is the adapter
+[`anthropicAdapter.ts`](../desktop/frontend/src/lib/transcript/anthropicAdapter.ts):
+`anthropicTranscriptToParseResult` walks the captured `AnthropicTranscript`
+(model JSON tags already snake_case-aligned to the viewer's `types.ts`) into
+the viewer's `TranscriptEvent[]` — user-prompt / user-tool-result / assistant
+turns, with the auxiliary turns appended as trailing assistant events. The
+minimap, filter chips, per-event cards, and token totals are reused wholesale;
+`TranscriptView` grew one optional `parsed?: ParseResult` prop (an alternative
+to its `source: string`) so the captured transcript skips the `.jsonl` parse.
+
+The new reads are wired end-to-end on both transports — `MonitorService`
+(`ListCaptures` returning the camelCase `ProxyCaptureRowDTO`, `CaptureRaw`,
+`Capture`, `JobTranscript`) for Wails, the matching `GET` reads + a
+`callText` text-fetch helper for the web build — with the cross-transport
+`ProxyCaptureRow` / `ProxyMessage` / `AnthropicTranscript` aliases (BACI-108
+pattern) living in
+[`desktop/frontend/src/lib/proxyCaptures.ts`](../desktop/frontend/src/lib/proxyCaptures.ts).
+
 ---
 
 ## What's deliberately out of scope
@@ -390,8 +441,18 @@ inspection is a later issue.
   (per-job message detail); see the message-detail section above.
 - ~~**The Monitor web screen** (and the React `api.ts` seam method that
   consumes `GET /proxy/stats`)~~ — **shipped in BACI-304** (see the Monitor
-  screen section above); the per-job drill-down on the BACI-306 transcript
-  is BACI-308.
+  screen section above).
+- ~~**The per-job drill-down** on the BACI-306 transcript (a per-request raw
+  view + the parsed per-job message transcript, with REST + CLI reads to
+  fetch a single capture and a job's reconstructed transcript)~~ — **shipped
+  in BACI-308** (see the capture drill-down section above).
+- **Job-first grouping (the design's Option D)** — host → jobs → summed
+  per-job tokens is a richer lens deferred past BACI-308; the shipped drill
+  is the flat host → captures list with an issue-key/mode chip.
+- **Per-capture eval-note composing on the proxy transcript** —
+  `TranscriptView` supports `onPostEval`, but anchoring eval notes to
+  `proxy_messages` rows (no issue/comment binding like the `.jsonl`
+  transcripts had) is its own work.
 - **`bacio proxy reparse` backfill** of pre-306 raw `.http` into
   `proxy_messages` — deferred; 306 parses new traffic only.
 - **Raw-log-file retention / cleanup** — the index prune is BACI-302; the

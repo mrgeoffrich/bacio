@@ -55,6 +55,7 @@ export {
     MemberProjectDTO,
     PRDTO,
     PromptTemplateDTO,
+    ProxyCaptureRowDTO,
     ProxyFQDNStatDTO,
     RelationDTO,
     RelationsDTO,

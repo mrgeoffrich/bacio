@@ -166,6 +166,120 @@ func (s *Store) ListProxyRequests(limit int) ([]*model.ProxyRequest, error) {
 	return out, rows.Err()
 }
 
+// ProxyRequestFilter parameterises the BACI-308 filtered capture list — the
+// drill-down read that walks an FQDN stat row down to its individual captures.
+// Host scopes to one upstream (the column the Monitor table pivots on);
+// DispatchID scopes to one job's captures; IsAnthropic (when set) keeps only
+// the parseable message-API captures. Since (inclusive lower bound on
+// started_at) bounds the window; nil means no lower bound. Limit caps the
+// rows returned newest-first — <= 0 falls back to defaultProxyListLimit, and
+// any value is hard-capped at defaultProxyRequestLimit so the drill-down can't
+// pull the whole retention-bounded table at once.
+type ProxyRequestFilter struct {
+	Host        string
+	DispatchID  *int64
+	IsAnthropic *bool
+	Since       *time.Time
+	Limit       int
+}
+
+// defaultProxyListLimit is the BACI-308 capture-list default cap — the
+// "showing latest N" newest-first window the Monitor drill-down sheet renders.
+// Tighter than defaultProxyRequestLimit (the hard ceiling) because the sheet
+// shows a single host's recent captures, not the whole table.
+const defaultProxyListLimit = 200
+
+// ListProxyRequestsFiltered returns proxy-request rows matching the filter,
+// newest-first, capped. It backs the BACI-308 Monitor drill-down (a host's —
+// optionally a job's — captures). An empty filter behaves like
+// ListProxyRequests(defaultProxyListLimit). The result is always non-nil for
+// a clean query (an empty match yields an empty slice).
+func (s *Store) ListProxyRequestsFiltered(f ProxyRequestFilter) ([]*model.ProxyRequest, error) {
+	limit := f.Limit
+	if limit <= 0 {
+		limit = defaultProxyListLimit
+	}
+	if limit > defaultProxyRequestLimit {
+		limit = defaultProxyRequestLimit
+	}
+
+	q := proxyRequestSelect
+	var (
+		args   []any
+		wheres []string
+	)
+	if f.Host != "" {
+		wheres = append(wheres, "host = ?")
+		args = append(args, f.Host)
+	}
+	if f.DispatchID != nil {
+		wheres = append(wheres, "dispatch_id = ?")
+		args = append(args, *f.DispatchID)
+	}
+	if f.IsAnthropic != nil {
+		wheres = append(wheres, "is_anthropic = ?")
+		args = append(args, proxyBit(*f.IsAnthropic))
+	}
+	if f.Since != nil {
+		wheres = append(wheres, "started_at >= ?")
+		args = append(args, f.Since.UTC().Format("2006-01-02 15:04:05"))
+	}
+	if len(wheres) > 0 {
+		q += " WHERE " + strings.Join(wheres, " AND ")
+	}
+	q += " ORDER BY started_at DESC, id DESC LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := s.DB.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]*model.ProxyRequest, 0)
+	for rows.Next() {
+		pr, err := scanProxyRequest(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, pr)
+	}
+	return out, rows.Err()
+}
+
+// ListProxyCapturesEnriched is ListProxyRequestsFiltered plus the BACI-308
+// per-row enrichment: each capture that correlates to a dispatch carries that
+// dispatch's issue key + mode so the Monitor sheet can show the job chip
+// without a per-row fetch. The GetDispatch lookup is cached so a job's many
+// captures cost one read, and is best-effort — a deleted dispatch (ErrNotFound)
+// just leaves the chip empty. Shared by the REST handler and the local client
+// so both transports produce an identical list. Always non-nil.
+func (s *Store) ListProxyCapturesEnriched(f ProxyRequestFilter) ([]*model.ProxyCaptureRow, error) {
+	rows, err := s.ListProxyRequestsFiltered(f)
+	if err != nil {
+		return nil, err
+	}
+	type chip struct{ key, mode string }
+	chips := map[int64]chip{}
+	out := make([]*model.ProxyCaptureRow, 0, len(rows))
+	for _, pr := range rows {
+		row := &model.ProxyCaptureRow{ProxyRequest: *pr}
+		if pr.DispatchID != nil {
+			id := *pr.DispatchID
+			c, ok := chips[id]
+			if !ok {
+				if disp, derr := s.GetDispatch(id); derr == nil && disp != nil {
+					c = chip{key: disp.IssueKey, mode: string(disp.Mode)}
+				}
+				chips[id] = c
+			}
+			row.IssueKey = c.key
+			row.Mode = c.mode
+		}
+		out = append(out, row)
+	}
+	return out, nil
+}
+
 func scanProxyRequest(r rowScanner) (*model.ProxyRequest, error) {
 	var v model.ProxyRequest
 	var isStream, isAnthropic int
