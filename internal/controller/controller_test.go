@@ -946,3 +946,43 @@ func TestControllerStartStop(t *testing.T) {
 		t.Fatalf("Stop should call Release exactly once, got %d", calls)
 	}
 }
+
+// TestReparseProxyMessagesIfLeader_NoopOnStandbyAndNil (BACI-321): the backfill
+// sweep is a no-op on a standby (non-leader) elector and on a nil store, and runs
+// silently on a leader against an empty store (no captures to backfill). Mirrors
+// TestSyncIfLeaderRespectsLease.
+func TestReparseProxyMessagesIfLeader_NoopOnStandbyAndNil(t *testing.T) {
+	dir := t.TempDir()
+	s, err := store.Open(filepath.Join(dir, "db.sqlite"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer s.Close()
+
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	// Standby: no-op (no audit row, no log).
+	standby, _ := newFakeElector(t, false)
+	ReparseProxyMessagesIfLeader(s, standby, log)
+	if buf.Len() != 0 {
+		t.Fatalf("standby reparse should be silent, got: %s", buf.String())
+	}
+	if hist, err := s.ListHistory(store.HistoryFilter{Op: "proxy.reparse"}); err != nil || len(hist) != 0 {
+		t.Fatalf("standby reparse should write no audit row, got %d (err %v)", len(hist), err)
+	}
+
+	// Nil store: no-op (and no panic).
+	ReparseProxyMessagesIfLeader(nil, standby, log)
+
+	// Leader against an empty store: no eligible captures, so no failure log and
+	// no audit row (no-noise-on-empty contract).
+	leaderEl, _ := newFakeElector(t, true)
+	ReparseProxyMessagesIfLeader(s, leaderEl, log)
+	if strings.Contains(buf.String(), "failed") {
+		t.Fatalf("leader reparse against an empty store should not log a failure, got: %s", buf.String())
+	}
+	if hist, err := s.ListHistory(store.HistoryFilter{Op: "proxy.reparse"}); err != nil || len(hist) != 0 {
+		t.Fatalf("empty-store leader reparse should write no audit row, got %d (err %v)", len(hist), err)
+	}
+}

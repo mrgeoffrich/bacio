@@ -42,6 +42,25 @@ func systemFingerprint(system []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// ParseAndClassify folds the two pure parse steps a capture goes through — decode
+// the raw .http into a ParsedCapture (ParseCapture), then classify it against the
+// job's prior thread state (Classify) — into one call so the live recorder and the
+// BACI-321 backfill sweep run identical classification and can never drift. raw is
+// the rendered (inflated, redacted) .http bytes the recorder wrote to disk; prev is
+// the job's LatestThreadState carry (the zero value for a fresh thread). It returns
+// the parsed capture, whether it's a primary turn, and the request-message delta —
+// everything the caller needs to AddProxyMessage. A decode error (a truncated or
+// malformed capture, or a non-stream reply) is returned verbatim so the caller can
+// treat it as a terminal parse failure.
+func ParseAndClassify(raw []byte, prev ThreadState) (pc *model.ParsedCapture, isPrimary bool, delta []model.AnthropicMessage, err error) {
+	pc, err = ParseCapture(raw)
+	if err != nil {
+		return nil, false, nil, err
+	}
+	isPrimary, delta, _ = Classify(pc, prev)
+	return pc, isPrimary, delta, nil
+}
+
 // Classify decides whether a freshly-parsed capture extends the job's primary
 // thread (primary) or is an auxiliary call (title-gen, structured-output probe,
 // a different model, or a non-extending short call), computes the request-message

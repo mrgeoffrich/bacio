@@ -165,6 +165,14 @@ func newRouter(d deps) http.Handler {
 	// bearer-token-protected posture as the BACI-306/308 reads.
 	mux.HandleFunc("GET /proxy/search", d.handleProxySearch)
 
+	// BACI-321: proxy_messages backfill — the manual escape hatch over the
+	// leader-gated controller sweep. POST /proxy/reparse?dispatch=&dry_run=
+	// reparses dispatch-correlated Anthropic captures the live recorder path
+	// missed into proxy_messages. The first MUTATING proxy verb; same
+	// cross-cutting, bearer-token-protected posture as the BACI-303/306/308/320
+	// reads (a UI/CLI mutation, not agent passthrough).
+	mux.HandleFunc("POST /proxy/reparse", d.handleProxyReparse)
+
 	// BACI-187: shipping-log popover — list of recently-done issues,
 	// newest-first, sibling of /history. Per-repo only; cross-repo is
 	// deliberately out of scope (matches the rest of the surface).

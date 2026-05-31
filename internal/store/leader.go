@@ -55,6 +55,25 @@ const (
 	// AgentPingNoAckTimeout, so ~2m30s end-to-end from ping to end).
 	// Leader-gated so exactly one reaper runs across the cluster.
 	IdlePingTickInterval = 30 * time.Second
+
+	// ProxyReparseInterval is how often the controlling UI fires the
+	// BACI-321 proxy_messages backfill sweep
+	// (controller.ReparseProxyMessagesIfLeader → Store.ReparseUnparsedDispatches).
+	// Once a minute, leader-gated: the sweep re-derives the unparsed set on
+	// every tick (a LEFT JOIN against proxy_messages), reparses any
+	// dispatch-correlated Anthropic capture the live recorder path missed, and
+	// is idempotent on a quiet DB. One minute is frequent enough that a dropped
+	// capture's turn shows up in the per-job transcript within a couple of ticks
+	// without re-scanning the table constantly.
+	ProxyReparseInterval = 1 * time.Minute
+
+	// ProxyReparseQuietWindow keeps the BACI-321 backfill sweep off any
+	// dispatch the live recorder is still streaming into. A dispatch whose
+	// newest capture started within this window is skipped, so the sweep never
+	// races the live parse on an actively-streaming job (which would
+	// double-insert the row). 2× ProxyReparseInterval, so a job is eligible only
+	// once it's been quiet for at least two ticks.
+	ProxyReparseQuietWindow = 2 * time.Minute
 )
 
 // LeaderInfo is the current state of the ui_leader row, returned by

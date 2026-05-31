@@ -368,9 +368,87 @@ bounded by `pruneProxyMessages` on the same 60-day window as the index.
   JSON-escaped stored bytes; this is a plain-word forensic search, and the raw
   `.http` stays ground truth via `proxy raw <id>`.
 
-Pre-306 captures are **not** retroactively parsed (no backfill); new
-traffic populates `proxy_messages` going forward. A `bacio proxy reparse`
-backfill is a clean follow-on if 307/308 want history.
+The live recorder parses going forward; the captures it **missed** are
+backfilled by BACI-321 (see the backfill section below) — so pre-306
+history and any dropped/failed live parse eventually land in
+`proxy_messages` too.
+
+---
+
+## Backfill sweep (BACI-321)
+
+The live parse is best-effort and silently drops work in known cases: a
+full recorder hand-off queue drops the observation
+([`proxy_recorder.go`](../internal/api/proxy_recorder.go) `Record`); a
+transient parse/store error skips the row (logged + swallowed in
+`parseMessage`); any window where capture ran but parsing was off. A
+capture that misses the live parse keeps its `proxy_requests` row but gets
+no `proxy_messages` row, so its turn never appears in `Store.JobTranscript`.
+
+BACI-321 adds a periodic, leader-gated, in-process **backfill sweep** that
+reparses dispatch-correlated Anthropic captures the live path missed. The
+raw `.http` file already on disk is the parseable substrate — nothing new
+is captured.
+
+### Home + cadence — `internal/controller`
+
+`controller.ReparseProxyMessagesIfLeader(s, el, log)` mirrors
+`ArchiveSweepIfLeader`: nil-tolerant, gated on `el.CurrentState().AmLeader`,
+errors logged-and-swallowed. A ticker goroutine in `Controller.Start` fires
+it on `store.ProxyReparseInterval` (1 minute), plus a sweep-on-startup call
+so a short-lived process catches up. The overlap guard is free — the helper
+runs inline in its goroutine's `for/select` and `time.Ticker` drops ticks
+when the receiver is busy, so a long sweep just skips the next tick(s).
+
+**Leader-gating is mandatory.** `proxy_requests` / `proxy_messages` live in
+the shared `~/.bacio/db.sqlite` and every `bacio web`/`api`/worktree server
+runs a recorder; an ungated sweep would have every process racing the same
+global unparsed set, double-inserting rows. The `…IfLeader` guard makes
+exactly one process sweep.
+
+### Core seam — a store method
+
+`internal/store` (which already imports `internal/anthropic`) holds the
+core so the sweep and the CLI share one implementation:
+`Store.ReparseUnparsedDispatches(opts)` finds every eligible dispatch and
+calls `Store.ReparseDispatch(id)` for each. The four-step parse glue is
+folded into `anthropic.ParseAndClassify` (`ParseCapture` + `Classify`),
+which the live recorder's `parseMessage` now calls too, so the live and
+backfill paths can't drift.
+
+### Ordering + the v1 scope constraint
+
+`Classify` computes each capture's delta against `LatestThreadState` (the
+most-recent primary row by `id`), and `JobTranscript` reassembles
+`ORDER BY id`. So a dispatch's captures must be parsed in chronological
+order. **v1 handles fully-unparsed dispatches only** (a dispatch with no
+`proxy_messages` rows at all): replay all captures `started_at ASC` so ids
+stay monotonic and the delta chain is correct, non-destructively (no
+delete). Partial gaps inside an otherwise-parsed dispatch need a
+destructive suffix/full rebuild and stay **out of the automated loop**,
+reserved behind `bacio proxy reparse --rebuild` (refused as
+not-implemented in v1).
+
+### Terminal-failure marker + quiet window
+
+`proxy_requests.parse_failed_at` is stamped when a reparse attempt yields
+no row (a truncated/malformed capture that can never parse), so eligibility
+excludes it (`… AND parse_failed_at IS NULL`) and the sweep doesn't re-read
+its file every minute. The live recorder stamps the same marker on its own
+parse miss, for consistency. The sweep also skips any dispatch whose newest
+capture is younger than `store.ProxyReparseQuietWindow` (2 minutes), so it
+never reparses a job the live recorder is actively streaming into.
+
+### CLI — `bacio proxy reparse`
+
+The first **mutating** proxy verb, following the six agent-CLI rules:
+`--json` in, a `proxy.reparse` schema entry, `--dry-run` (project the
+dispatch/capture counts, touch nothing), store-boundary validation. No args
+= sweep all eligible; `--dispatch <id>` scopes to one job; `--rebuild` is
+reserved-but-refused. Remote-capable (`POST /proxy/reparse`) for parity
+with the rest of the proxy group. A non-empty wet run records a
+`proxy.reparse` audit row (`bacio-controller` for the sweep path, the
+caller's actor for the CLI path).
 
 ## Monitor web screen (BACI-304)
 
@@ -470,8 +548,10 @@ pattern) living in
   `TranscriptView` supports `onPostEval`, but anchoring eval notes to
   `proxy_messages` rows (no issue/comment binding like the `.jsonl`
   transcripts had) is its own work.
-- **`bacio proxy reparse` backfill** of pre-306 raw `.http` into
-  `proxy_messages` — deferred; 306 parses new traffic only.
+- ~~**`bacio proxy reparse` backfill** of raw `.http` the live path missed
+  into `proxy_messages`~~ — **shipped in BACI-321** (see the backfill section
+  above). The destructive partial-gap rebuild (`--rebuild`) and late
+  re-correlation of `dispatch_id IS NULL` captures stay out of scope.
 - **Raw-log-file retention / cleanup** — the index prune is BACI-302; the
   on-disk raw files have no auto-prune yet.
 - **Retiring the `.jsonl` transcript attachments** — shipped in BACI-307:

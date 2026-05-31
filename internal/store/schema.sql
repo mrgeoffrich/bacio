@@ -962,7 +962,14 @@ CREATE TABLE IF NOT EXISTS proxy_requests (
     -- removed. Empty/NULL when the header is absent or unresolved (best-effort).
     session_id      TEXT    NOT NULL DEFAULT '',
     claude_agent_id TEXT    NOT NULL DEFAULT '',
-    dispatch_id     INTEGER
+    dispatch_id     INTEGER,
+    -- BACI-321 terminal-failure marker for the leader-gated reparse backfill:
+    -- stamped when a reparse attempt yields no proxy_messages row (a truncated
+    -- or malformed capture can never parse, yet proxy_requests stores no
+    -- truncation flag). The backfill's eligibility excludes rows where this is
+    -- set, so an unparseable capture is attempted once and never re-read every
+    -- minute. The live recorder stamps it on its own parse miss too.
+    parse_failed_at DATETIME
 );
 
 CREATE INDEX IF NOT EXISTS idx_proxy_requests_started

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"strconv"
@@ -309,6 +310,96 @@ func (d deps) handleProxyRaw(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(body)
+}
+
+// handleProxyReparse serves the BACI-321 proxy_messages backfill — the first
+// MUTATING proxy verb, the manual escape hatch over the leader-gated controller
+// sweep. POST /proxy/reparse?dispatch=&dry_run= reparses dispatch-correlated
+// Anthropic captures the live recorder path missed. With no `dispatch` it sweeps
+// every eligible dispatch (the same work the controller does once a minute); with
+// `dispatch` it scopes to one job. `rebuild` (the destructive partial-gap rebuild)
+// is reserved but not implemented in v1 — passing it 400s. Dry-run projects the
+// counts without writing; a non-empty wet run records a `proxy.reparse` audit row.
+// Behind the bearer-token auth like /proxy/stats (a UI/CLI mutation, not agent
+// passthrough).
+func (d deps) handleProxyReparse(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+
+	if v := q.Get("rebuild"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_input", "rebuild must be a boolean", map[string]any{"field": "rebuild"})
+			return
+		}
+		if b {
+			writeError(w, http.StatusBadRequest, "not_implemented",
+				"rebuild (destructive partial-gap rebuild) is not implemented in v1", map[string]any{"field": "rebuild"})
+			return
+		}
+	}
+
+	var dispatchID *int64
+	if v := q.Get("dispatch"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n <= 0 {
+			writeError(w, http.StatusBadRequest, "invalid_input", "dispatch must be a positive integer", map[string]any{"field": "dispatch"})
+			return
+		}
+		dispatchID = &n
+	}
+
+	dryRun := isDryRun(r)
+	if dryRun {
+		var (
+			res store.ReparseResult
+			err error
+		)
+		if dispatchID != nil {
+			n, cerr := d.store.CountUnparsedDispatchCaptures(*dispatchID)
+			if cerr != nil {
+				err = cerr
+			} else {
+				res.CapturesReparsed = n
+				if n > 0 {
+					res.DispatchesScanned = 1
+				}
+			}
+		} else {
+			res, err = d.store.ProjectReparseUnparsedDispatches(store.ReparseOpts{})
+		}
+		if err != nil {
+			s, c := statusForError(err)
+			writeError(w, s, c, err.Error(), nil)
+			return
+		}
+		writeDryRun(w, http.StatusOK, &res)
+		return
+	}
+
+	var (
+		res store.ReparseResult
+		err error
+	)
+	if dispatchID != nil {
+		res, err = d.store.ReparseDispatch(*dispatchID)
+	} else {
+		res, err = d.store.ReparseUnparsedDispatches(store.ReparseOpts{})
+	}
+	if err != nil {
+		s, c := statusForError(err)
+		writeError(w, s, c, err.Error(), nil)
+		return
+	}
+	if res.Total() > 0 {
+		recordOp(d.store, d.logger, model.HistoryEntry{
+			Actor:   ActorFromContext(r.Context()),
+			Op:      "proxy.reparse",
+			Kind:    "sweep",
+			Details: fmt.Sprintf(`{"dispatches_scanned":%d,"captures_reparsed":%d,"captures_failed":%d}`,
+				res.DispatchesScanned, res.CapturesReparsed, res.CapturesFailed),
+		})
+	}
+	writeJSON(w, http.StatusOK, &res)
 }
 
 // readProxyID parses a positive int64 path value (the proxy_requests id or a
