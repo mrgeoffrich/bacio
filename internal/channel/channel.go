@@ -134,17 +134,6 @@ type Source interface {
 	// logged, not fatal.
 	DrainUserMessages(ctx context.Context) ([]UserMessageEvent, error)
 
-	// AttachTranscript locates the transcript of a completed
-	// subagent (identified by agentID — the `agentId` from a Task
-	// result) and attaches a rendered digest of it to issueKey as a
-	// linked document. note is an optional supervisor-supplied
-	// string recorded in the digest header. It returns a short
-	// human-readable confirmation the channel surfaces as the tool
-	// result, or an error the channel surfaces as an MCP tool error
-	// (issue/agent not found, harness too old to persist subagent
-	// transcripts, etc.).
-	AttachTranscript(ctx context.Context, issueKey, agentID, note string) (string, error)
-
 	// SendNotification records a BACI-287 agent→user notification — a
 	// non-blocking, fire-and-forget message the agent fires at the user
 	// via the `send_user_notification` MCP tool. Unlike AskQuestion it
@@ -375,14 +364,14 @@ func (s *Server) handle(ctx context.Context, msg *rpcMessage) {
 	case "ping":
 		s.reply(msg.ID, map[string]any{})
 	case "tools/list":
-		// reply / register / attach_transcript / send_user_notification
-		// advertise unconditionally — none of them park a JSON-RPC reply,
-		// so the poller-gate reasoning that applies to ask_user_question
-		// (a parked reply would never be delivered without the drain
-		// step) does not apply to them. ask_user_question only
-		// advertises when the poller is on. See ServeMCP / Run split
-		// + the BACIO_AGENT_MODE gate in internal/cli/channel.go.
-		tools := []any{replyToolSchema(), registerToolSchema(), attachTranscriptToolSchema(), sendUserNotificationToolSchema()}
+		// reply / register / send_user_notification advertise
+		// unconditionally — none of them park a JSON-RPC reply, so the
+		// poller-gate reasoning that applies to ask_user_question (a
+		// parked reply would never be delivered without the drain step)
+		// does not apply to them. ask_user_question only advertises when
+		// the poller is on. See ServeMCP / Run split + the
+		// BACIO_AGENT_MODE gate in internal/cli/channel.go.
+		tools := []any{replyToolSchema(), registerToolSchema(), sendUserNotificationToolSchema()}
 		if s.poller {
 			tools = append(tools, askUserQuestionToolSchema())
 		}
@@ -466,41 +455,6 @@ func registerToolSchema() map[string]any {
 				},
 			},
 			"required": []string{"session_id"},
-		},
-	}
-}
-
-// attachTranscriptToolSchema describes the bacio MCP `attach_transcript`
-// tool. It takes an issue key and a completed subagent's agentId,
-// locates that subagent's transcript on disk, and links the raw
-// .jsonl to the issue as a document.
-func attachTranscriptToolSchema() map[string]any {
-	return map[string]any{
-		"name": "attach_transcript",
-		"description": "Attach a completed subagent's transcript to a bacio issue for traceability. " +
-			"After a dispatched Task subagent finishes, call this with the issue key and the agentId " +
-			"from the Task result — bacio locates that subagent's transcript and links the raw .jsonl " +
-			"transcript verbatim to the issue as a document (visible from `bacio issue show` " +
-			"and the bacio UIs). The transcript is capped at ~2.5 MB; an over-cap transcript is " +
-			"truncated with a footer. Re-calling for the same (issue, " +
-			"agent) pair refreshes the attachment. Errors clearly if the issue or transcript cannot be found.",
-		"inputSchema": map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"issue_id": map[string]any{
-					"type":        "string",
-					"description": "The canonical issue key (e.g. \"BACI-42\") the transcript belongs to.",
-				},
-				"agent_id": map[string]any{
-					"type":        "string",
-					"description": "The subagent's agentId from the Task tool result (e.g. \"a8d9f1ea8797ea776\"). A leading \"agent-\" is accepted and stripped.",
-				},
-				"note": map[string]any{
-					"type":        "string",
-					"description": "Optional free-text note recorded in the digest header — e.g. the subagent's one-line summary.",
-				},
-			},
-			"required": []string{"issue_id", "agent_id"},
 		},
 	}
 }
@@ -644,8 +598,6 @@ func (s *Server) handleToolCall(ctx context.Context, msg *rpcMessage) {
 		s.handleRegisterCall(ctx, msg.ID, head.Arguments)
 	case "ask_user_question":
 		s.handleAskUserQuestionCall(ctx, msg.ID, head.Arguments)
-	case "attach_transcript":
-		s.handleAttachTranscriptCall(ctx, msg.ID, head.Arguments)
 	case "send_user_notification":
 		s.handleSendUserNotificationCall(ctx, msg.ID, head.Arguments)
 	default:
@@ -709,49 +661,11 @@ func (s *Server) handleRegisterCall(ctx context.Context, id json.RawMessage, raw
 	s.toolResult(id, false, msg)
 }
 
-// handleAttachTranscriptCall validates the issue key + agent id, asks
-// the source to locate the subagent transcript and link a digest to
-// the issue, and returns the confirmation as a tool result. Any
-// failure (missing args, issue/transcript not found) surfaces as an
-// MCP tool error rather than dropping the JSON-RPC connection.
-func (s *Server) handleAttachTranscriptCall(ctx context.Context, id json.RawMessage, rawArgs json.RawMessage) {
-	var args struct {
-		IssueID string `json:"issue_id"`
-		AgentID string `json:"agent_id"`
-		Note    string `json:"note"`
-	}
-	if len(rawArgs) > 0 {
-		if err := json.Unmarshal(rawArgs, &args); err != nil {
-			s.replyError(id, -32602, "invalid attach_transcript arguments: "+err.Error())
-			return
-		}
-	}
-	issueID := strings.TrimSpace(args.IssueID)
-	agentID := strings.TrimSpace(args.AgentID)
-	// Accept both "agent-<id>" and bare "<id>" forms.
-	agentID = strings.TrimPrefix(agentID, "agent-")
-	if issueID == "" {
-		s.toolResult(id, true, "attach_transcript requires an issue_id (e.g. \"BACI-42\")")
-		return
-	}
-	if agentID == "" {
-		s.toolResult(id, true, "attach_transcript requires an agent_id (the agentId from the Task result)")
-		return
-	}
-	confirmation, err := s.src.AttachTranscript(ctx, issueID, agentID, strings.TrimSpace(args.Note))
-	if err != nil {
-		s.logf("bacio channel: attach_transcript %s agent-%s: %v", issueID, agentID, err)
-		s.toolResult(id, true, fmt.Sprintf("could not attach transcript for agent-%s to %s: %v", agentID, issueID, err))
-		return
-	}
-	s.toolResult(id, false, confirmation)
-}
-
 // handleSendUserNotificationCall validates the body + optional issue key,
 // asks the source to record a notification, and returns a tool result
 // immediately. Unlike ask_user_question this is fire-and-forget — there is
 // no parked reply, no pending-map entry, and no poller gate (the tool
-// advertises unconditionally, like reply / register / attach_transcript).
+// advertises unconditionally, like reply / register).
 // Any failure surfaces as an MCP tool error rather than dropping the
 // JSON-RPC connection.
 func (s *Server) handleSendUserNotificationCall(ctx context.Context, id json.RawMessage, rawArgs json.RawMessage) {

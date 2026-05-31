@@ -1,11 +1,12 @@
 // DocsViewer (BACI-204) — right pane of the redesigned Documents view.
-// Wraps the lifted Render/Source toggle + NotionEditor / TranscriptView /
-// SVG <img> triad + the Save / Copy-source bar that used to live inline
+// Wraps the lifted Render/Source toggle + NotionEditor / SVG <img> /
+// HTML <iframe> set + the Save / Copy-source bar that used to live inline
 // in DocsView. The only behaviour additions are the new header strip
 // (filename + type + linked-issue / linked-feature chips + archive
 // toggle) — every editor path renders identically to the pre-refactor
-// surface, so the BACI-56 (SVG) and BACI-125 (transcript) flows keep
-// working without a second pass.
+// surface, so the BACI-56 (SVG) flow keeps working without a second pass.
+// (BACI-307 retired the .jsonl-transcript render branch; legacy
+// transcript docs now open as plain source.)
 //
 // The component is purely presentational: parent owns the load/save
 // state (content/dirty/saving), the live editor buffer, the doc list,
@@ -13,8 +14,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { NotionEditor } from './editor/NotionEditor';
-import TranscriptView from '../lib/transcript/TranscriptView';
-import { isHtmlDoc, isJsonlTranscriptDoc, isSvgDoc } from '../lib/docFormat';
+import { isHtmlDoc, isSvgDoc } from '../lib/docFormat';
 import { Archive, ArchiveRestore, Link2, PanelLeftOpen } from 'lucide-react';
 
 function typeLabel(t) {
@@ -76,11 +76,7 @@ export default function DocsViewer({
     () => !!filename && isHtmlDoc(filename, content || ''),
     [filename, content],
   );
-  const isTranscript = useMemo(
-    () => !!filename && isJsonlTranscriptDoc(filename),
-    [filename],
-  );
-  const renderable = isSvg || isHtml || isTranscript;
+  const renderable = isSvg || isHtml;
 
   // SVG Render tab — Blob URL paired with one revoke per create, same
   // shape as the pre-refactor effect (React StrictMode safety).
@@ -266,10 +262,6 @@ export default function DocsViewer({
       ) : isSvg && view === 'render' ? (
         <div className="mk-docs-svg-pane">
           <img className="mk-docs-svg-img" src={svgUrl} alt={filename} />
-        </div>
-      ) : isTranscript && view === 'render' ? (
-        <div className="mk-docs-transcript-pane">
-          <TranscriptView source={content || ''} filename={filename} sizeBytes={(content || '').length} />
         </div>
       ) : (
         <div className="mk-docs-editor">

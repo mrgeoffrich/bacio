@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -949,18 +948,6 @@ func (c *localClient) CreateRescueDispatch(ctx context.Context, dispatchID int64
 		return nil, fmt.Errorf("rescue: load repo %d: %w", orig.RepoID, err)
 	}
 
-	// Best-effort agent id resolution from a linked transcript doc.
-	// The dead worker's transcript was likely never attached by the
-	// supervisor (the worker died before its summary returned) — but
-	// the bacio-transcript-review skill often attaches them post-hoc,
-	// and either way the agent id resolves cleanly when present.
-	var agentID, transcriptName string
-	if orig.IssueID != nil {
-		if links, ferr := c.store.ListDocumentsLinkedToIssue(*orig.IssueID); ferr == nil {
-			agentID, transcriptName = newestTranscriptAgentID(links)
-		}
-	}
-
 	target, err := c.pickIdleRescueSupervisor(repo.ID, deadSess.SessionID)
 	if err != nil {
 		return nil, err
@@ -969,12 +956,7 @@ func (c *localClient) CreateRescueDispatch(ctx context.Context, dispatchID int64
 		return nil, fmt.Errorf("rescue: no idle supervisor available (need a live, channel-connected, non-busy session in %s; you can also start a fresh `claude` in this repo to receive the rescue)", repo.Prefix)
 	}
 
-	worktreePath := ""
-	if agentID != "" {
-		worktreePath = filepath.Join(repo.Path, ".claude", "worktrees", "agent-"+agentID)
-	}
-
-	payload := buildRescueDispatchPayload(orig, agentID, worktreePath, transcriptName, repo.Path)
+	payload := buildRescueDispatchPayload(orig, repo.Path)
 
 	d, err := c.store.AddDispatch(store.AddDispatchIn{
 		RepoID:          repo.ID,
@@ -986,8 +968,8 @@ func (c *localClient) CreateRescueDispatch(ctx context.Context, dispatchID int64
 	if err != nil {
 		return nil, err
 	}
-	details := fmt.Sprintf("original_dispatch=%d,target_session=%s,agent=%s,worktree=%s",
-		orig.ID, target.SessionID, agentID, worktreePath)
+	details := fmt.Sprintf("original_dispatch=%d,target_session=%s",
+		orig.ID, target.SessionID)
 	c.recordOp(model.HistoryEntry{
 		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
 		Op: "agent.rescue", Kind: "agent",
@@ -1007,56 +989,6 @@ func isRescueTrivialCreator(c string) bool {
 		return true
 	}
 	return false
-}
-
-// newestTranscriptAgentID returns (agentID, filename) parsed from
-// the newest bacio transcript document among links — by linkage
-// CreatedAt, since that's when the transcript was attached to the
-// issue. Returns ("", "") when no link points at a transcript.
-func newestTranscriptAgentID(links []*model.DocumentLink) (string, string) {
-	var newest *model.DocumentLink
-	for _, l := range links {
-		if l == nil {
-			continue
-		}
-		if l.DocumentType != model.DocTypeTranscript && !model.IsBacioTranscriptFilename(l.DocumentFilename) {
-			continue
-		}
-		if newest == nil || l.CreatedAt.After(newest.CreatedAt) {
-			newest = l
-		}
-	}
-	if newest == nil {
-		return "", ""
-	}
-	return parseAgentIDFromTranscriptFilename(newest.DocumentFilename), newest.DocumentFilename
-}
-
-// ParseAgentIDFromTranscriptFilenameForTest exposes the private
-// parser to external tests (package client_test). Production code
-// MUST NOT depend on this — the canonical caller is
-// newestTranscriptAgentID inside this package.
-func ParseAgentIDFromTranscriptFilenameForTest(name string) string {
-	return parseAgentIDFromTranscriptFilename(name)
-}
-
-// parseAgentIDFromTranscriptFilename extracts <id> from the
-// attach_transcript naming convention
-// `bacio-transcript-<KEY>-agent-<id>.jsonl`. Returns "" when the
-// filename doesn't match.
-func parseAgentIDFromTranscriptFilename(name string) string {
-	name = strings.TrimSuffix(name, ".jsonl")
-	i := strings.Index(name, "-agent-")
-	if i < 0 {
-		return ""
-	}
-	rest := name[i+len("-agent-"):]
-	// Defensive: stop at a path separator if the filename was passed in
-	// with a directory prefix.
-	if j := strings.IndexAny(rest, "/\\"); j >= 0 {
-		rest = rest[:j]
-	}
-	return rest
 }
 
 // pickIdleRescueSupervisor returns the freshest live, channel-
@@ -1103,11 +1035,7 @@ func (c *localClient) pickIdleRescueSupervisor(repoID int64, excludeSessionID st
 //   - run close-out via the bare `bacio` on PATH
 //   - reply against the rescue dispatch id (read from the <channel>
 //     tag's dispatch_id attribute)
-//
-// agentID and worktreePath may be empty when no transcript was
-// attached; the payload then instructs the supervisor to discover
-// the worktree via `git worktree list`.
-func buildRescueDispatchPayload(orig *model.AgentDispatch, agentID, worktreePath, transcriptName, repoPath string) string {
+func buildRescueDispatchPayload(orig *model.AgentDispatch, repoPath string) string {
 	var b strings.Builder
 	b.WriteString("bacio rescue: a previously dispatched ")
 	if orig.Mode != "" {
@@ -1125,28 +1053,13 @@ func buildRescueDispatchPayload(orig *model.AgentDispatch, agentID, worktreePath
 	if orig.Mode != "" {
 		fmt.Fprintf(&b, "  Mode: %s\n", orig.Mode)
 	}
-	if agentID != "" {
-		fmt.Fprintf(&b, "  Dead agent id: %s\n", agentID)
-	} else {
-		b.WriteString("  Dead agent id: unknown (no transcript attached) — discover the worktree via `git worktree list` below\n")
-	}
-	if worktreePath != "" {
-		fmt.Fprintf(&b, "  Worktree: %s\n", worktreePath)
-	}
-	if transcriptName != "" {
-		fmt.Fprintf(&b, "  Transcript document: %s (linked to %s)\n", transcriptName, orig.IssueKey)
-	}
 	fmt.Fprintf(&b, "  Repo: %s\n", repoPath)
 	b.WriteString("\n")
 
 	b.WriteString("Steps:\n\n")
-	if worktreePath != "" {
-		fmt.Fprintf(&b, "1. cd into the worktree:\n   cd %s\n\n", worktreePath)
-	} else {
-		fmt.Fprintf(&b, "1. Discover the dead worker's worktree, then cd into it:\n"+
-			"   git -C %s worktree list   # pick the locked one matching the work\n"+
-			"   cd <path>\n\n", repoPath)
-	}
+	fmt.Fprintf(&b, "1. Discover the dead worker's worktree, then cd into it:\n"+
+		"   git -C %s worktree list   # pick the locked one matching the work\n"+
+		"   cd <path>\n\n", repoPath)
 
 	b.WriteString("2. Inspect the worktree:\n")
 	b.WriteString("   git status --short\n")
@@ -1154,19 +1067,7 @@ func buildRescueDispatchPayload(orig *model.AgentDispatch, agentID, worktreePath
 	b.WriteString("   git log HEAD~3..HEAD --oneline\n")
 	b.WriteString("   git branch --show-current\n\n")
 
-	if agentID != "" {
-		b.WriteString("3. Read the last ~80 lines of the dead worker's transcript to understand what it was doing when it died. The raw .jsonl is under\n")
-		fmt.Fprintf(&b, "   ~/.claude/projects/*/<parent-session>/subagents/agent-%s.jsonl\n", agentID)
-		b.WriteString("   (or `bacio doc show ")
-		if transcriptName != "" {
-			b.WriteString(transcriptName)
-		} else {
-			b.WriteString("<transcript-filename>")
-		}
-		b.WriteString("` for the attached copy).\n\n")
-	} else {
-		b.WriteString("3. Read the dead worker's transcript if you can locate one (no transcript was attached to this issue, so you may need to skip this step).\n\n")
-	}
+	b.WriteString("3. Read the dead worker's transcript if you can locate one. Captured Anthropic traffic for this dispatch lives in `bacio proxy job <dispatch_id>`; you may otherwise need to skip this step.\n\n")
 
 	b.WriteString("4. Classify the diff:\n\n")
 	b.WriteString("   FINALIZE (most common): edits look complete and on-task. Drive the close-out:\n")

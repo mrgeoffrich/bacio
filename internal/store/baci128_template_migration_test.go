@@ -117,16 +117,17 @@ func TestRefreshAskUserQuestionTemplatesIdempotent(t *testing.T) {
 	}
 }
 
-// TestRefreshAskUserQuestionTemplatesUpgradesPreamble locks in
-// the dispatch preamble rewrite: the pre-BACI-128 preamble carried
-// `issue_key = ...` in the attach_transcript example; the new
-// default uses `issue_id = ...`.
+// TestRefreshAskUserQuestionTemplatesUpgradesPreamble locks in the
+// dispatch-preamble rewrite: a stored body that byte-matches the
+// pre-BACI-128 frozen default (the user never customised it) is replaced
+// in place with the current default. The BACI-128 rename carried
+// `issue_key = ...` → `issue_id = ...` inside the attach_transcript
+// example; BACI-307 removed that example entirely, so the assertion is
+// now body-equality against the current default rather than a substring
+// check on the (deleted) example.
 func TestRefreshAskUserQuestionTemplatesUpgradesPreamble(t *testing.T) {
 	s := newTestStore(t)
 	old := baci128PrevDefaults[model.BuiltinTemplatePreamble]
-	if !strings.Contains(old, "issue_key = ") {
-		t.Fatalf("test setup: pre-BACI-128 preamble doesn't carry `issue_key = `:\n%s", old)
-	}
 	if _, err := s.DB.Exec(
 		`UPDATE prompt_templates SET body = ? WHERE slug = ?`,
 		old, model.BuiltinTemplatePreamble,
@@ -140,10 +141,10 @@ func TestRefreshAskUserQuestionTemplatesUpgradesPreamble(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetDispatchPreamble: %v", err)
 	}
-	if !strings.Contains(body, "issue_id = ") {
-		t.Fatalf("BACI-128 preamble refresh did not rename issue_key to issue_id:\n%s", body)
+	if body != model.DefaultPromptBodyForBuiltinSlug(model.BuiltinTemplatePreamble) {
+		t.Fatalf("pre-BACI-128 preamble was not refreshed to the current default:\n%s", body)
 	}
-	if strings.Contains(body, "issue_key = ") {
-		t.Fatalf("BACI-128 preamble refresh left a stale `issue_key = ` example:\n%s", body)
+	if strings.Contains(body, "attach_transcript") {
+		t.Fatalf("refreshed preamble still mentions the retired attach_transcript step:\n%s", body)
 	}
 }

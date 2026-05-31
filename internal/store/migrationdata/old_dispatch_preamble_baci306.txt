@@ -54,8 +54,20 @@ stop so the supervisor can answer. (The worker signals "waiting on
 the user" by leaving an open `ask_user_question` on the ticket, not
 by a state flip — there is no longer a `needs_action` state.)
 
-After Task returns, call mcp__bacio__reply with the dispatch_id from
-the <channel> tag to acknowledge the dispatch.
+After Task returns, attach the subagent's transcript to the ticket
+for traceability — call:
+
+    mcp__bacio__attach_transcript(
+      issue_id = <the value inside the <issue_id>...</issue_id> tag from the stub below>,
+      agent_id = <the agentId from the Task result>,
+      note     = <the subagent's one-line summary>,
+    )
+
+The Task result carries an `agentId` alongside the summary; pass it
+verbatim. If the call fails (e.g. a harness too old to persist
+subagent transcripts), note it and carry on — it is not fatal to the
+dispatch. Then call mcp__bacio__reply with the dispatch_id from the
+<channel> tag to acknowledge the dispatch.
 
 Caveat: a running subagent is NOT interruptible mid-flight.
 Cancelling a dispatch in the UI clears the queue but does not stop

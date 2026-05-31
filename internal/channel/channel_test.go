@@ -45,13 +45,6 @@ type fakeSource struct {
 	abandonedOpenN   int
 	abandonOpenCalls int
 
-	// attach_transcript state. attached records every
-	// AttachTranscript call; attachResult / attachErr let a test
-	// inject the canned return.
-	attached     []attachRec
-	attachResult string
-	attachErr    error
-
 	// BACI-286 user-message state. userMsgBatches hands back successive
 	// pre-canned batches from DrainUserMessages (same shape as
 	// batches), and userMsgErr lets a test inject a drain error.
@@ -70,12 +63,6 @@ type fakeSource struct {
 type notifyRec struct {
 	issueID string
 	body    string
-}
-
-type attachRec struct {
-	issueKey string
-	agentID  string
-	note     string
 }
 
 // askRec records one AskQuestion call with the issue id the
@@ -202,19 +189,6 @@ func (f *fakeSource) DrainUserMessages(ctx context.Context) ([]UserMessageEvent,
 	return b, nil
 }
 
-func (f *fakeSource) AttachTranscript(ctx context.Context, issueKey, agentID, note string) (string, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.attachErr != nil {
-		return "", f.attachErr
-	}
-	f.attached = append(f.attached, attachRec{issueKey, agentID, note})
-	if f.attachResult != "" {
-		return f.attachResult, nil
-	}
-	return fmt.Sprintf("attached transcript agent-%s to %s", agentID, issueKey), nil
-}
-
 func (f *fakeSource) SendNotification(ctx context.Context, issueID, body string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -282,17 +256,17 @@ func TestChannelHandshakeAndReply(t *testing.T) {
 	list := byID[2]
 	tools, _ := list["result"].(map[string]any)["tools"].([]any)
 	// Run() turns the poller on, so ask_user_question (BACI-53)
-	// joins reply + register + attach_transcript (BACI-85) +
-	// send_user_notification (BACI-287) on the advertised list.
-	if len(tools) != 5 {
-		t.Fatalf("tools/list returned %d tools, want 5", len(tools))
+	// joins reply + register + send_user_notification (BACI-287) on
+	// the advertised list.
+	if len(tools) != 4 {
+		t.Fatalf("tools/list returned %d tools, want 4", len(tools))
 	}
 	seen := map[string]bool{}
 	for _, tool := range tools {
 		name, _ := tool.(map[string]any)["name"].(string)
 		seen[name] = true
 	}
-	if !seen["reply"] || !seen["register"] || !seen["ask_user_question"] || !seen["attach_transcript"] || !seen["send_user_notification"] {
+	if !seen["reply"] || !seen["register"] || !seen["ask_user_question"] || !seen["send_user_notification"] {
 		t.Fatalf("tools/list missing entries: %+v", seen)
 	}
 
@@ -793,101 +767,9 @@ func TestAskUserQuestionRejectsInvalidPayload(t *testing.T) {
 	}
 }
 
-// TestChannelAttachTranscriptTool drives a tools/call(attach_transcript):
-// the happy path reaches Source.AttachTranscript with the trimmed args,
-// a missing issue_id / agent_id is rejected with isError=true without
-// reaching the source, and the "agent-" prefix is stripped.
-// BACI-128 renamed the MCP arg from issue_key to issue_id.
-func TestChannelAttachTranscriptTool(t *testing.T) {
-	src := &fakeSource{attachResult: "attached"}
-	requests := strings.Join([]string{
-		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`,
-		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"attach_transcript","arguments":{"issue_id":"BACI-9","agent_id":"agent-abc123","note":"all done"}}}`,
-		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"attach_transcript","arguments":{"agent_id":"abc123"}}}`,
-		`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"attach_transcript","arguments":{"issue_id":"BACI-9"}}}`,
-	}, "\n") + "\n"
-
-	var out bytes.Buffer
-	srv := New(src, "bacio", "test", strings.NewReader(requests), &out, nil)
-	if err := srv.Run(context.Background()); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-
-	frames := decodeFrames(t, out.String())
-	byID := map[float64]map[string]any{}
-	for _, f := range frames {
-		if id, ok := f["id"].(float64); ok {
-			byID[id] = f
-		}
-	}
-
-	ok := byID[2]
-	if isErr, _ := ok["result"].(map[string]any)["isError"].(bool); isErr {
-		t.Fatalf("attach_transcript tool-call reported an error: %+v", ok)
-	}
-	// "agent-" prefix stripped, args trimmed and forwarded.
-	want := attachRec{"BACI-9", "abc123", "all done"}
-	if len(src.attached) != 1 || src.attached[0] != want {
-		t.Fatalf("attached = %+v, want [%+v]", src.attached, want)
-	}
-
-	missingIssue := byID[3]
-	if isErr, _ := missingIssue["result"].(map[string]any)["isError"].(bool); !isErr {
-		t.Fatalf("attach_transcript without issue_id should report isError=true: %+v", missingIssue)
-	}
-	missingAgent := byID[4]
-	if isErr, _ := missingAgent["result"].(map[string]any)["isError"].(bool); !isErr {
-		t.Fatalf("attach_transcript without agent_id should report isError=true: %+v", missingAgent)
-	}
-	if len(src.attached) != 1 {
-		t.Fatalf("Source.AttachTranscript reached on invalid args: %+v", src.attached)
-	}
-}
-
-// TestChannelAttachTranscriptAdvertisedWithoutPoller locks in the
-// decision that attach_transcript advertises unconditionally — it does
-// not park a JSON-RPC reply, so the poller-gate that applies to
-// ask_user_question does not apply to it.
-func TestChannelAttachTranscriptAdvertisedWithoutPoller(t *testing.T) {
-	src := &fakeSource{}
-	requests := strings.Join([]string{
-		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`,
-		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`,
-	}, "\n") + "\n"
-
-	var out bytes.Buffer
-	srv := New(src, "bacio", "test", strings.NewReader(requests), &out, nil)
-	if err := srv.ServeMCP(context.Background()); err != nil {
-		t.Fatalf("ServeMCP: %v", err)
-	}
-	frames := decodeFrames(t, out.String())
-	var list map[string]any
-	for _, f := range frames {
-		if id, ok := f["id"].(float64); ok && id == 2 {
-			list = f
-		}
-	}
-	tools, _ := list["result"].(map[string]any)["tools"].([]any)
-	seen := map[string]bool{}
-	for _, tool := range tools {
-		name, _ := tool.(map[string]any)["name"].(string)
-		seen[name] = true
-	}
-	// No poller: reply + register + attach_transcript, but NOT
-	// ask_user_question.
-	if !seen["attach_transcript"] {
-		t.Fatalf("attach_transcript must advertise even without the poller: %+v", seen)
-	}
-	if seen["ask_user_question"] {
-		t.Fatalf("ask_user_question must NOT advertise without the poller: %+v", seen)
-	}
-}
-
 // TestChannelSendUserNotificationAdvertisedWithoutPoller locks in the
 // BACI-287 decision that send_user_notification advertises unconditionally
-// — like attach_transcript it parks no JSON-RPC reply, so the poller-gate
+// — like reply / register it parks no JSON-RPC reply, so the poller-gate
 // that applies to ask_user_question does not apply to it.
 func TestChannelSendUserNotificationAdvertisedWithoutPoller(t *testing.T) {
 	src := &fakeSource{}
