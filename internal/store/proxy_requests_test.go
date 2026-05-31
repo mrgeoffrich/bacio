@@ -216,6 +216,117 @@ func TestListProxyRequests(t *testing.T) {
 	}
 }
 
+// TestListProxyRequestsFiltered covers the BACI-308 drill-down read: the
+// host / dispatch_id / is_anthropic / since filters narrow the rows, the
+// result is newest-first, and the cap is honoured (and ceilinged).
+func TestListProxyRequestsFiltered(t *testing.T) {
+	s := newTestStore(t)
+	t0 := time.Now().Add(-10 * time.Minute)
+	d1 := int64(11)
+	d2 := int64(22)
+
+	// Three anthropic captures on host A (two correlated to d1, one to d2),
+	// one non-anthropic capture on host A, and one on host B — laid down out
+	// of time order so ORDER BY has work to do.
+	add := func(host string, anthropic bool, dispatch *int64, at time.Time) *model.ProxyRequest {
+		t.Helper()
+		pr, err := s.AddProxyRequest(AddProxyRequestIn{
+			Method: "POST", Host: host, Path: "/v1/messages", Status: 200,
+			IsAnthropic: anthropic, DispatchID: dispatch,
+			StartedAt: at, EndedAt: at,
+		})
+		if err != nil {
+			t.Fatalf("add (%s): %v", host, err)
+		}
+		return pr
+	}
+	add("api.anthropic.com", true, &d1, t0.Add(1*time.Minute))
+	add("api.anthropic.com", true, &d1, t0.Add(3*time.Minute))
+	add("api.anthropic.com", true, &d2, t0.Add(2*time.Minute))
+	add("api.anthropic.com", false, nil, t0.Add(4*time.Minute)) // a count_tokens-style probe
+	add("example.com", false, nil, t0.Add(5*time.Minute))
+
+	// Host filter: only api.anthropic.com rows (4 of 5), newest-first.
+	hostRows, err := s.ListProxyRequestsFiltered(ProxyRequestFilter{Host: "api.anthropic.com"})
+	if err != nil {
+		t.Fatalf("host filter: %v", err)
+	}
+	if len(hostRows) != 4 {
+		t.Fatalf("host filter got %d rows, want 4", len(hostRows))
+	}
+	for i := 0; i+1 < len(hostRows); i++ {
+		if hostRows[i].StartedAt.Before(hostRows[i+1].StartedAt) {
+			t.Fatalf("host rows not newest-first at %d", i)
+		}
+	}
+
+	// Dispatch filter: the two d1 captures only.
+	dispRows, err := s.ListProxyRequestsFiltered(ProxyRequestFilter{DispatchID: &d1})
+	if err != nil {
+		t.Fatalf("dispatch filter: %v", err)
+	}
+	if len(dispRows) != 2 {
+		t.Fatalf("dispatch filter got %d rows, want 2", len(dispRows))
+	}
+
+	// is_anthropic filter (combined with host): drops the probe and the
+	// example.com row, leaving the 3 anthropic captures.
+	anthFalse := false
+	anthTrue := true
+	anthRows, err := s.ListProxyRequestsFiltered(ProxyRequestFilter{Host: "api.anthropic.com", IsAnthropic: &anthTrue})
+	if err != nil {
+		t.Fatalf("anthropic filter: %v", err)
+	}
+	if len(anthRows) != 3 {
+		t.Fatalf("anthropic filter got %d rows, want 3", len(anthRows))
+	}
+	nonAnth, err := s.ListProxyRequestsFiltered(ProxyRequestFilter{Host: "api.anthropic.com", IsAnthropic: &anthFalse})
+	if err != nil {
+		t.Fatalf("non-anthropic filter: %v", err)
+	}
+	if len(nonAnth) != 1 {
+		t.Fatalf("non-anthropic filter got %d rows, want 1", len(nonAnth))
+	}
+
+	// Since cutoff: only rows at/after t0+4m (the probe + example.com).
+	cutoff := t0.Add(4 * time.Minute)
+	sinceRows, err := s.ListProxyRequestsFiltered(ProxyRequestFilter{Since: &cutoff})
+	if err != nil {
+		t.Fatalf("since filter: %v", err)
+	}
+	if len(sinceRows) != 2 {
+		t.Fatalf("since filter got %d rows, want 2", len(sinceRows))
+	}
+
+	// Explicit small cap is honoured.
+	capped, err := s.ListProxyRequestsFiltered(ProxyRequestFilter{Host: "api.anthropic.com", Limit: 2})
+	if err != nil {
+		t.Fatalf("cap: %v", err)
+	}
+	if len(capped) != 2 {
+		t.Fatalf("cap got %d rows, want 2", len(capped))
+	}
+
+	// An over-ceiling limit is clamped to defaultProxyRequestLimit (it must
+	// not error or return more than the table holds).
+	all, err := s.ListProxyRequestsFiltered(ProxyRequestFilter{Limit: defaultProxyRequestLimit * 10})
+	if err != nil {
+		t.Fatalf("ceiling: %v", err)
+	}
+	if len(all) != 5 {
+		t.Fatalf("ceiling got %d rows, want 5 (all)", len(all))
+	}
+
+	// No match yields a non-nil empty slice.
+	none, err := s.ListProxyRequestsFiltered(ProxyRequestFilter{Host: "nope.example"})
+	if err != nil {
+		t.Fatalf("no-match: %v", err)
+	}
+	if none == nil || len(none) != 0 {
+		t.Fatalf("no-match should be non-nil empty, got %v", none)
+	}
+}
+
 // addProxyRow is a tiny helper for the aggregation tests — a fixed
 // method/path with the host, status, and duration the test cares about.
 func addProxyRow(t *testing.T, s *Store, host string, status int, dur time.Duration) {
