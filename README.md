@@ -86,7 +86,7 @@ This creates `~/sync/your-project` with one file per issue, feature, and documen
 bacio sync                # pull → import → export → commit → push
 ```
 
-Run it whenever — pushes your writes, pulls anyone else's. Multi-machine setup, conflict semantics, and the inspect/verify tools live in [docs/getting-started.md](docs/getting-started.md#5-sync-across-machines-when-youre-ready).
+Run it whenever — pushes your writes, pulls anyone else's. Multi-machine setup, conflict semantics, and the inspect/verify tools live in [docs/getting-started.md](docs/getting-started.md#4-sync-across-machines-when-youre-ready).
 
 ## Why bacio
 
