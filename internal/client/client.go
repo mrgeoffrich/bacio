@@ -479,6 +479,17 @@ type Client interface {
 	// returned slice is always non-nil (empty for an empty table).
 	ProxyStats(ctx context.Context, f store.ProxyStatsFilter) ([]*model.ProxyFQDNStat, error)
 
+	// ----- Per-job message detail (BACI-306) -----
+	// AnthropicCapture returns the parsed detail of one captured Anthropic
+	// SSE turn, keyed on the proxy_requests id; ErrNotFound when that capture
+	// wasn't parseable. JobTranscript returns a dispatch's assembled ordered
+	// transcript (primary thread + summed usage + auxiliary turns); ErrNotFound
+	// when the dispatch has no parsed captures. Both are cross-cutting reads
+	// like ProxyStats; the remote backend GETs /proxy/captures/{id} and
+	// /proxy/jobs/{dispatch_id}/transcript.
+	AnthropicCapture(ctx context.Context, id int64) (*model.ProxyMessage, error)
+	JobTranscript(ctx context.Context, dispatchID int64) (*model.AnthropicTranscript, error)
+
 	// ----- Agent registry (local-only in v1; remote returns ErrLocalOnly) -----
 	// The agent registry records which AI agent sessions are alive
 	// against which repos, and which issues they're focused on.
