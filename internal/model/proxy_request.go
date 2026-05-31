@@ -82,6 +82,31 @@ type ProxyCaptureRow struct {
 	Mode     string `json:"mode,omitempty"`
 }
 
+// ProxyMessageMatch is one match line from the BACI-320 content search over the
+// parsed proxy_messages bodies (`bacio proxy grep <text>` / GET /proxy/search) —
+// a single content block whose text contains the searched substring. One capture
+// can produce several matches (one per matching block), so the search emits one
+// of these per matching block, not per capture: the `--limit` cap counts these
+// match lines, the unit a reader counts.
+//
+// ProxyRequestID is the proxy_requests id (the CAPTURE column) so the reader can
+// drill straight into `proxy capture <id>` / `proxy raw <id>` — closing the
+// search→drill-in loop. Role is "assistant" (the reconstructed turn) or "user"
+// (a request user/tool_result delta turn); Block is the block type the match was
+// found in ("text"|"thinking"|"tool_use"|"tool_result"); Snippet is the matched
+// block's collapsed, capped text (never raw JSON field names). DispatchID /
+// SessionID / ClaudeAgentID are the correlation lifted from the row for the
+// --dispatch / --session / --agent audit lens; empty/nil when unset.
+type ProxyMessageMatch struct {
+	ProxyRequestID int64  `json:"proxy_request_id"`
+	DispatchID     *int64 `json:"dispatch_id,omitempty"`
+	Role           string `json:"role"`
+	Block          string `json:"block"`
+	Snippet        string `json:"snippet"`
+	SessionID      string `json:"session_id,omitempty"`
+	ClaudeAgentID  string `json:"claude_agent_id,omitempty"`
+}
+
 // ProxyFQDNStat is the BACI-303 per-FQDN rollup of proxy_requests rows:
 // one entry per distinct upstream host, summarising how much an agent
 // session talked to it. RequestCount / BytesIn / BytesOut are simple

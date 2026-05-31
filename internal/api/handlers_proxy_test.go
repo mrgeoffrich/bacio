@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -277,5 +278,78 @@ func TestProxyStatsSinceExcludesBackdated(t *testing.T) {
 	_ = json.Unmarshal(raw, &stats)
 	if len(stats) != 1 || stats[0].RequestCount != 1 {
 		t.Fatalf("since window wrong: %+v", stats)
+	}
+}
+
+// seedProxyMessage inserts one parsed proxy_messages row with the given
+// assistant turn text — the GET /proxy/search handler greps these.
+func seedProxyMessage(t *testing.T, s *store.Store, proxyReqID int64, asstText string) {
+	t.Helper()
+	cap := &model.ParsedCapture{
+		Model: "claude-opus-4-8", SystemFP: "fp", MessageCount: 1,
+		Turn: model.AnthropicTurn{Blocks: []model.AnthropicBlock{{Type: "text", Text: asstText}}},
+	}
+	if _, err := s.AddProxyMessage(store.AddProxyMessageIn{
+		ProxyRequestID: proxyReqID, Capture: cap, IsPrimary: true, StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("seed proxy message %d: %v", proxyReqID, err)
+	}
+}
+
+// TestProxySearchEndpoint: GET /proxy/search?q=court returns the matching block
+// as a ProxyMessageMatch carrying the capture id, role, block, and snippet.
+func TestProxySearchEndpoint(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	seedProxyMessage(t, s, 1, "a stray token court before the tool")
+	seedProxyMessage(t, s, 2, "nothing relevant here")
+
+	resp, raw := apiGet(t, ts.URL+"/proxy/search?q=court")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d body=%s", resp.StatusCode, raw)
+	}
+	var matches []*model.ProxyMessageMatch
+	if err := json.Unmarshal(raw, &matches); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("got %d matches, want 1: %s", len(matches), raw)
+	}
+	m := matches[0]
+	if m.ProxyRequestID != 1 || m.Role != "assistant" || m.Block != "text" {
+		t.Fatalf("match wrong: %+v", m)
+	}
+	if !strings.Contains(m.Snippet, "stray token court") {
+		t.Fatalf("snippet = %q, want the block text", m.Snippet)
+	}
+}
+
+// TestProxySearchMissingQuery rejects a missing q at the handler boundary.
+func TestProxySearchMissingQuery(t *testing.T) {
+	ts, _ := newTestAPI(t, api.Options{})
+	resp, _ := apiGet(t, ts.URL+"/proxy/search")
+	if resp.StatusCode != 400 {
+		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	}
+}
+
+// TestProxySearchBadRole rejects an unknown role value.
+func TestProxySearchBadRole(t *testing.T) {
+	ts, _ := newTestAPI(t, api.Options{})
+	resp, _ := apiGet(t, ts.URL+"/proxy/search?q=x&role=bogus")
+	if resp.StatusCode != 400 {
+		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	}
+}
+
+// TestProxySearchEmptyArrayNotNull: the search handler emits [] not null for an
+// unmatched needle.
+func TestProxySearchEmptyArrayNotNull(t *testing.T) {
+	ts, _ := newTestAPI(t, api.Options{})
+	resp, raw := apiGet(t, ts.URL+"/proxy/search?q=nope")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+	if len(raw) == 0 || raw[0] != '[' {
+		t.Fatalf("expected [], got %s", string(raw))
 	}
 }

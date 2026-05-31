@@ -223,3 +223,14 @@ func (c *localClient) ProxyCaptureRaw(ctx context.Context, id int64) ([]byte, er
 	}
 	return body, nil
 }
+
+func (c *localClient) SearchProxyMessages(ctx context.Context, f store.ProxyMessageFilter) ([]*model.ProxyMessageMatch, error) {
+	matches, err := c.store.SearchProxyMessages(f)
+	if err != nil {
+		return nil, err
+	}
+	if matches == nil {
+		matches = []*model.ProxyMessageMatch{}
+	}
+	return matches, nil
+}

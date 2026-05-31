@@ -132,6 +132,8 @@ func renderText(w io.Writer, v any) error {
 		}
 	case []*model.ProxyFQDNStat:
 		printProxyStats(w, x)
+	case []*model.ProxyMessageMatch:
+		printProxyMatches(w, x)
 	case *model.ProxyMessage:
 		printProxyMessage(w, x)
 	case *model.AnthropicTranscript:
@@ -515,6 +517,27 @@ func printProxyStats(w io.Writer, stats []*model.ProxyFQDNStat) {
 		fmt.Fprintf(w, "%-32s %8d %6.0f%% %8d %8d %10s %s\n",
 			s.Host, s.RequestCount, s.ErrorRate*100, s.P50MS, s.P95MS,
 			fmt.Sprintf("%d/%d", s.BytesIn, s.BytesOut), localTime(s.LastSeen))
+	}
+}
+
+// printProxyMatches renders the BACI-320 content-search hits as an aligned
+// CAPTURE / DISP / ROLE / BLOCK / MATCH table — the search→drill-in surface, so
+// the CAPTURE id is what the reader feeds to `proxy capture <id>`. A dispatch-less
+// match shows "-" for DISP. JSON output (the parse contract) carries the full
+// rows including the session/agent correlation.
+func printProxyMatches(w io.Writer, matches []*model.ProxyMessageMatch) {
+	if len(matches) == 0 {
+		fmt.Fprintln(w, "no matching captures")
+		return
+	}
+	fmt.Fprintf(w, "%-8s %-6s %-10s %-12s %s\n", "CAPTURE", "DISP", "ROLE", "BLOCK", "MATCH")
+	for _, m := range matches {
+		disp := "-"
+		if m.DispatchID != nil {
+			disp = fmt.Sprintf("%d", *m.DispatchID)
+		}
+		fmt.Fprintf(w, "%-8d %-6s %-10s %-12s %s\n",
+			m.ProxyRequestID, disp, m.Role, m.Block, m.Snippet)
 	}
 }
 

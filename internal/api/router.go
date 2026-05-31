@@ -157,6 +157,14 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("GET /proxy/captures", d.handleProxyCaptures)
 	mux.HandleFunc("GET /proxy/captures/{id}/raw", d.handleProxyRaw)
 
+	// BACI-320: content grep over the parsed message bodies —
+	// /proxy/search?q=&role=&block=&dispatch_id=&session=&agent=&since=&from=&limit=
+	// returns one match line per matching content block (capture id + dispatch +
+	// role + block + snippet) so a reader can drill into /proxy/captures/{id}. A
+	// distinct path segment from /proxy/captures, same cross-cutting,
+	// bearer-token-protected posture as the BACI-306/308 reads.
+	mux.HandleFunc("GET /proxy/search", d.handleProxySearch)
+
 	// BACI-187: shipping-log popover — list of recently-done issues,
 	// newest-first, sibling of /history. Per-repo only; cross-repo is
 	// deliberately out of scope (matches the rest of the surface).

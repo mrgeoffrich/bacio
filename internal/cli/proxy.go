@@ -26,6 +26,95 @@ func newProxyCmd() *cobra.Command {
 	cmd.AddCommand(newProxyCaptureCmd())
 	cmd.AddCommand(newProxyRawCmd())
 	cmd.AddCommand(newProxyJobCmd())
+	cmd.AddCommand(newProxyGrepCmd())
+	return cmd
+}
+
+// newProxyGrepCmd is `bacio proxy grep <text>` (alias `search`) — the BACI-320
+// content search over the captured Anthropic message bodies, complementing the
+// index-level filtering `proxy captures` does. It greps the parsed turns for a
+// case-insensitive substring and emits one match line per matching content block,
+// each carrying its capture id so you can drill straight into `proxy capture
+// <id>` — closing the search→drill-in loop. Scope with the same correlation
+// filters as `captures` (--dispatch / --session / --agent / --since), plus
+// optional --role / --block. Read-only, so prefer `-o json` for the full rows.
+func newProxyGrepCmd() *cobra.Command {
+	var (
+		role     string
+		block    string
+		dispatch int64
+		session  string
+		agent    string
+		sinceStr string
+		limit    int
+	)
+	cmd := &cobra.Command{
+		Use:     "grep <text>",
+		Aliases: []string{"search"},
+		Short:   "Search captured Anthropic turns by content",
+		Long: `Search the captured Anthropic message bodies for a substring — the
+content filter that complements 'bacio proxy captures' (the index filter). The
+match is case-insensitive; each result is one content block, carrying its capture
+id so you can drill in with 'bacio proxy capture <id>' / 'proxy raw <id>'.
+
+Scope with the same correlation filters as 'captures' — --dispatch (one job),
+--session, --agent, --since (a lookback window) — plus optional --role
+(assistant | user) and --block (text | thinking | tool_use | tool_result).
+
+  --since accepts a duration lookback: 30m, 1h, 1d, 2w
+
+The search runs over the parsed message bodies, which store JSON-escaped content,
+so a needle containing characters JSON escapes (a literal quote, a newline) won't
+match; this is a plain-word forensic search. The raw .http bytes remain available
+via 'proxy raw <id>' for a known capture.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			switch role {
+			case "", "assistant", "user":
+			default:
+				return fmt.Errorf("invalid --role %q (want assistant or user)", role)
+			}
+			switch block {
+			case "", "text", "thinking", "tool_use", "tool_result":
+			default:
+				return fmt.Errorf("invalid --block %q (want text, thinking, tool_use or tool_result)", block)
+			}
+
+			c, err := openClient()
+			if err != nil {
+				return err
+			}
+			defer c.Close()
+
+			f := store.ProxyMessageFilter{
+				Query: args[0], Role: role, Block: block,
+				SessionID: session, ClaudeAgentID: agent, Limit: limit,
+			}
+			if dispatch > 0 {
+				f.DispatchID = &dispatch
+			}
+			if sinceStr != "" {
+				d, err := timeparse.Lookback(sinceStr)
+				if err != nil {
+					return err
+				}
+				cutoff := time.Now().Add(-d)
+				f.Since = &cutoff
+			}
+			matches, err := c.SearchProxyMessages(context.Background(), f)
+			if err != nil {
+				return err
+			}
+			return emit(matches)
+		},
+	}
+	cmd.Flags().StringVar(&role, "role", "", "scope to one role (assistant or user)")
+	cmd.Flags().StringVar(&block, "block", "", "scope to one block type (text, thinking, tool_use, tool_result)")
+	cmd.Flags().Int64Var(&dispatch, "dispatch", 0, "scope to one dispatch's captures")
+	cmd.Flags().StringVar(&session, "session", "", "scope to one Claude Code session id")
+	cmd.Flags().StringVar(&agent, "agent", "", "scope to one Claude Code agent id")
+	cmd.Flags().StringVar(&sinceStr, "since", "", "look back this far (e.g. 30m, 1h, 1d, 2w)")
+	cmd.Flags().IntVar(&limit, "limit", 0, "max match lines (0 for the default cap)")
 	return cmd
 }
 
