@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 
@@ -70,6 +71,105 @@ func (d deps) handleProxyStats(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, stats)
 }
 
+// handleProxyCaptures serves the BACI-308 filtered capture list — the
+// drill-down read the Monitor screen walks an FQDN stat row down into. It
+// filters proxy_requests by host / dispatch_id / is_anthropic / a `since`
+// lookback (or `from` absolute cutoff, mutually exclusive, mirroring
+// /proxy/stats) and caps with `limit`, newest-first. Each row is best-effort
+// enriched with its dispatch's issue key + mode so the sheet can show the job
+// chip without a per-row fetch; a deleted dispatch leaves those empty. Behind
+// the bearer-token auth like /proxy/stats (a UI/CLI read, not agent passthrough).
+func (d deps) handleProxyCaptures(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	var f store.ProxyRequestFilter
+	f.Host = q.Get("host")
+
+	if v := q.Get("dispatch_id"); v != "" {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || n <= 0 {
+			writeError(w, http.StatusBadRequest, "invalid_input", "dispatch_id must be a positive integer", map[string]any{"field": "dispatch_id"})
+			return
+		}
+		f.DispatchID = &n
+	}
+
+	if v := q.Get("is_anthropic"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_input", "is_anthropic must be a boolean", map[string]any{"field": "is_anthropic"})
+			return
+		}
+		f.IsAnthropic = &b
+	}
+
+	if v := q.Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			writeError(w, http.StatusBadRequest, "invalid_input", "limit must be a non-negative integer", map[string]any{"field": "limit"})
+			return
+		}
+		f.Limit = n
+	}
+
+	since := q.Get("since")
+	from := q.Get("from")
+	if since != "" && from != "" {
+		writeError(w, http.StatusBadRequest, "invalid_input", "since and from are mutually exclusive", nil)
+		return
+	}
+	if since != "" {
+		dur, err := timeparse.Lookback(since)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), map[string]any{"field": "since"})
+			return
+		}
+		cutoff := time.Now().Add(-dur)
+		f.Since = &cutoff
+	}
+	if from != "" {
+		t, err := timeparse.Timestamp(from)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_input", "from: "+err.Error(), map[string]any{"field": "from"})
+			return
+		}
+		f.Since = &t
+	}
+
+	rows, err := d.store.ListProxyRequestsFiltered(f)
+	if err != nil {
+		s, c := statusForError(err)
+		writeError(w, s, c, err.Error(), nil)
+		return
+	}
+
+	// Enrich each correlated row with its dispatch's issue key + mode. The
+	// lookup is cached so a job's many captures cost one GetDispatch, and is
+	// best-effort: a deleted dispatch (ErrNotFound) just leaves the chip empty.
+	type chip struct {
+		key  string
+		mode string
+	}
+	chips := map[int64]chip{}
+	out := make([]*model.ProxyCaptureRow, 0, len(rows))
+	for _, pr := range rows {
+		row := &model.ProxyCaptureRow{ProxyRequest: *pr}
+		if pr.DispatchID != nil {
+			id := *pr.DispatchID
+			c, ok := chips[id]
+			if !ok {
+				if disp, derr := d.store.GetDispatch(id); derr == nil && disp != nil {
+					c = chip{key: disp.IssueKey, mode: string(disp.Mode)}
+				}
+				chips[id] = c
+			}
+			row.IssueKey = c.key
+			row.Mode = c.mode
+		}
+		out = append(out, row)
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 // handleProxyCapture serves the BACI-306 parsed detail of one captured
 // Anthropic SSE turn, keyed on the proxy_requests id (the id the raw .http file
 // and `proxy stats` reference). 404 when that capture wasn't parseable
@@ -105,6 +205,41 @@ func (d deps) handleJobTranscript(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, tr)
+}
+
+// handleProxyRaw serves the BACI-308 raw .http capture for one proxy_requests
+// id: the inflated, auth-redacted req/resp bytes the recorder wrote to disk
+// (renderRawCapture redacts auth-bearing headers at capture time, so this is
+// safe to surface). It is the escape hatch the Monitor sheet falls back to when
+// a capture isn't a parseable Anthropic turn. 404 — not 500 — when the row has
+// no raw file (RawLogPath empty because the write failed) or the file is gone
+// from disk (pruned / log dir wiped), so the sheet treats "raw unavailable" as
+// a clean miss rather than a transport error. Behind the bearer-token auth like
+// /proxy/stats.
+func (d deps) handleProxyRaw(w http.ResponseWriter, r *http.Request) {
+	id, ok := readProxyID(r, w, "id")
+	if !ok {
+		return
+	}
+	pr, err := d.store.GetProxyRequest(id)
+	if err != nil {
+		s, c := statusForError(err)
+		writeError(w, s, c, err.Error(), nil)
+		return
+	}
+	if pr.RawLogPath == "" {
+		writeError(w, http.StatusNotFound, "not_found", "no raw capture file for this request", nil)
+		return
+	}
+	body, err := os.ReadFile(pr.RawLogPath)
+	if err != nil {
+		// File pruned / log dir wiped — a clean miss, not a server error.
+		writeError(w, http.StatusNotFound, "not_found", "raw capture file unavailable", nil)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
 }
 
 // readProxyID parses a positive int64 path value (the proxy_requests id or a

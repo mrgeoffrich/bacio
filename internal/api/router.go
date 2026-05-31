@@ -145,6 +145,18 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("GET /proxy/captures/{id}", d.handleProxyCapture)
 	mux.HandleFunc("GET /proxy/jobs/{dispatch_id}/transcript", d.handleJobTranscript)
 
+	// BACI-308: the Monitor drill-down reads — a filtered, newest-first
+	// capture LIST (/proxy/captures?host=&dispatch_id=&is_anthropic=&since=&limit=,
+	// each row enriched with its dispatch's issue-key + mode) and the raw
+	// .http passthrough for one capture (/proxy/captures/{id}/raw, the
+	// inflated auth-redacted bytes the recorder wrote). The bare
+	// /proxy/captures pattern is distinct from /proxy/captures/{id}, and the
+	// literal "raw" segment is more specific than {id}, so ServeMux
+	// disambiguates all three without a conflict. Same cross-cutting,
+	// bearer-token-protected posture as the BACI-306 reads.
+	mux.HandleFunc("GET /proxy/captures", d.handleProxyCaptures)
+	mux.HandleFunc("GET /proxy/captures/{id}/raw", d.handleProxyRaw)
+
 	// BACI-187: shipping-log popover — list of recently-done issues,
 	// newest-first, sibling of /history. Per-repo only; cross-repo is
 	// deliberately out of scope (matches the rest of the surface).
