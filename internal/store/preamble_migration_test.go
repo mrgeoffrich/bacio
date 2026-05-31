@@ -201,6 +201,39 @@ func TestRefreshDispatchPreambleUpgradesBACI225Default(t *testing.T) {
 	}
 }
 
+// TestRefreshDispatchPreambleUpgradesBACI306Default (BACI-307):
+// simulate a post-BACI-226 / pre-BACI-307 DB by writing the BACI-306
+// default (which still told the supervisor to call
+// mcp__bacio__attach_transcript after Task returned) into the row, then
+// re-run the refresh — it must replace the body with the BACI-307
+// default that no longer mentions attach_transcript.
+func TestRefreshDispatchPreambleUpgradesBACI306Default(t *testing.T) {
+	s := newTestStore(t)
+	old := strings.TrimRight(oldDispatchPreambleBACI306, "\r\n")
+	if !strings.Contains(old, "attach_transcript") {
+		t.Fatalf("test setup: pre-BACI-307 preamble doesn't mention attach_transcript:\n%s", old)
+	}
+	if _, err := s.DB.Exec(
+		`UPDATE prompt_templates SET body = ? WHERE slug = ?`,
+		old, model.BuiltinTemplatePreamble,
+	); err != nil {
+		t.Fatalf("seed BACI-306 preamble: %v", err)
+	}
+	if err := refreshDispatchPreamble(s.DB); err != nil {
+		t.Fatalf("refreshDispatchPreamble: %v", err)
+	}
+	body, err := s.GetDispatchPreamble()
+	if err != nil {
+		t.Fatalf("GetDispatchPreamble: %v", err)
+	}
+	if body != model.DefaultPromptBodyForBuiltinSlug(model.BuiltinTemplatePreamble) {
+		t.Fatalf("BACI-306 default was not refreshed to the BACI-307 default:\n%s", body)
+	}
+	if strings.Contains(body, "attach_transcript") {
+		t.Fatalf("refreshed preamble still mentions the retired attach_transcript step:\n%s", body)
+	}
+}
+
 // TestRefreshDispatchPreambleLeavesCustomBody: a user-customised
 // preamble body is left untouched by the refresh.
 func TestRefreshDispatchPreambleLeavesCustomBody(t *testing.T) {
