@@ -551,18 +551,40 @@ export default function App() {
     }
   }, [navigate, activeBoard]);
 
-  // BACI-166: composer success handler — optimistically prepend the new
-  // card and route to its workspace. BACI-300 retired the auto-scope
-  // dispatch, so there's no longer a waitingState to pre-render; the
-  // standing 10s poll replaces the optimistic row with the authoritative
-  // one on its next tick.
-  const onComposerCreated = useCallback((newCard) => {
+  // BACI-166 / BACI-332: composer success handler — optimistically prepend
+  // the new card, then branch on the view it was created from:
+  //
+  //   - From the Pipeline screen, auto-scope it: pipe the card and queue a
+  //     Scope job (the scope-shelve chain) on Auto, so it lands directly in
+  //     the active Pipeline and gets scoped straight away rather than sitting
+  //     in Backlog. Reuses fastTrackCard's exact in-order api.* sequence
+  //     (state → process → engine mode), then routes to the Pipeline page.
+  //     On a mid-chain failure the steps before it already persisted and the
+  //     refresh leaves a coherent partial state (the bare card in Backlog)
+  //     the user can complete by hand.
+  //   - Off the Pipeline (board), behaviour is unchanged: route to the new
+  //     card's workspace. The standing 10s poll replaces the optimistic row
+  //     with the authoritative one on its next tick.
+  const onComposerCreated = useCallback(async (newCard) => {
     if (!newCard || !newCard.key) return;
     setCards(cs => [{ ...newCard }, ...cs]);
     setSettingsOpen(false);
     setSettingsInitialSection(null);
+    if (activeView === 'pipeline') {
+      try {
+        await api.setIssueState(activeBoard, newCard.key, 'in_pipeline');
+        await api.setCardProcess(activeBoard, newCard.key, { process: 'scope-shelve' });
+        await api.setEngineMode(activeBoard, newCard.key, 'auto');
+      } catch (err) {
+        reportError(err, { headline: "Couldn't scope the new card" });
+      } finally {
+        refreshCards({ silent: true });
+      }
+      navigate(viewPath(activeBoard, 'pipeline'));
+      return;
+    }
     navigate(issuePath(activeBoard, newCard.key));
-  }, [navigate, activeBoard]);
+  }, [navigate, activeBoard, activeView, refreshCards]);
 
   useEffect(() => {
     const onKey = (e) => {
