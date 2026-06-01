@@ -72,6 +72,20 @@ export function ListCaptures(host: string, dispatchID: number, anthropicOnly: bo
 }
 
 /**
+ * ListJobTranscripts returns the BACI-322 transcript browser list — one row per
+ * distinct dispatch that has parsed captures, the Monitor Transcript page's
+ * data. repo scopes to one repo prefix (the active board); issue / mode narrow
+ * to one issue / one job mode; sinceDays > 0 windows to a rolling lookback
+ * (0 = all-time, the same sentinel ProxyStats uses). The returned slice is
+ * always non-nil.
+ */
+export function ListJobTranscripts(repo: string, issue: string, mode: string, sinceDays: number): $CancellablePromise<$models.JobTranscriptRowDTO[]> {
+    return $Call.ByID(2401896545, repo, issue, mode, sinceDays).then(($result: any) => {
+        return $$createType7($result);
+    });
+}
+
+/**
  * ProxyStats returns the per-FQDN proxy-traffic rollup, busiest host
  * first (the order the store already returns). sinceDays > 0 windows the
  * rollup to a rolling lookback of that many days; sinceDays == 0 means
@@ -81,7 +95,7 @@ export function ListCaptures(host: string, dispatchID: number, anthropicOnly: bo
  */
 export function ProxyStats(sinceDays: number): $CancellablePromise<$models.ProxyFQDNStatDTO[]> {
     return $Call.ByID(56970572, sinceDays).then(($result: any) => {
-        return $$createType7($result);
+        return $$createType9($result);
     });
 }
 
@@ -92,5 +106,7 @@ const $$createType2 = model$0.AnthropicTranscript.createFrom;
 const $$createType3 = $Create.Nullable($$createType2);
 const $$createType4 = $models.ProxyCaptureRowDTO.createFrom;
 const $$createType5 = $Create.Array($$createType4);
-const $$createType6 = $models.ProxyFQDNStatDTO.createFrom;
+const $$createType6 = $models.JobTranscriptRowDTO.createFrom;
 const $$createType7 = $Create.Array($$createType6);
+const $$createType8 = $models.ProxyFQDNStatDTO.createFrom;
+const $$createType9 = $Create.Array($$createType8);

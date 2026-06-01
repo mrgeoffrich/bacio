@@ -1409,6 +1409,101 @@ export class IssueMetaDTO {
 }
 
 /**
+ * JobTranscriptRowDTO is one row of the BACI-322 transcript browser list,
+ * shaped for the desktop Monitor Transcript page. It mirrors
+ * model.JobTranscriptRow with camelCase JSON tags so the Wails binding matches
+ * the web twin's TS-only shape (lib/proxyCaptures.ts). DispatchID is the
+ * deep-link key; IssueKey / Mode / AgentName / RepoPrefix are best-effort
+ * enrichment (empty when the dispatch was deleted); Model is the primary
+ * thread's; TurnCount is the primary-capture count; Usage is summed across the
+ * dispatch; LastSeen is the most-recent capture's timestamp.
+ */
+export class JobTranscriptRowDTO {
+    "dispatchId": number;
+    "issueKey"?: string;
+    "mode"?: string;
+    "agentName"?: string;
+    "repoPrefix"?: string;
+    "model"?: string;
+    "turnCount": number;
+    "usage": JobTranscriptUsageDTO;
+    "lastSeen": time$0.Time;
+
+    /** Creates a new JobTranscriptRowDTO instance. */
+    constructor($$source: Partial<JobTranscriptRowDTO> = {}) {
+        if (!("dispatchId" in $$source)) {
+            this["dispatchId"] = 0;
+        }
+        if (!("turnCount" in $$source)) {
+            this["turnCount"] = 0;
+        }
+        if (!("usage" in $$source)) {
+            this["usage"] = (new JobTranscriptUsageDTO());
+        }
+        if (!("lastSeen" in $$source)) {
+            this["lastSeen"] = null;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new JobTranscriptRowDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): JobTranscriptRowDTO {
+        const $$createField7_0 = $$createType35;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("usage" in $$parsedSource) {
+            $$parsedSource["usage"] = $$createField7_0($$parsedSource["usage"]);
+        }
+        return new JobTranscriptRowDTO($$parsedSource as Partial<JobTranscriptRowDTO>);
+    }
+}
+
+/**
+ * JobTranscriptUsageDTO is the camelCase token-usage twin of
+ * model.AnthropicUsage, carried on JobTranscriptRowDTO so the desktop binding
+ * matches the web twin's TS shape (the same cross-transport split as the
+ * other Monitor DTOs).
+ */
+export class JobTranscriptUsageDTO {
+    "inputTokens": number;
+    "outputTokens": number;
+    "cacheCreationTokens": number;
+    "cacheReadTokens": number;
+    "thinkingTokens": number;
+
+    /** Creates a new JobTranscriptUsageDTO instance. */
+    constructor($$source: Partial<JobTranscriptUsageDTO> = {}) {
+        if (!("inputTokens" in $$source)) {
+            this["inputTokens"] = 0;
+        }
+        if (!("outputTokens" in $$source)) {
+            this["outputTokens"] = 0;
+        }
+        if (!("cacheCreationTokens" in $$source)) {
+            this["cacheCreationTokens"] = 0;
+        }
+        if (!("cacheReadTokens" in $$source)) {
+            this["cacheReadTokens"] = 0;
+        }
+        if (!("thinkingTokens" in $$source)) {
+            this["thinkingTokens"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new JobTranscriptUsageDTO instance from a string or object.
+     */
+    static createFrom($$source: any = {}): JobTranscriptUsageDTO {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new JobTranscriptUsageDTO($$parsedSource as Partial<JobTranscriptUsageDTO>);
+    }
+}
+
+/**
  * LatestPlanDTO (BACI-216) is the Wails-side mirror of
  * model.LatestPlan — the newest `plan`-typed doc linked directly to
  * an issue. Carries enough metadata (filename, uuid, updated_at) for
@@ -1879,8 +1974,8 @@ export class RelationsDTO {
      * Creates a new RelationsDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): RelationsDTO {
-        const $$createField0_0 = $$createType36;
-        const $$createField1_0 = $$createType36;
+        const $$createField0_0 = $$createType37;
+        const $$createField1_0 = $$createType37;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("outgoing" in $$parsedSource) {
             $$parsedSource["outgoing"] = $$createField0_0($$parsedSource["outgoing"]);
@@ -2110,7 +2205,7 @@ export class ShippedListDTO {
      * Creates a new ShippedListDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): ShippedListDTO {
-        const $$createField0_0 = $$createType38;
+        const $$createField0_0 = $$createType39;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("rows" in $$parsedSource) {
             $$parsedSource["rows"] = $$createField0_0($$parsedSource["rows"]);
@@ -2172,8 +2267,8 @@ export class SyncRegistryDTO {
      * Creates a new SyncRegistryDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): SyncRegistryDTO {
-        const $$createField0_0 = $$createType40;
-        const $$createField1_0 = $$createType42;
+        const $$createField0_0 = $$createType41;
+        const $$createField1_0 = $$createType43;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("syncRepos" in $$parsedSource) {
             $$parsedSource["syncRepos"] = $$createField0_0($$parsedSource["syncRepos"]);
@@ -2226,7 +2321,7 @@ export class SyncRepoDTO {
      * Creates a new SyncRepoDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): SyncRepoDTO {
-        const $$createField7_0 = $$createType44;
+        const $$createField7_0 = $$createType45;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("projects" in $$parsedSource) {
             $$parsedSource["projects"] = $$createField7_0($$parsedSource["projects"]);
@@ -2287,7 +2382,7 @@ export class SyncSetupDTO {
      * Creates a new SyncSetupDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): SyncSetupDTO {
-        const $$createField6_0 = $$createType46;
+        const $$createField6_0 = $$createType47;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("previewCollisions" in $$parsedSource) {
             $$parsedSource["previewCollisions"] = $$createField6_0($$parsedSource["previewCollisions"]);
@@ -2395,15 +2490,16 @@ const $$createType31 = LatestPlanDTO.createFrom;
 const $$createType32 = $Create.Nullable($$createType31);
 const $$createType33 = DocLinkDTO.createFrom;
 const $$createType34 = $Create.Array($$createType33);
-const $$createType35 = RelationDTO.createFrom;
-const $$createType36 = $Create.Array($$createType35);
-const $$createType37 = ShippedIssueDTO.createFrom;
-const $$createType38 = $Create.Array($$createType37);
-const $$createType39 = SyncRepoDTO.createFrom;
-const $$createType40 = $Create.Array($$createType39);
-const $$createType41 = UnsyncedProjectDTO.createFrom;
-const $$createType42 = $Create.Array($$createType41);
-const $$createType43 = MemberProjectDTO.createFrom;
-const $$createType44 = $Create.Array($$createType43);
-const $$createType45 = CollisionPreviewDTO.createFrom;
-const $$createType46 = $Create.Nullable($$createType45);
+const $$createType35 = JobTranscriptUsageDTO.createFrom;
+const $$createType36 = RelationDTO.createFrom;
+const $$createType37 = $Create.Array($$createType36);
+const $$createType38 = ShippedIssueDTO.createFrom;
+const $$createType39 = $Create.Array($$createType38);
+const $$createType40 = SyncRepoDTO.createFrom;
+const $$createType41 = $Create.Array($$createType40);
+const $$createType42 = UnsyncedProjectDTO.createFrom;
+const $$createType43 = $Create.Array($$createType42);
+const $$createType44 = MemberProjectDTO.createFrom;
+const $$createType45 = $Create.Array($$createType44);
+const $$createType46 = CollisionPreviewDTO.createFrom;
+const $$createType47 = $Create.Nullable($$createType46);

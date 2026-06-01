@@ -7,6 +7,7 @@ import FeaturesView from './components/FeaturesView.jsx';
 import AgentsView from './components/AgentsView.jsx';
 import HistoryView from './components/HistoryView.jsx';
 import MonitorView from './components/MonitorView.jsx';
+import TranscriptRoute from './components/TranscriptRoute.jsx';
 import PipelineView from './components/PipelineView.jsx';
 import ProcessEditor from './components/ProcessEditor.jsx';
 import IssueWorkspace from './components/IssueWorkspace.jsx';
@@ -1389,6 +1390,29 @@ export default function App() {
             element={
               <ErrorBoundary headline="Something went wrong in Monitor" label="The Monitor view crashed">
                 <MonitorView activeBoard={activeBoard} />
+              </ErrorBoundary>
+            }
+          />
+          {/* BACI-322: the Transcripts sub-tab is the same Monitor shell — it
+              derives the active sub-tab from the URL, so the segmented control
+              and the deep-link / refresh land on Transcripts. */}
+          <Route
+            path="/:prefix/monitor/transcripts"
+            element={
+              <ErrorBoundary headline="Something went wrong in Monitor" label="The Monitor view crashed">
+                <MonitorView activeBoard={activeBoard} />
+              </ErrorBoundary>
+            }
+          />
+          {/* BACI-322: the deep-linkable full-transcript page for one dispatch.
+              react-router v7 ranks this more-specific path above /:prefix/monitor
+              and the /:prefix/* catch-all, and the SPA fallback serves index.html
+              for it on both transports, so a cold refresh resolves it. */}
+          <Route
+            path="/:prefix/monitor/transcript/:id"
+            element={
+              <ErrorBoundary headline="Something went wrong in the transcript view" label="The transcript view crashed">
+                <TranscriptRoute />
               </ErrorBoundary>
             }
           />

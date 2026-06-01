@@ -113,6 +113,33 @@ type ProxyMessageMatch struct {
 	ClaudeAgentID  string `json:"claude_agent_id,omitempty"`
 }
 
+// JobTranscriptRow is one row of the BACI-322 transcript browser — one
+// distinct dispatch that has parsed captures, summarised so the Transcript
+// list can render it without assembling the whole transcript. DispatchID is
+// the per-job key the deep-link URL is keyed on (the same id `proxy job
+// <dispatch_id>` / GET /proxy/jobs/{dispatch_id}/transcript take). TurnCount
+// is the number of primary captures (the assistant turns in the job's main
+// thread); Usage is the summed token usage across the dispatch's captures;
+// Model is the primary thread's model. LastSeen is the most-recent capture's
+// started_at, the field the list orders on.
+//
+// IssueKey / Mode / AgentName / RepoPrefix are best-effort enrichment lifted
+// from the dispatch row (one cached GetDispatch per dispatch, the same idiom
+// ProxyCaptureRow uses) — empty when the dispatch has been deleted. The JSON
+// tags are snake_case so the wire shape of GET /proxy/jobs declares cleanly;
+// the desktop Wails DTO carries the camelCase twin.
+type JobTranscriptRow struct {
+	DispatchID int64          `json:"dispatch_id"`
+	IssueKey   string         `json:"issue_key,omitempty"`
+	Mode       string         `json:"mode,omitempty"`
+	AgentName  string         `json:"agent_name,omitempty"`
+	RepoPrefix string         `json:"repo_prefix,omitempty"`
+	Model      string         `json:"model,omitempty"`
+	TurnCount  int64          `json:"turn_count"`
+	Usage      AnthropicUsage `json:"usage"`
+	LastSeen   time.Time      `json:"last_seen"`
+}
+
 // ProxyFQDNStat is the BACI-303 per-FQDN rollup of proxy_requests rows:
 // one entry per distinct upstream host, summarising how much an agent
 // session talked to it. RequestCount / BytesIn / BytesOut are simple

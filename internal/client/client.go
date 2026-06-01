@@ -524,6 +524,16 @@ type Client interface {
 	// counts (dry-run projects them without writing).
 	ReparseProxyMessages(ctx context.Context, in ReparseProxyOpts, dryRun bool) (store.ReparseResult, error)
 
+	// ----- Transcript browser (BACI-322) -----
+	// ListJobTranscripts returns one summary row per distinct dispatch that has
+	// parsed captures — the row-per-dispatch list the Monitor Transcript page
+	// renders (turn count, summed usage, model, last-seen, plus the issue-key /
+	// mode / agent / repo-prefix enrichment lifted off the dispatch). The filter
+	// scopes to the active repo (RepoPrefix) and optionally one issue / mode /
+	// since-window. Cross-cutting like ProxyStats; the remote backend GETs
+	// /proxy/jobs. The returned slice is always non-nil (empty for no match).
+	ListJobTranscripts(ctx context.Context, f store.JobTranscriptFilter) ([]*model.JobTranscriptRow, error)
+
 	// ----- Agent registry (local-only in v1; remote returns ErrLocalOnly) -----
 	// The agent registry records which AI agent sessions are alive
 	// against which repos, and which issues they're focused on.
