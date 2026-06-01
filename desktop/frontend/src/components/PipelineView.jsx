@@ -339,6 +339,20 @@ export default function PipelineView({
 
   return (
     <div className={`mk-pl${gridExpanded ? ' is-backlog-expanded' : ''}${collapsed ? ' is-backlog-collapsed' : ''}`}>
+      {/* BACI-335: the rainbow gradient the fast-track zap's stroke paints
+          with (CSS `stroke: url(#mk-zap-rainbow)`). Rendered once, zero-size
+          and aria-hidden so it never affects layout or assistive tech. */}
+      <svg width="0" height="0" aria-hidden="true" focusable="false" style={{ position: 'absolute' }}>
+        <defs>
+          <linearGradient id="mk-zap-rainbow" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#FF5E5E" />
+            <stop offset="25%" stopColor="#FFB14E" />
+            <stop offset="50%" stopColor="#5ED66E" />
+            <stop offset="75%" stopColor="#4EA8FF" />
+            <stop offset="100%" stopColor="#B96EFF" />
+          </linearGradient>
+        </defs>
+      </svg>
       {/* ── Backlog ── */}
       <section
         className={`mk-pl-col mk-pl-backlog${collapsed ? ' is-collapsed' : ''}${dragOverCol === 'todo' ? ' is-drop' : ''}`}
@@ -649,10 +663,15 @@ function PipelineCard({
         <div className="mk-pl-card-foot">
           <span className="mk-pl-spacer" />
           {/* Fast-track (BACI-311): one click moves the card into the
-              pipeline, assigns Plan → Implement → Ship, and turns Auto on. */}
+              pipeline, assigns Plan → Implement → Ship, and turns Auto on.
+              BACI-335: a ghost/secondary button (matching the sibling "Move
+              into pipeline" ghost) so it stands out via its rainbow-outlined
+              zap rather than heavy primary fill. The zap's stroke is painted
+              with the shared #mk-zap-rainbow gradient def (rendered once on
+              the board). */}
           <button
             type="button"
-            className="mk-pl-btn is-primary is-sm"
+            className="mk-pl-btn is-ghost is-sm mk-pl-fasttrack"
             title="Fast-track: into pipeline, Plan → Implement → Ship, Auto on"
             aria-label="Fast-track: into pipeline, Plan → Implement → Ship, Auto on"
             onClick={(e) => { e.stopPropagation(); onFastTrack?.(card.key); }}
@@ -806,8 +825,9 @@ function StageCard({
   const running = jobs.find(j => j.status === 'running') || null;
   // BACI-330: a card with a running job can't be dragged — the engine
   // refuses to move a card mid-job, so we gate the gesture at the source.
-  // `locked` removes `draggable` (so a drag never starts), dims the card,
-  // and arms a "stop the job first" tooltip.
+  // `locked` removes `draggable` (so a drag never starts), highlights the
+  // card border (BACI-335 — no longer dims it, so the job chain stays
+  // legible), and arms a "stop the job first" tooltip.
   const locked = !!running;
   // Reset is hidden while a job is running (the Stop-first rule — the engine
   // refuses ErrJobRunning anyway). If the card transitions to running while
