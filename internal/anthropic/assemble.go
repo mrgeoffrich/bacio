@@ -3,6 +3,8 @@ package anthropic
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"strings"
 
 	"github.com/mrgeoffrich/bacio/internal/model"
 )
@@ -29,15 +31,55 @@ type ThreadState struct {
 	MessageCount int
 }
 
+// billingHeaderPrefix marks the volatile system block the Claude client prepends
+// to every /v1/messages request — an x-anthropic-billing-header text block whose
+// `cch=<hash>` cache token changes on essentially every call. systemFingerprint
+// drops it before hashing so the same conversation hashes identically across
+// turns (BACI-326).
+const billingHeaderPrefix = "x-anthropic-billing-header:"
+
 // systemFingerprint hashes the request's system block so two captures in the
 // same conversation (identical system prompt) share a fingerprint while a probe
-// with a different system prompt doesn't. The bytes are hashed verbatim (the
-// API accepts a string or a block list — either way the same conversation sends
-// the same bytes). An empty system yields "".
+// with a different system prompt doesn't.
+//
+// The Claude client prepends a volatile x-anthropic-billing-header text block
+// whose `cch` cache hash drifts per request, so hashing the system bytes
+// verbatim gave every turn after the first a different fingerprint — Classify
+// then filed them all auxiliary and turn_count capped at 1 (BACI-326). To make
+// the same conversation hash identically across turns, we decode the system as a
+// block list and drop a leading billing-header block before hashing. The strip
+// is tight: only a block at index 0 whose type is text and whose text starts
+// with the billing-header prefix is removed, so a real system prompt that merely
+// mentions the string is untouched.
+//
+// Anything that isn't a Claude-Code block list with a leading billing header —
+// the string-shorthand form, a block list without the header, an unexpected
+// shape — hashes the original bytes verbatim, exactly as before. The change is
+// strictly additive: it can never worsen a shape it doesn't recognise, and the
+// 17 genuinely-distinct system prompts in the surveyed corpus stay distinct so
+// sibling-thread disambiguation is preserved. An empty system yields "".
 func systemFingerprint(system []byte) string {
 	if len(system) == 0 {
 		return ""
 	}
+	// Try the block-list shape; only the leading block's type/text matter for the
+	// strip decision, so a tiny local struct (extra fields ignored) is enough.
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(system, &blocks); err == nil &&
+		len(blocks) > 0 && blocks[0].Type == "text" &&
+		strings.HasPrefix(blocks[0].Text, billingHeaderPrefix) {
+		// Re-encode the survivors deterministically (a slice of a fixed struct
+		// marshals with stable key order) and hash that stable portion.
+		if stable, err := json.Marshal(blocks[1:]); err == nil {
+			sum := sha256.Sum256(stable)
+			return hex.EncodeToString(sum[:])
+		}
+	}
+	// No billing header to strip (a string-form system, a non-Claude-Code block
+	// list, or an unexpected shape) — hash the bytes verbatim, as before.
 	sum := sha256.Sum256(system)
 	return hex.EncodeToString(sum[:])
 }

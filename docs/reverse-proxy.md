@@ -322,7 +322,13 @@ store read API, the CLI, and the tests share one parser:
   bare-presence heuristic filed every real turn auxiliary → zero primary turns,
   a blank model, and an empty transcript for all current-model traffic. The
   `format`-keyed test (`hasStructuredFormat` in `parse.go`) treats an
-  `effort`-only config as a normal turn. It returns the
+  `effort`-only config as a normal turn. The system-fingerprint half of the
+  primary test (`systemFingerprint` in `assemble.go`) strips the volatile
+  leading `x-anthropic-billing-header` system block — whose `cch` cache token
+  drifts on essentially every request — before hashing, so consecutive turns of
+  one conversation hash identically (BACI-326); without it every turn after the
+  first drifted to a fresh fingerprint → auxiliary → `turn_count` capped at 1.
+  It returns the
   request-message **delta** — the messages appended since the prior primary
   capture, with the echoed prior-assistant turn dropped (it's already
   represented by that capture's reconstructed turn). Storing the delta, not
