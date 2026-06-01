@@ -909,17 +909,18 @@ func hookPostToolUseHeartbeatCmd() *cobra.Command {
 // ---------- pre-tool-use ----------
 
 // preToolUseInput is the slice of the Claude Code PreToolUse payload
-// the worktree-confinement guard and the BACI-134 sqlite3 confinement
-// guard care about. The matcher is `Write|Edit|Bash`: the Write/Edit
-// branch reads `file_path`, the Bash branch reads `command`. The decoder
-// ignores unknown fields, so this is a strict subset and needs no
-// knowledge of any other tool's input shape.
+// the worktree-confinement guard, the BACI-134 sqlite3 confinement
+// guard, and the BACI-329 CLAUDE.md-read confinement guard care about.
+// The matcher is `Write|Edit|Bash|Read`: the Write/Edit/Read branches
+// read `file_path`, the Bash branch reads `command`. The decoder ignores
+// unknown fields, so this is a strict subset and needs no knowledge of
+// any other tool's input shape.
 type preToolUseInput struct {
 	SessionID string `json:"session_id"`
 	CWD       string `json:"cwd"`
 	ToolName  string `json:"tool_name"`
 	ToolInput struct {
-		FilePath string `json:"file_path"` // Write / Edit
+		FilePath string `json:"file_path"` // Write / Edit / Read (BACI-329)
 		Command  string `json:"command"`   // Bash (BACI-134)
 	} `json:"tool_input"`
 	// AgentID is Claude Code's per-subagent id (X-Claude-Code-Agent-Id),
@@ -950,7 +951,7 @@ func readPreToolUseInput() (*preToolUseInput, error) {
 // syntax. Keeping the literal here so the install-agent plan and the
 // hook code can't drift (same convention as postToolUseMatcher).
 //
-// The matcher covers two distinct guards that share the same hook entry:
+// The matcher covers three distinct guards that share the same hook entry:
 //
 //   - Write|Edit — the BACI-116 / BACI-129 worktree confinement guard.
 //     Denies edits that resolve outside a linked-worktree root, and any
@@ -968,7 +969,18 @@ func readPreToolUseInput() (*preToolUseInput, error) {
 //     specific shape `sqlite3 <path>` where `<path>` resolves to the
 //     default `~/.bacio/db.sqlite`; everything else (including a
 //     worktree-isolated `.bacio/db.sqlite`) fails open.
-const preToolUseMatcher = "Write|Edit|Bash"
+//
+//   - Read — the BACI-329 CLAUDE.md-read confinement guard. A dispatched
+//     worker's preamble (step 5) tells it to read its own worktree's
+//     CLAUDE.md, but nothing stopped a `Read <root>/CLAUDE.md` against
+//     the parent checkout — a confinement violation in the same family as
+//     the Write/Edit guard, and a staleness trap (the worktree is
+//     fast-forwarded onto origin/<base_branch> while the parent checkout
+//     may lag, or be the very thing the dispatch is editing). Narrowly
+//     scoped: only a `Read` whose target basename is `CLAUDE.md` and which
+//     resolves outside the linked worktree is denied; everything else
+//     (any other file, the primary checkout, no git repo) fails open.
+const preToolUseMatcher = "Write|Edit|Bash|Read"
 
 // preToolUseDecision is the verdict the confinement guard reaches for
 // one tool call. allow=true emits nothing (the call proceeds); allow=
@@ -1139,6 +1151,88 @@ func decidePreToolUse(in *preToolUseInput, resolveRoot worktreeRootResolver) pre
 				"The %s file_path %s resolves outside it (into the primary checkout or a "+
 				"sibling worktree). Re-issue the edit with a path under %s.",
 			root, in.ToolName, in.ToolInput.FilePath, root),
+	}
+}
+
+// decideReadClaudeMd is the pure decision function for the BACI-329
+// CLAUDE.md-read confinement guard — no stdin, no stdout, directly
+// unit-testable. The matcher (`Write|Edit|Bash|Read`) hands every Read
+// call to this function; it denies only the specific shape of a `Read`
+// whose target basename is `CLAUDE.md` resolving *outside* the linked
+// worktree the worker is standing in.
+//
+// Deliberately narrow, and deliberately *not* folded into
+// decidePreToolUse: that function's primary-checkout branch blanket-
+// denies regardless of path (correct for a mutation, wrong for a read),
+// and reusing it for Read would block every out-of-worktree read — a
+// large false-positive surface. The preamble (step 5) tells a dispatched
+// worker to read its own worktree's CLAUDE.md, which is fast-forwarded
+// onto origin/<base_branch>; a stray `Read <root>/CLAUDE.md` against the
+// parent checkout reads stale conventions (and the pre-change copy when
+// the dispatch is itself editing CLAUDE.md), and nudges the model to
+// adopt the parent root as its working prefix.
+//
+// Fail-open invariant: every case that isn't a positive "this reads a
+// CLAUDE.md outside the worktree" allows. In the primary checkout
+// (linked == false) there is no worktree to redirect to, and a Read is
+// not a mutation that needs the BACI-129 blanket-deny — so it allows.
+func decideReadClaudeMd(in *preToolUseInput, resolveRoot worktreeRootResolver) preToolUseDecision {
+	allow := preToolUseDecision{allow: true}
+
+	if in.ToolName != "Read" {
+		return allow
+	}
+	target := strings.TrimSpace(in.ToolInput.FilePath)
+	if target == "" {
+		return allow
+	}
+
+	// Resolve a relative file_path against cwd before the base-name check
+	// so a relative `Read CLAUDE.md` still matches. Mirror the Write/Edit
+	// branch's defensive cwd fallback.
+	if !filepath.IsAbs(target) {
+		base := in.CWD
+		if base == "" {
+			if wd, err := os.Getwd(); err == nil {
+				base = wd
+			}
+		}
+		target = filepath.Join(base, target)
+	}
+
+	// Narrow scope: only a CLAUDE.md read is in play. Any nested
+	// `<dir>/CLAUDE.md` matches by base name; the containment check below
+	// still allows an in-worktree nested copy and denies an out-of-worktree
+	// one. AGENTS.md and other convention files are deliberately not covered.
+	if filepath.Base(target) != "CLAUDE.md" {
+		return allow
+	}
+
+	root, linked := resolveRoot(in.CWD)
+
+	// Not in a git repo (fail-open), or in the primary checkout (no
+	// worktree to redirect to — a Read there isn't a confinement breach
+	// the way a Write is). Either way, allow.
+	if root == "" || !linked {
+		return allow
+	}
+
+	// Eval symlinks on both sides so a symlink inside the worktree can't
+	// slip the containment check, exactly as the Write/Edit guard does.
+	target = evalSymlinksLenient(target)
+	root = evalSymlinksLenient(root)
+
+	if pathWithin(root, target) {
+		return allow
+	}
+	return preToolUseDecision{
+		allow: false,
+		reason: fmt.Sprintf(
+			"bacio: this dispatched-worker session must read its own worktree's CLAUDE.md "+
+				"(%s), not the primary checkout's. The worktree is fast-forwarded onto the base "+
+				"branch while the parent checkout may be stale (and may be the very file this "+
+				"dispatch is editing). Re-issue the Read against %s.",
+			filepath.Join(root, "CLAUDE.md"), filepath.Join(root, "CLAUDE.md")),
 	}
 }
 
@@ -1321,7 +1415,7 @@ func emitPreToolUseDeny(reason string) {
 func hookPreToolUseCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:    "pre-tool-use",
-		Short:  "PreToolUse hook (matcher: Write|Edit|Bash): confine writes to a linked worktree and block raw sqlite3 against the live store",
+		Short:  "PreToolUse hook (matcher: Write|Edit|Bash|Read): confine writes to a linked worktree, block raw sqlite3 against the live store, and redirect parent-checkout CLAUDE.md reads to the worktree copy",
 		Args:   cobra.NoArgs,
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -1337,16 +1431,22 @@ func hookPreToolUseCmd() *cobra.Command {
 				fmt.Fprintln(os.Stderr, "bacio hook pre-tool-use:", err)
 				return nil
 			}
-			// Two sibling deciders share the hook entry. Write/Edit goes
+			// Three sibling deciders share the hook entry. Write/Edit goes
 			// through the worktree-confinement guard (BACI-116 / BACI-129);
-			// Bash goes through the sqlite3 confinement guard (BACI-134).
-			// Only one deny ever leaves the hook so Claude Code's surface
-			// stays uncluttered — Write/Edit checked first, then Bash.
+			// Bash goes through the sqlite3 confinement guard (BACI-134);
+			// Read goes through the CLAUDE.md-read confinement guard
+			// (BACI-329). Only one deny ever leaves the hook so Claude
+			// Code's surface stays uncluttered — Write/Edit checked first,
+			// then Bash, then Read.
 			if d := decidePreToolUse(in, gitLinkedWorktreeRoot); !d.allow {
 				emitPreToolUseDeny(d.reason)
 				return nil
 			}
 			if d := decideBashSqlite3(in, defaultLiveDBResolver); !d.allow {
+				emitPreToolUseDeny(d.reason)
+				return nil
+			}
+			if d := decideReadClaudeMd(in, gitLinkedWorktreeRoot); !d.allow {
 				emitPreToolUseDeny(d.reason)
 				return nil
 			}

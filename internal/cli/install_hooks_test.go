@@ -13,18 +13,19 @@ import (
 // handler — `post-tool-use` → `TaskCreate|TaskUpdate` (BACI-60: Claude
 // Code 2.1 renamed TodoWrite into the Task* family), `set-title` →
 // `mcp__bacio__register` (BACI-147: only fire on a successful
-// `register` MCP call), `pre-tool-use` → `Write|Edit|Bash` (BACI-116:
-// worktree-confinement guard; BACI-134: widened to cover Bash for
-// the sqlite3 confinement guard). A drift here silently breaks the
-// relevant hook because Claude Code matches the entry against every
-// tool call.
+// `register` MCP call), `pre-tool-use` → `Write|Edit|Bash|Read`
+// (BACI-116: worktree-confinement guard; BACI-134: widened to cover
+// Bash for the sqlite3 confinement guard; BACI-329: widened to cover
+// Read for the CLAUDE.md-read confinement guard). A drift here silently
+// breaks the relevant hook because Claude Code matches the entry against
+// every tool call.
 func TestBacioHookGroupMatcher(t *testing.T) {
 	// Keyed by subcommand so two PostToolUse entries carrying distinct
 	// matchers are both covered (BACI-147 added the second one).
 	wantMatcher := map[string]string{
 		"post-tool-use": "TaskCreate|TaskUpdate",
 		"set-title":     "mcp__bacio__register",
-		"pre-tool-use":  "Write|Edit|Bash",
+		"pre-tool-use":  "Write|Edit|Bash|Read",
 	}
 	for _, ev := range bacioHookEvents {
 		grp := bacioHookGroup(ev.Subcommand, ev.Matcher)
