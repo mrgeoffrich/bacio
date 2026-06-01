@@ -1090,7 +1090,7 @@ before `git commit` and before `git push`. These raise the floor and
 leave an audit signal — they do not *enforce*; the PreToolUse hook
 below does.
 
-### Worktree confinement — the PreToolUse `Write|Edit|Bash` hook (BACI-116, BACI-129, BACI-134)
+### Worktree confinement — the PreToolUse `Write|Edit|Bash|Read` hook (BACI-116, BACI-129, BACI-134, BACI-329)
 
 The worktree+branch guard above is a one-time **cwd snapshot**: it
 proves where the worker stood at startup, but it does not constrain
@@ -1104,11 +1104,12 @@ BACI-102 failure).
 
 The enforcement is a sixth `bacio hook` subcommand, `pre-tool-use`,
 wired by `bacio install-agent` as a **PreToolUse** hook with matcher
-`Write|Edit|Bash`. Two sibling deciders share the hook entry: Write/Edit
-goes through the worktree-confinement guard below, Bash goes through the
-sqlite3 confinement guard (BACI-134) further down. Only one deny ever
-leaves the hook so Claude Code's surface stays uncluttered — Write/Edit
-checked first, then Bash.
+`Write|Edit|Bash|Read`. Three sibling deciders share the hook entry:
+Write/Edit goes through the worktree-confinement guard below, Bash goes
+through the sqlite3 confinement guard (BACI-134) further down, and Read
+goes through the CLAUDE.md-read confinement guard (BACI-329) below that.
+Only one deny ever leaves the hook so Claude Code's surface stays
+uncluttered — Write/Edit checked first, then Bash, then Read.
 
 #### Write/Edit confinement (BACI-116, BACI-129)
 
@@ -1185,15 +1186,63 @@ sqlite3 confinement. That's the right behaviour — a supervisor that
 needs to mutate the live DB by hand should drop
 `BACIO_AGENT_MODE` for that shell.
 
+#### Read CLAUDE.md confinement (BACI-329)
+
+A third escape is a missing **enforcement** half of an existing prompt
+instruction, in the same shape as the sqlite3 story (preamble text +
+hook). The preamble (step 5) tells a dispatched worker to read its own
+worktree's `CLAUDE.md`, but nothing stopped a `Read <root>/CLAUDE.md`
+against the *parent* checkout — and in this dispatch setup the project
+`CLAUDE.md` is not auto-loaded into the subagent's context; it is
+fetched purely by that explicit `Read`, so a PreToolUse `Read` guard
+fully covers the path with no harness auto-load slipping content in
+behind it. The cost is twofold: a **confinement** breach (reading
+`<root>/…` nudges the model to adopt that prefix as its working
+directory, the same family as the Write/Edit guard), and **staleness**
+— the worktree is fast-forwarded onto `origin/<base_branch>` (preamble
+step 4) while the primary checkout sits on whatever local `main`
+happened to be, so a worker that reads the parent copy gets stale
+conventions, and a dispatch that *modifies* `CLAUDE.md` reads the
+pre-change version.
+
+The Read decider (`decideReadClaudeMd`) is deliberately **narrow** and a
+**separate sibling**, not folded into `decidePreToolUse`. It fires only
+when `tool_name == "Read"` and the target's basename is `CLAUDE.md`
+(after resolving a relative `file_path` against `cwd`); everything else
+fails open. It reuses the same `git`-based worktree classification and
+the boundary-safe `pathWithin` + `evalSymlinksLenient` pair as the
+Write/Edit guard: inside a **linked worktree**, a `CLAUDE.md` resolving
+under the worktree root is allowed and one resolving outside it (the
+parent checkout's, or a sibling worktree's) is **denied** with a reason
+naming `<worktree-root>/CLAUDE.md` as the path to read instead. The
+**primary checkout** (`linked == false`) and the not-in-a-repo case
+both fail open — there is no worktree to redirect to, and a Read is not
+a mutation that warrants the BACI-129 blanket-deny that the Write/Edit
+primary-checkout branch applies. Folding Read into `decidePreToolUse`
+would inherit that blanket-deny (wrong for reads) and block *every*
+out-of-worktree read (a large false-positive surface); the
+`CLAUDE.md`-only scope is the whole point. `AGENTS.md` and other
+convention files are deliberately out of scope for v1. A nested
+`<dir>/CLAUDE.md` matches by base name but the containment check still
+allows the in-worktree copy and denies the out-of-worktree one — no
+special handling needed.
+
+The same **rollout caveat** as every matcher change applies: the matcher
+lives in each project's `.claude/settings.json`, so existing worktrees
+and already-installed agent settings keep the old `Write|Edit|Bash`
+matcher until hooks are re-installed (`bacio install-agent`) or the
+worktree is recreated from the updated branch.
+
 #### Shared invariants
 
-Both deciders honour the same **fail-open** invariant as every other
-hook: stdin unreadable, JSON malformed, resolver error, symlink eval
-failure — every failure mode *allows* the call (exit 0, no deny
+All three deciders honour the same **fail-open** invariant as every
+other hook: stdin unreadable, JSON malformed, resolver error, symlink
+eval failure — every failure mode *allows* the call (exit 0, no deny
 payload) and logs one line to stderr. A `deny` is emitted only on a
 positive "resolved outside a known worktree root" / "this command
-targets the live DB" determination. The pure decision functions
-`decidePreToolUse` and `decideBashSqlite3` (`internal/cli/hook.go`)
+targets the live DB" / "this Read targets an out-of-worktree CLAUDE.md"
+determination. The pure decision functions `decidePreToolUse`,
+`decideBashSqlite3`, and `decideReadClaudeMd` (`internal/cli/hook.go`)
 are unit-tested directly (`hook_pretooluse_test.go`), as is the
 boundary-safe `pathWithin` helper.
 

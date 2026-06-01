@@ -26,11 +26,12 @@ import (
 // BACI-159 supervisor heartbeat with an empty matcher so it fires
 // on every supervisor tool call (the supervisor has no other
 // liveness signal during a long Task-spawned subagent run).
-// PreToolUse scopes the worktree- and sqlite3-confinement guards to
-// `Write|Edit|Bash`. All matchers use Claude Code's pipe-alternation
-// syntax (`Foo|Bar` for a literal multi-tool match). Source of truth
-// for each literal lives next to its hook handler so the two can't
-// drift — see internal/cli/hook.go.
+// PreToolUse scopes the worktree-, sqlite3-, and CLAUDE.md-read-
+// confinement guards to `Write|Edit|Bash|Read` (BACI-329 added the Read
+// branch). All matchers use Claude Code's pipe-alternation syntax
+// (`Foo|Bar` for a literal multi-tool match). Source of truth for each
+// literal lives next to its hook handler so the two can't drift — see
+// internal/cli/hook.go.
 //
 // Multiple rows can share an Event (PostToolUse has three since
 // BACI-159). applyBacioHooks groups by Event before rewriting the

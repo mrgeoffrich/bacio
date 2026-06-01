@@ -203,9 +203,9 @@ func TestDecidePreToolUseLinkedWorktreeAllowed(t *testing.T) {
 }
 
 // TestDecidePreToolUseNonWriteTool: decidePreToolUse only handles
-// Write/Edit — every other tool (notably Bash, since BACI-134 widened
-// the matcher to Write|Edit|Bash) is allowed here and routed to a
-// sibling decider in the caller.
+// Write/Edit — every other tool is allowed here and routed to a sibling
+// decider in the caller (Bash → decideBashSqlite3 since BACI-134, Read →
+// decideReadClaudeMd since BACI-329, both widening the matcher).
 func TestDecidePreToolUseNonWriteTool(t *testing.T) {
 	in := &preToolUseInput{ToolName: "Bash", CWD: t.TempDir()}
 	in.ToolInput.FilePath = "/anywhere/at/all.go"
@@ -464,6 +464,180 @@ func TestDecideBashSqlite3HomeExpansion(t *testing.T) {
 	d := decideBashSqlite3(in, resolveLive)
 	if d.allow {
 		t.Fatalf("expected deny for sqlite3 against ~/.bacio/db.sqlite, got allow")
+	}
+}
+
+// TestDecideReadClaudeMd pins the BACI-329 CLAUDE.md-read confinement
+// guard: from inside a linked worktree, a Read of a CLAUDE.md that
+// resolves *outside* the worktree (the parent checkout's, or a sibling
+// worktree's) is denied and redirected to the worktree copy; a Read of
+// the worktree's own CLAUDE.md, any non-CLAUDE.md file, the primary
+// checkout, or outside a git repo all fail open. The scope is narrow on
+// purpose — only out-of-worktree CLAUDE.md reads deny.
+func TestDecideReadClaudeMd(t *testing.T) {
+	// Worktrees live nested under <parent>/.claude/worktrees/<name>, so
+	// <parent>/CLAUDE.md resolves outside the worktree root.
+	parent := t.TempDir()
+	worktree := filepath.Join(parent, ".claude", "worktrees", "agent-abc")
+	if err := os.MkdirAll(worktree, 0o755); err != nil {
+		t.Fatalf("mkdir worktree: %v", err)
+	}
+	// A non-CLAUDE.md parent-checkout file the worker might reference.
+	parentSrc := filepath.Join(parent, "internal", "cli", "hook.go")
+	if err := os.MkdirAll(filepath.Dir(parentSrc), 0o755); err != nil {
+		t.Fatalf("mkdir parent src: %v", err)
+	}
+	// A nested per-dir CLAUDE.md outside the worktree.
+	parentDocsDir := filepath.Join(parent, "docs")
+	if err := os.MkdirAll(parentDocsDir, 0o755); err != nil {
+		t.Fatalf("mkdir parent docs: %v", err)
+	}
+	// A sibling worktree sharing a name prefix — the boundary-safety case.
+	siblingParent := t.TempDir()
+	siblingRoot := filepath.Join(siblingParent, "agent-abc")
+	siblingEvil := filepath.Join(siblingParent, "agent-abc-evil")
+	for _, d := range []string{siblingRoot, siblingEvil} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+	}
+	primary := t.TempDir()
+
+	cases := []struct {
+		name      string
+		toolName  string
+		cwd       string
+		filePath  string
+		resolve   worktreeRootResolver
+		wantAllow bool
+	}{
+		{
+			// The motivating case: a worker inside its worktree reads the
+			// parent checkout's CLAUDE.md → denied, redirected.
+			name:      "parent-claude-md-denied",
+			toolName:  "Read",
+			cwd:       worktree,
+			filePath:  filepath.Join(parent, "CLAUDE.md"),
+			resolve:   func(string) (string, bool) { return worktree, true },
+			wantAllow: false,
+		},
+		{
+			name:      "worktree-claude-md-allowed",
+			toolName:  "Read",
+			cwd:       worktree,
+			filePath:  filepath.Join(worktree, "CLAUDE.md"),
+			resolve:   func(string) (string, bool) { return worktree, true },
+			wantAllow: true,
+		},
+		{
+			// Relative CLAUDE.md resolves against cwd (the worktree) →
+			// under the root, allowed.
+			name:      "relative-claude-md-allowed",
+			toolName:  "Read",
+			cwd:       worktree,
+			filePath:  "CLAUDE.md",
+			resolve:   func(string) (string, bool) { return worktree, true },
+			wantAllow: true,
+		},
+		{
+			// Sibling worktree whose name shares a prefix with the confined
+			// root — boundary-safety (mirrors the Write/Edit sibling test).
+			name:      "sibling-worktree-claude-md-denied",
+			toolName:  "Read",
+			cwd:       siblingRoot,
+			filePath:  filepath.Join(siblingEvil, "CLAUDE.md"),
+			resolve:   func(string) (string, bool) { return siblingRoot, true },
+			wantAllow: false,
+		},
+		{
+			// Primary checkout (linked == false): nothing to redirect to,
+			// a Read isn't a mutation — fail-open.
+			name:      "primary-checkout-fails-open",
+			toolName:  "Read",
+			cwd:       primary,
+			filePath:  filepath.Join(primary, "CLAUDE.md"),
+			resolve:   func(string) (string, bool) { return primary, false },
+			wantAllow: true,
+		},
+		{
+			// Not in a git repo at all — fail-open.
+			name:      "no-git-repo-fails-open",
+			toolName:  "Read",
+			cwd:       worktree,
+			filePath:  filepath.Join(parent, "CLAUDE.md"),
+			resolve:   func(string) (string, bool) { return "", false },
+			wantAllow: true,
+		},
+		{
+			// A non-CLAUDE.md out-of-worktree read is NOT blocked — the
+			// narrow-scope guarantee. The resolver must not even be
+			// consulted because the base-name gate short-circuits first.
+			name:     "non-claude-md-read-allowed",
+			toolName: "Read",
+			cwd:      worktree,
+			filePath: parentSrc,
+			resolve: func(string) (string, bool) {
+				t.Fatalf("resolver must not be consulted for a non-CLAUDE.md read")
+				return "", false
+			},
+			wantAllow: true,
+		},
+		{
+			// Not a Read — this decider doesn't fire (Write/Edit route to
+			// decidePreToolUse; the caller routes). Resolver untouched.
+			name:     "non-read-tool-allowed",
+			toolName: "Write",
+			cwd:      worktree,
+			filePath: filepath.Join(parent, "CLAUDE.md"),
+			resolve: func(string) (string, bool) {
+				t.Fatalf("resolver must not be consulted for a non-Read tool")
+				return "", false
+			},
+			wantAllow: true,
+		},
+		{
+			// Empty file_path — nothing to confine, allow.
+			name:     "empty-file-path-allowed",
+			toolName: "Read",
+			cwd:      worktree,
+			filePath: "  ",
+			resolve: func(string) (string, bool) {
+				t.Fatalf("resolver must not be consulted for an empty file_path")
+				return "", false
+			},
+			wantAllow: true,
+		},
+		{
+			// A nested per-dir CLAUDE.md outside the worktree is denied by
+			// the base-name match — documents v1 behaviour. Only root
+			// CLAUDE.md is the motivating case, but the containment check
+			// (not a path-prefix carve-out) is what does the right thing.
+			name:      "nested-parent-claude-md-denied",
+			toolName:  "Read",
+			cwd:       worktree,
+			filePath:  filepath.Join(parentDocsDir, "CLAUDE.md"),
+			resolve:   func(string) (string, bool) { return worktree, true },
+			wantAllow: false,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			in := &preToolUseInput{ToolName: c.toolName, CWD: c.cwd}
+			in.ToolInput.FilePath = c.filePath
+
+			d := decideReadClaudeMd(in, c.resolve)
+			if d.allow != c.wantAllow {
+				t.Fatalf("decideReadClaudeMd allow=%v, want %v (reason=%q)", d.allow, c.wantAllow, d.reason)
+			}
+			if !c.wantAllow {
+				root, _ := c.resolve(c.cwd)
+				wantPath := filepath.Join(evalSymlinksLenient(root), "CLAUDE.md")
+				if !strings.Contains(d.reason, wantPath) {
+					t.Fatalf("deny reason should name the worktree CLAUDE.md %q; got: %s", wantPath, d.reason)
+				}
+			}
+		})
 	}
 }
 
