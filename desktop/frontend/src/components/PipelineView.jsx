@@ -1121,7 +1121,9 @@ const STANDALONE_OPTIONS = ['plan_large', 'scope', 'research'];
 function ProcessMenu({ dimmedHasProcess, jobs, onPick, onCancel }) {
   // Lazy initialiser: on Edit Process pre-fill from the card's existing job
   // modes (a standalone option wins if present); on a fresh card default to
-  // Plan + Implement on (preserving the old stepper's selectedUpTo = 2).
+  // Plan + Implement + Ship on — the plan-implement-ship chain is the most
+  // common end-to-end flow, so it's pre-selected and a user can Confirm with
+  // no extra clicks (BACI-331).
   const existingStandalone = () =>
     STANDALONE_OPTIONS.find(slug => (jobs || []).some(j => j.mode === slug)) || null;
   const [stages, setStages] = useState(() => {
@@ -1137,7 +1139,7 @@ function ProcessMenu({ dimmedHasProcess, jobs, onPick, onCancel }) {
         ship: modes.has('ship'),
       };
     }
-    return { design: false, plan: true, implement: true, ship: false };
+    return { design: false, plan: true, implement: true, ship: true };
   });
   // `standalone` is the selected standalone slug (or null when the
   // segmented chain is active).
