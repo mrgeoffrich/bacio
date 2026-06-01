@@ -48,15 +48,41 @@ and calls mcp__bacio__reply. You don't follow those steps yourself —
 the subagent does.
 
 When Task returns, forward the subagent's one-line summary as your
-visible response. If the subagent returns `needs_input: <what is
-missing>` rather than completing the work, surface that line and
-stop so the supervisor can answer. (The worker signals "waiting on
-the user" by leaving an open `ask_user_question` on the ticket, not
-by a state flip — there is no longer a `needs_action` state.)
+visible response, then settle the dispatch. Pick exactly ONE of the
+three branches below — read them in order and take the first that
+matches. The `dispatch_id` in every branch is the value of the
+`dispatch_id` attribute on the `<channel>` tag.
 
-After Task returns, call mcp__bacio__reply with the dispatch_id from
-the <channel> tag to acknowledge the dispatch.
+1. **Normal completion.** The subagent returned a one-line completion
+   summary (it finished the job — claimed, worked, released, replied).
+   → Call `mcp__bacio__reply` with the dispatch_id to acknowledge the
+   dispatch. This is the default, by far the most common case.
+
+2. **The subagent parked a question** — it returned a line starting
+   with `needs_input: <what is missing>`. This is a LEGITIMATE pause:
+   the worker left an open `ask_user_question` on the ticket and is
+   waiting on the user. → Surface that line as your response and STOP.
+   Do **nothing** to the dispatch — do NOT reply, do NOT report it
+   incomplete. The engine holds the chain while the question is open
+   and resumes once the user answers. (There is no longer a
+   `needs_action` state — an open question is the "waiting on the user"
+   signal.)
+
+3. **The subagent ended early / was interrupted.** Control came back to
+   you WITHOUT a normal completion summary (branch 1) AND WITHOUT a
+   `needs_input:` line (branch 2) — e.g. the user soft-cancelled (Esc /
+   interrupt) the worker, or it returned no proper summary. The job is
+   left dirty: a running Pipeline job, an un-released claim, an un-acked
+   dispatch. → Call `mcp__bacio__report_subagent_incomplete` with the
+   dispatch_id to reconcile it. Call this **instead of** `reply`, never
+   in addition — `report_subagent_incomplete` settles the dispatch by
+   cancelling it, and acking a cancelled dispatch errors.
+
+Excluding branch 2 from branch 3 is mandatory: a healthy-but-blocked
+job (one that parked a question) must NOT be reported incomplete, or
+the engine wrongly fails a job that is just waiting on the user.
 
 Caveat: a running subagent is NOT interruptible mid-flight.
 Cancelling a dispatch in the UI clears the queue but does not stop
-work already in progress.
+work already in progress; the soft-cancel reconcile in branch 3 is
+what cleans up the dirty job state afterward.
