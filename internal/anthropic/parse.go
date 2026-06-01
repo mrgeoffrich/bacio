@@ -69,7 +69,7 @@ func ParseCapture(raw []byte) (*model.ParsedCapture, error) {
 	pc.Model = req.Model
 	pc.SystemFP = systemFingerprint(req.System)
 	pc.MessageCount = len(req.Messages)
-	pc.HasOutputConfig = len(req.OutputConfig) > 0 && !bytes.Equal(bytes.TrimSpace(req.OutputConfig), []byte("null"))
+	pc.HasOutputConfig = hasStructuredFormat(req.OutputConfig)
 	pc.Messages = req.Messages
 	pc.Turn = decodeSSE(respBody)
 	if pc.Turn.Model == "" {
@@ -81,13 +81,38 @@ func ParseCapture(raw []byte) (*model.ParsedCapture, error) {
 // anthropicRequest is the subset of the /v1/messages request body the parser
 // reads. metadata is deliberately absent — see ParseCapture. system is a
 // RawMessage because the API accepts either a plain string or a block list, and
-// the fingerprint hashes the bytes either way. output_config marks a
-// structured-output probe (title-gen and friends).
+// the fingerprint hashes the bytes either way. output_config carries the probe
+// signal, but only via its `format` (json_schema) child — see hasStructuredFormat:
+// the Opus 4.x API also overloads output_config to carry a reasoning-`effort`
+// hint on essentially every normal turn, so its bare presence no longer marks a
+// probe (BACI-325).
 type anthropicRequest struct {
 	Model        string                   `json:"model"`
 	System       json.RawMessage          `json:"system"`
 	Messages     []model.AnthropicMessage `json:"messages"`
 	OutputConfig json.RawMessage          `json:"output_config"`
+}
+
+// hasStructuredFormat reports whether output_config carries a structured-output
+// `format` (json_schema) child — the signal that the capture is a structured-output
+// probe (title-gen and friends) rather than a normal conversation turn. Keying off
+// `format` rather than the bare presence of output_config is the BACI-325 fix: the
+// Opus 4.x API overloads output_config to also carry a reasoning-`effort` hint
+// (`{"effort":"xhigh"}`) on essentially every normal turn, so the bare-presence
+// heuristic classified every real turn as a probe → auxiliary → zero primary turns.
+// An `effort`-only config, an absent/null output_config, or a body that won't decode
+// all yield false (primary-eligible); only a present, non-null `format` yields true.
+func hasStructuredFormat(oc json.RawMessage) bool {
+	if len(oc) == 0 {
+		return false
+	}
+	var cfg struct {
+		Format json.RawMessage `json:"format"`
+	}
+	if err := json.Unmarshal(oc, &cfg); err != nil {
+		return false
+	}
+	return len(cfg.Format) > 0 && !bytes.Equal(bytes.TrimSpace(cfg.Format), []byte("null"))
 }
 
 // splitCapture partitions the raw .http into (request headers, request body,

@@ -351,6 +351,112 @@ func (s *Store) ReparseDispatch(dispatchID int64) (ReparseResult, error) {
 	return res, nil
 }
 
+// RebuildDispatch is ReparseDispatch's destructive sibling (BACI-325): it DELETEs
+// the dispatch's existing proxy_messages rows and clears its captures'
+// parse_failed_at markers, then replays every Anthropic SSE capture through the
+// (corrected) parser+classifier from scratch. It is the recovery path for a
+// dispatch whose stored rows were misclassified by a since-fixed parser bug — the
+// BACI-325 case where every Opus 4.x turn was filed auxiliary, so the dispatch has
+// rows but zero primaries (invisible to both the fully-unparsed backfill sweep and
+// --retry-failed, neither of which touches a dispatch that already has rows). Unlike
+// ReparseDispatch it does NOT skip already-parsed captures — it just deleted them, so
+// every eligible capture is replayed.
+//
+// The replay reuses the same anthropic.ParseAndClassify + AddProxyMessage core as
+// ReparseDispatch, re-reading LatestThreadState per capture so the delta chain
+// re-threads correctly against the freshly-inserted primary rows; the captures are
+// walked started_at ASC, id ASC so the new ids stay monotonic in capture order. A
+// capture whose file is missing/unreadable or whose bytes won't parse is stamped
+// parse_failed_at and counted in CapturesFailed, exactly as the backfill does.
+//
+// It is NOT transactional: the delete and the replay run through s.DB (AddProxyMessage
+// / LatestThreadState are s.DB-bound and have no tx-aware variants), so a concurrent
+// JobTranscript read in the brief window between the delete and the first re-insert
+// would 404 transiently. That window is acceptable for a manual, off-hot-path
+// recovery verb (`bacio proxy reparse --dispatch <id> --rebuild`) invoked on a
+// dispatch the user has chosen to re-classify; the global --rebuild sweep stays
+// unimplemented. DispatchesScanned is 1 when the dispatch had at least one Anthropic
+// SSE capture, else 0 (a clean no-op).
+func (s *Store) RebuildDispatch(dispatchID int64) (ReparseResult, error) {
+	caps, err := s.dispatchAnthropicCaptures(dispatchID)
+	if err != nil {
+		return ReparseResult{}, err
+	}
+	if len(caps) == 0 {
+		return ReparseResult{}, nil // no captures → nothing to rebuild.
+	}
+
+	// Destructive reset: drop the (misclassified) rows and re-arm any captures the
+	// stale parser gave up on, so the replay below starts from a clean slate.
+	if _, err := s.DB.Exec(`DELETE FROM proxy_messages WHERE dispatch_id = ?`, dispatchID); err != nil {
+		return ReparseResult{}, err
+	}
+	if _, err := s.ClearProxyParseFailed(ClearParseFailedOpts{Dispatch: &dispatchID}); err != nil {
+		return ReparseResult{}, err
+	}
+
+	var res ReparseResult
+	res.DispatchesScanned = 1
+	for _, pr := range caps {
+		rendered, err := os.ReadFile(pr.RawLogPath)
+		if err != nil {
+			// No raw file (empty path → ReadFile errors) or it's gone from disk:
+			// this capture can never be reparsed, so mark it terminal.
+			if err := s.MarkProxyRequestParseFailed(pr.ID); err != nil {
+				return res, err
+			}
+			res.CapturesFailed++
+			continue
+		}
+		// Thread the delta chain through the most-recent primary row, re-read per
+		// capture so each inserted primary row carries forward to the next
+		// capture's classification — exactly as ReparseDispatch / the live recorder.
+		prev, err := s.LatestThreadState(&dispatchID)
+		if err != nil {
+			return res, err
+		}
+		pc, isPrimary, delta, perr := anthropic.ParseAndClassify(rendered, prev)
+		if perr != nil {
+			if err := s.MarkProxyRequestParseFailed(pr.ID); err != nil {
+				return res, err
+			}
+			res.CapturesFailed++
+			continue
+		}
+		dispID := dispatchID
+		if _, err := s.AddProxyMessage(AddProxyMessageIn{
+			ProxyRequestID: pr.ID,
+			DispatchID:     &dispID,
+			SessionID:      pr.SessionID,
+			ClaudeAgentID:  pr.ClaudeAgentID,
+			Capture:        pc,
+			Delta:          delta,
+			IsPrimary:      isPrimary,
+			StartedAt:      pr.StartedAt,
+		}); err != nil {
+			return res, err
+		}
+		res.CapturesReparsed++
+	}
+	return res, nil
+}
+
+// CountDispatchAnthropicCaptures reports how many Anthropic SSE captures a rebuild
+// of one dispatch would attempt — ALL of the dispatch's is_anthropic=1 AND
+// is_stream=1 captures, the upper bound a delete-and-replay rebuild touches (unlike
+// CountUnparsedDispatchCaptures it counts already-parsed rows too, because the
+// rebuild deletes and replays them). It backs the `--rebuild --dispatch <id>` dry-run
+// projection without mutating anything.
+func (s *Store) CountDispatchAnthropicCaptures(dispatchID int64) (int, error) {
+	var n int
+	err := s.DB.QueryRow(`
+		SELECT COUNT(*)
+		FROM proxy_requests
+		WHERE dispatch_id = ? AND is_anthropic = 1 AND is_stream = 1`,
+		dispatchID).Scan(&n)
+	return n, err
+}
+
 // dispatchAnthropicCaptures returns a dispatch's is_anthropic+is_stream capture
 // rows in chronological order (started_at ASC, id ASC) — the order the backfill
 // must replay them in so proxy_messages.id stays monotonic in capture order.

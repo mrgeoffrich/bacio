@@ -43,8 +43,10 @@ func newProxyCmd() *cobra.Command {
 // a transient parse error, a window where parsing was off). With no flags it
 // sweeps every eligible dispatch; `--dispatch <id>` scopes to one job's captures.
 // The first MUTATING proxy verb, so it follows the six agent-CLI rules: --json in,
-// a `proxy.reparse` schema entry, --dry-run. The destructive partial-gap rebuild
-// (`--rebuild`) is reserved on the surface but not implemented in v1.
+// a `proxy.reparse` schema entry, --dry-run. The destructive per-dispatch rebuild
+// (`--rebuild --dispatch <id>`, BACI-325) deletes one dispatch's proxy_messages rows
+// and replays its captures through the corrected parser; a global `--rebuild`
+// (without `--dispatch`) is still refused.
 func newProxyReparseCmd() *cobra.Command {
 	var (
 		dispatch    int64
@@ -71,8 +73,13 @@ retried.
   previously gave up on backfill once the parser bug is fixed. Without it those
   captures stay skipped forever ("already given up on stays given up on").
 
-The --rebuild flag (the destructive partial-gap rebuild: delete-from-gap-onward +
-replay) is reserved but not implemented in v1.
+  --rebuild (BACI-325) is the destructive per-dispatch recovery: it deletes the
+  dispatch's existing proxy_messages rows and replays ALL its captures through the
+  current parser, re-classifying every turn. Use it to recover a dispatch whose rows
+  were misclassified by a since-fixed parser bug (e.g. the BACI-325 case where every
+  Opus 4.x turn was filed auxiliary, so the transcript read zero turns). It REQUIRES
+  --dispatch <id>; a global --rebuild (without --dispatch) is refused — an unbounded
+  destructive write over the shared store stays out of scope.
 
   --dry-run reports how many dispatches / captures a real run would reparse,
   touching nothing.`,
@@ -124,7 +131,7 @@ replay) is reserved but not implemented in v1.
 	}
 	cmd.Flags().Int64Var(&dispatch, "dispatch", 0, "scope the backfill to one dispatch's captures (default: sweep all eligible)")
 	cmd.Flags().BoolVar(&retryFailed, "retry-failed", false, "clear parse_failed_at on still-unparsed captures first, so previously-failed captures backfill once the parser is fixed (BACI-323)")
-	cmd.Flags().BoolVar(&rebuild, "rebuild", false, "destructive partial-gap rebuild (reserved; not implemented in v1)")
+	cmd.Flags().BoolVar(&rebuild, "rebuild", false, "destructively rebuild one dispatch: delete its proxy_messages rows + replay all captures through the current parser (BACI-325); requires --dispatch, a global rebuild is refused")
 	addInputFlag(cmd, &rawInput)
 	return cmd
 }

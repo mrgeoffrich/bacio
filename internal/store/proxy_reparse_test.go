@@ -412,4 +412,135 @@ func TestReparseUnparsedDispatches_EligibilityAndQuietWindow(t *testing.T) {
 	}
 }
 
+// staleParse simulates the BACI-325 broken-parser state: it parses the capture but
+// inserts the proxy_messages row with is_primary forced to FALSE (the bug filed every
+// real turn auxiliary), so the dispatch has rows but zero primaries — invisible to
+// the fully-unparsed backfill sweep and --retry-failed alike. RebuildDispatch is the
+// only path that recovers it.
+func staleParse(t *testing.T, s *Store, pr *model.ProxyRequest, dispatchID int64) {
+	t.Helper()
+	raw, err := os.ReadFile(pr.RawLogPath)
+	if err != nil {
+		t.Fatalf("read capture for stale parse: %v", err)
+	}
+	pc, err := anthropic.ParseCapture(raw)
+	if err != nil {
+		t.Fatalf("stale parse: %v", err)
+	}
+	d := dispatchID
+	if _, err := s.AddProxyMessage(AddProxyMessageIn{
+		ProxyRequestID: pr.ID, DispatchID: &d,
+		Capture: pc, Delta: nil, IsPrimary: false, StartedAt: pr.StartedAt,
+	}); err != nil {
+		t.Fatalf("stale add message: %v", err)
+	}
+}
+
+// TestRebuildDispatch_ReclassifiesMisclassified proves the BACI-325 history-recovery
+// path: a dispatch whose stored rows were all filed auxiliary by the broken parser
+// (zero primaries → empty transcript, blank model, zeroed usage) is recovered by
+// RebuildDispatch — it deletes the misclassified rows and replays the captures through
+// the corrected classifier, restoring the ordered primary thread, the model, and the
+// summed usage. It also asserts capture ORDER is preserved (the first primary message's
+// text) and that a second rebuild is idempotent (same row count).
+func TestRebuildDispatch_ReclassifiesMisclassified(t *testing.T) {
+	s := newTestStore(t)
+	dir := t.TempDir()
+	dispatchID := int64(1001)
+	base := time.Now().Add(-1 * time.Hour).UTC().Truncate(time.Second)
+
+	// Two captures in one primary thread: turn 1 (1 message), turn 2 (3 messages).
+	pr1 := seedCapture(t, s, dir, dispatchID, base, renderCapture("claude-opus-4-8", "sys", "first answer", 1, 100, 20))
+	pr2 := seedCapture(t, s, dir, dispatchID, base.Add(time.Minute), renderCapture("claude-opus-4-8", "sys", "second answer", 3, 160, 15))
+
+	// Stale-parse both: rows land but all is_primary=0 (the broken-parser state).
+	staleParse(t, s, pr1, dispatchID)
+	staleParse(t, s, pr2, dispatchID)
+
+	// Broken state: the transcript exists (rows present) but has zero primary
+	// messages, a blank model, and zeroed summed usage.
+	broken, err := s.JobTranscript(dispatchID)
+	if err != nil {
+		t.Fatalf("broken JobTranscript: %v", err)
+	}
+	if len(broken.Messages) != 0 {
+		t.Fatalf("broken transcript has %d primary messages, want 0 (all misclassified auxiliary)", len(broken.Messages))
+	}
+	if broken.Model != "" || broken.Usage.InputTokens != 0 || broken.Usage.OutputTokens != 0 {
+		t.Fatalf("broken transcript model=%q usage=%+v, want blank/zero", broken.Model, broken.Usage)
+	}
+	if len(broken.Auxiliary) != 2 {
+		t.Fatalf("broken transcript auxiliary turns = %d, want 2", len(broken.Auxiliary))
+	}
+
+	// Rebuild: delete the misclassified rows + replay through the corrected parser.
+	res, err := s.RebuildDispatch(dispatchID)
+	if err != nil {
+		t.Fatalf("RebuildDispatch: %v", err)
+	}
+	if res.DispatchesScanned != 1 || res.CapturesReparsed != 2 || res.CapturesFailed != 0 {
+		t.Fatalf("result = %+v, want 1 scanned / 2 reparsed / 0 failed", res)
+	}
+
+	got, err := s.JobTranscript(dispatchID)
+	if err != nil {
+		t.Fatalf("rebuilt JobTranscript: %v", err)
+	}
+	// Recovered ordered thread: user → assistant → user(tool/echo-stripped) → assistant.
+	wantRoles := []string{"user", "assistant", "user", "assistant"}
+	if len(got.Messages) != len(wantRoles) {
+		t.Fatalf("rebuilt %d primary messages, want %d: %+v", len(got.Messages), len(wantRoles), got.Messages)
+	}
+	for i, want := range wantRoles {
+		if got.Messages[i].Role != want {
+			t.Errorf("message %d role = %q, want %q", i, got.Messages[i].Role, want)
+		}
+	}
+	if got.Model != "claude-opus-4-8" {
+		t.Errorf("rebuilt model = %q, want claude-opus-4-8 (recovered from the primary thread)", got.Model)
+	}
+	// Usage sums both recovered primary turns: 100+160 in, 20+15 out.
+	if got.Usage.InputTokens != 260 || got.Usage.OutputTokens != 35 {
+		t.Errorf("rebuilt summed usage = %+v, want input 260 output 35", got.Usage)
+	}
+	if len(got.Auxiliary) != 0 {
+		t.Errorf("rebuilt transcript auxiliary turns = %d, want 0 (both reclassified primary)", len(got.Auxiliary))
+	}
+	// Capture order preserved: the first primary user message carries turn 1's body.
+	first := got.Messages[0]
+	if len(first.Content) == 0 || first.Content[0].Text != "msg 0" {
+		t.Errorf("first primary message = %+v, want the opening user turn (text 'msg 0')", first)
+	}
+
+	// Idempotent: a second rebuild yields the same recovered row set.
+	res2, err := s.RebuildDispatch(dispatchID)
+	if err != nil {
+		t.Fatalf("second RebuildDispatch: %v", err)
+	}
+	if res2.CapturesReparsed != 2 || res2.CapturesFailed != 0 {
+		t.Errorf("second rebuild result = %+v, want 2 reparsed / 0 failed (deterministic)", res2)
+	}
+	got2, err := s.JobTranscript(dispatchID)
+	if err != nil {
+		t.Fatalf("second rebuilt JobTranscript: %v", err)
+	}
+	if len(got2.Messages) != len(got.Messages) || got2.Usage != got.Usage {
+		t.Errorf("second rebuild diverged: messages %d/%d, usage %+v/%+v",
+			len(got2.Messages), len(got.Messages), got2.Usage, got.Usage)
+	}
+}
+
+// TestRebuildDispatch_NoCapturesIsCleanNoOp guards the empty case: a dispatch with no
+// Anthropic SSE captures rebuilds to a clean zero result, touching nothing.
+func TestRebuildDispatch_NoCapturesIsCleanNoOp(t *testing.T) {
+	s := newTestStore(t)
+	res, err := s.RebuildDispatch(int64(424242))
+	if err != nil {
+		t.Fatalf("RebuildDispatch(no captures): %v", err)
+	}
+	if res.Total() != 0 || res.DispatchesScanned != 0 {
+		t.Errorf("result = %+v, want a clean zero no-op", res)
+	}
+}
+
 func ptrInt64(n int64) *int64 { return &n }

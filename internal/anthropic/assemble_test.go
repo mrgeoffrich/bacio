@@ -124,6 +124,55 @@ func TestClassify_AuxiliaryProbe(t *testing.T) {
 	}
 }
 
+// TestClassify_EffortOnlyIsPrimary locks the BACI-325 fix at the classifier
+// boundary, independent of the byte-level parse: a capture whose HasOutputConfig
+// is false (an effort-only output_config, which hasStructuredFormat now derives to
+// false) extends the primary thread, while an otherwise-identical capture with
+// HasOutputConfig=true (a structured-output probe) is held out as auxiliary. This
+// is the difference between zero primary turns and a populated transcript.
+func TestClassify_EffortOnlyIsPrimary(t *testing.T) {
+	user := []model.AnthropicMessage{{Role: "user", Content: []model.AnthropicBlock{{Type: "text", Text: "hi"}}}}
+
+	// An effort-only turn — HasOutputConfig=false — establishes the primary thread.
+	effortOnly := &model.ParsedCapture{
+		Model:           "claude-opus-4-8",
+		SystemFP:        "fp-1",
+		MessageCount:    1,
+		HasOutputConfig: false,
+		Messages:        user,
+	}
+	prim, delta, state := Classify(effortOnly, ThreadState{})
+	if !prim {
+		t.Fatalf("effort-only capture should be primary (HasOutputConfig=false establishes the thread)")
+	}
+	if len(delta) != 1 || delta[0].Role != "user" {
+		t.Errorf("delta = %+v, want the 1 opening user message", delta)
+	}
+	if state.MessageCount != 1 {
+		t.Errorf("state.MessageCount = %d, want 1 (thread established)", state.MessageCount)
+	}
+
+	// A structured-output probe — HasOutputConfig=true — is auxiliary even with the
+	// same fingerprint/model, and leaves the established thread state untouched.
+	probe := &model.ParsedCapture{
+		Model:           "claude-opus-4-8",
+		SystemFP:        "fp-1",
+		MessageCount:    2,
+		HasOutputConfig: true,
+		Messages:        user,
+	}
+	primProbe, deltaProbe, stateAfter := Classify(probe, state)
+	if primProbe {
+		t.Errorf("structured-output probe should be auxiliary (HasOutputConfig=true)")
+	}
+	if deltaProbe != nil {
+		t.Errorf("auxiliary probe delta = %+v, want nil", deltaProbe)
+	}
+	if stateAfter.MessageCount != state.MessageCount {
+		t.Errorf("probe mutated thread state: MessageCount = %d, want unchanged %d", stateAfter.MessageCount, state.MessageCount)
+	}
+}
+
 func hasToolUse(m model.AnthropicMessage, id string) bool {
 	for _, b := range m.Content {
 		if b.Type == "tool_use" && b.ID == id {

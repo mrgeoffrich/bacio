@@ -379,26 +379,15 @@ func (d deps) handleProxyRaw(w http.ResponseWriter, r *http.Request) {
 // every eligible dispatch (the same work the controller does once a minute); with
 // `dispatch` it scopes to one job. `retry_failed` (BACI-323) clears parse_failed_at
 // on the still-unparsed captures in scope first, so dispatches the parser gave up
-// on backfill once the parser is fixed. `rebuild` (the destructive partial-gap
-// rebuild) is reserved but not implemented in v1 — passing it 400s. Dry-run projects
-// the counts without writing; a non-empty wet run records a `proxy.reparse` audit row.
+// on backfill once the parser is fixed. `rebuild` (BACI-325) is the destructive
+// per-dispatch rebuild — delete the dispatch's proxy_messages rows and replay all
+// its captures through the corrected parser — and REQUIRES `dispatch`; a global
+// rebuild (rebuild without dispatch) 400s as not_implemented. Dry-run projects the
+// counts without writing; a non-empty wet run records a `proxy.reparse` audit row.
 // Behind the bearer-token auth like /proxy/stats (a UI/CLI mutation, not agent
 // passthrough).
 func (d deps) handleProxyReparse(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-
-	if v := q.Get("rebuild"); v != "" {
-		b, err := strconv.ParseBool(v)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_input", "rebuild must be a boolean", map[string]any{"field": "rebuild"})
-			return
-		}
-		if b {
-			writeError(w, http.StatusBadRequest, "not_implemented",
-				"rebuild (destructive partial-gap rebuild) is not implemented in v1", map[string]any{"field": "rebuild"})
-			return
-		}
-	}
 
 	var dispatchID *int64
 	if v := q.Get("dispatch"); v != "" {
@@ -408,6 +397,23 @@ func (d deps) handleProxyReparse(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		dispatchID = &n
+	}
+
+	var rebuild bool
+	if v := q.Get("rebuild"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_input", "rebuild must be a boolean", map[string]any{"field": "rebuild"})
+			return
+		}
+		rebuild = b
+	}
+	// BACI-325: a per-dispatch rebuild ships; a global rebuild (no dispatch) is the
+	// unbounded destructive write that stays out of scope.
+	if rebuild && dispatchID == nil {
+		writeError(w, http.StatusBadRequest, "not_implemented",
+			"a global rebuild (without dispatch) is not implemented; pass dispatch to rebuild one dispatch", map[string]any{"field": "rebuild"})
+		return
 	}
 
 	var retryFailed bool
@@ -426,7 +432,21 @@ func (d deps) handleProxyReparse(w http.ResponseWriter, r *http.Request) {
 			res store.ReparseResult
 			err error
 		)
-		if dispatchID != nil {
+		switch {
+		case rebuild:
+			// BACI-325: a rebuild deletes and replays ALL the dispatch's Anthropic
+			// captures, so its projection counts all of them (dispatch is required
+			// here — the global rebuild was rejected above).
+			n, cerr := d.store.CountDispatchAnthropicCaptures(*dispatchID)
+			if cerr != nil {
+				err = cerr
+			} else {
+				res.CapturesReparsed = n
+				if n > 0 {
+					res.DispatchesScanned = 1
+				}
+			}
+		case dispatchID != nil:
 			// BACI-323: --retry-failed drops the parse_failed_at predicate so the
 			// count mirrors the wet run (which clears the dispatch's markers first).
 			n, cerr := d.store.CountUnparsedDispatchCaptures(*dispatchID, retryFailed)
@@ -438,7 +458,7 @@ func (d deps) handleProxyReparse(w http.ResponseWriter, r *http.Request) {
 					res.DispatchesScanned = 1
 				}
 			}
-		} else {
+		default:
 			res, err = d.store.ProjectReparseUnparsedDispatches(store.ReparseOpts{RetryFailed: retryFailed})
 		}
 		if err != nil {
@@ -454,7 +474,13 @@ func (d deps) handleProxyReparse(w http.ResponseWriter, r *http.Request) {
 		res store.ReparseResult
 		err error
 	)
-	if dispatchID != nil {
+	switch {
+	case rebuild:
+		// BACI-325: per-dispatch rebuild — RebuildDispatch deletes the dispatch's
+		// rows and clears its parse_failed_at markers itself, so the BACI-323
+		// retry-failed clear is redundant here and skipped (dispatch is required).
+		res, err = d.store.RebuildDispatch(*dispatchID)
+	case dispatchID != nil:
 		// BACI-323: clear the scoped dispatch's markers first when retrying
 		// failures — ReparseDispatch skips a stamped capture, so the clear is one
 		// layer up (mirrors the local client).
@@ -466,7 +492,7 @@ func (d deps) handleProxyReparse(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		res, err = d.store.ReparseDispatch(*dispatchID)
-	} else {
+	default:
 		res, err = d.store.ReparseUnparsedDispatches(store.ReparseOpts{RetryFailed: retryFailed})
 	}
 	if err != nil {
