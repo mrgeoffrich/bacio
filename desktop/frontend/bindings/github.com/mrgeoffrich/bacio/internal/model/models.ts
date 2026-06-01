@@ -233,8 +233,8 @@ export class AnthropicUsage {
 
 /**
  * DispatchMode is the slug of the prompt template a dispatch was queued
- * against — for the built-in templates that ship with bacio it's one of
- * "plan", "design", "implement", "review", "ship", or "fix_review"; for
+ * against — for the built-in templates that ship with bacio it's one of the
+ * BuiltinTemplate* slugs declared just below (the authoritative set); for
  * a user-created template it's whatever the user named it. "" = untyped (the
  * pre-Mode default; delivery treats it as unspecified). The mode is the
  * per-dispatch snapshot of which template was used; it deliberately
