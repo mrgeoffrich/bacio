@@ -9,7 +9,7 @@ import ShippedPopover from './ShippedPopover.jsx';
 import SessionMessageButton from './SessionMessageButton.jsx';
 import { documentPath } from '../lib/routes';
 import prLabel from '../lib/prLabel';
-import { stageLabel, stageGlyph, isShipStage } from '../lib/pipelineProcesses';
+import { stageLabel, stageGlyph, isShipStage, isShelveStage } from '../lib/pipelineProcesses';
 import { blockedByMode } from '../lib/blockedByBadge';
 import * as api from '../api';
 
@@ -771,18 +771,24 @@ function StageCard({
   useEffect(() => {
     if (running && confirmingReset) setConfirmingReset(false);
   }, [running, confirmingReset]);
-  const nonShip = jobs.filter(j => !isShipStage(j.mode));
+  // agentJobs are the real agent-dispatch stages — every job that isn't a
+  // terminal sentinel (Ship hand-off / Shelve demote, BACI-332). DoneBox /
+  // AbortedBox and the all-complete gate count only these, never a sentinel.
+  const agentJobs = jobs.filter(j => !isShipStage(j.mode) && !isShelveStage(j.mode));
   const nextPending = jobs.find(j => j.status === 'pending');
-  // allDone = every non-ship job is complete (cancelled deliberately does
+  // hasShelveSentinel: the chain ends in a Shelve demote, so it never
+  // offers a Ship hand-off — reaching the sentinel returns it to Backlog.
+  const hasShelveSentinel = jobs.some(j => isShelveStage(j.mode));
+  // allDone = every agent job is complete (cancelled deliberately does
   // NOT count — a Stopped job is Aborted, not "ready to hand off"; Ship
   // stays disabled on it).
-  const allDone = nonShip.length > 0 && !running &&
-    nonShip.every(j => j.status === 'complete');
+  const allDone = agentJobs.length > 0 && !running &&
+    agentJobs.every(j => j.status === 'complete');
   // aborted = the chain is wedged on a cancelled job — nothing running, no
-  // pending step left to auto-run, and at least one non-ship job cancelled.
+  // pending step left to auto-run, and at least one agent job cancelled.
   // The user re-runs the aborted step (or Edits the process) to proceed.
   const aborted = !running && !nextPending &&
-    nonShip.some(j => j.status === 'cancelled');
+    agentJobs.some(j => j.status === 'cancelled');
   const engineAuto = card.engineMode === 'auto';
   const question = (card.openQuestions || [])[0] || null;
   // BACI-296 / BACI-300: a worker that died on an Anthropic API error
@@ -833,10 +839,10 @@ function StageCard({
             {question ? (
               <QuestionPanel question={question} onOpenQuestion={onOpenQuestion} />
             ) : allDone ? (
-              <DoneBox jobs={nonShip} />
+              <DoneBox jobs={agentJobs} />
             ) : aborted ? (
               <AbortedBox
-                jobs={nonShip}
+                jobs={agentJobs}
                 onRerunJob={(seq) => onRerunJob?.(card.key, seq)}
               />
             ) : running ? (
@@ -951,8 +957,10 @@ function StageCard({
               </span>
             )}
             {/* BACI-314: render Ship ONLY when shippable — an un-shippable
-                card shows no Ship control at all (was present-but-disabled). */}
-            {allDone && (
+                card shows no Ship control at all (was present-but-disabled).
+                BACI-332: a Shelve-terminal chain never offers Ship — reaching
+                the sentinel returns the card to Backlog, not Shipping. */}
+            {allDone && !hasShelveSentinel && (
               <button
                 type="button"
                 className="mk-pl-btn is-sm is-primary"
@@ -970,22 +978,30 @@ function StageCard({
 
 // JobChain — the stepper across the top of the processing area. Each job
 // renders as a step with a status-driven dot; the Ship sentinel renders
-// as the hand-off step.
+// as the hand-off step, and the Shelve sentinel (BACI-332) as a distinct
+// "returns to Backlog" step.
 function JobChain({ jobs }) {
   return (
     <div className="mk-pl-chain">
       {jobs.map((j, i) => {
         const ship = isShipStage(j.mode);
-        const cls = ship ? 'handoff' : j.status;
+        const shelve = isShelveStage(j.mode);
+        // Both sentinels render as the handoff step shape; .is-shelve tints
+        // it as a "park" (return to Backlog) rather than Ship's "promote".
+        const cls = ship ? 'handoff' : shelve ? 'handoff is-shelve' : j.status;
         let dot = `${i + 1}`;
         if (ship) dot = '⏏';
+        else if (shelve) dot = '⇤';
         else if (j.status === 'complete') dot = '✓';
         else if (j.status === 'running') dot = '●';
         else if (j.status === 'cancelled') dot = '✕';
         return (
           <React.Fragment key={j.sequence}>
             {i > 0 && <span className="mk-pl-connector" />}
-            <span className={`mk-pl-step is-${cls}`}>
+            <span
+              className={`mk-pl-step is-${cls}`}
+              title={shelve ? 'Shelve · returns to Backlog' : undefined}
+            >
               <span className="mk-pl-dot">{dot}</span>
               <span className="mk-pl-step-lbl">{stageLabel(j.mode)}</span>
             </span>
@@ -1098,9 +1114,16 @@ function QuestionPanel({ question, onOpenQuestion }) {
   );
 }
 
-// SEG_ORDER is the fixed canonical order the four stage toggles render and
-// assemble in, regardless of click order (Design → Plan → Implement → Ship).
-const SEG_ORDER = ['design', 'plan', 'implement', 'ship'];
+// SEG_ORDER is the fixed canonical order the stage toggles render and
+// assemble in, regardless of click order (Design → Plan → Implement →
+// Ship/Shelve). Ship and Shelve are the two terminal sentinels — both
+// final-only and mutually exclusive (TERMINAL_SEGS), so at most one lights.
+const SEG_ORDER = ['design', 'plan', 'implement', 'ship', 'shelve'];
+
+// TERMINAL_SEGS are the mutually-exclusive terminal sentinels in the
+// segmented bar: Ship hands the card off to Shipping; Shelve (BACI-332)
+// returns it to Backlog. Turning one on clears the other.
+const TERMINAL_SEGS = ['ship', 'shelve'];
 
 // STANDALONE_OPTIONS are the no-chain single-agent rows offered below the
 // segmented stage toggles — each is a distinct agent that runs one pass
@@ -1126,9 +1149,10 @@ function ProcessMenu({ dimmedHasProcess, jobs, onPick, onCancel }) {
   // no extra clicks (BACI-331).
   const existingStandalone = () =>
     STANDALONE_OPTIONS.find(slug => (jobs || []).some(j => j.mode === slug)) || null;
+  const emptyStages = () => ({ design: false, plan: false, implement: false, ship: false, shelve: false });
   const [stages, setStages] = useState(() => {
     if (dimmedHasProcess && existingStandalone()) {
-      return { design: false, plan: false, implement: false, ship: false };
+      return emptyStages();
     }
     if (dimmedHasProcess) {
       const modes = new Set((jobs || []).map(j => j.mode));
@@ -1137,9 +1161,10 @@ function ProcessMenu({ dimmedHasProcess, jobs, onPick, onCancel }) {
         plan: modes.has('plan'),
         implement: modes.has('implement'),
         ship: modes.has('ship'),
+        shelve: modes.has('shelve'),
       };
     }
-    return { design: false, plan: true, implement: true, ship: true };
+    return { design: false, plan: true, implement: true, ship: true, shelve: false };
   });
   // `standalone` is the selected standalone slug (or null when the
   // segmented chain is active).
@@ -1148,18 +1173,27 @@ function ProcessMenu({ dimmedHasProcess, jobs, onPick, onCancel }) {
   );
 
   // toggleStage flips one segment and clears any standalone selection
-  // (the two are mutually exclusive).
+  // (the two are mutually exclusive). Turning a terminal sentinel
+  // (Ship / Shelve) on clears the other — at most one terminal at a time.
   const toggleStage = (mode) => {
     setStandalone(null);
-    setStages(s => ({ ...s, [mode]: !s[mode] }));
+    setStages(s => {
+      const next = { ...s, [mode]: !s[mode] };
+      if (!s[mode] && TERMINAL_SEGS.includes(mode)) {
+        for (const t of TERMINAL_SEGS) {
+          if (t !== mode) next[t] = false;
+        }
+      }
+      return next;
+    });
   };
   // selectStandalone toggles a standalone row; turning one on clears all
-  // four segments and supersedes any other standalone, turning the active
+  // segments and supersedes any other standalone, turning the active
   // one off leaves the segbar empty.
   const selectStandalone = (slug) => {
     setStandalone(cur => {
       const next = cur === slug ? null : slug;
-      if (next) setStages({ design: false, plan: false, implement: false, ship: false });
+      if (next) setStages(emptyStages());
       return next;
     });
   };
