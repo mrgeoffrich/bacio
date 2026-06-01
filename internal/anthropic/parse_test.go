@@ -31,7 +31,11 @@ func TestParseCapture_SSETurn(t *testing.T) {
 		t.Errorf("model = %q, want claude-opus-4-8", pc.Model)
 	}
 	if !pc.HasOutputConfig {
-		t.Errorf("HasOutputConfig = false, want true (the title-gen call carries output_config)")
+		// Fixture 01 is the real title-gen probe: its output_config carries a
+		// {"effort":"high","format":{"type":"json_schema",...}}. This assertion now
+		// proves the BACI-325 format-keyed detection (the `format` child marks the
+		// probe), not the bare presence of output_config.
+		t.Errorf("HasOutputConfig = false, want true (the title-gen call carries output_config.format)")
 	}
 	if pc.MessageCount != 1 {
 		t.Errorf("MessageCount = %d, want 1", pc.MessageCount)
@@ -53,6 +57,41 @@ func TestParseCapture_SSETurn(t *testing.T) {
 	}
 	if pc.Turn.Usage.OutputTokens != 18 {
 		t.Errorf("output_tokens = %d, want 18 (message_delta supersedes message_start's 7)", pc.Turn.Usage.OutputTokens)
+	}
+	if pc.Turn.StopReason != "end_turn" {
+		t.Errorf("stop_reason = %q, want end_turn", pc.Turn.StopReason)
+	}
+}
+
+// TestParseCapture_OutputConfigEffortOnly is the BACI-325 core regression: a
+// normal Opus 4.x turn whose output_config carries only a reasoning-effort hint
+// ({"effort":"xhigh"}) and NO structured-output `format`. The old bare-presence
+// heuristic flagged it as a probe → auxiliary → zero primary turns. The
+// format-keyed detection must classify it as NOT a probe (HasOutputConfig false)
+// so it stays primary-eligible, and the assistant turn must still reconstruct.
+func TestParseCapture_OutputConfigEffortOnly(t *testing.T) {
+	pc, err := ParseCapture(readFixture(t, "output-config-effort-only.sse.http"))
+	if err != nil {
+		t.Fatalf("ParseCapture: %v", err)
+	}
+	if pc.HasOutputConfig {
+		t.Errorf("HasOutputConfig = true, want false (effort-only output_config is a normal turn, not a probe)")
+	}
+	if pc.Model != "claude-opus-4-8" {
+		t.Errorf("model = %q, want claude-opus-4-8", pc.Model)
+	}
+	if pc.MessageCount != 1 {
+		t.Errorf("MessageCount = %d, want 1", pc.MessageCount)
+	}
+	// The assistant turn reconstructs from the SSE stream just like any other turn.
+	var text string
+	for _, b := range pc.Turn.Blocks {
+		if b.Type == "text" {
+			text += b.Text
+		}
+	}
+	if want := "It reverses the slice in place."; text != want {
+		t.Errorf("reconstructed text = %q, want %q", text, want)
 	}
 	if pc.Turn.StopReason != "end_turn" {
 		t.Errorf("stop_reason = %q, want end_turn", pc.Turn.StopReason)

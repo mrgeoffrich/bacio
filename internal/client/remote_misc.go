@@ -241,9 +241,10 @@ func (c *remoteClient) SearchProxyMessages(ctx context.Context, f store.ProxyMes
 // ----- Backfill (BACI-321) -----
 
 func (c *remoteClient) ReparseProxyMessages(ctx context.Context, in ReparseProxyOpts, dryRun bool) (store.ReparseResult, error) {
-	if in.Rebuild {
-		// Refuse before the round-trip — the server returns the same error, but
-		// failing fast keeps the contract identical to the local backend.
+	// BACI-325: refuse only a global rebuild (no --dispatch) before the round-trip
+	// — the server returns the same error, but failing fast keeps the contract
+	// identical to the local backend. A per-dispatch rebuild rides through.
+	if in.Rebuild && in.Dispatch == nil {
 		return store.ReparseResult{}, ErrRebuildNotImplemented
 	}
 	q := url.Values{}
@@ -252,6 +253,9 @@ func (c *remoteClient) ReparseProxyMessages(ctx context.Context, in ReparseProxy
 	}
 	if in.Dispatch != nil {
 		q.Set("dispatch", strInt(*in.Dispatch))
+	}
+	if in.Rebuild {
+		q.Set("rebuild", "true")
 	}
 	if in.RetryFailed {
 		q.Set("retry_failed", "true")

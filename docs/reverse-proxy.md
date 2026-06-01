@@ -280,8 +280,9 @@ store read API, the CLI, and the tests share one parser:
 
 - `ParseCapture(raw)` is the inverse of `renderRawCapture` — it splits the
   `==== REQUEST ==== / ==== RESPONSE ====` layout, reads the request JSON
-  (model, system, `messages[]`, `output_config` presence — **never**
-  `metadata.user_id`, which carries `device_id`/`account_uuid` PII), and
+  (model, system, `messages[]`, whether `output_config` carries a
+  structured-output `format` — **never** `metadata.user_id`, which carries
+  `device_id`/`account_uuid` PII), and
   decodes the response SSE into one assistant turn: ordered text /
   thinking / tool_use blocks (the `input_json_delta` fragments stitched),
   merged usage (input/cache off `message_start`, output + thinking off
@@ -312,8 +313,16 @@ store read API, the CLI, and the tests share one parser:
     corpus.
 - `Classify(pc, prev)` decides whether a capture extends the job's
   **primary thread** (same `(model, system-fingerprint)`, growing message
-  count, no `output_config`) or is **auxiliary** (a title-gen /
-  structured-output probe, a different model). It returns the
+  count, no structured-output probe) or is **auxiliary** (a title-gen /
+  structured-output probe, a different model). The probe test keys off a
+  structured-output `format` (json_schema) child of `output_config`, **not**
+  the bare presence of `output_config` (BACI-325): the Opus 4.x API overloads
+  `output_config` to also carry a reasoning-`effort` hint
+  (`{"effort":"xhigh"}`) on essentially every normal turn, so the old
+  bare-presence heuristic filed every real turn auxiliary → zero primary turns,
+  a blank model, and an empty transcript for all current-model traffic. The
+  `format`-keyed test (`hasStructuredFormat` in `parse.go`) treats an
+  `effort`-only config as a normal turn. It returns the
   request-message **delta** — the messages appended since the prior primary
   capture, with the echoed prior-assistant turn dropped (it's already
   represented by that capture's reconstructed turn). Storing the delta, not
@@ -461,13 +470,22 @@ backfill paths can't drift.
 `Classify` computes each capture's delta against `LatestThreadState` (the
 most-recent primary row by `id`), and `JobTranscript` reassembles
 `ORDER BY id`. So a dispatch's captures must be parsed in chronological
-order. **v1 handles fully-unparsed dispatches only** (a dispatch with no
-`proxy_messages` rows at all): replay all captures `started_at ASC` so ids
-stay monotonic and the delta chain is correct, non-destructively (no
-delete). Partial gaps inside an otherwise-parsed dispatch need a
-destructive suffix/full rebuild and stay **out of the automated loop**,
-reserved behind `bacio proxy reparse --rebuild` (refused as
-not-implemented in v1).
+order. The **non-destructive backfill handles fully-unparsed dispatches only**
+(a dispatch with no `proxy_messages` rows at all): replay all captures
+`started_at ASC` so ids stay monotonic and the delta chain is correct, with no
+delete. A dispatch that already has rows — whether a partial gap or a full set
+of *misclassified* rows (the BACI-325 case where every Opus 4.x turn was filed
+auxiliary, so the dispatch has rows but zero primaries) — is invisible to that
+backfill and needs a destructive rebuild: `Store.RebuildDispatch(id)` deletes
+the dispatch's `proxy_messages` rows, clears its `parse_failed_at` markers, and
+replays every capture `started_at ASC` through the corrected parser. It ships
+behind `bacio proxy reparse --rebuild --dispatch <id>` (BACI-325). A **global**
+`--rebuild` (no `--dispatch`) stays **out of the automated loop** and refused —
+an unbounded destructive write over the shared store is out of scope. The
+rebuild is non-transactional (the `s.DB`-bound `AddProxyMessage` /
+`LatestThreadState` have no tx variant), so a concurrent `JobTranscript` read in
+the brief delete→re-insert window may 404 transiently; acceptable for a manual,
+off-hot-path recovery verb.
 
 ### Terminal-failure marker + quiet window
 
@@ -497,10 +515,13 @@ dispatch/capture counts, touch nothing), store-boundary validation. No args
 = sweep all eligible; `--dispatch <id>` scopes to one job; `--retry-failed`
 clears `parse_failed_at` on the still-unparsed captures in scope first (so
 previously-failed captures backfill once the parser bug is fixed — BACI-323);
-`--rebuild` is reserved-but-refused. Remote-capable (`POST /proxy/reparse`) for parity
-with the rest of the proxy group. A non-empty wet run records a
-`proxy.reparse` audit row (`bacio-controller` for the sweep path, the
-caller's actor for the CLI path).
+`--rebuild --dispatch <id>` destructively rebuilds one dispatch (delete its
+`proxy_messages` rows + replay all captures through the current parser — the
+BACI-325 recovery for a dispatch misclassified by a since-fixed parser bug); a
+global `--rebuild` (no `--dispatch`) is refused. Remote-capable
+(`POST /proxy/reparse`) for parity with the rest of the proxy group. A non-empty
+wet run records a `proxy.reparse` audit row (`bacio-controller` for the sweep
+path, the caller's actor for the CLI path).
 
 ## Monitor web screen (BACI-304)
 
@@ -636,8 +657,11 @@ reshape for the web build — with the cross-transport `JobTranscriptRow` alias 
   transcripts had) is its own work.
 - ~~**`bacio proxy reparse` backfill** of raw `.http` the live path missed
   into `proxy_messages`~~ — **shipped in BACI-321** (see the backfill section
-  above). The destructive partial-gap rebuild (`--rebuild`) and late
-  re-correlation of `dispatch_id IS NULL` captures stay out of scope.
+  above). The destructive **per-dispatch** rebuild
+  (`--rebuild --dispatch <id>`) shipped in BACI-325 (recovers a dispatch
+  misclassified by a since-fixed parser bug). A **global** `--rebuild` (no
+  `--dispatch`) and late re-correlation of `dispatch_id IS NULL` captures stay
+  out of scope.
 - **Raw-log-file retention / cleanup** — the index prune is BACI-302; the
   on-disk raw files have no auto-prune yet.
 - **Retiring the `.jsonl` transcript attachments** — shipped in BACI-307:

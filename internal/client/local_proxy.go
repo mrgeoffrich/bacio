@@ -15,24 +15,28 @@ import (
 
 // ReparseProxyOpts is the cross-transport option set for the BACI-321 backfill.
 // Dispatch nil sweeps every eligible dispatch; Dispatch set scopes the run to one
-// job's captures. Rebuild requests the destructive partial-gap rebuild — reserved
-// on the surface but not implemented in v1 (the call errors with
-// ErrRebuildNotImplemented rather than silently doing the non-destructive thing).
-// RetryFailed (BACI-323) clears parse_failed_at on the still-unparsed captures in
-// scope before the reparse, so dispatches the parser previously gave up on (e.g.
-// the pre-fix marker-collision failures) backfill once the parser is fixed. The
-// dry-run path counts the captures it would clear without mutating.
+// job's captures. Rebuild requests the destructive per-dispatch rebuild (BACI-325)
+// — delete the dispatch's proxy_messages rows and replay all its captures through
+// the corrected parser — and REQUIRES Dispatch (the recovery for a dispatch
+// misclassified by a since-fixed parser bug). A global Rebuild with Dispatch nil
+// stays refused with ErrRebuildNotImplemented (an unbounded destructive write over
+// the shared store is out of scope). RetryFailed (BACI-323) clears parse_failed_at
+// on the still-unparsed captures in scope before the reparse, so dispatches the
+// parser previously gave up on (e.g. the pre-fix marker-collision failures) backfill
+// once the parser is fixed. The dry-run path counts the captures it would touch
+// without mutating.
 type ReparseProxyOpts struct {
 	Dispatch    *int64
 	Rebuild     bool
 	RetryFailed bool
 }
 
-// ErrRebuildNotImplemented is returned when a caller passes the destructive
-// partial-gap rebuild flag (`--rebuild` / "rebuild": true). The flag is reserved
-// on the CLI / schema surface so the destructive path can land later without a
-// surface change, but v1 only ships the non-destructive fully-unparsed backfill.
-var ErrRebuildNotImplemented = errors.New("proxy reparse: --rebuild (destructive partial-gap rebuild) is not implemented in v1")
+// ErrRebuildNotImplemented is returned when a caller passes the destructive rebuild
+// flag (`--rebuild` / "rebuild": true) WITHOUT a dispatch — the global rebuild sweep.
+// The per-dispatch rebuild (`--rebuild --dispatch <id>`) ships (BACI-325); an
+// unbounded destructive write across every dispatch in the shared store stays out of
+// scope, mirroring BACI-321's posture toward the automated leader sweep.
+var ErrRebuildNotImplemented = errors.New("proxy reparse: a global --rebuild (without --dispatch) is not implemented; pass --dispatch <id> to rebuild one dispatch")
 
 // ReparseProxyMessages runs the BACI-321 backfill: reparse one dispatch's
 // unparsed captures (Dispatch set) or sweep every eligible dispatch (Dispatch
@@ -44,7 +48,9 @@ var ErrRebuildNotImplemented = errors.New("proxy reparse: --rebuild (destructive
 // audit row with the per-run counts (mirroring archive.sweep's no-noise-on-empty
 // contract).
 func (c *localClient) ReparseProxyMessages(ctx context.Context, in ReparseProxyOpts, dryRun bool) (store.ReparseResult, error) {
-	if in.Rebuild {
+	// BACI-325: a global rebuild (no --dispatch) stays refused; a per-dispatch
+	// rebuild runs the destructive delete-and-replay below.
+	if in.Rebuild && in.Dispatch == nil {
 		return store.ReparseResult{}, ErrRebuildNotImplemented
 	}
 
@@ -56,7 +62,13 @@ func (c *localClient) ReparseProxyMessages(ctx context.Context, in ReparseProxyO
 		res store.ReparseResult
 		err error
 	)
-	if in.Dispatch != nil {
+	switch {
+	case in.Rebuild:
+		// Per-dispatch rebuild (BACI-325): RebuildDispatch deletes the dispatch's
+		// rows and clears its parse_failed_at markers itself, so the BACI-323
+		// RetryFailed clear above is redundant and skipped.
+		res, err = c.store.RebuildDispatch(*in.Dispatch)
+	case in.Dispatch != nil:
 		// BACI-323: for the scoped path, clear the dispatch's terminal-failure
 		// markers first when retrying failures — ReparseDispatch itself skips a
 		// stamped capture (keeping its non-destructive contract), so the clear has
@@ -67,7 +79,7 @@ func (c *localClient) ReparseProxyMessages(ctx context.Context, in ReparseProxyO
 			}
 		}
 		res, err = c.store.ReparseDispatch(*in.Dispatch)
-	} else {
+	default:
 		res, err = c.store.ReparseUnparsedDispatches(store.ReparseOpts{RetryFailed: in.RetryFailed})
 	}
 	if err != nil {
@@ -93,10 +105,21 @@ func (c *localClient) ReparseProxyMessages(ctx context.Context, in ReparseProxyO
 // the preview reports the upper bound of work, which is what a reader wants.
 func (c *localClient) projectReparse(in ReparseProxyOpts) (store.ReparseResult, error) {
 	if in.Dispatch != nil {
-		// BACI-323: with --retry-failed, the wet run clears this dispatch's
-		// terminal-failure markers first; the count drops the parse_failed_at
-		// predicate to mirror that, so the preview reflects the recovery work.
-		n, err := c.store.CountUnparsedDispatchCaptures(*in.Dispatch, in.RetryFailed)
+		// BACI-325: a per-dispatch rebuild deletes and replays ALL the dispatch's
+		// Anthropic captures, so its projection counts all of them — not just the
+		// unparsed ones the non-destructive backfill would touch.
+		var (
+			n   int
+			err error
+		)
+		if in.Rebuild {
+			n, err = c.store.CountDispatchAnthropicCaptures(*in.Dispatch)
+		} else {
+			// BACI-323: with --retry-failed, the wet run clears this dispatch's
+			// terminal-failure markers first; the count drops the parse_failed_at
+			// predicate to mirror that, so the preview reflects the recovery work.
+			n, err = c.store.CountUnparsedDispatchCaptures(*in.Dispatch, in.RetryFailed)
+		}
 		if err != nil {
 			return store.ReparseResult{}, err
 		}
