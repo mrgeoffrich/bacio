@@ -112,6 +112,25 @@ const EnginePauseReasonSubagentCancelled = "subagent_cancelled"
 // the Shipping column (§4 / impact-analysis §0), never as a pipeline job.
 const ShipJobMode = BuiltinTemplateShip
 
+// ShelveJobMode is the sentinel "mode" for the Shelve hand-off stage —
+// the demoting counterpart to ShipJobMode (BACI-332). Unlike Ship it is
+// NOT a builtin template slug (shelve never dispatches an agent): a
+// pipeline job carrying it is a HAND-OFF the engine recognises and uses
+// to move the card back to Backlog (todo), clearing the chain so the
+// demoted card is indistinguishable from one dragged back to Backlog by
+// hand and is freely re-pipeable. Final-stage only, same as Ship.
+const ShelveJobMode = "shelve"
+
+// sentinelLabels are the display labels for the non-dispatch terminal
+// sentinels (ship / shelve), consulted by stageDisplay before the raw
+// mode fallback so audit/display text reads "Scope → Shelve" rather than
+// "scope → shelve". Dispatch stages get their labels from
+// BuiltinTemplateActionLabel.
+var sentinelLabels = map[string]string{
+	ShipJobMode:   "Ship",
+	ShelveJobMode: "Shelve",
+}
+
 // PipelineJob is one persisted stage of a card's process chain
 // (pipeline_jobs row). Mode is a dispatch-template slug (plan,
 // implement, …) or ShipJobMode for the hand-off. DispatchID points at
@@ -133,6 +152,10 @@ type PipelineJob struct {
 // IsShipHandoff reports whether this stage is the Ship hand-off (move to
 // to_be_shipped) rather than an agent dispatch.
 func (j PipelineJob) IsShipHandoff() bool { return j.Mode == ShipJobMode }
+
+// IsShelveHandoff reports whether this stage is the Shelve hand-off (move
+// back to todo / Backlog) rather than an agent dispatch.
+func (j PipelineJob) IsShelveHandoff() bool { return j.Mode == ShelveJobMode }
 
 // Process is a named preset chain selected when a card enters
 // in_pipeline (§5.1). The presets are an in-code enumeration, not stored
@@ -165,6 +188,10 @@ var pipelineProcesses = []Process{
 	// picker as standalone rows, replacing the retired manual-triage
 	// dispatch path.
 	{Slug: "scope", Name: "Scope", Stages: []string{BuiltinTemplateScope}},
+	// scope-shelve (BACI-332): the out-of-the-box chain for a freshly-piped
+	// Pipeline-screen issue — run one Scope pass, then park the card back in
+	// Backlog at the Shelve sentinel for the human to triage the result.
+	{Slug: "scope-shelve", Name: "Scope → Shelve", Stages: []string{BuiltinTemplateScope, ShelveJobMode}},
 	{Slug: "research", Name: "Research", Stages: []string{BuiltinTemplateResearch}},
 }
 
@@ -196,7 +223,7 @@ func ProcessBySlug(slug string) (Process, error) {
 // dispatch dropdown uses (BuiltinTemplateActionLabel returns "" only for
 // _dispatch_preamble).
 func stageModeAllowed(mode string) bool {
-	if mode == ShipJobMode {
+	if mode == ShipJobMode || mode == ShelveJobMode {
 		return true
 	}
 	return BuiltinTemplateActionLabel(mode) != ""
@@ -221,9 +248,12 @@ func normaliseStages(stages []string) []string {
 func stageDisplay(modes []string) (slug, name string) {
 	labels := make([]string, len(modes))
 	for i, m := range modes {
-		if lbl := BuiltinTemplateActionLabel(m); lbl != "" {
-			labels[i] = lbl
-		} else {
+		switch {
+		case sentinelLabels[m] != "":
+			labels[i] = sentinelLabels[m]
+		case BuiltinTemplateActionLabel(m) != "":
+			labels[i] = BuiltinTemplateActionLabel(m)
+		default:
 			labels[i] = m
 		}
 	}
@@ -250,6 +280,12 @@ func ProcessFromStages(stages []string) (Process, error) {
 		if m == ShipJobMode {
 			if i != len(norm)-1 {
 				return Process{}, fmt.Errorf("ship may only be the final stage")
+			}
+			continue
+		}
+		if m == ShelveJobMode {
+			if i != len(norm)-1 {
+				return Process{}, fmt.Errorf("shelve may only be the final stage")
 			}
 			continue
 		}
@@ -290,6 +326,12 @@ func ProcessFromStagesWithPrefix(prefixModes, tailModes []string) (Process, erro
 		if m == ShipJobMode {
 			if i != len(combined)-1 {
 				return Process{}, fmt.Errorf("ship may only be the final stage")
+			}
+			continue
+		}
+		if m == ShelveJobMode {
+			if i != len(combined)-1 {
+				return Process{}, fmt.Errorf("shelve may only be the final stage")
 			}
 			continue
 		}

@@ -312,6 +312,9 @@ func (e *Engine) advanceChain(iss *model.Issue, jobs []*model.PipelineJob) ([]Ad
 	if next.IsShipHandoff() {
 		return e.handoff(iss)
 	}
+	if next.IsShelveHandoff() {
+		return e.shelve(iss)
+	}
 	return e.startJob(iss, next)
 }
 
@@ -743,6 +746,25 @@ func (e *Engine) handoff(iss *model.Issue) ([]Advance, error) {
 		return nil, err
 	}
 	return []Advance{e.advance(iss, "handoff", "-> to_be_shipped")}, nil
+}
+
+// shelve returns the card to Backlog at the Shelve sentinel (BACI-332):
+// the demoting counterpart of handoff. It clears the card's whole job
+// chain — including the just-reached shelve sentinel and any completed
+// history — then flips the issue back to todo. Clearing first means the
+// in_pipeline → todo teardown in SetIssueState (cancelRunningPipelineJob:
+// disarm Auto, clear the pause reason) sees an empty chain — there is no
+// running job at the sentinel anyway — so the demoted card is left
+// indistinguishable from one a user dragged back to Backlog, with no
+// lingering pipeline_jobs rows, and is freely re-pipeable (AC #5).
+func (e *Engine) shelve(iss *model.Issue) ([]Advance, error) {
+	if err := e.st.ClearIssueProcess(iss.ID); err != nil {
+		return nil, err
+	}
+	if err := e.st.SetIssueState(iss.ID, model.StateTodo); err != nil {
+		return nil, err
+	}
+	return []Advance{e.advance(iss, "shelve", "-> todo")}, nil
 }
 
 // setPause writes the engine pause reason iff it changed — avoids a write
