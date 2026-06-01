@@ -240,6 +240,66 @@ func (d deps) handleProxySearch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// handleProxyJobs serves the BACI-322 transcript browser list — one summary
+// row per distinct dispatch that has parsed captures, the row-per-dispatch
+// list the Monitor Transcript page renders. It scopes to the active repo
+// (`repo`), one issue (`issue`), one job mode (`mode`), and a `since` lookback
+// (or `from` absolute cutoff, mutually exclusive, mirroring /proxy/captures),
+// capped with `limit`, newest-first. Each row carries the issue-key / mode /
+// agent / repo-prefix enrichment lifted off its dispatch. Behind the
+// bearer-token auth like /proxy/stats (a UI/CLI read, not agent passthrough).
+func (d deps) handleProxyJobs(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	var f store.JobTranscriptFilter
+	f.RepoPrefix = q.Get("repo")
+	f.IssueKey = q.Get("issue")
+	f.Mode = q.Get("mode")
+
+	if v := q.Get("limit"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			writeError(w, http.StatusBadRequest, "invalid_input", "limit must be a non-negative integer", map[string]any{"field": "limit"})
+			return
+		}
+		f.Limit = n
+	}
+
+	since := q.Get("since")
+	from := q.Get("from")
+	if since != "" && from != "" {
+		writeError(w, http.StatusBadRequest, "invalid_input", "since and from are mutually exclusive", nil)
+		return
+	}
+	if since != "" {
+		dur, err := timeparse.Lookback(since)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), map[string]any{"field": "since"})
+			return
+		}
+		cutoff := time.Now().Add(-dur)
+		f.Since = &cutoff
+	}
+	if from != "" {
+		t, err := timeparse.Timestamp(from)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_input", "from: "+err.Error(), map[string]any{"field": "from"})
+			return
+		}
+		f.Since = &t
+	}
+
+	out, err := d.store.ListJobTranscripts(f)
+	if err != nil {
+		s, c := statusForError(err)
+		writeError(w, s, c, err.Error(), nil)
+		return
+	}
+	if out == nil {
+		out = []*model.JobTranscriptRow{}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 // handleProxyCapture serves the BACI-306 parsed detail of one captured
 // Anthropic SSE turn, keyed on the proxy_requests id (the id the raw .http file
 // and `proxy stats` reference). 404 when that capture wasn't parseable

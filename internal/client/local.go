@@ -234,3 +234,14 @@ func (c *localClient) SearchProxyMessages(ctx context.Context, f store.ProxyMess
 	}
 	return matches, nil
 }
+
+func (c *localClient) ListJobTranscripts(ctx context.Context, f store.JobTranscriptFilter) ([]*model.JobTranscriptRow, error) {
+	rows, err := c.store.ListJobTranscripts(f)
+	if err != nil {
+		return nil, err
+	}
+	if rows == nil {
+		rows = []*model.JobTranscriptRow{}
+	}
+	return rows, nil
+}

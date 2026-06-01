@@ -201,8 +201,8 @@ func TestRoundTripProxySearch(t *testing.T) {
 	}
 	if _, err := p.store.AddProxyMessage(store.AddProxyMessageIn{
 		ProxyRequestID: 2, DispatchID: &dispatchID, SessionID: "sess",
-		Capture: cap2,
-		Delta:   []model.AnthropicMessage{{Role: "user", Content: []model.AnthropicBlock{{Type: "text", Text: "go to court now"}}}},
+		Capture:   cap2,
+		Delta:     []model.AnthropicMessage{{Role: "user", Content: []model.AnthropicBlock{{Type: "text", Text: "go to court now"}}}},
 		IsPrimary: true, StartedAt: time.Now(),
 	}); err != nil {
 		t.Fatalf("seed cap2: %v", err)
@@ -312,6 +312,80 @@ func TestRoundTripProxyReparse(t *testing.T) {
 	}
 	if len(hist) != 1 {
 		t.Fatalf("audit rows for proxy.reparse = %d, want 1", len(hist))
+	}
+}
+
+// TestRoundTripJobTranscripts seeds parsed proxy_messages rows against a
+// dispatch and asserts the local and remote backends produce an identical
+// transcript-browser list — same dispatch row, same turn count / model / usage
+// / enrichment — and that the repo-prefix filter round-trips through the
+// ?repo= query param. Explicit, like the sibling proxy round-trips (the
+// roundtrip suite doesn't reflect-enumerate the interface).
+func TestRoundTripJobTranscripts(t *testing.T) {
+	p := newPair(t)
+	defer p.cleanup()
+	ctx := context.Background()
+
+	iss, err := p.store.CreateIssue(p.repo.ID, nil, "job", "", model.StateTodo, nil, "")
+	if err != nil {
+		t.Fatalf("CreateIssue: %v", err)
+	}
+	disp, err := p.store.AddDispatch(store.AddDispatchIn{
+		RepoID: p.repo.ID, IssueID: &iss.ID, Mode: model.DispatchModeImplement,
+		TargetSessionID: "00000000-0000-0000-0000-0000000000bb", CreatedBy: "user",
+	})
+	if err != nil {
+		t.Fatalf("AddDispatch: %v", err)
+	}
+	add := func(proxyReqID int64, modelName string, primary bool, in, out int64) {
+		cap := &model.ParsedCapture{
+			Model: modelName, SystemFP: "fp", MessageCount: 1,
+			Turn: model.AnthropicTurn{Model: modelName, Usage: model.AnthropicUsage{InputTokens: in, OutputTokens: out}},
+		}
+		if _, err := p.store.AddProxyMessage(store.AddProxyMessageIn{
+			ProxyRequestID: proxyReqID, DispatchID: &disp.ID,
+			Capture: cap, IsPrimary: primary, StartedAt: time.Now(),
+		}); err != nil {
+			t.Fatalf("seed capture %d: %v", proxyReqID, err)
+		}
+	}
+	add(1, "claude-opus-4-8", true, 100, 20)
+	add(2, "claude-haiku", false, 30, 5)
+	add(3, "claude-opus-4-8", true, 160, 15)
+
+	f := store.JobTranscriptFilter{RepoPrefix: p.repo.Prefix}
+	local, err := p.local.ListJobTranscripts(ctx, f)
+	if err != nil {
+		t.Fatalf("local ListJobTranscripts: %v", err)
+	}
+	remote, err := p.remote.ListJobTranscripts(ctx, f)
+	if err != nil {
+		t.Fatalf("remote ListJobTranscripts: %v", err)
+	}
+	if len(local) != 1 || len(remote) != 1 {
+		t.Fatalf("row count mismatch: local=%d remote=%d", len(local), len(remote))
+	}
+	x, y := local[0], remote[0]
+	if x.DispatchID != y.DispatchID || x.TurnCount != y.TurnCount ||
+		x.Model != y.Model || x.IssueKey != y.IssueKey || x.Mode != y.Mode ||
+		x.RepoPrefix != y.RepoPrefix || x.Usage != y.Usage {
+		t.Fatalf("row mismatch:\n local=%+v\n remote=%+v", x, y)
+	}
+	if x.TurnCount != 2 || x.Model != "claude-opus-4-8" || x.IssueKey != iss.Key {
+		t.Fatalf("row wrong: turns=%d model=%q key=%q", x.TurnCount, x.Model, x.IssueKey)
+	}
+
+	// A foreign repo prefix narrows the list to empty on both backends.
+	none, err := p.local.ListJobTranscripts(ctx, store.JobTranscriptFilter{RepoPrefix: "NONE"})
+	if err != nil {
+		t.Fatalf("local ListJobTranscripts(NONE): %v", err)
+	}
+	remoteNone, err := p.remote.ListJobTranscripts(ctx, store.JobTranscriptFilter{RepoPrefix: "NONE"})
+	if err != nil {
+		t.Fatalf("remote ListJobTranscripts(NONE): %v", err)
+	}
+	if len(none) != 0 || len(remoteNone) != 0 {
+		t.Fatalf("foreign-repo scope should be empty: local=%d remote=%d", len(none), len(remoteNone))
 	}
 }
 

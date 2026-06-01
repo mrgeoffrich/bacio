@@ -177,3 +177,75 @@ func (m *MonitorService) Capture(id int64) (*model.ProxyMessage, error) {
 func (m *MonitorService) JobTranscript(dispatchID int64) (*model.AnthropicTranscript, error) {
 	return m.client.JobTranscript(context.Background(), dispatchID)
 }
+
+// JobTranscriptUsageDTO is the camelCase token-usage twin of
+// model.AnthropicUsage, carried on JobTranscriptRowDTO so the desktop binding
+// matches the web twin's TS shape (the same cross-transport split as the
+// other Monitor DTOs).
+type JobTranscriptUsageDTO struct {
+	InputTokens         int64 `json:"inputTokens"`
+	OutputTokens        int64 `json:"outputTokens"`
+	CacheCreationTokens int64 `json:"cacheCreationTokens"`
+	CacheReadTokens     int64 `json:"cacheReadTokens"`
+	ThinkingTokens      int64 `json:"thinkingTokens"`
+}
+
+// JobTranscriptRowDTO is one row of the BACI-322 transcript browser list,
+// shaped for the desktop Monitor Transcript page. It mirrors
+// model.JobTranscriptRow with camelCase JSON tags so the Wails binding matches
+// the web twin's TS-only shape (lib/proxyCaptures.ts). DispatchID is the
+// deep-link key; IssueKey / Mode / AgentName / RepoPrefix are best-effort
+// enrichment (empty when the dispatch was deleted); Model is the primary
+// thread's; TurnCount is the primary-capture count; Usage is summed across the
+// dispatch; LastSeen is the most-recent capture's timestamp.
+type JobTranscriptRowDTO struct {
+	DispatchID int64                 `json:"dispatchId"`
+	IssueKey   string                `json:"issueKey,omitempty"`
+	Mode       string                `json:"mode,omitempty"`
+	AgentName  string                `json:"agentName,omitempty"`
+	RepoPrefix string                `json:"repoPrefix,omitempty"`
+	Model      string                `json:"model,omitempty"`
+	TurnCount  int64                 `json:"turnCount"`
+	Usage      JobTranscriptUsageDTO `json:"usage"`
+	LastSeen   time.Time             `json:"lastSeen"`
+}
+
+// ListJobTranscripts returns the BACI-322 transcript browser list — one row per
+// distinct dispatch that has parsed captures, the Monitor Transcript page's
+// data. repo scopes to one repo prefix (the active board); issue / mode narrow
+// to one issue / one job mode; sinceDays > 0 windows to a rolling lookback
+// (0 = all-time, the same sentinel ProxyStats uses). The returned slice is
+// always non-nil.
+func (m *MonitorService) ListJobTranscripts(repo, issue, mode string, sinceDays int) ([]JobTranscriptRowDTO, error) {
+	ctx := context.Background()
+	f := store.JobTranscriptFilter{RepoPrefix: repo, IssueKey: issue, Mode: mode}
+	if sinceDays > 0 {
+		cutoff := time.Now().Add(-time.Duration(sinceDays) * 24 * time.Hour)
+		f.Since = &cutoff
+	}
+	rows, err := m.client.ListJobTranscripts(ctx, f)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]JobTranscriptRowDTO, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, JobTranscriptRowDTO{
+			DispatchID: r.DispatchID,
+			IssueKey:   r.IssueKey,
+			Mode:       r.Mode,
+			AgentName:  r.AgentName,
+			RepoPrefix: r.RepoPrefix,
+			Model:      r.Model,
+			TurnCount:  r.TurnCount,
+			Usage: JobTranscriptUsageDTO{
+				InputTokens:         r.Usage.InputTokens,
+				OutputTokens:        r.Usage.OutputTokens,
+				CacheCreationTokens: r.Usage.CacheCreationInputTokens,
+				CacheReadTokens:     r.Usage.CacheReadInputTokens,
+				ThinkingTokens:      r.Usage.ThinkingTokens,
+			},
+			LastSeen: r.LastSeen,
+		})
+	}
+	return out, nil
+}

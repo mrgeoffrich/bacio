@@ -75,3 +75,36 @@ export interface ProxyMessage {
   usage: AnthropicUsageJSON;
   started_at: string;
 }
+
+// JobTranscriptUsage is the camelCase token-usage twin the transcript list row
+// carries — identical fields to the desktop JobTranscriptUsageDTO so the two
+// seams are interchangeable (the BACI-322 row-per-dispatch counterpart of the
+// other Monitor DTO splits).
+export interface JobTranscriptUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationTokens: number;
+  cacheReadTokens: number;
+  thinkingTokens: number;
+}
+
+// JobTranscriptRow is one row of the BACI-322 transcript browser list — one
+// distinct dispatch that has parsed captures. dispatchId is the deep-link key
+// the Transcript page navigates on; issueKey / mode / agentName / repoPrefix
+// are best-effort enrichment (empty when the dispatch was deleted); model is
+// the primary thread's; turnCount is the primary-capture count; usage is summed
+// across the dispatch; lastSeen is an ISO timestamp. The Wails seam re-exports
+// the generated JobTranscriptRowDTO under this name; the HTTP seam reshapes the
+// snake_case wire row into it. TranscriptListPanel imports it from `./api` and
+// never knows which transport it's on.
+export interface JobTranscriptRow {
+  dispatchId: number;
+  issueKey?: string;
+  mode?: string;
+  agentName?: string;
+  repoPrefix?: string;
+  model?: string;
+  turnCount: number;
+  usage: JobTranscriptUsage;
+  lastSeen: string;
+}

@@ -17,8 +17,16 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const moduleRoot = path.resolve(__dirname, '..');
 
-const { viewPath, issuePath, featurePath, documentPath, viewFromPath, prefixFromPath } =
-  await import(path.join(moduleRoot, 'routes.ts'));
+const {
+  viewPath,
+  issuePath,
+  featurePath,
+  documentPath,
+  viewFromPath,
+  prefixFromPath,
+  monitorTranscriptsPath,
+  transcriptPath,
+} = await import(path.join(moduleRoot, 'routes.ts'));
 
 const tests = [];
 function test(name, fn) { tests.push({ name, fn }); }
@@ -47,6 +55,17 @@ test('documentPath URL-encodes the filename under the prefix', () => {
   // A filename with a space would never come from bacio (kebab-case is enforced),
   // but the encoder still does the right thing for any edge case.
   assert.equal(documentPath('BACI', 'a b'), '/BACI/documents/a%20b');
+});
+
+test('monitorTranscriptsPath builds the prefixed Transcripts sub-tab route', () => {
+  assert.equal(monitorTranscriptsPath('BACI'), '/BACI/monitor/transcripts');
+  assert.equal(monitorTranscriptsPath('MINI'), '/MINI/monitor/transcripts');
+});
+
+test('transcriptPath builds the prefixed deep-link route keyed on the dispatch id', () => {
+  assert.equal(transcriptPath('BACI', 42), '/BACI/monitor/transcript/42');
+  // String ids pass through unchanged (the URL param arrives as a string).
+  assert.equal(transcriptPath('MINI', '7'), '/MINI/monitor/transcript/7');
 });
 
 test('prefixFromPath reads the first (prefix) segment off a pathname', () => {

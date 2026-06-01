@@ -260,6 +260,35 @@ func (c *remoteClient) ReparseProxyMessages(ctx context.Context, in ReparseProxy
 	return out, nil
 }
 
+// ----- Transcript browser (BACI-322) -----
+
+func (c *remoteClient) ListJobTranscripts(ctx context.Context, f store.JobTranscriptFilter) ([]*model.JobTranscriptRow, error) {
+	q := url.Values{}
+	if f.RepoPrefix != "" {
+		q.Set("repo", f.RepoPrefix)
+	}
+	if f.IssueKey != "" {
+		q.Set("issue", f.IssueKey)
+	}
+	if f.Mode != "" {
+		q.Set("mode", f.Mode)
+	}
+	if f.Limit > 0 {
+		q.Set("limit", strInt(int64(f.Limit)))
+	}
+	if f.Since != nil {
+		q.Set("from", f.Since.UTC().Format("2006-01-02T15:04:05Z"))
+	}
+	var out []*model.JobTranscriptRow
+	if err := c.do(ctx, http.MethodGet, "/proxy/jobs", q, nil, &out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = []*model.JobTranscriptRow{}
+	}
+	return out, nil
+}
+
 // BlockersFor stays local-only (BACI-114). The kanban surface always
 // runs against the local DB / Wails / `bacio web`, never via `bacio
 // --remote`, so the bulk read has no HTTP analogue today.
