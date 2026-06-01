@@ -103,3 +103,74 @@ func TestParseCapture_CountTokens(t *testing.T) {
 		t.Errorf("ParseCapture(count_tokens) err = %v, want ErrNotStream", err)
 	}
 }
+
+// TestParseCapture_ResponseMarkerInRequestBody is the BACI-323 regression: the
+// request body (the conversation-so-far) embeds the literal "==== RESPONSE ===="
+// text inside a JSON string. A bare-substring cut fires on that in-body
+// occurrence and truncates the request JSON mid-object, so json.Unmarshal
+// returns "unexpected end of JSON input". The line-anchored split must cut on
+// the real boundary instead, leaving the request JSON whole and the assistant
+// turn reconstructable.
+func TestParseCapture_ResponseMarkerInRequestBody(t *testing.T) {
+	pc, err := ParseCapture(readFixture(t, "marker-collision.sse.http"))
+	if err != nil {
+		t.Fatalf("ParseCapture: %v (the in-body marker truncated the request JSON)", err)
+	}
+	// Request side parses whole — the in-body marker did not truncate it.
+	if pc.Model != "claude-opus-4-8" {
+		t.Errorf("model = %q, want claude-opus-4-8", pc.Model)
+	}
+	if pc.MessageCount != 1 {
+		t.Errorf("MessageCount = %d, want 1", pc.MessageCount)
+	}
+	// Response side reconstructs from the SSE stream after the real boundary.
+	var text string
+	for _, b := range pc.Turn.Blocks {
+		if b.Type == "text" {
+			text += b.Text
+		}
+	}
+	if want := "Confirmed: the split is line-anchored."; text != want {
+		t.Errorf("reconstructed text = %q, want %q", text, want)
+	}
+	if pc.Turn.StopReason != "end_turn" {
+		t.Errorf("stop_reason = %q, want end_turn", pc.Turn.StopReason)
+	}
+}
+
+// TestParseCapture_StringFormMessageContent is the BACI-324 regression: a request
+// message carries `content` as a plain string (the /v1/messages shorthand the
+// Claude client emits for plain user turns) rather than a block list. The parser
+// must decode it — normalising the string to a single text block — rather than
+// failing `cannot unmarshal string into ... content`. Built inline (no fixture)
+// so the exact string-content shape is visible in the test.
+func TestParseCapture_StringFormMessageContent(t *testing.T) {
+	raw := "==== REQUEST ====\r\n" +
+		"POST /v1/messages HTTP/1.1\r\n" +
+		"Content-Type: application/json\r\n\r\n" +
+		`{"model":"claude-opus-4-8","system":"sys","messages":[{"role":"user","content":"plain string turn"},{"role":"assistant","content":[{"type":"text","text":"block turn"}]}]}` +
+		"\r\n==== RESPONSE ====\r\n" +
+		"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n" +
+		`data: {"type":"message_start","message":{"model":"claude-opus-4-8","usage":{"input_tokens":5}}}` + "\n\n" +
+		`data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}` + "\n\n" +
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ok"}}` + "\n\n" +
+		`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}`
+
+	pc, err := ParseCapture([]byte(raw))
+	if err != nil {
+		t.Fatalf("ParseCapture: %v (string-form content should decode)", err)
+	}
+	if pc.MessageCount != 2 {
+		t.Fatalf("MessageCount = %d, want 2", pc.MessageCount)
+	}
+	// The string-form message normalised to one text block carrying its text.
+	first := pc.Messages[0]
+	if first.Role != "user" || len(first.Content) != 1 ||
+		first.Content[0].Type != "text" || first.Content[0].Text != "plain string turn" {
+		t.Errorf("message[0] = %+v, want one user text block 'plain string turn'", first)
+	}
+	// The block-form message still decodes verbatim.
+	if second := pc.Messages[1]; len(second.Content) != 1 || second.Content[0].Text != "block turn" {
+		t.Errorf("message[1] = %+v, want one text block 'block turn'", second)
+	}
+}

@@ -222,6 +222,124 @@ func TestReparseDispatch_TruncatedCaptureMarkedAndNotRetried(t *testing.T) {
 	}
 }
 
+// TestClearProxyParseFailed_RetryFailedRecoversCaptures is the BACI-323 recovery
+// path: a parseable capture is stamped parse_failed_at (simulating a pre-fix
+// marker-collision failure the parser has since been fixed for). A sweep without
+// RetryFailed leaves it stamped and does no work ("already given up on stays given
+// up on"); a sweep WITH RetryFailed clears the marker first and backfills the
+// capture. The dry-run count must not mutate the marker.
+func TestClearProxyParseFailed_RetryFailedRecoversCaptures(t *testing.T) {
+	s := newTestStore(t)
+	dir := t.TempDir()
+	now := time.Now().UTC().Truncate(time.Second)
+	old := now.Add(-1 * time.Hour)
+	good := renderCapture("claude-opus-4-8", "sys", "answer", 1, 10, 5)
+
+	// A parseable capture that was nonetheless stamped failed (the bug under fix).
+	dispatchID := int64(901)
+	pr := seedCapture(t, s, dir, dispatchID, old, good)
+	if err := s.MarkProxyRequestParseFailed(pr.ID); err != nil {
+		t.Fatalf("stamp parse_failed_at: %v", err)
+	}
+
+	// (1) Sweep without RetryFailed: the marked capture is excluded → no work.
+	res, err := s.ReparseUnparsedDispatches(ReparseOpts{QuietWindow: 2 * time.Minute, Now: now})
+	if err != nil {
+		t.Fatalf("sweep without retry: %v", err)
+	}
+	if res.Total() != 0 {
+		t.Fatalf("sweep without retry did work %+v, want 0 (marked capture not retried)", res)
+	}
+
+	// (2) Dry-run projection with RetryFailed must count the recoverable capture
+	// (it drops the parse_failed_at predicate) WITHOUT mutating the marker.
+	proj, err := s.ProjectReparseUnparsedDispatches(ReparseOpts{QuietWindow: 2 * time.Minute, Now: now, RetryFailed: true})
+	if err != nil {
+		t.Fatalf("ProjectReparseUnparsedDispatches(RetryFailed): %v", err)
+	}
+	if proj.DispatchesScanned != 1 || proj.CapturesReparsed != 1 {
+		t.Errorf("retry-failed projection = %+v, want 1 scanned / 1 reparsed", proj)
+	}
+	got, err := s.GetProxyRequest(pr.ID)
+	if err != nil {
+		t.Fatalf("GetProxyRequest after projection: %v", err)
+	}
+	if got.ParseFailedAt == nil {
+		t.Fatalf("projection cleared the marker — dry-run must not mutate")
+	}
+
+	// (3) Sweep WITH RetryFailed: clears the marker first, then backfills.
+	res2, err := s.ReparseUnparsedDispatches(ReparseOpts{QuietWindow: 2 * time.Minute, Now: now, RetryFailed: true})
+	if err != nil {
+		t.Fatalf("sweep with retry: %v", err)
+	}
+	if res2.DispatchesScanned != 1 || res2.CapturesReparsed != 1 {
+		t.Fatalf("sweep with retry result = %+v, want 1 scanned / 1 reparsed", res2)
+	}
+	if _, err := s.JobTranscript(dispatchID); err != nil {
+		t.Errorf("recovered dispatch should now have a transcript: %v", err)
+	}
+	got2, err := s.GetProxyRequest(pr.ID)
+	if err != nil {
+		t.Fatalf("GetProxyRequest after retry: %v", err)
+	}
+	if got2.ParseFailedAt != nil {
+		t.Errorf("parse_failed_at still set after RetryFailed sweep, want cleared")
+	}
+}
+
+// TestClearProxyParseFailed_Scopes asserts the dispatch-scoped clear (the
+// `--dispatch <id> --retry-failed` path) only clears the named job's markers, and
+// that a capture which already has a proxy_messages row is never resurrected.
+func TestClearProxyParseFailed_Scopes(t *testing.T) {
+	s := newTestStore(t)
+	dir := t.TempDir()
+	now := time.Now().UTC().Truncate(time.Second)
+	old := now.Add(-1 * time.Hour)
+	good := renderCapture("claude-opus-4-8", "sys", "answer", 1, 10, 5)
+
+	// Two failed-but-unparsed dispatches.
+	dispA, dispB := int64(911), int64(912)
+	prA := seedCapture(t, s, dir, dispA, old, good)
+	prB := seedCapture(t, s, dir, dispB, old, good)
+	for _, pr := range []*model.ProxyRequest{prA, prB} {
+		if err := s.MarkProxyRequestParseFailed(pr.ID); err != nil {
+			t.Fatalf("stamp parse_failed_at: %v", err)
+		}
+	}
+
+	// An already-parsed capture stamped failed (shouldn't happen in practice, but
+	// the clear must never resurrect a classified row).
+	dispC := int64(913)
+	prC := seedCapture(t, s, dir, dispC, old, good)
+	liveParse(t, s, prC, dispC)
+	if err := s.MarkProxyRequestParseFailed(prC.ID); err != nil {
+		t.Fatalf("stamp parse_failed_at on parsed capture: %v", err)
+	}
+
+	// Scope the clear to dispatch A only.
+	cleared, err := s.ClearProxyParseFailed(ClearParseFailedOpts{Dispatch: &dispA})
+	if err != nil {
+		t.Fatalf("ClearProxyParseFailed(dispA): %v", err)
+	}
+	if cleared != 1 {
+		t.Fatalf("cleared = %d, want 1 (only dispatch A)", cleared)
+	}
+
+	gotA, _ := s.GetProxyRequest(prA.ID)
+	if gotA.ParseFailedAt != nil {
+		t.Errorf("dispatch A marker not cleared")
+	}
+	gotB, _ := s.GetProxyRequest(prB.ID)
+	if gotB.ParseFailedAt == nil {
+		t.Errorf("dispatch B marker cleared, want left intact (out of scope)")
+	}
+	gotC, _ := s.GetProxyRequest(prC.ID)
+	if gotC.ParseFailedAt == nil {
+		t.Errorf("already-parsed capture's marker cleared, want left intact (has a proxy_messages row)")
+	}
+}
+
 // TestReparseUnparsedDispatches_EligibilityAndQuietWindow asserts the sweep's
 // eligibility predicate: dispatch_id NULL / non-anthropic / non-stream / already-
 // parsed captures are excluded, and a dispatch whose newest capture is inside the

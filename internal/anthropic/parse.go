@@ -8,6 +8,10 @@
 // internal/api/proxy_recorder.go: a "==== REQUEST ====" header block + body,
 // then "==== RESPONSE ====" header block + body, written with CRLF, with the
 // gzip already inflated on disk and secrets redacted in the headers. The
+// request/response boundary is matched line-anchored (the marker on its own
+// line) so an in-body occurrence of the literal "==== RESPONSE ====" text — the
+// request body carries the whole conversation, which often contains it — can't
+// truncate the split (BACI-323). The
 // response of a streaming /v1/messages turn is an SSE event stream that
 // reconstructs exactly one assistant turn; the request body (application/json)
 // carries the whole conversation-so-far. The parsing rules are pinned by the
@@ -91,10 +95,34 @@ type anthropicRequest struct {
 // rule works regardless of how the file was read. Mirrors the Python reference
 // decoder's split_capture / section helpers (the read contract for
 // renderRawCapture's layout).
+//
+// The request/response boundary is matched line-anchored — on the full line
+// "\n==== RESPONSE ====\n" — not as a bare substring (BACI-323). The request
+// body carries the whole conversation-so-far, which in this repo frequently
+// contains the literal "==== RESPONSE ====" text (agents read the proxy
+// capture decoder / parse.go / docs into context). A bare-substring cut fires
+// on that in-body occurrence and truncates the request JSON mid-object, so
+// json.Unmarshal returns "unexpected end of JSON input". renderRawCapture
+// always writes the real boundary as "\r\n==== RESPONSE ====\r\n" (its own
+// line, → "\n==== RESPONSE ====\n" once LF-normalised), so the anchored form
+// matches exactly the recorder's boundary while an in-body occurrence — which
+// sits inside a single-line JSON body, never preceded by a newline byte — can't
+// match. A bare-substring cut is kept as a fallback for marker-less inputs
+// (hand-written fixtures / a future format tweak) so old behaviour is preserved
+// rather than handing back an empty response half.
 func splitCapture(raw []byte) (reqHead, reqBody, respHead, respBody []byte) {
 	s := strings.ReplaceAll(string(raw), "\r\n", "\n")
-	reqPart, respPart, _ := strings.Cut(s, responseMarker)
-	reqPart = strings.Replace(reqPart, requestMarker, "", 1)
+	reqPart, respPart, ok := strings.Cut(s, "\n"+responseMarker+"\n")
+	if !ok {
+		// No line-anchored boundary (a marker-less or hand-shaped capture):
+		// fall back to the bare-substring cut so old behaviour is preserved.
+		reqPart, respPart, _ = strings.Cut(s, responseMarker)
+	}
+	// Strip the leading "==== REQUEST ====\n" the file always opens with. Trim
+	// leading newlines first, then drop the prefix — an in-body "==== REQUEST
+	// ====" can't be the one removed (it isn't at the head of the request part).
+	reqPart = strings.TrimLeft(reqPart, "\n")
+	reqPart = strings.TrimPrefix(reqPart, requestMarker+"\n")
 	rh, rb := section(reqPart)
 	sh, sb := section(respPart)
 	return []byte(rh), []byte(rb), []byte(sh), []byte(sb)

@@ -253,6 +253,9 @@ func (c *remoteClient) ReparseProxyMessages(ctx context.Context, in ReparseProxy
 	if in.Dispatch != nil {
 		q.Set("dispatch", strInt(*in.Dispatch))
 	}
+	if in.RetryFailed {
+		q.Set("retry_failed", "true")
+	}
 	var out store.ReparseResult
 	if err := c.do(ctx, http.MethodPost, "/proxy/reparse", q, nil, &out); err != nil {
 		return store.ReparseResult{}, err

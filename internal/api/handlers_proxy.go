@@ -377,9 +377,11 @@ func (d deps) handleProxyRaw(w http.ResponseWriter, r *http.Request) {
 // sweep. POST /proxy/reparse?dispatch=&dry_run= reparses dispatch-correlated
 // Anthropic captures the live recorder path missed. With no `dispatch` it sweeps
 // every eligible dispatch (the same work the controller does once a minute); with
-// `dispatch` it scopes to one job. `rebuild` (the destructive partial-gap rebuild)
-// is reserved but not implemented in v1 — passing it 400s. Dry-run projects the
-// counts without writing; a non-empty wet run records a `proxy.reparse` audit row.
+// `dispatch` it scopes to one job. `retry_failed` (BACI-323) clears parse_failed_at
+// on the still-unparsed captures in scope first, so dispatches the parser gave up
+// on backfill once the parser is fixed. `rebuild` (the destructive partial-gap
+// rebuild) is reserved but not implemented in v1 — passing it 400s. Dry-run projects
+// the counts without writing; a non-empty wet run records a `proxy.reparse` audit row.
 // Behind the bearer-token auth like /proxy/stats (a UI/CLI mutation, not agent
 // passthrough).
 func (d deps) handleProxyReparse(w http.ResponseWriter, r *http.Request) {
@@ -408,6 +410,16 @@ func (d deps) handleProxyReparse(w http.ResponseWriter, r *http.Request) {
 		dispatchID = &n
 	}
 
+	var retryFailed bool
+	if v := q.Get("retry_failed"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_input", "retry_failed must be a boolean", map[string]any{"field": "retry_failed"})
+			return
+		}
+		retryFailed = b
+	}
+
 	dryRun := isDryRun(r)
 	if dryRun {
 		var (
@@ -415,7 +427,9 @@ func (d deps) handleProxyReparse(w http.ResponseWriter, r *http.Request) {
 			err error
 		)
 		if dispatchID != nil {
-			n, cerr := d.store.CountUnparsedDispatchCaptures(*dispatchID)
+			// BACI-323: --retry-failed drops the parse_failed_at predicate so the
+			// count mirrors the wet run (which clears the dispatch's markers first).
+			n, cerr := d.store.CountUnparsedDispatchCaptures(*dispatchID, retryFailed)
 			if cerr != nil {
 				err = cerr
 			} else {
@@ -425,7 +439,7 @@ func (d deps) handleProxyReparse(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		} else {
-			res, err = d.store.ProjectReparseUnparsedDispatches(store.ReparseOpts{})
+			res, err = d.store.ProjectReparseUnparsedDispatches(store.ReparseOpts{RetryFailed: retryFailed})
 		}
 		if err != nil {
 			s, c := statusForError(err)
@@ -441,9 +455,19 @@ func (d deps) handleProxyReparse(w http.ResponseWriter, r *http.Request) {
 		err error
 	)
 	if dispatchID != nil {
+		// BACI-323: clear the scoped dispatch's markers first when retrying
+		// failures — ReparseDispatch skips a stamped capture, so the clear is one
+		// layer up (mirrors the local client).
+		if retryFailed {
+			if _, cerr := d.store.ClearProxyParseFailed(store.ClearParseFailedOpts{Dispatch: dispatchID}); cerr != nil {
+				s, c := statusForError(cerr)
+				writeError(w, s, c, cerr.Error(), nil)
+				return
+			}
+		}
 		res, err = d.store.ReparseDispatch(*dispatchID)
 	} else {
-		res, err = d.store.ReparseUnparsedDispatches(store.ReparseOpts{})
+		res, err = d.store.ReparseUnparsedDispatches(store.ReparseOpts{RetryFailed: retryFailed})
 	}
 	if err != nil {
 		s, c := statusForError(err)

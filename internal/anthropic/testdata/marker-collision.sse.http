@@ -1,0 +1,30 @@
+==== REQUEST ====
+POST /v1/messages?beta=true HTTP/1.1
+Authorization: [redacted]
+Content-Type: application/json
+X-Claude-Code-Session-Id: 99999999-0000-0000-0000-000000000002
+X-Claude-Code-Agent-Id: agent-marker-collision
+
+{"model":"claude-opus-4-8","system":[{"type":"text","text":"You are reviewing captured proxy traffic for BACI-323."}],"messages":[{"role":"user","content":[{"type":"text","text":"The capture format is: ==== REQUEST ==== header block + body, then ==== RESPONSE ==== header block + body. Confirm the parser splits on the real boundary, not this in-body text."}]}],"max_tokens":64000,"stream":true}
+==== RESPONSE ====
+HTTP/2.0 200 OK
+Content-Type: text/event-stream; charset=utf-8
+Content-Encoding: gzip
+
+event: message_start
+data: {"type":"message_start","message":{"model":"claude-opus-4-8","id":"msg_collision","type":"message","role":"assistant","content":[],"stop_reason":null,"usage":{"input_tokens":200,"cache_creation_input_tokens":0,"cache_read_input_tokens":20,"output_tokens":1}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}      }
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Confirmed: the split is line-anchored."}         }
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0       }
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":12,"output_tokens_details":{"thinking_tokens":0}}}
+
+event: message_stop
+data: {"type":"message_stop"       }

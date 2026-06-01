@@ -43,10 +43,23 @@ func (r ReparseResult) Total() int {
 // races the live recorder on an actively-streaming job (a zero value falls back
 // to ProxyReparseQuietWindow). Now is an injectable clock for the quiet-window
 // cutoff (the zero value falls back to time.Now), so tests can seed captures at a
-// fixed age without sleeping.
+// fixed age without sleeping. RetryFailed (BACI-323) clears parse_failed_at on
+// eligible captures before the sweep runs, so dispatches the parser previously
+// gave up on (e.g. the pre-fix marker-collision failures) become eligible again
+// — without it those rows stay skipped forever ("already given up on stays given
+// up on").
 type ReparseOpts struct {
 	QuietWindow time.Duration
 	Now         time.Time
+	RetryFailed bool
+}
+
+// ClearParseFailedOpts scopes a ClearProxyParseFailed call. Dispatch nil clears
+// the terminal-failure marker on every eligible capture across all dispatches
+// (the sweep scope); Dispatch set scopes the clear to one job's captures (the
+// `bacio proxy reparse --dispatch <id> --retry-failed` path).
+type ClearParseFailedOpts struct {
+	Dispatch *int64
 }
 
 // MarkProxyRequestParseFailed stamps proxy_requests.parse_failed_at = now on one
@@ -59,6 +72,36 @@ func (s *Store) MarkProxyRequestParseFailed(proxyRequestID int64) error {
 		`UPDATE proxy_requests SET parse_failed_at = ? WHERE id = ?`,
 		time.Now().UTC(), proxyRequestID)
 	return err
+}
+
+// ClearProxyParseFailed clears proxy_requests.parse_failed_at on the
+// terminal-failed-but-unparsed Anthropic SSE captures (BACI-323) — the inverse of
+// MarkProxyRequestParseFailed, for recovering dispatches the parser previously gave
+// up on once the underlying parser bug is fixed. It clears only rows that are still
+// fully unparsed (no proxy_messages row), so it never resurrects a capture that has
+// already been classified; a cleared row is then eligible for the next
+// ReparseUnparsedDispatches / ReparseDispatch run exactly as a never-failed capture
+// is. Dispatch nil clears across all dispatches (sweep scope); Dispatch set scopes
+// to one job. Returns rows-affected so the caller can report the recovered count.
+func (s *Store) ClearProxyParseFailed(opts ClearParseFailedOpts) (int, error) {
+	q := `
+		UPDATE proxy_requests
+		SET parse_failed_at = NULL
+		WHERE is_anthropic = 1 AND is_stream = 1
+		  AND parse_failed_at IS NOT NULL
+		  AND NOT EXISTS (
+		      SELECT 1 FROM proxy_messages pm WHERE pm.proxy_request_id = proxy_requests.id)`
+	args := []any{}
+	if opts.Dispatch != nil {
+		q += ` AND dispatch_id = ?`
+		args = append(args, *opts.Dispatch)
+	}
+	res, err := s.DB.Exec(q, args...)
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	return int(n), err
 }
 
 // ReparseUnparsedDispatches is the BACI-321 backfill sweep: it finds every
@@ -83,7 +126,20 @@ func (s *Store) ReparseUnparsedDispatches(opts ReparseOpts) (ReparseResult, erro
 	}
 	cutoff := now.Add(-quiet).UTC()
 
-	ids, err := s.eligibleReparseDispatches(cutoff)
+	// BACI-323: clear the terminal-failure marker on still-unparsed captures first
+	// when the caller asks to retry failures, so a dispatch the parser previously
+	// gave up on becomes eligible again. A cleared dispatch is still fully unparsed
+	// (the failure prevented any proxy_messages insert), so it satisfies the
+	// eligibility query below without any --rebuild.
+	if opts.RetryFailed {
+		if _, err := s.ClearProxyParseFailed(ClearParseFailedOpts{}); err != nil {
+			return ReparseResult{}, err
+		}
+	}
+
+	// The markers are already cleared above when RetryFailed, so the eligibility
+	// query runs against the standard `parse_failed_at IS NULL` predicate.
+	ids, err := s.eligibleReparseDispatches(cutoff, false)
 	if err != nil {
 		return ReparseResult{}, err
 	}
@@ -105,13 +161,21 @@ func (s *Store) ReparseUnparsedDispatches(opts ReparseOpts) (ReparseResult, erro
 // fully-unparsed-only constraint the sweep does — the single-dispatch CLI path
 // reparses whatever is missing for the named job, so the projection counts the
 // same captures ReparseDispatch would touch.
-func (s *Store) CountUnparsedDispatchCaptures(dispatchID int64) (int, error) {
+//
+// retryFailed drops the `parse_failed_at IS NULL` predicate (BACI-323) so the
+// `--dispatch <id> --retry-failed` dry-run counts the terminal-failed captures
+// that path would clear-and-then-reparse, mirroring the wet run.
+func (s *Store) CountUnparsedDispatchCaptures(dispatchID int64, retryFailed bool) (int, error) {
+	failedPredicate := "AND pr.parse_failed_at IS NULL"
+	if retryFailed {
+		failedPredicate = ""
+	}
 	var n int
 	err := s.DB.QueryRow(`
 		SELECT COUNT(*)
 		FROM proxy_requests pr
 		WHERE pr.dispatch_id = ? AND pr.is_anthropic = 1 AND pr.is_stream = 1
-		  AND pr.parse_failed_at IS NULL
+		  `+failedPredicate+`
 		  AND NOT EXISTS (
 		      SELECT 1 FROM proxy_messages pm WHERE pm.proxy_request_id = pr.id)`,
 		dispatchID).Scan(&n)
@@ -123,7 +187,10 @@ func (s *Store) CountUnparsedDispatchCaptures(dispatchID int64) (int, error) {
 // many dispatches and captures a real run would attempt, without reading a single
 // .http file or writing a row. CapturesReparsed is the projected attempt count
 // (the upper bound — a capture that would fail to parse can't be told apart
-// without reading its file, so CapturesFailed stays 0 in the projection).
+// without reading its file, so CapturesFailed stays 0 in the projection). When
+// opts.RetryFailed is set it projects the retry-failed sweep — terminal-failed
+// captures the wet run would clear-then-reparse are counted as eligible — so the
+// dispatch and capture counts stay internally consistent (BACI-323).
 func (s *Store) ProjectReparseUnparsedDispatches(opts ReparseOpts) (ReparseResult, error) {
 	quiet := opts.QuietWindow
 	if quiet <= 0 {
@@ -135,13 +202,13 @@ func (s *Store) ProjectReparseUnparsedDispatches(opts ReparseOpts) (ReparseResul
 	}
 	cutoff := now.Add(-quiet).UTC()
 
-	ids, err := s.eligibleReparseDispatches(cutoff)
+	ids, err := s.eligibleReparseDispatches(cutoff, opts.RetryFailed)
 	if err != nil {
 		return ReparseResult{}, err
 	}
 	var res ReparseResult
 	for _, id := range ids {
-		n, err := s.CountUnparsedDispatchCaptures(id)
+		n, err := s.CountUnparsedDispatchCaptures(id, opts.RetryFailed)
 		if err != nil {
 			return ReparseResult{}, err
 		}
@@ -160,13 +227,24 @@ func (s *Store) ProjectReparseUnparsedDispatches(opts ReparseOpts) (ReparseResul
 // fully-unparsed v1 constraint — a partial gap is deferred to --rebuild), and
 // whose newest capture started before the quiet-window cutoff. Ordered by the
 // dispatch's oldest unparsed capture so a long run makes deterministic progress.
-func (s *Store) eligibleReparseDispatches(cutoff time.Time) ([]int64, error) {
+//
+// retryFailed drops the `parse_failed_at IS NULL` predicate (BACI-323): the
+// retry-failed sweep clears those markers before this query runs, so a
+// projection of that run must treat a still-unparsed terminal-failed capture as
+// eligible to mirror the wet behaviour. The wet sweep clears first then calls
+// this with retryFailed=false (the markers are already gone); the dry-run never
+// clears, so it passes retryFailed=true to count what would become eligible.
+func (s *Store) eligibleReparseDispatches(cutoff time.Time, retryFailed bool) ([]int64, error) {
+	failedPredicate := "AND pr.parse_failed_at IS NULL"
+	if retryFailed {
+		failedPredicate = "" // the wet run clears these markers first.
+	}
 	rows, err := s.DB.Query(`
 		SELECT pr.dispatch_id
 		FROM proxy_requests pr
 		WHERE pr.is_anthropic = 1 AND pr.is_stream = 1
 		  AND pr.dispatch_id IS NOT NULL
-		  AND pr.parse_failed_at IS NULL
+		  `+failedPredicate+`
 		  AND NOT EXISTS (
 		      SELECT 1 FROM proxy_messages pm WHERE pm.proxy_request_id = pr.id)
 		GROUP BY pr.dispatch_id

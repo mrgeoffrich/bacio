@@ -18,9 +18,14 @@ import (
 // job's captures. Rebuild requests the destructive partial-gap rebuild — reserved
 // on the surface but not implemented in v1 (the call errors with
 // ErrRebuildNotImplemented rather than silently doing the non-destructive thing).
+// RetryFailed (BACI-323) clears parse_failed_at on the still-unparsed captures in
+// scope before the reparse, so dispatches the parser previously gave up on (e.g.
+// the pre-fix marker-collision failures) backfill once the parser is fixed. The
+// dry-run path counts the captures it would clear without mutating.
 type ReparseProxyOpts struct {
-	Dispatch *int64
-	Rebuild  bool
+	Dispatch    *int64
+	Rebuild     bool
+	RetryFailed bool
 }
 
 // ErrRebuildNotImplemented is returned when a caller passes the destructive
@@ -52,9 +57,18 @@ func (c *localClient) ReparseProxyMessages(ctx context.Context, in ReparseProxyO
 		err error
 	)
 	if in.Dispatch != nil {
+		// BACI-323: for the scoped path, clear the dispatch's terminal-failure
+		// markers first when retrying failures — ReparseDispatch itself skips a
+		// stamped capture (keeping its non-destructive contract), so the clear has
+		// to happen one layer up.
+		if in.RetryFailed {
+			if _, cerr := c.store.ClearProxyParseFailed(store.ClearParseFailedOpts{Dispatch: in.Dispatch}); cerr != nil {
+				return store.ReparseResult{}, cerr
+			}
+		}
 		res, err = c.store.ReparseDispatch(*in.Dispatch)
 	} else {
-		res, err = c.store.ReparseUnparsedDispatches(store.ReparseOpts{})
+		res, err = c.store.ReparseUnparsedDispatches(store.ReparseOpts{RetryFailed: in.RetryFailed})
 	}
 	if err != nil {
 		return store.ReparseResult{}, err
@@ -79,7 +93,10 @@ func (c *localClient) ReparseProxyMessages(ctx context.Context, in ReparseProxyO
 // the preview reports the upper bound of work, which is what a reader wants.
 func (c *localClient) projectReparse(in ReparseProxyOpts) (store.ReparseResult, error) {
 	if in.Dispatch != nil {
-		n, err := c.store.CountUnparsedDispatchCaptures(*in.Dispatch)
+		// BACI-323: with --retry-failed, the wet run clears this dispatch's
+		// terminal-failure markers first; the count drops the parse_failed_at
+		// predicate to mirror that, so the preview reflects the recovery work.
+		n, err := c.store.CountUnparsedDispatchCaptures(*in.Dispatch, in.RetryFailed)
 		if err != nil {
 			return store.ReparseResult{}, err
 		}
@@ -89,7 +106,7 @@ func (c *localClient) projectReparse(in ReparseProxyOpts) (store.ReparseResult, 
 		}
 		return res, nil
 	}
-	return c.store.ProjectReparseUnparsedDispatches(store.ReparseOpts{})
+	return c.store.ProjectReparseUnparsedDispatches(store.ReparseOpts{RetryFailed: in.RetryFailed})
 }
 
 // detailsForReparse is the compact, parseable Details string the `proxy.reparse`
