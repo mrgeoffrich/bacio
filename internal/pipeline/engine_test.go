@@ -557,6 +557,121 @@ func TestEngineManualStartNoShip(t *testing.T) {
 	}
 }
 
+// TestEngineShelveReturnsToBacklog: an Auto scope-shelve card runs scope,
+// then on reaching the shelve sentinel demotes back to todo (Backlog) and
+// out of the Pipeline (BACI-332) — the demoting counterpart to the ship
+// hand-off.
+func TestEngineShelveReturnsToBacklog(t *testing.T) {
+	s := newEngineStore(t)
+	_, iss := seedPipelineCard(t, s, "SHLV", "scope-shelve", model.EngineAuto)
+	eng := New(s)
+
+	// Tick 1: starts the scope job.
+	if _, err := eng.Tick(); err != nil {
+		t.Fatalf("tick 1: %v", err)
+	}
+	r := runningJob(t, s, iss.ID)
+	if r == nil || r.Mode != model.BuiltinTemplateScope {
+		t.Fatalf("after tick 1 running = %+v, want scope", r)
+	}
+	simulateWorkerAck(t, s, *r.DispatchID)
+
+	// Tick 2: scope completes, next is the shelve sentinel → demote to todo.
+	advances, err := eng.Tick()
+	if err != nil {
+		t.Fatalf("tick 2: %v", err)
+	}
+	got, _ := s.GetIssueByID(iss.ID)
+	if got.State != model.StateTodo {
+		t.Fatalf("state = %s, want todo", got.State)
+	}
+	var sawShelve bool
+	for _, a := range advances {
+		if a.Kind == "shelve" {
+			sawShelve = true
+		}
+	}
+	if !sawShelve {
+		t.Fatalf("advances = %+v, want one shelve", advances)
+	}
+}
+
+// TestEngineManualStartShelve: a manual (Auto off) scope-shelve card
+// reaches the shelve sentinel via StartNext and demotes to todo —
+// manual and Auto behave identically (mirrors TestEngineManualStartNoShip).
+func TestEngineManualStartShelve(t *testing.T) {
+	s := newEngineStore(t)
+	_, iss := seedPipelineCard(t, s, "SHLM", "scope-shelve", model.EngineOff)
+	eng := New(s)
+
+	// Start scope, ack, Tick to complete it.
+	if _, err := eng.StartNext(iss.ID); err != nil {
+		t.Fatalf("StartNext scope: %v", err)
+	}
+	r := runningJob(t, s, iss.ID)
+	if r == nil || r.Mode != model.BuiltinTemplateScope {
+		t.Fatalf("StartNext didn't start scope: %+v", r)
+	}
+	simulateWorkerAck(t, s, *r.DispatchID)
+	if _, err := eng.Tick(); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+
+	// Start again → reaches the shelve sentinel and demotes to todo.
+	if _, err := eng.StartNext(iss.ID); err != nil {
+		t.Fatalf("StartNext shelve: %v", err)
+	}
+	got, _ := s.GetIssueByID(iss.ID)
+	if got.State != model.StateTodo {
+		t.Fatalf("state = %s, want todo (manual Start must shelve)", got.State)
+	}
+}
+
+// TestEngineShelveClearsChainForRepipe: after a shelve the card's job
+// chain is wiped, and a fresh process can be set on the re-piped card —
+// proving a shelved card carries no permanent penalty and is re-pipeable
+// (AC #5).
+func TestEngineShelveClearsChainForRepipe(t *testing.T) {
+	s := newEngineStore(t)
+	_, iss := seedPipelineCard(t, s, "SHLR", "scope-shelve", model.EngineAuto)
+	eng := New(s)
+
+	// Drive scope → shelve.
+	if _, err := eng.Tick(); err != nil {
+		t.Fatalf("tick 1: %v", err)
+	}
+	r := runningJob(t, s, iss.ID)
+	if r == nil {
+		t.Fatal("no running scope job after tick 1")
+	}
+	simulateWorkerAck(t, s, *r.DispatchID)
+	if _, err := eng.Tick(); err != nil {
+		t.Fatalf("tick 2: %v", err)
+	}
+
+	// The whole chain is gone — indistinguishable from a card never piped.
+	jobs, err := s.ListPipelineJobs(iss.ID)
+	if err != nil {
+		t.Fatalf("list jobs: %v", err)
+	}
+	if len(jobs) != 0 {
+		t.Fatalf("chain after shelve has %d jobs, want empty", len(jobs))
+	}
+
+	// Re-pipe: move back to in_pipeline and set a fresh process.
+	if err := s.SetIssueState(iss.ID, model.StateInPipeline); err != nil {
+		t.Fatalf("re-pipe state: %v", err)
+	}
+	proc, _ := model.ProcessBySlug("plan-implement")
+	if _, err := s.SetIssueProcess(iss.ID, proc); err != nil {
+		t.Fatalf("re-pipe set process: %v", err)
+	}
+	jobs, _ = s.ListPipelineJobs(iss.ID)
+	if len(jobs) != 2 {
+		t.Fatalf("re-piped chain has %d jobs, want 2 (plan-implement)", len(jobs))
+	}
+}
+
 // TestEngineStopRunning: Stop cancels the running job and halts Auto.
 // TestEngineHandoffAppendsToShippingBack — BACI-275: two cards handed
 // off through the engine into to_be_shipped must preserve arrival order.

@@ -2038,6 +2038,10 @@ body { margin: 0; }
 .mk-pl-step.is-cancelled .mk-pl-step-lbl { color: var(--status-blocked); text-decoration: line-through; }
 .mk-pl-step.is-handoff .mk-pl-dot { background: var(--status-review-bg); color: var(--status-review); }
 .mk-pl-step.is-handoff .mk-pl-step-lbl { color: var(--status-review); }
+/* BACI-332: the Shelve sentinel reads as "park back in Backlog" — the
+   neutral backlog slate, distinct from Ship's promote/review tint. */
+.mk-pl-step.is-handoff.is-shelve .mk-pl-dot { background: var(--status-todo-bg); color: var(--status-todo); }
+.mk-pl-step.is-handoff.is-shelve .mk-pl-step-lbl { color: var(--status-todo); }
 .mk-pl-connector { width: 24px; height: 2px; background: var(--border-1); margin: 0 4px; }
 
 .mk-pl-stage-detail { padding: 0 18px 14px; }
@@ -2181,6 +2185,10 @@ body { margin: 0; }
 .mk-pl-seg.is-on.is-design .mk-pl-seg-glyph { background: var(--status-claude-bg); color: var(--status-claude); }
 .mk-pl-seg.is-on.is-implement .mk-pl-seg-glyph { background: var(--status-doing-bg); color: var(--status-doing); }
 .mk-pl-seg.is-on.is-ship .mk-pl-seg-glyph { background: var(--status-review-bg); color: var(--status-review); }
+/* BACI-332: Shelve terminal toggle — the neutral backlog slate (returns
+   the card to Backlog), visually distinct from Ship's promote tint. */
+.mk-pl-seg.is-on.is-shelve { border-color: var(--status-todo); }
+.mk-pl-seg.is-on.is-shelve .mk-pl-seg-glyph { background: var(--status-todo-bg); color: var(--status-todo); }
 .mk-pl-step-conn {
   flex: 0 0 auto; width: 20px; height: 2px; background: var(--border-1);
   align-self: flex-start; margin: 20px 2px 0;
@@ -2284,6 +2292,9 @@ body { margin: 0; }
 .mk-pe-dot.is-running { background: var(--status-doing-bg); color: var(--status-doing); border-color: var(--status-doing); }
 .mk-pe-dot.is-cancelled { background: var(--status-blocked-bg); color: var(--status-blocked); }
 .mk-pe-dot.is-handoff { background: var(--status-review-bg); color: var(--status-review); }
+/* BACI-332: Shelve sentinel reads as "park back in Backlog" — the neutral
+   backlog slate, distinct from Ship's promote/review tint. */
+.mk-pe-dot.is-handoff.is-shelve { background: var(--status-todo-bg); color: var(--status-todo); }
 .mk-pe-dot.is-add { background: var(--status-todo-bg); color: var(--status-todo); }
 .mk-pe-lbl { font-size: 13.5px; font-weight: 600; color: var(--fg-1); }
 .mk-pe-row.is-locked .mk-pe-lbl { color: var(--fg-3); }

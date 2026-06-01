@@ -87,6 +87,53 @@ func TestProcessFromStages(t *testing.T) {
 			t.Error("expected error for _dispatch_preamble in a chain")
 		}
 	})
+
+	t.Run("shelve_last", func(t *testing.T) {
+		// BACI-332: shelve is a final-only sentinel like ship, and renders
+		// "Shelve" via the sentinel-label lookup (not the raw mode).
+		p, err := ProcessFromStages([]string{BuiltinTemplateScope, ShelveJobMode})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(p.Stages) != 2 || p.Stages[1] != ShelveJobMode {
+			t.Fatalf("Stages = %v, want [scope shelve]", p.Stages)
+		}
+		if p.Name != "Scope → Shelve" {
+			t.Errorf("Name = %q, want %q", p.Name, "Scope → Shelve")
+		}
+	})
+
+	t.Run("shelve_not_last", func(t *testing.T) {
+		if _, err := ProcessFromStages([]string{ShelveJobMode, BuiltinTemplateImplement}); err == nil {
+			t.Error("expected error for shelve before the final stage")
+		}
+	})
+
+	t.Run("two_finals_rejected", func(t *testing.T) {
+		// Ship and Shelve are each final-only, so a chain ending in both
+		// fails the position rule — at most one terminal sentinel.
+		if _, err := ProcessFromStages([]string{BuiltinTemplateImplement, ShipJobMode, ShelveJobMode}); err == nil {
+			t.Error("expected error for two terminal sentinels (ship then shelve)")
+		}
+	})
+}
+
+// TestProcessBySlugScopeShelve: the BACI-332 named preset resolves to the
+// Scope → Shelve chain.
+func TestProcessBySlugScopeShelve(t *testing.T) {
+	p, err := ProcessBySlug("scope-shelve")
+	if err != nil {
+		t.Fatalf("ProcessBySlug(scope-shelve): %v", err)
+	}
+	want := []string{BuiltinTemplateScope, ShelveJobMode}
+	if len(p.Stages) != len(want) {
+		t.Fatalf("Stages = %v, want %v", p.Stages, want)
+	}
+	for i, s := range want {
+		if p.Stages[i] != s {
+			t.Fatalf("Stages[%d] = %q, want %q", i, p.Stages[i], s)
+		}
+	}
 }
 
 // TestProcessFromStagesWithPrefix covers the BACI-294 edit-path

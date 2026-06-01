@@ -24,6 +24,10 @@ export const PIPELINE_PROCESSES: PipelineProcess[] = [
   // Triage stages (BACI-300): standalone no-chain passes — keep in
   // lockstep with internal/model/pipeline.go.
   { slug: 'scope', name: 'Scope', stages: ['scope'] },
+  // scope-shelve (BACI-332): the out-of-the-box chain auto-applied to a
+  // new issue created from the Pipeline screen — scope once, then park the
+  // card back in Backlog at the Shelve sentinel.
+  { slug: 'scope-shelve', name: 'Scope → Shelve', stages: ['scope', 'shelve'] },
   { slug: 'research', name: 'Research', stages: ['research'] },
 ];
 
@@ -51,6 +55,7 @@ const STAGE_LABELS: Record<string, string> = {
   plan_large: 'Large Plan',
   implement: 'Implement',
   ship: 'Ship',
+  shelve: 'Shelve',
   design: 'Design',
   review: 'Review',
   fix_review: 'Fix review',
@@ -74,6 +79,7 @@ const STAGE_GLYPHS: Record<string, string> = {
   design: 'D',
   implement: 'I',
   ship: '⏏',
+  shelve: '⇤',
   review: 'R',
   fix_review: 'F',
   scope: 'S',
@@ -92,6 +98,13 @@ export function isShipStage(mode: string): boolean {
   return mode === 'ship';
 }
 
+// isShelveStage reports whether a stage/job mode is the Shelve hand-off
+// sentinel (model.ShelveJobMode) — the demoting counterpart of Ship that
+// returns the card to Backlog (todo) rather than an agent dispatch.
+export function isShelveStage(mode: string): boolean {
+  return mode === 'shelve';
+}
+
 // EDITABLE_JOB_MODES is the palette the BACI-294 Edit Process screen offers
 // under "+ Add job" — every dispatchable builtin template mode in canonical
 // order plus the Ship hand-off sentinel. The reserved `_dispatch_preamble`
@@ -108,4 +121,5 @@ export const EDITABLE_JOB_MODES: string[] = [
   'review',
   'fix_review',
   'ship',
+  'shelve',
 ];
