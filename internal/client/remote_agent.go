@@ -147,6 +147,13 @@ func (c *remoteClient) FailPipelineForSession(ctx context.Context, sessionID, er
 	return remoteAgentNotSupported("fail-pipeline")
 }
 
+// FailDispatch (BACI-328) is driven by the local-only
+// `report_subagent_incomplete` channel tool — the channel always talks to
+// the local store, never --remote — so there's no HTTP analogue.
+func (c *remoteClient) FailDispatch(ctx context.Context, dispatchID int64) error {
+	return remoteAgentNotSupported("fail-dispatch")
+}
+
 func (c *remoteClient) ListOpenClaims(ctx context.Context, repo *model.Repo) ([]*model.AgentClaim, error) {
 	path := "/agents/claims/open"
 	if repo != nil {

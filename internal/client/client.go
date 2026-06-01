@@ -558,6 +558,18 @@ type Client interface {
 	MarkAgentErrored(ctx context.Context, sessionID, errType, errMsg string) error
 	ClearAgentError(ctx context.Context, sessionID string) error
 	FailPipelineForSession(ctx context.Context, sessionID, errType, errMsg string) error
+	// FailDispatch is the dispatch-keyed sibling of FailPipelineForSession,
+	// driven by the `report_subagent_incomplete` channel tool (BACI-328)
+	// when the supervisor detects a soft-cancelled dispatch worker. It
+	// resolves the dispatch's issue, drives the engine's CancelRunning
+	// (cancel the running job + its dispatch, halt Auto, stamp the neutral
+	// subagent_cancelled pause reason), releases every open claim on the
+	// issue, and mirrors the engine advance into the audit log. Best-effort
+	// and idempotent — an unknown / settled dispatch, or a dispatch with no
+	// issue (a setup/ping dispatch), is a clean no-op. Do NOT ack the
+	// dispatch afterwards: CancelRunning already cancelled it, and acking a
+	// cancelled dispatch errors. Local-only — remote returns ErrLocalOnly.
+	FailDispatch(ctx context.Context, dispatchID int64) error
 	// ListOpenClaims returns every open (unreleased) agent claim for repo,
 	// or across all repos when repo is nil. Local-only; remote returns
 	// ErrLocalOnly. Used by the desktop Board to derive each card's `taken`.
