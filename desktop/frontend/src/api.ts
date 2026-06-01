@@ -56,6 +56,7 @@ import {
   LatestPlanDTO,
   ProxyFQDNStatDTO,
   ProxyCaptureRowDTO,
+  JobTranscriptRowDTO,
 } from '../bindings/github.com/mrgeoffrich/bacio/desktop';
 import { ClaimDTO } from '../bindings/github.com/mrgeoffrich/bacio/internal/agentcards';
 // BACI-145: re-export the WaitingState / WaitingKind enums from the
@@ -95,6 +96,11 @@ export type ProxyFQDNStat = ProxyFQDNStatDTO;
 // transcript (AnthropicTranscript) shapes are re-exported below.
 export type ProxyCaptureRow = ProxyCaptureRowDTO;
 export type { ProxyMessage, AnthropicTranscript };
+// BACI-322: cross-transport alias for the Monitor Transcript page's
+// row-per-dispatch list. The web bundle's api.http.ts ships the same name from
+// its own TS-only shape (src/lib/proxyCaptures.ts) so TranscriptListPanel
+// imports one name regardless of build mode.
+export type JobTranscriptRow = JobTranscriptRowDTO;
 // Phase 4 (Pipeline): re-export PipelineJob so the Pipeline page and its
 // helpers import it from ./api like every other shape.
 export type { PipelineJob };
@@ -945,6 +951,25 @@ export async function jobTranscript(dispatchId: number): Promise<AnthropicTransc
     const tr = await MonitorService.JobTranscript(dispatchId);
     if (!tr) throw new Error('transcript not found');
     return tr;
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// listJobTranscripts (BACI-322) returns the Monitor Transcript page's
+// row-per-dispatch list — one summary row per dispatch that has parsed
+// captures. `repo` scopes to the active board's prefix; `issue` / `mode`
+// narrow to one issue / one job mode; `sinceDays` windows to a rolling lookback
+// (0 = all-time). The HTTP twin keeps the same name + shape so
+// TranscriptListPanel stays transport-agnostic.
+export async function listJobTranscripts(
+  repo = '',
+  issue = '',
+  mode = '',
+  sinceDays = 0,
+): Promise<JobTranscriptRow[]> {
+  try {
+    return await MonitorService.ListJobTranscripts(repo, issue, mode, sinceDays);
   } catch (err) {
     throw normalize(err);
   }

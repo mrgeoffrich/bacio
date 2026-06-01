@@ -187,6 +187,7 @@ shapes into the desktop's `BoardCard` / `IssueDetail` / `DocSummary` /
 | `listShippedIssues(p, sinceDays, limit)` | `GET /repos/{p}/shipped?since=&limit=` (BACI-187, BACI-221) | Topbar Shipped popover's list fetch. `sinceDays=0` is the "Forever" sentinel — the bundle omits `?since=` so the server returns the unbounded list. Response shape is `{rows, total}` so the popover header can render "showing N of TOTAL" without a second round trip. |
 | `countShippedIssues(p, sinceDays)` | `GET /repos/{p}/shipped/count?since=` (BACI-221) | Lean count-only sibling polled on the standard 10s `POLL_INTERVAL_MS` cadence so the topbar "Shipped · N" pill reflects the active Today / Last Week / Forever scope even when the popover is closed. No `?limit=` parameter — count is total under the scope. |
 | `listProxyStats(sinceDays)` | `GET /proxy/stats?since=` (BACI-304) | The Monitor screen's per-FQDN reverse-proxy rollup. **Cross-cutting** — `proxy_requests` has no `repo_id`, so this is the rare seam method that takes no repo prefix; the endpoint is the cross-cutting sibling of `/history`, behind the bearer-token auth (outside the `/anthropic/` exemption). `sinceDays=0` is the "All-time" sentinel (omit `?since=`); a positive value maps to the rolling `?since=Nd` lookback. Reshapes the server's snake_case `ProxyFQDNStat` rows into the camelCase shape `MonitorView` consumes. Wails twin is `MonitorService.ProxyStats`. |
+| `listJobTranscripts(repo, issue, mode, sinceDays)` | `GET /proxy/jobs?repo=&issue=&mode=&since=` (BACI-322) | The Monitor Transcript page's row-per-dispatch list. Unlike `listProxyStats` this **is** active-repo scoped — `proxy_messages` has no `repo_id`, but each dispatch resolves to a repo prefix, so `repo` (the URL prefix) drives the scope and `issue` / `mode` narrow further. `sinceDays=0` is the "All-time" sentinel. Reshapes the snake_case `JobTranscriptRow` rows into the camelCase shape `TranscriptListPanel` consumes. Wails twin is `MonitorService.ListJobTranscripts`. |
 
 ---
 
@@ -404,9 +405,21 @@ truth for the active repo** — `App` derives the active repo from
   - `/:prefix/agents` → `AgentsView`.
   - `/:prefix/history` → `HistoryView`.
   - `/:prefix/monitor` → `MonitorView` (BACI-304). The route nests under
-    `/:prefix` for nav uniformity, but the per-FQDN proxy stats are
-    global (the `proxy_requests` table is cross-cutting, no `repo_id`),
-    so the screen ignores the active repo for its data.
+    `/:prefix` for nav uniformity, but the per-FQDN proxy stats on the
+    Network sub-tab are global (the `proxy_requests` table is
+    cross-cutting, no `repo_id`), so that table ignores the active repo
+    for its data.
+  - `/:prefix/monitor/transcripts` → `MonitorView` (BACI-322). The same
+    Monitor shell — it derives the active sub-tab (Network | Transcripts)
+    from the URL, so this path renders the Transcript browser. The
+    Transcript list **is** active-repo scoped (each dispatch resolves to a
+    repo prefix), unlike the global Network table.
+  - `/:prefix/monitor/transcript/:id` → `TranscriptRoute` (BACI-322). The
+    deep-linkable full-transcript page for one dispatch (keyed on
+    `dispatch_id`). react-router v7 ranks this more-specific path above
+    `/:prefix/monitor` and the `/:prefix/*` catch-all, and the SPA
+    fallback serves `index.html` for it on both transports, so a cold
+    deep-link refresh resolves.
   - **Active-repo resolution.** App matches the URL's first segment to a
     known board *case-insensitively* (a lowercased shared link still
     resolves) but always emits the canonical uppercase prefix in

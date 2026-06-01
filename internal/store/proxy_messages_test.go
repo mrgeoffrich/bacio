@@ -425,3 +425,120 @@ func TestSearchProxyMessages_Empty(t *testing.T) {
 		t.Fatalf("got %d matches, want 0", len(matches))
 	}
 }
+
+// TestListJobTranscripts seeds captures across two dispatches in two repos and
+// asserts the row-per-dispatch aggregation: turn count (primary captures only),
+// summed usage, the primary thread's model (not an auxiliary capture's), the
+// enrichment lifted off the dispatch, and that the repo / issue / mode filters
+// narrow correctly. It also asserts the empty-table case yields a non-nil slice.
+func TestListJobTranscripts(t *testing.T) {
+	s := newTestStore(t)
+
+	// Empty table → non-nil empty slice.
+	if rows, err := s.ListJobTranscripts(JobTranscriptFilter{}); err != nil {
+		t.Fatalf("empty ListJobTranscripts: %v", err)
+	} else if rows == nil {
+		t.Fatal("empty ListJobTranscripts returned nil, want non-nil empty slice")
+	} else if len(rows) != 0 {
+		t.Fatalf("empty table: got %d rows, want 0", len(rows))
+	}
+
+	// Two repos, one issue + one dispatch each.
+	repoA, err := s.CreateRepo("AAAA", "repo-a", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create repo A: %v", err)
+	}
+	repoB, err := s.CreateRepo("BBBB", "repo-b", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create repo B: %v", err)
+	}
+	issA, err := s.CreateIssue(repoA.ID, nil, "issue a", "", model.StateTodo, nil, "")
+	if err != nil {
+		t.Fatalf("create issue A: %v", err)
+	}
+	issB, err := s.CreateIssue(repoB.ID, nil, "issue b", "", model.StateTodo, nil, "")
+	if err != nil {
+		t.Fatalf("create issue B: %v", err)
+	}
+	dispA := seedDispatch(t, s, repoA.ID, &issA.ID, "implement")
+	dispB := seedDispatch(t, s, repoB.ID, &issB.ID, "plan")
+
+	// Dispatch A: two primary captures (opus) + one auxiliary (haiku, title-gen).
+	add := func(proxyReqID, dispatchID int64, modelName string, primary bool, in, out int64) {
+		t.Helper()
+		cap := &model.ParsedCapture{
+			Model: modelName, SystemFP: "fp", MessageCount: 1,
+			Turn: model.AnthropicTurn{Model: modelName, Usage: model.AnthropicUsage{InputTokens: in, OutputTokens: out}},
+		}
+		if _, err := s.AddProxyMessage(AddProxyMessageIn{
+			ProxyRequestID: proxyReqID, DispatchID: &dispatchID,
+			Capture: cap, IsPrimary: primary, StartedAt: time.Now(),
+		}); err != nil {
+			t.Fatalf("add capture %d: %v", proxyReqID, err)
+		}
+	}
+	add(1, dispA, "claude-opus-4-8", true, 100, 20)
+	add(2, dispA, "claude-haiku", false, 30, 5) // auxiliary
+	add(3, dispA, "claude-opus-4-8", true, 160, 15)
+	add(4, dispB, "claude-sonnet-4-6", true, 50, 10)
+
+	// Unscoped: both dispatches, newest-first by last-seen.
+	rows, err := s.ListJobTranscripts(JobTranscriptFilter{})
+	if err != nil {
+		t.Fatalf("ListJobTranscripts: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("unscoped: got %d rows, want 2: %+v", len(rows), rows)
+	}
+	byDispatch := map[int64]*model.JobTranscriptRow{}
+	for _, r := range rows {
+		byDispatch[r.DispatchID] = r
+	}
+	a := byDispatch[dispA]
+	if a == nil {
+		t.Fatalf("dispatch A row missing: %+v", rows)
+	}
+	// Turn count = primary captures only (2, not the 3 total).
+	if a.TurnCount != 2 {
+		t.Errorf("dispatch A turn_count = %d, want 2 (primary captures)", a.TurnCount)
+	}
+	// Usage sums across ALL captures (incl. the auxiliary): 100+30+160 in, 20+5+15 out.
+	if a.Usage.InputTokens != 290 || a.Usage.OutputTokens != 40 {
+		t.Errorf("dispatch A usage = %+v, want input 290 output 40", a.Usage)
+	}
+	// Model is the primary thread's, not the auxiliary haiku's.
+	if a.Model != "claude-opus-4-8" {
+		t.Errorf("dispatch A model = %q, want claude-opus-4-8 (primary, not aux haiku)", a.Model)
+	}
+	// Enrichment lifted off the dispatch.
+	if a.IssueKey != issA.Key || a.Mode != "implement" || a.RepoPrefix != "AAAA" {
+		t.Errorf("dispatch A enrichment = key=%q mode=%q prefix=%q, want %s/implement/AAAA", a.IssueKey, a.Mode, a.RepoPrefix, issA.Key)
+	}
+
+	// Repo-prefix scope drops the foreign-repo dispatch.
+	scoped, err := s.ListJobTranscripts(JobTranscriptFilter{RepoPrefix: "AAAA"})
+	if err != nil {
+		t.Fatalf("repo-scoped ListJobTranscripts: %v", err)
+	}
+	if len(scoped) != 1 || scoped[0].DispatchID != dispA {
+		t.Fatalf("repo scope AAAA: got %d rows, want only dispatch A: %+v", len(scoped), scoped)
+	}
+
+	// Issue filter narrows to the one issue.
+	byIssue, err := s.ListJobTranscripts(JobTranscriptFilter{IssueKey: issB.Key})
+	if err != nil {
+		t.Fatalf("issue-scoped ListJobTranscripts: %v", err)
+	}
+	if len(byIssue) != 1 || byIssue[0].DispatchID != dispB {
+		t.Fatalf("issue scope %s: got %d rows, want only dispatch B: %+v", issB.Key, len(byIssue), byIssue)
+	}
+
+	// Mode filter narrows to the one job mode.
+	byMode, err := s.ListJobTranscripts(JobTranscriptFilter{Mode: "plan"})
+	if err != nil {
+		t.Fatalf("mode-scoped ListJobTranscripts: %v", err)
+	}
+	if len(byMode) != 1 || byMode[0].DispatchID != dispB {
+		t.Fatalf("mode scope plan: got %d rows, want only dispatch B: %+v", len(byMode), byMode)
+	}
+}

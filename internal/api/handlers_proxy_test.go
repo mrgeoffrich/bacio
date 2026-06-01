@@ -154,6 +154,117 @@ func TestProxyCapturesEmptyArrayNotNull(t *testing.T) {
 	}
 }
 
+// seedJobCapture inserts one parsed proxy_messages row correlated to a
+// dispatch — the BACI-322 GET /proxy/jobs handler aggregates these per
+// dispatch.
+func seedJobCapture(t *testing.T, s *store.Store, proxyReqID int64, dispatchID int64, modelName string, primary bool, in, out int64) {
+	t.Helper()
+	cap := &model.ParsedCapture{
+		Model: modelName, SystemFP: "fp", MessageCount: 1,
+		Turn: model.AnthropicTurn{Model: modelName, Usage: model.AnthropicUsage{InputTokens: in, OutputTokens: out}},
+	}
+	if _, err := s.AddProxyMessage(store.AddProxyMessageIn{
+		ProxyRequestID: proxyReqID, DispatchID: &dispatchID,
+		Capture: cap, IsPrimary: primary, StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("seed job capture %d: %v", proxyReqID, err)
+	}
+}
+
+// TestProxyJobsEndpoint seeds two dispatches in two repos and asserts
+// GET /proxy/jobs returns one row per dispatch, repo-scopes via ?repo=, and
+// narrows via ?mode=. Each row carries the dispatch enrichment.
+func TestProxyJobsEndpoint(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repoA := seedRepo(t, s)          // MINI
+	repoB := seedRepo2(t, s)         // OTHR
+	issA := seedIssue(t, s, repoA, "job a")
+	issB := seedIssue(t, s, repoB, "job b")
+	dispA, err := s.AddDispatch(store.AddDispatchIn{
+		RepoID: repoA.ID, IssueID: &issA.ID, Mode: model.DispatchModeImplement,
+		TargetSessionID: uuidFor("sess-job-a"), CreatedBy: "user",
+	})
+	if err != nil {
+		t.Fatalf("add dispatch A: %v", err)
+	}
+	dispB, err := s.AddDispatch(store.AddDispatchIn{
+		RepoID: repoB.ID, IssueID: &issB.ID, Mode: model.DispatchModePlan,
+		TargetSessionID: uuidFor("sess-job-b"), CreatedBy: "user",
+	})
+	if err != nil {
+		t.Fatalf("add dispatch B: %v", err)
+	}
+	// Dispatch A: two primary captures + one auxiliary.
+	seedJobCapture(t, s, 1, dispA.ID, "claude-opus-4-8", true, 100, 20)
+	seedJobCapture(t, s, 2, dispA.ID, "claude-haiku", false, 30, 5)
+	seedJobCapture(t, s, 3, dispA.ID, "claude-opus-4-8", true, 160, 15)
+	seedJobCapture(t, s, 4, dispB.ID, "claude-sonnet-4-6", true, 50, 10)
+
+	// Unscoped: both dispatches.
+	resp, raw := apiGet(t, ts.URL+"/proxy/jobs")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d body=%s", resp.StatusCode, raw)
+	}
+	var rows []*model.JobTranscriptRow
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("unscoped: got %d rows, want 2: %s", len(rows), raw)
+	}
+
+	// Repo scope drops the foreign repo.
+	resp, raw = apiGet(t, ts.URL+"/proxy/jobs?repo=MINI")
+	if resp.StatusCode != 200 {
+		t.Fatalf("repo-scoped status: %d body=%s", resp.StatusCode, raw)
+	}
+	rows = nil
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		t.Fatalf("decode repo-scoped: %v", err)
+	}
+	if len(rows) != 1 || rows[0].DispatchID != dispA.ID {
+		t.Fatalf("repo=MINI: got %d rows, want only dispatch A: %s", len(rows), raw)
+	}
+	a := rows[0]
+	// Turn count = primary captures only; model is the primary thread's; usage
+	// sums across all captures; enrichment lifted off the dispatch.
+	if a.TurnCount != 2 || a.Model != "claude-opus-4-8" {
+		t.Errorf("dispatch A row = turns %d model %q, want 2 / claude-opus-4-8", a.TurnCount, a.Model)
+	}
+	if a.Usage.InputTokens != 290 || a.Usage.OutputTokens != 40 {
+		t.Errorf("dispatch A usage = %+v, want input 290 output 40", a.Usage)
+	}
+	if a.IssueKey != issA.Key || a.Mode != string(model.DispatchModeImplement) || a.RepoPrefix != "MINI" {
+		t.Errorf("dispatch A enrichment = key=%q mode=%q prefix=%q, want %s/implement/MINI", a.IssueKey, a.Mode, a.RepoPrefix, issA.Key)
+	}
+
+	// Mode scope narrows to the plan job (dispatch B).
+	resp, raw = apiGet(t, ts.URL+"/proxy/jobs?mode=plan")
+	if resp.StatusCode != 200 {
+		t.Fatalf("mode-scoped status: %d body=%s", resp.StatusCode, raw)
+	}
+	rows = nil
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		t.Fatalf("decode mode-scoped: %v", err)
+	}
+	if len(rows) != 1 || rows[0].DispatchID != dispB.ID {
+		t.Fatalf("mode=plan: got %d rows, want only dispatch B: %s", len(rows), raw)
+	}
+}
+
+// TestProxyJobsEmptyArrayNotNull: the jobs handler emits [] not null for an
+// empty match.
+func TestProxyJobsEmptyArrayNotNull(t *testing.T) {
+	ts, _ := newTestAPI(t, api.Options{})
+	resp, raw := apiGet(t, ts.URL+"/proxy/jobs?repo=NONE")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d", resp.StatusCode)
+	}
+	if len(raw) == 0 || raw[0] != '[' {
+		t.Fatalf("expected [], got %s", string(raw))
+	}
+}
+
 // TestProxyCapturesBadDispatchID rejects a non-numeric dispatch_id at the
 // handler boundary.
 func TestProxyCapturesBadDispatchID(t *testing.T) {

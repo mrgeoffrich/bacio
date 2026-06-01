@@ -2491,6 +2491,149 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   overflow-x: auto;
 }
 
+/* BACI-322: Monitor sub-tabs (Network | Transcripts) — a segmented control
+   in the Monitor bar, styled off the Topbar's segmented rhythm. The shell
+   (MonitorView) syncs the active chip to the URL. */
+.mk-monitor-subtabs {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg-3);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+}
+.mk-monitor-subtab {
+  appearance: none;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  padding: 4px 12px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--fg-3);
+}
+.mk-monitor-subtab:hover { color: var(--fg-1); }
+.mk-monitor-subtab.is-active {
+  background: var(--bg-1);
+  color: var(--fg-1);
+  box-shadow: var(--shadow-1);
+}
+
+/* BACI-322: a Monitor sub-panel (Network or Transcripts) — the body below
+   the shared Monitor bar. Each panel owns its own filter row and content. */
+.mk-monitor-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.mk-monitor-panel-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  flex-shrink: 0;
+}
+/* The panel-bar's scope picker sits at the right like the screen bar's. */
+.mk-monitor-panel-bar .mk-monitor-scope { margin-left: auto; }
+
+/* BACI-322: the Transcripts panel — an issue-substring filter + mode select,
+   and a list of per-dispatch transcript rows (HistoryView-shaped). */
+.mk-transcript-filter {
+  flex: 0 1 280px;
+  appearance: none;
+  padding: 5px 10px;
+  background: var(--bg-1);
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  color: var(--fg-1);
+}
+.mk-transcript-filter::placeholder { color: var(--fg-4); }
+.mk-transcript-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-md);
+  background: var(--bg-2);
+}
+.mk-transcript-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-1);
+  text-decoration: none;
+  color: var(--fg-2);
+}
+.mk-transcript-row:last-child { border-bottom: 0; }
+.mk-transcript-row:hover { background: var(--bg-3); }
+.mk-transcript-row-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.mk-transcript-nokey {
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--fg-3);
+}
+.mk-transcript-model {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--fg-4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mk-transcript-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--fg-4);
+}
+.mk-transcript-tokens { font-variant-numeric: tabular-nums; }
+
+/* BACI-322: the deep-linkable full-transcript page — a back-header above the
+   reused <TranscriptView> body. */
+.mk-transcript-route {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding: 20px 24px;
+}
+.mk-transcript-route-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  flex-shrink: 0;
+}
+.mk-transcript-route-title {
+  font-size: var(--text-sm);
+  color: var(--fg-3);
+}
+.mk-transcript-route-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
 /* ============================================================
    Issue workspace (BACI-54) — full-screen routed per-issue view
    that replaced the right-side drawer + edit modal. A primary

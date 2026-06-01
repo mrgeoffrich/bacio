@@ -49,6 +49,8 @@ export {
     IssueBriefDTO,
     IssueDetail,
     IssueMetaDTO,
+    JobTranscriptRowDTO,
+    JobTranscriptUsageDTO,
     LatestPlanDTO,
     LeaderStatusDTO,
     LinkedDocDTO,

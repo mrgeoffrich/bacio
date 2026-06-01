@@ -207,6 +207,137 @@ func (s *Store) JobTranscript(dispatchID int64) (*model.AnthropicTranscript, err
 	return anthropic.AssembleTranscript(&id, assembled), nil
 }
 
+// JobTranscriptFilter parameterises the BACI-322 transcript browser
+// (`bacio proxy jobs` / GET /proxy/jobs) — the row-per-dispatch list the
+// Transcript page renders. RepoPrefix scopes to the active repo (rows whose
+// dispatch resolves to a different repo prefix are dropped — proxy_messages
+// has no repo_id, so the scope is applied in Go after the cached GetDispatch
+// enrichment); IssueKey / Mode narrow to one issue / one job mode the same
+// way. Since (inclusive lower bound on the dispatch's last-seen capture)
+// bounds the window; nil means no lower bound. Limit caps the rows returned
+// newest-first — <= 0 falls back to defaultProxyListLimit, hard-capped at
+// defaultProxyRequestLimit.
+type JobTranscriptFilter struct {
+	RepoPrefix string
+	IssueKey   string
+	Mode       string
+	Since      *time.Time
+	Limit      int
+}
+
+// ListJobTranscripts returns one summary row per distinct dispatch that has
+// parsed captures — the BACI-322 transcript browser's list. A
+// GROUP BY dispatch_id aggregation over proxy_messages folds each job's
+// captures into a turn count (the primary captures), summed token usage, and
+// the most-recent capture's started_at; the model is picked from a primary
+// row (an auxiliary title-gen capture can carry a different model, so a blind
+// MAX(model) would lie — mirror JobTranscript's primary/auxiliary split). Each
+// distinct dispatch is then best-effort enriched via a cached GetDispatch
+// (the exact idiom ListProxyCapturesEnriched uses) for its issue key / mode /
+// agent name / repo prefix; a deleted dispatch leaves those empty. The repo /
+// issue / mode filters are applied in Go against the enrichment (proxy_messages
+// has no FK to agent_dispatches), so they narrow after the grouped scan. The
+// grouped query is LIMIT-capped so the post-scan enrichment stays bounded.
+// Always non-nil.
+func (s *Store) ListJobTranscripts(f JobTranscriptFilter) ([]*model.JobTranscriptRow, error) {
+	limit := f.Limit
+	if limit <= 0 {
+		limit = defaultProxyListLimit
+	}
+	if limit > defaultProxyRequestLimit {
+		limit = defaultProxyRequestLimit
+	}
+
+	// One row per dispatch: turn count = the primary captures; usage summed
+	// across every capture; model from the latest primary row (correlated
+	// subquery, not MAX(model), so an auxiliary capture's model never wins);
+	// last_seen = the newest capture's started_at, the ordering column.
+	q := `
+		SELECT m.dispatch_id,
+		       SUM(CASE WHEN m.is_primary = 1 THEN 1 ELSE 0 END) AS turn_count,
+		       SUM(m.input_tokens)          AS input_tokens,
+		       SUM(m.output_tokens)         AS output_tokens,
+		       SUM(m.cache_creation_tokens) AS cache_creation_tokens,
+		       SUM(m.cache_read_tokens)     AS cache_read_tokens,
+		       SUM(m.thinking_tokens)       AS thinking_tokens,
+		       MAX(m.started_at)            AS last_seen,
+		       (SELECT p.model FROM proxy_messages p
+		          WHERE p.dispatch_id = m.dispatch_id AND p.is_primary = 1
+		          ORDER BY p.id DESC LIMIT 1) AS model
+		FROM proxy_messages m
+		WHERE m.dispatch_id IS NOT NULL`
+	var args []any
+	if f.Since != nil {
+		q += ` AND m.started_at >= ?`
+		args = append(args, f.Since.UTC().Format("2006-01-02 15:04:05"))
+	}
+	q += `
+		GROUP BY m.dispatch_id
+		ORDER BY last_seen DESC
+		LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := s.DB.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	type chip struct{ issueKey, mode, agent, prefix string }
+	chips := map[int64]chip{}
+	out := make([]*model.JobTranscriptRow, 0)
+	for rows.Next() {
+		var (
+			r           model.JobTranscriptRow
+			modelStr    sql.NullString
+			lastSeenStr string
+		)
+		// last_seen comes back as a string: SQLite's MAX() over the time
+		// column strips the column affinity the driver uses to hand a direct
+		// SELECT back as time.Time, so the aggregate scans as TEXT. Parse it
+		// with the layout the driver wrote (Go's default time.Time string).
+		if err := rows.Scan(
+			&r.DispatchID, &r.TurnCount,
+			&r.Usage.InputTokens, &r.Usage.OutputTokens,
+			&r.Usage.CacheCreationInputTokens, &r.Usage.CacheReadInputTokens,
+			&r.Usage.ThinkingTokens, &lastSeenStr, &modelStr,
+		); err != nil {
+			return nil, err
+		}
+		r.LastSeen = parseSQLiteTime(lastSeenStr)
+		if modelStr.Valid {
+			r.Model = modelStr.String
+		}
+
+		// Enrich from the dispatch (cached so a job's row costs one read).
+		c, ok := chips[r.DispatchID]
+		if !ok {
+			if disp, derr := s.GetDispatch(r.DispatchID); derr == nil && disp != nil {
+				c = chip{issueKey: disp.IssueKey, mode: string(disp.Mode), agent: disp.TargetAgentName, prefix: disp.RepoPrefix}
+			}
+			chips[r.DispatchID] = c
+		}
+		r.IssueKey = c.issueKey
+		r.Mode = c.mode
+		r.AgentName = c.agent
+		r.RepoPrefix = c.prefix
+
+		// Active-repo / issue / mode scoping, applied in Go against the
+		// enrichment since proxy_messages has no FK to agent_dispatches.
+		if f.RepoPrefix != "" && r.RepoPrefix != f.RepoPrefix {
+			continue
+		}
+		if f.IssueKey != "" && r.IssueKey != f.IssueKey {
+			continue
+		}
+		if f.Mode != "" && r.Mode != f.Mode {
+			continue
+		}
+		out = append(out, &r)
+	}
+	return out, rows.Err()
+}
+
 func scanProxyMessage(r rowScanner) (*model.ProxyMessage, error) {
 	var v model.ProxyMessage
 	var isPrimary int
@@ -450,4 +581,26 @@ func collapseSnippet(s string) string {
 func likeEscape(s string) string {
 	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 	return r.Replace(s)
+}
+
+// parseSQLiteTime parses a started_at value the way the modernc.org/sqlite
+// driver wrote it — a time.Time stored by Exec serialises through its default
+// String() layout. A direct SELECT of the column scans straight into a
+// time.Time, but an aggregate (MAX) loses the affinity and comes back as TEXT,
+// so ListJobTranscripts parses the string itself. Tries the driver's default
+// layout first, then the trimmed "2006-01-02 15:04:05" form the filters write;
+// an unparseable value yields the zero time rather than failing the read.
+func parseSQLiteTime(s string) time.Time {
+	for _, layout := range []string{
+		"2006-01-02 15:04:05.999999999 -0700 MST",
+		"2006-01-02 15:04:05.999999 -0700 MST",
+		"2006-01-02 15:04:05 -0700 MST",
+		"2006-01-02 15:04:05",
+		time.RFC3339Nano,
+	} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t.UTC()
+		}
+	}
+	return time.Time{}
 }

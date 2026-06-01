@@ -367,6 +367,24 @@ bounded by `pruneProxyMessages` on the same 60-day window as the index.
   containing characters JSON escapes (a literal quote, a newline) won't match the
   JSON-escaped stored bytes; this is a plain-word forensic search, and the raw
   `.http` stays ground truth via `proxy raw <id>`.
+- `bacio proxy jobs [--repo <PREFIX>] [--issue <KEY>] [--mode <m>] [--since <d>]`
+  / `GET /proxy/jobs?repo=&issue=&mode=&since=&from=&limit=`
+  (BACI-322) — the **transcript browser** list: one summary row per distinct
+  dispatch that has parsed captures, backing the Monitor screen's Transcript
+  page. Backed by `Store.ListJobTranscripts`, a `GROUP BY dispatch_id`
+  aggregation over `proxy_messages` (turn count = the primary captures, summed
+  token usage, the primary thread's model — picked from an `is_primary` row, not
+  a blind `MAX(model)`, so an auxiliary title-gen capture's model never wins —
+  and the newest capture's `started_at`). Each distinct dispatch is best-effort
+  enriched via a cached `GetDispatch` (the `ListProxyCapturesEnriched` idiom)
+  for its issue key / mode / agent / repo prefix. `proxy_messages` has no
+  `repo_id`, so the `--repo` / `--issue` / `--mode` scoping is applied in Go
+  against the enrichment after the grouped, `LIMIT`-capped scan. The deep-link
+  key is the `dispatch_id` (the same id `proxy job <dispatch_id>` takes), so the
+  Transcript page's per-transcript URL never rots. Note the bare `/proxy/jobs`
+  path is distinct from `/proxy/jobs/{dispatch_id}/transcript` — Go's `ServeMux`
+  ranks the longer, wildcard-bearing pattern as the more specific match, so the
+  two coexist.
 
 Pre-306 captures are **not** retroactively parsed (no backfill); new
 traffic populates `proxy_messages` going forward. A `bacio proxy reparse`
@@ -442,6 +460,40 @@ The new reads are wired end-to-end on both transports — `MonitorService`
 `ProxyCaptureRow` / `ProxyMessage` / `AnthropicTranscript` aliases (BACI-108
 pattern) living in
 [`desktop/frontend/src/lib/proxyCaptures.ts`](../desktop/frontend/src/lib/proxyCaptures.ts).
+
+## Monitor Network + Transcript tabs (BACI-322)
+
+BACI-322 splits the single Monitor screen into two URL-synced sub-tabs under
+the one `Monitor` Topbar entry — the BACI-308 drill-down conflated raw-traffic
+watching with transcript reading, two different jobs:
+
+- **Network** (`/:prefix/monitor`) — today's screen lifted verbatim into
+  [`NetworkPanel.jsx`](../desktop/frontend/src/components/NetworkPanel.jsx): the
+  per-FQDN traffic table + the right-docked capture sheet. Near-zero regression
+  risk (it's the same code).
+- **Transcript** (`/:prefix/monitor/transcripts`) — a first-class browser over
+  the per-dispatch transcripts
+  ([`TranscriptListPanel.jsx`](../desktop/frontend/src/components/TranscriptListPanel.jsx)),
+  backed by the new `GET /proxy/jobs` list (active-repo scoped, with a
+  client-side issue-substring filter + a server-side job-mode `<select>`). Each
+  row links to the **deep-linkable full-transcript route**
+  `/:prefix/monitor/transcript/:dispatchId`
+  ([`TranscriptRoute.jsx`](../desktop/frontend/src/components/TranscriptRoute.jsx)),
+  which renders the same assembled transcript the BACI-308 sheet shows — the
+  reused `<TranscriptView>` via the extracted
+  [`JobTranscriptBody.jsx`](../desktop/frontend/src/lib/transcript/JobTranscriptBody.jsx)
+  (one copy shared by the sheet and the route). The deep-link is keyed on
+  `dispatch_id` (the transcript key everywhere), so the URL is shareable from
+  other surfaces / comments without rotting; the SPA fallback already serves the
+  nested route on both transports, so a cold refresh resolves it.
+
+The one genuinely-new backend is `Store.ListJobTranscripts` + `GET /proxy/jobs`
++ the `bacio proxy jobs` CLI twin (see the read-surface list above) — no
+"list transcripts" query existed before (every capture list was host-anchored).
+The new read rides the same cross-transport chain — `MonitorService.ListJobTranscripts`
+returning the camelCase `JobTranscriptRowDTO` for Wails, the matching `GET`
+reshape for the web build — with the cross-transport `JobTranscriptRow` alias in
+`proxyCaptures.ts`.
 
 ---
 

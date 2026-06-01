@@ -26,6 +26,7 @@ func newProxyCmd() *cobra.Command {
 	cmd.AddCommand(newProxyCaptureCmd())
 	cmd.AddCommand(newProxyRawCmd())
 	cmd.AddCommand(newProxyJobCmd())
+	cmd.AddCommand(newProxyJobsCmd())
 	cmd.AddCommand(newProxyGrepCmd())
 	return cmd
 }
@@ -285,6 +286,68 @@ capture correlates on. Returns not-found when the dispatch has no parsed capture
 			return emit(tr)
 		},
 	}
+}
+
+// newProxyJobsCmd is `bacio proxy jobs` — the BACI-322 transcript browser
+// list, the CLI twin of GET /proxy/jobs: one summary row per distinct dispatch
+// that has parsed captures (turn count, summed token usage, model, last-seen,
+// plus the issue-key / mode / agent / repo-prefix enrichment). Scope with
+// --repo (the active repo prefix), --issue (one issue), --mode (one job mode),
+// and --since (a lookback window); rows are newest-first and capped. Read-only,
+// so prefer `-o json` for the full rows.
+func newProxyJobsCmd() *cobra.Command {
+	var (
+		repo     string
+		issue    string
+		mode     string
+		sinceStr string
+		limit    int
+	)
+	cmd := &cobra.Command{
+		Use:   "jobs",
+		Short: "List per-dispatch transcripts",
+		Long: `List the per-dispatch transcripts captured through the reverse proxy —
+one row per distinct dispatch that has parsed Anthropic captures (BACI-322), the
+CLI twin of the Monitor Transcript page. Each row carries its turn count, summed
+token usage, the primary thread's model, last-seen, and the dispatch's issue key
+/ mode / agent. Drill into one with 'bacio proxy job <dispatch_id>'.
+
+Scope with --repo (the active repo prefix), --issue (one issue key, e.g.
+BACI-302), --mode (one job mode: plan / implement / review / ship / design /
+fix_review), and --since (a lookback window). Rows are newest-first and capped.
+
+  --since accepts a duration lookback: 30m, 1h, 1d, 2w`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := openClient()
+			if err != nil {
+				return err
+			}
+			defer c.Close()
+
+			f := store.JobTranscriptFilter{
+				RepoPrefix: repo, IssueKey: issue, Mode: mode, Limit: limit,
+			}
+			if sinceStr != "" {
+				d, err := timeparse.Lookback(sinceStr)
+				if err != nil {
+					return err
+				}
+				cutoff := time.Now().Add(-d)
+				f.Since = &cutoff
+			}
+			rows, err := c.ListJobTranscripts(context.Background(), f)
+			if err != nil {
+				return err
+			}
+			return emit(rows)
+		},
+	}
+	cmd.Flags().StringVar(&repo, "repo", "", "scope to one repo prefix (e.g. BACI)")
+	cmd.Flags().StringVar(&issue, "issue", "", "scope to one issue key (e.g. BACI-302)")
+	cmd.Flags().StringVar(&mode, "mode", "", "scope to one job mode (plan, implement, review, ship, design, fix_review)")
+	cmd.Flags().StringVar(&sinceStr, "since", "", "look back this far (e.g. 30m, 1h, 1d, 2w)")
+	cmd.Flags().IntVar(&limit, "limit", 0, "max rows (0 for the default cap)")
+	return cmd
 }
 
 // newProxyStatsCmd is `bacio proxy stats` — the BACI-303 per-FQDN

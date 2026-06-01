@@ -165,6 +165,16 @@ func newRouter(d deps) http.Handler {
 	// bearer-token-protected posture as the BACI-306/308 reads.
 	mux.HandleFunc("GET /proxy/search", d.handleProxySearch)
 
+	// BACI-322: the transcript browser list — one summary row per distinct
+	// dispatch that has parsed captures
+	// (/proxy/jobs?repo=&issue=&mode=&since=&from=&limit=, each row enriched
+	// with its dispatch's issue-key / mode / agent / repo-prefix). The bare
+	// /proxy/jobs pattern is distinct from /proxy/jobs/{dispatch_id}/transcript
+	// above — ServeMux ranks the longer, wildcard-bearing pattern as the more
+	// specific match, so the two coexist without a conflict. Same cross-cutting,
+	// bearer-token-protected posture as the other /proxy reads.
+	mux.HandleFunc("GET /proxy/jobs", d.handleProxyJobs)
+
 	// BACI-187: shipping-log popover — list of recently-done issues,
 	// newest-first, sibling of /history. Per-repo only; cross-repo is
 	// deliberately out of scope (matches the rest of the surface).

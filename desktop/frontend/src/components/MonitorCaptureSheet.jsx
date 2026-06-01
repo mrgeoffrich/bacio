@@ -1,10 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { reportError } from '../errors';
 import * as api from '../api';
 import { formatWhen } from '../lib/formatWhen';
 import { formatBytes, formatMs } from '../lib/proxyStats';
-import TranscriptView from '../lib/transcript/TranscriptView';
-import { anthropicTranscriptToParseResult } from '../lib/transcript/anthropicAdapter';
+import JobTranscriptBody from '../lib/transcript/JobTranscriptBody';
 
 // MonitorCaptureSheet is the BACI-308 right-docked drill-down beside the
 // MonitorView FQDN table (Option A — master-detail side sheet). It walks three
@@ -244,38 +243,3 @@ function CaptureDetailBody({ capture, onViewTranscript }) {
   );
 }
 
-// JobTranscriptBody fetches a dispatch's assembled transcript and feeds it
-// through the adapter into the reused <TranscriptView>. A 404 (no parsed
-// captures for the dispatch) shows an inline message rather than an error toast.
-function JobTranscriptBody({ dispatchId }) {
-  const [transcript, setTranscript] = useState(null);
-  const [state, setState] = useState('loading'); // 'loading' | 'ready' | 'empty'
-
-  useEffect(() => {
-    let cancelled = false;
-    setState('loading');
-    setTranscript(null);
-    api.jobTranscript(dispatchId)
-      .then(tr => {
-        if (cancelled) return;
-        setTranscript(tr);
-        setState('ready');
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setState('empty');
-      });
-    return () => { cancelled = true; };
-  }, [dispatchId]);
-
-  const parsed = useMemo(
-    () => (transcript ? anthropicTranscriptToParseResult(transcript) : null),
-    [transcript],
-  );
-
-  if (state === 'loading') return <div className="mk-monitor-empty">Loading transcript…</div>;
-  if (state === 'empty' || !parsed) {
-    return <div className="mk-monitor-empty">No assembled transcript for this dispatch.</div>;
-  }
-  return <TranscriptView parsed={parsed} filename={`dispatch #${dispatchId}`} />;
-}

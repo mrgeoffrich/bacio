@@ -761,6 +761,11 @@ export type { ProxyFQDNStat };
 // api.ts re-exports the Wails-binding equivalents under the same names.
 import type { ProxyCaptureRow, ProxyMessage, AnthropicTranscript } from './lib/proxyCaptures';
 export type { ProxyCaptureRow, ProxyMessage, AnthropicTranscript };
+// BACI-322: the transcript browser's row-per-dispatch shape — same
+// cross-transport split. api.ts re-exports the Wails JobTranscriptRowDTO under
+// this name; this twin reshapes the snake_case wire row into it.
+import type { JobTranscriptRow } from './lib/proxyCaptures';
+export type { JobTranscriptRow };
 
 export interface PromptTemplateDTO {
   slug: string;
@@ -2242,6 +2247,64 @@ export async function anthropicCapture(id: number): Promise<ProxyMessage> {
 // feeds the viewer, so no reshape is needed.
 export async function jobTranscript(dispatchId: number): Promise<AnthropicTranscript> {
   return call<AnthropicTranscript>(`/proxy/jobs/${dispatchId}/transcript`);
+}
+
+// ApiJobTranscriptRow is the snake_case wire shape GET /proxy/jobs returns
+// (model.JobTranscriptRow). listJobTranscripts reshapes it into the camelCase
+// JobTranscriptRow the Transcript page consumes.
+interface ApiJobTranscriptRow {
+  dispatch_id: number;
+  issue_key?: string;
+  mode?: string;
+  agent_name?: string;
+  repo_prefix?: string;
+  model?: string;
+  turn_count: number;
+  usage: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+    thinking_tokens?: number;
+  };
+  last_seen: string;
+}
+
+// listJobTranscripts (BACI-322) is the HTTP twin of api.ts's
+// listJobTranscripts — the Monitor Transcript page's row-per-dispatch list.
+// GET /proxy/jobs is cross-cutting (no repo prefix in the path); `repo` scopes
+// to the active board, `issue` / `mode` narrow, `sinceDays === 0` is the
+// all-time sentinel. Reshapes the snake_case wire rows into the camelCase
+// JobTranscriptRow shape api.ts re-exports.
+export async function listJobTranscripts(
+  repo = '',
+  issue = '',
+  mode = '',
+  sinceDays = 0,
+): Promise<JobTranscriptRow[]> {
+  const query: Record<string, string | number> = {};
+  if (repo) query.repo = repo;
+  if (issue) query.issue = issue;
+  if (mode) query.mode = mode;
+  if (sinceDays > 0) query.since = `${sinceDays}d`;
+  const rows = await call<ApiJobTranscriptRow[]>('/proxy/jobs', { query });
+  return (rows ?? []).map(r => ({
+    dispatchId: r.dispatch_id,
+    issueKey: r.issue_key,
+    mode: r.mode,
+    agentName: r.agent_name,
+    repoPrefix: r.repo_prefix,
+    model: r.model,
+    turnCount: r.turn_count,
+    usage: {
+      inputTokens: r.usage?.input_tokens ?? 0,
+      outputTokens: r.usage?.output_tokens ?? 0,
+      cacheCreationTokens: r.usage?.cache_creation_input_tokens ?? 0,
+      cacheReadTokens: r.usage?.cache_read_input_tokens ?? 0,
+      thinkingTokens: r.usage?.thinking_tokens ?? 0,
+    },
+    lastSeen: r.last_seen,
+  }));
 }
 
 interface ApiDocView {

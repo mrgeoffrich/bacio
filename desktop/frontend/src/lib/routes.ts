@@ -44,6 +44,22 @@ export function processEditPath(prefix: string, key: string): string {
   return `/${prefix}/pipeline/${key}/process`;
 }
 
+// monitorTranscriptsPath maps onto the BACI-322 Monitor Transcript sub-tab
+// under the active repo prefix (`/<prefix>/monitor/transcripts`). The bare
+// `/<prefix>/monitor` is the Network sub-tab; this is its Transcripts peer.
+export function monitorTranscriptsPath(prefix: string): string {
+  return `/${prefix}/monitor/transcripts`;
+}
+
+// transcriptPath maps a dispatch id onto the BACI-322 deep-linkable
+// full-transcript route under the active repo prefix
+// (`/<prefix>/monitor/transcript/<dispatchId>`). dispatch_id is the stable
+// per-job key the transcript is addressed on, so the URL can be shared from
+// other surfaces / comments without rotting.
+export function transcriptPath(prefix: string, dispatchId: number | string): string {
+  return `/${prefix}/monitor/transcript/${dispatchId}`;
+}
+
 // featurePath maps a feature slug onto its detail route under the
 // active repo prefix.
 export function featurePath(prefix: string, slug: string): string {
