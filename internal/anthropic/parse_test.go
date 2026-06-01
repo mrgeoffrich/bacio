@@ -177,6 +177,52 @@ func TestParseCapture_ResponseMarkerInRequestBody(t *testing.T) {
 	}
 }
 
+// TestSystemFingerprint_StripsBillingHeader is the BACI-326 core regression for
+// the fingerprint helper: the Claude client prepends a volatile
+// x-anthropic-billing-header block whose `cch` cache hash drifts every request,
+// so hashing the system bytes verbatim gave every turn a different fingerprint.
+// Two captures whose system blocks differ ONLY in the billing header's cch must
+// now produce the SAME fingerprint (so Classify threads them), a genuinely
+// different system prompt must still produce a DIFFERENT fingerprint (so sibling
+// threads stay disambiguated), and a string-form system must still fingerprint
+// (the verbatim fallback) — non-empty and stable across identical bytes.
+func TestSystemFingerprint_StripsBillingHeader(t *testing.T) {
+	turn1, err := ParseCapture(readFixture(t, "system-fp-drift-turn1.sse.http"))
+	if err != nil {
+		t.Fatalf("parse turn1: %v", err)
+	}
+	turn2, err := ParseCapture(readFixture(t, "system-fp-drift-turn2.sse.http"))
+	if err != nil {
+		t.Fatalf("parse turn2: %v", err)
+	}
+	// turn1 and turn2 share the same conversation; their system blocks differ
+	// only in block 0's cch (4bd2d → 8d5cb). The stripped fingerprint is equal.
+	if turn1.SystemFP == "" {
+		t.Fatalf("turn1 SystemFP is empty, want a stripped-block-list hash")
+	}
+	if turn1.SystemFP != turn2.SystemFP {
+		t.Errorf("cch-only drift produced different fingerprints: turn1=%s turn2=%s (the billing header must be stripped before hashing)", turn1.SystemFP, turn2.SystemFP)
+	}
+
+	// A genuinely-different system prompt (same billing-header shape, different
+	// stable text) must hash differently — disambiguation is preserved.
+	otherText := systemFingerprint([]byte(`[{"type":"text","text":"x-anthropic-billing-header: cc_version=2.1.159.1f0; cc_entrypoint=cli; cch=4bd2d;"},{"type":"text","text":"You are a DIFFERENT agent."}]`))
+	if otherText == turn1.SystemFP {
+		t.Errorf("a different system prompt hashed equal to the drift thread: %s — sibling threads must stay distinct", otherText)
+	}
+
+	// A string-form system (the shorthand the API also accepts) has no block list
+	// to strip, so it hashes the verbatim bytes — non-empty and stable.
+	strFP1 := systemFingerprint([]byte(`"You are a plain string system prompt."`))
+	strFP2 := systemFingerprint([]byte(`"You are a plain string system prompt."`))
+	if strFP1 == "" {
+		t.Errorf("string-form system fingerprinted empty, want a verbatim hash")
+	}
+	if strFP1 != strFP2 {
+		t.Errorf("string-form fingerprint not stable: %s vs %s", strFP1, strFP2)
+	}
+}
+
 // TestParseCapture_StringFormMessageContent is the BACI-324 regression: a request
 // message carries `content` as a plain string (the /v1/messages shorthand the
 // Claude client emits for plain user turns) rather than a block list. The parser

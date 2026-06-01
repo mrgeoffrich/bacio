@@ -173,6 +173,68 @@ func TestClassify_EffortOnlyIsPrimary(t *testing.T) {
 	}
 }
 
+// TestClassify_SystemFingerprintDrift is the BACI-326 end-to-end regression: two
+// captures of the SAME conversation whose system blocks differ only in the
+// volatile x-anthropic-billing-header cch token must BOTH classify primary and
+// assemble into the full ordered thread. Before the fingerprint strip, turn2's
+// drifted cch gave it a different fingerprint → Classify filed it auxiliary →
+// turn_count capped at 1 and the primary conversation was lost. This is the
+// fingerprint-drift analogue of TestAssemble_PrimaryThread (whose fixtures carry
+// no billing header).
+func TestClassify_SystemFingerprintDrift(t *testing.T) {
+	turn1, err := ParseCapture(readFixture(t, "system-fp-drift-turn1.sse.http"))
+	if err != nil {
+		t.Fatalf("parse turn1: %v", err)
+	}
+	turn2, err := ParseCapture(readFixture(t, "system-fp-drift-turn2.sse.http"))
+	if err != nil {
+		t.Fatalf("parse turn2: %v", err)
+	}
+
+	var state ThreadState
+	var rows []AssembledRow
+
+	prim1, delta1, state := Classify(turn1, state)
+	if !prim1 {
+		t.Fatalf("turn1 should be primary (establishes the thread)")
+	}
+	rows = append(rows, AssembledRow{IsPrimary: prim1, Delta: delta1, Turn: turn1.Turn})
+
+	prim2, delta2, state := Classify(turn2, state)
+	if !prim2 {
+		t.Fatalf("turn2 should be primary despite the drifted cch (its stripped fingerprint matches turn1's); the classifier filed it auxiliary")
+	}
+	// The delta is the genuinely-new user input only — the echoed turn1 assistant
+	// is dropped (already represented by turn1's reconstructed Turn), leaving the
+	// tool_result user turn.
+	if len(delta2) != 1 || delta2[0].Role != "user" {
+		t.Fatalf("turn2 delta = %+v, want 1 user (tool_result); the echoed assistant must be dropped", delta2)
+	}
+	if !hasToolResult(delta2[0], "toolu_fp1") {
+		t.Errorf("turn2 delta user message missing tool_result for toolu_fp1: %+v", delta2[0])
+	}
+	rows = append(rows, AssembledRow{IsPrimary: prim2, Delta: delta2, Turn: turn2.Turn})
+
+	tr := AssembleTranscript(nil, rows)
+	// The full ordered thread (NOT capped at 1): user prompt, assistant+tool_use,
+	// tool_result user, final assistant.
+	wantRoles := []string{"user", "assistant", "user", "assistant"}
+	if len(tr.Messages) != len(wantRoles) {
+		t.Fatalf("assembled %d messages, want %d (the thread must not cap at 1): %+v", len(tr.Messages), len(wantRoles), tr.Messages)
+	}
+	for i, want := range wantRoles {
+		if tr.Messages[i].Role != want {
+			t.Errorf("message %d role = %q, want %q", i, tr.Messages[i].Role, want)
+		}
+	}
+	if len(tr.Auxiliary) != 0 {
+		t.Errorf("auxiliary turns = %d, want 0 (both turns are primary): %+v", len(tr.Auxiliary), tr.Auxiliary)
+	}
+	if tr.Model != "claude-opus-4-8" {
+		t.Errorf("transcript model = %q, want claude-opus-4-8", tr.Model)
+	}
+}
+
 func hasToolUse(m model.AnthropicMessage, id string) bool {
 	for _, b := range m.Content {
 		if b.Type == "tool_use" && b.ID == id {
