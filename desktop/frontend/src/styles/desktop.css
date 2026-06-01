@@ -2972,8 +2972,14 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   position: sticky; top: 0;
   display: flex; flex-direction: column; gap: 2px;
   padding: 4px 2px;
-  max-height: 70vh; overflow: auto;
+  max-height: 70vh; overflow-y: auto; overflow-x: hidden;
+  /* The rail is an 18px column with 12px ticks — a visible scrollbar
+     would sit on top of the ticks and hide the summary (overlay on
+     macOS, ~15px classic on Win/Linux or "always show scrollbars").
+     Keep it wheel-scrollable but render no scrollbar. */
+  scrollbar-width: none;
 }
+.mk-transcript-minimap::-webkit-scrollbar { width: 0; height: 0; }
 .mk-transcript-tick {
   display: block; width: 12px; height: 6px;
   border: 0; padding: 0; cursor: pointer;
