@@ -288,6 +288,28 @@ store read API, the CLI, and the tests share one parser:
   `message_delta`), and the stop reason. The `data:` JSON carries trailing
   whitespace inside the object, so each event is decoded leniently — a
   malformed event is skipped, never sinks the turn.
+  - The request/response boundary is matched **line-anchored** — on the
+    full line `\n==== RESPONSE ====\n`, not as a bare substring (BACI-323).
+    The request body carries the whole conversation-so-far, which in this
+    repo frequently *contains* the literal `==== RESPONSE ====` text (agents
+    read the proxy capture / `parse.go` / docs into context). A bare cut
+    fires on that in-body occurrence and truncates the request JSON
+    mid-object, so `json.Unmarshal` returns `unexpected end of JSON input`.
+    The recorder always writes the real boundary on its own CRLF line
+    (→ `\n==== RESPONSE ====\n` once LF-normalised), so the anchor matches
+    exactly the recorder's boundary while an in-body occurrence — which sits
+    inside a single-line JSON body, never preceded by a newline — can't. A
+    bare-substring cut is kept as a fallback for marker-less inputs.
+  - A request message's `content` is accepted in **both** forms the
+    `/v1/messages` API allows (BACI-324): the block-list form
+    (`"content":[{...}]`) and the string shorthand (`"content":"text"`, which
+    the Claude client emits for plain user turns). `AnthropicMessage.Unmarshal-
+    JSON` normalises a string to a single text block, so every consumer
+    (Classify, the persisted `delta_json`, the React viewer) sees the uniform
+    block-list shape. Without this the parser failed `cannot unmarshal string
+    into … content` on the bulk of real captures — co-occurring with the
+    marker-collision split bug above, so both fixes are needed to recover the
+    corpus.
 - `Classify(pc, prev)` decides whether a capture extends the job's
   **primary thread** (same `(model, system-fingerprint)`, growing message
   count, no `output_config`) or is **auxiliary** (a title-gen /
@@ -457,13 +479,25 @@ parse miss, for consistency. The sweep also skips any dispatch whose newest
 capture is younger than `store.ProxyReparseQuietWindow` (2 minutes), so it
 never reparses a job the live recorder is actively streaming into.
 
+The marker is durable — "already given up on stays given up on" — so a
+capture that failed for a *fixable* reason (e.g. the BACI-323 marker-collision
+parser bug, fixed above) stays stamped even after the parser is corrected.
+`bacio proxy reparse --retry-failed` (BACI-323) clears `parse_failed_at` on
+the still-unparsed captures in scope (`Store.ClearProxyParseFailed` — the
+inverse of the marker stamp, gated on no `proxy_messages` row so it never
+resurrects a classified capture) *before* the reparse, so those dispatches
+become eligible again and backfill in one pass — no `--rebuild` needed,
+because a cleared failed capture is still fully unparsed.
+
 ### CLI — `bacio proxy reparse`
 
 The first **mutating** proxy verb, following the six agent-CLI rules:
 `--json` in, a `proxy.reparse` schema entry, `--dry-run` (project the
 dispatch/capture counts, touch nothing), store-boundary validation. No args
-= sweep all eligible; `--dispatch <id>` scopes to one job; `--rebuild` is
-reserved-but-refused. Remote-capable (`POST /proxy/reparse`) for parity
+= sweep all eligible; `--dispatch <id>` scopes to one job; `--retry-failed`
+clears `parse_failed_at` on the still-unparsed captures in scope first (so
+previously-failed captures backfill once the parser bug is fixed — BACI-323);
+`--rebuild` is reserved-but-refused. Remote-capable (`POST /proxy/reparse`) for parity
 with the rest of the proxy group. A non-empty wet run records a
 `proxy.reparse` audit row (`bacio-controller` for the sweep path, the
 caller's actor for the CLI path).

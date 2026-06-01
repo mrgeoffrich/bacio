@@ -1,6 +1,7 @@
 package model
 
 import (
+	"bytes"
 	"encoding/json"
 	"time"
 )
@@ -70,6 +71,42 @@ type AnthropicBlock struct {
 type AnthropicMessage struct {
 	Role    string           `json:"role"`
 	Content []AnthropicBlock `json:"content"`
+}
+
+// UnmarshalJSON accepts both forms the /v1/messages API allows for a message's
+// `content` (BACI-324): the block-list form (`"content":[{...}]`) and the
+// string shorthand (`"content":"plain text"`, which the API treats as a single
+// text block). The Claude client emits the string form for plain user turns, so
+// without this the parser failed `cannot unmarshal string into ... content` on
+// the bulk of real captures. A string is normalised to one text block so every
+// downstream consumer (Classify, the persisted delta_json, the viewer) sees the
+// uniform block-list shape; a missing/null content yields no blocks.
+func (m *AnthropicMessage) UnmarshalJSON(data []byte) error {
+	// Decode into a shadow type with a raw content so we can branch on its JSON
+	// shape without recursing back into this method.
+	var raw struct {
+		Role    string          `json:"role"`
+		Content json.RawMessage `json:"content"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	m.Role = raw.Role
+	m.Content = nil
+	trimmed := bytes.TrimSpace(raw.Content)
+	switch {
+	case len(trimmed) == 0 || string(trimmed) == "null":
+		return nil
+	case trimmed[0] == '"':
+		var s string
+		if err := json.Unmarshal(trimmed, &s); err != nil {
+			return err
+		}
+		m.Content = []AnthropicBlock{{Type: "text", Text: s}}
+		return nil
+	default:
+		return json.Unmarshal(trimmed, &m.Content)
+	}
 }
 
 // AnthropicTurn is the single assistant turn reconstructed from one capture's

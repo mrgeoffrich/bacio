@@ -516,9 +516,11 @@ type Client interface {
 	// backfill sweep: it reparses dispatch-correlated Anthropic captures the
 	// live recorder path missed into proxy_messages so their turns appear in
 	// the per-job transcript. With Dispatch nil it sweeps every eligible
-	// dispatch; with Dispatch set it scopes to one job. Rebuild (the
-	// destructive partial-gap rebuild) is reserved but not implemented in v1 —
-	// the local backend errors cleanly. On a non-empty wet run the local
+	// dispatch; with Dispatch set it scopes to one job. RetryFailed (BACI-323)
+	// clears parse_failed_at on the still-unparsed captures in scope first, so
+	// dispatches the parser gave up on backfill once the parser is fixed.
+	// Rebuild (the destructive partial-gap rebuild) is reserved but not
+	// implemented in v1 — the local backend errors cleanly. On a non-empty wet run the local
 	// backend records a `proxy.reparse` audit row. Cross-cutting like
 	// ProxyStats; the remote backend POSTs /proxy/reparse. Returns the per-run
 	// counts (dry-run projects them without writing).

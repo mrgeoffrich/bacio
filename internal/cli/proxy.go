@@ -47,9 +47,10 @@ func newProxyCmd() *cobra.Command {
 // (`--rebuild`) is reserved on the surface but not implemented in v1.
 func newProxyReparseCmd() *cobra.Command {
 	var (
-		dispatch int64
-		rebuild  bool
-		rawInput string
+		dispatch    int64
+		retryFailed bool
+		rebuild     bool
+		rawInput    string
 	)
 	cmd := &cobra.Command{
 		Use:   "reparse",
@@ -65,6 +66,11 @@ backfills fully-unparsed dispatches (non-destructive — it never deletes an exi
 row); a capture that can't parse (truncated / malformed) is marked once and not
 retried.
 
+  --retry-failed clears the terminal-failure marker (parse_failed_at) on the
+  still-unparsed captures in scope before reparsing, so dispatches the parser
+  previously gave up on backfill once the parser bug is fixed. Without it those
+  captures stay skipped forever ("already given up on stays given up on").
+
 The --rebuild flag (the destructive partial-gap rebuild: delete-from-gap-onward +
 replay) is reserved but not implemented in v1.
 
@@ -74,7 +80,7 @@ replay) is reserved but not implemented in v1.
 		RunE: func(cmd *cobra.Command, args []string) error {
 			in := client.ReparseProxyOpts{}
 
-			raw, err := parseJSONInput(cmd, args, rawInput, "dispatch", "rebuild")
+			raw, err := parseJSONInput(cmd, args, rawInput, "dispatch", "retry-failed", "rebuild")
 			if err != nil {
 				return err
 			}
@@ -86,6 +92,7 @@ replay) is reserved but not implemented in v1.
 					return err
 				}
 				in.Dispatch = decoded.Dispatch
+				in.RetryFailed = decoded.RetryFailed
 				in.Rebuild = decoded.Rebuild
 			} else {
 				if cmd.Flags().Changed("dispatch") {
@@ -95,6 +102,7 @@ replay) is reserved but not implemented in v1.
 					d := dispatch
 					in.Dispatch = &d
 				}
+				in.RetryFailed = retryFailed
 				in.Rebuild = rebuild
 			}
 
@@ -115,6 +123,7 @@ replay) is reserved but not implemented in v1.
 		},
 	}
 	cmd.Flags().Int64Var(&dispatch, "dispatch", 0, "scope the backfill to one dispatch's captures (default: sweep all eligible)")
+	cmd.Flags().BoolVar(&retryFailed, "retry-failed", false, "clear parse_failed_at on still-unparsed captures first, so previously-failed captures backfill once the parser is fixed (BACI-323)")
 	cmd.Flags().BoolVar(&rebuild, "rebuild", false, "destructive partial-gap rebuild (reserved; not implemented in v1)")
 	addInputFlag(cmd, &rawInput)
 	return cmd
