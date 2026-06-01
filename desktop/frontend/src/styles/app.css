@@ -1986,6 +1986,13 @@ body { margin: 0; }
 .mk-pl-btn.is-ghost:hover { background: var(--bg-4); }
 .mk-pl-btn.is-danger { color: var(--status-blocked); border-color: var(--status-blocked); }
 .mk-pl-btn:disabled { opacity: .4; cursor: not-allowed; }
+/* BACI-335: the fast-track button is a plain ghost button (is-ghost above)
+   whose zap glyph stroke is painted with the rainbow gradient def rendered
+   once in PipelineView (#mk-zap-rainbow). The gradient lives on the stroke,
+   not a fill, so the bolt stays an outline. The slightly heavier stroke keeps
+   the rainbow legible at the 14px card size. */
+.mk-pl-fasttrack .mk-icon { width: 14px; height: 14px; }
+.mk-pl-fasttrack .mk-icon svg { stroke: url(#mk-zap-rainbow); stroke-width: 2.25; }
 
 /* ── in-pipeline stage card ── */
 .mk-pl-stage {
@@ -2001,11 +2008,15 @@ body { margin: 0; }
 }
 .mk-pl-stage.is-attn { border-color: var(--status-review); }
 .mk-pl-stage.is-dragging { opacity: .5; }
-/* BACI-330: a card with a running job can't be dragged — dim it and show a
-   not-allowed cursor so the lock reads visually; the "stop the job first"
-   tooltip explains it. Inner controls (Stop, Auto, etc.) keep the default
-   cursor so they stay clearly usable. */
-.mk-pl-stage.is-locked { opacity: .6; cursor: not-allowed; }
+/* BACI-330: a card with a running job can't be dragged — show a not-allowed
+   cursor so the lock reads as a gesture, and the "stop the job first" tooltip
+   explains it. Inner controls (Stop, Auto, etc.) keep the default cursor so
+   they stay clearly usable.
+   BACI-335: signal the lock on the border (honey, the running-job colour)
+   rather than by dimming the card — the job chain stepper and active-job
+   details are exactly the content a user reads while a job runs, so they must
+   stay fully legible. */
+.mk-pl-stage.is-locked { border-color: var(--status-doing); cursor: not-allowed; }
 .mk-pl-stage.is-locked button,
 .mk-pl-stage.is-locked [role="switch"] { cursor: pointer; }
 /* BACI-310: same cross-highlight as .mk-pl-card.is-blocker-hl, for the
