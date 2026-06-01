@@ -91,7 +91,7 @@ A `git fetch` failure on a non-main base means `origin/<base_branch>` doesn't ex
 
 ### 5. Read the project conventions
 
-Subagents don't auto-load CLAUDE.md. Read `<worktree-root>/CLAUDE.md` before doing real work — it's the index of project conventions, build commands, and topic-specific docs. If a CLAUDE.md entry points at a `docs/<topic>.md` file relevant to what you're about to change, read that doc too.
+Read `<worktree-root>/CLAUDE.md`. If a CLAUDE.md entry points at a `<worktree-root>/docs/<topic>.md` file relevant to what you're about to change, read that doc too.
 
 ### 6. Establish working directory — your first `TaskCreate` task
 
