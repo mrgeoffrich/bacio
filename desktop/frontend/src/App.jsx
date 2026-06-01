@@ -866,6 +866,14 @@ export default function App() {
     moveCard(key, 'cancelled');
   }, [moveCard]);
 
+  // BACI-330: drag-to-done zone. Twin of cancelCardFromPipeline — routes a
+  // card dropped onto the Done zone through the same terminal-move path
+  // (`done` is already in TERMINAL_STATES), so the optimistic column flip,
+  // blocker-strip, persistence, and rollback all come for free.
+  const doneCardFromPipeline = useCallback((key) => {
+    moveCard(key, 'done');
+  }, [moveCard]);
+
   // Backlog / Shipping drag-to-reorder. position is 1-based within the
   // card's (repo, state) band. PipelineView handles the optimistic
   // in-list move during the drag; this persists + reconciles.
@@ -1257,6 +1265,7 @@ export default function App() {
                   onMoveCard={moveCard}
                   onFastTrack={fastTrackCard}
                   onCancelCard={cancelCardFromPipeline}
+                  onDoneCard={doneCardFromPipeline}
                   onReorder={reorderPipelineCard}
                   onSetProcess={setCardProcess}
                   onResetProcess={resetCardProcess}

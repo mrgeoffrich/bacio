@@ -1659,16 +1659,31 @@ body { margin: 0; }
   background: var(--sky-50);
 }
 
-/* BACI-268: drag-to-cancel trash bin, pinned to the viewport's bottom-right
-   corner. A dashed chip in the muted palette that lights up in the danger
-   tone on drag-over — semantically a cancel, so it borrows --status-blocked
-   rather than the columns' sky tone. Not draggable; pointer-events stay
-   default so it receives the drop. */
-.mk-pl-trash {
+/* BACI-330: drag-activated drop tray, pinned to the viewport's bottom-right
+   corner. Only mounted while a card is being dragged, so there's no always-on
+   chrome (the BACI-268 always-on trash chip is gone). Two stacked drop zones:
+   Mark Done (green) above Cancel (red). A short fade-in reveal lands the tray
+   when the drag starts — a plain CSS transition, no Motion (no layout/layoutId
+   benefit per docs/motion-layout-animations.md). */
+.mk-pl-droptray {
   position: fixed;
   right: 20px;
   bottom: 20px;
   z-index: 41;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: mk-pl-droptray-in .14s ease-out;
+}
+@keyframes mk-pl-droptray-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+/* The shared chip geometry, lifted from the old .mk-pl-trash. Each zone is a
+   dashed chip in the muted palette that lights up in its terminal tone on
+   drag-over. Not draggable; pointer-events stay default so it receives the
+   drop. */
+.mk-pl-dropzone {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -1682,8 +1697,14 @@ body { margin: 0; }
   box-shadow: var(--shadow-2);
   transition: border-color .12s, background .12s, color .12s;
 }
-.mk-pl-trash svg { width: 16px; height: 16px; }
-.mk-pl-trash.is-drop {
+.mk-pl-dropzone svg { width: 16px; height: 16px; }
+/* Mark Done — success palette. Cancel — danger palette (matches BACI-268). */
+.mk-pl-dropzone.is-done.is-drop {
+  border-color: var(--status-done);
+  background: var(--status-done-bg);
+  color: var(--status-done);
+}
+.mk-pl-dropzone.is-cancel.is-drop {
   border-color: var(--status-blocked);
   background: var(--status-blocked-bg);
   color: var(--status-blocked);
@@ -1980,6 +2001,13 @@ body { margin: 0; }
 }
 .mk-pl-stage.is-attn { border-color: var(--status-review); }
 .mk-pl-stage.is-dragging { opacity: .5; }
+/* BACI-330: a card with a running job can't be dragged — dim it and show a
+   not-allowed cursor so the lock reads visually; the "stop the job first"
+   tooltip explains it. Inner controls (Stop, Auto, etc.) keep the default
+   cursor so they stay clearly usable. */
+.mk-pl-stage.is-locked { opacity: .6; cursor: not-allowed; }
+.mk-pl-stage.is-locked button,
+.mk-pl-stage.is-locked [role="switch"] { cursor: pointer; }
 /* BACI-310: same cross-highlight as .mk-pl-card.is-blocker-hl, for the
    in_pipeline stage card. */
 .mk-pl-stage.is-blocker-hl { border-color: var(--status-blocked); }

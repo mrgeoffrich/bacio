@@ -136,6 +136,7 @@ export default function PipelineView({
   onMoveCard,
   onFastTrack,
   onCancelCard,
+  onDoneCard,
   onReorder,
   onSetProcess,
   onResetProcess,
@@ -179,8 +180,9 @@ export default function PipelineView({
   const [dragKey, setDragKey] = useState(null);
   // Holds the column the dragged card is currently over, driving the
   // `is-drop` highlight. BACI-268 widens the value space with a non-column
-  // 'trash' sentinel for the drag-to-cancel bin — it only feeds the
-  // `=== 'trash'` highlight check, never a column lookup.
+  // 'trash' sentinel for the drag-to-cancel bin; BACI-330 adds a 'done'
+  // sentinel for the drag-to-done zone — both only feed an `=== <sentinel>`
+  // highlight check, never a column lookup.
   const [dragOverCol, setDragOverCol] = useState(null);
   // autoShip seeds from the backend (GET /auto-ship) — the DB value the
   // controller's auto-ship ticker actually acts on — so the toggle
@@ -301,6 +303,26 @@ export default function PipelineView({
     onDragOver: (e) => { e.preventDefault(); setDragOverCol('trash'); },
     onDragLeave: (e) => { if (e.currentTarget === e.target) setDragOverCol(null); },
     onDrop: (e) => { e.preventDefault(); cancelToTrash(); },
+  });
+
+  // BACI-330: drop onto the Done zone closes the dragged issue as `done`.
+  // Twin of cancelToTrash — routes to onDoneCard instead of onCancelCard;
+  // accepts a card from any column since `done` is a plain terminal
+  // transition (the same shape as cancel).
+  const doneToTray = () => {
+    const key = dragKey;
+    setDragKey(null);
+    setDragOverCol(null);
+    if (!key) return;
+    const card = cardByKey.get(key);
+    if (!card) return;
+    onDoneCard?.(card.key);
+  };
+
+  const doneDropProps = () => ({
+    onDragOver: (e) => { e.preventDefault(); setDragOverCol('done'); },
+    onDragLeave: (e) => { if (e.currentTarget === e.target) setDragOverCol(null); },
+    onDrop: (e) => { e.preventDefault(); doneToTray(); },
   });
 
   if (!activeBoard) {
@@ -532,17 +554,35 @@ export default function PipelineView({
         </div>
       </section>
 
-      {/* ── Trash bin (BACI-268) — drop a card here to cancel its issue.
-          Pinned bottom-right of the pipeline area; lights up with the
-          shared `is-drop` highlight on drag-over. ── */}
-      <div
-        className={`mk-pl-trash${dragOverCol === 'trash' ? ' is-drop' : ''}`}
-        aria-label="Cancel issue (drop here)"
-        {...trashDropProps()}
-      >
-        <Icon name="trash" />
-        <span className="mk-pl-trash-lbl">Cancel</span>
-      </div>
+      {/* ── Drop tray (BACI-330) — the two terminal-outcome drop zones,
+          stacked bottom-right of the pipeline area. Only mounted while a
+          card is being dragged (dragKey != null), so there's no always-on
+          chrome. Mark Done (green) sits above Cancel (red); each lights up
+          with the shared `is-drop` highlight on drag-over via its own
+          `dragOverCol` sentinel. Drop fires before dragend clears dragKey,
+          so the zone is still mounted when the drop lands. ── */}
+      {dragKey != null && (
+        <div className="mk-pl-droptray">
+          <div
+            className={`mk-pl-dropzone is-done${dragOverCol === 'done' ? ' is-drop' : ''}`}
+            aria-label="Mark done (drop here)"
+            {...doneDropProps()}
+          >
+            <Icon name="check" />
+            <Tooltip label="Close as done without shipping">
+              <span className="mk-pl-dropzone-lbl">Mark Done</span>
+            </Tooltip>
+          </div>
+          <div
+            className={`mk-pl-dropzone is-cancel${dragOverCol === 'trash' ? ' is-drop' : ''}`}
+            aria-label="Cancel issue (drop here)"
+            {...trashDropProps()}
+          >
+            <Icon name="trash" />
+            <span className="mk-pl-dropzone-lbl">Cancel</span>
+          </div>
+        </div>
+      )}
 
       <QuestionModal
         questionId={activeQuestionId}
@@ -764,6 +804,11 @@ function StageCard({
   const jobs = card.jobs || [];
   const hasProcess = jobs.length > 0;
   const running = jobs.find(j => j.status === 'running') || null;
+  // BACI-330: a card with a running job can't be dragged — the engine
+  // refuses to move a card mid-job, so we gate the gesture at the source.
+  // `locked` removes `draggable` (so a drag never starts), dims the card,
+  // and arms a "stop the job first" tooltip.
+  const locked = !!running;
   // Reset is hidden while a job is running (the Stop-first rule — the engine
   // refuses ErrJobRunning anyway). If the card transitions to running while
   // the confirm is armed, drop the armed state so a stale Confirm can't
@@ -804,11 +849,12 @@ function StageCard({
   const showProcessMenu = picking || !hasProcess;
 
   return (
+    <Tooltip label={locked ? 'Stop the running job before moving this card' : undefined}>
     <article
-      className={`mk-pl-stage${isDragging ? ' is-dragging' : ''}${paused ? ' is-attn' : ''}${isHighlighted ? ' is-blocker-hl' : ''}`}
-      draggable
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
+      className={`mk-pl-stage${isDragging ? ' is-dragging' : ''}${paused ? ' is-attn' : ''}${isHighlighted ? ' is-blocker-hl' : ''}${locked ? ' is-locked' : ''}`}
+      draggable={!locked}
+      onDragStart={locked ? undefined : onDragStart}
+      onDragEnd={locked ? undefined : onDragEnd}
     >
       <header className="mk-pl-stage-head" onClick={onOpen}>
         <CardHead card={card} activeBoard={activeBoard} onOpenIssue={onOpenIssue} onHighlight={onHighlight} />
@@ -965,6 +1011,7 @@ function StageCard({
         </>
       )}
     </article>
+    </Tooltip>
   );
 }
 
