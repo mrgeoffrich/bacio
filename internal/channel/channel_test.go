@@ -56,6 +56,19 @@ type fakeSource struct {
 	// and assert the channel surfaces it as a tool-error.
 	notified  []notifyRec
 	notifyErr error
+
+	// BACI-328 report_subagent_incomplete state. failedDispatches records
+	// every FailDispatch call; failDispatchErr lets a test inject a
+	// reconcile error and assert the channel surfaces it as a tool-error.
+	failedDispatches []failRec
+	failDispatchErr  error
+}
+
+// failRec records one FailDispatch call with the dispatch id and the
+// supervisor's advisory note threaded through.
+type failRec struct {
+	dispatchID int64
+	note       string
 }
 
 // notifyRec records one SendNotification call with the issue id the channel
@@ -199,6 +212,16 @@ func (f *fakeSource) SendNotification(ctx context.Context, issueID, body string)
 	return nil
 }
 
+func (f *fakeSource) FailDispatch(ctx context.Context, dispatchID int64, note string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.failDispatchErr != nil {
+		return f.failDispatchErr
+	}
+	f.failedDispatches = append(f.failedDispatches, failRec{dispatchID: dispatchID, note: note})
+	return nil
+}
+
 // decodeFrames splits the newline-delimited JSON-RPC output into
 // generic maps for assertion.
 func decodeFrames(t *testing.T, out string) []map[string]any {
@@ -256,17 +279,17 @@ func TestChannelHandshakeAndReply(t *testing.T) {
 	list := byID[2]
 	tools, _ := list["result"].(map[string]any)["tools"].([]any)
 	// Run() turns the poller on, so ask_user_question (BACI-53)
-	// joins reply + register + send_user_notification (BACI-287) on
-	// the advertised list.
-	if len(tools) != 4 {
-		t.Fatalf("tools/list returned %d tools, want 4", len(tools))
+	// joins reply + register + send_user_notification (BACI-287) +
+	// report_subagent_incomplete (BACI-328) on the advertised list.
+	if len(tools) != 5 {
+		t.Fatalf("tools/list returned %d tools, want 5", len(tools))
 	}
 	seen := map[string]bool{}
 	for _, tool := range tools {
 		name, _ := tool.(map[string]any)["name"].(string)
 		seen[name] = true
 	}
-	if !seen["reply"] || !seen["register"] || !seen["ask_user_question"] || !seen["send_user_notification"] {
+	if !seen["reply"] || !seen["register"] || !seen["ask_user_question"] || !seen["send_user_notification"] || !seen["report_subagent_incomplete"] {
 		t.Fatalf("tools/list missing entries: %+v", seen)
 	}
 
@@ -856,6 +879,54 @@ func TestChannelSendUserNotificationTool(t *testing.T) {
 	}
 	if src.notified[1] != (notifyRec{issueID: "", body: "ticket-less heads up"}) {
 		t.Fatalf("notified[1] = %+v, want ticket-less", src.notified[1])
+	}
+}
+
+// TestChannelReportSubagentIncomplete drives tools/call(report_subagent_incomplete)
+// and checks the dispatch_id + optional note reach Source.FailDispatch, the
+// response is a non-error tool result (no parked reply), and a missing
+// dispatch_id is rejected without reaching the source.
+func TestChannelReportSubagentIncomplete(t *testing.T) {
+	src := &fakeSource{}
+	requests := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`,
+		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"report_subagent_incomplete","arguments":{"dispatch_id":11,"note":"user cancelled"}}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"report_subagent_incomplete","arguments":{}}}`,
+	}, "\n") + "\n"
+
+	var out bytes.Buffer
+	srv := New(src, "bacio", "test", strings.NewReader(requests), &out, nil)
+	if err := srv.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	frames := decodeFrames(t, out.String())
+	byID := map[float64]map[string]any{}
+	for _, f := range frames {
+		if id, ok := f["id"].(float64); ok {
+			byID[id] = f
+		}
+	}
+
+	// id=2: the call reaches FailDispatch and reports a non-error result.
+	ok := byID[2]
+	if isErr, _ := ok["result"].(map[string]any)["isError"].(bool); isErr {
+		t.Fatalf("report_subagent_incomplete reported an error: %+v", ok)
+	}
+	// id=3: missing dispatch_id — rejected before reaching the source.
+	bad := byID[3]
+	if isErr, _ := bad["result"].(map[string]any)["isError"].(bool); !isErr {
+		t.Fatalf("report_subagent_incomplete without dispatch_id should report isError=true: %+v", bad)
+	}
+
+	src.mu.Lock()
+	defer src.mu.Unlock()
+	if len(src.failedDispatches) != 1 {
+		t.Fatalf("FailDispatch reached %d times, want 1 (missing-id call must not reach source): %+v", len(src.failedDispatches), src.failedDispatches)
+	}
+	if src.failedDispatches[0] != (failRec{dispatchID: 11, note: "user cancelled"}) {
+		t.Fatalf("failedDispatches[0] = %+v, want {11 user cancelled}", src.failedDispatches[0])
 	}
 }
 

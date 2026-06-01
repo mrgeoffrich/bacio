@@ -311,6 +311,18 @@ func (s *channelSource) Ack(ctx context.Context, eventID int64, note string) err
 	return err
 }
 
+// FailDispatch is the channel side of the BACI-328 `report_subagent_incomplete`
+// tool: the supervisor detected a soft-cancelled worker and hands back the
+// dispatch id so bacio reconciles the dirty in-flight Pipeline job. We
+// delegate to the client, which resolves the dispatch's issue and cancels
+// the running job in place (neutral subagent_cancelled pause), releases the
+// stale claim, and settles the dispatch. The note is advisory — the client
+// reconcile doesn't persist it (the cancel's engine.advance row carries the
+// audit trail), so it's dropped here.
+func (s *channelSource) FailDispatch(ctx context.Context, dispatchID int64, note string) error {
+	return s.c.FailDispatch(ctx, dispatchID)
+}
+
 // Register is the agent-driven side of the channel<->session join.
 // The agent calls the bacio MCP `register` tool with its own session
 // id (and optionally model); we resolve/mint its persistent identity,
