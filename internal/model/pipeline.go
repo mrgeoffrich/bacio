@@ -93,6 +93,17 @@ const (
 	EnginePauseReasonAgentErrorTerminal  = "agent_error_terminal"
 )
 
+// EnginePauseReasonSubagentCancelled: the user soft-cancelled (Esc /
+// interrupt) the dispatch worker running the current job, so control
+// returned to the supervisor session, which called the
+// `report_subagent_incomplete` channel tool (BACI-328). Like the API-error
+// reasons it cancels the in-flight job + dispatch and halts Auto in place
+// — the card stays in_pipeline — but it is a *deliberate user cancel*, not
+// a failure: the Pipeline UI renders a neutral "Cancelled" halt (not the
+// red error styling), worded "Start to retry". Distinct from the two
+// agent_error_* classes, which mean the worker died on a transport error.
+const EnginePauseReasonSubagentCancelled = "subagent_cancelled"
+
 // ShipJobMode is the sentinel "mode" for the Ship hand-off stage inside
 // a process chain. It is deliberately the same slug as the ship dispatch
 // template, but a pipeline job carrying it is a HAND-OFF, not a dispatch:
