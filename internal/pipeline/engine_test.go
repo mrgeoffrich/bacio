@@ -1009,3 +1009,86 @@ func TestFailRunning_NoRunningJobIsNoop(t *testing.T) {
 	}
 }
 
+// TestCancelRunning_PausesNeutral locks in the BACI-328 user-cancel path:
+// a soft cancel cancels the running job + its dispatch, halts Auto, and
+// pauses the card IN PLACE with the neutral subagent_cancelled pause reason
+// — the card stays in_pipeline (a deliberate cancel, not a failure), and a
+// follow-up Tick must not auto-advance.
+func TestCancelRunning_PausesNeutral(t *testing.T) {
+	s := newEngineStore(t)
+	_, iss := seedPipelineCard(t, s, "CANC", "plan-implement", model.EngineAuto)
+	eng := New(s)
+
+	if _, err := eng.Tick(); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	running := runningJob(t, s, iss.ID)
+	if running == nil {
+		t.Fatal("no running job to cancel")
+	}
+	dispatchID := running.DispatchID
+
+	advances, err := eng.CancelRunning(iss.ID)
+	if err != nil {
+		t.Fatalf("CancelRunning: %v", err)
+	}
+	if len(advances) != 1 || advances[0].Kind != "job.cancelled.subagent" {
+		t.Fatalf("advances = %+v, want one job.cancelled.subagent", advances)
+	}
+	jobs, _ := s.ListPipelineJobs(iss.ID)
+	if jobs[0].Status != model.JobCancelled {
+		t.Fatalf("job 1 status = %s, want cancelled", jobs[0].Status)
+	}
+	got, _ := s.GetIssueByID(iss.ID)
+	if got.State != model.StateInPipeline {
+		t.Fatalf("state = %s, want in_pipeline (cancel pauses in place)", got.State)
+	}
+	if got.EngineMode != model.EngineOff {
+		t.Fatalf("engine mode = %s, want off", got.EngineMode)
+	}
+	if got.EnginePauseReason != model.EnginePauseReasonSubagentCancelled {
+		t.Fatalf("pause reason = %q, want %q", got.EnginePauseReason, model.EnginePauseReasonSubagentCancelled)
+	}
+	if dispatchID != nil {
+		d, err := s.GetDispatch(*dispatchID)
+		if err != nil {
+			t.Fatalf("GetDispatch: %v", err)
+		}
+		if d.Status != model.DispatchCancelled {
+			t.Fatalf("dispatch status = %s, want cancelled", d.Status)
+		}
+	}
+	// A follow-up Tick must NOT auto-advance (Auto is off).
+	if _, err := eng.Tick(); err != nil {
+		t.Fatalf("post-cancel tick: %v", err)
+	}
+	if runningJob(t, s, iss.ID) != nil {
+		t.Fatal("post-cancel tick started a new job despite Auto off")
+	}
+}
+
+// TestCancelRunning_NoRunningJobIsNoop locks in idempotency: a card with no
+// running job (a too-early cancel, or a job that already settled) is a
+// clean no-op, so the report_subagent_incomplete tool is safe to call more
+// than once.
+func TestCancelRunning_NoRunningJobIsNoop(t *testing.T) {
+	s := newEngineStore(t)
+	_, iss := seedPipelineCard(t, s, "CNOP", "plan-implement", model.EngineAuto)
+	eng := New(s)
+	// No Tick — no job is running yet.
+	advances, err := eng.CancelRunning(iss.ID)
+	if err != nil {
+		t.Fatalf("CancelRunning: %v", err)
+	}
+	if len(advances) != 0 {
+		t.Fatalf("advances = %+v, want none", advances)
+	}
+	got, _ := s.GetIssueByID(iss.ID)
+	if got.State != model.StateInPipeline {
+		t.Fatalf("state = %s, want unchanged in_pipeline", got.State)
+	}
+	if got.EnginePauseReason != "" {
+		t.Fatalf("pause reason = %q, want empty (no-op stamps nothing)", got.EnginePauseReason)
+	}
+}
+

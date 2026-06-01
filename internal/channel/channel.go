@@ -145,6 +145,20 @@ type Source interface {
 	// error here means the row couldn't be inserted; the channel surfaces
 	// it as an MCP tool error.
 	SendNotification(ctx context.Context, issueID, body string) error
+
+	// FailDispatch reconciles a soft-cancelled dispatch worker (BACI-328).
+	// The supervisor calls the `report_subagent_incomplete` MCP tool after
+	// a Task subagent ended early/interrupted (control returned to the
+	// supervisor, not a normal completion and not a needs_input: pause);
+	// the source resolves the dispatch's in-flight Pipeline job and cancels
+	// it in place (cancel the running job + its dispatch, halt Auto, stamp
+	// the neutral subagent_cancelled pause reason, release the stale claim).
+	// note is the supervisor's optional human-readable reason (advisory).
+	// Best-effort and idempotent: a dispatch whose job already settled is a
+	// clean no-op. This tool SETTLES the dispatch (via the cancel) — it is
+	// the terminal acknowledgement for the cancelled-worker case, so the
+	// supervisor must call it INSTEAD OF `reply`, never both.
+	FailDispatch(ctx context.Context, dispatchID int64, note string) error
 }
 
 // Server speaks the channel protocol over a reader/writer pair (stdin
@@ -364,14 +378,15 @@ func (s *Server) handle(ctx context.Context, msg *rpcMessage) {
 	case "ping":
 		s.reply(msg.ID, map[string]any{})
 	case "tools/list":
-		// reply / register / send_user_notification advertise
-		// unconditionally — none of them park a JSON-RPC reply, so the
-		// poller-gate reasoning that applies to ask_user_question (a
-		// parked reply would never be delivered without the drain step)
-		// does not apply to them. ask_user_question only advertises when
-		// the poller is on. See ServeMCP / Run split + the
-		// BACIO_AGENT_MODE gate in internal/cli/channel.go.
-		tools := []any{replyToolSchema(), registerToolSchema(), sendUserNotificationToolSchema()}
+		// reply / register / send_user_notification /
+		// report_subagent_incomplete advertise unconditionally — none of
+		// them park a JSON-RPC reply, so the poller-gate reasoning that
+		// applies to ask_user_question (a parked reply would never be
+		// delivered without the drain step) does not apply to them.
+		// ask_user_question only advertises when the poller is on. See
+		// ServeMCP / Run split + the BACIO_AGENT_MODE gate in
+		// internal/cli/channel.go.
+		tools := []any{replyToolSchema(), registerToolSchema(), sendUserNotificationToolSchema(), reportSubagentIncompleteToolSchema()}
 		if s.poller {
 			tools = append(tools, askUserQuestionToolSchema())
 		}
@@ -582,6 +597,43 @@ func sendUserNotificationToolSchema() map[string]any {
 	}
 }
 
+// reportSubagentIncompleteToolSchema describes the bacio MCP
+// `report_subagent_incomplete` tool (BACI-328). The supervisor calls it
+// after a Task subagent ended early/interrupted (a user soft-cancel handed
+// control back) so bacio can reconcile the dirty in-flight Pipeline job —
+// otherwise the card sits in_pipeline with a running job, an un-released
+// claim, and an un-acked dispatch forever. It REPLACES `reply` for that
+// dispatch (the cancel settles it; acking a cancelled dispatch errors), so
+// the description is explicit about when to call it and when NOT to.
+func reportSubagentIncompleteToolSchema() map[string]any {
+	return map[string]any{
+		"name": "report_subagent_incomplete",
+		"description": "Report that a dispatched Task subagent ended EARLY or was INTERRUPTED (a user soft-cancel / Esc " +
+			"returned control to you, the supervisor) rather than finishing its job. bacio reconciles the dirty " +
+			"in-flight Pipeline job: it cancels the running job and its dispatch, pauses the card in place with a " +
+			"neutral \"Cancelled — Start to retry\" halt, and releases the worker's claim. " +
+			"Call this INSTEAD OF `reply` for that dispatch — it settles the dispatch itself, so do NOT also call " +
+			"`reply` (acking a cancelled dispatch errors). " +
+			"Only call it when the subagent did NOT return a normal completion summary AND did NOT return a " +
+			"`needs_input:` line. A `needs_input:` return is a legitimate pause (the worker parked an " +
+			"ask_user_question) — leave that dispatch alone, do not report it incomplete.",
+		"inputSchema": map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"dispatch_id": map[string]any{
+					"type":        "integer",
+					"description": "The dispatch_id from the <channel> tag whose subagent ended early/interrupted.",
+				},
+				"note": map[string]any{
+					"type":        "string",
+					"description": "Optional short human-readable reason (e.g. \"user cancelled\"). Advisory.",
+				},
+			},
+			"required": []string{"dispatch_id"},
+		},
+	}
+}
+
 func (s *Server) handleToolCall(ctx context.Context, msg *rpcMessage) {
 	var head struct {
 		Name      string          `json:"name"`
@@ -600,6 +652,8 @@ func (s *Server) handleToolCall(ctx context.Context, msg *rpcMessage) {
 		s.handleAskUserQuestionCall(ctx, msg.ID, head.Arguments)
 	case "send_user_notification":
 		s.handleSendUserNotificationCall(ctx, msg.ID, head.Arguments)
+	case "report_subagent_incomplete":
+		s.handleReportSubagentIncompleteCall(ctx, msg.ID, head.Arguments)
 	default:
 		s.replyError(msg.ID, -32602, "unknown tool: "+head.Name)
 	}
@@ -701,6 +755,37 @@ func (s *Server) handleSendUserNotificationCall(ctx context.Context, id json.Raw
 		return
 	}
 	s.toolResult(id, false, "notification sent")
+}
+
+// handleReportSubagentIncompleteCall validates the dispatch_id, asks the
+// source to reconcile the dirty in-flight Pipeline job (BACI-328), and
+// returns a tool result. Mirrors handleReplyCall's arg-validation shape —
+// dispatch_id required, note optional/advisory — but this is the terminal
+// acknowledgement for a cancelled worker: the source's FailDispatch settles
+// the dispatch by cancelling it, so the supervisor calls this INSTEAD OF
+// `reply`. Idempotent on the source side; any failure surfaces as an MCP
+// tool error rather than dropping the JSON-RPC connection.
+func (s *Server) handleReportSubagentIncompleteCall(ctx context.Context, id json.RawMessage, rawArgs json.RawMessage) {
+	var args struct {
+		DispatchID int64  `json:"dispatch_id"`
+		Note       string `json:"note"`
+	}
+	if len(rawArgs) > 0 {
+		if err := json.Unmarshal(rawArgs, &args); err != nil {
+			s.toolResult(id, true, "invalid report_subagent_incomplete arguments: "+err.Error())
+			return
+		}
+	}
+	if args.DispatchID == 0 {
+		s.toolResult(id, true, "report_subagent_incomplete requires a dispatch_id (the value from the <channel> tag)")
+		return
+	}
+	if err := s.src.FailDispatch(ctx, args.DispatchID, strings.TrimSpace(args.Note)); err != nil {
+		s.logf("bacio channel: report_subagent_incomplete dispatch %d: %v", args.DispatchID, err)
+		s.toolResult(id, true, fmt.Sprintf("could not reconcile dispatch %d: %v", args.DispatchID, err))
+		return
+	}
+	s.toolResult(id, false, fmt.Sprintf("reconciled cancelled dispatch %d", args.DispatchID))
 }
 
 // handleAskUserQuestionCall validates the payload, asks the source

@@ -245,8 +245,11 @@ export interface BoardCard {
   // Mirror of the Go-side boardcards.BoardCard pipeline fields. `jobs`
   // is the sequence-ordered chain; `currentJob` is the running stage (or
   // the next pending one); `engineMode` is "off" | "auto"; and
-  // `enginePauseReason` is "" | "open_question" (Auto halted on a
-  // question on the current job).
+  // `enginePauseReason` is one of "" | "open_question" (Auto halted on a
+  // question on the current job) | "agent_error_transient" |
+  // "agent_error_terminal" (BACI-296, the worker died on an Anthropic API
+  // error) | "subagent_cancelled" (BACI-328, the user soft-cancelled the
+  // worker — a neutral "Cancelled" halt, not an error).
   jobs?: BoardCardJob[];
   currentJob?: BoardCardJob | null;
   engineMode?: string;

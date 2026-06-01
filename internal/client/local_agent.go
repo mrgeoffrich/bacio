@@ -415,6 +415,80 @@ func (c *localClient) FailPipelineForSession(ctx context.Context, sessionID, err
 	return nil
 }
 
+// FailDispatch is the dispatch-keyed reconcile behind the
+// `report_subagent_incomplete` channel tool (BACI-328): when the
+// supervisor detects a soft-cancelled dispatch worker it hands back the
+// dispatch id (the only correlation it carries — it never knows the worker
+// session id). We resolve the dispatch's issue, drive the engine's
+// CancelRunning (cancel the running job + its dispatch, halt Auto, stamp
+// the neutral subagent_cancelled pause reason), release every open claim
+// on the issue (the worker never got to), and mirror the engine advance
+// into the audit log — the same `engine.advance` shape FailPipelineForSession
+// writes.
+//
+// Resolution is via the dispatch's IssueID, not a subagent_dispatches
+// reverse lookup: GetDispatch always carries IssueID for a pipeline job,
+// so this works even for a too-early cancel that fired before the worker
+// recorded its claim binding. Best-effort and idempotent: an unknown /
+// settled dispatch, or one with no issue (a setup/ping dispatch), is a
+// clean no-op inside CancelRunning, and releasing an already-released
+// claim is tolerated. We deliberately do NOT ack the dispatch — CancelRunning
+// already cancelled it, and AckDispatch errors on a cancelled dispatch.
+func (c *localClient) FailDispatch(ctx context.Context, dispatchID int64) error {
+	d, err := c.store.GetDispatch(dispatchID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil // dispatch pruned or never existed — nothing to reconcile
+		}
+		return err
+	}
+	if d.IssueID == nil {
+		return nil // a setup / ping dispatch has no pipeline job to cancel
+	}
+	issueID := *d.IssueID
+
+	eng := pipeline.New(c.store)
+	advances, err := eng.CancelRunning(issueID)
+	if err != nil {
+		return err
+	}
+	for _, adv := range advances {
+		repoID := adv.RepoID
+		c.recordOp(model.HistoryEntry{
+			RepoID: &repoID, RepoPrefix: adv.RepoPrefix,
+			Op: "engine.advance", Kind: "engine",
+			TargetID: &adv.IssueID, TargetLabel: adv.IssueKey,
+			Details: strings.TrimSpace(adv.Kind + " " + adv.Detail),
+		})
+	}
+
+	// Release every open claim on the issue — the cancelled worker never
+	// dropped its own. Best-effort: a per-claim release error (an orphan
+	// claim, a session that vanished) is logged and skipped so the rest of
+	// the teardown still completes. The release is state-neutral: pass the
+	// issue's current state as the fallback (the same ReleaseFallbackState
+	// the `bacio agent release` path uses) so the store takes its no-op
+	// state path rather than writing the issue's state to empty.
+	iss, err := c.store.GetIssueByID(issueID)
+	if err != nil {
+		return err
+	}
+	finalState := model.ReleaseFallbackState(iss.State)
+	claims, err := c.store.ListClaimsForIssue(issueID)
+	if err != nil {
+		return err
+	}
+	for _, cl := range claims {
+		if cl == nil || cl.ReleasedAt != nil {
+			continue
+		}
+		if _, _, _, err := c.store.ReleaseAgentClaim(cl.SessionID, issueID, finalState); err != nil {
+			fmt.Fprintln(os.Stderr, "bacio: warning: failed to release claim on cancelled dispatch:", err)
+		}
+	}
+	return nil
+}
+
 func (c *localClient) EndAgent(ctx context.Context, repo *model.Repo, in inputs.AgentEndInput, dryRun bool) (*model.AgentSession, error) {
 	if _, err := model.ParseEndReason(in.Reason); err != nil {
 		return nil, err

@@ -578,7 +578,7 @@ the mode, and the composed payload.
 
 ### Channel MCP tools
 
-The `bacio channel` MCP server exposes four tools:
+The `bacio channel` MCP server exposes five tools:
 
 | Tool                     | Purpose                                                                 |
 | ------------------------ | ----------------------------------------------------------------------- |
@@ -586,14 +586,55 @@ The `bacio channel` MCP server exposes four tools:
 | `register`               | Complete the session's registration (links the channel to a session id).|
 | `ask_user_question`      | Surface a **blocking** multi-choice clarification question to the user (BACI-53). |
 | `send_user_notification` | Fire a **non-blocking** agent→user notification into the bell (BACI-287). |
+| `report_subagent_incomplete` | Reconcile a soft-cancelled dispatch worker (BACI-328) — see below. |
 
-`reply`, `register`, and `send_user_notification` advertise
-unconditionally — none of them park a JSON-RPC reply, so the
-poller-gate that defers `ask_user_question` (a parked reply would never
-be delivered without the drain step) does not apply to them. None of the
-four has a REST or CLI mutate-equivalent — they are channel-only (the
-notification read side — list / mark-read — is REST, but the *write* is
-channel-only).
+`reply`, `register`, `send_user_notification`, and
+`report_subagent_incomplete` advertise unconditionally — none of them
+park a JSON-RPC reply, so the poller-gate that defers `ask_user_question`
+(a parked reply would never be delivered without the drain step) does not
+apply to them. None of the five has a REST or CLI mutate-equivalent — they
+are channel-only (the notification read side — list / mark-read — is REST,
+but the *write* is channel-only).
+
+#### `report_subagent_incomplete` — reconcile a soft-cancelled worker (BACI-328)
+
+When the user soft-cancels (Esc / interrupt) a running dispatch worker,
+control returns to the supervisor session but bacio is left dirty: the
+Pipeline card stays `in_pipeline` with a `running` job, the worker's
+`agent_claims` row is never released, and the `agent_dispatches` row never
+settles. No Claude Code hook can fix this — `Stop` / `SubagentStop` do not
+fire on user interrupts, and `StopFailure` fires on API errors only. The
+one place control reliably returns is the supervisor, so this is a
+supervisor-driven callback: after `Task` returns the preamble's detection
+rule (see [Worker contract](#worker-contract-per-mode-subagent-system-prompts-baci-76))
+calls `report_subagent_incomplete` with the `dispatch_id` **instead of**
+`reply` when the subagent ended early/interrupted.
+
+The handler chains `channelSource.FailDispatch` → `client.FailDispatch`,
+which resolves the dispatch's `IssueID`, drives
+`pipeline.Engine.CancelRunning` (cancel the running job + its dispatch,
+halt Auto, stamp the neutral `engine_pause_reason = "subagent_cancelled"`),
+releases every open claim on the issue, and mirrors the advance into an
+`engine.advance` audit row. It is the dispatch-keyed sibling of the
+`StopFailure → FailPipelineForSession → FailRunning` API-error path
+([above](#stopfailure--recording-api-failures)); `CancelRunning` and
+`FailRunning` share the `failOrCancelRunning` teardown, differing only in
+the pause reason. The Pipeline UI renders `subagent_cancelled` as a neutral
+"⏸ Cancelled — Start to retry" pill (not the red error styling), because a
+user cancel is a deliberate stop.
+
+**Ack ordering (load-bearing).** `report_subagent_incomplete` SETTLES the
+dispatch by cancelling it, so the supervisor must call it **instead of**
+`reply`, never both: `AckDispatch` on a cancelled dispatch is a hard error.
+The reconcile is best-effort and idempotent — a dispatch whose job already
+settled is a clean no-op — so a redundant call returns a clean tool-error
+rather than corrupting state.
+
+This covers a **soft** cancel that hands control back to the supervisor. A
+full session quit (the supervisor never gets another turn) won't fire the
+callback; that case is the job of a separate liveness-sweep backstop
+(a leader-gated controller sweep that reaps orphaned `running` jobs whose
+worker went stale), tracked as a follow-up.
 
 > **Retired tool — `attach_transcript` (BACI-85, removed in BACI-307).**
 > The channel used to expose a fifth tool, `attach_transcript`, that the
