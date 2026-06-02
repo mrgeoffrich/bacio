@@ -11,7 +11,7 @@ import CommentComposer from './issue/CommentComposer';
 import RelationsPanel from './issue/RelationsPanel';
 import PrAttachModal from './issue/PrAttachModal';
 import IssueTranscriptList from './issue/IssueTranscriptList';
-import { documentPath } from '../lib/routes';
+import { documentPath, featurePath } from '../lib/routes';
 import prLabel from '../lib/prLabel';
 
 // IssueWorkspace is the top-level per-issue screen — replaces the right-
@@ -309,7 +309,18 @@ export default function IssueWorkspace({
           {brief.feature && (
             <section className="mk-drawer-section">
               <div className="mk-drawer-label">Feature</div>
-              <span className="mk-tag">{brief.feature.title}</span>
+              {/*
+                BACI-345: the feature badge links back to the parent
+                feature's detail page — same featurePath() target the
+                FeaturesView nav uses. mk-tag-link keeps the pill visual
+                while resetting the default anchor styling.
+              */}
+              <Link
+                to={featurePath(activeBoard, brief.feature.slug)}
+                className="mk-tag mk-tag-link"
+              >
+                {brief.feature.title}
+              </Link>
             </section>
           )}
 
