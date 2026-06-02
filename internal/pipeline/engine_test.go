@@ -1207,3 +1207,174 @@ func TestCancelRunning_NoRunningJobIsNoop(t *testing.T) {
 	}
 }
 
+// addBlocker creates a fresh issue in `repo` (in the given state) and a
+// `blocks` edge from it onto `blockedID`, returning the blocker's id — the
+// seam the BACI-343 blocked-gate tests use to put a card behind a blocker.
+func addBlocker(t *testing.T, s *store.Store, repo *model.Repo, blockedID int64, state model.State) int64 {
+	t.Helper()
+	blocker, err := s.CreateIssue(repo.ID, nil, "blocker", "", state, nil, "")
+	if err != nil {
+		t.Fatalf("create blocker: %v", err)
+	}
+	if err := s.CreateRelation(blocker.ID, blockedID, model.RelBlocks); err != nil {
+		t.Fatalf("create blocks relation: %v", err)
+	}
+	return blocker.ID
+}
+
+// TestEngineBlockedCardPausesOnAuto (BACI-343): an Auto card with an open
+// blocker pauses with engine_pause_reason=blocked and starts no job; once
+// the blocker reaches done the next tick auto-resumes the chain with no
+// re-arm (Auto stays on the whole time).
+func TestEngineBlockedCardPausesOnAuto(t *testing.T) {
+	s := newEngineStore(t)
+	repo, iss := seedPipelineCard(t, s, "BLK1", "plan-implement", model.EngineAuto)
+	blockerID := addBlocker(t, s, repo, iss.ID, model.StateTodo)
+	eng := New(s)
+
+	// Tick: blocked → no job starts, pause stamped, Auto still armed.
+	if _, err := eng.Tick(); err != nil {
+		t.Fatalf("tick blocked: %v", err)
+	}
+	if r := runningJob(t, s, iss.ID); r != nil {
+		t.Fatalf("blocked card started a job: %+v", r)
+	}
+	got, _ := s.GetIssueByID(iss.ID)
+	if got.EnginePauseReason != model.EnginePauseReasonBlocked {
+		t.Fatalf("pause reason = %q, want blocked", got.EnginePauseReason)
+	}
+	if got.EngineMode != model.EngineAuto {
+		t.Fatalf("engine mode = %q, want auto (blocked pause must stay armed)", got.EngineMode)
+	}
+
+	// Clear the blocker → the next tick auto-resumes (no re-arm).
+	if err := s.SetIssueState(blockerID, model.StateDone); err != nil {
+		t.Fatalf("done blocker: %v", err)
+	}
+	if _, err := eng.Tick(); err != nil {
+		t.Fatalf("tick resume: %v", err)
+	}
+	r := runningJob(t, s, iss.ID)
+	if r == nil || r.Mode != model.BuiltinTemplatePlan {
+		t.Fatalf("after resume running = %+v, want plan", r)
+	}
+	got, _ = s.GetIssueByID(iss.ID)
+	if got.EnginePauseReason != "" {
+		t.Fatalf("pause reason = %q, want cleared on resume", got.EnginePauseReason)
+	}
+}
+
+// TestEngineBlockedCancelledBlockerReleases (BACI-343): the unblock
+// predicate accepts cancelled as well as done — a cancelled blocker
+// releases the card just like a shipped one.
+func TestEngineBlockedCancelledBlockerReleases(t *testing.T) {
+	s := newEngineStore(t)
+	repo, iss := seedPipelineCard(t, s, "BLK2", "plan-implement", model.EngineAuto)
+	blockerID := addBlocker(t, s, repo, iss.ID, model.StateTodo)
+	eng := New(s)
+
+	if _, err := eng.Tick(); err != nil {
+		t.Fatalf("tick blocked: %v", err)
+	}
+	if got, _ := s.GetIssueByID(iss.ID); got.EnginePauseReason != model.EnginePauseReasonBlocked {
+		t.Fatalf("pause reason = %q, want blocked", got.EnginePauseReason)
+	}
+
+	if err := s.SetIssueState(blockerID, model.StateCancelled); err != nil {
+		t.Fatalf("cancel blocker: %v", err)
+	}
+	if _, err := eng.Tick(); err != nil {
+		t.Fatalf("tick resume: %v", err)
+	}
+	if r := runningJob(t, s, iss.ID); r == nil || r.Mode != model.BuiltinTemplatePlan {
+		t.Fatalf("after resume running = %+v, want plan (cancelled blocker releases)", r)
+	}
+}
+
+// TestEngineBlockedManualStartOverrides (BACI-343, decision #1): the gate
+// lives on the Auto path only, so a manual Start consciously bypasses an
+// open blocker and runs the job anyway.
+func TestEngineBlockedManualStartOverrides(t *testing.T) {
+	s := newEngineStore(t)
+	repo, iss := seedPipelineCard(t, s, "BLK3", "plan-implement", model.EngineOff)
+	addBlocker(t, s, repo, iss.ID, model.StateTodo)
+	eng := New(s)
+
+	if _, err := eng.StartNext(iss.ID); err != nil {
+		t.Fatalf("StartNext: %v", err)
+	}
+	r := runningJob(t, s, iss.ID)
+	if r == nil || r.Mode != model.BuiltinTemplatePlan {
+		t.Fatalf("manual Start blocked by blocker: %+v, want plan running", r)
+	}
+}
+
+// TestEngineBlockedMidChain (BACI-343, decision #2): every agent-job start
+// is gated, not just the first — a blocker added after job 1 completes
+// pauses the next stage too.
+func TestEngineBlockedMidChain(t *testing.T) {
+	s := newEngineStore(t)
+	repo, iss := seedPipelineCard(t, s, "BLK4", "plan-implement", model.EngineAuto)
+	eng := New(s)
+
+	// Tick 1: no blocker yet → plan starts. Ack it.
+	if _, err := eng.Tick(); err != nil {
+		t.Fatalf("tick 1: %v", err)
+	}
+	r := runningJob(t, s, iss.ID)
+	if r == nil || r.Mode != model.BuiltinTemplatePlan {
+		t.Fatalf("after tick 1 running = %+v, want plan", r)
+	}
+	simulateWorkerAck(t, s, *r.DispatchID)
+
+	// Add a blocker before the implement tick.
+	addBlocker(t, s, repo, iss.ID, model.StateTodo)
+
+	// Tick 2: plan completes, but the implement stage is gated by the new
+	// blocker — no job starts, pause stamped.
+	if _, err := eng.Tick(); err != nil {
+		t.Fatalf("tick 2: %v", err)
+	}
+	if r := runningJob(t, s, iss.ID); r != nil {
+		t.Fatalf("implement started despite mid-chain blocker: %+v", r)
+	}
+	got, _ := s.GetIssueByID(iss.ID)
+	if got.EnginePauseReason != model.EnginePauseReasonBlocked {
+		t.Fatalf("pause reason = %q, want blocked mid-chain", got.EnginePauseReason)
+	}
+}
+
+// TestEngineBlockedShipHandoffNotGated (BACI-343, decision #2): the gate
+// never touches the Ship/Shelve sentinels. A card whose only pending stage
+// is the Ship hand-off still hands off to to_be_shipped even with an open
+// blocker present (the hand-off carries no dispatch and is reached only
+// after all agent work is done).
+func TestEngineBlockedShipHandoffNotGated(t *testing.T) {
+	s := newEngineStore(t)
+	repo, iss := seedPipelineCard(t, s, "BLK5", "implement-ship", model.EngineAuto)
+	eng := New(s)
+
+	// Tick 1: implement starts (no blocker yet). Ack it.
+	if _, err := eng.Tick(); err != nil {
+		t.Fatalf("tick 1: %v", err)
+	}
+	r := runningJob(t, s, iss.ID)
+	if r == nil || r.Mode != model.BuiltinTemplateImplement {
+		t.Fatalf("after tick 1 running = %+v, want implement", r)
+	}
+	simulateWorkerAck(t, s, *r.DispatchID)
+
+	// Add a blocker; the next pending stage is now the Ship sentinel.
+	addBlocker(t, s, repo, iss.ID, model.StateTodo)
+
+	// Tick 2: implement completes; the Ship hand-off is NOT gated → card
+	// moves to to_be_shipped despite the open blocker.
+	if _, err := eng.Tick(); err != nil {
+		t.Fatalf("tick 2: %v", err)
+	}
+	got, _ := s.GetIssueByID(iss.ID)
+	if got.State != model.StateToBeShipped {
+		t.Fatalf("state = %s, want to_be_shipped (ship hand-off must not be gated)", got.State)
+	}
+}
+

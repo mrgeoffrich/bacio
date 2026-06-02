@@ -975,7 +975,13 @@ function StageCard({
   // failure, so it renders as a calm "Cancelled" pill (no is-error styling),
   // worded "Start to retry".
   const subagentCancelled = card.enginePauseReason === 'subagent_cancelled';
-  const paused = card.enginePauseReason === 'open_question' || agentErrored || subagentCancelled || !!question;
+  // BACI-343: Auto is on but the card has open blockers, so the engine is
+  // holding off starting the next job until they clear — then it auto-resumes
+  // with no re-arm. The blocked-by badge already names the blockers; this is
+  // the calm "armed but waiting" pill that keeps the card from reading as a
+  // stalled one. Distinct from the error/cancelled reasons (which disarm Auto).
+  const blockedWaiting = card.enginePauseReason === 'blocked';
+  const paused = card.enginePauseReason === 'open_question' || agentErrored || subagentCancelled || blockedWaiting || !!question;
 
   const showProcessMenu = picking || !hasProcess;
 
@@ -1127,7 +1133,7 @@ function StageCard({
             <span className="mk-pl-spacer" />
             {paused && (
               <span
-                className={`mk-pl-halt${agentErrored ? ' is-error' : ''}`}
+                className={`mk-pl-halt${agentErrored ? ' is-error' : ''}${blockedWaiting ? ' is-blocked' : ''}`}
                 title={
                   agentErrorTransient
                     ? 'API outage — Start to retry once it clears'
@@ -1135,7 +1141,9 @@ function StageCard({
                       ? 'Account / billing / auth error — fix it, then Start'
                       : subagentCancelled
                         ? 'Cancelled — Start to retry'
-                        : undefined
+                        : blockedWaiting
+                          ? 'Waiting for blockers to clear — see the blocked-by badge. Auto resumes on its own.'
+                          : undefined
                 }
               >
                 {agentErrorTransient
@@ -1144,7 +1152,9 @@ function StageCard({
                     ? '⚠ Account error'
                     : subagentCancelled
                       ? '⏸ Cancelled'
-                      : '⏸ Auto halted'}
+                      : blockedWaiting
+                        ? '⏳ Waiting on blockers'
+                        : '⏸ Auto halted'}
               </span>
             )}
             {/* BACI-314: render Ship ONLY when shippable — an un-shippable

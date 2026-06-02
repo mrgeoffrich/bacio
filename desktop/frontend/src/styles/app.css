@@ -2155,6 +2155,13 @@ body { margin: 0; }
 .mk-pl-halt.is-error {
   color: var(--status-error); background: var(--status-error-bg);
 }
+/* BACI-343: the blocked-waiting halt is calm, NOT an alarm — Auto stays
+   armed and the card auto-resumes when its blockers clear. Reuse the
+   blocked-status token so it reads as "waiting on a dependency", distinct
+   from both the lavender open-question pause and the red error pill. */
+.mk-pl-halt.is-blocked {
+  color: var(--status-blocked); background: var(--status-blocked-bg);
+}
 
 /* BACI-314: the armed Reset confirm — an inline footer row ("Reset
    process? Confirm / Cancel"), not a modal. The leading prompt reads in the
