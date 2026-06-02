@@ -473,7 +473,10 @@ func TestRegistry_AllocatePortDeterministicPerSlug(t *testing.T) {
 // AllocatePort must skip a port that is live (a process is listening
 // on it) even when no registry entry claims it — the case that, left
 // unhandled, hands a new worktree the port the user's own running
-// `bacio web` is serving on.
+// `bacio web` is serving on. A live port at `seed` blocks two slots,
+// not one: `seed` as an API candidate, and `seed+1` whose derived proxy
+// port (seed+1−1 = seed) would clash with the live listener (BACI-344
+// proxy-pair reservation). So the allocator lands on `seed+2`.
 func TestRegistry_AllocatePortSkipsBoundPortNotInRegistry(t *testing.T) {
 	seed := DefaultAPIPort + 1 + HashPortOffset("alpha")
 	stubPortProbe(t, seed) // seed slot is bound, but no registry entry says so
@@ -484,8 +487,70 @@ func TestRegistry_AllocatePortSkipsBoundPortNotInRegistry(t *testing.T) {
 	if got == seed {
 		t.Errorf("returned the bound port %d instead of walking past it", seed)
 	}
-	if got != seed+1 {
-		t.Errorf("expected the next slot %d, got %d", seed+1, got)
+	if got == seed+1 {
+		t.Errorf("returned %d, whose proxy port %d is the bound port %d", got, got-1, seed)
+	}
+	if got != seed+2 {
+		t.Errorf("expected the next disjoint slot %d, got %d", seed+2, got)
+	}
+}
+
+// An existing registry entry at API port P reserves the whole pair
+// {P−1 (its proxy), P}, and additionally blocks the slot directly above
+// it: a worktree at P+1 derives proxy P, colliding with the existing
+// API listener. The allocator must skip P → P+2, never handing out the
+// adjacent P+1 (BACI-344 proxy-pair reservation — the bug a bare
+// APIPort-only `taken` set used to allow).
+func TestRegistry_AllocatePortSkipsNeighbourOfExistingEntry(t *testing.T) {
+	stubPortProbe(t) // no host ports bound — isolate from the host
+	seed := DefaultAPIPort + 1 + HashPortOffset("alpha")
+	reg := &Registry{Worktrees: []RegistryEntry{
+		{Slug: "other", Path: "/other", APIPort: seed},
+	}}
+	got, err := reg.AllocatePort("alpha")
+	if err != nil {
+		t.Fatalf("AllocatePort: %v", err)
+	}
+	if got == seed {
+		t.Errorf("returned the taken API port %d", seed)
+	}
+	if got == seed+1 {
+		t.Errorf("returned %d, whose proxy %d collides with the existing API port %d", got, got-1, seed)
+	}
+	if got != seed+2 {
+		t.Errorf("expected the next disjoint slot %d, got %d", seed+2, got)
+	}
+}
+
+// AllocatePort hands each worktree an adjacent *pair* of ports — the API
+// port and its derived proxy port one below (BACI-344). Allocating a run
+// of worktrees, every pair must stay disjoint from every other pair and
+// from the reserved default pair {DefaultProxyPort, DefaultAPIPort}.
+// This is the cross-worktree invariant the proxy-pair reservation
+// guarantees: no worktree's API port ever lands on another's proxy port.
+func TestRegistry_AllocatePortKeepsProxyPairsDisjoint(t *testing.T) {
+	stubPortProbe(t) // no host ports bound
+	reg := &Registry{}
+	used := map[int]string{
+		DefaultProxyPort: "default:proxy",
+		DefaultAPIPort:   "default:api",
+	}
+	// Distinct slugs so each Upsert is a fresh registry row.
+	slugs := []string{"alpha", "bravo", "charlie", "delta", "echo", "foxtrot"}
+	for _, slug := range slugs {
+		api, err := reg.AllocatePort(slug)
+		if err != nil {
+			t.Fatalf("allocate %s: %v", slug, err)
+		}
+		proxy := api - 1
+		for _, p := range []int{proxy, api} {
+			if owner, ok := used[p]; ok {
+				t.Fatalf("worktree %s port %d collides with %s", slug, p, owner)
+			}
+		}
+		used[proxy] = slug + ":proxy"
+		used[api] = slug + ":api"
+		reg.Upsert(RegistryEntry{Slug: slug, Path: "/wt/" + slug, APIPort: api})
 	}
 }
 

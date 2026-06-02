@@ -123,6 +123,14 @@ default; `<allocated> − 1` under a worktree manifest). The derivation lives in
 `DefaultProxyAddr` (`127.0.0.1:5319`). `bacio status` reports both the API and
 Proxy addrs.
 
+Because the proxy port is derived, not separately allocated, the worktree
+port allocator reserves both halves of the pair: `AllocatePort`
+([`internal/wtenv/registry.go`](../internal/wtenv/registry.go)) treats each
+worktree as occupying `{api_port − 1, api_port}` and probes both, so a fresh
+`init` never lands its API port on a sibling's proxy port (or vice versa).
+That's why auto-allocated API ports step by 2 and the lowest is `5322` — `5321`
+would put its proxy on the reserved default `5320`.
+
 `agentmode.ProxyEndpoint` keys off `env.ProxyAddr`, so the launch one-liner
 (and the install-agent banner) always point new agents at the proxy port.
 

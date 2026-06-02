@@ -179,22 +179,43 @@ func (r *Registry) FindBySlug(slug string) (*RegistryEntry, bool) {
 // currently bound by a live process (probePortFree), or until
 // MaxAutoPortWalk is exhausted.
 //
+// Each worktree actually occupies an adjacent *pair* of ports: the API
+// port returned here and the derived reverse-proxy port one below it
+// (proxyAddrFor → APIPort − 1, BACI-344). A candidate is only accepted
+// when BOTH halves of its pair are free, so a new worktree's API port
+// can never land on an existing worktree's proxy port (the
+// adjacent-port clash an APIPort-only reservation used to allow: A's
+// API == B's proxy when B.api = A.api + 1). This also makes the
+// "collision-free proxy port for free" promise in proxyAddrFor's doc
+// actually hold — the allocator, not just the derivation, keeps the
+// pairs disjoint.
+//
 // The OS probe matters because the registry is not a complete record
 // of what is listening: an entry can be dropped on a registry rebuild,
 // a `bacio web --port` may bind a port no manifest claims, and
 // non-bacio processes are invisible to it entirely. Probing keeps a
-// new worktree from being handed a port the user's own `bacio web` is
-// already serving on.
+// new worktree from being handed a port the user's own `bacio web` /
+// `bacio proxy serve` is already serving on — on either half of the
+// pair.
 //
-// The default port (DefaultAPIPort) is reserved — manifest-free
-// users keep using it, so a worktree init that lands there would
-// clash with that legacy default. The allocator skips it.
+// The default pair (DefaultAPIPort 5320 + DefaultProxyPort 5319) is
+// reserved — manifest-free users keep the legacy all-in-one default,
+// whose `bacio web` now binds both, so a worktree init that lands on
+// either would clash. Because the walk starts at DefaultAPIPort+1, the
+// lowest candidate (5321) has proxy 5320 and is therefore skipped; the
+// first allocatable API port is 5322.
 func (r *Registry) AllocatePort(slug string) (int, error) {
-	taken := make(map[int]bool, len(r.Worktrees)+1)
-	for _, e := range r.Worktrees {
-		taken[e.APIPort] = true
+	taken := make(map[int]bool, 2*len(r.Worktrees)+2)
+	// reserve marks both halves of a worktree's port pair: the API port
+	// and its derived proxy port one below.
+	reserve := func(apiPort int) {
+		taken[apiPort] = true
+		taken[apiPort-1] = true
 	}
-	taken[DefaultAPIPort] = true
+	for _, e := range r.Worktrees {
+		reserve(e.APIPort)
+	}
+	reserve(DefaultAPIPort) // also reserves DefaultProxyPort (5319)
 
 	start := DefaultAPIPort + 1 + HashPortOffset(slug)
 	for off := 0; off < MaxAutoPortWalk; off++ {
@@ -202,10 +223,11 @@ func (r *Registry) AllocatePort(slug string) (int, error) {
 		if candidate > 65535 {
 			return 0, fmt.Errorf("no free port within %d slots above %d", MaxAutoPortWalk, start)
 		}
-		if taken[candidate] {
+		proxy := candidate - 1 // the derived reverse-proxy port for this candidate
+		if taken[candidate] || taken[proxy] {
 			continue
 		}
-		if !probePortFree(candidate) {
+		if !probePortFree(candidate) || !probePortFree(proxy) {
 			continue
 		}
 		return candidate, nil
