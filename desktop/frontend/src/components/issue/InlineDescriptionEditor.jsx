@@ -1,13 +1,19 @@
 import React, { useEffect, useRef, useState } from 'react';
+import MarkdownView from '../../lib/markdownView';
 import { NotionEditor } from '../editor/NotionEditor';
 
-// InlineDescriptionEditor is the issue-description edit surface. BACI-292
-// swapped the plain <textarea> for the rich TipTap editor the Documents
-// screen uses (NotionEditor) so issue bodies get WYSIWYG markdown editing
-// — headings, lists, bold/italic, inline code, tables — consistent with
-// DocsView. The editor is always-on: there's no read/edit toggle. A Save
-// button persists the local buffer via onSave (workspace → App →
-// api.updateIssueDescription).
+// InlineDescriptionEditor is the issue-description surface. By default it
+// renders the body as read-only markdown through <MarkdownView> (the
+// canonical React read renderer — see docs/markdown-rendering.md) with an
+// Edit button; clicking Edit swaps in the rich TipTap editor (NotionEditor,
+// the same engine the Documents screen uses) with Save and Cancel controls.
+// BACI-339 reintroduced this click-to-edit toggle (anticipated by BACI-292's
+// "fall back to a click-to-edit toggle" note) so the description isn't an
+// always-mounted ProseMirror instance and so users get an explicit Cancel.
+//
+// Save persists the local buffer via onSave (workspace → App →
+// api.updateIssueDescription) and returns to the read view; Cancel discards
+// the buffer and returns to the read view without a round-trip.
 //
 // Stale-save fix (BACI-292 #3): the local `draft` buffer is authoritative
 // after a save. We track `savedBaseline` (the last persisted body) and
@@ -18,14 +24,18 @@ import { NotionEditor } from '../editor/NotionEditor';
 // dirty we keep `descEditing` true (onEditingChange) so App's poll-refresh
 // guard preserves it too.
 //
-// readOnly (taken/waiting issues) renders NotionEditor read-only — no
-// toolbar, no Save — fed straight from the prop.
+// readOnly (taken/waiting issues) renders the same <MarkdownView> read view
+// with no Edit affordance — one renderer, visually consistent with the
+// unlocked read view, and no ProseMirror mount on locked issues (BACI-339).
 export default function InlineDescriptionEditor({
   description,
   readOnly,
   onSave,
   onEditingChange,
 }) {
+  // editing gates the rich editor: false → read-only <MarkdownView>, true →
+  // NotionEditor with Save/Cancel. Always false for readOnly issues.
+  const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(description ?? '');
   // The last body we know is persisted: seeded from the prop, advanced to
   // `draft` on a successful save, and re-seeded from the prop when an
@@ -73,6 +83,22 @@ export default function InlineDescriptionEditor({
     }
   }, [description, dirty, savedBaseline]);
 
+  const startEdit = () => {
+    if (readOnly) return;
+    // Seed the editor buffer from the body the read view is showing.
+    setDraft(description ?? '');
+    setSavedBaseline(description ?? '');
+    setEditing(true);
+  };
+
+  // Cancel discards the buffer: reset draft to the saved baseline (clearing
+  // `dirty`, which fires onEditingChange(false) so App's poll-guard releases
+  // and the read view resyncs to the server body) and leave edit mode.
+  const cancelEdit = () => {
+    setDraft(savedBaseline);
+    setEditing(false);
+  };
+
   const commitSave = async () => {
     setSaving(true);
     // Hold the editor authoritative across the post-save poll storm.
@@ -82,23 +108,40 @@ export default function InlineDescriptionEditor({
       // The local buffer is now the persisted body — keep it authoritative
       // so the new content renders immediately, no waiting for the poll.
       setSavedBaseline(draft);
+      setEditing(false);
     } catch {
       // Save failed (onSave reports its own error) — drop the guard so a
-      // subsequent poll can resync the editor to the unchanged server body.
+      // subsequent poll can resync the editor to the unchanged server body,
+      // and stay in edit mode so the user can retry without losing the buffer.
       awaitingPropCatchupRef.current = false;
     } finally {
       setSaving(false);
     }
   };
 
-  if (readOnly) {
+  // Read view — shared by readOnly (taken/waiting) and unlocked-not-editing.
+  // The unlocked variant carries the Edit button; readOnly carries none.
+  if (readOnly || !editing) {
+    // While the buffer is dirty (a save is in flight) keep showing the draft
+    // so the just-typed body doesn't flash back to the stale prop; otherwise
+    // render the canonical description.
+    const body = !readOnly && dirty ? draft : (description ?? '');
     return (
       <section className="mk-drawer-section">
-        <div className="mk-drawer-label">Description</div>
-        {description ? (
-          <div className="mk-issue-notion-editor is-readonly">
-            <NotionEditor content={description} onChange={() => {}} readOnly />
-          </div>
+        <div className="mk-drawer-label">
+          Description
+          {!readOnly && (
+            <button
+              type="button"
+              className="mk-inline-edit-btn"
+              onClick={startEdit}
+            >
+              Edit
+            </button>
+          )}
+        </div>
+        {body ? (
+          <MarkdownView className="mk-markdown mk-issue-desc-read">{body}</MarkdownView>
         ) : (
           <p className="mk-drawer-text mk-meta-empty">No description.</p>
         )}
@@ -113,6 +156,14 @@ export default function InlineDescriptionEditor({
         <NotionEditor content={draft} onChange={setDraft} />
       </div>
       <div className="mk-edit-actions">
+        <button
+          type="button"
+          className="mk-btn-secondary"
+          disabled={saving}
+          onClick={cancelEdit}
+        >
+          Cancel
+        </button>
         <button
           type="button"
           className="mk-btn-primary"

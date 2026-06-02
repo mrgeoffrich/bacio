@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { Link } from 'react-router';
 import MarkdownView from '../lib/markdownView';
 import Icon from './Icon.jsx';
@@ -8,9 +8,10 @@ import InlineDescriptionEditor from './issue/InlineDescriptionEditor.jsx';
 import InlineTitleEditor from './issue/InlineTitleEditor.jsx';
 import CommentComposer from './issue/CommentComposer.jsx';
 import RelationsPanel from './issue/RelationsPanel.jsx';
+import PrAttachModal from './issue/PrAttachModal.jsx';
+import IssueTranscriptList from './issue/IssueTranscriptList.jsx';
 import { documentPath } from '../lib/routes';
 import prLabel from '../lib/prLabel';
-import { reportError } from '../errors';
 
 // IssueWorkspace is the top-level per-issue screen — replaces the right-
 // side drawer + centred edit modal with one routed view. Primary column
@@ -38,10 +39,10 @@ export default function IssueWorkspace({
   onNavigateIssue,
   onDescEditingChange,
 }) {
-  // Track the rail's prev/next position. Column-scoped, lexicographic
-  // by key. No wrap-around in v1 — the buttons disable at the ends.
-  const [prCandidate, setPrCandidate] = useState('');
-  const [attachingPR, setAttachingPR] = useState(false);
+  // PR attach is behind a modal (BACI-339) — the rail shows a compact
+  // "+ Attach PR" button that opens it, so the URL field doesn't occupy
+  // rail space unless the user wants to attach.
+  const [prModalOpen, setPrModalOpen] = useState(false);
 
   const issueMeta = brief?.issue;
   const taken = !!brief?.taken;
@@ -107,20 +108,6 @@ export default function IssueWorkspace({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [prevSibling, nextSibling, onNavigateIssue]);
-
-  const submitPR = useCallback(async () => {
-    const url = prCandidate.trim();
-    if (!url) return;
-    setAttachingPR(true);
-    try {
-      await onAttachPR(url);
-      setPrCandidate('');
-    } catch (err) {
-      reportError(err, { headline: "Couldn't attach pull request" });
-    } finally {
-      setAttachingPR(false);
-    }
-  }, [prCandidate, onAttachPR]);
 
   // Skeleton state — render the head with the bare key so the breadcrumb
   // and screen stay aligned while the first fetch is in flight.
@@ -351,26 +338,17 @@ export default function IssueWorkspace({
               <p className="mk-meta-empty">No PR attached.</p>
             )}
             {!(taken || waiting) && (
-              <div className="mk-pr-form">
-                <input
-                  className="mk-edit-input"
-                  type="url"
-                  placeholder="https://github.com/owner/repo/pull/N"
-                  value={prCandidate}
-                  disabled={attachingPR}
-                  onChange={(e) => setPrCandidate(e.target.value)}
-                />
-                <button
-                  type="button"
-                  className="mk-btn-secondary"
-                  disabled={!prCandidate.trim() || attachingPR}
-                  onClick={submitPR}
-                >
-                  {attachingPR ? 'Attaching…' : '+ Attach PR'}
-                </button>
-              </div>
+              <button
+                type="button"
+                className="mk-btn-secondary mk-pr-attach-btn"
+                onClick={() => setPrModalOpen(true)}
+              >
+                + Attach PR
+              </button>
             )}
           </section>
+
+          <IssueTranscriptList activeBoard={activeBoard} issueKey={issueMeta.key} />
 
           {brief.claimants.length > 0 && (
             <section className="mk-drawer-section">
@@ -390,6 +368,12 @@ export default function IssueWorkspace({
           )}
         </aside>
       </div>
+
+      <PrAttachModal
+        open={prModalOpen}
+        onClose={() => setPrModalOpen(false)}
+        onAttach={onAttachPR}
+      />
     </div>
   );
 }

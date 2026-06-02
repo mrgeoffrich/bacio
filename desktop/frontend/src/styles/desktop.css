@@ -2839,11 +2839,79 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
 }
 .mk-comment-composer .mk-edit-actions { gap: 8px; }
 
-/* Pull-request attach form — inline below the existing list. */
-.mk-pr-form {
-  display: flex; flex-direction: column; gap: 6px;
+/* BACI-339: "+ Attach PR" rail button — opens the PrAttachModal. Replaces
+   the old always-open .mk-pr-form inline URL field; full-width so it reads
+   as the section's add affordance. */
+.mk-pr-attach-btn {
+  width: 100%;
   margin-top: 6px;
 }
+
+/* BACI-339: the URL field inside the PR-attach modal — same field chrome
+   the description/title editors use, full-width within the modal. */
+.mk-pr-attach-modal .mk-tmpl-input { width: 100%; }
+
+/* BACI-339: description read view — give the rendered markdown a touch of
+   top space below the Description/Edit label so it doesn't crowd the row. */
+.mk-issue-desc-read { margin-top: 6px; }
+
+/* BACI-339: the description editor's Save/Cancel pair needs a gap between
+   the two buttons (the bare .mk-edit-actions only sets justify-content). */
+.mk-issue-notion-editor + .mk-edit-actions { gap: 8px; }
+
+/* BACI-339: compact rail variant of the Monitor's .mk-transcript-* list —
+   the per-issue transcripts beneath the Pull-requests section. Narrower and
+   denser than the full-width Monitor list, with a single-column meta row. */
+.mk-rail-transcript-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.mk-rail-transcript-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-1);
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+  text-decoration: none;
+  color: var(--fg-2);
+}
+.mk-rail-transcript-row:hover { background: var(--bg-3); }
+.mk-rail-transcript-main {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.mk-rail-transcript-mode {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fg-3);
+  flex-shrink: 0;
+}
+.mk-rail-transcript-agent {
+  font-size: var(--text-sm);
+  color: var(--fg-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mk-rail-transcript-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--fg-4);
+}
+.mk-rail-transcript-meta span { font-variant-numeric: tabular-nums; }
 
 /* Action button in the rail — bigger than the per-card .zap. */
 .mk-workspace-action-btn {
