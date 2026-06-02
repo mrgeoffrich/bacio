@@ -5,7 +5,6 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import Icon from './Icon.jsx';
 import Tooltip from './Tooltip.jsx';
 import QuestionModal from './QuestionModal.jsx';
-import ShippedPopover from './ShippedPopover.jsx';
 import SessionMessageButton from './SessionMessageButton.jsx';
 import { documentPath } from '../lib/routes';
 import prLabel from '../lib/prLabel';
@@ -151,26 +150,7 @@ export default function PipelineView({
   onSetBacklogCollapsed,
   onShipDispatch,
   onCancelWaiting,
-  shippedCount,
-  shippedScope,
-  onShippedScopeChange,
-  timezone,
-  flyingShipKey,
-  shipFlashing,
-  onShipFlightDone,
-  onTestIncrementShipped,
 }) {
-  // Dev/test affordance (BACI-295 follow-up): show a button that bumps
-  // the Shipped count by one so the count-rise → ka-ching path can be
-  // exercised with a real user gesture. Off for normal users — opt in
-  // with `?sfxtest` in the URL or `localStorage.bacioShipSfxTest = '1'`.
-  const showSfxTest = useMemo(() => {
-    try {
-      if (typeof window === 'undefined') return false;
-      if (new URLSearchParams(window.location.search).has('sfxtest')) return true;
-      return window.localStorage?.getItem('bacioShipSfxTest') === '1';
-    } catch { return false; }
-  }, []);
   const [activeQuestionId, setActiveQuestionId] = useState(null);
   const [expanded, setExpanded] = useState(false);
   // collapsed (BACI-288) shrinks the Backlog column to a thin rail so the
@@ -518,29 +498,6 @@ export default function PipelineView({
             />
           </label>
         </header>
-        <div className="mk-pl-shipping-tools">
-          <ShippedPopover
-            activeBoard={activeBoard}
-            shippedCount={shippedCount}
-            scope={shippedScope}
-            onScopeChange={onShippedScopeChange}
-            timezone={timezone}
-            onOpenIssue={onOpenIssue}
-            flyingShipKey={flyingShipKey}
-            shipFlashing={shipFlashing}
-            onShipFlightDone={onShipFlightDone}
-          />
-          {showSfxTest && (
-            <button
-              type="button"
-              className="mk-pill"
-              onClick={onTestIncrementShipped}
-              title="Test: bump the Shipped count by 1 to fire the ka-ching (dev only; the next poll re-syncs the real count)"
-            >
-              🔔 Test +1
-            </button>
-          )}
-        </div>
         <div className="mk-pl-col-body">
           {shipping.length === 0 ? (
             <div className="mk-pl-col-empty">Nothing to ship</div>

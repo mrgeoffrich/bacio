@@ -4,6 +4,7 @@ import Icon from './Icon.jsx';
 import RepoPicker from './RepoPicker.jsx';
 import Tooltip from './Tooltip.jsx';
 import NotificationBell from './NotificationBell.jsx';
+import ShippedPopover from './ShippedPopover.jsx';
 import { WEB_MODE } from '../env';
 import { viewPath, viewFromPath } from '../lib/routes';
 
@@ -31,7 +32,7 @@ function formatSyncTime(iso) {
   return d.toLocaleString();
 }
 
-export default function Topbar({ boards, activeBoard, onPickBoard, onAddRepository, onBeforeNavigate, onOpenPalette, onOpenSettings, onOpenSync, leaderState, agentCounts, notifUnreadCount, onNotifCountChange, onOpenNotificationIssue }) {
+export default function Topbar({ boards, activeBoard, onPickBoard, onAddRepository, onBeforeNavigate, onOpenSettings, onOpenSync, leaderState, agentCounts, notifUnreadCount, onNotifCountChange, onOpenNotificationIssue, shippedCount, shippedScope, onShippedScopeChange, timezone, flyingShipKey, shipFlashing, onShipFlightDone, onOpenIssue }) {
   // BACI-203: the active view is derived from the URL, not a prop.
   // useLocation re-renders on every navigation so the segmented
   // button's `is-active` class stays in lockstep. The breadcrumb
@@ -141,11 +142,26 @@ export default function Topbar({ boards, activeBoard, onPickBoard, onAddReposito
         </button>
       )}
 
-      <button className="mk-search" onClick={onOpenPalette}>
-        <Icon name="search" />
-        <span className="mk-search-text">Search issues, branches, prs</span>
-        <span className="mk-kbd">⌘ K</span>
-      </button>
+      {/* BACI-336: the Shipped · N pill lives in the topbar centre now
+          (it used to sit in the Pipeline Shipping column) so the shipped
+          count is an always-visible status across every view, not only
+          Pipeline. `margin: 0 auto` centres it in the flex row; the
+          breadcrumb pill (when an issue is open) eats from its left
+          margin, so the centre shifts slightly right with a workspace
+          open — an accepted, documented minor shift. */}
+      <div className="mk-topbar-center">
+        <ShippedPopover
+          activeBoard={activeBoard}
+          shippedCount={shippedCount}
+          scope={shippedScope}
+          onScopeChange={onShippedScopeChange}
+          timezone={timezone}
+          onOpenIssue={onOpenIssue}
+          flyingShipKey={flyingShipKey}
+          shipFlashing={shipFlashing}
+          onShipFlightDone={onShipFlightDone}
+        />
+      </div>
 
       <div className="mk-topbar-right">
         {/* BACI-287: the notification bell takes the top-right corner the

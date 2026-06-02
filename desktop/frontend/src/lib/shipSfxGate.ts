@@ -25,3 +25,25 @@ export function shouldPlayShipSfx(
   if (!audioCtor) return false;
   return true;
 }
+
+// shouldProbeShipSfx (BACI-336) gates the once-only startup autoplay
+// probe — the volume-0 play→pause useShipSfx fires on mount (rather than
+// waiting for the first user gesture) so a permissive browser registers
+// autoplay permission as early as possible. The same three gates as
+// play() apply, plus a one-shot guard so the probe never re-fires:
+//   - the user enabled the toggle;
+//   - the Audio constructor is reachable;
+//   - the element hasn't already been primed (by an earlier probe or by
+//     the first-gesture unlock landing first).
+// On a strict-autoplay engine (WebKit / the desktop webview) the probe's
+// play() rejects silently — that's fine; the existing first-gesture
+// unlock still covers those. This gate only decides whether to *attempt*
+// the probe, not whether the attempt will be granted.
+export function shouldProbeShipSfx(
+  enabled: boolean,
+  audioCtor: unknown,
+  alreadyDone: boolean,
+): boolean {
+  if (alreadyDone) return false;
+  return shouldPlayShipSfx(enabled, audioCtor);
+}
