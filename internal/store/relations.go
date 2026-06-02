@@ -9,8 +9,12 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/model"
 )
 
-// CreateRelation inserts the edge. The
-// bump_issue_updated_on_relation_insert schema trigger advances
+// CreateRelation inserts the edge. INSERT OR IGNORE makes a duplicate
+// (same from/to/type) a silent no-op rather than a UNIQUE-constraint
+// error, so callers that re-assert an existing edge — the Pipeline
+// drag-to-block gesture (BACI-342) where a user drops onto a card that
+// already blocks the dragged one — succeed without surfacing a 500.
+// The bump_issue_updated_on_relation_insert schema trigger advances
 // issues.updated_at on both endpoints so the sync importer's
 // last-writer-wins gate (which keys on issues.updated_at) doesn't
 // clobber the new edge on the next round-trip — replaceRelationsTx
@@ -21,7 +25,7 @@ import (
 // schema).
 func (s *Store) CreateRelation(fromID, toID int64, t model.RelationType) error {
 	_, err := s.DB.Exec(
-		`INSERT INTO issue_relations (from_issue_id, to_issue_id, type) VALUES (?, ?, ?)`,
+		`INSERT OR IGNORE INTO issue_relations (from_issue_id, to_issue_id, type) VALUES (?, ?, ?)`,
 		fromID, toID, string(t),
 	)
 	return err

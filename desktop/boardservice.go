@@ -905,6 +905,29 @@ func (b *BoardService) ReorderCard(repoPrefix, key string, position int) (BoardC
 	return cardFromIssue(iss, iss.Taken), nil
 }
 
+// CreateRelation wires a `blocks` edge so `blocked` ends up blocked by
+// `blocker` — the Pipeline drag-to-block gesture (BACI-342). A `blocks`
+// edge is stored from = blocker, to = blocked, so the drop target (the
+// blocker) is `blocker` and the dragged card (which becomes blocked) is
+// `blocked`. type is hard-coded to "blocks"; the gesture only creates
+// blocks/blocked-by. The store's INSERT OR IGNORE makes a duplicate edge
+// a silent no-op, and the React caller guards a self-drop, so neither
+// reaches this method as an error in normal use. The repo is resolved
+// from the blocker key (both cards share the active board's repo).
+func (b *BoardService) CreateRelation(repoPrefix, blocker, blocked string) error {
+	ctx := context.Background()
+	repo, err := b.resolveRepoForKey(ctx, repoPrefix, blocker)
+	if err != nil {
+		return err
+	}
+	_, err = b.client.LinkRelation(ctx, repo, inputs.LinkInput{
+		From: blocker,
+		Type: "blocks",
+		To:   blocked,
+	}, false)
+	return err
+}
+
 // SetCardProcess materialises a card's job chain from either a preset
 // slug (process) or an explicit ordered stage list (stages) — mutually
 // exclusive. The cumulative-stepper picker sends stages; the kept

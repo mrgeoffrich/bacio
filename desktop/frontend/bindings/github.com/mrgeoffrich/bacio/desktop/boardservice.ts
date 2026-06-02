@@ -181,6 +181,21 @@ export function CountUnreadNotifications(): $CancellablePromise<number> {
 }
 
 /**
+ * CreateRelation wires a `blocks` edge so `blocked` ends up blocked by
+ * `blocker` — the Pipeline drag-to-block gesture (BACI-342). A `blocks`
+ * edge is stored from = blocker, to = blocked, so the drop target (the
+ * blocker) is `blocker` and the dragged card (which becomes blocked) is
+ * `blocked`. type is hard-coded to "blocks"; the gesture only creates
+ * blocks/blocked-by. The store's INSERT OR IGNORE makes a duplicate edge
+ * a silent no-op, and the React caller guards a self-drop, so neither
+ * reaches this method as an error in normal use. The repo is resolved
+ * from the blocker key (both cards share the active board's repo).
+ */
+export function CreateRelation(repoPrefix: string, blocker: string, blocked: string): $CancellablePromise<void> {
+    return $Call.ByID(2970530249, repoPrefix, blocker, blocked);
+}
+
+/**
  * DeleteComment removes a comment from an issue and returns the
  * refreshed issue-drawer payload. The comment is addressed by its
  * immutable uuid. repoPrefix may be empty or "all" — the prefix is then

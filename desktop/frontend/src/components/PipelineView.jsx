@@ -53,9 +53,44 @@ const BLOCKER_STATE_LABEL = {
 // onOpenIssue. All click/select handlers stopPropagation so opening the
 // popover or following a link never starts a drag or trips the card's
 // onOpen.
-function BlockedByBadge({ blockedBy, onOpenIssue, onHighlight }) {
+//
+// BACI-342 drag-to-block: the badge doubles as the block-drag grab handle.
+// When canBlock is set (the card is an in-scope Backlog / In-Pipeline card)
+// the chip is `draggable`; its dragstart fires onBlockDragStart and
+// stopPropagation()s so the card's own move-drag never co-fires (the two
+// gestures live on the same physical surface, disambiguated by which one
+// starts). A card with no blockers still gets a faint grab-chip so every
+// in-scope card is a drag source — without it an unblocked card would have
+// no handle to start the gesture from. dragHandlers bundles the three
+// drag props shared by all three render modes.
+function BlockedByBadge({ blockedBy, onOpenIssue, onHighlight, sourceKey, canBlock, onBlockDragStart, onBlockDragEnd }) {
   const mode = blockedByMode(blockedBy);
-  if (mode === 'none') return null;
+  const dragHandlers = canBlock
+    ? {
+        draggable: true,
+        onDragStart: (e) => { e.stopPropagation(); onBlockDragStart?.(sourceKey); },
+        onDragEnd: (e) => { e.stopPropagation(); onBlockDragEnd?.(); },
+      }
+    : {};
+
+  if (mode === 'none') {
+    // No blockers yet: render a faint grab-chip only when the card can be a
+    // block-drag source. Otherwise (Shipping cards) render nothing, same as
+    // before BACI-342.
+    if (!canBlock) return null;
+    return (
+      <button
+        type="button"
+        className="mk-pl-blocked-btn is-grab"
+        aria-label="Drag onto another card to block this one"
+        title="Drag onto another card to mark this one blocked by it"
+        onClick={(e) => e.stopPropagation()}
+        {...dragHandlers}
+      >
+        <Icon name="lock" />
+      </button>
+    );
+  }
 
   if (mode === 'single') {
     const { key } = blockedBy[0];
@@ -68,6 +103,7 @@ function BlockedByBadge({ blockedBy, onOpenIssue, onHighlight }) {
         onClick={(e) => { e.stopPropagation(); onOpenIssue?.(key); }}
         onMouseEnter={() => onHighlight?.(key)}
         onMouseLeave={() => onHighlight?.(null)}
+        {...dragHandlers}
       >
         <Icon name="lock" />
         <span className="mk-pl-blocked-lbl">{key}</span>
@@ -85,6 +121,7 @@ function BlockedByBadge({ blockedBy, onOpenIssue, onHighlight }) {
           aria-label={`Blocked by ${blockedBy.length} issues`}
           title={`Blocked by ${blockedBy.length} issues`}
           onClick={(e) => e.stopPropagation()}
+          {...dragHandlers}
         >
           <Icon name="lock" />
           <span className="mk-pl-blocked-lbl">blocked by {blockedBy.length}</span>
@@ -126,6 +163,35 @@ function BlockedByBadge({ blockedBy, onOpenIssue, onHighlight }) {
 // (onReorder, 1-based position). The engine owns job progression — the
 // Start / Stop / Auto controls only nudge it.
 
+// BACI-342 drag-to-block helpers, shared by PipelineCard and StageCard so
+// both card types render the block drop-target identically. blockKind is
+// PipelineView.blockTargetKind's classification ('target' | 'source' |
+// 'dup' | null).
+
+// blockDragClass maps a blockKind to the extra card class while a block-
+// drag is in flight: a coral dashed ring on a valid 'target', a muted
+// not-allowed variant on the 'source' (self-drop) and 'dup' (already
+// blocked) no-ops, and nothing otherwise.
+function blockDragClass(blockKind) {
+  if (blockKind === 'target') return ' is-block-target';
+  if (blockKind === 'source' || blockKind === 'dup') return ' is-block-noop';
+  return '';
+}
+
+// blockDropProps returns the drag-over / drop handlers a card mounts while
+// a block-drag is in flight. preventDefault on dragover marks the card a
+// valid drop surface; the drop fires onBlockDrop (which PipelineView gates
+// to the 'target' kind, so a drop on a source/dup card is a silent no-op).
+// Returns empty handlers when no block-drag is active so the move/reorder
+// drag keeps its own onDragOver/onDrop.
+function blockDropProps(blockKind, onBlockDrop) {
+  if (!blockKind) return {};
+  return {
+    onDragOver: (e) => { e.preventDefault(); e.stopPropagation(); },
+    onDrop: (e) => { e.preventDefault(); e.stopPropagation(); onBlockDrop?.(); },
+  };
+}
+
 export default function PipelineView({
   cards,
   activeBoard,
@@ -150,6 +216,7 @@ export default function PipelineView({
   onSetBacklogCollapsed,
   onShipDispatch,
   onCancelWaiting,
+  onBlockCard,
 }) {
   const [activeQuestionId, setActiveQuestionId] = useState(null);
   const [expanded, setExpanded] = useState(false);
@@ -175,6 +242,16 @@ export default function PipelineView({
   // isn't rendered on the pipeline — no card matches, nothing highlights.
   const [highlightKey, setHighlightKey] = useState(null);
   const onHighlight = useCallback((k) => setHighlightKey(k), []);
+  // blockDragKey (BACI-342): the source card key while a drag-to-block
+  // gesture is in flight — set on a card's blocked-by chip dragstart,
+  // distinct from the card-move `dragKey` so the two gestures never alias.
+  // While it's non-null, in-scope cards paint a coral "drop to block"
+  // highlight and a drop fires onBlockCard(blockDragKey, target). The
+  // chip's own dragstart stopPropagation()s so the move-drag's dragKey
+  // never co-arms.
+  const [blockDragKey, setBlockDragKey] = useState(null);
+  const onBlockDragStart = useCallback((k) => setBlockDragKey(k), []);
+  const onBlockDragEnd = useCallback(() => setBlockDragKey(null), []);
 
   useEffect(() => {
     if (!activeBoard) { setAutoShip(false); return; }
@@ -258,6 +335,35 @@ export default function PipelineView({
       return;
     }
     onReorder?.(key, index + 1);
+  };
+
+  // BACI-342 drag-to-block: classify a card as a drop target while a
+  // block-drag is in flight. Returns null when no block-drag is active or
+  // the card is out of scope (Shipping — blocking semantics aren't
+  // actionable on a card already shipping), so the gesture is gated to
+  // Backlog / In-Pipeline cards. Otherwise:
+  //   'source' — the dragged card itself (self-drop is a no-op);
+  //   'dup'    — the source is already blocked by this card (no-op);
+  //   'target' — a valid drop that would create the blocks edge.
+  // The source/dup cards render a muted not-allowed variant so the user
+  // sees the no-op before releasing.
+  const blockTargetKind = (card) => {
+    if (!blockDragKey || card.column === 'to_be_shipped') return null;
+    if (card.key === blockDragKey) return 'source';
+    const source = cardByKey.get(blockDragKey);
+    if (source && (source.blockedBy || []).some(b => b.key === card.key)) return 'dup';
+    return 'target';
+  };
+
+  // Drop a block-drag onto a card. Only a 'target' classification creates
+  // the edge (source/dup are silent no-ops); clearing blockDragKey happens
+  // unconditionally so a no-op drop still ends the gesture.
+  const dropBlockOnCard = (targetCard) => {
+    const sourceKey = blockDragKey;
+    setBlockDragKey(null);
+    if (!sourceKey) return;
+    if (blockTargetKind(targetCard) !== 'target') return;
+    onBlockCard?.(sourceKey, targetCard.key);
   };
 
   const colDropProps = (col) => ({
@@ -410,6 +516,11 @@ export default function PipelineView({
                     backlog
                     isDragging={dragKey === card.key}
                     isHighlighted={card.key === highlightKey}
+                    canBlock
+                    blockKind={blockTargetKind(card)}
+                    onBlockDragStart={onBlockDragStart}
+                    onBlockDragEnd={onBlockDragEnd}
+                    onBlockDrop={() => dropBlockOnCard(card)}
                     onOpen={() => onOpenCard?.(card)}
                     onOpenIssue={onOpenIssue}
                     onHighlight={onHighlight}
@@ -456,6 +567,11 @@ export default function PipelineView({
                   activeBoard={activeBoard}
                   isDragging={dragKey === card.key}
                   isHighlighted={card.key === highlightKey}
+                  canBlock
+                  blockKind={blockTargetKind(card)}
+                  onBlockDragStart={onBlockDragStart}
+                  onBlockDragEnd={onBlockDragEnd}
+                  onBlockDrop={() => dropBlockOnCard(card)}
                   onOpen={() => onOpenCard?.(card)}
                   onOpenIssue={onOpenIssue}
                   onHighlight={onHighlight}
@@ -581,6 +697,11 @@ function PipelineCard({
   autoShip,
   isDragging,
   isHighlighted,
+  canBlock,
+  blockKind,
+  onBlockDragStart,
+  onBlockDragEnd,
+  onBlockDrop,
   onOpen,
   onOpenIssue,
   onHighlight,
@@ -595,16 +716,23 @@ function PipelineCard({
   const [over, setOver] = useState(false);
   const waiting = !!card.waitingState && !card.taken;
   const shippingInFlight = shipping && (card.taken || waiting);
+  // BACI-342: while a block-drag is in flight, this card's drag-over /
+  // drop route to the block gesture (cls) instead of the move/reorder one.
+  // A 'target' card paints the coral drop highlight; 'source'/'dup' paint
+  // the muted not-allowed variant (so the no-op is visible before the
+  // drop). blockKind is null whenever no block-drag is active.
+  const blockClass = blockDragClass(blockKind);
+  const blockProps = blockDropProps(blockKind, onBlockDrop);
 
   return (
     <article
-      className={`mk-pl-card${isDragging ? ' is-dragging' : ''}${over ? ' is-drop-before' : ''}${shippingInFlight ? ' is-shipping' : ''}${isHighlighted ? ' is-blocker-hl' : ''}`}
+      className={`mk-pl-card${isDragging ? ' is-dragging' : ''}${over ? ' is-drop-before' : ''}${shippingInFlight ? ' is-shipping' : ''}${isHighlighted ? ' is-blocker-hl' : ''}${blockClass}`}
       draggable
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
-      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setOver(true); }}
-      onDragLeave={() => setOver(false)}
-      onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setOver(false); onDropCard?.(); }}
+      onDragOver={blockKind ? blockProps.onDragOver : (e) => { e.preventDefault(); e.stopPropagation(); setOver(true); }}
+      onDragLeave={blockKind ? undefined : () => setOver(false)}
+      onDrop={blockKind ? blockProps.onDrop : (e) => { e.preventDefault(); e.stopPropagation(); setOver(false); onDropCard?.(); }}
       onClick={onOpen}
     >
       {showBadge && (
@@ -615,7 +743,15 @@ function PipelineCard({
           {index + 1}
         </span>
       )}
-      <CardHead card={card} activeBoard={activeBoard} onOpenIssue={onOpenIssue} onHighlight={onHighlight} />
+      <CardHead
+        card={card}
+        activeBoard={activeBoard}
+        onOpenIssue={onOpenIssue}
+        onHighlight={onHighlight}
+        canBlock={canBlock}
+        onBlockDragStart={onBlockDragStart}
+        onBlockDragEnd={onBlockDragEnd}
+      />
       <h3 className="mk-pl-card-title">{card.title}</h3>
       <CardLabels tags={card.tags} />
       {backlog && (
@@ -693,7 +829,7 @@ function PipelineCard({
 // badge (each only when it applies). Shared by the compact card and the
 // stage card's header so the anatomy stays identical, which is how the
 // blocked-by badge lands on all three card types at once.
-function CardHead({ card, activeBoard, onOpenIssue, onHighlight }) {
+function CardHead({ card, activeBoard, onOpenIssue, onHighlight, canBlock, onBlockDragStart, onBlockDragEnd }) {
   const latestPlan = card.latestPlan || null;
   const latestPR = card.latestPR || null;
   return (
@@ -706,6 +842,10 @@ function CardHead({ card, activeBoard, onOpenIssue, onHighlight }) {
         blockedBy={card.blockedBy}
         onOpenIssue={onOpenIssue}
         onHighlight={onHighlight}
+        sourceKey={card.key}
+        canBlock={canBlock}
+        onBlockDragStart={onBlockDragStart}
+        onBlockDragEnd={onBlockDragEnd}
       />
       <span className="mk-pl-card-icons">
         {latestPlan && (
@@ -757,6 +897,11 @@ function StageCard({
   activeBoard,
   isDragging,
   isHighlighted,
+  canBlock,
+  blockKind,
+  onBlockDragStart,
+  onBlockDragEnd,
+  onBlockDrop,
   onOpen,
   onOpenIssue,
   onHighlight,
@@ -834,16 +979,35 @@ function StageCard({
 
   const showProcessMenu = picking || !hasProcess;
 
+  // BACI-342: the block-drag drop-target classes/handlers. Like the move
+  // drag (gated by `locked`), the chip is only a block-drag *source* on an
+  // unlocked card — blocking a card mid-job is a strange action, so the
+  // grab handle follows the same Stop-first gate. A locked card can still
+  // be a drop *target* (it just becomes blocked-by another card, which is
+  // purely informational and doesn't move it).
+  const blockClass = blockDragClass(blockKind);
+  const blockProps = blockDropProps(blockKind, onBlockDrop);
+
   return (
     <Tooltip label={locked ? 'Stop the running job before moving this card' : undefined}>
     <article
-      className={`mk-pl-stage${isDragging ? ' is-dragging' : ''}${paused ? ' is-attn' : ''}${isHighlighted ? ' is-blocker-hl' : ''}${locked ? ' is-locked' : ''}`}
+      className={`mk-pl-stage${isDragging ? ' is-dragging' : ''}${paused ? ' is-attn' : ''}${isHighlighted ? ' is-blocker-hl' : ''}${locked ? ' is-locked' : ''}${blockClass}`}
       draggable={!locked}
       onDragStart={locked ? undefined : onDragStart}
       onDragEnd={locked ? undefined : onDragEnd}
+      onDragOver={blockKind ? blockProps.onDragOver : undefined}
+      onDrop={blockKind ? blockProps.onDrop : undefined}
     >
       <header className="mk-pl-stage-head" onClick={onOpen}>
-        <CardHead card={card} activeBoard={activeBoard} onOpenIssue={onOpenIssue} onHighlight={onHighlight} />
+        <CardHead
+          card={card}
+          activeBoard={activeBoard}
+          onOpenIssue={onOpenIssue}
+          onHighlight={onHighlight}
+          canBlock={canBlock && !locked}
+          onBlockDragStart={onBlockDragStart}
+          onBlockDragEnd={onBlockDragEnd}
+        />
         <h3 className="mk-pl-stage-title">{card.title}</h3>
         <CardLabels tags={card.tags} />
       </header>

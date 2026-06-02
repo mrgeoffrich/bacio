@@ -1866,6 +1866,25 @@ body { margin: 0; }
   background: var(--status-blocked-bg);
 }
 
+/* BACI-342 drag-to-block: the in-flight drop highlight. A coral DASHED
+   ring on a valid drop target distinguishes it from the move-drag's
+   solid sky-blue `is-drop` column highlight and the green/red drop tray —
+   the user reads "drop here to block" not "move into this column". The
+   no-op variant (self-drop or already-blocked) goes muted + not-allowed
+   so the user sees the no-op before releasing. Applies to both card types
+   (compact .mk-pl-card and the .mk-pl-stage in-pipeline card). */
+.mk-pl-card.is-block-target,
+.mk-pl-stage.is-block-target {
+  border: 2px dashed var(--status-blocked);
+  background: var(--status-blocked-bg);
+}
+.mk-pl-card.is-block-noop,
+.mk-pl-stage.is-block-noop {
+  border-color: var(--border-2);
+  opacity: .55;
+  cursor: not-allowed;
+}
+
 .mk-pl-badge {
   position: absolute;
   top: -7px; right: -7px;
@@ -1921,6 +1940,25 @@ body { margin: 0; }
   color: var(--paper, #fff);
 }
 .mk-pl-blocked-btn .mk-icon { width: 11px; height: 11px; }
+/* BACI-342: the faint grab-chip rendered on an unblocked in-scope card —
+   the only drag source for the drag-to-block gesture when the card has no
+   blockers yet. Quiet at rest (no coral fill, muted border, grab cursor)
+   so it doesn't add loud chrome to every card; it sharpens on hover so
+   it's discoverable as a handle. No label (just the 🔒 glyph), and tighter
+   padding than the blocked chip since there's no key beside it. */
+.mk-pl-blocked-btn.is-grab {
+  padding: 1px 5px;
+  border-color: var(--border-2);
+  background: transparent;
+  color: var(--fg-3);
+  cursor: grab;
+}
+.mk-pl-blocked-btn.is-grab:hover {
+  border-color: var(--status-blocked, var(--fg-2));
+  background: var(--status-blocked-bg, var(--bg-4));
+  color: var(--status-blocked, var(--fg-1));
+}
+.mk-pl-blocked-btn.is-grab:active { cursor: grabbing; }
 .mk-pl-card-title { font-size: 14px; font-weight: 600; line-height: 1.35; color: var(--fg-1); margin: 0; }
 .mk-pl-card-labels { display: flex; flex-wrap: wrap; gap: 5px; }
 .mk-pl-label {
