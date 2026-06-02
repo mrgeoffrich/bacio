@@ -1900,6 +1900,14 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   border: 1px solid var(--border-1);
   border-radius: var(--radius-sm);
   background: var(--bg-2);
+  /* BACI-341: the row is a router <Link> now — make it read as a
+     navigable affordance without restyling the layout. cursor + the
+     :hover lift below signal it's clickable; reset the anchor so it
+     doesn't pick up default link blue / underline (the inner spans
+     keep their own colours). */
+  cursor: pointer;
+  text-decoration: none;
+  color: inherit;
   transition: border-color var(--dur-fast) var(--ease-out),
               background var(--dur-fast) var(--ease-out);
 }

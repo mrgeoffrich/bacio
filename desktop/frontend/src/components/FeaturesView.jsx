@@ -5,9 +5,10 @@ import { reportError } from '../errors';
 import * as api from '../api';
 import MarkdownView from '../lib/markdownView';
 import CommentComposer from './issue/CommentComposer';
+import InlineDescriptionEditor from './issue/InlineDescriptionEditor.jsx';
 import FeatureEmojiPicker from './FeatureEmojiPicker.jsx';
 import Icon from './Icon.jsx';
-import { documentPath, featurePath } from '../lib/routes';
+import { documentPath, featurePath, issuePath } from '../lib/routes';
 import { isValidBranchName, shortBranchLabel } from '../lib/branchName';
 
 // BACI-236: the dependency-graph view is lazy-loaded so the
@@ -782,16 +783,25 @@ function FeatureOverviewSections({
         />
       </section>
 
-      <section className="mk-features-section">
-        <div className="mk-features-label">Description</div>
-        {detail.description ? (
-          <MarkdownView className="mk-features-text mk-markdown">
-            {detail.description}
-          </MarkdownView>
-        ) : (
-          <p className="mk-features-text mk-meta-empty">No description.</p>
-        )}
-      </section>
+      <InlineDescriptionEditor
+        description={detail.description}
+        readOnly={false}
+        onSave={async (body) => {
+          // Mirror App.saveDescription: report failures and re-throw so the
+          // editor stays in edit mode (and keeps the buffer) on error.
+          try {
+            const updated = await api.setFeatureDescription(
+              activeBoard,
+              detail.slug,
+              body,
+            );
+            onDetailChange(updated);
+          } catch (err) {
+            reportError(err, { headline: "Couldn't update description" });
+            throw err;
+          }
+        }}
+      />
 
       <section className="mk-features-section">
         <div className="mk-features-label">
@@ -804,12 +814,17 @@ function FeatureOverviewSections({
         ) : (
           <ul className="mk-features-issues">
             {detail.issues.map((iss) => (
-              <li key={iss.key} className="mk-features-issue">
-                <span className="mk-card-id">{iss.key}</span>
-                <span className="mk-features-issue-title">{iss.title}</span>
-                <span className={`mk-pill mk-status-${iss.state}`}>
-                  {iss.stateLabel}
-                </span>
+              <li key={iss.key}>
+                <Link
+                  to={issuePath(activeBoard, iss.key)}
+                  className="mk-features-issue"
+                >
+                  <span className="mk-card-id">{iss.key}</span>
+                  <span className="mk-features-issue-title">{iss.title}</span>
+                  <span className={`mk-pill mk-status-${iss.state}`}>
+                    {iss.stateLabel}
+                  </span>
+                </Link>
               </li>
             ))}
           </ul>

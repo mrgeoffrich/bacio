@@ -771,6 +771,21 @@ export async function setFeatureBranchName(
   }
 }
 
+// setFeatureDescription (BACI-341) updates the per-feature description
+// from the Features detail pane. Description is free text; empty clears
+// it. Mirrors setFeatureBranchName.
+export async function setFeatureDescription(
+  repoPrefix: string,
+  slug: string,
+  description: string,
+): Promise<FeatureDetail> {
+  try {
+    return await FeatureService.SetFeatureDescription(repoPrefix, slug, description);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
 // setFeatureHiddenOnBoard (BACI-177) flips the per-feature "Show on
 // board" toggle and returns the refreshed FeatureDetail. true hides
 // every kanban card belonging to this feature on this machine; false
