@@ -1,4 +1,5 @@
 import { useEditor } from '@tiptap/react';
+import type { MutableRefObject } from 'react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
 import TaskList from '@tiptap/extension-task-list';
@@ -13,10 +14,14 @@ interface UseEditorConfigProps {
   content: string;
   readOnly: boolean;
   onChange: (content: string) => void;
-  isInitialized: boolean;
+  // Live "has the initial content been seeded" flag. Read through a ref,
+  // not a captured boolean: useEditor builds the editor (and its onUpdate
+  // closure) exactly once, so a plain prop would freeze at its first-render
+  // value (false) and permanently swallow every onChange (BACI-340).
+  initializedRef: MutableRefObject<boolean>;
 }
 
-export function useEditorConfig({ content, readOnly, onChange, isInitialized }: UseEditorConfigProps) {
+export function useEditorConfig({ content, readOnly, onChange, initializedRef }: UseEditorConfigProps) {
   return useEditor({
     extensions: [
       StarterKit.configure({
@@ -58,7 +63,7 @@ export function useEditorConfig({ content, readOnly, onChange, isInitialized }: 
     content,
     editable: !readOnly,
     onUpdate: ({ editor }) => {
-      if (!isInitialized) {
+      if (!initializedRef.current) {
         return;
       }
       // tiptap-markdown stores its serializer on editor.storage.markdown.
