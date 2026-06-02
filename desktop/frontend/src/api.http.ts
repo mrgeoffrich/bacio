@@ -1965,6 +1965,25 @@ export async function setFeatureBranchName(
   return getFeature(repoPrefix, slug);
 }
 
+// setFeatureDescription (BACI-341) updates the per-feature description
+// edited inline from the Features detail pane. Description is free text;
+// empty clears it. Returns the refreshed FeatureDetail so the caller can
+// drop it straight into its panel state. Parallel to setFeatureBranchName.
+export async function setFeatureDescription(
+  repoPrefix: string,
+  slug: string,
+  description: string,
+): Promise<FeatureDetail> {
+  if (!repoPrefix || repoPrefix === 'all') {
+    throw new Error('select a repository to edit a feature');
+  }
+  await call<ApiFeature>(`/repos/${repoPrefix}/features/${slug}`, {
+    method: 'PATCH',
+    body: { slug, description },
+  });
+  return getFeature(repoPrefix, slug);
+}
+
 // setFeatureState (BACI-199) flips the feature's three-state column
 // and returns the refreshed FeatureDetail. BACI-250 decoupled this
 // from the auto-close pin — call setFeatureAutoClose to flip

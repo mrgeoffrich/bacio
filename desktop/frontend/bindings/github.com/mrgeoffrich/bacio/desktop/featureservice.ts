@@ -115,6 +115,19 @@ export function SetFeatureCollectHandoffs(repoPrefix: string, slug: string, enab
 }
 
 /**
+ * SetFeatureDescription (BACI-341) updates the per-feature description
+ * and returns the refreshed FeatureDetail. Description is free text, so
+ * there is no client-side validation — an empty string clears it.
+ * Parallel to SetFeatureBranchName, passing description as UpdateFeature's
+ * second content pointer.
+ */
+export function SetFeatureDescription(repoPrefix: string, slug: string, description: string): $CancellablePromise<$models.FeatureDetail> {
+    return $Call.ByID(2752191445, repoPrefix, slug, description).then(($result: any) => {
+        return $$createType0($result);
+    });
+}
+
+/**
  * SetFeatureEmoji (BACI-172) updates the per-feature emoji glyph and
  * returns the refreshed FeatureDetail. Empty string clears the
  * emoji. Validates at the store boundary so multi-cluster input

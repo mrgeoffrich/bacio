@@ -335,6 +335,23 @@ func (f *FeatureService) SetFeatureBranchName(repoPrefix, slug, branch string) (
 	return f.GetFeature(repoPrefix, slug)
 }
 
+// SetFeatureDescription (BACI-341) updates the per-feature description
+// and returns the refreshed FeatureDetail. Description is free text, so
+// there is no client-side validation — an empty string clears it.
+// Parallel to SetFeatureBranchName, passing description as UpdateFeature's
+// second content pointer.
+func (f *FeatureService) SetFeatureDescription(repoPrefix, slug, description string) (FeatureDetail, error) {
+	ctx := context.Background()
+	repo, err := f.resolveRepo(ctx, repoPrefix)
+	if err != nil {
+		return FeatureDetail{}, err
+	}
+	if _, err := f.client.UpdateFeature(ctx, repo, slug, nil, &description, nil, nil, false); err != nil {
+		return FeatureDetail{}, err
+	}
+	return f.GetFeature(repoPrefix, slug)
+}
+
 // SetHiddenOnBoard (BACI-177) flips the per-feature "Show on board"
 // toggle and returns the refreshed FeatureDetail. true hides every
 // kanban card belonging to this feature on this machine; false makes
