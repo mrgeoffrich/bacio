@@ -16,11 +16,14 @@ import (
 )
 
 // newProxyCmd is the `bacio proxy` parent for inspecting the BACI-302 reverse-proxy
-// capture. The read verbs (stats / captures / capture / raw / job / grep) are
-// read-only like `bacio history` / `bacio status` and carry no --json / --dry-run
-// / schema surface. The one mutating verb — `proxy reparse` (BACI-321, the
+// capture and (BACI-344) running the standalone proxy listener. The read verbs
+// (stats / captures / capture / raw / job / grep) are read-only like
+// `bacio history` / `bacio status` and carry no --json / --dry-run / schema
+// surface. The one mutating verb — `proxy reparse` (BACI-321, the
 // proxy_messages backfill) — follows the six agent-CLI rules: --json in, a
-// `proxy.reparse` schema entry, --dry-run, store-boundary validation.
+// `proxy.reparse` schema entry, --dry-run, store-boundary validation. The
+// `serve` / `install-service` verbs (BACI-344) are harness-integration shims
+// like `bacio web` / `api` — long-lived / host-driven, so no six-rule surface.
 func newProxyCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "proxy",
@@ -34,6 +37,11 @@ func newProxyCmd() *cobra.Command {
 	cmd.AddCommand(newProxyJobsCmd())
 	cmd.AddCommand(newProxyGrepCmd())
 	cmd.AddCommand(newProxyReparseCmd())
+	// BACI-344: the standalone reverse-proxy listener + its OS-supervisor
+	// install verb. Harness-integration shims (like `bacio web` / `api`),
+	// not six-rule mutating verbs — no --json / --dry-run / schema entry.
+	cmd.AddCommand(newProxyServeCmd())
+	cmd.AddCommand(newProxyInstallServiceCmd())
 	return cmd
 }
 
