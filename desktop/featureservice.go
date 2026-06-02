@@ -102,7 +102,12 @@ type FeatureDetail struct {
 	// auto-completion sweep won't move it.
 	State       string               `json:"state"`
 	StateManual bool                 `json:"stateManual"`
-	CreatedAt   time.Time            `json:"createdAt"`
+	// CollectHandoffs (BACI-333) mirrors the per-feature collect-handoffs
+	// toggle. ON (the default) collects worker close-out handoff comments;
+	// OFF silences a standing bucket. The drawer's segmented control reads
+	// it the same way as StateManual / Auto Close.
+	CollectHandoffs bool                 `json:"collectHandoffs"`
+	CreatedAt       time.Time            `json:"createdAt"`
 	UpdatedAt   time.Time            `json:"updatedAt"`
 	Issues      []FeatureLinkedIssue `json:"issues"`
 	// Comments is the BACI-124 chronological-handoff timeline, oldest
@@ -224,14 +229,15 @@ func (f *FeatureService) GetFeature(repoPrefix, slug string) (FeatureDetail, err
 		Description:   feat.Description,
 		Emoji:         feat.Emoji,
 		BranchName:    branch,
-		State:         string(feat.State),
-		StateManual:   feat.StateManual,
-		CreatedAt:     feat.CreatedAt,
-		UpdatedAt:     feat.UpdatedAt,
-		Issues:        issues,
-		Comments:      comments,
-		Documents:     docs,
-		HiddenOnBoard: feat.HiddenOnBoard,
+		State:           string(feat.State),
+		StateManual:     feat.StateManual,
+		CollectHandoffs: feat.CollectHandoffs,
+		CreatedAt:       feat.CreatedAt,
+		UpdatedAt:       feat.UpdatedAt,
+		Issues:          issues,
+		Comments:        comments,
+		Documents:       docs,
+		HiddenOnBoard:   feat.HiddenOnBoard,
 	}, nil
 }
 
@@ -273,6 +279,23 @@ func (f *FeatureService) SetFeatureAutoClose(repoPrefix, slug string, enabled bo
 		return FeatureDetail{}, err
 	}
 	if _, err := f.client.SetFeatureAutoClose(ctx, repo, slug, enabled, false); err != nil {
+		return FeatureDetail{}, err
+	}
+	return f.GetFeature(repoPrefix, slug)
+}
+
+// SetFeatureCollectHandoffs (BACI-333) flips the per-feature
+// collect-handoffs toggle and returns the refreshed FeatureDetail.
+// enabled=true collects worker close-out handoff comments; enabled=false
+// silences a standing bucket. Idempotent — flipping to the same state is
+// a no-op write. Mirrors SetFeatureAutoClose's shape.
+func (f *FeatureService) SetFeatureCollectHandoffs(repoPrefix, slug string, enabled bool) (FeatureDetail, error) {
+	ctx := context.Background()
+	repo, err := f.resolveRepo(ctx, repoPrefix)
+	if err != nil {
+		return FeatureDetail{}, err
+	}
+	if _, err := f.client.SetFeatureCollectHandoffs(ctx, repo, slug, enabled, false); err != nil {
 		return FeatureDetail{}, err
 	}
 	return f.GetFeature(repoPrefix, slug)

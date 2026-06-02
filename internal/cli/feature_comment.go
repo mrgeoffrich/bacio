@@ -26,14 +26,14 @@ func newFeatureCommentCmd() *cobra.Command {
 
 func featureCommentAddCmd() *cobra.Command {
 	var (
-		author, body, bodyFile, rawInput string
+		author, body, bodyFile, kind, rawInput string
 	)
 	cmd := &cobra.Command{
 		Use:   "add [SLUG]",
 		Short: "Add a comment to a feature",
 		Args:  cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			raw, err := parseJSONInput(cmd, args, rawInput, "as", "body", "body-file")
+			raw, err := parseJSONInput(cmd, args, rawInput, "as", "body", "body-file", "kind")
 			if err != nil {
 				return err
 			}
@@ -61,12 +61,17 @@ func featureCommentAddCmd() *cobra.Command {
 				FeatureSlug: args[0],
 				Author:      author,
 				Body:        text,
+				Kind:        kind,
 			})
 		},
 	}
 	cmd.Flags().StringVar(&author, "as", "", "comment author name (required when not using --json)")
 	cmd.Flags().StringVar(&body, "body", "", "comment body or '-' for stdin")
 	cmd.Flags().StringVar(&bodyFile, "body-file", "", "path to a markdown file")
+	// BACI-333: 'note' (default — a hand-typed comment, never gated) or
+	// 'handoff' (a worker close-out note, dropped without error on a
+	// feature with handoffs disabled).
+	cmd.Flags().StringVar(&kind, "kind", "", "comment kind: note (default) or handoff")
 	addInputFlag(cmd, &rawInput)
 	return cmd
 }
@@ -81,14 +86,23 @@ func addFeatureComment(in inputs.FeatureCommentAddInput) error {
 	if err != nil {
 		return err
 	}
-	cm, err := c.AddFeatureComment(context.Background(), repo, in, opts.dryRun)
+	res, err := c.AddFeatureComment(context.Background(), repo, in, opts.dryRun)
 	if err != nil {
 		return err
 	}
-	if opts.dryRun {
-		return emitDryRun(cm)
+	// BACI-333: a dropped handoff emits the {skipped,reason} result so the
+	// caller (worker or human) can see the write was a deliberate no-op
+	// rather than a silent success. A real insert emits the comment row.
+	out := func(v any) error {
+		if opts.dryRun {
+			return emitDryRun(v)
+		}
+		return emit(v)
 	}
-	return emit(cm)
+	if res.Skipped {
+		return out(res)
+	}
+	return out(res.Comment)
 }
 
 func featureCommentRmCmd() *cobra.Command {

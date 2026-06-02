@@ -44,6 +44,15 @@ const AUTO_CLOSE_OPTIONS = [
   { id: false, label: 'Off' },
 ];
 
+// BACI-333: per-feature collect-handoffs options. The id is the boolean
+// the API expects — true = collect worker close-out handoff comments
+// (the default), false = silence a standing bucket like `bugs` /
+// `maintenance`. Same shape as AUTO_CLOSE_OPTIONS.
+const COLLECT_HANDOFFS_OPTIONS = [
+  { id: true, label: 'On' },
+  { id: false, label: 'Off' },
+];
+
 // BACI-199: per-feature state options. The id is the canonical
 // state string ParseFeatureState accepts; label is the visible button
 // caption. Stays in lockstep with model.FeatureState — adding a
@@ -232,6 +241,7 @@ export default function FeaturesView({ activeBoard, onChangeHidden }) {
           emoji: m.emoji,
           state: m.state,
           stateManual: false,
+          collectHandoffs: true,
           createdAt: m.updatedAt,
           updatedAt: m.updatedAt,
           issues: [],
@@ -654,6 +664,59 @@ function FeatureOverviewSections({
             When on, the auto-completion sweep can promote this feature to
             done/cancelled once every child issue is terminal. Turn off for
             long-lived catch-all features.
+          </p>
+        </div>
+
+        <div className="mk-features-prop">
+          <label className="mk-features-prop-label">Collect handoffs</label>
+          <div
+            className="mk-segmented"
+            role="group"
+            aria-label="Collect worker handoff comments on this feature"
+          >
+            {COLLECT_HANDOFFS_OPTIONS.map((opt) => {
+              const collect = detail.collectHandoffs;
+              return (
+                <button
+                  key={String(opt.id)}
+                  className={`mk-segmented-btn ${
+                    collect === opt.id ? 'is-active' : ''
+                  }`}
+                  aria-pressed={collect === opt.id}
+                  onClick={async () => {
+                    if (collect === opt.id) return;
+                    try {
+                      const updated = await api.setFeatureCollectHandoffs(
+                        activeBoard,
+                        detail.slug,
+                        opt.id,
+                      );
+                      onDetailChange(updated);
+                      try {
+                        const feats = await api.listFeatures(activeBoard);
+                        onFeaturesChange(feats);
+                      } catch {
+                        // non-fatal — next selection refresh picks it up.
+                      }
+                    } catch (err) {
+                      reportError(err, {
+                        headline: "Couldn't update collect-handoffs",
+                      });
+                    }
+                  }}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+          <p
+            className="mk-features-prop-hint"
+            title="When on, implement-worker close-outs append a handoff comment to this feature so sibling workers inherit context. Turn off for standing bucket features whose unrelated children make handoffs noise."
+          >
+            When on, worker close-outs append a handoff comment so siblings
+            inherit context. Turn off for standing buckets like bugs /
+            maintenance.
           </p>
         </div>
 

@@ -27,6 +27,7 @@ func newFeatureCmd() *cobra.Command {
 		featureUnarchiveCmd(),
 		featureStateCmd(),
 		featureAutoCloseCmd(),
+		featureHandoffsCmd(),
 		newFeatureCommentCmd(),
 	)
 	return cmd
@@ -468,6 +469,49 @@ func featureAutoCloseCmd() *cobra.Command {
 	return cmd
 }
 
+// featureHandoffsCmd (BACI-333) — `bacio feature handoffs <slug> on|off`
+// (or `--json '{"slug":"x","enabled":false}'`). Flips the per-feature
+// collect_handoffs toggle: ON (the default) lets worker close-outs append
+// handoff comments to the feature; OFF stops a standing bucket
+// (`maintenance`, `bugs`) accumulating handoff noise.
+//
+// Mirrors featureAutoCloseCmd's shape 1:1 — positional or JSON, dry-run
+// honoured, strict-decode rejects unknown fields.
+func featureHandoffsCmd() *cobra.Command {
+	var rawInput string
+	cmd := &cobra.Command{
+		Use:   "handoffs [SLUG] [on|off]",
+		Short: "Toggle whether worker close-outs append handoff comments to a feature (BACI-333). OFF silences a standing bucket.",
+		Args:  cobra.RangeArgs(0, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			raw, err := parseJSONInput(cmd, args, rawInput)
+			if err != nil {
+				return err
+			}
+			if raw != nil {
+				in, _, err := inputio.DecodeStrict[inputs.FeatureHandoffsInput](raw)
+				if err != nil {
+					return err
+				}
+				if in.Slug == "" {
+					return fmt.Errorf("slug is required")
+				}
+				return setFeatureCollectHandoffs(in.Slug, in.Enabled)
+			}
+			if len(args) != 2 {
+				return fmt.Errorf("requires <SLUG> <on|off> positionals or --json")
+			}
+			enabled, err := parseOnOff(args[1])
+			if err != nil {
+				return err
+			}
+			return setFeatureCollectHandoffs(args[0], enabled)
+		},
+	}
+	addInputFlag(cmd, &rawInput)
+	return cmd
+}
+
 // parseOnOff parses the on|off literal used by feature.auto-close.
 // Strict — only "on" and "off" (case-insensitive) are accepted; other
 // truthy strings (true, 1, yes) would creep the parser into another
@@ -517,6 +561,26 @@ func setFeatureAutoClose(slug string, enabled bool) error {
 		return err
 	}
 	updated, err := c.SetFeatureAutoClose(context.Background(), repo, slug, enabled, opts.dryRun)
+	if err != nil {
+		return err
+	}
+	if opts.dryRun {
+		return emitDryRun(updated)
+	}
+	return emit(updated)
+}
+
+func setFeatureCollectHandoffs(slug string, enabled bool) error {
+	c, err := openClient()
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	repo, err := resolveRepoC(c)
+	if err != nil {
+		return err
+	}
+	updated, err := c.SetFeatureCollectHandoffs(context.Background(), repo, slug, enabled, opts.dryRun)
 	if err != nil {
 		return err
 	}

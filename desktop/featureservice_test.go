@@ -19,10 +19,26 @@ type fakeFeatureClient struct {
 	lastIncludeFlag bool
 	plan            *client.PlanView
 	planErr         error
+	// BACI-333: records the last SetFeatureCollectHandoffs call and the
+	// feature row ShowFeature should reflect back.
+	lastCollectHandoffs *bool
+	showFeature         *model.Feature
 }
 
 func (f *fakeFeatureClient) GetRepoByPrefix(context.Context, string) (*model.Repo, error) {
 	return f.repo, nil
+}
+
+func (f *fakeFeatureClient) SetFeatureCollectHandoffs(_ context.Context, _ *model.Repo, _ string, enabled, _ bool) (*model.Feature, error) {
+	f.lastCollectHandoffs = &enabled
+	if f.showFeature != nil {
+		f.showFeature.CollectHandoffs = enabled
+	}
+	return f.showFeature, nil
+}
+
+func (f *fakeFeatureClient) ShowFeature(_ context.Context, _ *model.Repo, _ string) (*client.FeatureView, error) {
+	return &client.FeatureView{Feature: f.showFeature}, nil
 }
 
 func (f *fakeFeatureClient) PlanFeature(_ context.Context, _ *model.Repo, _ string, includeClosed bool) (*client.PlanView, error) {
@@ -124,5 +140,28 @@ func TestGetFeaturePlanPropagatesError(t *testing.T) {
 	svc := NewFeatureService(fake)
 	if _, err := svc.GetFeaturePlan("MINI", "auth", false); err == nil {
 		t.Fatalf("expected error to propagate")
+	}
+}
+
+// TestSetFeatureCollectHandoffs (BACI-333) pins that the FeatureService
+// binding forwards the enabled flag to the client and reshapes the
+// refreshed feature into the DTO the frontend's segmented control reads.
+func TestSetFeatureCollectHandoffs(t *testing.T) {
+	repo := &model.Repo{ID: 1, Prefix: "MINI"}
+	fake := &fakeFeatureClient{
+		repo:        repo,
+		showFeature: &model.Feature{Slug: "maintenance", Title: "Maintenance", State: model.FeatureStateActive, CollectHandoffs: true},
+	}
+	svc := NewFeatureService(fake)
+
+	got, err := svc.SetFeatureCollectHandoffs("MINI", "maintenance", false)
+	if err != nil {
+		t.Fatalf("SetFeatureCollectHandoffs: %v", err)
+	}
+	if fake.lastCollectHandoffs == nil || *fake.lastCollectHandoffs {
+		t.Fatalf("client got enabled=%v, want false", fake.lastCollectHandoffs)
+	}
+	if got.CollectHandoffs {
+		t.Fatalf("DTO CollectHandoffs = true, want false after disable")
 	}
 }

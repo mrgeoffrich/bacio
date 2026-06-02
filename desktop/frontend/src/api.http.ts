@@ -714,6 +714,11 @@ export interface FeatureDetail {
   // auto-completion sweep.
   state: string;
   stateManual: boolean;
+  // BACI-333: per-feature collect-handoffs toggle. The drawer's
+  // segmented control reads it the same way as `stateManual`. ON (the
+  // default) collects worker close-out handoff comments; OFF silences a
+  // standing bucket.
+  collectHandoffs: boolean;
   createdAt: string;
   updatedAt: string;
   issues: FeatureLinkedIssue[];
@@ -1773,6 +1778,11 @@ interface ApiFeature {
   // is the safe default.
   state?: string;
   state_manual?: boolean;
+  // BACI-333: per-feature collect-handoffs toggle. Always present in
+  // JSON (no omitempty) so the React component reads it directly. A
+  // server that hasn't shipped BACI-333 leaves it absent — `?? true`
+  // keeps the opt-out default ON.
+  collect_handoffs?: boolean;
   created_at: string;
   updated_at: string;
   // BACI-177: per-feature "Show on board" toggle state. Always
@@ -1837,6 +1847,7 @@ export async function getFeature(repoPrefix: string, slug: string): Promise<Feat
     branchName: f.branch_name ?? '',
     state: f.state ?? 'active',
     stateManual: !!f.state_manual,
+    collectHandoffs: f.collect_handoffs ?? true,
     createdAt: f.created_at,
     updatedAt: f.updated_at,
     issues: (view.issues ?? []).map(iss => ({
@@ -1988,6 +1999,26 @@ export async function setFeatureAutoClose(
   }
   await call<ApiFeature>(
     `/repos/${repoPrefix}/features/${slug}/auto-close`,
+    { method: 'PUT', body: { enabled } },
+  );
+  return getFeature(repoPrefix, slug);
+}
+
+// setFeatureCollectHandoffs (BACI-333) flips the per-feature
+// collect-handoffs toggle that gates whether worker close-outs append
+// handoff comments to this feature, and returns the refreshed
+// FeatureDetail. enabled=true collects handoffs; enabled=false silences a
+// standing bucket like `bugs`/`maintenance`.
+export async function setFeatureCollectHandoffs(
+  repoPrefix: string,
+  slug: string,
+  enabled: boolean,
+): Promise<FeatureDetail> {
+  if (!repoPrefix || repoPrefix === 'all') {
+    throw new Error('select a repository to edit a feature');
+  }
+  await call<ApiFeature>(
+    `/repos/${repoPrefix}/features/${slug}/handoffs`,
     { method: 'PUT', body: { enabled } },
   );
   return getFeature(repoPrefix, slug);

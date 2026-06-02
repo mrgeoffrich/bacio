@@ -254,6 +254,13 @@ func (e *Engine) exportFeature(w *exportWriter, repo *model.Repo, f *model.Featu
 	if f.StateManual {
 		pairs = append(pairs, Pair{"state_manual", Bool(true)})
 	}
+	// BACI-333: round-trip the collect-handoffs opt-out. Unlike every
+	// other synced feature flag the default is ON (true), so emit the
+	// column only when it is OFF — emitting it on every feature would
+	// churn every feature.yaml on the next sync after the schema bump.
+	if !f.CollectHandoffs {
+		pairs = append(pairs, Pair{"collect_handoffs", Bool(false)})
+	}
 	yamlBytes, err := Emit(Map(pairs...))
 	if err != nil {
 		return 0, err
@@ -287,12 +294,19 @@ func (e *Engine) exportFeatureComment(w *exportWriter, featureFolder string, c *
 		return err
 	}
 	bodyHash := ContentHash(bodyBytes)
-	yamlBytes, err := Emit(Map(
-		Pair{"author", Str(c.Author)},
-		Pair{"body_hash", Str(bodyHash)},
-		Pair{"created_at", Time(c.CreatedAt)},
-		Pair{"uuid", Str(c.UUID)},
-	))
+	pairs := []Pair{
+		{"author", Str(c.Author)},
+		{"body_hash", Str(bodyHash)},
+		{"created_at", Time(c.CreatedAt)},
+		{"uuid", Str(c.UUID)},
+	}
+	// BACI-333: emit the kind discriminator only when it is not the
+	// 'note' default, mirroring comments.eval — pre-BACI-333 comment
+	// YAML stays byte-identical so the LWW gate doesn't churn.
+	if c.Kind != "" && c.Kind != store.FeatureCommentKindNote {
+		pairs = append(pairs, Pair{"kind", Str(c.Kind)})
+	}
+	yamlBytes, err := Emit(Map(pairs...))
 	if err != nil {
 		return err
 	}

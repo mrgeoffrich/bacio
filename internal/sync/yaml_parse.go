@@ -77,6 +77,14 @@ type ParsedFeature struct {
 	// the default (false) stays off-disk — same churn-avoidance
 	// rationale as State.
 	StateManual bool `yaml:"state_manual,omitempty" json:"state_manual,omitempty"`
+	// CollectHandoffs (BACI-333) round-trips the per-feature
+	// collect-handoffs opt-out. Pointer-of-bool with omitempty so the
+	// ON default (true) stays off-disk: a nil pointer on import is
+	// treated as ON, and the export only writes the key when the column
+	// is OFF. Unlike StateManual the default is the *true* end, so a
+	// plain `bool` would emit `false` everywhere and churn every
+	// feature.yaml — the pointer keeps the absent case distinct.
+	CollectHandoffs *bool `yaml:"collect_handoffs,omitempty" json:"collect_handoffs,omitempty"`
 }
 
 // ParsedRef is a {label, uuid} cross-reference. Both fields are
@@ -138,6 +146,12 @@ type ParsedComment struct {
 	Eval           bool      `yaml:"eval,omitempty" json:"eval,omitempty"`
 	AgentSessionID string    `yaml:"agent_session_id,omitempty" json:"agent_session_id,omitempty"`
 	Mode           string    `yaml:"mode,omitempty" json:"mode,omitempty"`
+	// Kind (BACI-333) round-trips the feature-comment note/handoff
+	// discriminator. Omitempty so the 'note' default stays off-disk:
+	// only feature comments ever set it (the export emits it only when
+	// not 'note'), and issue comments leave it empty so their YAML is
+	// byte-identical to today. An empty value on import means 'note'.
+	Kind string `yaml:"kind,omitempty" json:"kind,omitempty"`
 }
 
 // ParsedDocLink is one entry in doc.yaml's `links:` sequence.

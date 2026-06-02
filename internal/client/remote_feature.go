@@ -9,6 +9,7 @@ import (
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/model"
+	"github.com/mrgeoffrich/bacio/internal/store"
 )
 
 func (c *remoteClient) ListFeatures(ctx context.Context, repo *model.Repo, withDescription, includeArchived bool) ([]*model.Feature, error) {
@@ -203,6 +204,23 @@ func (c *remoteClient) SetFeatureAutoClose(ctx context.Context, repo *model.Repo
 	return &out, nil
 }
 
+// SetFeatureCollectHandoffs (BACI-333) — PUT
+// /repos/{prefix}/features/{slug}/handoffs with body {enabled: bool}.
+// Returns the refreshed feature row. Server stamps a `feature.handoffs`
+// audit entry on every real flip.
+func (c *remoteClient) SetFeatureCollectHandoffs(ctx context.Context, repo *model.Repo, slug string, enabled, dryRun bool) (*model.Feature, error) {
+	q := url.Values{}
+	if dryRun {
+		q.Set("dry_run", "true")
+	}
+	body := map[string]any{"enabled": enabled}
+	var out model.Feature
+	if err := c.do(ctx, http.MethodPut, "/repos/"+repo.Prefix+"/features/"+slug+"/handoffs", q, body, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // ListFeatureComments (BACI-124) — GET /repos/{prefix}/features/{slug}/comments.
 func (c *remoteClient) ListFeatureComments(ctx context.Context, repo *model.Repo, slug string) ([]*model.FeatureComment, error) {
 	var out []*model.FeatureComment
@@ -216,12 +234,15 @@ func (c *remoteClient) ListFeatureComments(ctx context.Context, repo *model.Repo
 }
 
 // AddFeatureComment (BACI-124) — POST /repos/{prefix}/features/{slug}/comments.
-func (c *remoteClient) AddFeatureComment(ctx context.Context, repo *model.Repo, in inputs.FeatureCommentAddInput, dryRun bool) (*model.FeatureComment, error) {
+// BACI-333: the server returns a FeatureCommentResult — the comment row on
+// a real insert, or {skipped:true,reason} when the store backstop drops a
+// kind='handoff' write to a handoffs-disabled feature.
+func (c *remoteClient) AddFeatureComment(ctx context.Context, repo *model.Repo, in inputs.FeatureCommentAddInput, dryRun bool) (*store.FeatureCommentResult, error) {
 	q := url.Values{}
 	if dryRun {
 		q.Set("dry_run", "true")
 	}
-	var out model.FeatureComment
+	var out store.FeatureCommentResult
 	if err := c.do(ctx, http.MethodPost, "/repos/"+repo.Prefix+"/features/"+in.FeatureSlug+"/comments", q, in, &out); err != nil {
 		return nil, err
 	}

@@ -111,6 +111,11 @@ var (
 		FeatureSlug: "auth",
 		Author:      "agent-alice",
 		Body:        "## MINI-42 handoff\n\n**Files of context.** internal/auth/session.go.\n**Deviations from plan.** None.\n**Work not done.** Cookie scoping deferred to MINI-43.",
+		// BACI-333: worker close-outs post with kind 'handoff' so they are
+		// dropped on a feature that has opted out via `bacio feature
+		// handoffs <slug> off`. Omit (defaults to 'note') for a hand-typed
+		// comment that should never be gated.
+		Kind: "handoff",
 	}
 	ExampleFeatureCommentRm = FeatureCommentRmInput{
 		FeatureSlug: "auth",
@@ -310,6 +315,9 @@ var (
 	// BACI-250: auto-close OFF on a long-lived catch-all so the BACI-199
 	// sweep doesn't promote it to `done` once its current children land.
 	ExampleFeatureAutoClose   = FeatureAutoCloseInput{Slug: "maintenance", Enabled: false}
+	// BACI-333: stop implement-workers piling handoff notes onto a
+	// standing bucket feature.
+	ExampleFeatureHandoffs    = FeatureHandoffsInput{Slug: "maintenance", Enabled: false}
 	ExampleDocArchive         = DocArchiveInput{Filename: "auth-old.md"}
 	ExampleDocUnarchive       = DocUnarchiveInput{Filename: "auth-old.md"}
 	ExampleArchiveSweep       = ArchiveSweepInput{}

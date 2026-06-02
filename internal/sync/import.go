@@ -632,10 +632,20 @@ func contentHashFeature(sf *scannedFeature) string {
 	// == false) stringify with empty trailing segments, different
 	// from the old hash on the first re-sync, then stable thereafter
 	// — one cycle of migration churn is the price.
-	return ContentHash([]byte(fmt.Sprintf("feature|%s|%s|%s|%s|%s|%s|%s|%t",
+	// BACI-333: fold collect_handoffs into the hash so a feature whose
+	// flag is flipped OFF on side A triggers an update on side B's
+	// import. The effective value is folded (nil pointer ⇒ the ON
+	// default) so the absent-key case hashes identically to an explicit
+	// ON — only an OFF feature perturbs the hash, keeping the ON majority
+	// byte-stable past the one-cycle migration churn.
+	collectHandoffs := true
+	if sf.Parsed.CollectHandoffs != nil {
+		collectHandoffs = *sf.Parsed.CollectHandoffs
+	}
+	return ContentHash([]byte(fmt.Sprintf("feature|%s|%s|%s|%s|%s|%s|%s|%t|%t",
 		sf.Parsed.UUID, sf.Parsed.Slug, sf.Parsed.Title, sf.BodyHash,
 		hashableArchived(sf.Parsed.ArchivedAt), sf.Parsed.Emoji,
-		hashableFeatureState(sf.Parsed.State), sf.Parsed.StateManual)))
+		hashableFeatureState(sf.Parsed.State), sf.Parsed.StateManual, collectHandoffs)))
 }
 
 func contentHashIssue(si *scannedIssue) string {
@@ -663,8 +673,13 @@ func contentHashComment(sc *scannedComment) string {
 // comment (astronomically unlikely with UUIDv7, but defensive) would
 // surface as a hash change rather than a silent no-op.
 func contentHashFeatureComment(sc *scannedFeatureComment) string {
-	return ContentHash([]byte(fmt.Sprintf("feature_comment|%s|%s|%s",
-		sc.Parsed.UUID, sc.Parsed.Author, sc.BodyHash)))
+	// BACI-333: fold the kind discriminator into the hash so a comment
+	// that gains kind='handoff' triggers an update rather than a silent
+	// no-op. The empty (note) case stringifies with a trailing empty
+	// segment — different from the pre-BACI-333 hash on the first
+	// re-sync, then stable thereafter (one cycle of migration churn).
+	return ContentHash([]byte(fmt.Sprintf("feature_comment|%s|%s|%s|%s",
+		sc.Parsed.UUID, sc.Parsed.Author, sc.BodyHash, sc.Parsed.Kind)))
 }
 
 func contentHashDocument(sd *scannedDocument) string {

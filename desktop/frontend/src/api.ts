@@ -802,6 +802,23 @@ export async function setFeatureAutoClose(
   }
 }
 
+// setFeatureCollectHandoffs (BACI-333) flips the per-feature
+// collect-handoffs toggle that gates whether worker close-outs append
+// handoff comments to this feature, and returns the refreshed
+// FeatureDetail. enabled=true collects handoffs; enabled=false silences a
+// standing bucket like `bugs`/`maintenance`.
+export async function setFeatureCollectHandoffs(
+  repoPrefix: string,
+  slug: string,
+  enabled: boolean,
+): Promise<FeatureDetail> {
+  try {
+    return await FeatureService.SetFeatureCollectHandoffs(repoPrefix, slug, enabled);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
 // addFeatureComment posts a chronological handoff comment to a feature
 // (BACI-124) and returns the refreshed feature detail.
 export async function addFeatureComment(

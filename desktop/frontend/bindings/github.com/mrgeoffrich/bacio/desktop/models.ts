@@ -644,6 +644,14 @@ export class FeatureDetail {
      */
     "state": string;
     "stateManual": boolean;
+
+    /**
+     * CollectHandoffs (BACI-333) mirrors the per-feature collect-handoffs
+     * toggle. ON (the default) collects worker close-out handoff comments;
+     * OFF silences a standing bucket. The drawer's segmented control reads
+     * it the same way as StateManual / Auto Close.
+     */
+    "collectHandoffs": boolean;
     "createdAt": time$0.Time;
     "updatedAt": time$0.Time;
     "issues": FeatureLinkedIssue[];
@@ -692,6 +700,9 @@ export class FeatureDetail {
         if (!("stateManual" in $$source)) {
             this["stateManual"] = false;
         }
+        if (!("collectHandoffs" in $$source)) {
+            this["collectHandoffs"] = false;
+        }
         if (!("createdAt" in $$source)) {
             this["createdAt"] = null;
         }
@@ -718,18 +729,18 @@ export class FeatureDetail {
      * Creates a new FeatureDetail instance from a string or object.
      */
     static createFrom($$source: any = {}): FeatureDetail {
-        const $$createField9_0 = $$createType8;
-        const $$createField10_0 = $$createType10;
-        const $$createField11_0 = $$createType12;
+        const $$createField10_0 = $$createType8;
+        const $$createField11_0 = $$createType10;
+        const $$createField12_0 = $$createType12;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("issues" in $$parsedSource) {
-            $$parsedSource["issues"] = $$createField9_0($$parsedSource["issues"]);
+            $$parsedSource["issues"] = $$createField10_0($$parsedSource["issues"]);
         }
         if ("comments" in $$parsedSource) {
-            $$parsedSource["comments"] = $$createField10_0($$parsedSource["comments"]);
+            $$parsedSource["comments"] = $$createField11_0($$parsedSource["comments"]);
         }
         if ("documents" in $$parsedSource) {
-            $$parsedSource["documents"] = $$createField11_0($$parsedSource["documents"]);
+            $$parsedSource["documents"] = $$createField12_0($$parsedSource["documents"]);
         }
         return new FeatureDetail($$parsedSource as Partial<FeatureDetail>);
     }

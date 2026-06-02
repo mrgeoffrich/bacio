@@ -26,6 +26,14 @@ type featureAutoCloseInput struct {
 	Enabled *bool `json:"enabled"`
 }
 
+// featureCollectHandoffsInput is the body shape for PUT
+// /repos/{prefix}/features/{slug}/handoffs (BACI-333). Same
+// pointer-of-bool shape so a missing field is distinguishable from
+// `enabled: false`.
+type featureCollectHandoffsInput struct {
+	Enabled *bool `json:"enabled"`
+}
+
 func (d deps) handleFeaturesList(w http.ResponseWriter, r *http.Request) {
 	repo, ok := resolveRepoFromPath(w, r, d.store)
 	if !ok {
@@ -521,6 +529,75 @@ func (d deps) handleFeatureAutoClose(w http.ResponseWriter, r *http.Request) {
 		RepoPrefix:  repo.Prefix,
 		Actor:       ActorFromContext(r.Context()),
 		Op:          "feature.auto-close",
+		Kind:        "feature",
+		TargetID:    &updated.ID,
+		TargetLabel: updated.Slug,
+		Details:     fmt.Sprintf("%s → %s", from, to),
+	})
+	writeJSON(w, http.StatusOK, updated)
+}
+
+// handleFeatureCollectHandoffs (BACI-333) flips the per-feature
+// `collect_handoffs` toggle that gates whether worker close-outs append
+// handoff comments to this feature. Body: `{"enabled": bool}`. Mirrors
+// handleFeatureAutoClose 1:1 except there is no polarity inversion —
+// `enabled` maps straight to the column; idempotent no-ops skip the
+// audit row; audits as `feature.handoffs` with Details `off → on` / `on → off`.
+func (d deps) handleFeatureCollectHandoffs(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	feat, ok := resolveFeatureOnRepo(w, r, d.store, repo)
+	if !ok {
+		return
+	}
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	body, _, err := inputio.DecodeStrict[featureCollectHandoffsInput](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	if body.Enabled == nil {
+		writeError(w, http.StatusBadRequest, "invalid_input",
+			"enabled is required", map[string]any{"field": "enabled"})
+		return
+	}
+	want := *body.Enabled
+	if isDryRun(r) {
+		projected := *feat
+		projected.CollectHandoffs = want
+		writeDryRun(w, http.StatusOK, &projected)
+		return
+	}
+	if feat.CollectHandoffs == want {
+		// Idempotent — return the row unchanged and skip the audit row.
+		writeJSON(w, http.StatusOK, feat)
+		return
+	}
+	if err := d.store.SetFeatureCollectHandoffs(feat.ID, want); err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	updated, err := d.store.GetFeatureByID(feat.ID)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	from, to := "on", "off"
+	if want {
+		from, to = "off", "on"
+	}
+	recordOp(d.store, d.logger, model.HistoryEntry{
+		RepoID:      &feat.RepoID,
+		RepoPrefix:  repo.Prefix,
+		Actor:       ActorFromContext(r.Context()),
+		Op:          "feature.handoffs",
 		Kind:        "feature",
 		TargetID:    &updated.ID,
 		TargetLabel: updated.Slug,

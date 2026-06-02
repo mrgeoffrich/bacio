@@ -102,6 +102,19 @@ export function SetFeatureBranchName(repoPrefix: string, slug: string, branch: s
 }
 
 /**
+ * SetFeatureCollectHandoffs (BACI-333) flips the per-feature
+ * collect-handoffs toggle and returns the refreshed FeatureDetail.
+ * enabled=true collects worker close-out handoff comments; enabled=false
+ * silences a standing bucket. Idempotent — flipping to the same state is
+ * a no-op write. Mirrors SetFeatureAutoClose's shape.
+ */
+export function SetFeatureCollectHandoffs(repoPrefix: string, slug: string, enabled: boolean): $CancellablePromise<$models.FeatureDetail> {
+    return $Call.ByID(277787338, repoPrefix, slug, enabled).then(($result: any) => {
+        return $$createType0($result);
+    });
+}
+
+/**
  * SetFeatureEmoji (BACI-172) updates the per-feature emoji glyph and
  * returns the refreshed FeatureDetail. Empty string clears the
  * emoji. Validates at the store boundary so multi-cluster input
