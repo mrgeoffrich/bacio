@@ -24,6 +24,7 @@ func newAPICmd() *cobra.Command {
 		port        int
 		token       string
 		corsOrigins []string
+		noProxy     bool
 	)
 	cmd := &cobra.Command{
 		Use:   "api",
@@ -33,6 +34,11 @@ func newAPICmd() *cobra.Command {
 Defaults to 127.0.0.1:5320. Override the bind via --addr (host:port) or just
 the port via --port. Set --token (or BACIO_API_TOKEN) to require
 "Authorization: Bearer <token>" on every request except /healthz.
+
+By default a second /anthropic-only listener is also stood up on the stable
+proxy port (BACI-344: the API port minus one) so a fresh agent — whose
+ANTHROPIC_BASE_URL points there — works out of the box. Pass --no-proxy once a
+dedicated 'bacio proxy serve' owns that port, so the two don't clash.
 
 Incoming requests carry their own actor via the X-Actor header (default "api").`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -100,6 +106,13 @@ Incoming requests carry their own actor via the X-Actor header (default "api").`
 
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
+
+			// BACI-344: same all-in-one second /anthropic-only listener as
+			// `bacio web`, so a fresh agent works without a separate
+			// `bacio proxy serve`. --no-proxy opts out; a bind clash is
+			// non-fatal (logged).
+			startSecondaryProxy(ctx, !noProxy, s, env.ProxyAddr, addr, logDir, logger)
+
 			err = friendlyServeErr(addr, srv.Run(ctx))
 			if err != nil {
 				logger.Error("api shutdown", "err", err)
@@ -114,6 +127,8 @@ Incoming requests carry their own actor via the X-Actor header (default "api").`
 	cmd.Flags().StringVar(&token, "token", "", "shared bearer token; falls back to BACIO_API_TOKEN env var")
 	cmd.Flags().StringSliceVar(&corsOrigins, "cors-origin", nil,
 		"allow cross-origin browser requests from this origin (repeatable; e.g. http://localhost:5174). Empty allow-list = same-origin only.")
+	cmd.Flags().BoolVar(&noProxy, "no-proxy", false,
+		"skip the second /anthropic-only listener on the proxy port (BACI-344). Use it once a dedicated `bacio proxy serve` owns that port, so the two don't clash.")
 	return cmd
 }
 
