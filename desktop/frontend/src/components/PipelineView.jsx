@@ -139,6 +139,7 @@ export default function PipelineView({
   onDoneCard,
   onReorder,
   onSetProcess,
+  onSetProcessAuto,
   onResetProcess,
   onEditProcess,
   onStartJob,
@@ -481,6 +482,7 @@ export default function PipelineView({
                   onDragStart={() => setDragKey(card.key)}
                   onDragEnd={() => { setDragKey(null); setDragOverCol(null); }}
                   onSetProcess={onSetProcess}
+                  onSetProcessAuto={onSetProcessAuto}
                   onResetProcess={onResetProcess}
                   onEditProcess={onEditProcess}
                   onStartJob={onStartJob}
@@ -804,6 +806,7 @@ function StageCard({
   onDragStart,
   onDragEnd,
   onSetProcess,
+  onSetProcessAuto,
   onResetProcess,
   onEditProcess,
   onStartJob,
@@ -893,6 +896,7 @@ function StageCard({
           dimmedHasProcess={hasProcess}
           jobs={jobs}
           onPick={(selection) => { setPicking(false); onSetProcess?.(card.key, selection); }}
+          onPickAuto={(selection) => { setPicking(false); onSetProcessAuto?.(card.key, selection); }}
           onCancel={hasProcess ? () => setPicking(false) : null}
         />
       ) : (
@@ -1208,7 +1212,7 @@ const STANDALONE_OPTIONS = ['plan_large', 'scope', 'research'];
 // divider, a set of standalone rows (Large Plan / Scope / Research) are each
 // mutually exclusive with the four toggles and with each other. The issue
 // card sits dimmed under the scrim.
-function ProcessMenu({ dimmedHasProcess, jobs, onPick, onCancel }) {
+function ProcessMenu({ dimmedHasProcess, jobs, onPick, onPickAuto, onCancel }) {
   // Lazy initialiser: on Edit Process pre-fill from the card's existing job
   // modes (a standalone option wins if present); on a fresh card default to
   // Plan + Implement + Ship on — the plan-implement-ship chain is the most
@@ -1335,14 +1339,28 @@ function ProcessMenu({ dimmedHasProcess, jobs, onPick, onCancel }) {
         );
       })}
 
-      <button
-        type="button"
-        className="mk-pl-procopt is-confirm"
-        disabled={!canConfirm}
-        onClick={() => onPick({ stages: selected })}
-      >
-        Confirm
-      </button>
+      {/* BACI-334: twin confirm buttons. Confirm sets the process (Auto
+          stays off — unchanged); Confirm + Auto sets the process AND turns
+          Auto on in one click. Both share the same canConfirm gate. */}
+      <div className="mk-pl-procbtns">
+        <button
+          type="button"
+          className="mk-pl-procopt is-confirm"
+          disabled={!canConfirm}
+          onClick={() => onPick({ stages: selected })}
+        >
+          Confirm
+        </button>
+        <button
+          type="button"
+          className="mk-pl-procopt is-confirm is-confirm-auto"
+          disabled={!canConfirm}
+          onClick={() => onPickAuto({ stages: selected })}
+          title="Set the process and run it automatically (Auto)"
+        >
+          Confirm + Auto
+        </button>
+      </div>
 
       {onCancel && (
         <button type="button" className="mk-pl-procopt is-cancel" onClick={onCancel}>

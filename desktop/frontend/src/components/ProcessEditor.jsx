@@ -26,7 +26,7 @@ import { viewPath } from '../lib/routes';
 // `jobs: [{sequence, mode, status}]`). A deep-link before cards have
 // loaded renders a loading state, then redirects to the Pipeline if the
 // key isn't found.
-export default function ProcessEditor({ cards, activeBoard, onSave }) {
+export default function ProcessEditor({ cards, activeBoard, onSave, onSaveAuto }) {
   const { key } = useParams();
   const navigate = useNavigate();
   const card = useMemo(
@@ -99,17 +99,23 @@ export default function ProcessEditor({ cards, activeBoard, onSave }) {
     setDragIdx(null);
   };
 
-  const save = () => {
+  // runSave drives both footer buttons: `save` persists the tail (Auto
+  // untouched), `saveAuto` (BACI-334) persists the tail and turns Auto on.
+  // They differ only in the App callback passed, so the saving lock and the
+  // error-banner lifecycle live here once.
+  const runSave = (fn) => {
     if (!canSave) return;
     setSaving(true);
     setBanner(null);
-    Promise.resolve(onSave?.(key, tail.map((t) => t.mode)))
+    Promise.resolve(fn?.(key, tail.map((t) => t.mode)))
       .then(() => backToPipeline())
       .catch((err) => {
         setSaving(false);
         setBanner({ kind: 'error', text: err?.message || 'Could not save the process.' });
       });
   };
+  const save = () => runSave(onSave);
+  const saveAuto = () => runSave(onSaveAuto);
 
   // Loading / not-found. App threads the cached cards; on a deep-link the
   // array may be empty for a tick. Once cards have loaded but the key is
@@ -252,6 +258,15 @@ export default function ProcessEditor({ cards, activeBoard, onSave }) {
         </button>
         <button type="button" className="mk-pl-btn is-primary" onClick={save} disabled={!canSave}>
           {saving ? 'Saving…' : 'Save'}
+        </button>
+        <button
+          type="button"
+          className="mk-pl-btn is-primary is-confirm-auto"
+          onClick={saveAuto}
+          disabled={!canSave}
+          title="Save the process and run it automatically (Auto)"
+        >
+          {saving ? 'Saving…' : 'Save + Auto'}
         </button>
       </footer>
     </div>
