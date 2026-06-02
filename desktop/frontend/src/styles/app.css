@@ -436,6 +436,19 @@ body { margin: 0; }
   padding: 2px 8px; border-radius: 9999px;
   background: var(--ink-50); color: var(--fg-2);
 }
+/* BACI-345: the feature badge on the issue detail page is a <Link> back
+   to the feature. Keep the .mk-tag pill visual, just strip the default
+   anchor underline/colour and add the clickable affordance. */
+.mk-tag-link {
+  display: inline-block; text-decoration: none; color: var(--fg-2);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+.mk-tag-link:hover {
+  background: var(--accent-1, var(--fg-1));
+  color: var(--paper, #fff);
+}
 .mk-card-foot {
   display: flex; align-items: center; gap: 8px;
   justify-content: space-between;
