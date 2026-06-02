@@ -63,6 +63,17 @@ CREATE TABLE IF NOT EXISTS features (
     state        TEXT    NOT NULL DEFAULT 'active'
                   CHECK (state IN ('active','done','cancelled')),
     state_manual INTEGER NOT NULL DEFAULT 0 CHECK (state_manual IN (0,1)),
+    -- collect_handoffs (BACI-333) gates whether worker close-outs append
+    -- handoff comments to this feature. DEFAULT 1 (opt-out) so every
+    -- existing feature behaves exactly as before; standing bucket
+    -- features (`maintenance`, `bugs`) are flipped to 0 so their
+    -- unrelated children don't pile up noise. Both a prompt-gate (the
+    -- common path) and a store-side backstop in CreateFeatureComment read
+    -- this — a kind='handoff' write to a 0 feature is dropped, while a
+    -- hand-typed kind='note' always goes through. Unlike every other
+    -- synced feature flag the default is 1, so the sync export emits the
+    -- column only when it is 0 to avoid churning every feature.yaml.
+    collect_handoffs INTEGER NOT NULL DEFAULT 1 CHECK (collect_handoffs IN (0,1)),
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(repo_id, slug)
@@ -210,6 +221,12 @@ CREATE TABLE IF NOT EXISTS feature_comments (
     feature_id INTEGER NOT NULL REFERENCES features(id) ON DELETE CASCADE,
     author     TEXT    NOT NULL,
     body       TEXT    NOT NULL,
+    -- kind (BACI-333) discriminates worker handoffs ('handoff') from
+    -- hand-typed notes ('note', the default). The store backstop in
+    -- CreateFeatureComment only ever drops handoffs to a feature with
+    -- collect_handoffs = 0; a note always inserts. Round-trips through
+    -- sync (emitted only when not 'note', mirroring comments.eval).
+    kind       TEXT    NOT NULL DEFAULT 'note',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

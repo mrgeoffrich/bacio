@@ -71,6 +71,15 @@ type FeatureAutoCloseInput struct {
 	Enabled bool   `json:"enabled"`
 }
 
+// FeatureHandoffsInput is the payload for `bacio feature handoffs --json`
+// (BACI-333). Both fields are required — like FeatureAutoCloseInput the
+// boolean uses an explicit value (no pointer) so the JSON schema rejects
+// an absent `enabled` rather than defaulting to false.
+type FeatureHandoffsInput struct {
+	Slug    string `json:"slug"`
+	Enabled bool   `json:"enabled"`
+}
+
 // FeatureCommentAddInput is the payload for `bacio feature comment add
 // --json` (BACI-124). The feature-scoped mirror of CommentAddInput —
 // feature_slug replaces issue_key because feature comments live under a
@@ -79,6 +88,12 @@ type FeatureCommentAddInput struct {
 	FeatureSlug string `json:"feature_slug"`
 	Author      string `json:"author"`
 	Body        string `json:"body"`
+	// Kind (BACI-333) is 'note' (the default — a hand-typed comment) or
+	// 'handoff' (a worker close-out note). A handoff write to a feature
+	// with collect_handoffs off is dropped by the store backstop without
+	// erroring; a note always inserts. Omitempty so the common note path
+	// stays a two-field payload.
+	Kind string `json:"kind,omitempty"`
 }
 
 // FeatureCommentRmInput is the payload for `bacio feature comment rm

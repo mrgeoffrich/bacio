@@ -143,7 +143,7 @@ func (f *featuresView) Help() string {
 	if f.overlay {
 		return "j/k scroll · g/G top/bottom · esc close"
 	}
-	return "j/k features · enter open · a archive · A unarchive · r reload · q quit"
+	return "j/k features · enter open · a archive · A unarchive · h handoffs · r reload · q quit"
 }
 
 func (f *featuresView) Update(msg tea.Msg) tea.Cmd {
@@ -210,6 +210,15 @@ func (f *featuresView) Update(msg tea.Msg) tea.Cmd {
 		if cur := f.currentFeature(); cur != nil && cur.ArchivedAt != nil {
 			f.setArchived(cur, false)
 		}
+	case "h":
+		// BACI-333: toggle whether worker close-outs collect handoff
+		// comments on the focused feature. Flip OFF for standing buckets
+		// (`bugs`, `maintenance`) so their unrelated children don't pile
+		// up handoff noise; ON (the default) keeps the cohesive-feature
+		// behaviour.
+		if cur := f.currentFeature(); cur != nil {
+			f.setCollectHandoffs(cur, !cur.CollectHandoffs)
+		}
 	}
 	f.refreshSelection()
 	return nil
@@ -232,6 +241,31 @@ func (f *featuresView) setArchived(feat *model.Feature, archived bool) {
 		Kind:        "feature",
 		TargetID:    &feat.ID,
 		TargetLabel: feat.Slug,
+	})
+	f.reload()
+}
+
+// setCollectHandoffs (BACI-333) flips the focused feature's
+// collect_handoffs column and records a feature.handoffs audit row.
+// Mirrors setArchived's shape; enabled maps straight to the column.
+func (f *featuresView) setCollectHandoffs(feat *model.Feature, enabled bool) {
+	if err := f.store.SetFeatureCollectHandoffs(feat.ID, enabled); err != nil {
+		f.err = err
+		return
+	}
+	from, to := "on", "off"
+	if enabled {
+		from, to = "off", "on"
+	}
+	recordTUIOp(f.store, model.HistoryEntry{
+		Actor:       tuiActor(),
+		RepoID:      &feat.RepoID,
+		RepoPrefix:  f.repo.Prefix,
+		Op:          "feature.handoffs",
+		Kind:        "feature",
+		TargetID:    &feat.ID,
+		TargetLabel: feat.Slug,
+		Details:     fmt.Sprintf("%s → %s", from, to),
 	})
 	f.reload()
 }
@@ -413,6 +447,12 @@ func (f *featuresView) renderDetail(width, height int) string {
 	if feat.BranchName != nil && *feat.BranchName != "" {
 		metaParts = append(metaParts, fmt.Sprintf("branch=%s", *feat.BranchName))
 	}
+	// BACI-333: surface the collect-handoffs opt-out only when OFF —
+	// same "show the non-default" splice as branch above, keeping the
+	// common (ON) detail pane uncluttered.
+	if !feat.CollectHandoffs {
+		metaParts = append(metaParts, "handoffs=off")
+	}
 	metaParts = append(metaParts,
 		fmt.Sprintf("created %s", feat.CreatedAt.Format("2006-01-02")),
 		fmt.Sprintf("updated %s", feat.UpdatedAt.Format("2006-01-02")),
@@ -500,6 +540,10 @@ func (f *featuresView) viewOverlay(width, height int) string {
 	overlayMetaParts := []string{fmt.Sprintf("[%s]", feat.Slug)}
 	if feat.BranchName != nil && *feat.BranchName != "" {
 		overlayMetaParts = append(overlayMetaParts, fmt.Sprintf("branch=%s", *feat.BranchName))
+	}
+	// BACI-333: same OFF-only handoffs splice as renderDetail.
+	if !feat.CollectHandoffs {
+		overlayMetaParts = append(overlayMetaParts, "handoffs=off")
 	}
 	overlayMetaParts = append(overlayMetaParts,
 		fmt.Sprintf("created %s", feat.CreatedAt.Format("2006-01-02 15:04")),

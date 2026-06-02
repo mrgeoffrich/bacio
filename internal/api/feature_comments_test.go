@@ -87,10 +87,11 @@ func TestFeatureCommentDeleteHappy(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	feat := seedFeature(t, s, repo, "auth", "Auth")
-	cm, err := s.CreateFeatureComment(feat.ID, "alice", "hi")
+	res, err := s.CreateFeatureComment(feat.ID, "alice", "hi", "")
 	if err != nil {
 		t.Fatalf("CreateFeatureComment: %v", err)
 	}
+	cm := res.Comment
 	resp, body := apiDelete(t, ts.URL+"/repos/MINI/features/"+feat.Slug+"/comments/"+cm.UUID, nil)
 	if resp.StatusCode != 204 {
 		t.Fatalf("status: %d, body=%s", resp.StatusCode, body)
@@ -106,10 +107,11 @@ func TestFeatureCommentDeleteDryRun(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	feat := seedFeature(t, s, repo, "auth", "Auth")
-	cm, err := s.CreateFeatureComment(feat.ID, "alice", "hi")
+	res, err := s.CreateFeatureComment(feat.ID, "alice", "hi", "")
 	if err != nil {
 		t.Fatalf("CreateFeatureComment: %v", err)
 	}
+	cm := res.Comment
 	resp, body := apiDelete(t, ts.URL+"/repos/MINI/features/"+feat.Slug+"/comments/"+cm.UUID+"?dry_run=1", nil)
 	if resp.StatusCode != 200 || resp.Header.Get("X-Dry-Run") != "applied" {
 		t.Fatalf("status: %d, header=%q, body=%s", resp.StatusCode, resp.Header.Get("X-Dry-Run"), body)
@@ -142,10 +144,11 @@ func TestFeatureCommentDeleteWrongFeature(t *testing.T) {
 	repo := seedRepo(t, s)
 	a := seedFeature(t, s, repo, "auth", "Auth")
 	b := seedFeature(t, s, repo, "billing", "Billing")
-	cm, err := s.CreateFeatureComment(a.ID, "alice", "hi")
+	res, err := s.CreateFeatureComment(a.ID, "alice", "hi", "")
 	if err != nil {
 		t.Fatalf("CreateFeatureComment: %v", err)
 	}
+	cm := res.Comment
 	resp, _ := apiDelete(t, ts.URL+"/repos/MINI/features/"+b.Slug+"/comments/"+cm.UUID, nil)
 	if resp.StatusCode != 404 {
 		t.Fatalf("status: %d", resp.StatusCode)
@@ -162,7 +165,7 @@ func TestFeatureShowSurfacesComments(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	feat := seedFeature(t, s, repo, "auth", "Auth")
-	if _, err := s.CreateFeatureComment(feat.ID, "alice", "hi"); err != nil {
+	if _, err := s.CreateFeatureComment(feat.ID, "alice", "hi", ""); err != nil {
 		t.Fatalf("CreateFeatureComment: %v", err)
 	}
 	resp, body := apiGet(t, ts.URL+"/repos/MINI/features/"+feat.Slug)

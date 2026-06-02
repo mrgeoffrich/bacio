@@ -62,7 +62,7 @@ func (s *Store) CreateFeature(repoID int64, slug, title, description, emoji, bra
 	return s.GetFeatureByID(id)
 }
 
-const featureCols = `id, uuid, repo_id, slug, title, description, emoji, branch_name, archived_at, state, state_manual, created_at, updated_at`
+const featureCols = `id, uuid, repo_id, slug, title, description, emoji, branch_name, archived_at, state, state_manual, collect_handoffs, created_at, updated_at`
 
 // FeatureFilter (BACI-68) is the filter struct for ListFeaturesFiltered.
 // The plain ListFeatures(repoID, includeDescription) signature predated
@@ -249,6 +249,29 @@ func (s *Store) SetFeatureAutoClose(featureID int64, enabled bool) error {
 	}
 	_, err := s.DB.Exec(
 		`UPDATE features SET state_manual = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
+		bit, featureID,
+	)
+	return err
+}
+
+// SetFeatureCollectHandoffs (BACI-333) flips the per-feature
+// `collect_handoffs` column that gates whether worker close-outs append
+// handoff comments to this feature. `enabled = true` writes 1 (the
+// opt-out default — collect handoffs); `enabled = false` writes 0 (a
+// standing bucket like `bugs`/`maintenance` whose unrelated children
+// shouldn't accumulate handoff noise).
+//
+// Unlike SetFeatureAutoClose there is no polarity inversion: `enabled`
+// maps straight to the column. Bumps updated_at so the LWW gate in sync
+// sees the change; writes unconditionally so flipping to the same value
+// still nudges updated_at (matches SetFeatureAutoClose / SetFeatureArchived).
+func (s *Store) SetFeatureCollectHandoffs(featureID int64, enabled bool) error {
+	bit := 0
+	if enabled {
+		bit = 1
+	}
+	_, err := s.DB.Exec(
+		`UPDATE features SET collect_handoffs = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`,
 		bit, featureID,
 	)
 	return err
@@ -494,13 +517,14 @@ func (s *Store) CreateFeatureFromSync(repoID int64, uuid, slug, title, descripti
 
 func scanFeature(row rowScanner) (*model.Feature, error) {
 	var (
-		f           model.Feature
-		branchName  sql.NullString
-		archivedAt  sql.NullTime
-		state       string
-		stateManual int64
+		f               model.Feature
+		branchName      sql.NullString
+		archivedAt      sql.NullTime
+		state           string
+		stateManual     int64
+		collectHandoffs int64
 	)
-	err := row.Scan(&f.ID, &f.UUID, &f.RepoID, &f.Slug, &f.Title, &f.Description, &f.Emoji, &branchName, &archivedAt, &state, &stateManual, &f.CreatedAt, &f.UpdatedAt)
+	err := row.Scan(&f.ID, &f.UUID, &f.RepoID, &f.Slug, &f.Title, &f.Description, &f.Emoji, &branchName, &archivedAt, &state, &stateManual, &collectHandoffs, &f.CreatedAt, &f.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -517,5 +541,6 @@ func scanFeature(row rowScanner) (*model.Feature, error) {
 	}
 	f.State = model.FeatureState(state)
 	f.StateManual = stateManual != 0
+	f.CollectHandoffs = collectHandoffs != 0
 	return &f, nil
 }

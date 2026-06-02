@@ -27,10 +27,11 @@ func TestExportFeatureComments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create feature: %v", err)
 	}
-	cm, err := s.CreateFeatureComment(feat.ID, "alice", "handoff body\n")
+	cres, err := s.CreateFeatureComment(feat.ID, "alice", "handoff body\n", "")
 	if err != nil {
 		t.Fatalf("create feature comment: %v", err)
 	}
+	cm := cres.Comment
 	if _, err := s.DB.Exec(`UPDATE feature_comments SET created_at = '2026-05-01 10:00:00' WHERE id = ?`, cm.ID); err != nil {
 		t.Fatalf("force ts: %v", err)
 	}
@@ -84,10 +85,11 @@ func TestRoundTripFeatureComments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create feature: %v", err)
 	}
-	cm, err := src.CreateFeatureComment(feat.ID, "alice", "ship it")
+	cres, err := src.CreateFeatureComment(feat.ID, "alice", "ship it", "")
 	if err != nil {
 		t.Fatalf("create feature comment: %v", err)
 	}
+	cm := cres.Comment
 
 	// Export the source.
 	dir := t.TempDir()

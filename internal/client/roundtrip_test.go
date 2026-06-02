@@ -455,8 +455,11 @@ func TestRoundTripFeatureComments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("remote AddFeatureComment #2: %v", err)
 	}
+	if cm2.Skipped || cm2.Comment == nil {
+		t.Fatalf("remote AddFeatureComment #2 result: %+v", cm2)
+	}
 	preview, _, err := p.local.DeleteFeatureComment(ctx, p.repo, inputs.FeatureCommentRmInput{
-		FeatureSlug: feat.Slug, CommentUUID: cm2.UUID,
+		FeatureSlug: feat.Slug, CommentUUID: cm2.Comment.UUID,
 	}, true)
 	if err != nil {
 		t.Fatalf("local DeleteFeatureComment dry-run: %v", err)
@@ -468,12 +471,82 @@ func TestRoundTripFeatureComments(t *testing.T) {
 		t.Fatalf("dry-run deleted the comment: %d", len(cs))
 	}
 	if _, _, err := p.local.DeleteFeatureComment(ctx, p.repo, inputs.FeatureCommentRmInput{
-		FeatureSlug: feat.Slug, CommentUUID: cm2.UUID,
+		FeatureSlug: feat.Slug, CommentUUID: cm2.Comment.UUID,
 	}, false); err != nil {
 		t.Fatalf("local DeleteFeatureComment: %v", err)
 	}
 	if cs, _ := p.remote.ListFeatureComments(ctx, p.repo, feat.Slug); len(cs) != 0 {
 		t.Fatalf("remote still sees deleted feature comment: %d", len(cs))
+	}
+}
+
+// TestRoundTripFeatureHandoffs (BACI-333) checks the collect-handoffs
+// toggle and the kind / skipped result behave identically over the local
+// and remote backends.
+func TestRoundTripFeatureHandoffs(t *testing.T) {
+	p := newPair(t)
+	defer p.cleanup()
+	ctx := context.Background()
+
+	feat, err := p.local.CreateFeature(ctx, p.repo, inputs.FeatureAddInput{
+		Title: "Maintenance", Slug: "maintenance",
+	}, false)
+	if err != nil {
+		t.Fatalf("CreateFeature: %v", err)
+	}
+
+	// Toggle parity: flip OFF over the remote backend; local sees it.
+	if _, err := p.remote.SetFeatureCollectHandoffs(ctx, p.repo, feat.Slug, false, false); err != nil {
+		t.Fatalf("remote SetFeatureCollectHandoffs: %v", err)
+	}
+	localFeat, err := p.local.ShowFeature(ctx, p.repo, feat.Slug)
+	if err != nil {
+		t.Fatalf("local ShowFeature: %v", err)
+	}
+	if localFeat.Feature.CollectHandoffs {
+		t.Fatal("local CollectHandoffs = true after remote disable")
+	}
+
+	// A handoff to the disabled feature is dropped without erroring, over
+	// both backends. No row lands.
+	for _, c := range []client.Client{p.local, p.remote} {
+		res, err := c.AddFeatureComment(ctx, p.repo, inputs.FeatureCommentAddInput{
+			FeatureSlug: feat.Slug, Author: "agent-bob", Body: "noise", Kind: store.FeatureCommentKindHandoff,
+		}, false)
+		if err != nil {
+			t.Fatalf("AddFeatureComment handoff: %v", err)
+		}
+		if !res.Skipped || res.Comment != nil {
+			t.Fatalf("expected dropped handoff, got %+v", res)
+		}
+	}
+	if cs, _ := p.local.ListFeatureComments(ctx, p.repo, feat.Slug); len(cs) != 0 {
+		t.Fatalf("dropped handoffs still landed: %d", len(cs))
+	}
+
+	// A hand-typed note still inserts on the disabled feature.
+	res, err := p.local.AddFeatureComment(ctx, p.repo, inputs.FeatureCommentAddInput{
+		FeatureSlug: feat.Slug, Author: "alice", Body: "real note",
+	}, false)
+	if err != nil {
+		t.Fatalf("AddFeatureComment note: %v", err)
+	}
+	if res.Skipped || res.Comment == nil || res.Comment.Kind != store.FeatureCommentKindNote {
+		t.Fatalf("expected inserted note, got %+v", res)
+	}
+
+	// Re-enable, then a handoff lands and round-trips its kind.
+	if _, err := p.local.SetFeatureCollectHandoffs(ctx, p.repo, feat.Slug, true, false); err != nil {
+		t.Fatalf("local SetFeatureCollectHandoffs: %v", err)
+	}
+	hr, err := p.remote.AddFeatureComment(ctx, p.repo, inputs.FeatureCommentAddInput{
+		FeatureSlug: feat.Slug, Author: "agent-bob", Body: "kept handoff", Kind: store.FeatureCommentKindHandoff,
+	}, false)
+	if err != nil {
+		t.Fatalf("AddFeatureComment kept handoff: %v", err)
+	}
+	if hr.Skipped || hr.Comment == nil || hr.Comment.Kind != store.FeatureCommentKindHandoff {
+		t.Fatalf("expected kept handoff with kind, got %+v", hr)
 	}
 }
 

@@ -36,15 +36,22 @@ func (e *Engine) applyFeatures(tx *sql.Tx, sr *scannedRepo, repo *model.Repo, re
 			incomingState = parsed
 		}
 		incomingStateManual := sf.Parsed.StateManual
+		// BACI-333: collect_handoffs defaults ON (1). A nil pointer in
+		// feature.yaml (the common case — the key is only emitted when
+		// OFF) decodes as ON; an explicit value overrides.
+		incomingCollectHandoffs := true
+		if sf.Parsed.CollectHandoffs != nil {
+			incomingCollectHandoffs = *sf.Parsed.CollectHandoffs
+		}
 		var existingID int64
 		var existingSlug, existingTitle, existingDescription, existingEmoji, existingState string
-		var existingStateManual int64
+		var existingStateManual, existingCollectHandoffs int64
 		var existingUpdatedAt time.Time
 		var existingArchivedAt sql.NullTime
 		err := tx.QueryRow(
-			`SELECT id, slug, title, description, emoji, state, state_manual, updated_at, archived_at FROM features WHERE uuid = ?`,
+			`SELECT id, slug, title, description, emoji, state, state_manual, collect_handoffs, updated_at, archived_at FROM features WHERE uuid = ?`,
 			uuid,
-		).Scan(&existingID, &existingSlug, &existingTitle, &existingDescription, &existingEmoji, &existingState, &existingStateManual, &existingUpdatedAt, &existingArchivedAt)
+		).Scan(&existingID, &existingSlug, &existingTitle, &existingDescription, &existingEmoji, &existingState, &existingStateManual, &existingCollectHandoffs, &existingUpdatedAt, &existingArchivedAt)
 		if errors.Is(err, sql.ErrNoRows) {
 			// Insert. archived_at round-trips per BACI-68; sync is the
 			// source of truth across machines so an archived row on one
@@ -53,9 +60,9 @@ func (e *Engine) applyFeatures(tx *sql.Tx, sr *scannedRepo, repo *model.Repo, re
 			// glyph across machines. state + state_manual (BACI-199)
 			// likewise.
 			if _, err := tx.Exec(
-				`INSERT INTO features (uuid, repo_id, slug, title, description, emoji, state, state_manual, created_at, updated_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				`INSERT INTO features (uuid, repo_id, slug, title, description, emoji, state, state_manual, collect_handoffs, created_at, updated_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				uuid, repo.ID, sf.Parsed.Slug, sf.Parsed.Title, sf.Description, sf.Parsed.Emoji,
-				string(incomingState), boolToInt(incomingStateManual),
+				string(incomingState), boolToInt(incomingStateManual), boolToInt(incomingCollectHandoffs),
 				sqliteTimestamp(sf.Parsed.CreatedAt), sqliteTimestamp(sf.Parsed.UpdatedAt),
 				nullableSqliteTimestamp(sf.Parsed.ArchivedAt),
 			); err != nil {
@@ -90,15 +97,17 @@ func (e *Engine) applyFeatures(tx *sql.Tx, sr *scannedRepo, repo *model.Repo, re
 		// triggers a write. state + state_manual (BACI-199) join the
 		// same predicate.
 		incomingStateManualInt := boolToInt(incomingStateManual)
+		incomingCollectHandoffsInt := boolToInt(incomingCollectHandoffs)
 		if existingSlug != sf.Parsed.Slug || existingTitle != sf.Parsed.Title || existingDescription != sf.Description ||
 			existingEmoji != sf.Parsed.Emoji ||
 			existingState != string(incomingState) ||
 			existingStateManual != incomingStateManualInt ||
+			existingCollectHandoffs != incomingCollectHandoffsInt ||
 			!nullableTimeEqual(existingArchivedAt, sf.Parsed.ArchivedAt) {
 			if _, err := tx.Exec(
-				`UPDATE features SET slug = ?, title = ?, description = ?, emoji = ?, state = ?, state_manual = ?, updated_at = ?, archived_at = ? WHERE id = ?`,
+				`UPDATE features SET slug = ?, title = ?, description = ?, emoji = ?, state = ?, state_manual = ?, collect_handoffs = ?, updated_at = ?, archived_at = ? WHERE id = ?`,
 				sf.Parsed.Slug, sf.Parsed.Title, sf.Description, sf.Parsed.Emoji,
-				string(incomingState), incomingStateManualInt,
+				string(incomingState), incomingStateManualInt, incomingCollectHandoffsInt,
 				sqliteTimestamp(sf.Parsed.UpdatedAt),
 				nullableSqliteTimestamp(sf.Parsed.ArchivedAt), existingID,
 			); err != nil {
@@ -503,19 +512,26 @@ func (e *Engine) applyFeatureComments(tx *sql.Tx, sr *scannedRepo, res *ImportRe
 		})
 		for _, sc := range sf.Comments {
 			hash := contentHashFeatureComment(sc)
+			// BACI-333: kind defaults to 'note' when the on-disk YAML omits
+			// the key (the common case — it's emitted only for handoffs).
+			incomingKind := sc.Parsed.Kind
+			if incomingKind == "" {
+				incomingKind = store.FeatureCommentKindNote
+			}
 			var (
 				existingID     int64
 				existingAuthor string
 				existingBody   string
+				existingKind   string
 			)
 			err := tx.QueryRow(
-				`SELECT id, author, body FROM feature_comments WHERE uuid = ?`,
+				`SELECT id, author, body, kind FROM feature_comments WHERE uuid = ?`,
 				sc.Parsed.UUID,
-			).Scan(&existingID, &existingAuthor, &existingBody)
+			).Scan(&existingID, &existingAuthor, &existingBody, &existingKind)
 			if errors.Is(err, sql.ErrNoRows) {
 				if _, err := tx.Exec(
-					`INSERT INTO feature_comments (uuid, feature_id, author, body, created_at) VALUES (?, ?, ?, ?, ?)`,
-					sc.Parsed.UUID, featureID, sc.Parsed.Author, sc.Body,
+					`INSERT INTO feature_comments (uuid, feature_id, author, body, kind, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+					sc.Parsed.UUID, featureID, sc.Parsed.Author, sc.Body, incomingKind,
 					sqliteTimestamp(sc.Parsed.CreatedAt),
 				); err != nil {
 					return fmt.Errorf("insert feature comment %s: %w", sc.Parsed.UUID, err)
@@ -523,10 +539,10 @@ func (e *Engine) applyFeatureComments(tx *sql.Tx, sr *scannedRepo, res *ImportRe
 				res.Inserted++
 			} else if err != nil {
 				return err
-			} else if existingAuthor != sc.Parsed.Author || existingBody != sc.Body {
+			} else if existingAuthor != sc.Parsed.Author || existingBody != sc.Body || existingKind != incomingKind {
 				if _, err := tx.Exec(
-					`UPDATE feature_comments SET author = ?, body = ? WHERE id = ?`,
-					sc.Parsed.Author, sc.Body, existingID,
+					`UPDATE feature_comments SET author = ?, body = ?, kind = ? WHERE id = ?`,
+					sc.Parsed.Author, sc.Body, incomingKind, existingID,
 				); err != nil {
 					return fmt.Errorf("update feature comment %s: %w", sc.Parsed.UUID, err)
 				}

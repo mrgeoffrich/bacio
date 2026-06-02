@@ -57,6 +57,9 @@ func newRouter(d deps) http.Handler {
 	// BACI-250: per-feature auto-close toggle — the sticky `state_manual`
 	// bit decoupled from the state-flip path. Body: {"enabled": bool}.
 	mux.HandleFunc("PUT /repos/{prefix}/features/{slug}/auto-close", d.handleFeatureAutoClose)
+	// BACI-333: per-feature collect-handoffs toggle — gates worker
+	// close-out handoff comments. Body: {"enabled": bool}.
+	mux.HandleFunc("PUT /repos/{prefix}/features/{slug}/handoffs", d.handleFeatureCollectHandoffs)
 	mux.HandleFunc("GET /repos/{prefix}/features/{slug}/plan", d.handleFeaturePlan)
 	mux.HandleFunc("GET /repos/{prefix}/features/{slug}/next", d.handleFeatureNextPeek)
 	mux.HandleFunc("POST /repos/{prefix}/features/{slug}/next", d.handleFeatureNextClaim)

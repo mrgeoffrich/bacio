@@ -212,6 +212,32 @@ func migrate(db *sql.DB) error {
 			return fmt.Errorf("add branch_name to features: %w", err)
 		}
 	}
+	// features.collect_handoffs (BACI-333) gates whether worker close-outs
+	// append handoff comments to this feature. DEFAULT 1 (opt-out) so
+	// existing rows behave exactly as before; the constant default is
+	// allowed on SQLite ALTER (only non-constant defaults are forbidden —
+	// see the updated_at migration above). Idempotent ALTER.
+	hasCollectHandoffs, err := columnExists(db, "features", "collect_handoffs")
+	if err != nil {
+		return err
+	}
+	if !hasCollectHandoffs {
+		if _, err := db.Exec(`ALTER TABLE features ADD COLUMN collect_handoffs INTEGER NOT NULL DEFAULT 1 CHECK (collect_handoffs IN (0,1))`); err != nil {
+			return fmt.Errorf("add collect_handoffs to features: %w", err)
+		}
+	}
+	// feature_comments.kind (BACI-333) discriminates worker handoffs
+	// ('handoff') from hand-typed notes ('note', the default). Constant
+	// default allowed on ALTER; older rows surface as 'note'. Idempotent.
+	hasFeatureCommentKind, err := columnExists(db, "feature_comments", "kind")
+	if err != nil {
+		return err
+	}
+	if !hasFeatureCommentKind {
+		if _, err := db.Exec(`ALTER TABLE feature_comments ADD COLUMN kind TEXT NOT NULL DEFAULT 'note'`); err != nil {
+			return fmt.Errorf("add kind to feature_comments: %w", err)
+		}
+	}
 	// issues.base_branch (BACI-232) is the per-issue override for the
 	// branch a PR merges into. NULL preserves the legacy "inherit from
 	// the feature (or ship to main)" behaviour on upgrade; the resolver

@@ -564,6 +564,48 @@ func (c *localClient) SetFeatureAutoClose(ctx context.Context, repo *model.Repo,
 	return updated, nil
 }
 
+// SetFeatureCollectHandoffs (BACI-333) flips the per-feature
+// `collect_handoffs` toggle that gates whether worker close-outs append
+// handoff comments to this feature. ON (the default) collects handoffs;
+// OFF stops a standing bucket (`bugs`/`maintenance`) accumulating noise.
+//
+// Mirrors SetFeatureAutoClose 1:1 except there is no polarity inversion —
+// `enabled` maps straight to the column. Records a `feature.handoffs`
+// audit row on every real flip; an idempotent no-op skips the audit.
+func (c *localClient) SetFeatureCollectHandoffs(ctx context.Context, repo *model.Repo, slug string, enabled, dryRun bool) (*model.Feature, error) {
+	feat, err := c.store.GetFeatureBySlug(repo.ID, slug)
+	if err != nil {
+		return nil, err
+	}
+	if dryRun {
+		projected := *feat
+		projected.CollectHandoffs = enabled
+		return &projected, nil
+	}
+	if feat.CollectHandoffs == enabled {
+		// Idempotent — return the row unchanged and skip the audit row.
+		return feat, nil
+	}
+	if err := c.store.SetFeatureCollectHandoffs(feat.ID, enabled); err != nil {
+		return nil, err
+	}
+	updated, err := c.store.GetFeatureByID(feat.ID)
+	if err != nil {
+		return nil, err
+	}
+	from, to := "on", "off"
+	if enabled {
+		from, to = "off", "on"
+	}
+	c.recordOp(model.HistoryEntry{
+		RepoID: &feat.RepoID, RepoPrefix: repo.Prefix,
+		Op: "feature.handoffs", Kind: "feature",
+		TargetID: &updated.ID, TargetLabel: updated.Slug,
+		Details: fmt.Sprintf("%s → %s", from, to),
+	})
+	return updated, nil
+}
+
 func (c *localClient) setFeatureArchived(ctx context.Context, repo *model.Repo, slug string, archived, dryRun bool, op string) (*model.Feature, error) {
 	feat, err := c.store.GetFeatureBySlug(repo.ID, slug)
 	if err != nil {

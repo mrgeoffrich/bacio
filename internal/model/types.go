@@ -65,8 +65,16 @@ type Feature struct {
 	// not as a side-effect of `bacio feature state`. No omitempty —
 	// same reason as State.
 	StateManual bool      `json:"state_manual"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	// CollectHandoffs (BACI-333) gates whether worker close-outs append
+	// handoff comments to this feature. Defaults to true (opt-out) so
+	// every existing feature behaves exactly as before; standing bucket
+	// features (`maintenance`, `bugs`) are flipped off via `bacio feature
+	// handoffs <slug> off` so their unrelated children don't accumulate
+	// noise. No omitempty — same reason as State/StateManual: the React
+	// Features view reads the column directly without an `?? true`.
+	CollectHandoffs bool      `json:"collect_handoffs"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 	// HiddenOnBoard (BACI-177) reflects the per-feature "Show on
 	// board" toggle exposed on the Features screen — true iff every
 	// kanban card belonging to this feature is hidden from the board.
@@ -213,11 +221,17 @@ type Comment struct {
 // plan, work deferred) so the next worker on a sibling issue in the
 // same feature inherits the context.
 type FeatureComment struct {
-	ID        int64     `json:"id"`
-	UUID      string    `json:"uuid"`
-	FeatureID int64     `json:"feature_id"`
-	Author    string    `json:"author"`
-	Body      string    `json:"body"`
+	ID        int64  `json:"id"`
+	UUID      string `json:"uuid"`
+	FeatureID int64  `json:"feature_id"`
+	Author    string `json:"author"`
+	Body      string `json:"body"`
+	// Kind (BACI-333) is 'note' (the default — a hand-typed comment) or
+	// 'handoff' (a worker close-out note). The store backstop only ever
+	// drops a 'handoff' write to a feature with collect_handoffs off; a
+	// 'note' always inserts. Always present in JSON (older rows read
+	// 'note').
+	Kind      string    `json:"kind"`
 	CreatedAt time.Time `json:"created_at"`
 }
 

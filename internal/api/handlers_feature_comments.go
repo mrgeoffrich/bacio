@@ -7,6 +7,7 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/inputio"
 	"github.com/mrgeoffrich/bacio/internal/model"
+	"github.com/mrgeoffrich/bacio/internal/store"
 )
 
 // handleFeatureCommentsList — GET /repos/{prefix}/features/{slug}/comments (BACI-124).
@@ -59,17 +60,35 @@ func (d deps) handleFeatureCommentAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if isDryRun(r) {
-		writeDryRun(w, http.StatusCreated, &model.FeatureComment{
+		// Project the would-be insert, applying the same BACI-333 backstop
+		// the store would so a dry-run handoff to a disabled feature
+		// reports the skip rather than a phantom row.
+		if in.Kind == store.FeatureCommentKindHandoff && !feat.CollectHandoffs {
+			writeDryRun(w, http.StatusOK, &store.FeatureCommentResult{Skipped: true, Reason: "feature handoffs disabled"})
+			return
+		}
+		kind := in.Kind
+		if kind == "" {
+			kind = store.FeatureCommentKindNote
+		}
+		writeDryRun(w, http.StatusCreated, &store.FeatureCommentResult{Comment: &model.FeatureComment{
 			FeatureID: feat.ID,
 			Author:    in.Author,
 			Body:      in.Body,
-		})
+			Kind:      kind,
+		}})
 		return
 	}
-	c, err := d.store.CreateFeatureComment(feat.ID, in.Author, in.Body)
+	res, err := d.store.CreateFeatureComment(feat.ID, in.Author, in.Body, in.Kind)
 	if err != nil {
 		status, code := statusForError(err)
 		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	// BACI-333: a dropped handoff left no row and is not an error — return
+	// the {skipped,reason} result with 200 and no audit row.
+	if res.Skipped {
+		writeJSON(w, http.StatusOK, res)
 		return
 	}
 	recordOp(d.store, d.logger, model.HistoryEntry{
@@ -82,7 +101,7 @@ func (d deps) handleFeatureCommentAdd(w http.ResponseWriter, r *http.Request) {
 		TargetLabel: feat.Slug,
 		Details:     "by " + in.Author,
 	})
-	writeJSON(w, http.StatusCreated, c)
+	writeJSON(w, http.StatusCreated, res)
 }
 
 // handleFeatureCommentDelete — DELETE /repos/{prefix}/features/{slug}/comments/{uuid} (BACI-124).

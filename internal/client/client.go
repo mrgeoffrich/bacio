@@ -209,6 +209,14 @@ type Client interface {
 	// skip the audit. The remote backend hits PUT
 	// /repos/{prefix}/features/{slug}/auto-close.
 	SetFeatureAutoClose(ctx context.Context, repo *model.Repo, slug string, enabled, dryRun bool) (*model.Feature, error)
+	// SetFeatureCollectHandoffs (BACI-333) flips the per-feature
+	// `collect_handoffs` toggle that gates whether worker close-outs
+	// append handoff comments to this feature. ON (the default) collects
+	// handoffs; OFF stops a standing bucket (`bugs`/`maintenance`)
+	// accumulating noise. Records an audit row (`feature.handoffs`) on
+	// every real flip; idempotent no-ops skip the audit. The remote
+	// backend hits PUT /repos/{prefix}/features/{slug}/handoffs.
+	SetFeatureCollectHandoffs(ctx context.Context, repo *model.Repo, slug string, enabled, dryRun bool) (*model.Feature, error)
 	// IsFeatureHiddenOnBoard / SetFeatureHiddenOnBoard / ListHiddenFeatureSlugs
 	// (BACI-177) expose the per-feature "Show on board" toggle that
 	// drives the Features-screen affordance. The flag is per-repo
@@ -365,7 +373,12 @@ type Client interface {
 	// next worker on a sibling issue in the same feature inherits the
 	// context. Same shape as issue comments but parented on slug.
 	ListFeatureComments(ctx context.Context, repo *model.Repo, slug string) ([]*model.FeatureComment, error)
-	AddFeatureComment(ctx context.Context, repo *model.Repo, in inputs.FeatureCommentAddInput, dryRun bool) (*model.FeatureComment, error)
+	// AddFeatureComment returns a *store.FeatureCommentResult (BACI-333):
+	// on a real insert Result.Comment carries the row; when the store
+	// backstop drops a kind='handoff' write to a handoffs-disabled
+	// feature, Result.Skipped is true and Comment is nil — no error,
+	// because a worker treats a dropped handoff as success.
+	AddFeatureComment(ctx context.Context, repo *model.Repo, in inputs.FeatureCommentAddInput, dryRun bool) (*store.FeatureCommentResult, error)
 	DeleteFeatureComment(ctx context.Context, repo *model.Repo, in inputs.FeatureCommentRmInput, dryRun bool) (preview *FeatureCommentDeletePreview, removed int64, err error)
 
 	LinkRelation(ctx context.Context, repo *model.Repo, in inputs.LinkInput, dryRun bool) (*model.Relation, error)

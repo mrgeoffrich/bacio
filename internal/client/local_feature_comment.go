@@ -6,6 +6,7 @@ import (
 
 	"github.com/mrgeoffrich/bacio/internal/cli/inputs"
 	"github.com/mrgeoffrich/bacio/internal/model"
+	"github.com/mrgeoffrich/bacio/internal/store"
 )
 
 // ListFeatureComments returns every feature_comments row for one
@@ -26,8 +27,12 @@ func (c *localClient) ListFeatureComments(ctx context.Context, repo *model.Repo,
 }
 
 // AddFeatureComment inserts one row into feature_comments and emits a
-// feature_comment.add audit row (BACI-124).
-func (c *localClient) AddFeatureComment(ctx context.Context, repo *model.Repo, in inputs.FeatureCommentAddInput, dryRun bool) (*model.FeatureComment, error) {
+// feature_comment.add audit row (BACI-124). BACI-333: the optional
+// in.Kind ('note' default, or 'handoff') threads through to the store
+// backstop — a kind='handoff' write to a feature with collect_handoffs
+// off is dropped (Skipped:true, no row, no audit row) rather than
+// erroring, because a worker treats a dropped handoff as success.
+func (c *localClient) AddFeatureComment(ctx context.Context, repo *model.Repo, in inputs.FeatureCommentAddInput, dryRun bool) (*store.FeatureCommentResult, error) {
 	if in.FeatureSlug == "" || in.Author == "" || in.Body == "" {
 		return nil, fmt.Errorf("feature_slug, author, and body are required")
 	}
@@ -36,23 +41,37 @@ func (c *localClient) AddFeatureComment(ctx context.Context, repo *model.Repo, i
 		return nil, err
 	}
 	if dryRun {
-		return &model.FeatureComment{
+		// Project the would-be insert, applying the same backstop the
+		// store would so a dry-run handoff to a disabled feature reports
+		// the skip rather than a phantom row.
+		if in.Kind == store.FeatureCommentKindHandoff && !f.CollectHandoffs {
+			return &store.FeatureCommentResult{Skipped: true, Reason: "feature handoffs disabled"}, nil
+		}
+		kind := in.Kind
+		if kind == "" {
+			kind = store.FeatureCommentKindNote
+		}
+		return &store.FeatureCommentResult{Comment: &model.FeatureComment{
 			FeatureID: f.ID,
 			Author:    in.Author,
 			Body:      in.Body,
-		}, nil
+			Kind:      kind,
+		}}, nil
 	}
-	cm, err := c.store.CreateFeatureComment(f.ID, in.Author, in.Body)
+	res, err := c.store.CreateFeatureComment(f.ID, in.Author, in.Body, in.Kind)
 	if err != nil {
 		return nil, err
 	}
-	c.recordOp(model.HistoryEntry{
-		RepoID: &repo.ID, RepoPrefix: repo.Prefix,
-		Op: "feature_comment.add", Kind: "feature",
-		TargetID: &f.ID, TargetLabel: f.Slug,
-		Details: "by " + in.Author,
-	})
-	return cm, nil
+	// Only audit a real insert — a dropped handoff left no row behind.
+	if !res.Skipped {
+		c.recordOp(model.HistoryEntry{
+			RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+			Op: "feature_comment.add", Kind: "feature",
+			TargetID: &f.ID, TargetLabel: f.Slug,
+			Details: "by " + in.Author,
+		})
+	}
+	return res, nil
 }
 
 // DeleteFeatureComment removes a feature_comments row by uuid and emits
