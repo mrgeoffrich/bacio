@@ -24,10 +24,15 @@ type NavView = 'pipeline' | 'board' | 'features' | 'docs' | 'agents' | 'history'
 // labels rather than the internal name: `board` → `/<prefix>/issues`
 // ("Issues" tab) and `docs` → `/<prefix>/documents` ("Documents" tab).
 // Keeps documentPath / featurePath / issuePath all in plural-noun shape
-// too.
+// too. BACI-337: the `monitor` nav lands on the Transcripts sub-tab —
+// the primary destination — rather than the bare `/<prefix>/monitor`
+// Network sub-tab. The Network sub-tab is still reachable by deep-link /
+// in-page tab click; viewFromPath maps both back to the `monitor` view
+// id so the top-nav segment highlights either way.
 export function viewPath(prefix: string, view: NavView | string): string {
   if (view === 'board') return `/${prefix}/issues`;
   if (view === 'docs') return `/${prefix}/documents`;
+  if (view === 'monitor') return monitorTranscriptsPath(prefix);
   return `/${prefix}/${view}`;
 }
 
