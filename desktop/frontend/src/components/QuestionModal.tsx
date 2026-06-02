@@ -5,8 +5,8 @@ import Modal from './Modal';
 import type {
   SessionQuestion,
   QuestionOption,
+  QuestionState,
 } from '../../bindings/github.com/mrgeoffrich/bacio/internal/model';
-import { QuestionState } from '../../bindings/github.com/mrgeoffrich/bacio/internal/model';
 
 // QuestionModal renders the BACI-53 ask_user_question form. Fetches
 // the full payload on open, renders each question as radios (single-
@@ -182,13 +182,13 @@ export default function QuestionModal({ questionId, onClose }: QuestionModalProp
       preventClickOutsideClose
     >
       {loading && !row && <p className="mk-drawer-text">Loading…</p>}
-      {row && row.state !== QuestionState.QuestionOpen && (
+      {row && row.state !== ('open' as QuestionState) && (
         <p className="mk-drawer-text mk-meta-empty">
           This question is no longer open (state: {row.state}). Refresh to
           remove it from your list.
         </p>
       )}
-      {row && row.state === QuestionState.QuestionOpen && (
+      {row && row.state === ('open' as QuestionState) && (
         <form
           onSubmit={(ev) => {
             ev.preventDefault();

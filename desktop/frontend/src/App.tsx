@@ -35,7 +35,7 @@ import type {
   WaitingState,
   AddRepositoryPayload,
 } from './api';
-import { WaitingKind } from './api';
+import type { WaitingKind } from './api';
 import type { DispatchMode, State } from '../bindings/github.com/mrgeoffrich/bacio/internal/model';
 import type { ProcessSelection } from './lib/pipelineProcesses';
 import type { ShippedScope } from './components/shippedScope.ts';
@@ -743,7 +743,7 @@ export default function App() {
   // matcher binds + delivers fast). Revert to null on failure so the
   // spinner disappears.
   const dispatchFromCard = useCallback((cardKey: string, mode: string) => {
-    const optimistic: WaitingState = { kind: WaitingKind.WaitingQueuedNoAgent, mode: mode as DispatchMode };
+    const optimistic: WaitingState = { kind: 'queued_no_agent' as WaitingKind, mode: mode as DispatchMode };
     setCards(cs => cs.map(c => c.key === cardKey ? { ...c, waitingState: optimistic } : c));
     api.dispatchIssue(activeBoard, cardKey, mode)
       .catch(err => {
