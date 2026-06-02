@@ -177,15 +177,18 @@ The single carve-out: if a pre-existing failure is genuinely large (a multi-hour
 1. Open a PR with all the changes. Use `bacio pr create <issue_id> -- --title "..." --body "..."` rather than bare `gh pr create` — it labels the PR `bacio:<issue_id>`, pre-flights against duplicate PRs from a sibling worker (BACI-163), and funnels the resulting URL through `bacio pr attach` so the local DB stays in sync in one step. Bare `gh pr create` still works but the wrapped form is the dispatched-worker default. Mirror the plan's `## Implementation steps` structure in the PR description and call out any deviations explicitly — the reviewer (often another bacio worker) reads this first.
 2. **Handoff.** Post a chronological handoff so the next worker (or the reviewer) inherits the context you built up. Check `feature.slug` on the brief — if set, post against the parent feature so sibling issues benefit too; otherwise post as a comment on the issue itself.
 
-   With a parent feature:
+   With a parent feature, post the handoff with `--kind handoff` (the BACI-333 worker-handoff discriminator) — **but only if that feature collects handoffs.** Standing bucket features (`maintenance`, `bugs`) opt out so their unrelated children don't pile up noise. Check `bacio feature show <slug> -o json` first: if `collect_handoffs` is `false`, **skip composing the handoff entirely** and fall back to a comment on the issue itself (the without-a-feature path below). If it's `true`, post:
 
    ```
    bacio feature comment add --json '{
      "feature_slug": "<slug>",
      "author": "<your agent identity>",
+     "kind": "handoff",
      "body": "## <issue_id> handoff\n\n**Files of context.** ...\n\n**Deviations from plan.** ...\n\n**Work not done.** ..."
    }'
    ```
+
+   (The store also backstops this: a `kind: handoff` write to a feature with handoffs disabled is dropped without erroring — it returns `{"skipped": true}`, which is success, not a retry. Checking `collect_handoffs` first just saves you composing a note that would be thrown away.)
 
    Without a parent feature:
 
