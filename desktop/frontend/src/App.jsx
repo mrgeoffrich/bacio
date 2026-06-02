@@ -936,6 +936,39 @@ export default function App() {
       });
   }, [activeBoard, refreshCards]);
 
+  // BACI-342 drag-to-block: dropping a card's blocked-by chip onto another
+  // card marks the dragged card (sourceKey) blocked by the drop target
+  // (targetKey). A `blocks` edge is stored from = blocker, to = blocked,
+  // so the relation is { from: targetKey, to: sourceKey }. PipelineView
+  // has already screened out the self-drop and existing-relation no-ops,
+  // and the server's INSERT OR IGNORE backstops a duplicate — but we
+  // re-check the no-ops here too so a stale render can't double-add.
+  // Optimistically splice the target into the source card's blockedBy so
+  // the badge updates instantly (mirrors moveCard's optimistic blocker
+  // edits); the silent refresh on success re-asserts the authoritative
+  // shape, and a failure reverts the splice via reportError.
+  const onBlockCard = useCallback((sourceKey, targetKey) => {
+    if (!sourceKey || !targetKey || sourceKey === targetKey) return;
+    let prevBlockedBy = null;
+    setCards(cs => {
+      const source = cs.find(c => c.key === sourceKey);
+      const target = cs.find(c => c.key === targetKey);
+      if (!source || !target) return cs;
+      const existing = source.blockedBy || [];
+      if (existing.some(b => b.key === targetKey)) return cs; // already blocked — no-op
+      prevBlockedBy = existing;
+      const nextBlockedBy = [...existing, { key: targetKey, state: target.column }];
+      return cs.map(c => c.key === sourceKey ? { ...c, blockedBy: nextBlockedBy } : c);
+    });
+    if (prevBlockedBy === null) return; // guard tripped — nothing to persist
+    api.createRelation(activeBoard, targetKey, sourceKey)
+      .then(() => refreshCards({ silent: true }))
+      .catch(err => {
+        reportError(err, { headline: "Couldn't link cards" });
+        setCards(cs => cs.map(c => c.key === sourceKey ? { ...c, blockedBy: prevBlockedBy } : c));
+      });
+  }, [activeBoard, refreshCards]);
+
   // Per-repo Shipping auto-ship toggle. PipelineView owns the display
   // state (seeded from localStorage — the backend exposes no GET); this
   // persists the change. Returns the promise so the view can revert its
@@ -1326,6 +1359,7 @@ export default function App() {
                   onSetBacklogCollapsed={setBacklogCollapsed}
                   onShipDispatch={dispatchFromCard}
                   onCancelWaiting={cancelWaitingFromCard}
+                  onBlockCard={onBlockCard}
                 />
               </ErrorBoundary>
             }
