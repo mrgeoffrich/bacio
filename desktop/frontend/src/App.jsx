@@ -1180,17 +1180,6 @@ export default function App() {
     refreshShippedCount();
   }, [refreshShippedCount]);
 
-  // BACI-295 follow-up dev/test affordance: optimistically bump the
-  // displayed Shipped count by one to exercise the count-rise → ka-ching
-  // path (and its autoplay unlock) with a real user gesture. Purely
-  // client-side — the next POLL_INTERVAL_MS refresh re-syncs the real
-  // server count (a drop snaps the odometer, no ding). PipelineView gates
-  // the button that calls this behind ?sfxtest / localStorage, so normal
-  // users never see it.
-  const testIncrementShipped = useCallback(() => {
-    setShippedCount((c) => (Number.isFinite(c) ? c : 0) + 1);
-  }, []);
-
   // BACI-193 ship flourish: detect cards that just transitioned into
   // `done` from a non-terminal column, expose the flying key + flash
   // signal to PipelineView / ShippedPopover. The hook diffs the `cards`
@@ -1242,7 +1231,6 @@ export default function App() {
         onPickBoard={pickBoard}
         onAddRepository={addRepository}
         onBeforeNavigate={() => { setSettingsOpen(false); setSettingsInitialSection(null); }}
-        onOpenPalette={() => setPaletteOpen(true)}
         onOpenSettings={() => { setSettingsInitialSection(null); setSettingsOpen(true); }}
         onOpenSync={openSync}
         leaderState={leaderState}
@@ -1250,6 +1238,14 @@ export default function App() {
         notifUnreadCount={notifUnreadCount}
         onNotifCountChange={setNotifUnreadCount}
         onOpenNotificationIssue={openNotificationIssue}
+        shippedCount={shippedCount}
+        shippedScope={shippedScope}
+        onShippedScopeChange={changeShippedScope}
+        timezone={timezone}
+        flyingShipKey={flyingShipKey}
+        shipFlashing={shipFlashing}
+        onShipFlightDone={onShipFlightDone}
+        onOpenIssue={navigateToIssue}
       />
       {loading ? (
         <div className="mk-app-state">Loading…</div>
@@ -1330,14 +1326,6 @@ export default function App() {
                   onSetBacklogCollapsed={setBacklogCollapsed}
                   onShipDispatch={dispatchFromCard}
                   onCancelWaiting={cancelWaitingFromCard}
-                  shippedCount={shippedCount}
-                  shippedScope={shippedScope}
-                  onShippedScopeChange={changeShippedScope}
-                  timezone={timezone}
-                  flyingShipKey={flyingShipKey}
-                  shipFlashing={shipFlashing}
-                  onShipFlightDone={onShipFlightDone}
-                  onTestIncrementShipped={testIncrementShipped}
                 />
               </ErrorBoundary>
             }

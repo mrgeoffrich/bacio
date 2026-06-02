@@ -43,9 +43,9 @@ import { useCallback, useEffect, useRef } from 'react';
 // The bundle ships the MP3 under `/assets/kaching-<hash>.mp3`
 // and we get back the resolved URL synchronously.
 import shippedKaChingURL from '../assets/kaching.mp3';
-import { shouldPlayShipSfx } from './shipSfxGate';
+import { shouldPlayShipSfx, shouldProbeShipSfx } from './shipSfxGate';
 
-export { shouldPlayShipSfx };
+export { shouldPlayShipSfx, shouldProbeShipSfx };
 
 // Playback volume. Halved — UI dings are easy to misjudge at full level.
 // play() re-asserts this on every fire so a real ka-ching is never left
@@ -73,10 +73,15 @@ export function useShipSfx({ enabled }: { enabled: boolean }): UseShipSfxResult 
   useEffect(() => { enabledRef.current = enabled; }, [enabled]);
 
   // The lazy-loaded HTMLAudioElement. Null until something first needs
-  // it — the first enabled play(), or the first-gesture unlock.
+  // it — the first enabled play(), the startup probe, or the
+  // first-gesture unlock.
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  // Set once the element has been primed by a user gesture (below).
+  // Set once the element has been primed (by the startup probe, the
+  // first-gesture unlock, whichever lands first).
   const unlockedRef = useRef(false);
+  // BACI-336: ensures the once-only startup autoplay probe fires at most
+  // once across the hook's lifetime, independent of the unlock guard.
+  const probedRef = useRef(false);
 
   // ensureAudio lazily constructs the shared element. Returns null when
   // the Audio constructor is unreachable (non-browser env) or the
@@ -97,6 +102,25 @@ export function useShipSfx({ enabled }: { enabled: boolean }): UseShipSfxResult 
     return audioRef.current;
   }, []);
 
+  // primeElement runs the volume-0 play→pause that marks the element as
+  // user-activated (the first-gesture unlock) or registers autoplay
+  // permission early (the startup probe). Inaudible (volume 0 — but NOT
+  // muted, so it still counts as audio) and self-restoring. Swallows a
+  // rejected play() so a strict-autoplay engine's refusal is a no-op
+  // rather than an unhandled rejection.
+  const primeElement = useCallback((el: HTMLAudioElement) => {
+    const prevVolume = el.volume;
+    el.volume = 0;
+    const restore = () => {
+      try { el.pause(); el.currentTime = 0; el.volume = prevVolume; }
+      catch { /* fine */ }
+    };
+    let p: Promise<void> | undefined;
+    try { p = el.play(); } catch { restore(); return; }
+    if (p && typeof p.then === 'function') p.then(restore, restore);
+    else restore();
+  }, []);
+
   // First-gesture autoplay unlock — see the file header. A volume-0
   // play→pause inside the first pointerdown / keydown marks the element
   // as user-activated so a later gesture-less ship still dings.
@@ -113,21 +137,34 @@ export function useShipSfx({ enabled }: { enabled: boolean }): UseShipSfxResult 
       if (!el) return;
       unlockedRef.current = true;
       removeListeners();
-      const prevVolume = el.volume;
-      el.volume = 0; // inaudible, but NOT muted → still counts as audio.
-      const restore = () => {
-        try { el.pause(); el.currentTime = 0; el.volume = prevVolume; }
-        catch { /* fine */ }
-      };
-      let p: Promise<void> | undefined;
-      try { p = el.play(); } catch { restore(); return; }
-      if (p && typeof p.then === 'function') p.then(restore, restore);
-      else restore();
+      primeElement(el);
     }
     window.addEventListener('pointerdown', unlock, true);
     window.addEventListener('keydown', unlock, true);
     return removeListeners;
-  }, [ensureAudio]);
+  }, [ensureAudio, primeElement]);
+
+  // BACI-336: once-only startup autoplay probe. Fired on mount (when the
+  // toggle is on) rather than waiting for the first user gesture, so a
+  // permissive browser registers autoplay permission as early as
+  // possible — before any ship event. Because the hook is mounted once at
+  // App level (above <Routes>), the granted permission then survives
+  // in-app navigations so a later gesture-less ship still dings. On a
+  // strict-autoplay engine the probe's play() rejects silently and the
+  // existing first-gesture unlock covers it instead. The probedRef guard
+  // keeps it to a single attempt; setting unlockedRef on a successful
+  // prime lets the gesture listener early-out so the two never double-fire.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (probedRef.current) return;
+    const audioCtor = (typeof Audio !== 'undefined') ? Audio : undefined;
+    if (!shouldProbeShipSfx(enabledRef.current, audioCtor, probedRef.current)) return;
+    const el = ensureAudio();
+    if (!el) return;
+    probedRef.current = true;
+    unlockedRef.current = true;
+    primeElement(el);
+  }, [ensureAudio, primeElement]);
 
   const play = useCallback(() => {
     // SSR / Node test guard: window is undefined in non-browser envs.

@@ -38,18 +38,16 @@ body { margin: 0; }
   font-family: var(--font-sans); font-size: 13px; color: var(--fg-1);
   cursor: pointer; max-width: 200px;
 }
-.mk-search {
-  flex: 1 1 200px; min-width: 0; max-width: 360px; height: 32px; border-radius: 8px;
-  background: var(--paper); border: 1px solid var(--border-1);
-  display: flex; align-items: center; gap: 8px; padding: 0 10px;
-  font-family: var(--font-sans); font-size: 13px; color: var(--fg-3);
-  cursor: pointer; white-space: nowrap; overflow: hidden;
-}
-.mk-search:hover { border-color: var(--border-2); }
-.mk-search .mk-icon { width: 14px; height: 14px; }
-.mk-search-text { flex: 1; min-width: 0; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mk-kbd { font-family: var(--font-mono); font-size: 11px; background: var(--ink-50); padding: 2px 6px; border-radius: 4px; color: var(--fg-2); flex-shrink: 0; white-space: nowrap; }
-.mk-topbar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+/* BACI-336: centre slot for the Shipped · N pill (it moved here from the
+   Pipeline Shipping column). The slot grows to fill the gap between the
+   left group (brand + segmented nav + breadcrumb) and the right cluster
+   and centres the pill inside that gap. min-width: 0 lets it shrink past
+   the pill's intrinsic width on narrow viewports rather than overflowing.
+   Note: a breadcrumb pill (when an issue workspace is open) eats from the
+   left group, so the centre shifts slightly right — an accepted, minor,
+   documented shift (true optical centring would need a 3-column grid). */
+.mk-topbar-center { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; justify-content: center; }
+.mk-topbar-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
 /* ---------- Buttons ---------- */
 .mk-btn-primary, .mk-btn-secondary {
@@ -2267,8 +2265,6 @@ body { margin: 0; }
 .mk-pl-btn.is-primary.is-confirm-auto:hover:not(:disabled) {
   background: var(--status-doing); filter: brightness(0.94);
 }
-
-.mk-pl-shipping-tools { flex-shrink: 0; }
 
 /* ── BACI-294: full-screen Edit Process editor (ProcessEditor) ── */
 .mk-pe {
