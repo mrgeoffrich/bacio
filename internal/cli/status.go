@@ -1,13 +1,16 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -16,6 +19,7 @@ import (
 	"github.com/mrgeoffrich/bacio/internal/logging"
 	"github.com/mrgeoffrich/bacio/internal/model"
 	"github.com/mrgeoffrich/bacio/internal/store"
+	"github.com/mrgeoffrich/bacio/internal/version"
 	"github.com/mrgeoffrich/bacio/internal/wtenv"
 )
 
@@ -26,6 +30,7 @@ import (
 type statusReport struct {
 	DBPath     string          `json:"db_path"`
 	APIAddr    string          `json:"api_addr"`
+	ProxyAddr  string          `json:"proxy_addr"`         // BACI-344: stable standalone-proxy addr (API port − 1)
 	EnvSource  string          `json:"env_source"`         // "flag" | "env" | "worktree" | "default"
 	EnvPath    string          `json:"env_path,omitempty"` // populated when a manifest fed resolution
 	LogDir     string          `json:"log_dir"`            // BACI-73: resolved log directory
@@ -143,6 +148,7 @@ func buildStatusReport(s *store.Store, env wtenv.Resolved, logRes logging.Resolv
 	report := &statusReport{
 		DBPath:    env.DBPath,
 		APIAddr:   env.APIAddr,
+		ProxyAddr: env.ProxyAddr,
 		EnvSource: string(env.Source),
 		EnvPath:   env.ManifestPath,
 		LogDir:    logRes.Dir,
@@ -157,6 +163,15 @@ func buildStatusReport(s *store.Store, env wtenv.Resolved, logRes logging.Resolv
 	if logErr != nil {
 		report.LLMRecommendations = append(report.LLMRecommendations,
 			fmt.Sprintf("Logging is misconfigured: %v. Fix --log-level / $BACIO_LOG_LEVEL / --log-dir to use a valid value.", logErr))
+	}
+	// BACI-344: best-effort version-skew check against a standalone
+	// `bacio proxy serve` on the proxy port. A proxy running a version
+	// behind keeps forwarding fine (capture is best-effort + backfilled),
+	// but its store touchpoints can drift across a schema migration — so
+	// flag it. A connect failure is silent: no proxy running is normal
+	// (the all-in-one `bacio web` second listener answers there instead).
+	if rec := proxyVersionSkewRec(env.ProxyAddr); rec != "" {
+		report.LLMRecommendations = append(report.LLMRecommendations, rec)
 	}
 	info, gitErr := git.Detect(cwd)
 	switch {
@@ -249,6 +264,40 @@ func statusRecommendations(repoRoot string) []string {
 	return recs
 }
 
+// proxyVersionSkewRec probes a standalone `bacio proxy serve` on the
+// proxy addr and returns an LLM recommendation when it reports a different
+// bacio version from this binary — the operator-visibility hook the ticket
+// asked for ("`bacio status` could flag when the running proxy is behind").
+// Strictly read-only and best-effort: a connect/parse failure or a matching
+// version returns "" so status stays quiet when no proxy is running or it's
+// already in step. Bounded by a short timeout so status never hangs on a
+// wedged port.
+func proxyVersionSkewRec(proxyAddr string) string {
+	if proxyAddr == "" {
+		return ""
+	}
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+	resp, err := client.Get(fmt.Sprintf("http://%s/version", proxyAddr))
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	var vr struct {
+		Version string `json:"version"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&vr); err != nil {
+		return ""
+	}
+	running := version.String()
+	if vr.Version == "" || vr.Version == running {
+		return ""
+	}
+	return fmt.Sprintf("The standalone reverse proxy on %s reports version %s, but this binary is %s. Restart `bacio proxy serve` to pick up store-schema changes (forwarding keeps working meanwhile; only its capture touchpoints can drift).", proxyAddr, vr.Version, running)
+}
+
 // buildStatusAgents (BACI-76) compares the generated dispatch-subagent
 // files in <repoRoot>/.claude/agents/ against the current
 // prompt_templates rows. Read-only — it renders the expected content in
@@ -306,6 +355,7 @@ func printStatus(w io.Writer, r *statusReport) error {
 		}
 		fmt.Fprintf(w, "DB:      %s\n", r.DBPath)
 		fmt.Fprintf(w, "API:     %s\n", r.APIAddr)
+		fmt.Fprintf(w, "Proxy:   %s\n", r.ProxyAddr)
 		fmt.Fprintf(w, "Env:     %s\n", formatEnvSource(r))
 		fmt.Fprintf(w, "Log:     %s\n", formatLogSource(r))
 		fmt.Fprintf(w, "%s\n\n", formatAgentMode(r.AgentMode))
@@ -326,6 +376,7 @@ func printStatus(w io.Writer, r *statusReport) error {
 		fmt.Fprintf(w, "Repo:    (unregistered — run `bacio init` to bind a prefix)\n")
 		fmt.Fprintf(w, "DB:      %s\n", r.DBPath)
 		fmt.Fprintf(w, "API:     %s\n", r.APIAddr)
+		fmt.Fprintf(w, "Proxy:   %s\n", r.ProxyAddr)
 		fmt.Fprintf(w, "Env:     %s\n", formatEnvSource(r))
 		fmt.Fprintf(w, "Log:     %s\n", formatLogSource(r))
 		fmt.Fprintf(w, "%s\n", formatAgentMode(r.AgentMode))
@@ -334,6 +385,7 @@ func printStatus(w io.Writer, r *statusReport) error {
 	default:
 		fmt.Fprintf(w, "DB:      %s\n", r.DBPath)
 		fmt.Fprintf(w, "API:     %s\n", r.APIAddr)
+		fmt.Fprintf(w, "Proxy:   %s\n", r.ProxyAddr)
 		fmt.Fprintf(w, "Env:     %s\n", formatEnvSource(r))
 		fmt.Fprintf(w, "Log:     %s\n", formatLogSource(r))
 		fmt.Fprintf(w, "%s\n", formatAgentMode(r.AgentMode))
