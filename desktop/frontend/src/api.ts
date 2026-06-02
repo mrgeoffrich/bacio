@@ -438,6 +438,26 @@ export async function reorderCard(
   }
 }
 
+// createRelation wires a `blocks` edge so `blocked` ends up blocked by
+// `blocker` — the Pipeline drag-to-block gesture (BACI-342). A `blocks`
+// edge is stored from = blocker, to = blocked, so the drop target (the
+// blocker) is the first arg and the dragged card (which becomes blocked)
+// is the second. The HTTP twin in api.http.ts hard-codes type 'blocks'
+// the same way; the server's INSERT OR IGNORE makes a duplicate a silent
+// no-op. The caller owns the optimistic badge update, so no value comes
+// back.
+export async function createRelation(
+  repoPrefix: string,
+  blocker: string,
+  blocked: string,
+): Promise<void> {
+  try {
+    await BoardService.CreateRelation(repoPrefix, blocker, blocked);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
 // setCardProcess assigns a process (see lib/pipelineProcesses),
 // materialising the card's pending job chain. The selection is either an
 // explicit ordered stage list (the cumulative-stepper picker) or a preset
