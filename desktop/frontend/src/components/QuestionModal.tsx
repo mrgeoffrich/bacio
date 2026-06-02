@@ -22,7 +22,7 @@ import type {
 // Other value just slots into the answer (single-select) or onto the
 // answer array (multi-select).
 //
-// Lifted out of AgentsView so KanbanCard (and any other surface that
+// Lifted out of AgentsView so PipelineCard (and any other surface that
 // surfaces a "? N" pill) can reuse it without duplicating the form
 // or the load/submit/cancel wiring.
 type QuestionModalProps = {

@@ -194,7 +194,7 @@ export interface BoardCard {
   // the two booleans waitingForClaim + waitingDispatchDelivered that
   // the BoardCard used to carry — neither could carry the active
   // dispatch's mode for the inline label. Absent (omitempty
-  // server-side) when the card isn't waiting; the KanbanCard renders
+  // server-side) when the card isn't waiting; the PipelineCard renders
   // no spinner in that case.
   waitingState?: WaitingState | null;
   // BACI-60 enrichment: lower-cased prompt-template label of the

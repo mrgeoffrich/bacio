@@ -81,7 +81,7 @@ import type { ProcessSelection } from './lib/pipelineProcesses';
 
 export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureLinkedDoc, FeaturePlan, FeaturePlanEntry, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, ArchivePreferencesDTO, AudioPreferencesDTO, TimezonePreferencesDTO, WaitingState, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO, SyncSetupDTO, CollisionPreviewDTO, RenumberEntryDTO, RenameEntryDTO, RepoLinkResultDTO, ShippedIssueDTO, ShippedListDTO, LatestPlanDTO, Notification };
 // BACI-216: cross-transport alias. The web bundle's api.http.ts ships
-// the same name from its own TS-only shape so KanbanCard / IssueWorkspace
+// the same name from its own TS-only shape so PipelineCard / IssueWorkspace
 // stay transport-agnostic.
 export type LatestPlan = LatestPlanDTO;
 // BACI-304: cross-transport alias for the Monitor screen's per-FQDN

@@ -26,8 +26,8 @@ export function isTerminalState(state: string | undefined | null): boolean {
 // `boardcards.isCardBlockerOpen` on the next poll, so this just makes
 // the lock icon clear immediately instead of after up to 10s.
 //
-// Cards whose `blockedBy` already lacks `movedKey` are returned by
-// identity so React.memo on KanbanCard still skips unchanged rows.
+// Cards whose `blockedBy` already lacks `movedKey` are returned
+// unchanged (same reference) rather than reallocated.
 export function stripBlockerFromCards<T extends { key: string; blockedBy?: Array<{ key: string }> | null }>(
   cards: T[],
   movedKey: string,

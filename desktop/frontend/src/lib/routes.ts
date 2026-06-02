@@ -1,5 +1,5 @@
 // BACI-203 / BACI-285: one source of truth for the router path shapes
-// used across App.tsx, Topbar, KanbanCard, ShippedPopover,
+// used across App.tsx, Topbar, PipelineCard, ShippedPopover,
 // CommandPalette, IssueComposer, LinkedDocPanel, RelationsPanel,
 // IssueLockBanner, FeaturesView, DocsView, and IssueWorkspace.
 //

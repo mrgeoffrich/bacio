@@ -671,8 +671,8 @@ export default function App() {
   // it stranded in a column the backend never accepted.
   //
   // Reads the previous column via the functional setCards form (and a
-  // capture-and-noop trick) so the callback identity doesn't depend on
-  // the cards array — keeps KanbanCard's React.memo effective.
+  // capture-and-noop trick) so the callback identity stays stable and
+  // doesn't depend on the cards array.
   //
   // BACI-146: when the moved card lands in a terminal column
   // (done/cancelled) we also strip its key from every sibling card's
@@ -1238,7 +1238,7 @@ export default function App() {
 
   // BACI-203: navigate-by-key callback for prev/next sibling jumps and
   // the kanban blocked-popover link. Kept as a memoised callback so
-  // KanbanCard / IssueWorkspace / RelationsPanel can drop it into
+  // PipelineCard / IssueWorkspace / RelationsPanel can drop it into
   // effect-dep arrays without thrashing.
   const navigateToIssue = useCallback((key: string) => {
     if (!key) return;

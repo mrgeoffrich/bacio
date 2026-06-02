@@ -4,7 +4,7 @@ import { Circle, CircleDot, CircleCheck } from 'lucide-react';
 // the per-agent drill-down and the per-card expanded Tasks list.
 // Mirrors the TUI's vocabulary so an operator can switch between
 // surfaces without re-learning. Shared by AgentsView (full panel) and
-// KanbanCard (inline pill expansion) so the glyph table has one
+// PipelineCard (inline pill expansion) so the glyph table has one
 // source of truth.
 export function todoGlyph(status: string) {
   switch (status) {
