@@ -4,7 +4,7 @@
 // blow up — the runtime isn't there at all in a browser.
 //
 // Mirrors only the surface we touch from frontend code: Events.On /
-// Emit. App.jsx uses Events.On for 'leaderStatus' (gated on WEB_MODE,
+// Emit. App.tsx uses Events.On for 'leaderStatus' (gated on WEB_MODE,
 // but the import itself runs at module load and would otherwise
 // throw). Add more entries here only if a new module-level Wails
 // call is introduced.

@@ -17,15 +17,15 @@
 // `bacio-193-plan.md` (Out of scope).
 //
 // The companion CSS (`.mk-shipped-pill.is-flash`) and Motion
-// `layoutId` plumbing live in `PipelineView.jsx` (the PipelineCard
-// flight source) and `ShippedPopover.jsx` (the destination slot);
+// `layoutId` plumbing live in `PipelineView.tsx` (the PipelineCard
+// flight source) and `ShippedPopover.tsx` (the destination slot);
 // this hook is the controller.
 //
 // BACI-254: the hook also fires an optional `onShip(keys)` callback
 // from the same detection effect. The callback receives every card
 // that transitioned in the tick (not just the first), so a burst
 // ship lands every audio cue even though only the first key drives
-// the visual flight. The SFX caller lives in `App.jsx` so the audio
+// the visual flight. The SFX caller lives in `App.tsx` so the audio
 // fires regardless of which surface the user is on — previously the
 // SFX was tied to the Motion flight-completion callback inside
 // `ShippedPopover`, which never fires when the source `motion.article`
@@ -85,7 +85,7 @@ export type ShipFlourishResult = {
 //
 // BACI-254: the optional `onShip(keys)` callback is fired from the
 // same detection effect with every card that transitioned in the
-// tick. The SFX caller in `App.jsx` uses it to play a sound per ship
+// tick. The SFX caller in `App.tsx` uses it to play a sound per ship
 // independently of Motion / the Pipeline being mounted. Only the first
 // key still drives the visual flight (one Motion flight at a time);
 // the array carries the rest so a burst ship lands every audio cue.

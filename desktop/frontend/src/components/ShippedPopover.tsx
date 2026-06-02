@@ -26,11 +26,11 @@ const LIMIT = 20;
 // Props:
 //   activeBoard  — current repo prefix; empty / "all" disables the pill.
 //   shippedCount — pre-computed count for the "Shipped · N" label;
-//                  App.jsx polls /shipped/count under the active scope
+//                  App.tsx polls /shipped/count under the active scope
 //                  on the same 10s cadence as the other live readouts
 //                  so pill and popover never drift.
 //   scope        — BACI-221: 'today' | 'week' | 'forever'. Owned by
-//                  App.jsx so the pill count and the list scope stay
+//                  App.tsx so the pill count and the list scope stay
 //                  in lockstep.
 //   onScopeChange — App-level setter that also persists the choice to
 //                  localStorage. Wired through PipelineView.
@@ -54,7 +54,7 @@ const LIMIT = 20;
 // actually completing the flight — which never happens when the
 // user is off the Pipeline (Features graph, Settings, …) because the
 // source `motion.article` isn't mounted. The SFX has moved up into
-// `App.jsx`, where BACI-295 ties it to the server-derived shippedCount
+// `App.tsx`, where BACI-295 ties it to the server-derived shippedCount
 // rising (the count-rise effect) so it fires regardless of the active
 // view. The visual flash stays put — it does genuinely depend on the
 // flight landing.
@@ -87,7 +87,7 @@ export default function ShippedPopover({ activeBoard, shippedCount, scope, onSco
 
   const rootRef = useRef<HTMLDivElement>(null);
 
-  // Outside-click + Escape — same recipe as RepoPicker.jsx.
+  // Outside-click + Escape — same recipe as RepoPicker.tsx.
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {

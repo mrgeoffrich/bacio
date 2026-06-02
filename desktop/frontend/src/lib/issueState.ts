@@ -5,7 +5,7 @@
 // internal/boardcards/cards.go — keep this list in lockstep with it.
 //
 // BACI-146 introduced this so the optimistic drag-to-move in
-// App.jsx can recompute downstream cards' `blockedBy` arrays
+// App.tsx can recompute downstream cards' `blockedBy` arrays
 // client-side the moment a blocker lands in a terminal column,
 // without waiting for the 10s poll to re-fetch the server-filtered
 // view.

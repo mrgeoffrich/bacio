@@ -33,9 +33,9 @@ export default defineConfig(({ mode }) => {
     },
     resolve: {
       // Array form (vs object) so the regex `find` matches both
-      // `./api` (used by App.jsx) and `../api` (used by every
+      // `./api` (used by App.tsx) and `../api` (used by every
       // component under components/). Web mode also stubs the
-      // Wails runtime to a no-op so App.jsx's module-level
+      // Wails runtime to a no-op so App.tsx's module-level
       // `import { Events } from '@wailsio/runtime'` doesn't crash.
       alias: isWeb ? [
         { find: '@wailsio/runtime', replacement: wailsStubPath },

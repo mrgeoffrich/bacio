@@ -18,7 +18,7 @@ import type { SyncRegistryDTO, SyncPreferencesDTO, MemberProjectDTO } from '../.
 // outer wrapper changes: the section pane mounts under the Settings
 // shell instead of stamping its own .mk-settings-view chrome.
 
-// Matches App.jsx's POLL_INTERVAL_MS — the registry refreshes at the
+// Matches App.tsx's POLL_INTERVAL_MS — the registry refreshes at the
 // same cadence the Board and Agents views poll (10 s). The poll runs
 // only while this section is mounted; the SettingsView only mounts
 // this when its activeSection === 'sync'.
@@ -106,7 +106,7 @@ export default function SyncSettingsSection() {
   }, [subModalOpen]);
 
   // changeBackgroundEnabled flips the toggle optimistically, then
-  // confirms with the server response — same shape as App.jsx's
+  // confirms with the server response — same shape as App.tsx's
   // changeShowArchived. On failure the modal surfaces and the UI
   // reverts to the persisted value.
   const changeBackgroundEnabled = useCallback((next: boolean) => {

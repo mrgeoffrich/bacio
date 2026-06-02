@@ -14,7 +14,7 @@ import type { PromptTemplateDTO } from '../../api';
 // for so the user can see at a glance which preferences live on this
 // browser vs the shared store.
 //
-// Props mirror what App.jsx already passes — no behaviour change
+// Props mirror what App.tsx already passes — no behaviour change
 // beyond the layout reshape.
 
 const THEME_OPTIONS = [
@@ -163,7 +163,7 @@ export default function SystemSettingsSection({
   }, [refreshTemplates]);
 
   // Each mutating path threads through these helpers so the promptConfig
-  // up in App.jsx stays in sync without waiting for the Settings screen
+  // up in App.tsx stays in sync without waiting for the Settings screen
   // to close.
   const notifyTemplatesChanged = useCallback(() => {
     if (typeof onTemplatesChanged === 'function') onTemplatesChanged();
@@ -397,7 +397,7 @@ export default function SystemSettingsSection({
           Shipped pill's local-midnight "Today" cutoff. A native <select>
           over the browser's IANA zone list (type-ahead searchable); the
           server stays timezone-agnostic — the browser does the midnight
-          math. Auto-detected + persisted on first run by App.jsx. */}
+          math. Auto-detected + persisted on first run by App.tsx. */}
       <section className="mk-settings-row">
         <div className="mk-settings-row-text">
           <div className="mk-settings-label">

@@ -22,7 +22,7 @@ const TYPE_LABEL = {
   duplicate_of: 'Duplicate of',
 };
 
-// stateLabel mirrors api.http.ts:STATE_LABELS / KanbanCard.jsx
+// stateLabel mirrors api.http.ts:STATE_LABELS / PipelineView.tsx
 // (single source of truth lives in api.http.ts; duplicated here so a
 // degraded chip doesn't need an extra prop drill). Keep in sync.
 const STATE_LABELS: Record<string, string> = {

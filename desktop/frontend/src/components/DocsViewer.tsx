@@ -56,7 +56,7 @@ export default function DocsViewer({
   onContentChange,
   onSave,
   onArchiveToggle,
-  onOpenIssue,    // (issueKey) => void — from App.jsx
+  onOpenIssue,    // (issueKey) => void — from App.tsx
   panelsCollapsed, // BACI-234: rail + list are hidden; render expand button
   onExpandPanels,  // () => void — re-open both side panels
   onCancelEdit,    // BACI-293: () => void — parent resets the lifted buffer to the loaded doc
@@ -297,7 +297,7 @@ export default function DocsViewer({
 }
 
 // DocLinkChip renders one linked-issue / linked-feature pill. Clicking
-// an issue chip opens the issue workspace via App.jsx's openIssueByKey
+// an issue chip opens the issue workspace via App.tsx's openIssueByKey
 // (same path the kanban-blocked popover uses, BACI-114). Feature chips
 // are rendered but not clickable — there's no "feature workspace" yet.
 type DocLinkChipProps = {

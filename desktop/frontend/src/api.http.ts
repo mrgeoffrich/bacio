@@ -1541,7 +1541,7 @@ export async function addIssue(
 // state and picks the most-recently-active free agent — the caller
 // names neither an agent nor a note. Errors from the server (no free
 // agent / state-gate mismatch) come back as the error envelope and
-// surface through reportError() up in App.jsx.
+// surface through reportError() up in App.tsx.
 export async function dispatchIssue(
   repoPrefix: string,
   issueKey: string,
@@ -2905,7 +2905,7 @@ export async function setAudioPreferences(shippedSfx: boolean): Promise<AudioPre
 //
 // Global ui.timezone setting — the user's IANA zone name. Drives the
 // browser-side local-midnight cutoff for the Pipeline Shipping-column
-// Shipped pill's "Today" scope. Empty when unset (App.jsx auto-detects
+// Shipped pill's "Today" scope. Empty when unset (App.tsx auto-detects
 // the browser zone and persists it on first run). HTTP twin of api.ts's
 // get/setTimezonePreferences — keep names + shape in lockstep.
 
@@ -3032,7 +3032,7 @@ export async function unarchiveDocument(prefix: string, filename: string): Promi
 // The bacio api server runs the elector itself, sharing the ui_leader
 // table with the desktop and TUI. The browser can never be the leader,
 // but its connected api server can — so the "Controlling" chip reflects
-// the server's lease, not this page's. App.jsx polls this on a 10s
+// the server's lease, not this page's. App.tsx polls this on a 10s
 // cadence (matching POLL_INTERVAL_MS, which mirrors UILeaderHeartbeatInterval).
 export async function getLeaderStatus(): Promise<LeaderStatusDTO> {
   const res = await call<{ amLeader: boolean; holderLabel: string }>('/leader');

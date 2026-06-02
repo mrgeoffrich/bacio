@@ -165,7 +165,7 @@ function mockFeatures(): FeatureSummary[] {
 // Everything else still flows through the CLI.
 //
 // onChangeHidden (BACI-177) is fired by the toggle so the parent
-// (App.jsx) can refresh the cached board cards — flipping the toggle
+// (App.tsx) can refresh the cached board cards — flipping the toggle
 // changes which cards ship over the wire, and the App-owned `cards`
 // state would otherwise show stale entries until the 10s poll.
 type FeaturesViewProps = {

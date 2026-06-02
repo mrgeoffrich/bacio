@@ -20,7 +20,7 @@ import type { FeatureSummary, BoardCard } from '../api';
 //   - onClose(): close handler (X / Cancel / Escape).
 //   - repoPrefix: the active board prefix; required (the composer is
 //     hidden when "all" is active, but defend at the API boundary too).
-//   - onCreated(newCard): fires on a successful create — App.jsx
+//   - onCreated(newCard): fires on a successful create — App.tsx
 //     prepends the optimistic card, opens IssueWorkspace, and bumps the
 //     refresh poll. The composer itself is unaware of the routing.
 type IssueComposerProps = {

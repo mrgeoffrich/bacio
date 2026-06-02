@@ -125,10 +125,10 @@ export default function App() {
   const [agents, setAgents] = useState<AgentCard[]>([]);
   // promptConfig is the global (repo-independent) dispatch-prompt config:
   // one entry per stage with its label and the issue states it's valid
-  // to run from. Board → KanbanCard reads it to gate the per-card action
+  // to run from. PipelineView reads it to gate the per-card action
   // button. Loaded on mount; reloaded when the Settings view closes.
   const [promptConfig, setPromptConfig] = useState<PromptTemplateDTO[]>([]);
-  // BACI-188: per-column collapse state lives in Board.jsx now —
+  // BACI-188: per-column collapse state lives in PipelineView.tsx now —
   // localStorage-backed, per-repo. The App-wide hide-empty-columns
   // preference was removed in BACI-188 (Settings toggle gone, REST /
   // Wails / store endpoints deleted).
@@ -349,7 +349,7 @@ export default function App() {
   // surfaces immediately without a re-fetch. Same optimistic-then-
   // confirmed shape as the other preference handlers. Pre-BACI-254
   // this was wired through ShippedPopover; the SFX now rides the
-  // shippedCount-rise effect in App.jsx (BACI-295) so it fires
+  // shippedCount-rise effect in App.tsx (BACI-295) so it fires
   // regardless of the active view.
   const changeAudioEnabled = useCallback((next: boolean) => {
     api.setAudioPreferences(next)

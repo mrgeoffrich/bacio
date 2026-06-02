@@ -1,5 +1,5 @@
 // BACI-203 / BACI-285: one source of truth for the router path shapes
-// used across App.jsx, Topbar, KanbanCard, ShippedPopover,
+// used across App.tsx, Topbar, KanbanCard, ShippedPopover,
 // CommandPalette, IssueComposer, LinkedDocPanel, RelationsPanel,
 // IssueLockBanner, FeaturesView, DocsView, and IssueWorkspace.
 //
@@ -14,7 +14,7 @@
 // model and the SPA-fallback contract on both the `bacio web` asset
 // server and the Wails AssetFileServerFS.
 
-// NAV view ids — kept in lockstep with Topbar.jsx's NAV array. The
+// NAV view ids — kept in lockstep with Topbar.tsx's NAV array. The
 // `board` view is special-cased: the path is `/issues` (matches the
 // "Issues" tab label) rather than `/board`.
 type NavView = 'pipeline' | 'board' | 'features' | 'docs' | 'agents' | 'history' | 'monitor';

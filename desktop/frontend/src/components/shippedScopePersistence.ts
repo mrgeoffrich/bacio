@@ -9,7 +9,7 @@
 // Default scope is `'week'` so the first-launch behaviour matches the
 // pre-BACI-221 pill exactly (the existing 7-day count). The picker
 // re-writes the key on every change; the read happens once on mount in
-// App.jsx so a relaunch lands on the same scope.
+// App.tsx so a relaunch lands on the same scope.
 
 import { isShippedScope, type ShippedScope } from './shippedScope.ts';
 

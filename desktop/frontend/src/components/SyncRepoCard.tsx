@@ -2,7 +2,7 @@ import Tooltip from './Tooltip';
 import type { SyncRepoDTO, MemberProjectDTO } from '../api';
 
 // formatSyncTime renders an ISO timestamp as a short local string.
-// Mirrors Topbar.jsx's formatSyncTime so the per-card subtitle reads
+// Mirrors Topbar.tsx's formatSyncTime so the per-card subtitle reads
 // the same as the topbar pill's hover.
 function formatSyncTime(iso: string | undefined): string {
   if (!iso) return '';
@@ -11,7 +11,7 @@ function formatSyncTime(iso: string | undefined): string {
   return d.toLocaleString();
 }
 
-// pillClassFor picks the mk-sync-badge modifier the same way Topbar.jsx
+// pillClassFor picks the mk-sync-badge modifier the same way Topbar.tsx
 // does — inlined verbatim (rather than lifted to a shared component)
 // per the BACI-108 plan: with only two callers, a tiny class-pick
 // duplication beats the over-abstraction of <SyncStatusBadge>.

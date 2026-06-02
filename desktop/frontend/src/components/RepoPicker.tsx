@@ -111,7 +111,7 @@ export default function RepoPicker({ boards, activeBoard, onPick, onAddRepositor
         setOpen(false);
       }
     } catch (err) {
-      // App.jsx already routes the failure through the global error
+      // App.tsx already routes the failure through the global error
       // modal; surface the message inline too so the modal stays open
       // and the user can correct the typed path.
       const message = err instanceof Error ? err.message : '';

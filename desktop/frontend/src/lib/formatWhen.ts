@@ -1,4 +1,4 @@
-// formatWhen (BACI-187, extracted from HistoryView.jsx) mirrors the TUI's
+// formatWhen (BACI-187, extracted from HistoryView.tsx) mirrors the TUI's
 // history view: a relative phrase for recent entries ("just now", "5m ago",
 // "3h ago", "2d ago"), an absolute local-date string once entries are more
 // than a week old. Used by HistoryView and the BACI-187 ShippedPopover.

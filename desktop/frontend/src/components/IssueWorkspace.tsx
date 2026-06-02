@@ -112,7 +112,7 @@ export default function IssueWorkspace({
     : null;
 
   // [ / ] hotkeys for prev/next within column. esc → close is wired in
-  // App.jsx so it can defer to the command palette's own esc handler.
+  // App.tsx so it can defer to the command palette's own esc handler.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;

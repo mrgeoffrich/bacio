@@ -19,7 +19,7 @@ import Tooltip from './Tooltip';
 // read" footer (BACI-287 resolved design).
 //
 // Props:
-//   unreadCount — the badge number; App.jsx polls /notifications/count on
+//   unreadCount — the badge number; App.tsx polls /notifications/count on
 //                 the same 10s cadence as the other live readouts so the
 //                 badge stays in lockstep without the dropdown being open.
 //   onCountChange — App-level setter so a mark-read / mark-all updates the
