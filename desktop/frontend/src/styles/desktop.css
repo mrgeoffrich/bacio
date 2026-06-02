@@ -2215,13 +2215,6 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   margin-bottom: 14px;
   flex-shrink: 0;
 }
-.mk-monitor-title {
-  font-family: var(--font-sans);
-  font-size: var(--text-xl);
-  font-weight: 700;
-  color: var(--fg-1);
-  margin: 0;
-}
 .mk-monitor-scope {
   margin-left: auto;
   display: flex;
@@ -2495,7 +2488,6 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
    in the Monitor bar, styled off the Topbar's segmented rhythm. The shell
    (MonitorView) syncs the active chip to the URL. */
 .mk-monitor-subtabs {
-  margin-left: auto;
   display: inline-flex;
   gap: 2px;
   padding: 2px;

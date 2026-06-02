@@ -1,14 +1,17 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router';
-import { viewPath, monitorTranscriptsPath } from '../lib/routes';
+import { monitorTranscriptsPath } from '../lib/routes';
 import NetworkPanel from './NetworkPanel';
 import TranscriptListPanel from './TranscriptListPanel';
 
 // SUBTABS is the canonical ordered list the segmented control renders. `id`
 // keys the active state; `label` is the chip text; `path` builds the route the
-// chip navigates to under the active repo prefix.
+// chip navigates to under the active repo prefix. The Network chip targets the
+// bare `/<prefix>/monitor` route directly rather than viewPath(prefix,
+// 'monitor') — BACI-337 repointed that nav alias at the Transcripts sub-tab, so
+// the chip would otherwise navigate away from Network.
 const SUBTABS = [
-  { id: 'network', label: 'Network', path: (prefix) => viewPath(prefix, 'monitor') },
+  { id: 'network', label: 'Network', path: (prefix) => `/${prefix}/monitor` },
   { id: 'transcripts', label: 'Transcripts', path: (prefix) => monitorTranscriptsPath(prefix) },
 ];
 
@@ -29,7 +32,9 @@ export default function MonitorView({ activeBoard }) {
   return (
     <div className="mk-monitor">
       <header className="mk-monitor-bar">
-        <h2 className="mk-monitor-title">Monitor</h2>
+        {/* BACI-337: the segmented control sits flush at the top-left and the
+            "Monitor" title is dropped — the tab control makes the page identity
+            clear enough. */}
         <div className="mk-monitor-subtabs" role="tablist" aria-label="Monitor sections">
           {SUBTABS.map(tab => (
             <button
