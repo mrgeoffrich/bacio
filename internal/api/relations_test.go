@@ -25,6 +25,36 @@ func TestRelationCreateBlocks(t *testing.T) {
 	assertHistoryOps(t, s, []string{"relation.create"})
 }
 
+// TestRelationCreateDuplicateNoOp covers the BACI-342 INSERT OR IGNORE:
+// re-creating an existing edge succeeds silently (201, no UNIQUE error)
+// rather than surfacing a 500. The Pipeline drag-to-block gesture relies
+// on this so dropping onto a card that already blocks the dragged one is
+// a no-op, not an error.
+func TestRelationCreateDuplicateNoOp(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+	a := seedIssue(t, s, repo, "a")
+	b := seedIssue(t, s, repo, "b")
+	body := `{"from":"` + a.Key + `","type":"blocks","to":"` + b.Key + `"}`
+	resp, _ := apiPost(t, ts.URL+"/repos/MINI/relations", body)
+	if resp.StatusCode != 201 {
+		t.Fatalf("first create status: %d", resp.StatusCode)
+	}
+	resp, dup := apiPost(t, ts.URL+"/repos/MINI/relations", body)
+	if resp.StatusCode != 201 {
+		t.Fatalf("duplicate create status: %d, body=%s", resp.StatusCode, dup)
+	}
+	// The edge still exists exactly once — list relations from a and
+	// confirm a single outgoing blocks edge to b.
+	rels, err := s.ListIssueRelations(a.ID)
+	if err != nil {
+		t.Fatalf("list relations: %v", err)
+	}
+	if got := len(rels.Outgoing); got != 1 {
+		t.Fatalf("want 1 outgoing edge after duplicate create, got %d", got)
+	}
+}
+
 func TestRelationCreateRelatesToHyphen(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
