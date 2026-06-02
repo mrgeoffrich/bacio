@@ -1,4 +1,4 @@
-import React from 'react';
+import type { BoardCard, RelationsDTO } from '../../api';
 
 // RelationsPanel (BACI-114) is the issue-workspace rail's full
 // relations surface — Blocked by / Blocking / Relates to / Duplicate
@@ -25,7 +25,7 @@ const TYPE_LABEL = {
 // stateLabel mirrors api.http.ts:STATE_LABELS / KanbanCard.jsx
 // (single source of truth lives in api.http.ts; duplicated here so a
 // degraded chip doesn't need an extra prop drill). Keep in sync.
-const STATE_LABELS = {
+const STATE_LABELS: Record<string, string> = {
   todo: 'Todo',
   in_review: 'In Review',
   done: 'Done',
@@ -33,11 +33,17 @@ const STATE_LABELS = {
   in_pipeline: 'In Pipeline',
   to_be_shipped: 'To Be Shipped',
 };
-function stateLabel(s) {
+function stateLabel(s: string): string {
   return STATE_LABELS[s] ?? s;
 }
 
-export default function RelationsPanel({ relations, cards, onNavigate }) {
+type RelationsPanelProps = {
+  relations: RelationsDTO | null | undefined;
+  cards: BoardCard[];
+  onNavigate?: (key: string) => void;
+};
+
+export default function RelationsPanel({ relations, cards, onNavigate }: RelationsPanelProps) {
   if (!relations) return null;
 
   // Fold the brief's outgoing + incoming arrays into four label-
@@ -45,7 +51,7 @@ export default function RelationsPanel({ relations, cards, onNavigate }) {
   // a `blocks` incoming edge becomes "Blocked by". `relates_to` and
   // `duplicate_of` are symmetric — fold both directions into the
   // outgoing label.
-  const groups = {
+  const groups: Record<'blocked_by' | 'blocking' | 'relates_to' | 'duplicate_of', string[]> = {
     blocked_by: [],
     blocking: [],
     relates_to: [],
@@ -69,9 +75,9 @@ export default function RelationsPanel({ relations, cards, onNavigate }) {
     groups.duplicate_of.length;
   if (total === 0) return null;
 
-  const cardByKey = new Map((cards || []).map(c => [c.key, c]));
+  const cardByKey = new Map<string, BoardCard>((cards || []).map(c => [c.key, c]));
 
-  const renderGroup = (label, keys) => {
+  const renderGroup = (label: string, keys: string[]) => {
     if (keys.length === 0) return null;
     return (
       <div className="mk-rel-group" key={label}>

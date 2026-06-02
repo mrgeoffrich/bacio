@@ -1,8 +1,10 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { reportError } from '../errors';
 import * as api from '../api';
+import type { ShippedIssueDTO } from '../api';
 import { formatWhen } from '../lib/formatWhen';
 import { SHIPPED_SCOPES, scopeLabel, scopeSinceParams } from './shippedScope.ts';
+import type { ShippedScope } from './shippedScope.ts';
 import ShippedPill from './ShippedPill';
 
 // CACHE_TTL_MS: how long the popover holds onto its last successful
@@ -56,28 +58,42 @@ const LIMIT = 20;
 // rising (the count-rise effect) so it fires regardless of the active
 // view. The visual flash stays put — it does genuinely depend on the
 // flight landing.
-export default function ShippedPopover({ activeBoard, shippedCount, scope, onScopeChange, timezone, onOpenIssue, flyingShipKey, shipFlashing, onShipFlightDone }) {
+type ShippedPopoverStatus = 'idle' | 'loading' | 'ready' | 'error';
+
+type ShippedPopoverProps = {
+  activeBoard: string;
+  shippedCount: number | null;
+  scope: ShippedScope;
+  onScopeChange: (next: ShippedScope) => void;
+  timezone: string;
+  onOpenIssue: (key: string) => void;
+  flyingShipKey: string | null;
+  shipFlashing: boolean;
+  onShipFlightDone: () => void;
+};
+
+export default function ShippedPopover({ activeBoard, shippedCount, scope, onScopeChange, timezone, onOpenIssue, flyingShipKey, shipFlashing, onShipFlightDone }: ShippedPopoverProps) {
   const [open, setOpen] = useState(false);
   // status: 'idle' | 'loading' | 'ready' | 'error'
   // rows is the last successful fetch (preserved across closes so the
   // next open paints instantly if we're inside the cache window).
   // total is the BACI-221 server-side count under the active scope;
   // fetchedAt is the wall-clock of the last successful fetch.
-  const [status, setStatus] = useState('idle');
-  const [rows, setRows] = useState([]);
+  const [status, setStatus] = useState<ShippedPopoverStatus>('idle');
+  const [rows, setRows] = useState<ShippedIssueDTO[]>([]);
   const [total, setTotal] = useState(0);
   const [error, setError] = useState('');
   const [fetchedAt, setFetchedAt] = useState(0);
 
-  const rootRef = useRef(null);
+  const rootRef = useRef<HTMLDivElement>(null);
 
   // Outside-click + Escape — same recipe as RepoPicker.jsx.
   useEffect(() => {
     if (!open) return;
-    const onDown = (e) => {
-      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false);
+    const onDown = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
     };
-    const onKey = (e) => {
+    const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false);
     };
     document.addEventListener('mousedown', onDown);
@@ -137,7 +153,7 @@ export default function ShippedPopover({ activeBoard, shippedCount, scope, onSco
   }, [open, activeBoard, scope, timezone, status, fetchedAt]);
 
   // Click a row → open the issue workspace + close the popover.
-  const pickRow = (key) => {
+  const pickRow = (key: string) => {
     if (typeof onOpenIssue === 'function') onOpenIssue(key);
     setOpen(false);
   };
@@ -151,7 +167,7 @@ export default function ShippedPopover({ activeBoard, shippedCount, scope, onSco
 
   // Scope click: defer to the App-level setter (which also persists),
   // then drop the cache so the open-effect re-fires immediately.
-  const pickScope = (next) => {
+  const pickScope = (next: ShippedScope) => {
     if (next === scope) return;
     if (typeof onScopeChange === 'function') onScopeChange(next);
     // The activeBoard/scope effect above resets cache state on
@@ -162,7 +178,7 @@ export default function ShippedPopover({ activeBoard, shippedCount, scope, onSco
   };
 
   const disabled = !activeBoard || activeBoard === 'all';
-  const safeCount = Number.isFinite(shippedCount) && shippedCount > 0 ? shippedCount : 0;
+  const safeCount = shippedCount != null && Number.isFinite(shippedCount) && shippedCount > 0 ? shippedCount : 0;
   const tooltip = safeCount > 0
     ? `${safeCount} ${safeCount === 1 ? 'issue' : 'issues'} shipped · click for the full list`
     : 'Recently-shipped issues for this repository';

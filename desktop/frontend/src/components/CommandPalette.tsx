@@ -1,9 +1,17 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import type { BoardCard } from '../api';
 import Icon from './Icon';
 
-export default function CommandPalette({ open, cards, onClose, onPick }) {
+type CommandPaletteProps = {
+  open: boolean;
+  cards: BoardCard[];
+  onClose: () => void;
+  onPick: (card: BoardCard) => void;
+};
+
+export default function CommandPalette({ open, cards, onClose, onPick }: CommandPaletteProps) {
   const [q, setQ] = useState('');
-  const inputRef = useRef(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (open) {

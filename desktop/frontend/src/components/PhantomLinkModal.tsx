@@ -1,6 +1,7 @@
-import React, { useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import Modal from './Modal';
 import * as api from '../api';
+import type { MemberProjectDTO, RepoLinkResult } from '../api';
 import { reportError } from '../errors';
 
 // PhantomLinkModal (BACI-112) — the path-input modal opened from a
@@ -20,7 +21,13 @@ import { reportError } from '../errors';
 //   - onSubmitted(result): fires on a successful link so the parent can
 //     refresh the registry. result has shape { prefix, path,
 //     syncRemoteUrl, alreadyLinked }.
-export default function PhantomLinkModal({ phantom, onClose, onSubmitted }) {
+type PhantomLinkModalProps = {
+  phantom: MemberProjectDTO | null;
+  onClose?: () => void;
+  onSubmitted?: (result: RepoLinkResult) => void;
+};
+
+export default function PhantomLinkModal({ phantom, onClose, onSubmitted }: PhantomLinkModalProps) {
   const [path, setPath] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -46,7 +53,7 @@ export default function PhantomLinkModal({ phantom, onClose, onSubmitted }) {
       setPath('');
       onSubmitted?.(result);
     } catch (err) {
-      const msg = err?.message || 'Failed to link phantom repo';
+      const msg = (err instanceof Error ? err.message : '') || 'Failed to link phantom repo';
       setError(msg);
       // Surface the global modal for genuinely unexpected failures
       // (network, 5xx). The handler's typed-error refusals — not a
@@ -139,7 +146,7 @@ export default function PhantomLinkModal({ phantom, onClose, onSubmitted }) {
 // String-match against the typed-error Error() output verbatim — the
 // API's human messages are deliberately stable so this stays a thin
 // best-effort filter.
-function isClientFacingValidation(msg) {
+function isClientFacingValidation(msg: string): boolean {
   if (!msg) return false;
   return msg.includes('is not a phantom')
     || msg.includes('is already bound to repo')

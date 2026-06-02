@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import type { Board, BoardColumn } from '../api';
 import Icon from './Icon';
 import SectionRail from './settings/SectionRail';
 import SystemSettingsSection from './settings/SystemSettingsSection';
@@ -23,11 +24,33 @@ import PerRepoSettingsSection from './settings/PerRepoSettingsSection';
 // down through three siblings — the page only ever cares about
 // "is any sub-modal open right now?".
 
-const SECTIONS = [
+type SettingsSection = 'system' | 'sync' | 'per-repo';
+
+const SECTIONS: { id: SettingsSection; label: string; hint: string }[] = [
   { id: 'system', label: 'System', hint: 'App-wide preferences' },
   { id: 'sync', label: 'Sync', hint: 'Background sync + registry' },
   { id: 'per-repo', label: 'Per-repository', hint: 'Per-repo defaults' },
 ];
+
+type SettingsViewProps = {
+  theme: string;
+  onChangeTheme: (theme: string) => void;
+  showArchived: boolean;
+  onChangeShowArchived: (next: boolean) => void;
+  archiveAutoEnabled: boolean;
+  archiveRetentionDays: number;
+  onChangeArchivePreferences: (autoEnabled: boolean, retentionDays: number) => void;
+  audioEnabled: boolean;
+  onChangeAudioEnabled: (next: boolean) => void;
+  timezone: string;
+  onChangeTimezone: (next: string) => void;
+  columns: BoardColumn[];
+  onClose: () => void;
+  onTemplatesChanged: () => void;
+  repoPrefix: string;
+  boards: Board[];
+  initialSection: string | null;
+};
 
 export default function SettingsView({
   theme,
@@ -47,13 +70,13 @@ export default function SettingsView({
   repoPrefix,
   boards,
   initialSection,
-}) {
+}: SettingsViewProps) {
   // Local-only selection state — opening Settings always lands on
   // System unless the topbar Sync pill routed in with `initialSection`.
   // The design doc explicitly recommends NOT persisting the last
   // section across opens (the discovery cost is low — only three
   // sections, all named by scope).
-  const [activeSection, setActiveSection] = useState(() => (
+  const [activeSection, setActiveSection] = useState<SettingsSection>(() => (
     initialSection === 'sync' || initialSection === 'per-repo'
       ? initialSection
       : 'system'
@@ -75,8 +98,9 @@ export default function SettingsView({
   const subModalOpenCount = useRef(0);
   const [subModalOpen, setSubModalOpen] = useState(false);
   useEffect(() => {
-    const onSubModal = (e) => {
-      const open = !!(e.detail && e.detail.open);
+    const onSubModal = (e: Event) => {
+      const detail = (e as CustomEvent<{ open?: boolean }>).detail;
+      const open = !!(detail && detail.open);
       subModalOpenCount.current = Math.max(0, subModalOpenCount.current + (open ? 1 : -1));
       setSubModalOpen(subModalOpenCount.current > 0);
     };
@@ -89,7 +113,7 @@ export default function SettingsView({
   // capture-phase listener and dismisses just the sub-modal, leaving
   // Settings open.
   useEffect(() => {
-    const onKey = (e) => {
+    const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       if (subModalOpen) return;
       onClose();

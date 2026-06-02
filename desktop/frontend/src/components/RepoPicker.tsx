@@ -1,7 +1,19 @@
-import React, { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
+import type { Board, AddRepositoryPayload } from '../api';
 import Modal from './Modal';
 import Icon from './Icon';
 import { WEB_MODE } from '../env';
+
+// Web-only Add-Repository modal state: the path/name/prefix the user is
+// typing. Null when the modal is closed.
+type AddWebState = { path: string; name: string; prefix: string };
+
+type RepoPickerProps = {
+  boards: Board[];
+  activeBoard: string;
+  onPick: (prefix: string) => void;
+  onAddRepository: (payload?: AddRepositoryPayload) => Promise<Board | undefined>;
+};
 
 // RepoPicker is the topbar's repository selector — a searchable dropdown that
 // replaces the plain native <select>. Clicking the trigger opens a menu with
@@ -11,17 +23,17 @@ import { WEB_MODE } from '../env';
 // path-input modal that POSTs the typed path to /repos (BACI-50). The
 // onAddRepository callback handles both: desktop ignores its payload,
 // web reads {path, name, prefix?} off it.
-export default function RepoPicker({ boards, activeBoard, onPick, onAddRepository }) {
+export default function RepoPicker({ boards, activeBoard, onPick, onAddRepository }: RepoPickerProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   // Web-only: { path, name, prefix } modal state. Null = closed.
-  const [addingWeb, setAddingWeb] = useState(null);
+  const [addingWeb, setAddingWeb] = useState<AddWebState | null>(null);
   const [addError, setAddError] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const rootRef = useRef(null);
-  const inputRef = useRef(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  const active = boards.find(b => b.prefix === activeBoard);
+  const active = boards.find((b: Board) => b.prefix === activeBoard);
   const label = active?.name || activeBoard || 'Select repository';
 
   // While open: focus the filter, and close on Escape or an outside click.
@@ -34,11 +46,11 @@ export default function RepoPicker({ boards, activeBoard, onPick, onAddRepositor
       return;
     }
     inputRef.current?.focus();
-    const onDown = (e) => {
+    const onDown = (e: MouseEvent) => {
       if (addingWeb) return;
-      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false);
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
     };
-    const onKey = (e) => {
+    const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       if (addingWeb) return; // the modal handles its own Escape
       setOpen(false);
@@ -53,11 +65,11 @@ export default function RepoPicker({ boards, activeBoard, onPick, onAddRepositor
 
   const q = query.trim().toLowerCase();
   const filtered = q
-    ? boards.filter(b =>
+    ? boards.filter((b: Board) =>
         b.name.toLowerCase().includes(q) || b.prefix.toLowerCase().includes(q))
     : boards;
 
-  const pick = (prefix) => {
+  const pick = (prefix: string) => {
     onPick(prefix);
     setOpen(false);
   };
@@ -102,7 +114,8 @@ export default function RepoPicker({ boards, activeBoard, onPick, onAddRepositor
       // App.jsx already routes the failure through the global error
       // modal; surface the message inline too so the modal stays open
       // and the user can correct the typed path.
-      setAddError(err?.message || 'Failed to add repository');
+      const message = err instanceof Error ? err.message : '';
+      setAddError(message || 'Failed to add repository');
     } finally {
       setSubmitting(false);
     }

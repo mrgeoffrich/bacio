@@ -1,7 +1,25 @@
-import React, { useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import Modal from './Modal';
 import * as api from '../api';
+import type {
+  SyncRepoDTO,
+  UnsyncedProjectDTO,
+  SyncSetupPayload,
+  SyncSetupResult,
+  CollisionPreviewDTO,
+} from '../api';
 import { reportError } from '../errors';
+
+// The three sync-setup modes, mirroring SetupSyncIn.mode on the wire.
+type SyncMode = 'attach' | 'clone' | 'init';
+
+type SyncSetupModalProps = {
+  open: boolean;
+  project: UnsyncedProjectDTO | null;
+  syncRepos: SyncRepoDTO[];
+  onClose?: () => void;
+  onDone?: (result: SyncSetupResult) => void;
+};
 
 // SyncSetupModal (BACI-111) — the two-step wizard that drives
 // POST /repos/{prefix}/sync/setup from the standalone Sync view.
@@ -27,13 +45,13 @@ import { reportError } from '../errors';
 //   - onClose(): close handler (the X / Cancel / Escape).
 //   - onDone(result): fires on a successful 200 so the parent re-fetches
 //     the registry.
-export default function SyncSetupModal({ open, project, syncRepos, onClose, onDone }) {
+export default function SyncSetupModal({ open, project, syncRepos, onClose, onDone }: SyncSetupModalProps) {
   // The default mode prefers attach when there's at least one registry
   // entry to pick from — the common case once a team sync repo is set
   // up. Otherwise default to clone (the next-most-common: joining an
   // existing remote). Init stays available as the third option.
-  const initialMode = syncRepos && syncRepos.length > 0 ? 'attach' : 'clone';
-  const [mode, setMode] = useState(initialMode);
+  const initialMode: SyncMode = syncRepos && syncRepos.length > 0 ? 'attach' : 'clone';
+  const [mode, setMode] = useState<SyncMode>(initialMode);
   const [attachRemote, setAttachRemote] = useState(
     syncRepos && syncRepos[0] ? syncRepos[0].remoteUrl : '',
   );
@@ -42,7 +60,7 @@ export default function SyncSetupModal({ open, project, syncRepos, onClose, onDo
   const [initLocalPath, setInitLocalPath] = useState('');
   const [initRemote, setInitRemote] = useState('');
   const [inFlight, setInFlight] = useState(false);
-  const [previewCollisions, setPreviewCollisions] = useState(null);
+  const [previewCollisions, setPreviewCollisions] = useState<CollisionPreviewDTO | null>(null);
   const [error, setError] = useState('');
 
   const reset = useCallback(() => {
@@ -66,14 +84,14 @@ export default function SyncSetupModal({ open, project, syncRepos, onClose, onDo
   // doSubmit runs the actual setup call. Shared by the step-1 submit
   // button and the step-2 "Join anyway (renumber)" confirm — the only
   // difference is the allowRenumber flag the latter passes.
-  const doSubmit = useCallback(async (allowRenumber) => {
+  const doSubmit = useCallback(async (allowRenumber: boolean) => {
     if (!project) return;
     setError('');
     // Per-mode client-side validation. The server also validates; this
     // is just so the user sees field-anchored feedback before a round
     // trip. Server-side absoluteness check on init.localPath is the
     // canonical one — we surface a helper hint here, not a hard refusal.
-    let payload;
+    let payload: SyncSetupPayload;
     switch (mode) {
       case 'attach':
         if (!attachRemote) {
@@ -112,7 +130,7 @@ export default function SyncSetupModal({ open, project, syncRepos, onClose, onDo
       reset();
       onDone?.(result);
     } catch (err) {
-      if (err && err.name === 'SyncSetupCollisionError') {
+      if (err instanceof api.SyncSetupCollisionError) {
         // Advance to step 2 — the form state stays intact so ← Back
         // re-renders step 1 with whatever the user typed.
         setPreviewCollisions(err.previewCollisions);
@@ -121,7 +139,7 @@ export default function SyncSetupModal({ open, project, syncRepos, onClose, onDo
         // correct and retry without losing the form. The global error
         // modal also fires (via reportError) for unexpected failures so
         // network / 5xx errors get the standard treatment.
-        const msg = err?.message || 'Failed to set up sync';
+        const msg = (err instanceof Error && err.message) || 'Failed to set up sync';
         setError(msg);
         if (!isClientValidationError(msg)) {
           reportError(err, { headline: "Sync setup failed" });
@@ -172,6 +190,27 @@ export default function SyncSetupModal({ open, project, syncRepos, onClose, onDo
 
 // renderStep1: the mode picker + per-mode form. Three radios, each
 // reveals its sub-form when picked.
+type Step1Args = {
+  project: UnsyncedProjectDTO;
+  syncRepos: SyncRepoDTO[];
+  mode: SyncMode;
+  setMode: (mode: SyncMode) => void;
+  attachRemote: string;
+  setAttachRemote: (remote: string) => void;
+  cloneRemote: string;
+  setCloneRemote: (remote: string) => void;
+  cloneLocalPath: string;
+  setCloneLocalPath: (path: string) => void;
+  initLocalPath: string;
+  setInitLocalPath: (path: string) => void;
+  initRemote: string;
+  setInitRemote: (remote: string) => void;
+  inFlight: boolean;
+  error: string;
+  onCancel: () => void;
+  onSubmit: () => void;
+};
+
 function renderStep1({
   project, syncRepos,
   mode, setMode,
@@ -182,7 +221,7 @@ function renderStep1({
   initRemote, setInitRemote,
   inFlight, error,
   onCancel, onSubmit,
-}) {
+}: Step1Args) {
   const hasRepos = syncRepos && syncRepos.length > 0;
   return (
     <>
@@ -357,7 +396,15 @@ function renderStep1({
 
 // renderStep2: the collision banner + Join anyway confirm. Appears
 // when the server returns 409 + a populated CollisionPreview.
-function renderStep2({ previewCollisions, inFlight, error, onBack, onConfirm }) {
+type Step2Args = {
+  previewCollisions: CollisionPreviewDTO;
+  inFlight: boolean;
+  error: string;
+  onBack: () => void;
+  onConfirm: () => void;
+};
+
+function renderStep2({ previewCollisions, inFlight, error, onBack, onConfirm }: Step2Args) {
   const renumbered = previewCollisions?.renumbered ?? [];
   const renamed = previewCollisions?.renamed ?? [];
   const total = renumbered.length + renamed.length;
@@ -440,7 +487,7 @@ function renderStep2({ previewCollisions, inFlight, error, onBack, onConfirm }) 
 // failure (`invalid_input` envelope) so we don't double-fire the global
 // error modal alongside the inline message. The HTTP and Wails paths
 // both throw plain Errors here, so this is best-effort string matching.
-function isClientValidationError(msg) {
+function isClientValidationError(msg: string): boolean {
   if (!msg) return false;
   return msg.startsWith('mode must be')
     || msg.startsWith('mode="')

@@ -11,6 +11,18 @@ import prLabel from '../lib/prLabel';
 import { stageLabel, stageGlyph, isShipStage, isShelveStage } from '../lib/pipelineProcesses';
 import { blockedByMode } from '../lib/blockedByBadge';
 import * as api from '../api';
+import type { BoardCard, ProcessSelection } from '../api';
+import type {
+  BoardCardBlocker,
+  BoardCardJob,
+  BoardCardQuestion,
+} from '../../bindings/github.com/mrgeoffrich/bacio/internal/boardcards';
+
+// blockKind classifies a card while a drag-to-block gesture is in flight:
+// 'target' (a valid drop), 'source' (self-drop no-op), 'dup' (already
+// blocked no-op), or null when no block-drag is active / the card is out
+// of scope. Mirrors PipelineView.blockTargetKind's return type.
+type BlockKind = 'target' | 'source' | 'dup' | null;
 
 // PipelineView (Phase 4) — the real three-column pipeline board, keyed on
 // the server-side issue states: Backlog (todo) → In Pipeline
@@ -29,7 +41,7 @@ import * as api from '../api';
 // needs_action | in_review) to the human label shown on the multi-blocker
 // popover's state pill. Mirrors STATE_LABELS in api.http.ts (module-
 // private there); kept tiny and local since only the popover needs it.
-const BLOCKER_STATE_LABEL = {
+const BLOCKER_STATE_LABEL: Partial<Record<string, string>> = {
   todo: 'Todo',
   in_progress: 'In Progress',
   needs_action: 'Needs Action',
@@ -63,9 +75,19 @@ const BLOCKER_STATE_LABEL = {
 // in-scope card is a drag source — without it an unblocked card would have
 // no handle to start the gesture from. dragHandlers bundles the three
 // drag props shared by all three render modes.
-function BlockedByBadge({ blockedBy, onOpenIssue, onHighlight, sourceKey, canBlock, onBlockDragStart, onBlockDragEnd }) {
+type BlockedByBadgeProps = {
+  blockedBy?: BoardCardBlocker[];
+  onOpenIssue?: (key: string) => void;
+  onHighlight?: (key: string | null) => void;
+  sourceKey: string;
+  canBlock?: boolean;
+  onBlockDragStart?: (key: string) => void;
+  onBlockDragEnd?: () => void;
+};
+
+function BlockedByBadge({ blockedBy, onOpenIssue, onHighlight, sourceKey, canBlock, onBlockDragStart, onBlockDragEnd }: BlockedByBadgeProps) {
   const mode = blockedByMode(blockedBy);
-  const dragHandlers = canBlock
+  const dragHandlers: React.HTMLAttributes<HTMLButtonElement> & { draggable?: boolean } = canBlock
     ? {
         draggable: true,
         onDragStart: (e) => { e.stopPropagation(); onBlockDragStart?.(sourceKey); },
@@ -93,7 +115,10 @@ function BlockedByBadge({ blockedBy, onOpenIssue, onHighlight, sourceKey, canBlo
   }
 
   if (mode === 'single') {
-    const { key } = blockedBy[0];
+    // mode === 'single' means blockedByMode saw exactly one blocker, so
+    // blockedBy is non-empty — the same invariant the original code relied
+    // on when it indexed blockedBy[0] unguarded.
+    const { key } = blockedBy![0];
     return (
       <button
         type="button"
@@ -111,20 +136,22 @@ function BlockedByBadge({ blockedBy, onOpenIssue, onHighlight, sourceKey, canBlo
     );
   }
 
-  // multi
+  // multi — mode === 'multi' means blockedByMode saw two or more blockers,
+  // so blockedBy is non-empty (same invariant as the single branch).
+  const blockers = blockedBy!;
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
         <button
           type="button"
           className="mk-pl-blocked-btn"
-          aria-label={`Blocked by ${blockedBy.length} issues`}
-          title={`Blocked by ${blockedBy.length} issues`}
+          aria-label={`Blocked by ${blockers.length} issues`}
+          title={`Blocked by ${blockers.length} issues`}
           onClick={(e) => e.stopPropagation()}
           {...dragHandlers}
         >
           <Icon name="lock" />
-          <span className="mk-pl-blocked-lbl">blocked by {blockedBy.length}</span>
+          <span className="mk-pl-blocked-lbl">blocked by {blockers.length}</span>
         </button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
@@ -137,7 +164,7 @@ function BlockedByBadge({ blockedBy, onOpenIssue, onHighlight, sourceKey, canBlo
           onClick={(e) => e.stopPropagation()}
         >
           <div className="mk-card-blocked-menu-label">Blocked by</div>
-          {blockedBy.map(b => (
+          {blockers.map(b => (
             <DropdownMenu.Item
               key={b.key}
               className="mk-card-blocked-item"
@@ -172,7 +199,7 @@ function BlockedByBadge({ blockedBy, onOpenIssue, onHighlight, sourceKey, canBlo
 // drag is in flight: a coral dashed ring on a valid 'target', a muted
 // not-allowed variant on the 'source' (self-drop) and 'dup' (already
 // blocked) no-ops, and nothing otherwise.
-function blockDragClass(blockKind) {
+function blockDragClass(blockKind: BlockKind | undefined): string {
   if (blockKind === 'target') return ' is-block-target';
   if (blockKind === 'source' || blockKind === 'dup') return ' is-block-noop';
   return '';
@@ -184,13 +211,48 @@ function blockDragClass(blockKind) {
 // to the 'target' kind, so a drop on a source/dup card is a silent no-op).
 // Returns empty handlers when no block-drag is active so the move/reorder
 // drag keeps its own onDragOver/onDrop.
-function blockDropProps(blockKind, onBlockDrop) {
+type BlockDropProps = {
+  onDragOver?: (e: React.DragEvent) => void;
+  onDrop?: (e: React.DragEvent) => void;
+};
+
+function blockDropProps(blockKind: BlockKind | undefined, onBlockDrop?: () => void): BlockDropProps {
   if (!blockKind) return {};
   return {
     onDragOver: (e) => { e.preventDefault(); e.stopPropagation(); },
     onDrop: (e) => { e.preventDefault(); e.stopPropagation(); onBlockDrop?.(); },
   };
 }
+
+type PipelineViewProps = {
+  cards?: BoardCard[] | null;
+  activeBoard?: string;
+  // promptConfig is passed by the App route but not consumed here — kept
+  // in the prop type so the call site stays well-typed.
+  promptConfig?: unknown;
+  onOpenComposer?: () => void;
+  onOpenCard?: (card: BoardCard) => void;
+  onOpenIssue?: (key: string) => void;
+  onMoveCard?: (key: string, col: string) => void;
+  onFastTrack?: (key: string) => void;
+  onCancelCard?: (key: string) => void;
+  onDoneCard?: (key: string) => void;
+  onReorder?: (key: string, position: number) => void;
+  onSetProcess?: (key: string, selection: ProcessSelection) => void;
+  onSetProcessAuto?: (key: string, selection: ProcessSelection) => void;
+  onResetProcess?: (key: string) => void;
+  onEditProcess?: (key: string) => void;
+  onStartJob?: (key: string) => void;
+  onStopJob?: (key: string) => void;
+  onRerunJob?: (key: string, seq: number) => void;
+  onSetEngineMode?: (key: string, mode: string) => void;
+  onShip?: (key: string) => void;
+  onSetAutoShip?: (next: boolean) => void | Promise<unknown>;
+  onSetBacklogCollapsed?: (next: boolean) => void | Promise<unknown>;
+  onShipDispatch?: (key: string, mode: string) => void;
+  onCancelWaiting?: (key: string) => void;
+  onBlockCard?: (sourceKey: string, targetKey: string) => void;
+};
 
 export default function PipelineView({
   cards,
@@ -217,21 +279,21 @@ export default function PipelineView({
   onShipDispatch,
   onCancelWaiting,
   onBlockCard,
-}) {
-  const [activeQuestionId, setActiveQuestionId] = useState(null);
+}: PipelineViewProps) {
+  const [activeQuestionId, setActiveQuestionId] = useState<number | null>(null);
   const [expanded, setExpanded] = useState(false);
   // collapsed (BACI-288) shrinks the Backlog column to a thin rail so the
   // In Pipeline + Shipping columns get the full width. Persisted per-repo
   // in the tui_settings KV — seeded from the backend GET, same pattern as
   // autoShip below. It overrides the transient `expanded` grid toggle.
   const [collapsed, setCollapsed] = useState(false);
-  const [dragKey, setDragKey] = useState(null);
+  const [dragKey, setDragKey] = useState<string | null>(null);
   // Holds the column the dragged card is currently over, driving the
   // `is-drop` highlight. BACI-268 widens the value space with a non-column
   // 'trash' sentinel for the drag-to-cancel bin; BACI-330 adds a 'done'
   // sentinel for the drag-to-done zone — both only feed an `=== <sentinel>`
   // highlight check, never a column lookup.
-  const [dragOverCol, setDragOverCol] = useState(null);
+  const [dragOverCol, setDragOverCol] = useState<string | null>(null);
   // autoShip seeds from the backend (GET /auto-ship) — the DB value the
   // controller's auto-ship ticker actually acts on — so the toggle
   // reflects the source of truth across machines, not a local cache.
@@ -240,8 +302,8 @@ export default function PipelineView({
   // hovered in some card's blocked-by badge. The card whose key matches
   // paints itself red (.is-blocker-hl). A no-op when the hovered blocker
   // isn't rendered on the pipeline — no card matches, nothing highlights.
-  const [highlightKey, setHighlightKey] = useState(null);
-  const onHighlight = useCallback((k) => setHighlightKey(k), []);
+  const [highlightKey, setHighlightKey] = useState<string | null>(null);
+  const onHighlight = useCallback((k: string | null) => setHighlightKey(k), []);
   // blockDragKey (BACI-342): the source card key while a drag-to-block
   // gesture is in flight — set on a card's blocked-by chip dragstart,
   // distinct from the card-move `dragKey` so the two gestures never alias.
@@ -249,8 +311,8 @@ export default function PipelineView({
   // highlight and a drop fires onBlockCard(blockDragKey, target). The
   // chip's own dragstart stopPropagation()s so the move-drag's dragKey
   // never co-arms.
-  const [blockDragKey, setBlockDragKey] = useState(null);
-  const onBlockDragStart = useCallback((k) => setBlockDragKey(k), []);
+  const [blockDragKey, setBlockDragKey] = useState<string | null>(null);
+  const onBlockDragStart = useCallback((k: string) => setBlockDragKey(k), []);
   const onBlockDragEnd = useCallback(() => setBlockDragKey(null), []);
 
   useEffect(() => {
@@ -275,7 +337,7 @@ export default function PipelineView({
   const backlog = useMemo(() => list.filter(c => c.column === 'todo'), [list]);
   const inPipeline = useMemo(() => list.filter(c => c.column === 'in_pipeline'), [list]);
   const shipping = useMemo(() => list.filter(c => c.column === 'to_be_shipped'), [list]);
-  const cardByKey = useMemo(() => new Map(list.map(c => [c.key, c])), [list]);
+  const cardByKey = useMemo(() => new Map(list.map((c): [string, BoardCard] => [c.key, c])), [list]);
 
   const toggleAutoShip = useCallback(() => {
     const next = !autoShip;
@@ -298,7 +360,7 @@ export default function PipelineView({
   // Move a card into `col` (= its new state). in_pipeline → Shipping goes
   // through the Ship hand-off; everything else is a plain state move. Shared
   // by the column drop zone and the cross-column case of dropOnCard.
-  const moveCardToColumn = (card, col) => {
+  const moveCardToColumn = (card: BoardCard, col: string) => {
     if (col === 'to_be_shipped' && card.column === 'in_pipeline') {
       onShip?.(card.key);
     } else {
@@ -307,7 +369,7 @@ export default function PipelineView({
   };
 
   // Cross-column drop onto a column's empty area.
-  const dropToColumn = (col) => {
+  const dropToColumn = (col: string) => {
     setDragOverCol(null);
     const key = dragKey;
     setDragKey(null);
@@ -323,7 +385,7 @@ export default function PipelineView({
   // The card's own onDrop stops propagation, so the column drop zone never
   // sees the event — without the cross-column branch here the move silently
   // no-ops, which is BACI-269 (drag In Pipeline card onto a Backlog card).
-  const dropOnCard = (targetCard, index) => {
+  const dropOnCard = (targetCard: BoardCard, index: number) => {
     const key = dragKey;
     setDragKey(null);
     setDragOverCol(null);
@@ -347,7 +409,7 @@ export default function PipelineView({
   //   'target' — a valid drop that would create the blocks edge.
   // The source/dup cards render a muted not-allowed variant so the user
   // sees the no-op before releasing.
-  const blockTargetKind = (card) => {
+  const blockTargetKind = (card: BoardCard): BlockKind => {
     if (!blockDragKey || card.column === 'to_be_shipped') return null;
     if (card.key === blockDragKey) return 'source';
     const source = cardByKey.get(blockDragKey);
@@ -358,7 +420,7 @@ export default function PipelineView({
   // Drop a block-drag onto a card. Only a 'target' classification creates
   // the edge (source/dup are silent no-ops); clearing blockDragKey happens
   // unconditionally so a no-op drop still ends the gesture.
-  const dropBlockOnCard = (targetCard) => {
+  const dropBlockOnCard = (targetCard: BoardCard) => {
     const sourceKey = blockDragKey;
     setBlockDragKey(null);
     if (!sourceKey) return;
@@ -366,10 +428,10 @@ export default function PipelineView({
     onBlockCard?.(sourceKey, targetCard.key);
   };
 
-  const colDropProps = (col) => ({
-    onDragOver: (e) => { e.preventDefault(); setDragOverCol(col); },
-    onDragLeave: (e) => { if (e.currentTarget === e.target) setDragOverCol(null); },
-    onDrop: (e) => { e.preventDefault(); dropToColumn(col); },
+  const colDropProps = (col: string) => ({
+    onDragOver: (e: React.DragEvent) => { e.preventDefault(); setDragOverCol(col); },
+    onDragLeave: (e: React.DragEvent) => { if (e.currentTarget === e.target) setDragOverCol(null); },
+    onDrop: (e: React.DragEvent) => { e.preventDefault(); dropToColumn(col); },
   });
 
   // BACI-268: drop onto the trash bin cancels the dragged issue. Mirrors
@@ -387,9 +449,9 @@ export default function PipelineView({
   };
 
   const trashDropProps = () => ({
-    onDragOver: (e) => { e.preventDefault(); setDragOverCol('trash'); },
-    onDragLeave: (e) => { if (e.currentTarget === e.target) setDragOverCol(null); },
-    onDrop: (e) => { e.preventDefault(); cancelToTrash(); },
+    onDragOver: (e: React.DragEvent) => { e.preventDefault(); setDragOverCol('trash'); },
+    onDragLeave: (e: React.DragEvent) => { if (e.currentTarget === e.target) setDragOverCol(null); },
+    onDrop: (e: React.DragEvent) => { e.preventDefault(); cancelToTrash(); },
   });
 
   // BACI-330: drop onto the Done zone closes the dragged issue as `done`.
@@ -407,9 +469,9 @@ export default function PipelineView({
   };
 
   const doneDropProps = () => ({
-    onDragOver: (e) => { e.preventDefault(); setDragOverCol('done'); },
-    onDragLeave: (e) => { if (e.currentTarget === e.target) setDragOverCol(null); },
-    onDrop: (e) => { e.preventDefault(); doneToTray(); },
+    onDragOver: (e: React.DragEvent) => { e.preventDefault(); setDragOverCol('done'); },
+    onDragLeave: (e: React.DragEvent) => { if (e.currentTarget === e.target) setDragOverCol(null); },
+    onDrop: (e: React.DragEvent) => { e.preventDefault(); doneToTray(); },
   });
 
   if (!activeBoard) {
@@ -686,6 +748,34 @@ export default function PipelineView({
 // title, labels) — the issue card only ever shows the issue itself.
 // Shipping adds a position badge + the Next-to-ship SHIP row / waiting
 // status.
+type PipelineCardProps = {
+  card: BoardCard;
+  activeBoard?: string;
+  index?: number;
+  showBadge?: boolean;
+  shipping?: boolean;
+  backlog?: boolean;
+  isNextToShip?: boolean;
+  autoShip?: boolean;
+  isDragging?: boolean;
+  isHighlighted?: boolean;
+  canBlock?: boolean;
+  blockKind?: BlockKind;
+  onBlockDragStart?: (key: string) => void;
+  onBlockDragEnd?: () => void;
+  onBlockDrop?: () => void;
+  onOpen?: () => void;
+  onOpenIssue?: (key: string) => void;
+  onHighlight?: (key: string | null) => void;
+  onDragStart?: () => void;
+  onDragEnd?: () => void;
+  onDropCard?: () => void;
+  onMoveCard?: (key: string, col: string) => void;
+  onFastTrack?: (key: string) => void;
+  onShipDispatch?: (key: string, mode: string) => void;
+  onCancelWaiting?: (key: string) => void;
+};
+
 function PipelineCard({
   card,
   activeBoard,
@@ -712,7 +802,7 @@ function PipelineCard({
   onFastTrack,
   onShipDispatch,
   onCancelWaiting,
-}) {
+}: PipelineCardProps) {
   const [over, setOver] = useState(false);
   const waiting = !!card.waitingState && !card.taken;
   const shippingInFlight = shipping && (card.taken || waiting);
@@ -740,7 +830,7 @@ function PipelineCard({
           className={`mk-pl-badge${shipping && isNextToShip ? ' is-next' : ''}`}
           aria-hidden="true"
         >
-          {index + 1}
+          {(index ?? 0) + 1}
         </span>
       )}
       <CardHead
@@ -829,7 +919,17 @@ function PipelineCard({
 // badge (each only when it applies). Shared by the compact card and the
 // stage card's header so the anatomy stays identical, which is how the
 // blocked-by badge lands on all three card types at once.
-function CardHead({ card, activeBoard, onOpenIssue, onHighlight, canBlock, onBlockDragStart, onBlockDragEnd }) {
+type CardHeadProps = {
+  card: BoardCard;
+  activeBoard?: string;
+  onOpenIssue?: (key: string) => void;
+  onHighlight?: (key: string | null) => void;
+  canBlock?: boolean;
+  onBlockDragStart?: (key: string) => void;
+  onBlockDragEnd?: () => void;
+};
+
+function CardHead({ card, activeBoard, onOpenIssue, onHighlight, canBlock, onBlockDragStart, onBlockDragEnd }: CardHeadProps) {
   const latestPlan = card.latestPlan || null;
   const latestPR = card.latestPR || null;
   return (
@@ -851,7 +951,7 @@ function CardHead({ card, activeBoard, onOpenIssue, onHighlight, canBlock, onBlo
         {latestPlan && (
           <Tooltip label={`Open plan: ${latestPlan.filename}`}>
             <Link
-              to={documentPath(activeBoard, latestPlan.filename)}
+              to={documentPath(activeBoard ?? '', latestPlan.filename)}
               className="mk-pl-icobtn"
               aria-label={`Open plan: ${latestPlan.filename}`}
               onClick={(e) => e.stopPropagation()}
@@ -879,7 +979,9 @@ function CardHead({ card, activeBoard, onOpenIssue, onHighlight, canBlock, onBlo
   );
 }
 
-function CardLabels({ tags }) {
+type CardLabelsProps = { tags?: string[] };
+
+function CardLabels({ tags }: CardLabelsProps) {
   if (!tags || tags.length === 0) return null;
   return (
     <div className="mk-pl-card-labels">
@@ -892,6 +994,33 @@ function CardLabels({ tags }) {
 // header on top; the processing area (job chain + active job / question)
 // in the body; all controls along the bottom. When no process has been
 // chosen yet, a process-pick menu sits over the card.
+type StageCardProps = {
+  card: BoardCard;
+  activeBoard?: string;
+  isDragging?: boolean;
+  isHighlighted?: boolean;
+  canBlock?: boolean;
+  blockKind?: BlockKind;
+  onBlockDragStart?: (key: string) => void;
+  onBlockDragEnd?: () => void;
+  onBlockDrop?: () => void;
+  onOpen?: () => void;
+  onOpenIssue?: (key: string) => void;
+  onHighlight?: (key: string | null) => void;
+  onDragStart?: () => void;
+  onDragEnd?: () => void;
+  onSetProcess?: (key: string, selection: ProcessSelection) => void;
+  onSetProcessAuto?: (key: string, selection: ProcessSelection) => void;
+  onResetProcess?: (key: string) => void;
+  onEditProcess?: (key: string) => void;
+  onStartJob?: (key: string) => void;
+  onStopJob?: (key: string) => void;
+  onRerunJob?: (key: string, seq: number) => void;
+  onSetEngineMode?: (key: string, mode: string) => void;
+  onShip?: (key: string) => void;
+  onOpenQuestion?: (id: number) => void;
+};
+
 function StageCard({
   card,
   activeBoard,
@@ -917,7 +1046,7 @@ function StageCard({
   onSetEngineMode,
   onShip,
   onOpenQuestion,
-}) {
+}: StageCardProps) {
   const [picking, setPicking] = useState(false);
   // BACI-314 Reset is a two-step in-card confirm: unarmed → armed (Confirm /
   // Cancel) → fires. Inline in the footer, not a modal, because Reset is
@@ -1182,7 +1311,9 @@ function StageCard({
 // renders as a step with a status-driven dot; the Ship sentinel renders
 // as the hand-off step, and the Shelve sentinel (BACI-332) as a distinct
 // "returns to Backlog" step.
-function JobChain({ jobs }) {
+type JobChainProps = { jobs: BoardCardJob[] };
+
+function JobChain({ jobs }: JobChainProps) {
   return (
     <div className="mk-pl-chain">
       {jobs.map((j, i) => {
@@ -1216,7 +1347,9 @@ function JobChain({ jobs }) {
 
 // ActiveJob — the running job's mode + live meta + the worker's todo
 // list (from the card's TodoWrite projection).
-function ActiveJob({ card, job }) {
+type ActiveJobProps = { card: BoardCard; job: BoardCardJob };
+
+function ActiveJob({ card, job }: ActiveJobProps) {
   const todos = card.todos || [];
   const verb = card.activeVerb || '';
   // A queued/delivered dispatch reads as "running" on the job long before a
@@ -1255,7 +1388,9 @@ function ActiveJob({ card, job }) {
 }
 
 // DoneBox — every non-ship job complete; ready to hand off to Shipping.
-function DoneBox({ jobs }) {
+type DoneBoxProps = { jobs: BoardCardJob[] };
+
+function DoneBox({ jobs }: DoneBoxProps) {
   const total = jobs.length;
   return (
     <div className="mk-pl-job is-done">
@@ -1270,7 +1405,12 @@ function DoneBox({ jobs }) {
 // AbortedBox — the chain is wedged on one or more Stopped (cancelled)
 // jobs. Each aborted job gets a Re-run control that resets it to pending
 // and re-dispatches it. Ship stays disabled until every job is complete.
-function AbortedBox({ jobs, onRerunJob }) {
+type AbortedBoxProps = {
+  jobs: BoardCardJob[];
+  onRerunJob?: (seq: number) => void;
+};
+
+function AbortedBox({ jobs, onRerunJob }: AbortedBoxProps) {
   const cancelled = jobs.filter(j => j.status === 'cancelled');
   return (
     <div className="mk-pl-job is-aborted">
@@ -1301,7 +1441,12 @@ function AbortedBox({ jobs, onRerunJob }) {
 
 // QuestionPanel — the open question on the current job. Auto halts until
 // it's answered; clicking opens the shared QuestionModal.
-function QuestionPanel({ question, onOpenQuestion }) {
+type QuestionPanelProps = {
+  question: BoardCardQuestion;
+  onOpenQuestion?: (id: number) => void;
+};
+
+function QuestionPanel({ question, onOpenQuestion }: QuestionPanelProps) {
   return (
     <button
       type="button"
@@ -1343,7 +1488,20 @@ const STANDALONE_OPTIONS = ['plan_large', 'scope', 'research'];
 // divider, a set of standalone rows (Large Plan / Scope / Research) are each
 // mutually exclusive with the four toggles and with each other. The issue
 // card sits dimmed under the scrim.
-function ProcessMenu({ dimmedHasProcess, jobs, onPick, onPickAuto, onCancel }) {
+// StageFlags is the on/off state of the five segmented stage toggles,
+// keyed by stage slug. Indexed by plain strings (SEG_ORDER / mode), so a
+// string-keyed Record rather than a fixed-key shape.
+type StageFlags = Record<string, boolean>;
+
+type ProcessMenuProps = {
+  dimmedHasProcess?: boolean;
+  jobs?: BoardCardJob[];
+  onPick: (selection: ProcessSelection) => void;
+  onPickAuto: (selection: ProcessSelection) => void;
+  onCancel?: (() => void) | null;
+};
+
+function ProcessMenu({ dimmedHasProcess, jobs, onPick, onPickAuto, onCancel }: ProcessMenuProps) {
   // Lazy initialiser: on Edit Process pre-fill from the card's existing job
   // modes (a standalone option wins if present); on a fresh card default to
   // Plan + Implement + Ship on — the plan-implement-ship chain is the most
@@ -1351,8 +1509,8 @@ function ProcessMenu({ dimmedHasProcess, jobs, onPick, onPickAuto, onCancel }) {
   // no extra clicks (BACI-331).
   const existingStandalone = () =>
     STANDALONE_OPTIONS.find(slug => (jobs || []).some(j => j.mode === slug)) || null;
-  const emptyStages = () => ({ design: false, plan: false, implement: false, ship: false, shelve: false });
-  const [stages, setStages] = useState(() => {
+  const emptyStages = (): StageFlags => ({ design: false, plan: false, implement: false, ship: false, shelve: false });
+  const [stages, setStages] = useState<StageFlags>(() => {
     if (dimmedHasProcess && existingStandalone()) {
       return emptyStages();
     }
@@ -1370,14 +1528,14 @@ function ProcessMenu({ dimmedHasProcess, jobs, onPick, onPickAuto, onCancel }) {
   });
   // `standalone` is the selected standalone slug (or null when the
   // segmented chain is active).
-  const [standalone, setStandalone] = useState(() =>
+  const [standalone, setStandalone] = useState<string | null>(() =>
     dimmedHasProcess ? existingStandalone() : null
   );
 
   // toggleStage flips one segment and clears any standalone selection
   // (the two are mutually exclusive). Turning a terminal sentinel
   // (Ship / Shelve) on clears the other — at most one terminal at a time.
-  const toggleStage = (mode) => {
+  const toggleStage = (mode: string) => {
     setStandalone(null);
     setStages(s => {
       const next = { ...s, [mode]: !s[mode] };
@@ -1392,7 +1550,7 @@ function ProcessMenu({ dimmedHasProcess, jobs, onPick, onPickAuto, onCancel }) {
   // selectStandalone toggles a standalone row; turning one on clears all
   // segments and supersedes any other standalone, turning the active
   // one off leaves the segbar empty.
-  const selectStandalone = (slug) => {
+  const selectStandalone = (slug: string) => {
     setStandalone(cur => {
       const next = cur === slug ? null : slug;
       if (next) setStages(emptyStages());
@@ -1411,7 +1569,7 @@ function ProcessMenu({ dimmedHasProcess, jobs, onPick, onPickAuto, onCancel }) {
 
   // A connector lights only when BOTH flanking segments are on, so a gap
   // (e.g. Plan skipped between Design and Implement) reads honestly.
-  const segConnActive = (i) => stages[SEG_ORDER[i]] && stages[SEG_ORDER[i + 1]];
+  const segConnActive = (i: number) => stages[SEG_ORDER[i]] && stages[SEG_ORDER[i + 1]];
 
   return (
     <div className="mk-pl-procmenu">

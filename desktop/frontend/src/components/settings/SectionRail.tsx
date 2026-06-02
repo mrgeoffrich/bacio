@@ -1,5 +1,3 @@
-import React from 'react';
-
 // BACI-248: vertical three-entry rail for the sectioned Settings page.
 // Same active/hover treatment as the .mk-segmented family the rest of
 // the app uses for two/three-choice controls, stacked into a column
@@ -11,7 +9,23 @@ import React from 'react';
 // `activeId` is the section currently mounted in the main pane;
 // onSelect fires when the user clicks an entry.
 
-export default function SectionRail({ sections, activeId, onSelect }) {
+type Section<Id extends string> = {
+  id: Id;
+  label: string;
+  hint?: string;
+};
+
+type SectionRailProps<Id extends string> = {
+  sections: readonly Section<Id>[];
+  activeId: Id;
+  onSelect: (id: Id) => void;
+};
+
+export default function SectionRail<Id extends string>({
+  sections,
+  activeId,
+  onSelect,
+}: SectionRailProps<Id>) {
   return (
     <nav className="mk-settings-rail" aria-label="Settings sections">
       {sections.map(s => {

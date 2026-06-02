@@ -1,6 +1,8 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import type { FormEvent } from 'react';
 import Modal from './Modal';
 import * as api from '../api';
+import type { FeatureSummary, BoardCard } from '../api';
 
 // IssueComposer (BACI-166) — the "+ from prompt" modal launched from the
 // Topbar's `+` button. The user types a one-line idea (and optionally a
@@ -21,18 +23,25 @@ import * as api from '../api';
 //   - onCreated(newCard): fires on a successful create — App.jsx
 //     prepends the optimistic card, opens IssueWorkspace, and bumps the
 //     refresh poll. The composer itself is unaware of the routing.
-export default function IssueComposer({ open, onClose, repoPrefix, onCreated }) {
+type IssueComposerProps = {
+  open: boolean;
+  onClose: () => void;
+  repoPrefix: string;
+  onCreated: (newCard: BoardCard) => void;
+};
+
+export default function IssueComposer({ open, onClose, repoPrefix, onCreated }: IssueComposerProps) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [inFlight, setInFlight] = useState(false);
   const [error, setError] = useState('');
-  const descriptionRef = useRef(null);
+  const descriptionRef = useRef<HTMLTextAreaElement>(null);
   // Phase 4: features are mandatory, so the composer offers a feature
   // picker. `features` is the repo's feature list; `featureSlug` is the
   // current selection, pre-seeded to the repo default. An empty slug
   // still defers to the store's default-feature resolution, so a repo
   // with no features / no default stays creatable.
-  const [features, setFeatures] = useState([]);
+  const [features, setFeatures] = useState<FeatureSummary[]>([]);
   const [featureSlug, setFeatureSlug] = useState('');
 
   // Autofocus the description on open — title is optional per the
@@ -77,7 +86,7 @@ export default function IssueComposer({ open, onClose, repoPrefix, onCreated }) 
     onClose?.();
   }, [inFlight, onClose]);
 
-  const submit = useCallback(async (e) => {
+  const submit = useCallback(async (e?: FormEvent) => {
     e?.preventDefault?.();
     const trimmedDesc = description.trim();
     if (!trimmedDesc) return;

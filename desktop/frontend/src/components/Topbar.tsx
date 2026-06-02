@@ -7,6 +7,8 @@ import NotificationBell from './NotificationBell';
 import ShippedPopover from './ShippedPopover';
 import { WEB_MODE } from '../env';
 import { viewPath, viewFromPath } from '../lib/routes';
+import type { Board, LeaderStatusDTO, AddRepositoryPayload } from '../api';
+import type { ShippedScope } from './shippedScope.ts';
 
 // NAV is the ordered top-nav. Exported so App can map the digit
 // hotkeys onto the same views in the same order. As of BACI-50 the
@@ -25,14 +27,39 @@ export const NAV = [
 // formatSyncTime renders an ISO timestamp as a short local string for
 // the sync badge's hover tooltip. Falls back to the raw string if the
 // date can't be parsed.
-function formatSyncTime(iso) {
+function formatSyncTime(iso: string) {
   if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString();
 }
 
-export default function Topbar({ boards, activeBoard, onPickBoard, onAddRepository, onBeforeNavigate, onOpenSettings, onOpenSync, leaderState, agentCounts, notifUnreadCount, onNotifCountChange, onOpenNotificationIssue, shippedCount, shippedScope, onShippedScopeChange, timezone, flyingShipKey, shipFlashing, onShipFlightDone, onOpenIssue }) {
+type AgentCounts = { available: number; busy: number };
+
+type TopbarProps = {
+  boards: Board[];
+  activeBoard: string;
+  onPickBoard: (prefix: string) => void;
+  onAddRepository: (payload?: AddRepositoryPayload) => Promise<Board | undefined>;
+  onBeforeNavigate?: () => void;
+  onOpenSettings: () => void;
+  onOpenSync: () => void;
+  leaderState: LeaderStatusDTO;
+  agentCounts: AgentCounts;
+  notifUnreadCount: number;
+  onNotifCountChange: (count: number) => void;
+  onOpenNotificationIssue: (prefix: string, key: string) => void;
+  shippedCount: number | null;
+  shippedScope: ShippedScope;
+  onShippedScopeChange: (next: ShippedScope) => void;
+  timezone: string;
+  flyingShipKey: string | null;
+  shipFlashing: boolean;
+  onShipFlightDone: () => void;
+  onOpenIssue: (key: string) => void;
+};
+
+export default function Topbar({ boards, activeBoard, onPickBoard, onAddRepository, onBeforeNavigate, onOpenSettings, onOpenSync, leaderState, agentCounts, notifUnreadCount, onNotifCountChange, onOpenNotificationIssue, shippedCount, shippedScope, onShippedScopeChange, timezone, flyingShipKey, shipFlashing, onShipFlightDone, onOpenIssue }: TopbarProps) {
   // BACI-203: the active view is derived from the URL, not a prop.
   // useLocation re-renders on every navigation so the segmented
   // button's `is-active` class stays in lockstep. The breadcrumb

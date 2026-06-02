@@ -1,4 +1,9 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
+
+type CommentComposerProps = {
+  defaultAuthor?: string;
+  onSubmit: (author: string, body: string) => void | Promise<void>;
+};
 
 // CommentComposer is the inline write surface for the workspace's
 // Activity section. Author defaults to whatever the parent passes (empty
@@ -6,7 +11,7 @@ import React, { useState } from 'react';
 // accepts multi-line markdown that round-trips through the same path
 // the legacy edit modal used. Stays available even on taken / waiting
 // issues — humans leaving notes for the in-flight agent is a real flow.
-export default function CommentComposer({ defaultAuthor = '', onSubmit }) {
+export default function CommentComposer({ defaultAuthor = '', onSubmit }: CommentComposerProps) {
   const [author, setAuthor] = useState(defaultAuthor);
   const [body, setBody] = useState('');
   const [sending, setSending] = useState(false);

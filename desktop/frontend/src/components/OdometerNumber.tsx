@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { decideOdometerAction, digitAt } from '../lib/odometer';
 
 // OdometerNumber (BACI-240) is the Pipeline Shipping-column Shipped
@@ -35,11 +35,16 @@ const DEFAULT_MAX_DIGITS = 3;
 
 // easeOutCubic — the brief calls for a "tasteful default". Cubic-out
 // is the standard pick for short UI tweens (fast start, gentle stop).
-function easeOutCubic(t) {
+function easeOutCubic(t: number): number {
   return 1 - Math.pow(1 - t, 3);
 }
 
-export default function OdometerNumber({ value, maxDigits = DEFAULT_MAX_DIGITS }) {
+type OdometerNumberProps = {
+  value: number;
+  maxDigits?: number;
+};
+
+export default function OdometerNumber({ value, maxDigits = DEFAULT_MAX_DIGITS }: OdometerNumberProps) {
   // displayValue is the integer the digit columns derive from. Starts
   // at the prop on first mount (snap), then either snaps or tweens
   // on each prop change.
@@ -49,11 +54,11 @@ export default function OdometerNumber({ value, maxDigits = DEFAULT_MAX_DIGITS }
   // Track the most recently-seen prop value across renders so the
   // effect can diff old vs new without re-firing on every parent
   // re-render that didn't actually change `value`.
-  const prevValueRef = useRef(null);
+  const prevValueRef = useRef<number | null>(null);
   // Active RAF handle so we can cancel a mid-flight tween if a new
   // value arrives before it lands (the brief's "rapid re-renders
   // stomp on displayValue" failure mode).
-  const rafRef = useRef(null);
+  const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
     const prev = prevValueRef.current;
@@ -83,7 +88,7 @@ export default function OdometerNumber({ value, maxDigits = DEFAULT_MAX_DIGITS }
       : Date.now();
     const from = action.from;
     const to = action.to;
-    const tick = (now) => {
+    const tick = (now: number) => {
       const elapsed = now - startedAt;
       const t = Math.min(1, elapsed / ROLL_DURATION_MS);
       const eased = easeOutCubic(t);

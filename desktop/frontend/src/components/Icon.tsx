@@ -1,5 +1,5 @@
-import React from 'react';
 import { Search, Plus, Columns3, GitBranch, Settings, X, Zap, Lock, MessageSquare, AlertTriangle, Minimize2, Maximize2, SkipForward, Pin, ChevronsDownUp, ChevronsUpDown, RefreshCw, FileText, GitPullRequest, Crown, Trash2, Bell, Check } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 
 // Glyphs come from lucide-react; the UI references them by short name
 // via <Icon name="..." />. The wrapper span (.mk-icon) sizes them, so the SVG's
@@ -60,9 +60,15 @@ const ICONS = {
   // BACI-287: notification-bell glyph on the topbar — opens the global
   // agent→user notification list, with an unread-count badge.
   bell: Bell,
+} satisfies Record<string, LucideIcon>;
+
+export type IconName = keyof typeof ICONS;
+
+type IconProps = {
+  name: IconName;
 };
 
-export default function Icon({ name }) {
+export default function Icon({ name }: IconProps) {
   const Glyph = ICONS[name];
   return (
     <span className="mk-icon" aria-hidden="true">

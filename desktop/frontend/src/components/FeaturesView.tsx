@@ -1,8 +1,15 @@
-import React, { useMemo, useState, useEffect, lazy, Suspense } from 'react';
+import { useMemo, useState, useEffect, lazy, Suspense } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { EyeOff, Search, X } from 'lucide-react';
 import { reportError } from '../errors';
 import * as api from '../api';
+import type {
+  FeatureSummary,
+  FeatureDetail,
+  FeatureLinkedIssue,
+  FeatureLinkedDoc,
+  FeatureCommentDTO,
+} from '../api';
 import MarkdownView from '../lib/markdownView';
 import CommentComposer from './issue/CommentComposer';
 import InlineDescriptionEditor from './issue/InlineDescriptionEditor';
@@ -77,18 +84,18 @@ const FILTERS = [
 // stateLabelFor maps a feature state string to the visible label,
 // falling back to the raw value so a forward-compat new state still
 // renders something. Mirrors stateLabel() for issue states.
-function stateLabelFor(state) {
+function stateLabelFor(state: string): string {
   const opt = FEATURE_STATE_OPTIONS.find((o) => o.id === state);
   return opt ? opt.label : state || 'Active';
 }
 
 // Short date for the feature-list rows and detail metadata line.
-function shortDate(iso) {
+function shortDate(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
 
 // relTime renders a coarse "time since" for the list-row updated stamp.
-function relTime(iso) {
+function relTime(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
   if (ms < 0) return 'in the future';
   const m = Math.floor(ms / 60_000);
@@ -103,7 +110,7 @@ function relTime(iso) {
 
 // commentTimestamp formats a feature comment's createdAt for display
 // next to its author — matches the issue drawer's comment metadata.
-function commentTimestamp(iso) {
+function commentTimestamp(iso: string): string {
   try {
     return new Date(iso).toLocaleString();
   } catch {
@@ -115,14 +122,15 @@ function commentTimestamp(iso) {
 // present in the URL. Used to cover states (notably `cancelled`) the
 // live data doesn't have so the filter strip can be exercised. Remove
 // together with the showMock branch before merging.
-function mockFeatures() {
-  const ago = (d) => new Date(Date.now() - d * 86_400_000).toISOString();
+function mockFeatures(): FeatureSummary[] {
+  const ago = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString();
   return [
     {
       slug: 'mock-cancelled-spike',
       title: 'Spike on alternate sync transport (parked)',
       emoji: '🧪',
       state: 'cancelled',
+      branchName: '',
       updatedAt: ago(12),
       hiddenOnBoard: false,
     },
@@ -131,6 +139,7 @@ function mockFeatures() {
       title: 'Features view redesign + state filter',
       emoji: '🎨',
       state: 'active',
+      branchName: '',
       updatedAt: ago(0),
       hiddenOnBoard: false,
     },
@@ -139,6 +148,7 @@ function mockFeatures() {
       title: 'Internal-only debug dashboard',
       emoji: '🛠',
       state: 'active',
+      branchName: '',
       updatedAt: ago(3),
       hiddenOnBoard: true,
     },
@@ -158,7 +168,12 @@ function mockFeatures() {
 // (App.jsx) can refresh the cached board cards — flipping the toggle
 // changes which cards ship over the wire, and the App-owned `cards`
 // state would otherwise show stale entries until the 10s poll.
-export default function FeaturesView({ activeBoard, onChangeHidden }) {
+type FeaturesViewProps = {
+  activeBoard: string;
+  onChangeHidden: () => void;
+};
+
+export default function FeaturesView({ activeBoard, onChangeHidden }: FeaturesViewProps) {
   // BACI-203: the selected slug is mirrored to/from the URL via
   // useParams + navigate. Click handlers in the master pane call
   // navigate(featurePath(slug)); the URL is the source of truth so
@@ -167,9 +182,9 @@ export default function FeaturesView({ activeBoard, onChangeHidden }) {
   // effects stay unchanged.
   const navigate = useNavigate();
   const { slug: slugParam } = useParams();
-  const [features, setFeatures] = useState([]);
-  const [selected, setSelected] = useState(slugParam ?? null); // slug
-  const [detail, setDetail] = useState(null);
+  const [features, setFeatures] = useState<FeatureSummary[]>([]);
+  const [selected, setSelected] = useState<string | null>(slugParam ?? null); // slug
+  const [detail, setDetail] = useState<FeatureDetail | null>(null);
   const [loading, setLoading] = useState(false);
   // BACI-199 filter strip: which state bucket the list is restricted
   // to. BACI-242 made `active` the default so a fresh visit shows the
@@ -240,6 +255,7 @@ export default function FeaturesView({ activeBoard, onChangeHidden }) {
           description:
             'This is a mock feature injected by `?mock=1` so the filter strip can be tested against rows the live DB doesn\'t carry. The detail pane is hand-rolled — clicking the State or Show-on-board toggles will fail silently against the backend.',
           emoji: m.emoji,
+          branchName: '',
           state: m.state,
           stateManual: false,
           collectHandoffs: true,
@@ -247,6 +263,7 @@ export default function FeaturesView({ activeBoard, onChangeHidden }) {
           updatedAt: m.updatedAt,
           issues: [],
           comments: [],
+          documents: [],
           hiddenOnBoard: m.hiddenOnBoard,
         });
         setLoading(false);
@@ -274,7 +291,12 @@ export default function FeaturesView({ activeBoard, onChangeHidden }) {
   // Per-state counts power the filter-chip badges so a quick glance
   // shows how the population breaks down.
   const counts = useMemo(() => {
-    const acc = { all: allFeatures.length, active: 0, done: 0, cancelled: 0 };
+    const acc: Record<string, number> = {
+      all: allFeatures.length,
+      active: 0,
+      done: 0,
+      cancelled: 0,
+    };
     for (const f of allFeatures) {
       const s = f.state || 'active';
       if (acc[s] !== undefined) acc[s] += 1;
@@ -413,7 +435,13 @@ export default function FeaturesView({ activeBoard, onChangeHidden }) {
 // with the emoji + title on the top line and slug + state + relative
 // updated time on the meta line. Replaces the two-line slug-then-title
 // layout which wrapped awkwardly at narrow widths.
-function FeatureRow({ feature, isActive, onSelect }) {
+type FeatureRowProps = {
+  feature: FeatureSummary;
+  isActive: boolean;
+  onSelect: () => void;
+};
+
+function FeatureRow({ feature, isActive, onSelect }: FeatureRowProps) {
   return (
     <button
       type="button"
@@ -478,14 +506,22 @@ function FeatureRow({ feature, isActive, onSelect }) {
 // with directed `blocks` edges). The segmented control above the
 // title row flips between them; the toggle is a local useState so
 // switching back to Overview is instant and never refetches.
+type FeatureDetailPaneProps = {
+  activeBoard: string;
+  detail: FeatureDetail;
+  onChangeHidden: () => void;
+  onDetailChange: (detail: FeatureDetail) => void;
+  onFeaturesChange: (features: FeatureSummary[]) => void;
+};
+
 function FeatureDetailPane({
   activeBoard,
   detail,
   onChangeHidden,
   onDetailChange,
   onFeaturesChange,
-}) {
-  const [viewMode, setViewMode] = useState('overview');
+}: FeatureDetailPaneProps) {
+  const [viewMode, setViewMode] = useState<string>('overview');
   return (
     <div className="mk-features-detail">
       <div
@@ -511,7 +547,7 @@ function FeatureDetailPane({
       <div className="mk-features-title-row">
         <FeatureEmojiPicker
           value={detail.emoji || ''}
-          onSelect={async (next) => {
+          onSelect={async (next: string) => {
             try {
               const updated = await api.setFeatureEmoji(
                 activeBoard,
@@ -562,13 +598,21 @@ function FeatureDetailPane({
 // Graph tab can swap it out without dragging this block around.
 // Extracted with no behaviour change; every onClick / onSubmit
 // handler is identical to the pre-BACI-236 inline form.
+type FeatureOverviewSectionsProps = {
+  activeBoard: string;
+  detail: FeatureDetail;
+  onChangeHidden: () => void;
+  onDetailChange: (detail: FeatureDetail) => void;
+  onFeaturesChange: (features: FeatureSummary[]) => void;
+};
+
 function FeatureOverviewSections({
   activeBoard,
   detail,
   onChangeHidden,
   onDetailChange,
   onFeaturesChange,
-}) {
+}: FeatureOverviewSectionsProps) {
   return (
     <>
       <section className="mk-features-properties">
@@ -786,7 +830,7 @@ function FeatureOverviewSections({
       <InlineDescriptionEditor
         description={detail.description}
         readOnly={false}
-        onSave={async (body) => {
+        onSave={async (body: string) => {
           // Mirror App.saveDescription: report failures and re-throw so the
           // editor stays in edit mode (and keeps the buffer) on error.
           try {
@@ -813,7 +857,7 @@ function FeatureOverviewSections({
           </p>
         ) : (
           <ul className="mk-features-issues">
-            {detail.issues.map((iss) => (
+            {detail.issues.map((iss: FeatureLinkedIssue) => (
               <li key={iss.key}>
                 <Link
                   to={issuePath(activeBoard, iss.key)}
@@ -852,12 +896,19 @@ function FeatureOverviewSections({
 // blocks the round-trip when the input is malformed, so the user
 // sees an inline error before the server's identical rejection.
 // Parallel to the Show-on-board and State rows above it.
+type FeatureBranchEditorProps = {
+  activeBoard: string;
+  detail: FeatureDetail;
+  onDetailChange: (detail: FeatureDetail) => void;
+  onFeaturesChange: (features: FeatureSummary[]) => void;
+};
+
 function FeatureBranchEditor({
   activeBoard,
   detail,
   onDetailChange,
   onFeaturesChange,
-}) {
+}: FeatureBranchEditorProps) {
   // Local edit buffer — the user can type without firing a save on
   // every keystroke. Resets when the upstream detail.branchName
   // changes (e.g. another tab switched away and back).
@@ -898,7 +949,13 @@ function FeatureBranchEditor({
         // non-fatal — next selection refresh picks it up.
       }
     } catch (err) {
-      const message = err?.message || String(err);
+      const rawMessage =
+        err instanceof Error
+          ? err.message
+          : typeof err === 'object' && err !== null && 'message' in err
+            ? String((err as { message: unknown }).message)
+            : undefined;
+      const message = rawMessage || String(err);
       // Surface store-side validation messages inline; route the rest
       // through the global error toast (network blip, etc).
       if (/^branch_name/.test(message)) {
@@ -994,7 +1051,12 @@ function FeatureBranchEditor({
 // the section is present-as-empty and doesn't pop in when the first doc
 // lands. Uses .mk-linked-doc + .mk-attachment-* from app.css /
 // desktop.css so no new CSS is needed.
-function FeatureLinkedDocsSection({ activeBoard, documents }) {
+type FeatureLinkedDocsSectionProps = {
+  activeBoard: string;
+  documents: FeatureLinkedDoc[];
+};
+
+function FeatureLinkedDocsSection({ activeBoard, documents }: FeatureLinkedDocsSectionProps) {
   return (
     <section className="mk-features-section">
       <div className="mk-features-label">Documents · {documents.length}</div>
@@ -1002,7 +1064,7 @@ function FeatureLinkedDocsSection({ activeBoard, documents }) {
         <p className="mk-features-text mk-meta-empty">No documents linked.</p>
       ) : (
         <div className="mk-linked-doc-list">
-          {documents.map((d) => (
+          {documents.map((d: FeatureLinkedDoc) => (
             <div key={d.filename} className="mk-linked-doc">
               <div className="mk-linked-doc-head">
                 <span className="mk-attachment-badge">{d.type || 'doc'}</span>
@@ -1028,9 +1090,15 @@ function FeatureLinkedDocsSection({ activeBoard, documents }) {
 // inline composer. Reuses the same MarkdownView + CommentComposer used
 // by the issue drawer so the markdown rendering rule (`<MarkdownView>`
 // is the canonical reader, never `react-markdown` directly) holds.
-function FeatureCommentsSection({ repoPrefix, detail, onChange }) {
+type FeatureCommentsSectionProps = {
+  repoPrefix: string;
+  detail: FeatureDetail;
+  onChange: (detail: FeatureDetail) => void;
+};
+
+function FeatureCommentsSection({ repoPrefix, detail, onChange }: FeatureCommentsSectionProps) {
   const comments = detail.comments ?? [];
-  const onSubmit = async (author, body) => {
+  const onSubmit = async (author: string, body: string) => {
     try {
       const updated = await api.addFeatureComment(
         repoPrefix,
@@ -1043,7 +1111,7 @@ function FeatureCommentsSection({ repoPrefix, detail, onChange }) {
       reportError(err, { headline: "Couldn't add comment" });
     }
   };
-  const onDelete = async (uuid) => {
+  const onDelete = async (uuid: string) => {
     try {
       const updated = await api.deleteFeatureComment(
         repoPrefix,
@@ -1067,7 +1135,7 @@ function FeatureCommentsSection({ repoPrefix, detail, onChange }) {
         // don't carry eval / mode / agent metadata, so no eval pill or
         // footer here — just author + timestamp + body + delete.
         <ul className="mk-timeline">
-          {comments.map((c) => (
+          {comments.map((c: FeatureCommentDTO) => (
             <li key={c.uuid} className="mk-tl-item">
               <span className="mk-tl-dot" />
               <div className="mk-tl-text">

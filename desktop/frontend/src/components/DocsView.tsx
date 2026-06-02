@@ -1,11 +1,13 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { reportError } from '../errors';
 import * as api from '../api';
+import type { DocSummary } from '../api';
 import DocsFacetRail from './DocsFacetRail';
 import DocsList from './DocsList';
 import DocsViewer from './DocsViewer';
 import { filterDocs, countFacets } from '../lib/docsFilter';
+import type { DocsQuery } from '../lib/docsFilter';
 import {
   readSort, persistSort,
   readSidebarCollapsed, persistSidebarCollapsed,
@@ -44,12 +46,17 @@ import { documentPath, viewPath } from '../lib/routes';
 // while collapsed since the list toolbar is no longer mounted. The
 // persisted preference key (`sidebarCollapsed`) is unchanged for
 // back-compat — it now means "both side panels collapsed".
-export default function DocsView({ activeBoard, onOpenIssue }) {
+type DocsViewProps = {
+  activeBoard: string;
+  onOpenIssue: (key: string) => void;
+};
+
+export default function DocsView({ activeBoard, onOpenIssue }: DocsViewProps) {
   const navigate = useNavigate();
   const { slug: slugParam } = useParams();
   const decodedSlug = slugParam ? decodeURIComponent(slugParam) : null;
-  const [docs, setDocs] = useState([]);
-  const [selected, setSelected] = useState(decodedSlug); // filename
+  const [docs, setDocs] = useState<DocSummary[]>([]);
+  const [selected, setSelected] = useState<string | null>(decodedSlug); // filename
   const [content, setContent] = useState('');      // live editor buffer
   const [savedContent, setSavedContent] = useState(''); // last persisted body
   const [loading, setLoading] = useState(false);
@@ -61,7 +68,7 @@ export default function DocsView({ activeBoard, onOpenIssue }) {
 
   // Query bag — Type/Links/Status facets, search, sort. Mirrors the
   // DocsQuery shape in lib/docsFilter.ts.
-  const [query, setQuery] = useState(() => ({
+  const [query, setQuery] = useState<DocsQuery>(() => ({
     search: '',
     type: '',
     links: 'all',
@@ -75,7 +82,7 @@ export default function DocsView({ activeBoard, onOpenIssue }) {
   // the first paint already reflects the user's saved preference;
   // writes go through setSidebarCollapsedPersisted below.
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
-  const setSidebarCollapsedPersisted = useCallback((v) => {
+  const setSidebarCollapsedPersisted = useCallback((v: boolean) => {
     setSidebarCollapsed(v);
     persistSidebarCollapsed(v);
   }, []);
@@ -193,7 +200,7 @@ export default function DocsView({ activeBoard, onOpenIssue }) {
 
   // updateQuery wraps the setter so persistence side-effects fire for
   // the fields DocsPersistence covers, and the rest are pure state.
-  const updateQuery = useCallback((patch) => {
+  const updateQuery = useCallback((patch: Partial<DocsQuery>) => {
     setQuery((q) => {
       const next = { ...q, ...patch };
       if ('sort' in patch) persistSort(activeBoard, next.sort);
@@ -205,7 +212,7 @@ export default function DocsView({ activeBoard, onOpenIssue }) {
   // The URL change also feeds back into the decodedSlug effect to keep
   // selected in sync without a double-setState. BACI-285: the doc routes
   // are scoped to the active repo prefix.
-  const onSelectDoc = useCallback((filename) => {
+  const onSelectDoc = useCallback((filename: string) => {
     navigate(filename ? documentPath(activeBoard, filename) : viewPath(activeBoard, 'docs'));
   }, [navigate, activeBoard]);
 

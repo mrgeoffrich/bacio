@@ -1,4 +1,4 @@
-import React from 'react';
+import type { Board } from '../api';
 
 // RepoNotFound (BACI-285) is the hard-404 screen for a URL whose first
 // segment isn't a known repo prefix — e.g. a stale `/ui/ZZZZ/pipeline`
@@ -11,7 +11,13 @@ import React from 'react';
 //
 // Reuses the existing empty-state styling (`mk-app-state` /
 // `mk-features-empty` idiom) so no new CSS is needed.
-export default function RepoNotFound({ prefix, boards, onPickBoard }) {
+type RepoNotFoundProps = {
+  prefix: string;
+  boards: Board[];
+  onPickBoard: (prefix: string) => void;
+};
+
+export default function RepoNotFound({ prefix, boards, onPickBoard }: RepoNotFoundProps) {
   return (
     <div className="mk-app-state">
       <div className="mk-features-empty" style={{ flexDirection: 'column', gap: '12px' }}>
@@ -24,7 +30,7 @@ export default function RepoNotFound({ prefix, boards, onPickBoard }) {
         </div>
         {boards.length > 0 && (
           <div className="mk-repo-picker-list" style={{ maxWidth: '320px', width: '100%' }}>
-            {boards.map(b => (
+            {boards.map((b) => (
               <button
                 key={b.prefix}
                 className="mk-repo-picker-item"

@@ -1,8 +1,8 @@
-import React from 'react';
 import { Link } from 'react-router';
 import { documentPath } from '../../lib/routes';
+import type { LinkedDocDTO } from '../../api';
 
-function formatBytes(n) {
+function formatBytes(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return '0 B';
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
@@ -32,9 +32,14 @@ function formatBytes(n) {
 // as the issue's plan (the BACI-87 confusion). So: surface "(issue +
 // feature)" when both, "(via feature/<slug>)" when feature-only, and
 // nothing when it's the issue's own link.
-export default function LinkedDocPanel({ doc, activeBoard }) {
+type LinkedDocPanelProps = {
+  doc: LinkedDocDTO;
+  activeBoard: string;
+};
+
+export default function LinkedDocPanel({ doc, activeBoard }: LinkedDocPanelProps) {
   const via = doc.linkedVia || [];
-  const featureVia = via.find(v => v.startsWith('feature/'));
+  const featureVia = via.find((v) => v.startsWith('feature/'));
   const viaLabel = via.includes('issue')
     ? (featureVia ? '(issue + feature)' : '')
     : (featureVia ? `(via ${featureVia})` : '');

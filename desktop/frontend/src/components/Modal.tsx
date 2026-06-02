@@ -1,6 +1,15 @@
 import React from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
 
+type ModalProps = {
+  open: boolean;
+  onClose?: () => void;
+  title: React.ReactNode;
+  variant?: 'error';
+  preventClickOutsideClose?: boolean;
+  children?: React.ReactNode;
+};
+
 // Modal wraps Radix Dialog with bacio's mk-modal* classes. Variants:
 //   - default: confirmation/form dialogs (z-index 100/101)
 //   - "error": red-accented, sits above other overlays (z-index 200/201)
@@ -14,7 +23,7 @@ export default function Modal({
   variant,
   preventClickOutsideClose,
   children,
-}) {
+}: ModalProps) {
   const isError = variant === 'error';
   const backdropClass = isError
     ? 'mk-modal-backdrop mk-error-modal-backdrop'
@@ -24,7 +33,7 @@ export default function Modal({
     ? 'mk-modal-title mk-error-modal-title'
     : 'mk-modal-title';
 
-  const contentProps = {
+  const contentProps: React.ComponentProps<typeof Dialog.Content> = {
     className: contentClass,
     'aria-describedby': undefined,
   };

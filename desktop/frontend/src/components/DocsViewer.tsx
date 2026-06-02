@@ -12,17 +12,41 @@
 // state (content/dirty/saving), the live editor buffer, the doc list,
 // and the archive-side reload. DocsViewer only emits callbacks.
 
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { NotionEditor } from './editor/NotionEditor';
 import { isHtmlDoc, isSvgDoc } from '../lib/docFormat';
 import { Archive, ArchiveRestore, Link2, PanelLeftOpen } from 'lucide-react';
+import type { DocSummary } from '../api';
 
-function typeLabel(t) {
+// One linked-issue / linked-feature row on a DocSummary. Derived from
+// the api seam's DocSummary so the chip rendering stays in lockstep with
+// the transport DTO (DocSummaryLink isn't separately re-exported).
+type DocSummaryLink = NonNullable<DocSummary['links']>[number];
+
+function typeLabel(t: string | undefined): string {
   return t ? t.replace(/_/g, ' ') : '';
 }
 
+type DocsViewerProps = {
+  // activeBoard is forwarded by DocsView but not consumed here; kept on
+  // the prop type so the call site stays valid.
+  activeBoard: string;
+  doc: DocSummary | null;
+  filename: string | null;
+  content: string;
+  loading: boolean;
+  saving: boolean;
+  dirty: boolean;
+  onContentChange: (content: string) => void;
+  onSave: () => void;
+  onArchiveToggle: (() => void) | null;
+  onOpenIssue: (issueKey: string) => void;
+  panelsCollapsed: boolean; // BACI-234: rail + list are hidden; render expand button
+  onExpandPanels: () => void; // re-open both side panels
+  onCancelEdit: () => void; // BACI-293: parent resets the lifted buffer to the loaded doc
+};
+
 export default function DocsViewer({
-  activeBoard,
   doc,            // DocSummary row for the selected doc (carries links + archivedAt)
   filename,
   content,
@@ -36,7 +60,7 @@ export default function DocsViewer({
   panelsCollapsed, // BACI-234: rail + list are hidden; render expand button
   onExpandPanels,  // () => void — re-open both side panels
   onCancelEdit,    // BACI-293: () => void — parent resets the lifted buffer to the loaded doc
-}) {
+}: DocsViewerProps) {
   const [view, setView] = useState('render');
   // BACI-293: a markdown doc lands read-only; Edit flips this true so the
   // editor becomes editable (toolbar/bubble menu appear) and the action
@@ -276,14 +300,20 @@ export default function DocsViewer({
 // an issue chip opens the issue workspace via App.jsx's openIssueByKey
 // (same path the kanban-blocked popover uses, BACI-114). Feature chips
 // are rendered but not clickable — there's no "feature workspace" yet.
-function DocLinkChip({ link, onOpenIssue }) {
-  if (link.issueKey) {
+type DocLinkChipProps = {
+  link: DocSummaryLink;
+  onOpenIssue: (issueKey: string) => void;
+};
+
+function DocLinkChip({ link, onOpenIssue }: DocLinkChipProps) {
+  const { issueKey } = link;
+  if (issueKey) {
     return (
       <button
         type="button"
         className="mk-docs-link-chip mk-docs-link-chip-issue"
-        onClick={() => onOpenIssue?.(link.issueKey)}
-        title={link.description ? `${link.issueKey} — ${link.description}` : link.issueKey}
+        onClick={() => onOpenIssue?.(issueKey)}
+        title={link.description ? `${issueKey} — ${link.description}` : issueKey}
       >
         <Link2 size={12} strokeWidth={2} aria-hidden="true" />
         <span>{link.issueKey}</span>

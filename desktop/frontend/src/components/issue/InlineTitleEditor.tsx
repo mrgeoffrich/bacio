@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 // InlineTitleEditor renders the issue title as a click-to-edit field in
 // the workspace header (BACI-292). Read mode is the same <h1> the header
@@ -10,7 +10,13 @@ import React, { useEffect, useRef, useState } from 'react';
 //
 // readOnly (taken/waiting issues) renders the plain <h1> with no
 // click-to-edit affordance — same gate the description editor uses.
-export default function InlineTitleEditor({ title, readOnly, onSave }) {
+type InlineTitleEditorProps = {
+  title: string;
+  readOnly: boolean;
+  onSave: (next: string) => void | Promise<void>;
+};
+
+export default function InlineTitleEditor({ title, readOnly, onSave }: InlineTitleEditorProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(title ?? '');
   const [saving, setSaving] = useState(false);

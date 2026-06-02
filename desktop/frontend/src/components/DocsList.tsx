@@ -18,22 +18,22 @@
 // If a future repo hits the tens-of-thousands the rail's facets will
 // have narrowed the visible set first.
 
-import React from 'react';
 import { FileText, Link2 } from 'lucide-react';
 import { formatWhen } from '../lib/formatWhen';
+import type { Doc, DocsQuery, SortKey } from '../lib/docsFilter';
 
-const SORT_OPTIONS = [
+const SORT_OPTIONS: { id: SortKey; label: string }[] = [
   { id: 'updated', label: 'Updated' },
   { id: 'created', label: 'Created' },
   { id: 'name',    label: 'Name' },
   { id: 'size',    label: 'Size' },
 ];
 
-function typeLabel(t) {
+function typeLabel(t: string | null | undefined): string {
   return t ? t.replace(/_/g, ' ') : '';
 }
 
-function formatSize(n) {
+function formatSize(n: number | null | undefined): string {
   if (n == null) return '';
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
@@ -43,12 +43,21 @@ function formatSize(n) {
 // Snippet line truncated at ~140 chars for the row; the underlying
 // store-side snippet caps at 200, so this is a per-row display trim
 // rather than a hard truncation of the data.
-function snippetForRow(s) {
+function snippetForRow(s: string | null | undefined): string {
   if (!s) return '';
   const collapsed = s.replace(/\s+/g, ' ').trim();
   if (collapsed.length <= 140) return collapsed;
   return collapsed.slice(0, 140).trimEnd() + '…';
 }
+
+type DocsListProps = {
+  visible: Doc[];
+  hasDocs: boolean;
+  query: DocsQuery;
+  onQueryChange: (patch: Partial<DocsQuery>) => void;
+  selected: string | null;
+  onSelect: (filename: string) => void;
+};
 
 export default function DocsList({
   visible,
@@ -57,8 +66,8 @@ export default function DocsList({
   onQueryChange,
   selected,
   onSelect,
-}) {
-  const setQuery = (patch) => onQueryChange(patch);
+}: DocsListProps) {
+  const setQuery = (patch: Partial<DocsQuery>) => onQueryChange(patch);
 
   return (
     <div className="mk-docs-list-pane">
@@ -71,7 +80,7 @@ export default function DocsList({
           <select
             className="mk-docs-toolbar-sort-select"
             value={query.sort}
-            onChange={(e) => setQuery({ sort: e.target.value })}
+            onChange={(e) => setQuery({ sort: e.target.value as SortKey })}
           >
             {SORT_OPTIONS.map((o) => (
               <option key={o.id} value={o.id}>{o.label}</option>
@@ -86,7 +95,7 @@ export default function DocsList({
         ) : visible.length === 0 ? (
           <div className="mk-docs-list-empty">No documents match the current filters.</div>
         ) : (
-          visible.map((d) => (
+          visible.map((d: Doc) => (
             <DocRow
               key={d.filename}
               doc={d}
@@ -100,7 +109,13 @@ export default function DocsList({
   );
 }
 
-function DocRow({ doc, active, onSelect }) {
+type DocRowProps = {
+  doc: Doc;
+  active: boolean;
+  onSelect: () => void;
+};
+
+function DocRow({ doc, active, onSelect }: DocRowProps) {
   const links = doc.links ?? [];
   const archived = !!doc.archivedAt;
   return (

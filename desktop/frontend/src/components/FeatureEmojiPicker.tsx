@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 
 // BACI-172: per-feature emoji picker.
@@ -38,10 +38,16 @@ const CURATED = [
 // DropdownMenu with the curated grid + a text input for free-form
 // entry. onSelect fires for both grid clicks and the input commit
 // (Enter), receiving the new emoji string (possibly empty to clear).
-export default function FeatureEmojiPicker({ value, onSelect, disabled }) {
+type FeatureEmojiPickerProps = {
+  value: string;
+  onSelect: (next: string) => void;
+  disabled?: boolean;
+};
+
+export default function FeatureEmojiPicker({ value, onSelect, disabled }: FeatureEmojiPickerProps) {
   const [draft, setDraft] = useState('');
   const [open, setOpen] = useState(false);
-  const commit = (next) => {
+  const commit = (next: string) => {
     onSelect(next);
     setDraft('');
     setOpen(false);

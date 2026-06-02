@@ -11,32 +11,50 @@
 // Visual template lifted from FeaturesView's filter chips so the
 // styling stays consistent across desktop screens.
 
-import React from 'react';
+import type React from 'react';
 import { Search, X, PanelLeftClose } from 'lucide-react';
 
-const LINK_OPTIONS = [
+import type { DocsCounts, DocsQuery, LinksFacet, StatusFacet } from '../lib/docsFilter';
+
+// Only the scalar (number) buckets are addressable as a chip count;
+// `byType` is a Record and is iterated separately, so exclude it.
+type NumericCountKey = {
+  [K in keyof DocsCounts]: DocsCounts[K] extends number ? K : never;
+}[keyof DocsCounts];
+
+type LinkOption = { id: LinksFacet; label: string; countKey: NumericCountKey };
+type StatusOption = { id: StatusFacet; label: string; countKey: NumericCountKey };
+
+const LINK_OPTIONS: LinkOption[] = [
   { id: 'all',      label: 'All',          countKey: 'total' },
   { id: 'issue',    label: 'Has issue',    countKey: 'withIssueLink' },
   { id: 'feature',  label: 'Has feature',  countKey: 'withFeatureLink' },
   { id: 'unlinked', label: 'Unlinked',     countKey: 'unlinked' },
 ];
 
-const STATUS_OPTIONS = [
+const STATUS_OPTIONS: StatusOption[] = [
   { id: 'active',   label: 'Active',   countKey: 'active' },
   { id: 'archived', label: 'Archived', countKey: 'archived' },
 ];
 
-function typeLabel(t) {
+function typeLabel(t: string): string {
   return t.replace(/_/g, ' ');
 }
 
+type DocsFacetRailProps = {
+  counts: DocsCounts;
+  query: DocsQuery;
+  onQueryChange: (patch: Partial<DocsQuery>) => void;
+  onCollapse?: () => void; // BACI-219: collapse the rail
+};
+
 export default function DocsFacetRail({
   counts,
-  query,            // { search, type, links, status, sort }
-  onQueryChange,    // (partial) => void  (merged into query)
-  onCollapse,       // () => void  (BACI-219: collapse the rail)
-}) {
-  const setQuery = (patch) => onQueryChange(patch);
+  query,
+  onQueryChange,
+  onCollapse,
+}: DocsFacetRailProps) {
+  const setQuery = (patch: Partial<DocsQuery>) => onQueryChange(patch);
 
   // Sort the type chips by descending count so the dominant buckets
   // sit at the top — matches the FeaturesView behaviour where the
@@ -125,7 +143,12 @@ export default function DocsFacetRail({
   );
 }
 
-function FacetSection({ title, children }) {
+type FacetSectionProps = {
+  title: string;
+  children: React.ReactNode;
+};
+
+function FacetSection({ title, children }: FacetSectionProps) {
   return (
     <div className="mk-docs-rail-section">
       <h4 className="mk-docs-rail-section-title">{title}</h4>
@@ -136,7 +159,14 @@ function FacetSection({ title, children }) {
   );
 }
 
-function FacetChip({ label, count, active, onClick }) {
+type FacetChipProps = {
+  label: string;
+  count: number;
+  active: boolean;
+  onClick: () => void;
+};
+
+function FacetChip({ label, count, active, onClick }: FacetChipProps) {
   return (
     <button
       type="button"

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import MarkdownView from '../../lib/markdownView';
 import { NotionEditor } from '../editor/NotionEditor';
 
@@ -27,12 +27,19 @@ import { NotionEditor } from '../editor/NotionEditor';
 // readOnly (taken/waiting issues) renders the same <MarkdownView> read view
 // with no Edit affordance — one renderer, visually consistent with the
 // unlocked read view, and no ProseMirror mount on locked issues (BACI-339).
+type InlineDescriptionEditorProps = {
+  description: string;
+  readOnly: boolean;
+  onSave: (body: string) => void | Promise<void>;
+  onEditingChange?: (editing: boolean) => void;
+};
+
 export default function InlineDescriptionEditor({
   description,
   readOnly,
   onSave,
   onEditingChange,
-}) {
+}: InlineDescriptionEditorProps) {
   // editing gates the rich editor: false → read-only <MarkdownView>, true →
   // NotionEditor with Save/Cancel. Always false for readOnly issues.
   const [editing, setEditing] = useState(false);

@@ -1,5 +1,6 @@
-import React from 'react';
 import { waitingStateLabel } from '../../lib/waitingLabels.ts';
+import type { WaitingState } from '../../api';
+import type { ClaimantDTO } from '../../../bindings/github.com/mrgeoffrich/bacio/internal/agentcards';
 
 // IssueLockBanner names the agent holding (or about to hold) the issue
 // and surfaces the BACI-51 "queued, no agent yet" affordance — the
@@ -17,7 +18,21 @@ import { waitingStateLabel } from '../../lib/waitingLabels.ts';
 // BACI-145: the inline waiting label uses the same wording as the
 // kanban card via the shared `waitingStateLabel` helper, so the two
 // surfaces stay in lockstep.
-export default function IssueLockBanner({ taken, waiting, waitingState, claimant, onCancelWaiting }) {
+type IssueLockBannerProps = {
+  taken: boolean;
+  waiting: boolean;
+  waitingState: WaitingState | null;
+  claimant: ClaimantDTO | null;
+  onCancelWaiting: () => void;
+};
+
+export default function IssueLockBanner({
+  taken,
+  waiting,
+  waitingState,
+  claimant,
+  onCancelWaiting,
+}: IssueLockBannerProps) {
   if (taken && claimant) {
     return (
       <div className="mk-workspace-lock-banner mk-pill mk-status-busy">

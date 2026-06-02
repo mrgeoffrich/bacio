@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import {
@@ -9,6 +9,26 @@ import {
   EDITABLE_JOB_MODES,
 } from '../lib/pipelineProcesses';
 import { viewPath } from '../lib/routes';
+import type { BoardCard } from '../api';
+
+// A single persisted job in the card's process chain ({sequence, mode,
+// status}), derived from the BoardCard wire type so it stays in lockstep
+// with the api seam rather than being redefined here.
+type BoardCardJob = NonNullable<BoardCard['jobs']>[number];
+
+// One pending-tail row in local editor state: a stable uid (so reorder /
+// remove survives re-renders even when modes repeat) plus the job mode.
+type TailRow = { uid: string; mode: string };
+
+// The error banner surfaced on a failed Save.
+type Banner = { kind: string; text: string };
+
+type ProcessEditorProps = {
+  cards: BoardCard[];
+  activeBoard: string;
+  onSave: (key: string, stages: string[]) => Promise<void>;
+  onSaveAuto: (key: string, stages: string[]) => Promise<void>;
+};
 
 // ProcessEditor (BACI-294) — the full-screen Edit Process screen. It edits
 // an in_pipeline card's job chain as a re-orderable list, respecting work
@@ -26,7 +46,7 @@ import { viewPath } from '../lib/routes';
 // `jobs: [{sequence, mode, status}]`). A deep-link before cards have
 // loaded renders a loading state, then redirects to the Pipeline if the
 // key isn't found.
-export default function ProcessEditor({ cards, activeBoard, onSave, onSaveAuto }) {
+export default function ProcessEditor({ cards, activeBoard, onSave, onSaveAuto }: ProcessEditorProps) {
   const { key } = useParams();
   const navigate = useNavigate();
   const card = useMemo(
@@ -39,9 +59,9 @@ export default function ProcessEditor({ cards, activeBoard, onSave, onSaveAuto }
   // Locked prefix = every job that has advanced past pending; editable tail
   // = the pending jobs, seeded into local state as {uid, mode} rows so a
   // reorder/remove is stable across renders even when modes repeat.
-  const jobs = card?.jobs || [];
+  const jobs: BoardCardJob[] = card?.jobs || [];
   const locked = useMemo(() => jobs.filter((j) => j.status !== 'pending'), [jobs]);
-  const seedTail = useMemo(
+  const seedTail = useMemo<TailRow[]>(
     () =>
       jobs
         .filter((j) => j.status === 'pending')
@@ -49,14 +69,14 @@ export default function ProcessEditor({ cards, activeBoard, onSave, onSaveAuto }
     [jobs],
   );
 
-  const [tail, setTail] = useState(seedTail);
+  const [tail, setTail] = useState<TailRow[]>(seedTail);
   const [saving, setSaving] = useState(false);
-  const [banner, setBanner] = useState(null); // { kind, text }
+  const [banner, setBanner] = useState<Banner | null>(null);
   const uidRef = useRef(0);
   const nextUid = () => `add-${uidRef.current++}`;
   // Track the dragged tail row index for native HTML5 reorder.
-  const [dragIdx, setDragIdx] = useState(null);
-  const [dragOverIdx, setDragOverIdx] = useState(null);
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
 
   // The whole projected chain (locked modes + edited tail) drives the
   // client-side ship-last validation that gates Save.
@@ -77,7 +97,7 @@ export default function ProcessEditor({ cards, activeBoard, onSave, onSaveAuto }
     tail.length === seedTail.length && tail.every((t, i) => t.mode === seedTail[i]?.mode);
   const canSave = !saving && chainModes.length > 0 && !terminalNotLast && !tailUnchanged;
 
-  const moveTail = (from, to) => {
+  const moveTail = (from: number, to: number) => {
     if (to < 0 || to >= tail.length) return;
     setTail((rows) => {
       const next = rows.slice();
@@ -86,10 +106,10 @@ export default function ProcessEditor({ cards, activeBoard, onSave, onSaveAuto }
       return next;
     });
   };
-  const removeTail = (uid) => setTail((rows) => rows.filter((r) => r.uid !== uid));
-  const addJob = (mode) => setTail((rows) => [...rows, { uid: nextUid(), mode }]);
+  const removeTail = (uid: string) => setTail((rows) => rows.filter((r) => r.uid !== uid));
+  const addJob = (mode: string) => setTail((rows) => [...rows, { uid: nextUid(), mode }]);
 
-  const onDrop = (to) => {
+  const onDrop = (to: number) => {
     setDragOverIdx(null);
     if (dragIdx == null || dragIdx === to) {
       setDragIdx(null);
@@ -103,11 +123,11 @@ export default function ProcessEditor({ cards, activeBoard, onSave, onSaveAuto }
   // untouched), `saveAuto` (BACI-334) persists the tail and turns Auto on.
   // They differ only in the App callback passed, so the saving lock and the
   // error-banner lifecycle live here once.
-  const runSave = (fn) => {
-    if (!canSave) return;
+  const runSave = (fn: (key: string, stages: string[]) => Promise<void>) => {
+    if (!canSave || !key) return;
     setSaving(true);
     setBanner(null);
-    Promise.resolve(fn?.(key, tail.map((t) => t.mode)))
+    Promise.resolve(fn(key, tail.map((t) => t.mode)))
       .then(() => backToPipeline())
       .catch((err) => {
         setSaving(false);

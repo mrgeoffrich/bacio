@@ -3,6 +3,7 @@ import Modal from '../Modal';
 import Tooltip from '../Tooltip';
 import { reportError } from '../../errors';
 import * as api from '../../api';
+import type { PromptTemplateDTO } from '../../api';
 
 // BACI-248: System Settings section — the global, app-wide preferences
 // pane carved out of the old single-scroll SettingsView body. Mounted
@@ -34,14 +35,20 @@ const ON_OFF_OPTIONS = [
 // EMPTY_NEW_TEMPLATE is the seed state for the "Add template" inline form.
 // actionLabel (BACI-67) is optional — an empty string is the "no override,
 // derive from the gerund name" sentinel the backend honours.
-const EMPTY_NEW_TEMPLATE = { slug: '', name: '', body: '', actionLabel: '' };
+type NewTemplateDraft = { slug: string; name: string; body: string; actionLabel: string };
+const EMPTY_NEW_TEMPLATE: NewTemplateDraft = { slug: '', name: '', body: '', actionLabel: '' };
+
+// RenameDraft is the rename-overlay form state — `null` when closed.
+type RenameDraft = { slug: string; newSlug: string; newName: string };
 
 // ScopeChip renders the small "Client" / "Server" pill rendered next
 // to the row label inside System. Client = stored in browser
 // localStorage (theme); Server = stored in app_settings on the shared
 // SQLite store. Hint text and behaviour come from the surrounding row;
 // this chip is purely a visual delineator.
-function ScopeChip({ kind }) {
+type ScopeChipProps = { kind: 'client' | 'server' };
+
+function ScopeChip({ kind }: ScopeChipProps) {
   const label = kind === 'client' ? 'Client' : 'Server';
   return (
     <span className={`mk-settings-scope-chip mk-settings-scope-chip--${kind}`}>
@@ -49,6 +56,21 @@ function ScopeChip({ kind }) {
     </span>
   );
 }
+
+type SystemSettingsSectionProps = {
+  theme: string;
+  onChangeTheme: (theme: string) => void;
+  showArchived: boolean;
+  onChangeShowArchived: (next: boolean) => void;
+  archiveAutoEnabled: boolean;
+  archiveRetentionDays: number;
+  onChangeArchivePreferences: (autoEnabled: boolean, retentionDays: number) => void;
+  audioEnabled: boolean;
+  onChangeAudioEnabled: (next: boolean) => void;
+  timezone: string;
+  onChangeTimezone: (next: string) => void;
+  onTemplatesChanged?: () => void;
+};
 
 export default function SystemSettingsSection({
   theme,
@@ -63,7 +85,7 @@ export default function SystemSettingsSection({
   timezone,
   onChangeTimezone,
   onTemplatesChanged,
-}) {
+}: SystemSettingsSectionProps) {
   // BACI-312: the IANA zone list for the timezone picker, sourced from
   // the browser's own tz database via Intl.supportedValuesOf. Memoised —
   // the list is large (~400 zones) and never changes for a session. The
@@ -71,9 +93,16 @@ export default function SystemSettingsSection({
   // back to a tiny seed plus whatever's currently stored / detected so
   // the picker still renders something selectable.
   const timezoneOptions = useMemo(() => {
-    let zones = [];
+    let zones: string[] = [];
+    // Intl.supportedValuesOf is ES2022; the project's lib target is ES2020,
+    // so the global Intl type doesn't declare it. Narrow through a precise
+    // optional-method view rather than reaching for `any`. The try/catch
+    // (plus the optional call) covers engines that lack it entirely.
+    const intl = Intl as typeof Intl & {
+      supportedValuesOf?: (key: 'timeZone') => string[];
+    };
     try {
-      zones = Intl.supportedValuesOf('timeZone');
+      zones = intl.supportedValuesOf?.('timeZone') ?? ['UTC'];
     } catch {
       zones = ['UTC'];
     }
@@ -98,18 +127,18 @@ export default function SystemSettingsSection({
     setRetentionDraft(String(archiveRetentionDays));
   }, [archiveRetentionDays]);
 
-  const [templates, setTemplates] = useState([]);
-  const [placeholders, setPlaceholders] = useState([]);
-  const [drafts, setDrafts] = useState({});
-  const [savingSlug, setSavingSlug] = useState(null);
+  const [templates, setTemplates] = useState<PromptTemplateDTO[]>([]);
+  const [placeholders, setPlaceholders] = useState<string[]>([]);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [savingSlug, setSavingSlug] = useState<string | null>(null);
   const [bacioVer, setBacioVer] = useState('');
 
   // Add-template inline form. `null` = collapsed; an object = open.
-  const [adding, setAdding] = useState(null);
+  const [adding, setAdding] = useState<NewTemplateDraft | null>(null);
   // Rename overlay state: { slug, newSlug, newName } when open.
-  const [renaming, setRenaming] = useState(null);
+  const [renaming, setRenaming] = useState<RenameDraft | null>(null);
   // Confirm overlays.
-  const [pendingDelete, setPendingDelete] = useState(null);
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
   const [pendingRestore, setPendingRestore] = useState(false);
 
   const refreshTemplates = useCallback(async () => {
@@ -140,7 +169,7 @@ export default function SystemSettingsSection({
     if (typeof onTemplatesChanged === 'function') onTemplatesChanged();
   }, [onTemplatesChanged]);
 
-  const saveTemplate = useCallback(async (slug, body) => {
+  const saveTemplate = useCallback(async (slug: string, body: string) => {
     setSavingSlug(slug);
     try {
       const updated = await api.savePromptTemplate(slug, body);
@@ -158,7 +187,7 @@ export default function SystemSettingsSection({
   // matcher reads this column on every tick to decide whether to bind
   // another queued dispatch. 0 = unlimited; built-in ship seeds to 1
   // so merging serialises. Validation (>=0) lives in the store.
-  const saveConcurrency = useCallback(async (slug, limit) => {
+  const saveConcurrency = useCallback(async (slug: string, limit: number) => {
     setSavingSlug(slug);
     try {
       const updated = await api.savePromptConcurrency(slug, limit);
@@ -176,7 +205,7 @@ export default function SystemSettingsSection({
   // dropdowns. An empty string clears the override; the UI then derives
   // a default from the gerund display name (the validator on the Go side
   // accepts the empty value as the "no override" sentinel).
-  const saveActionLabel = useCallback(async (slug, actionLabel) => {
+  const saveActionLabel = useCallback(async (slug: string, actionLabel: string) => {
     setSavingSlug(slug);
     try {
       const updated = await api.savePromptActionLabel(slug, actionLabel);

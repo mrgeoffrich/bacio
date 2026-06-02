@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
 import Modal from '../Modal';
 import { reportError } from '../../errors';
 
@@ -18,7 +18,13 @@ import { reportError } from '../../errors';
 //   - onAttach(url): attaches the PR — the workspace's onAttachPR prop
 //     (App's attachPR → api.attachPullRequest → refreshBrief). Throws on a
 //     rejected URL; the message surfaces inline.
-export default function PrAttachModal({ open, onClose, onAttach }) {
+type PrAttachModalProps = {
+  open: boolean;
+  onClose?: () => void;
+  onAttach: (url: string) => void | Promise<void>;
+};
+
+export default function PrAttachModal({ open, onClose, onAttach }: PrAttachModalProps) {
   const [url, setUrl] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -43,7 +49,9 @@ export default function PrAttachModal({ open, onClose, onAttach }) {
       setUrl('');
       onClose?.();
     } catch (err) {
-      const msg = err?.message || 'Failed to attach pull request';
+      const msg =
+        (err instanceof Error ? err.message : '') ||
+        'Failed to attach pull request';
       setError(msg);
       // The store's URL-shape refusals (must be http/https, malformed URL)
       // stay inline so the user can fix them; surface the global modal only
@@ -119,7 +127,7 @@ export default function PrAttachModal({ open, onClose, onAttach }) {
 // stable human messages for a malformed / non-http(s) / hostless URL;
 // string-match them the same way PhantomLinkModal filters its handler's
 // typed errors.
-function isClientFacingValidation(msg) {
+function isClientFacingValidation(msg: string) {
   if (!msg) return false;
   return msg.includes('URL is required')
     || msg.includes('URL too long')

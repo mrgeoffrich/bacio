@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router';
 import { reportError } from '../errors';
 import * as api from '../api';
+import type { JobTranscriptRow } from '../api';
 import { formatWhen } from '../lib/formatWhen';
 import { transcriptPath } from '../lib/routes';
 
@@ -23,7 +24,7 @@ const MODE_OPTIONS = [
 
 // summed token total for a row's usage — input + output is the at-a-glance
 // number the list shows (cache / thinking detail lives on the full transcript).
-function totalTokens(usage) {
+function totalTokens(usage: JobTranscriptRow['usage'] | undefined): number {
   if (!usage) return 0;
   return (usage.inputTokens || 0) + (usage.outputTokens || 0);
 }
@@ -35,8 +36,12 @@ function totalTokens(usage) {
 // issue-substring filter and a job-mode <select>; each row links to the
 // deep-linkable full-transcript route. The list fetches on mount + mode change
 // and silently re-polls every 10s (the Network panel's cadence).
-export default function TranscriptListPanel({ activeBoard }) {
-  const [rows, setRows] = useState([]);
+type TranscriptListPanelProps = {
+  activeBoard: string;
+};
+
+export default function TranscriptListPanel({ activeBoard }: TranscriptListPanelProps) {
+  const [rows, setRows] = useState<JobTranscriptRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [mode, setMode] = useState(''); // server-side mode filter
   const [issueFilter, setIssueFilter] = useState(''); // client-side substring
@@ -50,7 +55,7 @@ export default function TranscriptListPanel({ activeBoard }) {
       return undefined;
     }
     let cancelled = false;
-    const load = (silent) => {
+    const load = (silent: boolean) => {
       if (!silent) setLoading(true);
       api.listJobTranscripts(activeBoard, '', mode)
         .then(list => {

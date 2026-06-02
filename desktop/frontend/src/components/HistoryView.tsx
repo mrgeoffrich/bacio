@@ -1,16 +1,21 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { reportError } from '../errors';
 import * as api from '../api';
+import type { HistoryPage } from '../api';
 import { formatWhen } from '../lib/formatWhen';
 
 const PAGE_SIZE = 50;
 
+type HistoryViewProps = {
+  activeBoard: string;
+};
+
 // HistoryView is the desktop audit-log browser — the paged mirror of the TUI's
 // History tab. It shows the repo's history newest-first, one fixed-size page
 // at a time, with Prev/Next paging; it never loads the whole log at once.
-export default function HistoryView({ activeBoard }) {
+export default function HistoryView({ activeBoard }: HistoryViewProps) {
   const [page, setPage] = useState(0);
-  const [data, setData] = useState(null); // HistoryPage
+  const [data, setData] = useState<HistoryPage | null>(null);
   const [loading, setLoading] = useState(false);
 
   const repoSelected = !!activeBoard;

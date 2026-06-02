@@ -1,5 +1,6 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Link } from 'react-router';
+import type { BoardCard, IssueBriefDTO } from '../api';
 import MarkdownView from '../lib/markdownView';
 import Icon from './Icon';
 import IssueLockBanner from './issue/IssueLockBanner';
@@ -24,6 +25,26 @@ import prLabel from '../lib/prLabel';
 // `brief === null` is the loading skeleton state — render the issue key
 // from `openIssueKey` so the head doesn't flash empty during the first
 // fetch.
+type IssueWorkspaceProps = {
+  activeBoard: string;
+  openIssueKey: string;
+  brief: IssueBriefDTO | null;
+  cards: BoardCard[];
+  onClose: () => void;
+  onSaveTitle: (title: string) => void | Promise<void>;
+  onSaveDescription: (description: string) => void | Promise<void>;
+  onAddComment: (
+    author: string,
+    body: string,
+    opts?: { eval?: boolean; transcriptEventRef?: string },
+  ) => void | Promise<void>;
+  onDeleteComment: (commentUUID: string) => void | Promise<void>;
+  onCancelWaiting: () => void;
+  onAttachPR: (url: string) => void | Promise<void>;
+  onNavigateIssue: (key: string) => void;
+  onDescEditingChange: (editing: boolean) => void;
+};
+
 export default function IssueWorkspace({
   activeBoard,
   openIssueKey,
@@ -38,7 +59,7 @@ export default function IssueWorkspace({
   onAttachPR,
   onNavigateIssue,
   onDescEditingChange,
-}) {
+}: IssueWorkspaceProps) {
   // PR attach is behind a modal (BACI-339) — the rail shows a compact
   // "+ Attach PR" button that opens it, so the URL field doesn't occupy
   // rail space unless the user wants to attach.
@@ -93,10 +114,11 @@ export default function IssueWorkspace({
   // [ / ] hotkeys for prev/next within column. esc → close is wired in
   // App.jsx so it can defer to the command palette's own esc handler.
   useEffect(() => {
-    const onKey = (e) => {
+    const onKey = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      const tag = e.target?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target?.isContentEditable) return;
+      const target = e.target instanceof HTMLElement ? e.target : null;
+      const tag = target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable) return;
       if (e.key === '[' && prevSibling) {
         e.preventDefault();
         onNavigateIssue(prevSibling.key);

@@ -1,6 +1,16 @@
 import React from 'react';
 import { reportError } from '../errors';
 
+type ErrorBoundaryProps = {
+  children: React.ReactNode;
+  headline?: string;
+  label?: string;
+};
+
+type ErrorBoundaryState = {
+  hasError: boolean;
+};
+
 // ErrorBoundary wraps a subtree (a top-level view, an overlay) so a
 // render-time throw inside it doesn't crash the whole renderer.
 // componentDidCatch forwards the error to the global bus so the
@@ -11,15 +21,15 @@ import { reportError } from '../errors';
 // Pass `headline` to customise the modal headline for the wrapped
 // subtree (e.g. "Something went wrong in the board"). Pass `label`
 // to customise the fallback heading text.
-export default class ErrorBoundary extends React.Component {
-  state = { hasError: false };
+export default class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  state: ErrorBoundaryState = { hasError: false };
 
-  static getDerivedStateFromError() {
+  static getDerivedStateFromError(): ErrorBoundaryState {
     return { hasError: true };
   }
 
-  componentDidCatch(err, info) {
-    const componentStack = (info && info.componentStack) || '';
+  componentDidCatch(err: unknown, info: React.ErrorInfo) {
+    const componentStack = info?.componentStack || '';
     reportError(err, {
       headline: this.props.headline || 'Something went wrong in this view',
       source: 'react-boundary' + (componentStack ? `:${componentStack.trim().split('\n')[0]}` : ''),

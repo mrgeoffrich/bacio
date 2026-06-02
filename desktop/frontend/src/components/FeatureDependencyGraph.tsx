@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
+import type { ComponentType } from 'react';
 import { useNavigate } from 'react-router';
 import {
   ReactFlow,
@@ -7,12 +8,22 @@ import {
   Handle,
   Position,
 } from '@xyflow/react';
+import type { Node, NodeProps, NodeTypes, NodeMouseHandler } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
 import * as api from '../api';
+import type { FeaturePlan } from '../api';
 import { reportError } from '../errors';
 import { issuePath } from '../lib/routes';
 import { computeLayout } from './featureGraphLayout';
+import type { LayoutNode } from './featureGraphLayout';
+
+// BlockerNodeData is the per-node payload computeLayout bakes into each
+// node's `data`. We derive it from LayoutNode so the renderer and the
+// layout helper stay in lockstep, and parameterise @xyflow/react's
+// Node / NodeProps generics with it.
+type BlockerNodeData = LayoutNode['data'];
+type BlockerNodeType = Node<BlockerNodeData, 'blocker'>;
 
 // FeatureDependencyGraph (BACI-236, dagre layout under BACI-243)
 // renders the feature's open + closed issues as a left-to-right
@@ -26,11 +37,19 @@ import { computeLayout } from './featureGraphLayout';
 // edge. Closed nodes render muted; open nodes that have no remaining
 // open blockers show a "Ready" badge. Clicking a node navigates to the
 // issue workspace.
-export default function FeatureDependencyGraph({ repoPrefix, slug }) {
+type FeatureDependencyGraphProps = {
+  repoPrefix: string;
+  slug: string;
+};
+
+export default function FeatureDependencyGraph({
+  repoPrefix,
+  slug,
+}: FeatureDependencyGraphProps) {
   const navigate = useNavigate();
-  const [plan, setPlan] = useState(null);
+  const [plan, setPlan] = useState<FeaturePlan | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -59,7 +78,7 @@ export default function FeatureDependencyGraph({ repoPrefix, slug }) {
     return computeLayout(plan.order ?? []);
   }, [plan]);
 
-  const onNodeClick = useCallback(
+  const onNodeClick = useCallback<NodeMouseHandler<BlockerNodeType>>(
     (_evt, node) => {
       const key = node?.data?.issueKey;
       if (!key) return;
@@ -72,7 +91,7 @@ export default function FeatureDependencyGraph({ repoPrefix, slug }) {
   // ReactFlow doesn't warn about re-registering. The map references
   // the BlockerNode component declared below this function — wrapped
   // in useMemo so it's the same object reference on every render.
-  const nodeTypes = useMemo(() => ({ blocker: BlockerNode }), []);
+  const nodeTypes = useMemo<NodeTypes>(() => ({ blocker: BlockerNode }), []);
 
   if (loading) {
     return <div className="mk-features-empty">Loading graph…</div>;
@@ -116,7 +135,7 @@ export default function FeatureDependencyGraph({ repoPrefix, slug }) {
 // states (driven by data.closed / data.ready / default-blocked) match
 // the CSS rules in app.css so the renderer stays the only source of
 // truth for the look-and-feel.
-function BlockerNode({ data }) {
+const BlockerNode: ComponentType<NodeProps<BlockerNodeType>> = ({ data }) => {
   const variant = data.closed ? 'closed' : data.ready ? 'ready' : 'blocked';
   return (
     <div className={`mk-graph-node mk-graph-node--${variant}`}>
@@ -138,4 +157,4 @@ function BlockerNode({ data }) {
       <Handle type="source" position={Position.Right} isConnectable={false} />
     </div>
   );
-}
+};

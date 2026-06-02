@@ -1,4 +1,3 @@
-import React from 'react';
 import { Circle, CircleDot, CircleCheck } from 'lucide-react';
 
 // todoGlyph maps a TodoWrite status to the leading glyph rendered in
@@ -7,7 +6,7 @@ import { Circle, CircleDot, CircleCheck } from 'lucide-react';
 // surfaces without re-learning. Shared by AgentsView (full panel) and
 // KanbanCard (inline pill expansion) so the glyph table has one
 // source of truth.
-export function todoGlyph(status) {
+export function todoGlyph(status: string) {
   switch (status) {
     case 'completed':
       return <CircleCheck strokeWidth={2} />;

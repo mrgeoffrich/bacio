@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import * as api from '../../api';
+import type { JobTranscriptRow } from '../../api';
 import { reportError } from '../../errors';
 import { formatWhen } from '../../lib/formatWhen';
 import { transcriptPath } from '../../lib/routes';
@@ -18,8 +19,13 @@ import { transcriptPath } from '../../lib/routes';
 //
 // Each row deep-links to the existing full-transcript route via
 // transcriptPath; that viewer is out of scope to modify.
-export default function IssueTranscriptList({ activeBoard, issueKey }) {
-  const [rows, setRows] = useState([]);
+type IssueTranscriptListProps = {
+  activeBoard: string;
+  issueKey: string;
+};
+
+export default function IssueTranscriptList({ activeBoard, issueKey }: IssueTranscriptListProps) {
+  const [rows, setRows] = useState<JobTranscriptRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {

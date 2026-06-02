@@ -1,11 +1,16 @@
-import React, { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
+import type {
+  AgentCard as AgentCardDTO,
+  ClaimDTO,
+  DispatchDTO,
+} from '../api';
 import QuestionModal from './QuestionModal';
 import SessionMessageButton from './SessionMessageButton';
 import { todoGlyph } from '../lib/todoGlyph';
 import * as api from '../api';
 
 // relTime renders a coarse "time since" for the last-seen line.
-function relTime(iso) {
+function relTime(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
   const m = Math.floor(ms / 60000);
   if (m < 1) return 'just now';
@@ -18,9 +23,26 @@ function relTime(iso) {
 // TEMP demo data — appended to real agents when ?mock=1 is in the URL.
 // Covers the spectrum of card states so the grid redesign can be
 // reviewed against a realistic mix. Remove before merging.
-function mockAgents() {
+function mockAgents(): AgentCardDTO[] {
   const now = Date.now();
-  const ago = (m) => new Date(now - m * 60_000).toISOString();
+  const ago = (m: number) => new Date(now - m * 60_000).toISOString();
+  // The card only reads a handful of dispatch / claim fields; these
+  // helpers fill the remaining required DTO fields with inert defaults
+  // so the literals stay readable while satisfying the domain types.
+  const dispatch = (
+    d: Pick<DispatchDTO, 'id' | 'issueKey' | 'mode' | 'status'> &
+      Partial<DispatchDTO>,
+  ): DispatchDTO => ({
+    targetAgent: '',
+    payload: '',
+    createdBy: 'mock',
+    createdAt: ago(60),
+    needsRescue: false,
+    ...d,
+  });
+  const claim = (
+    c: Pick<ClaimDTO, 'issueKey' | 'state' | 'prompt'> & Partial<ClaimDTO>,
+  ): ClaimDTO => ({ claimedAt: ago(60), ...c });
   return [
     {
       sessionId: 'mock-busy-todos',
@@ -37,17 +59,17 @@ function mockAgents() {
       bacioVersionStale: false,
       lastSeenAt: ago(0),
       claims: [
-        {
+        claim({
           issueKey: 'BACI-204',
           state: 'in_pipeline',
           prompt:
             'Plan a redesign of the Agents view to fit cards on a responsive grid.',
-        },
+        }),
       ],
       dispatches: [
-        { id: 901, issueKey: 'BACI-204', mode: 'plan', status: 'delivered' },
-        { id: 898, issueKey: 'BACI-201', mode: 'review', status: 'acked' },
-        { id: 895, issueKey: 'BACI-199', mode: 'ship', status: 'acked' },
+        dispatch({ id: 901, issueKey: 'BACI-204', mode: 'plan', status: 'delivered' }),
+        dispatch({ id: 898, issueKey: 'BACI-201', mode: 'review', status: 'acked' }),
+        dispatch({ id: 895, issueKey: 'BACI-199', mode: 'ship', status: 'acked' }),
       ],
       todos: [
         { content: 'Read AgentsView and surrounding CSS', status: 'completed' },
@@ -75,10 +97,10 @@ function mockAgents() {
       bacioVersionStale: false,
       lastSeenAt: ago(2),
       claims: [
-        { issueKey: 'BACI-187', state: 'in_pipeline', prompt: 'Pick the auth strategy.' },
+        claim({ issueKey: 'BACI-187', state: 'in_pipeline', prompt: 'Pick the auth strategy.' }),
       ],
       dispatches: [
-        { id: 884, issueKey: 'BACI-187', mode: 'design', status: 'delivered' },
+        dispatch({ id: 884, issueKey: 'BACI-187', mode: 'design', status: 'delivered' }),
       ],
       todos: [],
       todosDone: 0,
@@ -103,8 +125,8 @@ function mockAgents() {
       lastSeenAt: ago(8),
       claims: [],
       dispatches: [
-        { id: 870, issueKey: 'BACI-198', mode: 'fix_review', status: 'acked' },
-        { id: 866, issueKey: 'BACI-197', mode: 'implement', status: 'acked' },
+        dispatch({ id: 870, issueKey: 'BACI-198', mode: 'fix_review', status: 'acked' }),
+        dispatch({ id: 866, issueKey: 'BACI-197', mode: 'implement', status: 'acked' }),
       ],
       todos: [],
       todosDone: 0,
@@ -126,17 +148,17 @@ function mockAgents() {
       bacioVersionStale: true,
       lastSeenAt: ago(14),
       claims: [
-        { issueKey: 'BACI-156', state: 'in_pipeline', prompt: 'Implement the sync diff renderer.' },
+        claim({ issueKey: 'BACI-156', state: 'in_pipeline', prompt: 'Implement the sync diff renderer.' }),
       ],
       dispatches: [
-        {
+        dispatch({
           id: 842,
           issueKey: 'BACI-156',
           mode: 'implement',
           status: 'delivered',
           needsRescue: true,
-        },
-        { id: 838, issueKey: 'BACI-155', mode: 'design', status: 'acked' },
+        }),
+        dispatch({ id: 838, issueKey: 'BACI-155', mode: 'design', status: 'acked' }),
       ],
       todos: [
         { content: 'Wire the new diff API', status: 'completed' },
@@ -163,11 +185,11 @@ function mockAgents() {
       lastSeenAt: ago(1),
       claims: [],
       dispatches: [
-        { id: 904, issueKey: 'BACI-205', mode: 'scope', status: 'queued' },
-        { id: 902, issueKey: 'BACI-203', mode: 'plan', status: 'pending' },
-        { id: 900, issueKey: 'BACI-202', mode: 'ship', status: 'acked' },
-        { id: 896, issueKey: 'BACI-200', mode: 'review', status: 'acked' },
-        { id: 893, issueKey: 'BACI-199', mode: 'implement', status: 'acked' },
+        dispatch({ id: 904, issueKey: 'BACI-205', mode: 'scope', status: 'queued' }),
+        dispatch({ id: 902, issueKey: 'BACI-203', mode: 'plan', status: 'pending' }),
+        dispatch({ id: 900, issueKey: 'BACI-202', mode: 'ship', status: 'acked' }),
+        dispatch({ id: 896, issueKey: 'BACI-200', mode: 'review', status: 'acked' }),
+        dispatch({ id: 893, issueKey: 'BACI-199', mode: 'implement', status: 'acked' }),
       ],
       todos: [],
       todosDone: 0,
@@ -183,21 +205,26 @@ function mockAgents() {
 // filtered out — once a session ends there's nothing actionable left on
 // it, and the history is visible via the History view if needed. Read-
 // only — agents are dispatched work from the issue drawer.
-export default function AgentsView({ agents, onRefresh }) {
+type AgentsViewProps = {
+  agents: AgentCardDTO[];
+  onRefresh?: () => void;
+};
+
+export default function AgentsView({ agents, onRefresh }: AgentsViewProps) {
   // BACI-53 ask_user_question modal state. activeQuestionId is the
   // pending row's primary key (null when no modal is open); when set
   // the modal fetches the full payload + renders the answer form.
-  const [activeQuestionId, setActiveQuestionId] = useState(null);
+  const [activeQuestionId, setActiveQuestionId] = useState<number | null>(null);
   // BACI-190 rescue: per-dispatch in-flight set so a double-click on
   // the Rescue button doesn't fire twice. The rescued button stays
   // disabled until the next onRefresh poll clears the NeedsRescue flag
   // (a fresh rescue dispatch lands on a different session — the
   // original dead-session dispatch keeps its flag until acked).
-  const [rescuing, setRescuing] = useState(() => new Set());
+  const [rescuing, setRescuing] = useState<Set<number>>(() => new Set());
   // BACI-190 rescue: most recent rescue error so a failure (no idle
   // supervisor / already-acked race) is visible inline without a toast
   // surface. Map: dispatch id → error message.
-  const [rescueError, setRescueError] = useState(() => ({}));
+  const [rescueError, setRescueError] = useState<Record<number, string>>(() => ({}));
 
   // TEMP demo toggle — ?mock=1 in the URL appends a varied set of fake
   // agents so the grid redesign can be reviewed against a realistic
@@ -214,9 +241,8 @@ export default function AgentsView({ agents, onRefresh }) {
     () => allAgents.filter((a) => a.status !== 'ended'),
     [allAgents],
   );
-  const hiddenEnded = allAgents.length - liveAgents.length;
 
-  const handleRescue = async (dispatchID) => {
+  const handleRescue = async (dispatchID: number) => {
     setRescuing((prev) => {
       const next = new Set(prev);
       next.add(dispatchID);
@@ -277,8 +303,16 @@ export default function AgentsView({ agents, onRefresh }) {
   );
 }
 
+type AgentCardProps = {
+  agent: AgentCardDTO;
+  rescuing: Set<number>;
+  rescueError: Record<number, string>;
+  onRescue: (dispatchID: number) => void;
+  onOpenQuestion: (questionID: number) => void;
+};
+
 // AgentCard renders one session as a self-contained grid tile.
-function AgentCard({ agent: a, rescuing, rescueError, onRescue, onOpenQuestion }) {
+function AgentCard({ agent: a, rescuing, rescueError, onRescue, onOpenQuestion }: AgentCardProps) {
   const name = a.agentName || a.sessionId.slice(0, 12);
   const openQuestions = a.openQuestions || [];
   const dispatches = a.dispatches || [];

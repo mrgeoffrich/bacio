@@ -1,4 +1,3 @@
-import React from 'react';
 import { Link, useParams } from 'react-router';
 import { monitorTranscriptsPath } from '../lib/routes';
 import JobTranscriptBody from '../lib/transcript/JobTranscriptBody';
@@ -18,7 +17,7 @@ export default function TranscriptRoute() {
   return (
     <div className="mk-transcript-route">
       <header className="mk-transcript-route-head">
-        <Link to={monitorTranscriptsPath(prefix)} className="mk-btn-secondary">
+        <Link to={monitorTranscriptsPath(prefix ?? '')} className="mk-btn-secondary">
           ← Transcripts
         </Link>
         <span className="mk-transcript-route-title mk-mono">dispatch #{id}</span>

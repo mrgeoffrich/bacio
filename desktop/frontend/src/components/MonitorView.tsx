@@ -1,4 +1,3 @@
-import React from 'react';
 import { useNavigate, useLocation } from 'react-router';
 import { monitorTranscriptsPath } from '../lib/routes';
 import NetworkPanel from './NetworkPanel';
@@ -11,8 +10,8 @@ import TranscriptListPanel from './TranscriptListPanel';
 // 'monitor') — BACI-337 repointed that nav alias at the Transcripts sub-tab, so
 // the chip would otherwise navigate away from Network.
 const SUBTABS = [
-  { id: 'network', label: 'Network', path: (prefix) => `/${prefix}/monitor` },
-  { id: 'transcripts', label: 'Transcripts', path: (prefix) => monitorTranscriptsPath(prefix) },
+  { id: 'network', label: 'Network', path: (prefix: string) => `/${prefix}/monitor` },
+  { id: 'transcripts', label: 'Transcripts', path: (prefix: string) => monitorTranscriptsPath(prefix) },
 ];
 
 // MonitorView is the BACI-322 Monitor screen shell — one Topbar entry, two
@@ -23,7 +22,11 @@ const SUBTABS = [
 // is Network, `/monitor/transcripts` is Transcripts — so a deep-link / refresh
 // lands on the right tab and the segmented control mirrors the location
 // (SettingsView's one-entry / URL-synced-sections model the app already uses).
-export default function MonitorView({ activeBoard }) {
+type MonitorViewProps = {
+  activeBoard: string;
+};
+
+export default function MonitorView({ activeBoard }: MonitorViewProps) {
   const navigate = useNavigate();
   const location = useLocation();
 

@@ -1,10 +1,10 @@
-import React from 'react';
 import Tooltip from './Tooltip';
+import type { SyncRepoDTO, MemberProjectDTO } from '../api';
 
 // formatSyncTime renders an ISO timestamp as a short local string.
 // Mirrors Topbar.jsx's formatSyncTime so the per-card subtitle reads
 // the same as the topbar pill's hover.
-function formatSyncTime(iso) {
+function formatSyncTime(iso: string | undefined): string {
   if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
@@ -15,21 +15,21 @@ function formatSyncTime(iso) {
 // does — inlined verbatim (rather than lifted to a shared component)
 // per the BACI-108 plan: with only two callers, a tiny class-pick
 // duplication beats the over-abstraction of <SyncStatusBadge>.
-function pillClassFor(entry) {
+function pillClassFor(entry: SyncRepoDTO): string {
   let cls = 'mk-pill mk-sync-badge';
   if (entry.inProgress) cls += ' is-syncing';
   else if (entry.lastError) cls += ' is-error';
   return cls;
 }
 
-function pillLabelFor(entry) {
+function pillLabelFor(entry: SyncRepoDTO): string {
   if (entry.inProgress) return 'Syncing…';
   if (entry.lastError) return 'Sync Failed';
   if (entry.lastSyncAt) return 'Sync Enabled';
   return 'Sync Configured';
 }
 
-function pillTitleFor(entry) {
+function pillTitleFor(entry: SyncRepoDTO): string {
   if (entry.inProgress) return 'Background sync in progress';
   if (entry.lastError) return `Last sync failed: ${entry.lastError}`;
   if (entry.lastSyncAt) return `Last synced ${formatSyncTime(entry.lastSyncAt)}`;
@@ -45,7 +45,12 @@ function pillTitleFor(entry) {
 // PhantomLinkModal via the onLinkPhantom callback (BACI-112). When
 // onLinkPhantom is undefined (a hypothetical read-only caller), the
 // button stays disabled with the legacy "Coming in BACI-112" tooltip.
-export default function SyncRepoCard({ entry, onLinkPhantom }) {
+type SyncRepoCardProps = {
+  entry: SyncRepoDTO;
+  onLinkPhantom?: (p: MemberProjectDTO) => void;
+};
+
+export default function SyncRepoCard({ entry, onLinkPhantom }: SyncRepoCardProps) {
   const projects = entry.projects ?? [];
   return (
     <div className="mk-tmpl mk-sync-repo-card">
@@ -66,7 +71,7 @@ export default function SyncRepoCard({ entry, onLinkPhantom }) {
         <div className="mk-sync-section-empty">No projects in this sync repo yet.</div>
       ) : (
         <ul className="mk-sync-project-list">
-          {projects.map(p => {
+          {projects.map((p: MemberProjectDTO) => {
             const isPhantom = p.status === 'phantom';
             const isAbsent = p.status === 'absent';
             const stateClass = `mk-pill mk-status-${p.status}`;

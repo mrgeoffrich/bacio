@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import SyncRepoCard from '../SyncRepoCard';
 import SyncSetupModal from '../SyncSetupModal';
 import PhantomLinkModal from '../PhantomLinkModal';
 import { reportError } from '../../errors';
 import * as api from '../../api';
+import type { SyncRegistryDTO, SyncPreferencesDTO, MemberProjectDTO } from '../../api';
 
 // BACI-248: Sync Settings section — absorbed body of the old
 // standalone SyncView. Now mounts as one entry in the sectioned
@@ -37,24 +38,24 @@ function ScopeChip() {
 }
 
 export default function SyncSettingsSection() {
-  const [registry, setRegistry] = useState(null);
-  const [prefs, setPrefs] = useState(null);
+  const [registry, setRegistry] = useState<SyncRegistryDTO | null>(null);
+  const [prefs, setPrefs] = useState<SyncPreferencesDTO | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [savingPrefs, setSavingPrefs] = useState(false);
   // BACI-111: prefix of the unsynced project the setup modal is open
   // for, or null when the modal is closed. The lookup against
   // registry.unsyncedProjects happens at render time so the row stays
   // resolvable even as the registry refreshes underneath the modal.
-  const [openSetupForPrefix, setOpenSetupForPrefix] = useState(null);
+  const [openSetupForPrefix, setOpenSetupForPrefix] = useState<string | null>(null);
   // BACI-112: phantom row whose Link local… button was clicked, or
   // null when the modal is closed. We carry the row object verbatim
   // (not just the prefix) because the row is a member of one sync
   // repo's projects array; resolving "which sync repo it belonged to"
   // after a registry refresh would be one extra lookup the modal
   // doesn't need to do.
-  const [phantomToLink, setPhantomToLink] = useState(null);
+  const [phantomToLink, setPhantomToLink] = useState<MemberProjectDTO | null>(null);
 
-  const refreshRegistry = useCallback((opts = {}) => {
+  const refreshRegistry = useCallback((opts: { silent?: boolean } = {}) => {
     api.getSyncRegistry()
       .then(setRegistry)
       .catch(err => {
@@ -108,7 +109,7 @@ export default function SyncSettingsSection() {
   // confirms with the server response — same shape as App.jsx's
   // changeShowArchived. On failure the modal surfaces and the UI
   // reverts to the persisted value.
-  const changeBackgroundEnabled = useCallback((next) => {
+  const changeBackgroundEnabled = useCallback((next: boolean) => {
     if (savingPrefs) return;
     setSavingPrefs(true);
     setPrefs({ backgroundEnabled: next });

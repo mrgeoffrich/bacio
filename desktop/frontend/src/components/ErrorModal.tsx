@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Modal from './Modal';
 import { subscribeErrors } from '../errors';
+import type { ReportedError } from '../errors';
 
 const DEV = !!(import.meta && import.meta.env && import.meta.env.DEV);
 const MAX_MESSAGE_CHARS = 500;
@@ -12,7 +13,7 @@ const MAX_MESSAGE_CHARS = 500;
 // count instead of pushing a fresh one — so a flapping poll loop
 // shows as "Couldn't refresh board (×7)", not 7 modals.
 export default function ErrorModal() {
-  const [queue, setQueue] = useState([]);
+  const [queue, setQueue] = useState<ReportedError[]>([]);
   const [showDetail, setShowDetail] = useState(false);
   const [showMore, setShowMore] = useState(false);
 

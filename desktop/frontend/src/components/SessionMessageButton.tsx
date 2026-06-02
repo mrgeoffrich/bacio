@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import type React from 'react';
+import { useState } from 'react';
 import * as api from '../api';
 
 // SessionMessageButton (BACI-286) renders a "Message" button that opens
@@ -12,7 +13,12 @@ import * as api from '../api';
 // when sessionId is empty so a card with no running worker shows no
 // affordance. On a successful send the box closes; an error stays inline
 // so the user can retry without losing the text.
-export default function SessionMessageButton({ sessionId, compact = false }) {
+type SessionMessageButtonProps = {
+  sessionId: string;
+  compact?: boolean;
+};
+
+export default function SessionMessageButton({ sessionId, compact = false }: SessionMessageButtonProps) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
@@ -41,7 +47,7 @@ export default function SessionMessageButton({ sessionId, compact = false }) {
     }
   };
 
-  const onKeyDown = (e) => {
+  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // Cmd/Ctrl+Enter sends; Esc cancels — same shortcuts as the rest of
     // the app's inline composers.
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {

@@ -1,5 +1,13 @@
-import React from 'react';
+import type React from 'react';
 import * as RTooltip from '@radix-ui/react-tooltip';
+
+type TooltipProps = {
+  label?: React.ReactNode;
+  side?: RTooltip.TooltipContentProps['side'];
+  align?: RTooltip.TooltipContentProps['align'];
+  children: React.ReactElement;
+  asChild?: boolean;
+};
 
 // Thin wrapper around Radix Tooltip with the bacio mk-* defaults baked
 // in: 250ms open delay, portal to root so the bubble escapes overflow
@@ -10,7 +18,7 @@ import * as RTooltip from '@radix-ui/react-tooltip';
 //   </Tooltip>
 //
 // Pass `side` / `align` to override placement (defaults to top + centre).
-export default function Tooltip({ label, side = 'top', align = 'center', children, asChild = true }) {
+export default function Tooltip({ label, side = 'top', align = 'center', children, asChild = true }: TooltipProps) {
   if (!label) return children;
   return (
     <RTooltip.Root>

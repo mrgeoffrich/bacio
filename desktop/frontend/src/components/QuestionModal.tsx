@@ -1,7 +1,12 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as api from '../api';
 import { reportError } from '../errors';
 import Modal from './Modal';
+import type {
+  SessionQuestion,
+  QuestionOption,
+} from '../../bindings/github.com/mrgeoffrich/bacio/internal/model';
+import { QuestionState } from '../../bindings/github.com/mrgeoffrich/bacio/internal/model';
 
 // QuestionModal renders the BACI-53 ask_user_question form. Fetches
 // the full payload on open, renders each question as radios (single-
@@ -20,19 +25,28 @@ import Modal from './Modal';
 // Lifted out of AgentsView so KanbanCard (and any other surface that
 // surfaces a "? N" pill) can reuse it without duplicating the form
 // or the load/submit/cancel wiring.
-export default function QuestionModal({ questionId, onClose }) {
-  const [row, setRow] = useState(null);
+type QuestionModalProps = {
+  questionId: number | null;
+  onClose?: () => void;
+};
+
+// answers maps question text -> the user's selection: a single option
+// label (single-select) or an array of labels (multi-select).
+type AnswerMap = Record<string, string | string[]>;
+
+export default function QuestionModal({ questionId, onClose }: QuestionModalProps) {
+  const [row, setRow] = useState<SessionQuestion | null>(null);
   const [loading, setLoading] = useState(false);
-  const [answers, setAnswers] = useState({});
+  const [answers, setAnswers] = useState<AnswerMap>({});
   // Per-question Other state, keyed by question text. Kept separate
   // from `answers` so a single-select that toggles between a label
   // and Other doesn't lose the typed text on toggle.
-  const [otherSelected, setOtherSelected] = useState({});
-  const [otherText, setOtherText] = useState({});
+  const [otherSelected, setOtherSelected] = useState<Record<string, boolean>>({});
+  const [otherText, setOtherText] = useState<Record<string, string>>({});
 
   // Track the row id we last loaded so a click on a different
   // question reloads cleanly without showing stale content.
-  const lastLoadedId = useRef(null);
+  const lastLoadedId = useRef<number | null>(null);
   useEffect(() => {
     if (questionId == null) {
       lastLoadedId.current = null;
@@ -65,7 +79,7 @@ export default function QuestionModal({ questionId, onClose }) {
 
   const items = row?.payload?.questions ?? [];
 
-  function pickSingleAnswer(question, value) {
+  function pickSingleAnswer(question: string, value: string) {
     // Single-select radio click on a labeled option: record the
     // value AND clear Other so the radio group reads cleanly (the
     // Other radio shares the same `name`, but the explicit clear
@@ -74,9 +88,10 @@ export default function QuestionModal({ questionId, onClose }) {
     setOtherSelected((prev) => ({ ...prev, [question]: false }));
   }
 
-  function toggleMultiAnswer(question, label, checked) {
+  function toggleMultiAnswer(question: string, label: string, checked: boolean) {
     setAnswers((prev) => {
-      const current = Array.isArray(prev[question]) ? prev[question] : [];
+      const existing = prev[question];
+      const current = Array.isArray(existing) ? existing : [];
       if (checked) {
         if (current.includes(label)) return prev;
         return { ...prev, [question]: [...current, label] };
@@ -85,7 +100,7 @@ export default function QuestionModal({ questionId, onClose }) {
     });
   }
 
-  function pickOther(question, multiSelect) {
+  function pickOther(question: string, multiSelect: boolean) {
     if (!multiSelect) {
       // Picking Other on a single-select clears the label answer —
       // they're mutually exclusive in the radio group.
@@ -94,11 +109,11 @@ export default function QuestionModal({ questionId, onClose }) {
     setOtherSelected((prev) => ({ ...prev, [question]: true }));
   }
 
-  function unpickOther(question) {
+  function unpickOther(question: string) {
     setOtherSelected((prev) => ({ ...prev, [question]: false }));
   }
 
-  function setOtherTextFor(question, value) {
+  function setOtherTextFor(question: string, value: string) {
     setOtherText((prev) => ({ ...prev, [question]: value }));
   }
 
@@ -108,7 +123,7 @@ export default function QuestionModal({ questionId, onClose }) {
     // store-side ValidateQuestionAnswers tolerates missing keys
     // and surfaces "at least one question must be answered" if the
     // whole map ends up empty.
-    const out = {};
+    const out: Record<string, string | string[]> = {};
     for (const item of items) {
       const v = answers[item.question];
       const otherOn = !!otherSelected[item.question];
@@ -130,6 +145,7 @@ export default function QuestionModal({ questionId, onClose }) {
   }
 
   async function handleSubmit() {
+    if (questionId == null) return;
     const final = buildFinalAnswers();
     try {
       setLoading(true);
@@ -143,6 +159,7 @@ export default function QuestionModal({ questionId, onClose }) {
   }
 
   async function handleCancel() {
+    if (questionId == null) return;
     if (!window.confirm('Dismiss this question? The agent will receive an error.')) {
       return;
     }
@@ -165,13 +182,13 @@ export default function QuestionModal({ questionId, onClose }) {
       preventClickOutsideClose
     >
       {loading && !row && <p className="mk-drawer-text">Loading…</p>}
-      {row && row.state !== 'open' && (
+      {row && row.state !== QuestionState.QuestionOpen && (
         <p className="mk-drawer-text mk-meta-empty">
           This question is no longer open (state: {row.state}). Refresh to
           remove it from your list.
         </p>
       )}
-      {row && row.state === 'open' && (
+      {row && row.state === QuestionState.QuestionOpen && (
         <form
           onSubmit={(ev) => {
             ev.preventDefault();
@@ -194,7 +211,7 @@ export default function QuestionModal({ questionId, onClose }) {
             const focusedPreview = !otherSelected[item.question] && focused && focused.preview
               ? focused.preview
               : '';
-            const renderOption = (opt) => {
+            const renderOption = (opt: QuestionOption) => {
               const inputId = `q-${item.question}-${opt.label}`;
               if (item.multiSelect) {
                 const arr = Array.isArray(answers[item.question])

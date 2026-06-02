@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import type { ProxyCaptureRow, ProxyMessage } from '../api';
 import { reportError } from '../errors';
 import * as api from '../api';
 import { formatWhen } from '../lib/formatWhen';
@@ -23,11 +24,16 @@ import JobTranscriptBody from '../lib/transcript/JobTranscriptBody';
 // The sheet is a flex sibling of the table (the table shrinks left, same
 // docked-panel idiom as the rest of the app), not a portal/modal. The caller
 // owns selectedHost and the open/close; the sheet owns its inner navigation.
-export default function MonitorCaptureSheet({ host, onClose }) {
+type MonitorCaptureSheetProps = {
+  host: string;
+  onClose: () => void;
+};
+
+export default function MonitorCaptureSheet({ host, onClose }: MonitorCaptureSheetProps) {
   // Inner navigation: null = the host's capture list; a capture row = its
   // detail; { dispatchId } = the job transcript for that capture's dispatch.
-  const [selectedCapture, setSelectedCapture] = useState(null);
-  const [transcriptFor, setTranscriptFor] = useState(null); // dispatchId | null
+  const [selectedCapture, setSelectedCapture] = useState<ProxyCaptureRow | null>(null);
+  const [transcriptFor, setTranscriptFor] = useState<number | null>(null); // dispatchId | null
 
   // Reset the inner navigation whenever the host changes — a fresh host
   // always opens on its capture list.
@@ -73,7 +79,7 @@ export default function MonitorCaptureSheet({ host, onClose }) {
             capture={selectedCapture}
             onViewTranscript={
               selectedCapture.dispatchId
-                ? () => setTranscriptFor(selectedCapture.dispatchId)
+                ? () => setTranscriptFor(selectedCapture.dispatchId ?? null)
                 : null
             }
           />
@@ -88,8 +94,13 @@ export default function MonitorCaptureSheet({ host, onClose }) {
 // CaptureListBody fetches and renders the host's captures, newest-first. Each
 // row is clickable into its detail; the issue-key + mode chip (borrowed from
 // the design's Option D) gives the job context at a glance.
-function CaptureListBody({ host, onSelect }) {
-  const [rows, setRows] = useState([]);
+type CaptureListBodyProps = {
+  host: string;
+  onSelect: (capture: ProxyCaptureRow) => void;
+};
+
+function CaptureListBody({ host, onSelect }: CaptureListBodyProps) {
+  const [rows, setRows] = useState<ProxyCaptureRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -149,11 +160,16 @@ function CaptureListBody({ host, onSelect }) {
 // turn (best-effort — a 404 means "not a parsed turn", shown as a banner, not
 // an error) plus the raw .http body. The "View job transcript" affordance is
 // hidden when the capture has no dispatch.
-function CaptureDetailBody({ capture, onViewTranscript }) {
-  const [raw, setRaw] = useState(null);
-  const [rawState, setRawState] = useState('loading'); // 'loading' | 'ready' | 'missing'
-  const [parsed, setParsed] = useState(null);
-  const [parsedState, setParsedState] = useState(
+type CaptureDetailBodyProps = {
+  capture: ProxyCaptureRow;
+  onViewTranscript: (() => void) | null;
+};
+
+function CaptureDetailBody({ capture, onViewTranscript }: CaptureDetailBodyProps) {
+  const [raw, setRaw] = useState<string | null>(null);
+  const [rawState, setRawState] = useState<'loading' | 'ready' | 'missing'>('loading');
+  const [parsed, setParsed] = useState<ProxyMessage | null>(null);
+  const [parsedState, setParsedState] = useState<'loading' | 'ready' | 'none'>(
     capture.isAnthropic ? 'loading' : 'none',
   );
 

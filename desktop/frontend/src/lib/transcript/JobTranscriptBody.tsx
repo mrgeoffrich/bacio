@@ -1,7 +1,12 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import * as api from '../../api';
+import type { AnthropicTranscript } from '../../api';
 import TranscriptView from './TranscriptView';
 import { anthropicTranscriptToParseResult } from './anthropicAdapter';
+
+type JobTranscriptBodyProps = {
+  dispatchId: number;
+};
 
 // JobTranscriptBody fetches a dispatch's assembled transcript and feeds it
 // through the adapter into the reused <TranscriptView>. A 404 (no parsed
@@ -10,9 +15,9 @@ import { anthropicTranscriptToParseResult } from './anthropicAdapter';
 // Extracted from MonitorCaptureSheet (BACI-308) into the shared transcript lib
 // so both the BACI-308 capture sheet's "job transcript" step and the BACI-322
 // deep-link TranscriptRoute render the same body from one copy.
-export default function JobTranscriptBody({ dispatchId }) {
-  const [transcript, setTranscript] = useState(null);
-  const [state, setState] = useState('loading'); // 'loading' | 'ready' | 'empty'
+export default function JobTranscriptBody({ dispatchId }: JobTranscriptBodyProps) {
+  const [transcript, setTranscript] = useState<AnthropicTranscript | null>(null);
+  const [state, setState] = useState<'loading' | 'ready' | 'empty'>('loading');
 
   useEffect(() => {
     let cancelled = false;

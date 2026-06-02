@@ -1,4 +1,4 @@
-import React from 'react';
+import type React from 'react';
 import { m } from 'motion/react';
 import OdometerNumber from './OdometerNumber';
 
@@ -11,6 +11,18 @@ import OdometerNumber from './OdometerNumber';
 // The optional Motion flight-target slot (`flyingKey`) is only mounted by
 // the Pipeline's BACI-193 ship-flourish; consumers that don't fly cards
 // into the pill leave it null and no slot renders.
+type ShippedPillProps = {
+  count: number;
+  onClick: () => void;
+  disabled?: boolean;
+  flashing?: boolean;
+  flyingKey?: string | null;
+  onFlightDone: () => void;
+  title: string;
+  ariaHasPopup: React.AriaAttributes['aria-haspopup'];
+  ariaExpanded: boolean;
+};
+
 export default function ShippedPill({
   count,
   onClick,
@@ -21,7 +33,7 @@ export default function ShippedPill({
   title,
   ariaHasPopup,
   ariaExpanded,
-}) {
+}: ShippedPillProps) {
   const safeCount = Number.isFinite(count) && count > 0 ? count : 0;
   return (
     <button

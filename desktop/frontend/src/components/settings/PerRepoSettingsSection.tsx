@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { reportError } from '../../errors';
 import * as api from '../../api';
+import type { Board, BoardColumn, FeatureSummary } from '../../api';
 
 // BACI-248: Per-repository Settings section — fenced-off pane behind
 // its own repo dropdown for the per-repo settings that used to share
@@ -21,11 +22,17 @@ import * as api from '../../api';
 // When the dropdown is unset / "all" the section renders an empty
 // state — mirrors how FeaturesView empty-states a cross-repo view.
 
+type PerRepoSettingsSectionProps = {
+  activeBoard: string;
+  boards: Board[];
+  columns: BoardColumn[];
+};
+
 export default function PerRepoSettingsSection({
   activeBoard,
   boards,
   columns,
-}) {
+}: PerRepoSettingsSectionProps) {
   // The pane's local repo selection. Defaults to the App-owned active
   // board on mount + when the App switches repos; the user can pick a
   // different repo without changing the global selection.
@@ -46,14 +53,14 @@ export default function PerRepoSettingsSection({
   // empty-string sentinel when unset; featureChoices is the list
   // backing the dropdown. Re-runs when repoPrefix changes.
   const [defaultFeatureSlug, setDefaultFeatureSlug] = useState('');
-  const [featureChoices, setFeatureChoices] = useState([]);
+  const [featureChoices, setFeatureChoices] = useState<FeatureSummary[]>([]);
   const [savingDefaultFeature, setSavingDefaultFeature] = useState(false);
 
   // BACI-248: hidden kanban states (the set, as a Set<string> of
   // canonical state names). Loaded on mount + on repoPrefix change.
   // Saved on each toggle — same blur-commit shape as the rest of
   // SettingsView (toggle === implicit blur).
-  const [hiddenStates, setHiddenStates] = useState(new Set());
+  const [hiddenStates, setHiddenStates] = useState<Set<string>>(new Set());
   const [savingHiddenStates, setSavingHiddenStates] = useState(false);
 
   // BACI-177: hidden features (set of slugs). Mirror of the per-feature
@@ -63,8 +70,8 @@ export default function PerRepoSettingsSection({
   // chip-list; featureChoices above is the slim shape backing the
   // default-feature dropdown — same data, same fetch, but kept under
   // separate names because they're consumed by different controls.
-  const [featureSummaries, setFeatureSummaries] = useState([]);
-  const [savingHiddenFeatureSlug, setSavingHiddenFeatureSlug] = useState(null);
+  const [featureSummaries, setFeatureSummaries] = useState<FeatureSummary[]>([]);
+  const [savingHiddenFeatureSlug, setSavingHiddenFeatureSlug] = useState<string | null>(null);
 
   // Mount + repoPrefix change: parallel-load every per-repo setting.
   // A failure on any one path surfaces once via reportError but doesn't
@@ -97,7 +104,7 @@ export default function PerRepoSettingsSection({
   // BACI-235: persist the per-repo default feature. Empty string is
   // the "clear" sentinel — routed through clearDefaultFeature so the
   // audit log records it as a clear, not as a "set to no feature".
-  const changeDefaultFeature = useCallback(async (nextSlug) => {
+  const changeDefaultFeature = useCallback(async (nextSlug: string) => {
     if (!repoPrefix) return;
     setSavingDefaultFeature(true);
     try {
@@ -119,7 +126,7 @@ export default function PerRepoSettingsSection({
   // server are both replace-not-merge — we build the new set
   // client-side, fire it as the full new array, and the server returns
   // the canonical sorted slice we re-seed our local set from.
-  const toggleHiddenState = useCallback(async (state) => {
+  const toggleHiddenState = useCallback(async (state: string) => {
     if (!repoPrefix || savingHiddenStates) return;
     const next = new Set(hiddenStates);
     if (next.has(state)) next.delete(state);
@@ -147,7 +154,7 @@ export default function PerRepoSettingsSection({
   // then awaits the server response. On failure the chip snaps back to
   // the server's persisted truth (the response is the refreshed
   // FeatureDetail, mapped onto the slim summary shape).
-  const toggleFeatureHidden = useCallback(async (slug, nextHidden) => {
+  const toggleFeatureHidden = useCallback(async (slug: string, nextHidden: boolean) => {
     if (!repoPrefix) return;
     setSavingHiddenFeatureSlug(slug);
     setFeatureSummaries(prev => prev.map(f => (

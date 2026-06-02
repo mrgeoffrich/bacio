@@ -1,6 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { reportError } from '../errors';
 import * as api from '../api';
+import type { Notification } from '../api';
 import { formatWhen } from '../lib/formatWhen';
 import Icon from './Icon';
 import Tooltip from './Tooltip';
@@ -27,24 +28,32 @@ import Tooltip from './Tooltip';
 //                 is clicked; the bell closes itself afterwards. Cross-repo
 //                 — the row carries its own prefix, which may differ from
 //                 the active board.
-export default function NotificationBell({ unreadCount, onCountChange, onOpenIssue }) {
+type NotificationBellProps = {
+  unreadCount: number;
+  onCountChange: (count: number) => void;
+  onOpenIssue: (repoPrefix: string, key: string) => void;
+};
+
+type NotificationStatus = 'idle' | 'loading' | 'ready' | 'error';
+
+export default function NotificationBell({ unreadCount, onCountChange, onOpenIssue }: NotificationBellProps) {
   const [open, setOpen] = useState(false);
   // status: 'idle' | 'loading' | 'ready' | 'error'
-  const [status, setStatus] = useState('idle');
-  const [rows, setRows] = useState([]);
+  const [status, setStatus] = useState<NotificationStatus>('idle');
+  const [rows, setRows] = useState<Notification[]>([]);
   const [error, setError] = useState('');
   // showAll toggles the unread-default / show-everything filter.
   const [showAll, setShowAll] = useState(false);
 
-  const rootRef = useRef(null);
+  const rootRef = useRef<HTMLDivElement>(null);
 
   // Outside-click + Escape — same recipe as ShippedPopover.
   useEffect(() => {
     if (!open) return;
-    const onDown = (e) => {
-      if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false);
+    const onDown = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
     };
-    const onKey = (e) => {
+    const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false);
     };
     document.addEventListener('mousedown', onDown);
@@ -93,7 +102,7 @@ export default function NotificationBell({ unreadCount, onCountChange, onOpenIss
       .catch(() => { /* badge is best-effort */ });
   };
 
-  const markRead = (id) => {
+  const markRead = (id: number) => {
     api.markNotificationRead(id)
       .then(() => {
         // Reflect locally: in unread view the row drops out; in show-all
@@ -113,7 +122,7 @@ export default function NotificationBell({ unreadCount, onCountChange, onOpenIss
       .catch((err) => reportError(err, { headline: "Couldn't mark notifications read" }));
   };
 
-  const pickRow = (row) => {
+  const pickRow = (row: Notification) => {
     // An issue-linked row deep-links to its ticket (cross-repo — use the
     // row's own prefix). Marking it read is the same explicit affordance as
     // the per-row button; opening the issue does not auto-clear it.

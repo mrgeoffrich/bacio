@@ -24,6 +24,21 @@ import { LazyMotion, domMax, LayoutGroup } from 'motion/react';
 import { reportError } from './errors';
 import { WEB_MODE } from './env';
 import * as api from './api';
+import type {
+  Board,
+  BoardColumn,
+  BoardCard,
+  IssueBriefDTO,
+  AgentCard,
+  PromptTemplateDTO,
+  LeaderStatusDTO,
+  WaitingState,
+  AddRepositoryPayload,
+} from './api';
+import { WaitingKind } from './api';
+import type { DispatchMode, State } from '../bindings/github.com/mrgeoffrich/bacio/internal/model';
+import type { ProcessSelection } from './lib/pipelineProcesses';
+import type { ShippedScope } from './components/shippedScope.ts';
 import { isTerminalState, stripBlockerFromCards, restoreBlockedByFromSnapshot } from './lib/issueState';
 import { useShipFlourish } from './lib/shipFlourish';
 import { useShipSfx } from './lib/shipSfx';
@@ -41,7 +56,7 @@ function readTheme() {
   try { return localStorage.getItem(THEME_KEY) || 'system'; }
   catch { return 'system'; }
 }
-function persistTheme(theme) {
+function persistTheme(theme: string) {
   try { localStorage.setItem(THEME_KEY, theme); }
   catch { /* non-fatal — the preference just won't survive a relaunch */ }
 }
@@ -49,7 +64,7 @@ function readActiveRepo() {
   try { return localStorage.getItem(REPO_KEY) || ''; }
   catch { return ''; }
 }
-function persistActiveRepo(prefix) {
+function persistActiveRepo(prefix: string) {
   try { localStorage.setItem(REPO_KEY, prefix); }
   catch { /* non-fatal — the preference just won't survive a relaunch */ }
 }
@@ -65,15 +80,15 @@ const LEGACY_PAGE_WORDS = new Set(['pipeline', 'issues', 'features', 'documents'
 // recognised prefix-less page words — the signal that an unmatched
 // prefix is a stale legacy link to soft-redirect rather than a
 // genuinely-unknown repo to hard-404.
-function legacyPageWord(first) {
+function legacyPageWord(first: string) {
   return LEGACY_PAGE_WORDS.has(first);
 }
 
 // isEditingTarget reports whether a keystroke landed in something the user is
 // typing into — a form field or the contenteditable doc editor — so global
 // hotkeys can stand down rather than hijack the keypress.
-function isEditingTarget(el) {
-  if (!el) return false;
+function isEditingTarget(el: EventTarget | null) {
+  if (!(el instanceof HTMLElement)) return false;
   const tag = el.tagName;
   return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
 }
@@ -82,16 +97,16 @@ export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const [boards, setBoards] = useState([]);
-  const [columns, setColumns] = useState([]);
-  const [cards, setCards] = useState([]);
+  const [boards, setBoards] = useState<Board[]>([]);
+  const [columns, setColumns] = useState<BoardColumn[]>([]);
+  const [cards, setCards] = useState<BoardCard[]>([]);
   // BACI-203: openIssueKey is now derived from the URL — the
   // `/issues/:key` workspace route owns the source of truth. The App
   // still keeps the brief payload around (loaded eagerly on key change,
   // polled every 10s while the workspace route is mounted) and a
   // descEditing flag the workspace's InlineDescriptionEditor propagates
   // up so the brief-poll merge can preserve the in-progress textarea.
-  const [openIssueBrief, setOpenIssueBrief] = useState(null);
+  const [openIssueBrief, setOpenIssueBrief] = useState<IssueBriefDTO | null>(null);
   const [descEditing, setDescEditing] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -101,18 +116,18 @@ export default function App() {
   // state" is preserved; settingsInitialSection rides alongside
   // settingsOpen and gets reset to null whenever the view closes so
   // the next plain "click the gear" open lands on System.
-  const [settingsInitialSection, setSettingsInitialSection] = useState(null);
+  const [settingsInitialSection, setSettingsInitialSection] = useState<string | null>(null);
   // BACI-166: the "+ from prompt" composer is a sibling modal flag —
   // reached via the Topbar's `+` button or the ⌘N shortcut. The modal
   // creates a fresh todo card from a rough one-liner (BACI-300 retired
   // the auto-scope dispatch — triage is a Pipeline stage now).
   const [composerOpen, setComposerOpen] = useState(false);
-  const [agents, setAgents] = useState([]);
+  const [agents, setAgents] = useState<AgentCard[]>([]);
   // promptConfig is the global (repo-independent) dispatch-prompt config:
   // one entry per stage with its label and the issue states it's valid
   // to run from. Board → KanbanCard reads it to gate the per-card action
   // button. Loaded on mount; reloaded when the Settings view closes.
-  const [promptConfig, setPromptConfig] = useState([]);
+  const [promptConfig, setPromptConfig] = useState<PromptTemplateDTO[]>([]);
   // BACI-188: per-column collapse state lives in Board.jsx now —
   // localStorage-backed, per-repo. The App-wide hide-empty-columns
   // preference was removed in BACI-188 (Settings toggle gone, REST /
@@ -150,7 +165,7 @@ export default function App() {
   // leaderState tracks the UI leader-election result from LeaderService.
   // amLeader = true means this desktop process holds the lease and may
   // dispatch. Standby processes show a chip and disable the per-card button.
-  const [leaderState, setLeaderState] = useState({ amLeader: false, holderLabel: '' });
+  const [leaderState, setLeaderState] = useState<LeaderStatusDTO>({ amLeader: false, holderLabel: '' });
   const [theme, setTheme] = useState(readTheme);
   const [loading, setLoading] = useState(true);
 
@@ -307,7 +322,7 @@ export default function App() {
   // toggle, then updates the App-owned flag on success so the Board /
   // Docs / Features views react immediately on the next refresh.
   // Optimistic-then-confirmed shape — the theme handler is the model.
-  const changeShowArchived = useCallback((next) => {
+  const changeShowArchived = useCallback((next: boolean) => {
     api.setDisplayPreferences(next)
       .then(prefs => setShowArchived(prefs.showArchived))
       .catch(err => reportError(err, { headline: "Couldn't save preference" }));
@@ -319,7 +334,7 @@ export default function App() {
   // 1..3650 with a 400, surfaced via reportError. The Settings UI
   // gates the numeric input on the boolean so the operator can flip
   // off auto-archive without first nudging the number into range.
-  const changeArchivePreferences = useCallback((autoEnabled, retentionDays) => {
+  const changeArchivePreferences = useCallback((autoEnabled: boolean, retentionDays: number) => {
     api.setArchivePreferences(autoEnabled, retentionDays)
       .then(prefs => {
         setArchiveAutoEnabled(prefs.autoEnabled);
@@ -336,7 +351,7 @@ export default function App() {
   // this was wired through ShippedPopover; the SFX now rides the
   // shippedCount-rise effect in App.jsx (BACI-295) so it fires
   // regardless of the active view.
-  const changeAudioEnabled = useCallback((next) => {
+  const changeAudioEnabled = useCallback((next: boolean) => {
     api.setAudioPreferences(next)
       .then(prefs => setAudioEnabled(prefs.shippedSfx))
       .catch(err => reportError(err, { headline: "Couldn't save preference" }));
@@ -347,7 +362,7 @@ export default function App() {
   // cutoff recomputes against the new zone on the next poll. Same
   // optimistic-then-confirmed shape as the other preference handlers. A
   // malformed IANA name is rejected with a 400, surfaced via reportError.
-  const changeTimezone = useCallback((next) => {
+  const changeTimezone = useCallback((next: string) => {
     api.setTimezonePreferences(next)
       .then(prefs => setTimezone(prefs.timezone))
       .catch(err => reportError(err, { headline: "Couldn't save preference" }));
@@ -398,7 +413,7 @@ export default function App() {
   // dispatch so the counts move. Pass { silent: true } on the poll path so a
   // transient failure logs instead of pushing through the modal — a flapping
   // poll over a sleeping laptop shouldn't spam the user.
-  const refreshCards = useCallback((opts = {}) => {
+  const refreshCards = useCallback((opts: { silent?: boolean } = {}) => {
     if (!activeBoard) return;
     api.listCards(activeBoard)
       .then(setCards)
@@ -408,7 +423,7 @@ export default function App() {
       });
   }, [activeBoard]);
 
-  const refreshAgents = useCallback((opts = {}) => {
+  const refreshAgents = useCallback((opts: { silent?: boolean } = {}) => {
     if (!activeBoard) return;
     api.listAgents(activeBoard)
       .then(setAgents)
@@ -470,7 +485,7 @@ export default function App() {
   // replaced by the previous one, so a poll landing mid-edit doesn't
   // stomp the buffer. Everything else (tags, comments, claimants, ...)
   // still refreshes.
-  const refreshBrief = useCallback((opts = {}) => {
+  const refreshBrief = useCallback((opts: { silent?: boolean } = {}) => {
     if (!activeBoard || !openIssueKey) return;
     api.getIssueBrief(activeBoard, openIssueKey)
       .then(brief => {
@@ -515,23 +530,11 @@ export default function App() {
   // BACI-248: SettingsView is an App-owned overlay (Sync is now folded
   // into it as a section) — dismiss it so the workspace is what the
   // user sees on arrival.
-  const openCard = useCallback((card) => {
+  const openCard = useCallback((card: BoardCard) => {
     if (!card?.key) return;
     setSettingsOpen(false);
     setSettingsInitialSection(null);
     navigate(issuePath(activeBoard, card.key));
-  }, [navigate, activeBoard]);
-
-  // BACI-114: the kanban blocked popover navigates by key — the
-  // target may not be the card the popover is rendered on (it's the
-  // blocker, not this card). Same effect as openCard but takes a key
-  // directly, mirroring the `onNavigateIssue` path the workspace rail
-  // already uses for prev/next sibling jumps.
-  const openIssueByKey = useCallback((key) => {
-    if (!key) return;
-    setSettingsOpen(false);
-    setSettingsInitialSection(null);
-    navigate(issuePath(activeBoard, key));
   }, [navigate, activeBoard]);
 
   // Close the workspace: navigate back. With BrowserRouter the browser's
@@ -565,7 +568,7 @@ export default function App() {
   //   - Off the Pipeline (board), behaviour is unchanged: route to the new
   //     card's workspace. The standing 10s poll replaces the optimistic row
   //     with the authoritative one on its next tick.
-  const onComposerCreated = useCallback(async (newCard) => {
+  const onComposerCreated = useCallback(async (newCard: BoardCard) => {
     if (!newCard || !newCard.key) return;
     setCards(cs => [{ ...newCard }, ...cs]);
     setSettingsOpen(false);
@@ -587,7 +590,7 @@ export default function App() {
   }, [navigate, activeBoard, activeView, refreshCards]);
 
   useEffect(() => {
-    const onKey = (e) => {
+    const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setPaletteOpen(true);
@@ -644,7 +647,7 @@ export default function App() {
   // payload (BACI-50). On success, refresh the board list and jump
   // to the new repo; an empty prefix means the user cancelled the
   // dialog (desktop only — the web modal always submits a real path).
-  const addRepository = (payload) => {
+  const addRepository = (payload?: AddRepositoryPayload) => {
     return api.addRepository(payload)
       .then(board => {
         if (!board.prefix) return undefined;
@@ -681,9 +684,9 @@ export default function App() {
   // The inverse edge (terminal → non-terminal, ie. blocker reopened)
   // is covered by the targeted `refreshCards()` we fire after a
   // successful state move so the icon re-arms within ~one round-trip.
-  const moveCard = useCallback((key, toCol) => {
-    let prevCol = null;
-    let prevBlockedBy = null;
+  const moveCard = useCallback((key: string, toCol: string) => {
+    let prevCol: string | null = null;
+    let prevBlockedBy: Map<string, BoardCard['blockedBy']> | null = null;
     setCards(cs => {
       const prev = cs.find(c => c.key === key);
       if (!prev || prev.column === toCol) return cs;
@@ -696,7 +699,7 @@ export default function App() {
         prevBlockedBy = new Map();
         for (const c of cs) {
           if ((c.blockedBy || []).some(b => b.key === key)) {
-            prevBlockedBy.set(c.key, c.blockedBy);
+            prevBlockedBy.set(c.key, c.blockedBy ?? []);
           }
         }
       }
@@ -704,21 +707,23 @@ export default function App() {
       return enteringTerminal ? stripBlockerFromCards(moved, key) : moved;
     });
     if (prevCol === null) return;
+    const fromCol = prevCol;
+    const blockedBySnapshot = prevBlockedBy;
     api.setIssueState(activeBoard, key, toCol)
       .then(() => {
         // BACI-146: a non-silent refresh covers the reopen edge
         // (terminal → non-terminal) where the server needs to put
         // each affected sibling's `blockedBy` back. One HTTP call
         // per move is cheap and surfaces stale-board errors loudly.
-        if (isTerminalState(prevCol) !== isTerminalState(toCol)) {
+        if (isTerminalState(fromCol) !== isTerminalState(toCol)) {
           refreshCards();
         }
       })
       .catch(err => {
         reportError(err, { headline: "Couldn't move card" });
         setCards(cs => {
-          const reverted = cs.map(c => c.key === key ? { ...c, column: prevCol } : c);
-          return prevBlockedBy ? restoreBlockedByFromSnapshot(reverted, prevBlockedBy) : reverted;
+          const reverted = cs.map(c => c.key === key ? { ...c, column: fromCol } : c);
+          return blockedBySnapshot ? restoreBlockedByFromSnapshot(reverted, blockedBySnapshot) : reverted;
         });
       });
   }, [activeBoard, refreshCards]);
@@ -737,8 +742,9 @@ export default function App() {
   // might be queued_blocked-by-concurrency-cap, or delivered if the
   // matcher binds + delivers fast). Revert to null on failure so the
   // spinner disappears.
-  const dispatchFromCard = useCallback((cardKey, mode) => {
-    setCards(cs => cs.map(c => c.key === cardKey ? { ...c, waitingState: { kind: 'queued_no_agent', mode } } : c));
+  const dispatchFromCard = useCallback((cardKey: string, mode: string) => {
+    const optimistic: WaitingState = { kind: WaitingKind.WaitingQueuedNoAgent, mode: mode as DispatchMode };
+    setCards(cs => cs.map(c => c.key === cardKey ? { ...c, waitingState: optimistic } : c));
     api.dispatchIssue(activeBoard, cardKey, mode)
       .catch(err => {
         setCards(cs => cs.map(c => c.key === cardKey ? { ...c, waitingState: null } : c));
@@ -759,7 +765,7 @@ export default function App() {
   // (or pending/delivered) dispatch. Optimistically clears the local
   // waitingState so the spinner disappears immediately; the refresh
   // poll reads the authoritative state.
-  const cancelWaitingFromCard = useCallback((cardKey) => {
+  const cancelWaitingFromCard = useCallback((cardKey: string) => {
     api.cancelWaitingDispatch(activeBoard, cardKey)
       .then(() => {
         setCards(cs => cs.map(c => c.key === cardKey ? { ...c, waitingState: null } : c));
@@ -779,7 +785,7 @@ export default function App() {
   // selection is a discriminated shape ({ stages } from the cumulative
   // stepper, or { process } from the kept skip-Plan preset buttons).
   // Refreshes so the new pending job chain renders on the card.
-  const setCardProcess = useCallback((key, selection) => {
+  const setCardProcess = useCallback((key: string, selection: ProcessSelection) => {
     api.setCardProcess(activeBoard, key, selection)
       .then(() => refreshCards({ silent: true }))
       .catch(err => reportError(err, { headline: "Couldn't set the process" }));
@@ -791,7 +797,7 @@ export default function App() {
   // a single error headline covers both calls, and the `finally` refresh
   // leaves a coherent partial state if the Auto call fails after the process
   // saved (chain set, Auto off — the user finishes with the card's switch).
-  const setCardProcessAuto = useCallback(async (key, selection) => {
+  const setCardProcessAuto = useCallback(async (key: string, selection: ProcessSelection) => {
     try {
       await api.setCardProcess(activeBoard, key, selection);
       await api.setEngineMode(activeBoard, key, 'auto');
@@ -808,7 +814,7 @@ export default function App() {
   // the promise so ProcessEditor can navigate back on success / show its
   // own error banner on failure (no reportError here — the editor owns the
   // surface). Refreshes so the new chain renders on the card on return.
-  const editCardProcessTail = useCallback((key, stages) => {
+  const editCardProcessTail = useCallback((key: string, stages: string[]) => {
     return api.editCardProcessTail(activeBoard, key, stages)
       .then(() => refreshCards({ silent: true }));
   }, [activeBoard, refreshCards]);
@@ -818,7 +824,7 @@ export default function App() {
   // setCardProcessAuto) so ProcessEditor keeps its navigate-back / error-banner
   // contract; the engine-mode call rides inside that promise so a failure in
   // either step surfaces in the editor's own banner.
-  const editCardProcessTailAuto = useCallback((key, stages) => {
+  const editCardProcessTailAuto = useCallback((key: string, stages: string[]) => {
     return api.editCardProcessTail(activeBoard, key, stages)
       .then(() => api.setEngineMode(activeBoard, key, 'auto'))
       .then(() => refreshCards({ silent: true }));
@@ -826,14 +832,14 @@ export default function App() {
 
   // Manual Start — advance one step (start the next pending job, or run
   // the Ship hand-off when the chain ends in one).
-  const startCardJob = useCallback((key) => {
+  const startCardJob = useCallback((key: string) => {
     api.startCardJob(activeBoard, key)
       .then(() => refreshCards({ silent: true }))
       .catch(err => reportError(err, { headline: "Couldn't start the job" }));
   }, [activeBoard, refreshCards]);
 
   // Manual Stop — cancel the running job and halt Auto.
-  const stopCardJob = useCallback((key) => {
+  const stopCardJob = useCallback((key: string) => {
     api.stopCardJob(activeBoard, key)
       .then(() => refreshCards({ silent: true }))
       .catch(err => reportError(err, { headline: "Couldn't stop the job" }));
@@ -844,7 +850,7 @@ export default function App() {
   // in-card confirm gates this; the engine refuses while a job is running
   // (the card hides Reset in that state). Refreshes so the emptied chain
   // re-renders as the fresh picker.
-  const resetCardProcess = useCallback((key) => {
+  const resetCardProcess = useCallback((key: string) => {
     api.resetCardProcess(activeBoard, key)
       .then(() => refreshCards({ silent: true }))
       .catch(err => reportError(err, { headline: "Couldn't reset the process" }));
@@ -852,7 +858,7 @@ export default function App() {
 
   // Per-job Re-run — reset an aborted (stopped) step to pending and
   // re-dispatch it (BACI-291). seq is the job's 1-based sequence.
-  const rerunCardJob = useCallback((key, seq) => {
+  const rerunCardJob = useCallback((key: string, seq: number) => {
     api.rerunCardJob(activeBoard, key, seq)
       .then(() => refreshCards({ silent: true }))
       .catch(err => reportError(err, { headline: "Couldn't re-run the job" }));
@@ -860,7 +866,7 @@ export default function App() {
 
   // Engine drive-mode toggle ("off" | "auto"). Optimistic flip on the
   // card so the switch reacts on click; the refresh re-asserts.
-  const setCardEngineMode = useCallback((key, mode) => {
+  const setCardEngineMode = useCallback((key: string, mode: string) => {
     setCards(cs => cs.map(c => c.key === key ? { ...c, engineMode: mode } : c));
     api.setEngineMode(activeBoard, key, mode)
       .then(() => refreshCards({ silent: true }))
@@ -878,7 +884,7 @@ export default function App() {
   // mid-chain failure the steps before it already persisted and the ones
   // after never ran, so the `finally` refresh leaves the board in a
   // coherent partial state the user can complete by hand.
-  const fastTrackCard = useCallback(async (key) => {
+  const fastTrackCard = useCallback(async (key: string) => {
     try {
       await api.setIssueState(activeBoard, key, 'in_pipeline');
       await api.setCardProcess(activeBoard, key, { process: 'plan-implement-ship' });
@@ -893,8 +899,8 @@ export default function App() {
   // Ship hand-off — move an in_pipeline card to to_be_shipped (no agent
   // dispatched here; the ship agent fires from the Shipping column).
   // Optimistic column move mirrors moveCard.
-  const shipCardFromPipeline = useCallback((key) => {
-    let prevCol = null;
+  const shipCardFromPipeline = useCallback((key: string) => {
+    let prevCol: string | null = null;
     setCards(cs => cs.map(c => {
       if (c.key !== key) return c;
       prevCol = c.column;
@@ -904,7 +910,8 @@ export default function App() {
       .then(() => refreshCards({ silent: true }))
       .catch(err => {
         reportError(err, { headline: "Couldn't ship the card" });
-        if (prevCol) setCards(cs => cs.map(c => c.key === key ? { ...c, column: prevCol } : c));
+        const fromCol = prevCol;
+        if (fromCol) setCards(cs => cs.map(c => c.key === key ? { ...c, column: fromCol } : c));
       });
   }, [activeBoard, refreshCards]);
 
@@ -912,7 +919,7 @@ export default function App() {
   // Pipeline's trash bin through the terminal-move path — moveCard already
   // handles the optimistic column flip (the card leaves its column),
   // `cancelled`-as-terminal blocker-strip, persistence, and rollback.
-  const cancelCardFromPipeline = useCallback((key) => {
+  const cancelCardFromPipeline = useCallback((key: string) => {
     moveCard(key, 'cancelled');
   }, [moveCard]);
 
@@ -920,14 +927,14 @@ export default function App() {
   // card dropped onto the Done zone through the same terminal-move path
   // (`done` is already in TERMINAL_STATES), so the optimistic column flip,
   // blocker-strip, persistence, and rollback all come for free.
-  const doneCardFromPipeline = useCallback((key) => {
+  const doneCardFromPipeline = useCallback((key: string) => {
     moveCard(key, 'done');
   }, [moveCard]);
 
   // Backlog / Shipping drag-to-reorder. position is 1-based within the
   // card's (repo, state) band. PipelineView handles the optimistic
   // in-list move during the drag; this persists + reconciles.
-  const reorderPipelineCard = useCallback((key, position) => {
+  const reorderPipelineCard = useCallback((key: string, position: number) => {
     api.reorderCard(activeBoard, key, position)
       .then(() => refreshCards({ silent: true }))
       .catch(err => {
@@ -947,9 +954,9 @@ export default function App() {
   // the badge updates instantly (mirrors moveCard's optimistic blocker
   // edits); the silent refresh on success re-asserts the authoritative
   // shape, and a failure reverts the splice via reportError.
-  const onBlockCard = useCallback((sourceKey, targetKey) => {
+  const onBlockCard = useCallback((sourceKey: string, targetKey: string) => {
     if (!sourceKey || !targetKey || sourceKey === targetKey) return;
-    let prevBlockedBy = null;
+    let prevBlockedBy: BoardCard['blockedBy'] | null = null;
     setCards(cs => {
       const source = cs.find(c => c.key === sourceKey);
       const target = cs.find(c => c.key === targetKey);
@@ -957,15 +964,16 @@ export default function App() {
       const existing = source.blockedBy || [];
       if (existing.some(b => b.key === targetKey)) return cs; // already blocked — no-op
       prevBlockedBy = existing;
-      const nextBlockedBy = [...existing, { key: targetKey, state: target.column }];
+      const nextBlockedBy = [...existing, { key: targetKey, state: target.column as State }];
       return cs.map(c => c.key === sourceKey ? { ...c, blockedBy: nextBlockedBy } : c);
     });
     if (prevBlockedBy === null) return; // guard tripped — nothing to persist
+    const snapshot = prevBlockedBy;
     api.createRelation(activeBoard, targetKey, sourceKey)
       .then(() => refreshCards({ silent: true }))
       .catch(err => {
         reportError(err, { headline: "Couldn't link cards" });
-        setCards(cs => cs.map(c => c.key === sourceKey ? { ...c, blockedBy: prevBlockedBy } : c));
+        setCards(cs => cs.map(c => c.key === sourceKey ? { ...c, blockedBy: snapshot } : c));
       });
   }, [activeBoard, refreshCards]);
 
@@ -973,7 +981,7 @@ export default function App() {
   // state (seeded from localStorage — the backend exposes no GET); this
   // persists the change. Returns the promise so the view can revert its
   // optimistic flip on failure.
-  const setRepoAutoShip = useCallback((enabled) => {
+  const setRepoAutoShip = useCallback((enabled: boolean) => {
     return api.setAutoShip(activeBoard, enabled)
       .catch(err => { reportError(err, { headline: "Couldn't toggle auto-ship" }); throw err; });
   }, [activeBoard]);
@@ -982,7 +990,7 @@ export default function App() {
   // PipelineView owns the display state (seeded from the backend GET);
   // this persists the change. Returns the promise so the view can revert
   // its optimistic flip on failure.
-  const setBacklogCollapsed = useCallback((collapsed) => {
+  const setBacklogCollapsed = useCallback((collapsed: boolean) => {
     return api.setBacklogCollapsed(activeBoard, collapsed)
       .catch(err => { reportError(err, { headline: "Couldn't collapse backlog" }); throw err; });
   }, [activeBoard]);
@@ -991,7 +999,7 @@ export default function App() {
   // refreshes the brief so the inline view re-renders with the
   // persisted state. Failures surface through reportError; the
   // workspace components catch their own setBusy flags.
-  const saveDescription = useCallback(async (description) => {
+  const saveDescription = useCallback(async (description: string) => {
     if (!openIssueKey) return;
     try {
       await api.updateIssueDescription(activeBoard, openIssueKey, description);
@@ -1009,7 +1017,7 @@ export default function App() {
   // BACI-292: title editing from the workspace header. The card list does
   // carry the title, so the cards refresh matters here — the kanban card
   // re-renders with the new title without waiting for the 10s poll.
-  const saveTitle = useCallback(async (title) => {
+  const saveTitle = useCallback(async (title: string) => {
     if (!openIssueKey) return;
     try {
       await api.updateIssueTitle(activeBoard, openIssueKey, title);
@@ -1025,7 +1033,7 @@ export default function App() {
   // the transcript_event_ref the per-event composer in the transcript
   // viewer fills in. The existing CommentComposer path keeps passing
   // (author, body) and lands the comment as a plain row.
-  const addComment = useCallback(async (author, body, opts) => {
+  const addComment = useCallback(async (author: string, body: string, opts?: { eval?: boolean; transcriptEventRef?: string }) => {
     if (!openIssueKey) return;
     try {
       await api.addComment(activeBoard, openIssueKey, author, body, opts);
@@ -1036,7 +1044,7 @@ export default function App() {
     }
   }, [activeBoard, openIssueKey, refreshBrief]);
 
-  const deleteComment = useCallback(async (commentUUID) => {
+  const deleteComment = useCallback(async (commentUUID: string) => {
     if (!openIssueKey || !commentUUID) return;
     try {
       await api.deleteComment(activeBoard, openIssueKey, commentUUID);
@@ -1047,7 +1055,7 @@ export default function App() {
     }
   }, [activeBoard, openIssueKey, refreshBrief]);
 
-  const attachPR = useCallback(async (url) => {
+  const attachPR = useCallback(async (url: string) => {
     if (!openIssueKey) return;
     await api.attachPullRequest(activeBoard, openIssueKey, url);
     refreshBrief();
@@ -1076,7 +1084,7 @@ export default function App() {
   // scope; the picker lives inside ShippedPopover and re-writes on
   // every click via the onScopeChange callback below.
   const [shippedScope, setShippedScope] = useState(readShippedScope);
-  const changeShippedScope = useCallback((next) => {
+  const changeShippedScope = useCallback((next: ShippedScope) => {
     setShippedScope(next);
     persistShippedScope(next);
   }, []);
@@ -1091,13 +1099,13 @@ export default function App() {
   // show_archived + the per-feature board-hide set, and (b) couldn't
   // represent "Forever" at all. Moving to server-side counting fixes
   // both and lets the count change with the scope picker.
-  const [shippedCount, setShippedCount] = useState(0);
+  const [shippedCount, setShippedCount] = useState<number | null>(0);
   // BACI-295: previous-count ref the count-rise SFX watch (below) diffs
   // against, so a genuine rise can be told apart from a first-load /
   // navigation refill. The scope/repo-change effect blanks `shippedCount`
   // to the `null` loading sentinel rather than poking this ref directly —
   // that null is what makes the watch snap (not ding) on the refill.
-  const prevShippedCountRef = useRef(null);
+  const prevShippedCountRef = useRef<number | null>(null);
   // refreshShippedCount (BACI-276): the single fetch the poll effect and
   // the on-ship trigger both invoke. Stable across renders so the
   // ship-flourish callback can call it without re-running its own
@@ -1158,7 +1166,7 @@ export default function App() {
   // BACI-287: deep-link a notification row to its issue. Cross-repo — the
   // row carries its own prefix, which may differ from the active board, so
   // navigate to that prefix's workspace route directly.
-  const openNotificationIssue = useCallback((prefix, key) => {
+  const openNotificationIssue = useCallback((prefix: string, key: string) => {
     if (!prefix || !key) return;
     navigate(issuePath(prefix, key));
   }, [navigate]);
@@ -1195,8 +1203,14 @@ export default function App() {
   // so the refill after a repo/scope switch reads as a fresh first-load
   // snap, not a rise. No false ding when you just switched repo or scope.
   useEffect(() => {
-    const action = decideOdometerAction(prevShippedCountRef.current, shippedCount);
-    if (action.kind === 'roll') playShipSfx();
+    // A null `shippedCount` is the loading sentinel — decideOdometerAction
+    // treats a non-finite `next` as a snap (never a roll), so skipping the
+    // call when null preserves the original "no ding while loading"
+    // behaviour without feeding null through the number-typed `next` arg.
+    if (shippedCount !== null) {
+      const action = decideOdometerAction(prevShippedCountRef.current, shippedCount);
+      if (action.kind === 'roll') playShipSfx();
+    }
     prevShippedCountRef.current = shippedCount;
   }, [shippedCount, playShipSfx]);
 
@@ -1226,7 +1240,7 @@ export default function App() {
   // the kanban blocked-popover link. Kept as a memoised callback so
   // KanbanCard / IssueWorkspace / RelationsPanel can drop it into
   // effect-dep arrays without thrashing.
-  const navigateToIssue = useCallback((key) => {
+  const navigateToIssue = useCallback((key: string) => {
     if (!key) return;
     navigate(issuePath(activeBoard, key));
   }, [navigate, activeBoard]);
@@ -1239,7 +1253,7 @@ export default function App() {
   // RepoPicker and the RepoNotFound screen. Falls back to the board
   // view ('board' → /issues) when the current path isn't a known nav
   // view (e.g. the repo-not-found screen itself).
-  const pickBoard = useCallback((prefix) => {
+  const pickBoard = useCallback((prefix: string) => {
     if (!prefix) return;
     const currentView = viewFromPath(location.pathname) || 'pipeline';
     navigate(viewPath(prefix, currentView));
@@ -1349,7 +1363,7 @@ export default function App() {
                   onSetProcess={setCardProcess}
                   onSetProcessAuto={setCardProcessAuto}
                   onResetProcess={resetCardProcess}
-                  onEditProcess={(key) => navigate(processEditPath(activeBoard, key))}
+                  onEditProcess={(key: string) => navigate(processEditPath(activeBoard, key))}
                   onStartJob={startCardJob}
                   onStopJob={stopCardJob}
                   onRerunJob={rerunCardJob}
@@ -1400,7 +1414,7 @@ export default function App() {
               <ErrorBoundary headline="Something went wrong in the issue view" label="The issue view crashed">
                 <IssueWorkspace
                   activeBoard={activeBoard}
-                  openIssueKey={openIssueKey}
+                  openIssueKey={openIssueKey!}
                   brief={openIssueBrief}
                   cards={cards}
                   onClose={closeIssue}
