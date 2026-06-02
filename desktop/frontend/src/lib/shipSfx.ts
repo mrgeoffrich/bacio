@@ -32,7 +32,7 @@
 // never spend the decode cost. Back-to-back plays reset currentTime to
 // 0 so the previous play stops cleanly rather than overlapping.
 //
-// Trigger: App.jsx's shippedCount-rise effect (BACI-295) calls `play()`
+// Trigger: App.tsx's shippedCount-rise effect (BACI-295) calls `play()`
 // whenever the server-derived Shipped count genuinely rises — the same
 // signal that rolls the Pipeline pill's odometer. (Pre-BACI-295 this
 // rode shipFlourish.ts's card→done diff via ShippedPopover's flash-edge;

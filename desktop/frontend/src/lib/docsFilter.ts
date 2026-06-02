@@ -1,5 +1,5 @@
 // docsFilter — pure helpers for the BACI-204 Documents page facet
-// rail + toolbar. Keeps the reducer/row code in DocsList.jsx free of
+// rail + toolbar. Keeps the reducer/row code in DocsList.tsx free of
 // branchy filter logic so the contract can be smoke-tested in plain
 // Node (see desktop/frontend/src/lib/__tests__/docsFilter.smoketest.mjs).
 //

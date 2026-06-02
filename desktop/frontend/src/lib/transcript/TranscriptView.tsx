@@ -247,7 +247,7 @@ export default function TranscriptView({
     if (!root) return undefined;
     const els: HTMLElement[] = [];
     const indexOfId = new Map<string, number>();
-    visibleItems.forEach((it, i) => {
+    visibleItems.forEach((it, _i) => {
       const el = document.getElementById(anchorIdFor(it));
       if (el) {
         els.push(el);

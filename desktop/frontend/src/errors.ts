@@ -2,7 +2,7 @@
 //
 // Every unexpected failure in the UI (Wails binding rejection, thrown
 // exception, render-time crash, unhandled promise) goes through
-// reportError(). The ErrorModal mounted in App.jsx subscribes to the
+// reportError(). The ErrorModal mounted in App.tsx subscribes to the
 // bus and surfaces one error at a time in a dismissable modal.
 //
 // The bus is a module-level singleton (not a React context) so

@@ -1,5 +1,5 @@
 // Single source of truth for the BACI-221 Today / Last Week / Forever
-// scope picker on the Pipeline Shipping-column Shipped popover. App.jsx owns the active
+// scope picker on the Pipeline Shipping-column Shipped popover. App.tsx owns the active
 // scope state (so the pill count and the popover list can never drift),
 // ShippedPopover renders the picker, and both reach for `scopeSinceDays`
 // here when shaping the API call. Keeping the type + the cutoff math in

@@ -1,6 +1,6 @@
 // blockedByBadge (BACI-310) — the pure classification behind the
 // Pipeline card's blocked-by indicator. Lives here, not inline in
-// PipelineView.jsx, so it can be unit-tested headlessly (plain Node, no
+// PipelineView.tsx, so it can be unit-tested headlessly (plain Node, no
 // React/JSX) the same way featureGraphLayout.ts backs the
 // featureDependencyLayout smoke test.
 //

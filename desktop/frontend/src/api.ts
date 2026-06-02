@@ -81,7 +81,7 @@ import type { ProcessSelection } from './lib/pipelineProcesses';
 
 export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureLinkedDoc, FeaturePlan, FeaturePlanEntry, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, ArchivePreferencesDTO, AudioPreferencesDTO, TimezonePreferencesDTO, WaitingState, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO, SyncSetupDTO, CollisionPreviewDTO, RenumberEntryDTO, RenameEntryDTO, RepoLinkResultDTO, ShippedIssueDTO, ShippedListDTO, LatestPlanDTO, Notification };
 // BACI-216: cross-transport alias. The web bundle's api.http.ts ships
-// the same name from its own TS-only shape so KanbanCard / IssueWorkspace
+// the same name from its own TS-only shape so PipelineCard / IssueWorkspace
 // stay transport-agnostic.
 export type LatestPlan = LatestPlanDTO;
 // BACI-304: cross-transport alias for the Monitor screen's per-FQDN
@@ -379,7 +379,7 @@ export async function cancelWaitingDispatch(
 // the dispatch being acked (the NeedsRescue flag on DispatchDTO).
 // Eligibility re-checks live on the backend so a stale UI click can't
 // queue an invalid rescue; errors surface as Error.message and bubble
-// through reportError() in App.jsx.
+// through reportError() in App.tsx.
 export async function rescueDispatch(dispatchID: number): Promise<DispatchDTO> {
   try {
     return await BoardService.RescueDispatch(dispatchID);
@@ -1270,7 +1270,7 @@ export async function setAudioPreferences(
 
 // BACI-312: ui.timezone global setting (IANA zone name). Drives the
 // browser-side local-midnight cutoff for the Pipeline Shipping-column
-// Shipped pill's "Today" scope. Empty when unset — App.jsx auto-detects
+// Shipped pill's "Today" scope. Empty when unset — App.tsx auto-detects
 // the browser zone and persists it on first run.
 
 export async function getTimezonePreferences(): Promise<TimezonePreferencesDTO> {
