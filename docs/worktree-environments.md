@@ -48,7 +48,7 @@ identity:
   created_at: 2026-05-18T18:14:00+10:00
 
 allocations:
-  api_port: 5321
+  api_port: 5324                            # reserves the pair 5323 (proxy) + 5324 (API)
   db_path: /Users/geoff/.bacio/db.sqlite   # shared store — the default
   # db_path: .bacio/db.sqlite              # per-worktree DB (--isolate-db)
   # log_dir: logs                          # optional (BACI-73); see below
@@ -69,8 +69,14 @@ Fields:
 - `identity.created_at` — ISO-8601 timestamp written by `init`.
 - `allocations.api_port` — the bind port `bacio api` uses by default.
   Auto-allocated at `init` time (deterministic hash of the slug plus a
-  collision walk against the global registry); port `5320` is reserved
-  for the legacy manifest-free default.
+  collision walk against the global registry). Each worktree actually
+  reserves an adjacent **pair** of ports: `api_port` and the derived
+  reverse-proxy port one below it (`api_port − 1`, BACI-344 — see
+  [`reverse-proxy.md`](reverse-proxy.md)). The allocator keeps the pairs
+  disjoint, so no worktree's API port ever lands on another's proxy
+  port. The default pair `5320` (API) + `5319` (proxy) is reserved for
+  the legacy manifest-free default; the lowest auto-allocated API port
+  is therefore `5322` (its proxy `5321`).
 - `allocations.db_path` — the SQLite DB this worktree's bacio resolves
   to. `bacio worktree init` pins the **shared** `~/.bacio/db.sqlite` by
   absolute path here unless DB isolation was requested (see
@@ -106,12 +112,12 @@ without a filesystem walk.
 worktrees:
   - slug: bacio
     path: /Users/geoff/Repos/bacio
-    api_port: 5321
+    api_port: 5322   # pair: 5321 (proxy) + 5322 (API)
     db_path: /Users/geoff/Repos/bacio/.bacio/db.sqlite
     created_at: 2026-05-18T17:00:00+10:00
   - slug: bacio-baci-63
     path: /Users/geoff/Repos/bacio-BACI-63
-    api_port: 5322
+    api_port: 5324   # pair: 5323 (proxy) + 5324 (API) — note the 2-port step
     db_path: /Users/geoff/Repos/bacio-BACI-63/.bacio/db.sqlite
     created_at: 2026-05-18T18:14:00+10:00
 ```
@@ -121,8 +127,9 @@ Notes:
 - `db_path` here is always absolute, even when the per-worktree YAML
   stores it relative. Lets `bacio worktree list` print stats without
   opening each manifest.
-- The legacy default (`~/.bacio/db.sqlite` + port `5320`) is NOT
-  registered; only worktrees that ran `init` appear.
+- The legacy default (`~/.bacio/db.sqlite` + API port `5320`, proxy
+  port `5319`) is NOT registered; only worktrees that ran `init` appear.
+  The allocator still reserves that pair so an `init` never lands on it.
 - The per-worktree YAML wins on disagreement. The registry is a
   cache; rebuilding it from the YAMLs is always safe.
 - A `!` mark next to an entry in `bacio worktree list` means the

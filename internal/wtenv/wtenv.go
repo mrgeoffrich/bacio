@@ -27,6 +27,15 @@
 //
 // Step 3 returning "no manifest present" is not an error; it falls
 // through to step 4 so existing users see no behaviour change.
+//
+// BACI-344: alongside the UI/API addr, Resolve also derives a stable
+// proxy addr (ProxyAddr) — the API port minus one — for the standalone
+// `bacio proxy serve` reverse-proxy listener. Splitting the proxy onto
+// its own deliberately tiny, long-lived process lets `bacio web` (UI +
+// REST API) be upgraded/restarted without dropping the liveness-critical
+// /anthropic/* pipe every agent pins via ANTHROPIC_BASE_URL. The proxy
+// addr is derived, not configured, so a worktree manifest's allocated
+// API port yields a collision-free proxy port for free.
 package wtenv
 
 import (
@@ -62,6 +71,17 @@ const DefaultAPIPort = 5320
 // DefaultAPIHost is the historical bind host (the host half of
 // DefaultAPIAddr).
 const DefaultAPIHost = "127.0.0.1"
+
+// DefaultProxyPort is the port the standalone reverse-proxy listener
+// (`bacio proxy serve`, BACI-344) falls back to — DefaultAPIPort − 1.
+// Derived rather than configured: the proxy addr always trails the
+// resolved API port by one, so a worktree manifest's allocated port
+// yields a collision-free proxy port without a second allocation.
+const DefaultProxyPort = DefaultAPIPort - 1
+
+// DefaultProxyAddr is the historical bind address for the standalone
+// reverse proxy (the host half of DefaultAPIAddr with DefaultProxyPort).
+const DefaultProxyAddr = "127.0.0.1:5319"
 
 // EnvVar names the environment variable that overrides the worktree
 // manifest lookup.
@@ -161,16 +181,22 @@ type ResolveOpts struct {
 	FileExists      func(path string) bool
 }
 
-// Resolved is the output of Resolve. DBPath and APIAddr are always
-// populated; ManifestPath is set only when a manifest file actually
-// fed the resolution (i.e. Source is Env or Worktree, or Flag with a
-// nearby manifest).
+// Resolved is the output of Resolve. DBPath, APIAddr, and ProxyAddr are
+// always populated; ManifestPath is set only when a manifest file
+// actually fed the resolution (i.e. Source is Env or Worktree, or Flag
+// with a nearby manifest).
+//
+// ProxyAddr (BACI-344) is the stable address the standalone
+// `bacio proxy serve` reverse-proxy listener binds — derived as the
+// API port minus one (proxyAddrFor) so it tracks whatever port APIAddr
+// resolved to, flag overrides included.
 type Resolved struct {
 	Source       Source
 	ManifestPath string
 	Manifest     *Manifest
 	DBPath       string
 	APIAddr      string
+	ProxyAddr    string
 }
 
 // ManifestSlug returns the slug of the resolved manifest, or empty
@@ -241,6 +267,7 @@ func Resolve(opts ResolveOpts) (Resolved, error) {
 			Manifest:     m,
 			DBPath:       dbPath,
 			APIAddr:      apiAddr,
+			ProxyAddr:    proxyAddrFor(apiAddr),
 		}, nil
 	}
 
@@ -250,9 +277,10 @@ func Resolve(opts ResolveOpts) (Resolved, error) {
 	// when the user has named the path directly.
 	if opts.FlagDB != "" && opts.FlagAddr != "" {
 		return Resolved{
-			Source:  SourceFlag,
-			DBPath:  opts.FlagDB,
-			APIAddr: opts.FlagAddr,
+			Source:    SourceFlag,
+			DBPath:    opts.FlagDB,
+			APIAddr:   opts.FlagAddr,
+			ProxyAddr: proxyAddrFor(opts.FlagAddr),
 		}, nil
 	}
 
@@ -269,10 +297,12 @@ func Resolve(opts ResolveOpts) (Resolved, error) {
 			// override. Log to stderr and fall through to the
 			// flag-only result.
 			if opts.FlagDB != "" {
+				apiAddr := applyFlagAddr(DefaultAPIAddr, opts.FlagAddr)
 				return Resolved{
-					Source:  SourceFlag,
-					DBPath:  opts.FlagDB,
-					APIAddr: applyFlagAddr(DefaultAPIAddr, opts.FlagAddr),
+					Source:    SourceFlag,
+					DBPath:    opts.FlagDB,
+					APIAddr:   apiAddr,
+					ProxyAddr: proxyAddrFor(apiAddr),
 				}, nil
 			}
 			return Resolved{}, fmt.Errorf("%s=%q: %w", EnvVar, envPath, err)
@@ -311,6 +341,10 @@ func Resolve(opts ResolveOpts) (Resolved, error) {
 		res.APIAddr = opts.FlagAddr
 		res.Source = SourceFlag
 	}
+	// Derive the proxy addr from the *final* API addr (after flag
+	// overrides) so --addr / --port flow through to the standalone
+	// proxy listener too.
+	res.ProxyAddr = proxyAddrFor(res.APIAddr)
 	return res, nil
 }
 
@@ -352,6 +386,23 @@ func manifestAPIAddr(m *Manifest) string {
 		port = DefaultAPIPort
 	}
 	return net.JoinHostPort(DefaultAPIHost, strconv.Itoa(port))
+}
+
+// proxyAddrFor derives the standalone reverse-proxy bind address from a
+// resolved API address (BACI-344): the same host, with the port reduced
+// by one. An unparseable addr or a port at or below 1 (where port−1
+// would be 0 / negative) falls back to DefaultProxyAddr, so the proxy
+// listener always has a usable address rather than a malformed one.
+func proxyAddrFor(apiAddr string) string {
+	host, portStr, err := net.SplitHostPort(apiAddr)
+	if err != nil || host == "" {
+		return DefaultProxyAddr
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port <= 1 {
+		return DefaultProxyAddr
+	}
+	return net.JoinHostPort(host, strconv.Itoa(port-1))
 }
 
 // LoadManifest reads a YAML manifest from disk. Returns an error if

@@ -17,6 +17,7 @@ import (
 
 	"github.com/mrgeoffrich/bacio/internal/api"
 	"github.com/mrgeoffrich/bacio/internal/browseropen"
+	"github.com/mrgeoffrich/bacio/internal/store"
 	"github.com/mrgeoffrich/bacio/internal/version"
 )
 
@@ -66,6 +67,7 @@ func newWebCmd() *cobra.Command {
 		token       string
 		corsOrigins []string
 		noOpen      bool
+		noProxy     bool
 	)
 	cmd := &cobra.Command{
 		Use:   "web",
@@ -180,6 +182,14 @@ Incoming requests carry their own actor via the X-Actor header
 				go openBrowserWhenReady(ctx, addr, logger)
 			}
 
+			// BACI-344: stand up a second /anthropic-only listener on the
+			// stable proxy port so a fresh agent (whose ANTHROPIC_BASE_URL
+			// now points there) works out of the box without a separate
+			// `bacio proxy serve`. --no-proxy opts out once you've adopted
+			// the dedicated proxy; a bind clash is non-fatal (logged) — it
+			// means a `bacio proxy serve` already owns that port.
+			startSecondaryProxy(ctx, !noProxy, s, env.ProxyAddr, addr, logDir, logger)
+
 			err = friendlyServeErr(addr, srv.Run(ctx))
 			if err != nil {
 				logger.Error("web shutdown", "err", err)
@@ -196,7 +206,42 @@ Incoming requests carry their own actor via the X-Actor header
 		"allow cross-origin browser requests from this origin (repeatable; e.g. http://localhost:5174). Empty allow-list = same-origin only.")
 	cmd.Flags().BoolVar(&noOpen, "no-open", false,
 		"start the server and mount the bundle, but skip the browser launch (SSH, headless CI, agent-driven testing)")
+	cmd.Flags().BoolVar(&noProxy, "no-proxy", false,
+		"skip the second /anthropic-only listener on the proxy port (BACI-344). Use it once a dedicated `bacio proxy serve` owns that port, so the two don't clash.")
 	return cmd
+}
+
+// startSecondaryProxy stands up the BACI-344 second /anthropic-only listener
+// on the stable proxy port, in a goroutine bound to ctx. It is the
+// all-in-one default for `bacio web` / `bacio api`: the launch one-liner now
+// points new agents at the proxy port, so without a separate
+// `bacio proxy serve` the all-in-one process must answer there too, or a
+// fresh agent gets connection-refused.
+//
+// No-ops when enabled is false (--no-proxy) or when proxyAddr is empty /
+// equal to the main addr (a hand-edited manifest where port−1 collapsed onto
+// the API port — the main listener already serves /anthropic there). A bind
+// failure on the proxy port is NON-FATAL: it almost always means a dedicated
+// `bacio proxy serve` already owns the port, which is exactly the adopt-the-
+// standalone-proxy path — log one info line and let it keep running.
+func startSecondaryProxy(ctx context.Context, enabled bool, s *store.Store, proxyAddr, mainAddr, logDir string, logger *slog.Logger) {
+	if !enabled || proxyAddr == "" || proxyAddr == mainAddr {
+		return
+	}
+	proxySrv := api.NewProxyServer(s, api.Options{
+		Addr:   proxyAddr,
+		LogDir: logDir,
+	}, logger)
+	go func() {
+		if err := proxySrv.Run(ctx); err != nil {
+			if errors.Is(err, syscall.EADDRINUSE) {
+				logger.Info("proxy port in use — assuming a dedicated `bacio proxy serve` owns it; the all-in-one second listener is skipped",
+					"proxy_addr", proxyAddr)
+				return
+			}
+			logger.Error("secondary proxy listener stopped", "proxy_addr", proxyAddr, "err", err)
+		}
+	}()
 }
 
 // openBrowserWhenReady polls GET http://<addr>/healthz until it

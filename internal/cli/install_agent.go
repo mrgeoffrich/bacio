@@ -167,12 +167,13 @@ unchanged.`,
 			printInstallAgentBanner(os.Stderr)
 			printWorktreeManifestHint(os.Stderr, info.Root)
 			// Resolve the reverse-proxy endpoint for the activation banner's
-			// launch one-liner (BACI-301). Best-effort: a resolution miss
-			// falls back to the default host:port via ProxyEndpoint rather
-			// than failing the install over a cosmetic banner.
+			// launch one-liner (BACI-344: the standalone proxy port,
+			// env.ProxyAddr). Best-effort: a resolution miss falls back to
+			// the default host:port via ProxyEndpoint rather than failing
+			// the install over a cosmetic banner.
 			var bannerAddr string
 			if env, err := resolveEnv(); err == nil {
-				bannerAddr = env.APIAddr
+				bannerAddr = env.ProxyAddr
 			}
 			printActivationBanner(os.Stderr, agentmode.ProxyEndpoint(bannerAddr))
 			return nil

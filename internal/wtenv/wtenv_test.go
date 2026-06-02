@@ -473,7 +473,10 @@ func TestRegistry_AllocatePortDeterministicPerSlug(t *testing.T) {
 // AllocatePort must skip a port that is live (a process is listening
 // on it) even when no registry entry claims it — the case that, left
 // unhandled, hands a new worktree the port the user's own running
-// `bacio web` is serving on.
+// `bacio web` is serving on. A live port at `seed` blocks two slots,
+// not one: `seed` as an API candidate, and `seed+1` whose derived proxy
+// port (seed+1−1 = seed) would clash with the live listener (BACI-344
+// proxy-pair reservation). So the allocator lands on `seed+2`.
 func TestRegistry_AllocatePortSkipsBoundPortNotInRegistry(t *testing.T) {
 	seed := DefaultAPIPort + 1 + HashPortOffset("alpha")
 	stubPortProbe(t, seed) // seed slot is bound, but no registry entry says so
@@ -484,7 +487,204 @@ func TestRegistry_AllocatePortSkipsBoundPortNotInRegistry(t *testing.T) {
 	if got == seed {
 		t.Errorf("returned the bound port %d instead of walking past it", seed)
 	}
-	if got != seed+1 {
-		t.Errorf("expected the next slot %d, got %d", seed+1, got)
+	if got == seed+1 {
+		t.Errorf("returned %d, whose proxy port %d is the bound port %d", got, got-1, seed)
+	}
+	if got != seed+2 {
+		t.Errorf("expected the next disjoint slot %d, got %d", seed+2, got)
+	}
+}
+
+// An existing registry entry at API port P reserves the whole pair
+// {P−1 (its proxy), P}, and additionally blocks the slot directly above
+// it: a worktree at P+1 derives proxy P, colliding with the existing
+// API listener. The allocator must skip P → P+2, never handing out the
+// adjacent P+1 (BACI-344 proxy-pair reservation — the bug a bare
+// APIPort-only `taken` set used to allow).
+func TestRegistry_AllocatePortSkipsNeighbourOfExistingEntry(t *testing.T) {
+	stubPortProbe(t) // no host ports bound — isolate from the host
+	seed := DefaultAPIPort + 1 + HashPortOffset("alpha")
+	reg := &Registry{Worktrees: []RegistryEntry{
+		{Slug: "other", Path: "/other", APIPort: seed},
+	}}
+	got, err := reg.AllocatePort("alpha")
+	if err != nil {
+		t.Fatalf("AllocatePort: %v", err)
+	}
+	if got == seed {
+		t.Errorf("returned the taken API port %d", seed)
+	}
+	if got == seed+1 {
+		t.Errorf("returned %d, whose proxy %d collides with the existing API port %d", got, got-1, seed)
+	}
+	if got != seed+2 {
+		t.Errorf("expected the next disjoint slot %d, got %d", seed+2, got)
+	}
+}
+
+// AllocatePort hands each worktree an adjacent *pair* of ports — the API
+// port and its derived proxy port one below (BACI-344). Allocating a run
+// of worktrees, every pair must stay disjoint from every other pair and
+// from the reserved default pair {DefaultProxyPort, DefaultAPIPort}.
+// This is the cross-worktree invariant the proxy-pair reservation
+// guarantees: no worktree's API port ever lands on another's proxy port.
+func TestRegistry_AllocatePortKeepsProxyPairsDisjoint(t *testing.T) {
+	stubPortProbe(t) // no host ports bound
+	reg := &Registry{}
+	used := map[int]string{
+		DefaultProxyPort: "default:proxy",
+		DefaultAPIPort:   "default:api",
+	}
+	// Distinct slugs so each Upsert is a fresh registry row.
+	slugs := []string{"alpha", "bravo", "charlie", "delta", "echo", "foxtrot"}
+	for _, slug := range slugs {
+		api, err := reg.AllocatePort(slug)
+		if err != nil {
+			t.Fatalf("allocate %s: %v", slug, err)
+		}
+		proxy := api - 1
+		for _, p := range []int{proxy, api} {
+			if owner, ok := used[p]; ok {
+				t.Fatalf("worktree %s port %d collides with %s", slug, p, owner)
+			}
+		}
+		used[proxy] = slug + ":proxy"
+		used[api] = slug + ":api"
+		reg.Upsert(RegistryEntry{Slug: slug, Path: "/wt/" + slug, APIPort: api})
+	}
+}
+
+// TestResolveProxyAddr covers the BACI-344 stable proxy addr: it is
+// always derived as the API port minus one, tracking whatever the API
+// addr resolved to across every source (default, worktree manifest,
+// flag, env), with a fallback to DefaultProxyAddr for an unparseable
+// addr or a port at/below 1 where port−1 would be 0/negative.
+func TestResolveProxyAddr(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+
+	t.Run("default", func(t *testing.T) {
+		res, err := Resolve(ResolveOpts{
+			Cwd:             tmp,
+			HomeDir:         home,
+			EnvLookup:       func(string) string { return "" },
+			GitDetect:       func(string) (*git.Info, error) { return nil, git.ErrNotARepo },
+			GitWorktreeRoot: func(string) (string, error) { return "", git.ErrNotARepo },
+		})
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		if res.ProxyAddr != DefaultProxyAddr {
+			t.Errorf("proxy_addr: got %q, want %q", res.ProxyAddr, DefaultProxyAddr)
+		}
+	})
+
+	t.Run("worktree_manifest_port_minus_one", func(t *testing.T) {
+		root := filepath.Join(tmp, "wt")
+		writeFile(t, filepath.Join(root, DefaultManifestFilename), `identity:
+  slug: my-wt
+allocations:
+  api_port: 5350
+  db_path: .bacio/db.sqlite
+`)
+		res, err := Resolve(ResolveOpts{
+			Cwd:             root,
+			HomeDir:         home,
+			EnvLookup:       func(string) string { return "" },
+			GitDetect:       fakeGit(root),
+			GitWorktreeRoot: fakeWorktreeRoot(root),
+		})
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		if res.APIAddr != "127.0.0.1:5350" {
+			t.Fatalf("api_addr: got %q, want 127.0.0.1:5350", res.APIAddr)
+		}
+		if res.ProxyAddr != "127.0.0.1:5349" {
+			t.Errorf("proxy_addr: got %q, want 127.0.0.1:5349 (api port − 1)", res.ProxyAddr)
+		}
+	})
+
+	t.Run("flag_addr_flows_through", func(t *testing.T) {
+		res, err := Resolve(ResolveOpts{
+			Cwd:       tmp,
+			FlagDB:    "/explicit/db.sqlite",
+			FlagAddr:  "127.0.0.1:9999",
+			HomeDir:   home,
+			EnvLookup: func(string) string { return "" },
+		})
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		if res.ProxyAddr != "127.0.0.1:9998" {
+			t.Errorf("proxy_addr: got %q, want 127.0.0.1:9998 (flag api port − 1)", res.ProxyAddr)
+		}
+	})
+
+	t.Run("flag_port_only_flows_through", func(t *testing.T) {
+		// --addr alone (no --db): the default-branch fall-through derives
+		// the proxy addr from the *final* api addr.
+		res, err := Resolve(ResolveOpts{
+			Cwd:             tmp,
+			FlagAddr:        "127.0.0.1:6000",
+			HomeDir:         home,
+			EnvLookup:       func(string) string { return "" },
+			GitDetect:       func(string) (*git.Info, error) { return nil, git.ErrNotARepo },
+			GitWorktreeRoot: func(string) (string, error) { return "", git.ErrNotARepo },
+		})
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		if res.ProxyAddr != "127.0.0.1:5999" {
+			t.Errorf("proxy_addr: got %q, want 127.0.0.1:5999", res.ProxyAddr)
+		}
+	})
+
+	t.Run("env_manifest_port_minus_one", func(t *testing.T) {
+		envManifest := filepath.Join(tmp, "envm.yaml")
+		writeFile(t, envManifest, `identity:
+  slug: env
+allocations:
+  api_port: 5500
+  db_path: env.sqlite
+`)
+		res, err := Resolve(ResolveOpts{
+			Cwd:       tmp,
+			HomeDir:   home,
+			EnvLookup: func(k string) string { if k == EnvVar { return envManifest }; return "" },
+		})
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		if res.ProxyAddr != "127.0.0.1:5499" {
+			t.Errorf("proxy_addr: got %q, want 127.0.0.1:5499", res.ProxyAddr)
+		}
+	})
+}
+
+// TestProxyAddrFor pins the derivation helper directly, including the
+// fallback edges the resolver relies on.
+func TestProxyAddrFor(t *testing.T) {
+	cases := []struct {
+		name    string
+		apiAddr string
+		want    string
+	}{
+		{name: "default", apiAddr: "127.0.0.1:5320", want: "127.0.0.1:5319"},
+		{name: "worktree_port", apiAddr: "127.0.0.1:5350", want: "127.0.0.1:5349"},
+		{name: "non_loopback_host", apiAddr: "0.0.0.0:8080", want: "0.0.0.0:8079"},
+		{name: "unparseable_falls_back", apiAddr: "not-an-addr", want: DefaultProxyAddr},
+		{name: "no_port_falls_back", apiAddr: "127.0.0.1", want: DefaultProxyAddr},
+		{name: "empty_port_falls_back", apiAddr: "127.0.0.1:", want: DefaultProxyAddr},
+		{name: "port_one_falls_back", apiAddr: "127.0.0.1:1", want: DefaultProxyAddr},
+		{name: "port_zero_falls_back", apiAddr: "127.0.0.1:0", want: DefaultProxyAddr},
+		{name: "empty_falls_back", apiAddr: "", want: DefaultProxyAddr},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := proxyAddrFor(c.apiAddr); got != c.want {
+				t.Errorf("proxyAddrFor(%q) = %q, want %q", c.apiAddr, got, c.want)
+			}
+		})
 	}
 }

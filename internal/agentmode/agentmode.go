@@ -21,8 +21,8 @@ const claudeInvocation = "claude --dangerously-skip-permissions --dangerously-lo
 // LaunchCommand returns the canonical shell one-liner that spins up a
 // Claude Code session wired to bacio's agent-mode supervision. It sets
 // BACIO_AGENT_MODE=1, points ANTHROPIC_BASE_URL at the BACI-301 reverse
-// proxy (proxyEndpoint, e.g. http://127.0.0.1:5320/anthropic) so all
-// Anthropic traffic routes through the local bacio web/api server, and
+// proxy (proxyEndpoint, e.g. http://127.0.0.1:5319/anthropic) so all
+// Anthropic traffic routes through the local bacio proxy listener, and
 // flips ENABLE_TOOL_SEARCH=true. No bacio correlation header is injected:
 // the reverse-proxy capture correlates off Claude Code's own request
 // headers (X-Claude-Code-Session-Id / -Agent-Id), so the launch one-liner
@@ -31,23 +31,27 @@ const claudeInvocation = "claude --dangerously-skip-permissions --dangerously-lo
 // exact same string and never drift apart.
 //
 // Consequence (intended, per the reverse-proxy-monitor feature): a
-// running `bacio web`/`bacio api` is a hard dependency of an agent
-// session — without it the worker gets connection-refused on
-// ANTHROPIC_BASE_URL.
+// running reverse proxy on the proxy port is a hard dependency of an
+// agent session — without it the worker gets connection-refused on
+// ANTHROPIC_BASE_URL. That proxy is either a standalone `bacio proxy
+// serve` (BACI-344) or the second `/anthropic`-only listener a default
+// `bacio web` / `bacio api` stands up on the same port.
 func LaunchCommand(proxyEndpoint string) string {
 	return fmt.Sprintf("%s=1 ANTHROPIC_BASE_URL=%s ENABLE_TOOL_SEARCH=true %s",
 		EnvVar, proxyEndpoint, claudeInvocation)
 }
 
 // ProxyEndpoint builds the ANTHROPIC_BASE_URL value from a resolved
-// host:port bind address (env.APIAddr), e.g. "127.0.0.1:5320" →
-// "http://127.0.0.1:5320/anthropic". A bind address that doesn't parse
-// as host:port falls back to the default 127.0.0.1 host so the launch
-// one-liner always emits a usable URL rather than a malformed one.
-func ProxyEndpoint(apiAddr string) string {
-	host, port, err := net.SplitHostPort(apiAddr)
+// host:port bind address. BACI-344 split the reverse proxy onto its own
+// stable listener, so callers pass env.ProxyAddr (the API port minus
+// one), e.g. "127.0.0.1:5319" → "http://127.0.0.1:5319/anthropic". A
+// bind address that doesn't parse as host:port falls back to the default
+// 127.0.0.1:5319 so the launch one-liner always emits a usable URL
+// rather than a malformed one.
+func ProxyEndpoint(proxyAddr string) string {
+	host, port, err := net.SplitHostPort(proxyAddr)
 	if err != nil || host == "" || port == "" {
-		host, port = "127.0.0.1", "5320"
+		host, port = "127.0.0.1", "5319"
 	}
 	return fmt.Sprintf("http://%s/anthropic", net.JoinHostPort(host, port))
 }

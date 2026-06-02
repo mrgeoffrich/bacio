@@ -15,10 +15,10 @@ import (
 // any byte change as a behaviour change, so the bar for editing is the
 // agentmode.LaunchCommand pin in agentmode_test.go, not this test.
 //
-// BACI-301: the one-liner now injects ANTHROPIC_BASE_URL pointed at the
-// reverse proxy on this worktree's resolved API port. The expected
-// endpoint is derived from the same resolveEnv chain the verb uses so
-// the test stays deterministic wherever it runs.
+// BACI-301/344: the one-liner now injects ANTHROPIC_BASE_URL pointed at
+// the standalone reverse-proxy port for this worktree (env.ProxyAddr).
+// The expected endpoint is derived from the same resolveEnv chain the
+// verb uses so the test stays deterministic wherever it runs.
 func TestAgentRunCommandPrintsCanonicalOneLiner(t *testing.T) {
 	cmd := newAgentRunCommandCmd()
 	var stdout, stderr bytes.Buffer
@@ -38,7 +38,7 @@ func TestAgentRunCommandPrintsCanonicalOneLiner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveEnv: %v", err)
 	}
-	want := agentmode.LaunchCommand(agentmode.ProxyEndpoint(env.APIAddr)) + "\n"
+	want := agentmode.LaunchCommand(agentmode.ProxyEndpoint(env.ProxyAddr)) + "\n"
 	if got != want {
 		t.Fatalf("stdout mismatch:\n  got:  %q\n  want: %q", got, want)
 	}

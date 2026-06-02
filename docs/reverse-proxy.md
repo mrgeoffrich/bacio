@@ -17,10 +17,14 @@ this listener.
 ## Shape
 
 - **Route:** `/anthropic/*` on the existing `bacio api` / `bacio web`
-  server, reusing the wtenv-resolved `env.APIAddr` port — no new port,
-  no new process. `POST /anthropic/v1/messages` forwards to
+  server, reusing the wtenv-resolved `env.APIAddr` port. `POST
+  /anthropic/v1/messages` forwards to
   `https://api.anthropic.com/v1/messages` (the `/anthropic` prefix is
-  stripped before forwarding).
+  stripped before forwarding). BACI-344 additionally serves this route on
+  a **stable proxy port** (the API port − 1) — via a standalone
+  `bacio proxy serve` and/or the all-in-one's second listener — so the UI
+  / binary can be upgraded without dropping the pipe; see "Standalone
+  proxy listener" below.
 - **Always mounted:** the route is registered regardless of `MountUI`,
   so the agent gets the pipe whether the user launched `bacio api` or
   `bacio web`.
@@ -68,14 +72,17 @@ the `bacio install-agent` activation banner — **always** injects the
 proxy endpoint:
 
 ```bash
-BACIO_AGENT_MODE=1 ANTHROPIC_BASE_URL=http://127.0.0.1:5320/anthropic ENABLE_TOOL_SEARCH=true claude --dangerously-skip-permissions --dangerously-load-development-channels server:bacio
+BACIO_AGENT_MODE=1 ANTHROPIC_BASE_URL=http://127.0.0.1:5319/anthropic ENABLE_TOOL_SEARCH=true claude --dangerously-skip-permissions --dangerously-load-development-channels server:bacio
 ```
 
-The endpoint's host:port is the worktree's resolved `env.APIAddr`
-(`agentmode.ProxyEndpoint`), so a sibling worktree with its own
-allocated port gets a one-liner pointing at *its* server. Both call
-sites build the string through `agentmode.LaunchCommand(endpoint)` so
-they can never drift.
+The endpoint's host:port is the worktree's resolved **proxy** addr —
+`env.ProxyAddr` (BACI-344), the API port minus one — via
+`agentmode.ProxyEndpoint`, so a sibling worktree with its own allocated
+port gets a one-liner pointing at *its* proxy. (Pre-BACI-344 this was
+`env.APIAddr`/`5320`; the split moved the launch endpoint onto the stable
+proxy port — see "Standalone proxy listener" below.) Both call sites build
+the string through `agentmode.LaunchCommand(endpoint)` so they can never
+drift.
 
 The one-liner injects **no** bacio correlation header. BACI-305
 originally stamped `ANTHROPIC_CUSTOM_HEADERS='X-Bacio-Corr: <slug>'`;
@@ -86,13 +93,99 @@ needed at launch.
 
 ### Consequence: a running bacio server is a hard dependency
 
-Because `ANTHROPIC_BASE_URL` points at the local proxy, a `bacio web`
-(or `bacio api`) **must be running on that port** for an agent session
-to reach the Anthropic API. Without it the worker gets
-connection-refused on its first request. This is intended per the
-feature's scoping decisions; the activation banner calls it out.
+Because `ANTHROPIC_BASE_URL` points at the local proxy, **something must
+be listening on the proxy port** for an agent session to reach the
+Anthropic API — either a standalone `bacio proxy serve` or the second
+`/anthropic`-only listener a default `bacio web` / `bacio api` stands up
+there (see below). Without it the worker gets connection-refused on its
+first request. This is intended per the feature's scoping decisions; the
+activation banner calls it out.
 
 ---
+
+## Standalone proxy listener (BACI-344)
+
+`bacio web` does double duty: it serves the disposable UI + REST API **and**
+hosts the liveness-critical reverse proxy. Restarting it to ship a new binary
+drops the proxy listener — in-flight SSE turns truncate (no `message_stop` →
+the agent retries) and the next request gets connection-refused. BACI-344
+**splits the proxy onto its own stable listener** so the UI / binary / schema
+can be upgraded without interrupting agents (Option A from the ticket).
+
+### Port model
+
+The historical port (`5320`, or a worktree's allocated port) stays the
+**UI/API** port — no re-bookmarking, no `BACIO_REMOTE` churn. The standalone
+proxy listens on a **derived proxy port = API port − 1** (`5319` in the
+default; `<allocated> − 1` under a worktree manifest). The derivation lives in
+[`internal/wtenv`](../internal/wtenv/wtenv.go) (`proxyAddrFor`, surfaced as
+`Resolved.ProxyAddr`); an unparseable addr or a port ≤ 1 falls back to
+`DefaultProxyAddr` (`127.0.0.1:5319`). `bacio status` reports both the API and
+Proxy addrs.
+
+Because the proxy port is derived, not separately allocated, the worktree
+port allocator reserves both halves of the pair: `AllocatePort`
+([`internal/wtenv/registry.go`](../internal/wtenv/registry.go)) treats each
+worktree as occupying `{api_port − 1, api_port}` and probes both, so a fresh
+`init` never lands its API port on a sibling's proxy port (or vice versa).
+That's why auto-allocated API ports step by 2 and the lowest is `5322` — `5321`
+would put its proxy on the reserved default `5320`.
+
+`agentmode.ProxyEndpoint` keys off `env.ProxyAddr`, so the launch one-liner
+(and the install-agent banner) always point new agents at the proxy port.
+
+### `bacio proxy serve`
+
+A deliberately tiny, long-lived process that hosts **only** `/anthropic/*`
+(+ the unauthenticated `/healthz` + `/version` reads). No UI, no REST API, no
+controller, no leader election. It reuses the **identical** proxy handler the
+full router builds — `buildProxyHandler` in
+[`internal/api/proxy_server.go`](../internal/api/proxy_server.go) is the shared
+seam, so the standalone surface (`newProxyOnlyHandler` → `api.NewProxyServer`)
+and `newRouter` can't drift. It binds `env.ProxyAddr` by default
+(`--addr` / `--port` override). This is the process agents pin; it changes
+rarely, so you essentially never restart it — meaning `bacio web` becomes
+freely restartable.
+
+### Second listener (the all-in-one default)
+
+A user may not have started `bacio proxy serve`, so the all-in-one `bacio web`
+/ `bacio api` **also** opens a second `/anthropic`-only listener on the proxy
+port (`startSecondaryProxy` in [`internal/cli/web.go`](../internal/cli/web.go)),
+so a fresh agent works out of the box. The bind is **non-fatal**: if it clashes
+(a dedicated `bacio proxy serve` already owns the port) the process logs one
+info line and carries on. `bacio web --no-proxy` / `bacio api --no-proxy`
+skips the second listener — use it once you've adopted the dedicated proxy so
+the two don't clash. The main listener keeps mounting `/anthropic` on the
+API port too (unchanged), so the all-in-one mode stays the default.
+
+> **Why the second listener isn't optional.** The launch endpoint now points
+> new agents at the proxy port. A user mid-migration who relaunches an agent
+> against an old all-in-one `bacio web` (serving `/anthropic` only on the API
+> port, not the proxy port) would get connection-refused — *unless* the second
+> listener is up. That's why a default `bacio web` answers on both.
+
+### Why a version-behind proxy is safe
+
+Capture is best-effort and decoupled (the recorder swallows write failures and
+the leader-gated sweep backfills missed captures from the on-disk `.http`
+files — see "Backfill sweep" below). So a `bacio proxy serve` running a version
+behind across a schema migration degrades to "some captures missed for that
+window, backfilled later" — **forwarding never breaks**. The proxy only needs
+restarting when its own store touchpoints (`proxy_requests` / `proxy_messages`)
+change; `bacio status` flags when a running proxy reports a different
+`/version` than the current binary.
+
+### Keep-alive
+
+`bacio proxy install-service` writes + loads a per-user OS-supervisor unit that
+runs `bacio proxy serve`: a launchd agent
+(`~/Library/LaunchAgents/io.bacio.proxy.plist`) on macOS, a systemd user unit
+(`~/.config/systemd/user/bacio-proxy.service`) on Linux. `--dry-run` prints the
+rendered unit + target path without writing. Windows errors clearly
+(`bacio proxy serve` runs there fine — only the install automation is
+macOS/Linux). The spawn-detached-child alternative (ticket option 1b) was
+rejected for its version-skew + reaping complexity.
 
 ---
 
