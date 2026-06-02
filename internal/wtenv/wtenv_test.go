@@ -488,3 +488,138 @@ func TestRegistry_AllocatePortSkipsBoundPortNotInRegistry(t *testing.T) {
 		t.Errorf("expected the next slot %d, got %d", seed+1, got)
 	}
 }
+
+// TestResolveProxyAddr covers the BACI-344 stable proxy addr: it is
+// always derived as the API port minus one, tracking whatever the API
+// addr resolved to across every source (default, worktree manifest,
+// flag, env), with a fallback to DefaultProxyAddr for an unparseable
+// addr or a port at/below 1 where port−1 would be 0/negative.
+func TestResolveProxyAddr(t *testing.T) {
+	tmp := t.TempDir()
+	home := filepath.Join(tmp, "home")
+
+	t.Run("default", func(t *testing.T) {
+		res, err := Resolve(ResolveOpts{
+			Cwd:             tmp,
+			HomeDir:         home,
+			EnvLookup:       func(string) string { return "" },
+			GitDetect:       func(string) (*git.Info, error) { return nil, git.ErrNotARepo },
+			GitWorktreeRoot: func(string) (string, error) { return "", git.ErrNotARepo },
+		})
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		if res.ProxyAddr != DefaultProxyAddr {
+			t.Errorf("proxy_addr: got %q, want %q", res.ProxyAddr, DefaultProxyAddr)
+		}
+	})
+
+	t.Run("worktree_manifest_port_minus_one", func(t *testing.T) {
+		root := filepath.Join(tmp, "wt")
+		writeFile(t, filepath.Join(root, DefaultManifestFilename), `identity:
+  slug: my-wt
+allocations:
+  api_port: 5350
+  db_path: .bacio/db.sqlite
+`)
+		res, err := Resolve(ResolveOpts{
+			Cwd:             root,
+			HomeDir:         home,
+			EnvLookup:       func(string) string { return "" },
+			GitDetect:       fakeGit(root),
+			GitWorktreeRoot: fakeWorktreeRoot(root),
+		})
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		if res.APIAddr != "127.0.0.1:5350" {
+			t.Fatalf("api_addr: got %q, want 127.0.0.1:5350", res.APIAddr)
+		}
+		if res.ProxyAddr != "127.0.0.1:5349" {
+			t.Errorf("proxy_addr: got %q, want 127.0.0.1:5349 (api port − 1)", res.ProxyAddr)
+		}
+	})
+
+	t.Run("flag_addr_flows_through", func(t *testing.T) {
+		res, err := Resolve(ResolveOpts{
+			Cwd:       tmp,
+			FlagDB:    "/explicit/db.sqlite",
+			FlagAddr:  "127.0.0.1:9999",
+			HomeDir:   home,
+			EnvLookup: func(string) string { return "" },
+		})
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		if res.ProxyAddr != "127.0.0.1:9998" {
+			t.Errorf("proxy_addr: got %q, want 127.0.0.1:9998 (flag api port − 1)", res.ProxyAddr)
+		}
+	})
+
+	t.Run("flag_port_only_flows_through", func(t *testing.T) {
+		// --addr alone (no --db): the default-branch fall-through derives
+		// the proxy addr from the *final* api addr.
+		res, err := Resolve(ResolveOpts{
+			Cwd:             tmp,
+			FlagAddr:        "127.0.0.1:6000",
+			HomeDir:         home,
+			EnvLookup:       func(string) string { return "" },
+			GitDetect:       func(string) (*git.Info, error) { return nil, git.ErrNotARepo },
+			GitWorktreeRoot: func(string) (string, error) { return "", git.ErrNotARepo },
+		})
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		if res.ProxyAddr != "127.0.0.1:5999" {
+			t.Errorf("proxy_addr: got %q, want 127.0.0.1:5999", res.ProxyAddr)
+		}
+	})
+
+	t.Run("env_manifest_port_minus_one", func(t *testing.T) {
+		envManifest := filepath.Join(tmp, "envm.yaml")
+		writeFile(t, envManifest, `identity:
+  slug: env
+allocations:
+  api_port: 5500
+  db_path: env.sqlite
+`)
+		res, err := Resolve(ResolveOpts{
+			Cwd:       tmp,
+			HomeDir:   home,
+			EnvLookup: func(k string) string { if k == EnvVar { return envManifest }; return "" },
+		})
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		if res.ProxyAddr != "127.0.0.1:5499" {
+			t.Errorf("proxy_addr: got %q, want 127.0.0.1:5499", res.ProxyAddr)
+		}
+	})
+}
+
+// TestProxyAddrFor pins the derivation helper directly, including the
+// fallback edges the resolver relies on.
+func TestProxyAddrFor(t *testing.T) {
+	cases := []struct {
+		name    string
+		apiAddr string
+		want    string
+	}{
+		{name: "default", apiAddr: "127.0.0.1:5320", want: "127.0.0.1:5319"},
+		{name: "worktree_port", apiAddr: "127.0.0.1:5350", want: "127.0.0.1:5349"},
+		{name: "non_loopback_host", apiAddr: "0.0.0.0:8080", want: "0.0.0.0:8079"},
+		{name: "unparseable_falls_back", apiAddr: "not-an-addr", want: DefaultProxyAddr},
+		{name: "no_port_falls_back", apiAddr: "127.0.0.1", want: DefaultProxyAddr},
+		{name: "empty_port_falls_back", apiAddr: "127.0.0.1:", want: DefaultProxyAddr},
+		{name: "port_one_falls_back", apiAddr: "127.0.0.1:1", want: DefaultProxyAddr},
+		{name: "port_zero_falls_back", apiAddr: "127.0.0.1:0", want: DefaultProxyAddr},
+		{name: "empty_falls_back", apiAddr: "", want: DefaultProxyAddr},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := proxyAddrFor(c.apiAddr); got != c.want {
+				t.Errorf("proxyAddrFor(%q) = %q, want %q", c.apiAddr, got, c.want)
+			}
+		})
+	}
+}
