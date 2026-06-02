@@ -785,6 +785,23 @@ export default function App() {
       .catch(err => reportError(err, { headline: "Couldn't set the process" }));
   }, [activeBoard, refreshCards]);
 
+  // BACI-334 "Confirm + Auto" — the picker's second confirm: set the process
+  // and turn Auto on in one click. Mirrors fastTrackCard's ordered pair:
+  // process must land before Auto (Auto on a chain-less card drives nothing),
+  // a single error headline covers both calls, and the `finally` refresh
+  // leaves a coherent partial state if the Auto call fails after the process
+  // saved (chain set, Auto off — the user finishes with the card's switch).
+  const setCardProcessAuto = useCallback(async (key, selection) => {
+    try {
+      await api.setCardProcess(activeBoard, key, selection);
+      await api.setEngineMode(activeBoard, key, 'auto');
+    } catch (err) {
+      reportError(err, { headline: "Couldn't set the process" });
+    } finally {
+      refreshCards({ silent: true });
+    }
+  }, [activeBoard, refreshCards]);
+
   // Edit the pending tail of a card's chain — the BACI-294 Edit Process
   // screen's Save. stages is the re-ordered pending tail only; the server
   // keeps the completed/running/cancelled jobs as a locked prefix. Returns
@@ -793,6 +810,17 @@ export default function App() {
   // surface). Refreshes so the new chain renders on the card on return.
   const editCardProcessTail = useCallback((key, stages) => {
     return api.editCardProcessTail(activeBoard, key, stages)
+      .then(() => refreshCards({ silent: true }));
+  }, [activeBoard, refreshCards]);
+
+  // BACI-334 "Save + Auto" — the editor's second save: persist the re-ordered
+  // tail then turn Auto on. Returns the promise (process before Auto, same as
+  // setCardProcessAuto) so ProcessEditor keeps its navigate-back / error-banner
+  // contract; the engine-mode call rides inside that promise so a failure in
+  // either step surfaces in the editor's own banner.
+  const editCardProcessTailAuto = useCallback((key, stages) => {
+    return api.editCardProcessTail(activeBoard, key, stages)
+      .then(() => api.setEngineMode(activeBoard, key, 'auto'))
       .then(() => refreshCards({ silent: true }));
   }, [activeBoard, refreshCards]);
 
@@ -1290,6 +1318,7 @@ export default function App() {
                   onDoneCard={doneCardFromPipeline}
                   onReorder={reorderPipelineCard}
                   onSetProcess={setCardProcess}
+                  onSetProcessAuto={setCardProcessAuto}
                   onResetProcess={resetCardProcess}
                   onEditProcess={(key) => navigate(processEditPath(activeBoard, key))}
                   onStartJob={startCardJob}
@@ -1326,6 +1355,7 @@ export default function App() {
                   cards={cards}
                   activeBoard={activeBoard}
                   onSave={editCardProcessTail}
+                  onSaveAuto={editCardProcessTailAuto}
                 />
               </ErrorBoundary>
             }

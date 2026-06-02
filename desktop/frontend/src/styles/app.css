@@ -2249,6 +2249,24 @@ body { margin: 0; }
 .mk-pl-procopt.is-confirm:disabled {
   background: var(--bg-4); color: var(--fg-4); cursor: default;
 }
+/* BACI-334: the twin-confirm row + the "Auto" variant. The Auto button takes
+   a SOLID fill (vs the plain Confirm's tinted bg) so it reads as the stronger
+   of the pair; the shared mk-pl-btn.is-confirm-auto rule below makes the
+   editor's "Save + Auto" match. Both halves share the same disabled gate. */
+.mk-pl-procbtns { display: flex; gap: 6px; }
+.mk-pl-procbtns .mk-pl-procopt { flex: 1; }
+.mk-pl-procopt.is-confirm.is-confirm-auto:not(:disabled) {
+  background: var(--status-doing); color: var(--paper);
+}
+.mk-pl-procopt.is-confirm.is-confirm-auto:hover:not(:disabled) {
+  background: var(--status-doing); filter: brightness(0.94);
+}
+.mk-pl-btn.is-primary.is-confirm-auto:not(:disabled) {
+  background: var(--status-doing); color: var(--paper);
+}
+.mk-pl-btn.is-primary.is-confirm-auto:hover:not(:disabled) {
+  background: var(--status-doing); filter: brightness(0.94);
+}
 
 .mk-pl-shipping-tools { flex-shrink: 0; }
 
