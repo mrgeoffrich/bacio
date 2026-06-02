@@ -33,7 +33,8 @@ There is no `bacio-server`, no `bacio-daemon`, no `bacio-sync-worker`. Every lon
 | CLI subcommand (`bacio issue add` etc.) | One-shot | Opens DB, mutates, exits. |
 | `bacio tui` | Long-running (user-bound) | Interactive kanban; also runs leader-gated tickers when it holds the lease. |
 | `bacio api` | Long-running | HTTP API only. No `/ui/` mount; serves 404 there (BACI-72). |
-| `bacio web` | Long-running | HTTP API **plus** the embedded React bundle at `/ui/`, **plus** opens the OS default browser. The one-liner humans want. |
+| `bacio web` | Long-running | HTTP API **plus** the embedded React bundle at `/ui/`, **plus** opens the OS default browser. The one-liner humans want. By default also opens a second `/anthropic`-only listener on the proxy port (BACI-344; `--no-proxy` opts out). |
+| `bacio proxy serve` | Long-running (rarely restarted) | BACI-344: standalone reverse-proxy listener — hosts ONLY `/anthropic/*` (+ `/healthz` + `/version`) on the **stable proxy port** (API port − 1). The process agents pin via `ANTHROPIC_BASE_URL`; splitting it off `bacio web` lets the UI / binary / schema be upgraded without interrupting in-flight agent turns. Keep it alive with `bacio proxy install-service` (launchd / systemd user unit). |
 | `bacio channel` | Long-running (Claude Code-spawned) | MCP-over-stdio server. One per Claude Code session, started by `.mcp.json`. Bridges agent ↔ bacio (dispatch delivery, reply, ask_user_question, send_user_notification). |
 | `bacio hook <event>` | One-shot (Claude Code-spawned) | Claude Code event hooks (SessionStart, PreToolUse, PostToolUse, …). Writes to the store and exits. |
 | `bacio-desktop` | Long-running (user-bound) | Wails window; runs the same leader-gated tickers as `bacio api` / `bacio tui` via `leaderservice`. |
@@ -54,7 +55,7 @@ Tracks every git worktree that ran `bacio worktree init`. Authoritative for port
 
 ### `<worktree>/environment-config.yaml` — per-worktree manifest (opt-in)
 
-Optional. Written by `bacio worktree init`. Pins the bacio instance in that worktree (CLI / api / web / desktop / channel / hooks) to its own API port; **DB stays shared by default** so dispatched workers reach the ticket they were assigned. Resolution chain: explicit `--db`/`--addr` flags > `$BACIO_ENV` > worktree manifest > legacy default (`~/.bacio/db.sqlite` + `127.0.0.1:5320`). Implemented in [`internal/wtenv/`](internal/wtenv/).
+Optional. Written by `bacio worktree init`. Pins the bacio instance in that worktree (CLI / api / web / desktop / channel / hooks) to its own API port; **DB stays shared by default** so dispatched workers reach the ticket they were assigned. Resolution chain: explicit `--db`/`--addr` flags > `$BACIO_ENV` > worktree manifest > legacy default (`~/.bacio/db.sqlite` + `127.0.0.1:5320`). The resolver also derives a stable **proxy addr** (BACI-344: `ProxyAddr` = API port − 1) alongside the API addr, for the standalone `bacio proxy serve` listener and the launch one-liner's `ANTHROPIC_BASE_URL`. Implemented in [`internal/wtenv/`](internal/wtenv/).
 
 ### `~/sync/<project>/` — git-backed sync mirror (opt-in)
 
