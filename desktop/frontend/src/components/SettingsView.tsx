@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import Icon from './Icon.jsx';
-import SectionRail from './settings/SectionRail.jsx';
-import SystemSettingsSection from './settings/SystemSettingsSection.jsx';
-import SyncSettingsSection from './settings/SyncSettingsSection.jsx';
-import PerRepoSettingsSection from './settings/PerRepoSettingsSection.jsx';
+import Icon from './Icon';
+import SectionRail from './settings/SectionRail';
+import SystemSettingsSection from './settings/SystemSettingsSection';
+import SyncSettingsSection from './settings/SyncSettingsSection';
+import PerRepoSettingsSection from './settings/PerRepoSettingsSection';
 
 // SettingsView is the desktop / web Settings screen — a full-screen
 // view (not a modal) covering the content area below the topbar.

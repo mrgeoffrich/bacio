@@ -1,6 +1,6 @@
 import React from 'react';
 import { m } from 'motion/react';
-import OdometerNumber from './OdometerNumber.jsx';
+import OdometerNumber from './OdometerNumber';
 
 // ShippedPill is the "Shipped · N" badge: the kit pill chrome
 // (.mk-pill) tinted with the done-state palette (.mk-shipped-pill) plus

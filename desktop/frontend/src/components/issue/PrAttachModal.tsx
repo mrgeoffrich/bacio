@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import Modal from '../Modal.jsx';
+import Modal from '../Modal';
 import { reportError } from '../../errors';
 
 // PrAttachModal (BACI-339) — the URL-input modal opened from the

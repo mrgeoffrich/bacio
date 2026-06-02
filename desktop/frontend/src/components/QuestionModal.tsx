@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as api from '../api';
 import { reportError } from '../errors';
-import Modal from './Modal.jsx';
+import Modal from './Modal';
 
 // QuestionModal renders the BACI-53 ask_user_question form. Fetches
 // the full payload on open, renders each question as radios (single-

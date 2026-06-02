@@ -5,9 +5,9 @@ import { reportError } from '../errors';
 import * as api from '../api';
 import MarkdownView from '../lib/markdownView';
 import CommentComposer from './issue/CommentComposer';
-import InlineDescriptionEditor from './issue/InlineDescriptionEditor.jsx';
-import FeatureEmojiPicker from './FeatureEmojiPicker.jsx';
-import Icon from './Icon.jsx';
+import InlineDescriptionEditor from './issue/InlineDescriptionEditor';
+import FeatureEmojiPicker from './FeatureEmojiPicker';
+import Icon from './Icon';
 import { documentPath, featurePath, issuePath } from '../lib/routes';
 import { isValidBranchName, shortBranchLabel } from '../lib/branchName';
 
@@ -15,7 +15,7 @@ import { isValidBranchName, shortBranchLabel } from '../lib/branchName';
 // @xyflow/react chunk (~150 KB gzipped) only lands when the user
 // actually opens the Graph tab. The Overview tab — the historical
 // default — pays nothing for the new affordance.
-const FeatureDependencyGraph = lazy(() => import('./FeatureDependencyGraph.jsx'));
+const FeatureDependencyGraph = lazy(() => import('./FeatureDependencyGraph'));
 
 // BACI-236: Overview vs Graph tab on the right pane. The id matches
 // the `viewMode` useState so the segmented control mirrors the active

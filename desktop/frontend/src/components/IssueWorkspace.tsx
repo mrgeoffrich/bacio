@@ -1,15 +1,15 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { Link } from 'react-router';
 import MarkdownView from '../lib/markdownView';
-import Icon from './Icon.jsx';
-import IssueLockBanner from './issue/IssueLockBanner.jsx';
-import LinkedDocPanel from './issue/LinkedDocPanel.jsx';
-import InlineDescriptionEditor from './issue/InlineDescriptionEditor.jsx';
-import InlineTitleEditor from './issue/InlineTitleEditor.jsx';
-import CommentComposer from './issue/CommentComposer.jsx';
-import RelationsPanel from './issue/RelationsPanel.jsx';
-import PrAttachModal from './issue/PrAttachModal.jsx';
-import IssueTranscriptList from './issue/IssueTranscriptList.jsx';
+import Icon from './Icon';
+import IssueLockBanner from './issue/IssueLockBanner';
+import LinkedDocPanel from './issue/LinkedDocPanel';
+import InlineDescriptionEditor from './issue/InlineDescriptionEditor';
+import InlineTitleEditor from './issue/InlineTitleEditor';
+import CommentComposer from './issue/CommentComposer';
+import RelationsPanel from './issue/RelationsPanel';
+import PrAttachModal from './issue/PrAttachModal';
+import IssueTranscriptList from './issue/IssueTranscriptList';
 import { documentPath } from '../lib/routes';
 import prLabel from '../lib/prLabel';
 

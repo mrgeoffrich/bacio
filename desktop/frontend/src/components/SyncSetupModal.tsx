@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import Modal from './Modal.jsx';
+import Modal from './Modal';
 import * as api from '../api';
 import { reportError } from '../errors';
 

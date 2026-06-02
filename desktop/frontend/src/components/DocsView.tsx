@@ -2,9 +2,9 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { reportError } from '../errors';
 import * as api from '../api';
-import DocsFacetRail from './DocsFacetRail.jsx';
-import DocsList from './DocsList.jsx';
-import DocsViewer from './DocsViewer.jsx';
+import DocsFacetRail from './DocsFacetRail';
+import DocsList from './DocsList';
+import DocsViewer from './DocsViewer';
 import { filterDocs, countFacets } from '../lib/docsFilter';
 import {
   readSort, persistSort,

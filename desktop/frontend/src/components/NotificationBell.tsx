@@ -2,8 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { reportError } from '../errors';
 import * as api from '../api';
 import { formatWhen } from '../lib/formatWhen';
-import Icon from './Icon.jsx';
-import Tooltip from './Tooltip.jsx';
+import Icon from './Icon';
+import Tooltip from './Tooltip';
 
 // NotificationBell (BACI-287) is the topbar's global agent→user
 // notification bell — a bell button with an unread-count badge plus an

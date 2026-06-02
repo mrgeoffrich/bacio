@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import Icon from './Icon.jsx';
+import Icon from './Icon';
 
 export default function CommandPalette({ open, cards, onClose, onPick }) {
   const [q, setQ] = useState('');

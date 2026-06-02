@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import Modal from './Modal.jsx';
+import Modal from './Modal';
 import { subscribeErrors } from '../errors';
 
 const DEV = !!(import.meta && import.meta.env && import.meta.env.DEV);

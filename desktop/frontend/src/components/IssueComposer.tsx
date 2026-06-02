@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import Modal from './Modal.jsx';
+import Modal from './Modal';
 import * as api from '../api';
 
 // IssueComposer (BACI-166) — the "+ from prompt" modal launched from the

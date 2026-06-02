@@ -1,5 +1,5 @@
 import React from 'react';
-import Tooltip from './Tooltip.jsx';
+import Tooltip from './Tooltip';
 
 // formatSyncTime renders an ISO timestamp as a short local string.
 // Mirrors Topbar.jsx's formatSyncTime so the per-card subtitle reads

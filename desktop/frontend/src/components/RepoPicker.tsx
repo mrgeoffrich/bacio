@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import Modal from './Modal.jsx';
-import Icon from './Icon.jsx';
+import Modal from './Modal';
+import Icon from './Icon';
 import { WEB_MODE } from '../env';
 
 // RepoPicker is the topbar's repository selector — a searchable dropdown that

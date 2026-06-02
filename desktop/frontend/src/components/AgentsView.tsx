@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
-import QuestionModal from './QuestionModal.jsx';
-import SessionMessageButton from './SessionMessageButton.jsx';
-import { todoGlyph } from '../lib/todoGlyph.jsx';
+import QuestionModal from './QuestionModal';
+import SessionMessageButton from './SessionMessageButton';
+import { todoGlyph } from '../lib/todoGlyph';
 import * as api from '../api';
 
 // relTime renders a coarse "time since" for the last-seen line.

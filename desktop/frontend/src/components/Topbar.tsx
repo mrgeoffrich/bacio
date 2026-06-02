@@ -1,10 +1,10 @@
 import React from 'react';
 import { useLocation, useNavigate } from 'react-router';
-import Icon from './Icon.jsx';
-import RepoPicker from './RepoPicker.jsx';
-import Tooltip from './Tooltip.jsx';
-import NotificationBell from './NotificationBell.jsx';
-import ShippedPopover from './ShippedPopover.jsx';
+import Icon from './Icon';
+import RepoPicker from './RepoPicker';
+import Tooltip from './Tooltip';
+import NotificationBell from './NotificationBell';
+import ShippedPopover from './ShippedPopover';
 import { WEB_MODE } from '../env';
 import { viewPath, viewFromPath } from '../lib/routes';
 

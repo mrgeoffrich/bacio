@@ -1,7 +1,7 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router'
-import App from './App.jsx'
+import App from './App'
 import { installGlobalErrorHandlers } from './errors'
 import './styles/tokens.css'
 import './styles/app.css'

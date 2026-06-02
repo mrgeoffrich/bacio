@@ -3,7 +3,7 @@ import { reportError } from '../errors';
 import * as api from '../api';
 import { formatWhen } from '../lib/formatWhen';
 import { SHIPPED_SCOPES, scopeLabel, scopeSinceParams } from './shippedScope.ts';
-import ShippedPill from './ShippedPill.jsx';
+import ShippedPill from './ShippedPill';
 
 // CACHE_TTL_MS: how long the popover holds onto its last successful
 // fetch before refetching on the next open. Thirty seconds is long

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import SyncRepoCard from '../SyncRepoCard.jsx';
-import SyncSetupModal from '../SyncSetupModal.jsx';
-import PhantomLinkModal from '../PhantomLinkModal.jsx';
+import SyncRepoCard from '../SyncRepoCard';
+import SyncSetupModal from '../SyncSetupModal';
+import PhantomLinkModal from '../PhantomLinkModal';
 import { reportError } from '../../errors';
 import * as api from '../../api';
 

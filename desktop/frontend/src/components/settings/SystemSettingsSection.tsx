@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import Modal from '../Modal.jsx';
-import Tooltip from '../Tooltip.jsx';
+import Modal from '../Modal';
+import Tooltip from '../Tooltip';
 import { reportError } from '../../errors';
 import * as api from '../../api';
 
