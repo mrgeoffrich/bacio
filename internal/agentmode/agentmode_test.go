@@ -77,26 +77,27 @@ func TestLaunchCommand(t *testing.T) {
 	}
 }
 
-// TestProxyEndpoint covers the host:port → ANTHROPIC_BASE_URL mapping,
-// including the fallback to the default 127.0.0.1:5320 host when the bind
-// address doesn't parse as host:port.
+// TestProxyEndpoint covers the host:port → ANTHROPIC_BASE_URL mapping.
+// BACI-344 retargeted the launch endpoint at the standalone proxy port
+// (env.ProxyAddr, the API port minus one), so the fallback when the bind
+// address doesn't parse is now 127.0.0.1:5319.
 func TestProxyEndpoint(t *testing.T) {
 	cases := []struct {
-		name    string
-		apiAddr string
-		want    string
+		name      string
+		proxyAddr string
+		want      string
 	}{
-		{name: "default_addr", apiAddr: "127.0.0.1:5320", want: "http://127.0.0.1:5320/anthropic"},
-		{name: "worktree_port", apiAddr: "127.0.0.1:5350", want: "http://127.0.0.1:5350/anthropic"},
-		{name: "non_loopback_host", apiAddr: "0.0.0.0:8080", want: "http://0.0.0.0:8080/anthropic"},
-		{name: "empty_falls_back", apiAddr: "", want: "http://127.0.0.1:5320/anthropic"},
-		{name: "no_port_falls_back", apiAddr: "127.0.0.1", want: "http://127.0.0.1:5320/anthropic"},
-		{name: "empty_port_falls_back", apiAddr: "127.0.0.1:", want: "http://127.0.0.1:5320/anthropic"},
+		{name: "default_addr", proxyAddr: "127.0.0.1:5319", want: "http://127.0.0.1:5319/anthropic"},
+		{name: "worktree_port", proxyAddr: "127.0.0.1:5349", want: "http://127.0.0.1:5349/anthropic"},
+		{name: "non_loopback_host", proxyAddr: "0.0.0.0:8079", want: "http://0.0.0.0:8079/anthropic"},
+		{name: "empty_falls_back", proxyAddr: "", want: "http://127.0.0.1:5319/anthropic"},
+		{name: "no_port_falls_back", proxyAddr: "127.0.0.1", want: "http://127.0.0.1:5319/anthropic"},
+		{name: "empty_port_falls_back", proxyAddr: "127.0.0.1:", want: "http://127.0.0.1:5319/anthropic"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := ProxyEndpoint(c.apiAddr); got != c.want {
-				t.Fatalf("ProxyEndpoint(%q) = %q, want %q", c.apiAddr, got, c.want)
+			if got := ProxyEndpoint(c.proxyAddr); got != c.want {
+				t.Fatalf("ProxyEndpoint(%q) = %q, want %q", c.proxyAddr, got, c.want)
 			}
 		})
 	}

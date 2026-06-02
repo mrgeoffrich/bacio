@@ -48,15 +48,16 @@ of truth (agentmode.LaunchCommand) so they cannot drift.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Resolve the worktree env so ANTHROPIC_BASE_URL points at the
-			// reverse proxy on *this* worktree's API port (BACI-301). The
-			// resolution is silent — any chatter would leak into a composed
+			// standalone reverse-proxy port for *this* worktree (BACI-344:
+			// env.ProxyAddr, the API port minus one). The resolution is
+			// silent — any chatter would leak into a composed
 			// eval "$(bacio agent-run-command)"; only the error path writes
 			// (to stderr, via cobra), never the success path.
 			env, err := resolveEnv()
 			if err != nil {
 				return err
 			}
-			endpoint := agentmode.ProxyEndpoint(env.APIAddr)
+			endpoint := agentmode.ProxyEndpoint(env.ProxyAddr)
 			_, err = fmt.Fprintln(os.Stdout, agentmode.LaunchCommand(endpoint))
 			return err
 		},
