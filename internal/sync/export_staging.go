@@ -413,30 +413,34 @@ func readUUIDFromYAML(path string) string {
 	return ""
 }
 
-// recordFolderOf returns the slash-separated path of the record
-// folder that contains the file at relPath, or "" if the path isn't
-// under a record folder. A record folder is the third segment under
-// repos/<prefix>/<kind>/<label>; comments live at the fourth segment
-// (repos/<prefix>/issues/<label>/comments/<file>) so we group those
-// by the issue folder above them.
+// recordFolderOf returns the slash-separated path whose deletion the
+// export diff should plan when the file at relPath has no live DB row,
+// or "" if the path isn't under a record folder. For a record manifest
+// (issue.yaml, feature.yaml, …) it returns the enclosing record folder
+// (the fourth segment under repos/<prefix>/<kind>/<label>). For a
+// comment file (repos/<prefix>/{features,issues}/<label>/comments/<file>)
+// it returns the comment *file* itself — BACI-338 scoped comment deletes
+// down from the whole parent record folder so a comment-only delete (the
+// record still present, one comment gone) prunes just the .yaml/.md pair
+// rather than nuking the entire feature/issue folder.
 func recordFolderOf(relPath string) string {
 	parts := strings.Split(relPath, "/")
 	if len(parts) < 4 || parts[0] != "repos" {
 		return ""
 	}
 	switch parts[2] {
-	case "features", "issues", "docs":
-		// Comment file: repos/<p>/issues/<label>/comments/<file>
-		// The "record folder" we care about for delete is the issue.
-		// Phase-2 export always writes the issue folder (issue.yaml +
-		// description.md) so the issue folder is already in stagingFiles.
-		// A comment-only delete (issue still present, comment gone) is
-		// an unusual case for v1 — we'd need to scope deletes finer.
-		// Until comment deletion is wired through, we stop at the
-		// record folder.
-		if len(parts) >= 4 {
-			return strings.Join(parts[:4], "/")
+	case "features", "issues":
+		// Comment file: repos/<p>/{features,issues}/<label>/comments/<file>.
+		// Scope the delete to the file itself, not the parent record
+		// folder — otherwise a comment-only delete would take the whole
+		// feature/issue down with it.
+		if len(parts) >= 6 && parts[4] == "comments" {
+			return relPath
 		}
+		return strings.Join(parts[:4], "/")
+	case "docs":
+		// Docs have no comments subdir; group by the record folder.
+		return strings.Join(parts[:4], "/")
 	}
 	return ""
 }

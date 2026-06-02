@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -142,4 +143,112 @@ func TestRoundTripFeatureComments(t *testing.T) {
 	if _, err := dst.GetFeatureCommentByUUID(cm.UUID); err == nil {
 		t.Fatalf("expected feature comment to be gone after delete-propagation")
 	}
+}
+
+// TestImport_FeatureCommentResurrectionGuard pins BACI-338 for feature
+// comments — the same file-*present* local-delete path as
+// TestImport_CommentResurrectionGuard, keyed on feature_comments. A
+// feature comment hard-deleted DB-only on dst (its .yaml/.md pair left
+// on disk) must stay deleted on re-import: the guard removes the file
+// pair, drops the sync_state row, and propagates the deletion.
+func TestImport_FeatureCommentResurrectionGuard(t *testing.T) {
+	src, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open src: %v", err)
+	}
+	t.Cleanup(func() { _ = src.Close() })
+	r, err := src.CreateRepo("MINI", "bacio", "/src/path", "")
+	if err != nil {
+		t.Fatalf("create src repo: %v", err)
+	}
+	feat, err := src.CreateFeature(r.ID, "auth", "Auth", "", "", "")
+	if err != nil {
+		t.Fatalf("create feature: %v", err)
+	}
+	cres, err := src.CreateFeatureComment(feat.ID, "alice", "delete me", "")
+	if err != nil {
+		t.Fatalf("create feature comment: %v", err)
+	}
+	cm := cres.Comment
+
+	dir := t.TempDir()
+	if _, err := (&Engine{Store: src}).Export(context.Background(), dir); err != nil {
+		t.Fatalf("export src: %v", err)
+	}
+
+	// Seed dst with the feature comment row + its sync_state.
+	dst, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatalf("open dst: %v", err)
+	}
+	t.Cleanup(func() { _ = dst.Close() })
+	if _, err := (&Engine{Store: dst}).Import(context.Background(), dir); err != nil {
+		t.Fatalf("seed dst: %v", err)
+	}
+	if _, err := dst.GetFeatureCommentByUUID(cm.UUID); err != nil {
+		t.Fatalf("dst should have the feature comment after seed: %v", err)
+	}
+	// Hard-delete the row on dst; the on-disk pair in dir is left present.
+	if err := dst.DeleteFeatureCommentByUUID(cm.UUID); err != nil {
+		t.Fatalf("delete feature comment row on dst: %v", err)
+	}
+	if _, err := dst.GetSyncState(cm.UUID); err != nil {
+		t.Fatalf("dst should still carry the deleted comment's sync_state: %v", err)
+	}
+	yamlPath, mdPath := featureCommentFilePaths(t, dir, "MINI", "auth", cm.UUID)
+
+	// Re-import: the guard must NOT re-insert.
+	res, err := (&Engine{Store: dst}).Import(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("re-import dst: %v", err)
+	}
+	deleted := false
+	for _, d := range res.Deleted {
+		if d.Kind == store.SyncKindFeatureComment && d.UUID == cm.UUID {
+			deleted = true
+			break
+		}
+	}
+	if !deleted {
+		t.Fatalf("expected feature comment deletion for %s, got %+v", cm.UUID, res.Deleted)
+	}
+	if res.Inserted != 0 {
+		t.Errorf("guard re-inserted: res.Inserted = %d, want 0", res.Inserted)
+	}
+	if _, err := dst.GetFeatureCommentByUUID(cm.UUID); err == nil {
+		t.Fatalf("feature comment resurrected on dst")
+	}
+	if _, err := os.Stat(yamlPath); !os.IsNotExist(err) {
+		t.Errorf("feature comment .yaml still present: %v", err)
+	}
+	if _, err := os.Stat(mdPath); !os.IsNotExist(err) {
+		t.Errorf("feature comment .md still present: %v", err)
+	}
+	if _, err := dst.GetSyncState(cm.UUID); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("sync_state row survived the guard: %v", err)
+	}
+}
+
+// featureCommentFilePaths resolves the on-disk .yaml/.md pair for a
+// feature comment by uuid under repos/<prefix>/features/<slug>/comments/.
+func featureCommentFilePaths(t *testing.T, root, prefix, slug, uuid string) (yamlPath, mdPath string) {
+	t.Helper()
+	commentsDir := filepath.Join(root, "repos", prefix, "features", slug, "comments")
+	entries, err := os.ReadDir(commentsDir)
+	if err != nil {
+		t.Fatalf("read comments dir %s: %v", commentsDir, err)
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasSuffix(name, uuid+".yaml") {
+			yamlPath = filepath.Join(commentsDir, name)
+		}
+		if strings.HasSuffix(name, uuid+".md") {
+			mdPath = filepath.Join(commentsDir, name)
+		}
+	}
+	if yamlPath == "" || mdPath == "" {
+		t.Fatalf("feature comment files for %s not found under %s", uuid, commentsDir)
+	}
+	return yamlPath, mdPath
 }

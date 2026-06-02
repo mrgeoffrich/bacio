@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -251,6 +252,98 @@ func TestImport_CommentDeletionPropagated(t *testing.T) {
 	if cs, _ := b.ListComments(iss1B.ID); len(cs) != 0 {
 		t.Fatalf("B still has the deleted comment: %d", len(cs))
 	}
+}
+
+// TestImport_CommentResurrectionGuard pins BACI-338: a comment that is
+// hard-deleted DB-only on B (its on-disk .yaml/.md pair left present in
+// the sync tree) must stay deleted on the next import rather than being
+// re-inserted from the orphaned files. The guard recognises "no DB row
+// but a sync_state row" as a local delete, removes the file pair, drops
+// the sync_state row, and propagates the deletion — the file-*present*
+// counterpart to TestImport_CommentDeletionPropagated's file-*absent*
+// path.
+func TestImport_CommentResurrectionGuard(t *testing.T) {
+	a, uuids := seedExportFixture(t)
+	dirA := t.TempDir()
+	if _, err := (&Engine{Store: a}).Export(context.Background(), dirA); err != nil {
+		t.Fatalf("export A: %v", err)
+	}
+	b, _ := store.Open(":memory:")
+	t.Cleanup(func() { b.Close() })
+	// Seed B: import the fixture so B has the comment row + sync_state.
+	if _, err := (&Engine{Store: b}).Import(context.Background(), dirA); err != nil {
+		t.Fatalf("seed B: %v", err)
+	}
+	repoB, _ := b.GetRepoByPrefix("MINI")
+	iss1B, err := b.GetIssueByKey(repoB.Prefix, 1)
+	if err != nil {
+		t.Fatalf("get MINI-1 on B: %v", err)
+	}
+	if cs, _ := b.ListComments(iss1B.ID); len(cs) != 1 {
+		t.Fatalf("B should have 1 comment after seed, got %d", len(cs))
+	}
+	// Hard-delete the comment row on B — the DB-only delete that bites
+	// in the wild. The on-disk .yaml/.md pair in dirA is left untouched.
+	if err := b.DeleteCommentByUUID(uuids["c1"]); err != nil {
+		t.Fatalf("delete comment row on B: %v", err)
+	}
+	if _, err := b.GetSyncState(uuids["c1"]); err != nil {
+		t.Fatalf("B should still carry the deleted comment's sync_state: %v", err)
+	}
+	yamlPath, mdPath := commentFilePaths(t, dirA, "MINI", "issues", "MINI-1", uuids["c1"])
+
+	// Re-import dirA into B: the resurrection guard must NOT re-insert.
+	res, err := (&Engine{Store: b}).Import(context.Background(), dirA)
+	if err != nil {
+		t.Fatalf("re-import B: %v", err)
+	}
+	if len(res.Deleted) != 1 || res.Deleted[0].Kind != store.SyncKindComment || res.Deleted[0].UUID != uuids["c1"] {
+		t.Fatalf("expected 1 comment deletion for %s, got %+v", uuids["c1"], res.Deleted)
+	}
+	if res.Inserted != 0 {
+		t.Errorf("guard re-inserted: res.Inserted = %d, want 0", res.Inserted)
+	}
+	if cs, _ := b.ListComments(iss1B.ID); len(cs) != 0 {
+		t.Fatalf("comment resurrected on B: %d", len(cs))
+	}
+	// The orphaned on-disk pair must be gone so the delete propagates.
+	if _, err := os.Stat(yamlPath); !os.IsNotExist(err) {
+		t.Errorf("comment .yaml still present: %v", err)
+	}
+	if _, err := os.Stat(mdPath); !os.IsNotExist(err) {
+		t.Errorf("comment .md still present: %v", err)
+	}
+	// And the sync_state row is gone so propagateDeletes never revisits it.
+	if _, err := b.GetSyncState(uuids["c1"]); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("sync_state row survived the guard: %v", err)
+	}
+}
+
+// commentFilePaths resolves the on-disk .yaml/.md pair for a comment by
+// uuid inside an exported sync tree. The emitter names each file
+// `<ts>--<uuid>.{yaml,md}` under <record>/comments/, so we match on the
+// uuid suffix rather than reconstructing the timestamp. `kind` is the
+// record folder kind ("issues" or "features").
+func commentFilePaths(t *testing.T, root, prefix, kind, recordLabel, uuid string) (yamlPath, mdPath string) {
+	t.Helper()
+	commentsDir := filepath.Join(root, "repos", prefix, kind, recordLabel, "comments")
+	entries, err := os.ReadDir(commentsDir)
+	if err != nil {
+		t.Fatalf("read comments dir %s: %v", commentsDir, err)
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasSuffix(name, uuid+".yaml") {
+			yamlPath = filepath.Join(commentsDir, name)
+		}
+		if strings.HasSuffix(name, uuid+".md") {
+			mdPath = filepath.Join(commentsDir, name)
+		}
+	}
+	if yamlPath == "" || mdPath == "" {
+		t.Fatalf("comment files for %s not found under %s", uuid, commentsDir)
+	}
+	return yamlPath, mdPath
 }
 
 // TestImport_DryRunRollsBack: a dry-run import reports what would
