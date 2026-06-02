@@ -442,3 +442,83 @@ func TestExportWritesIndex(t *testing.T) {
 		t.Fatalf("index.yaml not byte-stable across runs:\nfirst:\n%s\nsecond:\n%s", first, second)
 	}
 }
+
+// TestComputeFileOps_CommentOnlyDeleteScopesToFile pins the BACI-338
+// recordFolderOf narrowing: when a comment file disappears from the
+// current export (a DB-only comment delete) but the parent feature/issue
+// manifest is still present, the diff must plan a delete of just the
+// comment .yaml/.md pair — never the whole record folder. Before the
+// fix, recordFolderOf mapped the comment file up to repos/<p>/<kind>/
+// <label>, which would have nuked the live feature/issue.
+func TestComputeFileOps_CommentOnlyDeleteScopesToFile(t *testing.T) {
+	// target = the previously-exported tree (comment files present).
+	target := map[string]string{
+		"repos/MINI/features/auth/feature.yaml":                          "uuid: \"feat-uuid\"\n",
+		"repos/MINI/features/auth/description.md":                        "Notes.\n",
+		"repos/MINI/features/auth/comments/2026-05-01T10-00-00.000Z--fc-uuid.yaml": "uuid: \"fc-uuid\"\n",
+		"repos/MINI/features/auth/comments/2026-05-01T10-00-00.000Z--fc-uuid.md":   "feature comment body\n",
+		"repos/MINI/issues/MINI-1/issue.yaml":                            "uuid: \"iss-uuid\"\n",
+		"repos/MINI/issues/MINI-1/description.md":                        "Issue body.\n",
+		"repos/MINI/issues/MINI-1/comments/2026-05-09T14-22-00.000Z--ic-uuid.yaml": "uuid: \"ic-uuid\"\n",
+		"repos/MINI/issues/MINI-1/comments/2026-05-09T14-22-00.000Z--ic-uuid.md":   "issue comment body\n",
+	}
+	// staging = the current export — both comments gone, parent records
+	// (and the non-comment-folder docs) unchanged.
+	staging := map[string]string{
+		"repos/MINI/features/auth/feature.yaml":   "uuid: \"feat-uuid\"\n",
+		"repos/MINI/features/auth/description.md": "Notes.\n",
+		"repos/MINI/issues/MINI-1/issue.yaml":     "uuid: \"iss-uuid\"\n",
+		"repos/MINI/issues/MINI-1/description.md": "Issue body.\n",
+	}
+	targetDir := t.TempDir()
+	stagingDir := t.TempDir()
+	writeTree(t, targetDir, target)
+	writeTree(t, stagingDir, staging)
+
+	ops, err := computeFileOps(targetDir, stagingDir)
+	if err != nil {
+		t.Fatalf("computeFileOps: %v", err)
+	}
+	gotDeletes := map[string]bool{}
+	for _, op := range ops {
+		if op.Kind == opDelete {
+			gotDeletes[op.Path] = true
+		}
+	}
+	wantDeletes := []string{
+		"repos/MINI/features/auth/comments/2026-05-01T10-00-00.000Z--fc-uuid.yaml",
+		"repos/MINI/features/auth/comments/2026-05-01T10-00-00.000Z--fc-uuid.md",
+		"repos/MINI/issues/MINI-1/comments/2026-05-09T14-22-00.000Z--ic-uuid.yaml",
+		"repos/MINI/issues/MINI-1/comments/2026-05-09T14-22-00.000Z--ic-uuid.md",
+	}
+	for _, w := range wantDeletes {
+		if !gotDeletes[w] {
+			t.Errorf("missing scoped comment-file delete: %s\nall deletes: %v", w, gotDeletes)
+		}
+	}
+	if len(gotDeletes) != len(wantDeletes) {
+		t.Errorf("unexpected delete count: got %d %v, want %d", len(gotDeletes), gotDeletes, len(wantDeletes))
+	}
+	// The parent record folders must NOT be planned for deletion.
+	for _, folder := range []string{"repos/MINI/features/auth", "repos/MINI/issues/MINI-1"} {
+		if gotDeletes[folder] {
+			t.Errorf("comment-only delete nuked the whole record folder %s", folder)
+		}
+	}
+}
+
+// writeTree lays down a map of slash-separated relative paths → bodies
+// under root, creating parent dirs. Small test helper for the
+// computeFileOps diff tests.
+func writeTree(t *testing.T, root string, files map[string]string) {
+	t.Helper()
+	for rel, body := range files {
+		abs := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+			t.Fatalf("mkdir for %s: %v", rel, err)
+		}
+		if err := os.WriteFile(abs, []byte(body), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"time"
 
@@ -454,6 +455,16 @@ func (e *Engine) applyComments(tx *sql.Tx, sr *scannedRepo, res *ImportResult) e
 				evalInt = 1
 			}
 			if errors.Is(err, sql.ErrNoRows) {
+				// BACI-338: resurrection guard. No DB row but a sync_state
+				// row ⇒ this comment was hard-deleted locally (a genuinely
+				// new comment arriving from a remote pull has no local
+				// sync_state). Removing the on-disk pair + sync_state row
+				// here propagates the delete instead of re-inserting it.
+				if handled, err := e.guardCommentResurrection(tx, sc.Parsed.UUID, sc.YAMLPath, sc.MDPath, store.SyncKindComment, res); err != nil {
+					return err
+				} else if handled {
+					continue
+				}
 				if _, err := tx.Exec(
 					`INSERT INTO comments (uuid, issue_id, author, body, created_at, eval, agent_session_id, mode)
 					 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -490,6 +501,63 @@ func (e *Engine) applyComments(tx *sql.Tx, sr *scannedRepo, res *ImportResult) e
 		}
 	}
 	return nil
+}
+
+// guardCommentResurrection (BACI-338) closes the missing cell in the
+// (DB row × sync_state × seen-on-disk) case table for hard-deletable
+// comments. It is called from the apply pass's ErrNoRows branch — the
+// scanned comment is on disk but has no DB row. If a sync_state row
+// exists for the uuid, the comment was deleted locally (a genuinely
+// new comment arriving from a remote pull has no local sync_state), so
+// instead of re-inserting the orphaned file we remove the on-disk
+// .yaml/.md pair and drop the sync_state row. Export emits nothing for
+// it and the deletion propagates to the remote on this same run.
+//
+// Returns (handled, err): handled=true means the caller must skip the
+// insert. handled=false (no sync_state row, or a bootstrap flow) means
+// the comment is genuinely new and the caller inserts as before.
+//
+// Gated by !e.SkipPropagateDeletes so bootstrap flows (clone / attach)
+// — where sync_state is not a trustworthy "what was last shared"
+// snapshot — never trip it, mirroring why propagateDeletes is gated
+// the same way.
+//
+// File removal is not transactional, the import is. On a DryRun we
+// touch nothing and only record the projected DeletionEntry; on a real
+// run a later rollback would restore the sync_state row but leave the
+// files gone — which self-heals, since the next sync sees "sync_state
+// present, file absent" and propagateDeletes drops the row.
+func (e *Engine) guardCommentResurrection(tx *sql.Tx, uuid, yamlPath, mdPath, kind string, res *ImportResult) (bool, error) {
+	if e.SkipPropagateDeletes {
+		return false, nil
+	}
+	var dummy string
+	err := tx.QueryRow(`SELECT uuid FROM sync_state WHERE uuid = ?`, uuid).Scan(&dummy)
+	if errors.Is(err, sql.ErrNoRows) {
+		// No sync_state ⇒ genuinely new ⇒ let the caller insert.
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	res.Deleted = append(res.Deleted, DeletionEntry{Kind: kind, UUID: uuid})
+	if e.DryRun {
+		// Project the delete without touching files or sync_state — the
+		// outer transaction rolls back on dry-run anyway.
+		return true, nil
+	}
+	for _, p := range []string{yamlPath, mdPath} {
+		if p == "" {
+			continue
+		}
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			return false, fmt.Errorf("remove orphaned comment file %s: %w", p, err)
+		}
+	}
+	if _, err := tx.Exec(`DELETE FROM sync_state WHERE uuid = ?`, uuid); err != nil {
+		return false, fmt.Errorf("drop sync_state for deleted comment %s: %w", uuid, err)
+	}
+	return true, nil
 }
 
 // applyFeatureComments mirrors applyComments but writes feature-scoped
@@ -529,6 +597,14 @@ func (e *Engine) applyFeatureComments(tx *sql.Tx, sr *scannedRepo, res *ImportRe
 				sc.Parsed.UUID,
 			).Scan(&existingID, &existingAuthor, &existingBody, &existingKind)
 			if errors.Is(err, sql.ErrNoRows) {
+				// BACI-338: resurrection guard, mirroring applyComments —
+				// no DB row but a sync_state row ⇒ deleted locally; remove
+				// the on-disk pair + sync_state row instead of re-inserting.
+				if handled, err := e.guardCommentResurrection(tx, sc.Parsed.UUID, sc.YAMLPath, sc.MDPath, store.SyncKindFeatureComment, res); err != nil {
+					return err
+				} else if handled {
+					continue
+				}
 				if _, err := tx.Exec(
 					`INSERT INTO feature_comments (uuid, feature_id, author, body, kind, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
 					sc.Parsed.UUID, featureID, sc.Parsed.Author, sc.Body, incomingKind,
