@@ -207,3 +207,23 @@ func (s *Store) BlockersFor(ids []int64) (map[int64][]IssueBlocker, error) {
 	}
 	return out, rows.Err()
 }
+
+// IssueHasOpenBlockers reports whether the given issue has at least one
+// `blocks` edge pointing at it whose source is still in an open state
+// (anything but done / cancelled). It reads through BlockersFor + the
+// shared isOpenBlockerState predicate so it answers against the single
+// definition of "open blocker" the dispatch-layer gate (BACI-217) and the
+// per-card BlockedBy filter already use — the pipeline engine's blocked
+// gate (BACI-343) is the one caller today.
+func (s *Store) IssueHasOpenBlockers(issueID int64) (bool, error) {
+	blockers, err := s.BlockersFor([]int64{issueID})
+	if err != nil {
+		return false, err
+	}
+	for _, b := range blockers[issueID] {
+		if isOpenBlockerState(b.BlockerState) {
+			return true, nil
+		}
+	}
+	return false, nil
+}

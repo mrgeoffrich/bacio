@@ -288,6 +288,31 @@ func (e *Engine) tickIssue(iss *model.Issue) ([]Advance, error) {
 	if iss.EngineMode != model.EngineAuto {
 		return advances, nil
 	}
+
+	// 3) Blocked gate (BACI-343). Before starting the next agent job, hold
+	//    off while the card has open `blocks` relations pointing at it. The
+	//    pause leaves Auto armed (unlike the agent_error / cancelled
+	//    reasons), so the first tick after the last blocker reaches
+	//    done/cancelled falls through to advanceChain and auto-resumes with
+	//    no re-arm. Gate the Auto path only — a manual Start (StartNext)
+	//    deliberately bypasses it, letting a human consciously start despite
+	//    a blocker. The Ship/Shelve hand-offs are never gated: they're
+	//    reached only after all agent work is done and carry no dispatch.
+	//    Reached only with no job running (a running job short-circuits in
+	//    step 1), so the blocked pause can't collide with the open_question
+	//    pause reconcileRunning writes while a job is in flight.
+	if next := firstByStatus(jobs, model.JobPending); next != nil &&
+		!next.IsShipHandoff() && !next.IsShelveHandoff() {
+		blocked, err := e.st.IssueHasOpenBlockers(iss.ID)
+		if err != nil {
+			return advances, err
+		}
+		if blocked {
+			e.setPauseReason(iss, model.EnginePauseReasonBlocked)
+			return advances, nil
+		}
+	}
+
 	adv, err := e.advanceChain(iss, jobs)
 	return append(advances, adv...), err
 }
@@ -439,7 +464,7 @@ func (e *Engine) StopRunning(issueID int64) ([]Advance, error) {
 	if err := e.st.SetIssueEngineMode(issueID, model.EngineOff); err != nil {
 		return nil, err
 	}
-	e.setPause(iss, false)
+	e.setPauseReason(iss, "")
 	e.steerWorkerToStop(iss)
 	return []Advance{e.advance(iss, "job.cancelled", fmt.Sprintf("seq=%d mode=%s (stopped)", running.Sequence, running.Mode))}, nil
 }
@@ -659,7 +684,7 @@ func (e *Engine) reconcileRunning(iss *model.Issue, job *model.PipelineJob) (boo
 			if err := e.st.SetPipelineJobStatus(job.ID, model.JobComplete); err != nil {
 				return false, nil, err
 			}
-			e.setPause(iss, false)
+			e.setPauseReason(iss, "")
 			return true, []Advance{e.advance(iss, "job.complete", fmt.Sprintf("seq=%d mode=%s (dispatch pruned)", job.Sequence, job.Mode))}, nil
 		}
 		return false, nil, err
@@ -669,7 +694,7 @@ func (e *Engine) reconcileRunning(iss *model.Issue, job *model.PipelineJob) (boo
 		if err := e.st.SetPipelineJobStatus(job.ID, model.JobComplete); err != nil {
 			return false, nil, err
 		}
-		e.setPause(iss, false)
+		e.setPauseReason(iss, "")
 		return true, []Advance{e.advance(iss, "job.complete", fmt.Sprintf("seq=%d mode=%s", job.Sequence, job.Mode))}, nil
 	case model.DispatchCancelled:
 		if err := e.st.SetPipelineJobStatus(job.ID, model.JobCancelled); err != nil {
@@ -680,7 +705,7 @@ func (e *Engine) reconcileRunning(iss *model.Issue, job *model.PipelineJob) (boo
 		if err := e.st.SetIssueEngineMode(iss.ID, model.EngineOff); err != nil {
 			return false, nil, err
 		}
-		e.setPause(iss, false)
+		e.setPauseReason(iss, "")
 		return false, []Advance{e.advance(iss, "job.cancelled", fmt.Sprintf("seq=%d mode=%s", job.Sequence, job.Mode))}, nil
 	default:
 		// queued / pending / delivered — in flight. The pause reason
@@ -689,7 +714,11 @@ func (e *Engine) reconcileRunning(iss *model.Issue, job *model.PipelineJob) (boo
 		if err != nil {
 			return false, nil, err
 		}
-		e.setPause(iss, hasQ)
+		reason := ""
+		if hasQ {
+			reason = model.EnginePauseReasonOpenQuestion
+		}
+		e.setPauseReason(iss, reason)
 		return false, nil, nil
 	}
 }
@@ -718,7 +747,7 @@ func (e *Engine) startJob(iss *model.Issue, job *model.PipelineJob) ([]Advance, 
 		}
 		return nil, nil
 	}
-	e.setPause(iss, false)
+	e.setPauseReason(iss, "")
 	return []Advance{e.advance(iss, "job.start", fmt.Sprintf("seq=%d mode=%s dispatch=%d", job.Sequence, job.Mode, d.ID))}, nil
 }
 
@@ -767,21 +796,18 @@ func (e *Engine) shelve(iss *model.Issue) ([]Advance, error) {
 	return []Advance{e.advance(iss, "shelve", "-> todo")}, nil
 }
 
-// setPause writes the engine pause reason iff it changed — avoids a write
-// (and sync churn) on every tick while a question stays open/closed.
-func (e *Engine) setPause(iss *model.Issue, paused bool) {
-	want := ""
-	if paused {
-		want = model.EnginePauseReasonOpenQuestion
-	}
-	if iss.EnginePauseReason == want {
+// setPauseReason writes the engine pause reason iff it changed — avoids a
+// write (and sync churn) on every tick while the reason stays the same
+// (a question staying open, a card staying blocked). Pass "" to clear it.
+func (e *Engine) setPauseReason(iss *model.Issue, reason string) {
+	if iss.EnginePauseReason == reason {
 		return
 	}
-	if err := e.st.SetIssueEnginePauseReason(iss.ID, want); err != nil {
+	if err := e.st.SetIssueEnginePauseReason(iss.ID, reason); err != nil {
 		e.logger().Warn("bacio engine: set pause reason failed", "issue", iss.Key, "err", err)
 		return
 	}
-	iss.EnginePauseReason = want
+	iss.EnginePauseReason = reason
 }
 
 func (e *Engine) advance(iss *model.Issue, kind, detail string) Advance {

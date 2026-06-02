@@ -104,6 +104,20 @@ const (
 // agent_error_* classes, which mean the worker died on a transport error.
 const EnginePauseReasonSubagentCancelled = "subagent_cancelled"
 
+// EnginePauseReasonBlocked: Auto is on but the card has one or more open
+// `blocks` relations pointing at it (a blocker issue not yet in done /
+// cancelled), so the engine holds off starting any agent job until every
+// blocker lands in a terminal state, then AUTO-RESUMES on the next tick
+// with no re-arm (BACI-343). Crucially unlike the agent_error_* / cancelled
+// reasons — which flip EngineMode to off and demand a manual Start — this
+// pause leaves Auto armed: the whole point is that clearing the last
+// blocker releases the card on its own. The unblock predicate is the same
+// "state in (done, cancelled)" used by the dispatch-layer gate (BACI-217),
+// so a blocker that finishes in place as an in_pipeline card (e.g. a
+// no-ship process) never releases its dependents until it is shipped or
+// dragged to Done.
+const EnginePauseReasonBlocked = "blocked"
+
 // ShipJobMode is the sentinel "mode" for the Ship hand-off stage inside
 // a process chain. It is deliberately the same slug as the ship dispatch
 // template, but a pipeline job carrying it is a HAND-OFF, not a dispatch:
