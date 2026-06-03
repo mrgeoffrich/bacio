@@ -542,3 +542,125 @@ func TestListJobTranscripts(t *testing.T) {
 		t.Fatalf("mode scope plan: got %d rows, want only dispatch B: %+v", len(byMode), byMode)
 	}
 }
+
+// seedJobCapture adds one parsed primary capture for a dispatch carrying the
+// given session / agent correlation — the seed the session/agent transcript
+// tests group on.
+func seedJobCapture(t *testing.T, s *Store, proxyReqID, dispatchID int64, session, agent string) {
+	t.Helper()
+	cap := &model.ParsedCapture{Model: "claude-opus-4-8", SystemFP: "fp", MessageCount: 1}
+	if _, err := s.AddProxyMessage(AddProxyMessageIn{
+		ProxyRequestID: proxyReqID, DispatchID: &dispatchID,
+		SessionID: session, ClaudeAgentID: agent,
+		Capture: cap, IsPrimary: true, StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("seedJobCapture %d: %v", proxyReqID, err)
+	}
+}
+
+// TestListJobTranscripts_SessionAgentEnrichment asserts each row carries the
+// dispatch's session_id / claude_agent_id (one per dispatch) and a session
+// label: the session's agent name when an agent_sessions row names it, else
+// the short session id when no row exists.
+func TestListJobTranscripts_SessionAgentEnrichment(t *testing.T) {
+	s := newTestStore(t)
+	repo, err := s.CreateRepo("AAAA", "repo-a", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+
+	// A named session: an agent_sessions row with an agent name to resolve.
+	ag, _, err := s.UpsertAgent("swift-otter@claude.test", true)
+	if err != nil {
+		t.Fatalf("upsert agent: %v", err)
+	}
+	const namedSess = "11111111-2222-3333-4444-555555555555"
+	if _, err := s.UpsertAgentSession(UpsertAgentSessionIn{
+		SessionID: namedSess, RepoID: repo.ID, AgentID: &ag.ID, Actor: "agent-claude",
+	}); err != nil {
+		t.Fatalf("upsert session: %v", err)
+	}
+
+	dispNamed := seedDispatch(t, s, repo.ID, nil, "implement")
+	seedJobCapture(t, s, 1, dispNamed, namedSess, "agent-aaa")
+	seedJobCapture(t, s, 2, dispNamed, namedSess, "agent-aaa")
+
+	// An unsynced session: captures reference a session id with no
+	// agent_sessions row, so the label falls back to the short id.
+	const orphanSess = "99999999-8888-7777-6666-555555555555"
+	dispOrphan := seedDispatch(t, s, repo.ID, nil, "plan")
+	seedJobCapture(t, s, 3, dispOrphan, orphanSess, "agent-bbb")
+
+	rows, err := s.ListJobTranscripts(JobTranscriptFilter{})
+	if err != nil {
+		t.Fatalf("ListJobTranscripts: %v", err)
+	}
+	byDispatch := map[int64]*model.JobTranscriptRow{}
+	for _, r := range rows {
+		byDispatch[r.DispatchID] = r
+	}
+
+	named := byDispatch[dispNamed]
+	if named == nil {
+		t.Fatalf("named dispatch row missing: %+v", rows)
+	}
+	if named.SessionID != namedSess || named.ClaudeAgentID != "agent-aaa" {
+		t.Errorf("named row session/agent = %q / %q, want %q / agent-aaa", named.SessionID, named.ClaudeAgentID, namedSess)
+	}
+	if named.SessionLabel != "swift-otter@claude.test" {
+		t.Errorf("named row label = %q, want the agent name", named.SessionLabel)
+	}
+
+	orphan := byDispatch[dispOrphan]
+	if orphan == nil {
+		t.Fatalf("orphan dispatch row missing: %+v", rows)
+	}
+	if orphan.SessionLabel != orphanSess[:12] {
+		t.Errorf("orphan row label = %q, want short id %q", orphan.SessionLabel, orphanSess[:12])
+	}
+}
+
+// TestListJobTranscripts_SessionAgentFilters asserts the session / agent
+// filters narrow the list to one supervisor session / one subagent identity.
+func TestListJobTranscripts_SessionAgentFilters(t *testing.T) {
+	s := newTestStore(t)
+	repo, err := s.CreateRepo("AAAA", "repo-a", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+
+	// One session, two dispatches (a plan→implement chain), each its own agent.
+	const sess = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	dispPlan := seedDispatch(t, s, repo.ID, nil, "plan")
+	dispImpl := seedDispatch(t, s, repo.ID, nil, "implement")
+	seedJobCapture(t, s, 1, dispPlan, sess, "agent-plan")
+	seedJobCapture(t, s, 2, dispImpl, sess, "agent-impl")
+
+	// A second session entirely (a different sitting).
+	const otherSess = "ffffffff-0000-1111-2222-333333333333"
+	dispOther := seedDispatch(t, s, repo.ID, nil, "ship")
+	seedJobCapture(t, s, 3, dispOther, otherSess, "agent-ship")
+
+	// Session filter: both dispatches of that one session, not the other.
+	bySession, err := s.ListJobTranscripts(JobTranscriptFilter{SessionID: sess})
+	if err != nil {
+		t.Fatalf("session-scoped ListJobTranscripts: %v", err)
+	}
+	if len(bySession) != 2 {
+		t.Fatalf("session scope: got %d rows, want 2 (the chain): %+v", len(bySession), bySession)
+	}
+	for _, r := range bySession {
+		if r.DispatchID == dispOther {
+			t.Fatalf("session scope leaked the other session's dispatch: %+v", bySession)
+		}
+	}
+
+	// Agent filter: only the dispatch that subagent ran.
+	byAgent, err := s.ListJobTranscripts(JobTranscriptFilter{ClaudeAgentID: "agent-impl"})
+	if err != nil {
+		t.Fatalf("agent-scoped ListJobTranscripts: %v", err)
+	}
+	if len(byAgent) != 1 || byAgent[0].DispatchID != dispImpl {
+		t.Fatalf("agent scope agent-impl: got %d rows, want only the implement dispatch: %+v", len(byAgent), byAgent)
+	}
+}

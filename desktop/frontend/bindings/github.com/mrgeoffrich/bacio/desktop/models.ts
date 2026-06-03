@@ -1427,7 +1427,10 @@ export class IssueMetaDTO {
  * deep-link key; IssueKey / Mode / AgentName / RepoPrefix are best-effort
  * enrichment (empty when the dispatch was deleted); Model is the primary
  * thread's; TurnCount is the primary-capture count; Usage is summed across the
- * dispatch; LastSeen is the most-recent capture's timestamp.
+ * dispatch; LastSeen is the most-recent capture's timestamp. SessionID /
+ * ClaudeAgentID / SessionLabel (BACI-348) are the supervisor-session / subagent
+ * correlation keys + the session's human label, so the UI can fold dispatches
+ * under a named session.
  */
 export class JobTranscriptRowDTO {
     "dispatchId": number;
@@ -1439,6 +1442,9 @@ export class JobTranscriptRowDTO {
     "turnCount": number;
     "usage": JobTranscriptUsageDTO;
     "lastSeen": time$0.Time;
+    "sessionId"?: string;
+    "claudeAgentId"?: string;
+    "sessionLabel"?: string;
 
     /** Creates a new JobTranscriptRowDTO instance. */
     constructor($$source: Partial<JobTranscriptRowDTO> = {}) {

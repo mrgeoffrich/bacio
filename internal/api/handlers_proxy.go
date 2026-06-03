@@ -243,7 +243,8 @@ func (d deps) handleProxySearch(w http.ResponseWriter, r *http.Request) {
 // handleProxyJobs serves the BACI-322 transcript browser list — one summary
 // row per distinct dispatch that has parsed captures, the row-per-dispatch
 // list the Monitor Transcript page renders. It scopes to the active repo
-// (`repo`), one issue (`issue`), one job mode (`mode`), and a `since` lookback
+// (`repo`), one issue (`issue`), one job mode (`mode`), one supervisor session
+// (`session`) / subagent identity (`agent`) (BACI-348), and a `since` lookback
 // (or `from` absolute cutoff, mutually exclusive, mirroring /proxy/captures),
 // capped with `limit`, newest-first. Each row carries the issue-key / mode /
 // agent / repo-prefix enrichment lifted off its dispatch. Behind the
@@ -254,6 +255,8 @@ func (d deps) handleProxyJobs(w http.ResponseWriter, r *http.Request) {
 	f.RepoPrefix = q.Get("repo")
 	f.IssueKey = q.Get("issue")
 	f.Mode = q.Get("mode")
+	f.SessionID = q.Get("session")
+	f.ClaudeAgentID = q.Get("agent")
 
 	if v := q.Get("limit"); v != "" {
 		n, err := strconv.Atoi(v)

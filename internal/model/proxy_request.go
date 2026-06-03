@@ -125,19 +125,28 @@ type ProxyMessageMatch struct {
 //
 // IssueKey / Mode / AgentName / RepoPrefix are best-effort enrichment lifted
 // from the dispatch row (one cached GetDispatch per dispatch, the same idiom
-// ProxyCaptureRow uses) — empty when the dispatch has been deleted. The JSON
-// tags are snake_case so the wire shape of GET /proxy/jobs declares cleanly;
-// the desktop Wails DTO carries the camelCase twin.
+// ProxyCaptureRow uses) — empty when the dispatch has been deleted.
+//
+// SessionID / ClaudeAgentID (BACI-348) are the dispatch's supervisor-session
+// and per-subagent correlation keys, lifted off the captures (every capture of
+// one dispatch shares them). SessionLabel is the human label for SessionID —
+// the session's agent name, else the short session id, else "" — so the UI can
+// fold dispatches under a named session without a raw UUID. The JSON tags are
+// snake_case so the wire shape of GET /proxy/jobs declares cleanly; the desktop
+// Wails DTO carries the camelCase twin.
 type JobTranscriptRow struct {
-	DispatchID int64          `json:"dispatch_id"`
-	IssueKey   string         `json:"issue_key,omitempty"`
-	Mode       string         `json:"mode,omitempty"`
-	AgentName  string         `json:"agent_name,omitempty"`
-	RepoPrefix string         `json:"repo_prefix,omitempty"`
-	Model      string         `json:"model,omitempty"`
-	TurnCount  int64          `json:"turn_count"`
-	Usage      AnthropicUsage `json:"usage"`
-	LastSeen   time.Time      `json:"last_seen"`
+	DispatchID    int64          `json:"dispatch_id"`
+	IssueKey      string         `json:"issue_key,omitempty"`
+	Mode          string         `json:"mode,omitempty"`
+	AgentName     string         `json:"agent_name,omitempty"`
+	RepoPrefix    string         `json:"repo_prefix,omitempty"`
+	Model         string         `json:"model,omitempty"`
+	TurnCount     int64          `json:"turn_count"`
+	Usage         AnthropicUsage `json:"usage"`
+	LastSeen      time.Time      `json:"last_seen"`
+	SessionID     string         `json:"session_id,omitempty"`
+	ClaudeAgentID string         `json:"claude_agent_id,omitempty"`
+	SessionLabel  string         `json:"session_label,omitempty"`
 }
 
 // ProxyFQDNStat is the BACI-303 per-FQDN rollup of proxy_requests rows:
