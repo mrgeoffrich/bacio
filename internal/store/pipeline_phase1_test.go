@@ -231,9 +231,9 @@ func TestReorderIssue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	a, _ := s.CreateIssue(repo.ID, nil, "a", "", model.StateTodo, nil, "")
-	b, _ := s.CreateIssue(repo.ID, nil, "b", "", model.StateTodo, nil, "")
-	c, _ := s.CreateIssue(repo.ID, nil, "c", "", model.StateTodo, nil, "")
+	a, _ := s.CreateIssue(repo.ID, nil, "a", "", model.StateTodo, nil, "", "")
+	b, _ := s.CreateIssue(repo.ID, nil, "b", "", model.StateTodo, nil, "", "")
+	c, _ := s.CreateIssue(repo.ID, nil, "c", "", model.StateTodo, nil, "", "")
 
 	// Move c (number 3) to the top.
 	if err := s.ReorderIssue(c.ID, 1); err != nil {
@@ -274,7 +274,7 @@ func TestBootstrapRepoDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	orphan, _ := s.CreateIssue(repo.ID, nil, "orphan", "", model.StateTodo, nil, "")
+	orphan, _ := s.CreateIssue(repo.ID, nil, "orphan", "", model.StateTodo, nil, "", "")
 
 	if err := s.BootstrapRepoDefaults(repo.ID); err != nil {
 		t.Fatalf("BootstrapRepoDefaults: %v", err)

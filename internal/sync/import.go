@@ -98,9 +98,9 @@ type DeletionEntry struct {
 // resolvable on import. The reference is left in place on disk; we
 // just don't write a DB-side edge.
 type DanglingRef struct {
-	From      string `json:"from"`       // e.g. "MINI-7"
-	FromUUID  string `json:"from_uuid"`
-	Kind      string `json:"kind"`       // "blocks", "feature", "doc_link"...
+	From        string `json:"from"` // e.g. "MINI-7"
+	FromUUID    string `json:"from_uuid"`
+	Kind        string `json:"kind"` // "blocks", "feature", "doc_link"...
 	TargetLabel string `json:"target_label"`
 	TargetUUID  string `json:"target_uuid"`
 }
@@ -326,7 +326,7 @@ func (e *Engine) applyImport(ctx context.Context, tx *sql.Tx, source string, sca
 }
 
 // upsertRepo resolves the parsed repo to a *model.Repo, creating a
-// phantom row when no DB row matches the uuid. Real (path != '')
+// phantom row when no DB row matches the uuid. Real (path != ”)
 // repos are upgraded if they were previously phantom; otherwise we
 // just patch name/remote_url/next_issue_number from the file.
 //
@@ -649,10 +649,16 @@ func contentHashFeature(sf *scannedFeature) string {
 }
 
 func contentHashIssue(si *scannedIssue) string {
-	return ContentHash([]byte(fmt.Sprintf("issue|%s|%d|%s|%s|%s|%s|%s|%s",
+	// BACI-349: customer_impact is folded into the hash so an impact-only
+	// edit on one machine perturbs the hash and the sibling sees an
+	// `updated` (not a silent `noop`) on the next pull. The empty-impact
+	// case appends a trailing "|" — a one-cycle re-hash for every existing
+	// issue on the first re-sync after upgrade, the same migration cost
+	// the eval-triple fold paid in contentHashComment.
+	return ContentHash([]byte(fmt.Sprintf("issue|%s|%d|%s|%s|%s|%s|%s|%s|%s",
 		si.Parsed.UUID, si.Parsed.Number, si.Parsed.State, si.Parsed.Assignee,
 		si.Parsed.Title, si.BodyHash, strings.Join(si.Parsed.Tags, ","),
-		hashableArchived(si.Parsed.ArchivedAt))))
+		hashableArchived(si.Parsed.ArchivedAt), si.Parsed.CustomerImpact)))
 }
 
 func contentHashComment(sc *scannedComment) string {

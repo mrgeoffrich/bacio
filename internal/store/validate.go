@@ -32,7 +32,7 @@ const (
 	maxSlugLen     = 60
 	maxFilenameLen = 200
 	maxBodyBytes   = 10 << 20 // 10 MiB — generous enough for a raw subagent transcript attachment (BACI-90)
-	maxURLBytes    = 2 << 10 // 2 KiB
+	maxURLBytes    = 2 << 10  // 2 KiB
 )
 
 var slugRule = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
@@ -77,6 +77,15 @@ func ValidateTitle(s, field string) (string, error) {
 // or agents (assignee, comment author). Same rules as a title, smaller cap.
 func ValidateName(s, field string) (string, error) {
 	return validateSingleLine(s, field, maxNameLen, true)
+}
+
+// ValidateCustomerImpact is for the optional single-line BACI-349
+// customer_impact field — a one-line statement of the change in the
+// user's terms. Optional (blank returns "" — the "no user-facing change"
+// state), trimmed, no control characters, no embedded newlines, capped at
+// maxTitleLen runes (same generous cap as a title).
+func ValidateCustomerImpact(s, field string) (string, error) {
+	return validateSingleLine(s, field, maxTitleLen, false)
 }
 
 // ValidateActor validates an actor string before it lands in the audit

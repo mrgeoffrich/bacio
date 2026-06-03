@@ -312,6 +312,64 @@ func TestRoundTripIssueBaseBranch(t *testing.T) {
 	}
 }
 
+// TestRoundTripIssueCustomerImpact (BACI-349) confirms the new
+// issues.customer_impact field round-trips through both clients: set on
+// create, read via show, update + clear via edit. Pinned because the
+// remote edit path adds the field to a hand-built JSON map (a future
+// refactor could silently drop it — same rationale as the base_branch
+// pin above).
+func TestRoundTripIssueCustomerImpact(t *testing.T) {
+	p := newPair(t)
+	defer p.cleanup()
+	ctx := context.Background()
+
+	// Create via the remote client with an impact set; local must see it.
+	iss, err := p.remote.CreateIssue(ctx, p.repo, inputs.IssueAddInput{
+		Title:          "Fix Safari login",
+		CustomerImpact: "Login no longer 500s on Safari",
+	}, false)
+	if err != nil {
+		t.Fatalf("remote CreateIssue: %v", err)
+	}
+	if iss.CustomerImpact != "Login no longer 500s on Safari" {
+		t.Fatalf("create impact = %q, want the Safari line", iss.CustomerImpact)
+	}
+	got, err := p.local.GetIssueByKey(ctx, p.repo, iss.Key)
+	if err != nil {
+		t.Fatalf("local GetIssueByKey: %v", err)
+	}
+	if got.CustomerImpact != "Login no longer 500s on Safari" {
+		t.Fatalf("local sees impact = %q, want the Safari line", got.CustomerImpact)
+	}
+
+	// Edit via remote, non-empty new value.
+	next := "Shipped list is scannable at a glance"
+	if _, err := p.remote.UpdateIssue(ctx, p.repo, iss.Key, client.IssueEdit{CustomerImpact: &next}, false); err != nil {
+		t.Fatalf("remote UpdateIssue impact: %v", err)
+	}
+	got, err = p.local.GetIssueByKey(ctx, p.repo, iss.Key)
+	if err != nil {
+		t.Fatalf("local GetIssueByKey post-update: %v", err)
+	}
+	if got.CustomerImpact != next {
+		t.Fatalf("post-update impact = %q, want %q", got.CustomerImpact, next)
+	}
+
+	// Clear via remote (non-nil empty pointer) → back to the "no impact"
+	// state (empty string, not nil — the column is NOT NULL DEFAULT '').
+	empty := ""
+	if _, err := p.remote.UpdateIssue(ctx, p.repo, iss.Key, client.IssueEdit{CustomerImpact: &empty}, false); err != nil {
+		t.Fatalf("remote UpdateIssue clear: %v", err)
+	}
+	got, err = p.local.GetIssueByKey(ctx, p.repo, iss.Key)
+	if err != nil {
+		t.Fatalf("local GetIssueByKey post-clear: %v", err)
+	}
+	if got.CustomerImpact != "" {
+		t.Fatalf("post-clear CustomerImpact = %q, want empty", got.CustomerImpact)
+	}
+}
+
 func TestRoundTripCommentsAndDocs(t *testing.T) {
 	p := newPair(t)
 	defer p.cleanup()

@@ -701,7 +701,7 @@ func seedOnePass(s *store.Store, repo *model.Repo, copyIdx int) error {
 			}
 		}
 		title := iss.title + titleSfx
-		created, err := s.CreateIssue(repo.ID, featureID, title, iss.desc, iss.state, iss.tags, "")
+		created, err := s.CreateIssue(repo.ID, featureID, title, iss.desc, iss.state, iss.tags, "", "")
 		if err != nil {
 			return fmt.Errorf("seed: create issue %q: %w", title, err)
 		}

@@ -109,7 +109,7 @@ func setupPRCreateTestWith(t *testing.T, gh *fakeGH, o prCreateTestOpts) string 
 		}
 		featureID = &feat.ID
 	}
-	iss, err := s.CreateIssue(repo.ID, featureID, "Login broken on Safari", "", model.StateTodo, nil, o.IssueBaseBranch)
+	iss, err := s.CreateIssue(repo.ID, featureID, "Login broken on Safari", "", model.StateTodo, nil, o.IssueBaseBranch, "")
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}

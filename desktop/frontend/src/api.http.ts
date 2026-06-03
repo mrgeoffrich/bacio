@@ -169,6 +169,11 @@ export interface BoardCard {
   column: string;
   columnLabel: string;
   title: string;
+  // BACI-349: optional one-line customer impact denormalised onto the
+  // card. Absent (server-side omitempty) when unset; the opt-in
+  // impact-primary Pipeline view renders it as the card head and demotes
+  // the title to a subtitle only when this is non-empty.
+  customerImpact?: string;
   // BACI-171: short (~140-char) excerpt of the issue description used
   // by the bottom-right ActivityTray to render a one-or-two-line
   // summary per entry. Absent (server-side omitempty) when the issue
@@ -309,6 +314,10 @@ export interface PipelineJob {
 export interface ShippedIssueDTO {
   key: string;
   title: string;
+  // BACI-349: optional one-line customer impact. The popover renders
+  // this as the primary line and falls back to `title` (with a
+  // muted/italic class) when it's absent.
+  customerImpact?: string;
   terminalAt: string;
   tags: string[];
   featureSlug?: string;
@@ -370,6 +379,9 @@ export interface IssueDetail {
   column: string;
   columnLabel: string;
   title: string;
+  // BACI-349: optional one-line customer impact; the detail header
+  // renders it inline and lets the user edit it.
+  customerImpact?: string;
   description: string;
   tags: string[];
   assignees: string[];
@@ -392,6 +404,9 @@ export interface IssueMetaDTO {
   column: string;
   columnLabel: string;
   title: string;
+  // BACI-349: optional one-line customer impact; the IssueWorkspace
+  // header renders it inline and lets the user edit it.
+  customerImpact?: string;
   description: string;
   tags: string[];
   assignees: string[];
@@ -931,6 +946,10 @@ interface ApiIssue {
   description?: string;
   state: string;
   assignee?: string;
+  // BACI-349: optional one-line customer impact. Snake-case on the wire
+  // (model.Issue's json tag); cardFromIssue / the meta reshape copy it
+  // onto the camelCase customerImpact field.
+  customer_impact?: string;
   tags?: string[];
   taken?: boolean;
   // BACI-172: per-feature glyph denormalised from the join in
@@ -956,6 +975,10 @@ function cardFromIssue(iss: ApiIssue): BoardCard {
     column: iss.state,
     columnLabel: stateLabel(iss.state),
     title: iss.title,
+    // BACI-349: thread the customer impact through so a card refreshed
+    // via setIssueState() (drag-to-move) keeps it until the next
+    // listCards() rebuild.
+    customerImpact: iss.customer_impact,
     tags: iss.tags ?? [],
     assignees: assigneeList(assignee),
     claude: assignee === 'claude',
@@ -1163,6 +1186,7 @@ export async function getIssue(repoPrefix: string, key: string): Promise<IssueDe
     column: iss.state,
     columnLabel: stateLabel(iss.state),
     title: iss.title,
+    customerImpact: iss.customer_impact,
     description: iss.description ?? '',
     tags: iss.tags ?? [],
     assignees: assigneeList(assignee),
@@ -1288,6 +1312,7 @@ function reshapeApiBrief(view: ApiIssueBrief): IssueBriefDTO {
     column: iss.state,
     columnLabel: stateLabel(iss.state),
     title: iss.title,
+    customerImpact: iss.customer_impact,
     description: iss.description ?? '',
     tags: iss.tags ?? [],
     assignees: assigneeList(assignee),
@@ -1707,6 +1732,27 @@ export async function updateIssueTitle(
   await call<unknown>(`/repos/${repoPrefix}/issues/${key}`, {
     method: 'PATCH',
     body: { title },
+  });
+  return getIssue(repoPrefix, key);
+}
+
+// updateIssueCustomerImpact (BACI-349) PATCHes the issue's one-line
+// customer impact. Unlike the title an empty value is legitimate — it
+// clears the field back to the "no impact" state — so it's always sent
+// as a present `customer_impact` key (empty = clear).
+export async function updateIssueCustomerImpact(
+  repoPrefix: string,
+  key: string,
+  customerImpact: string,
+): Promise<IssueDetail> {
+  if (!repoPrefix || repoPrefix === 'all') {
+    const i = key.lastIndexOf('-');
+    if (i <= 0) throw new Error(`invalid issue key: ${key}`);
+    repoPrefix = key.slice(0, i);
+  }
+  await call<unknown>(`/repos/${repoPrefix}/issues/${key}`, {
+    method: 'PATCH',
+    body: { customer_impact: customerImpact },
   });
   return getIssue(repoPrefix, key);
 }
@@ -3221,4 +3267,23 @@ export async function setBacklogCollapsed(
 export async function getBacklogCollapsed(repoPrefix: string): Promise<boolean> {
   const out = await call<{ backlog_collapsed: boolean }>(`/repos/${repoPrefix}/backlog-collapsed`);
   return !!out.backlog_collapsed;
+}
+
+// setImpactPrimary / getImpactPrimary (BACI-349) front the per-repo
+// Pipeline impact-primary display preference — clone of the
+// backlog-collapsed pair above.
+export async function setImpactPrimary(
+  repoPrefix: string,
+  impactPrimary: boolean,
+): Promise<boolean> {
+  const out = await call<{ impact_primary: boolean }>(`/repos/${repoPrefix}/impact-primary`, {
+    method: 'PUT',
+    body: { impact_primary: impactPrimary },
+  });
+  return !!out.impact_primary;
+}
+
+export async function getImpactPrimary(repoPrefix: string): Promise<boolean> {
+  const out = await call<{ impact_primary: boolean }>(`/repos/${repoPrefix}/impact-primary`);
+  return !!out.impact_primary;
 }

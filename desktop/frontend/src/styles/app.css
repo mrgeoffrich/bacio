@@ -1973,6 +1973,14 @@ body { margin: 0; }
 }
 .mk-pl-blocked-btn.is-grab:active { cursor: grabbing; }
 .mk-pl-card-title { font-size: 14px; font-weight: 600; line-height: 1.35; color: var(--fg-1); margin: 0; }
+/* BACI-349: the demoted title subtitle shown under the customer-impact
+   headline when the board's impact-primary toggle is on. Muted + smaller
+   so the impact line reads as the headline and the imperative title as
+   the supporting "what the work was". */
+.mk-pl-card-subtitle {
+  font-size: 12px; font-weight: 500; line-height: 1.3;
+  color: var(--fg-3); margin: 0;
+}
 .mk-pl-card-labels { display: flex; flex-wrap: wrap; gap: 5px; }
 .mk-pl-label {
   font-size: 11px; font-weight: 500; color: var(--fg-2);

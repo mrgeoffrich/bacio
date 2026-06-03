@@ -64,7 +64,7 @@ type Feature struct {
 	// auto-close` verb (auto-close OFF sets it to true, ON clears it),
 	// not as a side-effect of `bacio feature state`. No omitempty —
 	// same reason as State.
-	StateManual bool      `json:"state_manual"`
+	StateManual bool `json:"state_manual"`
 	// CollectHandoffs (BACI-333) gates whether worker close-outs append
 	// handoff comments to this feature. Defaults to true (opt-out) so
 	// every existing feature behaves exactly as before; standing bucket
@@ -89,13 +89,13 @@ type Feature struct {
 }
 
 type Issue struct {
-	ID          int64     `json:"id"`
-	UUID        string    `json:"uuid"`
-	RepoID      int64     `json:"repo_id"`
-	Number      int64     `json:"number"`
-	Key         string    `json:"key"` // e.g. "MINI-42"
-	FeatureID    *int64 `json:"feature_id,omitempty"`
-	FeatureSlug  string `json:"feature_slug,omitempty"`
+	ID          int64  `json:"id"`
+	UUID        string `json:"uuid"`
+	RepoID      int64  `json:"repo_id"`
+	Number      int64  `json:"number"`
+	Key         string `json:"key"` // e.g. "MINI-42"
+	FeatureID   *int64 `json:"feature_id,omitempty"`
+	FeatureSlug string `json:"feature_slug,omitempty"`
 	// FeatureEmoji (BACI-172) is the per-feature glyph denormalised
 	// onto the issue row via the feature join in issueSelect. Empty
 	// when the issue has no feature, or when the feature has no
@@ -109,10 +109,19 @@ type Issue struct {
 	// kanban card chip and the ActivityTray auto-grouping don't need a
 	// second feature lookup per card.
 	FeatureBranchName string `json:"feature_branch_name,omitempty"`
-	Title       string    `json:"title"`
-	Description string    `json:"description,omitempty"`
-	State       State     `json:"state"`
-	Assignee    string    `json:"assignee,omitempty"`
+	Title             string `json:"title"`
+	Description       string `json:"description,omitempty"`
+	State             State  `json:"state"`
+	Assignee          string `json:"assignee,omitempty"`
+	// CustomerImpact (BACI-349) is an optional single-line statement of
+	// the change in the user's terms ("Login no longer 500s on Safari"),
+	// authored at scope-time by the scope agent (or edited by a human).
+	// Empty = "no user-facing change" — read surfaces (the shipped list,
+	// the opt-in impact-primary board view) fall back to the title when
+	// it's blank, so pre-existing rows degrade gracefully. Same shape as
+	// Assignee (plain string, empty = unset). Validated at the store
+	// boundary by ValidateCustomerImpact (single-line, title-capped).
+	CustomerImpact string `json:"customer_impact,omitempty"`
 	// Taken is true iff this issue currently has at least one open
 	// (unreleased) agent claim held by an alive session — the derived
 	// "an agent is actively holding this" signal also surfaced on the
@@ -154,7 +163,7 @@ type Issue struct {
 	// nullable shape. The resolver that combines this with
 	// feature.branch_name is BACI-226; this field just records the
 	// override.
-	BaseBranch *string   `json:"base_branch,omitempty"`
+	BaseBranch *string `json:"base_branch,omitempty"`
 	// Priority is the manual ordering key within a (repo, state) band,
 	// used by the Pipeline page's Backlog (todo) and Shipping
 	// (to_be_shipped) columns. Lower sorts first — position 1 (next to
@@ -163,9 +172,9 @@ type Issue struct {
 	// Store.ReorderIssue, so the queue order survives reloads rather
 	// than living in board-local display state. No omitempty: the field
 	// is always visible so the Pipeline reads it without a fallback.
-	Priority   int       `json:"priority"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	Priority  int       `json:"priority"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 	// EngineMode / EnginePauseReason are the per-issue controller-engine
 	// fields, meaningful only while the issue is in_pipeline. EngineMode
 	// is "off" (manual Start advances one job) or "auto" (the engine

@@ -1652,7 +1652,15 @@ func (b *boardView) viewOverlay(width, height int) string {
 	// 4 horizontal border rows (top, header/desc divider, desc/bottom
 	// divider, bottom) eat 4 rows; the rest is content.
 	contentRows := height - 4
+	// BACI-349: the header is normally 2 rows (title + meta); when the
+	// issue carries a customer-impact line we grow it to 3 so the
+	// read-only impact line can sit between them without stealing a meta
+	// row. The clamp below still keeps the description/comments panes a
+	// sensible minimum height on a short terminal.
 	headerH := 2
+	if iss.CustomerImpact != "" {
+		headerH = 3
+	}
 	if headerH > contentRows-6 {
 		headerH = max(1, contentRows-6)
 	}
@@ -1680,11 +1688,21 @@ func (b *boardView) viewOverlay(width, height int) string {
 }
 
 // renderOverlayHeaderLines returns h lines (each cellW visible cols)
-// of the issue-overlay header: title row, then a single meta row.
-// Pads with empty rows if h > 2.
+// of the issue-overlay header: title row, an optional read-only
+// customer-impact row (BACI-349), then a single meta row. Pads with
+// empty rows if h exceeds the rendered line count.
 func (b *boardView) renderOverlayHeaderLines(iss *model.Issue, cellW, h int) []string {
 	titleLine := keyStyle.Bold(true).Render("["+iss.Key+"]") + "  " +
 		boldStyle.Render(iss.Title)
+
+	headerRows := []string{titleLine}
+	// BACI-349: the TUI is display-only for customer_impact — show the
+	// line read-only (editing lives on the React detail page / the
+	// `bacio issue edit` CLI), and only when non-empty so a blank field
+	// doesn't waste a header row.
+	if iss.CustomerImpact != "" {
+		headerRows = append(headerRows, mutedStyle.Italic(true).Render(iss.CustomerImpact))
+	}
 
 	metaItems := []string{stateLabel(iss.State)}
 	if iss.FeatureSlug != "" {
@@ -1698,8 +1716,9 @@ func (b *boardView) renderOverlayHeaderLines(iss *model.Issue, cellW, h int) []s
 		"updated "+iss.UpdatedAt.Format("2006-01-02 15:04"),
 	)
 	metaLine := mutedStyle.Render(strings.Join(metaItems, " · "))
+	headerRows = append(headerRows, metaLine)
 
-	lines := padCell(strings.Join([]string{titleLine, metaLine}, "\n"), cellW)
+	lines := padCell(strings.Join(headerRows, "\n"), cellW)
 	for len(lines) < h {
 		lines = append(lines, strings.Repeat(" ", cellW))
 	}

@@ -730,7 +730,7 @@ func setupStopFailureEnv(t *testing.T) (string, *store.Store, *model.Repo, strin
 // against a dispatch — the in-flight state the StopFailure hook reconciles.
 func seedRunningPipelineClaim(t *testing.T, s *store.Store, repo *model.Repo, sessID string) *model.Issue {
 	t.Helper()
-	iss, err := s.CreateIssue(repo.ID, nil, "card", "", model.StateInPipeline, nil, "")
+	iss, err := s.CreateIssue(repo.ID, nil, "card", "", model.StateInPipeline, nil, "", "")
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}

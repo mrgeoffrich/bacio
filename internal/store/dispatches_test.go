@@ -598,7 +598,7 @@ func seedShipDispatchForBranch(t *testing.T, s *Store, repo *model.Repo, feat *m
 	if feat != nil {
 		featID = &feat.ID
 	}
-	iss, err := s.CreateIssue(repo.ID, featID, title, "", model.StateInReview, nil, override)
+	iss, err := s.CreateIssue(repo.ID, featID, title, "", model.StateInReview, nil, override, "")
 	if err != nil {
 		t.Fatalf("create issue %q: %v", title, err)
 	}
@@ -780,7 +780,7 @@ func TestInflightByModeBaseForRepo(t *testing.T) {
 	seedShipDispatchForBranch(t, s, repo, nil, "feat/B ship", "bulk-b@claude.test", "feat/B")
 
 	// Plus a plan dispatch on main so we get a second mode too.
-	planIss, err := s.CreateIssue(repo.ID, nil, "main plan", "", model.StateTodo, nil, "main")
+	planIss, err := s.CreateIssue(repo.ID, nil, "main plan", "", model.StateTodo, nil, "main", "")
 	if err != nil {
 		t.Fatalf("create plan issue: %v", err)
 	}
@@ -1575,7 +1575,7 @@ func TestBindQueuedDispatch_RequeueRecoversDeliveredDispatch(t *testing.T) {
 func seedBlockerFixture(t *testing.T) (*Store, *model.Repo, *model.Issue, *model.Issue) {
 	t.Helper()
 	s, repo, blocked, _, _ := seedDispatchFixture(t)
-	blocker, err := s.CreateIssue(repo.ID, nil, "the blocker", "", model.StateTodo, nil, "")
+	blocker, err := s.CreateIssue(repo.ID, nil, "the blocker", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("create blocker issue: %v", err)
 	}
@@ -1786,7 +1786,7 @@ func TestPromoteReadyFollowOns_BlockerVariantWaitsForNewBlocker(t *testing.T) {
 		t.Fatalf("AddBlockerFollowOnDispatch: %v", err)
 	}
 	// Add a second open blocker post-queue.
-	blocker2, err := s.CreateIssue(repo.ID, nil, "second blocker", "", model.StateTodo, nil, "")
+	blocker2, err := s.CreateIssue(repo.ID, nil, "second blocker", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("create second blocker: %v", err)
 	}
@@ -1921,14 +1921,14 @@ func TestPromoteReadyFollowOns_StampsBlockerSnapshot(t *testing.T) {
 	}
 	// Add two more blockers (one done, one cancelled) so the gate
 	// sees three rows total at fire time.
-	blocker2, err := s.CreateIssue(repo.ID, nil, "second blocker", "", model.StateTodo, nil, "")
+	blocker2, err := s.CreateIssue(repo.ID, nil, "second blocker", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("create second blocker: %v", err)
 	}
 	if err := s.CreateRelation(blocker2.ID, blocked.ID, model.RelBlocks); err != nil {
 		t.Fatalf("create blocks edge 2: %v", err)
 	}
-	blocker3, err := s.CreateIssue(repo.ID, nil, "third blocker", "", model.StateTodo, nil, "")
+	blocker3, err := s.CreateIssue(repo.ID, nil, "third blocker", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("create third blocker: %v", err)
 	}

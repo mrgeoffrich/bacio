@@ -995,6 +995,15 @@ export default function App() {
       .catch(err => { reportError(err, { headline: "Couldn't collapse backlog" }); throw err; });
   }, [activeBoard]);
 
+  // Per-repo Pipeline impact-primary display preference (BACI-349).
+  // PipelineView owns the display state (seeded from the backend GET);
+  // this persists the change and returns the promise so the view can
+  // revert its optimistic flip on failure.
+  const setImpactPrimary = useCallback((impactPrimary: boolean) => {
+    return api.setImpactPrimary(activeBoard, impactPrimary)
+      .catch(err => { reportError(err, { headline: "Couldn't toggle impact-first view" }); throw err; });
+  }, [activeBoard]);
+
   // Workspace write callbacks — each wraps the existing api.* call and
   // refreshes the brief so the inline view re-renders with the
   // persisted state. Failures surface through reportError; the
@@ -1025,6 +1034,23 @@ export default function App() {
       refreshCards({ silent: true });
     } catch (err) {
       reportError(err, { headline: "Couldn't save title" });
+      throw err;
+    }
+  }, [activeBoard, openIssueKey, refreshBrief, refreshCards]);
+
+  // BACI-349: customer-impact editing from the workspace header. The card
+  // list carries the impact (BoardCard.customerImpact), so the cards
+  // refresh matters — the kanban card's impact-primary view re-renders
+  // without waiting for the 10s poll. An empty value is a legitimate save
+  // (clears the field).
+  const saveCustomerImpact = useCallback(async (customerImpact: string) => {
+    if (!openIssueKey) return;
+    try {
+      await api.updateIssueCustomerImpact(activeBoard, openIssueKey, customerImpact);
+      refreshBrief();
+      refreshCards({ silent: true });
+    } catch (err) {
+      reportError(err, { headline: "Couldn't save customer impact" });
       throw err;
     }
   }, [activeBoard, openIssueKey, refreshBrief, refreshCards]);
@@ -1371,6 +1397,7 @@ export default function App() {
                   onShip={shipCardFromPipeline}
                   onSetAutoShip={setRepoAutoShip}
                   onSetBacklogCollapsed={setBacklogCollapsed}
+                  onSetImpactPrimary={setImpactPrimary}
                   onShipDispatch={dispatchFromCard}
                   onCancelWaiting={cancelWaitingFromCard}
                   onBlockCard={onBlockCard}
@@ -1419,6 +1446,7 @@ export default function App() {
                   cards={cards}
                   onClose={closeIssue}
                   onSaveTitle={saveTitle}
+                  onSaveCustomerImpact={saveCustomerImpact}
                   onSaveDescription={saveDescription}
                   onAddComment={addComment}
                   onDeleteComment={deleteComment}

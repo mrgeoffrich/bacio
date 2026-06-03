@@ -181,25 +181,26 @@ func (e *Engine) applyIssues(tx *sql.Tx, sr *scannedRepo, repo *model.Repo, res 
 		}
 
 		var (
-			existingID          int64
-			existingNumber      int64
-			existingFeatureID   sql.NullInt64
-			existingTitle       string
-			existingDescription string
-			existingState       string
-			existingAssignee    string
-			existingUpdatedAt   time.Time
-			existingArchivedAt  sql.NullTime
+			existingID             int64
+			existingNumber         int64
+			existingFeatureID      sql.NullInt64
+			existingTitle          string
+			existingDescription    string
+			existingState          string
+			existingAssignee       string
+			existingCustomerImpact string
+			existingUpdatedAt      time.Time
+			existingArchivedAt     sql.NullTime
 		)
 		err := tx.QueryRow(
-			`SELECT id, number, feature_id, title, description, state, assignee, updated_at, archived_at FROM issues WHERE uuid = ?`,
+			`SELECT id, number, feature_id, title, description, state, assignee, customer_impact, updated_at, archived_at FROM issues WHERE uuid = ?`,
 			uuid,
-		).Scan(&existingID, &existingNumber, &existingFeatureID, &existingTitle, &existingDescription, &existingState, &existingAssignee, &existingUpdatedAt, &existingArchivedAt)
+		).Scan(&existingID, &existingNumber, &existingFeatureID, &existingTitle, &existingDescription, &existingState, &existingAssignee, &existingCustomerImpact, &existingUpdatedAt, &existingArchivedAt)
 		if errors.Is(err, sql.ErrNoRows) {
 			res2, err := tx.Exec(
-				`INSERT INTO issues (uuid, repo_id, number, feature_id, title, description, state, assignee, created_at, updated_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				`INSERT INTO issues (uuid, repo_id, number, feature_id, title, description, state, assignee, customer_impact, created_at, updated_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				uuid, repo.ID, si.Parsed.Number, nullableInt64(featureID),
-				si.Parsed.Title, si.Description, si.Parsed.State, si.Parsed.Assignee,
+				si.Parsed.Title, si.Description, si.Parsed.State, si.Parsed.Assignee, si.Parsed.CustomerImpact,
 				sqliteTimestamp(si.Parsed.CreatedAt), sqliteTimestamp(si.Parsed.UpdatedAt),
 				nullableSqliteTimestamp(si.Parsed.ArchivedAt),
 			)
@@ -239,12 +240,13 @@ func (e *Engine) applyIssues(tx *sql.Tx, sr *scannedRepo, repo *model.Repo, res 
 				existingDescription != si.Description ||
 				existingState != si.Parsed.State ||
 				existingAssignee != si.Parsed.Assignee ||
+				existingCustomerImpact != si.Parsed.CustomerImpact ||
 				!nullableTimeEqual(existingArchivedAt, si.Parsed.ArchivedAt)
 			if changed {
 				if _, err := tx.Exec(
-					`UPDATE issues SET number = ?, feature_id = ?, title = ?, description = ?, state = ?, assignee = ?, updated_at = ?, archived_at = ? WHERE id = ?`,
+					`UPDATE issues SET number = ?, feature_id = ?, title = ?, description = ?, state = ?, assignee = ?, customer_impact = ?, updated_at = ?, archived_at = ? WHERE id = ?`,
 					si.Parsed.Number, nullableInt64(featureID),
-					si.Parsed.Title, si.Description, si.Parsed.State, si.Parsed.Assignee,
+					si.Parsed.Title, si.Description, si.Parsed.State, si.Parsed.Assignee, si.Parsed.CustomerImpact,
 					sqliteTimestamp(si.Parsed.UpdatedAt), nullableSqliteTimestamp(si.Parsed.ArchivedAt), existingID,
 				); err != nil {
 					return fmt.Errorf("update issue %s: %w", uuid, err)

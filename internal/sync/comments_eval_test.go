@@ -25,7 +25,7 @@ func TestExportComment_NonEvalYAMLByteIdentical(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	iss, err := s.CreateIssue(r.ID, nil, "x", "", model.StateTodo, nil, "")
+	iss, err := s.CreateIssue(r.ID, nil, "x", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestRoundTripEvalComment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create src repo: %v", err)
 	}
-	iss, err := src.CreateIssue(r.ID, nil, "x", "", model.StateTodo, nil, "")
+	iss, err := src.CreateIssue(r.ID, nil, "x", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}

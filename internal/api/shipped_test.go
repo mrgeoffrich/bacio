@@ -150,6 +150,45 @@ func TestHandleShippedPRChip(t *testing.T) {
 	}
 }
 
+// TestHandleShippedCustomerImpact (BACI-349) confirms the shipped-list
+// DTO carries customer_impact: a row with an impact set surfaces it, a
+// row without one carries the empty string (the popover falls back to
+// the title client-side).
+func TestHandleShippedCustomerImpact(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo := seedRepo(t, s)
+
+	// One shipped issue with an impact, one without.
+	withImpact, err := s.CreateIssue(repo.ID, nil, "fix login", "", model.StateTodo, nil, "", "Login no longer 500s on Safari")
+	if err != nil {
+		t.Fatalf("create with-impact: %v", err)
+	}
+	if err := s.SetIssueState(withImpact.ID, model.StateDone); err != nil {
+		t.Fatalf("ship with-impact: %v", err)
+	}
+	shipIssue(t, s, repo, "internal refactor")
+
+	resp, raw := apiGet(t, ts.URL+"/repos/"+repo.Prefix+"/shipped")
+	if resp.StatusCode != 200 {
+		t.Fatalf("status: %d body=%s", resp.StatusCode, raw)
+	}
+	var body api.ShippedListResponse
+	_ = json.Unmarshal(raw, &body)
+	byKey := map[string]api.ShippedIssue{}
+	for _, r := range body.Rows {
+		byKey[r.Key] = r
+	}
+	if got := byKey[withImpact.Key].CustomerImpact; got != "Login no longer 500s on Safari" {
+		t.Fatalf("with-impact row customerImpact = %q, want the Safari line", got)
+	}
+	// The refactor row shipped without an impact — its DTO field is empty.
+	for k, r := range byKey {
+		if k != withImpact.Key && r.CustomerImpact != "" {
+			t.Fatalf("blank-impact row %s carried customerImpact = %q, want empty", k, r.CustomerImpact)
+		}
+	}
+}
+
 // TestHandleShippedNonExistentRepo — /repos/ZZZZ/shipped returns 404
 // like every other per-repo route. The count sibling does too.
 func TestHandleShippedNonExistentRepo(t *testing.T) {

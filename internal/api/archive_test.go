@@ -144,7 +144,7 @@ func TestArchiveSweepHTTP(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	feat := seedFeature(t, s, repo, "f", "F")
-	iss, err := s.CreateIssue(repo.ID, &feat.ID, "i", "", model.StateDone, nil, "")
+	iss, err := s.CreateIssue(repo.ID, &feat.ID, "i", "", model.StateDone, nil, "", "")
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestArchiveSweepHTTPDryRun(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	feat := seedFeature(t, s, repo, "f", "F")
-	iss, err := s.CreateIssue(repo.ID, &feat.ID, "i", "", model.StateDone, nil, "")
+	iss, err := s.CreateIssue(repo.ID, &feat.ID, "i", "", model.StateDone, nil, "", "")
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}

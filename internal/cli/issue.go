@@ -48,12 +48,11 @@ func newIssueCmd() *cobra.Command {
 	return cmd
 }
 
-
 func issueAddCmd() *cobra.Command {
 	var (
-		featureSlug, description, descriptionFile, stateStr, baseBranch string
-		tags                                                            []string
-		rawInput                                                        string
+		featureSlug, description, descriptionFile, stateStr, baseBranch, customerImpact string
+		tags                                                                            []string
+		rawInput                                                                        string
 	)
 	cmd := &cobra.Command{
 		Use:   "add [title]",
@@ -61,7 +60,7 @@ func issueAddCmd() *cobra.Command {
 		Args:  cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			raw, err := parseJSONInput(cmd, args, rawInput,
-				"feature", "description", "description-file", "state", "tag", "base-branch")
+				"feature", "description", "description-file", "state", "tag", "base-branch", "customer-impact")
 			if err != nil {
 				return err
 			}
@@ -71,7 +70,7 @@ func issueAddCmd() *cobra.Command {
 			if len(args) != 1 {
 				return fmt.Errorf("requires <title> positional or --json")
 			}
-			return runIssueAdd(args[0], featureSlug, description, descriptionFile, stateStr, tags, baseBranch)
+			return runIssueAdd(args[0], featureSlug, description, descriptionFile, stateStr, tags, baseBranch, customerImpact)
 		},
 	}
 	cmd.Flags().StringVarP(&featureSlug, "feature", "f", "", "feature slug to attach to")
@@ -80,22 +79,24 @@ func issueAddCmd() *cobra.Command {
 	cmd.Flags().StringVar(&stateStr, "state", "", "initial state (default: todo)")
 	cmd.Flags().StringSliceVar(&tags, "tag", nil, "tag to attach (repeatable)")
 	cmd.Flags().StringVar(&baseBranch, "base-branch", "", "per-issue PR base-branch override (BACI-232; empty inherits from the feature, ultimately main)")
+	cmd.Flags().StringVar(&customerImpact, "customer-impact", "", "optional one-line customer impact in the user's terms (BACI-349; blank = no user-facing change, read surfaces fall back to the title)")
 	addInputFlag(cmd, &rawInput)
 	return cmd
 }
 
-func runIssueAdd(title, featureSlug, description, descriptionFile, stateStr string, tags []string, baseBranch string) error {
+func runIssueAdd(title, featureSlug, description, descriptionFile, stateStr string, tags []string, baseBranch, customerImpact string) error {
 	desc, err := readLongText(description, descriptionFile, false, "description")
 	if err != nil {
 		return err
 	}
 	return createIssue(inputs.IssueAddInput{
-		Title:       title,
-		FeatureSlug: featureSlug,
-		Description: desc,
-		State:       stateStr,
-		Tags:        tags,
-		BaseBranch:  baseBranch,
+		Title:          title,
+		FeatureSlug:    featureSlug,
+		Description:    desc,
+		State:          stateStr,
+		Tags:           tags,
+		BaseBranch:     baseBranch,
+		CustomerImpact: customerImpact,
 	})
 }
 
@@ -390,17 +391,17 @@ func repoForIssueKey(c client.Client, key string) (*model.Repo, error) {
 
 func issueEditCmd() *cobra.Command {
 	var (
-		title, description, descriptionFile, featureSlug, baseBranch string
-		clearFeature                                                 bool
-		rawInput                                                     string
+		title, description, descriptionFile, featureSlug, baseBranch, customerImpact string
+		clearFeature                                                                 bool
+		rawInput                                                                     string
 	)
 	cmd := &cobra.Command{
 		Use:   "edit [KEY]",
-		Short: "Edit an issue's title, description, feature, or base branch",
+		Short: "Edit an issue's title, description, feature, base branch, or customer impact",
 		Args:  cobra.RangeArgs(0, 1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			raw, err := parseJSONInput(cmd, args, rawInput,
-				"title", "description", "description-file", "feature", "no-feature", "base-branch")
+				"title", "description", "description-file", "feature", "no-feature", "base-branch", "customer-impact")
 			if err != nil {
 				return err
 			}
@@ -410,7 +411,7 @@ func issueEditCmd() *cobra.Command {
 			if len(args) != 1 {
 				return fmt.Errorf("requires <KEY> positional or --json")
 			}
-			return runIssueEdit(cmd, args[0], title, description, descriptionFile, featureSlug, clearFeature, baseBranch)
+			return runIssueEdit(cmd, args[0], title, description, descriptionFile, featureSlug, clearFeature, baseBranch, customerImpact)
 		},
 	}
 	cmd.Flags().StringVar(&title, "title", "", "new title")
@@ -419,11 +420,12 @@ func issueEditCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&featureSlug, "feature", "f", "", "move to a feature slug")
 	cmd.Flags().BoolVar(&clearFeature, "no-feature", false, "detach from any feature")
 	cmd.Flags().StringVar(&baseBranch, "base-branch", "", "new per-issue PR base-branch override (BACI-232; pass --base-branch '' to clear back to inherit-from-feature)")
+	cmd.Flags().StringVar(&customerImpact, "customer-impact", "", "new one-line customer impact (BACI-349; pass --customer-impact '' to clear back to no-impact)")
 	addInputFlag(cmd, &rawInput)
 	return cmd
 }
 
-func runIssueEdit(cmd *cobra.Command, key, title, description, descriptionFile, featureSlug string, clearFeature bool, baseBranch string) error {
+func runIssueEdit(cmd *cobra.Command, key, title, description, descriptionFile, featureSlug string, clearFeature bool, baseBranch, customerImpact string) error {
 	c, err := openClient()
 	if err != nil {
 		return err
@@ -462,6 +464,9 @@ func runIssueEdit(cmd *cobra.Command, key, title, description, descriptionFile, 
 	}
 	if cmd.Flags().Changed("base-branch") {
 		edit.BaseBranch = &baseBranch
+	}
+	if cmd.Flags().Changed("customer-impact") {
+		edit.CustomerImpact = &customerImpact
 	}
 	return applyIssueEditC(c, repo, key, edit)
 }
@@ -523,11 +528,21 @@ func runIssueEditJSON(raw []byte) error {
 			edit.BaseBranch = in.BaseBranch
 		}
 	}
+	// BACI-349: customer_impact absent = no change; present (even null /
+	// "") = clear back to the "no impact" state ("").
+	if _, ok := present["customer_impact"]; ok {
+		if in.CustomerImpact == nil {
+			empty := ""
+			edit.CustomerImpact = &empty
+		} else {
+			edit.CustomerImpact = in.CustomerImpact
+		}
+	}
 	return applyIssueEditC(c, repo, in.Key, edit)
 }
 
 func applyIssueEditC(c client.Client, repo *model.Repo, key string, edit client.IssueEdit) error {
-	if edit.Title == nil && edit.Description == nil && edit.FeatureID == nil && edit.BaseBranch == nil {
+	if edit.Title == nil && edit.Description == nil && edit.FeatureID == nil && edit.BaseBranch == nil && edit.CustomerImpact == nil {
 		return fmt.Errorf("nothing to update")
 	}
 	updated, err := c.UpdateIssue(context.Background(), repo, key, edit, opts.dryRun)

@@ -1234,6 +1234,11 @@ export class IssueDetail {
     "column": string;
     "columnLabel": string;
     "title": string;
+
+    /**
+     * CustomerImpact (BACI-349) — see IssueMetaDTO.CustomerImpact.
+     */
+    "customerImpact"?: string;
     "description": string;
     "tags": string[];
     "assignees": string[];
@@ -1303,34 +1308,34 @@ export class IssueDetail {
      * Creates a new IssueDetail instance from a string or object.
      */
     static createFrom($$source: any = {}): IssueDetail {
-        const $$createField5_0 = $$createType0;
         const $$createField6_0 = $$createType0;
-        const $$createField8_0 = $$createType26;
-        const $$createField9_0 = $$createType22;
-        const $$createField10_0 = $$createType34;
-        const $$createField11_0 = $$createType28;
-        const $$createField13_0 = $$createType32;
+        const $$createField7_0 = $$createType0;
+        const $$createField9_0 = $$createType26;
+        const $$createField10_0 = $$createType22;
+        const $$createField11_0 = $$createType34;
+        const $$createField12_0 = $$createType28;
+        const $$createField14_0 = $$createType32;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
-            $$parsedSource["tags"] = $$createField5_0($$parsedSource["tags"]);
+            $$parsedSource["tags"] = $$createField6_0($$parsedSource["tags"]);
         }
         if ("assignees" in $$parsedSource) {
-            $$parsedSource["assignees"] = $$createField6_0($$parsedSource["assignees"]);
+            $$parsedSource["assignees"] = $$createField7_0($$parsedSource["assignees"]);
         }
         if ("comments" in $$parsedSource) {
-            $$parsedSource["comments"] = $$createField8_0($$parsedSource["comments"]);
+            $$parsedSource["comments"] = $$createField9_0($$parsedSource["comments"]);
         }
         if ("pullRequests" in $$parsedSource) {
-            $$parsedSource["pullRequests"] = $$createField9_0($$parsedSource["pullRequests"]);
+            $$parsedSource["pullRequests"] = $$createField10_0($$parsedSource["pullRequests"]);
         }
         if ("documents" in $$parsedSource) {
-            $$parsedSource["documents"] = $$createField10_0($$parsedSource["documents"]);
+            $$parsedSource["documents"] = $$createField11_0($$parsedSource["documents"]);
         }
         if ("claimants" in $$parsedSource) {
-            $$parsedSource["claimants"] = $$createField11_0($$parsedSource["claimants"]);
+            $$parsedSource["claimants"] = $$createField12_0($$parsedSource["claimants"]);
         }
         if ("latestPlan" in $$parsedSource) {
-            $$parsedSource["latestPlan"] = $$createField13_0($$parsedSource["latestPlan"]);
+            $$parsedSource["latestPlan"] = $$createField14_0($$parsedSource["latestPlan"]);
         }
         return new IssueDetail($$parsedSource as Partial<IssueDetail>);
     }
@@ -1350,6 +1355,13 @@ export class IssueMetaDTO {
     "column": string;
     "columnLabel": string;
     "title": string;
+
+    /**
+     * CustomerImpact (BACI-349) is the issue's optional one-line customer
+     * impact. The React detail header renders it inline and lets the user
+     * edit it; empty is omitted from JSON.
+     */
+    "customerImpact"?: string;
     "description": string;
     "tags": string[];
     "assignees": string[];
@@ -1402,18 +1414,18 @@ export class IssueMetaDTO {
      * Creates a new IssueMetaDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): IssueMetaDTO {
-        const $$createField5_0 = $$createType0;
         const $$createField6_0 = $$createType0;
-        const $$createField9_0 = $$createType32;
+        const $$createField7_0 = $$createType0;
+        const $$createField10_0 = $$createType32;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
-            $$parsedSource["tags"] = $$createField5_0($$parsedSource["tags"]);
+            $$parsedSource["tags"] = $$createField6_0($$parsedSource["tags"]);
         }
         if ("assignees" in $$parsedSource) {
-            $$parsedSource["assignees"] = $$createField6_0($$parsedSource["assignees"]);
+            $$parsedSource["assignees"] = $$createField7_0($$parsedSource["assignees"]);
         }
         if ("latestPlan" in $$parsedSource) {
-            $$parsedSource["latestPlan"] = $$createField9_0($$parsedSource["latestPlan"]);
+            $$parsedSource["latestPlan"] = $$createField10_0($$parsedSource["latestPlan"]);
         }
         return new IssueMetaDTO($$parsedSource as Partial<IssueMetaDTO>);
     }
@@ -2158,6 +2170,12 @@ export class SetupSyncIn {
 export class ShippedIssueDTO {
     "key": string;
     "title": string;
+
+    /**
+     * CustomerImpact (BACI-349) — the popover renders this as the primary
+     * line, falling back to Title (with a muted/italic class) when empty.
+     */
+    "customerImpact"?: string;
     "terminalAt": time$0.Time;
     "tags": string[];
     "featureSlug"?: string;
@@ -2186,10 +2204,10 @@ export class ShippedIssueDTO {
      * Creates a new ShippedIssueDTO instance from a string or object.
      */
     static createFrom($$source: any = {}): ShippedIssueDTO {
-        const $$createField3_0 = $$createType0;
+        const $$createField4_0 = $$createType0;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
-            $$parsedSource["tags"] = $$createField3_0($$parsedSource["tags"]);
+            $$parsedSource["tags"] = $$createField4_0($$parsedSource["tags"]);
         }
         return new ShippedIssueDTO($$parsedSource as Partial<ShippedIssueDTO>);
     }

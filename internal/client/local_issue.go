@@ -361,6 +361,11 @@ func (c *localClient) CreateIssue(ctx context.Context, repo *model.Repo, in inpu
 	if err != nil {
 		return nil, err
 	}
+	// BACI-349: same rehearse-at-the-client pattern for customer_impact.
+	cleanImpact, err := store.ValidateCustomerImpact(in.CustomerImpact, "customer_impact")
+	if err != nil {
+		return nil, err
+	}
 	// BACI-235: resolution happens at the store boundary so both the
 	// explicit-slug path and the default-feature auto-apply path share
 	// one validator. The returned feature (if any) backs the dry-run
@@ -377,15 +382,16 @@ func (c *localClient) CreateIssue(ctx context.Context, repo *model.Repo, in inpu
 			projectedSlug = resolvedFeature.Slug
 		}
 		projected := &model.Issue{
-			RepoID:      repo.ID,
-			Number:      repo.NextIssueNumber,
-			Key:         fmt.Sprintf("%s-%d", repo.Prefix, repo.NextIssueNumber),
-			FeatureID:   featureID,
-			FeatureSlug: projectedSlug,
-			Title:       in.Title,
-			Description: in.Description,
-			State:       state,
-			Tags:        cleanTags,
+			RepoID:         repo.ID,
+			Number:         repo.NextIssueNumber,
+			Key:            fmt.Sprintf("%s-%d", repo.Prefix, repo.NextIssueNumber),
+			FeatureID:      featureID,
+			FeatureSlug:    projectedSlug,
+			Title:          in.Title,
+			Description:    in.Description,
+			State:          state,
+			Tags:           cleanTags,
+			CustomerImpact: cleanImpact,
 		}
 		if projected.Tags == nil {
 			projected.Tags = []string{}
@@ -398,7 +404,7 @@ func (c *localClient) CreateIssue(ctx context.Context, repo *model.Repo, in inpu
 		}
 		return projected, nil
 	}
-	iss, err := c.store.CreateIssue(repo.ID, featureID, in.Title, in.Description, state, cleanTags, cleanBase)
+	iss, err := c.store.CreateIssue(repo.ID, featureID, in.Title, in.Description, state, cleanTags, cleanBase, cleanImpact)
 	if err != nil {
 		return nil, err
 	}
@@ -416,7 +422,7 @@ func (c *localClient) UpdateIssue(ctx context.Context, repo *model.Repo, key str
 	if err != nil {
 		return nil, err
 	}
-	if edit.Title == nil && edit.Description == nil && edit.FeatureID == nil && edit.BaseBranch == nil {
+	if edit.Title == nil && edit.Description == nil && edit.FeatureID == nil && edit.BaseBranch == nil && edit.CustomerImpact == nil {
 		return nil, fmt.Errorf("nothing to update")
 	}
 	if dryRun {
@@ -454,9 +460,18 @@ func (c *localClient) UpdateIssue(ctx context.Context, repo *model.Repo, key str
 				projected.BaseBranch = &b
 			}
 		}
+		// BACI-349: same dry-run pre-validation for customer_impact, so an
+		// over-cap or control-char value is rejected on rehearsal.
+		if edit.CustomerImpact != nil {
+			clean, err := store.ValidateCustomerImpact(*edit.CustomerImpact, "customer_impact")
+			if err != nil {
+				return nil, err
+			}
+			projected.CustomerImpact = clean
+		}
 		return &projected, nil
 	}
-	if err := c.store.UpdateIssue(iss.ID, edit.Title, edit.Description, edit.FeatureID, edit.BaseBranch); err != nil {
+	if err := c.store.UpdateIssue(iss.ID, edit.Title, edit.Description, edit.FeatureID, edit.BaseBranch, edit.CustomerImpact); err != nil {
 		return nil, err
 	}
 	updated, err := c.store.GetIssueByID(iss.ID)
@@ -468,10 +483,11 @@ func (c *localClient) UpdateIssue(ctx context.Context, repo *model.Repo, key str
 		Op: "issue.update", Kind: "issue",
 		TargetID: &updated.ID, TargetLabel: updated.Key,
 		Details: updatedFieldList(map[string]bool{
-			"title":       edit.Title != nil,
-			"description": edit.Description != nil,
-			"feature":     edit.FeatureID != nil,
-			"base_branch": edit.BaseBranch != nil,
+			"title":           edit.Title != nil,
+			"description":     edit.Description != nil,
+			"feature":         edit.FeatureID != nil,
+			"base_branch":     edit.BaseBranch != nil,
+			"customer_impact": edit.CustomerImpact != nil,
 		}),
 	})
 	return updated, nil

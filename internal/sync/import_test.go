@@ -141,7 +141,7 @@ func TestImport_CollisionRenumber(t *testing.T) {
 	}
 	// Create a new local issue at number 1 (it'll allocate next, but
 	// we force the number directly).
-	freshIssue, err := b.CreateIssue(repo.ID, nil, "Local replacement for 1", "", model.StateTodo, nil, "")
+	freshIssue, err := b.CreateIssue(repo.ID, nil, "Local replacement for 1", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("create fresh: %v", err)
 	}
@@ -970,7 +970,7 @@ func TestImport_LWW_PreservesLocallyCreatedRelation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get repo: %v", err)
 	}
-	iss3, err := s.CreateIssue(r.ID, nil, "Third issue", "", model.StateTodo, nil, "")
+	iss3, err := s.CreateIssue(r.ID, nil, "Third issue", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("create iss3: %v", err)
 	}

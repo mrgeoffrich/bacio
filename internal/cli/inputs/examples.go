@@ -19,11 +19,16 @@ var (
 		// main). A non-empty value follows git refname rules and pins
 		// the PR base for one issue.
 		BaseBranch: "main",
+		// BACI-349: optional one-line customer impact in the user's terms.
+		// Left blank for purely internal work (refactors, type
+		// migrations); read surfaces fall back to the title when blank.
+		CustomerImpact: "Tab strip no longer drifts when the issue list overflows",
 	}
 	ExampleIssueEdit = IssueEditInput{
-		Key:        "MINI-42",
-		Title:      strPtr("Pin tab strip with body-height clipping"),
-		BaseBranch: strPtr("main"),
+		Key:            "MINI-42",
+		Title:          strPtr("Pin tab strip with body-height clipping"),
+		BaseBranch:     strPtr("main"),
+		CustomerImpact: strPtr("Tab strip no longer drifts when the issue list overflows"),
 	}
 	ExampleIssueState = IssueStateInput{
 		Key:   "MINI-42",
@@ -307,29 +312,29 @@ var (
 		PurgeDB: false,
 	}
 
-	ExampleIssueArchive       = IssueArchiveInput{Key: "MINI-42"}
-	ExampleIssueUnarchive     = IssueUnarchiveInput{Key: "MINI-42"}
-	ExampleFeatureArchive     = FeatureArchiveInput{Slug: "auth-old"}
-	ExampleFeatureUnarchive   = FeatureUnarchiveInput{Slug: "auth-old"}
-	ExampleFeatureState       = FeatureStateInput{Slug: "auth-old", State: "done"}
+	ExampleIssueArchive     = IssueArchiveInput{Key: "MINI-42"}
+	ExampleIssueUnarchive   = IssueUnarchiveInput{Key: "MINI-42"}
+	ExampleFeatureArchive   = FeatureArchiveInput{Slug: "auth-old"}
+	ExampleFeatureUnarchive = FeatureUnarchiveInput{Slug: "auth-old"}
+	ExampleFeatureState     = FeatureStateInput{Slug: "auth-old", State: "done"}
 	// BACI-250: auto-close OFF on a long-lived catch-all so the BACI-199
 	// sweep doesn't promote it to `done` once its current children land.
-	ExampleFeatureAutoClose   = FeatureAutoCloseInput{Slug: "maintenance", Enabled: false}
+	ExampleFeatureAutoClose = FeatureAutoCloseInput{Slug: "maintenance", Enabled: false}
 	// BACI-333: stop implement-workers piling handoff notes onto a
 	// standing bucket feature.
-	ExampleFeatureHandoffs    = FeatureHandoffsInput{Slug: "maintenance", Enabled: false}
-	ExampleDocArchive         = DocArchiveInput{Filename: "auth-old.md"}
-	ExampleDocUnarchive       = DocUnarchiveInput{Filename: "auth-old.md"}
-	ExampleArchiveSweep       = ArchiveSweepInput{}
+	ExampleFeatureHandoffs = FeatureHandoffsInput{Slug: "maintenance", Enabled: false}
+	ExampleDocArchive      = DocArchiveInput{Filename: "auth-old.md"}
+	ExampleDocUnarchive    = DocUnarchiveInput{Filename: "auth-old.md"}
+	ExampleArchiveSweep    = ArchiveSweepInput{}
 	// BACI-321: scope the proxy_messages backfill to one job's captures.
 	// Omit `dispatch` to sweep every eligible dispatch.
-	ExampleProxyReparse       = ProxyReparseInput{Dispatch: int64Ptr(412)}
-	ExampleSettingsShowArchived = SettingsShowArchivedInput{Value: true}
+	ExampleProxyReparse           = ProxyReparseInput{Dispatch: int64Ptr(412)}
+	ExampleSettingsShowArchived   = SettingsShowArchivedInput{Value: true}
 	ExampleSettingsSyncBackground = SettingsSyncBackgroundInput{Value: false}
 	// BACI-240: ship-flourish ka-ching SFX toggle. Defaults to true
 	// (BACI-295); set false to silence it.
 	ExampleSettingsShippedSfx = SettingsShippedSfxInput{Value: true}
-	ExampleSettingsArchive        = SettingsArchiveInput{
+	ExampleSettingsArchive    = SettingsArchiveInput{
 		AutoEnabled:   true,
 		RetentionDays: 7,
 	}

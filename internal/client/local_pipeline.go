@@ -325,3 +325,35 @@ func (c *localClient) SetRepoBacklogCollapsed(ctx context.Context, repo *model.R
 	}
 	return collapsed, nil
 }
+
+// GetRepoImpactPrimary reads the per-repo Pipeline impact-primary display
+// preference from the tui_settings KV — read-only, no audit row.
+func (c *localClient) GetRepoImpactPrimary(ctx context.Context, repo *model.Repo) (bool, error) {
+	return c.store.IsImpactPrimary(repo.ID)
+}
+
+// SetRepoImpactPrimary persists the per-repo Pipeline impact-primary
+// display preference and returns the resulting value. Records a
+// `repo_setting.update` audit row only when the value actually changes —
+// clone of SetRepoBacklogCollapsed.
+func (c *localClient) SetRepoImpactPrimary(ctx context.Context, repo *model.Repo, impactPrimary, dryRun bool) (bool, error) {
+	if dryRun {
+		return impactPrimary, nil
+	}
+	prev, err := c.store.IsImpactPrimary(repo.ID)
+	if err != nil {
+		return false, err
+	}
+	if err := c.store.SetImpactPrimary(repo.ID, impactPrimary); err != nil {
+		return false, err
+	}
+	if prev != impactPrimary {
+		c.recordOp(model.HistoryEntry{
+			RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+			Op: "repo_setting.update", Kind: "repo_setting",
+			TargetID: &repo.ID, TargetLabel: "pipeline.impact_primary",
+			Details: fmt.Sprintf("impact_primary=%v", impactPrimary),
+		})
+	}
+	return impactPrimary, nil
+}

@@ -20,13 +20,18 @@ import (
 // everything the row renders. Full bodies / claimants / dispatch
 // shape live on the issue brief, one click away.
 type ShippedIssue struct {
-	Key          string    `json:"key"`
-	Title        string    `json:"title"`
-	TerminalAt   time.Time `json:"terminalAt"`
-	Tags         []string  `json:"tags"`
-	FeatureSlug  string    `json:"featureSlug,omitempty"`
-	FeatureEmoji string    `json:"featureEmoji,omitempty"`
-	PRURL        string    `json:"prUrl,omitempty"`
+	Key   string `json:"key"`
+	Title string `json:"title"`
+	// CustomerImpact (BACI-349) is the issue's optional one-line customer
+	// impact. The popover renders it as the primary line and falls back
+	// to Title when it's empty (with a muted/italic class to mark the
+	// fallback) — empty is omitted from JSON.
+	CustomerImpact string    `json:"customerImpact,omitempty"`
+	TerminalAt     time.Time `json:"terminalAt"`
+	Tags           []string  `json:"tags"`
+	FeatureSlug    string    `json:"featureSlug,omitempty"`
+	FeatureEmoji   string    `json:"featureEmoji,omitempty"`
+	PRURL          string    `json:"prUrl,omitempty"`
 }
 
 // ShippedListResponse (BACI-221) wraps the popover's per-fetch rows
@@ -160,11 +165,12 @@ func (d deps) handleShippedList(w http.ResponseWriter, r *http.Request) {
 	rows := make([]ShippedIssue, 0, len(issues))
 	for _, iss := range issues {
 		row := ShippedIssue{
-			Key:          iss.Key,
-			Title:        iss.Title,
-			Tags:         iss.Tags,
-			FeatureSlug:  iss.FeatureSlug,
-			FeatureEmoji: iss.FeatureEmoji,
+			Key:            iss.Key,
+			Title:          iss.Title,
+			CustomerImpact: iss.CustomerImpact,
+			Tags:           iss.Tags,
+			FeatureSlug:    iss.FeatureSlug,
+			FeatureEmoji:   iss.FeatureEmoji,
 		}
 		if row.Tags == nil {
 			row.Tags = []string{}

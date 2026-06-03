@@ -25,7 +25,7 @@ func seedPipelineCard(t *testing.T, s *store.Store, prefix, processSlug string, 
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	iss, err := s.CreateIssue(repo.ID, nil, "card", "", model.StateInPipeline, nil, "")
+	iss, err := s.CreateIssue(repo.ID, nil, "card", "", model.StateInPipeline, nil, "", "")
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestEngineAutoShip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("repo: %v", err)
 	}
-	iss, err := s.CreateIssue(repo.ID, nil, "card", "", model.StateToBeShipped, nil, "")
+	iss, err := s.CreateIssue(repo.ID, nil, "card", "", model.StateToBeShipped, nil, "", "")
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestEngineManualShip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("repo: %v", err)
 	}
-	iss, err := s.CreateIssue(repo.ID, nil, "card", "", model.StateToBeShipped, nil, "")
+	iss, err := s.CreateIssue(repo.ID, nil, "card", "", model.StateToBeShipped, nil, "", "")
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
@@ -282,14 +282,14 @@ func TestEngineShipAdvancesBehindWedgedTop(t *testing.T) {
 	// Two cards enter Shipping in order: the first becomes the top
 	// (TopShippingIssue), the second sits strictly behind it (BACI-275
 	// appends to the back of the FIFO with MAX(priority)+1).
-	top, err := s.CreateIssue(repo.ID, nil, "wedged top", "", model.StateInPipeline, nil, "")
+	top, err := s.CreateIssue(repo.ID, nil, "wedged top", "", model.StateInPipeline, nil, "", "")
 	if err != nil {
 		t.Fatalf("create top: %v", err)
 	}
 	if err := s.SetIssueState(top.ID, model.StateToBeShipped); err != nil {
 		t.Fatalf("ship top: %v", err)
 	}
-	behind, err := s.CreateIssue(repo.ID, nil, "behind", "", model.StateInPipeline, nil, "")
+	behind, err := s.CreateIssue(repo.ID, nil, "behind", "", model.StateInPipeline, nil, "", "")
 	if err != nil {
 		t.Fatalf("create behind: %v", err)
 	}
@@ -708,7 +708,7 @@ func TestEngineHandoffAppendsToShippingBack(t *testing.T) {
 
 	// Second card arrives in the same repo and is handed off after the
 	// first is already queued.
-	second, err := s.CreateIssue(repo.ID, nil, "second", "", model.StateInPipeline, nil, "")
+	second, err := s.CreateIssue(repo.ID, nil, "second", "", model.StateInPipeline, nil, "", "")
 	if err != nil {
 		t.Fatalf("create second issue: %v", err)
 	}
@@ -1212,7 +1212,7 @@ func TestCancelRunning_NoRunningJobIsNoop(t *testing.T) {
 // seam the BACI-343 blocked-gate tests use to put a card behind a blocker.
 func addBlocker(t *testing.T, s *store.Store, repo *model.Repo, blockedID int64, state model.State) int64 {
 	t.Helper()
-	blocker, err := s.CreateIssue(repo.ID, nil, "blocker", "", state, nil, "")
+	blocker, err := s.CreateIssue(repo.ID, nil, "blocker", "", state, nil, "", "")
 	if err != nil {
 		t.Fatalf("create blocker: %v", err)
 	}

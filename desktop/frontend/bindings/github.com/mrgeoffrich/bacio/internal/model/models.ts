@@ -316,6 +316,18 @@ export class Issue {
     "assignee"?: string;
 
     /**
+     * CustomerImpact (BACI-349) is an optional single-line statement of
+     * the change in the user's terms ("Login no longer 500s on Safari"),
+     * authored at scope-time by the scope agent (or edited by a human).
+     * Empty = "no user-facing change" — read surfaces (the shipped list,
+     * the opt-in impact-primary board view) fall back to the title when
+     * it's blank, so pre-existing rows degrade gracefully. Same shape as
+     * Assignee (plain string, empty = unset). Validated at the store
+     * boundary by ValidateCustomerImpact (single-line, title-capped).
+     */
+    "customer_impact"?: string;
+
+    /**
      * Taken is true iff this issue currently has at least one open
      * (unreleased) agent claim held by an alive session — the derived
      * "an agent is actively holding this" signal also surfaced on the
@@ -442,10 +454,10 @@ export class Issue {
      * Creates a new Issue instance from a string or object.
      */
     static createFrom($$source: any = {}): Issue {
-        const $$createField14_0 = $$createType7;
+        const $$createField15_0 = $$createType7;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
-            $$parsedSource["tags"] = $$createField14_0($$parsedSource["tags"]);
+            $$parsedSource["tags"] = $$createField15_0($$parsedSource["tags"]);
         }
         return new Issue($$parsedSource as Partial<Issue>);
     }

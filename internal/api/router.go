@@ -101,6 +101,12 @@ func newRouter(d deps) http.Handler {
 	// ?dry_run) and audits a repo_setting.update row on change.
 	mux.HandleFunc("GET /repos/{prefix}/backlog-collapsed", d.handleRepoBacklogCollapsedGet)
 	mux.HandleFunc("PUT /repos/{prefix}/backlog-collapsed", d.handleRepoBacklogCollapsed)
+	// BACI-349: per-repo Pipeline impact-primary display preference
+	// (tui_settings `pipeline.impact_primary`). Purely client-side chrome
+	// like backlog-collapsed — GET seeds the toggle, PUT persists it
+	// (honouring ?dry_run) and audits a repo_setting.update row on change.
+	mux.HandleFunc("GET /repos/{prefix}/impact-primary", d.handleRepoImpactPrimaryGet)
+	mux.HandleFunc("PUT /repos/{prefix}/impact-primary", d.handleRepoImpactPrimary)
 
 	mux.HandleFunc("GET /repos/{prefix}/issues/{key}/comments", d.handleCommentsList)
 	mux.HandleFunc("POST /repos/{prefix}/issues/{key}/comments", d.handleCommentAdd)

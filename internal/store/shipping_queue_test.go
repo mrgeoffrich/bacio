@@ -26,9 +26,9 @@ func TestSetIssueState_ToBeShippedAppendsToBack(t *testing.T) {
 		t.Fatalf("create repo: %v", err)
 	}
 
-	first, _ := s.CreateIssue(repo.ID, nil, "first", "", model.StateTodo, nil, "")
-	second, _ := s.CreateIssue(repo.ID, nil, "second", "", model.StateTodo, nil, "")
-	third, _ := s.CreateIssue(repo.ID, nil, "third", "", model.StateTodo, nil, "")
+	first, _ := s.CreateIssue(repo.ID, nil, "first", "", model.StateTodo, nil, "", "")
+	second, _ := s.CreateIssue(repo.ID, nil, "second", "", model.StateTodo, nil, "", "")
+	third, _ := s.CreateIssue(repo.ID, nil, "third", "", model.StateTodo, nil, "", "")
 
 	for _, iss := range []*model.Issue{first, second, third} {
 		if err := s.SetIssueState(iss.ID, model.StateToBeShipped); err != nil {
@@ -68,8 +68,8 @@ func TestSetIssueState_ToBeShippedLowerNumberArrivesLast(t *testing.T) {
 	}
 
 	// low has the smaller number but ships last.
-	low, _ := s.CreateIssue(repo.ID, nil, "low", "", model.StateTodo, nil, "")
-	high, _ := s.CreateIssue(repo.ID, nil, "high", "", model.StateTodo, nil, "")
+	low, _ := s.CreateIssue(repo.ID, nil, "low", "", model.StateTodo, nil, "", "")
+	high, _ := s.CreateIssue(repo.ID, nil, "high", "", model.StateTodo, nil, "", "")
 
 	if err := s.SetIssueState(high.ID, model.StateToBeShipped); err != nil {
 		t.Fatalf("ship high: %v", err)
@@ -104,8 +104,8 @@ func TestSetIssueState_ReassertToBeShippedKeepsPriority(t *testing.T) {
 		t.Fatalf("create repo: %v", err)
 	}
 
-	first, _ := s.CreateIssue(repo.ID, nil, "first", "", model.StateTodo, nil, "")
-	second, _ := s.CreateIssue(repo.ID, nil, "second", "", model.StateTodo, nil, "")
+	first, _ := s.CreateIssue(repo.ID, nil, "first", "", model.StateTodo, nil, "", "")
+	second, _ := s.CreateIssue(repo.ID, nil, "second", "", model.StateTodo, nil, "", "")
 
 	if err := s.SetIssueState(first.ID, model.StateToBeShipped); err != nil {
 		t.Fatalf("ship first: %v", err)

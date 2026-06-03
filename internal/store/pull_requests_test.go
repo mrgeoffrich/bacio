@@ -13,11 +13,11 @@ import (
 // (`created_at DESC, id DESC`) and `count` reflects the total.
 func TestLatestPRByIssue(t *testing.T) {
 	s, repo, iss := seedRepoAndIssue(t)
-	other, err := s.CreateIssue(repo.ID, nil, "other", "", model.StateTodo, nil, "")
+	other, err := s.CreateIssue(repo.ID, nil, "other", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("CreateIssue other: %v", err)
 	}
-	empty, err := s.CreateIssue(repo.ID, nil, "empty", "", model.StateTodo, nil, "")
+	empty, err := s.CreateIssue(repo.ID, nil, "empty", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("CreateIssue empty: %v", err)
 	}

@@ -144,7 +144,7 @@ func TestCommentTranscriptEventRefRoundTrips(t *testing.T) {
 // notes is absent from the map (not present-with-zero).
 func TestCountEvalCommentsByIssue(t *testing.T) {
 	s, repo, iss := seedRepoAndIssue(t)
-	other, err := s.CreateIssue(repo.ID, nil, "other", "", model.StateTodo, nil, "")
+	other, err := s.CreateIssue(repo.ID, nil, "other", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("CreateIssue other: %v", err)
 	}

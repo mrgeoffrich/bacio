@@ -582,3 +582,74 @@ func (d deps) handleRepoBacklogCollapsedGet(w http.ResponseWriter, r *http.Reque
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"backlog_collapsed": collapsed})
 }
+
+// impactPrimaryIn is the strict-decoded body for PUT
+// /repos/{prefix}/impact-primary (BACI-349). A local request struct like
+// backlogCollapsedIn — no CLI verb backs this per-repo display preference.
+type impactPrimaryIn struct {
+	ImpactPrimary bool `json:"impact_primary"`
+}
+
+// handleRepoImpactPrimary — PUT /repos/{prefix}/impact-primary.
+// Persists the per-repo Pipeline impact-primary display preference in the
+// tui_settings KV (BACI-349). Honours ?dry_run=true and audits a
+// repo_setting.update row only when the value actually changes. Clone of
+// handleRepoBacklogCollapsed.
+func (d deps) handleRepoImpactPrimary(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	raw, ok := readBody(r, w)
+	if !ok {
+		return
+	}
+	in, _, err := inputio.DecodeStrict[impactPrimaryIn](raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), nil)
+		return
+	}
+	if isDryRun(r) {
+		writeDryRun(w, http.StatusOK, map[string]any{"impact_primary": in.ImpactPrimary})
+		return
+	}
+	prev, err := d.store.IsImpactPrimary(repo.ID)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if err := d.store.SetImpactPrimary(repo.ID, in.ImpactPrimary); err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	if prev != in.ImpactPrimary {
+		recordOp(d.store, d.logger, model.HistoryEntry{
+			RepoID: &repo.ID, RepoPrefix: repo.Prefix,
+			Actor:       ActorFromContext(r.Context()),
+			Op:          "repo_setting.update",
+			Kind:        "repo_setting",
+			TargetLabel: "pipeline.impact_primary",
+			Details:     fmt.Sprintf("impact_primary=%v", in.ImpactPrimary),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"impact_primary": in.ImpactPrimary})
+}
+
+// handleRepoImpactPrimaryGet — GET /repos/{prefix}/impact-primary.
+// Reads the per-repo Pipeline impact-primary display preference so the
+// Pipeline page seeds its toggle state from the persisted KV (BACI-349).
+func (d deps) handleRepoImpactPrimaryGet(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	impactPrimary, err := d.store.IsImpactPrimary(repo.ID)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"impact_primary": impactPrimary})
+}

@@ -16,7 +16,7 @@ func TestPipelineClientOps(t *testing.T) {
 	if err != nil {
 		t.Fatalf("repo: %v", err)
 	}
-	iss, err := c.store.CreateIssue(repo.ID, nil, "card", "", model.StateInPipeline, nil, "")
+	iss, err := c.store.CreateIssue(repo.ID, nil, "card", "", model.StateInPipeline, nil, "", "")
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
@@ -32,7 +32,7 @@ func TestPipelineClientOps(t *testing.T) {
 
 	// SetIssueProcess (explicit stage-list path) round-trips an arbitrary
 	// chain the named presets don't enumerate.
-	issS, _ := c.store.CreateIssue(repo.ID, nil, "card-stages", "", model.StateInPipeline, nil, "")
+	issS, _ := c.store.CreateIssue(repo.ID, nil, "card-stages", "", model.StateInPipeline, nil, "", "")
 	sj, err := c.SetIssueProcess(ctx, repo, issS.Key, "", []string{"design", "plan_large", "implement", "ship"}, false)
 	if err != nil {
 		t.Fatalf("SetIssueProcess stages: %v", err)
@@ -49,7 +49,7 @@ func TestPipelineClientOps(t *testing.T) {
 
 	// Dry-run process projects without writing — including the stage-list
 	// projection path.
-	iss2, _ := c.store.CreateIssue(repo.ID, nil, "card2", "", model.StateInPipeline, nil, "")
+	iss2, _ := c.store.CreateIssue(repo.ID, nil, "card2", "", model.StateInPipeline, nil, "", "")
 	dj, err := c.SetIssueProcess(ctx, repo, iss2.Key, "", []string{"design", "implement"}, true)
 	if err != nil {
 		t.Fatalf("SetIssueProcess dry-run: %v", err)
@@ -64,7 +64,7 @@ func TestPipelineClientOps(t *testing.T) {
 	// EditIssueProcessTail keeps the locked prefix and replaces the
 	// pending tail. Seed a card with a started chain (job 1 complete),
 	// then edit the tail.
-	issE, _ := c.store.CreateIssue(repo.ID, nil, "card-edit", "", model.StateInPipeline, nil, "")
+	issE, _ := c.store.CreateIssue(repo.ID, nil, "card-edit", "", model.StateInPipeline, nil, "", "")
 	ej, err := c.SetIssueProcess(ctx, repo, issE.Key, "plan-implement-ship", nil, false)
 	if err != nil {
 		t.Fatalf("SetIssueProcess for edit: %v", err)
@@ -117,7 +117,7 @@ func TestPipelineClientOps(t *testing.T) {
 	}
 
 	// Reorder a Shipping card to the top.
-	iss3, _ := c.store.CreateIssue(repo.ID, nil, "card3", "", model.StateToBeShipped, nil, "")
+	iss3, _ := c.store.CreateIssue(repo.ID, nil, "card3", "", model.StateToBeShipped, nil, "", "")
 	updated, err := c.ReorderIssue(ctx, repo, iss3.Key, 1, false)
 	if err != nil {
 		t.Fatalf("ReorderIssue: %v", err)

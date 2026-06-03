@@ -17,6 +17,11 @@ type IssueAddInput struct {
 	// same git refname rules as features.branch_name (no whitespace, no
 	// `..`, no leading `-`, etc.).
 	BaseBranch string `json:"base_branch,omitempty"`
+	// CustomerImpact (BACI-349) is the optional single-line statement of
+	// the change in the user's terms. Empty (the default) is the
+	// first-class "no user-facing change" state — read surfaces fall back
+	// to the title. Authored at scope-time; single-line, title-capped.
+	CustomerImpact string `json:"customer_impact,omitempty"`
 }
 
 // IssueEditInput is the payload for `bacio issue edit --json`. Pointer fields
@@ -27,6 +32,7 @@ type IssueAddInput struct {
 //   - description absent = no change; "" or null = clear
 //   - feature_slug absent = no change; "" or null = detach; non-empty = set
 //   - base_branch absent = no change; "" or null = clear (inherit); non-empty = set
+//   - customer_impact absent = no change; "" or null = clear (no impact); non-empty = set
 type IssueEditInput struct {
 	Key         string  `json:"key"`
 	Title       *string `json:"title,omitempty"`
@@ -37,6 +43,10 @@ type IssueEditInput struct {
 	// (back to NULL, inherit from feature); non-nil non-empty = set
 	// + validate.
 	BaseBranch *string `json:"base_branch,omitempty"`
+	// CustomerImpact (BACI-349) — same pointer-plus-presence dance: nil =
+	// no change; non-nil empty = clear (back to the "no impact" state);
+	// non-nil non-empty = set + validate (single-line, title-capped).
+	CustomerImpact *string `json:"customer_impact,omitempty"`
 }
 
 // IssueStateInput is the payload for `bacio issue state --json`.

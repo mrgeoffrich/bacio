@@ -13,7 +13,7 @@ func TestIssueBriefHappy(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	feat := seedFeature(t, s, repo, "auth", "Auth")
-	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "x", "", model.StateTodo, nil, "")
+	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "x", "", model.StateTodo, nil, "", "")
 	if _, err := s.CreateComment(store.CreateCommentIn{IssueID: iss.ID, Author: "alice", Body: "first comment"}); err != nil {
 		t.Fatalf("comment: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestIssueBriefBaseBranchResolves(t *testing.T) {
 	}
 
 	// Issue with feature branch but no override → brief carries feat/X.
-	iss, err := s.CreateIssue(repo.ID, &feat.ID, "inherit", "", model.StateTodo, nil, "")
+	iss, err := s.CreateIssue(repo.ID, &feat.ID, "inherit", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("create inherit issue: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestIssueBriefBaseBranchResolves(t *testing.T) {
 
 	// Issue with override=main → brief carries main even when the
 	// feature is on feat/X (terminal merge-feature case).
-	override, err := s.CreateIssue(repo.ID, &feat.ID, "merge back", "", model.StateTodo, nil, "main")
+	override, err := s.CreateIssue(repo.ID, &feat.ID, "merge back", "", model.StateTodo, nil, "main", "")
 	if err != nil {
 		t.Fatalf("create override issue: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestIssueBriefNoFeatureDocs(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	feat := seedFeature(t, s, repo, "auth", "Auth")
-	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "x", "", model.StateTodo, nil, "")
+	iss, _ := s.CreateIssue(repo.ID, &feat.ID, "x", "", model.StateTodo, nil, "", "")
 	// BACI-203 strips every linked-doc body — the assertion below
 	// checks the entire entry vanishes when no_feature_docs=1, not
 	// just the body. DocTypePlan stays here so the seeded shape

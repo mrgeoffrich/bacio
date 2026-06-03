@@ -165,7 +165,7 @@ func TestMatchIfLeaderWritesBindAudit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	iss, err := s.CreateIssue(repo.ID, nil, "matcher target", "", model.StateTodo, nil, "")
+	iss, err := s.CreateIssue(repo.ID, nil, "matcher target", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
@@ -258,7 +258,7 @@ func TestArchiveSweepIfLeaderWritesAudit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	iss, err := s.CreateIssue(repo.ID, nil, "done long ago", "", model.StateDone, nil, "")
+	iss, err := s.CreateIssue(repo.ID, nil, "done long ago", "", model.StateDone, nil, "", "")
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
@@ -335,18 +335,18 @@ func TestArchiveSweepIfLeaderWritesFeatureAutoStateAudit(t *testing.T) {
 	}
 	// Feature D: two done children → expect promotion to done.
 	featD, _ := s.CreateFeature(repo.ID, "feat-d", "Feat D", "", "", "")
-	if _, err := s.CreateIssue(repo.ID, &featD.ID, "d1", "", model.StateDone, nil, ""); err != nil {
+	if _, err := s.CreateIssue(repo.ID, &featD.ID, "d1", "", model.StateDone, nil, "", ""); err != nil {
 		t.Fatalf("create d1: %v", err)
 	}
-	if _, err := s.CreateIssue(repo.ID, &featD.ID, "d2", "", model.StateDone, nil, ""); err != nil {
+	if _, err := s.CreateIssue(repo.ID, &featD.ID, "d2", "", model.StateDone, nil, "", ""); err != nil {
 		t.Fatalf("create d2: %v", err)
 	}
 	// Feature C: two cancelled children → expect promotion to cancelled.
 	featC, _ := s.CreateFeature(repo.ID, "feat-c", "Feat C", "", "", "")
-	if _, err := s.CreateIssue(repo.ID, &featC.ID, "c1", "", model.StateCancelled, nil, ""); err != nil {
+	if _, err := s.CreateIssue(repo.ID, &featC.ID, "c1", "", model.StateCancelled, nil, "", ""); err != nil {
 		t.Fatalf("create c1: %v", err)
 	}
-	if _, err := s.CreateIssue(repo.ID, &featC.ID, "c2", "", model.StateCancelled, nil, ""); err != nil {
+	if _, err := s.CreateIssue(repo.ID, &featC.ID, "c2", "", model.StateCancelled, nil, "", ""); err != nil {
 		t.Fatalf("create c2: %v", err)
 	}
 
@@ -414,7 +414,7 @@ func TestArchiveSweepIfLeaderSkipsFeatureAutoStateAuditWhenZero(t *testing.T) {
 	// summary row — otherwise it bails before the new sibling row
 	// could possibly fire either way and the test is vacuous.
 	repo, _ := s.CreateRepo("AS", "as", t.TempDir(), "")
-	iss, _ := s.CreateIssue(repo.ID, nil, "i", "", model.StateDone, nil, "")
+	iss, _ := s.CreateIssue(repo.ID, nil, "i", "", model.StateDone, nil, "", "")
 	if _, err := s.DB.Exec(
 		`UPDATE issues SET terminal_at = datetime('now','-30 days') WHERE id = ?`,
 		iss.ID,
@@ -457,7 +457,7 @@ func TestControllerStartRunsArchiveSweepOnStartup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	iss, err := s.CreateIssue(repo.ID, nil, "done long ago", "", model.StateDone, nil, "")
+	iss, err := s.CreateIssue(repo.ID, nil, "done long ago", "", model.StateDone, nil, "", "")
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
@@ -519,7 +519,7 @@ func TestControllerStartStartupSweepStandbyNoop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	iss, err := s.CreateIssue(repo.ID, nil, "done long ago", "", model.StateDone, nil, "")
+	iss, err := s.CreateIssue(repo.ID, nil, "done long ago", "", model.StateDone, nil, "", "")
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
@@ -602,7 +602,7 @@ func TestFollowOnSweepIfLeader_LeaderWrites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	iss, err := s.CreateIssue(repo.ID, nil, "promote me", "", model.StateTodo, nil, "")
+	iss, err := s.CreateIssue(repo.ID, nil, "promote me", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
@@ -684,7 +684,7 @@ func TestFollowOnSweepIfLeader_OrphanCancelWrites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	iss, err := s.CreateIssue(repo.ID, nil, "cancel me", "", model.StateTodo, nil, "")
+	iss, err := s.CreateIssue(repo.ID, nil, "cancel me", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
@@ -758,7 +758,7 @@ func TestFollowOnSweepIfLeader_PromotesRegardlessOfState(t *testing.T) {
 	// in_review issue + an implement follow-on — pre-BACI-252 the
 	// implement default gate (`todo`) would have failed here. After
 	// BACI-252 the row promotes.
-	iss, err := s.CreateIssue(repo.ID, nil, "any-state at fire", "", model.StateInReview, nil, "")
+	iss, err := s.CreateIssue(repo.ID, nil, "any-state at fire", "", model.StateInReview, nil, "", "")
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
@@ -840,11 +840,11 @@ func TestFollowOnSweepIfLeader_BlockersClearPromoteCarriesSnapshot(t *testing.T)
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	blocked, err := s.CreateIssue(repo.ID, nil, "blocked-side", "", model.StateTodo, nil, "")
+	blocked, err := s.CreateIssue(repo.ID, nil, "blocked-side", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("create blocked: %v", err)
 	}
-	blocker, err := s.CreateIssue(repo.ID, nil, "blocker-side", "", model.StateTodo, nil, "")
+	blocker, err := s.CreateIssue(repo.ID, nil, "blocker-side", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("create blocker: %v", err)
 	}

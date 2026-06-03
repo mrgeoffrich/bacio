@@ -7,6 +7,7 @@ import IssueLockBanner from './issue/IssueLockBanner';
 import LinkedDocPanel from './issue/LinkedDocPanel';
 import InlineDescriptionEditor from './issue/InlineDescriptionEditor';
 import InlineTitleEditor from './issue/InlineTitleEditor';
+import InlineCustomerImpactEditor from './issue/InlineCustomerImpactEditor';
 import CommentComposer from './issue/CommentComposer';
 import RelationsPanel from './issue/RelationsPanel';
 import PrAttachModal from './issue/PrAttachModal';
@@ -32,6 +33,7 @@ type IssueWorkspaceProps = {
   cards: BoardCard[];
   onClose: () => void;
   onSaveTitle: (title: string) => void | Promise<void>;
+  onSaveCustomerImpact: (customerImpact: string) => void | Promise<void>;
   onSaveDescription: (description: string) => void | Promise<void>;
   onAddComment: (
     author: string,
@@ -52,6 +54,7 @@ export default function IssueWorkspace({
   cards,
   onClose,
   onSaveTitle,
+  onSaveCustomerImpact,
   onSaveDescription,
   onAddComment,
   onDeleteComment,
@@ -167,6 +170,14 @@ export default function IssueWorkspace({
           title={issueMeta.title}
           readOnly={taken || waiting}
           onSave={onSaveTitle}
+        />
+        {/* BACI-349: the one-line customer impact, click-to-edit, sits
+            directly under the title (CSS breaks it onto its own row).
+            Blank renders a muted "+ Add customer impact" affordance. */}
+        <InlineCustomerImpactEditor
+          customerImpact={issueMeta.customerImpact ?? ''}
+          readOnly={taken || waiting}
+          onSave={onSaveCustomerImpact}
         />
         {/*
           BACI-216: prominent "Open plan" link in the workspace header

@@ -311,6 +311,14 @@ type Client interface {
 	// when the value changes; get is read-only.
 	GetRepoBacklogCollapsed(ctx context.Context, repo *model.Repo) (bool, error)
 	SetRepoBacklogCollapsed(ctx context.Context, repo *model.Repo, collapsed, dryRun bool) (bool, error)
+	// GetRepoImpactPrimary / SetRepoImpactPrimary (BACI-349) front the
+	// per-repo Pipeline-page "show customer impact as the card head"
+	// display preference, persisted in the `tui_settings` KV. Same shape
+	// and audit behaviour as the backlog-collapsed pair above — purely
+	// client-side chrome threaded through both transports (Wails desktop +
+	// REST GET/PUT /repos/{prefix}/impact-primary).
+	GetRepoImpactPrimary(ctx context.Context, repo *model.Repo) (bool, error)
+	SetRepoImpactPrimary(ctx context.Context, repo *model.Repo, impactPrimary, dryRun bool) (bool, error)
 	// StartPipelineJob / StopPipelineJob / SetEngineMode are the engine
 	// controls behind the in-process card's Start / Stop / Auto buttons.
 	// They have no CLI verb (engine/UI only) but ARE on the client so the
@@ -1038,6 +1046,10 @@ type IssueEdit struct {
 	// base_branch unchanged; non-nil empty string = clear (back to
 	// NULL, inherit from feature); non-nil non-empty = set + validate.
 	BaseBranch *string
+	// CustomerImpact (BACI-349) — pointer-vs-presence: nil = leave
+	// customer_impact unchanged; non-nil empty string = clear (back to
+	// the "no impact" state); non-nil non-empty = set + validate.
+	CustomerImpact *string
 }
 
 // BriefOptions mirrors the `bacio issue brief` flag set.

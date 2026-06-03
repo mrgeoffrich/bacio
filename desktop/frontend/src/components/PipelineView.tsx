@@ -249,6 +249,7 @@ type PipelineViewProps = {
   onShip?: (key: string) => void;
   onSetAutoShip?: (next: boolean) => void | Promise<unknown>;
   onSetBacklogCollapsed?: (next: boolean) => void | Promise<unknown>;
+  onSetImpactPrimary?: (next: boolean) => void | Promise<unknown>;
   onShipDispatch?: (key: string, mode: string) => void;
   onCancelWaiting?: (key: string) => void;
   onBlockCard?: (sourceKey: string, targetKey: string) => void;
@@ -276,6 +277,7 @@ export default function PipelineView({
   onShip,
   onSetAutoShip,
   onSetBacklogCollapsed,
+  onSetImpactPrimary,
   onShipDispatch,
   onCancelWaiting,
   onBlockCard,
@@ -298,6 +300,12 @@ export default function PipelineView({
   // controller's auto-ship ticker actually acts on — so the toggle
   // reflects the source of truth across machines, not a local cache.
   const [autoShip, setAutoShip] = useState(false);
+  // impactPrimary (BACI-349) flips every card from title-primary (the
+  // default) to customer-impact-primary (the impact line as the card head,
+  // title demoted to a subtitle) for cards whose customer_impact is set.
+  // Per-repo display chrome persisted in the tui_settings KV — seeded from
+  // the backend GET, same pattern as autoShip / collapsed.
+  const [impactPrimary, setImpactPrimary] = useState(false);
   // highlightKey (BACI-310): the issue key of the blocker currently being
   // hovered in some card's blocked-by badge. The card whose key matches
   // paints itself red (.is-blocker-hl). A no-op when the hovered blocker
@@ -333,6 +341,15 @@ export default function PipelineView({
     return () => { cancelled = true; };
   }, [activeBoard]);
 
+  useEffect(() => {
+    if (!activeBoard) { setImpactPrimary(false); return; }
+    let cancelled = false;
+    api.getImpactPrimary(activeBoard)
+      .then((v) => { if (!cancelled) setImpactPrimary(!!v); })
+      .catch(() => { if (!cancelled) setImpactPrimary(false); });
+    return () => { cancelled = true; };
+  }, [activeBoard]);
+
   const list = cards || [];
   const backlog = useMemo(() => list.filter(c => c.column === 'todo'), [list]);
   const inPipeline = useMemo(() => list.filter(c => c.column === 'in_pipeline'), [list]);
@@ -356,6 +373,15 @@ export default function PipelineView({
       setCollapsed(!next);
     });
   }, [collapsed, onSetBacklogCollapsed]);
+
+  const toggleImpactPrimary = useCallback(() => {
+    const next = !impactPrimary;
+    setImpactPrimary(next); // optimistic
+    Promise.resolve(onSetImpactPrimary?.(next)).catch(() => {
+      // Revert the optimistic flip if the PUT failed.
+      setImpactPrimary(!next);
+    });
+  }, [impactPrimary, onSetImpactPrimary]);
 
   // Move a card into `col` (= its new state). in_pipeline → Shipping goes
   // through the Ship hand-off; everything else is a plain state move. Shared
@@ -576,6 +602,7 @@ export default function PipelineView({
                     index={i}
                     showBadge={expanded}
                     backlog
+                    impactPrimary={impactPrimary}
                     isDragging={dragKey === card.key}
                     isHighlighted={card.key === highlightKey}
                     canBlock
@@ -627,6 +654,7 @@ export default function PipelineView({
                 <StageCard
                   card={card}
                   activeBoard={activeBoard}
+                  impactPrimary={impactPrimary}
                   isDragging={dragKey === card.key}
                   isHighlighted={card.key === highlightKey}
                   canBlock
@@ -665,6 +693,16 @@ export default function PipelineView({
           <span className="mk-pl-pill is-ship">Shipping</span>
           <span className="mk-pl-count">{shipping.length}</span>
           <span className="mk-pl-spacer" />
+          <label className="mk-pl-toggle" title="Show each card's customer impact as the headline (title becomes a subtitle)">
+            Impact first
+            <button
+              type="button"
+              role="switch"
+              aria-checked={impactPrimary}
+              className={`mk-pl-switch${impactPrimary ? ' is-on' : ''}`}
+              onClick={toggleImpactPrimary}
+            />
+          </label>
           <label className="mk-pl-toggle" title="Auto-ship the next card">
             Auto-ship
             <button
@@ -689,6 +727,7 @@ export default function PipelineView({
                 shipping
                 isNextToShip={i === 0}
                 autoShip={autoShip}
+                impactPrimary={impactPrimary}
                 isDragging={dragKey === card.key}
                 isHighlighted={card.key === highlightKey}
                 onOpen={() => onOpenCard?.(card)}
@@ -757,6 +796,7 @@ type PipelineCardProps = {
   backlog?: boolean;
   isNextToShip?: boolean;
   autoShip?: boolean;
+  impactPrimary?: boolean;
   isDragging?: boolean;
   isHighlighted?: boolean;
   canBlock?: boolean;
@@ -785,6 +825,7 @@ function PipelineCard({
   backlog,
   isNextToShip,
   autoShip,
+  impactPrimary,
   isDragging,
   isHighlighted,
   canBlock,
@@ -842,7 +883,7 @@ function PipelineCard({
         onBlockDragStart={onBlockDragStart}
         onBlockDragEnd={onBlockDragEnd}
       />
-      <h3 className="mk-pl-card-title">{card.title}</h3>
+      <CardTitleBlock card={card} titleClass="mk-pl-card-title" impactPrimary={impactPrimary} />
       <CardLabels tags={card.tags} />
       {backlog && (
         <div className="mk-pl-card-foot">
@@ -990,6 +1031,31 @@ function CardLabels({ tags }: CardLabelsProps) {
   );
 }
 
+// CardTitleBlock (BACI-349) renders a card's head text. Default
+// (impactPrimary off, or the card has no customer_impact) is the plain
+// imperative title in the `<titleClass>` <h3>. When the board's
+// impact-primary toggle is on AND the card carries a customer impact, the
+// impact becomes the headline <h3> and the title is demoted to a muted
+// `.mk-pl-card-subtitle` line below it. Shared by PipelineCard (Backlog /
+// Shipping) and StageCard (In Pipeline) so both columns flip together.
+type CardTitleBlockProps = {
+  card: BoardCard;
+  titleClass: string;
+  impactPrimary?: boolean;
+};
+
+function CardTitleBlock({ card, titleClass, impactPrimary }: CardTitleBlockProps) {
+  if (impactPrimary && card.customerImpact) {
+    return (
+      <>
+        <h3 className={titleClass}>{card.customerImpact}</h3>
+        <p className="mk-pl-card-subtitle">{card.title}</p>
+      </>
+    );
+  }
+  return <h3 className={titleClass}>{card.title}</h3>;
+}
+
 // StageCard — the in-pipeline card that grows to fill the column. Issue
 // header on top; the processing area (job chain + active job / question)
 // in the body; all controls along the bottom. When no process has been
@@ -997,6 +1063,7 @@ function CardLabels({ tags }: CardLabelsProps) {
 type StageCardProps = {
   card: BoardCard;
   activeBoard?: string;
+  impactPrimary?: boolean;
   isDragging?: boolean;
   isHighlighted?: boolean;
   canBlock?: boolean;
@@ -1024,6 +1091,7 @@ type StageCardProps = {
 function StageCard({
   card,
   activeBoard,
+  impactPrimary,
   isDragging,
   isHighlighted,
   canBlock,
@@ -1143,7 +1211,7 @@ function StageCard({
           onBlockDragStart={onBlockDragStart}
           onBlockDragEnd={onBlockDragEnd}
         />
-        <h3 className="mk-pl-stage-title">{card.title}</h3>
+        <CardTitleBlock card={card} titleClass="mk-pl-stage-title" impactPrimary={impactPrimary} />
         <CardLabels tags={card.tags} />
       </header>
 

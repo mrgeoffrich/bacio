@@ -18,8 +18,8 @@ func TestArchiveSweep_FeatureAutoStatePromotesAllDone(t *testing.T) {
 	s := newTestStore(t)
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
 	feat, _ := s.CreateFeature(repo.ID, "demo", "Demo", "", "", "")
-	a, _ := s.CreateIssue(repo.ID, &feat.ID, "a", "", model.StateDone, nil, "")
-	b, _ := s.CreateIssue(repo.ID, &feat.ID, "b", "", model.StateDone, nil, "")
+	a, _ := s.CreateIssue(repo.ID, &feat.ID, "a", "", model.StateDone, nil, "", "")
+	b, _ := s.CreateIssue(repo.ID, &feat.ID, "b", "", model.StateDone, nil, "", "")
 	_ = a
 	_ = b
 
@@ -45,8 +45,8 @@ func TestArchiveSweep_FeatureAutoStateAllCancelledPromotesCancelled(t *testing.T
 	s := newTestStore(t)
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
 	feat, _ := s.CreateFeature(repo.ID, "demo", "Demo", "", "", "")
-	_, _ = s.CreateIssue(repo.ID, &feat.ID, "a", "", model.StateCancelled, nil, "")
-	_, _ = s.CreateIssue(repo.ID, &feat.ID, "b", "", model.StateCancelled, nil, "")
+	_, _ = s.CreateIssue(repo.ID, &feat.ID, "a", "", model.StateCancelled, nil, "", "")
+	_, _ = s.CreateIssue(repo.ID, &feat.ID, "b", "", model.StateCancelled, nil, "", "")
 
 	res, err := s.ArchiveSweep(false)
 	if err != nil {
@@ -67,8 +67,8 @@ func TestArchiveSweep_FeatureAutoStateMixedPicksDone(t *testing.T) {
 	s := newTestStore(t)
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
 	feat, _ := s.CreateFeature(repo.ID, "demo", "Demo", "", "", "")
-	_, _ = s.CreateIssue(repo.ID, &feat.ID, "a", "", model.StateDone, nil, "")
-	_, _ = s.CreateIssue(repo.ID, &feat.ID, "b", "", model.StateCancelled, nil, "")
+	_, _ = s.CreateIssue(repo.ID, &feat.ID, "a", "", model.StateDone, nil, "", "")
+	_, _ = s.CreateIssue(repo.ID, &feat.ID, "b", "", model.StateCancelled, nil, "", "")
 
 	res, err := s.ArchiveSweep(false)
 	if err != nil {
@@ -92,8 +92,8 @@ func TestArchiveSweep_FeatureAutoStateRespectsStickyBit(t *testing.T) {
 	s := newTestStore(t)
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
 	feat, _ := s.CreateFeature(repo.ID, "demo", "Demo", "", "", "")
-	_, _ = s.CreateIssue(repo.ID, &feat.ID, "a", "", model.StateDone, nil, "")
-	_, _ = s.CreateIssue(repo.ID, &feat.ID, "b", "", model.StateDone, nil, "")
+	_, _ = s.CreateIssue(repo.ID, &feat.ID, "a", "", model.StateDone, nil, "", "")
+	_, _ = s.CreateIssue(repo.ID, &feat.ID, "b", "", model.StateDone, nil, "", "")
 	if err := s.SetFeatureState(feat.ID, model.FeatureStateCancelled); err != nil {
 		t.Fatalf("set state cancelled: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestArchiveSweep_FeatureAutoStateIdempotent(t *testing.T) {
 	s := newTestStore(t)
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
 	feat, _ := s.CreateFeature(repo.ID, "demo", "Demo", "", "", "")
-	_, _ = s.CreateIssue(repo.ID, &feat.ID, "a", "", model.StateDone, nil, "")
+	_, _ = s.CreateIssue(repo.ID, &feat.ID, "a", "", model.StateDone, nil, "", "")
 
 	r1, err := s.ArchiveSweep(false)
 	if err != nil {
@@ -166,8 +166,8 @@ func TestArchiveSweep_FeatureAutoStatePartialChildrenLeavesActive(t *testing.T) 
 	s := newTestStore(t)
 	repo, _ := s.CreateRepo("TST", "test", t.TempDir(), "")
 	feat, _ := s.CreateFeature(repo.ID, "demo", "Demo", "", "", "")
-	_, _ = s.CreateIssue(repo.ID, &feat.ID, "a", "", model.StateDone, nil, "")
-	_, _ = s.CreateIssue(repo.ID, &feat.ID, "b", "", model.StateInReview, nil, "")
+	_, _ = s.CreateIssue(repo.ID, &feat.ID, "a", "", model.StateDone, nil, "", "")
+	_, _ = s.CreateIssue(repo.ID, &feat.ID, "b", "", model.StateInReview, nil, "", "")
 
 	res, err := s.ArchiveSweep(false)
 	if err != nil {

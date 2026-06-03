@@ -70,7 +70,7 @@ func TestFeatureShowHappy(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	feat := seedFeature(t, s, repo, "auth", "Auth")
-	if _, err := s.CreateIssue(repo.ID, &feat.ID, "an issue", "", model.StateTodo, nil, ""); err != nil {
+	if _, err := s.CreateIssue(repo.ID, &feat.ID, "an issue", "", model.StateTodo, nil, "", ""); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
 	resp, body := apiGet(t, ts.URL+"/repos/MINI/features/auth")
@@ -262,13 +262,13 @@ func TestAPI_BoardCards_HidesHiddenFeatures(t *testing.T) {
 	repo := seedRepo(t, s)
 	authFeat := seedFeature(t, s, repo, "auth", "Auth")
 	opsFeat := seedFeature(t, s, repo, "ops", "Ops")
-	if _, err := s.CreateIssue(repo.ID, &authFeat.ID, "auth-issue", "", model.StateTodo, nil, ""); err != nil {
+	if _, err := s.CreateIssue(repo.ID, &authFeat.ID, "auth-issue", "", model.StateTodo, nil, "", ""); err != nil {
 		t.Fatalf("create auth issue: %v", err)
 	}
-	if _, err := s.CreateIssue(repo.ID, &opsFeat.ID, "ops-issue", "", model.StateTodo, nil, ""); err != nil {
+	if _, err := s.CreateIssue(repo.ID, &opsFeat.ID, "ops-issue", "", model.StateTodo, nil, "", ""); err != nil {
 		t.Fatalf("create ops issue: %v", err)
 	}
-	if _, err := s.CreateIssue(repo.ID, nil, "unattached-issue", "", model.StateTodo, nil, ""); err != nil {
+	if _, err := s.CreateIssue(repo.ID, nil, "unattached-issue", "", model.StateTodo, nil, "", ""); err != nil {
 		t.Fatalf("create unattached issue: %v", err)
 	}
 
@@ -586,7 +586,7 @@ func TestFeatureDeleteDryRunCascade(t *testing.T) {
 	ts, s := newTestAPI(t, api.Options{})
 	repo := seedRepo(t, s)
 	feat := seedFeature(t, s, repo, "auth", "Auth")
-	if _, err := s.CreateIssue(repo.ID, &feat.ID, "child", "", model.StateTodo, nil, ""); err != nil {
+	if _, err := s.CreateIssue(repo.ID, &feat.ID, "child", "", model.StateTodo, nil, "", ""); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
 	resp, body := apiDelete(t, ts.URL+"/repos/MINI/features/auth?dry_run=true", nil)

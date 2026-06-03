@@ -634,6 +634,29 @@ export async function getBacklogCollapsed(repoPrefix: string): Promise<boolean> 
   }
 }
 
+// setImpactPrimary (BACI-349) persists the per-repo Pipeline
+// impact-primary display preference. Returns the persisted value.
+export async function setImpactPrimary(
+  repoPrefix: string,
+  impactPrimary: boolean,
+): Promise<boolean> {
+  try {
+    return await BoardService.SetImpactPrimary(repoPrefix, impactPrimary);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// getImpactPrimary (BACI-349) reads the per-repo Pipeline impact-primary
+// display preference so the toggle seeds from the persisted KV.
+export async function getImpactPrimary(repoPrefix: string): Promise<boolean> {
+  try {
+    return await BoardService.GetImpactPrimary(repoPrefix);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
 // updateIssueDescription replaces an issue's description and returns the
 // refreshed issue-drawer payload.
 export async function updateIssueDescription(
@@ -657,6 +680,21 @@ export async function updateIssueTitle(
 ): Promise<IssueDetail> {
   try {
     return await BoardService.UpdateIssueTitle(repoPrefix, key, title);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
+// updateIssueCustomerImpact (BACI-349) replaces an issue's one-line
+// customer impact and returns the refreshed issue-drawer payload. An
+// empty value is legitimate — it clears the field — so it's always sent.
+export async function updateIssueCustomerImpact(
+  repoPrefix: string,
+  key: string,
+  customerImpact: string,
+): Promise<IssueDetail> {
+  try {
+    return await BoardService.UpdateIssueCustomerImpact(repoPrefix, key, customerImpact);
   } catch (err) {
     throw normalize(err);
   }
