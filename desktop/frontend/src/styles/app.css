@@ -2034,6 +2034,11 @@ body { margin: 0; }
 .mk-pl-btn.is-ghost { background: transparent; border-color: var(--border-2); color: var(--fg-1); }
 .mk-pl-btn.is-ghost:hover { background: var(--bg-4); }
 .mk-pl-btn.is-danger { color: var(--status-blocked); border-color: var(--status-blocked); }
+/* BACI-347: the error-retry control. Painted with the alarm-red --status-error
+   token so it matches the red halt pill it sits beside, distinct from is-danger
+   (the lavender --status-blocked the AbortedBox Re-run / Reset buttons use). */
+.mk-pl-btn.is-retry { color: var(--status-error); border-color: var(--status-error); }
+.mk-pl-btn.is-retry:hover { background: var(--status-error-bg); }
 .mk-pl-btn:disabled { opacity: .4; cursor: not-allowed; }
 /* BACI-335: the fast-track button is a plain ghost button (is-ghost above)
    whose zap glyph stroke is painted with the rainbow gradient def rendered

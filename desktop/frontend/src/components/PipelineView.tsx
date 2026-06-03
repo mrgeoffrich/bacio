@@ -1286,6 +1286,32 @@ function StageCard({
                         : '⏸ Auto halted'}
               </span>
             )}
+            {/* BACI-347: a dedicated retry control for the engine-paused halts,
+                beside the pill (which stays as the at-a-glance explanation).
+                It calls the same onStartJob handler as the footer Start button,
+                so it advances regardless of Auto and clears the pause reason —
+                the dedicated affordance that ignores the Start gate. Error
+                halts read as an alarm-red ↻ Retry; the soft-cancel halt is a
+                deliberate stop, so it reads as a calm ▶ Resume (no error
+                styling). blockedWaiting is excluded — Auto resumes it on its
+                own, so it needs no manual retry. */}
+            {(agentErrored || subagentCancelled) && (
+              <Tooltip label={
+                agentErrorTerminal
+                  ? 'Account / billing / auth error — fix it first, then retry'
+                  : agentErrorTransient
+                    ? 'Retry once the API outage clears'
+                    : 'Resume the cancelled job'
+              }>
+                <button
+                  type="button"
+                  className={`mk-pl-btn is-sm ${agentErrored ? 'is-retry' : 'is-primary'}`}
+                  onClick={() => onStartJob?.(card.key)}
+                >
+                  {agentErrored ? '↻ Retry' : '▶ Resume'}
+                </button>
+              </Tooltip>
+            )}
             {/* BACI-314: render Ship ONLY when shippable — an un-shippable
                 card shows no Ship control at all (was present-but-disabled).
                 BACI-332: a Shelve-terminal chain never offers Ship — reaching
