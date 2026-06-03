@@ -279,6 +279,19 @@ func migrate(db *sql.DB) error {
 	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_issues_assignee ON issues(assignee)`); err != nil {
 		return err
 	}
+	// issues.customer_impact (BACI-349) is the optional single-line
+	// "what did this do for me?" line, authored at scope-time. Same shape
+	// as assignee — NOT NULL DEFAULT '' so existing rows surface as the
+	// empty "no impact" state and fall back to the title everywhere.
+	hasCustomerImpact, err := columnExists(db, "issues", "customer_impact")
+	if err != nil {
+		return err
+	}
+	if !hasCustomerImpact {
+		if _, err := db.Exec(`ALTER TABLE issues ADD COLUMN customer_impact TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("add customer_impact to issues: %w", err)
+		}
+	}
 	// BACI-255: drop the denormalised waiting_for_claim cache column. The
 	// flag was always a stored mirror of "is there an open
 	// queued/pending/delivered dispatch on this issue?", and could drift
@@ -1682,6 +1695,7 @@ func rebuildIssuesDropStateCheck(ctx context.Context, conn *sql.Conn) error {
 			description TEXT    NOT NULL DEFAULT '',
 			state       TEXT    NOT NULL,
 			assignee    TEXT    NOT NULL DEFAULT '',
+			customer_impact TEXT NOT NULL DEFAULT '',
 			archived_at DATETIME,
 			terminal_at DATETIME,
 			user_action_reason_type TEXT,
@@ -1699,11 +1713,11 @@ func rebuildIssuesDropStateCheck(ctx context.Context, conn *sql.Conn) error {
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO issues_new
 			(id, uuid, repo_id, number, feature_id, title, description, state, assignee,
-			 archived_at, terminal_at, user_action_reason_type, base_branch,
+			 customer_impact, archived_at, terminal_at, user_action_reason_type, base_branch,
 			 priority, engine_mode, engine_pause_reason, created_at, updated_at)
 		SELECT
 			id, uuid, repo_id, number, feature_id, title, description, state, assignee,
-			archived_at, terminal_at, user_action_reason_type, base_branch,
+			customer_impact, archived_at, terminal_at, user_action_reason_type, base_branch,
 			priority, engine_mode, engine_pause_reason, created_at, updated_at
 		FROM issues
 	`); err != nil {
@@ -1845,6 +1859,7 @@ func rebuildIssuesDropUserActionReason(ctx context.Context, conn *sql.Conn) erro
 			description TEXT    NOT NULL DEFAULT '',
 			state       TEXT    NOT NULL,
 			assignee    TEXT    NOT NULL DEFAULT '',
+			customer_impact TEXT NOT NULL DEFAULT '',
 			archived_at DATETIME,
 			terminal_at DATETIME,
 			base_branch TEXT,
@@ -1861,11 +1876,11 @@ func rebuildIssuesDropUserActionReason(ctx context.Context, conn *sql.Conn) erro
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO issues_new
 			(id, uuid, repo_id, number, feature_id, title, description, state, assignee,
-			 archived_at, terminal_at, base_branch,
+			 customer_impact, archived_at, terminal_at, base_branch,
 			 priority, engine_mode, engine_pause_reason, created_at, updated_at)
 		SELECT
 			id, uuid, repo_id, number, feature_id, title, description, state, assignee,
-			archived_at, terminal_at, base_branch,
+			customer_impact, archived_at, terminal_at, base_branch,
 			priority, engine_mode, engine_pause_reason, created_at, updated_at
 		FROM issues
 	`); err != nil {

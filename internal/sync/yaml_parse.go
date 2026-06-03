@@ -107,11 +107,15 @@ type ParsedRelations struct {
 
 // ParsedIssue is the on-disk shape of issue.yaml.
 type ParsedIssue struct {
-	UUID            string          `yaml:"uuid" json:"uuid"`
-	Number          int64           `yaml:"number" json:"number"`
-	Title           string          `yaml:"title" json:"title"`
-	State           string          `yaml:"state" json:"state"`
-	Assignee        string          `yaml:"assignee" json:"assignee"`
+	UUID     string `yaml:"uuid" json:"uuid"`
+	Number   int64  `yaml:"number" json:"number"`
+	Title    string `yaml:"title" json:"title"`
+	State    string `yaml:"state" json:"state"`
+	Assignee string `yaml:"assignee" json:"assignee"`
+	// CustomerImpact (BACI-349) round-trips the optional one-line customer
+	// impact — authored content like Title/Assignee, so it syncs. omitempty
+	// keeps an empty field off-disk so pre-BACI-349 issue files don't churn.
+	CustomerImpact  string          `yaml:"customer_impact,omitempty" json:"customer_impact,omitempty"`
 	Tags            []string        `yaml:"tags" json:"tags"`
 	PRs             []string        `yaml:"prs" json:"prs"`
 	Feature         *ParsedRef      `yaml:"feature,omitempty" json:"feature,omitempty"`
@@ -220,6 +224,7 @@ func ParseIssueYAML(b []byte) (*ParsedIssue, error) {
 	}
 	i.Title = NormalizeNFC(i.Title)
 	i.Assignee = NormalizeNFC(i.Assignee)
+	i.CustomerImpact = NormalizeNFC(i.CustomerImpact)
 	for k := range i.Tags {
 		i.Tags[k] = NormalizeNFC(i.Tags[k])
 	}
@@ -324,25 +329,26 @@ func strictDecode(b []byte, out any) error {
 // surface, not numeric fields like number where the type is
 // unambiguous.
 var stringFields = map[string]struct{}{
-	"assignee":     {},
-	"author":       {},
-	"name":         {},
-	"prefix":       {},
-	"reason":       {},
-	"remote_url":   {},
-	"slug":         {},
-	"source_path":  {},
-	"state":        {},
-	"target_label": {},
-	"target_uuid":  {},
-	"title":        {},
-	"type":         {},
-	"uuid":         {},
-	"kind":         {},
-	"label":        {},
-	"old":          {},
-	"new":          {},
-	"filename":     {},
+	"assignee":         {},
+	"author":           {},
+	"customer_impact":  {},
+	"name":             {},
+	"prefix":           {},
+	"reason":           {},
+	"remote_url":       {},
+	"slug":             {},
+	"source_path":      {},
+	"state":            {},
+	"target_label":     {},
+	"target_uuid":      {},
+	"title":            {},
+	"type":             {},
+	"uuid":             {},
+	"kind":             {},
+	"label":            {},
+	"old":              {},
+	"new":              {},
+	"filename":         {},
 	"description_hash": {},
 	"content_hash":     {},
 	"body_hash":        {},

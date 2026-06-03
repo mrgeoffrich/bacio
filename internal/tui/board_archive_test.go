@@ -25,11 +25,11 @@ func TestBoardArchiveKeybinds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	doneIss, err := s.CreateIssue(repo.ID, nil, "done one", "", model.StateDone, nil, "")
+	doneIss, err := s.CreateIssue(repo.ID, nil, "done one", "", model.StateDone, nil, "", "")
 	if err != nil {
 		t.Fatalf("create done iss: %v", err)
 	}
-	inProg, err := s.CreateIssue(repo.ID, nil, "active", "", model.StateInReview, nil, "")
+	inProg, err := s.CreateIssue(repo.ID, nil, "active", "", model.StateInReview, nil, "", "")
 	if err != nil {
 		t.Fatalf("create inprog iss: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestBoardConfirmArchiveCancelledByOtherKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	iss, err := s.CreateIssue(repo.ID, nil, "active", "", model.StateInReview, nil, "")
+	iss, err := s.CreateIssue(repo.ID, nil, "active", "", model.StateInReview, nil, "", "")
 	if err != nil {
 		t.Fatalf("create iss: %v", err)
 	}

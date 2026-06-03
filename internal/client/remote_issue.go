@@ -179,6 +179,11 @@ func (c *remoteClient) UpdateIssue(ctx context.Context, repo *model.Repo, key st
 	if edit.BaseBranch != nil {
 		body["base_branch"] = *edit.BaseBranch
 	}
+	// BACI-349: customer_impact follows the same shape — non-nil empty
+	// string clears (sent as ""), non-nil non-empty sets, nil omits.
+	if edit.CustomerImpact != nil {
+		body["customer_impact"] = *edit.CustomerImpact
+	}
 	q := url.Values{}
 	if dryRun {
 		q.Set("dry_run", "true")

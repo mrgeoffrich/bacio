@@ -30,7 +30,7 @@ func seedIssueForTriggers(t *testing.T) (*Store, int64) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	iss, err := s.CreateIssue(repo.ID, nil, "Trigger fixture", "", model.StateTodo, nil, "")
+	iss, err := s.CreateIssue(repo.ID, nil, "Trigger fixture", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
@@ -53,11 +53,11 @@ func seedTwoIssuesForTriggers(t *testing.T) (*Store, int64, int64) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	a, err := s.CreateIssue(repo.ID, nil, "From", "", model.StateTodo, nil, "")
+	a, err := s.CreateIssue(repo.ID, nil, "From", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("create from: %v", err)
 	}
-	b, err := s.CreateIssue(repo.ID, nil, "To", "", model.StateTodo, nil, "")
+	b, err := s.CreateIssue(repo.ID, nil, "To", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("create to: %v", err)
 	}
@@ -79,7 +79,7 @@ func seedDocumentForTriggers(t *testing.T) (s *Store, docID, issueID int64) {
 	if err != nil {
 		t.Fatalf("create repo: %v", err)
 	}
-	iss, err := s.CreateIssue(repo.ID, nil, "Doc target", "", model.StateTodo, nil, "")
+	iss, err := s.CreateIssue(repo.ID, nil, "Doc target", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}

@@ -98,6 +98,12 @@ CREATE TABLE IF NOT EXISTS issues (
     -- migrateIssuesStateCheck for the in-place CHECK drop on older DBs.
     state       TEXT    NOT NULL,
     assignee    TEXT    NOT NULL DEFAULT '',
+    -- customer_impact (BACI-349) is an optional single-line statement of
+    -- the change in the user's terms, authored at scope-time. Empty = "no
+    -- user-facing change"; every read surface falls back to the title when
+    -- it's blank, so pre-existing rows degrade gracefully. Same shape as
+    -- assignee (TEXT NOT NULL DEFAULT '').
+    customer_impact TEXT NOT NULL DEFAULT '',
     -- archived_at (BACI-68) doubles as the boolean "hidden from default
     -- views" flag and the audit timestamp of when the row was hidden.
     -- NULL = visible; non-NULL = archived. The auto-sweep stamps it

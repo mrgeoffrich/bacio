@@ -140,6 +140,12 @@ type BoardCard struct {
 	Column      string `json:"column"`
 	ColumnLabel string `json:"columnLabel"`
 	Title       string `json:"title"`
+	// CustomerImpact (BACI-349) is the issue's optional one-line customer
+	// impact denormalised from the issue row. Empty (and omitted from
+	// JSON) when unset — the opt-in impact-primary Pipeline view renders
+	// it as the card head and demotes the title to a subtitle only when
+	// this is truthy; the default title-primary view ignores it.
+	CustomerImpact string `json:"customerImpact,omitempty"`
 	// DescriptionExcerpt (BACI-171) is a short (~140-rune) excerpt of
 	// the issue's description used by the bottom-right ActivityTray to
 	// render a one-or-two-line summary per entry without an extra
@@ -587,6 +593,7 @@ func Assemble(ctx context.Context, c client.Client, repo *model.Repo, includeArc
 			Column:             string(iss.State),
 			ColumnLabel:        StateLabel(iss.State),
 			Title:              iss.Title,
+			CustomerImpact:     iss.CustomerImpact,
 			DescriptionExcerpt: descriptionExcerpt(iss.Description),
 			Tags:               tags,
 			Assignees:          assigneeList(iss.Assignee),

@@ -33,7 +33,7 @@ func typeOf[T any]() reflect.Type { return reflect.TypeOf((*T)(nil)).Elem() }
 // inputs.*Input struct.
 var Registry = []Entry{
 	{"issue.add", "Create an issue in the current repo.", typeOf[inputs.IssueAddInput](), inputs.ExampleIssueAdd},
-	{"issue.edit", "Update an issue's title, description, feature, or base branch.", typeOf[inputs.IssueEditInput](), inputs.ExampleIssueEdit},
+	{"issue.edit", "Update an issue's title, description, feature, base branch, or customer impact.", typeOf[inputs.IssueEditInput](), inputs.ExampleIssueEdit},
 	{"issue.state", "Set an issue's state.", typeOf[inputs.IssueStateInput](), inputs.ExampleIssueState},
 	{"issue.assign", "Assign an issue to a person or agent.", typeOf[inputs.IssueAssignInput](), inputs.ExampleIssueAssign},
 	{"issue.unassign", "Clear an issue's assignee.", typeOf[inputs.IssueUnassignInput](), inputs.ExampleIssueUnassign},

@@ -72,7 +72,7 @@ func TestRoundTripProxyCaptures(t *testing.T) {
 	defer p.cleanup()
 	ctx := context.Background()
 
-	iss, err := p.store.CreateIssue(p.repo.ID, nil, "drill", "", model.StateTodo, nil, "")
+	iss, err := p.store.CreateIssue(p.repo.ID, nil, "drill", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
@@ -326,7 +326,7 @@ func TestRoundTripJobTranscripts(t *testing.T) {
 	defer p.cleanup()
 	ctx := context.Background()
 
-	iss, err := p.store.CreateIssue(p.repo.ID, nil, "job", "", model.StateTodo, nil, "")
+	iss, err := p.store.CreateIssue(p.repo.ID, nil, "job", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}

@@ -157,15 +157,19 @@ type RelationsDTO struct {
 // brief.issue.{...} and brief.taken. The waiting signal lives on the
 // brief envelope's WaitingState field (BACI-145/BACI-255), not here.
 type IssueMetaDTO struct {
-	Key         string   `json:"key"`
-	Column      string   `json:"column"`
-	ColumnLabel string   `json:"columnLabel"`
-	Title       string   `json:"title"`
-	Description string   `json:"description"`
-	Tags        []string `json:"tags"`
-	Assignees   []string `json:"assignees"`
-	Claude      bool     `json:"claude"`
-	Taken       bool     `json:"taken"`
+	Key         string `json:"key"`
+	Column      string `json:"column"`
+	ColumnLabel string `json:"columnLabel"`
+	Title       string `json:"title"`
+	// CustomerImpact (BACI-349) is the issue's optional one-line customer
+	// impact. The React detail header renders it inline and lets the user
+	// edit it; empty is omitted from JSON.
+	CustomerImpact string   `json:"customerImpact,omitempty"`
+	Description    string   `json:"description"`
+	Tags           []string `json:"tags"`
+	Assignees      []string `json:"assignees"`
+	Claude         bool     `json:"claude"`
+	Taken          bool     `json:"taken"`
 	// LatestPlan (BACI-216) — the newest `plan`-typed doc linked
 	// directly to this issue, or nil when none. Drives the prominent
 	// "Open plan" link in IssueWorkspace's header. Mirrors the
@@ -207,18 +211,20 @@ type IssueBriefDTO struct {
 
 // IssueDetail is the issue-drawer payload for a single issue.
 type IssueDetail struct {
-	Key          string        `json:"key"`
-	Column       string        `json:"column"`
-	ColumnLabel  string        `json:"columnLabel"`
-	Title        string        `json:"title"`
-	Description  string        `json:"description"`
-	Tags         []string      `json:"tags"`
-	Assignees    []string      `json:"assignees"`
-	Claude       bool          `json:"claude"`
-	Comments     []CommentDTO  `json:"comments"`
-	PullRequests []PRDTO       `json:"pullRequests"`
-	Documents    []DocLinkDTO  `json:"documents"`
-	Claimants    []ClaimantDTO `json:"claimants"`
+	Key         string `json:"key"`
+	Column      string `json:"column"`
+	ColumnLabel string `json:"columnLabel"`
+	Title       string `json:"title"`
+	// CustomerImpact (BACI-349) — see IssueMetaDTO.CustomerImpact.
+	CustomerImpact string        `json:"customerImpact,omitempty"`
+	Description    string        `json:"description"`
+	Tags           []string      `json:"tags"`
+	Assignees      []string      `json:"assignees"`
+	Claude         bool          `json:"claude"`
+	Comments       []CommentDTO  `json:"comments"`
+	PullRequests   []PRDTO       `json:"pullRequests"`
+	Documents      []DocLinkDTO  `json:"documents"`
+	Claimants      []ClaimantDTO `json:"claimants"`
 	// Taken is the derived "an agent is actively holding this" signal —
 	// true iff Claimants has an open (unreleased) claim.
 	Taken bool `json:"taken"`
@@ -261,13 +267,16 @@ func latestPlanDTO(p *model.LatestPlan) *LatestPlanDTO {
 // same type from either api.ts (Wails) or api.http.ts (HTTP) without
 // reshape.
 type ShippedIssueDTO struct {
-	Key          string    `json:"key"`
-	Title        string    `json:"title"`
-	TerminalAt   time.Time `json:"terminalAt"`
-	Tags         []string  `json:"tags"`
-	FeatureSlug  string    `json:"featureSlug,omitempty"`
-	FeatureEmoji string    `json:"featureEmoji,omitempty"`
-	PRURL        string    `json:"prUrl,omitempty"`
+	Key   string `json:"key"`
+	Title string `json:"title"`
+	// CustomerImpact (BACI-349) — the popover renders this as the primary
+	// line, falling back to Title (with a muted/italic class) when empty.
+	CustomerImpact string    `json:"customerImpact,omitempty"`
+	TerminalAt     time.Time `json:"terminalAt"`
+	Tags           []string  `json:"tags"`
+	FeatureSlug    string    `json:"featureSlug,omitempty"`
+	FeatureEmoji   string    `json:"featureEmoji,omitempty"`
+	PRURL          string    `json:"prUrl,omitempty"`
 }
 
 // ShippedListDTO (BACI-221) wraps the popover's per-fetch rows with
@@ -551,11 +560,12 @@ func (b *BoardService) ListShipped(repoPrefix string, sinceDays int, sinceTs str
 			tags = []string{}
 		}
 		row := ShippedIssueDTO{
-			Key:          iss.Key,
-			Title:        iss.Title,
-			Tags:         tags,
-			FeatureSlug:  iss.FeatureSlug,
-			FeatureEmoji: iss.FeatureEmoji,
+			Key:            iss.Key,
+			Title:          iss.Title,
+			CustomerImpact: iss.CustomerImpact,
+			Tags:           tags,
+			FeatureSlug:    iss.FeatureSlug,
+			FeatureEmoji:   iss.FeatureEmoji,
 		}
 		if iss.TerminalAt != nil {
 			row.TerminalAt = *iss.TerminalAt
@@ -651,20 +661,21 @@ func (b *BoardService) GetIssue(repoPrefix, key string) (IssueDetail, error) {
 		})
 	}
 	return IssueDetail{
-		Key:          iss.Key,
-		Column:       string(iss.State),
-		ColumnLabel:  stateLabel(iss.State),
-		Title:        iss.Title,
-		Description:  iss.Description,
-		Tags:         tags,
-		Assignees:    assigneeList(iss.Assignee),
-		Claude:       iss.Assignee == "claude",
-		Comments:     comments,
-		PullRequests: prs,
-		Documents:    docs,
-		Claimants:    claimants,
-		Taken:        view.Taken,
-		LatestPlan:   latestPlanDTO(view.LatestPlan),
+		Key:            iss.Key,
+		Column:         string(iss.State),
+		ColumnLabel:    stateLabel(iss.State),
+		Title:          iss.Title,
+		CustomerImpact: iss.CustomerImpact,
+		Description:    iss.Description,
+		Tags:           tags,
+		Assignees:      assigneeList(iss.Assignee),
+		Claude:         iss.Assignee == "claude",
+		Comments:       comments,
+		PullRequests:   prs,
+		Documents:      docs,
+		Claimants:      claimants,
+		Taken:          view.Taken,
+		LatestPlan:     latestPlanDTO(view.LatestPlan),
 	}, nil
 }
 
@@ -700,16 +711,17 @@ func (b *BoardService) GetIssueBrief(repoPrefix, key string) (IssueBriefDTO, err
 	}
 	latestPlan := latestPlanDTO(brief.LatestPlan)
 	meta := IssueMetaDTO{
-		Key:         iss.Key,
-		Column:      string(iss.State),
-		ColumnLabel: stateLabel(iss.State),
-		Title:       iss.Title,
-		Description: iss.Description,
-		Tags:        tags,
-		Assignees:   assigneeList(iss.Assignee),
-		Claude:      iss.Assignee == "claude",
-		Taken:       brief.Taken,
-		LatestPlan:  latestPlan,
+		Key:            iss.Key,
+		Column:         string(iss.State),
+		ColumnLabel:    stateLabel(iss.State),
+		Title:          iss.Title,
+		CustomerImpact: iss.CustomerImpact,
+		Description:    iss.Description,
+		Tags:           tags,
+		Assignees:      assigneeList(iss.Assignee),
+		Claude:         iss.Assignee == "claude",
+		Taken:          brief.Taken,
+		LatestPlan:     latestPlan,
 	}
 
 	var feat *FeatureRefDTO
@@ -858,6 +870,24 @@ func (b *BoardService) UpdateIssueTitle(repoPrefix, key, title string) (IssueDet
 		return IssueDetail{}, err
 	}
 	if _, err := b.client.UpdateIssue(ctx, repo, key, client.IssueEdit{Title: &title}, false); err != nil {
+		return IssueDetail{}, err
+	}
+	return b.GetIssue(repoPrefix, key)
+}
+
+// UpdateIssueCustomerImpact (BACI-349) replaces an issue's one-line
+// customer impact and returns the refreshed issue-drawer payload. Unlike
+// the title, an empty value is legitimate — it clears the field back to
+// the "no impact" state — so the value is always sent as a non-nil
+// pointer (empty = clear). repoPrefix may be empty or "all" — the prefix
+// is then derived from the canonical issue key.
+func (b *BoardService) UpdateIssueCustomerImpact(repoPrefix, key, customerImpact string) (IssueDetail, error) {
+	ctx := context.Background()
+	repo, err := b.resolveRepoForKey(ctx, repoPrefix, key)
+	if err != nil {
+		return IssueDetail{}, err
+	}
+	if _, err := b.client.UpdateIssue(ctx, repo, key, client.IssueEdit{CustomerImpact: &customerImpact}, false); err != nil {
 		return IssueDetail{}, err
 	}
 	return b.GetIssue(repoPrefix, key)
@@ -1066,6 +1096,29 @@ func (b *BoardService) GetBacklogCollapsed(repoPrefix string) (bool, error) {
 		return false, err
 	}
 	return b.client.GetRepoBacklogCollapsed(ctx, repo)
+}
+
+// SetImpactPrimary (BACI-349) persists the per-repo Pipeline
+// impact-primary display preference and returns the resulting value.
+func (b *BoardService) SetImpactPrimary(repoPrefix string, impactPrimary bool) (bool, error) {
+	ctx := context.Background()
+	repo, err := b.client.GetRepoByPrefix(ctx, repoPrefix)
+	if err != nil {
+		return false, err
+	}
+	return b.client.SetRepoImpactPrimary(ctx, repo, impactPrimary, false)
+}
+
+// GetImpactPrimary (BACI-349) reads the per-repo Pipeline impact-primary
+// display preference so the Pipeline page seeds its toggle state from the
+// persisted KV, not a local cache.
+func (b *BoardService) GetImpactPrimary(repoPrefix string) (bool, error) {
+	ctx := context.Background()
+	repo, err := b.client.GetRepoByPrefix(ctx, repoPrefix)
+	if err != nil {
+		return false, err
+	}
+	return b.client.GetRepoImpactPrimary(ctx, repo)
 }
 
 // AddComment appends a comment to an issue and returns the refreshed

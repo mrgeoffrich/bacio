@@ -362,6 +362,13 @@ func (e *Engine) exportIssue(
 		// signal and matches what the JSON output produces.
 		pairs = append(pairs, Pair{"assignee", Str("")})
 	}
+	// BACI-349: customer_impact is emitted only when set — unlike assignee
+	// (always-emitted), an empty impact line stays off-disk so every
+	// pre-BACI-349 issue file's bytes are unchanged (no churn on the first
+	// sync after upgrade). Matches the omitempty tag on ParsedIssue.
+	if iss.CustomerImpact != "" {
+		pairs = append(pairs, Pair{"customer_impact", Str(iss.CustomerImpact)})
+	}
 	if iss.FeatureID != nil {
 		f := featureByID[*iss.FeatureID]
 		if f != nil {

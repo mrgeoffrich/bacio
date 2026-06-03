@@ -26,15 +26,15 @@ func TestIssueFeatureBranchNameJoin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create feature without branch: %v", err)
 	}
-	issWithBranch, err := s.CreateIssue(repo.ID, &feat.ID, "Has branch", "", model.StateTodo, nil, "")
+	issWithBranch, err := s.CreateIssue(repo.ID, &feat.ID, "Has branch", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("create issue with branched feature: %v", err)
 	}
-	issEmptyBranch, err := s.CreateIssue(repo.ID, &featNoBranch.ID, "Feature ships to main", "", model.StateTodo, nil, "")
+	issEmptyBranch, err := s.CreateIssue(repo.ID, &featNoBranch.ID, "Feature ships to main", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("create issue with un-branched feature: %v", err)
 	}
-	issNoFeature, err := s.CreateIssue(repo.ID, nil, "No feature", "", model.StateTodo, nil, "")
+	issNoFeature, err := s.CreateIssue(repo.ID, nil, "No feature", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("create issue without feature: %v", err)
 	}

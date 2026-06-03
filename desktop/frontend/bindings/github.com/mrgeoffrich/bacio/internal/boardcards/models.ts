@@ -28,6 +28,15 @@ export class BoardCard {
     "title": string;
 
     /**
+     * CustomerImpact (BACI-349) is the issue's optional one-line customer
+     * impact denormalised from the issue row. Empty (and omitted from
+     * JSON) when unset — the opt-in impact-primary Pipeline view renders
+     * it as the card head and demotes the title to a subtitle only when
+     * this is truthy; the default title-primary view ignores it.
+     */
+    "customerImpact"?: string;
+
+    /**
      * DescriptionExcerpt (BACI-171) is a short (~140-rune) excerpt of
      * the issue's description used by the bottom-right ActivityTray to
      * render a one-or-two-line summary per entry without an extra
@@ -267,46 +276,46 @@ export class BoardCard {
      * Creates a new BoardCard instance from a string or object.
      */
     static createFrom($$source: any = {}): BoardCard {
-        const $$createField5_0 = $$createType0;
         const $$createField6_0 = $$createType0;
-        const $$createField11_0 = $$createType2;
-        const $$createField16_0 = $$createType4;
-        const $$createField17_0 = $$createType6;
-        const $$createField19_0 = $$createType8;
-        const $$createField23_0 = $$createType10;
-        const $$createField24_0 = $$createType12;
-        const $$createField25_0 = $$createType14;
-        const $$createField26_0 = $$createType15;
+        const $$createField7_0 = $$createType0;
+        const $$createField12_0 = $$createType2;
+        const $$createField17_0 = $$createType4;
+        const $$createField18_0 = $$createType6;
+        const $$createField20_0 = $$createType8;
+        const $$createField24_0 = $$createType10;
+        const $$createField25_0 = $$createType12;
+        const $$createField26_0 = $$createType14;
+        const $$createField27_0 = $$createType15;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("tags" in $$parsedSource) {
-            $$parsedSource["tags"] = $$createField5_0($$parsedSource["tags"]);
+            $$parsedSource["tags"] = $$createField6_0($$parsedSource["tags"]);
         }
         if ("assignees" in $$parsedSource) {
-            $$parsedSource["assignees"] = $$createField6_0($$parsedSource["assignees"]);
+            $$parsedSource["assignees"] = $$createField7_0($$parsedSource["assignees"]);
         }
         if ("waitingState" in $$parsedSource) {
-            $$parsedSource["waitingState"] = $$createField11_0($$parsedSource["waitingState"]);
+            $$parsedSource["waitingState"] = $$createField12_0($$parsedSource["waitingState"]);
         }
         if ("openQuestions" in $$parsedSource) {
-            $$parsedSource["openQuestions"] = $$createField16_0($$parsedSource["openQuestions"]);
+            $$parsedSource["openQuestions"] = $$createField17_0($$parsedSource["openQuestions"]);
         }
         if ("todos" in $$parsedSource) {
-            $$parsedSource["todos"] = $$createField17_0($$parsedSource["todos"]);
+            $$parsedSource["todos"] = $$createField18_0($$parsedSource["todos"]);
         }
         if ("blockedBy" in $$parsedSource) {
-            $$parsedSource["blockedBy"] = $$createField19_0($$parsedSource["blockedBy"]);
+            $$parsedSource["blockedBy"] = $$createField20_0($$parsedSource["blockedBy"]);
         }
         if ("latestPlan" in $$parsedSource) {
-            $$parsedSource["latestPlan"] = $$createField23_0($$parsedSource["latestPlan"]);
+            $$parsedSource["latestPlan"] = $$createField24_0($$parsedSource["latestPlan"]);
         }
         if ("latestPR" in $$parsedSource) {
-            $$parsedSource["latestPR"] = $$createField24_0($$parsedSource["latestPR"]);
+            $$parsedSource["latestPR"] = $$createField25_0($$parsedSource["latestPR"]);
         }
         if ("jobs" in $$parsedSource) {
-            $$parsedSource["jobs"] = $$createField25_0($$parsedSource["jobs"]);
+            $$parsedSource["jobs"] = $$createField26_0($$parsedSource["jobs"]);
         }
         if ("currentJob" in $$parsedSource) {
-            $$parsedSource["currentJob"] = $$createField26_0($$parsedSource["currentJob"]);
+            $$parsedSource["currentJob"] = $$createField27_0($$parsedSource["currentJob"]);
         }
         return new BoardCard($$parsedSource as Partial<BoardCard>);
     }

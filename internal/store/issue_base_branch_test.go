@@ -18,7 +18,7 @@ func TestCreateIssueWithBaseBranch(t *testing.T) {
 	}
 
 	// Empty base_branch on create → column reads NULL → BaseBranch is nil.
-	noBase, err := s.CreateIssue(repo.ID, nil, "no override", "", model.StateTodo, nil, "")
+	noBase, err := s.CreateIssue(repo.ID, nil, "no override", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("create issue no-override: %v", err)
 	}
@@ -27,7 +27,7 @@ func TestCreateIssueWithBaseBranch(t *testing.T) {
 	}
 
 	// Non-empty base_branch on create → column reads back the value.
-	iss, err := s.CreateIssue(repo.ID, nil, "ship to main", "", model.StateTodo, nil, "main")
+	iss, err := s.CreateIssue(repo.ID, nil, "ship to main", "", model.StateTodo, nil, "main", "")
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestCreateIssueWithBaseBranch(t *testing.T) {
 
 	// Update via the pointer-and-presence path: set a new value.
 	newBase := "release/2025.06"
-	if err := s.UpdateIssue(iss.ID, nil, nil, nil, &newBase); err != nil {
+	if err := s.UpdateIssue(iss.ID, nil, nil, nil, &newBase, nil); err != nil {
 		t.Fatalf("update base: %v", err)
 	}
 	got, err = s.GetIssueByKey(prefix, num)
@@ -61,7 +61,7 @@ func TestCreateIssueWithBaseBranch(t *testing.T) {
 
 	// Clear via explicit empty pointer → column goes back to NULL.
 	empty := ""
-	if err := s.UpdateIssue(iss.ID, nil, nil, nil, &empty); err != nil {
+	if err := s.UpdateIssue(iss.ID, nil, nil, nil, &empty, nil); err != nil {
 		t.Fatalf("clear base: %v", err)
 	}
 	got, err = s.GetIssueByKey(prefix, num)
@@ -75,7 +75,7 @@ func TestCreateIssueWithBaseBranch(t *testing.T) {
 	// Invalid base_branch on update is rejected (same validator as
 	// features.branch_name).
 	bad := "has spaces"
-	if err := s.UpdateIssue(iss.ID, nil, nil, nil, &bad); err == nil {
+	if err := s.UpdateIssue(iss.ID, nil, nil, nil, &bad, nil); err == nil {
 		t.Fatalf("expected ValidateBranchName rejection for %q, got nil", bad)
 	}
 }
@@ -85,7 +85,7 @@ func TestCreateIssueWithBaseBranch(t *testing.T) {
 func TestCreateIssue_InvalidBaseBranch(t *testing.T) {
 	s := newTestStore(t)
 	repo, _ := s.CreateRepo("IBBB", "ibb2", t.TempDir(), "")
-	if _, err := s.CreateIssue(repo.ID, nil, "bad", "", model.StateTodo, nil, "with spaces"); err == nil {
+	if _, err := s.CreateIssue(repo.ID, nil, "bad", "", model.StateTodo, nil, "with spaces", ""); err == nil {
 		t.Fatalf("expected ValidateBranchName rejection on create, got nil")
 	}
 }

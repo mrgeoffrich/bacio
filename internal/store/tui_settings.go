@@ -194,3 +194,30 @@ func (s *Store) SetBacklogCollapsed(repoID int64, collapsed bool) error {
 	}
 	return s.SetTUISetting(repoID, backlogCollapsedKey, value)
 }
+
+// impactPrimaryKey is the per-repo KV key (BACI-349) for the Pipeline
+// page's "show customer impact as the card head" display preference.
+// Purely client-side chrome like backlogCollapsedKey above — it flips
+// the kanban cards from title-primary (default) to impact-primary (title
+// demoted to a subtitle) for cards whose customer_impact is set.
+const impactPrimaryKey = "pipeline.impact_primary"
+
+// IsImpactPrimary (BACI-349) reports whether the Pipeline page renders
+// cards customer-impact-primary for repo. Defaults to false (title-primary).
+func (s *Store) IsImpactPrimary(repoID int64) (bool, error) {
+	raw, err := s.GetTUISetting(repoID, impactPrimaryKey)
+	if err != nil {
+		return false, err
+	}
+	return raw == "1", nil
+}
+
+// SetImpactPrimary (BACI-349) persists the Pipeline impact-primary
+// display preference for repo. Stored as "1" (on) / "" (off).
+func (s *Store) SetImpactPrimary(repoID int64, impactPrimary bool) error {
+	value := ""
+	if impactPrimary {
+		value = "1"
+	}
+	return s.SetTUISetting(repoID, impactPrimaryKey, value)
+}

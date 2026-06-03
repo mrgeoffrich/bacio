@@ -215,3 +215,28 @@ func (c *remoteClient) SetRepoBacklogCollapsed(ctx context.Context, repo *model.
 	}
 	return out.Collapsed, nil
 }
+
+func (c *remoteClient) GetRepoImpactPrimary(ctx context.Context, repo *model.Repo) (bool, error) {
+	var out struct {
+		ImpactPrimary bool `json:"impact_primary"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/repos/"+repo.Prefix+"/impact-primary", nil, nil, &out); err != nil {
+		return false, err
+	}
+	return out.ImpactPrimary, nil
+}
+
+func (c *remoteClient) SetRepoImpactPrimary(ctx context.Context, repo *model.Repo, impactPrimary, dryRun bool) (bool, error) {
+	q := url.Values{}
+	if dryRun {
+		q.Set("dry_run", "true")
+	}
+	body := map[string]any{"impact_primary": impactPrimary}
+	var out struct {
+		ImpactPrimary bool `json:"impact_primary"`
+	}
+	if err := c.do(ctx, http.MethodPut, "/repos/"+repo.Prefix+"/impact-primary", q, body, &out); err != nil {
+		return false, err
+	}
+	return out.ImpactPrimary, nil
+}

@@ -18,7 +18,7 @@ func TestPipelineEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("repo: %v", err)
 	}
-	iss, err := s.CreateIssue(repo.ID, nil, "card", "", model.StateInPipeline, nil, "")
+	iss, err := s.CreateIssue(repo.ID, nil, "card", "", model.StateInPipeline, nil, "", "")
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestPipelineEndpoints(t *testing.T) {
 	}
 
 	// Reorder a Shipping card to the top (position 1 → priority 0).
-	iss2, err := s.CreateIssue(repo.ID, nil, "card2", "", model.StateToBeShipped, nil, "")
+	iss2, err := s.CreateIssue(repo.ID, nil, "card2", "", model.StateToBeShipped, nil, "", "")
 	if err != nil {
 		t.Fatalf("issue2: %v", err)
 	}
@@ -126,6 +126,44 @@ func TestPipelineEndpoints(t *testing.T) {
 	resp.Body.Close()
 	if got, _ := s.GetIssueByID(iss2.ID); got.Priority != 0 {
 		t.Fatalf("reordered priority = %d, want 0", got.Priority)
+	}
+
+	// Impact-primary toggle (per-repo, BACI-349). Clone of the
+	// backlog-collapsed block above: GET defaults false, PUT persists,
+	// dry_run is a no-op.
+	ipURL := ts.URL + "/repos/" + repo.Prefix + "/impact-primary"
+	resp = do(t, http.MethodGet, ipURL, nil, nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("impact-primary GET status %d", resp.StatusCode)
+	}
+	ip := decode[map[string]any](t, resp.Body)
+	resp.Body.Close()
+	if got, _ := ip["impact_primary"].(bool); got {
+		t.Fatalf("impact-primary default = true, want false")
+	}
+
+	resp = do(t, http.MethodPut, ipURL, strings.NewReader(`{"impact_primary":true}`), nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("impact-primary PUT status %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	if on, _ := s.IsImpactPrimary(repo.ID); !on {
+		t.Fatal("impact-primary not persisted")
+	}
+	resp = do(t, http.MethodGet, ipURL, nil, nil)
+	ip = decode[map[string]any](t, resp.Body)
+	resp.Body.Close()
+	if got, _ := ip["impact_primary"].(bool); !got {
+		t.Fatalf("impact-primary GET after PUT = false, want true")
+	}
+
+	resp = do(t, http.MethodPut, ipURL+"?dry_run=true", strings.NewReader(`{"impact_primary":false}`), nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("impact-primary dry-run status %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	if on, _ := s.IsImpactPrimary(repo.ID); !on {
+		t.Fatal("impact-primary dry-run mutated the store")
 	}
 }
 
@@ -138,7 +176,7 @@ func TestJobRerunEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("repo: %v", err)
 	}
-	iss, err := s.CreateIssue(repo.ID, nil, "card", "", model.StateInPipeline, nil, "")
+	iss, err := s.CreateIssue(repo.ID, nil, "card", "", model.StateInPipeline, nil, "", "")
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
@@ -199,7 +237,7 @@ func TestProcessResetEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("repo: %v", err)
 	}
-	iss, err := s.CreateIssue(repo.ID, nil, "card", "", model.StateInPipeline, nil, "")
+	iss, err := s.CreateIssue(repo.ID, nil, "card", "", model.StateInPipeline, nil, "", "")
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
@@ -272,7 +310,7 @@ func TestProcessEditTailEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("repo: %v", err)
 	}
-	iss, err := s.CreateIssue(repo.ID, nil, "card", "", model.StateInPipeline, nil, "")
+	iss, err := s.CreateIssue(repo.ID, nil, "card", "", model.StateInPipeline, nil, "", "")
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
@@ -348,7 +386,7 @@ func TestProcessFromStagesEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("repo: %v", err)
 	}
-	iss, err := s.CreateIssue(repo.ID, nil, "card", "", model.StateInPipeline, nil, "")
+	iss, err := s.CreateIssue(repo.ID, nil, "card", "", model.StateInPipeline, nil, "", "")
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}

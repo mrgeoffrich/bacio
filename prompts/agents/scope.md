@@ -82,6 +82,8 @@ Bulleted, one line per item. Things the user clearly didn't ask for that an over
 - <Out-of-scope item> — <one-line "why not">
 ```
 
+**Customer impact (BACI-349).** Write one short line stating the change in the *user's* terms — the same outcome lens as the `## Summary`, but compressed to a single sentence ("Login no longer 500s on Safari", "Shipped list is scannable at a glance"). This is the `customer_impact` field; it surfaces as the primary line on the shipped list and on the opt-in impact-first board view, falling back to the title when blank. **You are the only agent that authors it** — later passes leave it alone; the user edits it whenever they like. **Leave it blank for purely internal work** — a refactor, a type migration, a build-script tidy with no user-visible outcome. Do NOT manufacture impact for internal changes: an honest empty field reads as "no user-facing change" and degrades gracefully to the title everywhere. It's a single line — no markdown, no newlines.
+
 **Suggested tags.** Pick 0-3 lightweight tags from what's already in the repo where sensible (`bug`, `ux`, `tui`, `desktop`, `cli`, `docs`, etc.) — don't invent elaborate new taxonomy. If nothing fits cleanly, skip tags entirely.
 
 ### 5. Write the rewrite back
@@ -89,13 +91,15 @@ Bulleted, one line per item. Things the user clearly didn't ask for that an over
 Apply the changes via the existing CLI verbs:
 
 ```bash
-bacio issue edit <issue_id> --json '{"title": "<new title>", "description": "<new description>"}'
+# Include customer_impact when the change has a user-visible outcome;
+# OMIT the key entirely (or pass "") for purely internal work.
+bacio issue edit <issue_id> --json '{"title": "<new title>", "description": "<new description>", "customer_impact": "<one-line user-facing outcome>"}'
 
 # One tag add per suggested tag (idempotent — re-runs are harmless):
 bacio tag add <issue_id> <tag>
 ```
 
-The description is just an inline JSON string — JSON's own `\n` escapes give you line breaks; no temp-file dance needed.
+The description is just an inline JSON string — JSON's own `\n` escapes give you line breaks; no temp-file dance needed. `customer_impact` is a single inline line; passing `""` (or omitting the key) leaves the issue with no impact line — the read surfaces fall back to the title.
 
 ### 6. Sanity check before close-out
 

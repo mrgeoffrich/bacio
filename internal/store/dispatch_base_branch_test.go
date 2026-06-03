@@ -38,7 +38,7 @@ func TestAddDispatchStampsBaseBranch_FeatureWins(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create feature: %v", err)
 	}
-	iss, err := s.CreateIssue(repo.ID, &feat.ID, "login broken", "", model.StateTodo, nil, "")
+	iss, err := s.CreateIssue(repo.ID, &feat.ID, "login broken", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestAddDispatchStampsBaseBranch_IssueOverrideWins(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create feature: %v", err)
 	}
-	iss, err := s.CreateIssue(repo.ID, &feat.ID, "merge feat back", "", model.StateTodo, nil, "main")
+	iss, err := s.CreateIssue(repo.ID, &feat.ID, "merge feat back", "", model.StateTodo, nil, "main", "")
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestBindQueuedDispatchStampsBaseBranch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create feature: %v", err)
 	}
-	iss, err := s.CreateIssue(repo.ID, &feat.ID, "queued issue", "", model.StateTodo, nil, "")
+	iss, err := s.CreateIssue(repo.ID, &feat.ID, "queued issue", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
@@ -159,7 +159,7 @@ func TestBindQueuedDispatch_ResolvesIssueOverride(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create feature: %v", err)
 	}
-	iss, err := s.CreateIssue(repo.ID, &feat.ID, "override later", "", model.StateTodo, nil, "")
+	iss, err := s.CreateIssue(repo.ID, &feat.ID, "override later", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestBindQueuedDispatch_ResolvesIssueOverride(t *testing.T) {
 	}
 	// Now the user pins this specific issue to main (terminal merge).
 	override := "main"
-	if err := s.UpdateIssue(iss.ID, nil, nil, nil, &override); err != nil {
+	if err := s.UpdateIssue(iss.ID, nil, nil, nil, &override, nil); err != nil {
 		t.Fatalf("update issue: %v", err)
 	}
 

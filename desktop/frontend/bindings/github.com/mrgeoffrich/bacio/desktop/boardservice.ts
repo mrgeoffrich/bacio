@@ -274,6 +274,15 @@ export function GetDefaultFeature(repoPrefix: string): $CancellablePromise<$mode
 }
 
 /**
+ * GetImpactPrimary (BACI-349) reads the per-repo Pipeline impact-primary
+ * display preference so the Pipeline page seeds its toggle state from the
+ * persisted KV, not a local cache.
+ */
+export function GetImpactPrimary(repoPrefix: string): $CancellablePromise<boolean> {
+    return $Call.ByID(3781828001, repoPrefix);
+}
+
+/**
  * GetIssue returns the full issue-drawer payload for one issue. repoPrefix
  * may be empty or "all" — canonical issue keys (PREFIX-N) resolve without a
  * repo context.
@@ -540,6 +549,14 @@ export function SetDefaultFeature(repoPrefix: string, slug: string): $Cancellabl
 }
 
 /**
+ * SetImpactPrimary (BACI-349) persists the per-repo Pipeline
+ * impact-primary display preference and returns the resulting value.
+ */
+export function SetImpactPrimary(repoPrefix: string, impactPrimary: boolean): $CancellablePromise<boolean> {
+    return $Call.ByID(479770125, repoPrefix, impactPrimary);
+}
+
+/**
  * SetIssueState changes an issue's state and returns the refreshed card.
  * It backs the board's drag-to-move: dropping a card in a new column
  * persists the state change so it survives the next auto-refresh poll.
@@ -576,6 +593,20 @@ export function StopCardJob(repoPrefix: string, key: string): $CancellablePromis
 export function UnarchiveIssue(repoPrefix: string, issueKey: string): $CancellablePromise<model$0.Issue | null> {
     return $Call.ByID(3350533803, repoPrefix, issueKey).then(($result: any) => {
         return $$createType6($result);
+    });
+}
+
+/**
+ * UpdateIssueCustomerImpact (BACI-349) replaces an issue's one-line
+ * customer impact and returns the refreshed issue-drawer payload. Unlike
+ * the title, an empty value is legitimate — it clears the field back to
+ * the "no impact" state — so the value is always sent as a non-nil
+ * pointer (empty = clear). repoPrefix may be empty or "all" — the prefix
+ * is then derived from the canonical issue key.
+ */
+export function UpdateIssueCustomerImpact(repoPrefix: string, key: string, customerImpact: string): $CancellablePromise<$models.IssueDetail> {
+    return $Call.ByID(2666824201, repoPrefix, key, customerImpact).then(($result: any) => {
+        return $$createType0($result);
     });
 }
 

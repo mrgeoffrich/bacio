@@ -260,6 +260,12 @@ export default function ShippedPopover({ activeBoard, shippedCount, scope, onSco
               // in muted mono micro-type. The PR pill and feature-slug
               // text are dropped (the row click already opens the
               // issue; the emoji alone signals the feature).
+              // BACI-349: the primary line is the customer impact (the
+              // change in the user's terms); fall back to the imperative
+              // title when impact is blank, marking the fallback with an
+              // `is-fallback` class so it renders muted/italic and reads
+              // visibly as "no dedicated impact line". The hover title
+              // attribute always carries the work title for context.
               <button
                 key={r.key}
                 type="button"
@@ -271,7 +277,9 @@ export default function ShippedPopover({ activeBoard, shippedCount, scope, onSco
                   {r.featureEmoji && (
                     <span className="mk-shipped-row-feature" aria-hidden="true">{r.featureEmoji}</span>
                   )}
-                  <span className="mk-shipped-row-title">{r.title}</span>
+                  <span className={`mk-shipped-row-title${r.customerImpact ? '' : ' is-fallback'}`}>
+                    {r.customerImpact || r.title}
+                  </span>
                 </span>
                 <span className="mk-shipped-row-sub-line">
                   <span className="mk-shipped-row-key mk-card-id">{r.key}</span>

@@ -81,7 +81,7 @@ func (s *Store) ResolveCreateIssueFeatureID(repoID int64, suppliedSlug string) (
 //
 // baseBranch (BACI-232) is the per-issue override for the PR base
 // branch — "" → NULL → inherit from the feature (and ultimately main).
-func (s *Store) CreateIssue(repoID int64, featureID *int64, title, description string, state model.State, tags []string, baseBranch string) (*model.Issue, error) {
+func (s *Store) CreateIssue(repoID int64, featureID *int64, title, description string, state model.State, tags []string, baseBranch, customerImpact string) (*model.Issue, error) {
 	// The issues.state CHECK was dropped (migrateIssuesStateCheck) so the
 	// growing Pipeline state set doesn't need a migration each time; the
 	// enum is now enforced here at the store boundary instead.
@@ -97,6 +97,10 @@ func (s *Store) CreateIssue(repoID int64, featureID *int64, title, description s
 		return nil, err
 	}
 	baseBranch, err = ValidateBranchName(baseBranch)
+	if err != nil {
+		return nil, err
+	}
+	customerImpact, err = ValidateCustomerImpact(customerImpact, "customer_impact")
 	if err != nil {
 		return nil, err
 	}
@@ -117,9 +121,9 @@ func (s *Store) CreateIssue(repoID int64, featureID *int64, title, description s
 	// first read. terminalAtClause yields CURRENT_TIMESTAMP for
 	// done/cancelled and NULL otherwise.
 	res, err := tx.Exec(
-		`INSERT INTO issues (uuid, repo_id, number, feature_id, title, description, state, base_branch, terminal_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, `+terminalAtClause(state)+`)`,
+		`INSERT INTO issues (uuid, repo_id, number, feature_id, title, description, state, base_branch, customer_impact, terminal_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, `+terminalAtClause(state)+`)`,
 		identity.New(), repoID, num, nullableInt(featureID), title, description, string(state),
-		sql.NullString{String: baseBranch, Valid: baseBranch != ""},
+		sql.NullString{String: baseBranch, Valid: baseBranch != ""}, customerImpact,
 	)
 	if err != nil {
 		return nil, err
@@ -326,7 +330,13 @@ func (s *Store) ListIssues(f IssueFilter) ([]*model.Issue, error) {
 // Feature.UpdateFeature's branchName: nil pointer = no change; non-nil
 // empty string = clear (write NULL, inherit from feature); non-nil
 // non-empty = set + validate.
-func (s *Store) UpdateIssue(id int64, title, description *string, featureID **int64, baseBranch *string) error {
+//
+// customerImpact (BACI-349) uses the same presence-pointer convention:
+// nil = no change; non-nil empty string = clear (write ”); non-nil
+// non-empty = set + validate. Unlike baseBranch the column is NOT NULL
+// DEFAULT ” (the empty string IS the "no impact" state), so the cleared
+// value lands as ” rather than NULL.
+func (s *Store) UpdateIssue(id int64, title, description *string, featureID **int64, baseBranch, customerImpact *string) error {
 	sets := []string{}
 	args := []any{}
 	if title != nil {
@@ -358,6 +368,16 @@ func (s *Store) UpdateIssue(id int64, title, description *string, featureID **in
 		// Empty string clears the column to NULL — keeps the legacy
 		// "inherit from feature" behaviour reachable from an edit.
 		args = append(args, sql.NullString{String: clean, Valid: clean != ""})
+	}
+	if customerImpact != nil {
+		clean, err := ValidateCustomerImpact(*customerImpact, "customer_impact")
+		if err != nil {
+			return err
+		}
+		// NOT NULL DEFAULT '' column — empty clears to the "no impact"
+		// state ('') rather than NULL.
+		sets = append(sets, "customer_impact = ?")
+		args = append(args, clean)
 	}
 	if len(sets) == 0 {
 		return nil
@@ -614,7 +634,7 @@ func (s *Store) PeekNextIssue(repoID int64, featureID int64) (*model.Issue, erro
 // ClaimNextIssue atomically picks the next ready issue in a feature and
 // stamps it with the given assignee (leaving it in todo — claiming is a
 // focus marker since BACI-300, not a state move). "Ready" means:
-// state='todo', assignee='', and every `blocks`-blocker is in a terminal
+// state='todo', assignee=”, and every `blocks`-blocker is in a terminal
 // state (done/cancelled). Returns nil, nil when nothing is currently claimable
 // (the caller should treat this as "wait and retry"). The picked row is
 // the lowest-numbered candidate, matching the order produced by
@@ -990,7 +1010,7 @@ func (s *Store) CountFeatures(repoID int64) (int, error) {
 // round trip.
 const issueSelect = `
 SELECT i.id, i.uuid, i.repo_id, i.number, r.prefix, i.feature_id, COALESCE(f.slug, ''), COALESCE(f.emoji, ''), COALESCE(f.branch_name, ''),
-       i.title, i.description, i.state, i.assignee,
+       i.title, i.description, i.state, i.assignee, i.customer_impact,
        EXISTS (
          SELECT 1 FROM agent_claims c
          JOIN agent_sessions s ON s.id = c.session_pk
@@ -1019,7 +1039,7 @@ func scanIssue(row rowScanner) (*model.Issue, error) {
 		engineMode     string
 	)
 	err := row.Scan(&i.ID, &i.UUID, &i.RepoID, &i.Number, &prefix, &featureID, &featSlug, &featEmoji, &featBranchName,
-		&i.Title, &i.Description, &state, &i.Assignee, &i.Taken,
+		&i.Title, &i.Description, &state, &i.Assignee, &i.CustomerImpact, &i.Taken,
 		&archivedAt, &terminalAt, &baseBranch,
 		&i.Priority, &engineMode, &i.EnginePauseReason, &i.CreatedAt, &i.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {

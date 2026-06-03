@@ -2777,6 +2777,32 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   letter-spacing: -0.01em; color: var(--fg-1);
 }
 
+/* BACI-349: the one-line customer impact, click-to-edit, sits on its own
+   row directly under the title (flex-basis:100% forces the wrap in the
+   flex-wrap header). Secondary type — smaller and muted relative to the
+   title so it reads as the "in the user's terms" gloss. The .is-empty
+   variant is the dashed "+ Add customer impact" prompt shown when blank. */
+.mk-workspace-impact {
+  flex-basis: 100%;
+  font-size: 13px; font-weight: 500; line-height: 1.35;
+  color: var(--fg-2); margin: 0;
+}
+.mk-workspace-impact.is-empty { color: var(--fg-3); font-style: italic; }
+.mk-workspace-impact[role="button"] {
+  cursor: text; border-radius: var(--radius-sm);
+  padding: 2px 4px; margin: -2px -4px;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.mk-workspace-impact[role="button"]:hover { background: var(--bg-4); }
+/* The inline impact <input> matches the read line's typography + the
+   full-width wrap so committing/reverting doesn't reflow the header.
+   Reuses .mk-edit-input for the field chrome. */
+.mk-workspace-impact-input {
+  flex-basis: 100%;
+  font-size: 13px; font-weight: 500; line-height: 1.35;
+  color: var(--fg-1);
+}
+
 /* BACI-292: bounded wrapper for the embedded NotionEditor in the issue
    description (the editor is also DocsView's full-pane editor, whose
    wrapper is height:100% + a sticky toolbar tuned for that pane). Inside
@@ -3736,6 +3762,15 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
   overflow: hidden;
   min-width: 0;
   line-height: 1.3;
+}
+/* BACI-349: the shipped row shows the customer impact as its primary
+   line, falling back to the imperative title when impact is blank. The
+   fallback renders muted + italic so a real impact line is visibly
+   distinct from "this row has no dedicated impact, here's the title". */
+.mk-shipped-row-title.is-fallback {
+  color: var(--fg-3);
+  font-style: italic;
+  font-weight: 400;
 }
 
 /* Sub-line: muted micro-type carrying [KEY] · [when]. Override the

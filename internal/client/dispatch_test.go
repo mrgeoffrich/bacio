@@ -20,7 +20,7 @@ func TestDispatchLifecycleLocal(t *testing.T) {
 	defer p.cleanup()
 	ctx := context.Background()
 
-	iss, err := p.store.CreateIssue(p.repo.ID, nil, "fix the thing", "", model.StateTodo, nil, "")
+	iss, err := p.store.CreateIssue(p.repo.ID, nil, "fix the thing", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestDispatchPromptTemplateRendering(t *testing.T) {
 	defer p.cleanup()
 	ctx := context.Background()
 
-	iss, err := p.store.CreateIssue(p.repo.ID, nil, "fix the thing", "", model.StateTodo, nil, "")
+	iss, err := p.store.CreateIssue(p.repo.ID, nil, "fix the thing", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestClaimReleaseKeepsAssigneeInLockstep(t *testing.T) {
 	defer p.cleanup()
 	ctx := context.Background()
 
-	iss, err := p.store.CreateIssue(p.repo.ID, nil, "lockstep", "", model.StateTodo, nil, "")
+	iss, err := p.store.CreateIssue(p.repo.ID, nil, "lockstep", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
@@ -306,7 +306,7 @@ func TestRoundTripDispatchCreate(t *testing.T) {
 	defer p.cleanup()
 	ctx := context.Background()
 
-	iss, err := p.store.CreateIssue(p.repo.ID, nil, "ship it", "", model.StateTodo, nil, "")
+	iss, err := p.store.CreateIssue(p.repo.ID, nil, "ship it", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
@@ -379,7 +379,7 @@ func TestEndAgentPresumedDeadWritesRequeueAudit(t *testing.T) {
 				c = p.remote
 			}
 
-			iss, err := p.store.CreateIssue(p.repo.ID, nil, "stuck on stale session", "", model.StateTodo, nil, "")
+			iss, err := p.store.CreateIssue(p.repo.ID, nil, "stuck on stale session", "", model.StateTodo, nil, "", "")
 			if err != nil {
 				t.Fatalf("CreateIssue: %v", err)
 			}
@@ -487,7 +487,7 @@ func TestDrainDispatchesWritesDeliverAudit(t *testing.T) {
 	defer p.cleanup()
 	ctx := context.Background()
 
-	iss, err := p.store.CreateIssue(p.repo.ID, nil, "deliver me", "", model.StateTodo, nil, "")
+	iss, err := p.store.CreateIssue(p.repo.ID, nil, "deliver me", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
@@ -575,7 +575,7 @@ func TestDrainDispatchesUniquePerSession(t *testing.T) {
 	defer p.cleanup()
 	ctx := context.Background()
 
-	iss, err := p.store.CreateIssue(p.repo.ID, nil, "no double-deliver", "", model.StateTodo, nil, "")
+	iss, err := p.store.CreateIssue(p.repo.ID, nil, "no double-deliver", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
@@ -695,7 +695,7 @@ func TestStoreClaimDispatchDeliveryIdempotent(t *testing.T) {
 	defer p.cleanup()
 	ctx := context.Background()
 
-	iss, err := p.store.CreateIssue(p.repo.ID, nil, "idempotent claim", "", model.StateTodo, nil, "")
+	iss, err := p.store.CreateIssue(p.repo.ID, nil, "idempotent claim", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
@@ -753,7 +753,7 @@ func TestAbandonOpenQuestionsWritesAudit(t *testing.T) {
 	defer p.cleanup()
 	ctx := context.Background()
 
-	iss, err := p.store.CreateIssue(p.repo.ID, nil, "parked work", "", model.StateInReview, nil, "")
+	iss, err := p.store.CreateIssue(p.repo.ID, nil, "parked work", "", model.StateInReview, nil, "", "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
@@ -845,7 +845,7 @@ func TestEndAgentSessionAbandonsOpenQuestionsAudit(t *testing.T) {
 				c = p.remote
 			}
 
-			iss, err := p.store.CreateIssue(p.repo.ID, nil, "parked on a question", "", model.StateInReview, nil, "")
+			iss, err := p.store.CreateIssue(p.repo.ID, nil, "parked on a question", "", model.StateInReview, nil, "", "")
 			if err != nil {
 				t.Fatalf("CreateIssue: %v", err)
 			}
@@ -931,7 +931,7 @@ func TestCreateRescueDispatchHappyPath(t *testing.T) {
 	defer p.cleanup()
 	ctx := context.Background()
 
-	iss, err := p.store.CreateIssue(p.repo.ID, nil, "salvage me", "", model.StateInReview, nil, "")
+	iss, err := p.store.CreateIssue(p.repo.ID, nil, "salvage me", "", model.StateInReview, nil, "", "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
@@ -1045,7 +1045,7 @@ func TestCreateRescueDispatchRejectsAliveSession(t *testing.T) {
 	defer p.cleanup()
 	ctx := context.Background()
 
-	iss, err := p.store.CreateIssue(p.repo.ID, nil, "alive worker", "", model.StateInReview, nil, "")
+	iss, err := p.store.CreateIssue(p.repo.ID, nil, "alive worker", "", model.StateInReview, nil, "", "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}

@@ -452,11 +452,11 @@ func TestListJobTranscripts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create repo B: %v", err)
 	}
-	issA, err := s.CreateIssue(repoA.ID, nil, "issue a", "", model.StateTodo, nil, "")
+	issA, err := s.CreateIssue(repoA.ID, nil, "issue a", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("create issue A: %v", err)
 	}
-	issB, err := s.CreateIssue(repoB.ID, nil, "issue b", "", model.StateTodo, nil, "")
+	issB, err := s.CreateIssue(repoB.ID, nil, "issue b", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("create issue B: %v", err)
 	}

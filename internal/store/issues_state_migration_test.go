@@ -22,6 +22,7 @@ CREATE TABLE issues (
 	state       TEXT    NOT NULL CHECK (state IN
 	              ('todo','in_progress','needs_action','in_review','done','cancelled')),
 	assignee    TEXT    NOT NULL DEFAULT '',
+	customer_impact TEXT NOT NULL DEFAULT '',
 	archived_at DATETIME,
 	terminal_at DATETIME,
 	user_action_reason_type TEXT,
@@ -179,6 +180,7 @@ CREATE TABLE issues (
 	description TEXT    NOT NULL DEFAULT '',
 	state       TEXT    NOT NULL,
 	assignee    TEXT    NOT NULL DEFAULT '',
+	customer_impact TEXT NOT NULL DEFAULT '',
 	archived_at DATETIME,
 	terminal_at DATETIME,
 	user_action_reason_type TEXT,

@@ -116,7 +116,7 @@ func TestAddSessionQuestionRejectsEmptyIssueKey(t *testing.T) {
 // claim, stays) in the requested state.
 func setupClaimedIssue(t *testing.T, p *pair, sessionID string, state model.State) (*model.Issue, *model.AgentSession) {
 	t.Helper()
-	iss, err := p.store.CreateIssue(p.repo.ID, nil, "auto-flip target", "", state, nil, "")
+	iss, err := p.store.CreateIssue(p.repo.ID, nil, "auto-flip target", "", state, nil, "", "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}

@@ -209,21 +209,28 @@ func (d deps) handleIssueCreate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), map[string]any{"field": "base_branch"})
 		return
 	}
+	// BACI-349: validate customer_impact the same way.
+	cleanImpact, err := store.ValidateCustomerImpact(in.CustomerImpact, "customer_impact")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), map[string]any{"field": "customer_impact"})
+		return
+	}
 	if isDryRun(r) {
 		projectedSlug := in.FeatureSlug
 		if projectedSlug == "" && resolvedFeature != nil {
 			projectedSlug = resolvedFeature.Slug
 		}
 		projected := &model.Issue{
-			RepoID:      repo.ID,
-			Number:      repo.NextIssueNumber,
-			Key:         fmt.Sprintf("%s-%d", repo.Prefix, repo.NextIssueNumber),
-			FeatureID:   featureID,
-			FeatureSlug: projectedSlug,
-			Title:       in.Title,
-			Description: in.Description,
-			State:       state,
-			Tags:        cleanTags,
+			RepoID:         repo.ID,
+			Number:         repo.NextIssueNumber,
+			Key:            fmt.Sprintf("%s-%d", repo.Prefix, repo.NextIssueNumber),
+			FeatureID:      featureID,
+			FeatureSlug:    projectedSlug,
+			Title:          in.Title,
+			Description:    in.Description,
+			State:          state,
+			Tags:           cleanTags,
+			CustomerImpact: cleanImpact,
 		}
 		if projected.Tags == nil {
 			projected.Tags = []string{}
@@ -237,7 +244,7 @@ func (d deps) handleIssueCreate(w http.ResponseWriter, r *http.Request) {
 		writeDryRun(w, http.StatusCreated, projected)
 		return
 	}
-	iss, err := d.store.CreateIssue(repo.ID, featureID, in.Title, in.Description, state, cleanTags, cleanBase)
+	iss, err := d.store.CreateIssue(repo.ID, featureID, in.Title, in.Description, state, cleanTags, cleanBase, cleanImpact)
 	if err != nil {
 		status, code := statusForError(err)
 		writeError(w, status, code, err.Error(), nil)
@@ -390,7 +397,7 @@ func (d deps) handleIssueEdit(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var tPtr, dPtr, bPtr *string
+	var tPtr, dPtr, bPtr, ciPtr *string
 	var fPtr **int64
 	if _, ok := present["title"]; ok {
 		if in.Title == nil || *in.Title == "" {
@@ -436,7 +443,18 @@ func (d deps) handleIssueEdit(w http.ResponseWriter, r *http.Request) {
 			bPtr = in.BaseBranch
 		}
 	}
-	if tPtr == nil && dPtr == nil && fPtr == nil && bPtr == nil {
+	// BACI-349: customer_impact follows the same pointer-plus-presence
+	// dance — present (even null / "") clears to the "no impact" state;
+	// non-empty validates and sets.
+	if _, ok := present["customer_impact"]; ok {
+		if in.CustomerImpact == nil {
+			empty := ""
+			ciPtr = &empty
+		} else {
+			ciPtr = in.CustomerImpact
+		}
+	}
+	if tPtr == nil && dPtr == nil && fPtr == nil && bPtr == nil && ciPtr == nil {
 		writeError(w, http.StatusBadRequest, "invalid_input", "nothing to update", nil)
 		return
 	}
@@ -477,10 +495,20 @@ func (d deps) handleIssueEdit(w http.ResponseWriter, r *http.Request) {
 				projected.BaseBranch = &b
 			}
 		}
+		if ciPtr != nil {
+			// Pre-validate so the dry-run rejects an over-cap / control-char
+			// impact line the same way the real call would.
+			clean, err := store.ValidateCustomerImpact(*ciPtr, "customer_impact")
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_input", err.Error(), map[string]any{"field": "customer_impact"})
+				return
+			}
+			projected.CustomerImpact = clean
+		}
 		writeDryRun(w, http.StatusOK, &projected)
 		return
 	}
-	if err := d.store.UpdateIssue(iss.ID, tPtr, dPtr, fPtr, bPtr); err != nil {
+	if err := d.store.UpdateIssue(iss.ID, tPtr, dPtr, fPtr, bPtr, ciPtr); err != nil {
 		status, code := statusForError(err)
 		writeError(w, status, code, err.Error(), nil)
 		return
@@ -500,10 +528,11 @@ func (d deps) handleIssueEdit(w http.ResponseWriter, r *http.Request) {
 		TargetID:    &updated.ID,
 		TargetLabel: updated.Key,
 		Details: updatedFieldList(map[string]bool{
-			"title":       tPtr != nil,
-			"description": dPtr != nil,
-			"feature":     fPtr != nil,
-			"base_branch": bPtr != nil,
+			"title":           tPtr != nil,
+			"description":     dPtr != nil,
+			"feature":         fPtr != nil,
+			"base_branch":     bPtr != nil,
+			"customer_impact": ciPtr != nil,
 		}),
 	})
 	writeJSON(w, http.StatusOK, updated)

@@ -16,7 +16,7 @@ func TestAddSessionQuestionParentsToRunningJob(t *testing.T) {
 	if err != nil {
 		t.Fatalf("repo: %v", err)
 	}
-	iss, err := s.CreateIssue(repo.ID, nil, "card", "", model.StateInPipeline, nil, "")
+	iss, err := s.CreateIssue(repo.ID, nil, "card", "", model.StateInPipeline, nil, "", "")
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
@@ -59,7 +59,7 @@ func TestAddSessionQuestionParentsToRunningJob(t *testing.T) {
 	}
 
 	// A question on a non-pipeline issue stays session-parented (nil job).
-	iss2, err := s.CreateIssue(repo.ID, nil, "todo", "", model.StateTodo, nil, "")
+	iss2, err := s.CreateIssue(repo.ID, nil, "todo", "", model.StateTodo, nil, "", "")
 	if err != nil {
 		t.Fatalf("issue2: %v", err)
 	}

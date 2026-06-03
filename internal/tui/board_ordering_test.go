@@ -52,7 +52,7 @@ func TestBoardColumnOrdering(t *testing.T) {
 	}
 	keysByTitle := map[string]string{}
 	for _, sd := range seeds {
-		iss, err := s.CreateIssue(repo.ID, nil, sd.title, "", sd.state, nil, "")
+		iss, err := s.CreateIssue(repo.ID, nil, sd.title, "", sd.state, nil, "", "")
 		if err != nil {
 			t.Fatalf("create issue %q: %v", sd.title, err)
 		}

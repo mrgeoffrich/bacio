@@ -19,7 +19,7 @@ func seedRunningPipelineJob(t *testing.T, c *localClient, prefix string) (*model
 	if err != nil {
 		t.Fatalf("CreateRepo: %v", err)
 	}
-	iss, err := c.store.CreateIssue(repo.ID, nil, "card", "", model.StateInPipeline, nil, "")
+	iss, err := c.store.CreateIssue(repo.ID, nil, "card", "", model.StateInPipeline, nil, "", "")
 	if err != nil {
 		t.Fatalf("CreateIssue: %v", err)
 	}
