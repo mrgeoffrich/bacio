@@ -197,28 +197,38 @@ type JobTranscriptUsageDTO struct {
 // deep-link key; IssueKey / Mode / AgentName / RepoPrefix are best-effort
 // enrichment (empty when the dispatch was deleted); Model is the primary
 // thread's; TurnCount is the primary-capture count; Usage is summed across the
-// dispatch; LastSeen is the most-recent capture's timestamp.
+// dispatch; LastSeen is the most-recent capture's timestamp. SessionID /
+// ClaudeAgentID / SessionLabel (BACI-348) are the supervisor-session / subagent
+// correlation keys + the session's human label, so the UI can fold dispatches
+// under a named session.
 type JobTranscriptRowDTO struct {
-	DispatchID int64                 `json:"dispatchId"`
-	IssueKey   string                `json:"issueKey,omitempty"`
-	Mode       string                `json:"mode,omitempty"`
-	AgentName  string                `json:"agentName,omitempty"`
-	RepoPrefix string                `json:"repoPrefix,omitempty"`
-	Model      string                `json:"model,omitempty"`
-	TurnCount  int64                 `json:"turnCount"`
-	Usage      JobTranscriptUsageDTO `json:"usage"`
-	LastSeen   time.Time             `json:"lastSeen"`
+	DispatchID    int64                 `json:"dispatchId"`
+	IssueKey      string                `json:"issueKey,omitempty"`
+	Mode          string                `json:"mode,omitempty"`
+	AgentName     string                `json:"agentName,omitempty"`
+	RepoPrefix    string                `json:"repoPrefix,omitempty"`
+	Model         string                `json:"model,omitempty"`
+	TurnCount     int64                 `json:"turnCount"`
+	Usage         JobTranscriptUsageDTO `json:"usage"`
+	LastSeen      time.Time             `json:"lastSeen"`
+	SessionID     string                `json:"sessionId,omitempty"`
+	ClaudeAgentID string                `json:"claudeAgentId,omitempty"`
+	SessionLabel  string                `json:"sessionLabel,omitempty"`
 }
 
 // ListJobTranscripts returns the BACI-322 transcript browser list — one row per
 // distinct dispatch that has parsed captures, the Monitor Transcript page's
 // data. repo scopes to one repo prefix (the active board); issue / mode narrow
-// to one issue / one job mode; sinceDays > 0 windows to a rolling lookback
-// (0 = all-time, the same sentinel ProxyStats uses). The returned slice is
-// always non-nil.
-func (m *MonitorService) ListJobTranscripts(repo, issue, mode string, sinceDays int) ([]JobTranscriptRowDTO, error) {
+// to one issue / one job mode; session / agent (BACI-348) narrow to one
+// supervisor session / one subagent identity; sinceDays > 0 windows to a
+// rolling lookback (0 = all-time, the same sentinel ProxyStats uses). The
+// returned slice is always non-nil.
+func (m *MonitorService) ListJobTranscripts(repo, issue, mode, session, agent string, sinceDays int) ([]JobTranscriptRowDTO, error) {
 	ctx := context.Background()
-	f := store.JobTranscriptFilter{RepoPrefix: repo, IssueKey: issue, Mode: mode}
+	f := store.JobTranscriptFilter{
+		RepoPrefix: repo, IssueKey: issue, Mode: mode,
+		SessionID: session, ClaudeAgentID: agent,
+	}
 	if sinceDays > 0 {
 		cutoff := time.Now().Add(-time.Duration(sinceDays) * 24 * time.Hour)
 		f.Since = &cutoff
@@ -244,7 +254,10 @@ func (m *MonitorService) ListJobTranscripts(repo, issue, mode string, sinceDays 
 				CacheReadTokens:     r.Usage.CacheReadInputTokens,
 				ThinkingTokens:      r.Usage.ThinkingTokens,
 			},
-			LastSeen: r.LastSeen,
+			LastSeen:      r.LastSeen,
+			SessionID:     r.SessionID,
+			ClaudeAgentID: r.ClaudeAgentID,
+			SessionLabel:  r.SessionLabel,
 		})
 	}
 	return out, nil

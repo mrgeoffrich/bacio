@@ -213,16 +213,21 @@ func (s *Store) JobTranscript(dispatchID int64) (*model.AnthropicTranscript, err
 // dispatch resolves to a different repo prefix are dropped — proxy_messages
 // has no repo_id, so the scope is applied in Go after the cached GetDispatch
 // enrichment); IssueKey / Mode narrow to one issue / one job mode the same
-// way. Since (inclusive lower bound on the dispatch's last-seen capture)
-// bounds the window; nil means no lower bound. Limit caps the rows returned
-// newest-first — <= 0 falls back to defaultProxyListLimit, hard-capped at
+// way. SessionID / ClaudeAgentID (BACI-348) narrow to one supervisor session /
+// one subagent identity — real proxy_messages columns, so they push into the
+// SQL WHERE like the `proxy grep` sibling, unlike the repo/issue/mode filters.
+// Since (inclusive lower bound on the dispatch's last-seen capture) bounds the
+// window; nil means no lower bound. Limit caps the rows returned newest-first —
+// <= 0 falls back to defaultProxyListLimit, hard-capped at
 // defaultProxyRequestLimit.
 type JobTranscriptFilter struct {
-	RepoPrefix string
-	IssueKey   string
-	Mode       string
-	Since      *time.Time
-	Limit      int
+	RepoPrefix    string
+	IssueKey      string
+	Mode          string
+	SessionID     string
+	ClaudeAgentID string
+	Since         *time.Time
+	Limit         int
 }
 
 // ListJobTranscripts returns one summary row per distinct dispatch that has
@@ -231,12 +236,20 @@ type JobTranscriptFilter struct {
 // captures into a turn count (the primary captures), summed token usage, and
 // the most-recent capture's started_at; the model is picked from a primary
 // row (an auxiliary title-gen capture can carry a different model, so a blind
-// MAX(model) would lie — mirror JobTranscript's primary/auxiliary split). Each
-// distinct dispatch is then best-effort enriched via a cached GetDispatch
-// (the exact idiom ListProxyCapturesEnriched uses) for its issue key / mode /
-// agent name / repo prefix; a deleted dispatch leaves those empty. The repo /
-// issue / mode filters are applied in Go against the enrichment (proxy_messages
-// has no FK to agent_dispatches), so they narrow after the grouped scan. The
+// MAX(model) would lie — mirror JobTranscript's primary/auxiliary split).
+// session_id / claude_agent_id (BACI-348) are picked per group with MAX():
+// every capture of one dispatch shares one session id and the subagent's
+// captures share one agent id ("subagents share the session id" — schema.sql),
+// and the columns are '' when the header was absent, so MAX prefers the real id
+// (empty sorts lowest) without a correlated subquery. Each distinct dispatch is
+// then best-effort enriched via a cached GetDispatch (the exact idiom
+// ListProxyCapturesEnriched uses) for its issue key / mode / agent name / repo
+// prefix, and SessionLabel is resolved via a cached GetAgentSession on the
+// session id (agent name else the short session id); a deleted dispatch /
+// unsynced session leaves those empty. The repo / issue / mode filters are
+// applied in Go against the enrichment (proxy_messages has no FK to
+// agent_dispatches), so they narrow after the grouped scan; the session / agent
+// filters are real columns and so push into the grouped scan's WHERE. The
 // grouped query is LIMIT-capped so the post-scan enrichment stays bounded.
 // Always non-nil.
 func (s *Store) ListJobTranscripts(f JobTranscriptFilter) ([]*model.JobTranscriptRow, error) {
@@ -251,6 +264,8 @@ func (s *Store) ListJobTranscripts(f JobTranscriptFilter) ([]*model.JobTranscrip
 	// One row per dispatch: turn count = the primary captures; usage summed
 	// across every capture; model from the latest primary row (correlated
 	// subquery, not MAX(model), so an auxiliary capture's model never wins);
+	// session_id / claude_agent_id from MAX() (one per dispatch — the empty
+	// string sorts lowest, so a real id always wins over an absent header);
 	// last_seen = the newest capture's started_at, the ordering column.
 	q := `
 		SELECT m.dispatch_id,
@@ -261,12 +276,22 @@ func (s *Store) ListJobTranscripts(f JobTranscriptFilter) ([]*model.JobTranscrip
 		       SUM(m.cache_read_tokens)     AS cache_read_tokens,
 		       SUM(m.thinking_tokens)       AS thinking_tokens,
 		       MAX(m.started_at)            AS last_seen,
+		       MAX(m.session_id)            AS session_id,
+		       MAX(m.claude_agent_id)       AS claude_agent_id,
 		       (SELECT p.model FROM proxy_messages p
 		          WHERE p.dispatch_id = m.dispatch_id AND p.is_primary = 1
 		          ORDER BY p.id DESC LIMIT 1) AS model
 		FROM proxy_messages m
 		WHERE m.dispatch_id IS NOT NULL`
 	var args []any
+	if f.SessionID != "" {
+		q += ` AND m.session_id = ?`
+		args = append(args, f.SessionID)
+	}
+	if f.ClaudeAgentID != "" {
+		q += ` AND m.claude_agent_id = ?`
+		args = append(args, f.ClaudeAgentID)
+	}
 	if f.Since != nil {
 		q += ` AND m.started_at >= ?`
 		args = append(args, f.Since.UTC().Format("2006-01-02 15:04:05"))
@@ -285,6 +310,9 @@ func (s *Store) ListJobTranscripts(f JobTranscriptFilter) ([]*model.JobTranscrip
 
 	type chip struct{ issueKey, mode, agent, prefix string }
 	chips := map[int64]chip{}
+	// SessionLabel is resolved once per distinct session id (cached) — a job's
+	// row costs at most one GetAgentSession; the empty session id maps to "".
+	labels := map[string]string{}
 	out := make([]*model.JobTranscriptRow, 0)
 	for rows.Next() {
 		var (
@@ -300,7 +328,7 @@ func (s *Store) ListJobTranscripts(f JobTranscriptFilter) ([]*model.JobTranscrip
 			&r.DispatchID, &r.TurnCount,
 			&r.Usage.InputTokens, &r.Usage.OutputTokens,
 			&r.Usage.CacheCreationInputTokens, &r.Usage.CacheReadInputTokens,
-			&r.Usage.ThinkingTokens, &lastSeenStr, &modelStr,
+			&r.Usage.ThinkingTokens, &lastSeenStr, &r.SessionID, &r.ClaudeAgentID, &modelStr,
 		); err != nil {
 			return nil, err
 		}
@@ -322,6 +350,21 @@ func (s *Store) ListJobTranscripts(f JobTranscriptFilter) ([]*model.JobTranscrip
 		r.AgentName = c.agent
 		r.RepoPrefix = c.prefix
 
+		// Session label: agent name for that session, else the short session
+		// id, else "" (no session header). Cached per distinct session id.
+		if r.SessionID != "" {
+			label, ok := labels[r.SessionID]
+			if !ok {
+				if sess, serr := s.GetAgentSession(r.SessionID); serr == nil && sess != nil && sess.AgentName != "" {
+					label = sess.AgentName
+				} else {
+					label = shortSessionID(r.SessionID)
+				}
+				labels[r.SessionID] = label
+			}
+			r.SessionLabel = label
+		}
+
 		// Active-repo / issue / mode scoping, applied in Go against the
 		// enrichment since proxy_messages has no FK to agent_dispatches.
 		if f.RepoPrefix != "" && r.RepoPrefix != f.RepoPrefix {
@@ -336,6 +379,16 @@ func (s *Store) ListJobTranscripts(f JobTranscriptFilter) ([]*model.JobTranscrip
 		out = append(out, &r)
 	}
 	return out, rows.Err()
+}
+
+// shortSessionID truncates a (UUID-shaped) session id to its first 12 chars —
+// the fallback label when a session has no agent_sessions row to name it,
+// mirroring the AgentsView short-id convention so the UI never shows a raw UUID.
+func shortSessionID(id string) string {
+	if len(id) <= 12 {
+		return id
+	}
+	return id[:12]
 }
 
 func scanProxyMessage(r rowScanner) (*model.ProxyMessage, error) {

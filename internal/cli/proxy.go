@@ -413,6 +413,8 @@ func newProxyJobsCmd() *cobra.Command {
 		repo     string
 		issue    string
 		mode     string
+		session  string
+		agent    string
 		sinceStr string
 		limit    int
 	)
@@ -427,7 +429,9 @@ token usage, the primary thread's model, last-seen, and the dispatch's issue key
 
 Scope with --repo (the active repo prefix), --issue (one issue key, e.g.
 BACI-302), --mode (one job mode: plan / implement / review / ship / design /
-fix_review), and --since (a lookback window). Rows are newest-first and capped.
+fix_review), --session (one Claude Code supervisor session — a whole sitting's
+dispatch chain), --agent (one subagent identity — finer than dispatch when
+re-dispatched), and --since (a lookback window). Rows are newest-first and capped.
 
   --since accepts a duration lookback: 30m, 1h, 1d, 2w`,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -438,7 +442,8 @@ fix_review), and --since (a lookback window). Rows are newest-first and capped.
 			defer c.Close()
 
 			f := store.JobTranscriptFilter{
-				RepoPrefix: repo, IssueKey: issue, Mode: mode, Limit: limit,
+				RepoPrefix: repo, IssueKey: issue, Mode: mode,
+				SessionID: session, ClaudeAgentID: agent, Limit: limit,
 			}
 			if sinceStr != "" {
 				d, err := timeparse.Lookback(sinceStr)
@@ -458,6 +463,8 @@ fix_review), and --since (a lookback window). Rows are newest-first and capped.
 	cmd.Flags().StringVar(&repo, "repo", "", "scope to one repo prefix (e.g. BACI)")
 	cmd.Flags().StringVar(&issue, "issue", "", "scope to one issue key (e.g. BACI-302)")
 	cmd.Flags().StringVar(&mode, "mode", "", "scope to one job mode (plan, implement, review, ship, design, fix_review)")
+	cmd.Flags().StringVar(&session, "session", "", "scope to one Claude Code supervisor session id")
+	cmd.Flags().StringVar(&agent, "agent", "", "scope to one Claude Code agent id")
 	cmd.Flags().StringVar(&sinceStr, "since", "", "look back this far (e.g. 30m, 1h, 1d, 2w)")
 	cmd.Flags().IntVar(&limit, "limit", 0, "max rows (0 for the default cap)")
 	return cmd

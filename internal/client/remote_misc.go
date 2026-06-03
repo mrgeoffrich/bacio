@@ -280,6 +280,12 @@ func (c *remoteClient) ListJobTranscripts(ctx context.Context, f store.JobTransc
 	if f.Mode != "" {
 		q.Set("mode", f.Mode)
 	}
+	if f.SessionID != "" {
+		q.Set("session", f.SessionID)
+	}
+	if f.ClaudeAgentID != "" {
+		q.Set("agent", f.ClaudeAgentID)
+	}
 	if f.Limit > 0 {
 		q.Set("limit", strInt(int64(f.Limit)))
 	}

@@ -75,12 +75,13 @@ export function ListCaptures(host: string, dispatchID: number, anthropicOnly: bo
  * ListJobTranscripts returns the BACI-322 transcript browser list — one row per
  * distinct dispatch that has parsed captures, the Monitor Transcript page's
  * data. repo scopes to one repo prefix (the active board); issue / mode narrow
- * to one issue / one job mode; sinceDays > 0 windows to a rolling lookback
- * (0 = all-time, the same sentinel ProxyStats uses). The returned slice is
- * always non-nil.
+ * to one issue / one job mode; session / agent (BACI-348) narrow to one
+ * supervisor session / one subagent identity; sinceDays > 0 windows to a
+ * rolling lookback (0 = all-time, the same sentinel ProxyStats uses). The
+ * returned slice is always non-nil.
  */
-export function ListJobTranscripts(repo: string, issue: string, mode: string, sinceDays: number): $CancellablePromise<$models.JobTranscriptRowDTO[]> {
-    return $Call.ByID(2401896545, repo, issue, mode, sinceDays).then(($result: any) => {
+export function ListJobTranscripts(repo: string, issue: string, mode: string, session: string, agent: string, sinceDays: number): $CancellablePromise<$models.JobTranscriptRowDTO[]> {
+    return $Call.ByID(2401896545, repo, issue, mode, session, agent, sinceDays).then(($result: any) => {
         return $$createType7($result);
     });
 }

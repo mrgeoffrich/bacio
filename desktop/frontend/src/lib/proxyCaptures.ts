@@ -93,10 +93,13 @@ export interface JobTranscriptUsage {
 // the Transcript page navigates on; issueKey / mode / agentName / repoPrefix
 // are best-effort enrichment (empty when the dispatch was deleted); model is
 // the primary thread's; turnCount is the primary-capture count; usage is summed
-// across the dispatch; lastSeen is an ISO timestamp. The Wails seam re-exports
-// the generated JobTranscriptRowDTO under this name; the HTTP seam reshapes the
-// snake_case wire row into it. TranscriptListPanel imports it from `./api` and
-// never knows which transport it's on.
+// across the dispatch; lastSeen is an ISO timestamp. sessionId / claudeAgentId
+// / sessionLabel (BACI-348) are the supervisor-session / subagent correlation
+// keys + the session's human label, used to fold dispatches into session /
+// agent groups. The Wails seam re-exports the generated JobTranscriptRowDTO
+// under this name; the HTTP seam reshapes the snake_case wire row into it.
+// TranscriptListPanel imports it from `./api` and never knows which transport
+// it's on.
 export interface JobTranscriptRow {
   dispatchId: number;
   issueKey?: string;
@@ -107,4 +110,7 @@ export interface JobTranscriptRow {
   turnCount: number;
   usage: JobTranscriptUsage;
   lastSeen: string;
+  sessionId?: string;
+  claudeAgentId?: string;
+  sessionLabel?: string;
 }

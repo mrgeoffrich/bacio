@@ -2605,6 +2605,106 @@ html { background: var(--bg-1); }            /* no white flash on overscroll */
 }
 .mk-transcript-tokens { font-variant-numeric: tabular-nums; }
 
+/* BACI-348: the "Group by" segmented control on the Transcripts panel-bar —
+   clones the .mk-monitor-subtabs tablist with its own class so the two don't
+   collide. The label sits inline ahead of the segments. */
+.mk-group-by {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.mk-group-by-label {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--fg-4);
+}
+.mk-group-by .mk-group-by-tab + .mk-group-by-tab { margin-left: 2px; }
+.mk-group-by-tab {
+  appearance: none;
+  background: var(--bg-3);
+  border: 1px solid var(--border-1);
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--fg-3);
+}
+.mk-group-by-tab:hover { color: var(--fg-1); }
+.mk-group-by-tab.is-active {
+  background: var(--bg-1);
+  color: var(--fg-1);
+  box-shadow: var(--shadow-1);
+  border-color: var(--border-2);
+}
+
+/* BACI-348: a collapsible group of per-dispatch rows (a supervisor session or a
+   subagent identity) when the Transcripts list is grouped by session / agent.
+   The header is a clickable expander; the body nests the existing transcript
+   rows so they stay visually identical to the flat list. */
+.mk-transcript-group {
+  border-bottom: 1px solid var(--border-1);
+}
+.mk-transcript-group:last-child { border-bottom: 0; }
+.mk-transcript-group-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  appearance: none;
+  background: var(--bg-3);
+  border: 0;
+  cursor: pointer;
+  padding: 8px 14px;
+  text-align: left;
+  font-family: var(--font-sans);
+}
+.mk-transcript-group-head:hover { background: var(--bg-2); }
+.mk-transcript-group-arrow {
+  font-size: 10px;
+  color: var(--fg-4);
+  flex-shrink: 0;
+}
+.mk-transcript-group-label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--fg-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.mk-transcript-group-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+  flex-shrink: 0;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--fg-4);
+}
+/* Nested rows sit indented under the group header. */
+.mk-transcript-group-body .mk-transcript-row { padding-left: 32px; }
+
+/* BACI-348: the v1 windowing caveat under a grouped list. */
+.mk-transcript-caveat {
+  flex-shrink: 0;
+  margin-top: 10px;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  color: var(--fg-4);
+  line-height: 1.5;
+}
+.mk-transcript-caveat code {
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
 /* BACI-322: the deep-linkable full-transcript page — a back-header above the
    reused <TranscriptView> body. */
 .mk-transcript-route {

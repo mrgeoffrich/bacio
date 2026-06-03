@@ -2321,24 +2321,32 @@ interface ApiJobTranscriptRow {
     thinking_tokens?: number;
   };
   last_seen: string;
+  session_id?: string;
+  claude_agent_id?: string;
+  session_label?: string;
 }
 
 // listJobTranscripts (BACI-322) is the HTTP twin of api.ts's
 // listJobTranscripts — the Monitor Transcript page's row-per-dispatch list.
 // GET /proxy/jobs is cross-cutting (no repo prefix in the path); `repo` scopes
-// to the active board, `issue` / `mode` narrow, `sinceDays === 0` is the
-// all-time sentinel. Reshapes the snake_case wire rows into the camelCase
+// to the active board, `issue` / `mode` narrow, `session` / `agent` (BACI-348)
+// narrow to one supervisor session / subagent identity, `sinceDays === 0` is
+// the all-time sentinel. Reshapes the snake_case wire rows into the camelCase
 // JobTranscriptRow shape api.ts re-exports.
 export async function listJobTranscripts(
   repo = '',
   issue = '',
   mode = '',
+  session = '',
+  agent = '',
   sinceDays = 0,
 ): Promise<JobTranscriptRow[]> {
   const query: Record<string, string | number> = {};
   if (repo) query.repo = repo;
   if (issue) query.issue = issue;
   if (mode) query.mode = mode;
+  if (session) query.session = session;
+  if (agent) query.agent = agent;
   if (sinceDays > 0) query.since = `${sinceDays}d`;
   const rows = await call<ApiJobTranscriptRow[]>('/proxy/jobs', { query });
   return (rows ?? []).map(r => ({
@@ -2357,6 +2365,9 @@ export async function listJobTranscripts(
       thinkingTokens: r.usage?.thinking_tokens ?? 0,
     },
     lastSeen: r.last_seen,
+    sessionId: r.session_id,
+    claudeAgentId: r.claude_agent_id,
+    sessionLabel: r.session_label,
   }));
 }
 

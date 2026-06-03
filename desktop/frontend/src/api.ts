@@ -1011,17 +1011,20 @@ export async function jobTranscript(dispatchId: number): Promise<AnthropicTransc
 // listJobTranscripts (BACI-322) returns the Monitor Transcript page's
 // row-per-dispatch list — one summary row per dispatch that has parsed
 // captures. `repo` scopes to the active board's prefix; `issue` / `mode`
-// narrow to one issue / one job mode; `sinceDays` windows to a rolling lookback
-// (0 = all-time). The HTTP twin keeps the same name + shape so
+// narrow to one issue / one job mode; `session` / `agent` (BACI-348) narrow to
+// one supervisor session / one subagent identity; `sinceDays` windows to a
+// rolling lookback (0 = all-time). The HTTP twin keeps the same name + shape so
 // TranscriptListPanel stays transport-agnostic.
 export async function listJobTranscripts(
   repo = '',
   issue = '',
   mode = '',
+  session = '',
+  agent = '',
   sinceDays = 0,
 ): Promise<JobTranscriptRow[]> {
   try {
-    return await MonitorService.ListJobTranscripts(repo, issue, mode, sinceDays);
+    return await MonitorService.ListJobTranscripts(repo, issue, mode, session, agent, sinceDays);
   } catch (err) {
     throw normalize(err);
   }
