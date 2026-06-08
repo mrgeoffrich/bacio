@@ -818,6 +818,12 @@ import type {
   ApiFeatureView,
   ApiPlanView,
 } from './api/wire/feature';
+import { reshapeDispatch } from './api/wire/dispatch';
+import type { ApiDispatch, ApiUserMessage } from './api/wire/dispatch';
+import { reshapeDocSummary, reshapeDocContent } from './api/wire/doc';
+import type { ApiDocument, ApiDocView } from './api/wire/doc';
+import { reshapeHistoryEntry } from './api/wire/history';
+import type { ApiHistoryEntry } from './api/wire/history';
 
 export interface PromptTemplateDTO {
   slug: string;
@@ -1199,27 +1205,6 @@ export async function markAllNotificationsRead(): Promise<number> {
 // the Go-side snake_case the API serialises (links carry the issue
 // key / feature slug pre-formatted, so the client doesn't need to
 // resolve them).
-interface ApiDocumentLink {
-  issue_key?: string;
-  feature_slug?: string;
-  description?: string;
-}
-
-interface ApiDocument {
-  filename: string;
-  type: string;
-  size_bytes: number;
-  updated_at: string;
-  created_at: string;
-  archived_at?: string;
-  content?: string;
-  // BACI-204: per-row snippet + link rows hydrated by the store-side
-  // IN-query so the Documents page renders chips and previews without
-  // an N+1 round trip.
-  snippet?: string;
-  links?: ApiDocumentLink[];
-}
-
 export async function listDocs(repoPrefix: string, typeFilter = ''): Promise<DocSummary[]> {
   if (!repoPrefix || repoPrefix === 'all') {
     throw new Error('select a repository to view its documents');
@@ -1227,44 +1212,7 @@ export async function listDocs(repoPrefix: string, typeFilter = ''): Promise<Doc
   const docs = await call<ApiDocument[]>(`/repos/${repoPrefix}/documents`, {
     query: { type: typeFilter || undefined },
   });
-  return docs.map(d => ({
-    filename: d.filename,
-    type: d.type,
-    sizeBytes: d.size_bytes,
-    updatedAt: d.updated_at,
-    createdAt: d.created_at,
-    archivedAt: d.archived_at,
-    snippet: d.snippet,
-    links: d.links?.map(l => ({
-      issueKey: l.issue_key,
-      featureSlug: l.feature_slug,
-      description: l.description,
-    })),
-  }));
-}
-
-interface ApiDispatch {
-  id: number;
-  issue_key?: string;
-  target_agent_name?: string;
-  mode?: string;
-  status: string;
-  payload?: string;
-  created_by?: string;
-  created_at: string;
-}
-
-function reshapeDispatch(d: ApiDispatch): DispatchDTO {
-  return {
-    id: d.id,
-    issueKey: d.issue_key ?? '',
-    targetAgent: d.target_agent_name ?? '',
-    mode: d.mode ?? '',
-    status: d.status,
-    payload: d.payload ?? '',
-    createdBy: d.created_by ?? '',
-    createdAt: d.created_at,
-  };
+  return docs.map(reshapeDocSummary);
 }
 
 // addIssue (BACI-166) creates a new issue via POST /repos/{prefix}/issues
@@ -1378,18 +1326,6 @@ export async function rescueDispatch(dispatchID: number): Promise<DispatchDTO> {
     { method: 'POST' },
   );
   return reshapeDispatch(raw);
-}
-
-// ApiUserMessage is the wire shape of a BACI-286 steer message returned
-// by the POST endpoint. The callers are fire-and-forget (success vs
-// toasted error), so only id is consumed — the rest mirrors the Go
-// model.UserMessage for completeness.
-interface ApiUserMessage {
-  id: number;
-  session_id: string;
-  body: string;
-  created_by: string;
-  created_at: string;
 }
 
 // sendSessionMessage (BACI-286) POSTs a user→agent steer message at a
@@ -1741,16 +1677,6 @@ export async function deleteFeatureComment(
   return getFeature(repoPrefix, slug);
 }
 
-interface ApiHistoryEntry {
-  id: number;
-  actor: string;
-  op: string;
-  kind?: string;
-  target_label?: string;
-  details?: string;
-  created_at: string;
-}
-
 // ApiProxyFQDNStat is the snake_case wire shape GET /proxy/stats returns
 // (model.ProxyFQDNStat's JSON tags). listProxyStats reshapes it into the
 // camelCase ProxyFQDNStat the Monitor screen consumes.
@@ -1781,15 +1707,7 @@ export async function listHistory(
     query: { limit: pageSize + 1, offset: page * pageSize },
   });
   const hasMore = rows.length > pageSize;
-  const entries = (hasMore ? rows.slice(0, pageSize) : rows).map(e => ({
-    id: e.id,
-    actor: e.actor,
-    op: e.op,
-    kind: e.kind ?? '',
-    targetLabel: e.target_label ?? '',
-    details: e.details ?? '',
-    createdAt: e.created_at,
-  }));
+  const entries = (hasMore ? rows.slice(0, pageSize) : rows).map(reshapeHistoryEntry);
   return { entries, page, pageSize, hasMore };
 }
 
@@ -2014,23 +1932,12 @@ export async function listJobTranscripts(
   }));
 }
 
-interface ApiDocView {
-  document: ApiDocument & { content: string };
-  links: unknown[];
-}
-
 export async function getDoc(repoPrefix: string, filename: string): Promise<DocContent> {
   if (!repoPrefix || repoPrefix === 'all') {
     throw new Error('select a repository to view its documents');
   }
   const view = await call<ApiDocView>(`/repos/${repoPrefix}/documents/${filename}`);
-  const d = view.document;
-  return {
-    filename: d.filename,
-    type: d.type,
-    content: d.content ?? '',
-    updatedAt: d.updated_at,
-  };
+  return reshapeDocContent(view);
 }
 
 export async function saveDoc(
