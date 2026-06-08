@@ -40,6 +40,7 @@ import type { DispatchMode, State } from '../bindings/github.com/mrgeoffrich/bac
 import type { ProcessSelection } from './lib/pipelineProcesses';
 import type { ShippedScope } from './components/shippedScope.ts';
 import { isTerminalState, stripBlockerFromCards, restoreBlockedByFromSnapshot } from './lib/issueState';
+import { useInterval, POLL_INTERVAL_MS } from './lib/hooks/useInterval';
 import { useShipFlourish } from './lib/shipFlourish';
 import { useShipSfx } from './lib/shipSfx';
 import { decideOdometerAction } from './lib/odometer';
@@ -47,7 +48,6 @@ import { viewPath, issuePath, processEditPath, viewFromPath, prefixFromPath } fr
 
 const THEME_KEY = 'bacio-theme'; // persisted preference: 'system' | 'light' | 'dark'
 const REPO_KEY = 'bacio-active-repo'; // persisted preference: last-selected repo prefix
-const POLL_INTERVAL_MS = 10_000; // Board/Agents auto-refresh cadence while on-screen
 
 // localStorage is always present inside the Wails webview, but a hardened
 // browser profile can throw on access — fall back to defaults rather than
@@ -308,15 +308,18 @@ export default function App() {
   // chip doesn't have to wait for the first interval to fire.
   useEffect(() => {
     api.getLeaderStatus().then(setLeaderState).catch(() => {});
-    if (WEB_MODE) {
-      const id = setInterval(() => {
-        api.getLeaderStatus().then(setLeaderState).catch(() => {});
-      }, POLL_INTERVAL_MS);
-      return () => clearInterval(id);
-    }
+    // Web mode polls via the useInterval below; desktop mode gets pushed
+    // ticks over the Wails Events bus instead.
+    if (WEB_MODE) return;
     const off = Events.On('leaderStatus', (e) => setLeaderState(e.data));
     return () => { if (typeof off === 'function') off(); };
   }, []);
+  // Web mode has no Events bus, so poll GET /leader on the standard cadence.
+  // Disabled (no timer armed) in desktop mode, where the push subscription
+  // above keeps the chip live.
+  useInterval(() => {
+    api.getLeaderStatus().then(setLeaderState).catch(() => {});
+  }, POLL_INTERVAL_MS, WEB_MODE);
 
   // changeShowArchived persists the BACI-68 display.show_archived
   // toggle, then updates the App-owned flag on success so the Board /
@@ -456,17 +459,12 @@ export default function App() {
   }, [activeView, refreshCards, refreshAgents]);
 
   // Poll the Board / Agents screens every 10s so they don't go stale while
-  // open. The cleanup clears the interval on navigation away, repo change,
-  // or unmount — no leaks, no redundant fetches off-screen.
-  useEffect(() => {
-    if (!activeBoard) return;
-    if (activeView !== 'board' && activeView !== 'agents' && activeView !== 'pipeline') return;
-    const id = setInterval(() => {
-      if (activeView === 'board' || activeView === 'pipeline') refreshCards({ silent: true });
-      else refreshAgents({ silent: true });
-    }, POLL_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [activeView, activeBoard, refreshCards, refreshAgents]);
+  // open. `enabled` is false off those screens / before a board is picked,
+  // which tears the timer down — no leaks, no redundant fetches off-screen.
+  useInterval(() => {
+    if (activeView === 'board' || activeView === 'pipeline') refreshCards({ silent: true });
+    else refreshAgents({ silent: true });
+  }, POLL_INTERVAL_MS, !!activeBoard && (activeView === 'board' || activeView === 'agents' || activeView === 'pipeline'));
 
   // BACI-74: keep the top-nav Agents counters live regardless of which
   // view is showing. The Agents view's own poll above re-fetches on the
@@ -474,11 +472,7 @@ export default function App() {
   // harmless duplicate hit, not a correctness issue, so the simpler
   // "always poll while a board is selected" rule wins. One small GET
   // per 10s is cheap.
-  useEffect(() => {
-    if (!activeBoard) return;
-    const id = setInterval(() => refreshAgents({ silent: true }), POLL_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [activeBoard, refreshAgents]);
+  useInterval(() => refreshAgents({ silent: true }), POLL_INTERVAL_MS, !!activeBoard);
 
   // refreshBrief reloads the IssueWorkspace payload for the open issue.
   // Pass { silent: true } on the poll path so a transient failure logs
@@ -521,16 +515,12 @@ export default function App() {
   }, [activeBoard, openIssueKey]);
 
   // While the workspace is mounted, poll the brief every 10s alongside
-  // the other view polls. Off-screen views get no refresh; the cleanup
-  // clears the interval on close / repo change / unmount.
-  useEffect(() => {
-    if (!activeBoard || !openIssueKey || activeView !== 'board') return;
-    // activeView === 'board' covers /issues and /issues/:key (both
-    // derive to 'board' via viewFromPath); the openIssueKey guard
-    // narrows the poll to the workspace route specifically.
-    const id = setInterval(() => refreshBrief({ silent: true }), POLL_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [activeBoard, openIssueKey, activeView, refreshBrief]);
+  // the other view polls. `enabled` is false off-screen / before an issue
+  // is open, which tears the timer down on close / repo change / unmount.
+  // activeView === 'board' covers /issues and /issues/:key (both derive to
+  // 'board' via viewFromPath); the openIssueKey guard narrows the poll to
+  // the workspace route specifically.
+  useInterval(() => refreshBrief({ silent: true }), POLL_INTERVAL_MS, !!activeBoard && !!openIssueKey && activeView === 'board');
 
   // BACI-203: open the issue workspace by routing to /issues/:key.
   // BACI-248: SettingsView is an App-owned overlay (Sync is now folded
@@ -1194,9 +1184,11 @@ export default function App() {
     // first-load / scope / repo change. The null sentinel fixes that.)
     setShippedCount(null);
     refreshShippedCount();
-    const id = setInterval(refreshShippedCount, POLL_INTERVAL_MS);
-    return () => { clearInterval(id); };
   }, [activeBoard, shippedScope, refreshShippedCount]);
+  // Poll the count on the standard cadence while a concrete board is open.
+  // refreshShippedCount self-guards the no-board / 'all' case, so the
+  // `enabled` flag just avoids arming a timer that would no-op anyway.
+  useInterval(refreshShippedCount, POLL_INTERVAL_MS, !!activeBoard && activeBoard !== 'all');
 
   // BACI-287: notification-bell unread count. Global / cross-repo (the
   // bell lists notifications from every repo), polled on the standard
@@ -1212,9 +1204,9 @@ export default function App() {
   }, []);
   useEffect(() => {
     refreshNotifCount();
-    const id = setInterval(refreshNotifCount, POLL_INTERVAL_MS);
-    return () => { clearInterval(id); };
   }, [refreshNotifCount]);
+  // Global / cross-repo, so it always polls (no board gate) while mounted.
+  useInterval(refreshNotifCount, POLL_INTERVAL_MS);
 
   // BACI-287: deep-link a notification row to its issue. Cross-repo — the
   // row carries its own prefix, which may differ from the active board, so

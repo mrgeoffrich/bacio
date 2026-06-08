@@ -11,6 +11,7 @@ import {
   formatMs,
 } from '../lib/proxyStats';
 import type { MonitorScope } from '../lib/proxyStats';
+import { useInterval, POLL_INTERVAL_MS } from '../lib/hooks/useInterval';
 import MonitorCaptureSheet from './MonitorCaptureSheet';
 
 // A sortable column over the per-FQDN stats table. `key` is the
@@ -24,10 +25,6 @@ type Column = {
   sortValue: (s: ProxyFQDNStat) => string | number;
   render: (s: ProxyFQDNStat) => React.ReactNode;
 };
-
-// Silent-refresh cadence — matches the 10s POLL_INTERVAL_MS the rest of
-// the web/desktop surfaces poll on.
-const POLL_INTERVAL_MS = 10_000;
 
 // COLUMNS drives both the sortable header and the per-row cells (see the
 // Column type above for what each field does).
@@ -61,31 +58,33 @@ export default function NetworkPanel() {
   // BACI-308 drill-down: the FQDN the capture sheet is open on (null = closed).
   const [selectedHost, setSelectedHost] = useState<string | null>(null);
 
-  // Fetch on scope change (with a loading flicker) and on a 10s interval
-  // (silent — keeps the table fresh without a flash). The interval is
-  // re-armed whenever the scope changes so it always fetches the current
-  // window.
+  // Fetch on scope change with a loading flicker. The cancellation guard
+  // stops a slow old-scope fetch from clobbering the new scope's table.
   useEffect(() => {
     let cancelled = false;
-    const sinceDays = scopeToSinceDays(scope);
-    const load = (silent: boolean) => {
-      if (!silent) setLoading(true);
-      api.listProxyStats(sinceDays)
-        .then(rows => {
-          if (cancelled) return;
-          setStats(rows);
-          setLoading(false);
-        })
-        .catch(err => {
-          if (cancelled) return;
-          reportError(err, { headline: "Couldn't load proxy stats" });
-          setLoading(false);
-        });
-    };
-    load(false);
-    const id = setInterval(() => load(true), POLL_INTERVAL_MS);
-    return () => { cancelled = true; clearInterval(id); };
+    setLoading(true);
+    api.listProxyStats(scopeToSinceDays(scope))
+      .then(rows => {
+        if (cancelled) return;
+        setStats(rows);
+        setLoading(false);
+      })
+      .catch(err => {
+        if (cancelled) return;
+        reportError(err, { headline: "Couldn't load proxy stats" });
+        setLoading(false);
+      });
+    return () => { cancelled = true; };
   }, [scope]);
+
+  // Silent 10s refresh that keeps the table fresh without a flash. The
+  // latest-callback-ref hook reads the current `scope` on each tick, so the
+  // timer needn't be re-armed when the scope changes.
+  useInterval(() => {
+    api.listProxyStats(scopeToSinceDays(scope))
+      .then(setStats)
+      .catch(err => reportError(err, { headline: "Couldn't load proxy stats" }));
+  }, POLL_INTERVAL_MS);
 
   // Click a header to sort on it: first click on a column picks its
   // default direction (descending for numeric/biggest-first, ascending
