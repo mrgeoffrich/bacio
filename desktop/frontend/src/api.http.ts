@@ -19,709 +19,127 @@
 // component layer will break in a way TypeScript can't catch in this
 // directory. Keep them in sync.
 
-// ---------- DTO shapes (mirror desktop/*service.go) ----------
+// ---------- DTO shapes ----------
+//
+// The camelCase DTOs both transports expose now live in the shared,
+// runtime-free ./api/contract module (BACI-359). They're imported here for
+// the `call<T>` generics + function return annotations and re-exported so
+// the public ./api surface stays byte-identical. The snake_case `Api*`
+// wire shapes + the reshapers live under ./api/wire/* (BACI-358).
 
-export interface Board {
-  prefix: string;
-  name: string;
-  issueCount: number;
-  // BACI-89 background-sync status. syncEnabled = "this repo has git
-  // sync configured"; the other three reflect the controller's
-  // background sync runner last / current state. syncLastAt /
-  // syncLastError are absent when the repo has never synced / the last
-  // sync succeeded.
-  syncEnabled: boolean;
-  syncInProgress: boolean;
-  syncLastAt?: string;
-  syncLastError?: string;
-}
+import type {
+  Board,
+  BoardCard,
+  BoardColumn,
+  IssueDetail,
+  IssueBriefDTO,
+  PRDTO,
+  AgentCard,
+  DispatchDTO,
+  DocSummary,
+  DocContent,
+  FeatureSummary,
+  FeatureDetail,
+  FeaturePlan,
+  HistoryPage,
+  LeaderStatusDTO,
+  PromptTemplateDTO,
+  Notification,
+  PipelineJob,
+  ShippedListDTO,
+  SyncRegistry,
+  SyncPreferences,
+  SyncSetupPayload,
+  SyncSetupResult,
+  SyncSetupDTO,
+  CollisionPreviewDTO,
+  RepoLinkResult,
+  AddRepositoryPayload,
+  SessionQuestionRow,
+  DisplayPreferencesDTO,
+  ArchivePreferencesDTO,
+  AudioPreferencesDTO,
+  TimezonePreferencesDTO,
+  DefaultFeatureDTO,
+  BoardHiddenStatesDTO,
+} from './api/contract';
 
-// SyncRegistry / SyncRepoEntry / MemberProject / UnsyncedProject are
-// the camelCase DTOs the React tree consumes. Same shape as the
-// SyncRegistryApi wire types, just snake → camel on the field names.
-export interface SyncRegistry {
-  syncRepos: SyncRepoEntry[];
-  unsyncedProjects: UnsyncedProject[];
-}
-
-export interface SyncRepoEntry {
-  remoteUrl: string;
-  label: string;
-  localPath: string;
-  clonedAt: string;
-  lastSyncAt?: string;
-  lastError?: string;
-  inProgress: boolean;
-  projects: MemberProject[];
-}
-
-export interface MemberProject {
-  prefix: string;
-  name: string;
-  uuid?: string;
-  status: 'linked' | 'phantom' | 'absent';
-}
-
-export interface UnsyncedProject {
-  prefix: string;
-  name: string;
-  uuid: string;
-  path: string;
-}
-
-export interface BoardColumn {
-  state: string;
-  label: string;
-}
-
-export interface BoardCardTodo {
-  content: string;
-  status: string;
-}
-
-// BoardCardBlocker (BACI-114) is one open `blocks` edge pointing AT
-// a card. Title is intentionally NOT on the wire — the kanban
-// popover joins it from the same `cards` array (Option A: thin
-// renderer over data the brief already has).
-export interface BoardCardBlocker {
-  key: string;
-  state: string; // todo | in_review | in_pipeline | to_be_shipped — open-state set
-}
-
-// BACI-145: WaitingKind / WaitingState mirror the Go-side types in
-// internal/boardcards/cards.go. Kept as a hand-written copy here (the
-// web bundle doesn't import the Wails bindings — those drag in
-// runtime-only deps unavailable in the browser). See api.ts for the
-// Wails-driven import path; both files re-export the same names so
-// React components can switch transports without a type rewrite.
-export type WaitingKind = 'queued_no_agent' | 'queued_blocked' | 'delivered';
-
-export interface WaitingState {
-  kind: WaitingKind;
-  mode?: string;
-  actionLabel?: string;
-}
-
-// LatestPlan (BACI-216) is the newest `plan`-typed doc linked
-// directly to an issue. Drives the per-card plan icon on the
-// kanban and the prominent "Open plan" link in the workspace
-// header. Mirror of model.LatestPlan; api.ts re-exports the
-// Wails-binding equivalent under the same name.
-export interface LatestPlan {
-  documentId: number;
-  uuid: string;
-  filename: string;
-  updatedAt: string;
-}
-// LatestPlanDTO is the Wails-shaped alias — kept as a parallel name
-// so a component importing either flavour gets the same shape.
-export type LatestPlanDTO = LatestPlan;
-
-export interface BoardCard {
-  key: string;
-  column: string;
-  columnLabel: string;
-  title: string;
-  // BACI-349: optional one-line customer impact denormalised onto the
-  // card. Absent (server-side omitempty) when unset; the opt-in
-  // impact-primary Pipeline view renders it as the card head and demotes
-  // the title to a subtitle only when this is non-empty.
-  customerImpact?: string;
-  // BACI-171: short (~140-char) excerpt of the issue description used
-  // by the bottom-right ActivityTray to render a one-or-two-line
-  // summary per entry. Absent (server-side omitempty) when the issue
-  // has no description; the kanban card itself ignores this field.
-  descriptionExcerpt?: string;
-  tags: string[];
-  assignees: string[];
-  claude: boolean;
-  taken: boolean;
-  // BACI-172: per-feature glyph denormalised onto the card by the
-  // server (via the issue → feature join in store.issueSelect). Empty
-  // (and absent on the wire) when the issue has no feature, or the
-  // feature has no emoji set. The kanban card renderer only paints
-  // the top-left slot when truthy.
-  featureEmoji?: string;
-  // BACI-231: per-feature integration branch denormalised onto the
-  // card by the same join. Empty (and absent on the wire) when the
-  // card belongs to no feature or to a feature that ships straight
-  // to main — the kanban renders the branch chip only when truthy
-  // and the ActivityTray groups by this field.
-  featureBranchName?: string;
-  // BACI-145: structured "why is this card waiting?" state. Replaces
-  // the two booleans waitingForClaim + waitingDispatchDelivered that
-  // the BoardCard used to carry — neither could carry the active
-  // dispatch's mode for the inline label. Absent (omitempty
-  // server-side) when the card isn't waiting; the PipelineCard renders
-  // no spinner in that case.
-  waitingState?: WaitingState | null;
-  // BACI-60 enrichment: lower-cased prompt-template label of the
-  // newest open claim's most recent non-cancelled dispatch (empty
-  // when no verb can be derived) and the claiming session's
-  // TodoWrite progress (zeroes when no todos / not taken).
-  activeVerb?: string;
-  // BACI-286: external session id of the winning open claim — the worker
-  // running this card's job. The Pipeline running-job card's "message"
-  // button targets it to push a user→agent steer message. Absent
-  // (omitempty server-side) on untaken cards.
-  runningSessionId?: string;
-  todosDone?: number;
-  todosTotal?: number;
-  // BACI-75: the per-task rows underlying todosDone/todosTotal,
-  // surfaced so the kanban card's "Tasks n/m" pill can expand inline
-  // without a follow-up fetch. Absent (omitempty server-side) on
-  // untaken cards / when the session never wrote a TodoList.
-  todos?: BoardCardTodo[];
-  // BACI-68: mirror of issues.archived_at IS NOT NULL. Cards with
-  // archived=true only surface when display.show_archived is on; the
-  // kanban renders them visibly muted so an archived card stands out
-  // from the live ones around it.
-  archived?: boolean;
-  // BACI-114: the open-state `blocks` edges pointing at this card.
-  // Empty (and omitted from JSON) when nothing is blocking — the
-  // kanban indicator only lights up when at least one entry is
-  // present. Absent in older payloads so the renderer must null-
-  // check (`card.blockedBy?.length ?? 0`).
-  blockedBy?: BoardCardBlocker[];
-  // BACI-187: the BACI-138 terminal_at stamp — non-null on done /
-  // cancelled cards, absent on open cards — the timestamp a card
-  // reached a terminal column. The binding twin in api.ts mirrors
-  // the same wire shape.
-  terminalAt?: string;
-  // BACI-216: the newest `plan`-typed doc linked directly to this
-  // issue, or absent when none. Drives the per-card plan icon that
-  // opens the doc viewer. Server-side omitempty drops the field
-  // when no plan is linked; the cards endpoint already serves
-  // camelCase via the Go json tag so no reshape is needed in
-  // listCards().
-  latestPlan?: LatestPlan | null;
-  // LatestPR (BACI-239) is the most-recently-attached PR on this issue,
-  // or absent when none. Drives the per-card PR chip.
-  latestPR?: BoardCardLatestPR | null;
-  // Pipeline (Phase 4) — the card's process chain + engine drive state,
-  // populated by the cards endpoint only while the card is in_pipeline.
-  // Mirror of the Go-side boardcards.BoardCard pipeline fields. `jobs`
-  // is the sequence-ordered chain; `currentJob` is the running stage (or
-  // the next pending one); `engineMode` is "off" | "auto"; and
-  // `enginePauseReason` is one of "" | "open_question" (Auto halted on a
-  // question on the current job) | "agent_error_transient" |
-  // "agent_error_terminal" (BACI-296, the worker died on an Anthropic API
-  // error) | "subagent_cancelled" (BACI-328, the user soft-cancelled the
-  // worker — a neutral "Cancelled" halt, not an error).
-  jobs?: BoardCardJob[];
-  currentJob?: BoardCardJob | null;
-  engineMode?: string;
-  enginePauseReason?: string;
-  // BACI-53: open ask_user_question rows for this card. On a pipeline
-  // card the first open question is the "waiting on you" signal that
-  // trips the engine halt. Mirror of the wire shape served by /cards.
-  openQuestions?: BoardCardQuestion[];
-}
-
-// BoardCardLatestPR (BACI-239) is the newest PR attached to a card.
-// Hand-mirrored here (the web bundle can't import the Wails binding).
-export interface BoardCardLatestPR {
-  url: string;
-  count: number;
-}
-
-// BoardCardQuestion (BACI-53) is one open ask_user_question row carried
-// on a BoardCard. pipelineJobId (Phase 4) is the job the question is
-// parented to, when the card is in_pipeline.
-export interface BoardCardQuestion {
-  id: number;
-  header?: string;
-  firstQuestion?: string;
-  pipelineJobId?: number | null;
-}
-
-// BoardCardJob (Phase 4) is one stage of a card's process chain — the
-// camelCase projection the /cards endpoint serves on BoardCard.jobs.
-// Mirror of internal/boardcards/cards.go::BoardCardJob.
-export interface BoardCardJob {
-  sequence: number;
-  mode: string;
-  status: string; // pending | running | complete | cancelled
-}
-
-// PipelineJob (Phase 4) mirrors model.PipelineJob (snake_case wire
-// shape). The job-control endpoints (process / start / stop / jobs)
-// return the refreshed chain in this shape.
-export interface PipelineJob {
-  id: number;
-  issue_id: number;
-  sequence: number;
-  mode: string;
-  status: string;
-  dispatch_id?: number;
-  created_at: string;
-  started_at?: string;
-  completed_at?: string;
-}
-
-// ShippedIssueDTO (BACI-187) is one row in the Pipeline Shipping-column shipping-log
-// popover. Mirrors desktop/boardservice.go:ShippedIssueDTO and the
-// /repos/{prefix}/shipped wire shape exactly — the React-side
-// ShippedPopover imports the type from `./api` (this file in web
-// mode, api.ts in desktop mode) without reshape.
-export interface ShippedIssueDTO {
-  key: string;
-  title: string;
-  // BACI-349: optional one-line customer impact. The popover renders
-  // this as the primary line and falls back to `title` (with a
-  // muted/italic class) when it's absent.
-  customerImpact?: string;
-  terminalAt: string;
-  tags: string[];
-  featureSlug?: string;
-  featureEmoji?: string;
-  prUrl?: string;
-}
-
-// ShippedListDTO (BACI-221) wraps the popover's per-fetch rows with
-// the total count under the same scope so the popover header can
-// render "showing N of TOTAL" without an extra round trip. Mirrors
-// desktop/boardservice.go:ShippedListDTO and the {rows, total} HTTP
-// response shape.
-export interface ShippedListDTO {
-  rows: ShippedIssueDTO[];
-  total: number;
-}
-
-export interface CommentDTO {
-  uuid: string;
-  author: string;
-  body: string;
-  createdAt: string;
-  // BACI-131 eval-comment fields. eval is true when the row was
-  // posted from the kanban card's quick-eval composer; the triple
-  // (agentSessionId, dispatchId, mode) is the in-flight context
-  // captured server-side at write time. agentName is the persistent
-  // agent identity slug resolved from agentSessionId at read time
-  // (via a JOIN on agent_sessions → agents) — never persisted on
-  // the row. All five fields are zero values on a normal (non-eval)
-  // comment.
-  eval?: boolean;
-  agentSessionId?: string;
-  dispatchId?: number;
-  mode?: string;
-  agentName?: string;
-}
-
-export interface PRDTO {
-  url: string;
-}
-
-export interface DocLinkDTO {
-  filename: string;
-  type: string;
-  description: string;
-}
-
-export interface ClaimantDTO {
-  sessionId: string;
-  agentName: string;
-  prompt: string;
-  claimedAt: string;
-  releasedAt: string | null;
-  open: boolean;
-}
-
-export interface IssueDetail {
-  key: string;
-  column: string;
-  columnLabel: string;
-  title: string;
-  // BACI-349: optional one-line customer impact; the detail header
-  // renders it inline and lets the user edit it.
-  customerImpact?: string;
-  description: string;
-  tags: string[];
-  assignees: string[];
-  claude: boolean;
-  comments: CommentDTO[];
-  pullRequests: PRDTO[];
-  documents: DocLinkDTO[];
-  claimants: ClaimantDTO[];
-  taken: boolean;
-  // BACI-216: newest `plan`-typed doc linked directly to this
-  // issue; null when none. See LatestPlan above.
-  latestPlan?: LatestPlan | null;
-}
-
-// IssueMetaDTO mirrors desktop/boardservice.go:IssueMetaDTO — the
-// issue-header slice of an IssueBriefDTO. Kept thin so the rail and
-// primary column don't have to thread the full brief.
-export interface IssueMetaDTO {
-  key: string;
-  column: string;
-  columnLabel: string;
-  title: string;
-  // BACI-349: optional one-line customer impact; the IssueWorkspace
-  // header renders it inline and lets the user edit it.
-  customerImpact?: string;
-  description: string;
-  tags: string[];
-  assignees: string[];
-  claude: boolean;
-  taken: boolean;
-  // BACI-216: newest `plan`-typed doc linked directly to this
-  // issue, surfaced so IssueWorkspace's header can render the
-  // prominent "Open plan" link without descending into the brief's
-  // documents list.
-  latestPlan?: LatestPlan | null;
-}
-
-export interface LinkedDocDTO {
-  filename: string;
-  type: string;
-  description: string;
-  sourcePath?: string;
-  linkedVia: string[];
-  // sizeBytes is the doc's on-disk size in bytes. Always populated, even
-  // when content is omitted from the brief (BACI-115 keeps transcript
-  // bodies out of the inlined payload but carries the size so a consumer
-  // can render "body not inlined — N KB" instead of "body is empty").
-  sizeBytes: number;
-  content: string;
-}
-
-export interface FeatureRefDTO {
-  slug: string;
-  title: string;
-}
-
-export interface RelationDTO {
-  type: string;
-  otherKey: string;
-}
-
-export interface RelationsDTO {
-  outgoing: RelationDTO[];
-  incoming: RelationDTO[];
-}
-
-// IssueBriefDTO mirrors desktop/boardservice.go:IssueBriefDTO — the
-// workspace-shaped payload. The REST surface (GET /repos/.../brief)
-// emits the snake_case internal/client/views.go::IssueBrief shape;
-// reshapeApiBrief() collapses it into this shape so React reads the
-// same camelCase fields in both modes.
-export interface IssueBriefDTO {
-  issue: IssueMetaDTO;
-  feature: FeatureRefDTO | null;
-  relations: RelationsDTO;
-  pullRequests: PRDTO[];
-  documents: LinkedDocDTO[];
-  comments: CommentDTO[];
-  claimants: ClaimantDTO[];
-  taken: boolean;
-  // BACI-145: structured waiting state for the IssueLockBanner.
-  // Absent (server-side omitempty) when the issue isn't waiting —
-  // post-BACI-255 this is also the sole "is this card waiting?"
-  // signal on the wire (the boolean waitingForClaim it used to live
-  // alongside was removed because it duplicated this richer field).
-  waitingState?: WaitingState | null;
-  // BACI-216: duplicated alongside issue.latestPlan so envelope
-  // consumers don't have to descend into the meta block. The two
-  // are always in lockstep — same source-of-truth lookup.
-  latestPlan?: LatestPlan | null;
-  warnings: string[];
-}
-
-export interface ClaimDTO {
-  issueKey: string;
-  prompt: string;
-  claimedAt: string;
-  state: string;
-}
-
-export interface DispatchDTO {
-  id: number;
-  issueKey: string;
-  targetAgent: string;
-  mode: string;
-  status: string;
-  payload: string;
-  createdBy: string;
-  createdAt: string;
-}
-
-export interface SessionTodoDTO {
-  content: string;
-  status: string;
-  // BACI-62: per-job scope so a future "history" pane can group
-  // prior-job todos. Empty / absent on rows from sessions registered
-  // before BACI-62 or when the hook couldn't attribute a single
-  // open claim. Optional on the wire (omitempty server-side).
-  issueKey?: string;
-  // BACI-132: per-dispatch scope so two dispatches on the same
-  // (session, issue) get separate task lists. Absent on pre-BACI-132
-  // rows and on orphan rows the hook couldn't attribute to an
-  // in-flight dispatch. Optional on the wire (omitempty server-side).
-  // The JSON tag is `dispatch_id` (snake_case) to match the
-  // model.SessionTodo wire shape exposed by the unfiltered
-  // /agents/sessions/{id}/todos endpoint — the AgentCard DTO uses
-  // the same key for symmetry.
-  dispatch_id?: number;
-}
-
-// QuestionDTO is one open BACI-53 ask_user_question row — the
-// minimal shape the agent card needs to render its "user input
-// needed" badge. Header is the question's short tag; the full
-// payload is fetched via getSessionQuestion when the user opens
-// the modal.
-export interface QuestionDTO {
-  id: number;
-  issueKey?: string;
-  header: string;
-  askedAt: string;
-}
-
-// SessionQuestion is the full row returned by the per-question
-// endpoints. Mirrors the Go shape (snake_case is the wire format
-// for these — the agent registry was built before we standardised
-// camelCase, and questions match the existing dispatch/claim
-// shapes for consistency).
-export interface SessionQuestionPayload {
-  questions: SessionQuestionItem[];
-}
-
-export interface SessionQuestionItem {
-  question: string;
-  header: string;
-  multiSelect?: boolean;
-  options: SessionQuestionOption[];
-}
-
-export interface SessionQuestionOption {
-  label: string;
-  description?: string;
-}
-
-export interface SessionQuestionRow {
-  id: number;
-  session_id: string;
-  request_uuid: string;
-  issue_key?: string;
-  payload: SessionQuestionPayload;
-  answers?: Record<string, unknown>;
-  state: 'open' | 'answered' | 'cancelled' | 'abandoned';
-  asked_at: string;
-  answered_at?: string;
-  asked_by: string;
-  answered_by?: string;
-}
-
-// Notification (BACI-287) is the wire shape of one agent→user
-// notification — the cross-transport twin of the desktop binding's
-// model.Notification. Field naming follows the Go snake_case JSON tags so
-// the React-side <NotificationBell> reads the same shape in both modes.
-export interface Notification {
-  id: number;
-  repo_id: number;
-  repo_prefix?: string;
-  issue_id?: number;
-  issue_key?: string;
-  body: string;
-  source_agent: string;
-  session_pk?: number;
-  created_at: string;
-  read_at?: string;
-}
-
-export interface AgentCard {
-  sessionId: string;
-  agentName: string;
-  actor: string;
-  model: string;
-  branch: string;
-  repoPrefix: string;
-  status: string;
-  // BACI-296: the Anthropic API failure behind an "errored" status.
-  // Empty for every other status.
-  errorType?: string;
-  errorMessage?: string;
-  busy: boolean;
-  busyIssue: string;
-  hasChannel: boolean;
-  bacioVersion: string;
-  bacioVersionStale: boolean;
-  lastSeenAt: string;
-  claims: ClaimDTO[];
-  dispatches: DispatchDTO[];
-  todos: SessionTodoDTO[];
-  todosDone: number;
-  todosTotal: number;
-  // BACI-53: open ask_user_question rows. Empty when the agent
-  // isn't waiting on the user.
-  openQuestions: QuestionDTO[];
-}
-
-// DocSummaryLink (BACI-204) is one link row on a DocSummary —
-// matches the desktop Wails-side DocSummaryLinkDTO so callers can
-// share the rendering between transports.
-export interface DocSummaryLink {
-  issueKey?: string;
-  featureSlug?: string;
-  description?: string;
-}
-
-export interface DocSummary {
-  filename: string;
-  type: string;
-  sizeBytes: number;
-  updatedAt: string;
-  // BACI-204: lifecycle dates + the per-row snippet + linked-issue /
-  // linked-feature chips ride back on every row so the redesigned
-  // Documents page renders without an N+1 per-row round trip.
-  createdAt: string;
-  archivedAt?: string;
-  snippet?: string;
-  links?: DocSummaryLink[];
-}
-
-export interface DocContent {
-  filename: string;
-  type: string;
-  content: string;
-  updatedAt: string;
-}
-
-export interface FeatureSummary {
-  slug: string;
-  title: string;
-  // BACI-184: per-feature emoji glyph for the Features panel list.
-  // Empty when none is set — the list renders nothing (no placeholder)
-  // in that case. Mirrors FeatureDetail.emoji so both surfaces share
-  // the same glyph BACI-172 paints on every kanban card.
-  emoji: string;
-  // BACI-199: three-state column on the feature row — `active`
-  // (default), `done` (delivered) or `cancelled` (abandoned). The
-  // Features panel renders a state pill so a glance distinguishes
-  // work in flight from delivered / abandoned work.
-  state: string;
-  // BACI-231: per-feature integration branch. Empty string when the
-  // feature ships straight to main (the legacy default). The
-  // FeatureRow renders a branch chip on the meta line when truthy.
-  branchName: string;
-  updatedAt: string;
-  // BACI-177: per-feature "Show on board" toggle state. When true,
-  // every kanban card belonging to this feature is hidden from the
-  // board on this machine. Lives in the per-repo board-hide KV
-  // (tui_settings), not on the features row.
-  hiddenOnBoard: boolean;
-}
-
-export interface FeatureLinkedIssue {
-  key: string;
-  title: string;
-  state: string;
-  stateLabel: string;
-}
-
-// FeatureCommentDTO mirrors model.FeatureComment (BACI-124) — the
-// feature-scoped chronological-handoff scratchpad row.
-export interface FeatureCommentDTO {
-  uuid: string;
-  author: string;
-  body: string;
-  createdAt: string;
-}
-
-// FeatureLinkedDoc (BACI-214) is one document linked to the feature
-// via `bacio doc link <file> <feature-slug>`. Drives the "Documents"
-// section on FeaturesView's detail pane. Deliberately narrower than
-// the issue brief's LinkedDocDTO (no `linkedVia` / no `sizeBytes`):
-// on the feature pane the source is unambiguous (the feature itself),
-// and the size readout would cost an extra round-trip per doc.
-// `sourcePath` is reserved for parity with the desktop binding but
-// stays empty today.
-export interface FeatureLinkedDoc {
-  filename: string;
-  type: string;
-  description: string;
-  sourcePath?: string;
-}
-
-// FeaturePlanEntry mirrors desktop FeaturePlanEntry (BACI-236). One
-// row per issue in the feature; blockedBy carries the keys of
-// in-feature blockers the dependency-graph view draws as directed
-// edges. closed is true for done / cancelled issues so the renderer
-// can mute them while keeping their connections to live work visible.
-export interface FeaturePlanEntry {
-  key: string;
-  title: string;
-  state: string;
-  assignee: string;
-  blockedBy: string[];
-  closed: boolean;
-}
-
-// FeaturePlan is the dependency-graph payload for one feature
-// (BACI-236). slug echoes the requested feature; order is the
-// topo-sorted issue list driving the graph view's nodes + edges.
-export interface FeaturePlan {
-  slug: string;
-  order: FeaturePlanEntry[];
-}
-
-export interface FeatureDetail {
-  slug: string;
-  title: string;
-  description: string;
-  // BACI-172: per-feature emoji rendered on every kanban card under
-  // this feature. Empty when none is set.
-  emoji: string;
-  // BACI-231: per-feature integration branch the detail pane's
-  // "Integration branch" Properties row reads from / writes to.
-  // Empty string when the feature ships straight to main.
-  branchName: string;
-  // BACI-199: three-state column on the feature row + sticky bit.
-  // The drawer's segmented control reads `state` to highlight the
-  // active button and `stateManual` to flag rows pinned against the
-  // auto-completion sweep.
-  state: string;
-  stateManual: boolean;
-  // BACI-333: per-feature collect-handoffs toggle. The drawer's
-  // segmented control reads it the same way as `stateManual`. ON (the
-  // default) collects worker close-out handoff comments; OFF silences a
-  // standing bucket.
-  collectHandoffs: boolean;
-  createdAt: string;
-  updatedAt: string;
-  issues: FeatureLinkedIssue[];
-  comments: FeatureCommentDTO[];
-  // BACI-214: documents linked to this feature via
-  // `bacio doc link <file> <feature-slug>`. Each row is a link into
-  // the canonical /documents/<filename> viewer.
-  documents: FeatureLinkedDoc[];
-  // BACI-177: per-feature "Show on board" toggle state. When true,
-  // every kanban card belonging to this feature is hidden from the
-  // board on this machine.
-  hiddenOnBoard: boolean;
-}
-
-export interface HistoryEntryDTO {
-  id: number;
-  actor: string;
-  op: string;
-  kind: string;
-  targetLabel: string;
-  details: string;
-  createdAt: string;
-}
-
-export interface HistoryPage {
-  entries: HistoryEntryDTO[];
-  page: number;
-  pageSize: number;
-  hasMore: boolean;
-}
-
-export interface LeaderStatusDTO {
-  amLeader: boolean;
-  holderLabel: string;
-}
+export type {
+  Board,
+  SyncRegistry,
+  SyncRegistryDTO,
+  SyncRepoEntry,
+  SyncRepoDTO,
+  MemberProject,
+  MemberProjectDTO,
+  UnsyncedProject,
+  UnsyncedProjectDTO,
+  BoardColumn,
+  BoardCardTodo,
+  BoardCardBlocker,
+  WaitingKind,
+  WaitingState,
+  LatestPlan,
+  LatestPlanDTO,
+  BoardCard,
+  BoardCardLatestPR,
+  BoardCardQuestion,
+  BoardCardJob,
+  PipelineJob,
+  ShippedIssueDTO,
+  ShippedListDTO,
+  CommentDTO,
+  PRDTO,
+  DocLinkDTO,
+  ClaimantDTO,
+  IssueDetail,
+  IssueMetaDTO,
+  LinkedDocDTO,
+  FeatureRefDTO,
+  RelationDTO,
+  RelationsDTO,
+  IssueBriefDTO,
+  ClaimDTO,
+  DispatchDTO,
+  SessionTodoDTO,
+  QuestionDTO,
+  SessionQuestionPayload,
+  SessionQuestionItem,
+  SessionQuestionOption,
+  SessionQuestionRow,
+  Notification,
+  AgentCard,
+  DocSummaryLink,
+  DocSummary,
+  DocContent,
+  FeatureSummary,
+  FeatureLinkedIssue,
+  FeatureCommentDTO,
+  FeatureLinkedDoc,
+  FeaturePlanEntry,
+  FeaturePlan,
+  FeatureDetail,
+  HistoryEntryDTO,
+  HistoryPage,
+  LeaderStatusDTO,
+  PromptTemplateDTO,
+  AddRepositoryPayload,
+  SyncSetupPayload,
+  RenumberEntryDTO,
+  RenameEntryDTO,
+  CollisionPreviewDTO,
+  SyncSetupDTO,
+  SyncSetupResult,
+  RepoLinkResult,
+  RepoLinkResultDTO,
+  SyncPreferences,
+  DisplayPreferencesDTO,
+  ArchivePreferencesDTO,
+  AudioPreferencesDTO,
+  TimezonePreferencesDTO,
+  DefaultFeatureDTO,
+  BoardHiddenStatesDTO,
+} from './api/contract';
 
 // BACI-304: re-export the Monitor screen's per-FQDN stats shape from the
 // shared (browser-safe, runtime-free) lib so MonitorView imports the same
@@ -803,26 +221,6 @@ import type {
   RepoLinkResultApi,
 } from './api/wire/sync';
 
-export interface PromptTemplateDTO {
-  slug: string;
-  mode: string;
-  label: string;
-  body: string;
-  default: string;
-  isBuiltin: boolean;
-  isDefault: boolean;
-  concurrencyLimit: number;
-  defaultConcurrencyLimit: number;
-  concurrencyIsDefault: boolean;
-  // BACI-67: imperative override rendered on the dispatch action
-  // menus (kanban-card + issue-workspace dropdowns). When empty, the
-  // UI derives one from `label` (the gerund display name); the seed
-  // step stamps every built-in with an explicit imperative so the
-  // derivation rule is only a fallback for user-created templates.
-  actionLabel: string;
-  defaultActionLabel: string;
-  actionLabelIsDefault: boolean;
-}
 
 // ---------- WebModeUnavailableError ----------
 
@@ -992,11 +390,6 @@ export async function listCards(repoPrefix: string): Promise<BoardCard[]> {
 // picker and resolves path/name itself). Both surfaces share the same
 // addRepository(payload?) signature — see api.ts for the desktop
 // wrapper.
-export interface AddRepositoryPayload {
-  path: string;
-  name: string;
-  prefix?: string;
-}
 
 export async function addRepository(payload?: AddRepositoryPayload): Promise<Board> {
   // BACI-50: no browser folder picker, so the web bundle pops a
@@ -1934,46 +1327,14 @@ export async function bacioVersion(): Promise<string> {
 // SyncSetupCollisionError so the caller can `instanceof`-branch into
 // the step-2 confirm.
 
-export interface SyncSetupPayload {
-  mode: 'init' | 'clone' | 'attach';
-  remote?: string;
-  localPath?: string;
-  allowRenumber?: boolean;
-}
 
-export interface RenumberEntryDTO {
-  prefix: string;
-  oldNumber: number;
-  newNumber: number;
-  uuid: string;
-}
 
-export interface RenameEntryDTO {
-  kind: string;
-  old: string;
-  new: string;
-  uuid: string;
-}
 
-export interface CollisionPreviewDTO {
-  renumbered?: RenumberEntryDTO[];
-  renamed?: RenameEntryDTO[];
-}
 
-export interface SyncSetupDTO {
-  mode: string;
-  localPath?: string;
-  remote?: string;
-  commitSHA?: string;
-  pushed?: boolean;
-  attached?: boolean;
-  previewCollisions?: CollisionPreviewDTO;
-}
 
 // Re-exports for the cross-transport modal: SyncSetupResult is the
 // camelCase DTO the modal consumes; SyncSetupCollisionError is the
 // typed exception thrown on the 409 path. Same names as api.ts.
-export type SyncSetupResult = SyncSetupDTO;
 
 export class SyncSetupCollisionError extends Error {
   previewCollisions: CollisionPreviewDTO;
@@ -2049,17 +1410,10 @@ export async function setupSync(
 // returns snake_case JSON; we reshape to camelCase on the way out so
 // the React modal consumes the same shape under both transports.
 
-export interface RepoLinkResult {
-  prefix: string;
-  path: string;
-  syncRemoteUrl: string;
-  alreadyLinked: boolean;
-}
 
 // RepoLinkResultDTO is the cross-transport alias used by SyncView /
 // PhantomLinkModal — matches the api.ts re-export. The HTTP wire shape
 // stays snake_case in line with the rest of api.http.ts.
-export type RepoLinkResultDTO = RepoLinkResult;
 
 // linkPhantomRepo (BACI-112) — POST /repos/{prefix}/link with body
 // {path: ...}. Mirrors the Wails-bound seam in api.ts. Errors come
@@ -2083,9 +1437,6 @@ export async function linkPhantomRepo(
 // standalone Sync view (BACI-108). Same shape as the board / display
 // preferences pairs; lives behind /settings/sync-preferences.
 
-export interface SyncPreferences {
-  backgroundEnabled: boolean;
-}
 
 export async function getSyncPreferences(): Promise<SyncPreferences> {
   const res = await call<{ background_enabled: boolean }>('/settings/sync-preferences');
@@ -2108,7 +1459,6 @@ export async function setSyncPreferences(backgroundEnabled: boolean): Promise<Sy
 // setting for one call; the desktop / web UIs have no per-call knob,
 // so the setting is the single source of truth here.
 
-export type DisplayPreferencesDTO = { showArchived: boolean };
 
 export async function getDisplayPreferences(): Promise<DisplayPreferencesDTO> {
   const res = await call<{ show_archived: boolean }>('/settings/display-preferences');
@@ -2131,7 +1481,6 @@ export async function setDisplayPreferences(showArchived: boolean): Promise<Disp
 // terminal-state issue's terminal_at must sit before the next sweep
 // archives it.
 
-export type ArchivePreferencesDTO = { autoEnabled: boolean; retentionDays: number };
 
 export async function getArchivePreferences(): Promise<ArchivePreferencesDTO> {
   const res = await call<{ auto_enabled: boolean; retention_days: number }>('/settings/archive-preferences');
@@ -2157,7 +1506,6 @@ export async function setArchivePreferences(
 // {shipped_sfx: bool} rather than a generic "value" to leave room for
 // future audio toggles without breaking the existing field name.
 
-export type AudioPreferencesDTO = { shippedSfx: boolean };
 
 export async function getAudioPreferences(): Promise<AudioPreferencesDTO> {
   const res = await call<{ shipped_sfx: boolean }>('/settings/audio-preferences');
@@ -2180,7 +1528,6 @@ export async function setAudioPreferences(shippedSfx: boolean): Promise<AudioPre
 // the browser zone and persists it on first run). HTTP twin of api.ts's
 // get/setTimezonePreferences — keep names + shape in lockstep.
 
-export type TimezonePreferencesDTO = { timezone: string };
 
 export async function getTimezonePreferences(): Promise<TimezonePreferencesDTO> {
   const res = await call<{ timezone: string }>('/settings/timezone-preferences');
@@ -2202,7 +1549,6 @@ export async function setTimezonePreferences(timezone: string): Promise<Timezone
 // legacy default). FK ON DELETE SET NULL clears the column when the
 // referenced feature is deleted.
 
-export type DefaultFeatureDTO = { slug: string; title?: string; emoji?: string };
 
 type defaultFeatureResp = { feature: { slug: string; title?: string; emoji?: string } | null };
 
@@ -2240,7 +1586,6 @@ export async function clearDefaultFeature(repoPrefix: string): Promise<DefaultFe
 // slice-valued envelope) so the React seam reads both per-repo
 // board-hide endpoints with one transport pattern.
 
-export type BoardHiddenStatesDTO = { states: string[] };
 
 type boardHiddenStatesResp = { states: string[] | null };
 

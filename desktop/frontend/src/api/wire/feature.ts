@@ -10,7 +10,7 @@ import type {
   FeatureSummary,
   FeatureDetail,
   FeaturePlan,
-} from '../../api.http';
+} from '../contract';
 import { stateLabel } from './common';
 
 export interface ApiFeature {

@@ -6,7 +6,7 @@
 // ApiRestoreResponse wraps the restore-builtins payload. Moved out of
 // api.http.ts so the reshape is unit testable — see ./issue.ts.
 
-import type { PromptTemplateDTO } from '../../api.http';
+import type { PromptTemplateDTO } from '../contract';
 
 export interface ApiPromptTemplate {
   slug: string;

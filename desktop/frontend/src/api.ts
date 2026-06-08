@@ -1,6 +1,13 @@
 // Thin typed wrapper over the generated Wails bindings. Centralises the
 // binding import path and normalises rejections to Error so the React
 // components can stay unaware of Wails specifics.
+//
+// BACI-359 (Phase 2b): the camelCase DTO shapes are no longer re-exported
+// from the bindings here — they come from the shared, runtime-free
+// ./api/contract module that api.http.ts compiles against too. Each
+// function below keeps its explicit Promise<DTO> return annotation, so a
+// Wails binding that drifts from the contract (a regenerated shape that no
+// longer matches) becomes a tsc error at this seam.
 import {
   BoardService,
   DocService,
@@ -9,9 +16,75 @@ import {
   MonitorService,
   LeaderService,
   SettingsService,
+} from '../bindings/github.com/mrgeoffrich/bacio/desktop';
+// Binding types kept only for the internal null-filter type guards: the
+// Wails bindings type their slice returns as (T | null)[] (the Go element
+// is a pointer), so the guards narrow against the binding shape, then the
+// contract-typed function return coerces the result.
+import type { PipelineJob as WirePipelineJob, Notification as WireNotification } from '../bindings/github.com/mrgeoffrich/bacio/internal/model';
+// BACI-308/322: the Monitor capture-detail / job-transcript / per-FQDN
+// stats shapes keep their existing cross-transport binding source (the web
+// twin ships parallel TS-only shapes from src/lib) — not folded into
+// contract.ts. ProxyMessage is the parsed single-capture detail;
+// AnthropicTranscript is the assembled per-job transcript.
+import type { ProxyMessage, AnthropicTranscript } from '../bindings/github.com/mrgeoffrich/bacio/internal/model';
+import type {
+  ProxyFQDNStatDTO,
+  ProxyCaptureRowDTO,
+  JobTranscriptRowDTO,
+} from '../bindings/github.com/mrgeoffrich/bacio/desktop';
+// ProcessSelection (BACI-283) is the picker's discriminated handback —
+// an explicit stage list or a preset slug. Shared (runtime-free) lib type.
+import type { ProcessSelection } from './lib/pipelineProcesses';
+// DTO shapes — the single source both transports compile against (BACI-359).
+import type {
   Board,
   BoardColumn,
   BoardCard,
+  IssueDetail,
+  IssueBriefDTO,
+  PRDTO,
+  AgentCard,
+  DispatchDTO,
+  DocSummary,
+  DocContent,
+  FeatureSummary,
+  FeatureDetail,
+  FeaturePlan,
+  HistoryPage,
+  LeaderStatusDTO,
+  PromptTemplateDTO,
+  ArchivePreferencesDTO,
+  AudioPreferencesDTO,
+  TimezonePreferencesDTO,
+  SyncPreferencesDTO,
+  SyncRegistryDTO,
+  SyncSetupDTO,
+  SyncSetupPayload,
+  SyncSetupResult,
+  CollisionPreviewDTO,
+  RepoLinkResult,
+  ShippedListDTO,
+  Notification,
+  PipelineJob,
+  AddRepositoryPayload,
+  DisplayPreferencesDTO,
+  DefaultFeatureDTO,
+  BoardHiddenStatesDTO,
+} from './api/contract';
+
+// Re-export the full public DTO surface from the contract so components
+// importing from `./api` are unchanged. Names that the Wails seam
+// historically exported (including the `*DTO` aliases) are all kept.
+export type {
+  Board,
+  BoardColumn,
+  BoardCard,
+  BoardCardTodo,
+  BoardCardBlocker,
+  BoardCardQuestion,
+  BoardCardJob,
+  BoardCardLatestPR,
   IssueDetail,
   IssueBriefDTO,
   IssueMetaDTO,
@@ -22,6 +95,7 @@ import {
   PRDTO,
   CommentDTO,
   AgentCard,
+  ClaimDTO,
   DispatchDTO,
   DocSummary,
   DocContent,
@@ -32,7 +106,7 @@ import {
   FeatureLinkedDoc,
   FeaturePlan,
   FeaturePlanEntry,
-  FeatureComment as FeatureCommentDTO,
+  FeatureCommentDTO,
   HistoryPage,
   HistoryEntryDTO,
   LeaderStatusDTO,
@@ -40,96 +114,45 @@ import {
   ArchivePreferencesDTO,
   AudioPreferencesDTO,
   TimezonePreferencesDTO,
+  WaitingState,
+  WaitingKind,
+  SyncPreferences,
   SyncPreferencesDTO,
+  SyncRegistry,
   SyncRegistryDTO,
+  SyncRepoEntry,
   SyncRepoDTO,
+  MemberProject,
   MemberProjectDTO,
+  UnsyncedProject,
   UnsyncedProjectDTO,
+  SyncSetupPayload,
+  SyncSetupResult,
   SyncSetupDTO,
-  SetupSyncIn as SetupSyncInDTO,
   CollisionPreviewDTO,
   RenumberEntryDTO,
   RenameEntryDTO,
+  RepoLinkResult,
   RepoLinkResultDTO,
   ShippedIssueDTO,
   ShippedListDTO,
+  LatestPlan,
   LatestPlanDTO,
-  ProxyFQDNStatDTO,
-  ProxyCaptureRowDTO,
-  JobTranscriptRowDTO,
-} from '../bindings/github.com/mrgeoffrich/bacio/desktop';
-import { ClaimDTO } from '../bindings/github.com/mrgeoffrich/bacio/internal/agentcards';
-// BACI-145: re-export the WaitingState / WaitingKind enums from the
-// boardcards binding so the React components import them from the
-// same api.ts seam as everything else (avoids one-off binding paths
-// scattered through the kanban code).
-import { WaitingState, WaitingKind } from '../bindings/github.com/mrgeoffrich/bacio/internal/boardcards';
-// Phase 4 (Pipeline): PipelineJob is the per-stage process-chain row the
-// controller engine advances. Lives in the model bindings; re-exported
-// below so the Pipeline page imports it from the same ./api seam as
-// everything else (parallels the WaitingState import rationale).
-import { PipelineJob, Notification } from '../bindings/github.com/mrgeoffrich/bacio/internal/model';
-// BACI-308: the proxy capture-detail / job-transcript shapes the Monitor
-// drill-down consumes. ProxyMessage is the parsed single-capture detail;
-// AnthropicTranscript is the assembled per-job transcript the adapter feeds the
-// viewer. Both carry snake_case JSON tags aligned to the transcript TS types.
-import type { ProxyMessage, AnthropicTranscript } from '../bindings/github.com/mrgeoffrich/bacio/internal/model';
-// ProcessSelection (BACI-283) is the picker's discriminated handback —
-// an explicit stage list or a preset slug. Re-exported below so callers
-// pull it from the ./api seam alongside PipelineJob.
-import type { ProcessSelection } from './lib/pipelineProcesses';
-
-export type { Board, BoardColumn, BoardCard, IssueDetail, IssueBriefDTO, IssueMetaDTO, LinkedDocDTO, FeatureRefDTO, RelationDTO, RelationsDTO, PRDTO, CommentDTO, AgentCard, ClaimDTO, DispatchDTO, DocSummary, DocContent, DocLinkDTO, FeatureSummary, FeatureDetail, FeatureLinkedIssue, FeatureLinkedDoc, FeaturePlan, FeaturePlanEntry, FeatureCommentDTO, HistoryPage, HistoryEntryDTO, LeaderStatusDTO, PromptTemplateDTO, ArchivePreferencesDTO, AudioPreferencesDTO, TimezonePreferencesDTO, WaitingState, SyncPreferencesDTO, SyncRegistryDTO, SyncRepoDTO, MemberProjectDTO, UnsyncedProjectDTO, SyncSetupDTO, CollisionPreviewDTO, RenumberEntryDTO, RenameEntryDTO, RepoLinkResultDTO, ShippedIssueDTO, ShippedListDTO, LatestPlanDTO, Notification };
-// BACI-216: cross-transport alias. The web bundle's api.http.ts ships
-// the same name from its own TS-only shape so PipelineCard / IssueWorkspace
-// stay transport-agnostic.
-export type LatestPlan = LatestPlanDTO;
-// BACI-304: cross-transport alias for the Monitor screen's per-FQDN
-// proxy-stats row. The web bundle's api.http.ts ships the same name from
-// its own TS-only shape (src/lib/proxyStats.ts) so MonitorView imports one
-// name regardless of build mode.
-export type ProxyFQDNStat = ProxyFQDNStatDTO;
-// BACI-308: cross-transport alias for the Monitor capture drill-down list
-// row. The web bundle's api.http.ts ships the same name from its own TS-only
-// shape (src/lib/proxyCaptures.ts) so MonitorCaptureSheet imports one name
-// regardless of build mode. The capture-detail (ProxyMessage) and job
-// transcript (AnthropicTranscript) shapes are re-exported below.
-export type ProxyCaptureRow = ProxyCaptureRowDTO;
-export type { ProxyMessage, AnthropicTranscript };
-// BACI-322: cross-transport alias for the Monitor Transcript page's
-// row-per-dispatch list. The web bundle's api.http.ts ships the same name from
-// its own TS-only shape (src/lib/proxyCaptures.ts) so TranscriptListPanel
-// imports one name regardless of build mode.
-export type JobTranscriptRow = JobTranscriptRowDTO;
-// Phase 4 (Pipeline): re-export PipelineJob so the Pipeline page and its
-// helpers import it from ./api like every other shape.
-export type { PipelineJob };
+  Notification,
+  PipelineJob,
+  AddRepositoryPayload,
+  DisplayPreferencesDTO,
+  DefaultFeatureDTO,
+  BoardHiddenStatesDTO,
+} from './api/contract';
 export type { ProcessSelection };
 
-// BACI-108: cross-transport aliases — components import from `./api`
-// and stay unaware of whether they're on the Wails or HTTP seam. The
-// web bundle's api.http.ts ships the same names with parallel TS-only
-// shapes (the bundle can't load the Wails-generated bindings — see the
-// note at the top of api.http.ts).
-export type SyncPreferences = SyncPreferencesDTO;
-export type SyncRegistry = SyncRegistryDTO;
-export type SyncRepoEntry = SyncRepoDTO;
-export type MemberProject = MemberProjectDTO;
-export type UnsyncedProject = UnsyncedProjectDTO;
-// BACI-111: cross-transport sync-setup wire shape. SyncSetupPayload is
-// the camelCase input the SyncSetupModal builds; SyncSetupResult is the
-// returned outcome the modal consumes on success. SyncSetupCollisionError
-// is the typed exception thrown when the server (Wails or HTTP) refuses
-// the call because the import would renumber / rename local rows — the
-// modal `instanceof`-checks it to advance to the step-2 confirm.
-export type SyncSetupPayload = SetupSyncInDTO;
-export type SyncSetupResult = SyncSetupDTO;
-// BACI-112: cross-transport alias for the phantom-repo link result.
-// The web bundle's api.http.ts re-exports the same name from its own
-// TS-only shape so SyncView / PhantomLinkModal stays unaware of the
-// underlying transport.
-export type RepoLinkResult = RepoLinkResultDTO;
-export { WaitingKind };
+// BACI-308/322 Monitor drill-down aliases — cross-transport names served
+// from the bindings on this seam, from src/lib on the web seam.
+export type ProxyFQDNStat = ProxyFQDNStatDTO;
+export type ProxyCaptureRow = ProxyCaptureRowDTO;
+export type JobTranscriptRow = JobTranscriptRowDTO;
+export type { ProxyMessage, AnthropicTranscript };
 
 // SyncSetupCollisionError carries the typed CollisionPreviewDTO so the
 // modal can render the renumber / rename preview verbatim. Throws are
@@ -178,16 +201,6 @@ export async function listCards(repoPrefix: string): Promise<BoardCard[]> {
   } catch (err) {
     throw normalize(err);
   }
-}
-
-// AddRepositoryPayload mirrors the web-build shape so callers can pass
-// the same signature in both modes. Desktop ignores it — the Wails
-// AddRepository pops a native folder picker and resolves path/name
-// itself.
-export interface AddRepositoryPayload {
-  path: string;
-  name: string;
-  prefix?: string;
 }
 
 // addRepository opens a native folder picker and registers the chosen git
@@ -284,7 +297,7 @@ export async function listNotifications(unreadOnly = true, limit = 0): Promise<N
     // the Go element is a pointer; the store never returns nil rows, so
     // filter defensively to land the non-null shape the bell consumes.
     const rows = await BoardService.ListNotifications(unreadOnly, limit);
-    return (rows ?? []).filter((n): n is Notification => n != null);
+    return (rows ?? []).filter((n): n is WireNotification => n != null);
   } catch (err) {
     throw normalize(err);
   }
@@ -475,7 +488,7 @@ export async function setCardProcess(
     // store never returns nil elements, so drop them to match the
     // non-null contract the HTTP twin already satisfies.
     const jobs = await BoardService.SetCardProcess(repoPrefix, key, process, stages);
-    return (jobs ?? []).filter((j): j is PipelineJob => j != null);
+    return (jobs ?? []).filter((j): j is WirePipelineJob => j != null);
   } catch (err) {
     throw normalize(err);
   }
@@ -492,7 +505,7 @@ export async function editCardProcessTail(
 ): Promise<PipelineJob[]> {
   try {
     const jobs = await BoardService.EditCardProcessTail(repoPrefix, key, stages);
-    return (jobs ?? []).filter((j): j is PipelineJob => j != null);
+    return (jobs ?? []).filter((j): j is WirePipelineJob => j != null);
   } catch (err) {
     throw normalize(err);
   }
@@ -509,7 +522,7 @@ export async function resetCardProcess(
 ): Promise<PipelineJob[]> {
   try {
     const jobs = await BoardService.ResetCardProcess(repoPrefix, key);
-    return (jobs ?? []).filter((j): j is PipelineJob => j != null);
+    return (jobs ?? []).filter((j): j is WirePipelineJob => j != null);
   } catch (err) {
     throw normalize(err);
   }
@@ -523,7 +536,7 @@ export async function startCardJob(
 ): Promise<PipelineJob[]> {
   try {
     const jobs = await BoardService.StartCardJob(repoPrefix, key);
-    return (jobs ?? []).filter((j): j is PipelineJob => j != null);
+    return (jobs ?? []).filter((j): j is WirePipelineJob => j != null);
   } catch (err) {
     throw normalize(err);
   }
@@ -537,7 +550,7 @@ export async function stopCardJob(
 ): Promise<PipelineJob[]> {
   try {
     const jobs = await BoardService.StopCardJob(repoPrefix, key);
-    return (jobs ?? []).filter((j): j is PipelineJob => j != null);
+    return (jobs ?? []).filter((j): j is WirePipelineJob => j != null);
   } catch (err) {
     throw normalize(err);
   }
@@ -553,7 +566,7 @@ export async function rerunCardJob(
 ): Promise<PipelineJob[]> {
   try {
     const jobs = await BoardService.RerunCardJob(repoPrefix, key, seq);
-    return (jobs ?? []).filter((j): j is PipelineJob => j != null);
+    return (jobs ?? []).filter((j): j is WirePipelineJob => j != null);
   } catch (err) {
     throw normalize(err);
   }
@@ -1257,7 +1270,6 @@ export async function savePromptActionLabel(
 // BACI-68: display.show_archived global toggle. Lives behind a
 // dedicated Wails endpoint so the Settings panel can read / write
 // it without coupling display state to other preferences.
-export type DisplayPreferencesDTO = { showArchived: boolean };
 
 export async function getDisplayPreferences(): Promise<DisplayPreferencesDTO> {
   try {
@@ -1349,7 +1361,6 @@ export async function setTimezonePreferences(
 // BACI-235: per-repo default_feature setting. Empty slug = unset.
 // Slug + title + emoji are inflated when set so the dropdown can
 // render the same glyph + label as the rest of the feature affordances.
-export type DefaultFeatureDTO = { slug: string; title?: string; emoji?: string };
 
 export async function getDefaultFeature(
   repoPrefix: string,
@@ -1386,7 +1397,6 @@ export async function clearDefaultFeature(
 // states hidden from the board on this machine). Lives in
 // tui_settings[board.hidden_states] — surfaced now on the desktop /
 // web Per-repository Settings pane, previously TUI-only.
-export type BoardHiddenStatesDTO = { states: string[] };
 
 export async function getBoardHiddenStates(
   repoPrefix: string,

@@ -7,7 +7,7 @@
 // api.http.ts so the reshape is unit testable — see ./issue.ts for the
 // pattern + the Phase 2b note.
 
-import type { DispatchDTO } from '../../api.http';
+import type { DispatchDTO } from '../contract';
 
 export interface ApiDispatch {
   id: number;
