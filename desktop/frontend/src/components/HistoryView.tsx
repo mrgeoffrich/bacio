@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { reportError } from '../errors';
 import * as api from '../api';
 import type { HistoryPage } from '../api';
 import { formatWhen } from '../lib/formatWhen';
+import { useAsyncResource } from '../lib/hooks/useAsyncResource';
 
 const PAGE_SIZE = 50;
 
@@ -15,31 +15,20 @@ type HistoryViewProps = {
 // at a time, with Prev/Next paging; it never loads the whole log at once.
 export default function HistoryView({ activeBoard }: HistoryViewProps) {
   const [page, setPage] = useState(0);
-  const [data, setData] = useState<HistoryPage | null>(null);
-  const [loading, setLoading] = useState(false);
 
   const repoSelected = !!activeBoard;
 
   // Reset to the first page whenever the repo changes.
   useEffect(() => { setPage(0); }, [activeBoard]);
 
-  // Load the current page.
-  useEffect(() => {
-    if (!repoSelected) {
-      setData(null);
-      return;
-    }
-    setLoading(true);
-    api.listHistory(activeBoard, page, PAGE_SIZE)
-      .then(p => {
-        setData(p);
-        setLoading(false);
-      })
-      .catch(err => {
-        reportError(err, { headline: "Couldn't load history" });
-        setLoading(false);
-      });
-  }, [activeBoard, page, repoSelected]);
+  // Load the current page eagerly on repo / page change (no poll — the audit
+  // log is browsed, not watched live).
+  const { data, loading } = useAsyncResource<HistoryPage | null>(
+    () => api.listHistory(activeBoard, page, PAGE_SIZE),
+    null,
+    [activeBoard, page],
+    { enabled: repoSelected, errorHeadline: "Couldn't load history" },
+  );
 
   if (!repoSelected) {
     return (
