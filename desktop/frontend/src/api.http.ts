@@ -36,53 +36,6 @@ export interface Board {
   syncLastError?: string;
 }
 
-// SyncStatusApi mirrors api.SyncStatusOut — the wire shape of the
-// BACI-89 GET /sync endpoint.
-interface SyncStatusApi {
-  prefix: string;
-  configured: boolean;
-  background_enabled: boolean;
-  in_progress: boolean;
-  last_sync_at?: string;
-  last_error?: string;
-  remote?: string;
-}
-
-// SyncRegistryApi / SyncRepoApi / MemberProjectApi / UnsyncedProjectApi
-// mirror api.SyncRegistryOut and friends — the wire shape of the
-// BACI-107 GET /sync/repos endpoint. Snake-case on the wire matches
-// every other api.http.ts wire DTO; getSyncRegistry() below reshapes
-// to the camelCase SyncRegistry the React tree consumes.
-interface SyncRegistryApi {
-  sync_repos: SyncRepoApi[];
-  unsynced_projects: UnsyncedProjectApi[];
-}
-
-interface SyncRepoApi {
-  remote_url: string;
-  label: string;
-  local_path: string;
-  cloned_at: string;
-  last_sync_at?: string;
-  last_error?: string;
-  in_progress: boolean;
-  projects: MemberProjectApi[];
-}
-
-interface MemberProjectApi {
-  prefix: string;
-  name: string;
-  uuid?: string;
-  status: 'linked' | 'phantom' | 'absent';
-}
-
-interface UnsyncedProjectApi {
-  prefix: string;
-  name: string;
-  uuid: string;
-  path: string;
-}
-
 // SyncRegistry / SyncRepoEntry / MemberProject / UnsyncedProject are
 // the camelCase DTOs the React tree consumes. Same shape as the
 // SyncRegistryApi wire types, just snake → camel on the field names.
@@ -790,6 +743,66 @@ export type { ProxyCaptureRow, ProxyMessage, AnthropicTranscript };
 import type { JobTranscriptRow } from './lib/proxyCaptures';
 export type { JobTranscriptRow };
 
+// BACI-358: the snake_case `Api*` wire shapes and the pure reshapers that
+// map them into the camelCase DTOs above now live in per-domain modules
+// under ./api/wire/. We import the types (for the `call<T>` generics) and
+// the reshapers (for the fetch wrappers) from there; the inline reshapes
+// left in this file lean on the shared label/assignee helpers in
+// ./api/wire/common.
+import { STATE_LABELS } from './api/wire/common';
+import {
+  cardFromIssue,
+  reshapeApiBrief,
+  reshapeIssueView,
+} from './api/wire/issue';
+import type {
+  ApiIssue,
+  ApiIssueView,
+  ApiIssueBrief,
+  ApiBoardCard,
+} from './api/wire/issue';
+import {
+  reshapeFeatureSummary,
+  reshapeFeatureView,
+  reshapePlanView,
+} from './api/wire/feature';
+import type {
+  ApiFeature,
+  ApiFeatureView,
+  ApiPlanView,
+} from './api/wire/feature';
+import { reshapeDispatch } from './api/wire/dispatch';
+import type { ApiDispatch, ApiUserMessage } from './api/wire/dispatch';
+import { reshapeDocSummary, reshapeDocContent } from './api/wire/doc';
+import type { ApiDocument, ApiDocView } from './api/wire/doc';
+import { reshapeHistoryEntry } from './api/wire/history';
+import type { ApiHistoryEntry } from './api/wire/history';
+import {
+  reshapeProxyStat,
+  reshapeProxyCapture,
+  reshapeJobTranscript,
+} from './api/wire/proxy';
+import type {
+  ApiProxyFQDNStat,
+  ApiProxyCaptureRow,
+  ApiJobTranscriptRow,
+} from './api/wire/proxy';
+import { reshapeTemplate } from './api/wire/template';
+import type { ApiPromptTemplate, ApiRestoreResponse } from './api/wire/template';
+import {
+  boardWithSync,
+  reshapeSyncRegistry,
+  reshapeSyncSetup,
+  reshapeRepoLinkResult,
+} from './api/wire/sync';
+import type {
+  ApiRepo,
+  SyncStatusApi,
+  SyncRegistryApi,
+  SyncSetupApi,
+  RepoLinkResultApi,
+} from './api/wire/sync';
+
 export interface PromptTemplateDTO {
   slug: string;
   mode: string;
@@ -922,82 +935,6 @@ async function callText(path: string, opts: FetchOpts = {}): Promise<string> {
   return text;
 }
 
-// ---------- Reshape helpers (API JSON → desktop DTOs) ----------
-
-// State labels mirror desktop/boardservice.go:stateLabels so the web
-// build renders the same kanban column titles as the desktop. Keep in
-// sync.
-const STATE_LABELS: Record<string, string> = {
-  todo: 'Todo',
-  in_review: 'In Review',
-  done: 'Done',
-  cancelled: 'Cancelled',
-  in_pipeline: 'In Pipeline',
-  to_be_shipped: 'To Be Shipped',
-};
-
-function stateLabel(s: string): string {
-  return STATE_LABELS[s] ?? s;
-}
-
-interface ApiIssue {
-  key: string;
-  title: string;
-  description?: string;
-  state: string;
-  assignee?: string;
-  // BACI-349: optional one-line customer impact. Snake-case on the wire
-  // (model.Issue's json tag); cardFromIssue / the meta reshape copy it
-  // onto the camelCase customerImpact field.
-  customer_impact?: string;
-  tags?: string[];
-  taken?: boolean;
-  // BACI-172: per-feature glyph denormalised from the join in
-  // store.issueSelect. Snake-case on the wire; the cardFromIssue
-  // reshape below copies it onto the camelCase BoardCard.featureEmoji.
-  feature_emoji?: string;
-  // BACI-231: per-feature integration branch from the same join.
-  // Snake-case on the wire; cardFromIssue reshapes onto
-  // BoardCard.featureBranchName so per-issue endpoints (e.g.
-  // setIssueState's drag-refresh) keep the branch chip until the
-  // next listCards() rebuild.
-  feature_branch_name?: string;
-}
-
-function assigneeList(a: string | undefined | null): string[] {
-  return a ? [a] : [];
-}
-
-function cardFromIssue(iss: ApiIssue): BoardCard {
-  const assignee = iss.assignee ?? '';
-  return {
-    key: iss.key,
-    column: iss.state,
-    columnLabel: stateLabel(iss.state),
-    title: iss.title,
-    // BACI-349: thread the customer impact through so a card refreshed
-    // via setIssueState() (drag-to-move) keeps it until the next
-    // listCards() rebuild.
-    customerImpact: iss.customer_impact,
-    tags: iss.tags ?? [],
-    assignees: assigneeList(assignee),
-    claude: assignee === 'claude',
-    taken: !!iss.taken,
-    // BACI-172: thread the joined feature emoji through so a card
-    // refreshed via setIssueState() (drag-to-move) keeps its glyph
-    // until the next listCards() rebuilds the array.
-    featureEmoji: iss.feature_emoji,
-    // BACI-231: thread the joined feature branch through so the
-    // drag-refresh keeps the kanban branch chip until the next
-    // listCards() rebuild.
-    featureBranchName: iss.feature_branch_name,
-    // BACI-145: setIssueState (a drag-to-move) is blocked for waiting
-    // cards by the UI, so the wire shape produced here can't be
-    // observably waiting. Leave waitingState undefined; the next 10s
-    // poll re-runs listCards and re-populates it from the server.
-  };
-}
-
 // ---------- API surface ----------
 
 export async function listBoards(): Promise<Board[]> {
@@ -1023,56 +960,12 @@ export async function listBoards(): Promise<Board[]> {
   return boards;
 }
 
-// boardWithSync folds a SyncStatusApi (possibly undefined) into a
-// Board. Centralised so listBoards and addRepository stay in lockstep.
-function boardWithSync(
-  prefix: string,
-  name: string,
-  issueCount: number,
-  sync: SyncStatusApi | undefined,
-): Board {
-  return {
-    prefix,
-    name,
-    issueCount,
-    syncEnabled: sync?.configured ?? false,
-    syncInProgress: sync?.in_progress ?? false,
-    syncLastAt: sync?.last_sync_at,
-    syncLastError: sync?.last_error,
-  };
-}
-
 // getSyncRegistry fetches BACI-107's GET /sync/repos and reshapes the
 // snake-case wire payload to the camelCase SyncRegistry the React
-// tree consumes. The reshape is mechanical — every field is renamed
-// 1:1 — so the helper stays a thin map() over the two slices.
+// tree consumes (see reshapeSyncRegistry in ./api/wire/sync).
 export async function getSyncRegistry(): Promise<SyncRegistry> {
   const wire = await call<SyncRegistryApi>('/sync/repos');
-  return {
-    syncRepos: wire.sync_repos.map(reshapeSyncRepo),
-    unsyncedProjects: wire.unsynced_projects.map(reshapeUnsyncedProject),
-  };
-}
-
-function reshapeSyncRepo(r: SyncRepoApi): SyncRepoEntry {
-  return {
-    remoteUrl: r.remote_url,
-    label: r.label,
-    localPath: r.local_path,
-    clonedAt: r.cloned_at,
-    lastSyncAt: r.last_sync_at,
-    lastError: r.last_error,
-    inProgress: r.in_progress,
-    projects: r.projects.map(reshapeMemberProject),
-  };
-}
-
-function reshapeMemberProject(m: MemberProjectApi): MemberProject {
-  return { prefix: m.prefix, name: m.name, uuid: m.uuid, status: m.status };
-}
-
-function reshapeUnsyncedProject(u: UnsyncedProjectApi): UnsyncedProject {
-  return { prefix: u.prefix, name: u.name, uuid: u.uuid, path: u.path };
+  return reshapeSyncRegistry(wire);
 }
 
 export async function listColumns(): Promise<BoardColumn[]> {
@@ -1118,56 +1011,12 @@ export async function addRepository(payload?: AddRepositoryPayload): Promise<Boa
     name: payload.name,
   };
   if (payload.prefix) body.prefix = payload.prefix.toUpperCase();
-  interface ApiRepo {
-    prefix: string;
-    name: string;
-    path: string;
-  }
   const repo = await call<ApiRepo>('/repos', { method: 'POST', body });
   // Match listBoards: issueCount=0 on a freshly-created repo. A
   // freshly-added repo almost never has sync configured yet — the
   // zero SyncStatusApi gives syncEnabled=false. The next listBoards
   // refresh picks up real sync status from GET /sync.
   return boardWithSync(repo.prefix, repo.name, 0, undefined);
-}
-
-interface ApiCommentEnvelope {
-  uuid: string;
-  author: string;
-  body: string;
-  created_at: string;
-  // BACI-131 — wire-shape mirror of model.Comment. eval is always
-  // present on the wire (the server omits no field), agent_name is
-  // populated only by the JOIN-aware list endpoint. The four context
-  // fields stay omitted on normal comments via the model's omitempty.
-  eval?: boolean;
-  agent_session_id?: string;
-  dispatch_id?: number;
-  mode?: string;
-  agent_name?: string;
-}
-interface ApiPR { url: string; }
-interface ApiDocLink {
-  document_filename: string;
-  document_type: string;
-  description?: string;
-}
-interface ApiClaimant {
-  session_id: string;
-  agent_name: string;
-  prompt: string;
-  claimed_at: string;
-  released_at: string | null;
-}
-interface ApiIssueView {
-  issue: ApiIssue;
-  comments: ApiCommentEnvelope[];
-  pull_requests: ApiPR[];
-  documents: ApiDocLink[];
-  claimants: ApiClaimant[];
-  taken: boolean;
-  // BACI-216: snake-cased wire shape — see ApiLatestPlan above.
-  latest_plan?: ApiLatestPlan | null;
 }
 
 export async function getIssue(repoPrefix: string, key: string): Promise<IssueDetail> {
@@ -1179,186 +1028,7 @@ export async function getIssue(repoPrefix: string, key: string): Promise<IssueDe
     repoPrefix = key.slice(0, i);
   }
   const view = await call<ApiIssueView>(`/repos/${repoPrefix}/issues/${key}`);
-  const iss = view.issue;
-  const assignee = iss.assignee ?? '';
-  return {
-    key: iss.key,
-    column: iss.state,
-    columnLabel: stateLabel(iss.state),
-    title: iss.title,
-    customerImpact: iss.customer_impact,
-    description: iss.description ?? '',
-    tags: iss.tags ?? [],
-    assignees: assigneeList(assignee),
-    claude: assignee === 'claude',
-    comments: (view.comments ?? []).map(mapApiComment),
-    pullRequests: (view.pull_requests ?? []).map(p => ({ url: p.url })),
-    documents: (view.documents ?? []).map(d => ({
-      filename: d.document_filename,
-      type: d.document_type,
-      description: d.description ?? '',
-    })),
-    claimants: (view.claimants ?? []).map(c => ({
-      sessionId: c.session_id,
-      agentName: c.agent_name,
-      prompt: c.prompt,
-      claimedAt: c.claimed_at,
-      releasedAt: c.released_at,
-      open: c.released_at == null,
-    })),
-    taken: !!view.taken,
-    latestPlan: mapApiLatestPlan(view.latest_plan),
-  };
-}
-
-// mapApiComment normalises the wire-shape envelope (snake_case,
-// always-defined-but-maybe-zero context fields) to the CommentDTO
-// the React tree consumes (camelCase, optional-when-zero context).
-// Shared by getIssue() and reshapeApiBrief() so the BACI-131 fields
-// stay in lock-step across both read paths.
-function mapApiComment(c: ApiCommentEnvelope): CommentDTO {
-  return {
-    uuid: c.uuid,
-    author: c.author,
-    body: c.body,
-    createdAt: c.created_at,
-    eval: !!c.eval,
-    agentSessionId: c.agent_session_id ?? '',
-    dispatchId: c.dispatch_id,
-    mode: c.mode ?? '',
-    agentName: c.agent_name ?? '',
-  };
-}
-
-interface ApiBriefDoc {
-  filename: string;
-  type: string;
-  description?: string;
-  source_path?: string;
-  linked_via?: string[];
-  size_bytes?: number;
-  content?: string;
-}
-
-// ApiLatestPlan is the snake_case wire shape of model.LatestPlan — the
-// per-issue plan projection BACI-216 attaches to the issue show / brief
-// payloads. Reshaped into the camelCase LatestPlan the UI consumes by
-// mapApiLatestPlan below. The cards endpoint already serves camelCase
-// via the Go json tag so the listCards() path doesn't go through this
-// reshape — only the snake-cased show / brief handlers do.
-interface ApiLatestPlan {
-  document_id: number;
-  uuid: string;
-  filename: string;
-  updated_at: string;
-}
-
-function mapApiLatestPlan(p: ApiLatestPlan | null | undefined): LatestPlan | null {
-  if (!p) return null;
-  return {
-    documentId: p.document_id,
-    uuid: p.uuid,
-    filename: p.filename,
-    updatedAt: p.updated_at,
-  };
-}
-
-interface ApiRelation {
-  // ListIssueRelations emits model.Relation, which serialises as
-  // {from_issue, to_issue, type, id, created_at}. The brief reshape
-  // resolves these into RelationDTO entries with the "other end" key.
-  from_issue: string;
-  to_issue: string;
-  type: string;
-}
-
-interface ApiIssueRelations {
-  outgoing?: ApiRelation[] | null;
-  incoming?: ApiRelation[] | null;
-}
-
-interface ApiFeatureRef {
-  slug: string;
-  title: string;
-}
-
-interface ApiIssueBrief {
-  issue: ApiIssue;
-  feature?: ApiFeatureRef | null;
-  relations?: ApiIssueRelations | null;
-  pull_requests?: ApiPR[] | null;
-  documents?: ApiBriefDoc[] | null;
-  comments?: ApiCommentEnvelope[] | null;
-  claimants?: ApiClaimant[] | null;
-  taken?: boolean;
-  // BACI-145: snake-case wire shape mirroring internal/api/views.go
-  // IssueBrief.WaitingState. WaitingState's own field names stay
-  // camelCase server-side (the boardcards JSON tags are camel) so no
-  // per-field rename here — only the outer wrapper is snake.
-  waiting_state?: WaitingState | null;
-  // BACI-216: snake-cased wire shape — see ApiLatestPlan above.
-  latest_plan?: ApiLatestPlan | null;
-  warnings?: string[] | null;
-}
-
-function reshapeApiBrief(view: ApiIssueBrief): IssueBriefDTO {
-  const iss = view.issue;
-  const assignee = iss.assignee ?? '';
-  // BACI-216: resolve the latest plan once; both the meta and the
-  // envelope-level field carry the same shape.
-  const latestPlan = mapApiLatestPlan(view.latest_plan);
-  const meta: IssueMetaDTO = {
-    key: iss.key,
-    column: iss.state,
-    columnLabel: stateLabel(iss.state),
-    title: iss.title,
-    customerImpact: iss.customer_impact,
-    description: iss.description ?? '',
-    tags: iss.tags ?? [],
-    assignees: assigneeList(assignee),
-    claude: assignee === 'claude',
-    taken: !!view.taken,
-    latestPlan,
-  };
-  const feat: FeatureRefDTO | null = view.feature
-    ? { slug: view.feature.slug, title: view.feature.title }
-    : null;
-  const outgoing: RelationDTO[] = (view.relations?.outgoing ?? []).map(r => ({
-    type: r.type,
-    otherKey: r.to_issue,
-  }));
-  const incoming: RelationDTO[] = (view.relations?.incoming ?? []).map(r => ({
-    type: r.type,
-    otherKey: r.from_issue,
-  }));
-  return {
-    issue: meta,
-    feature: feat,
-    relations: { outgoing, incoming },
-    pullRequests: (view.pull_requests ?? []).map(p => ({ url: p.url })),
-    documents: (view.documents ?? []).map(d => ({
-      filename: d.filename,
-      type: d.type,
-      description: d.description ?? '',
-      sourcePath: d.source_path ?? '',
-      linkedVia: d.linked_via ?? [],
-      sizeBytes: d.size_bytes ?? 0,
-      content: d.content ?? '',
-    })),
-    comments: (view.comments ?? []).map(mapApiComment),
-    claimants: (view.claimants ?? []).map(c => ({
-      sessionId: c.session_id,
-      agentName: c.agent_name,
-      prompt: c.prompt,
-      claimedAt: c.claimed_at,
-      releasedAt: c.released_at,
-      open: c.released_at == null,
-    })),
-    taken: !!view.taken,
-    waitingState: view.waiting_state ?? null,
-    latestPlan,
-    warnings: view.warnings ?? [],
-  };
+  return reshapeIssueView(view);
 }
 
 export async function getIssueBrief(repoPrefix: string, key: string): Promise<IssueBriefDTO> {
@@ -1464,27 +1134,6 @@ export async function markAllNotificationsRead(): Promise<number> {
 // the Go-side snake_case the API serialises (links carry the issue
 // key / feature slug pre-formatted, so the client doesn't need to
 // resolve them).
-interface ApiDocumentLink {
-  issue_key?: string;
-  feature_slug?: string;
-  description?: string;
-}
-
-interface ApiDocument {
-  filename: string;
-  type: string;
-  size_bytes: number;
-  updated_at: string;
-  created_at: string;
-  archived_at?: string;
-  content?: string;
-  // BACI-204: per-row snippet + link rows hydrated by the store-side
-  // IN-query so the Documents page renders chips and previews without
-  // an N+1 round trip.
-  snippet?: string;
-  links?: ApiDocumentLink[];
-}
-
 export async function listDocs(repoPrefix: string, typeFilter = ''): Promise<DocSummary[]> {
   if (!repoPrefix || repoPrefix === 'all') {
     throw new Error('select a repository to view its documents');
@@ -1492,44 +1141,7 @@ export async function listDocs(repoPrefix: string, typeFilter = ''): Promise<Doc
   const docs = await call<ApiDocument[]>(`/repos/${repoPrefix}/documents`, {
     query: { type: typeFilter || undefined },
   });
-  return docs.map(d => ({
-    filename: d.filename,
-    type: d.type,
-    sizeBytes: d.size_bytes,
-    updatedAt: d.updated_at,
-    createdAt: d.created_at,
-    archivedAt: d.archived_at,
-    snippet: d.snippet,
-    links: d.links?.map(l => ({
-      issueKey: l.issue_key,
-      featureSlug: l.feature_slug,
-      description: l.description,
-    })),
-  }));
-}
-
-interface ApiDispatch {
-  id: number;
-  issue_key?: string;
-  target_agent_name?: string;
-  mode?: string;
-  status: string;
-  payload?: string;
-  created_by?: string;
-  created_at: string;
-}
-
-function reshapeDispatch(d: ApiDispatch): DispatchDTO {
-  return {
-    id: d.id,
-    issueKey: d.issue_key ?? '',
-    targetAgent: d.target_agent_name ?? '',
-    mode: d.mode ?? '',
-    status: d.status,
-    payload: d.payload ?? '',
-    createdBy: d.created_by ?? '',
-    createdAt: d.created_at,
-  };
+  return docs.map(reshapeDocSummary);
 }
 
 // addIssue (BACI-166) creates a new issue via POST /repos/{prefix}/issues
@@ -1645,18 +1257,6 @@ export async function rescueDispatch(dispatchID: number): Promise<DispatchDTO> {
   return reshapeDispatch(raw);
 }
 
-// ApiUserMessage is the wire shape of a BACI-286 steer message returned
-// by the POST endpoint. The callers are fire-and-forget (success vs
-// toasted error), so only id is consumed — the rest mirrors the Go
-// model.UserMessage for completeness.
-interface ApiUserMessage {
-  id: number;
-  session_id: string;
-  body: string;
-  created_by: string;
-  created_at: string;
-}
-
 // sendSessionMessage (BACI-286) POSTs a user→agent steer message at a
 // busy session. The channel serving that session pushes it as a
 // `<channel kind="message">` tag at the worker's next turn boundary —
@@ -1670,19 +1270,6 @@ export async function sendSessionMessage(
     `/agents/sessions/${encodeURIComponent(sessionID)}/messages`,
     { method: 'POST', body: { body } },
   );
-}
-
-interface ApiBoardCard {
-  // setIssueState returns the model.Issue; same reshape as listCards.
-  // Post-BACI-255 the wire model.Issue no longer carries a denormalised
-  // waiting_for_claim flag — drag-state for waiting cards is gated by
-  // the kanban's own waitingState lookup, not a per-row boolean.
-  key: string;
-  state: string;
-  title: string;
-  assignee?: string;
-  tags?: string[];
-  taken?: boolean;
 }
 
 export async function setIssueState(
@@ -1805,78 +1392,12 @@ export async function deleteComment(
   return getIssue(repoPrefix, key);
 }
 
-interface ApiFeature {
-  slug: string;
-  title: string;
-  description?: string;
-  // BACI-172: per-feature emoji glyph from the wire. Optional /
-  // absent on pre-BACI-172 features (or features with no glyph
-  // set); model.Feature serialises with omitempty.
-  emoji?: string;
-  // BACI-225: per-feature integration branch from the wire. Optional
-  // / absent when the feature ships straight to main (the legacy
-  // default); model.Feature serialises BranchName with omitempty
-  // when the column is NULL.
-  branch_name?: string;
-  // BACI-199: three-state column + sticky bit. Always present
-  // in JSON (no omitempty on model.Feature). Pre-BACI-199 servers
-  // (no column wired yet) leave these absent — `state ?? 'active'`
-  // is the safe default.
-  state?: string;
-  state_manual?: boolean;
-  // BACI-333: per-feature collect-handoffs toggle. Always present in
-  // JSON (no omitempty) so the React component reads it directly. A
-  // server that hasn't shipped BACI-333 leaves it absent — `?? true`
-  // keeps the opt-out default ON.
-  collect_handoffs?: boolean;
-  created_at: string;
-  updated_at: string;
-  // BACI-177: per-feature "Show on board" toggle state. Always
-  // present in JSON (no omitempty) so the React component reads it
-  // without an `?? false`. Defaults to false on a server that hasn't
-  // shipped BACI-177 yet — the field will simply be absent.
-  hidden_on_board?: boolean;
-}
-
 export async function listFeatures(repoPrefix: string): Promise<FeatureSummary[]> {
   if (!repoPrefix || repoPrefix === 'all') {
     throw new Error('select a repository to view its features');
   }
   const feats = await call<ApiFeature[]>(`/repos/${repoPrefix}/features`);
-  return feats.map(f => ({
-    slug: f.slug,
-    title: f.title,
-    emoji: f.emoji ?? '',
-    state: f.state ?? 'active',
-    branchName: f.branch_name ?? '',
-    updatedAt: f.updated_at,
-    hiddenOnBoard: !!f.hidden_on_board,
-  }));
-}
-
-interface ApiFeatureComment {
-  uuid: string;
-  author: string;
-  body: string;
-  created_at: string;
-}
-
-// ApiFeatureLink mirrors model.DocumentLink (BACI-214) — the snake_case
-// wire shape served by `GET /repos/{prefix}/features/{slug}` for each
-// linked document. Description is the link-time `--why`. Other
-// model.DocumentLink fields (ids, issue/feature foreign keys, created_at)
-// aren't surfaced on the feature pane.
-interface ApiFeatureLink {
-  document_filename: string;
-  document_type: string;
-  description?: string;
-}
-
-interface ApiFeatureView {
-  feature: ApiFeature;
-  issues: Array<{ key: string; title: string; state: string }>;
-  comments?: ApiFeatureComment[];
-  documents?: ApiFeatureLink[];
+  return feats.map(reshapeFeatureSummary);
 }
 
 export async function getFeature(repoPrefix: string, slug: string): Promise<FeatureDetail> {
@@ -1884,56 +1405,7 @@ export async function getFeature(repoPrefix: string, slug: string): Promise<Feat
     throw new Error('select a repository to view its features');
   }
   const view = await call<ApiFeatureView>(`/repos/${repoPrefix}/features/${slug}`);
-  const f = view.feature;
-  return {
-    slug: f.slug,
-    title: f.title,
-    description: f.description ?? '',
-    emoji: f.emoji ?? '',
-    branchName: f.branch_name ?? '',
-    state: f.state ?? 'active',
-    stateManual: !!f.state_manual,
-    collectHandoffs: f.collect_handoffs ?? true,
-    createdAt: f.created_at,
-    updatedAt: f.updated_at,
-    issues: (view.issues ?? []).map(iss => ({
-      key: iss.key,
-      title: iss.title,
-      state: iss.state,
-      stateLabel: stateLabel(iss.state),
-    })),
-    comments: (view.comments ?? []).map(c => ({
-      uuid: c.uuid,
-      author: c.author,
-      body: c.body,
-      createdAt: c.created_at,
-    })),
-    documents: (view.documents ?? []).map(d => ({
-      filename: d.document_filename,
-      type: d.document_type,
-      description: d.description ?? '',
-      sourcePath: '',
-    })),
-    hiddenOnBoard: !!f.hidden_on_board,
-  };
-}
-
-// ApiPlanEntry is the snake_case wire shape served by GET
-// /repos/{prefix}/features/{slug}/plan — mirrors api.PlanEntry. We
-// reshape blocked_by → blockedBy on the client so the FeaturePlan
-// camelCase shape matches the Wails binding (BACI-236).
-interface ApiPlanEntry {
-  key: string;
-  title: string;
-  state: string;
-  assignee?: string;
-  blocked_by?: string[];
-  closed?: boolean;
-}
-
-interface ApiPlanView {
-  feature: string;
-  order?: ApiPlanEntry[];
+  return reshapeFeatureView(view);
 }
 
 // getFeaturePlan (BACI-236) returns the topo-sorted dependency-graph
@@ -1954,17 +1426,7 @@ export async function getFeaturePlan(
     `/repos/${repoPrefix}/features/${slug}/plan`,
     { query: includeClosed ? { include_closed: '1' } : undefined },
   );
-  return {
-    slug: view.feature,
-    order: (view.order ?? []).map(e => ({
-      key: e.key,
-      title: e.title,
-      state: e.state,
-      assignee: e.assignee ?? '',
-      blockedBy: e.blocked_by ?? [],
-      closed: !!e.closed,
-    })),
-  };
+  return reshapePlanView(view);
 }
 
 // setFeatureEmoji (BACI-172) updates the per-feature emoji glyph
@@ -2144,32 +1606,9 @@ export async function deleteFeatureComment(
   return getFeature(repoPrefix, slug);
 }
 
-interface ApiHistoryEntry {
-  id: number;
-  actor: string;
-  op: string;
-  kind?: string;
-  target_label?: string;
-  details?: string;
-  created_at: string;
-}
-
 // ApiProxyFQDNStat is the snake_case wire shape GET /proxy/stats returns
 // (model.ProxyFQDNStat's JSON tags). listProxyStats reshapes it into the
 // camelCase ProxyFQDNStat the Monitor screen consumes.
-interface ApiProxyFQDNStat {
-  host: string;
-  request_count: number;
-  bytes_in: number;
-  bytes_out: number;
-  error_count: number;
-  error_rate: number;
-  p50_ms: number;
-  p95_ms: number;
-  first_seen: string;
-  last_seen: string;
-}
-
 export async function listHistory(
   repoPrefix: string,
   page: number,
@@ -2184,15 +1623,7 @@ export async function listHistory(
     query: { limit: pageSize + 1, offset: page * pageSize },
   });
   const hasMore = rows.length > pageSize;
-  const entries = (hasMore ? rows.slice(0, pageSize) : rows).map(e => ({
-    id: e.id,
-    actor: e.actor,
-    op: e.op,
-    kind: e.kind ?? '',
-    targetLabel: e.target_label ?? '',
-    details: e.details ?? '',
-    createdAt: e.created_at,
-  }));
+  const entries = (hasMore ? rows.slice(0, pageSize) : rows).map(reshapeHistoryEntry);
   return { entries, page, pageSize, hasMore };
 }
 
@@ -2256,41 +1687,7 @@ export async function listProxyStats(sinceDays = 0): Promise<ProxyFQDNStat[]> {
   const query: Record<string, string | number> = {};
   if (sinceDays > 0) query.since = `${sinceDays}d`;
   const rows = await call<ApiProxyFQDNStat[]>('/proxy/stats', { query });
-  return (rows ?? []).map(r => ({
-    host: r.host,
-    requestCount: r.request_count,
-    bytesIn: r.bytes_in,
-    bytesOut: r.bytes_out,
-    errorCount: r.error_count,
-    errorRate: r.error_rate,
-    p50Ms: r.p50_ms,
-    p95Ms: r.p95_ms,
-    firstSeen: r.first_seen,
-    lastSeen: r.last_seen,
-  }));
-}
-
-// ApiProxyCaptureRow is the snake_case wire shape GET /proxy/captures returns
-// (model.ProxyCaptureRow — the embedded ProxyRequest fields plus the issue_key
-// / mode enrichment). listProxyCaptures reshapes it into the camelCase
-// ProxyCaptureRow the sheet consumes. raw_log_path is omitempty on the wire;
-// its presence becomes hasRaw.
-interface ApiProxyCaptureRow {
-  id: number;
-  method: string;
-  host: string;
-  path: string;
-  status: number;
-  bytes_in: number;
-  bytes_out: number;
-  duration_ms: number;
-  raw_log_path?: string;
-  is_stream?: boolean;
-  is_anthropic?: boolean;
-  dispatch_id?: number | null;
-  issue_key?: string;
-  mode?: string;
-  started_at: string;
+  return (rows ?? []).map(reshapeProxyStat);
 }
 
 // listProxyCaptures (BACI-308) is the HTTP twin of api.ts's listProxyCaptures —
@@ -2309,23 +1706,7 @@ export async function listProxyCaptures(
   if (anthropicOnly) query.is_anthropic = true;
   if (sinceDays > 0) query.since = `${sinceDays}d`;
   const rows = await call<ApiProxyCaptureRow[]>('/proxy/captures', { query });
-  return (rows ?? []).map(r => ({
-    id: r.id,
-    method: r.method,
-    host: r.host,
-    path: r.path,
-    status: r.status,
-    bytesIn: r.bytes_in,
-    bytesOut: r.bytes_out,
-    durationMs: r.duration_ms,
-    isStream: !!r.is_stream,
-    isAnthropic: !!r.is_anthropic,
-    hasRaw: !!r.raw_log_path,
-    dispatchId: r.dispatch_id,
-    issueKey: r.issue_key,
-    mode: r.mode,
-    startedAt: r.started_at,
-  }));
+  return (rows ?? []).map(reshapeProxyCapture);
 }
 
 // getProxyCaptureRaw (BACI-308) is the HTTP twin of api.ts's getProxyCaptureRaw —
@@ -2346,30 +1727,6 @@ export async function anthropicCapture(id: number): Promise<ProxyMessage> {
 // feeds the viewer, so no reshape is needed.
 export async function jobTranscript(dispatchId: number): Promise<AnthropicTranscript> {
   return call<AnthropicTranscript>(`/proxy/jobs/${dispatchId}/transcript`);
-}
-
-// ApiJobTranscriptRow is the snake_case wire shape GET /proxy/jobs returns
-// (model.JobTranscriptRow). listJobTranscripts reshapes it into the camelCase
-// JobTranscriptRow the Transcript page consumes.
-interface ApiJobTranscriptRow {
-  dispatch_id: number;
-  issue_key?: string;
-  mode?: string;
-  agent_name?: string;
-  repo_prefix?: string;
-  model?: string;
-  turn_count: number;
-  usage: {
-    input_tokens?: number;
-    output_tokens?: number;
-    cache_creation_input_tokens?: number;
-    cache_read_input_tokens?: number;
-    thinking_tokens?: number;
-  };
-  last_seen: string;
-  session_id?: string;
-  claude_agent_id?: string;
-  session_label?: string;
 }
 
 // listJobTranscripts (BACI-322) is the HTTP twin of api.ts's
@@ -2395,31 +1752,7 @@ export async function listJobTranscripts(
   if (agent) query.agent = agent;
   if (sinceDays > 0) query.since = `${sinceDays}d`;
   const rows = await call<ApiJobTranscriptRow[]>('/proxy/jobs', { query });
-  return (rows ?? []).map(r => ({
-    dispatchId: r.dispatch_id,
-    issueKey: r.issue_key,
-    mode: r.mode,
-    agentName: r.agent_name,
-    repoPrefix: r.repo_prefix,
-    model: r.model,
-    turnCount: r.turn_count,
-    usage: {
-      inputTokens: r.usage?.input_tokens ?? 0,
-      outputTokens: r.usage?.output_tokens ?? 0,
-      cacheCreationTokens: r.usage?.cache_creation_input_tokens ?? 0,
-      cacheReadTokens: r.usage?.cache_read_input_tokens ?? 0,
-      thinkingTokens: r.usage?.thinking_tokens ?? 0,
-    },
-    lastSeen: r.last_seen,
-    sessionId: r.session_id,
-    claudeAgentId: r.claude_agent_id,
-    sessionLabel: r.session_label,
-  }));
-}
-
-interface ApiDocView {
-  document: ApiDocument & { content: string };
-  links: unknown[];
+  return (rows ?? []).map(reshapeJobTranscript);
 }
 
 export async function getDoc(repoPrefix: string, filename: string): Promise<DocContent> {
@@ -2427,13 +1760,7 @@ export async function getDoc(repoPrefix: string, filename: string): Promise<DocC
     throw new Error('select a repository to view its documents');
   }
   const view = await call<ApiDocView>(`/repos/${repoPrefix}/documents/${filename}`);
-  const d = view.document;
-  return {
-    filename: d.filename,
-    type: d.type,
-    content: d.content ?? '',
-    updatedAt: d.updated_at,
-  };
+  return reshapeDocContent(view);
 }
 
 export async function saveDoc(
@@ -2463,41 +1790,6 @@ export async function saveDoc(
 // /settings/templates/full list endpoint that returns the full DTO
 // (label, defaults, is_builtin, …) so the web bundle stops deriving
 // labels client-side.
-
-interface ApiPromptTemplate {
-  slug: string;
-  mode: string;
-  label: string;
-  body: string;
-  default: string;
-  is_builtin: boolean;
-  is_default: boolean;
-  concurrency_limit?: number;
-  default_concurrency_limit?: number;
-  concurrency_is_default?: boolean;
-  // BACI-67: imperative override for the dispatch action menus.
-  action_label?: string;
-  default_action_label?: string;
-  action_label_is_default?: boolean;
-}
-
-function reshapeTemplate(t: ApiPromptTemplate): PromptTemplateDTO {
-  return {
-    slug: t.slug,
-    mode: t.mode,
-    label: t.label,
-    body: t.body,
-    default: t.default,
-    isBuiltin: t.is_builtin,
-    isDefault: t.is_default,
-    concurrencyLimit: t.concurrency_limit ?? 0,
-    defaultConcurrencyLimit: t.default_concurrency_limit ?? 0,
-    concurrencyIsDefault: t.concurrency_is_default ?? true,
-    actionLabel: t.action_label ?? '',
-    defaultActionLabel: t.default_action_label ?? '',
-    actionLabelIsDefault: t.action_label_is_default ?? true,
-  };
-}
 
 export async function listPromptTemplates(): Promise<PromptTemplateDTO[]> {
   // BACI-50 added the composite /settings/templates/full endpoint that
@@ -2606,11 +1898,6 @@ export async function deletePromptTemplate(
   return reshapeTemplate(raw);
 }
 
-interface ApiRestoreResponse {
-  restored: string[];
-  templates: ApiPromptTemplate[];
-}
-
 export async function restoreBuiltinPromptTemplates(): Promise<PromptTemplateDTO[]> {
   const raw = await call<ApiRestoreResponse>('/settings/templates/restore-builtins', {
     method: 'POST',
@@ -2705,67 +1992,6 @@ export class SyncSetupCollisionError extends Error {
 // Init/Clone are the engine result structs — only the per-mode field
 // for the chosen mode is populated. preview_collisions is set on the
 // 409 path only.
-interface SyncSetupApi {
-  mode: string;
-  init?: {
-    local_path?: string;
-    remote?: string;
-    commit_sha?: string;
-    pushed?: boolean;
-    attached?: boolean;
-  };
-  clone?: {
-    local_path?: string;
-    remote?: string;
-  };
-  preview_collisions?: {
-    renumbered?: Array<{
-      prefix: string;
-      uuid: string;
-      old_number: number;
-      new_number: number;
-    }>;
-    renamed?: Array<{
-      kind: string;
-      prefix?: string;
-      uuid: string;
-      old: string;
-      new: string;
-    }>;
-  };
-}
-
-function reshapeSyncSetup(wire: SyncSetupApi): SyncSetupDTO {
-  const out: SyncSetupDTO = { mode: wire.mode };
-  if (wire.init) {
-    out.localPath = wire.init.local_path;
-    out.remote = wire.init.remote;
-    out.commitSHA = wire.init.commit_sha;
-    out.pushed = wire.init.pushed;
-    out.attached = wire.init.attached;
-  } else if (wire.clone) {
-    out.localPath = wire.clone.local_path;
-    out.remote = wire.clone.remote;
-  }
-  if (wire.preview_collisions) {
-    out.previewCollisions = {
-      renumbered: (wire.preview_collisions.renumbered ?? []).map(r => ({
-        prefix: r.prefix,
-        oldNumber: r.old_number,
-        newNumber: r.new_number,
-        uuid: r.uuid,
-      })),
-      renamed: (wire.preview_collisions.renamed ?? []).map(r => ({
-        kind: r.kind,
-        old: r.old,
-        new: r.new,
-        uuid: r.uuid,
-      })),
-    };
-  }
-  return out;
-}
-
 export async function setupSync(
   prefix: string,
   payload: SyncSetupPayload,
@@ -2835,13 +2061,6 @@ export interface RepoLinkResult {
 // stays snake_case in line with the rest of api.http.ts.
 export type RepoLinkResultDTO = RepoLinkResult;
 
-interface RepoLinkResultApi {
-  repo: { prefix: string; path: string };
-  sync_remote_url: string;
-  already_linked?: boolean;
-  would_link?: boolean;
-}
-
 // linkPhantomRepo (BACI-112) — POST /repos/{prefix}/link with body
 // {path: ...}. Mirrors the Wails-bound seam in api.ts. Errors come
 // back as plain Error from call(); the caller renders the human
@@ -2855,12 +2074,7 @@ export async function linkPhantomRepo(
     `/repos/${encodeURIComponent(prefix)}/link`,
     { method: 'POST', body: { path } },
   );
-  return {
-    prefix: res.repo?.prefix ?? prefix,
-    path: res.repo?.path ?? path,
-    syncRemoteUrl: res.sync_remote_url ?? '',
-    alreadyLinked: !!res.already_linked,
-  };
+  return reshapeRepoLinkResult(res, prefix, path);
 }
 
 // ---------- Sync preferences (BACI-89 / BACI-108) ----------
