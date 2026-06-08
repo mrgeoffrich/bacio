@@ -300,6 +300,53 @@ func TestProcessResetEndpoint(t *testing.T) {
 	}
 }
 
+// TestMarkDoneEndpoint covers the BACI-352 POST /mark-done surface: a
+// dry_run projects the card in done without writing, and a real call moves
+// an in_pipeline card straight to done — never to_be_shipped.
+func TestMarkDoneEndpoint(t *testing.T) {
+	ts, s := newTestAPI(t, api.Options{})
+	repo, err := s.CreateRepo("MKDN", "http-markdone", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("repo: %v", err)
+	}
+	iss, err := s.CreateIssue(repo.ID, nil, "card", "", model.StateInPipeline, nil, "", "")
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	proc, err := model.ProcessFromStages([]string{"implement", "mark_done"})
+	if err != nil {
+		t.Fatalf("ProcessFromStages: %v", err)
+	}
+	if _, err := s.SetIssueProcess(iss.ID, proc); err != nil {
+		t.Fatalf("SetIssueProcess: %v", err)
+	}
+	base := ts.URL + "/repos/" + repo.Prefix + "/issues/" + iss.Key
+
+	// dry_run projects done without writing.
+	resp := do(t, http.MethodPost, base+"/mark-done?dry_run=true", nil, nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("mark-done dry-run status %d", resp.StatusCode)
+	}
+	projected := decode[map[string]any](t, resp.Body)
+	resp.Body.Close()
+	if projected["state"] != string(model.StateDone) {
+		t.Fatalf("mark-done dry-run state = %v, want done", projected["state"])
+	}
+	if got, _ := s.GetIssueByID(iss.ID); got.State != model.StateInPipeline {
+		t.Fatalf("mark-done dry-run wrote state = %s, want in_pipeline", got.State)
+	}
+
+	// Real call moves straight to done (not to_be_shipped).
+	resp = do(t, http.MethodPost, base+"/mark-done", nil, nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("mark-done status %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	if got, _ := s.GetIssueByID(iss.ID); got.State != model.StateDone {
+		t.Fatalf("state = %s, want done", got.State)
+	}
+}
+
 // TestProcessEditTailEndpoint covers the BACI-294 PUT /process/tail
 // surface: editing the pending tail keeps the locked prefix, a dry_run
 // projects without writing, a ship-not-last tail is 400 with field=stages,

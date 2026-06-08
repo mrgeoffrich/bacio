@@ -93,6 +93,7 @@ func newRouter(d deps) http.Handler {
 	mux.HandleFunc("POST /repos/{prefix}/issues/{key}/jobs/{seq}/rerun", d.handleIssueJobRerun)
 	mux.HandleFunc("PUT /repos/{prefix}/issues/{key}/engine-mode", d.handleIssueEngineMode)
 	mux.HandleFunc("POST /repos/{prefix}/issues/{key}/ship", d.handleIssueShip)
+	mux.HandleFunc("POST /repos/{prefix}/issues/{key}/mark-done", d.handleIssueMarkDone)
 	mux.HandleFunc("GET /repos/{prefix}/auto-ship", d.handleRepoAutoShipGet)
 	mux.HandleFunc("PUT /repos/{prefix}/auto-ship", d.handleRepoAutoShip)
 	// BACI-288: per-repo Pipeline Backlog-column collapse preference

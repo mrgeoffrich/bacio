@@ -116,6 +116,35 @@ func TestProcessFromStages(t *testing.T) {
 			t.Error("expected error for two terminal sentinels (ship then shelve)")
 		}
 	})
+
+	t.Run("mark_done_last", func(t *testing.T) {
+		// BACI-352: mark_done is a final-only sentinel like ship/shelve, and
+		// renders "Done" via the sentinel-label lookup (not the raw mode).
+		p, err := ProcessFromStages([]string{BuiltinTemplateImplement, MarkDoneJobMode})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(p.Stages) != 2 || p.Stages[1] != MarkDoneJobMode {
+			t.Fatalf("Stages = %v, want [implement mark_done]", p.Stages)
+		}
+		if p.Name != "Implement → Done" {
+			t.Errorf("Name = %q, want %q", p.Name, "Implement → Done")
+		}
+	})
+
+	t.Run("mark_done_not_last", func(t *testing.T) {
+		if _, err := ProcessFromStages([]string{MarkDoneJobMode, BuiltinTemplateImplement}); err == nil {
+			t.Error("expected error for mark_done before the final stage")
+		}
+	})
+
+	t.Run("ship_then_mark_done_rejected", func(t *testing.T) {
+		// At most one terminal sentinel: ship is not last, so the chain
+		// ending in both ship and mark_done is rejected.
+		if _, err := ProcessFromStages([]string{BuiltinTemplateImplement, ShipJobMode, MarkDoneJobMode}); err == nil {
+			t.Error("expected error for two terminal sentinels (ship then mark_done)")
+		}
+	})
 }
 
 // TestProcessBySlugScopeShelve: the BACI-332 named preset resolves to the
@@ -234,6 +263,30 @@ func TestProcessFromStagesWithPrefix(t *testing.T) {
 			[]string{BuiltinTemplatePreamble},
 		); err == nil {
 			t.Error("expected error for _dispatch_preamble in the tail")
+		}
+	})
+
+	t.Run("mark_done_in_tail_last", func(t *testing.T) {
+		// BACI-352: mark_done is final-only across the whole chain, same as
+		// ship/shelve on the edit path.
+		p, err := ProcessFromStagesWithPrefix(
+			[]string{BuiltinTemplateImplement},
+			[]string{BuiltinTemplateReview, MarkDoneJobMode},
+		)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(p.Stages) != 2 || p.Stages[1] != MarkDoneJobMode {
+			t.Fatalf("Stages = %v, want [review mark_done] (tail only)", p.Stages)
+		}
+	})
+
+	t.Run("mark_done_in_tail_not_last", func(t *testing.T) {
+		if _, err := ProcessFromStagesWithPrefix(
+			[]string{BuiltinTemplatePlan},
+			[]string{MarkDoneJobMode, BuiltinTemplateImplement},
+		); err == nil {
+			t.Error("expected error for mark_done before the final stage of the tail")
 		}
 	})
 }

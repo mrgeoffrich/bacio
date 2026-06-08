@@ -586,6 +586,20 @@ export async function shipCard(
   }
 }
 
+// markDoneCard is the in_pipeline → done hand-off (BACI-352): close a card
+// out as done directly, bypassing the Shipping column and the ship agent.
+// The direct-done counterpart to shipCard. Returns the updated card.
+export async function markDoneCard(
+  repoPrefix: string,
+  key: string,
+): Promise<BoardCard> {
+  try {
+    return await BoardService.MarkCardDone(repoPrefix, key);
+  } catch (err) {
+    throw normalize(err);
+  }
+}
+
 // setAutoShip toggles the per-repo Shipping-column auto-ship setting.
 // Returns the persisted value.
 export async function setAutoShip(

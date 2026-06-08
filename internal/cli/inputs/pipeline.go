@@ -56,6 +56,13 @@ type IssueShipInput struct {
 	Key string `json:"key"`
 }
 
+// IssueMarkDoneInput is the payload for `bacio issue mark-done --json`
+// (BACI-352) — the in_pipeline → done hand-off, bypassing the Shipping
+// column and the ship agent. Key-only.
+type IssueMarkDoneInput struct {
+	Key string `json:"key"`
+}
+
 // RepoAutoShipInput is the payload for `bacio issue auto-ship --json` and
 // PUT …/auto-ship — the per-repo Shipping-column auto-ship toggle.
 type RepoAutoShipInput struct {

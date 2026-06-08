@@ -105,6 +105,23 @@ func (c *remoteClient) ShipIssue(ctx context.Context, repo *model.Repo, key stri
 	return &out, nil
 }
 
+func (c *remoteClient) MarkDoneIssue(ctx context.Context, repo *model.Repo, key string, dryRun bool) (*model.Issue, error) {
+	canonical, err := c.ResolveIssueKey(ctx, repo, key)
+	if err != nil {
+		return nil, err
+	}
+	prefix := strings.SplitN(canonical, "-", 2)[0]
+	q := url.Values{}
+	if dryRun {
+		q.Set("dry_run", "true")
+	}
+	var out model.Issue
+	if err := c.do(ctx, http.MethodPost, "/repos/"+prefix+"/issues/"+canonical+"/mark-done", q, nil, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 func (c *remoteClient) StartPipelineJob(ctx context.Context, repo *model.Repo, key string) ([]*model.PipelineJob, error) {
 	return c.jobControl(ctx, repo, key, "start")
 }

@@ -107,6 +107,31 @@ func TestPipelineClientOps(t *testing.T) {
 		t.Fatalf("shipped state = %s, want to_be_shipped", shipped.State)
 	}
 
+	// Mark-done hand-off → done (BACI-352). Seed a card with a mark_done-
+	// terminal chain; dry-run projects done without writing, the real call
+	// lands the card in done (not to_be_shipped).
+	issD, _ := c.store.CreateIssue(repo.ID, nil, "card-done", "", model.StateInPipeline, nil, "", "")
+	if _, err := c.SetIssueProcess(ctx, repo, issD.Key, "", []string{"implement", "mark_done"}, false); err != nil {
+		t.Fatalf("SetIssueProcess mark_done: %v", err)
+	}
+	projDone, err := c.MarkDoneIssue(ctx, repo, issD.Key, true)
+	if err != nil {
+		t.Fatalf("MarkDoneIssue dry-run: %v", err)
+	}
+	if projDone.State != model.StateDone {
+		t.Fatalf("dry-run mark-done state = %s, want done", projDone.State)
+	}
+	if got, _ := c.store.GetIssueByID(issD.ID); got.State != model.StateInPipeline {
+		t.Fatalf("dry-run mark-done wrote state = %s, want in_pipeline (no write)", got.State)
+	}
+	done, err := c.MarkDoneIssue(ctx, repo, issD.Key, false)
+	if err != nil {
+		t.Fatalf("MarkDoneIssue: %v", err)
+	}
+	if done.State != model.StateDone {
+		t.Fatalf("mark-done state = %s, want done", done.State)
+	}
+
 	// Auto-ship toggle.
 	val, err := c.SetRepoAutoShip(ctx, repo, true, false)
 	if err != nil || !val {

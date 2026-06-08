@@ -71,6 +71,9 @@ var (
 	ExampleIssueShip = IssueShipInput{
 		Key: "MINI-42",
 	}
+	ExampleIssueMarkDone = IssueMarkDoneInput{
+		Key: "MINI-42",
+	}
 	ExampleRepoAutoShip = RepoAutoShipInput{
 		Enabled: true,
 	}

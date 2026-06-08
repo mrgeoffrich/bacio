@@ -3237,6 +3237,16 @@ export async function shipCard(
   return cardFromIssue(iss);
 }
 
+export async function markDoneCard(
+  repoPrefix: string,
+  key: string,
+): Promise<BoardCard> {
+  const iss = await call<ApiIssue>(`/repos/${repoPrefix}/issues/${key}/mark-done`, {
+    method: 'POST',
+  });
+  return cardFromIssue(iss);
+}
+
 export async function setAutoShip(
   repoPrefix: string,
   enabled: boolean,

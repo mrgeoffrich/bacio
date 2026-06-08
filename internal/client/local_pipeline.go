@@ -165,6 +165,31 @@ func (c *localClient) ShipIssue(ctx context.Context, repo *model.Repo, key strin
 	return c.store.GetIssueByID(iss.ID)
 }
 
+// MarkDoneIssue is the in_pipeline → done hand-off (the manual Mark-done
+// control / in-process Mark-done stage, BACI-352): close the card out as
+// done without touching the Shipping column or dispatching the ship agent.
+// Returns the refreshed issue.
+func (c *localClient) MarkDoneIssue(ctx context.Context, repo *model.Repo, key string, dryRun bool) (*model.Issue, error) {
+	iss, err := c.GetIssueByKey(ctx, repo, key)
+	if err != nil {
+		return nil, err
+	}
+	if dryRun {
+		projected := *iss
+		projected.State = model.StateDone
+		return &projected, nil
+	}
+	if _, err := pipeline.New(c.store).MarkDone(iss.ID); err != nil {
+		return nil, err
+	}
+	c.recordOp(model.HistoryEntry{
+		RepoID: &iss.RepoID, RepoPrefix: repo.Prefix,
+		Op: "issue.mark_done", Kind: "issue",
+		TargetID: &iss.ID, TargetLabel: iss.Key,
+	})
+	return c.store.GetIssueByID(iss.ID)
+}
+
 // StartPipelineJob is the manual Start control: advance the card one
 // step (start next job / hand off). Returns the refreshed chain.
 func (c *localClient) StartPipelineJob(ctx context.Context, repo *model.Repo, key string) ([]*model.PipelineJob, error) {

@@ -424,6 +424,17 @@ export function MarkAllNotificationsRead(): $CancellablePromise<number> {
 }
 
 /**
+ * MarkCardDone is the in_pipeline → done hand-off (BACI-352): close a card
+ * out as done directly, bypassing the Shipping column and the ship agent.
+ * The direct-done counterpart to ShipCard.
+ */
+export function MarkCardDone(repoPrefix: string, key: string): $CancellablePromise<$models.BoardCard> {
+    return $Call.ByID(3684593014, repoPrefix, key).then(($result: any) => {
+        return $$createType1($result);
+    });
+}
+
+/**
  * MarkNotificationRead (BACI-287) stamps read_at on one notification —
  * the bell's per-row "mark read". Idempotent.
  */

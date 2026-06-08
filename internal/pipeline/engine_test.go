@@ -42,6 +42,32 @@ func seedPipelineCard(t *testing.T, s *store.Store, prefix, processSlug string, 
 	return repo, iss
 }
 
+// seedPipelineCardStages is the explicit-stages twin of seedPipelineCard
+// for chains the named presets don't enumerate (e.g. a mark_done-terminal
+// chain — BACI-352 deliberately adds no preset for it).
+func seedPipelineCardStages(t *testing.T, s *store.Store, prefix string, stages []string, mode model.EngineMode) (*model.Repo, *model.Issue) {
+	t.Helper()
+	repo, err := s.CreateRepo(prefix, "engine-test", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("create repo: %v", err)
+	}
+	iss, err := s.CreateIssue(repo.ID, nil, "card", "", model.StateInPipeline, nil, "", "")
+	if err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	proc, err := model.ProcessFromStages(stages)
+	if err != nil {
+		t.Fatalf("process from stages: %v", err)
+	}
+	if _, err := s.SetIssueProcess(iss.ID, proc); err != nil {
+		t.Fatalf("set process: %v", err)
+	}
+	if err := s.SetIssueEngineMode(iss.ID, mode); err != nil {
+		t.Fatalf("set engine mode: %v", err)
+	}
+	return repo, iss
+}
+
 func runningJob(t *testing.T, s *store.Store, issueID int64) *model.PipelineJob {
 	t.Helper()
 	jobs, err := s.ListPipelineJobs(issueID)
@@ -669,6 +695,110 @@ func TestEngineShelveClearsChainForRepipe(t *testing.T) {
 	jobs, _ = s.ListPipelineJobs(iss.ID)
 	if len(jobs) != 2 {
 		t.Fatalf("re-piped chain has %d jobs, want 2 (plan-implement)", len(jobs))
+	}
+}
+
+// TestEngineMarkDoneReachesDone (BACI-352): an Auto card with chain
+// [implement, mark_done] runs implement, then on reaching the mark_done
+// sentinel moves straight to done — never entering to_be_shipped and never
+// dispatching a ship agent. The sentinel job is marked complete and Auto is
+// disarmed by the in_pipeline → done teardown.
+func TestEngineMarkDoneReachesDone(t *testing.T) {
+	s := newEngineStore(t)
+	_, iss := seedPipelineCardStages(t, s, "MKD1", []string{model.BuiltinTemplateImplement, model.MarkDoneJobMode}, model.EngineAuto)
+	eng := New(s)
+
+	// Tick 1: starts the implement job.
+	if _, err := eng.Tick(); err != nil {
+		t.Fatalf("tick 1: %v", err)
+	}
+	r := runningJob(t, s, iss.ID)
+	if r == nil || r.Mode != model.BuiltinTemplateImplement {
+		t.Fatalf("after tick 1 running = %+v, want implement", r)
+	}
+	simulateWorkerAck(t, s, *r.DispatchID)
+
+	// Tick 2: implement completes, next is the mark_done sentinel → done.
+	advances, err := eng.Tick()
+	if err != nil {
+		t.Fatalf("tick 2: %v", err)
+	}
+	got, _ := s.GetIssueByID(iss.ID)
+	if got.State != model.StateDone {
+		t.Fatalf("state = %s, want done", got.State)
+	}
+	var sawMarkDone bool
+	for _, a := range advances {
+		if a.Kind == "mark_done" {
+			sawMarkDone = true
+		}
+	}
+	if !sawMarkDone {
+		t.Fatalf("advances = %+v, want one mark_done", advances)
+	}
+	// Auto disarmed and pause cleared by the teardown.
+	if got.EngineMode == model.EngineAuto {
+		t.Errorf("engine mode = %s, want auto disarmed after mark_done", got.EngineMode)
+	}
+	if got.EnginePauseReason != "" {
+		t.Errorf("pause reason = %q, want cleared", got.EnginePauseReason)
+	}
+	// No ship was ever dispatched — mark_done bypasses Shipping entirely.
+	if d, _ := s.LatestDispatchForIssueMode(iss.ID, model.DispatchModeShip); d != nil {
+		t.Fatalf("mark_done dispatched a ship: %+v", d)
+	}
+	// The sentinel job reads complete in history.
+	jobs, _ := s.ListPipelineJobs(iss.ID)
+	for _, j := range jobs {
+		if j.Status != model.JobComplete {
+			t.Errorf("job seq=%d mode=%s status=%s, want complete", j.Sequence, j.Mode, j.Status)
+		}
+	}
+}
+
+// TestEngineManualMarkDone (BACI-352): the exported MarkDone control on an
+// in_pipeline card lands it in done (the manual "Mark done" button / CLI
+// path), mirroring TestEngineManualShip for the ship hand-off.
+func TestEngineManualMarkDone(t *testing.T) {
+	s := newEngineStore(t)
+	_, iss := seedPipelineCardStages(t, s, "MKD2", []string{model.BuiltinTemplateImplement, model.MarkDoneJobMode}, model.EngineOff)
+	eng := New(s)
+
+	advances, err := eng.MarkDone(iss.ID)
+	if err != nil {
+		t.Fatalf("MarkDone: %v", err)
+	}
+	got, _ := s.GetIssueByID(iss.ID)
+	if got.State != model.StateDone {
+		t.Fatalf("state = %s, want done after manual MarkDone", got.State)
+	}
+	if len(advances) != 1 || advances[0].Kind != "mark_done" {
+		t.Fatalf("advances = %+v, want one mark_done", advances)
+	}
+}
+
+// TestEngineMarkDoneNonPipelineNoop (BACI-352): MarkDone on a card that
+// isn't in_pipeline is a no-op (nil advance), matching Handoff's guard.
+func TestEngineMarkDoneNonPipelineNoop(t *testing.T) {
+	s := newEngineStore(t)
+	repo, err := s.CreateRepo("MKD3", "mkd3", t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("repo: %v", err)
+	}
+	iss, err := s.CreateIssue(repo.ID, nil, "card", "", model.StateTodo, nil, "", "")
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	eng := New(s)
+	advances, err := eng.MarkDone(iss.ID)
+	if err != nil {
+		t.Fatalf("MarkDone: %v", err)
+	}
+	if len(advances) != 0 {
+		t.Fatalf("advances = %+v, want none for a non-pipeline card", advances)
+	}
+	if got, _ := s.GetIssueByID(iss.ID); got.State != model.StateTodo {
+		t.Fatalf("state = %s, want todo (unchanged)", got.State)
 	}
 }
 

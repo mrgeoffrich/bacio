@@ -295,6 +295,11 @@ type Client interface {
 	// so the user must Stop first. Returns the refreshed (empty) chain.
 	ResetIssueProcess(ctx context.Context, repo *model.Repo, key string, dryRun bool) ([]*model.PipelineJob, error)
 	ShipIssue(ctx context.Context, repo *model.Repo, key string, dryRun bool) (*model.Issue, error)
+	// MarkDoneIssue (BACI-352) is the in_pipeline → done hand-off (the manual
+	// Mark-done control / in-process Mark-done stage). Unlike ShipIssue it
+	// bypasses the Shipping column and the ship agent entirely, landing the
+	// card straight in done.
+	MarkDoneIssue(ctx context.Context, repo *model.Repo, key string, dryRun bool) (*model.Issue, error)
 	SetRepoAutoShip(ctx context.Context, repo *model.Repo, enabled, dryRun bool) (bool, error)
 	// GetRepoAutoShip reads the per-repo Shipping auto-ship toggle — the
 	// DB value the controller's auto-ship ticker acts on, so the UI can
