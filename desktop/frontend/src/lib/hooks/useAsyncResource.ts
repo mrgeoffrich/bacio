@@ -72,11 +72,13 @@ export function useAsyncResource<T>(
   const onErrorRef = useRef(onError);
   const headlineRef = useRef(errorHeadline);
   const silentRef = useRef(silent);
+  const enabledRef = useRef(enabled);
   useEffect(() => {
     fetcherRef.current = fetcher;
     onErrorRef.current = onError;
     headlineRef.current = errorHeadline;
     silentRef.current = silent;
+    enabledRef.current = enabled;
   });
 
   // Monotonic request sequence: a load captures the value at its start and
@@ -119,8 +121,15 @@ export function useAsyncResource<T>(
       });
   }, []);
 
+  // A manual refresh on a disabled resource is a no-op — the same guard the
+  // hand-rolled refreshers opened with (`if (!activeBoard) return`), so a
+  // post-mutation / view-switch refresh fired before a board is picked
+  // doesn't fetch a board-less endpoint.
   const refresh = useCallback(
-    (opts?: { silent?: boolean }) => run(false, opts?.silent ?? false),
+    (opts?: { silent?: boolean }) => {
+      if (!enabledRef.current) return;
+      run(false, opts?.silent ?? false);
+    },
     [run],
   );
 

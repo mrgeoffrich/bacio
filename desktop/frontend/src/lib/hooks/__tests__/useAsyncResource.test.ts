@@ -171,6 +171,22 @@ describe('useAsyncResource', () => {
     expect(result.current.data).toBe('fast');
   });
 
+  it('refresh() is a no-op while the resource is disabled', async () => {
+    const fetcher = vi.fn(() => Promise.resolve('v'));
+    const { result, rerender } = renderHook(
+      ({ on }) => useAsyncResource(fetcher, 'init', [], { enabled: on }),
+      { initialProps: { on: false } },
+    );
+
+    act(() => result.current.refresh());
+    expect(fetcher).not.toHaveBeenCalled(); // disabled → guarded out
+
+    rerender({ on: true });
+    await waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1)); // eager load on enable
+    act(() => result.current.refresh());
+    expect(fetcher).toHaveBeenCalledTimes(2); // now it fetches
+  });
+
   it('exposes setData for an optimistic local update', async () => {
     const { result } = renderHook(() =>
       useAsyncResource<string[]>(() => Promise.resolve(['a']), [], []),
