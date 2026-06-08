@@ -36,53 +36,6 @@ export interface Board {
   syncLastError?: string;
 }
 
-// SyncStatusApi mirrors api.SyncStatusOut — the wire shape of the
-// BACI-89 GET /sync endpoint.
-interface SyncStatusApi {
-  prefix: string;
-  configured: boolean;
-  background_enabled: boolean;
-  in_progress: boolean;
-  last_sync_at?: string;
-  last_error?: string;
-  remote?: string;
-}
-
-// SyncRegistryApi / SyncRepoApi / MemberProjectApi / UnsyncedProjectApi
-// mirror api.SyncRegistryOut and friends — the wire shape of the
-// BACI-107 GET /sync/repos endpoint. Snake-case on the wire matches
-// every other api.http.ts wire DTO; getSyncRegistry() below reshapes
-// to the camelCase SyncRegistry the React tree consumes.
-interface SyncRegistryApi {
-  sync_repos: SyncRepoApi[];
-  unsynced_projects: UnsyncedProjectApi[];
-}
-
-interface SyncRepoApi {
-  remote_url: string;
-  label: string;
-  local_path: string;
-  cloned_at: string;
-  last_sync_at?: string;
-  last_error?: string;
-  in_progress: boolean;
-  projects: MemberProjectApi[];
-}
-
-interface MemberProjectApi {
-  prefix: string;
-  name: string;
-  uuid?: string;
-  status: 'linked' | 'phantom' | 'absent';
-}
-
-interface UnsyncedProjectApi {
-  prefix: string;
-  name: string;
-  uuid: string;
-  path: string;
-}
-
 // SyncRegistry / SyncRepoEntry / MemberProject / UnsyncedProject are
 // the camelCase DTOs the React tree consumes. Same shape as the
 // SyncRegistryApi wire types, just snake → camel on the field names.
@@ -836,6 +789,19 @@ import type {
 } from './api/wire/proxy';
 import { reshapeTemplate } from './api/wire/template';
 import type { ApiPromptTemplate, ApiRestoreResponse } from './api/wire/template';
+import {
+  boardWithSync,
+  reshapeSyncRegistry,
+  reshapeSyncSetup,
+  reshapeRepoLinkResult,
+} from './api/wire/sync';
+import type {
+  ApiRepo,
+  SyncStatusApi,
+  SyncRegistryApi,
+  SyncSetupApi,
+  RepoLinkResultApi,
+} from './api/wire/sync';
 
 export interface PromptTemplateDTO {
   slug: string;
@@ -994,56 +960,12 @@ export async function listBoards(): Promise<Board[]> {
   return boards;
 }
 
-// boardWithSync folds a SyncStatusApi (possibly undefined) into a
-// Board. Centralised so listBoards and addRepository stay in lockstep.
-function boardWithSync(
-  prefix: string,
-  name: string,
-  issueCount: number,
-  sync: SyncStatusApi | undefined,
-): Board {
-  return {
-    prefix,
-    name,
-    issueCount,
-    syncEnabled: sync?.configured ?? false,
-    syncInProgress: sync?.in_progress ?? false,
-    syncLastAt: sync?.last_sync_at,
-    syncLastError: sync?.last_error,
-  };
-}
-
 // getSyncRegistry fetches BACI-107's GET /sync/repos and reshapes the
 // snake-case wire payload to the camelCase SyncRegistry the React
-// tree consumes. The reshape is mechanical — every field is renamed
-// 1:1 — so the helper stays a thin map() over the two slices.
+// tree consumes (see reshapeSyncRegistry in ./api/wire/sync).
 export async function getSyncRegistry(): Promise<SyncRegistry> {
   const wire = await call<SyncRegistryApi>('/sync/repos');
-  return {
-    syncRepos: wire.sync_repos.map(reshapeSyncRepo),
-    unsyncedProjects: wire.unsynced_projects.map(reshapeUnsyncedProject),
-  };
-}
-
-function reshapeSyncRepo(r: SyncRepoApi): SyncRepoEntry {
-  return {
-    remoteUrl: r.remote_url,
-    label: r.label,
-    localPath: r.local_path,
-    clonedAt: r.cloned_at,
-    lastSyncAt: r.last_sync_at,
-    lastError: r.last_error,
-    inProgress: r.in_progress,
-    projects: r.projects.map(reshapeMemberProject),
-  };
-}
-
-function reshapeMemberProject(m: MemberProjectApi): MemberProject {
-  return { prefix: m.prefix, name: m.name, uuid: m.uuid, status: m.status };
-}
-
-function reshapeUnsyncedProject(u: UnsyncedProjectApi): UnsyncedProject {
-  return { prefix: u.prefix, name: u.name, uuid: u.uuid, path: u.path };
+  return reshapeSyncRegistry(wire);
 }
 
 export async function listColumns(): Promise<BoardColumn[]> {
@@ -1089,11 +1011,6 @@ export async function addRepository(payload?: AddRepositoryPayload): Promise<Boa
     name: payload.name,
   };
   if (payload.prefix) body.prefix = payload.prefix.toUpperCase();
-  interface ApiRepo {
-    prefix: string;
-    name: string;
-    path: string;
-  }
   const repo = await call<ApiRepo>('/repos', { method: 'POST', body });
   // Match listBoards: issueCount=0 on a freshly-created repo. A
   // freshly-added repo almost never has sync configured yet — the
@@ -2075,67 +1992,6 @@ export class SyncSetupCollisionError extends Error {
 // Init/Clone are the engine result structs — only the per-mode field
 // for the chosen mode is populated. preview_collisions is set on the
 // 409 path only.
-interface SyncSetupApi {
-  mode: string;
-  init?: {
-    local_path?: string;
-    remote?: string;
-    commit_sha?: string;
-    pushed?: boolean;
-    attached?: boolean;
-  };
-  clone?: {
-    local_path?: string;
-    remote?: string;
-  };
-  preview_collisions?: {
-    renumbered?: Array<{
-      prefix: string;
-      uuid: string;
-      old_number: number;
-      new_number: number;
-    }>;
-    renamed?: Array<{
-      kind: string;
-      prefix?: string;
-      uuid: string;
-      old: string;
-      new: string;
-    }>;
-  };
-}
-
-function reshapeSyncSetup(wire: SyncSetupApi): SyncSetupDTO {
-  const out: SyncSetupDTO = { mode: wire.mode };
-  if (wire.init) {
-    out.localPath = wire.init.local_path;
-    out.remote = wire.init.remote;
-    out.commitSHA = wire.init.commit_sha;
-    out.pushed = wire.init.pushed;
-    out.attached = wire.init.attached;
-  } else if (wire.clone) {
-    out.localPath = wire.clone.local_path;
-    out.remote = wire.clone.remote;
-  }
-  if (wire.preview_collisions) {
-    out.previewCollisions = {
-      renumbered: (wire.preview_collisions.renumbered ?? []).map(r => ({
-        prefix: r.prefix,
-        oldNumber: r.old_number,
-        newNumber: r.new_number,
-        uuid: r.uuid,
-      })),
-      renamed: (wire.preview_collisions.renamed ?? []).map(r => ({
-        kind: r.kind,
-        old: r.old,
-        new: r.new,
-        uuid: r.uuid,
-      })),
-    };
-  }
-  return out;
-}
-
 export async function setupSync(
   prefix: string,
   payload: SyncSetupPayload,
@@ -2205,13 +2061,6 @@ export interface RepoLinkResult {
 // stays snake_case in line with the rest of api.http.ts.
 export type RepoLinkResultDTO = RepoLinkResult;
 
-interface RepoLinkResultApi {
-  repo: { prefix: string; path: string };
-  sync_remote_url: string;
-  already_linked?: boolean;
-  would_link?: boolean;
-}
-
 // linkPhantomRepo (BACI-112) — POST /repos/{prefix}/link with body
 // {path: ...}. Mirrors the Wails-bound seam in api.ts. Errors come
 // back as plain Error from call(); the caller renders the human
@@ -2225,12 +2074,7 @@ export async function linkPhantomRepo(
     `/repos/${encodeURIComponent(prefix)}/link`,
     { method: 'POST', body: { path } },
   );
-  return {
-    prefix: res.repo?.prefix ?? prefix,
-    path: res.repo?.path ?? path,
-    syncRemoteUrl: res.sync_remote_url ?? '',
-    alreadyLinked: !!res.already_linked,
-  };
+  return reshapeRepoLinkResult(res, prefix, path);
 }
 
 // ---------- Sync preferences (BACI-89 / BACI-108) ----------
