@@ -148,6 +148,37 @@ it (the value is preserved through `feature edit`); if you need to
 flip a wrongly-set branch later, use `bacio feature edit --branch
 ""` to clear or `--branch feat/<new>` to rename.
 
+**Push the integration branch to `origin` (feature-branch workflow
+only).** Setting `branch_name = feat/<feature-slug>` is only half the
+job. BACI-226's resolver hands `feat/<feature-slug>` to every phase
+issue's dispatch as its `<base_branch>`, and the implement worker's
+preamble then runs `git fetch origin feat/<feature-slug>` +
+`git reset --hard origin/feat/<feature-slug>` *before touching a file*
+— and **stops with an error if that branch isn't on the remote** (it
+never creates the branch itself; a missing branch is a deliberate "real
+signal" guard). So the branch must exist on `origin` before the first
+implement dispatch fires, and `plan_large` is the only agent that knows
+the name at creation time. Immediately after creating the feature, push
+the integration branch off the current `main` tip — but only if it
+isn't already on the remote, so a re-plan never clobbers in-flight phase
+work:
+
+```bash
+# Feature-branch workflow ONLY — skip this whole step for ship-to-main.
+if git ls-remote --exit-code --heads origin feat/<feature-slug> >/dev/null 2>&1; then
+  echo "feat/<feature-slug> already on origin — leaving it as-is"
+else
+  git push origin origin/main:refs/heads/feat/<feature-slug>
+fi
+```
+
+`origin/main:refs/heads/feat/<feature-slug>` creates the remote branch
+at the current `origin/main` tip without checking it out or touching
+the worktree HEAD (the preamble already fast-forwarded HEAD onto
+`origin/main`, so they agree). **Skip this entirely for a ship-to-main
+feature** — with no `branch_name` there is no integration branch, and
+pushing one would be dead weight on the remote that nothing consumes.
+
 ### b) File the per-phase issues
 
 For each phase, in order, file:
@@ -527,13 +558,16 @@ bacio comment add <issue_id> --as <your-name> --body-file /tmp/plan-large-commen
   by design — the feature link is what surfaces the plan in every
   phase issue's brief.
 - **Feature branch ↔ terminal merge is an all-or-nothing pair.**
-  If `features.branch_name` is set, file the terminal merge issue
-  with `--base-branch main` and block it on every per-phase impl.
-  If `branch_name` is empty, do not file a terminal merge issue —
-  it would just shadow the regular ship-to-main flow. Re-running
-  this mode on a feature that already has `branch_name` set must
-  not double-file the terminal merge issue (section c idempotency
-  check).
+  If `features.branch_name` is set, push `feat/<feature-slug>` to
+  `origin` (section a) so the first implement worker can position
+  against it, AND file the terminal merge issue with
+  `--base-branch main` and block it on every per-phase impl.
+  If `branch_name` is empty, push no branch and do not file a
+  terminal merge issue — both would just shadow the regular
+  ship-to-main flow. Re-running this mode on a feature that already
+  has `branch_name` set must not re-push over an existing remote
+  branch (section a idempotency check) and must not double-file the
+  terminal merge issue (section c idempotency check).
 - **Don't add follow-up tickets the user didn't ask for.** The
   filing-new-issues rule from the preamble still applies to
   *adjacent* work you spot during planning. The phase issues this
