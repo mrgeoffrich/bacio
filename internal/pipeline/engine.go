@@ -296,13 +296,14 @@ func (e *Engine) tickIssue(iss *model.Issue) ([]Advance, error) {
 	//    done/cancelled falls through to advanceChain and auto-resumes with
 	//    no re-arm. Gate the Auto path only — a manual Start (StartNext)
 	//    deliberately bypasses it, letting a human consciously start despite
-	//    a blocker. The Ship/Shelve hand-offs are never gated: they're
-	//    reached only after all agent work is done and carry no dispatch.
+	//    a blocker. The Ship/Shelve/Mark-done hand-offs are never gated:
+	//    they're reached only after all agent work is done and carry no
+	//    dispatch.
 	//    Reached only with no job running (a running job short-circuits in
 	//    step 1), so the blocked pause can't collide with the open_question
 	//    pause reconcileRunning writes while a job is in flight.
 	if next := firstByStatus(jobs, model.JobPending); next != nil &&
-		!next.IsShipHandoff() && !next.IsShelveHandoff() {
+		!next.IsShipHandoff() && !next.IsShelveHandoff() && !next.IsMarkDoneHandoff() {
 		blocked, err := e.st.IssueHasOpenBlockers(iss.ID)
 		if err != nil {
 			return advances, err
@@ -339,6 +340,9 @@ func (e *Engine) advanceChain(iss *model.Issue, jobs []*model.PipelineJob) ([]Ad
 	}
 	if next.IsShelveHandoff() {
 		return e.shelve(iss)
+	}
+	if next.IsMarkDoneHandoff() {
+		return e.markDone(iss)
 	}
 	return e.startJob(iss, next)
 }
@@ -660,6 +664,28 @@ func (e *Engine) Handoff(issueID int64) ([]Advance, error) {
 	return e.handoff(iss)
 }
 
+// MarkDone is the manual "Mark done" control (and the in-process Mark-done
+// stage): move an in_pipeline card straight to done (BACI-352), bypassing
+// the Shipping column and the ship agent. A no-op when the card isn't
+// in_pipeline. Same transition the Auto chain reaches at the mark_done
+// sentinel. Unlike Handoff (which leaves a running job untouched on its
+// to_be_shipped path) the in_pipeline → done teardown cancels any in-flight
+// job, so this is the CLI-only "force done now" case; the on-card button is
+// gated on all agent jobs being complete.
+func (e *Engine) MarkDone(issueID int64) ([]Advance, error) {
+	if e == nil || e.st == nil {
+		return nil, nil
+	}
+	iss, err := e.st.GetIssueByID(issueID)
+	if err != nil {
+		return nil, err
+	}
+	if iss.State != model.StateInPipeline {
+		return nil, nil
+	}
+	return e.markDone(iss)
+}
+
 // reconcileRunning inspects the running job's dispatch. Returns
 // completed=true only when the job moved to complete (so the caller may
 // advance the chain). A cancelled dispatch halts the chain (Auto off);
@@ -794,6 +820,33 @@ func (e *Engine) shelve(iss *model.Issue) ([]Advance, error) {
 		return nil, err
 	}
 	return []Advance{e.advance(iss, "shelve", "-> todo")}, nil
+}
+
+// markDone closes the card out as done at the Mark-done sentinel
+// (BACI-352): the direct-done counterpart of handoff. It marks any pending
+// mark_done sentinel job complete (so the chain reads cleanly in history),
+// then flips the issue straight to done — bypassing the Shipping column and
+// the ship agent entirely. The in_pipeline → done transition in
+// SetIssueState runs the cancelRunningPipelineJob teardown (disarm Auto,
+// clear the pause reason, cancel any in-flight job), so no extra clear is
+// needed here. Idempotent: if the issue already left in_pipeline,
+// SetIssueState is a no-op on the non-pipeline state.
+func (e *Engine) markDone(iss *model.Issue) ([]Advance, error) {
+	jobs, err := e.st.ListPipelineJobs(iss.ID)
+	if err != nil {
+		return nil, err
+	}
+	for _, j := range jobs {
+		if j.IsMarkDoneHandoff() && j.Status == model.JobPending {
+			if err := e.st.SetPipelineJobStatus(j.ID, model.JobComplete); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if err := e.st.SetIssueState(iss.ID, model.StateDone); err != nil {
+		return nil, err
+	}
+	return []Advance{e.advance(iss, "mark_done", "-> done")}, nil
 }
 
 // setPauseReason writes the engine pause reason iff it changed — avoids a

@@ -1054,6 +1054,22 @@ func (b *BoardService) ShipCard(repoPrefix, key string) (BoardCard, error) {
 	return cardFromIssue(iss, iss.Taken), nil
 }
 
+// MarkCardDone is the in_pipeline → done hand-off (BACI-352): close a card
+// out as done directly, bypassing the Shipping column and the ship agent.
+// The direct-done counterpart to ShipCard.
+func (b *BoardService) MarkCardDone(repoPrefix, key string) (BoardCard, error) {
+	ctx := context.Background()
+	repo, err := b.resolveRepoForKey(ctx, repoPrefix, key)
+	if err != nil {
+		return BoardCard{}, err
+	}
+	iss, err := b.client.MarkDoneIssue(ctx, repo, key, false)
+	if err != nil {
+		return BoardCard{}, err
+	}
+	return cardFromIssue(iss, iss.Taken), nil
+}
+
 func (b *BoardService) SetAutoShip(repoPrefix string, enabled bool) (bool, error) {
 	ctx := context.Background()
 	repo, err := b.client.GetRepoByPrefix(ctx, repoPrefix)

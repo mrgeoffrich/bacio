@@ -915,6 +915,27 @@ export default function App() {
       });
   }, [activeBoard, refreshCards]);
 
+  // BACI-352: Mark-done hand-off — close an in_pipeline card out as done
+  // directly, bypassing the Shipping column and the ship agent. The direct-
+  // done counterpart to shipCardFromPipeline. Optimistic column flip to
+  // 'done' (the card leaves the Pipeline columns), then a non-silent refresh
+  // to reconcile — matching the drag-to-done path's visible refresh.
+  const markDoneCardFromPipeline = useCallback((key: string) => {
+    let prevCol: string | null = null;
+    setCards(cs => cs.map(c => {
+      if (c.key !== key) return c;
+      prevCol = c.column;
+      return { ...c, column: 'done' };
+    }));
+    api.markDoneCard(activeBoard, key)
+      .then(() => refreshCards())
+      .catch(err => {
+        reportError(err, { headline: "Couldn't mark the card done" });
+        const fromCol = prevCol;
+        if (fromCol) setCards(cs => cs.map(c => c.key === key ? { ...c, column: fromCol } : c));
+      });
+  }, [activeBoard, refreshCards]);
+
   // BACI-268: trash-bin drag-to-cancel. Routes a card dropped onto the
   // Pipeline's trash bin through the terminal-move path — moveCard already
   // handles the optimistic column flip (the card leaves its column),
@@ -1395,6 +1416,7 @@ export default function App() {
                   onRerunJob={rerunCardJob}
                   onSetEngineMode={setCardEngineMode}
                   onShip={shipCardFromPipeline}
+                  onMarkDone={markDoneCardFromPipeline}
                   onSetAutoShip={setRepoAutoShip}
                   onSetBacklogCollapsed={setBacklogCollapsed}
                   onSetImpactPrimary={setImpactPrimary}

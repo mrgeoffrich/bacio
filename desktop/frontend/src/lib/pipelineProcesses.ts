@@ -56,6 +56,7 @@ const STAGE_LABELS: Record<string, string> = {
   implement: 'Implement',
   ship: 'Ship',
   shelve: 'Shelve',
+  mark_done: 'Done',
   design: 'Design',
   review: 'Review',
   fix_review: 'Fix review',
@@ -80,6 +81,7 @@ const STAGE_GLYPHS: Record<string, string> = {
   implement: 'I',
   ship: '⏏',
   shelve: '⇤',
+  mark_done: '✓',
   review: 'R',
   fix_review: 'F',
   scope: 'S',
@@ -105,6 +107,14 @@ export function isShelveStage(mode: string): boolean {
   return mode === 'shelve';
 }
 
+// isMarkDoneStage reports whether a stage/job mode is the Mark-done hand-off
+// sentinel (model.MarkDoneJobMode, BACI-352) — the direct-done counterpart
+// of Ship that moves the card straight to done, bypassing the Shipping
+// column and the ship agent, rather than an agent dispatch.
+export function isMarkDoneStage(mode: string): boolean {
+  return mode === 'mark_done';
+}
+
 // EDITABLE_JOB_MODES is the palette the BACI-294 Edit Process screen offers
 // under "+ Add job" — every dispatchable builtin template mode in canonical
 // order plus the Ship hand-off sentinel. The reserved `_dispatch_preamble`
@@ -122,4 +132,5 @@ export const EDITABLE_JOB_MODES: string[] = [
   'fix_review',
   'ship',
   'shelve',
+  'mark_done',
 ];

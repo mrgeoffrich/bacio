@@ -8,7 +8,7 @@ import QuestionModal from './QuestionModal';
 import SessionMessageButton from './SessionMessageButton';
 import { documentPath } from '../lib/routes';
 import prLabel from '../lib/prLabel';
-import { stageLabel, stageGlyph, isShipStage, isShelveStage } from '../lib/pipelineProcesses';
+import { stageLabel, stageGlyph, isShipStage, isShelveStage, isMarkDoneStage } from '../lib/pipelineProcesses';
 import { blockedByMode } from '../lib/blockedByBadge';
 import * as api from '../api';
 import type { BoardCard, ProcessSelection } from '../api';
@@ -247,6 +247,7 @@ type PipelineViewProps = {
   onRerunJob?: (key: string, seq: number) => void;
   onSetEngineMode?: (key: string, mode: string) => void;
   onShip?: (key: string) => void;
+  onMarkDone?: (key: string) => void;
   onSetAutoShip?: (next: boolean) => void | Promise<unknown>;
   onSetBacklogCollapsed?: (next: boolean) => void | Promise<unknown>;
   onSetImpactPrimary?: (next: boolean) => void | Promise<unknown>;
@@ -275,6 +276,7 @@ export default function PipelineView({
   onRerunJob,
   onSetEngineMode,
   onShip,
+  onMarkDone,
   onSetAutoShip,
   onSetBacklogCollapsed,
   onSetImpactPrimary,
@@ -676,6 +678,7 @@ export default function PipelineView({
                   onRerunJob={onRerunJob}
                   onSetEngineMode={onSetEngineMode}
                   onShip={onShip}
+                  onMarkDone={onMarkDone}
                   onOpenQuestion={(id) => setActiveQuestionId(id)}
                 />
               </m.div>
@@ -1085,6 +1088,7 @@ type StageCardProps = {
   onRerunJob?: (key: string, seq: number) => void;
   onSetEngineMode?: (key: string, mode: string) => void;
   onShip?: (key: string) => void;
+  onMarkDone?: (key: string) => void;
   onOpenQuestion?: (id: number) => void;
 };
 
@@ -1113,6 +1117,7 @@ function StageCard({
   onRerunJob,
   onSetEngineMode,
   onShip,
+  onMarkDone,
   onOpenQuestion,
 }: StageCardProps) {
   const [picking, setPicking] = useState(false);
@@ -1139,13 +1144,18 @@ function StageCard({
     if (running && confirmingReset) setConfirmingReset(false);
   }, [running, confirmingReset]);
   // agentJobs are the real agent-dispatch stages — every job that isn't a
-  // terminal sentinel (Ship hand-off / Shelve demote, BACI-332). DoneBox /
-  // AbortedBox and the all-complete gate count only these, never a sentinel.
-  const agentJobs = jobs.filter(j => !isShipStage(j.mode) && !isShelveStage(j.mode));
+  // terminal sentinel (Ship hand-off / Shelve demote / Mark-done, BACI-332 /
+  // BACI-352). DoneBox / AbortedBox and the all-complete gate count only
+  // these, never a sentinel.
+  const agentJobs = jobs.filter(j => !isShipStage(j.mode) && !isShelveStage(j.mode) && !isMarkDoneStage(j.mode));
   const nextPending = jobs.find(j => j.status === 'pending');
   // hasShelveSentinel: the chain ends in a Shelve demote, so it never
   // offers a Ship hand-off — reaching the sentinel returns it to Backlog.
   const hasShelveSentinel = jobs.some(j => isShelveStage(j.mode));
+  // hasMarkDoneSentinel: the chain ends in a Mark-done sentinel (BACI-352),
+  // so it offers a "Mark done" control instead of Ship — reaching the
+  // sentinel closes the card out as done, bypassing Shipping.
+  const hasMarkDoneSentinel = jobs.some(j => isMarkDoneStage(j.mode));
   // allDone = every agent job is complete (cancelled deliberately does
   // NOT count — a Stopped job is Aborted, not "ready to hand off"; Ship
   // stays disabled on it).
@@ -1383,14 +1393,29 @@ function StageCard({
             {/* BACI-314: render Ship ONLY when shippable — an un-shippable
                 card shows no Ship control at all (was present-but-disabled).
                 BACI-332: a Shelve-terminal chain never offers Ship — reaching
-                the sentinel returns the card to Backlog, not Shipping. */}
-            {allDone && !hasShelveSentinel && (
+                the sentinel returns the card to Backlog, not Shipping.
+                BACI-352: a Mark-done-terminal chain offers "Mark done"
+                instead of Ship — it closes the card out as done directly. */}
+            {allDone && !hasShelveSentinel && !hasMarkDoneSentinel && (
               <button
                 type="button"
                 className="mk-pl-btn is-sm is-primary"
                 onClick={() => onShip?.(card.key)}
               >
                 ⏏ Ship
+              </button>
+            )}
+            {/* BACI-352: the Mark-done control — parallel to Ship, shown once
+                all agent jobs are complete on a Mark-done-terminal chain.
+                Moves the card straight to done, bypassing Shipping and the
+                ship agent. */}
+            {allDone && hasMarkDoneSentinel && (
+              <button
+                type="button"
+                className="mk-pl-btn is-sm is-done"
+                onClick={() => onMarkDone?.(card.key)}
+              >
+                ✓ Mark done
               </button>
             )}
           </footer>
@@ -1403,8 +1428,9 @@ function StageCard({
 
 // JobChain — the stepper across the top of the processing area. Each job
 // renders as a step with a status-driven dot; the Ship sentinel renders
-// as the hand-off step, and the Shelve sentinel (BACI-332) as a distinct
-// "returns to Backlog" step.
+// as the hand-off step, the Shelve sentinel (BACI-332) as a distinct
+// "returns to Backlog" step, and the Mark-done sentinel (BACI-352) as a
+// "closes out as done" step.
 type JobChainProps = { jobs: BoardCardJob[] };
 
 function JobChain({ jobs }: JobChainProps) {
@@ -1413,12 +1439,15 @@ function JobChain({ jobs }: JobChainProps) {
       {jobs.map((j, i) => {
         const ship = isShipStage(j.mode);
         const shelve = isShelveStage(j.mode);
-        // Both sentinels render as the handoff step shape; .is-shelve tints
-        // it as a "park" (return to Backlog) rather than Ship's "promote".
-        const cls = ship ? 'handoff' : shelve ? 'handoff is-shelve' : j.status;
+        const markDone = isMarkDoneStage(j.mode);
+        // All three sentinels render as the handoff step shape; .is-shelve
+        // tints it as a "park" (return to Backlog) and .is-done as a
+        // "close out" (straight to done) rather than Ship's "promote".
+        const cls = ship ? 'handoff' : shelve ? 'handoff is-shelve' : markDone ? 'handoff is-done' : j.status;
         let dot = `${i + 1}`;
         if (ship) dot = '⏏';
         else if (shelve) dot = '⇤';
+        else if (markDone) dot = '✓';
         else if (j.status === 'complete') dot = '✓';
         else if (j.status === 'running') dot = '●';
         else if (j.status === 'cancelled') dot = '✕';
@@ -1427,7 +1456,7 @@ function JobChain({ jobs }: JobChainProps) {
             {i > 0 && <span className="mk-pl-connector" />}
             <span
               className={`mk-pl-step is-${cls}`}
-              title={shelve ? 'Shelve · returns to Backlog' : undefined}
+              title={shelve ? 'Shelve · returns to Backlog' : markDone ? 'Mark done · closes out as done' : undefined}
             >
               <span className="mk-pl-dot">{dot}</span>
               <span className="mk-pl-step-lbl">{stageLabel(j.mode)}</span>
@@ -1557,14 +1586,16 @@ function QuestionPanel({ question, onOpenQuestion }: QuestionPanelProps) {
 
 // SEG_ORDER is the fixed canonical order the stage toggles render and
 // assemble in, regardless of click order (Design → Plan → Implement →
-// Ship/Shelve). Ship and Shelve are the two terminal sentinels — both
-// final-only and mutually exclusive (TERMINAL_SEGS), so at most one lights.
-const SEG_ORDER = ['design', 'plan', 'implement', 'ship', 'shelve'];
+// Ship/Shelve/Done). Ship, Shelve, and Mark-done are the three terminal
+// sentinels — all final-only and mutually exclusive (TERMINAL_SEGS), so at
+// most one lights.
+const SEG_ORDER = ['design', 'plan', 'implement', 'ship', 'shelve', 'mark_done'];
 
 // TERMINAL_SEGS are the mutually-exclusive terminal sentinels in the
 // segmented bar: Ship hands the card off to Shipping; Shelve (BACI-332)
-// returns it to Backlog. Turning one on clears the other.
-const TERMINAL_SEGS = ['ship', 'shelve'];
+// returns it to Backlog; Mark-done (BACI-352) closes it out as done.
+// Turning one on clears the others.
+const TERMINAL_SEGS = ['ship', 'shelve', 'mark_done'];
 
 // STANDALONE_OPTIONS are the no-chain single-agent rows offered below the
 // segmented stage toggles — each is a distinct agent that runs one pass
@@ -1603,7 +1634,7 @@ function ProcessMenu({ dimmedHasProcess, jobs, onPick, onPickAuto, onCancel }: P
   // no extra clicks (BACI-331).
   const existingStandalone = () =>
     STANDALONE_OPTIONS.find(slug => (jobs || []).some(j => j.mode === slug)) || null;
-  const emptyStages = (): StageFlags => ({ design: false, plan: false, implement: false, ship: false, shelve: false });
+  const emptyStages = (): StageFlags => ({ design: false, plan: false, implement: false, ship: false, shelve: false, mark_done: false });
   const [stages, setStages] = useState<StageFlags>(() => {
     if (dimmedHasProcess && existingStandalone()) {
       return emptyStages();
@@ -1616,9 +1647,10 @@ function ProcessMenu({ dimmedHasProcess, jobs, onPick, onPickAuto, onCancel }: P
         implement: modes.has('implement'),
         ship: modes.has('ship'),
         shelve: modes.has('shelve'),
+        mark_done: modes.has('mark_done'),
       };
     }
-    return { design: false, plan: true, implement: true, ship: true, shelve: false };
+    return { design: false, plan: true, implement: true, ship: true, shelve: false, mark_done: false };
   });
   // `standalone` is the selected standalone slug (or null when the
   // segmented chain is active).

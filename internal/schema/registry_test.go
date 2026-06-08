@@ -29,6 +29,30 @@ func TestRegistryHasSyncBackground(t *testing.T) {
 	t.Fatal("settings.sync-background not found in Registry slice")
 }
 
+// TestRegistryHasMarkDone (BACI-352) locks the new issue.mark-done verb
+// into the schema registry — `bacio schema show issue.mark-done` and the
+// REST /schema route both depend on this row, per the agent-CLI principle
+// that every mutating verb is schema-reachable with a worked example.
+func TestRegistryHasMarkDone(t *testing.T) {
+	all := All()
+	if _, ok := all["issue.mark-done"]; !ok {
+		t.Fatal("schema registry is missing issue.mark-done")
+	}
+	for _, e := range Registry {
+		if e.Name != "issue.mark-done" {
+			continue
+		}
+		if e.Short == "" {
+			t.Error("issue.mark-done has an empty Short")
+		}
+		if e.Example == nil {
+			t.Error("issue.mark-done has no Example")
+		}
+		return
+	}
+	t.Fatal("issue.mark-done not found in Registry slice")
+}
+
 // TestRegistryIssueSchemasHaveCustomerImpact (BACI-349) locks the new
 // customer_impact field into the published issue.add / issue.edit
 // schemas — `bacio schema show issue.add` and the REST /schema route both

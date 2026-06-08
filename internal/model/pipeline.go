@@ -135,14 +135,24 @@ const ShipJobMode = BuiltinTemplateShip
 // hand and is freely re-pipeable. Final-stage only, same as Ship.
 const ShelveJobMode = "shelve"
 
+// MarkDoneJobMode is the sentinel "mode" for the Mark-done hand-off stage
+// — the direct-done counterpart to ShipJobMode (BACI-352). Like Shelve it
+// is NOT a builtin template slug (mark-done never dispatches an agent): a
+// pipeline job carrying it is a HAND-OFF the engine recognises and uses to
+// move the card straight to done, bypassing the Shipping column and the
+// ship agent entirely. It is a distinct namespace from the `done` issue
+// State, so there is no collision. Final-stage only, same as Ship/Shelve.
+const MarkDoneJobMode = "mark_done"
+
 // sentinelLabels are the display labels for the non-dispatch terminal
-// sentinels (ship / shelve), consulted by stageDisplay before the raw
-// mode fallback so audit/display text reads "Scope → Shelve" rather than
-// "scope → shelve". Dispatch stages get their labels from
+// sentinels (ship / shelve / mark_done), consulted by stageDisplay before
+// the raw mode fallback so audit/display text reads "Scope → Shelve"
+// rather than "scope → shelve". Dispatch stages get their labels from
 // BuiltinTemplateActionLabel.
 var sentinelLabels = map[string]string{
-	ShipJobMode:   "Ship",
-	ShelveJobMode: "Shelve",
+	ShipJobMode:     "Ship",
+	ShelveJobMode:   "Shelve",
+	MarkDoneJobMode: "Done",
 }
 
 // PipelineJob is one persisted stage of a card's process chain
@@ -170,6 +180,10 @@ func (j PipelineJob) IsShipHandoff() bool { return j.Mode == ShipJobMode }
 // IsShelveHandoff reports whether this stage is the Shelve hand-off (move
 // back to todo / Backlog) rather than an agent dispatch.
 func (j PipelineJob) IsShelveHandoff() bool { return j.Mode == ShelveJobMode }
+
+// IsMarkDoneHandoff reports whether this stage is the Mark-done hand-off
+// (move straight to done) rather than an agent dispatch.
+func (j PipelineJob) IsMarkDoneHandoff() bool { return j.Mode == MarkDoneJobMode }
 
 // Process is a named preset chain selected when a card enters
 // in_pipeline (§5.1). The presets are an in-code enumeration, not stored
@@ -237,7 +251,7 @@ func ProcessBySlug(slug string) (Process, error) {
 // dispatch dropdown uses (BuiltinTemplateActionLabel returns "" only for
 // _dispatch_preamble).
 func stageModeAllowed(mode string) bool {
-	if mode == ShipJobMode || mode == ShelveJobMode {
+	if mode == ShipJobMode || mode == ShelveJobMode || mode == MarkDoneJobMode {
 		return true
 	}
 	return BuiltinTemplateActionLabel(mode) != ""
@@ -303,6 +317,12 @@ func ProcessFromStages(stages []string) (Process, error) {
 			}
 			continue
 		}
+		if m == MarkDoneJobMode {
+			if i != len(norm)-1 {
+				return Process{}, fmt.Errorf("mark_done may only be the final stage")
+			}
+			continue
+		}
 		if !stageModeAllowed(m) {
 			return Process{}, fmt.Errorf("unknown job mode %q", m)
 		}
@@ -346,6 +366,12 @@ func ProcessFromStagesWithPrefix(prefixModes, tailModes []string) (Process, erro
 		if m == ShelveJobMode {
 			if i != len(combined)-1 {
 				return Process{}, fmt.Errorf("shelve may only be the final stage")
+			}
+			continue
+		}
+		if m == MarkDoneJobMode {
+			if i != len(combined)-1 {
+				return Process{}, fmt.Errorf("mark_done may only be the final stage")
 			}
 			continue
 		}

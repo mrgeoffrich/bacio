@@ -308,6 +308,60 @@ func issueShipCmd() *cobra.Command {
 	return cmd
 }
 
+// issueMarkDoneCmd — `bacio issue mark-done <KEY>`. Closes an in_pipeline
+// card out as done directly (BACI-352): moves it straight to done,
+// bypassing the Shipping column and the ship agent. The direct-done
+// counterpart to `bacio issue ship`.
+func issueMarkDoneCmd() *cobra.Command {
+	var rawInput string
+	cmd := &cobra.Command{
+		Use:   "mark-done [KEY]",
+		Short: "Close an in_pipeline card out as done directly (Pipeline)",
+		Args:  cobra.RangeArgs(0, 1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			raw, err := parseJSONInput(cmd, args, rawInput)
+			if err != nil {
+				return err
+			}
+			var key string
+			if raw != nil {
+				in, _, err := inputio.DecodeStrict[inputs.IssueMarkDoneInput](raw)
+				if err != nil {
+					return err
+				}
+				if in.Key == "" {
+					return fmt.Errorf("key is required")
+				}
+				key = in.Key
+			} else {
+				if len(args) != 1 {
+					return fmt.Errorf("requires <KEY> positional or --json")
+				}
+				key = args[0]
+			}
+			c, err := openClient()
+			if err != nil {
+				return err
+			}
+			defer c.Close()
+			repo, err := repoForIssueKey(c, key)
+			if err != nil {
+				return err
+			}
+			updated, err := c.MarkDoneIssue(context.Background(), repo, key, opts.dryRun)
+			if err != nil {
+				return err
+			}
+			if opts.dryRun {
+				return emitDryRun(updated)
+			}
+			return emit(updated)
+		},
+	}
+	addInputFlag(cmd, &rawInput)
+	return cmd
+}
+
 // issueAutoShipCmd — `bacio issue auto-ship <on|off>`. Toggles the
 // per-repo Shipping-column auto-ship setting.
 func issueAutoShipCmd() *cobra.Command {

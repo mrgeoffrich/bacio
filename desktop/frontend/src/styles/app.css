@@ -2039,6 +2039,11 @@ body { margin: 0; }
 .mk-pl-btn.is-sm { height: 28px; font-size: 12.5px; padding: 0 10px; }
 .mk-pl-btn.is-primary { background: var(--sky-500); color: #fff; }
 .mk-pl-btn.is-primary:hover { background: var(--sky-600); }
+/* BACI-352: the on-card Mark-done action — filled with the done/green token
+   so it reads as a terminal "close out" action, parallel to Ship's filled
+   primary but tinted done rather than review. */
+.mk-pl-btn.is-done { background: var(--status-done); color: #fff; }
+.mk-pl-btn.is-done:hover { filter: brightness(0.94); }
 .mk-pl-btn.is-ghost { background: transparent; border-color: var(--border-2); color: var(--fg-1); }
 .mk-pl-btn.is-ghost:hover { background: var(--bg-4); }
 .mk-pl-btn.is-danger { color: var(--status-blocked); border-color: var(--status-blocked); }
@@ -2115,6 +2120,10 @@ body { margin: 0; }
    neutral backlog slate, distinct from Ship's promote/review tint. */
 .mk-pl-step.is-handoff.is-shelve .mk-pl-dot { background: var(--status-todo-bg); color: var(--status-todo); }
 .mk-pl-step.is-handoff.is-shelve .mk-pl-step-lbl { color: var(--status-todo); }
+/* BACI-352: the Mark-done sentinel reads as "close out as done" — the
+   done/green tint, distinct from Ship's review tint and Shelve's slate. */
+.mk-pl-step.is-handoff.is-done .mk-pl-dot { background: var(--status-done-bg); color: var(--status-done); }
+.mk-pl-step.is-handoff.is-done .mk-pl-step-lbl { color: var(--status-done); }
 .mk-pl-connector { width: 24px; height: 2px; background: var(--border-1); margin: 0 4px; }
 
 .mk-pl-stage-detail { padding: 0 18px 14px; }
@@ -2269,6 +2278,10 @@ body { margin: 0; }
    the card to Backlog), visually distinct from Ship's promote tint. */
 .mk-pl-seg.is-on.is-shelve { border-color: var(--status-todo); }
 .mk-pl-seg.is-on.is-shelve .mk-pl-seg-glyph { background: var(--status-todo-bg); color: var(--status-todo); }
+/* BACI-352: Mark-done terminal toggle — the done/green tint (closes the
+   card out as done), distinct from Ship's promote tint and Shelve's slate. */
+.mk-pl-seg.is-on.is-mark_done { border-color: var(--status-done); }
+.mk-pl-seg.is-on.is-mark_done .mk-pl-seg-glyph { background: var(--status-done-bg); color: var(--status-done); }
 .mk-pl-step-conn {
   flex: 0 0 auto; width: 20px; height: 2px; background: var(--border-1);
   align-self: flex-start; margin: 20px 2px 0;
@@ -2391,6 +2404,9 @@ body { margin: 0; }
 /* BACI-332: Shelve sentinel reads as "park back in Backlog" — the neutral
    backlog slate, distinct from Ship's promote/review tint. */
 .mk-pe-dot.is-handoff.is-shelve { background: var(--status-todo-bg); color: var(--status-todo); }
+/* BACI-352: Mark-done sentinel reads as "close out as done" — the
+   done/green tint, distinct from Ship's review tint and Shelve's slate. */
+.mk-pe-dot.is-handoff.is-done { background: var(--status-done-bg); color: var(--status-done); }
 .mk-pe-dot.is-add { background: var(--status-todo-bg); color: var(--status-todo); }
 .mk-pe-lbl { font-size: 13.5px; font-weight: 600; color: var(--fg-1); }
 .mk-pe-row.is-locked .mk-pe-lbl { color: var(--fg-3); }

@@ -43,6 +43,7 @@ func newIssueCmd() *cobra.Command {
 		issueReorderCmd(),
 		issueProcessCmd(),
 		issueShipCmd(),
+		issueMarkDoneCmd(),
 		issueAutoShipCmd(),
 	)
 	return cmd

@@ -375,6 +375,45 @@ func (d deps) handleIssueShip(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, updated)
 }
 
+// handleIssueMarkDone — POST /repos/{prefix}/issues/{key}/mark-done. The
+// direct-done hand-off (BACI-352): move an in_pipeline card straight to
+// done, bypassing the Shipping column and the ship agent. Returns the
+// updated issue since the hand-off changes the card's column.
+func (d deps) handleIssueMarkDone(w http.ResponseWriter, r *http.Request) {
+	repo, ok := resolveRepoFromPath(w, r, d.store)
+	if !ok {
+		return
+	}
+	iss, ok := resolveIssueOnRepo(w, r, d.store, repo)
+	if !ok {
+		return
+	}
+	if isDryRun(r) {
+		projected := *iss
+		projected.State = model.StateDone
+		writeDryRun(w, http.StatusOK, &projected)
+		return
+	}
+	if _, err := pipeline.New(d.store).WithLogger(d.logger).MarkDone(iss.ID); err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	recordOp(d.store, d.logger, model.HistoryEntry{
+		RepoID: &iss.RepoID, RepoPrefix: repo.Prefix,
+		Actor: ActorFromContext(r.Context()),
+		Op:    "issue.mark_done", Kind: "issue",
+		TargetID: &iss.ID, TargetLabel: iss.Key,
+	})
+	updated, err := d.store.GetIssueByID(iss.ID)
+	if err != nil {
+		status, code := statusForError(err)
+		writeError(w, status, code, err.Error(), nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, updated)
+}
+
 // engineMutate is the shared body for the three engine-backed, body-less
 // POST verbs (start / stop / ship): resolve repo + issue, run the engine
 // op, audit it, and return the refreshed job chain.

@@ -6,6 +6,7 @@ import {
   stageGlyph,
   isShipStage,
   isShelveStage,
+  isMarkDoneStage,
   EDITABLE_JOB_MODES,
 } from '../lib/pipelineProcesses';
 import { viewPath } from '../lib/routes';
@@ -84,12 +85,12 @@ export default function ProcessEditor({ cards, activeBoard, onSave, onSaveAuto }
     () => [...locked.map((j) => j.mode), ...tail.map((t) => t.mode)],
     [locked, tail],
   );
-  // A terminal sentinel (Ship hand-off / Shelve demote, BACI-332) may only
-  // be the final stage — mirrors the server's ProcessFromStagesWithPrefix
-  // gate, so the client refuses Save before the round-trip rather than
-  // surfacing a server error.
+  // A terminal sentinel (Ship hand-off / Shelve demote, BACI-332 /
+  // Mark-done, BACI-352) may only be the final stage — mirrors the server's
+  // ProcessFromStagesWithPrefix gate, so the client refuses Save before the
+  // round-trip rather than surfacing a server error.
   const terminalNotLast = chainModes.some(
-    (m, i) => (isShipStage(m) || isShelveStage(m)) && i !== chainModes.length - 1,
+    (m, i) => (isShipStage(m) || isShelveStage(m) || isMarkDoneStage(m)) && i !== chainModes.length - 1,
   );
   // Disable Save when nothing would change, when the chain is empty, or
   // when a terminal sentinel isn't the final stage.
@@ -174,8 +175,9 @@ export default function ProcessEditor({ cards, activeBoard, onSave, onSaveAuto }
 
       <ol className="mk-pe-list">
         {locked.map((j) => {
-          const sentinel = isShipStage(j.mode) || isShelveStage(j.mode);
+          const sentinel = isShipStage(j.mode) || isShelveStage(j.mode) || isMarkDoneStage(j.mode);
           const shelve = isShelveStage(j.mode);
+          const markDone = isMarkDoneStage(j.mode);
           let dot = stageGlyph(j.mode);
           if (j.status === 'complete') dot = '✓';
           else if (j.status === 'running') dot = '●';
@@ -183,7 +185,7 @@ export default function ProcessEditor({ cards, activeBoard, onSave, onSaveAuto }
           return (
             <li key={`locked-${j.sequence}`} className={`mk-pe-row is-locked is-${j.status}`}>
               <span className="mk-pe-handle is-disabled" aria-hidden="true">⋮⋮</span>
-              <span className={`mk-pe-dot is-${sentinel ? 'handoff' : j.status}${shelve ? ' is-shelve' : ''}`}>{dot}</span>
+              <span className={`mk-pe-dot is-${sentinel ? 'handoff' : j.status}${shelve ? ' is-shelve' : ''}${markDone ? ' is-done' : ''}`}>{dot}</span>
               <span className="mk-pe-lbl">{stageLabel(j.mode)}</span>
               <span className="mk-pe-status">{j.status}</span>
             </li>
@@ -202,7 +204,7 @@ export default function ProcessEditor({ cards, activeBoard, onSave, onSaveAuto }
             onDragEnd={() => { setDragIdx(null); setDragOverIdx(null); }}
           >
             <span className="mk-pe-handle" title="Drag to re-order">⋮⋮</span>
-            <span className={`mk-pe-dot is-${isShipStage(row.mode) || isShelveStage(row.mode) ? 'handoff' : 'pending'}${isShelveStage(row.mode) ? ' is-shelve' : ''}`}>
+            <span className={`mk-pe-dot is-${isShipStage(row.mode) || isShelveStage(row.mode) || isMarkDoneStage(row.mode) ? 'handoff' : 'pending'}${isShelveStage(row.mode) ? ' is-shelve' : ''}${isMarkDoneStage(row.mode) ? ' is-done' : ''}`}>
               {stageGlyph(row.mode)}
             </span>
             <span className="mk-pe-lbl">{stageLabel(row.mode)}</span>
@@ -263,7 +265,7 @@ export default function ProcessEditor({ cards, activeBoard, onSave, onSaveAuto }
 
       {(banner || terminalNotLast) && (
         <div className="mk-pe-banner is-error" role="alert">
-          {banner?.text || 'Ship or Shelve must be the final job in the chain.'}
+          {banner?.text || 'Ship, Shelve, or Done must be the final job in the chain.'}
           {banner && (
             <button type="button" className="mk-pe-banner-x" onClick={() => setBanner(null)} aria-label="Dismiss">
               ✕
