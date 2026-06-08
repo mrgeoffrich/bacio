@@ -1,13 +1,12 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { Link } from 'react-router';
-import { reportError } from '../errors';
 import * as api from '../api';
 import type { JobTranscriptRow } from '../api';
 import { formatWhen } from '../lib/formatWhen';
 import { transcriptPath } from '../lib/routes';
 import { groupTranscripts } from '../lib/transcriptGroups';
 import type { GroupByMode, TranscriptGroup } from '../lib/transcriptGroups';
-import { useInterval, POLL_INTERVAL_MS } from '../lib/hooks/useInterval';
+import { usePolledResource } from '../lib/hooks/usePolledResource';
 
 // MODE_OPTIONS is the job-mode <select> the list filters on. The empty value is
 // "all modes"; the rest are the dispatch modes a worker runs under. Server-side
@@ -80,46 +79,21 @@ type TranscriptListPanelProps = {
 };
 
 export default function TranscriptListPanel({ activeBoard }: TranscriptListPanelProps) {
-  const [rows, setRows] = useState<JobTranscriptRow[]>([]);
-  const [loading, setLoading] = useState(true);
   const [mode, setMode] = useState(''); // server-side mode filter
   const [issueFilter, setIssueFilter] = useState(''); // client-side substring
   const [groupBy, setGroupBy] = useState<GroupByMode>('dispatch'); // client-side fold
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set()); // collapsed group keys
 
-  // Fetch on mount / repo / mode change with a loading flicker. The
-  // cancellation guard stops a slow stale fetch from clobbering newer rows.
-  useEffect(() => {
-    if (!activeBoard) {
-      setRows([]);
-      setLoading(false);
-      return undefined;
-    }
-    let cancelled = false;
-    setLoading(true);
-    api.listJobTranscripts(activeBoard, '', mode)
-      .then(list => {
-        if (cancelled) return;
-        setRows(list);
-        setLoading(false);
-      })
-      .catch(err => {
-        if (cancelled) return;
-        reportError(err, { headline: "Couldn't load transcripts" });
-        setLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [activeBoard, mode]);
-
-  // Silent 10s refresh while a board is selected. The latest-callback-ref
-  // hook reads the current activeBoard / mode on each tick; `enabled` keeps
-  // the timer off until a board is picked.
-  useInterval(() => {
-    if (!activeBoard) return;
-    api.listJobTranscripts(activeBoard, '', mode)
-      .then(setRows)
-      .catch(err => reportError(err, { headline: "Couldn't load transcripts" }));
-  }, POLL_INTERVAL_MS, !!activeBoard);
+  // Eager load on mount / repo / mode change with a loading flicker, then a
+  // silent 10s refresh while a board is selected. `enabled` keeps both the
+  // eager fetch and the poll off until a board is picked (the component
+  // renders the "select a repo" placeholder in that state regardless).
+  const { data: rows, loading } = usePolledResource<JobTranscriptRow[]>(
+    () => api.listJobTranscripts(activeBoard, '', mode),
+    [],
+    [activeBoard, mode],
+    { enabled: !!activeBoard, errorHeadline: "Couldn't load transcripts" },
+  );
 
   // Issue-substring filter is client-side and live (no debounce) — it narrows
   // the already-fetched rows by a case-insensitive match on the issue key.

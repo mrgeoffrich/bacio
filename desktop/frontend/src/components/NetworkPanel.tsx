@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { reportError } from '../errors';
+import React, { useState, useMemo } from 'react';
 import * as api from '../api';
 import type { ProxyFQDNStat } from '../api';
 import { formatWhen } from '../lib/formatWhen';
@@ -11,7 +10,7 @@ import {
   formatMs,
 } from '../lib/proxyStats';
 import type { MonitorScope } from '../lib/proxyStats';
-import { useInterval, POLL_INTERVAL_MS } from '../lib/hooks/useInterval';
+import { usePolledResource } from '../lib/hooks/usePolledResource';
 import MonitorCaptureSheet from './MonitorCaptureSheet';
 
 // A sortable column over the per-FQDN stats table. `key` is the
@@ -48,8 +47,6 @@ const COLUMNS: Column[] = [
 // auto-refreshes every 10s while mounted (silent — no loading flicker on the
 // poll).
 export default function NetworkPanel() {
-  const [stats, setStats] = useState<ProxyFQDNStat[]>([]);
-  const [loading, setLoading] = useState(true);
   const [scope, setScope] = useState<MonitorScope>('day'); // default Last 24h
   // Default sort is busiest-first (requestCount desc) — exactly the order
   // the server already returns, so the initial render is a no-op sort.
@@ -58,33 +55,16 @@ export default function NetworkPanel() {
   // BACI-308 drill-down: the FQDN the capture sheet is open on (null = closed).
   const [selectedHost, setSelectedHost] = useState<string | null>(null);
 
-  // Fetch on scope change with a loading flicker. The cancellation guard
-  // stops a slow old-scope fetch from clobbering the new scope's table.
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    api.listProxyStats(scopeToSinceDays(scope))
-      .then(rows => {
-        if (cancelled) return;
-        setStats(rows);
-        setLoading(false);
-      })
-      .catch(err => {
-        if (cancelled) return;
-        reportError(err, { headline: "Couldn't load proxy stats" });
-        setLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [scope]);
-
-  // Silent 10s refresh that keeps the table fresh without a flash. The
-  // latest-callback-ref hook reads the current `scope` on each tick, so the
-  // timer needn't be re-armed when the scope changes.
-  useInterval(() => {
-    api.listProxyStats(scopeToSinceDays(scope))
-      .then(setStats)
-      .catch(err => reportError(err, { headline: "Couldn't load proxy stats" }));
-  }, POLL_INTERVAL_MS);
+  // Eager load on scope change with a loading flicker, then a silent 10s
+  // refresh that keeps the table fresh without a flash. The hook's stale-load
+  // guard replaces the old cancellation flag, and its latest-fetcher ref reads
+  // the current `scope` on each poll so the timer needn't be re-armed.
+  const { data: stats, loading } = usePolledResource<ProxyFQDNStat[]>(
+    () => api.listProxyStats(scopeToSinceDays(scope)),
+    [],
+    [scope],
+    { errorHeadline: "Couldn't load proxy stats" },
+  );
 
   // Click a header to sort on it: first click on a column picks its
   // default direction (descending for numeric/biggest-first, ascending

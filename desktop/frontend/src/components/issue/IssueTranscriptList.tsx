@@ -1,10 +1,9 @@
-import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import * as api from '../../api';
 import type { JobTranscriptRow } from '../../api';
-import { reportError } from '../../errors';
 import { formatWhen } from '../../lib/formatWhen';
 import { transcriptPath } from '../../lib/routes';
+import { useAsyncResource } from '../../lib/hooks/useAsyncResource';
 
 // IssueTranscriptList (BACI-339) is the rail sub-section that surfaces this
 // issue's parsed agent transcripts so they're discoverable from the
@@ -25,30 +24,15 @@ type IssueTranscriptListProps = {
 };
 
 export default function IssueTranscriptList({ activeBoard, issueKey }: IssueTranscriptListProps) {
-  const [rows, setRows] = useState<JobTranscriptRow[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (!activeBoard || !issueKey) {
-      setRows([]);
-      setLoading(false);
-      return undefined;
-    }
-    let cancelled = false;
-    setLoading(true);
-    api.listJobTranscripts(activeBoard, issueKey)
-      .then(list => {
-        if (cancelled) return;
-        setRows(list);
-        setLoading(false);
-      })
-      .catch(err => {
-        if (cancelled) return;
-        reportError(err, { headline: "Couldn't load transcripts" });
-        setLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [activeBoard, issueKey]);
+  // One-shot eager load on mount / issue-key change — no poll (a transcript
+  // captured while the workspace is open is a post-hoc artefact; the next open
+  // surfaces it). `enabled` gates the board-less / issue-less case.
+  const { data: rows, loading } = useAsyncResource<JobTranscriptRow[]>(
+    () => api.listJobTranscripts(activeBoard, issueKey),
+    [],
+    [activeBoard, issueKey],
+    { enabled: !!activeBoard && !!issueKey, errorHeadline: "Couldn't load transcripts" },
+  );
 
   return (
     <section className="mk-drawer-section">

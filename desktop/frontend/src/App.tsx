@@ -41,6 +41,8 @@ import type { ProcessSelection } from './lib/pipelineProcesses';
 import type { ShippedScope } from './components/shippedScope.ts';
 import { isTerminalState, stripBlockerFromCards, restoreBlockedByFromSnapshot } from './lib/issueState';
 import { useInterval, POLL_INTERVAL_MS } from './lib/hooks/useInterval';
+import { useAsyncResource } from './lib/hooks/useAsyncResource';
+import { usePolledResource } from './lib/hooks/usePolledResource';
 import { useLocalStorage, readLocalStorage, writeLocalStorage } from './lib/hooks/useLocalStorage';
 import { useShipFlourish } from './lib/shipFlourish';
 import { useShipSfx } from './lib/shipSfx';
@@ -84,7 +86,8 @@ export default function App() {
 
   const [boards, setBoards] = useState<Board[]>([]);
   const [columns, setColumns] = useState<BoardColumn[]>([]);
-  const [cards, setCards] = useState<BoardCard[]>([]);
+  // cards / agents are sourced from useAsyncResource (BACI-356), declared
+  // below once `activeBoard` is derived — see the App-level data-hooks block.
   // BACI-203: openIssueKey is now derived from the URL — the
   // `/issues/:key` workspace route owns the source of truth. The App
   // still keeps the brief payload around (loaded eagerly on key change,
@@ -107,7 +110,6 @@ export default function App() {
   // creates a fresh todo card from a rough one-liner (BACI-300 retired
   // the auto-scope dispatch — triage is a Pipeline stage now).
   const [composerOpen, setComposerOpen] = useState(false);
-  const [agents, setAgents] = useState<AgentCard[]>([]);
   // promptConfig is the global (repo-independent) dispatch-prompt config:
   // one entry per stage with its label and the issue states it's valid
   // to run from. PipelineView reads it to gate the per-card action
@@ -394,41 +396,38 @@ export default function App() {
     if (activeBoard) writeLocalStorage(REPO_KEY, activeBoard);
   }, [activeBoard]);
 
-  // refreshCards / refreshAgents reload the App-owned card and agent lists
-  // for the active repo. Used by the repo-change effect, the screen-switch
-  // effect, the 10s poll, the Agents panel's refresh button, and after a
-  // dispatch so the counts move. Pass { silent: true } on the poll path so a
-  // transient failure logs instead of pushing through the modal — a flapping
-  // poll over a sleeping laptop shouldn't spam the user.
-  const refreshCards = useCallback((opts: { silent?: boolean } = {}) => {
-    if (!activeBoard) return;
-    api.listCards(activeBoard)
-      .then(setCards)
-      .catch(err => {
-        if (opts.silent) console.warn('card refresh failed:', err);
-        else reportError(err, { headline: "Couldn't refresh board" });
-      });
-  }, [activeBoard]);
-
-  const refreshAgents = useCallback((opts: { silent?: boolean } = {}) => {
-    if (!activeBoard) return;
-    api.listAgents(activeBoard)
-      .then(setAgents)
-      .catch(err => {
-        if (opts.silent) console.warn('agent refresh failed:', err);
-        else reportError(err, { headline: "Couldn't refresh agents" });
-      });
-  }, [activeBoard]);
-
-  // Load cards + agents whenever the selected repository changes. Both stay
-  // loaded regardless of the active view — CommandPalette reads cards
-  // (and IssueWorkspace reads them for prev/next siblings), the Agents
-  // tab reads agents, and either can open from any screen.
-  useEffect(() => {
-    if (!activeBoard) return;
-    refreshCards();
-    refreshAgents();
-  }, [activeBoard, refreshCards, refreshAgents]);
+  // cards / agents are the App-owned card and agent lists for the active repo,
+  // sourced from useAsyncResource (BACI-356). The hook owns the list state +
+  // the stale-load guard and eager-loads on every repo change — both stay
+  // loaded regardless of the active view (CommandPalette reads cards, and
+  // IssueWorkspace reads them for prev/next siblings; the Agents tab reads
+  // agents; either can open from any screen). `enabled: !!activeBoard` is the
+  // old `if (!activeBoard) return` guard. `refreshCards` / `refreshAgents` are
+  // the hook's manual `refresh` — the repo-change eager load is automatic, so
+  // the screen-switch effect, the 10s polls, the Agents panel's refresh
+  // button, and the post-mutation refreshes all call it; pass { silent: true }
+  // on the poll / post-mutation path so a transient failure logs instead of
+  // pushing through the modal. `setCards` / `setAgents` (the hook's setData)
+  // keep the optimistic flips in the mutation handlers working.
+  const {
+    data: cards,
+    setData: setCards,
+    refresh: refreshCards,
+  } = useAsyncResource<BoardCard[]>(
+    () => api.listCards(activeBoard),
+    [],
+    [activeBoard],
+    { enabled: !!activeBoard, errorHeadline: "Couldn't refresh board" },
+  );
+  const {
+    data: agents,
+    refresh: refreshAgents,
+  } = useAsyncResource<AgentCard[]>(
+    () => api.listAgents(activeBoard),
+    [],
+    [activeBoard],
+    { enabled: !!activeBoard, errorHeadline: "Couldn't refresh agents" },
+  );
 
   // Re-fetch the active screen's data on switch so it's fresh on arrival,
   // not mount-time/cached. Board + Agents only — Features/Docs/History are
@@ -567,7 +566,7 @@ export default function App() {
       return;
     }
     navigate(issuePath(activeBoard, newCard.key));
-  }, [navigate, activeBoard, activeView, refreshCards]);
+  }, [navigate, activeBoard, activeView, refreshCards, setCards]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -706,7 +705,7 @@ export default function App() {
           return blockedBySnapshot ? restoreBlockedByFromSnapshot(reverted, blockedBySnapshot) : reverted;
         });
       });
-  }, [activeBoard, refreshCards]);
+  }, [activeBoard, refreshCards, setCards]);
 
   // Dispatch a prompt from a card's action button: the backend gates the
   // mode on the issue's state and enqueues a target-less dispatch the
@@ -730,7 +729,7 @@ export default function App() {
         setCards(cs => cs.map(c => c.key === cardKey ? { ...c, waitingState: null } : c));
         reportError(err, { headline: "Couldn't dispatch agent" });
       });
-  }, [activeBoard]);
+  }, [activeBoard, setCards]);
 
   // Phase 5 cutover: dispatchChainFromCard / setFollowOnFromCard /
   // cancelFollowOnFromCard / quickEvalComment were board-only affordances
@@ -751,7 +750,7 @@ export default function App() {
         setCards(cs => cs.map(c => c.key === cardKey ? { ...c, waitingState: null } : c));
       })
       .catch(err => reportError(err, { headline: "Couldn't cancel queued dispatch" }));
-  }, [activeBoard]);
+  }, [activeBoard, setCards]);
 
   // ─── Pipeline (Phase 4) handlers ───────────────────────────────────
   // Each wraps the api.* pipeline call and refreshes the cards array so
@@ -854,7 +853,7 @@ export default function App() {
         reportError(err, { headline: "Couldn't change the drive mode" });
         refreshCards({ silent: true });
       });
-  }, [activeBoard, refreshCards]);
+  }, [activeBoard, refreshCards, setCards]);
 
   // Fast-track (BACI-311) — collapse the manual drag → pick-process →
   // toggle-Auto flow into one click on a Backlog card. Runs the three
@@ -893,7 +892,7 @@ export default function App() {
         const fromCol = prevCol;
         if (fromCol) setCards(cs => cs.map(c => c.key === key ? { ...c, column: fromCol } : c));
       });
-  }, [activeBoard, refreshCards]);
+  }, [activeBoard, refreshCards, setCards]);
 
   // BACI-352: Mark-done hand-off — close an in_pipeline card out as done
   // directly, bypassing the Shipping column and the ship agent. The direct-
@@ -914,7 +913,7 @@ export default function App() {
         const fromCol = prevCol;
         if (fromCol) setCards(cs => cs.map(c => c.key === key ? { ...c, column: fromCol } : c));
       });
-  }, [activeBoard, refreshCards]);
+  }, [activeBoard, refreshCards, setCards]);
 
   // BACI-268: trash-bin drag-to-cancel. Routes a card dropped onto the
   // Pipeline's trash bin through the terminal-move path — moveCard already
@@ -976,7 +975,7 @@ export default function App() {
         reportError(err, { headline: "Couldn't link cards" });
         setCards(cs => cs.map(c => c.key === sourceKey ? { ...c, blockedBy: snapshot } : c));
       });
-  }, [activeBoard, refreshCards]);
+  }, [activeBoard, refreshCards, setCards]);
 
   // Per-repo Shipping auto-ship toggle. PipelineView owns the display
   // state (seeded from localStorage — the backend exposes no GET); this
@@ -1182,17 +1181,17 @@ export default function App() {
   // readouts so the badge stays roughly live without the dropdown being
   // open. The bell also calls setNotifUnreadCount directly after a
   // mark-read / mark-all so the badge updates instantly.
-  const [notifUnreadCount, setNotifUnreadCount] = useState(0);
-  const refreshNotifCount = useCallback(() => {
-    api.countUnreadNotifications()
-      .then((n) => setNotifUnreadCount(n))
-      .catch(() => { /* badge is best-effort; the dropdown surfaces failures */ });
-  }, []);
-  useEffect(() => {
-    refreshNotifCount();
-  }, [refreshNotifCount]);
-  // Global / cross-repo, so it always polls (no board gate) while mounted.
-  useInterval(refreshNotifCount, POLL_INTERVAL_MS);
+  // BACI-356: usePolledResource owns the eager load + the always-on poll
+  // (global / cross-repo, no board gate) + the best-effort error swallow (the
+  // badge is non-critical; the dropdown surfaces real failures). setData
+  // (renamed setNotifUnreadCount) keeps the bell's direct after-mark-read
+  // update flowing through.
+  const { data: notifUnreadCount, setData: setNotifUnreadCount } = usePolledResource<number>(
+    () => api.countUnreadNotifications(),
+    0,
+    [],
+    { onError: () => {} },
+  );
 
   // BACI-287: deep-link a notification row to its issue. Cross-repo — the
   // row carries its own prefix, which may differ from the active board, so

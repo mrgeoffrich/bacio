@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 import type { ProxyCaptureRow, ProxyMessage } from '../api';
-import { reportError } from '../errors';
 import * as api from '../api';
 import { formatWhen } from '../lib/formatWhen';
 import { formatBytes, formatMs } from '../lib/proxyStats';
+import { useAsyncResource } from '../lib/hooks/useAsyncResource';
 import JobTranscriptBody from '../lib/transcript/JobTranscriptBody';
 
 // MonitorCaptureSheet is the BACI-308 right-docked drill-down beside the
@@ -100,25 +100,12 @@ type CaptureListBodyProps = {
 };
 
 function CaptureListBody({ host, onSelect }: CaptureListBodyProps) {
-  const [rows, setRows] = useState<ProxyCaptureRow[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    api.listProxyCaptures(host)
-      .then(list => {
-        if (cancelled) return;
-        setRows(list);
-        setLoading(false);
-      })
-      .catch(err => {
-        if (cancelled) return;
-        reportError(err, { headline: "Couldn't load captures" });
-        setLoading(false);
-      });
-    return () => { cancelled = true; };
-  }, [host]);
+  const { data: rows, loading } = useAsyncResource<ProxyCaptureRow[]>(
+    () => api.listProxyCaptures(host),
+    [],
+    [host],
+    { errorHeadline: "Couldn't load captures" },
+  );
 
   if (loading) return <div className="mk-monitor-empty">Loading…</div>;
   if (rows.length === 0) {
