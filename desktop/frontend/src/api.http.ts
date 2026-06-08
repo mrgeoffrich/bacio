@@ -824,6 +824,18 @@ import { reshapeDocSummary, reshapeDocContent } from './api/wire/doc';
 import type { ApiDocument, ApiDocView } from './api/wire/doc';
 import { reshapeHistoryEntry } from './api/wire/history';
 import type { ApiHistoryEntry } from './api/wire/history';
+import {
+  reshapeProxyStat,
+  reshapeProxyCapture,
+  reshapeJobTranscript,
+} from './api/wire/proxy';
+import type {
+  ApiProxyFQDNStat,
+  ApiProxyCaptureRow,
+  ApiJobTranscriptRow,
+} from './api/wire/proxy';
+import { reshapeTemplate } from './api/wire/template';
+import type { ApiPromptTemplate, ApiRestoreResponse } from './api/wire/template';
 
 export interface PromptTemplateDTO {
   slug: string;
@@ -1680,19 +1692,6 @@ export async function deleteFeatureComment(
 // ApiProxyFQDNStat is the snake_case wire shape GET /proxy/stats returns
 // (model.ProxyFQDNStat's JSON tags). listProxyStats reshapes it into the
 // camelCase ProxyFQDNStat the Monitor screen consumes.
-interface ApiProxyFQDNStat {
-  host: string;
-  request_count: number;
-  bytes_in: number;
-  bytes_out: number;
-  error_count: number;
-  error_rate: number;
-  p50_ms: number;
-  p95_ms: number;
-  first_seen: string;
-  last_seen: string;
-}
-
 export async function listHistory(
   repoPrefix: string,
   page: number,
@@ -1771,41 +1770,7 @@ export async function listProxyStats(sinceDays = 0): Promise<ProxyFQDNStat[]> {
   const query: Record<string, string | number> = {};
   if (sinceDays > 0) query.since = `${sinceDays}d`;
   const rows = await call<ApiProxyFQDNStat[]>('/proxy/stats', { query });
-  return (rows ?? []).map(r => ({
-    host: r.host,
-    requestCount: r.request_count,
-    bytesIn: r.bytes_in,
-    bytesOut: r.bytes_out,
-    errorCount: r.error_count,
-    errorRate: r.error_rate,
-    p50Ms: r.p50_ms,
-    p95Ms: r.p95_ms,
-    firstSeen: r.first_seen,
-    lastSeen: r.last_seen,
-  }));
-}
-
-// ApiProxyCaptureRow is the snake_case wire shape GET /proxy/captures returns
-// (model.ProxyCaptureRow — the embedded ProxyRequest fields plus the issue_key
-// / mode enrichment). listProxyCaptures reshapes it into the camelCase
-// ProxyCaptureRow the sheet consumes. raw_log_path is omitempty on the wire;
-// its presence becomes hasRaw.
-interface ApiProxyCaptureRow {
-  id: number;
-  method: string;
-  host: string;
-  path: string;
-  status: number;
-  bytes_in: number;
-  bytes_out: number;
-  duration_ms: number;
-  raw_log_path?: string;
-  is_stream?: boolean;
-  is_anthropic?: boolean;
-  dispatch_id?: number | null;
-  issue_key?: string;
-  mode?: string;
-  started_at: string;
+  return (rows ?? []).map(reshapeProxyStat);
 }
 
 // listProxyCaptures (BACI-308) is the HTTP twin of api.ts's listProxyCaptures —
@@ -1824,23 +1789,7 @@ export async function listProxyCaptures(
   if (anthropicOnly) query.is_anthropic = true;
   if (sinceDays > 0) query.since = `${sinceDays}d`;
   const rows = await call<ApiProxyCaptureRow[]>('/proxy/captures', { query });
-  return (rows ?? []).map(r => ({
-    id: r.id,
-    method: r.method,
-    host: r.host,
-    path: r.path,
-    status: r.status,
-    bytesIn: r.bytes_in,
-    bytesOut: r.bytes_out,
-    durationMs: r.duration_ms,
-    isStream: !!r.is_stream,
-    isAnthropic: !!r.is_anthropic,
-    hasRaw: !!r.raw_log_path,
-    dispatchId: r.dispatch_id,
-    issueKey: r.issue_key,
-    mode: r.mode,
-    startedAt: r.started_at,
-  }));
+  return (rows ?? []).map(reshapeProxyCapture);
 }
 
 // getProxyCaptureRaw (BACI-308) is the HTTP twin of api.ts's getProxyCaptureRaw —
@@ -1861,30 +1810,6 @@ export async function anthropicCapture(id: number): Promise<ProxyMessage> {
 // feeds the viewer, so no reshape is needed.
 export async function jobTranscript(dispatchId: number): Promise<AnthropicTranscript> {
   return call<AnthropicTranscript>(`/proxy/jobs/${dispatchId}/transcript`);
-}
-
-// ApiJobTranscriptRow is the snake_case wire shape GET /proxy/jobs returns
-// (model.JobTranscriptRow). listJobTranscripts reshapes it into the camelCase
-// JobTranscriptRow the Transcript page consumes.
-interface ApiJobTranscriptRow {
-  dispatch_id: number;
-  issue_key?: string;
-  mode?: string;
-  agent_name?: string;
-  repo_prefix?: string;
-  model?: string;
-  turn_count: number;
-  usage: {
-    input_tokens?: number;
-    output_tokens?: number;
-    cache_creation_input_tokens?: number;
-    cache_read_input_tokens?: number;
-    thinking_tokens?: number;
-  };
-  last_seen: string;
-  session_id?: string;
-  claude_agent_id?: string;
-  session_label?: string;
 }
 
 // listJobTranscripts (BACI-322) is the HTTP twin of api.ts's
@@ -1910,26 +1835,7 @@ export async function listJobTranscripts(
   if (agent) query.agent = agent;
   if (sinceDays > 0) query.since = `${sinceDays}d`;
   const rows = await call<ApiJobTranscriptRow[]>('/proxy/jobs', { query });
-  return (rows ?? []).map(r => ({
-    dispatchId: r.dispatch_id,
-    issueKey: r.issue_key,
-    mode: r.mode,
-    agentName: r.agent_name,
-    repoPrefix: r.repo_prefix,
-    model: r.model,
-    turnCount: r.turn_count,
-    usage: {
-      inputTokens: r.usage?.input_tokens ?? 0,
-      outputTokens: r.usage?.output_tokens ?? 0,
-      cacheCreationTokens: r.usage?.cache_creation_input_tokens ?? 0,
-      cacheReadTokens: r.usage?.cache_read_input_tokens ?? 0,
-      thinkingTokens: r.usage?.thinking_tokens ?? 0,
-    },
-    lastSeen: r.last_seen,
-    sessionId: r.session_id,
-    claudeAgentId: r.claude_agent_id,
-    sessionLabel: r.session_label,
-  }));
+  return (rows ?? []).map(reshapeJobTranscript);
 }
 
 export async function getDoc(repoPrefix: string, filename: string): Promise<DocContent> {
@@ -1967,41 +1873,6 @@ export async function saveDoc(
 // /settings/templates/full list endpoint that returns the full DTO
 // (label, defaults, is_builtin, …) so the web bundle stops deriving
 // labels client-side.
-
-interface ApiPromptTemplate {
-  slug: string;
-  mode: string;
-  label: string;
-  body: string;
-  default: string;
-  is_builtin: boolean;
-  is_default: boolean;
-  concurrency_limit?: number;
-  default_concurrency_limit?: number;
-  concurrency_is_default?: boolean;
-  // BACI-67: imperative override for the dispatch action menus.
-  action_label?: string;
-  default_action_label?: string;
-  action_label_is_default?: boolean;
-}
-
-function reshapeTemplate(t: ApiPromptTemplate): PromptTemplateDTO {
-  return {
-    slug: t.slug,
-    mode: t.mode,
-    label: t.label,
-    body: t.body,
-    default: t.default,
-    isBuiltin: t.is_builtin,
-    isDefault: t.is_default,
-    concurrencyLimit: t.concurrency_limit ?? 0,
-    defaultConcurrencyLimit: t.default_concurrency_limit ?? 0,
-    concurrencyIsDefault: t.concurrency_is_default ?? true,
-    actionLabel: t.action_label ?? '',
-    defaultActionLabel: t.default_action_label ?? '',
-    actionLabelIsDefault: t.action_label_is_default ?? true,
-  };
-}
 
 export async function listPromptTemplates(): Promise<PromptTemplateDTO[]> {
   // BACI-50 added the composite /settings/templates/full endpoint that
@@ -2108,11 +1979,6 @@ export async function deletePromptTemplate(
     method: 'DELETE',
   });
   return reshapeTemplate(raw);
-}
-
-interface ApiRestoreResponse {
-  restored: string[];
-  templates: ApiPromptTemplate[];
 }
 
 export async function restoreBuiltinPromptTemplates(): Promise<PromptTemplateDTO[]> {
