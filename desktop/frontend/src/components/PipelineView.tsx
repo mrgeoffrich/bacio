@@ -352,7 +352,7 @@ export default function PipelineView({
     return () => { cancelled = true; };
   }, [activeBoard]);
 
-  const list = cards || [];
+  const list = useMemo(() => cards || [], [cards]);
   const backlog = useMemo(() => list.filter(c => c.column === 'todo'), [list]);
   const inPipeline = useMemo(() => list.filter(c => c.column === 'in_pipeline'), [list]);
   const shipping = useMemo(() => list.filter(c => c.column === 'to_be_shipped'), [list]);

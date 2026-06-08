@@ -22,4 +22,10 @@
     "noFallthroughCasesInSwitch": true
   },
   "include": ["src", "bindings"],
+  // Test files (Vitest specs + legacy smoke tests) live under __tests__
+  // and pull in test-only types (vitest, @testing-library). They are
+  // transformed/type-checked by Vitest, not by the app build, so keep
+  // them out of `tsc` (npm run build / build:web). node_modules is
+  // re-listed because specifying `exclude` overrides tsc's default.
+  "exclude": ["node_modules", "src/**/__tests__/**"],
 }

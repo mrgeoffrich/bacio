@@ -10,7 +10,11 @@
     "preview": "vite preview",
     "dev:web": "vite --mode web",
     "build:web": "tsc && vite build --mode web",
-    "preview:web": "vite preview --mode web"
+    "preview:web": "vite preview --mode web",
+    "test": "vitest run && npm run test:smoke",
+    "test:watch": "vitest",
+    "test:smoke": "node scripts/run-smoketests.mjs",
+    "lint": "eslint . --ext .ts,.tsx"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.0.0",
@@ -39,10 +43,19 @@
     "tiptap-markdown": "^0.9.0"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
     "@types/react": "^18.2.43",
     "@types/react-dom": "^18.2.17",
+    "@typescript-eslint/eslint-plugin": "^8.60.1",
+    "@typescript-eslint/parser": "^8.60.1",
     "@vitejs/plugin-react": "^6.0.0",
+    "eslint": "^8.57.1",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.4.26",
+    "jsdom": "^29.1.1",
     "typescript": "^5.2.2",
-    "vite": "^8.0.5"
+    "vite": "^8.0.5",
+    "vitest": "^4.1.8"
   }
 }

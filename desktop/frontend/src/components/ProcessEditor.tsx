@@ -60,7 +60,7 @@ export default function ProcessEditor({ cards, activeBoard, onSave, onSaveAuto }
   // Locked prefix = every job that has advanced past pending; editable tail
   // = the pending jobs, seeded into local state as {uid, mode} rows so a
   // reorder/remove is stable across renders even when modes repeat.
-  const jobs: BoardCardJob[] = card?.jobs || [];
+  const jobs = useMemo<BoardCardJob[]>(() => card?.jobs || [], [card?.jobs]);
   const locked = useMemo(() => jobs.filter((j) => j.status !== 'pending'), [jobs]);
   const seedTail = useMemo<TailRow[]>(
     () =>
