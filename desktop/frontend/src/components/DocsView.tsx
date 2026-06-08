@@ -10,9 +10,10 @@ import { filterDocs, countFacets } from '../lib/docsFilter';
 import type { DocsQuery } from '../lib/docsFilter';
 import {
   readSort, persistSort,
-  readSidebarCollapsed, persistSidebarCollapsed,
+  SIDEBAR_COLLAPSED_KEY, sidebarCollapsedCodec,
   DEFAULT_SORT,
 } from './DocsPersistence';
+import { useLocalStorage } from '../lib/hooks/useLocalStorage';
 import { documentPath, viewPath } from '../lib/routes';
 
 // DocsView (BACI-204) — desktop document browser + editor, redesigned
@@ -78,14 +79,14 @@ export default function DocsView({ activeBoard, onOpenIssue }: DocsViewProps) {
 
   // BACI-219: sidebar collapsed/expanded preference is global (not
   // per-repo) — matches the BACI-186 ActivityTray precedent the
-  // ticket explicitly cited. Seeded by a lazy useState initialiser so
-  // the first paint already reflects the user's saved preference;
-  // writes go through setSidebarCollapsedPersisted below.
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
-  const setSidebarCollapsedPersisted = useCallback((v: boolean) => {
-    setSidebarCollapsed(v);
-    persistSidebarCollapsed(v);
-  }, []);
+  // ticket explicitly cited. useLocalStorage (BACI-355) seeds the first
+  // paint from the saved preference and persists every change, with the
+  // '1'/'0' on-disk format preserved by sidebarCollapsedCodec.
+  const [sidebarCollapsed, setSidebarCollapsed] = useLocalStorage<boolean>(
+    SIDEBAR_COLLAPSED_KEY,
+    false,
+    sidebarCollapsedCodec,
+  );
 
   const repoSelected = !!activeBoard;
   const dirty = content !== savedContent;
@@ -270,7 +271,7 @@ export default function DocsView({ activeBoard, onOpenIssue }: DocsViewProps) {
             counts={railCounts}
             query={query}
             onQueryChange={updateQuery}
-            onCollapse={() => setSidebarCollapsedPersisted(true)}
+            onCollapse={() => setSidebarCollapsed(true)}
           />
           <DocsList
             visible={visible}
@@ -297,7 +298,7 @@ export default function DocsView({ activeBoard, onOpenIssue }: DocsViewProps) {
           onArchiveToggle={selected ? archiveToggle : null}
           onOpenIssue={onOpenIssue}
           panelsCollapsed={sidebarCollapsed}
-          onExpandPanels={() => setSidebarCollapsedPersisted(false)}
+          onExpandPanels={() => setSidebarCollapsed(false)}
         />
       </div>
     </div>

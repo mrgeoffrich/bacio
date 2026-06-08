@@ -1,17 +1,17 @@
 // Persistence helpers for the BACI-204 Documents page's per-repo
 // sort preference + the BACI-219 global sidebar-collapsed preference.
-// Same try/catch shape as boardCompactPersistence.ts and
-// activityTrayPersistence.ts; each preference lives on its own
-// kebab-cased `bacio-`-prefixed key so the storage shape stays tidy
-// and individually upgradeable.
+// Each preference lives on its own kebab-cased `bacio-`-prefixed key so
+// the storage shape stays tidy and individually upgradeable.
 //
-// We now have three callers reading/writing on this pattern
-// (ActivityTray, DocsPersistence sort, DocsPersistence sidebar) — a
-// shared `useLocalStoragePref` hook would be the right refactor, but
-// landing it inside this small UX tweak slows review without
-// unblocking any new behaviour. Follow-up issue territory.
+// BACI-355: the hardened-profile try/catch fallback now lives in the
+// shared readLocalStorage / writeLocalStorage primitives. The global
+// sidebar pref is driven through useLocalStorage at its call site (via
+// `sidebarCollapsedCodec`); the per-repo sort map keeps its keyed
+// read/persist pair (it isn't a single key→value pair the hook models),
+// now built on the same primitives.
 
 import type { SortKey } from '../lib/docsFilter';
+import { readLocalStorage, writeLocalStorage, type LocalStorageCodec } from '../lib/hooks/useLocalStorage.ts';
 
 export const SORT_KEY_KEY = 'bacio-docs-sort';
 export const SIDEBAR_COLLAPSED_KEY = 'bacio-docs-sidebar-collapsed';
@@ -21,32 +21,29 @@ export const SIDEBAR_COLLAPSED_KEY = 'bacio-docs-sidebar-collapsed';
 export const DEFAULT_SORT: SortKey = 'updated';
 
 function readPerRepoMap<T>(key: string): Record<string, T> {
+  const raw = readLocalStorage(key);
+  if (!raw) return {};
   try {
-    const raw = globalThis.localStorage?.getItem(key);
-    if (!raw) return {};
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') return {};
     return parsed as Record<string, T>;
   } catch {
+    // Garbage on disk (hand-edited / legacy) — fall back to empty.
     return {};
   }
 }
 
 function persistPerRepo<T>(key: string, repo: string, value: T, isDefault: (v: T) => boolean): void {
   if (!repo) return;
-  try {
-    const map = readPerRepoMap<T>(key);
-    if (isDefault(value)) {
-      // Trim back to the default so the on-disk JSON stays compact
-      // across repos — matches the boardCompactPersistence precedent.
-      delete map[repo];
-    } else {
-      map[repo] = value;
-    }
-    globalThis.localStorage?.setItem(key, JSON.stringify(map));
-  } catch {
-    /* non-fatal — the preference just won't survive the next reload */
+  const map = readPerRepoMap<T>(key);
+  if (isDefault(value)) {
+    // Trim back to the default so the on-disk JSON stays compact
+    // across repos — matches the boardCompactPersistence precedent.
+    delete map[repo];
+  } else {
+    map[repo] = value;
   }
+  writeLocalStorage(key, JSON.stringify(map));
 }
 
 const VALID_SORT_KEYS: SortKey[] = ['updated', 'created', 'name', 'size'];
@@ -66,20 +63,19 @@ export function persistSort(repo: string, sort: SortKey): void {
 
 // Sidebar collapse — global (not per-repo) preference, mirrors the
 // BACI-186 ActivityTray storage shape (raw '1' for collapsed, '0' or
-// anything else for expanded). Hardened-storage throws fall back to
-// the default (expanded).
+// anything else for expanded). DocsView drives the live value through
+// useLocalStorage with this codec; the read/persist pair below is the
+// equivalent non-React accessor.
+export const sidebarCollapsedCodec: LocalStorageCodec<boolean> = {
+  serialize: (collapsed) => (collapsed ? '1' : '0'),
+  deserialize: (raw) => raw === '1',
+};
+
 export function readSidebarCollapsed(): boolean {
-  try {
-    return globalThis.localStorage?.getItem(SIDEBAR_COLLAPSED_KEY) === '1';
-  } catch {
-    return false;
-  }
+  const raw = readLocalStorage(SIDEBAR_COLLAPSED_KEY);
+  return raw === null ? false : sidebarCollapsedCodec.deserialize(raw);
 }
 
 export function persistSidebarCollapsed(collapsed: boolean): void {
-  try {
-    globalThis.localStorage?.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? '1' : '0');
-  } catch {
-    /* non-fatal — the preference just won't survive the next reload */
-  }
+  writeLocalStorage(SIDEBAR_COLLAPSED_KEY, sidebarCollapsedCodec.serialize(collapsed));
 }

@@ -2,33 +2,33 @@
 // Mirrors `activityTrayPersistence.ts` (single global string on a
 // kebab-cased `bacio-` key) — *not* the per-repo nested-object shape
 // `boardCompactPersistence.ts` uses, because the scope is a personal
-// preference that doesn't change per repo. Same try/catch wrapping so
-// a hardened browser profile (rejected localStorage access) falls back
-// to the default.
+// preference that doesn't change per repo. The hardened-profile fallback
+// now lives in the shared readLocalStorage / writeLocalStorage primitives
+// (BACI-355); `shippedScopeCodec` carries the scope-specific validation.
 //
 // Default scope is `'week'` so the first-launch behaviour matches the
-// pre-BACI-221 pill exactly (the existing 7-day count). The picker
-// re-writes the key on every change; the read happens once on mount in
-// App.tsx so a relaunch lands on the same scope.
+// pre-BACI-221 pill exactly (the existing 7-day count). App.tsx drives the
+// live value through useLocalStorage with this codec; the read/persist pair
+// below is the equivalent non-React accessor.
 
 import { isShippedScope, type ShippedScope } from './shippedScope.ts';
+import { readLocalStorage, writeLocalStorage, type LocalStorageCodec } from '../lib/hooks/useLocalStorage.ts';
 
 export const STORAGE_KEY = 'bacio-shipped-scope';
 export const DEFAULT_SCOPE: ShippedScope = 'week';
 
+// The scope is its own on-disk string; deserialize just rejects a legacy /
+// hand-edited value that isn't one of the three canonical scopes.
+export const shippedScopeCodec: LocalStorageCodec<ShippedScope> = {
+  serialize: (scope) => scope,
+  deserialize: (raw) => (isShippedScope(raw) ? raw : DEFAULT_SCOPE),
+};
+
 export function readShippedScope(): ShippedScope {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return isShippedScope(raw) ? raw : DEFAULT_SCOPE;
-  } catch {
-    return DEFAULT_SCOPE;
-  }
+  const raw = readLocalStorage(STORAGE_KEY);
+  return raw === null ? DEFAULT_SCOPE : shippedScopeCodec.deserialize(raw);
 }
 
 export function persistShippedScope(scope: ShippedScope): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, scope);
-  } catch {
-    /* non-fatal — the preference just won't survive a relaunch */
-  }
+  writeLocalStorage(STORAGE_KEY, shippedScopeCodec.serialize(scope));
 }

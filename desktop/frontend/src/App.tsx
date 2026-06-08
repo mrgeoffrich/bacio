@@ -14,7 +14,7 @@ import IssueWorkspace from './components/IssueWorkspace';
 import CommandPalette from './components/CommandPalette';
 import IssueComposer from './components/IssueComposer';
 import RepoNotFound from './components/RepoNotFound';
-import { readShippedScope, persistShippedScope } from './components/shippedScopePersistence.ts';
+import { STORAGE_KEY as SHIPPED_SCOPE_KEY, DEFAULT_SCOPE, shippedScopeCodec } from './components/shippedScopePersistence.ts';
 import { scopeSinceParams } from './components/shippedScope.ts';
 import SettingsView from './components/SettingsView';
 import ErrorBoundary from './components/ErrorBoundary';
@@ -41,6 +41,7 @@ import type { ProcessSelection } from './lib/pipelineProcesses';
 import type { ShippedScope } from './components/shippedScope.ts';
 import { isTerminalState, stripBlockerFromCards, restoreBlockedByFromSnapshot } from './lib/issueState';
 import { useInterval, POLL_INTERVAL_MS } from './lib/hooks/useInterval';
+import { useLocalStorage, readLocalStorage, writeLocalStorage } from './lib/hooks/useLocalStorage';
 import { useShipFlourish } from './lib/shipFlourish';
 import { useShipSfx } from './lib/shipSfx';
 import { decideOdometerAction } from './lib/odometer';
@@ -48,26 +49,10 @@ import { viewPath, issuePath, processEditPath, viewFromPath, prefixFromPath } fr
 
 const THEME_KEY = 'bacio-theme'; // persisted preference: 'system' | 'light' | 'dark'
 const REPO_KEY = 'bacio-active-repo'; // persisted preference: last-selected repo prefix
-
-// localStorage is always present inside the Wails webview, but a hardened
-// browser profile can throw on access — fall back to defaults rather than
-// failing to boot.
-function readTheme() {
-  try { return localStorage.getItem(THEME_KEY) || 'system'; }
-  catch { return 'system'; }
-}
-function persistTheme(theme: string) {
-  try { localStorage.setItem(THEME_KEY, theme); }
-  catch { /* non-fatal — the preference just won't survive a relaunch */ }
-}
-function readActiveRepo() {
-  try { return localStorage.getItem(REPO_KEY) || ''; }
-  catch { return ''; }
-}
-function persistActiveRepo(prefix: string) {
-  try { localStorage.setItem(REPO_KEY, prefix); }
-  catch { /* non-fatal — the preference just won't survive a relaunch */ }
-}
+// Both round-trip through useLocalStorage / readLocalStorage / writeLocalStorage
+// (BACI-355), which bake in the hardened-profile fallback (localStorage is
+// always present inside the Wails webview, but a hardened browser profile can
+// throw on access — fall back to defaults rather than failing to boot).
 
 // BACI-285: the prefix-less page words a stale legacy link
 // (`/ui/pipeline`, `/ui/issues/BACI-1`, ...) can lead with. The first
@@ -166,7 +151,7 @@ export default function App() {
   // amLeader = true means this desktop process holds the lease and may
   // dispatch. Standby processes show a chip and disable the per-card button.
   const [leaderState, setLeaderState] = useState<LeaderStatusDTO>({ amLeader: false, holderLabel: '' });
-  const [theme, setTheme] = useState(readTheme);
+  const [theme, setTheme] = useLocalStorage(THEME_KEY, 'system');
   const [loading, setLoading] = useState(true);
 
   // BACI-285: the URL's first segment is the active repo prefix — the
@@ -195,7 +180,7 @@ export default function App() {
   // The repo a prefix-less / bare path should redirect to: the last
   // validated localStorage pick if it still exists, else the first board.
   const fallbackPrefix = (() => {
-    const remembered = readActiveRepo();
+    const remembered = readLocalStorage(REPO_KEY) ?? '';
     if (boards.some(b => b.prefix === remembered)) return remembered;
     return boards[0]?.prefix ?? '';
   })();
@@ -232,7 +217,6 @@ export default function App() {
   // That's safe: when switching away from 'system', React runs this effect's
   // previous cleanup (which removes the system listener) before re-running.
   useEffect(() => {
-    persistTheme(theme);
     const mq = window.matchMedia('(prefers-color-scheme: dark)');
     const apply = () => {
       const resolved = theme === 'system' ? (mq.matches ? 'dark' : 'light') : theme;
@@ -407,7 +391,7 @@ export default function App() {
 
   // Remember the selected repo so the app reopens on the same one.
   useEffect(() => {
-    if (activeBoard) persistActiveRepo(activeBoard);
+    if (activeBoard) writeLocalStorage(REPO_KEY, activeBoard);
   }, [activeBoard]);
 
   // refreshCards / refreshAgents reload the App-owned card and agent lists
@@ -1122,15 +1106,17 @@ export default function App() {
   }, [agents]);
 
   // shippedScope (BACI-221) is the active Today / Last Week / Forever
-  // window for the Pipeline Shipping-column Shipped pill + its popover. Seeded from
-  // localStorage on mount so a relaunch lands on the last-picked
-  // scope; the picker lives inside ShippedPopover and re-writes on
-  // every click via the onScopeChange callback below.
-  const [shippedScope, setShippedScope] = useState(readShippedScope);
-  const changeShippedScope = useCallback((next: ShippedScope) => {
-    setShippedScope(next);
-    persistShippedScope(next);
-  }, []);
+  // window for the Pipeline Shipping-column Shipped pill + its popover.
+  // useLocalStorage (BACI-355) seeds it from localStorage on mount so a
+  // relaunch lands on the last-picked scope and persists every change;
+  // shippedScopeCodec rejects a legacy / hand-edited value on read. The
+  // picker lives inside ShippedPopover and drives setShippedScope on every
+  // click via the onShippedScopeChange prop below.
+  const [shippedScope, setShippedScope] = useLocalStorage<ShippedScope>(
+    SHIPPED_SCOPE_KEY,
+    DEFAULT_SCOPE,
+    shippedScopeCodec,
+  );
 
   // shippedCount (BACI-187, server-derived for BACI-221) feeds the
   // Pipeline Shipping-column "Shipped · N" pill. Polled on the standard POLL_INTERVAL_MS
@@ -1332,7 +1318,7 @@ export default function App() {
         onOpenNotificationIssue={openNotificationIssue}
         shippedCount={shippedCount}
         shippedScope={shippedScope}
-        onShippedScopeChange={changeShippedScope}
+        onShippedScopeChange={setShippedScope}
         timezone={timezone}
         flyingShipKey={flyingShipKey}
         shipFlashing={shipFlashing}
