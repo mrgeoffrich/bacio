@@ -450,6 +450,9 @@ export default function App() {
     if (!activeBoard) return;
     if (activeView === 'board' || activeView === 'pipeline') refreshCards();
     else if (activeView === 'agents') refreshAgents();
+    // activeBoard intentionally omitted: repo switches are handled by the
+    // effect above, so including it here would double-fetch on switch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeView, refreshCards, refreshAgents]);
 
   // Poll the Board / Agents screens every 10s so they don't go stale while
@@ -512,6 +515,9 @@ export default function App() {
     if (!activeBoard || !openIssueKey) return;
     setOpenIssueBrief(null);
     refreshBrief();
+    // refreshBrief intentionally omitted: this effect should re-run only
+    // when the open issue changes, not when the callback identity does.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeBoard, openIssueKey]);
 
   // While the workspace is mounted, poll the brief every 10s alongside
