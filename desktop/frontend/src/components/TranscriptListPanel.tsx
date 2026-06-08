@@ -7,9 +7,7 @@ import { formatWhen } from '../lib/formatWhen';
 import { transcriptPath } from '../lib/routes';
 import { groupTranscripts } from '../lib/transcriptGroups';
 import type { GroupByMode, TranscriptGroup } from '../lib/transcriptGroups';
-
-// Silent-refresh cadence — matches the Network panel's 10s poll.
-const POLL_INTERVAL_MS = 10_000;
+import { useInterval, POLL_INTERVAL_MS } from '../lib/hooks/useInterval';
 
 // MODE_OPTIONS is the job-mode <select> the list filters on. The empty value is
 // "all modes"; the rest are the dispatch modes a worker runs under. Server-side
@@ -89,8 +87,8 @@ export default function TranscriptListPanel({ activeBoard }: TranscriptListPanel
   const [groupBy, setGroupBy] = useState<GroupByMode>('dispatch'); // client-side fold
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set()); // collapsed group keys
 
-  // Fetch on mount / repo / mode change (with a loading flicker) and on a 10s
-  // interval (silent). Re-armed whenever repo or mode changes.
+  // Fetch on mount / repo / mode change with a loading flicker. The
+  // cancellation guard stops a slow stale fetch from clobbering newer rows.
   useEffect(() => {
     if (!activeBoard) {
       setRows([]);
@@ -98,24 +96,30 @@ export default function TranscriptListPanel({ activeBoard }: TranscriptListPanel
       return undefined;
     }
     let cancelled = false;
-    const load = (silent: boolean) => {
-      if (!silent) setLoading(true);
-      api.listJobTranscripts(activeBoard, '', mode)
-        .then(list => {
-          if (cancelled) return;
-          setRows(list);
-          setLoading(false);
-        })
-        .catch(err => {
-          if (cancelled) return;
-          reportError(err, { headline: "Couldn't load transcripts" });
-          setLoading(false);
-        });
-    };
-    load(false);
-    const id = setInterval(() => load(true), POLL_INTERVAL_MS);
-    return () => { cancelled = true; clearInterval(id); };
+    setLoading(true);
+    api.listJobTranscripts(activeBoard, '', mode)
+      .then(list => {
+        if (cancelled) return;
+        setRows(list);
+        setLoading(false);
+      })
+      .catch(err => {
+        if (cancelled) return;
+        reportError(err, { headline: "Couldn't load transcripts" });
+        setLoading(false);
+      });
+    return () => { cancelled = true; };
   }, [activeBoard, mode]);
+
+  // Silent 10s refresh while a board is selected. The latest-callback-ref
+  // hook reads the current activeBoard / mode on each tick; `enabled` keeps
+  // the timer off until a board is picked.
+  useInterval(() => {
+    if (!activeBoard) return;
+    api.listJobTranscripts(activeBoard, '', mode)
+      .then(setRows)
+      .catch(err => reportError(err, { headline: "Couldn't load transcripts" }));
+  }, POLL_INTERVAL_MS, !!activeBoard);
 
   // Issue-substring filter is client-side and live (no debounce) — it narrows
   // the already-fetched rows by a case-insensitive match on the issue key.
