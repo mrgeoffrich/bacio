@@ -796,7 +796,7 @@ export type { JobTranscriptRow };
 // the reshapers (for the fetch wrappers) from there; the inline reshapes
 // left in this file lean on the shared label/assignee helpers in
 // ./api/wire/common.
-import { STATE_LABELS, stateLabel } from './api/wire/common';
+import { STATE_LABELS } from './api/wire/common';
 import {
   cardFromIssue,
   reshapeApiBrief,
@@ -808,6 +808,16 @@ import type {
   ApiIssueBrief,
   ApiBoardCard,
 } from './api/wire/issue';
+import {
+  reshapeFeatureSummary,
+  reshapeFeatureView,
+  reshapePlanView,
+} from './api/wire/feature';
+import type {
+  ApiFeature,
+  ApiFeatureView,
+  ApiPlanView,
+} from './api/wire/feature';
 
 export interface PromptTemplateDTO {
   slug: string;
@@ -1517,78 +1527,12 @@ export async function deleteComment(
   return getIssue(repoPrefix, key);
 }
 
-interface ApiFeature {
-  slug: string;
-  title: string;
-  description?: string;
-  // BACI-172: per-feature emoji glyph from the wire. Optional /
-  // absent on pre-BACI-172 features (or features with no glyph
-  // set); model.Feature serialises with omitempty.
-  emoji?: string;
-  // BACI-225: per-feature integration branch from the wire. Optional
-  // / absent when the feature ships straight to main (the legacy
-  // default); model.Feature serialises BranchName with omitempty
-  // when the column is NULL.
-  branch_name?: string;
-  // BACI-199: three-state column + sticky bit. Always present
-  // in JSON (no omitempty on model.Feature). Pre-BACI-199 servers
-  // (no column wired yet) leave these absent — `state ?? 'active'`
-  // is the safe default.
-  state?: string;
-  state_manual?: boolean;
-  // BACI-333: per-feature collect-handoffs toggle. Always present in
-  // JSON (no omitempty) so the React component reads it directly. A
-  // server that hasn't shipped BACI-333 leaves it absent — `?? true`
-  // keeps the opt-out default ON.
-  collect_handoffs?: boolean;
-  created_at: string;
-  updated_at: string;
-  // BACI-177: per-feature "Show on board" toggle state. Always
-  // present in JSON (no omitempty) so the React component reads it
-  // without an `?? false`. Defaults to false on a server that hasn't
-  // shipped BACI-177 yet — the field will simply be absent.
-  hidden_on_board?: boolean;
-}
-
 export async function listFeatures(repoPrefix: string): Promise<FeatureSummary[]> {
   if (!repoPrefix || repoPrefix === 'all') {
     throw new Error('select a repository to view its features');
   }
   const feats = await call<ApiFeature[]>(`/repos/${repoPrefix}/features`);
-  return feats.map(f => ({
-    slug: f.slug,
-    title: f.title,
-    emoji: f.emoji ?? '',
-    state: f.state ?? 'active',
-    branchName: f.branch_name ?? '',
-    updatedAt: f.updated_at,
-    hiddenOnBoard: !!f.hidden_on_board,
-  }));
-}
-
-interface ApiFeatureComment {
-  uuid: string;
-  author: string;
-  body: string;
-  created_at: string;
-}
-
-// ApiFeatureLink mirrors model.DocumentLink (BACI-214) — the snake_case
-// wire shape served by `GET /repos/{prefix}/features/{slug}` for each
-// linked document. Description is the link-time `--why`. Other
-// model.DocumentLink fields (ids, issue/feature foreign keys, created_at)
-// aren't surfaced on the feature pane.
-interface ApiFeatureLink {
-  document_filename: string;
-  document_type: string;
-  description?: string;
-}
-
-interface ApiFeatureView {
-  feature: ApiFeature;
-  issues: Array<{ key: string; title: string; state: string }>;
-  comments?: ApiFeatureComment[];
-  documents?: ApiFeatureLink[];
+  return feats.map(reshapeFeatureSummary);
 }
 
 export async function getFeature(repoPrefix: string, slug: string): Promise<FeatureDetail> {
@@ -1596,56 +1540,7 @@ export async function getFeature(repoPrefix: string, slug: string): Promise<Feat
     throw new Error('select a repository to view its features');
   }
   const view = await call<ApiFeatureView>(`/repos/${repoPrefix}/features/${slug}`);
-  const f = view.feature;
-  return {
-    slug: f.slug,
-    title: f.title,
-    description: f.description ?? '',
-    emoji: f.emoji ?? '',
-    branchName: f.branch_name ?? '',
-    state: f.state ?? 'active',
-    stateManual: !!f.state_manual,
-    collectHandoffs: f.collect_handoffs ?? true,
-    createdAt: f.created_at,
-    updatedAt: f.updated_at,
-    issues: (view.issues ?? []).map(iss => ({
-      key: iss.key,
-      title: iss.title,
-      state: iss.state,
-      stateLabel: stateLabel(iss.state),
-    })),
-    comments: (view.comments ?? []).map(c => ({
-      uuid: c.uuid,
-      author: c.author,
-      body: c.body,
-      createdAt: c.created_at,
-    })),
-    documents: (view.documents ?? []).map(d => ({
-      filename: d.document_filename,
-      type: d.document_type,
-      description: d.description ?? '',
-      sourcePath: '',
-    })),
-    hiddenOnBoard: !!f.hidden_on_board,
-  };
-}
-
-// ApiPlanEntry is the snake_case wire shape served by GET
-// /repos/{prefix}/features/{slug}/plan — mirrors api.PlanEntry. We
-// reshape blocked_by → blockedBy on the client so the FeaturePlan
-// camelCase shape matches the Wails binding (BACI-236).
-interface ApiPlanEntry {
-  key: string;
-  title: string;
-  state: string;
-  assignee?: string;
-  blocked_by?: string[];
-  closed?: boolean;
-}
-
-interface ApiPlanView {
-  feature: string;
-  order?: ApiPlanEntry[];
+  return reshapeFeatureView(view);
 }
 
 // getFeaturePlan (BACI-236) returns the topo-sorted dependency-graph
@@ -1666,17 +1561,7 @@ export async function getFeaturePlan(
     `/repos/${repoPrefix}/features/${slug}/plan`,
     { query: includeClosed ? { include_closed: '1' } : undefined },
   );
-  return {
-    slug: view.feature,
-    order: (view.order ?? []).map(e => ({
-      key: e.key,
-      title: e.title,
-      state: e.state,
-      assignee: e.assignee ?? '',
-      blockedBy: e.blocked_by ?? [],
-      closed: !!e.closed,
-    })),
-  };
+  return reshapePlanView(view);
 }
 
 // setFeatureEmoji (BACI-172) updates the per-feature emoji glyph
