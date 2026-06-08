@@ -5,6 +5,7 @@ import PhantomLinkModal from '../PhantomLinkModal';
 import { reportError } from '../../errors';
 import * as api from '../../api';
 import type { SyncRegistryDTO, SyncPreferencesDTO, MemberProjectDTO } from '../../api';
+import { useInterval, POLL_INTERVAL_MS } from '../../lib/hooks/useInterval';
 
 // BACI-248: Sync Settings section — absorbed body of the old
 // standalone SyncView. Now mounts as one entry in the sectioned
@@ -18,11 +19,9 @@ import type { SyncRegistryDTO, SyncPreferencesDTO, MemberProjectDTO } from '../.
 // outer wrapper changes: the section pane mounts under the Settings
 // shell instead of stamping its own .mk-settings-view chrome.
 
-// Matches App.tsx's POLL_INTERVAL_MS — the registry refreshes at the
-// same cadence the Board and Agents views poll (10 s). The poll runs
-// only while this section is mounted; the SettingsView only mounts
-// this when its activeSection === 'sync'.
-const POLL_INTERVAL_MS = 10_000;
+// The registry refreshes at the same shared POLL_INTERVAL_MS cadence the
+// Board and Agents views poll (10 s). The poll runs only while this section
+// is mounted; the SettingsView only mounts this when activeSection === 'sync'.
 
 const BACKGROUND_OPTIONS = [
   { id: false, label: 'Off' },
@@ -86,12 +85,9 @@ export default function SyncSettingsSection() {
 
   // Poll the registry on the same cadence the Board uses. Only the
   // registry refreshes — the toggle is operator-driven and doesn't
-  // need a poll. The cleanup clears the interval on unmount (i.e. when
+  // need a poll. The hook tears the timer down on unmount (i.e. when
   // the user switches away from the Sync section).
-  useEffect(() => {
-    const id = setInterval(() => refreshRegistry({ silent: true }), POLL_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, [refreshRegistry]);
+  useInterval(() => refreshRegistry({ silent: true }), POLL_INTERVAL_MS);
 
   // Bubble submodal-open up to the SettingsView shell so its Escape
   // listener doesn't fight Radix Dialog for the keypress.
